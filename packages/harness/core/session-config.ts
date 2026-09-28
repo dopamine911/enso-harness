@@ -28,6 +28,12 @@ export interface SessionEnsoConfig {
   readonly result: EnsoConfigParseResult
   /** The file a human changes to change this session's policy: the project's, when it was read. */
   readonly path: string
+  /**
+   * The config files this resolution read, user first; empty when none exists (#435). Recorded
+   * here, where the reading happens: the resolution is cached per session, so a probe at record
+   * time would name files the cached result never saw (PR #440 review).
+   */
+  readonly sources: readonly string[]
 }
 
 /**
@@ -64,37 +70,44 @@ export function sessionEnsoConfig(session: object, context: SessionConfigContext
 async function resolveSessionConfig(context: SessionConfigContext): Promise<SessionEnsoConfig> {
   const userPath = ensoConfigPath(context.home)
   const user = readConfig(userPath)
-  if (user.kind === 'unreadable') return { result: user, path: userPath }
+  const userSources = user.present ? [userPath] : []
+  const userOnly = { result: user.result, path: userPath, sources: userSources }
+  if (user.result.kind === 'unreadable') return userOnly
   const projectPath = projectConfigPath(context.cwd)
+  const bothSources = [...userSources, projectPath]
   let projectText: string | undefined
   try {
     projectText = readTextIfPresent(projectPath)
   } catch (error: unknown) {
-    return { result: { kind: 'unreadable', reason: `could not be read: ${String(error)}` }, path: projectPath }
+    const reason = `could not be read: ${String(error)}`
+    return { result: { kind: 'unreadable', reason }, path: projectPath, sources: bothSources }
   }
-  if (projectText === undefined) return { result: user, path: userPath }
+  if (projectText === undefined) return userOnly
   if (!(await projectTrusted(context, projectPath))) {
     context.ui.notify(
       `Enso: ${projectPath} was not read — this project is not trusted, so the session runs under ${userPath} only.`,
       'warning',
     )
-    return { result: user, path: userPath }
+    return userOnly
   }
   const project = parseEnsoConfig(projectText)
-  if (project.kind === 'unreadable') return { result: project, path: projectPath }
+  if (project.kind === 'unreadable') return { result: project, path: projectPath, sources: bothSources }
   // `projects.roots` is user-only: which directories may be projects is not a project's to widen.
   const { projects, ...projectConfig } = project.config
   if (projects !== undefined) {
     context.ui.notify(`Enso: ${projectPath} sets projects.roots, which only ${userPath} may set — ignored.`, 'warning')
   }
-  return { result: { kind: 'ok', config: mergeEnsoConfig(user.config, projectConfig) }, path: projectPath }
+  const merged = mergeEnsoConfig(user.result.config, projectConfig)
+  return { result: { kind: 'ok', config: merged }, path: projectPath, sources: bothSources }
 }
 
-function readConfig(path: string): EnsoConfigParseResult {
+/** A config file's parse, and whether there was a file to read — a read that threw had one. */
+function readConfig(path: string): { readonly result: EnsoConfigParseResult; readonly present: boolean } {
   try {
-    return parseEnsoConfig(readTextIfPresent(path))
+    const text = readTextIfPresent(path)
+    return { result: parseEnsoConfig(text), present: text !== undefined }
   } catch (error: unknown) {
-    return { kind: 'unreadable', reason: `could not be read: ${String(error)}` }
+    return { result: { kind: 'unreadable', reason: `could not be read: ${String(error)}` }, present: true }
   }
 }
 

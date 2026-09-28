@@ -4,6 +4,8 @@ import {
   describeTranscriptEntry,
   type EnsoLogLine,
   type EnsoSessionUsage,
+  EnsoForkPoint,
+  type EnsoRunContext,
   type EnsoThreadEvent,
   EnsoThreadEvents,
   EnsoThreadInspection,
@@ -55,6 +57,10 @@ function loggedLineKey(line: EnsoLogLine): string {
  *   • host ≠ branch's last entry  → the host's walk is wrong (a picc shape change).
  * Both are named as MISMATCH in text, not colour alone, so a test — and a screen reader —
  * can see them.
+ *
+ * The FORK POINT (#435) is listed beside them: the thread's identity, then what it runs under,
+ * from `GET /api/threads/:threadId/manifest`. That route answers a cold thread from its file,
+ * so it is fetched on its own — a thread with no live session still shows its manifest.
  */
 
 export interface BrowserBelief {
@@ -117,6 +123,12 @@ export interface ThreadDebugViewProps {
   readonly inspection: EnsoThreadInspection | undefined
   /** The thread's two event tails (#97), fetched alongside the inspection; undefined before the first refresh. */
   readonly events: EnsoThreadEvents | undefined
+  /**
+   * The thread's fork point (#435), live or cold — or why the last read of it produced none (PR #440
+   * review: said in its section, never dropped; a 404 is {@link NO_FORK_POINT_YET}). Undefined
+   * before the first refresh.
+   */
+  readonly manifest: ForkPointReading
   /** Why the last refresh produced nothing — a 404 for a thread that has not run yet, a down server. */
   readonly error: string | undefined
   /** The last copy's outcome; the label beside the button says which. */
@@ -164,7 +176,9 @@ function Mismatch({ when, says }: { when: boolean; says: string }): React.ReactN
   )
 }
 
-function EventTailList({ events }: { events: readonly EnsoThreadEvent[] }): React.ReactNode {
+/** One tail, or `not fetched yet` before the first refresh. */
+function EventTailList({ events }: { events: readonly EnsoThreadEvent[] | undefined }): React.ReactNode {
+  if (events === undefined) return <div>not fetched yet</div>
   if (events.length === 0) return <div>nothing yet</div>
   return (
     <ol>
@@ -177,11 +191,75 @@ function EventTailList({ events }: { events: readonly EnsoThreadEvent[] }): Reac
   )
 }
 
+/** A run context's fields, one line each: hashes shortened to twelve characters. */
+function runContextRows(context: EnsoRunContext): Array<readonly [string, string]> {
+  return [
+    [
+      'git',
+      context.git === null
+        ? 'no repository'
+        : `${context.git.revision.slice(0, 12)}${context.git.dirty ? ' dirty' : ''}`,
+    ],
+    ['config', `${context.config.hash.slice(0, 12)} from ${context.config.sources.join(', ') || 'defaults'}`],
+    ['skills', context.skills.map((skill) => skill.name).join(', ') || 'none'],
+    [
+      'context files',
+      context.contextFiles.map((file) => `${file.path} ${file.sha256.slice(0, 12)}`).join('; ') || 'none',
+    ],
+    ['mode rules', context.mode === null ? 'none recorded' : context.mode.rulesHash.slice(0, 12)],
+  ]
+}
+
+/** What the fork-point section shows: the manifest, or why there is none. */
+export type ForkPointReading = EnsoForkPoint | { readonly problem: string } | undefined
+
+/** A manifest 404 (#435): no session file and no live session — a new thread before its first reply. */
+export const NO_FORK_POINT_YET = 'no fork point: the thread is not stored yet'
+
+/**
+ * Why a manifest read produced none (PR #440 review): said, never dropped — a schema mismatch is
+ * exactly the disagreement this drawer exists to show.
+ */
+function manifestProblemOf(failure: unknown): string {
+  if (failure instanceof InspectionFetchError && failure.status === 404) return NO_FORK_POINT_YET
+  return failure instanceof Error ? failure.message : String(failure)
+}
+
+/** The manifest (#435) as a definition list: identity first, then the conditions it runs under. */
+function ForkPointList({ reading }: { reading: ForkPointReading }): React.ReactNode {
+  if (reading === undefined) return <div>reading…</div>
+  if ('problem' in reading) return <div role="status">{reading.problem}</div>
+  const { identity, conditions } = reading
+  const rows: Array<readonly [string, string]> = [
+    ['thread', identity.threadId],
+    ['leaf entry', identity.leafEntryId ?? 'empty branch'],
+    ['forked from', identity.parentThreadId ?? 'no parent'],
+    ['model', conditions.model === null ? 'none recorded' : `${conditions.model.provider}/${conditions.model.modelId}`],
+    ['thinking', conditions.thinkingLevel ?? 'none recorded'],
+    ['mode', conditions.mode],
+    ['cwd', conditions.cwd],
+    ...(conditions.runContext === null
+      ? [['run context', 'none recorded yet'] as const]
+      : runContextRows(conditions.runContext)),
+  ]
+  return (
+    <dl aria-label="fork point">
+      {rows.map(([term, description]) => (
+        <div key={term} className="flex gap-2">
+          <dt className="shrink-0">{term}</dt>
+          <dd className="break-all">{description}</dd>
+        </div>
+      ))}
+    </dl>
+  )
+}
+
 export function ThreadDebugView({
   threadId,
   browser,
   inspection: session,
   events,
+  manifest,
   error,
   copyState,
   bundleState,
@@ -302,9 +380,13 @@ export function ThreadDebugView({
 				    the completed one. A `tool-result` gap here is the elision, not a #88 drop. */}
         <section>
           <h3 className="font-semibold text-foreground">the host emitted</h3>
-          {events === undefined ? <div>not fetched yet</div> : <EventTailList events={events.emitted} />}
+          <EventTailList events={events?.emitted} />
           <h3 className="mt-2 font-semibold text-foreground">the server sent</h3>
-          {events === undefined ? <div>not fetched yet</div> : <EventTailList events={events.sent} />}
+          <EventTailList events={events?.sent} />
+        </section>
+        <section>
+          <h3 className="font-semibold text-foreground">fork point</h3>
+          <ForkPointList reading={manifest} />
         </section>
       </div>
     </aside>
@@ -346,6 +428,18 @@ async function fetchThreadDebug(
 ): Promise<{ session: EnsoThreadInspection; events: EnsoThreadEvents }> {
   const [session, events] = await Promise.all([fetchThreadInspection(threadId), fetchThreadEvents(threadId)])
   return { session, events }
+}
+
+/** What the fork-point section says when the manifest route answered a shape its schema refuses. */
+export const MANIFEST_SCHEMA_MISMATCH = "the server's manifest payload did not match its schema"
+
+/** Fetches one thread's fork point (#435); a non-2xx — 404 for a thread with no session anywhere — is a throw. */
+async function fetchThreadManifest(threadId: string): Promise<EnsoForkPoint> {
+  const response = await fetch(`/api/threads/${encodeURIComponent(threadId)}/manifest`)
+  if (!response.ok) throw new InspectionFetchError(response.status, boundedFailureDetail(await response.text()))
+  const payload: unknown = await response.json()
+  if (!Check(EnsoForkPoint, payload)) throw new Error(MANIFEST_SCHEMA_MISMATCH)
+  return payload
 }
 
 /**
@@ -471,12 +565,14 @@ export function ThreadDebugDrawer(): React.ReactNode {
   const logged = useMemo(() => ring.filter((line) => line.properties?.threadId === threadId), [ring, threadId])
   const [session, setSession] = useState<EnsoThreadInspection | undefined>(undefined)
   const [events, setEvents] = useState<EnsoThreadEvents | undefined>(undefined)
+  const [manifest, setManifest] = useState<ForkPointReading>(undefined)
   const [error, setError] = useState<string | undefined>(undefined)
   const [copyState, setCopyState] = useState<CopyState>('idle')
   const [bundleState, setBundleState] = useState<BundleState>('idle')
   const browser: BrowserBelief = { mode, usage, recentChunks, generation, logged }
   // One sequencer per thread id: a new thread starts a new "latest".
   const fetchLatest = useMemo(() => latestWins(() => fetchThreadDebug(threadId)), [threadId])
+  const fetchManifestLatest = useMemo(() => latestWins(() => fetchThreadManifest(threadId)), [threadId])
   const refresh = useCallback((): void => {
     fetchLatest().then(
       (fetched) => {
@@ -495,7 +591,14 @@ export function ThreadDebugDrawer(): React.ReactNode {
         setError(failure instanceof Error ? failure.message : String(failure))
       },
     )
-  }, [fetchLatest])
+    // The manifest answers cold too (#435), so it is fetched beside the live pair, not with it.
+    fetchManifestLatest().then(
+      (fetched) => {
+        if (fetched !== undefined) setManifest(fetched)
+      },
+      (failure: unknown) => setManifest({ problem: manifestProblemOf(failure) }),
+    )
+  }, [fetchLatest, fetchManifestLatest])
   useEffect(() => {
     refresh() // on open, and again for a new thread
     // Then on every server-state chunk: a subscription rather than a render dependency,
@@ -509,7 +612,7 @@ export function ThreadDebugDrawer(): React.ReactNode {
     })
   }, [stores, refresh])
   const copy = (): void => {
-    navigator.clipboard.writeText(JSON.stringify({ threadId, browser, session, events }, null, 2)).then(
+    navigator.clipboard.writeText(JSON.stringify({ threadId, browser, session, events, manifest }, null, 2)).then(
       () => setCopyState('copied'),
       () => setCopyState('failed'),
     )
@@ -532,6 +635,7 @@ export function ThreadDebugDrawer(): React.ReactNode {
       browser={browser}
       inspection={session}
       events={events}
+      manifest={manifest}
       error={error}
       copyState={copyState}
       bundleState={bundleState}

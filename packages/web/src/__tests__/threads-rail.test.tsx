@@ -1,5 +1,13 @@
 import { afterEach, expect, test } from 'bun:test'
-import { ENSO_GUARD_DENIAL_KEY, ENSO_PROJECT_HEADER, type EnsoProject, type EnsoStoredThread } from '@enso/core'
+import { EventType } from '@ag-ui/core'
+import {
+  ENSO_GUARD_DENIAL_KEY,
+  ENSO_PROJECT_HEADER,
+  type EnsoFollowFrame,
+  type EnsoProject,
+  type EnsoStoredThread,
+} from '@enso/core'
+import type { StreamChunk } from '@tanstack/ai'
 import type { UIMessage } from '@tanstack/ai-client'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { pageClock } from '../page-clock.ts'
@@ -9,9 +17,12 @@ import {
   mintThread,
   reviveHistoryMessages,
   TITLE_MAX_CHARS,
+  type ThreadStores,
   type ThreadSummary,
   threadListStore,
   titleFromMessages,
+  TORN_TAIL_CONTINUED,
+  TORN_TAIL_SUPERSEDED,
   updateThreadSummary,
 } from '../thread-stores.ts'
 import {
@@ -23,6 +34,7 @@ import {
   UNLISTED_PARENT,
   UNTITLED_THREAD,
 } from '../threads-rail.tsx'
+import { createScriptedFetch, SNAPSHOT_IDLE } from './scripted-server.ts'
 
 /**
  * #90 PR 3: the sessions rail and the page's thread list behind it. The rail is rendered
@@ -195,6 +207,138 @@ test('⚠ adopting a branch that ends inside a turn opens with a warning that sa
     permissionMode: { mode: 'default', available: [] },
   })
   expect(settled.notifications.get()).toEqual([])
+})
+
+test('⚠ the torn-tail notice offers Continue once: pressing it posts …/continue, and a refusal is said as a line (#436)', async () => {
+  const posted: string[] = []
+  const torn = adoptThread(
+    {
+      threadId: 'torn-2',
+      projectId: 'p-launch',
+      messages: [],
+      permissionMode: { mode: 'default', available: [] },
+      interrupted: 'tool-call-without-result',
+    },
+    (input: string, init?: RequestInit) => {
+      posted.push(`${init?.method} ${input}`)
+      return Promise.resolve(new Response('nothing to continue: the thread ends on a reply', { status: 422 }))
+    },
+  )
+  const [notice] = torn.notifications.get()
+  const action = torn.notifications.takeAction(notice?.id ?? -1)
+  expect(action?.label).toBe('Continue')
+  // One-shot: taken off the line, so a second press has nothing to run.
+  expect(torn.notifications.takeAction(notice?.id ?? -1)).toBeUndefined()
+  expect(torn.notifications.get()[0]?.action).toBeUndefined()
+
+  const said = Promise.withResolvers<void>()
+  torn.notifications.subscribe(() => {
+    if (torn.notifications.get().length > 1) said.resolve()
+  })
+  action?.run()
+  await said.promise
+  expect(posted).toEqual(['POST /api/threads/torn-2/continue'])
+  expect(torn.notifications.get()[1]).toMatchObject({
+    message: expect.stringContaining('nothing to continue: the thread ends on a reply'),
+    notifyType: 'warning',
+  })
+})
+
+/** A torn thread's stores following a scripted server, whose `…/continue` answers `continueStatus`. */
+function followedTornThread(
+  threadId: string,
+  continueStatus: number,
+): { stores: ThreadStores; frame: (frame: EnsoFollowFrame) => Promise<void>; stop: () => void } {
+  const server = createScriptedFetch()
+  const stores = adoptThread(
+    {
+      threadId,
+      projectId: 'p-launch',
+      messages: [],
+      permissionMode: { mode: 'default', available: [] },
+      interrupted: 'unanswered-prompt',
+    },
+    (input: string, init?: RequestInit) =>
+      input.endsWith('/continue')
+        ? Promise.resolve(new Response(continueStatus === 202 ? null : 'refused here', { status: continueStatus }))
+        : server.fetch(input, init),
+  )
+  let waiter: ((chunk: StreamChunk) => void) | undefined
+  const controller = new AbortController()
+  void (async () => {
+    for await (const chunk of stores.connection.subscribe(controller.signal)) waiter?.(chunk)
+  })()
+  return {
+    stores,
+    // Resolves once the frame's OWN first chunk reached the page — a status or snapshot as its
+    // CUSTOM, a turn as its STEP_STARTED — never on a straggler from the frame before.
+    frame: (frame: EnsoFollowFrame): Promise<void> => {
+      const { promise, resolve } = Promise.withResolvers<void>()
+      waiter = (chunk: StreamChunk) => {
+        const own =
+          frame.type === 'observation'
+            ? chunk.type === EventType.STEP_STARTED
+            : chunk.type === EventType.CUSTOM && chunk.name === frame.type
+        if (own) resolve()
+      }
+      server.frame(frame)
+      return promise
+    },
+    stop: () => controller.abort(),
+  }
+}
+
+const TURN_START: EnsoFollowFrame = { type: 'observation', seq: 1, observation: { kind: 'turn-start' } }
+const status = (busy: boolean, generation: number): EnsoFollowFrame => ({
+  type: 'status',
+  live: true,
+  busy,
+  generation,
+})
+
+// PR #442 review: the line and its button outlived the tail. PR #440 review: keyed on `busy`, any
+// lease retired it — a mode change, `/model`, a refused Continue. Only a run's first turn does.
+test('⚠ the torn-tail line is kept through a lease that starts no run, and superseded by the first turn (#436)', async () => {
+  const torn = followedTornThread('torn-leased', 202)
+  await torn.frame(SNAPSHOT_IDLE)
+  await torn.frame(status(true, 1)) // a mode change's lease: busy, no run
+  await torn.frame(status(false, 1))
+  expect(torn.stores.notifications.get()[0]?.action?.label).toBe('Continue')
+  await torn.frame(TURN_START)
+  expect(torn.stores.notifications.get()[0]).toMatchObject({
+    message: TORN_TAIL_SUPERSEDED,
+    notifyType: 'info',
+    action: undefined,
+  })
+  torn.stop()
+})
+
+test('⚠ an accepted Continue resolves the line as continued, once; a refused one leaves the next run to supersede it (#436)', async () => {
+  const pressContinue = (stores: ThreadStores): void => {
+    const [line] = stores.notifications.get()
+    stores.notifications.takeAction(line?.id ?? -1)?.run()
+  }
+  const accepted = followedTornThread('torn-continued', 202)
+  await accepted.frame(SNAPSHOT_IDLE)
+  pressContinue(accepted.stores)
+  await accepted.frame(TURN_START)
+  expect(accepted.stores.notifications.get()[0]).toMatchObject({ message: TORN_TAIL_CONTINUED, notifyType: 'info' })
+  // Only the first run: a later turn leaves the resolved line as it is.
+  await accepted.frame(TURN_START)
+  expect(accepted.stores.notifications.get()[0]?.message).toBe(TORN_TAIL_CONTINUED)
+  accepted.stop()
+
+  const refused = followedTornThread('torn-refused', 422)
+  await refused.frame(SNAPSHOT_IDLE)
+  const refusalSaid = Promise.withResolvers<void>()
+  refused.stores.notifications.subscribe(() => {
+    if (refused.stores.notifications.get().length > 1) refusalSaid.resolve()
+  })
+  pressContinue(refused.stores)
+  await refusalSaid.promise
+  await refused.frame(TURN_START) // the prompt the refusal left the user to send
+  expect(refused.stores.notifications.get()[0]?.message).toBe(TORN_TAIL_SUPERSEDED)
+  refused.stop()
 })
 
 test('history revival drops malformed rows and invalid dates instead of handing them to TanStack', () => {

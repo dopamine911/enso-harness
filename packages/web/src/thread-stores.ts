@@ -243,20 +243,49 @@ function createThreadStores(
       onToolResultDescriptor: (toolCallId: string, descriptor: EnsoToolResultDescriptor) => {
         toolResultDescriptors.set(new Map(toolResultDescriptors.get()).set(toolCallId, descriptor))
       },
+      onTurnStart: () => retireTornTail(threadId),
     }),
   }
 }
 
 /**
  * What a resumed thread says about a turn that never settled (#109) — a durable line at
- * the head of the transcript's notices, never a toast, because the next prompt continues
- * from the torn tail and the user should know that before typing it.
+ * the head of the transcript's notices, never a toast, because the torn tail is where the
+ * thread stands and the user should know that before typing. Its action is **Continue**
+ * (#436): the run picks up from exactly the stored state, with no new user message; a new
+ * prompt stays the alternative, and also continues from the tail.
  */
 const INTERRUPTED_TAIL_NOTICE: Record<EnsoInterruptedTail, string> = {
   'unanswered-prompt':
-    "This session's last prompt was never answered — its run was cut off before a reply. The next prompt continues from there.",
+    "This session's last prompt was never answered — its run was cut off before a reply. Continue picks up from there without a new message, or send a new prompt.",
   'tool-call-without-result':
-    "This session's last turn ended mid-tool-call — the result never arrived. The next prompt continues from there.",
+    "This session's last turn ended mid-tool-call — the result never arrived. Continue picks up from there (the lost result is recorded as an error), or send a new prompt.",
+  'tool-results-without-reply':
+    "This session's last turn ended after its tool results, before the model replied to them. Continue picks up from there without a new message, or send a new prompt.",
+}
+
+/** The interrupted-tail notice's action (#436): post Continue; the run arrives on the follow, a refusal as a line. */
+const CONTINUE_LABEL = 'Continue'
+
+/**
+ * What the torn-tail line becomes once a run answers it (PR #442 review) — Continue's, or any other:
+ * a prompt sent instead, or a run another tab started. Before, the warning and its button outlived
+ * the tail, and a late press was a 409 or a 422 under a reply that had already answered it.
+ */
+export const TORN_TAIL_CONTINUED = 'The cut-off turn was continued from its stored state.'
+export const TORN_TAIL_SUPERSEDED = 'A later run picked up after the cut-off turn.'
+
+/** Per thread, what to do with its torn-tail line when its first run starts; gone once done. */
+const tornTailLines = new Map<string, () => void>()
+
+/**
+ * The thread's first run — Continue's, a prompt sent instead, another tab's — answers its torn
+ * tail. Keyed on the run's first turn, not on `busy` (PR #440 review): every control route takes
+ * a lease and raises `busy` without starting a run.
+ */
+function retireTornTail(threadId: string): void {
+  tornTailLines.get(threadId)?.()
+  tornTailLines.delete(threadId)
 }
 
 // ── the page's threads ────────────────────────────────────────────────────────
@@ -366,6 +395,7 @@ function dropThread(threadId: string): void {
   stores.connection.close()
   threads.delete(threadId)
   summaries.delete(threadId)
+  tornTailLines.delete(threadId)
   publishThreadList()
 }
 
@@ -473,7 +503,27 @@ export function adoptThread(history: EnsoThreadHistory, fetchImpl?: FetchLike, i
   })
   stores.permissionMode.applyReceipt(history.permissionMode)
   if (history.interrupted !== undefined) {
-    stores.notifications.push(INTERRUPTED_TAIL_NOTICE[history.interrupted], 'warning', 'run', ENSO_NOTICE_SOURCE)
+    let continued = false
+    const line = stores.notifications.pushWithAction({
+      message: INTERRUPTED_TAIL_NOTICE[history.interrupted],
+      notifyType: 'warning',
+      origin: 'run',
+      source: ENSO_NOTICE_SOURCE,
+      action: {
+        label: CONTINUE_LABEL,
+        run: () => {
+          continued = true
+          // Only an accepted Continue starts the run it names; a refused one leaves the prompt sent
+          // instead to supersede the line (PR #440 review).
+          void stores.connection.continueRun().then((outcome) => {
+            if (outcome !== 'told') continued = false
+          })
+        },
+      },
+    })
+    tornTailLines.set(history.threadId, () =>
+      stores.notifications.resolveLine(line, continued ? TORN_TAIL_CONTINUED : TORN_TAIL_SUPERSEDED),
+    )
   }
   threads.set(stores.threadId, stores)
   summaries.set(stores.threadId, {

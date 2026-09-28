@@ -57,6 +57,11 @@ export interface AgentHost {
   /** One request of a stored thread, element by element (#361 phase 3); undefined for no file or no such turn. */
   readStoredRequestDetail(threadId: string, request: number | 'next'): Promise<BranchRequestDetail | undefined>
   /**
+   * A stored thread's fork point (#435): identity and run conditions off its branch, one open,
+   * nothing built (#86); undefined for no file in a served project.
+   */
+  readStoredForkPoint(threadId: string): Promise<EnsoForkPoint | undefined>
+  /**
    * Fork a stored thread at one of its user messages, as pi's `/fork` does (#433; the module
    * header): a new session file naming the source as its parent, holding everything before that
    * message, and the message's text to prefill with. The source's file is not written; nothing is
@@ -92,6 +97,8 @@ export interface HostedThread {
   branchContext(): BranchContext
   /** One request's context, element by element (#361 phase 3); undefined for a turn the branch does not have. */
   branchRequestDetail(request: number | 'next'): BranchRequestDetail | undefined
+  /** The branch's fork point (#435): identity, then what it runs under — the manifest's live half. */
+  forkPoint(): Promise<EnsoForkPoint>
   /**
    * What the loaded extensions would say about a tool call, through the runtime's own hook
    * runner — the verdict a model's call would meet, without a model. Inspection, like the
@@ -253,12 +260,16 @@ export const EnsoThreadHistory = Type.Object(
 ```ts
 /**
  * How a stored branch ends when its last turn did not settle (#109): a prompt the
- * assistant never answered, or an assistant turn that called a tool and never got its
- * result — the server died mid-run, or the run was cut before the reply.
+ * assistant never answered, an assistant turn that called a tool and never got its
+ * result, or one whose every call got its result and no reply followed (PR #442 review) — the
+ * server died mid-run, or the run was cut before the reply. The third is a kill's shape, not a
+ * Stop's: a Stop during the tools ends on pi's own `Operation aborted` error results, and a Stop
+ * after them on the aborted reply, neither of which is named here.
  *
  * Derived on read from the branch, never written to pi's file: deepseek-harness appends a
- * synthetic `turn/end { interrupted }` on resume repair; here the report is the repair, and the
- * next prompt continues from the torn tail as pi would.
+ * synthetic `turn/end { interrupted }` on resume repair; here the report is the repair. The
+ * browser offers Continue on it (#436: `POST …/continue` runs from exactly the stored state, and
+ * closes an orphan call with an error result first); the next prompt also continues from the tail.
  *
  * Never said of a thread whose run is still going here (#412): pi parked on a question ends its
  * branch on the call with no result yet, by construction, and that run has not torn.
@@ -266,6 +277,7 @@ export const EnsoThreadHistory = Type.Object(
 export const EnsoInterruptedTail = Type.Union([
   Type.Literal('unanswered-prompt'),
   Type.Literal('tool-call-without-result'),
+  Type.Literal('tool-results-without-reply'),
 ])
 ```
 

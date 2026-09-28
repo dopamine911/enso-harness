@@ -98,7 +98,7 @@ function loadWebSearch(
       throw new Error('no test reaches the network')
     },
     resolveSessionConfig: () =>
-      Promise.resolve({ result: { kind: 'ok', config: {} }, path: '/home/u/.enso/config.json' }),
+      Promise.resolve({ result: { kind: 'ok', config: {} }, path: '/home/u/.enso/config.json', sources: [] }),
     ...overrides,
   }
   let captured: CapturedTool | undefined
@@ -368,6 +368,7 @@ test("⚠ at session start the session's config replaces the user's: a project's
         Promise.resolve({
           result: { kind: 'ok', config: { webSearch: { backend: 'deepseek' } } },
           path: '/work/project/.enso/config.json',
+          sources: ['/work/project/.enso/config.json'],
         }),
     },
     { DEEPSEEK_API_KEY: 'sk-deepseek' },

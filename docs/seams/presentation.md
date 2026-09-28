@@ -33,6 +33,12 @@ export interface FollowConnectionOptions {
    * result renders.
    */
   readonly onToolResultDescriptor?: (toolCallId: string, descriptor: EnsoToolResultDescriptor) => void
+  /**
+   * A turn started on the thread — pi's `turn_start`, the evidence a run is really going (PR #440
+   * review). A lease alone (a mode change, `/model`, a refused Continue) raises `busy` but never
+   * starts a turn, so what must key on "a run answered this thread" keys on this, not on `busy`.
+   */
+  readonly onTurnStart?: () => void
 }
 ```
 
@@ -82,6 +88,13 @@ export interface FollowConnection extends SubscribeConnectionAdapter {
    * recorded through `problem` and said once, as a refused control is, and answers `undefined`.
    */
   readonly fork: (entryId: string) => Promise<EnsoForkReceipt | undefined>
+  /**
+   * Continue the thread's torn tail from its stored state (#436): `POST …/continue`, no prompt and
+   * no new user message. The run arrives on the follow as a run another tab started would; a refusal
+   * — the thread running (409), nothing to continue (422) — is recorded through `problem` and said
+   * once, as a refused control is.
+   */
+  readonly continueRun: () => Promise<ContinueOutcome>
   /**
    * Release the thread's follow (#272): the socket closes and nothing else opens one on
    * this connection. The page calls it when a thread leaves its live list — a thread whose

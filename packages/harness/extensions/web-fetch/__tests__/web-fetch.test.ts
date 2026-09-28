@@ -69,7 +69,11 @@ function loadWebFetch(overrides: Partial<WebFetchDependencies> = {}): LoadedWebF
     },
     // No project config unless a test says so: the session's policy is the user's.
     resolveSessionConfig: () =>
-      Promise.resolve({ result: parseEnsoConfig(configWith([ALLOWED_HOST])), path: CONFIG_PATH }),
+      Promise.resolve({
+        result: parseEnsoConfig(configWith([ALLOWED_HOST])),
+        path: CONFIG_PATH,
+        sources: [CONFIG_PATH],
+      }),
     ...overrides,
   }
   let captured: CapturedTool | undefined
@@ -139,6 +143,7 @@ test("⚠ at session start the session's config replaces the user's: the merged 
       Promise.resolve({
         result: parseEnsoConfig(configWith([ALLOWED_HOST, 'docs.project.example'])),
         path: projectPath,
+        sources: [CONFIG_PATH, projectPath],
       }),
   })
   expect(loaded.tool.description).not.toContain('docs.project.example')
@@ -181,6 +186,7 @@ test('⚠ session_start returns while the trust question is open; a call made me
   answer.resolve({
     result: parseEnsoConfig(configWith(['docs.project.example'])),
     path: '/work/project/.enso/config.json',
+    sources: ['/work/project/.enso/config.json'],
   })
   expect(await call).toContain('hello from the docs')
 })
@@ -191,6 +197,7 @@ test("a session whose config is unreadable fails CLOSED from its start, naming t
       Promise.resolve({
         result: { kind: 'unreadable', reason: 'not valid JSON' },
         path: '/work/project/.enso/config.json',
+        sources: ['/work/project/.enso/config.json'],
       }),
   })
   await loaded.startSession()

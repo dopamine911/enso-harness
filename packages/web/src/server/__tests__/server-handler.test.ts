@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   ENSO_PROJECT_HEADER,
+  EnsoForkPoint,
   type EnsoFollowFrame,
   type EnsoModelState,
   type EnsoObservation,
@@ -1259,6 +1260,30 @@ test('GET …/context/:request reads a turn or `next`; any other segment, or a t
   for (const segment of ['0', '01', 'x', '-1']) expect((await read(segment)).status).toBe(404)
   // Looking builds nothing (#86).
   expect(built).toHaveLength(0)
+})
+
+// #435: the fork point reads cold from the host's branch walk and live from pi's memory — the
+// same route, and looking builds nothing (#86).
+test('GET …/manifest answers a cold thread from its file without building, a live one from its session, and 404 for neither', async () => {
+  const point: EnsoForkPoint = {
+    identity: { threadId: 's1', leafEntryId: 'e2', parentThreadId: 's0' },
+    conditions: { model: null, thinkingLevel: 'high', mode: 'plan', cwd: '/repo', runContext: null },
+  }
+  const { url, built } = await startWith(settlesAtOnce, {
+    s1: { transcript: [], modified: new Date('2026-09-24T10:00:00.000Z'), firstMessage: 'one', forkPoint: point },
+  })
+  const cold = await fetch(`${url}/api/threads/s1/manifest`)
+  expect(cold.status).toBe(200)
+  const body: unknown = await cold.json()
+  expect(Check(EnsoForkPoint, body)).toBe(true)
+  expect(body).toEqual(point)
+  expect(built).toHaveLength(0)
+  expect((await fetch(`${url}/api/threads/nowhere/manifest`)).status).toBe(404)
+  expect(built).toHaveLength(0)
+
+  expect(await prompt(url, 'live1', 'hi')).toBe(202)
+  const live: unknown = await (await fetch(`${url}/api/threads/live1/manifest`)).json()
+  expect(live).toMatchObject({ identity: { threadId: 'session-1' }, conditions: { runContext: null } })
 })
 
 // ⚠ #391: Start applies the new session's settings TOGETHER — the model first (the effort a model

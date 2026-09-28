@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test'
+import { createHash } from 'node:crypto'
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -10,7 +11,13 @@ import {
   type SessionEntry,
   SessionManager,
 } from '@earendil-works/pi-coding-agent'
-import { ASK_USER_TOOL_NAME, type EnsoObservation } from '@enso/core'
+import {
+  ASK_USER_TOOL_NAME,
+  ENSO_RUN_CONTEXT_ENTRY,
+  type EnsoObservation,
+  type EnsoRunContext,
+  readEnsoRunContext,
+} from '@enso/core'
 import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
 import { findRepoRoot, harnessPackageDir, realpathOrSelf } from '@enso/core/paths'
 import type { LogRecorder } from '@logtape/testing/recorder'
@@ -23,6 +30,7 @@ import {
   seedMultiAccountConfig,
   stopRunSettlingDialogs,
 } from '../agent-host.ts'
+import { LOST_TOOL_RESULT_TEXT, NOTHING_TO_CONTINUE } from '../continuation.ts'
 import { readPiccPersistedMode, storedPermissionModeState } from '../permission-mode-adapter.ts'
 
 /**
@@ -66,6 +74,7 @@ const MANIFEST_EXTENSION_MARKERS = [
   'picc-permission-modes/index.ts',
   'pi-multi-account/index.ts',
   'extensions/ask-user/index.ts',
+  'extensions/run-context/index.ts',
 ]
 
 /** Collect every event a session emits, from its first subscriber on (the host replays what came before). */
@@ -1124,6 +1133,8 @@ interface FauxModule {
     streamSimple: NonNullable<ProviderConfig['streamSimple']>
     getModel(): Parameters<ExtensionAPI['setModel']>[0]
     setResponses(responses: unknown[]): void
+    /** How many requests the provider has answered. */
+    readonly state: { readonly callCount: number }
   }
   fauxAssistantMessage(content: unknown, options?: { stopReason?: string; errorMessage?: string }): unknown
   fauxToolCall(name: string, arguments_: Record<string, unknown>): unknown
@@ -1734,4 +1745,380 @@ test('each /model option carries the levels pi decides for THAT model (#391)', a
   expect(deep).toContain('high')
   // `xhigh` is offered only to a model that maps it explicitly — pi's rule, carried as it decides.
   expect(deep).not.toContain('xhigh')
+})
+
+// ── the run context and the fork point (#435) ────────────────────────────────
+
+/** Run one prompt on `hosted` and wait for it to settle. */
+async function runPrompt(hosted: HostedThread, message: string): Promise<void> {
+  const settled = Promise.withResolvers<void>()
+  const unsubscribe = hosted.runtime.subscribe((observation) => {
+    if (observation.kind === 'settled') settled.resolve()
+  })
+  hosted.runtime.prompt({ message }, { onAccepted: () => undefined, onRejected: settled.reject })
+  await settled.promise.finally(unsubscribe)
+}
+
+/** The `enso-run-context` records on a stored session's branch, oldest first. */
+function runContextsOf(file: string): EnsoRunContext[] {
+  return SessionManager.open(file)
+    .getBranch()
+    .flatMap((entry) => {
+      const recorded = entry.type === 'custom' ? readEnsoRunContext(entry.customType, entry.data) : undefined
+      return recorded === undefined ? [] : [recorded]
+    })
+}
+
+const sha256Of = (text: string): string => createHash('sha256').update(text).digest('hex')
+
+// ⚠ THE ACCEPTANCE (#435): the REAL extension, loaded last from the manifest, under pi's faux
+// provider. Two runs with nothing changed write one entry; a changed context file writes a second
+// that names the new hash — and neither ever reaches the model.
+test('⚠ two runs with nothing changed record one run context; a changed AGENTS.md records a second naming its hash — and the model never sees either (#435)', async () => {
+  const project = realpathOrSelf(mkdtempSync(join(tmpdir(), 'enso-lineage-project-')))
+  const agentsFile = join(project, 'AGENTS.md')
+  writeFileSync(agentsFile, 'Use tabs.\n')
+  const core = createFauxCore()
+  core.setResponses([
+    faux.fauxAssistantMessage('one'),
+    faux.fauxAssistantMessage('two'),
+    faux.fauxAssistantMessage('three'),
+  ])
+  const requests: unknown[] = []
+  const watched: FauxCore = {
+    ...core,
+    streamSimple: (...call: Parameters<FauxCore['streamSimple']>) => {
+      requests.push(call[1])
+      return core.streamSimple(...call)
+    },
+  }
+  const host = createAgentHost({
+    servesDirectory: (directory) => realpathOrSelf(directory) === project,
+    agentDir,
+    harnessPackageDir: harnessDir,
+    extensionFactories: [fauxModelExtension(watched)],
+  })
+  const threadId = crypto.randomUUID()
+  const first = await host.createSession(threadId, () => project)
+  openSessions.push(first)
+  await runPrompt(first, 'first')
+  await runPrompt(first, 'second')
+  const file = first.inspect().sessionFile
+  if (file === null) throw new Error('the session was not flushed after two replies')
+  const once = runContextsOf(file)
+  expect(once).toHaveLength(1)
+  expect(once[0]?.contextFiles).toEqual([{ path: agentsFile, sha256: sha256Of('Use tabs.\n') }])
+  expect(once[0]?.git).toBeNull()
+  // The real picc is loaded: its `modes` entry must yield a rules hash. A picc that renamed its
+  // persisted rule fields records `mode: null` instead, and this goes red (PR #440 review).
+  expect(once[0]?.mode).toEqual({ rulesHash: expect.stringMatching(/^[0-9a-f]{64}$/) })
+  first.runtime.dispose()
+
+  // pi reads context files when a session is built: the change is seen by the resumed session.
+  writeFileSync(agentsFile, 'Use spaces.\n')
+  const resumed = await host.createSession(threadId, () => project)
+  openSessions.push(resumed)
+  await runPrompt(resumed, 'third')
+  const twice = runContextsOf(file)
+  expect(twice).toHaveLength(2)
+  expect(twice[1]?.contextFiles).toEqual([{ path: agentsFile, sha256: sha256Of('Use spaces.\n') }])
+  const [firstRecord] = once
+  const [, secondRecord] = twice
+  if (firstRecord === undefined || secondRecord === undefined) throw new Error('a run context is missing')
+  // Nothing else changed: the second record is the first with the new hash.
+  expect({ ...secondRecord, contextFiles: firstRecord.contextFiles }).toEqual(firstRecord)
+  // The live fork point reads the latest.
+  expect((await resumed.forkPoint()).conditions.runContext).toEqual(secondRecord)
+
+  // pi's context builder skips custom entries: no request carried the record or its hashes.
+  expect(requests).toHaveLength(3)
+  const sent = JSON.stringify(requests)
+  expect(sent).toContain('Use spaces.')
+  expect(sent).not.toContain(ENSO_RUN_CONTEXT_ENTRY)
+  expect(sent).not.toContain(sha256Of('Use tabs.\n'))
+  expect(sent).not.toContain(sha256Of('Use spaces.\n'))
+})
+
+test('⚠ two forks of one thread, one of them run under a changed context file, show fork points that differ outside identity only in that field (#435)', async () => {
+  const source = crypto.randomUUID()
+  const { file } = storeTurns(source, [
+    ['first question', 'first answer'],
+    ['second question', 'second answer'],
+  ])
+  const recorded: EnsoRunContext = {
+    git: { revision: 'f00d', dirty: false },
+    config: { hash: sha256Of('{}'), sources: [] },
+    skills: [{ name: 'tdd', path: '/skills/tdd/SKILL.md' }],
+    contextFiles: [{ path: '/repo/AGENTS.md', sha256: sha256Of('v1') }],
+    mode: null,
+  }
+  const opened = SessionManager.open(file)
+  opened.appendModelChange('anthropic', 'claude-x')
+  opened.appendCustomEntry(ENSO_RUN_CONTEXT_ENTRY, recorded)
+  const forkAt = opened.appendMessage({ role: 'user', content: 'third question', timestamp: Date.now() })
+  const host = hostWith()
+  const plain = await host.forkThread(source, forkAt)
+  const changed = await host.forkThread(source, forkAt)
+  if (plain.kind !== 'forked' || changed.kind !== 'forked') throw new Error('a fork was refused')
+  const changedFile = (await host.listSessions()).find((stored) => stored.id === changed.threadId)?.path ?? ''
+  const changedContext = { ...recorded, contextFiles: [{ path: '/repo/AGENTS.md', sha256: sha256Of('v2') }] }
+  SessionManager.open(changedFile).appendCustomEntry(ENSO_RUN_CONTEXT_ENTRY, changedContext)
+
+  const plainPoint = await host.readStoredForkPoint(plain.threadId)
+  const changedPoint = await host.readStoredForkPoint(changed.threadId)
+  if (plainPoint === undefined || changedPoint === undefined) throw new Error('a fork has no fork point')
+  expect(plainPoint.identity).toMatchObject({ threadId: plain.threadId, parentThreadId: source })
+  expect(changedPoint.identity).toMatchObject({ threadId: changed.threadId, parentThreadId: source })
+  expect(plainPoint.conditions).toEqual({
+    model: { provider: 'anthropic', modelId: 'claude-x' },
+    thinkingLevel: null,
+    mode: 'default',
+    cwd: repoRoot,
+    runContext: recorded,
+  })
+  expect(changedPoint.conditions).toEqual({ ...plainPoint.conditions, runContext: changedContext })
+  // A thread held nowhere has no fork point; nothing is built to answer.
+  expect(await host.readStoredForkPoint('never-stored')).toBeUndefined()
+})
+
+// ── Continue on a torn tail (#436) ───────────────────────────────────────────
+// ⚠⚠ THESE PIN pi'S PRIVATE RUN LIFECYCLE. `continueRun` calls `AgentSession._runAgentPrompt`
+// through one cast (the host's module header): a pi bump that renames or reshapes it — or a raw
+// `agent.continue()` in its place, which never settles and leaves `isStreaming` false — goes red here.
+
+/** A stored assistant reply: text, then any tool calls — the shape a killed run leaves on disk. */
+function storedReply(text: string, calls: ReadonlyArray<{ id: string; name: string; arguments: object }> = []): never {
+  return {
+    role: 'assistant',
+    content: [{ type: 'text', text }, ...calls.map((call) => ({ type: 'toolCall', ...call }))],
+    api: 'anthropic-messages',
+    provider: 'anthropic',
+    model: 'test',
+    usage: {
+      input: 1,
+      output: 1,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 2,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+    stopReason: calls.length === 0 ? 'stop' : 'toolUse',
+    timestamp: Date.now(),
+  } as never
+}
+
+/** A cold thread whose last run was cut off as `tail` says: one whole turn, then the torn one. */
+function storeTornThread(
+  tail: 'unanswered-prompt' | 'tool-call-without-result' | 'tool-results-without-reply' | 'complete',
+): {
+  threadId: string
+  file: string
+} {
+  const threadId = crypto.randomUUID()
+  const { file } = storeTurns(threadId, [['first question', 'first answer']])
+  const stored = SessionManager.open(file)
+  if (tail === 'complete') return { threadId, file }
+  stored.appendMessage({ role: 'user', content: 'second question', timestamp: Date.now() })
+  if (tail !== 'unanswered-prompt') {
+    stored.appendMessage(
+      storedReply('reading it', [{ id: 'call-torn', name: 'read', arguments: { path: 'package.json', limit: 1 } }]),
+    )
+  }
+  if (tail === 'tool-results-without-reply') {
+    stored.appendMessage({
+      role: 'toolResult',
+      toolCallId: 'call-torn',
+      toolName: 'read',
+      content: [{ type: 'text', text: '{' }],
+      isError: false,
+      timestamp: Date.now(),
+    } as never)
+  }
+  return { threadId, file }
+}
+
+/** What a faux request was sent: each message's role and its text. */
+type SentContext = { messages: Array<{ role: string; content: unknown }> }
+function textOf(content: unknown): string {
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return ''
+  return content
+    .map((part: { type?: string; text?: string }) => (part.type === 'text' ? (part.text ?? '') : ''))
+    .join('')
+}
+
+/** The stored branch of `file` as `role[isError]: text` lines — messages only, tool results included. */
+function storedMessages(file: string): string[] {
+  return SessionManager.open(file)
+    .getBranch()
+    .flatMap((entry) => {
+      if (entry.type !== 'message') return []
+      const { message } = entry
+      if (message.role === 'toolResult')
+        return [`toolResult${message.isError ? '[isError]' : ''}: ${textOf(message.content)}`]
+      if (message.role !== 'user' && message.role !== 'assistant') return []
+      return [`${message.role}: ${textOf(message.content)}`]
+    })
+}
+
+/** A cold thread opened by a fresh host under the faux provider — the rail's resume path. */
+async function resumeTorn(threadId: string, core: FauxCore): Promise<HostedThread> {
+  const hosted = await hostWith([fauxModelExtension(core)]).createSession(threadId, () => repoRoot)
+  openSessions.push(hosted)
+  return hosted
+}
+
+test('⚠⚠ Continue answers an unanswered prompt from the stored state: one copy of the prompt, one settled after run-ended, and a prompt enqueued mid-run is answered in the same run (#436)', async () => {
+  const { threadId, file } = storeTornThread('unanswered-prompt')
+  const core = createFauxCore()
+  const asked = Promise.withResolvers<SentContext>()
+  const gate = Promise.withResolvers<void>()
+  core.setResponses([
+    async (context: SentContext) => {
+      asked.resolve(context)
+      await gate.promise
+      return faux.fauxAssistantMessage('continued answer')
+    },
+    faux.fauxAssistantMessage('answer to what was typed'),
+  ])
+  const hosted = await resumeTorn(threadId, core)
+  const seen: EnsoObservation[] = []
+  const settled = Promise.withResolvers<void>()
+  hosted.runtime.subscribe((observation) => {
+    seen.push(observation)
+    if (observation.kind === 'settled') settled.resolve()
+  })
+  let accepted = false
+  hosted.runtime.continueRun({ onAccepted: () => (accepted = true), onRejected: settled.reject })
+  expect(accepted).toBe(true)
+
+  // The model sees the stored context exactly: the unanswered prompt last, once, and nothing new.
+  const sent = await asked.promise
+  const userTexts = sent.messages.filter((message) => message.role === 'user').map((message) => textOf(message.content))
+  expect(userTexts).toEqual(['first question', 'second question'])
+  // pi's own system messages (instructions, not turns) may trail it; the last TURN is the prompt.
+  expect(sent.messages.filter((message) => message.role !== 'system').at(-1)?.role).toBe('user')
+
+  // Mid-run the thread is RUNNING to pi: a prompt is queued behind the run, not lost.
+  const queued = Promise.withResolvers<void>()
+  hosted.runtime.prompt(
+    { message: 'typed during continue', admission: 'enqueue' },
+    { onAccepted: queued.resolve, onRejected: queued.reject },
+  )
+  await queued.promise
+  gate.resolve()
+  await settled.promise
+  await nextTick()
+
+  const kinds = seen.map((observation) => observation.kind)
+  expect(kinds.filter((kind) => kind === 'settled')).toHaveLength(1)
+  expect(kinds.indexOf('settled')).toBeGreaterThan(kinds.lastIndexOf('run-ended'))
+  expect(kinds).toContain('run-ended')
+  const messages = storedMessages(file)
+  expect(messages.filter((line) => line === 'user: second question')).toHaveLength(1)
+  expect(messages.slice(-4)).toEqual([
+    'user: second question',
+    'assistant: continued answer',
+    'user: typed during continue',
+    'assistant: answer to what was typed',
+  ])
+})
+
+test('⚠ Continue closes a tool call left without its result with an error result, then runs on (#436)', async () => {
+  const { threadId, file } = storeTornThread('tool-call-without-result')
+  const core = createFauxCore()
+  const asked = Promise.withResolvers<SentContext>()
+  core.setResponses([
+    (context: SentContext) => {
+      asked.resolve(context)
+      return faux.fauxAssistantMessage('continuing after the lost result')
+    },
+  ])
+  const hosted = await resumeTorn(threadId, core)
+  const settled = Promise.withResolvers<void>()
+  hosted.runtime.subscribe((observation) => {
+    if (observation.kind === 'settled') settled.resolve()
+  })
+  hosted.runtime.continueRun({ onAccepted: () => undefined, onRejected: settled.reject })
+  const turns = (await asked.promise).messages.filter((message) => message.role !== 'system')
+  expect(turns.at(-1)?.role).toBe('toolResult')
+  await settled.promise
+  expect(storedMessages(file).slice(-4)).toEqual([
+    'user: second question',
+    'assistant: reading it',
+    `toolResult[isError]: ${LOST_TOOL_RESULT_TEXT}`,
+    'assistant: continuing after the lost result',
+  ])
+})
+
+// PR #442 review: the tail a kill leaves most often on a tool-using turn — the results are stored,
+// the reply to them is not. The model is asked with the results last and nothing added.
+test('⚠ Continue answers tool results that never got their reply, adding nothing before the model (#436)', async () => {
+  const { threadId, file } = storeTornThread('tool-results-without-reply')
+  const core = createFauxCore()
+  const asked = Promise.withResolvers<SentContext>()
+  core.setResponses([
+    (context: SentContext) => {
+      asked.resolve(context)
+      return faux.fauxAssistantMessage('the reply the results were waiting for')
+    },
+  ])
+  const hosted = await resumeTorn(threadId, core)
+  const settled = Promise.withResolvers<void>()
+  hosted.runtime.subscribe((observation) => {
+    if (observation.kind === 'settled') settled.resolve()
+  })
+  hosted.runtime.continueRun({ onAccepted: () => undefined, onRejected: settled.reject })
+  const turns = (await asked.promise).messages.filter((message) => message.role !== 'system')
+  expect(turns.at(-1)?.role).toBe('toolResult')
+  await settled.promise
+  expect(storedMessages(file).slice(-4)).toEqual([
+    'user: second question',
+    'assistant: reading it',
+    'toolResult: {',
+    'assistant: the reply the results were waiting for',
+  ])
+})
+
+test('⚠ a thread that ends on a reply is refused — nothing runs, nothing is written (#436)', async () => {
+  const { threadId, file } = storeTornThread('complete')
+  const core = createFauxCore()
+  core.setResponses([faux.fauxAssistantMessage('a second answer to nothing')])
+  const hosted = await resumeTorn(threadId, core)
+  const seen = collectEvents(hosted)
+  const before = readFileSync(file, 'utf8')
+  const refusals: string[] = []
+  hosted.runtime.continueRun({
+    onAccepted: () => refusals.push('accepted'),
+    onRejected: (reason) => refusals.push(reason),
+  })
+  await nextTick()
+  expect(refusals).toEqual([NOTHING_TO_CONTINUE])
+  expect(readFileSync(file, 'utf8')).toBe(before)
+  expect(seen.filter((observation) => observation.kind === 'turn-start' || observation.kind === 'settled')).toEqual([])
+  expect(core.state.callCount).toBe(0)
+})
+
+test('Continue on a thread that is running is refused; the run in flight is untouched (#436)', async () => {
+  const core = createFauxCore()
+  const gate = Promise.withResolvers<void>()
+  const asked = Promise.withResolvers<void>()
+  core.setResponses([
+    async () => {
+      asked.resolve()
+      await gate.promise
+      return faux.fauxAssistantMessage('done')
+    },
+  ])
+  const hosted = await hostedSession([fauxModelExtension(core)])
+  const run = runPrompt(hosted, 'hi')
+  await asked.promise
+  const refusals: string[] = []
+  hosted.runtime.continueRun({
+    onAccepted: () => refusals.push('accepted'),
+    onRejected: (reason) => refusals.push(reason),
+  })
+  expect(refusals).toEqual(['the thread is running; continue when it settles'])
+  gate.resolve()
+  await run
 })
