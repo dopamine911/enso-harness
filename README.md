@@ -157,12 +157,13 @@ hole:
 | `--no-skills` | Skills discovered from `~/.agents/skills/`, which the agent-dir redirect does not cover. |
 
 ⚠ **An exported `ANTHROPIC_API_KEY` does not reach pi.** Enso deletes every secret-shaped environment
-variable before spawning and tells you which on stderr. Provider credentials belong in pi's own
-`auth.json`, so run `/login` once **in the terminal** (`bun run enso`) — it is one of pi's TUI
-commands, and the server refuses any slash command the runtime does not offer rather than passing
-it to the model as text. The grant is per agent dir and both surfaces share it: log in once, and
-`bun run dev` uses the same credentials. The rule lives in
-[`packages/core/src/secrets.ts`](packages/core/src/secrets.ts).
+variable before spawning and tells you which on stderr
+([`packages/core/src/secrets.ts`](packages/core/src/secrets.ts)). Provider credentials belong in pi's own
+`auth.json`, so run `/login` once — typed in the web page's chat box, where it walks pi's provider
+picker as dialog cards (#338), or in the terminal (`bun run enso`). The grant is per agent dir, so
+one login serves both. A fresh `ENSO_HOME` has
+none, and its default model can still be Cursor's (#341): log in first, then choose a model with
+`/model`.
 
 ---
 
