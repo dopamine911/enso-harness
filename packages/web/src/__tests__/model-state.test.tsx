@@ -122,6 +122,24 @@ test('the chip is a button either way: the model and its provider when live, the
   await mounted.unmount()
 })
 
+test('a cold thread with a recorded model: the chip says it, marked recorded; the live state wins once there is one (#434)', async () => {
+  const recorded = { model: { provider: 'anthropic', modelId: 'claude-sonnet-5' }, thinkingLevel: 'medium' }
+  const mounted = await mount(<ModelChip state={null} recorded={recorded} onOpen={noop} />)
+  const chip = (): HTMLButtonElement => {
+    const found = mounted.container.querySelector<HTMLButtonElement>('button[aria-label="model"]')
+    if (found === null) throw new Error('expected the model chip')
+    return found
+  }
+  expect(chip().textContent).toBe('model (recorded): claude-sonnet-5 · anthropic · medium')
+  await mounted.render(<ModelChip state={null} recorded={{ model: null, thinkingLevel: 'high' }} onOpen={noop} />)
+  expect(chip().textContent).toBe('model (recorded): high')
+  await mounted.render(<ModelChip state={LIVE_MODEL} recorded={recorded} onOpen={noop} />)
+  expect(chip().textContent).toBe('modelFake One· fake')
+  await mounted.render(<ModelChip state={null} recorded={null} onOpen={noop} />)
+  expect(chip().textContent).toBe(MODEL_NOT_LIVE)
+  await mounted.unmount()
+})
+
 test('the thinking select renders nothing while not live, and the current level once it is', async () => {
   const mounted = await mount(<ThinkingLevelSelect state={null} onSelect={noop} />)
   expect(mounted.container.querySelector('[aria-label="thinking level"]')).toBeNull()

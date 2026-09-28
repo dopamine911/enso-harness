@@ -218,6 +218,7 @@ export {
   EnsoModelChoice,
   EnsoModelState,
   EnsoPromptAdmission,
+  EnsoRecordedModel,
   EnsoSessionConfiguration,
   EnsoSessionUsage,
   EnsoThreadCommands,

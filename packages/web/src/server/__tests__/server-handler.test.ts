@@ -438,6 +438,26 @@ test('⚠ POST …/command sets the thinking level on a thread that never ran: 2
   expect(built).toHaveLength(1)
 })
 
+// #434: a cold thread's snapshot says what its branch last ran on, as RECORDED beside a `null`
+// model — nothing is built to read it. Once the thread is live, the live state is the whole answer.
+test("a cold thread's snapshot carries its recorded model beside a null model; once live, only the live model (#434)", async () => {
+  const recordedModel = { model: { provider: 'anthropic', modelId: 'claude-sonnet-5' }, thinkingLevel: 'medium' }
+  const stored = { cold: { transcript: [], modified: new Date(0), firstMessage: 'earlier', recordedModel } }
+  const { url, built } = await startWith(settlesAtOnce, stored)
+  const controller = new AbortController()
+  openFollows.push(controller)
+  const coldFollow = await openFollow(url, 'cold', controller)
+  expect(coldFollow.frames[0]).toMatchObject({ type: 'snapshot', live: false, model: null, recordedModel })
+  expect(built).toHaveLength(0)
+
+  expect(await prompt(url, 'cold', 'run it')).toBe(202)
+  const later = new AbortController()
+  openFollows.push(later)
+  const liveFollow = await openFollow(url, 'cold', later)
+  expect(liveFollow.frames[0]).toMatchObject({ type: 'snapshot', live: true, model: { model: { name: 'Fake One' } } })
+  expect(liveFollow.frames[0]).not.toHaveProperty('recordedModel')
+})
+
 /** A project root with one directory under it, both canonical — a page may register `app` (#395). */
 function projectRoot(): { root: string; app: string } {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'enso-roots-')))

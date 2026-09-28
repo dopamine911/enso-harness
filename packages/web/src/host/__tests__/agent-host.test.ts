@@ -1034,6 +1034,61 @@ test('forking a LIVE thread forks what its file holds, as a cold one does, and l
   expect(live.inspect().sessionId).toBe(source)
 })
 
+// ── a cold thread's recorded model (#434) ────────────────────────────────────
+
+test('⚠ a stored read reports the LAST model and thinking level on the branch path — a change on an abandoned branch is ignored (#434)', async () => {
+  const threadId = crypto.randomUUID()
+  const { file } = storeTurns(threadId, [['first question', 'first answer']])
+  const more = SessionManager.open(file)
+  more.appendModelChange('anthropic', 'claude-early')
+  more.appendThinkingLevelChange('low')
+  more.appendModelChange('openai', 'gpt-kept')
+  const branchPoint = more.appendThinkingLevelChange('high')
+  // A later change that the leaf's path will NOT hold: pi restores neither.
+  more.appendModelChange('google', 'gemini-abandoned')
+  more.appendThinkingLevelChange('xhigh')
+  more.branch(branchPoint)
+  more.appendMessage({ role: 'user', content: 'on the kept branch', timestamp: Date.now() })
+
+  const stored = await hostWith().readStoredThread(threadId)
+  expect(stored?.recordedModel).toEqual({ model: { provider: 'openai', modelId: 'gpt-kept' }, thinkingLevel: 'high' })
+})
+
+test('a stored branch that records no model change and no thinking level has no recorded model; one half alone is reported alone (#434)', async () => {
+  const none = crypto.randomUUID()
+  storeTurns(none, [['a question', 'an answer']])
+  const host = hostWith()
+  expect((await host.readStoredThread(none))?.recordedModel).toBeUndefined()
+
+  const levelOnly = crypto.randomUUID()
+  const { file } = storeTurns(levelOnly, [['a question', 'an answer']])
+  SessionManager.open(file).appendThinkingLevelChange('medium')
+  expect((await host.readStoredThread(levelOnly))?.recordedModel).toEqual({ model: null, thinkingLevel: 'medium' })
+})
+
+test("a fork reports its source's recorded model up to the fork point, not a change the source made after it (#434, #433)", async () => {
+  const source = crypto.randomUUID()
+  const { file } = storeTurns(source, [['first question', 'first answer']])
+  const more = SessionManager.open(file)
+  more.appendModelChange('anthropic', 'claude-before-fork')
+  more.appendThinkingLevelChange('medium')
+  const forkPoint = more.appendMessage({ role: 'user', content: 'second question', timestamp: Date.now() })
+  more.appendModelChange('openai', 'gpt-after-fork')
+  more.appendThinkingLevelChange('high')
+
+  const host = hostWith()
+  const forked = await host.forkThread(source, forkPoint)
+  if (forked.kind !== 'forked') throw new Error(`the fork was refused: ${forked.reason}`)
+  expect((await host.readStoredThread(forked.threadId))?.recordedModel).toEqual({
+    model: { provider: 'anthropic', modelId: 'claude-before-fork' },
+    thinkingLevel: 'medium',
+  })
+  expect((await host.readStoredThread(source))?.recordedModel).toEqual({
+    model: { provider: 'openai', modelId: 'gpt-after-fork' },
+    thinkingLevel: 'high',
+  })
+})
+
 test('a fork is refused, with a reason, for a thread with no file or not served, an entry the file lacks, and an entry that is no user message (#433)', async () => {
   const source = crypto.randomUUID()
   storeTurns(source, [['a question', 'an answer']])

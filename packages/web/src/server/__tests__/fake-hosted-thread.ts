@@ -7,6 +7,7 @@ import type {
   EnsoModelState,
   EnsoObservation,
   EnsoPermissionModeState,
+  EnsoRecordedModel,
   EnsoSessionUsage,
   EnsoTranscriptEntry,
   HostFlowOutcome,
@@ -300,6 +301,8 @@ export interface FakeStoredThread {
   readonly mode?: string
   /** What pi's rule sums over the file (#45); nothing spent when absent. */
   readonly usage?: EnsoSessionUsage
+  /** What the branch records it last ran on (#434); none when absent. */
+  readonly recordedModel?: EnsoRecordedModel
   /** The branch analysed (#45 phase 2); an empty branch when absent. */
   readonly branch?: BranchStats
   /** The branch's context (#361); no request when absent. */
@@ -400,6 +403,7 @@ export function createFakeAgentHost(
               cwd: directoryOf(storedThread),
               transcript: storedThread.transcript,
               usage: storedThread.usage ?? { ...FAKE_NO_USAGE },
+              recordedModel: storedThread.recordedModel,
             },
       )
     },

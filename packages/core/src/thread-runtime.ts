@@ -107,6 +107,31 @@ export const EnsoModelState = Type.Object({
 export type EnsoModelState = Static<typeof EnsoModelState>
 
 /**
+ * What a stored thread's branch RECORDS it last ran on (#434): the last `model_change` and the
+ * last `thinking_level_change` on the path to the leaf — the values pi restores when the session
+ * is opened. Not an `EnsoModelState`: nothing is built for a cold read (#86), so there is no
+ * display name and no available levels, and the page labels it recorded, not live. A half the
+ * branch never recorded is `null`; a branch that records neither has no recorded model at all.
+ *
+ * @group Thread runtime
+ */
+export const EnsoRecordedModel = Type.Object(
+  {
+    model: Type.Union([
+      Type.Object(
+        { provider: Type.String({ minLength: 1 }), modelId: Type.String({ minLength: 1 }) },
+        { additionalProperties: false },
+      ),
+      Type.Null(),
+    ]),
+    thinkingLevel: Type.Union([Type.String({ minLength: 1 }), Type.Null()]),
+  },
+  { additionalProperties: false },
+)
+/** @group Thread runtime */
+export type EnsoRecordedModel = Static<typeof EnsoRecordedModel>
+
+/**
  * How full the context window is, as pi reckons it (#45): pi's `getContextUsage()`, never a
  * number of ours. `tokens` is pi's estimate — the latest assistant request's usage plus what
  * has been added since — and `null` right after a compaction, until the next response says.

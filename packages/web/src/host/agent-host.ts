@@ -20,6 +20,7 @@ import {
   type EnsoOpenDialog,
   type EnsoPermissionModeState,
   type EnsoPromptAdmission,
+  type EnsoRecordedModel,
   type EnsoSessionUsage,
   type EnsoThreadEvent,
   type EnsoTranscriptEntry,
@@ -69,7 +70,7 @@ import { builtinProviderName, providerRefusalOf } from './provider-refusal.ts'
 import type { RuntimeEvent } from './runtime-event.ts'
 import { toRpcWireEvent } from './session-events.ts'
 import { growsSessionSpend, liveSessionUsage, storedSessionUsage } from './session-usage.ts'
-import { transcriptOf } from './transcript.ts'
+import { recordedModelOf, transcriptOf } from './transcript.ts'
 
 const log = ensoLogger('host')
 
@@ -455,6 +456,8 @@ export interface StoredThreadRead {
   readonly transcript: EnsoTranscriptEntry[]
   /** Every usage in the file, on every branch, by pi's rule (`session-usage.ts`); no context. */
   readonly usage: EnsoSessionUsage
+  /** What the branch records it last ran on (#434); `undefined` when it records neither a model nor a level. */
+  readonly recordedModel: EnsoRecordedModel | undefined
 }
 
 /** A stored thread as `readStoredThreadStats` reads it. */
@@ -683,10 +686,12 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     if (located === undefined) return undefined
     // `open` loads the file into memory and writes nothing until an append.
     const stored = SessionManager.open(located.path)
+    const branch = stored.getBranch()
     return {
       cwd: located.cwd,
-      transcript: transcriptOf(stored.getBranch()),
+      transcript: transcriptOf(branch),
       usage: storedSessionUsage(stored.getEntries()),
+      recordedModel: recordedModelOf(branch),
     }
   }
 

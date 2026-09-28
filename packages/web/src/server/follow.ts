@@ -204,6 +204,7 @@ export async function followThread(deps: FollowRouteDeps, threadId: string, resp
     generation: mount.generation,
     permissionMode: mount.permissionMode,
     model: mount.model,
+    ...(mount.recordedModel === undefined ? {} : { recordedModel: mount.recordedModel }),
     cwd: mount.cwd,
     usage: mount.usage,
     messages: mount.messages,

@@ -3,6 +3,7 @@ import type {
   EnsoModelState,
   EnsoOpenDialog,
   EnsoPermissionModeState,
+  EnsoRecordedModel,
   EnsoSessionUsage,
   EnsoTranscriptEntry,
 } from '@enso/core'
@@ -65,8 +66,18 @@ export interface ThreadMount {
   readonly generation: number
   /** The live session's own mode, or the one this branch persists. */
   readonly permissionMode: EnsoPermissionModeState
-  /** The live session's model and thinking level (#338 slice 2); `null` when not live — a file does not say what pi would run. */
+  /**
+   * The live session's model and thinking level (#338 slice 2); `null` when not live — nothing is
+   * built to say what pi would run, or which levels it would offer (#86).
+   */
   readonly model: EnsoModelState | null
+  /**
+   * What a NOT-live thread's branch records it last ran on (#434): the last `model_change` and
+   * `thinking_level_change` on the path — what pi restores on open. The page shows it labelled
+   * recorded; never set on a live thread, whose `model` is the truth. `undefined` when the branch
+   * records neither.
+   */
+  readonly recordedModel: EnsoRecordedModel | undefined
   /** Every question pi is blocked on, oldest first (#114); empty when the thread is not live. */
   readonly openDialogs: EnsoOpenDialog[]
   /**
@@ -118,7 +129,15 @@ export async function readThreadMount(deps: ThreadReadDeps, threadId: string): P
 /** What a mount says about the run, read one way per kind of thread — a live one's session, or a cold one's file. */
 type RunReading = Pick<
   ThreadMount,
-  'interrupted' | 'live' | 'busy' | 'generation' | 'permissionMode' | 'model' | 'openDialogs' | 'usage'
+  | 'interrupted'
+  | 'live'
+  | 'busy'
+  | 'generation'
+  | 'permissionMode'
+  | 'model'
+  | 'recordedModel'
+  | 'openDialogs'
+  | 'usage'
 >
 
 /**
@@ -136,6 +155,7 @@ function liveReading(thread: ThreadView, transcript: readonly EnsoTranscriptEntr
     generation: thread.generation,
     permissionMode: runtime.permissionModeState(),
     model: runtime.modelState(),
+    recordedModel: undefined,
     openDialogs: runtime.openDialogs(),
     usage: runtime.sessionUsage(),
   }
@@ -154,6 +174,7 @@ function coldReading(
     generation: 0,
     permissionMode: host.storedPermissionMode(transcript),
     model: null,
+    recordedModel: stored?.recordedModel,
     openDialogs: [],
     usage: stored?.usage ?? NO_USAGE,
   }
