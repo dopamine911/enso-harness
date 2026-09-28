@@ -123,8 +123,12 @@ export interface ThreadDebugViewProps {
   readonly inspection: EnsoThreadInspection | undefined
   /** The thread's two event tails (#97), fetched alongside the inspection; undefined before the first refresh. */
   readonly events: EnsoThreadEvents | undefined
-  /** The thread's fork point (#435), live or cold; undefined before the first refresh or for a thread held nowhere. */
-  readonly manifest: EnsoForkPoint | undefined
+  /**
+   * The thread's fork point (#435), live or cold — or why the last read of it produced none (PR #440
+   * review: said in its section, never dropped; a 404 is {@link NO_FORK_POINT_YET}). Undefined
+   * before the first refresh.
+   */
+  readonly manifest: ForkPointReading
   /** Why the last refresh produced nothing — a 404 for a thread that has not run yet, a down server. */
   readonly error: string | undefined
   /** The last copy's outcome; the label beside the button says which. */
@@ -206,10 +210,26 @@ function runContextRows(context: EnsoRunContext): Array<readonly [string, string
   ]
 }
 
+/** What the fork-point section shows: the manifest, or why there is none. */
+export type ForkPointReading = EnsoForkPoint | { readonly problem: string } | undefined
+
+/** A manifest 404 (#435): no session file and no live session — a new thread before its first reply. */
+export const NO_FORK_POINT_YET = 'no fork point: the thread is not stored yet'
+
+/**
+ * Why a manifest read produced none (PR #440 review): said, never dropped — a schema mismatch is
+ * exactly the disagreement this drawer exists to show.
+ */
+function manifestProblemOf(failure: unknown): string {
+  if (failure instanceof InspectionFetchError && failure.status === 404) return NO_FORK_POINT_YET
+  return failure instanceof Error ? failure.message : String(failure)
+}
+
 /** The manifest (#435) as a definition list: identity first, then the conditions it runs under. */
-function ForkPointList({ point }: { point: EnsoForkPoint | undefined }): React.ReactNode {
-  if (point === undefined) return <div>no session anywhere yet</div>
-  const { identity, conditions } = point
+function ForkPointList({ reading }: { reading: ForkPointReading }): React.ReactNode {
+  if (reading === undefined) return <div>reading…</div>
+  if ('problem' in reading) return <div role="status">{reading.problem}</div>
+  const { identity, conditions } = reading
   const rows: Array<readonly [string, string]> = [
     ['thread', identity.threadId],
     ['leaf entry', identity.leafEntryId ?? 'empty branch'],
@@ -366,7 +386,7 @@ export function ThreadDebugView({
         </section>
         <section>
           <h3 className="font-semibold text-foreground">fork point</h3>
-          <ForkPointList point={manifest} />
+          <ForkPointList reading={manifest} />
         </section>
       </div>
     </aside>
@@ -542,7 +562,7 @@ export function ThreadDebugDrawer(): React.ReactNode {
   const logged = useMemo(() => ring.filter((line) => line.properties?.threadId === threadId), [ring, threadId])
   const [session, setSession] = useState<EnsoThreadInspection | undefined>(undefined)
   const [events, setEvents] = useState<EnsoThreadEvents | undefined>(undefined)
-  const [manifest, setManifest] = useState<EnsoForkPoint | undefined>(undefined)
+  const [manifest, setManifest] = useState<ForkPointReading>(undefined)
   const [error, setError] = useState<string | undefined>(undefined)
   const [copyState, setCopyState] = useState<CopyState>('idle')
   const [bundleState, setBundleState] = useState<BundleState>('idle')
@@ -573,7 +593,7 @@ export function ThreadDebugDrawer(): React.ReactNode {
       (fetched) => {
         if (fetched !== undefined) setManifest(fetched)
       },
-      () => setManifest(undefined),
+      (failure: unknown) => setManifest({ problem: manifestProblemOf(failure) }),
     )
   }, [fetchLatest, fetchManifestLatest])
   useEffect(() => {

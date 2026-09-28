@@ -36,7 +36,11 @@ import {
  *
  * The mode's rules are picc's: it persists them, with the mode name, as its `modes` custom entry
  * (`persistState`). This reads the last one on the branch — picc's own `restoreState` rule — and
- * hashes the rule set; the name stays picc's record, read beside this one.
+ * hashes the rule set; the name stays picc's record, read beside this one. The fields are read by
+ * name, not validated against picc's type (PR #440 review): an entry carrying none of them — picc
+ * renamed its shape — records the mode as unknown (`null`), never a constant hash of nothing that
+ * would stop noticing rule changes. The real-harness test in `agent-host.test.ts` loads picc and
+ * asserts a hash is recorded, so a rename goes red there.
  */
 
 /** The `customType` picc persists its mode and rules under. */
@@ -141,16 +145,20 @@ function lastCustomData(branch: readonly unknown[], customType: string): unknown
   return undefined
 }
 
+/** The persisted rule fields of picc's `modes` entry (`ModesPersistedEntry`), in the order they are hashed. */
+const PICC_RULE_FIELDS = [
+  'alwaysAllowRules',
+  'alwaysDenyRules',
+  'alwaysAskRules',
+  'additionalWorkingDirectories',
+] as const
+
 function modeRules(branch: readonly unknown[]): EnsoRunContext['mode'] {
   const data = lastCustomData(branch, PICC_MODES_ENTRY)
   if (typeof data !== 'object' || data === null) return null
   const persisted = data as Record<string, unknown>
-  const rules = {
-    alwaysAllowRules: persisted.alwaysAllowRules ?? null,
-    alwaysDenyRules: persisted.alwaysDenyRules ?? null,
-    alwaysAskRules: persisted.alwaysAskRules ?? null,
-    additionalWorkingDirectories: persisted.additionalWorkingDirectories ?? null,
-  }
+  if (PICC_RULE_FIELDS.every((field) => persisted[field] === undefined)) return null
+  const rules = Object.fromEntries(PICC_RULE_FIELDS.map((field) => [field, persisted[field] ?? null]))
   return { rulesHash: sha256(canonicalJson(rules)) }
 }
 

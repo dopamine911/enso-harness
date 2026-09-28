@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 300.**
+**Decision headers: 301.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -93,7 +93,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/harness/extensions/logging/__tests__/logging.test.ts` | `#132` | The extension's two branches (#132): pi as a CHILD configures its own sink; pi IN-PROCESS leaves the server's alone. |
 | `packages/harness/extensions/logging/index.ts` | `#132`, `#144`, `#167` | The extension process's logging (#132), and the one record only an extension can write: the provider's own request id (#144). |
 | `packages/harness/extensions/run-context/__tests__/git-probe.test.ts` | `#435` | #435: the run-context git probe asks the SESSION's cwd, whatever repository the environment names. |
-| `packages/harness/extensions/run-context/index.ts` | `#126`, `#435` | The run-context recorder (#435, Lineage #126): at every run start, what the run starts under — git revision and dirty state, the resolved config's hash and files, the skills, the context files' hashes, the permission mode's rule-set hash — appended to pi's log as an `enso-run-context` entry (`@enso/core` `run-context.ts`) ONLY when a field differs from the last one on the branch. |
+| `packages/harness/extensions/run-context/index.ts` | `#126`, `#435`, `#440` | The run-context recorder (#435, Lineage #126): at every run start, what the run starts under — git revision and dirty state, the resolved config's hash and files, the skills, the context files' hashes, the permission mode's rule-set hash — appended to pi's log as an `enso-run-context` entry (`@enso/core` `run-context.ts`) ONLY when a field differs from the last one on the branch. |
 | `packages/harness/extensions/web-fetch/__tests__/one-trust-question.test.ts` | `#421` | #421, found live: the trust question for a project's `.enso/config.json` must be asked ONCE per session, though two tools (web_fetch, web_search) read the config. |
 | `packages/harness/extensions/web-fetch/__tests__/web-fetch.test.ts` | `#54` | The web_fetch extension (#54), against injected IO seams — no test here touches the network, DNS, or the user's config file. |
 | `packages/harness/extensions/web-fetch/index.ts` | `#9`, `#54`, `#59`, `#421` | The web_fetch tool (#54) — the sanctioned web access that replaces the ad-hoc network clients #9 denies in bash. |
@@ -128,6 +128,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/__tests__/static-markup.ts` | `#236` | What a `<select>` in a `renderToStaticMarkup` string offers, read through a DOM (#236). |
 | `packages/web/src/__tests__/stored-threads.test.ts` | `#103` | #103 receipt, step 8: the dev proxy answered a dead API with Bun's whole HTML error page, and quoting it filled the rail. |
 | `packages/web/src/__tests__/thread-context.test.tsx` | `#361` | #361: the Context view — its derivations as pure functions, and a static render of what it says it estimated, what the provider counted, and what it does not know. |
+| `packages/web/src/__tests__/thread-debug-drawer.test.tsx` | `#435`, `#440` | The drawer, mounted, reading its fork point (#435). |
 | `packages/web/src/__tests__/thread-debug.test.tsx` | `#86` | #86: the drawer's one job is to NAME a disagreement between what the browser believes and what pi's session holds. |
 | `packages/web/src/__tests__/thread-stats.test.tsx` | `#45` | #45 phase 2: the stats drawer, livecraft's session analysis over our wire — its derivations as pure functions, and a static render of what it says it measured and what it could not. |
 | `packages/web/src/__tests__/thread-status.test.tsx` | `#45`, `#90` | #90 PR 1: the always-on status bar. |

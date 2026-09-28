@@ -1809,6 +1809,9 @@ test('⚠ two runs with nothing changed record one run context; a changed AGENTS
   expect(once).toHaveLength(1)
   expect(once[0]?.contextFiles).toEqual([{ path: agentsFile, sha256: sha256Of('Use tabs.\n') }])
   expect(once[0]?.git).toBeNull()
+  // The real picc is loaded: its `modes` entry must yield a rules hash. A picc that renamed its
+  // persisted rule fields records `mode: null` instead, and this goes red (PR #440 review).
+  expect(once[0]?.mode).toEqual({ rulesHash: expect.stringMatching(/^[0-9a-f]{64}$/) })
   first.runtime.dispose()
 
   // pi reads context files when a session is built: the change is seen by the resumed session.

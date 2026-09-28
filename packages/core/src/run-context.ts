@@ -69,6 +69,10 @@ export const EnsoRunContext = Type.Object(
     contextFiles: Type.Array(
       Type.Object({ path: Type.String({ minLength: 1 }), sha256: Sha256 }, { additionalProperties: false }),
     ),
+    /**
+     * sha256 of the mode's rule set, from the branch's last `modes` entry; `null` when there is none,
+     * or when it carries none of the rule fields (the entry's shape moved: unknown, never a hash of nothing).
+     */
     mode: Type.Union([Type.Object({ rulesHash: Sha256 }, { additionalProperties: false }), Type.Null()]),
   },
   { additionalProperties: false },
