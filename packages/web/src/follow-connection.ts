@@ -98,6 +98,12 @@ export interface FollowConnectionOptions {
    * result renders.
    */
   readonly onToolResultDescriptor?: (toolCallId: string, descriptor: EnsoToolResultDescriptor) => void
+  /**
+   * A turn started on the thread — pi's `turn_start`, the evidence a run is really going (PR #440
+   * review). A lease alone (a mode change, `/model`, a refused Continue) raises `busy` but never
+   * starts a turn, so what must key on "a run answered this thread" keys on this, not on `busy`.
+   */
+  readonly onTurnStart?: () => void
 }
 
 /** One run this adapter has open: its AG-UI ids and, once the receipt is in, the acquisition it took or queued behind. */
@@ -509,6 +515,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     if (observation.kind === 'tool-result' && observation.complete && observation.descriptor !== undefined) {
       options.onToolResultDescriptor?.(observation.toolCallId, observation.descriptor)
     }
+    if (observation.kind === 'turn-start') options.onTurnStart?.()
     push(...observationToAguiEvents(observation, idsOf(current)))
   }
 

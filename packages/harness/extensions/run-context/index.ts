@@ -1,14 +1,9 @@
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import type { BeforeAgentStartEvent, ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent'
-import { ENSO_RUN_CONTEXT_ENTRY, type EnsoConfigParseResult, type EnsoRunContext, readEnsoRunContext } from '@enso/core'
+import { ENSO_RUN_CONTEXT_ENTRY, type EnsoConfigParseResult, type EnsoRunContext } from '@enso/core'
 import { ensoHome } from '@enso/core/paths'
-import {
-  type SessionConfigContext,
-  type SessionEnsoConfig,
-  sessionConfigSources,
-  sessionEnsoConfig,
-} from '../../core/index.ts'
+import { type SessionConfigContext, type SessionEnsoConfig, sessionEnsoConfig } from '../../core/index.ts'
 
 /**
  * The run-context recorder (#435, Lineage #126): at every run start, what the run starts under —
@@ -51,8 +46,6 @@ const GIT_TIMEOUT_MS = 5000
 export interface RunContextDependencies {
   /** The session's config — the one resolution per session (`session-config.ts`). */
   resolveSessionConfig: (session: object, context: Omit<SessionConfigContext, 'home'>) => Promise<SessionEnsoConfig>
-  /** The config files that resolution read. */
-  configSources: (cwd: string, resolved: SessionEnsoConfig) => string[]
   /** Run git in `cwd` — never in a repository an inherited environment names. */
   runGit: (args: string[], cwd: string) => Promise<GitResult>
 }
@@ -130,7 +123,7 @@ async function resolvedConfig(
 ): Promise<{ result: EnsoConfigParseResult; sources: string[] }> {
   try {
     const resolved = await dependencies.resolveSessionConfig(context.sessionManager, context)
-    return { result: resolved.result, sources: dependencies.configSources(context.cwd, resolved) }
+    return { result: resolved.result, sources: [...resolved.sources] }
   } catch (error: unknown) {
     return { result: { kind: 'unreadable', reason: String(error) }, sources: [] }
   }
@@ -162,6 +155,16 @@ function modeRules(branch: readonly unknown[]): EnsoRunContext['mode'] {
   return { rulesHash: sha256(canonicalJson(rules)) }
 }
 
+/**
+ * Code-point order, as `canonicalJson` orders keys (PR #440 review): `localeCompare` collates under
+ * the process's locale, and the TUI and the web server may write one session file under different
+ * `LANG`s — a spurious entry each time the surface changed.
+ */
+function byCodePoint(first: string, second: string): number {
+  if (first < second) return -1
+  return first > second ? 1 : 0
+}
+
 async function runContextOf(
   dependencies: RunContextDependencies,
   event: BeforeAgentStartEvent,
@@ -170,9 +173,7 @@ async function runContextOf(
   const [git, config] = await Promise.all([gitState(dependencies, context.cwd), resolvedConfig(dependencies, context)])
   const skills = event.systemPromptOptions.skills
     .map((skill) => ({ name: skill.name, path: skill.filePath }))
-    .sort((first, second) =>
-      first.name === second.name ? first.path.localeCompare(second.path) : first.name.localeCompare(second.name),
-    )
+    .sort((first, second) => byCodePoint(first.name, second.name) || byCodePoint(first.path, second.path))
   return {
     git,
     config: { hash: sha256(canonicalJson(config.result)), sources: config.sources },
@@ -190,9 +191,10 @@ export function createRunContext(dependencies: RunContextDependencies): (pi: Ext
   return (pi: ExtensionAPI): void => {
     pi.on('before_agent_start', async (event, context) => {
       const current = await runContextOf(dependencies, event, context)
+      // Compared RAW, not through the reader's schema (PR #440 review): a record this writer made
+      // that the schema rejects would otherwise read as absent and be appended again every run.
       const last = lastCustomData(context.sessionManager.getBranch(), ENSO_RUN_CONTEXT_ENTRY)
-      const recorded = last === undefined ? undefined : readEnsoRunContext(ENSO_RUN_CONTEXT_ENTRY, last)
-      if (recorded !== undefined && canonicalJson(recorded) === canonicalJson(current)) return
+      if (last !== undefined && canonicalJson(last) === canonicalJson(current)) return
       pi.appendEntry(ENSO_RUN_CONTEXT_ENTRY, current)
     })
   }
@@ -206,6 +208,5 @@ export function createRunContext(dependencies: RunContextDependencies): (pi: Ext
  */
 export default createRunContext({
   resolveSessionConfig: (session, context) => sessionEnsoConfig(session, { ...context, home: ensoHome(process.env) }),
-  configSources: (cwd, resolved) => sessionConfigSources(ensoHome(process.env), cwd, resolved),
   runGit: (args, cwd) => runGitIn(process.env, args, cwd),
 })

@@ -243,6 +243,7 @@ function createThreadStores(
       onToolResultDescriptor: (toolCallId: string, descriptor: EnsoToolResultDescriptor) => {
         toolResultDescriptors.set(new Map(toolResultDescriptors.get()).set(toolCallId, descriptor))
       },
+      onTurnStart: () => retireTornTail(threadId),
     }),
   }
 }
@@ -276,6 +277,16 @@ export const TORN_TAIL_SUPERSEDED = 'A later run picked up after the cut-off tur
 
 /** Per thread, what to do with its torn-tail line when its first run starts; gone once done. */
 const tornTailLines = new Map<string, () => void>()
+
+/**
+ * The thread's first run — Continue's, a prompt sent instead, another tab's — answers its torn
+ * tail. Keyed on the run's first turn, not on `busy` (PR #440 review): every control route takes
+ * a lease and raises `busy` without starting a run.
+ */
+function retireTornTail(threadId: string): void {
+  tornTailLines.get(threadId)?.()
+  tornTailLines.delete(threadId)
+}
 
 // ── the page's threads ────────────────────────────────────────────────────────
 
@@ -502,7 +513,11 @@ export function adoptThread(history: EnsoThreadHistory, fetchImpl?: FetchLike, i
         label: CONTINUE_LABEL,
         run: () => {
           continued = true
-          void stores.connection.continueRun()
+          // Only an accepted Continue starts the run it names; a refused one leaves the prompt sent
+          // instead to supersede the line (PR #440 review).
+          void stores.connection.continueRun().then((outcome) => {
+            if (outcome !== 'told') continued = false
+          })
         },
       },
     })
@@ -534,11 +549,6 @@ export function getThreadStores(threadId: string): ThreadStores {
 export function updateThreadSummary(threadId: string, patch: Pick<ThreadSummary, 'title' | 'busy' | 'waiting'>): void {
   const current = summaries.get(threadId)
   if (current === undefined) return
-  // The thread's first run — Continue's, a prompt sent instead, another tab's — answers its torn tail.
-  if (patch.busy && !current.busy) {
-    tornTailLines.get(threadId)?.()
-    tornTailLines.delete(threadId)
-  }
   if (current.title === patch.title && current.busy === patch.busy && current.waiting === patch.waiting) return
   summaries.set(threadId, { ...current, ...patch, lastActivityAt: new Date() })
   publishThreadList()

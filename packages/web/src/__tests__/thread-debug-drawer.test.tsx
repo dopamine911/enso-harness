@@ -2,7 +2,7 @@ import { afterAll, afterEach, expect, test } from 'bun:test'
 import { act } from 'react'
 import type { createRoot as CreateRoot } from 'react-dom/client'
 import { ThreadStoresContext } from '../store.ts'
-import { NO_FORK_POINT_YET, ThreadDebugDrawer } from '../thread-debug.tsx'
+import { MANIFEST_SCHEMA_MISMATCH, NO_FORK_POINT_YET, ThreadDebugDrawer } from '../thread-debug.tsx'
 import { clearThreadsForTest, mintThread } from '../thread-stores.ts'
 import { ensureDom, releaseDom } from './dom-environment.ts'
 import { requestedUrl } from './scripted-server.ts'
@@ -63,7 +63,7 @@ test('a manifest the server refuses is said in the fork-point section, with its 
 
 test('a manifest that does not match its schema is said, not dropped', async () => {
   const section = await forkPointSectionUnder(serverAnswering(() => Response.json({ identity: 'nonsense' })))
-  expect(section).toContain("the server's manifest payload did not match its schema")
+  expect(section).toContain(MANIFEST_SCHEMA_MISMATCH)
 })
 
 test('a 404 reads as a thread not stored yet', async () => {

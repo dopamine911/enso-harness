@@ -33,6 +33,12 @@ export interface FollowConnectionOptions {
    * result renders.
    */
   readonly onToolResultDescriptor?: (toolCallId: string, descriptor: EnsoToolResultDescriptor) => void
+  /**
+   * A turn started on the thread — pi's `turn_start`, the evidence a run is really going (PR #440
+   * review). A lease alone (a mode change, `/model`, a refused Continue) raises `busy` but never
+   * starts a turn, so what must key on "a run answered this thread" keys on this, not on `busy`.
+   */
+  readonly onTurnStart?: () => void
 }
 ```
 

@@ -69,7 +69,7 @@ flowchart LR
 | `mapPiEvent (22 kinds)` | [Observations](./observations.md) | [`packages/web/src/host/map-events.ts:283`](../../packages/web/src/host/map-events.ts#L283) |
 | `EnsoObservation` | [Core exports](./core-exports.md) | [`packages/core/src/observation.ts:583`](../../packages/core/src/observation.ts#L583) |
 | `observation frame` | [Observations](./observations.md) | [`packages/web/src/server/follow.ts:187`](../../packages/web/src/server/follow.ts#L187) |
-| `follow connection` | [Routes](./routes.md) | [`packages/web/src/follow-connection.ts:474`](../../packages/web/src/follow-connection.ts#L474) |
+| `follow connection` | [Routes](./routes.md) | [`packages/web/src/follow-connection.ts:480`](../../packages/web/src/follow-connection.ts#L480) |
 | `to-agui chunk` | [Observations](./observations.md) | [`packages/web/src/to-agui.ts:76`](../../packages/web/src/to-agui.ts#L76) |
 | `custom event router` | [Observations](./observations.md) | [`packages/web/src/custom-event-router.ts:209`](../../packages/web/src/custom-event-router.ts#L209) |
 

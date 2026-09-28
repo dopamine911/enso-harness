@@ -430,12 +430,15 @@ async function fetchThreadDebug(
   return { session, events }
 }
 
+/** What the fork-point section says when the manifest route answered a shape its schema refuses. */
+export const MANIFEST_SCHEMA_MISMATCH = "the server's manifest payload did not match its schema"
+
 /** Fetches one thread's fork point (#435); a non-2xx — 404 for a thread with no session anywhere — is a throw. */
 async function fetchThreadManifest(threadId: string): Promise<EnsoForkPoint> {
   const response = await fetch(`/api/threads/${encodeURIComponent(threadId)}/manifest`)
   if (!response.ok) throw new InspectionFetchError(response.status, boundedFailureDetail(await response.text()))
   const payload: unknown = await response.json()
-  if (!Check(EnsoForkPoint, payload)) throw new Error("the server's manifest payload did not match its schema")
+  if (!Check(EnsoForkPoint, payload)) throw new Error(MANIFEST_SCHEMA_MISMATCH)
   return payload
 }
 
