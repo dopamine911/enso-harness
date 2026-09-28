@@ -56,6 +56,13 @@ export interface AgentHost {
   readStoredThreadContext(threadId: string): Promise<StoredThreadContext | undefined>
   /** One request of a stored thread, element by element (#361 phase 3); undefined for no file or no such turn. */
   readStoredRequestDetail(threadId: string, request: number | 'next'): Promise<BranchRequestDetail | undefined>
+  /**
+   * Fork a stored thread at one of its user messages, as pi's `/fork` does (#433; the module
+   * header): a new session file naming the source as its parent, holding everything before that
+   * message, and the message's text to prefill with. The source's file is not written; nothing is
+   * built for either thread (#86).
+   */
+  forkThread(threadId: string, entryId: string): Promise<ThreadForkOutcome>
   /** What a fresh thread starts in — served before any run exists, so the header never guesses. */
   freshPermissionMode(): EnsoPermissionModeState
   /** A stored thread's state from its transcript alone: nothing is built to answer (#86, #95). */
@@ -134,6 +141,11 @@ export interface StoredThread {
   readonly messageCount: number
   /** The first user message, verbatim; empty for a session with none. */
   readonly firstMessage: string
+  /**
+   * The thread it was forked from (#433): its header's `parentSession` file, as that file's
+   * session id. Absent for a thread that is no fork, and for one whose parent file is gone.
+   */
+  readonly parentThreadId?: string
 }
 ```
 
@@ -167,6 +179,12 @@ export const EnsoStoredThread = Type.Object(
      * prompt anyway; this is the readable, early form of that refusal.
      */
     busy: Type.Boolean(),
+    /**
+     * The thread this one was forked from (#433): the session id its header's `parentSession`
+     * file holds. Absent for a thread that is no fork — and for one whose parent file is gone,
+     * which no longer names a thread the page could open.
+     */
+    parentThreadId: Type.Optional(Type.String()),
   },
   { additionalProperties: false },
 )
@@ -269,12 +287,22 @@ every branch, pinned equal to pi's own total in `agent-host.test.ts`. `createSes
 and no index file. Only a thread with no file asks where a new one goes (`newSessionDirectory` is a
 function, called on that branch alone), so a project the thread was once named for can be removed and
 the thread still resumes. `inspect()` reads ids and directory straight off the session manager and converts
-the live branch the same way. The host is tested against the real session manager in
+the live branch the same way. `forkThread` (#433) is pi's `/fork` at its default position `before`,
+taken from the file: it opens the source (building nothing), refuses an entry the file lacks or one
+that is no user message, and writes a new session file whose header's `parentSession` names the
+source — the branch up to the message's parent (`createBranchedSession`), or nothing when the message
+is the root (`create` + `newSession({ parentSession })`) — answering the new id and the message's text
+to prefill. A fork with no assistant message on its branch is one pi would not flush, so the host
+writes its entries as pi's first flush does; the source's file is never written. `listSessions` reads
+each fork's `parentSession` back to the parent's session id (`parentThreadId`) off the same listing;
+a parent whose file is gone names none. Outside a runtime pi's `session_before_fork` hook does not
+fire (no loaded extension handles it). The host is tested against the real session manager in
 `host/__tests__/agent-host.test.ts`.
 
 **Consumed by the server.** `packages/web/src/server/index.ts` owns the read routes:
 `GET /api/stored-threads` → `respondWithStoredThreads` maps each `StoredThread` to a `EnsoStoredThread`,
-marking `busy` by peeking the registry; `GET /api/threads` summarises each live thread from `inspect()`.
+marking `busy` by peeking the registry and carrying a fork's `parentThreadId`; `POST …/fork` asks
+`host.forkThread` (409 while a run holds the source); `GET /api/threads` summarises each live thread from `inspect()`.
 `packages/web/src/server/thread-registry.ts` is the only builder (it is handed `host.createSession`),
 and its `inspectThread` is the one place a `EnsoThreadInspection` is assembled, so the thread route and
 the bundle cannot drift. The LIVE-OR-COLD read — `inspect().entries` when the thread is live,

@@ -851,30 +851,42 @@ test("⚠ subscribe delivers startup records with origin `session-start` and a r
  * session dir — is the scratch one, then that dir is passed rather than assumed.
  */
 function storeSession(threadId: string, userText: string, assistantText: string, directory = repoRoot): string {
+  return storeTurns(threadId, [[userText, assistantText]], directory).file
+}
+
+/** A stored session of whole turns, each a user message and pi's reply — its file, and each turn's user entry id. */
+function storeTurns(
+  threadId: string,
+  turns: ReadonlyArray<readonly [string, string]>,
+  directory = repoRoot,
+): { file: string; userEntryIds: string[] } {
   hostWith()
   const sessionDir = SessionManager.inMemory(directory).getSessionDir()
   const stored = SessionManager.create(directory, sessionDir, { id: threadId })
-  stored.appendMessage({ role: 'user', content: userText, timestamp: Date.now() })
-  stored.appendMessage({
-    role: 'assistant',
-    content: [{ type: 'text', text: assistantText }],
-    api: 'anthropic-messages',
-    provider: 'anthropic',
-    model: 'test',
-    usage: {
-      input: 1,
-      output: 1,
-      cacheRead: 0,
-      cacheWrite: 0,
-      totalTokens: 2,
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-    },
-    stopReason: 'stop',
-    timestamp: Date.now(),
-  } as never)
+  const userEntryIds = turns.map(([userText, assistantText]) => {
+    const userEntryId = stored.appendMessage({ role: 'user', content: userText, timestamp: Date.now() })
+    stored.appendMessage({
+      role: 'assistant',
+      content: [{ type: 'text', text: assistantText }],
+      api: 'anthropic-messages',
+      provider: 'anthropic',
+      model: 'test',
+      usage: {
+        input: 1,
+        output: 1,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 2,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+      stopReason: 'stop',
+      timestamp: Date.now(),
+    } as never)
+    return userEntryId
+  })
   const file = stored.getSessionFile()
   if (file === undefined) throw new Error('pi did not flush the stored session')
-  return file
+  return { file, userEntryIds }
 }
 
 test('⚠ createSession(threadId) OPENS the session file already under that id — the branch is the stored one, not a fresh file', async () => {
@@ -937,6 +949,108 @@ test('⚠ a stored session in a directory the host does not serve is not listed,
   const refused = host.createSession(threadId, () => repoRoot)
   await expect(refused).rejects.toBeInstanceOf(SessionDirectoryRefused)
   await expect(refused).rejects.toThrow(`${elsewhere} is not a project this server runs sessions in`)
+})
+
+// ── fork (#433): pi's `/fork` at a user message, from the file ─────────────────
+
+/** A fork's session file as pi reads it back: its header, and its branch as role/text pairs. */
+function readFork(host: AgentHost, forkThreadId: string): Promise<{ parentSession: unknown; branch: string[] }> {
+  return host.listSessions().then((listed) => {
+    const file = listed.find((stored) => stored.id === forkThreadId)?.path
+    if (file === undefined) throw new Error(`the fork ${forkThreadId} is not listed`)
+    const opened = SessionManager.open(file)
+    const branch = transcriptTexts(opened.getBranch())
+    return { parentSession: opened.getHeader()?.parentSession, branch }
+  })
+}
+
+/** A branch's messages as `role: text` — what a fork is checked to hold. */
+function transcriptTexts(branch: readonly SessionEntry[]): string[] {
+  return branch.flatMap((entry) => {
+    if (entry.type !== 'message' || (entry.message.role !== 'user' && entry.message.role !== 'assistant')) return []
+    const { content } = entry.message
+    const text =
+      typeof content === 'string' ? content : content.map((part) => (part.type === 'text' ? part.text : '')).join('')
+    return [`${entry.message.role}: ${text}`]
+  })
+}
+
+test("⚠ forking a cold thread at turn two's prompt gives a new thread holding turn one, naming its parent, with turn two's words to send again; the source is untouched", async () => {
+  const source = crypto.randomUUID()
+  const { file, userEntryIds } = storeTurns(source, [
+    ['first question', 'first answer'],
+    ['second question', 'second answer'],
+  ])
+  const before = readFileSync(file)
+  const host = hostWith()
+  const forked = await host.forkThread(source, userEntryIds[1] ?? '')
+  if (forked.kind !== 'forked') throw new Error(`the fork was refused: ${forked.reason}`)
+  expect(forked.threadId).not.toBe(source)
+  expect(forked.prefill).toBe('second question')
+  expect(await readFork(host, forked.threadId)).toEqual({
+    parentSession: file,
+    branch: ['user: first question', 'assistant: first answer'],
+  })
+  expect(readFileSync(file).equals(before)).toBe(true)
+  // The rail's relation: the listing names the parent by its thread id.
+  const listed = await host.listSessions()
+  expect(listed.find((stored) => stored.id === forked.threadId)?.parentThreadId).toBe(source)
+  expect(listed.find((stored) => stored.id === source)?.parentThreadId).toBeUndefined()
+})
+
+test('⚠ forking at the first prompt gives an EMPTY thread that names its parent — listed untitled, and it resumes under its id (#433)', async () => {
+  const source = crypto.randomUUID()
+  const { file, userEntryIds } = storeTurns(source, [['only question', 'only answer']])
+  const before = readFileSync(file)
+  const host = hostWith()
+  const forked = await host.forkThread(source, userEntryIds[0] ?? '')
+  if (forked.kind !== 'forked') throw new Error(`the fork was refused: ${forked.reason}`)
+  expect(forked.prefill).toBe('only question')
+  expect(await readFork(host, forked.threadId)).toEqual({ parentSession: file, branch: [] })
+  expect(readFileSync(file).equals(before)).toBe(true)
+  const listed = (await host.listSessions()).find((stored) => stored.id === forked.threadId)
+  expect(listed).toMatchObject({ parentThreadId: source, messageCount: 0, firstMessage: '' })
+  // pi would not have written it (no assistant message); resuming must OPEN it, not start a fresh session.
+  const hosted = await host.createSession(forked.threadId, () => {
+    throw new Error('a fork with a session file was asked for a new directory')
+  })
+  openSessions.push(hosted)
+  expect(hosted.inspect().sessionFile).toBe(listed?.path ?? '')
+})
+
+test('forking a LIVE thread forks what its file holds, as a cold one does, and leaves the live session as it was (#433)', async () => {
+  const source = crypto.randomUUID()
+  const { userEntryIds } = storeTurns(source, [
+    ['live first', 'live answer'],
+    ['live second', 'live second answer'],
+  ])
+  const host = hostWith()
+  const live = await host.createSession(source, () => repoRoot)
+  openSessions.push(live)
+  const forked = await host.forkThread(source, userEntryIds[1] ?? '')
+  if (forked.kind !== 'forked') throw new Error(`the fork was refused: ${forked.reason}`)
+  expect(forked.prefill).toBe('live second')
+  expect((await readFork(host, forked.threadId)).branch).toEqual(['user: live first', 'assistant: live answer'])
+  expect(live.inspect().sessionId).toBe(source)
+})
+
+test('a fork is refused, with a reason, for a thread with no file or not served, an entry the file lacks, and an entry that is no user message (#433)', async () => {
+  const source = crypto.randomUUID()
+  storeTurns(source, [['a question', 'an answer']])
+  const host = hostWith()
+  const assistantEntryId = SessionManager.open(
+    (await host.listSessions()).find((stored) => stored.id === source)?.path ?? '',
+  )
+    .getBranch()
+    .find((entry) => entry.type === 'message' && entry.message.role === 'assistant')?.id
+  expect(await host.forkThread('never-stored', 'x')).toMatchObject({ kind: 'no-thread' })
+  const elsewhere = crypto.randomUUID()
+  const { userEntryIds } = storeTurns(elsewhere, [['q', 'a']], mkdtempSync(join(tmpdir(), 'enso-unserved-fork-')))
+  expect(await host.forkThread(elsewhere, userEntryIds[0] ?? '')).toMatchObject({ kind: 'no-thread' })
+  expect(await host.forkThread(source, 'no-such-entry')).toMatchObject({ kind: 'no-entry' })
+  expect(await host.forkThread(source, assistantEntryId ?? '')).toMatchObject({ kind: 'not-a-user-message' })
+  // Nothing refused left a file behind.
+  expect((await host.listSessions()).filter((stored) => stored.parentThreadId === source)).toEqual([])
 })
 
 // ── session usage (#45): pi's totals, live and stored ────────────────────────

@@ -237,11 +237,49 @@ export const EnsoStoredThread = Type.Object(
      * prompt anyway; this is the readable, early form of that refusal.
      */
     busy: Type.Boolean(),
+    /**
+     * The thread this one was forked from (#433): the session id its header's `parentSession`
+     * file holds. Absent for a thread that is no fork — and for one whose parent file is gone,
+     * which no longer names a thread the page could open.
+     */
+    parentThreadId: Type.Optional(Type.String()),
   },
   { additionalProperties: false },
 )
 /** @group Thread inspection */
 export type EnsoStoredThread = Static<typeof EnsoStoredThread>
+
+/**
+ * `POST /api/threads/:id/fork` (#433): fork the thread at one of its user messages, pi's `/fork`
+ * with its default position `before`. `entryId` is the pi entry id of that user message — the
+ * id a stored history's message carries.
+ *
+ * @group Thread inspection
+ */
+export const EnsoForkRequest = Type.Object({ entryId: Type.String({ minLength: 1 }) }, { additionalProperties: false })
+/** @group Thread inspection */
+export type EnsoForkRequest = Static<typeof EnsoForkRequest>
+
+/**
+ * What a fork answers (#433): the new thread, and the forked message's text — pi's `/fork` puts it
+ * in the editor, so the new thread's composer opens holding it, ready to send again or edit.
+ *
+ * @group Thread inspection
+ */
+export const EnsoForkReceipt = Type.Object(
+  { threadId: Type.String(), prefill: Type.String() },
+  { additionalProperties: false },
+)
+/** @group Thread inspection */
+export type EnsoForkReceipt = Static<typeof EnsoForkReceipt>
+
+/**
+ * The palette's `/fork` (#433): a `host` row of kind `view` — the page does it, forking at the
+ * thread's last user message through the fork route; nothing is posted to `…/command`.
+ *
+ * @group Thread inspection
+ */
+export const ENSO_FORK_COMMAND = 'fork'
 
 /**
  * How a stored branch ends when its last turn did not settle (#109): a prompt the

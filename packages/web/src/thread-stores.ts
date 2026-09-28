@@ -56,6 +56,12 @@ export interface ThreadStores {
    * chat factory — TanStack owns the messages from there.
    */
   readonly history: readonly UIMessage[]
+  /**
+   * What the composer opens holding (#433): a fork's prefill — the forked prompt's words, to send
+   * again or edit, as pi's `/fork` puts them in its editor — and empty otherwise. Read ONCE, when
+   * the composer mounts; the composer owns its draft from there.
+   */
+  readonly initialDraft: string
   readonly permissionMode: PermissionModeStore
   /** The session's model and thinking level (#338 slice 2); `null` until a live snapshot or `model` observation says. */
   readonly model: ModelStore
@@ -201,14 +207,16 @@ function createThreadStores(
   threadId: string,
   history: readonly UIMessage[],
   fetchImpl: FetchLike | undefined,
-  projectId: string | undefined,
+  opening: { readonly projectId: string | undefined; readonly initialDraft: string },
 ): ThreadStores {
+  const { projectId, initialDraft } = opening
   const notifications = createNotificationsStore()
   const toolResultDescriptors = createStore<ReadonlyMap<string, EnsoToolResultDescriptor>>(new Map())
   const threadFetch = namingProject(fetchImpl, projectId)
   return {
     threadId,
     history,
+    initialDraft,
     permissionMode: createPermissionModeStore(),
     model: createModelStore(),
     cwd: createStore<string | undefined>(undefined),
@@ -398,7 +406,7 @@ function makeRoomForOneMore(): void {
  */
 export function mintThread(fetchImpl?: FetchLike, projectId?: string): ThreadStores {
   makeRoomForOneMore()
-  const stores = createThreadStores(crypto.randomUUID(), [], fetchImpl, projectId)
+  const stores = createThreadStores(crypto.randomUUID(), [], fetchImpl, { projectId, initialDraft: '' })
   stores.startSession.set(true)
   threads.set(stores.threadId, stores)
   summaries.set(stores.threadId, {
@@ -451,14 +459,18 @@ export function reviveHistoryMessages(messages: readonly unknown[]): UIMessage[]
  *
  * Adopting a thread already on this page returns it — the rail cannot hold one twice — and
  * adopting one past the page's follow budget drops an idle thread to make room (#272). `fetch`
- * is the thread's network seam, as `mintThread`'s.
+ * is the thread's network seam, as `mintThread`'s; `initialDraft` is what its composer opens
+ * holding (a fork's prefill, #433).
  */
-export function adoptThread(history: EnsoThreadHistory, fetchImpl?: FetchLike): ThreadStores {
+export function adoptThread(history: EnsoThreadHistory, fetchImpl?: FetchLike, initialDraft = ''): ThreadStores {
   const existing = threads.get(history.threadId)
   if (existing !== undefined) return existing
   makeRoomForOneMore()
   const messages = reviveHistoryMessages(history.messages)
-  const stores = createThreadStores(history.threadId, messages, fetchImpl, history.projectId)
+  const stores = createThreadStores(history.threadId, messages, fetchImpl, {
+    projectId: history.projectId,
+    initialDraft,
+  })
   stores.permissionMode.applyReceipt(history.permissionMode)
   if (history.interrupted !== undefined) {
     stores.notifications.push(INTERRUPTED_TAIL_NOTICE[history.interrupted], 'warning', 'run', ENSO_NOTICE_SOURCE)

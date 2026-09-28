@@ -14,7 +14,15 @@ import {
   titleFromMessages,
   updateThreadSummary,
 } from '../thread-stores.ts'
-import { groupByProject, relativeAge, STORED_ROWS_SHOWN, ThreadsRail, UNTITLED_THREAD } from '../threads-rail.tsx'
+import {
+  forkParentTitles,
+  groupByProject,
+  relativeAge,
+  STORED_ROWS_SHOWN,
+  ThreadsRail,
+  UNLISTED_PARENT,
+  UNTITLED_THREAD,
+} from '../threads-rail.tsx'
 
 /**
  * #90 PR 3: the sessions rail and the page's thread list behind it. The rail is rendered
@@ -317,6 +325,52 @@ test("each project is a section with its own threads — the page's open ones, t
   expect(gone).toMatch(
     /aria-label="new thread in gone"[^>]*disabled=""|disabled=""[^>]*aria-label="new thread in gone"/,
   )
+})
+
+test('a fork says which thread it came from, by that thread’s title — a stored one’s, an open one’s, or that it is not listed (#433)', () => {
+  const now = pageClock.get()
+  const stored = [
+    storedIn('p-launch', 'parent', { title: 'the original' }),
+    storedIn('p-launch', 'fork', { title: 'the original', parentThreadId: 'parent' }),
+    // A fork of an open thread the listing has no title for yet: the page's own title names it.
+    storedIn('p-launch', 'fork-of-open', { parentThreadId: 'open' }),
+    storedIn('p-launch', 'orphan-fork', { title: 'lost parent', parentThreadId: 'elsewhere' }),
+  ]
+  const threads: ThreadSummary[] = [
+    {
+      threadId: 'open',
+      title: 'asked just now',
+      lastActivityAt: now,
+      busy: false,
+      waiting: false,
+      projectId: 'p-launch',
+    },
+  ]
+  const parents = forkParentTitles(stored, threads)
+  expect([...parents]).toEqual([
+    ['fork', 'the original'],
+    ['fork-of-open', 'asked just now'],
+    ['orphan-fork', UNLISTED_PARENT],
+  ])
+  const rendered = renderToStaticMarkup(
+    <ThreadsRail
+      projects={[LAUNCH]}
+      threads={threads}
+      activeThreadId="open"
+      earlier={stored}
+      forkParents={parents}
+      earlierError={undefined}
+      onSelect={noop}
+      onResume={noop}
+      onNew={noop}
+      onAddProject={noop}
+      onRemoveProject={noop}
+      projectNotice={undefined}
+    />,
+  )
+  const rows = rendered.split('</button>')
+  const forkLines = rows.flatMap((row) => /forked from ([^<]*)/.exec(row)?.[1] ?? [])
+  expect(forkLines).toEqual(['the original', 'asked just now', UNLISTED_PARENT])
 })
 
 test('⚠ an open thread whose project is not listed is kept, under "other"; with no projects yet, every thread is still there', () => {

@@ -195,7 +195,10 @@ export {
 } from './thread-context.ts'
 export {
   describeThreadEvent,
+  ENSO_FORK_COMMAND,
   EnsoEventProvenance,
+  EnsoForkReceipt,
+  EnsoForkRequest,
   EnsoInterruptedTail,
   EnsoStoredThread,
   EnsoThreadEvent,

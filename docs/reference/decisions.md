@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 290.**
+**Decision headers: 292.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -112,6 +112,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/__tests__/follow-budget.test.ts` | `#272` | The page's follow budget (#272). |
 | `packages/web/src/__tests__/follow-connection.test.ts` | `#112` | The adapter is the ONLY place AG-UI is made (#112). |
 | `packages/web/src/__tests__/fonts.test.ts` | `#407` | #407 item 6: a font per role, kept in this browser, over the theme's; and the families' faces declared from their own stylesheets, unbundled. |
+| `packages/web/src/__tests__/fork-thread.test.ts` | `#433` | #433: the fork route takes a pi entry id, and a prompt this page sent carries the id the composer minted, not its entry's. |
 | `packages/web/src/__tests__/mode-lines.test.ts` | `#29`, `#90` | #29's remaining half: a mode change becomes a visible transcript line. |
 | `packages/web/src/__tests__/notifications.test.tsx` | `#29`, `#90` | #29's browser half: notify messages become visible transcript lines. |
 | `packages/web/src/__tests__/page-scoped-stores.test.ts` | `#103`, `#125` | The anchor for #125 item 3 / #103 invariant 2 (switching threads leaks no state): every store that holds a THREAD's state is created inside `createThreadStores` (thread-stores.ts), so a second thread on the page gets its own. |
@@ -149,6 +150,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/fixture-conversation.ts` | `#27`, `#31`, `#75`, `#404` | The styling dev loop (#31): a scripted conversation streamed through the REAL `useChat` pipeline as local AG-UI events — no server, no pi. |
 | `packages/web/src/follow-connection.ts` | `#112`, `#272`, `#274` | The browser's connection to a thread (#112): TanStack's `SubscribeConnectionAdapter` over the prompt/follow split. |
 | `packages/web/src/fonts.ts` | `#407` | The page's fonts (#407 item 6): the families it ships, the per-role choice in Settings, and how both reach the page. |
+| `packages/web/src/fork-thread.ts` | `#433` | Forking from the page (#433): a user message's fork action and the palette's `/fork` both land here, and the page opens what the fork route answers. |
 | `packages/web/src/guard-refusal.tsx` | `#387`, `#407` | A guard refusal as the design draws it (`Enso-Design-Direction` `.guard`, #407 item 1): the tool, the verdict in the refusal colour, what was asked, why it was refused, and who refused it. |
 | `packages/web/src/host/__tests__/agent-host.test.ts` | `#27`, `#45`, `#69` | The in-process host against the REAL harness package (#69) — every extension the manifest names loads, and inline probe extensions observe what the host does. |
 | `packages/web/src/host/__tests__/agent-loop-contract.test.ts` | `#130` | A CONTRACT TEST on the runtime's loop, the shape of `cc-safety-net-contract.test.ts`: the wire shape of a refused tool call is the vendor's doing — a guard's `{ block, reason }` becomes an error result with the reason as its content, `isError: true` — and `map-events.ts` relies on it (the `tool_execution_end` case, "isError is the only signal a refused call has"). |
@@ -163,7 +165,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/host/__tests__/permission-mode-adapter.test.ts` | `#95` | picc's own restore rule, applied to the raw branch, below the seam (L3 step A). |
 | `packages/web/src/host/__tests__/session-events.test.ts` | `#69` | The replica of pi's unexported `toJsonEvent` (#69): what `map-events.ts` consumes must be byte-for-byte the rpc wire shape. |
 | `packages/web/src/host/__tests__/session-usage.test.ts` | `#45` | #45: which session events make the host re-read pi's totals. |
-| `packages/web/src/host/agent-host.ts` | `#27`, `#69`, `#73`, `#89`, `#338`, `#341`, `#351` | pi, hosted IN THIS PROCESS (#69) — the web server's replacement for spawning `pi --mode rpc` per prompt. |
+| `packages/web/src/host/agent-host.ts` | `#27`, `#69`, `#73`, `#86`, `#89`, `#338`, `#341`, `#351`, `#433` | pi, hosted IN THIS PROCESS (#69) — the web server's replacement for spawning `pi --mode rpc` per prompt. |
 | `packages/web/src/host/branch-context.ts` | `#361` | A thread's context, request by request (#361) — the host half of `EnsoThreadContext` and of `EnsoContextRequestDetail`, read off pi's own entries for a live session and a stored file alike. |
 | `packages/web/src/host/branch-stats.ts` | `#45`, `#359` | A thread's branch, analysed (#45 phase 2): per prompt, per turn, per tool — the session half of `EnsoThreadStats`. |
 | `packages/web/src/host/context-elements.ts` | `#361` | A request's context as ELEMENTS (#361) — dsh-context's browser rows: a prompt section, a tool definition, a message, a tool result — and the prices the makeup sums, so the trend's bars and the browser's rows are one computation, not two that could drift. |
@@ -243,7 +245,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/thread-status.tsx` | `#45`, `#51`, `#84`, `#90`, `#103` | The status bar (#90 PR 1): the always-on line that says what this session is doing and what it has cost, so the answer to "is anything happening?" |
 | `packages/web/src/thread-stores.ts` | `#90`, `#272` | Everything the browser knows about one thread beyond its messages (#90 PR 3). |
 | `packages/web/src/thread-url.ts` | `#95`, `#142` | The thread a page URL names (#142): `?thread=<id>`. |
-| `packages/web/src/threads-rail.tsx` | `#90`, `#95`, `#104`, `#114`, `#278`, `#395` | The threads rail (#90 PR 3, #395): which conversation am I in, in which project, what else is there, how do I start another. |
+| `packages/web/src/threads-rail.tsx` | `#90`, `#95`, `#104`, `#114`, `#278`, `#395`, `#433` | The threads rail (#90 PR 3, #395): which conversation am I in, in which project, what else is there, how do I start another. |
 | `packages/web/src/to-agui.ts` | `#18`, `#24`, `#112` | `EnsoObservation` → AG-UI `StreamChunk` (#24, #112). |
 | `packages/web/src/transcript-reveal.ts` | `#359`, `#360` | From a point or a row in the stats drawer to the transcript row it describes (#359) — pi-livecraft's `onNavigate({ kind: 'turn' \| 'message' \| 'tool' })`, over our transcript. |
 | `packages/web/src/view-parts.tsx` | `#361` | The analysis views' building blocks — the Context and Stats tabs (#361), in the design direction's card language (`Enso-Design-Direction`, `.card`, `.seg`, `.filter`, `.kind`): a card with a head (title, a muted line saying how to read it, its controls on the right) over its body, a segmented choice, a small button, a filter pill and a row's kind label. |

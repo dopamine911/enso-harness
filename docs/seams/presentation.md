@@ -76,6 +76,13 @@ export interface FollowConnection extends SubscribeConnectionAdapter {
    */
   readonly configure: (configuration: EnsoSessionConfiguration) => Promise<ConfigureOutcome>
   /**
+   * Fork the thread at one of its user messages (#433): `POST …/fork` with the message's pi entry
+   * id. The receipt names the new thread and the words to prefill it with; a refusal — the thread
+   * running (409), an entry it does not have (404), one that is no user message (400) — is
+   * recorded through `problem` and said once, as a refused control is, and answers `undefined`.
+   */
+  readonly fork: (entryId: string) => Promise<EnsoForkReceipt | undefined>
+  /**
    * Release the thread's follow (#272): the socket closes and nothing else opens one on
    * this connection. The page calls it when a thread leaves its live list — a thread whose
    * pane is gone must not keep a stream the browser counts against its six-per-origin
@@ -158,6 +165,12 @@ export interface ThreadStores {
    * chat factory — TanStack owns the messages from there.
    */
   readonly history: readonly UIMessage[]
+  /**
+   * What the composer opens holding (#433): a fork's prefill — the forked prompt's words, to send
+   * again or edit, as pi's `/fork` puts them in its editor — and empty otherwise. Read ONCE, when
+   * the composer mounts; the composer owns its draft from there.
+   */
+  readonly initialDraft: string
   readonly permissionMode: PermissionModeStore
   /** The session's model and thinking level (#338 slice 2); `null` until a live snapshot or `model` observation says. */
   readonly model: ModelStore

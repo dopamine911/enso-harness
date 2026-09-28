@@ -30,10 +30,12 @@ import {
   configureThread,
   type FollowRouteDeps,
   followThread,
+  forkThreadAt,
   promptThread,
   readClosedBody,
   readConfigureBody,
   readDialogBody,
+  readForkBody,
   readHostCommandBody,
   readModeChangeBody,
   readPromptBody,
@@ -74,6 +76,8 @@ const THREAD_MODE_ROUTE = /^\/api\/threads\/([^/?#]+)\/mode$/
 const THREAD_COMMAND_ROUTE = /^\/api\/threads\/([^/?#]+)\/command$/
 /** `POST …/configure` (#391): a new session's model, effort and mode, applied together — the Start-a-session dialog. */
 const THREAD_CONFIGURE_ROUTE = /^\/api\/threads\/([^/?#]+)\/configure$/
+/** `POST …/fork` (#433): fork the thread at one of its user messages — a new thread naming this one as its parent. */
+const THREAD_FORK_ROUTE = /^\/api\/threads\/([^/?#]+)\/fork$/
 /** `DELETE /api/projects/<projectId>` (#395) — the id is sixteen hex digits, so it needs no decoding. */
 const PROJECT_ROUTE = /^\/api\/projects\/([0-9a-f]{16})$/
 
@@ -439,6 +443,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
           lastActivityAt: session.modified.toISOString(),
           messageCount: session.messageCount,
           busy: threads.peek(session.id)?.busy === true,
+          ...(session.parentThreadId === undefined ? {} : { parentThreadId: session.parentThreadId }),
         },
       ]
     })
@@ -717,6 +722,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     { method: 'POST', route: THREAD_MODE_ROUTE, respond: respondToModeChange },
     { method: 'POST', route: THREAD_COMMAND_ROUTE, respond: respondToHostCommand },
     { method: 'POST', route: THREAD_CONFIGURE_ROUTE, respond: respondToConfigure },
+    { method: 'POST', route: THREAD_FORK_ROUTE, respond: respondToFork },
     {
       method: 'POST',
       route: THREAD_ABORT_ROUTE,
@@ -951,6 +957,29 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     log.info('session configured', { threadId, ...configuration })
     response.writeHead(204)
     response.end()
+  }
+
+  /**
+   * `POST …/fork` (#433): the new thread's id and the text to prefill its composer with. An unknown
+   * thread or entry is a 404, a non-user entry a 400, a thread a run holds the usual 409 — each with
+   * its reason as text, as the other control routes answer.
+   */
+  async function respondToFork(threadId: string, request: IncomingMessage, response: ServerResponse): Promise<void> {
+    const fork = await readJsonBody(request, response, {
+      maxBytes: MAX_DIALOG_BODY_BYTES,
+      capText: `a fork request is at most ${MAX_DIALOG_BODY_BYTES} bytes`,
+      parse: readForkBody,
+    })
+    if (fork === undefined) return
+    const outcome = await forkThreadAt(threadRead, threadId, fork)
+    if (outcome.status !== 200) {
+      log.warn('fork at {entryId} refused ({status}): {reason}', { threadId, ...fork, ...outcome })
+      refuseWith(response, outcome)
+      return
+    }
+    log.info('forked at {entryId} as {forkThreadId}', { threadId, ...fork, forkThreadId: outcome.receipt.threadId })
+    response.writeHead(200, { 'Content-Type': 'application/json' })
+    response.end(JSON.stringify(outcome.receipt))
   }
 
   // ── Projects (#395): the directories threads run in — listed, registered under a declared

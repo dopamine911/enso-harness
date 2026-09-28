@@ -1,5 +1,6 @@
 import {
   ENSO_CONTEXT_COMMAND,
+  ENSO_FORK_COMMAND,
   type EnsoHostCommandRun,
   type EnsoModelChoice,
   type EnsoModelState,
@@ -97,12 +98,20 @@ export function withoutHostValues(commands: readonly RuntimeCommand[]): RuntimeC
 }
 
 /**
- * The `view` rows, last in the list (#361 phase 5): `/context` opens the Context view over the
- * chat. A view reads what the routes already serve, so the row carries no options and no value,
- * and a run of it — the palette never sends one — is refused below.
+ * The `view` rows, last in the list: rows the PAGE does. `/context` opens the Context view over
+ * the chat (#361 phase 5); `/fork` forks the thread at its last user message through the fork
+ * route and opens the fork (#433). A view reads or posts to its own routes, so the row carries no
+ * options and no value, and a run of it through `…/command` — the palette never sends one — is
+ * refused below.
  */
 export const HOST_VIEW_ROWS: readonly RuntimeCommand[] = [
   { name: ENSO_CONTEXT_COMMAND, source: 'host', kind: 'view', description: 'show what the context is made of' },
+  {
+    name: ENSO_FORK_COMMAND,
+    source: 'host',
+    kind: 'view',
+    description: 'fork a new thread from before the last prompt, holding its words to send again',
+  },
 ]
 
 /** What a run asks for once checked: the model to set, the level to set, or why neither. */
@@ -141,6 +150,7 @@ export function decideHostCommand<Model extends EnsoModelChoice>(
       return { kind: 'thinking', level: run.value }
     }
     case ENSO_CONTEXT_COMMAND:
+    case ENSO_FORK_COMMAND:
       return { kind: 'refused', reason: `/${run.name} opens in the page; there is nothing for the host to run` }
     default:
       return { kind: 'refused', reason: `no host command named ${run.name}` }

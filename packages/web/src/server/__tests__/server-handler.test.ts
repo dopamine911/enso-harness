@@ -333,8 +333,8 @@ test('⚠ GET …/commands builds the thread’s session and answers its own lis
   expect(live).toMatchObject({ threadId: 'fresh', source: 'live' })
   expect(built).toHaveLength(1)
   expect(built[0]?.prompts).toEqual([])
-  // pi's row first, then the host's (#338 slices 2 and 3, #361) — the settings with their CURRENT
-  // value on a live thread, the flows with none (there is no "current" login), the view last.
+  // pi's row first, then the host's (#338 slices 2 and 3, #361, #433) — the settings with their CURRENT
+  // value on a live thread, the flows with none (there is no "current" login), the views last.
   expect(live.commands.map((command) => [command.name, command.source])).toEqual([
     ['mode', 'extension'],
     ['model', 'host'],
@@ -343,6 +343,7 @@ test('⚠ GET …/commands builds the thread’s session and answers its own lis
     ['logout', 'host'],
     ['compact', 'host'],
     ['context', 'host'],
+    ['fork', 'host'],
   ])
   expect(live.commands[3]).toMatchObject({ kind: 'flow', options: [{ id: 'fake/oauth' }, { id: 'fake/api_key' }] })
   expect(live.commands[3]?.value).toBeUndefined()
@@ -787,6 +788,35 @@ test('POST …/command is refused while the thread runs (409) — a setting is n
   expect(await refused.text()).toContain('is running')
 })
 
+/** `POST …/fork` (#433) with this body; the status and the text or receipt it answered. */
+async function fork(url: string, threadId: string, body: unknown): Promise<{ status: number; body: string }> {
+  const response = await fetch(`${url}/api/threads/${threadId}/fork`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  return { status: response.status, body: await response.text() }
+}
+
+test('⚠ POST …/fork answers the new thread and its prefill; refuses a running thread (409), an unknown thread or entry (404), a non-user entry and a bad body (400) (#433)', async () => {
+  const stored = { 'stored-1': { transcript: STORED_BRANCH, modified: new Date(0), firstMessage: 'earlier question' } }
+  const { url, built } = await startWith(asksAndWaits, stored)
+  const forked = await fork(url, 'stored-1', { entryId: 'u1' })
+  expect(forked.status).toBe(200)
+  expect(JSON.parse(forked.body)).toEqual({ threadId: 'stored-1-fork', prefill: 'earlier question' })
+  // Forking reads the file: nothing is built for the source (#86).
+  expect(built).toHaveLength(0)
+  expect((await fork(url, 'stored-1', { entryId: 'a1' })).status).toBe(400)
+  expect((await fork(url, 'stored-1', { entryId: 'nope' })).status).toBe(404)
+  expect((await fork(url, 'never-stored', { entryId: 'u1' })).status).toBe(404)
+  expect((await fork(url, 'stored-1', { entryId: 'u1', extra: 1 })).status).toBe(400)
+  // A run holds the thread: the fork point may not be where the run leaves the branch.
+  await prompt(url, 'stored-1', '/mode')
+  const busy = await fork(url, 'stored-1', { entryId: 'u1' })
+  expect(busy.status).toBe(409)
+  expect(busy.body).toContain('is running')
+})
+
 test('GET /api/threads/:id returns the branch as the transcript of ours, with sessionFile null while unflushed', async () => {
   const { url } = await startWith(settlesAtOnce)
   await prompt(url, 't1', 'hello')
@@ -898,6 +928,7 @@ test('GET /api/stored-threads lists stored threads with title, count and age, ma
       transcript: [] as EnsoTranscriptEntry[],
       modified: new Date('2026-09-08T11:00:00.000Z'),
       firstMessage: '   ',
+      parentThreadId: 'stored-1',
     },
   }
   const { url } = await startWith(asksAndWaits, stored)
@@ -917,13 +948,14 @@ test('GET /api/stored-threads lists stored threads with title, count and age, ma
       messageCount: 2,
       busy: true,
     },
-    // A blank first message is no title — the rail says "new thread", not "   ".
+    // A blank first message is no title — the rail says "new thread", not "   ". A fork names its parent (#433).
     {
       threadId: 'stored-2',
       projectId: launch,
       lastActivityAt: '2026-09-08T11:00:00.000Z',
       messageCount: 0,
       busy: false,
+      parentThreadId: 'stored-1',
     },
   ])
 })

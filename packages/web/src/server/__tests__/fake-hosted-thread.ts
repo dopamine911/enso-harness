@@ -306,6 +306,8 @@ export interface FakeStoredThread {
   readonly context?: BranchContext
   /** Its requests' details, by `String(request)`. */
   readonly details?: Readonly<Record<string, BranchRequestDetail>>
+  /** The thread it was forked from (#433); none when absent. */
+  readonly parentThreadId?: string
 }
 
 const FAKE_FRESH_MODE: EnsoPermissionModeState = { mode: 'default', available: ['default'] }
@@ -379,6 +381,7 @@ export function createFakeAgentHost(
                   messageCount: storedThread.transcript.filter((transcriptEntry) => transcriptEntry.kind === 'message')
                     .length,
                   firstMessage: storedThread.firstMessage,
+                  ...(storedThread.parentThreadId === undefined ? {} : { parentThreadId: storedThread.parentThreadId }),
                 },
               ]
             : [],
@@ -417,6 +420,17 @@ export function createFakeAgentHost(
           ? undefined
           : { usage: storedThread.usage ?? { ...FAKE_NO_USAGE }, context: storedThread.context ?? FAKE_EMPTY_CONTEXT },
       )
+    },
+    // The real host's refusals, decided over the stored transcript; a fork is `<id>-fork`.
+    forkThread: (threadId: string, entryId: string) => {
+      const entry = served(threadId)?.transcript.find((candidate) => candidate.id === entryId)
+      if (served(threadId) === undefined) return Promise.resolve({ kind: 'no-thread', reason: `no thread ${threadId}` })
+      if (entry === undefined) return Promise.resolve({ kind: 'no-entry', reason: `no entry ${entryId}` })
+      if (entry.kind !== 'message' || entry.role !== 'user') {
+        return Promise.resolve({ kind: 'not-a-user-message', reason: `entry ${entryId} is not a user message` })
+      }
+      const prefill = entry.parts.map((part) => (part.type === 'text' ? part.text : '')).join('')
+      return Promise.resolve({ kind: 'forked', threadId: `${threadId}-fork`, prefill })
     },
   }
 }

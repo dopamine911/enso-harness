@@ -149,11 +149,11 @@ const REGEX_ROUTE_METADATA: Record<string, RouteMetadata> = {
     path: '/api/threads/:threadId/command',
     handler: 'respondToHostCommand → runHostCommand',
     input:
-      "path: `threadId`; body: `EnsoHostCommandRun` — `model` with `provider/id`, `thinking` with a level, `login` with `provider/authType`, `logout` with a provider, `compact` with nothing; a `view` row (`context`) is the page's to open, never run",
+      "path: `threadId`; body: `EnsoHostCommandRun` — `model` with `provider/id`, `thinking` with a level, `login` with `provider/authType`, `logout` with a provider, `compact` with nothing; a `view` row (`context`, `fork`) is the page's to do, never run",
     success:
       '204 empty for a setting (the change arrives on the follow as `model`); 202 empty for a flow or action (`login`, `logout`, `compact`) — started, its questions and progress arrive on the follow as dialogs and `notify` lines',
     errors:
-      '400 malformed id/body; 403 untrusted origin; 409 thread busy; 413 body too large; 422 unknown command, model or level, a provider without credentials, or a `view` (`/context`) the page opens itself; 500 handler failure',
+      '400 malformed id/body; 403 untrusted origin; 409 thread busy; 413 body too large; 422 unknown command, model or level, a provider without credentials, or a `view` (`/context`, `/fork`) the page does itself; 500 handler failure',
     routeClass: 'control',
     builds: 'yes',
     logs: 'yes',
@@ -170,6 +170,21 @@ const REGEX_ROUTE_METADATA: Record<string, RouteMetadata> = {
     routeClass: 'control',
     builds: 'yes',
     logs: 'yes',
+  },
+  THREAD_FORK_ROUTE: {
+    method: 'POST',
+    path: '/api/threads/:threadId/fork',
+    handler: 'respondToFork → forkThreadAt → AgentHost.forkThread',
+    input:
+      "path: `threadId`; body: `EnsoForkRequest` — `entryId`, the pi entry id of one of the thread's user messages; the fork is pi's `/fork` at position `before`, taken from the session file",
+    success:
+      "200 `EnsoForkReceipt` JSON — the new thread id (its session file names the source as `parentSession`) and the forked message's text, for the new composer",
+    errors:
+      '400 malformed id/body, or an entry that is no user message; 403 untrusted origin; 404 no session file in a served project, or no such entry; 409 thread busy; 413 body too large; 500 handler failure',
+    routeClass: 'control',
+    builds: 'no',
+    logs: 'yes',
+    factory: { path: FOLLOW_PATH, declaration: 'export async function forkThreadAt' },
   },
   PROJECT_ROUTE: {
     method: 'DELETE',

@@ -6,6 +6,8 @@ import {
   type EnsoAbortReceipt,
   type EnsoConfigurationRefusal,
   type EnsoFollowFrame,
+  type EnsoForkReceipt,
+  EnsoForkRequest,
   EnsoHostCommandRun,
   EnsoPermissionModeChange,
   type EnsoPromptAdmission,
@@ -668,6 +670,36 @@ export function readConfigureBody(raw: string): EnsoSessionConfiguration {
     'configure',
     'configure body takes only `model`, `thinking` and `mode`, each a non-empty string',
   )
+}
+
+export type ForkRouteOutcome =
+  | { readonly status: 200; readonly receipt: EnsoForkReceipt }
+  | { readonly status: 400 | 404 | 409; readonly reason: string }
+
+/** The host's fork refusal → the status the route answers it with. */
+const FORK_REFUSAL_STATUS = { 'no-thread': 404, 'no-entry': 404, 'not-a-user-message': 400 } as const
+
+/**
+ * Fork a thread at one of its user messages (#433): a new thread whose session file names this
+ * one as its parent — the host's `forkThread`, from the file, building nothing (#86). Refused
+ * while a run holds the thread (409), as every control route is: the file is still growing, and
+ * the fork point the page chose may not be where the run leaves the branch.
+ */
+export async function forkThreadAt(
+  deps: ThreadReadDeps,
+  threadId: string,
+  request: EnsoForkRequest,
+): Promise<ForkRouteOutcome> {
+  const running = runningRefusal(deps.threads, threadId, 'fork it')
+  if (running !== undefined) return running
+  const outcome = await deps.host.forkThread(threadId, request.entryId)
+  if (outcome.kind !== 'forked') return { status: FORK_REFUSAL_STATUS[outcome.kind], reason: outcome.reason }
+  return { status: 200, receipt: { threadId: outcome.threadId, prefill: outcome.prefill } }
+}
+
+/** The fork body, checked against its closed schema — `entryId`, nothing else. */
+export function readForkBody(raw: string): EnsoForkRequest {
+  return readClosedBody(raw, EnsoForkRequest, 'fork', 'fork body needs a non-empty `entryId` and nothing else')
 }
 
 export type AbortRouteOutcome =

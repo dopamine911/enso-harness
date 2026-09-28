@@ -1,12 +1,14 @@
 import {
   type DialogAnswer,
   ENSO_CONTEXT_COMMAND,
+  ENSO_FORK_COMMAND,
   ENSO_IMAGE_MAX_BYTES,
   ENSO_IMAGE_MIME_TYPES,
   ENSO_NOTICE_SOURCE,
   ENSO_PROMPT_MAX_IMAGES,
   type EnsoDialogAnswer,
   type EnsoDialogSpec,
+  type EnsoForkReceipt,
   type EnsoProject,
   type EnsoPromptImage,
   type EnsoProviderRefusal,
@@ -30,6 +32,7 @@ import {
   ChartColumnIcon,
   CircleQuestionMarkIcon,
   ExternalLinkIcon,
+  GitForkIcon,
   LayersIcon,
   MenuIcon,
   MessagesSquareIcon,
@@ -78,6 +81,7 @@ import { EnsoRing, EnsoSmile } from './enso-mark.tsx'
 import type { EnsoRendererMap } from './EnsoToolResult.tsx'
 import { createFixtureChat, fixtureFetch } from './fixture-conversation.ts'
 import type { DialogAnswerOutcome, FollowConnection } from './follow-connection.ts'
+import { ForkContext, forkFromPage } from './fork-thread.ts'
 import { ModelChip, ModelChoiceDialog, ThinkingLevelSelect, useModelState } from './model-state.tsx'
 import { ThreadNotifications } from './notifications.tsx'
 import { PermissionModeSelect, usePermissionMode } from './permission-mode.tsx'
@@ -110,7 +114,7 @@ import {
   updateThreadSummary,
 } from './thread-stores.ts'
 import { readThreadUrl, type ThreadUrl, urlForThread } from './thread-url.ts'
-import { ThreadsRail, UNTITLED_THREAD } from './threads-rail.tsx'
+import { forkParentTitles, ThreadsRail, UNTITLED_THREAD } from './threads-rail.tsx'
 import { locateStatsTarget, type RevealStatsTarget, revealElement } from './transcript-reveal.ts'
 
 /**
@@ -180,7 +184,8 @@ const isFixtureMode = typeof window !== 'undefined' && new URLSearchParams(windo
  */
 const PAGE_FETCH = isFixtureMode ? fixtureFetch : undefined
 const mintPageThread = (projectId?: string): ThreadStores => mintThread(PAGE_FETCH, projectId)
-const adoptPageThread = (history: EnsoThreadHistory): ThreadStores => adoptThread(history, PAGE_FETCH)
+const adoptPageThread = (history: EnsoThreadHistory, initialDraft?: string): ThreadStores =>
+  adoptThread(history, PAGE_FETCH, initialDraft)
 /** `?debug` opens the session debug drawer (#86) — same switch shape as `?fixture`. */
 const isDebugMode = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('debug')
 /**
@@ -1014,9 +1019,34 @@ const MessageBody = memo(function MessageBody({
 				    empty bubble where the refusal had been said live. */}
         {refusal === undefined ? null : <RefusedAttemptLine refusal={refusal} />}
       </MessageContent>
+      {role === 'user' ? <ForkPromptButton messageId={messageId} /> : null}
     </Message>
   )
 }, sameRenderedMessage)
+
+/**
+ * A prompt's fork action (#433): a new thread holding everything before this prompt, its composer
+ * holding the prompt's words — pi's `/fork`. Not offered where no page opens the fork.
+ */
+function ForkPromptButton({ messageId }: { messageId: string }): React.ReactNode {
+  const forkAt = useContext(ForkContext)
+  if (forkAt === undefined) return null
+  return (
+    <div className="flex justify-end ledger:justify-start">
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
+        className="h-7 gap-1 px-2 text-xs text-muted-foreground"
+        title="a new thread holding everything before this prompt, with its words ready to send again"
+        onClick={(): void => forkAt(messageId)}
+      >
+        <GitForkIcon aria-hidden="true" />
+        fork from here
+      </Button>
+    </div>
+  )
+}
 
 /** The same refusal line, whether or not the message object behind it was replaced. */
 function sameRefusal(before: EnsoProviderRefusal | undefined, after: EnsoProviderRefusal | undefined): boolean {
@@ -1075,14 +1105,17 @@ const chatComponents = {
       const stores = useThreadStores()
       const disconnected = useStore(stores.disconnected)
       // Controlled, so the send button can disable on empty and a take-back can write it —
-      // the ai-elements chatbot example's PromptInput does the same.
-      const [draft, setDraft] = useState('')
+      // the ai-elements chatbot example's PromptInput does the same. A fork opens holding the
+      // forked prompt's words (#433), as pi's `/fork` fills its editor.
+      const [draft, setDraft] = useState(stores.initialDraft)
       // The textarea, so a palette choice can put focus back where typing continues (#338).
       const textareaRef = useRef<HTMLTextAreaElement | null>(null)
       // The user messages this composer put in the transcript for prompts pi is still
       // HOLDING (#75): a stop hands those texts back, and the bubble that was never asked
       // leaves with them — pi's TUI does the same. A claimed prompt's bubble stays.
       const heldLocally = useRef<Array<{ id: string; text: string }>>([])
+      // The pane's fork (#433): `/fork` forks at the last prompt; absent where no page opens a fork.
+      const forkAt = useContext(ForkContext)
       // ⚠ `takeBack` runs after a network round trip, from a closure made by an older render.
       // `chat.messages` there is that render's snapshot; filtering it would replace the
       // transcript with the snapshot minus one — reverting every delta that streamed in
@@ -1198,6 +1231,7 @@ const chatComponents = {
         onOpenModelDialog: setModelDialog,
         onOpenView: (commandName: string): void => {
           if (commandName === ENSO_CONTEXT_COMMAND) setContextOpen(true)
+          else if (commandName === ENSO_FORK_COMMAND && forkAt !== undefined) forkAt(undefined)
           else
             stores.notifications.push(
               `/${commandName} opens a view this page does not have`,
@@ -1518,6 +1552,7 @@ export function ThreadPane({
   debugOpen,
   view = 'chat',
   onView = KEEP_VIEW,
+  onForked,
 }: {
   threadId: string
   active: boolean
@@ -1527,10 +1562,28 @@ export function ThreadPane({
   view?: ThreadView
   /** Changes the page's view. Mounted alone there is no page, so the view stays as it is. */
   onView?: (view: ThreadView) => void
+  /** The page opens a fork this pane made (#433). Mounted alone there is no page, and no fork is offered. */
+  onForked?: (receipt: EnsoForkReceipt) => void
 }): React.ReactNode {
   const stores = getThreadStores(threadId)
   const { useAppChat } = useMemo(() => createThreadChatHook(stores), [stores])
   const chat = useAppChat()
+  // A fork reads the transcript when it is asked for, not per chunk: the latest committed list.
+  const latestMessages = useRef(chat.messages)
+  useEffect(() => {
+    latestMessages.current = chat.messages
+  }, [chat.messages])
+  const forkAt = useMemo(
+    () =>
+      onForked === undefined
+        ? undefined
+        : (messageId: string | undefined): void => {
+            void forkFromPage(stores, latestMessages.current, messageId).then((receipt) => {
+              if (receipt !== undefined) onForked(receipt)
+            })
+          },
+    [stores, onForked],
+  )
   // ⚠ The title depends on the FIRST user message and nothing else, but `chat.messages`
   // gets a new identity on every streamed chunk — so an effect over the list re-derived it
   // per token and threw the answer away (#283). Depend on that message instead; the list's
@@ -1550,7 +1603,9 @@ export function ThreadPane({
       <ThreadStoresContext.Provider value={stores}>
         <DebugOpenContext.Provider value={debugOpen && active}>
           <PaneViewContext.Provider value={paneView}>
-            <chat.AppChat />
+            <ForkContext.Provider value={forkAt}>
+              <chat.AppChat />
+            </ForkContext.Provider>
           </PaneViewContext.Provider>
         </DebugOpenContext.Provider>
       </ThreadStoresContext.Provider>
@@ -1843,12 +1898,13 @@ export function ChatScreen(): React.ReactNode {
   }, [])
   const resume = useMemo(
     () =>
-      createResumeRequests<{ how: ThreadNavigation; epoch: number }>(
+      // `prefill` rides with a fork's open (#433): the new thread's composer opens holding it.
+      createResumeRequests<{ how: ThreadNavigation; epoch: number; prefill?: string }>(
         fetchThreadHistory,
         (history, intent) => {
           if (intent.epoch !== epoch.current) return // a navigation happened since — superseded
           setResumeError(undefined)
-          navigate(adoptPageThread(history).threadId, intent.how)
+          navigate(adoptPageThread(history, intent.prefill).threadId, intent.how)
         },
         (message, intent) => {
           if (intent.epoch !== epoch.current) return
@@ -1863,6 +1919,15 @@ export function ChatScreen(): React.ReactNode {
   )
   const resumeFrom = useCallback(
     (threadId: string, how: ThreadNavigation): void => resume(threadId, { how, epoch: epoch.current }),
+    [resume],
+  )
+  // A fork (#433) opens the way a rail resume does, its composer holding the forked prompt's
+  // words; the listing refreshes so the rail shows the fork and whose it is.
+  const openFork = useCallback(
+    (receipt: EnsoForkReceipt): void => {
+      void storedThreads.refresh()
+      resume(receipt.threadId, { how: 'push', epoch: epoch.current, prefill: receipt.prefill })
+    },
     [resume],
   )
   // Boot: the URL named a thread — adopt it. Once per page; the coordinator drops a stale answer.
@@ -1918,6 +1983,7 @@ export function ChatScreen(): React.ReactNode {
           threads={threads}
           activeThreadId={activeThreadId}
           earlier={storedThreadsNotOnThisPage(stored.rows, pageThreadIds)}
+          forkParents={forkParentTitles(stored.rows, threads)}
           earlierError={stored.error ?? projects.error ?? resumeError}
           onSelect={rail.leave((threadId: string) => navigate(threadId, 'push'))}
           onResume={rail.leave((threadId: string) => resumeFrom(threadId, 'push'))}
@@ -1945,6 +2011,7 @@ export function ChatScreen(): React.ReactNode {
               debugOpen={isDebugMode && debugOpen}
               view={view}
               onView={setView}
+              onForked={openFork}
             />
           ))}
         </div>

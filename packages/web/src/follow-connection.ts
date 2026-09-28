@@ -6,6 +6,7 @@ import {
   EnsoConfigurationRefusal,
   type EnsoFollowFrame,
   EnsoFollowFrame as EnsoFollowFrameSchema,
+  EnsoForkReceipt,
   type EnsoHostCommandRun,
   ensoLogger,
   type EnsoPromptBody,
@@ -269,6 +270,13 @@ export interface FollowConnection extends SubscribeConnectionAdapter {
    * comes back with its step and reason for the dialog to show.
    */
   readonly configure: (configuration: EnsoSessionConfiguration) => Promise<ConfigureOutcome>
+  /**
+   * Fork the thread at one of its user messages (#433): `POST …/fork` with the message's pi entry
+   * id. The receipt names the new thread and the words to prefill it with; a refusal — the thread
+   * running (409), an entry it does not have (404), one that is no user message (400) — is
+   * recorded through `problem` and said once, as a refused control is, and answers `undefined`.
+   */
+  readonly fork: (entryId: string) => Promise<EnsoForkReceipt | undefined>
   /**
    * Release the thread's follow (#272): the socket closes and nothing else opens one on
    * this connection. The page calls it when a thread leaves its live list — a thread whose
@@ -819,5 +827,21 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
       : { outcome: 'failed', status: response.status }
   }
 
-  return { subscribe, send, answerDialog, abort, prompt, changeMode, runHostCommand, configure, close }
+  async function fork(entryId: string): Promise<EnsoForkReceipt | undefined> {
+    const response = await post('fork', 'fork', {
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ entryId }),
+    })
+    if (response === undefined) return undefined
+    if (response.status !== 200) {
+      problem('fork refused: {status} {body}', { status: response.status, body: await response.text() })
+      return undefined
+    }
+    const receipt: unknown = await response.json()
+    if (Check(EnsoForkReceipt, receipt)) return receipt
+    problem('the fork receipt did not match its schema')
+    return undefined
+  }
+
+  return { subscribe, send, answerDialog, abort, prompt, changeMode, runHostCommand, configure, fork, close }
 }

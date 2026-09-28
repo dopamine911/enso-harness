@@ -176,8 +176,9 @@ export const RuntimeCommand = Type.Object({
    * chosen in place (`/thinking`); `flow` — chosen like a `select`, but the choice STARTS
    * something rather than applying it: `/login` and `/logout` (slice 3) run as dialog flows,
    * their questions and progress arriving on the feed, the route answering 202 when the flow has
-   * begun; `action` — runs with no value (`/compact`, slice 4); `view` — runs nothing: the page
-   * opens what the row names over the chat (`/context`, #361), and nothing is posted. The palette
+   * begun; `action` — runs with no value (`/compact`, slice 4); `view` — the PAGE does it: opens
+   * what the row names over the chat (`/context`, #361) or forks at the last prompt (`/fork`,
+   * #433) through its own route, and nothing is posted to `…/command`. The palette
    * renders by kind; nothing is per-command UI.
    */
   kind: Type.Optional(

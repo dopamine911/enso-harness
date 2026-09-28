@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { getSupportedThinkingLevels } from '@earendil-works/pi-ai'
 import {
   createAgentSessionFromServices,
@@ -167,6 +167,21 @@ const log = ensoLogger('host')
  * so a failover swap by pi-multi-account (`pi.setModel`, `index.ts:4031`) reaches the feed the
  * same way a `/model` from the palette does. The watcher registers nothing else and is listed in
  * `loadedExtensionPaths` like every extension pi loaded.
+ *
+ * ⚠ A FORK IS TAKEN FROM THE FILE, OUTSIDE ANY RUNTIME (#433). `forkThread` opens the source's
+ * session file (`SessionManager.open`, building nothing — #86) and forks it the way pi's `/fork`
+ * does at its default position `before` (`AgentSessionRuntime.fork`, `agent-session-runtime.js`
+ * :174): the entry must be a user message; the new session's branch ends at that message's
+ * PARENT (`createBranchedSession`), or is empty when the message is the root (`create` +
+ * `newSession({ parentSession })`); the message's text comes back to prefill the composer. A live
+ * source and a cold one fork alike — a live thread's file holds every entry its memory does once
+ * flushed, and one never flushed has no file to fork. Stated non-coverage: outside a runtime pi's
+ * `session_before_fork` extension hook does not fire; no loaded extension handles it today. pi
+ * writes a session file only at its first assistant message, so a fork whose branch holds none
+ * (the empty one above) would have no file — nothing to list, nothing naming its parent, and a
+ * resume under its id would create a fresh session. The host writes such a fork's entries the way
+ * pi's first flush does (`_persist`: one JSON line per entry, `wx`), and pi appends to it from
+ * then on as to any flushed file.
  */
 
 /** The agent dir's multi-account config file, and the keys this host seeds in it. */
@@ -326,7 +341,21 @@ export interface StoredThread {
   readonly messageCount: number
   /** The first user message, verbatim; empty for a session with none. */
   readonly firstMessage: string
+  /**
+   * The thread it was forked from (#433): its header's `parentSession` file, as that file's
+   * session id. Absent for a thread that is no fork, and for one whose parent file is gone.
+   */
+  readonly parentThreadId?: string
 }
+
+/**
+ * A fork (#433), or why not. The refusals are the host's to decide and the route's to say:
+ * `no-thread` — no session file under the id in a served project; `no-entry` — the file has no
+ * entry under the id; `not-a-user-message` — pi forks only at a user message.
+ */
+export type ThreadForkOutcome =
+  | { readonly kind: 'forked'; readonly threadId: string; readonly prefill: string }
+  | { readonly kind: 'no-thread' | 'no-entry' | 'not-a-user-message'; readonly reason: string }
 
 /**
  * Stop: tell the runtime, then settle every pending question as `aborted` WHILE it stops, and
@@ -405,6 +434,13 @@ export interface AgentHost {
   readStoredThreadContext(threadId: string): Promise<StoredThreadContext | undefined>
   /** One request of a stored thread, element by element (#361 phase 3); undefined for no file or no such turn. */
   readStoredRequestDetail(threadId: string, request: number | 'next'): Promise<BranchRequestDetail | undefined>
+  /**
+   * Fork a stored thread at one of its user messages, as pi's `/fork` does (#433; the module
+   * header): a new session file naming the source as its parent, holding everything before that
+   * message, and the message's text to prefill with. The source's file is not written; nothing is
+   * built for either thread (#86).
+   */
+  forkThread(threadId: string, entryId: string): Promise<ThreadForkOutcome>
   /** What a fresh thread starts in — served before any run exists, so the header never guesses. */
   freshPermissionMode(): EnsoPermissionModeState
   /** A stored thread's state from its transcript alone: nothing is built to answer (#86, #95). */
@@ -546,6 +582,24 @@ function describeCommand(
   return description === undefined ? { name, source } : { name, source, description }
 }
 
+/** A user message's text as pi's `/fork` prefills it (`extractUserMessageText`): its text parts, joined; images dropped. */
+function userMessageText(content: string | ReadonlyArray<{ readonly type: string; readonly text?: string }>): string {
+  if (typeof content === 'string') return content
+  return content.map((part) => (part.type === 'text' && typeof part.text === 'string' ? part.text : '')).join('')
+}
+
+/**
+ * A fork pi has not written because its branch holds no assistant message (the module header,
+ * #433): its header and entries, written as pi's first flush writes them, so the fork is listed,
+ * names its parent, and resumes under its id. A file already there — pi wrote it — is left alone.
+ */
+function writeUnflushedSession(session: SessionManager): void {
+  const file = session.getSessionFile()
+  if (file === undefined || existsSync(file)) return
+  const lines = [session.getHeader(), ...session.getEntries()].map((fileEntry) => `${JSON.stringify(fileEntry)}\n`)
+  writeFileSync(file, lines.join(''), { flag: 'wx' })
+}
+
 export function createAgentHost(options: AgentHostOptions): AgentHost {
   const { agentDir, harnessPackageDir, servesDirectory } = options
 
@@ -585,15 +639,24 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
    */
   async function everySession(): Promise<StoredThread[]> {
     const listed = await SessionManager.listAll()
+    // A fork's header names its parent by FILE (#433); the thread is that file's session id, read
+    // off the same listing. A parent file that is gone names no thread, so the fork carries none.
+    const idByPath = new Map(listed.map((info) => [resolve(info.path), info.id]))
     return listed
-      .map((info) => ({
-        id: info.id,
-        path: info.path,
-        cwd: info.cwd,
-        modified: info.modified,
-        messageCount: info.messageCount,
-        firstMessage: info.firstMessage,
-      }))
+      .map((info) => {
+        const parentThreadId =
+          info.parentSessionPath === undefined ? undefined : idByPath.get(resolve(info.parentSessionPath))
+        return {
+          id: info.id,
+          path: info.path,
+          cwd: info.cwd,
+          modified: info.modified,
+          messageCount: info.messageCount,
+          // pi says `(no messages)` for a file with none — an empty fork's (#433) — which is no title.
+          firstMessage: info.messageCount === 0 ? '' : info.firstMessage,
+          ...(parentThreadId === undefined ? {} : { parentThreadId }),
+        }
+      })
       .sort((first, second) => second.modified.getTime() - first.modified.getTime())
   }
 
@@ -647,6 +710,31 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   ): Promise<BranchRequestDetail | undefined> {
     const path = await storedSessionPath(threadId)
     return path === undefined ? undefined : branchRequestDetail(SessionManager.open(path).getBranch(), request)
+  }
+
+  async function forkThread(threadId: string, entryId: string): Promise<ThreadForkOutcome> {
+    const located = await storedSession(threadId)
+    if (located === undefined) {
+      return { kind: 'no-thread', reason: `thread ${threadId} has no session file in a project this server serves` }
+    }
+    const source = SessionManager.open(located.path)
+    const entry = source.getEntry(entryId)
+    if (entry === undefined) return { kind: 'no-entry', reason: `thread ${threadId} has no entry ${entryId}` }
+    if (entry.type !== 'message' || entry.message.role !== 'user') {
+      return { kind: 'not-a-user-message', reason: `entry ${entryId} is not a user message; a fork starts at one` }
+    }
+    const prefill = userMessageText(entry.message.content)
+    // pi's `before`: the fork holds everything up to the message's parent — or nothing, naming its parent.
+    let fork: SessionManager
+    if (entry.parentId === null) {
+      fork = SessionManager.create(source.getCwd(), source.getSessionDir())
+      fork.newSession({ parentSession: located.path })
+    } else {
+      source.createBranchedSession(entry.parentId)
+      fork = source
+    }
+    writeUnflushedSession(fork)
+    return { kind: 'forked', threadId: fork.getSessionId(), prefill }
   }
 
   async function createSession(threadId: string, newSessionDirectory: () => string): Promise<HostedThread> {
@@ -1320,6 +1408,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     readStoredThreadStats,
     readStoredThreadContext,
     readStoredRequestDetail,
+    forkThread,
     freshPermissionMode: freshPermissionModeState,
     storedPermissionMode: storedPermissionModeState,
   }
