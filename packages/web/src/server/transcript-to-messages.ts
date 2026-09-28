@@ -147,13 +147,6 @@ function answerAfter(
 }
 
 /**
- * The result pi records for a call its run's abort cut (`createErrorToolResult("Operation
- * aborted")`, pi-agent-core `agent-loop.js:436`, `:501`, `:520`) — a Stop's mark, which a kill
- * never leaves (PR #442 review).
- */
-const PI_ABORTED_RESULT_TEXT = 'Operation aborted'
-
-/**
  * Whether the transcript ends inside a turn (#109, `EnsoInterruptedTail`).
  *
  * ⚠ READ OFF THE ENTRIES, NEVER OFF THE MESSAGES (#220). Both vocabularies can express
@@ -174,8 +167,10 @@ const PI_ABORTED_RESULT_TEXT = 'Operation aborted'
  * fact that says so, and inventing one would be a guess. A last turn whose calls were ALL
  * answered is torn too (PR #442 review): pi keeps the reply to the results only at its end, so a
  * kill anywhere in that model call — the longest window on a tool-using turn — leaves exactly
- * this. It is told from a Stop by pi's aborted result, which a kill never writes; a turn with
- * no call at all is a finished reply.
+ * this. A Stop never does (PR #438 review, run against the real host): after the aborted results
+ * pi's loop makes one more model call on the aborted signal, and persists its `aborted` error reply
+ * — a stopped branch ends on an assistant message with no call, settled by the rule above. So an
+ * `Operation aborted` result with nothing after it is a kill that landed before that reply: torn.
  */
 export function interruptedTail(transcript: readonly EnsoTranscriptEntry[]): EnsoInterruptedTail | undefined {
   const lastMessageIndex = transcript.findLastIndex((entry) => entry.kind === 'message')
@@ -187,6 +182,5 @@ export function interruptedTail(transcript: readonly EnsoTranscriptEntry[]): Ens
   )
   if (answers.length === 0) return undefined
   if (answers.includes(undefined)) return 'tool-call-without-result'
-  const stopped = answers.some((answer) => answer?.isError === true && answer.text === PI_ABORTED_RESULT_TEXT)
-  return stopped ? undefined : 'tool-results-without-reply'
+  return 'tool-results-without-reply'
 }

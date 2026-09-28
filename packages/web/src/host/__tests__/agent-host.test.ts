@@ -32,6 +32,7 @@ import {
 } from '../agent-host.ts'
 import { LOST_TOOL_RESULT_TEXT, NOTHING_TO_CONTINUE } from '../continuation.ts'
 import { readPiccPersistedMode, storedPermissionModeState } from '../permission-mode-adapter.ts'
+import { recordedModelOf } from '../transcript.ts'
 
 /**
  * The in-process host against the REAL harness package (#69) — every extension the manifest
@@ -1063,16 +1064,29 @@ test('⚠ a stored read reports the LAST model and thinking level on the branch 
   expect(stored?.recordedModel).toEqual({ model: { provider: 'openai', modelId: 'gpt-kept' }, thinkingLevel: 'high' })
 })
 
-test('a stored branch that records no model change and no thinking level has no recorded model; one half alone is reported alone (#434)', async () => {
-  const none = crypto.randomUUID()
-  storeTurns(none, [['a question', 'an answer']])
-  const host = hostWith()
-  expect((await host.readStoredThread(none))?.recordedModel).toBeUndefined()
+// PR #438 review: pi restores the model from the last `model_change` OR assistant reply on the path
+// (`getSessionContextSettings`), and a reopen that cannot restore the recorded model falls back
+// WITHOUT a change entry — only the replies after it say what ran.
+test('⚠ a stored branch reports the model its last reply ran on when the reply follows the last change, as pi restores it (#434)', async () => {
+  const threadId = crypto.randomUUID()
+  const { file } = storeTurns(threadId, [['a question', 'an answer']])
+  const stored = SessionManager.open(file)
+  stored.appendModelChange('openai', 'gpt-recorded')
+  stored.appendMessage({ role: 'user', content: 'after a reopen', timestamp: Date.now() })
+  // `storedReply` runs on `anthropic`/`test`: the model pi fell back to, with no change entry.
+  stored.appendMessage(storedReply('answered on the fallback'))
+  expect((await hostWith().readStoredThread(threadId))?.recordedModel).toEqual({
+    model: { provider: 'anthropic', modelId: 'test' },
+    thinkingLevel: null,
+  })
+})
 
-  const levelOnly = crypto.randomUUID()
-  const { file } = storeTurns(levelOnly, [['a question', 'an answer']])
-  SessionManager.open(file).appendThinkingLevelChange('medium')
-  expect((await host.readStoredThread(levelOnly))?.recordedModel).toEqual({ model: null, thinkingLevel: 'medium' })
+test('a branch that records no reply, no model change and no thinking level has no recorded model; one half alone is reported alone (#434)', () => {
+  expect(recordedModelOf([{ type: 'message', message: { role: 'user', content: 'q' } }])).toBeUndefined()
+  expect(recordedModelOf([{ type: 'thinking_level_change', thinkingLevel: 'medium' }])).toEqual({
+    model: null,
+    thinkingLevel: 'medium',
+  })
 })
 
 test("a fork reports its source's recorded model up to the fork point, not a change the source made after it (#434, #433)", async () => {

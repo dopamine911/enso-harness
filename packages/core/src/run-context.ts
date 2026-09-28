@@ -7,11 +7,12 @@ import { EnsoRecordedModel } from './thread-runtime.ts'
  * fork point a thread's manifest assembles from them.
  *
  * ⚠ AN ENTRY IN pi's LOG, WRITTEN ONLY ON CHANGE. The harness's `run-context` extension computes
- * a record at every run start (`before_agent_start`, loaded LAST so every earlier handler's
- * change to the skills and context files is in) and appends it with `pi.appendEntry` only when a
- * field differs from the last {@link ENSO_RUN_CONTEXT_ENTRY} on the branch. A fork inherits the
- * entries on its path, so a fork's first run appends only if something changed. pi's context
- * builder skips `custom` entries: the model never sees it.
+ * a record at every prompt's run start (`before_agent_start`, loaded LAST so every earlier
+ * handler's change to the skills and context files is in) and appends it with `pi.appendEntry`
+ * only when a field differs from the last {@link ENSO_RUN_CONTEXT_ENTRY} on the branch. A fork
+ * inherits the entries on its path, so a fork's first run appends only if something changed. pi's
+ * context builder skips `custom` entries: the model never sees it. A #436 Continue records none:
+ * pi emits no `before_agent_start` for it, so the latest record is the cut-off run's.
  *
  * ⚠ HASHES, NEVER CONTENTS. A context file is its path and a sha256 of what the model received;
  * the config is a sha256 of the resolved `EnsoConfig` (stable key order) and the files it came
@@ -123,7 +124,10 @@ export const EnsoForkPoint = Type.Object(
         /** The permission mode the branch's last `modes` entry names (picc's record); its initial one without. */
         mode: Type.String({ minLength: 1 }),
         cwd: Type.String({ minLength: 1 }),
-        /** The branch's latest run context; `null` before its first run. */
+        /**
+         * The branch's latest run context; `null` before its first run, or when the newest record
+         * does not read (another schema's): an older one is not the current conditions.
+         */
         runContext: Type.Union([EnsoRunContext, Type.Null()]),
       },
       { additionalProperties: false },

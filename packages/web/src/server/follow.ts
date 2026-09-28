@@ -27,7 +27,7 @@ import { HostCommandRefused, modelOptionId } from '../host/host-commands.ts'
 import { forgetRun, noteRunAdmitted } from './run-timing.ts'
 import { SSE_HEADERS, startSseKeepalive } from './sse.ts'
 import { readThreadMount, type ThreadReadDeps } from './thread-read.ts'
-import type { ThreadFeedFrame, ThreadRegistry } from './thread-registry.ts'
+import type { ThreadFeedFrame, ThreadRegistry, ThreadView } from './thread-registry.ts'
 
 /**
  * The prompt/follow split (#112) — the server↔browser wire.
@@ -40,8 +40,9 @@ import type { ThreadFeedFrame, ThreadRegistry } from './thread-registry.ts'
  *   POST /api/threads/:id/continue unary (#436). Takes the thread like a prompt and continues
  *                                  its torn tail from the stored state — no new user message.
  *                                  202 accepted (the run arrives on the follow, its `settled`
- *                                  releases the thread), 409 while a run holds it, 422 with the
- *                                  runtime's reason for a tail there is nothing to continue from.
+ *                                  releases the thread), 404 for a thread neither live nor
+ *                                  stored, 409 while a run holds it, 422 with the runtime's
+ *                                  reason for a tail there is nothing to continue from.
  *   GET  /api/threads/:id/follow   one snapshot frame, then observations and status
  *                                  frames for as long as the client stays. Observation
  *                                  only: never builds a session; a thread that is not live
@@ -91,6 +92,8 @@ export interface PromptBody {
 export type PromptOutcome =
   | { readonly status: 202; readonly receipt: EnsoPromptReceipt }
   | { readonly status: 400; readonly reason: string }
+  /** The thread was taken and released again while this prompt waited on its build (#444) — rare. */
+  | { readonly status: 409; readonly reason: string }
 
 /**
  * Leading token of a slash input, without the slash. `/mode auto` -> `mode`.
@@ -288,8 +291,8 @@ export async function promptThread(deps: FollowRouteDeps, threadId: string, body
   }
 
   const command = slashCommandName(body.message)
-  const live = threads.peek(threadId)
-  if (live?.busy === true) {
+  /** The busy path: the prompt joins the run that holds the thread, with its admission (#75). */
+  const joinRun = (live: ThreadView): PromptOutcome => {
     const unavailable = command === undefined ? undefined : unavailableCommand(live.hosted.runtime, command)
     if (unavailable !== undefined) return { status: 400, reason: unavailable }
     live.hosted.runtime.prompt(
@@ -302,8 +305,17 @@ export async function promptThread(deps: FollowRouteDeps, threadId: string, body
     )
     return { status: 202, receipt: { threadId, messageId, generation: live.generation, queued: true } }
   }
+  const live = threads.peek(threadId)
+  if (live?.busy === true) return joinRun(live)
 
   const lease = await threads.acquire(threadId)
+  if (lease === 'busy') {
+    // Another request took the thread while this one waited on the build or an abort (#444): join
+    // its run as a prompt that found it busy would. Released again in between — the other request
+    // was refused — there is nothing to join, and the prompt is not run without a lease: 409.
+    const holder = threads.peek(threadId)
+    return holder?.busy === true ? joinRun(holder) : busyRefusal(threadId, 'send')
+  }
   const unavailable = command === undefined ? undefined : unavailableCommand(lease.runtime, command)
   if (unavailable !== undefined) {
     lease.release()
@@ -359,9 +371,10 @@ export type ContinueOutcome =
  * cut-off one never finished. Taken like a prompt's idle path: refused while a run holds the thread
  * (409 — there is nothing torn about a thread that is running), else acquired (a resumed thread
  * BUILDS here, which is the case this exists for) and handed to the runtime. The runtime's refusal —
- * a tail that is no unanswered prompt or unfinished tool call — is the 422, verbatim, and releases
- * the lease. Accepted, it answers 202 and the run arrives on the follow like any other; the thread's
- * own `settled` releases it, as it releases a prompt's.
+ * a tail that is no unanswered prompt, unfinished tool call or tool results with no reply, or a pi
+ * build without the run lifecycle — is the 422, verbatim, and releases the lease. Accepted, it
+ * answers 202 and the run arrives on the follow like any other; the thread's own `settled` releases
+ * it, as it releases a prompt's.
  *
  * A thread neither live here nor stored is a 404 BEFORE anything is built (PR #442 review): there is
  * nothing to continue by definition, and `acquire` would build a fresh session under the id and hold
@@ -374,7 +387,10 @@ export async function continueThread(deps: FollowRouteDeps, threadId: string): P
   if (threads.peek(threadId) === undefined && (await host.storedThreadDirectory(threadId)) === undefined) {
     return { status: 404, reason: `no thread ${threadId} to continue` }
   }
+  // The one check that cannot race (#444): a second Continue — another tab, or a prompt that won
+  // the thread while this one waited on the build — is refused here, before it holds a lease.
   const lease = await threads.acquire(threadId)
+  if (lease === 'busy') return busyRefusal(threadId, 'continue')
   noteRunAdmitted(threadId, lease.generation)
   const settle = threads.observe(threadId, (frame: ThreadFeedFrame) => {
     if (frame.kind !== 'observation' || frame.observation.kind !== 'settled') return
@@ -487,6 +503,7 @@ export async function changeThreadMode(
   const running = runningRefusal(threads, threadId, 'change the mode')
   if (running !== undefined) return running
   const lease = await threads.acquire(threadId)
+  if (lease === 'busy') return busyRefusal(threadId, 'change the mode')
   const { available } = lease.runtime.permissionModeState()
   if (!available.includes(change.mode)) {
     lease.release()
@@ -533,15 +550,18 @@ export function readClosedBody<Schema extends TSchema>(
   return body
 }
 
-/** The 409 every control route answers while a run holds the thread (#75: never queued behind a run), or `undefined`. */
+/** The 409 every control route answers while a run holds the thread (#75: never queued behind a run). */
+function busyRefusal(threadId: string, action: string): { readonly status: 409; readonly reason: string } {
+  return { status: 409, reason: `thread ${threadId} is running; ${action} when it settles` }
+}
+
+/** {@link busyRefusal} when a peek already sees the thread held, or `undefined` — the fast answer before any wait. */
 function runningRefusal(
   threads: ThreadRegistry,
   threadId: string,
   action: string,
 ): { readonly status: 409; readonly reason: string } | undefined {
-  return threads.peek(threadId)?.busy === true
-    ? { status: 409, reason: `thread ${threadId} is running; ${action} when it settles` }
-    : undefined
+  return threads.peek(threadId)?.busy === true ? busyRefusal(threadId, action) : undefined
 }
 
 export type HostCommandOutcome =
@@ -569,6 +589,7 @@ export async function runHostCommand(
   const running = runningRefusal(threads, threadId, `change ${run.name}`)
   if (running !== undefined) return running
   const lease = await threads.acquire(threadId)
+  if (lease === 'busy') return busyRefusal(threadId, `change ${run.name}`)
   // ⚠ A `flow` row STARTS and the route answers 202 (#338 slice 3), and so does an `action` (slice
   // 4: `/compact` is a model call, seconds to a minute): a login may wait minutes on a
   // device code, and its questions and progress are on the feed, not in this response. The lease
@@ -673,6 +694,7 @@ export async function configureThread(
   const running = runningRefusal(threads, threadId, 'configure it')
   if (running !== undefined) return running
   const lease = await threads.acquire(threadId)
+  if (lease === 'busy') return busyRefusal(threadId, 'configure it')
   try {
     const refusal = await applyConfiguration(lease.runtime, configuration)
     return refusal === undefined ? { status: 204 } : { status: 422, refusal }

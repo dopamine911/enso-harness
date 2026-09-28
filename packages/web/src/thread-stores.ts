@@ -17,7 +17,7 @@ import { createRecentChunksStore, type RecentChunksStore } from './custom-event-
 import { createFollowConnection, type FollowConnection } from './follow-connection.ts'
 import { createModeLines, type ModeLines } from './mode-lines.ts'
 import { createModelStore, type ModelStore } from './model-state.tsx'
-import { createNotificationsStore, type NotificationsStore } from './notifications.tsx'
+import { createNotificationsStore, type NotificationAction, type NotificationsStore } from './notifications.tsx'
 import { createPermissionModeStore, type PermissionModeStore } from './permission-mode.tsx'
 import { createStore, type Store, type WritableStore } from './store.ts'
 
@@ -288,6 +288,54 @@ function retireTornTail(threadId: string): void {
   tornTailLines.delete(threadId)
 }
 
+/** Said when Continue is pressed while this page has no follow: the run would land where the page cannot see it. */
+const CONTINUE_WHILE_DISCONNECTED =
+  'Continue was not sent: this page is disconnected from the thread, and would not see the run. Press it again once the page reconnects.'
+
+/**
+ * The torn-tail line and its Continue (#436). Whether Continue started the run is known only once
+ * the server answers (PR #439 review): a first turn that lands while the answer is pending waits
+ * for it — the turn is Continue's on a 202, and someone else's run (another tab's prompt, won just
+ * before) otherwise.
+ *
+ * Only `told` and `refused` are final (PR #438 review). A press while disconnected is not sent at
+ * all — the composer refuses to send then for the same reason (#119) — and a `busy` or
+ * `unreachable` answer started nothing: each puts the action back, so the one way to act is not
+ * used up by a press that did nothing.
+ */
+function offerContinue(stores: ThreadStores, tail: EnsoInterruptedTail): void {
+  let continuing = Promise.resolve(false)
+  const action: NotificationAction = {
+    label: CONTINUE_LABEL,
+    run: () => {
+      if (stores.disconnected.get()) {
+        stores.notifications.push(CONTINUE_WHILE_DISCONNECTED, 'warning', 'run', ENSO_NOTICE_SOURCE)
+        stores.notifications.restoreAction(line, action)
+        return
+      }
+      continuing = stores.connection.continueRun().then(
+        (outcome) => {
+          if (outcome === 'busy' || outcome === 'unreachable') stores.notifications.restoreAction(line, action)
+          return outcome === 'told'
+        },
+        () => false,
+      )
+    },
+  }
+  const line = stores.notifications.pushWithAction({
+    message: INTERRUPTED_TAIL_NOTICE[tail],
+    notifyType: 'warning',
+    origin: 'run',
+    source: ENSO_NOTICE_SOURCE,
+    action,
+  })
+  tornTailLines.set(stores.threadId, () => {
+    void continuing.then((continued) =>
+      stores.notifications.resolveLine(line, continued ? TORN_TAIL_CONTINUED : TORN_TAIL_SUPERSEDED),
+    )
+  })
+}
+
 // ── the page's threads ────────────────────────────────────────────────────────
 
 /** What the rail shows for one thread — written by its pane from the chat it owns. */
@@ -502,32 +550,7 @@ export function adoptThread(history: EnsoThreadHistory, fetchImpl?: FetchLike, i
     initialDraft,
   })
   stores.permissionMode.applyReceipt(history.permissionMode)
-  if (history.interrupted !== undefined) {
-    // Whether Continue started the run, known only once the server answers (PR #439 review): a
-    // first turn that lands while the answer is pending waits for it — the turn is Continue's on a
-    // 202, and someone else's run (another tab's prompt, won just before) on a 409.
-    let continuing = Promise.resolve(false)
-    const line = stores.notifications.pushWithAction({
-      message: INTERRUPTED_TAIL_NOTICE[history.interrupted],
-      notifyType: 'warning',
-      origin: 'run',
-      source: ENSO_NOTICE_SOURCE,
-      action: {
-        label: CONTINUE_LABEL,
-        run: () => {
-          continuing = stores.connection.continueRun().then(
-            (outcome) => outcome === 'told',
-            () => false,
-          )
-        },
-      },
-    })
-    tornTailLines.set(history.threadId, () => {
-      void continuing.then((continued) =>
-        stores.notifications.resolveLine(line, continued ? TORN_TAIL_CONTINUED : TORN_TAIL_SUPERSEDED),
-      )
-    })
-  }
+  if (history.interrupted !== undefined) offerContinue(stores, history.interrupted)
   threads.set(stores.threadId, stores)
   summaries.set(stores.threadId, {
     threadId: stores.threadId,

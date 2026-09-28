@@ -798,7 +798,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
       })
     }
     const outcome = await promptThread(followDeps, threadId, body)
-    if (outcome.status === 400) {
+    if (outcome.status !== 202) {
       log.warn('prompt refused: {reason}', { threadId, reason: outcome.reason })
       refuseWith(response, outcome)
       return

@@ -2,7 +2,12 @@ import { afterAll, beforeAll, beforeEach, expect, test } from 'bun:test'
 import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
 import type { LogRecorder } from '@logtape/testing/recorder'
 import type { HostedThread } from '../../host/agent-host.ts'
-import { createThreadRegistry, type ScheduleIdleDisposal, type ThreadRegistry } from '../thread-registry.ts'
+import {
+  createThreadRegistry,
+  type ScheduleIdleDisposal,
+  type ThreadLease,
+  type ThreadRegistry,
+} from '../thread-registry.ts'
 import { createFakeHostedThread, type FakeHostedThread, type FakeThreadParts, takeQueue } from './fake-hosted-thread.ts'
 
 let logs: LogRecorder
@@ -107,10 +112,18 @@ function fakeHost(): { threads: ThreadRegistry; built: FakeHosted[]; clock: Manu
 
 const sleep = (ms: number): Promise<void> => new Promise<void>((resolve) => setTimeout(resolve, ms))
 
-test('the same thread acquired twice gets ONE session; two threads get two', async () => {
+/** A lease the test expects to get; `'busy'` fails the test by name. */
+async function take(threads: ThreadRegistry, threadId: string): Promise<ThreadLease> {
+  const lease = await threads.acquire(threadId)
+  if (lease === 'busy') throw new Error(`${threadId} was busy`)
+  return lease
+}
+
+test('the same thread acquired again gets ONE session; two threads get two', async () => {
   const { threads, built } = fakeHost()
-  const first = await threads.acquire('t1')
-  const again = await threads.acquire('t1')
+  const first = await take(threads, 't1')
+  first.release()
+  const again = await take(threads, 't1')
   expect(again.runtime).toBe(first.runtime)
   expect(built).toHaveLength(1)
   await threads.acquire('t2')
@@ -118,16 +131,28 @@ test('the same thread acquired twice gets ONE session; two threads get two', asy
   expect(threads.liveThreadCount()).toBe(2)
 })
 
-test('two concurrent first requests on one thread share one build', async () => {
+// #444, PR #438 review: two requests on a cold thread both passed the route's busy peek and both
+// got leases; the newer one's refusal released the thread under the older one's run.
+test('⚠ two concurrent first requests on one thread share one build, and only one takes it: the other is told busy', async () => {
   const { threads, built } = fakeHost()
   const [first, second] = await Promise.all([threads.acquire('t1'), threads.acquire('t1')])
-  expect(second.runtime).toBe(first.runtime)
   expect(built).toHaveLength(1)
+  expect([first, second].filter((taken) => taken === 'busy')).toHaveLength(1)
+  expect(threads.peek('t1')).toMatchObject({ busy: true, generation: 1 })
+})
+
+test('a held thread is refused, not taken again; released, it is taken by the next acquire', async () => {
+  const { threads } = fakeHost()
+  const held = await take(threads, 't1')
+  expect(await threads.acquire('t1')).toBe('busy')
+  expect(threads.peek('t1')?.generation).toBe(held.generation)
+  held.release()
+  expect((await take(threads, 't1')).generation).toBe(held.generation + 1)
 })
 
 test('release starts the idle clock; the session is disposed after the window, and a later acquire rebuilds', async () => {
   const { threads, built, clock } = fakeHost()
-  const lease = await threads.acquire('t1')
+  const lease = await take(threads, 't1')
   lease.release()
   // One millisecond short of the window, and then on it: the edge itself, not a margin.
   clock.advance(19)
@@ -153,7 +178,7 @@ test('release starts the idle clock; the session is disposed after the window, a
 test('an idled-out thread has no live session to peek, and rememberedCommands still answers with the last build', async () => {
   const { threads, built, clock } = fakeHost()
   expect(threads.rememberedCommands()).toBeUndefined()
-  const lease = await threads.acquire('t1')
+  const lease = await take(threads, 't1')
   lease.release()
   clock.advance(20)
   expect(threads.peek('t1')).toBeUndefined()
@@ -165,10 +190,10 @@ test('an idled-out thread has no live session to peek, and rememberedCommands st
 
 test("acquire within the idle window cancels the disposal — #43's fix in one assertion", async () => {
   const { threads, built, clock } = fakeHost()
-  const first = await threads.acquire('t1')
+  const first = await take(threads, 't1')
   first.release()
   clock.advance(19)
-  const second = await threads.acquire('t1')
+  const second = await take(threads, 't1')
   // Cancelled, not deferred: nothing is armed, so no amount of idle time disposes it.
   expect(clock.pending()).toBe(0)
   clock.advance(1000)
@@ -179,7 +204,7 @@ test("acquire within the idle window cancels the disposal — #43's fix in one a
 
 test('abort stops the run and never disposes; a repeat while it is pending is the same answer, not a second call; the next acquire waits for it (#116)', async () => {
   const { threads, built } = fakeHost()
-  await threads.acquire('t1')
+  const run = await take(threads, 't1')
   expect(threads.abort('t1')).toEqual({ outcome: 'aborted', restored: [] })
   const hosted = built[0]
   if (hosted === undefined) throw new Error('no session built')
@@ -189,8 +214,10 @@ test('abort stops the run and never disposes; a repeat while it is pending is th
   expect(threads.abort('t1')).toEqual({ outcome: 'aborted', restored: [] })
   expect(hosted.record.aborts).toBe(1)
 
+  // The run's settle released it; pi's abort has not resolved yet.
+  run.release()
   let acquired = false
-  const pending = threads.acquire('t1').then(() => {
+  const pending = take(threads, 't1').then(() => {
     acquired = true
   })
   // No timer is in play here: nothing but `finishAbort` can resolve that acquire, so one turn of
@@ -205,7 +232,7 @@ test('abort stops the run and never disposes; a repeat while it is pending is th
 test('abort on an idle thread or an unknown one touches nothing, and says which (#116)', async () => {
   const { threads, built } = fakeHost()
   expect(threads.abort('never')).toEqual({ outcome: 'unknown', restored: [] })
-  const lease = await threads.acquire('t1')
+  const lease = await take(threads, 't1')
   lease.release()
   expect(threads.abort('t1')).toEqual({ outcome: 'idle', restored: [] })
   expect(built[0]?.record.aborts).toBe(0)
@@ -263,10 +290,12 @@ test('⚠ a stop must stop: if clearing the queue throws, pi is still told to ab
 
 test('⚠ a lease superseded by a later acquire is stale: its release touches nothing, and says so', async () => {
   const { threads, built } = fakeHost()
-  const first = await threads.acquire('t1')
-  const second = await threads.acquire('t1')
+  const first = await take(threads, 't1')
+  first.release()
+  const second = await take(threads, 't1')
   expect(second.generation).toBe(first.generation + 1)
 
+  // A's late release — a parked dialog's, ten minutes on — while B holds the thread.
   first.release()
   expect(threads.peek('t1')?.busy).toBe(true)
   logs.assertLogged({
@@ -287,7 +316,7 @@ test('⚠ a lease superseded by a later acquire is stale: its release touches no
 
 test('⚠ a lease from before a rebuild is stale, and the rebuilt thread continues the count', async () => {
   const { threads, built, clock } = fakeHost()
-  const before = await threads.acquire('t1')
+  const before = await take(threads, 't1')
   before.release()
   clock.advance(20) // the idle window: disposed
   expect(threads.liveThreadCount()).toBe(0)
@@ -297,7 +326,7 @@ test('⚠ a lease from before a rebuild is stale, and the rebuilt thread continu
     properties: { threadId: 't1', operation: 'release', because: 'the thread was disposed' },
   })
 
-  const after = await threads.acquire('t1')
+  const after = await take(threads, 't1')
   expect(after.generation).toBe(before.generation + 1)
   expect(built).toHaveLength(2)
   expect(threads.peek('t1')?.generation).toBe(after.generation)
@@ -322,7 +351,7 @@ test('a failed build leaves no entry, so the next request retries', async () => 
 
 test('shutdown disposes every live session and clears pending idle timers', async () => {
   const { threads, built, clock } = fakeHost()
-  const t1 = await threads.acquire('t1')
+  const t1 = await take(threads, 't1')
   await threads.acquire('t2')
   t1.release()
   expect(clock.pending()).toBe(1)
@@ -386,7 +415,7 @@ test('⚠ ensure builds a session without taking a run; it idles out, and a late
   expect(built).toHaveLength(1)
   expect(view).toMatchObject({ threadId: 't1', busy: false, generation: 0 })
   clock.advance(19)
-  const lease = await threads.acquire('t1')
+  const lease = await take(threads, 't1')
   expect(lease.runtime).toBe(view.hosted.runtime)
   expect(lease.generation).toBe(1)
   expect(built).toHaveLength(1)
@@ -415,7 +444,7 @@ test('⚠ ensure on a live thread whose run is stopping answers at once and touc
 
 test('an ask and a run arriving together share ONE build, and the run holds it (#390)', async () => {
   const { threads, built, clock } = fakeHost()
-  const [view, lease] = await Promise.all([threads.ensure('t1'), threads.acquire('t1')])
+  const [view, lease] = await Promise.all([threads.ensure('t1'), take(threads, 't1')])
   expect(built).toHaveLength(1)
   expect(lease.runtime).toBe(view.hosted.runtime)
   // The run holds the thread: no idle disposal is armed under its lease.

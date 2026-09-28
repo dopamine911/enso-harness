@@ -251,13 +251,15 @@ test('a branch ending on a tool call with no result is a call without its result
 })
 
 // PR #442 review: pi keeps the reply to the results only at its end, so a kill during that model
-// call leaves the results with nothing after them. A Stop leaves pi's own aborted result instead.
-test("⚠ a turn whose every call has its result and no reply is torn — unless pi's abort wrote a result (a Stop)", () => {
+// call leaves the results with nothing after them. PR #438 review: a Stop never ends there — pi
+// persists the aborted call's error reply after the results — so pi's aborted result is torn too.
+test('⚠ a turn whose every call has its result and no reply is torn, whatever the results say; the reply settles it', () => {
   expect(branchTail([call('a1'), result('r1')])).toBe('tool-results-without-reply')
   // A result the guards refused is a real one: a kill after it is still torn.
   const refused = entry('r1', { role: 'toolResult', toolCallId: 'c1', toolName: 'bash', content: [], isError: true })
   expect(branchTail([call('a1'), refused])).toBe('tool-results-without-reply')
-  // pi's `createErrorToolResult("Operation aborted")`: the run was stopped, not torn.
+  // pi's `createErrorToolResult("Operation aborted")` with nothing after it: a kill that landed
+  // between the aborted results and the error reply pi appends for a Stop.
   const aborted = entry('r1', {
     role: 'toolResult',
     toolCallId: 'c1',
@@ -265,8 +267,11 @@ test("⚠ a turn whose every call has its result and no reply is torn — unless
     content: [{ type: 'text', text: 'Operation aborted' }],
     isError: true,
   })
-  expect(branchTail([call('a1'), aborted])).toBeUndefined()
-  // …and the reply to the results settles the turn.
+  expect(branchTail([call('a1'), aborted])).toBe('tool-results-without-reply')
+  // A Stop's real shape, measured on the real host: pi's error reply after the results — no call.
+  const stoppedReply = entry('a2', { role: 'assistant', content: [], stopReason: 'error' })
+  expect(branchTail([call('a1'), aborted, stoppedReply])).toBeUndefined()
+  // …and a reply to the results settles the turn.
   const reply = entry('a2', { role: 'assistant', content: [{ type: 'text', text: 'done' }] })
   expect(branchTail([call('a1'), result('r1'), reply])).toBeUndefined()
 })

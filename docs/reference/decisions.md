@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 301.**
+**Decision headers: 302.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -38,7 +38,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/core/src/pi-manifest.ts` | `#211`, `#221` | What a pi package's manifest declares, and where pi will look for it (#221) — THE one place that knows pi's manifest-resource layout. |
 | `packages/core/src/project.ts` | `#24`, `#395` | Projects (#395): the local directories one Enso server runs threads in. |
 | `packages/core/src/provider-refusal.ts` | `#340`, `#384` | A model provider refused a request (#340): the fact the page and the log were missing. |
-| `packages/core/src/run-context.ts` | `#126`, `#435` | The run conditions pi does not record (#435, Lineage #126 receipt steps 3 and 5), and the fork point a thread's manifest assembles from them. |
+| `packages/core/src/run-context.ts` | `#126`, `#435`, `#436` | The run conditions pi does not record (#435, Lineage #126 receipt steps 3 and 5), and the fork point a thread's manifest assembles from them. |
 | `packages/core/src/secrets.ts` | `#7`, `#89`, `#98` | Secrets stay OUT of the environment the model's tools inherit (#89). |
 | `packages/core/src/thread-context.ts` | `#361` | One thread's context, request by request (#361): what `GET /api/threads/:threadId/context` answers and the Context view draws — dsh-context's composition and trend, over pi. |
 | `packages/core/src/thread-inspection.ts` | `#86` | What a live thread's session ACTUALLY contains, as the server reports it (#86). |
@@ -93,7 +93,8 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/harness/extensions/logging/__tests__/logging.test.ts` | `#132` | The extension's two branches (#132): pi as a CHILD configures its own sink; pi IN-PROCESS leaves the server's alone. |
 | `packages/harness/extensions/logging/index.ts` | `#132`, `#144`, `#167` | The extension process's logging (#132), and the one record only an extension can write: the provider's own request id (#144). |
 | `packages/harness/extensions/run-context/__tests__/git-probe.test.ts` | `#435` | #435: the run-context git probe asks the SESSION's cwd, whatever repository the environment names. |
-| `packages/harness/extensions/run-context/index.ts` | `#126`, `#435`, `#440` | The run-context recorder (#435, Lineage #126): at every run start, what the run starts under — git revision and dirty state, the resolved config's hash and files, the skills, the context files' hashes, the permission mode's rule-set hash — appended to pi's log as an `enso-run-context` entry (`@enso/core` `run-context.ts`) ONLY when a field differs from the last one on the branch. |
+| `packages/harness/extensions/run-context/__tests__/run-context.test.ts` | `#435`, `#438` | #435's recorder over its dependency seam (PR #438 review): the branches the review rounds added, each where a real run would take it — git and the config faked, pi reduced to the `on` it registers with and the `appendEntry` it writes through. |
+| `packages/harness/extensions/run-context/index.ts` | `#126`, `#435`, `#436`, `#438`, `#440` | The run-context recorder (#435, Lineage #126): at every prompt's run start, what the run starts under — git revision and dirty state, the resolved config's hash and files, the skills, the context files' hashes, the permission mode's rule-set hash — appended to pi's log as an `enso-run-context` entry (`@enso/core` `run-context.ts`) ONLY when a field differs from the last one on the branch. |
 | `packages/harness/extensions/web-fetch/__tests__/one-trust-question.test.ts` | `#421` | #421, found live: the trust question for a project's `.enso/config.json` must be asked ONCE per session, though two tools (web_fetch, web_search) read the config. |
 | `packages/harness/extensions/web-fetch/__tests__/web-fetch.test.ts` | `#54` | The web_fetch extension (#54), against injected IO seams — no test here touches the network, DNS, or the user's config file. |
 | `packages/harness/extensions/web-fetch/index.ts` | `#9`, `#54`, `#59`, `#421` | The web_fetch tool (#54) — the sanctioned web access that replaces the ad-hoc network clients #9 denies in bash. |

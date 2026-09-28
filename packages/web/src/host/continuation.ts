@@ -79,7 +79,7 @@ export function continuationLead(
 
 /** Why a Continue was refused — the reason the route says as its 422. */
 export const NOTHING_TO_CONTINUE =
-  'nothing to continue: the thread does not end on an unanswered prompt or an unfinished tool call'
+  'nothing to continue: the thread does not end on an unanswered prompt, an unfinished tool call, or tool results with no reply'
 
 /**
  * Why a Continue was refused on a pi build without the private run lifecycle it calls (PR #442

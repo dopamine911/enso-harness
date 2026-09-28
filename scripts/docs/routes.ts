@@ -27,7 +27,11 @@ interface RouteMetadata {
   readonly routeClass: 'control' | 'observation' | 'browser-log-ingest' | 'static'
   readonly builds: 'yes' | 'no'
   readonly logs: 'yes' | 'no'
-  readonly factory?: { readonly path: string; readonly declaration: string }
+  /**
+   * The follow-module factory the handler calls, and what that factory reaches: the thread's
+   * runtime (the default), or the storage seam (`AgentHost`) without a runtime — the fork route.
+   */
+  readonly factory?: { readonly path: string; readonly declaration: string; readonly reaches?: 'storage' }
 }
 
 /**
@@ -119,7 +123,7 @@ const REGEX_ROUTE_METADATA: Record<string, RouteMetadata> = {
     input: 'path: `threadId`; body: `EnsoPromptBody`',
     success: '202 `EnsoPromptReceipt` JSON',
     errors:
-      '400 malformed id/body or unavailable command; 403 untrusted origin; 413 body too large; 500 handler failure',
+      '400 malformed id/body or unavailable command; 403 untrusted origin; 409 the thread was taken and released again while the prompt waited on its build (rare; #444); 413 body too large; 500 handler failure',
     routeClass: 'control',
     builds: 'yes',
     logs: 'yes',
@@ -190,7 +194,7 @@ const REGEX_ROUTE_METADATA: Record<string, RouteMetadata> = {
     routeClass: 'control',
     builds: 'no',
     logs: 'yes',
-    factory: { path: FOLLOW_PATH, declaration: 'export async function forkThreadAt' },
+    factory: { path: FOLLOW_PATH, declaration: 'export async function forkThreadAt', reaches: 'storage' },
   },
   THREAD_CONTINUE_ROUTE: {
     method: 'POST',
@@ -200,7 +204,7 @@ const REGEX_ROUTE_METADATA: Record<string, RouteMetadata> = {
     success:
       '202 empty — the torn tail is continued from the stored state with no new user message; the run arrives on the follow and its `settled` releases the thread',
     errors:
-      '400 malformed thread id; 403 untrusted origin; 409 thread busy; 422 nothing to continue — the thread does not end on an unanswered prompt or an unfinished tool call; 500 handler failure',
+      '400 malformed thread id; 403 untrusted origin; 404 no thread under that id, live or stored; 409 thread busy; 422 nothing to continue — the thread does not end on an unanswered prompt, an unfinished tool call, or tool results with no reply, or this pi build has no run lifecycle to continue in; 500 handler failure',
     routeClass: 'control',
     builds: 'yes',
     logs: 'yes',

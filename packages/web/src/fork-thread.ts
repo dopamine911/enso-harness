@@ -73,10 +73,21 @@ export function forkEntryFor(
   return counterpart !== undefined && storedAs(sentWords(counterpart), sentWords(target)) ? counterpart.id : undefined
 }
 
+/** The threads with a fork outstanding — keyed by the pane's stores, so a pane dropped takes its entry. */
+const forking = new WeakSet<object>()
+
+/** What a second fork press says while the first is outstanding. */
+const FORK_UNDER_WAY = 'fork: a fork of this thread is already under way'
+
 /**
  * Fork the pane's thread at a user message on `page`: the branch read, the entry found, the fork
  * route asked. Every failure is a notice on this thread, as a refused control's is; the receipt
  * only when the fork exists.
+ *
+ * ⚠ ONE AT A TIME PER THREAD (PR #438 review): every fork writes a new session, and the page opens
+ * only the latest receipt — a double click, or `/fork` pressed twice, left the first fork on disk,
+ * unopened, an orphan "forked from" row in the rail. A press while one is outstanding is said and
+ * dropped, as Continue's second press is.
  */
 export async function forkFromPage(
   stores: Pick<ThreadStores, 'threadId' | 'fetch' | 'connection' | 'notifications'>,
@@ -85,6 +96,24 @@ export async function forkFromPage(
 ): Promise<EnsoForkReceipt | undefined> {
   const say = (text: string): void =>
     stores.notifications.push(`thread ${stores.threadId}: ${text}`, 'warning', 'run', ENSO_NOTICE_SOURCE)
+  if (forking.has(stores)) {
+    say(FORK_UNDER_WAY)
+    return undefined
+  }
+  forking.add(stores)
+  try {
+    return await forkOnce(stores, page, messageId, say)
+  } finally {
+    forking.delete(stores)
+  }
+}
+
+async function forkOnce(
+  stores: Pick<ThreadStores, 'threadId' | 'fetch' | 'connection'>,
+  page: readonly UIMessage[],
+  messageId: string | undefined,
+  say: (text: string) => void,
+): Promise<EnsoForkReceipt | undefined> {
   let branch: UIMessage[]
   try {
     const response = await stores.fetch(`/api/threads/${encodeURIComponent(stores.threadId)}/history`)

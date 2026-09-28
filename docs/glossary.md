@@ -64,9 +64,9 @@ each: `thread` is the noun everywhere the id crosses; `session` is reserved for 
 | **stored thread** | a thread whose log is on disk and can be resumed: what the rail lists after a restart. Wire: `EnsoStoredThread` | `threadId` | the runtime's first flush — the file does not exist until the first assistant message; a fork's is written when it is made (#433) | the storage seam lists it; the file is the record |
 | **entry** | one line of the runtime's log: a message, a tool call, a tool result, a model change, or a custom entry an extension persisted | the runtime's entry id and parent id | the runtime | carried verbatim, read defensively, never modelled above the host — since [leak L2](./seams/README.md#leak-numbers) the branch is read as `EnsoTranscriptEntry`, a type of ours |
 | **branch** | the root-to-leaf chain of entries the runtime currently considers the conversation; a stored thread's history is its branch rebuilt as messages on every cold read | entry ids | the runtime | the runtime; moved by tree navigation and by a fork |
-| **custom entry** | an entry an extension appended to persist its own state — the permission mode is one, a guard refusal (#387) another; run provenance will be more. The pattern for anything durable that must travel with a fork | `customType` | the appending extension | the log; a fork inherits it by construction |
+| **custom entry** | an entry an extension appended to persist its own state — the permission mode is one, a guard refusal (#387) another, the run context (#435) a third. The pattern for anything durable that must travel with a fork | `customType` | the appending extension | the log; a fork inherits it by construction |
 | **fork** | a new log whose header names its parent; the branch is copied to the fork point. Made from the browser at a user message (#433): the fork holds everything before it, and its composer opens holding the message's words; the listing names the parent as `parentThreadId` | a new thread id; `parentSession` in its header | the runtime | the runtime |
-| **fork point** | the position a fork was taken from: today the parent's id and the branch entry. What a *reproducible* fork additionally needs — project revision, context manifest, active rules and skills, configuration — is the lineage phase's schema (#126), recorded as custom entries | — | — | — |
+| **fork point** | the position a fork was taken from, and what it ran under (#435): its identity — the thread, the branch's leaf entry, the parent — and its conditions — model, thinking level, mode, cwd, and the latest run context (project revision, config, skills, context files, the mode's rules). `EnsoForkPoint`, served by `GET /api/threads/:threadId/manifest` | the leaf entry id | derived from the branch on read: the runtime's entries and Enso's custom entries | never stored; the manifest route and the debug drawer read it |
 | **run** | one acquisition of a thread: from a prompt's admission to *settled*. Not one prompt — prompts during a run queue into it, and steering, follow-ups and retries all land inside one run. The unit a receipt names and a log record belongs to | `generation` | `acquire()` | the lease; ended by the settle observer, never by a route or a click |
 | **generation** | the run's number: per thread, monotonic for the server's lifetime, kept across dispose, **reset when the server restarts** — which is what "lost session" means. The stale-lease fence, and the receipt the browser compares against | integer, memory only | the registry | — |
 | **turn** | one model request and the tool results it produced, as the runtime marks it (`turn-start` / `turn-end`). *Decision (6):* this is the only meaning; the status bar's "turns" (a count of user messages) is a **prompt** count and is renamed. Several turns make a run | — | the runtime | — |
@@ -333,9 +333,9 @@ harness did). The first is canonical and never rewritten by us; the second is th
 - **ENSO_HOME** — the user's Enso directory, `~/.enso` unless the variable says otherwise (#421): the
   runtime's agent dir, the secrets file, the logs and the project list, shared by every checkout. A checkout's
   old `.enso/` is moved into it on launch, never overwriting.
-- **run provenance** — what a fork point will additionally record — project revision, context
-  manifest, active rules and skills, configuration — as custom entries in the runtime's log, never a
-  side file. Schema designed in the lineage phase against a real fork (#126).
+- **run provenance** — what a fork point records beyond the runtime's own entries — project revision, context
+  files, the mode's rules, skills, configuration — as the `enso-run-context` custom entry in the
+  runtime's log, never a side file (#435, #126). Hashes and paths, never contents.
 
 **Mechanism** — where the bytes go:
 

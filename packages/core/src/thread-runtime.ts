@@ -107,11 +107,12 @@ export const EnsoModelState = Type.Object({
 export type EnsoModelState = Static<typeof EnsoModelState>
 
 /**
- * What a stored thread's branch RECORDS it last ran on (#434): the last `model_change` and the
- * last `thinking_level_change` on the path to the leaf — the values pi restores when the session
- * is opened. Not an `EnsoModelState`: nothing is built for a cold read (#86), so there is no
- * display name and no available levels, and the page labels it recorded, not live. A half the
- * branch never recorded is `null`; a branch that records neither has no recorded model at all.
+ * What a stored thread's branch RECORDS it last ran on (#434): the model of the last `model_change`
+ * or assistant reply on the path to the leaf, and the last `thinking_level_change` — pi's own
+ * restore rule when the session is opened (PR #438 review). Not an `EnsoModelState`: nothing is
+ * built for a cold read (#86), so there is no display name and no available levels, and the page
+ * labels it recorded, not live. A half the branch never recorded is `null`; a branch that records
+ * neither has no recorded model at all.
  *
  * @group Thread runtime
  */

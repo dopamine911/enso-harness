@@ -1,6 +1,9 @@
-import { expect, test } from 'bun:test'
+import { afterEach, expect, test } from 'bun:test'
 import type { UIMessage } from '@tanstack/ai-client'
-import { forkEntryFor } from '../fork-thread.ts'
+import { forkEntryFor, forkFromPage } from '../fork-thread.ts'
+import { clearThreadsForTest, mintThread } from '../thread-stores.ts'
+
+afterEach(() => clearThreadsForTest())
 
 /**
  * #433: the fork route takes a pi entry id, and a prompt this page sent carries the id the
@@ -71,4 +74,35 @@ test('⚠ a /command whose stored words are gone is not taken on position: an ex
   // A /template pi expanded keeps none of its words either: refused, not guessed.
   const expanded = [prompt('e-u1', 'first'), prompt('e-u2', 'Review the diff for bugs.')]
   expect(forkEntryFor([prompt('e-u1', 'first'), prompt('client-9', '/review')], 'client-9', expanded)).toBeUndefined()
+})
+
+// PR #438 review: every fork writes a session and the page opens only the latest receipt — a double
+// click left the first fork on disk, unopened.
+test('⚠ a second fork press while one is outstanding forks nothing and says so; once it settles, the next press forks', async () => {
+  const history = Promise.withResolvers<void>()
+  const forkPosts: string[] = []
+  const stores = mintThread((input: string, init?: RequestInit) => {
+    if (input.endsWith('/history')) {
+      return history.promise.then(() =>
+        Response.json({
+          threadId: 't',
+          projectId: 'p',
+          messages: BRANCH,
+          permissionMode: { mode: 'default', available: [] },
+        }),
+      )
+    }
+    if (input.endsWith('/fork') && init?.method === 'POST') {
+      forkPosts.push(typeof init.body === 'string' ? init.body : '')
+      return Promise.resolve(Response.json({ threadId: `fork-${forkPosts.length}`, prefill: 'second' }))
+    }
+    return Promise.resolve(new Response('not scripted', { status: 404 }))
+  })
+  const first = forkFromPage(stores, BRANCH, 'e-u2')
+  expect(await forkFromPage(stores, BRANCH, 'e-u2')).toBeUndefined()
+  expect(stores.notifications.get()).toHaveLength(1)
+  history.resolve()
+  expect(await first).toEqual({ threadId: 'fork-1', prefill: 'second' })
+  expect(await forkFromPage(stores, BRANCH, 'e-u2')).toEqual({ threadId: 'fork-2', prefill: 'second' })
+  expect(forkPosts).toEqual(['{"entryId":"e-u2"}', '{"entryId":"e-u2"}'])
 })

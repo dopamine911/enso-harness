@@ -84,11 +84,19 @@ export interface NotificationsStore extends Store<ReadonlyArray<EnsoNotification
    * a torn-tail warning once a run has answered it. A line already dropped off the bound is gone.
    */
   readonly resolveLine: (id: number, message: string) => void
+  /**
+   * Put an action back on its line (PR #438 review): a press whose outcome was not final — the
+   * server busy, unreachable, the page disconnected — must not use up the only way to act. A line
+   * already resolved, or dropped off the bound, stays as it is.
+   */
+  readonly restoreAction: (id: number, action: NotificationAction) => void
 }
 
 export function createNotificationsStore(): NotificationsStore {
   const store = createStore<ReadonlyArray<EnsoNotification>>([])
   let nextNotificationId = 1
+  /** Lines a later fact has answered (`resolveLine`) — never given an action back. */
+  const resolved = new Set<number>()
   const append = (line: NotificationLineInput): number => {
     const id = nextNotificationId++
     const appended = [...store.get(), { ...line, id, at: new Date() }]
@@ -112,7 +120,11 @@ export function createNotificationsStore(): NotificationsStore {
       return action
     },
     resolveLine: (id: number, message: string) => {
+      resolved.add(id)
       rewrite(id, (notification) => ({ ...notification, message, notifyType: 'info', action: undefined }))
+    },
+    restoreAction: (id: number, action: NotificationAction) => {
+      if (!resolved.has(id)) rewrite(id, (notification) => ({ ...notification, action }))
     },
   }
 }

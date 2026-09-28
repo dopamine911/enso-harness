@@ -246,14 +246,20 @@ test('⚠ the torn-tail notice offers Continue once: pressing it posts …/conti
 
 /**
  * A torn thread's stores following a scripted server, whose `…/continue` answers `continueStatus`
- * once `answered` resolves (at once by default).
+ * once `answered` resolves (at once by default) — `0` for no answer at all, a dropped connection.
  */
 function followedTornThread(
   threadId: string,
   continueStatus: number,
   answered: Promise<void> = Promise.resolve(),
-): { stores: ThreadStores; frame: (frame: EnsoFollowFrame) => Promise<void>; stop: () => void } {
+): {
+  stores: ThreadStores
+  frame: (frame: EnsoFollowFrame) => Promise<void>
+  stop: () => void
+  continues: () => number
+} {
   const server = createScriptedFetch()
+  let continues = 0
   const stores = adoptThread(
     {
       threadId,
@@ -262,10 +268,14 @@ function followedTornThread(
       permissionMode: { mode: 'default', available: [] },
       interrupted: 'unanswered-prompt',
     },
-    (input: string, init?: RequestInit) =>
-      input.endsWith('/continue')
-        ? answered.then(() => new Response(continueStatus === 202 ? null : 'refused here', { status: continueStatus }))
-        : server.fetch(input, init),
+    (input: string, init?: RequestInit) => {
+      if (!input.endsWith('/continue')) return server.fetch(input, init)
+      continues += 1
+      return answered.then(() => {
+        if (continueStatus === 0) throw new TypeError('Failed to fetch')
+        return new Response(continueStatus === 202 ? null : 'refused here', { status: continueStatus })
+      })
+    },
   )
   let waiter: ((chunk: StreamChunk) => void) | undefined
   const controller = new AbortController()
@@ -273,6 +283,7 @@ function followedTornThread(
     for await (const chunk of stores.connection.subscribe(controller.signal)) waiter?.(chunk)
   })()
   return {
+    continues: () => continues,
     stores,
     // Resolves once the frame's OWN first chunk reached the page — a status or snapshot as its
     // CUSTOM, a turn as its STEP_STARTED — never on a straggler from the frame before.
@@ -363,6 +374,48 @@ test('⚠ an accepted Continue resolves the line as continued, once; a refused o
   answer.resolve()
   expect(await resolvedLine(raced.stores)).toBe(TORN_TAIL_SUPERSEDED)
   raced.stop()
+})
+
+/** Resolves once the torn-tail line carries its action again — a press that did nothing gave it back. */
+function actionBack(stores: ThreadStores): Promise<void> {
+  const { promise, resolve } = Promise.withResolvers<void>()
+  const check = (): void => {
+    if (stores.notifications.get()[0]?.action?.label === 'Continue') resolve()
+  }
+  stores.notifications.subscribe(check)
+  check()
+  return promise
+}
+
+// PR #438 review: the press took the action off the line before the outcome was known, so a press
+// that started nothing — while disconnected, a 409 with no run behind it, no answer — used up the
+// only way to continue.
+test('⚠ a Continue that started nothing gives its action back: not sent while disconnected, answered busy, or unanswered (#436)', async () => {
+  const press = (stores: ThreadStores): void => {
+    const [line] = stores.notifications.get()
+    stores.notifications.takeAction(line?.id ?? -1)?.run()
+  }
+
+  const offline = followedTornThread('torn-offline', 202)
+  await offline.frame(SNAPSHOT_IDLE)
+  offline.stores.disconnected.set(true)
+  press(offline.stores)
+  await actionBack(offline.stores)
+  expect(offline.continues()).toBe(0)
+  expect(offline.stores.notifications.get()).toHaveLength(2) // and said why
+  offline.stop()
+
+  for (const [threadId, status] of [
+    ['torn-busy', 409],
+    ['torn-unreachable', 0],
+  ] as const) {
+    const torn = followedTornThread(threadId, status)
+    await torn.frame(SNAPSHOT_IDLE)
+    press(torn.stores)
+    await actionBack(torn.stores)
+    expect(torn.continues()).toBe(1)
+    torn.stop()
+  }
 })
 
 test('history revival drops malformed rows and invalid dates instead of handing them to TanStack', () => {

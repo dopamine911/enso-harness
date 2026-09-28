@@ -49,11 +49,13 @@ interface FakeHost {
 /**
  * `overrides`: a test's own answer for one runtime method, over the fake's recording default (L3 step C).
  * `stored`: session files the host lists — a continue needs one to exist (PR #442 review).
+ * `buildGate`: every build waits on it — the window two requests on a cold thread share (#444).
  */
 function fakeHost(
   commands: string[] = ['mode'],
   overrides: Partial<ThreadRuntime> = {},
   stored: Record<string, FakeStoredThread> = {},
+  buildGate: Promise<void> = Promise.resolve(),
 ): FakeHost {
   const built: FakeThreadRecord[] = []
   let emit: (observation: EnsoObservation) => void = () => undefined
@@ -73,7 +75,7 @@ function fakeHost(
     })
     built.push(fake.record)
     emit = fake.emit
-    return Promise.resolve(fake.hosted)
+    return buildGate.then(() => fake.hosted)
   }, stored)
   return { host, built, emit: (observation: EnsoObservation) => emit(observation), accept: () => accept() }
 }
@@ -475,6 +477,48 @@ test("⚠ POST …/continue takes the thread and is released by the run's settle
 
   fake.emit(SETTLED)
   expect(await threadSummary(url, 't1')).toMatchObject({ busy: false, generation: 1 })
+})
+
+// #444, PR #438 review (reproduced through HTTP): two Continues on a cold thread both passed the
+// busy peek before the build, both got leases, and the refused one's release left the accepted run
+// idle — `busy: false` mid-run, and a Stop that answered "nothing is running".
+test('⚠ two Continues racing on a cold thread: one runs, the other is a 409 before it holds the thread; Stop still reaches the run', async () => {
+  let running = false
+  const build = Promise.withResolvers<void>()
+  const fake = fakeHost(
+    [],
+    {
+      // pi's own guard (`isStreaming`): a run already in flight refuses a second.
+      continueRun: (outcome: PromptOutcome) => {
+        if (running) {
+          outcome.onRejected('the thread is running; continue when it settles')
+          return
+        }
+        running = true
+        outcome.onAccepted()
+      },
+    },
+    TORN,
+    build.promise,
+  )
+  // The build opens once BOTH requests are past the route's busy peek: each asks for the stored
+  // file only after it (`continueThread`), so the second ask is the race's window, held open.
+  const storedThreadDirectory = fake.host.storedThreadDirectory.bind(fake.host)
+  let asked = 0
+  fake.host.storedThreadDirectory = (threadId: string) => {
+    asked += 1
+    if (asked === 2) build.resolve()
+    return storedThreadDirectory(threadId)
+  }
+  const url = await startWith(fake)
+  const continueOnce = (): Promise<Response> => fetch(`${url}/api/threads/t1/continue`, { method: 'POST' })
+  const statuses = (await Promise.all([continueOnce(), continueOnce()])).map((answer) => answer.status)
+  expect(statuses.toSorted((first, second) => first - second)).toEqual([202, 409])
+  expect(fake.built).toHaveLength(1)
+  expect(await threadSummary(url, 't1')).toMatchObject({ busy: true, generation: 1 })
+  expect((await fetch(`${url}/api/threads/t1/abort`, { method: 'POST' })).status).toBe(200)
+  expect(fake.built[0]?.aborts).toBe(1)
+  fake.emit(SETTLED)
 })
 
 test('a continue the runtime refuses is a 422 with its reason, and the thread is released at once (#436)', async () => {

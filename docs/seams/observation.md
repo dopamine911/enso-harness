@@ -175,20 +175,19 @@ prompt route in `packages/web/src/server/follow.ts` announces it (line 256) when
 a prompt after its receipt went out. Both are grounded in the kinds table's "Produced by" column.
 
 **Minted once.** The registry, `packages/web/src/server/thread-registry.ts`, is the only place a `seq`
-is assigned: `publishObservation` (line 354) increments the feed's counter, records the observation
+is assigned: `publishObservation` increments the feed's counter, records the observation
 (`observation-log.ts` — `info` for the spine kinds, `debug` for every observation, `trace` with the
 payload), then publishes. The feed subscribes the runtime once per live thread and routes every event
-through the mapper (lines 332–334); the prompt route's `announce` (line 516) enters the same counter.
+through the mapper; the registry's `announce` — the prompt route's rejections — enters the same counter.
 
-**Consumed by the follow route and the browser.** `followThread` (`server/follow.ts` line 161) writes
-one frame per feed frame — `observation` with its `seq`, `status` with `live`/`busy`/`generation`
-(lines 160–170) — after a snapshot taken in the same tick as the subscription, exact as of `asOfSeq`
-(lines 146–150, 178–189). In the browser `packages/web/src/follow-connection.ts` checks every frame
-against `EnsoFollowFrame` with a validator compiled at module load (line 497, compiled at 71), pushes
-the snapshot and status frames whole as chunks named by their type (lines 383–389), closes runs on
-`settled` (line 396) and matches `prompt-rejected` to the prompt it
-queued (line 400). `packages/web/src/to-agui.ts` is the adapter proper: observation → state-layer
-chunk, run in the page, never serialised or stored (header lines 5–34).
+**Consumed by the follow route and the browser.** `followThread` (`server/follow.ts`) writes one frame
+per feed frame through `writeFrame` — `observation` with its `seq`, `status` with
+`live`/`busy`/`generation` — after a snapshot taken in the same tick as the subscription, exact as of
+`asOfSeq`. In the browser `packages/web/src/follow-connection.ts` checks every frame against
+`EnsoFollowFrame` with `followFrameValidator`, compiled at module load; its `observe` pushes the
+snapshot and status frames whole as chunks named by their type, closes runs on `settled` and matches
+`prompt-rejected` to the prompt it queued. `packages/web/src/to-agui.ts` is the adapter proper:
+observation → state-layer chunk, run in the page, never serialised or stored (its header).
 
 **The resync rule.** Nothing is replayed by cursor. A reconnect opens a new follow and gets a new
 snapshot (`follow.ts` header lines 13–15; `server/follow.ts` lines 175–186); when the last follower

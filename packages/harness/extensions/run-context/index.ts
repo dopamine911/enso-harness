@@ -6,12 +6,17 @@ import { ensoHome } from '@enso/core/paths'
 import { type SessionConfigContext, type SessionEnsoConfig, sessionEnsoConfig } from '../../core/index.ts'
 
 /**
- * The run-context recorder (#435, Lineage #126): at every run start, what the run starts under —
- * git revision and dirty state, the resolved config's hash and files, the skills, the context
- * files' hashes, the permission mode's rule-set hash — appended to pi's log as an
+ * The run-context recorder (#435, Lineage #126): at every prompt's run start, what the run starts
+ * under — git revision and dirty state, the resolved config's hash and files, the skills, the
+ * context files' hashes, the permission mode's rule-set hash — appended to pi's log as an
  * `enso-run-context` entry (`@enso/core` `run-context.ts`) ONLY when a field differs from the last
  * one on the branch. Never per turn; a fork inherits the entries on its path, so its first run
  * appends only what changed.
+ *
+ * ⚠ A CONTINUE RECORDS NONE (PR #438 review). pi emits `before_agent_start` inside `prompt()`
+ * only, and a #436 Continue runs through pi's private run lifecycle without it (the host's module
+ * header lists it among the accepted differences). The latest record on the branch then describes
+ * the run that was cut off — conditions that may have moved since, a revision or a config edit.
  *
  * ⚠ LOADED LAST (`package.json` `pi.extensions`). `before_agent_start` handlers run in load order
  * and may change the prompt's skills and context files (`systemPromptOptions` is mutable); the
