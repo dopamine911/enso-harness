@@ -160,8 +160,8 @@ hole:
 variable before spawning and tells you which on stderr
 ([`packages/core/src/secrets.ts`](packages/core/src/secrets.ts)). Provider credentials belong in pi's own
 `auth.json`, so run `/login` once — typed in the web page's chat box, where it walks pi's provider
-picker as dialog cards (#338), or in the terminal (`bun run enso`). The grant is per agent dir and
-both surfaces share it: log in once, and both use the same credentials. A fresh `ENSO_HOME` has
+picker as dialog cards (#338), or in the terminal (`bun run enso`). The grant is per agent dir, so
+one login serves both. A fresh `ENSO_HOME` has
 none, and its default model can still be Cursor's (#341): log in first, then choose a model with
 `/model`.
 
