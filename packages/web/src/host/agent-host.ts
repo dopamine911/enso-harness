@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { getSupportedThinkingLevels } from '@earendil-works/pi-ai'
 import {
@@ -115,6 +115,16 @@ const log = ensoLogger('host')
  * Tied to the proxy's wording: if that changes, behaviour falls back to today's, and
  * `agent-host.test.ts` goes red against the real proxy. Leaves when the proxy answers 401.
  *
+ * ⚠⚠ …AND `includeCursor: false`, UNLESS THE OPERATOR SET IT. multi-account ships its Cursor
+ * provider inside the package, so its default (`true`) registers `cursor` and a spare
+ * `cursor-account-2` whether or not anyone has a Cursor login, and publishes both into pi's
+ * `models.json` with a placeholder key (`cursor-proxy`) against its loopback proxy. pi reads a key
+ * as a credential, so every Cursor model was offered as usable — in the Start dialog, in the model
+ * picker, and as the default model #341 lost two hours to. Cursor is opt-in here: `"includeCursor":
+ * true` in the file turns it back on and is kept. The vendor never removes a Cursor publication
+ * (`dropOwnLoopbackPublications` skips them), so with Cursor off the seed also drops the ones it
+ * left in `models.json` — only entries in exactly the shape it writes, never an operator's own.
+ *
  * ⚠⚠ EVERY THREAD IS A MULTI-ACCOUNT ROOT: `PI_MULTI_ACCOUNT_INDEPENDENT_ROOTS=1` (#351).
  * pi-multi-account keeps ONE root session per process for terminal pi — a lease on
  * `globalThis[Symbol.for('pi-multi-account:active-root-session')]` — and a session that starts
@@ -159,8 +169,26 @@ const log = ensoLogger('host')
 const MULTI_ACCOUNT_CONFIG_FILENAME = 'provider-failover.json'
 const MULTI_ACCOUNT_CHILD_PROXY_KEY = 'childProxy'
 const MULTI_ACCOUNT_AUTH_PATTERNS_KEY = 'authErrorPatterns'
+const MULTI_ACCOUNT_INCLUDE_CURSOR_KEY = 'includeCursor'
 /** Matched case-insensitively as a substring of the error text — see the module header (#341). */
 const MULTI_ACCOUNT_AUTH_PATTERNS: readonly string[] = ['account is logged in for this request']
+
+/**
+ * pi's provider registry in the agent dir, and how multi-account publishes a Cursor slot into it
+ * (`cursor-bridge.ts#CURSOR_PROXY_PLACEHOLDER_KEY`, `index.ts#provisionNativeSlot`): a Cursor slot
+ * id, the placeholder key, a loopback `baseUrl`, and no key beyond the ones it writes.
+ */
+const PI_MODELS_FILENAME = 'models.json'
+const CURSOR_SLOT_ID = /^cursor(-account-\d+)?$/
+const CURSOR_PROXY_PLACEHOLDER_KEY = 'cursor-proxy'
+const CURSOR_LOOPBACK_PREFIX = 'http://127.0.0.1:'
+const CURSOR_PUBLICATION_KEYS: Readonly<Record<string, true>> = {
+  api: true,
+  baseUrl: true,
+  models: true,
+  apiKey: true,
+  compat: true,
+}
 
 /**
  * The host's own extension (see the module header): named so `loadedExtensionPaths` says what
@@ -418,8 +446,10 @@ export interface StoredThreadContext {
 export const AGENT_RUNTIME_VERSION: string = PI_VERSION
 
 /**
- * Seed the agent dir's multi-account config — see the module header: pin `childProxy: false`,
- * and add Enso's `authErrorPatterns` to the operator's (#341).
+ * Seed the agent dir's multi-account config — see the module header: pin `childProxy: false`, add
+ * Enso's `authErrorPatterns` to the operator's (#341), and turn Cursor off unless the operator
+ * set `includeCursor` — then, with Cursor off, drop the Cursor slots multi-account left in pi's
+ * `models.json`.
  *
  * Creates the file if absent; otherwise reads, sets what is missing, writes — and only when
  * something changed. Every other key, and every entry the operator listed, is kept verbatim;
@@ -442,13 +472,61 @@ export function seedMultiAccountConfig(agentDir: string): void {
     (pattern) =>
       !operatorEntries.some((known) => typeof known === 'string' && known.toLowerCase() === pattern.toLowerCase()),
   )
-  if (existing[MULTI_ACCOUNT_CHILD_PROXY_KEY] === false && missingPatterns.length === 0) return
-  const seeded = {
-    ...existing,
-    [MULTI_ACCOUNT_CHILD_PROXY_KEY]: false,
-    [MULTI_ACCOUNT_AUTH_PATTERNS_KEY]: [...operatorEntries, ...missingPatterns],
+  // The vendor reads `includeCursor ?? true`, so `null` is as unset as absent.
+  const operatorCursor = existing[MULTI_ACCOUNT_INCLUDE_CURSOR_KEY]
+  const cursorUnset = operatorCursor === undefined || operatorCursor === null
+  if (existing[MULTI_ACCOUNT_CHILD_PROXY_KEY] !== false || missingPatterns.length > 0 || cursorUnset) {
+    const seeded = {
+      ...existing,
+      [MULTI_ACCOUNT_CHILD_PROXY_KEY]: false,
+      [MULTI_ACCOUNT_AUTH_PATTERNS_KEY]: [...operatorEntries, ...missingPatterns],
+      ...(cursorUnset ? { [MULTI_ACCOUNT_INCLUDE_CURSOR_KEY]: false } : {}),
+    }
+    writeFileSync(configPath, `${JSON.stringify(seeded, null, '\t')}\n`)
   }
-  writeFileSync(configPath, `${JSON.stringify(seeded, null, '\t')}\n`)
+  // …and by truthiness (`if (!config.includeCursor)`), so this does too.
+  if (cursorUnset || !operatorCursor) dropCursorPublications(agentDir)
+}
+
+/** A `models.json` provider entry in exactly the shape multi-account publishes a Cursor slot in. */
+function isCursorPublication(providerId: string, entry: unknown): boolean {
+  if (!CURSOR_SLOT_ID.test(providerId) || typeof entry !== 'object' || entry === null) return false
+  const record = entry as Record<string, unknown>
+  return (
+    record.apiKey === CURSOR_PROXY_PLACEHOLDER_KEY &&
+    typeof record.baseUrl === 'string' &&
+    record.baseUrl.startsWith(CURSOR_LOOPBACK_PREFIX) &&
+    Object.keys(record).every((key) => Object.hasOwn(CURSOR_PUBLICATION_KEYS, key))
+  )
+}
+
+/**
+ * Remove multi-account's Cursor publications from pi's `models.json` — see the module header. Every
+ * other provider and key is kept verbatim; the file is written only when something was removed.
+ */
+function dropCursorPublications(agentDir: string): void {
+  const modelsPath = join(agentDir, PI_MODELS_FILENAME)
+  if (!existsSync(modelsPath)) return
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(readFileSync(modelsPath, 'utf8'))
+  } catch {
+    // pi's file, and pi reports a malformed one when it loads it; there is nothing of ours to drop.
+    return
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return
+  const models = parsed as Record<string, unknown>
+  const providers = models.providers
+  if (typeof providers !== 'object' || providers === null || Array.isArray(providers)) return
+  const entries = Object.entries(providers)
+  const kept = entries.filter(([providerId, entry]) => !isCursorPublication(providerId, entry))
+  if (kept.length === entries.length) return
+  // Staged and renamed over, as the vendor writes it: pi never reads a half-written registry.
+  const staging = `${modelsPath}.enso.tmp`
+  writeFileSync(staging, `${JSON.stringify({ ...models, providers: Object.fromEntries(kept) }, null, 2)}\n`, {
+    mode: 0o600,
+  })
+  renameSync(staging, modelsPath)
 }
 
 /** `RuntimeCommand` with `description` present only when pi supplied one (`exactOptionalPropertyTypes`). */

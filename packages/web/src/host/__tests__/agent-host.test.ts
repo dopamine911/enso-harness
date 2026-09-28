@@ -130,44 +130,58 @@ const nextTick = (): Promise<void> => {
 
 const SEEDED_AUTH_PATTERN = 'account is logged in for this request'
 
-test("⚠ the agent dir's multi-account config is seeded — childProxy off, Enso's auth pattern added — and the operator's keys and patterns are kept", () => {
+test("⚠ the agent dir's multi-account config is seeded — childProxy off, Enso's auth pattern added, Cursor off unless set — and the operator's keys and patterns are kept", () => {
   const scratch = mkdtempSync(join(tmpdir(), 'enso-host-seed-'))
   const configPath = join(scratch, 'provider-failover.json')
-  // absent → created with the pin and the pattern
+  // absent → created with the pin, the pattern and Cursor off
   seedMultiAccountConfig(scratch)
   expect(JSON.parse(readFileSync(configPath, 'utf8'))).toEqual({
     childProxy: false,
     authErrorPatterns: [SEEDED_AUTH_PATTERN],
+    includeCursor: false,
   })
-  // present with the operator's keys and patterns → merged, not clobbered
+  // present with the operator's keys and patterns → merged, not clobbered; their Cursor choice kept
   writeFileSync(
     configPath,
-    JSON.stringify({ childProxy: true, showUsage: false, authErrorPatterns: ['my proxy says no', 42] }),
+    JSON.stringify({
+      childProxy: true,
+      showUsage: false,
+      includeCursor: true,
+      authErrorPatterns: ['my proxy says no', 42],
+    }),
   )
   seedMultiAccountConfig(scratch)
   expect(JSON.parse(readFileSync(configPath, 'utf8'))).toEqual({
     childProxy: false,
     showUsage: false,
+    includeCursor: true,
     authErrorPatterns: ['my proxy says no', 42, SEEDED_AUTH_PATTERN],
   })
-  // an agent dir the old seed pinned (every existing one: `{ childProxy: false }`) → the pattern is added
+  // an agent dir an older seed wrote (`{ childProxy: false }`, no Cursor key) → the pattern and Cursor off added
   writeFileSync(configPath, JSON.stringify({ childProxy: false, showUsage: false }))
   seedMultiAccountConfig(scratch)
   expect(JSON.parse(readFileSync(configPath, 'utf8'))).toEqual({
     childProxy: false,
     showUsage: false,
     authErrorPatterns: [SEEDED_AUTH_PATTERN],
+    includeCursor: false,
   })
   // the pattern already there, in another case → not added twice (the vendor compares them so) — on a
-  // rewrite, which the unpinned proxy forces
+  // rewrite, which the unpinned proxy forces; a `null` Cursor key is the vendor's default (on), so it is seeded
   writeFileSync(
     configPath,
-    JSON.stringify({ childProxy: true, showUsage: false, authErrorPatterns: [SEEDED_AUTH_PATTERN.toUpperCase()] }),
+    JSON.stringify({
+      childProxy: true,
+      showUsage: false,
+      includeCursor: null,
+      authErrorPatterns: [SEEDED_AUTH_PATTERN.toUpperCase()],
+    }),
   )
   seedMultiAccountConfig(scratch)
   expect(JSON.parse(readFileSync(configPath, 'utf8'))).toEqual({
     childProxy: false,
     showUsage: false,
+    includeCursor: false,
     authErrorPatterns: [SEEDED_AUTH_PATTERN.toUpperCase()],
   })
   // and creating a host seeds it in the host's own agent dir — before any session exists
@@ -176,6 +190,44 @@ test("⚠ the agent dir's multi-account config is seeded — childProxy off, Ens
   expect(JSON.parse(readFileSync(join(hostAgentDir, 'provider-failover.json'), 'utf8'))).toEqual({
     childProxy: false,
     authErrorPatterns: [SEEDED_AUTH_PATTERN],
+    includeCursor: false,
+  })
+})
+
+/** A Cursor slot as multi-account publishes it into `models.json` (`index.ts#provisionNativeSlot`). */
+const cursorPublication = (port: number): Record<string, unknown> => ({
+  api: 'openai-completions',
+  baseUrl: `http://127.0.0.1:${port}/v1`,
+  models: [{ id: 'claude-4-sonnet' }],
+  apiKey: 'cursor-proxy',
+})
+
+test("⚠ with Cursor off, the Cursor slots multi-account published into pi's models.json are dropped — an operator's own entries, and an opted-in Cursor, are kept", () => {
+  const scratch = mkdtempSync(join(tmpdir(), 'enso-host-seed-cursor-'))
+  const modelsPath = join(scratch, 'models.json')
+  const ollama = { baseUrl: 'http://127.0.0.1:11434/v1', api: 'openai-completions', apiKey: 'ollama', models: [] }
+  // an operator's own `cursor-account-3`: same id family, but a key the vendor never writes
+  const ownCursor = { ...cursorPublication(4000), headers: { 'x-team': 'billing' } }
+  const published = {
+    note: 'kept',
+    providers: {
+      ollama,
+      cursor: cursorPublication(9123),
+      'cursor-account-2': cursorPublication(9123),
+      'cursor-account-3': ownCursor,
+    },
+  }
+  // opted in → nothing is touched
+  writeFileSync(join(scratch, 'provider-failover.json'), JSON.stringify({ includeCursor: true }))
+  writeFileSync(modelsPath, JSON.stringify(published))
+  seedMultiAccountConfig(scratch)
+  expect(JSON.parse(readFileSync(modelsPath, 'utf8'))).toEqual(published)
+  // off (as seeded) → the two publications go, everything else stays
+  writeFileSync(join(scratch, 'provider-failover.json'), JSON.stringify({ includeCursor: false }))
+  seedMultiAccountConfig(scratch)
+  expect(JSON.parse(readFileSync(modelsPath, 'utf8'))).toEqual({
+    note: 'kept',
+    providers: { ollama, 'cursor-account-3': ownCursor },
   })
 })
 
