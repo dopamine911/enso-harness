@@ -35,3 +35,40 @@ test('⚠ a prompt the branch does not hold, or holds with other words in its pl
   expect(forkEntryFor([], undefined, BRANCH)).toBeUndefined()
   expect(forkEntryFor(BRANCH, 'e-a1', BRANCH)).toBeUndefined()
 })
+
+// PR #439 review: pi stores a prompt rewritten (`agent-session.js` `prompt`), so a prompt this page
+// sent is found only where the rewrite keeps its words — and never on position alone.
+test('⚠ a sent prompt pi rewrote is found where the rewrite keeps its words: image notes, a skill', () => {
+  const skillBlock =
+    '<skill name="tdd" location="/skills/tdd/SKILL.md">\nReferences are relative to /skills/tdd.\n\nred, green\n</skill>'
+  const branch = [
+    prompt('e-u1', 'look at this\n\n[Image: resized from 4000x3000 to 2000x1500]'),
+    reply('e-a1'),
+    prompt('e-u2', `${skillBlock}\n\nthe parser`),
+    reply('e-a2'),
+    prompt('e-u3', skillBlock),
+  ]
+  const page = [
+    prompt('client-1', 'look at this'),
+    reply('client-2'),
+    prompt('client-3', '/skill:tdd the parser'),
+    reply('client-4'),
+    prompt('client-5', '/skill:tdd'),
+  ]
+  expect(forkEntryFor(page, 'client-1', branch)).toBe('e-u1')
+  expect(forkEntryFor(page, 'client-3', branch)).toBe('e-u2')
+  expect(forkEntryFor(page, 'client-5', branch)).toBe('e-u3')
+  // The skill's args are part of what it keeps: other args in that place are another prompt.
+  const otherArgs = [...page.slice(0, 2), prompt('client-3', '/skill:tdd the lexer')]
+  expect(forkEntryFor(otherArgs, 'client-3', branch)).toBeUndefined()
+})
+
+test('⚠ a /command whose stored words are gone is not taken on position: an extension command stores no entry', () => {
+  // `/deploy` ran as an extension command — nothing stored — so the branch's second prompt is the
+  // page's third. Position alone would fork `/deploy` at "second".
+  const page = [prompt('e-u1', 'first'), reply('e-a1'), prompt('client-7', '/deploy'), prompt('client-8', 'second')]
+  expect(forkEntryFor(page, 'client-7', BRANCH)).toBeUndefined()
+  // A /template pi expanded keeps none of its words either: refused, not guessed.
+  const expanded = [prompt('e-u1', 'first'), prompt('e-u2', 'Review the diff for bugs.')]
+  expect(forkEntryFor([prompt('e-u1', 'first'), prompt('client-9', '/review')], 'client-9', expanded)).toBeUndefined()
+})

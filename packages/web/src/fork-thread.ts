@@ -15,8 +15,9 @@ import { reviveHistoryMessages, type ThreadStores } from './thread-stores.ts'
  * stream. So the entry is read off the thread's stored branch at the moment of the fork — the
  * `/history` read the rail's resume makes, pi's memory for a live thread and the file for a cold
  * one — and the page's message is matched to it: by id when it has the entry's, else by its
- * place among the user messages, and only when the words agree. A message the branch does not
- * hold (a prompt still queued behind a run) is said, never guessed at.
+ * place among the user messages, and only when the words agree as pi stores them (`storedAs`). A
+ * message the branch does not hold (a prompt still queued behind a run, one pi stored rewritten
+ * past recognising) is said, never guessed at.
  */
 
 /**
@@ -29,6 +30,30 @@ export const ForkContext = createContext<((messageId: string | undefined) => voi
 function sentWords(message: UIMessage): string {
   return message.parts.map((part) => (part.type === 'text' ? part.content : '')).join('')
 }
+
+/**
+ * Whether `stored` is how pi stored the page's `sent` words (PR #439 review). pi rewrites a prompt
+ * before writing it (`agent-session.js` `prompt`): a converted or resized image appends its notes
+ * after a blank line, and `/skill:name args` becomes the skill's block, then the args. Both keep
+ * enough of the sent words to be recognised. A `/template` expansion keeps none, and is NOT taken
+ * on position alone: a `/`-command pi ran as an extension command stores no entry at all, so the
+ * place it seems to hold belongs to the prompt after it.
+ */
+function storedAs(stored: string, sent: string): boolean {
+  if (stored === sent || stored.startsWith(`${sent}\n\n`)) return true
+  if (!sent.startsWith(SKILL_COMMAND)) return false
+  // pi's own split (`_expandSkillCommand`): the name runs to the first space, the rest is the args.
+  const space = sent.indexOf(' ')
+  const name = space === -1 ? sent.slice(SKILL_COMMAND.length) : sent.slice(SKILL_COMMAND.length, space)
+  const args = space === -1 ? '' : sent.slice(space + 1).trim()
+  return stored.startsWith(`<skill name="${name}" `) && (args === '' || stored.includes(`</skill>\n\n${args}`))
+}
+
+const SKILL_COMMAND = '/skill:'
+
+/** Why a sent prompt has no entry to fork at, and what finds it — said by the refusal. */
+const UNMATCHED_PROMPT =
+  'it may still be queued behind a run, or pi stored it rewritten (a /template, an input handler). Once its run has settled, reload the page: a thread reopened from its stored branch forks at any prompt.'
 
 /**
  * The pi entry id of the page's user message `messageId` (the last one when `undefined`), read off
@@ -45,7 +70,7 @@ export function forkEntryFor(
   if (target === undefined) return undefined
   if (branchPrompts.some(({ id }) => id === target.id)) return target.id
   const counterpart = branchPrompts[pagePrompts.indexOf(target)]
-  return counterpart !== undefined && sentWords(counterpart) === sentWords(target) ? counterpart.id : undefined
+  return counterpart !== undefined && storedAs(sentWords(counterpart), sentWords(target)) ? counterpart.id : undefined
 }
 
 /**
@@ -74,9 +99,9 @@ export async function forkFromPage(
   const entryId = forkEntryFor(page, messageId, branch)
   if (entryId === undefined) {
     say(
-      messageId === undefined
-        ? 'fork: there is no prompt on this thread to fork from'
-        : 'fork: that prompt is not on the thread’s stored branch yet — fork it once its run has settled',
+      page.some((message) => message.role === 'user')
+        ? `fork: that prompt is not in its place on the thread's stored branch — ${UNMATCHED_PROMPT}`
+        : 'fork: there is no prompt on this thread to fork from',
     )
     return undefined
   }
