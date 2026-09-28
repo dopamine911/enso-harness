@@ -314,7 +314,12 @@ export async function promptThread(deps: FollowRouteDeps, threadId: string, body
     // its run as a prompt that found it busy would. Released again in between — the other request
     // was refused — there is nothing to join, and the prompt is not run without a lease: 409.
     const holder = threads.peek(threadId)
-    return holder?.busy === true ? joinRun(holder) : busyRefusal(threadId, 'send')
+    if (holder?.busy === true) return joinRun(holder)
+    // Not "is running" (PR #438 review): the client shows this verbatim, and the thread is idle now.
+    return {
+      status: 409,
+      reason: `thread ${threadId} was taken and released again while this prompt waited on its build; send it again`,
+    }
   }
   const unavailable = command === undefined ? undefined : unavailableCommand(lease.runtime, command)
   if (unavailable !== undefined) {
