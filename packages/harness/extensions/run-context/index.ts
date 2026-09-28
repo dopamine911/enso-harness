@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import type { BeforeAgentStartEvent, ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent'
 import { ENSO_RUN_CONTEXT_ENTRY, type EnsoConfigParseResult, type EnsoRunContext, readEnsoRunContext } from '@enso/core'
@@ -24,6 +25,12 @@ import {
  * session in the harness (`session-config.ts`, shared by key with web_fetch and web_search — the
  * same resolution, never a second one), and the skills and context files arrive on the event.
  *
+ * ⚠ GIT IN THE SESSION'S CWD, NOT THE ENVIRONMENT'S REPOSITORY. git honours an inherited
+ * `GIT_DIR` / `GIT_WORK_TREE` / `GIT_INDEX_FILE` over its working directory, and git exports them to
+ * every hook — so a server started from a hook's shell would record the hook's repository for every
+ * session. The probe runs through `node:child_process` with git's repository-locating variables
+ * removed (`pi.exec` takes no environment); found under a worktree's pre-commit gate.
+ *
  * ⚠ HASHES ONLY. No file body and no config value is written — a context file is its path and
  * sha256, the config a sha256 of the resolved value with keys sorted.
  *
@@ -42,6 +49,14 @@ export interface RunContextDependencies {
   resolveSessionConfig: (session: object, context: Omit<SessionConfigContext, 'home'>) => Promise<SessionEnsoConfig>
   /** The config files that resolution read. */
   configSources: (cwd: string, resolved: SessionEnsoConfig) => string[]
+  /** Run git in `cwd` — never in a repository an inherited environment names. */
+  runGit: (args: string[], cwd: string) => Promise<GitResult>
+}
+
+/** What a git query answered. */
+export interface GitResult {
+  readonly code: number
+  readonly stdout: string
 }
 
 const sha256 = (text: string): string => createHash('sha256').update(text).digest('hex')
@@ -59,13 +74,49 @@ function canonicalJson(value: unknown): string {
   return JSON.stringify(value) ?? 'null'
 }
 
-async function gitState(pi: ExtensionAPI, cwd: string): Promise<EnsoRunContext['git']> {
-  const options = { cwd, timeout: GIT_TIMEOUT_MS }
-  const head = await pi.exec('git', ['rev-parse', 'HEAD'], options)
+async function gitState(dependencies: RunContextDependencies, cwd: string): Promise<EnsoRunContext['git']> {
+  const head = await dependencies.runGit(['rev-parse', 'HEAD'], cwd)
   const revision = head.stdout.trim()
   if (head.code !== 0 || revision === '') return null
-  const status = await pi.exec('git', ['status', '--porcelain'], options)
+  const status = await dependencies.runGit(['status', '--porcelain'], cwd)
   return { revision, dirty: status.code !== 0 || status.stdout.trim() !== '' }
+}
+
+/**
+ * git's repository-locating variables (`git rev-parse --local-env-vars`). ⚠ Dropped from the
+ * child's environment: an inherited `GIT_DIR` — a git hook exports one, and so does anything run
+ * from inside one — overrides `cwd`, and git would report THAT repository as the session's.
+ * Found when the gate ran under a worktree's pre-commit hook.
+ */
+const GIT_LOCAL_VARIABLES: Record<string, true> = {
+  GIT_ALTERNATE_OBJECT_DIRECTORIES: true,
+  GIT_CONFIG: true,
+  GIT_CONFIG_PARAMETERS: true,
+  GIT_CONFIG_COUNT: true,
+  GIT_OBJECT_DIRECTORY: true,
+  GIT_DIR: true,
+  GIT_WORK_TREE: true,
+  GIT_IMPLICIT_WORK_TREE: true,
+  GIT_GRAFT_FILE: true,
+  GIT_INDEX_FILE: true,
+  GIT_NO_REPLACE_OBJECTS: true,
+  GIT_REPLACE_REF_BASE: true,
+  GIT_PREFIX: true,
+  GIT_SHALLOW_FILE: true,
+  GIT_COMMON_DIR: true,
+}
+
+/**
+ * git in `cwd`, under `environment` without its repository-locating variables; a failure to run is
+ * a non-zero code. Exported as the test seam: a test hands in an environment, never the process's.
+ */
+export function runGitIn(environment: NodeJS.ProcessEnv, args: string[], cwd: string): Promise<GitResult> {
+  const env = Object.fromEntries(Object.entries(environment).filter(([name]) => GIT_LOCAL_VARIABLES[name] !== true))
+  const { promise, resolve } = Promise.withResolvers<GitResult>()
+  execFile('git', args, { cwd, env, timeout: GIT_TIMEOUT_MS }, (error, stdout) => {
+    resolve({ code: error === null ? 0 : 1, stdout })
+  })
+  return promise
 }
 
 /** A resolution that failed outright (a bad trust store) is recorded as unreadable, with why. */
@@ -104,12 +155,11 @@ function modeRules(branch: readonly unknown[]): EnsoRunContext['mode'] {
 }
 
 async function runContextOf(
-  pi: ExtensionAPI,
   dependencies: RunContextDependencies,
   event: BeforeAgentStartEvent,
   context: ExtensionContext,
 ): Promise<EnsoRunContext> {
-  const [git, config] = await Promise.all([gitState(pi, context.cwd), resolvedConfig(dependencies, context)])
+  const [git, config] = await Promise.all([gitState(dependencies, context.cwd), resolvedConfig(dependencies, context)])
   const skills = event.systemPromptOptions.skills
     .map((skill) => ({ name: skill.name, path: skill.filePath }))
     .sort((first, second) =>
@@ -127,11 +177,11 @@ async function runContextOf(
   }
 }
 
-/** The run-context recorder, over its two dependencies; the default export wires the real ones. */
+/** The run-context recorder, over its dependencies; the default export wires the real ones. */
 export function createRunContext(dependencies: RunContextDependencies): (pi: ExtensionAPI) => void {
   return (pi: ExtensionAPI): void => {
     pi.on('before_agent_start', async (event, context) => {
-      const current = await runContextOf(pi, dependencies, event, context)
+      const current = await runContextOf(dependencies, event, context)
       const last = lastCustomData(context.sessionManager.getBranch(), ENSO_RUN_CONTEXT_ENTRY)
       const recorded = last === undefined ? undefined : readEnsoRunContext(ENSO_RUN_CONTEXT_ENTRY, last)
       if (recorded !== undefined && canonicalJson(recorded) === canonicalJson(current)) return
@@ -140,8 +190,14 @@ export function createRunContext(dependencies: RunContextDependencies): (pi: Ext
   }
 }
 
-/** The pi entry point — the session's config in `ENSO_HOME` (#421), whichever surface loads this. */
+/**
+ * The pi entry point — the session's config in `ENSO_HOME` (#421), whichever surface loads this;
+ * git run through `node:child_process` rather than `pi.exec`, which takes no environment, so the
+ * inherited repository-locating variables can be dropped (`GIT_LOCAL_VARIABLES`). Read per call:
+ * the environment at the run, not at load.
+ */
 export default createRunContext({
   resolveSessionConfig: (session, context) => sessionEnsoConfig(session, { ...context, home: ensoHome(process.env) }),
   configSources: (cwd, resolved) => sessionConfigSources(ensoHome(process.env), cwd, resolved),
+  runGit: (args, cwd) => runGitIn(process.env, args, cwd),
 })

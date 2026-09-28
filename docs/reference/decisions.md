@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 297.**
+**Decision headers: 298.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -92,6 +92,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/harness/extensions/guards/index.ts` | `#4`, `#9`, `#10`, `#11`, `#20`, `#21`, `#69` | Tier 0 guards — see `docs/concepts/pi-immediate-needs.md`. |
 | `packages/harness/extensions/logging/__tests__/logging.test.ts` | `#132` | The extension's two branches (#132): pi as a CHILD configures its own sink; pi IN-PROCESS leaves the server's alone. |
 | `packages/harness/extensions/logging/index.ts` | `#132`, `#144`, `#167` | The extension process's logging (#132), and the one record only an extension can write: the provider's own request id (#144). |
+| `packages/harness/extensions/run-context/__tests__/git-probe.test.ts` | `#435` | #435: the run-context git probe asks the SESSION's cwd, whatever repository the environment names. |
 | `packages/harness/extensions/run-context/index.ts` | `#126`, `#435` | The run-context recorder (#435, Lineage #126): at every run start, what the run starts under — git revision and dirty state, the resolved config's hash and files, the skills, the context files' hashes, the permission mode's rule-set hash — appended to pi's log as an `enso-run-context` entry (`@enso/core` `run-context.ts`) ONLY when a field differs from the last one on the branch. |
 | `packages/harness/extensions/web-fetch/__tests__/one-trust-question.test.ts` | `#421` | #421, found live: the trust question for a project's `.enso/config.json` must be asked ONCE per session, though two tools (web_fetch, web_search) read the config. |
 | `packages/harness/extensions/web-fetch/__tests__/web-fetch.test.ts` | `#54` | The web_fetch extension (#54), against injected IO seams — no test here touches the network, DNS, or the user's config file. |
