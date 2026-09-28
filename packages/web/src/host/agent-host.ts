@@ -123,7 +123,10 @@ const log = ensoLogger('host')
  * picker, and as the default model #341 lost two hours to. Cursor is opt-in here: `"includeCursor":
  * true` in the file turns it back on and is kept. The vendor never removes a Cursor publication
  * (`dropOwnLoopbackPublications` skips them), so with Cursor off the seed also drops the ones it
- * left in `models.json` — only entries in exactly the shape it writes, never an operator's own.
+ * left in `models.json` — only entries in exactly the shape it writes, never an operator's own. An
+ * operator's `modelOverrides` on a Cursor slot are carried into each republication
+ * (`index.ts#provisionNativeSlot`), so such an entry is not that shape and stays, listed: kept,
+ * because nothing here deletes what an operator wrote.
  *
  * ⚠⚠ EVERY THREAD IS A MULTI-ACCOUNT ROOT: `PI_MULTI_ACCOUNT_INDEPENDENT_ROOTS=1` (#351).
  * pi-multi-account keeps ONE root session per process for terminal pi — a lease on
@@ -175,8 +178,9 @@ const MULTI_ACCOUNT_AUTH_PATTERNS: readonly string[] = ['account is logged in fo
 
 /**
  * pi's provider registry in the agent dir, and how multi-account publishes a Cursor slot into it
- * (`cursor-bridge.ts#CURSOR_PROXY_PLACEHOLDER_KEY`, `index.ts#provisionNativeSlot`): a Cursor slot
- * id, the placeholder key, a loopback `baseUrl`, and no key beyond the ones it writes.
+ * (`cursor-bridge.ts#CURSOR_PROXY_PLACEHOLDER_KEY`): a Cursor slot id, the placeholder key, a
+ * loopback `baseUrl`, and exactly the four keys its Cursor path hands `provisionNativeSlot`
+ * (`index.ts`, `onProvision` in `refreshCursorSlots`) — never `compat`, which only other callers pass.
  */
 const PI_MODELS_FILENAME = 'models.json'
 const CURSOR_SLOT_ID = /^cursor(-account-\d+)?$/
@@ -187,7 +191,6 @@ const CURSOR_PUBLICATION_KEYS: Readonly<Record<string, true>> = {
   baseUrl: true,
   models: true,
   apiKey: true,
-  compat: true,
 }
 
 /**

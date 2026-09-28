@@ -229,6 +229,12 @@ test("⚠ with Cursor off, the Cursor slots multi-account published into pi's mo
     note: 'kept',
     providers: { ollama, 'cursor-account-3': ownCursor },
   })
+  // a malformed registry is pi's to report, not a reason to fail host creation: seeded, file untouched
+  writeFileSync(join(scratch, 'provider-failover.json'), '{}')
+  writeFileSync(modelsPath, '{ "providers": { "cursor": ')
+  seedMultiAccountConfig(scratch)
+  expect(readFileSync(modelsPath, 'utf8')).toBe('{ "providers": { "cursor": ')
+  expect(JSON.parse(readFileSync(join(scratch, 'provider-failover.json'), 'utf8')).includeCursor).toBe(false)
 })
 
 /**
