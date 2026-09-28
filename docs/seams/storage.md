@@ -57,6 +57,11 @@ export interface AgentHost {
   /** One request of a stored thread, element by element (#361 phase 3); undefined for no file or no such turn. */
   readStoredRequestDetail(threadId: string, request: number | 'next'): Promise<BranchRequestDetail | undefined>
   /**
+   * A stored thread's fork point (#435): identity and run conditions off its branch, one open,
+   * nothing built (#86); undefined for no file in a served project.
+   */
+  readStoredForkPoint(threadId: string): Promise<EnsoForkPoint | undefined>
+  /**
    * Fork a stored thread at one of its user messages, as pi's `/fork` does (#433; the module
    * header): a new session file naming the source as its parent, holding everything before that
    * message, and the message's text to prefill with. The source's file is not written; nothing is
@@ -92,6 +97,8 @@ export interface HostedThread {
   branchContext(): BranchContext
   /** One request's context, element by element (#361 phase 3); undefined for a turn the branch does not have. */
   branchRequestDetail(request: number | 'next'): BranchRequestDetail | undefined
+  /** The branch's fork point (#435): identity, then what it runs under — the manifest's live half. */
+  forkPoint(): Promise<EnsoForkPoint>
   /**
    * What the loaded extensions would say about a tool call, through the runtime's own hook
    * runner — the verdict a model's call would meet, without a model. Inspection, like the

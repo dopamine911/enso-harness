@@ -14,6 +14,7 @@ import {
 } from '@earendil-works/pi-coding-agent'
 import {
   type DialogAnswer,
+  type EnsoForkPoint,
   type EnsoHostCommandRun,
   type EnsoModelState,
   type EnsoObservation,
@@ -37,6 +38,7 @@ import { type BranchContext, type BranchRequestDetail, branchContext, branchRequ
 import { type BranchStats, branchStats } from './branch-stats.ts'
 import { createEventTail, describeObservation } from './event-tail.ts'
 import { createEnsoExtensionUiContext } from './extension-ui-context.ts'
+import { forkPointOf } from './fork-point.ts'
 import { decideHostCommand, HOST_VIEW_ROWS, HostCommandRefused, hostCommandRows } from './host-commands.ts'
 import {
   authEventText,
@@ -183,6 +185,11 @@ const log = ensoLogger('host')
  * resume under its id would create a fresh session. The host writes such a fork's entries the way
  * pi's first flush does (`_persist`: one JSON line per entry, `wx`), and pi appends to it from
  * then on as to any flushed file.
+ *
+ * A FORK POINT IS READ OFF THE BRANCH (#435). `forkPoint` (live) and `readStoredForkPoint` (cold,
+ * one open, nothing built) walk the same branch with `fork-point.ts`: the session id, the leaf,
+ * the parent the listing resolves (#433), then the recorded model and level (#434), picc's last
+ * mode, the cwd and the latest `enso-run-context` the harness's `run-context` extension wrote.
  */
 
 /** The agent dir's multi-account config file, and the keys this host seeds in it. */
@@ -314,6 +321,8 @@ export interface HostedThread {
   branchContext(): BranchContext
   /** One request's context, element by element (#361 phase 3); undefined for a turn the branch does not have. */
   branchRequestDetail(request: number | 'next'): BranchRequestDetail | undefined
+  /** The branch's fork point (#435): identity, then what it runs under — the manifest's live half. */
+  forkPoint(): Promise<EnsoForkPoint>
   /**
    * What the loaded extensions would say about a tool call, through the runtime's own hook
    * runner — the verdict a model's call would meet, without a model. Inspection, like the
@@ -435,6 +444,11 @@ export interface AgentHost {
   readStoredThreadContext(threadId: string): Promise<StoredThreadContext | undefined>
   /** One request of a stored thread, element by element (#361 phase 3); undefined for no file or no such turn. */
   readStoredRequestDetail(threadId: string, request: number | 'next'): Promise<BranchRequestDetail | undefined>
+  /**
+   * A stored thread's fork point (#435): identity and run conditions off its branch, one open,
+   * nothing built (#86); undefined for no file in a served project.
+   */
+  readStoredForkPoint(threadId: string): Promise<EnsoForkPoint | undefined>
   /**
    * Fork a stored thread at one of its user messages, as pi's `/fork` does (#433; the module
    * header): a new session file naming the source as its parent, holding everything before that
@@ -740,6 +754,16 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     }
     writeUnflushedSession(fork)
     return { kind: 'forked', threadId: fork.getSessionId(), prefill }
+  }
+
+  async function readStoredForkPoint(threadId: string): Promise<EnsoForkPoint | undefined> {
+    const located = await storedSession(threadId)
+    if (located === undefined) return undefined
+    return forkPointOf(SessionManager.open(located.path).getBranch(), {
+      threadId,
+      cwd: located.cwd,
+      parentThreadId: located.parentThreadId,
+    })
   }
 
   async function createSession(threadId: string, newSessionDirectory: () => string): Promise<HostedThread> {
@@ -1388,6 +1412,14 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       branchStats: () => branchStats(sessionManager.getBranch()),
       branchContext: () => branchContext(sessionManager.getBranch()),
       branchRequestDetail: (request: number | 'next') => branchRequestDetail(sessionManager.getBranch(), request),
+      async forkPoint(): Promise<EnsoForkPoint> {
+        const threadId = sessionManager.getSessionId()
+        return forkPointOf(sessionManager.getBranch(), {
+          threadId,
+          cwd: sessionManager.getCwd(),
+          parentThreadId: (await locate(threadId))?.parentThreadId,
+        })
+      },
       inspect(): HostedThreadInspection {
         // ⚠ `getSessionFile()` names the path pi WILL write, from creation — but pi flushes
         // lazily, holding every entry until the first assistant message. So the path is
@@ -1413,6 +1445,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     readStoredThreadStats,
     readStoredThreadContext,
     readStoredRequestDetail,
+    readStoredForkPoint,
     forkThread,
     freshPermissionMode: freshPermissionModeState,
     storedPermissionMode: storedPermissionModeState,

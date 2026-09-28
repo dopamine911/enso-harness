@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { type EnsoConfigParseResult, mergeEnsoConfig, parseEnsoConfig } from '@enso/core'
 import { ensoAgentDir, ensoConfigPath, projectConfigPath, readTextIfPresent } from '@enso/core/paths'
 import { createProjectTrustStore, defaultProjectTrust, projectTrustOptions } from './project-trust.ts'
@@ -59,6 +60,19 @@ export function sessionEnsoConfig(session: object, context: SessionConfigContext
     resolutions.set(session, resolution)
   }
   return resolution
+}
+
+/**
+ * The config files a resolution was read from (#435), user first: the user's when it exists, and
+ * the project's when the resolution names it — `resolveSessionConfig` names the project's file
+ * exactly when it read it. The run context records these beside the config's hash.
+ *
+ * @group Project trust
+ */
+export function sessionConfigSources(home: string, cwd: string, resolved: SessionEnsoConfig): string[] {
+  const userPath = ensoConfigPath(home)
+  const projectPath = projectConfigPath(cwd)
+  return [...(existsSync(userPath) ? [userPath] : []), ...(resolved.path === projectPath ? [projectPath] : [])]
 }
 
 async function resolveSessionConfig(context: SessionConfigContext): Promise<SessionEnsoConfig> {

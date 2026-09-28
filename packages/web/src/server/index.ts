@@ -47,6 +47,7 @@ import { followLogTail, type LogTailRouteDeps } from './logs-tail-route.ts'
 import { createProjectRegistry, ProjectUnavailable } from './projects.ts'
 import { SSE_KEEPALIVE_MS } from './sse.ts'
 import { createContextRequestRoute, createThreadContextRoute } from './thread-context-route.ts'
+import { createThreadManifestRoute } from './thread-manifest-route.ts'
 import { readThreadMount, type ThreadReadDeps } from './thread-read.ts'
 import { createThreadRegistry, inspectThread, type ThreadView } from './thread-registry.ts'
 import { createThreadStatsRoute } from './thread-stats-route.ts'
@@ -65,6 +66,8 @@ const THREAD_STATS_ROUTE = /^\/api\/threads\/([^/?#]+)\/stats$/
 const THREAD_CONTEXT_ROUTE = /^\/api\/threads\/([^/?#]+)\/context$/
 /** `GET /api/threads/<threadId>/context/<turn|next>` — one request's context, element by element (#361). */
 const THREAD_CONTEXT_REQUEST_ROUTE = /^\/api\/threads\/([^/?#]+)\/context\/([1-9]\d*|next)$/
+/** `GET /api/threads/<threadId>/manifest` — the thread's fork point: identity, then run conditions (#435). */
+const THREAD_MANIFEST_ROUTE = /^\/api\/threads\/([^/?#]+)\/manifest$/
 /** The wire (#112): `POST …/prompt`, `GET …/follow`, `POST …/dialog`, `POST …/abort` (#116). See `follow.ts`. */
 const THREAD_FOLLOW_ROUTE = /^\/api\/threads\/([^/?#]+)\/follow$/
 const THREAD_PROMPT_ROUTE = /^\/api\/threads\/([^/?#]+)\/prompt$/
@@ -582,11 +585,14 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   // One thread's context (#361): pi's branch, request by request; no log is read.
   const threadContext = createThreadContextRoute({ threads, host })
   const contextRequest = createContextRequestRoute({ threads, host })
+  // One thread's fork point (#435): identity and run conditions off pi's branch.
+  const threadManifest = createThreadManifestRoute({ threads, host })
 
   /**
-   * A thread analysis — stats (#45), context (#361) — or 404 for a thread the server holds neither
-   * live nor on disk. The payload is built before the head, as `respondWithStats` builds it: a
-   * day file that fails to read is the 500 `answerOrFail` writes, never a throw after a committed 200.
+   * A thread analysis — stats (#45), context (#361), manifest (#435) — or 404 for a thread the
+   * server holds neither live nor on disk. The payload is built before the head, as
+   * `respondWithStats` builds it: a day file that fails to read is the 500 `answerOrFail`
+   * writes, never a throw after a committed 200.
    */
   function analysisResponder(
     read: (threadId: string) => Promise<object | undefined>,
@@ -606,6 +612,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   }
   const respondWithThreadStats = analysisResponder(threadStats)
   const respondWithThreadContext = analysisResponder(threadContext)
+  const respondWithThreadManifest = analysisResponder(threadManifest)
   /**
    * One request's context; the request is the route's second capture, a turn or `next` — the
    * dispatcher's own match, so the url is read once. A turn the thread lacks, or a thread held
@@ -701,6 +708,11 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
       method: 'GET',
       route: THREAD_CONTEXT_ROUTE,
       respond: idOnly(respondWithThreadContext),
+    },
+    {
+      method: 'GET',
+      route: THREAD_MANIFEST_ROUTE,
+      respond: idOnly(respondWithThreadManifest),
     },
     {
       method: 'GET',

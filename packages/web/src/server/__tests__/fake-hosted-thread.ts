@@ -2,6 +2,7 @@ import { tmpdir } from 'node:os'
 import type {
   DialogAnswer,
   EnsoDialogSpec,
+  EnsoForkPoint,
   EnsoHostCommandRun,
   EnsoModelChoice,
   EnsoModelState,
@@ -131,6 +132,8 @@ export interface FakeHostedThreadOptions {
   /** What `branchRequestDetail(request)` answers, by `String(request)`; undefined when absent. */
   readonly details?: Readonly<Record<string, BranchRequestDetail>>
   readonly inspect?: Partial<HostedThreadInspection>
+  /** What `forkPoint()` answers (#435); the inspection's session with no recorded conditions when absent. */
+  readonly forkPoint?: EnsoForkPoint
 }
 
 /** Hand the queue back the way pi does — a copy out, the queue emptied. */
@@ -286,6 +289,13 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
     branchStats: () => options.branch ?? FAKE_EMPTY_BRANCH,
     branchContext: () => options.context ?? FAKE_EMPTY_CONTEXT,
     branchRequestDetail: (request: number | 'next') => options.details?.[String(request)],
+    forkPoint: () =>
+      Promise.resolve(
+        options.forkPoint ?? {
+          identity: { threadId: inspection.sessionId, leafEntryId: inspection.entries.at(-1)?.id ?? null },
+          conditions: { model: null, thinkingLevel: null, mode: 'default', cwd: inspection.cwd, runContext: null },
+        },
+      ),
   }
   return { hosted, record, emit, open }
 }
@@ -311,6 +321,8 @@ export interface FakeStoredThread {
   readonly details?: Readonly<Record<string, BranchRequestDetail>>
   /** The thread it was forked from (#433); none when absent. */
   readonly parentThreadId?: string
+  /** Its fork point (#435); assembled from the fields above, with no run context, when absent. */
+  readonly forkPoint?: EnsoForkPoint
 }
 
 const FAKE_FRESH_MODE: EnsoPermissionModeState = { mode: 'default', available: ['default'] }
@@ -423,6 +435,27 @@ export function createFakeAgentHost(
         storedThread === undefined
           ? undefined
           : { usage: storedThread.usage ?? { ...FAKE_NO_USAGE }, context: storedThread.context ?? FAKE_EMPTY_CONTEXT },
+      )
+    },
+    // The branch's fork point (#435): the one the thread declares, else its facts with no run context.
+    readStoredForkPoint: (threadId: string) => {
+      const storedThread = served(threadId)
+      if (storedThread === undefined) return Promise.resolve(undefined)
+      return Promise.resolve(
+        storedThread.forkPoint ?? {
+          identity: {
+            threadId,
+            leafEntryId: storedThread.transcript.at(-1)?.id ?? null,
+            ...(storedThread.parentThreadId === undefined ? {} : { parentThreadId: storedThread.parentThreadId }),
+          },
+          conditions: {
+            model: storedThread.recordedModel?.model ?? null,
+            thinkingLevel: storedThread.recordedModel?.thinkingLevel ?? null,
+            mode: storedThread.mode ?? fresh.mode,
+            cwd: directoryOf(storedThread),
+            runContext: null,
+          },
+        },
       )
     },
     // The real host's refusals, decided over the stored transcript; a fork is `<id>-fork`.

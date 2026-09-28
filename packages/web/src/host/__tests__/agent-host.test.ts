@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test'
+import { createHash } from 'node:crypto'
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -10,7 +11,13 @@ import {
   type SessionEntry,
   SessionManager,
 } from '@earendil-works/pi-coding-agent'
-import { ASK_USER_TOOL_NAME, type EnsoObservation } from '@enso/core'
+import {
+  ASK_USER_TOOL_NAME,
+  ENSO_RUN_CONTEXT_ENTRY,
+  type EnsoObservation,
+  type EnsoRunContext,
+  readEnsoRunContext,
+} from '@enso/core'
 import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
 import { findRepoRoot, harnessPackageDir, realpathOrSelf } from '@enso/core/paths'
 import type { LogRecorder } from '@logtape/testing/recorder'
@@ -66,6 +73,7 @@ const MANIFEST_EXTENSION_MARKERS = [
   'picc-permission-modes/index.ts',
   'pi-multi-account/index.ts',
   'extensions/ask-user/index.ts',
+  'extensions/run-context/index.ts',
 ]
 
 /** Collect every event a session emits, from its first subscriber on (the host replays what came before). */
@@ -1734,4 +1742,135 @@ test('each /model option carries the levels pi decides for THAT model (#391)', a
   expect(deep).toContain('high')
   // `xhigh` is offered only to a model that maps it explicitly — pi's rule, carried as it decides.
   expect(deep).not.toContain('xhigh')
+})
+
+// ── the run context and the fork point (#435) ────────────────────────────────
+
+/** Run one prompt on `hosted` and wait for it to settle. */
+async function runPrompt(hosted: HostedThread, message: string): Promise<void> {
+  const settled = Promise.withResolvers<void>()
+  const unsubscribe = hosted.runtime.subscribe((observation) => {
+    if (observation.kind === 'settled') settled.resolve()
+  })
+  hosted.runtime.prompt({ message }, { onAccepted: () => undefined, onRejected: settled.reject })
+  await settled.promise.finally(unsubscribe)
+}
+
+/** The `enso-run-context` records on a stored session's branch, oldest first. */
+function runContextsOf(file: string): EnsoRunContext[] {
+  return SessionManager.open(file)
+    .getBranch()
+    .flatMap((entry) => {
+      const recorded = entry.type === 'custom' ? readEnsoRunContext(entry.customType, entry.data) : undefined
+      return recorded === undefined ? [] : [recorded]
+    })
+}
+
+const sha256Of = (text: string): string => createHash('sha256').update(text).digest('hex')
+
+// ⚠ THE ACCEPTANCE (#435): the REAL extension, loaded last from the manifest, under pi's faux
+// provider. Two runs with nothing changed write one entry; a changed context file writes a second
+// that names the new hash — and neither ever reaches the model.
+test('⚠ two runs with nothing changed record one run context; a changed AGENTS.md records a second naming its hash — and the model never sees either (#435)', async () => {
+  const project = realpathOrSelf(mkdtempSync(join(tmpdir(), 'enso-lineage-project-')))
+  const agentsFile = join(project, 'AGENTS.md')
+  writeFileSync(agentsFile, 'Use tabs.\n')
+  const core = createFauxCore()
+  core.setResponses([
+    faux.fauxAssistantMessage('one'),
+    faux.fauxAssistantMessage('two'),
+    faux.fauxAssistantMessage('three'),
+  ])
+  const requests: unknown[] = []
+  const watched: FauxCore = {
+    ...core,
+    streamSimple: (...call: Parameters<FauxCore['streamSimple']>) => {
+      requests.push(call[1])
+      return core.streamSimple(...call)
+    },
+  }
+  const host = createAgentHost({
+    servesDirectory: (directory) => realpathOrSelf(directory) === project,
+    agentDir,
+    harnessPackageDir: harnessDir,
+    extensionFactories: [fauxModelExtension(watched)],
+  })
+  const threadId = crypto.randomUUID()
+  const first = await host.createSession(threadId, () => project)
+  openSessions.push(first)
+  await runPrompt(first, 'first')
+  await runPrompt(first, 'second')
+  const file = first.inspect().sessionFile
+  if (file === null) throw new Error('the session was not flushed after two replies')
+  const once = runContextsOf(file)
+  expect(once).toHaveLength(1)
+  expect(once[0]?.contextFiles).toEqual([{ path: agentsFile, sha256: sha256Of('Use tabs.\n') }])
+  expect(once[0]?.git).toBeNull()
+  first.runtime.dispose()
+
+  // pi reads context files when a session is built: the change is seen by the resumed session.
+  writeFileSync(agentsFile, 'Use spaces.\n')
+  const resumed = await host.createSession(threadId, () => project)
+  openSessions.push(resumed)
+  await runPrompt(resumed, 'third')
+  const twice = runContextsOf(file)
+  expect(twice).toHaveLength(2)
+  expect(twice[1]?.contextFiles).toEqual([{ path: agentsFile, sha256: sha256Of('Use spaces.\n') }])
+  const [firstRecord] = once
+  const [, secondRecord] = twice
+  if (firstRecord === undefined || secondRecord === undefined) throw new Error('a run context is missing')
+  // Nothing else changed: the second record is the first with the new hash.
+  expect({ ...secondRecord, contextFiles: firstRecord.contextFiles }).toEqual(firstRecord)
+  // The live fork point reads the latest.
+  expect((await resumed.forkPoint()).conditions.runContext).toEqual(secondRecord)
+
+  // pi's context builder skips custom entries: no request carried the record or its hashes.
+  expect(requests).toHaveLength(3)
+  const sent = JSON.stringify(requests)
+  expect(sent).toContain('Use spaces.')
+  expect(sent).not.toContain(ENSO_RUN_CONTEXT_ENTRY)
+  expect(sent).not.toContain(sha256Of('Use tabs.\n'))
+  expect(sent).not.toContain(sha256Of('Use spaces.\n'))
+})
+
+test('⚠ two forks of one thread, one of them run under a changed context file, show fork points that differ outside identity only in that field (#435)', async () => {
+  const source = crypto.randomUUID()
+  const { file } = storeTurns(source, [
+    ['first question', 'first answer'],
+    ['second question', 'second answer'],
+  ])
+  const recorded: EnsoRunContext = {
+    git: { revision: 'f00d', dirty: false },
+    config: { hash: sha256Of('{}'), sources: [] },
+    skills: [{ name: 'tdd', path: '/skills/tdd/SKILL.md' }],
+    contextFiles: [{ path: '/repo/AGENTS.md', sha256: sha256Of('v1') }],
+    mode: null,
+  }
+  const opened = SessionManager.open(file)
+  opened.appendModelChange('anthropic', 'claude-x')
+  opened.appendCustomEntry(ENSO_RUN_CONTEXT_ENTRY, recorded)
+  const forkAt = opened.appendMessage({ role: 'user', content: 'third question', timestamp: Date.now() })
+  const host = hostWith()
+  const plain = await host.forkThread(source, forkAt)
+  const changed = await host.forkThread(source, forkAt)
+  if (plain.kind !== 'forked' || changed.kind !== 'forked') throw new Error('a fork was refused')
+  const changedFile = (await host.listSessions()).find((stored) => stored.id === changed.threadId)?.path ?? ''
+  const changedContext = { ...recorded, contextFiles: [{ path: '/repo/AGENTS.md', sha256: sha256Of('v2') }] }
+  SessionManager.open(changedFile).appendCustomEntry(ENSO_RUN_CONTEXT_ENTRY, changedContext)
+
+  const plainPoint = await host.readStoredForkPoint(plain.threadId)
+  const changedPoint = await host.readStoredForkPoint(changed.threadId)
+  if (plainPoint === undefined || changedPoint === undefined) throw new Error('a fork has no fork point')
+  expect(plainPoint.identity).toMatchObject({ threadId: plain.threadId, parentThreadId: source })
+  expect(changedPoint.identity).toMatchObject({ threadId: changed.threadId, parentThreadId: source })
+  expect(plainPoint.conditions).toEqual({
+    model: { provider: 'anthropic', modelId: 'claude-x' },
+    thinkingLevel: null,
+    mode: 'default',
+    cwd: repoRoot,
+    runContext: recorded,
+  })
+  expect(changedPoint.conditions).toEqual({ ...plainPoint.conditions, runContext: changedContext })
+  // A thread held nowhere has no fork point; nothing is built to answer.
+  expect(await host.readStoredForkPoint('never-stored')).toBeUndefined()
 })

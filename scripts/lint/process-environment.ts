@@ -22,6 +22,7 @@ export const PROCESS_ENVIRONMENT_READERS: readonly string[] = [
   'packages/harness/extensions/logging/index.ts', // the pi entry point's own environment
   'packages/harness/extensions/web-fetch/index.ts', // ENSO_HOME: where the user's config is (#421)
   'packages/harness/extensions/web-search/index.ts', // ENSO_HOME: where the secrets file and the config are (#421)
+  'packages/harness/extensions/run-context/index.ts', // ENSO_HOME: where the session's config is, to hash it (#435)
   'packages/web/src/host/agent-host.ts', // pins PI_CODING_AGENT_DIR, then quarantines
   'packages/web/src/server/dev.ts', // launcher: ENSO_HOME + levels
   'packages/web/src/server/dev-web.ts', // launcher: ENSO_HOME + levels
