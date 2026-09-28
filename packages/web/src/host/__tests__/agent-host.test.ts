@@ -1877,6 +1877,10 @@ test('⚠ two forks of one thread, one of them run under a changed context file,
     runContext: recorded,
   })
   expect(changedPoint.conditions).toEqual({ ...plainPoint.conditions, runContext: changedContext })
+  // PR #439 review: a newest record that does not read (another schema's) is unknown — never the
+  // older one presented as current.
+  SessionManager.open(changedFile).appendCustomEntry(ENSO_RUN_CONTEXT_ENTRY, { schema: 'next' })
+  expect((await host.readStoredForkPoint(changed.threadId))?.conditions.runContext).toBeNull()
   // A thread held nowhere has no fork point; nothing is built to answer.
   expect(await host.readStoredForkPoint('never-stored')).toBeUndefined()
 })

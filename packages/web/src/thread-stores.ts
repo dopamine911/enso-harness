@@ -503,7 +503,10 @@ export function adoptThread(history: EnsoThreadHistory, fetchImpl?: FetchLike, i
   })
   stores.permissionMode.applyReceipt(history.permissionMode)
   if (history.interrupted !== undefined) {
-    let continued = false
+    // Whether Continue started the run, known only once the server answers (PR #439 review): a
+    // first turn that lands while the answer is pending waits for it — the turn is Continue's on a
+    // 202, and someone else's run (another tab's prompt, won just before) on a 409.
+    let continuing = Promise.resolve(false)
     const line = stores.notifications.pushWithAction({
       message: INTERRUPTED_TAIL_NOTICE[history.interrupted],
       notifyType: 'warning',
@@ -512,18 +515,18 @@ export function adoptThread(history: EnsoThreadHistory, fetchImpl?: FetchLike, i
       action: {
         label: CONTINUE_LABEL,
         run: () => {
-          continued = true
-          // Only an accepted Continue starts the run it names; a refused one leaves the prompt sent
-          // instead to supersede the line (PR #440 review).
-          void stores.connection.continueRun().then((outcome) => {
-            if (outcome !== 'told') continued = false
-          })
+          continuing = stores.connection.continueRun().then(
+            (outcome) => outcome === 'told',
+            () => false,
+          )
         },
       },
     })
-    tornTailLines.set(history.threadId, () =>
-      stores.notifications.resolveLine(line, continued ? TORN_TAIL_CONTINUED : TORN_TAIL_SUPERSEDED),
-    )
+    tornTailLines.set(history.threadId, () => {
+      void continuing.then((continued) =>
+        stores.notifications.resolveLine(line, continued ? TORN_TAIL_CONTINUED : TORN_TAIL_SUPERSEDED),
+      )
+    })
   }
   threads.set(stores.threadId, stores)
   summaries.set(stores.threadId, {

@@ -30,8 +30,11 @@ export const ENSO_RUN_CONTEXT_ENTRY = 'enso-run-context' as const
 const Sha256 = Type.String({ pattern: '^[0-9a-f]{64}$' })
 
 /**
- * What one run started under. `git` is `null` outside a repository; `mode` is `null` when the
- * branch carries no persisted mode (no permission-mode extension loaded).
+ * What one run started under. `git` is `null` when git could not name the revision — `rev-parse
+ * HEAD` failed or ran past 5 s, whatever the reason: no repository, no commit yet, no git, a
+ * timeout (PR #439 review). A `status` that fails keeps the revision and records `dirty: true`: it
+ * cannot say the tree is clean. `mode` is `null` when the branch carries no persisted mode (no
+ * permission-mode extension loaded) or one without picc's rule fields.
  *
  * @group Run context
  */

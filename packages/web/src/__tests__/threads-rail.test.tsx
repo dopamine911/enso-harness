@@ -244,10 +244,14 @@ test('⚠ the torn-tail notice offers Continue once: pressing it posts …/conti
   })
 })
 
-/** A torn thread's stores following a scripted server, whose `…/continue` answers `continueStatus`. */
+/**
+ * A torn thread's stores following a scripted server, whose `…/continue` answers `continueStatus`
+ * once `answered` resolves (at once by default).
+ */
 function followedTornThread(
   threadId: string,
   continueStatus: number,
+  answered: Promise<void> = Promise.resolve(),
 ): { stores: ThreadStores; frame: (frame: EnsoFollowFrame) => Promise<void>; stop: () => void } {
   const server = createScriptedFetch()
   const stores = adoptThread(
@@ -260,7 +264,7 @@ function followedTornThread(
     },
     (input: string, init?: RequestInit) =>
       input.endsWith('/continue')
-        ? Promise.resolve(new Response(continueStatus === 202 ? null : 'refused here', { status: continueStatus }))
+        ? answered.then(() => new Response(continueStatus === 202 ? null : 'refused here', { status: continueStatus }))
         : server.fetch(input, init),
   )
   let waiter: ((chunk: StreamChunk) => void) | undefined
@@ -296,6 +300,18 @@ const status = (busy: boolean, generation: number): EnsoFollowFrame => ({
   generation,
 })
 
+/** The torn-tail line's words once a run has resolved it — the resolution waits on a pending Continue. */
+function resolvedLine(stores: ThreadStores): Promise<string | undefined> {
+  const { promise, resolve } = Promise.withResolvers<string | undefined>()
+  const check = (): void => {
+    const [line] = stores.notifications.get()
+    if (line?.notifyType === 'info') resolve(line.message)
+  }
+  stores.notifications.subscribe(check)
+  check()
+  return promise
+}
+
 // PR #442 review: the line and its button outlived the tail. PR #440 review: keyed on `busy`, any
 // lease retired it — a mode change, `/model`, a refused Continue. Only a run's first turn does.
 test('⚠ the torn-tail line is kept through a lease that starts no run, and superseded by the first turn (#436)', async () => {
@@ -305,11 +321,8 @@ test('⚠ the torn-tail line is kept through a lease that starts no run, and sup
   await torn.frame(status(false, 1))
   expect(torn.stores.notifications.get()[0]?.action?.label).toBe('Continue')
   await torn.frame(TURN_START)
-  expect(torn.stores.notifications.get()[0]).toMatchObject({
-    message: TORN_TAIL_SUPERSEDED,
-    notifyType: 'info',
-    action: undefined,
-  })
+  expect(await resolvedLine(torn.stores)).toBe(TORN_TAIL_SUPERSEDED)
+  expect(torn.stores.notifications.get()[0]?.action).toBeUndefined()
   torn.stop()
 })
 
@@ -322,7 +335,7 @@ test('⚠ an accepted Continue resolves the line as continued, once; a refused o
   await accepted.frame(SNAPSHOT_IDLE)
   pressContinue(accepted.stores)
   await accepted.frame(TURN_START)
-  expect(accepted.stores.notifications.get()[0]).toMatchObject({ message: TORN_TAIL_CONTINUED, notifyType: 'info' })
+  expect(await resolvedLine(accepted.stores)).toBe(TORN_TAIL_CONTINUED)
   // Only the first run: a later turn leaves the resolved line as it is.
   await accepted.frame(TURN_START)
   expect(accepted.stores.notifications.get()[0]?.message).toBe(TORN_TAIL_CONTINUED)
@@ -337,8 +350,19 @@ test('⚠ an accepted Continue resolves the line as continued, once; a refused o
   pressContinue(refused.stores)
   await refusalSaid.promise
   await refused.frame(TURN_START) // the prompt the refusal left the user to send
-  expect(refused.stores.notifications.get()[0]?.message).toBe(TORN_TAIL_SUPERSEDED)
+  expect(await resolvedLine(refused.stores)).toBe(TORN_TAIL_SUPERSEDED)
   refused.stop()
+
+  // PR #439 review: another tab's prompt won the thread a moment before this Continue. Its first
+  // turn lands while the Continue is unanswered; the 409 that follows says the run was not ours.
+  const answer = Promise.withResolvers<void>()
+  const raced = followedTornThread('torn-raced', 409, answer.promise)
+  await raced.frame(SNAPSHOT_IDLE)
+  pressContinue(raced.stores)
+  await raced.frame(TURN_START)
+  answer.resolve()
+  expect(await resolvedLine(raced.stores)).toBe(TORN_TAIL_SUPERSEDED)
+  raced.stop()
 })
 
 test('history revival drops malformed rows and invalid dates instead of handing them to TanStack', () => {

@@ -40,7 +40,10 @@ import { type SessionConfigContext, type SessionEnsoConfig, sessionEnsoConfig } 
 
 /** The `customType` picc persists its mode and rules under. */
 const PICC_MODES_ENTRY = 'modes'
-/** How long one git query may take before the revision is recorded as unknown (no repository). */
+/**
+ * How long one git query may take. A `rev-parse` past it records `git: null`, as any failure of it
+ * does; a `status` past it records `dirty: true`.
+ */
 const GIT_TIMEOUT_MS = 5000
 
 export interface RunContextDependencies {

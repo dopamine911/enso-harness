@@ -1,4 +1,4 @@
-import { type EnsoForkPoint, type EnsoRunContext, readEnsoRunContext } from '@enso/core'
+import { ENSO_RUN_CONTEXT_ENTRY, type EnsoForkPoint, type EnsoRunContext, readEnsoRunContext } from '@enso/core'
 import { persistedPermissionMode } from './permission-mode-adapter.ts'
 import { recordedModelOf } from './transcript.ts'
 
@@ -18,12 +18,16 @@ interface PiBranchEntry {
   readonly data?: unknown
 }
 
+/**
+ * The branch's NEWEST `enso-run-context`, or `null` when there is none or it does not read (PR
+ * #439 review): an older one is not the current conditions, so a record from another schema is
+ * unknown, never walked past to one that reads.
+ */
 function latestRunContext(branch: readonly unknown[]): EnsoRunContext | null {
   for (let entryIndex = branch.length - 1; entryIndex >= 0; entryIndex -= 1) {
     const entry = branch[entryIndex] as PiBranchEntry | undefined
-    if (entry?.type !== 'custom' || typeof entry.customType !== 'string') continue
-    const recorded = readEnsoRunContext(entry.customType, entry.data)
-    if (recorded !== undefined) return recorded
+    if (entry?.type !== 'custom' || entry.customType !== ENSO_RUN_CONTEXT_ENTRY) continue
+    return readEnsoRunContext(ENSO_RUN_CONTEXT_ENTRY, entry.data) ?? null
   }
   return null
 }
