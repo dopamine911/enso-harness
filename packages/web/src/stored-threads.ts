@@ -46,8 +46,11 @@ async function fetchStoredThreadList(): Promise<unknown> {
  * id — its 404, an id nobody has used yet (#378); any other non-2xx throws with the status in the
  * message, a 403 naming where a thread outside the projects is stored among them.
  */
-export async function fetchThreadHistory(threadId: string): Promise<EnsoThreadHistory | undefined> {
-  const response = await fetch(`/api/threads/${encodeURIComponent(threadId)}/history`)
+export async function fetchThreadHistory(
+  threadId: string,
+  fetchImpl: (input: string) => Promise<Response> = fetch,
+): Promise<EnsoThreadHistory | undefined> {
+  const response = await fetchImpl(`/api/threads/${encodeURIComponent(threadId)}/history`)
   if (response.status === 404) return undefined
   if (!response.ok) throw new Error(await describeFailedResponse(response))
   const payload: unknown = await response.json()

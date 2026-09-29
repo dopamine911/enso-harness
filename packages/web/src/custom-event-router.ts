@@ -236,6 +236,11 @@ function routeObservation(stores: ThreadStores, observation: EnsoObservation): v
       if (shown !== undefined && shown.id === observation.id) stores.dialog.set(undefined)
       return
     }
+    case 'branch-compacted':
+      // The branch was rewritten (#348): counted, and the pane re-reads the thread when idle —
+      // never mid-run, so a compaction pi made on overflow waits for the run it rescued.
+      stores.branchCompacted.set(stores.branchCompacted.get() + 1)
+      return
     case 'session-usage': {
       // The session's totals and context now (#45) — whole, so the latest replaces.
       const { kind: _kind, ...usage } = observation

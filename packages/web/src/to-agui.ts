@@ -225,6 +225,11 @@ export function observationToAguiEvents(observation: EnsoObservation, ids: AguiI
       // vocabulary; the status bar applies the latest, whole.
       return [custom(observation)]
 
+    case 'branch-compacted':
+      // pi rewrote the branch (#348). CUSTOM: AG-UI has no word for a transcript replaced
+      // under it; the pane re-reads the thread once it is idle.
+      return [custom(observation)]
+
     case 'turn-start':
       return [{ type: EventType.STEP_STARTED, stepName: 'turn' }]
 

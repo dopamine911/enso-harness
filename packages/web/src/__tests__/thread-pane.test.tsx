@@ -7,6 +7,7 @@ import {
   type EnsoThreadHistory,
   type EnsoThreadStats,
 } from '@enso/core'
+import type { UIMessage } from '@tanstack/ai-client'
 import { act } from 'react'
 import type { createRoot as CreateRoot, Root } from 'react-dom/client'
 import { ChatScreen, ThreadPane, type ThreadView } from '../chat-screen.tsx'
@@ -294,6 +295,44 @@ test('⚠ busy on the wire → working, stop offered, mode select disabled, rail
     expect(pane.stopButton()).toBeNull()
     expect(pane.modeSelect().disabled).toBe(false)
     expect(railBusy(pane.stores.threadId)).toBe(false)
+  })
+  await pane.unmount()
+})
+
+// #348: a compaction rewrites the branch under the transcript the pane mounted with. The pane re-reads
+// it, but only once the thread is idle: pi compacts on its own when the context overflows, inside the
+// run it then retries, and replacing the transcript under a streaming reply would drop what streamed.
+test('⚠ a compaction said mid-run waits for the run; once idle the pane shows the compacted branch', async () => {
+  const text = (id: string, role: 'user' | 'assistant', content: string): UIMessage => ({
+    id,
+    role,
+    parts: [{ type: 'text', content }],
+  })
+  const threadId = 'compacted-thread'
+  const history = (messages: UIMessage[]): EnsoThreadHistory => ({
+    threadId,
+    projectId: 'p-launch',
+    messages,
+    permissionMode: { mode: 'default', available: ['default'] },
+  })
+  const pane = await mountPane({
+    history: history([text('u1', 'user', 'old question'), text('a1', 'assistant', 'the long old answer')]),
+    // What the server holds after the compaction: pi's summary in place of the old turns.
+    server: { histories: { [threadId]: history([text('s1', 'user', 'summary of what came before')]) } },
+  })
+  expect(pane.container.textContent).toContain('the long old answer')
+  await pane.settle({ ...SNAPSHOT_IDLE, live: true, busy: true, generation: 1 })
+  await pane.settle({ type: 'observation', seq: 1, observation: { kind: 'branch-compacted', reason: 'overflow' } })
+  // Mid-run: nothing is replaced under the run pi is retrying.
+  await flush(tick)
+  expect(pane.container.textContent).toContain('the long old answer')
+  await pane.settle(
+    { type: 'observation', seq: 2, observation: { kind: 'settled' } },
+    { type: 'status', live: true, busy: false, generation: 1 },
+  )
+  await eventually(() => {
+    expect(pane.container.textContent).toContain('summary of what came before')
+    expect(pane.container.textContent).not.toContain('the long old answer')
   })
   await pane.unmount()
 })

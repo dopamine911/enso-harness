@@ -502,3 +502,32 @@ test('a provider refusal maps whole; a malformed one is unmapped; a retry carrie
     finalError: '429 {}',
   })
 })
+
+// #348: a finished compaction rewrote the branch, so a page re-reads it; an aborted or failed one
+// rewrote nothing, and must not send every page to re-read the same messages.
+test('only a FINISHED compaction is branch-compacted; an aborted or failed one is not', () => {
+  expect(
+    mapPiEvent({
+      type: 'compaction_end',
+      reason: 'manual',
+      result: { summary: 's' },
+      aborted: false,
+      willRetry: false,
+    }),
+  ).toEqual({ kind: 'branch-compacted', reason: 'manual' })
+  expect(
+    mapPiEvent({
+      type: 'compaction_end',
+      reason: 'overflow',
+      result: { summary: 's' },
+      aborted: false,
+      willRetry: true,
+    }),
+  ).toEqual({ kind: 'branch-compacted', reason: 'overflow' })
+  for (const unfinished of [
+    { type: 'compaction_end', reason: 'manual', result: undefined, aborted: true, willRetry: false },
+    { type: 'compaction_end', reason: 'threshold', result: undefined, aborted: false, errorMessage: 'boom' },
+  ]) {
+    expect(mapPiEvent(unfinished)).toEqual({ kind: 'unmapped', event: unfinished })
+  }
+})

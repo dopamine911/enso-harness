@@ -39,6 +39,10 @@ const CUSTOM_METADATA: Record<string, CustomMetadata> = {
       "`recentChunks`; `usage` (the status bar's cost and context meter, #45); clears `refusal` once output grows (#340)",
     routerBranch: true,
   },
+  'branch-compacted': {
+    consumer: "`recentChunks`; `branchCompacted` (the pane re-reads the thread's messages once idle, #348)",
+    routerBranch: true,
+  },
   queue: { consumer: '`recentChunks`; `queue`', routerBranch: true },
   'dialog-settled': { consumer: '`recentChunks`; `dialog`', routerBranch: true },
   'permission-mode': { consumer: '`recentChunks`; `permissionMode`; `modeLines`', routerBranch: true },

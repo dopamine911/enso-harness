@@ -562,6 +562,21 @@ export const EnsoRunEnded = Type.Object({
 export const EnsoSettled = Type.Object({ kind: Type.Literal('settled') })
 
 /**
+ * pi compacted the branch (#348): its older turns are now one summary, so a transcript a page
+ * mounted earlier no longer matches the session — the page re-reads the thread once it is idle.
+ * `manual` is `/compact`; `threshold` and `overflow` are pi's own, when the context crossed its
+ * threshold or overflowed mid-run. Said only for a compaction that finished: an aborted one
+ * rewrote nothing.
+ *
+ * @group Observations
+ * @category Message stream
+ */
+export const EnsoBranchCompacted = Type.Object({
+  kind: Type.Literal('branch-compacted'),
+  reason: Type.Union([Type.Literal('manual'), Type.Literal('threshold'), Type.Literal('overflow')]),
+})
+
+/**
  * Anything not modelled above, carried through so it can be logged or displayed.
  *
  * ⚠ `event` is `Type.Unknown()`, not a closed event schema. Constraining it would make a
@@ -592,6 +607,7 @@ export const EnsoObservation = Type.Union([
   EnsoMessageStart,
   EnsoMessageEnd,
   EnsoSessionUsageObservation,
+  EnsoBranchCompacted,
   EnsoTurnStart,
   EnsoTurnEnd,
   EnsoProviderRefused,

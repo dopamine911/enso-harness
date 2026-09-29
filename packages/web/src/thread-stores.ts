@@ -141,6 +141,12 @@ export interface ThreadStores {
    */
   readonly startSession: WritableStore<boolean>
   /**
+   * How many compactions pi has said it finished on this thread (#348): each rewrote the branch
+   * under the transcript this page holds. The pane re-reads the thread once it is idle and has
+   * seen fewer than this.
+   */
+  readonly branchCompacted: WritableStore<number>
+  /**
    * The project this thread runs in (#395): the one its `+` named when minted, or its stored
    * session's when adopted. `undefined` for a thread minted before the page knew its projects (a
    * fresh page's first thread) — the server builds it in the launch directory, which is where the
@@ -232,6 +238,7 @@ function createThreadStores(
     guardDenials: createStore<ReadonlyMap<string, EnsoGuardRule>>(guardDenialsIn(history)),
     toolResultDescriptors,
     startSession: createStore(false),
+    branchCompacted: createStore(0),
     projectId,
     fetch: threadFetch,
     connection: createFollowConnection({

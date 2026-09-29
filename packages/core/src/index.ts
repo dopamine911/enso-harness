@@ -134,6 +134,7 @@ export {
 } from './log-tail.ts'
 export {
   ENSO_NOTICE_SOURCE,
+  EnsoBranchCompacted,
   EnsoCustomEntry,
   EnsoDialogOutcome,
   EnsoDialogSettled,

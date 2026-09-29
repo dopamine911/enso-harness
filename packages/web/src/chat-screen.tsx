@@ -44,6 +44,7 @@ import { Tabs as TabsPrimitive } from 'radix-ui'
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { useStickToBottomContext } from 'use-stick-to-bottom'
 import { AddProjectDialog } from './add-project.tsx'
+import { useRereadAfterCompaction } from './branch-reread.ts'
 import { type ChoiceHandlers, CommandPalette, runTypedHostCommand, typedCommandName } from './command-palette.tsx'
 import { fetchThreadCommands } from './commands-connection.ts'
 import { Attachment, AttachmentPreview, AttachmentRemove, Attachments } from './components/ai-elements/attachments.tsx'
@@ -1137,6 +1138,8 @@ const chatComponents = {
       useEffect(() => {
         latestMessages.current = chat.messages
       }, [chat.messages])
+      // A compaction rewrote the branch (#348): the transcript is re-read once the thread is idle.
+      useRereadAfterCompaction(stores, chat)
       /**
        * Send what the form holds: the text, and the pasted or dropped images as inline bytes.
        * Nothing sends while disconnected (#119, PR #123 review): the prompt would reach a
