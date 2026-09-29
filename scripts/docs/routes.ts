@@ -35,15 +35,58 @@ interface RouteMetadata {
 }
 
 /**
- * A GET that reads one thread and builds nothing — these rows share everything but these four
- * facts (and the follow's factory, and an input beyond the thread id), so they are stated once.
+ * A regex route's facts. `path` is stated only where discovery cannot derive it: a
+ * `threadRoute('<action>')` constant is `/api/threads/:threadId/<action>` by construction.
+ */
+type RegexRouteMetadata = Omit<RouteMetadata, 'path'> & { readonly path?: string }
+
+/** What a thread read that finds no session answers — most of the read rows' errors. */
+const NO_SESSION_ERRORS = '400 malformed thread id; 403 untrusted origin; 404 no session; 500 handler failure'
+/** A git read's errors: a thread held nowhere, or one whose project is no longer served. */
+const GIT_READ_ERRORS =
+  '400 malformed thread id; 403 untrusted origin; 404 no session, or its project is no longer served; 500 handler failure'
+/** What a live-only read answers. */
+const NO_LIVE_SESSION_ERRORS = '400 malformed thread id; 403 untrusted origin; 404 no live session'
+
+/**
+ * A GET that reads one thread and builds nothing — every such row shares its method, input, class
+ * and acquisition, so a row states its handler, what it answers, and anything beyond those.
  */
 function threadRead(
-  facts: Pick<RouteMetadata, 'path' | 'handler' | 'success' | 'errors' | 'factory'> &
-    Partial<Pick<RouteMetadata, 'input'>>,
-): RouteMetadata {
-  return { method: 'GET', input: 'path: `threadId`', routeClass: 'observation', builds: 'no', logs: 'no', ...facts }
+  handler: string,
+  success: string,
+  errors: string = NO_SESSION_ERRORS,
+  extra: Partial<Pick<RouteMetadata, 'input' | 'factory' | 'path'>> = {},
+): RegexRouteMetadata {
+  return {
+    method: 'GET',
+    input: 'path: `threadId`',
+    routeClass: 'observation',
+    builds: 'no',
+    logs: 'no',
+    handler,
+    success,
+    errors,
+    ...extra,
+  }
 }
+
+/**
+ * A control route on one thread: a POST that logs its own outcome. A row states its handler, its
+ * input, what it answers and refuses, whether it builds the session, and the follow factory it
+ * calls; a route off the thread paths says its method and path.
+ */
+function threadControl(
+  handler: string,
+  input: string,
+  [success, errors]: readonly [success: string, errors: string],
+  facts: Pick<RouteMetadata, 'builds'> & Partial<Pick<RouteMetadata, 'factory' | 'path' | 'method'>>,
+): RegexRouteMetadata {
+  return { method: 'POST', handler, input, success, errors, routeClass: 'control', logs: 'yes', ...facts }
+}
+
+/** A factory in `follow.ts` that reaches the thread's runtime. */
+const follows = (declaration: string): NonNullable<RouteMetadata['factory']> => ({ path: FOLLOW_PATH, declaration })
 
 /** A literal GET that takes no input, reads, and builds nothing — the listing and inspection rows. */
 function literalRead(
@@ -59,206 +102,139 @@ function literalRead(
   }
 }
 
-const REGEX_ROUTE_METADATA: Record<string, RouteMetadata> = {
-  THREAD_ROUTE: threadRead({
-    path: '/api/threads/:threadId',
-    handler: 'respondWithThread',
-    success: '200 JSON',
-    errors: '400 malformed thread id; 403 untrusted origin; 404 no live session',
-  }),
-  THREAD_EVENTS_ROUTE: threadRead({
-    path: '/api/threads/:threadId/events',
-    handler: 'respondWithThreadEvents',
-    success: '200 `EnsoThreadEvents` JSON',
-    errors: '400 malformed thread id; 403 untrusted origin; 404 no live session',
-  }),
-  THREAD_COMMANDS_ROUTE: threadRead({
-    path: '/api/threads/:threadId/commands',
-    handler: 'respondWithThreadCommands',
-    success: '200 `EnsoThreadCommands` JSON — `source` says live, remembered or none',
-    errors: '400 malformed thread id; 403 untrusted origin',
-  }),
-  THREAD_STATS_ROUTE: threadRead({
-    path: '/api/threads/:threadId/stats',
-    handler: 'respondWithThreadStats',
-    success: "200 `EnsoThreadStats` JSON — pi's session for the numbers, the log's day files for the times",
-    errors: '400 malformed thread id; 403 untrusted origin; 404 no session; 500 handler failure',
-  }),
-  THREAD_CONTEXT_ROUTE: threadRead({
-    path: '/api/threads/:threadId/context',
-    handler: 'respondWithThreadContext',
-    success: "200 `EnsoThreadContext` JSON — pi's branch, request by request, and its context meter",
-    errors: '400 malformed thread id; 403 untrusted origin; 404 no session; 500 handler failure',
-  }),
-  THREAD_CONTEXT_REQUEST_ROUTE: threadRead({
-    path: '/api/threads/:threadId/context/:request',
-    input: 'path: `threadId`, `request` (a turn number or `next`)',
-    handler: 'respondWithContextRequest',
-    success: "200 `EnsoContextRequestDetail` JSON — one request's context, element by element",
-    errors: '400 malformed thread id; 403 untrusted origin; 404 no session or no such turn; 500 handler failure',
-  }),
-  THREAD_MANIFEST_ROUTE: threadRead({
-    path: '/api/threads/:threadId/manifest',
-    handler: 'respondWithThreadManifest',
-    success: "200 `EnsoForkPoint` JSON — identity, then run conditions, off pi's branch",
-    errors: '400 malformed thread id; 403 untrusted origin; 404 no session; 500 handler failure',
-  }),
-  THREAD_EVAL_ROUTE: threadRead({
-    path: '/api/threads/:threadId/eval',
-    handler: 'respondWithThreadEval',
-    success:
-      "200 `EnsoSessionEval` JSON — the mechanical timeline and scorecard (#441): the branch's events off pi's entries, the queued prompts and interrupts off the day files the branch spans",
-    errors: '400 malformed thread id; 403 untrusted origin; 404 no session; 500 handler failure',
-  }),
-  THREAD_GIT_ROUTE: threadRead({
-    path: '/api/threads/:threadId/git',
-    handler: 'respondWithThreadGit',
-    success:
-      "200 `EnsoThreadGit` JSON — the thread's cwd and git's state there (#453): repository, branch, upstream, the last-push baseline and the rule that chose it, ahead/behind, and changed files by where they sit; `not-a-repository` or `unavailable` with git's reason otherwise. Read-only, no fetch",
-    errors:
-      '400 malformed thread id; 403 untrusted origin; 404 no session, or its project is no longer served; 500 handler failure',
-  }),
-  THREAD_CHANGES_ROUTE: threadRead({
-    path: '/api/threads/:threadId/changes',
-    handler: 'respondWithThreadChanges',
-    success:
-      "200 `EnsoThreadChanges` JSON — git's state in the thread's cwd and every file that differs from its last-push baseline (#452): unpushed commits, staged and unstaged edits, deletions, renames and untracked files, each with its unified diff unless binary or too large; `truncated` past 500 files. A diff git cannot produce reads as `unavailable`. Read-only, no fetch",
-    errors:
-      '400 malformed thread id; 403 untrusted origin; 404 no session, or its project is no longer served; 500 handler failure',
-  }),
-  THREAD_HISTORY_ROUTE: threadRead({
-    path: '/api/threads/:threadId/history',
-    handler: 'respondWithThreadHistory',
-    success: '200 `EnsoThreadHistory` JSON',
-    errors: '400 malformed thread id; 403 untrusted origin; 404 no session; 500 handler failure',
-  }),
-  THREAD_FOLLOW_ROUTE: threadRead({
-    path: '/api/threads/:threadId/follow',
-    handler: 'followThread',
-    success: '200 SSE stream',
-    errors: '400 malformed thread id; 403 untrusted origin; 500 handler failure',
-    factory: { path: FOLLOW_PATH, declaration: 'export async function followThread' },
-  }),
-  THREAD_PROMPT_ROUTE: {
-    method: 'POST',
-    path: '/api/threads/:threadId/prompt',
-    handler: 'respondToPrompt → promptThread',
-    input: 'path: `threadId`; body: `EnsoPromptBody`',
-    success: '202 `EnsoPromptReceipt` JSON',
-    errors:
+const BODY_ERRORS = '400 malformed id/body; 403 untrusted origin'
+
+const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
+  THREAD_ROUTE: threadRead('respondWithThread', '200 JSON', NO_LIVE_SESSION_ERRORS, { path: '/api/threads/:threadId' }),
+  THREAD_EVENTS_ROUTE: threadRead('respondWithThreadEvents', '200 `EnsoThreadEvents` JSON', NO_LIVE_SESSION_ERRORS),
+  THREAD_COMMANDS_ROUTE: threadRead(
+    'respondWithThreadCommands',
+    '200 `EnsoThreadCommands` JSON — `source` says live, remembered or none',
+    '400 malformed thread id; 403 untrusted origin',
+  ),
+  THREAD_STATS_ROUTE: threadRead(
+    'respondWithThreadStats',
+    "200 `EnsoThreadStats` JSON — pi's session for the numbers, the log's day files for the times",
+  ),
+  THREAD_CONTEXT_ROUTE: threadRead(
+    'respondWithThreadContext',
+    "200 `EnsoThreadContext` JSON — pi's branch, request by request, and its context meter",
+  ),
+  THREAD_CONTEXT_REQUEST_ROUTE: threadRead(
+    'respondWithContextRequest',
+    "200 `EnsoContextRequestDetail` JSON — one request's context, element by element",
+    '400 malformed thread id; 403 untrusted origin; 404 no session or no such turn; 500 handler failure',
+    {
+      path: '/api/threads/:threadId/context/:request',
+      input: 'path: `threadId`, `request` (a turn number or `next`)',
+    },
+  ),
+  THREAD_MANIFEST_ROUTE: threadRead(
+    'respondWithThreadManifest',
+    "200 `EnsoForkPoint` JSON — identity, then run conditions, off pi's branch",
+  ),
+  THREAD_EVAL_ROUTE: threadRead(
+    'respondWithThreadEval',
+    "200 `EnsoSessionEval` JSON — the mechanical timeline and scorecard (#441): the branch's events off pi's entries, the queued prompts and interrupts off the day files the branch spans",
+  ),
+  THREAD_GIT_ROUTE: threadRead(
+    'respondWithThreadGit',
+    "200 `EnsoThreadGit` JSON — the thread's cwd and git's state there (#453): repository, branch, upstream, the last-push baseline and the rule that chose it, ahead/behind, and changed files by where they sit; `not-a-repository` or `unavailable` with git's reason otherwise. Read-only, no fetch",
+    GIT_READ_ERRORS,
+  ),
+  THREAD_CHANGES_ROUTE: threadRead(
+    'respondWithThreadChanges',
+    "200 `EnsoThreadChanges` JSON — git's state in the thread's cwd and every file that differs from its last-push baseline (#452): unpushed commits, staged and unstaged edits, deletions, renames and untracked files, each with its unified diff unless binary or too large; `truncated` past 500 files. A diff git cannot produce reads as `unavailable`. Read-only, no fetch",
+    GIT_READ_ERRORS,
+  ),
+  THREAD_HISTORY_ROUTE: threadRead('respondWithThreadHistory', '200 `EnsoThreadHistory` JSON'),
+  THREAD_FOLLOW_ROUTE: threadRead(
+    'followThread',
+    '200 SSE stream',
+    '400 malformed thread id; 403 untrusted origin; 500 handler failure',
+    { factory: follows('export async function followThread') },
+  ),
+  THREAD_PROMPT_ROUTE: threadControl(
+    'respondToPrompt → promptThread',
+    'path: `threadId`; body: `EnsoPromptBody`',
+    [
+      '202 `EnsoPromptReceipt` JSON',
       '400 malformed id/body or unavailable command; 403 untrusted origin; 409 the thread was taken and released again while the prompt waited on its build (rare; #444); 413 body too large; 500 handler failure',
-    routeClass: 'control',
-    builds: 'yes',
-    logs: 'yes',
-    factory: { path: FOLLOW_PATH, declaration: 'export async function promptThread' },
-  },
-  THREAD_DIALOG_ROUTE: {
-    method: 'POST',
-    path: '/api/threads/:threadId/dialog',
-    handler: 'respondToDialog → answerThreadDialog',
-    input: 'path: `threadId`; body: `DialogAnswer`',
-    success: '204 empty',
-    errors:
-      '400 malformed id/body; 403 untrusted origin; 404 no live question; 413 body too large; 422 answer refused; 500 handler failure',
-    routeClass: 'control',
-    builds: 'no',
-    logs: 'yes',
-    factory: { path: FOLLOW_PATH, declaration: 'export function answerThreadDialog' },
-  },
-  THREAD_ABORT_ROUTE: {
-    method: 'POST',
-    path: '/api/threads/:threadId/abort',
-    handler: 'respondToAbort → abortThread',
-    input: 'path: `threadId`; no body',
-    success: '200 `EnsoAbortReceipt` JSON',
-    errors: '400 malformed thread id; 403 untrusted origin; 404 no live session; 409 nothing running',
-    routeClass: 'control',
-    builds: 'no',
-    logs: 'yes',
-    factory: { path: FOLLOW_PATH, declaration: 'export function abortThread' },
-  },
-  THREAD_COMMAND_ROUTE: {
-    method: 'POST',
-    path: '/api/threads/:threadId/command',
-    handler: 'respondToHostCommand → runHostCommand',
-    input:
-      "path: `threadId`; body: `EnsoHostCommandRun` — `model` with `provider/id`, `thinking` with a level, `login` with `provider/authType`, `logout` with a provider, `compact` with nothing; a `view` row (`context`, `fork`) is the page's to do, never run",
-    success:
+    ],
+    { builds: 'yes', factory: follows('export async function promptThread') },
+  ),
+  THREAD_DIALOG_ROUTE: threadControl(
+    'respondToDialog → answerThreadDialog',
+    'path: `threadId`; body: `DialogAnswer`',
+    ['204 empty', `${BODY_ERRORS}; 404 no live question; 413 body too large; 422 answer refused; 500 handler failure`],
+    { builds: 'no', factory: follows('export function answerThreadDialog') },
+  ),
+  THREAD_ABORT_ROUTE: threadControl(
+    'respondToAbort → abortThread',
+    'path: `threadId`; no body',
+    [
+      '200 `EnsoAbortReceipt` JSON',
+      '400 malformed thread id; 403 untrusted origin; 404 no live session; 409 nothing running',
+    ],
+    { builds: 'no', factory: follows('export function abortThread') },
+  ),
+  THREAD_COMMAND_ROUTE: threadControl(
+    'respondToHostCommand → runHostCommand',
+    "path: `threadId`; body: `EnsoHostCommandRun` — `model` with `provider/id`, `thinking` with a level, `login` with `provider/authType`, `logout` with a provider, `compact` with nothing; a `view` row (`context`, `fork`) is the page's to do, never run",
+    [
       '204 empty for a setting (the change arrives on the follow as `model`); 202 empty for a flow or action (`login`, `logout`, `compact`) — started, its questions and progress arrive on the follow as dialogs and `notify` lines',
-    errors:
-      '400 malformed id/body; 403 untrusted origin; 409 thread busy; 413 body too large; 422 unknown command, model or level, a provider without credentials, or a `view` (`/context`, `/fork`) the page does itself; 500 handler failure',
-    routeClass: 'control',
-    builds: 'yes',
-    logs: 'yes',
-  },
-  THREAD_CONFIGURE_ROUTE: {
-    method: 'POST',
-    path: '/api/threads/:threadId/configure',
-    handler: 'respondToConfigure → configureThread',
-    input:
-      'path: `threadId`; body: `EnsoSessionConfiguration` — optional `model` (`provider/id`), `thinking` (a level that model supports) and `mode`; applied in that order under one lease, a value equal to the current one left alone',
-    success: '204 empty — every step applied (the changes arrive on the follow as `model` and `permission-mode`)',
-    errors:
-      '400 malformed id/body; 403 untrusted origin; 409 thread busy; 413 body too large; 422 JSON `EnsoConfigurationRefusal` — the step that refused (`model`, `thinking`, `mode`) and the reason, the steps before it applied; 500 handler failure',
-    routeClass: 'control',
-    builds: 'yes',
-    logs: 'yes',
-  },
-  THREAD_FORK_ROUTE: {
-    method: 'POST',
-    path: '/api/threads/:threadId/fork',
-    handler: 'respondToFork → forkThreadAt → AgentHost.forkThread',
-    input:
-      "path: `threadId`; body: `EnsoForkRequest` — `entryId`, the pi entry id of one of the thread's user messages; the fork is pi's `/fork` at position `before`, taken from the session file",
-    success:
+      `${BODY_ERRORS}; 409 thread busy; 413 body too large; 422 unknown command, model or level, a provider without credentials, or a \`view\` (\`/context\`, \`/fork\`) the page does itself; 500 handler failure`,
+    ],
+    { builds: 'yes' },
+  ),
+  THREAD_CONFIGURE_ROUTE: threadControl(
+    'respondToConfigure → configureThread',
+    'path: `threadId`; body: `EnsoSessionConfiguration` — optional `model` (`provider/id`), `thinking` (a level that model supports) and `mode`; applied in that order under one lease, a value equal to the current one left alone',
+    [
+      '204 empty — every step applied (the changes arrive on the follow as `model` and `permission-mode`)',
+      `${BODY_ERRORS}; 409 thread busy; 413 body too large; 422 JSON \`EnsoConfigurationRefusal\` — the step that refused (\`model\`, \`thinking\`, \`mode\`) and the reason, the steps before it applied; 500 handler failure`,
+    ],
+    { builds: 'yes' },
+  ),
+  THREAD_FORK_ROUTE: threadControl(
+    'respondToFork → forkThreadAt → AgentHost.forkThread',
+    "path: `threadId`; body: `EnsoForkRequest` — `entryId`, the pi entry id of one of the thread's user messages; the fork is pi's `/fork` at position `before`, taken from the session file",
+    [
       "200 `EnsoForkReceipt` JSON — the new thread id (its session file names the source as `parentSession`) and the forked message's text, for the new composer",
-    errors:
       '400 malformed id/body, or an entry that is no user message; 403 untrusted origin; 404 no session file in a served project, or no such entry; 409 thread busy; 413 body too large; 500 handler failure',
-    routeClass: 'control',
-    builds: 'no',
-    logs: 'yes',
-    factory: { path: FOLLOW_PATH, declaration: 'export async function forkThreadAt', reaches: 'storage' },
-  },
-  THREAD_CONTINUE_ROUTE: {
-    method: 'POST',
-    path: '/api/threads/:threadId/continue',
-    handler: 'respondToContinue → continueThread → ThreadRuntime.continueRun',
-    input: 'path: `threadId`; no body',
-    success:
+    ],
+    {
+      builds: 'no',
+      factory: { path: FOLLOW_PATH, declaration: 'export async function forkThreadAt', reaches: 'storage' },
+    },
+  ),
+  THREAD_CONTINUE_ROUTE: threadControl(
+    'respondToContinue → continueThread → ThreadRuntime.continueRun',
+    'path: `threadId`; no body',
+    [
       '202 empty — the torn tail is continued from the stored state with no new user message; the run arrives on the follow and its `settled` releases the thread',
-    errors:
       '400 malformed thread id; 403 untrusted origin; 404 no thread under that id, live or stored; 409 thread busy; 422 nothing to continue — the thread does not end on an unanswered prompt, an unfinished tool call, or tool results with no reply, or this pi build has no run lifecycle to continue in; 500 handler failure',
-    routeClass: 'control',
-    builds: 'yes',
-    logs: 'yes',
-    factory: { path: FOLLOW_PATH, declaration: 'export async function continueThread' },
-  },
-  PROJECT_ROUTE: {
-    method: 'DELETE',
-    path: '/api/projects/:projectId',
-    handler: 'respondToProjectRemoval → ProjectRegistry.remove',
-    input: 'path: `projectId` (sixteen hex digits)',
-    success:
+    ],
+    { builds: 'yes', factory: follows('export async function continueThread') },
+  ),
+  PROJECT_ROUTE: threadControl(
+    'respondToProjectRemoval → ProjectRegistry.remove',
+    'path: `projectId` (sixteen hex digits)',
+    [
       '204 empty — the registration is forgotten; its sessions stay on disk and are served again if the directory is registered again',
-    errors:
       '403 untrusted origin; 404 no registered project with that id; 409 the launch project, or a thread in the project is running',
-    routeClass: 'control',
-    builds: 'no',
-    logs: 'yes',
-  },
-  THREAD_MODE_ROUTE: {
-    method: 'POST',
-    path: '/api/threads/:threadId/mode',
-    handler: 'respondToModeChange → changeThreadMode',
-    input: 'path: `threadId`; body: `EnsoPermissionModeChange`',
-    success: '204 empty; the change arrives on the follow as `permission-mode`',
-    errors:
-      '400 malformed id/body; 403 untrusted origin; 409 thread busy; 413 body too large; 422 mode not offered; 500 handler failure',
-    routeClass: 'control',
-    builds: 'yes',
-    logs: 'yes',
-    factory: { path: FOLLOW_PATH, declaration: 'export async function changeThreadMode' },
-  },
+    ],
+    { builds: 'no', path: '/api/projects/:projectId', method: 'DELETE' },
+  ),
+  THREAD_MODE_ROUTE: threadControl(
+    'respondToModeChange → changeThreadMode',
+    'path: `threadId`; body: `EnsoPermissionModeChange`',
+    [
+      '204 empty; the change arrives on the follow as `permission-mode`',
+      `${BODY_ERRORS}; 409 thread busy; 413 body too large; 422 mode not offered; 500 handler failure`,
+    ],
+    { builds: 'yes', factory: follows('export async function changeThreadMode') },
+  ),
 }
 
 const LITERAL_ROUTE_METADATA: Record<string, Omit<RouteMetadata, 'method' | 'path'>> = {
@@ -384,13 +360,22 @@ export function discoverRoutes(): ResolvedRoute[] {
     [LOGS_STATS_PATH]: readFileSync(join(ROOT, LOGS_STATS_PATH), 'utf8'),
   }
 
-  const regexRoutes: DetectedRoute[] = [...server.matchAll(/^const ([A-Z][A-Z_]*_ROUTE) = \/.*\/$/gm)].map((match) => ({
-    key: match[1] ?? '',
-    method: REGEX_ROUTE_METADATA[match[1] ?? '']?.method ?? 'GET',
-    path: REGEX_ROUTE_METADATA[match[1] ?? '']?.path ?? 'UNCLASSIFIED',
-    line: lineAt(server, match.index),
-    kind: 'regex',
-  }))
+  // A route constant is a regex literal, or `threadRoute('<action>')` — the server's builder for
+  // `/api/threads/<threadId>/<action>`, whose path is derived here rather than restated.
+  const regexRoutes: DetectedRoute[] = [
+    ...server.matchAll(/^const ([A-Z][A-Z_]*_ROUTE) = (?:\/.*\/|threadRoute\('([a-z-]+)'\))$/gm),
+  ].map((match) => {
+    const key = match[1] ?? ''
+    const metadata = REGEX_ROUTE_METADATA[key]
+    const action = match[2]
+    return {
+      key,
+      method: metadata?.method ?? 'GET',
+      path: metadata?.path ?? (action === undefined ? 'UNCLASSIFIED' : `/api/threads/:threadId/${action}`),
+      line: lineAt(server, match.index),
+      kind: 'regex',
+    }
+  })
   for (const route of regexRoutes) {
     const references = [...server.matchAll(new RegExp(`\\b${route.key}\\b`, 'g'))]
     if (references.length < 2) throw new Error(`routes: ${route.key} is declared but not dispatched`)
@@ -426,7 +411,7 @@ export function discoverRoutes(): ResolvedRoute[] {
         if (detected.kind === 'regex') {
           const regex = REGEX_ROUTE_METADATA[detected.key]
           if (regex === undefined) throw new Error(`routes: metadata disappeared for ${detected.key}`)
-          return regex
+          return { ...regex, path: detected.path }
         }
         const literal = LITERAL_ROUTE_METADATA[detected.key]
         if (literal === undefined) throw new Error(`routes: metadata disappeared for ${detected.key}`)
@@ -471,7 +456,7 @@ function generate(): string {
     '',
     "Every `/api/threads/:threadId…` route also reads the `X-Enso-Project` header (#395): a page names a new thread's project with it, and an id that is no registered project is a 400 before the route runs.",
     '',
-    '> Parser limitation: discovery recognizes top-level `const *_ROUTE = /…/` declarations plus direct `request.method` branches using `url === …` or `url.startsWith(…)`. Statuses, input shapes, classes, acquisition, and self-logging are intentionally explicit checked metadata rather than inferred behavior.',
+    '> Parser limitation: discovery recognizes top-level `const *_ROUTE = /…/` and `const *_ROUTE = threadRoute(…)` declarations plus direct `request.method` branches using `url === …` or `url.startsWith(…)`. Statuses, input shapes, classes, acquisition, and self-logging are intentionally explicit checked metadata rather than inferred behavior.',
     '',
     '| Method | Rendered path | Handler / factory | Input shape | Success | Named error statuses | Class | Builds / acquires? | Logs itself? | Source |',
     '|---|---|---|---|---|---|---|---|---|---|',
