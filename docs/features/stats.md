@@ -22,11 +22,11 @@ Further down: **Cumulative usage by tool**, **Distribution**, **Costliest prompt
 
 ## What to look for
 
-The thread above cost `$0.2104`. Three things stand out.
+The thread above cost about 21 cents. Three things stand out.
 
 Turn 9 is one solid cache-write bar in **Tokens**, and the peak of **Cost per turn**. It is the first turn after the switch to `claude-opus-4-1`: the new model had no cache, so the whole prefix was written again, at that model's price. Most other turns are almost all cache read. If you see a lone cache-write bar in a thread of your own, look for a model switch or a compaction just before it. [Context Events](./context-browser.md) names which.
 
-`$0.0283 not attributed to a turn on this branch` is the compaction. Its summary was a model call of its own, but not a turn of the conversation, so the tab names the cost instead of hiding it in a turn.
+The line under the metrics, about 3 cents `not attributed to a turn on this branch`, is the compaction. Its summary was a model call of its own, but not a turn of the conversation, so the tab names the cost instead of hiding it in a turn.
 
 **failures** reads `1`, not `3`. pi records a guard's refusal as an error, just like a real failure. Enso keeps a record of each refusal, so the tab counts the failed `cat` as a failure and the two refused calls apart. A refusal is the guard working, not the tool breaking.
 
