@@ -142,8 +142,9 @@ export function ThreadEvalView({ outcome }: { readonly outcome: EvalOutcome }): 
             value={`${countText(card.askRejected)} / ${countText(card.askCalls)}`}
             danger={card.askRejected > 0}
           />
+          {/* The glossary's "refusal channel": who refused. NOT the scorecard's `refusalsTotal` — that is `r=`, what the operator clicked. */}
           <Metric
-            label="refusals"
+            label="refusal channels"
             value={countText(card.guardRefusals + card.operatorDenials + card.providerRefusals)}
             note={`guard ${countText(card.guardRefusals)} · operator ${countText(card.operatorDenials)} · provider ${countText(card.providerRefusals)}`}
           />

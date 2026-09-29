@@ -14,7 +14,7 @@ const EVALUATED: EnsoSessionEval = {
   logDays: ['2026-09-29'],
   events: [
     { kind: 'human', index: 0, at: '2026-09-29T10:00:00.000Z', detail: 'check the tests', words: 3 },
-    { kind: 'prompt-queued', at: '2026-09-29T10:00:01.000Z', detail: 'queued on run 1' },
+    { kind: 'prompt-queued', detail: 'queued on run 1' },
     { kind: 'gate', index: 2, at: '2026-09-29T10:00:02.000Z', detail: 'bun test', outcome: 'fail' },
     { kind: 'tool-denied', index: 4, at: '2026-09-29T10:00:03.000Z', detail: 'operator denied Run command: No' },
     { kind: 'human-correction', index: 5, at: '2026-09-29T10:00:04.000Z', detail: "no, that's wrong", words: 3 },
@@ -72,13 +72,15 @@ const text = (markup: string): string =>
   markup
     .replace(/<[^>]+>/g, ' ')
     .replace(/&#x27;/g, "'")
+    .replace(/&gt;/g, '>')
+    .replace(/&lt;/g, '<')
     .replace(/\s+/g, ' ')
 
 test('the panel says what it counted: the metrics, the refusal channels apart, the gate outcomes, the modes', () => {
   const rendered = text(renderToStaticMarkup(<ThreadEvalView outcome={{ kind: 'read', payload: EVALUATED }} />))
   expect(rendered).toContain('5 events')
   expect(rendered).toContain('from the file')
-  expect(rendered).toContain('guard 0 · operator 1 · provider 0')
+  expect(rendered).toContain('refusal channels 1 guard 0 · operator 1 · provider 0')
   expect(rendered).toContain('0 passed · 1 failed')
   expect(rendered).toContain('longest run 1')
   expect(rendered).toContain('modes default → acceptEdits')
@@ -92,6 +94,10 @@ test('⚠ the timeline carries the two counters per row, f= for what was typed a
   const counters = [...markup.matchAll(/f=(\d+)<\/span><span[^>]*>r=(\d+)/g)].map((match) => `${match[1]}/${match[2]}`)
   // human 0/0 → queued 1/0 → gate 1/0 → denied 1/1 → correction 2/1
   expect(counters).toEqual(['0/0', '1/0', '1/0', '1/1', '2/1'])
+  // an event the log gave no stamp for (the queued prompt) shows a placeholder, not a broken slice
+  expect(text(markup)).toContain('· · · >< f=1 r=0 prompt-queued')
+  // a gate row carries its words-free detail and its outcome
+  expect(text(markup)).toContain('gate bun test [fail]')
 })
 
 test('a log-side count with no day file read is —, not 0, and the panel says why', () => {
