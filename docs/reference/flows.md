@@ -40,7 +40,7 @@ flowchart LR
 
 | Node | Contract | Input | Source |
 |---|---|---|---|
-| `respondToProjectRegistration → ProjectRegistry.register` | [`POST /api/projects`](./routes.md) | body: `EnsoProjectRegistration` — an absolute `path` strictly under a root the ENSO_HOME config declares (`projects.roots`), optional `title` | [`packages/web/src/server/index.ts:1294`](../../packages/web/src/server/index.ts#L1294) |
+| `respondToProjectRegistration → ProjectRegistry.register` | [`POST /api/projects`](./routes.md) | body: `EnsoProjectRegistration` — an absolute `path` strictly under a root the ENSO_HOME config declares (`projects.roots`), optional `title` | [`packages/web/src/server/index.ts:1306`](../../packages/web/src/server/index.ts#L1306) |
 | `respondToProjectRemoval → ProjectRegistry.remove` | [`DELETE /api/projects/:projectId`](./routes.md) | path: `projectId` (sixteen hex digits) | [`packages/web/src/server/index.ts:140`](../../packages/web/src/server/index.ts#L140) |
 | `respondToPromptRemoval → PromptLibrary.remove` | [`DELETE /api/prompts/:id`](./routes.md) | path: `id`; header: `If-Match: <ETag>` (the version read) or `If-Match: *` | [`packages/web/src/server/index.ts:138`](../../packages/web/src/server/index.ts#L138) |
 | `respondToPromptWrite → PromptLibrary.write` | [`PUT /api/prompts/:id`](./routes.md) | path: `id`; headers: exactly one precondition — `If-None-Match: *` (create: no file of that name), `If-Match: <ETag>` (replace the version read), `If-Match: *` (replace whatever is there); body: `EnsoLibraryPromptWrite` — `name`, `description`, `category` (system, append or session) and the markdown `body` | [`packages/web/src/server/index.ts:137`](../../packages/web/src/server/index.ts#L137) |

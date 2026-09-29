@@ -45,7 +45,12 @@ sequenceDiagram
 2. **Looking must not build (#86).** `readStoredThread` opens the file into memory and writes nothing
    until an append; the history route `peek`s the registry, and a thread neither live nor stored is
    a 404 — while the follow's cold read is an *empty* snapshot, so observation may precede the first
-   prompt ([`follow-snapshot-frames.md`](./follow-snapshot-frames.md), invariant 2).
+   prompt ([`follow-snapshot-frames.md`](./follow-snapshot-frames.md), invariant 2). A session file in
+   a directory that is no project here is a **403 naming the directory**, not that 404 (#378). The
+   page reads the three by where the id came from (`stored-threads.ts#createResumeRequests`): a 404
+   for the URL's own thread — written before its first prompt, then lost to a restart — starts it
+   under that id, said nowhere; a 404 for a rail row is a stale listing; either failure is said on
+   the rail's "could not open the thread" line, never as the listing failing.
 3. **The rail is the listing, newest first, titled by the first user message.** A blank first
    message is no title (`server/index.ts#respondWithStoredThreads`). `busy` marks a thread a run on
    *this* server holds; the row is shown, not locked (#114), and an idle thread the server still

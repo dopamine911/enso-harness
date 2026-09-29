@@ -188,7 +188,8 @@ const isFixtureMode = typeof window !== 'undefined' && new URLSearchParams(windo
  * the page mints or adopts goes through these two, so none is left on the real network.
  */
 const PAGE_FETCH = isFixtureMode ? fixtureFetch : undefined
-const mintPageThread = (projectId?: string): ThreadStores => mintThread(PAGE_FETCH, projectId)
+const mintPageThread = (projectId?: string, threadId?: string): ThreadStores =>
+  mintThread(PAGE_FETCH, projectId, threadId)
 const adoptPageThread = (history: EnsoThreadHistory, initialDraft?: string): ThreadStores =>
   adoptThread(history, PAGE_FETCH, initialDraft)
 /** `?debug` opens the session debug drawer (#86) — same switch shape as `?fixture`. */
@@ -1949,7 +1950,8 @@ export function ChatScreen(): React.ReactNode {
   const resume = useMemo(
     () =>
       // `prefill` rides with a fork's open (#433): the new thread's composer opens holding it.
-      createResumeRequests<{ how: ThreadNavigation; epoch: number; prefill?: string }>(
+      // `fromUrl`: the id is the URL's (the boot, back/forward), not a row or a fork (#378).
+      createResumeRequests<{ how: ThreadNavigation; epoch: number; prefill?: string; fromUrl?: boolean }>(
         fetchThreadHistory,
         (history, intent) => {
           if (intent.epoch !== epoch.current) return // a navigation happened since — superseded
@@ -1964,11 +1966,27 @@ export function ChatScreen(): React.ReactNode {
           // (the error is on the rail), and the URL rewritten so a reload does not ask again.
           if (activePane.current === undefined) navigate(mintPageThread().threadId, 'replace')
         },
+        (threadId, intent) => {
+          if (intent.epoch !== epoch.current) return
+          // ⚠ #378: the server holds nothing under the URL's own id — the page wrote it before the
+          // first prompt, and the server restarted or dropped the empty thread since. Not an error:
+          // the thread is started under the id the URL already names. A 403 (a file outside the
+          // projects) is a failure above, never this.
+          if (intent.fromUrl === true) {
+            setResumeError(undefined)
+            navigate(mintPageThread(undefined, threadId).threadId, intent.how)
+            return
+          }
+          // A rail row or a fork the server no longer holds: the listing was stale. Said.
+          setResumeError(`the server holds no session for thread ${threadId}`)
+          if (activePane.current === undefined) navigate(mintPageThread().threadId, 'replace')
+        },
       ),
     [navigate],
   )
   const resumeFrom = useCallback(
-    (threadId: string, how: ThreadNavigation): void => resume(threadId, { how, epoch: epoch.current }),
+    (threadId: string, how: ThreadNavigation, fromUrl = false): void =>
+      resume(threadId, { how, epoch: epoch.current, fromUrl }),
     [resume],
   )
   // A fork (#433) opens the way a rail resume does, its composer holding the forked prompt's
@@ -1982,7 +2000,7 @@ export function ChatScreen(): React.ReactNode {
   )
   // Boot: the URL named a thread — adopt it. Once per page; the coordinator drops a stale answer.
   useEffect(() => {
-    if (BOOT.kind === 'resume') resumeFrom(BOOT.threadId, 'pop')
+    if (BOOT.kind === 'resume') resumeFrom(BOOT.threadId, 'pop', true)
   }, [resumeFrom])
   // Back/forward: the URL moved; the page follows it — a thread on this page is a switch, one
   // that is not is a resume. Neither writes history again.
@@ -1994,7 +2012,7 @@ export function ChatScreen(): React.ReactNode {
         navigate(named.threadId, 'pop')
         return
       }
-      resumeFrom(named.threadId, 'pop')
+      resumeFrom(named.threadId, 'pop', true)
     }
     window.addEventListener('popstate', onPopState)
     return () => window.removeEventListener('popstate', onPopState)
@@ -2034,7 +2052,8 @@ export function ChatScreen(): React.ReactNode {
           activeThreadId={activeThreadId}
           earlier={storedThreadsNotOnThisPage(stored.rows, pageThreadIds)}
           forkParents={forkParentTitles(stored.rows, threads)}
-          earlierError={stored.error ?? projects.error ?? resumeError}
+          earlierError={stored.error ?? projects.error}
+          openError={resumeError}
           onSelect={rail.leave((threadId: string) => navigate(threadId, 'push'))}
           onResume={rail.leave((threadId: string) => resumeFrom(threadId, 'push'))}
           onNew={rail.leave((projectId: string | undefined) => navigate(mintPageThread(projectId).threadId, 'push'))}

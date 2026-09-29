@@ -569,12 +569,25 @@ test('stored threads are listed and read only in a project, each under its own; 
     expect.objectContaining({ threadId: 'inApp', projectId: project.projectId }),
   ])
   expect(await (await fetch(`${url}/api/threads/inApp/history`)).json()).toMatchObject({ projectId: project.projectId })
-  expect((await fetch(`${url}/api/threads/elsewhere/history`)).status).toBe(404)
+  // #378: a file outside every project is refused BY NAME — 403, saying where — never the 404 a page
+  // reads as an id nobody has used, and starts afresh. An id nobody has used is still the 404.
+  const refusedHistory = async (threadId: string): Promise<[number, string]> => {
+    const response = await fetch(`${url}/api/threads/${threadId}/history`)
+    return [response.status, await response.text()]
+  }
+  expect(await refusedHistory('elsewhere')).toEqual([
+    403,
+    'stored in /somewhere/else, which is not a project here — add it as a project to open it',
+  ])
+  expect(await refusedHistory('never-used')).toEqual([404, 'no session for thread never-used'])
 
   expect((await fetch(`${url}/api/projects/${launch?.projectId}`, { method: 'DELETE' })).status).toBe(409)
   expect((await fetch(`${url}/api/projects/${project.projectId}`, { method: 'DELETE' })).status).toBe(204)
   expect(await listed()).toEqual([expect.objectContaining({ threadId: 'inLaunch' })])
-  expect((await fetch(`${url}/api/threads/inApp/history`)).status).toBe(404)
+  expect(await refusedHistory('inApp')).toEqual([
+    403,
+    `stored in ${app}, which is not a project here — add it as a project to open it`,
+  ])
   // A stale tab still following it is told there is nowhere it runs — never the launch directory,
   // where resuming it would not happen either (PR #399 review).
   const stale = new AbortController()

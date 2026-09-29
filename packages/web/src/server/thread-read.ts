@@ -57,6 +57,12 @@ export interface ThreadReadDeps {
 export interface ThreadMount {
   /** Does the server hold this id at all — a live thread or a file? `false` is `/history`'s 404. */
   readonly present: boolean
+  /**
+   * The directory of this id's session file when that directory is no project here (#378):
+   * `present` is `false` for it, like an id never seen, but the file is there — so `/history`
+   * refuses it by name (403) rather than as unknown (404), and a page does not start it afresh.
+   */
+  readonly storedOutside: string | undefined
   /** The branch as the messages a chat mounts with: pi's memory when live, the file when cold. */
   readonly messages: UIMessage[]
   /** Set only when the branch ends inside a turn (#109). */
@@ -95,7 +101,7 @@ export interface ThreadMount {
 const NO_USAGE: EnsoSessionUsage = { cost: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, context: null }
 
 /** A live thread's mount reads no file. */
-const NOT_READ = { stored: undefined, storedUnserved: false } as const
+const NOT_READ = { stored: undefined, storedOutside: undefined } as const
 
 /**
  * The file, read only for a thread that is not live here — nothing is built to answer (#86).
@@ -105,24 +111,28 @@ const NOT_READ = { stored: undefined, storedUnserved: false } as const
 async function readCold(
   host: AgentHost,
   threadId: string,
-): Promise<{ readonly stored: StoredThreadRead | undefined; readonly storedUnserved: boolean }> {
+): Promise<{ readonly stored: StoredThreadRead | undefined; readonly storedOutside: string | undefined }> {
   const stored = await host.readStoredThread(threadId)
-  if (stored !== undefined) return { stored, storedUnserved: false }
-  return { stored, storedUnserved: (await host.storedThreadDirectory(threadId)) !== undefined }
+  if (stored !== undefined) return { stored, storedOutside: undefined }
+  return { stored, storedOutside: await host.storedThreadDirectory(threadId) }
 }
 
 export async function readThreadMount(deps: ThreadReadDeps, threadId: string): Promise<ThreadMount> {
   const { threads, host, projects } = deps
   const live = threads.peek(threadId)
-  const { stored, storedUnserved } = live === undefined ? await readCold(host, threadId) : NOT_READ
+  const read = live === undefined ? await readCold(host, threadId) : NOT_READ
+  const { stored } = read
   const nowLive = threads.peek(threadId)
   const inspection = nowLive?.hosted.inspect()
   const transcript = inspection === undefined ? (stored?.transcript ?? []) : inspection.entries
+  // A thread that went live during the read is served, wherever its file is.
+  const storedOutside = nowLive === undefined ? read.storedOutside : undefined
   return {
     present: nowLive !== undefined || stored !== undefined,
+    storedOutside,
     messages: transcriptToMessages(transcript),
     ...(nowLive === undefined ? coldReading(host, transcript, stored) : liveReading(nowLive, transcript)),
-    ...placeOf(projects, threadId, inspection?.cwd ?? stored?.cwd, storedUnserved),
+    ...placeOf(projects, threadId, inspection?.cwd ?? stored?.cwd, storedOutside),
   }
 }
 
@@ -191,12 +201,12 @@ function placeOf(
   projects: ProjectRegistry,
   threadId: string,
   sessionDirectory: string | undefined,
-  storedUnserved: boolean,
+  storedOutside: string | undefined,
 ): Pick<ThreadMount, 'cwd' | 'projectId'> {
   if (sessionDirectory !== undefined) {
     return { cwd: sessionDirectory, projectId: projects.byDirectory(sessionDirectory)?.projectId }
   }
-  if (storedUnserved) return { cwd: '', projectId: undefined }
+  if (storedOutside !== undefined) return { cwd: '', projectId: undefined }
   const project = projects.projectOfNewThread(threadId)
   return { cwd: project?.path ?? '', projectId: project?.projectId }
 }

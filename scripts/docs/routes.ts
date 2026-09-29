@@ -154,7 +154,11 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
     "200 `EnsoThreadChanges` JSON — git's state in the thread's cwd and every file that differs from its last-push baseline (#452): unpushed commits, staged and unstaged edits, deletions, renames and untracked files, each with its unified diff unless binary or too large; `truncated` past 500 files. A diff git cannot produce reads as `unavailable`. Read-only, no fetch",
     GIT_READ_ERRORS,
   ),
-  THREAD_HISTORY_ROUTE: threadRead('respondWithThreadHistory', '200 `EnsoThreadHistory` JSON'),
+  THREAD_HISTORY_ROUTE: threadRead(
+    'respondWithThreadHistory',
+    '200 `EnsoThreadHistory` JSON',
+    '400 malformed thread id; 403 untrusted origin, or a session stored in a directory that is no project here (named, #378); 404 no session — an id nobody has used, which a page starts; 500 handler failure',
+  ),
   THREAD_FOLLOW_ROUTE: threadRead(
     'followThread',
     '200 SSE stream',

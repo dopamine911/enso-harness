@@ -480,11 +480,12 @@ function makeRoomForOneMore(): void {
  * The rail lists it at once, untitled. Inside the page's follow budget: minting past it drops
  * an idle thread (#272). `fetch` is the thread's network seam (`createThreadStores`). A minted thread opens on the
  * Start-a-session dialog (#391) — every way the page mints one is a new thread the person is about
- * to start.
+ * to start. `threadId` is new unless the URL named one the server has never held (#378): that
+ * thread is started under the id the URL already says.
  */
-export function mintThread(fetchImpl?: FetchLike, projectId?: string): ThreadStores {
+export function mintThread(fetchImpl?: FetchLike, projectId?: string, threadId?: string): ThreadStores {
   makeRoomForOneMore()
-  const stores = createThreadStores(crypto.randomUUID(), [], fetchImpl, { projectId, initialDraft: '' })
+  const stores = createThreadStores(threadId ?? crypto.randomUUID(), [], fetchImpl, { projectId, initialDraft: '' })
   stores.startSession.set(true)
   threads.set(stores.threadId, stores)
   summaries.set(stores.threadId, {
