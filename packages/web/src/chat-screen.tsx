@@ -1570,7 +1570,7 @@ const KEEP_VIEW = (): void => undefined
  * bug (#362 review), one level up. `inert` keeps it out of the tab order and the accessibility tree.
  *
  * ⓘ Exported for `__tests__/chat-screen.test.tsx` only, which mounts two of them to pin
- * that a hidden pane renders no debug column. Nothing else imports it.
+ * that an off-screen pane renders no debug column. Nothing else imports it.
  */
 export function ThreadPane({
   threadId,
