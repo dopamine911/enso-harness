@@ -152,6 +152,12 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
     '/api/stored-threads': options.storedThreads ?? [],
     '/api/projects': options.projects ?? [SCRIPTED_LAUNCH_PROJECT],
   }
+  /** A thread analysis each view reads (#45, #441, #453), without its `threadId`; undefined is the 404. */
+  const analysisReads: Readonly<Record<string, () => object | undefined>> = {
+    stats: () => options.stats,
+    eval: () => options.eval,
+    git: () => (options.git === undefined ? undefined : { cwd: '/scripted/launch', git: options.git() }),
+  }
   /** The page's own reads — mode seed, the rail's stored list, a resume click's history. Exact paths. */
   const pageRead = (path: string): Response | undefined => {
     const literal = literalReads[path]
@@ -171,20 +177,11 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
       const threadId = decodeURIComponent(commands[1])
       return Response.json({ threadId, commands: options.commands ?? [], source: 'live' })
     }
-    const stats = /^\/api\/threads\/([^/]+)\/stats$/.exec(path)
-    if (stats?.[1] !== undefined) {
-      if (options.stats === undefined) return new Response('nothing has run in this thread', { status: 404 })
-      return Response.json({ threadId: decodeURIComponent(stats[1]), ...options.stats })
-    }
-    const git = /^\/api\/threads\/([^/]+)\/git$/.exec(path)
-    if (git?.[1] !== undefined) {
-      if (options.git === undefined) return new Response('nothing has run in this thread', { status: 404 })
-      return Response.json({ threadId: decodeURIComponent(git[1]), cwd: '/scripted/launch', git: options.git() })
-    }
-    const evaluated = /^\/api\/threads\/([^/]+)\/eval$/.exec(path)
-    if (evaluated?.[1] !== undefined) {
-      if (options.eval === undefined) return new Response('nothing has run in this thread', { status: 404 })
-      return Response.json({ threadId: decodeURIComponent(evaluated[1]), ...options.eval })
+    const analysis = /^\/api\/threads\/([^/]+)\/(stats|eval|git)$/.exec(path)
+    if (analysis?.[1] !== undefined && analysis[2] !== undefined) {
+      const payload = analysisReads[analysis[2]]?.()
+      if (payload === undefined) return new Response('nothing has run in this thread', { status: 404 })
+      return Response.json({ threadId: decodeURIComponent(analysis[1]), ...payload })
     }
     const inspection = /^\/api\/threads\/([^/]+)$/.exec(path)
     if (inspection?.[1] !== undefined) {

@@ -161,25 +161,30 @@ function parseStatus(output: string): StatusFacts {
   const records = output.split('\0')
   for (let recordIndex = 0; recordIndex < records.length; recordIndex += 1) {
     const record = records[recordIndex] ?? ''
-    if (record.startsWith('# branch.oid ')) {
-      const oid = record.slice('# branch.oid '.length)
-      facts.head = oid === '(initial)' ? null : oid
-    } else if (record.startsWith('# branch.head ')) {
-      const head = record.slice('# branch.head '.length)
-      facts.branch = head === '(detached)' ? null : head
-    } else if (record.startsWith('# branch.upstream ')) {
-      facts.upstream = record.slice('# branch.upstream '.length)
-    } else if (record.startsWith('1 ') || record.startsWith('2 ')) {
-      if (record[2] !== '.') facts.changes.staged += 1
-      if (record[3] !== '.') facts.changes.unstaged += 1
-      if (record.startsWith('2 ')) recordIndex += 1
-    } else if (record.startsWith('u ')) {
-      facts.changes.conflicted += 1
-    } else if (record.startsWith('? ')) {
-      facts.changes.untracked += 1
-    }
+    if (record.startsWith('# ')) readHeader(facts, record)
+    else countChange(facts.changes, record)
+    if (record.startsWith('2 ')) recordIndex += 1
   }
   return facts
+}
+
+/** A `# branch.*` header: HEAD's commit (`(initial)` before one), its branch (`(detached)`), the upstream. */
+function readHeader(facts: StatusFacts, record: string): void {
+  const [, key, value = ''] = /^# (branch\.\w+) (.*)$/s.exec(record) ?? []
+  if (key === 'branch.oid') facts.head = value === '(initial)' ? null : value
+  else if (key === 'branch.head') facts.branch = value === '(detached)' ? null : value
+  else if (key === 'branch.upstream') facts.upstream = value
+}
+
+/** One changed path: `1`/`2` ordinary or renamed with its index and tree columns, `u` unmerged, `?` untracked. */
+function countChange(changes: StatusFacts['changes'], record: string): void {
+  const kind = record.slice(0, 2)
+  if (kind === 'u ') changes.conflicted += 1
+  else if (kind === '? ') changes.untracked += 1
+  else if (kind === '1 ' || kind === '2 ') {
+    if (record[2] !== '.') changes.staged += 1
+    if (record[3] !== '.') changes.unstaged += 1
+  }
 }
 
 /** The marker each stopped operation leaves in the git directory, checked in this order. */

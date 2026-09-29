@@ -1,11 +1,9 @@
 import { type EnsoGitRepository, type EnsoGitState, EnsoThreadGit } from '@enso/core'
 import type { UIMessage } from '@tanstack/ai-client'
 import { GitBranchIcon } from 'lucide-react'
-import { useEffect, useState } from 'react'
 import type { FetchLike } from './browser-logging.ts'
+import { useReadOnUsage } from './read-on-usage.ts'
 import { readSchemaRoute } from './route-read.ts'
-import { useThreadStores } from './store.ts'
-import { latestWins } from './thread-debug.tsx'
 
 /**
  * The status bar's git readout (#453): the branch, how far it is ahead of and behind the last
@@ -54,29 +52,10 @@ export function settledToolResults(messages: ReadonlyArray<UIMessage>): number {
 
 /**
  * The thread's git state, read on mount, whenever `moment` changes (a tool result settled, the run
- * started or ended) and whenever the thread's usage moves.
+ * started or ended) and whenever the thread's usage moves (`read-on-usage.ts`).
  */
 export function useThreadGit(moment: string): GitOutcome {
-  const stores = useThreadStores()
-  const [outcome, setOutcome] = useState<GitOutcome>(NONE)
-  useEffect(() => {
-    // A read issued before this moment is dropped by the cleanup; the readout shown stays until
-    // the new one lands, so the bar does not blink on every settled call.
-    let mounted = true
-    const readLatest = latestWins(() => readThreadGit(stores.threadId, stores.fetch))
-    const refresh = (): void => {
-      void readLatest().then((latest) => {
-        if (mounted && latest !== undefined) setOutcome(latest)
-      })
-    }
-    refresh()
-    const unsubscribe = stores.usage.subscribe(refresh)
-    return () => {
-      mounted = false
-      unsubscribe()
-    }
-  }, [stores, moment])
-  return outcome
+  return useReadOnUsage(readThreadGit, NONE, moment)
 }
 
 /** Where the baseline came from, in words — the tooltip's first line. */
