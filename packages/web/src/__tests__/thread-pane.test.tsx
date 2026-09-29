@@ -2,6 +2,8 @@ import { afterAll, afterEach, expect, spyOn, test } from 'bun:test'
 import {
   ENSO_GUARD_DENIAL_ENTRY,
   ENSO_PROVIDER_REFUSAL_KEY,
+  type EnsoGitFileChange,
+  type EnsoGitRepository,
   type EnsoThreadHistory,
   type EnsoThreadStats,
 } from '@enso/core'
@@ -254,9 +256,11 @@ test("every request a pane makes goes through its thread's fetch, never the page
   await pane.unmount()
   // The Stats and Context views read their routes; the thread's server answers 404, which the view
   // says as "nothing has run" — the tripwire's 500 would read as a failure instead.
-  for (const view of ['stats', 'context'] as const) {
+  for (const view of ['stats', 'context', 'changes'] as const) {
     const viewing = await mountPane({ view, globalFetch: tripwire })
-    await eventually(() => expect(viewing.container.textContent).toContain('nothing has run in this thread yet'))
+    await eventually(() =>
+      expect(viewing.container.textContent?.toLowerCase()).toContain('nothing has run in this thread yet'),
+    )
     await viewing.unmount()
   }
   expect(strays).toEqual([])
@@ -1419,6 +1423,90 @@ test('the status bar reads git on mount and again when a tool result settles (#4
   )
   await eventually(() => expect(pane.status()).toContain('· 1 unstaged'))
   expect(reads).toBeGreaterThan(beforeRun)
+  await pane.unmount()
+})
+
+// #452: the Changes view — the tree of every file that differs from the last push, the chosen
+// file's diff side by side, a directory folded away, and a read again when a tool result settles.
+test('the Changes view lists the tree, shows the chosen file, folds a directory, and reads again on a settled call (#452)', async () => {
+  const repository: EnsoGitRepository = {
+    kind: 'repository',
+    root: '/scripted/launch',
+    head: 'f00d',
+    branch: 'main',
+    upstream: 'origin/main',
+    baseline: { rule: 'upstream', ref: 'origin/main', commit: 'f00d' },
+    ahead: 0,
+    behind: 0,
+    changes: { staged: 0, unstaged: 2, untracked: 0, conflicted: 0 },
+    operation: null,
+  }
+  const edit = (path: string, before: string, after: string): EnsoGitFileChange => ({
+    path,
+    oldPath: null,
+    status: 'modified',
+    added: 1,
+    removed: 1,
+    patch: [`diff --git a/${path} b/${path}`, '@@ -1 +1 @@', `-${before}`, `+${after}`, ''].join('\n'),
+    omitted: null,
+  })
+  let files = [edit('src/a.ts', 'alpha-old', 'alpha-new'), edit('src/b.ts', 'beta-old', 'beta-new')]
+  const pane = await mountPane({
+    view: 'changes',
+    server: { changes: () => ({ git: repository, files, truncated: false }) },
+  })
+  await pane.settle(SNAPSHOT_IDLE)
+  const panel = (): HTMLElement => {
+    const found = pane.container.querySelector<HTMLElement>('#thread-view-changes')
+    if (found === null) throw new Error('expected the Changes panel')
+    return found
+  }
+  const fileButton = (name: string): HTMLButtonElement => {
+    const found = [...panel().querySelectorAll<HTMLButtonElement>('nav button')].find((button) =>
+      button.textContent?.includes(name),
+    )
+    if (found === undefined) throw new Error(`expected ${name} in the tree`)
+    return found
+  }
+  await eventually(() => expect(panel().textContent).toContain('alpha-new'))
+  expect(panel().textContent).not.toContain('beta-new')
+  await flush(async () => fileButton('b.ts').click())
+  await eventually(() => expect(panel().textContent).toContain('beta-new'))
+  expect(fileButton('b.ts').getAttribute('aria-current')).toBe('true')
+
+  // Folding `src/` hides its files; the diff on screen stays.
+  const folder = fileButton('src')
+  expect(folder.getAttribute('aria-expanded')).toBe('true')
+  await flush(async () => folder.click())
+  expect(folder.getAttribute('aria-expanded')).toBe('false')
+  expect(panel().querySelector('nav')?.textContent).not.toContain('a.ts')
+  await flush(async () => folder.click())
+
+  // A tool result settles: the view reads again, and the chosen file stays chosen.
+  files = [...files, edit('src/c.ts', 'gamma-old', 'gamma-new')]
+  await flush(async () => {
+    typeInto(pane.composer(), 'edit c')
+    pressEnter(pane.composer())
+    await tick()
+  })
+  await pane.settle(
+    { type: 'observation', seq: 1, observation: { kind: 'message-start', role: 'assistant' } },
+    { type: 'observation', seq: 2, observation: { kind: 'tool-call', toolCallId: 'c1', toolName: 'edit', args: {} } },
+    {
+      type: 'observation',
+      seq: 3,
+      observation: {
+        kind: 'tool-result',
+        toolCallId: 'c1',
+        toolName: 'edit',
+        text: 'ok',
+        complete: true,
+        isError: false,
+      },
+    },
+  )
+  await eventually(() => expect(panel().querySelector('nav')?.textContent).toContain('c.ts'))
+  expect(panel().textContent).toContain('beta-new')
   await pane.unmount()
 })
 

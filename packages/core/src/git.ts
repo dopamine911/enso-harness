@@ -1,7 +1,8 @@
 /**
  * git, read (#453) — THE one way Enso runs git: the run-context recorder's revision probe
  * (#435) and the web server's `GET /api/threads/:threadId/git` both come through {@link runGitIn}.
- * {@link readGitState} turns a cwd into an {@link EnsoGitState}, the last-push baseline included.
+ * {@link readGitState} turns a cwd into an {@link EnsoGitState}, the last-push baseline included;
+ * {@link readGitChanges} lists every file that differs from that baseline, with its patch (#452).
  *
  * ⚠ GIT IN THE GIVEN CWD, NOT THE ENVIRONMENT'S REPOSITORY. git honours an inherited `GIT_DIR` /
  * `GIT_WORK_TREE` / `GIT_INDEX_FILE` over its working directory, and git exports them to every
@@ -25,9 +26,15 @@
  */
 
 import { execFile } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, lstatSync } from 'node:fs'
 import { join } from 'node:path'
-import type { EnsoGitBaseline, EnsoGitOperation, EnsoGitRepository, EnsoGitState } from './git-state.ts'
+import type {
+  EnsoGitBaseline,
+  EnsoGitFileChange,
+  EnsoGitOperation,
+  EnsoGitRepository,
+  EnsoGitState,
+} from './git-state.ts'
 
 /**
  * How long one git query may take.
@@ -35,6 +42,12 @@ import type { EnsoGitBaseline, EnsoGitOperation, EnsoGitRepository, EnsoGitState
  * @group Git
  */
 export const GIT_TIMEOUT_MS = 5000
+
+/**
+ * The most a query may print. A diff past it is killed like a timed-out one (code -1): its reader
+ * says the patches were too large, never that nothing changed.
+ */
+const GIT_MAX_OUTPUT_BYTES = 32 * 1024 * 1024
 
 /**
  * What a git query answered. `code` is git's exit code, or -1 when git could not be started or was
@@ -106,7 +119,7 @@ export function runGitIn(environment: NodeJS.ProcessEnv, args: readonly string[]
   execFile(
     'git',
     [...GIT_READ_ONLY_CONFIG, ...args],
-    { cwd, env, timeout: GIT_TIMEOUT_MS },
+    { cwd, env, timeout: GIT_TIMEOUT_MS, maxBuffer: GIT_MAX_OUTPUT_BYTES },
     (error, stdout, stderr) => {
       resolve({ code: exitCode(error), stdout, stderr })
     },
@@ -303,5 +316,205 @@ export async function readGitState(runGit: GitRunner, cwd: string): Promise<Enso
     behind,
     changes: status.changes,
     operation: operationIn(gitDirectory),
+  }
+}
+
+// ── What changed since the baseline (#452) ─────────────────────────────────────────────────────
+
+/** The most files a page is sent; the rest are counted as `truncated`. */
+const MAX_CHANGED_FILES = 500
+/** The largest patch sent for one file, in characters; a larger one is `too-large`. */
+const MAX_PATCH_CHARS = 512 * 1024
+/** The most patch text one answer carries; files past it are `too-large`. */
+const MAX_TOTAL_PATCH_CHARS = 8 * 1024 * 1024
+/** An untracked file larger than this is not read at all: `too-large`, its counts unknown. */
+const MAX_UNTRACKED_BYTES = 1024 * 1024
+
+/**
+ * The diff options every changes query takes. ⚠ Nothing the repository or the user configures may
+ * change what is read or run: no external diff program, no textconv filter (both run programs the
+ * config names), no colour, and paths from the root whatever `diff.relative` says.
+ */
+const DIFF_OPTIONS = ['--no-color', '--no-ext-diff', '--no-textconv', '--no-relative', '--find-renames']
+
+const STATUS_LETTERS: Readonly<Record<string, EnsoGitFileChange['status']>> = {
+  A: 'added',
+  M: 'modified',
+  D: 'deleted',
+  R: 'renamed',
+  C: 'copied',
+  T: 'type-changed',
+}
+
+interface ListedFile {
+  path: string
+  oldPath: string | null
+  status: EnsoGitFileChange['status']
+}
+
+/**
+ * `git diff --name-status -z`: a status field, then its path — two paths for a rename or copy,
+ * whose status carries a similarity score (`R087`).
+ */
+function parseNameStatus(output: string): ListedFile[] {
+  const fields = output.split('\0')
+  const files: ListedFile[] = []
+  let fieldIndex = 0
+  while (fieldIndex < fields.length) {
+    const letter = fields[fieldIndex]?.[0]
+    const status = letter === undefined ? undefined : STATUS_LETTERS[letter]
+    if (status === undefined) {
+      fieldIndex += 1
+      continue
+    }
+    const twoPaths = status === 'renamed' || status === 'copied'
+    const first = fields[fieldIndex + 1] ?? ''
+    const second = twoPaths ? (fields[fieldIndex + 2] ?? '') : ''
+    files.push(twoPaths ? { path: second, oldPath: first, status } : { path: first, oldPath: null, status })
+    fieldIndex += twoPaths ? 3 : 2
+  }
+  return files.filter((file) => file.path !== '')
+}
+
+/**
+ * `git diff --numstat -z`, in the order `--name-status` lists: added and removed per file, `-` for
+ * a binary file. A rename's record is `added\tremoved\t` followed by its two paths as fields.
+ */
+function parseNumstat(output: string): Array<{ added: number | null; removed: number | null }> {
+  const fields = output.split('\0')
+  const counts: Array<{ added: number | null; removed: number | null }> = []
+  let fieldIndex = 0
+  while (fieldIndex < fields.length) {
+    const match = /^(-|\d+)\t(-|\d+)\t(.*)$/s.exec(fields[fieldIndex] ?? '')
+    if (match === null) {
+      fieldIndex += 1
+      continue
+    }
+    counts.push({
+      added: match[1] === '-' ? null : Number(match[1]),
+      removed: match[2] === '-' ? null : Number(match[2]),
+    })
+    // An empty path field means the two paths of a rename follow as their own fields.
+    fieldIndex += match[3] === '' ? 3 : 1
+  }
+  return counts
+}
+
+/** One unified diff split per file: every file's part starts at its `diff --git` line. */
+function splitPatches(output: string): string[] {
+  return output.split(/^(?=diff --git )/m).filter((part) => part.startsWith('diff --git '))
+}
+
+/** A patch's own counts: its `+` and `-` lines, headers aside. */
+function countPatch(patch: string): { added: number; removed: number } {
+  let added = 0
+  let removed = 0
+  let inHunk = false
+  for (const line of patch.split('\n')) {
+    if (line.startsWith('@@')) inHunk = true
+    else if (inHunk && line.startsWith('+')) added += 1
+    else if (inHunk && line.startsWith('-')) removed += 1
+  }
+  return { added, removed }
+}
+
+const isBinaryPatch = (patch: string): boolean => /^(Binary files .* differ|GIT binary patch)$/m.test(patch)
+
+/** A file's change as sent: its patch while the answer has room, `too-large` once it has not. */
+function withPatch(
+  file: ListedFile,
+  counts: { added: number | null; removed: number | null },
+  patch: string | undefined,
+  budget: { left: number },
+): EnsoGitFileChange {
+  const change = { ...file, ...counts }
+  if (patch !== undefined && isBinaryPatch(patch))
+    return { ...change, added: null, removed: null, patch: null, omitted: 'binary' }
+  if (patch === undefined || patch.length > MAX_PATCH_CHARS || patch.length > budget.left) {
+    return { ...change, patch: null, omitted: 'too-large' }
+  }
+  budget.left -= patch.length
+  return { ...change, patch, omitted: null }
+}
+
+/** The tree git compares an unborn branch with: the empty tree, in this repository's hash. */
+async function emptyTree(runGit: GitRunner, root: string): Promise<string | null> {
+  const hashed = await runGit(['hash-object', '-t', 'tree', '/dev/null'], root)
+  return hashed.code === 0 ? hashed.stdout.trim() : null
+}
+
+/** Tracked files that differ from `base`, in the working tree: committed, staged or not. */
+async function trackedChanges(
+  runGit: GitRunner,
+  root: string,
+  base: string,
+  budget: { left: number },
+): Promise<EnsoGitFileChange[]> {
+  const [names, numbers, patches] = await Promise.all([
+    runGit(['diff', ...DIFF_OPTIONS, '--name-status', '-z', base, '--'], root),
+    runGit(['diff', ...DIFF_OPTIONS, '--numstat', '-z', base, '--'], root),
+    runGit(['diff', ...DIFF_OPTIONS, base, '--'], root),
+  ])
+  if (names.code !== 0) throw new Error(reasonOf(names))
+  const files = parseNameStatus(names.stdout)
+  const counts = numbers.code === 0 ? parseNumstat(numbers.stdout) : []
+  // A patch run that failed (too much output) or split differently from the list sends no patch:
+  // pairing file N with some other file's patch would be worse than none.
+  const split = patches.code === 0 ? splitPatches(patches.stdout) : []
+  const aligned = split.length === files.length
+  return files.map((file, fileIndex) =>
+    withPatch(
+      file,
+      counts[fileIndex] ?? { added: null, removed: null },
+      aligned ? split[fileIndex] : undefined,
+      budget,
+    ),
+  )
+}
+
+/** A file git does not track yet, diffed against nothing — read only when it is small enough. */
+async function untrackedChange(
+  runGit: GitRunner,
+  root: string,
+  path: string,
+  budget: { left: number },
+): Promise<EnsoGitFileChange> {
+  const file: ListedFile = { path, oldPath: null, status: 'untracked' }
+  const size = lstatSync(join(root, path), { throwIfNoEntry: false })?.size ?? 0
+  if (size > MAX_UNTRACKED_BYTES) return { ...file, added: null, removed: null, patch: null, omitted: 'too-large' }
+  // `--no-index` exits 1 when the two differ — which a new file always does against nothing.
+  const diffed = await runGit(['diff', ...DIFF_OPTIONS, '--no-index', '--', '/dev/null', path], root)
+  const patch = diffed.code === 0 || diffed.code === 1 ? diffed.stdout : undefined
+  const counts = patch === undefined ? { added: null, removed: null } : countPatch(patch)
+  return withPatch(file, counts, patch, budget)
+}
+
+/**
+ * Every file in `repository`'s working tree that differs from its baseline commit — commits not yet
+ * pushed, staged and unstaged edits, deletions, renames — and every untracked file, each with its
+ * patch while the answer has room (`MAX_*` above). Run from the repository's root, so every path is
+ * the root's. A baseline of `none` (no commit yet) compares with the empty tree.
+ *
+ * @group Git
+ */
+export async function readGitChanges(
+  runGit: GitRunner,
+  repository: EnsoGitRepository,
+): Promise<{ files: EnsoGitFileChange[]; truncated: boolean }> {
+  const { root } = repository
+  const base = repository.baseline.commit ?? (await emptyTree(runGit, root))
+  if (base === null) throw new Error('git could not name the empty tree to compare with')
+  const budget = { left: MAX_TOTAL_PATCH_CHARS }
+  const tracked = await trackedChanges(runGit, root, base, budget)
+  const listed = await runGit(['ls-files', '--others', '--exclude-standard', '-z'], root)
+  // A nested repository is listed as its directory (`vendor/lib/`), which has no diff of its own.
+  const untrackedPaths =
+    listed.code === 0 ? listed.stdout.split('\0').filter((path) => path !== '' && !path.endsWith('/')) : []
+  const room = Math.max(0, MAX_CHANGED_FILES - tracked.length)
+  const untracked: EnsoGitFileChange[] = []
+  for (const path of untrackedPaths.slice(0, room)) untracked.push(await untrackedChange(runGit, root, path, budget))
+  return {
+    files: [...tracked.slice(0, MAX_CHANGED_FILES), ...untracked],
+    truncated: tracked.length > MAX_CHANGED_FILES || untrackedPaths.length > room,
   }
 }

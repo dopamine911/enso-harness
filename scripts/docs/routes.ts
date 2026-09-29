@@ -118,6 +118,14 @@ const REGEX_ROUTE_METADATA: Record<string, RouteMetadata> = {
     errors:
       '400 malformed thread id; 403 untrusted origin; 404 no session, or its project is no longer served; 500 handler failure',
   }),
+  THREAD_CHANGES_ROUTE: threadRead({
+    path: '/api/threads/:threadId/changes',
+    handler: 'respondWithThreadChanges',
+    success:
+      "200 `EnsoThreadChanges` JSON — git's state in the thread's cwd and every file that differs from its last-push baseline (#452): unpushed commits, staged and unstaged edits, deletions, renames and untracked files, each with its unified diff unless binary or too large; `truncated` past 500 files. A diff git cannot produce reads as `unavailable`. Read-only, no fetch",
+    errors:
+      '400 malformed thread id; 403 untrusted origin; 404 no session, or its project is no longer served; 500 handler failure',
+  }),
   THREAD_HISTORY_ROUTE: threadRead({
     path: '/api/threads/:threadId/history',
     handler: 'respondWithThreadHistory',

@@ -1,9 +1,9 @@
-import { type EnsoGitRepository, type EnsoGitState, EnsoThreadGit } from '@enso/core'
+import { type EnsoGitRepository, EnsoThreadGit } from '@enso/core'
 import type { UIMessage } from '@tanstack/ai-client'
 import { GitBranchIcon } from 'lucide-react'
 import type { FetchLike } from './browser-logging.ts'
 import { useReadOnUsage } from './read-on-usage.ts'
-import { readSchemaRoute } from './route-read.ts'
+import { readThreadRoute, THREAD_READ_NONE, type ThreadReadOutcome } from './route-read.ts'
 
 /**
  * The status bar's git readout (#453): the branch, how far it is ahead of and behind the last
@@ -22,24 +22,11 @@ import { readSchemaRoute } from './route-read.ts'
  */
 
 /** What the bar holds: nothing yet (or a thread nothing has run in), git's state, or why not. */
-export type GitOutcome =
-  | { readonly kind: 'none' }
-  | { readonly kind: 'read'; readonly git: EnsoGitState }
-  | { readonly kind: 'failed'; readonly problem: string }
-
-const NONE: GitOutcome = { kind: 'none' }
+export type GitOutcome = ThreadReadOutcome<EnsoThreadGit>
 
 /** `GET /api/threads/:threadId/git`, as the bar holds it. */
-export async function readThreadGit(threadId: string, fetchImpl: FetchLike): Promise<GitOutcome> {
-  const read = await readSchemaRoute(
-    `/api/threads/${encodeURIComponent(threadId)}/git`,
-    EnsoThreadGit,
-    'git',
-    fetchImpl,
-  )
-  if (read.kind === 'absent') return NONE
-  return read.kind === 'read' ? { kind: 'read', git: read.payload.git } : read
-}
+export const readThreadGit = (threadId: string, fetchImpl: FetchLike): Promise<GitOutcome> =>
+  readThreadRoute(threadId, 'git', EnsoThreadGit, fetchImpl)
 
 /** Tool results in the transcript — each one a moment the tree may have changed. */
 export function settledToolResults(messages: ReadonlyArray<UIMessage>): number {
@@ -55,11 +42,11 @@ export function settledToolResults(messages: ReadonlyArray<UIMessage>): number {
  * started or ended) and whenever the thread's usage moves (`read-on-usage.ts`).
  */
 export function useThreadGit(moment: string): GitOutcome {
-  return useReadOnUsage(readThreadGit, NONE, moment)
+  return useReadOnUsage(readThreadGit, THREAD_READ_NONE, moment)
 }
 
 /** Where the baseline came from, in words — the tooltip's first line. */
-function baselineText(repository: EnsoGitRepository): string {
+export function baselineText(repository: EnsoGitRepository): string {
   const { baseline } = repository
   switch (baseline.rule) {
     case 'upstream':
@@ -126,7 +113,7 @@ function RepositoryReadout({ repository }: { readonly repository: EnsoGitReposit
 export function GitIndicator({ outcome }: { readonly outcome: GitOutcome }): React.ReactNode {
   if (outcome.kind === 'none') return null
   if (outcome.kind === 'failed') return <span title={`git state could not be read: ${outcome.problem}`}>git ?</span>
-  const { git } = outcome
+  const { git } = outcome.payload
   if (git.kind === 'not-a-repository')
     return <span title="this thread's project is not in a git repository">no git</span>
   if (git.kind === 'unavailable') return <span title={`git could not answer: ${git.reason}`}>git unavailable</span>

@@ -19,7 +19,7 @@ import {
   isEnsoThreadId,
   withEnsoLogContext,
 } from '@enso/core'
-import { readGitState, runGit } from '@enso/core/git'
+import { readGitChanges, readGitState, runGit } from '@enso/core/git'
 import { missingVendorPaths } from '@enso/core/pi-manifest'
 import { AGENT_RUNTIME_VERSION, type AgentHost, createAgentHost, SessionDirectoryRefused } from '../host/agent-host.ts'
 import { withoutHostValues } from '../host/host-commands.ts'
@@ -50,7 +50,7 @@ import { createProjectRegistry, ProjectUnavailable } from './projects.ts'
 import { SSE_KEEPALIVE_MS } from './sse.ts'
 import { createContextRequestRoute, createThreadContextRoute } from './thread-context-route.ts'
 import { createThreadEvalRoute } from './thread-eval-route.ts'
-import { createThreadGitRoute } from './thread-git-route.ts'
+import { createThreadChangesRoute, createThreadGitRoute } from './thread-git-route.ts'
 import { createThreadManifestRoute } from './thread-manifest-route.ts'
 import { readThreadMount, type ThreadReadDeps } from './thread-read.ts'
 import { createThreadRegistry, inspectThread, type ThreadView } from './thread-registry.ts'
@@ -76,6 +76,8 @@ const THREAD_MANIFEST_ROUTE = /^\/api\/threads\/([^/?#]+)\/manifest$/
 const THREAD_EVAL_ROUTE = /^\/api\/threads\/([^/?#]+)\/eval$/
 /** `GET /api/threads/<threadId>/git` — git in the thread's cwd: branch, last-push baseline, unpushed work (#453). */
 const THREAD_GIT_ROUTE = /^\/api\/threads\/([^/?#]+)\/git$/
+/** `GET /api/threads/<threadId>/changes` — every file that differs from the last-push baseline, with its patch (#452). */
+const THREAD_CHANGES_ROUTE = /^\/api\/threads\/([^/?#]+)\/changes$/
 /** The wire (#112): `POST …/prompt`, `GET …/follow`, `POST …/dialog`, `POST …/abort` (#116). See `follow.ts`. */
 const THREAD_FOLLOW_ROUTE = /^\/api\/threads\/([^/?#]+)\/follow$/
 const THREAD_PROMPT_ROUTE = /^\/api\/threads\/([^/?#]+)\/prompt$/
@@ -600,15 +602,16 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   // One thread's session eval (#441): the branch's events and the log's, scored mechanically.
   const threadEval = createThreadEvalRoute({ threads, host, logsDir: options.logsDir })
   // One thread's git state (#453): read in its cwd when asked, only in a directory this server serves.
-  const threadGit = createThreadGitRoute({
-    threads,
-    host,
-    servesDirectory,
-    readGit: (cwd) => readGitState(runGit, cwd),
+  const gitDeps = { threads, host, servesDirectory, readGit: (cwd: string) => readGitState(runGit, cwd) }
+  const threadGit = createThreadGitRoute(gitDeps)
+  // What changed since the last push (#452): the same state, with every file and its patch.
+  const threadChanges = createThreadChangesRoute({
+    ...gitDeps,
+    readChanges: (repository) => readGitChanges(runGit, repository),
   })
 
   /**
-   * A thread analysis — stats (#45), context (#361), manifest (#435), git (#453) — or 404 for a thread the
+   * A thread analysis — stats (#45), context (#361), manifest (#435), git (#453), changes (#452) — or 404 for a thread the
    * server holds neither live nor on disk. The payload is built before the head, as
    * `respondWithStats` builds it: a day file that fails to read is the 500 `answerOrFail`
    * writes, never a throw after a committed 200.
@@ -634,6 +637,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   const respondWithThreadManifest = analysisResponder(threadManifest)
   const respondWithThreadEval = analysisResponder(threadEval)
   const respondWithThreadGit = analysisResponder(threadGit)
+  const respondWithThreadChanges = analysisResponder(threadChanges)
   /**
    * One request's context; the request is the route's second capture, a turn or `next` — the
    * dispatcher's own match, so the url is read once. A turn the thread lacks, or a thread held
@@ -744,6 +748,11 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
       method: 'GET',
       route: THREAD_GIT_ROUTE,
       respond: idOnly(respondWithThreadGit),
+    },
+    {
+      method: 'GET',
+      route: THREAD_CHANGES_ROUTE,
+      respond: idOnly(respondWithThreadChanges),
     },
     {
       method: 'GET',

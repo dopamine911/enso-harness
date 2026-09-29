@@ -40,8 +40,10 @@ export async function readSchemaRoute<Schema extends TSchema>(
  * A thread analysis as a view holds it (#45, #361): still reading, read, or why not. The Stats and
  * Context views read their routes this one way.
  */
-export type AnalysisOutcome<Payload> =
-  | { readonly kind: 'reading' }
+export type AnalysisOutcome<Payload> = { readonly kind: 'reading' } | SettledRead<Payload>
+
+/** A read that has come back: its payload, or why not. */
+type SettledRead<Payload> =
   | { readonly kind: 'read'; readonly payload: Payload }
   | { readonly kind: 'failed'; readonly problem: string }
 
@@ -58,11 +60,26 @@ export async function readThreadAnalysis<Schema extends TSchema>(
   schema: Schema,
   fetchImpl: FetchLike = fetch,
 ): Promise<AnalysisOutcome<Static<Schema>>> {
-  const read = await readSchemaRoute(
-    `/api/threads/${encodeURIComponent(threadId)}/${analysis}`,
-    schema,
-    analysis,
-    fetchImpl,
-  )
-  return read.kind === 'absent' ? { kind: 'failed', problem: 'nothing has run in this thread yet' } : read
+  const read = await readThreadRoute(threadId, analysis, schema, fetchImpl)
+  return read.kind === 'none' ? { kind: 'failed', problem: 'nothing has run in this thread yet' } : read
+}
+
+/**
+ * A thread read a readout holds (#452, #453): nothing yet — or a thread nothing has run in, which
+ * is not a failure to show — the payload, or why not. The git readout and the Changes view.
+ */
+export type ThreadReadOutcome<Payload> = { readonly kind: 'none' } | SettledRead<Payload>
+
+/** Where a thread read starts, and what a 404 is. */
+export const THREAD_READ_NONE = { kind: 'none' } as const
+
+/** `GET /api/threads/:threadId/<route>`, a 404 held as nothing to show. */
+export async function readThreadRoute<Schema extends TSchema>(
+  threadId: string,
+  route: string,
+  schema: Schema,
+  fetchImpl: FetchLike,
+): Promise<ThreadReadOutcome<Static<Schema>>> {
+  const read = await readSchemaRoute(`/api/threads/${encodeURIComponent(threadId)}/${route}`, schema, route, fetchImpl)
+  return read.kind === 'absent' ? THREAD_READ_NONE : read
 }

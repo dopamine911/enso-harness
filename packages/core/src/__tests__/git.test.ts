@@ -4,8 +4,8 @@ import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { Check } from 'typebox/value'
-import { type GitRunner, readGitState, runGitIn } from '../git.ts'
-import { EnsoGitState } from '../index.ts'
+import { type GitRunner, readGitChanges, readGitState, runGitIn } from '../git.ts'
+import { EnsoGitFileChange, EnsoGitState } from '../index.ts'
 import { findRepoRoot } from '../paths.ts'
 
 /**
@@ -261,4 +261,117 @@ test('⚠ an inherited GIT_DIR naming another repository does not reach the read
   expect(await readGitState(underHook, outside)).toEqual({ kind: 'not-a-repository' })
   // …and a cwd that IS a repository still answers its own revision.
   expect(await runGitIn(hookEnvironment, ['rev-parse', 'HEAD'], repoRoot)).toMatchObject({ code: 0, stdout: leaked })
+})
+
+// ── What changed since the baseline (#452) ────────────────────────────────────────────────────
+
+async function changesAt(cwd: string): Promise<Awaited<ReturnType<typeof readGitChanges>>> {
+  const read = await readGitChanges(runGit, await repositoryAt(cwd))
+  for (const file of read.files) expect(Check(EnsoGitFileChange, file)).toBe(true)
+  return read
+}
+
+test('every change since the last push is listed: unpushed commits, staged, unstaged, deleted, renamed, new', async () => {
+  const { clone } = cloned()
+  writeFileSync(join(clone, 'gone.md'), 'gone\n')
+  writeFileSync(join(clone, 'old-name.md'), 'a\nb\nc\nd\ne\n')
+  git(clone, 'add', '.')
+  git(clone, 'commit', '--quiet', '-m', 'files to change')
+  git(clone, 'push', '--quiet')
+  commit(clone, 'committed.md', 'not pushed\n')
+  writeFileSync(join(clone, 'README.md'), 'one\ntwo\n')
+  git(clone, 'add', 'README.md')
+  git(clone, 'rm', '--quiet', 'gone.md')
+  git(clone, 'mv', 'old-name.md', 'new-name.md')
+  writeFileSync(join(clone, 'fresh.md'), 'fresh\nfile\n')
+  const { files, truncated } = await changesAt(clone)
+  expect(truncated).toBe(false)
+  const byPath = Object.fromEntries(files.map((file) => [file.path, file]))
+  expect(byPath['committed.md']).toMatchObject({ status: 'added', added: 1, removed: 0, omitted: null })
+  expect(byPath['README.md']).toMatchObject({ status: 'modified', added: 1, removed: 0 })
+  expect(byPath['README.md']?.patch).toContain('+two')
+  expect(byPath['gone.md']).toMatchObject({ status: 'deleted', added: 0, removed: 1 })
+  expect(byPath['new-name.md']).toMatchObject({ status: 'renamed', oldPath: 'old-name.md', added: 0, removed: 0 })
+  expect(byPath['fresh.md']).toMatchObject({ status: 'untracked', added: 2, removed: 0, omitted: null })
+  expect(byPath['fresh.md']?.patch).toContain('+fresh')
+  // Each patch is its own file's, not a neighbour's.
+  for (const file of files.filter((change) => change.patch !== null)) expect(file.patch).toContain(file.path)
+
+  git(clone, 'add', '.')
+  git(clone, 'commit', '--quiet', '-m', 'all of it')
+  git(clone, 'push', '--quiet')
+  expect((await changesAt(clone)).files).toEqual([])
+})
+
+test('a binary file is listed without a patch; a large new file is not read', async () => {
+  const directory = repository()
+  writeFileSync(join(directory, 'image.bin'), Buffer.from([0, 1, 2, 3, 0, 255]))
+  git(directory, 'add', 'image.bin')
+  writeFileSync(join(directory, 'big.log'), 'x'.repeat(2 * 1024 * 1024))
+  const { files } = await changesAt(directory)
+  expect(files.find((file) => file.path === 'image.bin')).toMatchObject({
+    status: 'added',
+    added: null,
+    removed: null,
+    patch: null,
+    omitted: 'binary',
+  })
+  expect(files.find((file) => file.path === 'big.log')).toMatchObject({
+    status: 'untracked',
+    added: null,
+    patch: null,
+    omitted: 'too-large',
+  })
+})
+
+test('with no commit yet everything is compared with the empty tree', async () => {
+  const directory = scratch('unborn-changes')
+  git(directory, 'init', '--quiet', '-b', 'main')
+  writeFileSync(join(directory, 'staged.md'), 'staged\n')
+  git(directory, 'add', 'staged.md')
+  writeFileSync(join(directory, 'loose.md'), 'loose\n')
+  const { files } = await changesAt(directory)
+  expect(files.map((file) => [file.path, file.status])).toEqual([
+    ['staged.md', 'added'],
+    ['loose.md', 'untracked'],
+  ])
+})
+
+test("⚠ paths are the root's from a subdirectory cwd, whatever diff.relative says", async () => {
+  const directory = repository()
+  mkdirSync(join(directory, 'src'))
+  commit(directory, 'src/app.ts', 'one\n')
+  writeFileSync(join(directory, 'src', 'app.ts'), 'two\n')
+  writeFileSync(join(directory, 'README.md'), 'changed\n')
+  writeFileSync(join(directory, 'top.md'), 'new at the top\n')
+  git(directory, 'config', 'diff.relative', 'true')
+  const { files } = await changesAt(join(directory, 'src'))
+  expect(files.map((file) => file.path).sort()).toEqual(['README.md', 'src/app.ts', 'top.md'])
+})
+
+test('⚠ an external diff or textconv program the repository configures does not run', async () => {
+  const directory = repository()
+  const ran = join(scratch('diff-program'), 'ran')
+  const program = join(directory, 'diff-program.sh')
+  writeFileSync(program, `#!/bin/sh\ntouch '${ran}'\ncat "$1"\n`, { mode: 0o755 })
+  git(directory, 'config', 'diff.external', program)
+  git(directory, 'config', 'diff.shout.textconv', program)
+  writeFileSync(join(directory, '.gitattributes'), '*.md diff=shout\n')
+  writeFileSync(join(directory, 'README.md'), 'changed\n')
+  // The config really is live: git as a person runs it, the program runs.
+  git(directory, 'diff')
+  expect(existsSync(ran)).toBe(true)
+  execFileSync('rm', [ran])
+  const { files } = await changesAt(directory)
+  expect(existsSync(ran)).toBe(false)
+  expect(files.find((file) => file.path === 'README.md')?.patch).toContain('+changed')
+})
+
+test('a nested repository is not listed as a file', async () => {
+  const directory = repository()
+  const nested = join(directory, 'vendor')
+  mkdirSync(nested)
+  git(nested, 'init', '--quiet', '-b', 'main')
+  commit(nested, 'lib.ts', 'x\n')
+  expect((await changesAt(directory)).files).toEqual([])
 })

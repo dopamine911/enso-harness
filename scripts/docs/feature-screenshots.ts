@@ -391,7 +391,7 @@ async function openThread(page: Page, threadId: string): Promise<void> {
   await page.waitForTimeout(800)
 }
 
-async function tab(page: Page, name: 'Chat' | 'Context' | 'Stats'): Promise<void> {
+async function tab(page: Page, name: 'Chat' | 'Context' | 'Stats' | 'Changes'): Promise<void> {
   await page.getByRole('tab', { name, exact: true }).click()
   await page.waitForTimeout(1200)
 }
@@ -535,6 +535,20 @@ async function stats(page: Page, threadId: string): Promise<void> {
   ])
 }
 
+/** What changed since the last push (#452): pi's one edit, in the tree and side by side. */
+async function changes(page: Page, threadId: string): Promise<void> {
+  await openThread(page, threadId)
+  await tab(page, 'Changes')
+  const panel = page.locator('#thread-view-changes')
+  await panel.getByText("required('DATABASE_URL')", { exact: false }).first().waitFor()
+  await shoot(page, 'changes', [
+    { target: panel.getByText('no remote to compare with', { exact: false }), label: '1' },
+    { target: panel.getByRole('navigation', { name: 'changed files' }), label: '2' },
+    { target: panel.getByRole('heading', { name: 'src/config.ts' }), label: '3' },
+    { target: panel.getByText("required('DATABASE_URL')", { exact: false }).first(), label: '4' },
+  ])
+}
+
 /** The session eval under the stats (#441): its scorecard, then its timeline. */
 async function sessionEval(page: Page, threadId: string): Promise<void> {
   await openThread(page, threadId)
@@ -649,6 +663,7 @@ const LIVE_SHOTS = [
   contextBrowser,
   stats,
   sessionEval,
+  changes,
   debugging,
   settings,
   commandPalette,
