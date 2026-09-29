@@ -41,7 +41,7 @@ Nothing in the dialog changes anything until you press **Start session**. Then t
 
 The thread above was opened after a restart of the app, so it is cold. Its last run was on `claude-opus-4-1`, which the composer shows as `model (recorded):`. The thinking selector is hidden, because there is no live session to change. Sending a prompt starts the session again under the same id, and the chip becomes the live model.
 
-If a thread's last run was cut off before pi answered, the thread shows a notice with a **Continue** button. Continue picks up from the stored state without a new message.
+If a thread's last run was cut off before pi answered, the thread shows a notice with a **Continue** button. Continue picks up from the stored state without a new message. See [Forks and lineage](./lineage.md), which also covers what a thread records about the conditions it ran under.
 
 ## What it doesn't do
 

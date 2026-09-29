@@ -1,4 +1,4 @@
-import { type ChildProcess, spawn } from 'node:child_process'
+import { type ChildProcess, spawn, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createConnection } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -553,6 +553,55 @@ async function debugging(page: Page, threadId: string): Promise<void> {
   ])
 }
 
+async function settings(page: Page, threadId: string): Promise<void> {
+  await openThread(page, threadId)
+  await page.getByRole('button', { name: 'settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Settings' })
+  await dialog.getByText('Theme', { exact: true }).waitFor()
+  await page.waitForTimeout(500)
+  await shoot(page, 'settings', [
+    { target: dialog.getByText('Theme', { exact: true }), label: '1' },
+    { target: dialog.getByText('Body', { exact: true }), label: '2' },
+    { target: dialog.getByText('kept in this browser'), label: '3' },
+  ])
+}
+
+/**
+ * Forks the thread at its third prompt, from the page, and takes the two lineage shots: the fork
+ * in the rail with the prompt back in its composer, and the fork's manifest in the debug drawer.
+ */
+async function lineage(page: Page, threadId: string): Promise<void> {
+  await openThread(page, threadId)
+  const prompt = page.getByText(PROMPTS[2]).last()
+  await scrollToTop(prompt)
+  // The fork button under the third prompt: the third one on the page, prompts being in order.
+  await page.getByText('fork from here').nth(2).click()
+  // The source thread's pane stays mounted, hidden: the fork's composer is the visible one.
+  const composer = page.getByPlaceholder('ask pi something').filter({ visible: true })
+  await page.waitForURL((url) => url.searchParams.get('thread') !== threadId)
+  await waitFor(async () => (await composer.inputValue()) === PROMPTS[2], "the fork's prompt in its composer")
+  const rail = page.getByRole('navigation', { name: 'threads' })
+  await shoot(page, 'lineage-fork', [
+    { target: rail.getByText(/^forked from /).first(), label: '1' },
+    { target: composer, label: '2' },
+  ])
+  const forkId = new URL(page.url()).searchParams.get('thread') ?? ''
+  await page.goto(`${WEB}/?debug&thread=${forkId}`)
+  const manifest = page.getByLabel('fork point')
+  await manifest.waitFor()
+  await scrollToTop(page.getByText('fork point', { exact: true }))
+  await shoot(
+    page,
+    'lineage-fork-point',
+    [
+      { target: page.getByText('fork point', { exact: true }), label: '1' },
+      { target: manifest.getByText('forked from', { exact: true }), label: '2' },
+      { target: manifest.getByText('git', { exact: true }), label: '3' },
+    ],
+    [page.getByText('fork point', { exact: true }), manifest],
+  )
+}
+
 async function coldThread(page: Page, threadId: string): Promise<void> {
   await openThread(page, threadId)
   const rail = page.getByRole('navigation', { name: 'threads' })
@@ -565,7 +614,20 @@ async function coldThread(page: Page, threadId: string): Promise<void> {
 }
 
 /** The shots of the finished thread while its session is still live, in order. */
-const LIVE_SHOTS = [chat, guards, webAccess, permissionModes, context, contextBrowser, stats, debugging, commandPalette]
+const LIVE_SHOTS = [
+  chat,
+  guards,
+  webAccess,
+  permissionModes,
+  context,
+  contextBrowser,
+  stats,
+  debugging,
+  settings,
+  commandPalette,
+  // ⚠ LAST of the live shots: it adds a second thread to the rail.
+  lineage,
+]
 
 // --- running it -------------------------------------------------------------------------------
 
@@ -638,6 +700,17 @@ async function main(): Promise<void> {
     mkdirSync(dirname(join(project, path)), { recursive: true })
     writeFileSync(join(project, path), text)
   }
+  // A repository, so the run context records a revision — and, once pi's edit lands, `dirty`.
+  const git = (...args: string[]): void => {
+    const run = spawnSync('git', ['-c', 'user.name=demo', '-c', 'user.email=demo@example.invalid', ...args], {
+      cwd: project,
+      encoding: 'utf8',
+    })
+    if (run.status !== 0) throw new Error(`feature-screenshots: git ${args[0]} failed: ${run.stderr}`)
+  }
+  git('init', '--quiet', '--initial-branch=main')
+  git('add', '--all')
+  git('commit', '--quiet', '--message', 'shop-api')
   const modelLog = join(scratch, 'model.log')
   const stopModel = startFeatureModel(MODEL_PORT, FEATURE_SCRIPT, modelLog)
   let stack = startStack(home, project)
@@ -660,6 +733,14 @@ async function main(): Promise<void> {
     if (threadId === '')
       throw new Error(`feature-screenshots: the session did not finish (model log: ${modelLog})\n${failed.join('\n')}`)
     for (const shot of LIVE_SHOTS) await attempt(browser, shot.name, (page) => shot(page, threadId), failed)
+    // The session eval has no page yet (#441): its sample on `session-eval.md` is this output.
+    const evaluation = spawnSync(process.execPath, ['run', '--silent', 'eval', threadId], {
+      cwd: ROOT,
+      encoding: 'utf8',
+    })
+    process.stdout.write(
+      `feature-screenshots: \`bun run eval\` on the session:\n${evaluation.stdout}${evaluation.stderr}\n`,
+    )
 
     // A cold thread is one no session holds: restart the stack, and the thread is read off its file.
     await stopStack(stack)

@@ -33,7 +33,7 @@ In the browser:
 
 ![The session debug drawer beside a thread](./images/debug-drawer.png)
 
-1. **session debug**: what the page believes about the thread, what pi's session holds, what the server sent, and where the thread was forked from.
+1. **session debug**: what the page believes about the thread, what pi's session holds, what the server sent, and its **fork point** (see [Forks and lineage](./lineage.md)).
 2. **download log bundle**: the server's bundle with this page's own log added.
 
 ## What to look for

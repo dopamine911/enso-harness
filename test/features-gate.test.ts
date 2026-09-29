@@ -95,7 +95,8 @@ test('every Features page has the six parts, in order, and one or two screenshot
   const offenders: string[] = []
   for (const page of pages) {
     const text = readFileSync(join(FEATURES, page), 'utf8')
-    const headings = [...text.matchAll(/^## (.+)$/gm)].map((match) => match[1])
+    // Outside fenced blocks: a `## ` line in sample output is text, not the page's structure.
+    const headings = [...text.replace(/```[\s\S]*?```/g, '').matchAll(/^## (.+)$/gm)].map((match) => match[1])
     if (JSON.stringify(headings) !== JSON.stringify(SHAPE))
       offenders.push(`${page}: sections are ${headings.join(' / ')}`)
     const looks = text.slice(text.indexOf('## What it looks like'), text.indexOf('## What to look for'))

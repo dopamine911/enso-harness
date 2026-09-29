@@ -22,7 +22,7 @@ The thread's id is in the page URL, so a reload shows the same thread, and the b
 1. The thread in the rail. Its title is its first prompt.
 2. pi's thinking, folded. **Thought** opens it.
 3. A tool call as one row: the tool, what it was given, and a check when it finished. Click the row to see **in** and **out**.
-4. **fork from here** starts a new thread with everything before this prompt, and puts the prompt back in the composer.
+4. **fork from here** starts a new thread with everything before this prompt, and puts the prompt back in the composer. See [Forks and lineage](./lineage.md).
 5. **attach an image**.
 6. The status bar: whether pi is working, then prompts, tool calls, refusals, failures, and the thread's cost.
 
