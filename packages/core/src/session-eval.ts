@@ -49,7 +49,8 @@ export const ENSO_OPERATOR_DENIAL_ENTRY = 'enso-operator-denial'
 
 /**
  * An operator's deny on a permission prompt, as the host records it on the branch. `option` is the
- * button pressed, verbatim; `toolName` is the tool the prompt was for when the host could tell.
+ * button pressed, verbatim; `title` is the prompt's as lifted (`Run command`, `Permission`, or picc's
+ * own) — the lift surfaces no tool name, so none is recorded.
  *
  * @group Session eval
  */
@@ -57,9 +58,7 @@ export const EnsoOperatorDenial = Type.Object(
   {
     dialogId: Type.String({ minLength: 1 }),
     option: Type.String({ minLength: 1 }),
-    toolName: Type.Optional(Type.String({ minLength: 1 })),
-    /** The prompt's title as lifted (`Run command`, `Permission`, or picc's own), when the tool is not known. */
-    title: Type.Optional(Type.String({ minLength: 1 })),
+    title: Type.String({ minLength: 1 }),
   },
   { additionalProperties: false },
 )
@@ -511,9 +510,12 @@ function walkCustom(walk: Walk, index: number, entry: Extract<EnsoTranscriptEntr
   if (entry.customType === ENSO_OPERATOR_DENIAL_ENTRY) {
     if (!Check(EnsoOperatorDenial, entry.data)) return
     const denial = entry.data
-    const subject = denial.toolName ?? denial.title
-    const tool = subject === undefined ? '' : ` ${subject}`
-    walk.events.push({ kind: 'tool-denied', index, ...stamp, detail: `operator denied${tool}: ${denial.option}` })
+    walk.events.push({
+      kind: 'tool-denied',
+      index,
+      ...stamp,
+      detail: `operator denied ${denial.title}: ${denial.option}`,
+    })
   }
 }
 

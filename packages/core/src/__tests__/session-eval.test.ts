@@ -208,7 +208,7 @@ test('⚠ refusals are three counts that never mix: a guard’s, the operator’
     call('g1', 'bash', { command: 'cat .env' }),
     custom(ENSO_GUARD_DENIAL_ENTRY, { toolCallId: 'g1', rule: 'secret-path' }),
     result('g1', 'bash', 'refused', { isError: true }),
-    custom(ENSO_OPERATOR_DENIAL_ENTRY, { dialogId: 'd1', option: 'No', toolName: 'bash' }),
+    custom(ENSO_OPERATOR_DENIAL_ENTRY, { dialogId: 'd1', option: 'No', title: 'Run command' }),
     refused,
     call('q1', 'ask_user', { questions: [] }),
     result('q1', 'ask_user', 'The user declined to answer and chose nothing.'),
@@ -219,7 +219,7 @@ test('⚠ refusals are three counts that never mix: a guard’s, the operator’
   expect(out.scorecard.refusalsTotal).toBe(2)
   // A guard's refusal is not a tool failure (#407).
   expect(out.scorecard.signals.toolErrors).toBe(0)
-  expect(out.events.find((event) => event.kind === 'tool-denied')?.detail).toBe('operator denied bash: No')
+  expect(out.events.find((event) => event.kind === 'tool-denied')?.detail).toBe('operator denied Run command: No')
   // A denial entry that does not read is nothing, never a guess.
   expect(evalOf([custom(ENSO_OPERATOR_DENIAL_ENTRY, { option: 42 })]).scorecard.operatorDenials).toBe(0)
 })
