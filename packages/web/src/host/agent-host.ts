@@ -14,6 +14,7 @@ import {
 } from '@earendil-works/pi-coding-agent'
 import {
   type DialogAnswer,
+  ENSO_OPERATOR_DENIAL_ENTRY,
   type EnsoForkPoint,
   type EnsoHostCommandRun,
   type EnsoModelState,
@@ -35,6 +36,7 @@ import {
 import { ensoHome, ensoSecretsPath, findRepoRoot } from '@enso/core/paths'
 import { quarantineSecrets } from '@enso/core/secrets'
 import { type BranchContext, type BranchRequestDetail, branchContext, branchRequestDetail } from './branch-context.ts'
+import { type BranchEval, branchEval } from './branch-eval.ts'
 import { type BranchStats, branchStats } from './branch-stats.ts'
 import { type ContinuationLead, continuationLead, NO_RUN_LIFECYCLE, NOTHING_TO_CONTINUE } from './continuation.ts'
 import { createEventTail, describeObservation } from './event-tail.ts'
@@ -345,6 +347,8 @@ export interface HostedThread {
   emittedEvents(): EnsoThreadEvent[]
   /** The branch analysed (#45 phase 2): per request, per turn, per tool, off pi's own entries. */
   branchStats(): BranchStats
+  /** The branch as the session eval reads it (#441): the transcript and the turns' usage. */
+  branchEval(): BranchEval
   /** The branch's context, request by request (#361): what each was assembled from, by pi's own assembly. */
   branchContext(): BranchContext
   /** One request's context, element by element (#361 phase 3); undefined for a turn the branch does not have. */
@@ -477,6 +481,8 @@ export interface AgentHost {
    * nothing built (#86); undefined for no file in a served project.
    */
   readStoredForkPoint(threadId: string): Promise<EnsoForkPoint | undefined>
+  /** A stored thread as the session eval reads it (#441): one open, nothing built (#86); undefined for no file. */
+  readStoredThreadEval(threadId: string): Promise<BranchEval | undefined>
   /**
    * Fork a stored thread at one of its user messages, as pi's `/fork` does (#433; the module
    * header): a new session file naming the source as its parent, holding everything before that
@@ -794,6 +800,11 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     })
   }
 
+  async function readStoredThreadEval(threadId: string): Promise<BranchEval | undefined> {
+    const path = await storedSessionPath(threadId)
+    return path === undefined ? undefined : branchEval(SessionManager.open(path).getBranch())
+  }
+
   async function createSession(threadId: string, newSessionDirectory: () => string): Promise<HostedThread> {
     // Resolved BEFORE the services so a bad id fails before anything is built. A file under this
     // id decides the directory — pi fixed it at creation — and one this host does not serve is a
@@ -901,7 +912,13 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       for (const listener of listeners) listener(observation)
     }
 
-    const ui = createEnsoExtensionUiContext({ emit, threadId })
+    const ui = createEnsoExtensionUiContext({
+      emit,
+      threadId,
+      // The operator pressed No on a permission prompt (#441): picc turns it into an ordinary error
+      // result, so the fact is written here, on the branch, where the eval reads it.
+      onOperatorDenial: (denial) => sessionManager.appendCustomEntry(ENSO_OPERATOR_DENIAL_ENTRY, denial),
+    })
 
     // ⚠ SUBSCRIBE BEFORE BINDING (#88). Extensions persist state during `session_start` —
     // picc writes its opening `modes` entry there — and pi emits `entry_appended` to whoever
@@ -1463,6 +1480,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         return { block: result.block === true, reason: result.reason }
       },
       branchStats: () => branchStats(sessionManager.getBranch()),
+      branchEval: () => branchEval(sessionManager.getBranch()),
       branchContext: () => branchContext(sessionManager.getBranch()),
       branchRequestDetail: (request: number | 'next') => branchRequestDetail(sessionManager.getBranch(), request),
       async forkPoint(): Promise<EnsoForkPoint> {
@@ -1497,6 +1515,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     readStoredThread,
     readStoredThreadStats,
     readStoredThreadContext,
+    readStoredThreadEval,
     readStoredRequestDetail,
     readStoredForkPoint,
     forkThread,

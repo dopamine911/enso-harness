@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, expect, test } from 'bun:test'
-import { type EnsoQuestionnaireResult, QUESTIONNAIRE_COMPONENT_KEY } from '@enso/core'
+import { type EnsoOperatorDenial, type EnsoQuestionnaireResult, QUESTIONNAIRE_COMPONENT_KEY } from '@enso/core'
 import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
 import type { LogRecorder } from '@logtape/testing/recorder'
 import {
@@ -308,6 +308,35 @@ test("⚠⚠ picc's permission prompt reaches the browser as a select with its o
   // picc's own check is `choice === "Yes"` — the string it offered, back verbatim.
   expect(await pending).toBe('Yes')
   expect(pendingDialogCount()).toBe(0)
+})
+
+// #441: picc turns a No into an ordinary error result, so the ONLY record of which button the
+// operator pressed is this hook. An allow says nothing; a cancel is pi's "dismissed", not a deny.
+test("⚠ the operator's No on a lifted prompt is reported with the dialog id and title; Yes and cancel are not", async () => {
+  const denials: EnsoOperatorDenial[] = []
+  const requests: RuntimeEvent[] = []
+  const { uiContext, answerDialog, cancelAllDialogs } = createEnsoExtensionUiContext({
+    emit: (event: RuntimeEvent) => {
+      if (event.type === 'extension_ui_request') requests.push(event)
+    },
+    threadId: THREAD,
+    onOperatorDenial: (denial: EnsoOperatorDenial) => denials.push(denial),
+  })
+  const denied = uiContext.custom<string | null>(createFilePermissionDialogFactory(WRITE_PROMPT), { overlay: true })
+  await untilEmitted(requests, 1)
+  answerDialog({ id: requestId(requests[0]), value: 'No' })
+  expect(await denied).toBe('No')
+  expect(denials).toEqual([{ dialogId: requestId(requests[0]), option: 'No', title: 'Create file' }])
+
+  const allowed = uiContext.custom<string | null>(createFilePermissionDialogFactory(WRITE_PROMPT), { overlay: true })
+  await untilEmitted(requests, 2)
+  answerDialog({ id: requestId(requests[1]), value: 'Yes' })
+  expect(await allowed).toBe('Yes')
+  const cancelled = uiContext.custom<string | null>(createFilePermissionDialogFactory(WRITE_PROMPT), { overlay: true })
+  await untilEmitted(requests, 3)
+  cancelAllDialogs()
+  expect(await cancelled).toBeUndefined()
+  expect(denials).toHaveLength(1)
 })
 
 test("cancelling the lifted prompt resolves picc's 'dismissed' value; a non-picc component still resolves undefined at once", async () => {

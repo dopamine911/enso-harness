@@ -39,6 +39,7 @@
     "Thread stats",
     "Thread context",
     "Run context",
+    "Session eval",
     "Dialogs",
     "Permission mode",
     "Projects",

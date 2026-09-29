@@ -294,6 +294,11 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
     // The fake loads no extensions: every probe is the hook's silence.
     probeToolCall: async (): Promise<undefined> => undefined,
     branchStats: () => options.branch ?? FAKE_EMPTY_BRANCH,
+    // The eval reads the transcript the inspection holds and the branch's turns (#441).
+    branchEval: () => ({
+      transcript: [...inspection.entries],
+      turnStats: (options.branch ?? FAKE_EMPTY_BRANCH).turnStats,
+    }),
     branchContext: () => options.context ?? FAKE_EMPTY_CONTEXT,
     branchRequestDetail: (request: number | 'next') => options.details?.[String(request)],
     forkPoint: () =>
@@ -442,6 +447,17 @@ export function createFakeAgentHost(
         storedThread === undefined
           ? undefined
           : { usage: storedThread.usage ?? { ...FAKE_NO_USAGE }, context: storedThread.context ?? FAKE_EMPTY_CONTEXT },
+      )
+    },
+    readStoredThreadEval: (threadId: string) => {
+      const storedThread = served(threadId)
+      return Promise.resolve(
+        storedThread === undefined
+          ? undefined
+          : {
+              transcript: [...storedThread.transcript],
+              turnStats: (storedThread.branch ?? FAKE_EMPTY_BRANCH).turnStats,
+            },
       )
     },
     // The branch's fork point (#435): the one the thread declares, else its facts with no run context.

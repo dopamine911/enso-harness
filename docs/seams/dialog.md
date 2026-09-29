@@ -242,15 +242,15 @@ export interface EnsoExtensionUiContext {
 **Implemented once**, by `createEnsoExtensionUiContext` in `packages/web/src/host/extension-ui-context.ts`
 (line 250). The host is the UI: it implements the interface extensions call and turns each call into
 the same record the mapper already consumed over the old transport (header lines 38–40). The four
-blocking methods — `select`, `confirm`, `input`, `editor` (lines 374–420) — go through one
-`awaitDialog` (line 319): mint an id, park the request in a pending map, emit the request, and block
+blocking methods — `select`, `confirm`, `input`, `editor` (lines 386–432) — go through one
+`awaitDialog` (line 326): mint an id, park the request in a pending map, emit the request, and block
 until an answer, a cancel, the caller's abort signal or its own timeout. Every path that stops the wait
-goes through `finish` (line 340), which deletes the pending entry, emits the settle record with its
+goes through `finish` (line 352), which deletes the pending entry, emits the settle record with its
 outcome (line 339) and resolves the extension with its value — `undefined` for `select`/`input`/
 `editor`, `false` for `confirm`, on every non-answer outcome (lines 312–313). That is why the settle
 observation exists at all: the runtime has no event for a question ending (lines 316–317).
 `agent-host.ts` binds one context per session (line 904) and delegates the runtime contract's
-`answerDialog` and `openDialogs` to it (lines 1305–1310); `cancelAllDialogs` cancels every pending
+`answerDialog` and `openDialogs` to it (lines 1322–1327); `cancelAllDialogs` cancels every pending
 question at session teardown (line 547, called from `agent-host.ts:1439`), so teardown is a settle
 path too.
 

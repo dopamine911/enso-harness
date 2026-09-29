@@ -178,6 +178,21 @@ export {
 } from './provider-refusal.ts'
 export { ENSO_RUN_CONTEXT_ENTRY, EnsoForkPoint, EnsoRunContext, readEnsoRunContext } from './run-context.ts'
 export {
+  ENSO_OPERATOR_DENIAL_ENTRY,
+  EnsoEvalEvent,
+  EnsoEvalScorecard,
+  EnsoOperatorDenial,
+  EnsoSessionEval,
+  EVAL_DROPPED,
+  EVAL_EVENT_KINDS,
+  type EvalEventKind,
+  OUTWARD_TOOLS,
+  readEnsoSessionEval,
+  type SessionEvalInput,
+  type SessionEvalResult,
+  sessionEvalOf,
+} from './session-eval.ts'
+export {
   ENSO_CONTEXT_ADDITIONS_SHOWN,
   ENSO_CONTEXT_COMMAND,
   ENSO_CONTEXT_IMAGE_PREVIEW_BYTES,

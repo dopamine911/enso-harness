@@ -17,6 +17,7 @@ export const PROCESS_ENVIRONMENT_READERS: readonly string[] = [
   'scripts/enso.ts', // the launcher: quarantine, then the spawn's env
   'scripts/enso-thread.ts', // ENSO_SERVER_URL
   'scripts/enso-logs.ts', // ENSO_SERVER_URL, ENSO_HOME
+  'scripts/enso-eval.ts', // ENSO_SERVER_URL
   'scripts/gate.ts', // npm_config_user_agent, and the child's FORCE_COLOR
   'packages/core/src/secrets.ts', // the quarantine's default argument — the seam itself
   'packages/harness/extensions/logging/index.ts', // the pi entry point's own environment
