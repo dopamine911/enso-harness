@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 309.**
+**Decision headers: 311.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -133,6 +133,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/__tests__/thread-context.test.tsx` | `#361` | #361: the Context view — its derivations as pure functions, and a static render of what it says it estimated, what the provider counted, and what it does not know. |
 | `packages/web/src/__tests__/thread-debug-drawer.test.tsx` | `#435`, `#440` | The drawer, mounted, reading its fork point (#435). |
 | `packages/web/src/__tests__/thread-debug.test.tsx` | `#86` | #86: the drawer's one job is to NAME a disagreement between what the browser believes and what pi's session holds. |
+| `packages/web/src/__tests__/thread-eval.test.tsx` | `#441` | #441's Stats-tab panel: a static render of what the eval says it counted, what it could not, and the timeline's two counters — never a verdict. |
 | `packages/web/src/__tests__/thread-stats.test.tsx` | `#45` | #45 phase 2: the stats drawer, livecraft's session analysis over our wire — its derivations as pure functions, and a static render of what it says it measured and what it could not. |
 | `packages/web/src/__tests__/thread-status.test.tsx` | `#45`, `#90` | #90 PR 1: the always-on status bar. |
 | `packages/web/src/__tests__/thread-url.test.ts` | `#142` | The URL is the source of truth for the active thread (#142): what it names, and what it cannot. |
@@ -255,6 +256,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/stored-threads.ts` | `#95`, `#395` | The sessions a user can come back to (#95): pi's session files in this server's projects, as the server lists them — the rail's rows under each project (#395). |
 | `packages/web/src/thread-context-analysis.ts` | `#361` | What the Context view derives from `EnsoThreadContext` before it draws (#361): the category order and names, totals, the prompt-granularity roll-up and the delta series — dsh-context's `categories.ts`, `headline.ts` and trend aggregation, over our wire. |
 | `packages/web/src/thread-context.tsx` | `#361` | The Context view (#361) — dsh-context's Context tab over pi, in the design direction's layout (`Enso-Design-Direction`, the Context view): Now (what the next request is made of, beside the provider's count for the last one), Trend (every request's makeup, and the picked one's brief), then the Context Browser with Context Events and File Activity beside it on a wide view. |
+| `packages/web/src/thread-eval.tsx` | `#441` | The session eval on the Stats tab (#441, the follow-up its issue named): the scorecard, the agent-side signals and the timeline `GET /api/threads/:threadId/eval` answers, under the stats drawer. |
 | `packages/web/src/thread-stats-analysis.ts` | `#45`, `#387`, `#407` | What the stats drawer derives from `EnsoThreadStats` before it draws (#45 phase 2): the averages, the per-tool totals and the two rankings — pi-livecraft's `analyzeSession` and `SessionAnalysisWidget` rankings (`.inspiration/pi-extensions/pi-livecraft`), ported to our wire. |
 | `packages/web/src/thread-stats.tsx` | `#45`, `#359` | The thread's stats drawer (#45 phase 2) — pi-livecraft's session analysis widget (`.inspiration/pi-extensions/pi-livecraft/src/features/session-analysis/`), section for section, over our wire: summary cards, context and tokens per turn, cost per turn, cumulative usage by tool, costliest calls, distribution, costliest prompts. |
 | `packages/web/src/thread-status.tsx` | `#45`, `#51`, `#84`, `#90`, `#103` | The status bar (#90 PR 1): the always-on line that says what this session is doing and what it has cost, so the answer to "is anything happening?" |

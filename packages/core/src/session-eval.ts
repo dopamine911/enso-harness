@@ -301,6 +301,39 @@ const ACT_VERB_RE = /\b(fix|ship|build|merge|push|commit|create|implement|deploy
 /** `commit` excluded: a local, unpushed commit is not outward-facing on its own. */
 const MUTATING_EVENT_KINDS: ReadonlySet<EvalEventKind> = new Set(['push', 'pr-create', 'outward'])
 
+/**
+ * The timeline's two running counters (#441), kept apart on purpose: `f=` is what the operator
+ * TYPES against the run, `r=` what the operator CLICKS. They move at different times — in the run
+ * the script was built to measure, `r=` reached 4 seventy-four minutes before `f=` left 1.
+ *
+ * @group Session eval
+ */
+export const FRICTION_KINDS: ReadonlySet<EvalEventKind> = new Set([
+  'human-correction',
+  'prompt-queued',
+  'human-confusion',
+  'interrupt',
+])
+/** @group Session eval */
+export const REFUSAL_KINDS: ReadonlySet<EvalEventKind> = new Set(['ask-rejected', 'tool-denied'])
+
+/**
+ * Each event with the counters as they stood after it — what a timeline row shows beside the event.
+ *
+ * @group Session eval
+ */
+export function runningCounters(
+  events: readonly EnsoEvalEvent[],
+): ReadonlyArray<{ readonly event: EnsoEvalEvent; readonly friction: number; readonly refusals: number }> {
+  let friction = 0
+  let refusals = 0
+  return events.map((event) => {
+    if (FRICTION_KINDS.has(event.kind)) friction += 1
+    if (REFUSAL_KINDS.has(event.kind)) refusals += 1
+    return { event, friction, refusals }
+  })
+}
+
 const WRITE_TOOLS: ReadonlySet<string> = new Set(['write', 'edit'])
 const ASK_TOOL = 'ask_user'
 const BASH_TOOL = 'bash'
