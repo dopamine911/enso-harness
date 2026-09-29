@@ -364,8 +364,28 @@ export const EnsoSystemPromptPreview = Type.Object(
       Type.Object({ name: Type.String(), tokens: Type.Integer({ minimum: 0 }) }, { additionalProperties: false }),
     ),
     totalTokens: Type.Integer({ minimum: 0 }),
+    /** The thread's model's context window, for a share of it; `null` when the model declares none. */
+    contextWindow: Type.Union([Type.Integer({ exclusiveMinimum: 0 }), Type.Null()]),
   },
   { additionalProperties: false },
 )
 /** @group Prompt library */
 export type EnsoSystemPromptPreview = Static<typeof EnsoSystemPromptPreview>
+
+/**
+ * `POST /api/threads/:id/system-prompt` (#443): an UNSAVED prompt's text, previewed as the editor
+ * types it — the same preview a saved one gets, so the breakdown never waits on a save.
+ *
+ * @group Prompt library
+ */
+export const EnsoSystemPromptDraft = Type.Object(
+  {
+    mode: EnsoSystemPromptMode,
+    text: Type.String({ minLength: 1 }),
+    /** What the preview calls it; the editor's name field. */
+    name: Type.String({ minLength: 1, maxLength: 120 }),
+  },
+  { additionalProperties: false },
+)
+/** @group Prompt library */
+export type EnsoSystemPromptDraft = Static<typeof EnsoSystemPromptDraft>

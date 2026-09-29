@@ -118,7 +118,9 @@ what the act caused arrives on the follow, for every follower alike. Nothing her
   prompt. A file the library cannot read or parse is *refused by name*, never skipped. Its
   **preview** is the runtime's own rendering of the system prompt a thread's next request would carry
   with it, section by section, each marked as the library's or the runtime's (`EnsoSystemPromptPreview`,
-  `GET …/system-prompt`); its total is what the Context tab prices that first request at. Wire:
+  `GET …/system-prompt`, and `POST` for an unsaved draft); its total is what the Context tab prices
+  that first request at. The **prompt manager** is the page's editor for the library: the header's
+  prompt button, its size bar and the preview's breakdown in view while a prompt is written. Wire:
   `EnsoLibraryPrompt`, `EnsoLibraryPromptListing`. Not a prompt template: the runtime's templates are slash
   commands, and a library prompt is not one.
 - **message** — what the transcript holds and the model sees: a user message, an assistant message, a

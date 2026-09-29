@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 330.**
+**Decision headers: 334.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -128,6 +128,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/__tests__/notifications.test.tsx` | `#29`, `#90` | #29's browser half: notify messages become visible transcript lines. |
 | `packages/web/src/__tests__/page-scoped-stores.test.ts` | `#103`, `#125` | The anchor for #125 item 3 / #103 invariant 2 (switching threads leaks no state): every store that holds a THREAD's state is created inside `createThreadStores` (thread-stores.ts), so a second thread on the page gets its own. |
 | `packages/web/src/__tests__/permission-mode.test.tsx` | `#84`, `#90` | #84's browser half: the CURRENT permission mode as state, and the control that changes it. |
+| `packages/web/src/__tests__/prompt-editor-state.test.ts` | `#443` | #443: the prompt manager's editor as data — what is unsaved, what may be saved, what a copy of pi's default holds, and a rename's order: the new file first, then the old one removed. |
 | `packages/web/src/__tests__/prompt-input.test.ts` | `#141` | ⚠ Upstream reported a refusal only when the WHOLE batch failed; a mixed drop lost files silently (PR #141 review). |
 | `packages/web/src/__tests__/prompt-library-connection.test.ts` | `#443` | #443: the Start dialog's library reads never throw — a failure is words the dialog shows beside the field, and pi's default still starts. |
 | `packages/web/src/__tests__/questionnaire-card.test.tsx` | `#12` | The `ask_user` card (#12), mounted: what it sends is what the server holds to the question and the tool reads back as the user's words — one answer per question, in order — and it sends nothing until every question has one. |
@@ -212,7 +213,10 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/page-clock.ts` | `#278` | The page's clock as a store (#278): the one value that changes with no input. |
 | `packages/web/src/permission-mode.tsx` | `#73`, `#84`, `#90` | The CURRENT permission mode, as state — and the control that changes it (#84). |
 | `packages/web/src/project-list.ts` | `#395` | The projects the rail groups threads under (#395): the launch directory first, then the ones registered under the install's roots, as `GET /api/projects` lists them. |
+| `packages/web/src/prompt-editor-state.ts` | `#443` | The prompt manager's editor, as data (#443): the draft on screen, the file it was opened from, and the rules a save follows — kept apart from the React so each is tested as the value it is. |
 | `packages/web/src/prompt-library-connection.ts` | `#443` | The prompt library's reads (#443): `GET /api/prompts` and `GET /api/prompts/:id`, validated with the wire's own schemas, as `commands-connection.ts` reads the palette's list. |
+| `packages/web/src/prompt-manager.tsx` | `#443` | The prompt manager (#443): one place to read, write and organise the prompts a session runs with — the header's scroll button, beside Settings, because the library is the user's, not a thread's. |
+| `packages/web/src/prompt-size.tsx` | `#443` | What a prompt costs, always in view while it is written (#443): the file's bytes, exact; the body's tokens, `≈` — `estimateTextTokens`, the function the Context tab prices system text with — and, once pi has rendered it, its share of the model's window. |
 | `packages/web/src/questionnaire-card.tsx` | `#12` | The agent's `ask_user` questionnaire as one card (#12): a tab per question, each option a row with its label and what choosing it means, an "Other" row for an answer in the user's own words, and one "Submit answers" once every question has one. |
 | `packages/web/src/read-on-usage.ts` | `#45`, `#361`, `#362`, `#404`, `#453` | A thread's route, read on mount and again whenever the thread's usage moves (#45, #361) — the Stats and Context views' one refresh rule. |
 | `packages/web/src/refused-attempt.tsx` | `#387` | Who refused, as a reader names them (#387): pi's display name for the provider (`Anthropic`), else its id; undefined when the refusal names no provider. |

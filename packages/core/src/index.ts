@@ -181,6 +181,7 @@ export {
   EnsoLibraryPromptSummary,
   EnsoLibraryPromptWrite,
   EnsoSystemPromptChoice,
+  EnsoSystemPromptDraft,
   EnsoSystemPromptMode,
   EnsoSystemPromptPreview,
   EnsoSystemPromptSection,

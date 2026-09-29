@@ -1535,9 +1535,14 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
           systemPrompt = choice
         }
         const rendered = renderedUnder(session, setChoice, candidate ?? undefined, systemPrompt)
-        // The preamble when the host knows it: the candidate's, or a SYSTEM.md pi's loader found.
-        const preamble = candidate?.mode === 'system' ? candidate.text : services.resourceLoader.getSystemPrompt()
-        const preview = previewOf(rendered, preamble, candidate, session.agent.state.tools)
+        const window = session.model?.contextWindow
+        const preview = previewOf({
+          rendered,
+          preamble: candidate?.mode === 'system' ? candidate.text : services.resourceLoader.getSystemPrompt(),
+          candidate,
+          tools: session.agent.state.tools,
+          contextWindow: window !== undefined && window > 0 ? window : undefined,
+        })
         return preview === undefined ? { kind: 'unsplittable' } : { kind: 'preview', preview }
       },
       branchRequestDetail: (request: number | 'next') => branchRequestDetail(sessionManager.getBranch(), request),

@@ -151,6 +151,9 @@ export interface FakeHostedThreadOptions {
   readonly previewSystemPrompt?: (candidate: EnsoSystemPromptChoice | null) => SystemPromptPreviewOutcome
 }
 
+/** The fake model's context window, as a preview reports it. */
+const FAKE_CONTEXT_WINDOW = 200_000
+
 /** The fake's pi preamble — pi's own, shortened; a candidate's `system` text replaces it. */
 export const FAKE_PI_PREAMBLE = 'You are an expert coding assistant operating inside pi.'
 
@@ -174,7 +177,7 @@ function fakeSystemPromptPreview(candidate: EnsoSystemPromptChoice | null): Syst
   ]
   const prompt = candidate === null ? null : { id: candidate.id, name: candidate.name, mode: candidate.mode }
   const totalTokens = sections.reduce((sum, item) => sum + item.tokens, 0)
-  return { kind: 'preview', preview: { prompt, sections, tools: [], totalTokens } }
+  return { kind: 'preview', preview: { prompt, sections, tools: [], totalTokens, contextWindow: FAKE_CONTEXT_WINDOW } }
 }
 
 /** Hand the queue back the way pi does — a copy out, the queue emptied. */

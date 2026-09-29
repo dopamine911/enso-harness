@@ -8,6 +8,7 @@ import {
   type EnsoLibraryPromptSummary,
   EnsoLibraryPromptWrite,
   type EnsoSystemPromptChoice,
+  EnsoSystemPromptDraft,
   ensoLogger,
   parseLibraryPrompt,
   serializeLibraryPrompt,
@@ -34,6 +35,26 @@ const EXTENSION = '.md'
 
 /** What every prompt route answers, and a configure naming a prompt, when the server was started without a library. */
 export const NO_PROMPT_LIBRARY = 'this server has no prompt library (it was started without ENSO_HOME/prompts)'
+
+/** The draft-preview body, checked against its closed schema. */
+export function readSystemPromptDraftBody(raw: string): EnsoSystemPromptDraft {
+  return readClosedBody(
+    raw,
+    EnsoSystemPromptDraft,
+    'draft',
+    'draft body takes only `mode` (system or append), a non-empty `text` and a `name` (1–120 characters)',
+  )
+}
+
+/** The text's sha256, as a recorded choice carries it. */
+function sha256Of(text: string): string {
+  return createHash('sha256').update(text).digest('hex')
+}
+
+/** An unsaved prompt as the choice a preview takes — named, hashed, never recorded. */
+export function draftChoice(draft: EnsoSystemPromptDraft): EnsoSystemPromptChoice {
+  return { id: 'draft', name: draft.name, mode: draft.mode, sha256: sha256Of(draft.text), text: draft.text }
+}
 
 /** The `PUT` body, checked against its closed schema. */
 export function readPromptWriteBody(raw: string): EnsoLibraryPromptWrite {
@@ -146,8 +167,7 @@ export function createPromptLibrary(directory: string): PromptLibrary {
       }
       // pi reads an empty custom preamble as none and builds its default: say so, never run it silently.
       if (body.trim().length === 0) return { kind: 'refused', reason: `${name} has no text to send` }
-      const sha256 = createHash('sha256').update(body).digest('hex')
-      return { kind: 'chosen', choice: { id, name, mode: category, sha256, text: body } }
+      return { kind: 'chosen', choice: { id, name, mode: category, sha256: sha256Of(body), text: body } }
     },
   }
 }

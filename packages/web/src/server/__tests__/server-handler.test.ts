@@ -1510,3 +1510,19 @@ test('the system-prompt preview says so when the thread is running, and a server
     body: NO_PROMPT_LIBRARY,
   })
 })
+
+test('⚠ POST …/system-prompt previews an unsaved draft as a saved prompt is previewed, records nothing, and refuses a body off its shape (#443)', async () => {
+  const { url, built } = await library()
+  const draft = { mode: 'append', text: 'Always answer in haiku.', name: 'Haiku draft' }
+  const answered = await send(url, '/api/threads/t-draft/system-prompt', 'POST', draft)
+  expect(answered.status).toBe(200)
+  const preview = JSON.parse(answered.body)
+  expect(Check(EnsoSystemPromptPreview, preview)).toBe(true)
+  expect(preview.prompt).toEqual({ id: 'draft', name: 'Haiku draft', mode: 'append' })
+  expect(preview.sections).toContainEqual(expect.objectContaining({ name: 'addendum', origin: 'library' }))
+  expect(built.at(-1)?.systemPrompt).toBeUndefined()
+  expect((await send(url, '/api/threads/t-draft/system-prompt', 'POST', { ...draft, mode: 'session' })).status).toBe(
+    400,
+  )
+  expect((await send(url, '/api/threads/t-draft/system-prompt', 'POST', { ...draft, text: '' })).status).toBe(400)
+})
