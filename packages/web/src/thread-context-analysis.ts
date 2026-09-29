@@ -1,4 +1,10 @@
-import type { EnsoContextCategory, EnsoContextMakeup, EnsoContextRequest, EnsoFileOperation } from '@enso/core'
+import type {
+  EnsoContextCategory,
+  EnsoContextMakeup,
+  EnsoContextRequest,
+  EnsoFileOperation,
+  EnsoThreadSystemPrompt,
+} from '@enso/core'
 
 /**
  * What the Context view derives from `EnsoThreadContext` before it draws (#361): the category
@@ -24,6 +30,33 @@ export const CATEGORY_LABEL: Readonly<Record<EnsoContextCategory, string>> = {
   injected: 'injected context',
   assistant: 'assistant messages',
   toolResults: 'tool results',
+}
+
+/** What the thread's system prompt is called on its rows (#443): the library prompt's name, or pi's. */
+function systemPromptName(prompt: EnsoThreadSystemPrompt): string {
+  if (prompt === null) return 'pi default'
+  if (prompt === 'unreadable') return 'unreadable record'
+  return prompt.name
+}
+
+/** A category's name on its row; the system prompt's says which prompt it is. */
+export function categoryLabel(category: EnsoContextCategory, prompt: EnsoThreadSystemPrompt): string {
+  return category === 'system' ? `${CATEGORY_LABEL.system} · ${systemPromptName(prompt)}` : CATEGORY_LABEL[category]
+}
+
+/** The element a library prompt wrote, by its key: a `system` prompt's preamble, an `append` prompt's addendum. */
+const LIBRARY_SECTION_KEY = {
+  system: 'system:section:preamble',
+  append: 'system:section:addendum',
+} as const
+
+/** An element's label, with the library prompt's name beside the section it wrote. */
+export function elementLabel(
+  element: { readonly key: string; readonly label: string },
+  prompt: EnsoThreadSystemPrompt,
+): string {
+  if (prompt === null || prompt === 'unreadable') return element.label
+  return element.key === LIBRARY_SECTION_KEY[prompt.mode] ? `${element.label} · ${prompt.name}` : element.label
 }
 
 /** The theme's chart colours (`styles/global.css`), one per category, close to dsh's. */

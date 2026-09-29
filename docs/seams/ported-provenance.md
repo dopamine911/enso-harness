@@ -7,6 +7,7 @@ imports nothing from the state layer; this is what the headers say.
 
 | File | Upstream | At | License | Modified |
 |---|---|---|---|---|
+| `artifact.tsx` | vercel/ai-elements `packages/elements/src/artifact.tsx` | `6a9d5b1822ff` | Apache-2.0 | Modified — this file is a SUBSET (the prompt manager's editor panel, #443): |
 | `attachments.tsx` | vercel/ai-elements `packages/elements/src/attachments.tsx` | `6a9d5b1822ff` | Apache-2.0 | Modified — this file is a deliberate SUBSET (the composer's attachment strip, #68/#121): |
 | `conversation.tsx` | vercel/ai-elements `packages/elements/src/conversation.tsx` | `6a9d5b1822ff` | Apache-2.0 | Modified: |
 | `message.tsx` | vercel/ai-elements `packages/elements/src/message.tsx` | `6a9d5b1822ff` | Apache-2.0 | Modified — this file is a deliberate SUBSET (35 of 360 upstream lines): |

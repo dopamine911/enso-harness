@@ -97,13 +97,24 @@ export function renderedUnder(
   return rendered
 }
 
+/** What a preview is made from: pi's rendering, what the host knows of it, and the session's tools and window. */
+export interface PreviewInputs {
+  readonly rendered: string
+  /** The preamble when the host knows it: the candidate's, or a `SYSTEM.md` pi's loader found. */
+  readonly preamble: string | undefined
+  readonly candidate: EnsoSystemPromptChoice | null
+  readonly tools: readonly Parameters<typeof toToolDeclaration>[0][]
+  readonly contextWindow: number | undefined
+}
+
 /** The preview, from pi's rendering and the session's executable tools; `undefined` when it does not split. */
-export function previewOf(
-  rendered: string,
-  preamble: string | undefined,
-  candidate: EnsoSystemPromptChoice | null,
-  tools: readonly Parameters<typeof toToolDeclaration>[0][],
-): EnsoSystemPromptPreview | undefined {
+export function previewOf({
+  rendered,
+  preamble,
+  candidate,
+  tools,
+  contextWindow,
+}: PreviewInputs): EnsoSystemPromptPreview | undefined {
   const split = splitRenderedPrompt(rendered, preamble)
   if (split === undefined) return undefined
   const sections = split.map(({ name, text }) => ({
@@ -118,5 +129,5 @@ export function previewOf(
   }))
   const totalTokens = [...sections, ...declared].reduce((sum, item) => sum + item.tokens, 0)
   const prompt = candidate === null ? null : { id: candidate.id, name: candidate.name, mode: candidate.mode }
-  return { prompt, sections, tools: declared, totalTokens }
+  return { prompt, sections, tools: declared, totalTokens, contextWindow: contextWindow ?? null }
 }

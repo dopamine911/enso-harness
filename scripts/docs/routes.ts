@@ -248,6 +248,20 @@ const REGEX_ROUTE_METADATA: Record<string, RouteMetadata> = {
       "400 malformed thread id; 403 untrusted origin; 404 a prompt named on a server without a library; 409 thread running; 422 the prompt is refused, with the reason naming it — missing, unreadable or unparseable, a session prompt, or empty; 500 pi's rendering does not split back into its sections, or handler failure",
     builds: 'yes',
   }),
+  THREAD_SYSTEM_PROMPT_DRAFT_ROUTE: {
+    method: 'POST',
+    path: '/api/threads/:threadId/system-prompt',
+    handler: 'respondWithDraftPreview → HostedThread.previewSystemPrompt',
+    input:
+      "path: `threadId`; body: `EnsoSystemPromptDraft` — an unsaved prompt's `mode` (`system` or `append`), `text` and `name`",
+    success:
+      "200 `EnsoSystemPromptPreview` JSON — the same preview a saved prompt gets, for the editor's breakdown while it types; nothing is recorded",
+    errors:
+      "400 malformed id/body; 403 untrusted origin; 409 thread running; 413 body too large; 500 pi's rendering does not split back into its sections, or handler failure",
+    routeClass: 'observation',
+    builds: 'yes',
+    logs: 'no',
+  },
   PROMPT_READ_ROUTE: promptRoute({
     method: 'GET',
     handler: 'respondWithPrompt → PromptLibrary.read',

@@ -1,4 +1,10 @@
-import { EnsoLibraryPrompt, EnsoLibraryPromptListing } from '@enso/core'
+import {
+  EnsoLibraryPrompt,
+  EnsoLibraryPromptListing,
+  type EnsoLibraryPromptWrite,
+  type EnsoSystemPromptDraft,
+  EnsoSystemPromptPreview,
+} from '@enso/core'
 import type { Static, TSchema } from 'typebox'
 import { Check } from 'typebox/value'
 import type { FetchLike } from './browser-logging.ts'
@@ -29,15 +35,21 @@ async function failureOf(response: Response): Promise<string> {
   return body.length > 0 ? body : `the server answered ${response.status}`
 }
 
-/** One GET, its payload checked against `schema`; `what` names the payload when it does not match. */
+/** A JSON body sent with `method`. */
+function sending(method: 'PUT' | 'POST', body: unknown): RequestInit {
+  return { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+}
+
+/** One request, its payload checked against `schema`; `what` names the payload when it does not match. */
 async function readChecked<Schema extends TSchema>(
-  path: string,
+  request: string | { readonly path: string; readonly init: RequestInit },
   schema: Schema,
   what: string,
   fetchImpl: FetchLike,
 ): Promise<{ readonly kind: 'loaded'; readonly payload: Static<Schema> } | Unavailable> {
   try {
-    const response = await fetchImpl(path)
+    const response =
+      typeof request === 'string' ? await fetchImpl(request) : await fetchImpl(request.path, request.init)
     if (!response.ok) return { kind: 'unavailable', detail: await failureOf(response) }
     const payload: unknown = await response.json()
     if (!Check(schema, payload)) return { kind: 'unavailable', detail: `the server's ${what} did not match its schema` }
@@ -57,4 +69,59 @@ export async function fetchPromptLibrary(fetchImpl: FetchLike = fetch): Promise<
 export async function fetchLibraryPrompt(id: string, fetchImpl: FetchLike = fetch): Promise<LibraryPromptRead> {
   const read = await readChecked(`/api/prompts/${encodeURIComponent(id)}`, EnsoLibraryPrompt, 'prompt', fetchImpl)
   return read.kind === 'loaded' ? { kind: 'loaded', prompt: read.payload } : read
+}
+
+/** Write a prompt whole under `id` — created or replaced — and answer it as the server read it back. */
+export async function writeLibraryPrompt(
+  id: string,
+  fields: EnsoLibraryPromptWrite,
+  fetchImpl: FetchLike = fetch,
+): Promise<LibraryPromptRead> {
+  const path = `/api/prompts/${encodeURIComponent(id)}`
+  const read = await readChecked({ path, init: sending('PUT', fields) }, EnsoLibraryPrompt, 'prompt', fetchImpl)
+  return read.kind === 'loaded' ? { kind: 'loaded', prompt: read.payload } : read
+}
+
+/** Delete a prompt's file; the server's reason when it did not. */
+export async function deleteLibraryPrompt(
+  id: string,
+  fetchImpl: FetchLike = fetch,
+): Promise<{ readonly kind: 'deleted' } | Unavailable> {
+  try {
+    const response = await fetchImpl(`/api/prompts/${encodeURIComponent(id)}`, { method: 'DELETE' })
+    return response.ok ? { kind: 'deleted' } : { kind: 'unavailable', detail: await failureOf(response) }
+  } catch (failure: unknown) {
+    return { kind: 'unavailable', detail: failure instanceof Error ? failure.message : String(failure) }
+  }
+}
+
+export type SystemPromptPreviewRead =
+  | { readonly kind: 'loaded'; readonly preview: EnsoSystemPromptPreview }
+  | { readonly kind: 'unavailable'; readonly detail: string }
+
+/**
+ * The system prompt `threadId`'s next request would carry: with a saved prompt (`promptId`), with
+ * an unsaved draft, or pi's default when neither is given.
+ */
+export async function fetchSystemPromptPreview(
+  threadId: string,
+  candidate: { readonly promptId: string } | { readonly draft: EnsoSystemPromptDraft } | null,
+  fetchImpl: FetchLike = fetch,
+): Promise<SystemPromptPreviewRead> {
+  const base = `/api/threads/${encodeURIComponent(threadId)}/system-prompt`
+  const read =
+    candidate !== null && 'draft' in candidate
+      ? await readChecked(
+          { path: base, init: sending('POST', candidate.draft) },
+          EnsoSystemPromptPreview,
+          'preview',
+          fetchImpl,
+        )
+      : await readChecked(
+          candidate === null ? base : `${base}?prompt=${encodeURIComponent(candidate.promptId)}`,
+          EnsoSystemPromptPreview,
+          'preview',
+          fetchImpl,
+        )
+  return read.kind === 'loaded' ? { kind: 'loaded', preview: read.payload } : read
 }
