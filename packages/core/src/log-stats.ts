@@ -47,6 +47,8 @@ export const ENSO_LOG_EVENTS = {
   messageUsage: 'message {role} used {input} in, {output} out',
   /** `guards/index.ts`: a refusal, with its `rule`. */
   toolDenied: '{toolName} denied: {reason}',
+  /** `thread-registry.ts`: the operator's Stop reached the run — the eval's interrupt (#441). */
+  runAborted: 'run {generation} told to abort; {restored} queued prompt(s) handed back',
 } as const
 
 /**

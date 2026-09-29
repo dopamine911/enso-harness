@@ -336,6 +336,20 @@ harness did). The first is canonical and never rewritten by us; the second is th
 - **run provenance** — what a fork point records beyond the runtime's own entries — project revision, context
   files, the mode's rules, skills, configuration — as the `enso-run-context` custom entry in the
   runtime's log, never a side file (#435, #126). Hashes and paths, never contents.
+- **session eval** — a thread's mechanical scorecard and event timeline (#441), computed from what the
+  session recorded and nothing else: `EnsoSessionEval`, served by `GET /api/threads/:threadId/eval`
+  and printed by `bun run eval`. Named metrics, never a composite; a *signal* is one agent-side
+  metric of it, reported per kind and unweighted. Ported from `session-timeline.py`.
+- **friction** — what the operator *types* against the run: corrections, queued prompts, confusion,
+  interrupts. The eval's `f=` counter. Kept apart from the *refusal channel* because the two move at
+  different times.
+- **refusal channel** — where a refusal came from, never mixed: a guard's (policy, the
+  `enso-guard-denial` entry), the operator's (a person: a declined ask, or an *operator denial*), the
+  provider's (#381). The eval counts each on its own; only the operator's is the `r=` counter, what
+  the operator *clicks*.
+- **operator denial** — the operator pressed No on a permission prompt. Recorded by the host as the
+  `enso-operator-denial` custom entry (#441), because the permission extension turns it into an
+  ordinary error result and nothing else keeps which button was pressed.
 
 **Mechanism** — where the bytes go:
 

@@ -60,6 +60,7 @@ const MODULE_FACTS: Readonly<Record<string, readonly [classification: Classifica
   'provider-refusal.ts': ['wire', 'Observation, Record'],
   'run-context.ts': ['wire', 'Thread, Record'],
   'secrets.ts': ['node-only utility', 'Permission'],
+  'session-eval.ts': ['wire', 'Thread, Record'],
   'thread-inspection.ts': ['wire', 'Thread, Observation'],
   'thread-timeline.ts': ['wire', 'Thread, Observation, Record'],
   'thread-context.ts': ['wire', 'Thread, Observation'],

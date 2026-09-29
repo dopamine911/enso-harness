@@ -13,10 +13,12 @@ import {
 } from '@earendil-works/pi-coding-agent'
 import {
   ASK_USER_TOOL_NAME,
+  ENSO_OPERATOR_DENIAL_ENTRY,
   ENSO_RUN_CONTEXT_ENTRY,
   type EnsoObservation,
   type EnsoRunContext,
   readEnsoRunContext,
+  sessionEvalOf,
 } from '@enso/core'
 import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
 import { findRepoRoot, harnessPackageDir, realpathOrSelf } from '@enso/core/paths'
@@ -31,6 +33,7 @@ import {
   stopRunSettlingDialogs,
 } from '../agent-host.ts'
 import { LOST_TOOL_RESULT_TEXT, NOTHING_TO_CONTINUE } from '../continuation.ts'
+import { PICC_PERMISSION_DIALOG_MODULE } from '../permission-dialog.ts'
 import { readPiccPersistedMode, storedPermissionModeState } from '../permission-mode-adapter.ts'
 import { recordedModelOf } from '../transcript.ts'
 
@@ -483,6 +486,52 @@ test('an answer naming no pending dialog is reported, never thrown', async () =>
   logs.clear()
   expect(() => hosted.runtime.answerDialog({ id: 'never-asked', cancelled: true })).not.toThrow()
   logs.assertLogged({ level: 'warning', rawMessage: /unknown request id/, properties: { dialogId: 'never-asked' } })
+})
+
+// #441: picc turns an operator's No into an ordinary error result, so the host writes the fact
+// itself — the one `appendCustomEntry` behind `enso-operator-denial`, pinned here through the real
+// session manager and the real lifted prompt, then read back by the eval.
+test("⚠ the operator's No on picc's real permission prompt is an enso-operator-denial entry on the branch, and the eval counts it", async () => {
+  const picc = (await import(PICC_PERMISSION_DIALOG_MODULE)) as {
+    createFilePermissionDialogFactory: (options: Record<string, unknown>) => never
+  }
+  const choices: unknown[] = []
+  const probe: InlineExtension = {
+    name: 'enso-host-deny-probe',
+    factory: (pi: ExtensionAPI) => {
+      pi.on('session_start', (_event, extensionContext) => {
+        // Exactly picc's call, with picc's own factory: the prompt a write in `default` mode raises.
+        void extensionContext.ui
+          .custom(
+            picc.createFilePermissionDialogFactory({
+              options: ['Yes', 'No'],
+              title: 'Create file',
+              question: 'Create receipt.txt?',
+            }),
+          )
+          .then((choice) => choices.push(choice))
+      })
+    },
+  }
+  const hosted = await hostedSession([probe])
+  // The lift awaits picc's module before the request is emitted: wait for the request by name.
+  const select = await untilObservation(
+    hosted,
+    (event) => event.kind === 'extension-ui-request' && event.method === 'select',
+  )
+  const dialogId = String((select as { id?: unknown }).id)
+  hosted.runtime.answerDialog({ id: dialogId, value: 'No' })
+  await nextTick()
+  expect(choices).toEqual(['No'])
+  const { transcript, turnStats } = hosted.branchEval()
+  const denial = transcript.find((entry) => entry.kind === 'custom' && entry.customType === ENSO_OPERATOR_DENIAL_ENTRY)
+  expect(denial).toMatchObject({
+    data: { dialogId, option: 'No', title: 'Create file' },
+  })
+  const evaluated = sessionEvalOf({ transcript, turnStats, log: [], logDays: [] })
+  expect(evaluated.scorecard.operatorDenials).toBe(1)
+  expect(evaluated.scorecard.refusalsTotal).toBe(1)
+  expect(evaluated.events.find((event) => event.kind === 'tool-denied')?.detail).toBe('operator denied Create file: No')
 })
 
 test('⚠ a throwing session_start becomes an extension-error observation; the session is still created', async () => {

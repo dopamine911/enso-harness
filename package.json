@@ -27,6 +27,7 @@
     "enso": "bun scripts/enso.ts",
     "dev": "bun scripts/dev.ts",
     "logs": "bun scripts/enso-logs.ts",
+    "eval": "bun scripts/enso-eval.ts",
     "dev:server": "bun run --silent --cwd packages/web dev:server",
     "dev:web": "bun run --silent --cwd packages/web dev:web",
     "e2e": "bunx playwright test --config packages/web/e2e/playwright.config.ts --grep-invert @model",

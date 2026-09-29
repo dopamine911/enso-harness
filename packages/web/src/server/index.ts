@@ -48,6 +48,7 @@ import { followLogTail, type LogTailRouteDeps } from './logs-tail-route.ts'
 import { createProjectRegistry, ProjectUnavailable } from './projects.ts'
 import { SSE_KEEPALIVE_MS } from './sse.ts'
 import { createContextRequestRoute, createThreadContextRoute } from './thread-context-route.ts'
+import { createThreadEvalRoute } from './thread-eval-route.ts'
 import { createThreadManifestRoute } from './thread-manifest-route.ts'
 import { readThreadMount, type ThreadReadDeps } from './thread-read.ts'
 import { createThreadRegistry, inspectThread, type ThreadView } from './thread-registry.ts'
@@ -69,6 +70,8 @@ const THREAD_CONTEXT_ROUTE = /^\/api\/threads\/([^/?#]+)\/context$/
 const THREAD_CONTEXT_REQUEST_ROUTE = /^\/api\/threads\/([^/?#]+)\/context\/([1-9]\d*|next)$/
 /** `GET /api/threads/<threadId>/manifest` — the thread's fork point: identity, then run conditions (#435). */
 const THREAD_MANIFEST_ROUTE = /^\/api\/threads\/([^/?#]+)\/manifest$/
+/** `GET /api/threads/<threadId>/eval` — the thread's session eval: mechanical timeline and scorecard (#441). */
+const THREAD_EVAL_ROUTE = /^\/api\/threads\/([^/?#]+)\/eval$/
 /** The wire (#112): `POST …/prompt`, `GET …/follow`, `POST …/dialog`, `POST …/abort` (#116). See `follow.ts`. */
 const THREAD_FOLLOW_ROUTE = /^\/api\/threads\/([^/?#]+)\/follow$/
 const THREAD_PROMPT_ROUTE = /^\/api\/threads\/([^/?#]+)\/prompt$/
@@ -590,6 +593,8 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   const contextRequest = createContextRequestRoute({ threads, host })
   // One thread's fork point (#435): identity and run conditions off pi's branch.
   const threadManifest = createThreadManifestRoute({ threads, host })
+  // One thread's session eval (#441): the branch's events and the log's, scored mechanically.
+  const threadEval = createThreadEvalRoute({ threads, host, logsDir: options.logsDir })
 
   /**
    * A thread analysis — stats (#45), context (#361), manifest (#435) — or 404 for a thread the
@@ -616,6 +621,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   const respondWithThreadStats = analysisResponder(threadStats)
   const respondWithThreadContext = analysisResponder(threadContext)
   const respondWithThreadManifest = analysisResponder(threadManifest)
+  const respondWithThreadEval = analysisResponder(threadEval)
   /**
    * One request's context; the request is the route's second capture, a turn or `next` — the
    * dispatcher's own match, so the url is read once. A turn the thread lacks, or a thread held
@@ -716,6 +722,11 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
       method: 'GET',
       route: THREAD_MANIFEST_ROUTE,
       respond: idOnly(respondWithThreadManifest),
+    },
+    {
+      method: 'GET',
+      route: THREAD_EVAL_ROUTE,
+      respond: idOnly(respondWithThreadEval),
     },
     {
       method: 'GET',

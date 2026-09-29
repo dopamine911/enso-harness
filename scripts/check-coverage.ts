@@ -71,8 +71,11 @@ export const TOTAL_FUNCTION_COVERAGE_FLOOR = 0.89
  *
  * Re-measured 2026-09-25 (#395: the project registry, the listing store the rail's two lists
  * share, the project list — 143 owned sources): the 80% bound asks for 114, and ~10% under gives 128.
+ *
+ * Re-measured 2026-09-29 (#441: the session eval in core, its host walk, its route and the shared
+ * log-day reader — 163 owned sources): the 80% bound asks for 130, and ~10% under gives 146.
  */
-export const MINIMUM_REPORTED_FILES = 128
+export const MINIMUM_REPORTED_FILES = 146
 
 const LCOV_PATH = join(findRepoRoot(import.meta.url), 'coverage', 'lcov.info')
 
