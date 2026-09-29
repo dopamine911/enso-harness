@@ -101,6 +101,8 @@ const THREAD_CONFIGURE_ROUTE = /^\/api\/threads\/([^/?#]+)\/configure$/
 /**
  * `GET …/system-prompt[?prompt=<id>]` (#443): the system prompt the thread's next request would carry
  * with a library prompt — pi's default without one — section by section. Builds the thread on ask.
+ * The one query parameter is part of the pattern on purpose: its id pattern mirrors the library's
+ * (`isLibraryPromptId`), so a malformed id or any other parameter is a 404, never a file lookup.
  */
 const THREAD_SYSTEM_PROMPT_ROUTE = /^\/api\/threads\/([^/?#]+)\/system-prompt(?:\?prompt=([a-z0-9][a-z0-9-]{0,63}))?$/
 /** `POST …/system-prompt` (#443): the same preview for an unsaved prompt's text — the editor's breakdown. */

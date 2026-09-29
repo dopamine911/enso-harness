@@ -11,6 +11,7 @@ import {
   runtimeDefaultDraft,
   saveDraft,
   saveRefusal,
+  savedState,
 } from '../prompt-editor-state.ts'
 
 /**
@@ -128,4 +129,18 @@ test('a save that is refused before it is sent sends nothing', async () => {
     reason: 'a prompt is already saved as reviewer.md',
   })
   expect(server.asked).toEqual([])
+})
+
+test('a save that answers keeps a draft typed on since it went out, unsaved; with none, the file is the editor', () => {
+  const sent = { ...OPENED.draft, body: 'sent' }
+  const prompt = { ...SAVED, body: 'sent', bytes: 1, tokens: 1 }
+  const unchanged = savedState({ saved: OPENED.saved, draft: sent }, sent, prompt)
+  expect(unchanged).toEqual(openedState(prompt))
+  expect(isDirty(unchanged)).toBe(false)
+  const typedOn = { ...sent, body: 'sent, and more' }
+  const kept = savedState({ saved: OPENED.saved, draft: typedOn }, sent, prompt)
+  expect(kept.draft).toBe(typedOn)
+  expect(kept.saved).toEqual(openedState(prompt).saved)
+  expect(isDirty(kept)).toBe(true)
+  expect(savedState(undefined, sent, prompt)).toEqual(openedState(prompt))
 })

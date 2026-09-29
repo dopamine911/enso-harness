@@ -35,6 +35,7 @@ import {
   isDirty,
   newState,
   openedState,
+  savedState,
   runtimeDefaultDraft,
   saveDraft,
 } from './prompt-editor-state.ts'
@@ -439,9 +440,9 @@ function useManagerState(
   const [pending, setPending] = useState<Move | undefined>(undefined)
   const [refusal, setRefusal] = useState<string | undefined>(undefined)
   const taken = new Set(listingOf(library)?.prompts.map((prompt) => prompt.id) ?? [])
-  // ⚠ Every move takes a new ticket; a prompt read answers only if its ticket is still the latest.
-  // Otherwise a slow read of an earlier selection lands after a later one and fills the editor
-  // with the wrong prompt while the list shows the right one selected.
+  // ⚠ Every move takes a new ticket; a prompt read, save or delete touches the editor only if its
+  // ticket is still the latest. Otherwise a slow answer to an earlier selection lands after a later
+  // one and fills (or empties) the editor while the list shows the later one selected.
   const moves = useRef(0)
   const open = (next: Selection, ticket: number): void => {
     setRefusal(undefined)
@@ -478,27 +479,31 @@ function useManagerState(
     change: (draft) => setEditor((state) => (state === undefined ? state : { ...state, draft })),
     save: async () => {
       if (editor === undefined) return
+      const ticket = moves.current
       const outcome = await saveDraft(editor, taken, fetchImpl)
+      if (outcome.kind === 'saved') reload()
+      if (ticket !== moves.current) return
       if (outcome.kind === 'refused') {
         setRefusal(outcome.reason)
         return
       }
       setRefusal(undefined)
-      setEditor(openedState(outcome.prompt))
+      setEditor((current) => savedState(current, editor.draft, outcome.prompt))
       setSelection({ kind: 'prompt', id: outcome.prompt.id })
-      reload()
     },
     remove: async () => {
       const id = editor?.saved?.id
       if (id === undefined) return
+      const ticket = moves.current
       const removed = await deleteLibraryPrompt(id, fetchImpl)
+      if (removed.kind === 'deleted') reload()
+      if (ticket !== moves.current) return
       if (removed.kind !== 'deleted') {
         setRefusal(removed.detail)
         return
       }
       setEditor(undefined)
       setSelection({ kind: 'pi-default' })
-      reload()
     },
     settle: (discard) => {
       if (discard && pending !== undefined) perform(pending)

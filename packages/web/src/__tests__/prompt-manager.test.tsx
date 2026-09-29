@@ -148,7 +148,7 @@ function answer(input: string, init: RequestInit | undefined, written: Mounted['
 }
 
 /** A request the test answers late: its response waits on the promise `hold` returns for it. */
-type Hold = (input: string) => Promise<void> | undefined
+type Hold = (request: string) => Promise<void> | undefined
 
 async function mountManager(hold?: Hold): Promise<Mounted> {
   const asked: string[] = []
@@ -158,7 +158,7 @@ async function mountManager(hold?: Hold): Promise<Mounted> {
   const root: Root = createRoot(container)
   const fetch = (input: string, init?: RequestInit): Promise<Response> => {
     asked.push(`${init?.method ?? 'GET'} ${input}`)
-    const late = hold?.(input)
+    const late = hold?.(`${init?.method ?? 'GET'} ${input}`)
     return late === undefined
       ? Promise.resolve(answer(input, init, written))
       : late.then(() => answer(input, init, written))
@@ -334,7 +334,7 @@ test('delete asks, naming the file, before anything is removed', async () => {
 // read, arriving after the later one's, is stale — the editor keeps what the list has selected.
 test('⚠ a prompt read that answers after a later selection is dropped: the editor shows what is selected', async () => {
   const { promise: released, resolve: release } = Promise.withResolvers<void>()
-  const mounted = await mountManager((input) => (input === '/api/prompts/reviewer' ? released : undefined))
+  const mounted = await mountManager((request) => (request === 'GET /api/prompts/reviewer' ? released : undefined))
   await openListed(mounted, 'Reviewer')
   await openListed(mounted, 'Haiku')
   const name = (): string | undefined => mounted.dialog().querySelector<HTMLInputElement>('#prompt-name')?.value
@@ -345,5 +345,63 @@ test('⚠ a prompt read that answers after a later selection is dropped: the edi
   })
   expect(name()).toBe('Haiku')
   expect(mounted.dialog().querySelector<HTMLTextAreaElement>('#prompt-body')?.value).toBe(HAIKU.body)
+  await mounted.unmount()
+})
+
+/** A request held until the test releases it. */
+function held(request: string): { readonly hold: Hold; readonly release: () => Promise<void> } {
+  const { promise, resolve } = Promise.withResolvers<void>()
+  return {
+    hold: (asked) => (asked === request ? promise : undefined),
+    release: () =>
+      flush(async () => {
+        resolve()
+        await tick()
+      }),
+  }
+}
+
+// ⚠ Typing goes on while a save is in flight: the save's answer must not put back the text it sent.
+test('⚠ edits made while a save is in flight survive its answer, and still read as unsaved', async () => {
+  const put = held('PUT /api/prompts/terse')
+  const mounted = await mountManager(put.hold)
+  await click(mounted, 'New')
+  await typeInto(mounted, '#prompt-name', 'Terse')
+  await typeInto(mounted, '#prompt-id', 'terse')
+  await typeInto(mounted, '#prompt-body', 'One sentence.')
+  await click(mounted, 'Save')
+  await typeInto(mounted, '#prompt-body', 'One sentence. Then a second.')
+  await put.release()
+  await eventually(() => expect(mounted.written).toHaveLength(1))
+  expect(mounted.written[0]?.fields.body).toBe('One sentence.')
+  await eventually(() => expect(mounted.dialog().textContent).toContain('terse.md'))
+  expect(mounted.dialog().querySelector<HTMLTextAreaElement>('#prompt-body')?.value).toBe(
+    'One sentence. Then a second.',
+  )
+  expect(textOf(mounted, 'unsaved changes')).toContain('unsaved')
+  await mounted.unmount()
+})
+
+// ⚠ A delete answering after the person moved on must not pull them back to pi's default.
+test('⚠ a delete that answers after another prompt was opened leaves that prompt open', async () => {
+  const remove = held('DELETE /api/prompts/reviewer')
+  const mounted = await mountManager(remove.hold)
+  await openListed(mounted, 'Reviewer')
+  await eventually(() => expect(mounted.dialog().textContent).toContain('reviewer.md'))
+  await click(mounted, 'Delete')
+  const confirm = [...mounted.dialog().querySelectorAll<HTMLButtonElement>('[role="alert"] button')].find(
+    (button) => button.textContent === 'Delete',
+  )
+  if (confirm === undefined) throw new Error('expected the confirming Delete')
+  await flush(async () => {
+    confirm.click()
+    await tick()
+  })
+  await openListed(mounted, 'Haiku')
+  const name = (): string | undefined => mounted.dialog().querySelector<HTMLInputElement>('#prompt-name')?.value
+  await eventually(() => expect(name()).toBe('Haiku'))
+  await remove.release()
+  expect(mounted.asked).toContain('DELETE /api/prompts/reviewer')
+  expect(name()).toBe('Haiku')
   await mounted.unmount()
 })

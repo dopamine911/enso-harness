@@ -41,6 +41,20 @@ export function openedState(prompt: EnsoLibraryPrompt): EditorState {
   return { saved: draft, draft }
 }
 
+/**
+ * The editor once a save of `sent` answered with `prompt`: the file is the new baseline, and a draft
+ * typed on since the save went out stays — still unsaved — instead of being put back to what was sent.
+ */
+export function savedState(
+  current: EditorState | undefined,
+  sent: EditorDraft,
+  prompt: EnsoLibraryPrompt,
+): EditorState {
+  const opened = openedState(prompt)
+  if (current === undefined || current.draft === sent) return opened
+  return { saved: opened.saved, draft: current.draft }
+}
+
 /** A new prompt, not yet a file. */
 export function newState(draft: EditorDraft): EditorState {
   return { saved: undefined, draft }
