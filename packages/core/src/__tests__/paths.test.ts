@@ -14,8 +14,8 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
   ensoAgentDir,
-  ensoPermissionRulesPath,
   ensoHome,
+  ensoPermissionRulesPath,
   fileUrlToPath,
   findRepoRoot,
   harnessPackageDir,

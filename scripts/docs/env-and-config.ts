@@ -22,7 +22,12 @@ import { runGenerator } from './generator-support.ts'
 const ROOT = findRepoRoot(import.meta.url)
 const SOURCE_ROOTS = ['packages', 'scripts', 'test'] as const
 const PROCESS_ENV_BASE = /\bprocess\s*\.\s*env\b/g
-/** `{ ...process.env, KEY: value, … }`: the whole override, so every key it sets is found, not only the first. */
+/**
+ * `{ ...process.env, KEY: value, … }`: the whole override, so every key it sets is found, not only
+ * the first. ⚠ FLAT overrides only, as every one in the tree is: a value that is itself an object
+ * literal stops `[^{}]*`, the override is not matched, and its keys are not found. A key the
+ * metadata lists is then reported as "without a read"; a new, unlisted one is missed.
+ */
 const PROCESS_ENV_CHILD_OVERRIDE = /\{\s*\.\.\.\s*process\s*\.\s*env\s*,([^{}]*)\}/g
 const OVERRIDE_KEY = /([A-Za-z_$][\w$]*)\s*:/g
 /** A runtime path helper: a file under `ENSO_HOME` (#421), or the checkout's own build cache under `node_modules`. */
