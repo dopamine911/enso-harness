@@ -228,7 +228,7 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
   THREAD_SYSTEM_PROMPT_ROUTE: threadRead(
     'respondWithSystemPromptPreview → HostedThread.previewSystemPrompt',
     "200 `EnsoSystemPromptPreview` JSON — pi's rendering of the next request's system prompt with that prompt, section by section (who wrote each: the library or pi), the tool definitions sent beside it, and the total the Context tab prices a first request made with it at; the thread's own choice is untouched",
-    "400 malformed thread id; 403 untrusted origin; 404 a prompt named on a server without a library; 409 thread running; 422 the prompt is refused, with the reason naming it — missing, unreadable or unparseable, a session prompt, or empty — or pi's rendering with it does not split back into its sections; 500 pi's rendering of its default does not split back, or handler failure",
+    "400 malformed thread id; 403 untrusted origin; 404 a prompt named on a server without a library; 409 thread running; 422 the prompt is refused, with the reason naming it — missing, unreadable, not UTF-8 or unparseable, a session prompt, or empty; 500 pi's rendering does not split back into its sections (the prompt's own text is matched whole, so it cannot cause this), or handler failure",
     {
       path: '/api/threads/:threadId/system-prompt',
       input:
@@ -244,7 +244,7 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
     success:
       "200 `EnsoSystemPromptPreview` JSON — the same preview a saved prompt gets, for the editor's breakdown while it types; nothing is recorded",
     errors:
-      "400 malformed id/body; 403 untrusted origin; 409 thread running; 413 body too large; 422 pi's rendering with the draft does not split back into its sections (its text holds a line like one of pi's section tags); 500 handler failure",
+      "400 malformed id/body; 403 untrusted origin; 409 thread running; 413 body too large; 500 pi's rendering does not split back into its sections (the draft's text is matched whole, so it cannot cause this), or handler failure",
     routeClass: 'observation',
     builds: 'yes',
     logs: 'no',
@@ -532,7 +532,7 @@ function generate(): string {
     '',
     "Every `/api/threads/:threadId…` route also reads the `X-Enso-Project` header (#395): a page names a new thread's project with it, and an id that is no registered project is a 400 before the route runs.",
     '',
-    '> Parser limitation: discovery recognizes top-level `const *_ROUTE = /…/` and `const *_ROUTE = threadRoute(…)` declarations plus direct `request.method` branches using `url === …` or `url.startsWith(…)`. Statuses, input shapes, classes, acquisition, and self-logging are intentionally explicit checked metadata rather than inferred behavior.',
+    '> Parser limitation: discovery recognizes top-level `const *_ROUTE = /…/`, `const *_ROUTE = threadRoute(…)`, `const *_ROUTE = promptRoute()` and `const *_ROUTE = new RegExp(` declarations (only `threadRoute` derives its path; every other form states it in its metadata) plus direct `request.method` branches using `url === …` or `url.startsWith(…)`. Statuses, input shapes, classes, acquisition, and self-logging are intentionally explicit checked metadata rather than inferred behavior.',
     '',
     '| Method | Rendered path | Handler / factory | Input shape | Success | Named error statuses | Class | Builds / acquires? | Logs itself? | Source |',
     '|---|---|---|---|---|---|---|---|---|---|',

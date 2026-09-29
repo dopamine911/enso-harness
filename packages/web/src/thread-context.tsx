@@ -5,7 +5,7 @@ import type { FetchLike } from './browser-logging.ts'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './components/ui/dialog.tsx'
 import { ContextEvents, FileActivity } from './context-activity.tsx'
 import { ContextBrowser, type ContextBrowserFocus, type ContextBrowserRequest } from './context-browser.tsx'
-import { ThreadSystemPromptContext, useCategoryLabel } from './context-labels.tsx'
+import { ThreadSystemPromptContext, useCategoryLabel, useElementLabel } from './context-labels.tsx'
 import {
   changeText,
   estimateChangeText,
@@ -445,6 +445,7 @@ function RequestBrief({
 }): React.ReactNode {
   const { actual, brief } = request
   const muted = 'text-xs text-muted-foreground'
+  const labelOf = useElementLabel()
   return (
     <article className="grid gap-3 rounded-lg border bg-background p-3">
       {/* A pick is confirmed in one line, not by re-reading the brief: the region below changes
@@ -487,7 +488,7 @@ function RequestBrief({
                     onClick={() => onOpenElement(addition.key)}
                   >
                     <Swatch category={addition.category} className="size-2" />
-                    <span className="truncate">{addition.label}</span>
+                    <span className="truncate">{labelOf(addition)}</span>
                   </button>
                 </li>
               ))}

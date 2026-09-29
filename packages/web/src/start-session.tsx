@@ -46,7 +46,7 @@ export interface StartSessionDialogProps {
   /** The thread's permission mode and the modes it offers — the composer's own store. */
   readonly mode: string | undefined
   readonly modes: readonly string[]
-  /** `connection.configure`: the three settings, applied together. */
+  /** `connection.configure`: the settings — system prompt, model, effort, mode — applied together. */
   readonly configure: (configuration: EnsoSessionConfiguration) => Promise<ConfigureOutcome>
   /** The chat's send: false when it refused (disconnected), and the dialog then stays open. */
   readonly send: (text: string) => boolean

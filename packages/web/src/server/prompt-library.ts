@@ -103,6 +103,13 @@ function errorCode(error: unknown): string | undefined {
   return (error as NodeJS.ErrnoException).code
 }
 
+/**
+ * ⚠ STRICT, AND BOM KEPT. A lenient decode turns every byte that is not UTF-8 into U+FFFD, and the
+ * file would be read — hashed, sent to the model — as something it does not say: refused instead,
+ * by name. The BOM is left in the text for the parser to read past, so the text re-encodes to the
+ * file's exact bytes and `bytes` stays the size on disk.
+ */
+const UTF8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
 function readFile(directory: string, id: string): LibraryRead {
   const file = `${id}${EXTENSION}`
   // Refused, never missing: a listed `Notes.md` must still be named, and nothing outside is looked at.
@@ -110,9 +117,10 @@ function readFile(directory: string, id: string): LibraryRead {
     return { kind: 'refused', reason: `${file}: the name is not lowercase words joined by hyphens` }
   let text: string
   try {
-    text = readFileSync(pathOf(directory, id), 'utf8')
+    text = UTF8.decode(readFileSync(pathOf(directory, id)))
   } catch (error: unknown) {
     if (errorCode(error) === 'ENOENT') return { kind: 'missing', reason: `no prompt ${id} in ${directory}` }
+    if (error instanceof TypeError) return { kind: 'refused', reason: `${file}: is not UTF-8 text` }
     return { kind: 'refused', reason: `${file}: cannot be read (${errorCode(error) ?? String(error)})` }
   }
   const parsed = parseLibraryPrompt(id, text)

@@ -98,8 +98,8 @@ export function utf8Bytes(text: string): number {
 
 /** What a library prompt says about itself, and its body — the editable part of a file. */
 const libraryPromptFields = {
-  /** What lists show. */
-  name: Type.String({ minLength: 1, maxLength: 120 }),
+  /** What lists show — never only spaces, so a `PUT` of one is its body's 400, not a file that reads back refused. */
+  name: Type.String({ minLength: 1, maxLength: 120, pattern: '\\S' }),
   /** One line, optional in the file; empty when absent. */
   description: Type.String({ maxLength: 500 }),
   category: EnsoLibraryPromptCategory,
@@ -237,7 +237,9 @@ export function parseLibraryPrompt(id: string, text: string): LibraryPromptParse
   const fields = readFrontmatter(lines.slice(1, close))
   if (typeof fields === 'string') return { kind: 'refused', reason: `${id}.md: ${fields}` }
   const { name, description = '', category } = fields
-  if (name === undefined || name.length === 0) return { kind: 'refused', reason: `${id}.md: frontmatter has no name` }
+  // A name of spaces is no name: a list row would be blank and a refusal would name nobody.
+  if (name === undefined || name.trim().length === 0)
+    return { kind: 'refused', reason: `${id}.md: frontmatter has no name` }
   if (category === undefined || !CATEGORIES.has(category)) {
     return { kind: 'refused', reason: `${id}.md: frontmatter category must be system, append or session` }
   }

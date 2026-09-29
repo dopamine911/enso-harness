@@ -1,4 +1,4 @@
-import { ENSO_RUN_CONTEXT_ENTRY, type EnsoForkPoint, type EnsoRunContext, readEnsoRunContext } from '@enso/core'
+import { ENSO_RUN_CONTEXT_ENTRY, type EnsoForkPoint, lastCustomEntryData, readEnsoRunContext } from '@enso/core'
 import { persistedPermissionMode } from './permission-mode-adapter.ts'
 import { recordedModelOf } from './transcript.ts'
 
@@ -11,25 +11,9 @@ import { recordedModelOf } from './transcript.ts'
  * `run-context` extension writes one only when a condition changed, so the last one is current.
  */
 
+/** The one field of a pi entry the fork point reads itself — the leaf's id. */
 interface PiBranchEntry {
   readonly id?: unknown
-  readonly type?: unknown
-  readonly customType?: unknown
-  readonly data?: unknown
-}
-
-/**
- * The branch's NEWEST `enso-run-context`, or `null` when there is none or it does not read (PR
- * #439 review): an older one is not the current conditions, so a record from another schema is
- * unknown, never walked past to one that reads.
- */
-function latestRunContext(branch: readonly unknown[]): EnsoRunContext | null {
-  for (let entryIndex = branch.length - 1; entryIndex >= 0; entryIndex -= 1) {
-    const entry = branch[entryIndex] as PiBranchEntry | undefined
-    if (entry?.type !== 'custom' || entry.customType !== ENSO_RUN_CONTEXT_ENTRY) continue
-    return readEnsoRunContext(ENSO_RUN_CONTEXT_ENTRY, entry.data) ?? null
-  }
-  return null
 }
 
 /** The fork point of `branch` (root to leaf), for the session `threadId` in `cwd`. */
@@ -50,7 +34,11 @@ export function forkPointOf(
       thinkingLevel: recorded?.thinkingLevel ?? null,
       mode: persistedPermissionMode(branch),
       cwd: session.cwd,
-      runContext: latestRunContext(branch),
+      // The NEWEST `enso-run-context`, or `null` when there is none or it does not read (PR #439
+      // review): an older one is not the current conditions, so a record from another schema is
+      // unknown, never walked past to one that reads.
+      runContext:
+        readEnsoRunContext(ENSO_RUN_CONTEXT_ENTRY, lastCustomEntryData(branch, ENSO_RUN_CONTEXT_ENTRY)) ?? null,
     },
   }
 }

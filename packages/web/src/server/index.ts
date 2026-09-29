@@ -678,8 +678,9 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
 
   /**
    * A preview of `candidate` on the thread, built on ask; 409 while it runs. A rendering that does
-   * not split is a 500 only for pi's default — pi's own text. With a candidate, the likelier cause is
-   * the candidate's text itself (a line that reads as one of pi's section tags): a 422 naming it, at warn.
+   * not split is a 500: the host matches the candidate's own text whole (preamble and addendum,
+   * `system-prompt-preview.ts`), so whatever it holds cannot be the cause — pi rendered something the
+   * splitter does not know.
    */
   async function answerPreview(
     threadId: string,
@@ -699,18 +700,10 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
       })
       return
     }
-    if (candidate === null) {
-      log.error('pi rendered a system prompt that does not split back', { threadId })
-      refuseWith(response, {
-        status: 500,
-        reason: "pi's rendering of its default system prompt does not split back into its sections",
-      })
-      return
-    }
-    log.warn('a system prompt preview does not split back into its sections', { threadId, id: candidate.id })
+    log.error('pi rendered a system prompt that does not split back', { threadId, id: candidate?.id ?? null })
     refuseWith(response, {
-      status: 422,
-      reason: `pi's rendering with ${candidate.name} does not split back into its sections — does its text hold a line like one of pi's section tags?`,
+      status: 500,
+      reason: "pi's rendering of this system prompt does not split back into its sections",
     })
   }
 

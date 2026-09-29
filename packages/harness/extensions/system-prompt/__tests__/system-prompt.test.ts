@@ -39,19 +39,32 @@ test("⚠ applied again — the web host's loader already put it there — it ch
 
 type Handler = (event: unknown, context: unknown) => unknown
 
-/** One run start under the extension, over `branch`; what it did to the options and what it said. */
-function runStart(branch: unknown[]): { options: { cwd: string; customPrompt?: string }; notices: string[] } {
+/**
+ * One run start under the extension, over `branch`; what it did to the options and what it said.
+ * The options are pi's normalized ones — `appendSystemPrompt` always a string — and each notice is
+ * `level:message`, since the level is what makes the unreadable-record notice red in the terminal.
+ */
+function runStart(branch: unknown[]): {
+  options: { cwd: string; customPrompt?: string; appendSystemPrompt: string }
+  notices: string[]
+} {
   let handler: Handler | undefined
   systemPrompt({
     on: (event: string, registered: Handler): void => {
       if (event === 'before_agent_start') handler = registered
     },
   } as unknown as ExtensionAPI)
-  const options: { cwd: string; customPrompt?: string } = { cwd: '/r' }
+  const options: { cwd: string; customPrompt?: string; appendSystemPrompt: string } = {
+    cwd: '/r',
+    appendSystemPrompt: '',
+  }
   const notices: string[] = []
   handler?.(
     { systemPromptOptions: options },
-    { sessionManager: { getBranch: () => branch }, ui: { notify: (message: string) => notices.push(message) } },
+    {
+      sessionManager: { getBranch: () => branch },
+      ui: { notify: (message: string, level: string) => notices.push(`${level}:${message}`) },
+    },
   )
   return { options, notices }
 }
@@ -67,5 +80,5 @@ test("the branch's LAST record is applied; none, or pi's default recorded over a
   expect(reset.notices).toEqual([])
   const unreadable = runStart([entry({ id: 'p', mode: 'session' })])
   expect(unreadable.options.customPrompt).toBeUndefined()
-  expect(unreadable.notices).toEqual([UNREADABLE_SYSTEM_PROMPT_NOTICE])
+  expect(unreadable.notices).toEqual([`error:${UNREADABLE_SYSTEM_PROMPT_NOTICE}`])
 })

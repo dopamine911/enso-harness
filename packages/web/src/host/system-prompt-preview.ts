@@ -16,10 +16,13 @@ import {
  * it does expose is the rendering, `AgentSession.systemPrompt` — the preamble, then every other
  * section inside its `<name>` tags, joined by blank lines (pi-ai `getSystemMessageText`). So the
  * host asks pi for the rendering under the candidate ({@link renderedUnder}) and splits it here
- * ({@link splitRenderedPrompt}); the split is VERIFIED by re-joining it, and a rendering that does
- * not re-join byte for byte is refused rather than shown wrong. The total never depends on the
- * split: it is the whole rendering's price split the same way the Context tab splits pi's stored
- * sections.
+ * ({@link splitRenderedPrompt}). What the host knows it checks exactly: the preamble when it is a
+ * custom one, and the addendum always — pi renders `getAppendSystemPrompt()` joined by blank lines
+ * as `<addendum>` (`system-prompt.js` `promptSections.addendum`), so an append text holding
+ * pi-looking tags cannot fabricate sections. The rest is split at tag boundaries, each name at
+ * most once; a rendering that does not fit is refused rather than shown wrong. The total never
+ * depends on the split: it is the whole rendering's price split the same way the Context tab
+ * splits pi's stored sections.
  *
  * ⚠ A SWAP, SYNCHRONOUS AND UNDONE. The candidate is put in the loader's place, pi rebuilds (the
  * same public call `setSystemPrompt` uses), the rendering is read, and the thread's own choice is
@@ -51,33 +54,65 @@ function sectionEnd(rest: string, name: string, from: number): number | undefine
 }
 
 /**
- * pi's rendering as its sections, or `undefined` when it does not split back into exactly itself.
- * `preamble` is the preamble when the host knows it (a custom one); pi's own has no section tag in
- * it, so without one the preamble ends where the first section opens.
+ * Where the addendum that opens `rest` ends, matched WHOLE against the one the host handed pi: its
+ * text is the user's and may hold `</addendum>` or any other tag, so no close inside it is a boundary.
  */
-export function splitRenderedPrompt(rendered: string, preamble: string | undefined): RenderedSection[] | undefined {
+function addendumEnd(rest: string, addendum: string | undefined): number | undefined {
+  if (addendum === undefined || !rest.startsWith(addendum)) return undefined
+  const after = addendum.length
+  return after === rest.length || rest.startsWith(SECTION_SEPARATOR, after) ? after : undefined
+}
+
+/** What the host knows of the rendering: a custom preamble, and the addendum pi was handed. */
+export interface KnownSections {
+  readonly preamble: string | undefined
+  /** The appends joined as pi joins them; `undefined` when there are none (pi renders no addendum). */
+  readonly addendum: string | undefined
+}
+
+/**
+ * pi's rendering as its sections, or `undefined` when it does not fit what the host knows.
+ * `preamble` is the preamble when the host knows it (a custom one); pi's own has no section tag in
+ * it, so without one the preamble ends where the first section opens. The addendum is matched
+ * whole: its text is the user's and may hold anything, including `</addendum>` and other tags.
+ */
+export function splitRenderedPrompt(rendered: string, known: KnownSections): RenderedSection[] | undefined {
   const firstSection = rendered.indexOf(`${SECTION_SEPARATOR}<`)
-  const head = preamble ?? (firstSection === -1 ? rendered : rendered.slice(0, firstSection))
+  const head = known.preamble ?? (firstSection === -1 ? rendered : rendered.slice(0, firstSection))
   if (head.length === 0 || !rendered.startsWith(head)) return undefined
   const sections: RenderedSection[] = [{ name: 'preamble', text: head }]
+  const seen = new Set(['preamble'])
+  const addendum = known.addendum === undefined ? undefined : `<addendum>\n${known.addendum}\n</addendum>`
   let rest = rendered.slice(head.length)
   while (rest.length > 0) {
     if (!rest.startsWith(SECTION_SEPARATOR)) return undefined
     rest = rest.slice(SECTION_SEPARATOR.length)
     const open = SECTION_OPEN.exec(rest)
     const name = open?.[1]
-    const end = open === null || name === undefined ? undefined : sectionEnd(rest, name, open[0].length - 1)
-    if (name === undefined || end === undefined) return undefined
+    if (open === null || name === undefined || seen.has(name)) return undefined
+    const end = name === 'addendum' ? addendumEnd(rest, addendum) : sectionEnd(rest, name, open[0].length - 1)
+    if (end === undefined) return undefined
+    seen.add(name)
     sections.push({ name, text: rest.slice(0, end) })
     rest = rest.slice(end)
   }
-  return sections.map((section) => section.text).join(SECTION_SEPARATOR) === rendered ? sections : undefined
+  // An addendum pi was handed but did not render means the rendering is not what the host thinks.
+  return addendum !== undefined && !seen.has('addendum') ? undefined : sections
 }
 
-/** Whose words a section is: the candidate's preamble or addendum is the library's, the rest pi's. */
-function originOf(name: string, candidate: EnsoSystemPromptChoice | null): EnsoSystemPromptSection['origin'] {
+/**
+ * Whose words a section is: the candidate's preamble is the library's; the addendum is the
+ * library's only when it is the candidate's text alone. ⚠ When pi's `APPEND_SYSTEM.md` shares the
+ * addendum with it, the section is labelled `pi` — the schema has one origin per section, and
+ * calling pi's text the library's would be the worse lie.
+ */
+function originOf(
+  name: string,
+  candidate: EnsoSystemPromptChoice | null,
+  baseAppends: readonly string[],
+): EnsoSystemPromptSection['origin'] {
   if (candidate?.mode === 'system' && name === 'preamble') return 'library'
-  if (candidate?.mode === 'append' && name === 'addendum') return 'library'
+  if (candidate?.mode === 'append' && name === 'addendum' && baseAppends.length === 0) return 'library'
   return 'pi'
 }
 
@@ -102,6 +137,8 @@ export interface PreviewInputs {
   readonly rendered: string
   /** The preamble when the host knows it: the candidate's, or a `SYSTEM.md` pi's loader found. */
   readonly preamble: string | undefined
+  /** pi's own appends (`APPEND_SYSTEM.md`), from its loader — the candidate's `append` text is added here. */
+  readonly baseAppends: readonly string[]
   readonly candidate: EnsoSystemPromptChoice | null
   readonly tools: readonly Parameters<typeof toToolDeclaration>[0][]
   readonly contextWindow: number | undefined
@@ -111,15 +148,20 @@ export interface PreviewInputs {
 export function previewOf({
   rendered,
   preamble,
+  baseAppends,
   candidate,
   tools,
   contextWindow,
 }: PreviewInputs): EnsoSystemPromptPreview | undefined {
-  const split = splitRenderedPrompt(rendered, preamble)
+  const appends = candidate?.mode === 'append' ? [...baseAppends, candidate.text] : baseAppends
+  // pi renders no addendum when the join is empty (`system-prompt.js`: `if (appendSystemPrompt)`).
+  const joined = appends.join(SECTION_SEPARATOR)
+  const addendum = joined === '' ? undefined : joined
+  const split = splitRenderedPrompt(rendered, { preamble, addendum })
   if (split === undefined) return undefined
   const sections = split.map(({ name, text }) => ({
     name,
-    origin: originOf(name, candidate),
+    origin: originOf(name, candidate, baseAppends),
     text,
     tokens: estimateTextTokens(text),
   }))

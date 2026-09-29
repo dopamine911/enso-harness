@@ -7,7 +7,8 @@
  *   `ArtifactAction`, `ArtifactContent`. Removed `ArtifactClose`: the panel sits inside a dialog
  *   that has its own close, and two close buttons for one surface is one too many
  * - `ArtifactAction` renders its label beside the icon when it has one, rather than only to screen
- *   readers: the editor's actions (save, delete) are words a person looks for, not icons to learn
+ *   readers: the editor's actions (save, delete) are words a person looks for, not icons to learn.
+ *   Its `tooltip` prop is removed with the Tooltip import: a visible label already says it.
  * - `@repo/shadcn-ui/...` imports → `@/` aliases; removed `"use client"` (Vite SPA); explicit
  *   return types
  */
@@ -15,7 +16,6 @@
 import type { LucideIcon } from "lucide-react";
 import type { ComponentProps, HTMLAttributes } from "react";
 import { Button } from "@/components/ui/button.tsx";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip.tsx";
 import { cn } from "@/lib/utils.ts";
 
 export type ArtifactProps = HTMLAttributes<HTMLDivElement>;
@@ -49,13 +49,11 @@ export const ArtifactActions = ({ className, ...props }: ArtifactActionsProps): 
 );
 
 export type ArtifactActionProps = ComponentProps<typeof Button> & {
-	tooltip?: string;
 	label?: string;
 	icon?: LucideIcon;
 };
 
 export const ArtifactAction = ({
-	tooltip,
 	label,
 	icon: Icon,
 	children,
@@ -63,35 +61,18 @@ export const ArtifactAction = ({
 	size = "sm",
 	variant = "ghost",
 	...props
-}: ArtifactActionProps): React.ReactNode => {
-	const button = (
-		<Button
-			className={cn("h-8 gap-1.5 px-2 text-muted-foreground hover:text-foreground", className)}
-			size={size}
-			type="button"
-			variant={variant}
-			{...props}
-		>
-			{Icon ? <Icon className="size-4" /> : null}
-			{children ?? label}
-		</Button>
-	);
-
-	if (tooltip) {
-		return (
-			<TooltipProvider>
-				<Tooltip>
-					<TooltipTrigger asChild>{button}</TooltipTrigger>
-					<TooltipContent>
-						<p>{tooltip}</p>
-					</TooltipContent>
-				</Tooltip>
-			</TooltipProvider>
-		);
-	}
-
-	return button;
-};
+}: ArtifactActionProps): React.ReactNode => (
+	<Button
+		className={cn("h-8 gap-1.5 px-2 text-muted-foreground hover:text-foreground", className)}
+		size={size}
+		type="button"
+		variant={variant}
+		{...props}
+	>
+		{Icon ? <Icon className="size-4" /> : null}
+		{children ?? label}
+	</Button>
+);
 
 export type ArtifactContentProps = HTMLAttributes<HTMLDivElement>;
 

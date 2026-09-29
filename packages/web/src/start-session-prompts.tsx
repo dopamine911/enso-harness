@@ -15,8 +15,12 @@ import { fetchLibraryPrompt, fetchPromptLibrary, type LibraryListing } from './p
  * wrong instructions. Choosing pi's default is always possible, and is the default.
  */
 
-/** The select's value for pi's own prompt — a Radix item may not have an empty value. */
-export const PI_DEFAULT_SYSTEM_PROMPT = 'pi-default'
+/**
+ * The select's value for pi's own prompt — a Radix item may not have an empty value. ⚠ Outside the
+ * library id grammar (`isLibraryPromptId`: no `:`), so no saved prompt can share it: `pi-default`
+ * did, and a prompt saved as `pi-default.md` was sent as pi's default.
+ */
+export const PI_DEFAULT_SYSTEM_PROMPT = ':pi-default'
 
 type LibraryState = { readonly kind: 'loading' } | LibraryListing
 

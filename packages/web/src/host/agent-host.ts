@@ -1543,6 +1543,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         const preview = previewOf({
           rendered,
           preamble: candidate?.mode === 'system' ? candidate.text : services.resourceLoader.getSystemPrompt(),
+          baseAppends: services.resourceLoader.getAppendSystemPrompt(),
           candidate,
           tools: session.agent.state.tools,
           contextWindow: window !== undefined && window > 0 ? window : undefined,

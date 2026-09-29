@@ -40,7 +40,7 @@ export function applySystemPrompt(
     options.customPrompt = choice.text
     return
   }
-  const appended = options.appendSystemPrompt ?? ''
+  const appended = options.appendSystemPrompt
   // Already there when it ends the addendum — the web host's loader put it. Nothing is lost if an
   // APPEND_SYSTEM.md happens to end with the same text: the text is in the prompt either way.
   if (appended === choice.text || appended.endsWith(`${APPEND_SEPARATOR}${choice.text}`)) return

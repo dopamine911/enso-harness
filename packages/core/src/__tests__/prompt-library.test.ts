@@ -83,6 +83,7 @@ test.each([
   ],
   ['twice', '---\nname: x\nname: y\ncategory: system\n---\n', 'names name twice'],
   ['nameless', '---\ncategory: system\n---\n', 'has no name'],
+  ['blank', '---\nname: "   "\ncategory: system\n---\n', 'has no name'],
   ['kind', '---\nname: x\ncategory: user\n---\n', 'category must be system, append or session'],
   ['quoted', '---\nname: "x\ncategory: system\n---\n', 'name is not a readable string'],
   ['long', `---\nname: ${'n'.repeat(121)}\ncategory: system\n---\n`, 'its name or description is too long'],

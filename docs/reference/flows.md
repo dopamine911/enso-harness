@@ -40,7 +40,7 @@ flowchart LR
 
 | Node | Contract | Input | Source |
 |---|---|---|---|
-| `respondToProjectRegistration → ProjectRegistry.register` | [`POST /api/projects`](./routes.md) | body: `EnsoProjectRegistration` — an absolute `path` strictly under a root the ENSO_HOME config declares (`projects.roots`), optional `title` | [`packages/web/src/server/index.ts:1255`](../../packages/web/src/server/index.ts#L1255) |
+| `respondToProjectRegistration → ProjectRegistry.register` | [`POST /api/projects`](./routes.md) | body: `EnsoProjectRegistration` — an absolute `path` strictly under a root the ENSO_HOME config declares (`projects.roots`), optional `title` | [`packages/web/src/server/index.ts:1248`](../../packages/web/src/server/index.ts#L1248) |
 | `respondToProjectRemoval → ProjectRegistry.remove` | [`DELETE /api/projects/:projectId`](./routes.md) | path: `projectId` (sixteen hex digits) | [`packages/web/src/server/index.ts:139`](../../packages/web/src/server/index.ts#L139) |
 | `respondToPromptRemoval → PromptLibrary.remove` | [`DELETE /api/prompts/:id`](./routes.md) | path: `id` | [`packages/web/src/server/index.ts:137`](../../packages/web/src/server/index.ts#L137) |
 | `respondToPromptWrite → PromptLibrary.write` | [`PUT /api/prompts/:id`](./routes.md) | path: `id`; body: `EnsoLibraryPromptWrite` — `name`, `description`, `category` (system, append or session) and the markdown `body` | [`packages/web/src/server/index.ts:136`](../../packages/web/src/server/index.ts#L136) |

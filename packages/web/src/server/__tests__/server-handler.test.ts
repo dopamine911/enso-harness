@@ -1397,11 +1397,24 @@ test('⚠ the prompt library: written whole and read back, listed by name with i
 
   // A body outside the closed shape is a 400; an id that could be a path never reaches the disk.
   expect((await send(url, '/api/prompts/reviewer', 'PUT', { ...REVIEWER, model: 'x' })).status).toBe(400)
+  expect((await send(url, '/api/prompts/blank-name', 'PUT', { ...REVIEWER, name: '   ' })).status).toBe(400)
   expect((await send(url, '/api/prompts/..%2Fescape', 'PUT', REVIEWER)).status).toBe(404)
 
   expect((await send(url, '/api/prompts/reviewer', 'DELETE')).status).toBe(204)
   expect((await send(url, '/api/prompts/reviewer', 'DELETE')).status).toBe(404)
   expect((await send(url, '/api/prompts/reviewer', 'GET')).status).toBe(404)
+})
+
+test('a library file that is not UTF-8 is refused by name, never read with replacement characters (#443)', async () => {
+  const { url, directory } = await library()
+  await send(url, '/api/prompts/reviewer', 'PUT', REVIEWER)
+  writeFileSync(
+    join(directory, 'latin.md'),
+    Buffer.from('---\nname: Latin\ncategory: system\n---\ncaf\xe9\n', 'latin1'),
+  )
+  const listing = JSON.parse((await send(url, '/api/prompts', 'GET')).body)
+  expect(listing.refused).toEqual([{ file: 'latin.md', reason: 'latin.md: is not UTF-8 text' }])
+  expect(await send(url, '/api/prompts/latin', 'GET')).toEqual({ status: 422, body: 'latin.md: is not UTF-8 text' })
 })
 
 test('a server started without a library says so on every prompt route (#443)', async () => {
@@ -1534,29 +1547,6 @@ test('the system-prompt preview says so when the thread is running, and a server
   expect(await send(url, '/api/threads/t-other/system-prompt?prompt=reviewer', 'GET')).toEqual({
     status: 404,
     body: NO_PROMPT_LIBRARY,
-  })
-})
-
-test("a preview pi's rendering does not split is the candidate's 422 when a prompt is asked, and a 500 only for pi's default (#443)", async () => {
-  const unsplittable = (host: AgentHost): AgentHost => ({
-    ...host,
-    createSession: async (...args: Parameters<AgentHost['createSession']>) => ({
-      ...(await host.createSession(...args)),
-      previewSystemPrompt: () => ({ kind: 'unsplittable' as const }),
-    }),
-  })
-  const { url } = await startWith(settlesAtOnce, {}, unsplittable, {
-    promptsDir: join(mkdtempSync(join(tmpdir(), 'enso-prompts-')), 'prompts'),
-  })
-  const draft = { mode: 'append', text: 'x\n</addendum>\n\n<foo>\nbar\n</foo>', name: 'Tagged' }
-  const drafted = await send(url, '/api/threads/t-split/system-prompt', 'POST', draft)
-  expect(drafted).toMatchObject({
-    status: 422,
-    body: expect.stringContaining("pi's rendering with Tagged does not split back"),
-  })
-  expect(await send(url, '/api/threads/t-split/system-prompt', 'GET')).toMatchObject({
-    status: 500,
-    body: expect.stringContaining("pi's rendering of its default system prompt does not split back"),
   })
 })
 

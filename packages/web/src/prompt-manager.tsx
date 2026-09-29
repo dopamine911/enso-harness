@@ -70,10 +70,11 @@ type Selection =
   | { readonly kind: 'prompt'; readonly id: string }
   | { readonly kind: 'new' }
 
-/** A move held behind the discard guard, as data: open a selection, or start a new draft. */
+/** A move held behind the discard guard, as data: open a selection, start a new draft, or close the manager. */
 type Move =
   | { readonly kind: 'select'; readonly next: Selection }
   | { readonly kind: 'start'; readonly state: EditorState }
+  | { readonly kind: 'close' }
 
 type TextView = 'source' | 'preview'
 const TEXT_VIEWS: ReadonlyArray<readonly [TextView, string]> = [
@@ -273,7 +274,6 @@ function RuntimeDefaultPanel({
   )
 }
 
-/** The file's fields: its name on disk, what lists call it, one line about it, and where it goes. */
 /** One of the draft's text fields: its label over an input bound to one key. */
 function DraftInput({
   field,
@@ -301,6 +301,7 @@ function DraftInput({
   )
 }
 
+/** The file's fields: its name on disk, what lists call it, one line about it, and where it goes. */
 function DraftFields({
   draft,
   onChange,
@@ -339,14 +340,24 @@ function DraftFields({
 }
 
 /** Delete, asked twice: the button, then the file named. */
-function DeleteAction({ id, onDelete }: { id: string | undefined; onDelete: () => void }): React.ReactNode {
+function DeleteAction({
+  id,
+  disabled,
+  onDelete,
+}: {
+  id: string | undefined
+  disabled: boolean
+  onDelete: () => void
+}): React.ReactNode {
   const [asking, setAsking] = useState(false)
   if (id === undefined) return null
-  if (!asking) return <ArtifactAction icon={Trash2Icon} label="Delete" onClick={() => setAsking(true)} />
+  if (!asking) {
+    return <ArtifactAction icon={Trash2Icon} label="Delete" disabled={disabled} onClick={() => setAsking(true)} />
+  }
   return (
     <span role="alert" className="flex items-center gap-1 text-xs">
       delete {id}.md?
-      <Button variant="destructive" size="sm" onClick={onDelete}>
+      <Button variant="destructive" size="sm" disabled={disabled} onClick={onDelete}>
         Delete
       </Button>
       <Button variant="ghost" size="sm" onClick={() => setAsking(false)}>
@@ -363,6 +374,8 @@ function EditorPanel(props: {
   onCopy: () => void
   onDelete: () => void
   refusal: string | undefined
+  /** A save or delete is in flight: Save and Delete wait for it. */
+  working: boolean
   threadId: string | undefined
   window: EnsoSystemPromptPreview | undefined
   fetch: FetchLike | undefined
@@ -387,10 +400,10 @@ function EditorPanel(props: {
           </ArtifactDescription>
         </div>
         <ArtifactActions>
-          <ArtifactAction icon={SaveIcon} label="Save" disabled={!dirty} onClick={props.onSave} />
+          <ArtifactAction icon={SaveIcon} label="Save" disabled={!dirty || props.working} onClick={props.onSave} />
           <ArtifactAction icon={CopyIcon} label="Copy" onClick={props.onCopy} />
           {/* Keyed by the file: a confirmation asked for one file never carries over to the next one opened or saved. */}
-          <DeleteAction key={state.saved?.id} id={state.saved?.id} onDelete={props.onDelete} />
+          <DeleteAction key={state.saved?.id} id={state.saved?.id} disabled={props.working} onDelete={props.onDelete} />
         </ArtifactActions>
       </ArtifactHeader>
       <ArtifactContent className="grid content-start gap-3">
@@ -419,18 +432,26 @@ function DiscardGuard({ onDiscard, onStay }: { onDiscard: () => void; onStay: ()
   )
 }
 
-/** What the manager has open: the selection, the editor's state, and a move waiting on the discard guard. */
+/**
+ * What the manager has open: the selection, the editor's state, and a move waiting on the discard
+ * guard. Held by the dialog, not its content, so a close is a move like any other: asked first when
+ * the draft is unsaved (`close`), and `onClosed` only once it is not — or once it was discarded.
+ */
 function useManagerState(
   library: LibraryState,
   reload: () => void,
   fetchImpl: FetchLike | undefined,
+  onClosed: () => void,
 ): {
   selection: Selection
   editor: EditorState | undefined
   pending: Move | undefined
   refusal: string | undefined
+  /** A save or delete is in flight: both wait for it. */
+  working: boolean
   select: (next: Selection) => void
   start: (state: EditorState) => void
+  close: () => void
   change: (draft: EditorDraft) => void
   save: () => Promise<void>
   remove: () => Promise<void>
@@ -440,6 +461,22 @@ function useManagerState(
   const [editor, setEditor] = useState<EditorState | undefined>(undefined)
   const [pending, setPending] = useState<Move | undefined>(undefined)
   const [refusal, setRefusal] = useState<string | undefined>(undefined)
+  // ⚠ One write at a time. A second Save while the first is in flight wrote the file twice and, on
+  // a rename, deleted the old one twice — the second DELETE's 404 then read as a half-done rename.
+  // The ref holds a double-click in one tick; the state disables the buttons meanwhile.
+  const writing = useRef(false)
+  const [working, setWorking] = useState(false)
+  /** Takes the one write slot, or says it is taken; `release` gives it back when the write answered. */
+  const claim = (): boolean => {
+    if (writing.current) return false
+    writing.current = true
+    setWorking(true)
+    return true
+  }
+  const release = (): void => {
+    writing.current = false
+    setWorking(false)
+  }
   // A refused file is still a file: a new prompt or a rename onto its name would write over it unread.
   const listing = listingOf(library)
   const taken = new Set([
@@ -463,11 +500,18 @@ function useManagerState(
   }
   const perform = (move: Move): void => {
     moves.current += 1
+    setRefusal(undefined)
     if (move.kind === 'select') {
       open(move.next, moves.current)
       return
     }
-    setRefusal(undefined)
+    if (move.kind === 'close') {
+      // Closed means gone: the next open starts on pi's default, as a fresh dialog did.
+      setSelection({ kind: 'pi-default' })
+      setEditor(undefined)
+      onClosed()
+      return
+    }
     setSelection({ kind: 'new' })
     setEditor(move.state)
   }
@@ -480,13 +524,15 @@ function useManagerState(
     editor,
     pending,
     refusal,
+    working,
     select: (next) => guarded({ kind: 'select', next }),
     start: (state) => guarded({ kind: 'start', state }),
+    close: () => guarded({ kind: 'close' }),
     change: (draft) => setEditor((state) => (state === undefined ? state : { ...state, draft })),
     save: async () => {
-      if (editor === undefined) return
+      if (editor === undefined || !claim()) return
       const ticket = moves.current
-      const outcome = await saveDraft(editor, taken, fetchImpl)
+      const outcome = await saveDraft(editor, taken, fetchImpl).finally(release)
       if (outcome.kind === 'saved') reload()
       if (ticket !== moves.current) return
       if (outcome.kind === 'refused') {
@@ -496,12 +542,14 @@ function useManagerState(
       setRefusal(outcome.warning)
       setEditor((current) => savedState(current, editor.draft, outcome.prompt))
       setSelection({ kind: 'prompt', id: outcome.prompt.id })
+      // Saved is what the guard was asking about: a move it held no longer needs asking.
+      setPending(undefined)
     },
     remove: async () => {
       const id = editor?.saved?.id
-      if (id === undefined) return
+      if (id === undefined || !claim()) return
       const ticket = moves.current
-      const removed = await deleteLibraryPrompt(id, fetchImpl)
+      const removed = await deleteLibraryPrompt(id, fetchImpl).finally(release)
       if (removed.kind === 'deleted') reload()
       if (ticket !== moves.current) return
       if (removed.kind !== 'deleted') {
@@ -556,6 +604,7 @@ function SelectedPanel({
       onCopy={() => manager.start(newState(copyDraft(editor.draft)))}
       onDelete={() => void manager.remove()}
       refusal={manager.refusal}
+      working={manager.working}
       threadId={threadId}
       window={runtimeDefault.kind === 'loaded' ? runtimeDefault.preview : undefined}
       fetch={fetchImpl}
@@ -564,14 +613,18 @@ function SelectedPanel({
 }
 
 function ManagerBody({
+  library,
+  runtimeDefault,
+  manager,
   threadId,
   fetch: fetchImpl,
 }: {
+  library: LibraryState
+  runtimeDefault: HeadState
+  manager: ManagerState
   threadId: string | undefined
-  fetch?: FetchLike
+  fetch: FetchLike | undefined
 }): React.ReactNode {
-  const { library, runtimeDefault, reload } = useLibrary(true, threadId, fetchImpl)
-  const manager = useManagerState(library, reload, fetchImpl)
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden rounded-md border">
       <div className="flex min-h-0 w-64 shrink-0 flex-col">
@@ -596,7 +649,14 @@ function ManagerBody({
   )
 }
 
-/** The header's prompt button and the manager it opens; the thread on screen renders pi's prompt. */
+/**
+ * The header's prompt button and the manager it opens; the thread on screen renders pi's prompt.
+ *
+ * ⚠ CONTROLLED, SO A CLOSE ASKS. Escape, a click outside and the X are the dialog's own closes; left
+ * to it, they unmount the editor and an unsaved draft is gone without a word. Each is routed through
+ * the manager's discard guard instead (`close`), which is why its state lives here and not in the
+ * content the dialog unmounts.
+ */
 export function PromptManagerDialog({
   threadId,
   fetch,
@@ -604,8 +664,11 @@ export function PromptManagerDialog({
   threadId: string | undefined
   fetch?: FetchLike
 }): React.ReactNode {
+  const [open, setOpen] = useState(false)
+  const { library, runtimeDefault, reload } = useLibrary(open, threadId, fetch)
+  const manager = useManagerState(library, reload, fetch, () => setOpen(false))
   return (
-    <Dialog>
+    <Dialog open={open} onOpenChange={(next: boolean) => (next ? setOpen(true) : manager.close())}>
       <DialogTrigger asChild>
         <Button
           variant="ghost"
@@ -621,7 +684,13 @@ export function PromptManagerDialog({
           <DialogTitle>Prompts</DialogTitle>
           <DialogDescription>markdown files in ENSO_HOME/prompts — edit, copy and name them here</DialogDescription>
         </DialogHeader>
-        <ManagerBody threadId={threadId} {...(fetch === undefined ? {} : { fetch })} />
+        <ManagerBody
+          library={library}
+          runtimeDefault={runtimeDefault}
+          manager={manager}
+          threadId={threadId}
+          fetch={fetch}
+        />
       </DialogContent>
     </Dialog>
   )

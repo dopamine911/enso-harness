@@ -776,7 +776,7 @@ export function readConfigureBody(raw: string): EnsoSessionConfiguration {
     raw,
     EnsoSessionConfiguration,
     'configure',
-    'configure body takes only `model`, `thinking`, `mode` and `systemPrompt`, each a non-empty string',
+    "configure body takes only `model`, `thinking`, `mode` and `systemPrompt`, each a non-empty string; `systemPrompt` may also be `null` for pi's default",
   )
 }
 

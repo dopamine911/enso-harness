@@ -190,7 +190,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/host/__tests__/permission-mode-adapter.test.ts` | `#95` | picc's own restore rule, applied to the raw branch, below the seam (L3 step A). |
 | `packages/web/src/host/__tests__/session-events.test.ts` | `#69` | The replica of pi's unexported `toJsonEvent` (#69): what `map-events.ts` consumes must be byte-for-byte the rpc wire shape. |
 | `packages/web/src/host/__tests__/session-usage.test.ts` | `#45` | #45: which session events make the host re-read pi's totals. |
-| `packages/web/src/host/__tests__/system-prompt-preview.test.ts` | `#443` | #443: the preview splits pi's rendering — the preamble, then each section inside its tags, joined by blank lines — and refuses a rendering that does not split back into exactly itself. |
+| `packages/web/src/host/__tests__/system-prompt-preview.test.ts` | `#443` | #443: the preview splits pi's rendering — the preamble, then each section inside its tags, joined by blank lines — and refuses a rendering that does not fit what the host knows of it. |
 | `packages/web/src/host/branch-context.ts` | `#361` | A thread's context, request by request (#361) — the host half of `EnsoThreadContext` and of `EnsoContextRequestDetail`, read off pi's own entries for a live session and a stored file alike. |
 | `packages/web/src/host/branch-eval.ts` | `#441` | The branch as the session eval reads it (#441): the transcript as ours (leak L2) and the turns' usage from the same walk the stats drawer uses. |
 | `packages/web/src/host/branch-stats.ts` | `#45`, `#359` | A thread's branch, analysed (#45 phase 2): per prompt, per turn, per tool — the session half of `EnsoThreadStats`. |

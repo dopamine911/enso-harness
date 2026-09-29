@@ -169,6 +169,14 @@ test("the system-prompt row names the thread's prompt: a library prompt, pi's de
   expect(categoryLabel('tools', REVIEWER)).toBe('tool schemas')
 })
 
+test("the request brief's In list names the library prompt beside the section it wrote, as the row one click away does", () => {
+  const preamble = { category: 'system' as const, label: 'preamble', key: 'system:section:preamble' }
+  const brief = { prompt: 'list files', added: [preamble], moreAdded: 0, reply: 'done', toolCalls: [] }
+  const picked = request(2, 1, { brief })
+  const context = { ...STORED, systemPrompt: REVIEWER, requests: [request(1, 1), picked] }
+  expect(text(context)).toContain('preamble · Reviewer')
+})
+
 test('the section a library prompt wrote carries its name: a system prompt its preamble, an append prompt its addendum', () => {
   const preamble = { key: 'system:section:preamble', label: 'preamble' }
   const addendum = { key: 'system:section:addendum', label: 'addendum' }

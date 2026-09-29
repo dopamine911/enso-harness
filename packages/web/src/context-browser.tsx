@@ -509,6 +509,7 @@ function LeftList({
   left: EnsoContextRequestDetail['left']
   before: number | undefined
 }): React.ReactNode {
+  const labelOf = useElementLabel()
   if (left.length === 0) return null
   return (
     <div className="grid gap-2 rounded-lg border border-dashed border-border-strong p-3">
@@ -521,7 +522,7 @@ function LeftList({
         {left.map((gone) => (
           <li key={gone.key} className="flex min-w-0 items-center gap-2">
             <Swatch category={gone.category} className="size-2" />
-            <span className="truncate">{gone.label}</span>
+            <span className="truncate">{labelOf(gone)}</span>
           </li>
         ))}
       </ul>

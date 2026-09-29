@@ -314,6 +314,40 @@ test('⚠ moving away from unsaved changes asks first: Keep editing stays, Disca
   await mounted.unmount()
 })
 
+test('⚠ closing the manager with unsaved changes asks first — Escape included — and Discard closes it', async () => {
+  const mounted = await mountManager()
+  await click(mounted, 'New')
+  await typeInto(mounted, '#prompt-name', 'Unsaved')
+  const escape = (): Promise<void> =>
+    flush(async () => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+      await tick()
+    })
+  await escape()
+  await eventually(() => expect(mounted.dialog().textContent).toContain('This prompt has unsaved changes.'))
+  await click(mounted, 'Keep editing')
+  expect(mounted.dialog().querySelector<HTMLInputElement>('#prompt-name')?.value).toBe('Unsaved')
+  await escape()
+  await click(mounted, 'Discard them')
+  await eventually(() => expect(document.querySelector('[role="dialog"]')).toBeNull())
+  await mounted.unmount()
+})
+
+test('a save that lands clears a move the guard was holding: nothing is left to discard', async () => {
+  const mounted = await mountManager()
+  await openListed(mounted, 'Reviewer')
+  await eventually(() =>
+    expect(mounted.dialog().querySelector<HTMLInputElement>('#prompt-name')?.value).toBe('Reviewer'),
+  )
+  await typeInto(mounted, '#prompt-name', 'Reviewer, sharper')
+  await openListed(mounted, 'pi default')
+  await eventually(() => expect(mounted.dialog().textContent).toContain('This prompt has unsaved changes.'))
+  await click(mounted, 'Save')
+  await eventually(() => expect(mounted.written).toHaveLength(1))
+  await eventually(() => expect(mounted.dialog().textContent).not.toContain('This prompt has unsaved changes.'))
+  await mounted.unmount()
+})
+
 test('delete asks, naming the file, before anything is removed', async () => {
   const mounted = await mountManager()
   await openListed(mounted, 'Reviewer')
@@ -383,6 +417,28 @@ test('⚠ edits made while a save is in flight survive its answer, and still rea
     'One sentence. Then a second.',
   )
   expect(textOf(mounted, 'unsaved changes')).toContain('unsaved')
+  await mounted.unmount()
+})
+
+// ⚠ A double-click on Save: one write, and a rename removes the old file once — a second DELETE
+// would answer 404 and report a rename that happened as half-done.
+test('⚠ a second Save while one is in flight sends nothing: one PUT, one DELETE, no warning', async () => {
+  const put = held('PUT /api/prompts/reviewer-v2')
+  const mounted = await mountManager(put.hold)
+  await openListed(mounted, 'Reviewer')
+  await eventually(() => expect(mounted.dialog().querySelector<HTMLInputElement>('#prompt-id')?.value).toBe('reviewer'))
+  await typeInto(mounted, '#prompt-id', 'reviewer-v2')
+  const save = buttonNamed(mounted, 'Save')
+  await flush(async () => {
+    save.click()
+    save.click()
+    await tick()
+  })
+  await put.release()
+  await eventually(() => expect(mounted.dialog().textContent).toContain('reviewer-v2.md'))
+  expect(mounted.asked.filter((request) => request.startsWith('PUT'))).toEqual(['PUT /api/prompts/reviewer-v2'])
+  expect(mounted.asked.filter((request) => request.startsWith('DELETE'))).toEqual(['DELETE /api/prompts/reviewer'])
+  expect(mounted.dialog().textContent).not.toContain('was not removed')
   await mounted.unmount()
 })
 

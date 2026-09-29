@@ -2,7 +2,7 @@
 
 ## What it shows
 
-A project is a folder pi works in. The rail lists your projects, and each project's threads under it. A new thread asks how to start: which model, how much effort, which permission mode, and the first prompt. They are applied together when you start.
+A project is a folder pi works in. The rail lists your projects, and each project's threads under it. A new thread asks how to start: which model, how much effort, which permission mode, which system prompt, and the first prompt. They are applied together when you start.
 
 A thread you ran before is still there after a restart. Until you run it again it is *cold*: Enso reads it from pi's session file, and nothing is running.
 
@@ -26,7 +26,9 @@ A thread you ran before is still there after a restart. Until you run it again i
 1. **Model**: the models your login gives you. **filter models…** narrows the list. (The screenshots use a scripted stand-in, listed as `demo`.)
 2. **Effort**: the thinking levels this model offers.
 3. **Mode**: what pi may do without asking. See [Permission modes](./permission-modes.md).
-4. **Prompt**: the first message. Enter starts the session, Shift+Enter adds a line.
+4. **System prompt**: `pi default`, or a system or append prompt from your library, with its size in tokens. It is **fixed for the whole session**. A library file that cannot be read is listed under the field by name. See [Prompts](./prompts.md).
+5. **Saved prompt**: fills the prompt box from one of your session prompts. It is there only when the library has one.
+6. **Prompt**: the first message. Enter starts the session, Shift+Enter adds a line.
 
 ![A cold thread, opened from the rail](./images/sessions-cold-thread.png)
 
@@ -37,7 +39,7 @@ A thread you ran before is still there after a restart. Until you run it again i
 
 ## What to look for
 
-Nothing in the dialog changes anything until you press **Start session**. Then the model, the effort and the mode are sent in one request, in that order. If one of them is refused, the dialog stays open and says which one, and the prompt is not sent. So you never get a session that runs your prompt on the wrong model.
+Nothing in the dialog changes anything until you press **Start session**. Then the system prompt, the model, the effort and the mode are sent in one request, in that order. If one of them is refused, the dialog stays open and says which one, and the prompt is not sent. So you never get a session that runs your prompt on the wrong model, or under the wrong system prompt.
 
 The thread above was opened after a restart of the app, so it is cold. Its last run was on `claude-opus-4-1`, which the composer shows as `model (recorded):`. The thinking selector is hidden, because there is no live session to change. Sending a prompt starts the session again under the same id, and the chip becomes the live model.
 

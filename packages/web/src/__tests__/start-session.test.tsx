@@ -20,7 +20,7 @@ const { StartSessionDialog }: typeof StartSessionModule = await import('../start
 
 /**
  * The Start-a-session dialog (#391), MOUNTED under happy-dom over a fetch seam: what Start sends is
- * the contract — the three settings in ONE configure call, the effort the CHOSEN model offers,
+ * the contract — the four settings in ONE configure call, the effort the CHOSEN model offers,
  * then the prompt through the chat's send — and a refused step keeps the dialog open and says which.
  */
 
@@ -88,11 +88,15 @@ const TRIAGE: EnsoLibraryPrompt = {
   body: 'Triage the open issues.',
 }
 
-/** The library (#443): a system prompt, an append prompt, a session prompt, and one refused file. */
+/**
+ * The library (#443): a system prompt, an append prompt, a session prompt, one refused file — and a
+ * system prompt saved under the id `pi-default`, which the dialog must never take for pi's own.
+ */
 const LIBRARY: EnsoLibraryPromptListing = {
   prompts: [
     { id: 'reviewer', name: 'Reviewer', description: '', category: 'system', bytes: 900, tokens: 1234 },
     { id: 'haiku', name: 'Haiku', description: '', category: 'append', bytes: 40, tokens: 9 },
+    { id: 'pi-default', name: 'Shadow', description: '', category: 'system', bytes: 30, tokens: 5 },
     summarizeLibraryPrompt(TRIAGE),
   ],
   refused: [{ file: 'broken.md', reason: 'broken.md: frontmatter category must be system, append or session' }],
@@ -196,7 +200,7 @@ async function chooseTypeAndStart(mounted: Mounted, modelId: string, prompt: str
   })
 }
 
-test('Start sends the three settings in one call — the effort the CHOSEN model offers — then the prompt, then closes', async () => {
+test('Start sends the four settings in one call — the effort the CHOSEN model offers — then the prompt, then closes', async () => {
   const mounted = await mountStart({ outcome: 'told' })
   // The session runs Deep at `high`; Plain cannot reason, so choosing it takes the effort to `off`.
   await chooseTypeAndStart(mounted, 'fake/plain', 'hello there')
@@ -257,12 +261,24 @@ test("#443: the system prompt offers pi's default and the system and append prom
     'pi default',
     "Reviewer≈1,234 tokens · replaces pi's prompt",
     "Haiku≈9 tokens · adds to pi's prompt",
+    "Shadow≈5 tokens · replaces pi's prompt",
   ])
   expect(mounted.dialog().querySelector('#start-session-system-prompt')?.textContent).toContain('Reviewer')
   await chooseTypeAndStart(mounted, 'fake/deep', 'review this')
   await eventually(() => expect(mounted.closes).toEqual([1]))
   expect(mounted.configured).toEqual([
     { model: 'fake/deep', thinking: 'high', mode: 'default', systemPrompt: 'reviewer' },
+  ])
+  await mounted.unmount()
+})
+
+test("#443: ⚠ a library prompt saved as `pi-default` is sent by its id, never as pi's default", async () => {
+  const mounted = await mountStart({ outcome: 'told' })
+  await choose(mounted, 'start-session-system-prompt', 'Shadow')
+  await chooseTypeAndStart(mounted, 'fake/deep', 'go')
+  await eventually(() => expect(mounted.closes).toEqual([1]))
+  expect(mounted.configured).toEqual([
+    { model: 'fake/deep', thinking: 'high', mode: 'default', systemPrompt: 'pi-default' },
   ])
   await mounted.unmount()
 })
