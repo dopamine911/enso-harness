@@ -51,7 +51,7 @@ test('closed, the dialog reads nothing; open, it shows Now and the Context Brows
     flush(async () => {
       root.render(
         <ThreadStoresContext.Provider value={stores}>
-          <ThreadContextDialog open={open} onClose={(): void => undefined} />
+          <ThreadContextDialog open={open} onClose={(): void => undefined} returnFocus={(): void => undefined} />
         </ThreadStoresContext.Provider>,
       )
     })

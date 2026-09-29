@@ -733,7 +733,16 @@ function ContextDialogBody(): React.ReactNode {
  * was asked — the Context tab holds the rest (trend, events, files). Same reads, same cards; the
  * dialog adds nothing of its own.
  */
-export function ThreadContextDialog({ open, onClose }: { open: boolean; onClose: () => void }): React.ReactNode {
+export function ThreadContextDialog({
+  open,
+  onClose,
+  returnFocus,
+}: {
+  open: boolean
+  onClose: () => void
+  /** Where focus goes once the dialog has closed — the composer (#367), never `<body>`. */
+  returnFocus: () => void
+}): React.ReactNode {
   return (
     <Dialog
       open={open}
@@ -741,7 +750,13 @@ export function ThreadContextDialog({ open, onClose }: { open: boolean; onClose:
         if (!next) onClose()
       }}
     >
-      <DialogContent className="max-h-dialog overflow-y-auto sm:max-w-context-dialog">
+      <DialogContent
+        className="max-h-dialog overflow-y-auto sm:max-w-context-dialog"
+        onCloseAutoFocus={(event: Event): void => {
+          event.preventDefault()
+          returnFocus()
+        }}
+      >
         <DialogHeader>
           <DialogTitle>Context</DialogTitle>
           <DialogDescription>

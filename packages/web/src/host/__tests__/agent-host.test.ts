@@ -925,12 +925,14 @@ function storeTurns(
   threadId: string,
   turns: ReadonlyArray<readonly [string, string]>,
   directory = repoRoot,
+  /** When the messages say they were sent — `now` unless a test needs an old thread. */
+  at: () => number = Date.now,
 ): { file: string; userEntryIds: string[] } {
   hostWith()
   const sessionDir = SessionManager.inMemory(directory).getSessionDir()
   const stored = SessionManager.create(directory, sessionDir, { id: threadId })
   const userEntryIds = turns.map(([userText, assistantText]) => {
-    const userEntryId = stored.appendMessage({ role: 'user', content: userText, timestamp: Date.now() })
+    const userEntryId = stored.appendMessage({ role: 'user', content: userText, timestamp: at() })
     stored.appendMessage({
       role: 'assistant',
       content: [{ type: 'text', text: assistantText }],
@@ -946,7 +948,7 @@ function storeTurns(
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
       },
       stopReason: 'stop',
-      timestamp: Date.now(),
+      timestamp: at(),
     } as never)
     return userEntryId
   })
@@ -1062,6 +1064,33 @@ test("⚠ forking a cold thread at turn two's prompt gives a new thread holding 
   const listed = await host.listSessions()
   expect(listed.find((stored) => stored.id === forked.threadId)?.parentThreadId).toBe(source)
   expect(listed.find((stored) => stored.id === source)?.parentThreadId).toBeUndefined()
+})
+
+// #447: a fork copies its source's messages with their times, and pi's `modified` is the last
+// message's — so a fork taken now of a thread idle for hours read as hours old and sorted with it.
+test('a fork of a thread idle for hours lists as made now, and sorts above a thread active since', async () => {
+  const hoursAgo = Date.now() - 3 * 60 * 60 * 1000
+  const source = crypto.randomUUID()
+  const { userEntryIds } = storeTurns(
+    source,
+    [
+      ['old question', 'old answer'],
+      ['later question', 'later answer'],
+    ],
+    repoRoot,
+    () => hoursAgo,
+  )
+  const active = crypto.randomUUID()
+  storeTurns(active, [['recent question', 'recent answer']])
+  const host = hostWith()
+  const forkedAt = Date.now()
+  const forked = await host.forkThread(source, userEntryIds[1] ?? '')
+  if (forked.kind !== 'forked') throw new Error(`the fork was refused: ${forked.reason}`)
+  // pi writes a fork's file only once it holds an assistant message; this one copies one.
+  const listed = await host.listSessions()
+  const index = (id: string): number => listed.findIndex((stored) => stored.id === id)
+  expect(listed[index(forked.threadId)]?.modified.getTime()).toBeGreaterThanOrEqual(forkedAt - 1000)
+  expect(index(forked.threadId)).toBeLessThan(index(active))
 })
 
 test('⚠ forking at the first prompt gives an EMPTY thread that names its parent — listed untitled, and it resumes under its id (#433)', async () => {

@@ -249,6 +249,33 @@ function RefusalWord({
   )
 }
 
+/**
+ * "a question is waiting", said in the bar while pi waits on an answer (#362).
+ *
+ * ⚠ THE LIVE REGION IS ALWAYS MOUNTED (#371): a screen reader announces a change inside a region
+ * that exists, not a region that appears already filled. Only its words change; the visible line
+ * is `aria-hidden` so they are read once, and `sr-only` is absolutely placed, so while empty the
+ * region takes no item or gap in the bar's row.
+ */
+function QuestionWaiting({ waiting }: { waiting: boolean | undefined }): React.ReactNode {
+  return (
+    <>
+      <span role="status" className="sr-only">
+        {waiting ? 'a question is waiting' : ''}
+      </span>
+      {waiting ? (
+        <span
+          aria-hidden="true"
+          className="flex items-center gap-2 font-medium text-human"
+          title="pi is waiting for your answer — it is in the Chat view"
+        >
+          <span className="size-2 shrink-0 rounded-full bg-human signal:shadow-glow-human" />a question is waiting
+        </span>
+      ) : null}
+    </>
+  )
+}
+
 /** Pure view — everything it shows arrives as props, so a static render pins the wording. */
 export function ThreadStatusView({
   activity,
@@ -279,16 +306,7 @@ export function ThreadStatusView({
         {activityLabel(activity)}
       </span>
       {/* Seen from every view: the question itself is in the transcript (#362 review). */}
-      {questionWaiting ? (
-        <span
-          role="status"
-          className="flex items-center gap-2 font-medium text-human"
-          title="pi is waiting for your answer — it is in the Chat view"
-        >
-          <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-human signal:shadow-glow-human" />
-          a question is waiting
-        </span>
-      ) : null}
+      <QuestionWaiting waiting={questionWaiting} />
       {/* #340: `$0.0000` beside `idle` means "nothing ran" here, not "free" — the line in the
 			    transcript says who refused and why. */}
       <RefusalWord refusal={refusal} source={refusalSource} />

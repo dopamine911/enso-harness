@@ -3,6 +3,7 @@ import { summarizeToolInput } from '@enso/core'
 import type { MessagePart, ToolCallPart, ToolResultPart } from '@tanstack/ai'
 import type { ChatUISelectedPart } from '@tanstack/ai-client/ui'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { FIXTURE_LINK_TRIPWIRE } from '../fixture-conversation.ts'
 import { SelectedMessagePart } from '../selected-message-part.tsx'
 import { ThreadStoresContext } from '../store.ts'
 import { clearThreadsForTest, mintThread } from '../thread-stores.ts'
@@ -267,6 +268,17 @@ test('⚠ a markdown link with an executable destination renders as its text; a 
   expect(rendered).toContain('run me and data beside <a href="https://example.com">safe</a>')
   expect(rendered).not.toContain('javascript:')
   expect(rendered).not.toContain('data:text/html')
+})
+
+// #299: the `?fixture` page's own link tripwire must BE a link, or its inert render proves nothing —
+// its old destination held spaces, so it never parsed and read as healthy with no sanitiser at all.
+test("the fixture page's link tripwire is a well-formed link: a safe scheme renders it as one, its own is dropped", () => {
+  const asLink = FIXTURE_LINK_TRIPWIRE.replace('javascript:', 'https://example.com/')
+  expect(html({ key: 'text', part: { type: 'text', content: asLink } })).toContain('<a href="https://example.com/')
+  const rendered = html({ key: 'text', part: { type: 'text', content: FIXTURE_LINK_TRIPWIRE } })
+  expect(rendered).toContain('this link must be inert')
+  expect(rendered).not.toContain('javascript:')
+  expect(rendered).not.toContain('<a ')
 })
 
 // The link filter is an ALLOWLIST (`@tanstack/markdown` `sanitizeUrl`): it strips control
