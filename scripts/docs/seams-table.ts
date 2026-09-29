@@ -41,7 +41,11 @@ const NON_SEAM_PAGES: Record<string, true> = { 'README.md': true, 'ported-proven
 interface SeamMetadata {
   /** The glossary domains the contract belongs to. */
   readonly domain: string
-  /** The gate(s) that name the boundary; `—` when only the page's own tests do. */
+  /**
+   * The gate(s) that fence the boundary, named — a gate test, or the seam's own test when that is
+   * what holds it (`dialog.md`, `tool-result.md`). Never `—`: a seam with nothing fencing it is a
+   * finding for its page, not a blank cell (#202).
+   */
   readonly gate: string
 }
 
