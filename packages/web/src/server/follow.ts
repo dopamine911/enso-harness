@@ -28,7 +28,7 @@ import type { SystemPromptPick } from './prompt-library.ts'
 import { forgetRun, noteRunAdmitted } from './run-timing.ts'
 import { SSE_HEADERS, startSseKeepalive } from './sse.ts'
 import { readThreadMount, type ThreadReadDeps } from './thread-read.ts'
-import type { ThreadFeedFrame, ThreadRegistry, ThreadView } from './thread-registry.ts'
+import type { ThreadFeedFrame, ThreadLease, ThreadRegistry, ThreadView } from './thread-registry.ts'
 
 /**
  * The prompt/follow split (#112) — the server↔browser wire.
@@ -90,11 +90,14 @@ export interface PromptBody {
   readonly images?: readonly PromptImageContent[]
 }
 
+/** A route's refusal: the status it answers with, and the reason that is the body. */
+type Refusal<Status extends number> = { readonly status: Status; readonly reason: string }
+
 export type PromptOutcome =
   | { readonly status: 202; readonly receipt: EnsoPromptReceipt }
-  | { readonly status: 400; readonly reason: string }
+  | Refusal<400>
   /** The thread was taken and released again while this prompt waited on its build (#444) — rare. */
-  | { readonly status: 409; readonly reason: string }
+  | Refusal<409>
 
 /**
  * Leading token of a slash input, without the slash. `/mode auto` -> `mode`.
@@ -366,11 +369,7 @@ export async function promptThread(deps: FollowRouteDeps, threadId: string, body
   return { status: 202, receipt: { threadId, messageId, generation: lease.generation, queued: false } }
 }
 
-export type ContinueOutcome =
-  | { readonly status: 202 }
-  | { readonly status: 404; readonly reason: string }
-  | { readonly status: 409; readonly reason: string }
-  | { readonly status: 422; readonly reason: string }
+export type ContinueOutcome = { readonly status: 202 } | Refusal<404 | 409 | 422>
 
 /**
  * Continue a torn thread from its stored state (#436): no prompt, no new user message — the run the
@@ -451,10 +450,7 @@ export function readDialogBody(raw: string): DialogAnswer {
   throw new Error('dialog body needs cancelled, value, confirmed, or answers')
 }
 
-export type DialogOutcome =
-  | { readonly status: 204 }
-  | { readonly status: 404; readonly reason: string }
-  | { readonly status: 422; readonly reason: string }
+export type DialogOutcome = { readonly status: 204 } | Refusal<404 | 422>
 
 /**
  * Deliver the answer to the LIVE session's OPEN question.
@@ -482,10 +478,7 @@ export function answerThreadDialog(deps: FollowRouteDeps, threadId: string, answ
   return { status: 204 }
 }
 
-export type ModeChangeOutcome =
-  | { readonly status: 204 }
-  | { readonly status: 409; readonly reason: string }
-  | { readonly status: 422; readonly reason: string }
+export type ModeChangeOutcome = { readonly status: 204 } | Refusal<409 | 422>
 
 /**
  * Switch a thread's permission mode (L3 step C, #162 workstream 4): a control route, not a
@@ -506,10 +499,8 @@ export async function changeThreadMode(
   change: EnsoPermissionModeChange,
 ): Promise<ModeChangeOutcome> {
   const { threads } = deps
-  const running = runningRefusal(threads, threadId, 'change the mode')
-  if (running !== undefined) return running
-  const lease = await threads.acquire(threadId)
-  if (lease === 'busy') return busyRefusal(threadId, 'change the mode')
+  const lease = await controlLease(threads, threadId, 'change the mode')
+  if ('reason' in lease) return lease
   const { available } = lease.runtime.permissionModeState()
   if (!available.includes(change.mode)) {
     lease.release()
@@ -557,24 +548,32 @@ export function readClosedBody<Schema extends TSchema>(
 }
 
 /** The 409 every control route answers while a run holds the thread (#75: never queued behind a run). */
-function busyRefusal(threadId: string, action: string): { readonly status: 409; readonly reason: string } {
+function busyRefusal(threadId: string, action: string): Refusal<409> {
   return { status: 409, reason: `thread ${threadId} is running; ${action} when it settles` }
 }
 
 /** {@link busyRefusal} when a peek already sees the thread held, or `undefined` — the fast answer before any wait. */
-function runningRefusal(
-  threads: ThreadRegistry,
-  threadId: string,
-  action: string,
-): { readonly status: 409; readonly reason: string } | undefined {
+function runningRefusal(threads: ThreadRegistry, threadId: string, action: string): Refusal<409> | undefined {
   return threads.peek(threadId)?.busy === true ? busyRefusal(threadId, action) : undefined
 }
 
-export type HostCommandOutcome =
-  | { readonly status: 204 }
-  | { readonly status: 202 }
-  | { readonly status: 409; readonly reason: string }
-  | { readonly status: 422; readonly reason: string }
+/**
+ * A control route's hold on the thread (#75): refused while a run holds it, else acquired — a thread
+ * that has never run builds here — or refused if a run won it while this waited. Either refusal is
+ * the 409 `busyRefusal` words with `action`.
+ */
+async function controlLease(
+  threads: ThreadRegistry,
+  threadId: string,
+  action: string,
+): Promise<ThreadLease | Refusal<409>> {
+  const running = runningRefusal(threads, threadId, action)
+  if (running !== undefined) return running
+  const lease = await threads.acquire(threadId)
+  return lease === 'busy' ? busyRefusal(threadId, action) : lease
+}
+
+export type HostCommandOutcome = { readonly status: 204 } | { readonly status: 202 } | Refusal<409 | 422>
 
 /**
  * Run a `host` command (#338 slice 2) — `/model`, `/thinking` — as a control route, the way
@@ -592,10 +591,8 @@ export async function runHostCommand(
   run: EnsoHostCommandRun,
 ): Promise<HostCommandOutcome> {
   const { threads } = deps
-  const running = runningRefusal(threads, threadId, `change ${run.name}`)
-  if (running !== undefined) return running
-  const lease = await threads.acquire(threadId)
-  if (lease === 'busy') return busyRefusal(threadId, `change ${run.name}`)
+  const lease = await controlLease(threads, threadId, `change ${run.name}`)
+  if ('reason' in lease) return lease
   // ⚠ A `flow` row STARTS and the route answers 202 (#338 slice 3), and so does an `action` (slice
   // 4: `/compact` is a model call, seconds to a minute): a login may wait minutes on a
   // device code, and its questions and progress are on the feed, not in this response. The lease
@@ -678,7 +675,7 @@ export function readHostCommandBody(raw: string): EnsoHostCommandRun {
 
 export type ConfigureOutcome =
   | { readonly status: 204 }
-  | { readonly status: 409; readonly reason: string }
+  | Refusal<409>
   | { readonly status: 422; readonly refusal: EnsoConfigurationRefusal }
 
 /**
@@ -699,10 +696,8 @@ export async function configureThread(
   pickSystemPrompt: (id: string) => SystemPromptPick,
 ): Promise<ConfigureOutcome> {
   const { threads } = deps
-  const running = runningRefusal(threads, threadId, 'configure it')
-  if (running !== undefined) return running
-  const lease = await threads.acquire(threadId)
-  if (lease === 'busy') return busyRefusal(threadId, 'configure it')
+  const lease = await controlLease(threads, threadId, 'configure it')
+  if ('reason' in lease) return lease
   try {
     const refusal =
       systemPromptRefusal(lease.runtime, configuration.systemPrompt, pickSystemPrompt) ??
@@ -813,10 +808,7 @@ export function readForkBody(raw: string): EnsoForkRequest {
   return readClosedBody(raw, EnsoForkRequest, 'fork', 'fork body needs a non-empty `entryId` and nothing else')
 }
 
-export type AbortRouteOutcome =
-  | { readonly status: 200; readonly receipt: EnsoAbortReceipt }
-  | { readonly status: 404; readonly reason: string }
-  | { readonly status: 409; readonly reason: string }
+export type AbortRouteOutcome = { readonly status: 200; readonly receipt: EnsoAbortReceipt } | Refusal<404 | 409>
 
 /**
  * Stop the run in flight on a live thread (#116).

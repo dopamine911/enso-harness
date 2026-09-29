@@ -20,7 +20,7 @@ import {
   isEnsoThreadId,
   withEnsoLogContext,
 } from '@enso/core'
-import { readGitState, runGit } from '@enso/core/git'
+import { readGitChanges, readGitState, runGit } from '@enso/core/git'
 import { missingVendorPaths } from '@enso/core/pi-manifest'
 import { AGENT_RUNTIME_VERSION, type AgentHost, createAgentHost, SessionDirectoryRefused } from '../host/agent-host.ts'
 import { withoutHostValues } from '../host/host-commands.ts'
@@ -61,43 +61,53 @@ import {
 import { SSE_KEEPALIVE_MS } from './sse.ts'
 import { createContextRequestRoute, createThreadContextRoute } from './thread-context-route.ts'
 import { createThreadEvalRoute } from './thread-eval-route.ts'
-import { createThreadGitRoute } from './thread-git-route.ts'
+import { createThreadChangesRoute, createThreadGitRoute } from './thread-git-route.ts'
 import { createThreadManifestRoute } from './thread-manifest-route.ts'
 import { readThreadMount, type ThreadReadDeps } from './thread-read.ts'
 import { createThreadRegistry, inspectThread, type ThreadView } from './thread-registry.ts'
 import { createThreadStatsRoute } from './thread-stats-route.ts'
 
+/**
+ * `/api/threads/<threadId>/<action>`: the id is one path segment, percent-encoded by the caller,
+ * and the route's first capture; the action names what is asked of the thread.
+ */
+function threadRoute(action: string): RegExp {
+  return new RegExp(`^/api/threads/([^/?#]+)/${action}$`)
+}
+
 /** `GET /api/threads/<threadId>` — the id is one path segment, percent-encoded by the caller. */
 const THREAD_ROUTE = /^\/api\/threads\/([^/?#]+)$/
 /** `GET /api/threads/<threadId>/events` — the thread's two event tails (#97). */
-const THREAD_EVENTS_ROUTE = /^\/api\/threads\/([^/?#]+)\/events$/
+const THREAD_EVENTS_ROUTE = threadRoute('events')
 /** `GET /api/threads/<threadId>/history` — the branch as messages, live or stored (#95). */
-const THREAD_HISTORY_ROUTE = /^\/api\/threads\/([^/?#]+)\/history$/
+const THREAD_HISTORY_ROUTE = threadRoute('history')
 /** `GET /api/threads/<threadId>/commands` — the slash commands the thread can run, for the palette (#338). */
-const THREAD_COMMANDS_ROUTE = /^\/api\/threads\/([^/?#]+)\/commands$/
+const THREAD_COMMANDS_ROUTE = threadRoute('commands')
 /** `GET /api/threads/<threadId>/stats` — the thread analysed: per prompt, turn and tool (#45). */
-const THREAD_STATS_ROUTE = /^\/api\/threads\/([^/?#]+)\/stats$/
+const THREAD_STATS_ROUTE = threadRoute('stats')
 /** `GET /api/threads/<threadId>/context` — the thread's context, request by request (#361). */
-const THREAD_CONTEXT_ROUTE = /^\/api\/threads\/([^/?#]+)\/context$/
+const THREAD_CONTEXT_ROUTE = threadRoute('context')
 /** `GET /api/threads/<threadId>/context/<turn|next>` — one request's context, element by element (#361). */
 const THREAD_CONTEXT_REQUEST_ROUTE = /^\/api\/threads\/([^/?#]+)\/context\/([1-9]\d*|next)$/
 /** `GET /api/threads/<threadId>/manifest` — the thread's fork point: identity, then run conditions (#435). */
-const THREAD_MANIFEST_ROUTE = /^\/api\/threads\/([^/?#]+)\/manifest$/
+const THREAD_MANIFEST_ROUTE = threadRoute('manifest')
 /** `GET /api/threads/<threadId>/eval` — the thread's session eval: mechanical timeline and scorecard (#441). */
-const THREAD_EVAL_ROUTE = /^\/api\/threads\/([^/?#]+)\/eval$/
+const THREAD_EVAL_ROUTE = threadRoute('eval')
 /** `GET /api/threads/<threadId>/git` — git in the thread's cwd: branch, last-push baseline, unpushed work (#453). */
-const THREAD_GIT_ROUTE = /^\/api\/threads\/([^/?#]+)\/git$/
+const THREAD_GIT_ROUTE = threadRoute('git')
+/** `GET /api/threads/<threadId>/changes` — every file that differs from the last-push baseline, with its patch (#452). */
+const THREAD_CHANGES_ROUTE = threadRoute('changes')
 /** The wire (#112): `POST …/prompt`, `GET …/follow`, `POST …/dialog`, `POST …/abort` (#116). See `follow.ts`. */
-const THREAD_FOLLOW_ROUTE = /^\/api\/threads\/([^/?#]+)\/follow$/
-const THREAD_PROMPT_ROUTE = /^\/api\/threads\/([^/?#]+)\/prompt$/
-const THREAD_DIALOG_ROUTE = /^\/api\/threads\/([^/?#]+)\/dialog$/
-const THREAD_ABORT_ROUTE = /^\/api\/threads\/([^/?#]+)\/abort$/
+const THREAD_FOLLOW_ROUTE = threadRoute('follow')
+const THREAD_PROMPT_ROUTE = threadRoute('prompt')
+const THREAD_DIALOG_ROUTE = threadRoute('dialog')
+const THREAD_ABORT_ROUTE = threadRoute('abort')
 /** `POST …/mode` (#162 workstream 4, L3 step C): switch the mode as a control route, not a prompt. */
-const THREAD_MODE_ROUTE = /^\/api\/threads\/([^/?#]+)\/mode$/
+const THREAD_MODE_ROUTE = threadRoute('mode')
 /** `POST …/command` (#338 slice 2): run a `host` command — `/model`, `/thinking` — as a control route, not a prompt. */
-const THREAD_COMMAND_ROUTE = /^\/api\/threads\/([^/?#]+)\/command$/
+const THREAD_COMMAND_ROUTE = threadRoute('command')
 /** `POST …/configure` (#391): a new session's model, effort and mode, applied together — the Start-a-session dialog. */
-const THREAD_CONFIGURE_ROUTE = /^\/api\/threads\/([^/?#]+)\/configure$/
+const THREAD_CONFIGURE_ROUTE = threadRoute('configure')
 /**
  * `GET …/system-prompt[?prompt=<id>]` (#443): the system prompt the thread's next request would carry
  * with a library prompt — pi's default without one — section by section. Builds the thread on ask.
@@ -106,11 +116,11 @@ const THREAD_CONFIGURE_ROUTE = /^\/api\/threads\/([^/?#]+)\/configure$/
  */
 const THREAD_SYSTEM_PROMPT_ROUTE = /^\/api\/threads\/([^/?#]+)\/system-prompt(?:\?prompt=([a-z0-9][a-z0-9-]{0,63}))?$/
 /** `POST …/system-prompt` (#443): the same preview for an unsaved prompt's text — the editor's breakdown. */
-const THREAD_SYSTEM_PROMPT_DRAFT_ROUTE = /^\/api\/threads\/([^/?#]+)\/system-prompt$/
+const THREAD_SYSTEM_PROMPT_DRAFT_ROUTE = threadRoute('system-prompt')
 /** `POST …/fork` (#433): fork the thread at one of its user messages — a new thread naming this one as its parent. */
-const THREAD_FORK_ROUTE = /^\/api\/threads\/([^/?#]+)\/fork$/
+const THREAD_FORK_ROUTE = threadRoute('fork')
 /** `POST …/continue` (#436): continue a torn thread from its stored state — no new prompt. */
-const THREAD_CONTINUE_ROUTE = /^\/api\/threads\/([^/?#]+)\/continue$/
+const THREAD_CONTINUE_ROUTE = threadRoute('continue')
 /**
  * `/api/prompts/<id>` (#443) — a library prompt; the id is its file name, so it needs no decoding. One
  * constant per method, as the routes reference reads them: `GET` reads it, `PUT` writes it whole,
@@ -713,15 +723,16 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   // One thread's session eval (#441): the branch's events and the log's, scored mechanically.
   const threadEval = createThreadEvalRoute({ threads, host, logsDir: options.logsDir })
   // One thread's git state (#453): read in its cwd when asked, only in a directory this server serves.
-  const threadGit = createThreadGitRoute({
-    threads,
-    host,
-    servesDirectory,
-    readGit: (cwd) => readGitState(runGit, cwd),
+  const gitDeps = { threads, host, servesDirectory, readGit: (cwd: string) => readGitState(runGit, cwd) }
+  const threadGit = createThreadGitRoute(gitDeps)
+  // What changed since the last push (#452): the same state, with every file and its patch.
+  const threadChanges = createThreadChangesRoute({
+    ...gitDeps,
+    readChanges: (repository) => readGitChanges(runGit, repository),
   })
 
   /**
-   * A thread analysis — stats (#45), context (#361), manifest (#435), git (#453) — or 404 for a thread the
+   * A thread analysis — stats (#45), context (#361), manifest (#435), git (#453), changes (#452) — or 404 for a thread the
    * server holds neither live nor on disk. The payload is built before the head, as
    * `respondWithStats` builds it: a day file that fails to read is the 500 `answerOrFail`
    * writes, never a throw after a committed 200.
@@ -747,6 +758,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   const respondWithThreadManifest = analysisResponder(threadManifest)
   const respondWithThreadEval = analysisResponder(threadEval)
   const respondWithThreadGit = analysisResponder(threadGit)
+  const respondWithThreadChanges = analysisResponder(threadChanges)
   /**
    * One request's context; the request is the route's second capture, a turn or `next` — the
    * dispatcher's own match, so the url is read once. A turn the thread lacks, or a thread held
@@ -817,62 +829,25 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   function idOnly(respond: (threadId: string, response: ServerResponse) => void | Promise<void>): ThreadRouteHandler {
     return (threadId: string, _request: IncomingMessage, response: ServerResponse) => respond(threadId, response)
   }
+  /** The GET rows that read only the id — most of the table, so it says them as route and handler. */
+  const idOnlyReads: ReadonlyArray<
+    readonly [RegExp, (threadId: string, response: ServerResponse) => void | Promise<void>]
+  > = [
+    [THREAD_EVENTS_ROUTE, respondWithThreadEvents],
+    [THREAD_HISTORY_ROUTE, respondWithThreadHistory],
+    [THREAD_COMMANDS_ROUTE, respondWithThreadCommands],
+    [THREAD_STATS_ROUTE, respondWithThreadStats],
+    [THREAD_CONTEXT_ROUTE, respondWithThreadContext],
+    [THREAD_MANIFEST_ROUTE, respondWithThreadManifest],
+    [THREAD_EVAL_ROUTE, respondWithThreadEval],
+    [THREAD_GIT_ROUTE, respondWithThreadGit],
+    [THREAD_CHANGES_ROUTE, respondWithThreadChanges],
+  ]
   const THREAD_ROUTES: readonly ThreadRoute[] = [
-    {
-      method: 'GET',
-      route: THREAD_EVENTS_ROUTE,
-      respond: idOnly(respondWithThreadEvents),
-    },
-    {
-      method: 'GET',
-      route: THREAD_HISTORY_ROUTE,
-      respond: idOnly(respondWithThreadHistory),
-    },
-    {
-      method: 'GET',
-      route: THREAD_COMMANDS_ROUTE,
-      respond: idOnly(respondWithThreadCommands),
-    },
-    {
-      method: 'GET',
-      route: THREAD_STATS_ROUTE,
-      respond: idOnly(respondWithThreadStats),
-    },
-    {
-      method: 'GET',
-      route: THREAD_CONTEXT_ROUTE,
-      respond: idOnly(respondWithThreadContext),
-    },
-    {
-      method: 'GET',
-      route: THREAD_MANIFEST_ROUTE,
-      respond: idOnly(respondWithThreadManifest),
-    },
-    {
-      method: 'GET',
-      route: THREAD_EVAL_ROUTE,
-      respond: idOnly(respondWithThreadEval),
-    },
-    {
-      method: 'GET',
-      route: THREAD_GIT_ROUTE,
-      respond: idOnly(respondWithThreadGit),
-    },
-    {
-      method: 'GET',
-      route: THREAD_CONTEXT_REQUEST_ROUTE,
-      respond: respondWithContextRequest,
-    },
-    {
-      method: 'GET',
-      route: THREAD_SYSTEM_PROMPT_ROUTE,
-      respond: respondWithSystemPromptPreview,
-    },
-    {
-      method: 'GET',
-      route: THREAD_ROUTE,
-      respond: idOnly(respondWithThread),
-    },
+    ...idOnlyReads.map(([route, respond]): ThreadRoute => ({ method: 'GET', route, respond: idOnly(respond) })),
+    { method: 'GET', route: THREAD_CONTEXT_REQUEST_ROUTE, respond: respondWithContextRequest },
+    { method: 'GET', route: THREAD_SYSTEM_PROMPT_ROUTE, respond: respondWithSystemPromptPreview },
+    { method: 'GET', route: THREAD_ROUTE, respond: idOnly(respondWithThread) },
     {
       method: 'GET',
       route: THREAD_FOLLOW_ROUTE,
@@ -886,11 +861,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     { method: 'POST', route: THREAD_SYSTEM_PROMPT_DRAFT_ROUTE, respond: respondWithDraftPreview },
     { method: 'POST', route: THREAD_FORK_ROUTE, respond: respondToFork },
     { method: 'POST', route: THREAD_CONTINUE_ROUTE, respond: idOnly(respondToContinue) },
-    {
-      method: 'POST',
-      route: THREAD_ABORT_ROUTE,
-      respond: idOnly(respondToAbort),
-    },
+    { method: 'POST', route: THREAD_ABORT_ROUTE, respond: idOnly(respondToAbort) },
   ]
 
   /**
@@ -1018,88 +989,99 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     response.end()
   }
 
-  async function respondToDialog(threadId: string, request: IncomingMessage, response: ServerResponse): Promise<void> {
-    // A dialog answer is an id and a short value; nothing legitimate approaches this.
-    const answer = await readJsonBody(request, response, {
+  /** A control route's refusal: the status and the reason it answers with. */
+  type ControlRefusal = { readonly status: number; readonly reason: string }
+  /** The refusals among a route's outcomes: the ones carrying a reason. */
+  const isRefusal = <Outcome extends { readonly status: number }>(
+    outcome: Outcome,
+  ): outcome is Extract<Outcome, ControlRefusal> => 'reason' in outcome
+
+  /**
+   * A control route whose body is a small JSON value (#265): read under the dialog cap, run, and
+   * answered — a refusal as its status and reason, logged in the route's own words with the object
+   * it refused (`subject`), an acceptance logged and answered as the route says (by default its
+   * status, empty). Every route states its messages: the log is searched by them.
+   */
+  async function answerControl<Body, Outcome extends { readonly status: number }>(
+    threadId: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+    route: {
+      /** The body as its cap names it: `a dialog answer is at most … bytes`. */
+      readonly body: string
+      readonly parse: (text: string) => Body
+      readonly run: (body: Body) => Outcome | Promise<Outcome>
+      /** What the records name: the dialog id, the mode, the command. */
+      readonly subject: (body: Body) => Record<string, unknown>
+      readonly refused: string
+      readonly accepted: (
+        outcome: Exclude<Outcome, ControlRefusal>,
+        body: Body,
+      ) => { readonly message: string; readonly facts?: object }
+      readonly answer?: (outcome: Exclude<Outcome, ControlRefusal>) => void
+    },
+  ): Promise<void> {
+    const body = await readJsonBody(request, response, {
       maxBytes: MAX_DIALOG_BODY_BYTES,
-      capText: `a dialog answer is at most ${MAX_DIALOG_BODY_BYTES} bytes`,
+      capText: `${route.body} is at most ${MAX_DIALOG_BODY_BYTES} bytes`,
+      parse: route.parse,
+    })
+    if (body === undefined) return
+    const outcome = await route.run(body)
+    if (isRefusal(outcome)) {
+      log.warn(route.refused, { threadId, ...route.subject(body), status: outcome.status, reason: outcome.reason })
+      refuseWith(response, outcome)
+      return
+    }
+    // The guard's false branch: TypeScript does not narrow a generic union by exclusion.
+    const accepted = outcome as Exclude<Outcome, ControlRefusal>
+    const { message, facts = {} } = route.accepted(accepted, body)
+    log.info(message, { threadId, ...route.subject(body), ...facts })
+    if (route.answer !== undefined) route.answer(accepted)
+    else {
+      response.writeHead(outcome.status)
+      response.end()
+    }
+  }
+
+  // A dialog answer is an id and a short value; nothing legitimate approaches the cap.
+  function respondToDialog(threadId: string, request: IncomingMessage, response: ServerResponse): Promise<void> {
+    return answerControl(threadId, request, response, {
+      body: 'a dialog answer',
       parse: readDialogBody,
+      run: (answer) => answerThreadDialog(followDeps, threadId, answer),
+      subject: (answer) => ({ dialogId: answer.id }),
+      refused: 'dialog {dialogId} answer refused ({status}): {reason}',
+      accepted: () => ({ message: 'dialog {dialogId} answered' }),
     })
-    if (answer === undefined) return
-    const outcome = answerThreadDialog(followDeps, threadId, answer)
-    if (outcome.status !== 204) {
-      log.warn('dialog {dialogId} answer refused ({status}): {reason}', {
-        threadId,
-        dialogId: answer.id,
-        status: outcome.status,
-        reason: outcome.reason,
-      })
-      refuseWith(response, outcome)
-      return
-    }
-    log.info('dialog {dialogId} answered', { threadId, dialogId: answer.id })
-    response.writeHead(204)
-    response.end()
   }
 
-  async function respondToModeChange(
-    threadId: string,
-    request: IncomingMessage,
-    response: ServerResponse,
-  ): Promise<void> {
-    // A mode name; nothing legitimate approaches the dialog cap either.
-    const change = await readJsonBody(request, response, {
-      maxBytes: MAX_DIALOG_BODY_BYTES,
-      capText: `a mode change is at most ${MAX_DIALOG_BODY_BYTES} bytes`,
+  // A mode name; nothing legitimate approaches the dialog cap either.
+  function respondToModeChange(threadId: string, request: IncomingMessage, response: ServerResponse): Promise<void> {
+    return answerControl(threadId, request, response, {
+      body: 'a mode change',
       parse: readModeChangeBody,
+      run: (change) => changeThreadMode(followDeps, threadId, change),
+      subject: (change) => ({ mode: change.mode }),
+      refused: 'mode change to {mode} refused ({status}): {reason}',
+      accepted: () => ({ message: 'mode change to {mode} told' }),
     })
-    if (change === undefined) return
-    const outcome = await changeThreadMode(followDeps, threadId, change)
-    if (outcome.status !== 204) {
-      log.warn('mode change to {mode} refused ({status}): {reason}', {
-        threadId,
-        mode: change.mode,
-        status: outcome.status,
-        reason: outcome.reason,
-      })
-      refuseWith(response, outcome)
-      return
-    }
-    log.info('mode change to {mode} told', { threadId, mode: change.mode })
-    response.writeHead(204)
-    response.end()
   }
 
-  async function respondToHostCommand(
-    threadId: string,
-    request: IncomingMessage,
-    response: ServerResponse,
-  ): Promise<void> {
-    // A command name and one option id; the dialog cap is generous for it.
-    const run = await readJsonBody(request, response, {
-      maxBytes: MAX_DIALOG_BODY_BYTES,
-      capText: `a host command is at most ${MAX_DIALOG_BODY_BYTES} bytes`,
+  // A command name and one option id; the dialog cap is generous for it. A setting answers 204, a
+  // flow or action 202 — started, its questions arrive on the follow.
+  function respondToHostCommand(threadId: string, request: IncomingMessage, response: ServerResponse): Promise<void> {
+    return answerControl(threadId, request, response, {
+      body: 'a host command',
       parse: readHostCommandBody,
+      run: (run) => runHostCommand(followDeps, threadId, run),
+      subject: (run) => ({ name: run.name }),
+      refused: 'host command {name} refused ({status}): {reason}',
+      accepted: (outcome, run) => ({
+        message: outcome.status === 202 ? 'host flow {name} started' : 'host command {name} applied',
+        facts: run.value === undefined ? {} : { value: run.value },
+      }),
     })
-    if (run === undefined) return
-    const outcome = await runHostCommand(followDeps, threadId, run)
-    if (outcome.status !== 204 && outcome.status !== 202) {
-      log.warn('host command {name} refused ({status}): {reason}', {
-        threadId,
-        name: run.name,
-        status: outcome.status,
-        reason: outcome.reason,
-      })
-      refuseWith(response, outcome)
-      return
-    }
-    log.info(outcome.status === 202 ? 'host flow {name} started' : 'host command {name} applied', {
-      threadId,
-      name: run.name,
-      ...(run.value === undefined ? {} : { value: run.value }),
-    })
-    response.writeHead(outcome.status)
-    response.end()
   }
 
   /**
@@ -1140,22 +1122,22 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
    * thread or entry is a 404, a non-user entry a 400, a thread a run holds the usual 409 — each with
    * its reason as text, as the other control routes answer.
    */
-  async function respondToFork(threadId: string, request: IncomingMessage, response: ServerResponse): Promise<void> {
-    const fork = await readJsonBody(request, response, {
-      maxBytes: MAX_DIALOG_BODY_BYTES,
-      capText: `a fork request is at most ${MAX_DIALOG_BODY_BYTES} bytes`,
+  function respondToFork(threadId: string, request: IncomingMessage, response: ServerResponse): Promise<void> {
+    return answerControl(threadId, request, response, {
+      body: 'a fork request',
       parse: readForkBody,
+      run: (fork) => forkThreadAt(threadRead, threadId, fork),
+      subject: (fork) => fork,
+      refused: 'fork at {entryId} refused ({status}): {reason}',
+      accepted: (outcome) => ({
+        message: 'forked at {entryId} as {forkThreadId}',
+        facts: { forkThreadId: outcome.receipt.threadId },
+      }),
+      answer: (outcome) => {
+        response.writeHead(200, { 'Content-Type': 'application/json' })
+        response.end(JSON.stringify(outcome.receipt))
+      },
     })
-    if (fork === undefined) return
-    const outcome = await forkThreadAt(threadRead, threadId, fork)
-    if (outcome.status !== 200) {
-      log.warn('fork at {entryId} refused ({status}): {reason}', { threadId, ...fork, ...outcome })
-      refuseWith(response, outcome)
-      return
-    }
-    log.info('forked at {entryId} as {forkThreadId}', { threadId, ...fork, forkThreadId: outcome.receipt.threadId })
-    response.writeHead(200, { 'Content-Type': 'application/json' })
-    response.end(JSON.stringify(outcome.receipt))
   }
 
   // ── Projects (#395): the directories threads run in — listed, registered under a declared

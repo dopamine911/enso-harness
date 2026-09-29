@@ -118,7 +118,11 @@
   // pair out of the count — an exclusion, not a fold): 2.5538522532047048 % (773 of 30268),
   // pinned at 2.56. Adding four theme families folded `theme.ts`'s table into family → id →
   // label (a row per theme restating its family and scheme was a clone group of its own):
-  // 2.5472040069858632 % (773 of 30347), pinned at 2.55. Re-measure with
+  // 2.5472040069858632 % (773 of 30347), pinned at 2.55. `main` had drifted back up to 3.0 % and #452
+  // added its routes; the server's route table (a `threadRoute` builder, compact rows), its JSON control
+  // routes (one `answerControl`), `follow.ts`'s lease and refusal types, and the routes page's metadata
+  // (positional rows, paths derived) were folded: 2.509718172983479 % (1,033 of 41,160), pinned at
+  // 2.52. Re-measure with
   // `bunx fallow dupes --format json` (`stats.duplication_percentage`), and lower it the moment
   // a fold makes a smaller number pass.
   //
@@ -129,7 +133,7 @@
   "duplicates": {
     "mode": "semantic",
     "ignore": ["packages/web/src/components/**", "packages/core/src/**", "packages/web/src/styles/themes.css"],
-    "threshold": 2.55
+    "threshold": 2.52
   },
   // Complexity. Two readers of this block:
   //

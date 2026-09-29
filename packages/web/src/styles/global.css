@@ -83,6 +83,7 @@
   --container-stats-view: 72rem; /* the Stats tab — the Context tab's width, so its cards pair up the same way */
   --container-context-dialog: 64rem; /* /context's dialog */
   --container-debug-pane: 30rem; /* the ?debug column */
+  --container-changes-tree: 20rem; /* the Changes tab's file tree */
   --container-command-palette: 28rem; /* the / palette's popup */
   --container-provider-label: 16ch; /* the model chip's provider */
 }

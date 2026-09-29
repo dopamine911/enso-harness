@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import type { EnsoGitRepository } from '@enso/core'
+import type { EnsoGitRepository, EnsoGitState } from '@enso/core'
 import type { UIMessage } from '@tanstack/ai-client'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { changesText, GitIndicator, type GitOutcome, readThreadGit, settledToolResults } from '../thread-git.tsx'
@@ -13,6 +13,7 @@ import { changesText, GitIndicator, type GitOutcome, readThreadGit, settledToolR
 const REPOSITORY: EnsoGitRepository = {
   kind: 'repository',
   root: '/work/shop-api',
+  scope: '',
   head: '0123456789abcdef',
   branch: 'feature-x',
   upstream: 'origin/feature-x',
@@ -24,10 +25,11 @@ const REPOSITORY: EnsoGitRepository = {
 }
 
 const render = (outcome: GitOutcome): string => renderToStaticMarkup(<GitIndicator outcome={outcome} />)
-const read = (repository: Partial<EnsoGitRepository>): GitOutcome => ({
+const payload = (git: EnsoGitState): GitOutcome => ({
   kind: 'read',
-  git: { ...REPOSITORY, ...repository },
+  payload: { threadId: 't1', cwd: '/work/shop-api', git },
 })
+const read = (repository: Partial<EnsoGitRepository>): GitOutcome => payload({ ...REPOSITORY, ...repository })
 
 test('a repository reads as its branch, ahead and behind, and its changes; the tooltip names the last push', () => {
   const markup = render(read({}))
@@ -68,8 +70,8 @@ test('a detached HEAD names its commit; a stopped operation is said in the refus
 })
 
 test('outside a repository, git unable to answer, a failed read and no answer yet are each said apart', () => {
-  expect(render({ kind: 'read', git: { kind: 'not-a-repository' } })).toContain('no git')
-  const unavailable = render({ kind: 'read', git: { kind: 'unavailable', reason: 'detected dubious ownership' } })
+  expect(render(payload({ kind: 'not-a-repository' }))).toContain('no git')
+  const unavailable = render(payload({ kind: 'unavailable', reason: 'detected dubious ownership' }))
   expect(unavailable).toContain('git unavailable')
   expect(unavailable).toContain('detected dubious ownership')
   expect(render({ kind: 'failed', problem: '500 boom' })).toContain('git ?')
@@ -82,8 +84,8 @@ test('conflicted files come first in the changes', () => {
 
 test('the route read: a payload, a thread nothing has run in, a failure in the server words, a schema miss', async () => {
   const answering = (response: Response) => (): Promise<Response> => Promise.resolve(response)
-  const payload = { threadId: 't1', cwd: '/work/shop-api', git: REPOSITORY }
-  expect(await readThreadGit('t1', answering(Response.json(payload)))).toEqual({ kind: 'read', git: REPOSITORY })
+  const body = { threadId: 't1', cwd: '/work/shop-api', git: REPOSITORY }
+  expect(await readThreadGit('t1', answering(Response.json(body)))).toEqual({ kind: 'read', payload: body })
   expect(await readThreadGit('t1', answering(new Response('no', { status: 404 })))).toEqual({ kind: 'none' })
   expect(await readThreadGit('t1', answering(new Response('boom', { status: 500 })))).toEqual({
     kind: 'failed',
