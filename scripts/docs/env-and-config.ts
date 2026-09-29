@@ -131,6 +131,13 @@ const ENVIRONMENT_METADATA: readonly EnvironmentMetadata[] = [
   },
   {
     key: 'ENSO_SERVER_URL',
+    source: 'scripts/enso-eval.ts',
+    reader: '`scripts/enso-eval.ts#main`',
+    purposeAndDefault: 'Optional live-server URL for the session eval; defaults to `http://127.0.0.1:5179`.',
+    phase: 'per-call',
+  },
+  {
+    key: 'ENSO_SERVER_URL',
     source: 'scripts/enso-thread.ts',
     reader: '`scripts/enso-thread.ts`',
     purposeAndDefault: 'Optional live-server URL for thread inspection; defaults to `http://127.0.0.1:5179`.',

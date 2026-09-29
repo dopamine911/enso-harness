@@ -12,6 +12,7 @@ import {
   type EnsoDialogLink,
   type EnsoDialogOutcome,
   type EnsoOpenDialog,
+  type EnsoOperatorDenial,
   type EnsoQuestion,
   type EnsoQuestionnaireResult,
   ensoLogger,
@@ -110,6 +111,11 @@ export interface EnsoExtensionUiContextOptions {
    * path (the lift rejecting because picc's module did not load) without unloading picc.
    */
   liftDialog?: (component: unknown) => Promise<LiftedPermissionDialog | undefined>
+  /**
+   * The operator answered a lifted permission prompt with one of picc's deny options (#441). The
+   * host persists it; nothing else records which button was pressed.
+   */
+  onOperatorDenial?: (denial: EnsoOperatorDenial) => void
   /** How long an ASYNC component factory may take to produce its component. Defaults to `CUSTOM_COMPONENT_BUILD_TIMEOUT_MS`; injectable for tests. */
   componentBuildTimeoutMs?: number
 }
@@ -131,6 +137,12 @@ const CUSTOM_COMPONENT_BUILD_TIMEOUT_MS = 2000
 const CONFIRM_DISMISSED: boolean = false
 
 const hostLog = ensoLogger('host', 'ui')
+
+/**
+ * picc's deny labels, verbatim (`index.ts` `promptPermission`): `No` on a file or bash prompt,
+ * `Block` on the generic one. Every other option allows, some for the session.
+ */
+const PICC_DENY_OPTIONS: ReadonlySet<string> = new Set(['No', 'Block'])
 
 export interface EnsoExtensionUiContext {
   readonly uiContext: ExtensionUIContext
@@ -498,13 +510,20 @@ export function createEnsoExtensionUiContext(options: EnsoExtensionUiContextOpti
         resolve(undefined as T)
         return promise
       }
+      let answeredId: string | undefined
       const choice = await awaitDialog(
         { method: 'select', title: lifted.title, options: [...lifted.options], message: lifted.message },
         undefined,
         undefined,
-        (response) => ('value' in response ? response.value : undefined),
+        (response) => {
+          answeredId = response.id
+          return 'value' in response ? response.value : undefined
+        },
       )
       disposeQuietly(component)
+      if (typeof choice === 'string' && PICC_DENY_OPTIONS.has(choice) && answeredId !== undefined) {
+        options.onOperatorDenial?.({ dialogId: answeredId, option: choice, title: lifted.title })
+      }
       // The lifted select's value is one of the strings picc offered — `T` for picc is
       // `FilePermissionChoice = string | null`, and cancel is `undefined`, its "no" path.
       resolve(choice as T)

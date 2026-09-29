@@ -477,7 +477,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
         if (thread.abortInFlight === inFlight) thread.abortInFlight = undefined
       })
     thread.abortInFlight = inFlight
-    log.info('run {generation} told to abort; {restored} queued prompt(s) handed back', {
+    log.info(ENSO_LOG_EVENTS.runAborted, {
       threadId,
       generation: thread.generation,
       restored: cleared.interrupting.length + cleared.enqueued.length,

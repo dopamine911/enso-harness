@@ -61,6 +61,8 @@ export interface AgentHost {
    * nothing built (#86); undefined for no file in a served project.
    */
   readStoredForkPoint(threadId: string): Promise<EnsoForkPoint | undefined>
+  /** A stored thread as the session eval reads it (#441): one open, nothing built (#86); undefined for no file. */
+  readStoredThreadEval(threadId: string): Promise<BranchEval | undefined>
   /**
    * Fork a stored thread at one of its user messages, as pi's `/fork` does (#433; the module
    * header): a new session file naming the source as its parent, holding everything before that
@@ -93,6 +95,8 @@ export interface HostedThread {
   emittedEvents(): EnsoThreadEvent[]
   /** The branch analysed (#45 phase 2): per request, per turn, per tool, off pi's own entries. */
   branchStats(): BranchStats
+  /** The branch as the session eval reads it (#441): the transcript and the turns' usage. */
+  branchEval(): BranchEval
   /** The branch's context, request by request (#361): what each was assembled from, by pi's own assembly. */
   branchContext(): BranchContext
   /** One request's context, element by element (#361 phase 3); undefined for a turn the branch does not have. */

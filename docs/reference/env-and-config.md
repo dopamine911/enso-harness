@@ -6,7 +6,7 @@ and `packages/harness/package.json`. No machine environment and no user config i
 
 ## Explicit environment keys
 
-The 13 files that directly touch the process environment exactly match the
+The 14 files that directly touch the process environment exactly match the
 `node/no-process-env` exception list in `scripts/lint/process-environment.ts`; generation fails if either side gains or loses a file.
 Rows cover literal dot access, literal bracket access, destructuring, `node:process` `env` imports,
 grounded `environment.KEY` seams, and keys explicitly written beside a process-environment spread.
@@ -16,6 +16,7 @@ grounded `environment.KEY` seams, and keys explicitly written beside a process-e
 | `ENSO_HOME` | `packages/core/src/paths.ts#ensoHome` | Optional user-level Enso directory (#421); an absent or empty value defaults to `~/.enso`. pi's agent dir, the secrets file, the logs and the project list all resolve under it. | boot / load / per-call |
 | `ENSO_LOG_CONSOLE` | `packages/core/src/log-process.ts#parseEnsoLogLevels` | Optional terminal log level; launcher default is `info`, while child-pi logging defaults to no console sink. | boot / load |
 | `ENSO_LOG_LEVEL` | `packages/core/src/log-process.ts#parseEnsoLogLevels` | Optional file log level and per-category overrides; defaults to `info`. | boot / load |
+| `ENSO_SERVER_URL` | `scripts/enso-eval.ts#main` | Optional live-server URL for the session eval; defaults to `http://127.0.0.1:5179`. | per-call |
 | `ENSO_SERVER_URL` | `scripts/enso-logs.ts#bundle` | Optional live-server URL for bundle retrieval; defaults to `http://127.0.0.1:5179`. | per-call |
 | `ENSO_SERVER_URL` | `scripts/enso-thread.ts` | Optional live-server URL for thread inspection; defaults to `http://127.0.0.1:5179`. | boot |
 | `ENSO_SITE_BASE` | `scripts/docs/site-base.ts#SITE_BASE` (module read) | Optional; the path the documentation site is served under. Defaults to `/enso` for a local build. The publish workflow sets it to `/<repository>` — what a GitHub project site is served from — so the base is derived rather than a literal that rots on a rename. | build |

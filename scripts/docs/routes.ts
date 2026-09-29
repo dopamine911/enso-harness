@@ -103,6 +103,13 @@ const REGEX_ROUTE_METADATA: Record<string, RouteMetadata> = {
     success: "200 `EnsoForkPoint` JSON — identity, then run conditions, off pi's branch",
     errors: '400 malformed thread id; 403 untrusted origin; 404 no session; 500 handler failure',
   }),
+  THREAD_EVAL_ROUTE: threadRead({
+    path: '/api/threads/:threadId/eval',
+    handler: 'respondWithThreadEval',
+    success:
+      "200 `EnsoSessionEval` JSON — the mechanical timeline and scorecard (#441): the branch's events off pi's entries, the queued prompts and interrupts off the day files the branch spans",
+    errors: '400 malformed thread id; 403 untrusted origin; 404 no session; 500 handler failure',
+  }),
   THREAD_HISTORY_ROUTE: threadRead({
     path: '/api/threads/:threadId/history',
     handler: 'respondWithThreadHistory',

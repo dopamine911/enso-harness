@@ -1,16 +1,7 @@
-import { readdirSync } from 'node:fs'
-import { join } from 'node:path'
-import {
-  type EnsoDurationSummary,
-  type EnsoLogLine,
-  type EnsoThreadStats,
-  foldDay,
-  mergeDurationSummaries,
-} from '@enso/core'
-import { ensoLogDay, ensoLogFilename } from '@enso/core/log-process'
+import { type EnsoDurationSummary, type EnsoThreadStats, foldDay, mergeDurationSummaries } from '@enso/core'
 import type { AgentHost } from '../host/agent-host.ts'
 import { liveOrStored } from './live-or-stored.ts'
-import { readLogFile } from './logs-stats-route.ts'
+import { localDayOf, logDaysOnDisk, threadLines } from './thread-log-days.ts'
 import type { ThreadRegistry } from './thread-registry.ts'
 
 /**
@@ -45,29 +36,6 @@ export interface ThreadStatsRouteDeps {
   readonly logsDir: string
   /** ⓘ Injectable so a test names its day. */
   readonly now?: () => Date
-}
-
-/** The day files present, oldest first — whatever the 14-day prune left. A missing directory has none. */
-function logDaysOnDisk(logsDir: string): string[] {
-  let names: string[]
-  try {
-    names = readdirSync(logsDir)
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
-    throw error
-  }
-  return names.flatMap((filename) => ensoLogDay(filename) ?? []).sort()
-}
-
-/** The local day a moment falls on, as the day files name it. */
-function localDayOf(moment: Date): string {
-  return ensoLogDay(ensoLogFilename(moment)) ?? ''
-}
-
-/** This thread's records in one day file. The raw id test first, so most lines are never parsed. */
-function threadLines(logsDir: string, day: string, threadId: string): EnsoLogLine[] {
-  const { lines } = readLogFile(join(logsDir, `enso-${day}.jsonl`), (raw) => raw.includes(threadId))
-  return lines.filter((line) => line.properties?.threadId === threadId)
 }
 
 /** What one day adds to a thread's stats — all the route keeps of it. */
