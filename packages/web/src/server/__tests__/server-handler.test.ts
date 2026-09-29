@@ -11,6 +11,7 @@ import {
   type EnsoObservation,
   EnsoProject,
   EnsoStoredThread,
+  EnsoSystemPromptPreview,
   EnsoThreadCommands,
   EnsoThreadEvents,
   EnsoThreadHistory,
@@ -37,6 +38,7 @@ import { NO_PROMPT_LIBRARY } from '../prompt-library.ts'
 import {
   createFakeAgentHost,
   createFakeHostedThread,
+  FAKE_PI_PREAMBLE,
   type FakeStoredThread,
   type FakeThreadParts,
   type FakeThreadRecord,
@@ -1462,4 +1464,65 @@ test('⚠ POST …/configure takes a system prompt from the library first, and r
   expect(await refusal('t-late', { systemPrompt: 'reviewer' })).toMatchObject({
     reason: expect.stringContaining("pi's default"),
   })
+})
+
+test("⚠ GET …/system-prompt previews pi's default, a library prompt's breakdown, and refuses by name what cannot be one (#443)", async () => {
+  const { url, built } = await library()
+  await send(url, '/api/prompts/reviewer', 'PUT', REVIEWER)
+  await send(url, '/api/prompts/opener', 'PUT', { ...REVIEWER, name: 'Opener', category: 'session' })
+  const preview = (query: string): Promise<{ status: number; body: string }> =>
+    send(url, `/api/threads/t-preview/system-prompt${query}`, 'GET')
+
+  const pi = await preview('')
+  expect(pi.status).toBe(200)
+  const piPreview: unknown = JSON.parse(pi.body)
+  expect(Check(EnsoSystemPromptPreview, piPreview)).toBe(true)
+  expect(piPreview).toMatchObject({
+    prompt: null,
+    sections: [{ name: 'preamble', origin: 'pi', text: FAKE_PI_PREAMBLE }, { name: 'cwd' }],
+  })
+
+  const reviewer = JSON.parse((await preview('?prompt=reviewer')).body)
+  expect(reviewer.prompt).toEqual({ id: 'reviewer', name: 'Reviewer', mode: 'system' })
+  expect(reviewer.sections[0]).toEqual({
+    name: 'preamble',
+    origin: 'library',
+    text: REVIEWER.body,
+    tokens: estimateTextTokens(REVIEWER.body),
+  })
+  // Previewing chose nothing: the thread's own prompt is still pi's default.
+  expect(built.at(-1)?.systemPrompt).toBeUndefined()
+
+  expect(await preview('?prompt=opener')).toEqual({
+    status: 422,
+    body: 'Opener is a session prompt: it fills the first message, not the system prompt',
+  })
+  expect((await preview('?prompt=nobody')).status).toBe(422)
+})
+
+test('the system-prompt preview says so when the thread is running, and a server without a library names that (#443)', async () => {
+  const { url } = await startWith(asksAndWaits)
+  expect(await prompt(url, 't-busy', 'go')).toBe(202)
+  const busy = await send(url, '/api/threads/t-busy/system-prompt', 'GET')
+  expect(busy).toEqual({ status: 409, body: 'thread t-busy is running; preview its system prompt when it settles' })
+  expect(await send(url, '/api/threads/t-other/system-prompt?prompt=reviewer', 'GET')).toEqual({
+    status: 404,
+    body: NO_PROMPT_LIBRARY,
+  })
+})
+
+test('⚠ POST …/system-prompt previews an unsaved draft as a saved prompt is previewed, records nothing, and refuses a body off its shape (#443)', async () => {
+  const { url, built } = await library()
+  const draft = { mode: 'append', text: 'Always answer in haiku.', name: 'Haiku draft' }
+  const answered = await send(url, '/api/threads/t-draft/system-prompt', 'POST', draft)
+  expect(answered.status).toBe(200)
+  const preview = JSON.parse(answered.body)
+  expect(Check(EnsoSystemPromptPreview, preview)).toBe(true)
+  expect(preview.prompt).toEqual({ id: 'draft', name: 'Haiku draft', mode: 'append' })
+  expect(preview.sections).toContainEqual(expect.objectContaining({ name: 'addendum', origin: 'library' }))
+  expect(built.at(-1)?.systemPrompt).toBeUndefined()
+  expect((await send(url, '/api/threads/t-draft/system-prompt', 'POST', { ...draft, mode: 'session' })).status).toBe(
+    400,
+  )
+  expect((await send(url, '/api/threads/t-draft/system-prompt', 'POST', { ...draft, text: '' })).status).toBe(400)
 })

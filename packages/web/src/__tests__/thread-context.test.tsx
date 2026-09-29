@@ -2,7 +2,15 @@ import { afterEach, expect, test } from 'bun:test'
 import type { EnsoContextRequest, EnsoFileOperation, EnsoThreadContext } from '@enso/core'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { ThreadStoresContext } from '../store.ts'
-import { changeOf, displayPath, lastRequestPerPrompt, operationsUpTo, totalOf } from '../thread-context-analysis.ts'
+import {
+  categoryLabel,
+  changeOf,
+  displayPath,
+  elementLabel,
+  lastRequestPerPrompt,
+  operationsUpTo,
+  totalOf,
+} from '../thread-context-analysis.ts'
 import { ThreadContextView } from '../thread-context.tsx'
 import { clearThreadsForTest, mintThread } from '../thread-stores.ts'
 
@@ -59,6 +67,7 @@ const STORED: EnsoThreadContext = {
   next: makeup(2000),
   events: [],
   files: [],
+  systemPrompt: null,
   requests: [
     request(1, 1),
     request(2, 1, {
@@ -147,4 +156,27 @@ test('a path under the thread tree reads ./-relative; one outside it as given', 
   // The tree itself — a search over `.` — is `./`, never `./.` (#407).
   expect(displayPath('.', '/home/me/repo')).toBe('./')
   expect(displayPath('/home/me/repo', '/home/me/repo')).toBe('./')
+})
+
+// ── #443: a custom system prompt is visible in the evidence, not only in the dialog that chose it.
+
+const REVIEWER = { id: 'reviewer', name: 'Reviewer', mode: 'system' as const, sha256: 'a'.repeat(64) }
+
+test("the system-prompt row names the thread's prompt: a library prompt, pi's default, or an unreadable record — never the default in its place", () => {
+  expect(text({ ...STORED, systemPrompt: REVIEWER })).toContain('system prompt · Reviewer')
+  expect(text(STORED)).toContain('system prompt · pi default')
+  expect(text({ ...STORED, systemPrompt: 'unreadable' })).toContain('system prompt · unreadable record')
+  expect(categoryLabel('tools', REVIEWER)).toBe('tool schemas')
+})
+
+test('the section a library prompt wrote carries its name: a system prompt its preamble, an append prompt its addendum', () => {
+  const preamble = { key: 'system:section:preamble', label: 'preamble' }
+  const addendum = { key: 'system:section:addendum', label: 'addendum' }
+  expect(elementLabel(preamble, REVIEWER)).toBe('preamble · Reviewer')
+  expect(elementLabel(addendum, REVIEWER)).toBe('addendum')
+  const haiku = { ...REVIEWER, name: 'Haiku', mode: 'append' as const }
+  expect(elementLabel(addendum, haiku)).toBe('addendum · Haiku')
+  expect(elementLabel(preamble, haiku)).toBe('preamble')
+  expect(elementLabel(preamble, null)).toBe('preamble')
+  expect(elementLabel(preamble, 'unreadable')).toBe('preamble')
 })

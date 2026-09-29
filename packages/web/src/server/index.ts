@@ -11,6 +11,7 @@ import {
   EnsoProjectRegistration,
   type EnsoProjectsConfig,
   type EnsoStoredThread,
+  type EnsoSystemPromptChoice,
   type EnsoThreadCommands,
   type EnsoThreadEvents,
   type EnsoThreadHistory,
@@ -51,8 +52,10 @@ import {
   createPromptLibrary,
   NO_PROMPT_LIBRARY,
   type LibraryRead,
+  draftChoice,
   type PromptLibrary,
   readPromptWriteBody,
+  readSystemPromptDraftBody,
   type SystemPromptPick,
 } from './prompt-library.ts'
 import { SSE_KEEPALIVE_MS } from './sse.ts'
@@ -95,6 +98,15 @@ const THREAD_MODE_ROUTE = /^\/api\/threads\/([^/?#]+)\/mode$/
 const THREAD_COMMAND_ROUTE = /^\/api\/threads\/([^/?#]+)\/command$/
 /** `POST …/configure` (#391): a new session's model, effort and mode, applied together — the Start-a-session dialog. */
 const THREAD_CONFIGURE_ROUTE = /^\/api\/threads\/([^/?#]+)\/configure$/
+/**
+ * `GET …/system-prompt[?prompt=<id>]` (#443): the system prompt the thread's next request would carry
+ * with a library prompt — pi's default without one — section by section. Builds the thread on ask.
+ * The one query parameter is part of the pattern on purpose: its id pattern mirrors the library's
+ * (`isLibraryPromptId`), so a malformed id or any other parameter is a 404, never a file lookup.
+ */
+const THREAD_SYSTEM_PROMPT_ROUTE = /^\/api\/threads\/([^/?#]+)\/system-prompt(?:\?prompt=([a-z0-9][a-z0-9-]{0,63}))?$/
+/** `POST …/system-prompt` (#443): the same preview for an unsaved prompt's text — the editor's breakdown. */
+const THREAD_SYSTEM_PROMPT_DRAFT_ROUTE = /^\/api\/threads\/([^/?#]+)\/system-prompt$/
 /** `POST …/fork` (#433): fork the thread at one of its user messages — a new thread naming this one as its parent. */
 const THREAD_FORK_ROUTE = /^\/api\/threads\/([^/?#]+)\/fork$/
 /** `POST …/continue` (#436): continue a torn thread from its stored state — no new prompt. */
@@ -247,6 +259,19 @@ async function readJsonBody<T>(
 function refuseWith(response: ServerResponse, outcome: { readonly status: number; readonly reason: string }): void {
   response.writeHead(outcome.status, { 'Content-Type': 'text/plain' })
   response.end(outcome.reason)
+}
+
+/** A body that carries a prompt's text — a library write or a draft — under the prompt cap. */
+function readPromptSizedBody<T>(
+  request: IncomingMessage,
+  response: ServerResponse,
+  parse: (text: string) => T,
+): Promise<T | undefined> {
+  return readJsonBody(request, response, {
+    maxBytes: MAX_PROMPT_BODY_BYTES,
+    capText: `a prompt is at most ${MAX_PROMPT_BODY_BYTES} bytes`,
+    parse,
+  })
 }
 
 /** A 200 with `body` as JSON. */
@@ -600,6 +625,62 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     response.end(JSON.stringify(inspectThread(thread)))
   }
 
+  /**
+   * The system-prompt preview (#443): the candidate from the library (`?prompt=`), or pi's default;
+   * the thread built on ask, as the commands route builds it — this is a person opening the prompt
+   * manager, not a look (#86). Nothing about the thread changes. A library prompt that cannot be one
+   * is the pick's refusal (422); a thread in a run is 409, since pi's rendering is then the run's.
+   */
+  async function respondWithSystemPromptPreview(
+    threadId: string,
+    _request: IncomingMessage,
+    response: ServerResponse,
+    match: RegExpExecArray,
+  ): Promise<void> {
+    const promptId = match[2]
+    const pick = promptId === undefined ? undefined : pickSystemPrompt(promptId)
+    if (pick?.kind === 'refused') {
+      refuseWith(response, { status: prompts === undefined ? 404 : 422, reason: pick.reason })
+      return
+    }
+    await answerPreview(threadId, pick?.choice ?? null, response)
+  }
+
+  /**
+   * `POST …/system-prompt` (#443): an unsaved prompt's text, previewed as the editor types it. The
+   * draft is a choice like a saved one's — its hash taken here — that nothing records.
+   */
+  async function respondWithDraftPreview(
+    threadId: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> {
+    const draft = await readPromptSizedBody(request, response, readSystemPromptDraftBody)
+    if (draft === undefined) return
+    await answerPreview(threadId, draftChoice(draft), response)
+  }
+
+  /** A preview of `candidate` on the thread, built on ask; 409 while it runs, 500 for a rendering that does not split. */
+  async function answerPreview(
+    threadId: string,
+    candidate: EnsoSystemPromptChoice | null,
+    response: ServerResponse,
+  ): Promise<void> {
+    const thread = await threads.ensure(threadId)
+    const outcome = thread.busy ? { kind: 'busy' as const } : thread.hosted.previewSystemPrompt(candidate)
+    if (outcome.kind === 'preview') {
+      answerJson(response, outcome.preview)
+      return
+    }
+    if (outcome.kind === 'unsplittable') log.error('pi rendered a system prompt that does not split back', { threadId })
+    refuseWith(
+      response,
+      outcome.kind === 'busy'
+        ? { status: 409, reason: `thread ${threadId} is running; preview its system prompt when it settles` }
+        : { status: 500, reason: "pi's rendering of this system prompt does not split back into its sections" },
+    )
+  }
+
   // The bundle (#132): today's records + the live threads + the versions, one file.
   const bundle = createBundleRoute({ threads, logsDir: options.logsDir, runtimeVersion: AGENT_RUNTIME_VERSION })
 
@@ -784,6 +865,11 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     },
     {
       method: 'GET',
+      route: THREAD_SYSTEM_PROMPT_ROUTE,
+      respond: respondWithSystemPromptPreview,
+    },
+    {
+      method: 'GET',
       route: THREAD_ROUTE,
       respond: idOnly(respondWithThread),
     },
@@ -797,6 +883,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     { method: 'POST', route: THREAD_MODE_ROUTE, respond: respondToModeChange },
     { method: 'POST', route: THREAD_COMMAND_ROUTE, respond: respondToHostCommand },
     { method: 'POST', route: THREAD_CONFIGURE_ROUTE, respond: respondToConfigure },
+    { method: 'POST', route: THREAD_SYSTEM_PROMPT_DRAFT_ROUTE, respond: respondWithDraftPreview },
     { method: 'POST', route: THREAD_FORK_ROUTE, respond: respondToFork },
     { method: 'POST', route: THREAD_CONTINUE_ROUTE, respond: idOnly(respondToContinue) },
     {
@@ -1184,11 +1271,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> {
-    const fields = await readJsonBody(request, response, {
-      maxBytes: MAX_PROMPT_BODY_BYTES,
-      capText: `a library prompt is at most ${MAX_PROMPT_BODY_BYTES} bytes`,
-      parse: readPromptWriteBody,
-    })
+    const fields = await readPromptSizedBody(request, response, readPromptWriteBody)
     if (fields === undefined) return
     const read = library.write(id, fields)
     if (read.kind !== 'prompt') log.error('prompt {id} did not read back after its write: {read}', { id, read })

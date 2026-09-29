@@ -40,7 +40,7 @@ interface RouteMetadata {
  */
 function threadRead(
   facts: Pick<RouteMetadata, 'path' | 'handler' | 'success' | 'errors' | 'factory'> &
-    Partial<Pick<RouteMetadata, 'input'>>,
+    Partial<Pick<RouteMetadata, 'input' | 'builds'>>,
 ): RouteMetadata {
   return { method: 'GET', input: 'path: `threadId`', routeClass: 'observation', builds: 'no', logs: 'no', ...facts }
 }
@@ -235,6 +235,32 @@ const REGEX_ROUTE_METADATA: Record<string, RouteMetadata> = {
     builds: 'yes',
     logs: 'yes',
     factory: { path: FOLLOW_PATH, declaration: 'export async function continueThread' },
+  },
+  // Builds on ask, as the commands route does: a person opening the prompt manager (#443).
+  THREAD_SYSTEM_PROMPT_ROUTE: threadRead({
+    path: '/api/threads/:threadId/system-prompt',
+    handler: 'respondWithSystemPromptPreview → HostedThread.previewSystemPrompt',
+    input:
+      "path: `threadId`; query: optional `prompt` — a library prompt id (`system` or `append`); absent is pi's default",
+    success:
+      "200 `EnsoSystemPromptPreview` JSON — pi's rendering of the next request's system prompt with that prompt, section by section (who wrote each: the library or pi), the tool definitions sent beside it, and the total the Context tab prices a first request made with it at; the thread's own choice is untouched",
+    errors:
+      "400 malformed thread id; 403 untrusted origin; 404 a prompt named on a server without a library; 409 thread running; 422 the prompt is refused, with the reason naming it — missing, unreadable or unparseable, a session prompt, or empty; 500 pi's rendering does not split back into its sections, or handler failure",
+    builds: 'yes',
+  }),
+  THREAD_SYSTEM_PROMPT_DRAFT_ROUTE: {
+    method: 'POST',
+    path: '/api/threads/:threadId/system-prompt',
+    handler: 'respondWithDraftPreview → HostedThread.previewSystemPrompt',
+    input:
+      "path: `threadId`; body: `EnsoSystemPromptDraft` — an unsaved prompt's `mode` (`system` or `append`), `text` and `name`",
+    success:
+      "200 `EnsoSystemPromptPreview` JSON — the same preview a saved prompt gets, for the editor's breakdown while it types; nothing is recorded",
+    errors:
+      "400 malformed id/body; 403 untrusted origin; 409 thread running; 413 body too large; 500 pi's rendering does not split back into its sections, or handler failure",
+    routeClass: 'observation',
+    builds: 'yes',
+    logs: 'no',
   },
   PROMPT_READ_ROUTE: promptRoute({
     method: 'GET',

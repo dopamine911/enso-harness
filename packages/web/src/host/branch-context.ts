@@ -7,6 +7,7 @@ import {
   type EnsoContextMakeup,
   type EnsoContextRequest,
   type EnsoFileOperation,
+  type EnsoThreadSystemPrompt,
 } from '@enso/core'
 import { promptText } from './branch-stats.ts'
 import {
@@ -28,6 +29,7 @@ import {
   systemSources,
 } from './context-elements.ts'
 import { contextEvents, fileOperations, totalOfItems } from './context-history.ts'
+import { threadSystemPrompt } from './system-prompt.ts'
 
 /**
  * A thread's context, request by request (#361) — the host half of `EnsoThreadContext` and of
@@ -51,6 +53,8 @@ export interface BranchContext {
   readonly events: EnsoContextEvent[]
   /** What the file tools did (`context-history.ts`). */
   readonly files: EnsoFileOperation[]
+  /** The system prompt the branch records (#443). */
+  readonly systemPrompt: EnsoThreadSystemPrompt
 }
 
 /** One request's context, element by element, and what left it since the request before. */
@@ -215,6 +219,7 @@ export function branchContext(branch: readonly SessionEntry[]): BranchContext {
     requests,
     events: contextEvents(branch, (leafId) => totalOfItems(allItems(contextAt(leafId)))),
     files: fileOperations(branch),
+    systemPrompt: threadSystemPrompt(branch),
   }
 }
 

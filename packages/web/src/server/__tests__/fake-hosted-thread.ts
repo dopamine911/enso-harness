@@ -11,6 +11,7 @@ import type {
   EnsoRecordedModel,
   EnsoSessionUsage,
   EnsoSystemPromptChoice,
+  EnsoSystemPromptSection,
   EnsoTranscriptEntry,
   HostFlowOutcome,
   PromptOutcome,
@@ -18,7 +19,13 @@ import type {
   RuntimeCommand,
   ThreadRuntime,
 } from '@enso/core'
-import type { AgentHost, HostedThread, HostedThreadInspection } from '../../host/agent-host.ts'
+import { estimateTextTokens } from '@enso/core'
+import type {
+  AgentHost,
+  HostedThread,
+  HostedThreadInspection,
+  SystemPromptPreviewOutcome,
+} from '../../host/agent-host.ts'
 import type { BranchContext, BranchRequestDetail } from '../../host/branch-context.ts'
 import type { BranchStats } from '../../host/branch-stats.ts'
 import { createEventTail, describeObservation } from '../../host/event-tail.ts'
@@ -140,6 +147,37 @@ export interface FakeHostedThreadOptions {
   readonly inspect?: Partial<HostedThreadInspection>
   /** What `forkPoint()` answers (#435); the inspection's session with no recorded conditions when absent. */
   readonly forkPoint?: EnsoForkPoint
+  /** What `previewSystemPrompt` answers (#443); {@link fakeSystemPromptPreview} when absent. */
+  readonly previewSystemPrompt?: (candidate: EnsoSystemPromptChoice | null) => SystemPromptPreviewOutcome
+}
+
+/** The fake model's context window, as a preview reports it. */
+const FAKE_CONTEXT_WINDOW = 200_000
+
+/** The fake's pi preamble — pi's own, shortened; a candidate's `system` text replaces it. */
+export const FAKE_PI_PREAMBLE = 'You are an expert coding assistant operating inside pi.'
+
+/**
+ * A preview as the real host shapes one (#443): the preamble (the candidate's, or pi's), the addendum
+ * an `append` candidate joins, and the cwd — each priced as the Context tab prices it; no tools.
+ */
+function fakeSystemPromptPreview(candidate: EnsoSystemPromptChoice | null): SystemPromptPreviewOutcome {
+  const section = (name: string, text: string, library: boolean): EnsoSystemPromptSection => ({
+    name,
+    origin: library ? 'library' : 'pi',
+    text,
+    tokens: estimateTextTokens(text),
+  })
+  const sections = [
+    candidate?.mode === 'system'
+      ? section('preamble', candidate.text, true)
+      : section('preamble', FAKE_PI_PREAMBLE, false),
+    ...(candidate?.mode === 'append' ? [section('addendum', `<addendum>\n${candidate.text}\n</addendum>`, true)] : []),
+    section('cwd', `<cwd>\n${FAKE_PROJECT_DIRECTORY}\n</cwd>`, false),
+  ]
+  const prompt = candidate === null ? null : { id: candidate.id, name: candidate.name, mode: candidate.mode }
+  const totalTokens = sections.reduce((sum, item) => sum + item.tokens, 0)
+  return { kind: 'preview', preview: { prompt, sections, tools: [], totalTokens, contextWindow: FAKE_CONTEXT_WINDOW } }
 }
 
 /** Hand the queue back the way pi does — a copy out, the queue emptied. */
@@ -312,6 +350,8 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
       turnStats: (options.branch ?? FAKE_EMPTY_BRANCH).turnStats,
     }),
     branchContext: () => options.context ?? FAKE_EMPTY_CONTEXT,
+    previewSystemPrompt: (candidate: EnsoSystemPromptChoice | null) =>
+      (options.previewSystemPrompt ?? fakeSystemPromptPreview)(candidate),
     branchRequestDetail: (request: number | 'next') => options.details?.[String(request)],
     forkPoint: () =>
       Promise.resolve(
@@ -373,6 +413,7 @@ const FAKE_EMPTY_CONTEXT: BranchContext = {
   requests: [],
   events: [],
   files: [],
+  systemPrompt: null,
 }
 
 /**

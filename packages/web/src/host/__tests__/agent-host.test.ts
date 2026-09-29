@@ -5,6 +5,8 @@ import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
+  createAgentSessionFromServices,
+  createAgentSessionServices,
   type ExtensionAPI,
   type ExtensionCommandContext,
   type InlineExtension,
@@ -20,6 +22,7 @@ import {
   type EnsoRunContext,
   type EnsoSystemPromptChoice,
   type EnsoSystemPromptMode,
+  type EnsoSystemPromptPreview,
   readEnsoRunContext,
   sessionEvalOf,
 } from '@enso/core'
@@ -81,6 +84,7 @@ const MANIFEST_EXTENSION_MARKERS = [
   'picc-permission-modes/index.ts',
   'pi-multi-account/index.ts',
   'extensions/ask-user/index.ts',
+  'extensions/system-prompt/index.ts',
   'extensions/run-context/index.ts',
 ]
 
@@ -2319,3 +2323,146 @@ test("a thread whose recorded system prompt does not read is refused by name bef
   )
   expect(extensionsLoaded).toBe(0)
 })
+
+/** What the Context tab prices a request's system prompt at: every `system:` element, tools included. */
+function contextSystemTokens(hosted: HostedThread, request: number): number {
+  const detail = hosted.branchRequestDetail(request)
+  if (detail === undefined) throw new Error(`the branch has no request ${request}`)
+  return detail.elements
+    .filter((element) => element.key.startsWith('system:'))
+    .reduce((sum, element) => sum + element.tokens, 0)
+}
+
+/** A preview on a fresh thread, then its first request made with the same prompt: both halves of the comparison. */
+async function previewThenRun(
+  candidate: EnsoSystemPromptChoice | null,
+): Promise<{ preview: EnsoSystemPromptPreview; contextTotal: number }> {
+  const { host, project } = recordingHost(1)
+  const hosted = await host.createSession(crypto.randomUUID(), () => project)
+  openSessions.push(hosted)
+  const outcome = hosted.previewSystemPrompt(candidate)
+  if (outcome.kind !== 'preview') throw new Error(`no preview: ${outcome.kind}`)
+  if (candidate !== null && hosted.runtime.setSystemPrompt(candidate) !== undefined) throw new Error('not set')
+  await runPrompt(hosted, 'one')
+  return { preview: outcome.preview, contextTotal: contextSystemTokens(hosted, 1) }
+}
+
+const sectionNames = (preview: EnsoSystemPromptPreview): string[] => preview.sections.map((section) => section.name)
+
+test("⚠⚠ a system prompt's preview totals what the Context tab prices its first request at; the preamble is the library's and pi's tools section is gone (#443)", async () => {
+  const candidate = choiceOf('system', "# Reviewer\n\n<tools>\nnot pi's\n</tools>\n\nSay what breaks.")
+  const { preview, contextTotal } = await previewThenRun(candidate)
+  expect(preview.totalTokens).toBe(contextTotal)
+  expect(preview.prompt).toEqual({ id: candidate.id, name: candidate.name, mode: 'system' })
+  expect(preview.sections[0]).toMatchObject({ name: 'preamble', origin: 'library', text: candidate.text })
+  expect(sectionNames(preview)).not.toContain('tools')
+  expect(preview.tools.length).toBeGreaterThan(0)
+})
+
+test("⚠ an append prompt's preview totals the same as its first request; every pi section stays and the addendum is the library's (#443)", async () => {
+  const { preview, contextTotal } = await previewThenRun(choiceOf('append', 'Always answer in haiku.'))
+  expect(preview.totalTokens).toBe(contextTotal)
+  expect(preview.sections.find((section) => section.name === 'addendum')).toMatchObject({ origin: 'library' })
+  expect(sectionNames(preview)).toEqual(expect.arrayContaining(['preamble', 'tools', 'rules', 'docs', 'cwd']))
+})
+
+test("pi's default, previewed, is pi's own rendering — every section pi's — and totals what its first request is priced at (#443)", async () => {
+  const { preview, contextTotal } = await previewThenRun(null)
+  expect(preview.totalTokens).toBe(contextTotal)
+  expect(preview.prompt).toBeNull()
+  expect(preview.sections[0]?.text.startsWith(PI_DEFAULT_PREAMBLE_START)).toBe(true)
+  expect(preview.sections.map((section) => section.origin)).toEqual(preview.sections.map(() => 'pi'))
+})
+
+test("a preview changes nothing: the thread's own prompt is what its request carries, and a preview of another after it still answers (#443)", async () => {
+  const { host, project, requests } = recordingHost(1)
+  const hosted = await host.createSession(crypto.randomUUID(), () => project)
+  openSessions.push(hosted)
+  const own = choiceOf('system', 'Mine.')
+  expect(hosted.runtime.setSystemPrompt(own)).toBeUndefined()
+  const other = hosted.previewSystemPrompt(choiceOf('system', 'Only previewed.'))
+  if (other.kind !== 'preview') throw new Error(`no preview: ${other.kind}`)
+  expect(other.preview.sections[0]).toMatchObject({ name: 'preamble', text: 'Only previewed.' })
+  await runPrompt(hosted, 'one')
+  expect(systemHeadOf(requests[0]).sections.preamble).toBe('Mine.')
+  // pi's default, previewed on a thread that runs its own: a preview, not a refusal.
+  expect(hosted.previewSystemPrompt(null)).toMatchObject({ kind: 'preview', preview: { prompt: null } })
+})
+
+test("the thread's context names the system prompt its branch records — live and from the file (#443)", async () => {
+  const { host, project } = recordingHost(1)
+  const threadId = crypto.randomUUID()
+  const hosted = await host.createSession(threadId, () => project)
+  openSessions.push(hosted)
+  expect(hosted.branchContext().systemPrompt).toBeNull()
+  const choice = choiceOf('append', 'Always answer in haiku.')
+  expect(hosted.runtime.setSystemPrompt(choice)).toBeUndefined()
+  await runPrompt(hosted, 'one')
+  const named = { id: choice.id, name: choice.name, mode: 'append' as const, sha256: choice.sha256 }
+  expect(hosted.branchContext().systemPrompt).toEqual(named)
+  hosted.runtime.dispose()
+  expect((await host.readStoredThreadContext(threadId))?.context.systemPrompt).toEqual(named)
+})
+
+// ⚠ #443: the terminal has no Enso host — pi loads the harness package and nothing else. The
+// harness's system-prompt extension is what carries a web-started thread's prompt there.
+// Both modes: `system` reaches pi as the custom preamble, `append` as the addendum — two paths in pi.
+const terminalCases: { mode: EnsoSystemPromptMode; text: string; section: 'preamble' | 'addendum' }[] = [
+  { mode: 'system', text: '# Reviewer\nRead the diff; say what breaks.', section: 'preamble' },
+  { mode: 'append', text: 'Always answer in haiku.', section: 'addendum' },
+]
+test.each(terminalCases)(
+  '⚠⚠ a thread started with a $mode prompt in the web and resumed by pi alone (the terminal) runs the recorded prompt; the log gains no system message (#443)',
+  async ({ mode, text, section }) => {
+    const core = createFauxCore()
+    core.setResponses([faux.fauxAssistantMessage('one'), faux.fauxAssistantMessage('two')])
+    const requests: unknown[] = []
+    const watched: FauxCore = {
+      ...core,
+      streamSimple: (...call: Parameters<FauxCore['streamSimple']>) => {
+        requests.push(call[1])
+        return core.streamSimple(...call)
+      },
+    }
+    const project = realpathOrSelf(mkdtempSync(join(tmpdir(), 'enso-library-prompt-')))
+    const host = createAgentHost({
+      servesDirectory: (directory) => realpathOrSelf(directory) === project,
+      agentDir,
+      harnessPackageDir: harnessDir,
+      extensionFactories: [fauxModelExtension(watched)],
+    })
+    const threadId = crypto.randomUUID()
+    const web = await host.createSession(threadId, () => project)
+    const choice = choiceOf(mode, text)
+    expect(web.runtime.setSystemPrompt(choice)).toBeUndefined()
+    await runPrompt(web, 'one')
+    const file = web.inspect().sessionFile
+    if (file === null) throw new Error('the web session was not flushed')
+    web.runtime.dispose()
+
+    // pi alone, as `scripts/enso.ts` runs it: the harness package, no host, no loader of ours.
+    const services = await createAgentSessionServices({
+      cwd: project,
+      agentDir,
+      resourceLoaderOptions: {
+        noExtensions: true,
+        noSkills: true,
+        additionalExtensionPaths: [harnessDir],
+        extensionFactories: [fauxModelExtension(watched)],
+      },
+    })
+    const { session } = await createAgentSessionFromServices({ services, sessionManager: SessionManager.open(file) })
+    await session.bindExtensions({ mode: 'rpc', onError: () => undefined })
+    await session.prompt('two')
+    session.dispose()
+
+    const [first, second] = requests.map(systemHeadOf)
+    const applied = section === 'preamble' ? choice.text : `<addendum>\n${choice.text}\n</addendum>`
+    expect(first?.sections[section]).toBe(applied)
+    expect(second).toEqual(first ?? { sections: {} })
+    const systemMessages = SessionManager.open(file)
+      .getBranch()
+      .filter((entry) => entry.type === 'message' && entry.message.role === 'system')
+    expect(systemMessages).toHaveLength(1)
+  },
+)

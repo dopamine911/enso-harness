@@ -42,6 +42,7 @@ test("picking a turn, then bars per prompt, moves the page to that prompt's last
     next: MAKEUP,
     events: [],
     files: [],
+    systemPrompt: null,
     // Prompt 1 took two requests; prompt 2 one.
     requests: [request(1, 1), request(2, 1), request(3, 2)],
   }

@@ -320,3 +320,130 @@ const systemPromptChoiceValidator = Compile(EnsoSystemPromptChoice)
 export function readEnsoSystemPromptChoice(data: unknown): EnsoSystemPromptChoice | undefined {
   return systemPromptChoiceValidator.Check(data) ? data : undefined
 }
+
+/**
+ * One section of a system prompt as pi renders it, and who wrote it: `library` for the text a
+ * library prompt put there (the preamble it replaced, the addendum it joined), `pi` for the rest.
+ *
+ * @group Prompt library
+ */
+export const EnsoSystemPromptSection = Type.Object(
+  {
+    /** pi's section name — `preamble`, `tools`, `rules`, `docs`, `addendum`, `project_context`, `skills`, `cwd`, … */
+    name: Type.String({ minLength: 1 }),
+    origin: Type.Union([Type.Literal('library'), Type.Literal('pi')]),
+    /** The section as pi sends it: every section but the preamble inside its `<name>` tags. */
+    text: Type.String(),
+    /** {@link estimateTextTokens} of `text` — the Context tab's price for the same section. */
+    tokens: Type.Integer({ minimum: 0 }),
+  },
+  { additionalProperties: false },
+)
+/** @group Prompt library */
+export type EnsoSystemPromptSection = Static<typeof EnsoSystemPromptSection>
+
+/**
+ * `GET /api/threads/:id/system-prompt` (#443): the system prompt a thread's next request would carry
+ * with `prompt` as its system prompt — pi's default when `prompt` is `null` — section by section,
+ * and the tool definitions sent beside it. `totalTokens` is what the Context tab's system rows sum to
+ * for a first request made with it.
+ *
+ * @group Prompt library
+ */
+export const EnsoSystemPromptPreview = Type.Object(
+  {
+    prompt: Type.Union([
+      Type.Object(
+        { id: Type.String(), name: Type.String(), mode: EnsoSystemPromptMode },
+        { additionalProperties: false },
+      ),
+      Type.Null(),
+    ]),
+    sections: Type.Array(EnsoSystemPromptSection),
+    tools: Type.Array(
+      Type.Object({ name: Type.String(), tokens: Type.Integer({ minimum: 0 }) }, { additionalProperties: false }),
+    ),
+    totalTokens: Type.Integer({ minimum: 0 }),
+    /** The thread's model's context window, for a share of it; `null` when the model declares none. */
+    contextWindow: Type.Union([Type.Integer({ exclusiveMinimum: 0 }), Type.Null()]),
+  },
+  { additionalProperties: false },
+)
+/** @group Prompt library */
+export type EnsoSystemPromptPreview = Static<typeof EnsoSystemPromptPreview>
+
+/**
+ * `POST /api/threads/:id/system-prompt` (#443): an UNSAVED prompt's text, previewed as the editor
+ * types it — the same preview a saved one gets, so the breakdown never waits on a save.
+ *
+ * @group Prompt library
+ */
+export const EnsoSystemPromptDraft = Type.Object(
+  {
+    mode: EnsoSystemPromptMode,
+    text: Type.String({ minLength: 1 }),
+    /** What the preview calls it; the editor's name field. */
+    name: Type.String({ minLength: 1, maxLength: 120 }),
+  },
+  { additionalProperties: false },
+)
+/** @group Prompt library */
+export type EnsoSystemPromptDraft = Static<typeof EnsoSystemPromptDraft>
+
+/**
+ * What a thread says its system prompt is, for a view (#443): the recorded choice without its text —
+ * `null` for pi's default, `'unreadable'` for a record that does not read (never shown as the default).
+ *
+ * @group Prompt library
+ */
+export const EnsoThreadSystemPrompt = Type.Union([
+  Type.Object(
+    {
+      id: Type.String({ minLength: 1 }),
+      name: Type.String({ minLength: 1 }),
+      mode: EnsoSystemPromptMode,
+      sha256: Type.String({ pattern: '^[0-9a-f]{64}$' }),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Null(),
+  Type.Literal('unreadable'),
+])
+/** @group Prompt library */
+export type EnsoThreadSystemPrompt = Static<typeof EnsoThreadSystemPrompt>
+
+/**
+ * The data of the branch's LAST custom entry of `customType`, root to leaf — the rule every reader
+ * of a custom entry follows (picc's `restoreState`, the run context, the system prompt): the last
+ * one on the path is the one in force. The branch is read as `unknown[]`: this package names no
+ * runtime type.
+ *
+ * @group Prompt library
+ */
+export function lastCustomEntryData(branch: readonly unknown[], customType: string): unknown {
+  for (let entryIndex = branch.length - 1; entryIndex >= 0; entryIndex -= 1) {
+    const entry = branch[entryIndex] as { type?: unknown; customType?: unknown; data?: unknown } | undefined
+    if (entry?.type === 'custom' && entry.customType === customType) return entry.data
+  }
+  return undefined
+}
+
+/** @group Prompt library */
+export type RecordedSystemPrompt =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'chosen'; readonly choice: EnsoSystemPromptChoice }
+  | { readonly kind: 'unreadable' }
+
+/**
+ * What a branch says its system prompt is (#443): none (pi's default), the choice its last
+ * `enso-system-prompt` entry holds, or an entry that does not read — which a reader must never take
+ * for pi's default. The host builds a session from it; the harness extension applies it per run.
+ *
+ * @group Prompt library
+ */
+export function recordedSystemPrompt(branch: readonly unknown[]): RecordedSystemPrompt {
+  const data = lastCustomEntryData(branch, ENSO_SYSTEM_PROMPT_ENTRY)
+  if (data === undefined) return { kind: 'none' }
+  const choice = readEnsoSystemPromptChoice(data)
+  return choice === undefined ? { kind: 'unreadable' } : { kind: 'chosen', choice }
+}

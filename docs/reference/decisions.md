@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 328.**
+**Decision headers: 337.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -101,6 +101,8 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/harness/extensions/logging/index.ts` | `#132`, `#144`, `#167` | The extension process's logging (#132), and the one record only an extension can write: the provider's own request id (#144). |
 | `packages/harness/extensions/run-context/__tests__/run-context.test.ts` | `#435`, `#438` | #435's recorder over its dependency seam (PR #438 review): the branches the review rounds added, each where a real run would take it — git and the config faked, pi reduced to the `on` it registers with and the `appendEntry` it writes through. |
 | `packages/harness/extensions/run-context/index.ts` | `#126`, `#435`, `#436`, `#438`, `#440` | The run-context recorder (#435, Lineage #126): at every prompt's run start, what the run starts under — git revision and dirty state, the resolved config's hash and files, the skills, the context files' hashes, the permission mode's rule-set hash — appended to pi's log as an `enso-run-context` entry (`@enso/core` `run-context.ts`) ONLY when a field differs from the last one on the branch. |
+| `packages/harness/extensions/system-prompt/__tests__/system-prompt.test.ts` | `#443` | #443's extension over pi's surface reduced to what it touches — the `on` it registers with, the branch it reads, the notice it may give. |
+| `packages/harness/extensions/system-prompt/index.ts` | `#436`, `#443` | A thread's library system prompt, applied on EVERY surface (#443): at each prompt's run start, the branch's last `enso-system-prompt` entry is put into the run's prompt options — a `system` prompt as pi's custom preamble, an `append` prompt after whatever pi appends — so a thread started with a prompt in the web and resumed in the terminal (`bun run enso`, then `/resume`) runs the text it started with, not pi's default. |
 | `packages/harness/extensions/web-fetch/__tests__/one-trust-question.test.ts` | `#421` | #421, found live: the trust question for a project's `.enso/config.json` must be asked ONCE per session, though two tools (web_fetch, web_search) read the config. |
 | `packages/harness/extensions/web-fetch/__tests__/web-fetch.test.ts` | `#54` | The web_fetch extension (#54), against injected IO seams — no test here touches the network, DNS, or the user's config file. |
 | `packages/harness/extensions/web-fetch/index.ts` | `#9`, `#54`, `#59`, `#421` | The web_fetch tool (#54) — the sanctioned web access that replaces the ad-hoc network clients #9 denies in bash. |
@@ -128,6 +130,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/__tests__/notifications.test.tsx` | `#29`, `#90` | #29's browser half: notify messages become visible transcript lines. |
 | `packages/web/src/__tests__/page-scoped-stores.test.ts` | `#103`, `#125` | The anchor for #125 item 3 / #103 invariant 2 (switching threads leaks no state): every store that holds a THREAD's state is created inside `createThreadStores` (thread-stores.ts), so a second thread on the page gets its own. |
 | `packages/web/src/__tests__/permission-mode.test.tsx` | `#84`, `#90` | #84's browser half: the CURRENT permission mode as state, and the control that changes it. |
+| `packages/web/src/__tests__/prompt-editor-state.test.ts` | `#443` | #443: the prompt manager's editor as data — what is unsaved, what may be saved, what a copy of pi's default holds, and a rename's order: the new file first, then the old one removed. |
 | `packages/web/src/__tests__/prompt-input.test.ts` | `#141` | ⚠ Upstream reported a refusal only when the WHOLE batch failed; a mixed drop lost files silently (PR #141 review). |
 | `packages/web/src/__tests__/prompt-library-connection.test.ts` | `#443` | #443: the Start dialog's library reads never throw — a failure is words the dialog shows beside the field, and pi's default still starts. |
 | `packages/web/src/__tests__/questionnaire-card.test.tsx` | `#12` | The `ask_user` card (#12), mounted: what it sends is what the server holds to the question and the tool reads back as the user's words — one answer per question, in order — and it sends nothing until every question has one. |
@@ -151,6 +154,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/commands-connection.ts` | `#144`, `#338`, `#344` | The `/` palette's one read (#338, slice 1): `GET /api/threads/:id/commands` — the slash commands the thread's session registers, grouped by the server into extension commands, prompt templates and skills, with a `source` that says whose list it is (`live`: this thread's session; `remembered`: the last built session's, because every session builds it from the same sources under the same configuration and this thread has no live session — never ran, or ran and idled out; the server cannot tell; `none`: no session has been built in this process). |
 | `packages/web/src/context-activity.tsx` | `#361` | The Context view's side cards (#361 phase 4), in the design direction's row language — dsh-context's Context Events (when and why the window changed) and File Activity (what pi's file tools did, up to the trend's picked request). |
 | `packages/web/src/context-browser.tsx` | `#361` | The Context Browser (#361 phase 3) — dsh-context's "open the box of any request", in the design direction's two columns: pick the next request or any past one (the picker, or a step either way), and see what it was assembled from — six categories, each expanding into one row per element with its estimate — beside the element picked: a prompt section, a tool's schema, a message, a reply's parts, a tool result beside its call's arguments. |
+| `packages/web/src/context-labels.tsx` | `#443` | The thread's system prompt, for the Context view's labels (#443): a custom prompt is visible in the evidence — the system-prompt row says which prompt it is, and the section the prompt wrote says so — not only in the dialog that chose it. |
 | `packages/web/src/context-parts.tsx` | `#361` | The Context view's shared pieces (#361): its number formats, and the six-category bar and legend — drawn by the Now card and the Context Browser alike. |
 | `packages/web/src/custom-event-router.ts` | `#103` | The one chunk that is neither an observation nor a frame: the follow ended without this page leaving it (#103 receipt) — the server closed, restarted, or dropped the connection. |
 | `packages/web/src/debug/__tests__/log-tail-connection.test.ts` | `#144` | The log tail client (#144 slice 2), driven over a scripted body: SSE text the test writes, read as the page reads it. |
@@ -181,6 +185,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/host/__tests__/permission-mode-adapter.test.ts` | `#95` | picc's own restore rule, applied to the raw branch, below the seam (L3 step A). |
 | `packages/web/src/host/__tests__/session-events.test.ts` | `#69` | The replica of pi's unexported `toJsonEvent` (#69): what `map-events.ts` consumes must be byte-for-byte the rpc wire shape. |
 | `packages/web/src/host/__tests__/session-usage.test.ts` | `#45` | #45: which session events make the host re-read pi's totals. |
+| `packages/web/src/host/__tests__/system-prompt-preview.test.ts` | `#443` | #443: the preview splits pi's rendering — the preamble, then each section inside its tags, joined by blank lines — and refuses a rendering that does not split back into exactly itself. |
 | `packages/web/src/host/branch-context.ts` | `#361` | A thread's context, request by request (#361) — the host half of `EnsoThreadContext` and of `EnsoContextRequestDetail`, read off pi's own entries for a live session and a stored file alike. |
 | `packages/web/src/host/branch-eval.ts` | `#441` | The branch as the session eval reads it (#441): the transcript as ours (leak L2) and the turns' usage from the same walk the stats drawer uses. |
 | `packages/web/src/host/branch-stats.ts` | `#45`, `#359` | A thread's branch, analysed (#45 phase 2): per prompt, per turn, per tool — the session half of `EnsoThreadStats`. |
@@ -199,6 +204,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/host/runtime-event.ts` | `#69`, `#162` | The runtime's event, as the host receives it — BELOW the thread-runtime seam since #162 workstream 4 (L2). |
 | `packages/web/src/host/session-events.ts` | `#69` | `AgentSessionEvent` → the rpc WIRE shape (#69). |
 | `packages/web/src/host/session-usage.ts` | `#45`, `#86` | A thread's spend and context, as pi reckons them (#45) — the two halves of `EnsoSessionUsage`. |
+| `packages/web/src/host/system-prompt-preview.ts` | `#443` | A system prompt before it is sent (#443): what a thread's next request would carry with a given library prompt — or pi's default — section by section, priced as the Context tab prices it. |
 | `packages/web/src/host/system-prompt.ts` | `#390`, `#443` | A session's system prompt from the library (#443), handed to pi through pi's OWN mechanism. |
 | `packages/web/src/host/transcript.ts` | `#162`, `#434` | The runtime's session branch → the transcript of ours (#162 workstream 4, L2's persistence side). |
 | `packages/web/src/listing-store.ts` | `#29`, `#86`, `#95`, `#395` | A list the server hands the page and the rail shows — stored threads (#95), projects (#395). |
@@ -210,7 +216,10 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/page-clock.ts` | `#278` | The page's clock as a store (#278): the one value that changes with no input. |
 | `packages/web/src/permission-mode.tsx` | `#73`, `#84`, `#90` | The CURRENT permission mode, as state — and the control that changes it (#84). |
 | `packages/web/src/project-list.ts` | `#395` | The projects the rail groups threads under (#395): the launch directory first, then the ones registered under the install's roots, as `GET /api/projects` lists them. |
+| `packages/web/src/prompt-editor-state.ts` | `#443` | The prompt manager's editor, as data (#443): the draft on screen, the file it was opened from, and the rules a save follows — kept apart from the React so each is tested as the value it is. |
 | `packages/web/src/prompt-library-connection.ts` | `#443` | The prompt library's reads (#443): `GET /api/prompts` and `GET /api/prompts/:id`, validated with the wire's own schemas, as `commands-connection.ts` reads the palette's list. |
+| `packages/web/src/prompt-manager.tsx` | `#443` | The prompt manager (#443): one place to read, write and organise the prompts a session runs with — the header's scroll button, beside Settings, because the library is the user's, not a thread's. |
+| `packages/web/src/prompt-size.tsx` | `#443` | What a prompt costs, always in view while it is written (#443): the file's bytes, exact; the body's tokens, `≈` — `estimateTextTokens`, the function the Context tab prices system text with — and, once pi has rendered it, its share of the model's window. |
 | `packages/web/src/questionnaire-card.tsx` | `#12` | The agent's `ask_user` questionnaire as one card (#12): a tab per question, each option a row with its label and what choosing it means, an "Other" row for an answer in the user's own words, and one "Submit answers" once every question has one. |
 | `packages/web/src/read-on-usage.ts` | `#45`, `#361`, `#362`, `#404`, `#453` | A thread's route, read on mount and again whenever the thread's usage moves (#45, #361) — the Stats and Context views' one refresh rule. |
 | `packages/web/src/refused-attempt.tsx` | `#387` | Who refused, as a reader names them (#387): pi's display name for the provider (`Anthropic`), else its id; undefined when the refusal names no provider. |
