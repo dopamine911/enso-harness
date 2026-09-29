@@ -2406,54 +2406,63 @@ test("the thread's context names the system prompt its branch records — live a
 
 // ⚠ #443: the terminal has no Enso host — pi loads the harness package and nothing else. The
 // harness's system-prompt extension is what carries a web-started thread's prompt there.
-test('⚠⚠ a thread started with a prompt in the web and resumed by pi alone (the terminal) runs the recorded prompt; the log gains no system message (#443)', async () => {
-  const core = createFauxCore()
-  core.setResponses([faux.fauxAssistantMessage('one'), faux.fauxAssistantMessage('two')])
-  const requests: unknown[] = []
-  const watched: FauxCore = {
-    ...core,
-    streamSimple: (...call: Parameters<FauxCore['streamSimple']>) => {
-      requests.push(call[1])
-      return core.streamSimple(...call)
-    },
-  }
-  const project = realpathOrSelf(mkdtempSync(join(tmpdir(), 'enso-library-prompt-')))
-  const host = createAgentHost({
-    servesDirectory: (directory) => realpathOrSelf(directory) === project,
-    agentDir,
-    harnessPackageDir: harnessDir,
-    extensionFactories: [fauxModelExtension(watched)],
-  })
-  const threadId = crypto.randomUUID()
-  const web = await host.createSession(threadId, () => project)
-  const choice = choiceOf('append', 'Always answer in haiku.')
-  expect(web.runtime.setSystemPrompt(choice)).toBeUndefined()
-  await runPrompt(web, 'one')
-  const file = web.inspect().sessionFile
-  if (file === null) throw new Error('the web session was not flushed')
-  web.runtime.dispose()
-
-  // pi alone, as `scripts/enso.ts` runs it: the harness package, no host, no loader of ours.
-  const services = await createAgentSessionServices({
-    cwd: project,
-    agentDir,
-    resourceLoaderOptions: {
-      noExtensions: true,
-      noSkills: true,
-      additionalExtensionPaths: [harnessDir],
+// Both modes: `system` reaches pi as the custom preamble, `append` as the addendum — two paths in pi.
+const terminalCases: { mode: EnsoSystemPromptMode; text: string; section: 'preamble' | 'addendum' }[] = [
+  { mode: 'system', text: '# Reviewer\nRead the diff; say what breaks.', section: 'preamble' },
+  { mode: 'append', text: 'Always answer in haiku.', section: 'addendum' },
+]
+test.each(terminalCases)(
+  '⚠⚠ a thread started with a $mode prompt in the web and resumed by pi alone (the terminal) runs the recorded prompt; the log gains no system message (#443)',
+  async ({ mode, text, section }) => {
+    const core = createFauxCore()
+    core.setResponses([faux.fauxAssistantMessage('one'), faux.fauxAssistantMessage('two')])
+    const requests: unknown[] = []
+    const watched: FauxCore = {
+      ...core,
+      streamSimple: (...call: Parameters<FauxCore['streamSimple']>) => {
+        requests.push(call[1])
+        return core.streamSimple(...call)
+      },
+    }
+    const project = realpathOrSelf(mkdtempSync(join(tmpdir(), 'enso-library-prompt-')))
+    const host = createAgentHost({
+      servesDirectory: (directory) => realpathOrSelf(directory) === project,
+      agentDir,
+      harnessPackageDir: harnessDir,
       extensionFactories: [fauxModelExtension(watched)],
-    },
-  })
-  const { session } = await createAgentSessionFromServices({ services, sessionManager: SessionManager.open(file) })
-  await session.bindExtensions({ mode: 'rpc', onError: () => undefined })
-  await session.prompt('two')
-  session.dispose()
+    })
+    const threadId = crypto.randomUUID()
+    const web = await host.createSession(threadId, () => project)
+    const choice = choiceOf(mode, text)
+    expect(web.runtime.setSystemPrompt(choice)).toBeUndefined()
+    await runPrompt(web, 'one')
+    const file = web.inspect().sessionFile
+    if (file === null) throw new Error('the web session was not flushed')
+    web.runtime.dispose()
 
-  const [first, second] = requests.map(systemHeadOf)
-  expect(first?.sections.addendum).toBe(`<addendum>\n${choice.text}\n</addendum>`)
-  expect(second).toEqual(first ?? { sections: {} })
-  const systemMessages = SessionManager.open(file)
-    .getBranch()
-    .filter((entry) => entry.type === 'message' && entry.message.role === 'system')
-  expect(systemMessages).toHaveLength(1)
-})
+    // pi alone, as `scripts/enso.ts` runs it: the harness package, no host, no loader of ours.
+    const services = await createAgentSessionServices({
+      cwd: project,
+      agentDir,
+      resourceLoaderOptions: {
+        noExtensions: true,
+        noSkills: true,
+        additionalExtensionPaths: [harnessDir],
+        extensionFactories: [fauxModelExtension(watched)],
+      },
+    })
+    const { session } = await createAgentSessionFromServices({ services, sessionManager: SessionManager.open(file) })
+    await session.bindExtensions({ mode: 'rpc', onError: () => undefined })
+    await session.prompt('two')
+    session.dispose()
+
+    const [first, second] = requests.map(systemHeadOf)
+    const applied = section === 'preamble' ? choice.text : `<addendum>\n${choice.text}\n</addendum>`
+    expect(first?.sections[section]).toBe(applied)
+    expect(second).toEqual(first ?? { sections: {} })
+    const systemMessages = SessionManager.open(file)
+      .getBranch()
+      .filter((entry) => entry.type === 'message' && entry.message.role === 'system')
+    expect(systemMessages).toHaveLength(1)
+  },
+)
