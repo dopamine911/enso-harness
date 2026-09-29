@@ -797,6 +797,30 @@ test('⚠ POST …/command with a flow row: 202 on start, the thread is not busy
   expect(built).toHaveLength(1)
 })
 
+// ⚠ #348: a login holds no lease, so `POST …/abort` answered 409 "nothing is running" through a
+// device-code wait. Stop now ends the login: 200, the flow settles, and a follow that opens
+// mid-login is told there is one (its snapshot), so a page arriving then offers the Stop too.
+test('⚠ POST …/abort during a login ends it: the snapshot says a login waits, Stop is 200, then nothing is left', async () => {
+  const { url, built } = await startWith(settlesAtOnce)
+  const started = await fetch(`${url}/api/threads/logging-in/command`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name: 'login', value: 'fake/oauth' }),
+  })
+  expect(started.status).toBe(202)
+  const controller = new AbortController()
+  openFollows.push(controller)
+  const follow = await openFollow(url, 'logging-in', controller)
+  expect(follow.frames[0]).toMatchObject({ type: 'snapshot', busy: false, login: { provider: 'fake' } })
+
+  const stop = async (): Promise<number> =>
+    (await fetch(`${url}/api/threads/logging-in/abort`, { method: 'POST' })).status
+  expect(await stop()).toBe(200)
+  expect(built[0]?.flows.map((flow) => flow.settled)).toEqual([true])
+  // Nothing waits any more, and no run is in flight: the next Stop has nothing to stop.
+  expect(await stop()).toBe(409)
+})
+
 // ⚠ THE LEASE COMES BACK ON A FAULT (PR #346 review): a runtime that throws while a flow is being
 // started — not a decided refusal — is the handler's 500, and the thread is not left busy under it.
 test('POST …/command: a flow start that faults is a 500 and releases the lease — the next prompt runs', async () => {

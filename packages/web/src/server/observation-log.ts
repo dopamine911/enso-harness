@@ -40,6 +40,8 @@ const SPINE: Readonly<Record<string, true>> = {
   'provider-refused': true,
   'provider-retry': true,
   'provider-retry-ended': true,
+  // A compaction rewrote the branch (#348): a reader of the log should see where the history changed.
+  'branch-compacted': true,
 }
 
 /**
@@ -98,6 +100,10 @@ function compactOf(observation: EnsoObservation): EnsoLogProperties {
         cost: observation.cost,
         ...(observation.context?.percent == null ? {} : { contextPercent: observation.context.percent }),
       }
+    case 'branch-compacted':
+      return { reason: observation.reason }
+    case 'login':
+      return { provider: observation.provider, waiting: observation.waiting }
     case 'extension-error':
       return { extensionPath: observation.extensionPath, event: observation.event }
     case 'run-ended':

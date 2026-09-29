@@ -290,6 +290,17 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
       }
       record.flows.push(entry)
     },
+    // A login is waiting from its acceptance until the test settles it (#348), as the real host's
+    // is until pi stores the credential; Stop's cancel settles it.
+    loginInProgress: () => {
+      const waiting = record.flows.find((flow) => !flow.settled && flow.run.name === 'login')
+      return waiting === undefined ? undefined : { provider: waiting.run.value?.split('/')[0] ?? 'provider' }
+    },
+    cancelLogin: () => {
+      const waiting = record.flows.find((flow) => !flow.settled && flow.run.name === 'login')
+      waiting?.settle()
+      return waiting !== undefined
+    },
     permissionModeState: () => ({ mode: 'default', available: ['default'] }),
     setSystemPrompt: (choice: EnsoSystemPromptChoice | null) => {
       // The real host's rule (#443), over the fake's record: a prompt sent is a request sent.

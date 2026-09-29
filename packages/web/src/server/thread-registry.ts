@@ -459,7 +459,14 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
   function abort(threadId: string): AbortResult {
     const thread = threads.get(threadId)
     if (thread === undefined) return { outcome: 'unknown', restored: [] }
-    if (!thread.busy) return { outcome: 'idle', restored: [] }
+    // ⚠ A LOGIN HOLDS NO LEASE (#348): the thread reads idle through a device-code wait, and Stop
+    // is the one way to end it short of pi's own expiry. Cancelled, it settles on its own; there
+    // was no queue to hand back.
+    if (!thread.busy) {
+      return thread.hosted.runtime.cancelLogin()
+        ? { outcome: 'aborted', restored: [] }
+        : { outcome: 'idle', restored: [] }
+    }
     if (thread.abortInFlight !== undefined) return { outcome: 'aborted', restored: [] }
     // A stop must stop (PR #129 review): if clearing the queue throws — pi emits the
     // emptied queue to its listeners inside it — the texts are lost and said, and pi is

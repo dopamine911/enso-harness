@@ -134,11 +134,15 @@ export {
 } from './log-tail.ts'
 export {
   ENSO_NOTICE_SOURCE,
+  EnsoBranchCompacted,
   EnsoCustomEntry,
   EnsoDialogOutcome,
   EnsoDialogSettled,
   EnsoExtensionError,
   EnsoExtensionUiRequest,
+  EnsoLoginInProgress,
+  EnsoLoginObservation,
+  EnsoLoginState,
   EnsoMessageEnd,
   EnsoMessageStart,
   EnsoModelObservation,

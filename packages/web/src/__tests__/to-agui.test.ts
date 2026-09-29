@@ -205,6 +205,8 @@ test('nothing is silently dropped: every kind except an in-flight result and a b
       availableThinkingLevels: ['off', 'low', 'medium', 'high'],
     },
     { kind: 'session-usage', cost: 0, input: 1, output: 1, cacheRead: 0, cacheWrite: 0, context: null },
+    { kind: 'branch-compacted', reason: 'manual' },
+    { kind: 'login', provider: 'Anthropic', waiting: true },
     { kind: 'turn-start' },
     { kind: 'turn-end', toolResults: 1 },
     { kind: 'queue', interrupting: [], enqueued: ['later'] },

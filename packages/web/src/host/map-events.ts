@@ -3,6 +3,7 @@ import {
   ENSO_TOOL_RESULT_KEY,
   EnsoDialogOutcome,
   type EnsoDialogSpec,
+  EnsoLoginState,
   EnsoModelState,
   EnsoNotifyType,
   type EnsoObservation,
@@ -274,6 +275,20 @@ function mapRetryEnd(event: RuntimeEvent): EnsoObservation {
 }
 
 /**
+ * pi's `compaction_end` (#348): the branch was rewritten under any page holding it. Only a
+ * FINISHED compaction — an aborted or failed one rewrote nothing, and a page re-reading for it
+ * would read the same.
+ */
+function mapCompactionEnd(event: RuntimeEvent): EnsoObservation {
+  const reason = event.reason
+  const finished = event.aborted !== true && event.result !== undefined && event.result !== null
+  if (finished && (reason === 'manual' || reason === 'threshold' || reason === 'overflow')) {
+    return { kind: 'branch-compacted', reason }
+  }
+  return { kind: 'unmapped', event }
+}
+
+/**
  * Map one pi rpc event. Never returns undefined — see the design rule above.
  *
  * `delivery` is how the host handed the event over (#96): `replayed` from its held buffer —
@@ -383,6 +398,10 @@ export function mapPiEvent(event: RuntimeEvent, delivery: EventDelivery = 'live'
     case 'session_usage':
       return hostState(event, EnsoSessionUsage, (usage) => ({ kind: 'session-usage', ...usage }))
 
+    case 'login':
+      // The host's own event (#348): a login began waiting on its provider, or stopped.
+      return hostState(event, EnsoLoginState, (login) => ({ kind: 'login', ...login }))
+
     case 'provider_refused':
       // The host's own event (#340): the provider refused the request pi just made.
       return hostState(event, EnsoProviderRefusal, (refusal) => ({ kind: 'provider-refused', ...refusal }))
@@ -392,6 +411,9 @@ export function mapPiEvent(event: RuntimeEvent, delivery: EventDelivery = 'live'
 
     case 'auto_retry_end':
       return mapRetryEnd(event)
+
+    case 'compaction_end':
+      return mapCompactionEnd(event)
 
     case 'entry_appended': {
       // ⚠ Only CUSTOM entries are promoted (#29): an extension persisting state via

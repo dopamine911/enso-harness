@@ -249,9 +249,9 @@ goes through `finish` (line 352), which deletes the pending entry, emits the set
 outcome (line 339) and resolves the extension with its value — `undefined` for `select`/`input`/
 `editor`, `false` for `confirm`, on every non-answer outcome (lines 312–313). That is why the settle
 observation exists at all: the runtime has no event for a question ending (lines 316–317).
-`agent-host.ts` binds one context per session (line 975) and delegates the runtime contract's
-`answerDialog` and `openDialogs` to it (lines 1382–1387); `cancelAllDialogs` cancels every pending
-question at session teardown (line 579, called from `agent-host.ts:1537`), so teardown is a settle
+`agent-host.ts` binds one context per session (line 981) and delegates the runtime contract's
+`answerDialog` and `openDialogs` to it (lines 1411–1416); `cancelAllDialogs` cancels every pending
+question at session teardown (line 579, called from `agent-host.ts:1576`), so teardown is a settle
 path too.
 
 **Consumed by the server.** `answerThreadDialog` in `packages/web/src/server/follow.ts` (line 363)
@@ -264,7 +264,7 @@ card at once (`follow.ts` line 200; `openDialogs` at extension-ui-context.ts lin
 request with `isEnsoDialogSpec` rather than casting, line 532).
 
 **Consumed by the browser.** The question arrives as an `extension-ui-request` observation whose
-`dialog` the mapper checked with `isEnsoDialogSpec` (`map-events.ts` line 137); the adapter passes the
+`dialog` the mapper checked with `isEnsoDialogSpec` (`map-events.ts` line 147); the adapter passes the
 observation whole on a CUSTOM chunk named by its kind (`to-agui.ts#custom`) and the router checks
 `{ id, dialog }` again against `EnsoOpenDialog` before it reaches the store (`custom-event-router.ts#routeUiRequest`). `EnsoDialogCard` in
 `packages/web/src/chat-screen.tsx` (`#EnsoDialogCard`) renders one card and hands `answerDialog` in
@@ -319,9 +319,9 @@ including the fail-closed lift (`EnsoExtensionUiContextOptions.liftDialog`, line
   (an injection seam, closed at the server: `follow.ts` lines 359–360).
 - **The settle funnel**: `finish` is the one place a settle record is emitted (extension-ui-context.ts
   line 324); the mapper turns an outcome the union does not name into `unmapped`, not a guess
-  (`map-events.ts` lines 327–336).
+  (`map-events.ts` lines 378–387).
 - **The kinds agree twice**: the host's `BlockingDialogRequest` (extension-ui-context.ts line 65) and
-  the mapper's `DIALOG_UI_METHODS` (`map-events.ts` line 38) name the same five methods, and the
+  the mapper's `DIALOG_UI_METHODS` (`map-events.ts` line 43) name the same five methods, and the
   host's comment says so.
 - **The vendor gate** (#145): `extension-ui-context.ts` and `permission-dialog.ts` import the runtime's
   package; nothing above `host/` does.
@@ -352,7 +352,7 @@ but a `select`. The mode itself is leak L3, on `permission-mode.md`.
 
 **`notify` rides the same observation.** A one-way notice is emitted by the host as a `notify` request
 (extension-ui-context.ts line 394) and mapped as an `extension-ui-request` the mapper marks
-non-blocking, since only the five dialog methods block (`map-events.ts` line 160); status-bar and
+non-blocking, since only the five dialog methods block (`map-events.ts` line 172); status-bar and
 widget calls are emitted and dropped (extension-ui-context.ts header lines 54–56). Not a dialog.
 
 ## Pivot cost

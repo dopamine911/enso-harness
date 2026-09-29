@@ -38,6 +38,8 @@ Most rows stay folded, and that is the point of the layout. A call that finished
 
 In the palette, a command runs at once, but a prompt or a skill is only inserted into the composer as `/name `, for you to finish and send.
 
+While `/login` waits for the provider (a device code to enter, a browser page to finish), the composer shows the stop button, labelled `cancel the login to <provider>`. It cancels the login, and nothing is stored. After `/compact`, or a compaction pi runs on its own when the context fills, the transcript is re-read once the thread is idle, so it shows the compacted history without a reload.
+
 ## What it doesn't do
 
 - An image in pi's reply that lives on another host is not loaded until you click it. The button names the host first. A reply is untrusted text, and loading an image is a request to whoever wrote its URL.

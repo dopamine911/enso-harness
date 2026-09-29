@@ -1,5 +1,6 @@
 import type {
   EnsoInterruptedTail,
+  EnsoLoginInProgress,
   EnsoModelState,
   EnsoOpenDialog,
   EnsoPermissionModeState,
@@ -86,6 +87,8 @@ export interface ThreadMount {
   readonly recordedModel: EnsoRecordedModel | undefined
   /** Every question pi is blocked on, oldest first (#114); empty when the thread is not live. */
   readonly openDialogs: EnsoOpenDialog[]
+  /** The login waiting on its provider (#348), which Stop can end; undefined when none is, or not live. */
+  readonly login: EnsoLoginInProgress | undefined
   /**
    * The tree pi runs this thread in (#44): the live session's own, the stored session's (pi fixed
    * it at creation), or — for a thread with neither — its project's, where it will be built (#395).
@@ -148,6 +151,7 @@ type RunReading = Pick<
   | 'recordedModel'
   | 'openDialogs'
   | 'usage'
+  | 'login'
 >
 
 /**
@@ -168,6 +172,7 @@ function liveReading(thread: ThreadView, transcript: readonly EnsoTranscriptEntr
     recordedModel: undefined,
     openDialogs: runtime.openDialogs(),
     usage: runtime.sessionUsage(),
+    login: runtime.loginInProgress(),
   }
 }
 
@@ -187,6 +192,7 @@ function coldReading(
     recordedModel: stored?.recordedModel,
     openDialogs: [],
     usage: stored?.usage ?? NO_USAGE,
+    login: undefined,
   }
 }
 

@@ -2594,3 +2594,74 @@ test.each(terminalCases)(
     expect(systemMessages).toHaveLength(1)
   },
 )
+
+/**
+ * A device-code login (#348): it shows a code, then waits on the provider with no question to
+ * cancel — the wait only ever ends on the signal, as a real poll's does when it is aborted. It
+ * rejects with a sentence of its own, not pi's "Login cancelled", so the host must know the cancel
+ * by its signal.
+ */
+const fauxDeviceCodeProvider: InlineExtension = {
+  name: 'enso-host-faux-device-code',
+  factory: (pi: ExtensionAPI) => {
+    pi.registerProvider('faux-device', {
+      api: 'enso-faux',
+      baseUrl: 'http://faux.invalid',
+      models: [],
+      oauth: {
+        name: 'Faux Device',
+        login: (callbacks: OAuthLoginCallbacks): Promise<OAuthCredentials> => {
+          callbacks.onDeviceCode({ userCode: 'B599-2E10', verificationUri: 'https://faux.invalid/device' })
+          return new Promise((_resolve, reject) => {
+            callbacks.signal?.addEventListener('abort', () => reject(new Error('device poll interrupted')))
+          })
+        },
+        refreshToken: async (credentials: OAuthCredentials): Promise<OAuthCredentials> => credentials,
+        getApiKey: (credentials: OAuthCredentials): string => credentials.access,
+      },
+    })
+  },
+}
+
+// ⚠ #348: a login holds no run lease, so nothing marked the thread as having something to stop,
+// and a device-code wait ran until the provider's own expiry. Stop now cancels it: the wait ends,
+// the thread says so, nothing is stored, and the `login` observation brackets the wait.
+test('⚠ Stop cancels a login waiting on its provider: said as cancelled, nothing stored, the wait bracketed (#348)', async () => {
+  const host = createAgentHost({
+    servesDirectory: servesRepoRoot,
+    agentDir: mkdtempSync(join(tmpdir(), 'enso-host-login-cancel-')),
+    permissionRulesPath,
+    harnessPackageDir: harnessDir,
+    extensionFactories: [fauxDeviceCodeProvider],
+  })
+  const hosted = await host.createSession(crypto.randomUUID(), () => repoRoot)
+  openSessions.push(hosted)
+  const events = collectEvents(hosted)
+  const waiting = untilObservation(hosted, (event) => event.kind === 'login' && event.waiting)
+  const settled = Promise.withResolvers<void>()
+  hosted.runtime.startHostFlow(
+    { name: 'login', value: 'faux-device/oauth' },
+    { onAccepted: (): void => undefined, onRejected: settled.reject, onSettled: settled.resolve },
+  )
+  await waiting
+  expect(hosted.runtime.loginInProgress()).toEqual({ provider: 'Faux Device' })
+
+  expect(hosted.runtime.cancelLogin()).toBe(true)
+  await settled.promise
+  const lines = events.flatMap((event) =>
+    event.kind === 'extension-ui-request' && event.method === 'notify' && event.message !== undefined
+      ? [event.message]
+      : [],
+  )
+  expect(lines).toContain('Login to Faux Device cancelled.')
+  expect(lines.some((line) => line.startsWith('Failed to log in'))).toBe(false)
+  expect(events.filter((event) => event.kind === 'login')).toEqual([
+    { kind: 'login', provider: 'Faux Device', waiting: true },
+    { kind: 'login', provider: 'Faux Device', waiting: false },
+  ])
+  expect(hosted.runtime.loginInProgress()).toBeUndefined()
+  expect(hosted.runtime.cancelLogin()).toBe(false)
+  // Nothing stored: `/logout` offers no Faux Device credential.
+  const logout = hosted.runtime.listCommands().find((command) => command.name === 'logout')
+  expect(logout?.options?.map((option) => option.id) ?? []).not.toContain('faux-device')
+})

@@ -222,6 +222,7 @@ export async function followThread(deps: FollowRouteDeps, threadId: string, resp
     messages: mount.messages,
     openDialogs: mount.openDialogs,
     ...(mount.interrupted === undefined ? {} : { interrupted: mount.interrupted }),
+    ...(mount.login === undefined ? {} : { login: mount.login }),
   })
 }
 

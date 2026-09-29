@@ -106,12 +106,12 @@ test('every auth event is one line with the thing the user needs in it — the U
   expect(loginDoneText('OpenAI', 'oauth', 'gpt-5')).toBe('Logged in to OpenAI. Selected gpt-5.')
   expect(loginDoneText('OpenAI', 'api_key', undefined)).toBe('Saved API key for OpenAI.')
   expect(logoutDoneText('OpenAI', 'oauth')).toBe('Logged out of OpenAI.')
-  expect(compactDoneText(84_120, 11_900)).toBe(
-    'Compacted the context: 84,120 → 11,900 tokens. Reload the page to see the compacted transcript.',
-  )
-  expect(compactDoneText(84_120, undefined)).toBe(
-    'Compacted the context from 84,120 tokens. Reload the page to see the compacted transcript.',
-  )
+  // The measured numbers, and no instruction to reload: the page re-reads the thread itself (#348).
+  for (const done of [compactDoneText(84_120, 11_900), compactDoneText(84_120, undefined)]) {
+    expect(done).toContain('84,120')
+    expect(done).not.toMatch(/reload/i)
+  }
+  expect(compactDoneText(84_120, 11_900)).toContain('11,900')
   expect(logoutDoneText('OpenAI', undefined)).toBe('Removed the stored credential for OpenAI.')
 })
 

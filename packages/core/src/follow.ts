@@ -1,6 +1,6 @@
 import { type Static, Type } from 'typebox'
 import { EnsoOpenDialog } from './dialog.ts'
-import { EnsoObservation } from './observation.ts'
+import { EnsoLoginInProgress, EnsoObservation } from './observation.ts'
 import { EnsoPermissionModeState } from './permission-mode.ts'
 import { EnsoInterruptedTail } from './thread-inspection.ts'
 import { EnsoModelState, EnsoPromptAdmission, EnsoRecordedModel, EnsoSessionUsage } from './thread-runtime.ts'
@@ -60,6 +60,8 @@ export const EnsoFollowSnapshot = Type.Object(
     /** Every question pi is blocked on right now, oldest first (#114). Empty when not live. */
     openDialogs: Type.Array(EnsoOpenDialog),
     interrupted: Type.Optional(EnsoInterruptedTail),
+    /** A login waiting on its provider (#348), which Stop can end; absent when none is. */
+    login: Type.Optional(EnsoLoginInProgress),
   },
   { additionalProperties: false },
 )

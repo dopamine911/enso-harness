@@ -562,6 +562,56 @@ export const EnsoRunEnded = Type.Object({
 export const EnsoSettled = Type.Object({ kind: Type.Literal('settled') })
 
 /**
+ * pi compacted the branch (#348): its older turns are now one summary, so a transcript a page
+ * mounted earlier no longer matches the session — the page re-reads the thread once it is idle.
+ * `manual` is `/compact`; `threshold` and `overflow` are pi's own, when the context crossed its
+ * threshold or overflowed mid-run. Said only for a compaction that finished: an aborted one
+ * rewrote nothing.
+ *
+ * @group Observations
+ * @category Message stream
+ */
+export const EnsoBranchCompacted = Type.Object({
+  kind: Type.Literal('branch-compacted'),
+  reason: Type.Union([Type.Literal('manual'), Type.Literal('threshold'), Type.Literal('overflow')]),
+})
+
+/**
+ * A login waiting on its provider (#348): the provider as the flow names it. A login holds no run
+ * lease — the composer stays open through a device-code wait — so this is what tells a page there
+ * is something Stop can end. The follow's snapshot carries it for a page that arrives mid-login.
+ *
+ * @group Observations
+ * @category Permission and dialogs
+ */
+export const EnsoLoginInProgress = Type.Object({ provider: Type.String({ minLength: 1 }) })
+/**
+ * @group Observations
+ * @category Permission and dialogs
+ */
+export type EnsoLoginInProgress = Static<typeof EnsoLoginInProgress>
+
+/**
+ * A login's state as the host says it (#348): which provider, and whether it is still waiting.
+ *
+ * @group Observations
+ * @category Permission and dialogs
+ */
+export const EnsoLoginState = Type.Object({ ...EnsoLoginInProgress.properties, waiting: Type.Boolean() })
+
+/**
+ * A login started waiting, or stopped (#348): `waiting: false` once it settles — stored,
+ * failed, or cancelled, by Stop or by its own card.
+ *
+ * @group Observations
+ * @category Permission and dialogs
+ */
+export const EnsoLoginObservation = Type.Object({
+  kind: Type.Literal('login'),
+  ...EnsoLoginState.properties,
+})
+
+/**
  * Anything not modelled above, carried through so it can be logged or displayed.
  *
  * ⚠ `event` is `Type.Unknown()`, not a closed event schema. Constraining it would make a
@@ -592,6 +642,8 @@ export const EnsoObservation = Type.Union([
   EnsoMessageStart,
   EnsoMessageEnd,
   EnsoSessionUsageObservation,
+  EnsoBranchCompacted,
+  EnsoLoginObservation,
   EnsoTurnStart,
   EnsoTurnEnd,
   EnsoProviderRefused,

@@ -20,6 +20,7 @@ import {
   type EnsoHostCommandRun,
   type EnsoModelState,
   type EnsoObservation,
+  type EnsoLoginInProgress,
   type EnsoOpenDialog,
   type EnsoPermissionModeState,
   type EnsoPromptAdmission,
@@ -299,6 +300,11 @@ interface LoginInProgress {
   readonly providerName: string
   authUrl: string | undefined
   readonly questions: AbortController
+  /**
+   * Stop, for this login only (#348): aborting it ends the provider wait (a device-code poll, a
+   * browser callback). `flowsAbort` is the SESSION's and final; this one leaves the session be.
+   */
+  readonly cancel: AbortController
 }
 
 export interface AgentHostOptions {
@@ -1071,6 +1077,9 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     // ONE flow at a time per session (PR #346 review): two logins on one feed would interleave
     // their questions with nothing to tell a reader which is which. The second is refused.
     let flowInProgress: string | undefined
+    // The login waiting on its provider, if one is (#348): what `loginInProgress` says and
+    // `cancelLogin` ends. Set only between the flow's start and pi storing the credential.
+    let waitingLogin: LoginInProgress | undefined
     const providerNameOf = (providerId: string): string =>
       session.modelRuntime.getProvider(providerId)?.name ?? providerId
     async function refreshStoredCredentials(): Promise<void> {
@@ -1188,18 +1197,35 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       // bridge drops it (`index.ts:263-264`) and pi's composer asks with none
       // (`provider-composer.js:173`). The login finished and its card stayed open, "a question is
       // waiting". So every question is tied to the login too, and withdrawn once it settles.
-      const login: LoginInProgress = { providerName, authUrl: undefined, questions: new AbortController() }
+      const login: LoginInProgress = {
+        providerName,
+        authUrl: undefined,
+        questions: new AbortController(),
+        cancel: new AbortController(),
+      }
+      // ⚠ WAITING IS WHAT STOP CAN END (#348): from here until pi stores the credential. A login
+      // holds no lease, so this — the `login` event, and `loginInProgress` for a snapshot — is how
+      // a page knows there is something to stop. Said once each way; the second end is a no-op.
+      waitingLogin = login
+      emit({ type: 'login', provider: providerName, waiting: true })
+      const endWaiting = (): void => {
+        if (waitingLogin !== login) return
+        waitingLogin = undefined
+        emit({ type: 'login', provider: providerName, waiting: false })
+      }
       try {
         await session.modelRuntime.login(providerId, authType, {
-          signal: flowsAbort.signal,
+          signal: AbortSignal.any([flowsAbort.signal, login.cancel.signal]),
           prompt: (prompt: Parameters<typeof askAuthPrompt>[0]): Promise<string> => askAuthPrompt(prompt, login),
           notify: (event: HostAuthEvent): void => {
             if (event.type === 'auth_url') login.authUrl = event.url
             ui.notifyFrom(ENSO_SENDER, authEventText(event, providerName), 'info')
           },
         })
-        // The credential is stored: the card goes now, not after the catalog refresh below.
+        // The credential is stored: the card goes now, not after the catalog refresh below, and
+        // there is nothing left for Stop to end.
         login.questions.abort()
+        endWaiting()
         // The credential IS stored past this line (PR #346 review): what follows can fail —
         // pi refusing the model, the catalog not refreshing — and is said as a warning, never
         // as a failed login that `/logout` would then contradict by listing the credential.
@@ -1213,13 +1239,16 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
           ui.notifyFrom(ENSO_SENDER, `Logged in to ${providerName}; post-login setup failed: ${reason}`, 'warning')
         }
       } catch (error) {
-        if (isFlowCancelled(error)) ui.notifyFrom(ENSO_SENDER, `Login to ${providerName} cancelled.`, 'info')
-        else {
+        // Stop's cancel is known by ITS signal, whatever sentence pi's provider throws for it.
+        if (login.cancel.signal.aborted || isFlowCancelled(error)) {
+          ui.notifyFrom(ENSO_SENDER, `Login to ${providerName} cancelled.`, 'info')
+        } else {
           const reason = error instanceof Error ? error.message : String(error)
           ui.notifyFrom(ENSO_SENDER, `Failed to log in to ${providerName}: ${reason}`, 'error')
         }
       } finally {
         login.questions.abort()
+        endWaiting()
         await refreshStoredCredentials()
         announceModelState()
       }
@@ -1232,9 +1261,9 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
      * and `compact()` awaits `abort()` before it arms its own guard (:1866–1867), so a prompt in
      * that window would run alongside the summary — the held lease is what forecloses it (PR #347
      * review). Stop reaches it: `abort` below calls `abortCompaction`, and pi's own `dispose`
-     * does too (:587). The page's transcript is TanStack's copy of the messages and does not
-     * re-read the branch on its own, so the done line says to reload; the next snapshot is the
-     * compacted branch.
+     * does too (:587). The page's transcript is TanStack's copy of the messages; pi's
+     * `compaction_end` becomes `branch-compacted` (#348), and the pane re-reads the branch once
+     * the thread is idle.
      */
     async function runCompact(): Promise<void> {
       ui.notifyFrom(ENSO_SENDER, 'Compacting the context…', 'info')
@@ -1408,6 +1437,16 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         commands.push(...hostFlowRows(currentLoginOptions(), logoutOptions(storedCredentials)))
         commands.push(...HOST_VIEW_ROWS)
         return commands
+      },
+      loginInProgress(): EnsoLoginInProgress | undefined {
+        return waitingLogin === undefined ? undefined : { provider: waitingLogin.providerName }
+      },
+      cancelLogin(): boolean {
+        if (waitingLogin === undefined) return false
+        // The provider's wait first, then its card: the login settles as cancelled either way.
+        waitingLogin.cancel.abort()
+        waitingLogin.questions.abort()
+        return true
       },
       startHostFlow(run: EnsoHostCommandRun, outcome: HostFlowOutcome): void {
         let decision: ReturnType<typeof decideHostFlow>

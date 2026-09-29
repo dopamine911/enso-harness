@@ -44,23 +44,23 @@ flowchart LR
 | `respondToProjectRemoval → ProjectRegistry.remove` | [`DELETE /api/projects/:projectId`](./routes.md) | path: `projectId` (sixteen hex digits) | [`packages/web/src/server/index.ts:140`](../../packages/web/src/server/index.ts#L140) |
 | `respondToPromptRemoval → PromptLibrary.remove` | [`DELETE /api/prompts/:id`](./routes.md) | path: `id`; header: `If-Match: <ETag>` (the version read) or `If-Match: *` | [`packages/web/src/server/index.ts:138`](../../packages/web/src/server/index.ts#L138) |
 | `respondToPromptWrite → PromptLibrary.write` | [`PUT /api/prompts/:id`](./routes.md) | path: `id`; headers: exactly one precondition — `If-None-Match: *` (create: no file of that name), `If-Match: <ETag>` (replace the version read), `If-Match: *` (replace whatever is there); body: `EnsoLibraryPromptWrite` — `name`, `description`, `category` (system, append or session) and the markdown `body` | [`packages/web/src/server/index.ts:137`](../../packages/web/src/server/index.ts#L137) |
-| `respondToAbort → abortThread` | [`POST /api/threads/:threadId/abort`](./routes.md) | path: `threadId`; no body | [`packages/web/src/server/index.ts:106`](../../packages/web/src/server/index.ts#L106)<br>[`packages/web/src/server/follow.ts:821`](../../packages/web/src/server/follow.ts#L821) |
+| `respondToAbort → abortThread` | [`POST /api/threads/:threadId/abort`](./routes.md) | path: `threadId`; no body | [`packages/web/src/server/index.ts:106`](../../packages/web/src/server/index.ts#L106)<br>[`packages/web/src/server/follow.ts:822`](../../packages/web/src/server/follow.ts#L822) |
 | `respondToHostCommand → runHostCommand` | [`POST /api/threads/:threadId/command`](./routes.md) | path: `threadId`; body: `EnsoHostCommandRun` — `model` with `provider/id`, `thinking` with a level, `login` with `provider/authType`, `logout` with a provider, `compact` with nothing; a `view` row (`context`, `fork`) is the page's to do, never run | [`packages/web/src/server/index.ts:110`](../../packages/web/src/server/index.ts#L110) |
 | `respondToConfigure → configureThread` | [`POST /api/threads/:threadId/configure`](./routes.md) | path: `threadId`; body: `EnsoSessionConfiguration` — optional `systemPrompt` (a library prompt id, `system` or `append`, or `null` for pi's default; absent leaves the session's as it is), `model` (`provider/id`), `thinking` (a level that model supports) and `mode`; applied in that order under one lease, a value equal to the current one left alone | [`packages/web/src/server/index.ts:112`](../../packages/web/src/server/index.ts#L112) |
-| `respondToContinue → continueThread → ThreadRuntime.continueRun` | [`POST /api/threads/:threadId/continue`](./routes.md) | path: `threadId`; no body | [`packages/web/src/server/index.ts:127`](../../packages/web/src/server/index.ts#L127)<br>[`packages/web/src/server/follow.ts:388`](../../packages/web/src/server/follow.ts#L388) |
-| `respondToDialog → answerThreadDialog` | [`POST /api/threads/:threadId/dialog`](./routes.md) | path: `threadId`; body: `DialogAnswer` | [`packages/web/src/server/index.ts:105`](../../packages/web/src/server/index.ts#L105)<br>[`packages/web/src/server/follow.ts:463`](../../packages/web/src/server/follow.ts#L463) |
-| `respondToFork → forkThreadAt → AgentHost.forkThread` | [`POST /api/threads/:threadId/fork`](./routes.md) | path: `threadId`; body: `EnsoForkRequest` — `entryId`, the pi entry id of one of the thread's user messages; the fork is pi's `/fork` at position `before`, taken from the session file | [`packages/web/src/server/index.ts:125`](../../packages/web/src/server/index.ts#L125)<br>[`packages/web/src/server/follow.ts:796`](../../packages/web/src/server/follow.ts#L796) |
-| `respondToModeChange → changeThreadMode` | [`POST /api/threads/:threadId/mode`](./routes.md) | path: `threadId`; body: `EnsoPermissionModeChange` | [`packages/web/src/server/index.ts:108`](../../packages/web/src/server/index.ts#L108)<br>[`packages/web/src/server/follow.ts:496`](../../packages/web/src/server/follow.ts#L496) |
-| `respondToPrompt → promptThread` | [`POST /api/threads/:threadId/prompt`](./routes.md) | path: `threadId`; body: `EnsoPromptBody` | [`packages/web/src/server/index.ts:104`](../../packages/web/src/server/index.ts#L104)<br>[`packages/web/src/server/follow.ts:288`](../../packages/web/src/server/follow.ts#L288) |
+| `respondToContinue → continueThread → ThreadRuntime.continueRun` | [`POST /api/threads/:threadId/continue`](./routes.md) | path: `threadId`; no body | [`packages/web/src/server/index.ts:127`](../../packages/web/src/server/index.ts#L127)<br>[`packages/web/src/server/follow.ts:389`](../../packages/web/src/server/follow.ts#L389) |
+| `respondToDialog → answerThreadDialog` | [`POST /api/threads/:threadId/dialog`](./routes.md) | path: `threadId`; body: `DialogAnswer` | [`packages/web/src/server/index.ts:105`](../../packages/web/src/server/index.ts#L105)<br>[`packages/web/src/server/follow.ts:464`](../../packages/web/src/server/follow.ts#L464) |
+| `respondToFork → forkThreadAt → AgentHost.forkThread` | [`POST /api/threads/:threadId/fork`](./routes.md) | path: `threadId`; body: `EnsoForkRequest` — `entryId`, the pi entry id of one of the thread's user messages; the fork is pi's `/fork` at position `before`, taken from the session file | [`packages/web/src/server/index.ts:125`](../../packages/web/src/server/index.ts#L125)<br>[`packages/web/src/server/follow.ts:797`](../../packages/web/src/server/follow.ts#L797) |
+| `respondToModeChange → changeThreadMode` | [`POST /api/threads/:threadId/mode`](./routes.md) | path: `threadId`; body: `EnsoPermissionModeChange` | [`packages/web/src/server/index.ts:108`](../../packages/web/src/server/index.ts#L108)<br>[`packages/web/src/server/follow.ts:497`](../../packages/web/src/server/follow.ts#L497) |
+| `respondToPrompt → promptThread` | [`POST /api/threads/:threadId/prompt`](./routes.md) | path: `threadId`; body: `EnsoPromptBody` | [`packages/web/src/server/index.ts:104`](../../packages/web/src/server/index.ts#L104)<br>[`packages/web/src/server/follow.ts:289`](../../packages/web/src/server/follow.ts#L289) |
 
 ## Observation pipeline
 
-One pi event becomes one observation and crosses six stages to reach the browser store. The union declares 24 kinds; the mapper produces 22 of them, and the rest are produced by the prompt route (see [Observations](./observations.md) for the per-kind producer, carrier and consumer).
+One pi event becomes one observation and crosses six stages to reach the browser store. The union declares 26 kinds; the mapper produces 24 of them, and the rest are produced by the prompt route (see [Observations](./observations.md) for the per-kind producer, carrier and consumer).
 
 ```mermaid
 flowchart LR
   Pi["pi runtime event"]
-  Pi --> Mapper["mapPiEvent (22 kinds)"]
+  Pi --> Mapper["mapPiEvent (24 kinds)"]
   Mapper --> Schema["EnsoObservation"]
   Schema --> Frame["observation frame"]
   Frame --> Connection["follow connection"]
@@ -71,11 +71,11 @@ flowchart LR
 
 | Stage | Contract | Source |
 |---|---|---|
-| `mapPiEvent (22 kinds)` | [Observations](./observations.md) | [`packages/web/src/host/map-events.ts:283`](../../packages/web/src/host/map-events.ts#L283) |
-| `EnsoObservation` | [Core exports](./core-exports.md) | [`packages/core/src/observation.ts:583`](../../packages/core/src/observation.ts#L583) |
+| `mapPiEvent (24 kinds)` | [Observations](./observations.md) | [`packages/web/src/host/map-events.ts:298`](../../packages/web/src/host/map-events.ts#L298) |
+| `EnsoObservation` | [Core exports](./core-exports.md) | [`packages/core/src/observation.ts:633`](../../packages/core/src/observation.ts#L633) |
 | `observation frame` | [Observations](./observations.md) | [`packages/web/src/server/follow.ts:194`](../../packages/web/src/server/follow.ts#L194) |
 | `follow connection` | [Routes](./routes.md) | [`packages/web/src/follow-connection.ts:480`](../../packages/web/src/follow-connection.ts#L480) |
 | `to-agui chunk` | [Observations](./observations.md) | [`packages/web/src/to-agui.ts:76`](../../packages/web/src/to-agui.ts#L76) |
-| `custom event router` | [Observations](./observations.md) | [`packages/web/src/custom-event-router.ts:209`](../../packages/web/src/custom-event-router.ts#L209) |
+| `custom event router` | [Observations](./observations.md) | [`packages/web/src/custom-event-router.ts:211`](../../packages/web/src/custom-event-router.ts#L211) |
 
-Kinds, in the union's order of declaration: `text-delta`, `thinking-delta`, `tool-call`, `tool-result`, `custom-entry`, `permission-mode`, `permission-mode-rejected`, `model`, `message-start`, `message-end`, `session-usage`, `turn-start`, `turn-end`, `provider-refused`, `provider-retry`, `provider-retry-ended`, `queue`, `prompt-rejected`, `extension-error`, `extension-ui-request`, `dialog-settled`, `run-ended`, `settled`, `unmapped`.
+Kinds, in the union's order of declaration: `text-delta`, `thinking-delta`, `tool-call`, `tool-result`, `custom-entry`, `permission-mode`, `permission-mode-rejected`, `model`, `message-start`, `message-end`, `session-usage`, `branch-compacted`, `login`, `turn-start`, `turn-end`, `provider-refused`, `provider-retry`, `provider-retry-ended`, `queue`, `prompt-rejected`, `extension-error`, `extension-ui-request`, `dialog-settled`, `run-ended`, `settled`, `unmapped`.
