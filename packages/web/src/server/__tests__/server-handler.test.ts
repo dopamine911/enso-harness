@@ -1276,7 +1276,14 @@ test('GET …/context/:request reads a turn or `next`; any other segment, or a t
 test('GET …/manifest answers a cold thread from its file without building, a live one from its session, and 404 for neither', async () => {
   const point: EnsoForkPoint = {
     identity: { threadId: 's1', leafEntryId: 'e2', parentThreadId: 's0' },
-    conditions: { model: null, thinkingLevel: 'high', mode: 'plan', cwd: '/repo', runContext: null },
+    conditions: {
+      model: null,
+      thinkingLevel: 'high',
+      mode: 'plan',
+      cwd: '/repo',
+      runContext: null,
+      systemPrompt: { id: 'reviewer', name: 'Reviewer', mode: 'system', sha256: 'e'.repeat(64) },
+    },
   }
   const { url, built } = await startWith(settlesAtOnce, {
     s1: { transcript: [], modified: new Date('2026-09-24T10:00:00.000Z'), firstMessage: 'one', forkPoint: point },

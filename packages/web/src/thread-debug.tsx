@@ -225,6 +225,13 @@ function manifestProblemOf(failure: unknown): string {
   return failure instanceof Error ? failure.message : String(failure)
 }
 
+/** The fork point's system prompt as one line: the library prompt's name, mode and hash prefix, never its text. */
+function systemPromptRow(prompt: EnsoForkPoint['conditions']['systemPrompt']): string {
+  if (prompt === null) return 'pi default'
+  if (prompt === 'unreadable') return 'unreadable record'
+  return `${prompt.name} (${prompt.mode}) · sha256 ${prompt.sha256.slice(0, 12)}…`
+}
+
 /** The manifest (#435) as a definition list: identity first, then the conditions it runs under. */
 function ForkPointList({ reading }: { reading: ForkPointReading }): React.ReactNode {
   if (reading === undefined) return <div>reading…</div>
@@ -238,6 +245,7 @@ function ForkPointList({ reading }: { reading: ForkPointReading }): React.ReactN
     ['thinking', conditions.thinkingLevel ?? 'none recorded'],
     ['mode', conditions.mode],
     ['cwd', conditions.cwd],
+    ['system prompt', systemPromptRow(conditions.systemPrompt)],
     ...(conditions.runContext === null
       ? [['run context', 'none recorded yet'] as const]
       : runContextRows(conditions.runContext)),

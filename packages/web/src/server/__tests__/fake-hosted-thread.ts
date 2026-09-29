@@ -357,7 +357,14 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
       Promise.resolve(
         options.forkPoint ?? {
           identity: { threadId: inspection.sessionId, leafEntryId: inspection.entries.at(-1)?.id ?? null },
-          conditions: { model: null, thinkingLevel: null, mode: 'default', cwd: inspection.cwd, runContext: null },
+          conditions: {
+            model: null,
+            thinkingLevel: null,
+            mode: 'default',
+            cwd: inspection.cwd,
+            runContext: null,
+            systemPrompt: null,
+          },
         },
       ),
   }
@@ -530,6 +537,7 @@ export function createFakeAgentHost(
             mode: storedThread.mode ?? fresh.mode,
             cwd: directoryOf(storedThread),
             runContext: null,
+            systemPrompt: null,
           },
         },
       )

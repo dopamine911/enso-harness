@@ -1,5 +1,6 @@
 import { ENSO_RUN_CONTEXT_ENTRY, type EnsoForkPoint, lastCustomEntryData, readEnsoRunContext } from '@enso/core'
 import { persistedPermissionMode } from './permission-mode-adapter.ts'
+import { threadSystemPrompt } from './system-prompt.ts'
 import { recordedModelOf } from './transcript.ts'
 
 /**
@@ -7,8 +8,9 @@ import { recordedModelOf } from './transcript.ts'
  * session's memory and a stored file, so the manifest of a thread reads one way whether it is
  * running. Identity is the session id, the branch's leaf and the parent the listing resolves
  * (#433); the conditions are the branch's recorded model and level (#434), picc's last mode
- * name, the session's cwd, and the latest `enso-run-context` on the branch — the harness's
- * `run-context` extension writes one only when a condition changed, so the last one is current.
+ * name, the session's cwd, the latest `enso-run-context` on the branch — the harness's
+ * `run-context` extension writes one only when a condition changed, so the last one is current —
+ * and the system prompt its last `enso-system-prompt` entry names (#443), hash and name only.
  */
 
 /** The one field of a pi entry the fork point reads itself — the leaf's id. */
@@ -39,6 +41,7 @@ export function forkPointOf(
       // unknown, never walked past to one that reads.
       runContext:
         readEnsoRunContext(ENSO_RUN_CONTEXT_ENTRY, lastCustomEntryData(branch, ENSO_RUN_CONTEXT_ENTRY)) ?? null,
+      systemPrompt: threadSystemPrompt(branch),
     },
   }
 }

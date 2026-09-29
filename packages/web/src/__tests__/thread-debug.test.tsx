@@ -122,7 +122,7 @@ const renderWith = ({
   )
 
 // #435: the fork point, identity first, then what the thread runs under — hashes shortened.
-test('the fork point lists identity, then the conditions and the run context it records', () => {
+test('the fork point lists identity, then the conditions — the system prompt among them — and the run context it records', () => {
   const point: EnsoForkPoint = {
     identity: { threadId: 'fork-1', leafEntryId: 'e9', parentThreadId: 'source-1' },
     conditions: {
@@ -137,21 +137,32 @@ test('the fork point lists identity, then the conditions and the run context it 
         contextFiles: [{ path: '/repo/AGENTS.md', sha256: 'c'.repeat(64) }],
         mode: { rulesHash: 'd'.repeat(64) },
       },
+      systemPrompt: { id: 'reviewer', name: 'Reviewer', mode: 'append', sha256: 'e'.repeat(64) },
     },
   }
   const rendered = renderWith({ browser: believing('plan'), inspection: undefined, manifest: point })
-  const order = ['fork-1', 'source-1', 'anthropic/claude-x', 'high', '/repo', `${'a'.repeat(12)} dirty`]
+  const order = [
+    'fork-1',
+    'source-1',
+    'anthropic/claude-x',
+    'high',
+    '/repo',
+    `Reviewer (append) · sha256 ${'e'.repeat(12)}…`,
+    `${'a'.repeat(12)} dirty`,
+  ]
   const positions = order.map((text) => rendered.indexOf(text))
   expect(positions.every((position) => position >= 0)).toBe(true)
   expect(positions).toEqual([...positions].sort((first, second) => first - second))
   expect(rendered).toContain(`/repo/AGENTS.md ${'c'.repeat(12)}`)
   expect(rendered).not.toContain('c'.repeat(13))
+  expect(rendered).not.toContain('e'.repeat(13))
   const fresh = renderWith({
     browser: believing('plan'),
     inspection: undefined,
-    manifest: { ...point, conditions: { ...point.conditions, runContext: null } },
+    manifest: { ...point, conditions: { ...point.conditions, runContext: null, systemPrompt: null } },
   })
   expect(fresh).toContain('none recorded yet')
+  expect(fresh).toContain('pi default')
 })
 
 // ── the mismatch highlight ───────────────────────────────────────────────────

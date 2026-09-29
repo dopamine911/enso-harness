@@ -1945,6 +1945,7 @@ test('⚠ two forks of one thread, one of them run under a changed context file,
     mode: 'default',
     cwd: repoRoot,
     runContext: recorded,
+    systemPrompt: null,
   })
   expect(changedPoint.conditions).toEqual({ ...plainPoint.conditions, runContext: changedContext })
   // PR #439 review: a newest record that does not read (another schema's) is unknown — never the
@@ -2279,6 +2280,23 @@ test("⚠⚠ a system prompt set at start is the first request's preamble in pla
   expect(systemMessages).toHaveLength(1)
   // The model never sees the record.
   expect(JSON.stringify(requests)).not.toContain(ENSO_SYSTEM_PROMPT_ENTRY)
+
+  // The fork point names it — live, stored, and on a fork, whose branch carries the record — by
+  // name and hash, never its text.
+  const named = { id: choice.id, name: choice.name, mode: choice.mode, sha256: choice.sha256 }
+  expect((await resumed.forkPoint()).conditions.systemPrompt).toEqual(named)
+  expect((await host.readStoredForkPoint(threadId))?.conditions.systemPrompt).toEqual(named)
+  const second = SessionManager.open(file)
+    .getBranch()
+    .find(
+      (entry) =>
+        entry.type === 'message' &&
+        entry.message.role === 'user' &&
+        JSON.stringify(entry.message.content).includes('two'),
+    )
+  const fork = await host.forkThread(threadId, second?.id ?? '')
+  if (fork.kind !== 'forked') throw new Error(`the fork was refused: ${fork.kind}`)
+  expect((await host.readStoredForkPoint(fork.threadId))?.conditions.systemPrompt).toEqual(named)
 })
 
 test("an append prompt keeps every pi section and adds its text after them; a session that already sent pi's default refuses one (#443)", async () => {

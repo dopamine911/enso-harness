@@ -62,8 +62,11 @@ function sameSystemPrompt(current: EnsoSystemPromptChoice | undefined, next: Ens
   return current.id === next.id && current.mode === next.mode && current.sha256 === next.sha256
 }
 
-/** The branch's system prompt as a view shows it: the choice without its text, pi's default, or unreadable. */
-export function threadSystemPrompt(branch: readonly SessionEntry[]): EnsoThreadSystemPrompt {
+/**
+ * The branch's system prompt as a view shows it — the Context tab's label, the fork point's
+ * condition: the choice without its text, pi's default, or unreadable.
+ */
+export function threadSystemPrompt(branch: readonly unknown[]): EnsoThreadSystemPrompt {
   const recorded = recordedSystemPrompt(branch)
   if (recorded.kind === 'none') return null
   if (recorded.kind === 'unreadable') return 'unreadable'
