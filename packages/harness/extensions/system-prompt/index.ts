@@ -47,7 +47,7 @@ export function applySystemPrompt(
 
 /** What the notice says when the branch's record does not read. */
 export const UNREADABLE_SYSTEM_PROMPT_NOTICE =
-  "this thread's recorded system prompt does not read — this run uses pi's default system prompt"
+  "Enso: this thread's recorded system prompt does not read — this run uses pi's default system prompt"
 
 export default function systemPrompt(pi: ExtensionAPI): void {
   pi.on('before_agent_start', (event: BeforeAgentStartEvent, context: ExtensionContext): undefined => {
