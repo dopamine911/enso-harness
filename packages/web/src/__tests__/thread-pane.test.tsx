@@ -1767,6 +1767,10 @@ test('a question waiting while Stats is shown is said on the Chat tab, in the st
   // The rail's row is the pane's summary: `waiting` follows the thread's open dialog (PR #403 review).
   const railRow = (): string => page.activeRows()[0]?.textContent ?? ''
   expect(railRow()).not.toContain('waiting on you')
+  // #371: the live region is there BEFORE the question, empty — a screen reader announces a change
+  // inside a region that exists, not one that appears already filled.
+  const liveRegion = page.visiblePanes()[0]?.querySelector('[role="status"]')
+  expect(liveRegion?.textContent).toBe('')
   await flush(async () => {
     getThreadStores(threadId).dialog.set({ id: 'd1', dialog: { method: 'confirm', title: 'Proceed?', message: '' } })
     await tick()
@@ -1774,6 +1778,10 @@ test('a question waiting while Stats is shown is said on the Chat tab, in the st
   expect(tab('stats').getAttribute('aria-selected')).toBe('true')
   expect(tab('chat').textContent).toContain('a question is waiting')
   expect(statusBar()).toContain('a question is waiting')
+  // The same node, now holding the words; the visible line is hidden from it, so it is read once.
+  expect(page.visiblePanes()[0]?.querySelector('[role="status"]')).toBe(liveRegion ?? null)
+  expect(liveRegion?.textContent).toBe('a question is waiting')
+  expect(page.visiblePanes()[0]?.querySelectorAll('[role="status"]')).toHaveLength(1)
   expect(railRow()).toContain('waiting on you')
   // On Chat the question is in view: the tab no longer flags it; the bar still says it waits.
   await flush(async () => {
@@ -1787,6 +1795,8 @@ test('a question waiting while Stats is shown is said on the Chat tab, in the st
     await tick()
   })
   expect(statusBar()).not.toContain('a question is waiting')
+  expect(liveRegion?.isConnected).toBe(true)
+  expect(liveRegion?.textContent).toBe('')
   expect(railRow()).not.toContain('waiting on you')
   await page.unmount()
 })

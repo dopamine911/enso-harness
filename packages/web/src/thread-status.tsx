@@ -279,14 +279,19 @@ export function ThreadStatusView({
         {activityLabel(activity)}
       </span>
       {/* Seen from every view: the question itself is in the transcript (#362 review). */}
+      {/* ⚠ THE LIVE REGION IS ALWAYS MOUNTED (#371): a screen reader announces a change inside a
+          region that exists, not a region that appears already filled. Only its words change;
+          `sr-only` is absolutely placed, so while empty it takes no item or gap in this row. */}
+      <span role="status" className="sr-only">
+        {questionWaiting ? 'a question is waiting' : ''}
+      </span>
       {questionWaiting ? (
         <span
-          role="status"
+          aria-hidden="true"
           className="flex items-center gap-2 font-medium text-human"
           title="pi is waiting for your answer — it is in the Chat view"
         >
-          <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-human signal:shadow-glow-human" />
-          a question is waiting
+          <span className="size-2 shrink-0 rounded-full bg-human signal:shadow-glow-human" />a question is waiting
         </span>
       ) : null}
       {/* #340: `$0.0000` beside `idle` means "nothing ran" here, not "free" — the line in the
