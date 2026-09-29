@@ -37,9 +37,28 @@ test('a malformed run context reads as none: bad hash, missing field, a file bod
 test('a fork point takes an empty branch and no run context, and refuses an unknown field', () => {
   const point = {
     identity: { threadId: 't1', leafEntryId: null },
-    conditions: { model: null, thinkingLevel: null, mode: 'default', cwd: '/repo', runContext: null },
+    conditions: {
+      model: null,
+      thinkingLevel: null,
+      mode: 'default',
+      cwd: '/repo',
+      runContext: null,
+      systemPrompt: null,
+    },
   }
   expect(Check(EnsoForkPoint, point)).toBe(true)
   expect(Check(EnsoForkPoint, { ...point, conditions: { ...point.conditions, runContext: RECORD } })).toBe(true)
   expect(Check(EnsoForkPoint, { ...point, identity: { ...point.identity, sessionFile: '/x.jsonl' } })).toBe(false)
+})
+
+test("a fork point's system prompt is a library prompt's name and hash, pi's default or unreadable — never its text (#443)", () => {
+  const conditions = { model: null, thinkingLevel: null, mode: 'default', cwd: '/repo', runContext: null }
+  const point = (systemPrompt: unknown): unknown => ({
+    identity: { threadId: 't1', leafEntryId: null },
+    conditions: { ...conditions, systemPrompt },
+  })
+  const reviewer = { id: 'reviewer', name: 'Reviewer', mode: 'system', sha256: HASH }
+  expect(Check(EnsoForkPoint, point(reviewer))).toBe(true)
+  expect(Check(EnsoForkPoint, point('unreadable'))).toBe(true)
+  expect(Check(EnsoForkPoint, point({ ...reviewer, text: 'the prompt itself' }))).toBe(false)
 })

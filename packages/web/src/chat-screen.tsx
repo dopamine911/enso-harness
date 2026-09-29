@@ -87,6 +87,7 @@ import { ModelChip, ModelChoiceDialog, ThinkingLevelSelect, useModelState, useRe
 import { ThreadNotifications } from './notifications.tsx'
 import { PermissionModeSelect, usePermissionMode } from './permission-mode.tsx'
 import { createProjectsStore, projectOf, removeProject } from './project-list.ts'
+import { PromptManagerDialog } from './prompt-manager.tsx'
 import { QuestionnaireControls } from './questionnaire-card.tsx'
 import { providerRefusalLine, providerRefusalSource, RefusedAttemptLine, refusalOfMessage } from './refused-attempt.tsx'
 import { SelectedMessagePart } from './selected-message-part.tsx'
@@ -1780,6 +1781,7 @@ function AppHeader({
         <span className="rounded-full border px-2 py-0.5 text-xs text-muted-foreground">fixture</span>
       ) : null}
       <ViewTabs view={view} onView={onView} threadId={active?.threadId} />
+      <PromptManagerDialog threadId={activeThreadId} />
       <SettingsDialog />
       {isDebugMode ? (
         <PaneSwitch

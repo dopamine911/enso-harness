@@ -5,6 +5,7 @@ import type { FetchLike } from './browser-logging.ts'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './components/ui/dialog.tsx'
 import { ContextEvents, FileActivity } from './context-activity.tsx'
 import { ContextBrowser, type ContextBrowserFocus, type ContextBrowserRequest } from './context-browser.tsx'
+import { ThreadSystemPromptContext, useCategoryLabel, useElementLabel } from './context-labels.tsx'
 import {
   changeText,
   estimateChangeText,
@@ -22,7 +23,6 @@ import { COMPACT, countText } from './stats-table.tsx'
 import { useStore, useThreadStores } from './store.ts'
 import {
   CATEGORY_COLOR,
-  CATEGORY_LABEL,
   CONTEXT_CATEGORIES,
   changeOf,
   lastRequestPerPrompt,
@@ -298,6 +298,7 @@ interface TrendPlotProps {
 
 function TrendPlot(props: TrendPlotProps): React.ReactNode {
   const { bars, requests, granularity, mode, pickedIndex, onPick } = props
+  const categoryOf = useCategoryLabel()
   const values = barValues(bars, mode)
   const scale = scaleOf(values)
   const every = Math.ceil(bars.length / AXIS_LABELS)
@@ -333,9 +334,7 @@ function TrendPlot(props: TrendPlotProps): React.ReactNode {
               const compacted = compactedBar(bar, requests, granularity)
               const label = `request ${bar.turn}, prompt ${bar.prompt}, ${figure(total)}${compacted ? ', compaction' : ''}`
               // The hover names every category's figure: the bar alone says only proportions.
-              const detail = CONTEXT_CATEGORIES.map(
-                (category) => `${CATEGORY_LABEL[category]} ${figure(makeup[category])}`,
-              )
+              const detail = CONTEXT_CATEGORIES.map((category) => `${categoryOf(category)} ${figure(makeup[category])}`)
               return (
                 <button
                   key={bar.turn}
@@ -446,6 +445,7 @@ function RequestBrief({
 }): React.ReactNode {
   const { actual, brief } = request
   const muted = 'text-xs text-muted-foreground'
+  const labelOf = useElementLabel()
   return (
     <article className="grid gap-3 rounded-lg border bg-background p-3">
       {/* A pick is confirmed in one line, not by re-reading the brief: the region below changes
@@ -488,7 +488,7 @@ function RequestBrief({
                     onClick={() => onOpenElement(addition.key)}
                   >
                     <Swatch category={addition.category} className="size-2" />
-                    <span className="truncate">{addition.label}</span>
+                    <span className="truncate">{labelOf(addition)}</span>
                   </button>
                 </li>
               ))}
@@ -688,7 +688,11 @@ function whenRead(outcome: ContextOutcome, show: (context: EnsoThreadContext) =>
     return <p className="p-4 text-xs text-muted-foreground">reading the thread's context…</p>
   if (outcome.kind === 'failed')
     return <p className="p-4 text-xs text-muted-foreground">no context: {outcome.problem}</p>
-  return show(outcome.payload)
+  return (
+    <ThreadSystemPromptContext.Provider value={outcome.payload.systemPrompt}>
+      {show(outcome.payload)}
+    </ThreadSystemPromptContext.Provider>
+  )
 }
 
 /** Pure view — the data arrives as props; the cards' choices are their own state. */

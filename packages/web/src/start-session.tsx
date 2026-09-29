@@ -17,15 +17,17 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Textarea } from './components/ui/textarea.tsx'
 import type { ConfigureOutcome } from './follow-connection.ts'
 import { OptionDetail, optionKeywords } from './model-state.tsx'
+import { PI_DEFAULT_SYSTEM_PROMPT, PromptLibraryFields, useSystemPromptChoice } from './start-session-prompts.tsx'
 
 /**
- * The Start-a-session dialog (#391): a new thread opens on it — the model, the effort, the mode and
- * the first prompt, then **Start session**. Before it a new thread was "dead" (Daniel, 2026-09-25):
+ * The Start-a-session dialog (#391): a new thread opens on it — the model, the effort, the mode, the
+ * system prompt (#443, pi's default or one from the library) and the first prompt, then **Start
+ * session**. Before it a new thread was "dead" (Daniel, 2026-09-25):
  * it had no session until its first prompt, so the model chip, the effort and the palette had
  * nothing to read.
  *
  * ⚠ ALL AT ONCE, ON START (the decision on #391). Nothing here changes the session while the person
- * chooses; Start sends the three settings in ONE request (`POST …/configure`), which the server
+ * chooses; Start sends the settings in ONE request (`POST …/configure`), which the server
  * applies in order under one lease and refuses by NAMING the step — the dialog stays open and says
  * it. Only then does the first prompt go, through the chat's own send, so the message bubble and the
  * run are exactly the composer's.
@@ -44,7 +46,7 @@ export interface StartSessionDialogProps {
   /** The thread's permission mode and the modes it offers — the composer's own store. */
   readonly mode: string | undefined
   readonly modes: readonly string[]
-  /** `connection.configure`: the three settings, applied together. */
+  /** `connection.configure`: the settings — system prompt, model, effort, mode — applied together. */
   readonly configure: (configuration: EnsoSessionConfiguration) => Promise<ConfigureOutcome>
   /** The chat's send: false when it refused (disconnected), and the dialog then stays open. */
   readonly send: (text: string) => boolean
@@ -120,7 +122,7 @@ function refusalText(outcome: Exclude<ConfigureOutcome, { outcome: 'told' }>): s
   }
 }
 
-const STEP_WORDS = { model: 'model', thinking: 'effort', mode: 'mode' } as const
+const STEP_WORDS = { systemPrompt: 'system prompt', model: 'model', thinking: 'effort', mode: 'mode' } as const
 
 function ModelField({
   models,
@@ -229,16 +231,20 @@ async function startWith(
 }
 
 /** The chosen settings as the configure body: a choice not made is not sent (the server keeps what it has). */
-function configurationOf(choices: {
+export function configurationOf(choices: {
   model: string | undefined
   thinking: string | undefined
   mode: string | undefined
+  systemPrompt: string
 }): EnsoSessionConfiguration {
-  const configuration: { model?: string; thinking?: string; mode?: string } = {}
+  const configuration: { model?: string; thinking?: string; mode?: string; systemPrompt?: string | null } = {}
   for (const key of ['model', 'thinking', 'mode'] as const) {
     const chosen = choices[key]
     if (chosen !== undefined) configuration[key] = chosen
   }
+  // Always said, pi's default as `null` (#443): a Start refused at a later step may already have
+  // applied a library prompt, and a retry with pi's default must replace it, not leave it running.
+  configuration.systemPrompt = choices.systemPrompt === PI_DEFAULT_SYSTEM_PROMPT ? null : choices.systemPrompt
   return configuration
 }
 
@@ -293,6 +299,7 @@ function SessionStatus({
 export function StartSessionDialog(props: StartSessionDialogProps): React.ReactNode {
   const { threadId, open, onClose, fetch: fetchImpl } = props
   const catalogue = useSessionCatalogue(open, threadId, fetchImpl)
+  const promptChoice = useSystemPromptChoice(open, fetchImpl)
   const [model, setModel] = useState<string | undefined>(undefined)
   const [thinking, setThinking] = useState<string | undefined>(undefined)
   const [mode, setMode] = useState<string | undefined>(undefined)
@@ -320,7 +327,11 @@ export function StartSessionDialog(props: StartSessionDialogProps): React.ReactN
     if (!ready) return
     setApplying(true)
     setRefusal(undefined)
-    const refused = await startWith(props, configurationOf({ model, thinking, mode }), text)
+    const refused = await startWith(
+      props,
+      configurationOf({ model, thinking, mode, systemPrompt: promptChoice.systemPrompt }),
+      text,
+    )
     setApplying(false)
     if (refused === undefined) onClose()
     else setRefusal(refused)
@@ -337,6 +348,7 @@ export function StartSessionDialog(props: StartSessionDialogProps): React.ReactN
               <ChoiceField field={EFFORT_FIELD} value={thinking} choices={levels} onChoose={setThinking} />
               <ChoiceField field={MODE_FIELD} value={mode} choices={props.modes} onChoose={setMode} />
             </div>
+            <PromptLibraryFields choice={promptChoice} fetch={fetchImpl} onPick={setText} />
             <Field>
               <FieldLabel htmlFor="start-session-prompt">Prompt</FieldLabel>
               <Textarea

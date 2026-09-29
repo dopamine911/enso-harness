@@ -1,8 +1,10 @@
 import { expect, test } from 'bun:test'
 import { tmpdir } from 'node:os'
 import { type SessionEntry, SessionManager } from '@earendil-works/pi-coding-agent'
+import { parseLibraryPrompt, serializeLibraryPrompt } from '@enso/core'
 import { branchContext, branchRequestDetail } from '../branch-context.ts'
 import { branchStats } from '../branch-stats.ts'
+import { foldSystem } from '../context-elements.ts'
 
 /**
  * #361: a thread's context, request by request, off pi's own entries — built here with pi's real
@@ -270,4 +272,17 @@ test('a second compaction that keeps the first: its summary alone counts, in the
   expect(fourth?.left.map((gone) => gone.label)).toEqual(['compaction summary'])
   const compactions = events.filter((event) => event.kind === 'compact')
   expect(compactions[1]?.tokens).toBe(tokens(40) - tokens(400))
+})
+
+test("#443: a library prompt's estimate is the Context tab's for the same text — one function prices both", () => {
+  const body = '# Reviewer\n\nRead the diff; say what breaks. ✓ ünïcode counts as characters, not bytes.'
+  const parsed = parseLibraryPrompt(
+    'reviewer',
+    serializeLibraryPrompt({ name: 'R', description: '', category: 'system', body }),
+  )
+  if (parsed.kind !== 'prompt') throw new Error(parsed.reason)
+  const message = { role: 'system', content: '', sections: { preamble: body }, timestamp: 0 } as never
+  const [preamble] = foldSystem([{ message, at: '' }])
+  expect(preamble?.item.key).toBe('system:section:preamble')
+  expect(preamble?.item.tokens).toBe(parsed.prompt.tokens)
 })

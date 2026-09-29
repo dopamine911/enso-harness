@@ -26,7 +26,7 @@ Every thread also carries a record of the conditions it ran under, its *fork poi
 
 ![The fork's fork point in the debug drawer](./images/lineage-fork-point.png)
 
-1. **fork point**: identity first (the thread, the entry its branch ends at, the thread it was forked from), then the conditions.
+1. **fork point**: identity first (the thread, the entry its branch ends at, the thread it was forked from), then the conditions, among them the **system prompt**: `pi default`, or a library prompt's name, its mode and the start of its hash.
 2. The parent thread's id.
 3. The conditions Enso recorded at the last run start: `git` is the project's revision, `config` the hash of the resolved config and where it came from, then the skills, the context files and the mode's rules.
 
@@ -34,7 +34,7 @@ Every thread also carries a record of the conditions it ran under, its *fork poi
 
 The thread above was forked before its third prompt, the one that asked pi to change `src/config.ts`. The fork holds the first two prompts and their answers, and nothing after. That is the point to fork from when you want to try the same request another way: on another model, in another mode, or after changing a context file.
 
-Then compare the two fork points. Outside the identity rows, they should differ in exactly what you changed. If they differ in something else, such as a revision you didn't expect or a context file that changed under you, the two runs are not the comparison you meant.
+Then compare the two fork points. Outside the identity rows, they should differ in exactly what you changed. If they differ in something else, such as a revision you didn't expect or a context file that changed under you, the two runs are not the comparison you meant. The same goes for two threads started with different system prompts: the **system prompt** row is where they differ. A fork keeps its parent's system prompt, since the prompt is fixed once a thread has sent its first request.
 
 The run context is written only when something in it changes. A thread that ran ten turns on an unchanged tree carries one record, not ten. A fork inherits the records on its branch, so its first run adds one only if a condition changed.
 
@@ -42,7 +42,7 @@ A thread you open after a restart shows the model it last ran on, marked `model 
 
 ## What it doesn't do
 
-- It records hashes and paths, never the contents of a config value or a context file. It can tell you that `AGENTS.md` changed, not what changed in it.
+- It records hashes and paths, never the contents of a config value, a context file or a system prompt. It can tell you that `AGENTS.md` changed, or which library prompt a thread started with, not what is in them.
 - Forking doesn't copy files. The project's working tree is shared, so a fork that edits a file edits it for every thread in that project.
 - The browser forks at a prompt, as pi's `/fork` does. Moving inside one thread's tree (pi's `/tree` and `/branch`) is not in the browser.
 - There is no side-by-side comparison view. You compare the two fork points yourself, or with [Session eval](./session-eval.md).

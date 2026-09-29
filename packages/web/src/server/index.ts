@@ -11,12 +11,14 @@ import {
   EnsoProjectRegistration,
   type EnsoProjectsConfig,
   type EnsoStoredThread,
+  type EnsoSystemPromptChoice,
   type EnsoThreadCommands,
   type EnsoThreadEvents,
   type EnsoThreadHistory,
   type EnsoThreadSummary,
   ensoLogger,
   isEnsoThreadId,
+  LIBRARY_PROMPT_ID_SOURCE,
   withEnsoLogContext,
 } from '@enso/core'
 import { readGitChanges, readGitState, runGit } from '@enso/core/git'
@@ -47,6 +49,17 @@ import { MAX_LOG_BODY_BYTES, receiveBrowserLogs } from './logs-route.ts'
 import { createLogStatsRoute } from './logs-stats-route.ts'
 import { followLogTail, type LogTailRouteDeps } from './logs-tail-route.ts'
 import { createProjectRegistry, ProjectUnavailable } from './projects.ts'
+import {
+  createPromptLibrary,
+  NO_PROMPT_LIBRARY,
+  type LibraryRead,
+  draftChoice,
+  type PromptLibrary,
+  readPromptWriteBody,
+  readSystemPromptDraftBody,
+  type SystemPromptPick,
+  type WriteCondition,
+} from './prompt-library.ts'
 import { SSE_KEEPALIVE_MS } from './sse.ts'
 import { createContextRequestRoute, createThreadContextRoute } from './thread-context-route.ts'
 import { createThreadEvalRoute } from './thread-eval-route.ts'
@@ -97,10 +110,32 @@ const THREAD_MODE_ROUTE = threadRoute('mode')
 const THREAD_COMMAND_ROUTE = threadRoute('command')
 /** `POST …/configure` (#391): a new session's model, effort and mode, applied together — the Start-a-session dialog. */
 const THREAD_CONFIGURE_ROUTE = threadRoute('configure')
+/**
+ * `GET …/system-prompt[?prompt=<id>]` (#443): the system prompt the thread's next request would carry
+ * with a library prompt — pi's default without one — section by section. Builds the thread on ask.
+ * The one query parameter is part of the pattern on purpose: its id is the library's own shape
+ * (`LIBRARY_PROMPT_ID_SOURCE`), so a malformed id or any other parameter is a 404, never a file lookup.
+ */
+const THREAD_SYSTEM_PROMPT_ROUTE = new RegExp(
+  `^/api/threads/([^/?#]+)/system-prompt(?:\\?prompt=(${LIBRARY_PROMPT_ID_SOURCE}))?$`,
+)
+/** `POST …/system-prompt` (#443): the same preview for an unsaved prompt's text — the editor's breakdown. */
+const THREAD_SYSTEM_PROMPT_DRAFT_ROUTE = threadRoute('system-prompt')
 /** `POST …/fork` (#433): fork the thread at one of its user messages — a new thread naming this one as its parent. */
 const THREAD_FORK_ROUTE = threadRoute('fork')
 /** `POST …/continue` (#436): continue a torn thread from its stored state — no new prompt. */
 const THREAD_CONTINUE_ROUTE = threadRoute('continue')
+/**
+ * `/api/prompts/<id>` (#443): a library prompt. The id is its file name in the library's own shape
+ * (`LIBRARY_PROMPT_ID_SOURCE`), so it needs no decoding and can never leave the directory.
+ */
+function promptRoute(): RegExp {
+  return new RegExp(`^/api/prompts/(${LIBRARY_PROMPT_ID_SOURCE})$`)
+}
+/** One constant per method, as the routes reference reads them: `GET` reads it, `PUT` writes it whole, `DELETE` removes it. */
+const PROMPT_READ_ROUTE = promptRoute()
+const PROMPT_WRITE_ROUTE = promptRoute()
+const PROMPT_DELETE_ROUTE = promptRoute()
 /** `DELETE /api/projects/<projectId>` (#395) — the id is sixteen hex digits, so it needs no decoding. */
 const PROJECT_ROUTE = /^\/api\/projects\/([0-9a-f]{16})$/
 
@@ -120,6 +155,8 @@ const DEFAULT_PORT = 5179
 const LOOPBACK_ONLY = '127.0.0.1'
 /** A dialog answer is an id and a short value — kilobytes, not megabytes. */
 const MAX_DIALOG_BODY_BYTES = 64 * 1024
+/** A library prompt is a system prompt at most — a few hundred kilobytes is already most of a context window. */
+const MAX_PROMPT_BODY_BYTES = 512 * 1024
 
 /**
  * Is this `Host`/`Origin` authority the machine itself? Port is irrelevant (either dev
@@ -241,6 +278,60 @@ function refuseWith(response: ServerResponse, outcome: { readonly status: number
   response.end(outcome.reason)
 }
 
+/** A strong entity tag as the library quotes one: a file's sha256, hex. */
+const PROMPT_ETAG = /^"[0-9a-f]{64}"$/
+
+/** Why a library write or delete does not say what it expects: the one line `refuseWith` sends. */
+const MISSING_PRECONDITION: Readonly<Record<'write' | 'delete', string>> = {
+  write:
+    'a prompt write states what it expects on disk: `If-None-Match: *` to create, `If-Match: <ETag>` to replace the version it read, `If-Match: *` to replace whatever is there',
+  delete: 'a prompt delete states the version it removes: `If-Match: <ETag>`, or `If-Match: *` for whatever is there',
+}
+
+/**
+ * The precondition a library write or delete states (#443): `If-None-Match: *` (create — no file
+ * there), `If-Match: "<etag>"` (the version a read answered), `If-Match: *` (whatever is there). ⚠
+ * NONE IS A 428, never an unconditional write: without it a stale page or a script overwrites a
+ * prompt it never read, a refused one included. Both headers, a list, or a weak tag are a 400.
+ */
+function writeConditionOf(
+  request: IncomingMessage,
+  what: 'write' | 'delete',
+): WriteCondition | { readonly status: 400 | 428; readonly reason: string } {
+  const none = request.headers['if-none-match']?.trim()
+  const match = request.headers['if-match']?.trim()
+  if (none !== undefined && match !== undefined) {
+    return { status: 400, reason: 'a prompt request takes `If-None-Match` or `If-Match`, not both' }
+  }
+  if (none !== undefined) {
+    return none === '*' ? { kind: 'absent' } : { status: 400, reason: '`If-None-Match` takes only `*`: create' }
+  }
+  if (match === undefined) return { status: 428, reason: MISSING_PRECONDITION[what] }
+  if (match === '*') return { kind: 'present' }
+  return PROMPT_ETAG.test(match)
+    ? { kind: 'matches', etag: match }
+    : { status: 400, reason: '`If-Match` takes `*` or the one ETag a read of this prompt answered' }
+}
+
+/** A body that carries a prompt's text — a library write or a draft — under the prompt cap. */
+function readPromptSizedBody<T>(
+  request: IncomingMessage,
+  response: ServerResponse,
+  parse: (text: string) => T,
+): Promise<T | undefined> {
+  return readJsonBody(request, response, {
+    maxBytes: MAX_PROMPT_BODY_BYTES,
+    capText: `a prompt is at most ${MAX_PROMPT_BODY_BYTES} bytes`,
+    parse,
+  })
+}
+
+/** A 200 with `body` as JSON. */
+function answerJson(response: ServerResponse, body: unknown): void {
+  response.writeHead(200, { 'Content-Type': 'application/json' })
+  response.end(JSON.stringify(body))
+}
+
 /**
  * ⚠ `decodeURIComponent` THROWS on a malformed escape (`/api/threads/%`), and a throw in the
  * request listener has nothing above it — it took the whole dev server down, every live
@@ -278,6 +369,8 @@ export interface EnsoServerOptions {
   projectsConfigPath?: string
   /** Where registrations are kept (`.enso/projects.json`); absent, they last as long as the process (tests). */
   projectsStatePath?: string
+  /** The prompt library's directory (`ENSO_HOME/prompts`, #443); absent, the server has none and says so. */
+  promptsDir?: string
   /**
    * The Enso pi package directory, loaded as the ONLY extension source.
    *
@@ -394,6 +487,12 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
       return hosted
     },
   })
+  const prompts: PromptLibrary | undefined =
+    options.promptsDir === undefined ? undefined : createPromptLibrary(options.promptsDir)
+  /** A library prompt as a session's system prompt, or why not — the configure route's first step (#443). */
+  function pickSystemPrompt(id: string): SystemPromptPick {
+    return prompts === undefined ? { kind: 'refused', reason: NO_PROMPT_LIBRARY } : prompts.pickSystemPrompt(id)
+  }
   /** The one live-or-cold read (#214), shared with the follow route's snapshot. */
   const threadRead: ThreadReadDeps = { threads, host, projects }
 
@@ -578,6 +677,72 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     response.end(JSON.stringify(inspectThread(thread)))
   }
 
+  /**
+   * The system-prompt preview (#443): the candidate from the library (`?prompt=`), or pi's default;
+   * the thread built on ask, as the commands route builds it — this is a person opening the prompt
+   * manager, not a look (#86). Nothing about the thread changes. A library prompt that cannot be one
+   * is the pick's refusal (422); a thread in a run is 409, since pi's rendering is then the run's.
+   */
+  async function respondWithSystemPromptPreview(
+    threadId: string,
+    _request: IncomingMessage,
+    response: ServerResponse,
+    match: RegExpExecArray,
+  ): Promise<void> {
+    const promptId = match[2]
+    const pick = promptId === undefined ? undefined : pickSystemPrompt(promptId)
+    if (pick?.kind === 'refused') {
+      refuseWith(response, { status: prompts === undefined ? 404 : 422, reason: pick.reason })
+      return
+    }
+    await answerPreview(threadId, pick?.choice ?? null, response)
+  }
+
+  /**
+   * `POST …/system-prompt` (#443): an unsaved prompt's text, previewed as the editor types it. The
+   * draft is a choice like a saved one's — its hash taken here — that nothing records.
+   */
+  async function respondWithDraftPreview(
+    threadId: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> {
+    const draft = await readPromptSizedBody(request, response, readSystemPromptDraftBody)
+    if (draft === undefined) return
+    await answerPreview(threadId, draftChoice(draft), response)
+  }
+
+  /**
+   * A preview of `candidate` on the thread, built on ask; 409 while it runs. A rendering that does
+   * not split is a 500: the host matches the candidate's own text whole (preamble and addendum,
+   * `system-prompt-preview.ts`), so whatever it holds cannot be the cause — pi rendered something the
+   * splitter does not know.
+   */
+  async function answerPreview(
+    threadId: string,
+    candidate: EnsoSystemPromptChoice | null,
+    response: ServerResponse,
+  ): Promise<void> {
+    const thread = await threads.ensure(threadId)
+    const outcome = thread.busy ? { kind: 'busy' as const } : thread.hosted.previewSystemPrompt(candidate)
+    if (outcome.kind === 'preview') {
+      answerJson(response, outcome.preview)
+      return
+    }
+    if (outcome.kind === 'busy') {
+      refuseWith(response, {
+        status: 409,
+        reason: `thread ${threadId} is running; preview its system prompt when it settles`,
+      })
+      return
+    }
+    log.error('pi rendered a system prompt that does not split back', { threadId, id: candidate?.id ?? null })
+    refuseWith(response, {
+      status: 500,
+      reason: "pi's rendering of this system prompt does not split back into its sections",
+    })
+  }
+
   // The bundle (#132): today's records + the live threads + the versions, one file.
   const bundle = createBundleRoute({ threads, logsDir: options.logsDir, runtimeVersion: AGENT_RUNTIME_VERSION })
 
@@ -733,6 +898,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   const THREAD_ROUTES: readonly ThreadRoute[] = [
     ...idOnlyReads.map(([route, respond]): ThreadRoute => ({ method: 'GET', route, respond: idOnly(respond) })),
     { method: 'GET', route: THREAD_CONTEXT_REQUEST_ROUTE, respond: respondWithContextRequest },
+    { method: 'GET', route: THREAD_SYSTEM_PROMPT_ROUTE, respond: respondWithSystemPromptPreview },
     { method: 'GET', route: THREAD_ROUTE, respond: idOnly(respondWithThread) },
     {
       method: 'GET',
@@ -744,6 +910,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     { method: 'POST', route: THREAD_MODE_ROUTE, respond: respondToModeChange },
     { method: 'POST', route: THREAD_COMMAND_ROUTE, respond: respondToHostCommand },
     { method: 'POST', route: THREAD_CONFIGURE_ROUTE, respond: respondToConfigure },
+    { method: 'POST', route: THREAD_SYSTEM_PROMPT_DRAFT_ROUTE, respond: respondWithDraftPreview },
     { method: 'POST', route: THREAD_FORK_ROUTE, respond: respondToFork },
     { method: 'POST', route: THREAD_CONTINUE_ROUTE, respond: idOnly(respondToContinue) },
     { method: 'POST', route: THREAD_ABORT_ROUTE, respond: idOnly(respondToAbort) },
@@ -985,7 +1152,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
       parse: readConfigureBody,
     })
     if (configuration === undefined) return
-    const outcome = await configureThread(followDeps, threadId, configuration)
+    const outcome = await configureThread(followDeps, threadId, configuration, pickSystemPrompt)
     if (outcome.status === 409) {
       log.warn('configure refused (409): {reason}', { threadId, reason: outcome.reason })
       refuseWith(response, outcome)
@@ -1129,6 +1296,128 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   }
 
   /**
+   * `PUT /api/prompts/:id` (#443): write a library prompt whole under the precondition its headers
+   * state; the answer is the file as read back, with its `ETag`, so a page never shows fields the
+   * file does not hold. A precondition the disk does not meet is a 412 naming the file.
+   */
+  async function respondToPromptWrite(
+    library: PromptLibrary,
+    id: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> {
+    const condition = writeConditionOf(request, 'write')
+    if ('status' in condition) {
+      endAndClose(request, response, condition.status, condition.reason)
+      return
+    }
+    const fields = await readPromptSizedBody(request, response, readPromptWriteBody)
+    if (fields === undefined) return
+    const written = library.write(id, fields, condition)
+    if (written.kind === 'conflict') {
+      log.warn('prompt {id} not written: {reason}', { id, reason: written.reason })
+      refuseWith(response, { status: 412, reason: written.reason })
+      return
+    }
+    if (written.kind !== 'prompt')
+      log.error('prompt {id} did not read back after its write: {read}', { id, read: written })
+    answerLibraryRead(response, written, 500)
+  }
+
+  /**
+   * A library read, answered: the prompt as JSON with its `ETag`, a missing file 404, a refused one
+   * with its reason at `refusedStatus` — 422 for a read, 500 for a write that does not read back.
+   */
+  function answerLibraryRead(response: ServerResponse, read: LibraryRead, refusedStatus: 422 | 500): void {
+    if (read.kind === 'prompt') {
+      response.writeHead(200, { 'Content-Type': 'application/json', ETag: read.etag })
+      response.end(JSON.stringify(read.prompt))
+      return
+    }
+    refuseWith(response, { status: read.kind === 'missing' ? 404 : refusedStatus, reason: read.reason })
+  }
+
+  /** `GET /api/prompts/:id`: the prompt, 404 when there is no such file, 422 naming why a file is refused. */
+  function respondWithPrompt(library: PromptLibrary, id: string, response: ServerResponse): void {
+    answerLibraryRead(response, library.read(id), 422)
+  }
+
+  /** `GET /api/prompts`: the library's prompts, and every file it refused, by name. */
+  function respondWithPrompts(library: PromptLibrary, response: ServerResponse): void {
+    answerJson(response, library.list())
+  }
+
+  /**
+   * `DELETE /api/prompts/:id` under its `If-Match`: 204, 404 when there was no such file, 412 when it
+   * is not the version the caller read. A thread that ran it keeps its own copy.
+   */
+  function respondToPromptRemoval(
+    library: PromptLibrary,
+    id: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): void {
+    const condition = writeConditionOf(request, 'delete')
+    if ('status' in condition) {
+      endAndClose(request, response, condition.status, condition.reason)
+      return
+    }
+    if (condition.kind === 'absent') {
+      endAndClose(request, response, 400, 'a delete takes `If-Match`, not `If-None-Match`')
+      return
+    }
+    const removed = library.remove(id, condition)
+    if (removed === 'missing') {
+      refuseWith(response, { status: 404, reason: `no prompt ${id} in ${library.directory}` })
+      return
+    }
+    if (removed !== 'removed') {
+      log.warn('prompt {id} not deleted: {reason}', { id, reason: removed.reason })
+      refuseWith(response, { status: 412, reason: removed.reason })
+      return
+    }
+    response.writeHead(204)
+    response.end()
+  }
+
+  /** A library route's work, answered or failed: a disk that throws is a 500, never a throw with nothing above it. */
+  function withLibrary(
+    request: IncomingMessage,
+    response: ServerResponse,
+    work: (library: PromptLibrary) => void | Promise<void>,
+  ): true {
+    if (prompts === undefined) {
+      endAndClose(request, response, 404, NO_PROMPT_LIBRARY)
+      return true
+    }
+    answerOrFail(
+      Promise.resolve().then(() => work(prompts)),
+      response,
+    )
+    return true
+  }
+
+  /** True when the request was a prompt-library route (#443). */
+  function dispatchPromptRoute(request: IncomingMessage, response: ServerResponse): boolean {
+    const url = request.url ?? ''
+    if (request.method === 'GET' && url === '/api/prompts') {
+      return withLibrary(request, response, (library) => respondWithPrompts(library, response))
+    }
+    const read = request.method === 'GET' ? PROMPT_READ_ROUTE.exec(url)?.[1] : undefined
+    if (read !== undefined)
+      return withLibrary(request, response, (library) => respondWithPrompt(library, read, response))
+    const written = request.method === 'PUT' ? PROMPT_WRITE_ROUTE.exec(url)?.[1] : undefined
+    if (written !== undefined) {
+      return withLibrary(request, response, (library) => respondToPromptWrite(library, written, request, response))
+    }
+    const removed = request.method === 'DELETE' ? PROMPT_DELETE_ROUTE.exec(url)?.[1] : undefined
+    if (removed !== undefined) {
+      return withLibrary(request, response, (library) => respondToPromptRemoval(library, removed, request, response))
+    }
+    return false
+  }
+
+  /**
    * The one check that stands between a page the operator happens to visit and an agent
    * with unconfined `bash` in their tree.
    *
@@ -1243,6 +1532,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     }
     if (dispatchLiteralRoute(request, response)) return
     if (dispatchProjectRoute(request, response)) return
+    if (dispatchPromptRoute(request, response)) return
     if (dispatchThreadRoute(request, response)) return
     response.writeHead(404, { 'Content-Type': 'text/plain' })
     response.end('not found')

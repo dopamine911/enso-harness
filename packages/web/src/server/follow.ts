@@ -24,6 +24,7 @@ import {
 import type { Static, TSchema } from 'typebox'
 import { Check, Errors } from 'typebox/value'
 import { HostCommandRefused, modelOptionId } from '../host/host-commands.ts'
+import type { SystemPromptPick } from './prompt-library.ts'
 import { forgetRun, noteRunAdmitted } from './run-timing.ts'
 import { SSE_HEADERS, startSseKeepalive } from './sse.ts'
 import { readThreadMount, type ThreadReadDeps } from './thread-read.ts'
@@ -679,28 +680,49 @@ export type ConfigureOutcome =
 
 /**
  * A new session's settings, applied together (#391): the Start-a-session dialog's Start. Refused
- * while a run holds the thread (409), as every control route is; else ONE lease for all three, in
- * the order that matters — the model first (the effort a model allows depends on it), then the
- * effort, then the mode. A value equal to the current one is left alone, so choosing what the
- * session already has says nothing on the feed. The first refusal stops it and is the 422, NAMING
- * the step: the steps before it applied, the ones after it did not run. The mode is awaited to its
- * acceptance (the mode route answers before it), so the prompt the page sends next cannot overtake
- * it and a rejected mode is this response, not a later line.
+ * while a run holds the thread (409), as every control route is; else ONE lease for all of them, in
+ * the order that matters — the system prompt first (#443: a session takes one only before its first
+ * request; the library's pick is `pickSystemPrompt`), then the model (the effort a model allows
+ * depends on it), then the effort, then the mode. A value equal to the current one is left alone,
+ * so choosing what the session already has says nothing on the feed. The first refusal stops it and
+ * is the 422, NAMING the step: the steps before it applied, the ones after it did not run. The mode
+ * is awaited to its acceptance (the mode route answers before it), so the prompt the page sends next
+ * cannot overtake it and a rejected mode is this response, not a later line.
  */
 export async function configureThread(
   deps: FollowRouteDeps,
   threadId: string,
   configuration: EnsoSessionConfiguration,
+  pickSystemPrompt: (id: string) => SystemPromptPick,
 ): Promise<ConfigureOutcome> {
   const { threads } = deps
   const lease = await controlLease(threads, threadId, 'configure it')
   if ('reason' in lease) return lease
   try {
-    const refusal = await applyConfiguration(lease.runtime, configuration)
+    const refusal =
+      systemPromptRefusal(lease.runtime, configuration.systemPrompt, pickSystemPrompt) ??
+      (await applyConfiguration(lease.runtime, configuration))
     return refusal === undefined ? { status: 204 } : { status: 422, refusal }
   } finally {
     lease.release()
   }
+}
+
+/**
+ * The system-prompt step (#443), first: the library's pick, then the runtime's own refusal — a
+ * session that already sent a request keeps the prompt it sent. `null` is pi's default, chosen: it
+ * replaces a prompt an earlier, refused Start applied. Absent leaves the session's as it is.
+ */
+function systemPromptRefusal(
+  runtime: ThreadRuntime,
+  id: string | null | undefined,
+  pickSystemPrompt: (id: string) => SystemPromptPick,
+): EnsoConfigurationRefusal | undefined {
+  if (id === undefined) return undefined
+  const pick = id === null ? undefined : pickSystemPrompt(id)
+  if (pick?.kind === 'refused') return { step: 'systemPrompt', reason: pick.reason }
+  const reason = runtime.setSystemPrompt(pick === undefined ? null : pick.choice)
+  return reason === undefined ? undefined : { step: 'systemPrompt', reason }
 }
 
 /** The steps in order; the first refusal, or `undefined` when every step applied or was already so. */
@@ -748,13 +770,13 @@ async function hostRefusalOf(runtime: ThreadRuntime, run: EnsoHostCommandRun): P
   }
 }
 
-/** The configure body, checked against its closed schema — `model`, `thinking`, `mode`, each optional. */
+/** The configure body, checked against its closed schema — `model`, `thinking`, `mode`, `systemPrompt`; each optional. */
 export function readConfigureBody(raw: string): EnsoSessionConfiguration {
   return readClosedBody(
     raw,
     EnsoSessionConfiguration,
     'configure',
-    'configure body takes only `model`, `thinking` and `mode`, each a non-empty string',
+    "configure body takes only `model`, `thinking`, `mode` and `systemPrompt`, each a non-empty string; `systemPrompt` may also be `null` for pi's default",
   )
 }
 

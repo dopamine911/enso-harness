@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -10,12 +11,14 @@ import {
   type EnsoObservation,
   EnsoProject,
   EnsoStoredThread,
+  EnsoSystemPromptPreview,
   EnsoThreadCommands,
   EnsoThreadEvents,
   EnsoThreadHistory,
   EnsoThreadInspection,
   EnsoThreadSummary,
   type EnsoTranscriptEntry,
+  estimateTextTokens,
   type PromptOutcome,
   type PromptRequest,
   type ThreadRuntime,
@@ -31,9 +34,11 @@ import {
 } from '../../host/agent-host.ts'
 import { transcriptOf } from '../../host/transcript.ts'
 import { startEnsoServer } from '../index.ts'
+import { NO_PROMPT_LIBRARY } from '../prompt-library.ts'
 import {
   createFakeAgentHost,
   createFakeHostedThread,
+  FAKE_PI_PREAMBLE,
   type FakeStoredThread,
   type FakeThreadParts,
   type FakeThreadRecord,
@@ -189,8 +194,11 @@ async function startWith(
   stored: Record<string, FakeStoredThread> = {},
   /** Wrap the fake host — a test that needs something to happen mid-read replaces one method. */
   wrapHost: (host: AgentHost) => AgentHost = (host: AgentHost) => host,
-  /** Where a page may register projects (#395); none, so only the launch directory, when absent. */
-  projectRoots: readonly string[] = [],
+  /**
+   * Where a page may register projects (#395) — none, so only the launch directory, when absent —
+   * and the prompt library's directory (#443) — absent, the server has none.
+   */
+  { projectRoots = [], promptsDir }: { readonly projectRoots?: readonly string[]; readonly promptsDir?: string } = {},
 ): Promise<{ url: string; built: FakeThreadRecord[]; requested: string[]; builtIn: string[] }> {
   // The fake is made before the server, whose projects' rule it must apply — bound when the server asks.
   let servesDirectory: (directory: string) => boolean = () => false
@@ -200,6 +208,7 @@ async function startWith(
   const started = startEnsoServer({
     cwd: tmpdir(),
     projectRoots,
+    ...(promptsDir === undefined ? {} : { promptsDir }),
     harnessPackageDir: emptyHarnessDir(),
     agentDir: mkdtempSync(join(tmpdir(), 'enso-handler-agent-')),
     logsDir: mkdtempSync(join(tmpdir(), 'enso-logs-')),
@@ -486,7 +495,7 @@ async function registeredProject(url: string, path: string): Promise<EnsoProject
 // The named project differs from the launch directory on purpose, so the precedence is what is pinned.
 test("a follow's snapshot names where the thread runs: its project's directory before a session, the session's own after", async () => {
   const { root, app } = projectRoot()
-  const { url, builtIn } = await startWith(settlesAtOnce, {}, undefined, [root])
+  const { url, builtIn } = await startWith(settlesAtOnce, {}, undefined, { projectRoots: [root] })
   const project = await registeredProject(url, app)
   const naming = { [ENSO_PROJECT_HEADER]: project.projectId }
 
@@ -512,7 +521,7 @@ test("a follow's snapshot names where the thread runs: its project's directory b
 // not registered — nothing is built for it.
 test('⚠ projects: registered under a root or refused with the reason; an unregistered id on a thread is a 400 and builds nothing', async () => {
   const { root, app } = projectRoot()
-  const { url, requested } = await startWith(settlesAtOnce, {}, undefined, [root])
+  const { url, requested } = await startWith(settlesAtOnce, {}, undefined, { projectRoots: [root] })
   const launchOnly: unknown = await (await fetch(`${url}/api/projects`)).json()
   expect(launchOnly).toEqual([expect.objectContaining({ launch: true, path: realpathSync(tmpdir()), status: 'ok' })])
 
@@ -549,7 +558,7 @@ test('stored threads are listed and read only in a project, each under its own; 
     settlesAtOnce,
     { inLaunch: stored(tmpdir()), inApp: stored(app), elsewhere: stored('/somewhere/else') },
     undefined,
-    [root],
+    { projectRoots: [root] },
   )
   const project = await registeredProject(url, app)
   const launch = ((await (await fetch(`${url}/api/projects`)).json()) as EnsoProject[])[0]
@@ -577,7 +586,7 @@ test('stored threads are listed and read only in a project, each under its own; 
 // build — so it ends with the project, or a page still showing it could go on prompting it there.
 test('⚠ removing a project is refused while one of its threads runs, and the project stays', async () => {
   const { root, app } = projectRoot()
-  const { url } = await startWith(asksAndWaits, {}, undefined, [root])
+  const { url } = await startWith(asksAndWaits, {}, undefined, { projectRoots: [root] })
   const project = await registeredProject(url, app)
   await prompt(url, 'busy', '/mode', { [ENSO_PROJECT_HEADER]: project.projectId })
   const refused = await fetch(`${url}/api/projects/${project.projectId}`, { method: 'DELETE' })
@@ -589,7 +598,7 @@ test('⚠ removing a project is refused while one of its threads runs, and the p
 
 test('⚠ removing a project ends its idle live threads, and nothing is built for them in the removed directory', async () => {
   const { root, app } = projectRoot()
-  const { url, requested } = await startWith(settlesAtOnce, {}, undefined, [root])
+  const { url, requested } = await startWith(settlesAtOnce, {}, undefined, { projectRoots: [root] })
   const project = await registeredProject(url, app)
   const naming = { [ENSO_PROJECT_HEADER]: project.projectId }
   expect(await prompt(url, 't1', 'hello', naming)).toBe(202)
@@ -608,7 +617,7 @@ test('⚠ removing a project ends its idle live threads, and nothing is built fo
 test('⚠ a claim naming a removed project does not block resuming a thread that has a session', async () => {
   const { root, app } = projectRoot()
   const old: FakeStoredThread = { transcript: [], modified: new Date('2026-09-24T00:00:00.000Z'), firstMessage: 'old' }
-  const { url, requested, builtIn } = await startWith(settlesAtOnce, { old }, undefined, [root])
+  const { url, requested, builtIn } = await startWith(settlesAtOnce, { old }, undefined, { projectRoots: [root] })
   const project = await registeredProject(url, app)
   const history = await fetch(`${url}/api/threads/old/history`, {
     headers: { [ENSO_PROJECT_HEADER]: project.projectId },
@@ -625,7 +634,7 @@ test('⚠ a claim naming a removed project does not block resuming a thread that
 // and its prompt is a 409 with the reason — a refusal the server decided, not a failed request.
 test('⚠ a new thread whose project was removed shows no directory, and its prompt is refused with the reason (409)', async () => {
   const { root, app } = projectRoot()
-  const { url, builtIn } = await startWith(settlesAtOnce, {}, undefined, [root])
+  const { url, builtIn } = await startWith(settlesAtOnce, {}, undefined, { projectRoots: [root] })
   const project = await registeredProject(url, app)
   const named = new AbortController()
   openFollows.push(named)
@@ -679,7 +688,7 @@ test('⚠ a request naming a different project for a thread already named is a 4
   const { root, app } = projectRoot()
   const other = join(root, 'other')
   mkdirSync(other)
-  const { url, requested } = await startWith(settlesAtOnce, {}, undefined, [root])
+  const { url, requested } = await startWith(settlesAtOnce, {}, undefined, { projectRoots: [root] })
   const appProject = await registeredProject(url, app)
   const otherProject = await registeredProject(url, other)
   const follow = new AbortController()
@@ -1267,7 +1276,14 @@ test('GET …/context/:request reads a turn or `next`; any other segment, or a t
 test('GET …/manifest answers a cold thread from its file without building, a live one from its session, and 404 for neither', async () => {
   const point: EnsoForkPoint = {
     identity: { threadId: 's1', leafEntryId: 'e2', parentThreadId: 's0' },
-    conditions: { model: null, thinkingLevel: 'high', mode: 'plan', cwd: '/repo', runContext: null },
+    conditions: {
+      model: null,
+      thinkingLevel: 'high',
+      mode: 'plan',
+      cwd: '/repo',
+      runContext: null,
+      systemPrompt: { id: 'reviewer', name: 'Reviewer', mode: 'system', sha256: 'e'.repeat(64) },
+    },
   }
   const { url, built } = await startWith(settlesAtOnce, {
     s1: { transcript: [], modified: new Date('2026-09-24T10:00:00.000Z'), firstMessage: 'one', forkPoint: point },
@@ -1323,4 +1339,317 @@ test('⚠ POST …/configure applies model, effort, mode in order and names the 
 
   // Only the three settings, and nothing else, is a configuration.
   expect((await configure({ model: 'fake/fake-1', prompt: 'hi' })).status).toBe(400)
+})
+
+// ── #443: the prompt library — files under ENSO_HOME/prompts, and a session's system prompt from it.
+
+const REVIEWER = {
+  name: 'Reviewer',
+  description: 'Reads diffs',
+  category: 'system',
+  body: '# Reviewer\nSay what breaks.',
+}
+
+async function library(): Promise<{ url: string; built: FakeThreadRecord[]; directory: string }> {
+  const directory = join(mkdtempSync(join(tmpdir(), 'enso-prompts-')), 'prompts')
+  const { url, built } = await startWith(settlesAtOnce, {}, undefined, { promptsDir: directory })
+  return { url, built, directory }
+}
+
+/** A create's precondition: no file under that name. */
+const CREATE = { 'If-None-Match': '*' } as const
+
+interface Sent {
+  readonly status: number
+  readonly body: string
+  /** The `ETag` the answer carried, when it did. */
+  readonly etag?: string
+}
+
+async function request(
+  url: string,
+  path: string,
+  init: { readonly method: string; readonly body?: unknown; readonly headers?: Record<string, string> },
+): Promise<Sent> {
+  const response = await fetch(`${url}${path}`, {
+    method: init.method,
+    headers: { 'Content-Type': 'application/json', ...init.headers },
+    ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
+  })
+  const etag = response.headers.get('ETag')
+  return { status: response.status, body: await response.text(), ...(etag === null ? {} : { etag }) }
+}
+
+function send(url: string, path: string, method: string, body?: unknown): Promise<Sent> {
+  return request(url, path, { method, body })
+}
+
+/** A library prompt written as a create — `If-None-Match: *`, as the manager writes a new one. */
+function createPrompt(url: string, id: string, fields: unknown): Promise<Sent> {
+  return request(url, `/api/prompts/${id}`, { method: 'PUT', body: fields, headers: CREATE })
+}
+
+test('⚠ the prompt library: written whole and read back, listed by name with its sizes, deleted — a file that does not parse is listed as refused, by name (#443)', async () => {
+  const { url, directory } = await library()
+  // No directory yet is an empty library, not a failure.
+  expect(JSON.parse((await send(url, '/api/prompts', 'GET')).body)).toEqual({ prompts: [], refused: [] })
+
+  const written = await createPrompt(url, 'reviewer', REVIEWER)
+  expect(written.status).toBe(200)
+  const prompt = JSON.parse(written.body)
+  expect(prompt).toMatchObject({ id: 'reviewer', ...REVIEWER, tokens: estimateTextTokens(REVIEWER.body) })
+  expect(prompt.bytes).toBe(readFileSync(join(directory, 'reviewer.md')).length)
+
+  writeFileSync(join(directory, 'broken.md'), '---\nname: Broken\ncategory: user\n---\nx')
+  writeFileSync(join(directory, 'notes.txt'), 'not a prompt')
+  const listing = JSON.parse((await send(url, '/api/prompts', 'GET')).body)
+  expect(listing.prompts).toEqual([
+    {
+      id: 'reviewer',
+      name: 'Reviewer',
+      description: 'Reads diffs',
+      category: 'system',
+      bytes: prompt.bytes,
+      tokens: prompt.tokens,
+    },
+  ])
+  expect(listing.refused).toEqual([
+    { file: 'broken.md', reason: expect.stringContaining('broken.md: frontmatter category') },
+  ])
+  expect(await send(url, '/api/prompts/broken', 'GET')).toMatchObject({
+    status: 422,
+    body: expect.stringContaining('broken.md'),
+  })
+
+  // A body outside the closed shape is a 400; an id that could be a path never reaches the disk.
+  expect((await createPrompt(url, 'fresh', { ...REVIEWER, model: 'x' })).status).toBe(400)
+  expect((await createPrompt(url, 'blank-name', { ...REVIEWER, name: '   ' })).status).toBe(400)
+  expect((await send(url, '/api/prompts/..%2Fescape', 'PUT', REVIEWER)).status).toBe(404)
+
+  const any = { method: 'DELETE', headers: { 'If-Match': '*' } }
+  expect((await request(url, '/api/prompts/reviewer', any)).status).toBe(204)
+  expect((await request(url, '/api/prompts/reviewer', any)).status).toBe(404)
+  expect((await send(url, '/api/prompts/reviewer', 'GET')).status).toBe(404)
+})
+
+test('⚠ every prompt write and delete states what it expects on disk: a create never lands on a file, a replace or delete only on the version read (#443)', async () => {
+  const { url, directory } = await library()
+  const put = (id: string, headers: Record<string, string>, fields: unknown = REVIEWER): Promise<Sent> =>
+    request(url, `/api/prompts/${id}`, { method: 'PUT', body: fields, headers })
+  const remove = (id: string, headers: Record<string, string>): Promise<Sent> =>
+    request(url, `/api/prompts/${id}`, { method: 'DELETE', headers })
+
+  // None is a 428, never an unconditional write — so a stale page or a script cannot write unread.
+  expect(await put('reviewer', {})).toMatchObject({ status: 428, body: expect.stringContaining('If-None-Match: *') })
+  expect(existsSync(join(directory, 'reviewer.md'))).toBe(false)
+  expect((await put('reviewer', { ...CREATE, 'If-Match': '*' })).status).toBe(400)
+  expect((await put('reviewer', { 'If-Match': 'W/"weak"' })).status).toBe(400)
+
+  const created = await put('reviewer', CREATE)
+  expect(created.status).toBe(200)
+  const read = await send(url, '/api/prompts/reviewer', 'GET')
+  expect(read.etag).toBe(created.etag)
+  // A create over a file that is there — a name taken since the list was read.
+  expect(await put('reviewer', CREATE, { ...REVIEWER, body: 'other' })).toEqual({
+    status: 412,
+    body: 'reviewer.md already exists',
+  })
+
+  // A replace of the version read; then that version is stale.
+  const replaced = await put('reviewer', { 'If-Match': created.etag ?? '' }, { ...REVIEWER, body: 'v2' })
+  expect(replaced.status).toBe(200)
+  expect(replaced.etag).not.toBe(created.etag)
+  expect(await put('reviewer', { 'If-Match': created.etag ?? '' }, { ...REVIEWER, body: 'v3' })).toEqual({
+    status: 412,
+    body: 'reviewer.md changed on disk since it was opened',
+  })
+  // Edited in another editor: the page's version is not the file's any more.
+  writeFileSync(join(directory, 'reviewer.md'), '---\nname: "Reviewer"\ncategory: system\n---\nhand edit')
+  expect((await put('reviewer', { 'If-Match': replaced.etag ?? '' })).status).toBe(412)
+  expect(readFileSync(join(directory, 'reviewer.md'), 'utf8')).toContain('hand edit')
+  // "Mine wins", asked for by name.
+  expect((await put('reviewer', { 'If-Match': '*' }, { ...REVIEWER, body: 'mine' })).status).toBe(200)
+  expect(readFileSync(join(directory, 'reviewer.md'), 'utf8')).toContain('mine')
+
+  // A refused file is a file: no create lands on it, and it has no version a page could have read.
+  writeFileSync(join(directory, 'broken.md'), 'no frontmatter')
+  expect((await put('broken', CREATE)).status).toBe(412)
+  expect((await put('broken', { 'If-Match': created.etag ?? '' })).status).toBe(412)
+  expect(readFileSync(join(directory, 'broken.md'), 'utf8')).toBe('no frontmatter')
+  // A replace of a file that is gone is no create.
+  expect(await put('gone', { 'If-Match': '*' })).toEqual({
+    status: 412,
+    body: 'gone.md is no longer there: it was deleted since it was opened',
+  })
+
+  // A delete: stated, of the version read.
+  const current = (await send(url, '/api/prompts/reviewer', 'GET')).etag ?? ''
+  expect((await remove('reviewer', {})).status).toBe(428)
+  expect((await remove('reviewer', CREATE)).status).toBe(400)
+  expect((await remove('reviewer', { 'If-Match': created.etag ?? '' })).status).toBe(412)
+  expect((await remove('reviewer', { 'If-Match': current })).status).toBe(204)
+  expect(existsSync(join(directory, 'reviewer.md'))).toBe(false)
+  // No stage is left behind by any of it.
+  expect(readdirSync(directory).filter((name) => name.endsWith('.tmp'))).toEqual([])
+})
+
+test('a library file that is not UTF-8 is refused by name, never read with replacement characters (#443)', async () => {
+  const { url, directory } = await library()
+  await createPrompt(url, 'reviewer', REVIEWER)
+  writeFileSync(
+    join(directory, 'latin.md'),
+    Buffer.from('---\nname: Latin\ncategory: system\n---\ncaf\xe9\n', 'latin1'),
+  )
+  const listing = JSON.parse((await send(url, '/api/prompts', 'GET')).body)
+  expect(listing.refused).toEqual([{ file: 'latin.md', reason: 'latin.md: is not UTF-8 text' }])
+  expect(await send(url, '/api/prompts/latin', 'GET')).toEqual({ status: 422, body: 'latin.md: is not UTF-8 text' })
+})
+
+test('a server started without a library says so on every prompt route (#443)', async () => {
+  const { url } = await startWith(settlesAtOnce)
+  expect(await send(url, '/api/prompts', 'GET')).toEqual({ status: 404, body: NO_PROMPT_LIBRARY })
+  expect(await send(url, '/api/prompts/reviewer', 'PUT', REVIEWER)).toEqual({ status: 404, body: NO_PROMPT_LIBRARY })
+})
+
+test('⚠ POST …/configure takes a system prompt from the library first, and refuses by name a session prompt, a missing or unparseable file, and a choice after the first request (#443)', async () => {
+  const { url, built, directory } = await library()
+  await createPrompt(url, 'reviewer', REVIEWER)
+  await createPrompt(url, 'opener', { ...REVIEWER, name: 'Opener', category: 'session' })
+  await createPrompt(url, 'blank', { ...REVIEWER, name: 'Blank', body: '  \n' })
+  writeFileSync(join(directory, 'broken.md'), 'no frontmatter')
+  const configure = (thread: string, body: unknown): Promise<{ status: number; body: string }> =>
+    send(url, `/api/threads/${thread}/configure`, 'POST', body)
+  const refusal = async (thread: string, body: unknown): Promise<unknown> => {
+    const answered = await configure(thread, body)
+    expect(answered.status).toBe(422)
+    return JSON.parse(answered.body)
+  }
+
+  expect(await refusal('t-session', { systemPrompt: 'opener', model: 'fake/fake-2' })).toEqual({
+    step: 'systemPrompt',
+    reason: 'Opener is a session prompt: it fills the first message, not the system prompt',
+  })
+  // The first step refused: the model after it never ran.
+  expect(built[0]?.modelState.model?.id).not.toBe('fake-2')
+  expect(await refusal('t-missing', { systemPrompt: 'nobody' })).toMatchObject({
+    reason: expect.stringContaining('no prompt nobody'),
+  })
+  expect(await refusal('t-broken', { systemPrompt: 'broken' })).toMatchObject({
+    reason: expect.stringContaining('broken.md: it does not open'),
+  })
+  expect(await refusal('t-blank', { systemPrompt: 'blank' })).toMatchObject({ reason: 'Blank has no text to send' })
+  // ⚠ The id is a body field here, not a route capture: one that could be a path is refused by its
+  // shape before any disk is touched — a valid `.md` beside the library answers as one that is not there.
+  writeFileSync(join(directory, '..', 'escape.md'), '---\nname: "Escape"\ncategory: system\n---\nread me')
+  expect(await refusal('t-escape', { systemPrompt: '../escape' })).toEqual({
+    step: 'systemPrompt',
+    reason: '../escape.md: the name is not lowercase words joined by hyphens',
+  })
+  expect(await refusal('t-absent', { systemPrompt: '../absent' })).toEqual({
+    step: 'systemPrompt',
+    reason: '../absent.md: the name is not lowercase words joined by hyphens',
+  })
+
+  expect((await configure('t-good', { systemPrompt: 'reviewer', model: 'fake/fake-2' })).status).toBe(204)
+  const chosen = built.at(-1)
+  expect(chosen?.systemPrompt).toEqual({
+    id: 'reviewer',
+    name: 'Reviewer',
+    mode: 'system',
+    sha256: createHash('sha256').update(REVIEWER.body).digest('hex'),
+    text: REVIEWER.body,
+  })
+  expect(chosen?.modelState.model?.id).toBe('fake-2')
+  // The same again is no change. Before the first request another REPLACES it — a Start refused at
+  // a later step may try again with a different prompt; after it, the session keeps its prompt for life.
+  expect((await configure('t-good', { systemPrompt: 'reviewer' })).status).toBe(204)
+  await createPrompt(url, 'other', { ...REVIEWER, name: 'Other', category: 'append' })
+  expect((await configure('t-good', { systemPrompt: 'other' })).status).toBe(204)
+  expect(chosen?.systemPrompt).toMatchObject({ id: 'other', mode: 'append' })
+  expect(await prompt(url, 't-good', 'hello')).toBe(202)
+  expect(await refusal('t-good', { systemPrompt: 'reviewer' })).toMatchObject({
+    reason: expect.stringContaining('already sent the system prompt Other and keeps it for its whole life'),
+  })
+
+  // ⚠ pi's default is a choice too (`null`): a Start whose first attempt applied a prompt and was
+  // refused later retries with pi's default, and the session must run pi's default, not the prompt.
+  expect((await configure('t-retry', { systemPrompt: 'reviewer' })).status).toBe(204)
+  const retried = built.at(-1)
+  expect(retried?.systemPrompt).toMatchObject({ id: 'reviewer' })
+  expect((await configure('t-retry', { systemPrompt: null })).status).toBe(204)
+  expect(retried?.systemPrompt).toBeUndefined()
+  expect(await prompt(url, 't-retry', 'hello')).toBe(202)
+  expect((await configure('t-retry', { systemPrompt: null })).status).toBe(204)
+  expect(await refusal('t-good', { systemPrompt: null })).toMatchObject({
+    reason: expect.stringContaining(
+      "already sent the system prompt Other and keeps it for its whole life; start a new thread for pi's default",
+    ),
+  })
+
+  // A thread that already prompted has sent pi's default.
+  expect(await prompt(url, 't-late', 'hello')).toBe(202)
+  expect(await refusal('t-late', { systemPrompt: 'reviewer' })).toMatchObject({
+    reason: expect.stringContaining("pi's default"),
+  })
+})
+
+test("⚠ GET …/system-prompt previews pi's default, a library prompt's breakdown, and refuses by name what cannot be one (#443)", async () => {
+  const { url, built } = await library()
+  await createPrompt(url, 'reviewer', REVIEWER)
+  await createPrompt(url, 'opener', { ...REVIEWER, name: 'Opener', category: 'session' })
+  const preview = (query: string): Promise<{ status: number; body: string }> =>
+    send(url, `/api/threads/t-preview/system-prompt${query}`, 'GET')
+
+  const pi = await preview('')
+  expect(pi.status).toBe(200)
+  const piPreview: unknown = JSON.parse(pi.body)
+  expect(Check(EnsoSystemPromptPreview, piPreview)).toBe(true)
+  expect(piPreview).toMatchObject({
+    prompt: null,
+    sections: [{ name: 'preamble', origin: 'pi', text: FAKE_PI_PREAMBLE }, { name: 'cwd' }],
+  })
+
+  const reviewer = JSON.parse((await preview('?prompt=reviewer')).body)
+  expect(reviewer.prompt).toEqual({ id: 'reviewer', name: 'Reviewer', mode: 'system' })
+  expect(reviewer.sections[0]).toEqual({
+    name: 'preamble',
+    origin: 'library',
+    text: REVIEWER.body,
+    tokens: estimateTextTokens(REVIEWER.body),
+  })
+  // Previewing chose nothing: the thread's own prompt is still pi's default.
+  expect(built.at(-1)?.systemPrompt).toBeUndefined()
+
+  expect(await preview('?prompt=opener')).toEqual({
+    status: 422,
+    body: 'Opener is a session prompt: it fills the first message, not the system prompt',
+  })
+  expect((await preview('?prompt=nobody')).status).toBe(422)
+})
+
+test('the system-prompt preview says so when the thread is running, and a server without a library names that (#443)', async () => {
+  const { url } = await startWith(asksAndWaits)
+  expect(await prompt(url, 't-busy', 'go')).toBe(202)
+  const busy = await send(url, '/api/threads/t-busy/system-prompt', 'GET')
+  expect(busy).toEqual({ status: 409, body: 'thread t-busy is running; preview its system prompt when it settles' })
+  expect(await send(url, '/api/threads/t-other/system-prompt?prompt=reviewer', 'GET')).toEqual({
+    status: 404,
+    body: NO_PROMPT_LIBRARY,
+  })
+})
+
+test('⚠ POST …/system-prompt previews an unsaved draft as a saved prompt is previewed, records nothing, and refuses a body off its shape (#443)', async () => {
+  const { url, built } = await library()
+  const draft = { mode: 'append', text: 'Always answer in haiku.', name: 'Haiku draft' }
+  const answered = await send(url, '/api/threads/t-draft/system-prompt', 'POST', draft)
+  expect(answered.status).toBe(200)
+  const preview = JSON.parse(answered.body)
+  expect(Check(EnsoSystemPromptPreview, preview)).toBe(true)
+  expect(preview.prompt).toEqual({ id: 'draft', name: 'Haiku draft', mode: 'append' })
+  expect(preview.sections).toContainEqual(expect.objectContaining({ name: 'addendum', origin: 'library' }))
+  expect(built.at(-1)?.systemPrompt).toBeUndefined()
+  expect((await send(url, '/api/threads/t-draft/system-prompt', 'POST', { ...draft, mode: 'session' })).status).toBe(
+    400,
+  )
+  expect((await send(url, '/api/threads/t-draft/system-prompt', 'POST', { ...draft, text: '' })).status).toBe(400)
 })

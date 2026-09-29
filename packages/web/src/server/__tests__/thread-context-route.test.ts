@@ -11,7 +11,7 @@ import { createFakeAgentHost, createFakeHostedThread } from './fake-hosted-threa
  */
 
 const MAKEUP = { system: 10, tools: 20, user: 3, injected: 0, assistant: 4, toolResults: 5 }
-const CONTEXT: BranchContext = { next: MAKEUP, requests: [], events: [], files: [] }
+const CONTEXT: BranchContext = { next: MAKEUP, requests: [], events: [], files: [], systemPrompt: null }
 const USAGE: EnsoSessionUsage = {
   cost: 0.1,
   input: 1,
@@ -40,6 +40,7 @@ test('a live thread answers from memory with its meter; a stored one from its fi
     requests: [],
     events: [],
     files: [],
+    systemPrompt: null,
   })
   expect(await route('stored')).toMatchObject({ threadId: 'stored', live: false, usage: null, next: MAKEUP })
   expect(await route('nowhere')).toBeUndefined()

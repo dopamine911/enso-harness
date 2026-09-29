@@ -1,5 +1,6 @@
 import { type Static, Type } from 'typebox'
 import { Compile } from 'typebox/compile'
+import { EnsoThreadSystemPrompt } from './prompt-library.ts'
 import { EnsoRecordedModel } from './thread-runtime.ts'
 
 /**
@@ -129,6 +130,12 @@ export const EnsoForkPoint = Type.Object(
          * does not read (another schema's): an older one is not the current conditions.
          */
         runContext: Type.Union([EnsoRunContext, Type.Null()]),
+        /**
+         * The system prompt the branch records (#443): a library prompt's id, name, mode and hash —
+         * never its text — `null` for pi's default, `unreadable` for a record that does not read. Two
+         * threads started with different prompts differ here, and nowhere else says so.
+         */
+        systemPrompt: EnsoThreadSystemPrompt,
       },
       { additionalProperties: false },
     ),

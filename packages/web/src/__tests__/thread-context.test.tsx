@@ -2,7 +2,15 @@ import { afterEach, expect, test } from 'bun:test'
 import type { EnsoContextRequest, EnsoFileOperation, EnsoThreadContext } from '@enso/core'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { ThreadStoresContext } from '../store.ts'
-import { changeOf, displayPath, lastRequestPerPrompt, operationsUpTo, totalOf } from '../thread-context-analysis.ts'
+import {
+  categoryLabel,
+  changeOf,
+  displayPath,
+  elementLabel,
+  lastRequestPerPrompt,
+  operationsUpTo,
+  totalOf,
+} from '../thread-context-analysis.ts'
 import { ThreadContextView } from '../thread-context.tsx'
 import { clearThreadsForTest, mintThread } from '../thread-stores.ts'
 
@@ -59,6 +67,7 @@ const STORED: EnsoThreadContext = {
   next: makeup(2000),
   events: [],
   files: [],
+  systemPrompt: null,
   requests: [
     request(1, 1),
     request(2, 1, {
@@ -147,4 +156,40 @@ test('a path under the thread tree reads ./-relative; one outside it as given', 
   // The tree itself — a search over `.` — is `./`, never `./.` (#407).
   expect(displayPath('.', '/home/me/repo')).toBe('./')
   expect(displayPath('/home/me/repo', '/home/me/repo')).toBe('./')
+})
+
+// ── #443: a custom system prompt is visible in the evidence, not only in the dialog that chose it.
+
+const REVIEWER = { id: 'reviewer', name: 'Reviewer', mode: 'system' as const, sha256: 'a'.repeat(64) }
+
+test("the system-prompt row names the thread's prompt: a library prompt, pi's default, or an unreadable record — never the default in its place", () => {
+  expect(text({ ...STORED, systemPrompt: REVIEWER })).toContain('system prompt · Reviewer')
+  expect(text(STORED)).toContain('system prompt · pi default')
+  expect(text({ ...STORED, systemPrompt: 'unreadable' })).toContain('system prompt · unreadable record')
+  expect(categoryLabel('tools', REVIEWER)).toBe('tool schemas')
+  // An append prompt's text is the addendum, under injected context: the system row holds pi's
+  // default, and says so beside the prompt's name — never the name alone over tokens it lacks.
+  const haiku = { ...REVIEWER, name: 'Haiku', mode: 'append' as const }
+  expect(categoryLabel('system', haiku)).toBe('system prompt · pi default + Haiku')
+  expect(categoryLabel('injected', haiku)).toBe('injected context')
+})
+
+test("the request brief's In list names the library prompt beside the section it wrote, as the row one click away does", () => {
+  const preamble = { category: 'system' as const, label: 'preamble', key: 'system:section:preamble' }
+  const brief = { prompt: 'list files', added: [preamble], moreAdded: 0, reply: 'done', toolCalls: [] }
+  const picked = request(2, 1, { brief })
+  const context = { ...STORED, systemPrompt: REVIEWER, requests: [request(1, 1), picked] }
+  expect(text(context)).toContain('preamble · Reviewer')
+})
+
+test('the section a library prompt wrote carries its name: a system prompt its preamble, an append prompt its addendum', () => {
+  const preamble = { key: 'system:section:preamble', label: 'preamble' }
+  const addendum = { key: 'system:section:addendum', label: 'addendum' }
+  expect(elementLabel(preamble, REVIEWER)).toBe('preamble · Reviewer')
+  expect(elementLabel(addendum, REVIEWER)).toBe('addendum')
+  const haiku = { ...REVIEWER, name: 'Haiku', mode: 'append' as const }
+  expect(elementLabel(addendum, haiku)).toBe('addendum · Haiku')
+  expect(elementLabel(preamble, haiku)).toBe('preamble')
+  expect(elementLabel(preamble, null)).toBe('preamble')
+  expect(elementLabel(preamble, 'unreadable')).toBe('preamble')
 })

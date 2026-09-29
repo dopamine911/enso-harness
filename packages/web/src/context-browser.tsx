@@ -11,6 +11,7 @@ import { TextPart } from '@tanstack/ai-react/ui'
 import { ArrowLeftIcon, ArrowRightIcon, ChevronRightIcon, LayersIcon, PanelsTopLeftIcon } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FetchLike } from './browser-logging.ts'
+import { useCategoryLabel, useElementLabel } from './context-labels.tsx'
 import { estimateChangeText, estimateText, MakeupBar, PERCENT, Swatch, timeText } from './context-parts.tsx'
 import { cn } from './lib/utils.ts'
 import { TEXT_PART_COMPONENTS } from './markdown-image.tsx'
@@ -211,6 +212,8 @@ function ElementView({
   picked: boolean
 }): React.ReactNode {
   const [view, setView] = useState<TextView>('raw')
+  const categoryOf = useCategoryLabel()
+  const labelOf = useElementLabel()
   const frame = 'grid min-w-0 grid-cols-1 content-start rounded-lg border bg-background @5xl:sticky @5xl:top-4'
   if (element === undefined) {
     return (
@@ -231,7 +234,7 @@ function ElementView({
   return (
     <aside aria-label="element" className={frame}>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b p-3">
-        <h3 className="min-w-0 flex-1 font-heading text-base font-semibold wrap-anywhere">{element.label}</h3>
+        <h3 className="min-w-0 flex-1 font-heading text-base font-semibold wrap-anywhere">{labelOf(element)}</h3>
         {hasText(element.body) ? (
           <Choice label="show the text" value={view} options={TEXT_VIEWS} onChange={setView} />
         ) : null}
@@ -239,7 +242,7 @@ function ElementView({
       <p className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 pt-2 font-mono text-xs text-muted-foreground">
         <span className="inline-flex items-center gap-1.5">
           <Swatch category={element.category} className="size-2" />
-          {CATEGORY_LABEL[element.category]}
+          {categoryOf(element.category)}
         </span>
         <span>{estimateText(element.tokens)}</span>
         <span>{element.at === undefined ? 'not stamped by pi' : `stored ${timeText(element.at)}`}</span>
@@ -277,6 +280,7 @@ function ElementRow({
   onPick: () => void
   rowRef: ((node: HTMLLIElement | null) => void) | undefined
 }): React.ReactNode {
+  const labelOf = useElementLabel()
   return (
     <li ref={rowRef}>
       <button
@@ -286,7 +290,7 @@ function ElementRow({
         onClick={onPick}
       >
         <span className="flex min-w-0 flex-1 items-center gap-2">
-          <span className="truncate">{element.label}</span>
+          <span className="truncate">{labelOf(element)}</span>
           {element.entered ? <NewBadge>+ new</NewBadge> : null}
         </span>
         <span className="font-mono text-xs whitespace-nowrap text-muted-foreground tabular-nums">
@@ -326,6 +330,7 @@ interface CategoryShape {
 
 /** A category's header: its name, its elements (and how many entered), its estimate, share and change. */
 function CategoryHeader({ category, elements, makeup, change, open, onToggle }: CategoryShape): React.ReactNode {
+  const labelOf = useCategoryLabel()
   const entered = elements.filter((element) => element.entered).length
   const share = shareOf(makeup[category], totalOf(makeup))
   const details = [
@@ -347,7 +352,7 @@ function CategoryHeader({ category, elements, makeup, change, open, onToggle }: 
       />
       <Swatch category={category} />
       <span className="grid min-w-0 flex-1 gap-0.5">
-        <b className="text-sm font-semibold">{CATEGORY_LABEL[category]}</b>
+        <b className="text-sm font-semibold">{labelOf(category)}</b>
         <small className="text-xs text-muted-foreground">{details.join(' · ')}</small>
       </span>
       <span className="grid justify-items-end gap-1 font-mono text-xs whitespace-nowrap tabular-nums">
@@ -504,6 +509,7 @@ function LeftList({
   left: EnsoContextRequestDetail['left']
   before: number | undefined
 }): React.ReactNode {
+  const labelOf = useElementLabel()
   if (left.length === 0) return null
   return (
     <div className="grid gap-2 rounded-lg border border-dashed border-border-strong p-3">
@@ -516,7 +522,7 @@ function LeftList({
         {left.map((gone) => (
           <li key={gone.key} className="flex min-w-0 items-center gap-2">
             <Swatch category={gone.category} className="size-2" />
-            <span className="truncate">{gone.label}</span>
+            <span className="truncate">{labelOf(gone)}</span>
           </li>
         ))}
       </ul>

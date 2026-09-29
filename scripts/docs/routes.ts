@@ -18,7 +18,7 @@ const LOGS_TAIL_PATH = 'packages/web/src/server/logs-tail-route.ts'
 const LOGS_STATS_PATH = 'packages/web/src/server/logs-stats-route.ts'
 
 interface RouteMetadata {
-  readonly method: 'GET' | 'POST' | 'DELETE'
+  readonly method: 'GET' | 'POST' | 'PUT' | 'DELETE'
   readonly path: string
   readonly handler: string
   readonly input: string
@@ -56,7 +56,7 @@ function threadRead(
   handler: string,
   success: string,
   errors: string = NO_SESSION_ERRORS,
-  extra: Partial<Pick<RouteMetadata, 'input' | 'factory' | 'path'>> = {},
+  extra: Partial<Pick<RouteMetadata, 'input' | 'factory' | 'path' | 'builds'>> = {},
 ): RegexRouteMetadata {
   return {
     method: 'GET',
@@ -87,6 +87,13 @@ function threadControl(
 
 /** A factory in `follow.ts` that reaches the thread's runtime. */
 const follows = (declaration: string): NonNullable<RouteMetadata['factory']> => ({ path: FOLLOW_PATH, declaration })
+
+/** A prompt-library row (#443): one path, three methods, no thread, nothing built. */
+function promptRoute(
+  facts: Pick<RouteMetadata, 'method' | 'handler' | 'input' | 'success' | 'errors' | 'routeClass' | 'logs'>,
+): RouteMetadata {
+  return { ...facts, path: '/api/prompts/:id', builds: 'no' }
+}
 
 /** A literal GET that takes no input, reads, and builds nothing — the listing and inspection rows. */
 function literalRead(
@@ -189,10 +196,10 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
   ),
   THREAD_CONFIGURE_ROUTE: threadControl(
     'respondToConfigure → configureThread',
-    'path: `threadId`; body: `EnsoSessionConfiguration` — optional `model` (`provider/id`), `thinking` (a level that model supports) and `mode`; applied in that order under one lease, a value equal to the current one left alone',
+    "path: `threadId`; body: `EnsoSessionConfiguration` — optional `systemPrompt` (a library prompt id, `system` or `append`, or `null` for pi's default; absent leaves the session's as it is), `model` (`provider/id`), `thinking` (a level that model supports) and `mode`; applied in that order under one lease, a value equal to the current one left alone",
     [
       '204 empty — every step applied (the changes arrive on the follow as `model` and `permission-mode`)',
-      `${BODY_ERRORS}; 409 thread busy; 413 body too large; 422 JSON \`EnsoConfigurationRefusal\` — the step that refused (\`model\`, \`thinking\`, \`mode\`) and the reason, the steps before it applied; 500 handler failure`,
+      `${BODY_ERRORS}; 409 thread busy; 413 body too large; 422 JSON \`EnsoConfigurationRefusal\` — the step that refused (\`systemPrompt\`, \`model\`, \`thinking\`, \`mode\`) and the reason, the steps before it applied — a system prompt is refused by name when its id is not a library name, its file is missing, unreadable or unparseable, a session prompt, or empty, or the session already sent a request (before it, a new choice — pi's default included — replaces the last); 500 handler failure`,
     ],
     { builds: 'yes' },
   ),
@@ -217,6 +224,64 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
     ],
     { builds: 'yes', factory: follows('export async function continueThread') },
   ),
+  // Builds on ask, as the commands route does: a person opening the prompt manager (#443).
+  THREAD_SYSTEM_PROMPT_ROUTE: threadRead(
+    'respondWithSystemPromptPreview → HostedThread.previewSystemPrompt',
+    "200 `EnsoSystemPromptPreview` JSON — pi's rendering of the next request's system prompt with that prompt, section by section (who wrote each: the library or pi), the tool definitions sent beside it, and the total the Context tab prices a first request made with it at; the thread's own choice is untouched",
+    "400 malformed thread id; 403 untrusted origin; 404 a prompt named on a server without a library; 409 thread running; 422 the prompt is refused, with the reason naming it — missing, unreadable, not UTF-8 or unparseable, a session prompt, or empty; 500 pi's rendering does not split back into its sections (the prompt's own text is matched whole, so it cannot cause this), or handler failure",
+    {
+      path: '/api/threads/:threadId/system-prompt',
+      input:
+        "path: `threadId`; query: optional `prompt` — a library prompt id (`system` or `append`); absent is pi's default",
+      builds: 'yes',
+    },
+  ),
+  THREAD_SYSTEM_PROMPT_DRAFT_ROUTE: {
+    method: 'POST',
+    handler: 'respondWithDraftPreview → HostedThread.previewSystemPrompt',
+    input:
+      "path: `threadId`; body: `EnsoSystemPromptDraft` — an unsaved prompt's `mode` (`system` or `append`), `text` and `name`",
+    success:
+      "200 `EnsoSystemPromptPreview` JSON — the same preview a saved prompt gets, for the editor's breakdown while it types; nothing is recorded",
+    errors:
+      "400 malformed id/body; 403 untrusted origin; 409 thread running; 413 body too large; 500 pi's rendering does not split back into its sections (the draft's text is matched whole, so it cannot cause this), or handler failure",
+    routeClass: 'observation',
+    builds: 'yes',
+    logs: 'no',
+  },
+  PROMPT_READ_ROUTE: promptRoute({
+    method: 'GET',
+    handler: 'respondWithPrompt → PromptLibrary.read',
+    input: 'path: `id` — the file name under `ENSO_HOME/prompts` without `.md`, lowercase words joined by hyphens',
+    success:
+      "200 `EnsoLibraryPrompt` JSON — its frontmatter fields, its body, the file's bytes and the body's estimated tokens — with an `ETag` header, the sha256 of the file's bytes, which a later replace or delete of this version names",
+    errors:
+      '403 untrusted origin; 404 no such file, or a server started without a library; 422 the file is refused, with the reason naming it — unreadable, not UTF-8, no frontmatter, an unknown key, no name, a category that is not system, append or session; 500 handler failure',
+    routeClass: 'observation',
+    logs: 'no',
+  }),
+  PROMPT_WRITE_ROUTE: promptRoute({
+    method: 'PUT',
+    handler: 'respondToPromptWrite → PromptLibrary.write',
+    input:
+      'path: `id`; headers: exactly one precondition — `If-None-Match: *` (create: no file of that name), `If-Match: <ETag>` (replace the version read), `If-Match: *` (replace whatever is there); body: `EnsoLibraryPromptWrite` — `name`, `description`, `category` (system, append or session) and the markdown `body`',
+    success:
+      '200 `EnsoLibraryPrompt` JSON with its new `ETag` — the file as read back after it was written whole (staged, then linked into place for a create, renamed over for a replace)',
+    errors:
+      '400 malformed body, or both headers, a list, or a weak tag; 403 untrusted origin; 404 a server started without a library; 412 the precondition does not hold, with the reason naming the file — it already exists (a refused file included), changed on disk since it was read, or is gone; 413 body too large; 428 no precondition — never an unconditional write; 500 the file does not read back, or a disk failure',
+    routeClass: 'control',
+    logs: 'yes',
+  }),
+  PROMPT_DELETE_ROUTE: promptRoute({
+    method: 'DELETE',
+    handler: 'respondToPromptRemoval → PromptLibrary.remove',
+    input: 'path: `id`; header: `If-Match: <ETag>` (the version read) or `If-Match: *`',
+    success: '204 empty — the file is gone; a thread that ran it keeps the text its log recorded',
+    errors:
+      '400 `If-None-Match`, a list, or a weak tag; 403 untrusted origin; 404 no such file, or a server started without a library; 412 the file changed on disk since it was read; 428 no `If-Match`; 500 handler failure',
+    routeClass: 'control',
+    logs: 'yes',
+  }),
   PROJECT_ROUTE: threadControl(
     'respondToProjectRemoval → ProjectRegistry.remove',
     'path: `projectId` (sixteen hex digits)',
@@ -252,6 +317,12 @@ const LITERAL_ROUTE_METADATA: Record<string, Omit<RouteMetadata, 'method' | 'pat
     handler: 'respondWithStoredThreads',
     success: '200 `EnsoStoredThread[]` JSON',
     errors: '403 untrusted origin; 500 handler failure',
+  }),
+  'GET /api/prompts': literalRead({
+    handler: 'respondWithPrompts → PromptLibrary.list',
+    success:
+      "200 `EnsoLibraryPromptListing` JSON — the library's prompts by name without their bodies, each with its bytes and estimated tokens, and every `.md` file it refused, with the reason naming it",
+    errors: '403 untrusted origin; 404 a server started without a library; 500 handler failure',
   }),
   'GET /api/projects': literalRead({
     handler: 'respondWithProjects',
@@ -321,7 +392,7 @@ const LITERAL_ROUTE_METADATA: Record<string, Omit<RouteMetadata, 'method' | 'pat
 
 interface DetectedRoute {
   readonly key: string
-  readonly method: 'GET' | 'POST' | 'DELETE'
+  readonly method: 'GET' | 'POST' | 'PUT' | 'DELETE'
   readonly path: string
   readonly line: number
   readonly kind: 'regex' | 'literal'
@@ -360,17 +431,20 @@ export function discoverRoutes(): ResolvedRoute[] {
     [LOGS_STATS_PATH]: readFileSync(join(ROOT, LOGS_STATS_PATH), 'utf8'),
   }
 
-  // A route constant is a regex literal, or `threadRoute('<action>')` — the server's builder for
-  // `/api/threads/<threadId>/<action>`, whose path is derived here rather than restated.
+  // A route constant is a regex literal, `threadRoute('<action>')` — the server's builder for
+  // `/api/threads/<threadId>/<action>`, whose path is derived here rather than restated — or a
+  // pattern built around the library's prompt id (`promptRoute()`, `new RegExp(`), whose metadata states its path.
   const regexRoutes: DetectedRoute[] = [
-    ...server.matchAll(/^const ([A-Z][A-Z_]*_ROUTE) = (?:\/.*\/|threadRoute\('([a-z-]+)'\))$/gm),
+    ...server.matchAll(
+      /^const ([A-Z][A-Z_]*_ROUTE) = (?:\/.*\/|threadRoute\('([a-z-]+)'\)|promptRoute\(\)|new RegExp\()$/gm,
+    ),
   ].map((match) => {
     const key = match[1] ?? ''
     const metadata = REGEX_ROUTE_METADATA[key]
     const action = match[2]
     const path = metadata?.path ?? (action === undefined ? undefined : `/api/threads/:threadId/${action}`)
-    // Only `threadRoute(...)` derives its path; a regex literal's metadata must state it.
-    if (metadata !== undefined && path === undefined) throw new Error(`routes: ${key} is a regex literal with no path`)
+    // Only `threadRoute(...)` derives its path; any other route's metadata must state it.
+    if (metadata !== undefined && path === undefined) throw new Error(`routes: ${key} has no path in its metadata`)
     return {
       key,
       method: metadata?.method ?? 'GET',
@@ -459,7 +533,7 @@ function generate(): string {
     '',
     "Every `/api/threads/:threadId…` route also reads the `X-Enso-Project` header (#395): a page names a new thread's project with it, and an id that is no registered project is a 400 before the route runs.",
     '',
-    '> Parser limitation: discovery recognizes top-level `const *_ROUTE = /…/` and `const *_ROUTE = threadRoute(…)` declarations plus direct `request.method` branches using `url === …` or `url.startsWith(…)`. Statuses, input shapes, classes, acquisition, and self-logging are intentionally explicit checked metadata rather than inferred behavior.',
+    '> Parser limitation: discovery recognizes top-level `const *_ROUTE = /…/`, `const *_ROUTE = threadRoute(…)`, `const *_ROUTE = promptRoute()` and `const *_ROUTE = new RegExp(` declarations (only `threadRoute` derives its path; every other form states it in its metadata) plus direct `request.method` branches using `url === …` or `url.startsWith(…)`. Statuses, input shapes, classes, acquisition, and self-logging are intentionally explicit checked metadata rather than inferred behavior.',
     '',
     '| Method | Rendered path | Handler / factory | Input shape | Success | Named error statuses | Class | Builds / acquires? | Logs itself? | Source |',
     '|---|---|---|---|---|---|---|---|---|---|',

@@ -3,6 +3,7 @@ import { Compile } from 'typebox/compile'
 import type { EnsoOpenDialog, EnsoQuestionAnswer } from './dialog.ts'
 import type { EnsoObservation } from './observation.ts'
 import type { EnsoPermissionModeState } from './permission-mode.ts'
+import type { EnsoSystemPromptChoice } from './prompt-library.ts'
 
 /**
  * The thread runtime: the contract the host implements for one thread, and the shapes that
@@ -243,9 +244,11 @@ export type EnsoHostCommandRun = Static<typeof EnsoHostCommandRun>
 /**
  * `POST /api/threads/:id/configure` (#391): a new session's settings, applied together — the
  * Start-a-session dialog's Start. `model` is a `/model` option id, `thinking` a level THAT model
- * supports, `mode` a permission mode the thread offers. The server applies them in this order
- * under one lease (the effort a model allows depends on the model); a value equal to the current
- * one is left alone. The first prompt is not part of it: it goes through the chat's own send.
+ * supports, `mode` a permission mode the thread offers, `systemPrompt` a library prompt (#443). The
+ * server applies them under one lease, the system prompt first (it is the one a session can take
+ * only before its first request) and then the rest in this order (the effort a model allows depends
+ * on the model); a value equal to the current one is left alone. The first prompt is not part of
+ * it: it goes through the chat's own send.
  *
  * @group Thread runtime
  */
@@ -254,6 +257,12 @@ export const EnsoSessionConfiguration = Type.Object(
     model: Type.Optional(Type.String({ minLength: 1 })),
     thinking: Type.Optional(Type.String({ minLength: 1 })),
     mode: Type.Optional(Type.String({ minLength: 1 })),
+    /**
+     * A library prompt's id (#443), `system` or `append`, or `null` for pi's default. Applied FIRST.
+     * Absent leaves the session's as it is; `null` is how a Start retried after a later step refused
+     * goes back to pi's default over a prompt the first attempt already applied.
+     */
+    systemPrompt: Type.Optional(Type.Union([Type.String({ minLength: 1 }), Type.Null()])),
   },
   { additionalProperties: false },
 )
@@ -267,7 +276,12 @@ export type EnsoSessionConfiguration = Static<typeof EnsoSessionConfiguration>
  * @group Thread runtime
  */
 export const EnsoConfigurationRefusal = Type.Object({
-  step: Type.Union([Type.Literal('model'), Type.Literal('thinking'), Type.Literal('mode')]),
+  step: Type.Union([
+    Type.Literal('systemPrompt'),
+    Type.Literal('model'),
+    Type.Literal('thinking'),
+    Type.Literal('mode'),
+  ]),
   reason: Type.String(),
 })
 /** @group Thread runtime */
@@ -459,6 +473,17 @@ export const ThreadRuntime = Type.Object({
    */
   setPermissionMode: Type.Unsafe<(mode: string, outcome: PromptOutcome) => void>(
     Type.Function([Type.Unknown(), Type.Unknown()], Type.Void()),
+  ),
+  /**
+   * Fix the session's system prompt to a library prompt (#443) — or to pi's default, `null` — before
+   * its first request: the choice is recorded in the thread's log, the next request carries it, and
+   * a resume reads it back; until then another choice replaces it. `undefined` when it applied, or
+   * when the same prompt is already this session's; else the refusal's reason — a session that has
+   * already sent a request keeps the prompt it sent (a system head rewritten mid-session throws the
+   * prompt cache away). Synchronous.
+   */
+  setSystemPrompt: Type.Unsafe<(choice: EnsoSystemPromptChoice | null) => string | undefined>(
+    Type.Function([Type.Unknown()], Type.Unknown()),
   ),
   /**
    * Receive every observation of this thread (L2, #162 workstream 4): the runtime's events

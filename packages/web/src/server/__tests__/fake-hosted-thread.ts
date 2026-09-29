@@ -10,6 +10,8 @@ import type {
   EnsoPermissionModeState,
   EnsoRecordedModel,
   EnsoSessionUsage,
+  EnsoSystemPromptChoice,
+  EnsoSystemPromptSection,
   EnsoTranscriptEntry,
   HostFlowOutcome,
   PromptOutcome,
@@ -17,12 +19,19 @@ import type {
   RuntimeCommand,
   ThreadRuntime,
 } from '@enso/core'
-import type { AgentHost, HostedThread, HostedThreadInspection } from '../../host/agent-host.ts'
+import { estimateTextTokens } from '@enso/core'
+import type {
+  AgentHost,
+  HostedThread,
+  HostedThreadInspection,
+  SystemPromptPreviewOutcome,
+} from '../../host/agent-host.ts'
 import type { BranchContext, BranchRequestDetail } from '../../host/branch-context.ts'
 import type { BranchStats } from '../../host/branch-stats.ts'
 import { createEventTail, describeObservation } from '../../host/event-tail.ts'
 import { decideHostCommand, HOST_VIEW_ROWS, HostCommandRefused, hostCommandRows } from '../../host/host-commands.ts'
 import { compactDoneText, decideHostFlow, hostFlowRows, loginDoneText, logoutDoneText } from '../../host/host-flows.ts'
+import { decideSystemPrompt } from '../../host/system-prompt.ts'
 
 /**
  * The one fake of the thread-runtime seam (#178; `docs/seams/thread-runtime.md`): a
@@ -104,6 +113,8 @@ export interface FakeThreadRecord {
   sessionUsage: EnsoSessionUsage
   /** How many continues the server asked for (#436); the default accepts each and runs nothing. */
   continues: number
+  /** The system prompt the server fixed (#443); `undefined` is pi's default. */
+  systemPrompt: EnsoSystemPromptChoice | undefined
   aborts: number
   queueClears: number
   disposed: number
@@ -136,6 +147,37 @@ export interface FakeHostedThreadOptions {
   readonly inspect?: Partial<HostedThreadInspection>
   /** What `forkPoint()` answers (#435); the inspection's session with no recorded conditions when absent. */
   readonly forkPoint?: EnsoForkPoint
+  /** What `previewSystemPrompt` answers (#443); {@link fakeSystemPromptPreview} when absent. */
+  readonly previewSystemPrompt?: (candidate: EnsoSystemPromptChoice | null) => SystemPromptPreviewOutcome
+}
+
+/** The fake model's context window, as a preview reports it. */
+const FAKE_CONTEXT_WINDOW = 200_000
+
+/** The fake's pi preamble — pi's own, shortened; a candidate's `system` text replaces it. */
+export const FAKE_PI_PREAMBLE = 'You are an expert coding assistant operating inside pi.'
+
+/**
+ * A preview as the real host shapes one (#443): the preamble (the candidate's, or pi's), the addendum
+ * an `append` candidate joins, and the cwd — each priced as the Context tab prices it; no tools.
+ */
+function fakeSystemPromptPreview(candidate: EnsoSystemPromptChoice | null): SystemPromptPreviewOutcome {
+  const section = (name: string, text: string, library: boolean): EnsoSystemPromptSection => ({
+    name,
+    origin: library ? 'library' : 'pi',
+    text,
+    tokens: estimateTextTokens(text),
+  })
+  const sections = [
+    candidate?.mode === 'system'
+      ? section('preamble', candidate.text, true)
+      : section('preamble', FAKE_PI_PREAMBLE, false),
+    ...(candidate?.mode === 'append' ? [section('addendum', `<addendum>\n${candidate.text}\n</addendum>`, true)] : []),
+    section('cwd', `<cwd>\n${FAKE_PROJECT_DIRECTORY}\n</cwd>`, false),
+  ]
+  const prompt = candidate === null ? null : { id: candidate.id, name: candidate.name, mode: candidate.mode }
+  const totalTokens = sections.reduce((sum, item) => sum + item.tokens, 0)
+  return { kind: 'preview', preview: { prompt, sections, tools: [], totalTokens, contextWindow: FAKE_CONTEXT_WINDOW } }
 }
 
 /** Hand the queue back the way pi does — a copy out, the queue emptied. */
@@ -158,6 +200,7 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
     aborts: 0,
     queueClears: 0,
     continues: 0,
+    systemPrompt: undefined,
     disposed: 0,
     queue: { interrupting: [], enqueued: [] },
   }
@@ -248,6 +291,13 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
       record.flows.push(entry)
     },
     permissionModeState: () => ({ mode: 'default', available: ['default'] }),
+    setSystemPrompt: (choice: EnsoSystemPromptChoice | null) => {
+      // The real host's rule (#443), over the fake's record: a prompt sent is a request sent.
+      const decision = decideSystemPrompt(record.systemPrompt, choice, record.prompts.length > 0)
+      if (decision.kind === 'refused') return decision.reason
+      record.systemPrompt = choice ?? undefined
+      return undefined
+    },
     setPermissionMode: (mode: string, outcome: PromptOutcome) => {
       // What the real host does: the vendor's command is accepted (an extension command's
       // acceptance is its completion) and the change comes back as `permission_mode`.
@@ -300,12 +350,21 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
       turnStats: (options.branch ?? FAKE_EMPTY_BRANCH).turnStats,
     }),
     branchContext: () => options.context ?? FAKE_EMPTY_CONTEXT,
+    previewSystemPrompt: (candidate: EnsoSystemPromptChoice | null) =>
+      (options.previewSystemPrompt ?? fakeSystemPromptPreview)(candidate),
     branchRequestDetail: (request: number | 'next') => options.details?.[String(request)],
     forkPoint: () =>
       Promise.resolve(
         options.forkPoint ?? {
           identity: { threadId: inspection.sessionId, leafEntryId: inspection.entries.at(-1)?.id ?? null },
-          conditions: { model: null, thinkingLevel: null, mode: 'default', cwd: inspection.cwd, runContext: null },
+          conditions: {
+            model: null,
+            thinkingLevel: null,
+            mode: 'default',
+            cwd: inspection.cwd,
+            runContext: null,
+            systemPrompt: null,
+          },
         },
       ),
   }
@@ -361,6 +420,7 @@ const FAKE_EMPTY_CONTEXT: BranchContext = {
   requests: [],
   events: [],
   files: [],
+  systemPrompt: null,
 }
 
 /**
@@ -477,6 +537,7 @@ export function createFakeAgentHost(
             mode: storedThread.mode ?? fresh.mode,
             cwd: directoryOf(storedThread),
             runContext: null,
+            systemPrompt: null,
           },
         },
       )

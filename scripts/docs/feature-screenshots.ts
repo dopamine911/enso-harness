@@ -70,6 +70,35 @@ const STEP_TIMEOUT_MS = 60_000
  */
 const PI_SETTINGS = { compaction: { keepRecentTokens: 300 } } as const
 
+/**
+ * The throwaway home's prompt library (#443), in the file shape `ENSO_HOME/prompts/<id>.md` holds:
+ * an append prompt for the System prompt field and the manager, and a session prompt, without which
+ * the Start dialog has no Saved prompt field to show. The session itself starts on pi's default, so
+ * the scripted model answers the prompt it was written for.
+ */
+const PROMPT_LIBRARY = {
+  'reviewer.md': [
+    '---',
+    'name: Reviewer',
+    'description: Reads the change before it answers, and says what breaks',
+    'category: append',
+    '---',
+    '# Reviewer',
+    '',
+    'Read the diff before you answer. Say what breaks first, then what to change.',
+    '',
+  ].join('\n'),
+  'config-audit.md': [
+    '---',
+    'name: Config audit',
+    'description: A first message for a project you have not read yet',
+    'category: session',
+    '---',
+    'List every environment variable the app reads, and what happens when one is missing.',
+    '',
+  ].join('\n'),
+} as const
+
 /** The `demo` provider, as pi's `models.json` declares a provider (#437): real prices, real windows. */
 const MODELS_JSON = {
   providers: {
@@ -330,11 +359,15 @@ async function playSession(page: Page, modelLog: string): Promise<string> {
     .first()
     .click()
   await dialog.getByPlaceholder('ask pi something').fill(PROMPTS[0])
+  // The library is read as the dialog opens; the Saved prompt field appears once it has been.
+  await dialog.getByText('Saved prompt', { exact: true }).waitFor()
   await shoot(page, 'sessions-start', [
     { target: dialog.getByText('Model', { exact: true }), label: '1' },
     { target: dialog.getByText('Effort', { exact: true }), label: '2' },
     { target: dialog.getByText('Mode', { exact: true }), label: '3' },
-    { target: dialog.getByText('Prompt', { exact: true }), label: '4' },
+    { target: dialog.getByText('System prompt', { exact: true }), label: '4' },
+    { target: dialog.getByText('Saved prompt', { exact: true }), label: '5' },
+    { target: dialog.getByText('Prompt', { exact: true }), label: '6' },
   ])
   await dialog.getByRole('button', { name: 'Start session' }).click()
   await page.getByText(ANSWER_ENDINGS[0], { exact: false }).last().waitFor({ timeout: STEP_TIMEOUT_MS })
@@ -606,6 +639,27 @@ async function settings(page: Page, threadId: string): Promise<void> {
   ])
 }
 
+/** The prompt manager (#443), open on the library's append prompt: its size, and what the model receives with it. */
+async function promptManager(page: Page, threadId: string): Promise<void> {
+  await openThread(page, threadId)
+  await page.getByRole('button', { name: 'prompts', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Prompts', exact: true })
+  const list = dialog.getByRole('navigation', { name: 'prompts' })
+  await list.getByText('Reviewer', { exact: true }).click()
+  // pi renders the draft on the live thread; the breakdown is there once it has.
+  const breakdown = dialog.getByRole('table', { name: 'what the model receives' })
+  await breakdown.waitFor({ timeout: STEP_TIMEOUT_MS })
+  await page.waitForTimeout(500)
+  await shoot(page, 'prompts-manager', [
+    { target: list.getByText('pi default', { exact: true }), label: '1' },
+    { target: list.getByText('Append prompts', { exact: true }), label: '2' },
+    { target: dialog.getByRole('button', { name: 'New', exact: true }), label: '3' },
+    { target: dialog.getByRole('button', { name: 'Save', exact: true }), label: '4' },
+    { target: dialog.getByLabel('prompt size'), label: '5' },
+    { target: breakdown, label: '6' },
+  ])
+}
+
 /**
  * Forks the thread at its third prompt, from the page, and takes the two lineage shots: the fork
  * in the rail with the prompt back in its composer, and the fork's manifest in the debug drawer.
@@ -666,6 +720,7 @@ const LIVE_SHOTS = [
   changes,
   debugging,
   settings,
+  promptManager,
   commandPalette,
   // ⚠ LAST of the live shots: it adds a second thread to the rail.
   lineage,
@@ -738,6 +793,8 @@ async function main(): Promise<void> {
   mkdirSync(join(home, 'pi-agent'), { recursive: true })
   writeFileSync(join(home, 'pi-agent', 'models.json'), JSON.stringify(MODELS_JSON, null, 2))
   writeFileSync(join(home, 'pi-agent', 'settings.json'), JSON.stringify(PI_SETTINGS, null, 2))
+  mkdirSync(join(home, 'prompts'))
+  for (const [file, text] of Object.entries(PROMPT_LIBRARY)) writeFileSync(join(home, 'prompts', file), text)
   for (const [path, text] of Object.entries(DEMO_FILES)) {
     mkdirSync(dirname(join(project, path)), { recursive: true })
     writeFileSync(join(project, path), text)

@@ -62,6 +62,7 @@ Every runtime path helper in `packages/core/src/paths.ts`: the user's state unde
 | `ENSO_HOME/logs` | `ensoLogsDir` | `configureProcessLogging` creates it and every harness process appends to the day file. | One file per local day; logging retains 14 days. |
 | `ENSO_HOME/pi-agent` | `ensoAgentDir` | The TUI/server launchers create it; pi and `createAgentHost` write settings, auth, sessions, and the multi-account seed. | Per-user state shared by every checkout and launch; retained until the operator removes it. |
 | `ENSO_HOME/projects.json` | `ensoProjectsPath` | The web server, when a page registers or removes a project (#395); written whole and renamed over. | Per-user until a project is removed; entries outside the configured roots are kept but not served. |
+| `ENSO_HOME/prompts` | `ensoPromptsDir` | The web server, when a page writes or deletes a library prompt (#443) — one `<id>.md` per prompt, written whole under the precondition the request states (a create is linked into place and never lands on a file there; a replace or delete lands only on the version read, by its ETag); the operator may edit the files directly. | Per-user until a prompt is deleted; a thread that ran one keeps the text its log recorded. |
 | `ENSO_HOME/secrets.env` | `ensoSecretsPath` | Operator only; harness code reads and quarantines but never writes it. | Per-user until the operator edits or removes it; secret reads are per call. |
 | `node_modules/.cache/enso/print-harness` | `printHarnessDir` | `scripts/print-harness.ts#materializePrintHarness` rebuilds the package mirror for non-interactive launches. | Per-checkout build cache (its links point into this checkout); reconciled on every print launch. |
 
@@ -80,7 +81,8 @@ the other resource arrays are also shown in declared order. A vendor path is any
 | extensions | 5 | `node_modules/@ladbabynpm/picc-permission-modes/index.ts` | **vendor path** |
 | extensions | 6 | `node_modules/pi-multi-account/index.ts` | **vendor path** |
 | extensions | 7 | `./extensions/ask-user/index.ts` | repository path |
-| extensions | 8 | `./extensions/run-context/index.ts` | repository path |
+| extensions | 8 | `./extensions/system-prompt/index.ts` | repository path |
+| extensions | 9 | `./extensions/run-context/index.ts` | repository path |
 | skills | 1 | `./skills` | repository path |
 | prompts | 1 | `./prompts` | repository path |
 | themes | 1 | `./themes` | repository path |

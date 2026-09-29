@@ -1,7 +1,8 @@
 import type { EnsoContextCategory, EnsoContextMakeup } from '@enso/core'
+import { useCategoryLabel } from './context-labels.tsx'
 import { cn } from './lib/utils.ts'
 import { COMPACT } from './stats-table.tsx'
-import { CATEGORY_COLOR, CATEGORY_LABEL, CONTEXT_CATEGORIES, shareOf, totalOf } from './thread-context-analysis.ts'
+import { CATEGORY_COLOR, CONTEXT_CATEGORIES, shareOf, totalOf } from './thread-context-analysis.ts'
 
 /**
  * The Context view's shared pieces (#361): its number formats, and the six-category bar and
@@ -94,12 +95,15 @@ export function Swatch({
 /** Each category's estimate and share of the makeup — the design's `.legend`. */
 export function MakeupLegend({ makeup }: { makeup: EnsoContextMakeup }): React.ReactNode {
   const total = totalOf(makeup)
+  const labelOf = useCategoryLabel()
   return (
     <dl className="grid grid-cols-legend gap-x-4 gap-y-1 text-sm">
       {CONTEXT_CATEGORIES.map((category) => (
         <div key={category} className="flex items-center gap-2">
           <Swatch category={category} />
-          <dt className="min-w-0 flex-1 truncate">{CATEGORY_LABEL[category]}</dt>
+          <dt className="min-w-0 flex-1 truncate" title={labelOf(category)}>
+            {labelOf(category)}
+          </dt>
           <dd className="font-mono text-xs whitespace-nowrap text-muted-foreground tabular-nums">
             {estimateText(makeup[category])} · {PERCENT.format(shareOf(makeup[category], total))}
           </dd>

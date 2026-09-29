@@ -15,6 +15,7 @@ import {
 import {
   type DialogAnswer,
   ENSO_OPERATOR_DENIAL_ENTRY,
+  ENSO_SYSTEM_PROMPT_ENTRY,
   type EnsoForkPoint,
   type EnsoHostCommandRun,
   type EnsoModelState,
@@ -24,6 +25,8 @@ import {
   type EnsoPromptAdmission,
   type EnsoRecordedModel,
   type EnsoSessionUsage,
+  type EnsoSystemPromptChoice,
+  type EnsoSystemPromptPreview,
   type EnsoThreadEvent,
   type EnsoTranscriptEntry,
   ensoLogger,
@@ -31,6 +34,7 @@ import {
   type PromptOutcome,
   type PromptRequest,
   type RuntimeCommand,
+  recordedSystemPrompt,
   type ThreadRuntime,
 } from '@enso/core'
 import { ensoHome, ensoSecretsPath, findRepoRoot } from '@enso/core/paths'
@@ -75,6 +79,8 @@ import { builtinProviderName, providerRefusalOf } from './provider-refusal.ts'
 import type { RuntimeEvent } from './runtime-event.ts'
 import { toRpcWireEvent } from './session-events.ts'
 import { growsSessionSpend, liveSessionUsage, storedSessionUsage } from './session-usage.ts'
+import { previewOf, renderedUnder } from './system-prompt-preview.ts'
+import { decideSystemPrompt, hasSentRequest, withSystemPrompt } from './system-prompt.ts'
 import { recordedModelOf, transcriptOf } from './transcript.ts'
 
 const log = ensoLogger('host')
@@ -351,6 +357,12 @@ export interface HostedThread {
   branchEval(): BranchEval
   /** The branch's context, request by request (#361): what each was assembled from, by pi's own assembly. */
   branchContext(): BranchContext
+  /**
+   * The system prompt the next request would carry under `candidate` — pi's default for `null` —
+   * section by section (#443). Changes nothing: the thread keeps its own choice. `busy` while a run
+   * is in flight; `unsplittable` when pi's rendering does not split back into itself.
+   */
+  previewSystemPrompt(candidate: EnsoSystemPromptChoice | null): SystemPromptPreviewOutcome
   /** One request's context, element by element (#361 phase 3); undefined for a turn the branch does not have. */
   branchRequestDetail(request: number | 'next'): BranchRequestDetail | undefined
   /** The branch's fork point (#435): identity, then what it runs under — the manifest's live half. */
@@ -371,6 +383,12 @@ export interface ToolCallVerdict {
   readonly block: boolean
   readonly reason: string | undefined
 }
+
+/** What a preview answers (#443): the preview, or why there is none. */
+export type SystemPromptPreviewOutcome =
+  | { readonly kind: 'preview'; readonly preview: EnsoSystemPromptPreview }
+  | { readonly kind: 'busy' }
+  | { readonly kind: 'unsplittable' }
 
 /** One of pi's session files in a directory this host serves, as pi lists it (#95). */
 export interface StoredThread {
@@ -815,6 +833,24 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     if (!servesDirectory(cwd)) {
       throw new SessionDirectoryRefused(`thread ${threadId}: ${cwd} is not a project this server runs sessions in`)
     }
+    // One session file per thread, under the agent dir pi resolves from the env the host set at creation —
+    // the same default `pi --mode rpc` used, so picc's persisted "modes" entry and the
+    // transcript land where the TUI's would. Opened when the thread already has a file
+    // (#95), created under the thread's id when not. Retained: `permissionModeState()`
+    // below walks its branch, the same walk picc's `restoreState` does.
+    const sessionManager =
+      located === undefined
+        ? SessionManager.create(cwd, undefined, { id: threadId })
+        : SessionManager.open(located.path)
+    // The thread's system prompt (#443): the one its branch recorded, else pi's default until a
+    // Start chooses one (`setSystemPrompt` below). An entry that does not read refuses the build —
+    // never pi's default in its place, which would rewrite the prompt the thread started with. Read
+    // BEFORE the services, as the directory is: a thread refused builds nothing.
+    const recorded = recordedSystemPrompt(sessionManager.getBranch())
+    if (recorded.kind === 'unreadable') {
+      throw new Error(`thread ${threadId}: its ${ENSO_SYSTEM_PROMPT_ENTRY} entry does not read as a system prompt`)
+    }
+    let systemPrompt: EnsoSystemPromptChoice | undefined = recorded.kind === 'chosen' ? recorded.choice : undefined
     // The watcher's handler is bound after the session exists (`announceModelState` below);
     // `model_select` cannot fire before it — only the session's own methods emit it.
     let onModelSelect = (): void => undefined
@@ -861,16 +897,10 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       })
     }
 
-    // One session file per thread, under the agent dir pi resolves from the env set above —
-    // the same default `pi --mode rpc` used, so picc's persisted "modes" entry and the
-    // transcript land where the TUI's would. Opened when the thread already has a file
-    // (#95), created under the thread's id when not. Retained: `permissionModeState()`
-    // below walks its branch, the same walk picc's `restoreState` does.
-    const sessionManager =
-      located === undefined
-        ? SessionManager.create(cwd, undefined, { id: threadId })
-        : SessionManager.open(located.path)
-    const { session } = await createAgentSessionFromServices({ services, sessionManager })
+    const { session } = await createAgentSessionFromServices({
+      services: { ...services, resourceLoader: withSystemPrompt(services.resourceLoader, () => systemPrompt) },
+      sessionManager,
+    })
 
     // ── The event fan-out. Records emitted before the FIRST subscriber (everything an
     // extension says during session_start — multi-account's startup notify, a dialog a
@@ -1400,6 +1430,27 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         announceModelState()
       },
       permissionModeState: currentPermissionModeState,
+      setSystemPrompt(choice: EnsoSystemPromptChoice | null): string | undefined {
+        const decision = decideSystemPrompt(systemPrompt, choice, hasSentRequest(sessionManager.getBranch()))
+        if (decision.kind === 'refused') return decision.reason
+        if (decision.kind === 'same') return undefined
+        systemPrompt = choice ?? undefined
+        // Recorded BEFORE the first request, so the log says what the request will carry; pi
+        // flushes it with the first assistant message, as it does the model and the mode. pi's
+        // default is recorded too (`null`): it replaces a choice this branch already records.
+        sessionManager.appendCustomEntry(ENSO_SYSTEM_PROMPT_ENTRY, choice)
+        // pi re-reads the loader when it rebuilds the prompt; the same tools make it rebuild.
+        session.setActiveToolsByName(session.getActiveToolNames())
+        if (choice === null) log.info("system prompt set to pi's default", { threadId })
+        else
+          log.info('system prompt {id} set ({mode})', {
+            threadId,
+            id: choice.id,
+            mode: choice.mode,
+            sha256: choice.sha256,
+          })
+        return undefined
+      },
       setPermissionMode(mode: string, outcome: PromptOutcome): void {
         // Only a mode the vendor registers a command for — the runtime treats an unknown
         // slash command as ORDINARY TEXT and would send it to the model as a chat message.
@@ -1482,6 +1533,23 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       branchStats: () => branchStats(sessionManager.getBranch()),
       branchEval: () => branchEval(sessionManager.getBranch()),
       branchContext: () => branchContext(sessionManager.getBranch()),
+      previewSystemPrompt(candidate: EnsoSystemPromptChoice | null): SystemPromptPreviewOutcome {
+        if (session.isStreaming || session.isCompacting) return { kind: 'busy' }
+        const setChoice = (choice: EnsoSystemPromptChoice | undefined): void => {
+          systemPrompt = choice
+        }
+        const rendered = renderedUnder(session, setChoice, candidate ?? undefined, systemPrompt)
+        const window = session.model?.contextWindow
+        const preview = previewOf({
+          rendered,
+          preamble: candidate?.mode === 'system' ? candidate.text : services.resourceLoader.getSystemPrompt(),
+          baseAppends: services.resourceLoader.getAppendSystemPrompt(),
+          candidate,
+          tools: session.agent.state.tools,
+          contextWindow: window !== undefined && window > 0 ? window : undefined,
+        })
+        return preview === undefined ? { kind: 'unsplittable' } : { kind: 'preview', preview }
+      },
       branchRequestDetail: (request: number | 'next') => branchRequestDetail(sessionManager.getBranch(), request),
       async forkPoint(): Promise<EnsoForkPoint> {
         const threadId = sessionManager.getSessionId()

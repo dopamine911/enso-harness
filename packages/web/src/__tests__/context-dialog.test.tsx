@@ -34,6 +34,7 @@ test('closed, the dialog reads nothing; open, it shows Now and the Context Brows
     next: MAKEUP,
     events: [],
     files: [],
+    systemPrompt: null,
     requests: [],
   }
   const detail: EnsoContextRequestDetail = { threadId: stores.threadId, request: 'next', elements: [], left: [] }
