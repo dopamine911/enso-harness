@@ -1364,6 +1364,64 @@ test("⚠ a frame on one thread's follow changes that pane and no other — cost
   await bravo.unmount()
 })
 
+// #453: the status bar reads git in the thread's cwd on mount, and again when a tool result
+// settles — the moment an edit, a write or a `git commit` lands — so the readout follows the tree.
+test('the status bar reads git on mount and again when a tool result settles (#453)', async () => {
+  let reads = 0
+  let unstaged = 0
+  const pane = await mountPane({
+    server: {
+      git: () => {
+        reads += 1
+        return {
+          kind: 'repository',
+          root: '/scripted/launch',
+          head: 'f00d',
+          branch: 'main',
+          upstream: 'origin/main',
+          baseline: { rule: 'upstream', ref: 'origin/main', commit: 'f00d' },
+          ahead: 0,
+          behind: 0,
+          changes: { staged: 0, unstaged, untracked: 0, conflicted: 0 },
+          operation: null,
+        }
+      },
+    },
+  })
+  await pane.settle(SNAPSHOT_IDLE)
+  await eventually(() => expect(pane.status()).toContain('main· clean'))
+  const beforeRun = reads
+  await flush(async () => {
+    typeInto(pane.composer(), 'edit it')
+    pressEnter(pane.composer())
+    await tick()
+  })
+  unstaged = 1
+  await pane.settle(
+    { type: 'observation', seq: 1, observation: { kind: 'message-start', role: 'assistant' } },
+    {
+      type: 'observation',
+      seq: 2,
+      observation: { kind: 'tool-call', toolCallId: 'c1', toolName: 'edit', args: { path: 'a.ts' } },
+    },
+    {
+      type: 'observation',
+      seq: 3,
+      observation: {
+        kind: 'tool-result',
+        toolCallId: 'c1',
+        toolName: 'edit',
+        text: 'ok',
+        complete: true,
+        isError: false,
+      },
+    },
+  )
+  await eventually(() => expect(pane.status()).toContain('· 1 unstaged'))
+  expect(reads).toBeGreaterThan(beforeRun)
+  await pane.unmount()
+})
+
 // PR #358 review: every live pane stays mounted under `hidden`, so the stats view — its panel
 // `id`, its fetches, its `stores.usage` subscription — must exist only in the pane on screen
 // (the debug column's rule, PR #94), and be back when the thread is shown again.

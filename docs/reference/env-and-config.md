@@ -6,7 +6,7 @@ and `packages/harness/package.json`. No machine environment and no user config i
 
 ## Explicit environment keys
 
-The 14 files that directly touch the process environment exactly match the
+The 15 files that directly touch the process environment exactly match the
 `node/no-process-env` exception list in `scripts/lint/process-environment.ts`; generation fails if either side gains or loses a file.
 Rows cover literal dot access, literal bracket access, destructuring, `node:process` `env` imports,
 grounded `environment.KEY` seams, and keys explicitly written beside a process-environment spread.

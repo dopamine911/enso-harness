@@ -1,6 +1,7 @@
 import type {
   EnsoFollowFrame,
   EnsoFollowSnapshot,
+  EnsoGitState,
   EnsoProject,
   EnsoSessionEval,
   EnsoStoredThread,
@@ -83,6 +84,11 @@ export interface ScriptedFetchOptions {
   readonly stats?: Omit<EnsoThreadStats, 'threadId'>
   /** What the eval panel's read answers (#441); 404 when absent, the panel's "no eval". */
   readonly eval?: Omit<EnsoSessionEval, 'threadId'>
+  /**
+   * What the status bar's git read answers (#453), asked per read so a test can move the tree
+   * between two; 404 when absent, a thread nothing has run in.
+   */
+  readonly git?: () => EnsoGitState
 }
 
 /** The launch project a scripted server lists by default — the id the fixtures' stored threads carry. */
@@ -169,6 +175,11 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
     if (stats?.[1] !== undefined) {
       if (options.stats === undefined) return new Response('nothing has run in this thread', { status: 404 })
       return Response.json({ threadId: decodeURIComponent(stats[1]), ...options.stats })
+    }
+    const git = /^\/api\/threads\/([^/]+)\/git$/.exec(path)
+    if (git?.[1] !== undefined) {
+      if (options.git === undefined) return new Response('nothing has run in this thread', { status: 404 })
+      return Response.json({ threadId: decodeURIComponent(git[1]), cwd: '/scripted/launch', git: options.git() })
     }
     const evaluated = /^\/api\/threads\/([^/]+)\/eval$/.exec(path)
     if (evaluated?.[1] !== undefined) {
