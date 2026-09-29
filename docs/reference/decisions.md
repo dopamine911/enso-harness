@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 328.**
+**Decision headers: 330.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -181,6 +181,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/host/__tests__/permission-mode-adapter.test.ts` | `#95` | picc's own restore rule, applied to the raw branch, below the seam (L3 step A). |
 | `packages/web/src/host/__tests__/session-events.test.ts` | `#69` | The replica of pi's unexported `toJsonEvent` (#69): what `map-events.ts` consumes must be byte-for-byte the rpc wire shape. |
 | `packages/web/src/host/__tests__/session-usage.test.ts` | `#45` | #45: which session events make the host re-read pi's totals. |
+| `packages/web/src/host/__tests__/system-prompt-preview.test.ts` | `#443` | #443: the preview splits pi's rendering — the preamble, then each section inside its tags, joined by blank lines — and refuses a rendering that does not split back into exactly itself. |
 | `packages/web/src/host/branch-context.ts` | `#361` | A thread's context, request by request (#361) — the host half of `EnsoThreadContext` and of `EnsoContextRequestDetail`, read off pi's own entries for a live session and a stored file alike. |
 | `packages/web/src/host/branch-eval.ts` | `#441` | The branch as the session eval reads it (#441): the transcript as ours (leak L2) and the turns' usage from the same walk the stats drawer uses. |
 | `packages/web/src/host/branch-stats.ts` | `#45`, `#359` | A thread's branch, analysed (#45 phase 2): per prompt, per turn, per tool — the session half of `EnsoThreadStats`. |
@@ -199,6 +200,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/host/runtime-event.ts` | `#69`, `#162` | The runtime's event, as the host receives it — BELOW the thread-runtime seam since #162 workstream 4 (L2). |
 | `packages/web/src/host/session-events.ts` | `#69` | `AgentSessionEvent` → the rpc WIRE shape (#69). |
 | `packages/web/src/host/session-usage.ts` | `#45`, `#86` | A thread's spend and context, as pi reckons them (#45) — the two halves of `EnsoSessionUsage`. |
+| `packages/web/src/host/system-prompt-preview.ts` | `#443` | A system prompt before it is sent (#443): what a thread's next request would carry with a given library prompt — or pi's default — section by section, priced as the Context tab prices it. |
 | `packages/web/src/host/system-prompt.ts` | `#390`, `#443` | A session's system prompt from the library (#443), handed to pi through pi's OWN mechanism. |
 | `packages/web/src/host/transcript.ts` | `#162`, `#434` | The runtime's session branch → the transcript of ours (#162 workstream 4, L2's persistence side). |
 | `packages/web/src/listing-store.ts` | `#29`, `#86`, `#95`, `#395` | A list the server hands the page and the rail shows — stored threads (#95), projects (#395). |

@@ -95,6 +95,11 @@ const THREAD_MODE_ROUTE = /^\/api\/threads\/([^/?#]+)\/mode$/
 const THREAD_COMMAND_ROUTE = /^\/api\/threads\/([^/?#]+)\/command$/
 /** `POST …/configure` (#391): a new session's model, effort and mode, applied together — the Start-a-session dialog. */
 const THREAD_CONFIGURE_ROUTE = /^\/api\/threads\/([^/?#]+)\/configure$/
+/**
+ * `GET …/system-prompt[?prompt=<id>]` (#443): the system prompt the thread's next request would carry
+ * with a library prompt — pi's default without one — section by section. Builds the thread on ask.
+ */
+const THREAD_SYSTEM_PROMPT_ROUTE = /^\/api\/threads\/([^/?#]+)\/system-prompt(?:\?prompt=([a-z0-9][a-z0-9-]{0,63}))?$/
 /** `POST …/fork` (#433): fork the thread at one of its user messages — a new thread naming this one as its parent. */
 const THREAD_FORK_ROUTE = /^\/api\/threads\/([^/?#]+)\/fork$/
 /** `POST …/continue` (#436): continue a torn thread from its stored state — no new prompt. */
@@ -600,6 +605,39 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     response.end(JSON.stringify(inspectThread(thread)))
   }
 
+  /**
+   * The system-prompt preview (#443): the candidate from the library (`?prompt=`), or pi's default;
+   * the thread built on ask, as the commands route builds it — this is a person opening the prompt
+   * manager, not a look (#86). Nothing about the thread changes. A library prompt that cannot be one
+   * is the pick's refusal (422); a thread in a run is 409, since pi's rendering is then the run's.
+   */
+  async function respondWithSystemPromptPreview(
+    threadId: string,
+    _request: IncomingMessage,
+    response: ServerResponse,
+    match: RegExpExecArray,
+  ): Promise<void> {
+    const promptId = match[2]
+    const pick = promptId === undefined ? undefined : pickSystemPrompt(promptId)
+    if (pick?.kind === 'refused') {
+      refuseWith(response, { status: prompts === undefined ? 404 : 422, reason: pick.reason })
+      return
+    }
+    const thread = await threads.ensure(threadId)
+    const outcome = thread.busy ? { kind: 'busy' as const } : thread.hosted.previewSystemPrompt(pick?.choice ?? null)
+    if (outcome.kind === 'preview') {
+      answerJson(response, outcome.preview)
+      return
+    }
+    if (outcome.kind === 'unsplittable') log.error('pi rendered a system prompt that does not split back', { threadId })
+    refuseWith(
+      response,
+      outcome.kind === 'busy'
+        ? { status: 409, reason: `thread ${threadId} is running; preview its system prompt when it settles` }
+        : { status: 500, reason: "pi's rendering of this system prompt does not split back into its sections" },
+    )
+  }
+
   // The bundle (#132): today's records + the live threads + the versions, one file.
   const bundle = createBundleRoute({ threads, logsDir: options.logsDir, runtimeVersion: AGENT_RUNTIME_VERSION })
 
@@ -781,6 +819,11 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
       method: 'GET',
       route: THREAD_CONTEXT_REQUEST_ROUTE,
       respond: respondWithContextRequest,
+    },
+    {
+      method: 'GET',
+      route: THREAD_SYSTEM_PROMPT_ROUTE,
+      respond: respondWithSystemPromptPreview,
     },
     {
       method: 'GET',

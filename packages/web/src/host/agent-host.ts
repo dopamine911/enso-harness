@@ -26,6 +26,7 @@ import {
   type EnsoRecordedModel,
   type EnsoSessionUsage,
   type EnsoSystemPromptChoice,
+  type EnsoSystemPromptPreview,
   type EnsoThreadEvent,
   type EnsoTranscriptEntry,
   ensoLogger,
@@ -77,6 +78,7 @@ import { builtinProviderName, providerRefusalOf } from './provider-refusal.ts'
 import type { RuntimeEvent } from './runtime-event.ts'
 import { toRpcWireEvent } from './session-events.ts'
 import { growsSessionSpend, liveSessionUsage, storedSessionUsage } from './session-usage.ts'
+import { previewOf, renderedUnder } from './system-prompt-preview.ts'
 import { decideSystemPrompt, hasSentRequest, recordedSystemPrompt, withSystemPrompt } from './system-prompt.ts'
 import { recordedModelOf, transcriptOf } from './transcript.ts'
 
@@ -354,6 +356,12 @@ export interface HostedThread {
   branchEval(): BranchEval
   /** The branch's context, request by request (#361): what each was assembled from, by pi's own assembly. */
   branchContext(): BranchContext
+  /**
+   * The system prompt the next request would carry under `candidate` — pi's default for `null` —
+   * section by section (#443). Changes nothing: the thread keeps its own choice. `busy` while a run
+   * is in flight; `unsplittable` when pi's rendering does not split back into itself.
+   */
+  previewSystemPrompt(candidate: EnsoSystemPromptChoice | null): SystemPromptPreviewOutcome
   /** One request's context, element by element (#361 phase 3); undefined for a turn the branch does not have. */
   branchRequestDetail(request: number | 'next'): BranchRequestDetail | undefined
   /** The branch's fork point (#435): identity, then what it runs under — the manifest's live half. */
@@ -374,6 +382,12 @@ export interface ToolCallVerdict {
   readonly block: boolean
   readonly reason: string | undefined
 }
+
+/** What a preview answers (#443): the preview, or why there is none. */
+export type SystemPromptPreviewOutcome =
+  | { readonly kind: 'preview'; readonly preview: EnsoSystemPromptPreview }
+  | { readonly kind: 'busy' }
+  | { readonly kind: 'unsplittable' }
 
 /** One of pi's session files in a directory this host serves, as pi lists it (#95). */
 export interface StoredThread {
@@ -1515,6 +1529,17 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       branchStats: () => branchStats(sessionManager.getBranch()),
       branchEval: () => branchEval(sessionManager.getBranch()),
       branchContext: () => branchContext(sessionManager.getBranch()),
+      previewSystemPrompt(candidate: EnsoSystemPromptChoice | null): SystemPromptPreviewOutcome {
+        if (session.isStreaming || session.isCompacting) return { kind: 'busy' }
+        const setChoice = (choice: EnsoSystemPromptChoice | undefined): void => {
+          systemPrompt = choice
+        }
+        const rendered = renderedUnder(session, setChoice, candidate ?? undefined, systemPrompt)
+        // The preamble when the host knows it: the candidate's, or a SYSTEM.md pi's loader found.
+        const preamble = candidate?.mode === 'system' ? candidate.text : services.resourceLoader.getSystemPrompt()
+        const preview = previewOf(rendered, preamble, candidate, session.agent.state.tools)
+        return preview === undefined ? { kind: 'unsplittable' } : { kind: 'preview', preview }
+      },
       branchRequestDetail: (request: number | 'next') => branchRequestDetail(sessionManager.getBranch(), request),
       async forkPoint(): Promise<EnsoForkPoint> {
         const threadId = sessionManager.getSessionId()

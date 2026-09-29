@@ -115,7 +115,10 @@ what the act caused arrives on the follow, for every follower alike. Nothing her
   the body goes: `system` replaces the runtime's preamble, `append` adds to the runtime's — those two are the
   **system-prompt modes**, a thread's system prompt taken from the library — and `session` is a
   **session prompt**, a saved prompt that fills the first message and changes nothing in the system
-  prompt. A file the library cannot read or parse is *refused by name*, never skipped. Wire:
+  prompt. A file the library cannot read or parse is *refused by name*, never skipped. Its
+  **preview** is the runtime's own rendering of the system prompt a thread's next request would carry
+  with it, section by section, each marked as the library's or the runtime's (`EnsoSystemPromptPreview`,
+  `GET …/system-prompt`); its total is what the Context tab prices that first request at. Wire:
   `EnsoLibraryPrompt`, `EnsoLibraryPromptListing`. Not a prompt template: the runtime's templates are slash
   commands, and a library prompt is not one.
 - **message** — what the transcript holds and the model sees: a user message, an assistant message, a

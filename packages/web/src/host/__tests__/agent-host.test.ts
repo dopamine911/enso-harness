@@ -20,6 +20,7 @@ import {
   type EnsoRunContext,
   type EnsoSystemPromptChoice,
   type EnsoSystemPromptMode,
+  type EnsoSystemPromptPreview,
   readEnsoRunContext,
   sessionEvalOf,
 } from '@enso/core'
@@ -2318,4 +2319,69 @@ test("a thread whose recorded system prompt does not read is refused by name bef
     `its ${ENSO_SYSTEM_PROMPT_ENTRY} entry does not read as a system prompt`,
   )
   expect(extensionsLoaded).toBe(0)
+})
+
+/** What the Context tab prices a request's system prompt at: every `system:` element, tools included. */
+function contextSystemTokens(hosted: HostedThread, request: number): number {
+  const detail = hosted.branchRequestDetail(request)
+  if (detail === undefined) throw new Error(`the branch has no request ${request}`)
+  return detail.elements
+    .filter((element) => element.key.startsWith('system:'))
+    .reduce((sum, element) => sum + element.tokens, 0)
+}
+
+/** A preview on a fresh thread, then its first request made with the same prompt: both halves of the comparison. */
+async function previewThenRun(
+  candidate: EnsoSystemPromptChoice | null,
+): Promise<{ preview: EnsoSystemPromptPreview; contextTotal: number }> {
+  const { host, project } = recordingHost(1)
+  const hosted = await host.createSession(crypto.randomUUID(), () => project)
+  openSessions.push(hosted)
+  const outcome = hosted.previewSystemPrompt(candidate)
+  if (outcome.kind !== 'preview') throw new Error(`no preview: ${outcome.kind}`)
+  if (candidate !== null && hosted.runtime.setSystemPrompt(candidate) !== undefined) throw new Error('not set')
+  await runPrompt(hosted, 'one')
+  return { preview: outcome.preview, contextTotal: contextSystemTokens(hosted, 1) }
+}
+
+const sectionNames = (preview: EnsoSystemPromptPreview): string[] => preview.sections.map((section) => section.name)
+
+test("⚠⚠ a system prompt's preview totals what the Context tab prices its first request at; the preamble is the library's and pi's tools section is gone (#443)", async () => {
+  const candidate = choiceOf('system', "# Reviewer\n\n<tools>\nnot pi's\n</tools>\n\nSay what breaks.")
+  const { preview, contextTotal } = await previewThenRun(candidate)
+  expect(preview.totalTokens).toBe(contextTotal)
+  expect(preview.prompt).toEqual({ id: candidate.id, name: candidate.name, mode: 'system' })
+  expect(preview.sections[0]).toMatchObject({ name: 'preamble', origin: 'library', text: candidate.text })
+  expect(sectionNames(preview)).not.toContain('tools')
+  expect(preview.tools.length).toBeGreaterThan(0)
+})
+
+test("⚠ an append prompt's preview totals the same as its first request; every pi section stays and the addendum is the library's (#443)", async () => {
+  const { preview, contextTotal } = await previewThenRun(choiceOf('append', 'Always answer in haiku.'))
+  expect(preview.totalTokens).toBe(contextTotal)
+  expect(preview.sections.find((section) => section.name === 'addendum')).toMatchObject({ origin: 'library' })
+  expect(sectionNames(preview)).toEqual(expect.arrayContaining(['preamble', 'tools', 'rules', 'docs', 'cwd']))
+})
+
+test("pi's default, previewed, is pi's own rendering — every section pi's — and totals what its first request is priced at (#443)", async () => {
+  const { preview, contextTotal } = await previewThenRun(null)
+  expect(preview.totalTokens).toBe(contextTotal)
+  expect(preview.prompt).toBeNull()
+  expect(preview.sections[0]?.text.startsWith(PI_DEFAULT_PREAMBLE_START)).toBe(true)
+  expect(preview.sections.map((section) => section.origin)).toEqual(preview.sections.map(() => 'pi'))
+})
+
+test("a preview changes nothing: the thread's own prompt is what its request carries, and a preview of another after it still answers (#443)", async () => {
+  const { host, project, requests } = recordingHost(1)
+  const hosted = await host.createSession(crypto.randomUUID(), () => project)
+  openSessions.push(hosted)
+  const own = choiceOf('system', 'Mine.')
+  expect(hosted.runtime.setSystemPrompt(own)).toBeUndefined()
+  const other = hosted.previewSystemPrompt(choiceOf('system', 'Only previewed.'))
+  if (other.kind !== 'preview') throw new Error(`no preview: ${other.kind}`)
+  expect(other.preview.sections[0]).toMatchObject({ name: 'preamble', text: 'Only previewed.' })
+  await runPrompt(hosted, 'one')
+  expect(systemHeadOf(requests[0]).sections.preamble).toBe('Mine.')
+  // pi's default, previewed on a thread that runs its own: a preview, not a refusal.
+  expect(hosted.previewSystemPrompt(null)).toMatchObject({ kind: 'preview', preview: { prompt: null } })
 })

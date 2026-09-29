@@ -99,6 +99,12 @@ export interface HostedThread {
   branchEval(): BranchEval
   /** The branch's context, request by request (#361): what each was assembled from, by pi's own assembly. */
   branchContext(): BranchContext
+  /**
+   * The system prompt the next request would carry under `candidate` — pi's default for `null` —
+   * section by section (#443). Changes nothing: the thread keeps its own choice. `busy` while a run
+   * is in flight; `unsplittable` when pi's rendering does not split back into itself.
+   */
+  previewSystemPrompt(candidate: EnsoSystemPromptChoice | null): SystemPromptPreviewOutcome
   /** One request's context, element by element (#361 phase 3); undefined for a turn the branch does not have. */
   branchRequestDetail(request: number | 'next'): BranchRequestDetail | undefined
   /** The branch's fork point (#435): identity, then what it runs under — the manifest's live half. */

@@ -320,3 +320,52 @@ const systemPromptChoiceValidator = Compile(EnsoSystemPromptChoice)
 export function readEnsoSystemPromptChoice(data: unknown): EnsoSystemPromptChoice | undefined {
   return systemPromptChoiceValidator.Check(data) ? data : undefined
 }
+
+/**
+ * One section of a system prompt as pi renders it, and who wrote it: `library` for the text a
+ * library prompt put there (the preamble it replaced, the addendum it joined), `pi` for the rest.
+ *
+ * @group Prompt library
+ */
+export const EnsoSystemPromptSection = Type.Object(
+  {
+    /** pi's section name — `preamble`, `tools`, `rules`, `docs`, `addendum`, `project_context`, `skills`, `cwd`, … */
+    name: Type.String({ minLength: 1 }),
+    origin: Type.Union([Type.Literal('library'), Type.Literal('pi')]),
+    /** The section as pi sends it: every section but the preamble inside its `<name>` tags. */
+    text: Type.String(),
+    /** {@link estimateTextTokens} of `text` — the Context tab's price for the same section. */
+    tokens: Type.Integer({ minimum: 0 }),
+  },
+  { additionalProperties: false },
+)
+/** @group Prompt library */
+export type EnsoSystemPromptSection = Static<typeof EnsoSystemPromptSection>
+
+/**
+ * `GET /api/threads/:id/system-prompt` (#443): the system prompt a thread's next request would carry
+ * with `prompt` as its system prompt — pi's default when `prompt` is `null` — section by section,
+ * and the tool definitions sent beside it. `totalTokens` is what the Context tab's system rows sum to
+ * for a first request made with it.
+ *
+ * @group Prompt library
+ */
+export const EnsoSystemPromptPreview = Type.Object(
+  {
+    prompt: Type.Union([
+      Type.Object(
+        { id: Type.String(), name: Type.String(), mode: EnsoSystemPromptMode },
+        { additionalProperties: false },
+      ),
+      Type.Null(),
+    ]),
+    sections: Type.Array(EnsoSystemPromptSection),
+    tools: Type.Array(
+      Type.Object({ name: Type.String(), tokens: Type.Integer({ minimum: 0 }) }, { additionalProperties: false }),
+    ),
+    totalTokens: Type.Integer({ minimum: 0 }),
+  },
+  { additionalProperties: false },
+)
+/** @group Prompt library */
+export type EnsoSystemPromptPreview = Static<typeof EnsoSystemPromptPreview>

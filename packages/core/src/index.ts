@@ -182,6 +182,8 @@ export {
   EnsoLibraryPromptWrite,
   EnsoSystemPromptChoice,
   EnsoSystemPromptMode,
+  EnsoSystemPromptPreview,
+  EnsoSystemPromptSection,
   estimateTextTokens,
   isLibraryPromptId,
   type LibraryPromptParse,
