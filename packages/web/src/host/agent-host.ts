@@ -715,11 +715,17 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       .map((info) => {
         const parentThreadId =
           info.parentSessionPath === undefined ? undefined : idByPath.get(resolve(info.parentSessionPath))
+        // ⚠ pi's `modified` is the last message's time, and a fork COPIES its source's messages
+        // with their timestamps (#447): a fork taken now of a thread idle for hours read as hours
+        // old, and sorted with it. The header's `created` is when the fork was made; for any other
+        // session it is never later than its last message, so the later of the two changes nothing else.
+        const created = info.created.getTime()
+        const modified = Number.isNaN(created) ? info.modified : new Date(Math.max(info.modified.getTime(), created))
         return {
           id: info.id,
           path: info.path,
           cwd: info.cwd,
-          modified: info.modified,
+          modified,
           messageCount: info.messageCount,
           // pi says `(no messages)` for a file with none — an empty fork's (#433) — which is no title.
           firstMessage: info.messageCount === 0 ? '' : info.firstMessage,
