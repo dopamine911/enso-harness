@@ -82,6 +82,12 @@ export const EnsoGitRepository = Type.Object(
     kind: Type.Literal('repository'),
     /** The working tree's top level (`git rev-parse --show-toplevel`). */
     root: Type.String({ minLength: 1 }),
+    /**
+     * Where the cwd sits in the working tree (`git rev-parse --show-prefix`): `''` at the top level,
+     * else a `/`-ended path. `changes` and the changed files are this directory's alone; the commits
+     * (`ahead`, `behind`) are the whole repository's.
+     */
+    scope: Type.String(),
     /** `HEAD`'s commit; `null` before the first commit. */
     head: Type.Union([Type.String({ minLength: 1 }), Type.Null()]),
     /** The checked-out branch, short; `null` when HEAD is detached. */
@@ -93,7 +99,7 @@ export const EnsoGitRepository = Type.Object(
     ahead: Count,
     /** Commits on `baseline.ref` that HEAD does not have; 0 when there is no ref. */
     behind: Count,
-    /** Files by where their changes sit (`git status`); one file can be staged and unstaged. */
+    /** Files under `scope` by where their changes sit (`git status`); one file can be staged and unstaged. */
     changes: Type.Object(
       { staged: Count, unstaged: Count, untracked: Count, conflicted: Count },
       { additionalProperties: false },
@@ -139,3 +145,68 @@ export const EnsoThreadGit = Type.Object(
 )
 /** @group Git */
 export type EnsoThreadGit = Static<typeof EnsoThreadGit>
+
+/**
+ * How a file differs from the baseline: git's own letters (`A`, `M`, `D`, `R`, `C`, `T`), with a
+ * file git does not track yet as `untracked`.
+ *
+ * @group Git
+ */
+export const EnsoGitFileStatus = Type.Union([
+  Type.Literal('added'),
+  Type.Literal('modified'),
+  Type.Literal('deleted'),
+  Type.Literal('renamed'),
+  Type.Literal('copied'),
+  Type.Literal('type-changed'),
+  Type.Literal('untracked'),
+])
+
+/**
+ * One file that differs from the baseline (#452): the working tree against `baseline.commit`,
+ * so commits not yet pushed, staged and unstaged edits all count, and a new file too.
+ *
+ * @group Git
+ */
+export const EnsoGitFileChange = Type.Object(
+  {
+    /** Relative to the repository's root, `/`-separated. */
+    path: Type.String({ minLength: 1 }),
+    /** The path it had at the baseline, for a rename or copy; `null` otherwise. */
+    oldPath: Type.Union([Type.String({ minLength: 1 }), Type.Null()]),
+    status: EnsoGitFileStatus,
+    /** Lines added and removed; `null` for a binary file, or when git did not count them. */
+    added: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
+    removed: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
+    /** git's unified diff for this file, headers included; `null` when `omitted` says why not. */
+    patch: Type.Union([Type.String(), Type.Null()]),
+    /**
+     * Why there is no patch: a binary file, one past the size a page is sent, or one git did not
+     * produce (its diff ran out of time or output, or did not account for every file).
+     */
+    omitted: Type.Union([Type.Literal('binary'), Type.Literal('too-large'), Type.Literal('unavailable'), Type.Null()]),
+  },
+  { additionalProperties: false },
+)
+/** @group Git */
+export type EnsoGitFileChange = Static<typeof EnsoGitFileChange>
+
+/**
+ * `GET /api/threads/:threadId/changes`: git's state in the thread's cwd, and every file that differs
+ * from its baseline. No files outside a repository or when git could not answer.
+ *
+ * @group Git
+ */
+export const EnsoThreadChanges = Type.Object(
+  {
+    threadId: Type.String({ minLength: 1 }),
+    cwd: Type.String({ minLength: 1 }),
+    git: EnsoGitState,
+    files: Type.Array(EnsoGitFileChange),
+    /** More files differ than a page is sent; `files` holds the first of them, in git's order. */
+    truncated: Type.Boolean(),
+  },
+  { additionalProperties: false },
+)
+/** @group Git */
+export type EnsoThreadChanges = Static<typeof EnsoThreadChanges>

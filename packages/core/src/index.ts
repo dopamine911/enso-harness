@@ -63,9 +63,12 @@ export {
 export {
   EnsoGitBaseline,
   EnsoGitBaselineRule,
+  EnsoGitFileChange,
+  EnsoGitFileStatus,
   EnsoGitOperation,
   EnsoGitRepository,
   EnsoGitState,
+  EnsoThreadChanges,
   EnsoThreadGit,
 } from './git-state.ts'
 export {

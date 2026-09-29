@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 321.**
+**Decision headers: 327.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -31,7 +31,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/core/src/dialog.ts` | `#12`, `#27`, `#112` | pi's blocking extension dialogs, as data (#27, #112). |
 | `packages/core/src/follow.ts` | `#112` | The server↔browser wire (#112): a thread's feed, as the follow route serves it. |
 | `packages/core/src/git-state.ts` | `#453` | What git says about a thread's cwd (#453): the repository, the branch, what it pushes to, the commit the last push left on the remote, and the work that is not there yet. |
-| `packages/core/src/git.ts` | `#435`, `#453` | git, read (#453) — THE one way Enso runs git: the run-context recorder's revision probe (#435) and the web server's `GET /api/threads/:threadId/git` both come through {@link runGitIn}. |
+| `packages/core/src/git.ts` | `#435`, `#452`, `#453` | git, read (#453) — THE one way Enso runs git: the run-context recorder's revision probe (#435) and the web server's `GET /api/threads/:threadId/git` both come through {@link runGitIn}. |
 | `packages/core/src/log-bundle.ts` | `#132` | The bundle (#132 item 5): ONE plaintext file a user attaches to an issue, built from things that already exist — the day's records, the live threads' inspections, the versions, and what the browser logged — with a manifest of what was redacted so the reader knows what is missing rather than wondering. |
 | `packages/core/src/log-process.ts` | `#132` | A process's sink (#132 item 2): ONE log for the harness — `.enso/logs/enso-YYYY-MM-DD.jsonl`, every process appending to the same day's file, every record redacted by field name before it is written, and — for a terminal — a pretty console sink beside it at its own level. |
 | `packages/core/src/log-stats.ts` | `#132`, `#144` | The day, derived (#144 slice 4): cost per thread and per model, how long each run took to its first token and to settle, how long each tool took, which guard rule refused what, and who wrote to today's file — all of it from the records, none of it from a counter. |
@@ -116,7 +116,9 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/__tests__/context-dialog.test.tsx` | `#361` | #361 phase 5: `/context`'s dialog, mounted — it reads nothing while closed, and once open shows the composition and the browser, not the tab's other cards (those stay on the Context tab). |
 | `packages/web/src/__tests__/context-trend.test.tsx` | `#361`, `#362` | #361: the trend's pick is the page's — the Context Browser opens it and File Activity counts up to it — including when a change of granularity moves it to another request (#362 review). |
 | `packages/web/src/__tests__/custom-event-router.test.ts` | `#53`, `#90`, `#162` | #53 S1.3: the CUSTOM-chunk router was an inline closure no test reached — renaming a chunk, dropping the notify-type allowlist, or swapping the two `apply*` calls all left the suite green. |
+| `packages/web/src/__tests__/diff-rows.test.ts` | `#452` | #452: git's unified diff, read the way git writes it, and laid out side by side the way a reader pairs an edit — each removed run beside the added run after it. |
 | `packages/web/src/__tests__/dom-environment.ts` | `#118` | A browser DOM for the tests that MOUNT React (#118) — the mounted-pane tests, which need effects, `useSyncExternalStore` subscriptions and TanStack's `useChat` to actually run. |
+| `packages/web/src/__tests__/file-tree.test.ts` | `#452` | #452: the changed files as a tree — directories first, names sorted, totals per directory, and a chain of single-directory levels folded into one row. |
 | `packages/web/src/__tests__/fixture-conversation.test.ts` | `#27`, `#218` | The compatibility probe that used to live in a PR body (#218). |
 | `packages/web/src/__tests__/follow-budget.test.ts` | `#272` | The page's follow budget (#272). |
 | `packages/web/src/__tests__/follow-connection.test.ts` | `#112` | The adapter is the ONLY place AG-UI is made (#112). |
@@ -132,6 +134,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/__tests__/scripted-server.ts` | `#112`, `#118` | A scripted server behind `fetch` (#112, #118): one follow body the test writes SSE frames into, and unary routes the test scripts the answers of. |
 | `packages/web/src/__tests__/static-markup.ts` | `#236` | What a `<select>` in a `renderToStaticMarkup` string offers, read through a DOM (#236). |
 | `packages/web/src/__tests__/stored-threads.test.ts` | `#103` | #103 receipt, step 8: the dev proxy answered a dead API with Bun's whole HTML error page, and quoting it filled the rail. |
+| `packages/web/src/__tests__/thread-changes.test.tsx` | `#452` | #452: the Changes view as a static render — every state said as what it is, the tree, and the first file's diff side by side. |
 | `packages/web/src/__tests__/thread-context.test.tsx` | `#361` | #361: the Context view — its derivations as pure functions, and a static render of what it says it estimated, what the provider counted, and what it does not know. |
 | `packages/web/src/__tests__/thread-debug-drawer.test.tsx` | `#435`, `#440` | The drawer, mounted, reading its fork point (#435). |
 | `packages/web/src/__tests__/thread-debug.test.tsx` | `#86` | #86: the drawer's one job is to NAME a disagreement between what the browser believes and what pi's session holds. |
@@ -159,6 +162,8 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/debug/log-tail-screen.tsx` | `#144` | The debug log page (#144 slice 2): the day's records, as the file has them, in a browser. |
 | `packages/web/src/debug/log-tail-view.tsx` | `#352` | What the two tail-fed pages — the day's log (`log-tail-screen.tsx`) and one thread's timeline (`thread-timeline-screen.tsx`) — share, held once (#352): the view the frames build, the hook that keeps one tail open and resumable, and the pinned, virtualized list both render into. |
 | `packages/web/src/debug/thread-timeline-screen.tsx` | `#144` | One thread's timeline (#144 slice 3): what the host emitted, what the server sent, and what was logged, as ONE list ordered by time — on the debug page at `debug.html?thread=<id>`. |
+| `packages/web/src/diff-rows.ts` | `#452` | A unified diff as the Changes view draws it (#452): git's patch for one file, parsed into hunks, and each hunk laid out side by side — the old file on the left, the new on the right. |
+| `packages/web/src/file-tree.ts` | `#452` | The Changes view's file tree (#452): the changed files, by directory, the way a reader scans a change — directories first, then files, each sorted by name, and each directory carrying the lines added and removed under it. |
 | `packages/web/src/fixture-conversation.ts` | `#27`, `#31`, `#75`, `#404` | The styling dev loop (#31): a scripted conversation streamed through the REAL `useChat` pipeline as local AG-UI events — no server, no pi. |
 | `packages/web/src/follow-connection.ts` | `#112`, `#272`, `#274` | The browser's connection to a thread (#112): TanStack's `SubscribeConnectionAdapter` over the prompt/follow split. |
 | `packages/web/src/fonts.ts` | `#407` | The page's fonts (#407 item 6): the families it ships, the per-role choice in Settings, and how both reach the page. |
@@ -227,7 +232,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/server/__tests__/server-handler.test.ts` | `#76`, `#86`, `#95`, `#97` | The server's routes beside the wire, over real HTTP (#76, #86, #95, #97): what the inspection, history and session-listing routes report about threads the prompt route built. |
 | `packages/web/src/server/__tests__/thread-context-route.test.ts` | `#361` | #361: one thread's context — pi's branch and pi's meter, from memory for a live thread and from the file otherwise, building nothing to answer. |
 | `packages/web/src/server/__tests__/thread-eval-route.test.ts` | `#441` | #441: one thread's eval — the branch from pi, the log's queued admissions and aborts from the day files the branch spans. |
-| `packages/web/src/server/__tests__/thread-git-route.test.ts` | `#453` | #453: one thread's git state — asked in the live thread's cwd, or the stored thread's, building nothing to answer, and never in a directory the server does not serve. |
+| `packages/web/src/server/__tests__/thread-git-route.test.ts` | `#452`, `#453` | #453: one thread's git state — asked in the live thread's cwd, or the stored thread's, building nothing to answer, and never in a directory the server does not serve. |
 | `packages/web/src/server/__tests__/thread-stats-route.test.ts` | `#45` | #45 phase 2: one thread's stats — pi's session for the numbers, the day files for the times. |
 | `packages/web/src/server/__tests__/transcript-to-messages.test.ts` | `#95`, `#162` | #95: a stored branch mounts as the messages a live run would have left behind. |
 | `packages/web/src/server/__tests__/vendor-links.test.ts` | `#160` | ⚠ The precondition that was missing when a real run failed. |
@@ -247,7 +252,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/server/sse.ts` | `#109` | The SSE plumbing every streaming route shares: the response headers and the keepalive. |
 | `packages/web/src/server/thread-context-route.ts` | `#86`, `#361` | `GET /api/threads/:threadId/context` (#361): the thread's context, request by request — the Context view reads it. |
 | `packages/web/src/server/thread-eval-route.ts` | `#441` | `GET /api/threads/:threadId/eval` (#441): one thread's session eval — the mechanical timeline and scorecard `session-eval.ts` computes. |
-| `packages/web/src/server/thread-git-route.ts` | `#86`, `#453` | `GET /api/threads/:threadId/git` (#453): git's state in the thread's cwd — the repository, the branch, the last-push baseline and the work not yet pushed (`@enso/core/git`). |
+| `packages/web/src/server/thread-git-route.ts` | `#86`, `#452`, `#453` | `GET /api/threads/:threadId/git` (#453): git's state in the thread's cwd — the repository, the branch, the last-push baseline and the work not yet pushed (`@enso/core/git`). |
 | `packages/web/src/server/thread-log-days.ts` | `#45`, `#441` | A thread's records in the day files (#45, #441): which days are on disk, which local day a moment falls on, and one day's lines for one thread. |
 | `packages/web/src/server/thread-manifest-route.ts` | `#86`, `#435` | `GET /api/threads/:threadId/manifest` (#435): the thread's fork point — its identity, then the conditions it runs under (recorded model and level, mode, cwd, the latest `enso-run-context`) — off the branch the host walks (`host/fork-point.ts`). |
 | `packages/web/src/server/thread-read.ts` | `#214` | THE LIVE-OR-COLD READ, ONCE (#214). |
@@ -259,6 +264,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/stats-table.tsx` | `#45`, `#144` | The table and the number formats the two stats surfaces share (#45 phase 2): the day's (`debug/day-stats-screen.tsx`, #144) and one thread's (`thread-stats.tsx`). |
 | `packages/web/src/store.ts` | `#90` | The smallest external store React can subscribe to: one value, replaced whole, and a listener set. |
 | `packages/web/src/stored-threads.ts` | `#95`, `#395` | The sessions a user can come back to (#95): pi's session files in this server's projects, as the server lists them — the rail's rows under each project (#395). |
+| `packages/web/src/thread-changes.tsx` | `#452`, `#453` | The Changes view (#452): every file in the thread's project that differs from the last push, as a tree, and the chosen file's diff side by side — the old file on the left, the new on the right. |
 | `packages/web/src/thread-context-analysis.ts` | `#361` | What the Context view derives from `EnsoThreadContext` before it draws (#361): the category order and names, totals, the prompt-granularity roll-up and the delta series — dsh-context's `categories.ts`, `headline.ts` and trend aggregation, over our wire. |
 | `packages/web/src/thread-context.tsx` | `#361` | The Context view (#361) — dsh-context's Context tab over pi, in the design direction's layout (`Enso-Design-Direction`, the Context view): Now (what the next request is made of, beside the provider's count for the last one), Trend (every request's makeup, and the picked one's brief), then the Context Browser with Context Events and File Activity beside it on a wide view. |
 | `packages/web/src/thread-eval.tsx` | `#441` | The session eval on the Stats tab (#441, the follow-up its issue named): the scorecard, the agent-side signals and the timeline `GET /api/threads/:threadId/eval` answers, under the stats drawer. |

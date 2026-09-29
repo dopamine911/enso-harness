@@ -32,6 +32,7 @@ import {
   ChartColumnIcon,
   CircleQuestionMarkIcon,
   ExternalLinkIcon,
+  FileDiffIcon,
   GitForkIcon,
   LayersIcon,
   MenuIcon,
@@ -98,9 +99,11 @@ import {
   fetchThreadHistory,
   storedThreadsNotOnThisPage,
 } from './stored-threads.ts'
+import { ThreadChanges } from './thread-changes.tsx'
 import { ThreadContextDialog, ThreadContextDrawer } from './thread-context.tsx'
 import { ThreadDebugDrawer } from './thread-debug.tsx'
 import { ThreadEvalDrawer } from './thread-eval.tsx'
+import { settledToolResults } from './thread-git.tsx'
 import { ThreadStatsDrawer } from './thread-stats.tsx'
 import { ThreadStatusBar } from './thread-status.tsx'
 import {
@@ -269,10 +272,15 @@ const DebugOpenContext = createContext(false)
  * The page's main views (#361): the transcript, or an analysis of the thread in its place. One
  * choice for the page — switching thread keeps it — rendered by the pane on screen.
  */
-export type ThreadView = 'chat' | 'context' | 'stats'
+export type ThreadView = 'chat' | 'context' | 'stats' | 'changes'
 
 /** A tab's value back to a view: the only strings the tab list hands over are these. */
-const THREAD_VIEWS: Readonly<Record<string, ThreadView>> = { chat: 'chat', context: 'context', stats: 'stats' }
+const THREAD_VIEWS: Readonly<Record<string, ThreadView>> = {
+  chat: 'chat',
+  context: 'context',
+  stats: 'stats',
+  changes: 'changes',
+}
 
 /**
  * What THIS pane shows, and how to change the page's view. `shown` is undefined in a hidden
@@ -1479,6 +1487,12 @@ const chatComponents = {
                   </div>
                 </div>
               ) : null}
+              {/* What changed since the last push (#452): the tree and the chosen file's diff, over the transcript. */}
+              {shown === 'changes' ? (
+                <div role="tabpanel" {...panelIds('changes')} className="absolute inset-0">
+                  <ThreadChanges moment={`${settledToolResults(chat.messages)}:${chat.sessionGenerating}`} />
+                </div>
+              ) : null}
             </div>
             {/* The session debug pane (#86): what the browser believes beside what pi's
 						    session holds, for THIS thread. Scrolls on its own so a long branch never
@@ -1852,6 +1866,16 @@ function ViewTabs({
         >
           <ChartColumnIcon aria-hidden="true" />
           <span className="max-sm:sr-only">Stats</span>
+        </TabsPrimitive.Trigger>
+        <TabsPrimitive.Trigger
+          value="changes"
+          id="thread-view-changes-tab"
+          aria-controls={controls('changes')}
+          title="every file that differs from the last push, and its diff side by side"
+          className={VIEW_TAB}
+        >
+          <FileDiffIcon aria-hidden="true" />
+          <span className="max-sm:sr-only">Changes</span>
         </TabsPrimitive.Trigger>
       </TabsPrimitive.List>
     </TabsPrimitive.Root>

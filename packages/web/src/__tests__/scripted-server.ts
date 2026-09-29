@@ -1,6 +1,7 @@
 import type {
   EnsoFollowFrame,
   EnsoFollowSnapshot,
+  EnsoGitFileChange,
   EnsoGitState,
   EnsoProject,
   EnsoSessionEval,
@@ -89,6 +90,8 @@ export interface ScriptedFetchOptions {
    * between two; 404 when absent, a thread nothing has run in.
    */
   readonly git?: () => EnsoGitState
+  /** What the Changes view's read answers (#452), asked per read; 404 when absent. */
+  readonly changes?: () => { git: EnsoGitState; files: EnsoGitFileChange[]; truncated: boolean }
 }
 
 /** The launch project a scripted server lists by default — the id the fixtures' stored threads carry. */
@@ -157,6 +160,7 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
     stats: () => options.stats,
     eval: () => options.eval,
     git: () => (options.git === undefined ? undefined : { cwd: '/scripted/launch', git: options.git() }),
+    changes: () => (options.changes === undefined ? undefined : { cwd: '/scripted/launch', ...options.changes() }),
   }
   /** The page's own reads — mode seed, the rail's stored list, a resume click's history. Exact paths. */
   const pageRead = (path: string): Response | undefined => {
@@ -177,7 +181,7 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
       const threadId = decodeURIComponent(commands[1])
       return Response.json({ threadId, commands: options.commands ?? [], source: 'live' })
     }
-    const analysis = /^\/api\/threads\/([^/]+)\/(stats|eval|git)$/.exec(path)
+    const analysis = /^\/api\/threads\/([^/]+)\/(stats|eval|git|changes)$/.exec(path)
     if (analysis?.[1] !== undefined && analysis[2] !== undefined) {
       const payload = analysisReads[analysis[2]]?.()
       if (payload === undefined) return new Response('nothing has run in this thread', { status: 404 })

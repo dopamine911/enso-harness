@@ -1,11 +1,11 @@
 import { expect, test } from 'bun:test'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { Check } from 'typebox/value'
-import { type GitRunner, readGitState, runGitIn } from '../git.ts'
-import { EnsoGitState } from '../index.ts'
+import { type GitRunner, readGitChanges, readGitState, runGitIn } from '../git.ts'
+import { EnsoGitFileChange, EnsoGitState } from '../index.ts'
 import { findRepoRoot } from '../paths.ts'
 
 /**
@@ -14,13 +14,24 @@ import { findRepoRoot } from '../paths.ts'
  * writing or running anything the repository configures.
  */
 
-const gitPath = Bun.which('git')
-if (gitPath === null) throw new Error('git is not on PATH')
+/** A program on this process's PATH, by absolute path. */
+function onPath(name: string): string {
+  const found = Bun.which(name)
+  if (found === null) throw new Error(`${name} is not on PATH`)
+  return found
+}
 
-/** A hermetic environment: no user or system config, a fixed identity, and git on PATH. */
+const gitPath = onPath('git')
+
+/**
+ * A hermetic environment: no user or system config, a fixed identity, and on PATH git and the shell
+ * tools beside `sh` — what git's own shell scripts (`git submodule`) and the fixtures' programs run.
+ * ⚠ Not git's directory alone: under a git hook that is git's exec-path (`/usr/lib/git-core`), which
+ * holds no `sed` or `touch`.
+ */
 const home = mkdtempSync(join(tmpdir(), 'enso-git-home-'))
 const environment = {
-  PATH: dirname(gitPath),
+  PATH: `${dirname(gitPath)}:${dirname(onPath('sh'))}`,
   HOME: home,
   GIT_CONFIG_NOSYSTEM: '1',
   GIT_AUTHOR_NAME: 'Enso',
@@ -261,4 +272,220 @@ test('⚠ an inherited GIT_DIR naming another repository does not reach the read
   expect(await readGitState(underHook, outside)).toEqual({ kind: 'not-a-repository' })
   // …and a cwd that IS a repository still answers its own revision.
   expect(await runGitIn(hookEnvironment, ['rev-parse', 'HEAD'], repoRoot)).toMatchObject({ code: 0, stdout: leaked })
+})
+
+// ── What changed since the baseline (#452) ────────────────────────────────────────────────────
+
+async function changesAt(cwd: string): Promise<Awaited<ReturnType<typeof readGitChanges>>> {
+  const read = await readGitChanges(runGit, await repositoryAt(cwd))
+  for (const file of read.files) expect(Check(EnsoGitFileChange, file)).toBe(true)
+  return read
+}
+
+test('every change since the last push is listed: unpushed commits, staged, unstaged, deleted, renamed, new', async () => {
+  const { clone } = cloned()
+  writeFileSync(join(clone, 'gone.md'), 'gone\n')
+  writeFileSync(join(clone, 'old-name.md'), 'a\nb\nc\nd\ne\n')
+  git(clone, 'add', '.')
+  git(clone, 'commit', '--quiet', '-m', 'files to change')
+  git(clone, 'push', '--quiet')
+  commit(clone, 'committed.md', 'not pushed\n')
+  writeFileSync(join(clone, 'README.md'), 'one\ntwo\n')
+  git(clone, 'add', 'README.md')
+  git(clone, 'rm', '--quiet', 'gone.md')
+  git(clone, 'mv', 'old-name.md', 'new-name.md')
+  writeFileSync(join(clone, 'fresh.md'), 'fresh\nfile\n')
+  const { files, truncated } = await changesAt(clone)
+  expect(truncated).toBe(false)
+  const byPath = Object.fromEntries(files.map((file) => [file.path, file]))
+  expect(byPath['committed.md']).toMatchObject({ status: 'added', added: 1, removed: 0, omitted: null })
+  expect(byPath['README.md']).toMatchObject({ status: 'modified', added: 1, removed: 0 })
+  expect(byPath['README.md']?.patch).toContain('+two')
+  expect(byPath['gone.md']).toMatchObject({ status: 'deleted', added: 0, removed: 1 })
+  expect(byPath['new-name.md']).toMatchObject({ status: 'renamed', oldPath: 'old-name.md', added: 0, removed: 0 })
+  expect(byPath['fresh.md']).toMatchObject({ status: 'untracked', added: 2, removed: 0, omitted: null })
+  expect(byPath['fresh.md']?.patch).toContain('+fresh')
+  // Each patch is its own file's, not a neighbour's.
+  for (const file of files.filter((change) => change.patch !== null)) expect(file.patch).toContain(file.path)
+
+  git(clone, 'add', '.')
+  git(clone, 'commit', '--quiet', '-m', 'all of it')
+  git(clone, 'push', '--quiet')
+  expect((await changesAt(clone)).files).toEqual([])
+})
+
+test('a binary file is listed without a patch; a large new file is not read', async () => {
+  const directory = repository()
+  writeFileSync(join(directory, 'image.bin'), Buffer.from([0, 1, 2, 3, 0, 255]))
+  git(directory, 'add', 'image.bin')
+  writeFileSync(join(directory, 'big.log'), 'x'.repeat(2 * 1024 * 1024))
+  const { files } = await changesAt(directory)
+  expect(files.find((file) => file.path === 'image.bin')).toMatchObject({
+    status: 'added',
+    added: null,
+    removed: null,
+    patch: null,
+    omitted: 'binary',
+  })
+  expect(files.find((file) => file.path === 'big.log')).toMatchObject({
+    status: 'untracked',
+    added: null,
+    patch: null,
+    omitted: 'too-large',
+  })
+})
+
+test('with no commit yet everything is compared with the empty tree', async () => {
+  const directory = scratch('unborn-changes')
+  git(directory, 'init', '--quiet', '-b', 'main')
+  writeFileSync(join(directory, 'staged.md'), 'staged\n')
+  git(directory, 'add', 'staged.md')
+  writeFileSync(join(directory, 'loose.md'), 'loose\n')
+  const { files } = await changesAt(directory)
+  expect(files.map((file) => [file.path, file.status])).toEqual([
+    ['staged.md', 'added'],
+    ['loose.md', 'untracked'],
+  ])
+})
+
+test("⚠ a project inside a larger repository reads its own directory only, in the root's paths", async () => {
+  const directory = repository()
+  // `[x]` is a glob that matches `proj x`: the scope is taken literally.
+  const project = join(directory, 'proj [x]')
+  mkdirSync(project)
+  mkdirSync(join(directory, 'proj x'))
+  commit(directory, 'proj [x]/app.ts', 'one\n')
+  writeFileSync(join(project, 'app.ts'), 'two\n')
+  writeFileSync(join(project, 'new.ts'), 'new\n')
+  writeFileSync(join(directory, 'README.md'), 'changed\n')
+  writeFileSync(join(directory, 'secret.env'), 'TOKEN=abc\n')
+  writeFileSync(join(directory, 'proj x', 'neighbour.ts'), 'not the project\n')
+  git(directory, 'config', 'diff.relative', 'true')
+  const state = await repositoryAt(project)
+  expect(state.scope).toBe('proj [x]/')
+  expect(state.changes).toEqual({ staged: 0, unstaged: 1, untracked: 1, conflicted: 0 })
+  const { files } = await readGitChanges(runGit, state)
+  expect(files.map((file) => file.path)).toEqual(['proj [x]/app.ts', 'proj [x]/new.ts'])
+  // From the top level the scope is the whole working tree.
+  const whole = await repositoryAt(directory)
+  expect(whole.scope).toBe('')
+  expect((await readGitChanges(runGit, whole)).files.map((file) => file.path).sort()).toEqual([
+    'README.md',
+    'proj [x]/app.ts',
+    'proj [x]/new.ts',
+    'proj x/neighbour.ts',
+    'secret.env',
+  ])
+})
+
+test('⚠ diff config the repository sets does not change what is read', async () => {
+  const directory = repository()
+  commit(directory, 'lines.md', 'one\n\ntwo\nthree\n')
+  writeFileSync(join(directory, 'lines.md'), 'one\n\ntwo\nTHREE\n')
+  const vendored = repository()
+  git(directory, '-c', 'protocol.file.allow=always', 'submodule', '--quiet', 'add', vendored, 'vendor/lib')
+  git(directory, 'commit', '--quiet', '-m', 'vendor a library')
+  commit(vendored, 'README.md', 'moved on\n')
+  git(join(directory, 'vendor/lib'), 'pull', '--quiet')
+  // A blank context line printed as nothing, and a submodule as a log with no `diff --git` part.
+  git(directory, 'config', 'diff.suppressBlankEmpty', 'true')
+  git(directory, 'config', 'diff.submodule', 'log')
+  const { files } = await changesAt(directory)
+  expect(files.find((file) => file.path === 'lines.md')?.patch).toContain('\n one\n \n two\n-three\n+THREE\n')
+  expect(files.find((file) => file.path === 'vendor/lib')?.patch).toContain('+Subproject commit ')
+})
+
+test("a type change is sent as both of git's parts, and every other file keeps its patch", async () => {
+  const directory = repository()
+  commit(directory, 'link.md', 'a file\n')
+  unlinkSync(join(directory, 'link.md'))
+  symlinkSync('README.md', join(directory, 'link.md'))
+  writeFileSync(join(directory, 'README.md'), 'one\ntwo\n')
+  const { files } = await changesAt(directory)
+  expect(files.map((file) => [file.path, file.status, file.omitted])).toEqual([
+    ['README.md', 'modified', null],
+    ['link.md', 'type-changed', null],
+  ])
+  const link = files.find((file) => file.path === 'link.md')?.patch ?? ''
+  expect(link).toContain('deleted file mode 100644')
+  expect(link).toContain('new file mode 120000')
+})
+
+test('git that cannot list the untracked files fails the read, never reads as none', async () => {
+  const directory = repository()
+  writeFileSync(join(directory, 'fresh.md'), 'fresh\n')
+  const failing: GitRunner = async (args, cwd) =>
+    args[0] === 'ls-files' ? { code: -1, stdout: '', stderr: '' } : runGit(args, cwd)
+  await expect(readGitChanges(failing, await repositoryAt(directory))).rejects.toThrow(/did not answer/)
+})
+
+test('⚠ an external diff or textconv program the repository configures does not run', async () => {
+  const directory = repository()
+  const ran = join(scratch('diff-program'), 'ran')
+  const program = join(directory, 'diff-program.sh')
+  writeFileSync(program, `#!/bin/sh\ntouch '${ran}'\ncat "$1"\n`, { mode: 0o755 })
+  git(directory, 'config', 'diff.external', program)
+  git(directory, 'config', 'diff.shout.textconv', program)
+  writeFileSync(join(directory, '.gitattributes'), '*.md diff=shout\n')
+  writeFileSync(join(directory, 'README.md'), 'changed\n')
+  // The config really is live: git as a person runs it, the program runs.
+  git(directory, 'diff')
+  expect(existsSync(ran)).toBe(true)
+  execFileSync('rm', [ran])
+  const { files } = await changesAt(directory)
+  expect(existsSync(ran)).toBe(false)
+  expect(files.find((file) => file.path === 'README.md')?.patch).toContain('+changed')
+})
+
+test('a nested repository is not listed as a file', async () => {
+  const directory = repository()
+  const nested = join(directory, 'vendor')
+  mkdirSync(nested)
+  git(nested, 'init', '--quiet', '-b', 'main')
+  commit(nested, 'lib.ts', 'x\n')
+  expect((await changesAt(directory)).files).toEqual([])
+})
+
+test("⚠ a tree that moves while it is read never gives a file another file's patch or counts", async () => {
+  const directory = repository()
+  commit(directory, 'b.md', 'one\n')
+  writeFileSync(join(directory, 'README.md'), 'one\ntwo\nthree\n')
+  const repositoryState = await repositoryAt(directory)
+  /**
+   * The real git, with the agent's next write landing right after git's first diff answers:
+   * README.md stops differing and b.md starts. Any later diff of the same read sees b.md.
+   */
+  let firstDiff: Promise<unknown> | undefined
+  const moving: GitRunner = async (args, cwd) => {
+    if (args[0] !== 'diff') return runGit(args, cwd)
+    if (firstDiff !== undefined) {
+      await firstDiff
+      return runGit(args, cwd)
+    }
+    const answered = runGit(args, cwd).then((result) => {
+      writeFileSync(join(directory, 'README.md'), 'one\n')
+      writeFileSync(join(directory, 'b.md'), 'changed\n')
+      return result
+    })
+    firstDiff = answered
+    return answered
+  }
+  const { files } = await readGitChanges(moving, repositoryState)
+  expect(files.map((file) => [file.path, file.added, file.removed])).toEqual([['README.md', 2, 0]])
+  expect(files[0]?.patch).toContain('+++ b/README.md')
+})
+
+test('a diff too large to hold still lists every file with its counts, its patch unavailable', async () => {
+  const directory = repository()
+  commit(directory, 'b.md', 'one\n')
+  writeFileSync(join(directory, 'README.md'), 'one\ntwo\nthree\n')
+  writeFileSync(join(directory, 'b.md'), 'changed\n')
+  // What `execFile` reports when git's output passes the buffer: killed, no exit code of its own.
+  const overflowing: GitRunner = async (args, cwd) =>
+    args.includes('--patch') ? { code: -1, stdout: '', stderr: '' } : runGit(args, cwd)
+  const { files } = await readGitChanges(overflowing, await repositoryAt(directory))
+  expect(files.map((file) => [file.path, file.added, file.removed, file.patch, file.omitted])).toEqual([
+    ['README.md', 2, 0, null, 'unavailable'],
+    ['b.md', 1, 1, null, 'unavailable'],
+  ])
 })
