@@ -1512,7 +1512,7 @@ test('the Changes view lists the tree, shows the chosen file, folds a directory,
   await pane.unmount()
 })
 
-// PR #358 review: every live pane stays mounted under `hidden`, so the stats view — its panel
+// PR #358 review: every live pane stays mounted off screen, so the stats view — its panel
 // `id`, its fetches, its `stores.usage` subscription — must exist only in the pane on screen
 // (the debug column's rule, PR #94), and be back when the thread is shown again.
 test('⚠ the stats view exists only while its pane is shown, and is back when the pane is', async () => {
@@ -1521,7 +1521,7 @@ test('⚠ the stats view exists only while its pane is shown, and is back when t
   await eventually(() => expect(views()).toBe(1))
   await pane.setActive(false)
   expect(views()).toBe(0)
-  // A hidden pane still draws its transcript, but names no panel: the ids are the shown pane's.
+  // An off-screen pane still draws its transcript, but names no panel: the ids are the shown pane's.
   expect(pane.container.querySelectorAll('[id^="thread-view-"]')).toHaveLength(0)
   await pane.setActive(true)
   expect(views()).toBe(1)
@@ -1613,7 +1613,7 @@ interface MountedPage {
   readonly activeRows: () => HTMLButtonElement[]
   readonly previousRows: () => HTMLButtonElement[]
   readonly click: (button: HTMLElement) => Promise<void>
-  /** The pane laid out (not `hidden`) — exactly one when any thread exists. */
+  /** The pane on screen (not an `inert` one kept laid out under it, #370) — exactly one when any thread exists. */
   readonly visiblePanes: () => HTMLElement[]
 }
 
@@ -1647,7 +1647,7 @@ async function mountPage(options: ScriptedFetchOptions = {}): Promise<MountedPag
       })
     },
     visiblePanes: () =>
-      [...container.querySelectorAll<HTMLElement>('#thread-status')].filter((bar) => bar.closest('.hidden') === null),
+      [...container.querySelectorAll<HTMLElement>('#thread-status')].filter((bar) => bar.closest('[inert]') === null),
   }
 }
 
@@ -1677,9 +1677,7 @@ test('the Stats tab replaces the transcript in the thread on screen, and follows
   expect(tab('chat').getAttribute('aria-selected')).toBe('true')
   // Shown: in the pane on screen, and not the transcript kept laid out but `inert` under another view.
   const shown = (id: string): HTMLElement[] =>
-    [...page.container.querySelectorAll<HTMLElement>(`#${id}`)].filter(
-      (panel) => panel.closest('.hidden') === null && panel.closest('[inert]') === null,
-    )
+    [...page.container.querySelectorAll<HTMLElement>(`#${id}`)].filter((panel) => panel.closest('[inert]') === null)
   expect(shown('thread-view-chat')).toHaveLength(1)
   // Every tab's `aria-controls` names a panel that is in the page (#362 review): only the shown one has one.
   const dangling = (): string[] =>
@@ -1817,7 +1815,7 @@ test('New Thread mints a thread, lists it in the rail as current, and shows exac
   await page.click(newThread)
   await eventually(() => {
     expect(page.activeRows()).toHaveLength(2)
-    // Newest first, and the newest is current; one pane visible, the other mounted but hidden.
+    // Newest first, and the newest is current; one pane on screen, the other mounted off it.
     expect(page.activeRows().map((row) => row.getAttribute('aria-current'))).toEqual(['true', null])
     expect(page.visiblePanes()).toHaveLength(1)
     expect(page.container.querySelectorAll('#thread-status')).toHaveLength(2)

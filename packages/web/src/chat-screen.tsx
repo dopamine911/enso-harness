@@ -1564,7 +1564,10 @@ const KEEP_VIEW = (): void => undefined
  * the rail.
  *
  * Stays mounted while another thread is on screen — see `createThreadChatHook` for why hiding,
- * not unmounting, is load-bearing.
+ * not unmounting, is load-bearing. ⚠ And stays LAID OUT (#370): an off-screen pane is drawn over
+ * the shown one at its size, `invisible` and `inert`, never `hidden`. A `display: none` pane comes
+ * back resized and the stick-to-bottom scroller re-pins a reader who had scrolled up — the tabs'
+ * bug (#362 review), one level up. `inert` keeps it out of the tab order and the accessibility tree.
  *
  * ⓘ Exported for `__tests__/chat-screen.test.tsx` only, which mounts two of them to pin
  * that a hidden pane renders no debug column. Nothing else imports it.
@@ -1622,7 +1625,12 @@ export function ThreadPane({
   }, [threadId, title, chat.sessionGenerating, waiting])
   const paneView = useMemo<PaneView>(() => ({ shown: active ? view : undefined, open: onView }), [active, view, onView])
   return (
-    <div className={active ? 'flex min-h-0 min-w-0 flex-1 flex-col' : 'hidden'}>
+    <div
+      inert={!active}
+      className={
+        active ? 'flex min-h-0 min-w-0 flex-1 flex-col' : 'invisible absolute inset-0 flex min-h-0 min-w-0 flex-col'
+      }
+    >
       <ThreadStoresContext.Provider value={stores}>
         <DebugOpenContext.Provider value={debugOpen && active}>
           <PaneViewContext.Provider value={paneView}>
@@ -1745,7 +1753,8 @@ function useNarrowRail(): {
       setOpen(false)
       act(arg)
     },
-    paneClass: open ? 'flex min-w-0 flex-1 max-md:hidden' : 'flex min-w-0 flex-1',
+    // `relative`: the off-screen panes are drawn over the shown one, in this box (#370).
+    paneClass: open ? 'relative flex min-w-0 flex-1 max-md:hidden' : 'relative flex min-w-0 flex-1',
   }
 }
 
