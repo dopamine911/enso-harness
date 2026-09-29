@@ -156,11 +156,15 @@ function declaredName(line: string): string | undefined {
 
 const indentOf = (line: string): number => line.length - line.trimStart().length
 
-/** The declaration a comment documents: the next code line, or for a `//` in a body, the enclosing one. */
+/**
+ * The declaration a comment documents: the line directly after a doc comment, or for a `//` in a
+ * body, the enclosing one. ⚠ Directly after, no blank line (PR #488 review): a doc comment that a
+ * blank line separates from its declaration documents nothing TypeScript would attach it to, and
+ * skipping the gap is how a tag would drift onto whatever statement moved in under it.
+ */
 function ownerOf(file: string, lines: readonly string[], comment: Comment): Anchor | undefined {
   if (comment.style === 'block') {
-    let next = comment.end + 1
-    while (next < lines.length && (lines[next] ?? '').trim() === '') next += 1
+    const next = comment.end + 1
     const symbol = declaredName(lines[next] ?? '')
     return symbol === undefined ? undefined : { file, line: next + 1, symbol }
   }
@@ -244,10 +248,10 @@ function collectPins(file: string, lines: readonly string[], comment: Comment, i
   into.pins.push({ file, title, invariants: ids })
 }
 
-function collectFile(path: string, into: Collected): void {
+function collectFile(root: string, path: string, into: Collected): void {
   const source = readFileSync(path, 'utf8')
   if (!/^\s*(?:\*|\/\/)\s*@(?:flow|invariant|pins)\b/m.test(source)) return
-  const file = relative(ROOT, path).replaceAll('\\', '/')
+  const file = relative(root, path).replaceAll('\\', '/')
   const lines = source.split('\n')
   for (const comment of commentsOf(lines)) {
     collectPins(file, lines, comment, into)
@@ -274,11 +278,11 @@ const unescapeTemplate = (text: string): string => text.replaceAll(/\\([\s\S])/g
  * Bun's snapshot files, read as TEXT the way bun writes them (`// Bun Snapshot v1`), never
  * evaluated: a string snapshot is stored as `"<value>"` inside a template literal.
  */
-function recordedDiagrams(problems: string[]): RecordedDiagram[] {
+function recordedDiagrams(root: string, problems: string[]): RecordedDiagram[] {
   const diagrams: RecordedDiagram[] = []
-  const snapshots = [...new Bun.Glob('packages/*/src/**/__snapshots__/*.snap').scanSync({ cwd: ROOT })].sort()
+  const snapshots = [...new Bun.Glob('packages/*/src/**/__snapshots__/*.snap').scanSync({ cwd: root })].sort()
   for (const snapshot of snapshots) {
-    const source = readFileSync(join(ROOT, snapshot), 'utf8')
+    const source = readFileSync(join(root, snapshot), 'utf8')
     const file = join(dirname(dirname(snapshot)), basename(snapshot, '.snap'))
     for (const [, rawKey = '', rawValue = ''] of source.matchAll(SNAPSHOT_ENTRY)) {
       const key = unescapeTemplate(rawKey)
@@ -342,11 +346,12 @@ function coherence(model: Omit<FlowModel, 'problems'>): string[] {
   ]
 }
 
-export function collectFlows(): FlowModel {
+/** `root`: the repository, unless a test points the scan at a fixture tree of the same shape. */
+export function collectFlows(root: string = ROOT): FlowModel {
   const into: Collected = { flows: [], invariants: [], pins: [], problems: [] }
-  const files = SCAN_ROOTS.flatMap((root) => filesUnder(join(ROOT, root)))
-  for (const path of files) collectFile(path, into)
-  const diagrams = recordedDiagrams(into.problems)
+  const files = SCAN_ROOTS.flatMap((scanRoot) => filesUnder(join(root, scanRoot)))
+  for (const path of files) collectFile(root, path, into)
+  const diagrams = recordedDiagrams(root, into.problems)
   const model = { flows: into.flows, invariants: into.invariants, pins: into.pins, diagrams }
   return { ...model, problems: [...into.problems, ...coherence(model)] }
 }
