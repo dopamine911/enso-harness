@@ -597,7 +597,10 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
    *     thread queues through pi (#75) — the 409 that guarded the old per-response run
    *     path guarded nothing here and locked the operator out of their own question.
    *   • NOT here: the file, with the mode its branch persists. Neither: 404 — the one thing
-   *     this route decides that the follow decides differently (`present`).
+   *     this route decides that the follow decides differently (`present`). A page reads a 404
+   *     for its URL's thread as an id nobody has used yet, and starts it (#378).
+   *   • A file in a directory that is no project here: 403, naming the directory — it exists,
+   *     so it is not a 404 a page would start afresh (#378).
    *
    * The read itself is `thread-read.ts#readThreadMount` (#214), shared with the follow's
    * snapshot: HERE is settled AFTER the file read, so a thread built during it is served
@@ -605,6 +608,16 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
    */
   async function respondWithThreadHistory(threadId: string, response: ServerResponse): Promise<void> {
     const mount = await readThreadMount(threadRead, threadId)
+    // #378: stored, but in a directory that is no project here — refused by name, so a page does
+    // not take it for an id nobody has used and start it afresh (a 404 means exactly that).
+    if (mount.storedOutside !== undefined) {
+      response.writeHead(403, { 'Content-Type': 'text/plain' })
+      // The directory FIRST and no thread id (the URL has it): a page bounds a failure to 120
+      // characters (`boundedFailureDetail`), and the directory is the part that must survive. The
+      // rest is 57 characters, so the advice survives too up to a 63-character directory (#478 review).
+      response.end(`stored in ${mount.storedOutside} — not a project here; add it as one to open it`)
+      return
+    }
     if (!mount.present || mount.projectId === undefined) {
       response.writeHead(404, { 'Content-Type': 'text/plain' })
       response.end(`no session for thread ${threadId}`)

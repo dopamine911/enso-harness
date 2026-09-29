@@ -2007,3 +2007,65 @@ test('a stored listing the server cannot serve is said in the rail, and the page
   await flush(async () => root.unmount())
   container.remove()
 })
+
+/** The URL names `threadId`, and the page is told the way back/forward tells it. */
+async function visitThreadUrl(threadId: string): Promise<void> {
+  await flush(async () => {
+    window.history.pushState(null, '', `?thread=${threadId}`)
+    window.dispatchEvent(new PopStateEvent('popstate'))
+    await tick()
+  })
+}
+
+const railAlerts = (container: HTMLElement): string[] =>
+  [...container.querySelectorAll('#threads-rail [role="alert"]')].map((alert) => alert.textContent ?? '')
+
+// #378: the page writes a fresh thread's id to the URL before its first prompt. If the server
+// restarts, or drops the empty thread, before that prompt, the URL names an id the server has never
+// held: a 404. That is no error — the thread is started under the id the URL already names.
+test("⚠ the URL's own thread, never held by the server, is started under that id: no error, the Start dialog open (#378)", async () => {
+  const page = await mountPage()
+  const unused = crypto.randomUUID()
+  try {
+    await visitThreadUrl(unused)
+    await eventually(() => {
+      expect(threadListStore.get().map((thread) => thread.threadId)).toContain(unused)
+      // Radix renders the dialog into `document.body`, not inside the page's container.
+      expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Start a session')
+    })
+    expect(window.location.search).toBe(`?thread=${unused}`)
+    expect(railAlerts(page.container)).toEqual([])
+  } finally {
+    window.history.replaceState(null, '', '/')
+    await page.unmount()
+  }
+})
+
+// #378: a thread stored in a directory that is no project here is not an unused id. It is refused
+// by name, on the rail's own line for a thread that would not open — never as a list that failed.
+test('a thread stored outside the projects is said on its own rail line, never as the listing failing (#378)', async () => {
+  const server = createScriptedFetch()
+  const outside = crypto.randomUUID()
+  const refusal = 'stored in /elsewhere — not a project here; add it as one to open it'
+  globalThis.fetch = ((input: string | URL | Request, init?: RequestInit): Promise<Response> =>
+    requestedUrl(input).endsWith(`/api/threads/${outside}/history`)
+      ? Promise.resolve(new Response(refusal, { status: 403 }))
+      : server.fetch(input, init)) as typeof fetch
+  const container = document.createElement('div')
+  document.body.appendChild(container)
+  const root: Root = createRoot(container)
+  try {
+    await flush(async () => {
+      root.render(<ChatScreen />)
+    })
+    await flush(tick)
+    await visitThreadUrl(outside)
+    await eventually(() => expect(railAlerts(container)).toEqual([`could not open the thread: 403 ${refusal}`]))
+    // Not started under its id: it is someone's stored thread, just not one this server serves.
+    expect(threadListStore.get().map((thread) => thread.threadId)).not.toContain(outside)
+  } finally {
+    window.history.replaceState(null, '', '/')
+    await flush(async () => root.unmount())
+    container.remove()
+  }
+})

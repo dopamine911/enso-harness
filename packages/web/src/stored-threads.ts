@@ -41,9 +41,14 @@ async function fetchStoredThreadList(): Promise<unknown> {
   return response.json()
 }
 
-/** A stored thread's history, for `adoptThread`; a non-2xx throws with the status in the message. */
-export async function fetchThreadHistory(threadId: string): Promise<EnsoThreadHistory> {
+/**
+ * A stored thread's history, for `adoptThread`. `undefined` when the server holds nothing under the
+ * id — its 404, an id nobody has used yet (#378); any other non-2xx throws with the status in the
+ * message, a 403 naming where a thread outside the projects is stored among them.
+ */
+export async function fetchThreadHistory(threadId: string): Promise<EnsoThreadHistory | undefined> {
   const response = await fetch(`/api/threads/${encodeURIComponent(threadId)}/history`)
+  if (response.status === 404) return undefined
   if (!response.ok) throw new Error(await describeFailedResponse(response))
   const payload: unknown = await response.json()
   if (!Check(EnsoThreadHistory, payload)) throw new Error("the server's history payload did not match its schema")
@@ -62,11 +67,17 @@ export async function fetchThreadHistory(threadId: string): Promise<EnsoThreadHi
  * Each request carries its own `intent` — what the caller meant by it — and gets it back
  * with the outcome (PR #143 review): a shared "how did the latest one happen" slot is wrong
  * the moment two requests overlap, and the boot's resume and a rail click can.
+ *
+ * Three outcomes, not two (#378): a history, a failure, or ABSENT — the server holds nothing under
+ * the id. Absent is not a failure: what it means is the caller's, by where the id came from. The
+ * URL's own thread before its first prompt is absent after a server restart, and is started; a
+ * rail row that is absent went stale, and is said.
  */
 export function createResumeRequests<TIntent>(
-  fetchHistory: (threadId: string) => Promise<EnsoThreadHistory>,
+  fetchHistory: (threadId: string) => Promise<EnsoThreadHistory | undefined>,
   onHistory: (history: EnsoThreadHistory, intent: TIntent) => void,
   onFailure: (message: string, intent: TIntent) => void,
+  onAbsent: (threadId: string, intent: TIntent) => void,
 ): (threadId: string, intent: TIntent) => void {
   let latest: string | undefined
   return (threadId: string, intent: TIntent) => {
@@ -75,7 +86,8 @@ export function createResumeRequests<TIntent>(
       (history) => {
         if (latest !== threadId) return
         latest = undefined
-        onHistory(history, intent)
+        if (history === undefined) onAbsent(threadId, intent)
+        else onHistory(history, intent)
       },
       (failure: unknown) => {
         if (latest !== threadId) return

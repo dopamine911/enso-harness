@@ -103,6 +103,11 @@ export interface ThreadsRailProps {
   readonly earlier: readonly EnsoStoredThread[]
   /** Why a list could not be fetched, or undefined. Shown above the sections. */
   readonly earlierError: string | undefined
+  /**
+   * Why a thread could not be opened — the URL's, a row's, a fork's (#378) — said as that, never as
+   * a list that failed. Absent, or undefined, is nothing to say.
+   */
+  readonly openError?: string | undefined
   readonly onSelect: (threadId: string) => void
   readonly onResume: (threadId: string) => void
   /** Start a thread in this project; `undefined` when the page knows no project yet (the server's launch directory). */
@@ -484,6 +489,7 @@ export function ThreadsRail({
   activeThreadId,
   earlier,
   earlierError,
+  openError,
   onSelect,
   onResume,
   onNew,
@@ -513,6 +519,11 @@ export function ThreadsRail({
         {earlierError !== undefined ? (
           <div role="alert" className="px-2 text-xs text-destructive">
             could not list threads: {earlierError}
+          </div>
+        ) : null}
+        {openError !== undefined ? (
+          <div role="alert" className="px-2 text-xs text-destructive">
+            could not open the thread: {openError}
           </div>
         ) : null}
         {projectNotice !== undefined ? (

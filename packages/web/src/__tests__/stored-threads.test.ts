@@ -76,8 +76,8 @@ test('the earlier list excludes every session already owned by this page', () =>
 // ── last click wins (PR #104 review) ─────────────────────────────────────────
 
 interface Deferred {
-  promise: Promise<EnsoThreadHistory>
-  resolve: (history: EnsoThreadHistory) => void
+  promise: Promise<EnsoThreadHistory | undefined>
+  resolve: (history: EnsoThreadHistory | undefined) => void
   reject: (error: Error) => void
 }
 
@@ -87,8 +87,10 @@ interface Deferred {
  * to the same promise first — so no timer stands in for "the response was processed".
  */
 function controlledHistory(): {
-  fetch: (threadId: string) => Promise<EnsoThreadHistory>
+  fetch: (threadId: string) => Promise<EnsoThreadHistory | undefined>
   resolve: (threadId: string) => Promise<void>
+  /** The server holds nothing under the id (#378): the fetch's 404. */
+  absent: (threadId: string) => Promise<void>
   reject: (threadId: string, message: string) => Promise<void>
 } {
   const pending = new Map<string, Deferred>()
@@ -99,7 +101,7 @@ function controlledHistory(): {
     )
   return {
     fetch: (threadId: string) => {
-      const deferred = Promise.withResolvers<EnsoThreadHistory>()
+      const deferred = Promise.withResolvers<EnsoThreadHistory | undefined>()
       pending.set(threadId, deferred)
       return deferred.promise
     },
@@ -107,6 +109,10 @@ function controlledHistory(): {
       pending
         .get(threadId)
         ?.resolve({ threadId, projectId: 'p-launch', messages: [], permissionMode: { mode: 'default', available: [] } })
+      return settled(threadId)
+    },
+    absent: (threadId: string) => {
+      pending.get(threadId)?.resolve(undefined)
       return settled(threadId)
     },
     reject: (threadId: string, message: string) => {
@@ -124,6 +130,7 @@ test('⚠ two clicks before the first history lands: the FIRST response is dropp
     history.fetch,
     (next) => applied.push(next.threadId),
     (m) => failures.push(m),
+    (absentId) => failures.push(`absent ${absentId}`),
   )
   resume('first', undefined)
   resume('second', undefined)
@@ -143,6 +150,7 @@ test("a superseded request's failure is not shown; the latest request's failure 
     history.fetch,
     (next) => applied.push(next.threadId),
     (m) => failures.push(m),
+    (absentId) => failures.push(`absent ${absentId}`),
   )
   resume('first', undefined)
   resume('second', undefined)
@@ -157,21 +165,28 @@ test("a superseded request's failure is not shown; the latest request's failure 
 })
 
 // The boot's resume and a rail click can overlap (PR #143 review): each outcome must carry
-// what ITS request meant, never what the latest request meant.
-test("each outcome carries its own request's intent, not the latest request's", async () => {
+// what ITS request meant, never what the latest request meant. Absent (#378) is its own outcome —
+// neither a history nor a failure — and a superseded one is dropped like the others.
+test("each outcome carries its own request's intent, not the latest request's — absent included", async () => {
   const history = controlledHistory()
   const seen: Array<[string, string]> = []
   const resume = createResumeRequests<string>(
     history.fetch,
-    (next, intent) => seen.push([next.threadId, intent]),
-    (message, intent) => seen.push([message, intent]),
+    (next, intent) => seen.push([`history ${next.threadId}`, intent]),
+    (message, intent) => seen.push([`failure ${message}`, intent]),
+    (threadId, intent) => seen.push([`absent ${threadId}`, intent]),
   )
   resume('first', 'pop')
   await history.resolve('first')
   resume('second', 'push')
   await history.reject('second', 'second went away')
+  resume('unused', 'pop')
+  resume('clicked', 'push')
+  await history.absent('unused') // superseded by the click: dropped, not started
+  await history.absent('clicked')
   expect(seen).toEqual([
-    ['first', 'pop'],
-    ['second went away', 'push'],
+    ['history first', 'pop'],
+    ['failure second went away', 'push'],
+    ['absent clicked', 'push'],
   ])
 })
