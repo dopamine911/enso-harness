@@ -18,7 +18,7 @@ The **Stats** tab analyses one thread: what it cost, how the cache behaved, whic
 3. **Cost per turn**, with the median beside the title.
 4. **Costliest calls**: the tool calls ranked by input, output, time or failures.
 
-Further down: **Cumulative usage by tool**, **Distribution**, **Costliest prompts** and **Latency**.
+Further down: **Cumulative usage by tool**, **Distribution**, **Costliest prompts** and **Latency**, then the thread's [Session eval](./session-eval.md).
 
 ## What to look for
 

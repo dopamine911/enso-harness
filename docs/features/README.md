@@ -15,7 +15,7 @@ If you want to know how Enso works inside, start at [the architecture](../archit
 | [Context](./context.md) | What the next request is made of, and how the context grew request by request. |
 | [Context browser](./context-browser.md) | Opening any request to see exactly what the model received. |
 | [Stats](./stats.md) | What a thread spent, and on what: tokens, cache, cost per turn, and the costliest calls. |
-| [Session eval](./session-eval.md) | A thread's scorecard and timeline from the command line: what the person did, what the agent did. |
+| [Session eval](./session-eval.md) | A thread's scorecard and timeline, on the Stats tab or from the command line: what the person did, what the agent did. |
 | [Web access](./web-access.md) | How pi reads the web: `web_fetch` with an allowlist, and `web_search`. |
 | [Logs and debugging](./logs-and-debugging.md) | Reading the day's log, the debug views, and a bundle to attach to an issue. |
 | [Terminal](./terminal.md) | Running pi in your terminal with Enso loaded, sharing one login with the browser. |

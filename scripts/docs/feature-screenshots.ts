@@ -535,6 +535,32 @@ async function stats(page: Page, threadId: string): Promise<void> {
   ])
 }
 
+/** The session eval under the stats (#441): its scorecard, then its timeline. */
+async function sessionEval(page: Page, threadId: string): Promise<void> {
+  await openThread(page, threadId)
+  await tab(page, 'Stats')
+  const panel = page.getByRole('region', { name: 'session eval' })
+  const title = panel.getByText('Session eval', { exact: true })
+  await title.waitFor()
+  await scrollToTop(title)
+  await shoot(page, 'session-eval', [
+    { target: title, label: '1' },
+    { target: panel.getByText('corrections', { exact: true }), label: '2' },
+    { target: panel.getByText('refusal channels', { exact: true }), label: '3' },
+  ])
+  const timeline = panel.getByText('Timeline', { exact: true })
+  await scrollToTop(timeline)
+  await shoot(
+    page,
+    'session-eval-timeline',
+    [
+      { target: timeline, label: '1' },
+      { target: panel.getByText('f= typed against the run · r= clicked against it'), label: '2' },
+    ],
+    [timeline, panel.getByRole('list', { name: 'eval timeline' })],
+  )
+}
+
 async function debugging(page: Page, threadId: string): Promise<void> {
   await page.goto(`${WEB}/?debug&thread=${threadId}`)
   await page.getByText('session debug').waitFor()
@@ -622,6 +648,7 @@ const LIVE_SHOTS = [
   context,
   contextBrowser,
   stats,
+  sessionEval,
   debugging,
   settings,
   commandPalette,
@@ -733,14 +760,6 @@ async function main(): Promise<void> {
     if (threadId === '')
       throw new Error(`feature-screenshots: the session did not finish (model log: ${modelLog})\n${failed.join('\n')}`)
     for (const shot of LIVE_SHOTS) await attempt(browser, shot.name, (page) => shot(page, threadId), failed)
-    // The session eval has no page yet (#441): its sample on `session-eval.md` is this output.
-    const evaluation = spawnSync(process.execPath, ['run', '--silent', 'eval', threadId], {
-      cwd: ROOT,
-      encoding: 'utf8',
-    })
-    process.stdout.write(
-      `feature-screenshots: \`bun run eval\` on the session:\n${evaluation.stdout}${evaluation.stderr}\n`,
-    )
 
     // A cold thread is one no session holds: restart the stack, and the thread is read off its file.
     await stopStack(stack)
