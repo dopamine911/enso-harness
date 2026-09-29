@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, expect, test } from 'bun:test'
+import { afterAll, beforeAll, expect, setSystemTime, test } from 'bun:test'
 import { createHash } from 'node:crypto'
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
@@ -1121,15 +1121,23 @@ test('a fork of a thread idle for hours lists as made now, and sorts above a thr
   )
   const active = crypto.randomUUID()
   storeTurns(active, [['recent question', 'recent answer']])
-  const host = hostWith()
-  const forkedAt = Date.now()
-  const forked = await host.forkThread(source, userEntryIds[1] ?? '')
-  if (forked.kind !== 'forked') throw new Error(`the fork was refused: ${forked.reason}`)
-  // pi writes a fork's file only once it holds an assistant message; this one copies one.
-  const listed = await host.listSessions()
-  const index = (id: string): number => listed.findIndex((stored) => stored.id === id)
-  expect(listed[index(forked.threadId)]?.modified.getTime()).toBeGreaterThanOrEqual(forkedAt - 1000)
-  expect(index(forked.threadId)).toBeLessThan(index(active))
+  // ⚠ A listing orders by millisecond, and a tie has no order. Warm, storing `active` and forking
+  // fit in ONE millisecond (measured: about half of 200 reruns tied, and it failed a gate run), so
+  // the fork is made on a clock set a second later — the runtime stamps the fork's header from it.
+  setSystemTime(new Date(Date.now() + 1000))
+  try {
+    const host = hostWith()
+    const forkedAt = Date.now()
+    const forked = await host.forkThread(source, userEntryIds[1] ?? '')
+    if (forked.kind !== 'forked') throw new Error(`the fork was refused: ${forked.reason}`)
+    // pi writes a fork's file only once it holds an assistant message; this one copies one.
+    const listed = await host.listSessions()
+    const index = (id: string): number => listed.findIndex((stored) => stored.id === id)
+    expect(listed[index(forked.threadId)]?.modified.getTime()).toBeGreaterThanOrEqual(forkedAt - 1000)
+    expect(index(forked.threadId)).toBeLessThan(index(active))
+  } finally {
+    setSystemTime()
+  }
 })
 
 test('⚠ forking at the first prompt gives an EMPTY thread that names its parent — listed untitled, and it resumes under its id (#433)', async () => {
