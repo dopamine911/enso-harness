@@ -13,6 +13,7 @@ import { createFakeAgentHost, createFakeHostedThread } from './fake-hosted-threa
 const REPOSITORY: EnsoGitState = {
   kind: 'repository',
   root: '/work/live',
+  scope: '',
   head: 'f00d',
   branch: 'main',
   upstream: 'origin/main',

@@ -11,6 +11,7 @@ import { baselineText } from './thread-git.tsx'
 /**
  * The Changes view (#452): every file in the thread's project that differs from the last push, as
  * a tree, and the chosen file's diff side by side — the old file on the left, the new on the right.
+ * A project inside a larger repository shows its own directory's files only (`scope`).
  * Off `GET /api/threads/:threadId/changes`, which diffs the working tree against the baseline #453
  * resolves, so unpushed commits, staged and unstaged edits and new files all show, however they
  * were made: an `edit`, a `write`, or a `sed -i` in `bash`.
@@ -20,8 +21,8 @@ import { baselineText } from './thread-git.tsx'
  * file on screen stays chosen across reads while it still differs.
  *
  * ⚠ ONLY WHAT GIT SENT. Unchanged lines between hunks are git's three lines of context and a count
- * of what it left out; a binary file, or one past the size a page is sent, says so instead of a
- * diff. Nothing here reads the files themselves.
+ * of what it left out; a binary file, one past the size a page is sent, or one git did not diff says
+ * so instead of a diff. Nothing here reads the files themselves.
  */
 
 /** What the view holds: nothing yet (a thread nothing has run in), the changes, or why not. */
@@ -212,6 +213,7 @@ function Hunk({
 function omittedText(change: EnsoGitFileChange): string {
   if (change.omitted === 'binary') return 'A binary file: there are no lines to compare.'
   if (change.omitted === 'too-large') return 'Too large to show here. Run git diff on this file to see it.'
+  if (change.omitted === 'unavailable') return 'git did not produce this diff. Run git diff on this file to see it.'
   return 'git reported no line changes: a mode change, or an empty file.'
 }
 
@@ -279,6 +281,14 @@ function RepositoryChanges({
         <span className="text-muted-foreground" title="as this clone last saw the remote — Enso never fetches">
           {baselineText(repository)}
         </span>
+        {repository.scope === '' ? null : (
+          <span
+            className="font-mono text-xs text-muted-foreground"
+            title="files outside this directory are not compared"
+          >
+            in {repository.scope}
+          </span>
+        )}
         <span className="ml-auto text-xs text-muted-foreground">
           {files.length}
           {truncated ? '+' : ''} {files.length === 1 ? 'file' : 'files'} · <Counts added={added} removed={removed} />

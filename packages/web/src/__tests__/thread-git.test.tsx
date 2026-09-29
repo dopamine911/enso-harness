@@ -13,6 +13,7 @@ import { changesText, GitIndicator, type GitOutcome, readThreadGit, settledToolR
 const REPOSITORY: EnsoGitRepository = {
   kind: 'repository',
   root: '/work/shop-api',
+  scope: '',
   head: '0123456789abcdef',
   branch: 'feature-x',
   upstream: 'origin/feature-x',

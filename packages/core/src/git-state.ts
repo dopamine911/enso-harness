@@ -82,6 +82,12 @@ export const EnsoGitRepository = Type.Object(
     kind: Type.Literal('repository'),
     /** The working tree's top level (`git rev-parse --show-toplevel`). */
     root: Type.String({ minLength: 1 }),
+    /**
+     * Where the cwd sits in the working tree (`git rev-parse --show-prefix`): `''` at the top level,
+     * else a `/`-ended path. `changes` and the changed files are this directory's alone; the commits
+     * (`ahead`, `behind`) are the whole repository's.
+     */
+    scope: Type.String(),
     /** `HEAD`'s commit; `null` before the first commit. */
     head: Type.Union([Type.String({ minLength: 1 }), Type.Null()]),
     /** The checked-out branch, short; `null` when HEAD is detached. */
@@ -93,7 +99,7 @@ export const EnsoGitRepository = Type.Object(
     ahead: Count,
     /** Commits on `baseline.ref` that HEAD does not have; 0 when there is no ref. */
     behind: Count,
-    /** Files by where their changes sit (`git status`); one file can be staged and unstaged. */
+    /** Files under `scope` by where their changes sit (`git status`); one file can be staged and unstaged. */
     changes: Type.Object(
       { staged: Count, unstaged: Count, untracked: Count, conflicted: Count },
       { additionalProperties: false },
@@ -169,13 +175,16 @@ export const EnsoGitFileChange = Type.Object(
     /** The path it had at the baseline, for a rename or copy; `null` otherwise. */
     oldPath: Type.Union([Type.String({ minLength: 1 }), Type.Null()]),
     status: EnsoGitFileStatus,
-    /** Lines added and removed; `null` for a binary file, or one too large to read. */
+    /** Lines added and removed; `null` for a binary file, or when git did not count them. */
     added: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
     removed: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
     /** git's unified diff for this file, headers included; `null` when `omitted` says why not. */
     patch: Type.Union([Type.String(), Type.Null()]),
-    /** Why there is no patch: a binary file, or one past the size a page is sent. */
-    omitted: Type.Union([Type.Literal('binary'), Type.Literal('too-large'), Type.Null()]),
+    /**
+     * Why there is no patch: a binary file, one past the size a page is sent, or one git did not
+     * produce (its diff ran out of time or output, or did not account for every file).
+     */
+    omitted: Type.Union([Type.Literal('binary'), Type.Literal('too-large'), Type.Literal('unavailable'), Type.Null()]),
   },
   { additionalProperties: false },
 )

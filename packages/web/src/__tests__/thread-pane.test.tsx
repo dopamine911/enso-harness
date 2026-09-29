@@ -1380,6 +1380,7 @@ test('the status bar reads git on mount and again when a tool result settles (#4
         return {
           kind: 'repository',
           root: '/scripted/launch',
+          scope: '',
           head: 'f00d',
           branch: 'main',
           upstream: 'origin/main',
@@ -1432,6 +1433,7 @@ test('the Changes view lists the tree, shows the chosen file, folds a directory,
   const repository: EnsoGitRepository = {
     kind: 'repository',
     root: '/scripted/launch',
+    scope: '',
     head: 'f00d',
     branch: 'main',
     upstream: 'origin/main',

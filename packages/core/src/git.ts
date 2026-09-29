@@ -94,8 +94,20 @@ const GIT_LOCAL_VARIABLES: Record<string, true> = {
 /** What every query runs under, whatever the environment says. */
 const GIT_READ_ONLY_VARIABLES = { GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0', GIT_PAGER: 'cat' }
 
-/** Config forced on the command line: a program the repository names must not run on a read. */
-const GIT_READ_ONLY_CONFIG = ['-c', 'core.fsmonitor=false']
+/**
+ * Config forced on the command line, whatever the repository or the user sets. No program the
+ * repository names runs on a read (`core.fsmonitor`), and a diff reads the way its reader parses
+ * it: a blank context line keeps its leading space (`diff.suppressBlankEmpty`), and a submodule is
+ * one `diff --git` part like any other file (`diff.submodule`).
+ */
+const GIT_READ_ONLY_CONFIG = [
+  '-c',
+  'core.fsmonitor=false',
+  '-c',
+  'diff.suppressBlankEmpty=false',
+  '-c',
+  'diff.submodule=short',
+]
 
 /** The exit code in an `execFile` error: git's own, or -1 for a git that never ran or was killed. */
 function exitCode(error: (Error & { code?: unknown; killed?: boolean }) | null): number {
@@ -290,17 +302,18 @@ async function aheadBehind(
  * @group Git
  */
 export async function readGitState(runGit: GitRunner, cwd: string): Promise<EnsoGitState> {
-  const located = await runGit(['rev-parse', '--show-toplevel', '--absolute-git-dir'], cwd)
+  const located = await runGit(['rev-parse', '--show-toplevel', '--absolute-git-dir', '--show-prefix'], cwd)
   if (located.code !== 0) {
     return NOT_A_WORKING_TREE.test(located.stderr)
       ? { kind: 'not-a-repository' }
       : { kind: 'unavailable', reason: reasonOf(located) }
   }
-  const [root, gitDirectory] = located.stdout.trim().split('\n')
-  if (root === undefined || root === '' || gitDirectory === undefined) {
+  // `--show-prefix` prints an empty line at the top level.
+  const [root, gitDirectory, scope = ''] = located.stdout.split('\n')
+  if (root === undefined || root === '' || gitDirectory === undefined || gitDirectory === '') {
     return { kind: 'unavailable', reason: 'git named no working tree' }
   }
-  const statusResult = await runGit(['status', '--porcelain=v2', '--branch', '-z'], cwd)
+  const statusResult = await runGit(['status', '--porcelain=v2', '--branch', '-z', '--', scopePathspec(scope)], cwd)
   if (statusResult.code !== 0) return { kind: 'unavailable', reason: reasonOf(statusResult) }
   const status = parseStatus(statusResult.stdout)
   const baseline = await resolveBaseline(runGit, cwd, status)
@@ -308,6 +321,7 @@ export async function readGitState(runGit: GitRunner, cwd: string): Promise<Enso
   return {
     kind: 'repository',
     root,
+    scope,
     head: status.head,
     branch: status.branch,
     upstream: status.upstream,
@@ -317,6 +331,15 @@ export async function readGitState(runGit: GitRunner, cwd: string): Promise<Enso
     changes: status.changes,
     operation: operationIn(gitDirectory),
   }
+}
+
+/**
+ * The files under `scope` and nothing else: from the top level whatever the cwd (`top`), and
+ * character for character, so a directory named `[x]` or `*` is not a pattern (`literal`). An empty
+ * scope is the whole working tree.
+ */
+function scopePathspec(scope: string): string {
+  return `:(top,literal)${scope}`
 }
 
 // ── What changed since the baseline (#452) ─────────────────────────────────────────────────────
@@ -364,17 +387,19 @@ const UNCOUNTED: LineCounts = { added: null, removed: null }
  * `git diff --raw --numstat [--patch] -z`: every file's raw record (`:modes hashes status`, then its
  * path — two paths for a rename or copy, whose status carries a similarity score, `R087`), then every
  * file's numstat record (`-` counts for a binary file; a rename's `added\tremoved\t` with its two
- * paths as their own fields), then — with `--patch` — an empty field and the unified diff.
+ * paths as their own fields), then — with `--patch` — an empty field and the unified diff, split
+ * into its `diff --git` parts.
  *
- * ⚠ One run is one walk of one diff: the three lists are the same files in the same order, so the
- * position pairs them exactly. Separate runs do not — the working tree moves under a run between
- * them, and a file that stopped differing while another started would get that file's patch.
- * A status this reader does not know keeps its place, as `undefined`, and is dropped by the caller.
+ * ⚠ One run is one walk of one diff: the lists are the same files in the same order, so the
+ * position pairs them (`patchesFor`). Separate runs do not — the working tree moves under a run
+ * between them, and a file that stopped differing while another started would get that file's
+ * patch. A status this reader does not know keeps its place, as `undefined`, and is dropped by the
+ * caller.
  */
 function parseDiff(output: string): {
   listed: Array<ListedFile | undefined>
   counts: LineCounts[]
-  patches: string[]
+  parts: string[]
 } {
   const fields = output.split('\0')
   const cursor = { at: 0 }
@@ -388,7 +413,7 @@ function parseDiff(output: string): {
   }
   // `--patch` separates the unified diff from the records with one empty field.
   if (fields[cursor.at] === '') cursor.at += 1
-  return { listed, counts, patches: splitPatches(fields.slice(cursor.at).join('\0')) }
+  return { listed, counts, parts: splitPatches(fields.slice(cursor.at).join('\0')) }
 }
 
 /** The raw record at the cursor, which it steps past; `undefined` for a status this reader does not know. */
@@ -441,13 +466,32 @@ function withPatch(
   budget: { left: number },
 ): EnsoGitFileChange {
   const change = { ...file, ...counts }
-  if (patch !== undefined && isBinaryPatch(patch))
-    return { ...change, added: null, removed: null, patch: null, omitted: 'binary' }
-  if (patch === undefined || patch.length > MAX_PATCH_CHARS || patch.length > budget.left) {
+  if (patch === undefined) return { ...change, patch: null, omitted: 'unavailable' }
+  if (isBinaryPatch(patch)) return { ...change, added: null, removed: null, patch: null, omitted: 'binary' }
+  if (patch.length > MAX_PATCH_CHARS || patch.length > budget.left) {
     return { ...change, patch: null, omitted: 'too-large' }
   }
   budget.left -= patch.length
   return { ...change, patch, omitted: null }
+}
+
+/**
+ * Each listed file's patch, in order; `undefined` when the parts do not account for the list.
+ * ⚠ A type change (a file that became a symlink, or back) is TWO parts under one header — git
+ * writes the old file's deletion, then the new one's creation — and is sent as both.
+ */
+function patchesFor(listed: ReadonlyArray<ListedFile | undefined>, parts: readonly string[]): string[] | undefined {
+  const patches: string[] = []
+  let partIndex = 0
+  for (const file of listed) {
+    const part = parts[partIndex] ?? ''
+    const next = parts[partIndex + 1]
+    const header = part.slice(0, part.indexOf('\n') + 1)
+    const twoParts = file?.status === 'type-changed' && next?.startsWith(header) === true
+    patches.push(twoParts ? part + next : part)
+    partIndex += twoParts ? 2 : 1
+  }
+  return partIndex === parts.length ? patches : undefined
 }
 
 /** The tree git compares an unborn branch with: the empty tree, in this repository's hash. */
@@ -456,26 +500,27 @@ async function emptyTree(runGit: GitRunner, root: string): Promise<string | null
   return hashed.code === 0 ? hashed.stdout.trim() : null
 }
 
-/** Tracked files that differ from `base`, in the working tree: committed, staged or not. */
+/** Tracked files under `scope` that differ from `base`, in the working tree: committed, staged or not. */
 async function trackedChanges(
   runGit: GitRunner,
-  root: string,
+  repository: EnsoGitRepository,
   base: string,
   budget: { left: number },
 ): Promise<EnsoGitFileChange[]> {
   const listing = ['diff', ...DIFF_OPTIONS, '--raw', '--numstat', '-z']
-  const whole = await runGit([...listing, '--patch', base, '--'], root)
+  const range = [base, '--', scopePathspec(repository.scope)]
+  const whole = await runGit([...listing, '--patch', ...range], repository.root)
   // Too much output to hold, or no answer in time: the files and their counts, without patches.
-  const read = whole.code === 0 ? whole : await runGit([...listing, base, '--'], root)
+  const read = whole.code === 0 ? whole : await runGit([...listing, ...range], repository.root)
   if (read.code !== 0) throw new Error(reasonOf(read))
-  const { listed, counts, patches } = parseDiff(read.stdout)
-  // One patch per listed file, by construction; a split that says otherwise sends no patch rather
-  // than risk pairing a file with another's.
-  const paired = read === whole && patches.length === listed.length
+  const { listed, counts, parts } = parseDiff(read.stdout)
+  // A split that does not account for the list sends no patch rather than risk pairing a file
+  // with another's.
+  const patches = read === whole ? patchesFor(listed, parts) : undefined
   return listed.flatMap((file, fileIndex) =>
     file === undefined || file.path === ''
       ? []
-      : [withPatch(file, counts[fileIndex] ?? UNCOUNTED, paired ? patches[fileIndex] : undefined, budget)],
+      : [withPatch(file, counts[fileIndex] ?? UNCOUNTED, patches?.[fileIndex], budget)],
   )
 }
 
@@ -497,10 +542,12 @@ async function untrackedChange(
 }
 
 /**
- * Every file in `repository`'s working tree that differs from its baseline commit — commits not yet
- * pushed, staged and unstaged edits, deletions, renames — and every untracked file, each with its
- * patch while the answer has room (`MAX_*` above). Run from the repository's root, so every path is
- * the root's. A baseline of `none` (no commit yet) compares with the empty tree.
+ * Every file under `repository.scope` that differs from its baseline commit — commits not yet
+ * pushed, staged and unstaged edits, deletions, renames — and every untracked file there, each with
+ * its patch while the answer has room (`MAX_*` above). ⚠ Only the scope: a project inside a larger
+ * repository (a dotfiles repository at `$HOME`) sends its own files, never its neighbours'. Run from
+ * the repository's root, so every path is the root's. A baseline of `none` (no commit yet) compares
+ * with the empty tree.
  *
  * @group Git
  */
@@ -512,11 +559,15 @@ export async function readGitChanges(
   const base = repository.baseline.commit ?? (await emptyTree(runGit, root))
   if (base === null) throw new Error('git could not name the empty tree to compare with')
   const budget = { left: MAX_TOTAL_PATCH_CHARS }
-  const tracked = await trackedChanges(runGit, root, base, budget)
-  const listed = await runGit(['ls-files', '--others', '--exclude-standard', '-z'], root)
+  const tracked = await trackedChanges(runGit, repository, base, budget)
+  const listed = await runGit(
+    ['ls-files', '--others', '--exclude-standard', '-z', '--', scopePathspec(repository.scope)],
+    root,
+  )
+  // No list is not an empty one: the view would say nothing differs.
+  if (listed.code !== 0) throw new Error(reasonOf(listed))
   // A nested repository is listed as its directory (`vendor/lib/`), which has no diff of its own.
-  const untrackedPaths =
-    listed.code === 0 ? listed.stdout.split('\0').filter((path) => path !== '' && !path.endsWith('/')) : []
+  const untrackedPaths = listed.stdout.split('\0').filter((path) => path !== '' && !path.endsWith('/'))
   const room = Math.max(0, MAX_CHANGED_FILES - tracked.length)
   const untracked: EnsoGitFileChange[] = []
   for (const path of untrackedPaths.slice(0, room)) untracked.push(await untrackedChange(runGit, root, path, budget))

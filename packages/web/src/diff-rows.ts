@@ -63,7 +63,11 @@ function hunkLine(hunk: OpenHunk, line: string): DiffLine | undefined {
   return { kind, text: line.slice(1), oldNumber, newNumber, noNewline: false }
 }
 
-/** git's patch for one file, as hunks; a patch with none (a mode change, an empty file) has none. */
+/**
+ * git's patch for one file, as hunks; a patch with none (a mode change, an empty file) has none. A
+ * type change is two parts, the old file's deletion and the new one's creation: a second
+ * `diff --git` header ends the hunk before it, so its `---`/`+++` lines are never read as lines.
+ */
 export function parsePatch(patch: string): DiffHunk[] {
   const hunks: OpenHunk[] = []
   let open: OpenHunk | undefined
@@ -74,6 +78,8 @@ export function parsePatch(patch: string): DiffHunk[] {
       const newStart = Number(header[2])
       open = { header: line, oldStart, newStart, lines: [], nextOld: oldStart, nextNew: newStart }
       hunks.push(open)
+    } else if (line.startsWith('diff --git ')) {
+      open = undefined
     } else if (open !== undefined && line.startsWith('\\')) {
       // `\ No newline at end of file` marks the line before it.
       const last = open.lines.at(-1)

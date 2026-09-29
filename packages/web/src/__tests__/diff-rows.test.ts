@@ -43,6 +43,29 @@ test('hunks are read with their headers, and every line numbered on its own side
   ])
 })
 
+test("a type change's two parts are two hunks: the second part's headers are not lines", () => {
+  const typeChange = [
+    'diff --git a/link.md b/link.md',
+    'deleted file mode 100644',
+    '--- a/link.md',
+    '+++ /dev/null',
+    '@@ -1 +0,0 @@',
+    '-a file',
+    'diff --git a/link.md b/link.md',
+    'new file mode 120000',
+    '--- /dev/null',
+    '+++ b/link.md',
+    '@@ -0,0 +1 @@',
+    '+README.md',
+    '\\ No newline at end of file',
+    '',
+  ].join('\n')
+  expect(parsePatch(typeChange).map((hunk) => hunk.lines.map((line) => [line.kind, line.text]))).toEqual([
+    [['removed', 'a file']],
+    [['added', 'README.md']],
+  ])
+})
+
 test('the header lines above the first hunk are not lines of either file', () => {
   expect(parsePatch(PATCH).flatMap((hunk) => hunk.lines.map((line) => line.text))).not.toContain('a/src/app.ts')
 })

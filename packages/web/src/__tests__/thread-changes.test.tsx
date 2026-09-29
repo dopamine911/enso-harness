@@ -12,6 +12,7 @@ import { type ChangesOutcome, readThreadChanges, ThreadChangesView } from '../th
 const CHANGES_REPOSITORY: EnsoGitRepository = {
   kind: 'repository',
   root: '/work/shop-api',
+  scope: '',
   head: 'f00d',
   branch: 'feature-x',
   upstream: 'origin/feature-x',
