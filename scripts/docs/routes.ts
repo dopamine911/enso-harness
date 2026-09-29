@@ -196,10 +196,10 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
   ),
   THREAD_CONFIGURE_ROUTE: threadControl(
     'respondToConfigure → configureThread',
-    "path: `threadId`; body: `EnsoSessionConfiguration` — optional `systemPrompt` (a library prompt id, `system` or `append`; absent is pi's default), `model` (`provider/id`), `thinking` (a level that model supports) and `mode`; applied in that order under one lease, a value equal to the current one left alone",
+    "path: `threadId`; body: `EnsoSessionConfiguration` — optional `systemPrompt` (a library prompt id, `system` or `append`, or `null` for pi's default; absent leaves the session's as it is), `model` (`provider/id`), `thinking` (a level that model supports) and `mode`; applied in that order under one lease, a value equal to the current one left alone",
     [
       '204 empty — every step applied (the changes arrive on the follow as `model` and `permission-mode`)',
-      `${BODY_ERRORS}; 409 thread busy; 413 body too large; 422 JSON \`EnsoConfigurationRefusal\` — the step that refused (\`systemPrompt\`, \`model\`, \`thinking\`, \`mode\`) and the reason, the steps before it applied — a system prompt is refused by name when its file is missing, unreadable or unparseable, a session prompt, or empty, or the session already sent a request (before it, a new choice replaces the last); 500 handler failure`,
+      `${BODY_ERRORS}; 409 thread busy; 413 body too large; 422 JSON \`EnsoConfigurationRefusal\` — the step that refused (\`systemPrompt\`, \`model\`, \`thinking\`, \`mode\`) and the reason, the steps before it applied — a system prompt is refused by name when its id is not a library name, its file is missing, unreadable or unparseable, a session prompt, or empty, or the session already sent a request (before it, a new choice — pi's default included — replaces the last); 500 handler failure`,
     ],
     { builds: 'yes' },
   ),
@@ -228,7 +228,7 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
   THREAD_SYSTEM_PROMPT_ROUTE: threadRead(
     'respondWithSystemPromptPreview → HostedThread.previewSystemPrompt',
     "200 `EnsoSystemPromptPreview` JSON — pi's rendering of the next request's system prompt with that prompt, section by section (who wrote each: the library or pi), the tool definitions sent beside it, and the total the Context tab prices a first request made with it at; the thread's own choice is untouched",
-    "400 malformed thread id; 403 untrusted origin; 404 a prompt named on a server without a library; 409 thread running; 422 the prompt is refused, with the reason naming it — missing, unreadable or unparseable, a session prompt, or empty; 500 pi's rendering does not split back into its sections, or handler failure",
+    "400 malformed thread id; 403 untrusted origin; 404 a prompt named on a server without a library; 409 thread running; 422 the prompt is refused, with the reason naming it — missing, unreadable or unparseable, a session prompt, or empty — or pi's rendering with it does not split back into its sections; 500 pi's rendering of its default does not split back, or handler failure",
     {
       path: '/api/threads/:threadId/system-prompt',
       input:
@@ -244,7 +244,7 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
     success:
       "200 `EnsoSystemPromptPreview` JSON — the same preview a saved prompt gets, for the editor's breakdown while it types; nothing is recorded",
     errors:
-      "400 malformed id/body; 403 untrusted origin; 409 thread running; 413 body too large; 500 pi's rendering does not split back into its sections, or handler failure",
+      "400 malformed id/body; 403 untrusted origin; 409 thread running; 413 body too large; 422 pi's rendering with the draft does not split back into its sections (its text holds a line like one of pi's section tags); 500 handler failure",
     routeClass: 'observation',
     builds: 'yes',
     logs: 'no',
@@ -430,17 +430,20 @@ export function discoverRoutes(): ResolvedRoute[] {
     [LOGS_STATS_PATH]: readFileSync(join(ROOT, LOGS_STATS_PATH), 'utf8'),
   }
 
-  // A route constant is a regex literal, or `threadRoute('<action>')` — the server's builder for
-  // `/api/threads/<threadId>/<action>`, whose path is derived here rather than restated.
+  // A route constant is a regex literal, `threadRoute('<action>')` — the server's builder for
+  // `/api/threads/<threadId>/<action>`, whose path is derived here rather than restated — or a
+  // pattern built around the library's prompt id (`promptRoute()`, `new RegExp(`), whose metadata states its path.
   const regexRoutes: DetectedRoute[] = [
-    ...server.matchAll(/^const ([A-Z][A-Z_]*_ROUTE) = (?:\/.*\/|threadRoute\('([a-z-]+)'\))$/gm),
+    ...server.matchAll(
+      /^const ([A-Z][A-Z_]*_ROUTE) = (?:\/.*\/|threadRoute\('([a-z-]+)'\)|promptRoute\(\)|new RegExp\()$/gm,
+    ),
   ].map((match) => {
     const key = match[1] ?? ''
     const metadata = REGEX_ROUTE_METADATA[key]
     const action = match[2]
     const path = metadata?.path ?? (action === undefined ? undefined : `/api/threads/:threadId/${action}`)
-    // Only `threadRoute(...)` derives its path; a regex literal's metadata must state it.
-    if (metadata !== undefined && path === undefined) throw new Error(`routes: ${key} is a regex literal with no path`)
+    // Only `threadRoute(...)` derives its path; any other route's metadata must state it.
+    if (metadata !== undefined && path === undefined) throw new Error(`routes: ${key} has no path in its metadata`)
     return {
       key,
       method: metadata?.method ?? 'GET',

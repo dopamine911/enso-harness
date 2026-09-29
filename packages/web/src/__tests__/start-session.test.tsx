@@ -201,8 +201,9 @@ test('Start sends the three settings in one call — the effort the CHOSEN model
   // The session runs Deep at `high`; Plain cannot reason, so choosing it takes the effort to `off`.
   await chooseTypeAndStart(mounted, 'fake/plain', 'hello there')
   await eventually(() => expect(mounted.closes).toEqual([1]))
-  // pi's default system prompt is no choice at all: nothing is sent for it (#443).
-  expect(mounted.configured).toEqual([{ model: 'fake/plain', thinking: 'off', mode: 'default' }])
+  // pi's default system prompt is said as `null` (#443): a retry must be able to take back a prompt
+  // an earlier, refused Start already applied.
+  expect(mounted.configured).toEqual([{ model: 'fake/plain', thinking: 'off', mode: 'default', systemPrompt: null }])
   expect(mounted.sent).toEqual(['hello there'])
   await mounted.unmount()
 })
@@ -291,6 +292,6 @@ test("#443: a refused system prompt keeps the dialog open and says so; a missing
   expect(bare.dialog().querySelector('#start-session-saved-prompt')).toBeNull()
   await chooseTypeAndStart(bare, 'fake/deep', 'go')
   await eventually(() => expect(bare.closes).toEqual([1]))
-  expect(bare.configured).toEqual([{ model: 'fake/deep', thinking: 'high', mode: 'default' }])
+  expect(bare.configured).toEqual([{ model: 'fake/deep', thinking: 'high', mode: 'default', systemPrompt: null }])
   await bare.unmount()
 })

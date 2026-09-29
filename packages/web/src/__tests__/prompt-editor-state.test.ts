@@ -45,7 +45,7 @@ test('a save is refused for a file name that is not one, an empty name, or a nam
   const taken = new Set(['reviewer', 'haiku'])
   expect(saveRefusal(newState({ ...SAVED, id: 'Bad Name' }), taken)).toContain('lowercase words joined by hyphens')
   expect(saveRefusal(newState({ ...SAVED, id: 'fresh', name: '  ' }), taken)).toBe('the prompt needs a name')
-  expect(saveRefusal(newState({ ...SAVED, id: 'haiku' }), taken)).toBe('a prompt is already saved as haiku.md')
+  expect(saveRefusal(newState({ ...SAVED, id: 'haiku' }), taken)).toBe('haiku.md is already in the library')
   // Its own name is not taken from itself.
   expect(saveRefusal({ ...OPENED, draft: { ...OPENED.draft, body: 'x' } }, taken)).toBeUndefined()
 })
@@ -99,7 +99,7 @@ function scripted(answers: Response[]): {
 
 const readBack = (id: string): Response => Response.json({ ...SAVED, id, bytes: 1, tokens: 1 })
 
-test('⚠ a rename writes the new file FIRST, then removes the old one; a failed write removes nothing', async () => {
+test('⚠ a rename writes the new file FIRST, then removes the old one; a failed write removes nothing; a failed remove is still a save', async () => {
   const renamed = { ...OPENED, draft: { ...OPENED.draft, id: 'reviewer-v2' } }
   const server = scripted([readBack('reviewer-v2'), new Response(null, { status: 204 })])
   expect(await saveDraft(renamed, new Set(['reviewer']), server.fetch)).toMatchObject({
@@ -115,10 +115,12 @@ test('⚠ a rename writes the new file FIRST, then removes the old one; a failed
   })
   expect(failing.asked).toEqual(['PUT /api/prompts/reviewer-v2'])
 
+  // The new file exists: the editor must move to it, and say the old one is still there.
   const stuck = scripted([readBack('reviewer-v2'), new Response('busy', { status: 500 })])
-  expect(await saveDraft(renamed, new Set(['reviewer']), stuck.fetch)).toEqual({
-    kind: 'refused',
-    reason: 'saved as reviewer-v2.md, but reviewer.md was not removed: busy',
+  expect(await saveDraft(renamed, new Set(['reviewer']), stuck.fetch)).toMatchObject({
+    kind: 'saved',
+    prompt: { id: 'reviewer-v2' },
+    warning: 'saved as reviewer-v2.md, but reviewer.md was not removed: busy',
   })
 })
 
@@ -126,7 +128,7 @@ test('a save that is refused before it is sent sends nothing', async () => {
   const server = scripted([])
   expect(await saveDraft(newState({ ...SAVED, id: 'reviewer' }), new Set(['reviewer']), server.fetch)).toEqual({
     kind: 'refused',
-    reason: 'a prompt is already saved as reviewer.md',
+    reason: 'reviewer.md is already in the library',
   })
   expect(server.asked).toEqual([])
 })

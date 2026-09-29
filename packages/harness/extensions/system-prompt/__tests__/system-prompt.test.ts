@@ -56,12 +56,15 @@ function runStart(branch: unknown[]): { options: { cwd: string; customPrompt?: s
   return { options, notices }
 }
 
-test("the branch's LAST record is applied; none leaves pi's default; one that does not read is said, never swallowed", () => {
+test("the branch's LAST record is applied; none, or pi's default recorded over a choice, leaves pi's default; one that does not read is said, never swallowed", () => {
   const entry = (data: unknown): unknown => ({ type: 'custom', customType: ENSO_SYSTEM_PROMPT_ENTRY, data })
   expect(runStart([entry(choice('system', 'First.')), entry(choice('system', 'Last.'))]).options.customPrompt).toBe(
     'Last.',
   )
   expect(runStart([]).options.customPrompt).toBeUndefined()
+  const reset = runStart([entry(choice('system', 'Taken back.')), entry(null)])
+  expect(reset.options.customPrompt).toBeUndefined()
+  expect(reset.notices).toEqual([])
   const unreadable = runStart([entry({ id: 'p', mode: 'session' })])
   expect(unreadable.options.customPrompt).toBeUndefined()
   expect(unreadable.notices).toEqual([UNREADABLE_SYSTEM_PROMPT_NOTICE])

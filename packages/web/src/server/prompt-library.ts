@@ -10,6 +10,7 @@ import {
   type EnsoSystemPromptChoice,
   EnsoSystemPromptDraft,
   ensoLogger,
+  isLibraryPromptId,
   parseLibraryPrompt,
   serializeLibraryPrompt,
   summarizeLibraryPrompt,
@@ -88,7 +89,13 @@ export interface PromptLibrary {
   pickSystemPrompt(id: string): SystemPromptPick
 }
 
+/**
+ * The file an id names. ⚠ The one join of a caller's id with the directory, so the id is checked
+ * HERE: the routes' patterns hold it for `/api/prompts/:id`, but configure's `systemPrompt` is a body
+ * field, and `../x` would otherwise read — or answer whether there is — a `.md` anywhere on disk.
+ */
 function pathOf(directory: string, id: string): string {
+  if (!isLibraryPromptId(id)) throw new Error(`${JSON.stringify(id)} is not a library prompt id`)
   return join(directory, `${id}${EXTENSION}`)
 }
 
@@ -97,12 +104,16 @@ function errorCode(error: unknown): string | undefined {
 }
 
 function readFile(directory: string, id: string): LibraryRead {
+  const file = `${id}${EXTENSION}`
+  // Refused, never missing: a listed `Notes.md` must still be named, and nothing outside is looked at.
+  if (!isLibraryPromptId(id))
+    return { kind: 'refused', reason: `${file}: the name is not lowercase words joined by hyphens` }
   let text: string
   try {
     text = readFileSync(pathOf(directory, id), 'utf8')
   } catch (error: unknown) {
     if (errorCode(error) === 'ENOENT') return { kind: 'missing', reason: `no prompt ${id} in ${directory}` }
-    return { kind: 'refused', reason: `${id}${EXTENSION}: cannot be read (${errorCode(error) ?? String(error)})` }
+    return { kind: 'refused', reason: `${file}: cannot be read (${errorCode(error) ?? String(error)})` }
   }
   const parsed = parseLibraryPrompt(id, text)
   return parsed.kind === 'prompt' ? parsed : { kind: 'refused', reason: parsed.reason }
@@ -140,8 +151,14 @@ export function createPromptLibrary(directory: string): PromptLibrary {
       mkdirSync(directory, { recursive: true })
       const path = pathOf(directory, id)
       const staging = `${path}.${process.pid}.tmp`
-      writeFileSync(staging, serializeLibraryPrompt(fields))
-      renameSync(staging, path)
+      try {
+        writeFileSync(staging, serializeLibraryPrompt(fields))
+        renameSync(staging, path)
+      } catch (error: unknown) {
+        // A half-written stage is never the prompt: remove it, so a failed write leaves the directory as it was.
+        rmSync(staging, { force: true })
+        throw error
+      }
       log.info('prompt {id} written ({category})', { id, category: fields.category })
       return readFile(directory, id)
     },

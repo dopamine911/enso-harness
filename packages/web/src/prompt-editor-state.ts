@@ -101,20 +101,24 @@ export function fileBytes(draft: EditorDraft): number {
   return utf8Bytes(serializeLibraryPrompt(draft))
 }
 
-/** Why the draft cannot be saved, or `undefined`. `taken` is every id the library already has. */
+/** Why the draft cannot be saved, or `undefined`. `taken` is every id the library already has a file for, refused ones included. */
 export function saveRefusal(state: EditorState, taken: ReadonlySet<string>): string | undefined {
   const { draft, saved } = state
   if (!isLibraryPromptId(draft.id)) return 'the file name is lowercase words joined by hyphens (a-z, 0-9, -)'
   if (draft.name.trim().length === 0) return 'the prompt needs a name'
-  if (draft.id !== saved?.id && taken.has(draft.id)) return `a prompt is already saved as ${draft.id}.md`
+  if (draft.id !== saved?.id && taken.has(draft.id)) return `${draft.id}.md is already in the library`
   return undefined
 }
 
 export type SaveOutcome =
-  | { readonly kind: 'saved'; readonly prompt: EnsoLibraryPrompt }
+  /** Written. `warning` when it was a rename and the old file is still there — listed, for the person to remove. */
+  | { readonly kind: 'saved'; readonly prompt: EnsoLibraryPrompt; readonly warning?: string }
   | { readonly kind: 'refused'; readonly reason: string }
 
-/** Write the draft; on a rename, then delete the old file. The reason when either did not happen. */
+/**
+ * Write the draft; on a rename, then delete the old file. Refused when nothing was written. A write
+ * that landed is a save even when the old file stays: the new file exists, and the editor must show it.
+ */
 export async function saveDraft(
   state: EditorState,
   taken: ReadonlySet<string>,
@@ -129,7 +133,11 @@ export async function saveDraft(
   if (renamedFrom !== undefined && renamedFrom !== id) {
     const removed = await deleteLibraryPrompt(renamedFrom, fetchImpl)
     if (removed.kind !== 'deleted') {
-      return { kind: 'refused', reason: `saved as ${id}.md, but ${renamedFrom}.md was not removed: ${removed.detail}` }
+      return {
+        kind: 'saved',
+        prompt: written.prompt,
+        warning: `saved as ${id}.md, but ${renamedFrom}.md was not removed: ${removed.detail}`,
+      }
     }
   }
   return { kind: 'saved', prompt: written.prompt }

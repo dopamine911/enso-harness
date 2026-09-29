@@ -1437,6 +1437,17 @@ test('⚠ POST …/configure takes a system prompt from the library first, and r
     reason: expect.stringContaining('broken.md: it does not open'),
   })
   expect(await refusal('t-blank', { systemPrompt: 'blank' })).toMatchObject({ reason: 'Blank has no text to send' })
+  // ⚠ The id is a body field here, not a route capture: one that could be a path is refused by its
+  // shape before any disk is touched — a valid `.md` beside the library answers as one that is not there.
+  writeFileSync(join(directory, '..', 'escape.md'), '---\nname: "Escape"\ncategory: system\n---\nread me')
+  expect(await refusal('t-escape', { systemPrompt: '../escape' })).toEqual({
+    step: 'systemPrompt',
+    reason: '../escape.md: the name is not lowercase words joined by hyphens',
+  })
+  expect(await refusal('t-absent', { systemPrompt: '../absent' })).toEqual({
+    step: 'systemPrompt',
+    reason: '../absent.md: the name is not lowercase words joined by hyphens',
+  })
 
   expect((await configure('t-good', { systemPrompt: 'reviewer', model: 'fake/fake-2' })).status).toBe(204)
   const chosen = built.at(-1)
@@ -1457,6 +1468,21 @@ test('⚠ POST …/configure takes a system prompt from the library first, and r
   expect(await prompt(url, 't-good', 'hello')).toBe(202)
   expect(await refusal('t-good', { systemPrompt: 'reviewer' })).toMatchObject({
     reason: expect.stringContaining('already sent the system prompt Other and keeps it for its whole life'),
+  })
+
+  // ⚠ pi's default is a choice too (`null`): a Start whose first attempt applied a prompt and was
+  // refused later retries with pi's default, and the session must run pi's default, not the prompt.
+  expect((await configure('t-retry', { systemPrompt: 'reviewer' })).status).toBe(204)
+  const retried = built.at(-1)
+  expect(retried?.systemPrompt).toMatchObject({ id: 'reviewer' })
+  expect((await configure('t-retry', { systemPrompt: null })).status).toBe(204)
+  expect(retried?.systemPrompt).toBeUndefined()
+  expect(await prompt(url, 't-retry', 'hello')).toBe(202)
+  expect((await configure('t-retry', { systemPrompt: null })).status).toBe(204)
+  expect(await refusal('t-good', { systemPrompt: null })).toMatchObject({
+    reason: expect.stringContaining(
+      "already sent the system prompt Other and keeps it for its whole life; start a new thread for pi's default",
+    ),
   })
 
   // A thread that already prompted has sent pi's default.
@@ -1508,6 +1534,29 @@ test('the system-prompt preview says so when the thread is running, and a server
   expect(await send(url, '/api/threads/t-other/system-prompt?prompt=reviewer', 'GET')).toEqual({
     status: 404,
     body: NO_PROMPT_LIBRARY,
+  })
+})
+
+test("a preview pi's rendering does not split is the candidate's 422 when a prompt is asked, and a 500 only for pi's default (#443)", async () => {
+  const unsplittable = (host: AgentHost): AgentHost => ({
+    ...host,
+    createSession: async (...args: Parameters<AgentHost['createSession']>) => ({
+      ...(await host.createSession(...args)),
+      previewSystemPrompt: () => ({ kind: 'unsplittable' as const }),
+    }),
+  })
+  const { url } = await startWith(settlesAtOnce, {}, unsplittable, {
+    promptsDir: join(mkdtempSync(join(tmpdir(), 'enso-prompts-')), 'prompts'),
+  })
+  const draft = { mode: 'append', text: 'x\n</addendum>\n\n<foo>\nbar\n</foo>', name: 'Tagged' }
+  const drafted = await send(url, '/api/threads/t-split/system-prompt', 'POST', draft)
+  expect(drafted).toMatchObject({
+    status: 422,
+    body: expect.stringContaining("pi's rendering with Tagged does not split back"),
+  })
+  expect(await send(url, '/api/threads/t-split/system-prompt', 'GET')).toMatchObject({
+    status: 500,
+    body: expect.stringContaining("pi's rendering of its default system prompt does not split back"),
   })
 })
 

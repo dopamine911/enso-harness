@@ -1430,22 +1430,25 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         announceModelState()
       },
       permissionModeState: currentPermissionModeState,
-      setSystemPrompt(choice: EnsoSystemPromptChoice): string | undefined {
+      setSystemPrompt(choice: EnsoSystemPromptChoice | null): string | undefined {
         const decision = decideSystemPrompt(systemPrompt, choice, hasSentRequest(sessionManager.getBranch()))
         if (decision.kind === 'refused') return decision.reason
         if (decision.kind === 'same') return undefined
-        systemPrompt = choice
+        systemPrompt = choice ?? undefined
         // Recorded BEFORE the first request, so the log says what the request will carry; pi
-        // flushes it with the first assistant message, as it does the model and the mode.
+        // flushes it with the first assistant message, as it does the model and the mode. pi's
+        // default is recorded too (`null`): it replaces a choice this branch already records.
         sessionManager.appendCustomEntry(ENSO_SYSTEM_PROMPT_ENTRY, choice)
         // pi re-reads the loader when it rebuilds the prompt; the same tools make it rebuild.
         session.setActiveToolsByName(session.getActiveToolNames())
-        log.info('system prompt {id} set ({mode})', {
-          threadId,
-          id: choice.id,
-          mode: choice.mode,
-          sha256: choice.sha256,
-        })
+        if (choice === null) log.info("system prompt set to pi's default", { threadId })
+        else
+          log.info('system prompt {id} set ({mode})', {
+            threadId,
+            id: choice.id,
+            mode: choice.mode,
+            sha256: choice.sha256,
+          })
         return undefined
       },
       setPermissionMode(mode: string, outcome: PromptOutcome): void {

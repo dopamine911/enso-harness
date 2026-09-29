@@ -64,6 +64,14 @@ test('what the library writes reads back equal, whatever the text holds', () => 
   expect(summarizeLibraryPrompt(parsed.prompt)).not.toHaveProperty('body')
 })
 
+test('a CRLF body is written LF, so the file is the text every read, hash and size is over; a byte-order mark is read past', () => {
+  const serialized = serializeLibraryPrompt({ name: 'Crlf', description: '', category: 'system', body: 'x\r\ny' })
+  expect(serialized).not.toContain('\r')
+  const parsed = parseLibraryPrompt('crlf', serialized)
+  expect(parsed).toMatchObject({ kind: 'prompt', prompt: { body: 'x\ny', bytes: utf8Bytes(serialized) } })
+  expect(parseLibraryPrompt('marked', `\uFEFF${FILE}`)).toMatchObject({ kind: 'prompt', prompt: { name: 'Reviewer' } })
+})
+
 test.each([
   ['Bad_Name', FILE, 'the name is not lowercase words'],
   ['plain', '# no frontmatter', 'does not open with a --- frontmatter block'],

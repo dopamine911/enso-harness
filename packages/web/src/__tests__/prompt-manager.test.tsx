@@ -282,13 +282,17 @@ test('⚠ a new prompt: the size bar is exact on every edit, the unsaved draft i
   await mounted.unmount()
 })
 
-test('a save refused on this side says why and writes nothing: a name the library already has', async () => {
+test('a save refused on this side says why and writes nothing: a name the library already has, refused files included', async () => {
   const mounted = await mountManager()
   await click(mounted, 'New')
   await typeInto(mounted, '#prompt-name', 'Other reviewer')
   await typeInto(mounted, '#prompt-id', 'reviewer')
   await click(mounted, 'Save')
-  await eventually(() => expect(mounted.dialog().textContent).toContain('a prompt is already saved as reviewer.md'))
+  await eventually(() => expect(mounted.dialog().textContent).toContain('reviewer.md is already in the library'))
+  // A file the library refused is still on disk: saving over it would destroy it unread.
+  await typeInto(mounted, '#prompt-id', 'broken')
+  await click(mounted, 'Save')
+  await eventually(() => expect(mounted.dialog().textContent).toContain('broken.md is already in the library'))
   expect(mounted.written).toEqual([])
   await mounted.unmount()
 })

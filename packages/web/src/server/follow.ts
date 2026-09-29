@@ -710,16 +710,18 @@ export async function configureThread(
 
 /**
  * The system-prompt step (#443), first: the library's pick, then the runtime's own refusal — a
- * session that already sent a request keeps the prompt it sent. Absent is pi's default, left as it is.
+ * session that already sent a request keeps the prompt it sent. `null` is pi's default, chosen: it
+ * replaces a prompt an earlier, refused Start applied. Absent leaves the session's as it is.
  */
 function systemPromptRefusal(
   runtime: ThreadRuntime,
-  id: string | undefined,
+  id: string | null | undefined,
   pickSystemPrompt: (id: string) => SystemPromptPick,
 ): EnsoConfigurationRefusal | undefined {
   if (id === undefined) return undefined
-  const pick = pickSystemPrompt(id)
-  const reason = pick.kind === 'refused' ? pick.reason : runtime.setSystemPrompt(pick.choice)
+  const pick = id === null ? undefined : pickSystemPrompt(id)
+  if (pick?.kind === 'refused') return { step: 'systemPrompt', reason: pick.reason }
+  const reason = runtime.setSystemPrompt(pick === undefined ? null : pick.choice)
   return reason === undefined ? undefined : { step: 'systemPrompt', reason }
 }
 

@@ -36,25 +36,30 @@ export type SystemPromptDecision =
 
 /**
  * The rule, once — the host and the server's fake both apply it. `current` is the session's
- * choice, `hasSentRequest` whether its branch holds a message yet. Until the first request a choice
- * may be REPLACED — nothing is cached yet, and a Start refused at a later step (a model with no key)
- * must be able to try again with another prompt; the branch's last entry is the one that counts.
- * From the first request on, the prompt is the session's for life.
+ * choice (`undefined` is pi's default), `next` the one asked for (`null` is pi's default, chosen),
+ * `hasSentRequest` whether its branch holds a message yet. Until the first request a choice may be
+ * REPLACED — pi's default included — nothing is cached yet, and a Start refused at a later step (a
+ * model with no key) must be able to try again with another prompt, or with none; the branch's last
+ * entry is the one that counts. From the first request on, the prompt is the session's for life.
  */
 export function decideSystemPrompt(
   current: EnsoSystemPromptChoice | undefined,
-  next: EnsoSystemPromptChoice,
+  next: EnsoSystemPromptChoice | null,
   hasSentRequest: boolean,
 ): SystemPromptDecision {
-  if (current !== undefined && current.id === next.id && current.mode === next.mode && current.sha256 === next.sha256) {
-    return { kind: 'same' }
-  }
+  if (sameSystemPrompt(current, next)) return { kind: 'same' }
   if (!hasSentRequest) return { kind: 'apply' }
   const running = current === undefined ? "pi's default system prompt" : `the system prompt ${current.name}`
+  const asked = next === null ? "pi's default" : next.name
   return {
     kind: 'refused',
-    reason: `this session has already sent ${running} and keeps it for its whole life; start a new thread for ${next.name}`,
+    reason: `this session has already sent ${running} and keeps it for its whole life; start a new thread for ${asked}`,
   }
+}
+
+function sameSystemPrompt(current: EnsoSystemPromptChoice | undefined, next: EnsoSystemPromptChoice | null): boolean {
+  if (current === undefined || next === null) return current === undefined && next === null
+  return current.id === next.id && current.mode === next.mode && current.sha256 === next.sha256
 }
 
 /** The branch's system prompt as a view shows it: the choice without its text, pi's default, or unreadable. */

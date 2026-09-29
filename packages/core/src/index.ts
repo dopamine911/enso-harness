@@ -191,6 +191,7 @@ export {
   EnsoThreadSystemPrompt,
   estimateTextTokens,
   isLibraryPromptId,
+  LIBRARY_PROMPT_ID_SOURCE,
   lastCustomEntryData,
   type LibraryPromptParse,
   parseLibraryPrompt,

@@ -18,6 +18,7 @@ import {
   type EnsoThreadSummary,
   ensoLogger,
   isEnsoThreadId,
+  LIBRARY_PROMPT_ID_SOURCE,
   withEnsoLogContext,
 } from '@enso/core'
 import { readGitChanges, readGitState, runGit } from '@enso/core/git'
@@ -111,10 +112,12 @@ const THREAD_CONFIGURE_ROUTE = threadRoute('configure')
 /**
  * `GET …/system-prompt[?prompt=<id>]` (#443): the system prompt the thread's next request would carry
  * with a library prompt — pi's default without one — section by section. Builds the thread on ask.
- * The one query parameter is part of the pattern on purpose: its id pattern mirrors the library's
- * (`isLibraryPromptId`), so a malformed id or any other parameter is a 404, never a file lookup.
+ * The one query parameter is part of the pattern on purpose: its id is the library's own shape
+ * (`LIBRARY_PROMPT_ID_SOURCE`), so a malformed id or any other parameter is a 404, never a file lookup.
  */
-const THREAD_SYSTEM_PROMPT_ROUTE = /^\/api\/threads\/([^/?#]+)\/system-prompt(?:\?prompt=([a-z0-9][a-z0-9-]{0,63}))?$/
+const THREAD_SYSTEM_PROMPT_ROUTE = new RegExp(
+  `^/api/threads/([^/?#]+)/system-prompt(?:\\?prompt=(${LIBRARY_PROMPT_ID_SOURCE}))?$`,
+)
 /** `POST …/system-prompt` (#443): the same preview for an unsaved prompt's text — the editor's breakdown. */
 const THREAD_SYSTEM_PROMPT_DRAFT_ROUTE = threadRoute('system-prompt')
 /** `POST …/fork` (#433): fork the thread at one of its user messages — a new thread naming this one as its parent. */
@@ -122,13 +125,16 @@ const THREAD_FORK_ROUTE = threadRoute('fork')
 /** `POST …/continue` (#436): continue a torn thread from its stored state — no new prompt. */
 const THREAD_CONTINUE_ROUTE = threadRoute('continue')
 /**
- * `/api/prompts/<id>` (#443) — a library prompt; the id is its file name, so it needs no decoding. One
- * constant per method, as the routes reference reads them: `GET` reads it, `PUT` writes it whole,
- * `DELETE` removes it.
+ * `/api/prompts/<id>` (#443): a library prompt. The id is its file name in the library's own shape
+ * (`LIBRARY_PROMPT_ID_SOURCE`), so it needs no decoding and can never leave the directory.
  */
-const PROMPT_READ_ROUTE = /^\/api\/prompts\/([a-z0-9][a-z0-9-]{0,63})$/
-const PROMPT_WRITE_ROUTE = /^\/api\/prompts\/([a-z0-9][a-z0-9-]{0,63})$/
-const PROMPT_DELETE_ROUTE = /^\/api\/prompts\/([a-z0-9][a-z0-9-]{0,63})$/
+function promptRoute(): RegExp {
+  return new RegExp(`^/api/prompts/(${LIBRARY_PROMPT_ID_SOURCE})$`)
+}
+/** One constant per method, as the routes reference reads them: `GET` reads it, `PUT` writes it whole, `DELETE` removes it. */
+const PROMPT_READ_ROUTE = promptRoute()
+const PROMPT_WRITE_ROUTE = promptRoute()
+const PROMPT_DELETE_ROUTE = promptRoute()
 /** `DELETE /api/projects/<projectId>` (#395) — the id is sixteen hex digits, so it needs no decoding. */
 const PROJECT_ROUTE = /^\/api\/projects\/([0-9a-f]{16})$/
 
@@ -670,7 +676,11 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     await answerPreview(threadId, draftChoice(draft), response)
   }
 
-  /** A preview of `candidate` on the thread, built on ask; 409 while it runs, 500 for a rendering that does not split. */
+  /**
+   * A preview of `candidate` on the thread, built on ask; 409 while it runs. A rendering that does
+   * not split is a 500 only for pi's default — pi's own text. With a candidate, the likelier cause is
+   * the candidate's text itself (a line that reads as one of pi's section tags): a 422 naming it, at warn.
+   */
   async function answerPreview(
     threadId: string,
     candidate: EnsoSystemPromptChoice | null,
@@ -682,13 +692,26 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
       answerJson(response, outcome.preview)
       return
     }
-    if (outcome.kind === 'unsplittable') log.error('pi rendered a system prompt that does not split back', { threadId })
-    refuseWith(
-      response,
-      outcome.kind === 'busy'
-        ? { status: 409, reason: `thread ${threadId} is running; preview its system prompt when it settles` }
-        : { status: 500, reason: "pi's rendering of this system prompt does not split back into its sections" },
-    )
+    if (outcome.kind === 'busy') {
+      refuseWith(response, {
+        status: 409,
+        reason: `thread ${threadId} is running; preview its system prompt when it settles`,
+      })
+      return
+    }
+    if (candidate === null) {
+      log.error('pi rendered a system prompt that does not split back', { threadId })
+      refuseWith(response, {
+        status: 500,
+        reason: "pi's rendering of its default system prompt does not split back into its sections",
+      })
+      return
+    }
+    log.warn('a system prompt preview does not split back into its sections', { threadId, id: candidate.id })
+    refuseWith(response, {
+      status: 422,
+      reason: `pi's rendering with ${candidate.name} does not split back into its sections — does its text hold a line like one of pi's section tags?`,
+    })
   }
 
   // The bundle (#132): today's records + the live threads + the versions, one file.

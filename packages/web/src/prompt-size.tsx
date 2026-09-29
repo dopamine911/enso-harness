@@ -17,8 +17,21 @@ import { fetchSystemPromptPreview, type SystemPromptPreviewRead } from './prompt
  * three numbers over text being edited, and a hover card would hide the one thing it exists to show.
  */
 
-/** pi's rendering of a prompt as the editor has it — none for a session prompt or an empty body. */
-export type HeadState = { readonly kind: 'none' } | { readonly kind: 'loading' } | SystemPromptPreviewRead
+/**
+ * pi's rendering of a prompt as the editor has it — none for a session prompt or an empty body. While
+ * a new rendering is asked, the last one it had stands in, so the whole-prompt total never drops to
+ * the body's alone between keystrokes.
+ */
+export type HeadState =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'loading'; readonly previous?: EnsoSystemPromptPreview }
+  | SystemPromptPreviewRead
+
+/** The rendering a head has to show now: the loaded one, or the last one while the next is asked. */
+function renderedOf(head: HeadState): EnsoSystemPromptPreview | undefined {
+  if (head.kind === 'loaded') return head.preview
+  return head.kind === 'loading' ? head.previous : undefined
+}
 
 /** How long typing must pause before the draft is rendered again. */
 const DRAFT_PREVIEW_PAUSE_MS = 300
@@ -40,7 +53,10 @@ export function useDraftHead(threadId: string | undefined, draft: EditorDraft, f
       return
     }
     let current = true
-    setHead({ kind: 'loading' })
+    setHead((last) => {
+      const previous = renderedOf(last)
+      return previous === undefined ? { kind: 'loading' } : { kind: 'loading', previous }
+    })
     const timer = setTimeout(() => {
       void fetchSystemPromptPreview(threadId, { draft: JSON.parse(key) as EnsoSystemPromptDraft }, fetchImpl).then(
         (read) => {
@@ -63,6 +79,19 @@ function windowShare(tokens: number, preview: EnsoSystemPromptPreview | undefine
     ? undefined
     : `${((tokens / window) * 100).toFixed(1)}% of the model’s ${count(window)}-token window`
 }
+/**
+ * The share the bar says. A system or append prompt's is of the whole prompt pi sends with it,
+ * never its body's alone: without a rendering, none is said. A session prompt is its own text.
+ */
+function shareOf(
+  draft: EditorDraft,
+  whole: EnsoSystemPromptPreview | undefined,
+  tokens: number,
+  window: EnsoSystemPromptPreview | undefined,
+): string | undefined {
+  if (whole !== undefined) return windowShare(whole.totalTokens, whole)
+  return draft.category === 'session' ? windowShare(tokens, window) : undefined
+}
 
 export function PromptSizeBar({
   draft,
@@ -75,8 +104,8 @@ export function PromptSizeBar({
   window: EnsoSystemPromptPreview | undefined
 }): React.ReactNode {
   const tokens = estimateTextTokens(draft.body)
-  const whole = head.kind === 'loaded' ? head.preview : undefined
-  const share = whole === undefined ? windowShare(tokens, window) : windowShare(whole.totalTokens, whole)
+  const whole = renderedOf(head)
+  const share = shareOf(draft, whole, tokens, window)
   return (
     <p
       aria-label="prompt size"

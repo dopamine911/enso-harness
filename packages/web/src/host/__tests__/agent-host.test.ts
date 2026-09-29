@@ -2303,6 +2303,32 @@ test("an append prompt keeps every pi section and adds its text after them; a se
   expect(systemHeadOf(requests[1]).sections.addendum).toBeUndefined()
 })
 
+test("⚠ pi's default chosen after a library prompt, before the first request, replaces it — in the request, in the log, and on resume (#443)", async () => {
+  const { host, project, requests } = recordingHost(2)
+  const threadId = crypto.randomUUID()
+  const first = await host.createSession(threadId, () => project)
+  openSessions.push(first)
+  // A Start that applied a prompt and was refused at a later step, retried with pi's default.
+  const choice = choiceOf('system', 'Chosen, then taken back.')
+  expect(first.runtime.setSystemPrompt(choice)).toBeUndefined()
+  expect(first.runtime.setSystemPrompt(null)).toBeUndefined()
+  await runPrompt(first, 'one')
+  const head = systemHeadOf(requests[0])
+  expect(JSON.stringify(head)).not.toContain(choice.text)
+  expect(head.sections.preamble?.startsWith(PI_DEFAULT_PREAMBLE_START)).toBe(true)
+  expect(first.runtime.setSystemPrompt(choice)).toContain("already sent pi's default system prompt")
+
+  const file = first.inspect().sessionFile
+  if (file === null) throw new Error('the session was not flushed after a reply')
+  expect(systemPromptEntriesOf(file)).toEqual([choice, null])
+  first.runtime.dispose()
+
+  const resumed = await host.createSession(threadId, () => project)
+  openSessions.push(resumed)
+  await runPrompt(resumed, 'two')
+  expect(systemHeadOf(requests[1])).toEqual(head)
+})
+
 test("a thread whose recorded system prompt does not read is refused by name before anything is built, never given pi's default (#443)", async () => {
   const project = realpathOrSelf(mkdtempSync(join(tmpdir(), 'enso-library-prompt-')))
   let extensionsLoaded = 0

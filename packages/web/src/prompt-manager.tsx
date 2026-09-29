@@ -389,7 +389,8 @@ function EditorPanel(props: {
         <ArtifactActions>
           <ArtifactAction icon={SaveIcon} label="Save" disabled={!dirty} onClick={props.onSave} />
           <ArtifactAction icon={CopyIcon} label="Copy" onClick={props.onCopy} />
-          <DeleteAction id={state.saved?.id} onDelete={props.onDelete} />
+          {/* Keyed by the file: a confirmation asked for one file never carries over to the next one opened or saved. */}
+          <DeleteAction key={state.saved?.id} id={state.saved?.id} onDelete={props.onDelete} />
         </ArtifactActions>
       </ArtifactHeader>
       <ArtifactContent className="grid content-start gap-3">
@@ -439,7 +440,12 @@ function useManagerState(
   const [editor, setEditor] = useState<EditorState | undefined>(undefined)
   const [pending, setPending] = useState<Move | undefined>(undefined)
   const [refusal, setRefusal] = useState<string | undefined>(undefined)
-  const taken = new Set(listingOf(library)?.prompts.map((prompt) => prompt.id) ?? [])
+  // A refused file is still a file: a new prompt or a rename onto its name would write over it unread.
+  const listing = listingOf(library)
+  const taken = new Set([
+    ...(listing?.prompts.map((prompt) => prompt.id) ?? []),
+    ...(listing?.refused.map((refused) => refused.file.replace(/\.md$/, '')) ?? []),
+  ])
   // ⚠ Every move takes a new ticket; a prompt read, save or delete touches the editor only if its
   // ticket is still the latest. Otherwise a slow answer to an earlier selection lands after a later
   // one and fills (or empties) the editor while the list shows the later one selected.
@@ -487,7 +493,7 @@ function useManagerState(
         setRefusal(outcome.reason)
         return
       }
-      setRefusal(undefined)
+      setRefusal(outcome.warning)
       setEditor((current) => savedState(current, editor.draft, outcome.prompt))
       setSelection({ kind: 'prompt', id: outcome.prompt.id })
     },

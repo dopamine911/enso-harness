@@ -257,8 +257,12 @@ export const EnsoSessionConfiguration = Type.Object(
     model: Type.Optional(Type.String({ minLength: 1 })),
     thinking: Type.Optional(Type.String({ minLength: 1 })),
     mode: Type.Optional(Type.String({ minLength: 1 })),
-    /** A library prompt's id (#443), `system` or `append`; absent is pi's default. Applied FIRST. */
-    systemPrompt: Type.Optional(Type.String({ minLength: 1 })),
+    /**
+     * A library prompt's id (#443), `system` or `append`, or `null` for pi's default. Applied FIRST.
+     * Absent leaves the session's as it is; `null` is how a Start retried after a later step refused
+     * goes back to pi's default over a prompt the first attempt already applied.
+     */
+    systemPrompt: Type.Optional(Type.Union([Type.String({ minLength: 1 }), Type.Null()])),
   },
   { additionalProperties: false },
 )
@@ -471,14 +475,14 @@ export const ThreadRuntime = Type.Object({
     Type.Function([Type.Unknown(), Type.Unknown()], Type.Void()),
   ),
   /**
-   * Fix the session's system prompt to a library prompt (#443), before its first request: the
-   * choice is recorded in the thread's log, the next request carries it, and a resume reads it
-   * back; until then another choice replaces it. `undefined` when it applied, or when the same
-   * prompt is already this session's; else the refusal's reason — a session that has already sent a
-   * request keeps the prompt it sent (a system head rewritten mid-session throws the prompt cache
-   * away). Synchronous.
+   * Fix the session's system prompt to a library prompt (#443) — or to pi's default, `null` — before
+   * its first request: the choice is recorded in the thread's log, the next request carries it, and
+   * a resume reads it back; until then another choice replaces it. `undefined` when it applied, or
+   * when the same prompt is already this session's; else the refusal's reason — a session that has
+   * already sent a request keeps the prompt it sent (a system head rewritten mid-session throws the
+   * prompt cache away). Synchronous.
    */
-  setSystemPrompt: Type.Unsafe<(choice: EnsoSystemPromptChoice) => string | undefined>(
+  setSystemPrompt: Type.Unsafe<(choice: EnsoSystemPromptChoice | null) => string | undefined>(
     Type.Function([Type.Unknown()], Type.Unknown()),
   ),
   /**

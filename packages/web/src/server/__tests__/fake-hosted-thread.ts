@@ -291,11 +291,11 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
       record.flows.push(entry)
     },
     permissionModeState: () => ({ mode: 'default', available: ['default'] }),
-    setSystemPrompt: (choice: EnsoSystemPromptChoice) => {
+    setSystemPrompt: (choice: EnsoSystemPromptChoice | null) => {
       // The real host's rule (#443), over the fake's record: a prompt sent is a request sent.
       const decision = decideSystemPrompt(record.systemPrompt, choice, record.prompts.length > 0)
       if (decision.kind === 'refused') return decision.reason
-      record.systemPrompt = choice
+      record.systemPrompt = choice ?? undefined
       return undefined
     },
     setPermissionMode: (mode: string, outcome: PromptOutcome) => {

@@ -1,5 +1,5 @@
 import type { EnsoLibraryPromptCategory, EnsoLibraryPromptSummary } from '@enso/core'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { FetchLike } from './browser-logging.ts'
 import { Field, FieldDescription, FieldError, FieldLabel } from './components/ui/field.tsx'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './components/ui/select.tsx'
@@ -147,11 +147,16 @@ function SessionPromptPicker(props: {
   const choices = promptsOf(props.library, (prompt) => prompt.category === 'session')
   const [picked, setPicked] = useState('')
   const [failure, setFailure] = useState<string | undefined>(undefined)
+  // ⚠ Only the latest pick may fill the box: a slow read of an earlier one lands after it otherwise,
+  // and the prompt box holds A's text while the field says B.
+  const latest = useRef('')
   if (choices.length === 0) return null
   const pick = async (id: string): Promise<void> => {
+    latest.current = id
     setPicked(id)
     setFailure(undefined)
     const read = await fetchLibraryPrompt(id, props.fetch)
+    if (latest.current !== id) return
     if (read.kind === 'loaded') props.onPick(read.prompt.body)
     else setFailure(read.detail)
   }

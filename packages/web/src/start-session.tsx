@@ -237,13 +237,14 @@ export function configurationOf(choices: {
   mode: string | undefined
   systemPrompt: string
 }): EnsoSessionConfiguration {
-  const configuration: { model?: string; thinking?: string; mode?: string; systemPrompt?: string } = {}
+  const configuration: { model?: string; thinking?: string; mode?: string; systemPrompt?: string | null } = {}
   for (const key of ['model', 'thinking', 'mode'] as const) {
     const chosen = choices[key]
     if (chosen !== undefined) configuration[key] = chosen
   }
-  // pi's default is no choice at all: the session keeps what pi builds (#443).
-  if (choices.systemPrompt !== PI_DEFAULT_SYSTEM_PROMPT) configuration.systemPrompt = choices.systemPrompt
+  // Always said, pi's default as `null` (#443): a Start refused at a later step may already have
+  // applied a library prompt, and a retry with pi's default must replace it, not leave it running.
+  configuration.systemPrompt = choices.systemPrompt === PI_DEFAULT_SYSTEM_PROMPT ? null : choices.systemPrompt
   return configuration
 }
 

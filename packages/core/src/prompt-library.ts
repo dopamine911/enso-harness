@@ -54,8 +54,15 @@ export type EnsoSystemPromptMode = Static<typeof EnsoSystemPromptMode>
 
 const CATEGORIES: ReadonlySet<string> = new Set(['system', 'append', 'session'])
 
-/** A library prompt's id: its file name without `.md` — lowercase words joined by hyphens. */
-const LIBRARY_PROMPT_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/
+/**
+ * A library prompt's id, unanchored: its file name without `.md` — lowercase words joined by hyphens.
+ * The one statement of the shape: the server's routes embed it, so a route can never match an id the
+ * library refuses, nor refuse one it reads.
+ *
+ * @group Prompt library
+ */
+export const LIBRARY_PROMPT_ID_SOURCE = '[a-z0-9][a-z0-9-]{0,63}'
+const LIBRARY_PROMPT_ID_PATTERN = new RegExp(`^${LIBRARY_PROMPT_ID_SOURCE}$`)
 
 /**
  * True for a string that can name a library prompt, and therefore a file: no separator, no dot,
@@ -220,7 +227,8 @@ export function parseLibraryPrompt(id: string, text: string): LibraryPromptParse
   if (!LIBRARY_PROMPT_ID_PATTERN.test(id)) {
     return { kind: 'refused', reason: `${id}.md: the name is not lowercase words joined by hyphens` }
   }
-  const lines = text.split(/\r?\n/)
+  // A byte-order mark is no content, and a file saved with one does open with the fence: read past it.
+  const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/)
   if (lines[0] !== FRONTMATTER_FENCE) {
     return { kind: 'refused', reason: `${id}.md: it does not open with a --- frontmatter block` }
   }
@@ -251,7 +259,8 @@ export function parseLibraryPrompt(id: string, text: string): LibraryPromptParse
 
 /**
  * A prompt's fields as the file the library keeps: the frontmatter (every value a JSON string, so
- * any text reads back as written), then the body. {@link parseLibraryPrompt} reads it back equal.
+ * any text reads back as written), then the body, its line ends LF — {@link parseLibraryPrompt}
+ * reads any line end as one, so the file holds the same text every read, hash and size is over.
  *
  * @group Prompt library
  */
@@ -262,7 +271,7 @@ export function serializeLibraryPrompt(prompt: EnsoLibraryPromptWrite): string {
     `description: ${JSON.stringify(prompt.description)}`,
     `category: ${prompt.category}`,
     FRONTMATTER_FENCE,
-    prompt.body,
+    prompt.body.replaceAll('\r\n', '\n'),
   ].join('\n')
 }
 
@@ -284,8 +293,9 @@ export function summarizeLibraryPrompt(prompt: EnsoLibraryPrompt): EnsoLibraryPr
 export const ENSO_SYSTEM_PROMPT_ENTRY = 'enso-system-prompt' as const
 
 /**
- * The system prompt a thread STARTED with (#443), recorded once in pi's log at session start and
- * read back to resume it. A thread with no such entry runs pi's default.
+ * The system prompt a thread STARTED with (#443), recorded in pi's log at session start and read
+ * back to resume it. A thread with no such entry runs pi's default; so does one whose last entry is
+ * `null` — pi's default chosen explicitly, over an earlier choice, before the first request.
  *
  * ⚠ THE TEXT IS KEPT, not only its hash. The thread must resume with the prompt it started with,
  * and the library file may have been edited or deleted since; the hash is what a later reader
@@ -435,15 +445,16 @@ export type RecordedSystemPrompt =
   | { readonly kind: 'unreadable' }
 
 /**
- * What a branch says its system prompt is (#443): none (pi's default), the choice its last
- * `enso-system-prompt` entry holds, or an entry that does not read — which a reader must never take
- * for pi's default. The host builds a session from it; the harness extension applies it per run.
+ * What a branch says its system prompt is (#443): none (pi's default — no entry, or a last entry of
+ * `null`), the choice its last `enso-system-prompt` entry holds, or an entry that does not read —
+ * which a reader must never take for pi's default. The host builds a session from it; the harness
+ * extension applies it per run.
  *
  * @group Prompt library
  */
 export function recordedSystemPrompt(branch: readonly unknown[]): RecordedSystemPrompt {
   const data = lastCustomEntryData(branch, ENSO_SYSTEM_PROMPT_ENTRY)
-  if (data === undefined) return { kind: 'none' }
+  if (data === undefined || data === null) return { kind: 'none' }
   const choice = readEnsoSystemPromptChoice(data)
   return choice === undefined ? { kind: 'unreadable' } : { kind: 'chosen', choice }
 }
