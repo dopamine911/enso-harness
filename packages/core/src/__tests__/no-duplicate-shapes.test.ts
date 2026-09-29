@@ -24,6 +24,7 @@ test('every module is reachable: from the barrel, or from a subpath package.json
   //   `git.ts`          `node:child_process` — the one git runner, and the repository reader (#453)
   //   `log-process.ts`  `@logtape/file` builds its sinks on `node:fs` at import
   //   `paths.ts`        `node:fs`/`node:url` — the repo-root walker and the harness's paths (#211)
+  //   `permission-rules.ts` `node:fs` — the permission rules file, seeded before pi loads (#446)
   //   `pi-manifest.ts`  `node:fs` — is a declared pi resource path actually there (#221)
   //   `secrets.ts`      `node:fs` — the secrets file's reader (#211)
   //
@@ -48,6 +49,7 @@ test('every module is reachable: from the barrel, or from a subpath package.json
     'git.ts',
     'log-process.ts',
     'paths.ts',
+    'permission-rules.ts',
     'pi-manifest.ts',
     'secrets.ts',
     '__tests__/log-recorder.ts',

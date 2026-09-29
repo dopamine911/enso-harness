@@ -380,6 +380,11 @@ export interface EnsoServerOptions {
   harnessPackageDir: string
   /** Scratch config dir for pi, so the operator's own packages stay invisible. */
   agentDir: string
+  /**
+   * The permission rules file pi runs under (`ENSO_HOME/permissions.json`, #446). Required, like
+   * `harnessPackageDir`: forgetting it would mean picc's own `node_modules` copy.
+   */
+  permissionRulesPath: string
   /** Where this process's log file is — the launcher configured logging there; the bundle route reads it (#132). */
   logsDir: string
   port?: number
@@ -476,7 +481,12 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   const servesDirectory = (directory: string): boolean => projects.byDirectory(directory) !== undefined
   const host: AgentHost =
     options.host?.(servesDirectory) ??
-    createAgentHost({ servesDirectory, agentDir: options.agentDir, harnessPackageDir: options.harnessPackageDir })
+    createAgentHost({
+      servesDirectory,
+      agentDir: options.agentDir,
+      harnessPackageDir: options.harnessPackageDir,
+      permissionRulesPath: options.permissionRulesPath,
+    })
   const threads = createThreadRegistry({
     // A thread with a session on disk is opened where pi recorded it; a new one where its project
     // is — asked for only when there is no session, so a claim naming a project that has since

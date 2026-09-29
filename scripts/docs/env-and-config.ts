@@ -22,7 +22,9 @@ import { runGenerator } from './generator-support.ts'
 const ROOT = findRepoRoot(import.meta.url)
 const SOURCE_ROOTS = ['packages', 'scripts', 'test'] as const
 const PROCESS_ENV_BASE = /\bprocess\s*\.\s*env\b/g
-const PROCESS_ENV_CHILD_OVERRIDE = /\{\s*\.\.\.\s*process\s*\.\s*env\s*,\s*([A-Za-z_$][\w$]*)\s*:/g
+/** `{ ...process.env, KEY: value, … }`: the whole override, so every key it sets is found, not only the first. */
+const PROCESS_ENV_CHILD_OVERRIDE = /\{\s*\.\.\.\s*process\s*\.\s*env\s*,([^{}]*)\}/g
+const OVERRIDE_KEY = /([A-Za-z_$][\w$]*)\s*:/g
 /** A runtime path helper: a file under `ENSO_HOME` (#421), or the checkout's own build cache under `node_modules`. */
 const RUNTIME_PATH_EXPORT =
   /export function (\w+)[^{]+\{\s*return join\((home|repoRoot, 'node_modules'), ((?:'[^']+'(?:, )?)+)\)\s*\}/g
@@ -95,6 +97,22 @@ const ENVIRONMENT_METADATA: readonly EnvironmentMetadata[] = [
     source: 'scripts/enso.ts',
     reader: '`scripts/enso.ts` (pi child environment write)',
     purposeAndDefault: 'Required pin to the selected agent directory in the spawned pi process.',
+    phase: 'boot',
+  },
+  {
+    key: 'PICC_PERMISSION_MODES_CONFIG_PATH',
+    source: 'packages/web/src/host/agent-host.ts',
+    reader: '`packages/web/src/host/agent-host.ts#createAgentHost` (process write)',
+    purposeAndDefault:
+      'Required pin to `ENSO_HOME/permissions.json` (#446), prepared before the first session. Unset, the permission-modes extension reads a copy inside its own `node_modules` directory, and imports Claude Code’s settings into any file with no rules.',
+    phase: 'boot',
+  },
+  {
+    key: 'PICC_PERMISSION_MODES_CONFIG_PATH',
+    source: 'scripts/enso.ts',
+    reader: '`scripts/enso.ts` (pi child environment write)',
+    purposeAndDefault:
+      'Required pin to `ENSO_HOME/permissions.json` in the spawned pi process (#446), prepared before the spawn.',
     phase: 'boot',
   },
   {
@@ -273,6 +291,15 @@ const RUNTIME_PATH_METADATA: readonly RuntimePathMetadata[] = [
     },
   },
   {
+    helper: 'ensoPermissionRulesPath',
+    path: 'ENSO_HOME/permissions.json',
+    writer:
+      'The operator; `preparePermissionRules` seeds it with Enso’s default deny rules, before pi loads, when it is absent or holds no rules (#446) — the permission-modes extension would otherwise import Claude Code’s settings into it. An unreadable file refuses the launch.',
+    lifetime:
+      'Per-user until the operator edits it; read when each session loads the extension, so an edit applies to new sessions.',
+    check: { file: 'packages/core/src/permission-rules.ts', contains: 'deny: [...ENSO_DEFAULT_DENY_RULES]' },
+  },
+  {
     helper: 'ensoLogsDir',
     path: 'ENSO_HOME/logs',
     writer: '`configureProcessLogging` creates it and every harness process appends to the day file.',
@@ -411,7 +438,8 @@ function scanProcessEnvironmentReads(
   }
   for (const match of sourceText.matchAll(PROCESS_ENV_CHILD_OVERRIDE)) {
     const processIndex = (match.index ?? 0) + match[0].indexOf('process')
-    if (!isCommentedAt(sourceText, processIndex)) addOccurrence(found, match[1] ?? '', source)
+    if (isCommentedAt(sourceText, processIndex)) continue
+    for (const key of (match[1] ?? '').matchAll(OVERRIDE_KEY)) addOccurrence(found, key[1] ?? '', source)
   }
   return directBases.length > 0
 }

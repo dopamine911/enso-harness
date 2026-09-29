@@ -7,6 +7,10 @@
  *   PI_CODING_AGENT_DIR  points pi at a scratch config dir, so none of the user's
  *                        installed packages, settings, keybindings, themes or
  *                        credentials are visible. Verified: 16 packages -> 0.
+ *   PICC_PERMISSION_MODES_CONFIG_PATH
+ *                        points the permission modes at ENSO_HOME/permissions.json
+ *                        (#446), prepared before the spawn — not the copy of Claude
+ *                        Code's rules picc keeps inside node_modules by default.
  *   --no-extensions      disables discovery, which also suppresses the PROJECT-local
  *                        .pi/settings.json in this repo (it installs Enso as a
  *                        package). Without it the package would load twice — once
@@ -54,12 +58,14 @@ import { join } from 'node:path'
 import {
   ensoAgentDir,
   ensoHome,
+  ensoPermissionRulesPath,
   ensoSecretsPath,
   findRepoRoot,
   harnessPackageDir,
   migrateCheckoutEnsoOnLaunch,
   printHarnessDir,
 } from '../packages/core/src/paths.ts'
+import { describePermissionRules, preparePermissionRules } from '../packages/core/src/permission-rules.ts'
 import { declaredResources, missingVendorPaths } from '../packages/core/src/pi-manifest.ts'
 import { quarantineSecrets } from '../packages/core/src/secrets.ts'
 import { isPrintRun, piArguments, piVersionSupported, piVersionText, SUPPORTED_PI_VERSIONS } from './enso-launch.ts'
@@ -111,6 +117,18 @@ if (migration.held) {
 }
 const agentDir: string = ensoAgentDir(home)
 mkdirSync(agentDir, { recursive: true })
+
+// The rules the permission-modes extension reads when pi loads it (#446), prepared before the
+// spawn: seeded when absent or empty (an empty file would import Claude Code's), refused when
+// unreadable. Harmless under the print variant, which loads no permission modes (#20).
+const permissionRules = preparePermissionRules(ensoPermissionRulesPath(home))
+if (permissionRules.kind === 'unreadable') {
+  process.stderr.write(
+    `enso: ${permissionRules.path} is unreadable (${permissionRules.reason}); fix it or remove it — a removed file is seeded with Enso's default deny rules (#446)\n`,
+  )
+  process.exit(1)
+}
+process.stderr.write(`enso: ${describePermissionRules(permissionRules)}\n`)
 
 const passthroughArgs = process.argv.slice(2)
 
@@ -243,7 +261,7 @@ process.stderr.write(
 
 const pi = Bun.spawn(['pi', ...args], {
   stdio: ['inherit', 'inherit', 'inherit'],
-  env: { ...process.env, PI_CODING_AGENT_DIR: agentDir },
+  env: { ...process.env, PI_CODING_AGENT_DIR: agentDir, PICC_PERMISSION_MODES_CONFIG_PATH: permissionRules.path },
 })
 // `exited` resolves with the exit code (never null, unlike Node's `exit` event).
 process.exit(await pi.exited)

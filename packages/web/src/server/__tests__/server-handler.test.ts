@@ -211,6 +211,7 @@ async function startWith(
     ...(promptsDir === undefined ? {} : { promptsDir }),
     harnessPackageDir: emptyHarnessDir(),
     agentDir: mkdtempSync(join(tmpdir(), 'enso-handler-agent-')),
+    permissionRulesPath: join(tmpdir(), 'enso-unread-permissions.json'),
     logsDir: mkdtempSync(join(tmpdir(), 'enso-logs-')),
     port: 0,
     host: (serverRule: (directory: string) => boolean) => {
@@ -1140,6 +1141,7 @@ test('⚠ a bind conflict rejects `listening` instead of hanging, and reports th
     cwd: tmpdir(),
     harnessPackageDir: emptyHarnessDir(),
     agentDir: mkdtempSync(join(tmpdir(), 'enso-handler-agent-')),
+    permissionRulesPath: join(tmpdir(), 'enso-unread-permissions.json'),
     logsDir: mkdtempSync(join(tmpdir(), 'enso-logs-')),
     port: 0,
     host: () => host,
@@ -1154,6 +1156,7 @@ test('⚠ a bind conflict rejects `listening` instead of hanging, and reports th
     cwd: tmpdir(),
     harnessPackageDir: emptyHarnessDir(),
     agentDir: mkdtempSync(join(tmpdir(), 'enso-handler-agent-')),
+    permissionRulesPath: join(tmpdir(), 'enso-unread-permissions.json'),
     logsDir: mkdtempSync(join(tmpdir(), 'enso-logs-')),
     port: occupied,
     host: () => host,

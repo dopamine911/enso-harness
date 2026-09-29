@@ -25,6 +25,7 @@ const SUBPATH_MODULES: readonly { readonly file: string; readonly entrypoint: Su
   { file: 'git.ts', entrypoint: '@enso/core/git' },
   { file: 'log-process.ts', entrypoint: '@enso/core/log-process' },
   { file: 'paths.ts', entrypoint: '@enso/core/paths' },
+  { file: 'permission-rules.ts', entrypoint: '@enso/core/permission-rules' },
   { file: 'pi-manifest.ts', entrypoint: '@enso/core/pi-manifest' },
   { file: 'secrets.ts', entrypoint: '@enso/core/secrets' },
 ]
@@ -32,6 +33,7 @@ type SubpathEntrypoint =
   | '@enso/core/git'
   | '@enso/core/log-process'
   | '@enso/core/paths'
+  | '@enso/core/permission-rules'
   | '@enso/core/pi-manifest'
   | '@enso/core/secrets'
 
@@ -64,6 +66,7 @@ const MODULE_FACTS: Readonly<Record<string, readonly [classification: Classifica
   'paths.ts': ['node-only utility', 'Project vocabulary'],
   'pi-manifest.ts': ['node-only utility', 'Project vocabulary'],
   'permission-mode.ts': ['config/policy', 'Permission'],
+  'permission-rules.ts': ['node-only utility', 'Permission'],
   'project.ts': ['wire', 'Thread, Permission'],
   'prompt-library.ts': ['wire', 'Thread, Record'],
   'provider-refusal.ts': ['wire', 'Observation, Record'],

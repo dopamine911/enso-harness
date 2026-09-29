@@ -70,6 +70,7 @@ async function startOverLogs(): Promise<{ url: string; logsDir: string }> {
     cwd: tmpdir(),
     harnessPackageDir: emptyHarnessDir(),
     agentDir: mkdtempSync(join(tmpdir(), 'enso-tail-agent-')),
+    permissionRulesPath: join(tmpdir(), 'enso-unread-permissions.json'),
     logsDir,
     port: 0,
     host: () => createFakeAgentHost(() => Promise.resolve(createFakeHostedThread().hosted)),

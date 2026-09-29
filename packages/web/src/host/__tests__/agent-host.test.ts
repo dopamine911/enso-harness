@@ -28,6 +28,7 @@ import {
 } from '@enso/core'
 import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
 import { findRepoRoot, harnessPackageDir, realpathOrSelf } from '@enso/core/paths'
+import { ENSO_DEFAULT_DENY_RULES } from '@enso/core/permission-rules'
 import type { LogRecorder } from '@logtape/testing/recorder'
 import {
   type AgentHost,
@@ -62,6 +63,8 @@ import { recordedModelOf } from '../transcript.ts'
 const repoRoot = findRepoRoot(import.meta.url)
 const harnessDir = harnessPackageDir(repoRoot)
 const agentDir = mkdtempSync(join(tmpdir(), 'enso-host-agent-'))
+/** Where these hosts point picc's user rules (#446): a scratch file, never the operator's `ENSO_HOME`. */
+const permissionRulesPath = join(mkdtempSync(join(tmpdir(), 'enso-host-rules-')), 'permissions.json')
 /** The one directory these hosts run sessions in (#395) — the server's projects, reduced to one. */
 const servesRepoRoot = (directory: string): boolean => realpathOrSelf(directory) === realpathOrSelf(repoRoot)
 const openSessions: HostedThread[] = []
@@ -100,6 +103,7 @@ function hostWith(extensionFactories: InlineExtension[] = []): AgentHost {
   return createAgentHost({
     servesDirectory: servesRepoRoot,
     agentDir,
+    permissionRulesPath,
     harnessPackageDir: harnessDir,
     extensionFactories,
   })
@@ -206,7 +210,12 @@ test("⚠ the agent dir's multi-account config is seeded — childProxy off, Ens
   })
   // and creating a host seeds it in the host's own agent dir — before any session exists
   const hostAgentDir = mkdtempSync(join(tmpdir(), 'enso-host-seed-at-boot-'))
-  createAgentHost({ servesDirectory: servesRepoRoot, agentDir: hostAgentDir, harnessPackageDir: harnessDir })
+  createAgentHost({
+    servesDirectory: servesRepoRoot,
+    agentDir: hostAgentDir,
+    harnessPackageDir: harnessDir,
+    permissionRulesPath,
+  })
   expect(JSON.parse(readFileSync(join(hostAgentDir, 'provider-failover.json'), 'utf8'))).toEqual({
     childProxy: false,
     authErrorPatterns: [SEEDED_AUTH_PATTERN],
@@ -346,6 +355,7 @@ test('⚠ creating a host removes secret-shaped variables from its environment, 
   createAgentHost({
     servesDirectory: servesRepoRoot,
     agentDir: mkdtempSync(join(tmpdir(), 'enso-host-quarantine-')),
+    permissionRulesPath,
     harnessPackageDir: harnessDir,
     environment,
   })
@@ -581,6 +591,35 @@ test('⚠ an entry an extension persists during session_start reaches the first 
   // is the transcript's first `Mode:` line only if it crosses — it is what #88 was missing.
   const openingMode = entries.find((entry) => entry.customType === 'modes')
   expect(openingMode?.data).toMatchObject({ mode: 'default' })
+})
+
+// ⚠ #446: the real permission-modes extension, in a real session, runs under the file the host
+// points it at, never its own `node_modules` copy of Claude Code's rules. Read off its opening
+// `modes` entry, where it persists the rules it loaded. A fresh file is Enso's deny rules and no
+// allow rule; a file the user wrote is what applies, as they wrote it.
+test("⚠ picc runs under the host's rules file: a fresh one is Enso's deny rules and no allow rule, a user's is theirs (#446)", async () => {
+  const userRule = 'Bash(bun test:*)'
+  const fresh = join(mkdtempSync(join(tmpdir(), 'enso-host-rules-fresh-')), 'permissions.json')
+  const written = join(mkdtempSync(join(tmpdir(), 'enso-host-rules-written-')), 'permissions.json')
+  writeFileSync(written, JSON.stringify({ permissions: { allow: [userRule] } }))
+  const loadedRules = async (path: string): Promise<Record<string, Record<string, unknown>>> => {
+    const host = createAgentHost({
+      servesDirectory: servesRepoRoot,
+      agentDir,
+      permissionRulesPath: path,
+      harnessPackageDir: harnessDir,
+    })
+    const hosted = await host.createSession(crypto.randomUUID(), () => repoRoot)
+    openSessions.push(hosted)
+    const modes = collectEvents(hosted).find((event) => event.kind === 'custom-entry' && event.customType === 'modes')
+    return (modes?.kind === 'custom-entry' ? modes.data : {}) as Record<string, Record<string, unknown>>
+  }
+  const seeded = await loadedRules(fresh)
+  expect(seeded.alwaysDenyRules?.userSettings).toEqual([...ENSO_DEFAULT_DENY_RULES])
+  expect(seeded.alwaysAllowRules?.userSettings).toBeUndefined()
+  const users = await loadedRules(written)
+  expect(users.alwaysAllowRules?.userSettings).toEqual([userRule])
+  expect(users.alwaysDenyRules?.userSettings).toBeUndefined()
 })
 
 // ⚠ L3 (#162 workstream 4). Above the host no surface reads the vendor's `modes` entry any
@@ -1530,6 +1569,7 @@ test('⚠ a provider refusal is on the feed: the failed attempt, pi’s retry, t
   const host = createAgentHost({
     servesDirectory: servesRepoRoot,
     agentDir: retryAgentDir,
+    permissionRulesPath,
     harnessPackageDir: harnessDir,
     extensionFactories: [fauxModelExtension(core)],
   })
@@ -1637,6 +1677,7 @@ test('⚠ a run that runs out of retries ends with pi giving up, and its last er
   const host = createAgentHost({
     servesDirectory: servesRepoRoot,
     agentDir: retryAgentDir,
+    permissionRulesPath,
     harnessPackageDir: harnessDir,
     extensionFactories: [fauxModelExtension(core)],
   })
@@ -1712,6 +1753,7 @@ test('⚠ a browser login from the web: the URL in our words, and a code questio
   const host = createAgentHost({
     servesDirectory: servesRepoRoot,
     agentDir: loginAgentDir,
+    permissionRulesPath,
     harnessPackageDir: harnessDir,
     extensionFactories: [fauxOAuthProvider],
   })
@@ -1792,6 +1834,7 @@ test('⚠ a login that finishes by its callback withdraws the code question it l
   const host = createAgentHost({
     servesDirectory: servesRepoRoot,
     agentDir: loginAgentDir,
+    permissionRulesPath,
     harnessPackageDir: harnessDir,
     extensionFactories: [callbackWinsProvider],
   })
@@ -1894,6 +1937,7 @@ test('⚠ two runs with nothing changed record one run context; a changed AGENTS
   const host = createAgentHost({
     servesDirectory: (directory) => realpathOrSelf(directory) === project,
     agentDir,
+    permissionRulesPath,
     harnessPackageDir: harnessDir,
     extensionFactories: [fauxModelExtension(watched)],
   })
@@ -2254,6 +2298,7 @@ function recordingHost(replies: number): { host: AgentHost; project: string; req
   const host = createAgentHost({
     servesDirectory: (directory) => realpathOrSelf(directory) === project,
     agentDir,
+    permissionRulesPath,
     harnessPackageDir: harnessDir,
     extensionFactories: [fauxModelExtension(watched)],
   })
@@ -2382,6 +2427,7 @@ test("a thread whose recorded system prompt does not read is refused by name bef
   const host = createAgentHost({
     servesDirectory: (directory) => realpathOrSelf(directory) === project,
     agentDir,
+    permissionRulesPath,
     harnessPackageDir: harnessDir,
     extensionFactories: [{ name: 'enso-host-load-probe', factory: (): void => void (extensionsLoaded += 1) }],
   })
@@ -2501,6 +2547,7 @@ test.each(terminalCases)(
     const host = createAgentHost({
       servesDirectory: (directory) => realpathOrSelf(directory) === project,
       agentDir,
+      permissionRulesPath,
       harnessPackageDir: harnessDir,
       extensionFactories: [fauxModelExtension(watched)],
     })

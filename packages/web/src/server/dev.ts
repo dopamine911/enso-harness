@@ -20,6 +20,7 @@ import { startLauncher } from '@enso/core/log-process'
 import {
   ensoAgentDir,
   ensoConfigPath,
+  ensoPermissionRulesPath,
   ensoProjectsPath,
   ensoPromptsDir,
   findRepoRoot,
@@ -67,6 +68,7 @@ const { listening } = startEnsoServer({
   promptsDir: ensoPromptsDir(home),
   harnessPackageDir: harnessPackageDir(repoRoot),
   agentDir,
+  permissionRulesPath: ensoPermissionRulesPath(home),
   logsDir,
 })
 

@@ -128,6 +128,10 @@ const VENDOR_NAMED_ALLOWED: readonly string[] = [
   // the constant and in the shape error that fires when no entry matches. Leaves when the
   // harness owns the print manifest instead of a launcher deriving it.
   'scripts/print-harness.ts',
+  // `PICC_PERMISSION_MODES_CONFIG_PATH` on the spawned pi's environment (#446): the one way to point
+  // the mode extension at `ENSO_HOME/permissions.json`, and it is the vendor's variable name. The
+  // host sets the same one under `host/`. Leaves when the harness owns where its rules live.
+  'scripts/enso.ts',
   // One inventory row's `seam` prose says a fake serves "a picc-shaped inspection" — it is
   // generated INTO docs/reference/verification-inventory.md, so the name is data here, not a
   // comment. Leaves when that fake stops replicating picc's `modes` custom entry.

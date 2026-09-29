@@ -24,6 +24,7 @@ const server = startEnsoServer({
   cwd: tmpdir(),
   harnessPackageDir: emptyHarness(),
   agentDir: mkdtempSync(join(tmpdir(), 'enso-proxy-agent-')),
+  permissionRulesPath: join(tmpdir(), 'enso-unread-permissions.json'),
   logsDir: mkdtempSync(join(tmpdir(), 'enso-proxy-logs-')),
   port: 0,
   host: () => createFakeAgentHost(() => Promise.reject(new Error('the proxy tests build no session'))),

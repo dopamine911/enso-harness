@@ -14,6 +14,8 @@ A permission mode says how much pi may do before it asks you. Each thread has on
 
 When pi needs to ask, the question appears in the chat. See [Questions and dialogs](./questions-and-dialogs.md).
 
+Within a mode, your permission rules decide what else runs without asking, what always asks, and what is refused. They live in `~/.enso/permissions.json` (`ENSO_HOME/permissions.json`), in the extension's `allow`, `deny` and `ask` lists, for example `"deny": ["Bash(npm publish*)"]`. A new `ENSO_HOME` starts with Enso's deny rules only: no `git commit --no-verify` or `-n`, and no `git push --delete`. The launch log says which file was used, and how many rules of each kind it holds.
+
 ## How to open it
 
 - The **mode** selector sits above the composer. Pick a mode to change it.
@@ -39,6 +41,10 @@ A new thread shows the mode as `unknown` until its first prompt has run. It star
 
 - A mode is not a guard. The guards apply in every mode, `bypassPermissions` included. See [Guards and receipts](./guards-and-receipts.md).
 - The terminal's print variant (`bun run enso -p "…"`) has no permission modes. There is nobody to ask, so the extension would refuse every edit. Only Enso's guards apply there, and `bash` is not confined.
+- Enso does not read Claude Code's permission rules (`~/.claude/settings.json`). Copy the ones you want into `permissions.json` yourself.
+- A file with no rules left in it is filled with Enso's deny rules again at the next launch. Otherwise the extension would import Claude Code's rules into it.
+- An edit to `permissions.json` applies to sessions started after it. A running thread keeps the rules it started with.
+- A file that is not plain JSON stops the launch, and the error names the file. Comments are not allowed.
 - A mode the thread does not offer is refused, and so is a change while the thread is running.
 
 ## Go deeper

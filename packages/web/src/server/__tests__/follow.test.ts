@@ -107,6 +107,7 @@ async function startWith(fake: FakeHost, sseKeepaliveMs = 1000): Promise<string>
     cwd: tmpdir(),
     harnessPackageDir: emptyHarnessDir(),
     agentDir: mkdtempSync(join(tmpdir(), 'enso-follow-agent-')),
+    permissionRulesPath: join(tmpdir(), 'enso-unread-permissions.json'),
     logsDir: mkdtempSync(join(tmpdir(), 'enso-logs-')),
     port: 0,
     host: () => fake.host,

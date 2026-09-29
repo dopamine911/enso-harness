@@ -59,6 +59,7 @@ test('refuses to start when a vendor manifest path is missing', () => {
       cwd,
       harnessPackageDir: harness,
       agentDir: tmpdir(),
+      permissionRulesPath: join(tmpdir(), 'enso-unread-permissions.json'),
       logsDir: tmpdir(),
     }),
   ).toThrow(/vendor package paths are missing/)
@@ -75,6 +76,7 @@ test('the refusal NAMES the missing path and the fix', () => {
       cwd,
       harnessPackageDir: harness,
       agentDir: tmpdir(),
+      permissionRulesPath: join(tmpdir(), 'enso-unread-permissions.json'),
       logsDir: tmpdir(),
     })
   } catch (error) {
@@ -93,6 +95,7 @@ test('starts when every vendor path resolves', async () => {
     cwd,
     harnessPackageDir: harness,
     agentDir: tmpdir(),
+    permissionRulesPath: join(tmpdir(), 'enso-unread-permissions.json'),
     logsDir: mkdtempSync(join(tmpdir(), 'enso-logs-')),
     port: 0,
   })
@@ -108,6 +111,7 @@ test('a non-vendor manifest path is not required to exist', async () => {
     cwd,
     harnessPackageDir: harness,
     agentDir: tmpdir(),
+    permissionRulesPath: join(tmpdir(), 'enso-unread-permissions.json'),
     logsDir: mkdtempSync(join(tmpdir(), 'enso-logs-')),
     port: 0,
   })
@@ -123,6 +127,7 @@ test('refuses when the harness package.json itself is absent', () => {
       cwd,
       harnessPackageDir: join(tmpdir(), 'definitely-not-here'),
       agentDir: tmpdir(),
+      permissionRulesPath: join(tmpdir(), 'enso-unread-permissions.json'),
       logsDir: tmpdir(),
     }),
   ).toThrow(/no package.json/)
@@ -135,6 +140,7 @@ test('refuses an empty cwd before touching the filesystem', () => {
       cwd: '',
       harnessPackageDir: fakeHarness({ extensions: [] }, true),
       agentDir: tmpdir(),
+      permissionRulesPath: join(tmpdir(), 'enso-unread-permissions.json'),
       logsDir: tmpdir(),
     }),
   ).toThrow(/cwd must not be empty/)
@@ -155,6 +161,7 @@ test('a `pi` that is not an object is refused by name, not walked character by c
       cwd,
       harnessPackageDir: fakeHarnessWithPi('node_modules/pi-multi-account/index.ts'),
       agentDir: tmpdir(),
+      permissionRulesPath: join(tmpdir(), 'enso-unread-permissions.json'),
       logsDir: tmpdir(),
     }),
   ).toThrow(/`pi` that is not an object/)
@@ -173,6 +180,7 @@ test('a non-string resource path is skipped, not handed to `.startsWith`', async
     cwd,
     harnessPackageDir: fakeHarnessWithPi({ extensions: [{ path: 'node_modules/whatever' }], skills: 42 }),
     agentDir: tmpdir(),
+    permissionRulesPath: join(tmpdir(), 'enso-unread-permissions.json'),
     logsDir: mkdtempSync(join(tmpdir(), 'enso-logs-')),
     port: 0,
   })
