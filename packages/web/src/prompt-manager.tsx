@@ -1,7 +1,7 @@
 import type { EnsoLibraryPromptCategory, EnsoLibraryPromptListing, EnsoSystemPromptPreview } from '@enso/core'
 import { TextPart } from '@tanstack/ai-react/ui'
 import { CopyIcon, FilePlusIcon, SaveIcon, ScrollTextIcon, Trash2Icon } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FetchLike } from './browser-logging.ts'
 import {
   Artifact,
@@ -439,19 +439,25 @@ function useManagerState(
   const [pending, setPending] = useState<Move | undefined>(undefined)
   const [refusal, setRefusal] = useState<string | undefined>(undefined)
   const taken = new Set(listingOf(library)?.prompts.map((prompt) => prompt.id) ?? [])
-  const open = (next: Selection): void => {
+  // ⚠ Every move takes a new ticket; a prompt read answers only if its ticket is still the latest.
+  // Otherwise a slow read of an earlier selection lands after a later one and fills the editor
+  // with the wrong prompt while the list shows the right one selected.
+  const moves = useRef(0)
+  const open = (next: Selection, ticket: number): void => {
     setRefusal(undefined)
     setSelection(next)
     setEditor(undefined)
     if (next.kind !== 'prompt') return
     void fetchLibraryPrompt(next.id, fetchImpl).then((read) => {
+      if (ticket !== moves.current) return
       if (read.kind === 'loaded') setEditor(openedState(read.prompt))
       else setRefusal(read.detail)
     })
   }
   const perform = (move: Move): void => {
+    moves.current += 1
     if (move.kind === 'select') {
-      open(move.next)
+      open(move.next, moves.current)
       return
     }
     setRefusal(undefined)

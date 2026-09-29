@@ -58,10 +58,19 @@ const REVIEWER: EnsoLibraryPrompt = {
   bytes: 90,
   tokens: 4,
 }
+const HAIKU: EnsoLibraryPrompt = {
+  id: 'haiku',
+  name: 'Haiku',
+  description: '',
+  category: 'append',
+  body: 'Always answer in haiku.',
+  bytes: 40,
+  tokens: 6,
+}
 const LISTING: EnsoLibraryPromptListing = {
   prompts: [
     summarizeLibraryPrompt(REVIEWER),
-    { id: 'haiku', name: 'Haiku', description: '', category: 'append', bytes: 40, tokens: 6 },
+    summarizeLibraryPrompt(HAIKU),
     { id: 'triage', name: 'Triage', description: '', category: 'session', bytes: 50, tokens: 9 },
   ],
   refused: [{ file: 'broken.md', reason: 'broken.md: it does not open with a --- frontmatter block' }],
@@ -119,6 +128,7 @@ function answer(input: string, init: RequestInit | undefined, written: Mounted['
   const method = init?.method ?? 'GET'
   if (input === '/api/prompts') return Response.json(LISTING)
   if (input === '/api/prompts/reviewer' && method === 'GET') return Response.json(REVIEWER)
+  if (input === '/api/prompts/haiku' && method === 'GET') return Response.json(HAIKU)
   if (input.startsWith('/api/threads/t1/system-prompt')) {
     return Response.json(method === 'POST' ? draftPreview(bodyOf(init) as EnsoSystemPromptDraft) : PI_DEFAULT)
   }
@@ -137,7 +147,10 @@ function answer(input: string, init: RequestInit | undefined, written: Mounted['
   return new Response('not scripted', { status: 404 })
 }
 
-async function mountManager(): Promise<Mounted> {
+/** A request the test answers late: its response waits on the promise `hold` returns for it. */
+type Hold = (input: string) => Promise<void> | undefined
+
+async function mountManager(hold?: Hold): Promise<Mounted> {
   const asked: string[] = []
   const written: Mounted['written'] = []
   const container = document.createElement('div')
@@ -145,7 +158,10 @@ async function mountManager(): Promise<Mounted> {
   const root: Root = createRoot(container)
   const fetch = (input: string, init?: RequestInit): Promise<Response> => {
     asked.push(`${init?.method ?? 'GET'} ${input}`)
-    return Promise.resolve(answer(input, init, written))
+    const late = hold?.(input)
+    return late === undefined
+      ? Promise.resolve(answer(input, init, written))
+      : late.then(() => answer(input, init, written))
   }
   await flush(async () => {
     root.render(<PromptManagerDialog threadId="t1" fetch={fetch} />)
@@ -311,5 +327,23 @@ test('delete asks, naming the file, before anything is removed', async () => {
   })
   await eventually(() => expect(mounted.asked).toContain('DELETE /api/prompts/reviewer'))
   await eventually(() => expect(mounted.dialog().textContent).toContain('what pi builds for this thread'))
+  await mounted.unmount()
+})
+
+// ⚠ Two opens in flight: the one answered last must not be the one shown. The earlier prompt's
+// read, arriving after the later one's, is stale — the editor keeps what the list has selected.
+test('⚠ a prompt read that answers after a later selection is dropped: the editor shows what is selected', async () => {
+  const { promise: released, resolve: release } = Promise.withResolvers<void>()
+  const mounted = await mountManager((input) => (input === '/api/prompts/reviewer' ? released : undefined))
+  await openListed(mounted, 'Reviewer')
+  await openListed(mounted, 'Haiku')
+  const name = (): string | undefined => mounted.dialog().querySelector<HTMLInputElement>('#prompt-name')?.value
+  await eventually(() => expect(name()).toBe('Haiku'))
+  await flush(async () => {
+    release()
+    await tick()
+  })
+  expect(name()).toBe('Haiku')
+  expect(mounted.dialog().querySelector<HTMLTextAreaElement>('#prompt-body')?.value).toBe(HAIKU.body)
   await mounted.unmount()
 })
