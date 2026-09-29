@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test'
 import { createHash } from 'node:crypto'
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -1349,18 +1349,37 @@ async function library(): Promise<{ url: string; built: FakeThreadRecord[]; dire
   return { url, built, directory }
 }
 
-async function send(
+/** A create's precondition: no file under that name. */
+const CREATE = { 'If-None-Match': '*' } as const
+
+interface Sent {
+  readonly status: number
+  readonly body: string
+  /** The `ETag` the answer carried, when it did. */
+  readonly etag?: string
+}
+
+async function request(
   url: string,
   path: string,
-  method: string,
-  body?: unknown,
-): Promise<{ status: number; body: string }> {
+  init: { readonly method: string; readonly body?: unknown; readonly headers?: Record<string, string> },
+): Promise<Sent> {
   const response = await fetch(`${url}${path}`, {
-    method,
-    headers: { 'Content-Type': 'application/json' },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    method: init.method,
+    headers: { 'Content-Type': 'application/json', ...init.headers },
+    ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
   })
-  return { status: response.status, body: await response.text() }
+  const etag = response.headers.get('ETag')
+  return { status: response.status, body: await response.text(), ...(etag === null ? {} : { etag }) }
+}
+
+function send(url: string, path: string, method: string, body?: unknown): Promise<Sent> {
+  return request(url, path, { method, body })
+}
+
+/** A library prompt written as a create — `If-None-Match: *`, as the manager writes a new one. */
+function createPrompt(url: string, id: string, fields: unknown): Promise<Sent> {
+  return request(url, `/api/prompts/${id}`, { method: 'PUT', body: fields, headers: CREATE })
 }
 
 test('⚠ the prompt library: written whole and read back, listed by name with its sizes, deleted — a file that does not parse is listed as refused, by name (#443)', async () => {
@@ -1368,7 +1387,7 @@ test('⚠ the prompt library: written whole and read back, listed by name with i
   // No directory yet is an empty library, not a failure.
   expect(JSON.parse((await send(url, '/api/prompts', 'GET')).body)).toEqual({ prompts: [], refused: [] })
 
-  const written = await send(url, '/api/prompts/reviewer', 'PUT', REVIEWER)
+  const written = await createPrompt(url, 'reviewer', REVIEWER)
   expect(written.status).toBe(200)
   const prompt = JSON.parse(written.body)
   expect(prompt).toMatchObject({ id: 'reviewer', ...REVIEWER, tokens: estimateTextTokens(REVIEWER.body) })
@@ -1396,18 +1415,80 @@ test('⚠ the prompt library: written whole and read back, listed by name with i
   })
 
   // A body outside the closed shape is a 400; an id that could be a path never reaches the disk.
-  expect((await send(url, '/api/prompts/reviewer', 'PUT', { ...REVIEWER, model: 'x' })).status).toBe(400)
-  expect((await send(url, '/api/prompts/blank-name', 'PUT', { ...REVIEWER, name: '   ' })).status).toBe(400)
+  expect((await createPrompt(url, 'fresh', { ...REVIEWER, model: 'x' })).status).toBe(400)
+  expect((await createPrompt(url, 'blank-name', { ...REVIEWER, name: '   ' })).status).toBe(400)
   expect((await send(url, '/api/prompts/..%2Fescape', 'PUT', REVIEWER)).status).toBe(404)
 
-  expect((await send(url, '/api/prompts/reviewer', 'DELETE')).status).toBe(204)
-  expect((await send(url, '/api/prompts/reviewer', 'DELETE')).status).toBe(404)
+  const any = { method: 'DELETE', headers: { 'If-Match': '*' } }
+  expect((await request(url, '/api/prompts/reviewer', any)).status).toBe(204)
+  expect((await request(url, '/api/prompts/reviewer', any)).status).toBe(404)
   expect((await send(url, '/api/prompts/reviewer', 'GET')).status).toBe(404)
+})
+
+test('⚠ every prompt write and delete states what it expects on disk: a create never lands on a file, a replace or delete only on the version read (#443)', async () => {
+  const { url, directory } = await library()
+  const put = (id: string, headers: Record<string, string>, fields: unknown = REVIEWER): Promise<Sent> =>
+    request(url, `/api/prompts/${id}`, { method: 'PUT', body: fields, headers })
+  const remove = (id: string, headers: Record<string, string>): Promise<Sent> =>
+    request(url, `/api/prompts/${id}`, { method: 'DELETE', headers })
+
+  // None is a 428, never an unconditional write — so a stale page or a script cannot write unread.
+  expect(await put('reviewer', {})).toMatchObject({ status: 428, body: expect.stringContaining('If-None-Match: *') })
+  expect(existsSync(join(directory, 'reviewer.md'))).toBe(false)
+  expect((await put('reviewer', { ...CREATE, 'If-Match': '*' })).status).toBe(400)
+  expect((await put('reviewer', { 'If-Match': 'W/"weak"' })).status).toBe(400)
+
+  const created = await put('reviewer', CREATE)
+  expect(created.status).toBe(200)
+  const read = await send(url, '/api/prompts/reviewer', 'GET')
+  expect(read.etag).toBe(created.etag)
+  // A create over a file that is there — a name taken since the list was read.
+  expect(await put('reviewer', CREATE, { ...REVIEWER, body: 'other' })).toEqual({
+    status: 412,
+    body: 'reviewer.md already exists',
+  })
+
+  // A replace of the version read; then that version is stale.
+  const replaced = await put('reviewer', { 'If-Match': created.etag ?? '' }, { ...REVIEWER, body: 'v2' })
+  expect(replaced.status).toBe(200)
+  expect(replaced.etag).not.toBe(created.etag)
+  expect(await put('reviewer', { 'If-Match': created.etag ?? '' }, { ...REVIEWER, body: 'v3' })).toEqual({
+    status: 412,
+    body: 'reviewer.md changed on disk since it was opened',
+  })
+  // Edited in another editor: the page's version is not the file's any more.
+  writeFileSync(join(directory, 'reviewer.md'), '---\nname: "Reviewer"\ncategory: system\n---\nhand edit')
+  expect((await put('reviewer', { 'If-Match': replaced.etag ?? '' })).status).toBe(412)
+  expect(readFileSync(join(directory, 'reviewer.md'), 'utf8')).toContain('hand edit')
+  // "Mine wins", asked for by name.
+  expect((await put('reviewer', { 'If-Match': '*' }, { ...REVIEWER, body: 'mine' })).status).toBe(200)
+  expect(readFileSync(join(directory, 'reviewer.md'), 'utf8')).toContain('mine')
+
+  // A refused file is a file: no create lands on it, and it has no version a page could have read.
+  writeFileSync(join(directory, 'broken.md'), 'no frontmatter')
+  expect((await put('broken', CREATE)).status).toBe(412)
+  expect((await put('broken', { 'If-Match': created.etag ?? '' })).status).toBe(412)
+  expect(readFileSync(join(directory, 'broken.md'), 'utf8')).toBe('no frontmatter')
+  // A replace of a file that is gone is no create.
+  expect(await put('gone', { 'If-Match': '*' })).toEqual({
+    status: 412,
+    body: 'gone.md is no longer there: it was deleted since it was opened',
+  })
+
+  // A delete: stated, of the version read.
+  const current = (await send(url, '/api/prompts/reviewer', 'GET')).etag ?? ''
+  expect((await remove('reviewer', {})).status).toBe(428)
+  expect((await remove('reviewer', CREATE)).status).toBe(400)
+  expect((await remove('reviewer', { 'If-Match': created.etag ?? '' })).status).toBe(412)
+  expect((await remove('reviewer', { 'If-Match': current })).status).toBe(204)
+  expect(existsSync(join(directory, 'reviewer.md'))).toBe(false)
+  // No stage is left behind by any of it.
+  expect(readdirSync(directory).filter((name) => name.endsWith('.tmp'))).toEqual([])
 })
 
 test('a library file that is not UTF-8 is refused by name, never read with replacement characters (#443)', async () => {
   const { url, directory } = await library()
-  await send(url, '/api/prompts/reviewer', 'PUT', REVIEWER)
+  await createPrompt(url, 'reviewer', REVIEWER)
   writeFileSync(
     join(directory, 'latin.md'),
     Buffer.from('---\nname: Latin\ncategory: system\n---\ncaf\xe9\n', 'latin1'),
@@ -1425,9 +1506,9 @@ test('a server started without a library says so on every prompt route (#443)', 
 
 test('⚠ POST …/configure takes a system prompt from the library first, and refuses by name a session prompt, a missing or unparseable file, and a choice after the first request (#443)', async () => {
   const { url, built, directory } = await library()
-  await send(url, '/api/prompts/reviewer', 'PUT', REVIEWER)
-  await send(url, '/api/prompts/opener', 'PUT', { ...REVIEWER, name: 'Opener', category: 'session' })
-  await send(url, '/api/prompts/blank', 'PUT', { ...REVIEWER, name: 'Blank', body: '  \n' })
+  await createPrompt(url, 'reviewer', REVIEWER)
+  await createPrompt(url, 'opener', { ...REVIEWER, name: 'Opener', category: 'session' })
+  await createPrompt(url, 'blank', { ...REVIEWER, name: 'Blank', body: '  \n' })
   writeFileSync(join(directory, 'broken.md'), 'no frontmatter')
   const configure = (thread: string, body: unknown): Promise<{ status: number; body: string }> =>
     send(url, `/api/threads/${thread}/configure`, 'POST', body)
@@ -1475,7 +1556,7 @@ test('⚠ POST …/configure takes a system prompt from the library first, and r
   // The same again is no change. Before the first request another REPLACES it — a Start refused at
   // a later step may try again with a different prompt; after it, the session keeps its prompt for life.
   expect((await configure('t-good', { systemPrompt: 'reviewer' })).status).toBe(204)
-  await send(url, '/api/prompts/other', 'PUT', { ...REVIEWER, name: 'Other', category: 'append' })
+  await createPrompt(url, 'other', { ...REVIEWER, name: 'Other', category: 'append' })
   expect((await configure('t-good', { systemPrompt: 'other' })).status).toBe(204)
   expect(chosen?.systemPrompt).toMatchObject({ id: 'other', mode: 'append' })
   expect(await prompt(url, 't-good', 'hello')).toBe(202)
@@ -1507,8 +1588,8 @@ test('⚠ POST …/configure takes a system prompt from the library first, and r
 
 test("⚠ GET …/system-prompt previews pi's default, a library prompt's breakdown, and refuses by name what cannot be one (#443)", async () => {
   const { url, built } = await library()
-  await send(url, '/api/prompts/reviewer', 'PUT', REVIEWER)
-  await send(url, '/api/prompts/opener', 'PUT', { ...REVIEWER, name: 'Opener', category: 'session' })
+  await createPrompt(url, 'reviewer', REVIEWER)
+  await createPrompt(url, 'opener', { ...REVIEWER, name: 'Opener', category: 'session' })
   const preview = (query: string): Promise<{ status: number; body: string }> =>
     send(url, `/api/threads/t-preview/system-prompt${query}`, 'GET')
 

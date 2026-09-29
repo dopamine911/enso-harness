@@ -112,7 +112,9 @@ function serverFetch(library: 'present' | 'absent'): (input: string) => Promise<
           : new Response('this server has no prompt library', { status: 404 }),
       )
     }
-    if (input === '/api/prompts/triage') return Promise.resolve(Response.json(TRIAGE))
+    if (input === '/api/prompts/triage') {
+      return Promise.resolve(Response.json(TRIAGE, { headers: { ETag: `"${'c'.repeat(64)}"` } }))
+    }
     return Promise.resolve(Response.json(COMMANDS))
   }
 }

@@ -266,7 +266,7 @@ What is durable, and where:
 | `ENSO_HOME/config.json` (the user's; absent is the defaults) | — | operator | once per session, at its start; a file that is there and unreadable fails closed (#59, #421) |
 | `<project>/.enso/config.json` (a project's, over the user's) | — | the project | once per session, only once the project is trusted; merged over the user's — lists combine, `projects.roots` is ignored (#421) |
 | `ENSO_HOME/pi-agent/trust.json` | the project's canonical path | pi, or Enso's replica of pi's store, under pi's lock | read at session start; the one decision gating a project's `.pi/` and `.enso/` (#421) |
-| `ENSO_HOME/prompts/<id>.md` (the prompt library) | the file name | the web server, written whole and renamed over (`PUT`/`DELETE /api/prompts/:id`); the operator may edit the files | on every list and read — the files are the record; a file that does not parse is listed as refused, by name (#443) |
+| `ENSO_HOME/prompts/<id>.md` (the prompt library) | the file name | the web server, written whole under the precondition each `PUT`/`DELETE /api/prompts/:id` states — a create never over a file that is there, a replace or delete only of the version read (`If-Match`, the file's ETag); the operator may edit the files | on every list and read — the files are the record; a file that does not parse is listed as refused, by name (#443) |
 | `ENSO_HOME/secrets.env` | — | operator | per call by the extension that needs it; quarantined from `process.env` |
 | `ENSO_HOME/pi-agent/provider-failover.json` | — | seeded at host creation | pi's multi-account extension |
 

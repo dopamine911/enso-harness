@@ -290,7 +290,7 @@ const RUNTIME_PATH_METADATA: readonly RuntimePathMetadata[] = [
     helper: 'ensoPromptsDir',
     path: 'ENSO_HOME/prompts',
     writer:
-      'The web server, when a page writes or deletes a library prompt (#443) — one `<id>.md` per prompt, written whole and renamed over; the operator may edit the files directly.',
+      'The web server, when a page writes or deletes a library prompt (#443) — one `<id>.md` per prompt, written whole under the precondition the request states (a create is linked into place and never lands on a file there; a replace or delete lands only on the version read, by its ETag); the operator may edit the files directly.',
     lifetime: 'Per-user until a prompt is deleted; a thread that ran one keeps the text its log recorded.',
     check: { file: 'packages/web/src/server/prompt-library.ts', contains: 'renameSync(staging, path)' },
   },

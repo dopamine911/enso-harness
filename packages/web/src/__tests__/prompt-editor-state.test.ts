@@ -26,7 +26,8 @@ const SAVED = {
   category: 'system' as const,
   body: 'Say what breaks.',
 }
-const OPENED = openedState({ ...SAVED, bytes: 1, tokens: 1 })
+const ETAG = `"${'a'.repeat(64)}"`
+const OPENED = openedState({ ...SAVED, bytes: 1, tokens: 1 }, ETAG)
 
 test('a prompt opened from its file is clean until a field changes; a new one is unsaved from the start', () => {
   expect(isDirty(OPENED)).toBe(false)
@@ -81,7 +82,7 @@ test("a copy of pi's default holds exactly the sections a system prompt takes th
   expect(copyDraft(SAVED)).toMatchObject({ id: 'reviewer-copy', name: 'Reviewer (copy)', body: SAVED.body })
 })
 
-/** A server that answers each request from `answers` in turn, recording what was asked. */
+/** A server that answers each request from `answers` in turn, recording what was asked and its precondition. */
 function scripted(answers: Response[]): {
   fetch: (input: string, init?: RequestInit) => Promise<Response>
   asked: string[]
@@ -90,30 +91,49 @@ function scripted(answers: Response[]): {
   return {
     asked,
     fetch: (input: string, init?: RequestInit): Promise<Response> => {
-      asked.push(`${init?.method ?? 'GET'} ${input}`)
+      const headers = new Headers(init?.headers)
+      let precondition = ''
+      for (const name of ['If-None-Match', 'If-Match']) {
+        if (headers.has(name)) precondition = ` ${name}: ${headers.get(name)}`
+      }
+      asked.push(`${init?.method ?? 'GET'} ${input}${precondition}`)
       const next = answers.shift()
       return next === undefined ? Promise.reject(new Error('unscripted request')) : Promise.resolve(next)
     },
   }
 }
 
-const readBack = (id: string): Response => Response.json({ ...SAVED, id, bytes: 1, tokens: 1 })
+const NEW_ETAG = `"${'b'.repeat(64)}"`
+const readBack = (id: string): Response =>
+  Response.json({ ...SAVED, id, bytes: 1, tokens: 1 }, { headers: { ETag: NEW_ETAG } })
 
-test('⚠ a rename writes the new file FIRST, then removes the old one; a failed write removes nothing; a failed remove is still a save', async () => {
+test('⚠ a rename writes the new file FIRST as a create, then removes the old one only at the version opened; a failed write removes nothing; a failed remove is still a save', async () => {
   const renamed = { ...OPENED, draft: { ...OPENED.draft, id: 'reviewer-v2' } }
   const server = scripted([readBack('reviewer-v2'), new Response(null, { status: 204 })])
   expect(await saveDraft(renamed, new Set(['reviewer']), server.fetch)).toMatchObject({
     kind: 'saved',
     prompt: { id: 'reviewer-v2' },
+    etag: NEW_ETAG,
   })
-  expect(server.asked).toEqual(['PUT /api/prompts/reviewer-v2', 'DELETE /api/prompts/reviewer'])
+  expect(server.asked).toEqual([
+    'PUT /api/prompts/reviewer-v2 If-None-Match: *',
+    `DELETE /api/prompts/reviewer If-Match: ${ETAG}`,
+  ])
 
   const failing = scripted([new Response('disk full', { status: 500 })])
   expect(await saveDraft(renamed, new Set(['reviewer']), failing.fetch)).toEqual({
     kind: 'refused',
     reason: 'disk full',
   })
-  expect(failing.asked).toEqual(['PUT /api/prompts/reviewer-v2'])
+  expect(failing.asked).toEqual(['PUT /api/prompts/reviewer-v2 If-None-Match: *'])
+
+  // A name taken since the list was read: refused by the server, never overwritten from here.
+  const taken = scripted([new Response('reviewer-v2.md already exists', { status: 412 })])
+  expect(await saveDraft(renamed, new Set(['reviewer']), taken.fetch)).toEqual({
+    kind: 'refused',
+    reason: 'reviewer-v2.md already exists',
+  })
+  expect(taken.asked).toEqual(['PUT /api/prompts/reviewer-v2 If-None-Match: *'])
 
   // The new file exists: the editor must move to it, and say the old one is still there.
   const stuck = scripted([readBack('reviewer-v2'), new Response('busy', { status: 500 })])
@@ -122,6 +142,23 @@ test('⚠ a rename writes the new file FIRST, then removes the old one; a failed
     prompt: { id: 'reviewer-v2' },
     warning: 'saved as reviewer-v2.md, but reviewer.md was not removed: busy',
   })
+})
+
+test('⚠ a save of an opened file replaces only the version it opened: another on disk is a conflict, and overwrite is asked for by name', async () => {
+  const edited = { ...OPENED, draft: { ...OPENED.draft, body: 'Say more.' } }
+  const changed = scripted([new Response('reviewer.md changed on disk since it was opened', { status: 412 })])
+  expect(await saveDraft(edited, new Set(['reviewer']), changed.fetch)).toEqual({
+    kind: 'conflict',
+    reason: 'reviewer.md changed on disk since it was opened',
+  })
+  expect(changed.asked).toEqual([`PUT /api/prompts/reviewer If-Match: ${ETAG}`])
+
+  const mine = scripted([readBack('reviewer')])
+  expect(await saveDraft(edited, new Set(['reviewer']), mine.fetch, true)).toMatchObject({
+    kind: 'saved',
+    etag: NEW_ETAG,
+  })
+  expect(mine.asked).toEqual(['PUT /api/prompts/reviewer If-Match: *'])
 })
 
 test('a save that is refused before it is sent sends nothing', async () => {
@@ -136,13 +173,13 @@ test('a save that is refused before it is sent sends nothing', async () => {
 test('a save that answers keeps a draft typed on since it went out, unsaved; with none, the file is the editor', () => {
   const sent = { ...OPENED.draft, body: 'sent' }
   const prompt = { ...SAVED, body: 'sent', bytes: 1, tokens: 1 }
-  const unchanged = savedState({ saved: OPENED.saved, draft: sent }, sent, prompt)
-  expect(unchanged).toEqual(openedState(prompt))
+  const unchanged = savedState({ saved: OPENED.saved, draft: sent }, sent, prompt, NEW_ETAG)
+  expect(unchanged).toEqual(openedState(prompt, NEW_ETAG))
   expect(isDirty(unchanged)).toBe(false)
   const typedOn = { ...sent, body: 'sent, and more' }
-  const kept = savedState({ saved: OPENED.saved, draft: typedOn }, sent, prompt)
+  const kept = savedState({ saved: OPENED.saved, draft: typedOn }, sent, prompt, NEW_ETAG)
   expect(kept.draft).toBe(typedOn)
-  expect(kept.saved).toEqual(openedState(prompt).saved)
+  expect(kept.saved).toEqual(openedState(prompt, NEW_ETAG).saved)
   expect(isDirty(kept)).toBe(true)
-  expect(savedState(undefined, sent, prompt)).toEqual(openedState(prompt))
+  expect(savedState(undefined, sent, prompt, NEW_ETAG)).toEqual(openedState(prompt, NEW_ETAG))
 })

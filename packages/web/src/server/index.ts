@@ -58,6 +58,7 @@ import {
   readPromptWriteBody,
   readSystemPromptDraftBody,
   type SystemPromptPick,
+  type WriteCondition,
 } from './prompt-library.ts'
 import { SSE_KEEPALIVE_MS } from './sse.ts'
 import { createContextRequestRoute, createThreadContextRoute } from './thread-context-route.ts'
@@ -275,6 +276,41 @@ async function readJsonBody<T>(
 function refuseWith(response: ServerResponse, outcome: { readonly status: number; readonly reason: string }): void {
   response.writeHead(outcome.status, { 'Content-Type': 'text/plain' })
   response.end(outcome.reason)
+}
+
+/** A strong entity tag as the library quotes one: a file's sha256, hex. */
+const PROMPT_ETAG = /^"[0-9a-f]{64}"$/
+
+/** Why a library write or delete does not say what it expects: the one line `refuseWith` sends. */
+const MISSING_PRECONDITION: Readonly<Record<'write' | 'delete', string>> = {
+  write:
+    'a prompt write states what it expects on disk: `If-None-Match: *` to create, `If-Match: <ETag>` to replace the version it read, `If-Match: *` to replace whatever is there',
+  delete: 'a prompt delete states the version it removes: `If-Match: <ETag>`, or `If-Match: *` for whatever is there',
+}
+
+/**
+ * The precondition a library write or delete states (#443): `If-None-Match: *` (create — no file
+ * there), `If-Match: "<etag>"` (the version a read answered), `If-Match: *` (whatever is there). ⚠
+ * NONE IS A 428, never an unconditional write: without it a stale page or a script overwrites a
+ * prompt it never read, a refused one included. Both headers, a list, or a weak tag are a 400.
+ */
+function writeConditionOf(
+  request: IncomingMessage,
+  what: 'write' | 'delete',
+): WriteCondition | { readonly status: 400 | 428; readonly reason: string } {
+  const none = request.headers['if-none-match']?.trim()
+  const match = request.headers['if-match']?.trim()
+  if (none !== undefined && match !== undefined) {
+    return { status: 400, reason: 'a prompt request takes `If-None-Match` or `If-Match`, not both' }
+  }
+  if (none !== undefined) {
+    return none === '*' ? { kind: 'absent' } : { status: 400, reason: '`If-None-Match` takes only `*`: create' }
+  }
+  if (match === undefined) return { status: 428, reason: MISSING_PRECONDITION[what] }
+  if (match === '*') return { kind: 'present' }
+  return PROMPT_ETAG.test(match)
+    ? { kind: 'matches', etag: match }
+    : { status: 400, reason: '`If-Match` takes `*` or the one ETag a read of this prompt answered' }
 }
 
 /** A body that carries a prompt's text — a library write or a draft — under the prompt cap. */
@@ -1260,8 +1296,9 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   }
 
   /**
-   * `PUT /api/prompts/:id` (#443): write a library prompt whole, created or replaced; the answer is
-   * the file as read back, so a page never shows fields the file does not hold.
+   * `PUT /api/prompts/:id` (#443): write a library prompt whole under the precondition its headers
+   * state; the answer is the file as read back, with its `ETag`, so a page never shows fields the
+   * file does not hold. A precondition the disk does not meet is a 412 naming the file.
    */
   async function respondToPromptWrite(
     library: PromptLibrary,
@@ -1269,19 +1306,34 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> {
+    const condition = writeConditionOf(request, 'write')
+    if ('status' in condition) {
+      endAndClose(request, response, condition.status, condition.reason)
+      return
+    }
     const fields = await readPromptSizedBody(request, response, readPromptWriteBody)
     if (fields === undefined) return
-    const read = library.write(id, fields)
-    if (read.kind !== 'prompt') log.error('prompt {id} did not read back after its write: {read}', { id, read })
-    answerLibraryRead(response, read, 500)
+    const written = library.write(id, fields, condition)
+    if (written.kind === 'conflict') {
+      log.warn('prompt {id} not written: {reason}', { id, reason: written.reason })
+      refuseWith(response, { status: 412, reason: written.reason })
+      return
+    }
+    if (written.kind !== 'prompt')
+      log.error('prompt {id} did not read back after its write: {read}', { id, read: written })
+    answerLibraryRead(response, written, 500)
   }
 
   /**
-   * A library read, answered: the prompt as JSON, a missing file 404, a refused one with its reason
-   * at `refusedStatus` — 422 for a read, 500 for a write that does not read back.
+   * A library read, answered: the prompt as JSON with its `ETag`, a missing file 404, a refused one
+   * with its reason at `refusedStatus` — 422 for a read, 500 for a write that does not read back.
    */
   function answerLibraryRead(response: ServerResponse, read: LibraryRead, refusedStatus: 422 | 500): void {
-    if (read.kind === 'prompt') return answerJson(response, read.prompt)
+    if (read.kind === 'prompt') {
+      response.writeHead(200, { 'Content-Type': 'application/json', ETag: read.etag })
+      response.end(JSON.stringify(read.prompt))
+      return
+    }
     refuseWith(response, { status: read.kind === 'missing' ? 404 : refusedStatus, reason: read.reason })
   }
 
@@ -1295,10 +1347,33 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     answerJson(response, library.list())
   }
 
-  /** `DELETE /api/prompts/:id`: 204, or 404 when there was no such file. A thread that ran it keeps its own copy. */
-  function respondToPromptRemoval(library: PromptLibrary, id: string, response: ServerResponse): void {
-    if (!library.remove(id)) {
+  /**
+   * `DELETE /api/prompts/:id` under its `If-Match`: 204, 404 when there was no such file, 412 when it
+   * is not the version the caller read. A thread that ran it keeps its own copy.
+   */
+  function respondToPromptRemoval(
+    library: PromptLibrary,
+    id: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): void {
+    const condition = writeConditionOf(request, 'delete')
+    if ('status' in condition) {
+      endAndClose(request, response, condition.status, condition.reason)
+      return
+    }
+    if (condition.kind === 'absent') {
+      endAndClose(request, response, 400, 'a delete takes `If-Match`, not `If-None-Match`')
+      return
+    }
+    const removed = library.remove(id, condition)
+    if (removed === 'missing') {
       refuseWith(response, { status: 404, reason: `no prompt ${id} in ${library.directory}` })
+      return
+    }
+    if (removed !== 'removed') {
+      log.warn('prompt {id} not deleted: {reason}', { id, reason: removed.reason })
+      refuseWith(response, { status: 412, reason: removed.reason })
       return
     }
     response.writeHead(204)
@@ -1337,7 +1412,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     }
     const removed = request.method === 'DELETE' ? PROMPT_DELETE_ROUTE.exec(url)?.[1] : undefined
     if (removed !== undefined) {
-      return withLibrary(request, response, (library) => respondToPromptRemoval(library, removed, response))
+      return withLibrary(request, response, (library) => respondToPromptRemoval(library, removed, request, response))
     }
     return false
   }

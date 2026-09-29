@@ -8,7 +8,7 @@ import {
   utf8Bytes,
 } from '@enso/core'
 import type { FetchLike } from './browser-logging.ts'
-import { deleteLibraryPrompt, writeLibraryPrompt } from './prompt-library-connection.ts'
+import { deleteLibraryPrompt, type LibraryPrecondition, writeLibraryPrompt } from './prompt-library-connection.ts'
 
 /**
  * The prompt manager's editor, as data (#443): the draft on screen, the file it was opened from,
@@ -17,6 +17,12 @@ import { deleteLibraryPrompt, writeLibraryPrompt } from './prompt-library-connec
  * ⚠ A RENAME IS A WRITE, THEN A DELETE — in that order, and never over another prompt. The id is
  * the file name; the new file is written first so a failed delete leaves two copies rather than
  * none, and a name another prompt already has is refused before anything is written.
+ *
+ * ⚠ EVERY WRITE NAMES WHAT IT EXPECTS ON DISK. A new file, or a rename's new name, is a create
+ * (`If-None-Match: *`): the server refuses it over any file there, one another tab or editor saved
+ * since the list was read included. A save of an opened file replaces only the version it opened
+ * (`If-Match`, the `etag` it was read with); a different one on disk is a `conflict`, which the
+ * person settles — reload it, or overwrite it with theirs.
  */
 
 /** Everything the editor edits: the file's name (`id`) and its fields. */
@@ -24,9 +30,14 @@ export interface EditorDraft extends EnsoLibraryPromptWrite {
   readonly id: string
 }
 
+/** A file as the editor opened or saved it: its fields, and the version it read (`etag`). */
+export interface SavedFile extends EditorDraft {
+  readonly etag: string
+}
+
 /** The draft, and the file it was opened from — `undefined` for a prompt not yet saved. */
 export interface EditorState {
-  readonly saved: EditorDraft | undefined
+  readonly saved: SavedFile | undefined
   readonly draft: EditorDraft
 }
 
@@ -35,22 +46,23 @@ function draftOf(prompt: EnsoLibraryPrompt): EditorDraft {
   return { id, name, description, category, body }
 }
 
-/** Opened from a saved file: nothing to save until something changes. */
-export function openedState(prompt: EnsoLibraryPrompt): EditorState {
+/** Opened from a saved file, at the version `etag`: nothing to save until something changes. */
+export function openedState(prompt: EnsoLibraryPrompt, etag: string): EditorState {
   const draft = draftOf(prompt)
-  return { saved: draft, draft }
+  return { saved: { ...draft, etag }, draft }
 }
 
 /**
- * The editor once a save of `sent` answered with `prompt`: the file is the new baseline, and a draft
- * typed on since the save went out stays — still unsaved — instead of being put back to what was sent.
+ * The editor once a save of `sent` answered with `prompt` at `etag`: the file is the new baseline, and
+ * a draft typed on since the save went out stays — still unsaved — instead of being put back to what was sent.
  */
 export function savedState(
   current: EditorState | undefined,
   sent: EditorDraft,
   prompt: EnsoLibraryPrompt,
+  etag: string,
 ): EditorState {
-  const opened = openedState(prompt)
+  const opened = openedState(prompt, etag)
   if (current === undefined || current.draft === sent) return opened
   return { saved: opened.saved, draft: current.draft }
 }
@@ -111,36 +123,47 @@ export function saveRefusal(state: EditorState, taken: ReadonlySet<string>): str
 }
 
 export type SaveOutcome =
-  /** Written. `warning` when it was a rename and the old file is still there — listed, for the person to remove. */
-  | { readonly kind: 'saved'; readonly prompt: EnsoLibraryPrompt; readonly warning?: string }
+  /** Written, at `etag`. `warning` when it was a rename and the old file is still there — listed, for the person to remove. */
+  | { readonly kind: 'saved'; readonly prompt: EnsoLibraryPrompt; readonly etag: string; readonly warning?: string }
   | { readonly kind: 'refused'; readonly reason: string }
+  /** The opened file changed on disk since it was read: nothing was written; reload it, or overwrite it. */
+  | { readonly kind: 'conflict'; readonly reason: string }
 
 /**
  * Write the draft; on a rename, then delete the old file. Refused when nothing was written. A write
  * that landed is a save even when the old file stays: the new file exists, and the editor must show it.
+ * `overwrite` is the person's answer to a `conflict`: replace whatever is on disk with the draft.
  */
 export async function saveDraft(
   state: EditorState,
   taken: ReadonlySet<string>,
   fetchImpl?: FetchLike,
+  overwrite = false,
 ): Promise<SaveOutcome> {
   const refusal = saveRefusal(state, taken)
   if (refusal !== undefined) return { kind: 'refused', reason: refusal }
   const { id, ...fields } = state.draft
-  const written = await writeLibraryPrompt(id, fields, fetchImpl)
+  const { saved } = state
+  const replacing = saved !== undefined && saved.id === id
+  let precondition: LibraryPrecondition = { kind: 'create' }
+  if (replacing) precondition = overwrite ? { kind: 'overwrite' } : { kind: 'replace', etag: saved.etag }
+  const written = await writeLibraryPrompt(id, fields, precondition, fetchImpl)
+  // A create that finds a file is a name taken since the list was read — never overwritten from here.
+  if (written.kind === 'conflict') return { kind: replacing ? 'conflict' : 'refused', reason: written.detail }
   if (written.kind !== 'loaded') return { kind: 'refused', reason: written.detail }
-  const renamedFrom = state.saved?.id
-  if (renamedFrom !== undefined && renamedFrom !== id) {
-    const removed = await deleteLibraryPrompt(renamedFrom, fetchImpl)
+  if (saved !== undefined && !replacing) {
+    // Only the version that was opened: an old file edited since is kept, and said.
+    const removed = await deleteLibraryPrompt(saved.id, { kind: 'replace', etag: saved.etag }, fetchImpl)
     if (removed.kind !== 'deleted') {
       return {
         kind: 'saved',
         prompt: written.prompt,
-        warning: `saved as ${id}.md, but ${renamedFrom}.md was not removed: ${removed.detail}`,
+        etag: written.etag,
+        warning: `saved as ${id}.md, but ${saved.id}.md was not removed: ${removed.detail}`,
       }
     }
   }
-  return { kind: 'saved', prompt: written.prompt }
+  return { kind: 'saved', prompt: written.prompt, etag: written.etag }
 }
 
 /** A category's name, as the editor and the list say it. */

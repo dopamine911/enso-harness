@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { linkSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   type EnsoLibraryPrompt,
@@ -25,6 +25,12 @@ import { readClosedBody } from './follow.ts'
  * (`parseLibraryPrompt`), is listed under `refused` with its reason, and choosing it for a session
  * is a refusal that says the same — never a silent fall back to pi's default. A file that is not
  * `.md` is not a prompt and is not listed.
+ *
+ * ⚠ EVERY WRITE SAYS WHAT IT EXPECTS ON DISK (`WriteCondition`, the routes' `If-None-Match` /
+ * `If-Match`). A create never lands on a file that is there — a prompt someone else saved, or a
+ * refused one nobody can read — and a replace or a delete lands only on the version its caller read
+ * (its `etag`), so a file edited in another editor since is not overwritten unseen. The one exception
+ * is asked for by name: `present`, "whatever is there, mine wins".
  *
  * The user's library only, for now: a project library (committed under `.pi/`) is a later slice,
  * and when it lands its precedence is stated here.
@@ -68,9 +74,22 @@ export function readPromptWriteBody(raw: string): EnsoLibraryPromptWrite {
 }
 
 export type LibraryRead =
-  | { readonly kind: 'prompt'; readonly prompt: EnsoLibraryPrompt }
+  /** `etag`: the file's bytes, hashed — what a later replace or delete names as the version it read. */
+  | { readonly kind: 'prompt'; readonly prompt: EnsoLibraryPrompt; readonly etag: string }
   | { readonly kind: 'missing'; readonly reason: string }
   | { readonly kind: 'refused'; readonly reason: string }
+
+/**
+ * What a write or a delete expects on disk: no file (`absent`, a create or a rename's new name),
+ * the version it read (`matches`), or any file at all (`present`, the explicit "mine wins").
+ */
+export type WriteCondition =
+  | { readonly kind: 'absent' }
+  | { readonly kind: 'matches'; readonly etag: string }
+  | { readonly kind: 'present' }
+
+/** What the disk held instead of what the condition expected — never a write. */
+export type WriteConflict = { readonly kind: 'conflict'; readonly reason: string }
 
 export type SystemPromptPick =
   | { readonly kind: 'chosen'; readonly choice: EnsoSystemPromptChoice }
@@ -81,10 +100,10 @@ export interface PromptLibrary {
   readonly directory: string
   list(): EnsoLibraryPromptListing
   read(id: string): LibraryRead
-  /** Writes the file whole (staged, then renamed over) and answers it as read back. */
-  write(id: string, fields: EnsoLibraryPromptWrite): LibraryRead
-  /** False when there was no such file. */
-  remove(id: string): boolean
+  /** Writes the file whole when the disk holds what `condition` expects, and answers it as read back. */
+  write(id: string, fields: EnsoLibraryPromptWrite, condition: WriteCondition): LibraryRead | WriteConflict
+  /** Removes the file when the disk holds what `condition` expects; `missing` when there was none. */
+  remove(id: string, condition: Exclude<WriteCondition, { kind: 'absent' }>): 'removed' | 'missing' | WriteConflict
   /** A `system` or `append` prompt as the choice a session records, or why it cannot be one. */
   pickSystemPrompt(id: string): SystemPromptPick
 }
@@ -110,21 +129,50 @@ function errorCode(error: unknown): string | undefined {
  * file's exact bytes and `bytes` stays the size on disk.
  */
 const UTF8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
+
+/** A strong entity tag for a file's bytes, quoted as HTTP writes one. */
+function etagOf(bytes: Uint8Array): string {
+  return `"${createHash('sha256').update(bytes).digest('hex')}"`
+}
+
+/** The file's etag, or `undefined` when there is no file. */
+function currentEtag(path: string): string | undefined {
+  try {
+    return etagOf(readFileSync(path))
+  } catch (error: unknown) {
+    if (errorCode(error) === 'ENOENT') return undefined
+    throw error
+  }
+}
+
+/** Why the file on disk is not what `condition` expects, or `undefined` when it is. */
+function conflictOf(path: string, file: string, condition: WriteCondition): string | undefined {
+  const etag = currentEtag(path)
+  if (condition.kind === 'absent') return etag === undefined ? undefined : `${file} already exists`
+  if (etag === undefined) return `${file} is no longer there: it was deleted since it was opened`
+  if (condition.kind === 'matches' && etag !== condition.etag) return `${file} changed on disk since it was opened`
+  return undefined
+}
+
 function readFile(directory: string, id: string): LibraryRead {
   const file = `${id}${EXTENSION}`
   // Refused, never missing: a listed `Notes.md` must still be named, and nothing outside is looked at.
   if (!isLibraryPromptId(id))
     return { kind: 'refused', reason: `${file}: the name is not lowercase words joined by hyphens` }
+  let bytes: Uint8Array
   let text: string
   try {
-    text = UTF8.decode(readFileSync(pathOf(directory, id)))
+    bytes = readFileSync(pathOf(directory, id))
+    text = UTF8.decode(bytes)
   } catch (error: unknown) {
     if (errorCode(error) === 'ENOENT') return { kind: 'missing', reason: `no prompt ${id} in ${directory}` }
     if (error instanceof TypeError) return { kind: 'refused', reason: `${file}: is not UTF-8 text` }
     return { kind: 'refused', reason: `${file}: cannot be read (${errorCode(error) ?? String(error)})` }
   }
   const parsed = parseLibraryPrompt(id, text)
-  return parsed.kind === 'prompt' ? parsed : { kind: 'refused', reason: parsed.reason }
+  return parsed.kind === 'prompt'
+    ? { kind: 'prompt', prompt: parsed.prompt, etag: etagOf(bytes) }
+    : { kind: 'refused', reason: parsed.reason }
 }
 
 /** The `.md` names in the directory; none when it does not exist yet. */
@@ -155,30 +203,52 @@ export function createPromptLibrary(directory: string): PromptLibrary {
       return { prompts, refused }
     },
     read: (id) => readFile(directory, id),
-    write(id: string, fields: EnsoLibraryPromptWrite): LibraryRead {
+    write(id: string, fields: EnsoLibraryPromptWrite, condition: WriteCondition): LibraryRead | WriteConflict {
       mkdirSync(directory, { recursive: true })
       const path = pathOf(directory, id)
+      const file = `${id}${EXTENSION}`
+      // A create is checked by the link itself (below); a replace against what is there now. The
+      // requests are synchronous, so no other write of this server lands between the two.
+      const conflict = condition.kind === 'absent' ? undefined : conflictOf(path, file, condition)
+      if (conflict !== undefined) return { kind: 'conflict', reason: conflict }
       const staging = `${path}.${process.pid}.tmp`
       try {
         writeFileSync(staging, serializeLibraryPrompt(fields))
-        renameSync(staging, path)
+        if (condition.kind !== 'absent') renameSync(staging, path)
+        else {
+          // ⚠ `link`, not `rename`: a link fails on a name that exists, so a create cannot land on a
+          // file that appeared since anyone looked — the check and the write are one call.
+          linkSync(staging, path)
+          rmSync(staging)
+        }
       } catch (error: unknown) {
         // A half-written stage is never the prompt: remove it, so a failed write leaves the directory as it was.
         rmSync(staging, { force: true })
+        if (condition.kind === 'absent' && errorCode(error) === 'EEXIST') {
+          return { kind: 'conflict', reason: `${file} already exists` }
+        }
         throw error
       }
-      log.info('prompt {id} written ({category})', { id, category: fields.category })
+      log.info('prompt {id} written ({category}, {condition})', {
+        id,
+        category: fields.category,
+        condition: condition.kind,
+      })
       return readFile(directory, id)
     },
-    remove(id: string): boolean {
+    remove(id, condition) {
+      const path = pathOf(directory, id)
+      if (currentEtag(path) === undefined) return 'missing'
+      const conflict = conflictOf(path, `${id}${EXTENSION}`, condition)
+      if (conflict !== undefined) return { kind: 'conflict', reason: conflict }
       try {
-        rmSync(pathOf(directory, id))
+        rmSync(path)
       } catch (error: unknown) {
-        if (errorCode(error) === 'ENOENT') return false
+        if (errorCode(error) === 'ENOENT') return 'missing'
         throw error
       }
       log.info('prompt {id} deleted', { id })
-      return true
+      return 'removed'
     },
     pickSystemPrompt(id: string): SystemPromptPick {
       const read = readFile(directory, id)

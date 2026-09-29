@@ -111,6 +111,8 @@ function draftPreview(draft: EnsoSystemPromptDraft): EnsoSystemPromptPreview {
 interface Mounted {
   readonly asked: string[]
   readonly written: Array<{ readonly id: string; readonly fields: EnsoLibraryPromptWrite }>
+  /** Every PUT and DELETE with the precondition it sent. */
+  readonly preconditions: string[]
   readonly dialog: () => HTMLElement
   readonly unmount: () => Promise<void>
 }
@@ -124,11 +126,17 @@ function bodyOf(init: RequestInit | undefined): unknown {
   return typeof init?.body === 'string' ? JSON.parse(init.body) : undefined
 }
 
+/** The ETag the scripted server answers a file's version with: its fields, so any change is a new one. */
+const etagOf = (fields: unknown): { readonly ETag: string } => ({
+  ETag: `"${new Bun.CryptoHasher('sha256').update(JSON.stringify(fields)).digest('hex')}"`,
+})
+
 function answer(input: string, init: RequestInit | undefined, written: Mounted['written']): Response {
   const method = init?.method ?? 'GET'
   if (input === '/api/prompts') return Response.json(LISTING)
-  if (input === '/api/prompts/reviewer' && method === 'GET') return Response.json(REVIEWER)
-  if (input === '/api/prompts/haiku' && method === 'GET') return Response.json(HAIKU)
+  if (input === '/api/prompts/reviewer' && method === 'GET')
+    return Response.json(REVIEWER, { headers: etagOf(REVIEWER) })
+  if (input === '/api/prompts/haiku' && method === 'GET') return Response.json(HAIKU, { headers: etagOf(HAIKU) })
   if (input.startsWith('/api/threads/t1/system-prompt')) {
     return Response.json(method === 'POST' ? draftPreview(bodyOf(init) as EnsoSystemPromptDraft) : PI_DEFAULT)
   }
@@ -136,12 +144,10 @@ function answer(input: string, init: RequestInit | undefined, written: Mounted['
   if (method === 'PUT') {
     const fields = bodyOf(init) as EnsoLibraryPromptWrite
     written.push({ id, fields })
-    return Response.json({
-      id,
-      ...fields,
-      bytes: utf8Bytes(serializeLibraryPrompt(fields)),
-      tokens: estimateTextTokens(fields.body),
-    })
+    return Response.json(
+      { id, ...fields, bytes: utf8Bytes(serializeLibraryPrompt(fields)), tokens: estimateTextTokens(fields.body) },
+      { headers: etagOf(fields) },
+    )
   }
   if (method === 'DELETE') return new Response(null, { status: 204 })
   return new Response('not scripted', { status: 404 })
@@ -150,18 +156,33 @@ function answer(input: string, init: RequestInit | undefined, written: Mounted['
 /** A request the test answers late: its response waits on the promise `hold` returns for it. */
 type Hold = (request: string) => Promise<void> | undefined
 
-async function mountManager(hold?: Hold): Promise<Mounted> {
+/** A request the test answers itself — a 412 the disk would give — instead of the scripted server. */
+type Override = (request: string) => Response | undefined
+
+/** A write's or delete's precondition as it was sent: `If-None-Match: *`, `If-Match: …`, or none. */
+function preconditionOf(init: RequestInit | undefined): string {
+  const headers = new Headers(init?.headers)
+  for (const name of ['If-None-Match', 'If-Match']) {
+    const value = headers.get(name)
+    if (value !== null) return `${name}: ${value}`
+  }
+  return 'none'
+}
+
+async function mountManager(hold?: Hold, override?: Override): Promise<Mounted> {
   const asked: string[] = []
   const written: Mounted['written'] = []
+  const preconditions: string[] = []
   const container = document.createElement('div')
   document.body.appendChild(container)
   const root: Root = createRoot(container)
   const fetch = (input: string, init?: RequestInit): Promise<Response> => {
-    asked.push(`${init?.method ?? 'GET'} ${input}`)
-    const late = hold?.(`${init?.method ?? 'GET'} ${input}`)
-    return late === undefined
-      ? Promise.resolve(answer(input, init, written))
-      : late.then(() => answer(input, init, written))
+    const request = `${init?.method ?? 'GET'} ${input}`
+    asked.push(request)
+    if (init?.method === 'PUT' || init?.method === 'DELETE') preconditions.push(`${request} ${preconditionOf(init)}`)
+    const answered = (): Response => override?.(request) ?? answer(input, init, written)
+    const late = hold?.(request)
+    return late === undefined ? Promise.resolve(answered()) : late.then(answered)
   }
   await flush(async () => {
     root.render(<PromptManagerDialog threadId="t1" fetch={fetch} />)
@@ -175,6 +196,7 @@ async function mountManager(hold?: Hold): Promise<Mounted> {
   const mounted: Mounted = {
     asked,
     written,
+    preconditions,
     dialog: (): HTMLElement => {
       const found = document.querySelector<HTMLElement>('[role="dialog"]')
       if (found === null) throw new Error('expected the prompt manager to be open')
@@ -463,5 +485,57 @@ test('⚠ a delete that answers after another prompt was opened leaves that prom
   await remove.release()
   expect(mounted.asked).toContain('DELETE /api/prompts/reviewer')
   expect(name()).toBe('Haiku')
+  await mounted.unmount()
+})
+
+// ⚠ The file changed on disk since it was opened: nothing is written until the person chooses.
+test('⚠ a save refused because the file changed on disk offers Reload and Overwrite: Overwrite sends If-Match: *', async () => {
+  let refuse = true
+  const mounted = await mountManager(undefined, (request) =>
+    refuse && request === 'PUT /api/prompts/reviewer'
+      ? new Response('reviewer.md changed on disk since it was opened', { status: 412 })
+      : undefined,
+  )
+  await openListed(mounted, 'Reviewer')
+  await eventually(() =>
+    expect(mounted.dialog().querySelector<HTMLInputElement>('#prompt-name')?.value).toBe('Reviewer'),
+  )
+  await typeInto(mounted, '#prompt-name', 'Reviewer, mine')
+  await click(mounted, 'Save')
+  await eventually(() => expect(mounted.dialog().textContent).toContain('changed on disk since it was opened'))
+  expect(mounted.preconditions).toEqual([`PUT /api/prompts/reviewer If-Match: ${etagOf(REVIEWER).ETag}`])
+  expect(mounted.written).toEqual([])
+  refuse = false
+  await click(mounted, 'Overwrite with mine')
+  await eventually(() => expect(mounted.written).toHaveLength(1))
+  expect(mounted.preconditions.at(-1)).toBe('PUT /api/prompts/reviewer If-Match: *')
+  await eventually(() => expect(mounted.dialog().querySelector('[aria-label="changed on disk"]')).toBeNull())
+  await mounted.unmount()
+})
+
+test('a delete refused because the file changed on disk offers Reload, which drops the draft for the file as it is', async () => {
+  const mounted = await mountManager(undefined, (request) =>
+    request === 'DELETE /api/prompts/reviewer'
+      ? new Response('reviewer.md changed on disk since it was opened', { status: 412 })
+      : undefined,
+  )
+  await openListed(mounted, 'Reviewer')
+  await eventually(() => expect(mounted.dialog().textContent).toContain('reviewer.md'))
+  await click(mounted, 'Delete')
+  const confirm = [...mounted.dialog().querySelectorAll<HTMLButtonElement>('[role="alert"] button')].find(
+    (button) => button.textContent === 'Delete',
+  )
+  if (confirm === undefined) throw new Error('expected the confirming Delete')
+  await flush(async () => {
+    confirm.click()
+    await tick()
+  })
+  await eventually(() => expect(mounted.dialog().textContent).toContain('changed on disk since it was opened'))
+  expect(mounted.preconditions).toEqual([`DELETE /api/prompts/reviewer If-Match: ${etagOf(REVIEWER).ETag}`])
+  expect(buttonNamed(mounted, 'Reload from disk')).toBeDefined()
+  expect(() => buttonNamed(mounted, 'Overwrite with mine')).toThrow()
+  await click(mounted, 'Reload from disk')
+  await eventually(() => expect(mounted.asked.filter((asked) => asked === 'GET /api/prompts/reviewer')).toHaveLength(2))
+  await eventually(() => expect(mounted.dialog().querySelector('[aria-label="changed on disk"]')).toBeNull())
   await mounted.unmount()
 })

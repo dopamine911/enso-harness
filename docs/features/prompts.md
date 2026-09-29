@@ -46,6 +46,8 @@ The numbers are the ones the rest of the app uses. The tokens are the same estim
 
 A prompt with changes you have not saved says `● unsaved` beside its name. Opening another prompt, starting a new one, or closing the dialog asks first: **Discard them** or **Keep editing**.
 
+The files can change under you: another tab, or an editor open on the same file. **Save** only replaces the version you opened. If the file changed on disk since, nothing is written, and the editor says so with two choices: **Reload from disk**, which drops your edits for the file as it is now, or **Overwrite with mine**. A new prompt, or a rename, is never saved over a file that is already there, even one the library could not read. **Delete** likewise removes only the version you opened.
+
 In the start dialog, **System prompt** lists `pi default` and every system and append prompt, each with its size. It is **fixed for the whole session**. **Saved prompt** lists the session prompts and puts the one you pick into the prompt box, where you can still change it before you send it.
 
 Once a thread has started, the Context tab names its system prompt on the system row: `system prompt · Reviewer`, or `system prompt · pi default`.

@@ -374,6 +374,10 @@ function EditorPanel(props: {
   onCopy: () => void
   onDelete: () => void
   refusal: string | undefined
+  /** The disk changed under the open file: the save or the delete it refused. */
+  conflict: 'save' | 'delete' | undefined
+  onReopen: () => void
+  onOverwrite: () => void
   /** A save or delete is in flight: Save and Delete wait for it. */
   working: boolean
   threadId: string | undefined
@@ -409,11 +413,43 @@ function EditorPanel(props: {
       <ArtifactContent className="grid content-start gap-3">
         <DraftFields draft={state.draft} onChange={onChange} />
         {props.refusal === undefined ? null : <FieldError>{props.refusal}</FieldError>}
+        {props.conflict === undefined ? null : (
+          <ConflictActions
+            conflict={props.conflict}
+            working={props.working}
+            onReopen={props.onReopen}
+            onOverwrite={props.onOverwrite}
+          />
+        )}
         <BodyField body={state.draft.body} readOnly={false} onChange={(body) => onChange({ ...state.draft, body })} />
       </ArtifactContent>
       <PromptSizeBar draft={state.draft} head={head} window={props.window} />
       <PromptBreakdown head={head} />
     </Artifact>
+  )
+}
+
+/**
+ * The open file changed on disk since it was read (#443): take it as it is now — the draft goes — or,
+ * for a save, put the draft over it. Nothing was written until one of them is chosen.
+ */
+function ConflictActions(props: {
+  conflict: 'save' | 'delete'
+  working: boolean
+  onReopen: () => void
+  onOverwrite: () => void
+}): React.ReactNode {
+  return (
+    <div role="alert" aria-label="changed on disk" className="flex flex-wrap items-center gap-2 text-sm">
+      <Button variant="outline" size="sm" disabled={props.working} onClick={props.onReopen}>
+        Reload from disk
+      </Button>
+      {props.conflict === 'save' ? (
+        <Button variant="destructive" size="sm" disabled={props.working} onClick={props.onOverwrite}>
+          Overwrite with mine
+        </Button>
+      ) : null}
+    </div>
   )
 }
 
@@ -447,20 +483,29 @@ function useManagerState(
   editor: EditorState | undefined
   pending: Move | undefined
   refusal: string | undefined
+  /**
+   * The disk no longer holds the version the editor opened (#443): a `save` or a `delete` refused
+   * with 412. `refusal` says why; the person reloads, or — for a save — overwrites.
+   */
+  conflict: 'save' | 'delete' | undefined
   /** A save or delete is in flight: both wait for it. */
   working: boolean
   select: (next: Selection) => void
   start: (state: EditorState) => void
   close: () => void
   change: (draft: EditorDraft) => void
-  save: () => Promise<void>
+  /** `overwrite`: the answer to a save's conflict — replace whatever is on disk with the draft. */
+  save: (overwrite?: boolean) => Promise<void>
   remove: () => Promise<void>
+  /** Read the open file again as it is on disk now, dropping the draft — the other answer to a conflict. */
+  reopen: () => void
   settle: (discard: boolean) => void
 } {
   const [selection, setSelection] = useState<Selection>({ kind: 'pi-default' })
   const [editor, setEditor] = useState<EditorState | undefined>(undefined)
   const [pending, setPending] = useState<Move | undefined>(undefined)
   const [refusal, setRefusal] = useState<string | undefined>(undefined)
+  const [conflict, setConflict] = useState<'save' | 'delete' | undefined>(undefined)
   // ⚠ One write at a time. A second Save while the first is in flight wrote the file twice and, on
   // a rename, deleted the old one twice — the second DELETE's 404 then read as a half-done rename.
   // The ref holds a double-click in one tick; the state disables the buttons meanwhile.
@@ -494,13 +539,14 @@ function useManagerState(
     if (next.kind !== 'prompt') return
     void fetchLibraryPrompt(next.id, fetchImpl).then((read) => {
       if (ticket !== moves.current) return
-      if (read.kind === 'loaded') setEditor(openedState(read.prompt))
+      if (read.kind === 'loaded') setEditor(openedState(read.prompt, read.etag))
       else setRefusal(read.detail)
     })
   }
   const perform = (move: Move): void => {
     moves.current += 1
     setRefusal(undefined)
+    setConflict(undefined)
     if (move.kind === 'select') {
       open(move.next, moves.current)
       return
@@ -524,40 +570,50 @@ function useManagerState(
     editor,
     pending,
     refusal,
+    conflict,
     working,
     select: (next) => guarded({ kind: 'select', next }),
     start: (state) => guarded({ kind: 'start', state }),
     close: () => guarded({ kind: 'close' }),
     change: (draft) => setEditor((state) => (state === undefined ? state : { ...state, draft })),
-    save: async () => {
+    save: async (overwrite = false) => {
       if (editor === undefined || !claim()) return
       const ticket = moves.current
-      const outcome = await saveDraft(editor, taken, fetchImpl).finally(release)
+      const outcome = await saveDraft(editor, taken, fetchImpl, overwrite).finally(release)
       if (outcome.kind === 'saved') reload()
       if (ticket !== moves.current) return
-      if (outcome.kind === 'refused') {
+      if (outcome.kind !== 'saved') {
         setRefusal(outcome.reason)
+        setConflict(outcome.kind === 'conflict' ? 'save' : undefined)
         return
       }
       setRefusal(outcome.warning)
-      setEditor((current) => savedState(current, editor.draft, outcome.prompt))
+      setConflict(undefined)
+      setEditor((current) => savedState(current, editor.draft, outcome.prompt, outcome.etag))
       setSelection({ kind: 'prompt', id: outcome.prompt.id })
       // Saved is what the guard was asking about: a move it held no longer needs asking.
       setPending(undefined)
     },
     remove: async () => {
-      const id = editor?.saved?.id
-      if (id === undefined || !claim()) return
+      const saved = editor?.saved
+      if (saved === undefined || !claim()) return
       const ticket = moves.current
-      const removed = await deleteLibraryPrompt(id, fetchImpl).finally(release)
+      const removed = await deleteLibraryPrompt(saved.id, { kind: 'replace', etag: saved.etag }, fetchImpl).finally(
+        release,
+      )
       if (removed.kind === 'deleted') reload()
       if (ticket !== moves.current) return
       if (removed.kind !== 'deleted') {
         setRefusal(removed.detail)
+        setConflict(removed.kind === 'conflict' ? 'delete' : undefined)
         return
       }
       setEditor(undefined)
       setSelection({ kind: 'pi-default' })
+    },
+    reopen: () => {
+      const id = editor?.saved?.id
+      if (id !== undefined) perform({ kind: 'select', next: { kind: 'prompt', id } })
     },
     settle: (discard) => {
       if (discard && pending !== undefined) perform(pending)
@@ -604,6 +660,9 @@ function SelectedPanel({
       onCopy={() => manager.start(newState(copyDraft(editor.draft)))}
       onDelete={() => void manager.remove()}
       refusal={manager.refusal}
+      conflict={manager.conflict}
+      onReopen={manager.reopen}
+      onOverwrite={() => void manager.save(true)}
       working={manager.working}
       threadId={threadId}
       window={runtimeDefault.kind === 'loaded' ? runtimeDefault.preview : undefined}

@@ -254,9 +254,9 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
     handler: 'respondWithPrompt → PromptLibrary.read',
     input: 'path: `id` — the file name under `ENSO_HOME/prompts` without `.md`, lowercase words joined by hyphens',
     success:
-      "200 `EnsoLibraryPrompt` JSON — its frontmatter fields, its body, the file's bytes and the body's estimated tokens",
+      "200 `EnsoLibraryPrompt` JSON — its frontmatter fields, its body, the file's bytes and the body's estimated tokens — with an `ETag` header, the sha256 of the file's bytes, which a later replace or delete of this version names",
     errors:
-      '403 untrusted origin; 404 no such file, or a server started without a library; 422 the file is refused, with the reason naming it — unreadable, no frontmatter, an unknown key, no name, a category that is not system, append or session; 500 handler failure',
+      '403 untrusted origin; 404 no such file, or a server started without a library; 422 the file is refused, with the reason naming it — unreadable, not UTF-8, no frontmatter, an unknown key, no name, a category that is not system, append or session; 500 handler failure',
     routeClass: 'observation',
     logs: 'no',
   }),
@@ -264,20 +264,21 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
     method: 'PUT',
     handler: 'respondToPromptWrite → PromptLibrary.write',
     input:
-      'path: `id`; body: `EnsoLibraryPromptWrite` — `name`, `description`, `category` (system, append or session) and the markdown `body`',
+      'path: `id`; headers: exactly one precondition — `If-None-Match: *` (create: no file of that name), `If-Match: <ETag>` (replace the version read), `If-Match: *` (replace whatever is there); body: `EnsoLibraryPromptWrite` — `name`, `description`, `category` (system, append or session) and the markdown `body`',
     success:
-      '200 `EnsoLibraryPrompt` JSON — the file as read back after it was written whole (staged, then renamed over)',
+      '200 `EnsoLibraryPrompt` JSON with its new `ETag` — the file as read back after it was written whole (staged, then linked into place for a create, renamed over for a replace)',
     errors:
-      '400 malformed body; 403 untrusted origin; 404 a server started without a library; 413 body too large; 500 the file does not read back, or a disk failure',
+      '400 malformed body, or both headers, a list, or a weak tag; 403 untrusted origin; 404 a server started without a library; 412 the precondition does not hold, with the reason naming the file — it already exists (a refused file included), changed on disk since it was read, or is gone; 413 body too large; 428 no precondition — never an unconditional write; 500 the file does not read back, or a disk failure',
     routeClass: 'control',
     logs: 'yes',
   }),
   PROMPT_DELETE_ROUTE: promptRoute({
     method: 'DELETE',
     handler: 'respondToPromptRemoval → PromptLibrary.remove',
-    input: 'path: `id`',
+    input: 'path: `id`; header: `If-Match: <ETag>` (the version read) or `If-Match: *`',
     success: '204 empty — the file is gone; a thread that ran it keeps the text its log recorded',
-    errors: '403 untrusted origin; 404 no such file, or a server started without a library; 500 handler failure',
+    errors:
+      '400 `If-None-Match`, a list, or a weak tag; 403 untrusted origin; 404 no such file, or a server started without a library; 412 the file changed on disk since it was read; 428 no `If-Match`; 500 handler failure',
     routeClass: 'control',
     logs: 'yes',
   }),
