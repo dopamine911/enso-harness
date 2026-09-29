@@ -220,6 +220,11 @@ export interface ModelChoiceDialogProps {
   /** The `select` host command whose options the dialog lists (`model`), or undefined while closed. */
   readonly command: string | undefined
   readonly onClose: () => void
+  /**
+   * Where focus goes once the dialog has closed — the composer (#367). The palette that opened it
+   * gave focus up without passing it on, so Radix's own return lands on `<body>`.
+   */
+  readonly returnFocus: () => void
   /** The user picked an option: `onHost(command, optionId)`. The dialog has closed by then. */
   readonly onPick: (command: string, optionId: string) => void
   /** The connection's `fetch` — injected by tests, the page's global by default. */
@@ -280,6 +285,7 @@ export function ModelChoiceDialog({
   threadId,
   command,
   onClose,
+  returnFocus,
   onPick,
   fetch: fetchImpl,
 }: ModelChoiceDialogProps): React.ReactNode {
@@ -311,6 +317,10 @@ export function ModelChoiceDialog({
       <ModelSelectorContent
         title={state.kind === 'loaded' ? (state.row.description ?? `/${state.row.name}`) : 'model'}
         filter={rankOption}
+        onCloseAutoFocus={(event: Event): void => {
+          event.preventDefault()
+          returnFocus()
+        }}
       >
         <ModelSelectorInput placeholder="filter options…" />
         <ModelSelectorList>

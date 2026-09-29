@@ -1333,9 +1333,14 @@ const chatComponents = {
             fetch={stores.fetch}
             command={modelDialog}
             onClose={(): void => setModelDialog(undefined)}
+            returnFocus={(): void => textareaRef.current?.focus()}
             onPick={host.onHost}
           />
-          <ThreadContextDialog open={contextOpen} onClose={(): void => setContextOpen(false)} />
+          <ThreadContextDialog
+            open={contextOpen}
+            onClose={(): void => setContextOpen(false)}
+            returnFocus={(): void => textareaRef.current?.focus()}
+          />
           <StartSessionDialog
             threadId={stores.threadId}
             fetch={stores.fetch}

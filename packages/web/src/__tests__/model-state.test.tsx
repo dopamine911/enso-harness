@@ -175,6 +175,7 @@ async function mountDialog(respond: () => Response, command: string | undefined)
         return Promise.resolve(respond())
       }}
       onClose={(): void => void closes.push(1)}
+      returnFocus={(): void => undefined}
       onPick={(chosenCommand: string, optionId: string): void => void picks.push([chosenCommand, optionId])}
     />,
   )
