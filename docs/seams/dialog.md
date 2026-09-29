@@ -264,7 +264,7 @@ card at once (`follow.ts` line 200; `openDialogs` at extension-ui-context.ts lin
 request with `isEnsoDialogSpec` rather than casting, line 532).
 
 **Consumed by the browser.** The question arrives as an `extension-ui-request` observation whose
-`dialog` the mapper checked with `isEnsoDialogSpec` (`map-events.ts` line 138); the adapter passes the
+`dialog` the mapper checked with `isEnsoDialogSpec` (`map-events.ts` line 147); the adapter passes the
 observation whole on a CUSTOM chunk named by its kind (`to-agui.ts#custom`) and the router checks
 `{ id, dialog }` again against `EnsoOpenDialog` before it reaches the store (`custom-event-router.ts#routeUiRequest`). `EnsoDialogCard` in
 `packages/web/src/chat-screen.tsx` (`#EnsoDialogCard`) renders one card and hands `answerDialog` in
@@ -321,7 +321,7 @@ including the fail-closed lift (`EnsoExtensionUiContextOptions.liftDialog`, line
   line 324); the mapper turns an outcome the union does not name into `unmapped`, not a guess
   (`map-events.ts` lines 378–387).
 - **The kinds agree twice**: the host's `BlockingDialogRequest` (extension-ui-context.ts line 65) and
-  the mapper's `DIALOG_UI_METHODS` (`map-events.ts` line 39) name the same five methods, and the
+  the mapper's `DIALOG_UI_METHODS` (`map-events.ts` line 43) name the same five methods, and the
   host's comment says so.
 - **The vendor gate** (#145): `extension-ui-context.ts` and `permission-dialog.ts` import the runtime's
   package; nothing above `host/` does.
@@ -352,7 +352,7 @@ but a `select`. The mode itself is leak L3, on `permission-mode.md`.
 
 **`notify` rides the same observation.** A one-way notice is emitted by the host as a `notify` request
 (extension-ui-context.ts line 394) and mapped as an `extension-ui-request` the mapper marks
-non-blocking, since only the five dialog methods block (`map-events.ts` line 161); status-bar and
+non-blocking, since only the five dialog methods block (`map-events.ts` line 172); status-bar and
 widget calls are emitted and dropped (extension-ui-context.ts header lines 54–56). Not a dialog.
 
 ## Pivot cost
