@@ -100,6 +100,7 @@ import {
 } from './stored-threads.ts'
 import { ThreadContextDialog, ThreadContextDrawer } from './thread-context.tsx'
 import { ThreadDebugDrawer } from './thread-debug.tsx'
+import { ThreadEvalDrawer } from './thread-eval.tsx'
 import { ThreadStatsDrawer } from './thread-stats.tsx'
 import { ThreadStatusBar } from './thread-status.tsx'
 import {
@@ -1474,6 +1475,7 @@ const chatComponents = {
                 <div role="tabpanel" {...panelIds('stats')} className="absolute inset-0 overflow-y-auto">
                   <div className="mx-auto w-full max-w-stats-view">
                     <ThreadStatsDrawer onNavigate={revealInTranscript} />
+                    <ThreadEvalDrawer />
                   </div>
                 </div>
               ) : null}

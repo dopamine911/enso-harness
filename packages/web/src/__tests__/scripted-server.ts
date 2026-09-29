@@ -2,6 +2,7 @@ import type {
   EnsoFollowFrame,
   EnsoFollowSnapshot,
   EnsoProject,
+  EnsoSessionEval,
   EnsoStoredThread,
   EnsoThreadEvents,
   EnsoThreadHistory,
@@ -80,6 +81,8 @@ export interface ScriptedFetchOptions {
   readonly commands?: readonly RuntimeCommand[]
   /** What the stats drawer's read answers (#45 phase 2); 404 when absent, the drawer's "no stats". */
   readonly stats?: Omit<EnsoThreadStats, 'threadId'>
+  /** What the eval panel's read answers (#441); 404 when absent, the panel's "no eval". */
+  readonly eval?: Omit<EnsoSessionEval, 'threadId'>
 }
 
 /** The launch project a scripted server lists by default — the id the fixtures' stored threads carry. */
@@ -166,6 +169,11 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
     if (stats?.[1] !== undefined) {
       if (options.stats === undefined) return new Response('nothing has run in this thread', { status: 404 })
       return Response.json({ threadId: decodeURIComponent(stats[1]), ...options.stats })
+    }
+    const evaluated = /^\/api\/threads\/([^/]+)\/eval$/.exec(path)
+    if (evaluated?.[1] !== undefined) {
+      if (options.eval === undefined) return new Response('nothing has run in this thread', { status: 404 })
+      return Response.json({ threadId: decodeURIComponent(evaluated[1]), ...options.eval })
     }
     const inspection = /^\/api\/threads\/([^/]+)$/.exec(path)
     if (inspection?.[1] !== undefined) {

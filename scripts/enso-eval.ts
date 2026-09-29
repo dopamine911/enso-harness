@@ -26,6 +26,7 @@ import {
   type EnsoSessionEval,
   type EvalEventKind,
   readEnsoSessionEval,
+  runningCounters,
 } from '../packages/core/src/index.ts'
 
 export interface EvalQuery {
@@ -145,14 +146,6 @@ const COMPARISON_KEYS = [
   'gateRuns',
 ] as const satisfies ReadonlyArray<keyof EnsoEvalScorecard>
 
-const FRICTION_KINDS: ReadonlySet<EvalEventKind> = new Set([
-  'human-correction',
-  'prompt-queued',
-  'human-confusion',
-  'interrupt',
-])
-const REFUSAL_KINDS: ReadonlySet<EvalEventKind> = new Set(['ask-rejected', 'tool-denied'])
-
 const KIND_GLYPHS: Readonly<Record<EvalEventKind, string>> = {
   human: '  ',
   'human-correction': '!!',
@@ -220,11 +213,7 @@ export function renderMarkdown(evaluated: EnsoSessionEval): string {
   lines.push('', '### Dropped (no pi fact)', '')
   for (const dropped of scorecard.dropped) lines.push(`- ${dropped}`)
   lines.push('', '### Timeline', '', '```')
-  let friction = 0
-  let refusals = 0
-  for (const event of evaluated.events) {
-    if (FRICTION_KINDS.has(event.kind)) friction += 1
-    if (REFUSAL_KINDS.has(event.kind)) refusals += 1
+  for (const { event, friction, refusals } of runningCounters(evaluated.events)) {
     lines.push(timelineLine(event, friction, refusals))
   }
   lines.push('```', '')

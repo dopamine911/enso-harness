@@ -34,7 +34,7 @@ import {
 } from './thread-stats-analysis.ts'
 import { toggleMember } from './toggle-member.ts'
 import type { RevealStatsTarget, StatsTarget } from './transcript-reveal.ts'
-import { Card } from './view-parts.tsx'
+import { Card, Empty, Metric, Section } from './view-parts.tsx'
 
 /**
  * The thread's stats drawer (#45 phase 2) — pi-livecraft's session analysis widget
@@ -81,58 +81,6 @@ function durationText(milliseconds: number): string {
 const plural = (count: number, word: string): string => `${countText(count)} ${word}${count === 1 ? '' : 's'}`
 
 // ── building blocks ──────────────────────────────────────────────────────────────────────────
-
-/** One headline figure: what it is, then the number large — the design's `.meter-figure` — and an optional note beneath. */
-function Metric({
-  label,
-  value,
-  danger = false,
-  note,
-}: {
-  label: string
-  value: string
-  danger?: boolean
-  note?: string | undefined
-}): React.ReactNode {
-  return (
-    <div className="grid content-start gap-1 rounded-lg border bg-background px-3 py-2">
-      <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd
-        className={cn(
-          'font-heading text-2xl leading-tight font-semibold whitespace-nowrap tabular-nums',
-          danger ? 'text-refuse' : 'text-foreground',
-        )}
-      >
-        {value}
-      </dd>
-      {note === undefined ? null : <dd className="text-xs text-muted-foreground">{note}</dd>}
-    </div>
-  )
-}
-
-/** A section of the analysis as a card: its title, and on the right what it ranks by or how to read it. */
-function Section({
-  title,
-  aside,
-  children,
-}: {
-  title: string
-  aside?: React.ReactNode
-  children: React.ReactNode
-}): React.ReactNode {
-  return (
-    <Card
-      title={title}
-      tools={aside === undefined ? undefined : <span className="text-xs text-muted-foreground">{aside}</span>}
-    >
-      <div className="grid min-w-0 grid-cols-1 gap-2 text-sm">{children}</div>
-    </Card>
-  )
-}
-
-function Empty({ children }: { children: string }): React.ReactNode {
-  return <p className="text-sm text-muted-foreground">{children}</p>
-}
 
 /** A chart tooltip's heading: the turn its point is. */
 const turnLabel = (label: unknown): string => `turn ${String(label)}`

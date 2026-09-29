@@ -49,7 +49,7 @@ export type AnalysisOutcome<Payload> =
 export const ANALYSIS_READING = { kind: 'reading' } as const
 
 /**
- * `GET /api/threads/:threadId/<analysis>` — `stats`, `context`. A 404 is a thread nothing has run
+ * `GET /api/threads/:threadId/<analysis>` — `stats`, `context`, `eval`. A 404 is a thread nothing has run
  * in yet: held neither live nor on disk.
  */
 export async function readThreadAnalysis<Schema extends TSchema>(
