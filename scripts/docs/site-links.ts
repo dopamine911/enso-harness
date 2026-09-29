@@ -14,7 +14,8 @@ import { SITE_BASE as BASE } from './site-base.ts'
  * the first build: 3 dead page links and 14 dead source links on ONE page, with `astro build`
  * reporting success. `site-content.ts` rewrites both classes; this is what holds the rewrite.
  *
- * WHAT IT CHECKS: every `href` in every built page that is internal — site-absolute or relative.
+ * WHAT IT CHECKS: every `href` and `src` in every built page that is internal — site-absolute or
+ * relative.
  * A path is served when the file exists, or its directory carries an `index.html`.
  *
  * WHAT IT DOES NOT CHECK: external links (a network check is not a build's job, and a dead
@@ -39,9 +40,15 @@ function builtPages(): string[] {
   return pages.sort()
 }
 
-/** The hrefs a page carries, minus the ones no build can answer for. */
+/**
+ * The hrefs a page carries, and the `src` of everything it loads, minus the ones no build can
+ * answer for.
+ *
+ * ⚠ `src` too (#437): a Features page's screenshot is an `<img>`, not a link, and an image that
+ * failed to reach the build is a broken picture on a page the crawl otherwise calls healthy.
+ */
 export function internalHrefs(html: string): string[] {
-  return [...html.matchAll(/href="([^"]+)"/g)]
+  return [...html.matchAll(/(?:href|src)="([^"]+)"/g)]
     .map((match) => match[1] ?? '')
     .filter((href) => href !== '' && !/^(?:https?:|mailto:|#|data:)/.test(href))
 }

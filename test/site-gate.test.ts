@@ -1,8 +1,16 @@
 import { expect, test } from 'bun:test'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { contentPath, documentationPages, pageTitle, rewriteLinks, sectionTitle } from '../scripts/docs/site-content.ts'
+import { dirname, join } from 'node:path'
+import {
+  contentPath,
+  documentationAssets,
+  documentationPages,
+  pageTitle,
+  projectAssets,
+  rewriteLinks,
+  sectionTitle,
+} from '../scripts/docs/site-content.ts'
 import { internalHrefs, resolveHref, unservedSections } from '../scripts/docs/site-links.ts'
 import { REPOSITORY_ROOT } from './gate-support.ts'
 
@@ -94,6 +102,31 @@ test('the projection rewrites every link class a route cannot serve (#188)', () 
   expect(rewriteLinks('[pi](https://example.invalid/pi)', page)).toBe('[pi](https://example.invalid/pi)')
 })
 
+test('⚠ an image embedded from docs/ stays relative, and the projection carries it (#437)', () => {
+  const page = 'features/chat.md'
+  // Astro bundles a relative image; rewritten to the blob, the `<img>` would point at an HTML page.
+  expect(rewriteLinks('![the chat](./images/chat-thread.png)', page)).toBe('![the chat](./images/chat-thread.png)')
+  // …but a LINK to an image is a link, and a site serves no file at that path: the blob.
+  expect(rewriteLinks('[the chat](./images/chat-thread.png)', page)).toBe(
+    '[the chat](https://github.com/dopamine911/zen-harness-foundation/blob/main/docs/features/images/chat-thread.png)',
+  )
+  // An embed of something that is not an image, or from outside `docs/`, keeps its alt text.
+  expect(rewriteLinks('![data](./data/labels.json)', page)).toBe(
+    '![data](https://github.com/dopamine911/zen-harness-foundation/blob/main/docs/features/data/labels.json)',
+  )
+  // Every image the pages embed is one the projection copies — to where the embed looks for it.
+  const target = mkdtempSync(join(tmpdir(), 'enso-site-assets-'))
+  const assets = projectAssets(target)
+  expect(assets).toEqual(documentationAssets())
+  for (const asset of assets) expect(existsSync(join(target, asset))).toBe(true)
+  for (const page of documentationPages()) {
+    const text = readFileSync(join(REPOSITORY_ROOT, 'docs', page), 'utf8')
+    for (const match of text.matchAll(/!\[[^\]]*\]\((\.\/[^)]+)\)/g)) {
+      expect(assets).toContain(join(dirname(page), match[1] ?? '').replace(/\\/g, '/'))
+    }
+  }
+})
+
 /**
  * THE PUBLISHED SITE'S BASE PATH IS DERIVED, AND THE ORDER OF ITS TWO BUILDS IS NOT OPTIONAL.
  *
@@ -164,9 +197,15 @@ test('the crawl reads the hrefs a site serves, and skips the ones it cannot answ
     '<a href="https://example.invalid/x">external</a>',
     '<a href="mailto:nobody@example.invalid">mail</a>',
     '<a href="#anchor">fragment</a>',
+    '<img src="/enso/_astro/chat-thread.Bx1.webp" alt="a screenshot">',
+    '<img src="data:image/png;base64,AAAA" alt="inline">',
   ].join('\n')
-  // External, mail and pure-fragment hrefs are not this build's to answer for.
-  expect(internalHrefs(html)).toEqual(['/enso/reference/routes/', '../seams/guards/'])
+  // External, mail and pure-fragment hrefs are not this build's to answer for; an image is (#437).
+  expect(internalHrefs(html)).toEqual([
+    '/enso/reference/routes/',
+    '../seams/guards/',
+    '/enso/_astro/chat-thread.Bx1.webp',
+  ])
   // Site-absolute (with and without the base) and page-relative land in one frame: under `dist`.
   expect(resolveHref('/enso/reference/routes/', 'site/dist/index.html')).toBe('site/dist/reference/routes')
   expect(resolveHref('../seams/guards/', 'site/dist/flows/resume/index.html')).toBe('site/dist/flows/seams/guards')
