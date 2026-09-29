@@ -458,18 +458,18 @@ async function trackedChanges(
   if (names.code !== 0) throw new Error(reasonOf(names))
   const files = parseNameStatus(names.stdout)
   const counts = numbers.code === 0 ? parseNumstat(numbers.stdout) : []
-  // A patch run that failed (too much output) or split differently from the list sends no patch:
-  // pairing file N with some other file's patch would be worse than none.
   const split = patches.code === 0 ? splitPatches(patches.stdout) : []
-  const aligned = split.length === files.length
-  return files.map((file, fileIndex) =>
-    withPatch(
-      file,
-      counts[fileIndex] ?? { added: null, removed: null },
-      aligned ? split[fileIndex] : undefined,
-      budget,
-    ),
-  )
+  // ⚠ Paired by position only when a list has one entry per file. A patch run that failed (too
+  // much output) or split differently sends no patch, and counts that do not line up are taken
+  // from the file's own patch, or unknown: file N with another file's patch or counts would be
+  // worse than none.
+  const patchesAligned = split.length === files.length
+  const countsAligned = counts.length === files.length
+  return files.map((file, fileIndex) => {
+    const patch = patchesAligned ? split[fileIndex] : undefined
+    const fromPatch = patch === undefined ? { added: null, removed: null } : countPatch(patch)
+    return withPatch(file, (countsAligned ? counts[fileIndex] : undefined) ?? fromPatch, patch, budget)
+  })
 }
 
 /** A file git does not track yet, diffed against nothing — read only when it is small enough. */

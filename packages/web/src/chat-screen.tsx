@@ -30,9 +30,9 @@ import {
 import {
   ArrowUpIcon,
   ChartColumnIcon,
-  FileDiffIcon,
   CircleQuestionMarkIcon,
   ExternalLinkIcon,
+  FileDiffIcon,
   GitForkIcon,
   LayersIcon,
   MenuIcon,

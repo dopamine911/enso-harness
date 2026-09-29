@@ -375,3 +375,36 @@ test('a nested repository is not listed as a file', async () => {
   commit(nested, 'lib.ts', 'x\n')
   expect((await changesAt(directory)).files).toEqual([])
 })
+
+test('⚠ counts that do not line up with the file list are never paired by position', async () => {
+  const directory = repository()
+  commit(directory, 'b.md', 'one\n')
+  writeFileSync(join(directory, 'README.md'), 'one\ntwo\nthree\n')
+  writeFileSync(join(directory, 'b.md'), 'changed\n')
+  /** The real git, with one list cut short — the mismatch a pairing by position would get wrong. */
+  const shortened =
+    (flag: string): GitRunner =>
+    async (args, cwd) => {
+      const result = await runGit(args, cwd)
+      if (!args.includes(flag)) return result
+      return { ...result, stdout: flag === '--numstat' ? result.stdout.split('\0').slice(1).join('\0') : '' }
+    }
+  const repositoryState = await repositoryAt(directory)
+  // numstat short by its first record: each file's counts come from its own patch.
+  const fromPatch = await readGitChanges(shortened('--numstat'), repositoryState)
+  expect(fromPatch.files.map((file) => [file.path, file.added, file.removed])).toEqual([
+    ['README.md', 2, 0],
+    ['b.md', 1, 1],
+  ])
+  // With no patch to count either (the patch run's output dropped), the counts are unknown.
+  const cutBoth: GitRunner = async (args, cwd) => {
+    const result = await shortened('--numstat')(args, cwd)
+    const isPatchRun = args[0] === 'diff' && !args.includes('--numstat') && !args.includes('--name-status')
+    return isPatchRun ? { ...result, stdout: '' } : result
+  }
+  const unknown = await readGitChanges(cutBoth, repositoryState)
+  expect(unknown.files.map((file) => [file.path, file.added, file.removed, file.omitted])).toEqual([
+    ['README.md', null, null, 'too-large'],
+    ['b.md', null, null, 'too-large'],
+  ])
+})
