@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 335.**
+**Decision headers: 337.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -101,6 +101,8 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/harness/extensions/logging/index.ts` | `#132`, `#144`, `#167` | The extension process's logging (#132), and the one record only an extension can write: the provider's own request id (#144). |
 | `packages/harness/extensions/run-context/__tests__/run-context.test.ts` | `#435`, `#438` | #435's recorder over its dependency seam (PR #438 review): the branches the review rounds added, each where a real run would take it — git and the config faked, pi reduced to the `on` it registers with and the `appendEntry` it writes through. |
 | `packages/harness/extensions/run-context/index.ts` | `#126`, `#435`, `#436`, `#438`, `#440` | The run-context recorder (#435, Lineage #126): at every prompt's run start, what the run starts under — git revision and dirty state, the resolved config's hash and files, the skills, the context files' hashes, the permission mode's rule-set hash — appended to pi's log as an `enso-run-context` entry (`@enso/core` `run-context.ts`) ONLY when a field differs from the last one on the branch. |
+| `packages/harness/extensions/system-prompt/__tests__/system-prompt.test.ts` | `#443` | #443's extension over pi's surface reduced to what it touches — the `on` it registers with, the branch it reads, the notice it may give. |
+| `packages/harness/extensions/system-prompt/index.ts` | `#436`, `#443` | A thread's library system prompt, applied on EVERY surface (#443): at each prompt's run start, the branch's last `enso-system-prompt` entry is put into the run's prompt options — a `system` prompt as pi's custom preamble, an `append` prompt after whatever pi appends — so a thread started with a prompt in the web and resumed in the terminal (`bun run enso`, then `/resume`) runs the text it started with, not pi's default. |
 | `packages/harness/extensions/web-fetch/__tests__/one-trust-question.test.ts` | `#421` | #421, found live: the trust question for a project's `.enso/config.json` must be asked ONCE per session, though two tools (web_fetch, web_search) read the config. |
 | `packages/harness/extensions/web-fetch/__tests__/web-fetch.test.ts` | `#54` | The web_fetch extension (#54), against injected IO seams — no test here touches the network, DNS, or the user's config file. |
 | `packages/harness/extensions/web-fetch/index.ts` | `#9`, `#54`, `#59`, `#421` | The web_fetch tool (#54) — the sanctioned web access that replaces the ad-hoc network clients #9 denies in bash. |

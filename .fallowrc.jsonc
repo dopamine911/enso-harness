@@ -11,6 +11,7 @@
     "packages/harness/extensions/web-fetch/index.ts",
     "packages/harness/extensions/web-search/index.ts",
     "packages/harness/extensions/ask-user/index.ts",
+    "packages/harness/extensions/system-prompt/index.ts",
     "packages/harness/extensions/run-context/index.ts",
     // Loaded by Bun from `packages/web/bunfig.toml` → `plugins`.
     "packages/web/src/server/bun-plugin-strict-binding-workaround.ts",

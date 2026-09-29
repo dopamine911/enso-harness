@@ -1,10 +1,5 @@
 import type { ResourceLoader, SessionEntry } from '@earendil-works/pi-coding-agent'
-import {
-  ENSO_SYSTEM_PROMPT_ENTRY,
-  type EnsoSystemPromptChoice,
-  type EnsoThreadSystemPrompt,
-  readEnsoSystemPromptChoice,
-} from '@enso/core'
+import { type EnsoSystemPromptChoice, type EnsoThreadSystemPrompt, recordedSystemPrompt } from '@enso/core'
 
 /**
  * A session's system prompt from the library (#443), handed to pi through pi's OWN mechanism.
@@ -23,8 +18,8 @@ import {
  * same tools — makes pi read it again. Nothing has been sent yet, so no cached prefix is lost.
  *
  * ⚠ FIXED FOR LIFE, AND IT TRAVELS. The choice is appended to pi's log as a custom entry
- * ({@link ENSO_SYSTEM_PROMPT_ENTRY}, text included) BEFORE the first request, and a session built
- * over a branch that carries one starts with it ({@link recordedSystemPrompt}) — a resumed thread
+ * (`enso-system-prompt`, text included) BEFORE the first request, and a session built
+ * over a branch that carries one starts with it (`@enso/core`'s `recordedSystemPrompt`) — a resumed thread
  * and a fork run the text they started with, not whatever the library file says now. A choice is
  * refused once the branch holds a message: from then on the prompt that went — pi's default, or the
  * last one chosen — is the session's ({@link decideSystemPrompt}).
@@ -60,22 +55,6 @@ export function decideSystemPrompt(
     kind: 'refused',
     reason: `this session has already sent ${running} and keeps it for its whole life; start a new thread for ${next.name}`,
   }
-}
-
-/** What a branch says its system prompt is: none (pi's default), a choice, or an entry that does not read. */
-export type RecordedSystemPrompt =
-  | { readonly kind: 'none' }
-  | { readonly kind: 'chosen'; readonly choice: EnsoSystemPromptChoice }
-  | { readonly kind: 'unreadable' }
-
-/** The branch's LAST system-prompt entry — the one in force; every one is written before the first request. */
-export function recordedSystemPrompt(branch: readonly SessionEntry[]): RecordedSystemPrompt {
-  const entry = branch.findLast(
-    (candidate) => candidate.type === 'custom' && candidate.customType === ENSO_SYSTEM_PROMPT_ENTRY,
-  )
-  if (entry === undefined || entry.type !== 'custom') return { kind: 'none' }
-  const choice = readEnsoSystemPromptChoice(entry.data)
-  return choice === undefined ? { kind: 'unreadable' } : { kind: 'chosen', choice }
 }
 
 /** The branch's system prompt as a view shows it: the choice without its text, pi's default, or unreadable. */

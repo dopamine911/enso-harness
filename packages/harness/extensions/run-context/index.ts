@@ -1,6 +1,11 @@
 import { createHash } from 'node:crypto'
 import type { BeforeAgentStartEvent, ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent'
-import { ENSO_RUN_CONTEXT_ENTRY, type EnsoConfigParseResult, type EnsoRunContext } from '@enso/core'
+import {
+  ENSO_RUN_CONTEXT_ENTRY,
+  type EnsoConfigParseResult,
+  type EnsoRunContext,
+  lastCustomEntryData,
+} from '@enso/core'
 import { type GitRunner, runGit } from '@enso/core/git'
 import { ensoHome } from '@enso/core/paths'
 import { type SessionConfigContext, type SessionEnsoConfig, sessionEnsoConfig } from '../../core/index.ts'
@@ -90,15 +95,6 @@ async function resolvedConfig(
   }
 }
 
-/** The branch's last entry of `customType`, root to leaf. */
-function lastCustomData(branch: readonly unknown[], customType: string): unknown {
-  for (let entryIndex = branch.length - 1; entryIndex >= 0; entryIndex -= 1) {
-    const entry = branch[entryIndex] as { type?: unknown; customType?: unknown; data?: unknown } | undefined
-    if (entry?.type === 'custom' && entry.customType === customType) return entry.data
-  }
-  return undefined
-}
-
 /** The persisted rule fields of picc's `modes` entry (`ModesPersistedEntry`), in the order they are hashed. */
 const PICC_RULE_FIELDS = [
   'alwaysAllowRules',
@@ -108,7 +104,7 @@ const PICC_RULE_FIELDS = [
 ] as const
 
 function modeRules(branch: readonly unknown[]): EnsoRunContext['mode'] {
-  const data = lastCustomData(branch, PICC_MODES_ENTRY)
+  const data = lastCustomEntryData(branch, PICC_MODES_ENTRY)
   if (typeof data !== 'object' || data === null) return null
   const persisted = data as Record<string, unknown>
   if (PICC_RULE_FIELDS.every((field) => persisted[field] === undefined)) return null
@@ -154,7 +150,7 @@ export function createRunContext(dependencies: RunContextDependencies): (pi: Ext
       const current = await runContextOf(dependencies, event, context)
       // Compared RAW, not through the reader's schema (PR #440 review): a record this writer made
       // that the schema rejects would otherwise read as absent and be appended again every run.
-      const last = lastCustomData(context.sessionManager.getBranch(), ENSO_RUN_CONTEXT_ENTRY)
+      const last = lastCustomEntryData(context.sessionManager.getBranch(), ENSO_RUN_CONTEXT_ENTRY)
       if (last !== undefined && canonicalJson(last) === canonicalJson(current)) return
       pi.appendEntry(ENSO_RUN_CONTEXT_ENTRY, current)
     })
