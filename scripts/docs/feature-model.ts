@@ -23,10 +23,11 @@ import { appendFileSync } from 'node:fs'
  * shows up as a refusal in the chat, and in `log` — never as a silent extra turn.
  */
 
+/** One content block of a scripted reply, tagged by `kind` so a new kind is a compile error where parts are read. */
 export type ScriptedPart =
-  | { readonly thinking: string }
-  | { readonly text: string }
-  | { readonly tool: string; readonly input: Record<string, unknown> }
+  | { readonly kind: 'thinking'; readonly thinking: string }
+  | { readonly kind: 'text'; readonly text: string }
+  | { readonly kind: 'tool'; readonly tool: string; readonly input: Record<string, unknown> }
 
 export interface FeatureModelScript {
   readonly replies: readonly (readonly ScriptedPart[])[]
@@ -58,30 +59,32 @@ function event(type: string, data: Record<string, unknown>): string {
 /** The content blocks of one reply, as the stream events that carry them. */
 function blockEvents(parts: readonly ScriptedPart[], replyIndex: number): string[] {
   return parts.flatMap((part, index) => {
-    if ('thinking' in part) {
-      return [
-        event('content_block_start', { index, content_block: { type: 'thinking', thinking: '', signature: '' } }),
-        event('content_block_delta', { index, delta: { type: 'thinking_delta', thinking: part.thinking } }),
-        event('content_block_delta', { index, delta: { type: 'signature_delta', signature: 'feature-shot' } }),
-        event('content_block_stop', { index }),
-      ]
+    switch (part.kind) {
+      case 'thinking':
+        return [
+          event('content_block_start', { index, content_block: { type: 'thinking', thinking: '', signature: '' } }),
+          event('content_block_delta', { index, delta: { type: 'thinking_delta', thinking: part.thinking } }),
+          event('content_block_delta', { index, delta: { type: 'signature_delta', signature: 'feature-shot' } }),
+          event('content_block_stop', { index }),
+        ]
+      case 'text':
+        return [
+          event('content_block_start', { index, content_block: { type: 'text', text: '' } }),
+          event('content_block_delta', { index, delta: { type: 'text_delta', text: part.text } }),
+          event('content_block_stop', { index }),
+        ]
+      case 'tool': {
+        const id = `toolu_feature_${replyIndex}_${index}`
+        return [
+          event('content_block_start', { index, content_block: { type: 'tool_use', id, name: part.tool, input: {} } }),
+          event('content_block_delta', {
+            index,
+            delta: { type: 'input_json_delta', partial_json: JSON.stringify(part.input) },
+          }),
+          event('content_block_stop', { index }),
+        ]
+      }
     }
-    if ('text' in part) {
-      return [
-        event('content_block_start', { index, content_block: { type: 'text', text: '' } }),
-        event('content_block_delta', { index, delta: { type: 'text_delta', text: part.text } }),
-        event('content_block_stop', { index }),
-      ]
-    }
-    const id = `toolu_feature_${replyIndex}_${index}`
-    return [
-      event('content_block_start', { index, content_block: { type: 'tool_use', id, name: part.tool, input: {} } }),
-      event('content_block_delta', {
-        index,
-        delta: { type: 'input_json_delta', partial_json: JSON.stringify(part.input) },
-      }),
-      event('content_block_stop', { index }),
-    ]
   })
 }
 
@@ -100,7 +103,9 @@ export function startFeatureModel(port: number, script: FeatureModelScript, log:
       }
       const body = (await request.json()) as MessagesRequest
       const auxiliary = (body.tools ?? []).length === 0
-      const parts: readonly ScriptedPart[] | undefined = auxiliary ? [{ text: script.summary }] : script.replies[next]
+      const parts: readonly ScriptedPart[] | undefined = auxiliary
+        ? [{ kind: 'text', text: script.summary }]
+        : script.replies[next]
       appendFileSync(log, `${auxiliary ? 'auxiliary' : `reply ${next}`} · ${body.model}\n`)
       if (parts === undefined) {
         return Response.json(
@@ -124,7 +129,7 @@ export function startFeatureModel(port: number, script: FeatureModelScript, log:
       const input = Math.min(6, total - cacheRead)
       const cacheWrite = total - cacheRead - input
       const output = tokensOf(JSON.stringify(parts).length)
-      const usesTool = parts.some((part) => 'tool' in part)
+      const usesTool = parts.some((part) => part.kind === 'tool')
 
       const stream = [
         event('message_start', {

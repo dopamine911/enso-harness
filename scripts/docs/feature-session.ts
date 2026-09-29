@@ -93,24 +93,26 @@ export const FEATURE_SCRIPT: FeatureModelScript = {
   replies: [
     // Prompt 1.
     [
-      { thinking: 'Search the source for the variable first, then look at .env for its value.' },
-      { tool: 'bash', input: { command: 'grep -rn DATABASE_URL src' } },
+      { kind: 'thinking', thinking: 'Search the source for the variable first, then look at .env for its value.' },
+      { kind: 'tool', tool: 'bash', input: { command: 'grep -rn DATABASE_URL src' } },
     ],
-    [{ tool: 'read', input: { path: '.env' } }],
-    [{ tool: 'read', input: { path: 'src/config.ts' } }],
+    [{ kind: 'tool', tool: 'read', input: { path: '.env' } }],
+    [{ kind: 'tool', tool: 'read', input: { path: 'src/config.ts' } }],
     [
       {
+        kind: 'text',
         text:
           'It reads `DATABASE_URL` from the environment in `src/config.ts`, and nothing checks that it is set. ' +
           'I could not read `.env`: the guard refused it as a credential file, so I cannot confirm its value.',
       },
     ],
     // Prompt 2.
-    [{ tool: 'bash', input: { command: 'cat docs/deploy.md' } }],
-    [{ tool: 'bash', input: { command: 'curl -s https://bun.sh/blog' } }],
-    [{ tool: WEB_FETCH_TOOL_NAME, input: { url: 'https://bun.sh/blog' } }],
+    [{ kind: 'tool', tool: 'bash', input: { command: 'cat docs/deploy.md' } }],
+    [{ kind: 'tool', tool: 'bash', input: { command: 'curl -s https://bun.sh/blog' } }],
+    [{ kind: 'tool', tool: WEB_FETCH_TOOL_NAME, input: { url: 'https://bun.sh/blog' } }],
     [
       {
+        kind: 'text',
         text:
           'There are no deploy notes: `docs/deploy.md` does not exist. I could not fetch the changelog either: ' +
           '`curl` is refused in the shell, and `web_fetch` has no allowed hosts yet. ' +
@@ -119,11 +121,12 @@ export const FEATURE_SCRIPT: FeatureModelScript = {
     ],
     // Prompt 3, on the second model.
     [
-      { thinking: 'There is a choice to make about how it fails. Ask before changing anything.' },
-      { tool: ASK_USER_TOOL_NAME, input: { questions: QUESTIONS } },
+      { kind: 'thinking', thinking: 'There is a choice to make about how it fails. Ask before changing anything.' },
+      { kind: 'tool', tool: ASK_USER_TOOL_NAME, input: { questions: QUESTIONS } },
     ],
     [
       {
+        kind: 'tool',
         tool: 'edit',
         input: {
           path: 'src/config.ts',
@@ -138,11 +141,12 @@ export const FEATURE_SCRIPT: FeatureModelScript = {
     ],
     [
       {
+        kind: 'text',
         text: '`config.databaseUrl` now throws at startup when `DATABASE_URL` is missing. I have not added the tests yet.',
       },
     ],
     // Prompt 4, after the compaction.
-    [{ text: 'config: fail at startup when `DATABASE_URL` is missing.' }],
+    [{ kind: 'text', text: 'config: fail at startup when `DATABASE_URL` is missing.' }],
   ],
   summary:
     'The user asked where shop-api reads DATABASE_URL (src/config.ts; .env was refused as a credential file), ' +
