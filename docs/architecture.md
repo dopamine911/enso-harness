@@ -534,7 +534,7 @@ page's own lead sentence, so it cannot say a leak is open after the page says it
 | [presentation](./seams/presentation.md) | Surface | presentation gate; `ported-provenance.md` generated | The state layer's message shape crosses two wire payloads. |
 | [storage](./seams/storage.md) | Thread, Record | `no-duplicate-paths`; boundaries (the forbidden-call rule) | Nothing of the runtime's persistence format, since L2 |
 | [the thread runtime](./seams/thread-runtime.md) | Thread, Control | vendor gate; glossary gate; boundaries | The admission vocabulary is ours now, and the mapping is one table (#216, closed). |
-| [the tool result descriptor](./seams/tool-result.md) | Surface | — | Nothing of ours leaks. |
+| [the tool result descriptor](./seams/tool-result.md) | Surface | unknown-kind test (`tool-result.test.tsx`); vendor gate | Nothing of ours leaks. |
 | [web providers](./seams/web-providers.md) | Permission (egress), Control | vendor gate | Nothing of the runtime's, since L6 closed (#162). |
 <!-- /generated-block -->
 

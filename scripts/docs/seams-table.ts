@@ -59,7 +59,9 @@ const SEAM_METADATA: Record<string, SeamMetadata> = {
   'dialog.md': { domain: 'Control', gate: 'extension-UI-context tests' },
   'permission-mode.md': { domain: 'Permission', gate: 'vendor gate; `code-offenders` stale-row check' },
   'guards.md': { domain: 'Permission', gate: '`tool-call-participants`; analyzer contract test' },
-  'tool-result.md': { domain: 'Surface', gate: '—' },
+  // #202: the page's own "What fences it" names these — the unknown-kind test is the one it calls the
+  // seam's worth (no descriptor can make a result invisible), the vendor gate keeps pi's types out.
+  'tool-result.md': { domain: 'Surface', gate: 'unknown-kind test (`tool-result.test.tsx`); vendor gate' },
   'presentation.md': { domain: 'Surface', gate: 'presentation gate; `ported-provenance.md` generated' },
   'logging.md': { domain: 'Record', gate: 'logging gate' },
   'web-providers.md': { domain: 'Permission (egress), Control', gate: 'vendor gate' },
