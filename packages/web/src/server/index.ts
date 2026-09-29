@@ -613,8 +613,9 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     if (mount.storedOutside !== undefined) {
       response.writeHead(403, { 'Content-Type': 'text/plain' })
       // The directory FIRST and no thread id (the URL has it): a page bounds a failure to 120
-      // characters (`boundedFailureDetail`), and the directory is the part that must survive.
-      response.end(`stored in ${mount.storedOutside}, which is not a project here — add it as a project to open it`)
+      // characters (`boundedFailureDetail`), and the directory is the part that must survive. The
+      // rest is 57 characters, so the advice survives too up to a 63-character directory (#478 review).
+      response.end(`stored in ${mount.storedOutside} — not a project here; add it as one to open it`)
       return
     }
     if (!mount.present || mount.projectId === undefined) {

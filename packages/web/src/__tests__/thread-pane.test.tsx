@@ -2046,7 +2046,7 @@ test("⚠ the URL's own thread, never held by the server, is started under that 
 test('a thread stored outside the projects is said on its own rail line, never as the listing failing (#378)', async () => {
   const server = createScriptedFetch()
   const outside = crypto.randomUUID()
-  const refusal = 'stored in /elsewhere, which is not a project here — add it as a project to open it'
+  const refusal = 'stored in /elsewhere — not a project here; add it as one to open it'
   globalThis.fetch = ((input: string | URL | Request, init?: RequestInit): Promise<Response> =>
     requestedUrl(input).endsWith(`/api/threads/${outside}/history`)
       ? Promise.resolve(new Response(refusal, { status: 403 }))

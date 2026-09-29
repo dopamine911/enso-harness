@@ -577,7 +577,7 @@ test('stored threads are listed and read only in a project, each under its own; 
   }
   expect(await refusedHistory('elsewhere')).toEqual([
     403,
-    'stored in /somewhere/else, which is not a project here — add it as a project to open it',
+    'stored in /somewhere/else — not a project here; add it as one to open it',
   ])
   expect(await refusedHistory('never-used')).toEqual([404, 'no session for thread never-used'])
 
@@ -586,7 +586,7 @@ test('stored threads are listed and read only in a project, each under its own; 
   expect(await listed()).toEqual([expect.objectContaining({ threadId: 'inLaunch' })])
   expect(await refusedHistory('inApp')).toEqual([
     403,
-    `stored in ${app}, which is not a project here — add it as a project to open it`,
+    `stored in ${app} — not a project here; add it as one to open it`,
   ])
   // A stale tab still following it is told there is nowhere it runs — never the launch directory,
   // where resuming it would not happen either (PR #399 review).
