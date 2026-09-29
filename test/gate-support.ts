@@ -55,6 +55,41 @@ export function markdownFiles(directory: string): string[] {
   return found
 }
 
+/**
+ * Comments and string lexemes in one alternation, so a `//` inside a quoted string is not a
+ * comment — the shape `gate-support.ts` uses for the same reason.
+ *
+ * ⚠ TEMPLATE LITERALS ARE LEXEMES TOO (PR #317 review). Leaving backticks out looks like a
+ * false-negative — a name spelled `` `stop the run` `` simply not found — but the cost is on
+ * the scanner, not the search: an unconsumed template literal hands its contents to the
+ * alternation, so an apostrophe in one (`` `pi's answer` ``) opens a quote that closes on the
+ * next unrelated one, and a `//` in one eats the rest of its line. Both invent literals, or
+ * lose real ones, some distance away. Multi-line by design: a template literal is the one
+ * string lexeme that spans lines.
+ */
+const COMMENT_OR_STRING = /\/\*[\s\S]*?\*\/|\/\/[^\n]*|'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`/g
+
+/**
+ * Every string literal a file DECLARES with a STATIC value, comments removed. Shared by
+ * `e2e-selectors.test.ts` (#277) and `features-gate.test.ts` (#437): both ask whether the UI
+ * still renders a name that something outside it depends on.
+ *
+ * ⚠ Comments first (PR #317 review). This side answers "does the composer render this name",
+ * and a comment string is not markup: with prose in scope, renaming a rendered `aria-label`
+ * while a comment still mentioned the old one kept the gate green — the exact drift the file
+ * claims to catch, one side of it unheld.
+ *
+ * A template literal counts only when it interpolates nothing. One that does is not a name
+ * this gate can compare: its rendered value is not in the source. That is a true negative —
+ * the constant it would have to match is a plain literal in the spec, by the test below.
+ */
+export function quotedLiterals(source: string): string[] {
+  const code = source.replace(COMMENT_OR_STRING, (lexeme) => (lexeme.startsWith('/') ? '' : lexeme))
+  return [...code.matchAll(/'([^'\n]*)'|"([^"\n]*)"|`([^`]*)`/g)]
+    .map((match) => match[1] ?? match[2] ?? match[3] ?? '')
+    .filter((literal) => !literal.includes('${'))
+}
+
 /** The words a line is made of, lower-cased, with `camelCase` and every separator split. */
 export function wordsOf(line: string): string[] {
   const words: string[] = []

@@ -343,7 +343,7 @@ choose whether and where to share the bundle.
 | 9 | `api-docs` | TypeDoc over the public contracts, with warnings fatal |
 | 10 | `site` | builds the docs site and crawls every built page for dead links |
 
-Twenty-one of those tests are **gates**: tests about the source tree rather than about behaviour — "no
+Twenty-two of those tests are **gates**: tests about the source tree rather than about behaviour — "no
 production `console.*`", "every documented export is grouped", "every diagram parses". Each one names
 its offenders rather than counting them, so the failure message is the fix.
 
@@ -379,7 +379,10 @@ machine were isolated. It isn't yet.
 
 ## Where to read next
 
-In the order that makes sense if you are new:
+**Using Enso?** Start with [`docs/features/`](docs/features/README.md): one page per feature, with
+screenshots — what it shows, how to open it, and what to look for.
+
+**Changing Enso?** In the order that makes sense if you are new:
 
 1. [`docs/architecture.md`](docs/architecture.md) — the founding stance, the seams, the phases.
 2. [`docs/glossary.md`](docs/glossary.md) — one word, one meaning. Worth skimming *before* the code.

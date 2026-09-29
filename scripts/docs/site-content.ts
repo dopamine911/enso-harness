@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { copyFileSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative } from 'node:path'
 import { findRepoRoot } from '../../packages/core/src/paths.ts'
 import { SITE_BASE } from './site-base.ts'
@@ -54,6 +54,46 @@ export function documentationPages(): string[] {
   return pages
 }
 
+/**
+ * The image files a page may embed. Only these are carried into the site: everything else
+ * `docs/` holds (`concepts/data/*.json`) is linked to on GitHub, never served (`rewriteLinks`).
+ */
+const ASSET = /\.(?:png|jpe?g|webp|gif|svg)$/i
+
+function isAsset(path: string): boolean {
+  return ASSET.test(path)
+}
+
+/** Every image file under `docs/`, repo-relative to `docs/`, in a stable order. */
+export function documentationAssets(): string[] {
+  const assets: string[] = []
+  const walk = (directory: string): void => {
+    for (const childName of readdirSync(directory).sort()) {
+      const path = join(directory, childName)
+      if (statSync(path).isDirectory()) walk(path)
+      else if (isAsset(childName)) assets.push(relative(join(ROOT, DOCS), path))
+    }
+  }
+  walk(join(ROOT, DOCS))
+  return assets
+}
+
+/**
+ * Copies every image under `docs/` to the same place under `target`, and returns what it copied.
+ *
+ * Beside the pages that embed them (#437): a relative `![…](./images/x.png)` is resolved by Astro
+ * against the projected page, so the file has to be where the link says.
+ */
+export function projectAssets(target: string): string[] {
+  const assets = documentationAssets()
+  for (const asset of assets) {
+    const destination = join(target, asset)
+    mkdirSync(dirname(destination), { recursive: true })
+    copyFileSync(join(ROOT, DOCS, asset), destination)
+  }
+  return assets
+}
+
 /** The page's H1, which Starlight needs as `title` — or a throw naming the page that has none. */
 export function pageTitle(source: string, page: string): string {
   const heading = /^#\s+(.+?)\s*$/m.exec(source)
@@ -85,10 +125,17 @@ const BLOB = 'https://github.com/dopamine911/zen-harness-foundation/blob/main'
  */
 export function rewriteLinks(source: string, page: string, anchoredAt: 'docs' | 'repository' = 'docs'): string {
   const directory = dirname(page)
-  return source.replace(/\]\(((?:\.{1,2}\/)?[^)\s#:]+)(#[^)\s]*)?\)/g, (_whole, target: string, anchor = '') => {
+  const pattern = /(!\[[^\]\n]*)?\]\(((?:\.{1,2}\/)?[^)\s#:]+)(#[^)\s]*)?\)/g
+  return source.replace(pattern, (whole, embed: string | undefined, target: string, anchor = '') => {
     const resolved = join(directory === '.' ? '' : directory, target).replace(/\\/g, '/')
-    const site = (path: string): string => `](${SITE_BASE}/${path.replace(/\/?$/, '/')}${anchor})`
-    const blob = (path: string): string => `](${BLOB}/${path}${anchor})`
+    // An image EMBEDDED from inside `docs/` stays relative: the projection copies it beside the
+    // page (`documentationAssets`), and Astro bundles a relative image into the build. Rewritten
+    // to the blob like any other non-page file, it would be an `<img>` pointing at an HTML page.
+    if (embed !== undefined && anchoredAt === 'docs' && !resolved.startsWith('..') && isAsset(resolved)) return whole
+    // The alt text, when the link is an embed, is part of the match and goes back unchanged.
+    const lead = embed ?? ''
+    const site = (path: string): string => `${lead}](${SITE_BASE}/${path.replace(/\/?$/, '/')}${anchor})`
+    const blob = (path: string): string => `${lead}](${BLOB}/${path}${anchor})`
     // The repository README is projected as the site's root, and its links are repo-relative
     // rather than docs-relative: `docs/architecture.md` from it is the same page `./glossary.md`
     // is from inside `docs/`. One page, one asymmetry, named rather than special-cased silently.
@@ -159,6 +206,8 @@ function project(): { written: number; indexes: number } {
     written += 1
   }
 
+  projectAssets(target)
+
   // The site's own root, from the repository's README: a site with no `/` is a site whose every
   // header link is dead, and 40 pages carried that link.
   writeFileSync(
@@ -196,6 +245,6 @@ function documentationDirectories(): string[] {
 if (import.meta.main) {
   const { written, indexes } = project()
   process.stdout.write(
-    `site-content: projected ${written} pages into ${CONTENT}, plus a root index and ${indexes} derived section indexes\n`,
+    `site-content: projected ${written} pages and ${documentationAssets().length} images into ${CONTENT}, plus a root index and ${indexes} derived section indexes\n`,
   )
 }

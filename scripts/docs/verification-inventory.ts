@@ -69,6 +69,12 @@ const GATE_METADATA: Readonly<Record<string, GateMetadata>> = {
     limitation:
       'Holds that every page under `docs/` projects with a title, that every page the sidebar names exists, and that each link class is rewritten for a route. Whether the BUILT site serves them is the `site` gate step, which builds and crawls.',
   },
+  'test/features-gate.test.ts': {
+    roots: ['docs/features', 'packages/web/src'],
+    exceptions: [],
+    limitation:
+      'Holds that every bold label on a Features page is a string the web surface renders, that every page has the six parts, and that every screenshot is used. Whether a label sits on the screen the page says it does is the screenshot capture’s to catch (`bun run docs:screenshots`), which fails on a control it cannot find.',
+  },
   'test/browser-bundle-gate.test.ts': {
     roots: ['packages/web/src/main.tsx'],
     exceptions: [],

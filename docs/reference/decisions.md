@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 311.**
+**Decision headers: 315.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -275,6 +275,9 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `scripts/docs/decisions.ts` | `#170` | Generates `docs/reference/decisions.md` (#170): one row for each owned source file whose first comment/header block cites an issue. |
 | `scripts/docs/env-and-config.ts` | `#170` | Generates `docs/reference/env-and-config.md` (#170): the explicit environment boundary, the composed `EnsoConfig` shape, every `.enso/` path assembled by core, and the harness manifest resources. |
 | `scripts/docs/extract-declaration.ts` | `#168` | The docs gate's one primitive (#168): a top-level declaration, by name, whole. |
+| `scripts/docs/feature-model.ts` | `#437` | A stand-in for Anthropic's Messages API that plays a scripted conversation (#437). |
+| `scripts/docs/feature-screenshots.ts` | `#404`, `#437` | Captures the Features screenshots (#437) into `docs/features/images/`. |
+| `scripts/docs/feature-session.ts` | `#437` | The session the Features screenshots are taken from (#437): a small project, four prompts, and what the model answers to each. |
 | `scripts/docs/flow-diagrams.ts` | `#188` | Generates `docs/reference/flows.md` (#188): the control plane and the observation pipeline as Mermaid, drawn from the SAME discovery the reference tables use. |
 | `scripts/docs/gate-source.ts` | `#170`, `#262` | Reading a declared constant back out of a gate's source (#170, split out on #262). |
 | `scripts/docs/generator-support.ts` | `#174` | What every generator under `scripts/docs/` shares (#174): the exhaustiveness check that makes a metadata table refuse to be stale, and the one way a generator runs — its page to stdout, or one `name: reason` line to stderr and a non-zero exit, never a partial page. |
@@ -305,6 +308,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `test/duplicate-shapes-gate.test.ts` | `#53`, `#174`, `#255` | One place for every shape: no TypeBox schema is declared outside `@enso/core` (#53, #255). |
 | `test/e2e-selectors.test.ts` | `#116`, `#277` | THE E2E SELECTOR CONTRACT (#277). |
 | `test/fallow-config.test.ts` | `#163` | fallow's entry list cannot drift from the harness manifest (#163). |
+| `test/features-gate.test.ts` | `#277`, `#437` | THE FEATURES PAGES DESCRIBE A UI THAT EXISTS (#437). |
 | `test/gate-abort.test.ts` | `#157` | The gate's blind spot, closed (#157): a tool that dies mid-run and still exits 0. |
 | `test/gate-support.ts` | `#150`, `#162`, `#165`, `#174` | What the source-tree gates share (#165, #162 workstream 6): the word-splitter, the sequence matcher, the comment skip, over the one walker (`scripts/source-tree.ts`, #174). |
 | `test/glossary-doc.test.ts` | `#161`, `#164`, `#165`, `#245` | The glossary keeps its own three rules (#161, PR #164 review; #245). |

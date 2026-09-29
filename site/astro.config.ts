@@ -65,8 +65,9 @@ export default defineConfig({
       title: 'Enso',
       description: 'The harness architecture, its seams, and the reference material generated from its source.',
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/dopamine911/zen-harness-foundation' }],
-      // Four sections, in the order a reader needs them: what it is, how it behaves, what it
-      // declares, how to change it.
+      // Five sections, in the order a reader needs them: what it does for a user (#437), what it
+      // is, how it behaves, what it declares, how to change it. Features comes first because it
+      // is the only section written for someone deciding whether to use Enso, not change it.
       //
       // ⚠ The page lists are `autogenerate`, never enumerated. A hand-written list of seam or
       // flow pages would be a maintained copy of a fact the directory already states, and the
@@ -74,6 +75,7 @@ export default defineConfig({
       // rather than a group carrying `autogenerate` itself: Starlight removed the latter in
       // v0.39.0, and the build error — not the editor types — is what says so.
       sidebar: [
+        { label: 'Features', items: [{ autogenerate: { directory: 'features' } }] },
         {
           label: 'Architecture',
           items: [
