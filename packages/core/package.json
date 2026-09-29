@@ -8,6 +8,7 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
+    "./git": "./src/git.ts",
     "./log-process": "./src/log-process.ts",
     "./paths": "./src/paths.ts",
     "./pi-manifest": "./src/pi-manifest.ts",

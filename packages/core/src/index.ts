@@ -61,6 +61,14 @@ export {
   isWholeBase64,
 } from './follow.ts'
 export {
+  EnsoGitBaseline,
+  EnsoGitBaselineRule,
+  EnsoGitOperation,
+  EnsoGitRepository,
+  EnsoGitState,
+  EnsoThreadGit,
+} from './git-state.ts'
+export {
   DEFAULT_GUARD_POLICY,
   ENSO_GUARD_DENIAL_ENTRY,
   ENSO_GUARD_DENIAL_KEY,

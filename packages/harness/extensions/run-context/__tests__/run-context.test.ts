@@ -1,7 +1,8 @@
 import { expect, test } from 'bun:test'
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
 import { ENSO_RUN_CONTEXT_ENTRY, type EnsoRunContext } from '@enso/core'
-import { createRunContext, type GitResult, type RunContextDependencies } from '../index.ts'
+import type { GitResult } from '@enso/core/git'
+import { createRunContext, type RunContextDependencies } from '../index.ts'
 
 /**
  * #435's recorder over its dependency seam (PR #438 review): the branches the review rounds added,
@@ -34,7 +35,7 @@ function session(
   createRunContext({
     resolveSessionConfig: () =>
       Promise.resolve({ result: { kind: 'ok', config: {} }, path: '/u/config.json', sources: [] }),
-    runGit: gitAnswering({ code: 0, stdout: 'f00d\n' }, { code: 0, stdout: '' }),
+    runGit: gitAnswering({ code: 0, stdout: 'f00d\n', stderr: '' }, { code: 0, stdout: '', stderr: '' }),
     ...dependencies,
   })(pi)
   return {
@@ -57,11 +58,13 @@ function session(
 
 /** git answering `rev-parse HEAD` with `head` and `status --porcelain` with `status`. */
 function gitAnswering(head: GitResult, status: GitResult): RunContextDependencies['runGit'] {
-  return (args: string[]) => Promise.resolve(args[0] === 'rev-parse' ? head : status)
+  return (args: readonly string[]) => Promise.resolve(args[0] === 'rev-parse' ? head : status)
 }
 
 test('⚠ a status git cannot answer records the tree dirty, the revision kept: it cannot say the tree is clean', async () => {
-  const recorder = session({ runGit: gitAnswering({ code: 0, stdout: 'f00d\n' }, { code: 1, stdout: '' }) })
+  const recorder = session({
+    runGit: gitAnswering({ code: 0, stdout: 'f00d\n', stderr: '' }, { code: 1, stdout: '', stderr: '' }),
+  })
   await recorder.run()
   expect(recorder.recorded()[0]?.git).toEqual({ revision: 'f00d', dirty: true })
 })
