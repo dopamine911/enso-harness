@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 345.**
+**Decision headers: 349.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -10,6 +10,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | File | Issues | First complete decision sentence |
 |---|---|---|
 | `packages/core/src/__tests__/config.test.ts` | `#59`, `#421` | The config loading contract (#59, #421): a file that is there parses or fails CLOSED — every non-conforming input comes back `unreadable`, never as a silently-empty config — and no file is the defaults. |
+| `packages/core/src/__tests__/flow-trace.ts` | `#132`, `#482` | A flow's sequence as one test observed it (#482): the diagram on a `docs/flows/` page is this recorder's output, held by `toMatchSnapshot`, never drawn by hand. |
 | `packages/core/src/__tests__/git.test.ts` | `#453` | #453: git read in a thread's cwd, against real repositories built in a temporary directory — every baseline rule, the states a working tree can be in, and the settings that keep a read from writing or running anything the repository configures. |
 | `packages/core/src/__tests__/log-process.test.ts` | `#132` | The file a user hands us (#132), end to end through the real configurator: what a line looks like, what never reaches it, what every line under a route carries — and the knob. |
 | `packages/core/src/__tests__/log-recorder.ts` | `#132`, `#178` | The tests' sink (#132), one for every package (#178): every `enso` record, at every level, into memory — a guard's verdict, an audit line or a route's problem is asserted as the record it is, the way a bundle reader would read it, not as a line on stderr. |
@@ -309,6 +310,8 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `scripts/docs/feature-screenshots.ts` | `#404`, `#437` | Captures the Features screenshots (#437) into `docs/features/images/`. |
 | `scripts/docs/feature-session.ts` | `#437` | The session the Features screenshots are taken from (#437): a small project, four prompts, and what the model answers to each. |
 | `scripts/docs/flow-diagrams.ts` | `#188` | Generates `docs/reference/flows.md` (#188): the control plane and the observation pipeline as Mermaid, drawn from the SAME discovery the reference tables use. |
+| `scripts/docs/flow-pages.ts` | `#482` | Builds a `docs/flows/<id>.md` page for every `@flow` in source (#482). |
+| `scripts/docs/flow-tags.ts` | `#482` | What a flow page is built from (#482): tags in source comments and the diagrams tests record. |
 | `scripts/docs/gate-source.ts` | `#170`, `#262` | Reading a declared constant back out of a gate's source (#170, split out on #262). |
 | `scripts/docs/generator-support.ts` | `#174` | What every generator under `scripts/docs/` shares (#174): the exhaustiveness check that makes a metadata table refuse to be stale, and the one way a generator runs — its page to stdout, or one `name: reason` line to stderr and a non-zero exit, never a partial page. |
 | `scripts/docs/ported-provenance.ts` | `#168` | Generates `docs/seams/ported-provenance.md` (#168): one row per file under `components/ai-elements/` — the upstream path and commit its header names, and the `Modified —` line that follows. |
@@ -323,7 +326,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `scripts/enso-logs.ts` | `#132` | See the log (#132): the day's file, rendered the way the terminal renders it live. |
 | `scripts/enso-thread.ts` | `#86`, `#97` | Inspect the live web server's threads from a shell — the agent's half of #86. |
 | `scripts/enso.ts` | `#20`, `#217`, `#446` | Launch a VANILLA pi with only Enso loaded. |
-| `scripts/gate.ts` | `#188`, `#208`, `#257`, `#342` | Ported from slop-factory's bun example (examples/bun/scripts/gate.ts) — the shape is deliberately identical so improvements travel in either direction. |
+| `scripts/gate.ts` | `#188`, `#208`, `#257`, `#342`, `#482` | Ported from slop-factory's bun example (examples/bun/scripts/gate.ts) — the shape is deliberately identical so improvements travel in either direction. |
 | `scripts/link-vendor-packages.ts` | `#30` | Ensure the vendor pi packages exist inside the harness package's own node_modules. |
 | `scripts/lint/process-environment.ts` | `#89` | The environment boundary (#89): every file allowed to read the real process environment. |
 | `scripts/print-harness.ts` | `#9`, `#13`, `#20` | The PRINT-MODE harness variant (#20): the Enso package minus picc-permission-modes. |
@@ -339,6 +342,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `test/e2e-selectors.test.ts` | `#116`, `#277` | THE E2E SELECTOR CONTRACT (#277). |
 | `test/fallow-config.test.ts` | `#163` | fallow's entry list cannot drift from the harness manifest (#163). |
 | `test/features-gate.test.ts` | `#277`, `#437` | THE FEATURES PAGES DESCRIBE A UI THAT EXISTS (#437). |
+| `test/flow-pages.test.ts` | `#482` | FLOW PAGES ARE BUILT FROM TAGS, AND THE TAGS MUST AGREE (#482). |
 | `test/gate-abort.test.ts` | `#157` | The gate's blind spot, closed (#157): a tool that dies mid-run and still exits 0. |
 | `test/gate-support.ts` | `#150`, `#162`, `#165`, `#174` | What the source-tree gates share (#165, #162 workstream 6): the word-splitter, the sequence matcher, the comment skip, over the one walker (`scripts/source-tree.ts`, #174). |
 | `test/glossary-doc.test.ts` | `#161`, `#164`, `#165`, `#245` | The glossary keeps its own three rules (#161, PR #164 review; #245). |

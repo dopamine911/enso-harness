@@ -53,8 +53,8 @@
  *                  none of them is visible to `tsc`. `--emit none`: it VALIDATES, and the site
  *                  renders the same surface as native pages (`starlight-typedoc`), so the
  *                  contract is converted once for checking and once for reading (#188).
- *   10. site     — `bun scripts/docs/site-content.ts && bunx astro build --root site && bun scripts/docs/site-links.ts`:
- *                  projects `docs/` into the Starlight site, builds it, and
+ *   10. site     — `bun scripts/docs/flow-pages.ts && bun scripts/docs/site-content.ts && bunx astro build --root site && bun scripts/docs/site-links.ts`:
+ *                  builds the flow pages from their tags (#482), projects `docs/` into the Starlight site, builds it, and
  *                  crawls every built page for dead internal links. The BUILD is not the check —
  *                  `astro build` reported success over 139 dead links, because a page's
  *                  `./routes.md` is correct on GitHub and a 404 as a route. The crawl is (#188).

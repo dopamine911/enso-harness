@@ -13,6 +13,7 @@ import {
   type PromptRequest,
   type ThreadRuntime,
 } from '@enso/core'
+import { type FlowTrace, flowTrace } from '@enso/core/flow-trace'
 import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
 import type { LogRecorder } from '@logtape/testing/recorder'
 import type { AgentHost } from '../../host/agent-host.ts'
@@ -44,6 +45,8 @@ interface FakeHost {
   readonly emit: (observation: EnsoObservation) => void
   /** Fire the last prompt's acceptance (a slash command's completion signal). */
   readonly accept: () => void
+  /** Draw this host's calls and emissions into a flow trace: the runtime's side of the diagram. */
+  readonly traceInto: (trace: FlowTrace) => void
 }
 
 /**
@@ -60,10 +63,12 @@ function fakeHost(
   const built: FakeThreadRecord[] = []
   let emit: (observation: EnsoObservation) => void = () => undefined
   let accept: () => void = () => undefined
+  let trace: FlowTrace | undefined
   const host = createFakeAgentHost(() => {
     const fake = createFakeHostedThread({
       runtime: ({ record }: FakeThreadParts) => ({
         prompt: (request: PromptRequest, outcome: PromptOutcome) => {
+          trace?.send('R', 'P', `prompt "${request.message}" { onAccepted, onRejected }`)
           record.prompts.push(request)
           accept = () => outcome.onAccepted()
         },
@@ -77,7 +82,18 @@ function fakeHost(
     emit = fake.emit
     return buildGate.then(() => fake.hosted)
   }, stored)
-  return { host, built, emit: (observation: EnsoObservation) => emit(observation), accept: () => accept() }
+  return {
+    host,
+    built,
+    emit: (observation: EnsoObservation) => {
+      trace?.send('P', 'F', observation.kind)
+      emit(observation)
+    },
+    accept: () => accept(),
+    traceInto: (into: FlowTrace) => {
+      trace = into
+    },
+  }
 }
 
 function emptyHarnessDir(): string {
@@ -153,8 +169,26 @@ const SELECT_DIALOG: EnsoObservation = {
   origin: 'run',
 }
 
+/** The server's side of `docs/flows/prompt-run-settle.md`, one column per part that speaks. */
+const PROMPT_FLOW = {
+  participants: {
+    B: 'browser (the test client)',
+    R: 'prompt route (server/index.ts, follow.ts)',
+    T: 'thread registry',
+    P: 'runtime (fake host)',
+    F: 'feed (observation log)',
+  },
+  categories: {
+    'enso.server.http': 'R',
+    'enso.server.follow': 'R',
+    'enso.server.threads': 'T',
+    'enso.server.events': 'F',
+  },
+} as const
+
 // ── 1. prompt is admission; the thread's own settle releases it ──────────────────────
 
+// @pins prompt-run-settle/admission prompt-run-settle/generation
 test("prompt answers at admission with a message id; the run is released by pi's settle, no HTTP response in between", async () => {
   const fake = fakeHost()
   const url = await startWith(fake)
@@ -163,7 +197,11 @@ test("prompt answers at admission with a message id; the run is released by pi's
   // Observation preceded the first prompt: an empty snapshot, not a 404.
   expect(follow.frames[0]).toMatchObject({ type: 'snapshot', live: false, busy: false, generation: 0, messages: [] })
 
+  const trace = flowTrace({ ...PROMPT_FLOW, logs })
+  fake.traceInto(trace)
+  trace.request('B', 'R', 'POST /api/threads/t1/prompt', { message: 'hello' })
   const admitted = await prompt(url, 't1', 'hello')
+  trace.respond('R', 'B', admitted.status, admitted.body)
   expect(admitted.status).toBe(202)
   expect(admitted.body).toMatchObject({ threadId: 't1', generation: 1, queued: false })
   expect(typeof admitted.body.messageId).toBe('string')
@@ -221,6 +259,8 @@ test("prompt answers at admission with a message id; the run is released by pi's
       .filter((record) => record.level !== 'trace')
       .some((record) => JSON.stringify(record.properties).includes('"hi"')),
   ).toBe(false)
+  // The flow page's diagram (#482): what this test drove and what the server logged, in order.
+  expect(trace.diagram()).toMatchSnapshot('flow prompt-run-settle: the server')
   follow.close()
 })
 
@@ -228,6 +268,7 @@ test("prompt answers at admission with a message id; the run is released by pi's
 // The browser tests script `prompt-rejected` onto the wire; nothing had driven the ROUTE's
 // `onRejected` → `announce` → follower path. Two paths, two leases to get right.
 
+// @pins prompt-run-settle/refusals
 test("⚠ a prompt the runtime REJECTS after the 202 is said on the follow with the receipt's message id, and the thread is released", async () => {
   const fake = fakeHost([], {
     prompt: (_request: PromptRequest, outcome: PromptOutcome) => outcome.onRejected('the runtime would not take it'),
@@ -277,6 +318,7 @@ test('⚠ a rejected prompt and a finished slash command leave no run-timing ent
   expect(takeFirstDeltaMs('timing-running', Number(running.body.generation))).toBeNumber()
 })
 
+// @pins prompt-run-settle/refusals
 test('⚠ a QUEUED prompt the runtime rejects is said on the follow too, and the run it queued behind stays open', async () => {
   let prompts = 0
   const fake = fakeHost([], {
@@ -848,6 +890,7 @@ test('⚠ a cancellation is a value, not a key: `cancelled: false` carrying an u
 
 // ── 5. a busy thread queues through pi (#75) ──────────────────────────────────────────
 
+// @pins prompt-run-settle/busy-queued
 test('a prompt on a busy thread is enqueued through the runtime, not refused and not re-acquired', async () => {
   const fake = fakeHost()
   const url = await startWith(fake)
@@ -921,6 +964,7 @@ test("⚠ what happens on thread A is on A's feed only: B's follow, snapshot, su
 
 // ── 6. refusals are plain HTTP, not stream events ─────────────────────────────────────
 
+// @pins prompt-run-settle/refusals
 test('an unknown slash command is a 400 at admission and releases the thread', async () => {
   const fake = fakeHost(['mode'])
   const url = await startWith(fake)

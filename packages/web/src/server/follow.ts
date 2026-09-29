@@ -275,16 +275,36 @@ export function readPromptBody(raw: string): PromptBody {
 /**
  * Fire a prompt and answer at admission.
  *
- * A BUSY thread (a run in flight, or a dialog the follow is showing) is not acquired again:
- * the message goes to the runtime with an admission (`enqueue` unless the caller asked to
- * `steer`), which is #75's decision. The run in flight keeps its lease; its `settled`
- * releases the thread once everything queued has run. The ONE refusal both paths share is a
- * slash command this surface cannot run (`unavailableCommand`, #337): that is a 400 before
- * anything is queued, busy or idle alike.
+ * @flow prompt-run-settle Prompt → run → settle: admitted on the POST, ended on the follow
+ * A prompt from the browser is one `POST /api/threads/:id/prompt`, and the route's whole job is
+ * admission: check the body, take the thread or queue behind the run that holds it, answer 202
+ * with a receipt. Nothing of the run is an HTTP response (#112). The run lives on the follow
+ * (observations, `settled`, then a released `status`), and the thread's own `settled`, read off
+ * the feed by the route, gives the lease back. Busy is queued, not refused (#75), and a late
+ * refusal is an observation.
+ * @contract packages/core/src/follow.ts#EnsoPromptReceipt
+ * @see docs/reference/routes.md the route table
+ * @see docs/seams/thread-runtime.md acceptance versus completion, the runtime's contract
+ * @see docs/glossary.md the words: Thread and Control
  *
- * An IDLE thread is taken; the prompt's own `settled` (or, for a slash command, its
- * acceptance — an extension command never settles) releases it through the feed. No HTTP
- * response is open for any of this.
+ * @invariant prompt-run-settle/admission Admission is the answer; the run is not an HTTP response.
+ * An IDLE thread is taken, `runtime.prompt` is fired and the 202 goes out at once. The prompt's
+ * own `settled` (or, for a slash command, its acceptance: an extension command never settles)
+ * releases the thread through the feed, read the way any follower reads it. The receipt's ids
+ * are the admission record's ids.
+ *
+ * @invariant prompt-run-settle/busy-queued Busy is queued, not refused and not re-acquired.
+ * A BUSY thread (a run in flight, or a dialog the follow is showing) is read with `peek`: the
+ * message goes to the runtime with an admission (`enqueue` unless the caller asked to `steer`),
+ * which is #75's decision, and the receipt names the run in flight with `queued: true`. That run
+ * keeps its lease; its `settled` releases the thread once everything queued has run.
+ *
+ * @invariant prompt-run-settle/refusals Refusals fall before the lease where they can; after the receipt they are observations.
+ * A whitespace-only body is a 400 from `readPromptBody` before any lease or session exists. The
+ * ONE refusal both paths share is a slash command this surface cannot run (`unavailableCommand`,
+ * #337): a 400 before anything is queued, busy or idle alike, and on the idle path the lease it
+ * took is given back. Once the 202 is out the feed is the only channel: a rejection is announced
+ * as `prompt-rejected` with the receipt's message id, in sequence with the runtime's observations.
  */
 export async function promptThread(deps: FollowRouteDeps, threadId: string, body: PromptBody): Promise<PromptOutcome> {
   const { threads } = deps

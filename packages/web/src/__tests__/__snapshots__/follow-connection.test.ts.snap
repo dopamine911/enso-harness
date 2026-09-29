@@ -1,0 +1,22 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`send opens TanStack's own run at admission; the thread's settle closes it: flow prompt-run-settle: the browser 1`] = `
+"sequenceDiagram
+  participant U as TanStack (useChat)
+  participant A as adapter (follow-connection.ts)
+  participant S as server (scripted)
+  U->>A: send "hello" (run r1)
+  A->>S: POST /api/threads/t1/prompt {message: "hello"}
+  A->>U: RUN_STARTED r1
+  S-->>A: 202 {threadId: "t1", messageId: "pm1", generation: 1, queued: false}
+  A->>U: TEXT_MESSAGE_START
+  Note over A: prompt pm1 opened on run 1
+  S->>A: status {live: true, busy: true, generation: 1}
+  S->>A: observation 1: text-delta
+  S->>A: observation 2: settled
+  S->>A: status {live: true, busy: false, generation: 1}
+  A->>U: CUSTOM status
+  A->>U: TEXT_MESSAGE_CONTENT "hi"
+  A->>U: RUN_FINISHED r1
+  A->>U: CUSTOM status"
+`;

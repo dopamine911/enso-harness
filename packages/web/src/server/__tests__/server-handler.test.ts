@@ -239,6 +239,7 @@ async function prompt(
   return response.status
 }
 
+// @pins prompt-run-settle/release-keeps-session
 test('⚠ two prompts on one thread reuse ONE session; a second thread gets its own (#43 over HTTP)', async () => {
   const { url, built } = await startWith(settlesAtOnce)
   expect(await prompt(url, 't1', 'one')).toBe(202)

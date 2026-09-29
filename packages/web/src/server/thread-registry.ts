@@ -336,12 +336,13 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
   function publishStatus(threadId: string, thread: ThreadEntry | undefined): void {
     const feed = feeds.get(threadId)
     if (feed === undefined) return
-    publish(feed, {
-      kind: 'status',
-      live: thread !== undefined,
-      busy: thread?.busy ?? false,
-      generation: thread?.generation ?? generations.get(threadId) ?? 0,
-    })
+    const live = thread !== undefined
+    const busy = thread?.busy ?? false
+    const generation = thread?.generation ?? generations.get(threadId) ?? 0
+    // What the followers were told, not only what the registry did: `acquired` and `released` say
+    // the lease moved, this says which status every open follow received (#482's flow traces).
+    log.debug('status to followers: live {live}, busy {busy}, run {generation}', { threadId, live, busy, generation })
+    publish(feed, { kind: 'status', live, busy, generation })
   }
 
   /**
@@ -428,6 +429,11 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
     return thread
   }
 
+  /**
+   * @invariant prompt-run-settle/release-keeps-session A settled run releases; it never disposes.
+   * This arms the idle timer and publishes `busy: false`; the session survives into the next run
+   * (#43), and only the idle window or an explicit dispose ends it.
+   */
   function release(threadId: string, thread: ThreadEntry): void {
     thread.idleTimer?.cancel()
     thread.idleTimer = scheduleIdleDisposal(() => disposeThread(threadId, `${idleTimeoutMs}ms idle`), idleTimeoutMs)
@@ -533,6 +539,12 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
   }
 
   return {
+    /**
+     * @invariant prompt-run-settle/generation The generation is the run's number and the join key.
+     * The take increments it, marks the thread busy and publishes the status before the lease is
+     * handed out, so every follower hears the number before the receipt names it. A `release`
+     * through a lease an older generation took is a reported no-op.
+     */
     async acquire(threadId: string): Promise<ThreadLease | 'busy'> {
       const thread = await entryOf(threadId)
       // Cancelled before the abort wait, so the idle window cannot dispose the thread inside it. A

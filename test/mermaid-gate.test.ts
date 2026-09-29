@@ -2,6 +2,7 @@ import { afterAll, expect, test } from 'bun:test'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
+import { collectFlows } from '../scripts/docs/flow-tags.ts'
 import { REPOSITORY_ROOT } from './gate-support.ts'
 
 /**
@@ -54,7 +55,11 @@ function documentationPages(directory: string, found: string[] = []): string[] {
   return found
 }
 
-/** Every mermaid fence in the documentation, with the page and the line it opens on. */
+/**
+ * Every mermaid fence in the documentation, with the page and the line it opens on, and every
+ * diagram a test records for a built flow page (#482): the page is gitignored, so its diagrams
+ * are read where they are kept, in the snapshots, whether or not a build has run.
+ */
 function diagrams(): { page: string; line: number; source: string }[] {
   const found: { page: string; line: number; source: string }[] = []
   for (const path of documentationPages(join(REPOSITORY_ROOT, 'docs'))) {
@@ -66,6 +71,9 @@ function diagrams(): { page: string; line: number; source: string }[] {
         source: match[1] ?? '',
       })
     }
+  }
+  for (const recorded of collectFlows().diagrams) {
+    found.push({ page: `${recorded.file} (recorded: ${recorded.caption})`, line: 1, source: recorded.diagram })
   }
   return found
 }
@@ -97,7 +105,7 @@ test('⚠ every mermaid diagram in the docs parses (#188)', async () => {
 })
 
 test('the parser can fail, and the corpus is not empty (#188)', async () => {
-  // A gate that parses nothing passes: eight flow pages, six architecture blocks, two generated.
+  // A gate that parses nothing passes: the flow pages, six architecture blocks, two generated, and the recorded ones.
   expect(diagrams().length).toBeGreaterThan(12)
   const mermaid = await parser()
   // ⚠ A `parse` that accepted anything would make the test above green over the exact breakage

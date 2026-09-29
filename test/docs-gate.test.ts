@@ -3,6 +3,7 @@ import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSy
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { extractDeclaration } from '../scripts/docs/extract-declaration.ts'
+import { builtFlowPages } from '../scripts/docs/flow-pages.ts'
 import {
   detectedExceptionConstants,
   numericConstant,
@@ -334,12 +335,20 @@ test('⚠ every cited test exists with exactly that title; every flow page cites
   expect(offenders).toEqual([])
 })
 
+/**
+ * A built flow page (#482) is gitignored, so a checkout has no file until `docs:flows` runs. A
+ * link to one resolves when the generator builds that path; a link to a flow it does not build
+ * still fails, so a renamed `@flow` breaks its readers here.
+ */
+const BUILT_PAGES = new Set(builtFlowPages().map((page) => join(REPOSITORY_ROOT, page)))
+
 test('⚠ every relative link under docs/ and in README resolves to a file (#162 workstream 11)', () => {
   const offenders: string[] = []
   for (const path of [...markdownFiles(DOCS_ROOT), join(REPOSITORY_ROOT, 'README.md')]) {
     const page = path.slice(REPOSITORY_ROOT.length + 1)
     for (const link of relativeLinks(readFileSync(path, 'utf8'))) {
-      if (!existsSync(join(path, '..', link.target))) offenders.push(`${page}:${link.line}: ${link.target}`)
+      const target = join(path, '..', link.target)
+      if (!(existsSync(target) || BUILT_PAGES.has(target))) offenders.push(`${page}:${link.line}: ${link.target}`)
     }
   }
   expect(offenders).toEqual([])

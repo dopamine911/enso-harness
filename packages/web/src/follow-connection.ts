@@ -434,10 +434,12 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
 
   /**
    * Close every run the server has moved past: `RUN_FINISHED` for each, so TanStack's
-   * loading state resolves. ⚠ A run whose generation is still unknown (its receipt has
-   * not come back) or newer than the server's is NOT closed — the frames ending an
-   * EARLIER run can arrive after this tab has already opened the next one, and closing
-   * that one here would end it before it started.
+   * loading state resolves.
+   *
+   * @invariant prompt-run-settle/generation-fence A run closes only once the server has moved past its generation.
+   * A run whose generation is still unknown (its receipt has not come back) or newer than the
+   * server's is NOT closed: the frames ending an EARLIER run can arrive after this tab has
+   * already opened the next one, and closing that one here would end it before it started.
    */
   function finishRunsThrough(generation: number): void {
     for (const run of runs.values()) {
@@ -447,10 +449,14 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
   }
 
   /**
-   * The thread's status. Released (`busy: false`) is the server's statement that the run
-   * is over — the way a slash command ends, which never `settled`s (its completion is its
-   * acceptance). Busy under a generation this adapter did not send is a run another
+   * The thread's status. Busy under a generation this adapter did not send is a run another
    * client started.
+   *
+   * @invariant prompt-run-settle/two-endings Acceptance and completion are separate signals, so a run ends on either.
+   * `onAccepted` is the runtime's preflight: taken, not finished (the `ThreadRuntime` contract).
+   * One exception is deliberate: an extension command's acceptance IS its completion, so a slash
+   * prompt releases on acceptance and never `settled`s. So a released status (`busy: false`) is
+   * the server's statement that the run is over, as much as `settled` is.
    */
   function observeStatus(busy: boolean, generation: number): void {
     serverGeneration = generation

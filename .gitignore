@@ -22,3 +22,7 @@ fallow-viz.html
 site/src/content/docs/
 site/dist/
 site/.astro/
+
+# Flow pages are BUILT from tags in source and the diagrams tests record (#482):
+# `bun run docs:flows`. Edit the source; a page here is overwritten on every build.
+docs/flows/prompt-run-settle.md
