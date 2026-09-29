@@ -110,19 +110,19 @@ function blockText(line: string, first: boolean, last: boolean): string {
 /** Every `/** … *\/` block and every run of `//` lines that starts a line, in order. */
 function commentsOf(lines: readonly string[]): Comment[] {
   const comments: Comment[] = []
-  for (let index = 0; index < lines.length; index += 1) {
-    const trimmed = (lines[index] ?? '').trimStart()
-    const start = index
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const trimmed = (lines[lineIndex] ?? '').trimStart()
+    const start = lineIndex
     if (trimmed.startsWith('/*')) {
-      while (!(lines[index] ?? '').includes('*/') && index + 1 < lines.length) index += 1
+      while (!(lines[lineIndex] ?? '').includes('*/') && lineIndex + 1 < lines.length) lineIndex += 1
       const body = lines
-        .slice(start, index + 1)
+        .slice(start, lineIndex + 1)
         .map((line, at, all) => blockText(line, at === 0, at === all.length - 1))
-      comments.push({ start, end: index, style: 'block', lines: body })
+      comments.push({ start, end: lineIndex, style: 'block', lines: body })
     } else if (trimmed.startsWith('//')) {
-      while ((lines[index + 1] ?? '').trimStart().startsWith('//')) index += 1
-      const body = lines.slice(start, index + 1).map((line) => line.replace(/^\s*\/\/\s?/, ''))
-      comments.push({ start, end: index, style: 'line', lines: body })
+      while ((lines[lineIndex + 1] ?? '').trimStart().startsWith('//')) lineIndex += 1
+      const body = lines.slice(start, lineIndex + 1).map((line) => line.replace(/^\s*\/\/\s?/, ''))
+      comments.push({ start, end: lineIndex, style: 'line', lines: body })
     }
   }
   return comments
@@ -303,7 +303,7 @@ function recordedDiagrams(problems: string[]): RecordedDiagram[] {
 }
 
 function duplicates(ids: readonly string[]): string[] {
-  return [...new Set(ids.filter((id, index) => ids.indexOf(id) !== index))]
+  return [...new Set(ids.filter((tagId, position) => ids.indexOf(tagId) !== position))]
 }
 
 /** Every way the tags can disagree with each other, named by what disagrees. */
@@ -313,8 +313,10 @@ function coherence(model: Omit<FlowModel, 'problems'>): string[] {
   const pinned = new Set(model.pins.flatMap((pin) => pin.invariants))
   const recorded = new Set(model.diagrams.map((diagram) => diagram.flow))
   return [
-    ...duplicates(model.flows.map((flow) => flow.id)).map((id) => `@flow ${id} is declared twice`),
-    ...duplicates(model.invariants.map((invariant) => invariant.id)).map((id) => `@invariant ${id} is declared twice`),
+    ...duplicates(model.flows.map((flow) => flow.id)).map((flowId) => `@flow ${flowId} is declared twice`),
+    ...duplicates(model.invariants.map((invariant) => invariant.id)).map(
+      (invariantId) => `@invariant ${invariantId} is declared twice`,
+    ),
     ...model.invariants
       .filter((invariant) => !flows.has(invariant.flow))
       .map((invariant) => `${invariant.at.file}: @invariant ${invariant.id} names no @flow`),
@@ -325,8 +327,8 @@ function coherence(model: Omit<FlowModel, 'problems'>): string[] {
       ),
     ...model.pins.flatMap((pin) =>
       pin.invariants
-        .filter((id) => !invariants.has(id))
-        .map((id) => `${pin.file}: "${pin.title}" pins ${id}, which no @invariant declares`),
+        .filter((invariantId) => !invariants.has(invariantId))
+        .map((invariantId) => `${pin.file}: "${pin.title}" pins ${invariantId}, which no @invariant declares`),
     ),
     ...model.flows
       .filter((flow) => !recorded.has(flow.id))

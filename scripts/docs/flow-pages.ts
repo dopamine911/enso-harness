@@ -124,7 +124,7 @@ function statedSection(flow: FlowDeclaration, invariants: readonly Invariant[]):
   }
   note(flow.at, 'the flow')
   for (const invariant of invariants) note(invariant.at, invariant.id.split('/')[1] ?? invariant.id)
-  const symbols = [...stated.values()].map((entry) => `- ${anchorLink(entry.at)}: ${entry.what.join(', ')}`)
+  const symbols = [...stated.values()].map((statement) => `- ${anchorLink(statement.at)}: ${statement.what.join(', ')}`)
   const sees = flow.sees.map((see) => `- [${see.label}](${linkTo(see.path)})`)
   return ['## Where it is stated', '', ...symbols, ...sees, '']
 }
@@ -140,7 +140,7 @@ export function renderFlowPage(flow: FlowDeclaration, model: FlowModel): string 
     model.diagrams.filter((diagram) => diagram.flow === flow.id),
     (diagram) => diagram.file,
   )
-  const pins = model.pins.filter((pin) => pin.invariants.some((id) => id.startsWith(`${flow.id}/`)))
+  const pins = model.pins.filter((pin) => pin.invariants.some((invariantId) => invariantId.startsWith(`${flow.id}/`)))
   return [
     `# Flow: ${flow.title}`,
     '',
