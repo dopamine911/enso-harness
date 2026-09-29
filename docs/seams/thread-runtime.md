@@ -107,6 +107,17 @@ export const ThreadRuntime = Type.Object({
     Type.Function([Type.Unknown(), Type.Unknown()], Type.Void()),
   ),
   /**
+   * Fix the session's system prompt to a library prompt (#443), before its first request: the
+   * choice is recorded in the thread's log, the next request carries it, and a resume reads it
+   * back; until then another choice replaces it. `undefined` when it applied, or when the same
+   * prompt is already this session's; else the refusal's reason — a session that has already sent a
+   * request keeps the prompt it sent (a system head rewritten mid-session throws the prompt cache
+   * away). Synchronous.
+   */
+  setSystemPrompt: Type.Unsafe<(choice: EnsoSystemPromptChoice) => string | undefined>(
+    Type.Function([Type.Unknown()], Type.Unknown()),
+  ),
+  /**
    * Receive every observation of this thread (L2, #162 workstream 4): the runtime's events
    * mapped to `EnsoObservation` BELOW this seam, plus what the host itself observes — a
    * dialog it opened, an extension's error, a mode its extension persisted. Nothing of the

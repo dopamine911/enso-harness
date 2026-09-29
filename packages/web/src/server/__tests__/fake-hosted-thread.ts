@@ -10,6 +10,7 @@ import type {
   EnsoPermissionModeState,
   EnsoRecordedModel,
   EnsoSessionUsage,
+  EnsoSystemPromptChoice,
   EnsoTranscriptEntry,
   HostFlowOutcome,
   PromptOutcome,
@@ -23,6 +24,7 @@ import type { BranchStats } from '../../host/branch-stats.ts'
 import { createEventTail, describeObservation } from '../../host/event-tail.ts'
 import { decideHostCommand, HOST_VIEW_ROWS, HostCommandRefused, hostCommandRows } from '../../host/host-commands.ts'
 import { compactDoneText, decideHostFlow, hostFlowRows, loginDoneText, logoutDoneText } from '../../host/host-flows.ts'
+import { decideSystemPrompt } from '../../host/system-prompt.ts'
 
 /**
  * The one fake of the thread-runtime seam (#178; `docs/seams/thread-runtime.md`): a
@@ -104,6 +106,8 @@ export interface FakeThreadRecord {
   sessionUsage: EnsoSessionUsage
   /** How many continues the server asked for (#436); the default accepts each and runs nothing. */
   continues: number
+  /** The system prompt the server fixed (#443); `undefined` is pi's default. */
+  systemPrompt: EnsoSystemPromptChoice | undefined
   aborts: number
   queueClears: number
   disposed: number
@@ -158,6 +162,7 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
     aborts: 0,
     queueClears: 0,
     continues: 0,
+    systemPrompt: undefined,
     disposed: 0,
     queue: { interrupting: [], enqueued: [] },
   }
@@ -248,6 +253,13 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
       record.flows.push(entry)
     },
     permissionModeState: () => ({ mode: 'default', available: ['default'] }),
+    setSystemPrompt: (choice: EnsoSystemPromptChoice) => {
+      // The real host's rule (#443), over the fake's record: a prompt sent is a request sent.
+      const decision = decideSystemPrompt(record.systemPrompt, choice, record.prompts.length > 0)
+      if (decision.kind === 'refused') return decision.reason
+      record.systemPrompt = choice
+      return undefined
+    },
     setPermissionMode: (mode: string, outcome: PromptOutcome) => {
       // What the real host does: the vendor's command is accepted (an extension command's
       // acceptance is its completion) and the change comes back as `permission_mode`.

@@ -46,6 +46,13 @@ import { MAX_LOG_BODY_BYTES, receiveBrowserLogs } from './logs-route.ts'
 import { createLogStatsRoute } from './logs-stats-route.ts'
 import { followLogTail, type LogTailRouteDeps } from './logs-tail-route.ts'
 import { createProjectRegistry, ProjectUnavailable } from './projects.ts'
+import {
+  createPromptLibrary,
+  NO_PROMPT_LIBRARY,
+  type PromptLibrary,
+  readPromptWriteBody,
+  type SystemPromptPick,
+} from './prompt-library.ts'
 import { SSE_KEEPALIVE_MS } from './sse.ts'
 import { createContextRequestRoute, createThreadContextRoute } from './thread-context-route.ts'
 import { createThreadEvalRoute } from './thread-eval-route.ts'
@@ -87,6 +94,14 @@ const THREAD_CONFIGURE_ROUTE = /^\/api\/threads\/([^/?#]+)\/configure$/
 const THREAD_FORK_ROUTE = /^\/api\/threads\/([^/?#]+)\/fork$/
 /** `POST …/continue` (#436): continue a torn thread from its stored state — no new prompt. */
 const THREAD_CONTINUE_ROUTE = /^\/api\/threads\/([^/?#]+)\/continue$/
+/**
+ * `/api/prompts/<id>` (#443) — a library prompt; the id is its file name, so it needs no decoding. One
+ * constant per method, as the routes reference reads them: `GET` reads it, `PUT` writes it whole,
+ * `DELETE` removes it.
+ */
+const PROMPT_READ_ROUTE = /^\/api\/prompts\/([a-z0-9][a-z0-9-]{0,63})$/
+const PROMPT_WRITE_ROUTE = /^\/api\/prompts\/([a-z0-9][a-z0-9-]{0,63})$/
+const PROMPT_DELETE_ROUTE = /^\/api\/prompts\/([a-z0-9][a-z0-9-]{0,63})$/
 /** `DELETE /api/projects/<projectId>` (#395) — the id is sixteen hex digits, so it needs no decoding. */
 const PROJECT_ROUTE = /^\/api\/projects\/([0-9a-f]{16})$/
 
@@ -106,6 +121,8 @@ const DEFAULT_PORT = 5179
 const LOOPBACK_ONLY = '127.0.0.1'
 /** A dialog answer is an id and a short value — kilobytes, not megabytes. */
 const MAX_DIALOG_BODY_BYTES = 64 * 1024
+/** A library prompt is a system prompt at most — a few hundred kilobytes is already most of a context window. */
+const MAX_PROMPT_BODY_BYTES = 512 * 1024
 
 /**
  * Is this `Host`/`Origin` authority the machine itself? Port is irrelevant (either dev
@@ -264,6 +281,8 @@ export interface EnsoServerOptions {
   projectsConfigPath?: string
   /** Where registrations are kept (`.enso/projects.json`); absent, they last as long as the process (tests). */
   projectsStatePath?: string
+  /** The prompt library's directory (`ENSO_HOME/prompts`, #443); absent, the server has none and says so. */
+  promptsDir?: string
   /**
    * The Enso pi package directory, loaded as the ONLY extension source.
    *
@@ -380,6 +399,12 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
       return hosted
     },
   })
+  const prompts: PromptLibrary | undefined =
+    options.promptsDir === undefined ? undefined : createPromptLibrary(options.promptsDir)
+  /** A library prompt as a session's system prompt, or why not — the configure route's first step (#443). */
+  function pickSystemPrompt(id: string): SystemPromptPick {
+    return prompts === undefined ? { kind: 'refused', reason: NO_PROMPT_LIBRARY } : prompts.pickSystemPrompt(id)
+  }
   /** The one live-or-cold read (#214), shared with the follow route's snapshot. */
   const threadRead: ThreadReadDeps = { threads, host, projects }
 
@@ -982,7 +1007,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
       parse: readConfigureBody,
     })
     if (configuration === undefined) return
-    const outcome = await configureThread(followDeps, threadId, configuration)
+    const outcome = await configureThread(followDeps, threadId, configuration, pickSystemPrompt)
     if (outcome.status === 409) {
       log.warn('configure refused (409): {reason}', { threadId, reason: outcome.reason })
       refuseWith(response, outcome)
@@ -1126,6 +1151,100 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   }
 
   /**
+   * `PUT /api/prompts/:id` (#443): write a library prompt whole, created or replaced; the answer is
+   * the file as read back, so a page never shows fields the file does not hold.
+   */
+  async function respondToPromptWrite(
+    library: PromptLibrary,
+    id: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> {
+    const fields = await readJsonBody(request, response, {
+      maxBytes: MAX_PROMPT_BODY_BYTES,
+      capText: `a library prompt is at most ${MAX_PROMPT_BODY_BYTES} bytes`,
+      parse: readPromptWriteBody,
+    })
+    if (fields === undefined) return
+    const read = library.write(id, fields)
+    if (read.kind !== 'prompt') {
+      log.error('prompt {id} did not read back after its write: {read}', { id, read })
+      refuseWith(response, { status: 500, reason: `${id}.md was written but does not read back as a prompt` })
+      return
+    }
+    response.writeHead(200, { 'Content-Type': 'application/json' })
+    response.end(JSON.stringify(read.prompt))
+  }
+
+  /** `GET /api/prompts/:id`: the prompt, 404 when there is no such file, 422 naming why a file is refused. */
+  function respondWithPrompt(library: PromptLibrary, id: string, response: ServerResponse): void {
+    const read = library.read(id)
+    if (read.kind === 'missing') {
+      refuseWith(response, { status: 404, reason: `no prompt ${id} in ${library.directory}` })
+      return
+    }
+    if (read.kind === 'refused') {
+      refuseWith(response, { status: 422, reason: read.reason })
+      return
+    }
+    response.writeHead(200, { 'Content-Type': 'application/json' })
+    response.end(JSON.stringify(read.prompt))
+  }
+
+  /** `GET /api/prompts`: the library's prompts, and every file it refused, by name. */
+  function respondWithPrompts(library: PromptLibrary, response: ServerResponse): void {
+    response.writeHead(200, { 'Content-Type': 'application/json' })
+    response.end(JSON.stringify(library.list()))
+  }
+
+  /** `DELETE /api/prompts/:id`: 204, or 404 when there was no such file. A thread that ran it keeps its own copy. */
+  function respondToPromptRemoval(library: PromptLibrary, id: string, response: ServerResponse): void {
+    if (!library.remove(id)) {
+      refuseWith(response, { status: 404, reason: `no prompt ${id} in ${library.directory}` })
+      return
+    }
+    response.writeHead(204)
+    response.end()
+  }
+
+  /** A library route's work, answered or failed: a disk that throws is a 500, never a throw with nothing above it. */
+  function withLibrary(
+    request: IncomingMessage,
+    response: ServerResponse,
+    work: (library: PromptLibrary) => void | Promise<void>,
+  ): true {
+    if (prompts === undefined) {
+      endAndClose(request, response, 404, NO_PROMPT_LIBRARY)
+      return true
+    }
+    answerOrFail(
+      Promise.resolve().then(() => work(prompts)),
+      response,
+    )
+    return true
+  }
+
+  /** True when the request was a prompt-library route (#443). */
+  function dispatchPromptRoute(request: IncomingMessage, response: ServerResponse): boolean {
+    const url = request.url ?? ''
+    if (request.method === 'GET' && url === '/api/prompts') {
+      return withLibrary(request, response, (library) => respondWithPrompts(library, response))
+    }
+    const read = request.method === 'GET' ? PROMPT_READ_ROUTE.exec(url)?.[1] : undefined
+    if (read !== undefined)
+      return withLibrary(request, response, (library) => respondWithPrompt(library, read, response))
+    const written = request.method === 'PUT' ? PROMPT_WRITE_ROUTE.exec(url)?.[1] : undefined
+    if (written !== undefined) {
+      return withLibrary(request, response, (library) => respondToPromptWrite(library, written, request, response))
+    }
+    const removed = request.method === 'DELETE' ? PROMPT_DELETE_ROUTE.exec(url)?.[1] : undefined
+    if (removed !== undefined) {
+      return withLibrary(request, response, (library) => respondToPromptRemoval(library, removed, response))
+    }
+    return false
+  }
+
+  /**
    * The one check that stands between a page the operator happens to visit and an agent
    * with unconfined `bash` in their tree.
    *
@@ -1240,6 +1359,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     }
     if (dispatchLiteralRoute(request, response)) return
     if (dispatchProjectRoute(request, response)) return
+    if (dispatchPromptRoute(request, response)) return
     if (dispatchThreadRoute(request, response)) return
     response.writeHead(404, { 'Content-Type': 'text/plain' })
     response.end('not found')

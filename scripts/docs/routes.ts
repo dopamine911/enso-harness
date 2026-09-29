@@ -18,7 +18,7 @@ const LOGS_TAIL_PATH = 'packages/web/src/server/logs-tail-route.ts'
 const LOGS_STATS_PATH = 'packages/web/src/server/logs-stats-route.ts'
 
 interface RouteMetadata {
-  readonly method: 'GET' | 'POST' | 'DELETE'
+  readonly method: 'GET' | 'POST' | 'PUT' | 'DELETE'
   readonly path: string
   readonly handler: string
   readonly input: string
@@ -180,10 +180,10 @@ const REGEX_ROUTE_METADATA: Record<string, RouteMetadata> = {
     path: '/api/threads/:threadId/configure',
     handler: 'respondToConfigure → configureThread',
     input:
-      'path: `threadId`; body: `EnsoSessionConfiguration` — optional `model` (`provider/id`), `thinking` (a level that model supports) and `mode`; applied in that order under one lease, a value equal to the current one left alone',
+      "path: `threadId`; body: `EnsoSessionConfiguration` — optional `systemPrompt` (a library prompt id, `system` or `append`; absent is pi's default), `model` (`provider/id`), `thinking` (a level that model supports) and `mode`; applied in that order under one lease, a value equal to the current one left alone",
     success: '204 empty — every step applied (the changes arrive on the follow as `model` and `permission-mode`)',
     errors:
-      '400 malformed id/body; 403 untrusted origin; 409 thread busy; 413 body too large; 422 JSON `EnsoConfigurationRefusal` — the step that refused (`model`, `thinking`, `mode`) and the reason, the steps before it applied; 500 handler failure',
+      '400 malformed id/body; 403 untrusted origin; 409 thread busy; 413 body too large; 422 JSON `EnsoConfigurationRefusal` — the step that refused (`systemPrompt`, `model`, `thinking`, `mode`) and the reason, the steps before it applied — a system prompt is refused by name when its file is missing, unreadable or unparseable, a session prompt, or empty, or the session already sent a request (before it, a new choice replaces the last); 500 handler failure',
     routeClass: 'control',
     builds: 'yes',
     logs: 'yes',
@@ -216,6 +216,44 @@ const REGEX_ROUTE_METADATA: Record<string, RouteMetadata> = {
     builds: 'yes',
     logs: 'yes',
     factory: { path: FOLLOW_PATH, declaration: 'export async function continueThread' },
+  },
+  PROMPT_READ_ROUTE: {
+    method: 'GET',
+    path: '/api/prompts/:id',
+    handler: 'respondWithPrompt → PromptLibrary.read',
+    input: 'path: `id` — the file name under `ENSO_HOME/prompts` without `.md`, lowercase words joined by hyphens',
+    success:
+      "200 `EnsoLibraryPrompt` JSON — its frontmatter fields, its body, the file's bytes and the body's estimated tokens",
+    errors:
+      '403 untrusted origin; 404 no such file, or a server started without a library; 422 the file is refused, with the reason naming it — unreadable, no frontmatter, an unknown key, no name, a category that is not system, append or session; 500 handler failure',
+    routeClass: 'observation',
+    builds: 'no',
+    logs: 'no',
+  },
+  PROMPT_WRITE_ROUTE: {
+    method: 'PUT',
+    path: '/api/prompts/:id',
+    handler: 'respondToPromptWrite → PromptLibrary.write',
+    input:
+      'path: `id`; body: `EnsoLibraryPromptWrite` — `name`, `description`, `category` (system, append or session) and the markdown `body`',
+    success:
+      '200 `EnsoLibraryPrompt` JSON — the file as read back after it was written whole (staged, then renamed over)',
+    errors:
+      '400 malformed body; 403 untrusted origin; 404 a server started without a library; 413 body too large; 500 the file does not read back, or a disk failure',
+    routeClass: 'control',
+    builds: 'no',
+    logs: 'yes',
+  },
+  PROMPT_DELETE_ROUTE: {
+    method: 'DELETE',
+    path: '/api/prompts/:id',
+    handler: 'respondToPromptRemoval → PromptLibrary.remove',
+    input: 'path: `id`',
+    success: '204 empty — the file is gone; a thread that ran it keeps the text its log recorded',
+    errors: '403 untrusted origin; 404 no such file, or a server started without a library; 500 handler failure',
+    routeClass: 'control',
+    builds: 'no',
+    logs: 'yes',
   },
   PROJECT_ROUTE: {
     method: 'DELETE',
@@ -260,6 +298,12 @@ const LITERAL_ROUTE_METADATA: Record<string, Omit<RouteMetadata, 'method' | 'pat
     handler: 'respondWithStoredThreads',
     success: '200 `EnsoStoredThread[]` JSON',
     errors: '403 untrusted origin; 500 handler failure',
+  }),
+  'GET /api/prompts': literalRead({
+    handler: 'respondWithPrompts → PromptLibrary.list',
+    success:
+      "200 `EnsoLibraryPromptListing` JSON — the library's prompts by name without their bodies, each with its bytes and estimated tokens, and every `.md` file it refused, with the reason naming it",
+    errors: '403 untrusted origin; 404 a server started without a library; 500 handler failure',
   }),
   'GET /api/projects': literalRead({
     handler: 'respondWithProjects',
@@ -329,7 +373,7 @@ const LITERAL_ROUTE_METADATA: Record<string, Omit<RouteMetadata, 'method' | 'pat
 
 interface DetectedRoute {
   readonly key: string
-  readonly method: 'GET' | 'POST' | 'DELETE'
+  readonly method: 'GET' | 'POST' | 'PUT' | 'DELETE'
   readonly path: string
   readonly line: number
   readonly kind: 'regex' | 'literal'

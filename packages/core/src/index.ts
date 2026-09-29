@@ -165,6 +165,25 @@ export {
   isEnsoProjectId,
 } from './project.ts'
 export {
+  ENSO_SYSTEM_PROMPT_ENTRY,
+  EnsoLibraryPrompt,
+  EnsoLibraryPromptCategory,
+  EnsoLibraryPromptListing,
+  EnsoLibraryPromptRefusal,
+  EnsoLibraryPromptSummary,
+  EnsoLibraryPromptWrite,
+  EnsoSystemPromptChoice,
+  EnsoSystemPromptMode,
+  estimateTextTokens,
+  isLibraryPromptId,
+  type LibraryPromptParse,
+  parseLibraryPrompt,
+  readEnsoSystemPromptChoice,
+  serializeLibraryPrompt,
+  summarizeLibraryPrompt,
+  utf8Bytes,
+} from './prompt-library.ts'
+export {
   ENSO_PROVIDER_REFUSAL_KEY,
   EnsoProviderRefusal,
   EnsoProviderRetry,

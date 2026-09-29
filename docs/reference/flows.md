@@ -5,13 +5,15 @@ Every node below is read out of the source the flow runs through — the route t
 
 ## Control plane
 
-The 10 control routes: what the browser can ask the runtime to do. Observation routes are the next diagram's first stage rather than a second copy of it.
+The 12 control routes: what the browser can ask the runtime to do. Observation routes are the next diagram's first stage rather than a second copy of it.
 
 ```mermaid
 flowchart LR
   Browser["Browser"]
   Browser -->|POST /api/projects| R_POST_api_projects["respondToProjectRegistration → ProjectRegistry.register"]
   Browser -->|DELETE /api/projects/:projectId| R_DELETE_api_projects_projectId["respondToProjectRemoval → ProjectRegistry.remove"]
+  Browser -->|DELETE /api/prompts/:id| R_DELETE_api_prompts_id["respondToPromptRemoval → PromptLibrary.remove"]
+  Browser -->|PUT /api/prompts/:id| R_PUT_api_prompts_id["respondToPromptWrite → PromptLibrary.write"]
   Browser -->|POST /api/threads/:threadId/abort| R_POST_api_threads_threadId_abort["respondToAbort → abortThread"]
   R_POST_api_threads_threadId_abort --> H_respondToAbort_abortThread["abortThread()"]
   H_respondToAbort_abortThread --> Runtime
@@ -38,16 +40,18 @@ flowchart LR
 
 | Node | Contract | Input | Source |
 |---|---|---|---|
-| `respondToProjectRegistration → ProjectRegistry.register` | [`POST /api/projects`](./routes.md) | body: `EnsoProjectRegistration` — an absolute `path` strictly under a root the ENSO_HOME config declares (`projects.roots`), optional `title` | [`packages/web/src/server/index.ts:1114`](../../packages/web/src/server/index.ts#L1114) |
-| `respondToProjectRemoval → ProjectRegistry.remove` | [`DELETE /api/projects/:projectId`](./routes.md) | path: `projectId` (sixteen hex digits) | [`packages/web/src/server/index.ts:91`](../../packages/web/src/server/index.ts#L91) |
-| `respondToAbort → abortThread` | [`POST /api/threads/:threadId/abort`](./routes.md) | path: `threadId`; no body | [`packages/web/src/server/index.ts:79`](../../packages/web/src/server/index.ts#L79)<br>[`packages/web/src/server/follow.ts:807`](../../packages/web/src/server/follow.ts#L807) |
-| `respondToHostCommand → runHostCommand` | [`POST /api/threads/:threadId/command`](./routes.md) | path: `threadId`; body: `EnsoHostCommandRun` — `model` with `provider/id`, `thinking` with a level, `login` with `provider/authType`, `logout` with a provider, `compact` with nothing; a `view` row (`context`, `fork`) is the page's to do, never run | [`packages/web/src/server/index.ts:83`](../../packages/web/src/server/index.ts#L83) |
-| `respondToConfigure → configureThread` | [`POST /api/threads/:threadId/configure`](./routes.md) | path: `threadId`; body: `EnsoSessionConfiguration` — optional `model` (`provider/id`), `thinking` (a level that model supports) and `mode`; applied in that order under one lease, a value equal to the current one left alone | [`packages/web/src/server/index.ts:85`](../../packages/web/src/server/index.ts#L85) |
-| `respondToContinue → continueThread → ThreadRuntime.continueRun` | [`POST /api/threads/:threadId/continue`](./routes.md) | path: `threadId`; no body | [`packages/web/src/server/index.ts:89`](../../packages/web/src/server/index.ts#L89)<br>[`packages/web/src/server/follow.ts:388`](../../packages/web/src/server/follow.ts#L388) |
-| `respondToDialog → answerThreadDialog` | [`POST /api/threads/:threadId/dialog`](./routes.md) | path: `threadId`; body: `DialogAnswer` | [`packages/web/src/server/index.ts:78`](../../packages/web/src/server/index.ts#L78)<br>[`packages/web/src/server/follow.ts:466`](../../packages/web/src/server/follow.ts#L466) |
-| `respondToFork → forkThreadAt → AgentHost.forkThread` | [`POST /api/threads/:threadId/fork`](./routes.md) | path: `threadId`; body: `EnsoForkRequest` — `entryId`, the pi entry id of one of the thread's user messages; the fork is pi's `/fork` at position `before`, taken from the session file | [`packages/web/src/server/index.ts:87`](../../packages/web/src/server/index.ts#L87)<br>[`packages/web/src/server/follow.ts:779`](../../packages/web/src/server/follow.ts#L779) |
-| `respondToModeChange → changeThreadMode` | [`POST /api/threads/:threadId/mode`](./routes.md) | path: `threadId`; body: `EnsoPermissionModeChange` | [`packages/web/src/server/index.ts:81`](../../packages/web/src/server/index.ts#L81)<br>[`packages/web/src/server/follow.ts:502`](../../packages/web/src/server/follow.ts#L502) |
-| `respondToPrompt → promptThread` | [`POST /api/threads/:threadId/prompt`](./routes.md) | path: `threadId`; body: `EnsoPromptBody` | [`packages/web/src/server/index.ts:77`](../../packages/web/src/server/index.ts#L77)<br>[`packages/web/src/server/follow.ts:284`](../../packages/web/src/server/follow.ts#L284) |
+| `respondToProjectRegistration → ProjectRegistry.register` | [`POST /api/projects`](./routes.md) | body: `EnsoProjectRegistration` — an absolute `path` strictly under a root the ENSO_HOME config declares (`projects.roots`), optional `title` | [`packages/web/src/server/index.ts:1139`](../../packages/web/src/server/index.ts#L1139) |
+| `respondToProjectRemoval → ProjectRegistry.remove` | [`DELETE /api/projects/:projectId`](./routes.md) | path: `projectId` (sixteen hex digits) | [`packages/web/src/server/index.ts:106`](../../packages/web/src/server/index.ts#L106) |
+| `respondToPromptRemoval → PromptLibrary.remove` | [`DELETE /api/prompts/:id`](./routes.md) | path: `id` | [`packages/web/src/server/index.ts:104`](../../packages/web/src/server/index.ts#L104) |
+| `respondToPromptWrite → PromptLibrary.write` | [`PUT /api/prompts/:id`](./routes.md) | path: `id`; body: `EnsoLibraryPromptWrite` — `name`, `description`, `category` (system, append or session) and the markdown `body` | [`packages/web/src/server/index.ts:103`](../../packages/web/src/server/index.ts#L103) |
+| `respondToAbort → abortThread` | [`POST /api/threads/:threadId/abort`](./routes.md) | path: `threadId`; no body | [`packages/web/src/server/index.ts:86`](../../packages/web/src/server/index.ts#L86)<br>[`packages/web/src/server/follow.ts:827`](../../packages/web/src/server/follow.ts#L827) |
+| `respondToHostCommand → runHostCommand` | [`POST /api/threads/:threadId/command`](./routes.md) | path: `threadId`; body: `EnsoHostCommandRun` — `model` with `provider/id`, `thinking` with a level, `login` with `provider/authType`, `logout` with a provider, `compact` with nothing; a `view` row (`context`, `fork`) is the page's to do, never run | [`packages/web/src/server/index.ts:90`](../../packages/web/src/server/index.ts#L90) |
+| `respondToConfigure → configureThread` | [`POST /api/threads/:threadId/configure`](./routes.md) | path: `threadId`; body: `EnsoSessionConfiguration` — optional `systemPrompt` (a library prompt id, `system` or `append`; absent is pi's default), `model` (`provider/id`), `thinking` (a level that model supports) and `mode`; applied in that order under one lease, a value equal to the current one left alone | [`packages/web/src/server/index.ts:92`](../../packages/web/src/server/index.ts#L92) |
+| `respondToContinue → continueThread → ThreadRuntime.continueRun` | [`POST /api/threads/:threadId/continue`](./routes.md) | path: `threadId`; no body | [`packages/web/src/server/index.ts:96`](../../packages/web/src/server/index.ts#L96)<br>[`packages/web/src/server/follow.ts:389`](../../packages/web/src/server/follow.ts#L389) |
+| `respondToDialog → answerThreadDialog` | [`POST /api/threads/:threadId/dialog`](./routes.md) | path: `threadId`; body: `DialogAnswer` | [`packages/web/src/server/index.ts:85`](../../packages/web/src/server/index.ts#L85)<br>[`packages/web/src/server/follow.ts:467`](../../packages/web/src/server/follow.ts#L467) |
+| `respondToFork → forkThreadAt → AgentHost.forkThread` | [`POST /api/threads/:threadId/fork`](./routes.md) | path: `threadId`; body: `EnsoForkRequest` — `entryId`, the pi entry id of one of the thread's user messages; the fork is pi's `/fork` at position `before`, taken from the session file | [`packages/web/src/server/index.ts:94`](../../packages/web/src/server/index.ts#L94)<br>[`packages/web/src/server/follow.ts:799`](../../packages/web/src/server/follow.ts#L799) |
+| `respondToModeChange → changeThreadMode` | [`POST /api/threads/:threadId/mode`](./routes.md) | path: `threadId`; body: `EnsoPermissionModeChange` | [`packages/web/src/server/index.ts:88`](../../packages/web/src/server/index.ts#L88)<br>[`packages/web/src/server/follow.ts:503`](../../packages/web/src/server/follow.ts#L503) |
+| `respondToPrompt → promptThread` | [`POST /api/threads/:threadId/prompt`](./routes.md) | path: `threadId`; body: `EnsoPromptBody` | [`packages/web/src/server/index.ts:84`](../../packages/web/src/server/index.ts#L84)<br>[`packages/web/src/server/follow.ts:285`](../../packages/web/src/server/follow.ts#L285) |
 
 ## Observation pipeline
 
@@ -69,7 +73,7 @@ flowchart LR
 |---|---|---|
 | `mapPiEvent (22 kinds)` | [Observations](./observations.md) | [`packages/web/src/host/map-events.ts:283`](../../packages/web/src/host/map-events.ts#L283) |
 | `EnsoObservation` | [Core exports](./core-exports.md) | [`packages/core/src/observation.ts:583`](../../packages/core/src/observation.ts#L583) |
-| `observation frame` | [Observations](./observations.md) | [`packages/web/src/server/follow.ts:190`](../../packages/web/src/server/follow.ts#L190) |
+| `observation frame` | [Observations](./observations.md) | [`packages/web/src/server/follow.ts:191`](../../packages/web/src/server/follow.ts#L191) |
 | `follow connection` | [Routes](./routes.md) | [`packages/web/src/follow-connection.ts:480`](../../packages/web/src/follow-connection.ts#L480) |
 | `to-agui chunk` | [Observations](./observations.md) | [`packages/web/src/to-agui.ts:76`](../../packages/web/src/to-agui.ts#L76) |
 | `custom event router` | [Observations](./observations.md) | [`packages/web/src/custom-event-router.ts:209`](../../packages/web/src/custom-event-router.ts#L209) |

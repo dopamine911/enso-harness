@@ -8,6 +8,7 @@ import {
   type EnsoContextElement,
   type EnsoContextImage,
   type EnsoContextMakeup,
+  estimateTextTokens,
   summarizeToolInput,
 } from '@enso/core'
 import { contentToText } from './map-events.ts'
@@ -32,7 +33,9 @@ import { contentToText } from './map-events.ts'
  * The head's elements: its instructions (`system`), each section — pi's own (`preamble`,
  * `tools`, `rules`, `docs`, `cwd`, `buildSystemPromptSections`) `system`, any other `injected` —
  * and each tool definition (`tools`). Each is priced as pi prices text, characters over four
- * rounded up; every other message is ONE element, priced by pi's `estimateTokens`.
+ * rounded up — `@enso/core`'s `estimateTextTokens`, the one the prompt library's sizes use (#443),
+ * so an editor and this tab cannot disagree about the same text; every other message is ONE
+ * element, priced by pi's `estimateTokens`.
  */
 
 // pi-coding-agent does not re-export pi-agent-core's `AgentMessage`; the projection's entry type,
@@ -73,8 +76,6 @@ const CATEGORY_OF_ROLE: Readonly<Record<string, EnsoContextCategory>> = {
 
 const LABEL_MAX = 80
 const REPLY_MAX = 120
-
-const tokensOf = (characters: number): number => Math.ceil(characters / 4)
 
 /** The first line of `text`, clipped — a row and a brief line are one line. */
 function firstLine(text: string, maximum: number = LABEL_MAX): string {
@@ -129,7 +130,7 @@ function replay(replayed: ReplayedSystem, { message, at }: SystemSource): void {
 
 /** A folded text element: priced as pi prices text. */
 function textItem(key: string, category: EnsoContextCategory, source: ItemSource & { text: string }): ContextItem {
-  return { key: `${SYSTEM_KEY}:${key}`, category, tokens: tokensOf(source.text.length), source }
+  return { key: `${SYSTEM_KEY}:${key}`, category, tokens: estimateTextTokens(source.text), source }
 }
 
 /**
@@ -158,7 +159,7 @@ export function foldSystem(sources: readonly SystemSource[]): SystemItem[] {
     const item: ContextItem = {
       key: `${SYSTEM_KEY}:tool:${toolName}`,
       category: 'tools',
-      tokens: tokensOf(JSON.stringify(tool).length),
+      tokens: estimateTextTokens(JSON.stringify(tool)),
       source: { kind: 'tool', tool },
     }
     folded.push({ item, at })

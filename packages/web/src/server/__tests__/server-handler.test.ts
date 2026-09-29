@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -16,6 +17,7 @@ import {
   EnsoThreadInspection,
   EnsoThreadSummary,
   type EnsoTranscriptEntry,
+  estimateTextTokens,
   type PromptOutcome,
   type PromptRequest,
   type ThreadRuntime,
@@ -31,6 +33,7 @@ import {
 } from '../../host/agent-host.ts'
 import { transcriptOf } from '../../host/transcript.ts'
 import { startEnsoServer } from '../index.ts'
+import { NO_PROMPT_LIBRARY } from '../prompt-library.ts'
 import {
   createFakeAgentHost,
   createFakeHostedThread,
@@ -189,8 +192,11 @@ async function startWith(
   stored: Record<string, FakeStoredThread> = {},
   /** Wrap the fake host — a test that needs something to happen mid-read replaces one method. */
   wrapHost: (host: AgentHost) => AgentHost = (host: AgentHost) => host,
-  /** Where a page may register projects (#395); none, so only the launch directory, when absent. */
-  projectRoots: readonly string[] = [],
+  /**
+   * Where a page may register projects (#395) — none, so only the launch directory, when absent —
+   * and the prompt library's directory (#443) — absent, the server has none.
+   */
+  { projectRoots = [], promptsDir }: { readonly projectRoots?: readonly string[]; readonly promptsDir?: string } = {},
 ): Promise<{ url: string; built: FakeThreadRecord[]; requested: string[]; builtIn: string[] }> {
   // The fake is made before the server, whose projects' rule it must apply — bound when the server asks.
   let servesDirectory: (directory: string) => boolean = () => false
@@ -200,6 +206,7 @@ async function startWith(
   const started = startEnsoServer({
     cwd: tmpdir(),
     projectRoots,
+    ...(promptsDir === undefined ? {} : { promptsDir }),
     harnessPackageDir: emptyHarnessDir(),
     agentDir: mkdtempSync(join(tmpdir(), 'enso-handler-agent-')),
     logsDir: mkdtempSync(join(tmpdir(), 'enso-logs-')),
@@ -486,7 +493,7 @@ async function registeredProject(url: string, path: string): Promise<EnsoProject
 // The named project differs from the launch directory on purpose, so the precedence is what is pinned.
 test("a follow's snapshot names where the thread runs: its project's directory before a session, the session's own after", async () => {
   const { root, app } = projectRoot()
-  const { url, builtIn } = await startWith(settlesAtOnce, {}, undefined, [root])
+  const { url, builtIn } = await startWith(settlesAtOnce, {}, undefined, { projectRoots: [root] })
   const project = await registeredProject(url, app)
   const naming = { [ENSO_PROJECT_HEADER]: project.projectId }
 
@@ -512,7 +519,7 @@ test("a follow's snapshot names where the thread runs: its project's directory b
 // not registered — nothing is built for it.
 test('⚠ projects: registered under a root or refused with the reason; an unregistered id on a thread is a 400 and builds nothing', async () => {
   const { root, app } = projectRoot()
-  const { url, requested } = await startWith(settlesAtOnce, {}, undefined, [root])
+  const { url, requested } = await startWith(settlesAtOnce, {}, undefined, { projectRoots: [root] })
   const launchOnly: unknown = await (await fetch(`${url}/api/projects`)).json()
   expect(launchOnly).toEqual([expect.objectContaining({ launch: true, path: realpathSync(tmpdir()), status: 'ok' })])
 
@@ -549,7 +556,7 @@ test('stored threads are listed and read only in a project, each under its own; 
     settlesAtOnce,
     { inLaunch: stored(tmpdir()), inApp: stored(app), elsewhere: stored('/somewhere/else') },
     undefined,
-    [root],
+    { projectRoots: [root] },
   )
   const project = await registeredProject(url, app)
   const launch = ((await (await fetch(`${url}/api/projects`)).json()) as EnsoProject[])[0]
@@ -577,7 +584,7 @@ test('stored threads are listed and read only in a project, each under its own; 
 // build — so it ends with the project, or a page still showing it could go on prompting it there.
 test('⚠ removing a project is refused while one of its threads runs, and the project stays', async () => {
   const { root, app } = projectRoot()
-  const { url } = await startWith(asksAndWaits, {}, undefined, [root])
+  const { url } = await startWith(asksAndWaits, {}, undefined, { projectRoots: [root] })
   const project = await registeredProject(url, app)
   await prompt(url, 'busy', '/mode', { [ENSO_PROJECT_HEADER]: project.projectId })
   const refused = await fetch(`${url}/api/projects/${project.projectId}`, { method: 'DELETE' })
@@ -589,7 +596,7 @@ test('⚠ removing a project is refused while one of its threads runs, and the p
 
 test('⚠ removing a project ends its idle live threads, and nothing is built for them in the removed directory', async () => {
   const { root, app } = projectRoot()
-  const { url, requested } = await startWith(settlesAtOnce, {}, undefined, [root])
+  const { url, requested } = await startWith(settlesAtOnce, {}, undefined, { projectRoots: [root] })
   const project = await registeredProject(url, app)
   const naming = { [ENSO_PROJECT_HEADER]: project.projectId }
   expect(await prompt(url, 't1', 'hello', naming)).toBe(202)
@@ -608,7 +615,7 @@ test('⚠ removing a project ends its idle live threads, and nothing is built fo
 test('⚠ a claim naming a removed project does not block resuming a thread that has a session', async () => {
   const { root, app } = projectRoot()
   const old: FakeStoredThread = { transcript: [], modified: new Date('2026-09-24T00:00:00.000Z'), firstMessage: 'old' }
-  const { url, requested, builtIn } = await startWith(settlesAtOnce, { old }, undefined, [root])
+  const { url, requested, builtIn } = await startWith(settlesAtOnce, { old }, undefined, { projectRoots: [root] })
   const project = await registeredProject(url, app)
   const history = await fetch(`${url}/api/threads/old/history`, {
     headers: { [ENSO_PROJECT_HEADER]: project.projectId },
@@ -625,7 +632,7 @@ test('⚠ a claim naming a removed project does not block resuming a thread that
 // and its prompt is a 409 with the reason — a refusal the server decided, not a failed request.
 test('⚠ a new thread whose project was removed shows no directory, and its prompt is refused with the reason (409)', async () => {
   const { root, app } = projectRoot()
-  const { url, builtIn } = await startWith(settlesAtOnce, {}, undefined, [root])
+  const { url, builtIn } = await startWith(settlesAtOnce, {}, undefined, { projectRoots: [root] })
   const project = await registeredProject(url, app)
   const named = new AbortController()
   openFollows.push(named)
@@ -679,7 +686,7 @@ test('⚠ a request naming a different project for a thread already named is a 4
   const { root, app } = projectRoot()
   const other = join(root, 'other')
   mkdirSync(other)
-  const { url, requested } = await startWith(settlesAtOnce, {}, undefined, [root])
+  const { url, requested } = await startWith(settlesAtOnce, {}, undefined, { projectRoots: [root] })
   const appProject = await registeredProject(url, app)
   const otherProject = await registeredProject(url, other)
   const follow = new AbortController()
@@ -1323,4 +1330,136 @@ test('⚠ POST …/configure applies model, effort, mode in order and names the 
 
   // Only the three settings, and nothing else, is a configuration.
   expect((await configure({ model: 'fake/fake-1', prompt: 'hi' })).status).toBe(400)
+})
+
+// ── #443: the prompt library — files under ENSO_HOME/prompts, and a session's system prompt from it.
+
+const REVIEWER = {
+  name: 'Reviewer',
+  description: 'Reads diffs',
+  category: 'system',
+  body: '# Reviewer\nSay what breaks.',
+}
+
+async function library(): Promise<{ url: string; built: FakeThreadRecord[]; directory: string }> {
+  const directory = join(mkdtempSync(join(tmpdir(), 'enso-prompts-')), 'prompts')
+  const { url, built } = await startWith(settlesAtOnce, {}, undefined, { promptsDir: directory })
+  return { url, built, directory }
+}
+
+async function send(
+  url: string,
+  path: string,
+  method: string,
+  body?: unknown,
+): Promise<{ status: number; body: string }> {
+  const response = await fetch(`${url}${path}`, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  })
+  return { status: response.status, body: await response.text() }
+}
+
+test('⚠ the prompt library: written whole and read back, listed by name with its sizes, deleted — a file that does not parse is listed as refused, by name (#443)', async () => {
+  const { url, directory } = await library()
+  // No directory yet is an empty library, not a failure.
+  expect(JSON.parse((await send(url, '/api/prompts', 'GET')).body)).toEqual({ prompts: [], refused: [] })
+
+  const written = await send(url, '/api/prompts/reviewer', 'PUT', REVIEWER)
+  expect(written.status).toBe(200)
+  const prompt = JSON.parse(written.body)
+  expect(prompt).toMatchObject({ id: 'reviewer', ...REVIEWER, tokens: estimateTextTokens(REVIEWER.body) })
+  expect(prompt.bytes).toBe(readFileSync(join(directory, 'reviewer.md')).length)
+
+  writeFileSync(join(directory, 'broken.md'), '---\nname: Broken\ncategory: user\n---\nx')
+  writeFileSync(join(directory, 'notes.txt'), 'not a prompt')
+  const listing = JSON.parse((await send(url, '/api/prompts', 'GET')).body)
+  expect(listing.prompts).toEqual([
+    {
+      id: 'reviewer',
+      name: 'Reviewer',
+      description: 'Reads diffs',
+      category: 'system',
+      bytes: prompt.bytes,
+      tokens: prompt.tokens,
+    },
+  ])
+  expect(listing.refused).toEqual([
+    { file: 'broken.md', reason: expect.stringContaining('broken.md: frontmatter category') },
+  ])
+  expect(await send(url, '/api/prompts/broken', 'GET')).toMatchObject({
+    status: 422,
+    body: expect.stringContaining('broken.md'),
+  })
+
+  // A body outside the closed shape is a 400; an id that could be a path never reaches the disk.
+  expect((await send(url, '/api/prompts/reviewer', 'PUT', { ...REVIEWER, model: 'x' })).status).toBe(400)
+  expect((await send(url, '/api/prompts/..%2Fescape', 'PUT', REVIEWER)).status).toBe(404)
+
+  expect((await send(url, '/api/prompts/reviewer', 'DELETE')).status).toBe(204)
+  expect((await send(url, '/api/prompts/reviewer', 'DELETE')).status).toBe(404)
+  expect((await send(url, '/api/prompts/reviewer', 'GET')).status).toBe(404)
+})
+
+test('a server started without a library says so on every prompt route (#443)', async () => {
+  const { url } = await startWith(settlesAtOnce)
+  expect(await send(url, '/api/prompts', 'GET')).toEqual({ status: 404, body: NO_PROMPT_LIBRARY })
+  expect(await send(url, '/api/prompts/reviewer', 'PUT', REVIEWER)).toEqual({ status: 404, body: NO_PROMPT_LIBRARY })
+})
+
+test('⚠ POST …/configure takes a system prompt from the library first, and refuses by name a session prompt, a missing or unparseable file, and a choice after the first request (#443)', async () => {
+  const { url, built, directory } = await library()
+  await send(url, '/api/prompts/reviewer', 'PUT', REVIEWER)
+  await send(url, '/api/prompts/opener', 'PUT', { ...REVIEWER, name: 'Opener', category: 'session' })
+  await send(url, '/api/prompts/blank', 'PUT', { ...REVIEWER, name: 'Blank', body: '  \n' })
+  writeFileSync(join(directory, 'broken.md'), 'no frontmatter')
+  const configure = (thread: string, body: unknown): Promise<{ status: number; body: string }> =>
+    send(url, `/api/threads/${thread}/configure`, 'POST', body)
+  const refusal = async (thread: string, body: unknown): Promise<unknown> => {
+    const answered = await configure(thread, body)
+    expect(answered.status).toBe(422)
+    return JSON.parse(answered.body)
+  }
+
+  expect(await refusal('t-session', { systemPrompt: 'opener', model: 'fake/fake-2' })).toEqual({
+    step: 'systemPrompt',
+    reason: 'Opener is a session prompt: it fills the first message, not the system prompt',
+  })
+  // The first step refused: the model after it never ran.
+  expect(built[0]?.modelState.model?.id).not.toBe('fake-2')
+  expect(await refusal('t-missing', { systemPrompt: 'nobody' })).toMatchObject({
+    reason: expect.stringContaining('no prompt nobody'),
+  })
+  expect(await refusal('t-broken', { systemPrompt: 'broken' })).toMatchObject({
+    reason: expect.stringContaining('broken.md: it does not open'),
+  })
+  expect(await refusal('t-blank', { systemPrompt: 'blank' })).toMatchObject({ reason: 'Blank has no text to send' })
+
+  expect((await configure('t-good', { systemPrompt: 'reviewer', model: 'fake/fake-2' })).status).toBe(204)
+  const chosen = built.at(-1)
+  expect(chosen?.systemPrompt).toEqual({
+    id: 'reviewer',
+    name: 'Reviewer',
+    mode: 'system',
+    sha256: createHash('sha256').update(REVIEWER.body).digest('hex'),
+    text: REVIEWER.body,
+  })
+  expect(chosen?.modelState.model?.id).toBe('fake-2')
+  // The same again is no change. Before the first request another REPLACES it — a Start refused at
+  // a later step may try again with a different prompt; after it, the session keeps its prompt for life.
+  expect((await configure('t-good', { systemPrompt: 'reviewer' })).status).toBe(204)
+  await send(url, '/api/prompts/other', 'PUT', { ...REVIEWER, name: 'Other', category: 'append' })
+  expect((await configure('t-good', { systemPrompt: 'other' })).status).toBe(204)
+  expect(chosen?.systemPrompt).toMatchObject({ id: 'other', mode: 'append' })
+  expect(await prompt(url, 't-good', 'hello')).toBe(202)
+  expect(await refusal('t-good', { systemPrompt: 'reviewer' })).toMatchObject({
+    reason: expect.stringContaining('already sent the system prompt Other and keeps it for its whole life'),
+  })
+
+  // A thread that already prompted has sent pi's default.
+  expect(await prompt(url, 't-late', 'hello')).toBe(202)
+  expect(await refusal('t-late', { systemPrompt: 'reviewer' })).toMatchObject({
+    reason: expect.stringContaining("pi's default"),
+  })
 })

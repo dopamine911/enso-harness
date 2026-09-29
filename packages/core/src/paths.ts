@@ -372,6 +372,16 @@ export function ensoProjectsPath(home: string): string {
 }
 
 /**
+ * The prompt library (#443): `ENSO_HOME/prompts/<id>.md`, one markdown file per prompt. The user's,
+ * never committed with a project.
+ *
+ * @group Workspace paths
+ */
+export function ensoPromptsDir(home: string): string {
+  return join(home, 'prompts')
+}
+
+/**
  * The harness package — the directory `enso.ts` hands to pi's `-e`.
  *
  * @group Workspace paths
