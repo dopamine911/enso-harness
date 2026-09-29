@@ -1564,10 +1564,18 @@ const KEEP_VIEW = (): void => undefined
  * the rail.
  *
  * Stays mounted while another thread is on screen — see `createThreadChatHook` for why hiding,
- * not unmounting, is load-bearing.
+ * not unmounting, is load-bearing. ⚠ And never `hidden` (#370): a `display: none` pane comes back
+ * resized, and the stick-to-bottom scroller re-pins a reader who had scrolled up — the tabs' bug
+ * (#362 review), one level up. Every pane fills the same box (`absolute inset-0`), so a switch
+ * moves nothing; one off screen is `content-visibility: hidden`, which skips its style, layout
+ * and paint like `display: none` but keeps its layout and scroll state. Measured at the page's
+ * four live panes (#472 review): a switch cost ~45 ms of main thread against ~47 with `hidden`
+ * and ~67 with `invisible` alone, which restyled every transcript. `invisible` stays as the
+ * fallback where `content-visibility` is unsupported (otherwise the later panes would paint over
+ * the shown one); `inert` keeps an off-screen pane out of the tab order and the accessibility tree.
  *
  * ⓘ Exported for `__tests__/chat-screen.test.tsx` only, which mounts two of them to pin
- * that a hidden pane renders no debug column. Nothing else imports it.
+ * that an off-screen pane renders no debug column. Nothing else imports it.
  */
 export function ThreadPane({
   threadId,
@@ -1622,7 +1630,14 @@ export function ThreadPane({
   }, [threadId, title, chat.sessionGenerating, waiting])
   const paneView = useMemo<PaneView>(() => ({ shown: active ? view : undefined, open: onView }), [active, view, onView])
   return (
-    <div className={active ? 'flex min-h-0 min-w-0 flex-1 flex-col' : 'hidden'}>
+    <div
+      inert={!active}
+      className={
+        active
+          ? 'absolute inset-0 flex min-h-0 min-w-0 flex-col'
+          : 'invisible absolute inset-0 flex min-h-0 min-w-0 flex-col [content-visibility:hidden]'
+      }
+    >
       <ThreadStoresContext.Provider value={stores}>
         <DebugOpenContext.Provider value={debugOpen && active}>
           <PaneViewContext.Provider value={paneView}>
@@ -1745,7 +1760,8 @@ function useNarrowRail(): {
       setOpen(false)
       act(arg)
     },
-    paneClass: open ? 'flex min-w-0 flex-1 max-md:hidden' : 'flex min-w-0 flex-1',
+    // `relative`: every pane is `absolute inset-0` in this box, shown or not (#370).
+    paneClass: open ? 'relative flex min-w-0 flex-1 max-md:hidden' : 'relative flex min-w-0 flex-1',
   }
 }
 

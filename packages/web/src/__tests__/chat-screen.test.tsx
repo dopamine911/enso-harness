@@ -168,9 +168,9 @@ test('⚠ two mounted panes with ?debug open render exactly ONE debug column, in
     </>,
   )
   expect(rendered.match(/id="thread-debug-pane"/g)).toHaveLength(1)
-  // The active pane is laid out; the other is hidden, not gone — its chat stays mounted.
-  // (The pane's div, specifically: each composer also carries a hidden file input, #68.)
-  expect(rendered.match(/<div class="hidden">/g)).toHaveLength(1)
+  // The active pane is shown; the other is off screen, not gone — its chat stays mounted, and
+  // `inert` keeps it out of reach (#370: laid out under the shown one, not `display: none`).
+  expect(rendered.match(/<div inert="" /g)).toHaveLength(1)
   expect(rendered.match(/id="thread-status"/g)).toHaveLength(2)
   // And with the switch off, no pane shows one.
   const closed = renderToStaticMarkup(<ThreadPane threadId={first.threadId} active={true} debugOpen={false} />)
