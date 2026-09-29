@@ -74,7 +74,8 @@ export const ThreadRuntime = Type.Object({
    * host cannot start (the route's 422); `onSettled` when the work ends. ⚠ THE LEASE FOLLOWS THE
    * KIND. A `flow` (login) is not a run: its lease is released on acceptance, as a mode change's
    * is — holding it marked the thread busy for the whole device-code wait (slice-3 smoke) — and
-   * the flow lives on the session until pi's own expiry or the session's disposal. An `action`
+   * the flow lives on the session until pi's own expiry, Stop (`cancelLogin`, #348), or the
+   * session's disposal. An `action`
    * (compaction, slice 4) REWRITES THE BRANCH and is run-shaped: the lease is held until
    * `onSettled`, so the composer is closed, a prompt is 409 (pi itself refuses one mid-compaction,
    * `agent-session.js:1227`), and Stop reaches it (`abort` calls `abortCompaction`). The work's
@@ -84,6 +85,18 @@ export const ThreadRuntime = Type.Object({
   startHostFlow: Type.Unsafe<(run: EnsoHostCommandRun, outcome: HostFlowOutcome) => void>(
     Type.Function([Type.Unknown(), Type.Unknown()], Type.Void()),
   ),
+  /**
+   * The login waiting on its provider, if one is (#348). A login holds no lease, so the registry
+   * cannot see it as busy: this is what the follow's snapshot carries, and what Stop asks for when
+   * no run is in flight. A `login` observation says when it starts and stops waiting.
+   */
+  loginInProgress: Type.Unsafe<() => EnsoLoginInProgress | undefined>(Type.Function([], Type.Unknown())),
+  /**
+   * Cancel the login in progress (#348) — Stop, when no run is in flight. `true` when one was:
+   * it then settles as a cancelled login ("Login to X cancelled."), its questions withdrawn and
+   * nothing stored. `false` when there was none.
+   */
+  cancelLogin: Type.Unsafe<() => boolean>(Type.Function([], Type.Unknown())),
   /**
    * The permission-mode receipt a run starts with (#84): picc's CURRENT mode for this
    * session, computed the way picc itself restores it — the last persisted `modes` entry
@@ -378,12 +391,16 @@ it renders and answers picc's mode question; a secret is an `input` dialog with 
 the browser masks and never echoes. Fire-and-forget like `prompt`, for the same reason: a device code
 may wait minutes, so the route answers 202 on acceptance — and releases the lease then, because a
 lease IS the registry's busy and a login is not a run (the smoke showed a held lease locking the
-composer for the device-code wait). The flow lives on the session; disposing the session aborts it; one flow runs at a time per
+composer for the device-code wait). The flow lives on the session; disposing the session aborts it,
+and so does **Stop** while it waits (#348): with no lease the registry reads the thread idle, so the
+host says `login` (waiting, then not) and `loginInProgress` for the snapshot, and the abort route
+calls `cancelLogin` when no run is in flight. One flow runs at a time per
 session, a second start is refused by name. `/compact` (slice 4) is an `action` on the same path
 with one difference: it REWRITES THE BRANCH, so the route holds the lease until it settles — the
 thread is busy, a setting is 409, Stop reaches it through `abortCompaction` — where a login's lease
 is released on acceptance. No option, a model call pi makes to summarise the branch, a notify with
-the token counts when it ends; the page's transcript is TanStack's copy, so the line says to reload. The stored
+the token counts when it ends; pi's `compaction_end` becomes `branch-compacted` (#348), and the
+pane re-reads the branch once the thread is idle. The stored
 credentials `/logout` offers are a cache — pi lists them asynchronously and `listCommands` is
 synchronous — refreshed at build and after every flow the host itself ran.
 

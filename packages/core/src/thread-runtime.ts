@@ -1,7 +1,7 @@
 import { type Static, Type } from 'typebox'
 import { Compile } from 'typebox/compile'
 import type { EnsoOpenDialog, EnsoQuestionAnswer } from './dialog.ts'
-import type { EnsoObservation } from './observation.ts'
+import type { EnsoLoginInProgress, EnsoObservation } from './observation.ts'
 import type { EnsoPermissionModeState } from './permission-mode.ts'
 import type { EnsoSystemPromptChoice } from './prompt-library.ts'
 
@@ -442,7 +442,8 @@ export const ThreadRuntime = Type.Object({
    * host cannot start (the route's 422); `onSettled` when the work ends. ⚠ THE LEASE FOLLOWS THE
    * KIND. A `flow` (login) is not a run: its lease is released on acceptance, as a mode change's
    * is — holding it marked the thread busy for the whole device-code wait (slice-3 smoke) — and
-   * the flow lives on the session until pi's own expiry or the session's disposal. An `action`
+   * the flow lives on the session until pi's own expiry, Stop (`cancelLogin`, #348), or the
+   * session's disposal. An `action`
    * (compaction, slice 4) REWRITES THE BRANCH and is run-shaped: the lease is held until
    * `onSettled`, so the composer is closed, a prompt is 409 (pi itself refuses one mid-compaction,
    * `agent-session.js:1227`), and Stop reaches it (`abort` calls `abortCompaction`). The work's
@@ -452,6 +453,18 @@ export const ThreadRuntime = Type.Object({
   startHostFlow: Type.Unsafe<(run: EnsoHostCommandRun, outcome: HostFlowOutcome) => void>(
     Type.Function([Type.Unknown(), Type.Unknown()], Type.Void()),
   ),
+  /**
+   * The login waiting on its provider, if one is (#348). A login holds no lease, so the registry
+   * cannot see it as busy: this is what the follow's snapshot carries, and what Stop asks for when
+   * no run is in flight. A `login` observation says when it starts and stops waiting.
+   */
+  loginInProgress: Type.Unsafe<() => EnsoLoginInProgress | undefined>(Type.Function([], Type.Unknown())),
+  /**
+   * Cancel the login in progress (#348) — Stop, when no run is in flight. `true` when one was:
+   * it then settles as a cancelled login ("Login to X cancelled."), its questions withdrawn and
+   * nothing stored. `false` when there was none.
+   */
+  cancelLogin: Type.Unsafe<() => boolean>(Type.Function([], Type.Unknown())),
   /**
    * The permission-mode receipt a run starts with (#84): picc's CURRENT mode for this
    * session, computed the way picc itself restores it — the last persisted `modes` entry

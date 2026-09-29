@@ -758,6 +758,48 @@ export function describeAttachmentError(error: PromptInputError): string {
 }
 
 /**
+ * Stop, while there is something to stop (#116): a run in flight, or a login waiting on its
+ * provider (#348). Through the thread's connection — `POST …/abort`. ⚠ NOT `chat.stop()`: that
+ * aborts this client's POST, which returned at admission, and touches nothing on the server. What
+ * it stopped ends on the follow (`settled` and `status` for a run; `login` and the cancel's line
+ * for a login), so this button changes nothing itself; the feed does. The run flag is
+ * `sessionGenerating`, the shared one — `isLoading` never rises here (#103 receipt). A login holds
+ * no run lease, so it has its own flag, `stores.login`. Not offered once the follow has ended
+ * (#119): the flags are then as of that moment, and a stop that may stop nothing is issue #4's
+ * shape — `docs/architecture.md`, The control plane, invariant 5.
+ */
+function StopControl({
+  running,
+  disconnected,
+  onStop,
+}: {
+  running: boolean
+  disconnected: boolean
+  onStop: () => void
+}): React.ReactNode {
+  const login = useStore(useThreadStores().login)
+  if (disconnected || !(running || login !== undefined)) return null
+  const stopsLogin = !running && login !== undefined
+  return (
+    <Button
+      type="button"
+      size="icon"
+      variant="outline"
+      className="size-11"
+      aria-label={stopsLogin ? `cancel the login to ${login.provider}` : 'stop the run'}
+      title={
+        stopsLogin
+          ? `cancel the login to ${login.provider} — nothing is stored`
+          : 'stop the run in flight — pi is told; the run ends on the feed'
+      }
+      onClick={onStop}
+    >
+      <SquareIcon />
+    </Button>
+  )
+}
+
+/**
  * Inside the ported form: the attachment strip, the textarea, the `/` palette, the attach /
  * stop / send buttons. A separate component because the attachments live in the form's context
  * (`usePromptInputAttachments`), and "can send" depends on them — an image with no words
@@ -827,28 +869,7 @@ function ComposerBody({
         >
           <PaperclipIcon />
         </PromptInputButton>
-        {/* Stop while a run is in flight (#116), through the thread's connection —
-				    `POST …/abort` → pi's own abort. ⚠ NOT `chat.stop()`: that aborts this
-				    client's POST, which returned at admission, and touches nothing on the
-				    server. The run ends on the follow (`settled`, `status`) like any other,
-				    so this button changes nothing itself; the feed does. Read off
-				    `sessionGenerating`, the shared run flag — `isLoading` never rises here
-				    (#103 receipt). Not offered once the follow has ended (#119): the flag
-				    is then as of that moment, and a stop that may stop nothing is issue #4's shape -
-				    `docs/architecture.md`, The control plane, invariant 5. */}
-        {running && !disconnected ? (
-          <Button
-            type="button"
-            size="icon"
-            variant="outline"
-            className="size-11"
-            aria-label="stop the run"
-            title="stop the run in flight — pi is told; the run ends on the feed"
-            onClick={onStop}
-          >
-            <SquareIcon />
-          </Button>
-        ) : null}
+        <StopControl running={running} disconnected={disconnected} onStop={onStop} />
         {/* Send stays offered in flight: a prompt during a run queues through pi (#75) —
 				    the form's submit takes the direct route past TanStack's own queue. */}
         <Button type="submit" size="icon" className="size-11" aria-label="send message" disabled={!canSend}>

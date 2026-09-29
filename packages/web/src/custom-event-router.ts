@@ -127,6 +127,8 @@ export function routeEnsoCustomEvent(stores: ThreadStores, eventType: string, da
     // card for a question that settled while the page was away. One card at a time: a
     // second concurrent question shows once the first settles and the next snapshot lists it.
     stores.dialog.set(data.openDialogs[0])
+    // A login waiting on its provider (#348) — a page arriving mid-login offers its Stop too.
+    stores.login.set(data.login)
     applyStatus(stores, data.generation)
     return
   }
@@ -240,6 +242,10 @@ function routeObservation(stores: ThreadStores, observation: EnsoObservation): v
       // The branch was rewritten (#348): counted, and the pane re-reads the thread when idle —
       // never mid-run, so a compaction pi made on overflow waits for the run it rescued.
       stores.branchCompacted.set(stores.branchCompacted.get() + 1)
+      return
+    case 'login':
+      // A login waiting on its provider (#348): what the composer's Stop can end.
+      stores.login.set(observation.waiting ? { provider: observation.provider } : undefined)
       return
     case 'session-usage': {
       // The session's totals and context now (#45) — whole, so the latest replaces.

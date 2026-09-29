@@ -102,6 +102,8 @@ function compactOf(observation: EnsoObservation): EnsoLogProperties {
       }
     case 'branch-compacted':
       return { reason: observation.reason }
+    case 'login':
+      return { provider: observation.provider, waiting: observation.waiting }
     case 'extension-error':
       return { extensionPath: observation.extensionPath, event: observation.event }
     case 'run-ended':

@@ -337,6 +337,35 @@ test('⚠ a compaction said mid-run waits for the run; once idle the pane shows 
   await pane.unmount()
 })
 
+// #348: a login holds no run lease, so the thread reads idle through a device-code wait and Stop was
+// never offered. The `login` observation is what the composer reads: Stop, named for the login,
+// while it waits; pressing it is the same `POST …/abort`; gone once the login stops waiting.
+test('⚠ while a login waits, the composer offers Stop for it; pressing it asks the server; gone once the login ends', async () => {
+  const pane = await mountPane()
+  const cancelLogin = (): HTMLButtonElement | null =>
+    pane.container.querySelector<HTMLButtonElement>('button[aria-label="cancel the login to Anthropic"]')
+  expect(cancelLogin()).toBeNull()
+  await pane.settle({
+    type: 'observation',
+    seq: 1,
+    observation: { kind: 'login', provider: 'Anthropic', waiting: true },
+  })
+  await eventually(() => expect(cancelLogin()).not.toBeNull())
+  expect(pane.status()).toContain('idle') // a login is not a run
+  await flush(async () => {
+    cancelLogin()?.click()
+    await tick()
+  })
+  await eventually(() => expect(pane.server.abortCount()).toBe(1))
+  await pane.settle({
+    type: 'observation',
+    seq: 2,
+    observation: { kind: 'login', provider: 'Anthropic', waiting: false },
+  })
+  await eventually(() => expect(cancelLogin()).toBeNull())
+  await pane.unmount()
+})
+
 test("the snapshot's mode is the select's value; the host's mode observation moves it (#84, #95, L3)", async () => {
   const pane = await mountPane()
   await pane.settle({ ...SNAPSHOT_IDLE, permissionMode: { mode: 'plan', available: ['default', 'plan', 'auto'] } })

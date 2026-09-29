@@ -111,6 +111,8 @@ export const EnsoFollowSnapshot = Type.Object(
     /** Every question pi is blocked on right now, oldest first (#114). Empty when not live. */
     openDialogs: Type.Array(EnsoOpenDialog),
     interrupted: Type.Optional(EnsoInterruptedTail),
+    /** A login waiting on its provider (#348), which Stop can end; absent when none is. */
+    login: Type.Optional(EnsoLoginInProgress),
   },
   { additionalProperties: false },
 )

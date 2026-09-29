@@ -268,6 +268,8 @@ export interface ThreadStores {
    * seen fewer than this.
    */
   readonly branchCompacted: WritableStore<number>
+  /** The login waiting on its provider (#348): what the composer's Stop can end. Undefined when none is. */
+  readonly login: WritableStore<EnsoLoginInProgress | undefined>
   /**
    * The project this thread runs in (#395): the one its `+` named when minted, or its stored
    * session's when adopted. `undefined` for a thread minted before the page knew its projects (a

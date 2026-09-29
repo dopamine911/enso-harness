@@ -3,6 +3,7 @@ import {
   ENSO_TOOL_RESULT_KEY,
   EnsoDialogOutcome,
   type EnsoDialogSpec,
+  EnsoLoginState,
   EnsoModelState,
   EnsoNotifyType,
   type EnsoObservation,
@@ -396,6 +397,10 @@ export function mapPiEvent(event: RuntimeEvent, delivery: EventDelivery = 'live'
 
     case 'session_usage':
       return hostState(event, EnsoSessionUsage, (usage) => ({ kind: 'session-usage', ...usage }))
+
+    case 'login':
+      // The host's own event (#348): a login began waiting on its provider, or stopped.
+      return hostState(event, EnsoLoginState, (login) => ({ kind: 'login', ...login }))
 
     case 'provider_refused':
       // The host's own event (#340): the provider refused the request pi just made.
