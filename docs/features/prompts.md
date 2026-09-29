@@ -50,7 +50,7 @@ The files can change under you: another tab, or an editor open on the same file.
 
 In the start dialog, **System prompt** lists `pi default` and every system and append prompt, each with its size. It is **fixed for the whole session**. **Saved prompt** lists the session prompts and puts the one you pick into the prompt box, where you can still change it before you send it.
 
-Once a thread has started, the Context tab names its system prompt on the system row: `system prompt · Reviewer`, or `system prompt · pi default`.
+Once a thread has started, the Context tab names its system prompt on the system row: `system prompt · Reviewer` for a system prompt, `system prompt · pi default + Reviewer` for an append prompt, or `system prompt · pi default`. An append prompt's own tokens are its **addendum**, counted under **injected context** with what else was added to pi's prompt (project context, skills); the element is labelled `addendum · Reviewer`.
 
 ## What it doesn't do
 

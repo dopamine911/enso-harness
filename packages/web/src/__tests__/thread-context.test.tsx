@@ -167,6 +167,11 @@ test("the system-prompt row names the thread's prompt: a library prompt, pi's de
   expect(text(STORED)).toContain('system prompt · pi default')
   expect(text({ ...STORED, systemPrompt: 'unreadable' })).toContain('system prompt · unreadable record')
   expect(categoryLabel('tools', REVIEWER)).toBe('tool schemas')
+  // An append prompt's text is the addendum, under injected context: the system row holds pi's
+  // default, and says so beside the prompt's name — never the name alone over tokens it lacks.
+  const haiku = { ...REVIEWER, name: 'Haiku', mode: 'append' as const }
+  expect(categoryLabel('system', haiku)).toBe('system prompt · pi default + Haiku')
+  expect(categoryLabel('injected', haiku)).toBe('injected context')
 })
 
 test("the request brief's In list names the library prompt beside the section it wrote, as the row one click away does", () => {

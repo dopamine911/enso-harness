@@ -101,7 +101,9 @@ export function MakeupLegend({ makeup }: { makeup: EnsoContextMakeup }): React.R
       {CONTEXT_CATEGORIES.map((category) => (
         <div key={category} className="flex items-center gap-2">
           <Swatch category={category} />
-          <dt className="min-w-0 flex-1 truncate">{labelOf(category)}</dt>
+          <dt className="min-w-0 flex-1 truncate" title={labelOf(category)}>
+            {labelOf(category)}
+          </dt>
           <dd className="font-mono text-xs whitespace-nowrap text-muted-foreground tabular-nums">
             {estimateText(makeup[category])} · {PERCENT.format(shareOf(makeup[category], total))}
           </dd>

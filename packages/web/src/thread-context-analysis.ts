@@ -32,11 +32,17 @@ export const CATEGORY_LABEL: Readonly<Record<EnsoContextCategory, string>> = {
   toolResults: 'tool results',
 }
 
-/** What the thread's system prompt is called on its rows (#443): the library prompt's name, or pi's. */
+/**
+ * What the thread's system prompt is called on its row (#443). ⚠ THE ROW HOLDS pi's BASE SECTIONS,
+ * so the name says what those are: a `system` prompt replaced pi's preamble, and is named alone; an
+ * `append` prompt left pi's default in place and added to it — its text is the `addendum`, which
+ * the categories file under `injected` (`thread-context.ts`), so the row says `pi default + <name>`
+ * rather than claim tokens it does not hold.
+ */
 function systemPromptName(prompt: EnsoThreadSystemPrompt): string {
   if (prompt === null) return 'pi default'
   if (prompt === 'unreadable') return 'unreadable record'
-  return prompt.name
+  return prompt.mode === 'append' ? `pi default + ${prompt.name}` : prompt.name
 }
 
 /** A category's name on its row; the system prompt's says which prompt it is. */
