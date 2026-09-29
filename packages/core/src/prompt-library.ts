@@ -389,3 +389,25 @@ export const EnsoSystemPromptDraft = Type.Object(
 )
 /** @group Prompt library */
 export type EnsoSystemPromptDraft = Static<typeof EnsoSystemPromptDraft>
+
+/**
+ * What a thread says its system prompt is, for a view (#443): the recorded choice without its text —
+ * `null` for pi's default, `'unreadable'` for a record that does not read (never shown as the default).
+ *
+ * @group Prompt library
+ */
+export const EnsoThreadSystemPrompt = Type.Union([
+  Type.Object(
+    {
+      id: Type.String({ minLength: 1 }),
+      name: Type.String({ minLength: 1 }),
+      mode: EnsoSystemPromptMode,
+      sha256: Type.String({ pattern: '^[0-9a-f]{64}$' }),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Null(),
+  Type.Literal('unreadable'),
+])
+/** @group Prompt library */
+export type EnsoThreadSystemPrompt = Static<typeof EnsoThreadSystemPrompt>

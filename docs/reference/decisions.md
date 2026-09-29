@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 334.**
+**Decision headers: 335.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -152,6 +152,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/commands-connection.ts` | `#144`, `#338`, `#344` | The `/` palette's one read (#338, slice 1): `GET /api/threads/:id/commands` — the slash commands the thread's session registers, grouped by the server into extension commands, prompt templates and skills, with a `source` that says whose list it is (`live`: this thread's session; `remembered`: the last built session's, because every session builds it from the same sources under the same configuration and this thread has no live session — never ran, or ran and idled out; the server cannot tell; `none`: no session has been built in this process). |
 | `packages/web/src/context-activity.tsx` | `#361` | The Context view's side cards (#361 phase 4), in the design direction's row language — dsh-context's Context Events (when and why the window changed) and File Activity (what pi's file tools did, up to the trend's picked request). |
 | `packages/web/src/context-browser.tsx` | `#361` | The Context Browser (#361 phase 3) — dsh-context's "open the box of any request", in the design direction's two columns: pick the next request or any past one (the picker, or a step either way), and see what it was assembled from — six categories, each expanding into one row per element with its estimate — beside the element picked: a prompt section, a tool's schema, a message, a reply's parts, a tool result beside its call's arguments. |
+| `packages/web/src/context-labels.tsx` | `#443` | The thread's system prompt, for the Context view's labels (#443): a custom prompt is visible in the evidence — the system-prompt row says which prompt it is, and the section the prompt wrote says so — not only in the dialog that chose it. |
 | `packages/web/src/context-parts.tsx` | `#361` | The Context view's shared pieces (#361): its number formats, and the six-category bar and legend — drawn by the Now card and the Context Browser alike. |
 | `packages/web/src/custom-event-router.ts` | `#103` | The one chunk that is neither an observation nor a frame: the follow ended without this page leaving it (#103 receipt) — the server closed, restarted, or dropped the connection. |
 | `packages/web/src/debug/__tests__/log-tail-connection.test.ts` | `#144` | The log tail client (#144 slice 2), driven over a scripted body: SSE text the test writes, read as the page reads it. |

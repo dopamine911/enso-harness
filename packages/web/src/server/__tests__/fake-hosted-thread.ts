@@ -413,6 +413,7 @@ const FAKE_EMPTY_CONTEXT: BranchContext = {
   requests: [],
   events: [],
   files: [],
+  systemPrompt: null,
 }
 
 /**

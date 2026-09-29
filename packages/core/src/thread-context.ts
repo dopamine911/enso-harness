@@ -1,4 +1,5 @@
 import { type Static, Type } from 'typebox'
+import { EnsoThreadSystemPrompt } from './prompt-library.ts'
 import { EnsoContextUsage } from './thread-runtime.ts'
 
 /**
@@ -258,6 +259,8 @@ export const EnsoThreadContext = Type.Object(
     events: Type.Array(EnsoContextEvent),
     /** Every file operation on the branch, oldest first. */
     files: Type.Array(EnsoFileOperation),
+    /** The system prompt the branch records (#443) — the label on the Context tab's system rows. */
+    systemPrompt: EnsoThreadSystemPrompt,
   },
   { additionalProperties: false },
 )

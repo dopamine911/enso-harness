@@ -2385,3 +2385,18 @@ test("a preview changes nothing: the thread's own prompt is what its request car
   // pi's default, previewed on a thread that runs its own: a preview, not a refusal.
   expect(hosted.previewSystemPrompt(null)).toMatchObject({ kind: 'preview', preview: { prompt: null } })
 })
+
+test("the thread's context names the system prompt its branch records — live and from the file (#443)", async () => {
+  const { host, project } = recordingHost(1)
+  const threadId = crypto.randomUUID()
+  const hosted = await host.createSession(threadId, () => project)
+  openSessions.push(hosted)
+  expect(hosted.branchContext().systemPrompt).toBeNull()
+  const choice = choiceOf('append', 'Always answer in haiku.')
+  expect(hosted.runtime.setSystemPrompt(choice)).toBeUndefined()
+  await runPrompt(hosted, 'one')
+  const named = { id: choice.id, name: choice.name, mode: 'append' as const, sha256: choice.sha256 }
+  expect(hosted.branchContext().systemPrompt).toEqual(named)
+  hosted.runtime.dispose()
+  expect((await host.readStoredThreadContext(threadId))?.context.systemPrompt).toEqual(named)
+})

@@ -185,6 +185,7 @@ export {
   EnsoSystemPromptMode,
   EnsoSystemPromptPreview,
   EnsoSystemPromptSection,
+  EnsoThreadSystemPrompt,
   estimateTextTokens,
   isLibraryPromptId,
   type LibraryPromptParse,
