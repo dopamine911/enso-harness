@@ -34,6 +34,7 @@ import {
   type PromptOutcome,
   type PromptRequest,
   type RuntimeCommand,
+  recordedSystemPrompt,
   type ThreadRuntime,
 } from '@enso/core'
 import { ensoHome, ensoSecretsPath, findRepoRoot } from '@enso/core/paths'
@@ -79,7 +80,7 @@ import type { RuntimeEvent } from './runtime-event.ts'
 import { toRpcWireEvent } from './session-events.ts'
 import { growsSessionSpend, liveSessionUsage, storedSessionUsage } from './session-usage.ts'
 import { previewOf, renderedUnder } from './system-prompt-preview.ts'
-import { decideSystemPrompt, hasSentRequest, recordedSystemPrompt, withSystemPrompt } from './system-prompt.ts'
+import { decideSystemPrompt, hasSentRequest, withSystemPrompt } from './system-prompt.ts'
 import { recordedModelOf, transcriptOf } from './transcript.ts'
 
 const log = ensoLogger('host')

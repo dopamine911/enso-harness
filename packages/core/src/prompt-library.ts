@@ -389,3 +389,61 @@ export const EnsoSystemPromptDraft = Type.Object(
 )
 /** @group Prompt library */
 export type EnsoSystemPromptDraft = Static<typeof EnsoSystemPromptDraft>
+
+/**
+ * What a thread says its system prompt is, for a view (#443): the recorded choice without its text —
+ * `null` for pi's default, `'unreadable'` for a record that does not read (never shown as the default).
+ *
+ * @group Prompt library
+ */
+export const EnsoThreadSystemPrompt = Type.Union([
+  Type.Object(
+    {
+      id: Type.String({ minLength: 1 }),
+      name: Type.String({ minLength: 1 }),
+      mode: EnsoSystemPromptMode,
+      sha256: Type.String({ pattern: '^[0-9a-f]{64}$' }),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Null(),
+  Type.Literal('unreadable'),
+])
+/** @group Prompt library */
+export type EnsoThreadSystemPrompt = Static<typeof EnsoThreadSystemPrompt>
+
+/**
+ * The data of the branch's LAST custom entry of `customType`, root to leaf — the rule every reader
+ * of a custom entry follows (picc's `restoreState`, the run context, the system prompt): the last
+ * one on the path is the one in force. The branch is read as `unknown[]`: this package names no
+ * runtime type.
+ *
+ * @group Prompt library
+ */
+export function lastCustomEntryData(branch: readonly unknown[], customType: string): unknown {
+  for (let entryIndex = branch.length - 1; entryIndex >= 0; entryIndex -= 1) {
+    const entry = branch[entryIndex] as { type?: unknown; customType?: unknown; data?: unknown } | undefined
+    if (entry?.type === 'custom' && entry.customType === customType) return entry.data
+  }
+  return undefined
+}
+
+/** @group Prompt library */
+export type RecordedSystemPrompt =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'chosen'; readonly choice: EnsoSystemPromptChoice }
+  | { readonly kind: 'unreadable' }
+
+/**
+ * What a branch says its system prompt is (#443): none (pi's default), the choice its last
+ * `enso-system-prompt` entry holds, or an entry that does not read — which a reader must never take
+ * for pi's default. The host builds a session from it; the harness extension applies it per run.
+ *
+ * @group Prompt library
+ */
+export function recordedSystemPrompt(branch: readonly unknown[]): RecordedSystemPrompt {
+  const data = lastCustomEntryData(branch, ENSO_SYSTEM_PROMPT_ENTRY)
+  if (data === undefined) return { kind: 'none' }
+  const choice = readEnsoSystemPromptChoice(data)
+  return choice === undefined ? { kind: 'unreadable' } : { kind: 'chosen', choice }
+}

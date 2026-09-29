@@ -81,7 +81,8 @@ the other resource arrays are also shown in declared order. A vendor path is any
 | extensions | 5 | `node_modules/@ladbabynpm/picc-permission-modes/index.ts` | **vendor path** |
 | extensions | 6 | `node_modules/pi-multi-account/index.ts` | **vendor path** |
 | extensions | 7 | `./extensions/ask-user/index.ts` | repository path |
-| extensions | 8 | `./extensions/run-context/index.ts` | repository path |
+| extensions | 8 | `./extensions/system-prompt/index.ts` | repository path |
+| extensions | 9 | `./extensions/run-context/index.ts` | repository path |
 | skills | 1 | `./skills` | repository path |
 | prompts | 1 | `./prompts` | repository path |
 | themes | 1 | `./themes` | repository path |

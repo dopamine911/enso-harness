@@ -38,6 +38,7 @@ export function createThreadContextRoute(
       requests: context.requests,
       events: context.events,
       files: context.files,
+      systemPrompt: context.systemPrompt,
     }
   }
 }
