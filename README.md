@@ -147,7 +147,7 @@ bun run logs         # read today's log, rendered
 
 ### What `bun run enso` actually does
 
-It starts **vanilla pi with only Enso loaded**, and isolates it three ways — each closing a different
+It starts **vanilla pi with only Enso loaded**, and isolates it four ways — each closing a different
 hole:
 
 | Mechanism | What it stops |
@@ -155,6 +155,7 @@ hole:
 | `PI_CODING_AGENT_DIR=~/.enso/pi-agent` | Your global pi packages, settings and credentials are invisible to this run. |
 | `--no-extensions` | pi's own discovery, which would otherwise load this repo's package a second time. |
 | `--no-skills` | Skills discovered from `~/.agents/skills/`, which the agent-dir redirect does not cover. |
+| `PICC_PERMISSION_MODES_CONFIG_PATH=~/.enso/permissions.json` | Claude Code's permission rules (`~/.claude/settings.json`), which the permission-modes extension would otherwise import, and use in every mode. A new `~/.enso` starts with Enso's deny rules only ([Permission modes](docs/features/permission-modes.md)). |
 
 ⚠ **An exported `ANTHROPIC_API_KEY` does not reach pi.** Enso deletes every secret-shaped environment
 variable before spawning and tells you which on stderr

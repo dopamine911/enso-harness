@@ -345,7 +345,7 @@ harness did). The first is canonical and never rewritten by us; the second is th
   runtime's `trust.json`; asked once per session when undecided; untrusted, the project's config is
   skipped and the session is told. Secrets are not config: `ENSO_HOME/secrets.env`, read per call, quarantined.
 - **ENSO_HOME** — the user's Enso directory, `~/.enso` unless the variable says otherwise (#421): the
-  runtime's agent dir, the secrets file, the logs and the project list, shared by every checkout. A checkout's
+  runtime's agent dir, the secrets file, the permission rules (`permissions.json`, #446), the logs and the project list, shared by every checkout. A checkout's
   old `.enso/` is moved into it on launch, never overwriting.
 - **run provenance** — what a fork point records beyond the runtime's own entries — project revision, context
   files, the mode's rules, skills, configuration — as the `enso-run-context` custom entry in the

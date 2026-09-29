@@ -38,6 +38,7 @@ import {
   type ThreadRuntime,
 } from '@enso/core'
 import { ensoHome, ensoSecretsPath, findRepoRoot } from '@enso/core/paths'
+import { describePermissionRules, preparePermissionRules } from '@enso/core/permission-rules'
 import { quarantineSecrets } from '@enso/core/secrets'
 import { type BranchContext, type BranchRequestDetail, branchContext, branchRequestDetail } from './branch-context.ts'
 import { type BranchEval, branchEval } from './branch-eval.ts'
@@ -140,6 +141,13 @@ const log = ensoLogger('host')
  * operator's `modelOverrides`, which the vendor carries into every republication, are theirs and
  * stay, as `{ modelOverrides }` alone (the vendor's own collapse; pi accepts an overrides-only
  * entry, and for Cursor it offers no model); the route and its placeholder credential go.
+ *
+ * ⚠⚠ `PICC_PERMISSION_MODES_CONFIG_PATH` IS PINNED TO `ENSO_HOME/permissions.json` (#446), and
+ * the file is prepared first. Unpinned, picc reads its user rules from a `config.json` inside its
+ * own `node_modules` directory; and a file with no rules makes it import Claude Code's
+ * `~/.claude/settings.json` into that file, every time it is empty. It reads both when the
+ * extension loads, per session, so the pin and the seed come before the first services.
+ * `preparePermissionRules` (`@enso/core/permission-rules`) says what is kept and seeded.
  *
  * ⚠⚠ EVERY THREAD IS A MULTI-ACCOUNT ROOT: `PI_MULTI_ACCOUNT_INDEPENDENT_ROOTS=1` (#351).
  * pi-multi-account keeps ONE root session per process for terminal pi — a lease on
@@ -305,6 +313,12 @@ export interface AgentHostOptions {
   agentDir: string
   /** The enso harness pi package directory; loaded as the ONLY extension source. */
   harnessPackageDir: string
+  /**
+   * The permission rules file (`ENSO_HOME/permissions.json`, #446) — see the module header.
+   * REQUIRED, never defaulted: forgetting it would mean picc's `node_modules` copy, and Claude
+   * Code's settings imported into it.
+   */
+  permissionRulesPath: string
   /**
    * The environment the secrets quarantine (#89) scrubs — `process.env` in production, the
    * one pi and every `bash` child inherit. A seam so the quarantine is testable without a
@@ -678,6 +692,16 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   process.env.PI_CODING_AGENT_DIR = agentDir
   process.env.PI_MULTI_ACCOUNT_INDEPENDENT_ROOTS = '1'
   seedMultiAccountConfig(agentDir)
+  // The rules picc reads when it loads, before the first services exist (#446). An unreadable file
+  // refuses to start the host: picc would read it as empty and import Claude Code's into it.
+  const permissionRules = preparePermissionRules(options.permissionRulesPath)
+  if (permissionRules.kind === 'unreadable') {
+    throw new Error(
+      `${permissionRules.path} is unreadable (${permissionRules.reason}); fix it or remove it — a removed file is seeded with Enso's default deny rules (#446)`,
+    )
+  }
+  process.env.PICC_PERMISSION_MODES_CONFIG_PATH = permissionRules.path
+  log.info(describePermissionRules(permissionRules))
   // The secrets file is the USER's (`ENSO_HOME`, #421), and the root `.env` bun autoloads is THIS
   // checkout's — neither is about the trees pi operates in (a session may run anywhere, a tmpdir
   // in tests). Both resolve from the environment and the harness, never from a session's cwd.

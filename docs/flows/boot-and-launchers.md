@@ -49,6 +49,10 @@ sequenceDiagram
    own `.pi/settings.json`, which installs the package and would load it twice. `--no-skills` is required
    and covered by neither: `~/.agents/skills/` is outside the agent dir. The host applies the same triple
    as loader options and sets the env at creation, before the first services — read at module import.
+   The permission rules are pinned the same way at both points (#446): `PICC_PERMISSION_MODES_CONFIG_PATH`
+   names `ENSO_HOME/permissions.json`, prepared first by `preparePermissionRules` — seeded with Enso's deny
+   rules when missing or empty (an empty file would make the extension import `~/.claude/settings.json`),
+   refused when unreadable — and the launcher says which on stderr, the host in its log.
 4. **`-e` receives the package directory, never extension files.** Loaded by package rules, the manifest
    drives every resource kind — extensions, skills, prompts and themes; files passed individually loaded
    the extensions and silently dropped everything else.

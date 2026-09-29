@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 343.**
+**Decision headers: 345.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -18,6 +18,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/core/src/__tests__/no-duplicate-paths.test.ts` | `#59`, `#256` | The anti-duplication anchor for path resolution (#59) — Daniel: "this should live in core and prevent duplicate code again." |
 | `packages/core/src/__tests__/no-duplicate-shapes.test.ts` | `#255` | Anchors for the reason this package exists: one place for every shape, reachable by one search. |
 | `packages/core/src/__tests__/observation-kinds.ts` | `#53` | The oracle both "every observation" sweeps compare against (#53 S1.4): every `kind` literal the EnsoObservation union declares, sorted. |
+| `packages/core/src/__tests__/permission-rules.test.ts` | `#446` | #446: the permission-modes extension reads a file with no rules as "import Claude Code's settings into it". |
 | `packages/core/src/__tests__/pi-manifest.test.ts` | `#221` | pi's manifest-resource layout, now owned in one place (#221 — it was implemented three times: the terminal launcher, the postinstall linker, and the server's `assertVendorLinks`). |
 | `packages/core/src/__tests__/picc-corpus-contract.test.ts` | `#7`, `#20`, `#222` | The picc CORPUS CONTRACT TEST (#222), the shape of `cc-safety-net-contract.test.ts` and `agent-loop-contract.test.ts`: read the installed vendor, assert the shape we copied. |
 | `packages/core/src/__tests__/prompt-library.test.ts` | `#443` | #443: a library prompt is a markdown file with a closed frontmatter block. |
@@ -40,6 +41,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/core/src/log.ts` | `#132` | The harness's log record (#132): one shape for every process, so a bundle a user hands us reads the same whichever layer wrote the line. |
 | `packages/core/src/paths.ts` | `#58`, `#59` | The workspace path helpers (#59) — THE one place that walks the filesystem for roots. |
 | `packages/core/src/permission-mode.ts` | `#84`, `#162` | The permission mode's shape on the wire (#84; #162 workstream 4, L3): what a run starts in and what it may switch to. |
+| `packages/core/src/permission-rules.ts` | `#446` | The permission rules pi runs under (#446): `ENSO_HOME/permissions.json`, never a copy of another tool's settings. |
 | `packages/core/src/pi-manifest.ts` | `#211`, `#221` | What a pi package's manifest declares, and where pi will look for it (#221) — THE one place that knows pi's manifest-resource layout. |
 | `packages/core/src/project.ts` | `#24`, `#395` | Projects (#395): the local directories one Enso server runs threads in. |
 | `packages/core/src/prompt-library.ts` | `#443` | The prompt library (#443): markdown files a person writes once and starts sessions with. |
@@ -320,7 +322,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `scripts/enso-launch.ts` | `#221` | The terminal launcher's decisions, apart from the launch (`enso.ts` spawns; this decides): the isolation triple as pi's arguments, the print-run trigger, and whether the pi it is about to spawn is one the guard was pinned against. |
 | `scripts/enso-logs.ts` | `#132` | See the log (#132): the day's file, rendered the way the terminal renders it live. |
 | `scripts/enso-thread.ts` | `#86`, `#97` | Inspect the live web server's threads from a shell — the agent's half of #86. |
-| `scripts/enso.ts` | `#20`, `#217` | Launch a VANILLA pi with only Enso loaded. |
+| `scripts/enso.ts` | `#20`, `#217`, `#446` | Launch a VANILLA pi with only Enso loaded. |
 | `scripts/gate.ts` | `#188`, `#208`, `#257`, `#342` | Ported from slop-factory's bun example (examples/bun/scripts/gate.ts) — the shape is deliberately identical so improvements travel in either direction. |
 | `scripts/link-vendor-packages.ts` | `#30` | Ensure the vendor pi packages exist inside the harness package's own node_modules. |
 | `scripts/lint/process-environment.ts` | `#89` | The environment boundary (#89): every file allowed to read the real process environment. |

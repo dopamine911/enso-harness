@@ -15,6 +15,7 @@ import { pathToFileURL } from 'node:url'
 import {
   ensoAgentDir,
   ensoHome,
+  ensoPermissionRulesPath,
   fileUrlToPath,
   findRepoRoot,
   harnessPackageDir,
@@ -112,6 +113,9 @@ test('realpathOrSelf returns the input unchanged for a path that does not exist'
 
 test('the derived directories assemble from their roots: runtime under ENSO_HOME, the build cache in the checkout', () => {
   expect(ensoAgentDir('/home/u/.enso')).toBe('/home/u/.enso/pi-agent')
+  // The permission rules pi runs under (#446): the user's, beside their config — not picc's
+  // `node_modules` copy, which one checkout's `bun install` resets.
+  expect(ensoPermissionRulesPath('/home/u/.enso')).toBe('/home/u/.enso/permissions.json')
   expect(printHarnessDir('/repo')).toBe('/repo/node_modules/.cache/enso/print-harness')
   expect(harnessPackageDir('/repo')).toBe('/repo/packages/harness')
   expect(webPackageDir('/repo')).toBe('/repo/packages/web')

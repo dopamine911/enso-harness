@@ -167,6 +167,18 @@ export const PICC_PERMISSION_MODES = ['default', 'acceptEdits', 'plan', 'bypassP
 no getter (`packages/web/src/host/permission-mode-adapter.ts:5-8`); the one observable artifact is the custom entry it appends on
 every change, `customType: "modes"`. The harness never writes one.
 
+**Its rules come from `ENSO_HOME/permissions.json`, prepared by us (#446).** The extension reads
+its user rules from the file its `PICC_PERMISSION_MODES_CONFIG_PATH` names, and it reads a file with
+no rules as "import `~/.claude/settings.json` into it", every time it is empty. So both launch
+surfaces point it at `ENSO_HOME/permissions.json` and prepare the file first, with
+`preparePermissionRules` (`@enso/core/permission-rules`): the host in `createAgentHost`, the terminal
+launcher on the spawned pi's environment (`scripts/enso.ts`). A missing or empty file is seeded with
+`ENSO_DEFAULT_DENY_RULES`, a file with rules is kept as it is, and an unreadable one refuses the
+launch. Unpointed, the extension would read a copy inside its own `node_modules` directory. It reads
+the file when it loads, once per session, so an edit applies to new sessions; the rules a run ran
+under are hashed into its run context (`mode.rulesHash`, #435). A project's own rules
+(`<project>/.pi/permissions.json`) are the extension's repo layer and not yet Enso's (#474).
+
 **Read by the host, and only there.** `packages/web/src/host/agent-host.ts` implements
 `ThreadRuntime.permissionModeState` for a live thread: the walk over `sessionManager.getBranch()` for
 the mode, and `PICC_PERMISSION_MODES` filtered by the commands the session's extension runner actually
@@ -219,8 +231,9 @@ last entry wins, none is `default`, another extension's custom entry is not a mo
   spells it is one allowlist line, each with its reason — and every line below is this seam's:
   none for this seam any more: the six lines L3 needed (`core/permission-mode.ts`, `core/index.ts`,
   `server/index.ts`, `server/follow.ts`, `permission-mode.tsx`, `mode-lines.ts`) left with steps A and
-  B, and the gate refuses a row that matches nothing, so they cannot come back unnoticed. The one line
-  left, `packages/core/src/guard.ts`, is the guards page's.
+  B, and the gate refuses a row that matches nothing, so they cannot come back unnoticed. One row is
+  this seam's again: `scripts/enso.ts`, which sets the extension's rules variable on the spawned pi
+  (#446). `packages/core/src/guard.ts` is the guards page's.
 - **The tool-call participants tripwire** (`packages/harness/extensions/__tests__/tool-call-participants.test.ts`)
   names the mode extension as the second of exactly two `tool_call` handlers, so it cannot be silently
   replaced by a third — see the guards page.
@@ -229,16 +242,18 @@ last entry wins, none is `default`, another extension's custom entry is not a mo
 
 ## What crosses it that should not
 
-**Nothing.** Above the host, no surface reads the vendor's persisted entry, spells its set, or names
-its commands; the vendor gate's allowlist has no row for this seam. What the browser knows of the mode
-is `EnsoPermissionModeState` in, `EnsoPermissionModeChange` out.
+**One variable name.** Above the host, no surface reads the vendor's persisted entry, spells its set,
+or names its commands. The terminal launcher names one thing, the extension's rules variable, because
+it spawns pi rather than hosting it (#446). What the browser knows of the mode is
+`EnsoPermissionModeState` in, `EnsoPermissionModeChange` out.
 
 ## Pivot cost
 
 **Replace the mode extension** and the files that change are `permission-mode-adapter.ts` (the set,
 the initial mode, the walk, the entry reader, the command a mode is set with) and `agent-host.ts` (the
-command-name intersection, the `permission_mode` emission, `setPermissionMode`) under `host/`. Nothing
-above them.
+command-name intersection, the `permission_mode` emission, `setPermissionMode`, the rules pin) under
+`host/`, plus the rules variable in `scripts/enso.ts`. The rules file's shape is the vendor's, so a
+replacement that reads another shape changes `@enso/core/permission-rules` too. Nothing above them.
 `EnsoFollowSnapshot`, the inspection, the summary, the router, the store's fold and both server cold
 paths do not change: they hold `{ mode, available }` and the fakes prove the server runs on that alone.
 
