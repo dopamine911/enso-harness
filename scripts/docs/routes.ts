@@ -121,6 +121,14 @@ const REGEX_ROUTE_METADATA: Record<string, RouteMetadata> = {
       "200 `EnsoSessionEval` JSON — the mechanical timeline and scorecard (#441): the branch's events off pi's entries, the queued prompts and interrupts off the day files the branch spans",
     errors: '400 malformed thread id; 403 untrusted origin; 404 no session; 500 handler failure',
   }),
+  THREAD_GIT_ROUTE: threadRead({
+    path: '/api/threads/:threadId/git',
+    handler: 'respondWithThreadGit',
+    success:
+      "200 `EnsoThreadGit` JSON — the thread's cwd and git's state there (#453): repository, branch, upstream, the last-push baseline and the rule that chose it, ahead/behind, and changed files by where they sit; `not-a-repository` or `unavailable` with git's reason otherwise. Read-only, no fetch",
+    errors:
+      '400 malformed thread id; 403 untrusted origin; 404 no session, or its project is no longer served; 500 handler failure',
+  }),
   THREAD_HISTORY_ROUTE: threadRead({
     path: '/api/threads/:threadId/history',
     handler: 'respondWithThreadHistory',

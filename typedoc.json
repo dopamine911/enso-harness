@@ -2,6 +2,7 @@
   "$schema": "https://typedoc.org/schema.json",
   "entryPoints": [
     "packages/core/src/index.ts",
+    "packages/core/src/git.ts",
     "packages/core/src/paths.ts",
     "packages/core/src/secrets.ts",
     "packages/core/src/pi-manifest.ts",
@@ -39,6 +40,7 @@
     "Thread stats",
     "Thread context",
     "Run context",
+    "Git",
     "Session eval",
     "Dialogs",
     "Permission mode",

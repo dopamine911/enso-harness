@@ -20,16 +20,23 @@ import { latestWins } from './thread-debug.tsx'
  * inline (#362 review). A CHANGE of `read` is a new question (the Context Browser asks for another request): the
  * outcome goes back to `reading` until it is answered, so a failure of the last question is not
  * shown as this one's.
+ *
+ * `moment` is another reason to read again (#453: the status bar's git readout asks when a tool
+ * result settles). A new moment asks the SAME question, so the last answer stays on screen until
+ * the next one lands — only a new `read` goes back to `reading`.
  */
 export function useReadOnUsage<Outcome>(
   read: (threadId: string, fetchImpl: FetchLike) => Promise<Outcome>,
   reading: Outcome,
+  moment: string = '',
 ): Outcome {
   const stores = useThreadStores()
   const [outcome, setOutcome] = useState<Outcome>(reading)
   const initial = useRef(reading)
+  const asked = useRef<{ stores: unknown; read: unknown } | undefined>(undefined)
   useEffect(() => {
-    setOutcome(initial.current)
+    if (asked.current?.stores !== stores || asked.current.read !== read) setOutcome(initial.current)
+    asked.current = { stores, read }
     let mounted = true
     const readLatest = latestWins(() => read(stores.threadId, stores.fetch))
     const refresh = (): void => {
@@ -43,6 +50,6 @@ export function useReadOnUsage<Outcome>(
       mounted = false
       unsubscribe()
     }
-  }, [stores, read])
+  }, [stores, read, moment])
   return outcome
 }

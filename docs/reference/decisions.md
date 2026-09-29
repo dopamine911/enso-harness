@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 322.**
+**Decision headers: 328.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -10,6 +10,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | File | Issues | First complete decision sentence |
 |---|---|---|
 | `packages/core/src/__tests__/config.test.ts` | `#59`, `#421` | The config loading contract (#59, #421): a file that is there parses or fails CLOSED — every non-conforming input comes back `unreadable`, never as a silently-empty config — and no file is the defaults. |
+| `packages/core/src/__tests__/git.test.ts` | `#453` | #453: git read in a thread's cwd, against real repositories built in a temporary directory — every baseline rule, the states a working tree can be in, and the settings that keep a read from writing or running anything the repository configures. |
 | `packages/core/src/__tests__/log-process.test.ts` | `#132` | The file a user hands us (#132), end to end through the real configurator: what a line looks like, what never reaches it, what every line under a route carries — and the knob. |
 | `packages/core/src/__tests__/log-recorder.ts` | `#132`, `#178` | The tests' sink (#132), one for every package (#178): every `enso` record, at every level, into memory — a guard's verdict, an audit line or a route's problem is asserted as the record it is, the way a bundle reader would read it, not as a line on stderr. |
 | `packages/core/src/__tests__/log-stats.test.ts` | `#144` | The day, derived (#144 slice 4): every number a fold over records that already exist, joined by the ids they carry and never by adjacency in a file three processes interleave. |
@@ -30,6 +31,8 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/core/src/config.ts` | `#59`, `#421` | Enso's config (#59): the USER's `config.json` in `ENSO_HOME` (`~/.enso/config.json`, #421). |
 | `packages/core/src/dialog.ts` | `#12`, `#27`, `#112` | pi's blocking extension dialogs, as data (#27, #112). |
 | `packages/core/src/follow.ts` | `#112` | The server↔browser wire (#112): a thread's feed, as the follow route serves it. |
+| `packages/core/src/git-state.ts` | `#453` | What git says about a thread's cwd (#453): the repository, the branch, what it pushes to, the commit the last push left on the remote, and the work that is not there yet. |
+| `packages/core/src/git.ts` | `#435`, `#453` | git, read (#453) — THE one way Enso runs git: the run-context recorder's revision probe (#435) and the web server's `GET /api/threads/:threadId/git` both come through {@link runGitIn}. |
 | `packages/core/src/log-bundle.ts` | `#132` | The bundle (#132 item 5): ONE plaintext file a user attaches to an issue, built from things that already exist — the day's records, the live threads' inspections, the versions, and what the browser logged — with a manifest of what was redacted so the reader knows what is missing rather than wondering. |
 | `packages/core/src/log-process.ts` | `#132` | A process's sink (#132 item 2): ONE log for the harness — `.enso/logs/enso-YYYY-MM-DD.jsonl`, every process appending to the same day's file, every record redacted by field name before it is written, and — for a terminal — a pretty console sink beside it at its own level. |
 | `packages/core/src/log-stats.ts` | `#132`, `#144` | The day, derived (#144 slice 4): cost per thread and per model, how long each run took to its first token and to settle, how long each tool took, which guard rule refused what, and who wrote to today's file — all of it from the records, none of it from a counter. |
@@ -96,7 +99,6 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/harness/extensions/guards/index.ts` | `#4`, `#9`, `#10`, `#11`, `#20`, `#21`, `#69` | Tier 0 guards — see `docs/concepts/pi-immediate-needs.md`. |
 | `packages/harness/extensions/logging/__tests__/logging.test.ts` | `#132` | The extension's two branches (#132): pi as a CHILD configures its own sink; pi IN-PROCESS leaves the server's alone. |
 | `packages/harness/extensions/logging/index.ts` | `#132`, `#144`, `#167` | The extension process's logging (#132), and the one record only an extension can write: the provider's own request id (#144). |
-| `packages/harness/extensions/run-context/__tests__/git-probe.test.ts` | `#435` | #435: the run-context git probe asks the SESSION's cwd, whatever repository the environment names. |
 | `packages/harness/extensions/run-context/__tests__/run-context.test.ts` | `#435`, `#438` | #435's recorder over its dependency seam (PR #438 review): the branches the review rounds added, each where a real run would take it — git and the config faked, pi reduced to the `on` it registers with and the `appendEntry` it writes through. |
 | `packages/harness/extensions/run-context/index.ts` | `#126`, `#435`, `#436`, `#438`, `#440` | The run-context recorder (#435, Lineage #126): at every prompt's run start, what the run starts under — git revision and dirty state, the resolved config's hash and files, the skills, the context files' hashes, the permission mode's rule-set hash — appended to pi's log as an `enso-run-context` entry (`@enso/core` `run-context.ts`) ONLY when a field differs from the last one on the branch. |
 | `packages/harness/extensions/web-fetch/__tests__/one-trust-question.test.ts` | `#421` | #421, found live: the trust question for a project's `.enso/config.json` must be asked ONCE per session, though two tools (web_fetch, web_search) read the config. |
@@ -137,6 +139,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/__tests__/thread-debug-drawer.test.tsx` | `#435`, `#440` | The drawer, mounted, reading its fork point (#435). |
 | `packages/web/src/__tests__/thread-debug.test.tsx` | `#86` | #86: the drawer's one job is to NAME a disagreement between what the browser believes and what pi's session holds. |
 | `packages/web/src/__tests__/thread-eval.test.tsx` | `#441` | #441's Stats-tab panel: a static render of what the eval says it counted, what it could not, and the timeline's two counters — never a verdict. |
+| `packages/web/src/__tests__/thread-git.test.tsx` | `#453` | #453: the status bar's git readout — the pure view in every state git can be in, the read of its route in every way it can go, and the count whose change asks again. |
 | `packages/web/src/__tests__/thread-stats.test.tsx` | `#45` | #45 phase 2: the stats drawer, livecraft's session analysis over our wire — its derivations as pure functions, and a static render of what it says it measured and what it could not. |
 | `packages/web/src/__tests__/thread-status.test.tsx` | `#45`, `#90` | #90 PR 1: the always-on status bar. |
 | `packages/web/src/__tests__/thread-url.test.ts` | `#142` | The URL is the source of truth for the active thread (#142): what it names, and what it cannot. |
@@ -209,7 +212,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/project-list.ts` | `#395` | The projects the rail groups threads under (#395): the launch directory first, then the ones registered under the install's roots, as `GET /api/projects` lists them. |
 | `packages/web/src/prompt-library-connection.ts` | `#443` | The prompt library's reads (#443): `GET /api/prompts` and `GET /api/prompts/:id`, validated with the wire's own schemas, as `commands-connection.ts` reads the palette's list. |
 | `packages/web/src/questionnaire-card.tsx` | `#12` | The agent's `ask_user` questionnaire as one card (#12): a tab per question, each option a row with its label and what choosing it means, an "Other" row for an answer in the user's own words, and one "Submit answers" once every question has one. |
-| `packages/web/src/read-on-usage.ts` | `#45`, `#361`, `#362`, `#404` | A thread's route, read on mount and again whenever the thread's usage moves (#45, #361) — the Stats and Context views' one refresh rule. |
+| `packages/web/src/read-on-usage.ts` | `#45`, `#361`, `#362`, `#404`, `#453` | A thread's route, read on mount and again whenever the thread's usage moves (#45, #361) — the Stats and Context views' one refresh rule. |
 | `packages/web/src/refused-attempt.tsx` | `#387` | Who refused, as a reader names them (#387): pi's display name for the provider (`Anthropic`), else its id; undefined when the refusal names no provider. |
 | `packages/web/src/route-read.ts` | `#45` | One GET of a JSON route whose answer has a schema, in the three ways it can go — a failure is words, never a throw (#45 phase 2 folded the thread timeline's and the stats drawer's copies). |
 | `packages/web/src/server/__tests__/bun-plugin-strict-binding-workaround.test.ts` | `#237` | The dev bundle's one source rewrite, executed (#237). |
@@ -229,6 +232,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/server/__tests__/server-handler.test.ts` | `#76`, `#86`, `#95`, `#97` | The server's routes beside the wire, over real HTTP (#76, #86, #95, #97): what the inspection, history and session-listing routes report about threads the prompt route built. |
 | `packages/web/src/server/__tests__/thread-context-route.test.ts` | `#361` | #361: one thread's context — pi's branch and pi's meter, from memory for a live thread and from the file otherwise, building nothing to answer. |
 | `packages/web/src/server/__tests__/thread-eval-route.test.ts` | `#441` | #441: one thread's eval — the branch from pi, the log's queued admissions and aborts from the day files the branch spans. |
+| `packages/web/src/server/__tests__/thread-git-route.test.ts` | `#453` | #453: one thread's git state — asked in the live thread's cwd, or the stored thread's, building nothing to answer, and never in a directory the server does not serve. |
 | `packages/web/src/server/__tests__/thread-stats-route.test.ts` | `#45` | #45 phase 2: one thread's stats — pi's session for the numbers, the day files for the times. |
 | `packages/web/src/server/__tests__/transcript-to-messages.test.ts` | `#95`, `#162` | #95: a stored branch mounts as the messages a live run would have left behind. |
 | `packages/web/src/server/__tests__/vendor-links.test.ts` | `#160` | ⚠ The precondition that was missing when a real run failed. |
@@ -249,6 +253,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/server/sse.ts` | `#109` | The SSE plumbing every streaming route shares: the response headers and the keepalive. |
 | `packages/web/src/server/thread-context-route.ts` | `#86`, `#361` | `GET /api/threads/:threadId/context` (#361): the thread's context, request by request — the Context view reads it. |
 | `packages/web/src/server/thread-eval-route.ts` | `#441` | `GET /api/threads/:threadId/eval` (#441): one thread's session eval — the mechanical timeline and scorecard `session-eval.ts` computes. |
+| `packages/web/src/server/thread-git-route.ts` | `#86`, `#453` | `GET /api/threads/:threadId/git` (#453): git's state in the thread's cwd — the repository, the branch, the last-push baseline and the work not yet pushed (`@enso/core/git`). |
 | `packages/web/src/server/thread-log-days.ts` | `#45`, `#441` | A thread's records in the day files (#45, #441): which days are on disk, which local day a moment falls on, and one day's lines for one thread. |
 | `packages/web/src/server/thread-manifest-route.ts` | `#86`, `#435` | `GET /api/threads/:threadId/manifest` (#435): the thread's fork point — its identity, then the conditions it runs under (recorded model and level, mode, cwd, the latest `enso-run-context`) — off the branch the host walks (`host/fork-point.ts`). |
 | `packages/web/src/server/thread-read.ts` | `#214` | THE LIVE-OR-COLD READ, ONCE (#214). |
@@ -264,6 +269,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/thread-context-analysis.ts` | `#361` | What the Context view derives from `EnsoThreadContext` before it draws (#361): the category order and names, totals, the prompt-granularity roll-up and the delta series — dsh-context's `categories.ts`, `headline.ts` and trend aggregation, over our wire. |
 | `packages/web/src/thread-context.tsx` | `#361` | The Context view (#361) — dsh-context's Context tab over pi, in the design direction's layout (`Enso-Design-Direction`, the Context view): Now (what the next request is made of, beside the provider's count for the last one), Trend (every request's makeup, and the picked one's brief), then the Context Browser with Context Events and File Activity beside it on a wide view. |
 | `packages/web/src/thread-eval.tsx` | `#441` | The session eval on the Stats tab (#441, the follow-up its issue named): the scorecard, the agent-side signals and the timeline `GET /api/threads/:threadId/eval` answers, under the stats drawer. |
+| `packages/web/src/thread-git.tsx` | `#453` | The status bar's git readout (#453): the branch, how far it is ahead of and behind the last push, and the work in the tree — off `GET /api/threads/:threadId/git`, whose tooltip names the baseline and the rule that chose it (`@enso/core` `git-state.ts`). |
 | `packages/web/src/thread-stats-analysis.ts` | `#45`, `#387`, `#407` | What the stats drawer derives from `EnsoThreadStats` before it draws (#45 phase 2): the averages, the per-tool totals and the two rankings — pi-livecraft's `analyzeSession` and `SessionAnalysisWidget` rankings (`.inspiration/pi-extensions/pi-livecraft`), ported to our wire. |
 | `packages/web/src/thread-stats.tsx` | `#45`, `#359` | The thread's stats drawer (#45 phase 2) — pi-livecraft's session analysis widget (`.inspiration/pi-extensions/pi-livecraft/src/features/session-analysis/`), section for section, over our wire: summary cards, context and tokens per turn, cost per turn, cumulative usage by tool, costliest calls, distribution, costliest prompts. |
 | `packages/web/src/thread-status.tsx` | `#45`, `#51`, `#84`, `#90`, `#103` | The status bar (#90 PR 1): the always-on line that says what this session is doing and what it has cost, so the answer to "is anything happening?" |

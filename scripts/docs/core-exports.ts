@@ -22,12 +22,18 @@ const BARREL = join(CORE_SOURCE, 'index.ts')
  * the browser graph cannot reach `node:*` through `@enso/core`. Each is read like the barrel is.
  */
 const SUBPATH_MODULES: readonly { readonly file: string; readonly entrypoint: SubpathEntrypoint }[] = [
+  { file: 'git.ts', entrypoint: '@enso/core/git' },
   { file: 'log-process.ts', entrypoint: '@enso/core/log-process' },
   { file: 'paths.ts', entrypoint: '@enso/core/paths' },
   { file: 'pi-manifest.ts', entrypoint: '@enso/core/pi-manifest' },
   { file: 'secrets.ts', entrypoint: '@enso/core/secrets' },
 ]
-type SubpathEntrypoint = '@enso/core/log-process' | '@enso/core/paths' | '@enso/core/pi-manifest' | '@enso/core/secrets'
+type SubpathEntrypoint =
+  | '@enso/core/git'
+  | '@enso/core/log-process'
+  | '@enso/core/paths'
+  | '@enso/core/pi-manifest'
+  | '@enso/core/secrets'
 
 type Classification = 'wire' | 'host contract' | 'config/policy' | 'node-only utility'
 type Region = 'web/host' | 'web/server' | 'web/browser' | 'harness' | 'scripts'
@@ -46,6 +52,8 @@ const MODULE_FACTS: Readonly<Record<string, readonly [classification: Classifica
   'config.ts': ['config/policy', 'Record, Permission'],
   'dialog.ts': ['wire', 'Control'],
   'follow.ts': ['wire', 'Control, Observation'],
+  'git.ts': ['node-only utility', 'Project vocabulary'],
+  'git-state.ts': ['wire', 'Thread, Observation'],
   'guard.ts': ['config/policy', 'Permission'],
   'log.ts': ['wire', 'Record'],
   'log-bundle.ts': ['node-only utility', 'Record'],

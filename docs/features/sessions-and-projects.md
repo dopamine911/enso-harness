@@ -43,11 +43,14 @@ The thread above was opened after a restart of the app, so it is cold. Its last 
 
 If a thread's last run was cut off before pi answered, the thread shows a notice with a **Continue** button. Continue picks up from the stored state without a new message. See [Forks and lineage](./lineage.md), which also covers what a thread records about the conditions it ran under.
 
+The status bar also says where the project stands in git. It shows the branch, `↑` for commits not pushed yet, `↓` for commits on the remote this branch doesn't have, and the files that changed: `main ↑2 · 1 staged · 3 unstaged`. Hover it to see what it is measured from. That is the last push to the branch's upstream if it has one. A branch pushed without an upstream is measured from its copy on the remote. A branch never pushed is measured from where it branched off the remote's default branch, such as `origin/main`. A project with no remote counts only uncommitted changes. The readout updates when a tool call finishes, so a commit or a push by pi shows up straight away. A project outside git says `no git`. The same state is served at `GET /api/threads/:threadId/git`.
+
 ## What it doesn't do
 
 - A project must be strictly inside a declared root. Hidden folders, and links that lead out of a root, are not offered.
 - Removing a project only forgets the registration. Its threads stay on disk, and come back if you add the folder again.
 - A thread is stored once pi has answered at least once. A thread closed before its first reply is not kept.
+- Enso never fetches, pushes or changes anything in git. "Last push" is what this copy of the repository last saw of the remote; run `git fetch` yourself to update it.
 
 ## Go deeper
 

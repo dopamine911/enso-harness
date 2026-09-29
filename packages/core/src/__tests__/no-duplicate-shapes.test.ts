@@ -21,6 +21,7 @@ test('every module is reachable: from the barrel, or from a subpath package.json
   // exceptions are declared in package.json (checked here so an exception cannot be an
   // undeclared file either), and every one is a module the BROWSER MUST NEVER SEE:
   //
+  //   `git.ts`          `node:child_process` — the one git runner, and the repository reader (#453)
   //   `log-process.ts`  `@logtape/file` builds its sinks on `node:fs` at import
   //   `paths.ts`        `node:fs`/`node:url` — the repo-root walker and the harness's paths (#211)
   //   `pi-manifest.ts`  `node:fs` — is a declared pi resource path actually there (#221)
@@ -44,6 +45,7 @@ test('every module is reachable: from the barrel, or from a subpath package.json
     .filter(([subpath]) => subpath !== '.')
     .map(([, target]) => target.replace(/^\.\/src\//, ''))
   expect(subpathModules).toEqual([
+    'git.ts',
     'log-process.ts',
     'paths.ts',
     'pi-manifest.ts',

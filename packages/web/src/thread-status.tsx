@@ -3,6 +3,7 @@ import type { UIMessage } from '@tanstack/ai-client'
 import { automaticPartsForMessage, selectMessageUI } from '@tanstack/ai-client/ui'
 import { toolResultState } from './EnsoToolResult.tsx'
 import { useStore, useThreadStores } from './store.ts'
+import { GitIndicator, type GitOutcome, settledToolResults, useThreadGit } from './thread-git.tsx'
 
 /**
  * The status bar (#90 PR 1): the always-on line that says what this session is doing and
@@ -163,6 +164,8 @@ export interface ThreadStatusViewProps {
   readonly refusal?: ProviderRefusalClass | undefined
   /** Who refused (#387): `Anthropic: rate-limited`, never a bare word that reads as Enso's policy. */
   readonly refusalSource?: string | undefined
+  /** git in the thread's cwd (#453): branch, ahead/behind the last push, the tree's changes. */
+  readonly git?: GitOutcome | undefined
 }
 
 const COMPACT_TOKENS = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 })
@@ -255,6 +258,7 @@ export function ThreadStatusView({
   questionWaiting,
   refusal,
   refusalSource,
+  git,
 }: ThreadStatusViewProps): React.ReactNode {
   const dotClass = activityDotClass(activity)
   const context = usage?.context ?? null
@@ -306,6 +310,7 @@ export function ThreadStatusView({
         </span>
       )}
       <ProjectIndicator cwd={cwd} />
+      {git === undefined ? null : <GitIndicator outcome={git} />}
       {context === null ? null : (
         <span className="ml-auto">
           <ContextMeter context={context} />
@@ -339,6 +344,7 @@ export function ThreadStatusBar({ messages, generating }: ThreadStatusBarProps):
   const questionWaiting = useStore(stores.dialog) !== undefined
   const refusal = useStore(stores.refusal)
   const guardDenials = useStore(stores.guardDenials)
+  const git = useThreadGit(`${settledToolResults(messages)}:${generating}`)
   return (
     <ThreadStatusView
       activity={describeActivity(messages, generating, disconnected)}
@@ -348,6 +354,7 @@ export function ThreadStatusBar({ messages, generating }: ThreadStatusBarProps):
       questionWaiting={questionWaiting}
       refusal={refusal?.refusalClass}
       refusalSource={refusal?.provider}
+      git={git}
     />
   )
 }
