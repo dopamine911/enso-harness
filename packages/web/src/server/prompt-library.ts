@@ -47,7 +47,7 @@ export function readPromptWriteBody(raw: string): EnsoLibraryPromptWrite {
 
 export type LibraryRead =
   | { readonly kind: 'prompt'; readonly prompt: EnsoLibraryPrompt }
-  | { readonly kind: 'missing' }
+  | { readonly kind: 'missing'; readonly reason: string }
   | { readonly kind: 'refused'; readonly reason: string }
 
 export type SystemPromptPick =
@@ -80,7 +80,7 @@ function readFile(directory: string, id: string): LibraryRead {
   try {
     text = readFileSync(pathOf(directory, id), 'utf8')
   } catch (error: unknown) {
-    if (errorCode(error) === 'ENOENT') return { kind: 'missing' }
+    if (errorCode(error) === 'ENOENT') return { kind: 'missing', reason: `no prompt ${id} in ${directory}` }
     return { kind: 'refused', reason: `${id}${EXTENSION}: cannot be read (${errorCode(error) ?? String(error)})` }
   }
   const parsed = parseLibraryPrompt(id, text)
@@ -136,8 +136,7 @@ export function createPromptLibrary(directory: string): PromptLibrary {
     },
     pickSystemPrompt(id: string): SystemPromptPick {
       const read = readFile(directory, id)
-      if (read.kind === 'missing') return { kind: 'refused', reason: `no prompt ${id} in ${directory}` }
-      if (read.kind === 'refused') return read
+      if (read.kind !== 'prompt') return { kind: 'refused', reason: read.reason }
       const { name, category, body } = read.prompt
       if (category === 'session') {
         return {

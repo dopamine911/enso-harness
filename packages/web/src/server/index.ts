@@ -49,6 +49,7 @@ import { createProjectRegistry, ProjectUnavailable } from './projects.ts'
 import {
   createPromptLibrary,
   NO_PROMPT_LIBRARY,
+  type LibraryRead,
   type PromptLibrary,
   readPromptWriteBody,
   type SystemPromptPick,
@@ -242,6 +243,12 @@ async function readJsonBody<T>(
 function refuseWith(response: ServerResponse, outcome: { readonly status: number; readonly reason: string }): void {
   response.writeHead(outcome.status, { 'Content-Type': 'text/plain' })
   response.end(outcome.reason)
+}
+
+/** A 200 with `body` as JSON. */
+function answerJson(response: ServerResponse, body: unknown): void {
+  response.writeHead(200, { 'Content-Type': 'application/json' })
+  response.end(JSON.stringify(body))
 }
 
 /**
@@ -1167,34 +1174,27 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     })
     if (fields === undefined) return
     const read = library.write(id, fields)
-    if (read.kind !== 'prompt') {
-      log.error('prompt {id} did not read back after its write: {read}', { id, read })
-      refuseWith(response, { status: 500, reason: `${id}.md was written but does not read back as a prompt` })
-      return
-    }
-    response.writeHead(200, { 'Content-Type': 'application/json' })
-    response.end(JSON.stringify(read.prompt))
+    if (read.kind !== 'prompt') log.error('prompt {id} did not read back after its write: {read}', { id, read })
+    answerLibraryRead(response, read, 500)
+  }
+
+  /**
+   * A library read, answered: the prompt as JSON, a missing file 404, a refused one with its reason
+   * at `refusedStatus` — 422 for a read, 500 for a write that does not read back.
+   */
+  function answerLibraryRead(response: ServerResponse, read: LibraryRead, refusedStatus: 422 | 500): void {
+    if (read.kind === 'prompt') return answerJson(response, read.prompt)
+    refuseWith(response, { status: read.kind === 'missing' ? 404 : refusedStatus, reason: read.reason })
   }
 
   /** `GET /api/prompts/:id`: the prompt, 404 when there is no such file, 422 naming why a file is refused. */
   function respondWithPrompt(library: PromptLibrary, id: string, response: ServerResponse): void {
-    const read = library.read(id)
-    if (read.kind === 'missing') {
-      refuseWith(response, { status: 404, reason: `no prompt ${id} in ${library.directory}` })
-      return
-    }
-    if (read.kind === 'refused') {
-      refuseWith(response, { status: 422, reason: read.reason })
-      return
-    }
-    response.writeHead(200, { 'Content-Type': 'application/json' })
-    response.end(JSON.stringify(read.prompt))
+    answerLibraryRead(response, library.read(id), 422)
   }
 
   /** `GET /api/prompts`: the library's prompts, and every file it refused, by name. */
   function respondWithPrompts(library: PromptLibrary, response: ServerResponse): void {
-    response.writeHead(200, { 'Content-Type': 'application/json' })
-    response.end(JSON.stringify(library.list()))
+    answerJson(response, library.list())
   }
 
   /** `DELETE /api/prompts/:id`: 204, or 404 when there was no such file. A thread that ran it keeps its own copy. */

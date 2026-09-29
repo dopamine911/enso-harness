@@ -17,12 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Textarea } from './components/ui/textarea.tsx'
 import type { ConfigureOutcome } from './follow-connection.ts'
 import { OptionDetail, optionKeywords } from './model-state.tsx'
-import {
-  PI_DEFAULT_SYSTEM_PROMPT,
-  SessionPromptPicker,
-  SystemPromptField,
-  usePromptLibrary,
-} from './start-session-prompts.tsx'
+import { PI_DEFAULT_SYSTEM_PROMPT, PromptLibraryFields, useSystemPromptChoice } from './start-session-prompts.tsx'
 
 /**
  * The Start-a-session dialog (#391): a new thread opens on it — the model, the effort, the mode, the
@@ -303,8 +298,7 @@ function SessionStatus({
 export function StartSessionDialog(props: StartSessionDialogProps): React.ReactNode {
   const { threadId, open, onClose, fetch: fetchImpl } = props
   const catalogue = useSessionCatalogue(open, threadId, fetchImpl)
-  const library = usePromptLibrary(open, fetchImpl)
-  const [systemPrompt, setSystemPrompt] = useState(PI_DEFAULT_SYSTEM_PROMPT)
+  const promptChoice = useSystemPromptChoice(open, fetchImpl)
   const [model, setModel] = useState<string | undefined>(undefined)
   const [thinking, setThinking] = useState<string | undefined>(undefined)
   const [mode, setMode] = useState<string | undefined>(undefined)
@@ -332,7 +326,11 @@ export function StartSessionDialog(props: StartSessionDialogProps): React.ReactN
     if (!ready) return
     setApplying(true)
     setRefusal(undefined)
-    const refused = await startWith(props, configurationOf({ model, thinking, mode, systemPrompt }), text)
+    const refused = await startWith(
+      props,
+      configurationOf({ model, thinking, mode, systemPrompt: promptChoice.systemPrompt }),
+      text,
+    )
     setApplying(false)
     if (refused === undefined) onClose()
     else setRefusal(refused)
@@ -349,8 +347,7 @@ export function StartSessionDialog(props: StartSessionDialogProps): React.ReactN
               <ChoiceField field={EFFORT_FIELD} value={thinking} choices={levels} onChoose={setThinking} />
               <ChoiceField field={MODE_FIELD} value={mode} choices={props.modes} onChoose={setMode} />
             </div>
-            <SystemPromptField library={library} value={systemPrompt} onChoose={setSystemPrompt} />
-            <SessionPromptPicker library={library} fetch={fetchImpl} onPick={setText} />
+            <PromptLibraryFields choice={promptChoice} fetch={fetchImpl} onPick={setText} />
             <Field>
               <FieldLabel htmlFor="start-session-prompt">Prompt</FieldLabel>
               <Textarea

@@ -45,6 +45,17 @@ function threadRead(
   return { method: 'GET', input: 'path: `threadId`', routeClass: 'observation', builds: 'no', logs: 'no', ...facts }
 }
 
+/** A prompt-library row (#443): one path, three methods, no thread, nothing built. */
+function promptRoute(
+  facts: Pick<RouteMetadata, 'method' | 'handler' | 'input' | 'success' | 'errors' | 'routeClass' | 'logs'>,
+): RouteMetadata {
+  return {
+    ...facts,
+    path: '/api/prompts/:id',
+    builds: 'no',
+  }
+}
+
 /** A literal GET that takes no input, reads, and builds nothing — the listing and inspection rows. */
 function literalRead(
   facts: Pick<RouteMetadata, 'handler' | 'success'> & Partial<Pick<RouteMetadata, 'errors' | 'factory' | 'input'>>,
@@ -217,9 +228,8 @@ const REGEX_ROUTE_METADATA: Record<string, RouteMetadata> = {
     logs: 'yes',
     factory: { path: FOLLOW_PATH, declaration: 'export async function continueThread' },
   },
-  PROMPT_READ_ROUTE: {
+  PROMPT_READ_ROUTE: promptRoute({
     method: 'GET',
-    path: '/api/prompts/:id',
     handler: 'respondWithPrompt → PromptLibrary.read',
     input: 'path: `id` — the file name under `ENSO_HOME/prompts` without `.md`, lowercase words joined by hyphens',
     success:
@@ -227,12 +237,10 @@ const REGEX_ROUTE_METADATA: Record<string, RouteMetadata> = {
     errors:
       '403 untrusted origin; 404 no such file, or a server started without a library; 422 the file is refused, with the reason naming it — unreadable, no frontmatter, an unknown key, no name, a category that is not system, append or session; 500 handler failure',
     routeClass: 'observation',
-    builds: 'no',
     logs: 'no',
-  },
-  PROMPT_WRITE_ROUTE: {
+  }),
+  PROMPT_WRITE_ROUTE: promptRoute({
     method: 'PUT',
-    path: '/api/prompts/:id',
     handler: 'respondToPromptWrite → PromptLibrary.write',
     input:
       'path: `id`; body: `EnsoLibraryPromptWrite` — `name`, `description`, `category` (system, append or session) and the markdown `body`',
@@ -241,20 +249,17 @@ const REGEX_ROUTE_METADATA: Record<string, RouteMetadata> = {
     errors:
       '400 malformed body; 403 untrusted origin; 404 a server started without a library; 413 body too large; 500 the file does not read back, or a disk failure',
     routeClass: 'control',
-    builds: 'no',
     logs: 'yes',
-  },
-  PROMPT_DELETE_ROUTE: {
+  }),
+  PROMPT_DELETE_ROUTE: promptRoute({
     method: 'DELETE',
-    path: '/api/prompts/:id',
     handler: 'respondToPromptRemoval → PromptLibrary.remove',
     input: 'path: `id`',
     success: '204 empty — the file is gone; a thread that ran it keeps the text its log recorded',
     errors: '403 untrusted origin; 404 no such file, or a server started without a library; 500 handler failure',
     routeClass: 'control',
-    builds: 'no',
     logs: 'yes',
-  },
+  }),
   PROJECT_ROUTE: {
     method: 'DELETE',
     path: '/api/projects/:projectId',

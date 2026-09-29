@@ -21,7 +21,7 @@ export const PI_DEFAULT_SYSTEM_PROMPT = 'pi-default'
 type LibraryState = { readonly kind: 'loading' } | LibraryListing
 
 /** The library, read afresh each time the dialog opens. */
-export function usePromptLibrary(open: boolean, fetchImpl: FetchLike | undefined): LibraryState {
+function usePromptLibrary(open: boolean, fetchImpl: FetchLike | undefined): LibraryState {
   const [library, setLibrary] = useState<LibraryState>({ kind: 'loading' })
   useEffect(() => {
     if (!open) return
@@ -35,6 +35,34 @@ export function usePromptLibrary(open: boolean, fetchImpl: FetchLike | undefined
     }
   }, [open, fetchImpl])
   return library
+}
+
+/** The library, and the system prompt chosen from it — pi's default until one is picked. */
+export interface SystemPromptChoice {
+  readonly library: LibraryState
+  readonly systemPrompt: string
+  readonly setSystemPrompt: (value: string) => void
+}
+
+export function useSystemPromptChoice(open: boolean, fetchImpl: FetchLike | undefined): SystemPromptChoice {
+  const library = usePromptLibrary(open, fetchImpl)
+  const [systemPrompt, setSystemPrompt] = useState(PI_DEFAULT_SYSTEM_PROMPT)
+  return { library, systemPrompt, setSystemPrompt }
+}
+
+/** Both library fields, as the dialog places them: the system prompt, then a saved prompt for the box. */
+export function PromptLibraryFields(props: {
+  choice: SystemPromptChoice
+  fetch: FetchLike | undefined
+  onPick: (text: string) => void
+}): React.ReactNode {
+  const { library, systemPrompt, setSystemPrompt } = props.choice
+  return (
+    <>
+      <SystemPromptField library={library} value={systemPrompt} onChoose={setSystemPrompt} />
+      <SessionPromptPicker library={library} fetch={props.fetch} onPick={props.onPick} />
+    </>
+  )
 }
 
 function promptsOf(
@@ -84,7 +112,7 @@ function LibraryProblems({ library }: { library: LibraryState }): React.ReactNod
   )
 }
 
-export function SystemPromptField(props: {
+function SystemPromptField(props: {
   library: LibraryState
   value: string
   onChoose: (value: string) => void
@@ -111,7 +139,7 @@ export function SystemPromptField(props: {
 }
 
 /** A saved session prompt, read in full and handed to the prompt box; a read that fails is said here. */
-export function SessionPromptPicker(props: {
+function SessionPromptPicker(props: {
   library: LibraryState
   fetch: FetchLike | undefined
   onPick: (text: string) => void
