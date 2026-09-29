@@ -29,6 +29,14 @@ import type { FetchLike } from './browser-logging.ts'
  * operation for an interrupt outcome, so `EnsoDialogInterrupt` styling is verified against
  * live `/mode` (or the fake-transport unit tests), not here.
  */
+/**
+ * The link tripwire, well-formed on purpose (#299): a destination with spaces is not a link in
+ * CommonMark. `@tanstack/markdown` forgives one (it strips the whitespace), but a stricter renderer
+ * would read the old tripwire as plain text — inert whether or not anything sanitised it, and so
+ * healthy-looking by accident. Healthy is its text with no link: the renderer drops the
+ * executable destination. Exported so a test proves it is a link to drop.
+ */
+export const FIXTURE_LINK_TRIPWIRE = "[this link must be inert](javascript:alert('sanitize-regression:link-fired'))"
 // The explicit return type is REQUIRED, not style: without it tsc infers a type that
 // references the helper's hashed internal chunk (`chat-*.js`) and fails TS2742
 // ("likely not portable") under this repo's composite/declaration build.
@@ -52,7 +60,7 @@ export function createFixtureChat(): TanStackChat {
           // so the healthy page shows them as literal characters — that is the pass, not a glitch.
           '<img src="x" alt="[image tripwire — healthy is this tag shown as text, never drawn]" ' +
           'onerror="alert(\'sanitize regression: img onerror fired\')">\n\n' +
-          "[this link must be inert](javascript:alert('sanitize regression: javascript link fired'))\n\n" +
+          `${FIXTURE_LINK_TRIPWIRE}\n\n` +
           "<script>alert('sanitize regression: script tag executed')</script>\n\n" +
           'SENTINEL-AFTER: healthy is the tags above as literal text and the link as plain text ' +
           'between the sentinels, and no script anywhere. The regression signal is an alert firing, ' +
