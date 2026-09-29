@@ -14,8 +14,21 @@ import { findRepoRoot } from '../paths.ts'
  * writing or running anything the repository configures.
  */
 
-const gitPath = Bun.which('git')
-if (gitPath === null) throw new Error('git is not on PATH')
+/** A program on this process's PATH, by absolute path. */
+function onPath(name: string): string {
+  const found = Bun.which(name)
+  if (found === null) throw new Error(`${name} is not on PATH`)
+  return found
+}
+
+const gitPath = onPath('git')
+/**
+ * What the configured-program fixtures run, by absolute path: the hermetic PATH below holds git's
+ * directory only, and under a git hook that is git's exec-path (`/usr/lib/git-core`), with no
+ * `touch` or `cat` in it.
+ */
+const touchPath = onPath('touch')
+const catPath = onPath('cat')
 
 /** A hermetic environment: no user or system config, a fixed identity, and git on PATH. */
 const home = mkdtempSync(join(tmpdir(), 'enso-git-home-'))
@@ -232,7 +245,7 @@ test('⚠ a program the repository configures as its fsmonitor does not run on a
   const directory = repository()
   const ran = join(scratch('fsmonitor'), 'ran')
   const hook = join(directory, 'fsmonitor.sh')
-  writeFileSync(hook, `#!/bin/sh\ntouch '${ran}'\n`, { mode: 0o755 })
+  writeFileSync(hook, `#!/bin/sh\n'${touchPath}' '${ran}'\n`, { mode: 0o755 })
   git(directory, 'config', 'core.fsmonitor', hook)
   // The config really is live: git as a person runs it, the program runs.
   git(directory, 'status', '--porcelain')
@@ -353,7 +366,7 @@ test('⚠ an external diff or textconv program the repository configures does no
   const directory = repository()
   const ran = join(scratch('diff-program'), 'ran')
   const program = join(directory, 'diff-program.sh')
-  writeFileSync(program, `#!/bin/sh\ntouch '${ran}'\ncat "$1"\n`, { mode: 0o755 })
+  writeFileSync(program, `#!/bin/sh\n'${touchPath}' '${ran}'\n'${catPath}' "$1"\n`, { mode: 0o755 })
   git(directory, 'config', 'diff.external', program)
   git(directory, 'config', 'diff.shout.textconv', program)
   writeFileSync(join(directory, '.gitattributes'), '*.md diff=shout\n')
@@ -376,35 +389,46 @@ test('a nested repository is not listed as a file', async () => {
   expect((await changesAt(directory)).files).toEqual([])
 })
 
-test('⚠ counts that do not line up with the file list are never paired by position', async () => {
+test("⚠ a tree that moves while it is read never gives a file another file's patch or counts", async () => {
+  const directory = repository()
+  commit(directory, 'b.md', 'one\n')
+  writeFileSync(join(directory, 'README.md'), 'one\ntwo\nthree\n')
+  const repositoryState = await repositoryAt(directory)
+  /**
+   * The real git, with the agent's next write landing right after git's first diff answers:
+   * README.md stops differing and b.md starts. Any later diff of the same read sees b.md.
+   */
+  let firstDiff: Promise<unknown> | undefined
+  const moving: GitRunner = async (args, cwd) => {
+    if (args[0] !== 'diff') return runGit(args, cwd)
+    if (firstDiff !== undefined) {
+      await firstDiff
+      return runGit(args, cwd)
+    }
+    const answered = runGit(args, cwd).then((result) => {
+      writeFileSync(join(directory, 'README.md'), 'one\n')
+      writeFileSync(join(directory, 'b.md'), 'changed\n')
+      return result
+    })
+    firstDiff = answered
+    return answered
+  }
+  const { files } = await readGitChanges(moving, repositoryState)
+  expect(files.map((file) => [file.path, file.added, file.removed])).toEqual([['README.md', 2, 0]])
+  expect(files[0]?.patch).toContain('+++ b/README.md')
+})
+
+test('a diff too large to hold still lists every file with its counts, without patches', async () => {
   const directory = repository()
   commit(directory, 'b.md', 'one\n')
   writeFileSync(join(directory, 'README.md'), 'one\ntwo\nthree\n')
   writeFileSync(join(directory, 'b.md'), 'changed\n')
-  /** The real git, with one list cut short — the mismatch a pairing by position would get wrong. */
-  const shortened =
-    (flag: string): GitRunner =>
-    async (args, cwd) => {
-      const result = await runGit(args, cwd)
-      if (!args.includes(flag)) return result
-      return { ...result, stdout: flag === '--numstat' ? result.stdout.split('\0').slice(1).join('\0') : '' }
-    }
-  const repositoryState = await repositoryAt(directory)
-  // numstat short by its first record: each file's counts come from its own patch.
-  const fromPatch = await readGitChanges(shortened('--numstat'), repositoryState)
-  expect(fromPatch.files.map((file) => [file.path, file.added, file.removed])).toEqual([
-    ['README.md', 2, 0],
-    ['b.md', 1, 1],
-  ])
-  // With no patch to count either (the patch run's output dropped), the counts are unknown.
-  const cutBoth: GitRunner = async (args, cwd) => {
-    const result = await shortened('--numstat')(args, cwd)
-    const isPatchRun = args[0] === 'diff' && !args.includes('--numstat') && !args.includes('--name-status')
-    return isPatchRun ? { ...result, stdout: '' } : result
-  }
-  const unknown = await readGitChanges(cutBoth, repositoryState)
-  expect(unknown.files.map((file) => [file.path, file.added, file.removed, file.omitted])).toEqual([
-    ['README.md', null, null, 'too-large'],
-    ['b.md', null, null, 'too-large'],
+  // What `execFile` reports when git's output passes the buffer: killed, no exit code of its own.
+  const overflowing: GitRunner = async (args, cwd) =>
+    args.includes('--patch') ? { code: -1, stdout: '', stderr: '' } : runGit(args, cwd)
+  const { files } = await readGitChanges(overflowing, await repositoryAt(directory))
+  expect(files.map((file) => [file.path, file.added, file.removed, file.patch, file.omitted])).toEqual([
+    ['README.md', 2, 0, null, 'too-large'],
+    ['b.md', 1, 1, null, 'too-large'],
   ])
 })

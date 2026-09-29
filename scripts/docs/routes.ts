@@ -368,10 +368,13 @@ export function discoverRoutes(): ResolvedRoute[] {
     const key = match[1] ?? ''
     const metadata = REGEX_ROUTE_METADATA[key]
     const action = match[2]
+    const path = metadata?.path ?? (action === undefined ? undefined : `/api/threads/:threadId/${action}`)
+    // Only `threadRoute(...)` derives its path; a regex literal's metadata must state it.
+    if (metadata !== undefined && path === undefined) throw new Error(`routes: ${key} is a regex literal with no path`)
     return {
       key,
       method: metadata?.method ?? 'GET',
-      path: metadata?.path ?? (action === undefined ? 'UNCLASSIFIED' : `/api/threads/:threadId/${action}`),
+      path: path ?? 'UNCLASSIFIED',
       line: lineAt(server, match.index),
       kind: 'regex',
     }

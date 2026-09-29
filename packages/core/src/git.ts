@@ -352,52 +352,65 @@ interface ListedFile {
   status: EnsoGitFileChange['status']
 }
 
-/**
- * `git diff --name-status -z`: a status field, then its path — two paths for a rename or copy,
- * whose status carries a similarity score (`R087`).
- */
-function parseNameStatus(output: string): ListedFile[] {
-  const fields = output.split('\0')
-  const files: ListedFile[] = []
-  let fieldIndex = 0
-  while (fieldIndex < fields.length) {
-    const letter = fields[fieldIndex]?.[0]
-    const status = letter === undefined ? undefined : STATUS_LETTERS[letter]
-    if (status === undefined) {
-      fieldIndex += 1
-      continue
-    }
-    const twoPaths = status === 'renamed' || status === 'copied'
-    const first = fields[fieldIndex + 1] ?? ''
-    const second = twoPaths ? (fields[fieldIndex + 2] ?? '') : ''
-    files.push(twoPaths ? { path: second, oldPath: first, status } : { path: first, oldPath: null, status })
-    fieldIndex += twoPaths ? 3 : 2
-  }
-  return files.filter((file) => file.path !== '')
+/** A file's added and removed lines: null for a binary file, or when git did not count them. */
+interface LineCounts {
+  added: number | null
+  removed: number | null
 }
 
+const UNCOUNTED: LineCounts = { added: null, removed: null }
+
 /**
- * `git diff --numstat -z`, in the order `--name-status` lists: added and removed per file, `-` for
- * a binary file. A rename's record is `added\tremoved\t` followed by its two paths as fields.
+ * `git diff --raw --numstat [--patch] -z`: every file's raw record (`:modes hashes status`, then its
+ * path — two paths for a rename or copy, whose status carries a similarity score, `R087`), then every
+ * file's numstat record (`-` counts for a binary file; a rename's `added\tremoved\t` with its two
+ * paths as their own fields), then — with `--patch` — an empty field and the unified diff.
+ *
+ * ⚠ One run is one walk of one diff: the three lists are the same files in the same order, so the
+ * position pairs them exactly. Separate runs do not — the working tree moves under a run between
+ * them, and a file that stopped differing while another started would get that file's patch.
+ * A status this reader does not know keeps its place, as `undefined`, and is dropped by the caller.
  */
-function parseNumstat(output: string): Array<{ added: number | null; removed: number | null }> {
+function parseDiff(output: string): {
+  listed: Array<ListedFile | undefined>
+  counts: LineCounts[]
+  patches: string[]
+} {
   const fields = output.split('\0')
-  const counts: Array<{ added: number | null; removed: number | null }> = []
-  let fieldIndex = 0
-  while (fieldIndex < fields.length) {
-    const match = /^(-|\d+)\t(-|\d+)\t(.*)$/s.exec(fields[fieldIndex] ?? '')
-    if (match === null) {
-      fieldIndex += 1
-      continue
-    }
-    counts.push({
-      added: match[1] === '-' ? null : Number(match[1]),
-      removed: match[2] === '-' ? null : Number(match[2]),
-    })
-    // An empty path field means the two paths of a rename follow as their own fields.
-    fieldIndex += match[3] === '' ? 3 : 1
+  const cursor = { at: 0 }
+  const listed: Array<ListedFile | undefined> = []
+  while (fields[cursor.at]?.startsWith(':') === true) listed.push(readRawRecord(fields, cursor))
+  const counts: LineCounts[] = []
+  while (counts.length < listed.length) {
+    const record = readNumstatRecord(fields, cursor)
+    if (record === undefined) break
+    counts.push(record)
   }
-  return counts
+  // `--patch` separates the unified diff from the records with one empty field.
+  if (fields[cursor.at] === '') cursor.at += 1
+  return { listed, counts, patches: splitPatches(fields.slice(cursor.at).join('\0')) }
+}
+
+/** The raw record at the cursor, which it steps past; `undefined` for a status this reader does not know. */
+function readRawRecord(fields: readonly string[], cursor: { at: number }): ListedFile | undefined {
+  const score = fields[cursor.at]?.split(' ').at(-1) ?? ''
+  const status = STATUS_LETTERS[score.slice(0, 1)]
+  const twoPaths = status === 'renamed' || status === 'copied'
+  const first = fields[cursor.at + 1] ?? ''
+  cursor.at += twoPaths ? 3 : 2
+  if (status === undefined) return undefined
+  return twoPaths
+    ? { path: fields[cursor.at - 1] ?? '', oldPath: first, status }
+    : { path: first, oldPath: null, status }
+}
+
+/** The numstat record at the cursor, which it steps past; `undefined`, not stepping, when there is none. */
+function readNumstatRecord(fields: readonly string[], cursor: { at: number }): LineCounts | undefined {
+  const match = /^(-|\d+)\t(-|\d+)\t(.*)$/s.exec(fields[cursor.at] ?? '')
+  if (match === null) return undefined
+  // An empty path field means the two paths of a rename follow as their own fields.
+  cursor.at += match[3] === '' ? 3 : 1
+  return { added: match[1] === '-' ? null : Number(match[1]), removed: match[2] === '-' ? null : Number(match[2]) }
 }
 
 /** One unified diff split per file: every file's part starts at its `diff --git` line. */
@@ -450,26 +463,20 @@ async function trackedChanges(
   base: string,
   budget: { left: number },
 ): Promise<EnsoGitFileChange[]> {
-  const [names, numbers, patches] = await Promise.all([
-    runGit(['diff', ...DIFF_OPTIONS, '--name-status', '-z', base, '--'], root),
-    runGit(['diff', ...DIFF_OPTIONS, '--numstat', '-z', base, '--'], root),
-    runGit(['diff', ...DIFF_OPTIONS, base, '--'], root),
-  ])
-  if (names.code !== 0) throw new Error(reasonOf(names))
-  const files = parseNameStatus(names.stdout)
-  const counts = numbers.code === 0 ? parseNumstat(numbers.stdout) : []
-  const split = patches.code === 0 ? splitPatches(patches.stdout) : []
-  // ⚠ Paired by position only when a list has one entry per file. A patch run that failed (too
-  // much output) or split differently sends no patch, and counts that do not line up are taken
-  // from the file's own patch, or unknown: file N with another file's patch or counts would be
-  // worse than none.
-  const patchesAligned = split.length === files.length
-  const countsAligned = counts.length === files.length
-  return files.map((file, fileIndex) => {
-    const patch = patchesAligned ? split[fileIndex] : undefined
-    const fromPatch = patch === undefined ? { added: null, removed: null } : countPatch(patch)
-    return withPatch(file, (countsAligned ? counts[fileIndex] : undefined) ?? fromPatch, patch, budget)
-  })
+  const listing = ['diff', ...DIFF_OPTIONS, '--raw', '--numstat', '-z']
+  const whole = await runGit([...listing, '--patch', base, '--'], root)
+  // Too much output to hold, or no answer in time: the files and their counts, without patches.
+  const read = whole.code === 0 ? whole : await runGit([...listing, base, '--'], root)
+  if (read.code !== 0) throw new Error(reasonOf(read))
+  const { listed, counts, patches } = parseDiff(read.stdout)
+  // One patch per listed file, by construction; a split that says otherwise sends no patch rather
+  // than risk pairing a file with another's.
+  const paired = read === whole && patches.length === listed.length
+  return listed.flatMap((file, fileIndex) =>
+    file === undefined || file.path === ''
+      ? []
+      : [withPatch(file, counts[fileIndex] ?? UNCOUNTED, paired ? patches[fileIndex] : undefined, budget)],
+  )
 }
 
 /** A file git does not track yet, diffed against nothing — read only when it is small enough. */
