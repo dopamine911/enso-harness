@@ -23,6 +23,14 @@ site/src/content/docs/
 site/dist/
 site/.astro/
 
-# Flow pages are BUILT from tags in source and the diagrams tests record (#482):
-# `bun run docs:flows`. Edit the source; a page here is overwritten on every build.
-docs/flows/prompt-run-settle.md
+# Docs pages that are BUILD OUTPUT (#482), written by `bun run docs:build` and the site build:
+# reference pages from their generators, flow pages from tags in source and the diagrams tests
+# record. Edit the source; a page here is overwritten on every build. The list is
+# `scripts/docs/build-docs.ts#builtDocPages`; `test/docs-gate.test.ts` holds this file to it.
+docs/reference/*.md
+!docs/reference/README.md
+docs/seams/ported-provenance.md
+docs/flows/*.md
+!docs/flows/README.md
+# Features pages built from a spec (`scripts/docs/features/index.ts`); the rest are still hand-written.
+docs/features/stats.md

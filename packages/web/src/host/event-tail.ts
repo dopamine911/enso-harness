@@ -32,6 +32,12 @@ export interface EventTail {
   readonly recent: () => EnsoThreadEvent[]
 }
 
+/**
+ * @invariant follow-snapshot-frames/provenance-tail Provenance is recorded, coalesced, in a ring.
+ * The host's tail names each delivery `held`, `replayed`, `live` or `dropped` (the header's
+ * ordering evidence); consecutive events of one type, name and provenance fold into one row with
+ * an exact count, so a change of provenance or name starts a new row; old rows fall off the front.
+ */
 export function createEventTail(capacity = EVENT_TAIL_CAPACITY): EventTail {
   const ring: EnsoThreadEvent[] = []
   let nextSequence = 0

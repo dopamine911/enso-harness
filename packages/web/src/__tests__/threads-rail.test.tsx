@@ -136,6 +136,7 @@ test("a summary update reaches the list and moves the thread's activity clock; a
   expect(threadListStore.get()).toHaveLength(1)
 })
 
+// @pins resume/one-id
 test('adopting stored history restores dates, title and mode under the stored thread id exactly once, and never asks to start a session (#391)', () => {
   const history = {
     threadId: 'stored-1',

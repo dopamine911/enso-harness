@@ -790,6 +790,7 @@ test('⚠ a queued prompt refused after a delay takes back only its own bubble; 
 
 // ── the follow ending under the page (#103 receipt, #119) ───────────────────────────────
 
+// @pins abort-clear-restore/composer-takes-back
 test('Enter or the button: one POST …/prompt each and the draft clears; DURING a run the prompt goes to pi now, listed above the composer, and a stop hands it back (#75)', async () => {
   const pane = await mountPane({ server: { queued: ['by the button, mid-run'] } })
   await pane.settle(SNAPSHOT_IDLE)
@@ -1947,6 +1948,7 @@ test("the rail lists the server's stored threads; a click resumes one with its h
 // docs/flows/resume.md, stated gap: the reader was pinned to produce an image part from the file
 // (transcript-to-messages.test.ts); nothing asserted the PAGE renders it. A resumed thread's
 // image must come back as an <img> from the server's history — no page state involved.
+// @pins resume/transcript-ours
 test("a resumed thread's image renders as an <img> from the stored history, bytes inline (#68, #95)", async () => {
   const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
   const page = await mountPage({
@@ -1997,6 +1999,7 @@ test("a resumed thread's image renders as an <img> from the stored history, byte
 // #381: a refused attempt reloaded as an EMPTY bubble — the refusal lived only in the live page's
 // notifications. From the stored history alone it must be said in the attempt's own place: after
 // the prompt, before the reply the retry got.
+// @pins resume/transcript-ours
 test("a resumed thread's refused attempt says the refusal in its own bubble, before the reply (#381)", async () => {
   const page = await mountPage({
     storedThreads: [

@@ -1,0 +1,33 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`a searched primary renders the via-line, the notice, the answer, and the sources: flow web-search-call: the current model searches 1`] = `
+"sequenceDiagram
+  participant R as runtime (a tool call inside a run)
+  participant X as web_search (extensions/web-search/index.ts)
+  participant S as ENSO_HOME/secrets.env (readSecret)
+  participant P as native provider · Tavily (providers/*.ts)
+  R->>X: execute({ query }, signal, onUpdate, { model: anthropic-messages })
+  X->>S: readSecret(TAVILY_API_KEY)
+  S->>X: absent: the fallback is not armed
+  X->>P: runAnthropicProviderSearch({ query, signal }) under the call's one deadline
+  P->>X: WebSearchOutcome { kind: "searched", providerId: "anthropic" }
+  Note over X: audit: searched provider anthropic — primary
+  X->>R: Searched the web via anthropic."
+`;
+
+exports[`ungrounded WITH Tavily armed falls back, and the render says why: flow web-search-call: an ungrounded answer falls back to Tavily 1`] = `
+"sequenceDiagram
+  participant R as runtime (a tool call inside a run)
+  participant X as web_search (extensions/web-search/index.ts)
+  participant S as ENSO_HOME/secrets.env (readSecret)
+  participant P as native provider · Tavily (providers/*.ts)
+  R->>X: execute({ query }, signal, onUpdate, { model: anthropic-messages })
+  X->>S: readSecret(TAVILY_API_KEY)
+  S->>X: present: the fallback is armed
+  X->>P: runAnthropicProviderSearch({ query, signal }) under the call's one deadline
+  P->>X: WebSearchOutcome { kind: "ungrounded", providerId: "anthropic" }
+  X->>P: runTavilyProviderSearch({ query, signal }) under the call's one deadline
+  P->>X: WebSearchOutcome { kind: "searched", providerId: "tavily" }
+  Note over X: audit: searched provider tavily — fallback: the anthropic backend answered WITHOUT searching (the model used its own knowledge)
+  X->>R: Searched the web via tavily (fallback — the anthropic backend answered WITHOUT searching (the model used its own knowledge))."
+`;

@@ -24,6 +24,12 @@ export type ThreadUrl =
  * opens a new thread; the debug page falls back to the day's tail, and a notice that said it
  * "opened a new thread" there told the reader the page did something it cannot do (PR #336
  * review). The page that knows what it fell back to says so.
+ *
+ * @invariant resume/url-names-thread The URL names the thread; the latest navigation wins.
+ * A thread id resumes, none is fresh, a malformed one is fresh AND said; `urlForThread` keeps
+ * every other parameter. The boot resumes with `pop` (no history written), a rail click pushes
+ * (`chat-screen.tsx`, `BOOT` and `navigate`), and two guards drop a late answer whole:
+ * `createResumeRequests` (last click wins) and the page's `epoch` (a navigation since).
  */
 export function readThreadUrl(search: string, fellBackTo = 'opened a new thread instead'): ThreadUrl {
   const named = new URLSearchParams(search).get(THREAD_QUERY_PARAMETER)

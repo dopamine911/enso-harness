@@ -48,6 +48,7 @@ const cwd = tmpdir()
 const NO_HOST = (): AgentHost =>
   createFakeAgentHost(() => Promise.reject(new Error('the vendor-link tests build no session')))
 
+// @pins boot-and-launchers/vendor-refusal
 test('refuses to start when a vendor manifest path is missing', () => {
   const harness = fakeHarness(
     { extensions: ['./extensions/guards/index.ts', 'node_modules/pi-multi-account/index.ts'] },

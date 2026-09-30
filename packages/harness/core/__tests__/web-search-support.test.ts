@@ -208,6 +208,7 @@ test('tavily HTTP and body failures throw with the dispatched bit set', async ()
 
 // The POSITIVE half of the env fallback (PR #64 review gap): the reader is a seam, so
 // the test injects it instead of touching process.env.
+// @pins web-search-call/auth-identity
 test('resolveModelAuth falls back to the provider env key — and only when nothing else authenticates', async () => {
   const model: SearchModel = { ...MODEL, provider: 'some-provider' }
   const readerCalls: string[] = []

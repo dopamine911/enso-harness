@@ -28,6 +28,8 @@ import type { LogRecorder } from '@logtape/testing/recorder'
 export interface FlowTrace {
   /** A message from one participant to another. */
   readonly send: (from: string, to: string, label: string) => void
+  /** An answer to an earlier message that is not HTTP (a callback's result, an exit), drawn dashed. */
+  readonly reply: (from: string, to: string, label: string) => void
   /** An HTTP request (`POST /path`), its JSON body's keys and short values shown. */
   readonly request: (from: string, to: string, request: string, body?: unknown) => void
   /** An HTTP answer, drawn as a reply (dashed). */
@@ -107,6 +109,10 @@ export function flowTrace(options: FlowTraceOptions): FlowTrace {
     send: (from, to, label) => {
       takeLogs()
       push(`  ${participant(from)}->>${participant(to)}: ${mermaidText(label)}`)
+    },
+    reply: (from, to, label) => {
+      takeLogs()
+      push(`  ${participant(from)}-->>${participant(to)}: ${mermaidText(label)}`)
     },
     request: (from, to, request, body) => {
       takeLogs()

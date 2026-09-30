@@ -275,6 +275,7 @@ test('prompt() during a run carries the images beside the text, enqueued (#68, #
   server.abort()
 })
 
+// @pins follow-snapshot-frames/snapshot-lists-complete
 test('the snapshot becomes the mode, open-question and run receipts the stores already read', async () => {
   const server = scripted()
   server.frame(SNAPSHOT_IDLE)
@@ -532,6 +533,7 @@ test('a refused host command names the outcome and is RECORDED — the same path
   expect(refusedProblems).toEqual(['thread t1: /model refused: 422 model nope/x is not available here'])
 })
 
+// @pins abort-clear-restore/settle-ends-run
 test('abort is one POST to …/abort and names what the server did; it closes no run itself — the feed does (#116)', async () => {
   const server = scripted()
   server.frame(SNAPSHOT_IDLE)
@@ -597,12 +599,32 @@ test('prompt() names what the server did: taken when the run had ended, refused 
   expect(await dead.prompt('x')).toBe('unreachable')
 })
 
+// @pins abort-clear-restore/queued-rejection-said
 test('⚠ abort() hands back what pi had queued; a later rejection of a queued prompt is said, not matched to a run', async () => {
+  const logs = await recordEnsoLogs()
   const server = scripted(QUEUED_RECEIPT, 204, 200, ['and then this', 'and this'])
+  // The browser's side of `docs/flows/abort-clear-restore.md` (#482): queued, stopped, handed back.
+  const trace = flowTrace({
+    participants: {
+      C: 'composer (the test)',
+      U: 'TanStack (useChat)',
+      A: 'adapter (follow-connection.ts)',
+      S: 'server (scripted)',
+    },
+    categories: { 'enso.browser.follow': 'A' },
+    logs,
+  })
+  server.traceInto(trace)
   server.frame({ ...SNAPSHOT_IDLE, live: true, busy: true, generation: 1 })
   await server.untilChunks(2)
-  expect(await server.connection.prompt('and then this')).toBe('queued')
-  expect(await server.connection.abort()).toEqual({ outcome: 'aborted', restored: ['and then this', 'and this'] })
+  server.step('C', 'A', 'prompt("and then this"), during the run')
+  const queued = await server.connection.prompt('and then this')
+  trace.reply('A', 'C', queued)
+  expect(queued).toBe('queued')
+  server.step('C', 'A', 'abort()')
+  const stopped = await server.connection.abort()
+  trace.reply('A', 'C', `${stopped.outcome}, restored ${stopped.restored.length}`)
+  expect(stopped).toEqual({ outcome: 'aborted', restored: ['and then this', 'and this'] })
   server.frame({
     type: 'observation',
     seq: 1,
@@ -611,7 +633,9 @@ test('⚠ abort() hands back what pi had queued; a later rejection of a queued p
   await new Promise((resolve) => setTimeout(resolve, 10))
   expect(server.problems).toEqual([expect.stringContaining('queued prompt refused: aborted')])
   expect(server.chunks.some((chunk) => chunk.type === EventType.RUN_ERROR)).toBe(false)
+  expect(trace.diagram()).toMatchSnapshot('flow abort-clear-restore: the browser')
   server.abort()
+  await releaseEnsoLogs()
 })
 
 test('⚠ when pi CLAIMS a queued prompt (a user message-start after an assistant one), the view ends the assistant bubble and opens a new one — the reply lands after its question', async () => {

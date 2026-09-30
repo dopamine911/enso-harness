@@ -99,7 +99,20 @@ function attachToolResult(
   return false
 }
 
-/** The transcript, root to leaf, as the messages a chat mounts with. Entries that are not messages are skipped. */
+/**
+ * The transcript, root to leaf, as the messages a chat mounts with. Entries that are not messages are skipped.
+ *
+ * @invariant resume/transcript-ours The transcript is ours; the reader assembles and never decodes.
+ * Below the seam `host/transcript.ts#transcriptOf` reads the runtime's stored entries
+ * defensively: same length, same order, an unmodelled kind is `other` with its `type`. Here a
+ * tool result is paired into the assistant message holding its call, one whose call is not on
+ * the branch is dropped, and `custom` and `other` are skipped; an image's bytes render as a data
+ * URL, never a fetch (`selected-message-part.tsx`). A refused attempt (#381), which pi keeps on
+ * the branch with `stopReason: "error"`, is a message carrying its `refusal`, and its bubble says
+ * `<Provider> · <model> refused: <class> (<status>) — <reason>` where the reply would have been,
+ * not an empty bubble. The provider is pi's display name for it (#387), from pi-ai's built-in
+ * catalogue, since a cold read has no session to ask.
+ */
 export function transcriptToMessages(transcript: readonly EnsoTranscriptEntry[]): UIMessage[] {
   const messages: UIMessage[] = []
   // The guard writes its refusal entry before pi builds the error result (#387), so a

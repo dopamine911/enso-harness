@@ -252,6 +252,17 @@ export interface GuardDependencies {
   harnessRoot: string
 }
 
+/**
+ * The guards extension, over its two seams. The bash analyzer is a dependency of this one
+ * handler, never an extension of its own.
+ *
+ * @invariant guarded-tool-call/two-participants Two tool_call participants, structurally.
+ * The manifest loads guards before the mode extension (`packages/harness/package.json`,
+ * `pi.extensions`), and cc-safety-net is a library under this handler, not a participant, so the
+ * count stays at two (#4, #9). The tripwire scans every declared extension tree for a `tool_call`
+ * registration and asserts set equality with those two. A third is #4's arbiter trigger, and the
+ * test says not to add yourself to the list.
+ */
 export function createGuards(dependencies: GuardDependencies): (pi: ExtensionAPI) => void {
   return function guards(pi: ExtensionAPI): void {
     guardsWithDependencies(pi, dependencies)
@@ -302,6 +313,15 @@ function deny(rule: EnsoGuardRule, reason: string): GuardDenial {
  *    half does not know this harness's own credential dir. LAST of the four: a command
  *    that is destructive, exfiltrating or dumping is refused for that first, which keeps
  *    the older reasons' wording stable. `shell-secret-paths.ts` states its non-coverage.
+ *
+ * @invariant guarded-tool-call/shell-deny-first Shell: deny first, patch last; the analyzer is a library.
+ * For `bash` the cc-safety-net verdict is read first (a throw is a deny, per its contract), then
+ * the network deny by name at command position per segment, with a *cannot vouch* refusal for a
+ * construct it cannot resolve, then the environment-dump deny, then the secret-path deny.
+ * `powershell` skips the analyzer for the coarse raw scan. Only a command that passed them all
+ * gets `defaultBashTimeoutSeconds`, so no denied command has mutated input. What the analyzer
+ * allows (a redirect into its own config dir) is our layers' job: the division of labour its
+ * contract test pins against defaults.
  */
 function shellCommandDenial(
   call: { toolName: string; command: string; cwd: string },
@@ -381,6 +401,29 @@ function shellCommandDenial(
   return undefined
 }
 
+/**
+ * @flow guarded-tool-call A tool call through the guard: one verdict, first block wins, always a record
+ * Before any tool runs, the runtime raises `tool_call` and every extension's handler answers in
+ * load order; the first `{ block: true, reason }` ends the call, and nothing after it can
+ * un-block. Our guard is one handler with an ordered `decide` inside it: the fail-closed floor,
+ * the shell denies, the write gates, then every other path-bearing tool as a reader. The bash
+ * analyzer is a library under that handler, not a participant of its own, so the count stays at
+ * two (#4, #9). Every answer is a log record. A refused call reaches the browser as a result
+ * flagged `isError` (the runtime's shape for any failure) and beside it the guard's own custom
+ * entry naming the call and the rule, which is what the page draws a refusal from, live and on
+ * resume (#387).
+ * @see docs/seams/guards.md the guards seam: the policy, the dependencies, decide's order and the L5 crossing
+ * @see packages/harness/core/network-egress.ts the network bar, and what it does not cover (its header)
+ * @see docs/glossary.md the words: guard, verdict, policy, rule, participant, arbiter, boundary vs bar (Permission)
+ *
+ * @invariant guarded-tool-call/one-verdict The verdict is a denial with its reason, or nothing.
+ * `decide` returns a `GuardDenial` or `undefined`, and the handler hands pi its own shape back:
+ * every refusal is `{ block: true, reason }`, every pass is `undefined`. Refusing is final:
+ * handlers are additive and the runtime returns on the first `block`, whatever loads after (the
+ * file header). `HostedThread.probeToolCall` pins this through the runtime's own hook runner,
+ * with the real load order and participants: the guards' refusal with its reason, and first
+ * block wins, so a later extension cannot un-block and its own block stands.
+ */
 function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencies): void {
   const policy: GuardPolicy = DEFAULT_GUARD_POLICY
 
@@ -389,20 +432,25 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
   // which also fires for "reload" and "resume", where the runtime survives — resets it.
   const readTracker = createSessionReadTracker()
 
-  // #4 gap 2, half two: a policy naming a tool pi does not register is a silent no-op —
-  // the guard compiles, loads, and never fires. Checked against the LIVE tool list each
-  // session_start (extensions can register tools, so the list is per-session state) —
-  // AND lazily on the first tool_call if session_start has not fired yet, so the floor
-  // never depends on pi's event ordering: a lifecycle that delivered a tool_call first
-  // would otherwise fail OPEN through this very window (PR #52 review). The check cannot
-  // run at extension load — pi refuses action methods there ("Extension runtime not
-  // initialized") — but by the first tool_call the registry is certainly populated.
-  // ⚠ Deny-all via this variable, NEVER a throw: a throwing session_start handler wedges
-  // print mode outright (probed 2026-09-04 — 120s hang, zero output). The unreadable-list
-  // case fails closed the same way: "could not check" must not render as "checked, fine".
   let policyToolsChecked = false
   let policyToolMismatch: string | undefined
 
+  /**
+   * @invariant guarded-tool-call/fail-closed-floor The floor comes first and fails closed.
+   * A policy naming a tool the runtime does not register, or a tool list that cannot be read,
+   * denies EVERY call with the mismatch in the reason (#4 gap 2): such a policy is otherwise a
+   * silent no-op, since the guard compiles, loads and never fires. Checked against the LIVE tool
+   * list each `session_start` (extensions can register tools, so the list is per-session state),
+   * AND lazily on the first `tool_call` if `session_start` has not fired yet, so the floor never
+   * depends on pi's event ordering: a lifecycle that delivered a `tool_call` first would otherwise
+   * fail OPEN through this very window (PR #52 review). The check cannot run at extension load
+   * (pi refuses action methods there: "Extension runtime not initialized"), but by the first
+   * `tool_call` the registry is certainly populated.
+   *
+   * ⚠ Deny-all via a variable, NEVER a throw: a throwing `session_start` handler wedges print mode
+   * outright (probed 2026-09-04: 120s hang, zero output). The unreadable-list case fails closed
+   * the same way: "could not check" must not render as "checked, fine".
+   */
   function verifyPolicyToolNames(): void {
     policyToolsChecked = true
     try {
@@ -426,9 +474,10 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
     verifyPolicyToolNames()
   })
 
-  // Record knowledge from RESULTS, never from calls: a blocked call produces no
-  // tool_result at all (verified in pi's agent-loop — the "immediate" path skips
-  // afterToolCall), and a failed one arrives with isError, so neither can record.
+  // @invariant guarded-tool-call/knowledge-from-results Knowledge comes from results, never from calls.
+  // This handler records a file as seen only when `isError` is false: a blocked call produces
+  // no `tool_result` at all (verified in pi's agent-loop: the "immediate" path skips
+  // afterToolCall), and a failed one arrives with `isError`, so neither can record.
   pi.on('tool_result', (event, extensionContext): void => {
     if (event.isError) return
     const candidate = pathArgumentOf(event)
@@ -448,13 +497,22 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
     }
   })
 
-  // Every verdict is a record (#132): a denial at `warn` with the tool, the path it named,
-  // the RULE that refused (#144 — the word a day's stats count by) and the reason; an allow
-  // at `debug`. The transcript shows the model what was refused; this says WHEN, on which
-  // call, in the file beside every other layer's line about it. pi is handed its own shape
-  // back — `{ block, reason }` — and never our `rule`: the rule rides a custom session entry
-  // instead (#387), because pi turns a block into an error result indistinguishable from a
-  // failed command, and the entry is the one thing of ours pi persists beside it.
+  // @invariant guarded-tool-call/every-verdict-recorded Every verdict is a record (#132).
+  // A denial at `warn` with the `toolCallId`, the tool, the path it named, the RULE that refused
+  // (#144: the word a day's stats count by) and the reason; an allow at `debug`, never silent.
+  // The transcript shows the model what was refused; this says WHEN, on which call, in the file
+  // beside every other layer's line about it.
+  //
+  // @invariant guarded-tool-call/denial-entry The guard says it refused, in the log pi keeps (#387).
+  // pi is handed its own shape back, `{ block, reason }`, and never our `rule`. pi discards the
+  // block marker and turns a block into an error result indistinguishable from a failed command,
+  // and a blocked call never reaches a `tool_result` hook, so before returning the verdict the
+  // guard appends a custom entry, `ENSO_GUARD_DENIAL_ENTRY` with `{ toolCallId, rule }`: the one
+  // thing of ours pi persists beside it. Live it crosses as a `custom-entry` observation into the
+  // thread's `guardDenials` store; on a cold read `transcript-to-messages.ts` joins it onto its
+  // result as `enso:guardDenial` metadata, and adopting the history seeds the same store. The tool
+  // row and the status bar read only that store: a refusal is never recognised by its wording.
+  // pi's context builder skips `custom` entries, so the model's view is unchanged.
   pi.on('tool_call', (event, extensionContext): ToolCallEventResult | undefined => {
     const verdict = decide(event, extensionContext.cwd)
     const path = pathArgumentOf(event)
@@ -473,6 +531,29 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
     return { block: verdict.block, reason: verdict.reason }
   })
 
+  /**
+   * @invariant guarded-tool-call/writes-included-readers-excluded Writes are an inclusion list; readers are everything else.
+   * `write` and `edit` are claimed before the reader fall-through and checked in order: outside
+   * the write roots (the cwd when none are configured), a protected fragment, a persistence
+   * target, a credential pattern, then the thread's knowledge of the file. *Stale* refuses both
+   * tools; *unknown and existing* refuses `write` only, and so does *partial*: a `read` that
+   * returned part of the file (pi's own cut, an `offset`, or any `limit`) stamps it for *stale*
+   * but is not the whole-file knowledge a `write` needs (#10, #11, #57 S2). Stale is distinct
+   * from unknown: the reason says changed, not never read.
+   *
+   * Every other tool carrying a `path` is a reader and a credential pattern denies it: exclusion,
+   * because an inclusion list naming only `read` once let `grep` over `~/.aws` through, and a tool
+   * the guard has never heard of is still a reader. A reader is also refused when its path holds
+   * a credential location beneath it (`grep` over `~` or `/` recurses into `~/.aws` the same way:
+   * #160 §4, `secretLocationBeneath`), except `ls` and `find`, which return names, never contents.
+   * The locations are the fragments placed in home, and, where they exist, in the workspace and
+   * the harness's own root (a pre-#421 `.enso/` the migration left behind: a `.gitignore` does not
+   * keep ripgrep out, since it is ignored outside a git work tree and the agent may edit it).
+   * `~/.enso` is in home, so it is always covered; once the checkout's `.enso/` is migrated,
+   * `grep path=.` at the root of the Enso checkout itself passes. Not seen: a fragment's location
+   * anywhere else, and a basename-class file (`.env`) beneath the path, which only a walk would
+   * find.
+   */
   function decide(event: ToolCallEvent, cwd: string): GuardDenial | undefined {
     const toolName = canonicalToolName(event.toolName)
 

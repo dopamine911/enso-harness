@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { basename, dirname, join, relative } from 'node:path'
 import { findRepoRoot } from '../../packages/core/src/paths.ts'
 import { filesUnder } from '../source-tree.ts'
@@ -92,7 +92,8 @@ interface Tag {
   readonly body: string[]
 }
 
-const SCAN_ROOTS = ['packages'] as const
+/** Every tree that holds owned source or tests: a flow's rules live in launchers and gates as much as in packages. */
+const SCAN_ROOTS = ['packages', 'scripts', 'test'] as const
 const TAG_LINE = /^@(\w+)\s*(.*)$/
 const DECLARATION =
   /^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function\*?\s+(\w+)|(?:const|let|var|class|interface|type|enum)\s+(\w+)|(\w+)\s*(?:<[^>]*>)?\s*\()/
@@ -280,7 +281,11 @@ const unescapeTemplate = (text: string): string => text.replaceAll(/\\([\s\S])/g
  */
 function recordedDiagrams(root: string, problems: string[]): RecordedDiagram[] {
   const diagrams: RecordedDiagram[] = []
-  const snapshots = [...new Bun.Glob('packages/*/src/**/__snapshots__/*.snap').scanSync({ cwd: root })].sort()
+  // Every tree's tests, not only `packages/*/src/`: the harness keeps its tests under `extensions/`
+  // and `core/`, the launchers under `scripts/__tests__/`.
+  const snapshots = [...new Bun.Glob('{packages,scripts,test}/**/__snapshots__/*.snap').scanSync({ cwd: root })]
+    .filter((snapshot) => !snapshot.includes('/node_modules/'))
+    .sort()
   for (const snapshot of snapshots) {
     const source = readFileSync(join(root, snapshot), 'utf8')
     const file = join(dirname(dirname(snapshot)), basename(snapshot, '.snap'))
@@ -349,7 +354,9 @@ function coherence(model: Omit<FlowModel, 'problems'>): string[] {
 /** `root`: the repository, unless a test points the scan at a fixture tree of the same shape. */
 export function collectFlows(root: string = ROOT): FlowModel {
   const into: Collected = { flows: [], invariants: [], pins: [], problems: [] }
-  const files = SCAN_ROOTS.flatMap((scanRoot) => filesUnder(join(root, scanRoot)))
+  const files = SCAN_ROOTS.map((scanRoot) => join(root, scanRoot))
+    .filter((directory) => existsSync(directory))
+    .flatMap((directory) => filesUnder(directory))
   for (const path of files) collectFile(root, path, into)
   const diagrams = recordedDiagrams(root, into.problems)
   const model = { flows: into.flows, invariants: into.invariants, pins: into.pins, diagrams }

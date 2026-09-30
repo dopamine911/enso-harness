@@ -276,7 +276,7 @@ do not change; `web-search.test.ts` runs against scripted providers and does not
 `vocabulary.ts` (`ModelSearchRequest.model`, `ResolvedProviderAuth`, `routedProviderIdForModel`, which
 reads `model.provider` and `model.api`) and `auth.ts` (`ModelAuthSource`, `resolveModelAuth`), plus the
 one call site that builds a `ModelSearchRequest` from the runtime's context
-(`extensions/web-search/index.ts:322-334`).
+(`extensions/web-search/index.ts:351-363`).
 The five providers read only `request.model` fields through the request and `resolveAuth`; the wire
 modules, the outcome union, the config sections, web_fetch and every test that scripts a provider do
 not change. That pivot has already been paid once: it is what deleted the allowlist's last two rows.

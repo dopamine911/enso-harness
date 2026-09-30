@@ -96,6 +96,16 @@ export function buildPrintManifest(manifest: HarnessManifest): PrintManifest {
  * — links are recreated every launch (a moved repo heals), and entries the harness no
  * longer has are REMOVED (a renamed or deleted sibling does not leave a dead link that pi
  * would skip in silence). Returns the directory to pass to `-e`.
+ *
+ * @invariant boot-and-launchers/print-mirror A print run loads a generated mirror, not a flag.
+ * The trigger is "this run cannot prompt" (`-p`, `--print`, or stdin that is not a TTY). The mode
+ * extension fails closed when it cannot prompt, the runtime has no per-extension exclusion, and
+ * `boot-and-launchers/package-dir` forbids passing files, so the variant is a package under
+ * `node_modules/.cache/enso/print-harness` (the checkout's own build cache, since its links point into
+ * this checkout): the filtered manifest (`buildPrintManifest`) plus a symlink for EVERY package-root
+ * entry, by `readdir`, since extensions import siblings by relative path. Enso's config is not in the
+ * package at all: it is the user's, `ENSO_HOME/config.json` (#421), found from the environment. A
+ * print run has our guards only: `bash` unconfined (#9).
  */
 export function materializePrintHarness(
   printHarnessDir: string,

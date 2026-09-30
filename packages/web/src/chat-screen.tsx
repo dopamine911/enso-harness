@@ -1200,7 +1200,16 @@ const chatComponents = {
         })
         return true
       }
-      /** Texts pi never took come back to the draft, and their never-asked bubbles leave the transcript. */
+      /**
+       * Texts pi never took come back to the draft, and their never-asked bubbles leave the transcript.
+       *
+       * @invariant abort-clear-restore/composer-takes-back The stopping tab's composer gets the texts back; the bubbles that were never asked leave.
+       * A stop's `restored` is appended to the draft after anything already typed, and the user
+       * bubbles this composer put in the transcript for prompts the runtime still held are removed;
+       * a claimed prompt's bubble stays, and deltas that streamed meanwhile are kept (the filter
+       * reads the latest committed transcript, not this render's). Only texts come back: images
+       * attached to a queued prompt are not restored, a limit the composer states, not a gap.
+       */
       const takeBack = (texts: readonly string[]): void => {
         const leaving = new Set<string>()
         for (const takenBackText of texts) {

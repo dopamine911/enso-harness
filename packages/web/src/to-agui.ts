@@ -126,13 +126,21 @@ export function observationToAguiEvents(observation: EnsoObservation, ids: AguiI
           // The descriptor, under the same namespaced key it uses everywhere else.
           // Legal because AG-UI's BaseEvent declares `[k: string]: unknown`.
           ...(observation.descriptor === undefined ? {} : { [ENSO_TOOL_RESULT_KEY]: observation.descriptor }),
+          // @invariant guarded-tool-call/refusal-is-error-result A refusal is an error result on the wire.
           // ⚠ `isError` has no AG-UI field on a tool result, and it is the only signal a
-          // REFUSED or ABORTED call has (a guard block; pi's abort mid-tool). TanStack's
-          // processor reads `state: "output-error"` off the chunk (a non-spec extra, legal
-          // as above) and marks the result and its call `error`, with the content as the
-          // error text — the same shape `transcript-to-messages` builds from the transcript, so a
-          // live transcript and a resumed one agree (#130). Before this the flag rode as
-          // `ensoIsError`, which nothing read: live said done, resume said error.
+          // REFUSED or ABORTED call has (a guard block; pi's abort mid-tool): `map-events.ts`,
+          // `tool_execution_end`. TanStack's processor reads `state: "output-error"` off the chunk
+          // (a non-spec extra, legal by BaseEvent's index signature) and marks the result and its
+          // call `error`, with the content as the error text: the same shape
+          // `transcript-to-messages` builds from the transcript on resume, so a live transcript
+          // and a resumed one agree (#130), and the same
+          // shape a command that ran and failed has. Before this the flag rode as `ensoIsError`,
+          // which nothing read: live said done, resume said error.
+          //
+          // The vendor's half: a guard's `{ block, reason }` becomes an error result in the
+          // runtime's own loop (`pi-agent-core/dist/agent-loop.js`, the `beforeResult?.block`
+          // branch: `createErrorToolResult(reason)`, `isError: true`), pinned against the
+          // installed version by the agent-loop contract test, so a bump that moves it goes red.
           ...(observation.isError ? { state: 'output-error' } : {}),
         },
       ]

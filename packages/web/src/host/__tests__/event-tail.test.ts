@@ -7,6 +7,7 @@ import { createEventTail, describeObservation } from '../event-tail.ts'
  * a held-then-replayed pair MUST stay two rows, because that pair is the finding.
  */
 
+// @pins follow-snapshot-frames/provenance-tail
 test('consecutive events of one type, name and provenance fold into one row with an exact count', () => {
   const tail = createEventTail()
   for (let index = 0; index < 5; index += 1) tail.record('message_update', undefined, 'live')
@@ -17,6 +18,7 @@ test('consecutive events of one type, name and provenance fold into one row with
   ])
 })
 
+// @pins follow-snapshot-frames/provenance-tail
 test('⚠ a change of provenance or name starts a new row — held vs replayed is the ordering evidence', () => {
   const tail = createEventTail()
   tail.record('entry_appended', 'modes', 'held')

@@ -23,6 +23,7 @@ const manifest = JSON.parse(readFileSync(join(REPOSITORY_ROOT, 'packages/harness
   pi: { extensions: string[] }
 }
 
+// @pins boot-and-launchers/manifest-order
 test('⚠ every repository extension in the harness manifest is a fallow entry, and only those (#163)', () => {
   const declared = manifest.pi.extensions
     .filter((path) => path.startsWith('./'))

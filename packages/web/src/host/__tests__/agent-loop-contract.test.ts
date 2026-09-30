@@ -20,6 +20,7 @@ const agentCorePackage = require.resolve('@earendil-works/pi-agent-core/package.
 const agentLoopSource = readFileSync(join(dirname(agentCorePackage), 'dist', 'agent-loop.js'), 'utf8')
 const { version } = JSON.parse(readFileSync(agentCorePackage, 'utf8')) as { version: string }
 
+// @pins guarded-tool-call/refusal-is-error-result
 test(`⚠ CONTRACT: pi-agent-core@${version} turns a blocking tool_call verdict into an error result carrying the reason`, () => {
   // The block branch, verbatim in shape: the verdict's reason IS the result's content.
   expect(agentLoopSource).toContain('if (beforeResult?.block) {')

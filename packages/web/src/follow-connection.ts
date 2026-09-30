@@ -376,7 +376,14 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
   let current: OpenRun | undefined
   /** `prompt-rejected` reasons that arrived before the receipt naming their run, by the receipt's `messageId`. */
   const rejectedBeforeReceipt = new Map<string, string>()
-  /** Receipt ids of prompts this tab queued behind a run (#75) — a later `prompt-rejected` for one is said, not matched to a run. */
+  /**
+   * Receipt ids of prompts this tab queued behind a run (#75).
+   *
+   * @invariant abort-clear-restore/queued-rejection-said A later rejection of a queued prompt is said, not matched to a run.
+   * A `prompt-rejected` naming one of these is reported where the human looks and opens no run
+   * error. `settled` forgets the ids: nothing behind a settled run can be refused any more; the
+   * runtime claimed it, or a stop cleared it.
+   */
   const queuedPrompts = new Set<string>()
 
   function push(...chunks: StreamChunk[]): void {

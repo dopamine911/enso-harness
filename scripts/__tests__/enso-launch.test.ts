@@ -1,25 +1,35 @@
 import { expect, test } from 'bun:test'
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { basename, dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { flowTrace } from '@enso/core/flow-trace'
+import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
 import { isPrintRun, piArguments, piVersionSupported, piVersionText, SUPPORTED_PI_VERSIONS } from '../enso-launch.ts'
 
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
+
 /**
- * The terminal launcher's decisions (docs/flows/boot-and-launchers.md, stated gap: `enso.ts`
- * had no test of its own). The launcher spawns pi and is not driven here; what it decides
- * before spawning is — the isolation triple, the print-run reading, and the version range,
- * against a `pi --version` line of the test's making. The vendor-path precondition moved out
- * with #221 — it is pi's manifest layout, not the launcher's decision, and is pinned at its
- * owner (`packages/core/src/__tests__/pi-manifest.test.ts`). Whether the RANGE still covers
- * the pi the guard corpus pins against is a different question again, and is
- * `pi-version-parity.test.ts`, beside this file.
+ * The terminal launcher's decisions (docs/flows/boot-and-launchers.md). What `enso.ts` decides
+ * before spawning is pinned as pure functions — the isolation triple, the print-run reading,
+ * and the version range, against a `pi --version` line of the test's making — and one test
+ * below drives `enso.ts` itself, against a `pi` shim first on `PATH`. The vendor-path
+ * precondition moved out with #221 — it is pi's manifest layout, not the launcher's decision,
+ * and is pinned at its owner (`packages/core/src/__tests__/pi-manifest.test.ts`). Whether the
+ * RANGE still covers the pi the guard corpus pins against is a different question again, and
+ * is `pi-version-parity.test.ts`, beside this file.
  */
 
 // ⚠ THE ISOLATION TRIPLE. Two legs are arguments and one is the environment; the arguments
 // must be exactly these, in this order, BEFORE whatever the user passed — a flag the user adds
 // cannot displace `--no-skills`, which neither of the other two covers (header).
+// @pins boot-and-launchers/isolation-triple boot-and-launchers/package-dir
 test('pi is launched with --no-extensions, --no-skills and -e <package>, ahead of the user’s arguments', () => {
   expect(piArguments('/pkg', ['-p', 'hello'])).toEqual(['--no-extensions', '--no-skills', '-e', '/pkg', '-p', 'hello'])
   expect(piArguments('/pkg', [])).toEqual(['--no-extensions', '--no-skills', '-e', '/pkg'])
 })
 
+// @pins boot-and-launchers/print-mirror
 test('a print run is -p, --print, or stdin that is not a TTY; an interactive run is none of those', () => {
   expect(isPrintRun(['-p', 'x'], true)).toBe(true)
   expect(isPrintRun(['--print', 'x'], true)).toBe(true)
@@ -33,6 +43,7 @@ test('a print run is -p, --print, or stdin that is not a TTY; an interactive run
 // ⚠ The BOUNDARIES, which are the whole content of the predicate: the minimum is supported and
 // the patch below it is not; the excluded version is refused and the patch below it is not.
 // These four also pin the `^0.87.1` semantics the harness manifest's peer range states.
+// @pins boot-and-launchers/pi-version-gate
 test('the tested pi range includes its minimum and excludes the version it stops below', () => {
   expect(piVersionSupported(piVersionText(SUPPORTED_PI_VERSIONS.minimum))).toBe(true)
   expect(piVersionSupported('0.87.0')).toBe(false)
@@ -43,6 +54,7 @@ test('the tested pi range includes its minimum and excludes the version it stops
 // ⚠ FAIL CLOSED: a version the launcher cannot read is a pi the corpus says nothing about, so
 // it is refused rather than launched. A prerelease of the excluded version is one of those —
 // the numeric core reads as the excluded version itself.
+// @pins boot-and-launchers/pi-version-gate
 test('a pi whose version cannot be read, or is a prerelease of the excluded version, is refused', () => {
   expect(piVersionSupported('')).toBe(false)
   expect(piVersionSupported('unknown')).toBe(false)
@@ -56,6 +68,7 @@ test('a pi whose version cannot be read, or is a prerelease of the excluded vers
 // when a banner named bun first — a wrong refusal when that number falls outside the range and
 // a wrong ACCEPTANCE when it falls inside, on the one gate standing between the guard and a
 // deny computed against the wrong target. pi's own name decides; a bare triple is the fallback.
+// @pins boot-and-launchers/pi-version-gate
 test("the version read is pi's, whatever else the banner names first (#217)", () => {
   // The dangerous shape: another component's number is in range, pi's is not.
   expect(piVersionSupported('bun 0.87.5 / pi 0.88.3')).toBe(false)
@@ -65,4 +78,115 @@ test("the version read is pi's, whatever else the banner names first (#217)", ()
   expect(piVersionSupported('pi v0.87.7')).toBe(true)
   // A banner that names no pi version at all is no version claim: refused.
   expect(piVersionSupported('bun 1.4.0 (linux x64)')).toBe(false)
+})
+
+// ── the launch itself: enso.ts, end to end, against a pi shim ─────────────────────────────
+
+/** A `pi` first on `PATH` that answers `--version` and records every call's argv and env. */
+function piShim(directory: string, version: string): string {
+  const script = join(directory, 'pi')
+  writeFileSync(
+    script,
+    [
+      '#!/bin/sh',
+      `printf '%s\\n' "$*" >> '${join(directory, 'calls')}'`,
+      `if [ "$1" = "--version" ]; then echo '${version}'; exit 0; fi`,
+      `for argument in "$@"; do printf '%s\\n' "$argument"; done > '${join(directory, 'argv')}'`,
+      `printf '%s\\n' "$PI_CODING_AGENT_DIR" "$PICC_PERMISSION_MODES_CONFIG_PATH" > '${join(directory, 'env')}'`,
+      '',
+    ].join('\n'),
+  )
+  chmodSync(script, 0o755)
+  return directory
+}
+
+const extensionName = (extensionPath: string): string =>
+  extensionPath.startsWith('node_modules/')
+    ? (extensionPath.split('/').at(-2) ?? extensionPath)
+    : basename(dirname(extensionPath))
+
+// ⚠ The one test that runs the launcher rather than its decisions. Piped stdin makes it a print
+// run; ENSO_HOME points at a scratch dir, so no user state is read or moved. The diagram's arrows
+// are the argv and env the shim received and the files the launcher left, with the scratch paths
+// masked; the launcher writes stderr, not log records, so it has no notes.
+// @pins boot-and-launchers/isolation-triple boot-and-launchers/package-dir boot-and-launchers/print-mirror
+test('a print launch reads pi --version from PATH, then spawns that pi with the isolation triple and the print mirror', async () => {
+  const scratch = mkdtempSync(join(tmpdir(), 'enso-launch-test-'))
+  const logs = await recordEnsoLogs()
+  try {
+    const version = piVersionText(SUPPORTED_PI_VERSIONS.minimum)
+    const shimDir = piShim(scratch, version)
+    const home = join(scratch, 'home')
+    const mask = (text: string): string => text.replaceAll(home, 'ENSO_HOME').replaceAll(repoRoot, '.')
+    const trace = flowTrace({
+      participants: {
+        U: 'user shell (the test)',
+        Z: 'terminal launcher (scripts/enso.ts)',
+        M: 'manifest (packages/harness/package.json → pi)',
+        X: 'print mirror (print-harness.ts)',
+        P: 'pi on PATH (a shim)',
+      },
+      categories: {},
+      logs,
+    })
+
+    trace.send('U', 'Z', 'bun scripts/enso.ts -p hello · stdin not a TTY')
+    // Through `sh`, so the shim goes first on the inherited `PATH` without this file reading the
+    // environment (`scripts/lint/process-environment.ts`).
+    const launch = `PATH='${shimDir}':"$PATH" ENSO_HOME='${home}' exec '${process.execPath}' '${join(repoRoot, 'scripts', 'enso.ts')}' -p hello`
+    const launcher = Bun.spawn(['/bin/sh', '-c', launch], {
+      cwd: scratch,
+      stdin: 'pipe',
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+    await launcher.stdin.end()
+    const [stderr, status] = await Promise.all([new Response(launcher.stderr).text(), launcher.exited])
+    expect(status).toBe(0)
+    const said = stderr.split('\n')
+    const line = (prefix: string): string => mask(said.find((each) => each.startsWith(prefix)) ?? `(no ${prefix})`)
+
+    const manifest = JSON.parse(readFileSync(join(repoRoot, 'packages', 'harness', 'package.json'), 'utf8'))
+    const mirrorDir = join(repoRoot, 'node_modules', '.cache', 'enso', 'print-harness')
+    const mirror = JSON.parse(readFileSync(join(mirrorDir, 'package.json'), 'utf8'))
+    const calls = readFileSync(join(scratch, 'calls'), 'utf8').trim().split('\n')
+    const argv = readFileSync(join(scratch, 'argv'), 'utf8').trim().split('\n')
+    const [agentDir, permissionsPath] = readFileSync(join(scratch, 'env'), 'utf8').trim().split('\n')
+    const resourceCount = /(\d+) declared resource path/.exec(stderr)?.[1] ?? '?'
+
+    // The version is asked first, then pi is spawned: two calls, in that order.
+    expect(calls).toEqual(['--version', argv.join(' ')])
+    expect(argv).toEqual(piArguments(mirrorDir, ['-p', 'hello']))
+    expect(agentDir).toBe(join(home, 'pi-agent'))
+    expect(permissionsPath).toBe(join(home, 'permissions.json'))
+    expect(mirror.pi.extensions).toEqual(
+      manifest.pi.extensions.filter((extensionPath: string) => !extensionPath.includes('picc-permission-modes')),
+    )
+
+    trace.send('Z', 'M', `read pi.* · ${resourceCount} declared resource paths, every node_modules/ path present`)
+    trace.send('Z', 'U', line('enso: permission rules'))
+    trace.send('Z', 'P', mask(`pi ${calls[0]}`))
+    trace.send('P', 'Z', `${version} · exit 0`)
+    trace.send(
+      'Z',
+      'X',
+      `materialize: pi.extensions minus picc-permission-modes (${mirror.pi.extensions.length} of ${manifest.pi.extensions.length}), every package-root entry linked`,
+    )
+    trace.send('Z', 'U', line('enso: vanilla pi'))
+    trace.send(
+      'Z',
+      'P',
+      mask(
+        `spawn pi ${argv.join(' ')} · env PI_CODING_AGENT_DIR=${agentDir}, PICC_PERMISSION_MODES_CONFIG_PATH=${permissionsPath}`,
+      ),
+    )
+    trace.send('X', 'P', `pi.extensions in manifest order: ${mirror.pi.extensions.map(extensionName).join(' → ')}`)
+    trace.send('P', 'Z', 'exit 0')
+    trace.send('Z', 'U', `exit ${status}`)
+    // The flow page's diagram (#482): what the launcher did, as its doubles and outputs saw it.
+    expect(trace.diagram()).toMatchSnapshot('flow boot-and-launchers: the terminal launcher')
+  } finally {
+    await releaseEnsoLogs()
+    rmSync(scratch, { recursive: true, force: true })
+  }
 })

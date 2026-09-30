@@ -557,9 +557,28 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   }
 
   /**
-   * pi's session files for this workspace (#95) — what the rail can come back to. `busy`
-   * marks the ones a thread on THIS server is running right now; the rail shows those but
-   * does not offer them, and `/history` refuses them below.
+   * pi's session files for this workspace (#95) — what the rail can come back to.
+   *
+   * @flow resume Resume: a stored thread, from the rail to live
+   * A stored thread is one whose log the runtime has flushed: nothing reaches disk before the first
+   * assistant message, so a thread that has only run slash commands has nothing to come back to.
+   * Resume is not a code identifier (glossary, Thread states): the rail's listing, the URL naming
+   * the thread, `GET …/history` read cold from the file, adoption in the browser under the SAME id,
+   * then the first prompt building the runtime over that file. The thread id IS the runtime's
+   * session id (#95): no mapping, no index file, across a restart. The pane's messages come from
+   * `/history` (`adoptThread`); the snapshot carries the same `messages`, and
+   * `custom-event-router.ts` reads one fact off them: whether the last assistant message is a
+   * refused attempt (#381). The host's name for the listing is `listSessions`; there is no
+   * `listThreads`.
+   * @contract packages/core/src/transcript.ts#EnsoTranscriptEntry
+   * @see docs/seams/storage.md the seam: the listing, the cold read, the open-or-create
+   * @see docs/seams/permission-mode.md the mode walk
+   * @see docs/glossary.md the words: stored thread, resume, live / cold, session reserved for the log (Thread)
+   *
+   * @invariant resume/rail-listing The rail is the listing, newest first, titled by the first user message.
+   * The host's own listing, one header parse per file, newest first; a blank first message is no
+   * title. `busy` marks a thread a run on THIS server holds: the row is shown, not locked (#114),
+   * and an idle thread the server still holds is resumable, since held is not busy (PR #104 review).
    */
   async function respondWithStoredThreads(response: ServerResponse): Promise<void> {
     const stored = await host.listSessions()
@@ -605,6 +624,17 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
    * The read itself is `thread-read.ts#readThreadMount` (#214), shared with the follow's
    * snapshot: HERE is settled AFTER the file read, so a thread built during it is served
    * pi's memory rather than the file both routes were racing.
+   *
+   * @invariant resume/looking-builds-nothing Looking must not build (#86).
+   * `readStoredThread` opens the file into memory and writes nothing until an append; this route
+   * `peek`s the registry, and a thread neither live nor stored is a 404, while the follow's cold
+   * read is an EMPTY snapshot, so observation may precede the first prompt
+   * (`follow-snapshot-frames/cold-empty`). A session file in a directory that is no project here is
+   * a 403 naming the directory, not that 404 (#378). The page reads the three by where the id came
+   * from (`stored-threads.ts#createResumeRequests`): a 404 for the URL's own thread (written before
+   * its first prompt, then lost to a restart) starts it under that id, said nowhere; a 404 for a
+   * rail row is a stale listing; either failure is said on the rail's "could not open the thread"
+   * line, never as the listing failing.
    */
   async function respondWithThreadHistory(threadId: string, response: ServerResponse): Promise<void> {
     const mount = await readThreadMount(threadRead, threadId)

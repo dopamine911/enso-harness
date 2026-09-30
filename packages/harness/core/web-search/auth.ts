@@ -66,6 +66,11 @@ export async function resolveModelAuth(
   model: SearchModel,
   readProviderEnvironmentKey: (provider: string) => string | undefined,
 ): Promise<ResolvedProviderAuth> {
+  // @invariant web-search-call/auth-identity Auth is the conversation's identity; the provider env key is the last resort.
+  // This asks the runtime's model registry, passes a failure through, drops null-valued headers,
+  // and reads the environment only when neither a key nor an `authorization` / `x-api-key` /
+  // `x-goog-api-key` header came back. The resolver travels inside `ModelSearchRequest`; the
+  // extension never calls it.
   const resolved = await authSource.getApiKeyAndHeaders(model)
   if (!resolved.ok) return resolved
   const headers = withoutNullHeaders(resolved.headers)

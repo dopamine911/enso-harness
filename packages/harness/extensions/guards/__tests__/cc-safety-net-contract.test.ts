@@ -128,6 +128,7 @@ for (const command of EXPECTED_ALLOWS) {
 // pass through checkCommand at all — `.cc-safety-net` therefore lives in
 // ENSO_PERSISTENCE_WRITE_DIRECTORIES. If this starts DENYING, upstream closed it and the
 // guard.ts comment should say so.
+// @pins guarded-tool-call/shell-deny-first
 test('allows a shell redirect into its own config dir — why .cc-safety-net is OUR persistence target', () => {
   expect(VERDICTS[OWN_CONFIG_DIR_REDIRECT]?.kind).toBe('allow')
 })

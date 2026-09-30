@@ -176,7 +176,14 @@ function liveReading(thread: ThreadView, transcript: readonly EnsoTranscriptEntr
   }
 }
 
-/** A thread not live here: what its file says, or nothing at all for one never stored. */
+/**
+ * A thread not live here: what its file says, or nothing at all for one never stored.
+ *
+ * @invariant resume/opening-mode The opening mode is the branch's last `modes` custom entry, or the fresh state.
+ * A cold thread's mode is `storedPermissionModeState`'s walk of the transcript from the end over
+ * `custom` entries, which builds nothing and offers the full registered set (#86: looking must not
+ * build); a live thread answers from the runtime (`liveReading`), fresher than the file.
+ */
 function coldReading(
   host: AgentHost,
   transcript: readonly EnsoTranscriptEntry[],

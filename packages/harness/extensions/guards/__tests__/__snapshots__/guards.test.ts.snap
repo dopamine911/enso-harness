@@ -1,0 +1,27 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`an analyzer deny is blocked with its rule identity in the reason: flow guarded-tool-call: a shell command the analyzer denies 1`] = `
+"sequenceDiagram
+  participant R as runtime (tool_call hook)
+  participant G as guards handler (extensions/guards/index.ts)
+  participant A as cc-safety-net (library)
+  R->>G: tool_call { toolName: "bash", command: "git reset --hard HEAD~3" }
+  G->>A: analyzeBashCommand({ command: "git reset --hard HEAD~3", cwd })
+  A->>G: { kind: "deny", ruleId: "git.reset-hard" }
+  Note over G: bash denied: Bash command blocked by cc-safety-net (git.reset-hard): git reset --hard destroys all uncommitted changes permanently.
+  G->>R: appendEntry("enso-guard-denial", {"toolCallId":"t","rule":"cc-safety-net"})
+  G->>R: { block: true, reason }"
+`;
+
+exports[`an allowed bash command still gets the timeout patch, after both gates: flow guarded-tool-call: a shell command that passes, patched last 1`] = `
+"sequenceDiagram
+  participant R as runtime (tool_call hook)
+  participant G as guards handler (extensions/guards/index.ts)
+  participant A as cc-safety-net (library)
+  R->>G: tool_call { toolName: "bash", command: "git status" }
+  G->>A: analyzeBashCommand({ command: "git status", cwd })
+  A->>G: { kind: "allow" }
+  Note over G: bash allowed
+  G->>R: undefined (the call runs)
+  R->>R: the command runs with input.timeout = 120"
+`;

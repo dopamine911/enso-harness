@@ -26,6 +26,7 @@ function fakePi(): { pi: ExtensionAPI; handlers: Map<string, Handler> } {
 
 afterEach(reset)
 
+// @pins boot-and-launchers/logging-first
 test('⚠ pi as a child: nothing has configured, so the extension does — its own record lands as process pi, and session_shutdown flushes', async () => {
   await reset()
   expect(isLoggingConfigured()).toBe(false)

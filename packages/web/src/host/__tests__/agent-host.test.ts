@@ -23,9 +23,11 @@ import {
   type EnsoSystemPromptChoice,
   type EnsoSystemPromptMode,
   type EnsoSystemPromptPreview,
+  type EnsoThreadEvent,
   readEnsoRunContext,
   sessionEvalOf,
 } from '@enso/core'
+import { flowTrace } from '@enso/core/flow-trace'
 import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
 import { findRepoRoot, harnessPackageDir, realpathOrSelf } from '@enso/core/paths'
 import { ENSO_DEFAULT_DENY_RULES } from '@enso/core/permission-rules'
@@ -378,6 +380,7 @@ async function multiAccountStartupLine(hosted: HostedThread): Promise<string> {
   return notice.kind === 'extension-ui-request' ? String(notice.message) : ''
 }
 
+// @pins boot-and-launchers/isolation-triple
 test('⚠ multi-account resolved its config inside the scratch agent dir, not ~/.pi/agent — the env was set first', async () => {
   const hosted = await hostedSession()
   // AWAITED, not read off the replay: since v1.23.0 the handler awaits its slot publishing
@@ -409,6 +412,7 @@ test('a new session says the model it starts with, as its own `model` observatio
   expect(opening).toEqual({ kind: 'model', ...hosted.runtime.modelState() })
 })
 
+// @pins boot-and-launchers/manifest-order
 test("exactly the manifest's extensions load, in order, then the host's own model watcher, with no load errors", async () => {
   const hosted = await hostedSession()
   const loaded = hosted.loadedExtensionPaths
@@ -442,6 +446,7 @@ test('⚠ session_start fires exactly once per session, and two sessions do not 
   expect(startsPerInstance).toEqual([1, 1])
 })
 
+// @pins dialog-ask-answer-settled/parked-in-host
 test('⚠⚠ a dialog an extension opens reaches the subscriber and its answer resolves the extension', async () => {
   let confirmed: boolean | undefined
   let settled = false
@@ -475,6 +480,7 @@ test('⚠⚠ a dialog an extension opens reaches the subscriber and its answer r
   expect(confirmed).toBe(true)
 })
 
+// @pins dialog-ask-answer-settled/one-finish dialog-ask-answer-settled/cancel-value
 test("a cancelled dialog resolves to pi's cancel value, and dispose cancels what is still pending", async () => {
   const answers: unknown[] = []
   const probe: InlineExtension = {
@@ -498,6 +504,7 @@ test("a cancelled dialog resolves to pi's cancel value, and dispose cancels what
   expect(answers).toEqual([undefined, undefined])
 })
 
+// @pins dialog-ask-answer-settled/cancel-value
 test('an answer naming no pending dialog is reported, never thrown', async () => {
   const hosted = await hostedSession()
   logs.clear()
@@ -573,6 +580,7 @@ test('⚠ a throwing session_start becomes an extension-error observation; the s
 // `bindExtensions` returned meant those entries were emitted to nobody: the held-until-
 // first-subscriber buffer sits behind the host's subscription, so nothing put them in it.
 // Found by the #86 drawer: two `modes` entries on the branch, one `custom-entry` in the browser.
+// @pins follow-snapshot-frames/held-until-first-subscriber
 test('⚠ an entry an extension persists during session_start reaches the first subscriber (#88)', async () => {
   const probe: InlineExtension = {
     name: 'enso-host-startup-entry-probe',
@@ -693,6 +701,7 @@ test('setPermissionMode with a mode the vendor registers no command for is rejec
 // guards.test.ts pins the handler against a hand-built ExtensionAPI. These ask the real runner,
 // with the real load order and the real participants, what a model's call would meet.
 
+// @pins guarded-tool-call/one-verdict
 test('⚠ through the runtime, the real guards refuse a write outside the workspace with their reason; a read inside passes', async () => {
   const hosted = await hostedSession()
   const refused = await hosted.probeToolCall('write', { path: '/etc/passwd', content: 'x' })
@@ -717,6 +726,7 @@ test('⚠ through the runtime, the guards refuse grep over home for the credenti
 // ⚠ FIRST BLOCK WINS — the runtime's behaviour the guards header rests on (guards/index.ts:20-25),
 // pinned by no test of ours until now. An extension loaded AFTER guards that answers "allow"
 // (returns nothing) cannot un-block; one that blocks a call guards allow adds its own block.
+// @pins guarded-tool-call/one-verdict
 test('⚠ first block is final: a later extension cannot un-block the guards, and its own block on an allowed call stands', async () => {
   const seen: string[] = []
   const laterExtension: InlineExtension = {
@@ -747,24 +757,48 @@ test('⚠ first block is final: a later extension cannot un-block the guards, an
 // the handler; the handler awaited the human). Decided 2026-09-16: if the user says stop, it's
 // stop. `abort()` settles every pending question as `aborted` — the glossary's word for it —
 // AFTER telling the runtime, so the loop holds the signal when the handler returns.
+// @pins dialog-ask-answer-settled/stop-stops dialog-ask-answer-settled/one-finish dialog-ask-answer-settled/cancel-value
 test("⚠ Stop stops: the run's abort settles a pending dialog as `aborted` — the card drops, the extension resumes with its cancel value", async () => {
+  // The host's side of `docs/flows/dialog-ask-answer-settled.md` (#482): asked, then stopped.
+  const trace = flowTrace({
+    participants: {
+      X: 'extension (the probe)',
+      H: 'host (agent-host.ts, extension-ui-context.ts)',
+      S: 'subscriber (the test)',
+    },
+    categories: { 'enso.host.ui': 'H' },
+    logs,
+  })
   let outcome: unknown = 'unsettled'
   const probe: InlineExtension = {
     name: 'enso-host-abort-dialog-probe',
     factory: (pi: ExtensionAPI) => {
       pi.on('session_start', (_event, extensionContext) => {
+        trace.send('X', 'H', 'ctx.ui.confirm("Still here?")')
         void extensionContext.ui.confirm('Still here?', 'after an abort').then((answer) => {
+          trace.reply('H', 'X', `resolves ${String(answer)}`)
           outcome = answer
         })
       })
     },
   }
   const hosted = await hostedSession([probe])
-  const events = collectEvents(hosted)
+  // The one subscriber, so the replayed request reaches it: collects what `collectEvents` would, and draws.
+  const events: EnsoObservation[] = []
+  hosted.runtime.subscribe((event) => {
+    events.push(event)
+    if (event.kind === 'extension-ui-request' && event.method === 'confirm') {
+      trace.send('H', 'S', `extension-ui-request {method: confirm, blocking: ${String(event.blocking)}}`)
+    }
+    if (event.kind === 'dialog-settled') trace.send('H', 'S', `dialog-settled {outcome: ${event.outcome}}`)
+  })
+  trace.send('S', 'H', 'openDialogs()')
   const openBefore = hosted.runtime.openDialogs()
+  trace.reply('H', 'S', `${openBefore.length} open`)
   expect(openBefore).toHaveLength(1)
   const dialogId = openBefore[0]?.id ?? ''
   const settled = untilObservation(hosted, (event) => event.kind === 'dialog-settled')
+  trace.send('S', 'H', 'abort()')
   await hosted.runtime.abort()
   expect(await settled).toEqual({ kind: 'dialog-settled', id: dialogId, outcome: 'aborted' })
   expect(hosted.runtime.openDialogs()).toHaveLength(0)
@@ -772,9 +806,11 @@ test("⚠ Stop stops: the run's abort settles a pending dialog as `aborted` — 
   expect(outcome).toBe(false)
   expect(events.filter((event) => event.kind === 'dialog-settled')).toHaveLength(1)
   // an answer arriving after the abort is the "already settled" path: reported, not thrown, nothing moves
+  trace.send('S', 'H', 'answerDialog {confirmed: true}, after the stop')
   hosted.runtime.answerDialog({ id: dialogId, confirmed: true })
   await nextTick()
   expect(outcome).toBe(false)
+  expect(trace.diagram()).toMatchSnapshot('flow dialog-ask-answer-settled: the host, a question the stop settles')
 })
 
 // A stop must stop, even when the runtime's abort rejects: the dialogs settle and the
@@ -816,10 +852,6 @@ test("listCommands is synchronous and names picc's /mode", async () => {
   expect(commands.some((command) => command.name === 'mode' && command.source === 'extension')).toBe(true)
 })
 
-function noopListener(): void {
-  // A subscriber that only exists so the host has one: the tail records the delivery, not this.
-}
-
 /** Emits a notify on command — used to produce an event while nobody is subscribed. */
 const lateNotifyProbe: InlineExtension = {
   name: 'enso-host-late-notify-probe',
@@ -833,6 +865,7 @@ const lateNotifyProbe: InlineExtension = {
   },
 }
 
+// @pins follow-snapshot-frames/held-until-first-subscriber
 test('⚠ events are held only until the FIRST subscriber; with nobody listening afterwards they are dropped, not replayed', async () => {
   // Per-thread sessions (#69 PR 2) subscribe one pump per run. If the host kept holding
   // between runs, an aborted run's `agent_settled` would replay into the next run's pump
@@ -868,17 +901,43 @@ test('⚠ events are held only until the FIRST subscriber; with nobody listening
 // #88 and #69 were both ordering bugs reconstructed from source. The tail (#97) is the record
 // that would have shown each in one glance: the provenance column says HOW every event through
 // the host's funnel was delivered, and a held/replayed pair or a dropped row is the finding.
+// @pins follow-snapshot-frames/provenance-tail follow-snapshot-frames/held-until-first-subscriber
 test("⚠ the emitted tail records each event's provenance: held at startup, replayed to the first subscriber, live, dropped (#97)", async () => {
   const hosted = await hostedSession([lateNotifyProbe])
+  // The host's side of `docs/flows/follow-snapshot-frames.md` (#482): what the subscriber
+  // received and what the tail said, each time the test read it.
+  const trace = flowTrace({
+    participants: { S: 'subscriber (the test)', H: 'host (agent-host.ts: emit, subscribe, the tail)' },
+    categories: { 'enso.host': 'H' },
+    logs,
+  })
+  /** The tail's provenances, in order, a run of one provenance read once. */
+  const provenances = (rows: readonly EnsoThreadEvent[]): string =>
+    rows
+      .map((event) => event.provenance)
+      .filter((provenance, index, all) => provenance !== all[index - 1])
+      .join(', ')
   const atStartup = hosted.emittedEvents()
+  trace.send('S', 'H', 'emittedEvents(), before anyone subscribed')
+  trace.reply('H', 'S', `the tail: ${provenances(atStartup)}`)
   // Before anyone subscribes every startup record is `held` — picc's `modes` entry among them.
   expect(atStartup.length).toBeGreaterThan(0)
   expect(atStartup.every((event) => event.provenance === 'held')).toBe(true)
   expect(atStartup.some((event) => event.type === 'custom-entry' && event.name === 'modes')).toBe(true)
 
-  const unsubscribe = hosted.runtime.subscribe(noopListener)
+  let lastOrigin: string | undefined
+  trace.send('S', 'H', 'subscribe(listener)')
+  const unsubscribe = hosted.runtime.subscribe((observation) => {
+    // Only the kinds that say where they came from (#96); an entry carries no origin.
+    if (!('origin' in observation)) return
+    const origin = observation.origin
+    if (origin !== lastOrigin) trace.send('H', 'S', `observations, origin ${origin}`)
+    lastOrigin = origin
+  })
   // The replay is recorded as it happens, in the held order, after the held rows.
   const afterSubscribe = hosted.emittedEvents()
+  trace.send('S', 'H', 'emittedEvents()')
+  trace.reply('H', 'S', `the tail: ${provenances(afterSubscribe)}`)
   const heldModes = afterSubscribe.find((event) => event.provenance === 'held' && event.name === 'modes')
   const replayedModes = afterSubscribe.find((event) => event.provenance === 'replayed' && event.name === 'modes')
   expect(heldModes).toBeDefined()
@@ -890,13 +949,16 @@ test("⚠ the emitted tail records each event's provenance: held at startup, rep
   expect(totalOf('replayed')).toBe(totalOf('held'))
 
   // With a subscriber attached the command's notify is `live`; with none, `dropped`.
+  trace.send('S', 'H', 'prompt "/enso-late-notify", subscribed')
   await new Promise<void>((resolve, reject) => {
     hosted.runtime.prompt(
       { message: '/enso-late-notify' },
       { onAccepted: resolve, onRejected: (reason: string) => reject(new Error(reason)) },
     )
   })
+  trace.send('S', 'H', 'unsubscribe()')
   unsubscribe()
+  trace.send('S', 'H', 'prompt "/enso-late-notify", nobody subscribed')
   await new Promise<void>((resolve, reject) => {
     hosted.runtime.prompt(
       { message: '/enso-late-notify' },
@@ -913,13 +975,17 @@ test("⚠ the emitted tail records each event's provenance: held at startup, rep
         event.provenance !== 'replayed',
     )
     .map((event) => event.provenance)
+  trace.send('S', 'H', 'emittedEvents()')
+  trace.reply('H', 'S', `its notify rows since: ${notifies.join(', ')}`)
   expect(notifies).toEqual(['live', 'dropped'])
+  expect(trace.diagram()).toMatchSnapshot('flow follow-snapshot-frames: the host, held until the first subscriber')
 })
 
 // #96's source tag: the subscriber is TOLD which events are a replay of the session's own
 // start. multi-account's two startup notices arrive `replayed`; a notice the same extension
 // emits during a run arrives `live`. This is what lets the browser group the first without
 // guessing from position — and the guess would have swallowed a run's early refusal.
+// @pins follow-snapshot-frames/held-until-first-subscriber
 test("⚠ subscribe delivers startup records with origin `session-start` and a run's with `run` (#96)", async () => {
   const hosted = await hostedSession([lateNotifyProbe])
   const deliveries: Array<[string, string]> = []
@@ -996,6 +1062,7 @@ function storeTurns(
   return { file, userEntryIds }
 }
 
+// @pins resume/one-id
 test('⚠ createSession(threadId) OPENS the session file already under that id — the branch is the stored one, not a fresh file', async () => {
   const threadId = crypto.randomUUID()
   const file = storeSession(threadId, 'what was I doing?', 'fixing the login bug')
@@ -1014,6 +1081,7 @@ test('⚠ createSession(threadId) OPENS the session file already under that id �
   expect(roles.slice(0, 2)).toEqual(['user', 'assistant'])
 })
 
+// @pins resume/one-id
 test('createSession(threadId) with no file under that id CREATES the session under it, so the file it flushes is found next time', async () => {
   const threadId = crypto.randomUUID()
   const hosted = await hostWith().createSession(threadId, () => repoRoot)
@@ -1023,6 +1091,7 @@ test('createSession(threadId) with no file under that id CREATES the session und
   expect((await hostWith().listSessions()).some((stored) => stored.id === threadId)).toBe(false)
 })
 
+// @pins resume/rail-listing resume/looking-builds-nothing
 test('listSessions names stored sessions newest first with the first user message; readStoredThread reads one without building pi', async () => {
   const older = crypto.randomUUID()
   const newer = crypto.randomUUID()

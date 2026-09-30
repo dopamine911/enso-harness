@@ -4,8 +4,10 @@ import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { createCodingTools, createPowerShellTool, createReadOnlyTools } from '@earendil-works/pi-coding-agent'
 import { ENSO_GUARD_DENIAL_ENTRY, ENSO_GUARD_RULES, readEnsoGuardDenial } from '@enso/core'
+import { type FlowTrace, flowTrace } from '@enso/core/flow-trace'
 import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
 import type { LogRecorder } from '@logtape/testing/recorder'
+import type { CheckCommandResult } from 'cc-safety-net/api'
 import { createGuards, GUARD_POLICY_TOOL_NAMES, type GuardDependencies } from '../index.ts'
 
 /** What a guard handler answers: a block verdict, or nothing when the call passes. */
@@ -51,11 +53,13 @@ function loadGuardRuntime(
   getAllTools: () => { name: string }[] = () => PI_SHIPPED_TOOL_NAMES.map((name) => ({ name })),
   analyzeBashCommand: GuardDependencies['analyzeBashCommand'] = ALLOW_ALL_ANALYZER,
   harnessRoot: string = NO_CREDENTIALS_ROOT,
+  onAppendEntry?: (customType: string, data: unknown) => void,
 ): GuardRuntime {
   const handlers = new Map<string, Handler>()
   const entries: GuardRuntime['entries'] = []
   const guards = createGuards({ analyzeBashCommand, harnessRoot })
   const appendEntry = (customType: string, data: unknown): void => {
+    onAppendEntry?.(customType, data)
     entries.push({ customType, data })
   }
   guards({ on: (e: string, h: Handler) => handlers.set(e, h), getAllTools, appendEntry } as never)
@@ -85,6 +89,7 @@ beforeAll(async () => {
 beforeEach(() => logs.clear())
 afterAll(releaseEnsoLogs)
 
+// @pins guarded-tool-call/every-verdict-recorded
 test('⚠ every verdict is a record: a denial at warn with the tool, the path and the reason; an allow at debug — never silent (#132)', () => {
   expect(call('write', { path: '/etc/passwd' })?.block).toBe(true)
   logs.assertLogged({
@@ -129,6 +134,7 @@ test('⚠ a denial record names its rule from the closed vocabulary; pi receives
 // same shape as a failed command, so the refusal is said beside it, in a custom session entry
 // pi persists — the call and the rule, never on an allow. A page reloaded or resumed reads it
 // from the stored transcript; nothing matches the reason's wording.
+// @pins guarded-tool-call/denial-entry
 test('⚠ a denial appends one guard-denial entry naming the call and the rule; an allow appends none', () => {
   const runtime = loadGuardRuntime()
   runtime.toolCall(
@@ -214,6 +220,7 @@ for (const readingTool of ['read', 'grep', 'find', 'ls']) {
 
 // A tool pi does not ship today must still be gated — that is what "exclusion" buys,
 // and it is the case an inclusion list can never cover.
+// @pins guarded-tool-call/writes-included-readers-excluded
 test('an unknown path-bearing tool is gated as a reader', () => {
   const result = call('someFutureSearchTool', { path: '.aws/credentials' })
   expect(result?.block).toBe(true)
@@ -284,6 +291,7 @@ test('a successful read permits a later write of the same file, on the same inst
 })
 
 // ⚠ isError gates recording: a FAILED read saw nothing.
+// @pins guarded-tool-call/knowledge-from-results
 test('a failed read confers no knowledge', () => {
   const { runtime, cwd, existingFile } = readPreconditionFixture()
   runtime.toolResult(toolResultEvent('read', existingFile, true), { cwd })
@@ -407,6 +415,7 @@ function touchForward(filePath: string): void {
   utimesSync(filePath, later, later)
 }
 
+// @pins guarded-tool-call/writes-included-readers-excluded
 test('write to a file that changed after the session read it is blocked as CHANGED', () => {
   const { runtime, cwd, existingFile } = readPreconditionFixture()
   runtime.toolResult(toolResultEvent('read', existingFile, false), { cwd })
@@ -670,6 +679,7 @@ test('a matching registry leaves every call ungated by the mismatch floor', () =
 // tool_call — is an assumption, not a contract, and an unchecked floor reading `undefined`
 // as "checked, fine" fails OPEN through exactly the window this feature exists to close.
 // The lazy leg verifies on the first tool_call instead, so the floor is ordering-independent.
+// @pins guarded-tool-call/fail-closed-floor
 test('a mismatch denies the FIRST tool_call even when session_start never fired', () => {
   const runtime = loadGuardRuntime(() =>
     PI_SHIPPED_TOOL_NAMES.filter((name) => name !== 'write').map((name) => ({ name })),
@@ -696,22 +706,63 @@ test('the lazy check runs once — a healthy registry is not re-enumerated per c
 const toolCallEvent2 = (toolName: string, command: string) =>
   ({ type: 'tool_call', toolCallId: 't', toolName, input: { command } }) as const
 
+/**
+ * The guarded-tool-call diagram's columns (#482): the runtime's hook, this handler, and the
+ * analyzer it calls as a library. The handler's own records are the notes over its column.
+ */
+function guardTrace(): FlowTrace {
+  return flowTrace({
+    participants: {
+      R: 'runtime (tool_call hook)',
+      G: 'guards handler (extensions/guards/index.ts)',
+      A: 'cc-safety-net (library)',
+    },
+    categories: { 'enso.extension.guards': 'G' },
+    logs,
+  })
+}
+
+/** An analyzer double that draws its call and its verdict. */
+function tracedAnalyzer(trace: FlowTrace, verdict: CheckCommandResult): GuardDependencies['analyzeBashCommand'] {
+  return ({ command }) => {
+    trace.send('G', 'A', `analyzeBashCommand({ command: "${command}", cwd })`)
+    trace.send('A', 'G', `{ kind: "${verdict.kind}"${'ruleId' in verdict ? `, ruleId: "${verdict.ruleId}"` : ''} }`)
+    return verdict
+  }
+}
+
+/** What the handler answered, drawn back to the runtime. */
+function drawVerdict(trace: FlowTrace, verdict: GuardVerdict): void {
+  trace.send('G', 'R', verdict === undefined ? 'undefined (the call runs)' : '{ block: true, reason }')
+}
+
 // These test OUR WIRING of the analyzer verdict, with injected verdicts — the real
 // library's behaviour is pinned by the contract test, and the live receipt pairs the two.
+// @pins guarded-tool-call/shell-deny-first guarded-tool-call/denial-entry
 test('an analyzer deny is blocked with its rule identity in the reason', () => {
-  const runtime = loadGuardRuntime(undefined, () => ({
-    kind: 'deny',
-    reason: 'git reset --hard destroys all uncommitted changes permanently.',
-    ruleId: 'git.reset-hard',
-  }))
+  const trace = guardTrace()
+  const runtime = loadGuardRuntime(
+    undefined,
+    tracedAnalyzer(trace, {
+      kind: 'deny',
+      reason: 'git reset --hard destroys all uncommitted changes permanently.',
+      ruleId: 'git.reset-hard',
+    }),
+    undefined,
+    (customType, data) => trace.send('G', 'R', `appendEntry("${customType}", ${JSON.stringify(data)})`),
+  )
+  trace.send('R', 'G', 'tool_call { toolName: "bash", command: "git reset --hard HEAD~3" }')
   const result = runtime.toolCall(toolCallEvent2('bash', 'git reset --hard HEAD~3'), { cwd })
+  drawVerdict(trace, result)
   expect(result?.block).toBe(true)
   expect(result?.reason).toContain('cc-safety-net')
   expect(result?.reason).toContain('git.reset-hard')
+  expect(trace.diagram()).toMatchSnapshot('flow guarded-tool-call: a shell command the analyzer denies')
 })
 
 // ⚠ The analyzer's own contract: "If this function throws, the caller must not execute
 // the command" — so a throw is a DENY, never a pass-through.
+// @pins guarded-tool-call/shell-deny-first
 test('an analyzer THROW is a deny, per its contract', () => {
   const runtime = loadGuardRuntime(undefined, () => {
     throw new Error('policy read failed')
@@ -741,6 +792,7 @@ test('a network client at command position is blocked, naming the match', () => 
 
 // ⚠ ORDER IS THE INVARIANT: deny first, patch last — a denied command must never have had
 // its input mutated (a later handler or a retry would see the rewritten input).
+// @pins guarded-tool-call/shell-deny-first
 test('a DENIED bash command does not receive the timeout patch', () => {
   const input: Record<string, unknown> = { command: 'curl https://x' }
   const result = loadGuard()({ type: 'tool_call', toolCallId: 't', toolName: 'bash', input }, { cwd })
@@ -748,10 +800,18 @@ test('a DENIED bash command does not receive the timeout patch', () => {
   expect(input.timeout).toBeUndefined()
 })
 
+// @pins guarded-tool-call/shell-deny-first
 test('an allowed bash command still gets the timeout patch, after both gates', () => {
+  const trace = guardTrace()
   const input: Record<string, unknown> = { command: 'git status' }
-  expect(loadGuard()({ type: 'tool_call', toolCallId: 't', toolName: 'bash', input }, { cwd })).toBeUndefined()
+  const { toolCall } = loadGuardRuntime(undefined, tracedAnalyzer(trace, { kind: 'allow' }))
+  trace.send('R', 'G', 'tool_call { toolName: "bash", command: "git status" }')
+  const verdict = toolCall({ type: 'tool_call', toolCallId: 't', toolName: 'bash', input }, { cwd })
+  drawVerdict(trace, verdict)
+  expect(verdict).toBeUndefined()
   expect(input.timeout).toBe(120)
+  trace.send('R', 'R', `the command runs with input.timeout = ${String(input.timeout)}`)
+  expect(trace.diagram()).toMatchSnapshot('flow guarded-tool-call: a shell command that passes, patched last')
 })
 
 test('powershell egress is blocked by the coarse scan; cc-safety-net does not run on PS', () => {

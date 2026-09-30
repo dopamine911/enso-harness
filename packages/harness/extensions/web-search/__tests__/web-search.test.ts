@@ -1,7 +1,9 @@
 import { expect, test } from 'bun:test'
 import { EXTERNAL_WEB_CONTENT_NOTICE, WEB_SEARCH_TOOL_NAME } from '@enso/core'
+import { type FlowTrace, flowTrace } from '@enso/core/flow-trace'
 import { auditRecords, recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
 import type { LogRecord } from '@logtape/logtape'
+import type { LogRecorder } from '@logtape/testing/recorder'
 import type { DeepseekSearchRequest, TavilySearchRequest, WebSearchOutcome } from '../../../core/index.ts'
 import { WebSearchProviderError } from '../../../core/index.ts'
 import { createWebSearch, fallbackReasonFor, type WebSearchDependencies } from '../index.ts'
@@ -133,32 +135,111 @@ async function run(loaded: LoadedWebSearch, extensionContext: unknown): Promise<
 }
 
 /** Capture the audit records for one call (#132: records, not stderr lines). */
-async function withAuditCapture<T>(action: () => Promise<T>): Promise<{ value: T; audits: readonly LogRecord[] }> {
+async function withAuditCapture<T>(
+  action: (logs: LogRecorder) => Promise<T>,
+): Promise<{ value: T; audits: readonly LogRecord[] }> {
   const logs = await recordEnsoLogs()
   try {
-    const value = await action()
+    const value = await action(logs)
     return { value, audits: auditRecords(logs, 'web-search') }
   } finally {
     await releaseEnsoLogs()
   }
 }
 
+/**
+ * The web-search-call diagram's columns (#482): the runtime calling the tool, the extension, the
+ * secrets file its arming read goes to, and the provider doubles. The audit record is the note.
+ */
+function webSearchTrace(logs: LogRecorder): FlowTrace {
+  return flowTrace({
+    participants: {
+      R: 'runtime (a tool call inside a run)',
+      X: 'web_search (extensions/web-search/index.ts)',
+      S: 'ENSO_HOME/secrets.env (readSecret)',
+      P: 'native provider · Tavily (providers/*.ts)',
+    },
+    categories: { 'enso.extension.web-search': 'X' },
+    logs,
+  })
+}
+
+/** A holder the doubles draw through: they are built before the call's recorder exists. */
+interface TraceSlot {
+  trace?: FlowTrace
+}
+
+/** The secrets read, drawn: which name was asked for and whether it was there, never its value. */
+function tracedSecrets(
+  slot: TraceSlot,
+  environment: Record<string, string>,
+): WebSearchDependencies['readEnvironmentVariable'] {
+  return (variableName) => {
+    slot.trace?.send('X', 'S', `readSecret(${variableName})`)
+    const value = environment[variableName]
+    slot.trace?.send(
+      'S',
+      'X',
+      value === undefined ? 'absent: the fallback is not armed' : 'present: the fallback is armed',
+    )
+    return value
+  }
+}
+
+/** A provider double that draws the run it was asked for and the outcome it gave. */
+function tracedProvider(slot: TraceSlot, name: string, outcome: WebSearchOutcome): () => Promise<WebSearchOutcome> {
+  return async () => {
+    slot.trace?.send('X', 'P', `${name}({ query, signal }) under the call's one deadline`)
+    slot.trace?.send('P', 'X', `WebSearchOutcome { kind: "${outcome.kind}", providerId: "${outcome.providerId}" }`)
+    return outcome
+  }
+}
+
+// @pins web-search-call/honest-render web-search-call/one-deadline-one-audit
 test('a searched primary renders the via-line, the notice, the answer, and the sources', async () => {
-  const loaded = loadWebSearch()
-  const { value: text, audits } = await withAuditCapture(() => run(loaded, { model: ANTHROPIC_MODEL }))
+  const slot: TraceSlot = {}
+  let tavilyRuns = 0
+  const loaded = loadWebSearch({
+    readEnvironmentVariable: tracedSecrets(slot, {}),
+    runProviders: {
+      anthropic: tracedProvider(slot, 'runAnthropicProviderSearch', SEARCHED),
+      google: async () => {
+        throw new Error('google fake not expected in this test')
+      },
+      openai: async () => {
+        throw new Error('openai fake not expected in this test')
+      },
+      deepseek: async () => {
+        throw new Error('deepseek fake not expected in this test')
+      },
+      tavily: async () => {
+        tavilyRuns += 1
+        return TAVILY_RESULTS
+      },
+    },
+  })
+  const { value: text, audits } = await withAuditCapture(async (logs) => {
+    slot.trace = webSearchTrace(logs)
+    slot.trace.send('R', 'X', `execute({ query }, signal, onUpdate, { model: ${ANTHROPIC_MODEL.api} })`)
+    const result = await run(loaded, { model: ANTHROPIC_MODEL })
+    slot.trace.send('X', 'R', result.split('\n')[0] ?? '')
+    return result
+  })
   expect(text.startsWith('Searched the web via anthropic.')).toBe(true)
   expect(text).toContain(EXTERNAL_WEB_CONTENT_NOTICE)
   expect(text).toContain('enso gained web_search[1].')
   expect(text).toContain('1. [Enso docs](https://example.com/enso)')
-  expect(loaded.calls.tavily).toBe(0)
+  expect(tavilyRuns).toBe(0)
   // One audit record, naming provider and outcome, never any key material.
   expect(audits).toHaveLength(1)
   expect(audits[0]?.properties).toMatchObject({ provider: 'anthropic', outcome: 'searched' })
+  expect(slot.trace?.diagram()).toMatchSnapshot('flow web-search-call: the current model searches')
 })
 
 // ⚠ THE ACCURACY CONTRACT (#63): an ungrounded answer with no fallback armed is returned
 // LABELED, never rendered as a search result, and never carries the web-content notice
 // (it is the model's own output, not external content).
+// @pins web-search-call/secret-arms-fallback web-search-call/honest-render
 test('ungrounded with no Tavily key: labeled as NOT a search result, no notice, no via-line', async () => {
   const loaded = loadWebSearch({
     runProviders: {
@@ -177,20 +258,26 @@ test('ungrounded with no Tavily key: labeled as NOT a search result, no notice, 
   expect(text).not.toContain('Searched the web')
 })
 
+// @pins web-search-call/secret-arms-fallback
 test('ungrounded WITH Tavily armed falls back, and the render says why', async () => {
-  const loaded = loadWebSearch(
-    {
-      runProviders: {
-        anthropic: async () => UNGROUNDED,
-        google: async () => UNGROUNDED,
-        openai: async () => UNGROUNDED,
-        deepseek: async () => UNGROUNDED,
-        tavily: async () => TAVILY_RESULTS,
-      },
+  const slot: TraceSlot = {}
+  const loaded = loadWebSearch({
+    readEnvironmentVariable: tracedSecrets(slot, { TAVILY_API_KEY: 'tv-key' }),
+    runProviders: {
+      anthropic: tracedProvider(slot, 'runAnthropicProviderSearch', UNGROUNDED),
+      google: async () => UNGROUNDED,
+      openai: async () => UNGROUNDED,
+      deepseek: async () => UNGROUNDED,
+      tavily: tracedProvider(slot, 'runTavilyProviderSearch', TAVILY_RESULTS),
     },
-    { TAVILY_API_KEY: 'tv-key' },
-  )
-  const { value: text, audits } = await withAuditCapture(() => run(loaded, { model: ANTHROPIC_MODEL }))
+  })
+  const { value: text, audits } = await withAuditCapture(async (logs) => {
+    slot.trace = webSearchTrace(logs)
+    slot.trace.send('R', 'X', `execute({ query }, signal, onUpdate, { model: ${ANTHROPIC_MODEL.api} })`)
+    const result = await run(loaded, { model: ANTHROPIC_MODEL })
+    slot.trace.send('X', 'R', result.split('\n')[0] ?? '')
+    return result
+  })
   expect(text.startsWith('Searched the web via tavily (fallback')).toBe(true)
   expect(text).toContain('answered WITHOUT searching')
   expect(text).toContain('## Results')
@@ -200,6 +287,7 @@ test('ungrounded WITH Tavily armed falls back, and the render says why', async (
   // The key must never appear in the rendered text or any audit record.
   expect(text).not.toContain('tv-key')
   expect(JSON.stringify(audits.map((record) => record.properties))).not.toContain('tv-key')
+  expect(slot.trace?.diagram()).toMatchSnapshot('flow web-search-call: an ungrounded answer falls back to Tavily')
 })
 
 test('a primary failure AFTER dispatch falls back and admits it may have billed', async () => {
@@ -228,6 +316,7 @@ test('a primary failure AFTER dispatch falls back and admits it may have billed'
 // branches through the tool itself, so the selection the model sees is the one asserted.
 // A wrong branch fails by name: the fake for the wrong provider throws.
 
+// @pins web-search-call/model-selects
 test('a Gemini model routes to the google provider through the tool, and the audit names it', async () => {
   const calls = { google: 0 }
   const loaded = loadWebSearch({
@@ -261,6 +350,7 @@ test('a Gemini model routes to the google provider through the tool, and the aud
   expect(audits[0]?.properties).toMatchObject({ provider: 'google', outcome: 'searched' })
 })
 
+// @pins web-search-call/model-selects
 test('every Responses-family api routes to the openai provider through the tool: openai, azure, codex', async () => {
   for (const api of ['openai-responses', 'azure-openai-responses', 'openai-codex-responses']) {
     const calls = { openai: 0 }
@@ -291,6 +381,7 @@ test('every Responses-family api routes to the openai provider through the tool:
   }
 })
 
+// @pins web-search-call/model-selects web-search-call/secret-arms-fallback
 test('an unrouted model with no Tavily key refuses, naming the arming env var', async () => {
   const loaded = loadWebSearch()
   const { value: text } = await withAuditCapture(() => run(loaded, { model: UNROUTED_MODEL }))
@@ -440,6 +531,7 @@ function stalledUntilAborted(providerId: 'anthropic') {
     })
 }
 
+// @pins web-search-call/one-deadline-one-audit
 test('⚠ a primary that stalls for the whole budget leaves the fallback NO time — it is refused with the deadline, not run for another budget', async () => {
   const tavilySignals: boolean[] = []
   const loaded = loadWebSearch(

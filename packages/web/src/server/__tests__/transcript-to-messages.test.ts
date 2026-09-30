@@ -73,6 +73,7 @@ test('user and assistant messages map in branch order, with text, thinking and t
 // TanStack's own normalised shape: the result sits in the assistant message that holds the
 // call, and the call reads complete with the result as its output — so a resumed step row
 // (#93) renders exactly like a live one.
+// @pins resume/transcript-ours
 test('a user message pi stored with an image beside its text comes back as text + image parts (#68) — the bytes are in the file', () => {
   const messages = branchToMessages([
     entry('u1', {
@@ -129,6 +130,7 @@ test('⚠ a tool result is paired into the assistant message holding its call; t
   expect(withCall?.parts[1]).not.toHaveProperty('error')
 })
 
+// @pins guarded-tool-call/refusal-is-error-result
 test('a refused tool call (isError) reads as an error on both the call and the result — a denial must not render as success', () => {
   const messages = branchToMessages([
     entry('a1', {
@@ -151,6 +153,7 @@ test('a refused tool call (isError) reads as an error on both the call and the r
 // `isError` with a reason as the text — pi builds them identically — and only the guard's
 // custom entry, written before the result, tells them apart after a reload. A marker that is
 // malformed, or names a call it does not precede, marks nothing.
+// @pins guarded-tool-call/denial-entry
 test('⚠ a guard refusal rides its own result as metadata; a failed call with the same shape carries none (#387)', () => {
   const bashCall = (id: string): BranchEntry =>
     entry(`a-${id}`, {
@@ -298,6 +301,7 @@ test('a non-message entry logged after the last message does not hide the torn t
 // with `stopReason: "error"` and the provider's message, and its content is empty. Mapped as
 // parts alone it mounted as an EMPTY assistant message — #340's silence again, for anyone who
 // reloaded. The refusal rides the message's own metadata; the reply after it carries none.
+// @pins resume/transcript-ours
 test('a stored refused attempt, then the reply that got through: the refusal rides the attempt, not the reply (#381)', () => {
   const rateLimited = '429 {"type":"error","error":{"type":"rate_limit_error","message":"rate limit exceeded"}}'
   const messages = branchToMessages([

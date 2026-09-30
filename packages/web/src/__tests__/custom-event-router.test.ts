@@ -153,6 +153,7 @@ test('a custom-entry is recorded but renders nothing and moves no store', () => 
 // #387, live: the guard's entry is the one thing that says a call was refused rather than
 // failed. Its custom-entry lands in the thread's denials by call id; an entry that is another
 // extension's, or malformed, marks nothing.
+// @pins guarded-tool-call/denial-entry
 test('a guard-denial custom-entry marks its call refused; any other entry marks nothing (#387)', () => {
   observe({
     kind: 'custom-entry',
@@ -187,6 +188,7 @@ test("a blocking extension-ui-request opens the thread's question; one without a
   expect(notificationMessages()).toEqual([expect.stringContaining('could not read')])
 })
 
+// @pins dialog-ask-answer-settled/settle-per-id
 test('dialog-settled drops the card for ITS id and no other (#114)', () => {
   observe({ kind: 'extension-ui-request', id: 'd1', method: 'confirm', blocking: true, origin: 'run', dialog: CONFIRM })
   observe({ kind: 'dialog-settled', id: 'd0', outcome: 'answered' })
@@ -581,6 +583,7 @@ const refusedAttempt = (id: string): unknown => ({
 const reply = (id: string): unknown => ({ id, role: 'assistant', parts: [{ type: 'text', content: 'hello' }] })
 const prompt = (id: string): unknown => ({ id, role: 'user', parts: [{ type: 'text', content: 'hi' }] })
 
+// @pins resume/transcript-ours
 test('a snapshot whose last reply is a refused attempt shows the word; one with a reply after it clears it (#381)', () => {
   route('snapshot', snapshot({ usage: SPENT, messages: [prompt('u1'), refusedAttempt('a1'), prompt('u2')] }))
   expect(stores.refusal.get()).toEqual({

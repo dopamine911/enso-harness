@@ -54,6 +54,7 @@ function hoist(repoRoot: string, packageName: string): void {
   writeFileSync(join(directory, 'package.json'), `{"name":"${packageName}"}`)
 }
 
+// @pins boot-and-launchers/vendor-refusal
 test('verify-or-fix: a present package is verified, an absent one is linked from the hoisted copy, and the link resolves', () => {
   const { repoRoot, packageRoot } = scratchRepo('link')
   for (const name of requiredPackageNames(MANIFEST)) hoist(repoRoot, name)

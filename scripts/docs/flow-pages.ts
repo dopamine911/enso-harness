@@ -14,7 +14,7 @@ import {
 
 /**
  * Builds a `docs/flows/<id>.md` page for every `@flow` in source (#482). The pages are BUILD
- * OUTPUT: gitignored, written by `bun run docs:flows` and by the site build, never edited and
+ * OUTPUT: gitignored, written by `bun run docs:build` (`build-docs.ts`) and by the site build, never edited and
  * never committed, so there is no copy for a change to forget. What review reads is the source:
  * the tags beside the code (`flow-tags.ts`) and the recorded diagrams in the tests' snapshots.
  *
@@ -159,16 +159,15 @@ export function renderFlowPage(flow: FlowDeclaration, model: FlowModel): string 
   ].join('\n')
 }
 
-if (import.meta.main) {
-  const model = collectFlows()
+/** Write every flow page; refuses, writing nothing, while the tags disagree. Returns the pages written. */
+export function writeFlowPages(model: FlowModel = collectFlows()): string[] {
   if (model.problems.length > 0) {
-    process.stderr.write(
-      `flow-pages: refused, the tags disagree:\n${model.problems.map((problem) => `  ${problem}`).join('\n')}\n`,
+    throw new Error(
+      `flow-pages: refused, the tags disagree:\n${model.problems.map((problem) => `  ${problem}`).join('\n')}`,
     )
-    process.exit(1)
   }
   for (const flow of model.flows) {
     writeFileSync(join(ROOT, PAGE_DIRECTORY, `${flow.id}.md`), renderFlowPage(flow, model))
   }
-  process.stdout.write(`flow-pages: built ${builtFlowPages(model).join(', ')}\n`)
+  return builtFlowPages(model)
 }

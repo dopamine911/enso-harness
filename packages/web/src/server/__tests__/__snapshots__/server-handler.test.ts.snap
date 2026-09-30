@@ -1,0 +1,41 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`⚠ a prompt on a thread passes THAT id to the host — the thread id is pi's session id, so a stored one reopens: flow resume: the first prompt builds the thread under its own id 1`] = `
+"sequenceDiagram
+  participant B as browser (the test client)
+  participant S as server (server/index.ts)
+  participant T as thread registry
+  participant H as host (fake, over stored threads)
+  B->>S: POST /api/threads/stored-1/prompt {message: "continue"}
+  T->>H: createSession(stored-1)
+  Note over T: thread built: session session-1 in /fake/agent/sessions/--fake-cwd--
+  Note over T: run 1 acquired
+  Note over T: run 1 released · idle timer [ms] ms
+  Note over S: prompt [id] opened on run 1
+  S-->>B: 202"
+`;
+
+exports[`GET /api/stored-threads lists stored threads with title, count and age, marking the ones a thread here is RUNNING: flow resume: the rail lists what is stored 1`] = `
+"sequenceDiagram
+  participant B as browser (the test client)
+  participant S as server (server/index.ts)
+  participant T as thread registry
+  participant H as host (fake, over stored threads)
+  B->>S: GET /api/stored-threads
+  S->>H: listSessions()
+  S-->>B: 200"
+`;
+
+exports[`GET /api/threads/:id/history serves a STORED thread's branch as messages with its persisted mode, and builds no session: flow resume: the cold read builds nothing 1`] = `
+"sequenceDiagram
+  participant B as browser (the test client)
+  participant S as server (server/index.ts)
+  participant T as thread registry
+  participant H as host (fake, over stored threads)
+  B->>S: GET /api/threads/stored-1/history
+  S->>H: readStoredThread(stored-1)
+  S-->>B: 200 {threadId: "stored-1", messages, permissionMode}
+  B->>S: GET /api/threads/never-existed/history
+  S->>H: readStoredThread(never-existed)
+  S-->>B: 404"
+`;

@@ -66,6 +66,7 @@ test('a non-string value inside the pi table is skipped, not fatal', () => {
 // ⚠ pi skips a missing manifest resource SILENTLY; both launch points must refuse instead.
 // Only the vendor (`node_modules/…`) paths are checked — the repo-local ones are the
 // package's own.
+// @pins boot-and-launchers/vendor-refusal
 test('the vendor paths a manifest declares that are not under the package root are named, and only those', () => {
   const packageRoot = join(scratch, 'harness')
   const put = (relativePath: string): void => {

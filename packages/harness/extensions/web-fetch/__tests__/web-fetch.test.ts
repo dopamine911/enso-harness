@@ -332,6 +332,7 @@ test('an allowlisted public host is fetched ONCE, with manual redirects and an a
   expect(text).toContain('hello from the docs')
 })
 
+// @pins web-search-call/web-fetch-gates
 test('a redirect is REPORTED with its absolute target and never followed', async () => {
   let fetchCount = 0
   const loaded = loadWebFetch({

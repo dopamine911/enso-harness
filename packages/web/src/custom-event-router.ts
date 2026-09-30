@@ -122,10 +122,11 @@ export function routeEnsoCustomEvent(stores: ThreadStores, eventType: string, da
             outputAtRefusal: data.usage.output,
           },
     )
-    // The complete list, every snapshot (#114): a reconnect's snapshot is the resync, so an
-    // empty list is a fact ("nothing is waiting") this page must apply too — it clears a
-    // card for a question that settled while the page was away. One card at a time: a
-    // second concurrent question shows once the first settles and the next snapshot lists it.
+    // @invariant follow-snapshot-frames/snapshot-lists-complete The snapshot's lists are complete, so the browser replaces rather than appends.
+    // `openDialogs` is every question the thread is blocked on now (#114): a reconnect's snapshot
+    // is the resync, so an empty list is a fact ("nothing is waiting") this page must apply too;
+    // it clears a card for a question that settled while the page was away. One card at a time:
+    // a second concurrent question shows once the first settles and the next snapshot lists it.
     stores.dialog.set(data.openDialogs[0])
     // A login waiting on its provider (#348) — a page arriving mid-login offers its Stop too.
     stores.login.set(data.login)

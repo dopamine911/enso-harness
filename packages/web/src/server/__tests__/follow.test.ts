@@ -77,6 +77,11 @@ function fakeHost(
         ...overrides,
       }),
       inspect: { sessionId: 's1', cwd: '/', sessionDir: '/s', commands },
+      onCall: (method: string, args: readonly unknown[]) => {
+        const [first] = args
+        if (method === 'answerDialog') trace?.send('R', 'P', `answerDialog ${fieldsOf(first)}`)
+        if (method === 'clearQueue' || method === 'abort') trace?.send('T', 'P', `${method}()`)
+      },
     })
     built.push(fake.record)
     emit = fake.emit
@@ -89,11 +94,21 @@ function fakeHost(
       trace?.send('P', 'F', observation.kind)
       emit(observation)
     },
-    accept: () => accept(),
+    accept: () => {
+      trace?.reply('P', 'R', 'onAccepted()')
+      accept()
+    },
     traceInto: (into: FlowTrace) => {
       trace = into
     },
   }
+}
+
+/** A call's argument as the diagram shows it: `{key: value, …}`, strings quoted. */
+function fieldsOf(argument: unknown): string {
+  if (typeof argument !== 'object' || argument === null) return String(argument)
+  const fields = Object.entries(argument).map(([key, value]) => `${key}: ${JSON.stringify(value)}`)
+  return `{${fields.join(', ')}}`
 }
 
 function emptyHarnessDir(): string {
@@ -186,9 +201,47 @@ const PROMPT_FLOW = {
   },
 } as const
 
+/** The server's side of the follow (`docs/flows/follow-snapshot-frames.md`): two tabs, one feed. */
+const FOLLOW_FLOW = {
+  participants: {
+    B: 'first tab (the test client)',
+    C: 'second tab (the test client)',
+    R: 'follow route (server/follow.ts)',
+    T: 'thread registry',
+    P: 'runtime (fake host)',
+    F: 'feed (observation log)',
+  },
+  categories: PROMPT_FLOW.categories,
+} as const
+
+/** The server's side of a dialog (`docs/flows/dialog-ask-answer-settled.md`): asked, answered, settled. */
+const DIALOG_FLOW = {
+  participants: {
+    B: 'browser (the test client)',
+    R: 'dialog route (server/index.ts, follow.ts)',
+    T: 'thread registry',
+    P: 'runtime (fake host)',
+    F: 'feed (observation log)',
+  },
+  categories: PROMPT_FLOW.categories,
+} as const
+
+/** The server's side of a stop (`docs/flows/abort-clear-restore.md`): cleared, handed back, settled. */
+const ABORT_FLOW = {
+  participants: {
+    B: 'browser (the test client)',
+    R: 'abort route (server/index.ts, follow.ts)',
+    T: 'thread registry',
+    P: 'runtime (fake host)',
+    F: 'feed (observation log)',
+  },
+  categories: PROMPT_FLOW.categories,
+} as const
+
 // ── 1. prompt is admission; the thread's own settle releases it ──────────────────────
 
 // @pins prompt-run-settle/admission prompt-run-settle/generation
+// @pins follow-snapshot-frames/cold-empty resume/cold-then-live
 test("prompt answers at admission with a message id; the run is released by pi's settle, no HTTP response in between", async () => {
   const fake = fakeHost()
   const url = await startWith(fake)
@@ -351,16 +404,24 @@ test('⚠ a QUEUED prompt the runtime rejects is said on the follow too, and the
   follow.close()
 })
 
+// @pins abort-clear-restore/one-abort-by-thread abort-clear-restore/queue-cleared-first abort-clear-restore/settle-ends-run
 test('⚠ POST …/abort tells pi once and answers with the restored queue; the run still ends on the follow by its settle, not by the route (#116, #75)', async () => {
   const fake = fakeHost()
   const url = await startWith(fake)
   const follow = await openFollow(url, 't1')
   await follow.untilFrames(1)
-  const abortWith = (threadId: string): Promise<Response> =>
-    fetch(`${url}/api/threads/${threadId}/abort`, { method: 'POST' })
+  const trace = flowTrace({ ...ABORT_FLOW, logs })
+  fake.traceInto(trace)
+  const abortWith = async (threadId: string): Promise<Response> => {
+    trace.request('B', 'R', `POST /api/threads/${threadId}/abort`)
+    const response = await fetch(`${url}/api/threads/${threadId}/abort`, { method: 'POST' })
+    trace.respond('R', 'B', response.status, response.status === 200 ? await response.clone().json() : undefined)
+    return response
+  }
 
   // Nothing live: 404. Idle after a run: 409. Neither reaches the session.
   expect((await abortWith('never')).status).toBe(404)
+  trace.request('B', 'R', 'POST /api/threads/t1/prompt', { message: 'hello' })
   await prompt(url, 't1', 'hello')
   await follow.untilFrames(3)
   // Two prompts wait behind the run; the stop hands them back, the interrupting one first.
@@ -368,6 +429,7 @@ test('⚠ POST …/abort tells pi once and answers with the restored queue; the 
   if (built === undefined) throw new Error('no session built')
   built.queue.enqueued.push('then this')
   built.queue.interrupting.push('wait — stop at the tests')
+  trace.send('B', 'P', 'the test queues two prompts behind the run')
   const told = await abortWith('t1')
   expect(told.status).toBe(200)
   expect(await told.json()).toEqual({ threadId: 't1', restored: ['wait — stop at the tests', 'then this'] })
@@ -395,6 +457,8 @@ test('⚠ POST …/abort tells pi once and answers with the restored queue; the 
   expect(idle.status).toBe(409)
   expect(await idle.text()).toContain('nothing is running')
   expect(fake.built[0]?.aborts).toBe(1)
+  // The flow page's diagram (#482): refused, stopped with the queue handed back, ended by the settle.
+  expect(trace.diagram()).toMatchSnapshot('flow abort-clear-restore: the server')
   follow.close()
 })
 
@@ -609,12 +673,16 @@ test('a continue of a thread neither live nor stored is a 404, and nothing is bu
 
 // ── 2. a dialog parks nothing ─────────────────────────────────────────────────────────
 
+// @pins dialog-ask-answer-settled/parked-in-host dialog-ask-answer-settled/answer-checked
 test('⚠ a blocking dialog is an observation on the follow and a unary answer back — nothing parks, nothing expires', async () => {
   const fake = fakeHost()
   const url = await startWith(fake)
   const follow = await openFollow(url, 't1')
   await follow.untilFrames(1)
 
+  const trace = flowTrace({ ...DIALOG_FLOW, logs })
+  fake.traceInto(trace)
+  trace.request('B', 'R', 'POST /api/threads/t1/prompt', { message: '/mode' })
   const admitted = await prompt(url, 't1', '/mode')
   expect(admitted.status).toBe(202)
   fake.emit(SELECT_DIALOG)
@@ -628,12 +696,16 @@ test('⚠ a blocking dialog is an observation on the follow and a unary answer b
 
   // An unoffered value is refused at the door (#112) — the seam the old resume path
   // closed with the same check; the question stays open, nothing reaches pi.
-  const answerWith = (body: Record<string, unknown>): Promise<Response> =>
-    fetch(`${url}/api/threads/t1/dialog`, {
+  const answerWith = async (body: Record<string, unknown>): Promise<Response> => {
+    trace.request('B', 'R', 'POST /api/threads/t1/dialog', body)
+    const response = await fetch(`${url}/api/threads/t1/dialog`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
+    trace.respond('R', 'B', response.status)
+    return response
+  }
   const refused = await answerWith({ id: 'd1', value: 'zzz' })
   expect(refused.status).toBe(422)
   expect(await refused.text()).toContain('refused')
@@ -658,9 +730,13 @@ test('⚠ a blocking dialog is an observation on the follow and a unary answer b
   })
   expect(follow.frames[5]).toEqual({ type: 'status', live: true, busy: false, generation: 1 })
   expect(fake.built[0]?.aborts).toBe(0)
+  // The flow page's diagram (#482): asked, refused twice at the door, answered once, settled.
+  expect(trace.diagram()).toMatchSnapshot('flow dialog-ask-answer-settled: the server')
   follow.close()
 })
 
+// @pins follow-snapshot-frames/snapshot-exact follow-snapshot-frames/snapshot-lists-complete
+// @pins dialog-ask-answer-settled/settle-per-id
 test("⚠ a question answered in one tab is settled on every follower's feed, and a follow opened under it gets it in the snapshot (#114)", async () => {
   const fake = fakeHost()
   const url = await startWith(fake)
@@ -749,14 +825,20 @@ test("⚠ closing the follow mid-run aborts nothing — the run is pi's, not the
   again.close()
 })
 
+// @pins follow-snapshot-frames/snapshot-exact
 test('⚠ two followers share one feed: both see every frame with the same seq, and one leaving detaches nothing', async () => {
   const fake = fakeHost()
   const url = await startWith(fake)
+  const trace = flowTrace({ ...FOLLOW_FLOW, logs })
+  fake.traceInto(trace)
+  trace.request('B', 'R', 'GET /api/threads/t1/follow')
   const first = await openFollow(url, 't1')
-  const second = await openFollow(url, 't1')
   await first.untilFrames(1)
+  trace.request('C', 'R', 'GET /api/threads/t1/follow')
+  const second = await openFollow(url, 't1')
   await second.untilFrames(1)
 
+  trace.request('B', 'R', 'POST /api/threads/t1/prompt', { message: 'hello' })
   await prompt(url, 't1', 'hello')
   fake.emit(TEXT_DELTA)
   await first.untilFrames(4)
@@ -766,6 +848,7 @@ test('⚠ two followers share one feed: both see every frame with the same seq, 
 
   // The first follower leaves; the feed stays attached for the second (the last-listener
   // detach must count listeners, not followers that ever existed).
+  trace.send('B', 'R', 'closes its follow')
   first.close()
   fake.emit(SETTLED)
   await second.untilFrames(6)
@@ -773,6 +856,8 @@ test('⚠ two followers share one feed: both see every frame with the same seq, 
     { type: 'observation', seq: 2, observation: { kind: 'settled' } },
     { type: 'status', live: true, busy: false, generation: 1 },
   ])
+  // The flow page's diagram (#482): two follows, their snapshots, one feed.
+  expect(trace.diagram()).toMatchSnapshot('flow follow-snapshot-frames: two followers, one feed')
   second.close()
 })
 

@@ -1,9 +1,10 @@
 import { afterAll, expect, test } from 'bun:test'
-import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
+import { GENERATED_PAGES, generatedPage } from '../scripts/docs/build-docs.ts'
 import { collectFlows } from '../scripts/docs/flow-tags.ts'
-import { REPOSITORY_ROOT } from './gate-support.ts'
+import { markdownFiles, REPOSITORY_ROOT } from './gate-support.ts'
 
 /**
  * EVERY DIAGRAM IN THE DOCS PARSES (#188).
@@ -39,43 +40,32 @@ afterAll(async () => {
 
 const MERMAID_FENCE = /```mermaid\n([\s\S]*?)```/g
 
-/**
- * Every markdown page under `docs/`.
- *
- * ⚠ Not `filesUnder` (`scripts/source-tree.ts`): it walks SOURCE files and returned nothing here,
- * which made the parse test above pass by parsing zero diagrams. The floor in the second test is
- * what reported that, which is the whole reason a "for all" assertion carries one.
- */
-function documentationPages(directory: string, found: string[] = []): string[] {
-  for (const name of readdirSync(directory)) {
-    const path = join(directory, name)
-    if (statSync(path).isDirectory()) documentationPages(path, found)
-    else if (name.endsWith('.md')) found.push(path)
-  }
-  return found
+/** Every mermaid fence in `text`, with the page and the line it opens on. */
+function fencesIn(page: string, text: string): { page: string; line: number; source: string }[] {
+  return [...text.matchAll(MERMAID_FENCE)].map((match) => ({
+    page,
+    line: text.slice(0, match.index).split('\n').length,
+    source: match[1] ?? '',
+  }))
 }
 
 /**
- * Every mermaid fence in the documentation, with the page and the line it opens on, and every
- * diagram a test records for a built flow page (#482): the page is gitignored, so its diagrams
- * are read where they are kept, in the snapshots, whether or not a build has run.
+ * Every mermaid diagram the site shows: the fences in the committed pages, the fences each
+ * generator prints, and every diagram a test records for a flow page (#482). Built pages are
+ * gitignored (`markdownFiles` skips them), so their diagrams are read where they are made, from
+ * the generator and the snapshots, whether or not a build has run.
  */
 function diagrams(): { page: string; line: number; source: string }[] {
-  const found: { page: string; line: number; source: string }[] = []
-  for (const path of documentationPages(join(REPOSITORY_ROOT, 'docs'))) {
-    const text = readFileSync(path, 'utf8')
-    for (const match of text.matchAll(MERMAID_FENCE)) {
-      found.push({
-        page: relative(REPOSITORY_ROOT, path),
-        line: text.slice(0, match.index).split('\n').length,
-        source: match[1] ?? '',
-      })
-    }
-  }
-  for (const recorded of collectFlows().diagrams) {
-    found.push({ page: `${recorded.file} (recorded: ${recorded.caption})`, line: 1, source: recorded.diagram })
-  }
-  return found
+  const committed = markdownFiles(join(REPOSITORY_ROOT, 'docs')).flatMap((path) =>
+    fencesIn(relative(REPOSITORY_ROOT, path), readFileSync(path, 'utf8')),
+  )
+  const generated = GENERATED_PAGES.flatMap(({ page }) => fencesIn(`${page} (generated)`, generatedPage(page)))
+  const recorded = collectFlows().diagrams.map((diagram) => ({
+    page: `${diagram.file} (recorded: ${diagram.caption})`,
+    line: 1,
+    source: diagram.diagram,
+  }))
+  return [...committed, ...generated, ...recorded]
 }
 
 /**

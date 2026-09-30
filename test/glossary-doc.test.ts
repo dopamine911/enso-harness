@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { builtDocPages, generatedPage } from '../scripts/docs/build-docs.ts'
 import { hasWordSequence, wordsOf } from './gate-support.ts'
 
 /**
@@ -182,7 +183,11 @@ function entryOf(word: string): { text: string; line: number } | undefined {
  * separator — or the offender line when the region holds no table this can count.
  */
 function tableRowCount(page: string, regionStart: string): number | string {
-  const source = readFileSync(join(import.meta.dir, '..', page), 'utf8').split('\n')
+  // A built page (#482) is read from its generator, never from a copy a past build left on disk.
+  const text = builtDocPages().includes(page)
+    ? generatedPage(page)
+    : readFileSync(join(import.meta.dir, '..', page), 'utf8')
+  const source = text.split('\n')
   const start = source.indexOf(regionStart)
   // Names the constant, not just the miss: a reworded heading on the far page is the usual
   // cause, and re-pointing `CENSUSES[…].regionStart` is the usual fix (PR #307 review).

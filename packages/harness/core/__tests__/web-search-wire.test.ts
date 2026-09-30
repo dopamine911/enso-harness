@@ -110,6 +110,7 @@ test('a stream with search blocks and citations comes back as `searched`, marker
 // citations or sources. This fixture carries a citations_delta with a URL but NO
 // server_tool_use / web_search_tool_result block — upstream's `grounded = sources > 0`
 // called this grounded; the rework must call it ungrounded.
+// @pins web-search-call/searched-by-activity
 test('an answer with a citation but NO search block is `ungrounded` — sources are not the key', async () => {
   const events = [
     { type: 'content_block_delta', delta: { type: 'text_delta', text: 'From my training data.' } },

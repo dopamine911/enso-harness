@@ -49,6 +49,7 @@ function workspacePiVersion(): string {
   }
 }
 
+// @pins boot-and-launchers/pi-version-gate
 test('⚠ the pi the guard corpus pins against is a pi the terminal launcher will run (#217)', () => {
   const pinned = workspacePiVersion()
   // The receipt that the resolution worked at all, so an empty string cannot pass the range check.

@@ -202,6 +202,7 @@ test("acquire within the idle window cancels the disposal — #43's fix in one a
   expect(built).toHaveLength(1)
 })
 
+// @pins abort-clear-restore/one-abort-by-thread abort-clear-restore/settle-ends-run
 test('abort stops the run and never disposes; a repeat while it is pending is the same answer, not a second call; the next acquire waits for it (#116)', async () => {
   const { threads, built } = fakeHost()
   const run = await take(threads, 't1')
@@ -229,6 +230,7 @@ test('abort stops the run and never disposes; a repeat while it is pending is th
   expect(acquired).toBe(true)
 })
 
+// @pins abort-clear-restore/one-abort-by-thread
 test('abort on an idle thread or an unknown one touches nothing, and says which (#116)', async () => {
   const { threads, built } = fakeHost()
   expect(threads.abort('never')).toEqual({ outcome: 'unknown', restored: [] })
@@ -241,6 +243,7 @@ test('abort on an idle thread or an unknown one touches nothing, and says which 
 
 // #75, clear-and-restore: what waited behind the stopped run comes back, interrupting first, and
 // pi's queue is emptied BEFORE pi is told — so nothing rides into the next prompt unasked.
+// @pins abort-clear-restore/queue-cleared-first abort-clear-restore/one-abort-by-thread
 test("⚠ abort hands back the queued prompts in order and clears pi's queue; a repeat restores nothing", async () => {
   const { threads, built } = fakeHost()
   await threads.acquire('t1')
@@ -266,6 +269,7 @@ test("⚠ abort hands back the queued prompts in order and clears pi's queue; a 
   expect(hosted.record.queueClears).toBe(1)
 })
 
+// @pins abort-clear-restore/stop-must-stop
 test('⚠ a stop must stop: if clearing the queue throws, pi is still told to abort and the loss is said (PR #129 review)', async () => {
   const { threads, built } = fakeHost()
   await threads.acquire('t1')

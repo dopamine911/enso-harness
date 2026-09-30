@@ -9,8 +9,8 @@ Every page has the same shape: the sequence as a diagram · the invariants, numb
 `<!-- test: <path>#<exact title> -->` and checked by `test/docs-gate.test.ts` — a renamed or deleted
 pin fails the page that cites it · where the behaviour is stated at the code.
 
-**Built pages (#482, pilot: prompt → run → settle).** A built page is not in the repository. `bun run
-docs:flows` (and the site build) writes it from source: `@flow <id> <title>` and its paragraph at the
+**Built pages (#482).** A built page is not in the repository. `bun run docs:build` (and the site
+build) writes it from source: `@flow <id> <title>` and its paragraph at the
 symbol the flow starts from, `@invariant <flow>/<name> <sentence>` at each symbol that keeps a rule,
 `// @pins <flow>/<name>` above each test that holds one, and the sequence diagrams tests record with
 `@enso/core/flow-trace` and `toMatchSnapshot('flow <id>: <caption>')`. To change a built page, change

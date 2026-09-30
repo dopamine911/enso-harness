@@ -168,15 +168,36 @@ function writeFrame(threads: ThreadRegistry, threadId: string, response: ServerR
 /**
  * Serve one follow.
  *
- * The snapshot is read through the one live-or-cold reader (`thread-read.ts#readThreadMount`,
- * #214) — the same read `/history` serves, so the two routes cannot disagree about a thread
- * that goes live mid-read — and it is taken in the same tick as the subscription, so it is
- * exact as of `asOfSeq` and no observation can fall between the two (dsh: one complete snapshot
- * per generation, then only deltas; reconnect = a new follow = a new snapshot).
+ * @flow follow-snapshot-frames The follow: snapshot, then frames; held, replayed, live
+ * A browser's view of a thread is one `GET /api/threads/:id/follow`: a snapshot exact as of a
+ * sequence number, then every later observation with a greater one, and status frames as the
+ * thread's busy flag and generation move. There is no cursor to resume from, because the snapshot
+ * IS the resync: a reconnect is a new follow and a new snapshot (#112, #114). Beneath the wire,
+ * the host holds events that happen before anyone subscribes and replays them to the first
+ * subscriber, and its tail records how each was delivered (`held`, `replayed`, `live`,
+ * `dropped`): the ordering evidence #88 and #69 were reconstructed without (#97).
+ * @contract packages/core/src/follow.ts#EnsoFollowSnapshot
+ * @see docs/seams/observation.md the wire, as a seam
+ * @see docs/architecture.md decided constraints: AG-UI is derived in the browser, never on the wire
  *
- * A thread with neither a session nor a file is an EMPTY snapshot, not a 404 (`present` is
- * ignored here): observation may precede the first prompt, and must, or the prompt's
- * opening events have no follower.
+ * @invariant follow-snapshot-frames/snapshot-exact The snapshot is exact as of `asOfSeq`, and no observation falls between the two.
+ * The snapshot is read through the one live-or-cold reader (`thread-read.ts#readThreadMount`,
+ * #214), the same read `/history` serves, so the two routes cannot disagree about a thread that
+ * goes live mid-read; and it is taken in the same tick as the subscription, so every later
+ * frame's `seq` is greater (dsh: one complete snapshot per generation, then only deltas;
+ * reconnect = a new follow = a new snapshot). Two followers of one thread share one feed and see
+ * every frame with the same `seq`; one leaving detaches nothing.
+ *
+ * @invariant follow-snapshot-frames/cold-empty A cold thread is an empty snapshot, not a 404.
+ * A thread with neither a session nor a file is an EMPTY snapshot (`present` is ignored here):
+ * observation may precede the first prompt, and must, or the prompt's opening events have no
+ * follower. The cold read is awaited BEFORE subscribing, so a thread built during the read is
+ * then seen live.
+ *
+ * @invariant resume/cold-then-live Cold, then live, on one follow; nothing is resumed by cursor.
+ * A resumed pane's follow opens before any run and reads `live: false` (the file's messages, the
+ * file's usage with no context, `openDialogs: []`); the first prompt acquires, `createSession`
+ * opens the file, and the same follow carries `status live: true`, then `busy: true, generation: 1`.
  */
 export async function followThread(deps: FollowRouteDeps, threadId: string, response: ServerResponse): Promise<void> {
   const { threads } = deps
@@ -206,6 +227,16 @@ export async function followThread(deps: FollowRouteDeps, threadId: string, resp
     follow.unsubscribe()
     return
   }
+  // What this follower was told the thread is, and as of which seq (#482's flow traces: the
+  // frame itself crosses a socket, so the record is what a trace can show in order).
+  log.debug('snapshot as of seq {asOfSeq}: live {live}, busy {busy}, run {generation}, {openDialogs} open questions', {
+    threadId,
+    asOfSeq: follow.asOfSeq,
+    live: mount.live,
+    busy: mount.busy,
+    generation: mount.generation,
+    openDialogs: mount.openDialogs.length,
+  })
 
   writeFrame(threads, threadId, response, {
     type: 'snapshot',
@@ -476,10 +507,13 @@ export type DialogOutcome = { readonly status: 204 } | Refusal<404 | 422>
 /**
  * Deliver the answer to the LIVE session's OPEN question.
  *
- * Validated against what was asked (#112): pi hands a select's value to the extension VERBATIM,
- * so an unoffered value is an injection seam the server closes — the same check the run path's
- * resume made. A refused answer leaves the question open; only a real `cancelled: true` skips
- * the check (#225).
+ * @invariant dialog-ask-answer-settled/answer-checked An answer is checked against the question it names before the runtime sees it.
+ * This peeks, never builds, then finds the id in the runtime's `openDialogs()`: a cold thread or
+ * a spent question is 404. A non-cancel answer `validateDialogAnswer` refuses is 422 and the
+ * question stays open: pi hands a select's value to the extension VERBATIM, so an unoffered value
+ * is an injection seam the server closes (#112), the same check the run path's resume made. Only
+ * a real `cancelled: true` skips the check (#225). Only then is `answerDialog` called, and 204
+ * returned; the response says nothing else.
  */
 export function answerThreadDialog(deps: FollowRouteDeps, threadId: string, answer: DialogAnswer): DialogOutcome {
   const live = deps.threads.peek(threadId)
@@ -836,8 +870,27 @@ export type AbortRouteOutcome = { readonly status: 200; readonly receipt: EnsoAb
 /**
  * Stop the run in flight on a live thread (#116).
  *
- * The run's end arrives on the follow; the answer carries the prompts that were waiting behind
- * it (#75, clear-and-restore), so the stopping tab can hand them back to its composer.
+ * @flow abort-clear-restore Abort: clear the queue, hand it back, let the settle end the run
+ * A stop is one `POST /api/threads/:id/abort` with no body: the thread id is the whole request
+ * (#116). The registry clears the runtime's queue BEFORE telling it to abort and answers with what
+ * was waiting (clear-and-restore, #75), for the composer of the tab that stopped. The route
+ * releases nothing: the run ends on the follow by its own `settled`, as any run does, and the
+ * runtime is told once; a repeat while the abort is pending gets the same answer with nothing
+ * restored. 200 with the receipt; 409 nothing in flight; 404 not live.
+ * @contract packages/core/src/follow.ts#EnsoAbortReceipt
+ * @see docs/seams/thread-runtime.md `abort` and `clearQueue`, the runtime's contract
+ * @see docs/seams/presentation.md a stop restores through the receipt, not the `queue` frame
+ * @see docs/architecture.md decided constraints: abort is by thread, not by lease (#116); a stop hands the queue back (#75); control-plane invariant 2
+ * @see docs/glossary.md the words: abort, stop (Control)
+ *
+ * @invariant abort-clear-restore/settle-ends-run The run ends on the follow by its settle, not by the route.
+ * The runtime's `abort()` resolves when the agent is idle again, and the run still settles (pi
+ * emits `agent_settled` from a `finally`); the prompt route's settle observer
+ * (`promptThread`) releases the lease, so every follower sees the same `settled` + `status` it
+ * would for a natural end. The registry keeps the abort in flight and the next `acquire` awaits
+ * it, so a prompt straight after a stop starts against an idle session (the module header's
+ * abort-then-prompt race). The browser's `abort()` closes no run either; `idle`, `gone`,
+ * `unreachable` are outcomes, not throws.
  */
 export function abortThread(deps: FollowRouteDeps, threadId: string): AbortRouteOutcome {
   const { outcome, restored } = deps.threads.abort(threadId)

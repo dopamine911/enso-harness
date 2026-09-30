@@ -149,6 +149,17 @@ export interface GuardDependencies {
 
 <!-- source: packages/harness/extensions/guards/index.ts#createGuards -->
 ```ts
+/**
+ * The guards extension, over its two seams. The bash analyzer is a dependency of this one
+ * handler, never an extension of its own.
+ *
+ * @invariant guarded-tool-call/two-participants Two tool_call participants, structurally.
+ * The manifest loads guards before the mode extension (`packages/harness/package.json`,
+ * `pi.extensions`), and cc-safety-net is a library under this handler, not a participant, so the
+ * count stays at two (#4, #9). The tripwire scans every declared extension tree for a `tool_call`
+ * registration and asserts set equality with those two. A third is #4's arbiter trigger, and the
+ * test says not to add yourself to the list.
+ */
 export function createGuards(dependencies: GuardDependencies): (pi: ExtensionAPI) => void {
   return function guards(pi: ExtensionAPI): void {
     guardsWithDependencies(pi, dependencies)

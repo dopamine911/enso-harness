@@ -448,19 +448,27 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
   }
 
   /**
-   * Abort the run in flight on a thread (#116). pi's `abort()` resolves when the agent is
-   * idle again; the run still ends through `agent_settled` (pi emits it from a `finally`),
-   * so the prompt route's settle observer releases the lease and every follower sees the
-   * same `settled` + `status` it would for a natural end. Never disposes.
+   * Abort the run in flight on a thread (#116). Never disposes.
    *
-   * One abort per run: `busy` stays true until that settle lands, so a second click (PR
-   * #120 review) would reach pi again. pi's `abort()` is re-entrant (`agent.abort()` +
-   * `waitForIdle()`), but the second call is the same answer, so it is not made — and it
-   * restores nothing: the first stop already took the queue.
+   * @invariant abort-clear-restore/one-abort-by-thread One abort per run, by thread; the route releases nothing.
+   * The stop is addressed by thread id because the lease that took the run lives in the prompt
+   * route's closure and a later request cannot reach it. `busy` stays true until the run's settle
+   * lands, so a second click (PR #120 review) would reach pi again. pi's `abort()` is re-entrant
+   * (`agent.abort()` + `waitForIdle()`), but the second call is the same answer, so it is not
+   * made: a repeat while the abort is pending is answered `aborted` with an empty `restored`, since
+   * the first stop already took the queue. No live thread is `unknown` (a 404), nothing in flight
+   * `idle` (a 409); neither reaches the runtime.
    *
-   * The queue is cleared BEFORE pi is told (#75): pi's loop leaves on `aborted` before its
-   * follow-up drain, so anything waiting would otherwise ride into the next prompt unasked.
-   * `clearQueue()` returns the texts and emits the `queue_update` every follower reads.
+   * @invariant abort-clear-restore/queue-cleared-first The queue is cleared before the runtime is told, and comes back steering first.
+   * pi's loop leaves on `aborted` before its follow-up drain, so anything waiting would otherwise
+   * ride into the next prompt unasked (#75). So `clearQueue()` first, then `abort()`, and the
+   * answer is the steering texts followed by the follow-ups. `clearQueue()` also emits the
+   * emptied `queue` observation, so every follower's list clears; the texts go only to the caller.
+   * The stop is an `info` record carrying the COUNT handed back, never the texts.
+   *
+   * @invariant abort-clear-restore/stop-must-stop A stop must stop.
+   * If clearing the queue throws, the loss is an `error` record, `restored` is empty, and the
+   * runtime is still told to abort (PR #129 review); never the other way round.
    */
   function abort(threadId: string): AbortResult {
     const thread = threads.get(threadId)

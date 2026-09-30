@@ -74,6 +74,7 @@ test('a completed tool result becomes TOOL_CALL_RESULT with its text', () => {
 // "output-error"` (activities/chat/stream/processor.js, `handleToolCallResultEvent`). The
 // earlier `ensoIsError` was read by nothing, and this test passed while a denial rendered as
 // success (#130). The mounted pane pins the observable half: the step row reads `error`.
+// @pins guarded-tool-call/refusal-is-error-result
 test('an errored result carries the state TanStack reads, so a denial cannot render as success', () => {
   const [errored] = toAgui({
     kind: 'tool-result',

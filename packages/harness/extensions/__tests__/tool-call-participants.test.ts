@@ -92,6 +92,7 @@ function declaredExtensionTrees(): { root: string; prefix: string }[] {
   return trees
 }
 
+// @pins guarded-tool-call/two-participants boot-and-launchers/manifest-order
 test("⚠ exactly the two known tool_call participants — a third means #4's arbiter is due", () => {
   const found = declaredExtensionTrees()
     .flatMap(({ root, prefix }) => registrationSitesUnder(root).map((site) => join(prefix, site)))

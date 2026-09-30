@@ -70,6 +70,7 @@ test('select emits a request and resolves to the answered value', async () => {
   expect(pendingDialogCount()).toBe(0)
 })
 
+// @pins dialog-ask-answer-settled/one-finish dialog-ask-answer-settled/settle-per-id
 test("openDialogs lists the pending questions as the browser's dialog specs, oldest first, and nothing once settled (#112, #114)", async () => {
   const { uiContext, answerDialog, openDialogs, requests, events } = contextUnderTest()
   const first = uiContext.select('Mode?', ['ask', 'auto'], { timeout: 50_000 })
@@ -116,6 +117,7 @@ test('input and editor resolve to the value, or undefined on cancel', async () =
   expect(await edited).toBeUndefined()
 })
 
+// @pins dialog-ask-answer-settled/cancel-value
 test('a wrong-shaped answer degrades to the cancel value rather than a wrong type', async () => {
   const { uiContext, answerDialog, requests } = contextUnderTest()
   const pending = uiContext.select('Pick', ['a'])
@@ -124,6 +126,7 @@ test('a wrong-shaped answer degrades to the cancel value rather than a wrong typ
   expect(await pending).toBeUndefined()
 })
 
+// @pins dialog-ask-answer-settled/one-finish dialog-ask-answer-settled/cancel-value
 test("the caller's abort signal and timeout both resolve to the cancel value, each settled with its own reason (#114)", async () => {
   const { uiContext, requests, events, pendingDialogCount } = contextUnderTest()
   const controller = new AbortController()
@@ -165,6 +168,7 @@ test('cancelAllDialogs settles every pending dialog as cancelled; a second answe
 // The run's abort (Daniel, 2026-09-16: if the user says stop, it's stop): the same settle as
 // teardown's, under the glossary's word for it. A dialog whose extension passed its own
 // aborted signal is already gone by then and is not settled twice.
+// @pins dialog-ask-answer-settled/stop-stops
 test('abortAllDialogs settles every pending dialog as aborted, each blocked call resolving to its cancel value, once', async () => {
   const { uiContext, abortAllDialogs, requests, events } = contextUnderTest()
   const a = uiContext.confirm('A?', 'm')

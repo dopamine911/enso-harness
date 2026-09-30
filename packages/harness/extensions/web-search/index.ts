@@ -119,6 +119,25 @@ function searchModelOf(model: Model<Api>): SearchModel {
   }
 }
 
+/**
+ * @flow web-search-call A web_search call: route, authenticate, search, fall back, label
+ * One `web_search` call is the model asking for the live web through a sanctioned egress: one of
+ * the two network tools the bash guard denies the ad-hoc clients for. The extension reads the
+ * committed config ONCE per session and fails closed (the user's `ENSO_HOME/config.json`, and a
+ * trusted project's `.enso/config.json` over it; absent means defaults, unreadable means every
+ * call refuses and no provider runs). Per call it routes the CURRENT MODEL to its own native
+ * search API, resolves auth through the runtime's model registry, and, only when
+ * `TAVILY_API_KEY` sits in `ENSO_HOME/secrets.env`, arms one Tavily attempt behind it. The
+ * result's first line names the backend that answered and, on fallback, why; an answer produced
+ * without searching is labeled, never rendered as a search result (#63). One deadline covers
+ * both attempts (#99); one audit record per call.
+ * @contract packages/harness/core/web-search/vocabulary.ts#WebSearchOutcome
+ * @see docs/seams/web-providers.md the seam and its fences
+ * @see docs/reference/env-and-config.md the config knobs and the secrets file
+ * @see docs/glossary.md the words: egress and secret (Permission)
+ * @see packages/core/src/web-search.ts the deadline and the arming rule
+ * @see packages/harness/extensions/web-search/index.ts the shape in one pass (the file's header)
+ */
 export function createWebSearch(dependencies: WebSearchDependencies): (pi: ExtensionAPI) => void {
   return function webSearch(pi: ExtensionAPI): void {
     // Load ONCE at extension load; see the header. The tool registers even on a broken
@@ -286,7 +305,17 @@ interface RunPrimaryOptions {
   onProgress: (text: string) => void
 }
 
-/** Run the selected primary backend; a non-outcome return is the failure record. */
+/**
+ * Run the selected primary backend; a non-outcome return is the failure record.
+ *
+ * @invariant web-search-call/model-selects Selection is the current model's own API, or the configured pin, never implicit.
+ * DeepSeek runs only when the user's config says `webSearch.backend: "deepseek"`; otherwise
+ * `routedProviderIdForModel` reads `model.provider` and `model.api` (Google by either, the three
+ * Responses APIs to `openai`, `anthropic-messages` to `anthropic`), and anything else (the
+ * runtime registers DeepSeek chat models as `openai-completions`) selects nothing: a failure
+ * record. The `google` and `openai` branches are driven through the tool; the absent-model record
+ * is not.
+ */
 async function runPrimary(options: RunPrimaryOptions): Promise<WebSearchOutcome | PrimaryFailure> {
   const { dependencies, webSearchConfig, extensionContext, query, signal, deadline, onProgress } = options
   try {
@@ -351,6 +380,12 @@ async function runPrimary(options: RunPrimaryOptions): Promise<WebSearchOutcome 
  * type says so, so "the primary stands" can no longer be expressed as a return value at all. ⓘ
  * Exported for `__tests__/web-search.test.ts`, which pins both halves of that signature at
  * compile time.
+ *
+ * @invariant web-search-call/secret-arms-fallback The fallback is armed by a secret's presence, never by config, and fires on three things.
+ * `TAVILY_API_KEY` is read per call through `readSecret` over `ENSO_HOME/secrets.env`, never
+ * `process.env`, which the host has quarantined (#89); present and non-empty arms it. This is
+ * the whole policy: `searched` never falls back; `ungrounded`, an unrouted model and a thrown
+ * provider error all do. The key reaches neither the rendered text nor the audit record.
  */
 export function fallbackReasonFor(primary: Extract<WebSearchOutcome, { kind: 'ungrounded' }> | PrimaryFailure): string {
   if ('kind' in primary) {
@@ -367,7 +402,16 @@ interface CallDeadline {
   readonly budgetMs: number
 }
 
-/** Run one provider attempt under what remains of the call's deadline AND the caller's signal. */
+/**
+ * Run one provider attempt under what remains of the call's deadline AND the caller's signal.
+ *
+ * @invariant web-search-call/one-deadline-one-audit One deadline, one progress update, one audit record.
+ * `WEB_SEARCH_TIMEOUT_MS` (60 s) is set once per call and covers both attempts, so primary and
+ * fallback stay under the server's 90 s no-progress cutoff (#98): a primary that stalls for the
+ * whole budget leaves the fallback an already-dead signal. The fallback's announcement is tool
+ * progress (#99). `auditLine` logs `warn` for a refusal and `info` otherwise: exactly one record
+ * per call, naming provider and outcome (#132).
+ */
 function underDeadline<T>(
   callerSignal: AbortSignal | undefined,
   deadline: CallDeadline,
@@ -411,7 +455,16 @@ function renderUngrounded(outcome: Extract<WebSearchOutcome, { kind: 'ungrounded
   }
 }
 
-/** Render a `searched` outcome: backend-named first line, the notice, answer, sources. */
+/**
+ * Render a `searched` outcome: backend-named first line, the notice, answer, sources.
+ *
+ * @invariant web-search-call/honest-render The render is honest about who answered and what it may have cost.
+ * The first line names `providerId`; on fallback it appends the reason, which says the primary
+ * may have billed when `requestDispatched` is true (set in `dispatchProviderPost`: false when the
+ * request failed to send, true when the API answered non-OK). `EXTERNAL_WEB_CONTENT_NOTICE`
+ * (shared with `web_fetch`) is the second section of every `searched` result;
+ * `renderUngrounded` omits it and the via-line, and labels the answer as NOT a search result.
+ */
 function renderOutcome(outcome: WebSearchOutcome, fallbackReason: string | undefined): AgentToolResult<undefined> {
   if (outcome.kind === 'ungrounded') return renderUngrounded(outcome)
 
