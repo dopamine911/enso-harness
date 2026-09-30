@@ -34,7 +34,14 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
-import { ENSO_AUTO_AUTHORIZER, ENSO_PERMISSION_MODES, modeAgentFile, modeAgentName } from './permission-modes.ts'
+import {
+  ENSO_AUTO_AUTHORIZER,
+  ENSO_CATCH_ALL,
+  ENSO_MODE_PRESETS,
+  ENSO_PERMISSION_MODES,
+  modeAgentFile,
+  modeAgentName,
+} from './permission-modes.ts'
 
 /** `.env` files are denied everywhere; the example template stays readable. */
 const ENV_FILES_DENIED = { '*.env': 'deny', '*.env.*': 'deny' } as const
@@ -44,6 +51,9 @@ const ENV_FILES_DENIED = { '*.env': 'deny', '*.env.*': 'deny' } as const
  *
  * - **Tools:** reads and searches run, as do Enso's `ask_user` and `web_search`; edits and writes
  *   ask; anything unnamed asks (`"*"`), `web_fetch` included.
+ * - **Catch-alls:** every map starts with Enso's catch-all, `**` (`ENSO_CATCH_ALL`): the one key a
+ *   mode changes, and the pattern `auto` may answer. A rule a user adds after it is theirs, and
+ *   beats every mode (#498, #499).
  * - **Bash:** asks, except gotgenes' documented read-only allowlist (its "Read-Only Bash Command
  *   Allowlist" recipe, trimmed of `less`/`more`, which can escape to a shell). The allowlist is
  *   safe to seed because gotgenes resolves a chain to its most restrictive part and floors
@@ -74,17 +84,17 @@ export const ENSO_DEFAULT_PERMISSION_POLICY = {
     grep: 'allow',
     find: 'allow',
     ls: 'allow',
-    edit: 'ask',
-    write: 'ask',
+    edit: { [ENSO_CATCH_ALL]: 'ask' },
+    write: { [ENSO_CATCH_ALL]: 'ask' },
     // Enso's own tools. Asking the user is itself the check; a search sends only a query through
     // the session's own provider. `web_fetch` reaches any URL, so it stays on the `*` ask.
     ask_user: 'allow',
     web_search: 'allow',
-    path_read: { '*': 'allow', ...ENV_FILES_DENIED, '*.env.example': 'allow' },
-    path_write: { '*': 'allow', ...ENV_FILES_DENIED },
-    external_directory: 'ask',
+    path_read: { [ENSO_CATCH_ALL]: 'allow', ...ENV_FILES_DENIED, '*.env.example': 'allow' },
+    path_write: { [ENSO_CATCH_ALL]: 'allow', ...ENV_FILES_DENIED },
+    external_directory: { [ENSO_CATCH_ALL]: 'ask' },
     bash: {
-      '*': 'ask',
+      [ENSO_CATCH_ALL]: 'ask',
       'cat *': 'allow',
       'head *': 'allow',
       'tail *': 'allow',
@@ -147,12 +157,19 @@ export function permissionEngineConfigPath(agentDir: string): string {
  *   was written, and the caller refuses to start.
  *
  * `movedAside` names where a regular file found at the engine's config path was moved to (see
- * `linkEngineConfig`), so the launch log says so.
+ * `linkEngineConfig`), so the launch log says so. `catchAllAdded` names the surfaces of a kept
+ * file that got Enso's catch-all put first (`withCatchAllFirst`), so the log says that too.
  *
  * @group Permission mode
  */
 export type PermissionPolicyPreparation =
-  | { readonly kind: 'kept'; readonly path: string; readonly surfaces: number; readonly movedAside?: string }
+  | {
+      readonly kind: 'kept'
+      readonly path: string
+      readonly surfaces: number
+      readonly catchAllAdded: readonly string[]
+      readonly movedAside?: string
+    }
   | {
       readonly kind: 'seeded'
       readonly path: string
@@ -207,20 +224,32 @@ function errorCode(error: unknown): unknown {
 function moveAside(path: string, kind: string): string | undefined {
   for (let attempt = 0; ; attempt += 1) {
     const candidate = attempt === 0 ? `${path}.${kind}` : `${path}.${kind}.${attempt}`
-    try {
-      linkSync(path, candidate)
-    } catch (error: unknown) {
-      if (errorCode(error) === 'EEXIST') continue
-      if (errorCode(error) === 'ENOENT') return undefined
-      throw error
-    }
-    try {
-      unlinkSync(path)
-    } catch (error: unknown) {
-      // The other launch unlinked the same file first: the copy under `candidate` is still whole.
-      if (errorCode(error) !== 'ENOENT') throw error
-    }
+    const linked = linkUnlessTaken(path, candidate)
+    if (linked === 'taken') continue
+    if (linked === 'gone') return undefined
+    unlinkUnlessGone(path)
     return candidate
+  }
+}
+
+/** Hard-link `path` to `candidate`: `taken` when the name exists, `gone` when `path` does not. */
+function linkUnlessTaken(path: string, candidate: string): 'linked' | 'taken' | 'gone' {
+  try {
+    linkSync(path, candidate)
+    return 'linked'
+  } catch (error: unknown) {
+    if (errorCode(error) === 'EEXIST') return 'taken'
+    if (errorCode(error) === 'ENOENT') return 'gone'
+    throw error
+  }
+}
+
+/** Unlink `path`; another launch that unlinked it first leaves the copy already made whole. */
+function unlinkUnlessGone(path: string): void {
+  try {
+    unlinkSync(path)
+  } catch (error: unknown) {
+    if (errorCode(error) !== 'ENOENT') throw error
   }
 }
 
@@ -281,6 +310,74 @@ function writeModeAgentFiles(agentDir: string): void {
   }
 }
 
+/** The directional surfaces a bare `path` / `external_directory` key expands to, in the engine. */
+const DIRECTIONAL_SURFACES: Readonly<Record<string, readonly string[]>> = {
+  path: ['path_read', 'path_write'],
+  external_directory: ['external_directory_read', 'external_directory_write'],
+}
+
+/** Every surface a mode preset changes with a map: where the preset's catch-all key has to go first. */
+const PRESET_MAP_SURFACES: ReadonlySet<string> = new Set(
+  Object.values(ENSO_MODE_PRESETS).flatMap((preset) =>
+    Object.entries(preset.permission).flatMap(([surface, rule]) => (typeof rule === 'string' ? [] : [surface])),
+  ),
+)
+
+/**
+ * The keys of a user's `permission` block to put Enso's catch-all into. A bare `path` or
+ * `external_directory` key stands for both of its directions, and the engine puts its entries
+ * first when it expands them, so the catch-all goes into the bare key when there is one.
+ */
+function catchAllSurfaces(permission: Readonly<Record<string, unknown>>): string[] {
+  const pending = new Set(PRESET_MAP_SURFACES)
+  const surfaces: string[] = []
+  for (const [bare, directions] of Object.entries(DIRECTIONAL_SURFACES)) {
+    if (!directions.some((direction) => pending.has(direction))) continue
+    if (bare in permission) surfaces.push(bare)
+    else surfaces.push(...directions.filter((direction) => direction in permission))
+    for (const direction of directions) pending.delete(direction)
+  }
+  surfaces.push(...[...pending].filter((surface) => surface in permission))
+  return surfaces
+}
+
+/**
+ * A user's `permission` block with Enso's catch-all FIRST in every surface a mode preset changes,
+ * and the surfaces that needed it (#499).
+ *
+ * A mode's preset merges key by key, and a key the user's map lacks lands after all the user's
+ * rules, beating them (`permission-modes.ts` says how). With the catch-all first, the preset
+ * replaces only that key, and every rule the user wrote still comes after it.
+ *
+ * The catch-all takes the value the engine would fall back to anyway (the block's own `"*"`, or
+ * `ask`), so the default mode decides exactly as before:
+ * - a map without it gets it prepended;
+ * - a string surface (`bash: 'ask'`) becomes `{ '**': fallback, '*': 'ask' }`, the user's rule
+ *   still covering everything after it (a surface-wide rule the user wrote, which `auto` leaves
+ *   to the user, #498);
+ * - a map that already has it, anywhere, is left as the user ordered it.
+ */
+function withCatchAllFirst(permission: Readonly<Record<string, unknown>>): {
+  readonly permission: Readonly<Record<string, unknown>>
+  readonly added: readonly string[]
+} {
+  const fallback = typeof permission['*'] === 'string' ? permission['*'] : 'ask'
+  const updated: Record<string, unknown> = { ...permission }
+  const added: string[] = []
+  for (const surface of catchAllSurfaces(permission)) {
+    const rule = permission[surface]
+    if (typeof rule === 'string') {
+      updated[surface] = { [ENSO_CATCH_ALL]: fallback, '*': rule }
+    } else if (typeof rule === 'object' && rule !== null && !Array.isArray(rule) && !(ENSO_CATCH_ALL in rule)) {
+      updated[surface] = { [ENSO_CATCH_ALL]: fallback, ...rule }
+    } else {
+      continue
+    }
+    added.push(surface)
+  }
+  return { permission: updated, added }
+}
+
 /**
  * Make `policyPath` a policy gotgenes will use as it is, and put it and the mode presets where
  * gotgenes reads them:
@@ -298,27 +395,45 @@ function writeModeAgentFiles(agentDir: string): void {
 export function preparePermissionPolicy(policyPath: string, agentDir: string): PermissionPolicyPreparation {
   const read = readPolicy(policyPath)
   if (read.kind === 'unreadable') return { kind: 'unreadable', path: policyPath, reason: read.reason }
-  let preparation: PermissionPolicyPreparation
-  const permission = read.kind === 'object' ? read.value.permission : undefined
-  if (read.kind === 'object' && typeof permission === 'object' && permission !== null) {
-    preparation = { kind: 'kept', path: policyPath, surfaces: Object.keys(permission).length }
-  } else if (read.kind === 'object' && typeof read.value.permissions === 'object' && read.value.permissions !== null) {
-    const piccBackup = replacePiccRulesFile(policyPath)
-    // Another launch moved it first: read what is there now.
-    if (piccBackup === undefined) return preparePermissionPolicy(policyPath, agentDir)
-    preparation = { kind: 'seeded', path: policyPath, was: 'a picc rules file', piccBackup }
-  } else {
-    const existing = read.kind === 'object' ? read.value : {}
-    writeJson(policyPath, { ...existing, ...ENSO_DEFAULT_PERMISSION_POLICY })
-    preparation = {
-      kind: 'seeded',
-      path: policyPath,
-      was: read.kind === 'absent' ? 'absent' : 'without a permission block',
-    }
-  }
+  const preparation = preparePolicyFile(policyPath, read)
+  // Another launch moved a picc file away first: read what is there now.
+  if (preparation === undefined) return preparePermissionPolicy(policyPath, agentDir)
   const movedAside = linkEngineConfig(agentDir, policyPath)
   writeModeAgentFiles(agentDir)
   return movedAside === undefined ? preparation : { ...preparation, movedAside }
+}
+
+type FilePreparation = Exclude<PermissionPolicyPreparation, { readonly kind: 'unreadable' }>
+
+/** Keep, seed or migrate the user's file; `undefined` when a picc file was already moved away. */
+function preparePolicyFile(
+  policyPath: string,
+  read: Exclude<ReadPolicy, { readonly kind: 'unreadable' }>,
+): FilePreparation | undefined {
+  const value = read.kind === 'object' ? read.value : {}
+  const { permission, permissions } = value
+  if (typeof permission === 'object' && permission !== null) {
+    return keepPolicy(policyPath, value, permission as Readonly<Record<string, unknown>>)
+  }
+  if (typeof permissions === 'object' && permissions !== null) {
+    const piccBackup = replacePiccRulesFile(policyPath)
+    return piccBackup === undefined
+      ? undefined
+      : { kind: 'seeded', path: policyPath, was: 'a picc rules file', piccBackup }
+  }
+  writeJson(policyPath, { ...value, ...ENSO_DEFAULT_PERMISSION_POLICY })
+  return { kind: 'seeded', path: policyPath, was: read.kind === 'absent' ? 'absent' : 'without a permission block' }
+}
+
+/** Keep a user's policy, with Enso's catch-all put first where a mode needs it (#499). */
+function keepPolicy(
+  policyPath: string,
+  file: Readonly<Record<string, unknown>>,
+  permission: Readonly<Record<string, unknown>>,
+): FilePreparation {
+  const normalized = withCatchAllFirst(permission)
+  if (normalized.added.length > 0) writeJson(policyPath, { ...file, permission: normalized.permission })
+  return { kind: 'kept', path: policyPath, surfaces: Object.keys(permission).length, catchAllAdded: normalized.added }
 }
 
 /**
@@ -335,7 +450,11 @@ export function describePermissionPolicy(
       ? ''
       : `; the engine's config path held a regular file (its own settings screen saves one), kept as ${preparation.movedAside}`
   if (preparation.kind === 'kept') {
-    return `permission policy: ${preparation.path}, ${preparation.surfaces} surfaces${moved}`
+    const added =
+      preparation.catchAllAdded.length === 0
+        ? ''
+        : `; Enso's catch-all (**) put first in ${preparation.catchAllAdded.join(', ')}, so no mode can override a rule written there (#499)`
+    return `permission policy: ${preparation.path}, ${preparation.surfaces} surfaces${added}${moved}`
   }
   const backup = preparation.piccBackup === undefined ? '' : ` (the old file is kept as ${preparation.piccBackup})`
   return (
