@@ -1,11 +1,14 @@
 name: Claude PR Review
 
-# A single-pass Claude review on a non-draft pull request, run ONCE (open/reopen/ready-for-review) rather than
-# on every push. Measured cost of re-running on every `synchronize`: 25 runs / 5.7h averaging 12.1 minutes
-# each (~303 minutes) on this repo's active branches alone — ~87% of a day that used 1000 Actions minutes.
-# This is not a required status check (see ci.yml / secret-scan.yml for those), so skipping later commits
-# costs nothing but staleness: push more commits and this review will not automatically re-run against them.
-# To force a fresh review after further pushes, close and reopen the pull request.
+# A single-pass Claude review on a non-draft pull request, on open/reopen/ready-for-review AND on every push.
+#
+# ⚠ EVERY PUSH IS REVIEWED, BUT ONLY WHAT IT PUSHED. Re-running the FULL review on every `synchronize` was
+# measured: 25 runs / 5.7h averaging 12.1 minutes each (~303 minutes) on this repo's active branches alone —
+# ~87% of a day that used 1000 Actions minutes. So the first run reviews the whole pull request, and a push
+# after it reviews the commits it added (`github.event.before`..`after`), in the context of the whole pull
+# request: the job below writes that diff, and the comments on the code it changed. When `before` is gone
+# (a force-push rewrote history), the run falls back to the full review. Rapid pushes cancel the run they
+# supersede (`concurrency`). This is not a required status check (see ci.yml / secret-scan.yml for those).
 #
 # REQUIRES the repository secret `CLAUDE_CODE_OAUTH_TOKEN`. Without it the job writes a note to the run
 # summary and stops — see "Check for the Claude token" below. A fresh clone therefore stays green rather than
@@ -31,9 +34,17 @@ name: Claude PR Review
 # arrangement single-sources the logic, which is better inside one organisation and worse everywhere else:
 # the workflow only runs where that organisation's repository is reachable. The cost of inlining is that
 # improvements no longer arrive centrally.
+#
+# COMMENTS ON CHANGED CODE ARE LISTED, NOT LEFT TO THE REVIEWER TO FIND (#482). The gates prove a comment is
+# attached to its declaration and that the test it names exists; nothing proves the words still describe the
+# code. `scripts/docs/touched-comments.ts` lists every comment whose own lines this pull request changed, or
+# whose declaration it changed (from `git diff` and the TypeScript syntax tree), most likely stale first.
+# `.claude/pr-review.md` tells the reviewer to check each one. The list is built in its OWN job, with
+# `contents: read` and no persisted credentials: it runs this pull request's code, and the review job holds the
+# Claude token and write permissions. A failed list does not stop the review; it only loses that check.
 on:
   pull_request:
-    types: [opened, reopened, ready_for_review]
+    types: [opened, reopened, ready_for_review, synchronize]
 
 concurrency:
   group: claude-pr-review-${{ github.event.pull_request.number || github.ref }}
@@ -46,11 +57,67 @@ permissions:
   id-token: write
 
 jobs:
+  touched-comments:
+    name: Comments on changed code
+    runs-on: ubuntu-latest
+    if: >-
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.user.type != 'Bot'
+    permissions:
+      contents: read
+    timeout-minutes: 5
+    outputs:
+      scope: ${{ steps.scope.outputs.scope }}
+    steps:
+      # The PR's HEAD commit, not GitHub's merge commit: a diff against a merge commit carries whatever landed
+      # on the base branch since, which is not this pull request's to answer for.
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0 # the base commit and `before`, for `git diff <from>...HEAD`
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4" # matches ci.yml
+      - run: bun install --frozen-lockfile
+      # What this run reviews: the new commits of a push whose `before` is still in history, else the whole PR.
+      - name: Choose the review scope
+        id: scope
+        env:
+          ACTION: ${{ github.event.action }}
+          BEFORE: ${{ github.event.before }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$ACTION" = "synchronize" ] && git merge-base --is-ancestor "$BEFORE" HEAD 2>/dev/null; then
+            echo "scope=new-commits" >> "$GITHUB_OUTPUT"
+            echo "from=$BEFORE" >> "$GITHUB_OUTPUT"
+            git diff --no-color "$BEFORE" HEAD > new-commits.diff
+          else
+            echo "scope=full" >> "$GITHUB_OUTPUT"
+            echo "from=$BASE_SHA" >> "$GITHUB_OUTPUT"
+          fi
+      - name: List the comments this run puts at risk
+        env:
+          FROM: ${{ steps.scope.outputs.from }}
+        run: bun scripts/docs/touched-comments.ts --base "$FROM" --out touched-comments.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: touched-comments
+          path: |
+            touched-comments.md
+            new-commits.diff
+          if-no-files-found: ignore
+          retention-days: 7
+
   review:
     name: Claude review
     runs-on: ubuntu-latest
-    # Skip drafts and bot-authored pull requests: neither wants a review on every push.
+    needs: touched-comments
+    # Skip drafts and bot-authored pull requests. `!cancelled()`: a list that failed to build must not cancel
+    # the review it only adds to; without it, the run reviews the full pull request.
     if: >-
+      !cancelled() &&
       github.event.pull_request.draft == false &&
       github.event.pull_request.user.type != 'Bot'
     timeout-minutes: 10
@@ -90,6 +157,16 @@ jobs:
         with:
           fetch-depth: 1
 
+      # The list the job above built, into `.claude/touched-comments.md`, where `.claude/pr-review.md` tells the
+      # reviewer to look. Missing (the list job failed) is not fatal: the reviewer finds no file and says so.
+      - name: Fetch the comments on changed code
+        if: steps.token.outputs.present == 'true'
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: touched-comments
+          path: .claude
+
       - name: Run Claude review
         id: claude
         if: steps.token.outputs.present == 'true'
@@ -114,12 +191,25 @@ jobs:
           prompt: |
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
+            REVIEW SCOPE: ${{ needs.touched-comments.outputs.scope || 'full' }}
+            HEAD: ${{ github.event.pull_request.head.sha }}
 
             Single-pass PR review. No subagents. Be concise.
 
+            ## Scope
+
+            - `full`: review the whole pull request, as the procedure below says.
+            - `new-commits`: this run follows a push. Review ONLY what that push changed:
+              `.claude/new-commits.diff` is its diff (from the previous head to HEAD). Read
+              `gh pr diff` for context, but report issues only in the new commits, and title the
+              comment `## Code Review (commits pushed up to <first 7 characters of HEAD>)` so the
+              thread shows which review covers which push. If `.claude/new-commits.diff` is missing,
+              review the full pull request instead and say so in the Overview.
+
             ## Procedure
 
-            1. `gh pr diff $PR_NUMBER` — read the full diff
+            1. `gh pr diff $PR_NUMBER`: read the full diff (under `new-commits`, read
+               `.claude/new-commits.diff` first; that is what this run reviews)
             2. For non-trivial changes, `Read` the surrounding file for context
             3. Apply project conventions:
                - `CLAUDE.md` is auto-loaded — follow what it says

@@ -21,10 +21,13 @@ import typescript from 'typescript'
 export interface SourceComment {
   /** 1-based line the comment starts on. */
   readonly line: number
+  /** 1-based line the comment ends on. */
+  readonly end: number
   readonly style: 'block' | 'line'
   /** The comment's lines with the markers removed: `//`, `/**`, `*\/` and a block's leading `*`. */
   readonly lines: readonly string[]
-  readonly owner: { readonly symbol: string; readonly line: number } | undefined
+  /** The declaration documented: its name, and the 1-based lines it spans, first to last. */
+  readonly owner: { readonly symbol: string; readonly line: number; readonly end: number } | undefined
   readonly test: string | undefined
 }
 
@@ -150,6 +153,7 @@ function describe(file: typescript.SourceFile, run: readonly Range[], node: type
   const directly = !typescript.isToken(node) && lineOf(file, node.getStart(file)) - lineOf(file, last.end) <= 1
   return {
     line: lineOf(file, first.pos) + 1,
+    end: lineOf(file, last.end) + 1,
     style,
     lines,
     owner: ownerOf(file, style, directly, node),
@@ -168,12 +172,17 @@ function ownerOf(
   directly: boolean,
   node: typescript.Node,
 ): SourceComment['owner'] {
+  const span = (declaration: typescript.Node, symbol: string): SourceComment['owner'] => ({
+    symbol,
+    line: lineOf(file, declaration.getStart(file)) + 1,
+    end: lineOf(file, declaration.getEnd()) + 1,
+  })
   const own = directly ? declaredName(file, node, style === 'line') : undefined
-  if (own !== undefined) return { symbol: own, line: lineOf(file, node.getStart(file)) + 1 }
+  if (own !== undefined) return span(node, own)
   if (style === 'block') return undefined
   for (let around = node.parent; around !== undefined; around = around.parent) {
     const symbol = declaredName(file, around, true)
-    if (symbol !== undefined) return { symbol, line: lineOf(file, around.getStart(file)) + 1 }
+    if (symbol !== undefined) return span(around, symbol)
   }
   return undefined
 }
