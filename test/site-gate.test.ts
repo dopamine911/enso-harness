@@ -143,11 +143,12 @@ test('⚠ an image embedded from docs/ stays relative, and the projection carrie
 /**
  * THE PUBLISHED SITE'S BASE PATH IS DERIVED, AND THE ORDER OF ITS TWO BUILDS IS NOT OPTIONAL.
  *
- * A GitHub project site is served from `/<repository>`, which is not this repository's short
- * name. Built with the wrong `base`, Astro emits perfectly valid HTML whose every internal link
- * 404s — and nothing fails: the build succeeds, the upload succeeds, the deployment succeeds,
- * and the site is broken in a way that reads as broken documentation. So the workflow takes the
- * base from the repository rather than repeating a literal that rots on a rename or a fork.
+ * Where Pages serves the site decides the base: `/<repository>` for a project site on github.io,
+ * `/` for a custom domain (#506). Built with the wrong `base`, Astro emits perfectly valid HTML
+ * whose every internal link 404s — and nothing fails: the build succeeds, the upload succeeds,
+ * the deployment succeeds, and the site is broken in a way that reads as broken documentation.
+ * So the workflow reads the base and origin from the Pages configuration (`configure-pages`)
+ * rather than repeating literals that rot on a rename, a fork, or a domain change.
  *
  * ⚠ The local build's default is the OTHER value (`/enso`), which is exactly why this is
  * checked here: the two are supposed to differ, so neither one being wrong is visible by
@@ -161,12 +162,14 @@ test('⚠ the docs-site workflow derives its base and builds the API first (#188
   // would re-prove it on someone else's minutes.
   expect(workflow).toContain('workflow_dispatch:')
   expect(workflow).not.toMatch(/^\s{2}(?:push|pull_request):/m)
-  // Derived from the repository, never a literal — the failure this test exists for.
-  expect(workflow).toContain('ENSO_SITE_BASE: /${{ github.event.repository.name }}')
-  // ⚠ Anything that is not the expression, rather than a lowercase literal (PR #330 review): a
-  // repository whose name starts with a capital — `Zen-Harness` is a valid GitHub name — would
-  // have walked straight past a `/[a-z]/` check, hardcoded and undetected.
-  expect(workflow).not.toMatch(/ENSO_SITE_BASE:\s*\/(?!\$\{\{)/)
+  // Both read from the Pages configuration, never written down — the failure this test exists
+  // for. The repository name is not enough since #506: on a custom domain the base is empty.
+  expect(workflow).toContain('ENSO_SITE_BASE: ${{ steps.pages.outputs.base_path }}')
+  expect(workflow).toContain('ENSO_SITE_URL: ${{ steps.pages.outputs.origin }}')
+  expect(workflow).toMatch(/id: pages\n\s+uses: actions\/configure-pages@/)
+  // ⚠ Nothing else may set them, the old repository-name expression included: a second
+  // assignment of either key is a literal or a stale derivation waiting to win.
+  expect(workflow.match(/ENSO_SITE_(?:BASE|URL):/g)).toHaveLength(2)
   // ⚠ `docs:api` no longer PRODUCES anything the site needs — it validates with `--emit none`,
   // and the site generates its own API pages from the same `typedoc.json`. It still runs first,
   // because a contract that fails to document should fail before a full static build, not after.

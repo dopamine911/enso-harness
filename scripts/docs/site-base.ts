@@ -7,10 +7,12 @@
  * produces a site whose every internal link 404s, and the crawl — carrying the same wrong
  * literal — would resolve them and report green.
  *
- * ⚠ THE DEFAULT IS THE LOCAL ONE, AND PUBLISHING OVERRIDES IT. A GitHub project site is served
- * from `/<repository>`, which is not this repository's short name, so the publish workflow sets
- * `ENSO_SITE_BASE` from the repository itself rather than repeating a literal that would rot the
- * first time the repo is renamed or forked.
+ * ⚠ THE DEFAULT IS THE LOCAL ONE, AND PUBLISHING OVERRIDES IT. Where Pages serves the site
+ * decides the base — `/<repository>` for a project site, EMPTY for a custom domain
+ * (`enso.engineer`, #506) — so the publish workflow reads it from the Pages configuration rather
+ * than repeating a literal that would rot on a rename, a fork or a domain change.
+ *
+ * ⚠ `??`, not `||`: an empty `ENSO_SITE_BASE` is the custom domain's real base, not a missing one.
  */
 export const SITE_BASE: string = process.env.ENSO_SITE_BASE ?? '/enso'
 
@@ -23,6 +25,6 @@ export const SITE_BASE: string = process.env.ENSO_SITE_BASE ?? '/enso'
  *
  * The default is deliberately an unresolvable placeholder: a local build has no origin, and
  * inventing a real one would put a URL nobody serves into a sitemap. The publish workflow sets
- * the owner's Pages origin.
+ * the origin Pages serves from (`https://enso.engineer` since #506).
  */
 export const SITE_URL: string = process.env.ENSO_SITE_URL ?? 'https://example.invalid'

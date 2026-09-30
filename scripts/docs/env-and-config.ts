@@ -64,7 +64,7 @@ const ENVIRONMENT_METADATA: readonly EnvironmentMetadata[] = [
     source: 'scripts/docs/site-base.ts',
     reader: '`scripts/docs/site-base.ts#SITE_URL` (module read)',
     purposeAndDefault:
-      'Optional; the origin the site is served from, which Astro needs to emit a sitemap — without it `@astrojs/sitemap` skips at WARN and the build still succeeds. Defaults to the unresolvable `https://example.invalid` because a local build has no origin; the publish workflow sets the owner\u2019s Pages origin.',
+      'Optional; the origin the site is served from, which Astro needs to emit a sitemap — without it `@astrojs/sitemap` skips at WARN and the build still succeeds. Defaults to the unresolvable `https://example.invalid` because a local build has no origin; the publish workflow sets the origin Pages serves the site from (`configure-pages`).',
     phase: 'build',
   },
   {
@@ -72,7 +72,7 @@ const ENVIRONMENT_METADATA: readonly EnvironmentMetadata[] = [
     source: 'scripts/docs/site-base.ts',
     reader: '`scripts/docs/site-base.ts#SITE_BASE` (module read)',
     purposeAndDefault:
-      'Optional; the path the documentation site is served under. Defaults to `/enso` for a local build. The publish workflow sets it to `/<repository>` — what a GitHub project site is served from — so the base is derived rather than a literal that rots on a rename.',
+      'Optional; the path the documentation site is served under. Defaults to `/enso` for a local build. The publish workflow sets it from the Pages configuration (`configure-pages`): `/<repository>` for a project site, empty for a custom domain — derived rather than a literal that rots on a rename or a domain change.',
     phase: 'build',
   },
   {
