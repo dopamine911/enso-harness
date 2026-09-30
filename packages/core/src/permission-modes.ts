@@ -22,14 +22,21 @@
  * - The launch surfaces write the agent files (`preparePermissionPolicy`).
  * - The host reads the entry back, to show the mode.
  *
- * ⚠ HOW THE MERGE TREATS A PRESET (gotgenes `policy/scope-merge.ts`):
- * - A surface given as a MAP is merged key by key into the user's map. A key the user already
- *   has keeps its place, and rules are last-match-wins, so the user's own later rules (the
- *   `.env` deny) still decide after a preset's `"*": allow`.
- * - A surface given as a STRING replaces the user's whole surface. `plan` uses that for its
- *   denies, so a user's `edit` allow cannot reopen editing in plan.
+ * ⚠ A MODE CHANGES ONLY ENSO'S CATCH-ALL, NEVER A RULE THE USER WROTE (#499). The engine merges a
+ * preset over the user's policy key by key (gotgenes `policy/permission-merge.ts`), and rules are
+ * last-match-wins:
+ * - a preset key the user's map already has is replaced where it stands, so every rule the user
+ *   wrote after it still decides;
+ * - a preset key the user's map lacks is appended AFTER all of the user's rules, and wins. That
+ *   is how `bypassPermissions` once allowed a command the user denied.
  *
- * Probed against gotgenes 36.2.0 on #496, with 150 calls across the five modes.
+ * So every preset map holds one key, `ENSO_CATCH_ALL`, and the launch puts that key first in every
+ * user map a preset touches (`permission-rules.ts#preparePermissionPolicy`). A deny, ask or allow
+ * the user wrote then beats every mode, as it does in oh-my-pi's approval modes and in Claude
+ * Code's. A surface given as a STRING replaces the user's whole surface instead: `plan` uses that
+ * for its denies, so a user's `edit` allow cannot reopen editing in plan.
+ *
+ * Probed against gotgenes 36.2.0 (#496, #499).
  *
  * @module
  */
@@ -66,6 +73,18 @@ export const ACTIVE_AGENT_CUSTOM_TYPE = 'active_agent'
  */
 export const ENSO_AUTO_AUTHORIZER = 'enso-auto'
 
+/**
+ * Enso's catch-all pattern: the one key a mode preset changes, and the pattern `auto` answers.
+ *
+ * The engine matches `**` exactly as it matches `*` (both compile to "anything",
+ * `policy/wildcard-matcher.ts`), but reports it as its own pattern. That lets Enso tell its own
+ * catch-all from a surface-wide rule the user wrote: a string surface (`bash: 'ask'`) and a
+ * user's `*` are the user's, and reach the user in `auto` (#498).
+ *
+ * @group Permission mode
+ */
+export const ENSO_CATCH_ALL = '**'
+
 const MODE_AGENT_PREFIX = 'enso-mode-'
 
 /** A surface's rule: one action for everything, or a map from pattern to action. */
@@ -79,15 +98,17 @@ interface ModePreset {
 }
 
 /**
- * In-project edits and writes, and the common filesystem commands, run without asking.
- * `path_write` is granted too, because an edit also consults the write side of the path gate.
- * Outside the project, `external_directory_write` still asks.
+ * In-project edits and writes run without asking. `path_write` is granted too, because an edit
+ * also consults the write side of the path gate. Outside the project, `external_directory_write`
+ * still asks.
+ *
+ * ⚠ Claude Code's acceptEdits also allows `mkdir`, `touch`, `mv` and `cp`. Allowing them here
+ * means adding patterns, which would land after the user's rules and beat their denies (#499).
  */
 const EDITS_ALLOWED: Readonly<Record<string, SurfaceRule>> = {
-  edit: { '*': 'allow' },
-  write: { '*': 'allow' },
-  path_write: { '*': 'allow' },
-  bash: { 'mkdir *': 'allow', 'touch *': 'allow', 'mv *': 'allow', 'cp *': 'allow' },
+  edit: { [ENSO_CATCH_ALL]: 'allow' },
+  write: { [ENSO_CATCH_ALL]: 'allow' },
+  path_write: { [ENSO_CATCH_ALL]: 'allow' },
 }
 
 /**
@@ -95,7 +116,7 @@ const EDITS_ALLOWED: Readonly<Record<string, SurfaceRule>> = {
  *
  * ⚠ `bypassPermissions` still asks in two places, because gotgenes floors them to `ask` whatever
  * the rules say: a command run through a wrapper (`bash -c`, `sudo`, `eval`) and a command its
- * parser cannot read. Deny rules keep denying in every mode.
+ * parser cannot read. A deny or ask the user wrote keeps deciding in every mode.
  *
  * ⚠ `plan` denies the edit and write TOOLS. A redirect from an allowlisted bash command
  * (`cat a > b`) still writes inside the project, because the seed allows `path_write` there
@@ -117,16 +138,16 @@ export const ENSO_MODE_PRESETS: Readonly<Record<EnsoPermissionModeName, ModePres
     permission: { edit: 'deny', write: 'deny' },
   },
   bypassPermissions: {
-    summary: 'everything runs without asking, except what a rule denies',
+    summary: 'everything runs without asking, except what your own rules deny or ask',
     permission: {
       '*': 'allow',
-      edit: { '*': 'allow' },
-      write: { '*': 'allow' },
-      path_read: { '*': 'allow' },
-      path_write: { '*': 'allow' },
-      external_directory_read: { '*': 'allow' },
-      external_directory_write: { '*': 'allow' },
-      bash: { '*': 'allow' },
+      edit: { [ENSO_CATCH_ALL]: 'allow' },
+      write: { [ENSO_CATCH_ALL]: 'allow' },
+      path_read: { [ENSO_CATCH_ALL]: 'allow' },
+      path_write: { [ENSO_CATCH_ALL]: 'allow' },
+      external_directory_read: { [ENSO_CATCH_ALL]: 'allow' },
+      external_directory_write: { [ENSO_CATCH_ALL]: 'allow' },
+      bash: { [ENSO_CATCH_ALL]: 'allow' },
     },
   },
   auto: {

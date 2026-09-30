@@ -73,12 +73,67 @@ test('a fresh ENSO_HOME gets Enso’s policy, the engine reads it through the li
   expect(readFileSync(join(agentDir, 'agents', 'enso-mode-plan.md'), 'utf8')).toBe(modeAgentFile('plan'))
 })
 
-test('a file that holds a permission block is kept byte for byte, and its surfaces counted', () => {
-  const content = `${JSON.stringify({ permission: { bash: 'ask', edit: 'allow' }, note: 'mine' })}\n`
+test('a file that holds a permission block, with nothing for a mode to override, is kept byte for byte', () => {
+  const content = `${JSON.stringify({ permission: { read: 'allow', bash: { '**': 'ask', 'rm *': 'deny' } }, note: 'mine' })}\n`
   const { policyPath, agentDir } = launch(content)
-  expect(preparePermissionPolicy(policyPath, agentDir)).toEqual({ kind: 'kept', path: policyPath, surfaces: 2 })
+  expect(preparePermissionPolicy(policyPath, agentDir)).toEqual({
+    kind: 'kept',
+    path: policyPath,
+    surfaces: 2,
+    catchAllAdded: [],
+  })
   expect(readFileSync(policyPath, 'utf8')).toBe(content)
   expectLinked(agentDir, policyPath)
+})
+
+// #499: a mode's preset replaces only Enso's catch-all, so every surface map a preset touches
+// must start with it. The value is what the engine falls back to anyway (the block's own `*`), so
+// the default mode decides as before; the user's own rules follow it and beat every mode.
+test('⚠ Enso’s catch-all is put first wherever a mode could otherwise override the user’s rules', () => {
+  const permission = {
+    '*': 'deny',
+    read: 'allow',
+    bash: { 'rm -rf *': 'deny' },
+    edit: 'ask',
+    path: { '*.pem': 'deny' },
+    path_write: { 'dist/*': 'deny' },
+    external_directory_read: { '~/dev/*': 'allow' },
+    write: { 'README.md': 'allow', '**': 'ask' },
+  }
+  const { policyPath, agentDir } = launch(JSON.stringify({ permission, note: 'mine' }))
+  const preparation = preparePermissionPolicy(policyPath, agentDir)
+  expect(preparation).toMatchObject({ kind: 'kept' })
+  expect(preparation.kind === 'kept' ? [...preparation.catchAllAdded].sort() : []).toEqual([
+    'bash',
+    'edit',
+    'external_directory_read',
+    'path',
+  ])
+  const written = readBack(policyPath) as { permission: Record<string, unknown>; note: string }
+  expect(written.note).toBe('mine')
+  // Key ORDER is the point: the engine's rules are last-match-wins.
+  expect(Object.entries(written.permission.bash as object)).toEqual([
+    ['**', 'deny'],
+    ['rm -rf *', 'deny'],
+  ])
+  // A string surface is the user's rule for everything: kept after the catch-all, as `*`.
+  expect(Object.entries(written.permission.edit as object)).toEqual([
+    ['**', 'deny'],
+    ['*', 'ask'],
+  ])
+  // The bare `path` key stands for both directions and expands first: the catch-all goes there,
+  // and `path_write` (which follows it in the expansion) is left alone.
+  expect(Object.entries(written.permission.path as object)).toEqual([
+    ['**', 'deny'],
+    ['*.pem', 'deny'],
+  ])
+  expect(written.permission.path_write).toEqual({ 'dist/*': 'deny' })
+  // A map that already has the catch-all, anywhere, is the user's order: left alone.
+  expect(Object.entries(written.permission.write as object)).toEqual([
+    ['README.md', 'allow'],
+    ['**', 'ask'],
+  ])
+  expect(written.permission.read).toBe('allow')
 })
 
 test('a file without a permission block is seeded, and its other keys are kept', () => {

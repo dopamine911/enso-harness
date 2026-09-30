@@ -296,7 +296,7 @@ test('outside auto the link defers without asking the classifier', async () => {
 
 test("an allow runs the action; the classifier saw the user's request, the action and the directory", async () => {
   const session = autoSession()
-  expect(await session.ask(bashAsk('bun test src/parse.test.ts', '*'))).toEqual({ kind: 'allow' })
+  expect(await session.ask(bashAsk('bun test src/parse.test.ts', '**'))).toEqual({ kind: 'allow' })
   const request = session.classifierRequests[0]
   expect(request?.apiKey).toBe('sk-test')
   expect(request?.prompt).toContain('fix the failing test in src/parse.ts')
@@ -344,21 +344,30 @@ test('⚠ a classifier that outlives its deadline defers, even when the model ca
   expect(session.reviews[0]?.details?.cause).toBe('deadline passed')
 })
 
-test('⚠ an explicit ask rule reaches the user; the catch-all and the engine sentinels go to the classifier', async () => {
+test("⚠ a rule the user wrote reaches the user, a surface-wide `*` included; Enso's `**` catch-all and the engine sentinels go to the classifier (#498)", async () => {
   const session = autoSession()
   expect(await session.ask(bashAsk('git push origin main', 'git push *'))).toEqual({ kind: 'defer' })
-  // The gate recorded no pattern, but the engine, asked again, names an explicit ask rule.
+  // `bash: 'ask'` or `bash: { '*': 'ask' }`, as the engine reports either: the user's own rule.
+  expect(await session.ask(bashAsk('npm run build', '*'))).toEqual({ kind: 'defer' })
+  // The gate recorded no pattern, but the engine, asked again, names a rule the user wrote.
   expect(await session.ask(bashAsk('rm -rf build'), queryAnswering({ state: 'ask', matchedPattern: 'rm *' }))).toEqual({
+    kind: 'defer',
+  })
+  expect(await session.ask(bashAsk('make'), queryAnswering({ state: 'ask', matchedPattern: '*' }))).toEqual({
     kind: 'defer',
   })
   expect(session.classifierRequests).toEqual([])
 
-  expect(await session.ask(bashAsk('npm run build', '*'))).toEqual({ kind: 'allow' })
+  expect(await session.ask(bashAsk('npm run lint', '**'))).toEqual({ kind: 'allow' })
   expect(await session.ask(bashAsk("bash -c 'make'", '<indirection-bash-wrapper>'))).toEqual({ kind: 'allow' })
-  expect(await session.ask(bashAsk('make'), queryAnswering({ state: 'ask', matchedPattern: '*' }))).toEqual({
+  expect(await session.ask(bashAsk('make test'), queryAnswering({ state: 'ask', matchedPattern: '**' }))).toEqual({
     kind: 'allow',
   })
-  expect(session.classifierRequests).toHaveLength(3)
+  // No pattern at all: the engine's synthesised universal fallback, Enso's too.
+  expect(await session.ask(bashAsk('make docs'), queryAnswering({ state: 'ask' }))).toEqual({
+    kind: 'allow',
+  })
+  expect(session.classifierRequests).toHaveLength(4)
 })
 
 test('a forwarded ask, whose rule is not visible, reaches the user', async () => {

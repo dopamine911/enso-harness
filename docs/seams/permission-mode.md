@@ -85,17 +85,30 @@ kept bypass enforced while Enso said `default` (found in review, pinned by `agen
 | Mode | Preset over the policy | Summary (the menu's, and the Features page's) |
 |---|---|---|
 | `default` | none | the policy in `permissions.json`, as written |
-| `acceptEdits` | `edit`, `write` and `path_write` allowed; bash `mkdir`, `touch`, `mv`, `cp` allowed | edits and writes inside the project run without asking |
+| `acceptEdits` | `edit`, `write` and `path_write` allowed | edits and writes inside the project run without asking |
 | `plan` | `edit` and `write` denied, as strings, so a user's own `edit` allow cannot reopen them | read and explore; the edit and write tools are denied |
-| `bypassPermissions` | every surface allowed, `external_directory_*` included | everything runs without asking, except what a rule denies |
+| `bypassPermissions` | every surface allowed, `external_directory_*` included | everything runs without asking, except what your own rules deny or ask |
 | `auto` | as `acceptEdits`, plus the classifier link (below) | edits run as in acceptEdits; a classifier model answers what would ask |
 
+**A mode changes only Enso's catch-all, `**`, never a rule the user wrote (#499).** The engine
+merges a preset over the user's policy key by key, and rules are last-match-wins: a preset key the
+user's map already has is replaced where it stands, but a key the map lacks is appended after all
+the user's rules and beats them. That is how `bypassPermissions` once allowed a command the user
+had denied. So every preset map holds the one key `**`, the seed starts every map with it, and the
+launch puts it first in any user map a preset touches, a string surface included
+(`core/src/permission-rules.ts#withCatchAllFirst`). The value it gets is what the engine would fall
+back to anyway, so the default mode decides exactly as before (probed across five user policies).
+The engine matches `**` exactly as `*`, but reports it as its own pattern, which is also what lets
+`auto` tell Enso's catch-all from the user's rules (#498).
+
 The names and the intent are Claude Code's
-([permission modes](https://code.claude.com/docs/en/permission-modes)): deny rules deny in every
-mode, `bypassPermissions` included, and in `auto` a classifier stands in for the user while an
-explicit ask rule still reaches them. Where Enso differs: `acceptEdits` allows `mkdir`, `touch`,
-`mv` and `cp`, not `rm`, `rmdir` or `sed`; `plan` has no plan-approval step and runs no classifier;
-`bypassPermissions` still asks in the two cases *Known gaps* names.
+([permission modes](https://code.claude.com/docs/en/permission-modes)): a deny or ask rule the user
+wrote holds in every mode, `bypassPermissions` included, and in `auto` a classifier stands in for
+the user everywhere else. oh-my-pi's approval modes put the user's rules above the mode the same
+way. Where Enso differs: `acceptEdits` allows no bash commands (Claude Code's allows `mkdir`,
+`touch`, `rm`, `mv`, `cp` and `sed`; allowing them here means adding patterns, the #499 bug);
+`plan` has no plan-approval step and runs no classifier; `bypassPermissions` still asks in the two
+cases *Known gaps* names.
 
 <!-- source: packages/core/src/permission-modes.ts#ENSO_PERMISSION_MODES -->
 ```ts
@@ -112,7 +125,7 @@ export const ENSO_PERMISSION_MODES = ['default', 'acceptEdits', 'plan', 'bypassP
  *
  * ⚠ `bypassPermissions` still asks in two places, because gotgenes floors them to `ask` whatever
  * the rules say: a command run through a wrapper (`bash -c`, `sudo`, `eval`) and a command its
- * parser cannot read. Deny rules keep denying in every mode.
+ * parser cannot read. A deny or ask the user wrote keeps deciding in every mode.
  *
  * ⚠ `plan` denies the edit and write TOOLS. A redirect from an allowlisted bash command
  * (`cat a > b`) still writes inside the project, because the seed allows `path_write` there
@@ -132,16 +145,16 @@ export const ENSO_MODE_PRESETS: Readonly<Record<EnsoPermissionModeName, ModePres
     permission: { edit: 'deny', write: 'deny' },
   },
   bypassPermissions: {
-    summary: 'everything runs without asking, except what a rule denies',
+    summary: 'everything runs without asking, except what your own rules deny or ask',
     permission: {
       '*': 'allow',
-      edit: { '*': 'allow' },
-      write: { '*': 'allow' },
-      path_read: { '*': 'allow' },
-      path_write: { '*': 'allow' },
-      external_directory_read: { '*': 'allow' },
-      external_directory_write: { '*': 'allow' },
-      bash: { '*': 'allow' },
+      edit: { [ENSO_CATCH_ALL]: 'allow' },
+      write: { [ENSO_CATCH_ALL]: 'allow' },
+      path_read: { [ENSO_CATCH_ALL]: 'allow' },
+      path_write: { [ENSO_CATCH_ALL]: 'allow' },
+      external_directory_read: { [ENSO_CATCH_ALL]: 'allow' },
+      external_directory_write: { [ENSO_CATCH_ALL]: 'allow' },
+      bash: { [ENSO_CATCH_ALL]: 'allow' },
     },
   },
   auto: {
@@ -309,6 +322,9 @@ every tool, and `auto`'s link is in the chain.
  *
  * - **Tools:** reads and searches run, as do Enso's `ask_user` and `web_search`; edits and writes
  *   ask; anything unnamed asks (`"*"`), `web_fetch` included.
+ * - **Catch-alls:** every map starts with Enso's catch-all, `**` (`ENSO_CATCH_ALL`): the one key a
+ *   mode changes, and the pattern `auto` may answer. A rule a user adds after it is theirs, and
+ *   beats every mode (#498, #499).
  * - **Bash:** asks, except gotgenes' documented read-only allowlist (its "Read-Only Bash Command
  *   Allowlist" recipe, trimmed of `less`/`more`, which can escape to a shell). The allowlist is
  *   safe to seed because gotgenes resolves a chain to its most restrictive part and floors
@@ -337,17 +353,17 @@ export const ENSO_DEFAULT_PERMISSION_POLICY = {
     grep: 'allow',
     find: 'allow',
     ls: 'allow',
-    edit: 'ask',
-    write: 'ask',
+    edit: { [ENSO_CATCH_ALL]: 'ask' },
+    write: { [ENSO_CATCH_ALL]: 'ask' },
     // Enso's own tools. Asking the user is itself the check; a search sends only a query through
     // the session's own provider. `web_fetch` reaches any URL, so it stays on the `*` ask.
     ask_user: 'allow',
     web_search: 'allow',
-    path_read: { '*': 'allow', ...ENV_FILES_DENIED, '*.env.example': 'allow' },
-    path_write: { '*': 'allow', ...ENV_FILES_DENIED },
-    external_directory: 'ask',
+    path_read: { [ENSO_CATCH_ALL]: 'allow', ...ENV_FILES_DENIED, '*.env.example': 'allow' },
+    path_write: { [ENSO_CATCH_ALL]: 'allow', ...ENV_FILES_DENIED },
+    external_directory: { [ENSO_CATCH_ALL]: 'ask' },
     bash: {
-      '*': 'ask',
+      [ENSO_CATCH_ALL]: 'ask',
       'cat *': 'allow',
       'head *': 'allow',
       'tail *': 'allow',
@@ -432,7 +448,14 @@ export function preparePermissionPolicy(policyPath: string, agentDir: string): P
   let preparation: PermissionPolicyPreparation
   const permission = read.kind === 'object' ? read.value.permission : undefined
   if (read.kind === 'object' && typeof permission === 'object' && permission !== null) {
-    preparation = { kind: 'kept', path: policyPath, surfaces: Object.keys(permission).length }
+    const normalized = withCatchAllFirst(permission as Readonly<Record<string, unknown>>)
+    if (normalized.added.length > 0) writeJson(policyPath, { ...read.value, permission: normalized.permission })
+    preparation = {
+      kind: 'kept',
+      path: policyPath,
+      surfaces: Object.keys(permission).length,
+      catchAllAdded: normalized.added,
+    }
   } else if (read.kind === 'object' && typeof read.value.permissions === 'object' && read.value.permissions !== null) {
     const piccBackup = replacePiccRulesFile(policyPath)
     // Another launch moved it first: read what is there now.
@@ -472,9 +495,10 @@ user (`permission-modes/index.ts#authorize`):
   to the engine's review log with its cause, as is every verdict.
 - **The engine caps it.** A link's `allow` on the `path` and `external_directory` families becomes a
   deferral, so those asks reach the user whatever the classifier says.
-- **An explicit ask rule defers to the user**, as Claude Code documents. A surface-wide rule a person
-  wrote (`bash: 'ask'`) is a `*` like the seed's catch-all and cannot be told apart, so `auto`
-  answers it.
+- **A rule the user wrote defers to the user**, as Claude Code documents for explicit ask rules
+  (#498). That includes a surface-wide rule (`bash: 'ask'`, or a `*` key), which the engine reports
+  as `*`. Only Enso's own catch-all (`**`), the engine's synthesised fallback and its floors (`<…>`)
+  go to the classifier (`permission-modes/index.ts#isExplicitPattern`).
 
 A user who removes `enso-auto` from `authorizerChain` gets prompts in `auto`, never fewer.
 
@@ -551,6 +575,9 @@ Stated plainly; none is hidden by a mode.
 - **A file broken mid-session reads as an empty policy.** The engine reads a file it cannot parse as
   no policy at all: every call asks, and the deny rules are gone until the file is fixed. The launch
   refuses an unreadable file; nothing can refuse one broken while a session runs.
+- **Enso's catch-all is put first at launch only.** A map added or rewritten without `**` while a
+  session runs is read by the engine at once, but it only gets the catch-all at the next launch.
+  Until then a mode's preset lands after that map's rules and beats them (#499).
 - **A project can loosen the policy.** The engine layers a project's
   `.pi/extensions/pi-permission-system/config.json` and its `.pi/agents/*.md` over the user's policy
   when pi counts the project as trusted, and the web host builds its sessions with pi's default,

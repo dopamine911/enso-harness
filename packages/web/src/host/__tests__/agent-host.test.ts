@@ -23,12 +23,14 @@ import {
   type EnsoSystemPromptMode,
   type EnsoSystemPromptPreview,
   type EnsoThreadEvent,
+  modeAgentName,
   readEnsoRunContext,
 } from '@enso/core'
 import { flowTrace } from '@enso/core/flow-trace'
 import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
 import { findRepoRoot, harnessPackageDir, realpathOrSelf } from '@enso/core/paths'
 import { ENSO_DEFAULT_PERMISSION_POLICY, permissionEngineConfigPath } from '@enso/core/permission-rules'
+import { getPermissionsService } from '@gotgenes/pi-permission-system'
 import type { LogRecorder } from '@logtape/testing/recorder'
 import {
   type AgentHost,
@@ -555,7 +557,8 @@ test('⚠ an entry an extension persists during session_start reaches the first 
 // host links to the file it was given before the first session. A fresh file is Enso's policy; a
 // file the user wrote is kept as they wrote it; either way the engine's path reads it.
 test("⚠ the engine's config path reads the host's policy file: a fresh one is Enso's policy, a user's is theirs (#446)", async () => {
-  const userPolicy = `${JSON.stringify({ permission: { bash: 'allow' } })}\n`
+  // Nothing here for the launch to put Enso's catch-all into (#499), so it is kept byte for byte.
+  const userPolicy = `${JSON.stringify({ permission: { read: 'allow' } })}\n`
   const fresh = join(mkdtempSync(join(tmpdir(), 'enso-host-rules-fresh-')), 'permissions.json')
   const written = join(mkdtempSync(join(tmpdir(), 'enso-host-rules-written-')), 'permissions.json')
   writeFileSync(written, userPolicy)
@@ -573,6 +576,66 @@ test("⚠ the engine's config path reads the host's policy file: a fresh one is 
   expect(await engineReads(written)).toBe(userPolicy)
   // Back to the file every other host in this suite names.
   await engineReads(permissionRulesPath)
+})
+
+/**
+ * A host whose engine reads `policy`, as the user wrote it. Nothing to restore after: every host
+ * the suite builds links the engine to its own file again when it is created.
+ */
+async function hostedUnder(policy: object, extensionFactories: InlineExtension[] = []): Promise<HostedThread> {
+  const path = join(mkdtempSync(join(tmpdir(), 'enso-host-rules-user-')), 'permissions.json')
+  writeFileSync(path, JSON.stringify(policy))
+  const host = createAgentHost({
+    servesDirectory: servesRepoRoot,
+    agentDir,
+    permissionRulesPath: path,
+    harnessPackageDir: harnessDir,
+    extensionFactories,
+  })
+  const hosted = await host.createSession(crypto.randomUUID(), () => repoRoot)
+  openSessions.push(hosted)
+  return hosted
+}
+
+// ⚠ #499: a mode must never override a rule the user wrote. The engine merges a mode's preset key
+// by key, and a preset key the user's map lacks lands AFTER the user's rules and wins: with this
+// policy (no catch-all in the bash map), `bypassPermissions` once allowed the denied `rm -rf`.
+// The launch puts Enso's catch-all first in the user's map, so the preset replaces only that.
+test('⚠ a deny the user wrote holds in every mode, through the real engine (#499)', async () => {
+  const hosted = await hostedUnder({ permission: { bash: { 'rm -rf *': 'deny', 'cp * /etc/*': 'deny' } } })
+  for (const mode of ['bypassPermissions', 'acceptEdits', 'auto', 'plan', 'default']) {
+    await switchMode(hosted, mode)
+    expect({ mode, verdict: (await hosted.probeToolCall('bash', { command: 'rm -rf build' }))?.block }).toEqual({
+      mode,
+      verdict: true,
+    })
+    expect({ mode, verdict: (await hosted.probeToolCall('bash', { command: 'cp a /etc/x' }))?.block }).toEqual({
+      mode,
+      verdict: true,
+    })
+  }
+})
+
+// #498 rests on a fact of the engine's: it reports Enso's catch-all as `**` and a surface-wide rule
+// the user wrote (a string surface, or a `*` key) as `*`, so `auto` can leave the user's to the
+// user. Asked through the engine's own service, as the auto link asks it.
+test("the engine reports Enso's catch-all as `**` and a user's surface-wide rule as `*` (#498)", async () => {
+  const matchedPattern = async (policy: object): Promise<unknown> => {
+    let sessionId = ''
+    const probe: InlineExtension = {
+      name: 'enso-host-catch-all-probe',
+      factory: (pi: ExtensionAPI) => {
+        pi.on('session_start', (_event, extensionContext) => {
+          sessionId = extensionContext.sessionManager.getSessionId()
+        })
+      },
+    }
+    await hostedUnder(policy, [probe])
+    return getPermissionsService(sessionId)?.checkPermission('bash', 'npm test', modeAgentName('auto')).matchedPattern
+  }
+  expect(await matchedPattern(ENSO_DEFAULT_PERMISSION_POLICY)).toBe('**')
+  expect(await matchedPattern({ permission: { bash: 'ask' } })).toBe('*')
+  expect(await matchedPattern({ permission: { bash: { '*': 'ask' } } })).toBe('*')
 })
 
 // L3 step C's MECHANISM, at the host and against the real extension (#162, #496):

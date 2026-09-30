@@ -4,6 +4,7 @@ import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-a
 import {
   ACTIVE_AGENT_CUSTOM_TYPE,
   ENSO_AUTO_AUTHORIZER,
+  ENSO_CATCH_ALL,
   ENSO_MODE_PRESETS,
   ENSO_OPERATOR_DENIAL_ENTRY,
   ENSO_PERMISSION_MODES,
@@ -183,16 +184,19 @@ function requestFacts(
 }
 
 /**
- * A rule pattern a person wrote for specific actions, as opposed to a surface's catch-all.
+ * A rule pattern a person wrote, as opposed to Enso's catch-all (#498).
  *
- * - `*` is a surface's catch-all. Enso's seed policy asks through `'*': 'ask'` and surface-wide
- *   strings (`external_directory: 'ask'`, which the engine normalises to `*`); those are the
- *   fallback `auto` exists to answer.
+ * - `ENSO_CATCH_ALL` (`**`) is Enso's catch-all: the seed's asks, the one key a mode changes, and
+ *   the fallback `auto` exists to answer. The engine reports it verbatim.
+ * - `*` is the USER's: a surface-wide rule they wrote, as a map key or as a string surface
+ *   (`bash: 'ask'`, which the engine reports as `*`). It reaches the user, in `auto` too, as
+ *   Claude Code's explicit ask rules do.
  * - `<…>` is the engine's own sentinel for a floored bash command (a wrapper, an unparsable
  *   command), not a rule anyone wrote.
+ * - No pattern at all is the engine's synthesised universal fallback: Enso's too.
  */
 function isExplicitPattern(pattern: unknown): pattern is string {
-  if (typeof pattern !== 'string' || pattern === '' || pattern === '*') return false
+  if (typeof pattern !== 'string' || pattern === '' || pattern === ENSO_CATCH_ALL) return false
   return !(pattern.startsWith('<') && pattern.endsWith('>'))
 }
 
@@ -206,9 +210,8 @@ function isExplicitPattern(pattern: unknown): pattern is string {
  *   an `ask` whose matched pattern is explicit. This covers a gate that records no pattern (the
  *   external-directory gate's direct branch).
  *
- * ⚠ What cannot be told apart: a surface-wide rule a person wrote (`bash: 'ask'`) is a `*` like
- * the seed's, so `auto` answers it. And a forwarded ask carries no pattern, so it is treated as
- * explicit (the caller defers) rather than guessed.
+ * ⚠ A forwarded ask carries no pattern, so it is treated as explicit (the caller defers) rather
+ * than guessed.
  */
 function explicitAskPattern(details: PromptPermissionDetails, query: PermissionQuery): string | undefined {
   const facts = requestFacts(details)

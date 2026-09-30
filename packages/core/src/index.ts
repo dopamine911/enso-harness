@@ -172,6 +172,7 @@ export { EnsoPermissionModeChange, EnsoPermissionModeState } from './permission-
 export {
   ACTIVE_AGENT_CUSTOM_TYPE,
   ENSO_AUTO_AUTHORIZER,
+  ENSO_CATCH_ALL,
   ENSO_DEFAULT_PERMISSION_MODE,
   ENSO_MODE_PRESETS,
   ENSO_PERMISSION_MODES,
