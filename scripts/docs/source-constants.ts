@@ -150,9 +150,13 @@ export function literalConstant(path: string, source: string, name: string): Lit
         `source-constants: ${path}:${line + 1}: ${name} is not a literal here (\`${inner.getText().slice(0, 60)}\`)`,
       )
     }
-    const value = evaluate(initializer)
-    resolving.pop()
-    return value
+    // Popped on a refusal too: the stack says what is being resolved NOW, and a caller that catches
+    // one refusal and reads on must not see a finished constant as a cycle (PR #490 review).
+    try {
+      return evaluate(initializer)
+    } finally {
+      resolving.pop()
+    }
   }
   return resolve(name)
 }
