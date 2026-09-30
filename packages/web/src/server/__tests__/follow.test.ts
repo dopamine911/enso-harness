@@ -241,7 +241,7 @@ const ABORT_FLOW = {
 // ── 1. prompt is admission; the thread's own settle releases it ──────────────────────
 
 // @pins prompt-run-settle/admission prompt-run-settle/generation
-// @pins follow-snapshot-frames/cold-empty resume/cold-then-live
+// @pins follow-snapshot-frames/cold-empty
 test("prompt answers at admission with a message id; the run is released by pi's settle, no HTTP response in between", async () => {
   const fake = fakeHost()
   const url = await startWith(fake)
@@ -560,6 +560,50 @@ test('⚠ a mode change while the thread is busy is a 409 — not queued behind 
   expect(busy.status).toBe(409)
   expect(fake.built[0]?.modeChanges).toEqual([])
   fake.emit(SETTLED)
+})
+
+// ── resume: a stored thread, followed cold, then live on its first prompt (#86) ─────────
+
+/** What the stored file's branch spent: the cold snapshot carries it, with no context yet. */
+const STORED_USAGE = { cost: 0.0123, input: 120, output: 45, cacheRead: 0, cacheWrite: 0, context: null }
+
+/** A stored thread with one exchange and what it spent: what a resumed pane follows before it prompts. */
+const RESUMED: Record<string, FakeStoredThread> = {
+  t1: {
+    transcript: [
+      { kind: 'message', id: 'u1', role: 'user', parts: [{ type: 'text', text: 'where is the config read?' }] },
+      { kind: 'message', id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'in src/config.ts' }] },
+    ],
+    modified: new Date(0),
+    firstMessage: 'where is the config read?',
+    usage: STORED_USAGE,
+  },
+}
+
+// @pins resume/cold-then-live
+test('⚠ a stored thread is followed cold from its file, and the same follow goes live on its first prompt (#86, PR #488 review)', async () => {
+  const fake = fakeHost(['mode'], {}, RESUMED)
+  const url = await startWith(fake)
+  const follow = await openFollow(url, 't1')
+  await follow.untilFrames(1)
+  // Cold: the file's messages and the file's usage with no context, nothing live, no question
+  // open, and no session built to show them.
+  const [snapshot] = follow.frames
+  expect(snapshot).toMatchObject({ type: 'snapshot', live: false, busy: false, generation: 0, openDialogs: [] })
+  if (snapshot?.type !== 'snapshot') throw new Error('the follow opened without a snapshot')
+  expect(snapshot.messages).toHaveLength(2)
+  expect(snapshot.usage).toEqual(STORED_USAGE)
+  expect(fake.built).toHaveLength(0)
+
+  // Live: the first prompt builds the thread under its own id, and the SAME follow says so.
+  expect((await prompt(url, 't1', 'and where is it validated?')).status).toBe(202)
+  await follow.untilFrames(3)
+  expect(follow.frames.slice(1)).toEqual([
+    { type: 'status', live: true, busy: false, generation: 0 },
+    { type: 'status', live: true, busy: true, generation: 1 },
+  ])
+  expect(fake.built).toHaveLength(1)
+  follow.close()
 })
 
 // ── continue: a torn thread resumed from its stored state (#436) ─────────────────────

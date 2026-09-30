@@ -275,7 +275,6 @@ test('prompt() during a run carries the images beside the text, enqueued (#68, #
   server.abort()
 })
 
-// @pins follow-snapshot-frames/snapshot-lists-complete
 test('the snapshot becomes the mode, open-question and run receipts the stores already read', async () => {
   const server = scripted()
   server.frame(SNAPSHOT_IDLE)

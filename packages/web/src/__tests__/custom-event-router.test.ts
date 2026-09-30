@@ -278,6 +278,7 @@ test('follow-ended marks the thread disconnected; the next status frame clears i
   expect(stores.disconnected.get()).toBe(false)
 })
 
+// @pins follow-snapshot-frames/snapshot-lists-complete
 test("the snapshot's openDialogs is the complete list: it replaces the card, an empty list clears it, a malformed snapshot moves nothing (#114)", () => {
   observe({
     kind: 'extension-ui-request',

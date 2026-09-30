@@ -218,9 +218,9 @@ export function observationToAguiEvents(observation: EnsoObservation, ids: AguiI
       ]
 
     case 'message-start':
-      // The AG-UI view opens ONE assistant message per run (`TEXT_MESSAGE_START` at run
-      // start) and closes it at settle, so per-message boundaries have no place in it —
-      // the same acknowledged loss as partial tool output above. The follow carries them.
+      // Nothing here: the message boundary is the adapter's, not this mapper's. The adapter
+      // (`follow-connection.ts#observeMessageStart`) reads it off the follow and, when pi claims a
+      // queued prompt mid-run, ends the assistant message and opens a new one (#75).
       return []
 
     case 'message-end':
