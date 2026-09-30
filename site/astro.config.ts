@@ -3,12 +3,18 @@ import mermaid from 'astro-mermaid'
 import { defineConfig } from 'astro/config'
 import starlightTypeDoc from 'starlight-typedoc'
 import { SITE_BASE, SITE_URL } from '../scripts/docs/site-base.ts'
+import socialCard from './src/social-card.json'
 
 /**
  * The social card link previews show (`scripts/docs/social-card.ts` renders it). Absolute, as
  * previews require, so the origin and base come from the one place both are decided.
  */
 const SOCIAL_CARD_URL = `${SITE_URL}${SITE_BASE}/social-card.png`
+/**
+ * Its alt text, from the text it was rendered from — the record the site gate holds to the hero's
+ * source — so the description cannot drift from the image.
+ */
+const SOCIAL_CARD_ALT = `Enso: ${socialCard.kicker}. ${socialCard.title.replace(' | ', ' ')}`
 
 /**
  * The documentation site (#188): a PRESENTATION layer over `docs/`, never a second source.
@@ -98,10 +104,7 @@ export default defineConfig({
         { tag: 'meta', attrs: { property: 'og:image', content: SOCIAL_CARD_URL } },
         { tag: 'meta', attrs: { property: 'og:image:width', content: '1200' } },
         { tag: 'meta', attrs: { property: 'og:image:height', content: '630' } },
-        {
-          tag: 'meta',
-          attrs: { property: 'og:image:alt', content: 'Enso: Give agents room to work. Keep the receipts.' },
-        },
+        { tag: 'meta', attrs: { property: 'og:image:alt', content: SOCIAL_CARD_ALT } },
         { tag: 'meta', attrs: { name: 'twitter:image', content: SOCIAL_CARD_URL } },
       ],
       // Five sections, in the order a reader needs them: what it does for a user (#437), what it
