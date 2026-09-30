@@ -28,6 +28,11 @@ import { linkCitations } from './source-citations.ts'
 const ROOT = findRepoRoot(import.meta.url)
 const DOCS = 'docs'
 const CONTENT = 'site/src/content/docs'
+/**
+ * The slug the repository's README is projected to. It is the one sidebar page that is not under
+ * `docs/` (`site/astro.config.ts` names it; `test/site-gate.test.ts` checks it is there).
+ */
+export const README_SLUG = 'readme'
 
 /**
  * Where a page lands in the site. A `README.md` becomes its directory's INDEX rather than being
@@ -137,7 +142,7 @@ export function rewriteLinks(source: string, page: string, anchoredAt: 'docs' | 
     const lead = embed ?? ''
     const site = (path: string): string => `${lead}](${SITE_BASE}/${path.replace(/\/?$/, '/')}${anchor})`
     const blob = (path: string): string => `${lead}](${BLOB}/${path}${anchor})`
-    // The repository README is projected as the site's root, and its links are repo-relative
+    // The repository README is projected as the site's `/readme/` page, and its links are repo-relative
     // rather than docs-relative: `docs/architecture.md` from it is the same page `./glossary.md`
     // is from inside `docs/`. One page, one asymmetry, named rather than special-cased silently.
     if (anchoredAt === 'repository') {
@@ -212,13 +217,13 @@ function project(): { written: number; indexes: number } {
 
   projectAssets(target)
 
-  // The site's own root, from the repository's README: a site with no `/` is a site whose every
-  // header link is dead, and 40 pages carried that link.
+  // The repository's README, as its own page. It was the site's root until the landing page
+  // (`site/src/pages/index.astro`, hello-enso's design) took `/`; the root is a page now, not
+  // projected content, so nothing here may write `index.md` at the top.
   writeFileSync(
-    join(target, 'index.md'),
+    join(target, `${README_SLUG}.md`),
     withFrontmatter(readFileSync(join(ROOT, 'README.md'), 'utf8'), 'README.md', 'repository'),
   )
-  directoriesWithIndex.add('.')
 
   // A section with no `README.md` still needs a page at its path, because the prose links to it.
   // Derived from the directory, never written by hand: the pages it holds, by their own titles.
@@ -249,6 +254,6 @@ function documentationDirectories(): string[] {
 if (import.meta.main) {
   const { written, indexes } = project()
   process.stdout.write(
-    `site-content: projected ${written} pages and ${documentationAssets().length} images into ${CONTENT}, plus a root index and ${indexes} derived section indexes\n`,
+    `site-content: projected ${written} pages and ${documentationAssets().length} images into ${CONTENT}, plus the README and ${indexes} derived section indexes\n`,
   )
 }

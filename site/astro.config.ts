@@ -65,6 +65,25 @@ export default defineConfig({
       title: 'Enso',
       description: 'The harness architecture, its seams, and the reference material generated from its source.',
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/dopamine911/zen-harness-foundation' }],
+      // Enso's theme (helloen.so's design): Starlight's variables set in `src/styles/theme.css`,
+      // the landing's own rules in `src/styles/landing.css`, imported by that page alone.
+      customCss: ['./src/styles/theme.css'],
+      logo: { src: './src/assets/landing/enso-smile.png', alt: '' },
+      // The landing page is the site's one hero, and the override renders hello-enso's.
+      components: { Hero: './src/components/LandingHero.astro' },
+      // Sora, Inter and JetBrains Mono from Google Fonts, as hello-enso loads them (chosen over
+      // self-hosting, 2026-09-30: every page view requests the fonts from Google).
+      head: [
+        { tag: 'link', attrs: { rel: 'preconnect', href: 'https://fonts.googleapis.com' } },
+        { tag: 'link', attrs: { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' } },
+        {
+          tag: 'link',
+          attrs: {
+            rel: 'stylesheet',
+            href: 'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Sora:wght@500;600&display=swap',
+          },
+        },
+      ],
       // Five sections, in the order a reader needs them: what it does for a user (#437), what it
       // is, how it behaves, what it declares, how to change it. Features comes first because it
       // is the only section written for someone deciding whether to use Enso, not change it.
@@ -106,6 +125,8 @@ export default defineConfig({
           label: 'Development',
           items: [
             { slug: 'verification' },
+            // The repository's README: the front page until the landing took `/`.
+            { slug: 'readme' },
             { label: 'Concepts', items: [{ autogenerate: { directory: 'concepts' } }] },
           ],
         },

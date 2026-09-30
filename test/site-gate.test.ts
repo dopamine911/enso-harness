@@ -9,6 +9,7 @@ import {
   documentationPages,
   pageTitle,
   projectAssets,
+  README_SLUG,
   rewriteLinks,
   sectionTitle,
 } from '../scripts/docs/site-content.ts'
@@ -72,8 +73,12 @@ test('⚠ every page under docs/ projects, and every one can be titled (#188)', 
 test('⚠ every page the sidebar names exists, and a README becomes its section index (#188)', () => {
   // A built page (#482) is gitignored: it exists once `docs:build` runs, which the site build does first.
   const built = new Set(builtDocPages())
+  // The README is projected from the repository root, not from `docs/` (`README_SLUG`).
   const missing = sidebarSlugs().filter(
-    (slug) => !(existsSync(join(REPOSITORY_ROOT, 'docs', `${slug}.md`)) || built.has(`docs/${slug}.md`)),
+    (slug) =>
+      !(slug === README_SLUG
+        ? existsSync(join(REPOSITORY_ROOT, 'README.md'))
+        : existsSync(join(REPOSITORY_ROOT, 'docs', `${slug}.md`)) || built.has(`docs/${slug}.md`)),
   )
   expect(missing).toEqual([])
   // The sidebar's explicit entries are the generated reference pages plus two prose pages; the
@@ -99,9 +104,9 @@ test('the projection rewrites every link class a route cannot serve (#188)', () 
   expect(rewriteLinks('[data](./data/labels.json)', 'concepts/page.md')).toBe(
     '[data](https://github.com/dopamine911/zen-harness-foundation/blob/main/docs/concepts/data/labels.json)',
   )
-  // ⚠ The repository README is the site's root and its links are REPO-relative, not
+  // ⚠ The repository README is a site page (`/readme/`) and its links are REPO-relative, not
   // docs-relative — the one page where `docs/architecture.md` and `./architecture.md` mean the
-  // same thing. Anchored wrongly, every link on the site's front page points into the blob.
+  // same thing. Anchored wrongly, every link on that page points into the blob.
   expect(rewriteLinks('[arch](docs/architecture.md)', 'README.md', 'repository')).toBe('[arch](/enso/architecture/)')
   expect(rewriteLinks('[lint](oxlint.config.ts)', 'README.md', 'repository')).toBe(
     '[lint](https://github.com/dopamine911/zen-harness-foundation/blob/main/oxlint.config.ts)',

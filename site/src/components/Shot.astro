@@ -1,0 +1,22 @@
+---
+/**
+ * A product screenshot that opens full size (the landing page's lightbox script). Astro optimises
+ * the image at build time (webp), so the PNGs kept in `src/assets/landing/` are never served as is.
+ */
+import type { ImageMetadata } from 'astro'
+import { Image } from 'astro:assets'
+
+interface Props {
+  image: ImageMetadata
+  alt: string
+  hint?: string
+  wide?: boolean
+}
+
+const { image, alt, hint = 'expand', wide = false } = Astro.props
+---
+
+<figure class:list={['shot', { wide }]} tabindex="0" role="button" aria-label={`Expand screenshot: ${alt}`} data-zoom>
+  <Image src={image} alt={alt} quality={85} />
+  <span class="zoom-hint">{hint}</span>
+</figure>

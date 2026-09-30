@@ -1,0 +1,787 @@
+/*
+ * The landing page (`src/pages/index.astro`), ported from hello-enso's `index.html` (helloen.so).
+ *
+ * The design's own variables are kept as NAMES, so its rules read as drawn, but each is bound to a
+ * theme variable (`theme.css`): the page is hello-enso in dark and follows the derived palette in
+ * light. Everything is scoped under `.landing` (the page) and `.landing-hero` (the Hero override),
+ * so no rule reaches another page. `.not-content` on the wrapper keeps Starlight's prose styles
+ * off it.
+ */
+
+.landing,
+.landing-hero {
+  --bg: var(--sl-color-bg);
+  --surface: var(--enso-surface);
+  --surface-2: var(--enso-surface-2);
+  --sidebar: var(--sl-color-bg-sidebar);
+  --fg: var(--sl-color-gray-1);
+  --soft: var(--sl-color-gray-2);
+  --muted: var(--sl-color-gray-3);
+  --border: var(--sl-color-hairline);
+  --border-strong: var(--sl-color-gray-4);
+  --cyan: var(--sl-color-accent);
+  --violet: var(--sl-color-purple);
+  --ok: var(--sl-color-green);
+  --refuse: var(--sl-color-red);
+  --radius: 10px;
+  --display: var(--enso-font-display);
+  --mono: var(--sl-font-mono);
+  color: var(--fg);
+  font-size: 16px;
+  line-height: 1.65;
+}
+
+/* The page is wider than a docs page: hello-enso's 1180px. */
+html:has(.landing) {
+  --sl-content-width: 73.75rem;
+}
+
+.landing a,
+.landing-hero a {
+  color: inherit;
+}
+
+.landing h2,
+.landing h3,
+.landing-hero h1 {
+  color: var(--sl-color-white);
+}
+
+.landing .mono {
+  font-family: var(--mono);
+}
+
+/* ── Buttons ── */
+.landing .button,
+.landing-hero .button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 0 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.landing .button:hover,
+.landing-hero .button:hover {
+  background: var(--surface-2);
+  border-color: var(--border-strong);
+}
+
+.landing .button.primary,
+.landing-hero .button.primary {
+  background: var(--cyan);
+  border-color: var(--cyan);
+  color: var(--sl-color-black);
+}
+
+.landing .button.primary:hover,
+.landing-hero .button.primary:hover {
+  filter: brightness(1.04);
+}
+
+/* ── Hero (the Hero override) ── */
+.landing-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  align-items: center;
+  gap: 56px;
+  padding: 72px 0 96px;
+}
+
+.landing-hero .eyebrow,
+.landing .kicker {
+  font: 500 12px/1.4 var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.landing-hero .eyebrow {
+  color: var(--cyan);
+  margin-bottom: 20px;
+}
+
+.landing-hero h1 {
+  font: 600 clamp(44px, 5.6vw, 74px) / 1.02 var(--display);
+  letter-spacing: -0.045em;
+  margin: 0;
+}
+
+.landing-hero h1 span {
+  color: var(--muted);
+}
+
+.landing-hero .lead {
+  font-size: 20px;
+  line-height: 1.55;
+  color: var(--soft);
+  margin: 28px 0 0;
+}
+
+.landing .hero-actions,
+.landing-hero .hero-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 34px;
+}
+
+.landing .quiet,
+.landing-hero .quiet {
+  margin-top: 22px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.landing-hero .hero-mark {
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+
+.landing-hero .hero-mark::before {
+  content: "";
+  position: absolute;
+  width: 78%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--enso-glow-cyan), var(--enso-glow-violet) 48%, transparent 70%);
+  filter: blur(10px);
+}
+
+/* ── Sections ── */
+.landing .rule {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 0;
+}
+
+.landing .section {
+  padding: 96px 0;
+}
+
+.landing .section-head {
+  display: grid;
+  grid-template-columns: 0.75fr 1.25fr;
+  gap: 70px;
+  margin-bottom: 60px;
+}
+
+.landing .kicker {
+  color: var(--muted);
+}
+
+.landing h2 {
+  font: 600 clamp(32px, 4vw, 50px) / 1.12 var(--display);
+  letter-spacing: -0.035em;
+  margin: 0;
+}
+
+.landing .section-intro {
+  font-size: 19px;
+  color: var(--soft);
+  margin: 0;
+  max-width: 760px;
+}
+
+.landing .section-head h2 + .section-intro {
+  margin-top: 22px;
+}
+
+.landing .section-intro strong {
+  color: var(--fg);
+  font-weight: 500;
+}
+
+/* A band that spans the viewport, whatever the content column: hello-enso's darker sections. */
+.landing .proof {
+  background: var(--sidebar);
+  box-shadow: 0 0 0 100vmax var(--sidebar);
+  clip-path: inset(0 -100vmax);
+  border-block: 1px solid var(--border);
+}
+
+/* ── Trust ── */
+.landing .trust-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.landing .trust-card {
+  padding: 30px;
+  min-height: 240px;
+  border-right: 1px solid var(--border);
+}
+
+.landing .trust-card:last-child {
+  border: 0;
+}
+
+.landing .trust-card .num {
+  font: 500 12px var(--mono);
+  color: var(--muted);
+}
+
+.landing .trust-card h3 {
+  font: 600 21px/1.25 var(--display);
+  margin: 48px 0 12px;
+}
+
+.landing .trust-card p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.landing .trust-card.active {
+  background: linear-gradient(145deg, var(--enso-glow-cyan), var(--enso-glow-violet));
+  box-shadow: inset 0 2px var(--cyan);
+}
+
+.landing .trust-card.active h3 {
+  color: var(--cyan);
+}
+
+/* ── The genie problem ── */
+.landing .genie {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 54px;
+  align-items: center;
+}
+
+.landing .quote-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 34px;
+}
+
+.landing .quote-panel .wish {
+  font: 500 17px/1.6 var(--mono);
+  color: var(--fg);
+  margin: 0 0 28px;
+}
+
+.landing .flow {
+  display: grid;
+  gap: 10px;
+}
+
+.landing .flow-row {
+  display: grid;
+  grid-template-columns: 100px 1fr;
+  gap: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  font-size: 14px;
+}
+
+.landing .flow-row span:first-child {
+  font-family: var(--mono);
+  color: var(--muted);
+}
+
+.landing .flow-row.bad span:last-child {
+  color: var(--sl-color-red-high);
+}
+
+.landing .flow-row.good span:last-child {
+  color: var(--sl-color-green-high);
+}
+
+.landing .copy h3 {
+  font: 600 30px/1.2 var(--display);
+  margin: 0 0 20px;
+}
+
+.landing .copy p {
+  color: var(--soft);
+  margin: 0 0 18px;
+}
+
+.landing .copy p:last-child {
+  margin-bottom: 0;
+}
+
+.landing .centred {
+  max-width: 760px;
+  margin: 46px auto 0;
+}
+
+.landing .centred .quiet {
+  margin-top: 16px;
+}
+
+/* ── Showcase ── */
+.landing .showcase {
+  display: grid;
+  gap: 72px;
+}
+
+.landing .showcase-row {
+  display: grid;
+  grid-template-columns: minmax(0, 0.7fr) minmax(0, 1.3fr);
+  gap: 46px;
+  align-items: start;
+}
+
+.landing .showcase-row:nth-child(even) {
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 0.7fr);
+}
+
+.landing .showcase-row:nth-child(even) .showcase-copy {
+  order: 2;
+}
+
+.landing .showcase-copy h3 {
+  font: 600 27px/1.2 var(--display);
+  margin: 10px 0 14px;
+}
+
+.landing .showcase-copy p {
+  color: var(--soft);
+  margin: 0;
+}
+
+.landing .showcase-copy .detail {
+  display: block;
+  margin-top: 15px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.landing .stack {
+  display: grid;
+  gap: 14px;
+}
+
+/* A screenshot that opens full size (`Shot.astro`, the lightbox script on the page). */
+.landing .shot,
+.landing-hero .shot {
+  position: relative;
+  margin: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  overflow: hidden;
+  background: #080b12;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.3);
+  cursor: zoom-in;
+}
+
+.landing-hero .shot {
+  width: min(100%, 680px);
+  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.42);
+}
+
+.landing .shot img,
+.landing-hero .shot img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.landing .shot:focus-visible,
+.landing-hero .shot:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 4px;
+}
+
+.landing .zoom-hint,
+.landing-hero .zoom-hint {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  padding: 5px 8px;
+  border: 1px solid var(--sl-color-hairline);
+  border-radius: 6px;
+  background: rgba(7, 10, 16, 0.88);
+  font: 500 10px var(--mono);
+  color: #c4ccdc;
+  pointer-events: none;
+}
+
+.landing .shot.wide {
+  max-width: 900px;
+  margin: auto;
+}
+
+/* ── Three ── */
+.landing .three {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 18px;
+}
+
+.landing .proof .three {
+  margin-top: 38px;
+}
+
+.landing .feature {
+  border-top: 1px solid var(--border);
+  padding-top: 24px;
+}
+
+.landing .feature .state {
+  font: 500 11px var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--cyan);
+}
+
+.landing .feature h3 {
+  font: 600 22px var(--display);
+  margin: 12px 0;
+}
+
+.landing .feature p {
+  color: var(--muted);
+  margin: 0;
+}
+
+/* ── Features map ── */
+.landing .features-map {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 18px;
+}
+
+.landing .feature-group {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 28px;
+  background: var(--surface);
+}
+
+.landing .feature-group h3 {
+  font: 600 22px/1.25 var(--display);
+  margin: 8px 0;
+}
+
+.landing .feature-group > p {
+  color: var(--muted);
+  margin: 0 0 20px;
+}
+
+.landing .feature-links {
+  display: grid;
+  border-top: 1px solid var(--border);
+}
+
+.landing .feature-link {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--border);
+  text-decoration: none;
+}
+
+.landing .feature-link:hover strong {
+  color: var(--cyan);
+}
+
+.landing .feature-link strong {
+  font-weight: 500;
+}
+
+.landing .feature-link span {
+  color: var(--muted);
+  font-size: 13px;
+  text-align: right;
+}
+
+.landing .feature-docs-note {
+  margin-top: 28px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.landing .feature-docs-note a,
+.landing .pi-link {
+  color: var(--cyan);
+  text-decoration: none;
+}
+
+.landing .feature-docs-note a:hover,
+.landing .pi-link:hover {
+  text-decoration: underline;
+}
+
+/* ── The software factory ── */
+.landing .factory {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 80px;
+  align-items: start;
+}
+
+.landing .factory h2 {
+  margin-top: 14px;
+}
+
+.landing .factory .section-intro {
+  margin-top: 24px;
+}
+
+.landing .factory-list {
+  display: grid;
+  border-top: 1px solid var(--border);
+}
+
+.landing .factory-item {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 20px;
+  padding: 18px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.landing .factory-item span {
+  font: 500 11px var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+}
+
+.landing .factory-item strong {
+  font-weight: 500;
+}
+
+.landing .factory-answer {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 400;
+}
+
+.landing .note {
+  margin-top: 28px;
+  padding: 18px 20px;
+  border-left: 2px solid var(--violet);
+  background: color-mix(in srgb, var(--violet) 6%, transparent);
+  color: var(--soft);
+}
+
+/* ── Built on pi ── */
+.landing .pi-panel {
+  display: grid;
+  grid-template-columns: 0.75fr 1.25fr;
+  gap: 70px;
+  padding: 46px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: linear-gradient(145deg, var(--enso-glow-cyan), var(--enso-glow-violet));
+}
+
+.landing .pi-panel h2 {
+  margin-top: 14px;
+}
+
+.landing .pi-copy p {
+  color: var(--soft);
+  margin: 0 0 18px;
+}
+
+.landing .pi-copy p:last-child {
+  margin-bottom: 0;
+}
+
+/* ── Security, honestly ── */
+.landing .honest {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 42px;
+  background: var(--surface);
+}
+
+.landing .honest h2 {
+  margin-top: 14px;
+  max-width: 800px;
+}
+
+.landing .honest p {
+  max-width: 780px;
+  color: var(--soft);
+  font-size: 18px;
+}
+
+.landing .honest strong {
+  color: var(--fg);
+}
+
+/* ── Close ── */
+.landing .smile-divider {
+  display: flex;
+  justify-content: center;
+  padding: 20px 0;
+}
+
+.landing .smile-divider img {
+  width: 54px;
+  height: 54px;
+  object-fit: contain;
+}
+
+.landing .final {
+  padding: 110px 0 70px;
+  text-align: center;
+}
+
+.landing .final img {
+  width: 74px;
+  height: 74px;
+  object-fit: contain;
+  margin: 0 auto 24px;
+}
+
+.landing .final h2 {
+  font-size: clamp(36px, 5vw, 60px);
+  line-height: 1.08;
+  letter-spacing: -0.04em;
+  margin: 0 auto;
+  max-width: 850px;
+}
+
+.landing .final p {
+  color: var(--muted);
+  font-size: 18px;
+  max-width: 680px;
+  margin: 22px auto 30px;
+}
+
+.landing .final .hero-actions {
+  justify-content: center;
+}
+
+/* ── Lightbox ── */
+.landing-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: none;
+  place-items: center;
+  padding: 28px;
+  background: rgba(3, 5, 9, 0.94);
+  backdrop-filter: blur(8px);
+}
+
+.landing-lightbox.open {
+  display: grid;
+}
+
+.landing-lightbox img {
+  display: block;
+  max-width: min(96vw, 1800px);
+  max-height: 90vh;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border: 1px solid #3d4b6b;
+  border-radius: 10px;
+  box-shadow: 0 30px 100px #000;
+}
+
+.landing-lightbox button {
+  position: fixed;
+  top: 18px;
+  right: 20px;
+  width: 42px;
+  height: 42px;
+  border: 1px solid #3d4b6b;
+  border-radius: 50%;
+  background: #111623;
+  color: #e8ecf5;
+  font-size: 24px;
+  cursor: pointer;
+}
+
+/* ── Narrow screens, as hello-enso breaks ── */
+@media (max-width: 850px) {
+  .landing-hero {
+    grid-template-columns: 1fr;
+    padding: 48px 0 64px;
+  }
+
+  .landing .section {
+    padding: 72px 0;
+  }
+
+  .landing .section-head,
+  .landing .genie,
+  .landing .factory,
+  .landing .pi-panel {
+    grid-template-columns: 1fr;
+    gap: 28px;
+  }
+
+  .landing .pi-panel {
+    padding: 30px;
+  }
+
+  .landing .features-map,
+  .landing .trust-grid,
+  .landing .three,
+  .landing .showcase-row,
+  .landing .showcase-row:nth-child(even) {
+    grid-template-columns: 1fr;
+  }
+
+  .landing .showcase-row {
+    gap: 24px;
+  }
+
+  .landing .showcase-row:nth-child(even) .showcase-copy {
+    order: 0;
+  }
+
+  .landing .trust-card {
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+    min-height: auto;
+  }
+
+  .landing .trust-card h3 {
+    margin-top: 26px;
+  }
+
+  .landing .factory-item {
+    grid-template-columns: 90px 1fr;
+  }
+
+  .landing .honest {
+    padding: 28px;
+  }
+}
+
+@media (max-width: 520px) {
+  .landing-hero h1 {
+    font-size: 40px;
+  }
+
+  .landing-hero .lead {
+    font-size: 18px;
+  }
+
+  .landing h2 {
+    font-size: 34px;
+  }
+
+  .landing .quote-panel {
+    padding: 22px;
+  }
+
+  .landing .flow-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}
