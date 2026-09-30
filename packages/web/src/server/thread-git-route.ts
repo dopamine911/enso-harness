@@ -6,7 +6,7 @@ import type { ThreadRegistry } from './thread-registry.ts'
  * `GET /api/threads/:threadId/git` (#453): git's state in the thread's cwd — the repository, the
  * branch, the last-push baseline and the work not yet pushed (`@enso/core/git`). And
  * `GET /api/threads/:threadId/changes` (#452): that state, with every file that differs from the
- * baseline and its patch — what the Changes view draws. Read when asked: the working tree moves
+ * baseline and its patch — what the Diff view draws. Read when asked: the working tree moves
  * under a run, so nothing is cached, and nothing is recorded.
  *
  * The cwd comes from pi's memory for a live thread and from the session file's header otherwise.

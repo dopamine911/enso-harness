@@ -1932,7 +1932,7 @@ function ViewTabs({
           className={VIEW_TAB}
         >
           <FileDiffIcon aria-hidden="true" />
-          <span className="max-sm:sr-only">Changes</span>
+          <span className="max-sm:sr-only">Diff</span>
         </TabsPrimitive.Trigger>
       </TabsPrimitive.List>
     </TabsPrimitive.Root>

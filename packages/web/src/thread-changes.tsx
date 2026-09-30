@@ -9,7 +9,7 @@ import { readThreadRoute, THREAD_READ_NONE, type ThreadReadOutcome } from './rou
 import { baselineText } from './thread-git.tsx'
 
 /**
- * The Changes view (#452): every file in the thread's project that differs from the last push, as
+ * The Diff view (#452): every file in the thread's project that differs from the last push, as
  * a tree, and the chosen file's diff side by side — the old file on the left, the new on the right.
  * A project inside a larger repository shows its own directory's files only (`scope`).
  * Off `GET /api/threads/:threadId/changes`, which diffs the working tree against the baseline #453
@@ -277,7 +277,7 @@ function RepositoryChanges({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b px-4 py-2 text-sm">
-        <h2 className="font-medium text-foreground">Changes</h2>
+        <h2 className="font-medium text-foreground">Diff</h2>
         <span className="text-muted-foreground" title="as this clone last saw the remote — Enso never fetches">
           {baselineText(repository)}
         </span>

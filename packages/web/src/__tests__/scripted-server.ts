@@ -90,7 +90,7 @@ export interface ScriptedFetchOptions {
    * between two; 404 when absent, a thread nothing has run in.
    */
   readonly git?: () => EnsoGitState
-  /** What the Changes view's read answers (#452), asked per read; 404 when absent. */
+  /** What the Diff view's read answers (#452), asked per read; 404 when absent. */
   readonly changes?: () => { git: EnsoGitState; files: EnsoGitFileChange[]; truncated: boolean }
 }
 

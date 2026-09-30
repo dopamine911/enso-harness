@@ -1,5 +1,5 @@
 /**
- * A unified diff as the Changes view draws it (#452): git's patch for one file, parsed into hunks,
+ * A unified diff as the Diff view draws it (#452): git's patch for one file, parsed into hunks,
  * and each hunk laid out side by side — the old file on the left, the new on the right.
  *
  * ⚠ GIT'S OWN FORMAT, AND ONLY THAT. The patch comes from `git diff` (`@enso/core/git`), so this

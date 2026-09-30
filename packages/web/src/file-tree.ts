@@ -1,7 +1,7 @@
 import type { EnsoGitFileChange } from '@enso/core'
 
 /**
- * The Changes view's file tree (#452): the changed files, by directory, the way a reader scans a
+ * The Diff view's file tree (#452): the changed files, by directory, the way a reader scans a
  * change — directories first, then files, each sorted by name, and each directory carrying the lines
  * added and removed under it.
  *
