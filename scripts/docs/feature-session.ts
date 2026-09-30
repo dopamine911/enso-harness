@@ -59,6 +59,36 @@ export const PROMPTS = [
   'Summarise the change in one line for the PR.',
 ] as const
 
+/**
+ * The throwaway home's prompt library (#443), in the file shape `ENSO_HOME/prompts/<id>.md` holds:
+ * an append prompt for the System prompt field and the manager, and a session prompt, without which
+ * the Start dialog has no Saved prompt field to show. The session itself starts on pi's default, so
+ * the scripted model answers the prompt it was written for. The Prompts page quotes `reviewer.md`
+ * as its example file, so the page shows the file the screenshot was taken with.
+ */
+export const PROMPT_LIBRARY = {
+  'reviewer.md': [
+    '---',
+    'name: Reviewer',
+    'description: Reads the change before it answers, and says what breaks',
+    'category: append',
+    '---',
+    '# Reviewer',
+    '',
+    'Read the diff before you answer. Say what breaks first, then what to change.',
+    '',
+  ].join('\n'),
+  'config-audit.md': [
+    '---',
+    'name: Config audit',
+    'description: A first message for a project you have not read yet',
+    'category: session',
+    '---',
+    'List every environment variable the app reads, and what happens when one is missing.',
+    '',
+  ].join('\n'),
+} as const
+
 /** The last words of each prompt's answer: the capture waits for them before going on. */
 export const ANSWER_ENDINGS = [
   'so I cannot confirm its value.',

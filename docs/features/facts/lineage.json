@@ -1,0 +1,17 @@
+{
+  "feature": "lineage",
+  "shots": [
+    {
+      "image": "lineage-fork",
+      "steps": ["open a thread from the rail", "choose **fork from here** under the third prompt"],
+      "shown": ["forked from Where does the app read its database URL? Check .env too.", "ask pi something"],
+      "measured": {}
+    },
+    {
+      "image": "lineage-fork-point",
+      "steps": ["add `?debug` to the thread's address"],
+      "shown": ["fork point", "forked from", "git"],
+      "measured": {}
+    }
+  ]
+}

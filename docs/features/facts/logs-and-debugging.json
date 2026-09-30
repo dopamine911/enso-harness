@@ -1,0 +1,17 @@
+{
+  "feature": "logs-and-debugging",
+  "shots": [
+    {
+      "image": "debug-log-tail",
+      "steps": ["open `http://127.0.0.1:5178/debug`"],
+      "shown": ["level", "download the day's bundle"],
+      "measured": {}
+    },
+    {
+      "image": "debug-drawer",
+      "steps": ["open a thread from the rail", "add `?debug` to the thread's address"],
+      "shown": ["session debug", "download log bundle"],
+      "measured": {}
+    }
+  ]
+}

@@ -292,6 +292,7 @@ export function ThreadStatusView({
   return (
     <footer
       id="thread-status"
+      aria-label="thread status"
       className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t px-5 py-2 font-mono text-xs text-muted-foreground"
     >
       <span

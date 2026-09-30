@@ -2,6 +2,8 @@ import { expect, test } from 'bun:test'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { builtFeaturePages, renderedFeaturePages } from '../scripts/docs/feature-pages.ts'
+import { FEATURE_SPECS } from '../scripts/docs/features/index.ts'
+import { type FeatureFacts, factsPath } from '../scripts/docs/features/spec.ts'
 import { quotedLiterals, REPOSITORY_ROOT, sourceFiles } from './gate-support.ts'
 
 /**
@@ -14,8 +16,10 @@ import { quotedLiterals, REPOSITORY_ROOT, sourceFiles } from './gate-support.ts'
  *
  * THE CONVENTION THIS HOLDS. On a Features page, **bold is reserved for UI labels.** Every bold
  * span must be a string the web surface renders: a static string literal, or a JSX text node,
- * somewhere in `packages/web/src` (tests aside). The match ignores case, because the UI
- * upper-cases some labels in CSS (`REFUSED · NETWORK EGRESS` is `network egress` in source).
+ * somewhere in `packages/web/src` (tests aside), or a string the capture read off the running
+ * page (#482: a tool row's arguments, a request's heading, which no literal spells). The match
+ * ignores case, because the UI upper-cases some labels in CSS (`REFUSED · NETWORK EGRESS` is
+ * `network egress` in source).
  * Emphasis that is not a label is written in italics, and commands and paths in code spans.
  *
  * ⚠ The e2e selector gate (`e2e-selectors.test.ts`, #277) is the model and the scanner is shared
@@ -89,10 +93,29 @@ function boldSpans(markdown: string): string[] {
   return [...prose.matchAll(/\*\*([^*\n]+)\*\*/g)].map((match) => match[1] ?? '')
 }
 
+/**
+ * What the capture read off the running page (#482): the text a ring's element showed, a measured
+ * value, a control a step clicked. Rendered by construction, the capture having found it on
+ * screen, and so as good a witness as a source literal; lower-cased.
+ */
+function capturedStrings(): string[] {
+  return FEATURE_SPECS.flatMap((spec) => {
+    const path = join(REPOSITORY_ROOT, factsPath(spec.id))
+    if (!existsSync(path)) return []
+    const facts = JSON.parse(readFileSync(path, 'utf8')) as FeatureFacts
+    return facts.shots.flatMap((shot) => [
+      ...shot.shown,
+      ...Object.values(shot.measured),
+      ...shot.steps.flatMap(boldSpans),
+    ])
+  }).map((captured) => captured.toLowerCase())
+}
+
 test('⚠ every bold label on a Features page is a string the web surface renders (#437)', () => {
   const rendered = renderedStrings()
   // A floor: a scan that found nothing would pass every page.
   expect(rendered.size).toBeGreaterThan(500)
+  for (const captured of capturedStrings()) rendered.add(captured)
   const missing = pages.flatMap((page) =>
     boldSpans(textOf(page))
       .filter((label) => !rendered.has(label.toLowerCase()))

@@ -150,3 +150,29 @@ export function isPrintRun(passthroughArgs: readonly string[], stdinIsTty: boole
 export function piArguments(packageToLoad: string, passthroughArgs: readonly string[]): string[] {
   return ['--no-extensions', '--no-skills', '-e', packageToLoad, ...passthroughArgs]
 }
+
+/** What a print run's launch line says after the package: the variant it loads instead (#20). */
+export const PRINT_VARIANT_NOTE = '(print variant, no permission modes — #20)'
+
+/** The launch's line naming every variable removed from pi's environment (#89), without its newline. */
+export function secretsKeptOutLine(removed: readonly string[]): string {
+  return `enso: secrets kept out of pi's environment (#89): ${removed.join(', ')}`
+}
+
+/** What the launch is about to spawn, as its last line before pi's own screen says it. */
+export interface VanillaPiLaunch {
+  readonly piVersion: string
+  readonly agentDir: string
+  readonly packageToLoad: string
+  readonly printRun: boolean
+  readonly declaredResourceCount: number
+}
+
+/** The launch's line naming the pi it spawns, and with what, without its newline. */
+export function vanillaPiLine(launch: VanillaPiLaunch): string {
+  return (
+    `enso: vanilla pi ${launch.piVersion} | agent-dir=${launch.agentDir} | package=${launch.packageToLoad}` +
+    `${launch.printRun ? ` ${PRINT_VARIANT_NOTE}` : ''} | ` +
+    `${launch.declaredResourceCount} declared resource path(s)`
+  )
+}

@@ -29,6 +29,9 @@ import { WEB_FETCH_MAX_URL_LENGTH } from '@enso/core'
  */
 export type WebFetchUrlDecision = { kind: 'ok'; url: URL } | { kind: 'refused'; reason: string }
 
+/** The schemes web_fetch accepts, named so the Web access page reads them rather than retyping (#482). */
+const FETCHABLE_PROTOCOLS: readonly string[] = ['http:', 'https:']
+
 /**
  * Parse and gate a raw URL string. Refusal reasons are written for the model to read.
  *
@@ -47,7 +50,7 @@ export function parseWebFetchUrl(rawUrl: string): WebFetchUrlDecision {
   } catch {
     return { kind: 'refused', reason: 'it is not parseable as an absolute URL' }
   }
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+  if (!FETCHABLE_PROTOCOLS.includes(url.protocol)) {
     return { kind: 'refused', reason: `only http and https URLs are fetchable, got "${url.protocol}"` }
   }
   if (url.username.length > 0 || url.password.length > 0) {

@@ -1,0 +1,13 @@
+{
+  "feature": "settings",
+  "shots": [
+    {
+      "image": "settings",
+      "steps": ["open a thread from the rail", "choose **settings**"],
+      "shown": ["Theme", "Body", "kept in this browser"],
+      "measured": {
+        "themeFont": "the theme's font"
+      }
+    }
+  ]
+}

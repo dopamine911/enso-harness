@@ -1,0 +1,11 @@
+{
+  "feature": "permission-modes",
+  "shots": [
+    {
+      "image": "permission-modes",
+      "steps": ["open a thread from the rail"],
+      "shown": ["Mode: default", "permission mode"],
+      "measured": {}
+    }
+  ]
+}

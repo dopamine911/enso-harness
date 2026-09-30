@@ -1,0 +1,23 @@
+{
+  "feature": "guards-and-receipts",
+  "shots": [
+    {
+      "image": "guards-receipt",
+      "steps": ["open a thread from the rail"],
+      "shown": [
+        ".env",
+        "Reading \".env\" via read is blocked: it matches a credential pattern. A secret read is the precondition for exfiltration, so this is denied even for inspection.",
+        "secret-read"
+      ],
+      "measured": {}
+    },
+    {
+      "image": "guards-refused-and-failed",
+      "steps": ["open a thread from the rail"],
+      "shown": ["bash cat docs/deploy.md error", "Refused · network egress", "Enso guard"],
+      "measured": {
+        "refusedApart": "2 refused by a guard — not failures"
+      }
+    }
+  ]
+}

@@ -13,27 +13,36 @@ import {
   FEATURE_SCRIPT,
   FIRST_MODEL,
   PROMPTS,
+  PROMPT_LIBRARY,
   SECOND_MODEL,
 } from './feature-session.ts'
+import { FEATURE_SPECS } from './features/index.ts'
 import {
   type FeatureFacts,
   type FeatureSpec,
   type FeatureUi,
   factsPath,
   type MarkTarget,
+  type SessionMoment,
+  type Shot,
   type ShotFacts,
+  type ThreadTab,
+  withShotFacts,
 } from './features/spec.ts'
-import { STATS } from './features/stats.ts'
 
 /**
  * Captures the Features screenshots (#437) into `docs/features/images/`. Run it after a UI change:
  *
- *   bun run docs:screenshots [--chromium <path to a chrome binary>] [--keep] [--only <shot>[,<shot>…]]
+ *   bun run docs:screenshots [--chromium <path to a chrome binary>] [--keep] [--only <feature>[,<feature>…]]
  *
  * `--keep` leaves the scratch directory — the home, the project, the model's request log — and
  * prints where it is, for when a step fails and the page alone does not say why. `--only` plays
- * the session, then captures just the named shots (function names below: `stats`, `coldThread`, …),
+ * the session, then captures just the named features' shots (their spec ids: `stats`, `chat`, …),
  * for recapturing one feature after its spec changed.
+ *
+ * WHAT EACH SHOT IS comes from its feature's spec (`features/<id>.ts`, #482): how it is reached,
+ * what it rings, what it measures. This file plays the session and carries the specs out, in the
+ * registry's order (`features/index.ts`); no shot's rings, crop or quoted values are chosen here.
  *
  * WHY A SCRIPT, NOT COMMITTED SCREENSHOTS WITH A DATE. A screenshot taken by hand drifts the
  * first time a label moves, and nothing says so. This one is regenerated from the running app,
@@ -61,7 +70,7 @@ import { STATS } from './features/stats.ts'
  *
  * ANNOTATIONS are drawn in the page before each shot — a numbered ring on the element a page
  * talks about — and each page's legend lists the numbers in order. They are real elements
- * found by role or text, so a renamed control fails the capture instead of ringing nothing.
+ * found by what a reader sees, so a renamed control fails the capture instead of ringing nothing.
  */
 
 const ROOT = findRepoRoot(import.meta.url)
@@ -80,35 +89,6 @@ const STEP_TIMEOUT_MS = 60_000
  * of 20k is several times this whole session.
  */
 const PI_SETTINGS = { compaction: { keepRecentTokens: 300 } } as const
-
-/**
- * The throwaway home's prompt library (#443), in the file shape `ENSO_HOME/prompts/<id>.md` holds:
- * an append prompt for the System prompt field and the manager, and a session prompt, without which
- * the Start dialog has no Saved prompt field to show. The session itself starts on pi's default, so
- * the scripted model answers the prompt it was written for.
- */
-const PROMPT_LIBRARY = {
-  'reviewer.md': [
-    '---',
-    'name: Reviewer',
-    'description: Reads the change before it answers, and says what breaks',
-    'category: append',
-    '---',
-    '# Reviewer',
-    '',
-    'Read the diff before you answer. Say what breaks first, then what to change.',
-    '',
-  ].join('\n'),
-  'config-audit.md': [
-    '---',
-    'name: Config audit',
-    'description: A first message for a project you have not read yet',
-    'category: session',
-    '---',
-    'List every environment variable the app reads, and what happens when one is missing.',
-    '',
-  ].join('\n'),
-} as const
 
 /** The `demo` provider, as pi's `models.json` declares a provider (#437): real prices, real windows. */
 const MODELS_JSON = {
@@ -280,9 +260,9 @@ async function annotate(page: Page, annotations: readonly Annotation[]): Promise
 }
 
 /**
- * The shots `--only` asked for, by shot function name; `undefined` for all of them. Playing the
- * session takes screenshots of its own steps (the Start dialog, the questions); under `--only`
- * those are not retaken, so recapturing one feature leaves every other image as it was.
+ * The features `--only` asked for, by spec id; `undefined` for all of them. Playing the session
+ * stops where some shots exist only while it waits (the Start dialog, the questions); under
+ * `--only` those are not retaken, so recapturing one feature leaves every other image as it was.
  */
 const ONLY: readonly string[] | undefined = process.argv.includes('--only')
   ? (process.argv[process.argv.indexOf('--only') + 1] ?? '').split(',')
@@ -370,8 +350,8 @@ async function hostCommand(page: Page, threadId: string, name: string, value?: s
 }
 
 /**
- * Plays the whole session, taking the three shots that only exist WHILE it runs — the Start
- * dialog, the questionnaire and the permission prompt. Returns the thread's id.
+ * Plays the whole session, stopping for the shots that only exist WHILE it runs — the Start
+ * dialog, the questionnaire and the permission prompt (`SessionShot`). Returns the thread's id.
  */
 async function playSession(page: Page, modelLog: string): Promise<string> {
   await page.goto(WEB)
@@ -383,14 +363,7 @@ async function playSession(page: Page, modelLog: string): Promise<string> {
   await dialog.getByPlaceholder('ask pi something').fill(PROMPTS[0])
   // The library is read as the dialog opens; the Saved prompt field appears once it has been.
   await dialog.getByText('Saved prompt', { exact: true }).waitFor()
-  await shoot(page, 'sessions-start', [
-    { target: dialog.getByText('Model', { exact: true }), label: '1' },
-    { target: dialog.getByText('Effort', { exact: true }), label: '2' },
-    { target: dialog.getByText('Mode', { exact: true }), label: '3' },
-    { target: dialog.getByText('System prompt', { exact: true }), label: '4' },
-    { target: dialog.getByText('Saved prompt', { exact: true }), label: '5' },
-    { target: dialog.getByText('Prompt', { exact: true }), label: '6' },
-  ])
+  await sessionShots(page, 'start-dialog')
   await dialog.getByRole('button', { name: 'Start session' }).click()
   await page.getByText(ANSWER_ENDINGS[0], { exact: false }).last().waitFor({ timeout: STEP_TIMEOUT_MS })
   const threadId = new URL(page.url()).searchParams.get('thread')
@@ -409,19 +382,11 @@ async function playSession(page: Page, modelLog: string): Promise<string> {
   await page.getByText('Missing variable', { exact: true }).click()
   await page.getByText('Other', { exact: true }).click()
   await page.getByPlaceholder('Type your answer').fill('a malformed URL')
-  await shoot(page, 'questions-ask-user', [
-    { target: page.getByRole('tablist').filter({ has: firstTab }), label: '1' },
-    { target: page.getByPlaceholder('Type your answer'), label: '2' },
-    { target: page.getByRole('button', { name: 'Submit answers' }), label: '3' },
-  ])
+  await sessionShots(page, 'questionnaire')
   await page.getByRole('button', { name: 'Submit answers' }).click()
   const yes = page.getByRole('button', { name: 'Yes', exact: true })
   await yes.waitFor({ timeout: STEP_TIMEOUT_MS })
-  await shoot(page, 'questions-permission-prompt', [
-    { target: page.getByText('pi is asking'), label: '1' },
-    { target: yes, label: '2' },
-    { target: page.getByText('Cancel — decline the question'), label: '3' },
-  ])
+  await sessionShots(page, 'permission-prompt')
   await yes.click()
   await page.getByText(ANSWER_ENDINGS[2], { exact: false }).last().waitFor({ timeout: STEP_TIMEOUT_MS })
   await page.locator('#thread-status').getByText('idle', { exact: true }).waitFor({ timeout: STEP_TIMEOUT_MS })
@@ -446,358 +411,162 @@ async function openThread(page: Page, threadId: string): Promise<void> {
   await page.waitForTimeout(800)
 }
 
-async function tab(page: Page, name: 'Chat' | 'Context' | 'Stats' | 'Changes'): Promise<void> {
+async function tab(page: Page, name: ThreadTab): Promise<void> {
   await page.getByRole('tab', { name, exact: true }).click()
   await page.waitForTimeout(1200)
 }
 
-/** A tool row, by the text of what it was given: a row is a `<details>` whose summary names it. */
-function toolRow(page: Page, summary: string): Locator {
-  return page.locator('details[data-enso-tool-call]').filter({ hasText: summary }).first()
+/**
+ * What an element reads as, whitespace folded: the form a page quotes it in. ⚠ With CSS case
+ * transforms off while it reads: `innerText` applies `text-transform`, so a small-caps header would
+ * be quoted as `PI IS ASKING` where the UI's text, and the reader's search, is `pi is asking`.
+ * `textContent` would keep the case but run adjacent elements together (`bashcat`).
+ */
+async function textOf(located: Locator): Promise<string> {
+  const plainCase = await located.page().addStyleTag({ content: '* { text-transform: none !important; }' })
+  try {
+    return (await located.innerText()).replaceAll(/\s+/g, ' ').trim()
+  } finally {
+    await plainCase.evaluate((node) => (node as unknown as BrowserElement).remove())
+  }
 }
 
-async function chat(page: Page, threadId: string): Promise<void> {
-  await openThread(page, threadId)
-  await scrollToTop(page.getByText(PROMPTS[0]).last())
-  await shoot(page, 'chat-thread', [
-    {
-      target: page.getByRole('navigation', { name: 'threads' }).getByText('Where does the app read').first(),
-      label: '1',
-    },
-    { target: page.getByText(/^Thought/).first(), label: '2' },
-    { target: toolRow(page, 'DATABASE_URL').locator('summary'), label: '3' },
-    { target: page.getByText('fork from here').first(), label: '4' },
-    { target: page.getByRole('button', { name: 'attach an image' }), label: '5' },
-    { target: page.locator('#thread-status'), label: '6' },
-  ])
-}
-
-async function commandPalette(page: Page, threadId: string): Promise<void> {
-  await openThread(page, threadId)
-  await page.getByRole('button', { name: 'commands' }).click()
-  await page.getByPlaceholder('filter commands…').waitFor()
-  await page.waitForTimeout(800)
-  await shoot(page, 'chat-command-palette', [{ target: page.getByPlaceholder('filter commands…'), label: '1' }])
-}
-
-async function guards(page: Page, threadId: string): Promise<void> {
-  await openThread(page, threadId)
-  const failed = toolRow(page, 'cat docs/deploy.md')
-  const refused = page.getByLabel('bash, refused by Enso guard')
-  await scrollToTop(failed)
-  await shoot(
-    page,
-    'guards-refused-and-failed',
-    [
-      { target: failed.locator('summary'), label: '1' },
-      { target: refused.getByText('network egress', { exact: false }).first(), label: '2' },
-      { target: refused.getByText('Enso guard'), label: '3' },
-    ],
-    [failed, refused],
-  )
-  const secret = page.getByLabel('read, refused by Enso guard')
-  await scrollToTop(secret)
-  await shoot(
-    page,
-    'guards-receipt',
-    [
-      { target: secret.getByText('.env', { exact: true }), label: '1' },
-      { target: secret.getByText(/^Reading "\.env" via read is blocked/), label: '2' },
-      { target: secret.getByText('secret-read', { exact: true }), label: '3' },
-    ],
-    [secret],
-  )
-}
-
-async function webAccess(page: Page, threadId: string): Promise<void> {
-  await openThread(page, threadId)
-  const call = toolRow(page, 'https://bun.sh/blog')
-  await call.locator('summary').click()
-  const answer = call.getByText(/^Not fetched/)
-  await answer.waitFor()
-  await scrollToTop(call)
-  await shoot(
-    page,
-    'web-fetch-refusal',
-    [
-      { target: call.locator('summary'), label: '1' },
-      { target: answer, label: '2' },
-    ],
-    [call],
-  )
-}
-
-async function permissionModes(page: Page, threadId: string): Promise<void> {
-  await openThread(page, threadId)
-  const line = page.getByText('Mode: default', { exact: true }).first()
-  const select = page.getByRole('combobox', { name: 'permission mode' })
-  await scrollToTop(line)
-  await shoot(
-    page,
-    'permission-modes',
-    [
-      { target: line, label: '1' },
-      { target: select, label: '2' },
-    ],
-    [line, select, page.getByPlaceholder('ask pi something')],
-  )
-}
-
-async function context(page: Page, threadId: string): Promise<void> {
-  await openThread(page, threadId)
-  await tab(page, 'Context')
-  await shoot(page, 'context-now-trend', [
-    { target: page.getByText('pi’s context meter', { exact: true }), label: '1' },
-    { target: page.getByText('next request · pi’s estimate (characters ÷ 4)'), label: '2' },
-    { target: page.getByRole('group', { name: 'bar per' }), label: '3' },
-    { target: page.getByText('compaction', { exact: true }).first(), label: '4' },
-  ])
-}
-
-async function contextBrowser(page: Page, threadId: string): Promise<void> {
-  await openThread(page, threadId)
-  await tab(page, 'Context')
-  // Request 9 is the first on the second model: the turn the cache had to be written again for.
-  await page.getByRole('button', { name: /^request 9, / }).click()
-  await page.getByRole('button', { name: 'Open in browser' }).click()
-  await scrollToTop(page.getByText('Context Browser', { exact: true }))
-  await shoot(page, 'context-browser', [
-    { target: page.getByRole('combobox', { name: 'the request to open' }), label: '1' },
-    { target: page.getByText(/entered since request 8/), label: '2' },
-    { target: page.getByText(new RegExp(`^model demo/${SECOND_MODEL}`)).first(), label: '3' },
-    { target: page.getByText('File Activity', { exact: true }), label: '4' },
-  ])
-  // One element opened: the read of the config file, as the model received it.
-  await page.locator('button[aria-expanded]').filter({ hasText: 'tool results' }).click()
-  const element = page.locator('button[aria-pressed]').filter({ hasText: 'config.ts' }).first()
-  await element.click()
-  const toggle = page.getByRole('group', { name: 'show the text' })
-  await toggle.waitFor()
-  await shoot(page, 'context-browser-element', [
-    { target: element, label: '1' },
-    { target: toggle, label: '2' },
-  ])
-}
-
-/** Where a mark's target is: by role and name, or by text it shows. The capture fails if neither resolves. */
+/** Where a mark's target is, inside its `within` when it has one. The capture fails if it does not resolve. */
 function locate(page: Page, target: MarkTarget): Locator {
-  if ('role' in target) return page.getByRole(target.role, { name: target.name }).first()
-  return page.getByText(target.text, { exact: false }).first()
-}
-
-/** What a mark's `{shown}` is: the name a role target was found by, or the text a text target's element renders. */
-async function shownBy(target: MarkTarget, located: Locator): Promise<string> {
-  if ('role' in target) return target.name
-  return (await located.innerText()).replaceAll(/\s+/g, ' ').trim()
+  const scope: Page | Locator = target.within === undefined ? page : locate(page, target.within)
+  if ('role' in target) {
+    const exact = target.exact === undefined ? {} : { exact: target.exact }
+    return scope.getByRole(target.role, { name: target.name, ...exact }).first()
+  }
+  if ('text' in target) return scope.getByText(target.text, { exact: target.exact ?? false }).first()
+  if ('label' in target) return scope.getByLabel(target.label).first()
+  if ('placeholder' in target) return scope.getByPlaceholder(target.placeholder).first()
+  const row = scope.locator('details[data-enso-tool-call]').filter({ hasText: target.toolCall }).first()
+  return target.summary === true ? row.locator('summary') : row
 }
 
 /**
- * One feature from its spec (#482): each shot's `go` runs through a `FeatureUi` that records the
- * reader's steps, the marks are rung where the page renders them, the measured values are read,
- * and all of it is written to the feature's facts file for `feature-pages.ts` to build the page.
+ * What a mark's `{shown}` is, and what a click's step calls its target: the name or label it was
+ * found by when that is plain text, else the text the element renders.
  */
-async function captureFeature(page: Page, spec: FeatureSpec, threadId: string): Promise<void> {
-  const shots: ShotFacts[] = []
-  for (const shot of spec.shots) {
-    const steps: string[] = []
-    const ui: FeatureUi = {
-      page,
-      openThread: async () => {
-        steps.push('open a thread from the rail')
-        await openThread(page, threadId)
-      },
-      tab: async (name) => {
-        steps.push(`choose the **${name}** tab at the top of the thread`)
-        await tab(page, name)
-      },
-    }
-    await shot.go(ui)
-    const targets = shot.marks.map((mark) => locate(page, mark.target))
-    const shown = await Promise.all(
-      shot.marks.map((mark, markIndex) => shownBy(mark.target, targets[markIndex] as Locator)),
-    )
-    const measured: Record<string, string> = {}
-    for (const [name, element] of Object.entries(shot.measure ?? {})) {
-      measured[name] = (await element(page).innerText()).replaceAll(/\s+/g, ' ').trim()
-      if (measured[name] === '') throw new Error(`feature-screenshots: ${spec.id} measured nothing for "${name}"`)
-    }
-    await shoot(
-      page,
-      shot.image,
-      targets.map((target, markIndex) => ({ target, label: String(markIndex + 1) })),
-    )
-    shots.push({ image: shot.image, steps, shown, measured })
+async function shownBy(target: MarkTarget, located: Locator): Promise<string> {
+  if ('role' in target && typeof target.name === 'string') return target.name
+  if ('label' in target) return target.label
+  if ('placeholder' in target) return target.placeholder
+  return textOf(located)
+}
+
+const ORDINALS = ['first', 'second', 'third', 'fourth'] as const
+
+/** The thread the page is on: the fork's once `forkAt` has moved to it. */
+function threadOnScreen(page: Page, fallback: string): string {
+  return new URL(page.url()).searchParams.get('thread') ?? fallback
+}
+
+/** The UI a shot's `go` drives: every call does what a reader would, and records it as their step. */
+function featureUi(page: Page, threadId: string, steps: string[]): FeatureUi {
+  return {
+    page,
+    openThread: async () => {
+      steps.push('open a thread from the rail')
+      await openThread(page, threadId)
+    },
+    tab: async (name) => {
+      steps.push(`choose the **${name}** tab at the top of the thread`)
+      await tab(page, name)
+    },
+    click: async (target) => {
+      const located = locate(page, target)
+      steps.push(`choose **${await shownBy(target, located)}**`)
+      await located.click()
+      await page.waitForTimeout(800)
+    },
+    scrollTo: async (target) => {
+      await scrollToTop(locate(page, target))
+    },
+    debugDrawer: async () => {
+      steps.push("add `?debug` to the thread's address")
+      await page.goto(`${WEB}/?debug&thread=${threadOnScreen(page, threadId)}`)
+      await page.getByText('session debug').waitFor()
+      await page.waitForTimeout(1200)
+    },
+    logPage: async () => {
+      steps.push(`open \`${WEB}/debug\``)
+      await page.goto(`${WEB}/debug`)
+      await page.getByText('enso · logs').waitFor()
+      await page.waitForTimeout(1500)
+    },
+    forkAt: async (promptNumber) => {
+      steps.push(`choose **fork from here** under the ${ORDINALS[promptNumber - 1] ?? `#${promptNumber}`} prompt`)
+      await scrollToTop(page.getByText(PROMPTS[promptNumber - 1] ?? '').last())
+      // The fork buttons are one per prompt, in order.
+      await page
+        .getByText('fork from here')
+        .nth(promptNumber - 1)
+        .click()
+      await page.waitForURL((url) => url.searchParams.get('thread') !== threadId)
+      // The source thread's pane stays mounted, hidden: the fork's composer is the visible one.
+      const composer = page.getByPlaceholder('ask pi something').filter({ visible: true })
+      const prompt = PROMPTS[promptNumber - 1]
+      await waitFor(async () => (await composer.inputValue()) === prompt, "the fork's prompt in its composer")
+    },
   }
-  const facts: FeatureFacts = { feature: spec.id, shots }
-  writeFileSync(join(ROOT, factsPath(spec.id)), `${JSON.stringify(facts, null, 2)}\n`)
+}
+
+/** `captured` into its feature's facts file, beside the other shots' last capture, formatted as the gate wants it. */
+function recordShotFacts(spec: FeatureSpec, captured: ShotFacts): void {
+  const path = join(ROOT, factsPath(spec.id))
+  const previous = existsSync(path) ? (JSON.parse(readFileSync(path, 'utf8')) as FeatureFacts) : undefined
+  writeFileSync(path, `${JSON.stringify(withShotFacts(spec, previous, captured), null, 2)}\n`)
   // In the repository's style, as `bun run format` writes it: a capture must not leave the format gate red.
   const formatted = spawnSync(process.execPath, ['--bun', 'oxfmt', factsPath(spec.id)], { cwd: ROOT, encoding: 'utf8' })
   if (formatted.status !== 0)
     throw new Error(`feature-screenshots: oxfmt refused ${factsPath(spec.id)}: ${formatted.stderr}`)
-  process.stdout.write(`feature-screenshots: wrote ${factsPath(spec.id)}\n`)
-}
-
-async function stats(page: Page, threadId: string): Promise<void> {
-  await captureFeature(page, STATS, threadId)
-}
-
-/** What changed since the last push (#452): pi's one edit, in the tree and side by side. */
-async function changes(page: Page, threadId: string): Promise<void> {
-  await openThread(page, threadId)
-  await tab(page, 'Changes')
-  const panel = page.locator('#thread-view-changes')
-  await panel.getByText("required('DATABASE_URL')", { exact: false }).first().waitFor()
-  await shoot(page, 'changes', [
-    { target: panel.getByText('no remote to compare with', { exact: false }), label: '1' },
-    { target: panel.getByRole('navigation', { name: 'changed files' }), label: '2' },
-    { target: panel.getByRole('heading', { name: 'src/config.ts' }), label: '3' },
-    { target: panel.getByText("required('DATABASE_URL')", { exact: false }).first(), label: '4' },
-  ])
-}
-
-/** The session eval under the stats (#441): its scorecard, then its timeline. */
-async function sessionEval(page: Page, threadId: string): Promise<void> {
-  await openThread(page, threadId)
-  await tab(page, 'Stats')
-  const panel = page.getByRole('region', { name: 'session eval' })
-  const title = panel.getByText('Session eval', { exact: true })
-  await title.waitFor()
-  await scrollToTop(title)
-  await shoot(page, 'session-eval', [
-    { target: title, label: '1' },
-    { target: panel.getByText('corrections', { exact: true }), label: '2' },
-    { target: panel.getByText('refusal channels', { exact: true }), label: '3' },
-  ])
-  const timeline = panel.getByText('Timeline', { exact: true })
-  await scrollToTop(timeline)
-  await shoot(
-    page,
-    'session-eval-timeline',
-    [
-      { target: timeline, label: '1' },
-      { target: panel.getByText('f= typed against the run · r= clicked against it'), label: '2' },
-    ],
-    [timeline, panel.getByRole('list', { name: 'eval timeline' })],
-  )
-}
-
-async function debugging(page: Page, threadId: string): Promise<void> {
-  await page.goto(`${WEB}/?debug&thread=${threadId}`)
-  await page.getByText('session debug').waitFor()
-  await page.waitForTimeout(1200)
-  await shoot(page, 'debug-drawer', [
-    { target: page.getByText('session debug'), label: '1' },
-    { target: page.getByRole('button', { name: 'download log bundle' }), label: '2' },
-  ])
-  await page.goto(`${WEB}/debug`)
-  const header = page.getByText('enso · logs')
-  await header.waitFor()
-  await page.waitForTimeout(1500)
-  await shoot(page, 'debug-log-tail', [
-    { target: page.getByText('level', { exact: true }), label: '1' },
-    { target: page.getByText(/download the day.s bundle/), label: '2' },
-  ])
-}
-
-async function settings(page: Page, threadId: string): Promise<void> {
-  await openThread(page, threadId)
-  await page.getByRole('button', { name: 'settings' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Settings' })
-  await dialog.getByText('Theme', { exact: true }).waitFor()
-  await page.waitForTimeout(500)
-  await shoot(page, 'settings', [
-    { target: dialog.getByText('Theme', { exact: true }), label: '1' },
-    { target: dialog.getByText('Body', { exact: true }), label: '2' },
-    { target: dialog.getByText('kept in this browser'), label: '3' },
-  ])
-}
-
-/** The prompt manager (#443), open on the library's append prompt: its size, and what the model receives with it. */
-async function promptManager(page: Page, threadId: string): Promise<void> {
-  await openThread(page, threadId)
-  await page.getByRole('button', { name: 'prompts', exact: true }).click()
-  const dialog = page.getByRole('dialog', { name: 'Prompts', exact: true })
-  const list = dialog.getByRole('navigation', { name: 'prompts' })
-  await list.getByText('Reviewer', { exact: true }).click()
-  // pi renders the draft on the live thread; the breakdown is there once it has.
-  const breakdown = dialog.getByRole('table', { name: 'what the model receives' })
-  await breakdown.waitFor({ timeout: STEP_TIMEOUT_MS })
-  await page.waitForTimeout(500)
-  await shoot(page, 'prompts-manager', [
-    { target: list.getByText('pi default', { exact: true }), label: '1' },
-    { target: list.getByText('Append prompts', { exact: true }), label: '2' },
-    { target: dialog.getByRole('button', { name: 'New', exact: true }), label: '3' },
-    { target: dialog.getByRole('button', { name: 'Save', exact: true }), label: '4' },
-    { target: dialog.getByLabel('prompt size'), label: '5' },
-    { target: breakdown, label: '6' },
-  ])
 }
 
 /**
- * Forks the thread at its third prompt, from the page, and takes the two lineage shots: the fork
- * in the rail with the prompt back in its composer, and the fork's manifest in the debug drawer.
+ * One shot from its spec (#482), on the screen its `go` (or the session) reached: the marks are
+ * rung where the page renders them, the image is taken, then the measured values are read, and
+ * all of it lands in the feature's facts file for `feature-pages.ts` to build the page from.
  */
-async function lineage(page: Page, threadId: string): Promise<void> {
-  await openThread(page, threadId)
-  const prompt = page.getByText(PROMPTS[2]).last()
-  await scrollToTop(prompt)
-  // The fork button under the third prompt: the third one on the page, prompts being in order.
-  await page.getByText('fork from here').nth(2).click()
-  // The source thread's pane stays mounted, hidden: the fork's composer is the visible one.
-  const composer = page.getByPlaceholder('ask pi something').filter({ visible: true })
-  await page.waitForURL((url) => url.searchParams.get('thread') !== threadId)
-  await waitFor(async () => (await composer.inputValue()) === PROMPTS[2], "the fork's prompt in its composer")
-  const rail = page.getByRole('navigation', { name: 'threads' })
-  await shoot(page, 'lineage-fork', [
-    { target: rail.getByText(/^forked from /).first(), label: '1' },
-    { target: composer, label: '2' },
-  ])
-  const forkId = new URL(page.url()).searchParams.get('thread') ?? ''
-  await page.goto(`${WEB}/?debug&thread=${forkId}`)
-  const manifest = page.getByLabel('fork point')
-  await manifest.waitFor()
-  await scrollToTop(page.getByText('fork point', { exact: true }))
+async function captureShot(page: Page, spec: FeatureSpec, shot: Shot, steps: readonly string[]): Promise<void> {
+  if (sessionPlaying && ONLY !== undefined) return
+  const targets = shot.marks.map((mark) => locate(page, mark.target))
+  const shown = await Promise.all(
+    shot.marks.map((mark, markIndex) => shownBy(mark.target, targets[markIndex] as Locator)),
+  )
   await shoot(
     page,
-    'lineage-fork-point',
-    [
-      { target: page.getByText('fork point', { exact: true }), label: '1' },
-      { target: manifest.getByText('forked from', { exact: true }), label: '2' },
-      { target: manifest.getByText('git', { exact: true }), label: '3' },
-    ],
-    [page.getByText('fork point', { exact: true }), manifest],
+    shot.image,
+    targets.map((target, markIndex) => ({ target, label: String(markIndex + 1) })),
+    (shot.region ?? []).map((target) => locate(page, target)),
   )
+  const measured: Record<string, string> = {}
+  for (const [quoted, element] of Object.entries(shot.measure ?? {})) {
+    measured[quoted] = await textOf(await element(page))
+    if (measured[quoted] === '') throw new Error(`feature-screenshots: ${spec.id} measured nothing for "${quoted}"`)
+  }
+  recordShotFacts(spec, { image: shot.image, steps, shown, measured })
+  process.stdout.write(`feature-screenshots: recorded ${shot.image} in ${factsPath(spec.id)}\n`)
 }
 
-async function coldThread(page: Page, threadId: string): Promise<void> {
-  await openThread(page, threadId)
-  const rail = page.getByRole('navigation', { name: 'threads' })
-  await shoot(page, 'sessions-cold-thread', [
-    { target: rail.getByText(DEMO_PROJECT, { exact: true }), label: '1' },
-    { target: rail.getByText('Where does the app read').first(), label: '2' },
-    { target: rail.getByText('Add project'), label: '3' },
-    { target: page.getByText(/^model \(recorded\):/), label: '4' },
-  ])
+/** Every spec'd shot the session takes at `moment`, while it waits there. */
+async function sessionShots(page: Page, moment: SessionMoment): Promise<void> {
+  for (const spec of FEATURE_SPECS) {
+    for (const shot of spec.shots)
+      if ('during' in shot && shot.during === moment) await captureShot(page, spec, shot, [])
+  }
 }
 
-/** The shots of the finished thread while its session is still live, in order. */
-const LIVE_SHOTS = [
-  chat,
-  guards,
-  webAccess,
-  permissionModes,
-  context,
-  contextBrowser,
-  stats,
-  sessionEval,
-  changes,
-  debugging,
-  settings,
-  promptManager,
-  commandPalette,
-  // ⚠ LAST of the live shots: it adds a second thread to the rail.
-  lineage,
-]
+/** A feature's shots of the finished thread: the live ones, or (`cold`) the ones after the restart. */
+async function captureFeature(page: Page, spec: FeatureSpec, threadId: string, cold: boolean): Promise<void> {
+  for (const shot of spec.shots) {
+    if ('during' in shot || (shot.cold === true) !== cold) continue
+    const steps: string[] = []
+    await shot.go(featureUi(page, threadId, steps))
+    await captureShot(page, spec, shot, steps)
+  }
+}
 
 // --- running it -------------------------------------------------------------------------------
 
@@ -849,7 +618,39 @@ async function attempt(
   await page.close()
 }
 
+/** The features `--only` names, in the registry's order; all of them without it. A name no spec has is refused. */
+function wantedFeatures(): readonly FeatureSpec[] {
+  const unknown = (ONLY ?? []).filter((requested) => !FEATURE_SPECS.some((spec) => spec.id === requested))
+  if (unknown.length > 0) throw new Error(`feature-screenshots: --only names no feature: ${unknown.join(', ')}`)
+  return FEATURE_SPECS.filter((spec) => ONLY === undefined || ONLY.includes(spec.id))
+}
+
+/** What the finished thread's shots run in: the browser, the thread, how to restart the stack, the failures so far. */
+interface FinishedThread {
+  readonly browser: Browser
+  readonly threadId: string
+  readonly restart: () => Promise<void>
+  readonly failed: string[]
+}
+
+/** Every wanted feature's shots of the finished thread: the live ones, then, after a restart, the cold ones. */
+async function captureFinishedThread(wanted: readonly FeatureSpec[], run: FinishedThread): Promise<void> {
+  const { browser, threadId, failed } = run
+  for (const spec of wanted) {
+    await attempt(browser, spec.id, (page) => captureFeature(page, spec, threadId, false), failed)
+  }
+  const cold = wanted.filter((spec) => spec.shots.some((shot) => 'go' in shot && shot.cold === true))
+  if (cold.length === 0) return
+  // A cold thread is one no session holds: restart the stack, and the thread is read off its file.
+  await run.restart()
+  for (const spec of cold) {
+    await attempt(browser, `${spec.id} (cold)`, (page) => captureFeature(page, spec, threadId, true), failed)
+  }
+}
+
 async function main(): Promise<void> {
+  // Before anything starts: a mistyped `--only` should not cost a session.
+  const wanted = wantedFeatures()
   const chromiumFlag = process.argv.indexOf('--chromium')
   const executablePath = chromiumFlag >= 0 ? process.argv[chromiumFlag + 1] : undefined
   for (const port of PORTS) {
@@ -907,18 +708,12 @@ async function main(): Promise<void> {
     )
     if (threadId === '')
       throw new Error(`feature-screenshots: the session did not finish (model log: ${modelLog})\n${failed.join('\n')}`)
-    const wanted = (name: string): boolean => ONLY === undefined || ONLY.includes(name)
-    for (const shot of LIVE_SHOTS.filter((live) => wanted(live.name))) {
-      await attempt(browser, shot.name, (page) => shot(page, threadId), failed)
-    }
-
-    if (wanted(coldThread.name)) {
-      // A cold thread is one no session holds: restart the stack, and the thread is read off its file.
+    const restart = async (): Promise<void> => {
       await stopStack(stack)
       stack = startStack(home, project)
       await waitFor(async () => (await isListening(5178)) && (await isListening(5179)), 'the dev stack, again')
-      await attempt(browser, coldThread.name, (page) => coldThread(page, threadId), failed)
     }
+    await captureFinishedThread(wanted, { browser, threadId, restart, failed })
     if (failed.length > 0) throw new Error(`feature-screenshots: ${failed.length} failed\n${failed.join('\n')}`)
   } finally {
     await browser?.close()
