@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test'
-import type { EnsoDialogSpec } from '@enso/core'
+import { type EnsoDialogSpec, NO_SESSION_INCIDENTS } from '@enso/core'
 import type { ChatUISelectedPart } from '@tanstack/ai-client/ui'
 import { renderToStaticMarkup } from 'react-dom/server'
 import {
@@ -187,6 +187,7 @@ test('a resumed pane mounts with the stored messages and the stored permission m
     ],
     permissionMode: { mode: 'plan', available: ['default', 'plan'] },
     sessionRisk: { level: 'low', signals: 0 },
+    incidents: NO_SESSION_INCIDENTS,
   })
   const rendered = renderToStaticMarkup(<ThreadPane threadId={stored.threadId} active={true} debugOpen={false} />)
   expect(rendered).toContain('Earlier question')

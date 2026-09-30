@@ -69,6 +69,10 @@ export const ENSO_GUARD_RULES = [
   'read-before-write',
   /** A read of a path that matches a credential pattern, by any tool carrying a `path`. */
   'secret-read',
+  /** A call to a tool family an open security incident suspended, until a human resolves it (#466). */
+  'incident-suspension',
+  /** A shell command naming the session or log directory — the records an incident rests on (#466). */
+  'protected-records',
 ] as const
 
 /** @group Guards */
@@ -83,10 +87,12 @@ export type EnsoGuardRule = (typeof ENSO_GUARD_RULES)[number]
  *   route cannot do it.
  * - `procedure` — the fix is a step the agent can take itself: read the file first.
  * - `configuration` — the harness is misconfigured; neither the agent nor an answer can fix it.
+ * - `suspension` — an open security incident suspended the tool (#466). Ends the turn; only the
+ *   user's resolution of the incident lifts it, so the reason says that, not "ask".
  *
  * @group Guards
  */
-export type EnsoGuardRuleKind = 'authorization' | 'redirect' | 'procedure' | 'configuration'
+export type EnsoGuardRuleKind = 'authorization' | 'redirect' | 'procedure' | 'configuration' | 'suspension'
 
 /**
  * Every rule's kind — a closed table, so a rule added to `ENSO_GUARD_RULES` must be classified to
@@ -107,6 +113,8 @@ export const ENSO_GUARD_RULE_KINDS: Readonly<Record<EnsoGuardRule, EnsoGuardRule
   'stale-write': 'procedure',
   'read-before-write': 'procedure',
   'secret-read': 'authorization',
+  'incident-suspension': 'suspension',
+  'protected-records': 'authorization',
 }
 
 /**

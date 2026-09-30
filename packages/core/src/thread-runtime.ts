@@ -4,6 +4,7 @@ import type { EnsoOpenDialog, EnsoQuestionAnswer } from './dialog.ts'
 import type { EnsoLoginInProgress, EnsoObservation } from './observation.ts'
 import type { EnsoPermissionModeState } from './permission-mode.ts'
 import type { EnsoSystemPromptChoice } from './prompt-library.ts'
+import type { EnsoIncidentResolution } from './session-incident.ts'
 
 /**
  * The thread runtime: the contract the host implements for one thread, and the shapes that
@@ -496,6 +497,19 @@ export const ThreadRuntime = Type.Object({
    */
   setSystemPrompt: Type.Unsafe<(choice: EnsoSystemPromptChoice | null) => string | undefined>(
     Type.Function([Type.Unknown()], Type.Unknown()),
+  ),
+  /**
+   * Record a human's resolution of the thread's incident (#466): refused — the reason returned —
+   * when `incidentResolutionRefusal` refuses it against the live branch; else its
+   * `enso-incident-resolved` record is appended through pi, so it reaches the file and every
+   * follower as a custom entry, and it is emitted on `ENSO_INCIDENT_RESOLVED_CHANNEL` so the live
+   * guard lifts the suspension at once. `undefined` when recorded. Synchronous.
+   *
+   * ⚠ The only writer of a resolution: the guard never lifts a suspension on its own, and no tool
+   * reaches this.
+   */
+  resolveIncident: Type.Unsafe<(incidentId: string, resolution: EnsoIncidentResolution) => string | undefined>(
+    Type.Function([Type.Unknown(), Type.Unknown()], Type.Unknown()),
   ),
   /**
    * Receive every observation of this thread (L2, #162 workstream 4): the runtime's events

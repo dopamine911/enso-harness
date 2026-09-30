@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   type DialogAnswer,
+  ENSO_INCIDENT_OPENED_ENTRY,
   ENSO_IMAGE_MAX_BYTES,
   ENSO_PROMPT_BODY_MAX_BYTES,
   ENSO_PROMPT_MAX_IMAGES,
@@ -133,7 +134,7 @@ beforeAll(async () => {
 beforeEach(() => logs.clear())
 afterAll(releaseEnsoLogs)
 
-async function startWith(fake: FakeHost, sseKeepaliveMs = 1000): Promise<string> {
+async function startWith(fake: Pick<FakeHost, 'host'>, sseKeepaliveMs = 1000): Promise<string> {
   const started = startEnsoServer({
     cwd: tmpdir(),
     harnessPackageDir: emptyHarnessDir(),
@@ -713,6 +714,140 @@ test('a continue of a thread neither live nor stored is a 404, and nothing is bu
   expect(missing.status).toBe(404)
   expect(await missing.text()).toBe('no thread nowhere to continue')
   expect(fake.built).toEqual([])
+})
+
+// ── incidents (#466): a human's resolution, as a control route ────────────────────────
+
+/** A stored thread whose branch opened incident `open-incident` and halted: what a resolution is for. */
+const HALTED: Record<string, FakeStoredThread> = {
+  t1: {
+    transcript: [
+      {
+        kind: 'custom',
+        id: 'c1',
+        customType: ENSO_INCIDENT_OPENED_ENTRY,
+        data: { incidentId: 'open-incident', signals: [], halted: true, suspended: ['execute', 'network', 'write'] },
+      },
+    ],
+    modified: new Date(0),
+    firstMessage: 'the question',
+  },
+}
+
+/** A host over {@link HALTED}: a thread it builds holds the stored branch, as the real host's resume does. */
+function haltedHost(): { host: AgentHost; built: FakeThreadRecord[]; emit: (observation: EnsoObservation) => void } {
+  const built: FakeThreadRecord[] = []
+  let emit: (observation: EnsoObservation) => void = () => undefined
+  const host = createFakeAgentHost((threadId: string) => {
+    const fake = createFakeHostedThread({ inspect: { entries: HALTED[threadId]?.transcript ?? [] } })
+    built.push(fake.record)
+    emit = fake.emit
+    return Promise.resolve(fake.hosted)
+  }, HALTED)
+  return { host, built, emit: (observation: EnsoObservation) => emit(observation) }
+}
+
+function resolve(
+  url: string,
+  path: { readonly threadId: string; readonly incidentId: string },
+  body: string,
+  headers = {},
+): Promise<Response> {
+  return fetch(`${url}/api/threads/${path.threadId}/incidents/${path.incidentId}/resolve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...headers },
+    body,
+  })
+}
+
+const FALSE_POSITIVE = JSON.stringify({ classification: 'false-positive', outcome: 'resume' })
+
+test('⚠ POST …/incidents/:incidentId/resolve records the resolution through the runtime and answers 204; the runtime’s refusal is the 422, verbatim (#466)', async () => {
+  const fake = haltedHost()
+  const url = await startWith(fake)
+
+  const recorded = await resolve(url, { threadId: 't1', incidentId: 'open-incident' }, FALSE_POSITIVE)
+  expect(recorded.status).toBe(204)
+  expect(fake.built[0]?.incidentResolutions).toEqual([
+    { incidentId: 'open-incident', classification: 'false-positive', outcome: 'resume', suspended: [] },
+  ])
+  logs.assertLogged({
+    level: 'info',
+    rawMessage: 'incident {incidentId} resolution recorded: {classification}, {outcome}',
+    properties: { threadId: 't1', incidentId: 'open-incident', classification: 'false-positive', outcome: 'resume' },
+  })
+
+  const unknown = await resolve(url, { threadId: 't1', incidentId: 'other-incident' }, FALSE_POSITIVE)
+  expect(unknown.status).toBe(422)
+  expect(await unknown.text()).toBe('no such incident on this thread')
+  const unfitting = await resolve(
+    url,
+    { threadId: 't1', incidentId: 'open-incident' },
+    JSON.stringify({ classification: 'agent-error', outcome: 'resume-with-restrictions', restricted: [] }),
+  )
+  expect(unfitting.status).toBe(422)
+  expect(fake.built[0]?.incidentResolutions).toHaveLength(1)
+  // Released after each answer: the thread takes a prompt next.
+  expect((await prompt(url, 't1', 'go on')).status).toBe(202)
+  fake.emit(SETTLED)
+})
+
+test('a resolution body that is not exactly `EnsoIncidentResolution` is a 400, before anything is built (#466)', async () => {
+  const fake = haltedHost()
+  const url = await startWith(fake)
+  for (const body of [
+    'not json',
+    '{}',
+    JSON.stringify({ classification: 'false-positive' }),
+    JSON.stringify({ classification: 'a hunch', outcome: 'resume' }),
+    JSON.stringify({ classification: 'false-positive', outcome: 'resume', restricted: ['read'] }),
+    JSON.stringify({ classification: 'false-positive', outcome: 'resume', note: 'extra' }),
+  ]) {
+    expect((await resolve(url, { threadId: 't1', incidentId: 'open-incident' }, body)).status).toBe(400)
+  }
+  expect(fake.built).toEqual([])
+})
+
+test('⚠ a resolution while the thread runs is a 409 and records nothing; one for a thread held nowhere is a 404 that builds nothing (#466)', async () => {
+  const fake = haltedHost()
+  const url = await startWith(fake)
+  const missing = await resolve(url, { threadId: 'nowhere', incidentId: 'open-incident' }, FALSE_POSITIVE)
+  expect(missing.status).toBe(404)
+  expect(fake.built).toEqual([])
+
+  await prompt(url, 't1', 'hello')
+  const busy = await resolve(url, { threadId: 't1', incidentId: 'open-incident' }, FALSE_POSITIVE)
+  expect(busy.status).toBe(409)
+  expect(await busy.text()).toContain('is running')
+  expect(fake.built[0]?.incidentResolutions).toEqual([])
+  fake.emit(SETTLED)
+})
+
+test('⚠ the resolve route is a control route: a cross-site or opaque origin is refused before anything is built (#466)', async () => {
+  const fake = haltedHost()
+  const url = await startWith(fake)
+  for (const origin of ['http://evil.example', 'null']) {
+    expect(
+      (await resolve(url, { threadId: 't1', incidentId: 'open-incident' }, FALSE_POSITIVE, { Origin: origin })).status,
+    ).toBe(403)
+  }
+  expect(fake.built).toEqual([])
+})
+
+test("a cold thread's snapshot carries its incidents, folded from the branch — the incident open and its families suspended (#466)", async () => {
+  const url = await startWith(haltedHost())
+  const follow = await openFollow(url, 't1')
+  await follow.untilFrames(1)
+  expect(follow.frames[0]).toMatchObject({
+    type: 'snapshot',
+    live: false,
+    incidents: {
+      incidents: [{ opened: { incidentId: 'open-incident' }, resolutions: [] }],
+      suspended: ['execute', 'network', 'write'],
+      ended: false,
+    },
+  })
+  follow.close()
 })
 
 // ── 2. a dialog parks nothing ─────────────────────────────────────────────────────────

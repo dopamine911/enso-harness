@@ -17,8 +17,14 @@ import {
 import {
   ASK_USER_TOOL_NAME,
   ENSO_RUN_CONTEXT_ENTRY,
+  ENSO_INCIDENT_OPENED_ENTRY,
+  ENSO_INCIDENT_RESOLVED_CHANNEL,
+  ENSO_INCIDENT_RESOLVED_ENTRY,
   ENSO_SYSTEM_PROMPT_ENTRY,
   type EnsoObservation,
+  type EnsoIncidentOpened,
+  type EnsoIncidentResolved,
+  type EnsoSessionIncidents,
   type EnsoRunContext,
   type EnsoSystemPromptChoice,
   type EnsoSystemPromptMode,
@@ -28,6 +34,8 @@ import {
   effectiveRows,
   type EnsoPermissionMap,
   modeAgentName,
+  openIncidentOf,
+  sessionIncidentsOf,
   withRule,
   readEnsoRunContext,
   threadTrustsProject,
@@ -1987,6 +1995,31 @@ test('⚠⚠ a batch the guard refused whole ends the run; a batch where a call 
   expect(await requestsAfterBatch([faux.fauxToolCall('bash', { command: 'curl https://example.com' })])).toBe(2)
 })
 
+// ⚠⚠ #466 end to end, through the real guard the harness loads: a stored thread whose branch holds
+// a halted incident is resumed — the guard rebuilds the suspension from the RECORD, whatever the
+// config says now, so a web_search the engine allows is refused as suspended — and the host's
+// resolution, appended and announced on the bus, lifts it in the LIVE guard, with no reload.
+test('⚠⚠ a resumed thread’s recorded incident suspends in the real guard, and the host’s resolution lifts it live (#466)', async () => {
+  const threadId = crypto.randomUUID()
+  const file = storeSession(threadId, 'fetch it', 'refused, and stopped')
+  const opened: EnsoIncidentOpened = {
+    incidentId: 'incident-e2e',
+    signals: [],
+    halted: true,
+    suspended: ['execute', 'network', 'write'],
+  }
+  SessionManager.open(file).appendCustomEntry(ENSO_INCIDENT_OPENED_ENTRY, opened)
+  const hosted = await hostWith().createSession(threadId, () => repoRoot)
+  openSessions.push(hosted)
+  const refusal = await hosted.probeToolCall('web_search', { query: 'x' })
+  expect(refusal).toEqual({ block: true, reason: expect.stringContaining('incident-e2e') })
+
+  expect(
+    hosted.runtime.resolveIncident('incident-e2e', { classification: 'false-positive', outcome: 'resume' }),
+  ).toBeUndefined()
+  expect((await hosted.probeToolCall('web_search', { query: 'x' }))?.block).toBe(false)
+})
+
 // ⚠⚠ If the user says stop, it's stop — also while the AGENT is asking. The question holds the run
 // from inside the tool's `execute`, and pi's abort waits for the run: the stop settles the question
 // as it begins (#376), so this returns, with the one question settled as `aborted` and none open.
@@ -2725,6 +2758,171 @@ test('Continue on a thread that is running is refused; the run in flight is unto
   expect(refusals).toEqual(['the thread is running; continue when it settles'])
   gate.resolve()
   await run
+})
+
+// ── incidents (#466): a human's resolution, through pi, and what an ended or forked thread keeps.
+
+/** A halted opening, as the guard records one when the risk reaches `incident`. */
+function openingOf(incidentId: string): EnsoIncidentOpened {
+  return { incidentId, signals: [], halted: true, suspended: ['execute', 'network', 'write'] }
+}
+
+/**
+ * An inline extension standing in for the guard: its pi appends an opening as the guard would, and
+ * it records every resolution the host emits on the channel the guard listens on.
+ */
+function incidentProbe(): { extension: InlineExtension; open: (incidentId: string) => void; heard: unknown[] } {
+  const heard: unknown[] = []
+  let api: ExtensionAPI | undefined
+  const extension: InlineExtension = {
+    name: 'enso-host-incident-probe',
+    factory: (pi: ExtensionAPI) => {
+      api = pi
+      pi.events.on(ENSO_INCIDENT_RESOLVED_CHANNEL, (record) => heard.push(record))
+    },
+  }
+  const open = (incidentId: string): void => {
+    if (api === undefined) throw new Error('the incident probe never loaded')
+    api.appendEntry(ENSO_INCIDENT_OPENED_ENTRY, openingOf(incidentId))
+  }
+  return { extension, open, heard }
+}
+
+/** The incidents a session file's branch folds to — what a resume, the guard and the snapshot read. */
+function storedIncidents(file: string): EnsoSessionIncidents {
+  return sessionIncidentsOf(
+    SessionManager.open(file)
+      .getBranch()
+      .flatMap((entry) => (entry.type === 'custom' ? [{ customType: entry.customType, data: entry.data }] : [])),
+  )
+}
+
+test('⚠⚠ a resolution is recorded through pi — on the branch, on the channel the live guard hears, on the feed the page folds; a superseded or unknown incident is refused (#466)', async () => {
+  const probe = incidentProbe()
+  const hosted = await hostedSession([probe.extension])
+  const seen = collectEvents(hosted)
+  probe.open('incident-1')
+  const record: EnsoIncidentResolved = {
+    incidentId: 'incident-1',
+    classification: 'false-positive',
+    outcome: 'resume',
+    suspended: [],
+  }
+
+  expect(hosted.runtime.resolveIncident('incident-1', { classification: 'false-positive', outcome: 'resume' })).toBe(
+    undefined,
+  )
+  expect(probe.heard).toEqual([record])
+  const resolvedOnFeed = seen.flatMap((observation) =>
+    observation.kind === 'custom-entry' && observation.customType === ENSO_INCIDENT_RESOLVED_ENTRY
+      ? [observation.data]
+      : [],
+  )
+  expect(resolvedOnFeed).toEqual([record])
+  const branch = sessionIncidentsOf(
+    hosted.inspect().entries.flatMap((entry) => (entry.kind === 'custom' ? [entry] : [])),
+  )
+  expect(branch.incidents.map((incident) => incident.resolutions)).toEqual([[record]])
+
+  probe.open('incident-2')
+  const resume = { classification: 'agent-error', outcome: 'resume' } as const
+  expect(hosted.runtime.resolveIncident('incident-1', resume)).toBe('a later incident supersedes this one')
+  expect(hosted.runtime.resolveIncident('incident-9', resume)).toBe('no such incident on this thread')
+  expect(probe.heard).toEqual([record])
+})
+
+test('⚠ a thread a resolution ended admits no prompt and no continue — the model is never asked, and a resume refuses the same (#466)', async () => {
+  const core = createFauxCore()
+  core.setResponses([faux.fauxAssistantMessage('first answer'), faux.fauxAssistantMessage('never sent')])
+  const probe = incidentProbe()
+  const hosted = await hostedSession([fauxModelExtension(core), probe.extension])
+  // One reply first, so the file is written and a resume has something to open.
+  await runPrompt(hosted, 'hi')
+  probe.open('incident-end')
+  expect(
+    hosted.runtime.resolveIncident('incident-end', { classification: 'confirmed-bypass', outcome: 'end-thread' }),
+  ).toBe(undefined)
+
+  const refusals: string[] = []
+  const outcome = { onAccepted: () => refusals.push('accepted'), onRejected: (reason: string) => refusals.push(reason) }
+  hosted.runtime.prompt({ message: 'go on' }, outcome)
+  hosted.runtime.continueRun(outcome)
+  const resumed = await hostWith([fauxModelExtension(createFauxCore())]).createSession(
+    hosted.inspect().sessionId,
+    () => repoRoot,
+  )
+  openSessions.push(resumed)
+  resumed.runtime.prompt({ message: 'go on after a restart' }, outcome)
+
+  expect(refusals).toHaveLength(3)
+  for (const reason of refusals) expect(reason).toContain('incident incident-end')
+  expect(core.state.callCount).toBe(1)
+})
+
+/**
+ * A stored thread of two turns, then `records` appended to its file as custom entries, then a third
+ * prompt — so a fork at the second prompt is taken before the records, and one at the third after.
+ */
+function storedWithRecords(records: ReadonlyArray<readonly [customType: string, data: object]>): {
+  threadId: string
+  before: string
+  after: string
+} {
+  const threadId = crypto.randomUUID()
+  const { file, userEntryIds } = storeTurns(threadId, [
+    ['first question', 'first answer'],
+    ['second question', 'second answer'],
+  ])
+  const stored = SessionManager.open(file)
+  for (const [customType, data] of records) stored.appendCustomEntry(customType, data)
+  const after = stored.appendMessage({ role: 'user', content: 'third question', timestamp: Date.now() })
+  return { threadId, before: userEntryIds[1] ?? '', after }
+}
+
+/** The fork's session file, by its thread id. */
+async function forkFile(host: AgentHost, source: string, entryId: string): Promise<string> {
+  const forked = await host.forkThread(source, entryId)
+  if (forked.kind !== 'forked') throw new Error(`the fork was refused: ${forked.reason}`)
+  const file = (await host.listSessions()).find((stored) => stored.id === forked.threadId)?.path
+  if (file === undefined) throw new Error(`the fork ${forked.threadId} is not listed`)
+  return file
+}
+
+test('⚠ a fork taken BEFORE an open incident inherits it as its own, pointing at the source; one taken after holds the one it copied (#466)', async () => {
+  const { threadId, before, after } = storedWithRecords([[ENSO_INCIDENT_OPENED_ENTRY, openingOf('source-incident')]])
+  const host = hostWith()
+
+  // At the second prompt: the fork holds turn one only — the source's incident is not on it.
+  const inherited = storedIncidents(await forkFile(host, threadId, before))
+  const opened = openIncidentOf(inherited)?.opened
+  expect(opened).toMatchObject({
+    signals: [],
+    halted: true,
+    suspended: ['execute', 'network', 'write'],
+    inheritedFrom: { threadId, incidentId: 'source-incident' },
+  })
+  expect(opened?.incidentId).not.toBe('source-incident')
+
+  // After it: the fork copied the opening, still open, and gets no second one — the fold would
+  // ignore it, but the file would hold a record neither writer meant.
+  const copied = SessionManager.open(await forkFile(host, threadId, after))
+    .getBranch()
+    .flatMap((entry) =>
+      entry.type === 'custom' && entry.customType === ENSO_INCIDENT_OPENED_ENTRY ? [entry.data] : [],
+    )
+  expect(copied).toEqual([openingOf('source-incident')])
+})
+
+test('a fork of a thread whose incident was resolved inherits nothing (#466)', async () => {
+  const { threadId, before } = storedWithRecords([
+    [ENSO_INCIDENT_OPENED_ENTRY, openingOf('settled-incident')],
+    [
+      ENSO_INCIDENT_RESOLVED_ENTRY,
+      { incidentId: 'settled-incident', classification: 'false-positive', outcome: 'resume', suspended: [] },
+    ],
+  ])
+  const forked = storedIncidents(await forkFile(hostWith(), threadId, before))
+  expect(forked).toEqual({ incidents: [], suspended: [], ended: false })
 })
 
 // ── #443: a library system prompt, through pi's own loader, fixed for the session's life.

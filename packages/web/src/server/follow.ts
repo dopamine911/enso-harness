@@ -9,6 +9,7 @@ import {
   type EnsoForkReceipt,
   EnsoForkRequest,
   EnsoHostCommandRun,
+  EnsoIncidentResolution,
   EnsoPermissionModeChange,
   type EnsoPromptAdmission,
   EnsoPromptBody,
@@ -247,6 +248,7 @@ export async function followThread(deps: FollowRouteDeps, threadId: string, resp
     generation: mount.generation,
     permissionMode: mount.permissionMode,
     sessionRisk: mount.sessionRisk,
+    incidents: mount.incidents,
     model: mount.model,
     ...(mount.recordedModel === undefined ? {} : { recordedModel: mount.recordedModel }),
     cwd: mount.cwd,
@@ -580,6 +582,53 @@ export async function changeThreadMode(
 /** The mode-change body, checked against its schema — a control route takes exactly its shape. */
 export function readModeChangeBody(raw: string): EnsoPermissionModeChange {
   return readClosedBody(raw, EnsoPermissionModeChange, 'mode', 'mode body needs a non-empty `mode`')
+}
+
+type IncidentResolveOutcome = { readonly status: 204 } | Refusal<404 | 409 | 422>
+
+/**
+ * Record a human's resolution of a thread's incident (#466) — the only way a suspension is lifted.
+ *
+ * A thread neither live nor stored is a 404 before anything is built, as `continueThread`'s is:
+ * there is no incident to resolve. Otherwise it is a control route: refused while a run holds the
+ * thread (409 — a resolution is not queued behind a run, and lifting a suspension mid-run would
+ * change what the run in flight may do between two of its calls), else acquired — a cold thread
+ * BUILDS here, so the record goes through pi and the guard that loads with it replays it — and
+ * released once the runtime answered. The runtime checks it against the live branch with
+ * `incidentResolutionRefusal`: its reason is the 422, verbatim. Recorded, 204; the record arrives
+ * on the follow as its custom entry.
+ */
+export async function resolveThreadIncident(
+  deps: FollowRouteDeps,
+  threadId: string,
+  incidentId: string,
+  resolution: EnsoIncidentResolution,
+): Promise<IncidentResolveOutcome> {
+  const { threads, host } = deps
+  const action = `resolve incident ${incidentId}`
+  const running = runningRefusal(threads, threadId, action)
+  if (running !== undefined) return running
+  if (threads.peek(threadId) === undefined && (await host.storedThreadDirectory(threadId)) === undefined) {
+    return { status: 404, reason: `no thread ${threadId} to resolve an incident on` }
+  }
+  const lease = await controlLease(threads, threadId, action)
+  if ('reason' in lease) return lease
+  try {
+    const refusal = lease.runtime.resolveIncident(incidentId, resolution)
+    return refusal === undefined ? { status: 204 } : { status: 422, reason: refusal }
+  } finally {
+    lease.release()
+  }
+}
+
+/** The resolution body, checked against its schema (#466) — a control route takes exactly its shape. */
+export function readIncidentResolutionBody(raw: string): EnsoIncidentResolution {
+  return readClosedBody(
+    raw,
+    EnsoIncidentResolution,
+    'incident resolution',
+    'incident resolution body needs a `classification` and an `outcome`, and `restricted` families only for resume-with-restrictions',
+  )
 }
 
 /**

@@ -34,7 +34,7 @@ exports[`GET /api/threads/:id/history serves a STORED thread's branch as message
   participant H as host (fake, over stored threads)
   B->>S: GET /api/threads/stored-1/history
   S->>H: readStoredThread(stored-1)
-  S-->>B: 200 {threadId: "stored-1", messages, permissionMode, sessionRisk}
+  S-->>B: 200 {threadId: "stored-1", messages, permissionMode, sessionRisk, incidents}
   B->>S: GET /api/threads/never-existed/history
   S->>H: readStoredThread(never-existed)
   S-->>B: 404"

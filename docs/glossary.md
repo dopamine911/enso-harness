@@ -246,12 +246,24 @@ what no mode may allow. Both answer before a tool runs; nothing after it does.
   (see Record).
 - **session risk** — what the agent did after a refusal, folded into observed **security signals**
   and a level, `low` / `medium` / `high` / `incident` (#464, phase 1 of #189). Observed by the guards
-  extension and replayed from the branch by the same fold; **observe only**: nothing is blocked
-  because of it, and its thresholds are uncalibrated until #468 replays real sessions.
+  extension and replayed from the branch by the same fold; the level decides nothing by itself —
+  reaching `incident` opens an **incident** — and its thresholds (`config.json`
+  `security.incidents`) are uncalibrated until #468 replays real sessions. Only a resolution resets it.
 - **security signal** — one observed fact of the session risk, named for what was seen, never for
   intent: `denial-retry`, `command-obfuscation`, `alternate-execution-path`,
-  `tool-substitution-after-denial`, `policy-introspection`. Every one needs an earlier refusal in its
-  window, so no single command is a signal on its own.
+  `tool-substitution-after-denial`, `policy-introspection`, `protected-record-touch`. Every one but the
+  last needs an earlier refusal in its window, so no single command is a signal on its own; a shell
+  command naming the session or log directory is one by itself (#466).
+- **incident** — the record a session's risk reaching `incident` opens (#466, phase 3 of #189):
+  `enso-incident-opened`, with the signals it rests on, whether it **halted**, and what it suspended.
+  With `security.incidents.halt` off (the default) it is an alert. Open until a human **resolves** it —
+  a classification (`false-positive` … `confirmed-bypass`) and an outcome (`resume`,
+  `resume-with-restrictions`, `end-thread`) recorded as `enso-incident-resolved`; the opening is never
+  edited. A fork inherits an open one.
+- **suspension** — what a halted incident does to the **tool families** execute (`bash`,
+  `powershell`), network (`web_fetch`, `web_search`) and write (`write`, `edit`): every call to one is
+  refused under `incident-suspension` until a resolution lifts it. Reading is never suspended. Folded
+  from the records at every session start, so it is the server's, not the page's or the model's.
 
 ## Observation
 

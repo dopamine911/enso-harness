@@ -90,6 +90,7 @@ test('⚠ a second fork press while one is outstanding forks nothing and says so
           messages: BRANCH,
           permissionMode: { mode: 'default', available: [] },
           sessionRisk: { level: 'low', signals: 0 },
+          incidents: { incidents: [], suspended: [], ended: false },
         }),
       )
     }

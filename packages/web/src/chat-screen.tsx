@@ -84,6 +84,7 @@ import type { EnsoRendererMap } from './EnsoToolResult.tsx'
 import { createFixtureChat, fixtureFetch } from './fixture-conversation.ts'
 import type { DialogAnswerOutcome, FollowConnection } from './follow-connection.ts'
 import { ForkContext, forkFromPage } from './fork-thread.ts'
+import { ThreadIncidents } from './incident-card.tsx'
 import { ModelChip, ModelChoiceDialog, ThinkingLevelSelect, useModelState, useRecordedModel } from './model-state.tsx'
 import { ThreadNotifications } from './notifications.tsx'
 import { PermissionModeSelect, usePermissionMode } from './permission-mode.tsx'
@@ -799,6 +800,20 @@ function StopControl({
   )
 }
 
+/** What the composer's empty box says: why it cannot send, or the invitation. */
+function composerPlaceholder({
+  disconnected,
+  ended,
+}: {
+  readonly disconnected: boolean
+  readonly ended: boolean
+}): string {
+  if (disconnected) return 'disconnected — reload and resume from the rail'
+  // A resolution ended the thread (#466): the server refuses a prompt, and a fork goes on.
+  if (ended) return 'this thread was ended by an incident resolution — it is read-only; fork it to go on'
+  return 'ask pi something'
+}
+
 /**
  * Inside the ported form: the attachment strip, the textarea, the `/` palette, the attach /
  * stop / send buttons. A separate component because the attachments live in the form's context
@@ -828,7 +843,10 @@ function ComposerBody({
 }): React.ReactNode {
   const stores = useThreadStores()
   const attachments = usePromptInputAttachments()
-  const canSend = (draft.trim().length > 0 || attachments.files.length > 0) && !disconnected
+  // A resolution ended the thread (#466): read-only for good — the server refuses a prompt, so
+  // the composer says why instead of offering a send that cannot land. Forking still works.
+  const ended = useStore(stores.incidents).ended
+  const canSend = (draft.trim().length > 0 || attachments.files.length > 0) && !disconnected && !ended
   return (
     <div className="flex flex-col gap-2 rounded-lg border border-input bg-card p-2 transition-colors focus-within:border-ring">
       {attachments.files.length === 0 ? null : (
@@ -846,7 +864,7 @@ function ComposerBody({
           ref={textareaRef}
           value={draft}
           onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => setDraft(event.target.value)}
-          placeholder={disconnected ? 'disconnected — reload and resume from the rail' : 'ask pi something'}
+          placeholder={composerPlaceholder({ disconnected, ended })}
           autoComplete="off"
           rows={1}
           className="max-h-40 min-h-11 flex-1 resize-none border-0 bg-transparent text-base shadow-none placeholder:text-muted-foreground focus-visible:ring-0 dark:bg-transparent"
@@ -1171,7 +1189,7 @@ const chatComponents = {
        * that a submit always reaches the wire (PR #343 review, round 2).
        */
       const send = (text: string, images: readonly EnsoPromptImage[]): boolean => {
-        if (disconnected) return false
+        if (disconnected || stores.incidents.get().ended) return false
         if (text.trim().length === 0 && images.length === 0) return false
         const parts: ContentPart[] = [
           ...(text.length === 0 ? [] : [{ type: 'text' as const, content: text }]),
@@ -1497,6 +1515,9 @@ const chatComponents = {
                     {/* pi's notify lines (#29) — the transcript tail, above the question,
 										    so "Mode set to X" reads next to the run it belongs to. */}
                     <ThreadNotifications />
+                    {/* The thread's incidents (#466): below the run that opened them, above any
+										    question — a halted thread waits on this card. */}
+                    <ThreadIncidents />
                     {/* ⚠ Mounted before anything opens one, deliberately. This is where #4's
 										    `ask` verdict reaches the browser, and an unmounted slot is precisely
 										    why an approval would silently never appear. */}

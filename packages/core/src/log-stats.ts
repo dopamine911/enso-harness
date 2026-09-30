@@ -51,6 +51,10 @@ export const ENSO_LOG_EVENTS = {
   securitySignal: 'security signal {signal} on {toolCallId}: {detail}',
   /** `guards/index.ts`: the session's risk level rose (#464, observe only). */
   sessionRiskChanged: 'session risk is {level} ({signals} signal(s))',
+  /** `guards/index.ts`: the session's risk reached `incident`, and an incident was opened (#466). */
+  incidentOpened: 'security incident {incidentId} opened; halted {halted}, suspended {suspended}',
+  /** `guards/index.ts`: a human's resolution reached the live guard (#466). */
+  incidentResolved: 'security incident {incidentId} resolved {classification}, {outcome}; suspended {suspended}',
   /** `thread-registry.ts`: the operator's Stop reached the run — the eval's interrupt (#441). */
   runAborted: 'run {generation} told to abort; {restored} queued prompt(s) handed back',
 } as const

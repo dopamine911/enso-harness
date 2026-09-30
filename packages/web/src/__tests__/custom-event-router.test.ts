@@ -1,14 +1,19 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import {
   ENSO_GUARD_DENIAL_ENTRY,
+  ENSO_INCIDENT_OPENED_ENTRY,
+  ENSO_INCIDENT_RESOLVED_ENTRY,
   ENSO_SESSION_RISK_ENTRY,
   ENSO_PROVIDER_REFUSAL_KEY,
   type EnsoDialogSpec,
   type EnsoFollowSnapshot,
+  type EnsoIncidentOpened,
+  type EnsoIncidentResolved,
   type EnsoFollowStatus,
   type EnsoModelState,
   type EnsoObservation,
   type EnsoSessionUsage,
+  NO_SESSION_INCIDENTS,
 } from '@enso/core'
 import { FOLLOW_ENDED_CUSTOM_EVENT, routeEnsoCustomEvent } from '../custom-event-router.ts'
 import { clearThreadsForTest, mintThread, type ThreadStores } from '../thread-stores.ts'
@@ -57,6 +62,7 @@ const snapshot = (overrides: Partial<EnsoFollowSnapshot> = {}): EnsoFollowSnapsh
   generation: 1,
   permissionMode: { mode: 'default', available: ['default'] },
   sessionRisk: { level: 'low', signals: 0 },
+  incidents: NO_SESSION_INCIDENTS,
   model: null,
   cwd: '/work/project',
   messages: [],
@@ -178,6 +184,63 @@ test("the snapshot seeds the session's risk and the guard's risk entry raises it
   observe({ kind: 'custom-entry', customType: ENSO_SESSION_RISK_ENTRY, data: { level: 'severe', signals: 9 } })
   expect(stores.sessionRisk.get()).toEqual({ level: 'high', signals: 3 })
   expect(notificationMessages().filter((message) => !message.startsWith('Mode: '))).toEqual([])
+})
+
+// #466: the incidents, folded live by the same step the server runs — an opening, then a human's
+// resolution — and resynced whole by every snapshot.
+const OPENED: EnsoIncidentOpened = {
+  incidentId: 'inc-1',
+  signals: [{ signal: 'denial-retry', toolCallId: 'c4', detail: 'retried a refused command', after: ['c2'] }],
+  halted: true,
+  suspended: ['execute', 'network', 'write'],
+}
+
+test("the guard's opening folds into the thread's incidents live, and a resolution keeps only what it restricts and starts the risk over", () => {
+  observe({ kind: 'custom-entry', customType: ENSO_SESSION_RISK_ENTRY, data: { level: 'incident', signals: 4 } })
+  observe({ kind: 'custom-entry', customType: ENSO_INCIDENT_OPENED_ENTRY, data: OPENED })
+  expect(stores.incidents.get()).toEqual({
+    incidents: [{ opened: OPENED, resolutions: [] }],
+    suspended: ['execute', 'network', 'write'],
+    ended: false,
+  })
+  const resolved: EnsoIncidentResolved = {
+    incidentId: 'inc-1',
+    classification: 'agent-error',
+    outcome: 'resume-with-restrictions',
+    suspended: ['network'],
+  }
+  observe({ kind: 'custom-entry', customType: ENSO_INCIDENT_RESOLVED_ENTRY, data: resolved })
+  expect(stores.incidents.get()).toEqual({
+    incidents: [{ opened: OPENED, resolutions: [resolved] }],
+    suspended: ['network'],
+    ended: false,
+  })
+  expect(stores.sessionRisk.get()).toEqual({ level: 'low', signals: 0 })
+})
+
+test("the snapshot's incidents replace the live fold — a resolution recorded while the page was away lands too", () => {
+  const open = { incidents: [{ opened: OPENED, resolutions: [] }], suspended: OPENED.suspended, ended: false }
+  route('snapshot', snapshot({ incidents: open }))
+  expect(stores.incidents.get()).toEqual(open)
+  const ended = {
+    incidents: [
+      {
+        opened: OPENED,
+        resolutions: [
+          {
+            incidentId: 'inc-1',
+            classification: 'confirmed-bypass' as const,
+            outcome: 'end-thread' as const,
+            suspended: OPENED.suspended,
+          },
+        ],
+      },
+    ],
+    suspended: OPENED.suspended,
+    ended: true,
+  }
+  route('snapshot', snapshot({ incidents: ended }))
+  expect(stores.incidents.get()).toEqual(ended)
 })
 
 test("a status frame sets the thread's run generation; a malformed one leaves the last standing (#109)", () => {

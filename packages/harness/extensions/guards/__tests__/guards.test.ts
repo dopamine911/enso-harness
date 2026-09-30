@@ -8,11 +8,19 @@ import {
   ENSO_GUARD_DENIAL_ENTRY,
   ENSO_GUARD_RULE_KINDS,
   ENSO_GUARD_RULES,
+  ENSO_INCIDENT_OPENED_ENTRY,
+  ENSO_INCIDENT_RESOLVED_CHANNEL,
+  ENSO_INCIDENT_RESOLVED_ENTRY,
+  ENSO_TOOL_FAMILIES,
   type EnsoGuardRule,
+  type EnsoIncidentPolicy,
   ENSO_PERMISSION_DENIAL_ENTRY,
   ENSO_SECURITY_SIGNAL_ENTRY,
   ENSO_SESSION_RISK_ENTRY,
+  incidentPolicyOf,
+  incidentResolvedOf,
   readEnsoGuardDenial,
+  sessionIncidentsOf,
   sessionRiskOfEntries,
 } from '@enso/core'
 import { type FlowTrace, flowTrace } from '@enso/core/flow-trace'
@@ -57,24 +65,42 @@ const ALLOW_ALL_ANALYZER: GuardDependencies['analyzeBashCommand'] = () => ({ kin
 
 /** A harness root holding no credential location — the default, so only the test that means it has one. */
 const NO_CREDENTIALS_ROOT = mkdtempSync(join(tmpdir(), 'enso-guard-harness-'))
+/** The records `protected-records` guards (#466): a session directory and a log directory of the test's own. */
+const SESSION_DIR = mkdtempSync(join(tmpdir(), 'enso-guard-sessions-'))
+// Under a `.enso` directory, as the default ENSO_HOME's is: `secret-path` refuses `/.enso/` too, so
+// this pins that the records are refused as records — the rule the signal needs — not as secrets.
+const LOGS_DIR = join(mkdtempSync(join(tmpdir(), 'enso-guard-home-')), '.enso', 'logs')
+/** The shipped default: an incident alerts and suspends nothing (#466). */
+const ALERT_ONLY: EnsoIncidentPolicy = incidentPolicyOf(undefined)
+const HALTING: EnsoIncidentPolicy = incidentPolicyOf({ incidents: { halt: true } })
 
 /**
  * Minimal stand-in for pi's ExtensionAPI — captures every registered handler.
  * `getAllTools` defaults to pi's real shipped set so session_start's policy check (#4)
- * passes; the mismatch tests inject their own list, or a throwing implementation.
+ * passes; the mismatch tests inject their own list, or a throwing implementation. A
+ * `session_start` gets pi's session manager as production does: an empty branch in the test's
+ * session directory, unless the test hands it one.
  */
 function loadGuardRuntime(
   getAllTools: () => { name: string }[] = () => PI_SHIPPED_TOOL_NAMES.map((name) => ({ name })),
   analyzeBashCommand: GuardDependencies['analyzeBashCommand'] = ALLOW_ALL_ANALYZER,
   harnessRoot: string = NO_CREDENTIALS_ROOT,
-  onAppendEntry?: (customType: string, data: unknown) => void,
+  options: {
+    readonly incidentPolicy?: EnsoIncidentPolicy
+    readonly onAppendEntry?: (customType: string, data: unknown) => void
+  } = {},
 ): GuardRuntime {
   const handlers = new Map<string, Handler>()
   const listeners = new Map<string, ((data: unknown) => void)[]>()
   const entries: GuardRuntime['entries'] = []
-  const guards = createGuards({ analyzeBashCommand, harnessRoot })
+  const guards = createGuards({
+    analyzeBashCommand,
+    harnessRoot,
+    incidentPolicy: () => options.incidentPolicy ?? ALERT_ONLY,
+    logsDirectory: LOGS_DIR,
+  })
   const appendEntry = (customType: string, data: unknown): void => {
-    onAppendEntry?.(customType, data)
+    options.onAppendEntry?.(customType, data)
     entries.push({ customType, data })
   }
   const events = {
@@ -85,9 +111,14 @@ function loadGuardRuntime(
   guards({ on: (e: string, h: Handler) => handlers.set(e, h), getAllTools, appendEntry, events } as never)
   const toolCall = handlers.get('tool_call')
   const toolResult = handlers.get('tool_result')
-  const sessionStart = handlers.get('session_start')
-  if (!(toolCall && toolResult && sessionStart)) {
+  const sessionStartHandler = handlers.get('session_start')
+  if (!(toolCall && toolResult && sessionStartHandler)) {
     throw new Error('guards did not register tool_call + tool_result + session_start')
+  }
+  const sessionStart: Handler = (event, extensionContext) => {
+    const context = extensionContext as { sessionManager?: object }
+    const sessionManager = { getBranch: () => [], getSessionDir: () => SESSION_DIR, ...context.sessionManager }
+    return sessionStartHandler(event, { ...context, sessionManager })
   }
   const emit = (channel: string, data: unknown): void => {
     for (const listener of listeners.get(channel) ?? []) listener(data)
@@ -187,6 +218,11 @@ const REFUSED_BY: Readonly<Record<EnsoGuardRule, () => { runtime: GuardRuntime; 
     return { runtime: fixture.runtime, verdict }
   },
   'secret-read': () => pathCall('read', '.env'),
+  'incident-suspension': () => {
+    const { runtime, verdicts } = escalated(HALTING)
+    return { runtime, verdict: verdicts.at(-1) }
+  },
+  'protected-records': () => shellCall(`cat ${join(LOGS_DIR, 'enso-2026-09-30.jsonl')}`),
 }
 
 function shellCall(command: string): { runtime: GuardRuntime; verdict: GuardVerdict } {
@@ -203,8 +239,9 @@ function pathCall(toolName: string, path: string): { runtime: GuardRuntime; verd
 // can lift names ask_user as the way out and ends the turn (pi stops once every call of the batch
 // set `terminate`). A redirect names the ask too, but keeps the turn for the sanctioned route its
 // reason names (`curl` → `web_fetch`). A refusal whose fix is the agent's own step, or the config's,
-// says neither — "ask the user" there would send the model to someone who cannot unblock it.
-test('⚠ an authorization refusal names the ask route and ends the turn; a redirect only names it; the others do neither (#465)', () => {
+// says neither — "ask the user" there would send the model to someone who cannot unblock it. A
+// suspension (#466) ends the turn and names no ask: only the user's resolution lifts it.
+test('⚠ an authorization refusal names the ask route and ends the turn; a redirect only names it; a suspension only ends it (#465, #466)', () => {
   for (const rule of ENSO_GUARD_RULES) {
     const { runtime, verdict } = REFUSED_BY[rule]()
     const recorded = runtime.entries.findLast((entry) => entry.customType === ENSO_GUARD_DENIAL_ENTRY)
@@ -214,7 +251,7 @@ test('⚠ an authorization refusal names the ask route and ends the turn; a redi
     expect({ rule, asks: verdict?.reason?.includes(ASK_USER_TOOL_NAME), ends: verdict?.terminate }).toEqual({
       rule,
       asks: kind === 'authorization' || kind === 'redirect',
-      ends: kind === 'authorization' ? true : undefined,
+      ends: kind === 'authorization' || kind === 'suspension' ? true : undefined,
     })
   }
 })
@@ -838,7 +875,10 @@ test('an analyzer deny is blocked with its rule identity in the reason', () => {
       ruleId: 'git.reset-hard',
     }),
     undefined,
-    (customType, data) => trace.send('G', 'R', `appendEntry("${customType}", ${JSON.stringify(data)})`),
+    {
+      onAppendEntry: (customType, data) =>
+        trace.send('G', 'R', `appendEntry("${customType}", ${JSON.stringify(data)})`),
+    },
   )
   trace.send('R', 'G', 'tool_call { toolName: "bash", command: "git reset --hard HEAD~3" }')
   const result = runtime.toolCall(toolCallEvent2('bash', 'git reset --hard HEAD~3'), { cwd })
@@ -1105,7 +1145,12 @@ test('⚠ a write to a credential-shaped path inside the workspace is blocked as
 test('⚠ the guard registers no tool: it participates through tool_call only, so no load order can un-guard it', () => {
   const registered: string[] = []
   const events: string[] = []
-  createGuards({ analyzeBashCommand: ALLOW_ALL_ANALYZER, harnessRoot: NO_CREDENTIALS_ROOT })({
+  createGuards({
+    analyzeBashCommand: ALLOW_ALL_ANALYZER,
+    harnessRoot: NO_CREDENTIALS_ROOT,
+    incidentPolicy: () => ALERT_ONLY,
+    logsDirectory: LOGS_DIR,
+  })({
     on: (event: string) => events.push(event),
     registerTool: (tool: { name: string }) => registered.push(tool.name),
     getAllTools: () => PI_SHIPPED_TOOL_NAMES.map((name) => ({ name })),
@@ -1313,4 +1358,184 @@ test('⚠ a Stop is not a No: a person-denial under an aborted run records nothi
   expect(appended(runtime, ENSO_PERMISSION_DENIAL_ENTRY)).toEqual([
     { toolCallId: 'c1', requestId: 'r2', surface: 'bash', value: 'npm test', resolution: 'policy_deny' },
   ])
+})
+
+// ── #466: an incident halts and suspends tools until a human resolves it (phase 3 of #189) ─────
+
+/** A guard with `policy`, started on an empty branch, driven through the escalation to `incident`. */
+function escalated(policy: EnsoIncidentPolicy): ReturnType<typeof drive> & { runtime: GuardRuntime } {
+  const runtime = loadGuardRuntime(undefined, undefined, undefined, { incidentPolicy: policy })
+  runtime.sessionStart({ type: 'session_start', reason: 'start' }, { cwd })
+  return { runtime, ...drive(runtime, ESCALATION) }
+}
+
+const callOn = (
+  runtime: GuardRuntime,
+  toolCallId: string,
+  toolName: string,
+  input: Record<string, unknown>,
+): GuardVerdict => runtime.toolCall({ type: 'tool_call', toolCallId, toolName, input }, { cwd })
+
+/** Every pi tool and every Enso tool, with an input the other rules pass. */
+const ONE_CALL_PER_TOOL: readonly [string, Record<string, unknown>][] = [
+  ['bash', { command: 'ls' }],
+  ['powershell', { command: 'Get-ChildItem' }],
+  ['write', { path: 'src/new-file.ts', content: 'x' }],
+  ['edit', { path: 'src/new-file.ts', edits: [] }],
+  ['web_fetch', { url: 'https://example.test' }],
+  ['web_search', { query: 'x' }],
+  ['read', { path: 'src/a.ts' }],
+  ['grep', { pattern: 'x', path: 'src' }],
+  ['find', { pattern: '*.ts', path: 'src' }],
+  ['ls', { path: 'src' }],
+  [ASK_USER_TOOL_NAME, { questions: [] }],
+]
+
+/** Which of `ONE_CALL_PER_TOOL` the guard refuses under `incident-suspension`. */
+function suspendedTools(runtime: GuardRuntime): string[] {
+  return ONE_CALL_PER_TOOL.flatMap(([toolName, input], index) => {
+    const before = runtime.entries.length
+    callOn(runtime, `s${index}`, toolName, input)
+    const refusal = runtime.entries
+      .slice(before)
+      .find((entry) => readEnsoGuardDenial(entry.customType, entry.data)?.rule === 'incident-suspension')
+    return refusal === undefined ? [] : [toolName]
+  })
+}
+
+const EXECUTE_NETWORK_WRITE = ['bash', 'powershell', 'write', 'edit', 'web_fetch', 'web_search']
+
+// ⚠ #466's first acceptance: with halting on, the sequence that reaches `incident` opens exactly
+// one incident, the call that reached it is refused under `incident-suspension` and ends the
+// batch, and every execute, network and write tool is refused after it — reads are not.
+test('⚠ with halting on, reaching incident opens ONE incident, refuses the call that reached it and ends the batch; reads still work (#466)', () => {
+  const { runtime, verdicts } = escalated(HALTING)
+  const opened = appended(runtime, ENSO_INCIDENT_OPENED_ENTRY)
+  expect(opened).toEqual([
+    expect.objectContaining({ halted: true, suspended: [...ENSO_TOOL_FAMILIES], signals: expect.any(Array) }),
+  ])
+  expect(verdicts.at(-1)).toEqual({ block: true, reason: expect.stringContaining('suspended'), terminate: true })
+  expect(suspendedTools(runtime)).toEqual(EXECUTE_NETWORK_WRITE)
+  // More signals while it is open do not open a second one.
+  drive(runtime, ESCALATION)
+  expect(appended(runtime, ENSO_INCIDENT_OPENED_ENTRY)).toHaveLength(1)
+})
+
+// ⚠ A refusal can be what tips the session into a halting incident — here the network deny's
+// `cannot vouch`, a redirect that alone keeps the model's turn. Tipped, it ends the batch (#466).
+test('⚠ a refusal that tips the session into a halting incident ends the batch, whatever its own rule', () => {
+  const tipping: readonly DrivenCall[] = [
+    { id: 'c1', command: 'curl https://example.test/x' },
+    { id: 'c2', command: 'wget https://example.test/x' },
+    { id: 'c3', command: 'python3 -c "print(1)"' },
+    { id: 'c4', command: '$(printf cu)rl https://example.test/x' },
+  ]
+  const alertOnly = loadGuardRuntime()
+  expect(drive(alertOnly, tipping).verdicts.at(-1)).toEqual({ block: true, reason: expect.any(String) })
+  const halting = loadGuardRuntime(undefined, undefined, undefined, { incidentPolicy: HALTING })
+  const { verdicts } = drive(halting, tipping)
+  expect(appended(halting, ENSO_INCIDENT_OPENED_ENTRY)).toHaveLength(1)
+  expect(verdicts.at(-1)).toEqual({ block: true, reason: expect.stringContaining('network deny'), terminate: true })
+})
+
+test('with halting off (the default), the same sequence opens the incident as an alert and suspends nothing (#466)', () => {
+  const { runtime, verdicts } = escalated(ALERT_ONLY)
+  expect(appended(runtime, ENSO_INCIDENT_OPENED_ENTRY)).toEqual([
+    expect.objectContaining({ halted: false, suspended: [] }),
+  ])
+  expect(verdicts.at(-1)).toBeUndefined()
+  expect(suspendedTools(runtime)).toEqual([])
+})
+
+// ⚠ Server-authoritative: the suspension is rebuilt from the entries at every start — a restart,
+// a resume or a reload does not lift it, and neither does a config switched to alert-only since:
+// the recorded incident is restored, not a new one opened. The resolution's record lifts it, and
+// the risk starts over.
+test('⚠ a suspension survives a resume and a reload; only a resolution record lifts it (#466)', () => {
+  const { branch } = escalated(HALTING)
+  const resumed = loadGuardRuntime(undefined, undefined, undefined, { incidentPolicy: ALERT_ONLY })
+  resumed.sessionStart(
+    { type: 'session_start', reason: 'resume' },
+    { cwd, sessionManager: { getBranch: () => branch } },
+  )
+  expect(suspendedTools(resumed)).toEqual(EXECUTE_NETWORK_WRITE)
+  resumed.sessionStart(
+    { type: 'session_start', reason: 'reload' },
+    { cwd, sessionManager: { getBranch: () => branch } },
+  )
+  expect(suspendedTools(resumed)).toEqual(EXECUTE_NETWORK_WRITE)
+  expect(appended(resumed, ENSO_INCIDENT_OPENED_ENTRY)).toEqual([])
+
+  const [opened] = sessionIncidentsOf(branch.flatMap((entry) => customEntry(entry))).incidents
+  if (opened === undefined) throw new Error('the escalation opened no incident')
+  const resolved = incidentResolvedOf(opened.opened.incidentId, { classification: 'false-positive', outcome: 'resume' })
+  const afterResolution = [...branch, { type: 'custom', customType: ENSO_INCIDENT_RESOLVED_ENTRY, data: resolved }]
+  const restarted = loadGuardRuntime(undefined, undefined, undefined, { incidentPolicy: HALTING })
+  restarted.sessionStart(
+    { type: 'session_start', reason: 'resume' },
+    { cwd, sessionManager: { getBranch: () => afterResolution } },
+  )
+  expect(suspendedTools(restarted)).toEqual([])
+  // The risk reset with the resolution: the same one-liner does not reopen an incident.
+  callOn(restarted, 'after', 'bash', { command: 'python3 -c "print(1)"' })
+  expect(appended(restarted, ENSO_INCIDENT_OPENED_ENTRY)).toEqual([])
+})
+
+function customEntry(entry: unknown): { customType: string; data: unknown }[] {
+  const { type, customType, data } = entry as { type?: unknown; customType?: unknown; data?: unknown }
+  return type === 'custom' && typeof customType === 'string' ? [{ customType, data }] : []
+}
+
+// ⚠ #466: only the resolve route restores tools. Live, the host appends the record and announces it
+// on the bus; every tool call the agent can make — a suspended one, a read, ask_user — leaves the
+// suspension where it was, and a resolution that keeps a family suspended lifts only the others.
+test('⚠ no tool call lifts a suspension; the announced resolution does, keeping what it restricts (#466)', () => {
+  const { runtime } = escalated(HALTING)
+  for (let round = 0; round < 2; round += 1) expect(suspendedTools(runtime)).toEqual(EXECUTE_NETWORK_WRITE)
+  const [opened] = appended(runtime, ENSO_INCIDENT_OPENED_ENTRY) as { incidentId: string }[]
+  if (opened === undefined) throw new Error('no incident opened')
+  runtime.emit(
+    ENSO_INCIDENT_RESOLVED_CHANNEL,
+    incidentResolvedOf(opened.incidentId, {
+      classification: 'agent-error',
+      outcome: 'resume-with-restrictions',
+      restricted: ['execute'],
+    }),
+  )
+  expect(suspendedTools(runtime)).toEqual(['bash', 'powershell'])
+  // A malformed announcement lifts nothing.
+  runtime.emit(ENSO_INCIDENT_RESOLVED_CHANNEL, { incidentId: opened.incidentId, outcome: 'resume' })
+  expect(suspendedTools(runtime)).toEqual(['bash', 'powershell'])
+})
+
+// ⚠ #466 item 8: the records an incident rests on are refused by name on the shell route — a touch
+// is itself a signal — and a credential basename is not a record (it stays `secret-path`'s).
+test('⚠ a shell command naming the session or log directory is refused as protected-records and is a signal (#466)', () => {
+  const runtime = loadGuardRuntime()
+  runtime.sessionStart({ type: 'session_start', reason: 'start' }, { cwd })
+  // A link in the workspace into the session directory: the literal path is outside, its realpath not.
+  const workspace = mkdtempSync(join(tmpdir(), 'enso-guard-link-'))
+  symlinkSync(SESSION_DIR, join(workspace, 'history'))
+  const commands: readonly [string, string, string][] = [
+    ['bash', `cat ${join(LOGS_DIR, 'enso-2026-09-30.jsonl')}`, cwd],
+    ['bash', `sed -i d ${join(SESSION_DIR, 'thread.jsonl')}`, cwd],
+    ['powershell', `Get-Content ${join(SESSION_DIR, 'thread.jsonl')}`, cwd],
+    ['bash', 'cat history/thread.jsonl', workspace],
+  ]
+  const rules = commands.map(([toolName, command, callCwd], index) => {
+    const before = runtime.entries.length
+    runtime.toolCall({ type: 'tool_call', toolCallId: `r${index}`, toolName, input: { command } }, { cwd: callCwd })
+    const refusal = runtime.entries.slice(before).find((entry) => entry.customType === ENSO_GUARD_DENIAL_ENTRY)
+    return refusal === undefined ? undefined : readEnsoGuardDenial(refusal.customType, refusal.data)?.rule
+  })
+  expect(rules).toEqual(['protected-records', 'protected-records', 'protected-records', 'protected-records'])
+  // Each touch is one (a repeat is a `denial-retry` besides, as any repeated refusal is).
+  const touches = (appended(runtime, ENSO_SECURITY_SIGNAL_ENTRY) as { signal: string; toolCallId: string }[])
+    .filter((signal) => signal.signal === 'protected-record-touch')
+    .map((signal) => signal.toolCallId)
+  expect(touches).toEqual(['r0', 'r1', 'r2', 'r3'])
+  const before = runtime.entries.length
+  callOn(runtime, 'env', 'bash', { command: 'cat .env' })
+  const envRefusal = runtime.entries.slice(before).find((entry) => entry.customType === ENSO_GUARD_DENIAL_ENTRY)
+  expect(readEnsoGuardDenial(ENSO_GUARD_DENIAL_ENTRY, envRefusal?.data)?.rule).toBe('secret-path')
 })

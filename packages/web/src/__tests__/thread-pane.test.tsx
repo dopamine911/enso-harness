@@ -6,6 +6,7 @@ import {
   type EnsoGitRepository,
   type EnsoThreadHistory,
   type EnsoThreadStats,
+  NO_SESSION_INCIDENTS,
 } from '@enso/core'
 import type { UIMessage } from '@tanstack/ai-client'
 import { act } from 'react'
@@ -315,6 +316,7 @@ test('⚠ a compaction said mid-run waits for the run; once idle the pane shows 
     messages,
     permissionMode: { mode: 'default', available: ['default'] },
     sessionRisk: { level: 'low', signals: 0 },
+    incidents: NO_SESSION_INCIDENTS,
   })
   const pane = await mountPane({
     history: history([text('u1', 'user', 'old question'), text('a1', 'assistant', 'the long old answer')]),
@@ -1185,6 +1187,7 @@ test('⚠ a call still waiting when the page joins a busy run reads running, not
       ],
       permissionMode: { mode: 'default', available: ['default', 'plan'] },
       sessionRisk: { level: 'low', signals: 0 },
+      incidents: NO_SESSION_INCIDENTS,
     },
   })
   await pane.settle({ ...SNAPSHOT_IDLE, threadId: 'asked-1', live: true, busy: true, generation: 1 })
@@ -1924,6 +1927,7 @@ test("the rail lists the server's stored threads; a click resumes one with its h
         ],
         permissionMode: { mode: 'plan', available: ['default', 'plan'] },
         sessionRisk: { level: 'low', signals: 0 },
+        incidents: NO_SESSION_INCIDENTS,
       },
     },
   })
@@ -1981,6 +1985,7 @@ test("a resumed thread's image renders as an <img> from the stored history, byte
         ],
         permissionMode: { mode: 'default', available: ['default'] },
         sessionRisk: { level: 'low', signals: 0 },
+        incidents: NO_SESSION_INCIDENTS,
       },
     },
   })
@@ -2039,6 +2044,7 @@ test("a resumed thread's refused attempt says the refusal in its own bubble, bef
         ],
         permissionMode: { mode: 'default', available: ['default'] },
         sessionRisk: { level: 'low', signals: 0 },
+        incidents: NO_SESSION_INCIDENTS,
       },
     },
   })

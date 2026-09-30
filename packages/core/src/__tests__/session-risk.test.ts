@@ -160,11 +160,10 @@ test('⚠ a batch is replayed in the order the guard met it: a refusal lands bef
     result('c1'),
     result('c2'),
   ]
-  expect(riskEventsOfEntries(entries).map((event) => `${event.kind}:${event.toolCallId}`)).toEqual([
-    'call:c1',
-    'guard-denial:c1',
-    'call:c2',
-  ])
+  const described = riskEventsOfEntries(entries).map((event) =>
+    event.kind === 'incident-resolved' ? event.kind : `${event.kind}:${event.toolCallId}`,
+  )
+  expect(described).toEqual(['call:c1', 'guard-denial:c1', 'call:c2'])
   expect(signalsOf(entries)).toEqual([['alternate-execution-path', 'c2']])
 })
 

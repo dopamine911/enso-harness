@@ -2,6 +2,7 @@ import { type Static, Type } from 'typebox'
 import { EnsoOpenDialog } from './dialog.ts'
 import { EnsoLoginInProgress, EnsoObservation } from './observation.ts'
 import { EnsoPermissionModeState } from './permission-mode.ts'
+import { EnsoSessionIncidents } from './session-incident.ts'
 import { EnsoSessionRiskChange } from './session-risk.ts'
 import { EnsoInterruptedTail } from './thread-inspection.ts'
 import { EnsoModelState, EnsoPromptAdmission, EnsoRecordedModel, EnsoSessionUsage } from './thread-runtime.ts'
@@ -35,6 +36,8 @@ export const EnsoFollowSnapshot = Type.Object(
     permissionMode: EnsoPermissionModeState,
     /** The session's risk as of this snapshot (#464); a rise arrives later as an `enso-session-risk` custom entry. */
     sessionRisk: EnsoSessionRiskChange,
+    /** The session's incidents as of this snapshot (#466); an opening or a resolution arrives later as its custom entry. */
+    incidents: EnsoSessionIncidents,
     /** The session's model and thinking level (#338 slice 2); `null` when the thread is not live — nothing is built to say what pi would run. */
     model: Type.Union([EnsoModelState, Type.Null()]),
     /** What a NOT-live thread's branch records it last ran on (#434); absent when live, or when the branch records neither. */
