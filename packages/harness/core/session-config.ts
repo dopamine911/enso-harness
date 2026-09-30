@@ -79,7 +79,8 @@ export function sessionConfigEnvironment(
 const resolutions = new WeakMap<object, Map<boolean | 'asked', Promise<SessionEnsoConfig>>>()
 
 /**
- * The session's config, resolved once per `session` (the context's `sessionManager`).
+ * The session's config, resolved once per `session` (the context's `sessionManager`) and trust
+ * answer: under the web host a Trust reloads the session, and the trusted resolution is a new one.
  *
  * @group Project trust
  */

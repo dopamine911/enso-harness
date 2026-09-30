@@ -58,7 +58,7 @@ import {
  */
 
 export interface RunContextDependencies {
-  /** The session's config — the one resolution per session (`session-config.ts`). */
+  /** The session's config — one resolution per session and trust answer (`session-config.ts`). */
   resolveSessionConfig: (
     session: object,
     context: Omit<SessionConfigContext, 'home' | 'hostOwnsTrust'>,

@@ -68,7 +68,7 @@ export function projectTrustQuestion(cwd: string): string {
   return (
     `Trust the project ${cwd}? It has its own configuration — .pi/ settings, skills, prompts, permission ` +
     `rules and modes, or .enso/config.json — which can change what the agent may do without asking. Until ` +
-    `you trust it, only your own configuration applies. Your message runs once you answer.`
+    `you trust it, only your own configuration applies. The run waits for your answer.`
   )
 }
 
