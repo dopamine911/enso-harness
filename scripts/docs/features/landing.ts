@@ -64,9 +64,9 @@ export function landingFeatureGroups(): ResolvedLandingGroup[] {
   const byId = new Map(FEATURE_SPECS.map((spec) => [spec.id, spec]))
   return LANDING_FEATURE_GROUPS.map((group) => ({
     ...group,
-    features: group.features.map((id) => {
-      const spec = byId.get(id)
-      if (spec === undefined) throw new Error(`landing: the feature "${id}" has no spec in FEATURE_SPECS`)
+    features: group.features.map((featureId) => {
+      const spec = byId.get(featureId)
+      if (spec === undefined) throw new Error(`landing: the feature "${featureId}" has no spec in FEATURE_SPECS`)
       return spec
     }),
   }))
