@@ -224,20 +224,32 @@ function errorCode(error: unknown): unknown {
 function moveAside(path: string, kind: string): string | undefined {
   for (let attempt = 0; ; attempt += 1) {
     const candidate = attempt === 0 ? `${path}.${kind}` : `${path}.${kind}.${attempt}`
-    try {
-      linkSync(path, candidate)
-    } catch (error: unknown) {
-      if (errorCode(error) === 'EEXIST') continue
-      if (errorCode(error) === 'ENOENT') return undefined
-      throw error
-    }
-    try {
-      unlinkSync(path)
-    } catch (error: unknown) {
-      // The other launch unlinked the same file first: the copy under `candidate` is still whole.
-      if (errorCode(error) !== 'ENOENT') throw error
-    }
+    const linked = linkUnlessTaken(path, candidate)
+    if (linked === 'taken') continue
+    if (linked === 'gone') return undefined
+    unlinkUnlessGone(path)
     return candidate
+  }
+}
+
+/** Hard-link `path` to `candidate`: `taken` when the name exists, `gone` when `path` does not. */
+function linkUnlessTaken(path: string, candidate: string): 'linked' | 'taken' | 'gone' {
+  try {
+    linkSync(path, candidate)
+    return 'linked'
+  } catch (error: unknown) {
+    if (errorCode(error) === 'EEXIST') return 'taken'
+    if (errorCode(error) === 'ENOENT') return 'gone'
+    throw error
+  }
+}
+
+/** Unlink `path`; another launch that unlinked it first leaves the copy already made whole. */
+function unlinkUnlessGone(path: string): void {
+  try {
+    unlinkSync(path)
+  } catch (error: unknown) {
+    if (errorCode(error) !== 'ENOENT') throw error
   }
 }
 
@@ -383,34 +395,45 @@ function withCatchAllFirst(permission: Readonly<Record<string, unknown>>): {
 export function preparePermissionPolicy(policyPath: string, agentDir: string): PermissionPolicyPreparation {
   const read = readPolicy(policyPath)
   if (read.kind === 'unreadable') return { kind: 'unreadable', path: policyPath, reason: read.reason }
-  let preparation: PermissionPolicyPreparation
-  const permission = read.kind === 'object' ? read.value.permission : undefined
-  if (read.kind === 'object' && typeof permission === 'object' && permission !== null) {
-    const normalized = withCatchAllFirst(permission as Readonly<Record<string, unknown>>)
-    if (normalized.added.length > 0) writeJson(policyPath, { ...read.value, permission: normalized.permission })
-    preparation = {
-      kind: 'kept',
-      path: policyPath,
-      surfaces: Object.keys(permission).length,
-      catchAllAdded: normalized.added,
-    }
-  } else if (read.kind === 'object' && typeof read.value.permissions === 'object' && read.value.permissions !== null) {
-    const piccBackup = replacePiccRulesFile(policyPath)
-    // Another launch moved it first: read what is there now.
-    if (piccBackup === undefined) return preparePermissionPolicy(policyPath, agentDir)
-    preparation = { kind: 'seeded', path: policyPath, was: 'a picc rules file', piccBackup }
-  } else {
-    const existing = read.kind === 'object' ? read.value : {}
-    writeJson(policyPath, { ...existing, ...ENSO_DEFAULT_PERMISSION_POLICY })
-    preparation = {
-      kind: 'seeded',
-      path: policyPath,
-      was: read.kind === 'absent' ? 'absent' : 'without a permission block',
-    }
-  }
+  const preparation = preparePolicyFile(policyPath, read)
+  // Another launch moved a picc file away first: read what is there now.
+  if (preparation === undefined) return preparePermissionPolicy(policyPath, agentDir)
   const movedAside = linkEngineConfig(agentDir, policyPath)
   writeModeAgentFiles(agentDir)
   return movedAside === undefined ? preparation : { ...preparation, movedAside }
+}
+
+type FilePreparation = Exclude<PermissionPolicyPreparation, { readonly kind: 'unreadable' }>
+
+/** Keep, seed or migrate the user's file; `undefined` when a picc file was already moved away. */
+function preparePolicyFile(
+  policyPath: string,
+  read: Exclude<ReadPolicy, { readonly kind: 'unreadable' }>,
+): FilePreparation | undefined {
+  const value = read.kind === 'object' ? read.value : {}
+  const { permission, permissions } = value
+  if (typeof permission === 'object' && permission !== null) {
+    return keepPolicy(policyPath, value, permission as Readonly<Record<string, unknown>>)
+  }
+  if (typeof permissions === 'object' && permissions !== null) {
+    const piccBackup = replacePiccRulesFile(policyPath)
+    return piccBackup === undefined
+      ? undefined
+      : { kind: 'seeded', path: policyPath, was: 'a picc rules file', piccBackup }
+  }
+  writeJson(policyPath, { ...value, ...ENSO_DEFAULT_PERMISSION_POLICY })
+  return { kind: 'seeded', path: policyPath, was: read.kind === 'absent' ? 'absent' : 'without a permission block' }
+}
+
+/** Keep a user's policy, with Enso's catch-all put first where a mode needs it (#499). */
+function keepPolicy(
+  policyPath: string,
+  file: Readonly<Record<string, unknown>>,
+  permission: Readonly<Record<string, unknown>>,
+): FilePreparation {
+  const normalized = withCatchAllFirst(permission)
+  if (normalized.added.length > 0) writeJson(policyPath, { ...file, permission: normalized.permission })
+  return { kind: 'kept', path: policyPath, surfaces: Object.keys(permission).length, catchAllAdded: normalized.added }
 }
 
 /**

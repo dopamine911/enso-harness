@@ -445,31 +445,9 @@ host in `agent-host.ts#createAgentHost`, the terminal launcher in `scripts/enso.
 export function preparePermissionPolicy(policyPath: string, agentDir: string): PermissionPolicyPreparation {
   const read = readPolicy(policyPath)
   if (read.kind === 'unreadable') return { kind: 'unreadable', path: policyPath, reason: read.reason }
-  let preparation: PermissionPolicyPreparation
-  const permission = read.kind === 'object' ? read.value.permission : undefined
-  if (read.kind === 'object' && typeof permission === 'object' && permission !== null) {
-    const normalized = withCatchAllFirst(permission as Readonly<Record<string, unknown>>)
-    if (normalized.added.length > 0) writeJson(policyPath, { ...read.value, permission: normalized.permission })
-    preparation = {
-      kind: 'kept',
-      path: policyPath,
-      surfaces: Object.keys(permission).length,
-      catchAllAdded: normalized.added,
-    }
-  } else if (read.kind === 'object' && typeof read.value.permissions === 'object' && read.value.permissions !== null) {
-    const piccBackup = replacePiccRulesFile(policyPath)
-    // Another launch moved it first: read what is there now.
-    if (piccBackup === undefined) return preparePermissionPolicy(policyPath, agentDir)
-    preparation = { kind: 'seeded', path: policyPath, was: 'a picc rules file', piccBackup }
-  } else {
-    const existing = read.kind === 'object' ? read.value : {}
-    writeJson(policyPath, { ...existing, ...ENSO_DEFAULT_PERMISSION_POLICY })
-    preparation = {
-      kind: 'seeded',
-      path: policyPath,
-      was: read.kind === 'absent' ? 'absent' : 'without a permission block',
-    }
-  }
+  const preparation = preparePolicyFile(policyPath, read)
+  // Another launch moved a picc file away first: read what is there now.
+  if (preparation === undefined) return preparePermissionPolicy(policyPath, agentDir)
   const movedAside = linkEngineConfig(agentDir, policyPath)
   writeModeAgentFiles(agentDir)
   return movedAside === undefined ? preparation : { ...preparation, movedAside }
