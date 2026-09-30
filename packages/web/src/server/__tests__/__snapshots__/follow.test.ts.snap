@@ -1,0 +1,123 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`prompt answers at admission with a message id; the run is released by pi's settle, no HTTP response in between: flow prompt-run-settle: the server 1`] = `
+"sequenceDiagram
+  participant B as browser (the test client)
+  participant R as prompt route (server/index.ts, follow.ts)
+  participant T as thread registry
+  participant P as runtime (fake host)
+  participant F as feed (observation log)
+  B->>R: POST /api/threads/t1/prompt {message: "hello"}
+  Note over T: status to followers: live true, busy false, run 0
+  Note over T: thread built: session s1 in /s
+  Note over T: status to followers: live true, busy true, run 1
+  Note over T: run 1 acquired
+  R->>P: prompt "hello" { onAccepted, onRejected }
+  Note over R: prompt [id] opened on run 1
+  R-->>B: 202 {threadId: "t1", messageId, generation: 1, queued: false}
+  P->>F: text-delta
+  Note over F: text-delta
+  Note over F: run 1 first delta after [ms]ms
+  P->>F: settled
+  Note over F: settled
+  Note over T: status to followers: live true, busy false, run 1
+  Note over T: run 1 released · idle timer [ms] ms"
+`;
+
+exports[`⚠ two followers share one feed: both see every frame with the same seq, and one leaving detaches nothing: flow follow-snapshot-frames: two followers, one feed 1`] = `
+"sequenceDiagram
+  participant B as first tab (the test client)
+  participant C as second tab (the test client)
+  participant R as follow route (server/follow.ts)
+  participant T as thread registry
+  participant P as runtime (fake host)
+  participant F as feed (observation log)
+  B->>R: GET /api/threads/t1/follow
+  Note over R: snapshot as of seq 0: live false, busy false, run 0, 0 open questions
+  C->>R: GET /api/threads/t1/follow
+  Note over R: snapshot as of seq 0: live false, busy false, run 0, 0 open questions
+  B->>R: POST /api/threads/t1/prompt {message: "hello"}
+  Note over T: status to followers: live true, busy false, run 0
+  Note over T: thread built: session s1 in /s
+  Note over T: status to followers: live true, busy true, run 1
+  Note over T: run 1 acquired
+  R->>P: prompt "hello" { onAccepted, onRejected }
+  Note over R: prompt [id] opened on run 1
+  P->>F: text-delta
+  Note over F: text-delta
+  Note over F: run 1 first delta after [ms]ms
+  B->>R: closes its follow
+  P->>F: settled
+  Note over F: settled
+  Note over T: status to followers: live true, busy false, run 1
+  Note over T: run 1 released · idle timer [ms] ms"
+`;
+
+exports[`⚠ a blocking dialog is an observation on the follow and a unary answer back — nothing parks, nothing expires: flow dialog-ask-answer-settled: the server 1`] = `
+"sequenceDiagram
+  participant B as browser (the test client)
+  participant R as dialog route (server/index.ts, follow.ts)
+  participant T as thread registry
+  participant P as runtime (fake host)
+  participant F as feed (observation log)
+  B->>R: POST /api/threads/t1/prompt {message: "/mode"}
+  Note over T: status to followers: live true, busy false, run 0
+  Note over T: thread built: session s1 in /s
+  Note over T: status to followers: live true, busy true, run 1
+  Note over T: run 1 acquired
+  R->>P: prompt "/mode" { onAccepted, onRejected }
+  Note over R: prompt [id] opened on run 1
+  P->>F: extension-ui-request
+  Note over F: extension-ui-request
+  B->>R: POST /api/threads/t1/dialog {id: "d1", value: "zzz"}
+  Note over R: dialog d1 answer refused (422): answer refused: 'zzz' is not one of the offered options
+  R-->>B: 422
+  B->>R: POST /api/threads/t1/dialog {id: "nope", value: "a"}
+  Note over R: dialog nope answer refused (404): no open question nope on thread t1 — answered, expired, or never asked
+  R-->>B: 404
+  B->>R: POST /api/threads/t1/dialog {id: "d1", value: "a"}
+  R->>P: answerDialog {id: "d1", value: "a"}
+  Note over F: dialog-settled
+  Note over R: dialog d1 answered
+  R-->>B: 204
+  B->>R: POST /api/threads/t1/dialog {id: "d1", value: "a"}
+  Note over R: dialog d1 answer refused (404): no open question d1 on thread t1 — answered, expired, or never asked
+  R-->>B: 404
+  P-->>R: onAccepted()
+  Note over T: status to followers: live true, busy false, run 1
+  Note over T: run 1 released · idle timer [ms] ms"
+`;
+
+exports[`⚠ POST …/abort tells pi once and answers with the restored queue; the run still ends on the follow by its settle, not by the route (#116, #75): flow abort-clear-restore: the server 1`] = `
+"sequenceDiagram
+  participant B as browser (the test client)
+  participant R as abort route (server/index.ts, follow.ts)
+  participant T as thread registry
+  participant P as runtime (fake host)
+  participant F as feed (observation log)
+  B->>R: POST /api/threads/never/abort
+  Note over R: abort refused (404): no live session for thread never
+  R-->>B: 404
+  B->>R: POST /api/threads/t1/prompt {message: "hello"}
+  Note over T: status to followers: live true, busy false, run 0
+  Note over T: thread built: session s1 in /s
+  Note over T: status to followers: live true, busy true, run 1
+  Note over T: run 1 acquired
+  R->>P: prompt "hello" { onAccepted, onRejected }
+  Note over R: prompt [id] opened on run 1
+  B->>P: the test queues two prompts behind the run
+  B->>R: POST /api/threads/t1/abort
+  T->>P: clearQueue()
+  Note over F: queue
+  T->>P: abort()
+  Note over T: run 1 told to abort · 2 queued prompt(s) handed back
+  Note over R: abort: queue of 2 restored to the caller
+  R-->>B: 200 {threadId: "t1", restored}
+  P->>F: settled
+  Note over F: settled
+  Note over T: status to followers: live true, busy false, run 1
+  Note over T: run 1 released · idle timer [ms] ms
+  B->>R: POST /api/threads/t1/abort
+  Note over R: abort refused (409): nothing is running on thread t1
+  R-->>B: 409"
+`;

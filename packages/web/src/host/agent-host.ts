@@ -438,23 +438,23 @@ export type ThreadForkOutcome =
   | { readonly kind: 'no-thread' | 'no-entry' | 'not-a-user-message'; readonly reason: string }
 
 /**
- * Stop: tell the runtime, then settle every pending question as `aborted` WHILE it stops, and
- * refuse any question asked before it has — then wait for it.
+ * Stop: tell the runtime, then settle every pending question WHILE it stops, then wait for it.
  *
- * The runtime is told FIRST because its loop must hold the abort signal when a blocked
- * `tool_call` handler returns (picc's permission prompt): pi's `abort()` raises the signal
- * synchronously, before its first `await` (`agent-session.js` `abort` → `agent.abort()`), so
- * the dialogs can settle as soon as the call has begun. They must not wait for it to finish:
- * a question asked from a tool's `execute` (ask_user) holds the run, pi's `abort()` waits for
- * the run to go idle, and a stop that settled dialogs only afterwards waited on the card for
- * ever (#376 review, reproduced: single-choice and multi-select both). The refusal covers the
- * tool that ignores the signal and asks again — ask_user's multi-select loop asks the next
- * option — which would otherwise open a fresh question the stop then waits on.
+ * @invariant dialog-ask-answer-settled/stop-stops Stop stops: the run's abort settles every pending dialog as `aborted`.
+ * The runtime is told FIRST so its loop holds the abort signal when a blocked `tool_call` handler returns
+ * (picc's permission prompt): pi's `abort()` raises it synchronously, before its first `await`
+ * (`agent-session.js` `abort` → `agent.abort()`). Then, while the runtime winds down, `abortAllDialogs()`
+ * resolves each pending question to its cancel value with the glossary's outcome for exactly this,
+ * `aborted`, and every follower hears `dialog-settled`; `refuseDialogsUntil` answers any question asked
+ * before the stop finishes with its cancel value, showing nothing (ask_user's multi-select asks the next
+ * option). Never only after the abort resolves: a question from a tool's `execute` (ask_user) holds the
+ * run, pi's `abort()` waits for idle, and such a stop waited on the card for ever (#376 review). Before
+ * 2026-09-16 the host settled nothing on abort, and the vendor's permission prompt passes no signal of its
+ * own, so Stop during it waited on a human (decided, Daniel: if the user says stop, it's stop).
  *
- * If the user says stop, it's stop (Daniel, 2026-09-16); the cards drop, the run ends. A stop
- * must stop (thread-registry.test.ts's rule, one layer down): the dialogs settle even if the
- * runtime's abort rejects — the rejection still propagates, the cards still drop. Exported so
- * that path is pinned against a stop that rejects, which the real runtime's is not made to do.
+ * A stop must stop (thread-registry.test.ts's rule, one layer down): the dialogs settle even if the
+ * runtime's abort rejects; the rejection still propagates, the cards still drop. Exported so that path
+ * is pinned against a stop that rejects, which the real runtime's is not made to do.
  */
 export async function stopRunSettlingDialogs(
   stopRuntime: () => Promise<void>,
@@ -869,11 +869,11 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     if (!servesDirectory(cwd)) {
       throw new SessionDirectoryRefused(`thread ${threadId}: ${cwd} is not a project this server runs sessions in`)
     }
-    // One session file per thread, under the agent dir pi resolves from the env the host set at creation —
-    // the same default `pi --mode rpc` used, so picc's persisted "modes" entry and the
-    // transcript land where the TUI's would. Opened when the thread already has a file
-    // (#95), created under the thread's id when not. Retained: `permissionModeState()`
-    // below walks its branch, the same walk picc's `restoreState` does.
+    // @invariant resume/one-id One id, end to end: a file under the thread's id is OPENED, none means one is created under it.
+    // `locate` resolves the id through the same listing `readStoredThread` uses (#95), so the file this later flushes
+    // is found next time, and the browser adopts under the history's `threadId` (`thread-stores.ts#adoptThread`). The
+    // file sits under the agent dir pi resolves from the env the host set, where `pi --mode rpc` put it, so picc's
+    // "modes" entry and the transcript land where the TUI's would; `permissionModeState()` below walks its branch.
     const sessionManager =
       located === undefined
         ? SessionManager.create(cwd, undefined, { id: threadId })
@@ -938,27 +938,27 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       sessionManager,
     })
 
-    // ── The event fan-out. Records emitted before the FIRST subscriber (everything an
-    // extension says during session_start — multi-account's startup notify, a dialog a
-    // probe opens) are held and replayed, so the browser sees them exactly as it saw
-    // pi's unsolicited startup stdout over the pipe.
-    //
-    // ⚠ Held ONLY until the first subscriber, never between runs. The session now lives
-    // across runs (#69 PR 2) and each run subscribes its own pump. Holding between runs
-    // would replay an aborted run's `agent_settled` into the NEXT run's pump — which would
-    // end that run before its first token (the disconnect-then-prompt race). Events with
-    // nobody listening after the first subscriber are dropped, like status heartbeats
-    // were when no rpc client was reading the pipe.
-    // Subscribers receive OBSERVATIONS (L2, #162 workstream 4): the runtime's event is mapped
-    // here, at delivery, and its shape never leaves the host.
+    // ── The event fan-out. Subscribers receive OBSERVATIONS (L2, #162 workstream 4): the
+    // runtime's event is mapped here, at delivery, and its shape never leaves the host. The
+    // emitted tail (#97) records every event through this funnel with HOW it was delivered,
+    // at the one place all of them pass, so the record and the delivery cannot disagree.
     const listeners = new Set<(observation: EnsoObservation) => void>()
     const heldUntilFirstSubscriber: RuntimeEvent[] = []
     let hasHadSubscriber = false
-    // The emitted tail (#97): every event through this funnel, with HOW it was delivered.
-    // Recorded at the one place all of them pass, so the record and the delivery cannot
-    // disagree — a held record's later replay is recorded again, as `replayed`, when it
-    // actually reaches a subscriber (see `subscribe`).
     const emitted = createEventTail()
+    /**
+     * @invariant follow-snapshot-frames/held-until-first-subscriber Held until the first subscriber; never held after.
+     * Records emitted before the FIRST subscriber (what an extension says during session_start: multi-account's
+     * startup notify, a dialog a probe opens, picc's opening `modes` entry) are held and replayed to it with origin
+     * `session-start`, so the browser sees them exactly as it saw pi's startup stdout over the pipe; the replay is
+     * recorded again, as `replayed`, when it actually reaches a subscriber (see `subscribe`).
+     *
+     * Never between runs: the session lives across runs (#69 PR 2) and each run subscribes its own pump, so holding
+     * would replay an aborted run's `agent_settled` into the NEXT run's pump and end it before its first token (the
+     * disconnect-then-prompt race). Once a subscriber has existed, an event with nobody listening is `dropped`, not
+     * queued for the next one, like status heartbeats with no rpc client reading the pipe. That closed #88 (an entry
+     * emitted to nobody) without reopening #69 (a settle replayed into the next run's pump).
+     */
     function emit(event: RuntimeEvent): void {
       if (listeners.size === 0) {
         if (!hasHadSubscriber) {
@@ -1360,13 +1360,13 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         let accepted = false
         // ⚠ Fire-and-forget, exactly as pi's rpc mode does: `prompt()` resolves only when
         // the whole run finishes, and awaiting it in front of the drain loop is the
-        // original `/mode` hang. Acceptance is the preflight callback; completion is the
-        // `agent_settled` event. A rejection AFTER acceptance is dropped here on purpose —
-        // this is pi's own rpc-mode handler line for line (dist/modes/rpc/rpc-mode.js,
-        // `case "prompt"`), and pi's `_runAgentPrompt` emits `agent_settled` from a
-        // `finally`, so the run still terminates; only the error text is lost. Model and
-        // tool errors never reach this path — the agent loop turns them into an assistant
-        // message with `stopReason: "error"`, which the stream carries as usual.
+        // original `/mode` hang. Acceptance is the preflight callback; completion is `agent_settled`.
+        // @invariant prompt-run-settle/late-rejection-dropped A rejection after acceptance never reaches the feed.
+        // It is dropped here on purpose: pi's own rpc-mode handler does the same (dist/modes/rpc/rpc-mode.js,
+        // `case "prompt"`), and pi's `_runAgentPrompt` emits `agent_settled` from a `finally`, so the run
+        // still terminates; only the error text is lost. Model and tool errors never reach this path: the
+        // agent loop turns them into an assistant message with `stopReason: "error"`, carried as usual.
+        // @unpinned no host test drives pi's preflight to success and then rejects the prompt.
         void session
           .prompt(request.message, {
             ...(request.images === undefined ? {} : { images: [...request.images] }),

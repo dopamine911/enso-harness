@@ -182,6 +182,7 @@ test.describe('chat surface', () => {
     await captureScreenshot(page, '07-image-sent')
   })
 
+  // @pins resume/url-names-thread resume/opening-mode
   test('the URL names the thread (#142): reload keeps it, back/forward walk threads, a pasted link opens cold, a bad id says so', async ({
     page,
   }) => {
@@ -232,6 +233,7 @@ test.describe('chat surface', () => {
     await captureScreenshot(page, '09-thread-bad-id')
   })
 
+  // @pins resume/url-names-thread
   test('⚠ New Thread during a slow boot resume wins outright: URL and pane agree, the late history is dropped (PR #143 review)', async ({
     page,
   }) => {

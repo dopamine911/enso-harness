@@ -1,0 +1,21 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`a print launch reads pi --version from PATH, then spawns that pi with the isolation triple and the print mirror: flow boot-and-launchers: the terminal launcher 1`] = `
+"sequenceDiagram
+  participant U as user shell (the test)
+  participant Z as terminal launcher (scripts/enso.ts)
+  participant M as manifest (packages/harness/package.json → pi)
+  participant X as print mirror (print-harness.ts)
+  participant P as pi on PATH (a shim)
+  U->>Z: bun scripts/enso.ts -p hello · stdin not a TTY
+  Z->>M: read pi.* · 13 declared resource paths, every node_modules/ path present
+  Z->>U: enso: permission rules: ENSO_HOME/permissions.json was absent, so it now holds Enso's 5 default deny rules · Claude Code's settings are not read (#35;446)
+  Z->>P: pi --version
+  P->>Z: 0.87.1 · exit 0
+  Z->>X: materialize: pi.extensions minus picc-permission-modes (8 of 9), every package-root entry linked
+  Z->>U: enso: vanilla pi 0.87.1 | agent-dir=ENSO_HOME/pi-agent | package=./node_modules/.cache/enso/print-harness (print variant, no permission modes — #35;20) | 13 declared resource path(s)
+  Z->>P: spawn pi --no-extensions --no-skills -e ./node_modules/.cache/enso/print-harness -p hello · env PI_CODING_AGENT_DIR=ENSO_HOME/pi-agent, PICC_PERMISSION_MODES_CONFIG_PATH=ENSO_HOME/permissions.json
+  X->>P: pi.extensions in manifest order: logging → guards → web-fetch → web-search → pi-multi-account → ask-user → system-prompt → run-context
+  P->>Z: exit 0
+  Z->>U: exit 0"
+`;

@@ -179,7 +179,10 @@ function registerWebFetch(
     ): Promise<AgentToolResult<undefined>> => {
       const rawUrl = params.url
 
-      // --- the policy gates, in cheapest-first order; each refusal is final.
+      // @invariant web-search-call/web-fetch-gates `web_fetch`, the sibling, gates cheapest-first and each refusal is final.
+      // URL parse, then the config problem, then the empty allowlist, then the exact host match,
+      // then the advisory public-address gate (one non-public answer refuses), then one fetch with
+      // `redirect: 'manual'`: a redirect is reported with its target, never followed.
       const urlDecision = parseWebFetchUrl(rawUrl)
       if (urlDecision.kind === 'refused') return refusal(rawUrl, urlDecision.reason)
       const url = urlDecision.url

@@ -23,6 +23,7 @@ import {
   type PromptRequest,
   type ThreadRuntime,
 } from '@enso/core'
+import { type FlowTrace, flowTrace } from '@enso/core/flow-trace'
 import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
 import type { LogRecorder } from '@logtape/testing/recorder'
 import { Check } from 'typebox/value'
@@ -239,6 +240,7 @@ async function prompt(
   return response.status
 }
 
+// @pins prompt-run-settle/release-keeps-session
 test('⚠ two prompts on one thread reuse ONE session; a second thread gets its own (#43 over HTTP)', async () => {
   const { url, built } = await startWith(settlesAtOnce)
   expect(await prompt(url, 't1', 'one')).toBe(202)
@@ -979,12 +981,62 @@ const STORED_BRANCH: EnsoTranscriptEntry[] = transcriptOf([
   },
 ])
 
+/** The server's side of `docs/flows/resume.md` (#482): the listing, the cold read, the first prompt. */
+const RESUME_FLOW = {
+  participants: {
+    B: 'browser (the test client)',
+    S: 'server (server/index.ts)',
+    T: 'thread registry',
+    H: 'host (fake, over stored threads)',
+  },
+  categories: { 'enso.server.http': 'S', 'enso.server.threads': 'T', 'enso.server.follow': 'S' },
+} as const
+
+/**
+ * A host wrapper that draws the store-facing calls into a trace once one is set: the listing, the
+ * cold read, the build. Handed to `startWith` before the trace exists, so the server's own start
+ * is not drawn.
+ */
+function drawnHost(): {
+  readonly wrap: (host: AgentHost) => AgentHost
+  readonly traceInto: (trace: FlowTrace) => void
+} {
+  let trace: FlowTrace | undefined
+  return {
+    wrap: (host: AgentHost): AgentHost => ({
+      ...host,
+      listSessions: () => {
+        trace?.send('S', 'H', 'listSessions()')
+        return host.listSessions()
+      },
+      readStoredThread: (threadId: string) => {
+        trace?.send('S', 'H', `readStoredThread(${threadId})`)
+        return host.readStoredThread(threadId)
+      },
+      createSession: (threadId: string, newSessionDirectory: () => string) => {
+        trace?.send('T', 'H', `createSession(${threadId})`)
+        return host.createSession(threadId, newSessionDirectory)
+      },
+    }),
+    traceInto: (into: FlowTrace) => {
+      trace = into
+    },
+  }
+}
+
+// @pins resume/one-id
 test("⚠ a prompt on a thread passes THAT id to the host — the thread id is pi's session id, so a stored one reopens", async () => {
-  const { url, requested } = await startWith(settlesAtOnce)
-  await prompt(url, 'stored-1', 'continue')
+  const drawn = drawnHost()
+  const { url, requested } = await startWith(settlesAtOnce, {}, drawn.wrap)
+  const trace = flowTrace({ ...RESUME_FLOW, logs })
+  drawn.traceInto(trace)
+  trace.request('B', 'S', 'POST /api/threads/stored-1/prompt', { message: 'continue' })
+  trace.respond('S', 'B', await prompt(url, 'stored-1', 'continue'))
   expect(requested).toEqual(['stored-1'])
+  expect(trace.diagram()).toMatchSnapshot('flow resume: the first prompt builds the thread under its own id')
 })
 
+// @pins resume/rail-listing
 test('GET /api/stored-threads lists stored threads with title, count and age, marking the ones a thread here is RUNNING', async () => {
   const stored = {
     'stored-1': {
@@ -999,10 +1051,15 @@ test('GET /api/stored-threads lists stored threads with title, count and age, ma
       parentThreadId: 'stored-1',
     },
   }
-  const { url } = await startWith(asksAndWaits, stored)
+  const drawn = drawnHost()
+  const { url } = await startWith(asksAndWaits, stored, drawn.wrap)
   // An open question holds stored-1 busy on this server: taken, never released.
   await prompt(url, 'stored-1', '/mode')
+  const trace = flowTrace({ ...RESUME_FLOW, logs })
+  drawn.traceInto(trace)
+  trace.request('B', 'S', 'GET /api/stored-threads')
   const response = await fetch(`${url}/api/stored-threads`)
+  trace.respond('S', 'B', response.status)
   expect(response.status).toBe(200)
   const listed: unknown = await response.json()
   expect(Array.isArray(listed) && listed.every((thread) => Check(EnsoStoredThread, thread))).toBe(true)
@@ -1026,16 +1083,25 @@ test('GET /api/stored-threads lists stored threads with title, count and age, ma
       parentThreadId: 'stored-1',
     },
   ])
+  expect(trace.diagram()).toMatchSnapshot('flow resume: the rail lists what is stored')
 })
 
+// @pins resume/looking-builds-nothing resume/opening-mode
 test("GET /api/threads/:id/history serves a STORED thread's branch as messages with its persisted mode, and builds no session", async () => {
   const stored = {
     'stored-1': { transcript: STORED_BRANCH, modified: new Date(0), firstMessage: 'earlier question', mode: 'plan' },
   }
-  const { url, built } = await startWith({ onPrompt: neverPrompted }, stored)
+  const drawn = drawnHost()
+  const { url, built } = await startWith({ onPrompt: neverPrompted }, stored, drawn.wrap)
+  const trace = flowTrace({ ...RESUME_FLOW, logs })
+  drawn.traceInto(trace)
+  trace.request('B', 'S', 'GET /api/threads/stored-1/history')
   const response = await fetch(`${url}/api/threads/stored-1/history`)
   expect(response.status).toBe(200)
   const history: unknown = await response.json()
+  // The project id hashes the launch directory, which differs by machine: left out of the drawing.
+  const { projectId: _projectId, ...drawnHistory } = history as Record<string, unknown>
+  trace.respond('S', 'B', response.status, drawnHistory)
   expect(Check(EnsoThreadHistory, history)).toBe(true)
   expect(history).toMatchObject({
     threadId: 'stored-1',
@@ -1047,12 +1113,17 @@ test("GET /api/threads/:id/history serves a STORED thread's branch as messages w
   })
   expect(built).toHaveLength(0)
   // Neither live nor stored: 404, still nothing built.
-  expect((await fetch(`${url}/api/threads/never-existed/history`)).status).toBe(404)
+  trace.request('B', 'S', 'GET /api/threads/never-existed/history')
+  const missing = await fetch(`${url}/api/threads/never-existed/history`)
+  trace.respond('S', 'B', missing.status)
+  expect(missing.status).toBe(404)
   expect(built).toHaveLength(0)
+  expect(trace.diagram()).toMatchSnapshot('flow resume: the cold read builds nothing')
 })
 
 // ⚠ HELD IS NOT BUSY (PR #104 review). A released thread stays cached for the idle window;
 // gating on presence locked a reloaded page out of its own session for thirty minutes.
+// @pins resume/rail-listing resume/opening-mode
 test("⚠ a thread this server holds IDLE is resumable — /history reads pi's memory, /sessions does not mark it busy", async () => {
   const stored = {
     t1: { transcript: STORED_BRANCH, modified: new Date(0), firstMessage: 'earlier question', mode: 'plan' },

@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test'
 import { readThreadUrl, urlForThread } from '../thread-url.ts'
 
 // The URL is the source of truth for the active thread (#142): what it names, and what it cannot.
+// @pins resume/url-names-thread
 test('a URL that names a thread id resumes it; none is a fresh page; one that cannot be a thread id is fresh AND said', () => {
   expect(readThreadUrl('?thread=6923e620-856a-4132-a9c8-1a2ff7d271f9&debug')).toEqual({
     kind: 'resume',

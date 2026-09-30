@@ -83,6 +83,18 @@ function resourceDeclarations(manifest: unknown): unknown[] {
  * manifest should not turn into a check against `"42"`.
  *
  * @group pi manifest
+ *
+ * @invariant boot-and-launchers/manifest-order Load order is the manifest, enumerated by hand, never a glob.
+ * `pi.extensions` is declaration order, never sorted: the four repository extensions (logging,
+ * guards, web-fetch, web-search), then the two vendor ones, then the rest of the repository's. The
+ * runtime resolves *tools* first-wins, so a registered tool name shadows every later
+ * registration of that name, which is why the guards are declared ahead of both vendor extensions,
+ * and why a directory glob (ordering by filename) is not acceptable. It is *not* what makes the guard
+ * hold: the guard registers no tool and participates through a `tool_call` handler instead (additive,
+ * first `block` final whatever the order), and that hook's two handlers are guards, then the mode
+ * extension. A third is #4's trigger. What the order does decide is the configurator
+ * (`boot-and-launchers/logging-first`). This function reads the order for the three readers that
+ * check the manifest (the launcher, the linker, the server), and never sorts it.
  */
 export function declaredResources(manifest: unknown): string[] {
   const resources: string[] = []
@@ -107,6 +119,43 @@ function vendorResourcePaths(manifest: unknown): string[] {
  * materialized by the installer and npm workspaces used to hoist them away.
  *
  * @group pi manifest
+ *
+ * @flow boot-and-launchers Boot and launchers: the manifest, the isolation triple, the print mirror, the vendor links
+ * Two launchers start the runtime with only this harness loaded: the terminal launcher
+ * (`scripts/enso.ts`) spawns it as a child; the server (`startEnsoServer` → `createAgentHost`) runs
+ * it in-process (#69). Both read one manifest, `packages/harness/package.json` → `pi`, and enforce the
+ * same preconditions before any of the runtime is imported: vendor links present (`missingVendorPaths`), the
+ * isolation triple applied, secrets out of the environment (#89). What differs is flags on a spawn
+ * versus loader options, and the print variant (#20). In-process, the host sets
+ * `PI_CODING_AGENT_DIR` and `PI_MULTI_ACCOUNT_INDEPENDENT_ROOTS=1`, seeds the multi-account config
+ * (childProxy off, the auth pattern of #341, Cursor off unless set), quarantines secrets, and then
+ * builds each thread's services with `{ noExtensions, noSkills, additionalExtensionPaths: [harness] }`.
+ * @contract scripts/print-harness.ts#buildPrintManifest
+ * @see scripts/enso.ts the terminal launcher (header)
+ * @see scripts/print-harness.ts the print mirror (header, materializePrintHarness)
+ * @see scripts/link-vendor-packages.ts the linker (requiredPackageNames)
+ * @see packages/core/src/pi-manifest.ts pi's manifest-resource layout, for all three readers (header)
+ * @see packages/web/src/host/agent-host.ts in-process: the host (header ⚠⚠ items, createSession)
+ * @see packages/web/src/server/index.ts in-process: the server (assertVendorLinks)
+ * @see packages/harness/extensions/guards/index.ts why the guards precede every vendor extension, and why a denial does not depend on that (header)
+ * @see docs/seams/guards.md the guards seam
+ * @see docs/seams/logging.md the configurators
+ * @see packages/harness/extensions/logging/index.ts why logging is first (header, Why first in the manifest)
+ * @see docs/reference/env-and-config.md the manifest as a table
+ *
+ * @invariant boot-and-launchers/vendor-refusal A missing vendor path is a refusal at both launch points, naming the path and the fix.
+ * The runtime skips a missing manifest resource path without a word (the symptom, once, was an HTTP
+ * 400 several layers away). Only `node_modules/` paths are checked; `./extensions/…` is our own
+ * source. Upstream, `link-vendor-packages.ts` runs from the root `postinstall` as verify-or-fix over
+ * every `dependencies` entry plus the `node_modules/` paths (`@enso/core` is only an import, and was
+ * unlinked): a present package is verified, an absent one is linked from the hoisted copy, or the
+ * install exits 1 naming it. The terminal launcher refuses with exit 1, naming each path and
+ * `bun install`; the server's `assertVendorLinks` throws the same message before the host is created.
+ *
+ * One precondition, and since #221 one IMPLEMENTATION: this module owns both pi assumptions (a `pi.*`
+ * value is a path or an array of them; a `node_modules/` path is literal, not a specifier), and all
+ * three readers call it. It was written three times before, with the prefix spelled as a constant
+ * twice and a bare literal once, which is why the duplicate-shape gate never named them.
  */
 export function missingVendorPaths(manifest: unknown, packageRoot: string): string[] {
   return vendorResourcePaths(manifest).filter((resourcePath) => !existsSync(resolve(packageRoot, resourcePath)))

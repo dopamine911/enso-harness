@@ -138,6 +138,8 @@ export interface FakeHostedThread extends FakeThreadParts {
 export interface FakeHostedThreadOptions {
   /** Methods to replace, built over the fake's parts; every other method keeps its recording default. */
   readonly runtime?: (parts: FakeThreadParts) => Partial<ThreadRuntime>
+  /** Told of every runtime call before it runs, by method name: how a flow trace draws what the double received (#482). */
+  readonly onCall?: (method: string, args: readonly unknown[]) => void
   /** What `branchStats()` answers (#45 phase 2); an empty branch when absent. */
   readonly branch?: BranchStats
   /** What `branchContext()` answers (#361); no request when absent. */
@@ -185,6 +187,21 @@ export function takeQueue(record: FakeThreadRecord): { interrupting: string[]; e
   const cleared = { interrupting: [...record.queue.interrupting], enqueued: [...record.queue.enqueued] }
   record.queue = { interrupting: [], enqueued: [] }
   return cleared
+}
+
+/** `runtime` with every method reporting its call first; the calls themselves are unchanged. */
+function reporting(runtime: ThreadRuntime, onCall: (method: string, args: readonly unknown[]) => void): ThreadRuntime {
+  const wrapped: Record<string, unknown> = {}
+  for (const [method, member] of Object.entries(runtime)) {
+    wrapped[method] =
+      typeof member === 'function'
+        ? (...args: unknown[]) => {
+            onCall(method, args)
+            return (member as (...args: unknown[]) => unknown)(...args)
+          }
+        : member
+  }
+  return wrapped as unknown as ThreadRuntime
 }
 
 export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): FakeHostedThread {
@@ -348,7 +365,7 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
     ...options.inspect,
   }
   const hosted: HostedThread = {
-    runtime,
+    runtime: options.onCall === undefined ? runtime : reporting(runtime, options.onCall),
     loadedExtensionPaths: [],
     inspect: () => inspection,
     emittedEvents: emitted.recent,

@@ -53,8 +53,8 @@
  *                  none of them is visible to `tsc`. `--emit none`: it VALIDATES, and the site
  *                  renders the same surface as native pages (`starlight-typedoc`), so the
  *                  contract is converted once for checking and once for reading (#188).
- *   10. site     — `bun scripts/docs/site-content.ts && bunx astro build --root site && bun scripts/docs/site-links.ts`:
- *                  projects `docs/` into the Starlight site, builds it, and
+ *   10. site     — `bun scripts/docs/build-docs.ts && bun scripts/docs/site-content.ts && bunx astro build --root site && bun scripts/docs/site-links.ts`:
+ *                  builds every generated and flow page (#482), projects `docs/` into the Starlight site, builds it, and
  *                  crawls every built page for dead internal links. The BUILD is not the check —
  *                  `astro build` reported success over 139 dead links, because a page's
  *                  `./routes.md` is correct on GitHub and a 404 as a route. The crawl is (#188).
@@ -235,8 +235,8 @@ export const GATES: readonly Gate[] = [
     // the build has an opinion about that. `docs:site` projects `docs/` into the site, builds,
     // and then crawls every built page: a link that resolves to nothing names itself.
     //
-    // Runs LAST because it consumes what the steps above produce — the generated reference
-    // pages the docs gate holds, and the API HTML `api-docs` writes.
+    // Runs LAST because it consumes what the steps above check: the pages `build-docs.ts` writes
+    // from the generators and tags the tests hold (#482), and the API surface `api-docs` validates.
     name: 'site',
     describe: 'starlight: the docs site builds from docs/, and every internal link resolves',
     script: 'docs:site',

@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { builtDocPages } from '../scripts/docs/build-docs.ts'
 import {
   contentPath,
   documentationAssets,
@@ -66,7 +67,11 @@ test('⚠ every page under docs/ projects, and every one can be titled (#188)', 
 })
 
 test('⚠ every page the sidebar names exists, and a README becomes its section index (#188)', () => {
-  const missing = sidebarSlugs().filter((slug) => !existsSync(join(REPOSITORY_ROOT, 'docs', `${slug}.md`)))
+  // A built page (#482) is gitignored: it exists once `docs:build` runs, which the site build does first.
+  const built = new Set(builtDocPages())
+  const missing = sidebarSlugs().filter(
+    (slug) => !(existsSync(join(REPOSITORY_ROOT, 'docs', `${slug}.md`)) || built.has(`docs/${slug}.md`)),
+  )
   expect(missing).toEqual([])
   // The sidebar's explicit entries are the generated reference pages plus two prose pages; the
   // rest of the tree is `autogenerate`, so a floor is all that can be asserted about the count.

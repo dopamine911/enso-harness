@@ -36,7 +36,8 @@
     "doctor": "bunx react-doctor --verbose",
     "doctor:check": "react-doctor --project packages/web --scope full --no-score --no-supply-chain --blocking error",
     "docs:api": "typedoc --emit none",
-    "docs:site": "bun scripts/docs/site-content.ts && bunx astro build --root site && bun scripts/docs/site-links.ts",
+    "docs:build": "bun scripts/docs/build-docs.ts",
+    "docs:site": "bun scripts/docs/build-docs.ts && bun scripts/docs/site-content.ts && bunx astro build --root site && bun scripts/docs/site-links.ts",
     "docs:screenshots": "bun scripts/docs/feature-screenshots.ts",
     "format:check": "bun --bun oxfmt --check",
     "complexity:check": "fallow health --complexity --max-cognitive 25 --max-cyclomatic 1000 --quiet"

@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
+import { LOG_KEEP_DAYS } from '../../packages/core/src/log-process.ts'
 import { findRepoRoot } from '../../packages/core/src/paths.ts'
 import { PROCESS_ENVIRONMENT_READERS } from '../lint/process-environment.ts'
 import { filesUnder } from '../source-tree.ts'
@@ -308,8 +309,8 @@ const RUNTIME_PATH_METADATA: readonly RuntimePathMetadata[] = [
     helper: 'ensoLogsDir',
     path: 'ENSO_HOME/logs',
     writer: '`configureProcessLogging` creates it and every harness process appends to the day file.',
-    lifetime: 'One file per local day; logging retains 14 days.',
-    check: { file: 'packages/core/src/log-process.ts', contains: 'const KEEP_DAYS = 14' },
+    lifetime: `One file per local day; logging retains ${LOG_KEEP_DAYS} days.`,
+    check: { file: 'packages/core/src/log-process.ts', contains: 'maxAgeMs: LOG_KEEP_DAYS * DAY_MS' },
   },
   {
     helper: 'ensoProjectsPath',

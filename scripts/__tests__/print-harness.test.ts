@@ -39,6 +39,7 @@ test('buildPrintManifest removes exactly the picc extension and keeps everything
 // ⚠ The contract test: run the filter against the REAL harness manifest, so renaming or
 // removing picc there turns THIS test red instead of turning a print launch into a loud
 // runtime refusal (or worse, a silent no-op filter).
+// @pins boot-and-launchers/print-mirror
 test('the real harness manifest matches the shape the print filter expects', () => {
   const realManifest = JSON.parse(readFileSync(join(harnessPackageRoot, 'package.json'), 'utf8'))
   const printManifest = buildPrintManifest(realManifest)
@@ -63,6 +64,7 @@ test('a manifest where picc is the only extension refuses rather than launching 
   expect(() => buildPrintManifest(onlyPicc)).toThrow(PrintHarnessShapeError)
 })
 
+// @pins boot-and-launchers/print-mirror
 test('materializePrintHarness writes the filtered manifest and symlinks into the real package', () => {
   const printDir = mkdtempSync(join(tmpdir(), 'enso-print-harness-test-'))
   try {

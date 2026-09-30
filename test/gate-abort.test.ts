@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { generatedPage } from '../scripts/docs/build-docs.ts'
 import { GATES, reportsWorkerAbort } from '../scripts/gate.ts'
 
 /**
@@ -328,7 +329,8 @@ test('⚠ the README names the gate steps the file runs, and counts the gates th
   }))
   expect(rows).toEqual(GATES.map((gate, index) => ({ position: index + 1, name: gate.name })))
 
-  const inventory = await Bun.file(join(import.meta.dir, '..', 'docs', 'reference', 'verification-inventory.md')).text()
+  // Built output (#482): read from its generator, never from a copy a past build left on disk.
+  const inventory = generatedPage('docs/reference/verification-inventory.md')
   const section = inventory.slice(inventory.indexOf('## Enforcement gates'))
   const listed = [...section.slice(0, section.indexOf('\n## ', 1)).matchAll(/^\| \[/gm)].length
   const stated = STATED_GATE_COUNT.exec(readme)?.[1]?.toLowerCase()

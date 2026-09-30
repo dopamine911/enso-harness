@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
 import { EventType } from '@ag-ui/core'
 import type { EnsoFollowFrame } from '@enso/core'
+import { type FlowTrace, flowTrace } from '@enso/core/flow-trace'
 import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
 import type { StreamChunk } from '@tanstack/ai'
 import { FOLLOW_ENDED_CUSTOM_EVENT } from '../custom-event-router.ts'
@@ -22,6 +23,26 @@ interface ScriptedServer extends ScriptedFetch {
   readonly untilChunks: (count: number) => Promise<void>
   /** Abort the subscription — the client's own leaving. */
   readonly abort: () => void
+  /** Draw the wire into a flow trace from here on: frames written, POSTs made, chunks yielded. */
+  readonly traceInto: (trace: FlowTrace) => void
+  /** A step the test itself takes, drawn when a trace is on. */
+  readonly step: (from: string, to: string, label: string) => void
+}
+
+/** A frame as one arrow's label: its type and the fields a reader follows. */
+function frameLabel(frame: EnsoFollowFrame): string {
+  if (frame.type === 'status')
+    return `status {live: ${frame.live}, busy: ${frame.busy}, generation: ${frame.generation}}`
+  if (frame.type === 'observation') return `observation ${frame.seq}: ${frame.observation.kind}`
+  return frame.type
+}
+
+/** A chunk as TanStack receives it: the event type, the run it names, a custom event's name. */
+function chunkLabel(chunk: StreamChunk): string {
+  const run = 'runId' in chunk ? ` ${chunk.runId}` : ''
+  const name = chunk.type === EventType.CUSTOM && 'name' in chunk ? ` ${chunk.name}` : ''
+  const delta = 'delta' in chunk && typeof chunk.delta === 'string' ? ` "${chunk.delta}"` : ''
+  return `${chunk.type}${run}${name}${delta}`
 }
 
 /** The adapter subscribed to a scripted server (`scripted-server.ts`), with its chunks collected. */
@@ -38,9 +59,26 @@ function scripted(
     ...(queued === undefined ? {} : { queued }),
   })
   const problems: string[] = []
+  let trace: FlowTrace | undefined
   const connection = createFollowConnection({
     threadId: 't1',
-    fetch: server.fetch,
+    fetch: async (input, init) => {
+      const method = init?.method ?? 'GET'
+      if (method === 'GET') return await server.fetch(input, init)
+      const body: unknown = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined
+      trace?.request('A', 'S', `${method} ${new URL(input, 'http://enso.test').pathname}`, body)
+      const response = await server.fetch(input, init)
+      trace?.respond(
+        'S',
+        'A',
+        response.status,
+        await response
+          .clone()
+          .json()
+          .catch((): undefined => undefined),
+      )
+      return response
+    },
     onProblem: (problem: unknown) => problems.push(String(problem)),
   })
   const chunks: StreamChunk[] = []
@@ -48,6 +86,7 @@ function scripted(
   const controller = new AbortController()
   void (async () => {
     for await (const chunk of connection.subscribe(controller.signal)) {
+      trace?.send('A', 'U', chunkLabel(chunk))
       chunks.push(chunk)
       for (const waiter of waiters.splice(0)) waiter()
     }
@@ -55,6 +94,10 @@ function scripted(
   })()
   return {
     ...server,
+    frame: (frame: EnsoFollowFrame) => {
+      trace?.send('S', 'A', frameLabel(frame))
+      server.frame(frame)
+    },
     connection,
     problems,
     chunks,
@@ -69,9 +112,14 @@ function scripted(
       return promise
     },
     abort: () => controller.abort(),
+    traceInto: (into: FlowTrace) => {
+      trace = into
+    },
+    step: (from: string, to: string, label: string) => trace?.send(from, to, label),
   }
 }
 
+// @pins prompt-run-settle/two-endings
 test('⚠ a released status ends the run — the slash-command case, which never settles', async () => {
   const server = scripted()
   server.frame(SNAPSHOT_IDLE)
@@ -85,6 +133,7 @@ test('⚠ a released status ends the run — the slash-command case, which never
   server.abort()
 })
 
+// @pins prompt-run-settle/generation-fence
 test("⚠ an earlier run's ending frames cannot close a run whose receipt is still pending; the receipt closes it if the server already moved past it", async () => {
   const server = scripted()
   server.frame(SNAPSHOT_IDLE)
@@ -236,11 +285,21 @@ test('the snapshot becomes the mode, open-question and run receipts the stores a
   server.abort()
 })
 
+// @pins prompt-run-settle/admission
 test("send opens TanStack's own run at admission; the thread's settle closes it", async () => {
+  const logs = await recordEnsoLogs()
   const server = scripted()
   server.frame(SNAPSHOT_IDLE)
   await server.untilChunks(1)
+  // The browser's side of `docs/flows/prompt-run-settle.md` (#482), from the snapshot on.
+  const trace = flowTrace({
+    participants: { U: 'TanStack (useChat)', A: 'adapter (follow-connection.ts)', S: 'server (scripted)' },
+    categories: { 'enso.browser.follow': 'A' },
+    logs,
+  })
+  server.traceInto(trace)
 
+  server.step('U', 'A', 'send "hello" (run r1)')
   await send(server, 'hello')
   expect(server.prompts).toEqual([{ message: 'hello' }])
   await server.untilChunks(3)
@@ -263,7 +322,9 @@ test("send opens TanStack's own run at admission; the thread's settle closes it"
     { type: EventType.RUN_FINISHED, threadId: 't1', runId: 'r1' },
     { type: EventType.CUSTOM, name: 'status', value: { type: 'status', live: true, busy: false, generation: 1 } },
   ])
+  expect(trace.diagram()).toMatchSnapshot('flow prompt-run-settle: the browser')
   server.abort()
+  await releaseEnsoLogs()
 })
 
 test('⚠ a run another client started is synthesised so this tab renders what it is watching', async () => {
@@ -294,6 +355,7 @@ test("a refused prompt (400) is a run error with the server's reason, and no run
   server.abort()
 })
 
+// @pins prompt-run-settle/refusals
 test("⚠ a prompt pi rejects after admission reaches the run as an error, by the receipt's message id", async () => {
   const server = scripted()
   server.frame(SNAPSHOT_IDLE)
@@ -312,6 +374,7 @@ test("⚠ a prompt pi rejects after admission reaches the run as an error, by th
 
 // PR #113 review: the queued-prompt path rejects the instant `session.prompt` runs, before
 // the 202 body is written — the follow can deliver the rejection before the receipt names the run.
+// @pins prompt-run-settle/refusals
 test('⚠ a rejection that beats its own receipt is held and still ends the run with its reason', async () => {
   const server = scripted()
   server.frame(SNAPSHOT_IDLE)
@@ -469,6 +532,7 @@ test('a refused host command names the outcome and is RECORDED — the same path
   expect(refusedProblems).toEqual(['thread t1: /model refused: 422 model nope/x is not available here'])
 })
 
+// @pins abort-clear-restore/settle-ends-run
 test('abort is one POST to …/abort and names what the server did; it closes no run itself — the feed does (#116)', async () => {
   const server = scripted()
   server.frame(SNAPSHOT_IDLE)
@@ -534,12 +598,32 @@ test('prompt() names what the server did: taken when the run had ended, refused 
   expect(await dead.prompt('x')).toBe('unreachable')
 })
 
+// @pins abort-clear-restore/queued-rejection-said
 test('⚠ abort() hands back what pi had queued; a later rejection of a queued prompt is said, not matched to a run', async () => {
+  const logs = await recordEnsoLogs()
   const server = scripted(QUEUED_RECEIPT, 204, 200, ['and then this', 'and this'])
+  // The browser's side of `docs/flows/abort-clear-restore.md` (#482): queued, stopped, handed back.
+  const trace = flowTrace({
+    participants: {
+      C: 'composer (the test)',
+      U: 'TanStack (useChat)',
+      A: 'adapter (follow-connection.ts)',
+      S: 'server (scripted)',
+    },
+    categories: { 'enso.browser.follow': 'A' },
+    logs,
+  })
+  server.traceInto(trace)
   server.frame({ ...SNAPSHOT_IDLE, live: true, busy: true, generation: 1 })
   await server.untilChunks(2)
-  expect(await server.connection.prompt('and then this')).toBe('queued')
-  expect(await server.connection.abort()).toEqual({ outcome: 'aborted', restored: ['and then this', 'and this'] })
+  server.step('C', 'A', 'prompt("and then this"), during the run')
+  const queued = await server.connection.prompt('and then this')
+  trace.reply('A', 'C', queued)
+  expect(queued).toBe('queued')
+  server.step('C', 'A', 'abort()')
+  const stopped = await server.connection.abort()
+  trace.reply('A', 'C', `${stopped.outcome}, restored ${stopped.restored.length}`)
+  expect(stopped).toEqual({ outcome: 'aborted', restored: ['and then this', 'and this'] })
   server.frame({
     type: 'observation',
     seq: 1,
@@ -548,7 +632,9 @@ test('⚠ abort() hands back what pi had queued; a later rejection of a queued p
   await new Promise((resolve) => setTimeout(resolve, 10))
   expect(server.problems).toEqual([expect.stringContaining('queued prompt refused: aborted')])
   expect(server.chunks.some((chunk) => chunk.type === EventType.RUN_ERROR)).toBe(false)
+  expect(trace.diagram()).toMatchSnapshot('flow abort-clear-restore: the browser')
   server.abort()
+  await releaseEnsoLogs()
 })
 
 test('⚠ when pi CLAIMS a queued prompt (a user message-start after an assistant one), the view ends the assistant bubble and opens a new one — the reply lands after its question', async () => {

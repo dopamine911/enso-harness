@@ -336,12 +336,13 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
   function publishStatus(threadId: string, thread: ThreadEntry | undefined): void {
     const feed = feeds.get(threadId)
     if (feed === undefined) return
-    publish(feed, {
-      kind: 'status',
-      live: thread !== undefined,
-      busy: thread?.busy ?? false,
-      generation: thread?.generation ?? generations.get(threadId) ?? 0,
-    })
+    const live = thread !== undefined
+    const busy = thread?.busy ?? false
+    const generation = thread?.generation ?? generations.get(threadId) ?? 0
+    // What the followers were told, not only what the registry did: `acquired` and `released` say
+    // the lease moved, this says which status every open follow received (#482's flow traces).
+    log.debug('status to followers: live {live}, busy {busy}, run {generation}', { threadId, live, busy, generation })
+    publish(feed, { kind: 'status', live, busy, generation })
   }
 
   /**
@@ -428,6 +429,11 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
     return thread
   }
 
+  /**
+   * @invariant prompt-run-settle/release-keeps-session A settled run releases; it never disposes.
+   * This arms the idle timer and publishes `busy: false`; the session survives into the next run
+   * (#43), and only the idle window or an explicit dispose ends it.
+   */
   function release(threadId: string, thread: ThreadEntry): void {
     thread.idleTimer?.cancel()
     thread.idleTimer = scheduleIdleDisposal(() => disposeThread(threadId, `${idleTimeoutMs}ms idle`), idleTimeoutMs)
@@ -442,19 +448,27 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
   }
 
   /**
-   * Abort the run in flight on a thread (#116). pi's `abort()` resolves when the agent is
-   * idle again; the run still ends through `agent_settled` (pi emits it from a `finally`),
-   * so the prompt route's settle observer releases the lease and every follower sees the
-   * same `settled` + `status` it would for a natural end. Never disposes.
+   * Abort the run in flight on a thread (#116). Never disposes.
    *
-   * One abort per run: `busy` stays true until that settle lands, so a second click (PR
-   * #120 review) would reach pi again. pi's `abort()` is re-entrant (`agent.abort()` +
-   * `waitForIdle()`), but the second call is the same answer, so it is not made — and it
-   * restores nothing: the first stop already took the queue.
+   * @invariant abort-clear-restore/one-abort-by-thread One abort per run, by thread; the route releases nothing.
+   * The stop is addressed by thread id because the lease that took the run lives in the prompt
+   * route's closure and a later request cannot reach it. `busy` stays true until the run's settle
+   * lands, so a second click (PR #120 review) would reach pi again. pi's `abort()` is re-entrant
+   * (`agent.abort()` + `waitForIdle()`), but the second call is the same answer, so it is not
+   * made: a repeat while the abort is pending is answered `aborted` with an empty `restored`, since
+   * the first stop already took the queue. No live thread is `unknown` (a 404), nothing in flight
+   * `idle` (a 409); neither reaches the runtime.
    *
-   * The queue is cleared BEFORE pi is told (#75): pi's loop leaves on `aborted` before its
-   * follow-up drain, so anything waiting would otherwise ride into the next prompt unasked.
-   * `clearQueue()` returns the texts and emits the `queue_update` every follower reads.
+   * @invariant abort-clear-restore/queue-cleared-first The queue is cleared before the runtime is told, and comes back steering first.
+   * pi's loop leaves on `aborted` before its follow-up drain, so anything waiting would otherwise
+   * ride into the next prompt unasked (#75). So `clearQueue()` first, then `abort()`, and the
+   * answer is the steering texts followed by the follow-ups. `clearQueue()` also emits the
+   * emptied `queue` observation, so every follower's list clears; the texts go only to the caller.
+   * The stop is an `info` record carrying the COUNT handed back, never the texts.
+   *
+   * @invariant abort-clear-restore/stop-must-stop A stop must stop.
+   * If clearing the queue throws, the loss is an `error` record, `restored` is empty, and the
+   * runtime is still told to abort (PR #129 review); never the other way round.
    */
   function abort(threadId: string): AbortResult {
     const thread = threads.get(threadId)
@@ -533,6 +547,12 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
   }
 
   return {
+    /**
+     * @invariant prompt-run-settle/generation The generation is the run's number and the join key.
+     * The take increments it, marks the thread busy and publishes the status before the lease is
+     * handed out, so every follower hears the number before the receipt names it. A `release`
+     * through a lease an older generation took is a reported no-op.
+     */
     async acquire(threadId: string): Promise<ThreadLease | 'busy'> {
       const thread = await entryOf(threadId)
       // Cancelled before the abort wait, so the idle window cannot dispose the thread inside it. A

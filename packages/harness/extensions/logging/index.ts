@@ -8,27 +8,26 @@ import { knownSecretValuesTracking } from '@enso/core/secrets'
  * The extension process's logging (#132), and the one record only an extension can write:
  * the provider's own request id (#144).
  *
- * Two ways this code runs, one behaviour each:
- *   - in-process (the web host): the server's launcher configured logging before pi
- *     existed, and `isLoggingConfigured()` says so — this configures nothing, and the
- *     extensions' records land in the server's file through the server's configure;
- *   - as a child (`enso.ts` → pi): nothing has configured, so this configures — the same
- *     day's file as everyone else, `process: "pi"`, NO console sink (stderr is the TUI's).
- *
- * ⚠ Never configure when something already has: LogTape's `configure` throws on a second
- * call by design (one configurator per process, or it is a bug — `log-process.test.ts`),
- * and a `reset: true` here would silently replace the server's sinks with ours. The
+ * The knobs are the same in both branches below: `ENSO_LOG_LEVEL` for the file's tier,
+ * per-category overrides in it; `ENSO_LOG_CONSOLE` is ignored here on purpose. The
  * `after_provider_response` handler registers either way: it is not about configuration.
  *
- * The knobs are the same: `ENSO_LOG_LEVEL` for the file's tier, per-category overrides in
- * it; `ENSO_LOG_CONSOLE` is ignored here on purpose.
+ * @invariant boot-and-launchers/logging-first Logging is first in the manifest, and configures only when nothing has.
+ * Two ways this code runs, one behaviour each. As a child (`enso.ts` → pi) nothing has configured,
+ * so this configures: the same day's file as everyone else, `process: "pi"`, NO console sink
+ * (stderr is the TUI's). In-process (the web host) the server's launcher configured logging before
+ * pi existed, and `isLoggingConfigured()` says so: this configures nothing, and the extensions'
+ * records land in the server's file through the server's configure. Never configure when something
+ * already has: LogTape's `configure` throws on a second call by design (one configurator per
+ * process, or it is a bug: `log-process.test.ts`), and a `reset: true` here would silently replace
+ * the server's sinks with ours.
  *
  * WHY FIRST IN THE MANIFEST (`packages/harness/package.json` → `pi.extensions`): the sink is
- * configured here, at load, awaited. Today no extension writes a record before
- * `session_start` — guards, web-fetch and web-search log only inside handlers, which fire
- * after every extension has loaded — so the position decides nothing yet (checked
- * 2026-09-16, #167). It is first so that stays true: an extension that one day logs while
- * loading finds the file already open, instead of a record that lands nowhere.
+ * configured here, at load, awaited. Today no extension writes a record before `session_start`
+ * (guards, web-fetch and web-search log only inside handlers, which fire after every extension has
+ * loaded), so the position decides nothing yet (checked 2026-09-16, #167). It is first so that
+ * stays true: an extension that one day logs while loading finds the file already open, instead of
+ * a record that lands nowhere.
  */
 export function createLoggingExtension(
   environment: Readonly<Record<string, string | undefined>>,

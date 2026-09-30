@@ -66,6 +66,7 @@ test('image content is validated, so a malformed attachment fails at the boundar
 // Three of its four refusals had never executed in a test (#162 exit criteria). A validator that
 // let a `confirmed` through to a `select`, or an arbitrary object through as an answer, would put
 // a string the extension never offered into its control flow; each row below is one such bug.
+// @pins dialog-ask-answer-settled/answer-checked
 test('validateDialogAnswer refuses every answer shape a dialog did not ask for, and names the shape it wanted', () => {
   const select: EnsoDialogSpec = { method: 'select', title: 'Pick', options: ['a', 'b'] }
   const confirm: EnsoDialogSpec = { method: 'confirm', title: 'Apply?', message: 'm' }

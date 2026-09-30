@@ -164,6 +164,10 @@ export async function runAnthropicWireSearch(options: AnthropicWireSearchOptions
   }
 
   const answerText = accumulatedText.length > 0 ? accumulatedText : 'No answer text was returned.'
+  // @invariant web-search-call/searched-by-activity `searched` vs `ungrounded` is keyed on search activity, never on source count.
+  // A `server_tool_use` block on the wire is the evidence a native search ran (each provider names
+  // its own signal); a citation with no search block is `ungrounded`, an errored search is
+  // `searched`. `WebSearchOutcome` (vocabulary.ts) is the contract.
   if (!sawNativeSearchBlock) {
     return { kind: 'ungrounded', providerId: options.providerId, answerText }
   }

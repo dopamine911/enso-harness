@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { builtDocPages } from '../scripts/docs/build-docs.ts'
 import { filesUnder } from '../scripts/source-tree.ts'
 
 /**
@@ -44,15 +45,26 @@ export function sourceFiles(directory: string, includeTests = false): string[] {
  * `sourceFiles`. Here rather than in one gate because two read it: `docs-gate.test.ts` for
  * fences and generated blocks, `prose-citation-gate.test.ts` for line citations, and a second
  * copy is how a page ends up scanned by one of them and not the other.
+ *
+ * ⚠ BUILD OUTPUT IS SKIPPED (#482): the pages `build-docs.ts` writes are gitignored and correct by
+ * construction from what the gates DO check (generators, tags, snapshots). A copy on disk is only
+ * as fresh as the last build, and a gate reading it would fail on a stale file, not on the code.
  */
 export function markdownFiles(directory: string): string[] {
   const found: string[] = []
   for (const dirent of readdirSync(directory, { withFileTypes: true })) {
     const path = join(directory, dirent.name)
     if (dirent.isDirectory()) found.push(...markdownFiles(path))
-    else if (dirent.name.endsWith('.md')) found.push(path)
+    else if (dirent.name.endsWith('.md') && !builtPages().has(path)) found.push(path)
   }
   return found
+}
+
+let built: ReadonlySet<string> | undefined
+/** The absolute paths `build-docs.ts` writes, read once per process. */
+function builtPages(): ReadonlySet<string> {
+  built ??= new Set(builtDocPages().map((page) => join(REPOSITORY_ROOT, page)))
+  return built
 }
 
 /**

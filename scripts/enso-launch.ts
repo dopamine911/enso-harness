@@ -11,18 +11,28 @@
  */
 
 /**
- * ⚠ THE PI THE GUARD'S REPLICA IS PINNED AGAINST (#217). `packages/harness/core/paths.ts`
- * REPLICATES pi's path normaliser — it is not on pi's export map, so it is copied, and
- * `packages/harness/core/__tests__/paths.test.ts` keeps the copy honest against the pi in the
- * WORKSPACE tree (`import.meta.resolve`). `enso.ts` spawns a bare `pi` from `PATH`, which is a
- * different resolution bounded by nothing: measured 2026-09-18, a shim reporting 0.85.0 earlier
- * on `PATH` launched with the whole suite green — so the guard could resolve a path differently
- * from the tool it gates, and a deny would be computed against the wrong target.
+ * The tested range is stated ONCE, here, and both ends read it: `enso.ts` refuses a `pi` outside it
+ * before the spawn, and `scripts/__tests__/pi-version-parity.test.ts` asserts the workspace pi the
+ * corpus pins against is inside it. It is `^0.87.1`: the harness's peer range and the workspace
+ * devDependency.
  *
- * So the tested range is stated ONCE, here, and both ends read it: `enso.ts` refuses a `pi`
- * outside it before the spawn, and `scripts/__tests__/pi-version-parity.test.ts` asserts the workspace pi the
- * corpus pins against is inside it. Widening it means running the corpus against the new pi
- * FIRST. It is `^0.87.1` — the harness's peer range and the workspace devDependency.
+ * @invariant boot-and-launchers/pi-version-gate The terminal launcher refuses a `pi` it was not pinned against (#217).
+ * The two surfaces resolve pi differently and only one was bounded: in-process imports the WORKSPACE
+ * copy, while the terminal launcher spawns the first `pi` on `PATH`. The guard REPLICATES pi's path
+ * resolver (`packages/harness/core/paths.ts`; `resolveToCwd` is not on pi's export map) and the corpus
+ * that keeps the copy honest (`packages/harness/core/__tests__/paths.test.ts`) reads the workspace
+ * copy, so on the terminal surface the guard could resolve a path differently from the tool it gates,
+ * and compute a deny against the wrong target, with the whole suite green (measured 2026-09-18 with a
+ * shim printing `0.85.0` earlier on `PATH`). So `enso.ts` reads `pi --version` before the spawn and
+ * refuses outside this range, naming both bounds, with no override flag: the range means "the corpus
+ * has been run against this", and `packages/harness/package.json` → `peerDependencies` states the same
+ * bound. Widening it means running the corpus against the new pi FIRST.
+ *
+ * The probe fails closed three ways beside the range: it is bounded at 5s (a wedged `pi --version`
+ * used to park the launcher silently, worse than the refusal it exists to print, and arming a kill is
+ * not enough, since a shell shim's own child holds the pipe open, so the deadline races the READ), a
+ * non-zero exit is refused rather than parsed, and a banner carrying no pi version is no version
+ * claim. What it does NOT cover: the versions of the libraries inside the pi binary's own tree.
  */
 export const SUPPORTED_PI_VERSIONS = {
   /** The oldest pi the corpus has been run against. */
@@ -114,13 +124,28 @@ export function isPrintRun(passthroughArgs: readonly string[], stdinIsTty: boole
 }
 
 /**
- * pi's arguments: the isolation triple, then whatever the user passed.
- *   --no-extensions  disables discovery, which also suppresses the PROJECT-local
- *                    `.pi/settings.json` that would otherwise load this package twice;
- *   --no-skills      ⚠ REQUIRED, and neither the agent dir nor --no-extensions covers it:
- *                    pi discovers skills from `~/.agents/skills/` too;
- *   -e <package>     the ONE package to load — the harness, or its print variant.
- * (`PI_CODING_AGENT_DIR` is the third leg, on the spawn's environment, not an argument.)
+ * pi's arguments: the isolation triple's two argument legs, then whatever the user passed. The
+ * third leg, `PI_CODING_AGENT_DIR`, is on the spawn's environment, not an argument.
+ *
+ * @invariant boot-and-launchers/isolation-triple Isolation is three mechanisms, each closing a different hole, and the same three at both launch points.
+ * `PI_CODING_AGENT_DIR` points the runtime at `ENSO_HOME/pi-agent` (`~/.enso`, #421): none of the
+ * user's packages, settings or credentials are visible. `--no-extensions` turns discovery off,
+ * including this repo's own `.pi/settings.json`, which installs the package and would load it twice.
+ * `--no-skills` is required and covered by neither: `~/.agents/skills/` is outside the agent dir.
+ * They go BEFORE the user's arguments, so a flag the user adds cannot displace them. The host applies
+ * the same triple as loader options and sets the env at creation, before the first services (it is
+ * read at module import).
+ *
+ * The permission rules are pinned the same way at both points (#446): `PICC_PERMISSION_MODES_CONFIG_PATH`
+ * names `ENSO_HOME/permissions.json`, prepared first by `preparePermissionRules`: seeded with Enso's
+ * deny rules when missing or empty (an empty file would make the extension import
+ * `~/.claude/settings.json`), refused when unreadable, and the launcher says which on stderr, the host
+ * in its log.
+ *
+ * @invariant boot-and-launchers/package-dir `-e` receives the package directory, never extension files.
+ * Loaded by package rules, the manifest drives every resource kind: extensions, skills, prompts and
+ * themes. Files passed individually loaded the extensions and silently dropped everything else. The
+ * ONE package is the harness, or its print variant.
  */
 export function piArguments(packageToLoad: string, passthroughArgs: readonly string[]): string[] {
   return ['--no-extensions', '--no-skills', '-e', packageToLoad, ...passthroughArgs]

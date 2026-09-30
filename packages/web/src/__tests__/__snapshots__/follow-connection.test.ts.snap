@@ -1,0 +1,44 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`send opens TanStack's own run at admission; the thread's settle closes it: flow prompt-run-settle: the browser 1`] = `
+"sequenceDiagram
+  participant U as TanStack (useChat)
+  participant A as adapter (follow-connection.ts)
+  participant S as server (scripted)
+  U->>A: send "hello" (run r1)
+  A->>S: POST /api/threads/t1/prompt {message: "hello"}
+  A->>U: RUN_STARTED r1
+  S-->>A: 202 {threadId: "t1", messageId: "pm1", generation: 1, queued: false}
+  A->>U: TEXT_MESSAGE_START
+  Note over A: prompt pm1 opened on run 1
+  S->>A: status {live: true, busy: true, generation: 1}
+  S->>A: observation 1: text-delta
+  S->>A: observation 2: settled
+  S->>A: status {live: true, busy: false, generation: 1}
+  A->>U: CUSTOM status
+  A->>U: TEXT_MESSAGE_CONTENT "hi"
+  A->>U: RUN_FINISHED r1
+  A->>U: CUSTOM status"
+`;
+
+exports[`⚠ abort() hands back what pi had queued; a later rejection of a queued prompt is said, not matched to a run: flow abort-clear-restore: the browser 1`] = `
+"sequenceDiagram
+  participant C as composer (the test)
+  participant U as TanStack (useChat)
+  participant A as adapter (follow-connection.ts)
+  participant S as server (scripted)
+  S->>A: snapshot
+  A->>U: CUSTOM snapshot
+  A->>U: RUN_STARTED external-1
+  C->>A: prompt("and then this"), during the run
+  A->>S: POST /api/threads/t1/prompt {message: "and then this", admission: "enqueue"}
+  A->>U: TEXT_MESSAGE_START
+  S-->>A: 202 {threadId: "t1", messageId: "pm1", generation: 2, queued: true}
+  A-->>C: queued
+  C->>A: abort()
+  A->>S: POST /api/threads/t1/abort
+  S-->>A: 200 {threadId: "t1", restored}
+  A-->>C: aborted, restored 2
+  S->>A: observation 1: prompt-rejected
+  Note over A: queued prompt refused: aborted"
+`;

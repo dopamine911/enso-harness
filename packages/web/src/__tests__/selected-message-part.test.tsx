@@ -52,6 +52,7 @@ test('a tool call from an UNREGISTERED name renders its name and result text', (
 // #407 item 1: pi hands a guard refusal over shaped like a failed command. With the call in the
 // thread's denials it is the design's refusal card — the verdict, what was asked, the reason,
 // who refused — and never the word `error`; the same result without a denial stays an error row.
+// @pins guarded-tool-call/denial-entry
 test('⚠ a refused call renders as the refusal card; the same error result without a denial is an error row', () => {
   const stores = mintThread()
   stores.guardDenials.set(new Map([['call-1', 'secret-path']]))

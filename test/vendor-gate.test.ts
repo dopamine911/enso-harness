@@ -149,12 +149,13 @@ const VENDOR_NAMED_ALLOWED: readonly string[] = [
   // manifest that did not name the real vendors would not be testing the real manifest.
   'scripts/__tests__/link-vendor-packages.test.ts',
   'scripts/__tests__/print-harness.test.ts',
-  // ⚠ `scripts/__tests__/enso-launch.test.ts` is NOT here any more: `declaredResources` and
-  // `missingVendorPaths` moved to `@enso/core` with #221, the manifests moved with them, and
-  // the gate reported the leftover row as `allowlisted, matches nothing` rather than letting
-  // it sit. The inventory shrinks when the leak does; that is the half of a ratchet that is
-  // easy to omit.
-  // Same manifests, same reason, new home.
+  // `scripts/__tests__/enso-launch.test.ts` is back (#482), for a different reason than the one it
+  // left with (#221): its end-to-end launch recording asserts the spawned pi's environment carries
+  // `PICC_PERMISSION_MODES_CONFIG_PATH` and the print mirror dropped picc's entry. Those are
+  // exactly the two leaks `scripts/enso.ts` and `scripts/print-harness.ts` hold; the test names
+  // what it checks. Leaves with them.
+  'scripts/__tests__/enso-launch.test.ts',
+  // Same manifests as the launcher tests above, moved to `@enso/core` with #221.
   'packages/core/src/__tests__/pi-manifest.test.ts',
   // The corpus contract reads picc's own `permissionContext.ts` and its `package.json`
   // version out of `node_modules`, and asserts our replica still agrees with it. Naming the

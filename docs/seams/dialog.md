@@ -242,16 +242,16 @@ export interface EnsoExtensionUiContext {
 **Implemented once**, by `createEnsoExtensionUiContext` in `packages/web/src/host/extension-ui-context.ts`
 (line 250). The host is the UI: it implements the interface extensions call and turns each call into
 the same record the mapper already consumed over the old transport (header lines 38–40). The four
-blocking methods — `select`, `confirm`, `input`, `editor` (lines 386–432) — go through one
+blocking methods — `select`, `confirm`, `input`, `editor` (lines 413–459) — go through one
 `awaitDialog` (line 326): mint an id, park the request in a pending map, emit the request, and block
 until an answer, a cancel, the caller's abort signal or its own timeout. Every path that stops the wait
-goes through `finish` (line 352), which deletes the pending entry, emits the settle record with its
-outcome (line 339) and resolves the extension with its value — `undefined` for `select`/`input`/
-`editor`, `false` for `confirm`, on every non-answer outcome (lines 312–313). That is why the settle
-observation exists at all: the runtime has no event for a question ending (lines 316–317).
+goes through `finish` (line 379), which deletes the pending entry, emits the settle record with its
+outcome (line 383) and resolves the extension with its value — `undefined` for `select`/`input`/
+`editor`, `false` for `confirm`, on every non-answer outcome (lines 358–359). That is why the settle
+observation exists at all: the runtime has no event for a question ending (lines 352–354).
 `agent-host.ts` binds one context per session (line 981) and delegates the runtime contract's
 `answerDialog` and `openDialogs` to it (lines 1411–1416); `cancelAllDialogs` cancels every pending
-question at session teardown (line 579, called from `agent-host.ts:1576`), so teardown is a settle
+question at session teardown (line 614, called from `agent-host.ts:1576`), so teardown is a settle
 path too.
 
 **Consumed by the server.** `answerThreadDialog` in `packages/web/src/server/follow.ts` (line 363)
@@ -260,8 +260,8 @@ question is spent, lines 365–372), validates a non-cancel answer against the q
 (lines 373–376; 422 with the refusal, and the question stays open), then hands it to the runtime
 (line 377) and answers 204 (line 378). `server/index.ts` maps that outcome to the response (lines
 840–862). The follow's snapshot lists every open question, oldest first, so a reconnect renders the
-card at once (`follow.ts` line 200; `openDialogs` at extension-ui-context.ts line 526 checks each
-request with `isEnsoDialogSpec` rather than casting, line 532).
+card at once (`follow.ts` line 200; `openDialogs` at extension-ui-context.ts line 604 checks each
+request with `isEnsoDialogSpec` rather than casting, line 610).
 
 **Consumed by the browser.** The question arrives as an `extension-ui-request` observation whose
 `dialog` the mapper checked with `isEnsoDialogSpec` (`map-events.ts` line 147); the adapter passes the

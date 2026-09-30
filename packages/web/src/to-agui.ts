@@ -126,13 +126,21 @@ export function observationToAguiEvents(observation: EnsoObservation, ids: AguiI
           // The descriptor, under the same namespaced key it uses everywhere else.
           // Legal because AG-UI's BaseEvent declares `[k: string]: unknown`.
           ...(observation.descriptor === undefined ? {} : { [ENSO_TOOL_RESULT_KEY]: observation.descriptor }),
+          // @invariant guarded-tool-call/refusal-is-error-result A refusal is an error result on the wire.
           // ⚠ `isError` has no AG-UI field on a tool result, and it is the only signal a
-          // REFUSED or ABORTED call has (a guard block; pi's abort mid-tool). TanStack's
-          // processor reads `state: "output-error"` off the chunk (a non-spec extra, legal
-          // as above) and marks the result and its call `error`, with the content as the
-          // error text — the same shape `transcript-to-messages` builds from the transcript, so a
-          // live transcript and a resumed one agree (#130). Before this the flag rode as
-          // `ensoIsError`, which nothing read: live said done, resume said error.
+          // REFUSED or ABORTED call has (a guard block; pi's abort mid-tool): `map-events.ts`,
+          // `tool_execution_end`. TanStack's processor reads `state: "output-error"` off the chunk
+          // (a non-spec extra, legal by BaseEvent's index signature) and marks the result and its
+          // call `error`, with the content as the error text: the same shape
+          // `transcript-to-messages` builds from the transcript on resume, so a live transcript
+          // and a resumed one agree (#130), and the same
+          // shape a command that ran and failed has. Before this the flag rode as `ensoIsError`,
+          // which nothing read: live said done, resume said error.
+          //
+          // The vendor's half: a guard's `{ block, reason }` becomes an error result in the
+          // runtime's own loop (`pi-agent-core/dist/agent-loop.js`, the `beforeResult?.block`
+          // branch: `createErrorToolResult(reason)`, `isError: true`), pinned against the
+          // installed version by the agent-loop contract test, so a bump that moves it goes red.
           ...(observation.isError ? { state: 'output-error' } : {}),
         },
       ]
@@ -210,9 +218,9 @@ export function observationToAguiEvents(observation: EnsoObservation, ids: AguiI
       ]
 
     case 'message-start':
-      // The AG-UI view opens ONE assistant message per run (`TEXT_MESSAGE_START` at run
-      // start) and closes it at settle, so per-message boundaries have no place in it —
-      // the same acknowledged loss as partial tool output above. The follow carries them.
+      // Nothing here: the message boundary is the adapter's, not this mapper's. The adapter
+      // (`follow-connection.ts#observeMessageStart`) reads it off the follow and, when pi claims a
+      // queued prompt mid-run, ends the assistant message and opens a new one (#75).
       return []
 
     case 'message-end':

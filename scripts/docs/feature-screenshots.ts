@@ -15,14 +15,25 @@ import {
   PROMPTS,
   SECOND_MODEL,
 } from './feature-session.ts'
+import {
+  type FeatureFacts,
+  type FeatureSpec,
+  type FeatureUi,
+  factsPath,
+  type MarkTarget,
+  type ShotFacts,
+} from './features/spec.ts'
+import { STATS } from './features/stats.ts'
 
 /**
  * Captures the Features screenshots (#437) into `docs/features/images/`. Run it after a UI change:
  *
- *   bun run docs:screenshots [--chromium <path to a chrome binary>] [--keep]
+ *   bun run docs:screenshots [--chromium <path to a chrome binary>] [--keep] [--only <shot>[,<shot>…]]
  *
  * `--keep` leaves the scratch directory — the home, the project, the model's request log — and
- * prints where it is, for when a step fails and the page alone does not say why.
+ * prints where it is, for when a step fails and the page alone does not say why. `--only` plays
+ * the session, then captures just the named shots (function names below: `stats`, `coldThread`, …),
+ * for recapturing one feature after its spec changed.
  *
  * WHY A SCRIPT, NOT COMMITTED SCREENSHOTS WITH A DATE. A screenshot taken by hand drifts the
  * first time a label moves, and nothing says so. This one is regenerated from the running app,
@@ -269,6 +280,16 @@ async function annotate(page: Page, annotations: readonly Annotation[]): Promise
 }
 
 /**
+ * The shots `--only` asked for, by shot function name; `undefined` for all of them. Playing the
+ * session takes screenshots of its own steps (the Start dialog, the questions); under `--only`
+ * those are not retaken, so recapturing one feature leaves every other image as it was.
+ */
+const ONLY: readonly string[] | undefined = process.argv.includes('--only')
+  ? (process.argv[process.argv.indexOf('--only') + 1] ?? '').split(',')
+  : undefined
+let sessionPlaying = false
+
+/**
  * One shot: annotate, capture, clear the annotations. The capture is the whole viewport, or the
  * smallest rectangle holding every locator in `region` — padded, so a badge at the edge of the
  * region is not cut in half. The region is cropped by screenshotting a transparent box laid over
@@ -280,6 +301,7 @@ async function shoot(
   annotations: readonly Annotation[],
   region: readonly Locator[] = [],
 ): Promise<void> {
+  if (sessionPlaying && ONLY !== undefined) return
   const anchor = annotations[0]?.target ?? region[0]
   if (anchor !== undefined) await steady(anchor)
   await annotate(page, annotations)
@@ -557,15 +579,66 @@ async function contextBrowser(page: Page, threadId: string): Promise<void> {
   ])
 }
 
+/** Where a mark's target is: by role and name, or by text it shows. The capture fails if neither resolves. */
+function locate(page: Page, target: MarkTarget): Locator {
+  if ('role' in target) return page.getByRole(target.role, { name: target.name }).first()
+  return page.getByText(target.text, { exact: false }).first()
+}
+
+/** What a mark's `{shown}` is: the name a role target was found by, or the text a text target's element renders. */
+async function shownBy(target: MarkTarget, located: Locator): Promise<string> {
+  if ('role' in target) return target.name
+  return (await located.innerText()).replaceAll(/\s+/g, ' ').trim()
+}
+
+/**
+ * One feature from its spec (#482): each shot's `go` runs through a `FeatureUi` that records the
+ * reader's steps, the marks are rung where the page renders them, the measured values are read,
+ * and all of it is written to the feature's facts file for `feature-pages.ts` to build the page.
+ */
+async function captureFeature(page: Page, spec: FeatureSpec, threadId: string): Promise<void> {
+  const shots: ShotFacts[] = []
+  for (const shot of spec.shots) {
+    const steps: string[] = []
+    const ui: FeatureUi = {
+      page,
+      openThread: async () => {
+        steps.push('open a thread from the rail')
+        await openThread(page, threadId)
+      },
+      tab: async (name) => {
+        steps.push(`choose the **${name}** tab at the top of the thread`)
+        await tab(page, name)
+      },
+    }
+    await shot.go(ui)
+    const targets = shot.marks.map((mark) => locate(page, mark.target))
+    const shown = await Promise.all(
+      shot.marks.map((mark, markIndex) => shownBy(mark.target, targets[markIndex] as Locator)),
+    )
+    const measured: Record<string, string> = {}
+    for (const [name, element] of Object.entries(shot.measure ?? {})) {
+      measured[name] = (await element(page).innerText()).replaceAll(/\s+/g, ' ').trim()
+      if (measured[name] === '') throw new Error(`feature-screenshots: ${spec.id} measured nothing for "${name}"`)
+    }
+    await shoot(
+      page,
+      shot.image,
+      targets.map((target, markIndex) => ({ target, label: String(markIndex + 1) })),
+    )
+    shots.push({ image: shot.image, steps, shown, measured })
+  }
+  const facts: FeatureFacts = { feature: spec.id, shots }
+  writeFileSync(join(ROOT, factsPath(spec.id)), `${JSON.stringify(facts, null, 2)}\n`)
+  // In the repository's style, as `bun run format` writes it: a capture must not leave the format gate red.
+  const formatted = spawnSync(process.execPath, ['--bun', 'oxfmt', factsPath(spec.id)], { cwd: ROOT, encoding: 'utf8' })
+  if (formatted.status !== 0)
+    throw new Error(`feature-screenshots: oxfmt refused ${factsPath(spec.id)}: ${formatted.stderr}`)
+  process.stdout.write(`feature-screenshots: wrote ${factsPath(spec.id)}\n`)
+}
+
 async function stats(page: Page, threadId: string): Promise<void> {
-  await openThread(page, threadId)
-  await tab(page, 'Stats')
-  await shoot(page, 'stats', [
-    { target: page.getByText('refused by a guard — not failures', { exact: false }), label: '1' },
-    { target: page.getByRole('heading', { name: 'Tokens' }), label: '2' },
-    { target: page.getByRole('heading', { name: 'Cost per turn' }), label: '3' },
-    { target: page.getByRole('heading', { name: 'Costliest calls' }), label: '4' },
-  ])
+  await captureFeature(page, STATS, threadId)
 }
 
 /** What changed since the last push (#452): pi's one edit, in the tree and side by side. */
@@ -825,19 +898,27 @@ async function main(): Promise<void> {
       browser,
       'session',
       async (page) => {
-        threadId = await playSession(page, modelLog)
+        sessionPlaying = true
+        threadId = await playSession(page, modelLog).finally(() => {
+          sessionPlaying = false
+        })
       },
       failed,
     )
     if (threadId === '')
       throw new Error(`feature-screenshots: the session did not finish (model log: ${modelLog})\n${failed.join('\n')}`)
-    for (const shot of LIVE_SHOTS) await attempt(browser, shot.name, (page) => shot(page, threadId), failed)
+    const wanted = (name: string): boolean => ONLY === undefined || ONLY.includes(name)
+    for (const shot of LIVE_SHOTS.filter((live) => wanted(live.name))) {
+      await attempt(browser, shot.name, (page) => shot(page, threadId), failed)
+    }
 
-    // A cold thread is one no session holds: restart the stack, and the thread is read off its file.
-    await stopStack(stack)
-    stack = startStack(home, project)
-    await waitFor(async () => (await isListening(5178)) && (await isListening(5179)), 'the dev stack, again')
-    await attempt(browser, coldThread.name, (page) => coldThread(page, threadId), failed)
+    if (wanted(coldThread.name)) {
+      // A cold thread is one no session holds: restart the stack, and the thread is read off its file.
+      await stopStack(stack)
+      stack = startStack(home, project)
+      await waitFor(async () => (await isListening(5178)) && (await isListening(5179)), 'the dev stack, again')
+      await attempt(browser, coldThread.name, (page) => coldThread(page, threadId), failed)
+    }
     if (failed.length > 0) throw new Error(`feature-screenshots: ${failed.length} failed\n${failed.join('\n')}`)
   } finally {
     await browser?.close()

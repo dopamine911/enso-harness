@@ -325,13 +325,40 @@ export function createEnsoExtensionUiContext(options: EnsoExtensionUiContextOpti
 
   /**
    * Block on a dialog until an answer, a cancellation, the caller's own abort signal, or
-   * the caller's timeout. `mapResponse` turns the wire answer into the method's return type;
-   * `cancelValue` is what the extension sees for every non-answer outcome — pi's own
-   * contract (`select`/`input`/`editor` → `undefined`, `confirm` → `false`).
+   * the caller's timeout. `mapResponse` turns the wire answer into the method's return type.
    *
-   * Every path that stops the wait goes through `finish`, which is why the settle record
-   * (#114) is emitted there and nowhere else: pi has no event for a question ending, and a
-   * follower that did not answer it has no other way to learn the card is stale.
+   * @flow dialog-ask-answer-settled A dialog: asked in the host, answered once, settled for every follower
+   * An extension's `ctx.ui.select` / `confirm` / `input` / `editor` blocks its run until a human
+   * answers. In-process there is no wire for that wait: the host IS the UI (this file's header),
+   * so the question is parked in the host's pending map and rides to every follower as a blocking
+   * `extension-ui-request` observation (#27, #112). The answer is one unary
+   * `POST /api/threads/:id/dialog`, checked against the question it names. Every way the wait can
+   * end crosses one `finish`, which emits `dialog-settled` with its outcome (how a tab that did
+   * not answer learns the card is stale), and a follow opened under an open question finds it in
+   * the snapshot's `openDialogs` (#114).
+   * @contract packages/core/src/dialog.ts#validateDialogAnswer
+   * @see docs/seams/dialog.md the vocabulary and both schemas, the host's wait, the route, the browser
+   * @see docs/glossary.md the words: parked, dialog, answer, outcome (Thread states, Control)
+   *
+   * @invariant dialog-ask-answer-settled/parked-in-host The question is parked in the host, and nowhere else.
+   * This mints the id, keeps `{ resolve, request }` in a `Map` keyed by it, and emits the request
+   * on the same emitter as the session's events, so request and settle sit in stream order.
+   * Nothing parks server-side; the run keeps going on the follow (`server/follow.ts` header). The
+   * thread is busy (`glossary.md`: parked).
+   *
+   * @invariant dialog-ask-answer-settled/one-finish Every path that stops the wait goes through `finish`.
+   * Answer, browser cancel, `dispose`'s `cancelAllDialogs`, the extension's own `timeout`, the
+   * extension's own `signal`: each deletes the pending entry first (so a second path is a no-op),
+   * emits `extension_ui_settled` with its outcome (#114), and THEN resolves the extension. pi has
+   * no event for a question ending, and a follower that did not answer it has no other way to
+   * learn the card is stale. One exception: a `signal` already aborted when asked resolves the
+   * cancel value with no request and no settle.
+   *
+   * @invariant dialog-ask-answer-settled/cancel-value A non-answer resolves the runtime's own cancel value, never a wrong type.
+   * `cancelValue` is what the extension sees for every non-answer outcome, pi's own contract:
+   * `select`, `input` and `editor` see `undefined`; `confirm` sees `false` (`CONFIRM_DISMISSED`).
+   * `mapResponse` degrades a wrong-shaped answer to that value. An answer naming no pending id is
+   * a logged warning (`answerDialog`), never a throw.
    */
   function awaitDialog<T>(
     request: BlockingDialogRequest,
@@ -566,6 +593,14 @@ export function createEnsoExtensionUiContext(options: EnsoExtensionUiContextOpti
         (response: DialogAnswer) => response.value,
       )
     },
+    /**
+     * @invariant dialog-ask-answer-settled/settle-per-id The settle is for one id, on every follower; the snapshot's list is complete.
+     * The browser drops the card only when `dialog-settled` names the id it shows
+     * (`custom-event-router.ts`, its `dialog-settled` case). This walks the pending map in
+     * insertion order, oldest first, checking each request with `isEnsoDialogSpec` rather than
+     * casting; the snapshot carries that list whole, so a reconnect renders the card and an empty
+     * list clears one.
+     */
     openDialogs(): EnsoOpenDialog[] {
       const open: EnsoOpenDialog[] = []
       for (const [dialogId, { request }] of pendingDialogs) {

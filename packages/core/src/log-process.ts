@@ -453,7 +453,12 @@ export function ensoLogDay(filename: string): string | undefined {
   return ENSO_LOG_FILENAME.exec(filename)?.[1]
 }
 
-const KEEP_DAYS = 14
+/**
+ * Days a log day file is kept before the sink prunes it. Exported so what the docs say is this number (#482).
+ *
+ * @group Logging
+ */
+export const LOG_KEEP_DAYS = 14
 const DAY_MS = 24 * 60 * 60 * 1000
 
 /**
@@ -521,7 +526,7 @@ export async function configureProcessLogging(options: ProcessLoggingOptions): P
       const day = ensoLogDay(filename)
       return day === undefined ? null : new Date(`${day}T00:00:00`) // local midnight, as the name was made
     },
-    maxAgeMs: KEEP_DAYS * DAY_MS,
+    maxAgeMs: LOG_KEEP_DAYS * DAY_MS,
     // The template as the message and the values as properties — an event name a bundle
     // can filter on, not a sentence with the values rendered into it.
     formatter: getJsonLinesFormatter({ message: 'template' }),

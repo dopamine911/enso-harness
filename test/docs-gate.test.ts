@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test'
 import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { builtDocPages } from '../scripts/docs/build-docs.ts'
 import { extractDeclaration } from '../scripts/docs/extract-declaration.ts'
 import {
   detectedExceptionConstants,
@@ -334,12 +335,36 @@ test('⚠ every cited test exists with exactly that title; every flow page cites
   expect(offenders).toEqual([])
 })
 
+/**
+ * A built page (#482) is gitignored, so a checkout has no file until `docs:build` runs. A link to
+ * one resolves when the build writes that path; a link to a page it does not build still fails, so
+ * a renamed `@flow` or a dropped generator breaks its readers here.
+ */
+const BUILT_PAGES = new Set(builtDocPages().map((page) => join(REPOSITORY_ROOT, page)))
+
+test('⚠ the build output is exactly what git ignores under docs/: no built page committed, none left tracked (#482)', () => {
+  const git = (...args: string[]): string[] =>
+    Bun.spawnSync(['git', ...args], { cwd: REPOSITORY_ROOT })
+      .stdout.toString()
+      .split('\n')
+      .filter((line) => line.length > 0)
+  // A page the build writes that git would still commit: the next build's copy shows as a change.
+  const unignored = builtDocPages().filter(
+    (page) => Bun.spawnSync(['git', 'check-ignore', '-q', page], { cwd: REPOSITORY_ROOT }).exitCode !== 0,
+  )
+  expect(unignored).toEqual([])
+  // A tracked page the ignore rules cover: a hand page under a built directory, or a built page
+  // committed before it became output. Either way the repository holds a copy that can drift.
+  expect(git('ls-files', '-ci', '--exclude-standard', 'docs')).toEqual([])
+})
+
 test('⚠ every relative link under docs/ and in README resolves to a file (#162 workstream 11)', () => {
   const offenders: string[] = []
   for (const path of [...markdownFiles(DOCS_ROOT), join(REPOSITORY_ROOT, 'README.md')]) {
     const page = path.slice(REPOSITORY_ROOT.length + 1)
     for (const link of relativeLinks(readFileSync(path, 'utf8'))) {
-      if (!existsSync(join(path, '..', link.target))) offenders.push(`${page}:${link.line}: ${link.target}`)
+      const target = join(path, '..', link.target)
+      if (!(existsSync(target) || BUILT_PAGES.has(target))) offenders.push(`${page}:${link.line}: ${link.target}`)
     }
   }
   expect(offenders).toEqual([])

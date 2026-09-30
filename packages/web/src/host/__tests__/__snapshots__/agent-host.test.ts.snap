@@ -1,0 +1,35 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`⚠ the emitted tail records each event's provenance: held at startup, replayed to the first subscriber, live, dropped (#97): flow follow-snapshot-frames: the host, held until the first subscriber 1`] = `
+"sequenceDiagram
+  participant S as subscriber (the test)
+  participant H as host (agent-host.ts: emit, subscribe, the tail)
+  S->>H: emittedEvents(), before anyone subscribed
+  H-->>S: the tail: held
+  S->>H: subscribe(listener)
+  H->>S: observations, origin session-start
+  S->>H: emittedEvents()
+  H-->>S: the tail: held, replayed
+  S->>H: prompt "/enso-late-notify", subscribed
+  H->>S: observations, origin run
+  S->>H: unsubscribe()
+  S->>H: prompt "/enso-late-notify", nobody subscribed
+  S->>H: emittedEvents()
+  H-->>S: its notify rows since: live, dropped"
+`;
+
+exports[`⚠ Stop stops: the run's abort settles a pending dialog as \`aborted\` — the card drops, the extension resumes with its cancel value: flow dialog-ask-answer-settled: the host, a question the stop settles 1`] = `
+"sequenceDiagram
+  participant X as extension (the probe)
+  participant H as host (agent-host.ts, extension-ui-context.ts)
+  participant S as subscriber (the test)
+  X->>H: ctx.ui.confirm("Still here?")
+  H->>S: extension-ui-request {method: confirm, blocking: true}
+  S->>H: openDialogs()
+  H-->>S: 1 open
+  S->>H: abort()
+  H->>S: dialog-settled {outcome: aborted}
+  H-->>X: resolves false
+  S->>H: answerDialog {confirmed: true}, after the stop
+  Note over H: dialog answer for unknown request id [id] — already answered, cancelled, or never asked"
+`;
