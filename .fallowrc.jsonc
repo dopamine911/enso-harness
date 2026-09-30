@@ -51,6 +51,10 @@
     "@fontsource/ibm-plex-mono"
   ],
   "ignorePatterns": [".inspiration/**", ".local/**", ".enso/**", "dist-types/**"],
+  // The landing page's feature map is BUILD OUTPUT (#504): `scripts/docs/site-content.ts` writes it
+  // before every site build, and it is gitignored, so an audit of a fresh checkout cannot resolve
+  // it. The one specifier by name, never `../generated/**`: another missing file must still show.
+  "ignoreUnresolvedImports": ["../generated/landing-features.json"],
   // "Every shape is a schema in @enso/core" (architecture → The shared core) emits a `Static<typeof X>`
   // type for every schema whether or not code names the type; the unnamed ones are still the
   // contract's public surface, not dead code (#175 bucket C). BY NAME, never "*": a genuinely

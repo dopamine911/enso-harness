@@ -21,6 +21,7 @@ test('⚠ every spec agrees with its captured facts (#482)', () => {
 const SPEC: FeatureSpec = {
   id: 'demo',
   title: 'Demo',
+  landingTagline: 'a demo',
   shows: ['It shows.'],
   opens: [],
   shots: [

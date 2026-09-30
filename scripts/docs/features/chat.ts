@@ -49,6 +49,7 @@ const IMAGE_MEGABYTES = ENSO_IMAGE_MAX_BYTES / (1024 * 1024)
 export const CHAT: FeatureSpec = {
   id: 'chat',
   title: 'Chat',
+  landingTagline: 'threads · tools · images',
   shows: [
     "A thread is one conversation with pi. The reply streams in as pi writes it. Each tool call pi makes is a row you can open, and pi's thinking is a block you can expand. You can attach images to a prompt, and run commands from a palette.",
     "The thread's id is in the page URL, so a reload shows the same thread, and the browser's back and forward buttons move between the threads you opened.",

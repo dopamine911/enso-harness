@@ -43,6 +43,7 @@ const withArticle = (word: string): string => `${/^[aeiou]/.test(word) ? 'an' : 
 export const PROMPTS: FeatureSpec = {
   id: 'prompts',
   title: 'Prompts',
+  landingTagline: 'system · append · session prompts',
   shows: [
     `Your prompt library: markdown files you write once and start sessions with. Each prompt is one file, \`${ensoPromptsDir('ENSO_HOME')}/<id>.md\`, with a short frontmatter block (${FRONTMATTER_KEYS.map((key) => `\`${key}\``).join(', ')}) and the text under it. The category says where the text goes:`,
     CATEGORIES.map((category) => `- ${GOES[category]}`).join('\n'),

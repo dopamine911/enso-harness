@@ -94,6 +94,7 @@ const SECRET_SUFFIXES = SECRET_NAME_WORDS.map((word) => `\`…_${word}\``).join(
 export const TERMINAL: FeatureSpec = {
   id: 'terminal',
   title: 'Terminal',
+  landingTagline: 'pi with Enso loaded',
   shows: [
     "`bun run enso` starts pi in your terminal with Enso loaded: the same guards, `web_fetch`, `web_search`, permission modes and logging as the web app. It is plain pi otherwise. You use pi's own interface, keys and commands.",
     'The run is isolated from any other pi you have installed, and your secrets stay out of it.',

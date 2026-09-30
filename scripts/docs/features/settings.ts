@@ -52,6 +52,7 @@ const DIALOG: MarkTarget = { role: 'dialog', name: 'Settings' }
 export const SETTINGS: FeatureSpec = {
   id: 'settings',
   title: 'Settings',
+  landingTagline: 'themes · fonts',
   shows: [
     `The look of the page: a colour theme, and a font for each of ${ROLE_COUNT} roles. ${DEFAULT.label} is the default theme, and the others include ${listed(OTHER_FAMILIES)}, in dark and light variants.`,
   ],

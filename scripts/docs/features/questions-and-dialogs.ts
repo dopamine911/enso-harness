@@ -4,6 +4,7 @@ import type { FeatureSpec } from './spec.ts'
 export const QUESTIONS_AND_DIALOGS: FeatureSpec = {
   id: 'questions-and-dialogs',
   title: 'Questions and dialogs',
+  landingTagline: 'answer pi in the browser',
   shows: [
     'Sometimes pi needs an answer from you before it can go on. Enso shows the question as a card in the chat, and your answer goes back to pi. There are two kinds:',
     [

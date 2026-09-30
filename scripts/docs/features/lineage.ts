@@ -32,6 +32,7 @@ const FORK_POINT: MarkTarget = { label: 'fork point' }
 export const LINEAGE: FeatureSpec = {
   id: 'lineage',
   title: 'Forks and lineage',
+  landingTagline: 'fork point · provenance · conditions',
   shows: [
     'A fork is a new thread that starts from a point in another one: everything before a prompt you pick, with that prompt back in the composer, ready to send again as it is or changed. The fork is its own thread, with its own id and its own session file. The one it came from is left exactly as it was, and the rail says which thread each fork came from.',
     'Every thread also carries a record of the conditions it ran under, its *fork point*. That makes two forks comparable: the same history, and a list of what differed.',

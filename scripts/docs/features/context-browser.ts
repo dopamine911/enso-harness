@@ -58,6 +58,7 @@ async function openSwitchedRequest(ui: FeatureUi): Promise<void> {
 export const CONTEXT_BROWSER: FeatureSpec = {
   id: 'context-browser',
   title: 'Context browser',
+  landingTagline: 'exact request elements',
   shows: [
     "The Context Browser opens one model request and shows what the model received, element by element: each prompt section, each tool's schema, each message, each reply, and each tool result beside the call that produced it. Pick an element to read it exactly as it was sent.",
     "Beside it, **Context Events** lists what changed the context other than the conversation, and **File Activity** lists what pi's file tools touched.",

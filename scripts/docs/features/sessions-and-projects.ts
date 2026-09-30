@@ -10,6 +10,7 @@ const field = (label: string): MarkTarget => ({ text: label, exact: true, within
 export const SESSIONS_AND_PROJECTS: FeatureSpec = {
   id: 'sessions-and-projects',
   title: 'Sessions and projects',
+  landingTagline: 'where and how a run starts',
   shows: [
     "A project is a folder pi works in. The rail lists your projects, and each project's threads under it. A new thread asks how to start: which model, how much effort, which permission mode, which system prompt, and the first prompt. They are applied together when you start.",
     "A thread you ran before is still there after a restart. Until you run it again it is *cold*: Enso reads it from pi's session file, and nothing is running.",

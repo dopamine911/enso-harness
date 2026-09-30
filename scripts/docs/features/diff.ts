@@ -41,6 +41,7 @@ const EDITED_LINE = "required('DATABASE_URL')"
 export const DIFF: FeatureSpec = {
   id: 'diff',
   title: 'Diff',
+  landingTagline: 'every changed file · side by side',
   shows: [
     "The **Diff** tab shows every file in the thread's project that differs from the last push, and what changed in it. The files are on the left as a tree, and the one you pick is on the right, side by side: the file at the last push on the left, the file now on the right.",
     "When the project is a folder inside a larger repository, only that folder's files are compared, and the header says `in <folder>/`. Files elsewhere in the repository are never listed or read. The status bar's counts cover the same folder, while its commits ahead and behind are the whole repository's.",
