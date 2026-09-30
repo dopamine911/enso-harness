@@ -1,26 +1,37 @@
 ---
 /**
- * The curated product story, in the same theme as the feature documentation.
- * The complete feature map is generated from the Features specs by site-content.ts.
+ * The site's front page (#503; restructured around how Enso is used, #511): the product story in
+ * the theme the docs share (`src/styles/theme.css`). It began as hello-enso's landing (helloen.so).
+ * The hero is Starlight's `Hero` slot, overridden by `src/components/LandingHero.astro`; everything
+ * below it is this page, and the full Features reference stays the exhaustive one.
+ *
+ * ⚠ ITS SCREENSHOTS ARE CAPTURED, NOT KEPT. Each is a Features shot taken again without its
+ * numbered rings (`scripts/docs/features/landing.ts#LANDING_SHOTS`), in the same run that
+ * regenerates the docs' images, so the landing cannot drift from the app while the docs don't.
+ *
+ * The feature map near the end is generated from the Features specs (#504): `features/landing.ts`
+ * groups them, a gate requires every spec to be grouped, and `site-content.ts` writes the result to
+ * `src/generated/landing-features.json`. Links into the docs go through the site's base.
  */
 import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro'
 import { Image } from 'astro:assets'
+import context from '../assets/landing/captured/context-now-trend.png'
+import diff from '../assets/landing/captured/diff.png'
+import guardReceipt from '../assets/landing/captured/guards-receipt.png'
+import fork from '../assets/landing/captured/lineage-fork.png'
+import forkPoint from '../assets/landing/captured/lineage-fork-point.png'
+import prompts from '../assets/landing/captured/prompts-manager.png'
+import questions from '../assets/landing/captured/questions-ask-user.png'
+import startSession from '../assets/landing/captured/sessions-start.png'
 import smile from '../assets/landing/enso-smile.png'
-import questions from '../../../docs/features/images/questions-ask-user.png'
-import startSession from '../../../docs/features/images/sessions-start.png'
-import prompts from '../../../docs/features/images/prompts-manager.png'
-import context from '../../../docs/features/images/context-now-trend.png'
-import diff from '../../../docs/features/images/diff.png'
-import fork from '../../../docs/features/images/lineage-fork.png'
-import lineage from '../../../docs/features/images/lineage-fork-point.png'
-import guardReceipt from '../../../docs/features/images/guards-receipt.png'
-import landingFeatureGroups from '../generated/landing-features.json'
 import Shot from '../components/Shot.astro'
+import landingFeatureGroups from '../generated/landing-features.json'
 import '../styles/landing.css'
 
 const base = import.meta.env.BASE_URL.replace(/\/$/, '')
 const feature = (slug: string): string => `${base}/features/${slug}/`
 const github = 'https://github.com/dopamine911/zen-harness-foundation'
+
 const factory = [
   ['Model', 'Which model is doing the work, and with how much effort?'],
   ['Instructions', 'What system prompt, saved prompt and task did the run begin with?'],
@@ -30,6 +41,7 @@ const factory = [
   ['Verification', 'What changed, what was tested, and what evidence remains?'],
   ['Human', 'Where did you answer, correct, redirect or change the conditions?'],
 ] as const
+
 const outcomes = [
   ['Allowed', 'The action could proceed.'],
   ['Asked', 'A decision was needed before proceeding.'],
@@ -42,8 +54,10 @@ const outcomes = [
 
 <StarlightPage
   frontmatter={{
+    // The tab reads "Give agents room to work. Keep the receipts. | Enso", as hello-enso's does.
     title: 'Give agents room to work. Keep the receipts.',
-    description: 'Work with capable coding agents, set the conditions, inspect the evidence, and try another path without erasing the first one.',
+    description:
+      'Work with capable coding agents, set the conditions, inspect the evidence, and try another path without erasing the first one.',
     template: 'splash',
     tableOfContents: false,
     prev: false,
@@ -51,97 +65,329 @@ const outcomes = [
     editUrl: false,
     hero: {
       title: 'Give agents room to work. | Keep the receipts.',
-      tagline: 'Enso is for developers who want the freedom of working with capable coding agents without removing themselves from the engineering process.',
+      tagline:
+        'Enso is for developers who want the freedom of working with capable coding agents without removing themselves from the engineering process.',
     },
   }}
 >
   <div class="landing not-content">
     <hr class="rule" />
+
     <section class="section" id="why">
       <div class="section-head">
         <div class="kicker">Trust, then verify</div>
         <h2>There is another path between blind trust and zero trust.</h2>
       </div>
       <div class="trust-grid">
-        <article class="trust-card"><div class="num">01</div><h3>Blind trust</h3><p>Hand over the process. Reconstruct the work when the result surprises you.</p></article>
-        <article class="trust-card active"><div class="num">02</div><h3>Trust, then verify</h3><p>Give the agent meaningful freedom. Preserve enough evidence to understand the work and step in when judgment matters.</p></article>
-        <article class="trust-card"><div class="num">03</div><h3>Zero trust</h3><p>Approve every movement. Stay involved, at the cost of the agent's room to work.</p></article>
+        <article class="trust-card">
+          <div class="num">01</div>
+          <h3>Blind trust</h3>
+          <p>Hand over the process. Reconstruct the work when the result surprises you.</p>
+        </article>
+        <article class="trust-card active">
+          <div class="num">02</div>
+          <h3>Trust, then verify</h3>
+          <p>Give the agent meaningful freedom. Preserve enough evidence to understand the work and step in when judgment matters.</p>
+        </article>
+        <article class="trust-card">
+          <div class="num">03</div>
+          <h3>Zero trust</h3>
+          <p>Approve every movement. Stay involved, at the cost of the agent's room to work.</p>
+        </article>
       </div>
       <div class="recognition">
         <h3>The instruction isn't always the intent.</h3>
         <p>You can write a perfectly reasonable prompt and get a perfectly reasonable result that still isn't what you meant.</p>
-        <p>Sometimes the agent misunderstood. Sometimes you left something important unsaid. Sometimes your own assumption was wrong. Enso gives you somewhere to look when the result and the intent part ways.</p>
+        <p>
+          Sometimes the agent misunderstood. Sometimes you left something important unsaid. Sometimes your own assumption was
+          wrong. Enso gives you somewhere to look when the result and the intent part ways.
+        </p>
       </div>
     </section>
 
     <section class="section proof" id="product">
       <div class="section-head">
         <div class="kicker">Work together</div>
-        <div><h2>Let the agent work without disappearing from the work.</h2><p class="section-intro">A thread is a working session, not just a prompt and an answer. The agent can investigate, edit, run tools and keep moving. When it needs your judgment, the question appears in the same place as the work.</p></div>
+        <div>
+          <h2>Let the agent work without disappearing from the work.</h2>
+          <p class="section-intro">
+            A thread is a working session, not just a prompt and an answer. The agent can investigate, edit, run tools and keep
+            moving. When it needs your judgment, the question appears in the same place as the work.
+          </p>
+        </div>
       </div>
-      <Shot image={questions} alt="Enso working thread with an ask_user question waiting for the developer's answer" wide />
+      <Shot image={questions} alt="An Enso thread with the agent's questions waiting for the developer's answer" wide />
       <div class="three">
-        <article class="feature"><h3>Questions when they matter</h3><p>The agent can stop and ask rather than guessing through an ambiguity. You can answer, redirect, change mode or add an image in the thread.</p></article>
-        <article class="feature"><h3>Permission without prompt fatigue</h3><p>Choose how much can happen without asking. A decision for the session does not have to become a permanent global rule.</p></article>
-        <article class="feature"><h3>Threads that remain threads</h3><p>Projects keep the work together. Open a stored thread later and its record is still there, ready to resume.</p></article>
+        <article class="feature">
+          <h3>Questions when they matter</h3>
+          <p>The agent can stop and ask rather than guessing through an ambiguity. You can answer, redirect, change mode or add an image in the thread.</p>
+        </article>
+        <article class="feature">
+          <h3>Permission without prompt fatigue</h3>
+          <p>Choose how much can happen without asking. A decision for the session does not have to become a permanent global rule.</p>
+        </article>
+        <article class="feature">
+          <h3>Threads that remain threads</h3>
+          <p>Projects keep the work together. Open a stored thread later and its record is still there, ready to resume.</p>
+        </article>
       </div>
       <p class="feature-docs-note">You do not have to approve every step to stay part of the process.</p>
-      <nav class="chapter-links" aria-label="Work together documentation"><a href={feature('chat')}>Chat →</a><a href={feature('questions-and-dialogs')}>Questions and dialogs →</a><a href={feature('permission-modes')}>Permission modes →</a><a href={feature('sessions-and-projects')}>Sessions and projects →</a></nav>
+      <nav class="chapter-links" aria-label="Work together documentation">
+        <a href={feature('chat')}>Chat →</a>
+        <a href={feature('questions-and-dialogs')}>Questions and dialogs →</a>
+        <a href={feature('permission-modes')}>Permission modes →</a>
+        <a href={feature('sessions-and-projects')}>Sessions and projects →</a>
+      </nav>
     </section>
 
     <section class="section" id="conditions">
-      <div class="section-head"><div class="kicker">Set the conditions</div><div><h2>A run starts with conditions you can see.</h2><p class="section-intro">Project, model, effort, permissions, system prompt and the task itself shape what happens next. Enso makes those choices explicit at the start instead of letting them disappear into setup.</p></div></div>
-      <div class="conditions-grid">
-        <div><Shot image={startSession} alt="Start a session dialog with model, effort, mode, system prompt, saved prompt and initial task" /><p class="quiet">Choose how the work starts, together, before the first request.</p></div>
-        <div><Shot image={prompts} alt="Enso prompt library showing reusable prompts, context cost and what the model receives" /><p class="quiet">Reuse system, append and session prompts. Inspect their context cost and what the model will receive. The system prompt stays fixed for the life of the thread.</p></div>
+      <div class="section-head">
+        <div class="kicker">Set the conditions</div>
+        <div>
+          <h2>A run starts with conditions you can see.</h2>
+          <p class="section-intro">
+            Project, model, effort, permissions, system prompt and the task itself shape what happens next. Enso makes those
+            choices explicit at the start instead of letting them disappear into setup.
+          </p>
+        </div>
       </div>
-      <nav class="chapter-links" aria-label="Session conditions documentation"><a href={feature('sessions-and-projects')}>Start a session →</a><a href={feature('prompts')}>Prompts →</a></nav>
+      <div class="conditions-grid">
+        <figure>
+          <Shot image={startSession} alt="The Start a session dialog: model, effort, mode, system prompt, saved prompt and the first task" />
+          <figcaption class="quiet">Choose how the work starts, together, before the first request.</figcaption>
+        </figure>
+        <figure>
+          <Shot image={prompts} alt="Enso's prompt library: reusable prompts, their context cost and what the model receives" />
+          <figcaption class="quiet">
+            Reuse system, append and session prompts. Inspect their context cost and what the model will receive. The system
+            prompt stays fixed for the life of the thread.
+          </figcaption>
+        </figure>
+      </div>
+      <nav class="chapter-links" aria-label="Session conditions documentation">
+        <a href={feature('sessions-and-projects')}>Start a session →</a>
+        <a href={feature('prompts')}>Prompts →</a>
+      </nav>
     </section>
 
     <section class="section proof" id="understand">
-      <div class="section-head"><div class="kicker">Understand what happened</div><h2>Understand what produced the result.</h2></div>
+      <div class="section-head">
+        <div class="kicker">Understand what happened</div>
+        <h2>Understand what produced the result.</h2>
+      </div>
       <div class="showcase">
         <article class="showcase-row">
-          <div class="showcase-copy"><div class="kicker">What did the model have?</div><h3>Inspect what it was working with.</h3><p>Context shows the composition of each request. The Context Browser opens the exact elements: system prompt, tool schemas, messages, injected context and tool results.</p><span class="detail">Context events also record model, mode and compaction changes. When a result surprises you, you have somewhere to look.</span><nav class="chapter-links" aria-label="Context documentation"><a href={feature('context')}>Context →</a><a href={feature('context-browser')}>Context Browser →</a></nav></div>
-          <Shot image={context} alt="Enso Context showing request composition and the request-by-request timeline" />
+          <div class="showcase-copy">
+            <div class="kicker">What did the model have?</div>
+            <h3>Inspect what it was working with.</h3>
+            <p>
+              Context shows the composition of each request. The Context Browser opens the exact elements: system prompt, tool
+              schemas, messages, injected context and tool results.
+            </p>
+            <span class="detail">
+              Context events also record model, mode and compaction changes. When a result surprises you, you have somewhere to
+              look.
+            </span>
+            <nav class="chapter-links" aria-label="Context documentation">
+              <a href={feature('context')}>Context →</a>
+              <a href={feature('context-browser')}>Context Browser →</a>
+            </nav>
+          </div>
+          <Shot image={context} alt="Enso Context: the composition of the next request and the request-by-request trend" />
         </article>
         <article class="showcase-row">
-          <div class="showcase-copy"><div class="kicker">What changed?</div><h3>Tool history tells you what was attempted. Diff tells you what is actually different.</h3><p>Diff reads the project, not the agent's tool history. It sees changes from an edit, a write, a shell command, a formatter or your own editor.</p><nav class="chapter-links" aria-label="Diff documentation"><a href={feature('diff')}>Diff →</a></nav></div>
-          <Shot image={diff} alt="Enso Diff showing the project's changed files and the old and new lines of a code change" />
+          <div class="showcase-copy">
+            <div class="kicker">What changed?</div>
+            <h3>Tool history tells you what was attempted. Diff tells you what is actually different.</h3>
+            <p>
+              Diff reads the project's git state, not the agent's tool history. It sees changes from an edit, a write, a shell
+              command, a formatter or your own editor.
+            </p>
+            <nav class="chapter-links" aria-label="Diff documentation">
+              <a href={feature('diff')}>Diff →</a>
+            </nav>
+          </div>
+          <Shot image={diff} alt="Enso Diff: the project's changed files, and the old and new lines of a change" />
         </article>
       </div>
-      <div class="diagnostics"><div class="kicker">How did the run behave?</div><h3>Separate signals. Room for judgment.</h3><p>Stats helps explain where time, context and cost went. Session Eval adds a timeline of human corrections, queued prompts, interrupts, declined questions, tool calls, writes, test and build activity, and refusal channels.</p><p>Enso keeps these signals separate instead of collapsing a session into a single quality score. They are evidence for investigating a run.</p><nav class="chapter-links" aria-label="Run diagnostics documentation"><a href={feature('stats')}>Stats →</a><a href={feature('session-eval')}>Session Eval →</a></nav></div>
+      <div class="diagnostics">
+        <div class="kicker">How did the run behave?</div>
+        <h3>Separate signals. Room for judgment.</h3>
+        <p>
+          Stats helps explain where time, context and cost went. Session Eval adds a timeline of human corrections, queued
+          prompts, interrupts, declined questions, tool calls, writes, test and build activity, and refusal channels.
+        </p>
+        <p>
+          Enso keeps these signals separate instead of collapsing a session into a single quality score. They are evidence for
+          investigating a run.
+        </p>
+        <nav class="chapter-links" aria-label="Run diagnostics documentation">
+          <a href={feature('stats')}>Stats →</a>
+          <a href={feature('session-eval')}>Session Eval →</a>
+        </nav>
+      </div>
     </section>
 
     <section class="section" id="forks">
-      <div class="section-head"><div class="kicker">Try another path</div><div><h2>Try another path without erasing the first one.</h2><p class="section-intro">Pick a prompt in an existing thread and fork from there. The original stays where it is. The new thread begins with the history before that point and puts the prompt back in front of you.</p></div></div>
-      <Shot image={fork} alt="A forked Enso thread showing its parent in the rail and the selected prompt back in the composer" />
-      <div class="lineage-row"><div class="showcase-copy"><div class="kicker">Lineage · run provenance</div><h3>Keep the conditions with the work.</h3><p>A run records conditions such as its model, effort, permissions, project revision and the configuration and context it began with. If two attempts behave differently, Enso gives you somewhere to look for what else changed.</p><span class="detail">Preserve both runs and the conditions they ran under. Inspect their fork points or compare threads with Session Eval from the command line. The browser does not yet have a side-by-side comparison workspace.</span><span class="detail">Forks share the project's working tree and keep the original system prompt. Start a new thread to try a different system prompt.</span><nav class="chapter-links" aria-label="Forks documentation"><a href={feature('lineage')}>Forks and lineage →</a></nav></div><Shot image={lineage} alt="Enso fork-point evidence showing parent identity, model, permissions, system prompt and recorded run conditions" /></div>
+      <div class="section-head">
+        <div class="kicker">Try another path</div>
+        <div>
+          <h2>Try another path without erasing the first one.</h2>
+          <p class="section-intro">
+            Pick a prompt in an existing thread and fork from there. The original stays where it is. The new thread begins with
+            the history before that point and puts the prompt back in front of you.
+          </p>
+        </div>
+      </div>
+      <div class="fork-pair">
+        <figure>
+          <Shot image={fork} alt="A fork in Enso: listed under the thread it came from, with the prompt it was forked at back in the composer" />
+          <figcaption class="quiet">
+            The fork, under the thread it came from in the rail, and the prompt it was forked at back in the composer.
+          </figcaption>
+        </figure>
+        <figure>
+          <Shot image={forkPoint} alt="A fork point: the parent thread, the model, the permission mode, the system prompt and the recorded run conditions" />
+          <figcaption class="quiet">Its fork point: where it came from, and the conditions its runs started under.</figcaption>
+        </figure>
+      </div>
+      <div class="lineage-copy showcase-copy">
+        <div class="kicker">Lineage · run provenance</div>
+        <h3>Keep the conditions with the work.</h3>
+        <p>
+          A run records conditions such as its model, effort, permissions and project revision, with fingerprints of the
+          configuration and context files it began with. If two attempts behave differently, Enso gives you somewhere to look
+          for what else changed.
+        </p>
+        <span class="detail">
+          Preserve both runs and the conditions they ran under. Inspect their fork points or compare threads with Session Eval
+          from the command line. The browser does not yet have a side-by-side comparison workspace.
+        </span>
+        <span class="detail">
+          Forks share the project's working tree and keep the original system prompt. Start a new thread to try a different
+          system prompt.
+        </span>
+        <nav class="chapter-links" aria-label="Forks documentation">
+          <a href={feature('lineage')}>Forks and lineage →</a>
+        </nav>
+      </div>
     </section>
 
     <section class="section" id="factory">
-      <div class="factory"><div><div class="kicker">The software factory</div><h2>Don't just use an agent. Build the system it works inside.</h2><p class="section-intro">The agent is one part of the system producing the software. The model, instructions, context, tools, permissions and project state all shape the result. Tests, feedback and human judgment matter too.</p><p class="section-intro">Change one of those conditions and the result may change with it. Enso gives those conditions somewhere to live and gives the work a record you can inspect.</p><div class="note">The software factory is not a machine you switch on and walk away from. It is a system you can inspect, tune and improve.</div></div><div class="factory-list">{factory.map(([name, question]) => (<div class="factory-item"><span>{name}</span><strong>{question}</strong></div>))}</div></div>
+      <div class="factory">
+        <div>
+          <div class="kicker">The software factory</div>
+          <h2>Don't just use an agent. Build the system it works inside.</h2>
+          <p class="section-intro">
+            The agent is one part of the system producing the software. The model, instructions, context, tools, permissions and
+            project state all shape the result. Tests, feedback and human judgment matter too.
+          </p>
+          <p class="section-intro">
+            Change one of those conditions and the result may change with it. Enso gives those conditions somewhere to live and
+            gives the work a record you can inspect.
+          </p>
+          <div class="note">
+            The software factory is not a machine you switch on and walk away from. It is a system you can inspect, tune and
+            improve.
+          </div>
+        </div>
+        <div class="factory-list">
+          {
+            factory.map(([name, question]) => (
+              <div class="factory-item">
+                <span>{name}</span>
+                <strong>{question}</strong>
+              </div>
+            ))
+          }
+        </div>
+      </div>
     </section>
 
     <section class="section proof" id="boundaries">
-      <div class="section-head"><div class="kicker">Freedom with boundaries</div><h2>Freedom works better when the rules are clear.</h2></div>
+      <div class="section-head">
+        <div class="kicker">Freedom with boundaries</div>
+        <h2>Freedom works better when the rules are clear.</h2>
+      </div>
       <div class="boundaries-grid">
         <div class="boundary-layers">
-          <article><h3>Permissions</h3><p>What can proceed, what needs an answer, and what is denied by policy.</p></article>
-          <article><h3>Questions</h3><p>A place for the agent to ask rather than guess.</p></article>
-          <article><h3>Guards</h3><p>Known classes of actions refused before they run, with a receipt explaining the boundary.</p></article>
-          <article><h3>Explicit web access</h3><p>A deliberate path to fetching and searching the web instead of opaque shell egress.</p></article>
+          <article>
+            <h3>Permissions</h3>
+            <p>What can proceed, what needs an answer, and what is denied by policy.</p>
+          </article>
+          <article>
+            <h3>Questions</h3>
+            <p>A place for the agent to ask rather than guess.</p>
+          </article>
+          <article>
+            <h3>Guards</h3>
+            <p>Known classes of actions refused before they run, with a receipt explaining the boundary.</p>
+          </article>
+          <article>
+            <h3>Explicit web access</h3>
+            <p>A deliberate path to fetching and searching the web instead of opaque shell egress.</p>
+          </article>
         </div>
-        <Shot image={guardReceipt} alt="Enso guard receipt explaining a write refused outside the workspace" />
+        <Shot image={guardReceipt} alt="An Enso guard receipt: reading .env refused as a credential read, with the guard and rule that decided it" />
       </div>
-      <dl class="outcomes">{outcomes.map(([name, meaning]) => (<div><dt>{name}</dt><dd>{meaning}</dd></div>))}</dl>
-      <nav class="chapter-links" aria-label="Boundaries documentation"><a href={feature('permission-modes')}>Permissions →</a><a href={feature('questions-and-dialogs')}>Questions →</a><a href={feature('guards-and-receipts')}>Guards and receipts →</a><a href={feature('web-access')}>Web access →</a></nav>
-      <aside class="honest"><div class="kicker">Security, honestly</div><h3>Enso is not a sandbox.</h3><p>Enso's permissions and guards cover paths it knows how to reason about. They do not isolate the machine. If you need containment, use a containment boundary.</p><p>Enso's job is to make the agent's working environment easier to understand, shape and investigate.</p></aside>
+      <dl class="outcomes">
+        {
+          outcomes.map(([name, meaning]) => (
+            <div>
+              <dt>{name}</dt>
+              <dd>{meaning}</dd>
+            </div>
+          ))
+        }
+      </dl>
+      <nav class="chapter-links" aria-label="Boundaries documentation">
+        <a href={feature('permission-modes')}>Permissions →</a>
+        <a href={feature('questions-and-dialogs')}>Questions →</a>
+        <a href={feature('guards-and-receipts')}>Guards and receipts →</a>
+        <a href={feature('web-access')}>Web access →</a>
+      </nav>
+      <aside class="honest">
+        <div class="kicker">Security, honestly</div>
+        <h3>Enso is not a sandbox.</h3>
+        <p>
+          Enso's permissions and guards cover paths it knows how to reason about. They do not isolate the machine. If you need
+          containment, use a containment boundary.
+        </p>
+        <p>Enso's job is to make the agent's working environment easier to understand, shape and investigate.</p>
+      </aside>
     </section>
 
-    <section class="section" id="foundation"><div class="pi-panel"><div><div class="kicker">Built on pi</div><h2>Use what works. Own what is different.</h2></div><div class="pi-copy"><p>Enso is built around pi rather than a private agent runtime of its own. pi handles the agent loop, model interaction, tools, sessions, branching and compaction.</p><p>Enso adds the browser, context inspection, permissions, evidence, lineage, debugging and the places where human judgment enters. That keeps Enso focused and gives it an existing ecosystem to build on.</p><nav class="chapter-links" aria-label="Foundation documentation"><a href="https://github.com/badlogic/pi-mono">pi →</a><a href={`${base}/architecture/`}>Architecture →</a></nav></div></div></section>
+    <section class="section" id="foundation">
+      <div class="pi-panel">
+        <div>
+          <div class="kicker">Built on pi</div>
+          <h2>Use what works. Own what is different.</h2>
+        </div>
+        <div class="pi-copy">
+          <p>
+            Enso is built around pi rather than a private agent runtime of its own. pi handles the agent loop, model interaction,
+            tools, sessions, branching and compaction.
+          </p>
+          <p>
+            Enso adds the browser, context inspection, permissions, evidence, lineage, debugging and the places where human
+            judgment enters. That keeps Enso focused and gives it an existing ecosystem to build on.
+          </p>
+          <nav class="chapter-links" aria-label="Foundation documentation">
+            <a href="https://github.com/earendil-works/pi">pi →</a>
+            <a href={`${base}/architecture/`}>Architecture →</a>
+          </nav>
+        </div>
+      </div>
+    </section>
 
-    <section class="section" id="features"><div class="section-head"><div class="kicker">Explore the features</div><div><h2>The full product map.</h2><p class="section-intro">The complete reference for working with Enso, inspecting a run and changing its conditions.</p></div></div>
+    <section class="section" id="features">
+      <div class="section-head">
+        <div class="kicker">Explore the features</div>
+        <div>
+          <h2>The full product map.</h2>
+          <p class="section-intro">The complete reference for working with Enso, inspecting a run and changing its conditions.</p>
+        </div>
+      </div>
       <div class="features-map">
         {
           landingFeatureGroups.map((group) => (
@@ -162,14 +408,41 @@ const outcomes = [
         }
       </div>
       <p class="feature-docs-note">
-        The feature docs document not only what each capability does, but also how to open it, what to look for, and what it does <em>not</em> do. <a href={`${base}/features/`}>Browse all feature documentation →</a>
+        The feature docs document not only what each capability does, but also how to open it, what to look for, and what it does
+        <em>not</em> do. <a href={`${base}/features/`}>Browse all feature documentation →</a>
       </p>
     </section>
 
-    <section class="section docs-evidence" id="documentation"><div class="section-head"><div class="kicker">Documentation as evidence</div><div><h2>The docs carry receipts too.</h2><p class="section-intro">The feature pages are built from the application and its source. Screenshots are regenerated from an Enso session, documented values are checked against what the app showed, and every feature page includes what it does not do. The build checks for drift.</p><nav class="chapter-links" aria-label="Documentation evidence"><a href={`${base}/features/`}>Features →</a><a href={`${base}/verification/`}>Verification →</a><a href={`${base}/architecture/`}>Architecture →</a></nav></div></div></section>
+    <section class="section docs-evidence" id="documentation">
+      <div class="section-head">
+        <div class="kicker">Documentation as evidence</div>
+        <div>
+          <h2>The docs carry receipts too.</h2>
+          <p class="section-intro">
+            The feature pages are built from the application and its source. Screenshots are regenerated from an Enso session,
+            documented values are checked against what the app showed, and every feature page includes what it does not do. The
+            build checks for drift.
+          </p>
+          <nav class="chapter-links" aria-label="Documentation evidence">
+            <a href={`${base}/features/`}>Features →</a>
+            <a href={`${base}/verification/`}>Verification →</a>
+            <a href={`${base}/architecture/`}>Architecture →</a>
+          </nav>
+        </div>
+      </div>
+    </section>
+
     <div class="smile-divider"><Image class="enso-smile" src={smile} alt="" width={54} height={54} /></div>
     <hr class="rule" />
-    <section class="final"><Image class="enso-smile" src={smile} alt="" width={74} height={74} /><h2>I check your work.<br />You check mine.<br />The system keeps the receipts.</h2><p>Enso is for developers who want capable agents to do real work without making the process disappear.</p><div class="hero-actions"><a class="button primary" href={github}>View on GitHub</a><a class="button" href={`${base}/features/`}>Read the docs</a></div></section>
+    <section class="final">
+      <Image class="enso-smile" src={smile} alt="" width={74} height={74} />
+      <h2>I check your work.<br />You check mine.<br />The system keeps the receipts.</h2>
+      <p>Enso is for developers who want capable agents to do real work without making the process disappear.</p>
+      <div class="hero-actions">
+        <a class="button primary" href={github}>View on GitHub</a>
+        <a class="button" href={`${base}/features/`}>Read the docs</a>
+      </div>
+    </section>
   </div>
 
   <div class="landing-lightbox" role="dialog" aria-modal="true" aria-label="Expanded product screenshot" data-lightbox>
