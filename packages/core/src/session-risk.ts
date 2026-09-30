@@ -311,8 +311,9 @@ const ONE_LINER =
 const INTERNALS = /guards?\/|guard\.ts|permissions\.json|extensions\/[\w.-]+\/config\.json|(?:^|[\s/'"])\.enso(?:\/|\b)/
 
 /**
- * A refusal of a shell call — by the guard, whatever rule, or by the permission engine on `bash`.
- * Read off the call, not the rule's name, so a rule added to the shell denies counts at once.
+ * A refusal of a shell call (`bash`, `powershell`) — by the guard, whatever rule, or by the
+ * permission engine, whose surface is the tool it refused. Read off the call, not the rule's name,
+ * so a rule added to the shell denies counts at once.
  */
 function isShellDenial(recent: RecentCall): boolean {
   if (recent.denial === undefined) return false
