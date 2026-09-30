@@ -162,14 +162,14 @@ html:has(.landing) {
 }
 
 .landing .section {
-  padding: 96px 0;
+  padding: 68px 0;
 }
 
 .landing .section-head {
   display: grid;
   grid-template-columns: 0.75fr 1.25fr;
   gap: 70px;
-  margin-bottom: 60px;
+  margin-bottom: 40px;
 }
 
 .landing .kicker {
@@ -218,7 +218,7 @@ html:has(.landing) {
 
 .landing .trust-card {
   padding: 30px;
-  min-height: 240px;
+  min-height: 200px;
   border-right: 1px solid var(--border);
 }
 
@@ -233,7 +233,7 @@ html:has(.landing) {
 
 .landing .trust-card h3 {
   font: 600 21px/1.25 var(--display);
-  margin: 48px 0 12px;
+  margin: 28px 0 12px;
 }
 
 .landing .trust-card p {
@@ -248,77 +248,6 @@ html:has(.landing) {
 
 .landing .trust-card.active h3 {
   color: var(--cyan);
-}
-
-/* ── The genie problem ── */
-.landing .genie {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 54px;
-  align-items: center;
-}
-
-.landing .quote-panel {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 34px;
-}
-
-.landing .quote-panel .wish {
-  font: 500 17px/1.6 var(--mono);
-  color: var(--fg);
-  margin: 0 0 28px;
-}
-
-.landing .flow {
-  display: grid;
-  gap: 10px;
-}
-
-.landing .flow-row {
-  display: grid;
-  grid-template-columns: 100px 1fr;
-  gap: 16px;
-  padding-top: 14px;
-  border-top: 1px solid var(--border);
-  font-size: 14px;
-}
-
-.landing .flow-row span:first-child {
-  font-family: var(--mono);
-  color: var(--muted);
-}
-
-.landing .flow-row.bad span:last-child {
-  color: var(--sl-color-red-high);
-}
-
-.landing .flow-row.good span:last-child {
-  color: var(--sl-color-green-high);
-}
-
-.landing .copy h3 {
-  font: 600 30px/1.2 var(--display);
-  margin: 0 0 20px;
-}
-
-.landing .copy p {
-  color: var(--soft);
-  margin: 0 0 18px;
-}
-
-.landing .copy p:last-child {
-  margin-bottom: 0;
-}
-
-.landing .centred {
-  max-width: 760px;
-  margin: 46px auto 0;
-}
-
-.landing .centred .quiet {
-  margin-top: 16px;
 }
 
 /* ── Showcase ── */
@@ -357,11 +286,6 @@ html:has(.landing) {
   margin-top: 15px;
   color: var(--muted);
   font-size: 14px;
-}
-
-.landing .stack {
-  display: grid;
-  gap: 14px;
 }
 
 /* A screenshot that opens full size (`Shot.astro`, the lightbox script on the page). */
@@ -428,13 +352,6 @@ html:has(.landing) {
 .landing .feature {
   border-top: 1px solid var(--border);
   padding-top: 24px;
-}
-
-.landing .feature .state {
-  font: 500 11px var(--mono);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--cyan);
 }
 
 .landing .feature h3 {
@@ -505,14 +422,12 @@ html:has(.landing) {
   font-size: 14px;
 }
 
-.landing .feature-docs-note a,
-.landing .pi-link {
+.landing .feature-docs-note a {
   color: var(--cyan);
   text-decoration: none;
 }
 
-.landing .feature-docs-note a:hover,
-.landing .pi-link:hover {
+.landing .feature-docs-note a:hover {
   text-decoration: underline;
 }
 
@@ -539,7 +454,7 @@ html:has(.landing) {
 
 .landing .factory-item {
   display: grid;
-  grid-template-columns: 120px 1fr;
+  grid-template-columns: 145px 1fr;
   gap: 20px;
   padding: 18px 0;
   border-bottom: 1px solid var(--border);
@@ -554,14 +469,6 @@ html:has(.landing) {
 
 .landing .factory-item strong {
   font-weight: 500;
-}
-
-.landing .factory-answer {
-  display: block;
-  margin-top: 6px;
-  color: var(--muted);
-  font-size: 14px;
-  font-weight: 400;
 }
 
 .landing .note {
@@ -596,27 +503,119 @@ html:has(.landing) {
   margin-bottom: 0;
 }
 
-/* ── Security, honestly ── */
-.landing .honest {
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 42px;
-  background: var(--surface);
+/* ── Editorial chapters ── */
+.landing .recognition {
+  max-width: 780px;
+  margin: 44px auto 0;
+  padding-left: 24px;
+  border-left: 2px solid var(--violet);
 }
 
-.landing .honest h2 {
-  margin-top: 14px;
-  max-width: 800px;
+.landing .recognition h3,
+.landing .diagnostics h3,
+.landing .honest h3 {
+  font: 600 27px/1.2 var(--display);
+  margin: 10px 0 14px;
+}
+
+.landing .recognition p,
+.landing .diagnostics p,
+.landing .boundary-layers p {
+  color: var(--soft);
+  margin: 12px 0 0;
+}
+
+.landing .conditions-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+  gap: 28px;
+  align-items: start;
+}
+
+.landing .chapter-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 24px;
+  margin-top: 24px;
+  font-size: 14px;
+}
+
+.landing .chapter-links a {
+  color: var(--cyan);
+  text-decoration: none;
+}
+
+.landing .chapter-links a:hover {
+  text-decoration: underline;
+}
+
+.landing .diagnostics {
+  margin-top: 40px;
+  padding-top: 28px;
+  border-top: 1px solid var(--border);
+  max-width: 840px;
+}
+
+.landing .lineage-row,
+.landing .boundaries-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 40px;
+  margin-top: 36px;
+  align-items: start;
+}
+
+.landing .boundary-layers {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+}
+
+.landing .boundary-layers h3 {
+  font: 600 21px/1.25 var(--display);
+  margin: 0;
+}
+
+.landing .outcomes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px 28px;
+  margin: 32px 0 0;
+}
+
+.landing .outcomes > div {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.landing .outcomes dt {
+  font: 500 12px var(--mono);
+  color: var(--fg);
+}
+
+.landing .outcomes dd {
+  color: var(--muted);
+  font-size: 14px;
+  margin: 6px 0 0;
+}
+
+.landing .docs-evidence .section-head {
+  margin-bottom: 0;
+}
+
+/* ── Security, honestly ── */
+.landing .honest {
+  margin-top: 36px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 28px;
+  background: var(--surface);
 }
 
 .landing .honest p {
   max-width: 780px;
   color: var(--soft);
-  font-size: 18px;
-}
-
-.landing .honest strong {
-  color: var(--fg);
+  font-size: 16px;
 }
 
 /* ── Close ── */
@@ -681,7 +680,7 @@ html:has(.landing) {
 
 .landing-lightbox img {
   display: block;
-  max-width: min(96vw, 1800px);
+  max-width: min(100%, 1800px);
   max-height: 90vh;
   width: auto;
   height: auto;
@@ -713,11 +712,10 @@ html:has(.landing) {
   }
 
   .landing .section {
-    padding: 72px 0;
+    padding: 48px 0;
   }
 
   .landing .section-head,
-  .landing .genie,
   .landing .factory,
   .landing .pi-panel {
     grid-template-columns: 1fr;
@@ -728,6 +726,9 @@ html:has(.landing) {
     padding: 30px;
   }
 
+  .landing .conditions-grid,
+  .landing .lineage-row,
+  .landing .boundaries-grid,
   .landing .features-map,
   .landing .trust-grid,
   .landing .three,
@@ -758,8 +759,8 @@ html:has(.landing) {
     grid-template-columns: 90px 1fr;
   }
 
-  .landing .honest {
-    padding: 28px;
+  .landing .outcomes {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -776,12 +777,17 @@ html:has(.landing) {
     font-size: 34px;
   }
 
-  .landing .quote-panel {
-    padding: 22px;
+  .landing .boundary-layers,
+  .landing .outcomes {
+    grid-template-columns: 1fr;
   }
 
-  .landing .flow-row {
-    grid-template-columns: 1fr;
+  .landing .feature-link {
+    flex-direction: column;
     gap: 4px;
+  }
+
+  .landing .feature-link span {
+    text-align: left;
   }
 }
