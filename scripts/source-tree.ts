@@ -21,7 +21,7 @@ const SKIPPED_DIRECTORIES: readonly string[] = ['node_modules', 'dist', 'dist-ty
 /**
  * A TypeScript or JavaScript module, any flavour. Exported because a reader of source
  * FILENAMES has the same question as this walker and must not answer it more narrowly:
- * `test/prose-citation-gate.test.ts` recognises a file mentioned in prose with it, and the
+ * `scripts/docs/source-citations.ts` recognises a file a page cites with it, and the
  * hand-rolled `tsx?|mjs` it replaced would have stopped seeing a `.cjs` or `.mts` page
  * citation the day one appeared — silently, since an unrecognised mention is simply not a
  * citation (PR #323 review). One extension set, every caller.

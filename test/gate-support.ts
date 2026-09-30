@@ -43,7 +43,7 @@ export function sourceFiles(directory: string, includeTests = false): string[] {
 /**
  * Every markdown page under `directory`, absolute paths — the docs' counterpart to
  * `sourceFiles`. Here rather than in one gate because two read it: `docs-gate.test.ts` for
- * fences and generated blocks, `prose-citation-gate.test.ts` for line citations, and a second
+ * fences and generated blocks, `source-citation-gate.test.ts` for source citations, and a second
  * copy is how a page ends up scanned by one of them and not the other.
  *
  * ⚠ BUILD OUTPUT IS SKIPPED (#482): the pages `build-docs.ts` writes are gitignored and correct by

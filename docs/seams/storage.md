@@ -343,15 +343,16 @@ converter, so the test reads what the real host would hand out.
 
 ## What fences it
 
-- **The storage-seam test**: `packages/core/src/__tests__/no-duplicate-paths.test.ts` line 99 —
+- **The storage-seam test**: `no-duplicate-paths.test.ts#STORAGE_SEAM` —
   "`SessionManager` is imported ONLY by the web host's agent-host.ts — the storage seam" — a scan of
   every non-test source root; the `.enso` literal is likewise assembled only in `paths.ts` — plus
-  `guard.ts`, where it is corpus data for `ENSO_PERSISTENCE_WRITE_DIRECTORIES` (line 263).
+  `guard.ts`, where it is corpus data for `guard.ts#ENSO_PERSISTENCE_WRITE_DIRECTORIES`.
 - **The vendor gate** (`test/vendor-gate.test.ts`, #145): the runtime's package is imported only under
   `packages/web/src/host/` and `packages/harness/extensions/`.
 - **Closed wire schemas**: `EnsoThreadInspection`, `EnsoStoredThread`, `EnsoThreadHistory` are
-  `additionalProperties: false` (thread-inspection.ts lines 84, 239, 280) — no host internal leaks by
-  an accidental spread; `server-handler.test.ts` line 444 checks summaries against `EnsoThreadSummary`.
+  `additionalProperties: false` (`thread-inspection.ts#EnsoThreadInspection`, `thread-inspection.ts#EnsoStoredThread`,
+  `thread-inspection.ts#EnsoThreadHistory`) — no host internal leaks by
+  an accidental spread; `server-handler.test.ts`'s "GET /api/threads lists live threads" test checks summaries against `EnsoThreadSummary`.
 
 ## What crosses it that should not
 

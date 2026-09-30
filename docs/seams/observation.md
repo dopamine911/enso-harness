@@ -16,7 +16,7 @@ Every fence on this page is the source, checked by `test/docs-gate.test.ts`. Ref
 
 ## The contract
 
-The union. Closed, and with no "skip" member by design (module header, `observation.ts` lines 9–13):
+The union. Closed, and with no "skip" member by design (module header, `observation.ts`):
 an event the mapper has no word for becomes `unmapped`, so dropping is inexpressible.
 
 <!-- source: packages/core/src/observation.ts#EnsoObservation -->
@@ -73,7 +73,7 @@ export const EnsoUsage = Type.Object({
 ```
 
 The frames. Every follow opens with exactly one snapshot, then observations each with a `seq` greater
-than the last, and status frames (`follow.ts` header, lines 11–15):
+than the last, and status frames (`follow.ts` header):
 
 <!-- source: packages/core/src/follow.ts#EnsoFollowFrame -->
 ```ts
@@ -171,11 +171,11 @@ export const EnsoFollowStatus = Type.Object(
 
 **Produced in two places.** The mapper, `mapPiEvent` in `packages/web/src/host/map-events.ts` (below
 the thread-runtime seam since L2, #162 workstream 4)
-(line 229, top-level; not fenced here because the declaration is the whole 120-line switch): one
-runtime event in, one observation out, never `undefined` (header lines 25–28). Its second parameter is
+(`host/map-events.ts#mapPiEvent`, top-level; not fenced here because the declaration is one long switch): one
+runtime event in, one observation out, never `undefined` (the header of `host/map-events.ts`). Its second parameter is
 the delivery the host tagged (#96): `replayed` becomes `origin: "session-start"` on a ui request, `live`
-becomes `"run"` (lines 225–227). The one kind the server synthesises itself is `prompt-rejected`: the
-prompt route in `packages/web/src/server/follow.ts` announces it (line 256) when the runtime refuses
+becomes `"run"` (`host/map-events.ts#mapExtensionUiRequest`). The one kind the server synthesises itself is `prompt-rejected`: the
+prompt route in `packages/web/src/server/follow.ts` announces it (`server/follow.ts#promptThread`) when the runtime refuses
 a prompt after its receipt went out. Both are grounded in the kinds table's "Produced by" column.
 
 **Minted once.** The registry, `packages/web/src/server/thread-registry.ts`, is the only place a `seq`
@@ -194,9 +194,9 @@ snapshot and status frames whole as chunks named by their type, closes runs on `
 observation → state-layer chunk, run in the page, never serialised or stored (its header).
 
 **The resync rule.** Nothing is replayed by cursor. A reconnect opens a new follow and gets a new
-snapshot (`follow.ts` header lines 13–15; `server/follow.ts` lines 175–186); when the last follower
+snapshot (`follow.ts` header; `server/follow.ts#followThread`); when the last follower
 leaves, the registry forgets the feed and `seq` restarts with the next follower, snapshot-first
-(`thread-registry.ts` lines 563–571). `asOfSeq` is the watermark the snapshot is complete through.
+(`thread-registry.ts#createThreadRegistry`). `asOfSeq` is the watermark the snapshot is complete through.
 
 ## What fences it
 
@@ -208,9 +208,9 @@ leaves, the registry forgets the feed and `seq` restarts with the next follower,
   in `@enso/core` because both sweeps sit in zones that may import only `core` (#173).
 - **The generated inventory**: `docs/reference/observations.md` must equal its generator's stdout
   (`test/docs-gate.test.ts`); a kind with no producer or consumer is printed as a finding, not omitted.
-- **Closed frames**: the three frame schemas are `additionalProperties: false` (`follow.ts` lines
-  40, 50, 61); the browser refuses a frame that fails `EnsoFollowFrame` with a problem record, not a
-  crash (`follow-connection.ts` lines 497–500).
+- **Closed frames**: the three frame schemas are `additionalProperties: false` (`core/src/follow.ts#EnsoFollowSnapshot`,
+  `core/src/follow.ts#EnsoFollowObservation`, `core/src/follow.ts#EnsoFollowStatus`); the browser refuses a frame that fails `EnsoFollowFrame` with a problem record, not a
+  crash (`follow-connection.ts#admitted`).
 - **The vendor gate** (`test/vendor-gate.test.ts`, #145): the mapper and the adapter import
   `@enso/core`, not the runtime's package.
 
@@ -227,7 +227,7 @@ renders what is waiting and "this one cuts in" is a different sentence from "thi
 turn"; a runtime with one queue class, or three, changes this shape and nothing above it.
 
 **`messages` on the snapshot is the state layer's shape.** `EnsoFollowSnapshot.messages`
-(`follow.ts` line 56), carried as `Type.Array(Type.Unknown())`: not an observation but the storage
+(`core/src/follow.ts#EnsoFollowSnapshot`), carried as `Type.Array(Type.Unknown())`: not an observation but the storage
 seam's rebuild, built by `server/transcript-to-messages.ts` and put on the opening snapshot by the
 follow route — see `storage.md`, and `presentation.md` → *What crosses it that should not*, which
 prices it. It is on THIS wire, with `Unknown` in place of a shape, and no client reads it off the
@@ -264,7 +264,7 @@ by one: snapshot, `seq`, status, dialog outcomes) emits observations and proves 
 today without a runtime at all.
 
 Replace the state layer instead and the adapter goes: `to-agui.ts` and the
-router — "a renderer that stops speaking AG-UI deletes it and the adapter" (`to-agui.ts` line 28).
+router — "a renderer that stops speaking AG-UI deletes it and the adapter" (`to-agui.ts` header).
 The observation vocabulary survives whole, and so does every frame that carries one. The wire does
 NOT: `EnsoFollowSnapshot.messages` is the state layer's shape on this wire and
 `EnsoThreadHistory.messages` is the same shape on the history route, both as `Unknown` — so both

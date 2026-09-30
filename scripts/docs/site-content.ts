@@ -2,6 +2,7 @@ import { copyFileSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, w
 import { dirname, join, relative } from 'node:path'
 import { findRepoRoot } from '../../packages/core/src/paths.ts'
 import { SITE_BASE } from './site-base.ts'
+import { linkCitations } from './source-citations.ts'
 
 /**
  * Projects `docs/` into the Starlight site's content collection (#188).
@@ -164,10 +165,13 @@ export function rewriteLinks(source: string, page: string, anchoredAt: 'docs' | 
  * `#` line showed the title twice — verified in the built page before this. The H1 is removed
  * from the projection and nowhere else: `docs/` keeps it, because a markdown file read on GitHub
  * has no frontmatter to render in its place.
+ *
+ * Every `path#Name` citation becomes a link to that declaration's line on GitHub (#482,
+ * `source-citations.ts`): the page names the declaration, the build computes where it is.
  */
 export function withFrontmatter(source: string, page: string, anchoredAt: 'docs' | 'repository' = 'docs'): string {
   const title = pageTitle(source, page).replace(/"/g, "'")
-  const body = rewriteLinks(source, page, anchoredAt).replace(/^#\s+.+?\s*$\n*/m, '')
+  const body = rewriteLinks(linkCitations(source, BLOB), page, anchoredAt).replace(/^#\s+.+?\s*$\n*/m, '')
   return `---\ntitle: "${title}"\n---\n\n${body}`
 }
 

@@ -231,11 +231,11 @@ question so a reconnect renders the card at once.
    is visible: `prompt` at admission (202 + receipt), `abort` 200 with the queue it handed back
    (`EnsoAbortReceipt`, #116 / #75) once pi was told, `dialog` 204 when the question was spent, and
    `mode` 204 once the runtime was told — refused 409 while a run is in flight, since a mode change
-   is not queued behind one, and 422 for a mode the thread does not offer (`follow.ts#changeThreadMode`).
+   is not queued behind one, and 422 for a mode the thread does not offer (`server/follow.ts#changeThreadMode`).
    Their effects arrive on the follow for every follower alike. `mode` is also the second route that
    ACQUIRES ([`routes.md`](./reference/routes.md): *Builds / acquires? yes*), which is why the rule is
    not "a route never releases": the settle observer ends a *run*, and a route releases where
-   acceptance IS completion — an extension command (`follow.ts#promptThread`, on `onAccepted`) and a
+   acceptance IS completion — an extension command (`server/follow.ts#promptThread`, on `onAccepted`) and a
    mode change (`#changeThreadMode`, likewise) — or where the prompt was refused before it became one.
 3. **The snapshot is the resync.** Nothing is replayed by cursor; a follow opens with the thread as of
    `asOfSeq` and continues from there.

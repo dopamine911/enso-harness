@@ -11,6 +11,7 @@ import {
   stringConstant,
 } from '../scripts/docs/gate-source.ts'
 import { FENCE_OPEN, SOURCEABLE_FENCE_LANGUAGE } from '../scripts/docs/refresh-fences.ts'
+import { declarationsIn } from '../scripts/docs/source-citations.ts'
 import { markdownFiles, REPOSITORY_ROOT } from './gate-support.ts'
 
 /**
@@ -416,10 +417,11 @@ test('⚠ a symbol named beside a source link is declared in the file it links (
     for (const citation of sourceCitations(readFileSync(path, 'utf8'))) {
       const target = join(path, '..', citation.file)
       if (!existsSync(target)) continue // the link gate above names this one
-      const source = readFileSync(target, 'utf8')
+      // Declared, as the TypeScript parser reads the file (#482), not as a regex over it would guess.
+      const declared = declarationsIn(target, readFileSync(target, 'utf8'))
       for (const name of citation.claimed) {
         if (retired.has(name) || /^Pi[A-Z]/.test(name)) continue
-        if (new RegExp(`\\b(?:type|interface|class|function|const|enum)\\s+${name}\\b`).test(source)) continue
+        if (declared.has(name)) continue
         offenders.push(`${page}:${citation.line}: ${citation.file} declares no ${name}`)
       }
     }
