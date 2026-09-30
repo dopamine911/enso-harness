@@ -37,7 +37,11 @@ function linkTo(path: string, line?: number): string {
   return line === undefined ? target : `${target}#L${line}`
 }
 
-const shortFile = (file: string): string => file.replace(/^packages\/[^/]+\/src\//, '')
+/** `packages/<name>/src/<rest>` shown as `<rest>`; any other path as it is. */
+function shortFile(file: string): string {
+  const [root, , source, ...rest] = file.split('/')
+  return root === 'packages' && source === 'src' && rest.length > 0 ? rest.join('/') : file
+}
 const baseName = (file: string): string => file.split('/').at(-1) ?? file
 
 function anchorLink(at: Anchor): string {

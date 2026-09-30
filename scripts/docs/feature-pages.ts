@@ -16,7 +16,8 @@ import { ROOT } from './flow-tags.ts'
  */
 
 const PAGE_DIRECTORY = 'docs/features'
-const PLACEHOLDER = /\{(\w+)\}/g
+/** A piece of a sentence: text as written, or a `{name}` placeholder a capture fills. */
+type Piece = { readonly text: string } | { readonly name: string }
 
 /** Every feature page this build writes, repository-relative. */
 export function builtFeaturePages(): string[] {
@@ -55,15 +56,45 @@ export function featureProblems(spec: FeatureSpec, facts: FeatureFacts | undefin
   return problems
 }
 
+const isNameCharacter = (character: string | undefined): boolean =>
+  character !== undefined &&
+  (character === '_' || (character >= '0' && character <= '9') || character.toLowerCase() !== character.toUpperCase())
+
+/** A non-empty run of letters, digits and `_`. */
+function isName(text: string): boolean {
+  if (text === '') return false
+  for (let position = 0; position < text.length; position += 1) if (!isNameCharacter(text[position])) return false
+  return true
+}
+
+/** A sentence split at its `{name}` placeholders; a brace that opens no name stays text. */
+function piecesOf(text: string): Piece[] {
+  const pieces: Piece[] = []
+  let literal = ''
+  for (let position = 0; position < text.length; position += 1) {
+    const close = text[position] === '{' ? text.indexOf('}', position) : -1
+    const name = close === -1 ? '' : text.slice(position + 1, close)
+    if (isName(name)) {
+      pieces.push({ text: literal }, { name })
+      literal = ''
+      position = close
+    } else literal += text[position]
+  }
+  return [...pieces, { text: literal }]
+}
+
+const namesIn = (text: string): string[] => piecesOf(text).flatMap((piece) => ('name' in piece ? [piece.name] : []))
+
 function unfilled(id: string, text: string, values: Readonly<Record<string, string>>): string[] {
-  return [...text.matchAll(PLACEHOLDER)]
-    .map((match) => match[1] ?? '')
+  return namesIn(text)
     .filter((name) => name !== 'shown' && (values[name] ?? '') === '')
     .map((name) => `${id}: "{${name}}" is quoted but the capture measured no value for it`)
 }
 
 const fill = (text: string, values: Readonly<Record<string, string>>): string =>
-  text.replaceAll(PLACEHOLDER, (whole, name: string) => values[name] ?? whole)
+  piecesOf(text)
+    .map((piece) => ('name' in piece ? (values[piece.name] ?? `{${piece.name}}`) : piece.text))
+    .join('')
 
 const capitalized = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1)
 

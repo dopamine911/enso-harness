@@ -1,7 +1,9 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { basename, dirname, join, relative } from 'node:path'
+import typescript from 'typescript'
 import { findRepoRoot } from '../../packages/core/src/paths.ts'
 import { filesUnder } from '../source-tree.ts'
+import { commentsIn, type SourceComment } from './source-comments.ts'
 
 /**
  * What a flow page is built from (#482): tags in source comments and the diagrams tests record.
@@ -15,10 +17,11 @@ import { filesUnder } from '../source-tree.ts'
  *   `// @pins <flow>/<name> …` on the line above a `test(` — that test holds those invariants.
  *   `toMatchSnapshot('flow <id>: <caption>')` — a diagram a test recorded (`flow-trace.ts`).
  *
- * ⚠ Read as TEXT, like every generator here: a tag is a line in a comment that starts with `@`,
- * and it runs to the next tag or the comment's end. The symbol a tag belongs to is the
- * declaration after its doc comment, or, for a `//` comment inside a body, the nearest enclosing
- * declaration above it. A tag whose symbol cannot be found is a PROBLEM, never a guess.
+ * ⚠ PARSED, NOT MATCHED (PR #488 review): which declaration a tag documents, and which test a pin
+ * sits on, come from the TypeScript syntax tree (`source-comments.ts`), and the snapshot files are
+ * read by the same parser. Only the tag syntax inside a comment is read as text, the way a reader
+ * reads it: a line starting `@name`, running to the next such line or the comment's end. A tag with
+ * no declaration to belong to is a PROBLEM, never a guess.
  *
  * Problems are returned, not thrown: `test/flow-pages.test.ts` asserts there are none, and
  * `flow-pages.ts` refuses to write a page while there are any.
@@ -76,16 +79,6 @@ export interface FlowModel {
   readonly problems: readonly string[]
 }
 
-interface Comment {
-  /** 0-based index of the comment's first line. */
-  readonly start: number
-  /** 0-based index of the comment's last line. */
-  readonly end: number
-  readonly style: 'block' | 'line'
-  /** The text, comment markers removed. */
-  readonly lines: readonly string[]
-}
-
 interface Tag {
   readonly name: string
   readonly head: string
@@ -94,46 +87,32 @@ interface Tag {
 
 /** Every tree that holds owned source or tests: a flow's rules live in launchers and gates as much as in packages. */
 const SCAN_ROOTS = ['packages', 'scripts', 'test'] as const
-const TAG_LINE = /^@(\w+)\s*(.*)$/
-const DECLARATION =
-  /^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function\*?\s+(\w+)|(?:const|let|var|class|interface|type|enum)\s+(\w+)|(\w+)\s*(?:<[^>]*>)?\s*\()/
-const NOT_A_NAME = new Set(['if', 'for', 'while', 'switch', 'return', 'catch', 'await', 'typeof', 'void', 'new'])
-const SNAPSHOT_KEY = /^(.*): flow ([a-z0-9-]+): (.+) \d+$/s
-const QUOTES = `'"\``
+/** The tags a file must mention before it is parsed at all: most of the tree has none. */
+const TAG_NAMES = ['@flow', '@invariant', '@pins'] as const
+/** The marker a recording test puts in its snapshot hint: `toMatchSnapshot('flow <id>: <caption>')`. */
+const FLOW_HINT = ': flow '
 
-function blockText(line: string, first: boolean, last: boolean): string {
-  let text = line
-  if (first) text = text.replace(/^\s*\/\*\*?\s?/, '')
-  if (last) text = text.replace(/\s*\*\/\s*$/, '')
-  return first ? text : text.replace(/^\s*\*\s?/, '')
+/** Words separated by any run of spaces or tabs. */
+const wordsOf = (text: string): string[] =>
+  text
+    .replaceAll('\t', ' ')
+    .split(' ')
+    .filter((word) => word !== '')
+
+/** A comment line that opens a tag: `@name rest of the line`, the name up to the first space. */
+function tagLine(line: string): { name: string; head: string } | undefined {
+  const trimmed = line.trim()
+  if (!trimmed.startsWith('@')) return undefined
+  const [name = '', ...head] = wordsOf(trimmed.slice(1))
+  return name === '' ? undefined : { name, head: head.join(' ') }
 }
 
-/** Every `/** … *\/` block and every run of `//` lines that starts a line, in order. */
-function commentsOf(lines: readonly string[]): Comment[] {
-  const comments: Comment[] = []
-  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
-    const trimmed = (lines[lineIndex] ?? '').trimStart()
-    const start = lineIndex
-    if (trimmed.startsWith('/*')) {
-      while (!(lines[lineIndex] ?? '').includes('*/') && lineIndex + 1 < lines.length) lineIndex += 1
-      const body = lines
-        .slice(start, lineIndex + 1)
-        .map((line, at, all) => blockText(line, at === 0, at === all.length - 1))
-      comments.push({ start, end: lineIndex, style: 'block', lines: body })
-    } else if (trimmed.startsWith('//')) {
-      while ((lines[lineIndex + 1] ?? '').trimStart().startsWith('//')) lineIndex += 1
-      const body = lines.slice(start, lineIndex + 1).map((line) => line.replace(/^\s*\/\/\s?/, ''))
-      comments.push({ start, end: lineIndex, style: 'line', lines: body })
-    }
-  }
-  return comments
-}
-
-function tagsOf(comment: Comment): Tag[] {
+/** A comment's tags, each running to the next tag or the comment's end. */
+function tagsOf(comment: SourceComment): Tag[] {
   const tags: Tag[] = []
   for (const line of comment.lines) {
-    const match = TAG_LINE.exec(line.trim())
-    if (match !== null) tags.push({ name: match[1] ?? '', head: (match[2] ?? '').trim(), body: [] })
+    const opened = tagLine(line)
+    if (opened !== undefined) tags.push({ ...opened, body: [] })
     else tags.at(-1)?.body.push(line.trim())
   }
   return tags
@@ -141,59 +120,15 @@ function tagsOf(comment: Comment): Tag[] {
 
 /** Lines joined into paragraphs: a blank line separates them, and trailing blanks go. */
 function prose(lines: readonly string[]): string {
-  return lines
-    .join('\n')
-    .split(/\n\s*\n/)
-    .map((paragraph) => paragraph.split('\n').join(' ').trim())
+  const paragraphs: string[][] = [[]]
+  for (const line of lines) {
+    if (line.trim() === '') paragraphs.push([])
+    else paragraphs.at(-1)?.push(line.trim())
+  }
+  return paragraphs
     .filter((paragraph) => paragraph.length > 0)
+    .map((paragraph) => paragraph.join(' '))
     .join('\n\n')
-}
-
-function declaredName(line: string): string | undefined {
-  const match = DECLARATION.exec(line)
-  const name = match?.[1] ?? match?.[2] ?? match?.[3]
-  return name === undefined || NOT_A_NAME.has(name) ? undefined : name
-}
-
-const indentOf = (line: string): number => line.length - line.trimStart().length
-
-/**
- * The declaration a comment documents: the line directly after a doc comment, or for a `//` in a
- * body, the enclosing one. ⚠ Directly after, no blank line (PR #488 review): a doc comment that a
- * blank line separates from its declaration documents nothing TypeScript would attach it to, and
- * skipping the gap is how a tag would drift onto whatever statement moved in under it.
- */
-function ownerOf(file: string, lines: readonly string[], comment: Comment): Anchor | undefined {
-  if (comment.style === 'block') {
-    const next = comment.end + 1
-    const symbol = declaredName(lines[next] ?? '')
-    return symbol === undefined ? undefined : { file, line: next + 1, symbol }
-  }
-  const depth = indentOf(lines[comment.start] ?? '')
-  for (let above = comment.start - 1; above >= 0; above -= 1) {
-    const line = lines[above] ?? ''
-    if (line.trim() === '' || indentOf(line) >= depth) continue
-    const symbol = declaredName(line)
-    if (symbol !== undefined) return { file, line: above + 1, symbol }
-  }
-  return undefined
-}
-
-/** The title of the `test(` starting on `line`: its first string literal, escapes read. */
-function testTitle(lines: readonly string[], line: number): string | undefined {
-  const text = lines.slice(line, line + 3).join('\n')
-  let index = text.indexOf('test(') + 'test('.length
-  while (/\s/.test(text[index] ?? '')) index += 1
-  const quote = text[index] ?? ''
-  if (!QUOTES.includes(quote) || quote === '') return undefined
-  let title = ''
-  for (index += 1; index < text.length; index += 1) {
-    const character = text[index] ?? ''
-    if (character === quote) return title
-    if (character === '\\') index += 1
-    title += text[index] ?? ''
-  }
-  return undefined
 }
 
 interface Collected {
@@ -204,17 +139,17 @@ interface Collected {
 }
 
 function collectFlow(tags: readonly Tag[], tag: Tag, at: Anchor, into: Collected): void {
-  const [id = '', ...title] = tag.head.split(/\s+/)
+  const [id = '', ...title] = wordsOf(tag.head)
   const contracts = tags
-    .filter((each) => each.name === 'contract')
-    .map((each) => {
-      const [path = '', symbol = ''] = each.head.split('#')
+    .filter((contract) => contract.name === 'contract')
+    .map((contract) => {
+      const [path = '', symbol = ''] = contract.head.split('#')
       return { path, symbol }
     })
   const sees = tags
-    .filter((each) => each.name === 'see')
-    .map((each) => {
-      const [path = '', ...label] = each.head.split(/\s+/)
+    .filter((see) => see.name === 'see')
+    .map((see) => {
+      const [path = '', ...label] = wordsOf(see.head)
       return { path, label: label.join(' ') }
     })
   into.flows.push({ id, title: title.join(' '), summary: prose(tag.body), contracts, sees, at })
@@ -222,7 +157,7 @@ function collectFlow(tags: readonly Tag[], tag: Tag, at: Anchor, into: Collected
 
 function collectInvariant(tags: readonly Tag[], index: number, at: Anchor, into: Collected): void {
   const tag = tags[index] as Tag
-  const [id = '', ...heading] = tag.head.split(/\s+/)
+  const [id = '', ...heading] = wordsOf(tag.head)
   const next = tags[index + 1]
   into.invariants.push({
     id,
@@ -234,51 +169,70 @@ function collectInvariant(tags: readonly Tag[], index: number, at: Anchor, into:
   })
 }
 
-function collectPins(file: string, lines: readonly string[], comment: Comment, into: Collected): void {
-  const ids = tagsOf(comment)
-    .filter((tag) => tag.name === 'pins')
-    .flatMap((tag) => tag.head.split(/\s+/))
-  if (ids.length === 0) return
-  const title = (lines[comment.end + 1] ?? '').trimStart().startsWith('test(')
-    ? testTitle(lines, comment.end + 1)
-    : undefined
-  if (title === undefined) {
-    into.problems.push(`${file}:${comment.start + 1}: @pins is not on the line above a test( with a literal title`)
+/** One comment's tags: its pins, and its flows and invariants at the declaration it documents. */
+function collectComment(file: string, comment: SourceComment, into: Collected): void {
+  const tags = tagsOf(comment)
+  const pins = tags.filter((tag) => tag.name === 'pins').flatMap((tag) => wordsOf(tag.head))
+  if (pins.length > 0 && comment.test === undefined) {
+    into.problems.push(`${file}:${comment.line}: @pins is not directly above a test( with a literal title`)
+  } else if (pins.length > 0) {
+    into.pins.push({ file, title: comment.test as string, invariants: pins })
+  }
+  if (!tags.some((tag) => tag.name === 'flow' || tag.name === 'invariant')) return
+  if (comment.owner === undefined) {
+    into.problems.push(`${file}:${comment.line}: a @flow or @invariant with no declaration to belong to`)
     return
   }
-  into.pins.push({ file, title, invariants: ids })
+  const at: Anchor = { file, ...comment.owner }
+  tags.forEach((tag, index) => {
+    if (tag.name === 'flow') collectFlow(tags, tag, at, into)
+    if (tag.name === 'invariant') collectInvariant(tags, index, at, into)
+  })
 }
 
 function collectFile(root: string, path: string, into: Collected): void {
   const source = readFileSync(path, 'utf8')
-  if (!/^\s*(?:\*|\/\/)\s*@(?:flow|invariant|pins)\b/m.test(source)) return
+  if (!TAG_NAMES.some((name) => source.includes(name))) return
   const file = relative(root, path).replaceAll('\\', '/')
-  const lines = source.split('\n')
-  for (const comment of commentsOf(lines)) {
-    collectPins(file, lines, comment, into)
-    const tags = tagsOf(comment)
-    if (!tags.some((tag) => tag.name === 'flow' || tag.name === 'invariant')) continue
-    const at = ownerOf(file, lines, comment)
-    if (at === undefined) {
-      into.problems.push(`${file}:${comment.start + 1}: a @flow or @invariant with no declaration to belong to`)
-      continue
-    }
-    tags.forEach((tag, index) => {
-      if (tag.name === 'flow') collectFlow(tags, tag, at, into)
-      if (tag.name === 'invariant') collectInvariant(tags, index, at, into)
-    })
-  }
+  for (const comment of commentsIn(path, source)) collectComment(file, comment, into)
 }
 
-/** One `exports[\`<key>\`] = \`<value>\`;` entry; both are template literals, escapes intact. */
-const SNAPSHOT_ENTRY = /^exports\[`((?:[^`\\]|\\[\s\S])*)`\] = `((?:[^`\\]|\\[\s\S])*)`;$/gm
-/** A template literal's body as its value: bun escapes only `` ` ``, `\` and `${` in a snapshot. */
-const unescapeTemplate = (text: string): string => text.replaceAll(/\\([\s\S])/g, '$1')
+/** `<title>: flow <id>: <caption> <n>`, the key bun writes for `toMatchSnapshot('flow <id>: <caption>')`. */
+function flowKey(key: string): { title: string; flow: string; caption: string } | undefined {
+  const hint = key.lastIndexOf(FLOW_HINT)
+  if (hint === -1) return undefined
+  const rest = key.slice(hint + FLOW_HINT.length)
+  const idEnd = rest.indexOf(': ')
+  const counter = rest.lastIndexOf(' ')
+  if (idEnd === -1 || counter <= idEnd || !Number.isInteger(Number(rest.slice(counter + 1)))) return undefined
+  return { title: key.slice(0, hint), flow: rest.slice(0, idEnd), caption: rest.slice(idEnd + 2, counter) }
+}
 
 /**
- * Bun's snapshot files, read as TEXT the way bun writes them (`// Bun Snapshot v1`), never
- * evaluated: a string snapshot is stored as `"<value>"` inside a template literal.
+ * Bun's snapshot file as the JavaScript it is (`exports[\`<key>\`] = \`<value>\`;`), read by the
+ * TypeScript parser, never evaluated: template literals come back with their escapes decoded.
  */
+function snapshotEntries(path: string, source: string): { key: string; value: string }[] {
+  const file = typescript.createSourceFile(
+    path,
+    source,
+    typescript.ScriptTarget.Latest,
+    false,
+    typescript.ScriptKind.JS,
+  )
+  const literal = (node: typescript.Node): string | undefined =>
+    typescript.isNoSubstitutionTemplateLiteral(node) || typescript.isStringLiteral(node) ? node.text : undefined
+  return file.statements.flatMap((statement) => {
+    if (!typescript.isExpressionStatement(statement) || !typescript.isBinaryExpression(statement.expression)) return []
+    const { left, right } = statement.expression
+    if (!typescript.isElementAccessExpression(left)) return []
+    const key = literal(left.argumentExpression)
+    const value = literal(right)
+    return key === undefined || value === undefined ? [] : [{ key, value }]
+  })
+}
+
+/** A string snapshot is stored as `"<value>"`: the quotes bun wraps it in are not the diagram. */
 function recordedDiagrams(root: string, problems: string[]): RecordedDiagram[] {
   const diagrams: RecordedDiagram[] = []
   // Every tree's tests, not only `packages/*/src/`: the harness keeps its tests under `extensions/`
@@ -287,25 +241,16 @@ function recordedDiagrams(root: string, problems: string[]): RecordedDiagram[] {
     .filter((snapshot) => !snapshot.includes('/node_modules/'))
     .sort()
   for (const snapshot of snapshots) {
-    const source = readFileSync(join(root, snapshot), 'utf8')
     const file = join(dirname(dirname(snapshot)), basename(snapshot, '.snap'))
-    for (const [, rawKey = '', rawValue = ''] of source.matchAll(SNAPSHOT_ENTRY)) {
-      const key = unescapeTemplate(rawKey)
-      const value = unescapeTemplate(rawValue)
-      const match = SNAPSHOT_KEY.exec(key)
-      if (match === null) continue
+    for (const { key, value } of snapshotEntries(snapshot, readFileSync(join(root, snapshot), 'utf8'))) {
+      const recorded = flowKey(key)
+      if (recorded === undefined) continue
       const text = value.trim()
       if (!text.startsWith('"sequenceDiagram') || !text.endsWith('"')) {
         problems.push(`${snapshot}: "${key}" is not a recorded sequence diagram`)
         continue
       }
-      diagrams.push({
-        flow: match[2] ?? '',
-        caption: match[3] ?? '',
-        file,
-        title: match[1] ?? '',
-        diagram: text.slice(1, -1),
-      })
+      diagrams.push({ ...recorded, file, diagram: text.slice(1, -1) })
     }
   }
   return diagrams

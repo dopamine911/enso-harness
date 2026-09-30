@@ -280,6 +280,16 @@ async function annotate(page: Page, annotations: readonly Annotation[]): Promise
 }
 
 /**
+ * The shots `--only` asked for, by shot function name; `undefined` for all of them. Playing the
+ * session takes screenshots of its own steps (the Start dialog, the questions); under `--only`
+ * those are not retaken, so recapturing one feature leaves every other image as it was.
+ */
+const ONLY: readonly string[] | undefined = process.argv.includes('--only')
+  ? (process.argv[process.argv.indexOf('--only') + 1] ?? '').split(',')
+  : undefined
+let sessionPlaying = false
+
+/**
  * One shot: annotate, capture, clear the annotations. The capture is the whole viewport, or the
  * smallest rectangle holding every locator in `region` — padded, so a badge at the edge of the
  * region is not cut in half. The region is cropped by screenshotting a transparent box laid over
@@ -291,6 +301,7 @@ async function shoot(
   annotations: readonly Annotation[],
   region: readonly Locator[] = [],
 ): Promise<void> {
+  if (sessionPlaying && ONLY !== undefined) return
   const anchor = annotations[0]?.target ?? region[0]
   if (anchor !== undefined) await steady(anchor)
   await annotate(page, annotations)
@@ -619,6 +630,10 @@ async function captureFeature(page: Page, spec: FeatureSpec, threadId: string): 
   }
   const facts: FeatureFacts = { feature: spec.id, shots }
   writeFileSync(join(ROOT, factsPath(spec.id)), `${JSON.stringify(facts, null, 2)}\n`)
+  // In the repository's style, as `bun run format` writes it: a capture must not leave the format gate red.
+  const formatted = spawnSync(process.execPath, ['--bun', 'oxfmt', factsPath(spec.id)], { cwd: ROOT, encoding: 'utf8' })
+  if (formatted.status !== 0)
+    throw new Error(`feature-screenshots: oxfmt refused ${factsPath(spec.id)}: ${formatted.stderr}`)
   process.stdout.write(`feature-screenshots: wrote ${factsPath(spec.id)}\n`)
 }
 
@@ -883,16 +898,16 @@ async function main(): Promise<void> {
       browser,
       'session',
       async (page) => {
-        threadId = await playSession(page, modelLog)
+        sessionPlaying = true
+        threadId = await playSession(page, modelLog).finally(() => {
+          sessionPlaying = false
+        })
       },
       failed,
     )
     if (threadId === '')
       throw new Error(`feature-screenshots: the session did not finish (model log: ${modelLog})\n${failed.join('\n')}`)
-    const only = process.argv.includes('--only')
-      ? (process.argv[process.argv.indexOf('--only') + 1] ?? '').split(',')
-      : undefined
-    const wanted = (name: string): boolean => only === undefined || only.includes(name)
+    const wanted = (name: string): boolean => ONLY === undefined || ONLY.includes(name)
     for (const shot of LIVE_SHOTS.filter((live) => wanted(live.name))) {
       await attempt(browser, shot.name, (page) => shot(page, threadId), failed)
     }

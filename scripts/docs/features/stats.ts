@@ -3,10 +3,10 @@ import { LOG_KEEP_DAYS } from '../../../packages/core/src/log-process.ts'
 import { SECOND_MODEL } from '../feature-session.ts'
 import type { FeatureSpec } from './spec.ts'
 
-/** A metric tile's value: the `<dd>` right after its `<dt>label</dt>` (`view-parts.tsx#Metric`). */
+/** A metric tile's value: the `<dd>` right after its `<dt>label</dt>` (`view-parts.tsx#Metric`), the label matched exactly. */
 const metric = (label: string) => (page: Page) =>
   page
-    .locator('dt', { hasText: new RegExp(`^${label}$`) })
+    .locator(`dt:text-is(${JSON.stringify(label)})`)
     .first()
     .locator('xpath=following-sibling::dd[1]')
 

@@ -46,11 +46,49 @@ export interface FlowTraceOptions {
   readonly logs: LogRecorder
 }
 
-const UUID = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi
 const LEVELS_DRAWN = new Set(['debug', 'info', 'warning', 'error', 'fatal'])
+/** A canonical UUID is 36 characters: hex, with dashes after the 8th, 12th, 16th and 20th. */
+const UUID_LENGTH = 36
+const UUID_DASHES = new Set([8, 13, 18, 23])
+const HEX = '0123456789abcdefABCDEF'
+
+/** A letter, digit or `_`: what a word, a placeholder name or a UUID's neighbour is made of. */
+function isWordCharacter(character: string | undefined): boolean {
+  if (character === undefined) return false
+  return (
+    character === '_' || (character >= '0' && character <= '9') || character.toLowerCase() !== character.toUpperCase()
+  )
+}
+
+/** Whether a whole UUID starts at `start`, not a longer run of word characters that contains one. */
+function uuidAt(text: string, start: number): boolean {
+  if (
+    start + UUID_LENGTH > text.length ||
+    isWordCharacter(text[start - 1]) ||
+    isWordCharacter(text[start + UUID_LENGTH])
+  ) {
+    return false
+  }
+  for (let offset = 0; offset < UUID_LENGTH; offset += 1) {
+    const character = text[start + offset] ?? ''
+    if (UUID_DASHES.has(offset) ? character !== '-' : !HEX.includes(character)) return false
+  }
+  return true
+}
+
+function withoutUuids(text: string): string {
+  let masked = ''
+  for (let position = 0; position < text.length; position += 1) {
+    if (uuidAt(text, position)) {
+      masked += '[id]'
+      position += UUID_LENGTH - 1
+    } else masked += text[position]
+  }
+  return masked
+}
 
 function mermaidText(text: string): string {
-  return text.replaceAll(';', ' ·').replaceAll('#', '#35;').replaceAll(UUID, '[id]')
+  return withoutUuids(text.replaceAll(';', ' ·').replaceAll('#', '#35;'))
 }
 
 function shown(key: string, value: unknown): string {
@@ -60,10 +98,31 @@ function shown(key: string, value: unknown): string {
   return JSON.stringify(value)
 }
 
+/** A non-empty run of letters, digits and `_`: a template placeholder's name. */
+function isWord(text: string): boolean {
+  if (text === '') return false
+  for (let position = 0; position < text.length; position += 1) if (!isWordCharacter(text[position])) return false
+  return true
+}
+
+/** A LogTape message template with each `{key}` replaced by `value(key)`; any other brace stays as written. */
+function filledTemplate(template: string, value: (key: string) => string): string {
+  let filled = ''
+  for (let position = 0; position < template.length; position += 1) {
+    const close = template[position] === '{' ? template.indexOf('}', position) : -1
+    const key = close === -1 ? '' : template.slice(position + 1, close)
+    if (isWord(key)) {
+      filled += value(key)
+      position = close
+    } else filled += template[position]
+  }
+  return filled
+}
+
 /** A record's own message template with its properties put back, masked where they vary. */
 function noteText(record: LogRecord): string {
   const template = typeof record.rawMessage === 'string' ? record.rawMessage : record.rawMessage.join('{}')
-  return template.replaceAll(/\{(\w+)\}/g, (_whole, key: string) => shown(key, record.properties[key]))
+  return filledTemplate(template, (key) => shown(key, record.properties[key]))
 }
 
 /** A JSON body as `{key: value, …}`: strings quoted when short, anything long or nested named only. */
