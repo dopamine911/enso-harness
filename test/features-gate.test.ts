@@ -3,7 +3,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { builtFeaturePages, renderedFeaturePages } from '../scripts/docs/feature-pages.ts'
 import { FEATURE_SPECS } from '../scripts/docs/features/index.ts'
-import { LANDING_FEATURE_GROUPS } from '../scripts/docs/features/landing.ts'
+import { LANDING_FEATURE_GROUPS, LANDING_SHOTS, LANDING_SHOTS_DIRECTORY } from '../scripts/docs/features/landing.ts'
 import { type FeatureFacts, factsPath } from '../scripts/docs/features/spec.ts'
 import { quotedLiterals, REPOSITORY_ROOT, sourceFiles } from './gate-support.ts'
 
@@ -179,4 +179,19 @@ test('⚠ the landing groups every Features page exactly once, and names nothing
     unknown: grouped.filter((id) => !specs.includes(id)),
     twice: grouped.filter((id, position) => grouped.indexOf(id) !== position),
   }).toEqual({ ungrouped: [], unknown: [], twice: [] })
+})
+
+// #511: the landing shows Features shots taken again without their rings. A shot renamed or dropped
+// from its spec would leave the landing a copy nobody regenerates; a copy with no entry is dead
+// weight the site still ships. Recapture with `bun run docs:screenshots`.
+test('⚠ every landing shot is a spec’d Features shot, and exactly those have their unringed copy (#511)', () => {
+  const specShots = new Set(FEATURE_SPECS.flatMap((spec) => spec.shots.map((shot) => shot.image)))
+  const wanted = Object.keys(LANDING_SHOTS)
+  const directory = join(REPOSITORY_ROOT, LANDING_SHOTS_DIRECTORY)
+  const copies = existsSync(directory) ? readdirSync(directory) : []
+  expect({
+    unknown: wanted.filter((image) => !specShots.has(image)),
+    missing: wanted.filter((image) => !copies.includes(`${image}.png`)),
+    stray: copies.filter((file) => !wanted.includes(basename(file, '.png'))),
+  }).toEqual({ unknown: [], missing: [], stray: [] })
 })

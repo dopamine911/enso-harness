@@ -9,7 +9,7 @@
         "switchRequest": "Request 9",
         "switchCacheRead": "cache read 0 (0%)",
         "compactionRequest": "Request 12",
-        "compactedFrom": "compacted from 5.3K"
+        "compactedFrom": "compacted from 3.5K"
       }
     }
   ]

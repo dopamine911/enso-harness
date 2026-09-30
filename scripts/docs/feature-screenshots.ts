@@ -2,9 +2,10 @@ import { type ChildProcess, spawn, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createConnection } from 'node:net'
 import { tmpdir } from 'node:os'
-import { delimiter, dirname, join } from 'node:path'
+import { delimiter, dirname, join, relative } from 'node:path'
 import { type Browser, chromium, type Locator, type Page } from '@playwright/test'
 import { findRepoRoot } from '../../packages/core/src/paths.ts'
+import { ENSO_DEFAULT_PERMISSION_POLICY } from '../../packages/core/src/permission-rules.ts'
 import { startFeatureModel } from './feature-model.ts'
 import {
   ANSWER_ENDINGS,
@@ -17,6 +18,7 @@ import {
   SECOND_MODEL,
 } from './feature-session.ts'
 import { FEATURE_SPECS } from './features/index.ts'
+import { LANDING_SHOTS, LANDING_SHOTS_DIRECTORY } from './features/landing.ts'
 import {
   type FeatureFacts,
   type FeatureSpec,
@@ -242,19 +244,20 @@ let sessionPlaying = false
  * One shot: annotate, capture, clear the annotations. The capture is the whole viewport, or the
  * smallest rectangle holding every locator in `region` — padded, so a badge at the edge of the
  * region is not cut in half. The region is cropped by screenshotting a transparent box laid over
- * it: an element screenshot takes whatever is painted inside that element's bounds.
+ * it: an element screenshot takes whatever is painted inside that element's bounds. It lands in
+ * `docs/features/images/<name>.png` unless `path` says otherwise (the landing's copies, #511).
  */
 async function shoot(
   page: Page,
   name: string,
   annotations: readonly Annotation[],
-  region: readonly Locator[] = [],
+  options: { readonly region?: readonly Locator[]; readonly path?: string } = {},
 ): Promise<void> {
   if (sessionPlaying && ONLY !== undefined) return
+  const { region = [], path = join(OUT, `${name}.png`) } = options
   const anchor = annotations[0]?.target ?? region[0]
   if (anchor !== undefined) await steady(anchor)
   await annotate(page, annotations)
-  const path = join(OUT, `${name}.png`)
   if (region.length === 0) await page.screenshot({ path })
   else {
     const boxes = await Promise.all(region.map((locator) => rectangleOf(locator, `${name}'s region`)))
@@ -267,7 +270,7 @@ async function shoot(
     await page.locator('[data-feature-annotation]').last().screenshot({ path })
   }
   await clearAnnotations(page)
-  process.stdout.write(`feature-screenshots: wrote docs/features/images/${name}.png\n`)
+  process.stdout.write(`feature-screenshots: wrote ${relative(ROOT, path)}\n`)
 }
 
 /**
@@ -508,8 +511,17 @@ async function captureShot(page: Page, spec: FeatureSpec, shot: Shot, steps: rea
     page,
     shot.image,
     targets.map((target, markIndex) => ({ target, label: String(markIndex + 1) })),
-    (shot.region ?? []).map((target) => locate(page, target)),
+    { region: (shot.region ?? []).map((target) => locate(page, target)) },
   )
+  // The landing's copy (#511): the same screen, settled by the ringed shot, with no rings.
+  const landing = LANDING_SHOTS[shot.image]
+  if (landing !== undefined) {
+    mkdirSync(join(ROOT, LANDING_SHOTS_DIRECTORY), { recursive: true })
+    await shoot(page, shot.image, [], {
+      region: (landing.region ?? shot.region ?? []).map((target) => locate(page, target)),
+      path: join(ROOT, LANDING_SHOTS_DIRECTORY, `${shot.image}.png`),
+    })
+  }
   const measured: Record<string, string> = {}
   for (const [quoted, element] of Object.entries(shot.measure ?? {})) {
     measured[quoted] = await textOf(await element(page))
@@ -636,6 +648,21 @@ async function main(): Promise<void> {
   mkdirSync(join(home, 'pi-agent'), { recursive: true })
   writeFileSync(join(home, 'pi-agent', 'models.json'), JSON.stringify(MODELS_JSON, null, 2))
   writeFileSync(join(home, 'pi-agent', 'settings.json'), JSON.stringify(PI_SETTINGS, null, 2))
+  // The permission policy (#496): Enso's default, with `web_fetch` allowed. The default asks before
+  // every fetch, and prompt 2's fetch is scripted to reach web_fetch's OWN allowlist refusal — what
+  // Web access documents — not a permission question the script has no answer for. (Found when the
+  // capture first ran after the engine switch: it waited on that question until it timed out.)
+  writeFileSync(
+    join(home, 'permissions.json'),
+    JSON.stringify(
+      {
+        ...ENSO_DEFAULT_PERMISSION_POLICY,
+        permission: { ...ENSO_DEFAULT_PERMISSION_POLICY.permission, web_fetch: 'allow' },
+      },
+      null,
+      2,
+    ),
+  )
   mkdirSync(join(home, 'prompts'))
   for (const [file, text] of Object.entries(PROMPT_LIBRARY)) writeFileSync(join(home, 'prompts', file), text)
   for (const [path, text] of Object.entries(DEMO_FILES)) {

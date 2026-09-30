@@ -13,9 +13,7 @@
       "image": "questions-permission-prompt",
       "steps": [],
       "shown": ["pi is asking", "Yes", "Cancel — decline the question"],
-      "measured": {
-        "allowAll": "Yes, allow all edits during this session (shift+tab)"
-      }
+      "measured": {}
     }
   ]
 }
