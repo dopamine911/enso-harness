@@ -45,6 +45,7 @@ import { LOST_TOOL_RESULT_TEXT, NOTHING_TO_CONTINUE } from '../continuation.ts'
 import { PICC_PERMISSION_DIALOG_MODULE } from '../permission-dialog.ts'
 import { readPiccPersistedMode, storedPermissionModeState } from '../permission-mode-adapter.ts'
 import { recordedModelOf } from '../transcript.ts'
+import { writeStoredSession } from './stored-session.ts'
 
 /**
  * The in-process host against the REAL harness package (#69) — every extension the manifest
@@ -1025,7 +1026,10 @@ function storeSession(threadId: string, userText: string, assistantText: string,
   return storeTurns(threadId, [[userText, assistantText]], directory).file
 }
 
-/** A stored session of whole turns, each a user message and pi's reply — its file, and each turn's user entry id. */
+/**
+ * A stored session of whole turns (`stored-session.ts`), after a host is created: the host sets
+ * `PI_CODING_AGENT_DIR` to the scratch one, which is where the writer files it.
+ */
 function storeTurns(
   threadId: string,
   turns: ReadonlyArray<readonly [string, string]>,
@@ -1034,32 +1038,7 @@ function storeTurns(
   at: () => number = Date.now,
 ): { file: string; userEntryIds: string[] } {
   hostWith()
-  const sessionDir = SessionManager.inMemory(directory).getSessionDir()
-  const stored = SessionManager.create(directory, sessionDir, { id: threadId })
-  const userEntryIds = turns.map(([userText, assistantText]) => {
-    const userEntryId = stored.appendMessage({ role: 'user', content: userText, timestamp: at() })
-    stored.appendMessage({
-      role: 'assistant',
-      content: [{ type: 'text', text: assistantText }],
-      api: 'anthropic-messages',
-      provider: 'anthropic',
-      model: 'test',
-      usage: {
-        input: 1,
-        output: 1,
-        cacheRead: 0,
-        cacheWrite: 0,
-        totalTokens: 2,
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-      },
-      stopReason: 'stop',
-      timestamp: at(),
-    } as never)
-    return userEntryId
-  })
-  const file = stored.getSessionFile()
-  if (file === undefined) throw new Error('pi did not flush the stored session')
-  return { file, userEntryIds }
+  return writeStoredSession({ cwd: directory, threadId, turns, at })
 }
 
 // @pins resume/one-id

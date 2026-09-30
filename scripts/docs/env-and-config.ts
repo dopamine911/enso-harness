@@ -76,6 +76,22 @@ const ENVIRONMENT_METADATA: readonly EnvironmentMetadata[] = [
     phase: 'build',
   },
   {
+    key: 'ENSO_E2E_MODEL',
+    source: 'packages/web/e2e/e2e-home.ts',
+    reader: '`packages/web/e2e/e2e-home.ts#e2eStack` (config load)',
+    purposeAndDefault:
+      'Optional; `1` selects the browser suite’s `@model` tier, which `bun run e2e:model` sets: the stack keeps the operator’s home and may reuse a running one. Unset, the model-free tier runs over the suite’s own seeded home (#486).',
+    phase: 'load',
+  },
+  {
+    key: 'PI_CODING_AGENT_DIR',
+    source: 'packages/web/e2e/e2e-home.ts',
+    reader: '`packages/web/e2e/e2e-home.ts#seededHome` (process write)',
+    purposeAndDefault:
+      'Set to the seeded home’s agent directory before the suite writes its stored threads, so pi files them there and never in the operator’s `~/.pi/agent` (#486).',
+    phase: 'load',
+  },
+  {
     key: 'FORCE_COLOR',
     source: 'scripts/gate.ts',
     reader: '`scripts/gate.ts#runGate` (child environment write)',

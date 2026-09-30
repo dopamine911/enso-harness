@@ -1,19 +1,22 @@
 /**
- * Playwright config for the MANUAL web smoke (#71).
+ * Playwright config for the browser suite (#71, #486).
  *
- * This is not part of `bun test` or the gate. It drives the real dev surface — the bun
- * fullstack server on 5178 proxying `/api` to the enso server on 5179 — and writes
- * screenshots a PR author drags into the PR. Run it with `bun run e2e` from the repo root;
- * see README.md in this directory for the two tiers (model-free by default, `@model` opt-in).
+ * Not part of `bun test`: it drives the real dev surface — the bun fullstack server on 5178
+ * proxying `/api` to the enso server on 5179 — in Chromium. `bun run e2e` runs the model-free
+ * tier, in CI on every pull request (`.github/workflows/ci.yml`, job `e2e`); `bun run e2e:model`
+ * adds one real model turn, by hand. See README.md in this directory.
  *
  * ⚠ `*.e2e.ts`, NOT `*.test.ts` / `*.spec.ts`: bun's test runner matches both of those
  * globs everywhere in the tree, and it would try to execute a Playwright spec as a unit
  * test. The coverage manifest (`test/coverage-manifest.test.ts`) sweeps `packages/web/src`
  * only, so this directory never joins the coverage denominator either.
  *
- * ⚠ `webServer.reuseExistingServer: true` is deliberate. The usual pattern gates this on
- * `process.env.CI`; there is no CI run of this suite (named non-scope on #71), and a dev
- * who already has `bun run dev` up should not have the harness fight it for the port.
+ * ⚠ THE MODEL-FREE TIER RUNS OVER ITS OWN HOME (`e2e-home.ts`): a throwaway `ENSO_HOME` with
+ * stored threads seeded in it, handed to the stack it starts. So `reuseExistingServer` is off for
+ * it: a dev stack already on 5178 serves the operator's home, where the seeded threads are not,
+ * and a run over it would pass or fail on whatever that home holds. A port in use is Playwright's
+ * plain error instead. The `@model` tier needs the operator's own login, so it keeps their home
+ * and may reuse their stack, as before.
  *
  * ⚠ `workers: 1`. Every test shares ONE enso server, and the server hosts ONE pi session per
  * request with one cwd — parallel browsers would interleave their runs' stderr and, for
@@ -23,11 +26,15 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { findRepoRoot } from '@enso/core/paths'
 import { defineConfig } from '@playwright/test'
+import { e2eStack } from './e2e-home.ts'
 
 const e2eDirectory = dirname(fileURLToPath(import.meta.url))
 // `bun run dev` must run from the repo root: scripts/dev.ts resolves the web package
 // directory from there. Same helper every other launcher uses, so the answer cannot drift.
 const repoRoot = findRepoRoot(import.meta.url)
+
+/** Over the seeded home, or the operator's for the `@model` tier (`e2e-home.ts#e2eStack`). */
+const stack = e2eStack()
 
 /** The web surface's origin — matches WEB_PORT in src/server/dev-web.ts. */
 export const WEB_ORIGIN = 'http://127.0.0.1:5178'
@@ -63,7 +70,8 @@ export default defineConfig({
     command: 'bun run dev',
     cwd: repoRoot,
     url: WEB_ORIGIN,
-    reuseExistingServer: true,
+    reuseExistingServer: stack.reuseRunningStack,
+    env: stack.environment,
     timeout: WEB_SERVER_STARTUP_TIMEOUT_MS,
     stdout: 'pipe',
     stderr: 'pipe',

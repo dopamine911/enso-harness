@@ -10,8 +10,8 @@ import {
   ANSWER_ENDINGS,
   DEMO_FILES,
   DEMO_PROJECT,
+  demoModelsJson,
   FEATURE_SCRIPT,
-  FIRST_MODEL,
   PROMPTS,
   PROMPT_LIBRARY,
   SECOND_MODEL,
@@ -90,39 +90,8 @@ const STEP_TIMEOUT_MS = 60_000
  */
 const PI_SETTINGS = { compaction: { keepRecentTokens: 300 } } as const
 
-/** The `demo` provider, as pi's `models.json` declares a provider (#437): real prices, real windows. */
-const MODELS_JSON = {
-  providers: {
-    demo: {
-      name: 'Demo',
-      baseUrl: `http://127.0.0.1:${MODEL_PORT}`,
-      api: 'anthropic-messages',
-      // Not a credential: the scripted model reads no key. pi offers a model only once its
-      // provider has one.
-      apiKey: 'demo-placeholder',
-      models: [
-        {
-          id: FIRST_MODEL,
-          name: 'Claude Sonnet 4.5',
-          reasoning: true,
-          input: ['text', 'image'],
-          contextWindow: 200_000,
-          maxTokens: 64_000,
-          cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
-        },
-        {
-          id: SECOND_MODEL,
-          name: 'Claude Opus 4.1',
-          reasoning: true,
-          input: ['text', 'image'],
-          contextWindow: 200_000,
-          maxTokens: 32_000,
-          cost: { input: 15, output: 75, cacheRead: 1.5, cacheWrite: 18.75 },
-        },
-      ],
-    },
-  },
-} as const
+/** The `demo` provider, served by the scripted model on `MODEL_PORT` (`feature-model.ts`). */
+const MODELS_JSON = demoModelsJson(MODEL_PORT)
 
 interface Annotation {
   readonly target: Locator
