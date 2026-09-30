@@ -10,13 +10,14 @@ import { findRepoRoot, harnessPackageDir } from '@enso/core/paths'
  * short-circuits, and what a stack produces is a union of vetoes emergent from load order.
  * #4 designed the arbiter that fixes this (one handler owning the verdict, participants as
  * libraries with priority + claim-or-skip + a discriminated decisionReason — the merged
- * design lives in #4's comments) and then DEFERRED the build when picc-permission-modes
- * was adopted: two participants with aligned fail direction are tolerable.
+ * design lives in #4's comments) and then DEFERRED the build when a permission-modes extension
+ * was adopted (picc then; `@gotgenes/pi-permission-system` since #496): two participants with
+ * aligned fail direction are tolerable.
  *
  * The recorded trigger: **a third `tool_call` participant is where evaluation order stops
  * being reasonable by luck** — and two fail-closed handlers already compose to "nothing
  * runs" in non-interactive mode (verified live; that hazard is why the print harness
- * strips picc, #20). The discipline has been to design AROUND the trigger: cc-safety-net
+ * strips the permission engine, #20). The discipline has been to design AROUND the trigger: cc-safety-net
  * went in as a LIBRARY inside the guards handler precisely to keep the count at two, and
  * web_fetch registers a TOOL, not a handler.
  *
@@ -48,11 +49,15 @@ const harnessRoot = harnessPackageDir(repositoryRoot)
  */
 const ALLOWED_TOOL_CALL_PARTICIPANTS = [
   'extensions/guards/index.ts',
-  'node_modules/@ladbabynpm/picc-permission-modes/index.ts',
+  'node_modules/@gotgenes/pi-permission-system/src/index.ts',
 ] as const
 
-/** Matches a registration in any quote style; a `.d.ts` overload declares, never registers. */
-const TOOL_CALL_REGISTRATION_PATTERN = /on\((["'`])tool_call\1/
+/**
+ * Matches a registration in any quote style, the event name on the next line included (gotgenes
+ * writes `pi.on(\n "tool_call",`, which a same-line pattern missed, #496); a `.d.ts` overload
+ * declares, never registers.
+ */
+const TOOL_CALL_REGISTRATION_PATTERN = /on\(\s*(["'`])tool_call\1/
 
 function isScannableSource(fileName: string): boolean {
   if (fileName.endsWith('.test.ts') || fileName.endsWith('.d.ts')) return false

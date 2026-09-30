@@ -1,6 +1,6 @@
 import type { FeatureSpec } from './spec.ts'
 
-/** Questions and dialogs (#114): the demo session's questionnaire, then picc's permission prompt, each while pi waits. */
+/** Questions and dialogs (#114): the demo session's questionnaire, then the permission engine's prompt, each while pi waits. */
 export const QUESTIONS_AND_DIALOGS: FeatureSpec = {
   id: 'questions-and-dialogs',
   title: 'Questions and dialogs',
@@ -8,7 +8,7 @@ export const QUESTIONS_AND_DIALOGS: FeatureSpec = {
     'Sometimes pi needs an answer from you before it can go on. Enso shows the question as a card in the chat, and your answer goes back to pi. There are two kinds:',
     [
       '- *A questionnaire*, when pi calls the `ask_user` tool. It holds one or more questions, each with options, and you answer all of them at once.',
-      "- *pi's own prompts*: a choice, a yes or no, or a line of text. The permission-modes extension asks this way before an edit, and so does `/login`.",
+      "- *pi's own prompts*: a choice, a yes or no, or a line of text. The permission engine asks this way before an edit, and so does `/login`.",
     ].join('\n'),
     'While a question is waiting, pi waits too. The status bar says `{waiting}`.',
   ],
@@ -46,17 +46,14 @@ export const QUESTIONS_AND_DIALOGS: FeatureSpec = {
         { target: { text: 'pi is asking' }, says: '**{shown}**, then what kind of question it is.' },
         {
           target: { role: 'button', name: 'Yes', exact: true },
-          says: "The options, exactly as the extension offered them. The text above them is the extension's own: the file, and what the edit touches.",
+          says: "The options, exactly as the permission engine offered them. The text above them is the engine's own: the tool, and what it would touch.",
         },
         { target: { text: 'Cancel — decline the question' }, says: '**{shown}**.' },
       ],
-      measure: {
-        allowAll: (page) => page.getByRole('button', { name: /allow all edits/ }).first(),
-      },
     },
   ],
   lookFor: [
-    'Read the detail before you answer. A permission prompt shows the file and the change, or the command, that pi wants to run. For a file inside the project, the second option, `{allowAll}`, is a mode change: it moves the thread to `acceptEdits`, and you will see that as a mode line in the chat.',
+    'Read the detail before you answer. A permission prompt shows the file and the change, or the command, that pi wants to run. The options that end in "for this session" allow that tool or pattern for the rest of the thread without asking again; they do not change the mode. "No, provide reason" asks for a line pi reads with the refusal.',
     'In the thread above, pi asks both before it edits anything, and each question is its own card with its own answer. While a card waits, the status bar reads `running ask_user` or `running edit` beside `{waiting}`: the tool call is open until you answer.',
     'If you open a thread and find a card already waiting, that question was asked while you were away. It is still live, and answering it now lets pi continue.',
   ],

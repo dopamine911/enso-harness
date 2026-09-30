@@ -26,7 +26,7 @@ import { Compile } from 'typebox/compile'
  * ⚠ ONE KIND IS OURS, NOT pi's: `questionnaire` — the agent's `ask_user` (#12), a whole set of
  * questions asked and answered as one card. pi has no such method; the tool hands `custom` a
  * component carrying the question under {@link QUESTIONNAIRE_COMPONENT_KEY}, and the host lifts
- * it (as it lifts picc's permission prompt to a `select`). Its answer is `{ answers }`, one
+ * it (as it lifts any component it knows to a dialog). Its answer is `{ answers }`, one
  * entry per question, and the host hands it to the tool — pi's response contract never sees it.
  */
 
@@ -150,9 +150,9 @@ export const EnsoDialogSpec = Type.Union([
     options: Type.Array(Type.String(), { minItems: 1 }),
     /**
      * The detail behind the question — a file preview, a diff, a command. pi's own
-     * `select` has none; the host adds it when it lifts a component dialog to a select
-     * (#73: picc's permission prompt), because a permission decision needs to see what it
-     * is deciding about. Preformatted text: rendered as-is, never as markdown.
+     * `select` has none; a surface that lifts a component dialog to a select may add it
+     * (#73), because a permission decision needs to see what it is deciding about.
+     * Preformatted text: rendered as-is, never as markdown.
      */
     message: Type.Optional(Type.String()),
     timeout: Type.Optional(Type.Number({ minimum: 0 })),

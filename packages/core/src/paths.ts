@@ -382,9 +382,9 @@ export function ensoPromptsDir(home: string): string {
 }
 
 /**
- * The permission rules pi runs under (#446): `ENSO_HOME/permissions.json`. The host and the
- * terminal launcher point the permission-modes extension at it; `preparePermissionRules`
- * (`@enso/core/permission-rules`) seeds it before the extension reads it.
+ * The permission policy pi runs under (#446, #496): `ENSO_HOME/permissions.json`. The host and
+ * the terminal launcher run `preparePermissionPolicy` (`@enso/core/permission-rules`) on it,
+ * which seeds it and links the permission engine's config path to it before the engine reads it.
  *
  * @group Workspace paths
  */

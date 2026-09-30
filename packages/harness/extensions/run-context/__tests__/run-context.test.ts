@@ -36,6 +36,7 @@ function session(
     resolveSessionConfig: () =>
       Promise.resolve({ result: { kind: 'ok', config: {} }, path: '/u/config.json', sources: [] }),
     runGit: gitAnswering({ code: 0, stdout: 'f00d\n', stderr: '' }, { code: 0, stdout: '', stderr: '' }),
+    readPermissionPolicy: () => '{"permission":{"bash":"ask"}}',
     ...dependencies,
   })(pi)
   return {
@@ -43,7 +44,7 @@ function session(
       if (handler === undefined) throw new Error('the recorder registered no before_agent_start handler')
       await handler(
         { systemPromptOptions: { skills, contextFiles: [] } },
-        { cwd: '/work', sessionManager: { getBranch: () => branch } },
+        { cwd: '/work', sessionManager: { getBranch: () => branch, getEntries: () => branch } },
       )
     },
     recorded: () =>
@@ -69,16 +70,21 @@ test('⚠ a status git cannot answer records the tree dirty, the revision kept: 
   expect(recorder.recorded()[0]?.git).toEqual({ revision: 'f00d', dirty: true })
 })
 
-test("⚠ a picc modes entry with none of picc's rule fields records the mode unknown; one with them, a hash", async () => {
-  const moved = session({}, [{ type: 'custom', customType: 'modes', data: { mode: 'default', rules: [] } }])
-  await moved.run()
-  expect(moved.recorded()[0]?.mode).toBeNull()
+test('⚠ an absent or unparseable policy records the mode unknown; a policy, a hash that moves with the mode', async () => {
+  const absent = session({ readPermissionPolicy: () => undefined })
+  await absent.run()
+  expect(absent.recorded()[0]?.mode).toBeNull()
+  const broken = session({ readPermissionPolicy: () => '{ not json' })
+  await broken.run()
+  expect(broken.recorded()[0]?.mode).toBeNull()
 
-  const current = session({}, [
-    { type: 'custom', customType: 'modes', data: { mode: 'default', alwaysAllowRules: [] } },
-  ])
-  await current.run()
-  expect(current.recorded()[0]?.mode).toEqual({ rulesHash: expect.stringMatching(/^[0-9a-f]{64}$/) })
+  const inDefault = session()
+  await inDefault.run()
+  const inPlan = session({}, [{ type: 'custom', customType: 'active_agent', data: { name: 'enso-mode-plan' } }])
+  await inPlan.run()
+  const defaultHash = inDefault.recorded()[0]?.mode?.rulesHash
+  expect(defaultHash).toMatch(/^[0-9a-f]{64}$/)
+  expect(inPlan.recorded()[0]?.mode?.rulesHash).not.toBe(defaultHash)
 })
 
 test('a config resolution that throws is recorded as unreadable, read from no file', async () => {

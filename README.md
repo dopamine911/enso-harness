@@ -155,7 +155,7 @@ hole:
 | `PI_CODING_AGENT_DIR=~/.enso/pi-agent` | Your global pi packages, settings and credentials are invisible to this run. |
 | `--no-extensions` | pi's own discovery, which would otherwise load this repo's package a second time. |
 | `--no-skills` | Skills discovered from `~/.agents/skills/`, which the agent-dir redirect does not cover. |
-| `PICC_PERMISSION_MODES_CONFIG_PATH=~/.enso/permissions.json` | Claude Code's permission rules (`~/.claude/settings.json`), which the permission-modes extension would otherwise import, and use in every mode. A new `~/.enso` starts with Enso's deny rules only ([Permission modes](docs/features/permission-modes.md)). |
+| `~/.enso/permissions.json`, linked as the permission engine's config under the agent dir (#496) | A policy from anywhere but the one file you edit: an absent file is seeded with Enso's default policy, an unreadable one stops the launch, and Claude Code's settings (`~/.claude/settings.json`) are never read ([Permission modes](docs/features/permission-modes.md)). |
 
 ⚠ **An exported `ANTHROPIC_API_KEY` does not reach pi.** Enso deletes every secret-shaped environment
 variable before spawning and tells you which on stderr
@@ -274,12 +274,12 @@ inspectable.
 
 ### Non-interactive runs — keep the distinction visible
 
-The permission-modes extension fails closed when it cannot ask a human. A `-p` non-interactive run
+The permission engine fails closed when it cannot ask a human. A `-p` non-interactive run
 under the full package could therefore continue chatting while being unable to perform work that
 requires interaction.
 
-Enso materialises a **print variant** under `node_modules/.cache/enso/print-harness/`: the same package minus that one
-interactive extension, with everything else symlinked into place. The distinction is explicit rather
+Enso materialises a **print variant** under `node_modules/.cache/enso/print-harness/`: the same package minus the
+permission engine, with everything else symlinked into place. The distinction is explicit rather
 than silently changing how the permission model behaves when no human is present.
 
 ### The web surface — observations are the contract

@@ -341,7 +341,7 @@ async function playSession(page: Page, modelLog: string): Promise<string> {
   await send(page, PROMPTS[1], ANSWER_ENDINGS[1])
   await hostCommand(page, threadId, 'model', `demo/${SECOND_MODEL}`)
 
-  // Prompt 3 asks before it acts: the questionnaire first, then picc's permission prompt.
+  // Prompt 3 asks before it acts: the questionnaire first, then the permission engine's prompt.
   const composer = page.getByPlaceholder('ask pi something')
   await composer.fill(PROMPTS[2])
   await composer.press('Enter')

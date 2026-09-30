@@ -1,9 +1,8 @@
 import { posix } from 'node:path'
 import type { SessionEntry } from '@earendil-works/pi-coding-agent'
-import type { EnsoContextEvent, EnsoFileOperation } from '@enso/core'
+import { ACTIVE_AGENT_CUSTOM_TYPE, type EnsoContextEvent, type EnsoFileOperation, readRecordedMode } from '@enso/core'
 import { type ContextItem, foldSystem, makeupOf } from './context-elements.ts'
 import { contentToText } from './map-events.ts'
-import { PICC_MODES_CUSTOM_TYPE, readPiccPersistedMode } from './permission-mode-adapter.ts'
 
 /**
  * What happened to a thread's context, and to its files (#361 phase 4) — dsh-context's Context
@@ -110,9 +109,9 @@ function settingEvents(walk: EventWalk, sessionEntry: SessionEntry): void {
     if (!began && walk.thinking !== level)
       push(walk, sessionEntry, { kind: 'switch', label: `thinking ${level}`, tokens: 0 })
     walk.thinking = level
-  } else if (sessionEntry.type === 'custom' && sessionEntry.customType === PICC_MODES_CUSTOM_TYPE) {
-    // picc's own reader: an entry of this type without a string mode names no mode, and is skipped.
-    const mode = readPiccPersistedMode(sessionEntry)
+  } else if (sessionEntry.type === 'custom' && sessionEntry.customType === ACTIVE_AGENT_CUSTOM_TYPE) {
+    // An `active_agent` entry naming no Enso mode (another agent, a malformed one) names no mode, and is skipped.
+    const mode = readRecordedMode(sessionEntry)
     if (mode === undefined) return
     if (!began && walk.mode !== mode) push(walk, sessionEntry, { kind: 'mode', label: `mode ${mode}`, tokens: 0 })
     walk.mode = mode

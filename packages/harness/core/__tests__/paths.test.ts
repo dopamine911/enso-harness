@@ -125,7 +125,7 @@ test("the shell-init files the vendored corpus omits, and direnv's .envrc, are p
   expect(isPersistenceWriteTarget('/work/project/envrc.md')).toBe(false)
 })
 
-// ⚠ The ZEN ADDITIONS: pi's OWN persistence surfaces, which picc's Claude-Code corpus
+// ⚠ The ZEN ADDITIONS: pi's OWN persistence surfaces, which a Claude-Code-derived list
 // cannot know about. Each line is a real load path (receipts in scripts/enso.ts's header).
 test("pi's own persistence surfaces are write targets — the enso additions", () => {
   // A project-local .pi/settings.json installs an extension for the next plain `pi` run.

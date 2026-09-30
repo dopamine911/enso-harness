@@ -129,7 +129,7 @@ const noop = (): void => {
   // Static markup runs no handlers; the callback exists only to satisfy the prop.
 }
 
-test("⚠ an unknown mode renders as `unknown` and offers nothing — the options are picc's to declare", () => {
+test("⚠ an unknown mode renders as `unknown` and offers nothing — the options are the host's to declare", () => {
   const control = selectIn(
     renderToStaticMarkup(<PermissionModeSelect mode={undefined} available={[]} disabled={false} onSelect={noop} />),
   )

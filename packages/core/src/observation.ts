@@ -231,8 +231,8 @@ export type EnsoDialogSettled = Static<typeof EnsoDialogSettled>
  *
  * This is a STATE receipt, not an event narration: the entry says "this extension's
  * persisted state is now `data`", and it may be re-appended without anything having
- * changed (picc persists on session start and on rule updates, not only on a mode
- * change). A renderer that wants to show a change must diff against the previous value
+ * changed (an extension may persist on session start as well as on a change). A renderer
+ * that wants to show a change must diff against the previous value
  * itself. `data` is `Type.Unknown()` for the same reason `EnsoUnmapped.event` is: the
  * shape belongs to the extension that wrote it, and constraining it here would turn
  * "we do not render this yet" into "the transport is broken".

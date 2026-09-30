@@ -1,35 +1,38 @@
 /**
- * The PRINT-MODE harness variant (#20): the Enso package minus picc-permission-modes.
+ * The PRINT-MODE harness variant (#20, #496): the Enso package minus the permission engine
+ * (`@gotgenes/pi-permission-system`).
  *
  * WHY A VARIANT PACKAGE AND NOT A FLAG
- * picc fails closed when it cannot prompt (`ctx.hasUI` false → every mutating tool denied),
- * which is the correct direction for the package and exactly wrong for `enso -p`: a print
- * run could complete no task requiring `write` or `bash`. There is no escape hatch — mode
- * lives in the session tree, set only via `/mode` interactively (upstream launch-time mode
+ * The engine denies every ask when it cannot prompt (no UI → each `ask` is a deny), which is
+ * the correct direction for the package and exactly wrong for `enso -p`: a print run could
+ * complete no task requiring `write` or most of `bash`. There is no escape hatch — the mode
+ * lives in the session, set only by a mode command interactively (upstream launch-time mode
  * selection is #13, the durable fix). pi offers no per-extension CLI exclusion either: `-e`
  * loads a whole package by its manifest, and passing extension FILES individually silently
  * drops every other resource kind (skills, prompts, themes — see scripts/enso.ts's header).
+ * Enso's permission-modes extension stays: without the engine its commands only record a mode
+ * nothing enforces.
  *
  * So print mode loads a GENERATED package: a scratch dir whose manifest is the harness
- * manifest with the picc extension filtered out, and whose resource directories are
+ * manifest with the engine's extension filtered out, and whose resource directories are
  * symlinks into the real package — everything else loads exactly as interactive enso loads
  * it. pi resolves the exact manifest paths through the symlinks; the docs' symlink caveat
  * applies to GLOBS, and this manifest lists resource roots and files directly.
  *
  * ⚠ The shape checks throw a NAMED error rather than degrade: if the harness manifest
- * stops matching (picc renamed, extensions list restructured), a print launch fails loudly
+ * stops matching (the engine renamed, extensions list restructured), a print launch fails loudly
  * instead of silently launching WITH the prompt-denying extension — the failure mode this
  * file exists to prevent.
  *
  * ⚠ What a print run then has: OUR guards only. `bash` is unconfined (#9) — that is the
- * pre-picc posture restored, usability without unattended safety. Stated in #20.
+ * posture before any permission engine, usability without unattended safety. Stated in #20.
  */
 import { mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { relinkDirectory } from './link-vendor-packages.ts'
 
 /** The manifest entry to remove — matching by package name, not exact path. */
-const PICC_EXTENSION_FRAGMENT = 'picc-permission-modes'
+const PERMISSION_ENGINE_FRAGMENT = 'pi-permission-system'
 
 /** The one real file in the variant; everything else is a symlink into the package. */
 const MANIFEST_FILENAME = 'package.json'
@@ -66,7 +69,7 @@ export class PrintHarnessShapeError extends Error {
 }
 
 /**
- * The harness manifest with picc-permission-modes removed from `pi.extensions`.
+ * The harness manifest with the permission engine removed from `pi.extensions`.
  * Everything else — skills, prompts, themes, dependencies — is carried verbatim.
  */
 export function buildPrintManifest(manifest: HarnessManifest): PrintManifest {
@@ -75,10 +78,12 @@ export function buildPrintManifest(manifest: HarnessManifest): PrintManifest {
     throw new PrintHarnessShapeError('pi.extensions is not an array')
   }
   const keptExtensions = extensions.filter(
-    (extensionPath) => typeof extensionPath !== 'string' || !extensionPath.includes(PICC_EXTENSION_FRAGMENT),
+    (extensionPath) => typeof extensionPath !== 'string' || !extensionPath.includes(PERMISSION_ENGINE_FRAGMENT),
   )
   if (keptExtensions.length === extensions.length) {
-    throw new PrintHarnessShapeError(`no extension entry contains "${PICC_EXTENSION_FRAGMENT}" — the filter is stale`)
+    throw new PrintHarnessShapeError(
+      `no extension entry contains "${PERMISSION_ENGINE_FRAGMENT}" — the filter is stale`,
+    )
   }
   if (keptExtensions.length === 0) {
     throw new PrintHarnessShapeError('the filter removed every extension')

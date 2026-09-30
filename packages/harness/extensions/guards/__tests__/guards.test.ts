@@ -614,8 +614,8 @@ test('a failed edit result does not refresh the stamp', () => {
 })
 
 // ── #4 gap 2: tool identity is case-insensitive, and the policy is checked live ───────────
-// Claude-Code-style vendors register capitalised tool names (picc's own types carry
-// `tool: "Bash"`), so two naming conventions are live in one process. Every branch must
+// Claude-Code-style packages register capitalised tool names (`Bash`, `Write`), so two
+// naming conventions can be live in one process. Every branch must
 // match by canonical name — these are DISAGREEING vectors (event case ≠ policy case), or
 // they would assert x === x.
 

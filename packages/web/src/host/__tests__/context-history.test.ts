@@ -147,16 +147,16 @@ test('settings: a thinking level or mode set after the first request is a switch
   const session = SessionManager.inMemory(tmpdir())
   // Where the thread began: set before the first request, so not events.
   session.appendThinkingLevelChange('medium')
-  session.appendCustomEntry('modes', { mode: 'default' })
+  session.appendCustomEntry('active_agent', { name: null })
   session.appendMessage({ role: 'user', content: 'go', timestamp: now() })
   session.appendMessage(assistant([{ type: 'text', text: 'ok' }]))
   session.appendThinkingLevelChange('high')
   // The same level again changes nothing.
   session.appendThinkingLevelChange('high')
-  session.appendCustomEntry('modes', { mode: 'plan' })
-  // `modes` written by something that is not picc's shape names no mode: skipped, not `mode [object Object]`.
-  session.appendCustomEntry('modes', { mode: { nested: true } })
-  session.appendCustomEntry('modes', { mode: 'plan' })
+  session.appendCustomEntry('active_agent', { name: 'enso-mode-plan' })
+  // An agent that is not an Enso mode names no mode: skipped, not `mode reviewer`.
+  session.appendCustomEntry('active_agent', { name: 'reviewer' })
+  session.appendCustomEntry('active_agent', { name: 'enso-mode-plan' })
   const { events } = branchContext(session.getBranch())
   expect(events.map((event) => [event.kind, event.label, event.turn, event.tokens])).toEqual([
     ['switch', 'thinking high', 2, 0],

@@ -12,13 +12,11 @@ import {
   type EnsoDialogLink,
   type EnsoDialogOutcome,
   type EnsoOpenDialog,
-  type EnsoOperatorDenial,
   type EnsoQuestion,
   type EnsoQuestionnaireResult,
   ensoLogger,
   isEnsoDialogSpec,
 } from '@enso/core'
-import { type LiftedPermissionDialog, liftPermissionDialog } from './permission-dialog.ts'
 import { liftQuestionnaire } from './questionnaire-dialog.ts'
 import type { RuntimeEvent } from './runtime-event.ts'
 
@@ -44,16 +42,17 @@ export type CustomComponentFactory<T> = (
  * for "a UI with no terminal".
  *
  * ⚠ `ctx.hasUI` IS `true` THE MOMENT ANY OBJECT IS BOUND — pi's runner compares against its
- * no-op context, not against `mode`. That is load-bearing for picc-permission-modes: with
- * no UI it fails closed and denies every mutating tool (the #20 failure). So this object
+ * no-op context, not against `mode`. That is load-bearing for the permission engine: with
+ * no UI it denies every ask (the #20 failure). So this object
  * must be bound on every session, and the blocking methods must genuinely block until a
  * human answers or the request is cancelled — never resolve a default eagerly.
  *
  * WHAT IS REAL AND WHAT IS A NO-OP
- * `select`/`confirm`/`input`/`editor` block on a pending map keyed by request id. `custom`
- * builds the extension's component and, when it is one this surface knows (#73: picc's
- * permission prompt), lifts it to a blocking `select`; any other component resolves
- * `undefined`, pi's rpc contract. `notify`, `setStatus`, `setWidget`, `setTitle`,
+ * `select`/`confirm`/`input`/`editor` block on a pending map keyed by request id; the
+ * permission engine asks through `select` and `input` (#496). `custom` builds the extension's
+ * component and, when it is one this surface knows (#12: the `ask_user` questionnaire), lifts
+ * it to a blocking dialog; any other component resolves `undefined`, pi's rpc contract.
+ * `notify`, `setStatus`, `setWidget`, `setTitle`,
  * `setEditorText` emit fire-and-forget records (the mapper forwards `notify` and drops the
  * terminal-addressed rest, as before). Everything else is a terminal concern with no
  * browser equivalent and returns its inert value.
@@ -83,9 +82,9 @@ type BlockingDialogRequest =
 const QUESTIONNAIRE_DECLINED: EnsoQuestionnaireResult = { cancelled: true }
 
 /**
- * What a component factory is handed in place of a terminal. picc's factory reads only
- * `tui.terminal.rows` (inside a try) to size its panel and never touches the keybindings;
- * nothing else on the web path touches either. Typed as pi's parameter types because that
+ * What a component factory is handed in place of a terminal. A factory may read
+ * `tui.terminal.rows` to size a panel; nothing on the web path touches the keybindings.
+ * Typed as pi's parameter types because that
  * is what the factory declares — the casts are the one place the "no terminal" fact meets
  * a terminal-shaped signature.
  */
@@ -105,24 +104,13 @@ export interface EnsoExtensionUiContextOptions {
   emit: (event: RuntimeEvent) => void
   /** The thread this context serves — on every record it writes. */
   threadId: string
-  /**
-   * How a `custom` component becomes a select (#73). Defaults to `liftPermissionDialog`;
-   * ⓘ injectable so `__tests__/extension-ui-context.test.ts` can exercise the fail-closed
-   * path (the lift rejecting because picc's module did not load) without unloading picc.
-   */
-  liftDialog?: (component: unknown) => Promise<LiftedPermissionDialog | undefined>
-  /**
-   * The operator answered a lifted permission prompt with one of picc's deny options (#441). The
-   * host persists it; nothing else records which button was pressed.
-   */
-  onOperatorDenial?: (denial: EnsoOperatorDenial) => void
   /** How long an ASYNC component factory may take to produce its component. Defaults to `CUSTOM_COMPONENT_BUILD_TIMEOUT_MS`; injectable for tests. */
   componentBuildTimeoutMs?: number
 }
 
 /**
  * The budget an async `custom` factory gets to construct its component (#73, PR #107
- * review). Construction is meant to be immediate — picc's factory is synchronous — but a
+ * review). Construction is meant to be immediate — the questionnaire's factory is synchronous — but a
  * factory may legitimately return a promise (to load something), and one that instead
  * waits on terminal interaction would hang the extension forever against a TUI that will
  * never answer. Past the budget the call falls back to pi's rpc contract (`undefined`).
@@ -137,12 +125,6 @@ const CUSTOM_COMPONENT_BUILD_TIMEOUT_MS = 2000
 const CONFIRM_DISMISSED: boolean = false
 
 const hostLog = ensoLogger('host', 'ui')
-
-/**
- * picc's deny labels, verbatim (`index.ts` `promptPermission`): `No` on a file or bash prompt,
- * `Block` on the generic one. Every other option allows, some for the session.
- */
-const PICC_DENY_OPTIONS: ReadonlySet<string> = new Set(['No', 'Block'])
 
 export interface EnsoExtensionUiContext {
   readonly uiContext: ExtensionUIContext
@@ -195,7 +177,7 @@ export interface HostInputQuestion {
 /**
  * A neutral 256-colour theme for the `theme` getter. The interface requires a `Theme`
  * instance and pi exports the class but not its singleton; no extension the harness loads
- * renders through it on the web surface (`hasUI` gates picc's footer, and footers do not
+ * renders through it on the web surface (footers and headers do not
  * exist here), so the values only need to be complete — tsc enforces that — not pretty.
  */
 const NEUTRAL_ANSI_256_FOREGROUND = 250
@@ -267,7 +249,6 @@ function createNeutralTheme(): PiTheme {
 export function createEnsoExtensionUiContext(options: EnsoExtensionUiContextOptions): EnsoExtensionUiContext {
   const { emit } = options
   const log = hostLog.with({ threadId: options.threadId })
-  const liftDialog = options.liftDialog ?? liftPermissionDialog
   const componentBuildTimeoutMs = options.componentBuildTimeoutMs ?? CUSTOM_COMPONENT_BUILD_TIMEOUT_MS
 
   /**
@@ -501,10 +482,9 @@ export function createEnsoExtensionUiContext(options: EnsoExtensionUiContextOpti
     setHeader: () => undefined,
     /**
      * Build the component the extension asked for and lift it if it is one this surface
-     * knows (#73). `done` is the same callback picc's own dialog would call on a keypress;
-     * here the lifted select's answer is what calls it, so the extension's `await` settles
-     * with a string it offered — or `undefined` on cancel/dismiss, its "no" path. An
-     * unknown component resolves `undefined` at once, exactly as pi's rpc mode does.
+     * knows (#12). `done` is the callback the component would call on a keypress; here the
+     * lifted dialog's answer is what calls it. An unknown component resolves `undefined` at
+     * once, exactly as pi's rpc mode does.
      */
     async custom<T>(factory: CustomComponentFactory<T>): Promise<T> {
       const { promise, resolve } = Promise.withResolvers<T>()
@@ -522,38 +502,9 @@ export function createEnsoExtensionUiContext(options: EnsoExtensionUiContextOpti
         resolve(result as T)
         return promise
       }
-      let lifted: LiftedPermissionDialog | undefined
-      try {
-        lifted = await liftDialog(component)
-      } catch (error) {
-        // picc's module did not load: the prompt cannot be lifted. Fail closed the way
-        // pi's rpc mode does (the extension sees "dismissed"), and say why — silently
-        // refusing every write is the #73 state this exists to end.
-        log.error('custom dialog could not be lifted (#73): {error}', { error })
-      }
-      if (lifted === undefined) {
-        disposeQuietly(component)
-        // pi's rpc contract, stated in TypeScript: an unknown component is "no component".
-        resolve(undefined as T)
-        return promise
-      }
-      let answeredId: string | undefined
-      const choice = await awaitDialog(
-        { method: 'select', title: lifted.title, options: [...lifted.options], message: lifted.message },
-        undefined,
-        undefined,
-        (response) => {
-          answeredId = response.id
-          return 'value' in response ? response.value : undefined
-        },
-      )
       disposeQuietly(component)
-      if (typeof choice === 'string' && PICC_DENY_OPTIONS.has(choice) && answeredId !== undefined) {
-        options.onOperatorDenial?.({ dialogId: answeredId, option: choice, title: lifted.title })
-      }
-      // The lifted select's value is one of the strings picc offered — `T` for picc is
-      // `FilePermissionChoice = string | null`, and cancel is `undefined`, its "no" path.
-      resolve(choice as T)
+      // pi's rpc contract, stated in TypeScript: an unknown component is "no component".
+      resolve(undefined as T)
       return promise
     },
     pasteToEditor: () => undefined,

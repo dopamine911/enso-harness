@@ -1,10 +1,11 @@
 import { expect, test } from 'bun:test'
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { flowTrace } from '@enso/core/flow-trace'
 import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
+import { permissionEngineConfigPath } from '@enso/core/permission-rules'
 import { isPrintRun, piArguments, piVersionSupported, piVersionText, SUPPORTED_PI_VERSIONS } from '../enso-launch.ts'
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
@@ -92,7 +93,7 @@ function piShim(directory: string, version: string): string {
       `printf '%s\\n' "$*" >> '${join(directory, 'calls')}'`,
       `if [ "$1" = "--version" ]; then echo '${version}'; exit 0; fi`,
       `for argument in "$@"; do printf '%s\\n' "$argument"; done > '${join(directory, 'argv')}'`,
-      `printf '%s\\n' "$PI_CODING_AGENT_DIR" "$PICC_PERMISSION_MODES_CONFIG_PATH" > '${join(directory, 'env')}'`,
+      `printf '%s\\n' "$PI_CODING_AGENT_DIR" > '${join(directory, 'env')}'`,
       '',
     ].join('\n'),
   )
@@ -151,35 +152,30 @@ test('a print launch reads pi --version from PATH, then spawns that pi with the 
     const mirror = JSON.parse(readFileSync(join(mirrorDir, 'package.json'), 'utf8'))
     const calls = readFileSync(join(scratch, 'calls'), 'utf8').trim().split('\n')
     const argv = readFileSync(join(scratch, 'argv'), 'utf8').trim().split('\n')
-    const [agentDir, permissionsPath] = readFileSync(join(scratch, 'env'), 'utf8').trim().split('\n')
+    const [agentDir = ''] = readFileSync(join(scratch, 'env'), 'utf8').trim().split('\n')
     const resourceCount = /(\d+) declared resource path/.exec(stderr)?.[1] ?? '?'
 
     // The version is asked first, then pi is spawned: two calls, in that order.
     expect(calls).toEqual(['--version', argv.join(' ')])
     expect(argv).toEqual(piArguments(mirrorDir, ['-p', 'hello']))
     expect(agentDir).toBe(join(home, 'pi-agent'))
-    expect(permissionsPath).toBe(join(home, 'permissions.json'))
+    // The engine reads its policy through the link the launcher made, before the spawn (#496).
+    expect(realpathSync(permissionEngineConfigPath(agentDir))).toBe(realpathSync(join(home, 'permissions.json')))
     expect(mirror.pi.extensions).toEqual(
-      manifest.pi.extensions.filter((extensionPath: string) => !extensionPath.includes('picc-permission-modes')),
+      manifest.pi.extensions.filter((extensionPath: string) => !extensionPath.includes('pi-permission-system')),
     )
 
     trace.send('Z', 'M', `read pi.* · ${resourceCount} declared resource paths, every node_modules/ path present`)
-    trace.send('Z', 'U', line('enso: permission rules'))
+    trace.send('Z', 'U', line('enso: permission policy'))
     trace.send('Z', 'P', mask(`pi ${calls[0]}`))
     trace.send('P', 'Z', `${version} · exit 0`)
     trace.send(
       'Z',
       'X',
-      `materialize: pi.extensions minus picc-permission-modes (${mirror.pi.extensions.length} of ${manifest.pi.extensions.length}), every package-root entry linked`,
+      `materialize: pi.extensions minus the permission engine (${mirror.pi.extensions.length} of ${manifest.pi.extensions.length}), every package-root entry linked`,
     )
     trace.send('Z', 'U', line('enso: vanilla pi'))
-    trace.send(
-      'Z',
-      'P',
-      mask(
-        `spawn pi ${argv.join(' ')} · env PI_CODING_AGENT_DIR=${agentDir}, PICC_PERMISSION_MODES_CONFIG_PATH=${permissionsPath}`,
-      ),
-    )
+    trace.send('Z', 'P', mask(`spawn pi ${argv.join(' ')} · env PI_CODING_AGENT_DIR=${agentDir}`))
     trace.send('X', 'P', `pi.extensions in manifest order: ${mirror.pi.extensions.map(extensionName).join(' → ')}`)
     trace.send('P', 'Z', 'exit 0')
     trace.send('Z', 'U', `exit ${status}`)

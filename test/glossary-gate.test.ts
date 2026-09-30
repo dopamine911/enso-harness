@@ -174,7 +174,7 @@ function declares(files: readonly SpelledFile[], replacement: string): boolean {
 test('⚠ every replacement the Retired table decided is a name that exists (#241)', () => {
   const rows = retiredTableRows()
   // The table is the subject: an empty parse would pass every assertion below.
-  expect(rows.length).toBe(20)
+  expect(rows.length).toBe(21)
   const sources = SEARCHED_ROOTS.flatMap((root) => sourceFiles(join(REPOSITORY_ROOT, root), true))
   // ⚠ CODE lines, not the file's text: this gate's own header names `describeRuntimeEvent` to
   // explain #241, and scanning text let that comment vouch for the name — the first probe

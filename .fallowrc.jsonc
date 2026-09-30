@@ -13,6 +13,7 @@
     "packages/harness/extensions/ask-user/index.ts",
     "packages/harness/extensions/system-prompt/index.ts",
     "packages/harness/extensions/run-context/index.ts",
+    "packages/harness/extensions/permission-modes/index.ts",
     // Loaded by Bun from `packages/web/bunfig.toml` → `plugins`.
     "packages/web/src/server/bun-plugin-strict-binding-workaround.ts",
     // Run directly: `bun scripts/enso-thread.ts`; not a package.json script.
@@ -22,7 +23,7 @@
   ],
   "ignoreDependencies": [
     // Loaded by the runtime from the harness manifest (`pi.extensions`, `pi.themes`).
-    "@ladbabynpm/picc-permission-modes",
+    // `@gotgenes/pi-permission-system` is not here: the permission-modes extension imports it.
     "pi-multi-account",
     "@mammothb/pi-tokyonight-storm",
     // Loaded by Bun from `packages/web/bunfig.toml` → `plugins`, and by the dev server's HMR.

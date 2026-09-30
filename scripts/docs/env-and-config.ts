@@ -122,20 +122,12 @@ const ENVIRONMENT_METADATA: readonly EnvironmentMetadata[] = [
     phase: 'boot',
   },
   {
-    key: 'PICC_PERMISSION_MODES_CONFIG_PATH',
-    source: 'packages/web/src/host/agent-host.ts',
-    reader: '`packages/web/src/host/agent-host.ts#createAgentHost` (process write)',
+    key: 'PI_CODING_AGENT_DIR',
+    source: 'packages/harness/extensions/run-context/index.ts',
+    reader: '`packages/harness/extensions/run-context/index.ts` (the default export’s `readPermissionPolicy`)',
     purposeAndDefault:
-      'Required pin to `ENSO_HOME/permissions.json` (#446), prepared before the first session. Unset, the permission-modes extension reads a copy inside its own `node_modules` directory, and imports Claude Code’s settings into any file with no rules.',
-    phase: 'boot',
-  },
-  {
-    key: 'PICC_PERMISSION_MODES_CONFIG_PATH',
-    source: 'scripts/enso.ts',
-    reader: '`scripts/enso.ts` (pi child environment write)',
-    purposeAndDefault:
-      'Required pin to `ENSO_HOME/permissions.json` in the spawned pi process (#446), prepared before the spawn.',
-    phase: 'boot',
+      'The agent directory both Enso surfaces set, read to find the permission policy the engine reads under it, for the run context’s `mode.rulesHash` (#496). Unset, the mode is `null`.',
+    phase: 'per-call',
   },
   {
     key: 'ENSO_HOME',
@@ -316,10 +308,10 @@ const RUNTIME_PATH_METADATA: readonly RuntimePathMetadata[] = [
     helper: 'ensoPermissionRulesPath',
     path: 'ENSO_HOME/permissions.json',
     writer:
-      'The operator; `preparePermissionRules` seeds it with Enso’s default deny rules, before pi loads, when it is absent or holds no rules (#446) — the permission-modes extension would otherwise import Claude Code’s settings into it. An unreadable file refuses the launch.',
+      'The operator; `preparePermissionPolicy` seeds it with Enso’s default policy before pi loads, when it is absent or holds no `permission` block, and replaces an old-format rules file (kept beside it as `.picc-backup`, #496). It links the permission engine’s config path under the agent dir to this file and rewrites the mode agents (`agents/enso-mode-*.md`) at every launch. An unreadable file refuses the launch.',
     lifetime:
-      'Per-user until the operator edits it; read when each session loads the extension, so an edit applies to new sessions.',
-    check: { file: 'packages/core/src/permission-rules.ts', contains: 'deny: [...ENSO_DEFAULT_DENY_RULES]' },
+      'Per-user until the operator edits it; the permission engine re-reads it when it changes, so an edit applies to running sessions too.',
+    check: { file: 'packages/core/src/permission-rules.ts', contains: 'linkEngineConfig(agentDir, policyPath)' },
   },
   {
     helper: 'ensoLogsDir',

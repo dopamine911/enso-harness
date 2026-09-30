@@ -20,7 +20,7 @@ const MANIFEST = {
     extensions: [
       './extensions/logging/index.ts',
       './extensions/guards/index.ts',
-      'node_modules/@ladbabynpm/picc-permission-modes/index.ts',
+      'node_modules/@example/permission-engine/src/index.ts',
       'node_modules/pi-multi-account/index.ts',
     ],
     themes: 'node_modules/@mammothb/pi-tokyonight-storm/theme.json',
@@ -31,7 +31,7 @@ test('declared resources are every pi.* path, arrays and singles alike, in decla
   expect(declaredResources(MANIFEST)).toEqual([
     './extensions/logging/index.ts',
     './extensions/guards/index.ts',
-    'node_modules/@ladbabynpm/picc-permission-modes/index.ts',
+    'node_modules/@example/permission-engine/src/index.ts',
     'node_modules/pi-multi-account/index.ts',
     'node_modules/@mammothb/pi-tokyonight-storm/theme.json',
   ])
@@ -75,14 +75,14 @@ test('the vendor paths a manifest declares that are not under the package root a
   }
   put('node_modules/pi-multi-account/index.ts')
   expect(missingVendorPaths(MANIFEST, packageRoot)).toEqual([
-    'node_modules/@ladbabynpm/picc-permission-modes/index.ts',
+    'node_modules/@example/permission-engine/src/index.ts',
     'node_modules/@mammothb/pi-tokyonight-storm/theme.json',
   ])
   // a directory alone is not the resource: the path names a file, and the file must be there
   mkdirSync(join(packageRoot, 'node_modules', '@mammothb', 'pi-tokyonight-storm'), { recursive: true })
   expect(missingVendorPaths(MANIFEST, packageRoot)).toHaveLength(2)
   put('node_modules/@mammothb/pi-tokyonight-storm/theme.json')
-  put('node_modules/@ladbabynpm/picc-permission-modes/index.ts')
+  put('node_modules/@example/permission-engine/src/index.ts')
   expect(missingVendorPaths(MANIFEST, packageRoot)).toEqual([])
 })
 

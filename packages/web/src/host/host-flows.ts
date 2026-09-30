@@ -13,7 +13,7 @@ import { HostCommandRefused } from './host-commands.ts'
  * asks its questions through an `AuthInteraction` — a text or secret prompt, a select, a code —
  * and reports through `notify` events (a URL to open, a device code, progress). The host lifts
  * each prompt to the SAME blocking dialog an extension would ask (`extension-ui-request`), so
- * the browser renders and answers a login exactly as it renders and answers picc's mode
+ * the browser renders and answers a login exactly as it renders and answers the `/mode`
  * question, and each event to a `notify` line. Nothing here is per-provider: the shape of
  * pi's interaction is the whole contract, and a provider pi adds tomorrow logs in here with no
  * code of ours.

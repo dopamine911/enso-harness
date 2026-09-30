@@ -186,15 +186,20 @@ what the act caused arrives on the follow, for every follower alike. Nothing her
 ## Permission
 
 What may run, and who decides. Two things decide today and they are one domain: the **permission
-mode** says what the run may do without asking; the **guards** refuse what no mode may allow. Both
-answer before a tool runs; nothing after it does.
+mode**, over the **permission policy**, says what the run may do without asking; the **guards** refuse
+what no mode may allow. Both answer before a tool runs; nothing after it does.
 
-- **permission mode** — the policy under which tools run: `default`, `acceptEdits`, `plan`,
-  `bypassPermissions`, plus any mode an extension registers. Persisted as a custom entry; the last one
-  on the branch wins, uncached because tree navigation moves the leaf (#84). Named in the run receipt;
+- **permission mode** — the preset under which tools run: `default`, `acceptEdits`, `plan`,
+  `bypassPermissions`, `auto` (#496). Every mode but `default` is a preset of ours, merged over the
+  permission policy for one session. Recorded as a custom entry; the last one among the session's
+  entries wins, in file order as the engine reads them, walked on every read and never cached (#84). Named in the run receipt;
   shown as **mode lines** in the transcript and a select in the status bar that says `unknown` when it
-  is unsure (invariant 5). The mode *concept* is ours; today's implementation is a vendor extension
-  read below the seam since [leak L3](./seams/README.md#leak-numbers) closed it (#162 workstream 4).
+  is unsure (invariant 5). The mode *concept* and the presets are ours; the engine that enforces them
+  is a vendor extension read below the seam since [leak L3](./seams/README.md#leak-numbers) closed it
+  (#162 workstream 4).
+- **permission policy** — `ENSO_HOME/permissions.json` (#446, #496): what every tool call is decided
+  against, per surface, `allow` / `ask` / `deny`, the last matching rule winning. Seeded with Enso's
+  default when absent; a file that does not read refuses the launch. Not the guards' *policy*.
 - **mode** — the permission mode, and nothing else. *Decision (3):* the runtime's own interface setting
   (interactive, non-interactive, driven in-process) is **not given a word of ours**: no Enso code
   tracks it, and `surface` — the candidate — already means TUI-or-web. It stays under the host and in
@@ -345,10 +350,10 @@ harness did). The first is canonical and never rewritten by us; the second is th
   runtime's `trust.json`; asked once per session when undecided; untrusted, the project's config is
   skipped and the session is told. Secrets are not config: `ENSO_HOME/secrets.env`, read per call, quarantined.
 - **ENSO_HOME** — the user's Enso directory, `~/.enso` unless the variable says otherwise (#421): the
-  runtime's agent dir, the secrets file, the permission rules (`permissions.json`, #446), the logs and the project list, shared by every checkout. A checkout's
+  runtime's agent dir, the secrets file, the permission policy (`permissions.json`, #446, #496), the logs and the project list, shared by every checkout. A checkout's
   old `.enso/` is moved into it on launch, never overwriting.
 - **run provenance** — what a fork point records beyond the runtime's own entries — project revision, context
-  files, the mode's rules, skills, configuration — as the `enso-run-context` custom entry in the
+  files, the mode's policy, skills, configuration — as the `enso-run-context` custom entry in the
   runtime's log, never a side file (#435, #126). Hashes and paths, never contents.
 - **session eval** — a thread's mechanical scorecard and event timeline (#441), computed from what the
   session recorded and nothing else: `EnsoSessionEval`, served by `GET /api/threads/:threadId/eval`
@@ -361,9 +366,10 @@ harness did). The first is canonical and never rewritten by us; the second is th
   `enso-guard-denial` entry), the operator's (a person: a declined ask, or an *operator denial*), the
   provider's (#381). The eval counts each on its own; only the operator's is the `r=` counter, what
   the operator *clicks*.
-- **operator denial** — the operator pressed No on a permission prompt. Recorded by the host as the
-  `enso-operator-denial` custom entry (#441), because the permission extension turns it into an
-  ordinary error result and nothing else keeps which button was pressed.
+- **operator denial** — the operator pressed No on a permission prompt. Recorded by Enso's
+  permission-modes extension as the `enso-operator-denial` custom entry (#441, #496), off the permission
+  engine's decision broadcast, because the engine turns it into an ordinary error result and nothing
+  else keeps which button was pressed.
 
 **Mechanism** — where the bytes go:
 
@@ -477,6 +483,7 @@ workstream 4): the runtime's event and stored-entry shapes are read only under `
 | `layer` meaning "who wrote it" in the log sense | the process | **process** for the OS process; **layer** keeps its code-region meaning | comments in `packages/core/src/log.ts` | — |
 | `surface` as a word for the runtime's interface setting | — | **none** — see *mode*, Decision (3) | not in code | — |
 | `abstain`, `allow` as verdict values | — | **none** — a verdict is a denial or nothing; the three-valued verdict is #4's design, not today's code | `.local/refactor/goals.md` §4 | — |
+| picc (`@ladbabynpm/picc-permission-modes`) and its rules format | the mode extension and the engine in one package: modes in a `modes` custom entry, rules as `permissions` `allow` / `deny` / `ask` lists, pointed at by `PICC_PERMISSION_MODES_CONFIG_PATH` | **the permission engine** (`@gotgenes/pi-permission-system`) with **Enso's permission-modes extension** over it; the mode as the `active_agent` entry; the policy in the engine's `permission` format (#496) | `packages/harness/package.json`, `host/permission-mode-adapter.ts`, `host/permission-dialog.ts`, `@enso/core/permission-rules` | `permissions.json.picc-backup`, the old file a launch moves aside |
 
 ---
 
@@ -488,7 +495,9 @@ against. Read it to find our word when coming from theirs — never to define ou
 **Columns.** *runtime* — pi (`@earendil-works/pi-coding-agent`), the agent loop this harness is a
 package for. *dsh* — deepseek-harness, the reference harness the #109 spike read. *state layer* —
 TanStack AI in the browser, and the AG-UI stream vocabulary its processor consumes. *mode extension* —
-picc (`picc-permission-modes`), which implements the permission mode today. *analyzer* —
+Enso's permission-modes extension (`packages/harness/extensions/permission-modes/`), which records the
+mode and answers `auto`'s asks. *permission engine* — `@gotgenes/pi-permission-system`, which decides
+every tool call against the permission policy and the mode's preset. *analyzer* —
 cc-safety-net, the command analyzer the bash guard wires as a library. *log substrate* — LogTape.
 
 | Ours | runtime (pi) | dsh | state layer (TanStack / AG-UI) | other |
@@ -498,7 +507,7 @@ cc-safety-net, the command analyzer the bash guard wires as a library. *log subs
 | `ThreadRuntime` (was `PiSession`) | `AgentSession`'s surface, driven in-process (#69) | `Agent` | — | — |
 | entry | session entry (`SessionEntry`: message, tool-call, custom, …) | event in the log | — | — |
 | branch | `getBranch()`: root→leaf | — | — | — |
-| custom entry | `appendEntry` with a `customType` | — | — | mode extension's `modes` entry |
+| custom entry | `appendEntry` with a `customType` | — | — | the permission engine's `active_agent` entry, which the mode extension appends |
 | fork | `/fork`; `SessionHeader.parentSession` | fork manifest (proposed) | — | — |
 | run | no counterpart — the interval from `prompt` admission to `agent_settled` | `Run` (owned interval, admission → idle); dsh's *turn* | `sessionGenerating` (a flag, not an id) | — |
 | generation | — | connection generation / `openGeneration` (three counters; ours is one) | — | — |
@@ -514,13 +523,13 @@ cc-safety-net, the command analyzer the bash guard wires as a library. *log subs
 | prompt / receipt | `prompt()` | `prompt()` unary → `{ messageId }` | `SubscribeConnectionAdapter.send` | — |
 | admission (#216) | `streamingBehavior`: `steer` or `followUp`; `steer()` / `follow_up()` | inbox `next-step` / `next-turn` | — | — |
 | queue | `queue_update`, `clearQueue()` | inbox `claimed` / `discarded` | the browser queue we do **not** use | — |
-| dialog / dialog kind | `extension_ui_request`; `ctx.ui.select / confirm / input / editor` | approval `request()` inside a turn | — | mode extension's `FilePermissionDialog`, lifted to `select`; `ask_user`'s questionnaire component, lifted to `questionnaire` (ours) |
+| dialog / dialog kind | `extension_ui_request`; `ctx.ui.select / confirm / input / editor` | approval `request()` inside a turn | — | the permission engine asks through `select` and `input`, no lift; `ask_user`'s questionnaire component, lifted to `questionnaire` (ours) |
 | notify | `ctx.ui.notify`; `setStatus` is dropped. One `ctx.ui` for every extension, so the host tags each extension's context with the extension pi loaded (`extensionsOverride`, `host/notice-sender.ts`) and a notify carries its `sender` (#387) | — | — | — |
-| permission mode | — | `permission/preset` + knobs; `custom` derived | — | mode extension's modes (`default`, `acceptEdits`, `plan`, `bypassPermissions`), persisted as `customType: "modes"` |
+| permission mode | — | `permission/preset` + knobs; `custom` derived | — | mode extension's modes (`default`, `acceptEdits`, `plan`, `bypassPermissions`, `auto`), each but `default` an agent (`enso-mode-<mode>`) whose `permission` block the permission engine merges over the policy; persisted as `customType: "active_agent"` |
 | (no word) — the runtime's interface setting | `ctx.mode`: `tui` / `rpc` / `json` / `print` | — | — | — |
 | verdict | `ToolCallEventResult`: `{ block, reason }` or `undefined` | — | — | analyzer `checkCommand` → `kind` `allow` or `deny`, with `ruleId`; a throw is a deny |
 | participant / arbiter | `pi.on("tool_call")`, additive: every handler runs, the first block ends the call | — | — | — |
-| tool identity | tool names `bash`, `write`, `edit`, `read` | — | — | the `picc-*` packages register `Bash` / `Edit` |
+| tool identity | tool names `bash`, `write`, `edit`, `read` | — | — | — |
 | record / level / sink | — | — | — | log substrate's `LogRecord`, categories, sinks |
 | layer | — | — | — | log substrate category segment two |
 | state layer / presentation layer | — | — | TanStack AI / `vercel/ai-elements` (ported) | — |

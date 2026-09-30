@@ -9,7 +9,7 @@
  *  2. a resource path beginning `node_modules/` is a LITERAL path relative to the package
  *     root — not a specifier pi resolves — so the file must be there on disk. Our harness
  *     manifest depends on that at the file level: it names
- *     `node_modules/@ladbabynpm/picc-permission-modes/index.ts` and
+ *     `node_modules/@gotgenes/pi-permission-system/src/index.ts` and
  *     `node_modules/pi-multi-account/index.ts`, source paths inside vendor packages rather
  *     than export-map entries.
  *
@@ -165,8 +165,8 @@ export function missingVendorPaths(manifest: unknown, packageRoot: string): stri
  * The package names those vendor paths reach into, deduplicated.
  *
  * ⚠ A scoped package carries its scope in the FIRST TWO segments (`@scope/name`), so the
- * name is not simply the first one — `node_modules/@ladbabynpm/picc-permission-modes/index.ts`
- * names `@ladbabynpm/picc-permission-modes`, not `@ladbabynpm`.
+ * name is not simply the first one — `node_modules/@gotgenes/pi-permission-system/src/index.ts`
+ * names `@gotgenes/pi-permission-system`, not `@gotgenes`.
  *
  * @group pi manifest
  */

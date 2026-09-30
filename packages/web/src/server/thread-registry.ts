@@ -2,7 +2,7 @@
  * One pi session per chat THREAD, held across runs (#69 PR 2 — closes #43).
  *
  * Before this module the server created a session per HTTP run and disposed it in the
- * handler's `finally`. picc keys its permission mode to the session, so `/mode` answered
+ * handler's `finally`. The permission mode is kept per session, so `/mode` answered
  * on prompt 1 was gone by prompt 2 (#43), the read-before-write tracker never saw a read
  * from an earlier prompt, and every prompt paid a fresh extension load. Here a thread's
  * session survives the run and is disposed only after `idleTimeoutMs` with no run, or at

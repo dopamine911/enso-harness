@@ -157,7 +157,7 @@ export const ENSO_CONTEXT_COMMAND = 'context'
  * - `compact`: a compaction — its summary in place of what it replaced;
  * - `prune`: an extension's `context_edit` — a message removed or replaced in later requests;
  * - `switch`: the model or the thinking level changed;
- * - `mode`: the permission mode changed (picc's `modes` entry).
+ * - `mode`: the permission mode changed (an `active_agent` entry naming an Enso mode, #496).
  *
  * @group Thread context
  */

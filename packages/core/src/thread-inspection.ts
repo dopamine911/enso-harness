@@ -35,7 +35,7 @@ export const EnsoThreadSummary = Type.Object(
     sessionDir: Type.String(),
     /** The session file's path once pi has flushed it to disk; null while it lives only in memory. */
     sessionFile: Type.Union([Type.String(), Type.Null()]),
-    /** picc's current mode, computed the way picc restores it. */
+    /** The current permission mode, computed the way the permission engine reads it (#496). */
     mode: Type.String(),
     /** A run has taken the session and not released it — in flight, or blocked on a question. */
     busy: Type.Boolean(),

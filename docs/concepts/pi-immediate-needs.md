@@ -241,7 +241,7 @@ Start deny-by-default with a narrow allow set and let it accrete.
 | 6 | Stale-write detection | port omp `conflict-detect.ts` | Small port | **Landed** — `stale-write`, built rather than ported: the stamp is pi's own `ino:size:mtimeNs:ctimeNs` (#11) |
 | 7 | `write` overwrites without any signal | 5 and 6 together | — | **Landed** with 5 and 6 |
 | 8 | An ask tool, so halting is possible | `registerTool` | Small | **Landed** (#12) — `ask_user`, ours: one to four questions asked as one card on the web, one prompt at a time in the terminal, with a real decline on both ([`seams/dialog.md`](../seams/dialog.md) → *Asked by the agent*). What the model must do after an unanswered question (halt, not route around) is not built |
-| 9 | Modes | picc's permission modes | — | **Landed by adoption** (#13) — [`seams/permission-mode.md`](../seams/permission-mode.md). Prompt, tools and policy as one named artifact is Expansion-phase work |
+| 9 | Modes | a permission engine's per-session agent, with Enso's mode presets over it | — | **Landed by adoption** (#13), the engine replaced in #496 — [`seams/permission-mode.md`](../seams/permission-mode.md). Prompt, tools and policy as one named artifact is Expansion-phase work |
 | 10 | Filesystem snapshot keyed to the session entry id | build — pi's `/tree` covers conversation rewind, neither harness covers the tree | Moderate | **Open** — #146 (supersedes #14): two published candidates to source-read first |
 | 11 | Worktree isolation | harness-level (omp's is Rust-bound, read only for shape) | Moderate | **Open** — #147 (supersedes #15): five published candidates to source-read first |
 | — | Command classification | build and accrete | Last | **Deferred** — `architecture.md` → *Deferred, deliberately* |

@@ -33,7 +33,7 @@ To add a seeded thread, add it to `seededHome` in `e2e-home.ts` with the turns a
 
 | Test | Held behaviour |
 |---|---|
-| empty state, `/mode` dialog, answer, settle | a dialog round trip through pi, with no model |
+| empty state, `/mode` dialog, answer, settle | a dialog round trip through pi, with no model: Enso's mode select ("Accept edits"), then the `Mode: acceptEdits` line from the host's `permission-mode` (#496) |
 | fonts load from `/fonts` | the web server's font route, wired to the page |
 | paste an image | the image reaches the prompt POST as `EnsoPromptImage` |
 | the URL names the thread | reload, back/forward, a pasted link, a malformed id (#142) |

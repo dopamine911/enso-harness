@@ -417,9 +417,9 @@ export function mapPiEvent(event: RuntimeEvent, delivery: EventDelivery = 'live'
 
     case 'entry_appended': {
       // ⚠ Only CUSTOM entries are promoted (#29): an extension persisting state via
-      // `pi.appendEntry(customType, data)` is a receipt a surface may want (picc's
-      // "modes" entry is the only RPC-observable artifact of a successful mode change —
-      // its updateStatus is a stub and its setMode never notifies). Every other entry
+      // `pi.appendEntry(customType, data)` is a receipt a surface may want (the mode's
+      // `active_agent` entry is how a mode change is recorded, #496; the host follows it with
+      // its own `permission_mode` event). Every other entry
       // kind (messages, compaction, labels) duplicates information that already flows
       // as first-class observations, so those stay unmapped, exactly as before.
       const entry = event.entry as { type?: string; customType?: string; data?: unknown } | undefined

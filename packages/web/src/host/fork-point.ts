@@ -1,5 +1,10 @@
-import { ENSO_RUN_CONTEXT_ENTRY, type EnsoForkPoint, lastCustomEntryData, readEnsoRunContext } from '@enso/core'
-import { persistedPermissionMode } from './permission-mode-adapter.ts'
+import {
+  ENSO_RUN_CONTEXT_ENTRY,
+  type EnsoForkPoint,
+  lastCustomEntryData,
+  readEnsoRunContext,
+  recordedPermissionMode,
+} from '@enso/core'
 import { threadSystemPrompt } from './system-prompt.ts'
 import { recordedModelOf } from './transcript.ts'
 
@@ -7,7 +12,7 @@ import { recordedModelOf } from './transcript.ts'
  * A thread's fork point (#435), assembled from its branch alone — the same walk for a live
  * session's memory and a stored file, so the manifest of a thread reads one way whether it is
  * running. Identity is the session id, the branch's leaf and the parent the listing resolves
- * (#433); the conditions are the branch's recorded model and level (#434), picc's last mode
+ * (#433); the conditions are the branch's recorded model and level (#434), its last mode
  * name, the session's cwd, the latest `enso-run-context` on the branch — the harness's
  * `run-context` extension writes one only when a condition changed, so the last one is current —
  * and the system prompt its last `enso-system-prompt` entry names (#443), hash and name only.
@@ -34,7 +39,9 @@ export function forkPointOf(
     conditions: {
       model: recorded?.model ?? null,
       thinkingLevel: recorded?.thinkingLevel ?? null,
-      mode: persistedPermissionMode(branch),
+      // The branch, not the session's entries: a fork copies the branch, so this is the mode the
+      // fork opens in (#496).
+      mode: recordedPermissionMode(branch),
       cwd: session.cwd,
       // The NEWEST `enso-run-context`, or `null` when there is none or it does not read (PR #439
       // review): an older one is not the current conditions, so a record from another schema is

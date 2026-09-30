@@ -12,9 +12,8 @@ import {
  * pi has no dialog method for a set of questions, so the tool hands `custom` a component that
  * carries its question under {@link QUESTIONNAIRE_COMPONENT_KEY} — a registered symbol, so the
  * tool and the host agree on it without either importing the other (the harness package is
- * loaded by pi, not by the web package). The component is the identity, as picc's
- * `FilePermissionDialog` is for its prompt (`permission-dialog.ts`); unlike picc's, it is ours,
- * so what it carries is the schema's shape, not a vendor's private fields.
+ * loaded by pi, not by the web package). The component is the identity; it is ours, so what
+ * it carries is the schema's shape, not a vendor's private fields.
  *
  * ⚠ Checked, never trusted: the carried value is validated against `EnsoDialogSpec` before it
  * becomes a question, so a malformed one is no dialog at all — `custom` then resolves

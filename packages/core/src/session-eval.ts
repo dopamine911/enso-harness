@@ -4,6 +4,7 @@ import { Check } from 'typebox/value'
 import { ENSO_GUARD_DENIAL_ENTRY, readEnsoGuardDenial } from './guard.ts'
 import { ENSO_LOG_EVENTS } from './log-stats.ts'
 import type { EnsoLogLine } from './log.ts'
+import { readRecordedMode } from './permission-modes.ts'
 import type { EnsoTurnStats } from './thread-stats.ts'
 import type { EnsoTranscriptEntry, EnsoTranscriptMessage, EnsoTranscriptToolResult } from './transcript.ts'
 
@@ -41,20 +42,37 @@ import type { EnsoTranscriptEntry, EnsoTranscriptMessage, EnsoTranscriptToolResu
  */
 
 /**
- * The `customType` the host persists an operator's deny under (#441): a permission prompt answered No.
+ * The `customType` an operator's deny is persisted under (#441, #496): a permission prompt answered No.
  *
  * @group Session eval
  */
 export const ENSO_OPERATOR_DENIAL_ENTRY = 'enso-operator-denial'
 
 /**
- * An operator's deny on a permission prompt, as the host records it on the branch. `option` is the
- * button pressed, verbatim; `title` is the prompt's as lifted (`Run command`, `Permission`, or picc's
- * own) — the lift surfaces no tool name, so none is recorded.
+ * An operator's deny on a permission prompt, as Enso's permission-modes extension records it on
+ * the branch when the permission engine reports a `user_denied` decision (#441, #496): the
+ * engine's request id, the surface the rule fired on (`bash`, `edit`, …) and the value it judged
+ * (the command, the path).
  *
  * @group Session eval
  */
 export const EnsoOperatorDenial = Type.Object(
+  {
+    requestId: Type.String({ minLength: 1 }),
+    surface: Type.String({ minLength: 1 }),
+    value: Type.String(),
+  },
+  { additionalProperties: false },
+)
+/** @group Session eval */
+export type EnsoOperatorDenial = Static<typeof EnsoOperatorDenial>
+
+/**
+ * The shape the host wrote before #496, from the permission prompt it lifted itself: the dialog's
+ * id, the button pressed and the prompt's title. Nothing writes it any more, but session files on
+ * disk hold it, and a deny recorded then is still a deny: the eval counts both shapes.
+ */
+const LegacyOperatorDenial = Type.Object(
   {
     dialogId: Type.String({ minLength: 1 }),
     option: Type.String({ minLength: 1 }),
@@ -62,8 +80,9 @@ export const EnsoOperatorDenial = Type.Object(
   },
   { additionalProperties: false },
 )
-/** @group Session eval */
-export type EnsoOperatorDenial = Static<typeof EnsoOperatorDenial>
+
+/** Either shape an `enso-operator-denial` entry may hold (#441, #496). */
+const RecordedOperatorDenial = Type.Union([EnsoOperatorDenial, LegacyOperatorDenial])
 
 /**
  * The timeline's event kinds — the script's, minus the ones pi has no fact for.
@@ -339,8 +358,6 @@ const ASK_TOOL = 'ask_user'
 const BASH_TOOL = 'bash'
 /** The ask tool's own refusal text (`ask-user/index.ts` `toolResultText`): the operator chose to talk instead. */
 const ASK_DECLINED_TEXT = 'The user declined to answer and chose nothing.'
-/** picc's `modes` entry — the mode name it persists. */
-const MODES_ENTRY = 'modes'
 
 const DUPLICATE_TOOL_WINDOW_CALLS = 20
 const RETRY_WINDOW_CALLS = 8
@@ -521,11 +538,11 @@ function walkToolResult(walk: Walk, index: number, entry: EnsoTranscriptToolResu
 
 function walkCustom(walk: Walk, index: number, entry: Extract<EnsoTranscriptEntry, { kind: 'custom' }>): void {
   const stamp = entry.at === undefined ? {} : { at: entry.at }
-  if (entry.customType === MODES_ENTRY) {
-    const mode = fieldOf(entry.data, 'mode')
-    if (typeof mode !== 'string' || mode === walk.lastMode) return
-    walk.lastMode = mode
-    walk.events.push({ kind: 'permission-mode', index, ...stamp, detail: mode })
+  const recordedMode = readRecordedMode(entry)
+  if (recordedMode !== undefined) {
+    if (recordedMode === walk.lastMode) return
+    walk.lastMode = recordedMode
+    walk.events.push({ kind: 'permission-mode', index, ...stamp, detail: recordedMode })
     return
   }
   if (entry.customType === ENSO_GUARD_DENIAL_ENTRY) {
@@ -541,13 +558,16 @@ function walkCustom(walk: Walk, index: number, entry: Extract<EnsoTranscriptEntr
     return
   }
   if (entry.customType === ENSO_OPERATOR_DENIAL_ENTRY) {
-    if (!Check(EnsoOperatorDenial, entry.data)) return
+    if (!Check(RecordedOperatorDenial, entry.data)) return
     const denial = entry.data
     walk.events.push({
       kind: 'tool-denied',
       index,
       ...stamp,
-      detail: `operator denied ${denial.title}: ${denial.option}`,
+      detail:
+        'requestId' in denial
+          ? `operator denied ${denial.surface}: ${denial.value}`
+          : `operator denied ${denial.title}: ${denial.option}`,
     })
   }
 }

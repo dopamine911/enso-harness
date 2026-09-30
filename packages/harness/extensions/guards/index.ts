@@ -73,8 +73,8 @@ import {
  * a parser that claimed it would read as coverage and not be coverage.
  *
  * TOOL IDENTITY (#4, gap 2): every tool-name comparison goes through `canonicalToolName`
- * on both sides, so a Claude-Code-style capitalised registration (`Write`, `Grep` —
- * picc's own types carry `tool: "Bash"`) can never skip a branch by case. And on
+ * on both sides, so a Claude-Code-style capitalised registration (`Write`, `Grep`, `Bash`)
+ * can never skip a branch by case. And on
  * `session_start` the policy's tool names are checked against pi's live `getAllTools()`:
  * a policy naming a tool pi no longer registers (a rename upstream) would otherwise turn
  * this guard into a silent no-op with nothing anywhere reporting it. ⚠ The check FAILS
@@ -89,9 +89,10 @@ import {
  * `~/.claude.json`, `.mcp.json`, …) were gap 2 here until #21: they are not secrets —
  * nothing is exfiltrated, something is installed — so `looksLikeSecret` never caught
  * them. `isPersistenceWriteTarget` now denies `write`/`edit` on them UNCONDITIONALLY —
- * every mode, every surface, including print runs where picc is absent entirely (#20).
- * picc reaches at most "ask" for the same set, and an ask is mode-shaped (auto's
- * classifier may approve one); this layer is the always-on floor beneath that.
+ * every mode, every surface, including print runs where the permission engine is absent
+ * entirely (#20). The engine reaches at most "ask" for the same set, and an ask is
+ * mode-shaped (auto's classifier may approve one, #496); this layer is the always-on floor
+ * beneath that.
  *
  * READ-BEFORE-WRITE (#10, Tier 1 item 5): `write` to an EXISTING file requires that this
  * session has seen its content — a successful `read` (or its own successful `write`; see

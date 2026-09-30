@@ -7,10 +7,9 @@
  *   PI_CODING_AGENT_DIR  points pi at a scratch config dir, so none of the user's
  *                        installed packages, settings, keybindings, themes or
  *                        credentials are visible. Verified: 16 packages -> 0.
- *   PICC_PERMISSION_MODES_CONFIG_PATH
- *                        points the permission modes at ENSO_HOME/permissions.json
- *                        (#446), prepared before the spawn — not the copy of Claude
- *                        Code's rules picc keeps inside node_modules by default.
+ *   (the permission policy) ENSO_HOME/permissions.json, prepared before the spawn: the
+ *                        permission engine's config path under the agent dir is linked
+ *                        to it, and the mode agents written beside pi's (#446, #496).
  *   --no-extensions      disables discovery, which also suppresses the PROJECT-local
  *                        .pi/settings.json in this repo (it installs Enso as a
  *                        package). Without it the package would load twice — once
@@ -41,8 +40,8 @@
  *   working, not a bug in it — see docs/concepts/provider-auth-and-client-identity.md.
  *
  * ⚠ A NON-INTERACTIVE RUN (`-p`, or piped stdin) loads a PRINT VARIANT of the package —
- *   the harness minus picc-permission-modes, which would otherwise fail closed and deny
- *   every mutating tool where no prompt can be shown. See the `isPrintRun` block below
+ *   the harness minus the permission engine, which would otherwise deny every ask where no
+ *   prompt can be shown. See the `isPrintRun` block below
  *   and scripts/print-harness.ts (#20). Interactive runs keep the full permission model.
  *
  * ⚠ THE `pi` SPAWNED HERE IS VERSION-GATED (#217). It comes from `PATH`, while the guard's
@@ -65,7 +64,7 @@ import {
   migrateCheckoutEnsoOnLaunch,
   printHarnessDir,
 } from '../packages/core/src/paths.ts'
-import { describePermissionRules, preparePermissionRules } from '../packages/core/src/permission-rules.ts'
+import { describePermissionPolicy, preparePermissionPolicy } from '../packages/core/src/permission-rules.ts'
 import { declaredResources, missingVendorPaths } from '../packages/core/src/pi-manifest.ts'
 import { quarantineSecrets } from '../packages/core/src/secrets.ts'
 import {
@@ -126,27 +125,28 @@ if (migration.held) {
 const agentDir: string = ensoAgentDir(home)
 mkdirSync(agentDir, { recursive: true })
 
-// The rules the permission-modes extension reads when pi loads it (#446), prepared before the
-// spawn: seeded when absent or empty (an empty file would import Claude Code's), refused when
-// unreadable. Harmless under the print variant, which loads no permission modes (#20).
-const permissionRules = preparePermissionRules(ensoPermissionRulesPath(home))
-if (permissionRules.kind === 'unreadable') {
+// The policy the permission engine reads when pi loads it (#446, #496), prepared before the
+// spawn: seeded when it holds none, the engine's config path linked to it, refused when
+// unreadable. Harmless under the print variant, which loads no permission engine (#20).
+const permissionPolicy = preparePermissionPolicy(ensoPermissionRulesPath(home), agentDir)
+if (permissionPolicy.kind === 'unreadable') {
   process.stderr.write(
-    `enso: ${permissionRules.path} is unreadable (${permissionRules.reason}); fix it or remove it — a removed file is seeded with Enso's default deny rules (#446)\n`,
+    `enso: ${permissionPolicy.path} is unreadable (${permissionPolicy.reason}); fix it or remove it — a removed file is seeded with Enso's default policy (#446)\n`,
   )
   process.exit(1)
 }
-process.stderr.write(`enso: ${describePermissionRules(permissionRules)}\n`)
+process.stderr.write(`enso: ${describePermissionPolicy(permissionPolicy)}\n`)
 
 const passthroughArgs = process.argv.slice(2)
 
 /**
- * ⚠ PRINT RUNS LOAD A VARIANT PACKAGE WITHOUT picc-permission-modes (#20).
- * picc fails closed when it cannot prompt — every mutating tool denied, no escape hatch —
- * so a `-p` run under the full package can chat and nothing else. The variant (built by
- * scripts/print-harness.ts) is the harness minus that one extension: guards and
- * multi-account still load, skills/prompts/themes still load, and the run has OUR guards
- * only — bash unconfined (#9), the pre-picc posture. Launch-time mode selection upstream
+ * ⚠ PRINT RUNS LOAD A VARIANT PACKAGE WITHOUT THE PERMISSION ENGINE (#20, #496).
+ * The engine denies every ask when it cannot prompt — every edit and most bash denied, no
+ * escape hatch — so a `-p` run under the full package can chat and nothing else. The variant
+ * (built by scripts/print-harness.ts) is the harness minus that one extension: guards,
+ * multi-account and the mode commands (inert without the engine) still load, skills/prompts/
+ * themes still load, and the run has OUR guards only — bash unconfined (#9). Launch-time mode
+ * selection upstream
  * (#13) is the durable fix; this is the honest interim. The trigger: `enso-launch.ts#isPrintRun`.
  */
 const printRun = isPrintRun(passthroughArgs, process.stdin.isTTY === true)
@@ -272,7 +272,7 @@ process.stderr.write(
 
 const pi = Bun.spawn(['pi', ...args], {
   stdio: ['inherit', 'inherit', 'inherit'],
-  env: { ...process.env, PI_CODING_AGENT_DIR: agentDir, PICC_PERMISSION_MODES_CONFIG_PATH: permissionRules.path },
+  env: { ...process.env, PI_CODING_AGENT_DIR: agentDir },
 })
 // `exited` resolves with the exit code (never null, unlike Node's `exit` event).
 process.exit(await pi.exited)
