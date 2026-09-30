@@ -23,13 +23,14 @@
  */
 import {
   existsSync,
+  linkSync,
   lstatSync,
   mkdirSync,
   readFileSync,
   readlinkSync,
-  renameSync,
   rmSync,
   symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
@@ -190,17 +191,37 @@ function writeJson(path: string, value: unknown): void {
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`)
 }
 
-/** The first free name beside `path` for a backup: `.<kind>`, then `.<kind>.1` … Never overwrites. */
-function freeBackupPath(path: string, kind: string): string {
-  let candidate = `${path}.${kind}`
-  for (let attempt = 1; lstatSync(candidate, { throwIfNoEntry: false }) !== undefined; attempt += 1) {
-    candidate = `${path}.${kind}.${attempt}`
-  }
-  return candidate
+function errorCode(error: unknown): unknown {
+  return error instanceof Error && 'code' in error ? error.code : undefined
 }
 
-function isMissingFile(error: unknown): boolean {
-  return error instanceof Error && 'code' in error && error.code === 'ENOENT'
+/**
+ * Move `path` aside under the first free backup name (`.<kind>`, then `.<kind>.1` …) and return
+ * that name, or `undefined` when `path` was already gone.
+ *
+ * ⚠ NEVER OVERWRITES, UNDER A RACE TOO (#497 review, second round). Checking for a free name and
+ * then renaming is two steps: another launch can create the backup in between, and `rename`
+ * silently replaces its destination. A hard link is one step that fails with `EEXIST` when the
+ * name is taken, so the name is reserved and filled at once; the original is unlinked after.
+ */
+function moveAside(path: string, kind: string): string | undefined {
+  for (let attempt = 0; ; attempt += 1) {
+    const candidate = attempt === 0 ? `${path}.${kind}` : `${path}.${kind}.${attempt}`
+    try {
+      linkSync(path, candidate)
+    } catch (error: unknown) {
+      if (errorCode(error) === 'EEXIST') continue
+      if (errorCode(error) === 'ENOENT') return undefined
+      throw error
+    }
+    try {
+      unlinkSync(path)
+    } catch (error: unknown) {
+      // The other launch unlinked the same file first: the copy under `candidate` is still whole.
+      if (errorCode(error) !== 'ENOENT') throw error
+    }
+    return candidate
+  }
 }
 
 /**
@@ -209,22 +230,16 @@ function isMissingFile(error: unknown): boolean {
  *
  * ⚠ TWO LAUNCHES MAY BOTH DECIDE TO MIGRATE (#497 review): the web host and the terminal, on a home
  * not yet migrated, each read the picc file before either moved it. So this step runs with a
- * decision that may be stale:
- * - the other launch already moved the file and wrote the seed: this move takes the SEED, so the
- *   backup name never overwrites (`.picc-backup.1`), and the user's rules stay in `.picc-backup`;
- * - the other launch moved it and has not written yet: the move finds nothing, and the caller
- *   reads the file again rather than failing the launch.
+ * decision that may be stale, and whatever it moves, `moveAside` never overwrites an earlier
+ * backup: the user's rules stay in the first one (`.picc-backup`), and a late launch's copy of the
+ * seed, or of the same rules, lands in `.picc-backup.1`. When the file is already gone (the other
+ * launch moved it and has not written the seed yet), the caller reads again rather than failing.
  *
  * @group Permission mode
  */
 export function replacePiccRulesFile(policyPath: string): string | undefined {
-  const backup = freeBackupPath(policyPath, 'picc-backup')
-  try {
-    renameSync(policyPath, backup)
-  } catch (error: unknown) {
-    if (isMissingFile(error)) return undefined
-    throw error
-  }
+  const backup = moveAside(policyPath, 'picc-backup')
+  if (backup === undefined) return undefined
   writeJson(policyPath, ENSO_DEFAULT_PERMISSION_POLICY)
   return backup
 }
@@ -247,14 +262,12 @@ function linkEngineConfig(agentDir: string, policyPath: string): string | undefi
     if (readlinkSync(linkPath) === target) return undefined
     rmSync(linkPath)
   } else if (existing !== undefined) {
-    movedAside = freeBackupPath(linkPath, 'bak')
-    renameSync(linkPath, movedAside)
+    movedAside = moveAside(linkPath, 'bak')
   }
   try {
     symlinkSync(target, linkPath)
   } catch (error: unknown) {
-    const raced = error instanceof Error && 'code' in error && error.code === 'EEXIST'
-    if (!raced || readlinkSync(linkPath) !== target) throw error
+    if (errorCode(error) !== 'EEXIST' || readlinkSync(linkPath) !== target) throw error
   }
   return movedAside
 }
