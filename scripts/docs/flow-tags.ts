@@ -58,6 +58,8 @@ export interface Invariant {
 
 export interface PinnedTest {
   readonly file: string
+  /** 1-based line of the `@pins` comment, where a reviewer goes to move or check it. */
+  readonly line: number
   readonly title: string
   readonly invariants: readonly string[]
 }
@@ -176,14 +178,14 @@ function collectComment(file: string, comment: SourceComment, into: Collected): 
   if (pins.length > 0 && comment.test === undefined) {
     into.problems.push(`${file}:${comment.line}: @pins is not directly above a test( with a literal title`)
   } else if (pins.length > 0) {
-    into.pins.push({ file, title: comment.test as string, invariants: pins })
+    into.pins.push({ file, line: comment.line, title: comment.test as string, invariants: pins })
   }
   if (!tags.some((tag) => tag.name === 'flow' || tag.name === 'invariant')) return
   if (comment.owner === undefined) {
     into.problems.push(`${file}:${comment.line}: a @flow or @invariant with no declaration to belong to`)
     return
   }
-  const at: Anchor = { file, ...comment.owner }
+  const at: Anchor = { file, symbol: comment.owner.symbol, line: comment.owner.line }
   tags.forEach((tag, index) => {
     if (tag.name === 'flow') collectFlow(tags, tag, at, into)
     if (tag.name === 'invariant') collectInvariant(tags, index, at, into)

@@ -48,16 +48,16 @@ const about = (text: string): (typeof comments)[number] | undefined =>
   comments.find((comment) => comment.lines.some((line) => line.includes(text)))
 
 test('⚠ a note inside an object-literal method belongs to that method, not the function around it', () => {
-  expect(about('object-literal handler')?.owner).toEqual({ symbol: 'execute', line: 3 })
+  expect(about('object-literal handler')?.owner).toEqual({ symbol: 'execute', line: 3, end: 7 })
 })
 
 test('⚠ a note beside a local value belongs to the function; a doc comment on a local variable belongs to the variable', () => {
-  expect(about('beside a local value')?.owner).toEqual({ symbol: 'resolve', line: 11 })
-  expect(about('documents that variable')?.owner).toEqual({ symbol: 'documented', line: 15 })
+  expect(about('beside a local value')?.owner).toEqual({ symbol: 'resolve', line: 11, end: 18 })
+  expect(about('documents that variable')?.owner).toEqual({ symbol: 'documented', line: 15, end: 15 })
 })
 
 test('a note no statement follows is still seen, and belongs to the function whose body it closes', () => {
-  expect(about('before its closing brace')?.owner).toEqual({ symbol: 'resolve', line: 11 })
+  expect(about('before its closing brace')?.owner).toEqual({ symbol: 'resolve', line: 11, end: 18 })
 })
 
 test('⚠ a doc comment a blank line cuts from its declaration documents nothing', () => {
