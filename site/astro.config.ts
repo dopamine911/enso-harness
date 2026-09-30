@@ -5,6 +5,12 @@ import starlightTypeDoc from 'starlight-typedoc'
 import { SITE_BASE, SITE_URL } from '../scripts/docs/site-base.ts'
 
 /**
+ * The social card link previews show (`scripts/docs/social-card.ts` renders it). Absolute, as
+ * previews require, so the origin and base come from the one place both are decided.
+ */
+const SOCIAL_CARD_URL = `${SITE_URL}${SITE_BASE}/social-card.png`
+
+/**
  * The documentation site (#188): a PRESENTATION layer over `docs/`, never a second source.
  *
  * Content is projected in from the repository's `docs/` by `scripts/docs/site-content.ts` —
@@ -86,6 +92,17 @@ export default defineConfig({
             href: 'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Sora:wght@500;600&display=swap',
           },
         },
+        // Link previews (Slack, X, LinkedIn…): Starlight already asks for a large card
+        // (`twitter:card` → `summary_large_image`), and a large card with no image previews as
+        // bare text. `site-links.ts` checks the image is in the build.
+        { tag: 'meta', attrs: { property: 'og:image', content: SOCIAL_CARD_URL } },
+        { tag: 'meta', attrs: { property: 'og:image:width', content: '1200' } },
+        { tag: 'meta', attrs: { property: 'og:image:height', content: '630' } },
+        {
+          tag: 'meta',
+          attrs: { property: 'og:image:alt', content: 'Enso: Give agents room to work. Keep the receipts.' },
+        },
+        { tag: 'meta', attrs: { name: 'twitter:image', content: SOCIAL_CARD_URL } },
       ],
       // Five sections, in the order a reader needs them: what it does for a user (#437), what it
       // is, how it behaves, what it declares, how to change it. Features comes first because it

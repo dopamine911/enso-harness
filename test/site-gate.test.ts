@@ -14,6 +14,12 @@ import {
   sectionTitle,
 } from '../scripts/docs/site-content.ts'
 import { internalHrefs, resolveHref, unservedSections } from '../scripts/docs/site-links.ts'
+import {
+  landingHeroText,
+  SOCIAL_CARD_IMAGE,
+  SOCIAL_CARD_RECORD,
+  SOCIAL_CARD_SIZE,
+} from '../scripts/docs/social-card.ts'
 import { REPOSITORY_ROOT } from './gate-support.ts'
 
 /**
@@ -226,6 +232,27 @@ test('the crawl reads the hrefs a site serves, and skips the ones it cannot answ
   expect(resolveHref('/enso/reference/routes/', 'site/dist/index.html')).toBe('site/dist/reference/routes')
   expect(resolveHref('../seams/guards/', 'site/dist/flows/resume/index.html')).toBe('site/dist/flows/seams/guards')
   expect(resolveHref('#anchor', 'site/dist/index.html')).toBe('site/dist/index.html')
+})
+
+// The social card: a preview needs an ABSOLUTE URL, so the crawl follows the page's own
+// `og:image` — on the site's origin only; a card hosted elsewhere is not this build's to answer for.
+test('the crawl follows the page’s own social card, and only on the site’s origin', () => {
+  const html = [
+    '<meta property="og:image" content="https://site.test/enso/social-card.png">',
+    '<meta property="og:image" content="https://cdn.elsewhere.test/card.png">',
+  ].join('\n')
+  expect(internalHrefs(html, 'https://site.test')).toEqual(['/enso/social-card.png'])
+})
+
+// ⚠ The card is an image of the hero's words, so it goes stale silently when they change: its record
+// must match the hero's source, and the image must be the size every preview crops from.
+// Regenerate with `bun run docs:social-card`.
+test('⚠ the social card says what the hero says, at 1200×630', () => {
+  const record: unknown = JSON.parse(readFileSync(join(REPOSITORY_ROOT, SOCIAL_CARD_RECORD), 'utf8'))
+  expect(record).toEqual(landingHeroText(REPOSITORY_ROOT))
+  // A PNG's width and height are the IHDR chunk's first two fields, at bytes 16 and 20.
+  const png = readFileSync(join(REPOSITORY_ROOT, SOCIAL_CARD_IMAGE))
+  expect({ width: png.readUInt32BE(16), height: png.readUInt32BE(20) }).toEqual(SOCIAL_CARD_SIZE)
 })
 
 test('a derived section index is titled, and every word of it (#188)', () => {

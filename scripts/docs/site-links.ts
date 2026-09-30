@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 import { findRepoRoot } from '../../packages/core/src/paths.ts'
-import { SITE_BASE as BASE } from './site-base.ts'
+import { SITE_BASE as BASE, SITE_URL } from './site-base.ts'
 
 /**
  * Every internal link in the BUILT site resolves to something the site serves (#188).
@@ -46,11 +46,20 @@ function builtPages(): string[] {
  *
  * ⚠ `src` too (#437): a Features page's screenshot is an `<img>`, not a link, and an image that
  * failed to reach the build is a broken picture on a page the crawl otherwise calls healthy.
+ *
+ * ⚠ And the page's `og:image` when it is on the site's own origin: a link preview needs an
+ * ABSOLUTE URL, which the filter below passes over as external, and a card missing from the build
+ * is a broken preview no one sees from the site itself.
  */
-export function internalHrefs(html: string): string[] {
-  return [...html.matchAll(/(?:href|src)="([^"]+)"/g)]
+export function internalHrefs(html: string, origin: string = SITE_URL): string[] {
+  const links = [...html.matchAll(/(?:href|src)="([^"]+)"/g)]
     .map((match) => match[1] ?? '')
     .filter((href) => href !== '' && !/^(?:https?:|mailto:|#|data:)/.test(href))
+  const cards = [...html.matchAll(/<meta property="og:image" content="([^"]+)"/g)]
+    .map((match) => match[1] ?? '')
+    .filter((url) => url.startsWith(`${origin}/`))
+    .map((url) => url.slice(origin.length))
+  return [...links, ...cards]
 }
 
 /**
