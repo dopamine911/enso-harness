@@ -1887,6 +1887,7 @@ const CHECKS_QUESTION = {
  */
 async function askedQuestionnaire(questions: readonly unknown[]): Promise<{
   hosted: HostedThread
+  core: FauxCore
   events: EnsoObservation[]
   question: Extract<EnsoObservation, { kind: 'extension-ui-request' }>
   settled: Promise<void>
@@ -1909,7 +1910,7 @@ async function askedQuestionnaire(questions: readonly unknown[]): Promise<{
   hosted.runtime.prompt({ message: 'set up storage' }, { onAccepted: () => undefined, onRejected: settled.reject })
   const question = await asked
   if (question.kind !== 'extension-ui-request') throw new Error('unreachable: matched on kind')
-  return { hosted, events, question, settled: settled.promise }
+  return { hosted, core, events, question, settled: settled.promise }
 }
 
 /** What `ask_user` returned to the model, once the run has settled. */
@@ -1929,7 +1930,7 @@ function askUserText(events: EnsoObservation[]): string {
 // on that path (the tool asking one prompt at a time, the lift not recognising the component, the
 // mapper not treating the kind as blocking) fails here.
 test('⚠⚠ the agent asks through ask_user: its questionnaire is one dialog, and the answers are its tool result (#12)', async () => {
-  const { hosted, events, question, settled } = await askedQuestionnaire([DATABASE_QUESTION, CHECKS_QUESTION])
+  const { hosted, core, events, question, settled } = await askedQuestionnaire([DATABASE_QUESTION, CHECKS_QUESTION])
   expect(question.blocking).toBe(true)
   expect(question.dialog).toEqual({
     method: 'questionnaire',
@@ -1948,15 +1949,42 @@ test('⚠⚠ the agent asks through ask_user: its questionnaire is one dialog, a
       '- Which checks? → lint, tests, in their own words: "e2e"',
     ].join('\n'),
   )
+  // An answer carries the run on: the model is asked again, with the answers.
+  expect(core.state.callCount).toBe(2)
 })
 
 // The card's Cancel is a real decline for every kind of question — the multi-choice one included,
-// which the adopted vendor could only read as "none of these" (#376 review).
-test('a declined ask_user questionnaire reaches the model as a decline, and the run settles (#12)', async () => {
-  const { hosted, events, question, settled } = await askedQuestionnaire([CHECKS_QUESTION])
+// which the adopted vendor could only read as "none of these" (#376 review). ⚠ And the decline
+// ENDS THE RUN (#379, #465): the model is not asked again, so it cannot pick for the user or route
+// around the question — the next move is the user's.
+test('⚠ a declined ask_user questionnaire reaches the model as a decline, and the run ends there (#12, #379)', async () => {
+  const { hosted, core, events, question, settled } = await askedQuestionnaire([CHECKS_QUESTION])
   hosted.runtime.answerDialog({ id: question.id, cancelled: true })
   await settled
   expect(askUserText(events)).toBe('The user declined to answer and chose nothing.')
+  expect(core.state.callCount).toBe(1)
+})
+
+/** A hosted session whose faux model sends ONE batch of `calls`, then would reply: how many requests it answered. */
+async function requestsAfterBatch(calls: readonly unknown[]): Promise<number> {
+  const core = createFauxCore()
+  core.setResponses([faux.fauxAssistantMessage([...calls]), faux.fauxAssistantMessage('Carrying on.')])
+  const hosted = await hostedSession([fauxModelExtension(core)])
+  await runPrompt(hosted, 'tidy up')
+  return core.state.callCount
+}
+
+// ⚠⚠ #465, #189: asking must be cheaper than working around a refusal. An authorization refusal
+// from the real guard sets pi's `terminate`, and pi's real loop ends the run once EVERY call of the
+// batch set it — so a batch the guard refused whole hands the turn back to the user, and the model
+// never gets the turn in which it would try another route. A batch where something else ran goes
+// on (pi's rule, `shouldTerminateToolBatch`): the model reads the refusal and its ask line then. A
+// redirect (`curl`) keeps the run, so the model can take the route it names (`web_fetch`).
+test('⚠⚠ a batch the guard refused whole ends the run; a batch where a call ran, or a redirect, goes on (#465)', async () => {
+  const refused = faux.fauxToolCall('write', { path: '/etc/enso-465-probe', content: 'x' })
+  expect(await requestsAfterBatch([refused])).toBe(1)
+  expect(await requestsAfterBatch([refused, faux.fauxToolCall('read', { path: 'package.json' })])).toBe(2)
+  expect(await requestsAfterBatch([faux.fauxToolCall('bash', { command: 'curl https://example.com' })])).toBe(2)
 })
 
 // ⚠⚠ If the user says stop, it's stop — also while the AGENT is asking. The question holds the run

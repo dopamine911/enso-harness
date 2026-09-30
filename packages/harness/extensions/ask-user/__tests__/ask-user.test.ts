@@ -25,7 +25,7 @@ interface CapturedTool {
       onUpdate: undefined,
       extensionContext: unknown,
     ]
-  ) => Promise<{ content: { type: string; text: string }[] }>
+  ) => Promise<{ content: { type: string; text: string }[]; terminate?: boolean }>
 }
 
 function loadTool(): CapturedTool {
@@ -79,9 +79,16 @@ function scriptedContext(options: {
   return { context: { mode: options.mode, hasUI: options.hasUI ?? true, ui }, asked, cards }
 }
 
-async function run(questions: EnsoQuestion[], context: unknown): Promise<string> {
+async function runResult(
+  questions: EnsoQuestion[],
+  context: unknown,
+): Promise<{ text: string; terminate: boolean | undefined }> {
   const result = await loadTool().execute('call-1', { questions }, undefined, undefined, context)
-  return result.content.map((part) => part.text).join('')
+  return { text: result.content.map((part) => part.text).join(''), terminate: result.terminate }
+}
+
+async function run(questions: EnsoQuestion[], context: unknown): Promise<string> {
+  return (await runResult(questions, context)).text
 }
 
 test('outside a terminal it asks as ONE card carrying the whole questionnaire, and reads the answers back in plain words', async () => {
@@ -105,10 +112,17 @@ test('outside a terminal it asks as ONE card carrying the whole questionnaire, a
   )
 })
 
-test('a declined card is a decline, not "none of these"', async () => {
+// ⚠ #379, #465: an unanswered question ends the turn — the user's "no" is a stop, not a cue for
+// the model to pick for them or to route around the question. An answer carries the run on.
+test('a declined card is a decline, not "none of these", and it ends the turn', async () => {
   const scripted = scriptedContext({ mode: 'rpc', card: { cancelled: true } })
-  expect(await run([DATABASE], scripted.context)).toBe('The user declined to answer and chose nothing.')
+  expect(await runResult([DATABASE], scripted.context)).toEqual({
+    text: 'The user declined to answer and chose nothing.',
+    terminate: true,
+  })
   expect(scripted.asked).toEqual([])
+  const answered = scriptedContext({ mode: 'rpc', card: { answers: [{ selected: ['SQLite'] }] } })
+  expect((await runResult([DATABASE], answered.context)).terminate).toBeUndefined()
 })
 
 // pi's own rpc mode resolves `custom` to `undefined` (it cannot show a component); the terminal
@@ -123,9 +137,11 @@ test('where the card cannot be shown, and in a terminal, it asks one plain promp
   expect(terminal.asked).toEqual(['select: Database — Which database?'])
 })
 
-test('with no one to ask, nothing is asked and the model is told so', async () => {
+test('with no one to ask, nothing is asked, the model is told so, and the turn ends', async () => {
   const scripted = scriptedContext({ mode: 'print', hasUI: false })
-  expect(await run([DATABASE], scripted.context)).toContain('Nothing was asked')
+  const result = await runResult([DATABASE], scripted.context)
+  expect(result.text).toContain('Nothing was asked')
+  expect(result.terminate).toBe(true)
   expect(scripted.asked).toEqual([])
   expect(scripted.cards).toEqual([])
 })

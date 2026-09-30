@@ -8,7 +8,7 @@ exports[`an analyzer deny is blocked with its rule identity in the reason: flow 
   R->>G: tool_call { toolName: "bash", command: "git reset --hard HEAD~3" }
   G->>A: analyzeBashCommand({ command: "git reset --hard HEAD~3", cwd })
   A->>G: { kind: "deny", ruleId: "git.reset-hard" }
-  Note over G: bash denied: Bash command blocked by cc-safety-net (git.reset-hard): git reset --hard destroys all uncommitted changes permanently.
+  Note over G: bash denied: Bash command blocked by cc-safety-net (git.reset-hard): git reset --hard destroys all uncommitted changes permanently. This needs the user's authorization. Do not try another way to the same effect: if the task still needs it, ask the user with ask_user — say what you want to do and why — and let them decide.
   G->>R: appendEntry("enso-guard-denial", {"toolCallId":"t","rule":"cc-safety-net"})
   G->>R: { block: true, reason }"
 `;

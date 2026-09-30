@@ -219,6 +219,10 @@ what no mode may allow. Both answer before a tool runs; nothing after it does.
   `@enso/core` (`network-egress`, `secret-read`, `stale-write`, …): the word beside a verdict's prose
   reason that a day's stats count by (#144). The command analyzer's own `ruleId`, when it has one, is
   quoted inside the reason, not promoted to a rule of ours.
+- **rule kind** — what a rule's refusal asks of the model, `ENSO_GUARD_RULE_KINDS` in `@enso/core`
+  (#465): *authorization* (only the user can lift it; the reason names `ask_user` and the verdict ends
+  the turn), *redirect* (the reason names a sanctioned route, plus `ask_user` for when it cannot do
+  it), *procedure* (a step the agent takes itself) or *configuration* (the harness is misconfigured).
 - **participant** — one handler on the tool-call hook. Handlers are additive: every participant's handler
   runs and the first denial ends the call, so a denial is final whatever the load order. First-wins
   resolution applies to registered *tools*, not to handlers, and the guard registers none — see
@@ -538,7 +542,7 @@ cc-safety-net, the command analyzer the bash guard wires as a library. *log subs
 | notify | `ctx.ui.notify`; `setStatus` is dropped. One `ctx.ui` for every extension, so the host tags each extension's context with the extension pi loaded (`extensionsOverride`, `host/notice-sender.ts`) and a notify carries its `sender` (#387) | — | — | — |
 | permission mode | — | `permission/preset` + knobs; `custom` derived | — | mode extension's modes (`default`, `acceptEdits`, `plan`, `bypassPermissions`, `auto`), each but `default` an agent (`enso-mode-<mode>`) whose `permission` block the permission engine merges over the policy; persisted as `customType: "active_agent"` |
 | (no word) — the runtime's interface setting | `ctx.mode`: `tui` / `rpc` / `json` / `print` | — | — | — |
-| verdict | `ToolCallEventResult`: `{ block, reason }` or `undefined` | — | — | analyzer `checkCommand` → `kind` `allow` or `deny`, with `ruleId`; a throw is a deny |
+| verdict | `ToolCallEventResult`: `{ block, reason, terminate? }` or `undefined` | — | — | analyzer `checkCommand` → `kind` `allow` or `deny`, with `ruleId`; a throw is a deny |
 | participant / arbiter | `pi.on("tool_call")`, additive: every handler runs, the first block ends the call | — | — | — |
 | tool identity | tool names `bash`, `write`, `edit`, `read` | — | — | — |
 | record / level / sink | — | — | — | log substrate's `LogRecord`, categories, sinks |

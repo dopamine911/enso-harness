@@ -4,8 +4,11 @@ import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { createCodingTools, createPowerShellTool, createReadOnlyTools } from '@earendil-works/pi-coding-agent'
 import {
+  ASK_USER_TOOL_NAME,
   ENSO_GUARD_DENIAL_ENTRY,
+  ENSO_GUARD_RULE_KINDS,
   ENSO_GUARD_RULES,
+  type EnsoGuardRule,
   ENSO_PERMISSION_DENIAL_ENTRY,
   ENSO_SECURITY_SIGNAL_ENTRY,
   ENSO_SESSION_RISK_ENTRY,
@@ -20,7 +23,7 @@ import type { CheckCommandResult } from 'cc-safety-net/api'
 import { createGuards, GUARD_POLICY_TOOL_NAMES, type GuardDependencies } from '../index.ts'
 
 /** What a guard handler answers: a block verdict, or nothing when the call passes. */
-type GuardVerdict = { block?: boolean; reason?: string } | undefined
+type GuardVerdict = { block?: boolean; reason?: string; terminate?: boolean } | undefined
 
 type Handler = (event: unknown, extensionContext: unknown) => GuardVerdict
 
@@ -134,11 +137,12 @@ test('⚠ every verdict is a record: a denial at warn with the tool, the path an
 
 // ⚠ THE WORD A DAY'S STATS COUNT BY (#144 slice 4). The reason is prose for the model; a count
 // over prose is a regex over sentences that were written to be read. `rule` is the closed
-// vocabulary (`ENSO_GUARD_RULES`) beside it — and it stays OURS: pi is handed `{ block, reason }`
-// and nothing else, so nothing of this harness rides on the runtime's published contract.
-test('⚠ a denial record names its rule from the closed vocabulary; pi receives block and reason alone', () => {
+// vocabulary (`ENSO_GUARD_RULES`) beside it — and it stays OURS: pi is handed `{ block, reason }`,
+// plus its own `terminate` for an authorization refusal (#465), and nothing else, so nothing of
+// this harness rides on the runtime's published contract.
+test('⚠ a denial record names its rule from the closed vocabulary; pi receives block, reason and terminate alone', () => {
   const verdict = call('write', { path: '/etc/passwd' })
-  expect(verdict).toEqual({ block: true, reason: expect.stringContaining('outside the workspace') })
+  expect(verdict).toEqual({ block: true, reason: expect.stringContaining('outside the workspace'), terminate: true })
   logs.assertLogged({
     level: 'warning',
     rawMessage: '{toolName} denied: {reason}',
@@ -148,6 +152,71 @@ test('⚠ a denial record names its rule from the closed vocabulary; pi receives
   logs.clear()
   call('read', { path: join(cwd, '.aws', 'credentials') })
   logs.assertLogged({ level: 'warning', properties: { rule: 'secret-read' } })
+})
+
+/**
+ * One call per rule that the real guard refuses with THAT rule — keyed by the rule type, so a rule
+ * added to `ENSO_GUARD_RULES` fails the typecheck here until it has a way to be hit.
+ */
+const REFUSED_BY: Readonly<Record<EnsoGuardRule, () => { runtime: GuardRuntime; verdict: GuardVerdict }>> = {
+  'policy-mismatch': () => {
+    const runtime = loadGuardRuntime(() => [{ name: 'read' }])
+    return { runtime, verdict: runtime.toolCall(toolCallEvent('read', 'src/a.ts'), { cwd }) }
+  },
+  'cc-safety-net': () => {
+    const runtime = loadGuardRuntime(undefined, () => ({ kind: 'deny', reason: 'destructive' }))
+    return { runtime, verdict: runtime.toolCall(toolCallEvent2('bash', 'rm -rf src'), { cwd }) }
+  },
+  'network-egress': () => shellCall('curl https://example.com'),
+  'environment-dump': () => shellCall('env'),
+  'secret-path': () => shellCall('cat .enso/secrets.env'),
+  'write-confinement': () => pathCall('write', '/etc/passwd'),
+  'protected-internals': () => pathCall('write', '.git/config'),
+  'persistence-write': () => pathCall('write', '.mcp.json'),
+  'secret-write': () => pathCall('write', '.env'),
+  'stale-write': () => {
+    const fixture = readPreconditionFixture()
+    fixture.runtime.toolResult(toolResultEvent('read', fixture.existingFile, false), { cwd: fixture.cwd })
+    touchForward(join(fixture.cwd, fixture.existingFile))
+    const verdict = fixture.runtime.toolCall(toolCallEvent('write', fixture.existingFile), { cwd: fixture.cwd })
+    return { runtime: fixture.runtime, verdict }
+  },
+  'read-before-write': () => {
+    const fixture = readPreconditionFixture()
+    const verdict = fixture.runtime.toolCall(toolCallEvent('write', fixture.existingFile), { cwd: fixture.cwd })
+    return { runtime: fixture.runtime, verdict }
+  },
+  'secret-read': () => pathCall('read', '.env'),
+}
+
+function shellCall(command: string): { runtime: GuardRuntime; verdict: GuardVerdict } {
+  const runtime = loadGuardRuntime()
+  return { runtime, verdict: runtime.toolCall(toolCallEvent2('bash', command), { cwd }) }
+}
+
+function pathCall(toolName: string, path: string): { runtime: GuardRuntime; verdict: GuardVerdict } {
+  const runtime = loadGuardRuntime()
+  return { runtime, verdict: runtime.toolCall(toolCallEvent(toolName, path), { cwd }) }
+}
+
+// ⚠ #465, #189: asking must be cheaper than working around a refusal. Every refusal only the user
+// can lift names ask_user as the way out and ends the turn (pi stops once every call of the batch
+// set `terminate`). A redirect names the ask too, but keeps the turn for the sanctioned route its
+// reason names (`curl` → `web_fetch`). A refusal whose fix is the agent's own step, or the config's,
+// says neither — "ask the user" there would send the model to someone who cannot unblock it.
+test('⚠ an authorization refusal names the ask route and ends the turn; a redirect only names it; the others do neither (#465)', () => {
+  for (const rule of ENSO_GUARD_RULES) {
+    const { runtime, verdict } = REFUSED_BY[rule]()
+    const recorded = runtime.entries.findLast((entry) => entry.customType === ENSO_GUARD_DENIAL_ENTRY)
+    const hit = recorded === undefined ? undefined : readEnsoGuardDenial(recorded.customType, recorded.data)?.rule
+    expect({ rule, hit }).toEqual({ rule, hit: rule })
+    const kind = ENSO_GUARD_RULE_KINDS[rule]
+    expect({ rule, asks: verdict?.reason?.includes(ASK_USER_TOOL_NAME), ends: verdict?.terminate }).toEqual({
+      rule,
+      asks: kind === 'authorization' || kind === 'redirect',
+      ends: kind === 'authorization' ? true : undefined,
+    })
+  }
 })
 
 // ⚠ THE MARKER pi DISCARDS (#387 gap 1). pi turns `{ block, reason }` into an error result the

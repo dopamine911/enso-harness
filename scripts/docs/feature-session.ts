@@ -167,8 +167,13 @@ export const FEATURE_SCRIPT: FeatureModelScript = {
       { kind: 'thinking', thinking: 'Search the source for the variable first, then look at .env for its value.' },
       { kind: 'tool', tool: 'bash', input: { command: 'grep -rn DATABASE_URL src' } },
     ],
-    [{ kind: 'tool', tool: 'read', input: { path: '.env' } }],
-    [{ kind: 'tool', tool: 'read', input: { path: 'src/config.ts' } }],
+    // One batch, as a model reading two files does it. ⚠ #465: `.env` alone would end the run there
+    // (the guard's refusal of it sets pi's `terminate`), and this queue would hand the next reply to
+    // prompt 2. A batch where a call ran goes on.
+    [
+      { kind: 'tool', tool: 'read', input: { path: '.env' } },
+      { kind: 'tool', tool: 'read', input: { path: 'src/config.ts' } },
+    ],
     [
       {
         kind: 'text',

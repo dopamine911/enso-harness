@@ -297,15 +297,18 @@ choosing it means) and `multiSelect`. The whole set is asked as ONE question of 
 - **Declining.** The card's Cancel is a real decline for every kind of question: the tool gets
   `{ cancelled: true }`, never `undefined`, which means "this host could not show it".
 - **What the model reads** is the answers in plain words, or that the user declined.
+- **An unanswered question ends the turn** (#379, #465): a decline, and the no-UI answer, set pi's
+  `terminate` on the result, so the model gets no turn to pick for the user or route around the
+  question. pi ends the run only when every call of the batch set it: an `ask_user` batched with
+  other calls does not end it.
 
 Where no card can be shown — pi's own terminal, or pi's rpc mode, whose `custom` resolves `undefined`
 — the tool asks one plain `select` or `input` at a time. A multi-choice question is a toggle list
 closed by "✓ Done", so dismissing any prompt is a decline there too. **Stop** while the tool waits
 stops the run and leaves no card: the host settles pending questions as the stop begins and refuses
-any asked until it has finished (`agent-host.ts#stopRunSettlingDialogs`, `refuseDialogsUntil`). What
-the model must do after a decline — halt rather than route around — is not this seam's (#4). Pinned
+any asked until it has finished (`agent-host.ts#stopRunSettlingDialogs`, `refuseDialogsUntil`). Pinned
 end to end, faux model to tool result, by `agent-host.test.ts#⚠⚠ the agent asks through ask_user: its questionnaire is one dialog, and the answers are its tool result (#12)`,
-with its siblings for the decline and Stop.
+with its siblings for the decline (which pins that the run ends there) and Stop.
 
 **Fakes.** `follow.test.ts` drives the answer route over an inline runtime whose `openDialogs` the test
 controls; `extension-ui-context.test.ts` exercises the context against scripted extension calls,

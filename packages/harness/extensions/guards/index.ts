@@ -8,8 +8,10 @@ import type {
   TruncationResult,
 } from '@earendil-works/pi-coding-agent'
 import {
+  ASK_USER_TOOL_NAME,
   DEFAULT_GUARD_POLICY,
   ENSO_GUARD_DENIAL_ENTRY,
+  ENSO_GUARD_RULE_KINDS,
   ENSO_LOG_EVENTS,
   ENSO_PERMISSION_DENIAL_ENTRY,
   ENSO_PERMISSION_DENIAL_RESOLUTIONS,
@@ -17,6 +19,7 @@ import {
   ENSO_SESSION_RISK_ENTRY,
   type EnsoGuardDenial,
   type EnsoGuardRule,
+  type EnsoGuardRuleKind,
   type EnsoPermissionDenial,
   type EnsoPermissionDenialResolution,
   type EnsoRiskEvent,
@@ -289,8 +292,8 @@ export function createGuards(dependencies: GuardDependencies): (pi: ExtensionAPI
 export default createGuards({ analyzeBashCommand: checkCommand, harnessRoot: findRepoRoot(import.meta.url) })
 
 /**
- * A refusal as this guard produces it: pi's `{ block, reason }` plus the RULE that refused
- * (#144 slice 4). The rule is what the denial record carries and what a day's stats count
+ * A refusal as this guard produces it: pi's `{ block, reason, terminate? }` plus the RULE that
+ * refused (#144 slice 4). The rule is what the denial record carries and what a day's stats count
  * by; the reason is prose for the model. Stripped back to pi's shape at the handler, so the
  * runtime is handed exactly the contract it published and nothing of ours rides on it.
  */
@@ -298,12 +301,54 @@ interface GuardDenial {
   readonly block: true
   readonly reason: string
   readonly rule: EnsoGuardRule
+  /** An authorization refusal ends the turn (#465): pi stops once every call of the batch set it. */
+  readonly terminate?: true
   /** A network-egress refusal's class (#464): how the deny matched, and what. */
   readonly egress?: { readonly via: string; readonly matched: string }
 }
 
+/**
+ * The way out a refusal only the user can lift names (#465): asking, not another route. Said once,
+ * here, so every such rule says it the same way.
+ */
+const ASK_ROUTE =
+  `This needs the user's authorization. Do not try another way to the same effect: if the task still ` +
+  `needs it, ask the user with ${ASK_USER_TOOL_NAME} — say what you want to do and why — and let them decide.`
+
+/** The line a redirect adds after its sanctioned route: asking, for when that route cannot do it. */
+const ASK_WHEN_THE_ROUTE_CANNOT =
+  `If the route above cannot do what the task needs, do not try another way to the same effect: ask ` +
+  `the user with ${ASK_USER_TOOL_NAME} — say what you want to do and why — and let them decide.`
+
+/** The ask line each kind adds to its reason — none where asking cannot unblock the refusal. */
+const ASK_LINE_BY_KIND: Readonly<Record<EnsoGuardRuleKind, string | undefined>> = {
+  authorization: ASK_ROUTE,
+  redirect: ASK_WHEN_THE_ROUTE_CANNOT,
+  procedure: undefined,
+  configuration: undefined,
+}
+
+/**
+ * The refusal for `rule`, by its kind (`ENSO_GUARD_RULE_KINDS`). ⚠ #465, #189: asking must be
+ * cheaper than working around a refusal, or a halt for working around one is not fair friction.
+ * - An authorization refusal names the ask and ENDS THE TURN: pi ends the run once every call of the
+ *   batch set `terminate`; a batch where something else ran goes on, and the model reads the line
+ *   on its next turn.
+ * - A redirect keeps the turn, so the agent can take the sanctioned route its reason names
+ *   (`curl` → `web_fetch`), and names the ask for when that route cannot do it.
+ * - A procedural refusal (read the file first) and the configuration floor carry neither: asking
+ *   cannot unblock them.
+ */
 function deny(rule: EnsoGuardRule, reason: string, egress?: GuardDenial['egress']): GuardDenial {
-  return egress === undefined ? { block: true, reason, rule } : { block: true, reason, rule, egress }
+  const kind = ENSO_GUARD_RULE_KINDS[rule]
+  const askLine = ASK_LINE_BY_KIND[kind]
+  return {
+    block: true,
+    reason: askLine === undefined ? reason : `${reason}\n\n${askLine}`,
+    rule,
+    ...(kind === 'authorization' ? { terminate: true } : {}),
+    ...(egress === undefined ? {} : { egress }),
+  }
 }
 
 /** The engine's decision payload, when it refuses the agent's own call: its fields, checked. */
@@ -661,7 +706,9 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
     })
     pi.appendEntry(ENSO_GUARD_DENIAL_ENTRY, denial)
     risk.guardDenied(denial)
-    return { block: verdict.block, reason: verdict.reason }
+    return verdict.terminate === true
+      ? { block: verdict.block, reason: verdict.reason, terminate: true }
+      : { block: verdict.block, reason: verdict.reason }
   })
 
   /**

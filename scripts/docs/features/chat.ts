@@ -123,7 +123,7 @@ export const CHAT: FeatureSpec = {
     },
   ],
   lookFor: [
-    'In the thread above, the first reply shows pi working: it thinks, runs `grep` in the shell, tries to read `.env`, and is refused. The refusal is a card of its own, not a failed row (see [Guards and receipts](./guards-and-receipts.md)). pi then reads `src/config.ts` instead, and its answer says what it could not check.',
+    'In the thread above, the first reply shows pi working: it thinks, runs `grep` in the shell, then reads `.env` and `src/config.ts` together. `.env` is refused. The refusal is a card of its own, not a failed row (see [Guards and receipts](./guards-and-receipts.md)). The other read ran, and pi answers from it, saying what it could not check.',
     'Most rows stay folded, and that is the point of the layout. A call that finished shows a check and nothing else. A call that failed opens itself, with a red border, so a failure is never behind a click. The status bar counts both kinds: this thread has `{refused}` and `{failed}`, and they are different things.',
     'In the palette, a command runs at once, but a prompt or a skill is only inserted into the composer as `/name `, for you to finish and send.',
     'While `/login` waits for the provider (a device code to enter, a browser page to finish), the composer shows the stop button, labelled `cancel the login to <provider>`. It cancels the login, and nothing is stored. After `/compact`, or a compaction pi runs on its own when the context fills, the transcript is re-read once the thread is idle, so it shows the compacted history without a reload.',

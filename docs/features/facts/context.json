@@ -6,10 +6,10 @@
       "steps": ["open a thread from the rail", "choose the **Context** tab at the top of the thread"],
       "shown": ["pi’s context meter", "next request · pi’s estimate (characters ÷ 4)", "bar per", "compaction"],
       "measured": {
-        "switchRequest": "Request 9",
+        "switchRequest": "Request 8",
         "switchCacheRead": "cache read 0 (0%)",
-        "compactionRequest": "Request 12",
-        "compactedFrom": "compacted from 3.5K"
+        "compactionRequest": "Request 11",
+        "compactedFrom": "compacted from 3.6K"
       }
     }
   ]

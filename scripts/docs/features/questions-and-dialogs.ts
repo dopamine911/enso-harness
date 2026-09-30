@@ -57,12 +57,14 @@ export const QUESTIONS_AND_DIALOGS: FeatureSpec = {
     'Read the detail before you answer. A permission prompt shows the file and the change, or the command, that pi wants to run. The options that end in "for this session" allow that tool or pattern for the rest of the thread without asking again; they do not change the mode. "No, provide reason" asks for a line pi reads with the refusal.',
     'In the thread above, pi asks both before it edits anything, and each question is its own card with its own answer. While a card waits, the status bar reads `running ask_user` or `running edit` beside `{waiting}`: the tool call is open until you answer.',
     'If you open a thread and find a card already waiting, that question was asked while you were away. It is still live, and answering it now lets pi continue.',
+    "Declining an `ask_user` questionnaire ends pi's turn: it does not pick an answer for you or carry on without one. The next move is yours.",
   ],
   limits: [
     'A question lives only while the thread runs. A thread opened from its file, with nothing running, has no questions to answer.',
     'A question can end without you: when pi is stopped, or when the extension that asked gives up after its own timeout.',
     'The questionnaire has no notes field. The only free text is **Other**.',
     'A choice outside the options offered is refused by the server. The browser cannot answer with an option pi never offered.',
+    'When pi asks in the same reply as other tool calls, a decline does not end its turn. pi reads the decline and carries on.',
   ],
   see: [
     {

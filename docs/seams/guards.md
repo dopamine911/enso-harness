@@ -186,10 +186,28 @@ built-ins are lowercase and vendor packages register capitalised names — a cas
 let the call proceed with nothing reporting it (`tool-identity.ts`'s header).
 
 **The verdict.** The `tool_call` handler returns the runtime's `ToolCallEventResult | undefined`
-(`guards/index.ts#guardsWithDependencies`): a denial is `{ block: true, reason }` (every `return` in `decide` and
-`shellCommandDenial` is a `guards/index.ts#deny`, `{ block: true, reason, rule }`, and the handler strips the rule
-before returning), a pass is `undefined`.
+(`guards/index.ts#guardsWithDependencies`): a denial is `{ block: true, reason }`, plus `terminate: true`
+for an authorization refusal (every `return` in `decide` and `shellCommandDenial` is a
+`guards/index.ts#deny`, `{ block: true, reason, rule }`, and the handler strips the rule before
+returning), a pass is `undefined`.
 There is no third value — the glossary's Retired table refuses `allow`/`abstain` as verdict words.
+
+**What a refusal asks of the model** (#465, #189). Each rule has a kind in core
+(`ENSO_GUARD_RULE_KINDS`, a closed table, so a new rule must be classified to compile), and `deny`
+shapes the refusal by it. Asking must be cheaper than working around a refusal:
+- **`authorization`**: only the user can lift it. The reason ends with one line naming `ask_user` as
+  the way out, and the verdict sets pi's `terminate`. pi ends the run only when every call of the
+  batch set it, so a batch the guard refused whole hands the turn back to the user; a batch where a
+  call ran goes on, and the model reads the line then.
+- **`redirect`** (`network-egress`, `environment-dump`): the reason names a sanctioned route the
+  agent can take itself (`web_fetch`, a non-secret variable). The turn goes on so it can, and the
+  reason adds `ask_user` for when that route cannot do it.
+- **`procedure`** (`stale-write`, `read-before-write`) and **`configuration`** (`policy-mismatch`):
+  neither line; asking cannot unblock them.
+
+There is no grant: an answer to `ask_user` never lets the refused call through (#465's decision).
+Pinned per rule by `guards.test.ts#⚠ an authorization refusal names the ask route and ends the turn; a redirect only names it; the others do neither (#465)`,
+and against pi's real loop by `agent-host.test.ts#⚠⚠ a batch the guard refused whole ends the run; a batch where a call ran, or a redirect, goes on (#465)`.
 
 ## Who implements it, who consumes it
 
