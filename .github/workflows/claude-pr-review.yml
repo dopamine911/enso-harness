@@ -157,15 +157,19 @@ jobs:
         with:
           fetch-depth: 1
 
-      # The list the job above built, into `.claude/touched-comments.md`, where `.claude/pr-review.md` tells the
-      # reviewer to look. Missing (the list job failed) is not fatal: the reviewer finds no file and says so.
+      # The list the job above built, and under `new-commits` the pushed commits' diff, into
+      # `.review-context/`, where `.claude/pr-review.md` and the prompt tell the reviewer to look.
+      # ⚠ NOT `.claude/`: claude-code-action deletes that whole tree and checks it out again from the base
+      # branch before the model runs (`restoreConfigFromBase`: a PR must not supply the CLI's settings or
+      # hooks), so a file downloaded there is gone by the time the reviewer looks. That is how #490's first
+      # run said "not present". Missing (the list job failed) is not fatal: the reviewer finds no file and says so.
       - name: Fetch the comments on changed code
         if: steps.token.outputs.present == 'true'
         continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           name: touched-comments
-          path: .claude
+          path: .review-context
 
       - name: Run Claude review
         id: claude
@@ -200,16 +204,16 @@ jobs:
 
             - `full`: review the whole pull request, as the procedure below says.
             - `new-commits`: this run follows a push. Review ONLY what that push changed:
-              `.claude/new-commits.diff` is its diff (from the previous head to HEAD). Read
+              `.review-context/new-commits.diff` is its diff (from the previous head to HEAD). Read
               `gh pr diff` for context, but report issues only in the new commits, and title the
               comment `## Code Review (commits pushed up to <first 7 characters of HEAD>)` so the
-              thread shows which review covers which push. If `.claude/new-commits.diff` is missing,
+              thread shows which review covers which push. If `.review-context/new-commits.diff` is missing,
               review the full pull request instead and say so in the Overview.
 
             ## Procedure
 
             1. `gh pr diff $PR_NUMBER`: read the full diff (under `new-commits`, read
-               `.claude/new-commits.diff` first; that is what this run reviews)
+               `.review-context/new-commits.diff` first; that is what this run reviews)
             2. For non-trivial changes, `Read` the surrounding file for context
             3. Apply project conventions:
                - `CLAUDE.md` is auto-loaded — follow what it says

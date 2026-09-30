@@ -35,5 +35,6 @@ docs/flows/*.md
 # Features pages built from a spec (`scripts/docs/features/index.ts`); the rest are still hand-written.
 docs/features/stats.md
 
-# Built by CI for the reviewer (`scripts/docs/touched-comments.ts`, #482); a local run writes it wherever `--out` says.
-.claude/touched-comments.md
+# Built by CI for the reviewer (`scripts/docs/touched-comments.ts`, #482): the comment list and the
+# pushed commits' diff. A local run writes the list wherever `--out` says.
+.review-context/
