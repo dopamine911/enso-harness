@@ -184,6 +184,8 @@ export {
 } from './permission-modes.ts'
 export {
   ENSO_PROJECT_HEADER,
+  ENSO_PROJECT_TRUST_BY_HOST,
+  ENSO_PROJECT_TRUST_ENTRY,
   EnsoDirectoryEntry,
   EnsoDirectoryListing,
   EnsoProject,
@@ -191,6 +193,8 @@ export {
   EnsoProjectsConfig,
   EnsoProjectsState,
   isEnsoProjectId,
+  THREAD_PROJECT_TRUST,
+  threadTrustsProject,
 } from './project.ts'
 export {
   ENSO_SYSTEM_PROMPT_ENTRY,

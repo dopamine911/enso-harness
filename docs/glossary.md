@@ -345,10 +345,11 @@ harness did). The first is canonical and never rewritten by us; the second is th
 - **config** — the user's `ENSO_HOME/config.json` (#59, #421): absent is the defaults in code, and a
   file that is there is read once per session and fails closed when unreadable. A trusted project's
   `.enso/config.json` merges over it for that project's sessions.
-- **project trust** — the runtime's decision that a project's own files may change a session: the
-  runtime's project directory, and the project's `.enso/config.json` (#421). One store, the
-  runtime's `trust.json`; asked once per session when undecided; untrusted, the project's config is
-  skipped and the session is told. Secrets are not config: `ENSO_HOME/secrets.env`, read per call, quarantined.
+- **project trust** — the decision that a project's own files may change a session: the runtime's
+  project directory and the project's `.enso/config.json` (#421, #502). Saved in the runtime's `trust.json` ("Trust project"), or in
+  the web on the thread itself ("Trust this thread", an `enso-project-trust` entry); undecided is
+  untrusted, and the web asks before the first run when the project has its own configuration.
+  Secrets are not config: `ENSO_HOME/secrets.env`, read per call, quarantined.
 - **ENSO_HOME** — the user's Enso directory, `~/.enso` unless the variable says otherwise (#421): the
   runtime's agent dir, the secrets file, the permission policy (`permissions.json`, #446, #496), the logs and the project list, shared by every checkout. A checkout's
   old `.enso/` is moved into it on launch, never overwriting.

@@ -86,9 +86,10 @@ const STEP_TIMEOUT_MS = 60_000
 /**
  * pi's settings for the throwaway home: compaction keeps only the last few hundred tokens. pi
  * refuses to compact a session smaller than what it keeps (`Nothing to compact`), and its default
- * of 20k is several times this whole session.
+ * of 20k is several times this whole session. Projects are trusted (#502): the demo is the reader's
+ * own project, and an undecided one runs untrusted with the engine's warning on every session.
  */
-const PI_SETTINGS = { compaction: { keepRecentTokens: 300 } } as const
+const PI_SETTINGS = { compaction: { keepRecentTokens: 300 }, defaultProjectTrust: 'always' } as const
 
 /** The `demo` provider, served by the scripted model on `MODEL_PORT` (`feature-model.ts`). */
 const MODELS_JSON = demoModelsJson(MODEL_PORT)

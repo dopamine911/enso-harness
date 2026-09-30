@@ -115,6 +115,14 @@ const ENVIRONMENT_METADATA: readonly EnvironmentMetadata[] = [
     phase: 'boot',
   },
   {
+    key: 'ENSO_PROJECT_TRUST_BY_HOST',
+    source: 'packages/web/src/host/agent-host.ts',
+    reader: '`packages/web/src/host/agent-host.ts#createAgentHost` (process write)',
+    purposeAndDefault:
+      'Always `1` in the server: the host decides project trust, asking before a run (#502), so the harness’s `.enso/config.json` resolution follows pi’s answer (`harness/core/session-config.ts#sessionConfigEnvironment`) instead of asking a second time. Unset in the terminal, where the harness asks its own question.',
+    phase: 'boot',
+  },
+  {
     key: 'PI_CODING_AGENT_DIR',
     source: 'scripts/enso.ts',
     reader: '`scripts/enso.ts` (pi child environment write)',
