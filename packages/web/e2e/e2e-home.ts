@@ -27,8 +27,10 @@ const E2E_HOME_VARIABLE = 'ENSO_E2E_HOME'
 export const SEEDED_TURNS = 25
 
 /**
- * Where the `demo` provider points: port 1, privileged and never served on a runner, so a request
- * that should not happen is refused at once instead of reaching the screenshot capture's model.
+ * Where the `demo` provider points: port 1, privileged and never served, so a request that
+ * should not happen is refused at once and never reaches a real provider. Not the Features
+ * capture's own port (`MODEL_PORT`, 5199): a capture running at the same time would answer there
+ * with its scripted model, and a stray request would pass instead of failing (PR #494 review).
  */
 const REFUSED_PORT = 1
 
