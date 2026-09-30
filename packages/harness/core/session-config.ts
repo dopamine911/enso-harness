@@ -1,5 +1,5 @@
-import { type EnsoConfigParseResult, mergeEnsoConfig, parseEnsoConfig } from '@enso/core'
-import { ensoAgentDir, ensoConfigPath, projectConfigPath, readTextIfPresent } from '@enso/core/paths'
+import { ENSO_PROJECT_TRUST_BY_HOST, type EnsoConfigParseResult, mergeEnsoConfig, parseEnsoConfig } from '@enso/core'
+import { ensoAgentDir, ensoConfigPath, ensoHome, projectConfigPath, readTextIfPresent } from '@enso/core/paths'
 import { createProjectTrustStore, defaultProjectTrust, projectTrustOptions } from './project-trust.ts'
 
 /**
@@ -49,20 +49,52 @@ export interface SessionConfigContext {
     select(title: string, options: string[]): Promise<string | undefined>
     notify(message: string, type?: 'info' | 'warning' | 'error'): void
   }
+  /** pi's answer for this session: whether the project's own scope is loaded. */
+  isProjectTrusted(): boolean
+  /**
+   * The web host decides trust (#502): it asks before a run, applies the answer to pi and reloads,
+   * so here the project's config follows `isProjectTrusted()` and nothing is asked twice. The
+   * terminal has no host: there the question below is Enso's own, as pi's covers only `.pi/`.
+   */
+  readonly hostOwnsTrust: boolean
 }
 
-const resolutions = new WeakMap<object, Promise<SessionEnsoConfig>>()
+/**
+ * The context's two process-wide parts, read from `environment`: the user's `ENSO_HOME`, and whether
+ * the web host owns project trust (it sets {@link ENSO_PROJECT_TRUST_BY_HOST} before its first
+ * session).
+ *
+ * @group Project trust
+ */
+export function sessionConfigEnvironment(
+  environment: Readonly<Record<string, string | undefined>>,
+): Pick<SessionConfigContext, 'home' | 'hostOwnsTrust'> {
+  return { home: ensoHome(environment), hostOwnsTrust: environment[ENSO_PROJECT_TRUST_BY_HOST] === '1' }
+}
 
 /**
- * The session's config, resolved once per `session` (the context's `sessionManager`).
+ * Resolutions per session, and within one per trust answer: under the web host a Trust reloads the
+ * session, and the reloaded tools must read the project's config the untrusted resolution skipped.
+ */
+const resolutions = new WeakMap<object, Map<boolean | 'asked', Promise<SessionEnsoConfig>>>()
+
+/**
+ * The session's config, resolved once per `session` (the context's `sessionManager`) and trust
+ * answer: under the web host a Trust reloads the session, and the trusted resolution is a new one.
  *
  * @group Project trust
  */
 export function sessionEnsoConfig(session: object, context: SessionConfigContext): Promise<SessionEnsoConfig> {
-  let resolution = resolutions.get(session)
+  let perTrust = resolutions.get(session)
+  if (perTrust === undefined) {
+    perTrust = new Map()
+    resolutions.set(session, perTrust)
+  }
+  const key = context.hostOwnsTrust ? context.isProjectTrusted() : 'asked'
+  let resolution = perTrust.get(key)
   if (resolution === undefined) {
     resolution = resolveSessionConfig(context)
-    resolutions.set(session, resolution)
+    perTrust.set(key, resolution)
   }
   return resolution
 }
@@ -83,7 +115,8 @@ async function resolveSessionConfig(context: SessionConfigContext): Promise<Sess
     return { result: { kind: 'unreadable', reason }, path: projectPath, sources: bothSources }
   }
   if (projectText === undefined) return userOnly
-  if (!(await projectTrusted(context, projectPath))) {
+  const trusted = context.hostOwnsTrust ? context.isProjectTrusted() : await projectTrusted(context, projectPath)
+  if (!trusted) {
     context.ui.notify(
       `Enso: ${projectPath} was not read — this project is not trusted, so the session runs under ${userPath} only.`,
       'warning',

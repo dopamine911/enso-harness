@@ -10,10 +10,12 @@ import {
   initTheme,
   VERSION as PI_VERSION,
   type PromptOptions,
+  ProjectTrustStore,
   SessionManager,
 } from '@earendil-works/pi-coding-agent'
 import {
   type DialogAnswer,
+  ENSO_PROJECT_TRUST_ENTRY,
   ENSO_SYSTEM_PROMPT_ENTRY,
   type EnsoForkPoint,
   type EnsoHostCommandRun,
@@ -36,6 +38,7 @@ import {
   type RuntimeCommand,
   readRecordedMode,
   recordedSystemPrompt,
+  THREAD_PROJECT_TRUST,
   type ThreadRuntime,
 } from '@enso/core'
 import { ensoHome, ensoSecretsPath, findRepoRoot } from '@enso/core/paths'
@@ -75,6 +78,13 @@ import {
   modeCommand,
   storedPermissionModeState,
 } from './permission-mode-adapter.ts'
+import {
+  createTrustGate,
+  hostedProjectTrust,
+  PROJECT_TRUST_OPTIONS,
+  projectTrustedNotice,
+  projectTrustQuestion,
+} from './project-trust.ts'
 import { builtinProviderName, providerRefusalOf } from './provider-refusal.ts'
 import type { RuntimeEvent } from './runtime-event.ts'
 import { toRpcWireEvent } from './session-events.ts'
@@ -696,6 +706,10 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   // session_start, and the secrets out of the environment before anything can inherit it (#89).
   process.env.PI_CODING_AGENT_DIR = agentDir
   process.env.PI_MULTI_ACCOUNT_INDEPENDENT_ROOTS = '1'
+  // This host decides project trust (#502), so the harness's own `.enso/config.json` question follows
+  // pi's answer instead of asking a second time (`harness/core/session-config.ts`, which reads it by
+  // `@enso/core`'s `ENSO_PROJECT_TRUST_BY_HOST`). Written literally, as the environment inventory reads.
+  process.env.ENSO_PROJECT_TRUST_BY_HOST = '1'
   seedMultiAccountConfig(agentDir)
   // The policy the permission engine reads when it loads, before the first services exist (#446,
   // #496). An unreadable file refuses to start the host rather than run under a policy nobody wrote.
@@ -894,9 +908,13 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         pi.on('model_select', () => onModelSelect())
       },
     }
+    // Trust before anything loads (#502): pi's `trust.json`, the thread's own record, the default —
+    // else untrusted, and asked before the first run (`trustGate` below).
+    const projectTrust = hostedProjectTrust(cwd, agentDir, sessionManager.getBranch())
     const services = await createAgentSessionServices({
       cwd,
       agentDir,
+      settingsManager: projectTrust.settingsManager,
       resourceLoaderOptions: {
         // The isolation triple `scripts/enso.ts` documents, expressed as loader options:
         // no discovery (`--no-extensions`), no ~/.agents skills (`--no-skills`), and the
@@ -979,6 +997,22 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     const ui = createEnsoExtensionUiContext({
       emit,
       threadId,
+    })
+
+    // The open trust decision, asked before a run (#502). A Trust is recorded where its answer says —
+    // pi's `trust.json` for the project, the thread's branch for the thread — then applied to pi and
+    // the session reloaded, so the engine binds the project's rules and modes before the run starts.
+    const trustGate = createTrustGate({
+      open: projectTrust.open,
+      ask: () => ui.uiContext.select(projectTrustQuestion(cwd), [...PROJECT_TRUST_OPTIONS]),
+      apply: async (answer) => {
+        if (answer === 'untrusted') return
+        if (answer === 'project') new ProjectTrustStore(agentDir).set(cwd, true)
+        else sessionManager.appendCustomEntry(ENSO_PROJECT_TRUST_ENTRY, THREAD_PROJECT_TRUST)
+        projectTrust.settingsManager.setProjectTrusted(true)
+        await session.reload()
+        ui.notifyFrom(ENSO_SENDER, projectTrustedNotice(answer), 'info')
+      },
     })
 
     // ⚠ SUBSCRIBE BEFORE BINDING (#88). Extensions persist state during `session_start` — any
@@ -1348,58 +1382,73 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     announceModelState()
 
     let disposed = false
+    function startPrompt(request: PromptRequest, outcome: PromptOutcome): void {
+      let accepted = false
+      // ⚠ Fire-and-forget, exactly as pi's rpc mode does: `prompt()` resolves only when
+      // the whole run finishes, and awaiting it in front of the drain loop is the
+      // original `/mode` hang. Acceptance is the preflight callback; completion is `agent_settled`.
+      // @invariant prompt-run-settle/late-rejection-dropped A rejection after acceptance never reaches the feed.
+      // It is dropped here on purpose: pi's own rpc-mode handler does the same (dist/modes/rpc/rpc-mode.js,
+      // `case "prompt"`), and pi's `_runAgentPrompt` emits `agent_settled` from a `finally`, so the run
+      // still terminates; only the error text is lost. Model and tool errors never reach this path: the
+      // agent loop turns them into an assistant message with `stopReason: "error"`, carried as usual.
+      // @unpinned no host test drives pi's preflight to success and then rejects the prompt.
+      void session
+        .prompt(request.message, {
+          ...(request.images === undefined ? {} : { images: [...request.images] }),
+          ...(request.admission === undefined ? {} : { streamingBehavior: STREAMING_BEHAVIOR_OF[request.admission] }),
+          source: PROMPT_SOURCE_RPC,
+          preflightResult: (didSucceed: boolean) => {
+            if (didSucceed) {
+              accepted = true
+              outcome.onAccepted()
+            }
+          },
+        })
+        .catch((error: unknown) => {
+          if (!accepted) outcome.onRejected(error instanceof Error ? error.message : String(error))
+        })
+    }
+
+    function startContinue(outcome: PromptOutcome): void {
+      // The run lifecycle's own two states a run cannot start in; the route's lease refuses a
+      // run it knows of first — this is the seam's lock. See the module header (#436).
+      if (session.isStreaming || session.isCompacting) {
+        outcome.onRejected('the thread is running; continue when it settles')
+        return
+      }
+      const lead = continuationLead(session.agent.state.messages)
+      if (lead === undefined) {
+        outcome.onRejected(NOTHING_TO_CONTINUE)
+        return
+      }
+      // ⚠⚠ The one cast onto pi's private run lifecycle — the module header says why. Checked
+      // BEFORE acceptance (PR #442 review): an `async` method can only fail synchronously by not
+      // being there, and a pi build without it must refuse, not answer 202 to a run that never starts.
+      const lifecycle = session as unknown as Partial<PiRunLifecycle>
+      if (typeof lifecycle._runAgentPrompt !== 'function') {
+        outcome.onRejected(NO_RUN_LIFECYCLE)
+        return
+      }
+      outcome.onAccepted()
+      void lifecycle._runAgentPrompt(lead).catch((error: unknown) => {
+        log.error('a continued run failed: {error}', { threadId, error })
+      })
+    }
+
     const runtime: ThreadRuntime = {
       prompt(request: PromptRequest, outcome: PromptOutcome): void {
-        let accepted = false
-        // ⚠ Fire-and-forget, exactly as pi's rpc mode does: `prompt()` resolves only when
-        // the whole run finishes, and awaiting it in front of the drain loop is the
-        // original `/mode` hang. Acceptance is the preflight callback; completion is `agent_settled`.
-        // @invariant prompt-run-settle/late-rejection-dropped A rejection after acceptance never reaches the feed.
-        // It is dropped here on purpose: pi's own rpc-mode handler does the same (dist/modes/rpc/rpc-mode.js,
-        // `case "prompt"`), and pi's `_runAgentPrompt` emits `agent_settled` from a `finally`, so the run
-        // still terminates; only the error text is lost. Model and tool errors never reach this path: the
-        // agent loop turns them into an assistant message with `stopReason: "error"`, carried as usual.
-        // @unpinned no host test drives pi's preflight to success and then rejects the prompt.
-        void session
-          .prompt(request.message, {
-            ...(request.images === undefined ? {} : { images: [...request.images] }),
-            ...(request.admission === undefined ? {} : { streamingBehavior: STREAMING_BEHAVIOR_OF[request.admission] }),
-            source: PROMPT_SOURCE_RPC,
-            preflightResult: (didSucceed: boolean) => {
-              if (didSucceed) {
-                accepted = true
-                outcome.onAccepted()
-              }
-            },
-          })
-          .catch((error: unknown) => {
-            if (!accepted) outcome.onRejected(error instanceof Error ? error.message : String(error))
-          })
+        // The open trust decision first (#502): the run waits on the question, never the reverse.
+        trustGate.run(
+          () => startPrompt(request, outcome),
+          (reason) => outcome.onRejected(reason),
+        )
       },
       continueRun(outcome: PromptOutcome): void {
-        // The run lifecycle's own two states a run cannot start in; the route's lease refuses a
-        // run it knows of first — this is the seam's lock. See the module header (#436).
-        if (session.isStreaming || session.isCompacting) {
-          outcome.onRejected('the thread is running; continue when it settles')
-          return
-        }
-        const lead = continuationLead(session.agent.state.messages)
-        if (lead === undefined) {
-          outcome.onRejected(NOTHING_TO_CONTINUE)
-          return
-        }
-        // ⚠⚠ The one cast onto pi's private run lifecycle — the module header says why. Checked
-        // BEFORE acceptance (PR #442 review): an `async` method can only fail synchronously by not
-        // being there, and a pi build without it must refuse, not answer 202 to a run that never starts.
-        const lifecycle = session as unknown as Partial<PiRunLifecycle>
-        if (typeof lifecycle._runAgentPrompt !== 'function') {
-          outcome.onRejected(NO_RUN_LIFECYCLE)
-          return
-        }
-        outcome.onAccepted()
-        void lifecycle._runAgentPrompt(lead).catch((error: unknown) => {
-          log.error('a continued run failed: {error}', { threadId, error })
-        })
+        trustGate.run(
+          () => startContinue(outcome),
+          (reason) => outcome.onRejected(reason),
+        )
       },
       answerDialog(response: DialogAnswer): void {
         ui.answerDialog(response)
@@ -1548,6 +1597,8 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         // A compaction in flight is the run Stop is stopping (#338 slice 4): pi's `abort()` does
         // not cancel it — `abortCompaction()` does, and is a no-op when none is running.
         session.abortCompaction()
+        // A run still waiting on the trust question (#502) is dropped, and the question asked again.
+        trustGate.abort()
         return stopRunSettlingDialogs(
           () => session.abort(),
           (stopping) => {
@@ -1566,6 +1617,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         if (disposed) return
         disposed = true
         flowsAbort.abort()
+        trustGate.abort()
         ui.cancelAllDialogs()
         unsubscribeSession()
         // `AgentSession.dispose()` does NOT emit session_shutdown — only pi's runtime layer

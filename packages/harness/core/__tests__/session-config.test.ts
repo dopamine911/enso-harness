@@ -17,7 +17,8 @@ interface Fixture {
   readonly cwd: string
   readonly asked: string[]
   readonly notices: string[]
-  context(answer?: string, hasUI?: boolean): SessionConfigContext
+  /** `hostTrust`: the web host owns trust (#502) and pi's answer is this; absent, the terminal. */
+  context(answer?: string, hasUI?: boolean, hostTrust?: boolean): SessionConfigContext
 }
 
 function fixture(options: { user?: object; project?: object; settings?: object } = {}): Fixture {
@@ -40,10 +41,12 @@ function fixture(options: { user?: object; project?: object; settings?: object }
     cwd,
     asked,
     notices,
-    context: (answer?: string, hasUI = true) => ({
+    context: (answer?: string, hasUI = true, hostTrust?: boolean) => ({
       home,
       cwd,
       hasUI,
+      isProjectTrusted: () => hostTrust === true,
+      hostOwnsTrust: hostTrust !== undefined,
       ui: {
         select: (title: string) => {
           asked.push(title)
@@ -61,6 +64,20 @@ const USER = { webFetch: { allowedHosts: ['docs.user.example'] } }
 const PROJECT = { webFetch: { allowedHosts: ['docs.project.example'] } }
 const hostsOf = (resolved: SessionEnsoConfig): unknown =>
   resolved.result.kind === 'ok' ? resolved.result.config.webFetch?.allowedHosts : resolved.result.reason
+
+// #502: in the web the host asks (before a run) and applies the answer to pi, then reloads the
+// session. The config must follow pi's answer — never a second question — and a session trusted
+// after it started must read the project's config the untrusted resolution skipped.
+test("⚠ under the web host the project config follows pi's trust: never asked, and read once trusted (#502)", async () => {
+  const f = fixture({ user: USER, project: PROJECT })
+  const session = {}
+  expect(hostsOf(await sessionEnsoConfig(session, f.context('Trust', true, false)))).toEqual(['docs.user.example'])
+  expect(hostsOf(await sessionEnsoConfig(session, f.context('Trust', true, true)))).toEqual([
+    'docs.user.example',
+    'docs.project.example',
+  ])
+  expect(f.asked).toEqual([])
+})
 
 test('no project config: the user config alone, and nothing is asked', async () => {
   const f = fixture({ user: USER })

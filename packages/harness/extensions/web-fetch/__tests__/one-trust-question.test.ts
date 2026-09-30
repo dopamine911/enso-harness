@@ -40,7 +40,7 @@ test('⚠ two tools, one session: the trust question is asked once (#421)', asyn
   writeFileSync(projectConfigPath(cwd), JSON.stringify({ webFetch: { allowedHosts: ['docs.project.example'] } }))
 
   const resolveSessionConfig: WebSearchDependencies['resolveSessionConfig'] = (session, context) =>
-    sessionEnsoConfig(session, { ...context, home })
+    sessionEnsoConfig(session, { ...context, home, hostOwnsTrust: false })
   const neverRead = (): undefined => undefined
   const startFetch = load(
     createWebFetch({

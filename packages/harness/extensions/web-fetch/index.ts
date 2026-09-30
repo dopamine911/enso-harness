@@ -22,6 +22,7 @@ import {
   runUnderDeadline,
   type SessionConfigContext,
   type SessionEnsoConfig,
+  sessionConfigEnvironment,
   sessionEnsoConfig,
 } from '../../core/index.ts'
 
@@ -80,7 +81,10 @@ export interface WebFetchDependencies {
    * `.enso/config.json` once the project is trusted — one resolution per session, shared with
    * web_search, so the trust question is asked once.
    */
-  resolveSessionConfig: (session: object, context: Omit<SessionConfigContext, 'home'>) => Promise<SessionEnsoConfig>
+  resolveSessionConfig: (
+    session: object,
+    context: Omit<SessionConfigContext, 'home' | 'hostOwnsTrust'>,
+  ) => Promise<SessionEnsoConfig>
   fetchUrl: (url: string, init: WebFetchRequestInit) => Promise<Response>
   /** Resolve a hostname to its addresses. Rejects on NXDOMAIN/timeouts. */
   resolveHostAddresses: (hostname: string) => Promise<string[]>
@@ -413,7 +417,8 @@ async function readBodyUpTo(response: Response, maxBytes: number): Promise<{ tex
 export default createWebFetch({
   locateConfigFile: () => ensoConfigPath(ensoHome(process.env)),
   readConfigText: readTextIfPresent,
-  resolveSessionConfig: (session, context) => sessionEnsoConfig(session, { ...context, home: ensoHome(process.env) }),
+  resolveSessionConfig: (session, context) =>
+    sessionEnsoConfig(session, { ...context, ...sessionConfigEnvironment(process.env) }),
   fetchUrl: (url: string, init: WebFetchRequestInit) => fetch(url, init),
   resolveHostAddresses: async (hostname: string) =>
     (await lookup(hostname, { all: true })).map((resolved) => resolved.address),

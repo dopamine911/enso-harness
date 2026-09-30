@@ -1,4 +1,6 @@
 import { type Static, Type } from 'typebox'
+import { Compile } from 'typebox/compile'
+import { lastCustomEntryData } from './prompt-library.ts'
 
 /**
  * Projects (#395): the local directories one Enso server runs threads in.
@@ -144,3 +146,42 @@ export const EnsoDirectoryListing = Type.Object(
 )
 /** @group Projects */
 export type EnsoDirectoryListing = Static<typeof EnsoDirectoryListing>
+
+/**
+ * A thread's own trust in its project (#502): the web's "Trust this thread" answer, recorded on the
+ * thread's branch so resuming it is trusted without asking, while a NEW thread in the same project
+ * asks again. The project-wide answer ("Trust project") is pi's `trust.json` instead, which terminal
+ * pi reads too. A fork copies the branch, and with it this trust.
+ *
+ * @group Project trust
+ */
+export const ENSO_PROJECT_TRUST_ENTRY = 'enso-project-trust' as const
+
+const ProjectTrustRecord = Compile(Type.Object({ trusted: Type.Literal(true) }, { additionalProperties: false }))
+
+/**
+ * Whether the branch records "Trust this thread". Only the last record counts; one that does not
+ * read is no trust (fail closed).
+ *
+ * @group Project trust
+ */
+export function threadTrustsProject(branch: readonly unknown[]): boolean {
+  return ProjectTrustRecord.Check(lastCustomEntryData(branch, ENSO_PROJECT_TRUST_ENTRY))
+}
+
+/**
+ * The record "Trust this thread" appends.
+ *
+ * @group Project trust
+ */
+export const THREAD_PROJECT_TRUST = { trusted: true } as const
+
+/**
+ * The environment variable the web host sets to `1` before its first session (#502): project trust
+ * is decided by the host — asked before a run, applied to pi, the session reloaded — so the
+ * harness's own `.enso/config.json` question stays out of the way and follows pi's answer. A process
+ * flag because the host runs its sessions in-process, the way `PI_CODING_AGENT_DIR` is one.
+ *
+ * @group Project trust
+ */
+export const ENSO_PROJECT_TRUST_BY_HOST = 'ENSO_PROJECT_TRUST_BY_HOST'
