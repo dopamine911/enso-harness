@@ -107,7 +107,7 @@ The important boundary gates for consolidation:
 - `vendor-gate.test.ts` — vendor imports and extension names stay under the host and extension roots;
 - `glossary-gate.test.ts` — retired names and vendor-prefixed first-party shapes do not return;
 - `docs-gate.test.ts` — sourced fences equal declarations and generated pages equal their generator;
-- `prose-citation-gate.test.ts` — a line cited beside a symbol lands inside that symbol's own declaration;
+- `source-citation-gate.test.ts` — a `path#Name` citation names a real declaration, and no hand page types a line number into this repository;
 - `presentation-gate.test.ts` — ported files name their provenance and import no application state;
 - `logging-gate.test.ts` — records use `ensoLogger`; the logging substrate stays behind it;
 - `harness-barrel-gate.test.ts` — the harness barrel exports exactly what the extensions import;

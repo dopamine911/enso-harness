@@ -198,17 +198,17 @@ const GATE_METADATA: Readonly<Record<string, GateMetadata>> = {
     limitation:
       'Matches provenance text and static imports; dynamically assembled dependencies are outside the import matcher.',
   },
-  'test/prose-citation-gate.test.ts': {
-    roots: ['docs'],
-    exceptions: [],
-    limitation:
-      'Resolves a line citation written beside a symbol the cited file declares exactly once; a bare range with no symbol beside it, and a symbol the file only uses, are outside it.',
-  },
   'test/secret-scan-gate.test.ts': {
     roots: ['.github/workflows/secret-scan.yml'],
     exceptions: [],
     limitation:
       'Runs the `git log` the scanner runs, over fixture histories, with the flags read out of the workflow; it pins what gitleaks is handed, not that gitleaks ran or what its rules matched.',
+  },
+  'test/source-citation-gate.test.ts': {
+    roots: ['docs', 'README.md'],
+    exceptions: [],
+    limitation:
+      'Resolves `path#Name` to one file and a name declared in it, and refuses a typed line number into this repository; it holds that the named declaration exists, not that the sentence around it is true of that declaration.',
   },
   'test/style-tokens-gate.test.ts': {
     rootArrays: ['PAGE_ROOTS'],

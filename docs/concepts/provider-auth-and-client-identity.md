@@ -175,15 +175,15 @@ identifies as Enso. That part is built, in the sense that nothing here forges an
 
 **What exists today, in two places.** Provider auth is *pi's*, not ours: it lives in pi's own
 `auth.json` under the scratch agent dir, written by `/login` and by `pi-multi-account` (#7) — stated
-at `packages/core/src/secrets.ts:30-33`. The harness extensions' own keys are a separate channel:
-`ENSO_HOME/secrets.env` (`~/.enso` by default, #421), read per call by `readSecret` (`secrets.ts:83-86`) so a rotation needs no restart,
+in the header of `packages/core/src/secrets.ts`. The harness extensions' own keys are a separate channel:
+`ENSO_HOME/secrets.env` (`~/.enso` by default, #421), read per call by `secrets.ts#readSecret` so a rotation needs no restart,
 and gated against the model's `read` tool. Both are listed in
 [`reference/env-and-config.md`](../reference/env-and-config.md).
 
 **Secrets do not live in config files, and they do not live in the environment either.**
 `~/.pi/agent/models.json` stores provider API keys in plaintext beside non-secret model configuration,
 which is how one got printed into a transcript on 2026-09-03 — so the harness reads values from the
-gated file instead, and `quarantineSecrets` (`secrets.ts:144-155`) deletes every secret-shaped
+gated file instead, and `secrets.ts#quarantineSecrets` deletes every secret-shaped
 variable from the environment before the first session and the first child process (#89). The
 environment is the channel this design closes, not a key source: a bullet that says "keys come from
 the OS keyring or the environment" would describe the opposite of what is built.

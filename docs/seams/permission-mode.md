@@ -164,7 +164,7 @@ export const PICC_PERMISSION_MODES = ['default', 'acceptEdits', 'plan', 'bypassP
 ## Who implements it, who consumes it
 
 **Persisted by the mode extension, not by us.** The extension keeps its live mode in a closure with
-no getter (`packages/web/src/host/permission-mode-adapter.ts:5-8`); the one observable artifact is the custom entry it appends on
+no getter (`permission-mode-adapter.ts`); the one observable artifact is the custom entry it appends on
 every change, `customType: "modes"`. The harness never writes one.
 
 **Its rules come from `ENSO_HOME/permissions.json`, prepared by us (#446).** The extension reads
@@ -189,19 +189,19 @@ tests pin). For a thread that is not live, `AgentHost.freshPermissionMode()` and
 `permission-mode-adapter.ts` and `agent-host.ts`, under `host/`, where the vendor gate allows them.
 
 **Consumed by the server, three ways — none of them spelling the vendor.** The follow's snapshot
-carries `permissionMode` (`packages/core/src/follow.ts:33`), filled from the live runtime or, for a
+carries `permissionMode` (`src/follow.ts#EnsoFollowSnapshot`), filled from the live runtime or, for a
 cold thread, from `host.storedPermissionMode(branch)`. That choice is made once, in
 `packages/web/src/server/thread-read.ts` (`readThreadMount`), and the follow and the history route
 both read it from there — one reader, so the two cannot answer differently about a thread that goes
 live mid-read (#214). The inspection and summary report the live mode. And
 `GET /api/mode` answers `host.freshPermissionMode()` before any run exists. The run receipt
-(`EnsoPromptReceipt`, `packages/core/src/follow.ts:158-169`) does **not** carry the mode; it carries
-`messageId`, `generation` and `queued` only.
+(`src/follow.ts#EnsoPromptReceipt`) does **not** carry the mode; it carries
+`threadId`, `messageId`, `generation` and `queued` only.
 
 **Said by the host, mid-run.** When the host's session subscription sees the vendor persist a mode, it
 emits its own `permission_mode` event right after it (`host/agent-host.ts`, the session subscription;
 pinned by `agent-host.test.ts` against the real extension). The mapper carries it as the
-`permission-mode` observation (`host/map-events.ts#mapPermissionMode`), and `to-agui.ts` emits it as
+`permission-mode` observation (`host/map-events.ts#mapPiEvent`, its `permission_mode` case), and `to-agui.ts` emits it as
 a CUSTOM chunk named `permission-mode`, carrying the observation whole; the run-start receipt is the
 snapshot's `permissionMode`, the same `EnsoPermissionModeState` shape. The vendor's `custom-entry`
 still crosses as itself — recorded and counted by the debug pane, rendered by nothing.
