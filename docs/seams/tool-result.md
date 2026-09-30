@@ -92,8 +92,8 @@ export function readEnsoToolResultDescriptor(
 }
 ```
 
-`isEnsoToolResultDescriptor` (`tool-result.ts:96-99`) is the same schema compiled once at module load
-(`:88-94`); a malformed descriptor is rejected, never coerced. Those are the module's six top-level
+`isEnsoToolResultDescriptor` (`core/src/tool-result.ts#isEnsoToolResultDescriptor`) is the same schema compiled once at module load
+(`core/src/tool-result.ts#descriptorValidator`); a malformed descriptor is rejected, never coerced. Those are the module's six top-level
 exports. The descriptor is also a field of the observation that carries a result across the wire:
 
 <!-- source: packages/core/src/observation.ts#EnsoToolResultObservation -->
@@ -124,7 +124,7 @@ costs O(output × ticks). Measured on the real wire, a 3-second command producin
 `tool-result` case of `observationToAguiEvents` in `packages/web/src/to-agui.ts`, which returns
 `[]` for `complete: false` — discarded all 30 of them. So **a partial `tool-result` does not cross
 the follow at all** (#279): the wire carries the completed result, whole. The elision is in the one
-place every frame crosses (`packages/web/src/server/follow.ts:107-112`):
+place every frame crosses (`packages/web/src/server/follow.ts#writeFrame`):
 
 <!-- source: packages/web/src/server/follow.ts#writeFrame -->
 ```ts
@@ -215,55 +215,54 @@ export function descriptorFrom(toolName: string, details: unknown): EnsoToolResu
 ```
 
 Only truncation is mapped, and the `kind` is `pi.tool.<toolName>` with empty `props` — the floor, not
-the ceiling: a tool that wants a richer descriptor should emit one (`:75-87`). **No tool does today.**
+the ceiling: a tool that wants a richer descriptor should emit one. **No tool does today.**
 `web-fetch` and `web-search` return `details: undefined` on every path
-(`packages/harness/extensions/web-fetch/index.ts:232,339,371`; `web-search/index.ts:435,440,454,493`),
-so no extension of ours attaches a descriptor. `toolResultMetadata` (`map-events.ts:102`) is the
+(`web-fetch/index.ts#refusal`, `web-fetch/index.ts#renderResponse`; `web-search/index.ts#progressForwarder`, `web-search/index.ts#refusal`, `web-search/index.ts#renderUngrounded`, `web-search/index.ts#renderOutcome`),
+so no extension of ours attaches a descriptor. `toolResultMetadata` (`host/map-events.ts#toolResultMetadata`) is the
 one place the key is written onto a part's `metadata`.
 
 **Carried** on the observation (`EnsoToolResultObservation.descriptor`), then onto the state layer's
 result event under the same key — as an extra field, because that event declares `content` and
-nothing else (`packages/web/src/to-agui.ts:30-42,126-128`). **The state layer drops it there** (#411):
+nothing else (the header of `packages/web/src/to-agui.ts`, and its `tool-result` case in `to-agui.ts#observationToAguiEvents`). **The state layer drops it there** (#411):
 TanStack's processor writes a result part from `content`, state and error only, and keeps no extra
 field, so live the part has no `metadata`. The follow connection therefore hands a finished result's
 descriptor to the thread's `toolResultDescriptors` store before it pushes the result
-(`follow-connection.ts:492-494`, `thread-stores.ts:235-237`). A resumed thread needs no store: its
+(`follow-connection.ts#observe`, `thread-stores.ts#onToolResultDescriptor`). A resumed thread needs no store: its
 parts are built from the stored transcript, `metadata` and all.
 
-**Rendered by `EnsoToolResult`** (`packages/web/src/EnsoToolResult.tsx:69-129`), reached from every tool
-row but a guard refusal's (`selected-message-part.tsx:134-137,196`) — a refused call is drawn as a receipt
+**Rendered by `EnsoToolResult`** (`packages/web/src/EnsoToolResult.tsx#EnsoToolResult`), reached from every tool
+row but a guard refusal's (`selected-message-part.tsx#ToolCallRow`, `selected-message-part.tsx#SelectedMessagePart`) — a refused call is drawn as a receipt
 by `guard-refusal.tsx` instead, its reason being the result's text (#407). The order is fixed: pending (`running…`) while the run
 is open and no result has paired; `aborted` once the run has ended with none (#130); an errored
-envelope renders its error and never consults the descriptor (`:127-133`); then the descriptor — the
-store's, else the one on `metadata` (`useDescriptor`, `:81-86`) — picks the rendering: none is the
+envelope renders its error and never consults the descriptor; then the descriptor — the
+store's, else the one on `metadata` (`EnsoToolResult.tsx#useDescriptor`) — picks the rendering: none is the
 textual fallback, and a `kind` with no renderer is the textual fallback WITH the truncation note under
-it (`:135-150`), because the truncation is data, not the renderer's. *The fallback
-is the point, not a courtesy* (`:11-14`): a type-tag design's characteristic failure is an unrenderable
+it, because the truncation is data, not the renderer's. *The fallback
+is the point, not a courtesy* (the header of `EnsoToolResult.tsx`): a type-tag design's characteristic failure is an unrenderable
 payload showing as nothing, indistinguishable from a successful empty result. `toolResultState` is also
-what the status bar's `running <tool>` reads (`thread-status.tsx:5`).
+what the status bar's `running <tool>` reads (`thread-status.tsx#describeActivity`).
 
-**The renderer map is empty** (`chat-screen.tsx:124-131`): every result falls through to the text form,
+**The renderer map is empty** (`chat-screen.tsx#descriptorRenderers`): every result falls through to the text form,
 which is exactly what the contract promises for an unknown kind, so empty is the honest default. A
 renderer is added when a tool earns one. A truncated `read` or `bash` result therefore reads as its
 text and `showing 1841 of 3000 lines` under it.
 
 **Second implementation:** none for a surface. `packages/web/src/__tests__/tool-result.test.tsx` renders
-`EnsoToolResult` over a one-entry `EnsoRendererMap` (`:15-17`) and pins the branches: a known kind renders
-through its renderer (`:39-43`), an unknown kind falls back to the envelope text and never to blank
-(`:46-50`), an error wins over a descriptor (`:73-77`). The reader and validator are pinned pure
-(`:23-33`). The terminal surface has no renderer today; the contract's design for it — ignore
-`metadata`, render `content` — is stated in the module header (`tool-result.ts:24-28`), not exercised.
+`EnsoToolResult` over a one-entry `EnsoRendererMap` (`tool-result.test.tsx#renderers`) and pins the branches: a known kind renders
+through its renderer, an unknown kind falls back to the envelope text and never to blank,
+an error wins over a descriptor. The reader and validator are pinned pure. The terminal surface has no renderer today; the contract's design for it — ignore
+`metadata`, render `content` — is stated in the module header (`core/src/tool-result.ts`), not exercised.
 
 ## What fences it
 
 - **The docs gate**, for this page's fences.
 - **The schema rule**: a shape is declared in `@enso/core` or does not exist; the descriptor is one
-  TypeBox schema serving the static type, the wire and the validator (`tool-result.ts:7-13`).
-- **The unknown-kind test** (`tool-result.test.tsx:46-50`) is the one this seam is worth: it holds the
+  TypeBox schema serving the static type, the wire and the validator (header of `core/src/tool-result.ts`).
+- **The unknown-kind test** (in `tool-result.test.tsx`) is the one this seam is worth: it holds the
   rule that no descriptor can make a result invisible.
 - **The vendor gate** keeps the runtime's types out of `EnsoToolResult.tsx` and `tool-result.ts`; the
   reader takes a plain record so the terminal can call it without the state layer's types
-  (`tool-result.ts:104-105`).
+  (`core/src/tool-result.ts#readEnsoToolResultDescriptor`).
 
 ## What crosses it that should not
 
@@ -271,10 +270,10 @@ through its renderer (`:39-43`), an unknown kind falls back to the envelope text
 in `@enso/core` and consumed by name. Two facts to know, neither a leak of this seam:
 
 - **The descriptor is derived from the runtime's `details` field**, read by the mapper as the
-  vendor's own type (`TruncationResult`, imported at `map-events.ts:1`; `result?.details` at `:343`). That is L2's
+  vendor's own type (`TruncationResult`, imported by `host/map-events.ts`; `result?.details` in `host/map-events.ts#mapPiEvent`). That is L2's
   event-side half, inventoried on the thread-runtime page; the mapper is the one place it is read.
 - **The `kind` values in use are the runtime's tool names** — `pi.tool.bash`, `pi.tool.read` — minted
-  by `descriptorFrom` (`:93`). A kind is a string by contract and the renderer map has no entry for any
+  by `descriptorFrom`. A kind is a string by contract and the renderer map has no entry for any
   of them, so today the vendor's name is data, not a dependency; a renderer keyed on `pi.tool.*` would
   make it one.
 
@@ -284,7 +283,7 @@ in `@enso/core` and consumed by name. Two facts to know, neither a leak of this 
 change are web-local: `EnsoToolResult.tsx` (the map, the state, the fallback), `selected-message-part.tsx`
 and `thread-status.tsx` (its two callers), `to-agui.ts` (where the descriptor rides onto the stream),
 and `chat-screen.tsx`'s empty map. `packages/core/src/tool-result.ts` and the observation's
-`descriptor` field do not change; `tool-result.test.tsx`'s reader tests (`:23-33`) run against core
+`descriptor` field do not change; `tool-result.test.tsx`'s reader tests run against core
 alone.
 
 **Add the terminal renderer** — the second surface #18 designed for — and nothing in core changes: it

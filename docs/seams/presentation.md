@@ -13,7 +13,7 @@ Every fence on this page is the source, checked by `test/docs-gate.test.ts`. Ref
 
 ## The contract
 
-The adapter. `createFollowConnection` (`packages/web/src/follow-connection.ts:258-714`, not fenced
+The adapter. `createFollowConnection` (`packages/web/src/follow-connection.ts#createFollowConnection`, not fenced
 for its length) builds one per thread: `subscribe()` opens `GET /api/threads/:id/follow` once and
 turns frames into the state layer's chunks; `send()` POSTs the prompt and answers at admission. Three
 methods beside the vendored adapter interface are ours, and each says why the vendored one would not do:
@@ -288,7 +288,7 @@ export interface ThreadStores {
 }
 ```
 
-The one path from a custom event to those stores is `routeEnsoCustomEvent` (`custom-event-router.ts:77-108`,
+The one path from a custom event to those stores is `routeEnsoCustomEvent` (`custom-event-router.ts#routeEnsoCustomEvent`,
 in prose): it records every event in `recentChunks`, then dispatches on the name, which is the
 observation's `kind` or the frame's `type` (#162 workstream 5) — a `snapshot` to the mode stores, the
 model, the project, the session's `usage`, the dialog slot and `generation`; a `status` to `generation`
@@ -302,27 +302,27 @@ throwing inside the state layer's stream loop, where a throw would end the run.
 
 ## Who implements it, who consumes it
 
-**The state layer's side is built once per thread.** `createThreadStores` (`thread-stores.ts:98-118`)
-creates every store above and the thread's `connection` (`createFollowConnection` at lines 112-116,
-with `onProblem` routed into the thread's notifications and `onToolResultDescriptor` into `toolResultDescriptors`, #411). `chat-screen.tsx:182-196` (`threadChatOptions`)
+**The state layer's side is built once per thread.** `createThreadStores` (`thread-stores.ts#createThreadStores`)
+creates every store above and the thread's `connection` (`createFollowConnection`,
+with `onProblem` routed into the thread's notifications and `onToolResultDescriptor` into `toolResultDescriptors`, #411). `chat-screen.tsx#threadChatOptions`
 hands that connection, the stored history and an `onCustomEvent` closure over the thread's stores to the
-state layer's chat factory (`createThreadChatHook`, line 218-220) — one factory per thread, because
-the state layer passes `onCustomEvent` no thread id (lines 155-163).
+state layer's chat factory (`chat-screen.tsx#createThreadChatHook`) — one factory per thread, because
+the state layer passes `onCustomEvent` no thread id.
 
-**The presentation layer is consumed by two files.** `chat-screen.tsx`'s imports at lines 24-52 pull
+**The presentation layer is consumed by two files.** `chat-screen.tsx`'s imports pull
 `attachments`, `conversation`, `message`, `prompt-input` and `queue` from `components/ai-elements/`;
-`selected-message-part.tsx:7` pulls `reasoning`. Those six ai-elements files and their commit pins are
+`selected-message-part.tsx`'s pull `reasoning`. Those six ai-elements files and their commit pins are
 the generated table in [`ported-provenance.md`](./ported-provenance.md); the eight `ui/` shadcn
 primitives beneath the same fence are receipted by [`components/ui/README.md`](../../packages/web/src/components/ui/README.md)
 instead, because the shadcn registry is re-fetched by style and version rather than by commit.
 The renderers that stay ours are outside the ported directory: the dialog card is `EnsoDialogCard` in
 `chat-screen.tsx` itself (`#EnsoDialogCard`), and the tool-result descriptor renderer, notices, the mode select
 and the status bar are the `SelectedMessagePart`, `ThreadNotifications`, `PermissionModeSelect`,
-`ThreadStatusBar` and `EnsoRendererMap` imports at lines 58-83.
+`ThreadStatusBar` and `EnsoRendererMap` imports.
 
 **A second connection today: the fixture.** `?fixture` swaps the live adapter for the scripted
-conversation in `fixture-conversation.ts` (`chat-screen.tsx:187`, `connection: isFixtureMode ?
-createFixtureChat().transport() : stores.connection`), and the option's type admits both (line 202).
+conversation in `fixture-conversation.ts` (`chat-screen.tsx#threadChatOptions`, `connection: isFixtureMode ?
+createFixtureChat().transport() : stores.connection`), and the option's type admits both (`chat-screen.tsx#ThreadChatOptions`).
 Everything downstream of the connection is identical on both paths, which is what the fixture is for
 (the styling dev loop, #31). The swap covers only the client's send, so a fixture page's threads are
 also minted with `fixtureFetch`, which refuses every request by name (#404): a prompt queued
@@ -349,18 +349,18 @@ need none: an upstream re-port is the second implementation, and the gate is wha
   3. *Nothing under it holds APPLICATION state* — component-local `useState`/`useRef` is what a
      presentation component is; what may not cross is the state layer: our stores, the follow
      connection, the wire schemas, the vendored client. The gate matches imports, not hooks, and
-     it does not spell them: `stateLayerTarget` (line 68) RESOLVES every specifier a ported file
+     it does not spell them: `presentation-gate.test.ts#stateLayerTarget` RESOLVES every specifier a ported file
      writes — `@/x` through the `@/*` → `./src/*` map, a relative path from the file — and refuses
      anything landing under `packages/web/src` outside `components/` and `lib/`
-     (`PRESENTATION_DIRECTORIES`, line 58), plus `@enso/core` and any `@tanstack/*`
-     (`FORBIDDEN_PACKAGE`, line 59), which are not ours to resolve. Both spellings, because PR
-     #152's review found the alias row missing (lines 46-48). Derived, because the hand-written
+     (`presentation-gate.test.ts#PRESENTATION_DIRECTORIES`), plus `@enso/core` and any `@tanstack/*`
+     (`presentation-gate.test.ts#FORBIDDEN_PACKAGE`), which are not ours to resolve. Both spellings, because PR
+     #152's review found the alias row missing. Derived, because the hand-written
      list it replaced had gone stale in silence: it named `session-stats`, renamed to
      `thread-stats.tsx` long before, and its hard-coded `.ts` suffix could not match a `.tsx`
      module at all — so `@/permission-mode.tsx`, a hook over the thread's stores, passed
      (#273). The proof that it cannot go stale again is a test, not a comment: every module
      sitting beside `chat-screen.tsx` is read off the directory and must be refused under both
-     spellings (line 154).
+     spellings.
 - **The rule** the gate enforces is each ported directory's README (`components/ai-elements/README.md`
   rules 1-4, `components/ui/README.md` rules 1-3): a provenance receipt per file; a standing fork
   updated by diff against that receipt; presentation only — state, the stream protocol, the dialog
@@ -369,28 +369,31 @@ need none: an upstream re-port is the second implementation, and the gate is wha
   as *port before you build*: hand-rolling needs its reason in the file header.
 - **`page-scoped-stores.test.ts`** (`packages/web/src/__tests__/`) walks every non-test, non-component
   source under `packages/web/src` for a store created at column zero and requires the list to equal
-  exactly three page-scoped stores, each with its reason (lines 19-26): `thread-stores.ts:threadList`
-  (the rail's list), `chat-screen.tsx:storedThreads` (the server's stored-threads listing) and
-  `thread-stores.ts:browserLogging` (the page's log ring and shipper). A fourth module-level store is
+  exactly five page-scoped stores, each with its reason (`page-scoped-stores.test.ts#PAGE_SCOPED_BY_DESIGN`):
+  `thread-stores.ts:threadList` (the rail's list), `chat-screen.tsx:storedThreads` (the server's
+  stored-threads listing), `chat-screen.tsx:projectList` (the server's projects, #395),
+  `thread-stores.ts:browserLogging` (the page's log ring and shipper) and `page-clock.ts:pageClock`
+  (the page's clock, #278). A sixth module-level store is
   thread state shared across threads — the bug class the mounted two-threads test observes — and
   fails here by name.
 - **Invariant 1** (`architecture.md`: *the feed is the only source of run state in the browser*) is
-  held inside the adapter. A run opens in `openRun` (`follow-connection.ts:295-304`, `RUN_STARTED`)
-  and closes in `closeRun` (306-310). The feed drives both: a `status` or snapshot frame reaches
-  `observeStatus` (362-373), which closes every run the server has moved past (`finishRunsThrough`,
-  349-354) or opens an `external-<generation>` run another client started (372); a `settled`
-  observation closes the runs through the server's generation (392-398); a `prompt-rejected` closes
-  the run it names with `RUN_ERROR` (416); the follow ending closes every open run (508-514). The one
-  place a returning POST touches a run is `send`, and only when admission failed — the fetch that
-  threw (569-578), a status that is not 202 (579-584), a receipt that fails its schema (585-594) —
-  or when the receipt lands on a run the follow has already spoken for: a rejection that crossed it
-  (606-610), or a server that released the run before the receipt came back (614-616). Never on
+  held inside the adapter. A run opens in `follow-connection.ts#openRun` (`RUN_STARTED`)
+  and closes in `follow-connection.ts#closeRun`. The feed drives both: a `status` or snapshot frame reaches
+  `follow-connection.ts#observeStatus`, which closes every run the server has moved past
+  (`follow-connection.ts#finishRunsThrough`) or opens an `external-<generation>` run another client started; a `settled`
+  observation closes the runs through the server's generation, and a `prompt-rejected` closes
+  the run it names with `RUN_ERROR` (both in `follow-connection.ts#observe`); the follow ending closes every open run
+  (`follow-connection.ts#subscribe`). The one
+  place a returning POST touches a run is `follow-connection.ts#send`, and only when admission failed — an image
+  refused on this side before any request, the fetch that threw, a status that is not 202, a receipt that fails its schema —
+  or when the receipt lands on a run the follow has already spoken for: a rejection that crossed it,
+  or a server that released the run before the receipt came back. Never on
   success.
 
 ## What crosses it that should not
 
 **The state layer's message shape crosses two wire payloads.** `EnsoThreadHistory.messages`
-(`thread-inspection.ts` line 279) and `EnsoFollowSnapshot.messages` (`follow.ts` line 56) are both
+(`core/src/thread-inspection.ts#EnsoThreadHistory`) and `EnsoFollowSnapshot.messages` (`core/src/follow.ts#EnsoFollowSnapshot`) are both
 `Type.Array(Type.Unknown())` on purpose — core must not own the client's transport shape — and both
 carry the client's `UIMessage`s. They are built by `transcriptToMessages` in
 `server/transcript-to-messages.ts`, the read-side twin of `to-agui.ts`, which imports `MessagePart`
@@ -398,9 +401,9 @@ and `UIMessage` from `@tanstack/ai-client` on its first line; the history route 
 and the follow's opening snapshot (`server/follow.ts`) each call it and put the result on the wire.
 `Unknown` here is a deliberate hole, not an absence: the shape crosses with nothing to diff, so a
 partially-deployed change to it raises no schema error on either side. Of the two, only the history
-payload is read — `reviveHistoryMessages` (`thread-stores.ts:252-273`) restores the `Date` that JSON
+payload is read — `reviveHistoryMessages` (`thread-stores.ts#reviveHistoryMessages`) restores the `Date` that JSON
 flattened and drops rows that cannot be UI messages, and `ThreadStores.history` is typed as the
-client's `UIMessage` (line 34). The snapshot's copy is written and read by nobody: the router's
+client's `UIMessage` (`thread-stores.ts#ThreadStores`). The snapshot's copy is written and read by nobody: the router's
 `snapshot` branch takes `permissionMode`, `openDialogs` and `generation` off the frame and never
 looks at `messages`. Not a vendor-of-the-loop leak and not numbered in goals §2, but it is where the
 state layer's shape exists outside the page, and a pivot pays for it (below).
@@ -409,7 +412,7 @@ state layer's shape exists outside the page, and a pivot pays for it (below).
 processor consumes (AG-UI) are vendored by decision, not leaked: `architecture.md` → Presentation
 names the client as the state layer, and the glossary's vendor map carries both. Apart from the
 message shape above, their vocabulary is derived in memory, in the browser, and never on the wire or
-stored — `to-agui.ts:17-28` says where it runs (the adapter calls it on each observation before
+stored — `to-agui.ts`'s header says where it runs (the adapter calls it on each observation before
 handing chunks to the client; *nothing serialises the output of this module and nothing stores it*),
 and its only production importer is `follow-connection.ts`.
 
@@ -427,12 +430,12 @@ Replace the state layer and the files that change are the adapter and its two ne
 `follow-connection.ts` (a new send/subscribe shape, or none), `custom-event-router.ts` (the client's
 `onCustomEvent` is the entry; the dispatch to stores stays), `to-agui.ts` (deleted — its header
 says so: *a renderer that stops speaking AG-UI deletes it and the adapter*), the chat factory in
-`chat-screen.tsx` (`threadChatOptions` and `createThreadChatHook`, lines 182-220, and the widget map
+`chat-screen.tsx` (`threadChatOptions` and `createThreadChatHook`, and the widget map
 written against the client's `ChatUIHost`), plus the message-shape crossing, which is seven sites and
 not three: `ThreadStores.history` and `reviveHistoryMessages` in the browser,
 `server/transcript-to-messages.ts` as the producer, its two callers in `server/follow.ts` (the follow
 snapshot) and `server/index.ts` (the history route), and the two schema fields that carry the result,
-`packages/core/src/follow.ts:56` and `packages/core/src/thread-inspection.ts:279`.
+`core/src/follow.ts#EnsoFollowSnapshot` and `core/src/thread-inspection.ts#EnsoThreadHistory`.
 The per-thread stores, the router's dispatch, and the fixture path are shaped by the thread, not the
 client, and survive.
 

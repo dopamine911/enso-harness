@@ -240,38 +240,38 @@ export interface EnsoExtensionUiContext {
 ## Who implements it, who consumes it
 
 **Implemented once**, by `createEnsoExtensionUiContext` in `packages/web/src/host/extension-ui-context.ts`
-(line 250). The host is the UI: it implements the interface extensions call and turns each call into
-the same record the mapper already consumed over the old transport (header lines 38–40). The four
-blocking methods — `select`, `confirm`, `input`, `editor` (lines 413–459) — go through one
-`awaitDialog` (line 326): mint an id, park the request in a pending map, emit the request, and block
+(`extension-ui-context.ts#createEnsoExtensionUiContext`). The host is the UI: it implements the interface extensions call and turns each call into
+the same record the mapper already consumed over the old transport (`extension-ui-context.ts` header). The four
+blocking methods — `select`, `confirm`, `input`, `editor` (`extension-ui-context.ts#uiContext`) — go through one
+`awaitDialog` (`extension-ui-context.ts#awaitDialog`): mint an id, park the request in a pending map, emit the request, and block
 until an answer, a cancel, the caller's abort signal or its own timeout. Every path that stops the wait
-goes through `finish` (line 379), which deletes the pending entry, emits the settle record with its
-outcome (line 383) and resolves the extension with its value — `undefined` for `select`/`input`/
-`editor`, `false` for `confirm`, on every non-answer outcome (lines 358–359). That is why the settle
-observation exists at all: the runtime has no event for a question ending (lines 352–354).
-`agent-host.ts` binds one context per session (line 981) and delegates the runtime contract's
-`answerDialog` and `openDialogs` to it (lines 1411–1416); `cancelAllDialogs` cancels every pending
-question at session teardown (line 614, called from `agent-host.ts:1576`), so teardown is a settle
+goes through `finish` (`extension-ui-context.ts#finish`), which deletes the pending entry, emits the settle record with its
+outcome and resolves the extension with its value — `undefined` for `select`/`input`/
+`editor`, `false` for `confirm`, on every non-answer outcome. That is why the settle
+observation exists at all: the runtime has no event for a question ending.
+`agent-host.ts` binds one context per session (`agent-host.ts#createSession`) and delegates the runtime contract's
+`answerDialog` and `openDialogs` to it (`agent-host.ts#answerDialog`); `cancelAllDialogs` cancels every pending
+question at session teardown (`extension-ui-context.ts#cancelAllDialogs`, called from `agent-host.ts#dispose`), so teardown is a settle
 path too.
 
-**Consumed by the server.** `answerThreadDialog` in `packages/web/src/server/follow.ts` (line 363)
-finds the open question by id on the live thread (line 366; 404 when the thread is not live or the
-question is spent, lines 365–372), validates a non-cancel answer against the question's kind
-(lines 373–376; 422 with the refusal, and the question stays open), then hands it to the runtime
-(line 377) and answers 204 (line 378). `server/index.ts` maps that outcome to the response (lines
-840–862). The follow's snapshot lists every open question, oldest first, so a reconnect renders the
-card at once (`follow.ts` line 200; `openDialogs` at extension-ui-context.ts line 604 checks each
-request with `isEnsoDialogSpec` rather than casting, line 610).
+**Consumed by the server.** `answerThreadDialog` in `packages/web/src/server/follow.ts` (`server/follow.ts#answerThreadDialog`)
+finds the open question by id on the live thread (404 when the thread is not live or the
+question is spent), validates a non-cancel answer against the question's kind
+(422 with the refusal, and the question stays open), then hands it to the runtime
+and answers 204. `server/index.ts` maps that outcome to the response (`server/index.ts#answerControl`).
+The follow's snapshot lists every open question, oldest first, so a reconnect renders the
+card at once (`server/follow.ts#followThread`; `extension-ui-context.ts#openDialogs` checks each
+request with `isEnsoDialogSpec` rather than casting).
 
 **Consumed by the browser.** The question arrives as an `extension-ui-request` observation whose
-`dialog` the mapper checked with `isEnsoDialogSpec` (`map-events.ts` line 147); the adapter passes the
+`dialog` the mapper checked with `isEnsoDialogSpec` (`map-events.ts#mapExtensionUiRequest`); the adapter passes the
 observation whole on a CUSTOM chunk named by its kind (`to-agui.ts#custom`) and the router checks
 `{ id, dialog }` again against `EnsoOpenDialog` before it reaches the store (`custom-event-router.ts#routeUiRequest`). `EnsoDialogCard` in
 `packages/web/src/chat-screen.tsx` (`#EnsoDialogCard`) renders one card and hands `answerDialog` in
-`packages/web/src/follow-connection.ts` (line 690) exactly the answer shapes — `{ value }`,
-`{ confirmed }`, `{ answers }`, `{ cancelled: true }` — because the server forwards them verbatim (chat-screen.tsx
-lines 631–632). The card drops on `dialog-settled` for its id, whoever answered (router lines 148–153), and
-the snapshot's list replaces what is shown (router line 105).
+`packages/web/src/follow-connection.ts` (`follow-connection.ts#answerDialog`) exactly the answer shapes — `{ value }`,
+`{ confirmed }`, `{ answers }`, `{ cancelled: true }` — because the server forwards them verbatim
+(`chat-screen.tsx#DialogAnswerControls`). The card drops on `dialog-settled` for its id, whoever answered (`custom-event-router.ts#routeObservation`), and
+the snapshot's list replaces what is shown (`custom-event-router.ts#routeEnsoCustomEvent`).
 
 **Asked by the agent (#12).** The model reaches this channel through one tool, `ask_user`
 (`packages/harness/extensions/ask-user/index.ts`, ours; its parameters are `core/src/ask-user.ts`):
@@ -309,19 +309,19 @@ with its siblings for the decline and Stop.
 
 **Fakes.** `follow.test.ts` drives the answer route over an inline runtime whose `openDialogs` the test
 controls; `extension-ui-context.test.ts` exercises the context against scripted extension calls,
-including the fail-closed lift (`EnsoExtensionUiContextOptions.liftDialog`, lines 99–103).
+including the fail-closed lift (`EnsoExtensionUiContextOptions.liftDialog`).
 
 ## What fences it
 
 - **One validator, both sides**: `validateDialogAnswer` lives beside the schemas so the server and the
   card enforce the same rule (`dialog.ts#validateDialogAnswer`) — in particular that a `select` value
-  is one of the offered options (lines 176–179), since the runtime hands it to the extension verbatim
-  (an injection seam, closed at the server: `follow.ts` lines 359–360).
-- **The settle funnel**: `finish` is the one place a settle record is emitted (extension-ui-context.ts
-  line 324); the mapper turns an outcome the union does not name into `unmapped`, not a guess
-  (`map-events.ts` lines 378–387).
-- **The kinds agree twice**: the host's `BlockingDialogRequest` (extension-ui-context.ts line 65) and
-  the mapper's `DIALOG_UI_METHODS` (`map-events.ts` line 43) name the same five methods, and the
+  is one of the offered options, since the runtime hands it to the extension verbatim
+  (an injection seam, closed at the server: `server/follow.ts#answerThreadDialog`).
+- **The settle funnel**: `finish` is the one place a settle record is emitted (`extension-ui-context.ts#finish`);
+  the mapper turns an outcome the union does not name into `unmapped`, not a guess
+  (`map-events.ts#mapPiEvent`).
+- **The kinds agree twice**: the host's `BlockingDialogRequest` (`extension-ui-context.ts#BlockingDialogRequest`) and
+  the mapper's `DIALOG_UI_METHODS` (`map-events.ts#DIALOG_UI_METHODS`) name the same five methods, and the
   host's comment says so.
 - **The vendor gate** (#145): `extension-ui-context.ts` and `permission-dialog.ts` import the runtime's
   package; nothing above `host/` does.
@@ -333,7 +333,7 @@ this as **L4** with "probably keep"; the glossary decided it (*dialog kind*, Dec
 `confirm`, `input`, `editor` are ours by adoption, the right set of primitives for a surface,
 `EnsoDialogSpec` names them, an answer is validated against them, and they are neither renamed nor
 mapped. The answer shapes likewise mirror the runtime's response contract minus its envelope
-(`dialog.ts` lines 14–24) so the server adds the envelope and nothing else. A decision, not a leak:
+(`dialog.ts#EnsoDialogAnswer`) so the server adds the envelope and nothing else. A decision, not a leak:
 a replacement loop would be adapted *to* this vocabulary.
 
 **The fifth kind, `questionnaire`, is ours, not the runtime's** (#12). pi has no method for a set of
@@ -343,17 +343,17 @@ keeps it unchanged: nothing about it is pi's.
 
 **The permission prompt is lifted inside the host, legitimately.** The mode extension asks its
 file-permission question through `custom`, handing the runtime a terminal component; the host's
-`custom` (extension-ui-context.ts line 443) builds it and `permission-dialog.ts` lifts the one
-component it knows into a `select` (line 475) whose options are the strings the extension reads back
+`custom` (`extension-ui-context.ts#custom`) builds it and `permission-dialog.ts` lifts the one
+component it knows into a `select` (`permission-dialog.ts#liftPermissionDialog`) whose options are the strings the extension reads back
 verbatim. That reads a vendor class by `instanceof` and its private fields by name, pinned by
-`permission-dialog.test.ts` (permission-dialog.ts lines 10–30) — vendor coupling, but under
+`permission-dialog.test.ts` (`permission-dialog.ts` header) — vendor coupling, but under
 `packages/web/src/host/`, where the vendor gate allows it, and nothing above the host sees anything
 but a `select`. The mode itself is leak L3, on `permission-mode.md`.
 
 **`notify` rides the same observation.** A one-way notice is emitted by the host as a `notify` request
-(extension-ui-context.ts line 394) and mapped as an `extension-ui-request` the mapper marks
-non-blocking, since only the five dialog methods block (`map-events.ts` line 172); status-bar and
-widget calls are emitted and dropped (extension-ui-context.ts header lines 54–56). Not a dialog.
+(`extension-ui-context.ts#notify`) and mapped as an `extension-ui-request` the mapper marks
+non-blocking, since only the five dialog methods block (`map-events.ts#mapExtensionUiRequest`); status-bar and
+widget calls are emitted and dropped (`extension-ui-context.ts` header). Not a dialog.
 
 ## Pivot cost
 

@@ -98,12 +98,12 @@ export function ensoLogger(layer: EnsoLogLayer, ...subcategory: readonly string[
 ```
 
 Redaction is by field NAME, at write, before anything reaches a sink. `ENSO_REDACT_FIELDS`
-(`log.ts:145`) is five case-insensitive patterns — `api[-_]?key`, `secret`, `password`, `token`,
+(`log.ts#ENSO_REDACT_FIELDS`) is five case-insensitive patterns — `api[-_]?key`, `secret`, `password`, `token`,
 `credential` — mirroring the secret store's boundary; `token` is deliberate, so a property literally
-called `tokens` is dropped by design (lines 165-167: better a missing count than a leaked key). A
+called `tokens` is dropped by design (better a missing count than a leaked key). A
 redacted field's value becomes the marker below, not a deletion, so the record still says the field
 was there; a known secret VALUE found anywhere becomes `ENSO_REDACTED_VALUE` (`'[REDACTED:value]'`,
-line 197, #139) — a distinct marker so the manifest counts the two passes separately.
+`log.ts#ENSO_REDACTED_VALUE`, #139) — a distinct marker so the manifest counts the two passes separately.
 
 <!-- source: packages/core/src/log.ts#ENSO_REDACTED -->
 ```ts
@@ -185,7 +185,7 @@ export const EnsoBrowserLogBatch = Type.Object(
 ```
 
 A process's sink is configured once, from `@enso/core/log-process` (a subpath, never the barrel —
-`log-process.ts:37-41`: the file sink builds on `node:fs` at module evaluation and took the page down
+`log-process.ts`'s header: the file sink builds on `node:fs` at module evaluation and took the page down
 when it was exported from `index.ts`). The configurator's options:
 
 <!-- source: packages/core/src/log-process.ts#ProcessLoggingOptions -->
@@ -210,79 +210,80 @@ export interface ProcessLoggingOptions {
 }
 ```
 
-`configureProcessLogging` (`log-process.ts:510-590`, in prose) builds a date-named file sink with
-`bufferSize: 0` (line 395; measured, header lines 53-62: the buffered sink held the last record until
+`configureProcessLogging` (in prose) builds a date-named file sink with
+`bufferSize: 0` (`log-process.ts#fileSink`; measured, `log-process.ts`'s header: the buffered sink held the last record until
 the next one), creates today's file `0600` before the sink opens it and again on each record, so a
-rollover at local midnight does not leave a `0664` file behind (323-339, 349-352, 370-375, #207),
-stamps `process` and a per-process `sequence` on every record (370-375), filters by the category's
-effective level (376-379), and wraps the file sink — and the console sink when one is configured
-(393-398) — in field-name redaction then the value pass (384-390).
+rollover at local midnight does not leave a `0664` file behind (`log-process.ts#owningTheDayFile`, #207),
+stamps `process` and a per-process `sequence` on every record (`log-process.ts#stamped`), filters by the category's
+effective level (`log-process.ts#file`), and wraps the file sink — and the console sink when one is configured
+(`log-process.ts#pretty`) — in field-name redaction then the value pass (`log-process.ts#redaction`, `log-process.ts#redactValues`).
 
 ## Who implements it, who consumes it
 
 **Three configurators, one per process kind**, each writing into the same day's file: the server
 (`process: 'server'`) and the web launcher (`'web'`), both through `startLauncher`
-(`log-process.ts:361-414`), which first moves a checkout's old `.enso/` into `ENSO_HOME` (#421), and
-the runtime as a child (`packages/harness/extensions/logging/index.ts:39-47`, `'pi'`).
+(`log-process.ts#startLauncher`), which first moves a checkout's old `.enso/` into `ENSO_HOME` (#421), and
+the runtime as a child (`logging/index.ts#createLoggingExtension`, `'pi'`).
 
-The extension is the interesting one (`logging/index.ts:11-21`): in-process under the web host the
+The extension is the interesting one: in-process under the web host the
 server configured before the runtime existed, `isLoggingConfigured()` is true, and it configures
 nothing — the extensions' records land in the server's file through the server's sinks. As a child
 of the terminal launcher nothing has configured, so it does, with no console sink (stderr is the
 terminal's). A second `configure` throws by the substrate's design; that is the whole reason the check
 exists. The same extension writes the one record only an extension can: the provider's request id
-and rate-limit headers, from an explicit four-name list (lines 56-67) so an `authorization` or
+and rate-limit headers, from an explicit four-name list (`logging/index.ts#RECORDED_RESPONSE_HEADERS`) so an `authorization` or
 `set-cookie` header is never echoed into a file the manifest says is safe.
 
-**The browser is the fourth layer and has its own configurator** (`packages/web/src/browser-logging.ts:13-36`):
+**The browser is the fourth layer and has its own configurator** (`browser-logging.ts#configureBrowserLogging`):
 a ring of the last 200 records at every level (the drawer's and the bundle's), a shipper that batches
 `info` and up to `POST /api/logs` and flushes with `sendBeacon` on hide, and a devtools console. A
-failed POST is dropped: *it is the log, and the log must never make more log* (lines 25-26).
-`server/logs-route.ts:29-58` receives the batch — capped at 256 KiB (line 19), closed schema, at most
-200 records, `Enso.browser.*` loggers only — and re-emits each record through this process's
+failed POST is dropped: *it is the log, and the log must never make more log* (`browser-logging.ts#createLogShipper`).
+`server/logs-route.ts#receiveBrowserLogs` receives the batch — capped at 256 KiB (`logs-route.ts#MAX_LOG_BODY_BYTES`), closed schema, at most
+200 records, `enso.browser.*` loggers only — and re-emits each record through this process's
 `ensoLogger('browser', …)` at its level with `process: "browser"`, the tab's `page` and the browser's
-`at` (lines 49-56). So the same sink redacts every layer. A bad batch is a 400 that is *not* logged
-(lines 12-16): a page in a loop sending garbage would otherwise write one line per attempt.
+`at`. So the same sink redacts every layer. A bad batch is a 400 that is *not* logged:
+a page in a loop sending garbage would otherwise write one line per attempt.
 
 **`process` versus `layer`** (glossary Record, decision 4). `ProcessLoggingOptions.process`
-(`log-process.ts:335-336`) is *which launcher this is — `server`, `web`, `pi` — on every record it
+(`log-process.ts#ProcessLoggingOptions`) is *which launcher this is — `server`, `web`, `pi` — on every record it
 writes, since the file is shared*: the operating-system process. `EnsoLogLayer` is the region of our
 code: `extension` is our code inside the runtime's process, and under the web host that process is
 `server`. Orthogonal on purpose — a browser record is `process: "browser"` because the server
 re-emitted it, and `layer: browser` because the page wrote it.
 
-**The redaction manifest** (`log-bundle.ts:47-64`, `redactionManifest`) reads the markers back: a
+**The redaction manifest** (`log-bundle.ts#redactionManifest`) reads the markers back: a
 property valued `ENSO_REDACTED` counts under its field name; a line containing `ENSO_REDACTED_VALUE`
-counts under `values`. Two counts on purpose (lines 50-53): a field redacted is a record shaped
+counts under `values`. Two counts on purpose: a field redacted is a record shaped
 right; a `values` row is a leak that was caught. No bookkeeping in the writer.
 
 ## What fences it
 
 - **The logging gate** (`test/logging-gate.test.ts`, #132) holds two lines, both ratchets, over
-  `packages/core/src`, `packages/web/src` and `packages/harness` (header lines 10-21):
+  `packages/core/src`, `packages/web/src`, `packages/web/e2e`, `packages/harness` and `scripts`
+  (`logging-gate.test.ts#MIGRATED_ROOTS`):
   1. *No production `console.*` in a migrated root* — a `console.error` is a record with no level, no
-     thread, no file, and no test that can hear it. The allowlist is empty (line 60).
+     thread, no file, and no test that can hear it. The allowlist is empty.
   2. *`@logtape/*` is imported only where the schema lives and where a process configures its sink* —
-     `LOGTAPE_ALLOWED` (lines 36-40) is `core/src/log.ts`, `core/src/log-process.ts` and
+     `logging-gate.test.ts#LOGTAPE_ALLOWED` is `core/src/log.ts`, `core/src/log-process.ts` and
      `web/src/browser-logging.ts`, three files, so the record shape is ours to hold and the substrate
-     is ours to swap. Comment lines are skipped (line 51), so a guard's doc may quote `console.log`.
-- **`log-process.test.ts`** pins that a redacted value never lands (`log.ts:151`), that a payload
+     is ours to swap. Comment lines are skipped (`gate-support.ts#codeLinesOf`), so a guard's doc may quote `console.log`.
+- **`log-process.test.ts`** pins that a redacted value never lands (`log.ts#ENSO_REDACTED`), that a payload
   thunk runs only for a record the tier admits (#284), and that a second configure in one process
-  throws (`logging/index.ts:18-19`).
+  throws (`logging/index.ts#createLoggingExtension`).
 
 ## What crosses it that should not
 
-**The substrate is vendored, by decision, and it shows in exactly three files.** `log.ts:8-13` says
+**The substrate is vendored, by decision, and it shows in exactly three files.** `log.ts`'s header says
 what is ours — the layers, the properties, the one way to get a logger — and that nothing outside
 this file and the configurators imports the substrate. The three allowlisted files import it by name
 (LogTape: `@logtape/logtape`, `@logtape/file`, `@logtape/pretty`, `@logtape/redaction`), and
-`EnsoLogLine`'s header (`log.ts:163-168`) admits the on-disk shape is the substrate's JSON-lines
+`EnsoLogLine`'s header (`log.ts#EnsoLogLine`) admits the on-disk shape is the substrate's JSON-lines
 formatter, pinned so a formatter change goes red instead of reshaping the file. Not one of the
 [numbered leaks](./README.md#leak-numbers) — L1–L6 are the loop's boundary — but the same kind of
 thing, stated: one maintainer, one seam, one gate, and a `EnsoLogger` that never exposes the
 substrate's `Logger`.
 
-Nothing else. `EnsoLogProperties` is open (`[key: string]: unknown`, line 48) — whatever a caller adds
+Nothing else. `EnsoLogProperties` is open (`[key: string]: unknown`, `log.ts#EnsoLogProperties`) — whatever a caller adds
 is carried, and field-name redaction at write is the only check it passes; that is the design, not a
 leak. The batch, the line shape and the options are ours; no caller sees a substrate type.
 
