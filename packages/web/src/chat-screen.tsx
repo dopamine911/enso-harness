@@ -1837,7 +1837,7 @@ function AppHeader({
       ) : null}
       <ViewTabs view={view} onView={onView} threadId={active?.threadId} />
       <PromptManagerDialog threadId={activeThreadId} />
-      <SettingsDialog />
+      <SettingsDialog threadId={activeThreadId} />
       {isDebugMode ? (
         <PaneSwitch
           open={debugOpen}

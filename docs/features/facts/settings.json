@@ -4,10 +4,21 @@
     {
       "image": "settings",
       "steps": ["open a thread from the rail", "choose **settings**"],
-      "shown": ["Theme", "Body", "kept in this browser"],
+      "shown": ["Theme", "Body", "appearance is kept in this browser; permissions are saved on the server"],
       "measured": {
         "themeFont": "the theme's font"
       }
+    },
+    {
+      "image": "settings-permissions",
+      "steps": ["open a thread from the rail", "choose **settings**", "choose **Permissions**"],
+      "shown": [
+        "This section is saved on the server, in /tmp/enso-feature-shots/home/permissions.json; the rest of Settings is kept in this browser.",
+        "Save",
+        "Show",
+        "yours — holds in every mode"
+      ],
+      "measured": {}
     }
   ]
 }

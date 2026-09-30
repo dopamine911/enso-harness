@@ -1,5 +1,6 @@
 import { Settings2Icon } from 'lucide-react'
 import { useState } from 'react'
+import type { FetchLike } from './browser-logging.ts'
 import { Button } from './components/ui/button.tsx'
 import {
   Dialog,
@@ -19,6 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from './components/ui/select.tsx'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from './components/ui/tabs.tsx'
 import {
   applyFonts,
   FONT_ROLES,
@@ -30,13 +32,16 @@ import {
   readSavedFonts,
   saveFonts,
 } from './fonts.ts'
+import { PermissionsSection, usePermissionPolicy } from './permissions-settings.tsx'
 import { applyTheme, isThemeId, pageStorage, readSavedTheme, saveTheme, THEME_FAMILIES, type ThemeId } from './theme.ts'
 
 /**
- * The page's settings (the header's gear): its colour theme, and a font per role (#407). A choice
- * applies at once and is kept in this browser (`theme.ts`, `fonts.ts`). Each option draws itself —
- * a theme's swatch wears `data-theme`, so its colours are that theme's variables, and a font's
- * name is set in that font — so nothing here restates a value the page already holds.
+ * The page's settings (the header's gear), in two tabs. Appearance: its colour theme, and a font per
+ * role (#407) — a choice applies at once and is kept in this browser (`theme.ts`, `fonts.ts`). Each
+ * option draws itself — a theme's swatch wears `data-theme`, so its colours are that theme's
+ * variables, and a font's name is set in that font — so nothing here restates a value the page
+ * already holds. Permissions (#474): the rules pi runs under, saved on the server
+ * (`permissions-settings.tsx`); its draft is held here, so closing the dialog keeps it.
  */
 
 /** A theme in its own colours: its background, then its primary and three of its chart colours. */
@@ -91,7 +96,7 @@ function FontField({
   )
 }
 
-export function SettingsDialog(): React.ReactNode {
+function AppearanceFields(): React.ReactNode {
   const [theme, setTheme] = useState<ThemeId>(() => readSavedTheme(pageStorage()))
   const [fonts, setFonts] = useState<FontSettings>(() => readSavedFonts(pageStorage()))
   const chooseFont = (role: FontRole, value: string): void => {
@@ -108,47 +113,77 @@ export function SettingsDialog(): React.ReactNode {
     saveTheme(value, pageStorage())
   }
   return (
-    <Dialog>
+    <FieldGroup>
+      <Field>
+        <FieldLabel htmlFor="settings-theme">Theme</FieldLabel>
+        <Select value={theme} onValueChange={choose}>
+          <SelectTrigger id="settings-theme" className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {THEME_FAMILIES.map(({ family, themes }) => (
+              <SelectGroup key={family}>
+                <SelectLabel>{family}</SelectLabel>
+                {themes.map((option) => (
+                  <SelectItem key={option.id} value={option.id}>
+                    <ThemeSwatch theme={option.id} />
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            ))}
+          </SelectContent>
+        </Select>
+        <FieldDescription>applies at once, to every thread on this page</FieldDescription>
+      </Field>
+      {FONT_ROLES.map(({ role, label }) => (
+        <FontField key={role} role={role} label={label} fonts={fonts} onChoose={chooseFont} />
+      ))}
+      <FieldDescription>
+        a role set to the theme's font follows the theme; any other choice keeps its font on every theme
+      </FieldDescription>
+    </FieldGroup>
+  )
+}
+
+export function SettingsDialog({
+  threadId,
+  fetch,
+}: {
+  threadId: string | undefined
+  fetch?: FetchLike
+}): React.ReactNode {
+  const [open, setOpen] = useState(false)
+  const permissions = usePermissionPolicy(open, fetch)
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="ghost" size="icon-sm" aria-label="settings" title="settings — the colour theme and fonts">
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label="settings"
+          title="settings — the colour theme, fonts and permissions"
+        >
           <Settings2Icon />
         </Button>
       </DialogTrigger>
-      <DialogContent>
+      <DialogContent className="flex max-h-5/6 flex-col sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>Settings</DialogTitle>
-          <DialogDescription>kept in this browser</DialogDescription>
+          <DialogDescription>appearance is kept in this browser; permissions are saved on the server</DialogDescription>
         </DialogHeader>
-        <FieldGroup>
-          <Field>
-            <FieldLabel htmlFor="settings-theme">Theme</FieldLabel>
-            <Select value={theme} onValueChange={choose}>
-              <SelectTrigger id="settings-theme" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {THEME_FAMILIES.map(({ family, themes }) => (
-                  <SelectGroup key={family}>
-                    <SelectLabel>{family}</SelectLabel>
-                    {themes.map((option) => (
-                      <SelectItem key={option.id} value={option.id}>
-                        <ThemeSwatch theme={option.id} />
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                ))}
-              </SelectContent>
-            </Select>
-            <FieldDescription>applies at once, to every thread on this page</FieldDescription>
-          </Field>
-          {FONT_ROLES.map(({ role, label }) => (
-            <FontField key={role} role={role} label={label} fonts={fonts} onChoose={chooseFont} />
-          ))}
-          <FieldDescription>
-            a role set to the theme's font follows the theme; any other choice keeps its font on every theme
-          </FieldDescription>
-        </FieldGroup>
+        <Tabs defaultValue="appearance" className="min-h-0 flex-1">
+          <TabsList>
+            <TabsTrigger value="appearance">Appearance</TabsTrigger>
+            <TabsTrigger value="permissions">Permissions</TabsTrigger>
+          </TabsList>
+          <TabsContent value="appearance" className="max-w-sm">
+            <AppearanceFields />
+          </TabsContent>
+          <TabsContent value="permissions" className="min-h-0 overflow-y-auto pr-1">
+            <PermissionsSection editor={permissions} threadId={threadId} fetch={fetch} />
+          </TabsContent>
+        </Tabs>
       </DialogContent>
     </Dialog>
   )

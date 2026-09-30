@@ -24,6 +24,9 @@ import {
   type EnsoSystemPromptMode,
   type EnsoSystemPromptPreview,
   type EnsoThreadEvent,
+  decisionAction,
+  effectiveRows,
+  type EnsoPermissionMap,
   modeAgentName,
   readEnsoRunContext,
   threadTrustsProject,
@@ -659,6 +662,54 @@ test("the engine reports Enso's catch-all as `**` and a user's surface-wide rule
   expect(await matchedPattern(ENSO_DEFAULT_PERMISSION_POLICY)).toBe('**')
   expect(await matchedPattern({ permission: { bash: 'ask' } })).toBe('*')
   expect(await matchedPattern({ permission: { bash: { '*': 'ask' } } })).toBe('*')
+})
+
+// ⚠ Settings shows each mode's rules from `effectiveRows` (#474), a MODEL of the engine's merge —
+// so it is pinned to the engine here: in every mode, every verdict the engine gives names a rule
+// the model shows on that surface, with the decision the engine applied and the right owner (a
+// preset's rule is `agent` to the engine, `mode` to the page). A merge the model gets wrong — a
+// preset replacing a surface, a shorthand expanded in the wrong order — fails by mode and value.
+test("⚠ Settings' model of every mode is the engine's: each verdict names a rule the model shows, with its decision and owner (#474)", async () => {
+  const permission: EnsoPermissionMap = {
+    ...(ENSO_DEFAULT_PERMISSION_POLICY.permission as EnsoPermissionMap),
+    bash: {
+      ...(ENSO_DEFAULT_PERMISSION_POLICY.permission.bash as Record<string, string>),
+      'rm -rf *': 'deny',
+      'git push *': 'ask',
+    },
+  }
+  const hosted = await hostedUnder({ ...ENSO_DEFAULT_PERMISSION_POLICY, permission })
+  const samples: readonly (readonly [string, string])[] = [
+    ['bash', 'git status'],
+    ['bash', 'rm -rf build'],
+    ['bash', 'git push origin main'],
+    ['bash', 'npm test'],
+    ['edit', 'src/a.ts'],
+    ['write', 'src/a.ts'],
+    ['read', 'src/a.ts'],
+    ['path_read', 'src/a.ts'],
+    ['path_write', 'src/a.ts'],
+  ]
+  for (const mode of ['bypassPermissions', 'acceptEdits', 'auto', 'plan', 'default'] as const) {
+    await switchMode(hosted, mode)
+    const rows = effectiveRows(permission, mode)
+    for (const [surface, value] of samples) {
+      const verdict = hosted.checkPermission({ surface, value })
+      const row = rows.find(
+        (candidate) => candidate.surface === surface && candidate.pattern === verdict?.matchedPattern,
+      )
+      expect({ mode, surface, value, verdict }).toEqual({
+        mode,
+        surface,
+        value,
+        verdict: expect.objectContaining({
+          mode,
+          state: row === undefined ? 'a rule the model does not show' : decisionAction(row.decision),
+          origin: row?.owner === 'mode' ? 'agent' : 'global',
+        }),
+      })
+    }
+  }
 })
 
 // L3 step C's MECHANISM, at the host and against the real extension (#162, #496):

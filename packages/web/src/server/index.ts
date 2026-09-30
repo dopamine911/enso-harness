@@ -8,6 +8,10 @@ import {
   ENSO_PROJECT_HEADER,
   ENSO_PROMPT_BODY_MAX_BYTES,
   ENSO_PROMPT_MAX_IMAGES,
+  EnsoPermissionCheckRequest,
+  type EnsoPermissionPolicyRead,
+  type EnsoPermissionPolicyReset,
+  EnsoPermissionPolicyWrite,
   EnsoProjectRegistration,
   type EnsoProjectsConfig,
   type EnsoStoredThread,
@@ -48,6 +52,7 @@ import {
 import { MAX_LOG_BODY_BYTES, receiveBrowserLogs } from './logs-route.ts'
 import { createLogStatsRoute } from './logs-stats-route.ts'
 import { followLogTail, type LogTailRouteDeps } from './logs-tail-route.ts'
+import { readPermissionPolicy, resetPermissionPolicy, writePermissionPolicy } from './permission-policy.ts'
 import { createProjectRegistry, ProjectUnavailable } from './projects.ts'
 import {
   createPromptLibrary,
@@ -111,6 +116,11 @@ const THREAD_COMMAND_ROUTE = threadRoute('command')
 /** `POST …/configure` (#391): a new session's model, effort and mode, applied together — the Start-a-session dialog. */
 const THREAD_CONFIGURE_ROUTE = threadRoute('configure')
 /**
+ * `POST …/permissions/check` (#474): the permission engine's verdict for `{ surface, value }` in the
+ * thread's mode now — Settings' "Try a command". Builds the thread on ask, as a preview does.
+ */
+const THREAD_PERMISSION_CHECK_ROUTE = threadRoute('permissions/check')
+/**
  * `GET …/system-prompt[?prompt=<id>]` (#443): the system prompt the thread's next request would carry
  * with a library prompt — pi's default without one — section by section. Builds the thread on ask.
  * The one query parameter is part of the pattern on purpose: its id is the library's own shape
@@ -155,6 +165,8 @@ const DEFAULT_PORT = 5179
 const LOOPBACK_ONLY = '127.0.0.1'
 /** A dialog answer is an id and a short value — kilobytes, not megabytes. */
 const MAX_DIALOG_BODY_BYTES = 64 * 1024
+/** A permission policy is a hand-sized JSON file; a megabyte is far past any real one (#474). */
+const MAX_POLICY_BODY_BYTES = 1024 * 1024
 /** A library prompt is a system prompt at most — a few hundred kilobytes is already most of a context window. */
 const MAX_PROMPT_BODY_BYTES = 512 * 1024
 
@@ -281,36 +293,41 @@ function refuseWith(response: ServerResponse, outcome: { readonly status: number
 /** A strong entity tag as the library quotes one: a file's sha256, hex. */
 const PROMPT_ETAG = /^"[0-9a-f]{64}"$/
 
-/** Why a library write or delete does not say what it expects: the one line `refuseWith` sends. */
-const MISSING_PRECONDITION: Readonly<Record<'write' | 'delete', string>> = {
-  write:
-    'a prompt write states what it expects on disk: `If-None-Match: *` to create, `If-Match: <ETag>` to replace the version it read, `If-Match: *` to replace whatever is there',
-  delete: 'a prompt delete states the version it removes: `If-Match: <ETag>`, or `If-Match: *` for whatever is there',
+/** What a conditional write names in its refusals: a library prompt (#443), or the permission policy (#474). */
+type WriteSubject = 'prompt' | 'permission policy'
+
+/** Why a write or delete does not say what it expects: the one line `refuseWith` sends. */
+function missingPrecondition(what: 'write' | 'delete', subject: WriteSubject): string {
+  return what === 'write'
+    ? `a ${subject} write states what it expects on disk: \`If-None-Match: *\` to create, \`If-Match: <ETag>\` to replace the version it read, \`If-Match: *\` to replace whatever is there`
+    : `a ${subject} delete states the version it removes: \`If-Match: <ETag>\`, or \`If-Match: *\` for whatever is there`
 }
 
 /**
- * The precondition a library write or delete states (#443): `If-None-Match: *` (create — no file
- * there), `If-Match: "<etag>"` (the version a read answered), `If-Match: *` (whatever is there). ⚠
- * NONE IS A 428, never an unconditional write: without it a stale page or a script overwrites a
- * prompt it never read, a refused one included. Both headers, a list, or a weak tag are a 400.
+ * The precondition a library write or delete states (#443) — and a permission-policy save (#474):
+ * `If-None-Match: *` (create — no file there), `If-Match: "<etag>"` (the version a read answered),
+ * `If-Match: *` (whatever is there). ⚠ NONE IS A 428, never an unconditional write: without it a
+ * stale page or a script overwrites a file it never read, a refused one included. Both headers, a
+ * list, or a weak tag are a 400.
  */
 function writeConditionOf(
   request: IncomingMessage,
   what: 'write' | 'delete',
+  subject: WriteSubject,
 ): WriteCondition | { readonly status: 400 | 428; readonly reason: string } {
   const none = request.headers['if-none-match']?.trim()
   const match = request.headers['if-match']?.trim()
   if (none !== undefined && match !== undefined) {
-    return { status: 400, reason: 'a prompt request takes `If-None-Match` or `If-Match`, not both' }
+    return { status: 400, reason: `a ${subject} request takes \`If-None-Match\` or \`If-Match\`, not both` }
   }
   if (none !== undefined) {
     return none === '*' ? { kind: 'absent' } : { status: 400, reason: '`If-None-Match` takes only `*`: create' }
   }
-  if (match === undefined) return { status: 428, reason: MISSING_PRECONDITION[what] }
+  if (match === undefined) return { status: 428, reason: missingPrecondition(what, subject) }
   if (match === '*') return { kind: 'present' }
   return PROMPT_ETAG.test(match)
     ? { kind: 'matches', etag: match }
-    : { status: 400, reason: '`If-Match` takes `*` or the one ETag a read of this prompt answered' }
+    : { status: 400, reason: `\`If-Match\` takes \`*\` or the one ETag a read of this ${subject} answered` }
 }
 
 /** A body that carries a prompt's text — a library write or a draft — under the prompt cap. */
@@ -964,6 +981,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     { method: 'POST', route: THREAD_COMMAND_ROUTE, respond: respondToHostCommand },
     { method: 'POST', route: THREAD_CONFIGURE_ROUTE, respond: respondToConfigure },
     { method: 'POST', route: THREAD_SYSTEM_PROMPT_DRAFT_ROUTE, respond: respondWithDraftPreview },
+    { method: 'POST', route: THREAD_PERMISSION_CHECK_ROUTE, respond: respondToPermissionCheck },
     { method: 'POST', route: THREAD_FORK_ROUTE, respond: respondToFork },
     { method: 'POST', route: THREAD_CONTINUE_ROUTE, respond: idOnly(respondToContinue) },
     { method: 'POST', route: THREAD_ABORT_ROUTE, respond: idOnly(respondToAbort) },
@@ -1359,7 +1377,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> {
-    const condition = writeConditionOf(request, 'write')
+    const condition = writeConditionOf(request, 'write', 'prompt')
     if ('status' in condition) {
       endAndClose(request, response, condition.status, condition.reason)
       return
@@ -1410,7 +1428,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     request: IncomingMessage,
     response: ServerResponse,
   ): void {
-    const condition = writeConditionOf(request, 'delete')
+    const condition = writeConditionOf(request, 'delete', 'prompt')
     if ('status' in condition) {
       endAndClose(request, response, condition.status, condition.reason)
       return
@@ -1448,6 +1466,134 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
       response,
     )
     return true
+  }
+
+  /**
+   * `POST /api/threads/:id/permissions/check` (#474): what the thread's permission engine decides
+   * for a value on a surface, in the thread's mode now. Asked of the REAL engine the session runs
+   * (`HostedThread.checkPermission`), never a second matcher in the page. 409 when the engine has
+   * published no service for the session.
+   */
+  async function respondToPermissionCheck(
+    threadId: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> {
+    const check = await readJsonBody(request, response, {
+      maxBytes: MAX_DIALOG_BODY_BYTES,
+      capText: `a permission check is at most ${MAX_DIALOG_BODY_BYTES} bytes`,
+      parse: (raw: string) =>
+        readClosedBody(raw, EnsoPermissionCheckRequest, 'permission check', 'a check needs a `surface` and a `value`'),
+    })
+    if (check === undefined) return
+    const thread = await threads.ensure(threadId)
+    const verdict = thread.hosted.checkPermission(check)
+    if (verdict === undefined) {
+      refuseWith(response, {
+        status: 409,
+        reason: `thread ${threadId} has no permission engine loaded: nothing there decides a call`,
+      })
+      return
+    }
+    answerJson(response, verdict)
+  }
+
+  /** A policy read answered with its `ETag` when there is a file to name one. */
+  function answerPolicy(response: ServerResponse, read: EnsoPermissionPolicyRead): void {
+    response.writeHead(200, {
+      'Content-Type': 'application/json',
+      ...(read.etag === undefined ? {} : { ETag: read.etag }),
+    })
+    response.end(JSON.stringify(read))
+  }
+
+  /**
+   * `PUT /api/permissions` (#474): the whole file a page sent, under its `If-Match`; normalised,
+   * validated against the engine's schema and written atomically (`permission-policy.ts`). 412 when
+   * the file changed since the page read it; 422 with each problem when the engine would not run it.
+   */
+  async function respondToPolicyWrite(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    const condition = writeConditionOf(request, 'write', 'permission policy')
+    if ('status' in condition) {
+      endAndClose(request, response, condition.status, condition.reason)
+      return
+    }
+    const body = await readJsonBody(request, response, {
+      maxBytes: MAX_POLICY_BODY_BYTES,
+      capText: `a permission policy is at most ${MAX_POLICY_BODY_BYTES} bytes`,
+      parse: (raw: string) =>
+        readClosedBody(
+          raw,
+          EnsoPermissionPolicyWrite,
+          'permission policy',
+          'a save carries `{ file }`, the whole file',
+        ),
+    })
+    if (body === undefined) return
+    const written = writePermissionPolicy(options.permissionRulesPath, options.agentDir, body.file, condition)
+    if (written.kind === 'conflict') {
+      log.warn('permission policy not saved: {reason}', { reason: written.reason })
+      refuseWith(response, { status: 412, reason: written.reason })
+      return
+    }
+    if (written.kind === 'refused') {
+      log.warn('permission policy not saved: {reason}', { reason: written.refusal.reason })
+      response.writeHead(422, { 'Content-Type': 'application/json' })
+      response.end(JSON.stringify(written.refusal))
+      return
+    }
+    log.info('permission policy saved to {path}', { path: options.permissionRulesPath })
+    answerPolicy(response, written.read)
+  }
+
+  /** `POST /api/permissions/reset` (#474): Enso's default in force, the file it replaced kept beside it. */
+  function respondToPolicyReset(request: IncomingMessage, response: ServerResponse): void {
+    const condition = writeConditionOf(request, 'write', 'permission policy')
+    if ('status' in condition) {
+      endAndClose(request, response, condition.status, condition.reason)
+      return
+    }
+    const reset = resetPermissionPolicy(options.permissionRulesPath, options.agentDir, condition)
+    if (reset.kind === 'conflict') {
+      refuseWith(response, { status: 412, reason: reset.reason })
+      return
+    }
+    log.info('permission policy reset to Enso’s; the previous file is {backup}', { backup: reset.backup ?? 'none' })
+    const answer: EnsoPermissionPolicyReset = {
+      ...(reset.backup === undefined ? {} : { backup: reset.backup }),
+      policy: reset.read,
+    }
+    response.writeHead(200, {
+      'Content-Type': 'application/json',
+      ...(reset.read.etag === undefined ? {} : { ETag: reset.read.etag }),
+    })
+    response.end(JSON.stringify(answer))
+  }
+
+  /** True when the request was a permission-policy route (#474). */
+  function dispatchPermissionRoute(request: IncomingMessage, response: ServerResponse): boolean {
+    const url = request.url ?? ''
+    if (request.method === 'GET' && url === '/api/permissions') {
+      answerOrFail(
+        Promise.resolve().then(() =>
+          answerPolicy(response, readPermissionPolicy(options.permissionRulesPath, options.agentDir)),
+        ),
+        response,
+      )
+      return true
+    }
+    if (request.method === 'PUT' && url === '/api/permissions') {
+      answerOrFail(respondToPolicyWrite(request, response), response)
+      return true
+    }
+    if (request.method === 'POST' && url === '/api/permissions/reset') {
+      answerOrFail(
+        Promise.resolve().then(() => respondToPolicyReset(request, response)),
+        response,
+      )
+      return true
+    }
+    return false
   }
 
   /** True when the request was a prompt-library route (#443). */
@@ -1586,6 +1732,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     if (dispatchLiteralRoute(request, response)) return
     if (dispatchProjectRoute(request, response)) return
     if (dispatchPromptRoute(request, response)) return
+    if (dispatchPermissionRoute(request, response)) return
     if (dispatchThreadRoute(request, response)) return
     response.writeHead(404, { 'Content-Type': 'text/plain' })
     response.end('not found')

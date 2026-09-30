@@ -48,15 +48,16 @@ if (ROLE_COUNT === undefined)
 const [FIRST_ROLE = ''] = ROLE_LABELS
 const DIALOG: MarkTarget = { role: 'dialog', name: 'Settings' }
 
-/** Settings (#407): the look of the page, from the header of the demo thread. */
+/** Settings (#407): the look of the page, and (#474) the permission rules pi runs under. */
 export const SETTINGS: FeatureSpec = {
   id: 'settings',
   title: 'Settings',
-  landingTagline: 'themes · fonts',
+  landingTagline: 'themes · fonts · permissions',
   shows: [
-    `The look of the page: a colour theme, and a font for each of ${ROLE_COUNT} roles. ${DEFAULT.label} is the default theme, and the others include ${listed(OTHER_FAMILIES)}, in dark and light variants.`,
+    `**Appearance**: the look of the page, a colour theme and a font for each of ${ROLE_COUNT} roles. ${DEFAULT.label} is the default theme, and the others include ${listed(OTHER_FAMILIES)}, in dark and light variants.`,
+    "**Permissions**: the rules pi runs under, from `ENSO_HOME/permissions.json` in the permission engine's own format, in the order the engine reads them. You can view them as written or as each mode runs them, change a rule's pattern or decision, move or remove it, add rules and drafted groups of rules, save, and reset to Enso's policy. **Try a command** asks the open thread's engine what it would decide.",
   ],
-  opens: ['{steps}, the sliders icon at the right of the header.'],
+  opens: ['{steps}, the sliders icon at the right of the header. **Permissions** is the second tab.'],
   shots: [
     {
       image: 'settings',
@@ -77,7 +78,7 @@ export const SETTINGS: FeatureSpec = {
         },
         {
           target: { text: 'kept in this browser', within: DIALOG },
-          says: '**{shown}**: settings are saved in this browser only.',
+          says: '**{shown}**: the appearance is saved in this browser only.',
         },
       ],
       measure: {
@@ -85,15 +86,50 @@ export const SETTINGS: FeatureSpec = {
         themeFont: (page) => page.getByRole('dialog', { name: 'Settings' }).getByLabel(FIRST_ROLE, { exact: true }),
       },
     },
+    {
+      image: 'settings-permissions',
+      alt: 'The Permissions tab of Settings',
+      go: async (ui) => {
+        await ui.openThread()
+        await ui.click({ role: 'button', name: 'settings' })
+        await ui.click({ role: 'tab', name: 'Permissions', within: DIALOG })
+        await ui.page.getByRole('dialog', { name: 'Settings' }).getByText('Show', { exact: true }).waitFor()
+      },
+      marks: [
+        {
+          target: { text: 'This section is saved on the server', within: DIALOG },
+          says: 'Where the rules are: the one file the engine reads, saved on the server. A save names the version it read, so a change made by hand while the page was open is never overwritten unseen; the page offers **Reload from disk** or **Overwrite with mine**.',
+        },
+        {
+          target: { role: 'button', name: 'Save', exact: true, within: DIALOG },
+          says: '**{shown}** writes the whole file. A policy the engine would not run as written is refused before it is written, each problem named at its place: the engine runs a file it cannot read as an EMPTY policy, every deny gone.',
+        },
+        {
+          target: { text: 'Show', exact: true, within: DIALOG },
+          says: '**{shown}**: the rules as written, which you edit, or as one of the modes runs them, with the rules that mode put there marked **from** it.',
+        },
+        {
+          target: { text: 'yours — holds in every mode', within: DIALOG },
+          says: "Who a rule belongs to. **{shown}**: a rule of yours, which no mode changes. Enso's `**` rule on a surface is marked **Enso's catch-all — a mode may change this**: its decision can be edited, but it cannot be moved or removed, and every rule of yours comes after it.",
+        },
+      ],
+      after: [
+        "Below the rules: **Add a rule**, three **Drafted rules** groups (publishing, remote writes, and secrets on the path gate) that add only the rules not already in force, **Reset to Enso's policy…**, which shows what it would change before it asks and keeps the replaced file as `permissions.json.bak`, and **Try a command**.",
+        'A banner says when `yoloMode` is on, since it makes every ask an allow. When the review log is on, the page names where it is written.',
+      ],
+    },
   ],
   lookFor: [
     'Pick the code font with the tool rows in mind. Commands, paths, tool input and output, and the debug drawer all use it, so it is the font you read most of a run in.',
     "A font is loaded the first time something uses it. Choosing a font you haven't used yet can take a moment to show.",
+    "A saved rule is in force at a running thread's next tool call, with no restart. The settings beside the rules, such as `yoloMode`, are read when a prompt starts.",
+    "A rule a run needs to keep is safer as **deny** than as **ask**: bypassPermissions makes Enso's asks allows, but not a deny of yours.",
   ],
   limits: [
-    'Settings are not stored on the server or in `ENSO_HOME`. Another browser, or a private window, starts from the default.',
-    'They change only how the page looks. Nothing here changes what pi does.',
-    "The terminal is not affected. It uses pi's own theme.",
+    'Appearance is not stored on the server or in `ENSO_HOME`. Another browser, or a private window, starts from the default.',
+    "Permissions shows only your file. A project's own policy, which the engine reads only for a trusted project, is not shown or edited here.",
+    '**Try a command** answers for the policy as saved. It asks the open thread, in its current mode, and says so when no engine has loaded there, rather than guessing.',
+    "The terminal is not affected by Appearance. It uses pi's own theme. It does run under the same permission rules.",
   ],
   see: [
     {

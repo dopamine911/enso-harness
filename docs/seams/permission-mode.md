@@ -539,6 +539,20 @@ a mode nothing enforces. A print run has Enso's guards only.
 alone. `permission-mode-adapter.test.ts` pins the walk below the seam, and the extension's tests pin
 the link against fakes of the engine's service.
 
+**Edited by Settings (#474).** The Permissions tab reads and writes the policy file through the
+server (`packages/web/src/server/permission-policy.ts`, routes in `docs/reference/routes.md`). A save
+names the version it read (`If-Match`, as a prompt write does), gets Enso's `**` put first where a
+mode needs it (`withCatchAllFirst`, the launch's own normalisation), is checked against the engine's
+own schema in the host (`host/permission-policy.ts#policyProblems`) and refused with each problem's
+place if the engine would not run it, then is written to a temporary file and renamed over, with its
+modification time moved past the last one, so every running session reloads it at its next call.
+Reset copies the file to the first free `permissions.json.bak[.N]` first. The per-mode view is a
+MODEL of the engine's merge in core (`core/src/permission-policy.ts#effectiveRows`: the shorthand expansion,
+then the preset merged key by key), pinned to the engine in every mode by `agent-host.test.ts`.
+**Try a command** is not modelled: it asks the thread's own engine
+(`HostedThread.checkPermission` → the engine's `getPermissionsService(sessionId).checkPermission`,
+with the mode's agent name).
+
 ## Known gaps
 
 Stated plainly; none is hidden by a mode.
@@ -550,12 +564,21 @@ Stated plainly; none is hidden by a mode.
 - **`bypassPermissions` still asks for wrappers and unparseable commands.** The engine floors a
   command run through `bash -c`, `sudo`, `eval` or `xargs`, and one its parser cannot read, to `ask`,
   whatever the rules say.
-- **A file broken mid-session reads as an empty policy.** The engine reads a file it cannot parse as
-  no policy at all: every call asks, and the deny rules are gone until the file is fixed. The launch
-  refuses an unreadable file; nothing can refuse one broken while a session runs.
-- **Enso's catch-all is put first at launch only.** A map added or rewritten without `**` while a
-  session runs is read by the engine at once, but it only gets the catch-all at the next launch.
-  Until then a mode's preset lands after that map's rules and beats them (#499).
+- **A file broken by hand mid-session reads as an empty policy.** The engine reads a file it cannot
+  parse as no policy at all: every call asks, and the deny rules are gone until the file is fixed.
+  The launch refuses an unreadable file, and Settings refuses to save one; nothing refuses one broken
+  by hand while a session runs.
+- **Enso's catch-all is put first at launch and on a Settings save only.** A map added or rewritten
+  by hand without `**` while a session runs is read by the engine at once, but it only gets the
+  catch-all at the next launch or save. Until then a mode's preset lands after that map's rules and
+  beats them (#499).
+- **The settings beside the rules reload per prompt, the rules per call.** The engine re-reads
+  `yoloMode`, the review log and the other knobs at session start and at each prompt, but the
+  `permission` block whenever the file's modification time changes. A saved `yoloMode` is in force
+  from a running thread's next prompt, and Try a command answers as the engine does until then.
+- **A hand edit in the same clock tick as the engine's last read can go unseen.** The engine keys its
+  reload on the modification time alone, which Linux stamps from a coarse clock. A Settings save
+  moves it past the last one; an editor does not, so such an edit is picked up at the next change.
 - **In the terminal, a project with only `.pi/agents/` is trusted unasked.** The engine layers a
   project's `.pi/extensions/pi-permission-system/config.json` and its `.pi/agents/*.md` over the user's
   policy only when the project is trusted. The web host decides that itself and strictly (#502): an
@@ -584,12 +607,19 @@ entry and its agent-file frontmatter, and `@enso/core/permission-rules` writes i
 its config path, because both launch surfaces (the host and `scripts/enso.ts`) prepare the files
 before the engine loads, and core is what they share.
 
+**The engine's merge, modelled in `@enso/core`** (#474). `permission-policy.ts` re-states how the
+engine expands `path` / `external_directory` and merges a mode's preset, so Settings can show every
+mode without a session in each. It is a second copy of engine behaviour, held to the first by
+`agent-host.test.ts` in all five modes; a verdict for a given value is never modelled.
+
 ## Pivot cost
 
 **Replace the engine** and the files that change are `packages/core/src/permission-modes.ts` (how a mode is
 recorded and what a preset looks like), `@enso/core/permission-rules` (the policy format, the seed and
 where the engine reads it), the permission-modes extension (the commands' entry and the `auto` link),
 and the manifest line in `packages/harness/package.json` with `scripts/print-harness.ts`'s filter.
+Settings' part is `@enso/core`'s `permission-policy.ts` (the modelled merge), and the host's schema
+check and `checkPermission`.
 The host's adapter and `agent-host.ts` read through core and do not change unless the new engine
 records a mode some other way. Nothing above the host changes: `EnsoFollowSnapshot`, the inspection,
 the summary, the router, the store's fold and both server cold paths hold `{ mode, available }`, and

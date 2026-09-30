@@ -371,6 +371,8 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
     emittedEvents: emitted.recent,
     // The fake loads no extensions: every probe is the hook's silence.
     probeToolCall: async (): Promise<undefined> => undefined,
+    // …and no permission engine publishes a service for it.
+    checkPermission: (): undefined => undefined,
     branchStats: () => options.branch ?? FAKE_EMPTY_BRANCH,
     // The eval reads the transcript the inspection holds and the branch's turns (#441).
     branchEval: () => ({
