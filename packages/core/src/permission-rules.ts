@@ -356,8 +356,13 @@ function catchAllSurfaces(permission: Readonly<Record<string, unknown>>): string
  *   still covering everything after it (a surface-wide rule the user wrote, which `auto` leaves
  *   to the user, #498);
  * - a map that already has it, anywhere, is left as the user ordered it.
+ *
+ * Exported for Settings' save (#474): a policy the page writes gets the same normalisation a
+ * launch gives a hand-edited one, so a mode can never override a rule written there.
+ *
+ * @group Permission mode
  */
-function withCatchAllFirst(permission: Readonly<Record<string, unknown>>): {
+export function withCatchAllFirst(permission: Readonly<Record<string, unknown>>): {
   readonly permission: Readonly<Record<string, unknown>>
   readonly added: readonly string[]
 } {

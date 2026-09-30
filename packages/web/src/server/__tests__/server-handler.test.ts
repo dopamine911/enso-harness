@@ -25,6 +25,7 @@ import {
 } from '@enso/core'
 import { type FlowTrace, flowTrace } from '@enso/core/flow-trace'
 import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
+import { ENSO_DEFAULT_PERMISSION_POLICY } from '@enso/core/permission-rules'
 import type { LogRecorder } from '@logtape/testing/recorder'
 import { Check } from 'typebox/value'
 import {
@@ -197,9 +198,18 @@ async function startWith(
   wrapHost: (host: AgentHost) => AgentHost = (host: AgentHost) => host,
   /**
    * Where a page may register projects (#395) — none, so only the launch directory, when absent —
-   * and the prompt library's directory (#443) — absent, the server has none.
+   * the prompt library's directory (#443) — absent, the server has none — and the permission
+   * policy file (#474), a shared path no test reads when absent.
    */
-  { projectRoots = [], promptsDir }: { readonly projectRoots?: readonly string[]; readonly promptsDir?: string } = {},
+  {
+    projectRoots = [],
+    promptsDir,
+    permissionRulesPath = join(tmpdir(), 'enso-unread-permissions.json'),
+  }: {
+    readonly projectRoots?: readonly string[]
+    readonly promptsDir?: string
+    readonly permissionRulesPath?: string
+  } = {},
 ): Promise<{ url: string; built: FakeThreadRecord[]; requested: string[]; builtIn: string[] }> {
   // The fake is made before the server, whose projects' rule it must apply — bound when the server asks.
   let servesDirectory: (directory: string) => boolean = () => false
@@ -212,7 +222,7 @@ async function startWith(
     ...(promptsDir === undefined ? {} : { promptsDir }),
     harnessPackageDir: emptyHarnessDir(),
     agentDir: mkdtempSync(join(tmpdir(), 'enso-handler-agent-')),
-    permissionRulesPath: join(tmpdir(), 'enso-unread-permissions.json'),
+    permissionRulesPath,
     logsDir: mkdtempSync(join(tmpdir(), 'enso-logs-')),
     port: 0,
     host: (serverRule: (directory: string) => boolean) => {
@@ -1770,4 +1780,66 @@ test('⚠ POST …/system-prompt previews an unsaved draft as a saved prompt is 
     400,
   )
   expect((await send(url, '/api/threads/t-draft/system-prompt', 'POST', { ...draft, text: '' })).status).toBe(400)
+})
+
+/** A server over its own policy file (#474), holding `text`. */
+async function policyServer(text: string): Promise<{ url: string; policyPath: string }> {
+  const policyPath = join(mkdtempSync(join(tmpdir(), 'enso-474-route-')), 'permissions.json')
+  writeFileSync(policyPath, text)
+  const { url } = await startWith(settlesAtOnce, {}, undefined, { permissionRulesPath: policyPath })
+  return { url, policyPath }
+}
+
+test('⚠ the permission policy over HTTP: read with its ETag, saved only under the version read, refused with each problem, normalised, and reset with a backup (#474)', async () => {
+  const original = `${JSON.stringify({ permission: { bash: { '**': 'ask', 'git status': 'allow' } } }, null, 2)}\n`
+  const { url, policyPath } = await policyServer(original)
+  const read = await send(url, '/api/permissions', 'GET')
+  const policy = JSON.parse(read.body)
+  expect(policy).toMatchObject({ kind: 'ok', path: policyPath, file: JSON.parse(original) })
+  expect(read.etag).toBe(policy.etag)
+
+  const save = (file: unknown, headers: Record<string, string>): Promise<Sent> =>
+    request(url, '/api/permissions', { method: 'PUT', body: { file }, headers })
+  const mine = { permission: { bash: { 'rm -rf *': 'deny' } } }
+  // No precondition is a 428, a stale one a 412, a typo a 422 naming its place — none writes.
+  expect((await save(mine, {})).status).toBe(428)
+  expect((await save(mine, { 'If-Match': `"${'0'.repeat(64)}"` })).status).toBe(412)
+  const refused = await save({ permission: { bash: { 'rm -rf *': 'dney' } } }, { 'If-Match': policy.etag })
+  expect(refused.status).toBe(422)
+  expect(JSON.parse(refused.body).problems).toEqual([{ at: '/permission/bash/rm -rf *', message: expect.any(String) }])
+  expect(readFileSync(policyPath, 'utf8')).toBe(original)
+
+  // A save lands with Enso's `**` first, as a launch puts it (#499), so no mode overrides the deny.
+  const saved = await save(mine, { 'If-Match': policy.etag })
+  expect(saved.status).toBe(200)
+  expect(Object.keys(JSON.parse(readFileSync(policyPath, 'utf8')).permission.bash)).toEqual(['**', 'rm -rf *'])
+  expect(saved.etag).toBe(JSON.parse(saved.body).etag)
+  expect(saved.etag).not.toBe(policy.etag)
+  const afterSave = readFileSync(policyPath, 'utf8')
+
+  expect(
+    (await request(url, '/api/permissions/reset', { method: 'POST', headers: { 'If-Match': policy.etag } })).status,
+  ).toBe(412)
+  const reset = await request(url, '/api/permissions/reset', {
+    method: 'POST',
+    headers: { 'If-Match': saved.etag ?? '' },
+  })
+  expect(reset.status).toBe(200)
+  const { backup, policy: now } = JSON.parse(reset.body)
+  expect(readFileSync(backup, 'utf8')).toBe(afterSave)
+  expect(now).toMatchObject({ kind: 'ok', file: ENSO_DEFAULT_PERMISSION_POLICY })
+
+  // A file the engine cannot parse is said to be one, never shown as an empty policy.
+  writeFileSync(policyPath, '{ "permission": ')
+  expect(JSON.parse((await send(url, '/api/permissions', 'GET')).body)).toMatchObject({
+    kind: 'unreadable',
+    reason: expect.any(String),
+  })
+})
+
+test('"Try a command" in a thread whose engine published no service is a 409, never a guess (#474)', async () => {
+  const { url } = await policyServer('{}')
+  const check = await send(url, '/api/threads/t-check/permissions/check', 'POST', { surface: 'bash', value: 'ls' })
+  expect(check.status).toBe(409)
+  expect((await send(url, '/api/threads/t-check/permissions/check', 'POST', { surface: 'bash' })).status).toBe(400)
 })

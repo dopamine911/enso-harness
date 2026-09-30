@@ -119,6 +119,17 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
     '200 `EnsoThreadCommands` JSON — `source` says live, remembered or none',
     '400 malformed thread id; 403 untrusted origin',
   ),
+  THREAD_PERMISSION_CHECK_ROUTE: {
+    method: 'POST',
+    handler: 'respondToPermissionCheck → HostedThread.checkPermission',
+    input: 'path: `threadId`; body: `EnsoPermissionCheckRequest` — a `surface` and a `value`',
+    success:
+      "200 `EnsoPermissionVerdict` JSON (#474) — the permission engine's own verdict in the thread's mode now: its decision, the pattern that won and where that rule came from (`global`, the user's file; `agent`, the mode's preset); nothing runs",
+    errors: `${BODY_ERRORS}; 409 the engine published no service for the session; 413 body too large; 500 handler failure`,
+    routeClass: 'observation',
+    builds: 'yes',
+    logs: 'no',
+  },
   THREAD_STATS_ROUTE: threadRead(
     'respondWithThreadStats',
     "200 `EnsoThreadStats` JSON — pi's session for the numbers, the log's day files for the times",
@@ -328,6 +339,35 @@ const LITERAL_ROUTE_METADATA: Record<string, Omit<RouteMetadata, 'method' | 'pat
       "200 `EnsoLibraryPromptListing` JSON — the library's prompts by name without their bodies, each with its bytes and estimated tokens, and every `.md` file it refused, with the reason naming it",
     errors: '403 untrusted origin; 404 a server started without a library; 500 handler failure',
   }),
+  'GET /api/permissions': literalRead({
+    handler: 'answerPolicy → readPermissionPolicy',
+    success:
+      "200 `EnsoPermissionPolicyRead` JSON (#474) — `ok` with the whole file as written, or `unreadable` with why (missing, not JSON, not an object: the engine runs such a file as an EMPTY policy); both with its path, the engine's review-log directory and Enso's default policy, and an `ETag` header (the sha256 of the file's bytes) when there is a file",
+    errors: '403 untrusted origin; 500 handler failure',
+  }),
+  'PUT /api/permissions': {
+    handler: 'respondToPolicyWrite → writePermissionPolicy',
+    input:
+      'headers: exactly one precondition — `If-Match: <ETag>` (the version read), `If-Match: *` (whatever is there) or `If-None-Match: *` (no file); body: `EnsoPermissionPolicyWrite` — `{ file }`, the whole file',
+    success:
+      "200 `EnsoPermissionPolicyRead` JSON with its new `ETag` — the file as written: Enso's `**` put first where a mode needs it (#499), validated against the engine's own schema, written to a temporary file and renamed over, its modification time moved so every running session reloads it at its next call",
+    errors:
+      '400 malformed body, or both headers, a list, or a weak tag; 403 untrusted origin; 412 the file changed on disk since it was read; 413 body too large; 422 `EnsoPermissionPolicyRefusal` JSON — the engine would not run it, each problem at its place; nothing written; 428 no precondition; 500 handler failure',
+    routeClass: 'control',
+    builds: 'no',
+    logs: 'yes',
+  },
+  'POST /api/permissions/reset': {
+    handler: 'respondToPolicyReset → resetPermissionPolicy',
+    input: 'header: `If-Match: <ETag>` or `If-Match: *`, or `If-None-Match: *` when there is no file; no body',
+    success:
+      "200 `EnsoPermissionPolicyReset` JSON — Enso's default policy in force, and `backup`, the replaced file's copy at the first free `permissions.json.bak[.N]` (absent when there was no file)",
+    errors:
+      '400 both headers, a list, or a weak tag; 403 untrusted origin; 412 the file changed on disk since it was read; 428 no precondition; 500 handler failure',
+    routeClass: 'control',
+    builds: 'no',
+    logs: 'yes',
+  },
   'GET /api/projects': literalRead({
     handler: 'respondWithProjects',
     success: '200 `EnsoProject[]` JSON — the launch project first, then the registered ones',
@@ -440,7 +480,7 @@ export function discoverRoutes(): ResolvedRoute[] {
   // pattern built around the library's prompt id (`promptRoute()`, `new RegExp(`), whose metadata states its path.
   const regexRoutes: DetectedRoute[] = [
     ...server.matchAll(
-      /^const ([A-Z][A-Z_]*_ROUTE) = (?:\/.*\/|threadRoute\('([a-z-]+)'\)|promptRoute\(\)|new RegExp\()$/gm,
+      /^const ([A-Z][A-Z_]*_ROUTE) = (?:\/.*\/|threadRoute\('([a-z/-]+)'\)|promptRoute\(\)|new RegExp\()$/gm,
     ),
   ].map((match) => {
     const key = match[1] ?? ''
@@ -468,8 +508,8 @@ export function discoverRoutes(): ResolvedRoute[] {
   )
 
   const literalRoutes: DetectedRoute[] = []
-  for (const match of server.matchAll(/request\.method === '(GET|POST)' && url === '([^']+)'/g)) {
-    const method = match[1] as 'GET' | 'POST'
+  for (const match of server.matchAll(/request\.method === '(GET|POST|PUT)' && url === '([^']+)'/g)) {
+    const method = match[1] as 'GET' | 'POST' | 'PUT'
     const path = match[2] ?? ''
     literalRoutes.push({ key: `${method} ${path}`, method, path, line: lineAt(server, match.index), kind: 'literal' })
   }

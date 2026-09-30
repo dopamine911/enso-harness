@@ -87,8 +87,8 @@ export const ENSO_CATCH_ALL = '**'
 
 const MODE_AGENT_PREFIX = 'enso-mode-'
 
-/** A surface's rule: one action for everything, or a map from pattern to action. */
-type SurfaceRule = string | Readonly<Record<string, string>>
+/** A surface's rule: one action for everything, or a map from pattern to action — the engine's three. */
+type SurfaceRule = 'allow' | 'ask' | 'deny' | Readonly<Record<string, 'allow' | 'ask' | 'deny'>>
 
 /** What a mode changes, over the user's policy. */
 interface ModePreset {

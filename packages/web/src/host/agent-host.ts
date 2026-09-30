@@ -23,7 +23,9 @@ import {
   type EnsoObservation,
   type EnsoLoginInProgress,
   type EnsoOpenDialog,
+  type EnsoPermissionCheckRequest,
   type EnsoPermissionModeState,
+  type EnsoPermissionVerdict,
   type EnsoPromptAdmission,
   type EnsoRecordedModel,
   type EnsoSessionUsage,
@@ -35,8 +37,10 @@ import {
   type HostFlowOutcome,
   type PromptOutcome,
   type PromptRequest,
+  modeAgentName,
   type RuntimeCommand,
   readRecordedMode,
+  recordedPermissionMode,
   recordedSystemPrompt,
   THREAD_PROJECT_TRUST,
   type ThreadRuntime,
@@ -44,6 +48,7 @@ import {
 import { ensoHome, ensoSecretsPath, findRepoRoot } from '@enso/core/paths'
 import { describePermissionPolicy, preparePermissionPolicy } from '@enso/core/permission-rules'
 import { quarantineSecrets } from '@enso/core/secrets'
+import { getPermissionsService } from '@gotgenes/pi-permission-system'
 import { type BranchContext, type BranchRequestDetail, branchContext, branchRequestDetail } from './branch-context.ts'
 import { type BranchEval, branchEval } from './branch-eval.ts'
 import { type BranchStats, branchStats } from './branch-stats.ts'
@@ -405,6 +410,13 @@ export interface HostedThread {
    * Runs no tool: a pass here is the hook's silence, not an execution.
    */
   probeToolCall(toolName: string, input: Record<string, unknown>): Promise<ToolCallVerdict | undefined>
+  /**
+   * The permission engine's own verdict for a value on a surface, in this thread's mode NOW (#474):
+   * what a call carrying it would meet, the pattern that decided it and where that rule came from
+   * (`global`, the user's file; `agent`, the mode's preset). Asked of the engine the session runs —
+   * never a second matcher. `undefined` when the engine has published no service for the session.
+   */
+  checkPermission(request: EnsoPermissionCheckRequest): EnsoPermissionVerdict | undefined
 }
 
 /** A refusal from the `tool_call` hook, as the runtime's runner returns it — nothing when every handler passed. */
@@ -1643,6 +1655,19 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         })
         if (result === undefined) return undefined
         return { block: result.block === true, reason: result.reason }
+      },
+      checkPermission(request: EnsoPermissionCheckRequest): EnsoPermissionVerdict | undefined {
+        const service = getPermissionsService(sessionManager.getSessionId())
+        if (service === undefined) return undefined
+        const mode = recordedPermissionMode(sessionManager.getEntries())
+        const result = service.checkPermission(request.surface, request.value, modeAgentName(mode))
+        return {
+          mode,
+          state: result.state,
+          origin: result.origin,
+          ...(result.matchedPattern === undefined ? {} : { matchedPattern: result.matchedPattern }),
+          ...(result.reason === undefined ? {} : { reason: result.reason }),
+        }
       },
       branchStats: () => branchStats(sessionManager.getBranch()),
       branchEval: () => branchEval(sessionManager.getBranch()),

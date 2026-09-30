@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, expect, setSystemTime, test } from 'bun:test'
 import { createHash } from 'node:crypto'
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -24,7 +24,11 @@ import {
   type EnsoSystemPromptMode,
   type EnsoSystemPromptPreview,
   type EnsoThreadEvent,
+  decisionAction,
+  effectiveRows,
+  type EnsoPermissionMap,
   modeAgentName,
+  withRule,
   readEnsoRunContext,
   threadTrustsProject,
 } from '@enso/core'
@@ -45,6 +49,7 @@ import {
 } from '../agent-host.ts'
 import { LOST_TOOL_RESULT_TEXT, NOTHING_TO_CONTINUE } from '../continuation.ts'
 import { storedPermissionModeState } from '../permission-mode-adapter.ts'
+import { readPermissionPolicy, resetPermissionPolicy, writePermissionPolicy } from '../permission-policy-file.ts'
 import { recordedModelOf } from '../transcript.ts'
 import { writeStoredSession } from './stored-session.ts'
 
@@ -659,6 +664,164 @@ test("the engine reports Enso's catch-all as `**` and a user's surface-wide rule
   expect(await matchedPattern(ENSO_DEFAULT_PERMISSION_POLICY)).toBe('**')
   expect(await matchedPattern({ permission: { bash: 'ask' } })).toBe('*')
   expect(await matchedPattern({ permission: { bash: { '*': 'ask' } } })).toBe('*')
+})
+
+// ⚠ Settings shows each mode's rules from `effectiveRows` (#474), a MODEL of the engine's merge —
+// so it is pinned to the engine here: in every mode, every verdict the engine gives names a rule
+// the model shows on that surface, with the decision the engine applied and the right owner (a
+// preset's rule is `agent` to the engine, `mode` to the page). A merge the model gets wrong — a
+// preset replacing a surface, a shorthand expanded in the wrong order — fails by mode and value.
+test("⚠ Settings' model of every mode is the engine's: each verdict names a rule the model shows, with its decision and owner (#474)", async () => {
+  const permission: EnsoPermissionMap = {
+    ...(ENSO_DEFAULT_PERMISSION_POLICY.permission as EnsoPermissionMap),
+    bash: {
+      ...(ENSO_DEFAULT_PERMISSION_POLICY.permission.bash as Record<string, string>),
+      'rm -rf *': 'deny',
+      'git push *': 'ask',
+    },
+  }
+  const hosted = await hostedUnder({ ...ENSO_DEFAULT_PERMISSION_POLICY, permission })
+  const samples: readonly (readonly [string, string])[] = [
+    ['bash', 'git status'],
+    ['bash', 'rm -rf build'],
+    ['bash', 'git push origin main'],
+    ['bash', 'npm test'],
+    ['edit', 'src/a.ts'],
+    ['write', 'src/a.ts'],
+    ['read', 'src/a.ts'],
+    ['path_read', 'src/a.ts'],
+    ['path_write', 'src/a.ts'],
+  ]
+  for (const mode of ['bypassPermissions', 'acceptEdits', 'auto', 'plan', 'default'] as const) {
+    await switchMode(hosted, mode)
+    const rows = effectiveRows(permission, mode)
+    for (const [surface, value] of samples) {
+      const verdict = hosted.checkPermission({ surface, value })
+      const row = rows.find(
+        (candidate) => candidate.surface === surface && candidate.pattern === verdict?.matchedPattern,
+      )
+      expect({ mode, surface, value, verdict }).toEqual({
+        mode,
+        surface,
+        value,
+        verdict: expect.objectContaining({
+          mode,
+          state: row === undefined ? 'a rule the model does not show' : decisionAction(row.decision),
+          origin: row?.owner === 'mode' ? 'agent' : 'global',
+        }),
+      })
+    }
+  }
+})
+
+// Settings' save (#474) against the REAL engine a session runs: what the page writes is what the
+// next call meets, in the session already running — and what the engine would not run is never
+// written. ⚠ Here, in this suite's process-wide agent dir, and not in a server test: the
+// multi-account extension keeps the agent dir of the first host a process builds, so a second
+// suite building real hosts under its own dir broke the isolation test above whenever it ran first.
+
+/** A running session over a fresh policy file (Enso's, seeded by the host), and that file's path. */
+async function runningUnderFreshPolicy(): Promise<{ hosted: HostedThread; policyPath: string }> {
+  const policyPath = join(mkdtempSync(join(tmpdir(), 'enso-474-rules-')), 'permissions.json')
+  const host = createAgentHost({
+    servesDirectory: servesRepoRoot,
+    agentDir,
+    permissionRulesPath: policyPath,
+    harnessPackageDir: harnessDir,
+  })
+  const hosted = await host.createSession(crypto.randomUUID(), () => repoRoot)
+  openSessions.push(hosted)
+  return { hosted, policyPath }
+}
+
+/** The policy as a page reads it — a test that gets `unreadable` has nothing to edit. */
+function readOk(policyPath: string): { file: Record<string, unknown>; etag: string } {
+  const read = readPermissionPolicy(policyPath, agentDir)
+  if (read.kind !== 'ok' || read.etag === undefined) throw new Error(`policy unreadable: ${JSON.stringify(read)}`)
+  return { file: read.file, etag: read.etag }
+}
+
+const PUBLISH = 'npm publish --tag enso-474'
+
+test('⚠ a saved deny is in force at the running session’s next call — no restart — and blocks it (#474)', async () => {
+  const { hosted, policyPath } = await runningUnderFreshPolicy()
+  expect(hosted.checkPermission({ surface: 'bash', value: PUBLISH })?.state).not.toBe('deny')
+
+  const { file, etag } = readOk(policyPath)
+  const permission = withRule(file.permission as EnsoPermissionMap, 'bash', PUBLISH, 'deny')
+  const written = writePermissionPolicy(policyPath, agentDir, { ...file, permission }, { kind: 'matches', etag })
+  expect(written.kind).toBe('written')
+
+  expect(hosted.checkPermission({ surface: 'bash', value: PUBLISH })).toMatchObject({
+    mode: 'default',
+    state: 'deny',
+    matchedPattern: PUBLISH,
+    origin: 'global',
+  })
+  expect((await hosted.probeToolCall('bash', { command: PUBLISH }))?.block).toBe(true)
+})
+
+// ⚠ The engine reads a file its schema rejects as an EMPTY policy — every deny gone. So a save it
+// would not run is refused whole, each problem at its place, and the file (and its denies) stay.
+test('⚠ a policy the engine would not run is refused with each problem’s place, and nothing is written (#474)', async () => {
+  const { hosted, policyPath } = await runningUnderFreshPolicy()
+  const { file, etag } = readOk(policyPath)
+  const denied = withRule(file.permission as EnsoPermissionMap, 'bash', PUBLISH, 'deny')
+  writePermissionPolicy(policyPath, agentDir, { ...file, permission: denied }, { kind: 'matches', etag })
+  const before = readFileSync(policyPath, 'utf8')
+  const current = readOk(policyPath)
+
+  const typo = { ...current.file, permission: { ...denied, bash: { ...(denied.bash as object), 'git *': 'alow' } } }
+  expect(writePermissionPolicy(policyPath, agentDir, typo, { kind: 'matches', etag: current.etag })).toEqual({
+    kind: 'refused',
+    refusal: {
+      reason: expect.stringContaining('nothing was saved'),
+      problems: [{ at: '/permission/bash/git *', message: expect.stringContaining('allow, ask, deny') }],
+    },
+  })
+  const unknownKey = { ...current.file, yolomode: true }
+  const refused = writePermissionPolicy(policyPath, agentDir, unknownKey, { kind: 'matches', etag: current.etag })
+  expect(refused.kind).toBe('refused')
+
+  expect(readFileSync(policyPath, 'utf8')).toBe(before)
+  expect(hosted.checkPermission({ surface: 'bash', value: PUBLISH })?.state).toBe('deny')
+})
+
+test('a save over a file changed since it was read is refused, and the change on disk is kept (#474)', async () => {
+  const { policyPath } = await runningUnderFreshPolicy()
+  const { file, etag } = readOk(policyPath)
+  const byHand = `${JSON.stringify({ ...file, permission: { bash: 'ask' } }, null, 2)}\n`
+  writeFileSync(policyPath, byHand)
+  const outcome = writePermissionPolicy(policyPath, agentDir, file, { kind: 'matches', etag })
+  expect(outcome).toEqual({ kind: 'conflict', reason: expect.stringContaining('changed on disk') })
+  expect(readFileSync(policyPath, 'utf8')).toBe(byHand)
+})
+
+test('a reset puts Enso’s policy in force and keeps every file it replaced, under a name of its own (#474)', async () => {
+  const { hosted, policyPath } = await runningUnderFreshPolicy()
+  const mine = `${JSON.stringify({ permission: { bash: { '**': 'ask', [PUBLISH]: 'deny' } } }, null, 2)}\n`
+  writeFileSync(policyPath, mine)
+  expect(hosted.checkPermission({ surface: 'bash', value: PUBLISH })?.state).toBe('deny')
+
+  const first = resetPermissionPolicy(policyPath, agentDir, { kind: 'present' })
+  if (first.kind !== 'reset') throw new Error(first.reason)
+  const firstBackup = `${realpathOrSelf(policyPath)}.bak`
+  expect(first.backup).toBe(firstBackup)
+  expect(readFileSync(firstBackup, 'utf8')).toBe(mine)
+  expect(JSON.parse(readFileSync(policyPath, 'utf8'))).toEqual(ENSO_DEFAULT_PERMISSION_POLICY)
+  expect(hosted.checkPermission({ surface: 'bash', value: PUBLISH })?.state).not.toBe('deny')
+
+  const second = resetPermissionPolicy(policyPath, agentDir, { kind: 'present' })
+  if (second.kind !== 'reset') throw new Error(second.reason)
+  expect(second.backup).toBe(`${realpathOrSelf(policyPath)}.bak.1`)
+  expect(readFileSync(firstBackup, 'utf8')).toBe(mine)
+
+  // With no file at all, a reset is a create: nothing to keep, and `*` — "whatever is there" — refused.
+  rmSync(policyPath)
+  expect(resetPermissionPolicy(policyPath, agentDir, { kind: 'present' }).kind).toBe('conflict')
+  const created = resetPermissionPolicy(policyPath, agentDir, { kind: 'absent' })
+  expect(created).toMatchObject({ kind: 'reset', read: { kind: 'ok', file: ENSO_DEFAULT_PERMISSION_POLICY } })
+  expect('backup' in created).toBe(false)
 })
 
 // L3 step C's MECHANISM, at the host and against the real extension (#162, #496):
