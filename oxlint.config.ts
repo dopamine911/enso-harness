@@ -153,8 +153,10 @@ export default defineConfig({
       // ours: the collection must be keyed `docs` for `docsLoader()`/`docsSchema()` to find it
       // (@astrojs/starlight 0.42.2, #188), and the file declares nothing else. Exempted as a
       // FILE rather than by adding `docs` to the contract keys, because that list is keyed on the
-      // NAME and would exempt the word everywhere.
-      files: ['**/*.test.ts', '**/*.test.tsx', 'site/src/content.config.ts'],
+      // NAME and would exempt the word everywhere. `site/astro.config.ts` likewise: every object in
+      // it is Astro's or Starlight's option bag, whose keys are fixed there (`logo.src`, a `head`
+      // entry's `attrs`, @astrojs/starlight 0.42.3).
+      files: ['**/*.test.ts', '**/*.test.tsx', 'site/src/content.config.ts', 'site/astro.config.ts'],
       rules: {
         'enso/abbreviated-binding': 'off',
         'enso/abbreviated-key': 'off',

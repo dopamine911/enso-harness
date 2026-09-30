@@ -1,0 +1,35 @@
+---
+/**
+ * Starlight's `Hero`, overridden (`astro.config.ts` → `components`). The landing page
+ * (`src/pages/index.astro`) is the only page with a hero; this renders hello-enso's: the eyebrow,
+ * the two-tone title, the lead, the actions and the product screenshot.
+ *
+ * The title and tagline come from the page's `hero` frontmatter, so the page's own data stays the
+ * one source for them; the rest of the markup is the landing's design.
+ */
+import heroShot from '../assets/landing/01b-hero-transcript-crop.png'
+import Shot from './Shot.astro'
+
+const hero = Astro.locals.starlightRoute.entry.data.hero
+const base = import.meta.env.BASE_URL.replace(/\/$/, '')
+const [lead, rest] = (hero?.title ?? '').split('|')
+---
+
+<div class="landing-hero">
+  <div>
+    <div class="eyebrow">An evidence-driven control plane for coding agents</div>
+    <h1>{lead}{rest && <span>{rest}</span>}</h1>
+    {hero?.tagline && <p class="lead">{hero.tagline}</p>}
+    <div class="hero-actions">
+      <a class="button primary" href="https://github.com/dopamine911/zen-harness-foundation">View Enso on GitHub</a>
+      <a class="button" href={`${base}/features/`}>Read the docs</a>
+    </div>
+    <p class="quiet">Trust the agent enough to let it work. Verify enough to understand what happened.</p>
+  </div>
+  <div class="hero-mark">
+    <Shot
+      image={heroShot}
+      alt="Enso transcript showing a developer asking for a regression test first and the agent beginning the investigation"
+    />
+  </div>
+</div>

@@ -19,7 +19,10 @@
     // Run directly: `bun scripts/enso-thread.ts`; not a package.json script.
     "scripts/enso-thread.ts",
     // Spawned by `test/docs-gate.test.ts` and run by hand: `bun scripts/docs/<name>.ts`.
-    "scripts/docs/*.ts"
+    "scripts/docs/*.ts",
+    // Named by path in `site/astro.config.ts` (Starlight's `customCss` and `components`).
+    "site/src/styles/theme.css",
+    "site/src/components/LandingHero.astro"
   ],
   "ignoreDependencies": [
     // Loaded by the runtime from the harness manifest (`pi.extensions`, `pi.themes`).
