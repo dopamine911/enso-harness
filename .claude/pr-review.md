@@ -4,7 +4,7 @@ These add to the review procedure in `.github/workflows/claude-pr-review.yml`. T
 
 ## Comments on changed code (#482)
 
-If `.claude/touched-comments.md` exists, `Read` it before writing the review. It lists every comment whose own lines this pull request changed, or where CODE changed in the declaration the comment documents. It was built from the diff and the TypeScript syntax tree (`scripts/docs/touched-comments.ts`), most likely stale first. Its line numbers are the pull request's own. The selection is already made; your job is the judgment.
+If `.review-context/touched-comments.md` exists, `Read` it before writing the review. It lists every comment whose own lines this pull request changed, or where CODE changed in the declaration the comment documents. It was built from the diff and the TypeScript syntax tree (`scripts/docs/touched-comments.ts`), most likely stale first. Its line numbers are the pull request's own. The selection is already made; your job is the judgment.
 
 For each quoted comment:
 
