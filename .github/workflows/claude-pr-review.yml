@@ -233,8 +233,13 @@ jobs:
                - **Tests** — coverage gaps for changed code; mocks must stub the full module surface
                - **Errors** — silent failures, broad catches, unjustified fallbacks
                - **Types** — type design and invariants if new types added
-               - **Comments** — accuracy vs code, comment rot
-            5. Security pass on changed lines: injection, auth bypass, secret leakage, OWASP top-10
+               - **Comments** — accuracy vs code, comment rot; for the listed ones, step 5
+            5. **Comments on changed code — required, not optional.** `Read`
+               `.review-context/touched-comments.md`: the list job's comments on code this pull
+               request changed, most at risk first. Check them as `.claude/pr-review.md` →
+               *Comments on changed code* says, and report each wrong one under Issues as
+               `Comment drift: <file>:<line>`. If the file does not exist, say so in Testing.
+            6. Security pass on changed lines: injection, auth bypass, secret leakage, OWASP top-10
 
             ## Output
 
@@ -259,6 +264,7 @@ jobs:
 
             ### Testing
             {what's covered, what's missing — specific test matrix if gaps exist}
+            Comment list: {checked N of M listed comments, and which you could not reach; or "Comment list not available"}
 
             ### Runtime Verification
             Not performed — this reviewer is read-only by design and cannot execute the project's gate.
