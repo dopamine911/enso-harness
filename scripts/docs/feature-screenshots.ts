@@ -618,7 +618,39 @@ async function attempt(
   await page.close()
 }
 
+/** The features `--only` names, in the registry's order; all of them without it. A name no spec has is refused. */
+function wantedFeatures(): readonly FeatureSpec[] {
+  const unknown = (ONLY ?? []).filter((requested) => !FEATURE_SPECS.some((spec) => spec.id === requested))
+  if (unknown.length > 0) throw new Error(`feature-screenshots: --only names no feature: ${unknown.join(', ')}`)
+  return FEATURE_SPECS.filter((spec) => ONLY === undefined || ONLY.includes(spec.id))
+}
+
+/** What the finished thread's shots run in: the browser, the thread, how to restart the stack, the failures so far. */
+interface FinishedThread {
+  readonly browser: Browser
+  readonly threadId: string
+  readonly restart: () => Promise<void>
+  readonly failed: string[]
+}
+
+/** Every wanted feature's shots of the finished thread: the live ones, then, after a restart, the cold ones. */
+async function captureFinishedThread(wanted: readonly FeatureSpec[], run: FinishedThread): Promise<void> {
+  const { browser, threadId, failed } = run
+  for (const spec of wanted) {
+    await attempt(browser, spec.id, (page) => captureFeature(page, spec, threadId, false), failed)
+  }
+  const cold = wanted.filter((spec) => spec.shots.some((shot) => 'go' in shot && shot.cold === true))
+  if (cold.length === 0) return
+  // A cold thread is one no session holds: restart the stack, and the thread is read off its file.
+  await run.restart()
+  for (const spec of cold) {
+    await attempt(browser, `${spec.id} (cold)`, (page) => captureFeature(page, spec, threadId, true), failed)
+  }
+}
+
 async function main(): Promise<void> {
+  // Before anything starts: a mistyped `--only` should not cost a session.
+  const wanted = wantedFeatures()
   const chromiumFlag = process.argv.indexOf('--chromium')
   const executablePath = chromiumFlag >= 0 ? process.argv[chromiumFlag + 1] : undefined
   for (const port of PORTS) {
@@ -676,22 +708,12 @@ async function main(): Promise<void> {
     )
     if (threadId === '')
       throw new Error(`feature-screenshots: the session did not finish (model log: ${modelLog})\n${failed.join('\n')}`)
-    const wanted = FEATURE_SPECS.filter((spec) => ONLY === undefined || ONLY.includes(spec.id))
-    const unknown = (ONLY ?? []).filter((requested) => !FEATURE_SPECS.some((spec) => spec.id === requested))
-    if (unknown.length > 0) throw new Error(`feature-screenshots: --only names no feature: ${unknown.join(', ')}`)
-    for (const spec of wanted) {
-      await attempt(browser, spec.id, (page) => captureFeature(page, spec, threadId, false), failed)
-    }
-
-    const cold = wanted.filter((spec) => spec.shots.some((shot) => 'go' in shot && shot.cold === true))
-    if (cold.length > 0) {
-      // A cold thread is one no session holds: restart the stack, and the thread is read off its file.
+    const restart = async (): Promise<void> => {
       await stopStack(stack)
       stack = startStack(home, project)
       await waitFor(async () => (await isListening(5178)) && (await isListening(5179)), 'the dev stack, again')
-      for (const spec of cold)
-        await attempt(browser, `${spec.id} (cold)`, (page) => captureFeature(page, spec, threadId, true), failed)
     }
+    await captureFinishedThread(wanted, { browser, threadId, restart, failed })
     if (failed.length > 0) throw new Error(`feature-screenshots: ${failed.length} failed\n${failed.join('\n')}`)
   } finally {
     await browser?.close()

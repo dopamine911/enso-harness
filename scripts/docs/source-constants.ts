@@ -84,35 +84,48 @@ function numberOperand(value: LiteralValue): number | undefined {
   return typeof value === 'number' ? value : undefined
 }
 
-/** A literal's value, `undefined` when the expression is not one this reads. */
-function literalValue(expression: typescript.Expression, evaluate: Evaluate): LiteralValue | undefined {
+const KEYWORD_VALUES: ReadonlyMap<typescript.SyntaxKind, boolean | null> = new Map([
+  [typescript.SyntaxKind.TrueKeyword, true],
+  [typescript.SyntaxKind.FalseKeyword, false],
+  [typescript.SyntaxKind.NullKeyword, null],
+])
+
+/** A string, a number, `true`, `false` or `null`; `undefined` for anything else. */
+function scalarValue(expression: typescript.Expression): LiteralValue | undefined {
   if (typescript.isStringLiteral(expression) || typescript.isNoSubstitutionTemplateLiteral(expression))
     return expression.text
   if (typescript.isNumericLiteral(expression)) return Number(expression.text.replaceAll('_', ''))
-  if (expression.kind === typescript.SyntaxKind.TrueKeyword) return true
-  if (expression.kind === typescript.SyntaxKind.FalseKeyword) return false
-  if (expression.kind === typescript.SyntaxKind.NullKeyword) return null
-  if (typescript.isArrayLiteralExpression(expression)) {
-    if (expression.elements.some(typescript.isSpreadElement)) return undefined
-    return expression.elements.map(evaluate)
+  return KEYWORD_VALUES.get(expression.kind)
+}
+
+/** `-x` or `x op y` over numbers; `undefined` when an operand is not one or the operator is not arithmetic. */
+function arithmeticValue(expression: typescript.Expression, evaluate: Evaluate): number | undefined {
+  if (typescript.isPrefixUnaryExpression(expression) && expression.operator === typescript.SyntaxKind.MinusToken) {
+    const operand = numberOperand(evaluate(expression.operand))
+    return operand === undefined ? undefined : -operand
   }
+  if (!typescript.isBinaryExpression(expression)) return undefined
+  const operation = ARITHMETIC[expression.operatorToken.kind]
+  const left = numberOperand(evaluate(expression.left))
+  const right = numberOperand(evaluate(expression.right))
+  return operation === undefined || left === undefined || right === undefined ? undefined : operation(left, right)
+}
+
+/** `new Set([…])`, read as its array. */
+function setValue(expression: typescript.Expression, evaluate: Evaluate): LiteralValue | undefined {
+  if (!typescript.isNewExpression(expression) || expression.expression.getText() !== 'Set') return undefined
+  const [argument] = expression.arguments ?? []
+  return argument === undefined ? undefined : evaluate(argument)
+}
+
+/** A literal's value, `undefined` when the expression is not one this reads. */
+function literalValue(expression: typescript.Expression, evaluate: Evaluate): LiteralValue | undefined {
+  if (typescript.isArrayLiteralExpression(expression))
+    return expression.elements.some(typescript.isSpreadElement) ? undefined : expression.elements.map(evaluate)
   if (typescript.isObjectLiteralExpression(expression)) return objectValue(expression, evaluate)
-  if (
-    typescript.isPrefixUnaryExpression(expression) &&
-    expression.operator === typescript.SyntaxKind.MinusToken &&
-    typeof evaluate(expression.operand) === 'number'
-  )
-    return -(evaluate(expression.operand) as number)
-  if (typescript.isBinaryExpression(expression)) {
-    const operation = ARITHMETIC[expression.operatorToken.kind]
-    const left = numberOperand(evaluate(expression.left))
-    const right = numberOperand(evaluate(expression.right))
-    return operation === undefined || left === undefined || right === undefined ? undefined : operation(left, right)
-  }
-  const [argument] = typescript.isNewExpression(expression) ? (expression.arguments ?? []) : []
-  if (typescript.isNewExpression(expression) && expression.expression.getText() === 'Set' && argument !== undefined)
-    return evaluate(argument)
-  return undefined
+  const scalar = scalarValue(expression)
+  if (scalar !== undefined) return scalar
+  return arithmeticValue(expression, evaluate) ?? setValue(expression, evaluate)
 }
 
 /** The value of the top-level constant `name` in `source`; `path` names the file in a refusal. */
