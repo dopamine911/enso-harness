@@ -2,13 +2,13 @@
 
 **Give agents room to work. Keep the receipts.**
 
-**Enso is an evidence-driven control plane for coding agents.** Built around
-[pi](https://github.com/earendil-works/pi), it makes the system behind an agent's work visible: what it
-knew, what it did, what changed, what was refused, and what evidence remains afterward.
+**Enso is where you debug and tune the system around a coding agent.** Built around
+[pi](https://github.com/earendil-works/pi), it shows what the agent knew, what it did, what changed,
+what was refused, and what evidence remains — and lets you change the conditions and try again.
 
 New here? Read this page, then [the architecture](docs/architecture.md). Everything else is linked
 from those two, and the whole set is browsable at
-**[the docs site](https://dopamine911.github.io/zen-harness-foundation/)**.
+**[the docs site](https://www.enso.engineer/)**.
 
 ---
 
