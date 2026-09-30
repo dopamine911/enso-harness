@@ -1,0 +1,27 @@
+{
+  "feature": "chat",
+  "shots": [
+    {
+      "image": "chat-thread",
+      "steps": ["open a thread from the rail"],
+      "shown": [
+        "Where does the app read its database URL? Check .env too.",
+        "Thought",
+        "bash grep -rn DATABASE_URL src",
+        "fork from here",
+        "attach an image",
+        "thread status"
+      ],
+      "measured": {
+        "refused": "2 refused",
+        "failed": "1 failed"
+      }
+    },
+    {
+      "image": "chat-command-palette",
+      "steps": ["open a thread from the rail", "choose **commands**"],
+      "shown": ["filter commands…"],
+      "measured": {}
+    }
+  ]
+}
