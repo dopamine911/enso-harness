@@ -196,6 +196,8 @@ the one input.
 | inspect current gate/ratchet/double inventory | read [`reference/verification-inventory.md`](./reference/verification-inventory.md) |
 
 A command proves exactly what it runs. The full gate does not exercise Playwright or a live provider:
-CI runs the model-free Playwright tier as its own job (`e2e`, #486), and nothing runs the live
+CI runs neither. The model-free Playwright tier runs by hand, `bun run e2e`, before merging a change to
+the browser surface (it left CI with #501: a Chromium job on every PR cost more than it caught), and
+nothing runs the live
 provider. A Playwright run does not prove the TUI; a generated page does not prove its prose. State the receipt
 at that granularity.

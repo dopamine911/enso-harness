@@ -3,8 +3,8 @@
  *
  * Not part of `bun test`: it drives the real dev surface — the bun fullstack server on 5178
  * proxying `/api` to the enso server on 5179 — in Chromium. `bun run e2e` runs the model-free
- * tier, in CI on every pull request (`.github/workflows/ci.yml`, job `e2e`); `bun run e2e:model`
- * adds one real model turn, by hand. See README.md in this directory.
+ * tier, by hand (CI stopped running it with #501); `bun run e2e:model` adds one real model turn,
+ * by hand too. See README.md in this directory.
  *
  * ⚠ `*.e2e.ts`, NOT `*.test.ts` / `*.spec.ts`: bun's test runner matches both of those
  * globs everywhere in the tree, and it would try to execute a Playwright spec as a unit
