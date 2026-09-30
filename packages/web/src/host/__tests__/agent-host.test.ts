@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, expect, setSystemTime, test } from 'bun:test'
 import { createHash } from 'node:crypto'
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -11,6 +11,7 @@ import {
   type ExtensionCommandContext,
   type InlineExtension,
   type SessionEntry,
+  ProjectTrustStore,
   SessionManager,
 } from '@earendil-works/pi-coding-agent'
 import {
@@ -25,6 +26,7 @@ import {
   type EnsoThreadEvent,
   modeAgentName,
   readEnsoRunContext,
+  threadTrustsProject,
 } from '@enso/core'
 import { flowTrace } from '@enso/core/flow-trace'
 import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
@@ -64,7 +66,17 @@ import { writeStoredSession } from './stored-session.ts'
 
 const repoRoot = findRepoRoot(import.meta.url)
 const harnessDir = harnessPackageDir(repoRoot)
-const agentDir = mkdtempSync(join(tmpdir(), 'enso-host-agent-'))
+/**
+ * A scratch agent dir that trusts the repository, as the operator's own `trust.json` does (#502):
+ * the repository has a `.pi/` (its `settings.json`), so undecided, every run here would wait on the
+ * trust question. The tests of trust itself use projects of their own.
+ */
+function scratchAgentDir(prefix: string): string {
+  const directory = mkdtempSync(join(tmpdir(), prefix))
+  new ProjectTrustStore(directory).set(repoRoot, true)
+  return directory
+}
+const agentDir = scratchAgentDir('enso-host-agent-')
 /** Where these hosts keep the permission policy (#446): a scratch file, never the operator's `ENSO_HOME`. */
 const permissionRulesPath = join(mkdtempSync(join(tmpdir(), 'enso-host-rules-')), 'permissions.json')
 /** The one directory these hosts run sessions in (#395) — the server's projects, reduced to one. */
@@ -712,6 +724,167 @@ test('⚠ back to default after bypassPermissions, the engine asks again: the mo
   expect(hosted.runtime.openDialogs()).toHaveLength(1)
   await hosted.runtime.abort()
   expect((await verdict)?.block).toBe(true)
+})
+
+/** What the repository's `.pi/APPEND_SYSTEM.md` says: in a request only when trust loaded the project. */
+const PROJECT_APPEND_MARKER = 'enso-502-project-append-system'
+
+/**
+ * A "cloned repository" (#502) with the engine's project config switching prompts off, and a
+ * `.pi/APPEND_SYSTEM.md` — a resource pi binds only when a session loads, so it reaches the model
+ * only if a Trust reloaded the session before the run.
+ */
+function yoloRepository(): string {
+  const project = realpathOrSelf(mkdtempSync(join(tmpdir(), 'enso-502-repo-')))
+  const configDir = join(project, '.pi', 'extensions', 'pi-permission-system')
+  mkdirSync(configDir, { recursive: true })
+  writeFileSync(join(configDir, 'config.json'), JSON.stringify({ yoloMode: true }))
+  writeFileSync(join(project, '.pi', 'APPEND_SYSTEM.md'), `${PROJECT_APPEND_MARKER}\n`)
+  return project
+}
+
+/** A host over `project` whose faux model counts the requests it answers: a run that started is one. */
+function trustHost(project: string): { host: AgentHost; requests: unknown[] } {
+  const core = createFauxCore()
+  core.setResponses(Array.from({ length: 8 }, (_, index) => faux.fauxAssistantMessage(`reply ${index + 1}`)))
+  const requests: unknown[] = []
+  const counted: FauxCore = {
+    ...core,
+    streamSimple: (...call: Parameters<FauxCore['streamSimple']>) => {
+      requests.push(call[1])
+      return core.streamSimple(...call)
+    },
+  }
+  const host = createAgentHost({
+    servesDirectory: (directory) => realpathOrSelf(directory) === project,
+    agentDir,
+    permissionRulesPath,
+    harnessPackageDir: harnessDir,
+    extensionFactories: [fauxModelExtension(counted)],
+  })
+  return { host, requests }
+}
+
+async function openThread(host: AgentHost, project: string, threadId = crypto.randomUUID()): Promise<HostedThread> {
+  const hosted = await host.createSession(threadId, () => project)
+  openSessions.push(hosted)
+  return hosted
+}
+
+const isTrustQuestion = (event: EnsoObservation): boolean =>
+  event.kind === 'extension-ui-request' &&
+  event.dialog?.method === 'select' &&
+  event.dialog.title.startsWith('Trust the project ')
+
+/** Whether the engine asks before a `write` (a permission dialog the probe waits on) or answers at once. */
+async function writeAsks(hosted: HostedThread): Promise<boolean> {
+  const asked = untilObservation(
+    hosted,
+    (event) => event.kind === 'extension-ui-request' && event.blocking === true && !isTrustQuestion(event),
+  )
+  const verdict = hosted.probeToolCall('write', { path: 'enso-502-probe.txt', content: 'x' })
+  const first = await Promise.race([verdict.then(() => 'answered'), asked.then(() => 'asked')])
+  if (first === 'answered') return false
+  const dialog = await asked
+  hosted.runtime.answerDialog({ id: String((dialog as { id?: unknown }).id), cancelled: true })
+  expect((await verdict)?.block).toBe(true)
+  return true
+}
+
+/** Prompt, answer the trust question with `answer` once it is asked, and wait for the run to settle. */
+async function promptAnswering(hosted: HostedThread, requests: unknown[], answer: string): Promise<void> {
+  const question = untilObservation(hosted, isTrustQuestion)
+  const settled = runPrompt(hosted, 'hello')
+  const asked = await question
+  // The run waits on the question: nothing has reached the model yet.
+  expect(requests).toHaveLength(0)
+  hosted.runtime.answerDialog({ id: String((asked as { id?: unknown }).id), value: answer })
+  await settled
+}
+
+/** Whether the thread's STORED branch records "Trust this thread" — what a resume reads. */
+function storedThreadTrust(hosted: HostedThread): boolean {
+  const file = hosted.inspect().sessionFile
+  if (file === null) throw new Error('the thread has no stored session yet')
+  return threadTrustsProject(SessionManager.open(file).getBranch())
+}
+
+// ⚠ #502: the web host trusted every project, so a repository's own `.pi/` could switch permission
+// prompts off. Undecided is untrusted now, and the first run waits on the question: "Trust this
+// thread" records the trust on the thread and reloads the session BEFORE the run, so the repository's
+// policy applies to it; resuming the thread asks nothing, and a new thread in the project asks again.
+test('⚠ an undecided repository cannot switch prompts off; "Trust this thread" holds for the thread only (#502)', async () => {
+  const project = yoloRepository()
+  const { host, requests } = trustHost(project)
+  const threadId = crypto.randomUUID()
+  const hosted = await openThread(host, project, threadId)
+  expect(await writeAsks(hosted)).toBe(true)
+  await promptAnswering(hosted, requests, 'Trust this thread')
+  expect(requests).toHaveLength(1)
+  expect(JSON.stringify(requests)).toContain(PROJECT_APPEND_MARKER)
+  expect(await writeAsks(hosted)).toBe(false)
+  expect(storedThreadTrust(hosted)).toBe(true)
+  expect(new ProjectTrustStore(agentDir).get(project)).toBeNull()
+
+  hosted.runtime.dispose()
+  const resumed = await openThread(host, project, threadId)
+  expect(await writeAsks(resumed)).toBe(false)
+  await runPrompt(resumed, 'again')
+  expect(resumed.runtime.openDialogs()).toHaveLength(0)
+
+  const fresh = await openThread(host, project)
+  expect(await writeAsks(fresh)).toBe(true)
+  const asked = untilObservation(fresh, isTrustQuestion)
+  fresh.runtime.prompt({ message: 'new thread' }, { onAccepted: () => undefined, onRejected: () => undefined })
+  await asked
+  await fresh.runtime.abort()
+})
+
+test('"Trust project" is saved and never asked again; "Don\'t trust" runs untrusted, saves nothing, asks once (#502)', async () => {
+  const trusting = yoloRepository()
+  const first = trustHost(trusting)
+  await promptAnswering(await openThread(first.host, trusting), first.requests, 'Trust project')
+  expect(new ProjectTrustStore(agentDir).get(trusting)).toBe(true)
+  const next = await openThread(first.host, trusting)
+  expect(await writeAsks(next)).toBe(false)
+  await runPrompt(next, 'no question')
+
+  const declining = yoloRepository()
+  const second = trustHost(declining)
+  const hosted = await openThread(second.host, declining)
+  await promptAnswering(hosted, second.requests, "Don't trust")
+  expect(await writeAsks(hosted)).toBe(true)
+  await runPrompt(hosted, 'still untrusted, not asked again')
+  expect(second.requests).toHaveLength(2)
+  expect(JSON.stringify(second.requests)).not.toContain(PROJECT_APPEND_MARKER)
+  expect(new ProjectTrustStore(agentDir).get(declining)).toBeNull()
+  expect(storedThreadTrust(hosted)).toBe(false)
+})
+
+// Stop while the question is open: the waiting run must not start once it is answered later.
+test('Stop before the trust question is answered drops the waiting run, and the next run asks again (#502)', async () => {
+  const project = yoloRepository()
+  const { host, requests } = trustHost(project)
+  const hosted = await openThread(host, project)
+  const asked = untilObservation(hosted, isTrustQuestion)
+  const refused = Promise.withResolvers<string>()
+  hosted.runtime.prompt({ message: 'waits' }, { onAccepted: () => undefined, onRejected: refused.resolve })
+  await asked
+  await hosted.runtime.abort()
+  expect(await refused.promise).toContain('stopped before the project-trust question was answered')
+  await promptAnswering(hosted, requests, 'Trust this thread')
+  expect(requests).toHaveLength(1)
+})
+
+test('a trusted repository behaves as before: its policy applies from the start, and nothing is asked (#502)', async () => {
+  const project = yoloRepository()
+  new ProjectTrustStore(agentDir).set(project, true)
+  const { host, requests } = trustHost(project)
+  const hosted = await openThread(host, project)
+  expect(await writeAsks(hosted)).toBe(false)
+  await runPrompt(hosted, 'hello')
+  expect(requests).toHaveLength(1)
+  expect(hosted.runtime.openDialogs()).toHaveLength(0)
 })
 
 // ⚠ Found by this test's first run: the runtime treats an unknown slash command as ordinary
@@ -1656,7 +1829,7 @@ test('⚠ a provider refusal is on the feed: the failed attempt, pi’s retry, t
   ])
   // Its own agent dir: pi's retry waits `baseDelayMs` first, and one millisecond keeps the suite fast
   // without touching the settings the other tests share.
-  const retryAgentDir = mkdtempSync(join(tmpdir(), 'enso-host-retry-'))
+  const retryAgentDir = scratchAgentDir('enso-host-retry-')
   writeFileSync(join(retryAgentDir, 'settings.json'), JSON.stringify({ retry: { baseDelayMs: 1 } }))
   const host = createAgentHost({
     servesDirectory: servesRepoRoot,
@@ -1764,7 +1937,7 @@ test('⚠ a run that runs out of retries ends with pi giving up, and its last er
   const refused = (): ReturnType<typeof faux.fauxAssistantMessage> =>
     faux.fauxAssistantMessage('', { stopReason: 'error', errorMessage: RATE_LIMITED })
   core.setResponses([refused(), refused()])
-  const retryAgentDir = mkdtempSync(join(tmpdir(), 'enso-host-retry-'))
+  const retryAgentDir = scratchAgentDir('enso-host-retry-')
   writeFileSync(join(retryAgentDir, 'settings.json'), JSON.stringify({ retry: { baseDelayMs: 1, maxRetries: 1 } }))
   const host = createAgentHost({
     servesDirectory: servesRepoRoot,

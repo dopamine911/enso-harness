@@ -257,10 +257,14 @@ default — no project roots, nothing fetchable, the default search routing. For
 ```
 
 A project can add its own `.enso/config.json`, read over yours — its lists add to yours, its values
-win — but **only once you trust the project**, with pi's own trust decision: the first session in an
-undecided project asks (Trust, Trust parent folder, this session only, or not), the answer is saved
-in pi's `trust.json`, and the same answer covers the project's `.pi/`. An untrusted project's file is
-skipped, and the thread says so. `projects.roots` stays yours: a project cannot set it.
+win — but **only once you trust the project**. In the web, an undecided project that has its own
+configuration (`.pi/` settings, skills, prompts, permission rules or modes, or `.enso/config.json`)
+is asked about before your first message runs: **Trust project** saves the answer in pi's
+`trust.json`, so it is not asked again; **Trust this thread** records it on the thread, so resuming
+it stays trusted and a new thread asks again; **Don't trust** runs under your own configuration only.
+Until a project is trusted it is untrusted, and its own files — `.enso/config.json` and `.pi/`
+alike — are not loaded. In the terminal, pi asks its own question, and the same saved answer
+applies. `projects.roots` stays yours: a project cannot set it.
 
 Its loading contract is deliberately strict:
 

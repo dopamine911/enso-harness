@@ -35,6 +35,7 @@ import {
   type SearchModel,
   type SessionConfigContext,
   type SessionEnsoConfig,
+  sessionConfigEnvironment,
   sessionEnsoConfig,
   TAVILY_API_KEY_VARIABLE,
   type TavilySearchRequest,
@@ -80,7 +81,10 @@ export interface WebSearchDependencies {
   /** `undefined` when there is no file: the defaults. */
   readConfigText: (path: string) => string | undefined
   /** The SESSION's config at `session_start` (#421) — shared with web_fetch; see its seam. */
-  resolveSessionConfig: (session: object, context: Omit<SessionConfigContext, 'home'>) => Promise<SessionEnsoConfig>
+  resolveSessionConfig: (
+    session: object,
+    context: Omit<SessionConfigContext, 'home' | 'hostOwnsTrust'>,
+  ) => Promise<SessionEnsoConfig>
   /** Env reads happen HERE (composition root) — providers receive values, never names. */
   readEnvironmentVariable: (variableName: string) => string | undefined
   runProviders: {
@@ -509,7 +513,8 @@ function auditLine(outcome: string, providerId: WebSearchProviderId | undefined,
 export default createWebSearch({
   locateConfigFile: () => ensoConfigPath(ensoHome(process.env)),
   readConfigText: readTextIfPresent,
-  resolveSessionConfig: (session, context) => sessionEnsoConfig(session, { ...context, home: ensoHome(process.env) }),
+  resolveSessionConfig: (session, context) =>
+    sessionEnsoConfig(session, { ...context, ...sessionConfigEnvironment(process.env) }),
   // ⚠ From the gated `ENSO_HOME/secrets.env` FILE, never `process.env` (#89): the host
   // quarantines every secret out of the environment before a session exists, precisely so
   // a `bash` child cannot print it. Extension code is trusted to read the file the model's

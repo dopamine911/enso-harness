@@ -9,9 +9,14 @@ import {
   recordedPermissionMode,
 } from '@enso/core'
 import { type GitRunner, runGit } from '@enso/core/git'
-import { ensoHome, readTextIfPresent } from '@enso/core/paths'
+import { readTextIfPresent } from '@enso/core/paths'
 import { permissionEngineConfigPath } from '@enso/core/permission-rules'
-import { type SessionConfigContext, type SessionEnsoConfig, sessionEnsoConfig } from '../../core/index.ts'
+import {
+  type SessionConfigContext,
+  type SessionEnsoConfig,
+  sessionConfigEnvironment,
+  sessionEnsoConfig,
+} from '../../core/index.ts'
 
 /**
  * The run-context recorder (#435, Lineage #126): at every prompt's run start, what the run starts
@@ -53,8 +58,11 @@ import { type SessionConfigContext, type SessionEnsoConfig, sessionEnsoConfig } 
  */
 
 export interface RunContextDependencies {
-  /** The session's config — the one resolution per session (`session-config.ts`). */
-  resolveSessionConfig: (session: object, context: Omit<SessionConfigContext, 'home'>) => Promise<SessionEnsoConfig>
+  /** The session's config — one resolution per session and trust answer (`session-config.ts`). */
+  resolveSessionConfig: (
+    session: object,
+    context: Omit<SessionConfigContext, 'home' | 'hostOwnsTrust'>,
+  ) => Promise<SessionEnsoConfig>
   /** Run git in `cwd` — never in a repository an inherited environment names. */
   runGit: GitRunner
   /** The permission policy's text as the engine reads it; `undefined` when there is none. */
@@ -163,7 +171,8 @@ export function createRunContext(dependencies: RunContextDependencies): (pi: Ext
  * the environment at the run, not at load.
  */
 export default createRunContext({
-  resolveSessionConfig: (session, context) => sessionEnsoConfig(session, { ...context, home: ensoHome(process.env) }),
+  resolveSessionConfig: (session, context) =>
+    sessionEnsoConfig(session, { ...context, ...sessionConfigEnvironment(process.env) }),
   runGit,
   readPermissionPolicy: () => {
     const agentDir = process.env.PI_CODING_AGENT_DIR

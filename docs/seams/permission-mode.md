@@ -556,12 +556,13 @@ Stated plainly; none is hidden by a mode.
 - **Enso's catch-all is put first at launch only.** A map added or rewritten without `**` while a
   session runs is read by the engine at once, but it only gets the catch-all at the next launch.
   Until then a mode's preset lands after that map's rules and beats them (#499).
-- **A project can loosen the policy.** The engine layers a project's
-  `.pi/extensions/pi-permission-system/config.json` and its `.pi/agents/*.md` over the user's policy
-  when pi counts the project as trusted, and the web host builds its sessions with pi's default,
-  which trusts every project; the terminal follows pi's own trust decision. A repository can
-  therefore allow what `permissions.json` asks for, or redefine an `enso-mode-*` agent. This is not
-  new: picc read `<cwd>/.pi/permissions.json` the same way.
+- **In the terminal, a project with only `.pi/agents/` is trusted unasked.** The engine layers a
+  project's `.pi/extensions/pi-permission-system/config.json` and its `.pi/agents/*.md` over the user's
+  policy only when the project is trusted. The web host decides that itself and strictly (#502): an
+  undecided project is untrusted, and asked about before its first run. The terminal follows pi's own
+  decision, which counts a project with none of pi's trust-gated files (`.pi/settings.json`,
+  `extensions`, `skills`, …) as trusted without asking — and `.pi/agents/` is not on that list, so
+  such a repository can redefine an `enso-mode-*` agent there (#510).
 
 ## What fences it
 

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { ensoAgentDir, findRepoRoot } from '@enso/core/paths'
+import { ensoAgentDir, findRepoRoot, realpathOrSelf } from '@enso/core/paths'
 import { demoModelsJson } from '../../../scripts/docs/feature-session.ts'
 import { writeStoredSession } from '../src/host/__tests__/stored-session.ts'
 
@@ -82,6 +82,9 @@ function seededHome(): E2eHome {
   // The writer files a session where pi would: under the agent dir this names (stored-session.ts).
   process.env.PI_CODING_AGENT_DIR = agentDir
   const project = findRepoRoot(import.meta.url)
+  // The checkout has a `.pi/` (#502): undecided, every prompt would wait on the trust question.
+  // Trusted, as the operator's own `trust.json` has it — pi's file, keyed by the real path.
+  writeFileSync(join(agentDir, 'trust.json'), JSON.stringify({ [realpathOrSelf(project)]: true }, null, 2))
   // With no `projects.roots` declared, the launch folder is the only project; this folder is none.
   const elsewhere = join(home, 'elsewhere')
   mkdirSync(elsewhere)
