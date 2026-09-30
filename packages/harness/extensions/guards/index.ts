@@ -11,13 +11,28 @@ import {
   DEFAULT_GUARD_POLICY,
   ENSO_GUARD_DENIAL_ENTRY,
   ENSO_LOG_EVENTS,
+  ENSO_PERMISSION_DENIAL_ENTRY,
+  ENSO_PERMISSION_DENIAL_RESOLUTIONS,
+  ENSO_SECURITY_SIGNAL_ENTRY,
+  ENSO_SESSION_RISK_ENTRY,
   type EnsoGuardDenial,
   type EnsoGuardRule,
+  type EnsoPermissionDenial,
+  type EnsoPermissionDenialResolution,
+  type EnsoRiskEvent,
+  type EnsoRiskState,
+  type EnsoSessionRiskChange,
   ensoLogger,
+  foldSessionRisk,
   type GuardPolicy,
+  INITIAL_SESSION_RISK,
+  riskCallOf,
+  riskEventsOfEntries,
+  sessionRiskStep,
   WEB_FETCH_TOOL_NAME,
 } from '@enso/core'
 import { findRepoRoot } from '@enso/core/paths'
+import { PERMISSIONS_DECISION_CHANNEL } from '@gotgenes/pi-permission-system'
 import { type CheckCommandResult, checkCommand } from 'cc-safety-net/api'
 import {
   canonicalToolName,
@@ -283,10 +298,110 @@ interface GuardDenial {
   readonly block: true
   readonly reason: string
   readonly rule: EnsoGuardRule
+  /** A network-egress refusal's class (#464): how the deny matched, and what. */
+  readonly egress?: { readonly via: string; readonly matched: string }
 }
 
-function deny(rule: EnsoGuardRule, reason: string): GuardDenial {
-  return { block: true, reason, rule }
+function deny(rule: EnsoGuardRule, reason: string, egress?: GuardDenial['egress']): GuardDenial {
+  return egress === undefined ? { block: true, reason, rule } : { block: true, reason, rule, egress }
+}
+
+/** The engine's decision payload, when it refuses the agent's own call: its fields, checked. */
+function permissionDenialOf(raw: unknown, toolCallId: string | undefined): EnsoPermissionDenial | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined
+  const decision = raw as Record<string, unknown>
+  if (decision.result !== 'deny') return undefined
+  // A forwarded ask is a subagent's, served by this session: the refusal is not this session's agent's.
+  if (decision.forwarding !== undefined && decision.forwarding !== null) return undefined
+  const { requestId, surface, value, resolution } = decision
+  if (typeof requestId !== 'string' || typeof surface !== 'string' || typeof value !== 'string') return undefined
+  if (!(ENSO_PERMISSION_DENIAL_RESOLUTIONS as readonly unknown[]).includes(resolution)) return undefined
+  const denial = { requestId, surface, value, resolution: resolution as EnsoPermissionDenialResolution }
+  return toolCallId === undefined ? denial : { toolCallId, ...denial }
+}
+
+/**
+ * The session's security risk (#464, phase 1 of #189): every call, every refusal — the guard's
+ * and the permission engine's — folded by `@enso/core`'s `sessionRiskStep`, each signal and each
+ * level change appended as an entry and logged.
+ *
+ * ⚠ OBSERVE ONLY, AND NEVER IN THE WAY. Nothing here decides a call. A throw anywhere in the fold
+ * is logged and swallowed: a bug in risk must not become a refusal, and must not become a pass.
+ *
+ * ⚠ THE ENGINE'S REFUSAL IS ATTRIBUTED HERE. Its decision event names no tool call. This handler
+ * is the first `tool_call` participant, and pi prepares a batch's calls one at a time (every
+ * handler of a call, the engine's ask included, before the next call is raised), so the call the
+ * guard saw last is the call the engine is deciding. The entry the guard writes names it, which is
+ * what lets a replay put the refusal back in its place (`riskEventsOfEntries`).
+ */
+function observeSessionRisk(pi: ExtensionAPI): {
+  resume(branch: () => readonly unknown[]): void
+  call(event: ToolCallEvent, signal: AbortSignal | undefined): void
+  guardDenied(denial: EnsoGuardDenial): void
+} {
+  let risk: EnsoRiskState = INITIAL_SESSION_RISK
+  let currentCall: string | undefined
+  let currentSignal: AbortSignal | undefined
+
+  const observe = (event: EnsoRiskEvent): void => {
+    try {
+      const step = sessionRiskStep(risk, event)
+      for (const signal of step.raised) {
+        log.warn(ENSO_LOG_EVENTS.securitySignal, { ...signal })
+        pi.appendEntry(ENSO_SECURITY_SIGNAL_ENTRY, signal)
+      }
+      if (step.state.level !== risk.level) {
+        const change: EnsoSessionRiskChange = { level: step.state.level, signals: step.state.signals.length }
+        log.warn(ENSO_LOG_EVENTS.sessionRiskChanged, { ...change })
+        pi.appendEntry(ENSO_SESSION_RISK_ENTRY, change)
+      }
+      risk = step.state
+    } catch (error) {
+      log.error('the session risk fold failed; no call is decided by it: {error}', { error })
+    }
+  }
+
+  pi.events.on(PERMISSIONS_DECISION_CHANNEL, (raw: unknown): void => {
+    // Inside the engine's own gate: a throw here must not reach it (observe only, as above).
+    try {
+      const denial = permissionDenialOf(raw, currentCall)
+      if (denial === undefined) return
+      // ⚠ A Stop is not a No (#496 review): the engine reads an unanswered prompt as `user_denied`,
+      // and the host settles every open prompt unanswered when the run is aborted — which it does
+      // after aborting the run's signal. A person's No under an aborted signal was the Stop's.
+      if (denial.resolution === 'user_denied' && currentSignal?.aborted === true) return
+      pi.appendEntry(ENSO_PERMISSION_DENIAL_ENTRY, denial)
+      observe({ kind: 'permission-denial', ...denial })
+    } catch (error) {
+      log.error('a permission decision could not be recorded: {error}', { error })
+    }
+  })
+
+  return {
+    // Rebuilt from the branch, never from stored signals: the same fold over the same events.
+    resume(branch: () => readonly unknown[]): void {
+      currentCall = undefined
+      currentSignal = undefined
+      try {
+        risk = foldSessionRisk(riskEventsOfEntries(branch()))
+      } catch (error) {
+        risk = INITIAL_SESSION_RISK
+        log.error('the session risk could not be rebuilt from the branch; it starts low: {error}', { error })
+      }
+    },
+    call(event: ToolCallEvent, signal: AbortSignal | undefined): void {
+      currentCall = event.toolCallId
+      currentSignal = signal
+      observe(riskCallOf(event.toolCallId, event.toolName, event.input))
+    },
+    guardDenied(denial: EnsoGuardDenial): void {
+      observe(
+        denial.via === undefined
+          ? { kind: 'guard-denial', toolCallId: denial.toolCallId, rule: denial.rule }
+          : { kind: 'guard-denial', toolCallId: denial.toolCallId, rule: denial.rule, via: denial.via },
+      )
+    },
+  }
 }
 
 /**
@@ -359,6 +474,7 @@ function shellCommandDenial(
       `${toolName} command refused: ${egress.matched} — the network deny (#9) cannot vouch for what it ` +
         `cannot resolve, so it refuses rather than guesses. Rewrite without the nesting, the substitution, ` +
         `or the stream: name the command directly. Fetching is ${WEB_FETCH_TOOL_NAME} (#54), never a shell client.`,
+      { via: egress.via, matched: egress.matched },
     )
   }
   if (egress !== undefined) {
@@ -369,6 +485,7 @@ function shellCommandDenial(
         `tool instead (#54): it fetches http(s) URLs from hosts on the allowlist in the user config. ` +
         `web_fetch and web_search (#63) are the only sanctioned web access. ` +
         `Do not try to work around the deny.`,
+      { via: egress.via, matched: egress.matched },
     )
   }
 
@@ -432,6 +549,8 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
   // extension runtime down on session replacement (fresh closure), and session_start —
   // which also fires for "reload" and "resume", where the runtime survives — resets it.
   const readTracker = createSessionReadTracker()
+  // #464: the session's security risk, observed beside what it has read; rebuilt on every start.
+  const risk = observeSessionRisk(pi)
 
   let policyToolsChecked = false
   let policyToolMismatch: string | undefined
@@ -470,9 +589,10 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
     }
   }
 
-  pi.on('session_start', (): void => {
+  pi.on('session_start', (_event, extensionContext): void => {
     readTracker.reset()
     verifyPolicyToolNames()
+    risk.resume(() => extensionContext.sessionManager.getBranch())
   })
 
   // @invariant guarded-tool-call/knowledge-from-results Knowledge comes from results, never from calls.
@@ -515,6 +635,8 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
   // row and the status bar read only that store: a refusal is never recognised by its wording.
   // pi's context builder skips `custom` entries, so the model's view is unchanged.
   pi.on('tool_call', (event, extensionContext): ToolCallEventResult | undefined => {
+    // The call first, then its refusal: the order the risk fold and every replay of it read (#464).
+    risk.call(event, extensionContext.signal)
     const verdict = decide(event, extensionContext.cwd)
     const path = pathArgumentOf(event)
     const properties = {
@@ -526,9 +648,19 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
       log.debug('{toolName} allowed', properties)
       return undefined
     }
-    log.warn(ENSO_LOG_EVENTS.toolDenied, { ...properties, rule: verdict.rule, reason: verdict.reason })
-    const denial: EnsoGuardDenial = { toolCallId: event.toolCallId, rule: verdict.rule }
+    const denial: EnsoGuardDenial = {
+      toolCallId: event.toolCallId,
+      rule: verdict.rule,
+      ...verdict.egress,
+    }
+    log.warn(ENSO_LOG_EVENTS.toolDenied, {
+      ...properties,
+      ...verdict.egress,
+      rule: verdict.rule,
+      reason: verdict.reason,
+    })
     pi.appendEntry(ENSO_GUARD_DENIAL_ENTRY, denial)
+    risk.guardDenied(denial)
     return { block: verdict.block, reason: verdict.reason }
   })
 

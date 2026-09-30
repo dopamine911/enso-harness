@@ -1,5 +1,6 @@
 import { type Static, Type } from 'typebox'
 import { EnsoPermissionModeState } from './permission-mode.ts'
+import { EnsoSessionRiskChange } from './session-risk.ts'
 import { EnsoTranscriptEntry } from './transcript.ts'
 
 /**
@@ -324,6 +325,8 @@ export const EnsoThreadHistory = Type.Object(
     projectId: Type.String(),
     messages: Type.Array(Type.Unknown()),
     permissionMode: EnsoPermissionModeState,
+    /** The session's risk (#464): the replayed level and how many signals it rests on — the status bar's seed. */
+    sessionRisk: EnsoSessionRiskChange,
     /** Present only when the branch ends inside a turn — see {@link EnsoInterruptedTail}. */
     interrupted: Type.Optional(EnsoInterruptedTail),
   },

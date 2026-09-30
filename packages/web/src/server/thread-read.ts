@@ -1,12 +1,14 @@
-import type {
-  EnsoInterruptedTail,
-  EnsoLoginInProgress,
-  EnsoModelState,
-  EnsoOpenDialog,
-  EnsoPermissionModeState,
-  EnsoRecordedModel,
-  EnsoSessionUsage,
-  EnsoTranscriptEntry,
+import {
+  type EnsoInterruptedTail,
+  type EnsoLoginInProgress,
+  type EnsoModelState,
+  type EnsoOpenDialog,
+  type EnsoPermissionModeState,
+  type EnsoRecordedModel,
+  type EnsoSessionRiskChange,
+  type EnsoSessionUsage,
+  type EnsoTranscriptEntry,
+  sessionRiskOfTranscript,
 } from '@enso/core'
 import type { UIMessage } from '@tanstack/ai-client'
 import type { AgentHost, StoredThreadRead } from '../host/agent-host.ts'
@@ -74,6 +76,11 @@ export interface ThreadMount {
   /** The live session's own mode, or the one this branch persists. */
   readonly permissionMode: EnsoPermissionModeState
   /**
+   * The session's risk (#464): the branch replayed through the fold the live guard runs — the
+   * same answer live or cold, since both read the same branch.
+   */
+  readonly sessionRisk: EnsoSessionRiskChange
+  /**
    * The live session's model and thinking level (#338 slice 2); `null` when not live — nothing is
    * built to say what pi would run, or which levels it would offer (#86).
    */
@@ -130,10 +137,12 @@ export async function readThreadMount(deps: ThreadReadDeps, threadId: string): P
   const transcript = inspection === undefined ? (stored?.transcript ?? []) : inspection.entries
   // A thread that went live during the read is served, wherever its file is.
   const storedOutside = nowLive === undefined ? read.storedOutside : undefined
+  const risk = sessionRiskOfTranscript(transcript)
   return {
     present: nowLive !== undefined || stored !== undefined,
     storedOutside,
     messages: transcriptToMessages(transcript),
+    sessionRisk: { level: risk.level, signals: risk.signals.length },
     ...(nowLive === undefined ? coldReading(host, transcript, stored) : liveReading(nowLive, transcript)),
     ...placeOf(projects, threadId, inspection?.cwd ?? stored?.cwd, storedOutside),
   }

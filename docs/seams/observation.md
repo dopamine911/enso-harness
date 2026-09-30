@@ -107,6 +107,8 @@ export const EnsoFollowSnapshot = Type.Object(
     /** See `EnsoThreadSummary.generation`. */
     generation: Type.Integer({ minimum: 0 }),
     permissionMode: EnsoPermissionModeState,
+    /** The session's risk as of this snapshot (#464); a rise arrives later as an `enso-session-risk` custom entry. */
+    sessionRisk: EnsoSessionRiskChange,
     /** The session's model and thinking level (#338 slice 2); `null` when the thread is not live — nothing is built to say what pi would run. */
     model: Type.Union([EnsoModelState, Type.Null()]),
     /** What a NOT-live thread's branch records it last ran on (#434); absent when live, or when the branch records neither. */

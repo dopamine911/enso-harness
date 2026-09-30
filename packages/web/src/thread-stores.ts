@@ -6,6 +6,7 @@ import {
   type EnsoToolResultDescriptor,
   type EnsoLoginInProgress,
   type EnsoInterruptedTail,
+  type EnsoSessionRiskChange,
   type EnsoSessionUsage,
   type EnsoThreadHistory,
   ensoLogger,
@@ -129,6 +130,12 @@ export interface ThreadStores {
    */
   readonly guardDenials: WritableStore<ReadonlyMap<string, EnsoGuardRule>>
   /**
+   * The session's risk (#464): its level and how many observed signals it rests on — seeded from
+   * the history and the follow's snapshot (the server's replay of the branch), raised live by the
+   * guard's `enso-session-risk` entry. Observed evidence, not a verdict.
+   */
+  readonly sessionRisk: WritableStore<EnsoSessionRiskChange>
+  /**
    * Finished tool results' #18 descriptors, by tool-call id, as they arrive LIVE (#411): TanStack
    * drops the one the AG-UI result carries, so the follow connection hands it over here. A stored
    * result carries its descriptor in its own metadata, so nothing is seeded; `EnsoToolResult`
@@ -239,6 +246,7 @@ function createThreadStores(
     queue: createStore<readonly string[]>([]),
     refusal: createStore<ProviderRefusalMark | undefined>(undefined),
     guardDenials: createStore<ReadonlyMap<string, EnsoGuardRule>>(guardDenialsIn(history)),
+    sessionRisk: createStore<EnsoSessionRiskChange>({ level: 'low', signals: 0 }),
     toolResultDescriptors,
     startSession: createStore(false),
     branchCompacted: createStore(0),
@@ -562,6 +570,7 @@ export function adoptThread(history: EnsoThreadHistory, fetchImpl?: FetchLike, i
     initialDraft,
   })
   stores.permissionMode.applyReceipt(history.permissionMode)
+  stores.sessionRisk.set(history.sessionRisk)
   if (history.interrupted !== undefined) offerContinue(stores, history.interrupted)
   threads.set(stores.threadId, stores)
   summaries.set(stores.threadId, {

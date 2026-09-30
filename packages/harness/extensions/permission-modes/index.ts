@@ -6,9 +6,7 @@ import {
   ENSO_AUTO_AUTHORIZER,
   ENSO_CATCH_ALL,
   ENSO_MODE_PRESETS,
-  ENSO_OPERATOR_DENIAL_ENTRY,
   ENSO_PERMISSION_MODES,
-  type EnsoOperatorDenial,
   type EnsoPermissionModeName,
   ensoLogger,
   modeAgentName,
@@ -17,7 +15,6 @@ import {
   type AuthorizerLog,
   type AuthorizerVerdict,
   getPermissionsService,
-  PERMISSIONS_DECISION_CHANNEL,
   PERMISSIONS_READY_CHANNEL,
   type PermissionQuery,
   type PermissionsService,
@@ -45,8 +42,8 @@ import { runUnderDeadline } from '../../core/index.ts'
  *   external-directory families to defer.
  * - **An explicit ask rule still reaches the user** in `auto`, as Claude Code documents for its
  *   auto mode. See `explicitAskPattern`.
- * - **A person's No is recorded** (#441): a `user_denied` decision on this session's bus appends
- *   `ENSO_OPERATOR_DENIAL_ENTRY`, which session evaluation reads.
+ * - **A person's No is recorded by the guards extension** (#464), not here: the engine's decision
+ *   names no tool call, and only the first `tool_call` participant knows which call it decides.
  * - **The engine's forced system prompt is dropped** (#443). See the `before_agent_start` handler.
  *
  * ⚠ ONE PROCESS, MANY SESSIONS. The engine's service map is process-global, keyed by session id,
@@ -370,19 +367,6 @@ async function authorize(
   }
 }
 
-/** Record a person's No from one decision broadcast; anything else, or anything malformed, is skipped. */
-function recordOperatorDenial(pi: ExtensionAPI, raw: unknown): void {
-  if (typeof raw !== 'object' || raw === null || !('resolution' in raw) || raw.resolution !== 'user_denied') return
-  // A forwarded ask is a subagent's; its No belongs to the requesting session.
-  if ('forwarding' in raw && raw.forwarding !== undefined && raw.forwarding !== null) return
-  if (!('requestId' in raw) || !('surface' in raw) || !('value' in raw)) return
-  const { requestId, surface, value } = raw
-  if (typeof requestId !== 'string' || typeof surface !== 'string' || typeof value !== 'string') return
-  // Typed by the reader's schema (`@enso/core` session-eval), so writer and reader cannot drift.
-  const denial: EnsoOperatorDenial = { requestId, surface, value }
-  pi.appendEntry(ENSO_OPERATOR_DENIAL_ENTRY, denial)
-}
-
 /** The permission-modes extension, over its dependencies; the default export wires the real ones. */
 export function createPermissionModes(dependencies: PermissionModesDependencies): (pi: ExtensionAPI) => void {
   return (pi: ExtensionAPI): void => {
@@ -481,19 +465,6 @@ export function createPermissionModes(dependencies: PermissionModesDependencies)
     // still gated.
     pi.on('before_agent_start', (event) => {
       delete event.systemPromptOptions.forceSystemPrompt
-    })
-
-    // pi's event bus is per session, so every decision on it is this session's.
-    pi.events.on(PERMISSIONS_DECISION_CHANNEL, (raw) => {
-      try {
-        // ⚠ Stop is not a No (#496 review): gotgenes reads an unanswered select as `user_denied`,
-        // and the host settles every open question unanswered when the run is aborted. The run's
-        // signal is aborted before the host settles them, so a denial under it was the stop's.
-        if (session?.signal?.aborted === true) return
-        recordOperatorDenial(pi, raw)
-      } catch (error: unknown) {
-        log.warn('could not record an operator denial: {error}', { error: String(error) })
-      }
     })
   }
 }

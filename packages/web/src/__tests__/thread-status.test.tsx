@@ -173,6 +173,7 @@ const render = (props: Partial<Parameters<typeof ThreadStatusView>[0]>): string 
       cwd={props.cwd}
       refusal={props.refusal}
       refusalSource={props.refusalSource}
+      risk={props.risk}
     />,
   )
 
@@ -196,6 +197,16 @@ test('refused and failed are said apart, each only when there is one (#407)', ()
   const neither = render({ counts: { prompts: 1, toolCalls: 4, refused: 0, failed: 0 } })
   expect(neither).not.toContain('refused')
   expect(neither).not.toContain('failed')
+})
+
+// #464: the session's risk is said once it is above `low`, as observed evidence — nothing is
+// blocked because of it, and the bar must not read as though something were.
+test('the risk is said only above low, with its signal count, and never as a verdict', () => {
+  expect(render({ risk: { level: 'low', signals: 0 } })).not.toContain('risk')
+  const medium = render({ risk: { level: 'medium', signals: 1 } })
+  expect(medium).toContain('risk medium · 1 signal')
+  expect(medium).toContain('not a verdict')
+  expect(render({ risk: { level: 'incident', signals: 5 } })).toContain('risk incident · 5 signals')
 })
 
 test('disconnected renders as its own word, not pulsing, with the recovery in the title', () => {

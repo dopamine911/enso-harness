@@ -11,6 +11,7 @@ import {
   providerReasonOf,
   providerRefusalClass,
   readEnsoGuardDenial,
+  readEnsoSessionRiskChange,
 } from '@enso/core'
 import { Compile } from 'typebox/compile'
 import { Check } from 'typebox/value'
@@ -103,6 +104,7 @@ export function routeEnsoCustomEvent(stores: ThreadStores, eventType: string, da
   if (eventType === 'snapshot') {
     if (!snapshotValidator.Check(data)) return
     applyPermissionMode(stores, data.permissionMode)
+    stores.sessionRisk.set(data.sessionRisk)
     // The session's model (#338 slice 2) — `null` when the thread is not live, applied as such:
     // a snapshot is the resync, and a model this page cannot vouch for is no model. A cold
     // thread's recorded model (#434) rides beside it, never as live state.
@@ -197,10 +199,16 @@ function applyStatus(stores: ThreadStores, generation: number): void {
 
 /**
  * A guard refused a call (#387): its entry names the call and the rule, and the tool row and the
- * status bar read it off the store. Every other extension's entry is a state receipt rendered
- * by nothing (L3 moved the mode onto its own observation).
+ * status bar read it off the store. The session's risk rose (#464): the status bar reads that too.
+ * Every other extension's entry is a state receipt rendered by nothing (L3 moved the mode onto its
+ * own observation).
  */
-function applyGuardDenial(stores: ThreadStores, customType: string, data: unknown): void {
+function applyGuardEntry(stores: ThreadStores, customType: string, data: unknown): void {
+  const risk = readEnsoSessionRiskChange(customType, data)
+  if (risk !== undefined) {
+    stores.sessionRisk.set(risk)
+    return
+  }
   const denial = readEnsoGuardDenial(customType, data)
   if (denial === undefined) return
   const denials = new Map(stores.guardDenials.get())
@@ -271,7 +279,7 @@ function routeObservation(stores: ThreadStores, observation: EnsoObservation): v
       stores.queue.set([...observation.interrupting, ...observation.enqueued])
       return
     case 'custom-entry':
-      applyGuardDenial(stores, observation.customType, observation.data)
+      applyGuardEntry(stores, observation.customType, observation.data)
       return
     default:
       // Recorded above; rendered by nothing. `unmapped` by design.

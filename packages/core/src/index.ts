@@ -265,10 +265,8 @@ export {
 } from './provider-refusal.ts'
 export { ENSO_RUN_CONTEXT_ENTRY, EnsoForkPoint, EnsoRunContext, readEnsoRunContext } from './run-context.ts'
 export {
-  ENSO_OPERATOR_DENIAL_ENTRY,
   EnsoEvalEvent,
   EnsoEvalScorecard,
-  EnsoOperatorDenial,
   EnsoSessionEval,
   EVAL_DROPPED,
   EVAL_EVENT_KINDS,
@@ -282,6 +280,33 @@ export {
   type SessionEvalResult,
   sessionEvalOf,
 } from './session-eval.ts'
+export {
+  ENSO_OPERATOR_DENIAL_ENTRY,
+  ENSO_PERMISSION_DENIAL_ENTRY,
+  ENSO_PERMISSION_DENIAL_RESOLUTIONS,
+  ENSO_RISK_LEVELS,
+  ENSO_SECURITY_SIGNAL_ENTRY,
+  ENSO_SECURITY_SIGNALS,
+  ENSO_SESSION_RISK_ENTRY,
+  type EnsoPermissionDenial,
+  type EnsoPermissionDenialResolution,
+  type EnsoRiskEvent,
+  type EnsoRiskLevel,
+  type EnsoRiskState,
+  type EnsoSecuritySignal,
+  type EnsoSecuritySignalKind,
+  EnsoSessionRisk,
+  type EnsoSessionRiskChange,
+  foldSessionRisk,
+  INITIAL_SESSION_RISK,
+  readEnsoPermissionDenial,
+  readEnsoSessionRiskChange,
+  riskCallOf,
+  riskEventsOfEntries,
+  sessionRiskOfEntries,
+  sessionRiskOfTranscript,
+  sessionRiskStep,
+} from './session-risk.ts'
 export {
   ENSO_CONTEXT_ADDITIONS_SHOWN,
   ENSO_CONTEXT_COMMAND,

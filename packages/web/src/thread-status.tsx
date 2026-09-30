@@ -1,4 +1,4 @@
-import type { EnsoContextUsage, EnsoSessionUsage, ProviderRefusalClass } from '@enso/core'
+import type { EnsoContextUsage, EnsoSessionRiskChange, EnsoSessionUsage, ProviderRefusalClass } from '@enso/core'
 import type { UIMessage } from '@tanstack/ai-client'
 import { automaticPartsForMessage, selectMessageUI } from '@tanstack/ai-client/ui'
 import { toolResultState } from './EnsoToolResult.tsx'
@@ -166,6 +166,8 @@ export interface ThreadStatusViewProps {
   readonly refusalSource?: string | undefined
   /** git in the thread's cwd (#453): branch, ahead/behind the last push, the tree's changes. */
   readonly git?: GitOutcome | undefined
+  /** The session's risk (#464): said only once it is above `low`. */
+  readonly risk?: EnsoSessionRiskChange | undefined
 }
 
 const COMPACT_TOKENS = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 })
@@ -250,6 +252,23 @@ function RefusalWord({
 }
 
 /**
+ * The session's risk (#464), once it is above `low`: `risk high · 3 signals`. Observed evidence,
+ * labelled as such — nothing is blocked because of it, and its thresholds are uncalibrated (#468).
+ */
+function RiskWord({ risk }: { readonly risk: EnsoSessionRiskChange | undefined }): React.ReactNode {
+  if (risk === undefined || risk.level === 'low') return null
+  const serious = risk.level === 'high' || risk.level === 'incident'
+  return (
+    <span
+      className={serious ? 'text-refuse' : 'text-foreground'}
+      title="security signals observed in this session: what the agent did after a refusal. Evidence, not a verdict — nothing is blocked because of it. The session eval on the Stats tab lists them."
+    >
+      risk {risk.level} · {risk.signals} {risk.signals === 1 ? 'signal' : 'signals'}
+    </span>
+  )
+}
+
+/**
  * "a question is waiting", said in the bar while pi waits on an answer (#362).
  *
  * ⚠ THE LIVE REGION IS ALWAYS MOUNTED (#371): a screen reader announces a change inside a region
@@ -286,6 +305,7 @@ export function ThreadStatusView({
   refusal,
   refusalSource,
   git,
+  risk,
 }: ThreadStatusViewProps): React.ReactNode {
   const dotClass = activityDotClass(activity)
   const context = usage?.context ?? null
@@ -311,6 +331,7 @@ export function ThreadStatusView({
       {/* #340: `$0.0000` beside `idle` means "nothing ran" here, not "free" — the line in the
 			    transcript says who refused and why. */}
       <RefusalWord refusal={refusal} source={refusalSource} />
+      <RiskWord risk={risk} />
       <span title="user messages in this transcript">
         {counts.prompts} {counts.prompts === 1 ? 'prompt' : 'prompts'}
       </span>
@@ -363,6 +384,7 @@ export function ThreadStatusBar({ messages, generating }: ThreadStatusBarProps):
   const questionWaiting = useStore(stores.dialog) !== undefined
   const refusal = useStore(stores.refusal)
   const guardDenials = useStore(stores.guardDenials)
+  const risk = useStore(stores.sessionRisk)
   const git = useThreadGit(`${settledToolResults(messages)}:${generating}`)
   return (
     <ThreadStatusView
@@ -374,6 +396,7 @@ export function ThreadStatusBar({ messages, generating }: ThreadStatusBarProps):
       refusal={refusal?.refusalClass}
       refusalSource={refusal?.provider}
       git={git}
+      risk={risk}
     />
   )
 }

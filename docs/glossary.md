@@ -240,6 +240,14 @@ what no mode may allow. Both answer before a tool runs; nothing after it does.
 - **secret** — a value that must not reach the model or the log: quarantined from the process
   environment, read per call by the extension that needs it, and **redacted** by field name at write
   (see Record).
+- **session risk** — what the agent did after a refusal, folded into observed **security signals**
+  and a level, `low` / `medium` / `high` / `incident` (#464, phase 1 of #189). Observed by the guards
+  extension and replayed from the branch by the same fold; **observe only**: nothing is blocked
+  because of it, and its thresholds are uncalibrated until #468 replays real sessions.
+- **security signal** — one observed fact of the session risk, named for what was seen, never for
+  intent: `denial-retry`, `command-obfuscation`, `alternate-execution-path`,
+  `tool-substitution-after-denial`, `policy-introspection`. Every one needs an earlier refusal in its
+  window, so no single command is a signal on its own.
 
 ## Observation
 
@@ -364,13 +372,15 @@ harness did). The first is canonical and never rewritten by us; the second is th
   interrupts. The eval's `f=` counter. Kept apart from the *refusal channel* because the two move at
   different times.
 - **refusal channel** — where a refusal came from, never mixed: a guard's (policy, the
-  `enso-guard-denial` entry), the operator's (a person: a declined ask, or an *operator denial*), the
-  provider's (#381). The eval counts each on its own; only the operator's is the `r=` counter, what
-  the operator *clicks*.
-- **operator denial** — the operator pressed No on a permission prompt. Recorded by Enso's
-  permission-modes extension as the `enso-operator-denial` custom entry (#441, #496), off the permission
-  engine's decision broadcast, because the engine turns it into an ordinary error result and nothing
-  else keeps which button was pressed.
+  `enso-guard-denial` entry), a **rule**'s (the permission engine: a rule you wrote or `auto`'s
+  classifier, the `enso-permission-denial` entry, #464), the operator's (a person: a declined ask, or
+  an *operator denial*), the provider's (#381). The eval counts each on its own; only the operator's
+  is the `r=` counter, what the operator *clicks*.
+- **operator denial** — the operator pressed No on a permission prompt. Recorded by Enso's guards
+  extension as an `enso-permission-denial` entry with `resolution: user_denied` and the refused call's
+  id (#464), off the permission engine's decision broadcast, because the engine turns it into an
+  ordinary error result and nothing else keeps which button was pressed. Sessions written before
+  #464 hold it as `enso-operator-denial` (#441, #496), which the eval still reads.
 
 **Mechanism** — where the bytes go:
 

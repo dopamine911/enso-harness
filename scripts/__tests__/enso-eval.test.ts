@@ -47,6 +47,7 @@ const BASE: EnsoSessionEval = {
     askRejectionRate: 1,
     operatorDenials: 0,
     guardRefusals: 0,
+    ruleRefusals: 0,
     providerRefusals: 0,
     refusalsTotal: 1,
     gateRuns: 1,
@@ -70,6 +71,8 @@ const BASE: EnsoSessionEval = {
       S21_events: [],
     },
     dropped: ['S6 plan mode: none'],
+    riskLevel: 'low',
+    securitySignals: 0,
   },
 }
 

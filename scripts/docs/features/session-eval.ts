@@ -57,6 +57,7 @@ export const SESSION_EVAL: FeatureSpec = {
   landingTagline: 'human and agent signals, kept separate',
   shows: [
     "A session eval is a thread's scorecard and timeline, computed only from what the session recorded. It counts what the person running the thread did (messages, corrections, queued prompts, interrupts, answers to questions, denials) and what the agent did (tool calls, writes, refusals, test and build runs and their outcomes). It lists the counts side by side and never combines them into a single score.",
+    "It also shows the session's security signals: what the agent did after a refusal, such as trying the same thing again, reaching for an interpreter one-liner, or reading the guard's own policy. Each is marked `!S` on the timeline where it happened, and the **session risk** card gives the level they add up to. Nothing is blocked because of them.",
     'Use it to check a claim about a run ("it never needed correcting") or to compare two runs of the same task, such as the two sides of a [fork](./lineage.md).',
   ],
   opens: [
@@ -93,7 +94,11 @@ export const SESSION_EVAL: FeatureSpec = {
         },
         {
           target: { text: 'refusal channels', exact: true, within: PANEL },
-          says: '**{shown}**: who refused, split three ways (guard, operator, provider) and never mixed.',
+          says: '**{shown}**: who refused, split four ways (guard, rule, operator, provider) and never mixed. A **rule** is the permission engine: a rule you wrote, or `auto`’s classifier.',
+        },
+        {
+          target: { text: 'session risk', exact: true, within: PANEL },
+          says: '**{shown}**: the level the security signals add up to, and how many there are. It is evidence, not a verdict, and nothing is blocked because of it.',
         },
       ],
       after: [
@@ -103,7 +108,7 @@ export const SESSION_EVAL: FeatureSpec = {
         refusalChannels: (page) =>
           page
             .getByRole('region', { name: 'session eval', exact: true })
-            .getByText(/^guard \d+ · operator \d+ · provider \d+$/),
+            .getByText(/^guard \d+ · rule \d+ · operator \d+ · provider \d+$/),
       },
     },
     {
@@ -136,6 +141,7 @@ export const SESSION_EVAL: FeatureSpec = {
   lookFor: [
     'Watch the two counters. `f=` counts friction, what the person *typed* against the run: corrections, queued prompts, confused messages and interrupts. `r=` counts refusals the person *clicked*: declined questions, and **No** on a permission prompt. They are kept apart because they move at different times. The line where either one starts climbing is where the run went wrong.',
     "In the thread above, neither one climbs: the last line still reads `{lastFriction}` and `{lastRefusals}`. The only marked lines are the guard refusals, flagged `{guardFlag}`, and **refusal channels** reads `{refusalChannels}`. The guards refused and the person refused nothing: a run that needed no correcting, with calls stopped by policy. The command line's `refusalsTotal` matches the last line's `{lastRefusals}` for the same reason: it counts only the person's refusals, the `r=` column.",
+    'A security signal, marked `!S`, always follows a refusal: the agent retried what was refused, or tried another way to do it. One signal can be innocent (a command retried after fixing a typo). Several in a row, reaching for a different tool or interpreter each time, are the pattern worth reading.',
     'Compare the ratios under **per human message** (replies, tool calls and writes for each message the person sent) between two runs of the same task. A run that needs many more of them to finish is doing more work per instruction, and the timeline shows where.',
   ],
   limits: [
@@ -144,12 +150,13 @@ export const SESSION_EVAL: FeatureSpec = {
     `Queued prompts and interrupts come from the log, which keeps ${LOG_KEEP_DAYS} days. For an older thread they read as \`—\` (unknown), never as \`0\`, and the card says why.`,
     "Corrections and confusion are found with fixed word lists. They miss what the lists don't name, and a message that happens to match one can count by mistake.",
     'The comparison table for several threads is in the command line only. The tab shows one thread at a time.',
+    'The security signals and their levels are uncalibrated: the counts behind `medium`, `high` and `incident` are first guesses, to be tuned against real sessions. A signal reads what a command says, not what it does, so a disguised command that the guards and the permission engine never refused raises none.',
   ],
   see: [
     {
       path: 'docs/glossary.md',
       label: 'Glossary',
-      why: '*session eval*, *friction*, *refusal channel* and *operator denial*',
+      why: '*session eval*, *friction*, *refusal channel*, *operator denial*, *session risk* and *security signal*',
     },
     { path: 'docs/reference/routes.md', label: 'HTTP routes', why: '`GET /api/threads/:threadId/eval`' },
     { path: 'docs/features/stats.md', label: 'Stats', why: 'what the same thread cost' },

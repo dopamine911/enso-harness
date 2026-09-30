@@ -47,6 +47,10 @@ export const ENSO_LOG_EVENTS = {
   messageUsage: 'message {role} used {input} in, {output} out',
   /** `guards/index.ts`: a refusal, with its `rule`. */
   toolDenied: '{toolName} denied: {reason}',
+  /** `guards/index.ts`: an observed security signal (#464) — what was seen, never a verdict. */
+  securitySignal: 'security signal {signal} on {toolCallId}: {detail}',
+  /** `guards/index.ts`: the session's risk level rose (#464, observe only). */
+  sessionRiskChanged: 'session risk is {level} ({signals} signal(s))',
   /** `thread-registry.ts`: the operator's Stop reached the run — the eval's interrupt (#441). */
   runAborted: 'run {generation} told to abort; {restored} queued prompt(s) handed back',
 } as const

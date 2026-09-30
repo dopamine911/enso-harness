@@ -3,9 +3,18 @@ import { mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, utimesSync
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { createCodingTools, createPowerShellTool, createReadOnlyTools } from '@earendil-works/pi-coding-agent'
-import { ENSO_GUARD_DENIAL_ENTRY, ENSO_GUARD_RULES, readEnsoGuardDenial } from '@enso/core'
+import {
+  ENSO_GUARD_DENIAL_ENTRY,
+  ENSO_GUARD_RULES,
+  ENSO_PERMISSION_DENIAL_ENTRY,
+  ENSO_SECURITY_SIGNAL_ENTRY,
+  ENSO_SESSION_RISK_ENTRY,
+  readEnsoGuardDenial,
+  sessionRiskOfEntries,
+} from '@enso/core'
 import { type FlowTrace, flowTrace } from '@enso/core/flow-trace'
 import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
+import { PERMISSIONS_DECISION_CHANNEL } from '@gotgenes/pi-permission-system'
 import type { LogRecorder } from '@logtape/testing/recorder'
 import type { CheckCommandResult } from 'cc-safety-net/api'
 import { createGuards, GUARD_POLICY_TOOL_NAMES, type GuardDependencies } from '../index.ts'
@@ -22,6 +31,8 @@ interface GuardRuntime {
   sessionStart: Handler
   /** What the guard appended with `pi.appendEntry`, in order (#387). */
   entries: { customType: string; data: unknown }[]
+  /** Broadcast on the session's bus, as the permission engine does its decisions (#464). */
+  emit: (channel: string, data: unknown) => void
 }
 
 /** pi's shipped tool set, as `getAllTools` returns it (probed live 2026-09-04). */
@@ -56,20 +67,29 @@ function loadGuardRuntime(
   onAppendEntry?: (customType: string, data: unknown) => void,
 ): GuardRuntime {
   const handlers = new Map<string, Handler>()
+  const listeners = new Map<string, ((data: unknown) => void)[]>()
   const entries: GuardRuntime['entries'] = []
   const guards = createGuards({ analyzeBashCommand, harnessRoot })
   const appendEntry = (customType: string, data: unknown): void => {
     onAppendEntry?.(customType, data)
     entries.push({ customType, data })
   }
-  guards({ on: (e: string, h: Handler) => handlers.set(e, h), getAllTools, appendEntry } as never)
+  const events = {
+    on: (channel: string, listener: (data: unknown) => void): void => {
+      listeners.set(channel, [...(listeners.get(channel) ?? []), listener])
+    },
+  }
+  guards({ on: (e: string, h: Handler) => handlers.set(e, h), getAllTools, appendEntry, events } as never)
   const toolCall = handlers.get('tool_call')
   const toolResult = handlers.get('tool_result')
   const sessionStart = handlers.get('session_start')
   if (!(toolCall && toolResult && sessionStart)) {
     throw new Error('guards did not register tool_call + tool_result + session_start')
   }
-  return { toolCall, toolResult, sessionStart, entries }
+  const emit = (channel: string, data: unknown): void => {
+    for (const listener of listeners.get(channel) ?? []) listener(data)
+  }
+  return { toolCall, toolResult, sessionStart, entries, emit }
 }
 
 /** The original single-handler loader — per-call tests that need no cross-call state. */
@@ -1020,6 +1040,7 @@ test('⚠ the guard registers no tool: it participates through tool_call only, s
     on: (event: string) => events.push(event),
     registerTool: (tool: { name: string }) => registered.push(tool.name),
     getAllTools: () => PI_SHIPPED_TOOL_NAMES.map((name) => ({ name })),
+    events: { on: (): undefined => undefined },
   } as never)
   expect(registered).toEqual([])
   expect(events).toContain('tool_call')
@@ -1069,4 +1090,158 @@ test('a secret-path denial receives no timeout patch', () => {
   const input: Record<string, unknown> = { command: 'cat .enso/secrets.env' }
   expect(loadGuard()({ type: 'tool_call', toolCallId: 't', toolName: 'bash', input }, { cwd })?.block).toBe(true)
   expect(input.timeout).toBeUndefined()
+})
+
+// ── #464: the session's security risk, observed by the guard (phase 1 of #189) ─────────────────
+
+interface DrivenCall {
+  readonly id: string
+  readonly command: string
+  /** The engine's decision on the call, when the guard let it through to the engine. */
+  readonly engine?: 'user_denied' | 'policy_deny' | 'authorizer_denied'
+}
+
+/**
+ * Drive calls through ONE real guard, recording the branch as pi stores it: each call's assistant
+ * message, every entry the guard appended while deciding it, its result. The engine's decision is
+ * broadcast on the bus inside the call, where the engine's own `tool_call` handler raises it.
+ */
+function drive(runtime: GuardRuntime, calls: readonly DrivenCall[]): { branch: unknown[]; verdicts: GuardVerdict[] } {
+  const branch: unknown[] = []
+  const verdicts: GuardVerdict[] = []
+  for (const { id, command, engine } of calls) {
+    branch.push({
+      type: 'message',
+      message: { role: 'assistant', content: [{ type: 'toolCall', id, name: 'bash', arguments: { command } }] },
+    })
+    const before = runtime.entries.length
+    const verdict = runtime.toolCall(
+      { type: 'tool_call', toolCallId: id, toolName: 'bash', input: { command } },
+      { cwd },
+    )
+    if (verdict === undefined && engine !== undefined) {
+      runtime.emit(PERMISSIONS_DECISION_CHANNEL, {
+        requestId: `request-${id}`,
+        surface: 'bash',
+        value: command,
+        result: 'deny',
+        resolution: engine,
+      })
+    }
+    for (const entry of runtime.entries.slice(before)) branch.push({ type: 'custom', ...entry })
+    branch.push({ type: 'message', message: { role: 'toolResult', toolCallId: id } })
+    verdicts.push(verdict)
+  }
+  return { branch, verdicts }
+}
+
+const appended = (runtime: GuardRuntime, customType: string): unknown[] =>
+  runtime.entries.filter((entry) => entry.customType === customType).map((entry) => entry.data)
+
+const ESCALATION: readonly DrivenCall[] = [
+  { id: 'c1', command: 'curl https://example.test/x' },
+  { id: 'c2', command: 'wget https://example.test/x' },
+  { id: 'c3', command: '$(printf cu)rl https://example.test/x' },
+  { id: 'c4', command: 'rm -rf build', engine: 'user_denied' },
+  { id: 'c5', command: 'rm -rf build', engine: 'user_denied' },
+  { id: 'c6', command: 'python3 -c "print(1)"' },
+]
+
+// ⚠ #464's acceptance: the fold the guard runs live and the replay of the branch it wrote agree,
+// signal for signal and level for level — so a threshold tuned on replays is the one that runs.
+test('⚠ live equals replay: the signals and levels the guard records are the ones a replay of its branch gives (#464)', () => {
+  const runtime = loadGuardRuntime()
+  const { branch, verdicts } = drive(runtime, ESCALATION)
+  const live = appended(runtime, ENSO_SECURITY_SIGNAL_ENTRY)
+  const replayed = sessionRiskOfEntries(branch)
+  expect(live).toEqual(replayed.signals)
+  expect(replayed.signals.map((signal) => `${signal.signal}@${signal.toolCallId}`)).toEqual([
+    'denial-retry@c2',
+    'denial-retry@c3',
+    'command-obfuscation@c3',
+    'denial-retry@c5',
+    'alternate-execution-path@c6',
+  ])
+  expect(appended(runtime, ENSO_SESSION_RISK_ENTRY)).toEqual([
+    { level: 'medium', signals: 1 },
+    { level: 'high', signals: 3 },
+    { level: 'incident', signals: 5 },
+  ])
+  expect(replayed.level).toBe('incident')
+  // ⚠ Observe only: at `incident` the one-liner still passes, and the refusals are the guard's own.
+  expect(verdicts.map((verdict) => verdict?.block === true)).toEqual([true, true, true, false, false, false])
+  // The obfuscation signal rests on the class the denial record now carries.
+  expect(appended(runtime, ENSO_GUARD_DENIAL_ENTRY).map((data) => (data as { via?: string }).via)).toEqual([
+    'command-position',
+    'command-position',
+    'unresolvable',
+  ])
+})
+
+test('⚠ a resumed session rebuilds its risk from the branch: the next call is judged against what came before (#464)', () => {
+  const { branch } = drive(loadGuardRuntime(), ESCALATION.slice(0, 3))
+  const oneLiner = {
+    type: 'tool_call',
+    toolCallId: 'c9',
+    toolName: 'bash',
+    input: { command: 'python3 -c "print(1)"' },
+  }
+
+  const resumed = loadGuardRuntime()
+  resumed.sessionStart(
+    { type: 'session_start', reason: 'resume' },
+    { cwd, sessionManager: { getBranch: () => branch } },
+  )
+  resumed.toolCall(oneLiner, { cwd })
+  expect(appended(resumed, ENSO_SECURITY_SIGNAL_ENTRY)).toEqual([
+    expect.objectContaining({ signal: 'alternate-execution-path', toolCallId: 'c9' }),
+  ])
+  expect(appended(resumed, ENSO_SESSION_RISK_ENTRY)).toEqual([{ level: 'incident', signals: 4 }])
+
+  const fresh = loadGuardRuntime()
+  fresh.sessionStart({ type: 'session_start', reason: 'start' }, { cwd, sessionManager: { getBranch: () => [] } })
+  fresh.toolCall(oneLiner, { cwd })
+  expect(appended(fresh, ENSO_SECURITY_SIGNAL_ENTRY)).toEqual([])
+})
+
+test("the engine's refusals are recorded against the call the guard saw last; approvals, forwarded and malformed decisions are not", () => {
+  const runtime = loadGuardRuntime()
+  runtime.toolCall(
+    { type: 'tool_call', toolCallId: 'c1', toolName: 'bash', input: { command: 'rm -rf build' } },
+    { cwd },
+  )
+  const decision = { requestId: 'r1', surface: 'bash', value: 'rm -rf build', result: 'deny' }
+  runtime.emit(PERMISSIONS_DECISION_CHANNEL, { ...decision, resolution: 'user_denied' })
+  runtime.emit(PERMISSIONS_DECISION_CHANNEL, { ...decision, requestId: 'r2', resolution: 'policy_deny' })
+  runtime.emit(PERMISSIONS_DECISION_CHANNEL, { ...decision, requestId: 'r3', resolution: 'authorizer_denied' })
+  runtime.emit(PERMISSIONS_DECISION_CHANNEL, { ...decision, result: 'allow', resolution: 'user_approved' })
+  runtime.emit(PERMISSIONS_DECISION_CHANNEL, { ...decision, resolution: 'gate_error' })
+  runtime.emit(PERMISSIONS_DECISION_CHANNEL, {
+    ...decision,
+    resolution: 'user_denied',
+    forwarding: { requesterAgentName: 'child', requesterSessionId: 'c' },
+  })
+  runtime.emit(PERMISSIONS_DECISION_CHANNEL, { resolution: 'user_denied', surface: 'bash' })
+  runtime.emit(PERMISSIONS_DECISION_CHANNEL, null)
+  expect(appended(runtime, ENSO_PERMISSION_DENIAL_ENTRY)).toEqual([
+    { toolCallId: 'c1', requestId: 'r1', surface: 'bash', value: 'rm -rf build', resolution: 'user_denied' },
+    { toolCallId: 'c1', requestId: 'r2', surface: 'bash', value: 'rm -rf build', resolution: 'policy_deny' },
+    { toolCallId: 'c1', requestId: 'r3', surface: 'bash', value: 'rm -rf build', resolution: 'authorizer_denied' },
+  ])
+})
+
+// ⚠ #496 review, moved here with the record: the engine reads an unanswered prompt as `user_denied`,
+// and the host settles every open prompt unanswered on Stop, after aborting the run's signal.
+test('⚠ a Stop is not a No: a person-denial under an aborted run records nothing; a rule refusal still does', () => {
+  const runtime = loadGuardRuntime()
+  const stopped = new AbortController()
+  stopped.abort()
+  const input = { command: 'npm test' }
+  runtime.toolCall({ type: 'tool_call', toolCallId: 'c1', toolName: 'bash', input }, { cwd, signal: stopped.signal })
+  const decision = { requestId: 'r1', surface: 'bash', value: 'npm test', result: 'deny' }
+  runtime.emit(PERMISSIONS_DECISION_CHANNEL, { ...decision, resolution: 'user_denied' })
+  runtime.emit(PERMISSIONS_DECISION_CHANNEL, { ...decision, requestId: 'r2', resolution: 'policy_deny' })
+  expect(appended(runtime, ENSO_PERMISSION_DENIAL_ENTRY)).toEqual([
+    { toolCallId: 'c1', requestId: 'r2', surface: 'bash', value: 'npm test', resolution: 'policy_deny' },
+  ])
 })

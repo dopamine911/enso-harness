@@ -250,6 +250,12 @@ export interface ThreadStores {
    */
   readonly guardDenials: WritableStore<ReadonlyMap<string, EnsoGuardRule>>
   /**
+   * The session's risk (#464): its level and how many observed signals it rests on — seeded from
+   * the history and the follow's snapshot (the server's replay of the branch), raised live by the
+   * guard's `enso-session-risk` entry. Observed evidence, not a verdict.
+   */
+  readonly sessionRisk: WritableStore<EnsoSessionRiskChange>
+  /**
    * Finished tool results' #18 descriptors, by tool-call id, as they arrive LIVE (#411): TanStack
    * drops the one the AG-UI result carries, so the follow connection hands it over here. A stored
    * result carries its descriptor in its own metadata, so nothing is seeded; `EnsoToolResult`

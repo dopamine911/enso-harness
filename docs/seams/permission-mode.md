@@ -482,13 +482,15 @@ A user who removes `enso-auto` from `authorizerChain` gets prompts in `auto`, ne
 
 ## Who implements it, who consumes it
 
-**Recorded by the mode extension, enforced by the engine.** The manifest loads the engine, then the
-mode extension directly after it (`packages/harness/package.json`, `pi.extensions`). The extension
-also records a person's No (#441): a `user_denied` decision on the session's bus appends
-`enso-operator-denial` (`permission-modes/index.ts#recordOperatorDenial`). And it drops the engine's
-forced system prompt every turn (#443), because a forced prompt replaces the sectioned one Enso's
-system head is built from; no enforcement is lost, since pi lists only the tools the engine left
-active. The prompt itself is an ordinary `select` and `input` dialog (`dialog.md`).
+**Recorded by the guards and the mode extension, enforced by the engine.** The manifest loads the
+engine, then the mode extension directly after it (`packages/harness/package.json`, `pi.extensions`).
+The guards extension, the first `tool_call` participant, records every refusal the engine makes of
+the agent's call — a person's No, a rule's deny, an authorizer's block — as `enso-permission-denial`
+with the call's id (`guards/index.ts#observeSessionRisk`, #464; before #464 the mode extension
+wrote a No as `enso-operator-denial`, which session eval still reads). The mode extension drops the
+engine's forced system prompt every turn (#443), because a forced prompt replaces the sectioned one
+Enso's system head is built from; no enforcement is lost, since pi lists only the tools the engine
+left active. The prompt itself is an ordinary `select` and `input` dialog (`dialog.md`).
 
 **Prepared on both launch surfaces.** `preparePermissionPolicy` runs before the engine loads: in
 `createAgentHost` after `PI_CODING_AGENT_DIR` names the agent dir, and in `scripts/enso.ts` before the

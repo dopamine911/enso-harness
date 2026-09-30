@@ -46,7 +46,9 @@ const KIND_GLYPHS: Readonly<Record<EvalEventKind, string>> = {
   'ask-rejected': '!?',
   'tool-denied': '!D',
   'guard-refused': '!G',
+  'rule-refused': '!P',
   'provider-refused': '!R',
+  'security-signal': '!S',
   commit: 'c',
   push: '^',
   'pr-create': 'PR',
@@ -64,6 +66,7 @@ const AGAINST_THE_RUN: ReadonlySet<EvalEventKind> = new Set([
   'ask-rejected',
   'tool-denied',
   'guard-refused',
+  'rule-refused',
   'provider-refused',
   'destructive',
 ])
@@ -145,8 +148,15 @@ export function ThreadEvalView({ outcome }: { readonly outcome: EvalOutcome }): 
           {/* The glossary's "refusal channel": who refused. NOT the scorecard's `refusalsTotal` — that is `r=`, what the operator clicked. */}
           <Metric
             label="refusal channels"
-            value={countText(card.guardRefusals + card.operatorDenials + card.providerRefusals)}
-            note={`guard ${countText(card.guardRefusals)} · operator ${countText(card.operatorDenials)} · provider ${countText(card.providerRefusals)}`}
+            value={countText(card.guardRefusals + card.ruleRefusals + card.operatorDenials + card.providerRefusals)}
+            note={`guard ${countText(card.guardRefusals)} · rule ${countText(card.ruleRefusals)} · operator ${countText(card.operatorDenials)} · provider ${countText(card.providerRefusals)}`}
+          />
+          {/* #464: observed evidence, never a verdict — and its thresholds are uncalibrated (#468). */}
+          <Metric
+            label="session risk"
+            value={card.riskLevel}
+            danger={card.riskLevel === 'high' || card.riskLevel === 'incident'}
+            note={`${countText(card.securitySignals)} signal(s) observed · not a verdict`}
           />
           <Metric
             label="gate runs"

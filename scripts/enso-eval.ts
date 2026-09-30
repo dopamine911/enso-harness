@@ -83,6 +83,7 @@ const SCORECARD_KEYS = [
   'askRejectionRate',
   'operatorDenials',
   'guardRefusals',
+  'ruleRefusals',
   'providerRefusals',
   'refusalsTotal',
   'gateRuns',
@@ -91,6 +92,8 @@ const SCORECARD_KEYS = [
   'canary',
   'canaryPresent',
   'firstCorrectionAt',
+  'riskLevel',
+  'securitySignals',
 ] as const satisfies ReadonlyArray<keyof EnsoEvalScorecard>
 
 const SIGNAL_KEYS = [
@@ -123,11 +126,14 @@ export const ROW_FIELDS = [
   'askRejected',
   'operatorDenials',
   'guardRefusals',
+  'ruleRefusals',
   'providerRefusals',
   'refusalsTotal',
   'gateRuns',
   'gatePassed',
   'gateFailed',
+  'riskLevel',
+  'securitySignals',
 ] as const satisfies ReadonlyArray<keyof EnsoEvalScorecard>
 
 /** The keys the comparison table lines up, threads across. */
@@ -159,7 +165,9 @@ const KIND_GLYPHS: Readonly<Record<EvalEventKind, string>> = {
   'ask-rejected': '!?',
   'tool-denied': '!D',
   'guard-refused': '!G',
+  'rule-refused': '!P',
   'provider-refused': '!R',
+  'security-signal': '!S',
   commit: ' c',
   push: ' ^',
   'pr-create': 'PR',

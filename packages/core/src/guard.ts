@@ -97,6 +97,11 @@ export const ENSO_GUARD_DENIAL_ENTRY = 'enso-guard-denial' as const
  * NOT repeated — it is the tool result's text already, the one copy the model and the page
  * both read.
  *
+ * A network-egress refusal also carries its class (#464): `via`, how the deny matched
+ * (`command-position`, … or `unresolvable`, a construct it cannot see through, #203), and
+ * `matched`, what it matched. The session's risk fold tells a plain-name refusal from a
+ * cannot-vouch one by `via`, not by the reason's wording.
+ *
  * The entry's `data`, and — under {@link ENSO_GUARD_DENIAL_KEY} — the metadata a stored tool
  * result carries, so a surface reads one shape either way.
  *
@@ -107,6 +112,8 @@ export const EnsoGuardDenial = Type.Object({
   // `Unsafe` for the static type only: a union mapped from the list validates every rule, but
   // TypeBox infers a mapped array's union as `never`.
   rule: Type.Unsafe<EnsoGuardRule>(Type.Union(ENSO_GUARD_RULES.map((rule) => Type.Literal(rule)))),
+  via: Type.Optional(Type.String({ minLength: 1 })),
+  matched: Type.Optional(Type.String()),
 })
 /** @group Guards */
 export type EnsoGuardDenial = Static<typeof EnsoGuardDenial>

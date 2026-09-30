@@ -314,6 +314,7 @@ test('⚠ a compaction said mid-run waits for the run; once idle the pane shows 
     projectId: 'p-launch',
     messages,
     permissionMode: { mode: 'default', available: ['default'] },
+    sessionRisk: { level: 'low', signals: 0 },
   })
   const pane = await mountPane({
     history: history([text('u1', 'user', 'old question'), text('a1', 'assistant', 'the long old answer')]),
@@ -1183,6 +1184,7 @@ test('⚠ a call still waiting when the page joins a busy run reads running, not
         },
       ],
       permissionMode: { mode: 'default', available: ['default', 'plan'] },
+      sessionRisk: { level: 'low', signals: 0 },
     },
   })
   await pane.settle({ ...SNAPSHOT_IDLE, threadId: 'asked-1', live: true, busy: true, generation: 1 })
@@ -1921,6 +1923,7 @@ test("the rail lists the server's stored threads; a click resumes one with its h
           { id: 'a1', role: 'assistant', parts: [{ type: 'text', content: 'Looking at auth.ts' }] },
         ],
         permissionMode: { mode: 'plan', available: ['default', 'plan'] },
+        sessionRisk: { level: 'low', signals: 0 },
       },
     },
   })
@@ -1977,6 +1980,7 @@ test("a resumed thread's image renders as an <img> from the stored history, byte
           },
         ],
         permissionMode: { mode: 'default', available: ['default'] },
+        sessionRisk: { level: 'low', signals: 0 },
       },
     },
   })
@@ -2034,6 +2038,7 @@ test("a resumed thread's refused attempt says the refusal in its own bubble, bef
           { id: 'a2', role: 'assistant', parts: [{ type: 'text', content: 'hello after the retry' }] },
         ],
         permissionMode: { mode: 'default', available: ['default'] },
+        sessionRisk: { level: 'low', signals: 0 },
       },
     },
   })
