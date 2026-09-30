@@ -267,6 +267,7 @@ export const SNAPSHOT_IDLE: EnsoFollowSnapshot = {
   busy: false,
   generation: 0,
   permissionMode: { mode: 'default', available: ['default', 'plan'] },
+  sessionRisk: { level: 'low', signals: 0 },
   model: null,
   cwd: '/work/project',
   usage: { cost: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, context: null },

@@ -344,9 +344,9 @@ nothing about it is pi's.
 **The permission prompt needs no lifting** (#496). Outside pi's terminal UI the permission engine
 asks through the runtime's own `select` (the question, then the detail on the lines below it) and,
 for a deny with a reason, `input`. Both are ordinary dialogs here, so the host adds nothing and
-knows no vendor class. A person's No is recorded by Enso's permission-modes extension, off the
-engine's decision broadcast (`extensions/permission-modes/index.ts#recordOperatorDenial`), not by
-the dialog. The mode itself is on `permission-mode.md`.
+knows no vendor class. A person's No is recorded by Enso's guards extension, off the engine's
+decision broadcast and named for the call it refused (`guards/index.ts#observeSessionRisk`, #464),
+not by the dialog. The mode itself is on `permission-mode.md`.
 
 **`notify` rides the same observation.** A one-way notice is emitted by the host as a `notify` request
 (`extension-ui-context.ts#notify`) and mapped as an `extension-ui-request` the mapper marks

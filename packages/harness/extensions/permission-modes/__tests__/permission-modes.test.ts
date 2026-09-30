@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
-import { ACTIVE_AGENT_CUSTOM_TYPE, ENSO_AUTO_AUTHORIZER, ENSO_OPERATOR_DENIAL_ENTRY, modeAgentName } from '@enso/core'
+import { ACTIVE_AGENT_CUSTOM_TYPE, ENSO_AUTO_AUTHORIZER, modeAgentName } from '@enso/core'
 import type {
   AuthorizerLog,
   AuthorizerVerdict,
@@ -49,8 +49,6 @@ interface HarnessOptions {
   readonly auth?: unknown
   readonly picked?: string | undefined
   readonly branch?: unknown[]
-  /** The run's abort signal, as pi's context carries it while the agent runs. */
-  readonly signal?: AbortSignal
 }
 
 const immediate: PermissionModesDependencies['underDeadline'] = (run) => run(new AbortController().signal)
@@ -124,7 +122,6 @@ function harness(options: HarnessOptions = {}): Harness {
       : { id: 'judge-1', provider: 'acme', api: 'acme-messages', baseUrl: 'https://acme.test' }
   const sessionContext = {
     hasUI: true,
-    signal: options.signal,
     ui,
     cwd: '/work/project',
     model,
@@ -383,57 +380,6 @@ test('an ask whose payload does not read reaches the user, never the classifier'
   const moved = { ...bashAsk('rm -rf build'), payload: { kind: 'tool' } } as unknown as PromptPermissionDetails
   expect(await session.ask(moved)).toEqual({ kind: 'defer' })
   expect(session.classifierRequests).toEqual([])
-})
-
-// --- the operator's No (#441)
-
-test("a person's No on this session's prompt is recorded as an operator denial", () => {
-  const session = harness()
-  session.emit('permissions:decision', {
-    requestId: 'request-7',
-    surface: 'bash',
-    value: 'rm -rf dist',
-    result: 'deny',
-    resolution: 'user_denied',
-    origin: null,
-    agentName: null,
-    matchedPattern: '*',
-  })
-  expect(session.entries).toEqual([
-    { customType: ENSO_OPERATOR_DENIAL_ENTRY, data: { requestId: 'request-7', surface: 'bash', value: 'rm -rf dist' } },
-  ])
-})
-
-test('⚠ a Stop is not a No: a denial while the run is aborting records nothing', () => {
-  const stopped = new AbortController()
-  stopped.abort()
-  const session = harness({ signal: stopped.signal })
-  session.startSession()
-  // What the engine broadcasts when the host settles its open question unanswered on Stop.
-  session.emit('permissions:decision', {
-    requestId: 'request-9',
-    surface: 'bash',
-    value: 'npm test',
-    result: 'deny',
-    resolution: 'user_denied',
-  })
-  expect(session.entries).toEqual([])
-})
-
-test('decisions a person did not deny here, and malformed ones, record nothing', () => {
-  const session = harness()
-  const decision = { requestId: 'request-8', surface: 'bash', value: 'ls', result: 'deny', origin: null }
-  session.emit('permissions:decision', { ...decision, result: 'allow', resolution: 'user_approved' })
-  session.emit('permissions:decision', { ...decision, resolution: 'policy_deny' })
-  session.emit('permissions:decision', { ...decision, resolution: 'authorizer_denied' })
-  session.emit('permissions:decision', {
-    ...decision,
-    resolution: 'user_denied',
-    forwarding: { requesterAgentName: 'child', requesterSessionId: 'c' },
-  })
-  session.emit('permissions:decision', { resolution: 'user_denied', surface: 'bash' })
-  session.emit('permissions:decision', null)
-  expect(session.entries).toEqual([])
 })
 
 // --- the forced system prompt (#443)

@@ -4,9 +4,9 @@
     {
       "image": "session-eval",
       "steps": ["open a thread from the rail", "choose the **Stats** tab at the top of the thread"],
-      "shown": ["Session eval", "corrections", "refusal channels"],
+      "shown": ["Session eval", "corrections", "refusal channels", "session risk"],
       "measured": {
-        "refusalChannels": "guard 2 · operator 0 · provider 0"
+        "refusalChannels": "guard 2 · rule 0 · operator 0 · provider 0"
       }
     },
     {

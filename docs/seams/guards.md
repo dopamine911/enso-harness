@@ -195,10 +195,11 @@ There is no third value — the glossary's Retired table refuses `allow`/`abstai
 
 **Implemented once**, by `packages/harness/extensions/guards/index.ts`. The default export is
 `createGuards({ analyzeBashCommand: checkCommand, harnessRoot })` — the real analyzer wired at the composition root.
-`guardsWithDependencies` registers three hooks: `session_start` resets the read tracker and
-verifies the policy's tool names against the live tool list (`guards/index.ts#verifyPolicyToolNames`); `tool_result` records which
-files the session has seen, from *results* only — a blocked call produces no result and a failed one
-arrives `isError`; `tool_call` calls `decide` and logs the verdict.
+`guardsWithDependencies` registers three hooks: `session_start` resets the read tracker, rebuilds the
+session's risk from the branch, and verifies the policy's tool names against the live tool list
+(`guards/index.ts#verifyPolicyToolNames`); `tool_result` records which files the session has seen,
+from *results* only — a blocked call produces no result and a failed one arrives `isError`;
+`tool_call` records the call for the session's risk, calls `decide` and logs the verdict.
 
 **`decide`'s order** (`guards/index.ts#decide`) — nested, so described, not fenced:
 
@@ -226,6 +227,20 @@ arrives `isError`; `tool_call` calls `decide` and logs the verdict.
 
 **Every verdict is a record** (#132): a denial at `warn` with the tool, the path and the reason; an
 allow at `debug`; never silent (the `tool_call` handler; pinned by `guards.test.ts`).
+
+**The session's risk is observed here, and decides nothing** (#464, phase 1 of #189;
+`guards/index.ts#observeSessionRisk`). Every call, every guard refusal and every refusal the
+permission engine makes of the agent's call (a person's No, a rule's deny, `auto`'s block — heard on
+the engine's decision bus) go through one pure fold in `@enso/core`, `session-risk.ts#sessionRiskStep`.
+A signal is appended as `enso-security-signal` and logged at `warn`; a rise in level as
+`enso-session-risk`. The engine's decision names no tool call, so the guard — the first participant,
+with pi preparing a batch's calls one at a time — attributes it to the call it saw last and records
+it as `enso-permission-denial` with that call's id; a `user_denied` under an aborted run is the
+Stop's, not a No, and is not recorded. A throw anywhere in the fold is logged and swallowed: a bug
+in risk becomes neither a refusal nor a pass. On `session_start` the state is rebuilt by replaying
+the branch through the same fold (`riskEventsOfEntries`), never read from stored signals, and the
+server replays the same branch for the thread snapshot and the session eval — `guards.test.ts`
+drives the guard over a refusal sequence and replays the branch it wrote: same signals, same levels.
 
 **Consumed by the runtime.** Handlers stack; the first `block` returns and cannot be un-blocked by a
 later extension, whatever the load order (the header of `guards/index.ts`). The participants and their load order are

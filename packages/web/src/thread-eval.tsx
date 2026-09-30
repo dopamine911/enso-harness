@@ -2,6 +2,7 @@ import {
   type EnsoEvalEvent,
   type EnsoEvalScorecard,
   EnsoSessionEval,
+  EVAL_KIND_GLYPHS,
   type EvalEventKind,
   runningCounters,
 } from '@enso/core'
@@ -32,31 +33,6 @@ const readThreadEval = (threadId: string, fetchImpl: FetchLike): Promise<EvalOut
 /** A count the log alone gives: `—` when no day was read. */
 const logCount = (value: number | null): string => (value === null ? '—' : countText(value))
 
-/** The timeline's glyphs, the CLI's: two characters that say the kind at a glance. */
-const KIND_GLYPHS: Readonly<Record<EvalEventKind, string>> = {
-  human: '',
-  'human-correction': '!!',
-  'human-confusion': '?',
-  'prompt-queued': '><',
-  interrupt: 'XX',
-  'permission-mode': 'P',
-  write: 'w',
-  'ask-options': '?',
-  'ask-answered': 'a',
-  'ask-rejected': '!?',
-  'tool-denied': '!D',
-  'guard-refused': '!G',
-  'provider-refused': '!R',
-  commit: 'c',
-  push: '^',
-  'pr-create': 'PR',
-  'pr-edit': 'pr',
-  branch: 'b',
-  gate: 'g',
-  destructive: '!',
-  outward: 'MP',
-}
-
 /** The kinds the timeline colours as a refusal or a stop — what the operator did against the run. */
 const AGAINST_THE_RUN: ReadonlySet<EvalEventKind> = new Set([
   'human-correction',
@@ -64,6 +40,7 @@ const AGAINST_THE_RUN: ReadonlySet<EvalEventKind> = new Set([
   'ask-rejected',
   'tool-denied',
   'guard-refused',
+  'rule-refused',
   'provider-refused',
   'destructive',
 ])
@@ -95,7 +72,7 @@ function TimelineRow({
     <li className="grid grid-cols-eval-row items-baseline gap-x-3 font-mono text-xs">
       <span className="text-muted-foreground tabular-nums">{stamp(event)}</span>
       <span className={cn('font-semibold', AGAINST_THE_RUN.has(event.kind) ? 'text-refuse' : 'text-muted-foreground')}>
-        {KIND_GLYPHS[event.kind]}
+        {EVAL_KIND_GLYPHS[event.kind].trim()}
       </span>
       <span className="text-muted-foreground tabular-nums">f={friction}</span>
       <span className="text-muted-foreground tabular-nums">r={refusals}</span>
@@ -145,8 +122,15 @@ export function ThreadEvalView({ outcome }: { readonly outcome: EvalOutcome }): 
           {/* The glossary's "refusal channel": who refused. NOT the scorecard's `refusalsTotal` — that is `r=`, what the operator clicked. */}
           <Metric
             label="refusal channels"
-            value={countText(card.guardRefusals + card.operatorDenials + card.providerRefusals)}
-            note={`guard ${countText(card.guardRefusals)} · operator ${countText(card.operatorDenials)} · provider ${countText(card.providerRefusals)}`}
+            value={countText(card.guardRefusals + card.ruleRefusals + card.operatorDenials + card.providerRefusals)}
+            note={`guard ${countText(card.guardRefusals)} · rule ${countText(card.ruleRefusals)} · operator ${countText(card.operatorDenials)} · provider ${countText(card.providerRefusals)}`}
+          />
+          {/* #464: observed evidence, never a verdict — and its thresholds are uncalibrated (#468). */}
+          <Metric
+            label="session risk"
+            value={card.riskLevel}
+            danger={card.riskLevel === 'high' || card.riskLevel === 'incident'}
+            note={`${countText(card.securitySignals)} signal(s) observed · not a verdict`}
           />
           <Metric
             label="gate runs"

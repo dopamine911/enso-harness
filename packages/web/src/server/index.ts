@@ -676,6 +676,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
       projectId: mount.projectId,
       messages: mount.messages,
       permissionMode: mount.permissionMode,
+      sessionRisk: mount.sessionRisk,
       ...(mount.interrupted === undefined ? {} : { interrupted: mount.interrupted }),
     }
     response.writeHead(200, { 'Content-Type': 'application/json' })

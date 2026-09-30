@@ -186,6 +186,7 @@ test('a resumed pane mounts with the stored messages and the stored permission m
       { id: 'a1', role: 'assistant', parts: [{ type: 'text', content: 'Earlier answer' }] },
     ],
     permissionMode: { mode: 'plan', available: ['default', 'plan'] },
+    sessionRisk: { level: 'low', signals: 0 },
   })
   const rendered = renderToStaticMarkup(<ThreadPane threadId={stored.threadId} active={true} debugOpen={false} />)
   expect(rendered).toContain('Earlier question')

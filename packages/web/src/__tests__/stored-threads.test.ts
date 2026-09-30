@@ -106,9 +106,13 @@ function controlledHistory(): {
       return deferred.promise
     },
     resolve: (threadId: string) => {
-      pending
-        .get(threadId)
-        ?.resolve({ threadId, projectId: 'p-launch', messages: [], permissionMode: { mode: 'default', available: [] } })
+      pending.get(threadId)?.resolve({
+        threadId,
+        projectId: 'p-launch',
+        messages: [],
+        permissionMode: { mode: 'default', available: [] },
+        sessionRisk: { level: 'low', signals: 0 },
+      })
       return settled(threadId)
     },
     absent: (threadId: string) => {

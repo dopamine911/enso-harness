@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import {
   ENSO_GUARD_DENIAL_ENTRY,
+  ENSO_SESSION_RISK_ENTRY,
   ENSO_PROVIDER_REFUSAL_KEY,
   type EnsoDialogSpec,
   type EnsoFollowSnapshot,
@@ -55,6 +56,7 @@ const snapshot = (overrides: Partial<EnsoFollowSnapshot> = {}): EnsoFollowSnapsh
   busy: false,
   generation: 1,
   permissionMode: { mode: 'default', available: ['default'] },
+  sessionRisk: { level: 'low', signals: 0 },
   model: null,
   cwd: '/work/project',
   messages: [],
@@ -164,6 +166,18 @@ test('a guard-denial custom-entry marks its call refused; any other entry marks 
   observe({ kind: 'custom-entry', customType: ENSO_GUARD_DENIAL_ENTRY, data: { toolCallId: 'c3', rule: 'curl' } })
   expect([...stores.guardDenials.get()]).toEqual([['c1', 'network-egress']])
   expect(notificationMessages()).toEqual([])
+})
+
+// #464: the session's risk, seeded by the snapshot (the server's replay) and raised live by the
+// guard's entry — the one store the status bar reads.
+test("the snapshot seeds the session's risk and the guard's risk entry raises it; a malformed one moves nothing", () => {
+  route('snapshot', snapshot({ sessionRisk: { level: 'medium', signals: 1 } }))
+  expect(stores.sessionRisk.get()).toEqual({ level: 'medium', signals: 1 })
+  observe({ kind: 'custom-entry', customType: ENSO_SESSION_RISK_ENTRY, data: { level: 'high', signals: 3 } })
+  expect(stores.sessionRisk.get()).toEqual({ level: 'high', signals: 3 })
+  observe({ kind: 'custom-entry', customType: ENSO_SESSION_RISK_ENTRY, data: { level: 'severe', signals: 9 } })
+  expect(stores.sessionRisk.get()).toEqual({ level: 'high', signals: 3 })
+  expect(notificationMessages().filter((message) => !message.startsWith('Mode: '))).toEqual([])
 })
 
 test("a status frame sets the thread's run generation; a malformed one leaves the last standing (#109)", () => {

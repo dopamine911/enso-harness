@@ -1,10 +1,16 @@
 import { type Static, Type } from 'typebox'
 import { Compile } from 'typebox/compile'
-import { Check } from 'typebox/value'
-import { ENSO_GUARD_DENIAL_ENTRY, readEnsoGuardDenial } from './guard.ts'
+import { readEnsoGuardDenial } from './guard.ts'
 import { ENSO_LOG_EVENTS } from './log-stats.ts'
 import type { EnsoLogLine } from './log.ts'
 import { readRecordedMode } from './permission-modes.ts'
+import {
+  ENSO_RISK_LEVELS,
+  type EnsoRiskLevel,
+  readEnsoPermissionDenial,
+  readRecordedOperatorDenial,
+  sessionRiskOfTranscript,
+} from './session-risk.ts'
 import type { EnsoTurnStats } from './thread-stats.ts'
 import type { EnsoTranscriptEntry, EnsoTranscriptMessage, EnsoTranscriptToolResult } from './transcript.ts'
 
@@ -32,57 +38,18 @@ import type { EnsoTranscriptEntry, EnsoTranscriptMessage, EnsoTranscriptToolResu
  *     when no log day was read.
  *   - A gate run records its outcome: pi's bash tool throws on a non-zero exit (`bash.js`,
  *     `Command exited with code N`), so the result's `isError` is a structured boolean, not the text
- *     the script refused to parse. `refused` when a guard refused the run; `unknown` while pending.
- *   - Refusals are three counts that never mix: a guard's (policy, `enso-guard-denial`), the
- *     operator's (a person, `enso-operator-denial` + a declined ask) and the provider's (#381).
- *     None is a tool failure (#407).
+ *     the script refused to parse. `refused` when a guard or the permission engine refused the run;
+ *     `unknown` while pending.
+ *   - Refusals are four counts that never mix: a guard's (policy, `enso-guard-denial`), a rule's
+ *     (the permission engine — a rule you wrote or `auto`'s classifier, `enso-permission-denial`,
+ *     #464), the operator's (a person: a No on a prompt, and a declined ask) and the provider's
+ *     (#381). None is a tool failure (#407).
+ *   - The security signals are the session risk's (#464): replayed from the branch with the same
+ *     fold the live guard runs, placed at the call they were observed on. Observed, never a verdict.
  *   - Dropped, and said so on the scorecard: S6 plan mode, S7 task reminders, subagent spawns,
  *     verify scripts, `mcp-mutate` (pi has no MCP; an outward-facing extension tool list starts empty).
  *   - The bash classifier carries this repo's commands (`bun run check`, `bun test`).
  */
-
-/**
- * The `customType` an operator's deny is persisted under (#441, #496): a permission prompt answered No.
- *
- * @group Session eval
- */
-export const ENSO_OPERATOR_DENIAL_ENTRY = 'enso-operator-denial'
-
-/**
- * An operator's deny on a permission prompt, as Enso's permission-modes extension records it on
- * the branch when the permission engine reports a `user_denied` decision (#441, #496): the
- * engine's request id, the surface the rule fired on (`bash`, `edit`, …) and the value it judged
- * (the command, the path).
- *
- * @group Session eval
- */
-export const EnsoOperatorDenial = Type.Object(
-  {
-    requestId: Type.String({ minLength: 1 }),
-    surface: Type.String({ minLength: 1 }),
-    value: Type.String(),
-  },
-  { additionalProperties: false },
-)
-/** @group Session eval */
-export type EnsoOperatorDenial = Static<typeof EnsoOperatorDenial>
-
-/**
- * The shape the host wrote before #496, from the permission prompt it lifted itself: the dialog's
- * id, the button pressed and the prompt's title. Nothing writes it any more, but session files on
- * disk hold it, and a deny recorded then is still a deny: the eval counts both shapes.
- */
-const LegacyOperatorDenial = Type.Object(
-  {
-    dialogId: Type.String({ minLength: 1 }),
-    option: Type.String({ minLength: 1 }),
-    title: Type.String({ minLength: 1 }),
-  },
-  { additionalProperties: false },
-)
-
-/** Either shape an `enso-operator-denial` entry may hold (#441, #496). */
-const RecordedOperatorDenial = Type.Union([EnsoOperatorDenial, LegacyOperatorDenial])
 
 /**
  * The timeline's event kinds — the script's, minus the ones pi has no fact for.
@@ -102,7 +69,9 @@ export const EVAL_EVENT_KINDS = [
   'ask-rejected',
   'tool-denied',
   'guard-refused',
+  'rule-refused',
   'provider-refused',
+  'security-signal',
   'commit',
   'push',
   'pr-create',
@@ -114,6 +83,38 @@ export const EVAL_EVENT_KINDS = [
 ] as const
 /** @group Session eval */
 export type EvalEventKind = (typeof EVAL_EVENT_KINDS)[number]
+
+/**
+ * The timeline's glyphs: two characters that say an event's kind at a glance — the CLI's column,
+ * padded to two; the Stats tab shows them trimmed. One table, so a new kind is marked once.
+ *
+ * @group Session eval
+ */
+export const EVAL_KIND_GLYPHS: Readonly<Record<EvalEventKind, string>> = {
+  human: '  ',
+  'human-correction': '!!',
+  'human-confusion': '? ',
+  'prompt-queued': '><',
+  interrupt: 'XX',
+  'permission-mode': ' P',
+  write: ' w',
+  'ask-options': ' ?',
+  'ask-answered': ' a',
+  'ask-rejected': '!?',
+  'tool-denied': '!D',
+  'guard-refused': '!G',
+  'rule-refused': '!P',
+  'provider-refused': '!R',
+  'security-signal': '!S',
+  commit: ' c',
+  push: ' ^',
+  'pr-create': 'PR',
+  'pr-edit': 'pr',
+  branch: ' b',
+  gate: ' g',
+  destructive: ' !',
+  outward: 'MP',
+}
 
 /**
  * One mechanically detected event. `index` is the transcript position for a branch fact and absent
@@ -193,6 +194,8 @@ export const EnsoEvalScorecard = Type.Object(
     operatorDenials: Type.Integer({ minimum: 0 }),
     /** A guard refused a call: policy, not a person. */
     guardRefusals: Type.Integer({ minimum: 0 }),
+    /** The permission engine refused a call (#464): a rule you wrote, or `auto`'s classifier — not a person. */
+    ruleRefusals: Type.Integer({ minimum: 0 }),
     /** The provider refused a request (#381). */
     providerRefusals: Type.Integer({ minimum: 0 }),
     /** What the operator CLICKED: declined asks plus denied prompts — the `r=` counter. */
@@ -223,6 +226,12 @@ export const EnsoEvalScorecard = Type.Object(
     ),
     /** What the script measured and pi records no fact for — absent by decision, not by omission. */
     dropped: Type.Array(Type.String()),
+    /**
+     * The session risk (#464): the level the replayed signals put it at, and how many there are.
+     * Observed evidence, not a verdict; the thresholds are uncalibrated (#468).
+     */
+    riskLevel: Type.Unsafe<EnsoRiskLevel>(Type.Union(ENSO_RISK_LEVELS.map((level) => Type.Literal(level)))),
+    securitySignals: Type.Integer({ minimum: 0 }),
   },
   { additionalProperties: false },
 )
@@ -459,7 +468,8 @@ function askDetail(args: unknown): string {
 /** The walk's state across entries: results are joined to their calls by id. */
 interface Walk {
   readonly events: EnsoEvalEvent[]
-  readonly guardRefused: Set<string>
+  /** Calls a guard or the permission engine refused: their error results are refusals, not failures. */
+  readonly refused: Set<string>
   /** A gate event by its call id, so the result can set its outcome. */
   readonly gateByCall: Map<string, EnsoEvalEvent>
   /** An ask call's transcript index by its id, for the answer's detail. */
@@ -532,7 +542,7 @@ function walkToolResult(walk: Walk, index: number, entry: EnsoTranscriptToolResu
   const gate = walk.gateByCall.get(entry.toolCallId)
   if (gate === undefined) return
   walk.gateByCall.delete(entry.toolCallId)
-  if (walk.guardRefused.has(entry.toolCallId)) gate.outcome = 'refused'
+  if (walk.refused.has(entry.toolCallId)) gate.outcome = 'refused'
   else gate.outcome = entry.isError ? 'fail' : 'pass'
 }
 
@@ -545,41 +555,54 @@ function walkCustom(walk: Walk, index: number, entry: Extract<EnsoTranscriptEntr
     walk.events.push({ kind: 'permission-mode', index, ...stamp, detail: recordedMode })
     return
   }
-  if (entry.customType === ENSO_GUARD_DENIAL_ENTRY) {
-    const denial = readEnsoGuardDenial(entry.customType, entry.data)
-    if (denial === undefined) return
-    walk.guardRefused.add(denial.toolCallId)
+  const guard = readEnsoGuardDenial(entry.customType, entry.data)
+  if (guard !== undefined) {
+    walk.refused.add(guard.toolCallId)
     walk.events.push({
       kind: 'guard-refused',
       index,
       ...stamp,
-      detail: `guard refused ${denial.toolCallId}: ${denial.rule}`,
+      detail: `guard refused ${guard.toolCallId}: ${guard.rule}`,
     })
     return
   }
-  if (entry.customType === ENSO_OPERATOR_DENIAL_ENTRY) {
-    if (!Check(RecordedOperatorDenial, entry.data)) return
-    const denial = entry.data
-    walk.events.push({
-      kind: 'tool-denied',
-      index,
-      ...stamp,
-      detail:
-        'requestId' in denial
-          ? `operator denied ${denial.surface}: ${denial.value}`
-          : `operator denied ${denial.title}: ${denial.option}`,
-    })
+  const permission = readEnsoPermissionDenial(entry.customType, entry.data)
+  if (permission !== undefined) {
+    if (permission.toolCallId !== undefined) walk.refused.add(permission.toolCallId)
+    walk.events.push({ index, ...stamp, ...permissionRefusalEvent(permission) })
+    return
   }
+  const operator = readRecordedOperatorDenial(entry.customType, entry.data)
+  if (operator === undefined) return
+  walk.events.push({
+    kind: 'tool-denied',
+    index,
+    ...stamp,
+    detail:
+      operator.kind === 'engine'
+        ? `operator denied ${operator.surface}: ${operator.value}`
+        : `operator denied ${operator.title}: ${operator.option}`,
+  })
+}
+
+/** An engine refusal as a timeline event: a person's No, or a rule's (a rule you wrote, `auto`'s classifier). */
+function permissionRefusalEvent(
+  denial: NonNullable<ReturnType<typeof readEnsoPermissionDenial>>,
+): Pick<EnsoEvalEvent, 'kind' | 'detail'> {
+  const what = `${denial.surface}: ${firstLine(denial.value)}`
+  if (denial.resolution === 'user_denied') return { kind: 'tool-denied', detail: `operator denied ${what}` }
+  const who = denial.resolution === 'policy_deny' ? 'a rule' : "auto's classifier"
+  return { kind: 'rule-refused', detail: `${who} refused ${what}` }
 }
 
 /** Every branch fact, in branch order. */
 function branchEvents(transcript: readonly EnsoTranscriptEntry[]): {
   events: EnsoEvalEvent[]
-  guardRefused: Set<string>
+  refused: Set<string>
 } {
   const walk: Walk = {
     events: [],
-    guardRefused: new Set(),
+    refused: new Set(),
     gateByCall: new Map(),
     askByCall: new Map(),
     lastMode: undefined,
@@ -589,7 +612,51 @@ function branchEvents(transcript: readonly EnsoTranscriptEntry[]): {
     else if (entry.kind === 'tool-result') walkToolResult(walk, index, entry)
     else if (entry.kind === 'custom') walkCustom(walk, index, entry)
   })
-  return { events: walk.events, guardRefused: walk.guardRefused }
+  return { events: walk.events, refused: walk.refused }
+}
+
+/** The signals a refusal raises, rather than a call: they read after the refusal, not the call. */
+const REFUSAL_SIGNALS: ReadonlySet<string> = new Set(['denial-retry', 'command-obfuscation'])
+
+/**
+ * The session risk's signals as timeline events, merged into the branch's events in transcript
+ * order (#464): a signal a call raised at the message that made the call, one a refusal raised at
+ * that refusal's entry — so `guard refused c2` reads before `denial-retry` on c2, not after.
+ */
+function withSignalEvents(
+  events: readonly EnsoEvalEvent[],
+  transcript: readonly EnsoTranscriptEntry[],
+  signals: ReturnType<typeof sessionRiskOfTranscript>['signals'],
+): EnsoEvalEvent[] {
+  const messageOfCall = new Map<string, number>()
+  const refusalOfCall = new Map<string, number>()
+  transcript.forEach((entry, index) => {
+    if (entry.kind === 'custom') {
+      const toolCallId =
+        readEnsoGuardDenial(entry.customType, entry.data)?.toolCallId ??
+        readEnsoPermissionDenial(entry.customType, entry.data)?.toolCallId
+      if (toolCallId !== undefined) refusalOfCall.set(toolCallId, index)
+      return
+    }
+    if (entry.kind !== 'message') return
+    for (const part of entry.parts) if (part.type === 'tool-call') messageOfCall.set(part.toolCallId, index)
+  })
+  const placed = signals.flatMap((signal): EnsoEvalEvent[] => {
+    const refusal = REFUSAL_SIGNALS.has(signal.signal) ? refusalOfCall.get(signal.toolCallId) : undefined
+    const index = refusal ?? messageOfCall.get(signal.toolCallId)
+    if (index === undefined) return []
+    const at = transcript[index]?.at
+    return [
+      {
+        kind: 'security-signal',
+        index,
+        ...(at === undefined ? {} : { at }),
+        detail: `${signal.signal}: ${signal.detail}`,
+      },
+    ]
+  })
+  // Stable: a signal goes after every branch event at or before its place.
+  return [...events, ...placed].sort((left, right) => (left.index ?? 0) - (right.index ?? 0))
 }
 
 /**
@@ -839,12 +906,13 @@ export type SessionEvalResult = Pick<EnsoSessionEval, 'events' | 'scorecard' | '
  */
 export function sessionEvalOf(input: SessionEvalInput): SessionEvalResult {
   const { transcript, turnStats, log, logDays } = input
-  const { events: fromBranch, guardRefused } = branchEvents(transcript)
-  const events = mergeByTime(fromBranch, logEvents(log))
+  const { events: branchOnly, refused } = branchEvents(transcript)
+  const risk = sessionRiskOfTranscript(transcript)
+  const events = mergeByTime(withSignalEvents(branchOnly, transcript, risk.signals), logEvents(log))
   const calls = toolCallRows(transcript)
   const errors = new Map<string, string>()
   for (const entry of transcript) {
-    if (entry.kind === 'tool-result' && entry.isError && !guardRefused.has(entry.toolCallId)) {
+    if (entry.kind === 'tool-result' && entry.isError && !refused.has(entry.toolCallId)) {
       errors.set(entry.toolCallId, entry.toolName.toLowerCase())
     }
   }
@@ -891,6 +959,7 @@ export function sessionEvalOf(input: SessionEvalInput): SessionEvalResult {
       askRejectionRate: askCalls === 0 ? null : round(askRejected / askCalls, 2),
       operatorDenials,
       guardRefusals: count(events, 'guard-refused'),
+      ruleRefusals: count(events, 'rule-refused'),
       providerRefusals: count(events, 'provider-refused'),
       refusalsTotal: askRejected + operatorDenials,
       gateRuns: gates.length,
@@ -914,6 +983,8 @@ export function sessionEvalOf(input: SessionEvalInput): SessionEvalResult {
         S21_events: drift,
       },
       dropped: [...EVAL_DROPPED],
+      riskLevel: risk.level,
+      securitySignals: risk.signals.length,
     },
   }
 }

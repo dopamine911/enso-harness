@@ -151,6 +151,7 @@ test('adopting stored history restores dates, title and mode under the stored th
       { id: 'a1', role: 'assistant', parts: [{ type: 'text', content: 'continuing' }] },
     ],
     permissionMode: { mode: 'plan', available: ['default', 'plan'] },
+    sessionRisk: { level: 'low', signals: 0 } as const,
   }
   const adopted = adoptThread(history)
   expect(adopted.threadId).toBe('stored-1')
@@ -186,6 +187,7 @@ test('adopting a history seeds the refused calls from its results; a failed resu
       },
     ],
     permissionMode: { mode: 'default', available: [] },
+    sessionRisk: { level: 'low', signals: 0 },
   })
   expect([...adopted.guardDenials.get()]).toEqual([['c1', 'secret-read']])
 })
@@ -196,6 +198,7 @@ test('⚠ adopting a branch that ends inside a turn opens with a warning that sa
     projectId: 'p-launch',
     messages: [{ id: 'u1', role: 'user', parts: [{ type: 'text', content: 'never answered' }] }],
     permissionMode: { mode: 'default', available: [] },
+    sessionRisk: { level: 'low', signals: 0 },
     interrupted: 'unanswered-prompt',
   })
   expect(torn.notifications.get()).toMatchObject([
@@ -206,6 +209,7 @@ test('⚠ adopting a branch that ends inside a turn opens with a warning that sa
     projectId: 'p-launch',
     messages: [],
     permissionMode: { mode: 'default', available: [] },
+    sessionRisk: { level: 'low', signals: 0 },
   })
   expect(settled.notifications.get()).toEqual([])
 })
@@ -218,6 +222,7 @@ test('⚠ the torn-tail notice offers Continue once: pressing it posts …/conti
       projectId: 'p-launch',
       messages: [],
       permissionMode: { mode: 'default', available: [] },
+      sessionRisk: { level: 'low', signals: 0 },
       interrupted: 'tool-call-without-result',
     },
     (input: string, init?: RequestInit) => {
@@ -267,6 +272,7 @@ function followedTornThread(
       projectId: 'p-launch',
       messages: [],
       permissionMode: { mode: 'default', available: [] },
+      sessionRisk: { level: 'low', signals: 0 },
       interrupted: 'unanswered-prompt',
     },
     (input: string, init?: RequestInit) => {

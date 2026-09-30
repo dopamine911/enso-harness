@@ -40,6 +40,7 @@ const EVALUATED: EnsoSessionEval = {
     askRejectionRate: null,
     operatorDenials: 1,
     guardRefusals: 0,
+    ruleRefusals: 1,
     providerRefusals: 0,
     refusalsTotal: 1,
     gateRuns: 1,
@@ -65,6 +66,8 @@ const EVALUATED: EnsoSessionEval = {
       ],
     },
     dropped: ['S6 plan mode entries and exits: pi has no plan mode attachment'],
+    riskLevel: 'medium',
+    securitySignals: 1,
   },
 }
 
@@ -80,7 +83,8 @@ test('the panel says what it counted: the metrics, the refusal channels apart, t
   const rendered = text(renderToStaticMarkup(<ThreadEvalView outcome={{ kind: 'read', payload: EVALUATED }} />))
   expect(rendered).toContain('5 events')
   expect(rendered).toContain('from the file')
-  expect(rendered).toContain('refusal channels 1 guard 0 · operator 1 · provider 0')
+  expect(rendered).toContain('refusal channels 2 guard 0 · rule 1 · operator 1 · provider 0')
+  expect(rendered).toContain('session risk medium 1 signal(s) observed · not a verdict')
   expect(rendered).toContain('0 passed · 1 failed')
   expect(rendered).toContain('longest run 1')
   expect(rendered).toContain('modes default → acceptEdits')
