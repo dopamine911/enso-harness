@@ -43,6 +43,9 @@ const SOURCE = [
   'interface Contract {',
   '  readonly openDialogs: () => void',
   '}',
+  '/** The schema, and its static type under the same name: the TypeBox pair. */',
+  'export const Pair = Type.Object({})',
+  'export type Pair = Static<typeof Pair>',
 ].join('\n')
 
 test('a name is declared at any depth, the shallowest one wins, and its line is past its doc comment', () => {
@@ -55,6 +58,8 @@ test('a name is declared at any depth, the shallowest one wins, and its line is 
   expect(declarations.get('method')).toBe(8)
   expect(declarations.get('openDialogs')).toBe(10)
   expect(declarations.has('void')).toBe(false)
+  // A const and a type at the same scope tie on depth: the first, the schema with its doc comment, wins.
+  expect(declarations.get('Pair')).toBe(13)
 })
 
 test('⚠ a citation resolves to exactly one file: an ambiguous path is refused with what it matched, never guessed', () => {

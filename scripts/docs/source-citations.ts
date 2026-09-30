@@ -93,9 +93,26 @@ function declaredName(node: typescript.Node): string | undefined {
 }
 
 /**
+ * The nodes a name declared inside is scoped by: a body, a class, an interface or type literal, an
+ * object. Only these deepen a declaration. Counting every syntax node would put a `const` two
+ * wrappers (its statement, its declaration list) below the `type` of the same name beside it.
+ */
+const SCOPES: ReadonlySet<typescript.SyntaxKind> = new Set([
+  typescript.SyntaxKind.Block,
+  typescript.SyntaxKind.ModuleBlock,
+  typescript.SyntaxKind.ClassDeclaration,
+  typescript.SyntaxKind.ClassExpression,
+  typescript.SyntaxKind.InterfaceDeclaration,
+  typescript.SyntaxKind.TypeLiteral,
+  typescript.SyntaxKind.ObjectLiteralExpression,
+  typescript.SyntaxKind.EnumDeclaration,
+])
+
+/**
  * Every name `source` declares, with the line its declaration starts on (1-based, past its doc
- * comment). ⚠ The SHALLOWEST declaration of a name wins, then the first: `finish` inside
- * `awaitDialog` is found, but a file-level `finish` would be the one a page means.
+ * comment). ⚠ The declaration in the OUTERMOST scope wins, then the first in the file: `finish`
+ * inside `awaitDialog` is found, but a file-level `finish` would be the one a page means; and a
+ * TypeBox schema `const` beats the `type` of the same name declared after it.
  */
 export function declarationsIn(path: string, source: string): ReadonlyMap<string, number> {
   const kind = path.endsWith('.tsx') ? typescript.ScriptKind.TSX : typescript.ScriptKind.TS
@@ -107,7 +124,8 @@ export function declarationsIn(path: string, source: string): ReadonlyMap<string
     if (name !== undefined && (previous === undefined || depth < previous.depth)) {
       found.set(name, { line: file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1, depth })
     }
-    typescript.forEachChild(node, (child) => visit(child, depth + 1))
+    const inner = SCOPES.has(node.kind) ? depth + 1 : depth
+    typescript.forEachChild(node, (child) => visit(child, inner))
   }
   visit(file, 0)
   return new Map([...found].map(([name, { line }]) => [name, line]))
