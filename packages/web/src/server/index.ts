@@ -1509,7 +1509,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
 
   /**
    * `PUT /api/permissions` (#474): the whole file a page sent, under its `If-Match`; normalised,
-   * validated against the engine's schema and written atomically (`permission-policy.ts`). 412 when
+   * validated against the engine's schema and written atomically (`host/permission-policy-file.ts`). 412 when
    * the file changed since the page read it; 422 with each problem when the engine would not run it.
    */
   async function respondToPolicyWrite(request: IncomingMessage, response: ServerResponse): Promise<void> {
