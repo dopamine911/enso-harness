@@ -601,18 +601,29 @@ async function hostedUnder(policy: object, extensionFactories: InlineExtension[]
 // by key, and a preset key the user's map lacks lands AFTER the user's rules and wins: with this
 // policy (no catch-all in the bash map), `bypassPermissions` once allowed the denied `rm -rf`.
 // The launch puts Enso's catch-all first in the user's map, so the preset replaces only that.
+// Path rules too, written as the bare `path` key beside a directional one: the engine expands the
+// bare key first, per scope, before a preset merges (`policy/scope-merge.ts`), so the catch-all put
+// into `path` also leads `path_write` (#500 review).
 test('⚠ a deny the user wrote holds in every mode, through the real engine (#499)', async () => {
-  const hosted = await hostedUnder({ permission: { bash: { 'rm -rf *': 'deny', 'cp * /etc/*': 'deny' } } })
+  const hosted = await hostedUnder({
+    permission: {
+      bash: { 'rm -rf *': 'deny', 'cp * /etc/*': 'deny' },
+      path: { '*.pem': 'deny' },
+      path_write: { '*/dist/*': 'deny' },
+    },
+  })
+  const calls: [string, Record<string, unknown>][] = [
+    ['bash', { command: 'rm -rf build' }],
+    ['bash', { command: 'cp a /etc/x' }],
+    ['read', { path: 'key.pem' }],
+    ['write', { path: 'dist/app.js', content: 'x' }],
+  ]
   for (const mode of ['bypassPermissions', 'acceptEdits', 'auto', 'plan', 'default']) {
     await switchMode(hosted, mode)
-    expect({ mode, verdict: (await hosted.probeToolCall('bash', { command: 'rm -rf build' }))?.block }).toEqual({
-      mode,
-      verdict: true,
-    })
-    expect({ mode, verdict: (await hosted.probeToolCall('bash', { command: 'cp a /etc/x' }))?.block }).toEqual({
-      mode,
-      verdict: true,
-    })
+    for (const [tool, input] of calls) {
+      const verdict = await hosted.probeToolCall(tool, input)
+      expect({ mode, tool, input, blocked: verdict?.block }).toEqual({ mode, tool, input, blocked: true })
+    }
   }
 })
 
