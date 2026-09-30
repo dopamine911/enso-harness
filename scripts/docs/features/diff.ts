@@ -22,7 +22,7 @@ const STATUS_MEANS: Readonly<Record<FileStatus, string>> = {
 const STATUS_LETTER = stringRecordIn('packages/web/src/thread-changes.tsx', 'STATUS_LETTER')
 
 function meaningOf(status: string): string {
-  if (!(status in STATUS_MEANS)) throw new Error(`changes: the spec has no words for the status ${status}`)
+  if (!(status in STATUS_MEANS)) throw new Error(`diff: the spec has no words for the status ${status}`)
   return STATUS_MEANS[status as FileStatus]
 }
 
@@ -33,16 +33,16 @@ const LEGEND = Object.entries(STATUS_LETTER)
 /** The most files the Changes route sends (`git.ts`). */
 const MAX_CHANGED_FILES = numberIn('packages/core/src/git.ts', 'MAX_CHANGED_FILES')
 
-const PANEL: MarkTarget = { role: 'tabpanel', name: 'Changes' }
+const PANEL: MarkTarget = { role: 'tabpanel', name: 'Diff' }
 /** pi's one edit, as the diff shows its new line. */
 const EDITED_LINE = "required('DATABASE_URL')"
 
-/** The Changes tab (#452): pi's one edit to the demo project, in the tree and side by side. */
-export const CHANGES: FeatureSpec = {
-  id: 'changes',
-  title: 'Changes',
+/** The Diff tab (#452): pi's one edit to the demo project, in the tree and side by side. */
+export const DIFF: FeatureSpec = {
+  id: 'diff',
+  title: 'Diff',
   shows: [
-    "The **Changes** tab shows every file in the thread's project that differs from the last push, and what changed in it. The files are on the left as a tree, and the one you pick is on the right, side by side: the file at the last push on the left, the file now on the right.",
+    "The **Diff** tab shows every file in the thread's project that differs from the last push, and what changed in it. The files are on the left as a tree, and the one you pick is on the right, side by side: the file at the last push on the left, the file now on the right.",
     "When the project is a folder inside a larger repository, only that folder's files are compared, and the header says `in <folder>/`. Files elsewhere in the repository are never listed or read. The status bar's counts cover the same folder, while its commits ahead and behind are the whole repository's.",
     "It reads git, not pi's tool calls. So a change shows up however it was made: an `edit`, a `write`, a `sed -i` or a formatter run through `bash`, or your own editor. Commits you have not pushed yet count, and so do staged and unstaged edits, deletions, renames and new files.",
   ],
@@ -52,12 +52,12 @@ export const CHANGES: FeatureSpec = {
   ],
   shots: [
     {
-      image: 'changes',
-      alt: 'The Changes tab',
+      image: 'diff',
+      alt: 'The Diff tab',
       go: async (ui) => {
         await ui.openThread()
-        await ui.tab('Changes')
-        await ui.page.getByRole('tabpanel', { name: 'Changes' }).getByText(EDITED_LINE).first().waitFor()
+        await ui.tab('Diff')
+        await ui.page.getByRole('tabpanel', { name: 'Diff' }).getByText(EDITED_LINE).first().waitFor()
       },
       marks: [
         {
@@ -80,7 +80,7 @@ export const CHANGES: FeatureSpec = {
       measure: {
         unchangedLines: (page) =>
           page
-            .getByRole('tabpanel', { name: 'Changes' })
+            .getByRole('tabpanel', { name: 'Diff' })
             .getByText(/unchanged lines?$/)
             .first(),
         // The status bar's git readout: its hover names the repository it reads.

@@ -66,7 +66,7 @@ export async function readThreadAnalysis<Schema extends TSchema>(
 
 /**
  * A thread read a readout holds (#452, #453): nothing yet — or a thread nothing has run in, which
- * is not a failure to show — the payload, or why not. The git readout and the Changes view.
+ * is not a failure to show — the payload, or why not. The git readout and the Diff view.
  */
 export type ThreadReadOutcome<Payload> = { readonly kind: 'none' } | SettledRead<Payload>
 

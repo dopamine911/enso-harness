@@ -1496,9 +1496,9 @@ test('the status bar reads git on mount and again when a tool result settles (#4
   await pane.unmount()
 })
 
-// #452: the Changes view — the tree of every file that differs from the last push, the chosen
+// #452: the Diff view — the tree of every file that differs from the last push, the chosen
 // file's diff side by side, a directory folded away, and a read again when a tool result settles.
-test('the Changes view lists the tree, shows the chosen file, folds a directory, and reads again on a settled call (#452)', async () => {
+test('the Diff view lists the tree, shows the chosen file, folds a directory, and reads again on a settled call (#452)', async () => {
   const repository: EnsoGitRepository = {
     kind: 'repository',
     root: '/scripted/launch',
@@ -1529,7 +1529,7 @@ test('the Changes view lists the tree, shows the chosen file, folds a directory,
   await pane.settle(SNAPSHOT_IDLE)
   const panel = (): HTMLElement => {
     const found = pane.container.querySelector<HTMLElement>('#thread-view-changes')
-    if (found === null) throw new Error('expected the Changes panel')
+    if (found === null) throw new Error('expected the Diff panel')
     return found
   }
   const fileButton = (name: string): HTMLButtonElement => {

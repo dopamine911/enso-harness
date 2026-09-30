@@ -20,7 +20,7 @@ import type { Locator, Page } from '@playwright/test'
  */
 
 /** The thread's views, as its tab strip names them. */
-export type ThreadTab = 'Chat' | 'Context' | 'Stats' | 'Changes'
+export type ThreadTab = 'Chat' | 'Context' | 'Stats' | 'Diff'
 
 /** The UI a shot reaches its screen through. Each call but `scrollTo` records the step a reader would take. */
 export interface FeatureUi {

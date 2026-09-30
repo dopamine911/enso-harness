@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { type ChangesOutcome, readThreadChanges, ThreadChangesView } from '../thread-changes.tsx'
 
 /**
- * #452: the Changes view as a static render — every state said as what it is, the tree, and the
+ * #452: the Diff view as a static render — every state said as what it is, the tree, and the
  * first file's diff side by side. Choosing a file, folding a directory and the refresh on a settled
  * call are the mounted pane's (`thread-pane.test.tsx`).
  */

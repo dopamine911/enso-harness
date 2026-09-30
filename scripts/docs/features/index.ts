@@ -1,7 +1,7 @@
-import { CHANGES } from './changes.ts'
 import { CHAT } from './chat.ts'
 import { CONTEXT_BROWSER } from './context-browser.ts'
 import { CONTEXT } from './context.ts'
+import { DIFF } from './diff.ts'
 import { GUARDS_AND_RECEIPTS } from './guards-and-receipts.ts'
 import { LINEAGE } from './lineage.ts'
 import { LOGS_AND_DEBUGGING } from './logs-and-debugging.ts'
@@ -30,7 +30,7 @@ export const FEATURE_SPECS: readonly FeatureSpec[] = [
   CONTEXT_BROWSER,
   STATS,
   SESSION_EVAL,
-  CHANGES,
+  DIFF,
   LOGS_AND_DEBUGGING,
   SETTINGS,
   PROMPTS,

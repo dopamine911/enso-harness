@@ -1,9 +1,9 @@
 {
-  "feature": "changes",
+  "feature": "diff",
   "shots": [
     {
-      "image": "changes",
-      "steps": ["open a thread from the rail", "choose the **Changes** tab at the top of the thread"],
+      "image": "diff",
+      "steps": ["open a thread from the rail", "choose the **Diff** tab at the top of the thread"],
       "shown": [
         "no remote to compare with — only uncommitted changes count",
         "changed files",
