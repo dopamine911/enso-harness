@@ -401,8 +401,11 @@ says where. Two launches racing to make the link both succeed. A `permissions.js
 to nothing refuses the launch rather than being written through.
 
 **The old format.** A file from before #496 held its rules as `permissions` `allow` / `deny` / `ask`
-lists. It is moved aside as `permissions.json.picc-backup` and replaced whole by the seed; its rules
-are not carried over, and the launch log says so (`core/src/permission-rules.ts#describePermissionPolicy`).
+lists. It is moved aside as `permissions.json.picc-backup` (never over an earlier backup:
+`.picc-backup.1` …) and replaced whole by the seed; its rules are not carried over, and the launch
+log names the backup (`core/src/permission-rules.ts#describePermissionPolicy`). Two launches
+migrating the same file at once keep the user's rules in the first backup, and neither fails
+(`core/src/permission-rules.ts#replacePiccRulesFile`, #497 review).
 Claude Code's `~/.claude/settings.json` is never read.
 
 **Unreadable refuses the launch.** A file that is not a JSON object (a comment counts: only plain
@@ -419,7 +422,7 @@ host in `agent-host.ts#createAgentHost`, the terminal launcher in `scripts/enso.
  * - refuse one that is not a JSON object, touching nothing.
  *
  * Seeding keeps every other top-level key the file had, except a picc file, which is replaced
- * whole (its copy is kept as `.picc-backup`).
+ * whole (its copy is kept beside it; `replacePiccRulesFile` names it).
  *
  * Call it before the extension loads, on both launch surfaces.
  */
@@ -431,9 +434,10 @@ export function preparePermissionPolicy(policyPath: string, agentDir: string): P
   if (read.kind === 'object' && typeof permission === 'object' && permission !== null) {
     preparation = { kind: 'kept', path: policyPath, surfaces: Object.keys(permission).length }
   } else if (read.kind === 'object' && typeof read.value.permissions === 'object' && read.value.permissions !== null) {
-    renameSync(policyPath, `${policyPath}.picc-backup`)
-    writeJson(policyPath, ENSO_DEFAULT_PERMISSION_POLICY)
-    preparation = { kind: 'seeded', path: policyPath, was: 'a picc rules file' }
+    const piccBackup = replacePiccRulesFile(policyPath)
+    // Another launch moved it first: read what is there now.
+    if (piccBackup === undefined) return preparePermissionPolicy(policyPath, agentDir)
+    preparation = { kind: 'seeded', path: policyPath, was: 'a picc rules file', piccBackup }
   } else {
     const existing = read.kind === 'object' ? read.value : {}
     writeJson(policyPath, { ...existing, ...ENSO_DEFAULT_PERMISSION_POLICY })

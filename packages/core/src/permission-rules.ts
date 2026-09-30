@@ -140,8 +140,8 @@ export function permissionEngineConfigPath(agentDir: string): string {
  *
  * - `kept`: the file holds a `permission` block; it is used as it is.
  * - `seeded`: the file now holds `ENSO_DEFAULT_PERMISSION_POLICY`. It was absent, held no
- *   `permission` block, or was a picc rules file (#496; that file is kept beside it as
- *   `<name>.picc-backup`, and its rules are not carried over).
+ *   `permission` block, or was a picc rules file (#496; that file is kept beside it, at
+ *   `piccBackup`, and its rules are not carried over).
  * - `unreadable`: the file is there but is not a JSON object (or is a link to nothing); nothing
  *   was written, and the caller refuses to start.
  *
@@ -156,6 +156,7 @@ export type PermissionPolicyPreparation =
       readonly kind: 'seeded'
       readonly path: string
       readonly was: 'absent' | 'without a permission block' | 'a picc rules file'
+      readonly piccBackup?: string
       readonly movedAside?: string
     }
   | { readonly kind: 'unreadable'; readonly path: string; readonly reason: string }
@@ -189,13 +190,43 @@ function writeJson(path: string, value: unknown): void {
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`)
 }
 
-/** The first free backup name beside `path`: `.bak`, then `.bak.1`, `.bak.2` … Never overwrites. */
-function freeBackupPath(path: string): string {
-  let candidate = `${path}.bak`
+/** The first free name beside `path` for a backup: `.<kind>`, then `.<kind>.1` … Never overwrites. */
+function freeBackupPath(path: string, kind: string): string {
+  let candidate = `${path}.${kind}`
   for (let attempt = 1; lstatSync(candidate, { throwIfNoEntry: false }) !== undefined; attempt += 1) {
-    candidate = `${path}.bak.${attempt}`
+    candidate = `${path}.${kind}.${attempt}`
   }
   return candidate
+}
+
+function isMissingFile(error: unknown): boolean {
+  return error instanceof Error && 'code' in error && error.code === 'ENOENT'
+}
+
+/**
+ * Move a picc rules file aside and write the seed in its place, returning the backup's path, or
+ * `undefined` when the file was already gone.
+ *
+ * ⚠ TWO LAUNCHES MAY BOTH DECIDE TO MIGRATE (#497 review): the web host and the terminal, on a home
+ * not yet migrated, each read the picc file before either moved it. So this step runs with a
+ * decision that may be stale:
+ * - the other launch already moved the file and wrote the seed: this move takes the SEED, so the
+ *   backup name never overwrites (`.picc-backup.1`), and the user's rules stay in `.picc-backup`;
+ * - the other launch moved it and has not written yet: the move finds nothing, and the caller
+ *   reads the file again rather than failing the launch.
+ *
+ * @group Permission mode
+ */
+export function replacePiccRulesFile(policyPath: string): string | undefined {
+  const backup = freeBackupPath(policyPath, 'picc-backup')
+  try {
+    renameSync(policyPath, backup)
+  } catch (error: unknown) {
+    if (isMissingFile(error)) return undefined
+    throw error
+  }
+  writeJson(policyPath, ENSO_DEFAULT_PERMISSION_POLICY)
+  return backup
 }
 
 /**
@@ -216,7 +247,7 @@ function linkEngineConfig(agentDir: string, policyPath: string): string | undefi
     if (readlinkSync(linkPath) === target) return undefined
     rmSync(linkPath)
   } else if (existing !== undefined) {
-    movedAside = freeBackupPath(linkPath)
+    movedAside = freeBackupPath(linkPath, 'bak')
     renameSync(linkPath, movedAside)
   }
   try {
@@ -245,7 +276,7 @@ function writeModeAgentFiles(agentDir: string): void {
  * - refuse one that is not a JSON object, touching nothing.
  *
  * Seeding keeps every other top-level key the file had, except a picc file, which is replaced
- * whole (its copy is kept as `.picc-backup`).
+ * whole (its copy is kept beside it; `replacePiccRulesFile` names it).
  *
  * Call it before the extension loads, on both launch surfaces.
  *
@@ -259,9 +290,10 @@ export function preparePermissionPolicy(policyPath: string, agentDir: string): P
   if (read.kind === 'object' && typeof permission === 'object' && permission !== null) {
     preparation = { kind: 'kept', path: policyPath, surfaces: Object.keys(permission).length }
   } else if (read.kind === 'object' && typeof read.value.permissions === 'object' && read.value.permissions !== null) {
-    renameSync(policyPath, `${policyPath}.picc-backup`)
-    writeJson(policyPath, ENSO_DEFAULT_PERMISSION_POLICY)
-    preparation = { kind: 'seeded', path: policyPath, was: 'a picc rules file' }
+    const piccBackup = replacePiccRulesFile(policyPath)
+    // Another launch moved it first: read what is there now.
+    if (piccBackup === undefined) return preparePermissionPolicy(policyPath, agentDir)
+    preparation = { kind: 'seeded', path: policyPath, was: 'a picc rules file', piccBackup }
   } else {
     const existing = read.kind === 'object' ? read.value : {}
     writeJson(policyPath, { ...existing, ...ENSO_DEFAULT_PERMISSION_POLICY })
@@ -292,8 +324,7 @@ export function describePermissionPolicy(
   if (preparation.kind === 'kept') {
     return `permission policy: ${preparation.path}, ${preparation.surfaces} surfaces${moved}`
   }
-  const backup =
-    preparation.was === 'a picc rules file' ? ` (the old file is kept as ${preparation.path}.picc-backup)` : ''
+  const backup = preparation.piccBackup === undefined ? '' : ` (the old file is kept as ${preparation.piccBackup})`
   return (
     `permission policy: ${preparation.path} was ${preparation.was}, so it now holds Enso's default ` +
     `policy${backup}; Claude Code's settings are not read (#446, #496)${moved}`

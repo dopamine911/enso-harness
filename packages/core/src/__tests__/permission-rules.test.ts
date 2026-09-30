@@ -8,6 +8,7 @@ import {
   readFileSync,
   readlinkSync,
   realpathSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -19,6 +20,7 @@ import {
   ENSO_DEFAULT_PERMISSION_POLICY,
   permissionEngineConfigPath,
   preparePermissionPolicy,
+  replacePiccRulesFile,
 } from '../permission-rules.ts'
 
 /**
@@ -98,9 +100,31 @@ test('a picc rules file is kept aside as .picc-backup and replaced whole by Enso
     kind: 'seeded',
     path: policyPath,
     was: 'a picc rules file',
+    piccBackup: `${policyPath}.picc-backup`,
   })
   expect(readFileSync(`${policyPath}.picc-backup`, 'utf8')).toBe(content)
   expect(readBack(policyPath)).toEqual(ENSO_DEFAULT_PERMISSION_POLICY)
+})
+
+// ⚠ #497 review: the web host and the terminal, started together on a home not yet migrated, both
+// read the picc file and both decide to migrate. The second one's step then runs on a decision
+// the first has already carried out. These replay that step late, in the two orders it can land.
+test('⚠ a launch migrating a picc file the other launch already migrated keeps the user’s rules in .picc-backup', () => {
+  const content = JSON.stringify({ permissions: { deny: ['Bash(npm publish*)'] } })
+  const { policyPath, agentDir } = launch(content)
+  preparePermissionPolicy(policyPath, agentDir)
+  // The late launch's step: it read the picc file before the first moved it.
+  expect(replacePiccRulesFile(policyPath)).toBe(`${policyPath}.picc-backup.1`)
+  expect(readFileSync(`${policyPath}.picc-backup`, 'utf8')).toBe(content)
+  expect(readBack(policyPath)).toEqual(ENSO_DEFAULT_PERMISSION_POLICY)
+})
+
+test('⚠ a launch whose picc file was moved away under it re-reads rather than failing the launch', () => {
+  const { policyPath, agentDir } = launch(JSON.stringify({ permissions: { deny: [] } }))
+  // The first launch has moved the file and not written the seed yet.
+  renameSync(policyPath, `${policyPath}.picc-backup`)
+  expect(replacePiccRulesFile(policyPath)).toBeUndefined()
+  expect(preparePermissionPolicy(policyPath, agentDir)).toMatchObject({ kind: 'seeded', was: 'absent' })
 })
 
 test('a file that is not a plain JSON object is refused and nothing is written: not the file, not the link', () => {
