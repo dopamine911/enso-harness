@@ -316,7 +316,7 @@ const INTERNALS = /guards?\/|guard\.ts|permissions\.json|extensions\/[\w.-]+\/co
  */
 function isShellDenial(recent: RecentCall): boolean {
   if (recent.denial === undefined) return false
-  return recent.denial.source === 'guard' ? SHELL_TOOLS.has(recent.tool) : recent.denial.surface === 'bash'
+  return SHELL_TOOLS.has(recent.denial.source === 'guard' ? recent.tool : recent.denial.surface)
 }
 
 /** What makes two refusals the same: the rule (or the engine's surface and value), and the target. */

@@ -31,10 +31,11 @@ const engineDenied = (
   toolCallId: string,
   value: string,
   resolution: EnsoPermissionDenialResolution = 'user_denied',
+  surface = 'bash',
 ): unknown => ({
   type: 'custom',
   customType: ENSO_PERMISSION_DENIAL_ENTRY,
-  data: { toolCallId, requestId: `request-${toolCallId}`, surface: 'bash', value, resolution },
+  data: { toolCallId, requestId: `request-${toolCallId}`, surface, value, resolution },
 })
 
 /** One call per assistant message, each with its outcome: the shape a session takes when calls are not batched. */
@@ -131,6 +132,22 @@ test("⚠ the engine's refusals count: a person's No repeated, and an auto block
     ['denial-retry', 'c2'],
     ['alternate-execution-path', 'c4'],
   ])
+})
+
+// Review of #522: the engine's `surface` is the tool it refused, so a refused PowerShell command is
+// a shell refusal whoever refused it — as the guard's own refusal of one already was.
+test('an engine refusal of a PowerShell command is a shell refusal: a one-liner after it is an alternate path', () => {
+  expect(
+    signalsOf(
+      oneCallEach(
+        [
+          ['c1', 'powershell', { command: 'Remove-Item -Recurse build' }],
+          engineDenied('c1', 'Remove-Item -Recurse build', 'policy_deny', 'powershell'),
+        ],
+        [bash('c2', 'python3 -c "import shutil; shutil.rmtree(\'build\')"')],
+      ),
+    ),
+  ).toEqual([['alternate-execution-path', 'c2']])
 })
 
 // ⚠ The order live and on replay: an assistant message stores its whole batch before any refusal,
