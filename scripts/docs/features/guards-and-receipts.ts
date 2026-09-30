@@ -117,11 +117,12 @@ export const GUARDS_AND_RECEIPTS: FeatureSpec = {
       '- *Provider-refused*: the model provider turned the request down, for example because of a rate limit or a missing login. It shows as a line naming the model and the class, such as `rate-limited (429)`.',
     ].join('\n'),
     "pi's own record makes no difference between the first two: both are error results. Enso records every refusal next to the call, so the receipt is still there after a reload, and **Stats** says `{refusedApart}` instead of counting every one as a failure.",
-    'A good refusal is one pi recovers from. In the thread above, pi reads `src/config.ts` instead of `.env`, tells you it could not confirm the value, and after the `curl` refusal it tries `web_fetch`, as the reason told it to.',
+    'A good refusal is one pi recovers from. In the thread above, pi read `.env` and `src/config.ts` together, answers from `src/config.ts`, and tells you it could not confirm the value. After the `curl` refusal it tries `web_fetch`, as the reason told it to.',
+    'What a refusal tells pi depends on who can lift it. A refusal only you can lift, such as a credential read or a write outside the workspace, tells pi to ask you with `ask_user` instead of trying another way, and ends its turn when every call it made was refused. A refusal that names another way, such as `web_fetch` for `curl`, lets pi take it, and asks it to ask you if that way cannot do the job. A refusal pi can fix itself, such as reading a file before overwriting it, says only how.',
   ],
   limits: [
     'The guards are not a sandbox. They refuse known kinds of calls. They do not confine the process. `git push`, interpreters such as `python -c`, and writes made through the shell (`echo x >> ~/.bashrc`) are not checked.',
-    'A refusal is not an error in Enso. pi is not stopped: it reads the reason and carries on.',
+    'A refusal is not an error in Enso. pi is not stopped when some call in the same reply ran: it reads the reason and carries on, and the ask line tells it not to route around the refusal. The line is advice to the model: nothing but the guards themselves stops it from trying.',
     "The guards apply to pi's tools. They do not check what you type yourself in a terminal.",
   ],
   see: [

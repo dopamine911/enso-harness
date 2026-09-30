@@ -6,7 +6,7 @@
       "steps": ["open a thread from the rail"],
       "shown": [
         ".env",
-        "Reading \".env\" via read is blocked: it matches a credential pattern. A secret read is the precondition for exfiltration, so this is denied even for inspection.",
+        "Reading \".env\" via read is blocked: it matches a credential pattern. A secret read is the precondition for exfiltration, so this is denied even for inspection. This needs the user's authorization. Do not try another way to the same effect: if the task still needs it, ask the user with ask_user — say what you want to do and why — and let them decide.",
         "secret-read"
       ],
       "measured": {}

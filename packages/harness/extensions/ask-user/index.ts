@@ -182,8 +182,16 @@ export function toolResultText(questions: readonly EnsoQuestion[], result: EnsoQ
   return ['The user answered:', ...lines].join('\n')
 }
 
-function textResult(text: string): AgentToolResult<undefined> {
-  return { content: [{ type: 'text', text }], details: undefined }
+/**
+ * ⚠ AN UNANSWERED QUESTION ENDS THE TURN (#379, #465): a decline is the user's "no", and a session
+ * with no one to answer cannot grant what was asked — either way the user decides what's next, so
+ * the model gets no turn to pick for them or to route around the question. pi ends the run once
+ * every call of the batch set `terminate`; an ask_user batched with other tools does not end it.
+ */
+function textResult(text: string, unanswered = false): AgentToolResult<undefined> {
+  return unanswered
+    ? { content: [{ type: 'text', text }], details: undefined, terminate: true }
+    : { content: [{ type: 'text', text }], details: undefined }
 }
 
 /** The title a one-card questionnaire carries: its question when alone, its count otherwise. */
@@ -216,7 +224,7 @@ async function execute(...executeArguments: AskUserExecuteArguments): Promise<Ag
             'Give every option in a question a distinct label, and ask again.',
     )
   }
-  if (!extensionContext.hasUI) return textResult(toolResultText(questions, 'no-ui'))
+  if (!extensionContext.hasUI) return textResult(toolResultText(questions, 'no-ui'), true)
   const asCard =
     extensionContext.mode === 'tui'
       ? undefined
@@ -224,7 +232,7 @@ async function execute(...executeArguments: AskUserExecuteArguments): Promise<Ag
           () => new QuestionnaireComponent({ title: questionnaireTitle(questions), questions }),
         )
   const result = asCard ?? (await askOneAtATime(extensionContext.ui, questions, signal))
-  return textResult(toolResultText(questions, result))
+  return textResult(toolResultText(questions, result), 'cancelled' in result)
 }
 
 export default function askUser(pi: ExtensionAPI): void {

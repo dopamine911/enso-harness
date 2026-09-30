@@ -87,8 +87,17 @@ function withoutUuids(text: string): string {
   return masked
 }
 
+/**
+ * A message as one diagram line. A sequence diagram's statement ends at the line break, so a
+ * multi-line message (a refusal's reason and its ask line, #465) is folded onto one line.
+ */
 function mermaidText(text: string): string {
-  return withoutUuids(text.replaceAll(';', ' ·').replaceAll('#', '#35;'))
+  return withoutUuids(
+    text
+      .replaceAll(/\s*\n\s*/g, ' ')
+      .replaceAll(';', ' ·')
+      .replaceAll('#', '#35;'),
+  )
 }
 
 function shown(key: string, value: unknown): string {

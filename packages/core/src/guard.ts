@@ -75,6 +75,41 @@ export const ENSO_GUARD_RULES = [
 export type EnsoGuardRule = (typeof ENSO_GUARD_RULES)[number]
 
 /**
+ * What a rule's refusal asks of the one who hit it (#465):
+ * - `authorization` — only the user can unblock it. The refusal names `ask_user` as the way out and
+ *   ends the turn (pi's `terminate`), so asking is cheaper than trying another route (#189).
+ * - `redirect` — the reason names a sanctioned route the agent can take itself (`web_fetch`, a
+ *   non-secret variable). The turn goes on so it can; the refusal adds `ask_user` for when that
+ *   route cannot do it.
+ * - `procedure` — the fix is a step the agent can take itself: read the file first.
+ * - `configuration` — the harness is misconfigured; neither the agent nor an answer can fix it.
+ *
+ * @group Guards
+ */
+export type EnsoGuardRuleKind = 'authorization' | 'redirect' | 'procedure' | 'configuration'
+
+/**
+ * Every rule's kind — a closed table, so a rule added to `ENSO_GUARD_RULES` must be classified to
+ * compile.
+ *
+ * @group Guards
+ */
+export const ENSO_GUARD_RULE_KINDS: Readonly<Record<EnsoGuardRule, EnsoGuardRuleKind>> = {
+  'policy-mismatch': 'configuration',
+  'cc-safety-net': 'authorization',
+  'network-egress': 'redirect',
+  'environment-dump': 'redirect',
+  'secret-path': 'authorization',
+  'write-confinement': 'authorization',
+  'protected-internals': 'authorization',
+  'persistence-write': 'authorization',
+  'secret-write': 'authorization',
+  'stale-write': 'procedure',
+  'read-before-write': 'procedure',
+  'secret-read': 'authorization',
+}
+
+/**
  * The `customType` of the session entry the guards extension appends when it refuses a call
  * (#387 gap 1, #407 item 1).
  *

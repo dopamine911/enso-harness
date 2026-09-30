@@ -8,9 +8,9 @@
         "choose the **Context** tab at the top of the thread",
         "choose **model demo/claude-opus-4-1**"
       ],
-      "shown": ["the request to open", "2 entered since request 8", "model demo/claude-opus-4-1", "File Activity"],
+      "shown": ["the request to open", "2 entered since request 7", "model demo/claude-opus-4-1", "File Activity"],
       "measured": {
-        "enteredSince": "2 entered since request 8"
+        "enteredSince": "2 entered since request 7"
       }
     },
     {
