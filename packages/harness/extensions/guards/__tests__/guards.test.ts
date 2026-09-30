@@ -137,8 +137,9 @@ test('⚠ every verdict is a record: a denial at warn with the tool, the path an
 
 // ⚠ THE WORD A DAY'S STATS COUNT BY (#144 slice 4). The reason is prose for the model; a count
 // over prose is a regex over sentences that were written to be read. `rule` is the closed
-// vocabulary (`ENSO_GUARD_RULES`) beside it — and it stays OURS: pi is handed `{ block, reason }`
-// and nothing else, so nothing of this harness rides on the runtime's published contract.
+// vocabulary (`ENSO_GUARD_RULES`) beside it — and it stays OURS: pi is handed `{ block, reason }`,
+// plus its own `terminate` for an authorization refusal (#465), and nothing else, so nothing of
+// this harness rides on the runtime's published contract.
 test('⚠ a denial record names its rule from the closed vocabulary; pi receives block, reason and terminate alone', () => {
   const verdict = call('write', { path: '/etc/passwd' })
   expect(verdict).toEqual({ block: true, reason: expect.stringContaining('outside the workspace'), terminate: true })

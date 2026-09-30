@@ -292,8 +292,8 @@ export function createGuards(dependencies: GuardDependencies): (pi: ExtensionAPI
 export default createGuards({ analyzeBashCommand: checkCommand, harnessRoot: findRepoRoot(import.meta.url) })
 
 /**
- * A refusal as this guard produces it: pi's `{ block, reason }` plus the RULE that refused
- * (#144 slice 4). The rule is what the denial record carries and what a day's stats count
+ * A refusal as this guard produces it: pi's `{ block, reason, terminate? }` plus the RULE that
+ * refused (#144 slice 4). The rule is what the denial record carries and what a day's stats count
  * by; the reason is prose for the model. Stripped back to pi's shape at the handler, so the
  * runtime is handed exactly the contract it published and nothing of ours rides on it.
  */
