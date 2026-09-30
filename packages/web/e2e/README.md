@@ -1,11 +1,11 @@
 # Browser suite (Playwright)
 
-Drives the real dev surface in Chromium. The model-free tier runs in CI on every pull request (`.github/workflows/ci.yml`, job `e2e`), and a failing test fails the PR. It holds what `bun test` cannot: happy-dom does no layout and fires no focus-return events, so focus, scroll positions and the off-screen panes are proven only here (#486).
+Drives the real dev surface in Chromium, by hand: CI does not run it (it did from #486 until #501; a Chromium job on every pull request cost more than it caught). Run the model-free tier before merging a change to the browser surface. It holds what `bun test` cannot: happy-dom does no layout and fires no focus-return events, so focus, scroll positions and the off-screen panes are proven only here (#486).
 
 ## Run
 
 ```bash
-bun run e2e                          # model-free tier: what CI runs
+bun run e2e                          # model-free tier: run it before merging browser-surface work
 bun run e2e -- --grep "#370"         # one test, by a word in its title
 bun run e2e:model                    # one real model turn (costs tokens, needs your login)
 ```
@@ -52,7 +52,7 @@ Each of the last four was shown failing with its fix reverted (#486).
 - **Screenshots** in `screenshots/`:
   - `01-empty-state.png`, `02-mode-dialog.png`, `03-mode-answered.png`, `06-image-attached.png`, `07-image-sent.png`, `08-thread-reloaded.png`, `09-thread-bad-id.png` from the chat-surface tests. The image test answers the prompt route itself, so no model is involved;
   - `04-model-streaming.png` and `05-model-settled.png` from `@model`.
-- **`test-results/`** holds a trace for each failed test. Open one with `bunx playwright show-trace <zip>`. In CI the same folder is the `e2e-results` artifact of a failed run.
+- **`test-results/`** holds a trace for each failed test. Open one with `bunx playwright show-trace <zip>`.
 
 The names are fixed, so these are the paths every run writes.
 

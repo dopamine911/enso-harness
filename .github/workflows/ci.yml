@@ -51,43 +51,6 @@ jobs:
       - name: Gate (oxfmt + oxlint + tsc + fallow + tests + coverage floor + docs)
         run: bun run check:all
 
-  # The browser suite (#486): the model-free tier of `packages/web/e2e/` in Chromium, on every PR.
-  # It holds what the unit DOM cannot (happy-dom does no layout and fires no focus return): focus
-  # after a dialog, a scrolled reader's place across a thread switch, the off-screen panes, the
-  # boot path. It needs no secret: the stack runs over the suite's own seeded home
-  # (`e2e-home.ts`), whose one provider points at a refused port, so the only network it uses is
-  # Playwright's browser download. Blocking: a model-free test that fails fails the PR.
-  e2e:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.4" # matches the `engines.bun` floor in package.json
-
-      # Frozen, as in `gate`; `postinstall` links the vendor packages the harness manifest names,
-      # which the dev stack loads.
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      # The build the pinned `@playwright/test` chooses, with the system libraries it needs.
-      - name: Install Chromium
-        run: bunx playwright install --with-deps chromium
-
-      - name: Browser suite (model-free)
-        run: bun run e2e
-
-      # A failed run's traces and screenshots: open a trace with `bunx playwright show-trace <zip>`.
-      - name: Keep a failed run's traces
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: e2e-results
-          path: packages/web/e2e/output/test-results
-          if-no-files-found: ignore
-
   # ADVISORY, deliberately (#163): the blocking gate refuses a NEW dead-code finding; this
   # job adds what the baseline cannot see on a PR — a changed function over the complexity
   # ceiling, a semantic clone the diff introduces — and reports without blocking. Promote
