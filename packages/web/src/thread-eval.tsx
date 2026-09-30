@@ -2,6 +2,7 @@ import {
   type EnsoEvalEvent,
   type EnsoEvalScorecard,
   EnsoSessionEval,
+  EVAL_KIND_GLYPHS,
   type EvalEventKind,
   runningCounters,
 } from '@enso/core'
@@ -31,33 +32,6 @@ const readThreadEval = (threadId: string, fetchImpl: FetchLike): Promise<EvalOut
 
 /** A count the log alone gives: `—` when no day was read. */
 const logCount = (value: number | null): string => (value === null ? '—' : countText(value))
-
-/** The timeline's glyphs, the CLI's: two characters that say the kind at a glance. */
-const KIND_GLYPHS: Readonly<Record<EvalEventKind, string>> = {
-  human: '',
-  'human-correction': '!!',
-  'human-confusion': '?',
-  'prompt-queued': '><',
-  interrupt: 'XX',
-  'permission-mode': 'P',
-  write: 'w',
-  'ask-options': '?',
-  'ask-answered': 'a',
-  'ask-rejected': '!?',
-  'tool-denied': '!D',
-  'guard-refused': '!G',
-  'rule-refused': '!P',
-  'provider-refused': '!R',
-  'security-signal': '!S',
-  commit: 'c',
-  push: '^',
-  'pr-create': 'PR',
-  'pr-edit': 'pr',
-  branch: 'b',
-  gate: 'g',
-  destructive: '!',
-  outward: 'MP',
-}
 
 /** The kinds the timeline colours as a refusal or a stop — what the operator did against the run. */
 const AGAINST_THE_RUN: ReadonlySet<EvalEventKind> = new Set([
@@ -98,7 +72,7 @@ function TimelineRow({
     <li className="grid grid-cols-eval-row items-baseline gap-x-3 font-mono text-xs">
       <span className="text-muted-foreground tabular-nums">{stamp(event)}</span>
       <span className={cn('font-semibold', AGAINST_THE_RUN.has(event.kind) ? 'text-refuse' : 'text-muted-foreground')}>
-        {KIND_GLYPHS[event.kind]}
+        {EVAL_KIND_GLYPHS[event.kind].trim()}
       </span>
       <span className="text-muted-foreground tabular-nums">f={friction}</span>
       <span className="text-muted-foreground tabular-nums">r={refusals}</span>

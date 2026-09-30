@@ -85,6 +85,38 @@ export const EVAL_EVENT_KINDS = [
 export type EvalEventKind = (typeof EVAL_EVENT_KINDS)[number]
 
 /**
+ * The timeline's glyphs: two characters that say an event's kind at a glance — the CLI's column,
+ * padded to two; the Stats tab shows them trimmed. One table, so a new kind is marked once.
+ *
+ * @group Session eval
+ */
+export const EVAL_KIND_GLYPHS: Readonly<Record<EvalEventKind, string>> = {
+  human: '  ',
+  'human-correction': '!!',
+  'human-confusion': '? ',
+  'prompt-queued': '><',
+  interrupt: 'XX',
+  'permission-mode': ' P',
+  write: ' w',
+  'ask-options': ' ?',
+  'ask-answered': ' a',
+  'ask-rejected': '!?',
+  'tool-denied': '!D',
+  'guard-refused': '!G',
+  'rule-refused': '!P',
+  'provider-refused': '!R',
+  'security-signal': '!S',
+  commit: ' c',
+  push: ' ^',
+  'pr-create': 'PR',
+  'pr-edit': 'pr',
+  branch: ' b',
+  gate: ' g',
+  destructive: ' !',
+  outward: 'MP',
+}
+
+/**
  * One mechanically detected event. `index` is the transcript position for a branch fact and absent
  * for a log fact; `at` orders the two together.
  *

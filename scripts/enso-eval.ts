@@ -24,7 +24,7 @@ import {
   type EnsoEvalEvent,
   type EnsoEvalScorecard,
   type EnsoSessionEval,
-  type EvalEventKind,
+  EVAL_KIND_GLYPHS,
   readEnsoSessionEval,
   runningCounters,
 } from '../packages/core/src/index.ts'
@@ -152,32 +152,6 @@ const COMPARISON_KEYS = [
   'gateRuns',
 ] as const satisfies ReadonlyArray<keyof EnsoEvalScorecard>
 
-const KIND_GLYPHS: Readonly<Record<EvalEventKind, string>> = {
-  human: '  ',
-  'human-correction': '!!',
-  'human-confusion': '? ',
-  'prompt-queued': '><',
-  interrupt: 'XX',
-  'permission-mode': ' P',
-  write: ' w',
-  'ask-options': ' ?',
-  'ask-answered': ' a',
-  'ask-rejected': '!?',
-  'tool-denied': '!D',
-  'guard-refused': '!G',
-  'rule-refused': '!P',
-  'provider-refused': '!R',
-  'security-signal': '!S',
-  commit: ' c',
-  push: ' ^',
-  'pr-create': 'PR',
-  'pr-edit': 'pr',
-  branch: ' b',
-  gate: ' g',
-  destructive: ' !',
-  outward: 'MP',
-}
-
 /** A value as a table cell: `null` is `—` (unknown), a list is joined, the rest as is. */
 function cell(value: string | number | boolean | readonly string[] | null | undefined): string {
   if (value === null || value === undefined) return '—'
@@ -191,7 +165,7 @@ function timelineLine(event: EnsoEvalEvent, friction: number, refusals: number):
   const words = event.words === undefined ? '' : `(${event.words}w)`
   const outcome = event.outcome === undefined ? '' : ` [${event.outcome}]`
   const detail = event.detail.replace(/\s+/g, ' ').slice(0, 88)
-  return `${stamp} [${index}] ${KIND_GLYPHS[event.kind]} f=${String(friction).padEnd(3)} r=${String(refusals).padEnd(3)} ${event.kind.padEnd(16)} ${words.padEnd(7)} ${detail}${outcome}`
+  return `${stamp} [${index}] ${EVAL_KIND_GLYPHS[event.kind]} f=${String(friction).padEnd(3)} r=${String(refusals).padEnd(3)} ${event.kind.padEnd(16)} ${words.padEnd(7)} ${detail}${outcome}`
 }
 
 /** The markdown for one thread: scorecard, signals, timeline. */

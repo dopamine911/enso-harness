@@ -270,6 +270,7 @@ export {
   EnsoSessionEval,
   EVAL_DROPPED,
   EVAL_EVENT_KINDS,
+  EVAL_KIND_GLYPHS,
   type EvalEventKind,
   FRICTION_KINDS,
   OUTWARD_TOOLS,
