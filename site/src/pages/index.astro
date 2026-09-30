@@ -1,29 +1,31 @@
 ---
 /**
- * The site's front page: hello-enso's landing (helloen.so, `dopamine911/hello-enso` `index.html`),
- * rebuilt as a Starlight splash page so the landing and the documentation are one site with one
- * theme (`src/styles/theme.css`). The hero is Starlight's `Hero` slot, overridden by
- * `src/components/LandingHero.astro`; everything below it is this page.
+ * The site's front page (#503; restructured around how Enso is used, #511): the product story in
+ * the theme the docs share (`src/styles/theme.css`). It began as hello-enso's landing (helloen.so).
+ * The hero is Starlight's `Hero` slot, overridden by `src/components/LandingHero.astro`; everything
+ * below it is this page, and the full Features reference stays the exhaustive one.
  *
- * Links into the docs go through the site's base, so they hold wherever the site is served. The
- * feature map is built from the Features specs (#504): `scripts/docs/features/landing.ts` groups
- * them, a gate requires every spec to be grouped, and `site-content.ts` writes the result to
- * `src/generated/landing-features.json`, which this page reads. A new Features page appears here
- * without touching this file.
+ * ⚠ ITS SCREENSHOTS ARE CAPTURED, NOT KEPT. Each is a Features shot taken again without its
+ * numbered rings (`scripts/docs/features/landing.ts#LANDING_SHOTS`), in the same run that
+ * regenerates the docs' images, so the landing cannot drift from the app while the docs don't.
+ *
+ * The feature map near the end is generated from the Features specs (#504): `features/landing.ts`
+ * groups them, a gate requires every spec to be grouped, and `site-content.ts` writes the result to
+ * `src/generated/landing-features.json`. Links into the docs go through the site's base.
  */
 import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro'
 import { Image } from 'astro:assets'
-import contextBrowser from '../assets/landing/03-context-browser-injected-agents-md.png'
-import contextTrend from '../assets/landing/02b-context-now-and-trend.png'
+import context from '../assets/landing/captured/context-now-trend.png'
+import diff from '../assets/landing/captured/diff.png'
+import guardReceipt from '../assets/landing/captured/guards-receipt.png'
+import fork from '../assets/landing/captured/lineage-fork.png'
+import forkPoint from '../assets/landing/captured/lineage-fork-point.png'
+import prompts from '../assets/landing/captured/prompts-manager.png'
+import questions from '../assets/landing/captured/questions-ask-user.png'
+import startSession from '../assets/landing/captured/sessions-start.png'
 import smile from '../assets/landing/enso-smile.png'
-import genieRunbook from '../assets/landing/04-genie-letter-vs-spirit-runbook.png'
-import guardReceipt from '../assets/landing/07b-guard-receipt-focused.png'
-import startSession from '../assets/landing/08-start-session-conditions.png'
-import statsOverview from '../assets/landing/06-stats-overview.png'
-import toolFailures from '../assets/landing/05b-genuine-tool-failures.png'
-// Written by `scripts/docs/site-content.ts` from the Features specs, before every site build.
-import landingFeatureGroups from '../generated/landing-features.json'
 import Shot from '../components/Shot.astro'
+import landingFeatureGroups from '../generated/landing-features.json'
 import '../styles/landing.css'
 
 const base = import.meta.env.BASE_URL.replace(/\/$/, '')
@@ -31,11 +33,22 @@ const feature = (slug: string): string => `${base}/features/${slug}/`
 const github = 'https://github.com/dopamine911/zen-harness-foundation'
 
 const factory = [
-  ['Context', 'What information and assumptions are available to the model?', 'Enso exposes the actual request through the Context timeline and browser, so context can be inspected rather than inferred.'],
-  ['Tools', 'What can it do, and what evidence does that work leave?', 'Tool calls, arguments, results and failures remain part of the session record.'],
-  ['Rules', 'Which known boundaries are explicit rather than implied?', 'Guards constrain specific known paths and leave a receipt when a boundary acts.'],
-  ['Checks', 'Which claims can be tested instead of trusted?', 'Tests, mechanical gates and their results turn claims about the work into evidence that can be checked.'],
-  ['Human', 'Where does judgment add more value than another automatic step?', 'Keep the developer able to inspect, question, redirect and change the conditions when understanding matters.'],
+  ['Model', 'Which model is doing the work, and with how much effort?'],
+  ['Instructions', 'What system prompt, saved prompt and task did the run begin with?'],
+  ['Context', 'What information was actually sent with each request?'],
+  ['Tools and permissions', 'What could the agent do without asking, and where did a boundary intervene?'],
+  ['Project', 'What code and configuration was the run operating against?'],
+  ['Verification', 'What changed, what was tested, and what evidence remains?'],
+  ['Human', 'Where did you answer, correct, redirect or change the conditions?'],
+] as const
+
+const outcomes = [
+  ['Allowed', 'The action could proceed.'],
+  ['Asked', 'A decision was needed before proceeding.'],
+  ['Operator declined', 'You chose not to allow the action.'],
+  ['Guard refused', 'A known rule stopped the action before it ran.'],
+  ['Tool failed', 'The action ran and returned an error.'],
+  ['Provider refused', 'The model provider declined the request.'],
 ] as const
 ---
 
@@ -44,7 +57,7 @@ const factory = [
     // The tab reads "Give agents room to work. Keep the receipts. | Enso", as hello-enso's does.
     title: 'Give agents room to work. Keep the receipts.',
     description:
-      'Enso is an evidence-driven control plane for coding agents. Give agents room to work. Keep the receipts.',
+      'Work with capable coding agents, set the conditions, inspect the evidence, and try another path without erasing the first one.',
     template: 'splash',
     tableOfContents: false,
     prev: false,
@@ -63,115 +76,316 @@ const factory = [
     <section class="section" id="why">
       <div class="section-head">
         <div class="kicker">Trust, then verify</div>
-        <div><h2>There is another path between blind trust and zero trust.</h2></div>
+        <h2>There is another path between blind trust and zero trust.</h2>
       </div>
       <div class="trust-grid">
         <article class="trust-card">
           <div class="num">01</div>
           <h3>Blind trust</h3>
-          <p>Hand over the process and inspect the result afterward. Fast when everything goes right. Hard to reconstruct when it doesn't.</p>
+          <p>Hand over the process. Reconstruct the work when the result surprises you.</p>
         </article>
         <article class="trust-card active">
           <div class="num">02</div>
           <h3>Trust, then verify</h3>
-          <p>Give the agent meaningful freedom. Preserve enough evidence for the human to understand, challenge and intervene when judgment matters.</p>
+          <p>Give the agent meaningful freedom. Preserve enough evidence to understand the work and step in when judgment matters.</p>
         </article>
         <article class="trust-card">
           <div class="num">03</div>
           <h3>Zero trust</h3>
-          <p>Put an approval in front of every movement. It can reduce some risks, but the friction can also undermine the reason to use an agent.</p>
+          <p>Approve every movement. Stay involved, at the cost of the agent's room to work.</p>
         </article>
       </div>
-    </section>
-
-    <section class="section">
-      <div class="genie">
-        <div class="quote-panel">
-          <p class="wish">“Clean this up, fix the bug, and make it safe.”</p>
-          <div class="flow">
-            <div class="flow-row"><span>instruction</span><span>The words are clear.</span></div>
-            <div class="flow-row bad"><span>assumptions</span><span>The intended tradeoffs may not be.</span></div>
-            <div class="flow-row good"><span>evidence</span><span>When intent and outcome diverge, there is somewhere to look.</span></div>
-          </div>
-        </div>
-        <div class="copy">
-          <div class="kicker">The genie problem</div>
-          <h3>The letter of the instruction isn't always the intent.</h3>
-          <p>Humans communicate with a great deal left unsaid. Another engineer brings assumptions about the codebase, acceptable tradeoffs and what you actually meant. An agent may understand the words perfectly without sharing those assumptions.</p>
-          <p>It's the old genie problem: the wish is granted according to what you said, not necessarily what you meant.</p>
-          <p>More rules do not eliminate that gap. Neither does more autonomy. Sometimes the agent's interpretation is wrong. Sometimes your assumption is wrong. Evidence gives both of you something concrete to work from.</p>
-        </div>
-      </div>
-      <div class="centred">
-        <Shot
-          image={genieRunbook}
-          alt="Enso transcript showing an incorrect runbook location, the agent checking it, creating a new file, and the human correcting the location"
-        />
-        <p class="quiet">
-          A real handoff from the LED-412 session: the stated runbook path did not exist, the agent checked before acting, and the human later corrected where the runbook actually lived. The record makes the gap between instruction and intended outcome inspectable.
+      <div class="recognition">
+        <h3>The instruction isn't always the intent.</h3>
+        <p>You can write a perfectly reasonable prompt and get a perfectly reasonable result that still isn't what you meant.</p>
+        <p>
+          Sometimes the agent misunderstood. Sometimes you left something important unsaid. Sometimes your own assumption was
+          wrong. Enso gives you somewhere to look when the result and the intent part ways.
         </p>
       </div>
     </section>
 
-    <section class="proof section" id="product">
+    <section class="section proof" id="product">
       <div class="section-head">
-        <div class="kicker">See the system</div>
+        <div class="kicker">Work together</div>
         <div>
-          <h2>Not just the conversation.</h2>
+          <h2>Let the agent work without disappearing from the work.</h2>
           <p class="section-intro">
-            Enso makes the system behind an agent's work visible: <strong>what it knew, what it did, what changed, what was refused, and what evidence remains afterward.</strong>
+            A thread is a working session, not just a prompt and an answer. The agent can investigate, edit, run tools and keep
+            moving. When it needs your judgment, the question appears in the same place as the work.
           </p>
         </div>
+      </div>
+      <Shot image={questions} alt="An Enso thread with the agent's questions waiting for the developer's answer" wide />
+      <div class="three">
+        <article class="feature">
+          <h3>Questions when they matter</h3>
+          <p>The agent can stop and ask rather than guessing through an ambiguity. You can answer, redirect, change mode or add an image in the thread.</p>
+        </article>
+        <article class="feature">
+          <h3>Permission without prompt fatigue</h3>
+          <p>Choose how much can happen without asking. A decision for the session does not have to become a permanent global rule.</p>
+        </article>
+        <article class="feature">
+          <h3>Threads that remain threads</h3>
+          <p>Projects keep the work together. Open a stored thread later and its record is still there, ready to resume.</p>
+        </article>
+      </div>
+      <p class="feature-docs-note">You do not have to approve every step to stay part of the process.</p>
+      <nav class="chapter-links" aria-label="Work together documentation">
+        <a href={feature('chat')}>Chat →</a>
+        <a href={feature('questions-and-dialogs')}>Questions and dialogs →</a>
+        <a href={feature('permission-modes')}>Permission modes →</a>
+        <a href={feature('sessions-and-projects')}>Sessions and projects →</a>
+      </nav>
+    </section>
+
+    <section class="section" id="conditions">
+      <div class="section-head">
+        <div class="kicker">Set the conditions</div>
+        <div>
+          <h2>A run starts with conditions you can see.</h2>
+          <p class="section-intro">
+            Project, model, effort, permissions, system prompt and the task itself shape what happens next. Enso makes those
+            choices explicit at the start instead of letting them disappear into setup.
+          </p>
+        </div>
+      </div>
+      <div class="conditions-grid">
+        <figure>
+          <Shot image={startSession} alt="The Start a session dialog: model, effort, mode, system prompt, saved prompt and the first task" />
+          <figcaption class="quiet">Choose how the work starts, together, before the first request.</figcaption>
+        </figure>
+        <figure>
+          <Shot image={prompts} alt="Enso's prompt library: reusable prompts, their context cost and what the model receives" />
+          <figcaption class="quiet">
+            Reuse system, append and session prompts. Inspect their context cost and what the model will receive. The system
+            prompt stays fixed for the life of the thread.
+          </figcaption>
+        </figure>
+      </div>
+      <nav class="chapter-links" aria-label="Session conditions documentation">
+        <a href={feature('sessions-and-projects')}>Start a session →</a>
+        <a href={feature('prompts')}>Prompts →</a>
+      </nav>
+    </section>
+
+    <section class="section proof" id="understand">
+      <div class="section-head">
+        <div class="kicker">Understand what happened</div>
+        <h2>Understand what produced the result.</h2>
       </div>
       <div class="showcase">
         <article class="showcase-row">
           <div class="showcase-copy">
-            <div class="kicker">Context · request by request</div>
-            <h3>Follow what the model was carrying.</h3>
-            <p>The context view shows the whole makeup of each model request, not just a token counter. Move across the timeline, select a request, and see what changed.</p>
-            <span class="detail mono">system prompt · tool schemas · messages · injected context · tool results</span>
+            <div class="kicker">What did the model have?</div>
+            <h3>Inspect what it was working with.</h3>
+            <p>
+              Context shows the composition of each request. The Context Browser opens the exact elements: system prompt, tool
+              schemas, messages, injected context and tool results.
+            </p>
+            <span class="detail">
+              Context events also record model, mode and compaction changes. When a result surprises you, you have somewhere to
+              look.
+            </span>
+            <nav class="chapter-links" aria-label="Context documentation">
+              <a href={feature('context')}>Context →</a>
+              <a href={feature('context-browser')}>Context Browser →</a>
+            </nav>
           </div>
-          <Shot image={contextTrend} alt="Enso Context showing the current request composition and request-by-request context trend" />
+          <Shot image={context} alt="Enso Context: the composition of the next request and the request-by-request trend" />
         </article>
         <article class="showcase-row">
           <div class="showcase-copy">
-            <div class="kicker">Context browser</div>
-            <h3>Open the box.</h3>
-            <p>A total only tells you that context grew. The browser shows why. Inspect individual elements, including project instructions and tool results, and trace when they entered the request.</p>
-            <span class="detail">This is the evidence behind “what did the agent know when it did that?”</span>
+            <div class="kicker">What changed?</div>
+            <h3>Tool history tells you what was attempted. Diff tells you what is actually different.</h3>
+            <p>
+              Diff reads the project's git state, not the agent's tool history. It sees changes from an edit, a write, a shell
+              command, a formatter or your own editor.
+            </p>
+            <nav class="chapter-links" aria-label="Diff documentation">
+              <a href={feature('diff')}>Diff →</a>
+            </nav>
           </div>
-          <Shot image={contextBrowser} alt="Enso Context Browser expanded to show injected project instructions from AGENTS.md" />
-        </article>
-        <article class="showcase-row">
-          <div class="showcase-copy">
-            <div class="kicker">Failures are evidence</div>
-            <h3>See the work that did not go cleanly.</h3>
-            <p>Tool failures stay in the transcript instead of disappearing behind a polished final answer. You can see the attempted command, its arguments, the actual output, and how the agent responded.</p>
-          </div>
-          <Shot image={toolFailures} alt="Enso Chat showing genuine failed tool calls and their error output" />
-        </article>
-        <article class="showcase-row">
-          <div class="showcase-copy">
-            <div class="kicker">Stats · operational evidence</div>
-            <h3>Understand the shape of the session.</h3>
-            <p>Cost, context use, tool calls, failures and latency sit beside the transcript. The point is not a score. It is enough evidence to investigate what happened and where the work became expensive or noisy.</p>
-          </div>
-          <Shot image={statsOverview} alt="Enso Stats showing session cost, tool calls, failures, token use and cost per turn" />
+          <Shot image={diff} alt="Enso Diff: the project's changed files, and the old and new lines of a change" />
         </article>
       </div>
-      <div class="three">
-        <article class="feature"><div class="state">Chat</div><h3>Work together.</h3><p>The agent works through the task. Tool calls, questions, refusals and failures remain part of the record.</p></article>
-        <article class="feature"><div class="state">Context</div><h3>See what it saw.</h3><p>Inspect what the model was carrying and how that context changed from one request to the next.</p></article>
-        <article class="feature"><div class="state">Stats</div><h3>Understand the work.</h3><p>Cost, tool use, context, latency, failures and other operational evidence live beside the transcript.</p></article>
+      <div class="diagnostics">
+        <div class="kicker">How did the run behave?</div>
+        <h3>Separate signals. Room for judgment.</h3>
+        <p>
+          Stats helps explain where time, context and cost went. Session Eval adds a timeline of human corrections, queued
+          prompts, interrupts, declined questions, tool calls, writes, test and build activity, and refusal channels.
+        </p>
+        <p>
+          Enso keeps these signals separate instead of collapsing a session into a single quality score. They are evidence for
+          investigating a run.
+        </p>
+        <nav class="chapter-links" aria-label="Run diagnostics documentation">
+          <a href={feature('stats')}>Stats →</a>
+          <a href={feature('session-eval')}>Session Eval →</a>
+        </nav>
+      </div>
+    </section>
+
+    <section class="section" id="forks">
+      <div class="section-head">
+        <div class="kicker">Try another path</div>
+        <div>
+          <h2>Try another path without erasing the first one.</h2>
+          <p class="section-intro">
+            Pick a prompt in an existing thread and fork from there. The original stays where it is. The new thread begins with
+            the history before that point and puts the prompt back in front of you.
+          </p>
+        </div>
+      </div>
+      <div class="fork-pair">
+        <figure>
+          <Shot image={fork} alt="A fork in Enso: listed under the thread it came from, with the prompt it was forked at back in the composer" />
+          <figcaption class="quiet">
+            The fork, under the thread it came from in the rail, and the prompt it was forked at back in the composer.
+          </figcaption>
+        </figure>
+        <figure>
+          <Shot image={forkPoint} alt="A fork point: the parent thread, the model, the permission mode, the system prompt and the recorded run conditions" />
+          <figcaption class="quiet">Its fork point: where it came from, and the conditions its runs started under.</figcaption>
+        </figure>
+      </div>
+      <div class="lineage-copy showcase-copy">
+        <div class="kicker">Lineage · run provenance</div>
+        <h3>Keep the conditions with the work.</h3>
+        <p>
+          A run records conditions such as its model, effort, permissions and project revision, with fingerprints of the
+          configuration and context files it began with. If two attempts behave differently, Enso gives you somewhere to look
+          for what else changed.
+        </p>
+        <span class="detail">
+          Preserve both runs and the conditions they ran under. Inspect their fork points or compare threads with Session Eval
+          from the command line. The browser does not yet have a side-by-side comparison workspace.
+        </span>
+        <span class="detail">
+          Forks share the project's working tree and keep the original system prompt. Start a new thread to try a different
+          system prompt.
+        </span>
+        <nav class="chapter-links" aria-label="Forks documentation">
+          <a href={feature('lineage')}>Forks and lineage →</a>
+        </nav>
+      </div>
+    </section>
+
+    <section class="section" id="factory">
+      <div class="factory">
+        <div>
+          <div class="kicker">The software factory</div>
+          <h2>Don't just use an agent. Build the system it works inside.</h2>
+          <p class="section-intro">
+            The agent is one part of the system producing the software. The model, instructions, context, tools, permissions and
+            project state all shape the result. Tests, feedback and human judgment matter too.
+          </p>
+          <p class="section-intro">
+            Change one of those conditions and the result may change with it. Enso gives those conditions somewhere to live and
+            gives the work a record you can inspect.
+          </p>
+          <div class="note">
+            The software factory is not a machine you switch on and walk away from. It is a system you can inspect, tune and
+            improve.
+          </div>
+        </div>
+        <div class="factory-list">
+          {
+            factory.map(([name, question]) => (
+              <div class="factory-item">
+                <span>{name}</span>
+                <strong>{question}</strong>
+              </div>
+            ))
+          }
+        </div>
+      </div>
+    </section>
+
+    <section class="section proof" id="boundaries">
+      <div class="section-head">
+        <div class="kicker">Freedom with boundaries</div>
+        <h2>Freedom works better when the rules are clear.</h2>
+      </div>
+      <div class="boundaries-grid">
+        <div class="boundary-layers">
+          <article>
+            <h3>Permissions</h3>
+            <p>What can proceed, what needs an answer, and what is denied by policy.</p>
+          </article>
+          <article>
+            <h3>Questions</h3>
+            <p>A place for the agent to ask rather than guess.</p>
+          </article>
+          <article>
+            <h3>Guards</h3>
+            <p>Known classes of actions refused before they run, with a receipt explaining the boundary.</p>
+          </article>
+          <article>
+            <h3>Explicit web access</h3>
+            <p>A deliberate path to fetching and searching the web instead of opaque shell egress.</p>
+          </article>
+        </div>
+        <Shot image={guardReceipt} alt="An Enso guard receipt: reading .env refused as a credential read, with the guard and rule that decided it" />
+      </div>
+      <dl class="outcomes">
+        {
+          outcomes.map(([name, meaning]) => (
+            <div>
+              <dt>{name}</dt>
+              <dd>{meaning}</dd>
+            </div>
+          ))
+        }
+      </dl>
+      <nav class="chapter-links" aria-label="Boundaries documentation">
+        <a href={feature('permission-modes')}>Permissions →</a>
+        <a href={feature('questions-and-dialogs')}>Questions →</a>
+        <a href={feature('guards-and-receipts')}>Guards and receipts →</a>
+        <a href={feature('web-access')}>Web access →</a>
+      </nav>
+      <aside class="honest">
+        <div class="kicker">Security, honestly</div>
+        <h3>Enso is not a sandbox.</h3>
+        <p>
+          Enso's permissions and guards cover paths it knows how to reason about. They do not isolate the machine. If you need
+          containment, use a containment boundary.
+        </p>
+        <p>Enso's job is to make the agent's working environment easier to understand, shape and investigate.</p>
+      </aside>
+    </section>
+
+    <section class="section" id="foundation">
+      <div class="pi-panel">
+        <div>
+          <div class="kicker">Built on pi</div>
+          <h2>Use what works. Own what is different.</h2>
+        </div>
+        <div class="pi-copy">
+          <p>
+            Enso is built around pi rather than a private agent runtime of its own. pi handles the agent loop, model interaction,
+            tools, sessions, branching and compaction.
+          </p>
+          <p>
+            Enso adds the browser, context inspection, permissions, evidence, lineage, debugging and the places where human
+            judgment enters. That keeps Enso focused and gives it an existing ecosystem to build on.
+          </p>
+          <nav class="chapter-links" aria-label="Foundation documentation">
+            <a href="https://github.com/earendil-works/pi">pi →</a>
+            <a href={`${base}/architecture/`}>Architecture →</a>
+          </nav>
+        </div>
       </div>
     </section>
 
     <section class="section" id="features">
       <div class="section-head">
-        <div class="kicker">Features</div>
+        <div class="kicker">Explore the features</div>
         <div>
-          <h2>Work with the agent. Inspect the system around it.</h2>
-          <p class="section-intro">Enso's features are different views and controls over the same agent loop. Work in the thread, inspect what the model received, preserve the evidence, and branch when you want to try different conditions.</p>
+          <h2>The full product map.</h2>
+          <p class="section-intro">The complete reference for working with Enso, inspecting a run and changing its conditions.</p>
         </div>
       </div>
       <div class="features-map">
@@ -194,117 +408,27 @@ const factory = [
         }
       </div>
       <p class="feature-docs-note">
-        The feature docs document not only what each capability does, but also how to open it, what to look for, and what it does <em>not</em> do. <a href={`${base}/features/`}>Browse all feature documentation →</a>
+        The feature docs document not only what each capability does, but also how to open it, what to look for, and what it does
+        <em>not</em> do. <a href={`${base}/features/`}>Browse all feature documentation →</a>
       </p>
     </section>
 
-    <section class="section" id="factory">
-      <div class="factory">
-        <div>
-          <div class="kicker">The software factory</div>
-          <h2>Don't just use an agent. Build the system it works inside.</h2>
-          <p class="section-intro">A capable coding agent can produce software quickly. The harder problem is designing the conditions around it: context, tools, rules, verification, feedback and the places where human judgment enters.</p>
-          <div class="note">
-            The software factory is itself something you engineer. The output is software; the system producing it (context, tools, models, rules, verification, feedback and human judgment) is increasingly part of the developer's work. Enso makes that system visible enough to inspect, debug and improve.
-          </div>
-        </div>
-        <div class="factory-list">
-          {
-            factory.map(([label, question, answer]) => (
-              <div class="factory-item">
-                <span>{label}</span>
-                <strong>
-                  {question}
-                  <small class="factory-answer">{answer}</small>
-                </strong>
-              </div>
-            ))
-          }
-        </div>
-      </div>
-    </section>
-
-    <section class="section" id="pi">
-      <div class="pi-panel">
-        <div>
-          <div class="kicker">Built on pi</div>
-          <h2>Use what works. Own what is different.</h2>
-        </div>
-        <div class="pi-copy">
-          <p>Enso did not start by rebuilding an agent harness. It is built around <a class="pi-link" href="https://github.com/earendil-works/pi">pi</a>, a proven, extensible coding-agent foundation with support for models, providers, tools, skills and extensions.</p>
-          <p>That gives Enso a capable agent runtime and an existing ecosystem to build on, while Enso concentrates its own engineering on observation, evidence, controls, context inspection, verification and the places where human judgment enters the process.</p>
-          <p>When the underlying harness gains capabilities, Enso can build with them rather than recreate them. When Enso needs something different, it can extend the system at the layer where that difference matters. That is part of why new Enso capabilities can move quickly without Enso trying to own the entire stack.</p>
-          <p><strong>pi provides the agent foundation. Enso makes the system around the agent visible, inspectable and easier to improve.</strong></p>
-        </div>
-      </div>
-    </section>
-
-    <section class="section">
+    <section class="section docs-evidence" id="documentation">
       <div class="section-head">
-        <div class="kicker">Set the conditions</div>
+        <div class="kicker">Documentation as evidence</div>
         <div>
-          <h2>Freedom is not the absence of choices.</h2>
-          <p class="section-intro">A session starts with explicit conditions: the model, effort, operating mode and initial task. The agent gets room to work inside a setup you can see and reason about.</p>
+          <h2>The docs carry receipts too.</h2>
+          <p class="section-intro">
+            The feature pages are built from the application and its source. Screenshots are regenerated from an Enso session,
+            documented values are checked against what the app showed, and every feature page includes what it does not do. The
+            build checks for drift.
+          </p>
+          <nav class="chapter-links" aria-label="Documentation evidence">
+            <a href={`${base}/features/`}>Features →</a>
+            <a href={`${base}/verification/`}>Verification →</a>
+            <a href={`${base}/architecture/`}>Architecture →</a>
+          </nav>
         </div>
-      </div>
-      <Shot image={startSession} wide alt="Enso Start a session dialog showing model, effort, mode and prompt selected together" />
-    </section>
-
-    <section class="proof section">
-      <div class="section-head">
-        <div class="kicker">Control with receipts</div>
-        <div>
-          <h2>A boundary should explain itself.</h2>
-          <p class="section-intro">When a known guard refuses an action, Enso keeps the refusal in the same record as the work: what was attempted, which boundary applied, and which rule acted.</p>
-        </div>
-      </div>
-      <div class="showcase">
-        <article class="showcase-row">
-          <div class="showcase-copy">
-            <div class="kicker">Refusal ≠ failure</div>
-            <h3>Different events mean different things.</h3>
-            <p>A tool call that genuinely fails and an action Enso refuses are not the same event. These two receipts preserve that distinction instead of collapsing both into a generic error.</p>
-            <span class="detail">A missing-file failure is evidence about the environment. A guard refusal is evidence about an explicit boundary.</span>
-          </div>
-          <div class="stack">
-            <Shot image={toolFailures} hint="expand failure" alt="Enso Chat showing genuine missing-file tool failures" />
-            <Shot image={guardReceipt} hint="expand refusal" alt="Focused Enso guard receipt showing a write refused outside the workspace" />
-          </div>
-        </article>
-        <article class="showcase-row">
-          <div class="showcase-copy">
-            <div class="kicker">Guard receipt</div>
-            <h3>Known boundaries can be explicit.</h3>
-            <p>Here the agent tries to edit a neighboring repository. The write is refused as outside the active workspace, and the receipt names the guard and rule that made the decision.</p>
-            <span class="detail mono">by Enso guard · rule write-confinement</span>
-          </div>
-          <Shot image={guardReceipt} alt="Focused Enso guard receipt showing a write refused outside the workspace" />
-        </article>
-      </div>
-    </section>
-
-    <section class="section">
-      <div class="honest">
-        <div class="kicker">Security, honestly</div>
-        <h2>Enso is not a sandbox.</h2>
-        <p>Sandboxes are useful when you need a containment boundary. Enso is solving a different problem. Its guards constrain specific, known paths; they are <strong>not proof that the machine is isolated</strong>.</p>
-        <p>Trying to anticipate every action an agent might take becomes a continuing game of rules and exceptions. At the other extreme, unrestricted autonomy asks the human to trust a system they increasingly cannot see.</p>
-        <p>Enso focuses on visibility, evidence and meaningful intervention. <strong>Observation first. Control where it is useful. Receipts when something matters.</strong></p>
-      </div>
-    </section>
-
-    <section class="section">
-      <div class="section-head">
-        <div class="kicker">How Enso is built</div>
-        <div>
-          <h2>The process carries the same burden as the product.</h2>
-          <p class="section-intro">Enso itself is built with agents. The work deliberately includes mechanical gates, review, evidence and revalidation. That adds friction. It also changes what “fast” means.</p>
-        </div>
-      </div>
-      <div class="three">
-        <article class="feature"><div class="state">Prefer evidence</div><h3>Claims get checked.</h3><p>If behavior can produce a record, preserve it. If a claim can be checked mechanically, check it.</p></article>
-        <article class="feature"><div class="state">Keep the human close</div><h3>Judgment still matters.</h3><p>The goal is not constant approval. It is preserving the places where understanding and intervention are useful.</p></article>
-        <article class="feature"><div class="state">Measure the result</div><h3>Speed is not diff velocity.</h3><p>The useful measure is how quickly you can produce software you understand and are willing to keep.</p></article>
       </div>
     </section>
 
@@ -312,8 +436,8 @@ const factory = [
     <hr class="rule" />
     <section class="final">
       <Image class="enso-smile" src={smile} alt="" width={74} height={74} />
-      <h2>I check your work. You check mine. The system keeps the receipts.</h2>
-      <p>Enso is being built for developers who want capable agents as collaborative engineering peers, not invisible replacements.</p>
+      <h2>I check your work.<br />You check mine.<br />The system keeps the receipts.</h2>
+      <p>Enso is for developers who want capable agents to do real work without making the process disappear.</p>
       <div class="hero-actions">
         <a class="button primary" href={github}>View on GitHub</a>
         <a class="button" href={`${base}/features/`}>Read the docs</a>
@@ -334,6 +458,8 @@ const factory = [
   const large = box?.querySelector('img')
   const close = box?.querySelector('button')
   if (box && large && close) {
+    // Keep the fixed overlay outside Starlight's content stacking and containing blocks.
+    document.body.append(box)
     let opener: HTMLElement | null = null
     const open = (shot: HTMLElement): void => {
       const image = shot.querySelector('img')

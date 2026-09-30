@@ -1,5 +1,5 @@
 import { FEATURE_SPECS } from './index.ts'
-import type { FeatureSpec } from './spec.ts'
+import type { FeatureSpec, MarkTarget } from './spec.ts'
 
 /**
  * The feature map on the site's landing page (`site/src/pages/index.astro`, #504): four groups,
@@ -70,4 +70,35 @@ export function landingFeatureGroups(): ResolvedLandingGroup[] {
       return spec
     }),
   }))
+}
+
+/**
+ * The Features screenshots the landing page shows (#511), each taken a second time WITHOUT its
+ * numbered rings. On a Features page every ring matches a legend line below the image; the landing
+ * has no legend, so there the rings are clutter, and a ring drawn over a receipt hides the line the
+ * receipt exists to show.
+ *
+ * `feature-screenshots.ts` takes each copy in the same session, right after the ringed shot, into
+ * `LANDING_SHOTS_DIRECTORY` — so the landing's evidence is regenerated with the docs', never kept
+ * by hand. `region` crops the copy for the landing's narrower columns (absent: the ringed shot's
+ * own crop, else the whole viewport). `features-gate.test.ts` holds every key to a spec'd shot and
+ * the directory to exactly these copies.
+ */
+export interface LandingShot {
+  readonly region?: readonly MarkTarget[]
+}
+
+export const LANDING_SHOTS_DIRECTORY = 'site/src/assets/landing/captured'
+
+/** Keyed by the Features shot's image stem (`Shot['image']`). */
+export const LANDING_SHOTS: Readonly<Record<string, LandingShot>> = {
+  'questions-ask-user': {},
+  // The dialog alone: the full viewport leaves it too small to read in a half-width column.
+  'sessions-start': { region: [{ role: 'dialog', name: 'Start a session' }] },
+  'prompts-manager': { region: [{ role: 'dialog', name: 'Prompts', exact: true }] },
+  'context-now-trend': {},
+  diff: {},
+  'lineage-fork': {},
+  'lineage-fork-point': {},
+  'guards-receipt': {},
 }
