@@ -14,6 +14,7 @@ const metric = (label: string) => (page: Page) =>
 export const STATS: FeatureSpec = {
   id: 'stats',
   title: 'Stats',
+  landingTagline: 'tokens · cache · cost · latency',
   shows: [
     "The **Stats** tab analyses one thread: what it cost, how the cache behaved, which parts of the conversation were expensive, and which tools did the most. Every figure comes from pi's own session file, so a thread from last month gives the same answer as one from a minute ago.",
   ],

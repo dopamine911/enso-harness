@@ -3,6 +3,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { builtFeaturePages, renderedFeaturePages } from '../scripts/docs/feature-pages.ts'
 import { FEATURE_SPECS } from '../scripts/docs/features/index.ts'
+import { LANDING_FEATURE_GROUPS } from '../scripts/docs/features/landing.ts'
 import { type FeatureFacts, factsPath } from '../scripts/docs/features/spec.ts'
 import { quotedLiterals, REPOSITORY_ROOT, sourceFiles } from './gate-support.ts'
 
@@ -165,4 +166,17 @@ test('the label readers see JSX text, skip comments, and read bold outside code 
   expect(jsxText('<p>{label}</p>')).toEqual([])
   expect(jsxText('/* <p>Old label</p> */ <p>New label</p>')).toEqual(['New label'])
   expect(boldSpans('Use **Stats**, not `**not bold**`.\n```\n**nor this**\n```')).toEqual(['Stats'])
+})
+
+// #504: the landing page's feature map is built from the specs, grouped by hand. A new Features
+// page with no group would be missing from the landing (Diff and Prompts were, for as long as the
+// map was a copied list); a group naming a page that is gone would link to nothing.
+test('⚠ the landing groups every Features page exactly once, and names nothing else (#504)', () => {
+  const grouped = LANDING_FEATURE_GROUPS.flatMap((group) => group.features)
+  const specs = FEATURE_SPECS.map((spec) => spec.id)
+  expect({
+    ungrouped: specs.filter((id) => !grouped.includes(id)),
+    unknown: grouped.filter((id) => !specs.includes(id)),
+    twice: grouped.filter((id, position) => grouped.indexOf(id) !== position),
+  }).toEqual({ ungrouped: [], unknown: [], twice: [] })
 })

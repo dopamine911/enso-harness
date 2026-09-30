@@ -1,6 +1,7 @@
 import { copyFileSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative } from 'node:path'
 import { findRepoRoot } from '../../packages/core/src/paths.ts'
+import { landingFeatureGroups } from './features/landing.ts'
 import { SITE_BASE } from './site-base.ts'
 import { linkCitations } from './source-citations.ts'
 
@@ -28,6 +29,8 @@ import { linkCitations } from './source-citations.ts'
 const ROOT = findRepoRoot(import.meta.url)
 const DOCS = 'docs'
 const CONTENT = 'site/src/content/docs'
+/** Data the site's pages read, written here and gitignored (the landing's feature map, #504). */
+const GENERATED = 'site/src/generated'
 /**
  * The slug the repository's README is projected to. It is the one sidebar page that is not under
  * `docs/` (`site/astro.config.ts` names it; `test/site-gate.test.ts` checks it is there).
@@ -224,6 +227,19 @@ function project(): { written: number; indexes: number } {
     join(target, `${README_SLUG}.md`),
     withFrontmatter(readFileSync(join(ROOT, 'README.md'), 'utf8'), 'README.md', 'repository'),
   )
+
+  // The landing page's feature map (#504), as DATA the page reads: the site takes its content as
+  // files this script writes, never as an import of `scripts/` (`.fallowrc.jsonc` → the `site`
+  // zone). Each feature is its spec's id, title and landing tagline, grouped as
+  // `features/landing.ts` groups them.
+  const landing = landingFeatureGroups().map((group) => ({
+    kicker: group.kicker,
+    title: group.title,
+    text: group.text,
+    features: group.features.map((spec) => ({ id: spec.id, title: spec.title, tagline: spec.landingTagline })),
+  }))
+  mkdirSync(join(ROOT, GENERATED), { recursive: true })
+  writeFileSync(join(ROOT, GENERATED, 'landing-features.json'), `${JSON.stringify(landing, null, 2)}\n`)
 
   // A section with no `README.md` still needs a page at its path, because the prose links to it.
   // Derived from the directory, never written by hand: the pages it holds, by their own titles.

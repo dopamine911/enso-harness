@@ -60,6 +60,7 @@ const SELECTOR: MarkTarget = { role: 'combobox', name: 'permission mode' }
 export const PERMISSION_MODES: FeatureSpec = {
   id: 'permission-modes',
   title: 'Permission modes',
+  landingTagline: 'how much pi may do before asking',
   shows: [
     "A permission mode says how much pi may do before it asks you. Each thread has one mode at a time, and you can change it while the thread is open. Every mode but `default` is a preset Enso lays over your permission policy for that thread; the modes follow [Claude Code's](https://code.claude.com/docs/en/permission-modes):",
     MODE_TABLE,

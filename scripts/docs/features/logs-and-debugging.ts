@@ -59,6 +59,7 @@ const DRAWER: MarkTarget = { role: 'complementary', name: 'session debug', exact
 export const LOGS_AND_DEBUGGING: FeatureSpec = {
   id: 'logs-and-debugging',
   title: 'Logs and debugging',
+  landingTagline: 'live logs · debug state · bundles',
   shows: [
     "Every Enso process writes one log file per day under `ENSO_HOME/logs`: the server, the web proxy and pi itself. You can read that log in the terminal, watch it in a browser, or see one thread's state from inside the chat. When something goes wrong, a bundle collects the day's records into one file you can attach to an issue.",
   ],

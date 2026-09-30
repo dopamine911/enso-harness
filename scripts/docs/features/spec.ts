@@ -103,6 +103,12 @@ export interface FeatureSpec {
   /** The page's file stem under `docs/features/`. */
   readonly id: string
   readonly title: string
+  /**
+   * The short line beside the feature's link on the site's landing page (#504), e.g.
+   * `threads · tools · images`. Required, so a feature cannot be added without its place there;
+   * its GROUP on that page is `features/landing.ts#LANDING_FEATURE_GROUPS`.
+   */
+  readonly landingTagline: string
   /** **What it shows**: paragraphs (a table or a code block is one paragraph). */
   readonly shows: readonly string[]
   /**

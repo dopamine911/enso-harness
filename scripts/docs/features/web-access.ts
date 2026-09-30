@@ -36,6 +36,7 @@ const FETCH_CALL: MarkTarget = { toolCall: 'https://bun.sh/blog' }
 export const WEB_ACCESS: FeatureSpec = {
   id: 'web-access',
   title: 'Web access',
+  landingTagline: 'web_fetch · web_search',
   shows: [
     'pi reaches the web through two tools Enso adds, and through nothing else:',
     [

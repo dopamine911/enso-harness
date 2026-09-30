@@ -48,6 +48,7 @@ const FAILED_CAT: MarkTarget = { toolCall: 'cat docs/deploy.md' }
 export const GUARDS_AND_RECEIPTS: FeatureSpec = {
   id: 'guards-and-receipts',
   title: 'Guards and receipts',
+  landingTagline: 'known boundaries · explicit refusals',
   shows: [
     "Enso's guards check every tool call before it runs, and refuse the ones that break a rule. A refused call does not run at all. It shows in the chat as a receipt that names the guard and the rule, beside the reason pi was given.",
     'The guards refuse, by rule:',

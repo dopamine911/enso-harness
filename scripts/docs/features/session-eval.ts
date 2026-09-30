@@ -54,6 +54,7 @@ const lastCounter = (prefix: 'f' | 'r') => (page: Page) =>
 export const SESSION_EVAL: FeatureSpec = {
   id: 'session-eval',
   title: 'Session eval',
+  landingTagline: 'human and agent signals, kept separate',
   shows: [
     "A session eval is a thread's scorecard and timeline, computed only from what the session recorded. It counts what the person running the thread did (messages, corrections, queued prompts, interrupts, answers to questions, denials) and what the agent did (tool calls, writes, refusals, test and build runs and their outcomes). It lists the counts side by side and never combines them into a single score.",
     'Use it to check a claim about a run ("it never needed correcting") or to compare two runs of the same task, such as the two sides of a [fork](./lineage.md).',
