@@ -1,21 +1,25 @@
 /**
- * Manual web smoke (#71): drive the real chat surface and leave screenshots behind.
+ * The browser suite (#71, #486): drive the real chat surface in Chromium.
  *
  * Two tiers, split by cost:
- *   - default: model-free. `/mode` is an extension command that raises a select dialog and
- *     completes without a model turn, so it exercises composer → server → pi → dialog park
- *     (#27) → answer → quick-close end to end for free.
+ *   - default: model-free, in CI on every pull request. `/mode` is an extension command that
+ *     raises a select dialog and completes without a model turn, so it exercises composer →
+ *     server → pi → dialog park (#27) → answer → quick-close end to end for free; the seeded
+ *     threads (`e2e-home.ts`) give long transcripts with no model at all.
  *   - `@model`: one real model turn. Costs tokens and needs a working provider identity
- *     (`.enso/pi-agent`); excluded unless you pass `--grep @model` (see README.md).
+ *     (`.enso/pi-agent`); run by hand with `bun run e2e:model` (see README.md).
  *
- * Screenshots are the deliverable — they go to OUTPUT_DIRECTORY/screenshots under fixed
- * names (README.md). Assertions are deliberately few: this is a smoke with receipts, not a
- * regression suite. Regression lives in `bun test`.
+ * What belongs here is what the unit DOM cannot hold: happy-dom does no layout and fires no
+ * focus return, so focus, scroll and the off-screen panes are proven only in a browser. Logic
+ * and folds stay in `bun test`. The chat-surface tests also leave screenshots for a PR under
+ * OUTPUT_DIRECTORY/screenshots, under fixed names (README.md).
  */
+import { randomUUID } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Page } from '@playwright/test'
 import { expect, test } from '@playwright/test'
+import { e2eHome, SEEDED_TITLES, SEEDED_TURNS } from './e2e-home.ts'
 import { OUTPUT_DIRECTORY } from './playwright.config.ts'
 
 const SCREENSHOT_DIRECTORY = join(OUTPUT_DIRECTORY, 'screenshots')
@@ -72,15 +76,40 @@ async function waitForRunToSettle(page: Page): Promise<void> {
   await expect(page.getByRole('button', { name: STOP_BUTTON_NAME })).toHaveCount(0, { timeout: RUN_SETTLE_TIMEOUT_MS })
 }
 
-/** The permission-mode select in the composer — what a resumed thread's persisted mode shows on (#142). */
+/**
+ * The composer on screen. ⚠ Not the placeholder alone: the Start dialog's prompt box has the same
+ * one, and every off-screen pane keeps its own composer, `inert` and invisible (#472).
+ */
+function composer(page: Page): ReturnType<Page['getByPlaceholder']> {
+  return page.getByPlaceholder(COMPOSER_PLACEHOLDER).filter({ visible: true })
+}
+
+/** The permission-mode select on screen — what a resumed thread's persisted mode shows on (#142). */
 function modeControl(page: Page): ReturnType<Page['getByRole']> {
-  return page.getByRole('combobox', { name: 'permission mode' })
+  return page.getByRole('combobox', { name: 'permission mode' }).filter({ visible: true })
+}
+
+/**
+ * A new thread opens the Start dialog (#395). These tests drive the composer instead, so they put
+ * it away: Escape closes it, and the composer stays as it is (`start-session.tsx`).
+ */
+async function dismissStartDialog(page: Page): Promise<void> {
+  const dialog = page.getByRole('dialog', { name: 'Start a session' })
+  await expect(dialog).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(dialog).toHaveCount(0)
+}
+
+/** A new thread, with the Start dialog put away: what the model-free tests start from. */
+async function openNewThread(page: Page): Promise<void> {
+  await page.goto('/')
+  await dismissStartDialog(page)
+  await expect(composer(page)).toBeVisible()
 }
 
 async function typeAndSend(page: Page, message: string): Promise<void> {
-  const composer = page.getByPlaceholder(COMPOSER_PLACEHOLDER)
-  await composer.fill(message)
-  await composer.press('Enter')
+  await composer(page).fill(message)
+  await composer(page).press('Enter')
 }
 
 /**
@@ -97,8 +126,7 @@ async function captureScreenshot(page: Page, fileName: string): Promise<void> {
 
 test.describe('chat surface', () => {
   test('empty state, /mode dialog, answer, settle (model-free)', async ({ page }) => {
-    await page.goto('/')
-    await expect(page.getByPlaceholder(COMPOSER_PLACEHOLDER)).toBeVisible()
+    await openNewThread(page)
     await captureScreenshot(page, '01-empty-state')
     // The `/` palette (#338) is in the composer and opens to its filter box; Escape puts it away.
     await page.getByRole('button', { name: 'commands' }).click()
@@ -129,9 +157,8 @@ test.describe('chat surface', () => {
     const fontStylesheet = page.waitForResponse(
       (response) => response.url().includes('/fonts/@fontsource-variable/inter/') && response.url().endsWith('.css'),
     )
-    await page.goto('/')
+    await openNewThread(page)
     expect((await fontStylesheet).status()).toBe(200)
-    await expect(page.getByPlaceholder(COMPOSER_PLACEHOLDER)).toBeVisible()
     const loadedFaces = await page.evaluate(async () =>
       (await document.fonts.load('1em "Inter Variable"')).map((face) => face.family),
     )
@@ -152,18 +179,17 @@ test.describe('chat surface', () => {
         body: JSON.stringify({ threadId: 't', messageId: 'm1', generation: 1, queued: false }),
       })
     })
-    await page.goto('/')
-    await expect(page.getByPlaceholder(COMPOSER_PLACEHOLDER)).toBeVisible()
+    await openNewThread(page)
     await expect(page.getByRole('button', { name: SEND_BUTTON_NAME })).toBeDisabled()
 
     // Ctrl+V with a PNG on the clipboard, as the browser delivers it: a `paste` whose data is a file.
-    await page.getByPlaceholder(COMPOSER_PLACEHOLDER).focus()
+    await composer(page).focus()
     await page.evaluate((base64) => {
       const bytes = Uint8Array.from(atob(base64), (character) => character.charCodeAt(0))
       const transfer = new DataTransfer()
       transfer.items.add(new File([bytes], 'pixel.png', { type: 'image/png' }))
       document
-        .querySelector('textarea')
+        .querySelector('textarea[name="message"]:not([inert] *)')
         ?.dispatchEvent(new ClipboardEvent('paste', { clipboardData: transfer, bubbles: true, cancelable: true }))
     }, ONE_PIXEL_PNG)
     const strip = page.getByLabel('attached images')
@@ -187,8 +213,7 @@ test.describe('chat surface', () => {
     page,
   }) => {
     // A fresh page writes its thread's id to the URL at once.
-    await page.goto('/')
-    await expect(page.getByPlaceholder(COMPOSER_PLACEHOLDER)).toBeVisible()
+    await openNewThread(page)
     await expect(page).toHaveURL(/\?thread=[0-9a-f-]{36}$/)
     const first = new URL(page.url()).searchParams.get('thread') ?? ''
 
@@ -210,6 +235,7 @@ test.describe('chat surface', () => {
 
     // New Thread pushes; back returns to the first thread; forward to the second.
     await page.getByRole('button', { name: 'New Thread', exact: true }).click()
+    await dismissStartDialog(page)
     await expect(page).not.toHaveURL(new RegExp(`thread=${first}$`))
     const second = new URL(page.url()).searchParams.get('thread') ?? ''
     expect(second).not.toBe(first)
@@ -227,9 +253,11 @@ test.describe('chat surface', () => {
 
     // A URL that cannot name a thread: a new session, and the rail says why.
     await page.goto('/?thread=not%20a%20thread')
+    // The fallback is a new thread, so its Start dialog opens, modal, over the rail's notice.
+    await dismissStartDialog(page)
     await expect(page.getByRole('alert')).toContainText('is not a thread id')
     await expect(page).toHaveURL(/\?thread=[0-9a-f-]{36}$/)
-    await expect(page.getByPlaceholder(COMPOSER_PLACEHOLDER)).toBeVisible()
+    await expect(composer(page)).toBeVisible()
     await captureScreenshot(page, '09-thread-bad-id')
   })
 
@@ -238,8 +266,7 @@ test.describe('chat surface', () => {
     page,
   }) => {
     // A thread to come back to, with a mode that tells it apart from a fresh one.
-    await page.goto('/')
-    await expect(page.getByPlaceholder(COMPOSER_PLACEHOLDER)).toBeVisible()
+    await openNewThread(page)
     const first = new URL(page.url()).searchParams.get('thread') ?? ''
     await typeAndSend(page, MODE_COMMAND)
     await page.getByRole('button', { name: MODE_OPTION_LABEL }).click()
@@ -254,6 +281,7 @@ test.describe('chat surface', () => {
     await page.goto(`/?thread=${first}`)
     await expect(page.getByText('resuming…')).toBeVisible()
     await page.getByRole('button', { name: 'New Thread', exact: true }).click()
+    await dismissStartDialog(page)
     const fresh = new URL(page.url()).searchParams.get('thread') ?? ''
     expect(fresh).not.toBe(first)
     await expect(modeControl(page)).toHaveValue('default')
@@ -269,7 +297,7 @@ test.describe('chat surface', () => {
   })
 
   test('one real model turn @model', async ({ page }) => {
-    await page.goto('/')
+    await openNewThread(page)
     await typeAndSend(page, MODEL_PROMPT)
     // The stop affordance proves the request reached the server and a run is in flight.
     await expect(page.getByRole('button', { name: STOP_BUTTON_NAME })).toBeVisible()
@@ -280,5 +308,150 @@ test.describe('chat surface', () => {
     await expect(assistantMessage).toBeVisible()
     await expect(assistantMessage).not.toBeEmpty()
     await captureScreenshot(page, '05-model-settled')
+  })
+})
+
+// ── Held only in a real browser (#486): focus, layout and the boot path, over seeded threads ──
+// happy-dom does no layout and fires no focus-return event, so each of these was verified by hand
+// once and held by nothing after. The threads are stored in the run's own home (`e2e-home.ts`).
+
+const SEEDED = e2eHome().threads
+
+/** The threads rail, by its accessible name. */
+function rail(page: Page): ReturnType<Page['getByRole']> {
+  return page.getByRole('navigation', { name: 'threads' })
+}
+
+/** Open a seeded thread from the rail, the way a reader switches, and wait for its last turn. */
+async function switchTo(page: Page, title: string): Promise<void> {
+  await rail(page).getByText(title, { exact: true }).click()
+  await expect(page.getByText(`${title}, turn ${SEEDED_TURNS}, paragraph 6`).filter({ visible: true })).toBeVisible()
+}
+
+/** The shown pane's transcript scroller: the `role="log"` root's scrolling child, outside every inert pane. */
+async function transcriptScroll(page: Page): Promise<{ top: number; bottomGap: number }> {
+  return page.evaluate(() => {
+    const log = [...document.querySelectorAll<HTMLElement>('[role="log"]')].find(
+      (candidate) => candidate.closest('[inert]') === null,
+    )
+    const scroller = [...(log?.children ?? [])].find(
+      (child): child is HTMLElement => child instanceof HTMLElement && child.scrollHeight > child.clientHeight,
+    )
+    if (scroller === undefined) throw new Error('the shown transcript has no scroller')
+    return { top: scroller.scrollTop, bottomGap: scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight }
+  })
+}
+
+/** Is focus in the shown pane's composer, not on `<body>` or in a pane off screen? */
+function focusIsInTheComposer(page: Page): Promise<boolean> {
+  return page.evaluate((placeholder) => {
+    const focused = document.activeElement
+    return (
+      focused instanceof HTMLTextAreaElement &&
+      focused.placeholder === placeholder &&
+      focused.closest('[inert]') === null &&
+      focused.closest('[role="dialog"]') === null
+    )
+  }, COMPOSER_PLACEHOLDER)
+}
+
+test.describe('seeded threads (#486)', () => {
+  // #367 (#471): the palette hands focus off before either dialog opens, so Radix's own return
+  // target is nothing; both dialogs put it back in the composer from `onCloseAutoFocus`.
+  test('⚠ Escape on /model or /context from the palette puts focus back in the composer (#367)', async ({ page }) => {
+    await page.goto(`/?thread=${SEEDED.first}`)
+    await expect(composer(page)).toBeVisible()
+    for (const [command, dialogName] of [
+      ['model', /model/i],
+      ['context', /context/i],
+    ] as const) {
+      await page.getByRole('button', { name: 'commands' }).filter({ visible: true }).click()
+      await page.getByPlaceholder('filter commands…').fill(command)
+      // Clicked once listed, not Enter: the rows come from the server, and an Enter before they
+      // arrive chooses nothing.
+      await page.getByRole('option', { name: new RegExp(`^/${command}\\b`) }).click()
+      const dialog = page.getByRole('dialog', { name: dialogName })
+      await expect(dialog).toBeVisible()
+      await page.keyboard.press('Escape')
+      await expect(dialog).toHaveCount(0)
+      await expect.poll(() => focusIsInTheComposer(page), { message: `focus after /${command}` }).toBe(true)
+    }
+  })
+
+  // #370 (#472): an off-screen pane stays laid out, so a reader who scrolled up finds the same place.
+  test("⚠ switching threads keeps a scrolled-up reader's place, and a thread at the bottom stays at the bottom (#370)", async ({
+    page,
+  }) => {
+    await page.goto(`/?thread=${SEEDED.first}`)
+    await expect(page.getByText(`${SEEDED_TITLES.first}, turn ${SEEDED_TURNS}, paragraph 6`)).toBeVisible()
+    await switchTo(page, SEEDED_TITLES.second)
+    // A thread opens at its bottom; the scroll there is smooth, so this waits for it to arrive.
+    await expect.poll(async () => (await transcriptScroll(page)).bottomGap).toBeLessThanOrEqual(2)
+    await switchTo(page, SEEDED_TITLES.first)
+    // Scroll up in the first, as a reader does: the wheel over the transcript.
+    const transcript = page.getByRole('log').filter({ visible: true })
+    await transcript.hover()
+    await page.mouse.wheel(0, -2400)
+    await expect.poll(async () => (await transcriptScroll(page)).bottomGap).toBeGreaterThan(1000)
+    const scrolledTo = (await transcriptScroll(page)).top
+
+    await switchTo(page, SEEDED_TITLES.second)
+    // The second was left at its bottom, and is still there.
+    expect((await transcriptScroll(page)).bottomGap).toBeLessThanOrEqual(2)
+    await switchTo(page, SEEDED_TITLES.first)
+    expect((await transcriptScroll(page)).top).toBe(scrolledTo)
+  })
+
+  // #472: every pane but the shown one is laid out invisibly, skipped by style and layout, and
+  // unreachable by pointer and focus.
+  test("⚠ every off-screen pane is inert and content-visibility: hidden, and a point on the transcript is the shown pane's (#472)", async ({
+    page,
+  }) => {
+    await page.goto(`/?thread=${SEEDED.first}`)
+    await switchTo(page, SEEDED_TITLES.second)
+    await switchTo(page, SEEDED_TITLES.first)
+    const panes = await page.evaluate(() => {
+      // One status bar per pane: the pane is the bar's outermost positioned wrapper.
+      const bars = [...document.querySelectorAll<HTMLElement>('footer[aria-label="thread status"]')]
+      return bars.map((bar) => {
+        const inertPane = bar.closest<HTMLElement>('[inert]')
+        return inertPane === null
+          ? { shown: true }
+          : { shown: false, visibility: getComputedStyle(inertPane).contentVisibility }
+      })
+    })
+    expect(panes.length).toBeGreaterThanOrEqual(2)
+    expect(panes.filter((pane) => pane.shown)).toHaveLength(1)
+    for (const pane of panes.filter((candidate) => !candidate.shown))
+      expect(pane).toEqual({ shown: false, visibility: 'hidden' })
+
+    const box = await page.getByRole('log').filter({ visible: true }).boundingBox()
+    if (box === null) throw new Error('the shown transcript has no box')
+    const hit = await page.evaluate(
+      ({ left, top }) => {
+        const element = document.elementFromPoint(left, top)
+        return {
+          inInertPane: element?.closest('[inert]') !== null,
+          inShownLog: element?.closest('[role="log"]') !== null,
+        }
+      },
+      { left: box.x + box.width / 2, top: box.y + box.height / 2 },
+    )
+    expect(hit).toEqual({ inInertPane: false, inShownLog: true })
+  })
+
+  // #378 (#478): the URL's own unused id is started, not reported; a thread the server refuses is said.
+  test('⚠ a URL naming an unused thread id starts that thread with no alert; one outside the projects is refused by name (#378)', async ({
+    page,
+  }) => {
+    const unused = randomUUID()
+    await page.goto(`/?thread=${unused}`)
+    await expect(page.getByRole('dialog', { name: 'Start a session' })).toBeVisible()
+    await expect(page).toHaveURL(new RegExp(`\\?thread=${unused}$`))
+    // `role=alert` by CSS: the modal dialog hides the rail from an accessibility-tree query.
+    await expect(page.locator('[role="alert"]')).toHaveCount(0)
+
+    await page.goto(`/?thread=${SEEDED.outside}`)
+    await expect(page.locator('[role="alert"]').filter({ hasText: 'could not open the thread:' })).toHaveCount(1)
   })
 })

@@ -51,6 +51,47 @@ export const DEMO_FILES: Readonly<Record<string, string>> = {
 export const FIRST_MODEL = 'claude-sonnet-4-5'
 export const SECOND_MODEL = 'claude-opus-4-1'
 
+/**
+ * The `demo` provider, as pi's `models.json` declares a provider (#437): real prices, real
+ * windows, served on loopback at `port` by the scripted model (`feature-model.ts`). The browser
+ * suite's seeded home declares it too (#486), with nothing listening, so a model list has
+ * entries and no request can reach a real provider.
+ */
+export function demoModelsJson(port: number): { readonly providers: Readonly<Record<string, unknown>> } {
+  return {
+    providers: {
+      demo: {
+        name: 'Demo',
+        baseUrl: `http://127.0.0.1:${port}`,
+        api: 'anthropic-messages',
+        // Not a credential: the scripted model reads no key. pi offers a model only once its
+        // provider has one.
+        apiKey: 'demo-placeholder',
+        models: [
+          {
+            id: FIRST_MODEL,
+            name: 'Claude Sonnet 4.5',
+            reasoning: true,
+            input: ['text', 'image'],
+            contextWindow: 200_000,
+            maxTokens: 64_000,
+            cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
+          },
+          {
+            id: SECOND_MODEL,
+            name: 'Claude Opus 4.1',
+            reasoning: true,
+            input: ['text', 'image'],
+            contextWindow: 200_000,
+            maxTokens: 32_000,
+            cost: { input: 15, output: 75, cacheRead: 1.5, cacheWrite: 18.75 },
+          },
+        ],
+      },
+    },
+  }
+}
+
 /** The prompts, in order: the first is typed into the Start dialog, the rest into the composer. */
 export const PROMPTS = [
   'Where does the app read its database URL? Check .env too.',
