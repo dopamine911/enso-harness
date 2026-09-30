@@ -98,18 +98,17 @@ export const ThreadRuntime = Type.Object({
    */
   cancelLogin: Type.Unsafe<() => boolean>(Type.Function([], Type.Unknown())),
   /**
-   * The permission-mode receipt a run starts with (#84): picc's CURRENT mode for this
-   * session, computed the way picc itself restores it — the last persisted `modes` entry
-   * in the session branch, else the initial `default` — and the modes this session may
-   * switch to, picc's set intersected with the commands actually registered. picc keeps
-   * the live value in a closure with no getter, so this is the only honest read.
-   * Synchronous: it walks the in-memory branch and registry, no round trip — and it is
+   * The permission-mode receipt a run starts with (#84, #496): the session's CURRENT mode,
+   * computed the way the permission engine reads it — the last `active_agent` entry among the
+   * session's entries, else `default` — and the modes this session may switch to, Enso's set
+   * intersected with the commands actually registered.
+   * Synchronous: it walks the in-memory entries and registry, no round trip — and it is
    * deliberately NOT `listCommands`, whose call count the refusal path's tests pin.
    */
   permissionModeState: Type.Unsafe<() => EnsoPermissionModeState>(Type.Function([], Type.Unknown())),
   /**
    * Switch the mode (L3 step C, #162 workstream 4). The host translates to whatever its mode
-   * extension accepts — for picc, the per-mode slash command, run as a prompt the same way
+   * extension accepts — the per-mode slash command, run as a prompt the same way
    * `prompt` runs one — so the caller says a mode and never a command. Fire-and-forget like
    * `prompt`: acceptance is `outcome.onAccepted` (an extension command's acceptance IS its
    * completion), the change itself is the `permission_mode` event on the feed, and a
@@ -299,8 +298,8 @@ as `HostedThread.runtime`. Three host modules do the adapting behind it: `sessio
 the runtime's session events into the open `RuntimeEvent` shape (replicated from the vendor's own
 JSON-event mapping, so the mapper's 29 tests kept consuming exactly what they consumed over the pipe);
 `extension-ui-context.ts` is the dialog side (an extension's `select` / `confirm` / `input` / `editor`
-becomes an open dialog; `answerDialog` resolves it); `permission-dialog.ts` lifts the mode extension's
-file-permission component into a `select`.
+becomes an open dialog; `answerDialog` resolves it, the permission engine's prompt included);
+`questionnaire-dialog.ts` lifts `ask_user`'s component into a questionnaire.
 
 **Consumed by the server only.** `packages/web/src/server/thread-registry.ts` holds one per live
 thread (`ThreadEntry.hosted.runtime`), subscribes it to the feed, and hands a `ThreadLease.runtime` to
@@ -321,7 +320,7 @@ consumer is one method replaced over the fake's own parts (`FakeHostedThreadOpti
 
 | Consumer | What it replaces | What it exercises |
 |---|---|---|
-| `server-handler.test.ts` (`fakeHost`) | a scripted `prompt` that emits through the fake's `emit`, a literal `listCommands` / `permissionModeState`, a picc-shaped `inspect` | the whole HTTP surface: prompt, follow, dialog, abort, history, bundle |
+| `server-handler.test.ts` (`fakeHost`) | a scripted `prompt` that emits through the fake's `emit`, a literal `listCommands` / `permissionModeState`, an `inspect` whose entries record a mode (`modeShapedInspection`) | the whole HTTP surface: prompt, follow, dialog, abort, history, bundle |
 | `thread-registry.test.ts` (`fakeHosted`) | an `abort` that resolves only when the test says so, a `clearQueue` a test can make throw | the registry's lifecycle: acquire, lease, release, idle, dispose, the abort-then-prompt race |
 | `follow.test.ts` (`fakeHost`) | a `prompt` that holds its `outcome` so the test accepts when it chooses | the prompt/follow split frame by frame: snapshot, `seq`, status, dialog outcomes |
 | `bundle-route.test.ts` (`liveThread`) | one literal `permissionModeState`, plus the inspection | the bundle's serialization of a live thread |
@@ -387,7 +386,7 @@ itself is never the route's answer — it is the observation every follower read
 **`startHostFlow` is a login as a dialog flow** (#338 slice 3). pi's `modelRuntime.login` asks its
 questions through an interaction — a text or secret prompt, a select, a code — and the host lifts
 each to the SAME blocking dialog an extension asks, so the browser renders and answers a login as
-it renders and answers picc's mode question; a secret is an `input` dialog with `secret: true`, which
+it renders and answers a permission prompt; a secret is an `input` dialog with `secret: true`, which
 the browser masks and never echoes. Fire-and-forget like `prompt`, for the same reason: a device code
 may wait minutes, so the route answers 202 on acceptance — and releases the lease then, because a
 lease IS the registry's busy and a login is not a run (the smoke showed a held lease locking the
@@ -425,7 +424,7 @@ Replace the runtime and the files that change are the host's: `agent-host.ts` (b
 over the new loop; the storage seam lives in the same file — see `storage.md`), `session-events.ts`
 and `map-events.ts` (produce the new loop's events and map them to observations — or map the
 loop's typed events directly and retire the replicated wire shape), `extension-ui-context.ts` and
-`permission-dialog.ts` (or their equivalents, if the new loop has extensions and questions at all).
+`questionnaire-dialog.ts` (or their equivalents, if the new loop has extensions and questions at all).
 The server, the registry, the routes, the follow, the browser and every test that drives the server
 over the fake do not change — that is what the fake proves today, and it is the whole point of the
 seam. The steer/follow-up exception this section used to carry is gone with #216: a runtime with no

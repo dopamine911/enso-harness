@@ -26,7 +26,7 @@ afterAll(() => rmSync(scratch, { recursive: true, force: true }))
 const MANIFEST = {
   dependencies: { '@enso/core': 'workspace:*', 'cc-safety-net': '2.3.3' },
   pi: {
-    extensions: ['./extensions/guards/index.ts', 'node_modules/@ladbabynpm/picc-permission-modes/index.ts'],
+    extensions: ['./extensions/guards/index.ts', 'node_modules/@example/permission-engine/src/index.ts'],
     themes: 'node_modules/@mammothb/pi-tokyonight-storm/theme.json',
   },
 }
@@ -35,7 +35,7 @@ const MANIFEST = {
 // manifest-only sweep once left it unlinked, failing the extension at load (header).
 test('required packages are every dependency plus every node_modules/… manifest path, scopes intact, once each', () => {
   expect(requiredPackageNames(MANIFEST).sort()).toEqual(
-    ['@ladbabynpm/picc-permission-modes', '@mammothb/pi-tokyonight-storm', '@enso/core', 'cc-safety-net'].sort(),
+    ['@example/permission-engine', '@mammothb/pi-tokyonight-storm', '@enso/core', 'cc-safety-net'].sort(),
   )
   expect(requiredPackageNames({})).toEqual([])
   expect(requiredPackageNames({ pi: { extensions: ['./local/only.ts'] } })).toEqual([])
@@ -63,7 +63,7 @@ test('verify-or-fix: a present package is verified, an absent one is linked from
   const outcome = linkVendorPackages(repoRoot, packageRoot, MANIFEST)
   expect(outcome.verified).toEqual(['cc-safety-net'])
   expect(outcome.linked.sort()).toEqual(
-    ['@ladbabynpm/picc-permission-modes', '@mammothb/pi-tokyonight-storm', '@enso/core'].sort(),
+    ['@example/permission-engine', '@mammothb/pi-tokyonight-storm', '@enso/core'].sort(),
   )
   const linked = join(packageRoot, 'node_modules', '@enso', 'core')
   expect(lstatSync(linked).isSymbolicLink()).toBe(true)
@@ -94,5 +94,7 @@ test('a broken link is replaced with a working one', () => {
 test('a package at neither the package root nor the repo root is an error that names it', () => {
   const { repoRoot, packageRoot } = scratchRepo('missing')
   hoist(repoRoot, '@enso/core')
-  expect(() => linkVendorPackages(repoRoot, packageRoot, MANIFEST)).toThrow(/cc-safety-net|picc|tokyonight/)
+  expect(() => linkVendorPackages(repoRoot, packageRoot, MANIFEST)).toThrow(
+    /cc-safety-net|permission-engine|tokyonight/,
+  )
 })

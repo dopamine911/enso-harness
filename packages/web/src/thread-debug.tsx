@@ -54,7 +54,7 @@ function loggedLineKey(line: EnsoLogLine): string {
  *
  * Three modes can disagree, and each disagreement points somewhere different:
  *   • browser store ≠ host        → the stream or the store dropped a receipt;
- *   • host ≠ branch's last entry  → the host's walk is wrong (a picc shape change).
+ *   • host ≠ entries' last mode entry → the host's walk is wrong (an `active_agent` shape change).
  * Both are named as MISMATCH in text, not colour alone, so a test — and a screen reader —
  * can see them.
  *

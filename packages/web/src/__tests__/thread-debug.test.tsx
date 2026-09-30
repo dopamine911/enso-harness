@@ -44,10 +44,10 @@ const noop = (): void => {
   // Static markup runs no handlers; the callbacks exist only to satisfy the props.
 }
 
-const piccEntry = (mode: string, id: string): EnsoTranscriptEntry => ({
+const modeEntry = (mode: string, id: string): EnsoTranscriptEntry => ({
   kind: 'custom',
-  customType: 'modes',
-  data: { mode },
+  customType: 'active_agent',
+  data: { name: `enso-mode-${mode}` },
   id,
   at: '2026-09-08T10:00:00.000Z',
 })
@@ -64,7 +64,7 @@ function inspection(overrides: Partial<EnsoThreadInspection> = {}): EnsoThreadIn
     busy: false,
     generation: 1,
     lastActivityAt: '2026-09-08T10:00:05.000Z',
-    entries: [{ kind: 'other', type: 'session', id: 'root', at: '2026-09-08T10:00:00.000Z' }, piccEntry('plan', 'm1')],
+    entries: [{ kind: 'other', type: 'session', id: 'root', at: '2026-09-08T10:00:00.000Z' }, modeEntry('plan', 'm1')],
     ...overrides,
   }
 }
@@ -258,7 +258,11 @@ test('⚠ the refresh trigger moves on a status frame, a persisted mode or a set
   routeEnsoCustomEvent(stores, 'dialog-settled', { kind: 'dialog-settled', id: 'd1', outcome: 'answered' })
   expect(latestServerStateSequence(stores.recentChunks.get())).toBeGreaterThan(afterStatus ?? 0)
   const afterSettle = latestServerStateSequence(stores.recentChunks.get())
-  routeEnsoCustomEvent(stores, 'custom-entry', { kind: 'custom-entry', customType: 'modes', data: { mode: 'plan' } })
+  routeEnsoCustomEvent(stores, 'custom-entry', {
+    kind: 'custom-entry',
+    customType: 'active_agent',
+    data: { name: 'enso-mode-plan' },
+  })
   const afterEntry = latestServerStateSequence(stores.recentChunks.get())
   expect(afterEntry).toBeGreaterThan(afterSettle ?? 0)
   // The follow ending under the page (step 8): the last fetch may describe a session that is gone.

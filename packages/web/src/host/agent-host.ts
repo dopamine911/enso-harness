@@ -14,7 +14,6 @@ import {
 } from '@earendil-works/pi-coding-agent'
 import {
   type DialogAnswer,
-  ENSO_OPERATOR_DENIAL_ENTRY,
   ENSO_SYSTEM_PROMPT_ENTRY,
   type EnsoForkPoint,
   type EnsoHostCommandRun,
@@ -35,11 +34,12 @@ import {
   type PromptOutcome,
   type PromptRequest,
   type RuntimeCommand,
+  readRecordedMode,
   recordedSystemPrompt,
   type ThreadRuntime,
 } from '@enso/core'
 import { ensoHome, ensoSecretsPath, findRepoRoot } from '@enso/core/paths'
-import { describePermissionRules, preparePermissionRules } from '@enso/core/permission-rules'
+import { describePermissionPolicy, preparePermissionPolicy } from '@enso/core/permission-rules'
 import { quarantineSecrets } from '@enso/core/secrets'
 import { type BranchContext, type BranchRequestDetail, branchContext, branchRequestDetail } from './branch-context.ts'
 import { type BranchEval, branchEval } from './branch-eval.ts'
@@ -71,10 +71,8 @@ import { mapPiEvent } from './map-events.ts'
 import { attributeNotices, ENSO_SENDER } from './notice-sender.ts'
 import {
   freshPermissionModeState,
-  PICC_PERMISSION_MODES,
-  persistedPermissionMode,
-  piccModeCommand,
-  readPiccPersistedMode,
+  livePermissionModeState,
+  modeCommand,
   storedPermissionModeState,
 } from './permission-mode-adapter.ts'
 import { builtinProviderName, providerRefusalOf } from './provider-refusal.ts'
@@ -95,7 +93,7 @@ const log = ensoLogger('host')
  * `AgentSession` directly … instead of spawning a subprocess." This module is that: one
  * `createAgentSessionServices` + `createAgentSessionFromServices` per hosted session, the
  * harness package loaded through the SAME loader path the CLI's `-e <dir>` uses, and our
- * `ExtensionUIContext` bound so dialogs reach the browser (#27) and picc's `hasUI` is true.
+ * `ExtensionUIContext` bound so dialogs reach the browser (#27) and the extensions' `hasUI` is true.
  *
  * ⚠⚠ ONE SERVICES OBJECT PER SESSION, NEVER SHARED. Spike receipt (2026-09-05, #69): two
  * sessions created from ONE services object share their extension INSTANCES — the probe
@@ -143,12 +141,13 @@ const log = ensoLogger('host')
  * stay, as `{ modelOverrides }` alone (the vendor's own collapse; pi accepts an overrides-only
  * entry, and for Cursor it offers no model); the route and its placeholder credential go.
  *
- * ⚠⚠ `PICC_PERMISSION_MODES_CONFIG_PATH` IS PINNED TO `ENSO_HOME/permissions.json` (#446), and
- * the file is prepared first. Unpinned, picc reads its user rules from a `config.json` inside its
- * own `node_modules` directory; and a file with no rules makes it import Claude Code's
- * `~/.claude/settings.json` into that file, every time it is empty. It reads both when the
- * extension loads, per session, so the pin and the seed come before the first services.
- * `preparePermissionRules` (`@enso/core/permission-rules`) says what is kept and seeded.
+ * ⚠⚠ THE PERMISSION ENGINE READS `ENSO_HOME/permissions.json` THROUGH A LINK (#446, #496), prepared
+ * first. The engine reads its policy from `<agentDir>/extensions/pi-permission-system/config.json`
+ * and takes no path from the environment, so `preparePermissionPolicy`
+ * (`@enso/core/permission-rules`) links that path to the user's file, seeds the file when it holds
+ * no policy, and writes the mode agents (`<agentDir>/agents/enso-mode-*.md`) the mode presets live
+ * in. It runs after `PI_CODING_AGENT_DIR` names the agent dir and before the first services: the
+ * engine reads both when the extension loads, per session.
  *
  * ⚠⚠ EVERY THREAD IS A MULTI-ACCOUNT ROOT: `PI_MULTI_ACCOUNT_INDEPENDENT_ROOTS=1` (#351).
  * pi-multi-account keeps ONE root session per process for terminal pi — a lease on
@@ -206,7 +205,7 @@ const log = ensoLogger('host')
  *
  * A FORK POINT IS READ OFF THE BRANCH (#435). `forkPoint` (live) and `readStoredForkPoint` (cold,
  * one open, nothing built) walk the same branch with `fork-point.ts`: the session id, the leaf,
- * the parent the listing resolves (#433), then the recorded model and level (#434), picc's last
+ * the parent the listing resolves (#433), then the recorded model and level (#434), the last
  * mode, the cwd and the latest `enso-run-context` the harness's `run-context` extension wrote.
  *
  * ⚠⚠ CONTINUE RUNS ON pi'S PRIVATE RUN LIFECYCLE (#436). `continueRun` resumes a torn thread from
@@ -220,7 +219,7 @@ const log = ensoLogger('host')
  * resolve before the run stopped (the spike on #436). `_runAgentPrompt` is what `prompt()` itself
  * ends in (`:1331`). Whether the tail CAN be continued is decided here, not by pi
  * (`continuation.ts`): the lifecycle would answer a completed reply again. The accepted differences
- * from a prompt: no `input` or `before_agent_start` for the continued turn — so no picc mode
+ * from a prompt: no `input` or `before_agent_start` for the continued turn — so no permission-mode
  * reminder, no pi-multi-account last-moment account preflight, and the harness's `enso-run-context`
  * is not re-checked for it; no auth preflight (missing credentials become a stored error reply, and
  * the run settles); no pre-prompt compaction check (the post-run one still runs); and the first
@@ -320,9 +319,9 @@ export interface AgentHostOptions {
   /** The enso harness pi package directory; loaded as the ONLY extension source. */
   harnessPackageDir: string
   /**
-   * The permission rules file (`ENSO_HOME/permissions.json`, #446) — see the module header.
-   * REQUIRED, never defaulted: forgetting it would mean picc's `node_modules` copy, and Claude
-   * Code's settings imported into it.
+   * The permission policy file (`ENSO_HOME/permissions.json`, #446, #496) — see the module header.
+   * REQUIRED, never defaulted: forgetting it would run the engine on whatever its own config path
+   * held, not the user's policy.
    */
   permissionRulesPath: string
   /**
@@ -442,7 +441,7 @@ export type ThreadForkOutcome =
  *
  * @invariant dialog-ask-answer-settled/stop-stops Stop stops: the run's abort settles every pending dialog as `aborted`.
  * The runtime is told FIRST so its loop holds the abort signal when a blocked `tool_call` handler returns
- * (picc's permission prompt): pi's `abort()` raises it synchronously, before its first `await`
+ * (a permission prompt): pi's `abort()` raises it synchronously, before its first `await`
  * (`agent-session.js` `abort` → `agent.abort()`). Then, while the runtime winds down, `abortAllDialogs()`
  * resolves each pending question to its cancel value with the glossary's outcome for exactly this,
  * `aborted`, and every follower hears `dialog-settled`; `refuseDialogsUntil` answers any question asked
@@ -698,16 +697,15 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   process.env.PI_CODING_AGENT_DIR = agentDir
   process.env.PI_MULTI_ACCOUNT_INDEPENDENT_ROOTS = '1'
   seedMultiAccountConfig(agentDir)
-  // The rules picc reads when it loads, before the first services exist (#446). An unreadable file
-  // refuses to start the host: picc would read it as empty and import Claude Code's into it.
-  const permissionRules = preparePermissionRules(options.permissionRulesPath)
-  if (permissionRules.kind === 'unreadable') {
+  // The policy the permission engine reads when it loads, before the first services exist (#446,
+  // #496). An unreadable file refuses to start the host rather than run under a policy nobody wrote.
+  const permissionPolicy = preparePermissionPolicy(options.permissionRulesPath, agentDir)
+  if (permissionPolicy.kind === 'unreadable') {
     throw new Error(
-      `${permissionRules.path} is unreadable (${permissionRules.reason}); fix it or remove it — a removed file is seeded with Enso's default deny rules (#446)`,
+      `${permissionPolicy.path} is unreadable (${permissionPolicy.reason}); fix it or remove it — a removed file is seeded with Enso's default policy (#446)`,
     )
   }
-  process.env.PICC_PERMISSION_MODES_CONFIG_PATH = permissionRules.path
-  log.info(describePermissionRules(permissionRules))
+  log.info(describePermissionPolicy(permissionPolicy))
   // The secrets file is the USER's (`ENSO_HOME`, #421), and the root `.env` bun autoloads is THIS
   // checkout's — neither is about the trees pi operates in (a session may run anywhere, a tmpdir
   // in tests). Both resolve from the environment and the harness, never from a session's cwd.
@@ -872,8 +870,8 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     // @invariant resume/one-id One id, end to end: a file under the thread's id is OPENED, none means one is created under it.
     // `locate` resolves the id through the same listing `readStoredThread` uses (#95), so the file this later flushes
     // is found next time, and the browser adopts under the history's `threadId` (`thread-stores.ts#adoptThread`). The
-    // file sits under the agent dir pi resolves from the env the host set, where `pi --mode rpc` put it, so picc's
-    // "modes" entry and the transcript land where the TUI's would; `permissionModeState()` below walks its branch.
+    // file sits under the agent dir pi resolves from the env the host set, where `pi --mode rpc` put it, so the mode's
+    // `active_agent` entries and the transcript land where the TUI's would; `permissionModeState()` below walks them.
     const sessionManager =
       located === undefined
         ? SessionManager.create(cwd, undefined, { id: threadId })
@@ -949,7 +947,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     /**
      * @invariant follow-snapshot-frames/held-until-first-subscriber Held until the first subscriber; never held after.
      * Records emitted before the FIRST subscriber (what an extension says during session_start: multi-account's
-     * startup notify, a dialog a probe opens, picc's opening `modes` entry) are held and replayed to it with origin
+     * startup notify, a dialog a probe opens, an extension's `session_start` entry) are held and replayed to it with origin
      * `session-start`, so the browser sees them exactly as it saw pi's startup stdout over the pipe; the replay is
      * recorded again, as `replayed`, when it actually reaches a subscriber (see `subscribe`).
      *
@@ -981,34 +979,29 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     const ui = createEnsoExtensionUiContext({
       emit,
       threadId,
-      // The operator pressed No on a permission prompt (#441): picc turns it into an ordinary error
-      // result, so the fact is written here, on the branch, where the eval reads it.
-      onOperatorDenial: (denial) => sessionManager.appendCustomEntry(ENSO_OPERATOR_DENIAL_ENTRY, denial),
     })
 
-    // ⚠ SUBSCRIBE BEFORE BINDING (#88). Extensions persist state during `session_start` —
-    // picc writes its opening `modes` entry there — and pi emits `entry_appended` to whoever
+    // ⚠ SUBSCRIBE BEFORE BINDING (#88). Extensions persist state during `session_start` — any
+    // `pi.appendEntry` there — and pi emits `entry_appended` to whoever
     // is listening at that moment. Subscribing after `bindExtensions` returned meant those
     // entries went to nobody: the held-until-first-subscriber buffer sits behind THIS
-    // subscription, so nothing put them in it, and the browser saw one `modes` entry where
+    // subscription, so nothing put them in it, and the browser saw one entry where
     // the branch had two. The `ui` notifies always crossed because `ui` binds `emit` directly.
     // Nothing session_start emits is run progress (`agent_settled` comes from the run loop
     // only), so replaying it into the first run's pump is inert.
     /**
-     * The mode NOW (#84): picc's own `restoreState` walk over the live branch, re-run on
-     * every call — see the walk for why it is never cached (`getBranch()` is one
-     * parent-pointer walk that builds a fresh array; the walk is a second linear pass).
-     * The dropdown offers picc's modes AS REGISTERED HERE: picc names one command per
-     * mode, exactly after it, so the intersection is a name lookup. Read off the registry
-     * directly rather than through `listCommands` — that call's count is a contract the
-     * refusal path's tests pin, and this is not a refusal lookup.
+     * The mode NOW (#84, #496): the last `active_agent` entry among the session's ENTRIES, the
+     * walk the permission engine itself makes, re-run on every call (see the adapter).
+     * The dropdown offers the modes AS REGISTERED HERE: the permission-modes extension names
+     * one command per mode, exactly after it, so the intersection is a name lookup. Read off
+     * the registry directly rather than through `listCommands` — that call's count is a
+     * contract the refusal path's tests pin, and this is not a refusal lookup.
      */
     function currentPermissionModeState(): EnsoPermissionModeState {
-      const mode = persistedPermissionMode(sessionManager.getBranch())
       const registered = new Set(
         session.extensionRunner.getRegisteredCommands().map((command) => command.invocationName),
       )
-      return { mode, available: PICC_PERMISSION_MODES.filter((candidate) => registered.has(candidate)) }
+      return livePermissionModeState(sessionManager.getEntries(), registered)
     }
 
     /**
@@ -1312,10 +1305,10 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       try {
         const wire = toRpcWireEvent(event)
         emit(wire)
-        // L3 (#162 workstream 4): the mode extension persisted a mode. Above this seam no
-        // surface knows that entry's shape, so the host says what the mode is now, as its
-        // own event; the mapper carries it as the `permission-mode` observation.
-        if (wire.type === 'entry_appended' && readPiccPersistedMode(wire.entry) !== undefined) {
+        // L3 (#162 workstream 4): an `active_agent` entry was appended — a mode was set (#496).
+        // Above this seam no surface knows that entry's shape, so the host says what the mode is
+        // now, as its own event; the mapper carries it as the `permission-mode` observation.
+        if (wire.type === 'entry_appended' && readRecordedMode(wire.entry) !== undefined) {
           emit({ type: 'permission_mode', ...currentPermissionModeState() })
         }
         // The thinking half of the model state — the module header says why the model half
@@ -1521,7 +1514,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         return undefined
       },
       setPermissionMode(mode: string, outcome: PromptOutcome): void {
-        // Only a mode the vendor registers a command for — the runtime treats an unknown
+        // Only a mode the extension registers a command for — the runtime treats an unknown
         // slash command as ORDINARY TEXT and would send it to the model as a chat message.
         // Found by the first test that drove this path against the real extension rather
         // than the fake (#162 exit criteria); the route refuses earlier (422), this is the seam's own lock.
@@ -1529,9 +1522,9 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
           outcome.onRejected(`mode ${mode} is not one this thread offers`)
           return
         }
-        // The vendor's command, as the prompt path runs any extension command: fire-and-
+        // The extension's command, as the prompt path runs any extension command: fire-and-
         // forget, acceptance is completion, and the change arrives as `permission_mode`.
-        runtime.prompt({ message: piccModeCommand(mode) }, outcome)
+        runtime.prompt({ message: modeCommand(mode) }, outcome)
       },
       subscribe(onObservation: (observation: EnsoObservation) => void): () => void {
         listeners.add(onObservation)

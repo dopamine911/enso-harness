@@ -75,20 +75,20 @@ interface FakeSessionScript {
 }
 
 /**
- * A branch shaped like pi's, with a picc `modes` entry, and NO file on disk — the unflushed
+ * A branch shaped like pi's, with an `active_agent` mode entry (#496), and NO file on disk — the unflushed
  * state #86's inspection must report honestly rather than invent (#86). The fixture is
  * written as the file holds it and crosses the seam as the transcript of ours, through the
  * host's own converter — what the real host hands out (L2).
  */
-function piccShapedInspection(): Partial<HostedThreadInspection> {
+function modeShapedInspection(): Partial<HostedThreadInspection> {
   return {
     sessionDir: '/fake/agent/sessions/--fake-cwd--',
     entries: transcriptOf([
       { type: 'session', id: 'root', parentId: null, timestamp: '2026-09-08T00:00:00.000Z' },
       {
         type: 'custom',
-        customType: 'modes',
-        data: { mode: 'plan' },
+        customType: 'active_agent',
+        data: { name: 'enso-mode-plan' },
         id: 'm1',
         parentId: 'root',
         timestamp: '2026-09-08T00:00:01.000Z',
@@ -98,7 +98,7 @@ function piccShapedInspection(): Partial<HostedThreadInspection> {
   }
 }
 
-/** What this fake host says a fresh thread starts in — picc's five, in picc's order, as the real host would. */
+/** What this fake host says a fresh thread starts in — Enso's five modes, in menu order, as the real host would. */
 const FRESH_MODE = { mode: 'default', available: ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'auto'] }
 
 function fakeHost(
@@ -127,12 +127,12 @@ function fakeHost(
             parts.record.prompts.push(request)
             script.onPrompt(parts.emit, outcome, request.message)
           },
-          // picc's row first, the host's two after — the real host's order (#338 slice 2).
+          // The permission-modes extension's row first, the host's two after — the real host's order (#338 slice 2).
           listCommands: () => [{ name: 'mode', source: 'extension' }, ...fakeHostRows(parts.record)],
           permissionModeState: () => ({ mode: 'default', available: ['default', 'acceptEdits'] }),
           ...script.runtime?.(parts),
         }),
-        inspect: { ...piccShapedInspection(), cwd: directory, ...script.inspect },
+        inspect: { ...modeShapedInspection(), cwd: directory, ...script.inspect },
       })
       built.push(fake.record)
       return Promise.resolve(fake.hosted)
@@ -905,12 +905,12 @@ test('GET /api/threads/:id returns the branch as the transcript of ours, with se
     generation: 1,
   })
   // The branch as the transcript of ours (L2): the session entry the host does not model is
-  // `other` with its type, the picc `modes` entry is `custom` with its data — a reader
+  // `other` with its type, the `active_agent` entry is `custom` with its data — a reader
   // cross-checks the mode without knowing the vendor's stored shape.
   const entries = (inspection as EnsoThreadInspection).entries
   expect(entries).toHaveLength(2)
   expect(entries[0]).toMatchObject({ kind: 'other', type: 'session' })
-  expect(entries[1]).toMatchObject({ kind: 'custom', customType: 'modes', data: { mode: 'plan' } })
+  expect(entries[1]).toMatchObject({ kind: 'custom', customType: 'active_agent', data: { name: 'enso-mode-plan' } })
 })
 
 // #97: the two tails of one run, read after it — what the host emitted and what the server
@@ -964,7 +964,14 @@ test('⚠ the events route of an unknown thread is a 404 and builds no session; 
 // ── resume (#95) ─────────────────────────────────────────────────────────────
 
 const STORED_BRANCH: EnsoTranscriptEntry[] = transcriptOf([
-  { type: 'custom', customType: 'modes', data: { mode: 'plan' }, id: 'p', parentId: null, timestamp: '' },
+  {
+    type: 'custom',
+    customType: 'active_agent',
+    data: { name: 'enso-mode-plan' },
+    id: 'p',
+    parentId: null,
+    timestamp: '',
+  },
   {
     type: 'message',
     id: 'u1',
@@ -1138,7 +1145,7 @@ test("⚠ a thread this server holds IDLE is resumable — /history reads pi's m
   // The fake's LIVE mode is `default` while its stored file says `plan`: an idle live
   // thread's history is what pi holds now, the session's own answer, not the file's.
   expect(history.permissionMode).toEqual({ mode: 'default', available: ['default', 'acceptEdits'] })
-  // Its in-memory branch carries no messages (a session-start entry and picc's modes entry).
+  // Its in-memory branch carries no messages (a session-start entry and a mode entry).
   expect(history.messages).toEqual([])
   expect(built).toHaveLength(1)
 })

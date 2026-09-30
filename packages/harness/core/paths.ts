@@ -12,7 +12,7 @@ import {
 import { fileUrlToPath, isFileUrl } from '@enso/core/paths'
 
 /**
- * The full directory-segment deny set: picc's vendored corpus plus the enso additions
+ * The full directory-segment deny set: the shared persistence corpus plus the enso additions
  * (pi's own persistence surfaces — see the constants' comments in @enso/core guard.ts).
  */
 const ALL_PERSISTENCE_WRITE_BASENAMES: readonly string[] = [

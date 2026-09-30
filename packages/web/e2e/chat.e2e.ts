@@ -37,17 +37,17 @@ const SEND_BUTTON_NAME = 'send message'
 const STOP_BUTTON_NAME = 'stop the run'
 
 /**
- * `/mode` is picc's select dialog; this label is one of its options.
+ * `/mode` is Enso's permission-modes select ("Select permission mode:"); this label is one of
+ * its options (#496).
  *
- * ⚠ Side-effect check (2026-09-05, picc-permission-modes in node_modules): the chosen mode
- * is persisted with `pi.appendEntry("modes", …)` into the RUN'S OWN pi session file
- * (`destination: "session"`), never into `settings.json`. Every web run is a fresh session,
- * so answering "Accept edits" here cannot flip the TUI's mode. It does leave one session
- * JSONL per run under `.enso/pi-agent/sessions/`, like any other run.
+ * ⚠ Side-effect check: the chosen mode is recorded with `pi.appendEntry("active_agent", …)` into
+ * the RUN'S OWN pi session file, never into `settings.json` or the policy file. Every web run is
+ * a fresh session, so answering "Accept edits" here cannot flip the TUI's mode. It does leave one
+ * session JSONL per run under the home's `pi-agent/sessions/`, like any other run.
  */
 const MODE_COMMAND = '/mode'
 const MODE_OPTION_LABEL = /accept edits/i
-/** The status line picc emits once the mode is switched — the observable that the answer landed. */
+/** The line Enso's mode-lines store shows once the host reports the new mode — the observable that the answer landed. */
 const MODE_ANSWERED_STATUS = /Mode: acceptEdits/
 
 /** A real 1×1 PNG (signature, IHDR, IDAT, IEND) — the smallest file a decoder accepts; what the paste test puts on the clipboard. */
@@ -142,7 +142,7 @@ test.describe('chat surface', () => {
 
     await modeOption.click()
     await waitForRunToSettle(page)
-    // The answer's receipt is picc's status line (a `custom-entry`), not assistant text — an
+    // The answer's receipt is the `Mode:` line the browser shows from the host's `permission-mode`, not assistant text — an
     // extension command produces no model turn, so the assistant container stays empty
     // (and Playwright reads an empty block as hidden; receipt: first run of this spec).
     await expect(page.getByText(MODE_ANSWERED_STATUS)).toBeVisible()

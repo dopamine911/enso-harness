@@ -1,13 +1,16 @@
 import { createHash } from 'node:crypto'
 import type { BeforeAgentStartEvent, ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent'
 import {
+  ENSO_MODE_PRESETS,
   ENSO_RUN_CONTEXT_ENTRY,
   type EnsoConfigParseResult,
   type EnsoRunContext,
   lastCustomEntryData,
+  recordedPermissionMode,
 } from '@enso/core'
 import { type GitRunner, runGit } from '@enso/core/git'
-import { ensoHome } from '@enso/core/paths'
+import { ensoHome, readTextIfPresent } from '@enso/core/paths'
+import { permissionEngineConfigPath } from '@enso/core/permission-rules'
 import { type SessionConfigContext, type SessionEnsoConfig, sessionEnsoConfig } from '../../core/index.ts'
 
 /**
@@ -41,22 +44,21 @@ import { type SessionConfigContext, type SessionEnsoConfig, sessionEnsoConfig } 
  * ⚠ HASHES ONLY. No file body and no config value is written — a context file is its path and
  * sha256, the config a sha256 of the resolved value with keys sorted.
  *
- * The mode's rules are picc's: it persists them, with the mode name, as its `modes` custom entry
- * (`persistState`). This reads the last one on the branch — picc's own `restoreState` rule — and
- * hashes the rule set; the name stays picc's record, read beside this one. The fields are read by
- * name, not validated against picc's type (PR #440 review): an entry carrying none of them — picc
- * renamed its shape — records the mode as unknown (`null`), never a constant hash of nothing that
- * would stop noticing rule changes. The real-harness test in `agent-host.test.ts` loads picc and
- * asserts a hash is recorded, so a rename goes red there.
+ * The mode's rules are the permission policy the engine reads (`ENSO_HOME/permissions.json`,
+ * through the link `preparePermissionPolicy` makes) and the preset of the session's mode, which
+ * the engine merges over it (#496). The rules hash is a sha256 of both. The mode NAME is the last
+ * `active_agent` entry among the session's entries, the engine's own walk. A policy that is absent
+ * or does not parse records the mode as unknown (`null`), never a constant hash of nothing that
+ * would stop noticing rule changes.
  */
 
-/** The `customType` picc persists its mode and rules under. */
-const PICC_MODES_ENTRY = 'modes'
 export interface RunContextDependencies {
   /** The session's config — the one resolution per session (`session-config.ts`). */
   resolveSessionConfig: (session: object, context: Omit<SessionConfigContext, 'home'>) => Promise<SessionEnsoConfig>
   /** Run git in `cwd` — never in a repository an inherited environment names. */
   runGit: GitRunner
+  /** The permission policy's text as the engine reads it; `undefined` when there is none. */
+  readPermissionPolicy: () => string | undefined
 }
 
 const sha256 = (text: string): string => createHash('sha256').update(text).digest('hex')
@@ -95,21 +97,17 @@ async function resolvedConfig(
   }
 }
 
-/** The persisted rule fields of picc's `modes` entry (`ModesPersistedEntry`), in the order they are hashed. */
-const PICC_RULE_FIELDS = [
-  'alwaysAllowRules',
-  'alwaysDenyRules',
-  'alwaysAskRules',
-  'additionalWorkingDirectories',
-] as const
-
-function modeRules(branch: readonly unknown[]): EnsoRunContext['mode'] {
-  const data = lastCustomEntryData(branch, PICC_MODES_ENTRY)
-  if (typeof data !== 'object' || data === null) return null
-  const persisted = data as Record<string, unknown>
-  if (PICC_RULE_FIELDS.every((field) => persisted[field] === undefined)) return null
-  const rules = Object.fromEntries(PICC_RULE_FIELDS.map((field) => [field, persisted[field] ?? null]))
-  return { rulesHash: sha256(canonicalJson(rules)) }
+function modeRules(entries: readonly unknown[], policyText: string | undefined): EnsoRunContext['mode'] {
+  if (policyText === undefined) return null
+  let policy: unknown
+  try {
+    policy = JSON.parse(policyText)
+  } catch {
+    return null
+  }
+  const mode = recordedPermissionMode(entries)
+  const preset = mode === 'default' ? null : ENSO_MODE_PRESETS[mode]
+  return { rulesHash: sha256(canonicalJson({ policy, preset })) }
 }
 
 /**
@@ -139,7 +137,7 @@ async function runContextOf(
       path: file.path,
       sha256: sha256(file.content),
     })),
-    mode: modeRules(context.sessionManager.getBranch()),
+    mode: modeRules(context.sessionManager.getEntries(), dependencies.readPermissionPolicy()),
   }
 }
 
@@ -160,10 +158,21 @@ export function createRunContext(dependencies: RunContextDependencies): (pi: Ext
 /**
  * The pi entry point — the session's config in `ENSO_HOME` (#421), whichever surface loads this;
  * git run through `@enso/core/git` rather than `pi.exec`, which takes no environment, so the
- * inherited repository-locating variables can be dropped. Read per call: the environment at the
- * run, not at load.
+ * inherited repository-locating variables can be dropped; the permission policy at the path the
+ * engine reads under `PI_CODING_AGENT_DIR`, which both Enso surfaces set (#496). Read per call:
+ * the environment at the run, not at load.
  */
 export default createRunContext({
   resolveSessionConfig: (session, context) => sessionEnsoConfig(session, { ...context, home: ensoHome(process.env) }),
   runGit,
+  readPermissionPolicy: () => {
+    const agentDir = process.env.PI_CODING_AGENT_DIR
+    if (agentDir === undefined) return undefined
+    try {
+      return readTextIfPresent(permissionEngineConfigPath(agentDir))
+    } catch {
+      // Unreadable (a permission error, a dangling link): the mode is unknown, never a failed run.
+      return undefined
+    }
+  },
 })

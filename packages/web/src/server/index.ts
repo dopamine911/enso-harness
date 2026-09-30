@@ -381,8 +381,8 @@ export interface EnsoServerOptions {
   /** Scratch config dir for pi, so the operator's own packages stay invisible. */
   agentDir: string
   /**
-   * The permission rules file pi runs under (`ENSO_HOME/permissions.json`, #446). Required, like
-   * `harnessPackageDir`: forgetting it would mean picc's own `node_modules` copy.
+   * The permission policy file pi runs under (`ENSO_HOME/permissions.json`, #446, #496). Required,
+   * like `harnessPackageDir`: forgetting it would run the engine on whatever its own config path held.
    */
   permissionRulesPath: string
   /** Where this process's log file is — the launcher configured logging there; the bundle route reads it (#132). */

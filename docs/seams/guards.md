@@ -114,12 +114,12 @@ export const DEFAULT_GUARD_POLICY: GuardPolicy = {
 
 More top-level constants in the same module are corpus, not schema, and are read by
 `packages/harness/core/paths.ts` and `environment-dump.ts`: `PERSISTENCE_WRITE_BASENAMES` and `PERSISTENCE_WRITE_DIRECTORIES`
-(vendored lists of shell-init, git, editor and agent-config paths a write would *install* something
+(Enso's lists of shell-init, git, editor and agent-config paths a write would *install* something
 into, matched by exact basename — `core/src/guard.ts#PERSISTENCE_WRITE_BASENAMES`), `ENSO_PERSISTENCE_WRITE_DIRECTORIES` (`.pi`,
-`.agents`, `.enso`, `.cc-safety-net`: the runtime's and the harness's own persistence surfaces, kept
-apart so the vendored block stays byte-comparable, `core/src/guard.ts#ENSO_PERSISTENCE_WRITE_DIRECTORIES`), `ENSO_PERSISTENCE_WRITE_BASENAMES`
-(the shell-init files picc omits — `.zshenv`, `.zlogin`, `.zlogout`, `.bash_login`, `.bash_logout` — and
-direnv's `.envrc`, apart for the same reason, #160), `PROC_ENVIRON_PATH` and `PROC_ENVIRON_IN_COMMAND`
+`.agents`, `.enso`, `.cc-safety-net`: the runtime's and the harness's own persistence surfaces,
+`core/src/guard.ts#ENSO_PERSISTENCE_WRITE_DIRECTORIES`), `ENSO_PERSISTENCE_WRITE_BASENAMES`
+(the further shell-init files — `.zshenv`, `.zlogin`, `.zlogout`, `.bash_login`, `.bash_logout` — and
+direnv's `.envrc`, #160), `PROC_ENVIRON_PATH` and `PROC_ENVIRON_IN_COMMAND`
 (a process's environment, per process or per thread: one shape for the read gate and the shell deny,
 #160 §5), and `SECRET_BASENAME_PATTERNS` (`core/src/guard.ts#SECRET_BASENAME_PATTERNS`).
 
@@ -230,8 +230,8 @@ allow at `debug`; never silent (the `tool_call` handler; pinned by `guards.test.
 **Consumed by the runtime.** Handlers stack; the first `block` returns and cannot be un-blocked by a
 later extension, whatever the load order (the header of `guards/index.ts`). The participants and their load order are
 the manifest, `pi.extensions` in `packages/harness/package.json`: logging, **guards**, web-fetch, web-search, the
-mode extension, the multi-account extension, ask-user, system-prompt and run-context. Two of those register a `tool_call` handler — guards and
-the mode extension, in that order.
+permission engine, the mode extension, the multi-account extension, ask-user, system-prompt and run-context. Two of those register a `tool_call` handler — guards and
+the permission engine, in that order (#496; the mode extension registers none).
 
 **Second implementation:** the injected analyzer. `guards.test.ts#loadGuardRuntime` builds the extension over a
 stand-in `ExtensionAPI` (captures `on`, fakes `getAllTools`) and an analyzer that allows everything,

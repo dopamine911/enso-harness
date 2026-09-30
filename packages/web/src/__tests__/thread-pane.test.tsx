@@ -1363,8 +1363,8 @@ test("⚠ the debug pane names a MISMATCH between the page's mode and the server
         busy: false,
         generation: 3,
         lastActivityAt: new Date().toISOString(),
-        // The branch agrees with the host (picc's modes entry says plan): the one disagreement is the page's.
-        entries: [{ kind: 'custom', id: 'm1', customType: 'modes', data: { mode: 'plan' } }],
+        // The branch agrees with the host (its `active_agent` entry says plan): the one disagreement is the page's.
+        entries: [{ kind: 'custom', id: 'm1', customType: 'active_agent', data: { name: 'enso-mode-plan' } }],
       },
     },
   })

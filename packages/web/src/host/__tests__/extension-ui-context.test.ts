@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, expect, test } from 'bun:test'
-import { type EnsoOperatorDenial, type EnsoQuestionnaireResult, QUESTIONNAIRE_COMPONENT_KEY } from '@enso/core'
+import { type EnsoQuestionnaireResult, QUESTIONNAIRE_COMPONENT_KEY } from '@enso/core'
 import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
 import type { LogRecorder } from '@logtape/testing/recorder'
 import {
@@ -7,7 +7,6 @@ import {
   createEnsoExtensionUiContext,
   type EnsoExtensionUiContext,
 } from '../extension-ui-context.ts'
-import { PICC_PERMISSION_DIALOG_MODULE } from '../permission-dialog.ts'
 import type { RuntimeEvent } from '../runtime-event.ts'
 
 /**
@@ -17,18 +16,9 @@ import type { RuntimeEvent } from '../runtime-event.ts'
  * surface is inert — pi's rpc mode's behaviour, which extensions already tolerate.
  */
 
-/** picc's `createFilePermissionDialogFactory(opts)` — the value it hands `ctx.ui.custom`. */
-type PermissionFactoryBuilder = (options: Record<string, unknown>) => CustomComponentFactory<string | null>
-
 let logs: LogRecorder
-let createFilePermissionDialogFactory: PermissionFactoryBuilder
 beforeAll(async () => {
   logs = await recordEnsoLogs()
-  // Runtime import, as the host does it: picc's sources must not enter this package's type graph.
-  const loaded = (await import(PICC_PERMISSION_DIALOG_MODULE)) as {
-    createFilePermissionDialogFactory: PermissionFactoryBuilder
-  }
-  createFilePermissionDialogFactory = loaded.createFilePermissionDialogFactory
 })
 beforeEach(() => logs.clear())
 afterAll(releaseEnsoLogs)
@@ -173,14 +163,15 @@ test('abortAllDialogs settles every pending dialog as aborted, each blocked call
   const { uiContext, abortAllDialogs, requests, events } = contextUnderTest()
   const a = uiContext.confirm('A?', 'm')
   const b = uiContext.select('B', ['x', 'y'])
-  // picc's permission prompt, exactly as it asks it — lifted to a select on the same pending map (#73)
-  const permission = uiContext.custom<string | null>(createFilePermissionDialogFactory(WRITE_PROMPT), { overlay: true })
+  // A lifted component parks on the same pending map, and is swept with the rest.
+  const questionnaire = uiContext.custom<EnsoQuestionnaireResult>(
+    questionnaireComponent({ title: 'Q', questions: [ONE_QUESTION] }) as never,
+  )
   await untilEmitted(requests, 3)
   abortAllDialogs()
   expect(await a).toBe(false)
   expect(await b).toBeUndefined()
-  // picc reads `choice === "Yes"`; the cancel value is not "Yes", so the tool is denied
-  expect(await permission).toBeUndefined()
+  expect(await questionnaire).toEqual({ cancelled: true })
   expect(settles(events).map((settle) => settle.outcome)).toEqual(['aborted', 'aborted', 'aborted'])
   abortAllDialogs()
   expect(settles(events)).toHaveLength(3)
@@ -277,109 +268,10 @@ test("the terminal-only surface is inert, exactly as in pi's rpc mode", async ()
   expect(events).toEqual([])
 })
 
-// ── picc's permission prompt, through `custom` (#73) ─────────────────────────
-
-/** Drain microtasks until `count` records exist — the lift awaits a cached module promise, so depth is not one tick. */
+/** Drain microtasks until `count` records exist — a lift awaits the component build, so depth is not one tick. */
 async function untilEmitted(events: RuntimeEvent[], count: number): Promise<void> {
   for (let drained = 0; drained < 100 && events.length < count; drained += 1) await Promise.resolve()
 }
-
-const WRITE_PROMPT = {
-  options: ['Yes', 'Yes, allow all edits during this session (shift+tab)', 'No'],
-  title: 'Create file',
-  subtitle: 'receipt-73.txt',
-  question: 'Do you want to create this file: receipt-73.txt?',
-  previewLines: ['ok'],
-  showPanel: true,
-}
-
-test("⚠⚠ picc's permission prompt reaches the browser as a select with its options and detail, and the answer is the option string", async () => {
-  const { uiContext, answerDialog, requests, pendingDialogCount } = contextUnderTest()
-  // Exactly picc's call: `ctx.ui.custom<FilePermissionChoice>(createFilePermissionDialogFactory(opts), {overlay…})`.
-  const pending = uiContext.custom<string | null>(createFilePermissionDialogFactory(WRITE_PROMPT), { overlay: true })
-  await untilEmitted(requests, 1) // the factory and the lift are awaited before the request is emitted
-  expect(requests).toHaveLength(1)
-  expect(requests[0]).toMatchObject({
-    type: 'extension_ui_request',
-    method: 'select',
-    title: 'Create file',
-    options: WRITE_PROMPT.options,
-  })
-  expect(String(requests[0]?.message)).toContain('Do you want to create this file: receipt-73.txt?')
-  expect(String(requests[0]?.message)).toContain('ok')
-  expect(pendingDialogCount()).toBe(1)
-  answerDialog({ id: requestId(requests[0]), value: 'Yes' })
-  // picc's own check is `choice === "Yes"` — the string it offered, back verbatim.
-  expect(await pending).toBe('Yes')
-  expect(pendingDialogCount()).toBe(0)
-})
-
-// #441: picc turns a No into an ordinary error result, so the ONLY record of which button the
-// operator pressed is this hook. An allow says nothing; a cancel is pi's "dismissed", not a deny.
-test("⚠ the operator's No on a lifted prompt is reported with the dialog id and title; Yes and cancel are not", async () => {
-  const denials: EnsoOperatorDenial[] = []
-  const requests: RuntimeEvent[] = []
-  const { uiContext, answerDialog, cancelAllDialogs } = createEnsoExtensionUiContext({
-    emit: (event: RuntimeEvent) => {
-      if (event.type === 'extension_ui_request') requests.push(event)
-    },
-    threadId: THREAD,
-    onOperatorDenial: (denial: EnsoOperatorDenial) => denials.push(denial),
-  })
-  const denied = uiContext.custom<string | null>(createFilePermissionDialogFactory(WRITE_PROMPT), { overlay: true })
-  await untilEmitted(requests, 1)
-  answerDialog({ id: requestId(requests[0]), value: 'No' })
-  expect(await denied).toBe('No')
-  expect(denials).toEqual([{ dialogId: requestId(requests[0]), option: 'No', title: 'Create file' }])
-
-  const allowed = uiContext.custom<string | null>(createFilePermissionDialogFactory(WRITE_PROMPT), { overlay: true })
-  await untilEmitted(requests, 2)
-  answerDialog({ id: requestId(requests[1]), value: 'Yes' })
-  expect(await allowed).toBe('Yes')
-  const cancelled = uiContext.custom<string | null>(createFilePermissionDialogFactory(WRITE_PROMPT), { overlay: true })
-  await untilEmitted(requests, 3)
-  cancelAllDialogs()
-  expect(await cancelled).toBeUndefined()
-  expect(denials).toHaveLength(1)
-})
-
-test("cancelling the lifted prompt resolves picc's 'dismissed' value; a non-picc component still resolves undefined at once", async () => {
-  const { uiContext, answerDialog, cancelAllDialogs, requests } = contextUnderTest()
-  const dismissed = uiContext.custom<string | null>(createFilePermissionDialogFactory(WRITE_PROMPT))
-  await untilEmitted(requests, 1)
-  answerDialog({ id: requestId(requests[0]), cancelled: true })
-  expect(await dismissed).toBeUndefined()
-  // teardown while a prompt is open: the extension is released, not left hanging
-  const torn = uiContext.custom<string | null>(createFilePermissionDialogFactory(WRITE_PROMPT))
-  await untilEmitted(requests, 2)
-  cancelAllDialogs()
-  expect(await torn).toBeUndefined()
-  // and pi's rpc contract for anything else is untouched: no request, undefined
-  const before = requests.length
-  expect(await uiContext.custom(() => ({ render: () => [], invalidate: () => undefined }))).toBeUndefined()
-  expect(requests).toHaveLength(before)
-})
-
-// ⚠ The catch that exists so a picc module that fails to load can never silently reopen #73:
-// the extension is released with "dismissed", the operator is told why, no request is emitted.
-test("⚠ a lift that rejects (picc's module did not load) fails closed: undefined to the extension, an error logged, no request", async () => {
-  const events: RuntimeEvent[] = []
-  const { uiContext } = createEnsoExtensionUiContext({
-    emit: (event: RuntimeEvent) => events.push(event),
-    threadId: THREAD,
-    liftDialog: () => Promise.reject(new Error('Cannot find module filePermissionDialog.ts')),
-  })
-  const answer = await uiContext.custom<string | null>(createFilePermissionDialogFactory(WRITE_PROMPT))
-  expect(answer).toBeUndefined()
-  expect(events).toEqual([])
-  expect(logs.records).toHaveLength(1)
-  logs.assertLogged({
-    level: 'error',
-    rawMessage: /#73/,
-    properties: (properties: Readonly<Record<string, unknown>>) =>
-      properties.threadId === THREAD && String(properties.error).includes('Cannot find module'),
-  })
-})
 
 test('a factory that resolves no component degrades to undefined instead of throwing on dispose', async () => {
   const { uiContext, events } = contextUnderTest()
@@ -389,7 +281,7 @@ test('a factory that resolves no component degrades to undefined instead of thro
   expect(events).toEqual([])
 })
 
-// ⚠ pi's rpc mode never ran the factory, so every non-picc factory used to get `undefined` at
+// ⚠ pi's rpc mode never ran the factory, so every unknown factory used to get `undefined` at
 // once. Building against the inert terminal must not take that away (Codex, PR #107): a factory
 // that throws, rejects, or never produces a component falls back the same way, with a report.
 test('⚠ a factory that throws or rejects against the inert terminal falls back to undefined, reported, no request', async () => {

@@ -170,6 +170,18 @@ export {
 } from './observation.ts'
 export { EnsoPermissionModeChange, EnsoPermissionModeState } from './permission-mode.ts'
 export {
+  ACTIVE_AGENT_CUSTOM_TYPE,
+  ENSO_AUTO_AUTHORIZER,
+  ENSO_DEFAULT_PERMISSION_MODE,
+  ENSO_MODE_PRESETS,
+  ENSO_PERMISSION_MODES,
+  type EnsoPermissionModeName,
+  modeAgentFile,
+  modeAgentName,
+  readRecordedMode,
+  recordedPermissionMode,
+} from './permission-modes.ts'
+export {
   ENSO_PROJECT_HEADER,
   EnsoDirectoryEntry,
   EnsoDirectoryListing,

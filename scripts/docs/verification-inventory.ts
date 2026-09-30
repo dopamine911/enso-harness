@@ -335,7 +335,7 @@ const DOUBLE_METADATA: readonly DoubleMetadata[] = [
     file: 'packages/web/src/server/__tests__/server-handler.test.ts',
     symbol: 'fakeHost',
     label: '`fakeHost` (server handler)',
-    seam: '`createFakeAgentHost` over `createFakeHostedThread` with a scripted prompt and a picc-shaped inspection',
+    seam: '`createFakeAgentHost` over `createFakeHostedThread` with a scripted prompt and an inspection whose entries record a mode (`modeShapedInspection`)',
     productionSurface: 'server request routing and runtime event delivery',
     exported: false,
   },

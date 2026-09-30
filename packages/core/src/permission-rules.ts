@@ -1,133 +1,345 @@
 /**
- * The permission rules pi runs under (#446): `ENSO_HOME/permissions.json`, never a copy of
- * another tool's settings.
+ * The permission policy pi runs under (#446, #496): `ENSO_HOME/permissions.json`, in
+ * `@gotgenes/pi-permission-system`'s format, never a copy of another tool's settings.
  *
- * The permission-modes extension reads its user rules from the file the host and the terminal
- * launcher point it at. Two facts about how it reads them make this module necessary:
+ * gotgenes reads its policy from one place only, `<agentDir>/extensions/pi-permission-system/
+ * config.json`, and there is no setting to point it elsewhere. So `preparePermissionPolicy`
+ * makes that path a symlink to the user's file. The file stays where #446 put it, and gotgenes'
+ * reload on change still works, since it follows the link and stats the target.
  *
- *   1. Left unpointed, it reads a `config.json` inside its own `node_modules` directory: one
- *      copy per checkout, reset by `bun install`, outside `ENSO_HOME`.
- *   2. ⚠ A file with NO RULES is read as "import Claude Code's": the extension then reads
- *      `~/.claude/settings.json` and writes its `permissions` block into the file. It does that
- *      every time the file is empty, not once. So Enso never lets the extension see an empty
- *      or missing file: `preparePermissionRules` seeds `ENSO_DEFAULT_DENY_RULES` first.
+ * It also writes the mode agent files (`permission-modes.ts`) beside pi's other agent
+ * files, because gotgenes reads a mode's preset from there.
  *
- * A file that is there and unreadable refuses the launch rather than being replaced: it is a
- * policy file, like `ENSO_HOME/config.json`, and the extension would otherwise treat it as
- * empty and import Claude Code's rules into it.
+ * ⚠ gotgenes reads a file it cannot parse as an EMPTY policy, and an empty policy has no deny
+ * rules at all: every call asks. That is why an unreadable file refuses the launch here rather
+ * than being passed on. A file the user breaks while a session runs still reaches gotgenes that
+ * way; nothing here can stop that.
  *
- * Only plain JSON is accepted. The extension also strips JavaScript-style comments before it
- * parses, so every file this module accepts, the extension reads the same way. A commented file
- * is refused here even though the extension would read it; that is the safe direction.
+ * Only plain JSON is accepted. gotgenes also strips JavaScript-style comments before it parses,
+ * so every file this module accepts, it reads the same way. A commented file is refused here
+ * even though gotgenes would read it; that is the safe direction.
  *
  * @module
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname } from 'node:path'
+import {
+  existsSync,
+  linkSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readlinkSync,
+  rmSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
+import { ENSO_AUTO_AUTHORIZER, ENSO_PERMISSION_MODES, modeAgentFile, modeAgentName } from './permission-modes.ts'
+
+/** `.env` files are denied everywhere; the example template stays readable. */
+const ENV_FILES_DENIED = { '*.env': 'deny', '*.env.*': 'deny' } as const
 
 /**
- * The rules a fresh `ENSO_HOME` starts with: the git escapes Enso's guards do not already
- * refuse (force-push is `cc-safety-net`'s `git.push-force`). Deny rules only, so seeding never
- * widens what runs without asking.
+ * The policy a fresh `ENSO_HOME` starts with.
  *
- * ⚠ `git commit * -n*` is deliberately absent: through the extension's matcher it also denies
- * a commit whose MESSAGE contains ` -n` (probed). `-n` right after `commit` is still denied.
+ * - **Tools:** reads and searches run, as do Enso's `ask_user` and `web_search`; edits and writes
+ *   ask; anything unnamed asks (`"*"`), `web_fetch` included.
+ * - **Bash:** asks, except gotgenes' documented read-only allowlist (its "Read-Only Bash Command
+ *   Allowlist" recipe, trimmed of `less`/`more`, which can escape to a shell). The allowlist is
+ *   safe to seed because gotgenes resolves a chain to its most restrictive part and floors
+ *   wrappers (`sh -c`, `sudo`, `xargs`) to ask.
+ * - **Git:** the escapes Enso's guards do not already refuse are denied (force-push is
+ *   `cc-safety-net`'s `git.push-force`).
+ * - **`.env` files:** denied for every tool and every bash command, through symlinks too.
+ * - **Outside the project:** asks.
+ * - **`auto` mode:** `authorizerChain` names Enso's classifier link. The link defers in every
+ *   other mode, and a user who removes the name gets prompts in `auto`, never fewer.
+ *
+ * ⚠ `path_write` is `allow` inside the project on purpose. gotgenes checks a bash path argument
+ * against BOTH directions unless the command is one of its pure readers, so `ask` here made
+ * `git diff src/a.ts` ask (probed). The cost: an allowlisted command's redirect (`cat a > b`)
+ * writes inside the project without asking. Writes outside still ask through
+ * `external_directory`.
+ *
+ * ⚠ `git commit * -n*` is deliberately absent: it would also deny a commit whose MESSAGE contains
+ * ` -n`. `-n` right after `commit` is still denied.
  *
  * @group Permission mode
  */
-export const ENSO_DEFAULT_DENY_RULES: readonly string[] = [
-  'Bash(git commit --no-verify*)',
-  'Bash(git commit * --no-verify*)',
-  'Bash(git commit -n*)',
-  'Bash(git push --delete *)',
-  'Bash(git push * --delete *)',
-]
+export const ENSO_DEFAULT_PERMISSION_POLICY = {
+  authorizerChain: [ENSO_AUTO_AUTHORIZER],
+  permission: {
+    '*': 'ask',
+    read: 'allow',
+    grep: 'allow',
+    find: 'allow',
+    ls: 'allow',
+    edit: 'ask',
+    write: 'ask',
+    // Enso's own tools. Asking the user is itself the check; a search sends only a query through
+    // the session's own provider. `web_fetch` reaches any URL, so it stays on the `*` ask.
+    ask_user: 'allow',
+    web_search: 'allow',
+    path_read: { '*': 'allow', ...ENV_FILES_DENIED, '*.env.example': 'allow' },
+    path_write: { '*': 'allow', ...ENV_FILES_DENIED },
+    external_directory: 'ask',
+    bash: {
+      '*': 'ask',
+      'cat *': 'allow',
+      'head *': 'allow',
+      'tail *': 'allow',
+      ls: 'allow',
+      'ls *': 'allow',
+      'tree *': 'allow',
+      'stat *': 'allow',
+      'wc *': 'allow',
+      'du *': 'allow',
+      'df *': 'allow',
+      'grep *': 'allow',
+      'rg *': 'allow',
+      'find *': 'allow',
+      'fd *': 'allow',
+      'diff *': 'allow',
+      'cmp *': 'allow',
+      'sha256sum *': 'allow',
+      pwd: 'allow',
+      whoami: 'allow',
+      'uname *': 'allow',
+      date: 'allow',
+      'which *': 'allow',
+      'git status': 'allow',
+      'git status *': 'allow',
+      'git diff': 'allow',
+      'git diff *': 'allow',
+      'git log': 'allow',
+      'git log *': 'allow',
+      'git show *': 'allow',
+      'git blame *': 'allow',
+      'git ls-files *': 'allow',
+      'git branch': 'allow',
+      'git remote -v': 'allow',
+      'git commit --no-verify*': 'deny',
+      'git commit * --no-verify*': 'deny',
+      'git commit -n*': 'deny',
+      'git push --delete *': 'deny',
+      'git push * --delete *': 'deny',
+    },
+  },
+} as const
 
 /**
- * How many rules of each behaviour a permissions file holds, counted as the extension counts
- * them: strings that are not blank, in the `permissions` block's `allow`, `deny` and `ask`.
+ * Where gotgenes reads its policy, under pi's agent directory.
  *
  * @group Permission mode
  */
-export interface PermissionRuleCounts {
-  readonly allow: number
-  readonly deny: number
-  readonly ask: number
+export function permissionEngineConfigPath(agentDir: string): string {
+  return join(agentDir, 'extensions', 'pi-permission-system', 'config.json')
 }
 
 /**
- * What `preparePermissionRules` found and did.
+ * What `preparePermissionPolicy` found and did with the user's file.
  *
- * - `kept`: the file holds rules; it is used as it is.
- * - `seeded`: the file was absent, or held no rules, and now holds `ENSO_DEFAULT_DENY_RULES`.
- * - `unreadable`: the file is there but is not a JSON object; nothing was written, and the
- *   caller refuses to start.
+ * - `kept`: the file holds a `permission` block; it is used as it is.
+ * - `seeded`: the file now holds `ENSO_DEFAULT_PERMISSION_POLICY`. It was absent, held no
+ *   `permission` block, or was a picc rules file (#496; that file is kept beside it, at
+ *   `piccBackup`, and its rules are not carried over).
+ * - `unreadable`: the file is there but is not a JSON object (or is a link to nothing); nothing
+ *   was written, and the caller refuses to start.
+ *
+ * `movedAside` names where a regular file found at the engine's config path was moved to (see
+ * `linkEngineConfig`), so the launch log says so.
  *
  * @group Permission mode
  */
-export type PermissionRulesPreparation =
-  | { readonly kind: 'kept'; readonly path: string; readonly counts: PermissionRuleCounts }
-  | { readonly kind: 'seeded'; readonly path: string; readonly was: 'absent' | 'without rules' }
+export type PermissionPolicyPreparation =
+  | { readonly kind: 'kept'; readonly path: string; readonly surfaces: number; readonly movedAside?: string }
+  | {
+      readonly kind: 'seeded'
+      readonly path: string
+      readonly was: 'absent' | 'without a permission block' | 'a picc rules file'
+      readonly piccBackup?: string
+      readonly movedAside?: string
+    }
   | { readonly kind: 'unreadable'; readonly path: string; readonly reason: string }
 
-function countRules(value: unknown): number {
-  return Array.isArray(value) ? value.filter((rule) => typeof rule === 'string' && rule.trim().length > 0).length : 0
+type ReadPolicy =
+  | { readonly kind: 'absent' }
+  | { readonly kind: 'object'; readonly value: Readonly<Record<string, unknown>> }
+  | { readonly kind: 'unreadable'; readonly reason: string }
+
+function readPolicy(path: string): ReadPolicy {
+  if (!existsSync(path)) {
+    // `existsSync` follows links: a link to nothing reads as absent, and seeding would write through it.
+    if (lstatSync(path, { throwIfNoEntry: false }) !== undefined)
+      return { kind: 'unreadable', reason: 'a link to nothing' }
+    return { kind: 'absent' }
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(readFileSync(path, 'utf8'))
+  } catch (error: unknown) {
+    return { kind: 'unreadable', reason: error instanceof Error ? error.message : String(error) }
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return { kind: 'unreadable', reason: 'not a JSON object' }
+  }
+  return { kind: 'object', value: parsed as Readonly<Record<string, unknown>> }
 }
 
-function countsOf(file: Readonly<Record<string, unknown>>): PermissionRuleCounts {
-  const block = file.permissions
-  if (typeof block !== 'object' || block === null) return { allow: 0, deny: 0, ask: 0 }
-  const rules = block as Readonly<Record<string, unknown>>
-  return { allow: countRules(rules.allow), deny: countRules(rules.deny), ask: countRules(rules.ask) }
+function writeJson(path: string, value: unknown): void {
+  mkdirSync(dirname(path), { recursive: true })
+  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`)
+}
+
+function errorCode(error: unknown): unknown {
+  return error instanceof Error && 'code' in error ? error.code : undefined
 }
 
 /**
- * Make `path` a permissions file the extension will use as it is: keep one that holds rules,
- * seed one that is absent or holds none, and refuse one that is not a JSON object. Seeding
- * keeps every other top-level key the file had.
+ * Move `path` aside under the first free backup name (`.<kind>`, then `.<kind>.1` …) and return
+ * that name, or `undefined` when `path` was already gone.
  *
- * Call it before the extension loads, with the path the extension is pointed at.
+ * ⚠ NEVER OVERWRITES, UNDER A RACE TOO (#497 review, second round). Checking for a free name and
+ * then renaming is two steps: another launch can create the backup in between, and `rename`
+ * silently replaces its destination. A hard link is one step that fails with `EEXIST` when the
+ * name is taken, so the name is reserved and filled at once; the original is unlinked after.
+ */
+function moveAside(path: string, kind: string): string | undefined {
+  for (let attempt = 0; ; attempt += 1) {
+    const candidate = attempt === 0 ? `${path}.${kind}` : `${path}.${kind}.${attempt}`
+    try {
+      linkSync(path, candidate)
+    } catch (error: unknown) {
+      if (errorCode(error) === 'EEXIST') continue
+      if (errorCode(error) === 'ENOENT') return undefined
+      throw error
+    }
+    try {
+      unlinkSync(path)
+    } catch (error: unknown) {
+      // The other launch unlinked the same file first: the copy under `candidate` is still whole.
+      if (errorCode(error) !== 'ENOENT') throw error
+    }
+    return candidate
+  }
+}
+
+/**
+ * Move a picc rules file aside and write the seed in its place, returning the backup's path, or
+ * `undefined` when the file was already gone.
+ *
+ * ⚠ TWO LAUNCHES MAY BOTH DECIDE TO MIGRATE (#497 review): the web host and the terminal, on a home
+ * not yet migrated, each read the picc file before either moved it. So this step runs with a
+ * decision that may be stale, and whatever it moves, `moveAside` never overwrites an earlier
+ * backup: the user's rules stay in the first one (`.picc-backup`), and a late launch's copy of the
+ * seed, or of the same rules, lands in `.picc-backup.1`. When the file is already gone (the other
+ * launch moved it and has not written the seed yet), the caller reads again rather than failing.
  *
  * @group Permission mode
  */
-export function preparePermissionRules(path: string): PermissionRulesPreparation {
-  let existing: Record<string, unknown> = {}
-  const present = existsSync(path)
-  if (present) {
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(readFileSync(path, 'utf8'))
-    } catch (error: unknown) {
-      return { kind: 'unreadable', path, reason: error instanceof Error ? error.message : String(error) }
-    }
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-      return { kind: 'unreadable', path, reason: 'not a JSON object' }
-    }
-    existing = parsed as Record<string, unknown>
-    const counts = countsOf(existing)
-    if (counts.allow + counts.deny + counts.ask > 0) return { kind: 'kept', path, counts }
-  }
-  const seeded = { ...existing, permissions: { allow: [], deny: [...ENSO_DEFAULT_DENY_RULES], ask: [] } }
-  mkdirSync(dirname(path), { recursive: true })
-  writeFileSync(path, `${JSON.stringify(seeded, null, 2)}\n`)
-  return { kind: 'seeded', path, was: present ? 'without rules' : 'absent' }
+export function replacePiccRulesFile(policyPath: string): string | undefined {
+  const backup = moveAside(policyPath, 'picc-backup')
+  if (backup === undefined) return undefined
+  writeJson(policyPath, ENSO_DEFAULT_PERMISSION_POLICY)
+  return backup
 }
 
 /**
- * The line both launch surfaces log for a preparation that did not refuse — the same words on
+ * Point gotgenes' config path at the user's file, and return where a regular file found there was
+ * moved (gotgenes' own settings screen saves by rename, which replaces the link). That file is
+ * kept under a backup name that never overwrites an earlier one.
+ *
+ * ⚠ Two launches may race on a fresh `ENSO_HOME` (the web host and the terminal): a link the
+ * other one made first, to the same file, is the outcome both wanted.
+ */
+function linkEngineConfig(agentDir: string, policyPath: string): string | undefined {
+  const linkPath = permissionEngineConfigPath(agentDir)
+  const target = resolve(policyPath)
+  mkdirSync(dirname(linkPath), { recursive: true })
+  const existing = lstatSync(linkPath, { throwIfNoEntry: false })
+  let movedAside: string | undefined
+  if (existing?.isSymbolicLink() === true) {
+    if (readlinkSync(linkPath) === target) return undefined
+    rmSync(linkPath)
+  } else if (existing !== undefined) {
+    movedAside = moveAside(linkPath, 'bak')
+  }
+  try {
+    symlinkSync(target, linkPath)
+  } catch (error: unknown) {
+    if (errorCode(error) !== 'EEXIST' || readlinkSync(linkPath) !== target) throw error
+  }
+  return movedAside
+}
+
+/** Write every mode's agent file. Enso owns them, so they are rewritten at every launch. */
+function writeModeAgentFiles(agentDir: string): void {
+  const agentsDir = join(agentDir, 'agents')
+  mkdirSync(agentsDir, { recursive: true })
+  for (const mode of ENSO_PERMISSION_MODES) {
+    writeFileSync(join(agentsDir, `${modeAgentName(mode)}.md`), modeAgentFile(mode))
+  }
+}
+
+/**
+ * Make `policyPath` a policy gotgenes will use as it is, and put it and the mode presets where
+ * gotgenes reads them:
+ * - keep a file that holds a `permission` block;
+ * - seed one that is absent, holds none, or is a picc rules file;
+ * - refuse one that is not a JSON object, touching nothing.
+ *
+ * Seeding keeps every other top-level key the file had, except a picc file, which is replaced
+ * whole (its copy is kept beside it; `replacePiccRulesFile` names it).
+ *
+ * Call it before the extension loads, on both launch surfaces.
+ *
+ * @group Permission mode
+ */
+export function preparePermissionPolicy(policyPath: string, agentDir: string): PermissionPolicyPreparation {
+  const read = readPolicy(policyPath)
+  if (read.kind === 'unreadable') return { kind: 'unreadable', path: policyPath, reason: read.reason }
+  let preparation: PermissionPolicyPreparation
+  const permission = read.kind === 'object' ? read.value.permission : undefined
+  if (read.kind === 'object' && typeof permission === 'object' && permission !== null) {
+    preparation = { kind: 'kept', path: policyPath, surfaces: Object.keys(permission).length }
+  } else if (read.kind === 'object' && typeof read.value.permissions === 'object' && read.value.permissions !== null) {
+    const piccBackup = replacePiccRulesFile(policyPath)
+    // Another launch moved it first: read what is there now.
+    if (piccBackup === undefined) return preparePermissionPolicy(policyPath, agentDir)
+    preparation = { kind: 'seeded', path: policyPath, was: 'a picc rules file', piccBackup }
+  } else {
+    const existing = read.kind === 'object' ? read.value : {}
+    writeJson(policyPath, { ...existing, ...ENSO_DEFAULT_PERMISSION_POLICY })
+    preparation = {
+      kind: 'seeded',
+      path: policyPath,
+      was: read.kind === 'absent' ? 'absent' : 'without a permission block',
+    }
+  }
+  const movedAside = linkEngineConfig(agentDir, policyPath)
+  writeModeAgentFiles(agentDir)
+  return movedAside === undefined ? preparation : { ...preparation, movedAside }
+}
+
+/**
+ * The line both launch surfaces log for a preparation that did not refuse, in the same words on
  * the web host and the terminal launcher, so a reader finds one in the logs by the other.
  *
  * @group Permission mode
  */
-export function describePermissionRules(
-  preparation: Exclude<PermissionRulesPreparation, { readonly kind: 'unreadable' }>,
+export function describePermissionPolicy(
+  preparation: Exclude<PermissionPolicyPreparation, { readonly kind: 'unreadable' }>,
 ): string {
-  if (preparation.kind === 'seeded') {
-    return (
-      `permission rules: ${preparation.path} was ${preparation.was}, so it now holds Enso's ` +
-      `${ENSO_DEFAULT_DENY_RULES.length} default deny rules; Claude Code's settings are not read (#446)`
-    )
+  const moved =
+    preparation.movedAside === undefined
+      ? ''
+      : `; the engine's config path held a regular file (its own settings screen saves one), kept as ${preparation.movedAside}`
+  if (preparation.kind === 'kept') {
+    return `permission policy: ${preparation.path}, ${preparation.surfaces} surfaces${moved}`
   }
-  const { allow, deny, ask } = preparation.counts
-  return `permission rules: ${preparation.path} — ${allow} allow, ${deny} deny, ${ask} ask`
+  const backup = preparation.piccBackup === undefined ? '' : ` (the old file is kept as ${preparation.piccBackup})`
+  return (
+    `permission policy: ${preparation.path} was ${preparation.was}, so it now holds Enso's default ` +
+    `policy${backup}; Claude Code's settings are not read (#446, #496)${moved}`
+  )
 }

@@ -223,48 +223,44 @@ export const DEFAULT_GUARD_POLICY: GuardPolicy = {
  * ⚠ Matched by EXACT basename (case-insensitive), never as a fragment — `.profile` as a
  * fragment would catch `~/work/.profile-notes/x.ts`.
  *
- * Vendored from `@ladbabynpm/picc-permission-modes` v0.1.1 (`permissionContext.ts`
- * `DANGEROUS_FILES` / `DANGEROUS_DIRECTORIES`, MIT, © 2026 Ladbaby), as a COPY rather
- * than a deep import: the lists are a corpus, not logic, and an unversioned deep import
- * into a v0.1.1 package is the risk #7 names. Kept in upstream's order so a divergence
- * is visible in a diff. ⚠ This layer must stay UNCONDITIONAL: picc reaches at most "ask"
- * for these paths (mode-shaped — an auto-mode classifier may approve one), and print
- * runs load no picc at all (#20), so here is the only always-on denial.
+ * Enso's own list: files whose modification persists code execution or changes tool
+ * behaviour across sessions. ⚠ This layer must stay UNCONDITIONAL: it is the only
+ * always-on denial for these paths, including print runs.
  *
  * @group Guards
  */
 export const PERSISTENCE_WRITE_BASENAMES: readonly string[] = [
-  '.gitconfig',
-  '.gitmodules',
-  '.bashrc',
-  '.bash_profile',
-  '.zshrc',
-  '.zprofile',
-  '.profile',
-  '.ripgreprc',
-  '.mcp.json',
-  '.claude.json',
+  '.gitconfig', // can set `core.hooksPath`, `core.fsmonitor` or aliases that run commands
+  '.gitmodules', // points submodule URLs/paths at attacker content fetched by later git runs
+  '.bashrc', // runs at every interactive bash start
+  '.bash_profile', // runs at every bash login shell
+  '.zshrc', // runs at every interactive zsh start
+  '.zprofile', // runs at every zsh login shell
+  '.profile', // runs at login for sh-compatible shells
+  '.ripgreprc', // default flags for every rg run (e.g. `--pre` runs a command per file)
+  '.mcp.json', // registers MCP servers an agent launches as processes
+  '.claude.json', // agent config: MCP servers and settings loaded next session
 ]
 
 /**
  * Directory names (any single path segment) whose CONTENTS are write-persistence vectors
  * — editor tasks, agent settings, git internals.
  *
- * Same provenance and matching rules as {@link PERSISTENCE_WRITE_BASENAMES}. `.git` overlaps
+ * Same matching rules as {@link PERSISTENCE_WRITE_BASENAMES}. `.git` overlaps
  * `protectedWriteFragments`' `/.git/` deliberately; the fragment also catches the bare repo
  * case and predates this.
  *
  * @group Guards
  */
-export const PERSISTENCE_WRITE_DIRECTORIES: readonly string[] = ['.git', '.vscode', '.idea', '.claude']
+export const PERSISTENCE_WRITE_DIRECTORIES: readonly string[] = [
+  '.git', // hooks run on git commands; config can run commands
+  '.vscode', // tasks.json/settings.json can run commands when the editor opens the folder
+  '.idea', // run configurations and tool settings executed by the IDE
+  '.claude', // agent settings, hooks and commands loaded next session
+]
 
 /**
- * ZEN ADDITIONS — NOT from picc.
- *
- * Kept as a separate constant so the vendored block above stays byte-comparable against
- * upstream. picc's corpus protects the agent picc ships in (Claude Code: `.claude`,
- * `.claude.json`, `.mcp.json`); the agent running THIS harness is pi, whose persistence
- * surfaces upstream has no reason to know:
+ * Agent-specific persistence directories for the harness itself (pi and Enso):
  *
  *   `.pi`      — a project-local `.pi/settings.json` installs an extension package that
  *                loads on the user's next plain `pi` session in that repo (the exact
@@ -286,9 +282,8 @@ export const PERSISTENCE_WRITE_DIRECTORIES: readonly string[] = ['.git', '.vscod
 export const ENSO_PERSISTENCE_WRITE_DIRECTORIES: readonly string[] = ['.pi', '.agents', '.enso', '.cc-safety-net']
 
 /**
- * ENSO ADDITIONS to {@link PERSISTENCE_WRITE_BASENAMES} — NOT from picc, kept apart for the same
- * byte-comparability (#160, folded from #21). The shell-init family picc's corpus leaves out, and
- * direnv's file:
+ * Further shell-init files and direnv's file, beyond {@link PERSISTENCE_WRITE_BASENAMES} (#160,
+ * folded from #21):
  *
  *   `.zshenv`   — read by EVERY zsh, interactive or not, so it runs before any script a later
  *                 tool call or cron job starts: the widest of the family.
@@ -298,7 +293,7 @@ export const ENSO_PERSISTENCE_WRITE_DIRECTORIES: readonly string[] = ['.pi', '.a
  *                 is re-allowed, so this is a lure the user is one `direnv allow` from running,
  *                 rather than silent execution; refused all the same, as the rc files are.
  *
- * Same matching as the vendored list: exact basename, case-insensitive.
+ * Same matching as {@link PERSISTENCE_WRITE_BASENAMES}: exact basename, case-insensitive.
  *
  * @group Guards
  */

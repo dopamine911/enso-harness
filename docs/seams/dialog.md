@@ -31,9 +31,9 @@ export const EnsoDialogSpec = Type.Union([
     options: Type.Array(Type.String(), { minItems: 1 }),
     /**
      * The detail behind the question — a file preview, a diff, a command. pi's own
-     * `select` has none; the host adds it when it lifts a component dialog to a select
-     * (#73: picc's permission prompt), because a permission decision needs to see what it
-     * is deciding about. Preformatted text: rendered as-is, never as markdown.
+     * `select` has none; a surface that lifts a component dialog to a select may add it
+     * (#73), because a permission decision needs to see what it is deciding about.
+     * Preformatted text: rendered as-is, never as markdown.
      */
     message: Type.Optional(Type.String()),
     timeout: Type.Optional(Type.Number({ minimum: 0 })),
@@ -323,8 +323,8 @@ including the fail-closed lift (`EnsoExtensionUiContextOptions.liftDialog`).
 - **The kinds agree twice**: the host's `BlockingDialogRequest` (`extension-ui-context.ts#BlockingDialogRequest`) and
   the mapper's `DIALOG_UI_METHODS` (`map-events.ts#DIALOG_UI_METHODS`) name the same five methods, and the
   host's comment says so.
-- **The vendor gate** (#145): `extension-ui-context.ts` and `permission-dialog.ts` import the runtime's
-  package; nothing above `host/` does.
+- **The vendor gate** (#145): `extension-ui-context.ts` imports the runtime's package; nothing above
+  `host/` does.
 
 ## What crosses it that should not
 
@@ -337,18 +337,16 @@ mapped. The answer shapes likewise mirror the runtime's response contract minus 
 a replacement loop would be adapted *to* this vocabulary.
 
 **The fifth kind, `questionnaire`, is ours, not the runtime's** (#12). pi has no method for a set of
-questions, so the host lifts it from `ask_user`'s component the way it lifts the permission prompt
-below, and its `{ answers }` go to the tool, not to pi's response contract. A replacement runtime
-keeps it unchanged: nothing about it is pi's.
+questions, so the host lifts it from `ask_user`'s component (`extension-ui-context.ts#custom`), and its
+`{ answers }` go to the tool, not to pi's response contract. A replacement runtime keeps it unchanged:
+nothing about it is pi's.
 
-**The permission prompt is lifted inside the host, legitimately.** The mode extension asks its
-file-permission question through `custom`, handing the runtime a terminal component; the host's
-`custom` (`extension-ui-context.ts#custom`) builds it and `permission-dialog.ts` lifts the one
-component it knows into a `select` (`permission-dialog.ts#liftPermissionDialog`) whose options are the strings the extension reads back
-verbatim. That reads a vendor class by `instanceof` and its private fields by name, pinned by
-`permission-dialog.test.ts` (`permission-dialog.ts` header) — vendor coupling, but under
-`packages/web/src/host/`, where the vendor gate allows it, and nothing above the host sees anything
-but a `select`. The mode itself is leak L3, on `permission-mode.md`.
+**The permission prompt needs no lifting** (#496). Outside pi's terminal UI the permission engine
+asks through the runtime's own `select` (the question, then the detail on the lines below it) and,
+for a deny with a reason, `input`. Both are ordinary dialogs here, so the host adds nothing and
+knows no vendor class. A person's No is recorded by Enso's permission-modes extension, off the
+engine's decision broadcast (`extensions/permission-modes/index.ts#recordOperatorDenial`), not by
+the dialog. The mode itself is on `permission-mode.md`.
 
 **`notify` rides the same observation.** A one-way notice is emitted by the host as a `notify` request
 (`extension-ui-context.ts#notify`) and mapped as an `extension-ui-request` the mapper marks
@@ -361,6 +359,6 @@ Replace the runtime and the vocabulary stays: `EnsoDialogSpec`, `EnsoOpenDialog`
 `EnsoDialogOutcome`, the validator, the answer route, the snapshot's list, the card and the router do not
 change — the answer route's tests in `follow.test.ts` and the card's static renders already run with no
 runtime. What changes is `extension-ui-context.ts` (implement the new loop's question interface, or
-none if it has no extensions) and `permission-dialog.ts` (or delete it, if the new loop has no
-permission prompt to lift). `agent-host.ts` changes only where it binds the context and delegates the
+none if it has no extensions) and `questionnaire-dialog.ts` (the `ask_user` lift). `agent-host.ts`
+changes only where it binds the context and delegates the
 two runtime-contract methods.

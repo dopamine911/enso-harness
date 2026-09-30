@@ -466,18 +466,17 @@ export const ThreadRuntime = Type.Object({
    */
   cancelLogin: Type.Unsafe<() => boolean>(Type.Function([], Type.Unknown())),
   /**
-   * The permission-mode receipt a run starts with (#84): picc's CURRENT mode for this
-   * session, computed the way picc itself restores it — the last persisted `modes` entry
-   * in the session branch, else the initial `default` — and the modes this session may
-   * switch to, picc's set intersected with the commands actually registered. picc keeps
-   * the live value in a closure with no getter, so this is the only honest read.
-   * Synchronous: it walks the in-memory branch and registry, no round trip — and it is
+   * The permission-mode receipt a run starts with (#84, #496): the session's CURRENT mode,
+   * computed the way the permission engine reads it — the last `active_agent` entry among the
+   * session's entries, else `default` — and the modes this session may switch to, Enso's set
+   * intersected with the commands actually registered.
+   * Synchronous: it walks the in-memory entries and registry, no round trip — and it is
    * deliberately NOT `listCommands`, whose call count the refusal path's tests pin.
    */
   permissionModeState: Type.Unsafe<() => EnsoPermissionModeState>(Type.Function([], Type.Unknown())),
   /**
    * Switch the mode (L3 step C, #162 workstream 4). The host translates to whatever its mode
-   * extension accepts — for picc, the per-mode slash command, run as a prompt the same way
+   * extension accepts — the per-mode slash command, run as a prompt the same way
    * `prompt` runs one — so the caller says a mode and never a command. Fire-and-forget like
    * `prompt`: acceptance is `outcome.onAccepted` (an extension command's acceptance IS its
    * completion), the change itself is the `permission_mode` event on the feed, and a

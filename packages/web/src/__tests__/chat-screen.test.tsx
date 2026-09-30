@@ -54,7 +54,7 @@ test('select renders one button per option, in order', () => {
   expect(rendered.match(/<button/g)).toHaveLength(2)
 })
 
-// #73: picc's permission prompt arrives as a select carrying the detail a decision needs.
+// #73: a permission prompt may arrive as a select carrying the detail a decision needs.
 test('a select with detail renders it preformatted above the options — file content is text, never HTML', () => {
   const rendered = answerControls({
     method: 'select',

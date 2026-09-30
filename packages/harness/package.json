@@ -13,7 +13,8 @@
       "./extensions/guards/index.ts",
       "./extensions/web-fetch/index.ts",
       "./extensions/web-search/index.ts",
-      "node_modules/@ladbabynpm/picc-permission-modes/index.ts",
+      "node_modules/@gotgenes/pi-permission-system/src/index.ts",
+      "./extensions/permission-modes/index.ts",
       "node_modules/pi-multi-account/index.ts",
       "./extensions/ask-user/index.ts",
       "./extensions/system-prompt/index.ts",
@@ -32,7 +33,7 @@
   },
   "dependencies": {
     "@enso/core": "*",
-    "@ladbabynpm/picc-permission-modes": "0.1.2",
+    "@gotgenes/pi-permission-system": "36.2.0",
     "@logtape/logtape": "2.3.7",
     "@mammothb/pi-tokyonight-storm": "0.2.1",
     "cc-safety-net": "2.4.6",

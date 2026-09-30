@@ -37,7 +37,7 @@ import { optionKeywords } from './model-state.tsx'
  *
  * ⚠ THE SELECTION RULE. An `extension` command RUNS at once — `onRun(name)`, and the owner sends
  * `/<name>` as a prompt through the path the send button uses (no new POST: an extension
- * command with no arguments runs, and `/mode` bare opens picc's select dialog, which is the
+ * command with no arguments runs, and `/mode` bare opens the mode extension's select dialog, which is the
  * nicer UX). A `prompt` template or a `skill` is INSERTED — `onInsert(name)`, and the owner puts
  * `/<name> ` in the composer and focuses it — because those take arguments the user has yet to
  * type. A `host` row renders BY KIND, nothing per command (#338 slice 2): a `level` row (`/thinking`)

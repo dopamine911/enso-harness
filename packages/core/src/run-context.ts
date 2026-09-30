@@ -17,8 +17,9 @@ import { EnsoRecordedModel } from './thread-runtime.ts'
  *
  * ⚠ HASHES, NEVER CONTENTS. A context file is its path and a sha256 of what the model received;
  * the config is a sha256 of the resolved `EnsoConfig` (stable key order) and the files it came
- * from; the mode is a sha256 of picc's persisted rule set. No secret and no file body is written.
- * The mode NAME stays picc's own record (`modes`), read beside this one (#126 decision 3).
+ * from; the mode is a sha256 of the permission policy and the active mode's preset (#496). No
+ * secret and no file body is written. The mode NAME stays the `active_agent` entry's own record,
+ * read beside this one (#126 decision 3).
  */
 
 /**
@@ -35,8 +36,8 @@ const Sha256 = Type.String({ pattern: '^[0-9a-f]{64}$' })
  * What one run started under. `git` is `null` when git could not name the revision — `rev-parse
  * HEAD` failed or ran past 5 s, whatever the reason: no repository, no commit yet, no git, a
  * timeout (PR #439 review). A `status` that fails keeps the revision and records `dirty: true`: it
- * cannot say the tree is clean. `mode` is `null` when the branch carries no persisted mode (no
- * permission-mode extension loaded) or one without picc's rule fields.
+ * cannot say the tree is clean. `mode` is `null` when no permission policy could be read, or it
+ * does not parse.
  *
  * @group Run context
  */
@@ -122,7 +123,7 @@ export const EnsoForkPoint = Type.Object(
         /** What the branch records it last ran on (#434); `null` halves for a branch that recorded none. */
         model: EnsoRecordedModel.properties.model,
         thinkingLevel: EnsoRecordedModel.properties.thinkingLevel,
-        /** The permission mode the branch's last `modes` entry names (picc's record); its initial one without. */
+        /** The permission mode the branch's last `active_agent` entry names (#496); `default` without. */
         mode: Type.String({ minLength: 1 }),
         cwd: Type.String({ minLength: 1 }),
         /**

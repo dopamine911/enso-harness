@@ -390,7 +390,7 @@ function RunProblem(): React.ReactNode {
  * deepseek-harness keeps the mode selector in the composer chrome for the same reason.
  *
  * ⚠ `POST …/mode`, never a prompt: the browser says a mode; how the host's extension is
- * told is the host's (for picc, its per-mode command). The indicator then updates from the
+ * told is the host's (its per-mode command, #496). The indicator then updates from the
  * `permission-mode` receipt the host emits once the mode is persisted — the mode actually set —
  * never from the click. Invariant 2: a route tells pi; the feed ends the story.
  *

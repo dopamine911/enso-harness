@@ -114,7 +114,7 @@ export function piVersionSupported(reportedVersion: string): boolean {
 }
 
 /**
- * ⚠ PRINT RUNS LOAD A VARIANT PACKAGE WITHOUT picc-permission-modes (#20). The trigger is
+ * ⚠ PRINT RUNS LOAD A VARIANT PACKAGE WITHOUT THE PERMISSION ENGINE (#20, #496). The trigger is
  * "this run cannot prompt": an explicit `-p`/`--print`, or stdin that is not a TTY (piped
  * input cannot answer a permission dialog even without -p). Interactive runs keep the full
  * package and the full permission model.
@@ -136,11 +136,10 @@ export function isPrintRun(passthroughArgs: readonly string[], stdinIsTty: boole
  * the same triple as loader options and sets the env at creation, before the first services (it is
  * read at module import).
  *
- * The permission rules are pinned the same way at both points (#446): `PICC_PERMISSION_MODES_CONFIG_PATH`
- * names `ENSO_HOME/permissions.json`, prepared first by `preparePermissionRules`: seeded with Enso's
- * deny rules when missing or empty (an empty file would make the extension import
- * `~/.claude/settings.json`), refused when unreadable, and the launcher says which on stderr, the host
- * in its log.
+ * The permission policy is prepared the same way at both points (#446, #496): `preparePermissionPolicy`
+ * seeds `ENSO_HOME/permissions.json` with Enso's policy when it holds none, links the engine's
+ * config path under the agent dir to it, and writes the mode agents; an unreadable file is refused,
+ * and the launcher says which on stderr, the host in its log.
  *
  * @invariant boot-and-launchers/package-dir `-e` receives the package directory, never extension files.
  * Loaded by package rules, the manifest drives every resource kind: extensions, skills, prompts and
@@ -152,7 +151,7 @@ export function piArguments(packageToLoad: string, passthroughArgs: readonly str
 }
 
 /** What a print run's launch line says after the package: the variant it loads instead (#20). */
-export const PRINT_VARIANT_NOTE = '(print variant, no permission modes — #20)'
+export const PRINT_VARIANT_NOTE = '(print variant, no permission engine — #20)'
 
 /** The launch's line naming every variable removed from pi's environment (#89), without its newline. */
 export function secretsKeptOutLine(removed: readonly string[]): string {

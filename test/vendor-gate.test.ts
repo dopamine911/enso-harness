@@ -68,11 +68,13 @@ const VENDOR_ROOTS = ['packages/web/src/host', 'packages/harness/extensions'] as
  */
 const VENDOR_IMPORT = /["']@earendil-works\//
 /** One word is the whole name. */
-const VENDOR_WORD = 'picc'
+const VENDOR_WORD = 'gotgenes'
 /** …and the ones spelled in several words, however they are joined (`cc-safety-net`, `ccSafetyNet`). */
 const VENDOR_WORD_SEQUENCES = [
   ['cc', 'safety', 'net'],
   ['pi', 'multi', 'account'],
+  // The permission engine's package name (#496); `picc`, its predecessor, left with it.
+  ['pi', 'permission', 'system'],
 ] as const
 
 function namesVendor(line: string): boolean {
@@ -123,27 +125,20 @@ const VENDOR_NAMED_ALLOWED: readonly string[] = [
   // after the analyzer whose verdict it carries (`cc-safety-net`). The leak is the vocabulary's,
   // and this file spells it as a key. Leaves when that rule is named for what it guards.
   'packages/web/src/guard-refusal.tsx',
-  // `PICC_EXTENSION_FRAGMENT` — the print variant exists to REMOVE picc from the manifest
-  // (#20: no permission modes under `--print`), so it must name the extension it filters, in
-  // the constant and in the shape error that fires when no entry matches. Leaves when the
-  // harness owns the print manifest instead of a launcher deriving it.
+  // `PERMISSION_ENGINE_FRAGMENT` — the print variant exists to REMOVE the permission engine from
+  // the manifest (#20: no permission prompts under `--print`), so it must name the extension it
+  // filters, in the constant and in the shape error that fires when no entry matches. Leaves when
+  // the harness owns the print manifest instead of a launcher deriving it.
   'scripts/print-harness.ts',
-  // `PICC_PERMISSION_MODES_CONFIG_PATH` on the spawned pi's environment (#446): the one way to point
-  // the mode extension at `ENSO_HOME/permissions.json`, and it is the vendor's variable name. The
-  // host sets the same one under `host/`. Leaves when the harness owns where its rules live.
-  'scripts/enso.ts',
-  // One inventory row's `seam` prose says a fake serves "a picc-shaped inspection" — it is
-  // generated INTO docs/reference/verification-inventory.md, so the name is data here, not a
-  // comment. Leaves when that fake stops replicating picc's `modes` custom entry.
-  'scripts/docs/verification-inventory.ts',
+  // `permissionEngineConfigPath` (#496): the engine reads its policy only from
+  // `<agentDir>/extensions/pi-permission-system/config.json`, so linking the user's
+  // `ENSO_HOME/permissions.json` there has to spell the engine's directory. Both launch surfaces
+  // call it. Leaves when the engine takes a config path, or the harness owns the link.
+  'packages/core/src/permission-rules.ts',
   // The Guards page's rule table (#482) keys its reader's words by rule id, and one rule is named
   // for the extension whose verdict it carries: `cc-safety-net`. The table is the page's inventory
   // of rules; leaves when that rule is renamed for what it refuses.
   'scripts/docs/features/guards-and-receipts.ts',
-  // The Permission modes page (#482) reads the mode list and the starting mode out of the host's
-  // adapter, whose constants are named for picc (`PICC_PERMISSION_MODES`): the only place the list
-  // is written. Leaves when the mode list is the harness's own.
-  'scripts/docs/features/permission-modes.ts',
   // ── The gates that have to spell the names ──
   // This file: it names the vendors in order to refuse them. Never leaves.
   'test/vendor-gate.test.ts',
@@ -152,40 +147,25 @@ const VENDOR_NAMED_ALLOWED: readonly string[] = [
   'test/glossary-doc.test.ts',
   // ── Tests that pin a vendor-shaped input ──
   // The launcher tests carry `pi.extensions` manifests verbatim —
-  // `node_modules/@ladbabynpm/picc-permission-modes/index.ts` and `node_modules/pi-multi-account/index.ts`
+  // `node_modules/@gotgenes/pi-permission-system/src/index.ts` and `node_modules/pi-multi-account/index.ts`
   // are the resources whose linking, filtering and missing-path refusal is under test. A fake
   // manifest that did not name the real vendors would not be testing the real manifest.
   'scripts/__tests__/link-vendor-packages.test.ts',
   'scripts/__tests__/print-harness.test.ts',
   // `scripts/__tests__/enso-launch.test.ts` is back (#482), for a different reason than the one it
-  // left with (#221): its end-to-end launch recording asserts the spawned pi's environment carries
-  // `PICC_PERMISSION_MODES_CONFIG_PATH` and the print mirror dropped picc's entry. Those are
-  // exactly the two leaks `scripts/enso.ts` and `scripts/print-harness.ts` hold; the test names
-  // what it checks. Leaves with them.
+  // left with (#221): its end-to-end launch recording asserts the print mirror dropped the
+  // permission engine's entry. That is exactly the leak `scripts/print-harness.ts` holds; the test
+  // names what it checks. Leaves with it.
   'scripts/__tests__/enso-launch.test.ts',
   // Same manifests as the launcher tests above, moved to `@enso/core` with #221.
   'packages/core/src/__tests__/pi-manifest.test.ts',
-  // The corpus contract reads picc's own `permissionContext.ts` and its `package.json`
-  // version out of `node_modules`, and asserts our replica still agrees with it. Naming the
-  // package IS the contract — a corpus taken against a fake would pin nothing. Leaves when
-  // the replica does.
-  'packages/core/src/__tests__/picc-corpus-contract.test.ts',
   // The server's refusal names the missing vendor path, so the test that pins the message
   // names it too. Leaves with `scripts/__tests__/link-vendor-packages.test.ts`.
   'packages/web/src/server/__tests__/vendor-links.test.ts',
-  // `piccShapedInspection` — the fake host hands out the session-file layout and `modes`
-  // custom entry as picc writes them (L2: the inspection's untyped `entries` array carries
-  // pi's persistence format). Leaves with L2, when a transcript type of ours replaces it.
-  'packages/web/src/server/__tests__/server-handler.test.ts',
-  // `piccEntry` — same L2 shape, from the browser side.
-  'packages/web/src/__tests__/thread-debug.test.tsx',
   // Two pi-multi-account startup banners, verbatim, because the bug was the banner being read
   // as an assistant message and swallowing a guard refusal. The strings ARE the fixture.
   // Leaves when that extension leaves the manifest.
   'packages/web/src/__tests__/notifications.test.tsx',
-  // One test name says whose the permission modes are to declare. Prose, but in a string
-  // literal, which this gate correctly refuses to treat as a comment.
-  'packages/web/src/__tests__/permission-mode.test.tsx',
   // The env reference lists the switch the host sets for pi-multi-account (#351): the
   // variable's own name is the vendor's. Leaves when that extension leaves the manifest.
   'scripts/docs/env-and-config.ts',
@@ -207,17 +187,23 @@ test('⚠ a vendor extension is named in code only there — the allowlist is th
 // first two rows are the ones a `\b` boundary and a both-sides lookaround each missed.
 test('the matcher reads words, not substrings: a vendor name counts wherever it is spelled', () => {
   for (const line of [
-    "import { readPiccPersistedMode } from '@enso/core';", // camelCase — missed by lookarounds
-    'export const PICC_PERMISSION_MODES = [] as const;', // `_` bounded — missed by \b
+    "import { readGotgenesPolicy } from '@enso/core';", // camelCase — missed by lookarounds
+    'export const GOTGENES_CONFIG_PATH = "";', // `_` bounded — missed by \b
     'const dirs = [".cc-safety-net"];',
     'const config = ccSafetyNetConfig;',
     'await loadPiMultiAccount();',
-    "a fresh thread starts in picc's default",
+    "import { getPermissionsService } from '@gotgenes/pi-permission-system';",
+    "the engine's review log lives under pi-permission-system/logs",
   ]) {
     expect(namesVendor(line)).toBe(true)
   }
   // Words that merely share a prefix are not the vendor.
-  for (const line of ['const piccolo = 1;', "import { pick } from './x.ts';", 'const netSafetyCc = 2;']) {
+  for (const line of [
+    'const gotgenesque = 1;',
+    "import { pick } from './x.ts';",
+    'const netSafetyCc = 2;',
+    'const piPermission = 3;',
+  ]) {
     expect(namesVendor(line)).toBe(false)
   }
 })

@@ -165,12 +165,14 @@ test("⚠ queued prompts and interrupts come from the server's log lines; the br
 
 test('a permission-mode change is an event once per change, and the modes are listed in order', () => {
   const out = evalOf([
-    custom('modes', { mode: 'plan' }),
-    custom('modes', { mode: 'plan' }),
-    custom('modes', { mode: 'acceptEdits' }),
-    custom('modes', { rules: [] }),
+    custom('active_agent', { name: 'enso-mode-plan' }),
+    custom('active_agent', { name: 'enso-mode-plan' }),
+    custom('active_agent', { name: 'enso-mode-acceptEdits' }),
+    // Someone else's agent names no mode; back to default is an entry naming no agent.
+    custom('active_agent', { name: 'reviewer' }),
+    custom('active_agent', { name: null }),
   ])
-  expect(out.scorecard.permissionModes).toEqual(['plan', 'acceptEdits'])
+  expect(out.scorecard.permissionModes).toEqual(['plan', 'acceptEdits', 'default'])
 })
 
 test('writes count the write and edit tools; the per-human ratios divide by at least one', () => {
@@ -208,7 +210,7 @@ test('⚠ refusals are three counts that never mix: a guard’s, the operator’
     call('g1', 'bash', { command: 'cat .env' }),
     custom(ENSO_GUARD_DENIAL_ENTRY, { toolCallId: 'g1', rule: 'secret-path' }),
     result('g1', 'bash', 'refused', { isError: true }),
-    custom(ENSO_OPERATOR_DENIAL_ENTRY, { dialogId: 'd1', option: 'No', title: 'Run command' }),
+    custom(ENSO_OPERATOR_DENIAL_ENTRY, { requestId: 'p1', surface: 'bash', value: 'git push' }),
     refused,
     call('q1', 'ask_user', { questions: [] }),
     result('q1', 'ask_user', 'The user declined to answer and chose nothing.'),
@@ -219,9 +221,17 @@ test('⚠ refusals are three counts that never mix: a guard’s, the operator’
   expect(out.scorecard.refusalsTotal).toBe(2)
   // A guard's refusal is not a tool failure (#407).
   expect(out.scorecard.signals.toolErrors).toBe(0)
-  expect(out.events.find((event) => event.kind === 'tool-denied')?.detail).toBe('operator denied Run command: No')
+  expect(out.events.find((event) => event.kind === 'tool-denied')?.detail).toBe('operator denied bash: git push')
   // A denial entry that does not read is nothing, never a guess.
   expect(evalOf([custom(ENSO_OPERATOR_DENIAL_ENTRY, { option: 42 })]).scorecard.operatorDenials).toBe(0)
+})
+
+// Session files written before #496 hold the host's own shape, from the prompt it lifted; a deny
+// recorded then still counts, in its own words.
+test('an operator denial in the pre-#496 shape still counts, and says the button and the prompt', () => {
+  const out = evalOf([custom(ENSO_OPERATOR_DENIAL_ENTRY, { dialogId: 'd1', option: 'No', title: 'Run command' })])
+  expect(out.scorecard.operatorDenials).toBe(1)
+  expect(out.events.find((event) => event.kind === 'tool-denied')?.detail).toBe('operator denied Run command: No')
 })
 
 test("⚠ a gate run records its outcome from the result's isError; pending is unknown, a guard's refusal is refused", () => {

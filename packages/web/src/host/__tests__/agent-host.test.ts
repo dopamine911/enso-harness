@@ -15,7 +15,6 @@ import {
 } from '@earendil-works/pi-coding-agent'
 import {
   ASK_USER_TOOL_NAME,
-  ENSO_OPERATOR_DENIAL_ENTRY,
   ENSO_RUN_CONTEXT_ENTRY,
   ENSO_SYSTEM_PROMPT_ENTRY,
   type EnsoObservation,
@@ -25,12 +24,11 @@ import {
   type EnsoSystemPromptPreview,
   type EnsoThreadEvent,
   readEnsoRunContext,
-  sessionEvalOf,
 } from '@enso/core'
 import { flowTrace } from '@enso/core/flow-trace'
 import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
 import { findRepoRoot, harnessPackageDir, realpathOrSelf } from '@enso/core/paths'
-import { ENSO_DEFAULT_DENY_RULES } from '@enso/core/permission-rules'
+import { ENSO_DEFAULT_PERMISSION_POLICY, permissionEngineConfigPath } from '@enso/core/permission-rules'
 import type { LogRecorder } from '@logtape/testing/recorder'
 import {
   type AgentHost,
@@ -42,8 +40,7 @@ import {
   stopRunSettlingDialogs,
 } from '../agent-host.ts'
 import { LOST_TOOL_RESULT_TEXT, NOTHING_TO_CONTINUE } from '../continuation.ts'
-import { PICC_PERMISSION_DIALOG_MODULE } from '../permission-dialog.ts'
-import { readPiccPersistedMode, storedPermissionModeState } from '../permission-mode-adapter.ts'
+import { storedPermissionModeState } from '../permission-mode-adapter.ts'
 import { recordedModelOf } from '../transcript.ts'
 import { writeStoredSession } from './stored-session.ts'
 
@@ -66,7 +63,7 @@ import { writeStoredSession } from './stored-session.ts'
 const repoRoot = findRepoRoot(import.meta.url)
 const harnessDir = harnessPackageDir(repoRoot)
 const agentDir = mkdtempSync(join(tmpdir(), 'enso-host-agent-'))
-/** Where these hosts point picc's user rules (#446): a scratch file, never the operator's `ENSO_HOME`. */
+/** Where these hosts keep the permission policy (#446): a scratch file, never the operator's `ENSO_HOME`. */
 const permissionRulesPath = join(mkdtempSync(join(tmpdir(), 'enso-host-rules-')), 'permissions.json')
 /** The one directory these hosts run sessions in (#395) — the server's projects, reduced to one. */
 const servesRepoRoot = (directory: string): boolean => realpathOrSelf(directory) === realpathOrSelf(repoRoot)
@@ -87,7 +84,8 @@ const MANIFEST_EXTENSION_MARKERS = [
   'extensions/guards/index.ts',
   'extensions/web-fetch/index.ts',
   'extensions/web-search/index.ts',
-  'picc-permission-modes/index.ts',
+  'pi-permission-system/src/index.ts',
+  'extensions/permission-modes/index.ts',
   'pi-multi-account/index.ts',
   'extensions/ask-user/index.ts',
   'extensions/system-prompt/index.ts',
@@ -513,52 +511,6 @@ test('an answer naming no pending dialog is reported, never thrown', async () =>
   logs.assertLogged({ level: 'warning', rawMessage: /unknown request id/, properties: { dialogId: 'never-asked' } })
 })
 
-// #441: picc turns an operator's No into an ordinary error result, so the host writes the fact
-// itself — the one `appendCustomEntry` behind `enso-operator-denial`, pinned here through the real
-// session manager and the real lifted prompt, then read back by the eval.
-test("⚠ the operator's No on picc's real permission prompt is an enso-operator-denial entry on the branch, and the eval counts it", async () => {
-  const picc = (await import(PICC_PERMISSION_DIALOG_MODULE)) as {
-    createFilePermissionDialogFactory: (options: Record<string, unknown>) => never
-  }
-  const choices: unknown[] = []
-  const probe: InlineExtension = {
-    name: 'enso-host-deny-probe',
-    factory: (pi: ExtensionAPI) => {
-      pi.on('session_start', (_event, extensionContext) => {
-        // Exactly picc's call, with picc's own factory: the prompt a write in `default` mode raises.
-        void extensionContext.ui
-          .custom(
-            picc.createFilePermissionDialogFactory({
-              options: ['Yes', 'No'],
-              title: 'Create file',
-              question: 'Create receipt.txt?',
-            }),
-          )
-          .then((choice) => choices.push(choice))
-      })
-    },
-  }
-  const hosted = await hostedSession([probe])
-  // The lift awaits picc's module before the request is emitted: wait for the request by name.
-  const select = await untilObservation(
-    hosted,
-    (event) => event.kind === 'extension-ui-request' && event.method === 'select',
-  )
-  const dialogId = String((select as { id?: unknown }).id)
-  hosted.runtime.answerDialog({ id: dialogId, value: 'No' })
-  await nextTick()
-  expect(choices).toEqual(['No'])
-  const { transcript, turnStats } = hosted.branchEval()
-  const denial = transcript.find((entry) => entry.kind === 'custom' && entry.customType === ENSO_OPERATOR_DENIAL_ENTRY)
-  expect(denial).toMatchObject({
-    data: { dialogId, option: 'No', title: 'Create file' },
-  })
-  const evaluated = sessionEvalOf({ transcript, turnStats, log: [], logDays: [] })
-  expect(evaluated.scorecard.operatorDenials).toBe(1)
-  expect(evaluated.scorecard.refusalsTotal).toBe(1)
-  expect(evaluated.events.find((event) => event.kind === 'tool-denied')?.detail).toBe('operator denied Create file: No')
-})
-
 test('⚠ a throwing session_start becomes an extension-error observation; the session is still created', async () => {
   const probe: InlineExtension = {
     name: 'enso-host-throwing-probe',
@@ -576,7 +528,7 @@ test('⚠ a throwing session_start becomes an extension-error observation; the s
 })
 
 // ⚠ THE HOST MUST BE LISTENING WHILE session_start RUNS (#88). Extensions persist state
-// during that hook — picc writes its opening `modes` entry there — and pi emits
+// during that hook — any `pi.appendEntry` there — and pi emits
 // `entry_appended` for it to whoever is subscribed AT THAT MOMENT. Subscribing after
 // `bindExtensions` returned meant those entries were emitted to nobody: the held-until-
 // first-subscriber buffer sits behind the host's subscription, so nothing put them in it.
@@ -587,86 +539,57 @@ test('⚠ an entry an extension persists during session_start reaches the first 
     name: 'enso-host-startup-entry-probe',
     factory: (pi: ExtensionAPI) => {
       pi.on('session_start', () => {
-        pi.appendEntry('probe-startup', { seen: true }) // the same call picc makes for `modes`
+        pi.appendEntry('probe-startup', { seen: true })
       })
     },
   }
   const hosted = await hostedSession([probe])
   const events = collectEvents(hosted)
-  const entries = events.flatMap((event) => (event.kind === 'custom-entry' ? [event] : []))
-  const probeEntry = entries.find((entry) => entry.customType === 'probe-startup')
-  expect(probeEntry?.data).toEqual({ seen: true })
-  // And the one that matters in production: picc's opening mode, persisted at session start,
-  // is the transcript's first `Mode:` line only if it crosses — it is what #88 was missing.
-  const openingMode = entries.find((entry) => entry.customType === 'modes')
-  expect(openingMode?.data).toMatchObject({ mode: 'default' })
+  const probeEntry = events.find((event) => event.kind === 'custom-entry' && event.customType === 'probe-startup')
+  expect(probeEntry).toMatchObject({ data: { seen: true } })
+  // Another extension's custom entry is not a mode: no permission-mode follows it (#496).
+  expect(events[events.indexOf(probeEntry as EnsoObservation) + 1]?.kind).not.toBe('permission-mode')
 })
 
-// ⚠ #446: the real permission-modes extension, in a real session, runs under the file the host
-// points it at, never its own `node_modules` copy of Claude Code's rules. Read off its opening
-// `modes` entry, where it persists the rules it loaded. A fresh file is Enso's deny rules and no
-// allow rule; a file the user wrote is what applies, as they wrote it.
-test("⚠ picc runs under the host's rules file: a fresh one is Enso's deny rules and no allow rule, a user's is theirs (#446)", async () => {
-  const userRule = 'Bash(bun test:*)'
+// ⚠ #446, #496: the permission engine reads its policy at one path under the agent dir, which the
+// host links to the file it was given before the first session. A fresh file is Enso's policy; a
+// file the user wrote is kept as they wrote it; either way the engine's path reads it.
+test("⚠ the engine's config path reads the host's policy file: a fresh one is Enso's policy, a user's is theirs (#446)", async () => {
+  const userPolicy = `${JSON.stringify({ permission: { bash: 'allow' } })}\n`
   const fresh = join(mkdtempSync(join(tmpdir(), 'enso-host-rules-fresh-')), 'permissions.json')
   const written = join(mkdtempSync(join(tmpdir(), 'enso-host-rules-written-')), 'permissions.json')
-  writeFileSync(written, JSON.stringify({ permissions: { allow: [userRule] } }))
-  const loadedRules = async (path: string): Promise<Record<string, Record<string, unknown>>> => {
+  writeFileSync(written, userPolicy)
+  const engineReads = async (path: string): Promise<string> => {
     const host = createAgentHost({
       servesDirectory: servesRepoRoot,
       agentDir,
       permissionRulesPath: path,
       harnessPackageDir: harnessDir,
     })
-    const hosted = await host.createSession(crypto.randomUUID(), () => repoRoot)
-    openSessions.push(hosted)
-    const modes = collectEvents(hosted).find((event) => event.kind === 'custom-entry' && event.customType === 'modes')
-    return (modes?.kind === 'custom-entry' ? modes.data : {}) as Record<string, Record<string, unknown>>
+    openSessions.push(await host.createSession(crypto.randomUUID(), () => repoRoot))
+    return readFileSync(permissionEngineConfigPath(agentDir), 'utf8')
   }
-  const seeded = await loadedRules(fresh)
-  expect(seeded.alwaysDenyRules?.userSettings).toEqual([...ENSO_DEFAULT_DENY_RULES])
-  expect(seeded.alwaysAllowRules?.userSettings).toBeUndefined()
-  const users = await loadedRules(written)
-  expect(users.alwaysAllowRules?.userSettings).toEqual([userRule])
-  expect(users.alwaysDenyRules?.userSettings).toBeUndefined()
+  expect(JSON.parse(await engineReads(fresh))).toEqual(ENSO_DEFAULT_PERMISSION_POLICY)
+  expect(await engineReads(written)).toBe(userPolicy)
+  // Back to the file every other host in this suite names.
+  await engineReads(permissionRulesPath)
 })
 
-// ⚠ L3 (#162 workstream 4). Above the host no surface reads the vendor's `modes` entry any
-// more; the HOST says the mode, as its own event, right after the entry it saw. This is the
-// real extension persisting at session_start and the real host answering — the whole
-// reason the browser can fold `permission-mode` alone.
-test("⚠ the host emits permission-mode after the vendor's modes entry — mode and the modes it registered", async () => {
+// L3 step C's MECHANISM, at the host and against the real extension (#162, #496):
+// `setPermissionMode` runs Enso's per-mode slash command as a prompt, the extension appends its
+// `active_agent` entry, the host emits `permission-mode` right after it, and
+// `permissionModeState()` moves. Above the host no surface reads that entry: the host says the
+// mode as its own event, the whole reason the browser can fold `permission-mode` alone.
+test('⚠ setPermissionMode runs the mode command: the active_agent entry, then the permission-mode observation, and the state all say the new mode', async () => {
   const hosted = await hostedSession()
   const events = collectEvents(hosted)
-  const isVendorModeEntry = (event: EnsoObservation): boolean =>
-    event.kind === 'custom-entry' &&
-    readPiccPersistedMode({ customType: event.customType, data: event.data }) !== undefined
-  const entryIndex = events.findIndex(isVendorModeEntry)
-  expect(entryIndex).toBeGreaterThanOrEqual(0)
-  const following = events[entryIndex + 1]
-  expect(following).toMatchObject({ kind: 'permission-mode', mode: 'default' })
-  const available = following?.kind === 'permission-mode' ? following.available : undefined
-  expect(available).toEqual(hosted.runtime.permissionModeState().available)
-  expect(available).toContain('default')
-  // Another extension's custom entry is not a mode: no permission-mode follows it.
-  const probeEntries = events.filter((event) => event.kind === 'custom-entry' && !isVendorModeEntry(event))
-  for (const probe of probeEntries) {
-    expect(events[events.indexOf(probe) + 1]?.kind).not.toBe('permission-mode')
-  }
-})
-
-// L3 step C's MECHANISM, at the host and against the real vendor extension: `setPermissionMode`
-// runs the vendor's per-mode slash command as a prompt, the extension persists its `modes`
-// entry, the host emits `permission-mode`, and `permissionModeState()` moves. Until this test the
-// path was exercised only through the fake, which implements `setPermissionMode` itself — the
-// one function whose whole job is this seam was executed by no test (#162 exit criteria).
-test('⚠ setPermissionMode runs the vendor command: the modes entry, the permission-mode observation and the state all say the new mode', async () => {
-  const hosted = await hostedSession()
-  const events = collectEvents(hosted)
-  expect(hosted.runtime.permissionModeState().mode).toBe('default')
+  expect(hosted.runtime.permissionModeState()).toEqual({
+    mode: 'default',
+    available: ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'auto'],
+  })
   const { promise: accepted, resolve: onAccepted, reject: onRejected } = Promise.withResolvers<void>()
   // Wait for the OBSERVATION, not a tick count: acceptance is the command's completion, and the
-  // vendor's persistence may land any number of turns later.
+  // entry may land any number of turns later.
   const modeChanged = untilObservation(hosted, (event) => event.kind === 'permission-mode' && event.mode === 'plan')
   hosted.runtime.setPermissionMode('plan', {
     onAccepted,
@@ -675,17 +598,53 @@ test('⚠ setPermissionMode runs the vendor command: the modes entry, the permis
   await accepted
   const change = await modeChanged
   expect(change).toMatchObject({ kind: 'permission-mode', mode: 'plan' })
-  expect(events).toContain(change)
+  const entry = events[events.indexOf(change) - 1]
+  expect(entry).toMatchObject({
+    kind: 'custom-entry',
+    customType: 'active_agent',
+    data: { name: 'enso-mode-plan' },
+  })
   expect(hosted.runtime.permissionModeState().mode).toBe('plan')
-  // The vendor persisted it: a cold read of the transcript agrees with the live state.
+  // A cold read of the transcript agrees with the live state.
   expect(storedPermissionModeState(hosted.inspect().entries).mode).toBe('plan')
+})
+
+/** Set a mode through the host and wait until the host says it moved. */
+async function switchMode(hosted: HostedThread, mode: string): Promise<void> {
+  const changed = untilObservation(hosted, (event) => event.kind === 'permission-mode' && event.mode === mode)
+  const { promise: accepted, resolve: onAccepted, reject } = Promise.withResolvers<void>()
+  hosted.runtime.setPermissionMode(mode, { onAccepted, onRejected: (reason: string) => reject(new Error(reason)) })
+  await accepted
+  await changed
+}
+
+// ⚠ The mode shown is the mode ENFORCED, back to `default` included (#496 review). `default` was
+// once recorded as `active_agent {name: null}`, which the engine resolves by falling back to the
+// last agent it saw: after `/bypassPermissions`, `/default` kept bypass enforced (writes ran
+// unasked) while the host said `default`. Asked through the real engine: a write bypass lets
+// through must ask again once the mode is back to `default`.
+test('⚠ back to default after bypassPermissions, the engine asks again: the mode shown is the mode enforced', async () => {
+  const hosted = await hostedSession()
+  const write = { path: 'enso-496-mode-probe.txt', content: 'x' }
+  await switchMode(hosted, 'bypassPermissions')
+  expect((await hosted.probeToolCall('write', write))?.block ?? false).toBe(false)
+  await switchMode(hosted, 'default')
+  expect(hosted.runtime.permissionModeState().mode).toBe('default')
+  const asked = untilObservation(hosted, (event) => event.kind === 'extension-ui-request' && event.blocking === true)
+  const verdict = hosted.probeToolCall('write', write)
+  // Asking is a dialog, not a verdict: the probe waits on it. A bypass still in force would answer.
+  const first = await Promise.race([verdict.then(() => 'answered without asking'), asked.then(() => 'asked')])
+  expect(first).toBe('asked')
+  expect(hosted.runtime.openDialogs()).toHaveLength(1)
+  await hosted.runtime.abort()
+  expect((await verdict)?.block).toBe(true)
 })
 
 // ⚠ Found by this test's first run: the runtime treats an unknown slash command as ordinary
 // text, so `setPermissionMode('no-such-mode')` was ACCEPTED and would have gone to the model
 // as the chat message "/no-such-mode". The route refuses earlier (422, `changeThreadMode`);
 // the host now refuses too, so the seam cannot be misused from any caller.
-test('setPermissionMode with a mode the vendor registers no command for is rejected at the host, never prompted', async () => {
+test('setPermissionMode with a mode the extension registers no command for is rejected at the host, never prompted', async () => {
   const hosted = await hostedSession()
   const events = collectEvents(hosted)
   const { promise: settled, resolve } = Promise.withResolvers<string>()
@@ -709,7 +668,9 @@ test('⚠ through the runtime, the real guards refuse a write outside the worksp
   expect(refused).toMatchObject({ block: true })
   expect(refused?.reason).toContain('/etc/passwd')
   const passed = await hosted.probeToolCall('read', { path: 'package.json' })
-  expect(passed).toBeUndefined()
+  // Passing is "not blocked": the permission engine answers an allowed call with an explicit
+  // `{ block: false }` where no participant used to answer at all (#496).
+  expect(passed?.block ?? false).toBe(false)
 })
 
 // #160 §4, through the runner: pi's own `grep` tool name reaches the search-beneath check, so a
@@ -847,7 +808,7 @@ test('abort with no pending dialog settles nothing and says nothing', async () =
   expect(events.some((event) => event.kind === 'dialog-settled')).toBe(false)
 })
 
-test("listCommands is synchronous and names picc's /mode", async () => {
+test('listCommands is synchronous and names the permission-modes extension’s /mode', async () => {
   const hosted = await hostedSession()
   const commands = hosted.runtime.listCommands()
   expect(commands.some((command) => command.name === 'mode' && command.source === 'extension')).toBe(true)
@@ -921,10 +882,9 @@ test("⚠ the emitted tail records each event's provenance: held at startup, rep
   const atStartup = hosted.emittedEvents()
   trace.send('S', 'H', 'emittedEvents(), before anyone subscribed')
   trace.reply('H', 'S', `the tail: ${provenances(atStartup)}`)
-  // Before anyone subscribes every startup record is `held` — picc's `modes` entry among them.
+  // Before anyone subscribes every startup record is `held`.
   expect(atStartup.length).toBeGreaterThan(0)
   expect(atStartup.every((event) => event.provenance === 'held')).toBe(true)
-  expect(atStartup.some((event) => event.type === 'custom-entry' && event.name === 'modes')).toBe(true)
 
   let lastOrigin: string | undefined
   trace.send('S', 'H', 'subscribe(listener)')
@@ -939,11 +899,13 @@ test("⚠ the emitted tail records each event's provenance: held at startup, rep
   const afterSubscribe = hosted.emittedEvents()
   trace.send('S', 'H', 'emittedEvents()')
   trace.reply('H', 'S', `the tail: ${provenances(afterSubscribe)}`)
-  const heldModes = afterSubscribe.find((event) => event.provenance === 'held' && event.name === 'modes')
-  const replayedModes = afterSubscribe.find((event) => event.provenance === 'replayed' && event.name === 'modes')
-  expect(heldModes).toBeDefined()
-  expect(replayedModes).toBeDefined()
-  expect((replayedModes?.sequence ?? 0) > (heldModes?.sequence ?? 0)).toBe(true)
+  const heldFirst = afterSubscribe.find((event) => event.provenance === 'held')
+  const replayedFirst = afterSubscribe.find(
+    (event) => event.provenance === 'replayed' && event.type === heldFirst?.type && event.name === heldFirst?.name,
+  )
+  expect(heldFirst).toBeDefined()
+  expect(replayedFirst).toBeDefined()
+  expect((replayedFirst?.sequence ?? 0) > (heldFirst?.sequence ?? 0)).toBe(true)
   // Every held event is replayed exactly once: the two provenances carry the same total.
   const totalOf = (provenance: string): number =>
     afterSubscribe.filter((event) => event.provenance === provenance).reduce((total, event) => total + event.count, 0)
@@ -2008,8 +1970,8 @@ test('⚠ two runs with nothing changed record one run context; a changed AGENTS
   expect(once).toHaveLength(1)
   expect(once[0]?.contextFiles).toEqual([{ path: agentsFile, sha256: sha256Of('Use tabs.\n') }])
   expect(once[0]?.git).toBeNull()
-  // The real picc is loaded: its `modes` entry must yield a rules hash. A picc that renamed its
-  // persisted rule fields records `mode: null` instead, and this goes red (PR #440 review).
+  // The policy the engine reads is linked under the agent dir: the mode's rules must yield a hash.
+  // A policy the recorder cannot read records `mode: null` instead, and this goes red (#496).
   expect(once[0]?.mode).toEqual({ rulesHash: expect.stringMatching(/^[0-9a-f]{64}$/) })
   first.runtime.dispose()
 

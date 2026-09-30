@@ -7,8 +7,8 @@ import { ROOT } from './flow-tags.ts'
  * A top-level constant's VALUE, read out of a source file with the TypeScript parser (#482).
  *
  * A docs builder may import only `@enso/core` (the `scripts` zone, `.fallowrc.jsonc`), but a page
- * quotes facts the browser, the host and the harness own: the guard verdict words, picc's mode
- * list, a size limit. Reading the constant beats re-typing it, and parsing beats the regex readers
+ * quotes facts the browser, the host and the harness own: the guard verdict words, the `auto`
+ * classifier's deadline, a size limit. Reading the constant beats re-typing it, and parsing beats the regex readers
  * in `gate-source.ts`: a bracket in a comment or a string can't end an array early here.
  *
  * It evaluates LITERALS only: strings, numbers, booleans, `null`, arrays, objects, arithmetic on

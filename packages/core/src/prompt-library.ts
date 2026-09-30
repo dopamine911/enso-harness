@@ -426,7 +426,7 @@ export type EnsoThreadSystemPrompt = Static<typeof EnsoThreadSystemPrompt>
 
 /**
  * The data of the branch's LAST custom entry of `customType`, root to leaf — the rule every reader
- * of a custom entry follows (picc's `restoreState`, the run context, the system prompt): the last
+ * of a custom entry on the branch follows (the run context, the system prompt): the last
  * one on the path is the one in force. The branch is read as `unknown[]`: this package names no
  * runtime type.
  *
