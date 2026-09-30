@@ -562,7 +562,7 @@ Stated plainly; none is hidden by a mode.
   undecided project is untrusted, and asked about before its first run. The terminal follows pi's own
   decision, which counts a project with none of pi's trust-gated files (`.pi/settings.json`,
   `extensions`, `skills`, …) as trusted without asking — and `.pi/agents/` is not on that list, so
-  such a repository can redefine an `enso-mode-*` agent there.
+  such a repository can redefine an `enso-mode-*` agent there (#510).
 
 ## What fences it
 
