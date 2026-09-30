@@ -1,0 +1,19 @@
+{
+  "feature": "changes",
+  "shots": [
+    {
+      "image": "changes",
+      "steps": ["open a thread from the rail", "choose the **Changes** tab at the top of the thread"],
+      "shown": [
+        "no remote to compare with — only uncommitted changes count",
+        "changed files",
+        "src/config.ts",
+        "+ databaseUrl: required('DATABASE_URL'),"
+      ],
+      "measured": {
+        "unchangedLines": "⋯ 5 unchanged lines",
+        "gitReadout": "main · 1 unstaged"
+      }
+    }
+  ]
+}

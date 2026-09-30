@@ -1,0 +1,11 @@
+{
+  "feature": "prompts",
+  "shots": [
+    {
+      "image": "prompts-manager",
+      "steps": ["open a thread from the rail", "choose **prompts**", "choose **Reviewer**"],
+      "shown": ["pi default", "Append prompts", "New", "Save", "prompt size", "what the model receives"],
+      "measured": {}
+    }
+  ]
+}

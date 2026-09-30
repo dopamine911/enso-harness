@@ -55,9 +55,12 @@ export interface Query {
   readonly file: string | undefined
 }
 
-export const USAGE =
-  'usage: bun run logs [--follow] [--level trace|debug|info|warning|error] [--thread ID] [--process NAME] [--since 10m] [--date YYYY-MM-DD] [--file PATH] [--json] [--color]\n' +
-  '       bun run logs bundle [--thread ID] > enso-bundle.md'
+/** The tier floor with no `--level`: named so the Features page quotes it, not a copy (#482). */
+const DEFAULT_LEVEL = 'info'
+
+// One literal, not a concatenation, so the Features page reads the flags from it (#482, `source-constants.ts`).
+export const USAGE = `usage: bun run logs [--follow] [--level trace|debug|info|warning|error] [--thread ID] [--process NAME] [--since 10m] [--date YYYY-MM-DD] [--file PATH] [--json] [--color]
+       bun run logs bundle [--thread ID] > enso-bundle.md`
 
 /** A flag the parser could not accept — the main prints it with the usage and exits 2. */
 export class UsageError extends Error {
@@ -76,7 +79,7 @@ export function parseArguments(argv: readonly string[]): Query {
   let follow = false
   let json = false
   let color = false
-  let level = ENSO_LOG_LEVEL_RANK.info ?? 2
+  let level = ENSO_LOG_LEVEL_RANK[DEFAULT_LEVEL] ?? 2
   let thread: string | undefined
   let processName: string | undefined
   let sinceMs: number | undefined

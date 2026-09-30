@@ -68,7 +68,15 @@ import {
 import { describePermissionRules, preparePermissionRules } from '../packages/core/src/permission-rules.ts'
 import { declaredResources, missingVendorPaths } from '../packages/core/src/pi-manifest.ts'
 import { quarantineSecrets } from '../packages/core/src/secrets.ts'
-import { isPrintRun, piArguments, piVersionSupported, piVersionText, SUPPORTED_PI_VERSIONS } from './enso-launch.ts'
+import {
+  isPrintRun,
+  piArguments,
+  piVersionSupported,
+  piVersionText,
+  SUPPORTED_PI_VERSIONS,
+  secretsKeptOutLine,
+  vanillaPiLine,
+} from './enso-launch.ts'
 import { buildPrintManifest, materializePrintHarness } from './print-harness.ts'
 
 const repoRoot = findRepoRoot(import.meta.url)
@@ -166,8 +174,7 @@ const args = piArguments(packageToLoad, passthroughArgs)
  * one, so the ordering matches the invariant instead of contradicting it eight lines down.
  */
 const quarantine = quarantineSecrets(process.env, { repoRoot, home })
-if (quarantine.removed.length > 0)
-  process.stderr.write(`enso: secrets kept out of pi's environment (#89): ${quarantine.removed.join(', ')}\n`)
+if (quarantine.removed.length > 0) process.stderr.write(`${secretsKeptOutLine(quarantine.removed)}\n`)
 if (quarantine.misplaced.length > 0) {
   process.stderr.write(
     `enso: ⚠ the root .env defines ${quarantine.misplaced.join(', ')} — bun autoloads .env into every bun child, ` +
@@ -254,9 +261,13 @@ if (!piVersionSupported(reportedPiVersion)) {
 }
 
 process.stderr.write(
-  `enso: vanilla pi ${reportedPiVersion} | agent-dir=${agentDir} | package=${packageToLoad}` +
-    `${printRun ? ' (print variant, no permission modes — #20)' : ''} | ` +
-    `${resources.length} declared resource path(s)\n`,
+  `${vanillaPiLine({
+    piVersion: reportedPiVersion,
+    agentDir,
+    packageToLoad,
+    printRun,
+    declaredResourceCount: resources.length,
+  })}\n`,
 )
 
 const pi = Bun.spawn(['pi', ...args], {

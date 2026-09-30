@@ -1,0 +1,23 @@
+{
+  "feature": "session-eval",
+  "shots": [
+    {
+      "image": "session-eval",
+      "steps": ["open a thread from the rail", "choose the **Stats** tab at the top of the thread"],
+      "shown": ["Session eval", "corrections", "refusal channels"],
+      "measured": {
+        "refusalChannels": "guard 2 · operator 0 · provider 0"
+      }
+    },
+    {
+      "image": "session-eval-timeline",
+      "steps": ["open a thread from the rail", "choose the **Stats** tab at the top of the thread"],
+      "shown": ["Timeline", "f= typed against the run · r= clicked against it"],
+      "measured": {
+        "guardFlag": "!G",
+        "lastFriction": "f=0",
+        "lastRefusals": "r=0"
+      }
+    }
+  ]
+}

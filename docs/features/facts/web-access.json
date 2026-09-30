@@ -1,0 +1,14 @@
+{
+  "feature": "web-access",
+  "shots": [
+    {
+      "image": "web-fetch-refusal",
+      "steps": ["open a thread from the rail", "choose **web_fetch https://bun.sh/blog**"],
+      "shown": [
+        "web_fetch https://bun.sh/blog",
+        "Not fetched: the web_fetch host allowlist is EMPTY — the recorded default policy (#54), not an accident. No host is fetchable until a human adds one: edit /tmp/enso-feature-shots/home/config.json to name exact hostnames, e.g. { \"webFetch\": { \"allowedHosts\": [\"docs.example.com\"] } }, and restart the session — the allowlist is read once at session start. Do not edit that file from this session; ask the human."
+      ],
+      "measured": {}
+    }
+  ]
+}

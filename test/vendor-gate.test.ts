@@ -136,6 +136,14 @@ const VENDOR_NAMED_ALLOWED: readonly string[] = [
   // generated INTO docs/reference/verification-inventory.md, so the name is data here, not a
   // comment. Leaves when that fake stops replicating picc's `modes` custom entry.
   'scripts/docs/verification-inventory.ts',
+  // The Guards page's rule table (#482) keys its reader's words by rule id, and one rule is named
+  // for the extension whose verdict it carries: `cc-safety-net`. The table is the page's inventory
+  // of rules; leaves when that rule is renamed for what it refuses.
+  'scripts/docs/features/guards-and-receipts.ts',
+  // The Permission modes page (#482) reads the mode list and the starting mode out of the host's
+  // adapter, whose constants are named for picc (`PICC_PERMISSION_MODES`): the only place the list
+  // is written. Leaves when the mode list is the harness's own.
+  'scripts/docs/features/permission-modes.ts',
   // ── The gates that have to spell the names ──
   // This file: it names the vendors in order to refuse them. Never leaves.
   'test/vendor-gate.test.ts',

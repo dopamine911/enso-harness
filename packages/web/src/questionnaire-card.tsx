@@ -232,7 +232,7 @@ export function QuestionnaireControls({
   return (
     <div className="flex flex-col gap-4">
       <Tabs value={active} onValueChange={setActive}>
-        <TabsList>
+        <TabsList aria-label="questions">
           {dialog.questions.map((question, index) => (
             <TabsTrigger key={question.header} value={String(index)}>
               {isAnswered(draftAt(index)) ? <CheckIcon aria-label="answered" /> : null}

@@ -17,7 +17,7 @@ export const STATS: FeatureSpec = {
   shows: [
     "The **Stats** tab analyses one thread: what it cost, how the cache behaved, which parts of the conversation were expensive, and which tools did the most. Every figure comes from pi's own session file, so a thread from last month gives the same answer as one from a minute ago.",
   ],
-  alsoOpens: ['A point on a chart, a call or a prompt in a list opens that spot in the chat.'],
+  opens: ['{steps}.', 'A point on a chart, a call or a prompt in a list opens that spot in the chat.'],
   shots: [
     {
       image: 'stats',
@@ -41,6 +41,9 @@ export const STATS: FeatureSpec = {
           says: '**{shown}**: the tool calls ranked by input, output, time or failures.',
         },
       ],
+      after: [
+        "Further down: **Cumulative usage by tool**, **Distribution**, **Costliest prompts** and **Latency**, then the thread's [Session eval](./session-eval.md).",
+      ],
       measure: {
         totalCost: metric('total cost'),
         failures: metric('failures'),
@@ -48,8 +51,6 @@ export const STATS: FeatureSpec = {
       },
     },
   ],
-  afterShots:
-    "Further down: **Cumulative usage by tool**, **Distribution**, **Costliest prompts** and **Latency**, then the thread's [Session eval](./session-eval.md).",
   lookFor: [
     'The thread above cost {totalCost}. Three things stand out.',
     `The first turn after the switch to \`${SECOND_MODEL}\` is one solid cache-write bar in **Tokens**, and the peak of **Cost per turn**: the new model had no cache, so the whole prefix was written again, at that model's price. Nearly every other turn is almost all cache read. If you see a lone cache-write bar in a thread of your own, look for a model switch or a compaction just before it. [Context Events](./context-browser.md) names which.`,

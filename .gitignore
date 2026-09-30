@@ -32,8 +32,9 @@ docs/reference/*.md
 docs/seams/ported-provenance.md
 docs/flows/*.md
 !docs/flows/README.md
-# Features pages built from a spec (`scripts/docs/features/index.ts`); the rest are still hand-written.
-docs/features/stats.md
+# Features pages, each built from its spec (`scripts/docs/features/index.ts`) and its captured facts.
+docs/features/*.md
+!docs/features/README.md
 
 # Built by CI for the reviewer (`scripts/docs/touched-comments.ts`, #482); a local run writes it wherever `--out` says.
 .claude/touched-comments.md

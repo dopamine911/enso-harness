@@ -41,7 +41,15 @@
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { ensoSecretsPath, rootDotenvPath } from './paths.ts'
 
-const SECRET_SHAPED_NAME = /(?:^|_)(?:API_KEY|TOKEN|SECRET|PASSWORD)S?(?:$|_)/
+/**
+ * The words a secret-shaped name carries (whole, underscore-delimited, singular or plural), named
+ * so the docs can list the same words the quarantine matches.
+ *
+ * @group Secrets
+ */
+export const SECRET_NAME_WORDS = ['API_KEY', 'TOKEN', 'SECRET', 'PASSWORD'] as const
+
+const SECRET_SHAPED_NAME = new RegExp(`(?:^|_)(?:${SECRET_NAME_WORDS.join('|')})S?(?:$|_)`)
 
 /**
  * Whether an environment variable NAME looks like it carries a secret. Case-sensitive: env names are.

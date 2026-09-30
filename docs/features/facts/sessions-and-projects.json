@@ -1,0 +1,22 @@
+{
+  "feature": "sessions-and-projects",
+  "shots": [
+    {
+      "image": "sessions-start",
+      "steps": [],
+      "shown": ["Model", "Effort", "Mode", "System prompt", "Saved prompt", "Prompt"],
+      "measured": {}
+    },
+    {
+      "image": "sessions-cold-thread",
+      "steps": ["open a thread from the rail"],
+      "shown": [
+        "shop-api",
+        "Where does the app read its database URL? Check .env too.",
+        "Add project",
+        "model (recorded): claude-opus-4-1 · demo · medium"
+      ],
+      "measured": {}
+    }
+  ]
+}

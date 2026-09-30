@@ -1,0 +1,29 @@
+{
+  "feature": "context-browser",
+  "shots": [
+    {
+      "image": "context-browser",
+      "steps": [
+        "open a thread from the rail",
+        "choose the **Context** tab at the top of the thread",
+        "choose **model demo/claude-opus-4-1**"
+      ],
+      "shown": ["the request to open", "2 entered since request 8", "model demo/claude-opus-4-1", "File Activity"],
+      "measured": {
+        "enteredSince": "2 entered since request 8"
+      }
+    },
+    {
+      "image": "context-browser-element",
+      "steps": [
+        "open a thread from the rail",
+        "choose the **Context** tab at the top of the thread",
+        "choose **model demo/claude-opus-4-1**",
+        "choose **tool results**",
+        "choose **read src/config.ts**"
+      ],
+      "shown": ["read src/config.ts ≈61", "show the text"],
+      "measured": {}
+    }
+  ]
+}
