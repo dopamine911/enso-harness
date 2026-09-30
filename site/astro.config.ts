@@ -69,6 +69,9 @@ export default defineConfig({
       // the landing's own rules in `src/styles/landing.css`, imported by that page alone.
       customCss: ['./src/styles/theme.css'],
       logo: { src: './src/assets/landing/enso-smile.png', alt: '' },
+      // The web app's own tab icon (`packages/web/public/favicon.png`), copied: the site and the app
+      // are one product, and the mascot replaced the old "Enso-harness" mark on both.
+      favicon: '/favicon.png',
       // The landing page is the site's one hero, and the override renders hello-enso's.
       components: { Hero: './src/components/LandingHero.astro' },
       // Sora, Inter and JetBrains Mono from Google Fonts, as hello-enso loads them (chosen over
