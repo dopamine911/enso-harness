@@ -19,7 +19,8 @@ import {
  * drops every edit rule the user wrote). `agent-host.test.ts` asks the real engine the same
  * questions in every mode, so this model cannot drift from it unnoticed.
  *
- * Nothing here reads or writes the file; the server does (`server/permission-policy.ts`).
+ * Nothing here reads or writes the file; the host does (`host/permission-policy-file.ts`), for the
+ * server's routes.
  *
  * @group Permission policy
  */

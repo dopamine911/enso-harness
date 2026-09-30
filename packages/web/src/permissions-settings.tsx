@@ -41,6 +41,7 @@ import {
   type PolicyChange,
   policyDiff,
   rowsBySurface,
+  checkSurfaces,
   surfaceChoices,
   withAction,
   withGroup,
@@ -887,7 +888,7 @@ export function PermissionsSection({
       )}
       <TryCommand
         threadId={threadId}
-        surfaces={surfaceChoices(permission)}
+        surfaces={checkSurfaces(permission)}
         unsaved={editor.draft !== undefined}
         fetch={fetchImpl}
       />

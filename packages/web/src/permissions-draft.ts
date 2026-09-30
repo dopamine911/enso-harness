@@ -39,6 +39,22 @@ export function surfaceChoices(permission: EnsoPermissionMap): string[] {
   return [...CHECK_SURFACES, ...named]
 }
 
+/** The shorthands the engine expands before any call meets them, and the directions each stands for. */
+const SHORTHANDS: Readonly<Record<string, readonly string[]>> = {
+  path: ['path_read', 'path_write'],
+  external_directory: ['external_directory_read', 'external_directory_write'],
+}
+
+/**
+ * The surfaces "Try a command" offers: `surfaceChoices` with each shorthand replaced by its
+ * directions. ⚠ Asked about `path` itself, the engine answers from the raw `path` block — a `*.pem`
+ * deny there — while a read meets `path_read`, where the seed's `**` allow comes after it and wins:
+ * a verdict no call gets (probed against the real engine in review of #474).
+ */
+export function checkSurfaces(permission: EnsoPermissionMap): string[] {
+  return [...new Set(surfaceChoices(permission).flatMap((surface) => SHORTHANDS[surface] ?? [surface]))]
+}
+
 /** The decision `pattern` has on `surface`, when it is there. */
 function decisionAt(
   permission: EnsoPermissionMap,

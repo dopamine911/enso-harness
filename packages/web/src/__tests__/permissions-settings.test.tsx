@@ -366,6 +366,20 @@ test('⚠ try a command with no thread open says so and asks nothing', async () 
   expect(mounted.sent.filter((entry) => entry.request.includes('/check'))).toEqual([])
 })
 
+// ⚠ Review of #474: asked about `path` itself, the engine answers from the raw shorthand block — a
+// verdict no call meets, since a read goes through `path_read`. A rule may still be ADDED on `path`.
+test('try a command offers a shorthand surface as its directions; adding a rule still offers the shorthand', async () => {
+  const file = { ...FILE, permission: { ...FILE.permission, external_directory: { '**': 'ask', '/etc/*': 'deny' } } }
+  const mounted = await mountSettings({ file })
+  const options = (label: string): string[] =>
+    [...find(mounted, `select[aria-label="${label}"]`).querySelectorAll('option')].map((option) => option.value)
+  expect(options('check surface')).not.toContain('external_directory')
+  expect(options('check surface')).toEqual(
+    expect.arrayContaining(['external_directory_read', 'external_directory_write']),
+  )
+  expect(options('new rule surface')).toContain('external_directory')
+})
+
 test("try a command shows the engine's verdict for the open thread, and a thread whose engine has not loaded says so", async () => {
   const mounted = await mountSettings({ threadId: 't1' })
   await typeInto(mounted, 'check value', 'git push origin main')

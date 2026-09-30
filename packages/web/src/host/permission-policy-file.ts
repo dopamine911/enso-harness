@@ -18,8 +18,16 @@ import {
   permissionEngineConfigPath,
   withCatchAllFirst,
 } from '@enso/core/permission-rules'
-import { policyProblems } from '../host/permission-policy.ts'
-import type { WriteCondition } from './prompt-library.ts'
+import { policyProblems } from './permission-policy.ts'
+
+/**
+ * What a write expects on disk: the server's `WriteCondition` (#443), stated here because the host
+ * imports only core. `absent` — no file; `matches` — the version read; `present` — whatever is there.
+ */
+type WriteCondition =
+  | { readonly kind: 'absent' }
+  | { readonly kind: 'matches'; readonly etag: string }
+  | { readonly kind: 'present' }
 
 /**
  * The user's permission policy on disk, as Settings reads and writes it (#474):
@@ -32,9 +40,13 @@ import type { WriteCondition } from './prompt-library.ts'
  * written to a temporary file beside it and renamed over it: the engine sees the old file or the
  * new one, never neither. The link survives: it names the path, and a rename keeps the path.
  *
- * ⚠ A SAVE SAYS WHAT IT EXPECTS ON DISK, as a prompt write does (`WriteCondition`): the file the
- * page read (its `ETag`), or `*`. The file is the user's too — they may edit it by hand while the
- * page is open — and an edit made there is never overwritten unseen.
+ * ⚠ A SAVE SAYS WHAT IT EXPECTS ON DISK, as a prompt write does: the file the page read (its
+ * `ETag`), or `*`. The file is the user's too — they may edit it by hand while the page is open —
+ * and an edit made there is never overwritten unseen.
+ *
+ * In the host, beside the engine's schema, because the write is shaped by what the engine does:
+ * it reloads on the modification time alone (`writeAtomically`), and its real-engine tests must
+ * share `agent-host.test.ts`'s process-wide agent dir.
  */
 
 /** A strong entity tag for the file's bytes, quoted as HTTP writes one (the prompt library's). */

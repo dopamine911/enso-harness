@@ -50,7 +50,7 @@ function ruleProblems(permission: unknown): Problem[] {
   }
   const problems: Problem[] = []
   for (const [surface, rule] of Object.entries(permission)) {
-    if (typeof rule === 'string' || typeof rule !== 'object' || rule === null || Array.isArray(rule)) {
+    if (typeof rule !== 'object' || rule === null || Array.isArray(rule)) {
       if (!isDecision(rule)) problems.push({ at: `/permission/${surface}`, message: 'must be allow, ask or deny' })
       continue
     }

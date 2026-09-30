@@ -29,6 +29,7 @@ import { readGitChanges, readGitState, runGit } from '@enso/core/git'
 import { missingVendorPaths } from '@enso/core/pi-manifest'
 import { AGENT_RUNTIME_VERSION, type AgentHost, createAgentHost, SessionDirectoryRefused } from '../host/agent-host.ts'
 import { withoutHostValues } from '../host/host-commands.ts'
+import { readPermissionPolicy, resetPermissionPolicy, writePermissionPolicy } from '../host/permission-policy-file.ts'
 import { createAboutRoute, createBundleRoute } from './bundle-route.ts'
 import {
   abortThread,
@@ -52,7 +53,6 @@ import {
 import { MAX_LOG_BODY_BYTES, receiveBrowserLogs } from './logs-route.ts'
 import { createLogStatsRoute } from './logs-stats-route.ts'
 import { followLogTail, type LogTailRouteDeps } from './logs-tail-route.ts'
-import { readPermissionPolicy, resetPermissionPolicy, writePermissionPolicy } from './permission-policy.ts'
 import { createProjectRegistry, ProjectUnavailable } from './projects.ts'
 import {
   createPromptLibrary,
