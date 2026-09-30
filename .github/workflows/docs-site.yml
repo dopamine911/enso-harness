@@ -5,16 +5,19 @@
 # spend Actions minutes re-proving what the gate just proved. What this workflow adds is the one
 # thing the gate does not do: put the built site somewhere a person can read it.
 #
-# ⚠ THE BASE PATH IS DERIVED, NEVER A LITERAL. A GitHub project site is served from
-# `/<repository>`, and a site built with the wrong `base` produces working HTML whose every
-# internal link 404s — the failure looks like broken documentation and is really one wrong
-# string. `ENSO_SITE_BASE` comes from the repository itself (`scripts/docs/site-base.ts` is the
-# single reader; the projector, the link crawl and Astro all take it from there), so a rename or
-# a fork publishes correctly without anyone remembering this file exists.
+# ⚠ THE BASE PATH AND ORIGIN ARE DERIVED, NEVER LITERALS. Where Pages serves the site decides
+# both: a project site is served from `/<repository>` on `<owner>.github.io`, and a custom
+# domain (`enso.engineer`, #506) from `/` on that domain. A site built with the wrong `base`
+# produces working HTML whose every internal link 404s — the failure looks like broken
+# documentation and is really one wrong string. So neither is written here: `configure-pages`
+# reads them from the Pages configuration itself (its `html_url`), and `ENSO_SITE_BASE` /
+# `ENSO_SITE_URL` carry them to `scripts/docs/site-base.ts`, the single reader the projector, the
+# link crawl and Astro share. Adding, changing or dropping the domain, renaming the repository or
+# forking it all publish correctly without anyone editing this file.
 #
 # `deploy` is opt-in per run. Pages has to be enabled for the repository with "GitHub Actions"
-# as its source; until it is, the build still runs and uploads an artifact a reviewer can
-# download, rather than failing on a deployment nobody asked for.
+# as its source, because the base comes from its configuration: without Pages the build fails at
+# `configure-pages` rather than guessing a base.
 name: Docs site
 
 on:
@@ -38,6 +41,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
+      pages: read # `configure-pages` reads the site's URL from the Pages configuration
     steps:
       - uses: actions/checkout@v4
 
@@ -56,10 +62,16 @@ jobs:
       - name: Validate the documented API surface
         run: bun run docs:api
 
+      # Where Pages serves the site: `base_path` is `/zen-harness-foundation` on github.io and
+      # empty on a custom domain, `origin` the scheme and host either way (#506).
+      - name: Read where Pages serves the site
+        id: pages
+        uses: actions/configure-pages@v5
+
       - name: Build the site and crawl its links
         env:
-          ENSO_SITE_BASE: /${{ github.event.repository.name }}
-          ENSO_SITE_URL: https://${{ github.repository_owner }}.github.io
+          ENSO_SITE_BASE: ${{ steps.pages.outputs.base_path }}
+          ENSO_SITE_URL: ${{ steps.pages.outputs.origin }}
         run: bun run docs:site
 
       - name: Upload the built site
