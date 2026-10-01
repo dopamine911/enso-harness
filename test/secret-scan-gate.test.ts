@@ -176,11 +176,11 @@ test('⚠ the repository allowlist keeps every pattern the workflow baseline had
 })
 
 /**
- * THE TRIGGER THAT RUNS BEFORE A MERGE (#538). The scan once ran on `merge_group` alone, on the
- * premise that `main` required a merge queue; it did not, this repository has never had a
- * `merge_group` run, and so no pull request was scanned before it merged — secrets were caught
- * only by the push backstop, when they already needed rotating. A test can hold the workflow
- * file; it cannot see the repository setting, which is why `pull_request` is the trigger held.
+ * EVERY PUSHED COMMIT IS SCANNED (#538). The scan once ran on `merge_group` and `push: [main]`
+ * alone, on the premise that `main` required a merge queue; it did not, this repository has never
+ * had a `merge_group` run, and so no pull request was scanned before it merged — secrets were
+ * caught only on `main`, when they already needed rotating. A test can hold the workflow file; it
+ * cannot see the repository setting, which is why the push trigger's branch set is what is held.
  */
 
 /** The `on:` block of the workflow, as the lines indented under it. */
@@ -191,18 +191,13 @@ function triggerBlockOfWorkflow(): string {
   return block
 }
 
-test('⚠ the secret scan runs on every push to a pull request, before any merge (#538)', () => {
+test('⚠ the secret scan runs on every push to every branch, and never cancels a scan (#538)', () => {
+  const workflow = readFileSync(join(REPOSITORY_ROOT, WORKFLOW), 'utf8')
   const triggers = triggerBlockOfWorkflow()
-  const pullRequest = /^ {2}pull_request:\n((?:[ ]{4}.*\n)*)/m.exec(triggers)?.[1]
-  expect(pullRequest).toBeDefined()
-  // Not `opened` alone: a push after opening must re-scan, and a draft made ready must be scanned.
-  const types =
-    /types:\s*\[([^\]]*)\]/
-      .exec(pullRequest ?? '')?.[1]
-      ?.split(',')
-      .map((type) => type.trim()) ?? []
-  expect(types).toEqual(expect.arrayContaining(['opened', 'synchronize', 'reopened', 'ready_for_review']))
-  // The other two stay: the queue's authoritative check if one is ever enabled, and the backstop on main.
+  // `['**']`, not `[main]` and not a list of names: a branch nobody listed is still scanned.
+  expect(/^ {2}push:\n[ ]{4}branches: \['\*\*'\]/m.test(triggers)).toBe(true)
+  // The queue's authoritative check stays for the day one is enabled.
   expect(/^ {2}merge_group:/m.test(triggers)).toBe(true)
-  expect(/^ {2}push:\n[ ]{4}branches: \[main\]/m.test(triggers)).toBe(true)
+  // A newer push must not cancel the scan of the commit it replaced: that range would never be read.
+  expect(/^concurrency:\n(?:[ ]+.*\n)*?[ ]+cancel-in-progress: false$/m.test(workflow)).toBe(true)
 })
