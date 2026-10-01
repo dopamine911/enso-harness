@@ -43,13 +43,13 @@ test('a print run is -p, --print, or stdin that is not a TTY; an interactive run
 
 // ⚠ The BOUNDARIES, which are the whole content of the predicate: the minimum is supported and
 // the patch below it is not; the excluded version is refused and the patch below it is not.
-// These four also pin the `^0.87.1` semantics the harness manifest's peer range states.
+// These four also pin the `^0.99.2` semantics the harness manifest's peer range states.
 // @pins boot-and-launchers/pi-version-gate
 test('the tested pi range includes its minimum and excludes the version it stops below', () => {
   expect(piVersionSupported(piVersionText(SUPPORTED_PI_VERSIONS.minimum))).toBe(true)
-  expect(piVersionSupported('0.87.0')).toBe(false)
+  expect(piVersionSupported('0.99.1')).toBe(false)
   expect(piVersionSupported(piVersionText(SUPPORTED_PI_VERSIONS.below))).toBe(false)
-  expect(piVersionSupported('0.87.9')).toBe(true)
+  expect(piVersionSupported('0.99.9')).toBe(true)
 })
 
 // ⚠ FAIL CLOSED: a version the launcher cannot read is a pi the corpus says nothing about, so
@@ -59,10 +59,10 @@ test('the tested pi range includes its minimum and excludes the version it stops
 test('a pi whose version cannot be read, or is a prerelease of the excluded version, is refused', () => {
   expect(piVersionSupported('')).toBe(false)
   expect(piVersionSupported('unknown')).toBe(false)
-  expect(piVersionSupported('0.87')).toBe(false)
-  expect(piVersionSupported('0.88.0-rc.1')).toBe(false)
+  expect(piVersionSupported('0.99')).toBe(false)
+  expect(piVersionSupported('0.100.0-rc.1')).toBe(false)
   // …and a version printed with company around it is still read: `pi --version` may grow a banner.
-  expect(piVersionSupported('pi 0.87.7 (bun 1.4.0)')).toBe(true)
+  expect(piVersionSupported('pi 0.99.7 (bun 1.4.0)')).toBe(true)
 })
 
 // ⚠ WHOSE number is it (PR #294 review). "The first triple in the output" read bun's version
@@ -72,11 +72,11 @@ test('a pi whose version cannot be read, or is a prerelease of the excluded vers
 // @pins boot-and-launchers/pi-version-gate
 test("the version read is pi's, whatever else the banner names first (#217)", () => {
   // The dangerous shape: another component's number is in range, pi's is not.
-  expect(piVersionSupported('bun 0.87.5 / pi 0.88.3')).toBe(false)
+  expect(piVersionSupported('bun 0.99.5 / pi 0.100.3')).toBe(false)
   // …and its mirror: the leading number is out of range, pi's is in it.
-  expect(piVersionSupported('bun 1.4.0 / pi 0.87.7')).toBe(true)
-  expect(piVersionSupported('pi@0.87.7')).toBe(true)
-  expect(piVersionSupported('pi v0.87.7')).toBe(true)
+  expect(piVersionSupported('bun 1.4.0 / pi 0.99.7')).toBe(true)
+  expect(piVersionSupported('pi@0.99.7')).toBe(true)
+  expect(piVersionSupported('pi v0.99.7')).toBe(true)
   // A banner that names no pi version at all is no version claim: refused.
   expect(piVersionSupported('bun 1.4.0 (linux x64)')).toBe(false)
 })

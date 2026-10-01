@@ -1104,7 +1104,7 @@ test('a read through the @ prefix confers knowledge of the plain path (#10 agree
 
 // ⚠ The list above is a copy of pi's registry. This is the receipt that it still matches:
 // the three exported factories (`createCodingTools`, `createReadOnlyTools`,
-// `createPowerShellTool`) together build every tool pi 0.87.1 ships (`allToolNames` in
+// `createPowerShellTool`) together build every tool pi 0.99.2 ships (`allToolNames` in
 // dist/core/tools/index.js is not on the export map, so the factories are the reachable
 // source of truth). A new pi mutator would land in this diff, not fall to the reader gate
 // unnoticed — and `GUARD_POLICY_TOOL_NAMES` must name only tools pi actually registers.

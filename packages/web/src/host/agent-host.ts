@@ -206,7 +206,7 @@ const log = ensoLogger('host')
  * (`readSecret`) — see `@enso/core`'s secrets.ts for why the root `.env` is the wrong place.
  *
  * ⚠ THE HOST LOADS ONE EXTENSION OF ITS OWN, `<inline:enso-model-watch>` (#338 slice 2), because
- * an extension is the only honest listener for a model change. pi 0.87.1 announces a model
+ * an extension is the only honest listener for a model change. pi (0.87.1; re-read at 0.99.2, line numbers 0.87.1's) announces a model
  * switch to extensions ALONE: `AgentSession.setModel` (`dist/core/agent-session.js:1645`)
  * writes the `model_change` entry through `sessionManager.appendModelChange` (:1652) with no
  * session event — `entry_appended` is emitted for custom entries from the extension API's
@@ -242,7 +242,7 @@ const log = ensoLogger('host')
  * ⚠⚠ CONTINUE RUNS ON pi'S PRIVATE RUN LIFECYCLE (#436). `continueRun` resumes a torn thread from
  * exactly its stored state — no new user message — by calling `AgentSession._runAgentPrompt(lead)`
  * (`agent-session.js:1078`, `private` in `agent-session.d.ts:403`, an ordinary method at run time)
- * through ONE cast (`PiRunLifecycle`). pi 0.87.1 has no public continue that runs inside that
+ * through ONE cast (`PiRunLifecycle`). pi (0.87.1, and still 0.99.2) has no public continue that runs inside that
  * lifecycle, and the lifecycle is what makes it a run: `session.agent.continue()` alone persists the
  * reply and fires the guards, but never emits `agent_settled` (the route releases the lease on
  * `settled`, so the thread stayed busy forever), leaves `isStreaming` false (a prompt enqueued during
@@ -1517,11 +1517,11 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
           ...(request.images === undefined ? {} : { images: [...request.images] }),
           ...(request.admission === undefined ? {} : { streamingBehavior: STREAMING_BEHAVIOR_OF[request.admission] }),
           source: PROMPT_SOURCE_RPC,
-          preflightResult: (didSucceed: boolean) => {
-            if (didSucceed) {
-              accepted = true
-              outcome.onAccepted()
-            }
+          // pi ≥ 0.99 calls this only for an ACCEPTED prompt, with how it was dispatched
+          // (`started`, `queued` or `handled`); a rejected one never calls it and rejects below.
+          preflightResult: () => {
+            accepted = true
+            outcome.onAccepted()
           },
         })
         .catch((error: unknown) => {

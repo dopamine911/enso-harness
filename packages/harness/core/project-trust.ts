@@ -11,7 +11,8 @@ import { resolvePathLikePi } from './paths.ts'
  * is pi's — the SAME `trust.json` in the agent dir that gates a project's `.pi/` — so one answer
  * covers both and a decision made in either place holds in the other. pi exports none of this
  * (`ProjectTrustStore`, `getProjectTrustOptions`, the lock are internal to
- * `dist/core/trust-manager.js`), so it is copied from pi-coding-agent 0.87.1 (MIT), and
+ * `dist/core/trust-manager.js`), so it is copied from pi-coding-agent 0.87.1 (MIT; re-read at 0.99.2,
+ * whose one change, `mcp.json` among the trust-requiring resources, is in a list not copied here), and
  * `__tests__/project-trust.test.ts` reaches the real module to hold the copy to it.
  *
  * ⚠ The LOCK is the part that must not drift: a session writing `.pi/` trust and Enso writing

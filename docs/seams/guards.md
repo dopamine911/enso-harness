@@ -343,9 +343,11 @@ leaves (`@enso/core/judge`): known secret values, secret-shaped assignments, fla
 token shapes become markers; paths stay, because a path is what the judge has to read, and a file
 whose path looks like a secret is never read for its contents.
 The backends live in the guards extension (`guards/judge-backends.ts`), the one place pi's libraries
-may be named, and ask through pi-ai 0.99's `classify()` (#535) while the agent stays on 0.87.1:
-`@earendil-works/pi-classifier` is an npm alias of `@earendil-works/pi-ai@0.99.2`, because
-pi-multi-account caps pi below 0.88 (#354). `jev` posts to TypeSafe's pinned endpoint and model;
+may be named, and ask through pi-ai's `classify()` (#535). ⚠ They import it as
+`@earendil-works/pi-classifier`, an npm alias of the agent's own pi-ai version: pi's extension
+loader maps `@earendil-works/pi-ai` to its `compat` entry, and under Node it rewrites any subpath onto
+it, so a direct `@earendil-works/pi-ai/api/…` import fails the whole guards extension in the terminal
+`pi` (measured on the 0.99.2 bump). `jev` posts to TypeSafe's pinned endpoint and model;
 `local` (#532) asks the llama.cpp router `security.judge.local` names, and ⚠ a router that is not on
 a loopback address is sent nothing. A failed call's reason is its HTTP status, never the server's
 error body, which may echo the request.
