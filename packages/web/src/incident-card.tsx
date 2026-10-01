@@ -87,18 +87,31 @@ function Observed({ record }: { readonly record: EnsoIncidentRecord }): React.Re
     <ul className="grid gap-2">
       {signals.map((signal) => (
         <li key={`${signal.signal}:${signal.toolCallId}`} className="grid gap-0.5">
-          <dl className="grid grid-cols-label-value gap-x-3 font-mono text-xs text-muted-foreground">
-            <dt>signal</dt>
-            <dd className="text-foreground">{signal.signal}</dd>
-            <dt>on call</dt>
-            <dd className="text-foreground">{signal.toolCallId}</dd>
-            <dt>after</dt>
-            <dd className="text-foreground">{signal.after.length === 0 ? '—' : signal.after.join(', ')}</dd>
-          </dl>
+          <Facts
+            rows={[
+              ['signal', signal.signal],
+              ['on call', signal.toolCallId],
+              ['after', signal.after.length === 0 ? '—' : signal.after.join(', ')],
+            ]}
+          />
           <p className="text-sm break-words">{signal.detail}</p>
         </li>
       ))}
     </ul>
+  )
+}
+
+/** Label and value pairs, in the card's two-column mono grid. */
+function Facts({ rows }: { readonly rows: readonly (readonly [label: string, value: string])[] }): React.ReactNode {
+  return (
+    <dl className="grid grid-cols-label-value gap-x-3 font-mono text-xs text-muted-foreground">
+      {rows.map(([label, value]) => (
+        <div key={label} className="contents">
+          <dt>{label}</dt>
+          <dd className="text-foreground">{value}</dd>
+        </div>
+      ))}
+    </dl>
   )
 }
 
@@ -109,14 +122,7 @@ function Suspended({ record }: { readonly record: EnsoIncidentRecord }): React.R
   }
   return (
     <>
-      <dl className="grid grid-cols-label-value gap-x-3 font-mono text-xs text-muted-foreground">
-        {suspended.map((family) => (
-          <div key={family} className="contents">
-            <dt>{family}</dt>
-            <dd className="text-foreground">{ENSO_FAMILY_TOOLS[family].join(', ')}</dd>
-          </div>
-        ))}
-      </dl>
+      <Facts rows={suspended.map((family) => [family, ENSO_FAMILY_TOOLS[family].join(', ')] as const)} />
       {/* The opening's record, never rewritten: once resolved, what stays is the resolution's. */}
       {record.resolutions.length === 0 ? null : (
         <p className="text-xs text-muted-foreground">
@@ -133,16 +139,13 @@ function Resolutions({ resolutions }: { readonly resolutions: readonly EnsoIncid
       {resolutions.map((resolution, index) => (
         // Records in order, never reordered — the position is the identity.
         <li key={index}>
-          <dl className="grid grid-cols-label-value gap-x-3 font-mono text-xs text-muted-foreground">
-            <dt>judged</dt>
-            <dd className="text-foreground">{CLASSIFICATION_LABEL[resolution.classification]}</dd>
-            <dt>outcome</dt>
-            <dd className="text-foreground">{resolution.outcome}</dd>
-            <dt>suspended</dt>
-            <dd className="text-foreground">
-              {resolution.suspended.length === 0 ? 'nothing' : resolution.suspended.join(', ')}
-            </dd>
-          </dl>
+          <Facts
+            rows={[
+              ['judged', CLASSIFICATION_LABEL[resolution.classification]],
+              ['outcome', resolution.outcome],
+              ['suspended', resolution.suspended.length === 0 ? 'nothing' : resolution.suspended.join(', ')],
+            ]}
+          />
         </li>
       ))}
     </ol>
@@ -154,6 +157,43 @@ function unrecordedReason(outcome: Exclude<IncidentResolveOutcome, { outcome: 't
   if (outcome.outcome === 'unreachable') return 'the server could not be reached — nothing was recorded'
   if (outcome.outcome === 'busy') return `the thread is running — resolve it once the run settles (${outcome.reason})`
   return `the server refused it: ${outcome.reason}`
+}
+
+/** One question of the form: a legend and one radio per option, each with its label. */
+function RadioChoice<Option extends string>({
+  legend,
+  options,
+  labels,
+  chosen,
+  disabled,
+  idPrefix,
+  onPick,
+}: {
+  readonly legend: string
+  readonly options: readonly Option[]
+  readonly labels: Readonly<Record<Option, string>>
+  readonly chosen: Option | undefined
+  readonly disabled: boolean
+  readonly idPrefix: string
+  readonly onPick: (picked: Option | undefined) => void
+}): React.ReactNode {
+  return (
+    <FieldSet>
+      <FieldLegend variant="label">{legend}</FieldLegend>
+      <RadioGroup
+        value={chosen ?? ''}
+        disabled={disabled}
+        onValueChange={(picked: string) => onPick(options.find((each) => each === picked))}
+      >
+        {options.map((each) => (
+          <Field key={each} orientation="horizontal">
+            <RadioGroupItem id={`${idPrefix}-${each}`} value={each} />
+            <FieldLabel htmlFor={`${idPrefix}-${each}`}>{labels[each]}</FieldLabel>
+          </Field>
+        ))}
+      </RadioGroup>
+    </FieldSet>
+  )
 }
 
 /** The resolution the form's choices make, or undefined until a classification and an outcome are chosen. */
@@ -224,42 +264,30 @@ function ResolveForm({
 
   return (
     <form onSubmit={submit} aria-label={`resolve incident ${incidentId}`} className="grid gap-3">
-      <FieldSet>
-        <FieldLegend variant="label">Classification</FieldLegend>
-        <RadioGroup
-          value={classification ?? ''}
-          disabled={posting}
-          onValueChange={(picked: string) => {
-            setClassification(ENSO_INCIDENT_CLASSIFICATIONS.find((each) => each === picked))
-            setConfirming(false)
-          }}
-        >
-          {ENSO_INCIDENT_CLASSIFICATIONS.map((each) => (
-            <Field key={each} orientation="horizontal">
-              <RadioGroupItem id={`${idPrefix}-c-${each}`} value={each} />
-              <FieldLabel htmlFor={`${idPrefix}-c-${each}`}>{CLASSIFICATION_LABEL[each]}</FieldLabel>
-            </Field>
-          ))}
-        </RadioGroup>
-      </FieldSet>
-      <FieldSet>
-        <FieldLegend variant="label">Outcome</FieldLegend>
-        <RadioGroup
-          value={outcome ?? ''}
-          disabled={posting}
-          onValueChange={(picked: string) => {
-            setOutcome(ENSO_INCIDENT_OUTCOMES.find((each) => each === picked))
-            setConfirming(false)
-          }}
-        >
-          {ENSO_INCIDENT_OUTCOMES.map((each) => (
-            <Field key={each} orientation="horizontal">
-              <RadioGroupItem id={`${idPrefix}-o-${each}`} value={each} />
-              <FieldLabel htmlFor={`${idPrefix}-o-${each}`}>{OUTCOME_LABEL[each]}</FieldLabel>
-            </Field>
-          ))}
-        </RadioGroup>
-      </FieldSet>
+      <RadioChoice
+        legend="Classification"
+        options={ENSO_INCIDENT_CLASSIFICATIONS}
+        labels={CLASSIFICATION_LABEL}
+        chosen={classification}
+        disabled={posting}
+        idPrefix={`${idPrefix}-c`}
+        onPick={(picked) => {
+          setClassification(picked)
+          setConfirming(false)
+        }}
+      />
+      <RadioChoice
+        legend="Outcome"
+        options={ENSO_INCIDENT_OUTCOMES}
+        labels={OUTCOME_LABEL}
+        chosen={outcome}
+        disabled={posting}
+        idPrefix={`${idPrefix}-o`}
+        onPick={(picked) => {
+          setOutcome(picked)
+          setConfirming(false)
+        }}
+      />
       {outcome === 'resume-with-restrictions' ? (
         <FieldSet>
           <FieldLegend variant="label">Stay suspended</FieldLegend>
