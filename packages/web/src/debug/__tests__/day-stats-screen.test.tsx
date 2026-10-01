@@ -61,12 +61,32 @@ const DAY: EnsoDayStats = {
       firstAt: '2026-09-22T08:00:00.100Z',
       lastAt: '2026-09-22T10:30:00.000Z',
       records: 12_000,
+      ended: { kind: 'stopped', at: '2026-09-22T10:30:00.000Z', detail: 'SIGTERM' },
     },
     {
       process: 'browser',
       firstAt: '2026-09-22T09:00:00.000Z',
       lastAt: '2026-09-22T09:05:00.000Z',
       records: 345,
+    },
+    // The server's SECOND launch of the day, and how it went (#385).
+    {
+      process: 'server',
+      pid: 4300,
+      startedAt: '2026-09-22T10:31:00.000Z',
+      firstAt: '2026-09-22T10:31:00.100Z',
+      lastAt: '2026-09-22T10:40:00.000Z',
+      records: 40,
+      ended: { kind: 'crashed', at: '2026-09-22T10:40:00.000Z', detail: 'ENOSPC: no space left on device' },
+    },
+    {
+      process: 'web',
+      pid: 4301,
+      startedAt: '2026-09-22T10:31:00.000Z',
+      firstAt: '2026-09-22T10:31:00.200Z',
+      lastAt: '2026-09-22T10:40:00.000Z',
+      records: 12,
+      ended: { kind: 'unclean', at: '2026-09-22T11:00:00.000Z', detail: 'ended without a record' },
     },
   ],
   runs: [
@@ -144,6 +164,9 @@ const DAY: EnsoDayStats = {
     toolCalls: 4,
     denials: 4,
     refusals: 3,
+    stops: 1,
+    crashes: 1,
+    uncleanEnds: 1,
     input: 1000,
     output: 200,
     cacheRead: 50,
@@ -245,7 +268,7 @@ test('the totals line says the day, its counts and its cost, and the summaries r
   await eventually(() => {
     const shown = page.container.textContent ?? ''
     expect(shown).toContain(
-      '2026-09-22 · 12,345 records (2 malformed) · 2 runs · 4 tool calls · 4 denials · 3 provider refusals · cost $0.0123 · 1,000 in / 200 out',
+      '2026-09-22 · 12,345 records (2 malformed) · 2 runs · 4 tool calls · 4 denials · 3 provider refusals · 1 stops / 1 crashes / 1 unclean ends · cost $0.0123 · 1,000 in / 200 out',
     )
     expect(shown).toContain('prompts: 1, 11,000/11,000/11,000 ms')
     expect(shown).toContain('first token: 1, 800/800/800 ms')
@@ -269,16 +292,22 @@ test('a day with no settled prompt says so instead of 0/0/0', async () => {
   await page.unmount()
 })
 
-test('a process row shows its pid and knobs; one without a pid shows —', async () => {
+test('a process row shows its pid, how it ended and its knobs; one without a pid or an end shows — (#385)', async () => {
   const page = await mountStats(healthy())
   await eventually(() => {
     const rows = rowTexts(page.container, 'processes')
     expect(rows[0]).toContain('server')
     expect(rows[0]).toContain('4242')
     expect(rows[0]).toContain('12,000')
+    expect(rows[0]).toContain('stopped on SIGTERM at')
     expect(rows[0]).toContain('file info · console warn · overrides enso.server=debug,enso.guards=trace')
     expect(rows[1]).toContain('browser')
     expect(rows[1]).toContain('—')
+    // The second launch is its own row, with its crash; the web surface's end was noticed later.
+    expect(rows[2]).toContain('4300')
+    expect(rows[2]).toContain('crashed at')
+    expect(rows[2]).toContain('ENOSPC: no space left on device')
+    expect(rows[3]).toContain('ended without a record (noticed')
   })
   await page.unmount()
 })

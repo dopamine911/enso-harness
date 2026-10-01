@@ -23,9 +23,16 @@ type ExitSignal = Parameters<ExitCallback>[2]
  * "the app is broken" rather than "the API is not up yet". So the server is started first
  * and given a moment.
  *
+ * The launcher writes to the day file as its own process, `dev` (#385): a child's exit code or
+ * signal is something only the launcher can see — a child that was SIGKILLed or OOM-killed said
+ * nothing — so `{label} exited ({exit})` goes to the file and not only to this terminal, and the
+ * launcher's own stop and crash are recorded like every launcher's (`installLoggingShutdown`).
+ *
  * Usage:  bun run dev                 # pi runs in the repo root
  *         bun run dev /some/path      # pi runs there instead
  */
+import { startLauncher } from '../packages/core/src/log-process.ts'
+import { ENSO_LOG_EVENTS } from '../packages/core/src/log-stats.ts'
 import { findRepoRoot, webPackageDir } from '../packages/core/src/paths.ts'
 
 const SERVER_HEAD_START_MS = 1200
@@ -36,6 +43,28 @@ const piCwd: string = process.argv[2] ?? repoRoot
 
 const children: PrefixedChild[] = []
 let shuttingDown = false
+
+/**
+ * Stop both children, waiting for them a bounded time — a child that ignores SIGTERM must not
+ * hold the launcher. Two callers: the logging contract (`installLoggingShutdown`, via
+ * `beforeStop`) on a signal or a crash, which records itself, ends the children here, flushes,
+ * and exits 130/143/1 (#267, #385); and `onExit` below when a child dies on its own, which has
+ * no record of its own to write — `devChildExited` is the record — and exits 1 after the flush.
+ * `shuttingDown` is set synchronously first, so whichever path runs second does nothing.
+ */
+async function stopChildren(): Promise<void> {
+  shuttingDown = true
+  for (const child of children) child.kill('SIGTERM')
+  await Promise.race([Promise.all(children.map((child) => child.exited)), Bun.sleep(500)])
+}
+
+const { log, dispose } = await startLauncher({
+  repoRoot,
+  environment: process.env,
+  process: 'dev',
+  logger: ['server', 'dev-launcher'],
+  beforeStop: stopChildren,
+})
 
 /** Prefix every line a stdio stream produces; resolves when the stream ends. */
 async function prefixStream(
@@ -76,8 +105,13 @@ function run(label: string, command: string, args: string[]): PrefixedChild {
     // signature into our file.
     onExit: (_child: PrefixedChild, code: ExitCode, signalCode: ExitSignal): void => {
       if (shuttingDown) return
-      process.stderr.write(`[dev] ${label} exited (${code ?? signalCode ?? 'signal'}) — stopping the other surface\n`)
-      shutdown()
+      // ⚠ To the FILE, not only this terminal (#385): the exit code or signal is the one fact about
+      // a child's end that the child itself could not record. A surface dying on its own is not a
+      // clean stop of the dev environment, so the launcher exits 1 after taking the other down.
+      log.warn(ENSO_LOG_EVENTS.devChildExited, { label, exit: String(code ?? signalCode ?? 'signal') })
+      void stopChildren()
+        .then(dispose)
+        .finally(() => process.exit(1))
     },
   })
   void prefixStream(child.stdout, label, (lines) => process.stdout.write(`${lines}\n`))
@@ -86,18 +120,7 @@ function run(label: string, command: string, args: string[]): PrefixedChild {
   return child
 }
 
-function shutdown(): void {
-  if (shuttingDown) return
-  shuttingDown = true
-  for (const child of children) child.kill('SIGTERM')
-  // Do not wait forever on a child that ignores SIGTERM.
-  setTimeout(() => process.exit(0), 500).unref()
-}
-
-process.on('SIGINT', shutdown)
-process.on('SIGTERM', shutdown)
-
-process.stderr.write(`[dev] pi will run in ${piCwd}\n`)
+log.info('pi will run in {piCwd}', { piCwd })
 // ⚠ bun runs the server (#30): the runtime the tests exercise (`bun test`) is now the
 // runtime that ships. Node's strip-types flag — and its strip-ONLY constraint — is gone.
 run('server', 'bun', ['src/server/dev.ts', piCwd])

@@ -82,6 +82,12 @@ import {
   ensoLogger,
 } from './log.ts'
 import { ensoHome, ensoLogsDir, migrateCheckoutEnsoOnLaunch } from './paths.ts'
+import {
+  type EnsoProcessMarker,
+  reconcileProcessMarkers,
+  removeProcessMarker,
+  writeProcessMarker,
+} from './process-marker.ts'
 import { knownSecretValuesTracking } from './secrets.ts'
 
 /**
@@ -365,6 +371,8 @@ export async function startLauncher(options: {
   readonly process: string
   /** This launcher's own logger: `['server', 'dev']`. */
   readonly logger: readonly [EnsoLogLayer, ...string[]]
+  /** What to end before the flush on a stop or a crash — `scripts/dev.ts` stops its children here (#385). */
+  readonly beforeStop?: () => Promise<void>
 }): Promise<{
   readonly home: string
   readonly logsDir: string
@@ -383,7 +391,7 @@ export async function startLauncher(options: {
     // against — asked per record, so a key rotated while the launcher runs is redacted too (#207).
     secretValues: knownSecretValuesTracking(home, options.environment),
   })
-  installLoggingShutdown(dispose)
+  installLoggingShutdown(dispose, options.beforeStop)
   const [layer, ...subcategory] = options.logger
   const log = ensoLogger(layer, ...subcategory)
   const { from, to } = migration
@@ -581,41 +589,109 @@ export async function configureProcessLogging(options: ProcessLoggingOptions): P
   // the debug lines says why — and WHO is writing (#144). A shared file makes "the
   // processes" mean "who has written to today's file"; with a pid and a start time,
   // liveness is inferable from the last write without any process asking to be counted.
-  getLogger([ENSO_LOG_ROOT, 'log']).info(ENSO_LOG_EVENTS.loggingConfigured, {
+  const startedAt = new Date(Date.now() - Math.round(process.uptime() * 1000)).toISOString()
+  const logLogger = getLogger([ENSO_LOG_ROOT, 'log'])
+  logLogger.info(ENSO_LOG_EVENTS.loggingConfigured, {
     file: levels.file,
     console: levels.console ?? 'off',
     overrides: levels.overrides.map((override) => `${override.category.join('.')}=${override.level}`),
     logsDir: options.logsDir,
-    pid: typeof process === 'undefined' ? undefined : process.pid,
-    startedAt: new Date(
-      Date.now() - (typeof process === 'undefined' ? 0 : Math.round(process.uptime() * 1000)),
-    ).toISOString(),
+    pid: process.pid,
+    startedAt,
   })
-  return dispose
+  // The marker this process leaves while it runs (#385), and the ones a previous process of any
+  // role left and never removed: each is an end nothing could record — SIGKILL, OOM, power loss —
+  // said now, with the dead process's own pid and start time, never this one's.
+  for (const dead of reconcileProcessMarkers(options.logsDir)) {
+    if (dead.kind === 'ended') {
+      const { process: role, pid, startedAt: diedStartedAt } = dead.marker
+      logLogger.warn(ENSO_LOG_EVENTS.processEndedWithoutRecord, { role, pid, startedAt: diedStartedAt })
+    } else logLogger.warn('removed an unreadable process marker at {path}', { path: dead.path })
+  }
+  const marker: EnsoProcessMarker = { process: options.process, pid: process.pid, startedAt }
+  const markerPath = writeProcessMarker(options.logsDir, marker)
+  markersOfThisProcess.add(markerPath)
+  return async (): Promise<void> => {
+    // Disposed is ended cleanly: the marker goes with the flush, not only at `exit`.
+    markersOfThisProcess.delete(markerPath)
+    removeProcessMarker(markerPath)
+    await dispose()
+  }
 }
 
 /**
- * The stop contract every launcher owes a supervisor (#267): flush the file, then exit the
- * way the signal would have — `128 + the signal's number`, so 130 for `SIGINT` and 143 for
- * `SIGTERM`.
+ * The markers this process holds, removed when it exits by any path that still runs code — a
+ * normal end, `process.exit`, a handled signal, a recorded crash. One listener for all of them:
+ * a test configures many times in one process, and a listener per configure would pile up.
+ */
+const markersOfThisProcess = new Set<string>()
+process.on('exit', () => {
+  for (const path of markersOfThisProcess) removeProcessMarker(path)
+})
+
+/** The error as a record carries it: the message, the name, the stack if there is one. */
+function crashPropertiesOf(reason: unknown): Record<string, unknown> {
+  if (reason instanceof Error) {
+    return { error: reason.message, name: reason.name, ...(reason.stack === undefined ? {} : { stack: reason.stack }) }
+  }
+  return { error: String(reason), name: typeof reason }
+}
+
+/**
+ * How a launcher ends, recorded (#267, #385): the stop contract every launcher owes a
+ * supervisor — flush the file, then exit the way the signal would have, `128 + the signal's
+ * number`, so 130 for `SIGINT` and 143 for `SIGTERM` — with a `process stopping on {signal}`
+ * record written BEFORE the flush, so the flush carries it; and a crash recorded: an error
+ * outside every handler, or an unhandled rejection, is one `fatal` record with the stack, then
+ * the flush, then exit 1. ⚠ Installing the crash handlers replaces the runtime's default of
+ * printing and exiting, so the explicit exit is what keeps a crashed server from running on
+ * half-dead.
  *
  * `128 + n` is read by a hub, a shell and systemd alike, which makes the table a CONTRACT and
  * not an implementation detail; it lived twice, verbatim, in the two dev launchers, where a
  * third signal or a changed flush order would have reached one of them.
  *
- * `once`, not `on`: a second signal during the flush must not start a second dispose.
+ * ⚠ `on`, not `once`, for the signals, with one guard for everything. A `once` handler is
+ * consumed by the first signal, and a SECOND one arriving on its heels can then meet the
+ * runtime's default — killed on the spot, flush lost, marker left. A second signal is the
+ * normal case: a supervisor signals the process group AND the dev launcher signals its
+ * children. Measured on #385 with `timeout -s TERM … bun run dev`: a web marker left behind in
+ * 2 of 3 runs under `once`, 0 of 5 under `on`. A unit test cannot land the second signal in
+ * that window (a repeat sent by a parent is coalesced or absorbed), so the proof is that smoke.
+ * The guard makes a repeat a no-op, so the one dispose runs to its exit; a second throw during
+ * the flush is a no-op the same way.
  *
  * @group Logging
  */
-export function installLoggingShutdown(dispose: () => Promise<void>): void {
+export function installLoggingShutdown(dispose: () => Promise<void>, beforeStop?: () => Promise<void>): void {
+  let ending = false
+  const end = (code: number): void => {
+    if (ending) return
+    ending = true
+    // ⚠ Whatever `beforeStop` does or fails to do, the flush and the exit follow: a child that
+    // will not die is not a reason for the launcher to hang or to lose its records.
+    void Promise.resolve()
+      .then(() => beforeStop?.())
+      .catch(() => undefined)
+      .then(dispose)
+      .finally(() => process.exit(code))
+  }
   for (const [signal, code] of [
     ['SIGINT', 130],
     ['SIGTERM', 143],
   ] as const) {
-    process.once(signal, () => {
-      void dispose().finally(() => process.exit(code))
+    process.on(signal, () => {
+      if (ending) return
+      getLogger([ENSO_LOG_ROOT, 'log']).info(ENSO_LOG_EVENTS.processStopping, { signal })
+      end(code)
     })
   }
+  const crash = (reason: unknown): void => {
+    if (!ending) getLogger([ENSO_LOG_ROOT, 'log']).fatal(ENSO_LOG_EVENTS.processCrashed, crashPropertiesOf(reason))
+    end(1)
+  }
+  process.on('uncaughtException', crash)
+  process.on('unhandledRejection', crash)
 }
 
 // ── Reading the file back (#132: `bun run logs`, and the bundle's reader) ─────────────────

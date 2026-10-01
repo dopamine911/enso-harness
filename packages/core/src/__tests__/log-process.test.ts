@@ -15,8 +15,10 @@ import {
   parseEnsoLogLevels,
   retiredEnvironmentNames,
 } from '../log-process.ts'
+import { ENSO_LOG_EVENTS } from '../log-stats.ts'
 import { ENSO_REDACTED, ENSO_REDACTED_VALUE, EnsoLogLine, ensoLogger, withEnsoLogContext } from '../log.ts'
 import { ensoSecretsPath } from '../paths.ts'
+import { isProcessMarkerAlive, processMarkersDir } from '../process-marker.ts'
 import { knownSecretValuesTracking, readSecret } from '../secrets.ts'
 
 /**
@@ -149,45 +151,153 @@ test('⚠ two processes, one file: every line lands whole — the property the d
   expect(parsed.filter((record) => record.properties?.process === 'bravo')).toHaveLength(201)
 })
 
-test('⚠ a stop signal flushes the file and exits 128 + the signal (#267): SIGINT 130, SIGTERM 143', async () => {
-  // In a CHILD, because the contract IS the exit code a supervisor reads, and the handler's
-  // last act is `process.exit`. A red line here means a stop either loses the records still
-  // in the sink or reports a code the hub cannot tell an orderly stop from a crash by.
-  const logsDir = mkdtempSync(join(tmpdir(), 'enso-logs-'))
-  const child = join(logsDir, 'stoppable.ts')
+/**
+ * A child that configures logging into `logsDir`, installs the shutdown contract, writes one
+ * record, and then does what `argv[2]` says: `wait` (alive on an open stdin until signalled),
+ * `throw` (an error outside every handler), `reject` (an unhandled rejection) — each a real
+ * process, because the contract IS the exit code a supervisor reads and the handler's last act
+ * is `process.exit`. `argv[3]` is the writer's name on its records.
+ */
+function writeEndingChild(logsDir: string): string {
+  const child = join(logsDir, 'ending.ts')
   writeFileSync(
     child,
     [
       `import { ensoLogger } from ${JSON.stringify(join(import.meta.dir, '..', 'log.ts'))};`,
       `import { configureProcessLogging, installLoggingShutdown } from ${JSON.stringify(join(import.meta.dir, '..', 'log-process.ts'))};`,
-      `const dispose = await configureProcessLogging({ logsDir: ${JSON.stringify(logsDir)}, process: process.argv[2] });`,
-      `installLoggingShutdown(dispose);`,
-      `ensoLogger("server", "stoppable").info("the record written before the stop by {who}", { who: process.argv[2] });`,
+      `const dispose = await configureProcessLogging({ logsDir: ${JSON.stringify(logsDir)}, process: process.argv[3] ?? 'server' });`,
+      // `beforeStop` says so on stdout and holds the flush a moment, so a test can land a SECOND signal mid-stop.
+      `installLoggingShutdown(dispose, async () => { process.stdout.write("stopping\\n"); await Bun.sleep(300) });`,
+      `ensoLogger("server", "ending").info("the record written before the end by {who}", { who: process.argv[3] ?? process.argv[2] });`,
       `process.stdout.write("ready\\n");`,
+      `if (process.argv[2] === 'throw') setTimeout(() => { throw new Error('the handler nobody wrote') }, 0);`,
+      `else if (process.argv[2] === 'reject') void Promise.reject(new Error('the promise nobody awaited'));`,
       // Alive until signalled by an open stdin handle, not a timer: nothing here waits on a clock.
-      `process.stdin.resume();`,
+      `else process.stdin.resume();`,
     ].join('\n'),
   )
+  return child
+}
+
+type EndingChild = Bun.Subprocess<'pipe', 'pipe', 'pipe'>
+
+/** Spawn the child and wait for its `ready` — it has configured logging and written its record. */
+async function startEndingChild(child: string, mode: string, who: string): Promise<EndingChild> {
+  const running = Bun.spawn(['bun', child, mode, who], {
+    cwd: join(import.meta.dir, '..'),
+    stdin: 'pipe',
+    stdout: 'pipe',
+    stderr: 'pipe',
+  })
+  await stdoutSays(running, 'ready')
+  return running
+}
+
+async function stdoutSays(running: EndingChild, word: string): Promise<void> {
+  for await (const chunk of running.stdout) {
+    if (new TextDecoder().decode(chunk).includes(word)) return
+  }
+}
+
+const dayRecordsOf = (logsDir: string): EnsoLogLine[] => {
+  const written = readdirSync(logsDir).filter((name) => /^enso-\d{4}-\d{2}-\d{2}\.jsonl$/.test(name))
+  return linesOf(join(logsDir, written[0] ?? '')).map((line) => JSON.parse(line) as EnsoLogLine)
+}
+
+test('⚠ a stop signal — even twice, as a supervisor and a parent both send it — leaves ONE `process stopping` record, flushes, and exits 128 + the signal (#267, #385)', async () => {
+  // A red line here means a stop either loses the records still in the sink, reports a code
+  // the hub cannot tell an orderly stop from a crash by, or leaves no trace of itself (#385).
+  // ⚠ The second signal is the realistic case (`timeout` signals the group, `bun run dev`
+  // signals its children): a `once` handler would let it kill the process mid-flush.
+  const logsDir = mkdtempSync(join(tmpdir(), 'enso-logs-'))
+  const child = writeEndingChild(logsDir)
   for (const [signal, code] of [
     ['SIGINT', 130],
     ['SIGTERM', 143],
   ] as const) {
-    const running = Bun.spawn(['bun', child, signal], {
-      cwd: join(import.meta.dir, '..'),
-      stdin: 'pipe',
-      stdout: 'pipe',
-      stderr: 'pipe',
-    })
-    for await (const chunk of running.stdout) {
-      if (new TextDecoder().decode(chunk).includes('ready')) break
-    }
+    const running = await startEndingChild(child, 'wait', signal)
+    running.kill(signal)
+    await stdoutSays(running, 'stopping')
     running.kill(signal)
     expect(await running.exited).toBe(code)
-    const written = readdirSync(logsDir).filter((name) => /^enso-\d{4}-\d{2}-\d{2}\.jsonl$/.test(name))
-    const records = linesOf(join(logsDir, written[0] ?? '')).map((line) => JSON.parse(line) as EnsoLogLine)
+    const records = dayRecordsOf(logsDir)
     // Flushed, not just registered: the record the child wrote before the signal is in the file.
     expect(records.some((record) => record.properties?.who === signal)).toBe(true)
+    const stops = records.filter(
+      (record) => record.message === ENSO_LOG_EVENTS.processStopping && record.properties?.process === signal,
+    )
+    expect(stops).toHaveLength(1)
+    expect(stops[0]?.properties?.signal).toBe(signal)
+    expect(stops[0]?.level).toBe('INFO')
   }
+  // Both ended cleanly: no marker is left for the next start to report.
+  expect(readdirSync(processMarkersDir(logsDir))).toEqual([])
+})
+
+test('⚠ an error outside every handler, or an unhandled rejection, is one `fatal` record with the stack, and the process exits 1 (#385)', async () => {
+  const logsDir = mkdtempSync(join(tmpdir(), 'enso-logs-'))
+  const child = writeEndingChild(logsDir)
+  for (const [mode, message] of [
+    ['throw', 'the handler nobody wrote'],
+    ['reject', 'the promise nobody awaited'],
+  ] as const) {
+    const running = await startEndingChild(child, mode, mode)
+    expect(await running.exited).toBe(1)
+    const crashes = dayRecordsOf(logsDir).filter(
+      (record) => record.message === ENSO_LOG_EVENTS.processCrashed && record.properties?.process === mode,
+    )
+    expect(crashes).toHaveLength(1)
+    expect(crashes[0]?.level).toBe('FATAL')
+    expect(crashes[0]?.properties?.error).toBe(message)
+    expect(String(crashes[0]?.properties?.stack)).toContain('ending.ts')
+  }
+  expect(readdirSync(processMarkersDir(logsDir))).toEqual([])
+})
+
+test('⚠ after a SIGKILL the next start says the previous process ended without a record, by ITS pid and start; after a clean stop it says nothing (#385)', async () => {
+  const logsDir = mkdtempSync(join(tmpdir(), 'enso-logs-'))
+  const child = writeEndingChild(logsDir)
+  // Killed: nothing in the process could write, so its marker stays behind.
+  const killed = await startEndingChild(child, 'wait', 'killed')
+  killed.kill('SIGKILL')
+  await killed.exited
+  expect(readdirSync(processMarkersDir(logsDir))).toEqual([`killed-${killed.pid}.json`])
+  const killedStart = dayRecordsOf(logsDir).find(
+    (record) => record.message === ENSO_LOG_EVENTS.loggingConfigured && record.properties?.process === 'killed',
+  )?.properties?.startedAt
+
+  // The next start reports it — naming the dead process, not itself — and removes the marker.
+  const next = await startEndingChild(child, 'wait', 'next')
+  next.kill('SIGTERM')
+  expect(await next.exited).toBe(143)
+  const unclean = dayRecordsOf(logsDir).filter((record) => record.message === ENSO_LOG_EVENTS.processEndedWithoutRecord)
+  expect(unclean).toHaveLength(1)
+  expect(unclean[0]?.level).toBe('WARN')
+  expect(unclean[0]?.properties).toEqual(
+    expect.objectContaining({ process: 'next', role: 'killed', pid: killed.pid, startedAt: killedStart }),
+  )
+  expect(readdirSync(processMarkersDir(logsDir))).toEqual([])
+
+  // A start after a CLEAN stop has nothing to report.
+  const after = await startEndingChild(child, 'wait', 'after')
+  after.kill('SIGTERM')
+  expect(await after.exited).toBe(143)
+  expect(
+    dayRecordsOf(logsDir).filter((record) => record.message === ENSO_LOG_EVENTS.processEndedWithoutRecord),
+  ).toHaveLength(1)
+})
+
+test('⚠ a marker whose pid is alive but belongs to another process (pid reuse after a reboot) is dead; a live owner with a matching start is not', () => {
+  // This process is the live owner: the kernel's start time for our pid agrees with the one the configurator would write.
+  const ownStart = new Date(Date.now() - Math.round(process.uptime() * 1000)).toISOString()
+  expect(isProcessMarkerAlive({ process: 'test', pid: process.pid, startedAt: ownStart })).toBe(true)
+  // Same live pid, a start time from an hour ago: not this process — a pid handed out again.
+  const anHourAgo = new Date(Date.now() - 3_600_000).toISOString()
+  expect(isProcessMarkerAlive({ process: 'test', pid: process.pid, startedAt: anHourAgo })).toBe(false)
+  // A start in the future is no process that ever ran.
+  expect(
+    isProcessMarkerAlive({ process: 'test', pid: process.pid, startedAt: new Date(Date.now() + 60_000).toISOString() }),
+  ).toBe(false)
 })
 
 test('a second configure in the same process is refused — one configurator per process, or it is a bug', async () => {

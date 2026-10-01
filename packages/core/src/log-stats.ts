@@ -33,6 +33,18 @@ import type { EnsoLogLine } from './log.ts'
 export const ENSO_LOG_EVENTS = {
   /** `log-process.ts`: every process's first record, with `pid` and `startedAt`. */
   loggingConfigured: 'logging configured: file {file}, console {console}, overrides {overrides}',
+  /** `log-process.ts`: an orderly stop — written before the flush, so the flush carries it (#385). */
+  processStopping: 'process stopping on {signal}',
+  /** `log-process.ts`: an error outside every handler, or an unhandled rejection; the process exits 1 after it (#385). */
+  processCrashed: 'process crashed: {error}',
+  /**
+   * `log-process.ts`: at start, a marker left by a previous process that never wrote a stop or
+   * crash record — SIGKILL, OOM, power loss (#385). `role`, `pid` and `startedAt` are the DEAD
+   * process's own, from its marker; `process` stays the writer's, as on every record.
+   */
+  processEndedWithoutRecord: 'previous {role} pid {pid} started {startedAt} ended without a record',
+  /** `scripts/dev.ts`: a dev child exited, with the code or signal only the launcher can see (#385). */
+  devChildExited: '{label} exited ({exit}); stopping the other surface',
   /** `thread-registry.ts`: a run took the thread. */
   runAcquired: 'run {generation} acquired',
   /** `thread-registry.ts`: the run let it go. */
@@ -110,8 +122,11 @@ export const EnsoDayStats = Type.Object(
     records: Type.Integer({ minimum: 0 }),
     malformed: Type.Integer({ minimum: 0 }),
     /**
-     * Who has written to the file: one row per writer, with the boot facts its first record
-     * carried. Liveness is not claimed — `lastAt` is the last write, and a reader infers.
+     * Who has written to the file: one row per LAUNCH — a writer's second `logging configured`
+     * of the day is a second row (#385) — with the boot facts its first record carried and, when
+     * the file says, how it ended. A row with no `ended` is still writing, or ended in a way
+     * nothing recorded and no later start has noticed yet. Liveness is not claimed — `lastAt` is
+     * the last write, and a reader infers.
      */
     processes: Type.Array(
       Type.Object(
@@ -126,6 +141,21 @@ export const EnsoDayStats = Type.Object(
           firstAt: Type.String(),
           lastAt: Type.String(),
           records: Type.Integer({ minimum: 0 }),
+          /**
+           * How it ended (#385): `stopped` on a signal (`detail` names it), `crashed` (`detail` is
+           * the error), or `unclean` — a later start found its marker with no owner (`at` is when
+           * that was noticed, not when it died).
+           */
+          ended: Type.Optional(
+            Type.Object(
+              {
+                kind: Type.Union([Type.Literal('stopped'), Type.Literal('crashed'), Type.Literal('unclean')]),
+                at: Type.String(),
+                detail: Type.String(),
+              },
+              { additionalProperties: false },
+            ),
+          ),
         },
         { additionalProperties: false },
       ),
@@ -235,6 +265,10 @@ export const EnsoDayStats = Type.Object(
         toolCalls: Type.Integer({ minimum: 0 }),
         denials: Type.Integer({ minimum: 0 }),
         refusals: Type.Integer({ minimum: 0 }),
+        /** How the day's processes ended (#385): orderly stops, recorded crashes, and ends nothing could record. */
+        stops: Type.Integer({ minimum: 0 }),
+        crashes: Type.Integer({ minimum: 0 }),
+        uncleanEnds: Type.Integer({ minimum: 0 }),
         ...Spend,
       },
       { additionalProperties: false },
@@ -335,6 +369,8 @@ interface RunFold {
   readonly spend: SpendTotals
 }
 
+type ProcessEnd = NonNullable<EnsoDayStats['processes'][number]['ended']>
+
 interface ProcessFold {
   readonly process: string
   pid?: number | undefined
@@ -345,6 +381,7 @@ interface ProcessFold {
   firstAt: string
   lastAt: string
   records: number
+  ended?: ProcessEnd | undefined
 }
 
 interface ToolFold {
@@ -358,7 +395,12 @@ type Properties = Readonly<Record<string, unknown>>
 
 /** The fold's working state: every join keyed by the ids a record carries. */
 interface Fold {
+  /** The CURRENT launch of each writer — a record is attributed to its writer's latest start (#385). */
   readonly processes: Map<string, ProcessFold>
+  /** Every launch of the day in order of first appearance: the rows. */
+  readonly launches: ProcessFold[]
+  /** Ends a later start reported for a pid no row of today's file carries (it started yesterday). */
+  uncleanEndsOffFile: number
   readonly runs: Map<string, RunFold>
   readonly tools: Map<string, ToolFold>
   readonly openCalls: Map<string, { readonly toolName: string; readonly at: number }>
@@ -416,6 +458,8 @@ function foldSecurity(security: SecurityFold, message: string, properties: Prope
 function foldOf(lines: readonly EnsoLogLine[]): Fold {
   const fold: Fold = {
     processes: new Map(),
+    launches: [],
+    uncleanEndsOffFile: 0,
     runs: new Map(),
     tools: new Map(),
     openCalls: new Map(),
@@ -461,18 +505,25 @@ function runOf(fold: Fold, properties: Properties): RunFold | undefined {
   return run
 }
 
-/** Every record counts for its writer; the first one of a writer is the row. */
+/**
+ * Every record counts for its writer's CURRENT launch; the first record of a writer, or its
+ * `logging configured` after an earlier launch already booted, opens a new row (#385). Records
+ * carry the writer's name, not its pid, so a launch is "the records since this writer's last
+ * boot" — two launches of one writer at the same moment (another checkout) would interleave.
+ */
 function foldWriter(fold: Fold, line: EnsoLogLine, properties: Properties): ProcessFold {
   const writer = stringOf(properties.process) ?? '(unstamped)'
   const at = line['@timestamp']
   const known = fold.processes.get(writer)
-  if (known !== undefined) {
+  const boots = line.message === ENSO_LOG_EVENTS.loggingConfigured
+  if (known !== undefined && !(boots && known.pid !== undefined)) {
     known.lastAt = at
     known.records += 1
     return known
   }
   const fresh: ProcessFold = { process: writer, firstAt: at, lastAt: at, records: 1 }
   fold.processes.set(writer, fresh)
+  fold.launches.push(fresh)
   return fresh
 }
 
@@ -482,6 +533,33 @@ function foldBoot(process: ProcessFold, properties: Properties): void {
   process.file = stringOf(properties.file)
   process.console = stringOf(properties.console)
   process.overrides = Array.isArray(properties.overrides) ? properties.overrides.map(String) : undefined
+}
+
+/** An end the writer recorded itself: a stop on a signal, or a crash. */
+function foldOwnEnd(writer: ProcessFold, kind: 'stopped' | 'crashed', at: string, detail: string): void {
+  writer.ended = { kind, at, detail }
+}
+
+/**
+ * An end a LATER start reported (#385): the row is the dead process's, wherever it is in the
+ * day — matched on its pid AND its start time, the same two facts the marker's liveness check
+ * uses, since a pid is handed out again within a day and the first launch with it is not the
+ * one that died. A pid-and-start no row carries started before today's file and is counted
+ * without a row.
+ */
+function foldReportedEnd(fold: Fold, at: string, properties: Properties): void {
+  const pid = numberOf(properties.pid)
+  const startedAt = stringOf(properties.startedAt)
+  // A report missing either fact names no launch: never let two absences match an unbooted row.
+  const row =
+    pid === undefined || startedAt === undefined
+      ? undefined
+      : fold.launches.find((launch) => launch.pid === pid && launch.startedAt === startedAt)
+  if (row === undefined) {
+    fold.uncleanEndsOffFile += 1
+    return
+  }
+  row.ended = { kind: 'unclean', at, detail: 'ended without a record' }
 }
 
 function foldUsage(fold: Fold, properties: Properties): void {
@@ -561,16 +639,35 @@ function foldAdmission(fold: Fold, line: EnsoLogLine, properties: Properties, in
   if (run !== undefined && run.openedAt === undefined) run.openedAt = instant
 }
 
+/** The process-lifecycle lines (#144, #385): a boot, an own end, an end a later start reported. True when the line was one. */
+function foldProcessLifecycle(fold: Fold, writer: ProcessFold, line: EnsoLogLine, properties: Properties): boolean {
+  const at = line['@timestamp']
+  switch (line.message) {
+    case ENSO_LOG_EVENTS.loggingConfigured:
+      foldBoot(writer, properties)
+      return true
+    case ENSO_LOG_EVENTS.processStopping:
+      foldOwnEnd(writer, 'stopped', at, stringOf(properties.signal) ?? '(no signal)')
+      return true
+    case ENSO_LOG_EVENTS.processCrashed:
+      foldOwnEnd(writer, 'crashed', at, stringOf(properties.error) ?? '(no error)')
+      return true
+    case ENSO_LOG_EVENTS.processEndedWithoutRecord:
+      foldReportedEnd(fold, at, properties)
+      return true
+    default:
+      return false
+  }
+}
+
 /** One line into the fold, by the event its template names. */
 function foldLine(fold: Fold, line: EnsoLogLine): void {
   const properties = line.properties ?? {}
   const instant = Date.parse(line['@timestamp'])
   const writer = foldWriter(fold, line, properties)
   if (line.message !== undefined && foldSecurity(fold.security, line.message, properties)) return
+  if (foldProcessLifecycle(fold, writer, line, properties)) return
   switch (line.message) {
-    case ENSO_LOG_EVENTS.loggingConfigured:
-      foldBoot(writer, properties)
-      return
     case ENSO_LOG_EVENTS.runAcquired: {
       const run = runOf(fold, properties)
       if (run !== undefined) run.acquiredAt = line['@timestamp']
@@ -651,6 +748,7 @@ function processRowOf(process: ProcessFold): EnsoDayStats['processes'][number] {
     firstAt: process.firstAt,
     lastAt: process.lastAt,
     records: process.records,
+    ...(process.ended === undefined ? {} : { ended: process.ended }),
   }
 }
 
@@ -701,12 +799,14 @@ function statsOf(day: string, fold: Fold, records: number, malformed: number): E
   for (const ruleDenials of fold.denials.values()) deniedCalls += ruleDenials
   let refusedRequests = 0
   for (const refusal of fold.refusals.values()) refusedRequests += refusal.count
+  const endsOf = (kind: ProcessEnd['kind']): number =>
+    fold.launches.filter((launch) => launch.ended?.kind === kind).length
 
   return {
     day,
     records,
     malformed,
-    processes: [...fold.processes.values()].map(processRowOf),
+    processes: fold.launches.map(processRowOf),
     runs: runRows,
     threads: [...threads.entries()].map(([threadId, thread]) => ({ threadId, ...thread })),
     models: [...fold.models.entries()].map(([model, spend]) => ({ model, ...spend })),
@@ -729,6 +829,9 @@ function statsOf(day: string, fold: Fold, records: number, malformed: number): E
       toolCalls,
       denials: deniedCalls,
       refusals: refusedRequests,
+      stops: endsOf('stopped'),
+      crashes: endsOf('crashed'),
+      uncleanEnds: endsOf('unclean') + fold.uncleanEndsOffFile,
       ...totalSpend,
     },
   }

@@ -269,6 +269,76 @@ test('processes are whoever wrote: the boot facts from the first record, the las
   expect(stats.processes[2]?.pid).toBeUndefined()
 })
 
+// ⚠ A writer's second `logging configured` of the day is a second LAUNCH (#385): one row per
+// start, each with how it ended, so "a second start; nothing says how the first ended" is gone.
+test("⚠ a second start is its own row; a stop, a crash and a later start's report each end the row they belong to (#385)", () => {
+  const boot = (stamp: string, process: string, pid: number): EnsoLogLine =>
+    record(stamp, ENSO_LOG_EVENTS.loggingConfigured, { process, pid, startedAt: stamp, file: 'info', console: 'off' })
+  const lines = [
+    boot(at(0), 'server', 100),
+    boot(at(0, 5), 'web', 101),
+    record(at(1), 'serving', { process: 'web' }),
+    record(at(2), ENSO_LOG_EVENTS.processStopping, { process: 'server', signal: 'SIGTERM' }),
+    // The second server — handed the SAME pid the first had (pids are reused within a day) — which crashes;
+    // the web surface is never heard from again …
+    boot(at(3), 'server', 100),
+    record(at(4), 'a record of the second launch', {}),
+    record(
+      at(5),
+      ENSO_LOG_EVENTS.processCrashed,
+      { error: 'ENOSPC: no space left on device', stack: 'x' },
+      { level: 'FATAL' },
+    ),
+    // … until a third start finds its marker, and one from yesterday no row of today carries.
+    boot(at(6), 'server', 300),
+    record(
+      at(6, 1),
+      ENSO_LOG_EVENTS.processEndedWithoutRecord,
+      { role: 'web', pid: 101, startedAt: at(0, 5) },
+      { level: 'WARN' },
+    ),
+    record(
+      at(6, 2),
+      ENSO_LOG_EVENTS.processEndedWithoutRecord,
+      { role: 'pi', pid: 9, startedAt: '2026-09-21T23:00:00.000Z' },
+      { level: 'WARN' },
+    ),
+  ]
+  const stats = dayStats('2026-09-22', lines, 0)
+  expect(Check(EnsoDayStats, stats)).toBe(true)
+  expect(stats.processes.map((row) => [row.process, row.pid, row.records, row.ended])).toEqual([
+    ['server', 100, 2, { kind: 'stopped', at: at(2), detail: 'SIGTERM' }],
+    ['web', 101, 2, { kind: 'unclean', at: at(6, 1), detail: 'ended without a record' }],
+    ['server', 100, 3, { kind: 'crashed', at: at(5), detail: 'ENOSPC: no space left on device' }],
+    ['server', 300, 3, undefined],
+  ])
+  expect(stats.totals).toEqual(expect.objectContaining({ stops: 1, crashes: 1, uncleanEnds: 2 }))
+})
+
+test('⚠ a reported end lands on the launch with the dead pid AND its start, not the first launch that ever had the pid (#385)', () => {
+  const boot = (stamp: string, process: string, pid: number): EnsoLogLine =>
+    record(stamp, ENSO_LOG_EVENTS.loggingConfigured, { process, pid, startedAt: stamp })
+  const lines = [
+    boot(at(0), 'server', 100),
+    record(at(1), ENSO_LOG_EVENTS.processStopping, { signal: 'SIGTERM' }),
+    boot(at(2), 'server', 100), // the pid again; this one is SIGKILLed
+    boot(at(3), 'server', 101),
+    record(
+      at(3, 1),
+      ENSO_LOG_EVENTS.processEndedWithoutRecord,
+      { role: 'server', pid: 100, startedAt: at(2) },
+      { level: 'WARN' },
+    ),
+  ]
+  const stats = dayStats('2026-09-22', lines, 0)
+  expect(stats.processes.map((row) => [row.pid, row.startedAt, row.ended?.kind])).toEqual([
+    [100, at(0), 'stopped'],
+    [100, at(2), 'unclean'],
+    [101, at(3), undefined],
+  ])
+  expect(stats.totals).toEqual(expect.objectContaining({ stops: 1, crashes: 0, uncleanEnds: 1 }))
+})
+
 // ⚠ A span is a claim about two clocks. A run that never settled has no wait; a result whose
 // call was never seen has no duration; a stamp that does not parse yields neither.
 test('⚠ a half-seen run has no span rather than a negative or NaN one', () => {

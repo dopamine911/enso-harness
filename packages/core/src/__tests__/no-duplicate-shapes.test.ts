@@ -27,6 +27,7 @@ test('every module is reachable: from the barrel, or from a subpath package.json
   //   `paths.ts`        `node:fs`/`node:url` — the repo-root walker and the harness's paths (#211)
   //   `permission-rules.ts` `node:fs` — the permission rules file, seeded before pi loads (#446)
   //   `pi-manifest.ts`  `node:fs` — is a declared pi resource path actually there (#221)
+  //   `process-marker.ts` `node:fs` — the per-process marker a start reconciles (#385)
   //   `secrets.ts`      `node:fs` — the secrets file's reader (#211)
   //
   // ⚠ Tree-shaking does not save a bundle from a bare `node:*` specifier: it is resolved at
@@ -53,6 +54,7 @@ test('every module is reachable: from the barrel, or from a subpath package.json
     'paths.ts',
     'permission-rules.ts',
     'pi-manifest.ts',
+    'process-marker.ts',
     'secrets.ts',
     '__tests__/flow-trace.ts',
     '__tests__/log-recorder.ts',
