@@ -69,6 +69,20 @@ lines.push(shapeRow('one segment', (shape) => shape.segments === 1))
 lines.push(shapeRow('four or more segments', (shape) => shape.segments >= 4))
 lines.push(shapeRow('a pipe', (shape) => shape.pipes))
 lines.push(shapeRow('a heredoc', (shape) => shape.heredoc))
+// #469 §5's pre-filter candidate: segmentable, every program a literal word, nothing hidden in the live text.
+const plain = commands.filter(
+  (command, index) =>
+    !(shapes[index]?.unsegmentable ?? true) &&
+    (shapes[index]?.programs ?? []).every((program) => program !== '?') &&
+    constructOf(command) === undefined,
+)
+lines.push(
+  row(
+    'plain (segmentable, every program a literal word, no construct) — #469 pre-filter candidate',
+    plain.length,
+    commands.length,
+  ),
+)
 const programs = tally(shapes.flatMap((shape) => shape.programs))
 const segmentTotal = programs.reduce((sum, [, number]) => sum + number, 0)
 lines.push(`programs at command position (${segmentTotal} segments), top 20:`)
