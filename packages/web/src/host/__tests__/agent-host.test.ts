@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, expect, setSystemTime, test } from 'bun:test'
 import { createHash } from 'node:crypto'
-import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -46,8 +46,17 @@ import {
 } from '@enso/core'
 import { flowTrace } from '@enso/core/flow-trace'
 import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
-import { findRepoRoot, harnessPackageDir, projectIdOf, projectSessionsDir, realpathOrSelf } from '@enso/core/paths'
+import {
+  ensoProjectsDir,
+  findRepoRoot,
+  harnessPackageDir,
+  projectIdOf,
+  projectSessionsDir,
+  projectSnapshotsDir,
+  realpathOrSelf,
+} from '@enso/core/paths'
 import { ENSO_DEFAULT_PERMISSION_POLICY, permissionEngineConfigPath } from '@enso/core/permission-rules'
+import { snapshotPaths } from '@enso/core/snapshot-store'
 import { getPermissionsService } from '@gotgenes/pi-permission-system'
 import type { LogRecorder } from '@logtape/testing/recorder'
 import {
@@ -2676,8 +2685,28 @@ test('⚠ two runs with nothing changed record one run context; a changed AGENTS
   const [firstRecord] = once
   const [, secondRecord] = twice
   if (firstRecord === undefined || secondRecord === undefined) throw new Error('a run context is missing')
-  // Nothing else changed: the second record is the first with the new hash.
-  expect({ ...secondRecord, contextFiles: firstRecord.contextFiles }).toEqual(firstRecord)
+  // The tree, as a snapshot (#551): the real extension minted the thread's store under the run's
+  // ENSO_HOME — the preload's `<scratch>/enso-home`, which `tmpdir()` names since the preload
+  // repointed TMPDIR at the scratch; never the operator's — beside the project's sessions, and the
+  // edited AGENTS.md is a new snapshot holding the new text, out of the project's own tree.
+  const runHome = join(tmpdir(), 'enso-home')
+  const storeDir = join(projectSnapshotsDir(ensoProjectsDir(runHome), projectIdOf(project)), threadId)
+  expect(existsSync(join(storeDir, 'HEAD'))).toBe(true)
+  expect(firstRecord.snapshot).toEqual({ hash: expect.stringMatching(/^[0-9a-f]{40}$/) })
+  expect(secondRecord.snapshot).toEqual({ hash: expect.stringMatching(/^[0-9a-f]{40}$/) })
+  expect(secondRecord.snapshot).not.toEqual(firstRecord.snapshot)
+  const snapshotEnvironment = { PATH: dirname(Bun.which('git') ?? '/usr/bin/git') }
+  expect(
+    await snapshotPaths(snapshotEnvironment, { directory: storeDir, tree: project }, secondRecord.snapshot?.hash ?? ''),
+  ).toContain('AGENTS.md')
+  expect(existsSync(join(project, '.git'))).toBe(false)
+  // Nothing else changed: the second record is the first with the new hash and the new snapshot.
+  const asFirst: EnsoRunContext = {
+    ...secondRecord,
+    contextFiles: firstRecord.contextFiles,
+    ...(firstRecord.snapshot === undefined ? {} : { snapshot: firstRecord.snapshot }),
+  }
+  expect(asFirst).toEqual(firstRecord)
   // The live fork point reads the latest.
   expect((await resumed.forkPoint()).conditions.runContext).toEqual(secondRecord)
 

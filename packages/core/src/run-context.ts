@@ -21,6 +21,13 @@ import { EnsoRecordedModel } from './thread-runtime.ts'
  * from; the mode is a sha256 of the permission policy and the active mode's preset (#496). No
  * secret and no file body is written. The mode NAME stays the `active_agent` entry's own record,
  * read beside this one (#126 decision 3).
+ *
+ * ⚠ THE TREE, AS A SNAPSHOT (#551 slice 1). `snapshot.hash` names the commit the thread's snapshot
+ * store (`@enso/core/snapshot-store`) holds of the tree as the run began — the tracked set and the
+ * unignored untracked files, never a force-add. It is the fork point's tree identity where
+ * `git.revision` is one only when `dirty: false`. `null` when no snapshot could be taken (the
+ * store could not be minted, a git failed); ABSENT on a record from before #551, which a reader
+ * must take for "unknown", not "none". Keyed to this record, never to pi's entry (#555 rule 5).
  */
 
 /**
@@ -81,6 +88,20 @@ export const EnsoRunContext = Type.Object(
      * or when it carries none of the rule fields (the entry's shape moved: unknown, never a hash of nothing).
      */
     mode: Type.Union([Type.Object({ rulesHash: Sha256 }, { additionalProperties: false }), Type.Null()]),
+    /**
+     * The commit the thread's snapshot store holds of the tree as the run began (#551); `null` when
+     * none could be taken; absent on a record from before #551. 40 or 64 hex digits: the store takes
+     * the checkout's object format (sha1 or sha256), since alternates cannot mix the two.
+     */
+    snapshot: Type.Optional(
+      Type.Union([
+        Type.Object(
+          { hash: Type.String({ pattern: '^([0-9a-f]{40}|[0-9a-f]{64})$' }) },
+          { additionalProperties: false },
+        ),
+        Type.Null(),
+      ]),
+    ),
   },
   { additionalProperties: false },
 )

@@ -29,12 +29,21 @@ import { join } from 'node:path'
  * Playwright's e2e home (`packages/web/e2e/e2e-home.ts`) runs outside `bun test` and is not
  * covered here.
  *
+ * ⚠ `ENSO_HOME` is pinned the same way, for the same reason, since #551: see below.
+ *
  * ⚠ The teardown is an `afterAll` in THIS preload, which bun runs once at the end of the whole
  * run — not a `process.on('exit')`: measured on bun 1.4.0, `bun test` ends without firing exit
  * or beforeExit listeners at all, so a cleanup registered there never ran (the first draft).
  */
 const scratch = mkdtempSync(join(tmpdir(), 'enso-test-run-'))
 process.env['TMPDIR'] = scratch
+// And the run's own ENSO_HOME (#551): the harness extensions run IN-PROCESS under a hosted thread
+// and read `ensoHome(process.env)` — the guards for the user's security config, the run-context
+// recorder for where a thread's snapshot store is minted. Unpinned, a host test would mint bare
+// repositories under the operator's `~/.enso/projects/`, one per test thread (the way an unpinned
+// `PI_CODING_AGENT_DIR` once filed fixtures under `~/.pi`, PR #554). A test that means the real
+// home passes its own environment; none does.
+process.env['ENSO_HOME'] = join(scratch, 'enso-home')
 afterAll(() => {
   rmSync(scratch, { recursive: true, force: true })
 })

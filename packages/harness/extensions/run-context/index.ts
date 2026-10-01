@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { join } from 'node:path'
 import type { BeforeAgentStartEvent, ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent'
 import {
   ENSO_MODE_PRESETS,
@@ -9,11 +10,20 @@ import {
   lastCustomEntryData,
   readEnsoRunContext,
   recordedPermissionMode,
+  ensoLogger,
   transcriptOf,
 } from '@enso/core'
 import { type GitRunner, runGit } from '@enso/core/git'
-import { readTextIfPresent } from '@enso/core/paths'
+import {
+  ensoHome,
+  ensoProjectsDir,
+  projectIdOf,
+  projectSnapshotsDir,
+  readTextIfPresent,
+  realpathOrSelf,
+} from '@enso/core/paths'
 import { permissionEngineConfigPath } from '@enso/core/permission-rules'
+import { openSnapshotStore, type SnapshotStore } from '@enso/core/snapshot-store'
 import {
   type SessionConfigContext,
   type SessionEnsoConfig,
@@ -66,6 +76,8 @@ import {
  * would stop noticing rule changes.
  */
 
+const log = ensoLogger('extension', 'run-context')
+
 export interface RunContextDependencies {
   /** The session's config — one resolution per session and trust answer (`session-config.ts`). */
   resolveSessionConfig: (
@@ -76,6 +88,11 @@ export interface RunContextDependencies {
   runGit: GitRunner
   /** The permission policy's text as the engine reads it; `undefined` when there is none. */
   readPermissionPolicy: () => string | undefined
+  /**
+   * The thread's snapshot store for its tree (#551): opened — minted when absent — per run, so a
+   * store removed with its thread is not held open; `undefined` when it cannot be minted.
+   */
+  openSnapshotStore: (tree: string, threadId: string) => Promise<SnapshotStore | undefined>
 }
 
 const sha256 = (text: string): string => createHash('sha256').update(text).digest('hex')
@@ -137,17 +154,46 @@ function byCodePoint(first: string, second: string): number {
   return first > second ? 1 : 0
 }
 
-/** The facts a record holds that are read from the session, not from the prompt's event: git, config, mode. */
+/** The facts a record holds that are read from the session, not from the prompt's event: git, config, mode, snapshot. */
 async function sessionFactsOf(
   dependencies: RunContextDependencies,
   context: ExtensionContext,
-): Promise<Pick<EnsoRunContext, 'git' | 'config' | 'mode'>> {
-  const [git, config] = await Promise.all([gitState(dependencies, context.cwd), resolvedConfig(dependencies, context)])
+): Promise<Pick<EnsoRunContext, 'git' | 'config' | 'mode' | 'snapshot'>> {
+  const [git, config, snapshot] = await Promise.all([
+    gitState(dependencies, context.cwd),
+    resolvedConfig(dependencies, context),
+    snapshotOf(dependencies, context),
+  ])
   return {
     git,
     config: { hash: sha256(canonicalJson(config.result)), sources: config.sources },
     mode: modeRules(transcriptOf(context.sessionManager.getEntries()), dependencies.readPermissionPolicy()),
+    snapshot,
   }
+}
+
+/**
+ * The tree as the run begins, as a snapshot (#551): `null` when the store cannot be opened or a
+ * git of it fails — said in the log with the step, never a thrown hook, never a stale hash.
+ */
+async function snapshotOf(
+  dependencies: RunContextDependencies,
+  context: ExtensionContext,
+): Promise<{ hash: string } | null> {
+  const store = await dependencies.openSnapshotStore(context.cwd, context.sessionManager.getSessionId())
+  if (store === undefined) {
+    log.warn('no snapshot store for {tree}: the run records no snapshot', { tree: context.cwd })
+    return null
+  }
+  const outcome = await store.snapshot()
+  if (outcome.kind === 'refused') {
+    log.warn('snapshot of {tree} refused at {step} (git exit {code}): {stderr}', {
+      tree: context.cwd,
+      ...outcome.refused,
+    })
+    return null
+  }
+  return { hash: outcome.taken.hash }
 }
 
 async function runContextOf(
@@ -242,4 +288,15 @@ export default createRunContext({
       return undefined
     }
   },
+  // The store beside the thread's session, under its project's folder (#552): the tree is the
+  // session's cwd, its project id the canonical path's. Opened per run; minted on the first.
+  openSnapshotStore: (tree, threadId) =>
+    openSnapshotStore({
+      directory: join(
+        projectSnapshotsDir(ensoProjectsDir(ensoHome(process.env)), projectIdOf(realpathOrSelf(tree))),
+        threadId,
+      ),
+      tree,
+      environment: process.env,
+    }),
 })

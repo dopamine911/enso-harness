@@ -109,10 +109,26 @@ const GIT_READ_ONLY_CONFIG = [
   'diff.submodule=short',
 ]
 
-/** The exit code in an `execFile` error: git's own, or -1 for a git that never ran or was killed. */
-function exitCode(error: (Error & { code?: unknown; killed?: boolean }) | null): number {
+/**
+ * The exit code in an `execFile` error: git's own, or -1 for a git that never ran or was killed.
+ * Shared with the snapshot store's own runner.
+ *
+ * @group Git
+ */
+export function exitCode(error: (Error & { code?: unknown; killed?: boolean }) | null): number {
   if (error === null) return 0
   return typeof error.code === 'number' && error.killed !== true ? error.code : -1
+}
+
+/**
+ * `environment` without git's repository-locating variables — what every git this package runs
+ * starts from, so an inherited `GIT_DIR` (a hook's shell) never names the repository. The
+ * snapshot store sets its own three on top (`snapshot-store.ts`).
+ *
+ * @group Git
+ */
+export function withoutGitLocalVariables(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return Object.fromEntries(Object.entries(environment).filter(([name]) => GIT_LOCAL_VARIABLES[name] !== true))
 }
 
 /**
@@ -123,10 +139,7 @@ function exitCode(error: (Error & { code?: unknown; killed?: boolean }) | null):
  * @group Git
  */
 export function runGitIn(environment: NodeJS.ProcessEnv, args: readonly string[], cwd: string): Promise<GitResult> {
-  const env = {
-    ...Object.fromEntries(Object.entries(environment).filter(([name]) => GIT_LOCAL_VARIABLES[name] !== true)),
-    ...GIT_READ_ONLY_VARIABLES,
-  }
+  const env = { ...withoutGitLocalVariables(environment), ...GIT_READ_ONLY_VARIABLES }
   const { promise, resolve } = Promise.withResolvers<GitResult>()
   execFile(
     'git',

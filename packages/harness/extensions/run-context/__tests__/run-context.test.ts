@@ -45,9 +45,13 @@ function session(
       Promise.resolve({ result: { kind: 'ok', config: {} }, path: '/u/config.json', sources: [] }),
     runGit: gitAnswering({ code: 0, stdout: 'f00d\n', stderr: '' }, { code: 0, stdout: '', stderr: '' }),
     readPermissionPolicy: () => '{"permission":{"bash":"ask"}}',
+    openSnapshotStore: storeTaking(HASH_A),
     ...dependencies,
   })(pi)
-  const context = { cwd: '/work', sessionManager: { getBranch: () => branch, getEntries: () => branch } }
+  const context = {
+    cwd: '/work',
+    sessionManager: { getBranch: () => branch, getEntries: () => branch, getSessionId: () => 'session-1' },
+  }
   const emit = async (event: string, payload: unknown): Promise<void> => {
     const handler = handlers.get(event)
     if (handler === undefined) throw new Error(`the recorder registered no ${event} handler`)
@@ -73,6 +77,62 @@ function session(
 function gitAnswering(head: GitResult, status: GitResult): RunContextDependencies['runGit'] {
   return (args: readonly string[]) => Promise.resolve(args[0] === 'rev-parse' ? head : status)
 }
+
+/** A store whose snapshots are the given hashes in turn, the first `changed`, the rest not; opened for `(tree, threadId)` as recorded. */
+function storeTaking(
+  ...hashes: string[]
+): RunContextDependencies['openSnapshotStore'] & { opened: [string, string][] } {
+  const opened: [string, string][] = []
+  let taken = 0
+  const open: RunContextDependencies['openSnapshotStore'] = (tree, threadId) => {
+    opened.push([tree, threadId])
+    return Promise.resolve({
+      directory: `/store/${threadId}`,
+      tree,
+      snapshot: () => {
+        const hash = hashes[Math.min(taken, hashes.length - 1)] ?? 'a'.repeat(40)
+        taken += 1
+        return Promise.resolve({ kind: 'taken' as const, taken: { hash, changed: taken === 1 } })
+      },
+    })
+  }
+  return Object.assign(open, { opened })
+}
+
+const HASH_A = '1'.repeat(40)
+const HASH_B = '2'.repeat(40)
+
+test("⚠ the record carries the tree's snapshot as the run began (#551): the store is opened for the session's cwd and id; a run on an unchanged tree appends nothing; an edited tree is a new record", async () => {
+  const store = storeTaking(HASH_A, HASH_A, HASH_B)
+  const recorder = session({ openSnapshotStore: store })
+  await recorder.run()
+  expect(store.opened).toEqual([['/work', 'session-1']])
+  expect(recorder.recorded().map((record) => record.snapshot)).toEqual([{ hash: HASH_A }])
+  // The same tree: the same hash, nothing to append.
+  await recorder.run()
+  expect(recorder.recorded()).toHaveLength(1)
+  // The tree edited between runs: the next run's record names the new snapshot.
+  await recorder.run()
+  expect(recorder.recorded().map((record) => record.snapshot)).toEqual([{ hash: HASH_A }, { hash: HASH_B }])
+})
+
+test('⚠ no store, or a snapshot git that fails, records `snapshot: null` — never a thrown hook, never a stale hash', async () => {
+  const noStore = session({ openSnapshotStore: () => Promise.resolve(undefined) })
+  await noStore.run()
+  expect(noStore.recorded()[0]?.snapshot).toBeNull()
+  const refusing = session({
+    openSnapshotStore: (tree) =>
+      Promise.resolve({
+        directory: '/store',
+        tree,
+        snapshot: () =>
+          Promise.resolve({ kind: 'refused' as const, refused: { step: 'add', code: 128, stderr: 'fatal' } }),
+      }),
+  })
+  await refusing.run()
+  expect(refusing.recorded()[0]?.snapshot).toBeNull()
+  expect(refusing.recorded()[0]?.git).toEqual({ revision: 'f00d', dirty: false })
+})
 
 test('⚠ a status git cannot answer records the tree dirty, the revision kept: it cannot say the tree is clean', async () => {
   const recorder = session({

@@ -92,6 +92,7 @@ const DOMAINS_BY_CLASSIFICATION: Readonly<Record<Classification, Readonly<Record
     'process-marker.ts': 'Record',
     'permission-rules.ts': 'Permission',
     'secrets.ts': 'Permission',
+    'snapshot-store.ts': 'Thread, Record',
   },
   'host contract': { 'thread-runtime.ts': 'Thread, Control' },
 }

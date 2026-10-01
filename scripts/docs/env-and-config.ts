@@ -116,6 +116,14 @@ const ENVIRONMENT_METADATA: readonly EnvironmentMetadata[] = [
     phase: 'load',
   },
   {
+    key: 'ENSO_HOME',
+    source: 'test/scratch-preload.ts',
+    reader: '`test/scratch-preload.ts` (process write, before any test file loads)',
+    purposeAndDefault:
+      'Set by the test preload to a directory under the run’s scratch, so the harness extensions a hosted thread loads in-process — which resolve `ensoHome` from the process environment for the user’s security config and for where a thread’s snapshot store is minted (#551) — never touch the operator’s `~/.enso`. Removed with the scratch when the run ends.',
+    phase: 'load',
+  },
+  {
     key: 'FORCE_COLOR',
     source: 'scripts/gate.ts',
     reader: '`scripts/gate.ts#runGate` (child environment write)',
@@ -430,9 +438,9 @@ const RUNTIME_PATH_METADATA: readonly RuntimePathMetadata[] = [
     helper: 'ensoProjectsDir',
     path: 'ENSO_HOME/projects',
     writer:
-      'One folder per project, named by `projectIdOf` (sixteen hex digits of the real path’s SHA-256; `projects.json` is the only id↔path map). Under it, `sessions/` holds the project’s thread logs — pi’s session files (#552): the web host and `bun run enso` both file there (`PI_CODING_AGENT_SESSION_DIR`), and a launch first moves the sessions pi filed by encoded cwd under the agent dir into their folders, never over an existing file. Reserved beside it: `trees/` and `snapshots/` (#551).',
+      'One folder per project, named by `projectIdOf` (sixteen hex digits of the real path’s SHA-256; `projects.json` is the only id↔path map). Under it, `sessions/` holds the project’s thread logs — pi’s session files (#552): the web host and `bun run enso` both file there (`PI_CODING_AGENT_SESSION_DIR`), and a launch first moves the sessions pi filed by encoded cwd under the agent dir into their folders, never over an existing file. `snapshots/<thread-id>` is one thread’s snapshot store (#551): a bare repository the `run-context` extension writes at every run start through `@enso/core/snapshot-store` — the tree’s tracked set and unignored untracked files, never a force-add, with `objects/info/alternates` to the checkout’s objects so a base snapshot stores no blob the checkout holds. Reserved beside them: `trees/` (#551 slice 2).',
     lifetime:
-      'Per-user; a moved checkout changes its id, so its threads stay under the old one until moved by hand. Trust (`pi-agent/trust.json`) and the checkout’s `.enso/config.json` stay where they are.',
+      'Per-user; a moved checkout changes its id, so its threads stay under the old one until moved by hand. A snapshot store is to be removed with its thread by #551 slice 2’s `dispose`; nothing removes one yet. Trust (`pi-agent/trust.json`) and the checkout’s `.enso/config.json` stay where they are.',
     check: { file: 'packages/core/src/paths.ts', contains: 'export function migrateSessionsIntoProjects' },
   },
   {
