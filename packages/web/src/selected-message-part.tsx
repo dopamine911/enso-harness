@@ -7,9 +7,9 @@ import { TextPart } from '@tanstack/ai-react/ui'
 import { ChevronRightIcon, CircleCheckIcon, CircleSlashIcon, CircleXIcon, LoaderCircleIcon } from 'lucide-react'
 import { Reasoning, ReasoningContent, ReasoningTrigger } from './components/ai-elements/reasoning.tsx'
 import { type EnsoRendererMap, EnsoToolResult, type ToolResultState, toolResultState } from './EnsoToolResult.tsx'
-import { GuardRefusal, useGuardDenial } from './guard-refusal.tsx'
 import { cn } from './lib/utils.ts'
 import { TEXT_PART_COMPONENTS } from './markdown-image.tsx'
+import { ToolRefusal, useToolRefusal } from './tool-refusal.tsx'
 
 /**
  * The call's input as an object. TanStack parses it onto the selected part once the
@@ -73,17 +73,17 @@ function ToolCallRow({
   const input = readToolInput(selected)
   const summary = summarizeToolInput(input)
   const { status } = toolResultState(selected.result, runOpen)
-  // A guard refused it (#387): a receipt, drawn as one — not a failed step with the word `error`.
-  const refusedBy = useGuardDenial(selected.part.id)
-  if (refusedBy !== undefined) {
+  // Something refused it (#387, #523): a receipt, drawn as one — not a failed step with the word `error`.
+  const refusal = useToolRefusal(selected.part.id)
+  if (refusal !== undefined) {
     return (
-      <GuardRefusal
+      <ToolRefusal
         toolCallId={selected.part.id}
         toolName={selected.part.name}
         asked={summary}
         asCommand={isCommandInput(input)}
         reason={resultText(selected.result)}
-        rule={refusedBy}
+        refusal={refusal}
       />
     )
   }

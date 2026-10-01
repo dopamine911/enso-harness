@@ -516,7 +516,7 @@ export function ThreadStatsView({
   readonly outcome: StatsOutcome
   readonly onNavigate?: ((target: StatsTarget) => void) | undefined
   readonly missed?: string | undefined
-  /** The calls a guard refused (#387) — the thread's `guardDenials`; none in a static render. */
+  /** The calls something refused (#387, #523) — the thread's `refusals`; none in a static render. */
   readonly refused?: RefusedCalls
 }): React.ReactNode {
   if (outcome.kind === 'reading')
@@ -662,6 +662,6 @@ export function ThreadStatsDrawer({ onNavigate }: { readonly onNavigate?: Reveal
     onNavigate === undefined || outcome.kind !== 'read'
       ? undefined
       : (target: StatsTarget): void => setMissed(onNavigate(target, outcome.payload) ? undefined : missedText(target))
-  const refused = useStore(useThreadStores().guardDenials)
+  const refused = useStore(useThreadStores().refusals)
   return <ThreadStatsView outcome={outcome} onNavigate={navigate} missed={missed} refused={refused} />
 }

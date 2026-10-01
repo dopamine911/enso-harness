@@ -1,6 +1,6 @@
 import { type Static, Type } from 'typebox'
 import { Compile } from 'typebox/compile'
-import { type EnsoGuardRule, readEnsoGuardDenial } from './guard.ts'
+import { ENSO_GUARD_RULES, type EnsoGuardRule, readEnsoGuardDenial } from './guard.ts'
 import type { EnsoTranscriptEntry } from './transcript.ts'
 
 /**
@@ -122,6 +122,91 @@ const permissionDenialValidator = Compile(EnsoPermissionDenial)
  */
 export function readEnsoPermissionDenial(customType: string, data: unknown): EnsoPermissionDenial | undefined {
   return customType === ENSO_PERMISSION_DENIAL_ENTRY && permissionDenialValidator.Check(data) ? data : undefined
+}
+
+/**
+ * Who refused a tool call (#523), the one vocabulary the page draws a refusal by — the guard's
+ * `enso-guard-denial` and the engine's `enso-permission-denial` both resolve to it: Enso's guard
+ * with the rule that refused, a permission rule the user wrote (`policy_deny`), `auto`'s
+ * classifier (`authorizer_denied`), or the person (`user_denied`).
+ *
+ * @group Session risk
+ */
+export const ENSO_TOOL_REFUSERS = ['guard', 'rule', 'auto', 'operator'] as const
+
+/** @group Session risk */
+export type EnsoToolRefuser = (typeof ENSO_TOOL_REFUSERS)[number]
+
+/**
+ * A refusal as a tool result carries it, under {@link ENSO_TOOL_REFUSAL_KEY}: who refused, and the
+ * guard's rule when it was the guard. The reason is the result's own text, as before (#387).
+ *
+ * @group Session risk
+ */
+export const EnsoToolRefusal = Type.Union([
+  Type.Object(
+    {
+      by: Type.Literal('guard'),
+      rule: Type.Unsafe<EnsoGuardRule>(Type.Union(ENSO_GUARD_RULES.map((rule) => Type.Literal(rule)))),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    { by: Type.Union([Type.Literal('rule'), Type.Literal('auto'), Type.Literal('operator')]) },
+    { additionalProperties: false },
+  ),
+])
+/** @group Session risk */
+export type EnsoToolRefusal = Static<typeof EnsoToolRefusal>
+
+/**
+ * The tool-result metadata key a refusal rides under on a stored result — beside
+ * `ENSO_TOOL_RESULT_KEY`, namespaced the same way and for the same reason (no dot).
+ *
+ * @group Session risk
+ */
+export const ENSO_TOOL_REFUSAL_KEY = 'enso:refusal' as const
+
+const toolRefusalValidator = Compile(EnsoToolRefusal)
+
+/**
+ * Who an engine resolution says refused: a rule, `auto`'s classifier, or the person.
+ *
+ * @group Session risk
+ */
+export function toolRefuserOf(resolution: EnsoPermissionDenialResolution): Exclude<EnsoToolRefuser, 'guard'> {
+  if (resolution === 'policy_deny') return 'rule'
+  return resolution === 'authorizer_denied' ? 'auto' : 'operator'
+}
+
+/**
+ * The refusal a custom entry records — the guard's or the engine's — as the call it refused and
+ * who refused it; undefined for another entry, a malformed one, or an engine refusal that names
+ * no call (a mode probe's, say).
+ *
+ * @group Session risk
+ */
+export function toolRefusalOf(
+  customType: string,
+  data: unknown,
+): { readonly toolCallId: string; readonly refusal: EnsoToolRefusal } | undefined {
+  const guard = readEnsoGuardDenial(customType, data)
+  if (guard !== undefined) return { toolCallId: guard.toolCallId, refusal: { by: 'guard', rule: guard.rule } }
+  const engine = readEnsoPermissionDenial(customType, data)
+  if (engine?.toolCallId === undefined) return undefined
+  return { toolCallId: engine.toolCallId, refusal: { by: toolRefuserOf(engine.resolution) } }
+}
+
+/**
+ * The refusal a tool result's metadata carries (see {@link ENSO_TOOL_REFUSAL_KEY}), or undefined.
+ *
+ * @group Session risk
+ */
+export function readEnsoToolRefusalMetadata(
+  metadata: Record<string, unknown> | undefined,
+): EnsoToolRefusal | undefined {
+  const candidate = metadata?.[ENSO_TOOL_REFUSAL_KEY]
+  return toolRefusalValidator.Check(candidate) ? candidate : undefined
 }
 
 /**

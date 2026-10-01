@@ -1,8 +1,9 @@
 import { expect, test } from 'bun:test'
 import {
   ENSO_GUARD_DENIAL_ENTRY,
-  ENSO_GUARD_DENIAL_KEY,
+  ENSO_PERMISSION_DENIAL_ENTRY,
   ENSO_PROVIDER_REFUSAL_KEY,
+  ENSO_TOOL_REFUSAL_KEY,
   ENSO_TOOL_RESULT_KEY,
   type EnsoInterruptedTail,
 } from '@enso/core'
@@ -150,11 +151,12 @@ test('a refused tool call (isError) reads as an error on both the call and the r
 })
 
 // #387's fixture: the same `bash` call, refused by a guard and failing on its own. Both are
-// `isError` with a reason as the text — pi builds them identically — and only the guard's
-// custom entry, written before the result, tells them apart after a reload. A marker that is
-// malformed, or names a call it does not precede, marks nothing.
+// `isError` with a reason as the text — pi builds them identically — and only the refusing
+// custom entry, written before the result, tells them apart after a reload: the guard's (#387)
+// and the engine's (#523), each read as who refused. A marker that is malformed, names a call it
+// does not precede, or is an engine refusal naming no call marks nothing.
 // @pins guarded-tool-call/denial-entry
-test('⚠ a guard refusal rides its own result as metadata; a failed call with the same shape carries none (#387)', () => {
+test('⚠ a refusal rides its own result as metadata, naming who refused; a failed call with the same shape carries none (#387, #523)', () => {
   const bashCall = (id: string): BranchEntry =>
     entry(`a-${id}`, {
       role: 'assistant',
@@ -168,30 +170,46 @@ test('⚠ a guard refusal rides its own result as metadata; a failed call with t
       content: [{ type: 'text', text }],
       isError: true,
     })
-  const custom = (id: string, data: unknown): unknown => ({
+  const custom = (id: string, customType: string, data: unknown): unknown => ({
     type: 'custom',
-    customType: ENSO_GUARD_DENIAL_ENTRY,
+    customType,
     data,
     id,
     parentId: null,
     timestamp: '',
   })
+  const engine = { requestId: 'req', surface: 'bash', value: 'cat ~/.aws/credentials' }
   const messages = branchToMessages([
     bashCall('refused'),
-    custom('d1', { toolCallId: 'refused', rule: 'secret-path' }),
+    custom('d1', ENSO_GUARD_DENIAL_ENTRY, { toolCallId: 'refused', rule: 'secret-path' }),
     errorResult('refused', 'bash command refused: "~/.aws/credentials" names credential material'),
     bashCall('failed'),
-    custom('d2', { toolCallId: 'failed', rule: 'not-a-rule' }),
+    custom('d2', ENSO_GUARD_DENIAL_ENTRY, { toolCallId: 'failed', rule: 'not-a-rule' }),
     errorResult('failed', 'cat: /home/me/.aws/credentials: No such file or directory'),
+    bashCall('said-no'),
+    custom('d3', ENSO_PERMISSION_DENIAL_ENTRY, { ...engine, toolCallId: 'said-no', resolution: 'user_denied' }),
+    errorResult('said-no', 'Permission denied by the user'),
+    bashCall('ruled'),
+    custom('d4', ENSO_PERMISSION_DENIAL_ENTRY, { ...engine, toolCallId: 'ruled', resolution: 'policy_deny' }),
+    errorResult('ruled', 'Permission denied by rule'),
+    bashCall('probe'),
+    custom('d5', ENSO_PERMISSION_DENIAL_ENTRY, { ...engine, resolution: 'user_denied' }),
+    errorResult('probe', 'an engine refusal naming no call'),
   ])
   const resultOf = (id: string): unknown =>
     messages.flatMap((message) => message.parts).find((part) => part.type === 'tool-result' && part.toolCallId === id)
   expect(resultOf('refused')).toMatchObject({
     state: 'error',
-    metadata: { [ENSO_GUARD_DENIAL_KEY]: { toolCallId: 'refused', rule: 'secret-path' } },
+    metadata: { [ENSO_TOOL_REFUSAL_KEY]: { by: 'guard', rule: 'secret-path' } },
   })
+  expect(resultOf('said-no')).toMatchObject({
+    state: 'error',
+    metadata: { [ENSO_TOOL_REFUSAL_KEY]: { by: 'operator' } },
+  })
+  expect(resultOf('ruled')).toMatchObject({ state: 'error', metadata: { [ENSO_TOOL_REFUSAL_KEY]: { by: 'rule' } } })
   expect(resultOf('failed')).toMatchObject({ state: 'error' })
   expect(resultOf('failed')).not.toHaveProperty('metadata')
+  expect(resultOf('probe')).not.toHaveProperty('metadata')
 })
 
 test('a result whose call is not on the branch is dropped, not rendered as a stray row', () => {

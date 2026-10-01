@@ -122,7 +122,7 @@ export interface ThreadCounts {
   readonly prompts: number
   /** Tool calls across the whole transcript, paired or not. */
   readonly toolCalls: number
-  /** Results an Enso guard refused (#387) — by policy, not by error. */
+  /** Results something refused (#387, #523) — a guard, a permission rule, `auto`, the person: by decision, not by error. */
   readonly refused: number
   /** Results that came back as errors and were not refusals: the tool ran, or tried to, and failed. */
   readonly failed: number
@@ -130,12 +130,12 @@ export interface ThreadCounts {
 
 /**
  * Count the transcript. Cheap enough to run per render; the list is what is on screen.
- * `guardDenials` is the thread's store of refused call ids — the one thing that tells a refusal
+ * `refusals` is the thread's store of refused call ids — the one thing that tells a refusal
  * from a failure, since pi hands both over as an error result.
  */
 export function countThread(
   messages: ReadonlyArray<UIMessage>,
-  guardDenials: ReadonlyMap<string, unknown> = new Map(),
+  refusals: ReadonlyMap<string, unknown> = new Map(),
 ): ThreadCounts {
   let prompts = 0
   let toolCalls = 0
@@ -146,7 +146,7 @@ export function countThread(
     for (const part of message.parts) {
       if (part.type === 'tool-call') toolCalls += 1
       if (part.type !== 'tool-result') continue
-      if (guardDenials.has(part.toolCallId)) refused += 1
+      if (refusals.has(part.toolCallId)) refused += 1
       else if (part.state === 'error') failed += 1
     }
   }
@@ -429,14 +429,14 @@ export function ThreadStatusBar({ messages, generating }: ThreadStatusBarProps):
   const cwd = useStore(stores.cwd)
   const questionWaiting = useStore(stores.dialog) !== undefined
   const refusal = useStore(stores.refusal)
-  const guardDenials = useStore(stores.guardDenials)
+  const refusals = useStore(stores.refusals)
   const risk = useStore(stores.sessionRisk)
   const incidents = useStore(stores.incidents)
   const git = useThreadGit(`${settledToolResults(messages)}:${generating}`)
   return (
     <ThreadStatusView
       activity={describeActivity(messages, generating, disconnected)}
-      counts={countThread(messages, guardDenials)}
+      counts={countThread(messages, refusals)}
       usage={usage}
       cwd={cwd}
       questionWaiting={questionWaiting}

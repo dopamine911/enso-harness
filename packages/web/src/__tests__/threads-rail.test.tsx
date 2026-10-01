@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'bun:test'
 import { EventType } from '@ag-ui/core'
 import {
-  ENSO_GUARD_DENIAL_KEY,
+  ENSO_TOOL_REFUSAL_KEY,
   ENSO_PROJECT_HEADER,
   type EnsoFollowFrame,
   type EnsoProject,
@@ -169,7 +169,7 @@ test('adopting stored history restores dates, title and mode under the stored th
 
 // #387 after a reload: the server joined the guard's entry onto the stored result; adopting
 // the history puts it where the live chunk would have — the thread's denials, by call id.
-test('adopting a history seeds the refused calls from its results; a failed result is not one (#387)', () => {
+test('adopting a history seeds the refused calls from its results, with who refused; a failed result is not one (#387, #523)', () => {
   const errored = (toolCallId: string, metadata?: Record<string, unknown>): UIMessage['parts'][number] => ({
     type: 'tool-result',
     toolCallId,
@@ -185,14 +185,21 @@ test('adopting a history seeds the refused calls from its results; a failed resu
       {
         id: 'a1',
         role: 'assistant',
-        parts: [errored('c1', { [ENSO_GUARD_DENIAL_KEY]: { toolCallId: 'c1', rule: 'secret-read' } }), errored('c2')],
+        parts: [
+          errored('c1', { [ENSO_TOOL_REFUSAL_KEY]: { by: 'guard', rule: 'secret-read' } }),
+          errored('c2'),
+          errored('c3', { [ENSO_TOOL_REFUSAL_KEY]: { by: 'operator' } }),
+        ],
       },
     ],
     permissionMode: { mode: 'default', available: [] },
     sessionRisk: { level: 'low', signals: 0 },
     incidents: NO_SESSION_INCIDENTS,
   })
-  expect([...adopted.guardDenials.get()]).toEqual([['c1', 'secret-read']])
+  expect([...adopted.refusals.get()]).toEqual([
+    ['c1', { by: 'guard', rule: 'secret-read' }],
+    ['c3', { by: 'operator' }],
+  ])
 })
 
 test('⚠ adopting a branch that ends inside a turn opens with a warning that says so; a settled one opens clean (#109)', () => {

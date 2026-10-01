@@ -3,6 +3,7 @@ import {
   ENSO_GUARD_DENIAL_ENTRY,
   ENSO_INCIDENT_OPENED_ENTRY,
   ENSO_INCIDENT_RESOLVED_ENTRY,
+  ENSO_PERMISSION_DENIAL_ENTRY,
   ENSO_SESSION_RISK_ENTRY,
   ENSO_PROVIDER_REFUSAL_KEY,
   type EnsoDialogSpec,
@@ -158,11 +159,12 @@ test('a custom-entry is recorded but renders nothing and moves no store', () => 
   expect(stores.recentChunks.get().map((chunk) => chunk.name)).toEqual(['custom-entry'])
 })
 
-// #387, live: the guard's entry is the one thing that says a call was refused rather than
-// failed. Its custom-entry lands in the thread's denials by call id; an entry that is another
-// extension's, or malformed, marks nothing.
+// #387, live: a refusal's entry is the one thing that says a call was refused rather than
+// failed. The guard's and the engine's (#523) both land in the thread's refusals by call id, as
+// who refused; an entry that is another extension's, malformed, or an engine refusal naming no
+// call (a mode probe's) marks nothing.
 // @pins guarded-tool-call/denial-entry
-test('a guard-denial custom-entry marks its call refused; any other entry marks nothing (#387)', () => {
+test('a refusal custom-entry marks its call refused, naming who; any other entry marks nothing (#387, #523)', () => {
   observe({
     kind: 'custom-entry',
     customType: ENSO_GUARD_DENIAL_ENTRY,
@@ -170,7 +172,33 @@ test('a guard-denial custom-entry marks its call refused; any other entry marks 
   })
   observe({ kind: 'custom-entry', customType: 'modes', data: { toolCallId: 'c2', rule: 'network-egress' } })
   observe({ kind: 'custom-entry', customType: ENSO_GUARD_DENIAL_ENTRY, data: { toolCallId: 'c3', rule: 'curl' } })
-  expect([...stores.guardDenials.get()]).toEqual([['c1', 'network-egress']])
+  const engine = { requestId: 'r', surface: 'bash', value: 'rm -rf x' }
+  observe({
+    kind: 'custom-entry',
+    customType: ENSO_PERMISSION_DENIAL_ENTRY,
+    data: { ...engine, toolCallId: 'c4', resolution: 'user_denied' },
+  })
+  observe({
+    kind: 'custom-entry',
+    customType: ENSO_PERMISSION_DENIAL_ENTRY,
+    data: { ...engine, toolCallId: 'c5', resolution: 'policy_deny' },
+  })
+  observe({
+    kind: 'custom-entry',
+    customType: ENSO_PERMISSION_DENIAL_ENTRY,
+    data: { ...engine, toolCallId: 'c6', resolution: 'authorizer_denied' },
+  })
+  observe({
+    kind: 'custom-entry',
+    customType: ENSO_PERMISSION_DENIAL_ENTRY,
+    data: { ...engine, resolution: 'user_denied' },
+  })
+  expect([...stores.refusals.get()]).toEqual([
+    ['c1', { by: 'guard', rule: 'network-egress' }],
+    ['c4', { by: 'operator' }],
+    ['c5', { by: 'rule' }],
+    ['c6', { by: 'auto' }],
+  ])
   expect(notificationMessages()).toEqual([])
 })
 

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import type { EnsoIncidentOpened, EnsoSessionIncidents, EnsoSessionUsage } from '@enso/core'
+import type { EnsoIncidentOpened, EnsoSessionIncidents, EnsoSessionUsage, EnsoToolRefusal } from '@enso/core'
 import type { UIMessage } from '@tanstack/ai-client'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { countThread, describeActivity, ThreadStatusView } from '../thread-status.tsx'
@@ -133,9 +133,9 @@ test('prompts count user messages; tool calls count every call, paired or not', 
   expect(countThread([])).toEqual({ prompts: 0, toolCalls: 0, refused: 0, failed: 0 })
 })
 
-// #407: pi hands a guard refusal and a failed command over as the same error result; only the
-// thread's denials store says which is which — never the text.
-test('⚠ an error result a guard refused counts as refused; the same shape without a denial counts as failed', () => {
+// #407: pi hands a refusal and a failed command over as the same error result; only the thread's
+// refusals store says which is which — never the text. A guard's and the engine's alike (#523).
+test('⚠ an error result something refused counts as refused — a guard, a rule, you; the same shape without a refusal counts as failed', () => {
   const errored = (toolCallId: string): UIMessage['parts'][number] => ({
     type: 'tool-result',
     toolCallId,
@@ -151,15 +151,19 @@ test('⚠ an error result a guard refused counts as refused; the same shape with
       errored('c2'),
       call('c3', 'read'),
       result('c3'),
+      call('c4', 'bash'),
+      errored('c4'),
+      call('c5', 'bash'),
+      errored('c5'),
     ]),
   ]
-  expect(countThread(messages, new Map([['c1', 'secret-path']]))).toEqual({
-    prompts: 0,
-    toolCalls: 3,
-    refused: 1,
-    failed: 1,
-  })
-  expect(countThread(messages)).toMatchObject({ refused: 0, failed: 2 })
+  const refusals = new Map<string, EnsoToolRefusal>([
+    ['c1', { by: 'guard', rule: 'secret-path' }],
+    ['c4', { by: 'operator' }],
+    ['c5', { by: 'rule' }],
+  ])
+  expect(countThread(messages, refusals)).toEqual({ prompts: 0, toolCalls: 5, refused: 3, failed: 1 })
+  expect(countThread(messages)).toMatchObject({ refused: 0, failed: 4 })
 })
 
 // ── the view ─────────────────────────────────────────────────────────────────
