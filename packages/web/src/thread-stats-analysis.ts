@@ -20,12 +20,12 @@ import { type EnsoThreadStats, type EnsoToolCallStats, median } from '@enso/core
 /** The calls something refused, by tool-call id — the thread's `refusals` store. */
 export type RefusedCalls = ReadonlyMap<string, unknown>
 
-/** Refused by a guard (#387): policy doing its job, said apart from a failure. */
+/** Refused (#387, #523) — by a guard, a permission rule, `auto`, or the person: a decision, said apart from a failure. */
 export function isRefused(call: EnsoToolCallStats, refused: RefusedCalls): boolean {
   return refused.has(call.toolCallId)
 }
 
-/** Failed: an error result no guard refused — the tool ran, or tried to, and failed. */
+/** Failed: an error result nothing refused — the tool ran, or tried to, and failed. */
 function isFailure(call: EnsoToolCallStats, refused: RefusedCalls): boolean {
   return call.isError && !isRefused(call, refused)
 }

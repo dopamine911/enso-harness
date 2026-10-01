@@ -390,8 +390,6 @@ export {
   readEnsoPermissionDenial,
   readEnsoSessionRiskChange,
   readEnsoToolRefusalMetadata,
-  toolRefusalOf,
-  toolRefuserOf,
   riskCallOf,
   riskEventsOfEntries,
   sessionRiskOfEntries,
@@ -399,6 +397,8 @@ export {
   judgeContextOf,
   judgeContextsOfEntries,
   sessionRiskStep,
+  toolRefusalOf,
+  toolRefuserOf,
 } from './session-risk.ts'
 export {
   ENSO_CONTEXT_ADDITIONS_SHOWN,
