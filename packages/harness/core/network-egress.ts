@@ -420,8 +420,10 @@ function wrappedOperandFinding(
  * value silencing the fallback that would have caught it. All-token scanning is the
  * wrapper-mode philosophy applied inside the payload; each token is basename'd and
  * case-folded. `NAME=value` words (env's assignments) and the exempted `[`/`{}` are
- * skipped; synthesis and runtime-expansion words report as themselves so the caller
- * denies or escalates exactly as it would at command position.
+ * skipped. A synthesis word reports as itself, for the caller to deny as it would at command
+ * position; a word built at runtime is run through the same floor the top level uses
+ * (`wrappedOperandFinding` → `runtimeOperandFinding`, #524), so the caller gets a denial or
+ * `unresolvable` — never a word to re-check.
  */
 function deniedWordInWrappedSegment(
   segmentText: string,
