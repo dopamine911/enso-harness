@@ -29,6 +29,12 @@ test('⚠ redaction: known values (longest first), secret assignments and flags,
   expect(redact('deploy --token hunter2 --password=pw1 --verbose')).toBe(
     'deploy --token [REDACTED] --password=[REDACTED] --verbose',
   )
+  // ⚠ The flag must stand alone (#534, found in a real transcript): a directory or option name
+  // that merely ENDS in `-auth` or `-token` is not a flag, and the word after it is not a secret.
+  expect(redact('cd /w/715-109-spb-local-auth\ngit fetch -q origin')).toBe(
+    'cd /w/715-109-spb-local-auth\ngit fetch -q origin',
+  )
+  expect(redact('cat my-token names.txt')).toBe('cat my-token names.txt')
   expect(redact(`curl -H 'Authorization: Basic dXNlcjpwYXNz' -H "X-Other: 1"`)).toBe(
     `curl -H 'Authorization: [REDACTED]' -H "X-Other: 1"`,
   )
