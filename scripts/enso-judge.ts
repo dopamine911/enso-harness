@@ -1,26 +1,35 @@
 #!/usr/bin/env bun
 
 /**
- * The command judge's real-session replay (#469), from the running server's
- * `GET /api/threads/:id/judge-cases`.
+ * The command judge's real-session replay (#469): from the running server's
+ * `GET /api/threads/:id/judge-cases`, or from the user's own Claude Code / omp transcripts on disk
+ * (`--from claude|omp`, `judge-corpus.ts`).
  *
- *   bun run judge [cases] [<thread> …] [--sample N]
+ *   bun run judge [cases] [<thread> …] [--from server|claude|omp] [--under <dir>,…] [--unreadable N] [--sample N]
  *                                       how many calls would be judged, and N exact request bodies
- *   bun run judge replay [<thread> …] --send [--out <file>] [--max-calls N]
- *                                       send every case to TypeSafe's Jev; JSONL to <file>
+ *   bun run judge replay [<thread> …] --send [--from …] [--under …] [--unreadable N] [--out <file>] [--max-calls N]
+ *                                       send the selected cases to TypeSafe's Jev; JSONL to <file>
  *   bun run judge score <replay.jsonl> --labels <labels.jsonl>
  *                                       precision and recall of the spike's rule and of each question
  *
- * ⚠ `cases` sends nothing: it is what the user reads and approves before anything leaves the
- * machine. `replay` refuses without `--send`. The states are redacted on the server before they
- * reach this process, and the bodies shown are `jevRequestOf`'s — exactly what `replay` sends.
+ * Both commands select the same cases: those whose `cwd` is under one of `--under`'s directories
+ * (all, if none given), then every `after-refusal` case and `--unreadable` N (200) of the rest,
+ * spread evenly. ⚠ `--under` filters BEFORE the sample, so another project's commands are never
+ * sampled, shown or sent.
  *
- * No thread named: every stored thread the server lists. Reads THROUGH THE ROUTE, never the
- * session file, as `bun run incidents` does. The server address defaults to the dev server's;
- * override with ENSO_SERVER_URL. The key is `TYPESAFE_API_KEY` in `ENSO_HOME/secrets.env`.
+ * ⚠ `cases` sends nothing: it is what the user reads and approves before anything leaves the
+ * machine. `replay` refuses without `--send`. States are redacted before they reach the sample
+ * (on the server, or by `judgeStateOf` for a corpus), and the bodies shown are `jevRequestOf`'s —
+ * exactly what `replay` sends.
+ *
+ * From the server with no thread named: every stored thread it lists. Reads THROUGH THE ROUTE,
+ * never the session file, as `bun run incidents` does. The server address defaults to the dev
+ * server's; override with ENSO_SERVER_URL. The key is `TYPESAFE_API_KEY` in `ENSO_HOME/secrets.env`.
  */
 
 import { writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { isAbsolute } from 'node:path'
 import {
   type CommandJudge,
   DEFAULT_GUARD_POLICY,
@@ -42,11 +51,13 @@ export type JudgeSource = 'server' | JudgeCorpus
 
 const SOURCES: readonly JudgeSource[] = ['server', 'claude', 'omp']
 
-/** What `cases` and `replay` both select: the source, and how many unreadable cases ride along. */
+/** What `cases` and `replay` both select: the source, the directories it is kept to, and the unreadable sample. */
 interface Selection {
   readonly threads: readonly string[]
   readonly source: JudgeSource
   readonly unreadable: number
+  /** Absolute directories a case's `cwd` must be under; empty keeps every case. */
+  readonly under: readonly string[]
 }
 
 export type JudgeQuery =
@@ -55,8 +66,8 @@ export type JudgeQuery =
   | { readonly command: 'score'; readonly replayFile: string; readonly labelsFile: string }
 
 export const USAGE = [
-  'usage: bun run judge [cases] [<thread> …] [--from server|claude|omp] [--unreadable N] [--sample N]',
-  '       bun run judge replay [<thread> …] --send [--from …] [--unreadable N] [--out <file>] [--max-calls N]',
+  'usage: bun run judge [cases] [<thread> …] [--from server|claude|omp] [--under <dir>[,<dir>]] [--unreadable N] [--sample N]',
+  '       bun run judge replay [<thread> …] --send [--from …] [--under …] [--unreadable N] [--out <file>] [--max-calls N]',
   '       bun run judge score <replay.jsonl> --labels <labels.jsonl>',
 ].join('\n')
 
@@ -98,7 +109,20 @@ function splitArguments(
   return { positionals, flags }
 }
 
-/** The source and the unreadable sample both commands take. */
+/** `--under`'s directories, `~` expanded: each must be absolute, or a filter would silently match nothing. */
+function directoriesOf(given: string | undefined): string[] {
+  if (given === undefined) return []
+  return given.split(',').map((directory) => {
+    const expanded = directory
+      .trim()
+      .replace(/^~(?=\/|$)/, homedir())
+      .replace(/\/+$/, '')
+    if (!isAbsolute(expanded)) throw new UsageError(`--under takes absolute directories, not ${directory}`)
+    return expanded
+  })
+}
+
+/** The source, the directories and the unreadable sample both commands take. */
 function selectionOf(positionals: string[], flags: ReadonlyMap<string, string>): Selection {
   const source = flags.get('--from') ?? 'server'
   if (!(SOURCES as readonly string[]).includes(source)) {
@@ -110,13 +134,35 @@ function selectionOf(positionals: string[], flags: ReadonlyMap<string, string>):
     threads: positionals,
     source: source as JudgeSource,
     unreadable: unreadable === undefined ? 200 : wholeNumber('--unreadable', unreadable),
+    under: directoriesOf(flags.get('--under')),
   }
+}
+
+/**
+ * Only the cases that ran under one of `directories` — the user's own projects, say — dropped
+ * BEFORE the sample is drawn, so nothing from elsewhere is sampled, shown or sent.
+ */
+export function casesUnder(
+  threads: readonly EnsoThreadJudgeCases[],
+  directories: readonly string[],
+): EnsoThreadJudgeCases[] {
+  if (directories.length === 0) return [...threads]
+  const inside = (cwd: string): boolean =>
+    directories.some((directory) => cwd === directory || cwd.startsWith(`${directory}/`))
+  return threads.flatMap((thread) => {
+    const cases = thread.cases.filter((judgeCase) => inside(judgeCase.state.cwd))
+    return cases.length === 0 ? [] : [{ ...thread, cases }]
+  })
 }
 
 export function parseArguments(argv: readonly string[], today: Date = new Date()): JudgeQuery {
   const [first, ...rest] = argv
   if (first === 'replay') {
-    const { positionals, flags } = splitArguments(rest, ['--out', '--max-calls', '--from', '--unreadable'], ['--send'])
+    const { positionals, flags } = splitArguments(
+      rest,
+      ['--out', '--max-calls', '--from', '--unreadable', '--under'],
+      ['--send'],
+    )
     if (!flags.has('--send')) {
       throw new UsageError(
         'replay sends every case to TypeSafe — read `bun run judge cases` first, then add --send to say so',
@@ -139,7 +185,12 @@ export function parseArguments(argv: readonly string[], today: Date = new Date()
     }
     return { command: 'score', replayFile, labelsFile }
   }
-  const { positionals, flags } = splitArguments(first === 'cases' ? rest : argv, ['--sample', '--from', '--unreadable'])
+  const { positionals, flags } = splitArguments(first === 'cases' ? rest : argv, [
+    '--sample',
+    '--from',
+    '--unreadable',
+    '--under',
+  ])
   const sample = flags.get('--sample')
   return {
     command: 'cases',
@@ -365,8 +416,13 @@ async function run(query: JudgeQuery, serverUrl: string): Promise<string> {
     return renderScore(records, readJsonLines(query.labelsFile) as CaseLabel[])
   }
   const { threads, note } = await casesOf(query, serverUrl)
-  const selected = sampleCases(threads, query.unreadable)
-  const header = [note, renderSelection(threads, selected)].filter((line) => line !== '').join('\n')
+  const kept = casesUnder(threads, query.under)
+  const selected = sampleCases(kept, query.unreadable)
+  const keptNote =
+    query.under.length === 0
+      ? ''
+      : `under ${query.under.join(', ')}: ${kept.length} of ${threads.length} transcripts kept`
+  const header = [note, keptNote, renderSelection(kept, selected)].filter((line) => line !== '').join('\n')
   if (query.command === 'cases') return `${header}\n${renderCases(selected, query.sample)}`
   const home = ensoHome(process.env)
   const judge = createJevJudge({ apiKey: () => readSecret(home, JEV_KEY_NAME), timeoutMs: 10_000, retries: 2 })

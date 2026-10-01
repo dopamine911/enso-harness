@@ -3,6 +3,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import {
   ENSO_PERMISSION_DENIAL_ENTRY,
+  type EnsoPermissionDenialResolution,
   type EnsoRiskThresholds,
   type EnsoThreadJudgeCases,
   judgeContextsOfEntries,
@@ -15,8 +16,9 @@ import { readJsonLines } from './server-cli.ts'
  * Claude Code's (`~/.claude/projects`) and omp's (`~/.omp/agent/sessions`), read from disk, built
  * into cases by core's own selection and state builder — the live guard's.
  *
- * - **omp** writes pi's own session format, so its branch is read as it is. It records no refusal
- *   Enso can read, so it gives only `unreadable` cases.
+ * - **omp** writes pi's own session format, but records a refusal only as the call's error result
+ *   (its tool policy's bash-pattern block, or the user's No). Each such refusal of a bash call is
+ *   given its `enso-permission-denial`, so omp's refusals make `after-refusal` cases too.
  * - **Claude Code** is mapped onto pi's shape: a `Bash` call is pi's `bash` call, and a call its
  *   permission system or a hook refused is an `enso-permission-denial` — the refusals that make
  *   `after-refusal` cases.
@@ -38,28 +40,38 @@ const CORPUS_ROOTS: Readonly<Record<JudgeCorpus, string>> = {
 const CLAUDE_DENIAL =
   /doesn't want to proceed|was rejected|permission to use .* (?:has been|was) denied|denied by|blocked by (?:a )?hook/i
 
+/**
+ * How omp words a refused call, at the very start of the error result: a result that merely
+ * mentions a denial (a test's output, a grep through this code) is not one.
+ */
+const OMP_POLICY_DENIAL = /^Tool "bash" is blocked by tool policy/
+const OMP_USER_DENIAL = /^Tool call denied by user/
+
 type Raw = Record<string, unknown>
 
 function recordOf(raw: unknown): Raw | undefined {
   return typeof raw === 'object' && raw !== null ? (raw as Raw) : undefined
 }
 
-function textOf(content: unknown): string {
-  return typeof content === 'string' ? content : JSON.stringify(content ?? '')
+/** A result's leading text — the string itself, or its first part's `text` — where a refusal is worded. */
+function leadingTextOf(content: unknown): string {
+  const text = Array.isArray(content) ? recordOf(content[0])?.text : content
+  return typeof text === 'string' ? text : ''
+}
+
+/** The entry a refused bash call is recorded under, as the live guard would read it. */
+function denialOf(toolCallId: string, command: string, resolution: EnsoPermissionDenialResolution): unknown {
+  const data = { toolCallId, requestId: `corpus-${toolCallId}`, surface: 'bash', value: command, resolution }
+  return { type: 'custom', customType: ENSO_PERMISSION_DENIAL_ENTRY, data }
 }
 
 /** A tool result as pi's — preceded, for a Bash call Claude Code refused, by its permission denial. */
 function claudeResultOf(part: Raw & { tool_use_id: string }, command: string | undefined): unknown[] {
   const result = { type: 'message', message: { role: 'toolResult', toolCallId: part.tool_use_id } }
-  if (part.is_error !== true || command === undefined || !CLAUDE_DENIAL.test(textOf(part.content))) return [result]
-  const data = {
-    toolCallId: part.tool_use_id,
-    requestId: `claude-${part.tool_use_id}`,
-    surface: 'bash',
-    value: command,
-    resolution: 'user_denied',
+  if (part.is_error !== true || command === undefined || !CLAUDE_DENIAL.test(leadingTextOf(part.content))) {
+    return [result]
   }
-  return [{ type: 'custom', customType: ENSO_PERMISSION_DENIAL_ENTRY, data }, result]
+  return [denialOf(part.tool_use_id, command, 'user_denied'), result]
 }
 
 /** A `tool_use` as pi's call, its Bash command remembered by id. */
@@ -109,6 +121,39 @@ function claudeEntriesAsPi(entries: readonly unknown[]): unknown[] {
   })
 }
 
+/** Which of omp's refusals an error result is, if any. */
+function ompResolutionOf(message: Raw): EnsoPermissionDenialResolution | undefined {
+  if (message.role !== 'toolResult' || message.isError !== true) return undefined
+  const text = leadingTextOf(message.content).trimStart()
+  if (OMP_POLICY_DENIAL.test(text)) return 'policy_deny'
+  return OMP_USER_DENIAL.test(text) ? 'user_denied' : undefined
+}
+
+/** An assistant message's bash commands, remembered by call id. */
+function rememberBashCalls(message: Raw, commands: Map<string, string>): void {
+  if (message.role !== 'assistant' || !Array.isArray(message.content)) return
+  for (const raw of message.content) {
+    const part = recordOf(raw)
+    if (part?.type !== 'toolCall' || part.name !== 'bash' || typeof part.id !== 'string') continue
+    const command = recordOf(part.arguments)?.command
+    commands.set(part.id, typeof command === 'string' ? command : '')
+  }
+}
+
+/** An omp session's branch as it is, each refused bash call's result preceded by its denial. */
+function ompEntriesWithDenials(entries: readonly unknown[]): unknown[] {
+  const commands = new Map<string, string>()
+  return entries.flatMap((raw) => {
+    const message = recordOf(recordOf(raw)?.message)
+    if (message === undefined) return [raw]
+    rememberBashCalls(message, commands)
+    const toolCallId = typeof message.toolCallId === 'string' ? message.toolCallId : ''
+    const command = commands.get(toolCallId)
+    const resolution = command === undefined ? undefined : ompResolutionOf(message)
+    return command === undefined || resolution === undefined ? [raw] : [denialOf(toolCallId, command, resolution), raw]
+  })
+}
+
 /** Where a transcript ran: Claude Code's per-entry `cwd`, omp's `session` entry. */
 function cwdOf(entries: readonly unknown[]): string | undefined {
   for (const raw of entries) {
@@ -150,7 +195,7 @@ export function corpusThreads(
       skippedNoCwd += 1
       continue
     }
-    const branch = corpus === 'claude' ? claudeEntriesAsPi(raw) : raw
+    const branch = corpus === 'claude' ? claudeEntriesAsPi(raw) : ompEntriesWithDenials(raw)
     const cases = judgeContextsOfEntries(branch, inputs.thresholds).map((context) => ({
       toolCallId: context.toolCallId,
       scope: context.reason,

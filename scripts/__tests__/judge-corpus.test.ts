@@ -6,8 +6,9 @@ import { DEFAULT_GUARD_POLICY, DEFAULT_RISK_THRESHOLDS } from '../../packages/co
 import { corpusThreads } from '../judge-corpus.ts'
 
 /**
- * The transcript corpora as replay cases (#469, #534): Claude Code's refusals become the judge's
- * `after-refusal` cases, omp's own format is read as it is, and the ACME tree is never opened.
+ * The transcript corpora as replay cases (#469, #534): Claude Code's and omp's refusals become the
+ * judge's `after-refusal` cases, omp's own format is otherwise read as it is, and the ACME tree is
+ * never opened.
  */
 
 const root = mkdtempSync(join(tmpdir(), 'enso-judge-corpus-'))
@@ -66,28 +67,41 @@ test('⚠ Claude Code: a refused Bash call makes the next one an after-refusal c
   expect(JSON.stringify(judgeCase?.state)).not.toContain(SECRET)
 })
 
-test('omp: its own pi-format session is read as it is, cwd from its session entry', () => {
+const ompCall = (id: string, command: string): unknown => ({
+  type: 'message',
+  message: { role: 'assistant', content: [{ type: 'toolCall', id, name: 'bash', arguments: { command } }] },
+})
+const ompResult = (id: string, text: string, isError: boolean): unknown => ({
+  type: 'message',
+  message: { role: 'toolResult', toolName: 'bash', toolCallId: id, isError, content: [{ type: 'text', text }] },
+})
+
+test('omp: read as it is, cwd from its session entry; a policy block is a refusal, a mention of one is not', () => {
   const ompRoot = join(root, 'omp')
   mkdirSync(ompRoot)
   writeFileSync(
     join(ompRoot, 'one.jsonl'),
     [
       { type: 'session', id: 's', cwd: '/proj' },
-      {
-        type: 'message',
-        message: {
-          role: 'assistant',
-          content: [{ type: 'toolCall', id: 'o1', name: 'bash', arguments: { command: 'echo aGk= | base64 -d' } }],
-        },
-      },
-      { type: 'message', message: { role: 'toolResult', toolCallId: 'o1' } },
+      ompCall('o1', 'echo aGk= | base64 -d'),
+      ompResult('o1', 'hi', false),
+      // Fails while printing a denial's wording: output, not a refusal.
+      ompCall('o2', 'bun test'),
+      ompResult('o2', '(fail) Tool "bash" is blocked by tool policy\nexit 1', true),
+      ompCall('o3', 'ls'),
+      ompCall('o4', 'git push --force origin main'),
+      ompResult('o4', 'Tool "bash" is blocked by tool policy.\nReason: Blocked by bash pattern: *push*--force*', true),
+      ompCall('o5', 'git push origin +main'),
     ]
       .map((entry) => `${JSON.stringify(entry)}\n`)
       .join(''),
   )
   const read = corpusThreads('omp', { ...inputs, root: ompRoot })
-  expect(read.threads.map((thread) => [thread.threadId, thread.cases.map((judgeCase) => judgeCase.scope)])).toEqual([
-    ['omp:one', ['unreadable']],
+  const cases = read.threads[0]?.cases ?? []
+  expect(cases.map((judgeCase) => [judgeCase.toolCallId, judgeCase.scope])).toEqual([
+    ['o1', 'unreadable'],
+    ['o5', 'after-refusal'],
   ])
-  expect(read.threads[0]?.cases[0]?.state.cwd).toBe('/proj')
+  expect(cases[1]?.state.cwd).toBe('/proj')
+  expect(cases[1]?.state.denied?.command).toBe('git push --force origin main')
 })

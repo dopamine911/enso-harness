@@ -1,8 +1,10 @@
 import { expect, test } from 'bun:test'
+import { homedir } from 'node:os'
 import { ENSO_JUDGE_POLICY, type EnsoThreadJudgeCases } from '../../packages/core/src/index.ts'
 import { jevRequestOf } from '../../packages/core/src/jev-judge.ts'
 import {
   type CaseLabel,
+  casesUnder,
   parseArguments,
   type ReplayRecord,
   renderCases,
@@ -33,6 +35,7 @@ test('⚠ replay without --send is a usage error that says why; the defaults and
     threads: ['t1'],
     source: 'server',
     unreadable: 200,
+    under: [],
     outFile: 'judge-replay-2026-09-30.jsonl',
     maxCalls: 1000,
   })
@@ -41,15 +44,20 @@ test('⚠ replay without --send is a usage error that says why; the defaults and
     threads: ['t1', 't2'],
     source: 'server',
     unreadable: 200,
+    under: [],
     sample: 3,
   })
-  expect(parseArguments(['cases', '--from', 'claude', '--unreadable', '50', '--sample', '1'])).toEqual({
+  expect(
+    parseArguments(['cases', '--from', 'claude', '--under', '~/own/,/srv/x', '--unreadable', '50', '--sample', '1']),
+  ).toEqual({
     command: 'cases',
     threads: [],
     source: 'claude',
     unreadable: 50,
+    under: [`${homedir()}/own`, '/srv/x'],
     sample: 1,
   })
+  expect(() => parseArguments(['cases', '--under', 'own'])).toThrow(/absolute/)
   expect(() => parseArguments(['score', 'replay.jsonl'])).toThrow(UsageError)
   expect(() => parseArguments(['cases', '--send'])).toThrow(UsageError)
   expect(() => parseArguments(['cases', '--from', 'acme'])).toThrow(UsageError)
@@ -85,6 +93,27 @@ test('the sample keeps every after-refusal case and spreads the unreadable ones 
   expect(renderSelection(threads, sampleCases(threads, 3))).toBe(
     'found: 1 after-refusal, 6 unreadable\nselected: 1 after-refusal (all), 3 unreadable (evenly spaced)',
   )
+})
+
+// ⚠ The user approved sending only their own projects' cases: a sibling directory sharing the
+// prefix (`own-client`) is NOT under `own`, and the filter runs before the sample is drawn.
+test('--under keeps a case only when its cwd is the directory or inside it', () => {
+  const at = (toolCallId: string, cwd: string): EnsoThreadJudgeCases['cases'][number] => ({
+    toolCallId,
+    scope: 'unreadable',
+    state: { ...stateOf('x'), cwd },
+  })
+  const threads: EnsoThreadJudgeCases[] = [
+    { threadId: 'a', live: false, cases: [at('a1', '/home/u/own'), at('a2', '/home/u/own-client/x')] },
+    { threadId: 'b', live: false, cases: [at('b1', '/home/u/client')] },
+    { threadId: 'c', live: false, cases: [at('c1', '/home/u/own/deep/er')] },
+  ]
+  const kept = casesUnder(threads, ['/home/u/own'])
+  expect(kept.map((thread) => [thread.threadId, thread.cases.map((judgeCase) => judgeCase.toolCallId)])).toEqual([
+    ['a', ['a1']],
+    ['c', ['c1']],
+  ])
+  expect(casesUnder(threads, [])).toEqual(threads)
 })
 
 test('cases counts per thread and in total, and samples the exact request bodies', () => {
