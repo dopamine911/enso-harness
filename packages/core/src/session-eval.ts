@@ -548,7 +548,7 @@ function walkToolResult(walk: Walk, index: number, entry: EnsoTranscriptToolResu
 
 function walkCustom(walk: Walk, index: number, entry: Extract<EnsoTranscriptEntry, { kind: 'custom' }>): void {
   const stamp = entry.at === undefined ? {} : { at: entry.at }
-  const recordedMode = readRecordedMode(entry)
+  const recordedMode = readRecordedMode(entry.customType, entry.data)
   if (recordedMode !== undefined) {
     if (recordedMode === walk.lastMode) return
     walk.lastMode = recordedMode

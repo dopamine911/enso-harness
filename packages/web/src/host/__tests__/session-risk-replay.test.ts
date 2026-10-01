@@ -3,7 +3,6 @@ import {
   ENSO_GUARD_DENIAL_ENTRY,
   ENSO_OPERATOR_DENIAL_ENTRY,
   ENSO_PERMISSION_DENIAL_ENTRY,
-  sessionRiskOfEntries,
   sessionRiskOfTranscript,
 } from '@enso/core'
 import { transcriptOf } from '../transcript.ts'
@@ -66,8 +65,7 @@ test('⚠ the raw branch and its transcript replay to the same risk, a batch, a 
     custom(ENSO_OPERATOR_DENIAL_ENTRY, { requestId: 'r4', surface: 'bash', value: 'rm -rf build' }),
     result('c4'),
   ]
-  const fromEntries = sessionRiskOfEntries(branch)
-  expect(sessionRiskOfTranscript(transcriptOf(branch))).toEqual(fromEntries)
+  const fromEntries = sessionRiskOfTranscript(transcriptOf(branch))
   expect(fromEntries.signals.map((signal) => `${signal.signal}@${signal.toolCallId}`)).toEqual([
     'alternate-execution-path@c2',
     'denial-retry@c4',

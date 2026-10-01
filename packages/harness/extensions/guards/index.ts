@@ -43,17 +43,20 @@ import {
   type EnsoRiskState,
   type EnsoSessionIncidents,
   type EnsoSessionRiskChange,
+  type EnsoTranscriptEntry,
   ensoLogger,
+  customEntriesOf,
   foldSessionRisk,
   type GuardPolicy,
   INITIAL_SESSION_RISK,
   judgeContextOf,
   NO_SESSION_INCIDENTS,
+  transcriptOf,
   openIncidentOf,
   readEnsoIncidentResolved,
   reportOwedOf,
   riskCallOf,
-  riskEventsOfEntries,
+  riskEventsOfTranscript,
   sessionIncidentsOf,
   sessionIncidentsStep,
   sessionRiskStep,
@@ -603,16 +606,16 @@ function observeSessionSecurity(
       currentCall = undefined
       currentSignal = undefined
       // ⚠ Never a throw: this runs in `session_start` (the print-mode wedge, `verifyPolicyToolNames`).
-      let entries: readonly unknown[]
+      let transcript: readonly EnsoTranscriptEntry[]
       try {
-        entries = branch()
+        transcript = transcriptOf(branch())
       } catch (error) {
         log.error('the branch could not be read; incidents and risk keep their state: {error}', { error })
         return
       }
-      incidents = sessionIncidentsOf(customEntriesOf(entries))
+      incidents = sessionIncidentsOf(customEntriesOf(transcript))
       try {
-        risk = foldSessionRisk(riskEventsOfEntries(entries), policy().thresholds)
+        risk = foldSessionRisk(riskEventsOfTranscript(transcript), policy().thresholds)
       } catch (error) {
         risk = INITIAL_SESSION_RISK
         log.error('the session risk could not be rebuilt from the branch; it starts low: {error}', { error })
@@ -635,15 +638,6 @@ function observeSessionSecurity(
     // Off the fold's own state, right after the call's step: what `judgeContextsOfEntries` replays.
     judgeContext: (toolCallId) => judgeContextOf(risk, toolCallId),
   }
-}
-
-/** A branch's custom entries, `{ customType, data }` in order — what the incident fold reads. */
-function customEntriesOf(entries: readonly unknown[]): { customType: string; data: unknown }[] {
-  return entries.flatMap((entry) => {
-    if (typeof entry !== 'object' || entry === null) return []
-    const { type, customType, data } = entry as { type?: unknown; customType?: unknown; data?: unknown }
-    return type === 'custom' && typeof customType === 'string' ? [{ customType, data }] : []
-  })
 }
 
 /** The judgement's log properties: each answer as a number when judged, why not when unjudged. */

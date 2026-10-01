@@ -1,8 +1,13 @@
 import { posix } from 'node:path'
 import type { SessionEntry } from '@earendil-works/pi-coding-agent'
-import { ACTIVE_AGENT_CUSTOM_TYPE, type EnsoContextEvent, type EnsoFileOperation, readRecordedMode } from '@enso/core'
+import {
+  ACTIVE_AGENT_CUSTOM_TYPE,
+  contentToText,
+  type EnsoContextEvent,
+  type EnsoFileOperation,
+  readRecordedMode,
+} from '@enso/core'
 import { type ContextItem, foldSystem, makeupOf } from './context-elements.ts'
-import { contentToText } from './map-events.ts'
 
 /**
  * What happened to a thread's context, and to its files (#361 phase 4) — dsh-context's Context
@@ -111,7 +116,7 @@ function settingEvents(walk: EventWalk, sessionEntry: SessionEntry): void {
     walk.thinking = level
   } else if (sessionEntry.type === 'custom' && sessionEntry.customType === ACTIVE_AGENT_CUSTOM_TYPE) {
     // An `active_agent` entry naming no Enso mode (another agent, a malformed one) names no mode, and is skipped.
-    const mode = readRecordedMode(sessionEntry)
+    const mode = readRecordedMode(sessionEntry.customType, sessionEntry.data)
     if (mode === undefined) return
     if (!began && walk.mode !== mode) push(walk, sessionEntry, { kind: 'mode', label: `mode ${mode}`, tokens: 0 })
     walk.mode = mode

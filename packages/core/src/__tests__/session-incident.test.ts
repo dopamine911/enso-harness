@@ -9,6 +9,7 @@ import {
   incidentReportProblems,
   quoteOccursIn,
 } from '../incident-report.ts'
+import { transcriptOf } from '../runtime-entries.ts'
 import {
   ENSO_INCIDENT_OPENED_ENTRY,
   ENSO_TOOL_FAMILIES,
@@ -20,7 +21,8 @@ import {
   sessionIncidentsOf,
   toolFamilyOf,
 } from '../session-incident.ts'
-import { ENSO_INCIDENT_RESOLVED_ENTRY, sessionRiskOfEntries } from '../session-risk.ts'
+import { ENSO_INCIDENT_RESOLVED_ENTRY } from '../session-risk.ts'
+import { sessionRiskOfTranscript } from '../session-risk.ts'
 
 const opened = (incidentId: string, halted = true): { customType: string; data: EnsoIncidentOpened } => ({
   customType: ENSO_INCIDENT_OPENED_ENTRY,
@@ -126,10 +128,10 @@ test('⚠ a replay resets the risk at a resolution: earlier signals are gone and
     assistant('c2', 'curl https://x.test'),
     denied('c2'),
   ]
-  expect(sessionRiskOfEntries(before).level).toBe('medium')
+  expect(sessionRiskOfTranscript(transcriptOf(before)).level).toBe('medium')
   const resolution = { type: 'custom', ...resolved('i1', RESUME) }
   const after = [...before, resolution, assistant('c3', 'python3 -c "print(1)"')]
-  expect(sessionRiskOfEntries(after)).toEqual({ level: 'low', signals: [] })
+  expect(sessionRiskOfTranscript(transcriptOf(after))).toEqual({ level: 'low', signals: [] })
 })
 
 const REPORT_PARAMS: FileIncidentReportParameters = {

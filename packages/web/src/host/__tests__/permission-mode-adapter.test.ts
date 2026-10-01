@@ -20,12 +20,12 @@ const EVERY_MODE = ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'auto
 // never a command that is not a mode.
 test('a live session reads its last active_agent entry and offers the modes it registered, in order', () => {
   const entries = [modeEntry('enso-mode-plan', 'a'), modeEntry('enso-mode-auto', 'b')]
-  expect(livePermissionModeState(entries, new Set(['auto', 'model', 'default', 'plan']))).toEqual({
+  expect(livePermissionModeState(transcriptOf(entries), new Set(['auto', 'model', 'default', 'plan']))).toEqual({
     mode: 'auto',
     available: ['default', 'plan', 'auto'],
   })
   // Back to default is an entry naming no agent, not the absence of one.
-  expect(livePermissionModeState([...entries, modeEntry(null, 'c')], new Set()).mode).toBe('default')
+  expect(livePermissionModeState(transcriptOf([...entries, modeEntry(null, 'c')]), new Set()).mode).toBe('default')
 })
 
 // @pins resume/opening-mode

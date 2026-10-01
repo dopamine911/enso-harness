@@ -1,6 +1,7 @@
 import { type Static, Type } from 'typebox'
 import { Compile } from 'typebox/compile'
 import { lastCustomEntryData } from './prompt-library.ts'
+import type { EnsoTranscriptEntry } from './transcript.ts'
 
 /**
  * Projects (#395): the local directories one Enso server runs threads in.
@@ -165,7 +166,7 @@ const ProjectTrustRecord = Compile(Type.Object({ trusted: Type.Literal(true) }, 
  *
  * @group Project trust
  */
-export function threadTrustsProject(branch: readonly unknown[]): boolean {
+export function threadTrustsProject(branch: readonly EnsoTranscriptEntry[]): boolean {
   return ProjectTrustRecord.Check(lastCustomEntryData(branch, ENSO_PROJECT_TRUST_ENTRY))
 }
 

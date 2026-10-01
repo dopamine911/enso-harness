@@ -62,7 +62,7 @@ import {
 import { LOST_TOOL_RESULT_TEXT, NOTHING_TO_CONTINUE } from '../continuation.ts'
 import { storedPermissionModeState } from '../permission-mode-adapter.ts'
 import { readPermissionPolicy, resetPermissionPolicy, writePermissionPolicy } from '../permission-policy-file.ts'
-import { recordedModelOf } from '../transcript.ts'
+import { recordedModelOf, transcriptOf } from '../transcript.ts'
 import { writeStoredSession } from './stored-session.ts'
 
 /**
@@ -983,7 +983,7 @@ async function promptAnswering(hosted: HostedThread, requests: unknown[], answer
 function storedThreadTrust(hosted: HostedThread): boolean {
   const file = hosted.inspect().sessionFile
   if (file === null) throw new Error('the thread has no stored session yet')
-  return threadTrustsProject(SessionManager.open(file).getBranch())
+  return threadTrustsProject(transcriptOf(SessionManager.open(file).getBranch()))
 }
 
 // ⚠ #502: the web host trusted every project, so a repository's own `.pi/` could switch permission

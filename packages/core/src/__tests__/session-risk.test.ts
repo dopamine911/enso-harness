@@ -1,13 +1,14 @@
 import { expect, test } from 'bun:test'
 import { ENSO_GUARD_DENIAL_ENTRY, type EnsoGuardRule } from '../guard.ts'
+import { transcriptOf } from '../runtime-entries.ts'
 import {
   ENSO_PERMISSION_DENIAL_ENTRY,
   type EnsoPermissionDenialResolution,
   foldSessionRisk,
   INITIAL_SESSION_RISK,
-  judgeContextsOfEntries,
-  riskEventsOfEntries,
-  sessionRiskOfEntries,
+  judgeContextsOfTranscript,
+  riskEventsOfTranscript,
+  sessionRiskOfTranscript,
   sessionRiskStep,
 } from '../session-risk.ts'
 
@@ -47,7 +48,7 @@ function oneCallEach(
 }
 
 const signalsOf = (entries: readonly unknown[]): [string, string][] =>
-  sessionRiskOfEntries(entries).signals.map((signal) => [signal.signal, signal.toolCallId])
+  sessionRiskOfTranscript(transcriptOf(entries)).signals.map((signal) => [signal.signal, signal.toolCallId])
 
 test('⚠ deny → retry → obfuscate → an interpreter one-liner: each step is its observed signal, and the level climbs to incident (#464)', () => {
   const entries = oneCallEach(
@@ -64,7 +65,7 @@ test('⚠ deny → retry → obfuscate → an interpreter one-liner: each step i
   ])
   const levels: string[] = []
   let state = INITIAL_SESSION_RISK
-  for (const event of riskEventsOfEntries(entries)) {
+  for (const event of riskEventsOfTranscript(transcriptOf(entries))) {
     state = sessionRiskStep(state, event).state
     levels.push(state.level)
   }
@@ -85,7 +86,7 @@ test('the judge’s scope: an allowed bash call after a refusal, or one the guar
     [bash('c5', 'find records -delete')],
     [['c6', 'read', { path: 'records/a.txt' }]],
   )
-  const contexts = judgeContextsOfEntries(entries)
+  const contexts = judgeContextsOfTranscript(transcriptOf(entries))
   expect(contexts.map((context) => [context.toolCallId, context.reason])).toEqual([
     ['c2', 'unreadable'],
     ['c5', 'after-refusal'],
@@ -191,7 +192,7 @@ test('⚠ a batch is replayed in the order the guard met it: a refusal lands bef
     result('c1'),
     result('c2'),
   ]
-  const described = riskEventsOfEntries(entries).map((event) =>
+  const described = riskEventsOfTranscript(transcriptOf(entries)).map((event) =>
     event.kind === 'incident-resolved' ? event.kind : `${event.kind}:${event.toolCallId}`,
   )
   expect(described).toEqual(['call:c1', 'guard-denial:c1', 'call:c2'])
@@ -239,5 +240,5 @@ test("a person's No recorded before #464 (no call id) is still a refusal, of the
 
 test('the fold is the same whole or step by step, and a replay of nothing is low with no signals', () => {
   expect(foldSessionRisk([])).toEqual(INITIAL_SESSION_RISK)
-  expect(sessionRiskOfEntries([])).toEqual({ level: 'low', signals: [] })
+  expect(sessionRiskOfTranscript(transcriptOf([]))).toEqual({ level: 'low', signals: [] })
 })

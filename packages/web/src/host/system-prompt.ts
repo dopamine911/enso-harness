@@ -1,5 +1,10 @@
 import type { ResourceLoader, SessionEntry } from '@earendil-works/pi-coding-agent'
-import { type EnsoSystemPromptChoice, type EnsoThreadSystemPrompt, recordedSystemPrompt } from '@enso/core'
+import {
+  type EnsoSystemPromptChoice,
+  type EnsoThreadSystemPrompt,
+  type EnsoTranscriptEntry,
+  recordedSystemPrompt,
+} from '@enso/core'
 
 /**
  * A session's system prompt from the library (#443), handed to pi through pi's OWN mechanism.
@@ -66,7 +71,7 @@ function sameSystemPrompt(current: EnsoSystemPromptChoice | undefined, next: Ens
  * The branch's system prompt as a view shows it — the Context tab's label, the fork point's
  * condition: the choice without its text, pi's default, or unreadable.
  */
-export function threadSystemPrompt(branch: readonly unknown[]): EnsoThreadSystemPrompt {
+export function threadSystemPrompt(branch: readonly EnsoTranscriptEntry[]): EnsoThreadSystemPrompt {
   const recorded = recordedSystemPrompt(branch)
   if (recorded.kind === 'none') return null
   if (recorded.kind === 'unreadable') return 'unreadable'

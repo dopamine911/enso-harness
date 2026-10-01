@@ -9,8 +9,8 @@ import type { EnsoTranscriptEntry } from './transcript.ts'
  * tool outcome changes because of it (halting is #466).
  *
  * ⚠ ONE FOLD, LIVE AND REPLAYED. `sessionRiskStep` is the only place a signal is decided. The
- * guards extension feeds it as calls arrive; `riskEventsOfEntries` rebuilds the same events from
- * pi's stored branch, for a resumed session, the session eval and the thread's snapshot. A test
+ * guards extension feeds it as calls arrive; `riskEventsOfTranscript` rebuilds the same events from
+ * the stored branch as our transcript, for a resumed session, the session eval and the thread's snapshot. A test
  * drives the guard over fixtures and replays the branch it wrote: same signals, same level. So a
  * threshold tuned on replays (#468) is the threshold the live guard runs.
  *
@@ -732,15 +732,15 @@ export function judgeContextOf(state: EnsoRiskState, toolCallId: string): EnsoJu
  * Every call a stored branch's live guard would have judged (#469 scope 1), with its context, in
  * order — the replay's cases. The guard judges a `bash` call it let through, right after the fold
  * meets the call and before any refusal of it; so does this, over the events the guard met
- * (`riskEventsOfEntries`), dropping a call the guard itself refused.
+ * (`riskEventsOfTranscript`), dropping a call the guard itself refused.
  *
  * @group Session risk
  */
-export function judgeContextsOfEntries(
-  entries: readonly unknown[],
+export function judgeContextsOfTranscript(
+  transcript: readonly EnsoTranscriptEntry[],
   thresholds: EnsoRiskThresholds = DEFAULT_RISK_THRESHOLDS,
 ): EnsoJudgeContext[] {
-  const events = riskEventsOfEntries(entries)
+  const events = riskEventsOfTranscript(transcript)
   const refusedByGuard = new Set(events.flatMap((event) => (event.kind === 'guard-denial' ? [event.toolCallId] : [])))
   const contexts: EnsoJudgeContext[] = []
   let state = INITIAL_SESSION_RISK
@@ -753,13 +753,9 @@ export function judgeContextsOfEntries(
   return contexts
 }
 
-function recordOf(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : undefined
-}
-
 /**
- * A branch entry as the walk needs it — the one shape both inputs are reduced to, so pi's raw
- * entries (the guard, resuming) and Enso's transcript (the server) cannot be walked differently.
+ * A branch entry as the walk needs it: an assistant message's calls, a tool result, or a custom
+ * entry — the one reduction, over our transcript, for every reader of the fold.
  */
 type BranchStep =
   | { readonly kind: 'calls'; readonly calls: readonly Extract<EnsoRiskEvent, { kind: 'call' }>[] }
@@ -769,29 +765,7 @@ type BranchStep =
 
 const OTHER: BranchStep = { kind: 'other' }
 
-/** A raw pi entry as a step: an assistant message's calls, a tool result, or a custom entry. */
-function stepOfEntry(raw: unknown): BranchStep {
-  const entry = recordOf(raw)
-  if (entry?.type === 'custom' && typeof entry.customType === 'string') {
-    return { kind: 'custom', customType: entry.customType, data: entry.data }
-  }
-  const message = entry?.type === 'message' ? recordOf(entry.message) : undefined
-  if (message === undefined) return OTHER
-  if (message.role === 'toolResult' && typeof message.toolCallId === 'string') {
-    return { kind: 'result', toolCallId: message.toolCallId }
-  }
-  // Only a user or assistant message is a message in the transcript; any other role is `other`.
-  if (message.role !== 'assistant' && message.role !== 'user') return OTHER
-  if (!Array.isArray(message.content)) return { kind: 'calls', calls: [] }
-  const calls = message.content.flatMap((part: unknown) => {
-    const toolCall = recordOf(part)
-    if (toolCall?.type !== 'toolCall' || typeof toolCall.id !== 'string' || typeof toolCall.name !== 'string') return []
-    return [riskCallOf(toolCall.id, toolCall.name, toolCall.arguments)]
-  })
-  return { kind: 'calls', calls }
-}
-
-/** A transcript entry as a step — the same reduction over Enso's own shape (leak L2). */
+/** A transcript entry as a step. */
 function stepOfTranscriptEntry(entry: EnsoTranscriptEntry): BranchStep {
   if (entry.kind === 'custom') return { kind: 'custom', customType: entry.customType, data: entry.data }
   if (entry.kind === 'tool-result') return { kind: 'result', toolCallId: entry.toolCallId }
@@ -872,28 +846,17 @@ function riskEventsOfSteps(steps: readonly BranchStep[]): EnsoRiskEvent[] {
 }
 
 /**
- * The fold's events from pi's stored branch (raw session entries) — what a resumed guard replays.
+ * The fold's events from a branch as our transcript (`transcriptOf`) — what a resumed guard
+ * replays, what the incident replay and the judge replay walk.
  *
  * @group Session risk
  */
-export function riskEventsOfEntries(entries: readonly unknown[]): EnsoRiskEvent[] {
-  return riskEventsOfSteps(entries.map(stepOfEntry))
+export function riskEventsOfTranscript(transcript: readonly EnsoTranscriptEntry[]): EnsoRiskEvent[] {
+  return riskEventsOfSteps(transcript.map(stepOfTranscriptEntry))
 }
 
 function surfaced(state: EnsoRiskState): EnsoSessionRisk {
   return { level: state.level, signals: [...state.signals] }
-}
-
-/**
- * A stored branch's risk, from pi's raw entries: the replayed level and every signal.
- *
- * @group Session risk
- */
-export function sessionRiskOfEntries(
-  entries: readonly unknown[],
-  thresholds: EnsoRiskThresholds = DEFAULT_RISK_THRESHOLDS,
-): EnsoSessionRisk {
-  return surfaced(foldSessionRisk(riskEventsOfEntries(entries), thresholds))
 }
 
 /**
@@ -905,5 +868,5 @@ export function sessionRiskOfTranscript(
   transcript: readonly EnsoTranscriptEntry[],
   thresholds: EnsoRiskThresholds = DEFAULT_RISK_THRESHOLDS,
 ): EnsoSessionRisk {
-  return surfaced(foldSessionRisk(riskEventsOfSteps(transcript.map(stepOfTranscriptEntry)), thresholds))
+  return surfaced(foldSessionRisk(riskEventsOfTranscript(transcript), thresholds))
 }

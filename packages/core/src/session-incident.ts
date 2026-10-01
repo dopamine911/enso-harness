@@ -17,9 +17,10 @@ import {
   type EnsoRiskThresholds,
   EnsoSecuritySignal,
   INITIAL_SESSION_RISK,
-  riskEventsOfEntries,
+  riskEventsOfTranscript,
   sessionRiskStep,
 } from './session-risk.ts'
+import { EnsoTranscriptCustom, type EnsoTranscriptEntry } from './transcript.ts'
 import { WEB_FETCH_TOOL_NAME } from './web-fetch.ts'
 import { WEB_SEARCH_TOOL_NAME } from './web-search.ts'
 
@@ -482,8 +483,8 @@ export type EnsoIncidentReplayRow = Static<typeof EnsoIncidentReplayRow>
 
 /**
  * One thread's incidents for `bun run incidents` (#468), from `GET /api/threads/:id/incidents`:
- * each incident's record with the custom entries it rests on exactly as the session file stores
- * them (`incidentEntriesOf`), and the branch replayed under `thresholds` — the server's own unless
+ * each incident's record with the custom entries it rests on, as our transcript records them — the
+ * stored `data` untouched (`incidentEntriesOf`) — and the branch replayed under `thresholds` — the server's own unless
  * the request named others.
  *
  * @group Session incident
@@ -502,7 +503,10 @@ export const EnsoThreadIncidents = Type.Object(
       { additionalProperties: false },
     ),
     incidents: Type.Array(
-      Type.Object({ record: EnsoIncidentRecord, entries: Type.Array(Type.Unknown()) }, { additionalProperties: false }),
+      Type.Object(
+        { record: EnsoIncidentRecord, entries: Type.Array(EnsoTranscriptCustom) },
+        { additionalProperties: false },
+      ),
     ),
     replay: Type.Array(EnsoIncidentReplayRow),
   },
@@ -530,33 +534,29 @@ const EVIDENCE_ENTRIES: ReadonlySet<string> = new Set([
 ])
 
 /**
- * The custom entries an incident rests on, as stored (#468's export): every entry naming it — the
- * opening, the report or its absence, each resolution — and the signal and refusal records of the
- * calls its signals name. Each is the session file's entry, untouched.
+ * The custom entries an incident rests on (#468's export): every entry naming it — the opening,
+ * the report or its absence, each resolution — and the signal and refusal records of the calls
+ * its signals name. Each is our transcript's record of the stored entry (`transcriptOf`): its
+ * `data` untouched, under our `{ kind: 'custom', id, at, customType }` envelope, not the runtime's.
  *
  * @group Session incident
  */
-export function incidentEntriesOf(entries: readonly unknown[], opened: EnsoIncidentOpened): unknown[] {
+export function incidentEntriesOf(
+  entries: readonly EnsoTranscriptEntry[],
+  opened: EnsoIncidentOpened,
+): EnsoTranscriptCustom[] {
   const calls = new Set(opened.signals.flatMap((signal) => [...signal.after, signal.toolCallId]))
-  return entries.filter((branchEntry) => {
-    const custom = customOf(branchEntry)
-    if (custom === undefined || typeof custom.data !== 'object' || custom.data === null) return false
-    const { incidentId, toolCallId } = custom.data as Record<string, unknown>
+  return entries.filter((entry): entry is EnsoTranscriptCustom => {
+    if (entry.kind !== 'custom' || typeof entry.data !== 'object' || entry.data === null) return false
+    const { incidentId, toolCallId } = entry.data as Record<string, unknown>
     if (incidentId === opened.incidentId) return true
-    return EVIDENCE_ENTRIES.has(custom.customType) && typeof toolCallId === 'string' && calls.has(toolCallId)
+    return EVIDENCE_ENTRIES.has(entry.customType) && typeof toolCallId === 'string' && calls.has(toolCallId)
   })
 }
 
 /** An opening's tipping call: its last signal's call (the step that raised it), or its id when it has none. */
 function triggerOf(signals: readonly EnsoSecuritySignal[], fallback: string): string {
   return signals.at(-1)?.toolCallId ?? fallback
-}
-
-/** The custom entry a raw pi entry is, or undefined. */
-function customOf(entry: unknown): { readonly customType: string; readonly data: unknown } | undefined {
-  if (typeof entry !== 'object' || entry === null) return undefined
-  const { type, customType, data } = entry as Record<string, unknown>
-  return type === 'custom' && typeof customType === 'string' ? { customType, data } : undefined
 }
 
 /** A replayed opening, before it is compared: its tipping call and the event index it opened at. */
@@ -606,7 +606,7 @@ function replayedOpenings(
  * @group Session incident
  */
 export function replayIncidents(
-  entries: readonly unknown[],
+  entries: readonly EnsoTranscriptEntry[],
   thresholds: EnsoRiskThresholds = DEFAULT_RISK_THRESHOLDS,
 ): EnsoIncidentReplayRow[] {
   // The branch splits at each inherited opening, so its event index is known; nothing in a fork
@@ -614,16 +614,15 @@ export function replayIncidents(
   const events: EnsoRiskEvent[] = []
   const openAt = new Set<number>()
   const recorded: EnsoIncidentOpened[] = []
-  let segment: unknown[] = []
-  for (const branchEntry of [...entries, undefined]) {
-    const custom = branchEntry === undefined ? undefined : customOf(branchEntry)
-    const opened = custom === undefined ? undefined : readEnsoIncidentOpened(custom.customType, custom.data)
-    if (branchEntry !== undefined && opened?.inheritedFrom === undefined) {
-      segment.push(branchEntry)
+  let segment: EnsoTranscriptEntry[] = []
+  for (const entry of [...entries, undefined]) {
+    const opened = entry?.kind === 'custom' ? readEnsoIncidentOpened(entry.customType, entry.data) : undefined
+    if (entry !== undefined && opened?.inheritedFrom === undefined) {
+      segment.push(entry)
       if (opened !== undefined) recorded.push(opened)
       continue
     }
-    events.push(...riskEventsOfEntries(segment))
+    events.push(...riskEventsOfTranscript(segment))
     segment = []
     if (opened !== undefined) openAt.add(events.length)
   }

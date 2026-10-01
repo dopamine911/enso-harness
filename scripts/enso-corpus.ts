@@ -13,7 +13,7 @@
  * text that has been through `redactJudgeText`, cut to one line of 110 characters.
  */
 
-import { DEFAULT_RISK_THRESHOLDS, riskEventsOfEntries } from '../packages/core/src/index.ts'
+import { DEFAULT_RISK_THRESHOLDS, riskEventsOfTranscript } from '../packages/core/src/index.ts'
 import { redactJudgeText } from '../packages/core/src/judge.ts'
 import {
   classifyFollow,
@@ -49,7 +49,7 @@ for (const corpus of ['claude', 'omp'] as const) {
     `# ${corpus}: ${read.branches.length} transcripts (${read.skippedAcme} ACME never opened, ${read.skippedNoCwd} without a cwd skipped)`,
   )
   for (const { branch } of read.branches) {
-    for (const event of riskEventsOfEntries(branch)) {
+    for (const event of riskEventsOfTranscript(branch)) {
       if (event.kind === 'call' && event.tool === 'bash' && event.command !== undefined) commands.push(event.command)
     }
     refusals.push(...refusalsIn(branch))

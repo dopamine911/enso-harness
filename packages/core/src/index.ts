@@ -391,11 +391,10 @@ export {
   readEnsoSessionRiskChange,
   readEnsoToolRefusalMetadata,
   riskCallOf,
-  riskEventsOfEntries,
-  sessionRiskOfEntries,
+  riskEventsOfTranscript,
   sessionRiskOfTranscript,
   judgeContextOf,
-  judgeContextsOfEntries,
+  judgeContextsOfTranscript,
   sessionRiskStep,
   toolRefusalOf,
   toolRefuserOf,
@@ -475,6 +474,7 @@ export {
   EnsoTranscriptPart,
   EnsoTranscriptToolResult,
 } from './transcript.ts'
+export { contentToText, customEntriesOf, transcriptEntryOf, transcriptOf } from './runtime-entries.ts'
 export {
   EXTERNAL_WEB_CONTENT_NOTICE,
   WEB_FETCH_MAX_RESPONSE_BYTES,

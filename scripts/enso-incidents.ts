@@ -15,7 +15,8 @@
  * file, as `bun run eval` does: `agent-host.ts` is the one file that opens pi's sessions. The server
  * address defaults to the dev server's; override with ENSO_SERVER_URL.
  *
- * `mechanical.json` is the incident's custom entries exactly as the session file holds them — the
+ * `mechanical.json` is the incident's custom entries as our transcript records them (#557) — each
+ * stored `data` untouched under our `{ kind, id, at, customType }` envelope: the
  * opening, the signal and refusal records of its calls, the report or its absence, each resolution;
  * `agent-report.md` is the agent's report rendered for reading; `resolution.json` the resolutions.
  */
@@ -221,7 +222,7 @@ export function renderAgentReport(record: EnsoIncidentRecord): string {
   ].join('\n')
 }
 
-/** The export's three files, by name: the entries as stored, the report for reading, the resolutions. */
+/** The export's three files, by name: the entries as recorded, the report for reading, the resolutions. */
 export function exportFiles(incident: EnsoThreadIncidents['incidents'][number]): Record<string, string> {
   return {
     'mechanical.json': `${JSON.stringify(incident.entries, null, 2)}\n`,

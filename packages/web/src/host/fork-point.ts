@@ -6,7 +6,7 @@ import {
   recordedPermissionMode,
 } from '@enso/core'
 import { threadSystemPrompt } from './system-prompt.ts'
-import { recordedModelOf } from './transcript.ts'
+import { recordedModelOf, transcriptOf } from './transcript.ts'
 
 /**
  * A thread's fork point (#435), assembled from its branch alone — the same walk for a live
@@ -30,6 +30,7 @@ export function forkPointOf(
 ): EnsoForkPoint {
   const leaf = branch.at(-1) as PiBranchEntry | undefined
   const recorded = recordedModelOf(branch)
+  const transcript = transcriptOf(branch)
   return {
     identity: {
       threadId: session.threadId,
@@ -41,14 +42,14 @@ export function forkPointOf(
       thinkingLevel: recorded?.thinkingLevel ?? null,
       // The branch, not the session's entries: a fork copies the branch, so this is the mode the
       // fork opens in (#496).
-      mode: recordedPermissionMode(branch),
+      mode: recordedPermissionMode(transcript),
       cwd: session.cwd,
       // The NEWEST `enso-run-context`, or `null` when there is none or it does not read (PR #439
       // review): an older one is not the current conditions, so a record from another schema is
       // unknown, never walked past to one that reads.
       runContext:
-        readEnsoRunContext(ENSO_RUN_CONTEXT_ENTRY, lastCustomEntryData(branch, ENSO_RUN_CONTEXT_ENTRY)) ?? null,
-      systemPrompt: threadSystemPrompt(branch),
+        readEnsoRunContext(ENSO_RUN_CONTEXT_ENTRY, lastCustomEntryData(transcript, ENSO_RUN_CONTEXT_ENTRY)) ?? null,
+      systemPrompt: threadSystemPrompt(transcript),
     },
   }
 }

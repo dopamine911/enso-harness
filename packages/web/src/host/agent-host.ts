@@ -33,6 +33,7 @@ import {
   type EnsoLoginInProgress,
   type EnsoOpenDialog,
   type EnsoPermissionCheckRequest,
+  type EnsoPermissionModeName,
   type EnsoPermissionModeState,
   type EnsoPermissionVerdict,
   type EnsoPromptAdmission,
@@ -45,6 +46,8 @@ import {
   type EnsoThreadEvent,
   type EnsoTranscriptEntry,
   ensoLogger,
+  customEntriesOf,
+  transcriptEntryOf,
   type HostFlowOutcome,
   incidentResolutionRefusal,
   incidentResolvedOf,
@@ -789,9 +792,13 @@ function writeUnflushedSession(session: SessionManager): void {
 
 /** A branch's incidents (#466): its custom entries, folded as the guard folds them on replay. */
 function branchIncidents(branch: readonly SessionEntry[]): EnsoSessionIncidents {
-  return sessionIncidentsOf(
-    branch.flatMap((entry) => (entry.type === 'custom' ? [{ customType: entry.customType, data: entry.data }] : [])),
-  )
+  return sessionIncidentsOf(customEntriesOf(transcriptOf(branch)))
+}
+
+/** The mode one appended entry records, if it is an `active_agent` entry naming one. */
+function appendedMode(entry: unknown): EnsoPermissionModeName | undefined {
+  const record = transcriptEntryOf(entry, 0)
+  return record.kind === 'custom' ? readRecordedMode(record.customType, record.data) : undefined
 }
 
 /**
@@ -1090,7 +1097,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     // Start chooses one (`setSystemPrompt` below). An entry that does not read refuses the build —
     // never pi's default in its place, which would rewrite the prompt the thread started with. Read
     // BEFORE the services, as the directory is: a thread refused builds nothing.
-    const recorded = recordedSystemPrompt(sessionManager.getBranch())
+    const recorded = recordedSystemPrompt(transcriptOf(sessionManager.getBranch()))
     if (recorded.kind === 'unreadable') {
       throw new Error(`thread ${threadId}: its ${ENSO_SYSTEM_PROMPT_ENTRY} entry does not read as a system prompt`)
     }
@@ -1111,7 +1118,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     }
     // Trust before anything loads (#502): pi's `trust.json`, the thread's own record, the default —
     // else untrusted, and asked before the first run (`trustGate` below).
-    const projectTrust = hostedProjectTrust(cwd, agentDir, sessionManager.getBranch())
+    const projectTrust = hostedProjectTrust(cwd, agentDir, transcriptOf(sessionManager.getBranch()))
     const services = await createAgentSessionServices({
       cwd,
       agentDir,
@@ -1236,7 +1243,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       const registered = new Set(
         session.extensionRunner.getRegisteredCommands().map((command) => command.invocationName),
       )
-      return livePermissionModeState(sessionManager.getEntries(), registered)
+      return livePermissionModeState(transcriptOf(sessionManager.getEntries()), registered)
     }
 
     /**
@@ -1533,7 +1540,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         // L3 (#162 workstream 4): an `active_agent` entry was appended — a mode was set (#496).
         // Above this seam no surface knows that entry's shape, so the host says what the mode is
         // now, as its own event; the mapper carries it as the `permission-mode` observation.
-        if (wire.type === 'entry_appended' && readRecordedMode(wire.entry) !== undefined) {
+        if (wire.type === 'entry_appended' && appendedMode(wire.entry) !== undefined) {
           emit({ type: 'permission_mode', ...currentPermissionModeState() })
         }
         // The thinking half of the model state — the module header says why the model half
@@ -1867,7 +1874,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       checkPermission(request: EnsoPermissionCheckRequest): EnsoPermissionVerdict | undefined {
         const service = getPermissionsService(sessionManager.getSessionId())
         if (service === undefined) return undefined
-        const mode = recordedPermissionMode(sessionManager.getEntries())
+        const mode = recordedPermissionMode(transcriptOf(sessionManager.getEntries()))
         const result = service.checkPermission(request.surface, request.value, modeAgentName(mode))
         return {
           mode,

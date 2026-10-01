@@ -79,11 +79,13 @@ vendor. Everything above the host runs against fakes.
 A generic runtime swap is the cost those pages state. A move to **Durable** has four more, which they do
 not:
 
-1. **The custom-entry envelope is read in `core`.** The folds `recordedPermissionMode`,
-   `sessionIncidentsOf`, `incidentEntriesOf` and `riskEventsOfEntries` take `readonly unknown[]` and
-   match pi's `{ type: 'custom', customType, data }` shape. L2 closed the transcript side
-   (`core/src/transcript.ts` is ours), but these folds still read the runtime's envelope. A Durable
-   store has `{ kind, data }` entries and documents. The fold *logic* ports; the envelope does not.
+1. **The custom-entry envelope was read in `core`** (closed by #557). The folds
+   `recordedPermissionMode`, `sessionIncidentsOf`, `incidentEntriesOf` and `riskEventsOfEntries` took
+   `readonly unknown[]` and matched pi's `{ type: 'custom', customType, data }` shape. L2 closed the
+   transcript side (`core/src/transcript.ts` is ours), but these folds still read the runtime's
+   envelope. A Durable store has `{ kind, data }` entries and documents. The fold *logic* ports; the
+   envelope does not. Now the folds take `EnsoTranscriptEntry[]` and the envelope is read in
+   `core/src/runtime-entries.ts` alone (rule 4 below says why there).
 2. **All eleven declared extensions load through pi's manifest.** `packages/harness/package.json`
    `pi.extensions` lists them, including two third-party ones (`@gotgenes/pi-permission-system`,
    `pi-multi-account`). Durable installs extensions in a registry, and the permission engine talks over
@@ -105,7 +107,13 @@ Rules for new work. None needs a new abstraction, and none is Durable-shaped; ea
    hook that reruns after a crash, or runs beside its sibling, does.
 4. **Hand folds our record type, not `unknown[]`.** The host decodes the runtime's entries into
    `{ kind, data }` of ours before the folds run, the way it already decodes the transcript. This is the
-   one concrete change the account above calls for; it removes the envelope from `core` (item 1).
+   one concrete change the account above calls for; it removes the envelope from the folds (item 1).
+   **Done in #557.** Every fold takes `EnsoTranscriptEntry[]`. The decoder is ONE module,
+   `core/src/runtime-entries.ts` (`transcriptOf`) — in `core`, not the host, because three zones
+   need it and `core` is the only one all three reach: the host (which adds the vendor-typed
+   refusal and descriptor on top), the extensions on `ctx.sessionManager.getBranch()`, and the
+   corpus scripts over the omp corpus. So the envelope is named in one swappable file in `core`
+   rather than in no file in `core`; a move replaces that file and the folds do not move.
 5. **Key new features to our ids and our records.** #146 as written keys a snapshot to "pi's session
    entry id". Key it to an Enso thread and entry id held in an Enso record, so `/tree` is not the
    mechanism. Same for #147.
