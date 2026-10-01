@@ -139,9 +139,15 @@ async function treeRepository(
 ): Promise<{ objects: string; index: string; objectFormat: string } | undefined> {
   const objects = await runGitIn(environment, ['rev-parse', '--path-format=absolute', '--git-path', 'objects'], tree)
   const index = await runGitIn(environment, ['rev-parse', '--path-format=absolute', '--git-path', 'index'], tree)
+  if (objects.code !== 0 || index.code !== 0) return undefined
+  // `--show-object-format` is git ≥ 2.32; a git without it has no sha256 repositories either, so
+  // the alternates and the seed keep their fast path and the format is sha1.
   const format = await runGitIn(environment, ['rev-parse', '--show-object-format'], tree)
-  if (objects.code !== 0 || index.code !== 0 || format.code !== 0) return undefined
-  return { objects: objects.stdout.trim(), index: index.stdout.trim(), objectFormat: format.stdout.trim() }
+  return {
+    objects: objects.stdout.trim(),
+    index: index.stdout.trim(),
+    objectFormat: format.code === 0 ? format.stdout.trim() : 'sha1',
+  }
 }
 
 /**

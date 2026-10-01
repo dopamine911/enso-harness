@@ -144,16 +144,15 @@ test("⚠ the store takes the checkout's object format — a sha256 checkout sna
   writeFileSync(join(tree, 'a.txt'), 'a\n')
   git(tree, 'add', '--all')
   git(tree, 'commit', '--quiet', '-m', 'a')
-  // The user's default says the other format: the checkout's wins, else alternates could not be read.
+  // The user's default says the other format, through a global config file — `GIT_CONFIG_COUNT`
+  // would be stripped by the runner as a repository-locating variable, and never reach git. The
+  // checkout's format wins, else alternates could not be read.
+  const globalConfig = join(mkdtempSync(join(tmpdir(), 'enso-snap-config-')), 'gitconfig')
+  writeFileSync(globalConfig, '[init]\n\tdefaultObjectFormat = sha1\n')
   const store = await openSnapshotStore({
     directory: join(mkdtempSync(join(tmpdir(), 'enso-snap-store-')), 'store'),
     tree,
-    environment: {
-      ...environment,
-      GIT_CONFIG_COUNT: '1',
-      GIT_CONFIG_KEY_0: 'init.defaultObjectFormat',
-      GIT_CONFIG_VALUE_0: 'sha1',
-    },
+    environment: { ...environment, GIT_CONFIG_GLOBAL: globalConfig },
   })
   if (store === undefined) throw new Error('did not open')
   const first = await taken(store)
