@@ -731,9 +731,9 @@ function shellCommandDenial(
  * load order; the first `{ block: true, reason }` ends the call, and nothing after it can
  * un-block. Our guard is one handler with an ordered `decide` inside it: the fail-closed floor
  * and an incident's suspension (`standingDenial`), the shell denies, the write gates, then every
- * other path-bearing tool as a reader. The bash
- * analyzer is a library under that handler, not a participant of its own, so the count stays at
- * two (#4, #9). Every answer is a log record. A refused call reaches the browser as a result
+ * other path-bearing tool as a reader. The bash analyzer is a library under that handler, not a
+ * participant of its own, so the count stays at two (#4, #9). Every answer is a log record. A
+ * refused call reaches the browser as a result
  * flagged `isError` (the runtime's shape for any failure) and beside it the guard's own custom
  * entry naming the call and the rule, which is what the page draws a refusal from, live and on
  * resume (#387).
