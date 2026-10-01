@@ -46,8 +46,11 @@ let shuttingDown = false
 
 /**
  * Stop both children, waiting for them a bounded time — a child that ignores SIGTERM must not
- * hold the launcher. Runs inside the logging contract (`installLoggingShutdown`): a signal or a
- * crash records itself, ends the children here, flushes, and exits 130/143/1 (#267, #385).
+ * hold the launcher. Two callers: the logging contract (`installLoggingShutdown`, via
+ * `beforeStop`) on a signal or a crash, which records itself, ends the children here, flushes,
+ * and exits 130/143/1 (#267, #385); and `onExit` below when a child dies on its own, which has
+ * no record of its own to write — `devChildExited` is the record — and exits 1 after the flush.
+ * `shuttingDown` is set synchronously first, so whichever path runs second does nothing.
  */
 async function stopChildren(): Promise<void> {
   shuttingDown = true

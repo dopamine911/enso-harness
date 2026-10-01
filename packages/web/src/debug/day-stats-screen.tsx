@@ -229,8 +229,9 @@ function DaySections({ view }: { view: DayView }): React.ReactNode {
           { heading: 'knobs' },
         ]}
         rows={stats.processes.map((process) => ({
-          // One row per LAUNCH (#385): a writer's second start of the day is its own row.
-          key: `${process.process}#${process.pid ?? process.firstAt}`,
+          // One row per LAUNCH (#385): a writer's second start of the day is its own row, and a pid
+          // handed out twice in a day is two launches — the start time tells them apart.
+          key: `${process.process}#${process.pid ?? '-'}#${process.startedAt ?? process.firstAt}`,
           cells: [
             process.process,
             process.pid === undefined ? ABSENT : String(process.pid),

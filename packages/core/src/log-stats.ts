@@ -541,12 +541,16 @@ function foldOwnEnd(writer: ProcessFold, kind: 'stopped' | 'crashed', at: string
 }
 
 /**
- * An end a LATER start reported (#385): the row is the dead pid's, wherever it is in the day;
- * a pid no row carries started before today's file and is counted without a row.
+ * An end a LATER start reported (#385): the row is the dead process's, wherever it is in the
+ * day — matched on its pid AND its start time, the same two facts the marker's liveness check
+ * uses, since a pid is handed out again within a day and the first launch with it is not the
+ * one that died. A pid-and-start no row carries started before today's file and is counted
+ * without a row.
  */
 function foldReportedEnd(fold: Fold, at: string, properties: Properties): void {
   const pid = numberOf(properties.pid)
-  const row = fold.launches.find((launch) => launch.pid !== undefined && launch.pid === pid)
+  const startedAt = stringOf(properties.startedAt)
+  const row = fold.launches.find((launch) => launch.pid === pid && launch.startedAt === startedAt)
   if (row === undefined) {
     fold.uncleanEndsOffFile += 1
     return
