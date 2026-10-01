@@ -280,7 +280,52 @@ const CONFIG_FIELD_METADATA: readonly ConfigFieldMetadata[] = [
     'Omitted from the Tavily request.',
     'webSearchConfig.tavily?.includeDomains',
   ),
+  incidentField('', 'Incidents alert and suspend nothing; the default risk thresholds.', 'security?.incidents'),
+  incidentField(
+    '.incidents',
+    'As above. User-only: a trusted project’s `security` is ignored with a notice.',
+    'security?.incidents',
+  ),
+  incidentField(
+    '.incidents.halt',
+    '`false`: an incident opens as an alert and suspends nothing (#466).',
+    'halt: incidents?.halt ?? false',
+  ),
+  incidentField(
+    '.incidents.windowCalls',
+    '`8` calls back.',
+    'incidents?.windowCalls ?? DEFAULT_RISK_THRESHOLDS.windowCalls',
+  ),
+  incidentField(
+    '.incidents.highAtSignals',
+    '`3` signals for `high`.',
+    'incidents?.highAtSignals ?? DEFAULT_RISK_THRESHOLDS.highAtSignals',
+  ),
+  incidentField(
+    '.incidents.highAtKinds',
+    '`2` distinct kinds for `high`.',
+    'incidents?.highAtKinds ?? DEFAULT_RISK_THRESHOLDS.highAtKinds',
+  ),
+  incidentField(
+    '.incidents.incidentAtSignals',
+    '`5` signals for `incident`.',
+    'incidents?.incidentAtSignals ?? DEFAULT_RISK_THRESHOLDS.incidentAtSignals',
+  ),
 ]
+
+/**
+ * A `security` field (#466): optional, read by `incidentPolicyOf`, which the guard (at each session
+ * start) and the server (for the replayed risk) both call — so the live level and the replay agree.
+ */
+function incidentField(suffix: string, defaultWhenOmitted: string, contains: string): ConfigFieldMetadata {
+  return {
+    field: `security${suffix}`,
+    required: 'no',
+    defaultWhenOmitted,
+    reader: '`packages/core/src/session-incident.ts#incidentPolicyOf`',
+    check: { file: 'packages/core/src/session-incident.ts', contains },
+  }
+}
 
 interface RuntimePathMetadata {
   readonly helper: string
@@ -539,11 +584,13 @@ function configInventory(): { fields: ConfigFieldMetadata[] } {
   const webFetchSource = readFileSync(join(ROOT, 'packages/core/src/web-fetch.ts'), 'utf8')
   const webSearchSource = readFileSync(join(ROOT, 'packages/core/src/web-search.ts'), 'utf8')
   const projectSource = readFileSync(join(ROOT, 'packages/core/src/project.ts'), 'utf8')
+  const incidentSource = readFileSync(join(ROOT, 'packages/core/src/session-incident.ts'), 'utf8')
   const discovered = [
     ...objectFields(configSource, 'EnsoConfig'),
     ...objectFields(webFetchSource, 'WebFetchConfig', 'webFetch.'),
     ...objectFields(webSearchSource, 'WebSearchConfig', 'webSearch.'),
     ...objectFields(projectSource, 'EnsoProjectsConfig', 'projects.'),
+    ...objectFields(incidentSource, 'EnsoSecurityConfig', 'security.'),
   ].sort()
   const metadata = [...CONFIG_FIELD_METADATA].sort((left, right) => compareText(left.field, right.field))
   const classified = metadata.map((row) => row.field)

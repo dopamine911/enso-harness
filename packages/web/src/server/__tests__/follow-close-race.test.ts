@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test'
 import { EventEmitter } from 'node:events'
 import type { ServerResponse } from 'node:http'
 import { tmpdir } from 'node:os'
+import { DEFAULT_RISK_THRESHOLDS } from '@enso/core'
 import type { StoredThreadRead } from '../../host/agent-host.ts'
 import { followThread } from '../follow.ts'
 import { createProjectRegistry } from '../projects.ts'
@@ -65,7 +66,11 @@ test('⚠ a follow whose client left during the stored read leaves no subscripti
   const projects = createProjectRegistry({ launchDirectory: tmpdir(), roots: [] })
   const { response, close } = closableResponse()
 
-  const following = followThread({ threads, host, projects, sseKeepaliveMs: 60_000 }, 'cold-1', response)
+  const following = followThread(
+    { threads, host, projects, riskThresholds: DEFAULT_RISK_THRESHOLDS, sseKeepaliveMs: 60_000 },
+    'cold-1',
+    response,
+  )
   close()
   read.resolve(undefined)
   await following

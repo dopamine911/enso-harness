@@ -15,7 +15,7 @@
  */
 
 import { mkdirSync } from 'node:fs'
-import { parseEnsoConfig } from '@enso/core'
+import { incidentPolicyOf, parseEnsoConfig } from '@enso/core'
 import { startLauncher } from '@enso/core/log-process'
 import {
   ensoAgentDir,
@@ -64,6 +64,8 @@ const { listening } = startEnsoServer({
   cwd,
   projectRoots,
   projectsConfigPath: configPath,
+  // The replayed risk is measured as the guard measures it (#466): the user's thresholds.
+  riskThresholds: incidentPolicyOf(config.config.security).thresholds,
   projectsStatePath: ensoProjectsPath(home),
   promptsDir: ensoPromptsDir(home),
   harnessPackageDir: harnessPackageDir(repoRoot),

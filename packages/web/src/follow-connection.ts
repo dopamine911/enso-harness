@@ -7,6 +7,7 @@ import {
   type EnsoFollowFrame,
   EnsoFollowFrame as EnsoFollowFrameSchema,
   EnsoForkReceipt,
+  type EnsoIncidentResolution,
   type EnsoHostCommandRun,
   ensoLogger,
   type EnsoPromptBody,
@@ -291,6 +292,13 @@ export interface FollowConnection extends SubscribeConnectionAdapter {
    */
   readonly continueRun: () => Promise<ContinueOutcome>
   /**
+   * Resolve the thread's incident (#466): `POST …/incidents/:incidentId/resolve`, the human's
+   * classification and outcome. The resolution arrives on the follow as its `custom-entry`; the
+   * answer only says whether the server took it — and, when not, why, because the card that asked
+   * shows the reason where the person is looking (as `configure` does for its dialog).
+   */
+  readonly resolveIncident: (incidentId: string, resolution: EnsoIncidentResolution) => Promise<IncidentResolveOutcome>
+  /**
    * Release the thread's follow (#272): the socket closes and nothing else opens one on
    * this connection. The page calls it when a thread leaves its live list — a thread whose
    * pane is gone must not keep a stream the browser counts against its six-per-origin
@@ -320,6 +328,15 @@ export type ConfigureOutcome =
   | { readonly outcome: 'refused'; readonly step: EnsoConfigurationRefusal['step']; readonly reason: string }
   | { readonly outcome: 'busy'; readonly reason: string }
   | { readonly outcome: 'failed'; readonly status: number }
+  | { readonly outcome: 'unreachable' }
+/**
+ * What `resolveIncident` reports (#466): recorded (204), or why not — the thread running (409), the
+ * resolution refused (422, `incidentResolutionRefusal`'s reason), or any other answer with its
+ * text — or the request never answered.
+ */
+export type IncidentResolveOutcome =
+  | { readonly outcome: 'told' }
+  | { readonly outcome: 'busy' | 'refused'; readonly reason: string }
   | { readonly outcome: 'unreachable' }
 
 export function createFollowConnection(options: FollowConnectionOptions): FollowConnection {
@@ -881,6 +898,21 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     return outcome
   }
 
+  async function resolveIncident(
+    incidentId: string,
+    resolution: EnsoIncidentResolution,
+  ): Promise<IncidentResolveOutcome> {
+    const response = await post(`incidents/${encodeURIComponent(incidentId)}/resolve`, `resolve ${incidentId}`, {
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(resolution),
+    })
+    if (response === undefined) return { outcome: 'unreachable' }
+    if (response.status === 204) return { outcome: 'told' }
+    const reason = await response.text()
+    log.warn('incident {incidentId} not resolved: {status} {reason}', { incidentId, status: response.status, reason })
+    return { outcome: response.status === 409 ? 'busy' : 'refused', reason: reason || `${response.status}` }
+  }
+
   return {
     subscribe,
     send,
@@ -892,6 +924,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     configure,
     fork,
     continueRun,
+    resolveIncident,
     close,
   }
 }

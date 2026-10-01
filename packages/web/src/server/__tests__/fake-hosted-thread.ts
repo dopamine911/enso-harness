@@ -4,6 +4,8 @@ import type {
   EnsoDialogSpec,
   EnsoForkPoint,
   EnsoHostCommandRun,
+  EnsoIncidentResolution,
+  EnsoIncidentResolved,
   EnsoModelChoice,
   EnsoModelState,
   EnsoObservation,
@@ -19,7 +21,13 @@ import type {
   RuntimeCommand,
   ThreadRuntime,
 } from '@enso/core'
-import { estimateTextTokens } from '@enso/core'
+import {
+  ENSO_INCIDENT_RESOLVED_ENTRY,
+  estimateTextTokens,
+  incidentResolutionRefusal,
+  incidentResolvedOf,
+  sessionIncidentsOf,
+} from '@enso/core'
 import type {
   AgentHost,
   HostedThread,
@@ -115,6 +123,8 @@ export interface FakeThreadRecord {
   continues: number
   /** The system prompt the server fixed (#443); `undefined` is pi's default. */
   systemPrompt: EnsoSystemPromptChoice | undefined
+  /** Every resolution the server recorded (#466), in order; the real host appends each to the branch. */
+  readonly incidentResolutions: EnsoIncidentResolved[]
   aborts: number
   queueClears: number
   disposed: number
@@ -217,6 +227,7 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
     aborts: 0,
     queueClears: 0,
     continues: 0,
+    incidentResolutions: [],
     systemPrompt: undefined,
     disposed: 0,
     queue: { interrupting: [], enqueued: [] },
@@ -324,6 +335,17 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
       const decision = decideSystemPrompt(record.systemPrompt, choice, record.prompts.length > 0)
       if (decision.kind === 'refused') return decision.reason
       record.systemPrompt = choice ?? undefined
+      return undefined
+    },
+    resolveIncident: (incidentId: string, resolution: EnsoIncidentResolution) => {
+      // The real host's rule (#466), over the inspection's branch and what was resolved since.
+      const branch = [
+        ...inspection.entries.flatMap((entry) => (entry.kind === 'custom' ? [entry] : [])),
+        ...record.incidentResolutions.map((resolved) => ({ customType: ENSO_INCIDENT_RESOLVED_ENTRY, data: resolved })),
+      ]
+      const refusal = incidentResolutionRefusal(sessionIncidentsOf(branch), incidentId, resolution)
+      if (refusal !== undefined) return refusal
+      record.incidentResolutions.push(incidentResolvedOf(incidentId, resolution))
       return undefined
     },
     setPermissionMode: (mode: string, outcome: PromptOutcome) => {

@@ -144,6 +144,7 @@ export const ENSO_SECURITY_SIGNALS = [
   'alternate-execution-path',
   'tool-substitution-after-denial',
   'policy-introspection',
+  'protected-record-touch',
 ] as const
 
 /** @group Session risk */
@@ -155,7 +156,7 @@ export type EnsoSecuritySignalKind = (typeof ENSO_SECURITY_SIGNALS)[number]
  *
  * @group Session risk
  */
-const EnsoSecuritySignal = Type.Object(
+export const EnsoSecuritySignal = Type.Object(
   {
     signal: Type.Unsafe<EnsoSecuritySignalKind>(
       Type.Union(ENSO_SECURITY_SIGNALS.map((signal) => Type.Literal(signal))),
@@ -229,6 +230,15 @@ export function readEnsoSessionRiskChange(customType: string, data: unknown): En
 }
 
 /**
+ * The `customType` of a human's resolution of an incident (#466), appended by the host through the
+ * resolve route. Here, not in `session-incident.ts`, because the risk fold reads it — a resolution
+ * is the one thing that resets a session's risk — and that module builds on this one.
+ *
+ * @group Session risk
+ */
+export const ENSO_INCIDENT_RESOLVED_ENTRY = 'enso-incident-resolved' as const
+
+/**
  * What the fold consumes, in the order the guard meets it: a call, then — when one was — its
  * refusal. `tool` is lower-cased; `command` and `path` are the call's own arguments, when it has
  * them.
@@ -245,6 +255,8 @@ export type EnsoRiskEvent =
     }
   | { readonly kind: 'guard-denial'; readonly toolCallId: string; readonly rule: EnsoGuardRule; readonly via?: string }
   | ({ readonly kind: 'permission-denial' } & EnsoPermissionDenial)
+  /** A human resolved the session's incident (#466): the risk starts over — it resets only here. */
+  | { readonly kind: 'incident-resolved' }
 
 /**
  * A call as the fold reads it, from its tool name and its input — the one mapping both the live
@@ -252,7 +264,11 @@ export type EnsoRiskEvent =
  *
  * @group Session risk
  */
-export function riskCallOf(toolCallId: string, toolName: string, input: unknown): EnsoRiskEvent {
+export function riskCallOf(
+  toolCallId: string,
+  toolName: string,
+  input: unknown,
+): Extract<EnsoRiskEvent, { kind: 'call' }> {
   const fields = typeof input === 'object' && input !== null ? (input as Record<string, unknown>) : {}
   return {
     kind: 'call',
@@ -290,12 +306,31 @@ export interface EnsoRiskState {
 /** @group Session risk */
 export const INITIAL_SESSION_RISK: EnsoRiskState = { level: 'low', signals: [], recent: [] }
 
-/** How far back a detector looks, in calls — the session eval's retry window. Uncalibrated. */
-const RISK_WINDOW_CALLS = 8
-/** Signals for `high`, or distinct kinds for `high`, and signals for `incident`. Uncalibrated (#468). */
-const HIGH_AT_SIGNALS = 3
-const HIGH_AT_KINDS = 2
-const INCIDENT_AT_SIGNALS = 5
+/**
+ * The fold's thresholds (#466 made them `config.json` knobs, `security.incidents`): how far back a
+ * detector looks, in calls, and the signal counts for `high` (or distinct kinds) and `incident`.
+ *
+ * @group Session risk
+ */
+export interface EnsoRiskThresholds {
+  readonly windowCalls: number
+  readonly highAtSignals: number
+  readonly highAtKinds: number
+  readonly incidentAtSignals: number
+}
+
+/**
+ * The defaults — named guesses, uncalibrated until #468's replay. The window is the session eval's
+ * retry window.
+ *
+ * @group Session risk
+ */
+export const DEFAULT_RISK_THRESHOLDS: EnsoRiskThresholds = {
+  windowCalls: 8,
+  highAtSignals: 3,
+  highAtKinds: 2,
+  incidentAtSignals: 5,
+}
 
 const SHELL_TOOLS: ReadonlySet<string> = new Set(['bash', 'powershell'])
 const WRITE_TOOLS: ReadonlySet<string> = new Set(['write', 'edit'])
@@ -401,8 +436,23 @@ function escapeRegExp(text: string): string {
 }
 
 /** The signals a refusal raises against the refusals before it in the window. */
-function denialSignals(call: RecentCall, denial: DenialFact, earlier: readonly RecentCall[]): EnsoSecuritySignal[] {
+function denialSignals(
+  call: RecentCall,
+  denial: DenialFact,
+  earlier: readonly RecentCall[],
+  windowCalls: number,
+): EnsoSecuritySignal[] {
   const found: EnsoSecuritySignal[] = []
+  // ⚠ The one signal that needs no earlier refusal (#466): a shell command naming the session or
+  // log directory is itself the observation — the records an incident rests on.
+  if (denial.source === 'guard' && denial.rule === 'protected-records') {
+    withSignal(found, {
+      signal: 'protected-record-touch',
+      toolCallId: call.toolCallId,
+      detail: `${call.tool} named the session or log directory`,
+      after: [],
+    })
+  }
   const keys = new Set(denialKeys(call, denial))
   const repeated = earlier.filter(
     (recent) => recent.denial !== undefined && denialKeys(recent, recent.denial).some((key) => keys.has(key)),
@@ -412,7 +462,7 @@ function denialSignals(call: RecentCall, denial: DenialFact, earlier: readonly R
     withSignal(found, {
       signal: 'denial-retry',
       toolCallId: call.toolCallId,
-      detail: `refused again (${what}) within ${RISK_WINDOW_CALLS} calls`,
+      detail: `refused again (${what}) within ${windowCalls} calls`,
       after: repeated.map((recent) => recent.toolCallId),
     })
   }
@@ -439,20 +489,20 @@ function denialSignals(call: RecentCall, denial: DenialFact, earlier: readonly R
  * The level the signals so far put a session at. It only rises: signals accumulate, and nothing
  * but a resolution (#466) clears them.
  */
-function riskLevelOf(signals: readonly EnsoSecuritySignal[]): EnsoRiskLevel {
+function riskLevelOf(signals: readonly EnsoSecuritySignal[], thresholds: EnsoRiskThresholds): EnsoRiskLevel {
   if (signals.length === 0) return 'low'
   const kinds = new Set(signals.map((signal) => signal.signal))
   if (
-    signals.length >= INCIDENT_AT_SIGNALS ||
+    signals.length >= thresholds.incidentAtSignals ||
     (kinds.has('command-obfuscation') && kinds.has('alternate-execution-path'))
   ) {
     return 'incident'
   }
-  if (signals.length >= HIGH_AT_SIGNALS || kinds.size >= HIGH_AT_KINDS) return 'high'
+  if (signals.length >= thresholds.highAtSignals || kinds.size >= thresholds.highAtKinds) return 'high'
   return 'medium'
 }
 
-function denialFactOf(event: Exclude<EnsoRiskEvent, { kind: 'call' }>): DenialFact {
+function denialFactOf(event: Extract<EnsoRiskEvent, { kind: 'guard-denial' | 'permission-denial' }>): DenialFact {
   if (event.kind === 'guard-denial') {
     return event.via === undefined
       ? { source: 'guard', rule: event.rule }
@@ -463,14 +513,18 @@ function denialFactOf(event: Exclude<EnsoRiskEvent, { kind: 'call' }>): DenialFa
 
 /**
  * One step of the fold: the state after `event`, and the signals it raised. Pure; the live guard
- * and every replay call only this.
+ * and every replay call only this, with the same thresholds (`config.json`, `security.incidents`).
  *
  * @group Session risk
  */
 export function sessionRiskStep(
   state: EnsoRiskState,
   event: EnsoRiskEvent,
+  thresholds: EnsoRiskThresholds = DEFAULT_RISK_THRESHOLDS,
 ): { readonly state: EnsoRiskState; readonly raised: readonly EnsoSecuritySignal[] } {
+  // A resolution is a clean slate (#466): the level, the signals AND the window, so a refusal from
+  // before it cannot pair with a call after it.
+  if (event.kind === 'incident-resolved') return { state: INITIAL_SESSION_RISK, raised: [] }
   if (event.kind === 'call') {
     const call: RecentCall = {
       toolCallId: event.toolCallId,
@@ -479,7 +533,7 @@ export function sessionRiskStep(
       ...(event.path === undefined ? {} : { path: event.path }),
     }
     const raised = callSignals(call, state.recent)
-    return settle(state, [...state.recent, call].slice(-RISK_WINDOW_CALLS), raised)
+    return settle(state, [...state.recent, call].slice(-thresholds.windowCalls), raised, thresholds)
   }
   // A refusal belongs to its call; one without an id (a record written before #464) to the last.
   const position =
@@ -489,18 +543,19 @@ export function sessionRiskStep(
   const call = state.recent[position]
   if (call === undefined || call.denial !== undefined) return { state, raised: [] }
   const denial = denialFactOf(event)
-  const raised = denialSignals(call, denial, state.recent.slice(0, position))
+  const raised = denialSignals(call, denial, state.recent.slice(0, position), thresholds.windowCalls)
   const recent = state.recent.map((recentCall, index) => (index === position ? { ...recentCall, denial } : recentCall))
-  return settle(state, recent, raised)
+  return settle(state, recent, raised, thresholds)
 }
 
 function settle(
   state: EnsoRiskState,
   recent: readonly RecentCall[],
   raised: readonly EnsoSecuritySignal[],
+  thresholds: EnsoRiskThresholds,
 ): { readonly state: EnsoRiskState; readonly raised: readonly EnsoSecuritySignal[] } {
   const signals = raised.length === 0 ? state.signals : [...state.signals, ...raised]
-  return { state: { level: riskLevelOf(signals), signals, recent }, raised }
+  return { state: { level: riskLevelOf(signals, thresholds), signals, recent }, raised }
 }
 
 /**
@@ -508,8 +563,11 @@ function settle(
  *
  * @group Session risk
  */
-export function foldSessionRisk(events: readonly EnsoRiskEvent[]): EnsoRiskState {
-  return events.reduce((state, event) => sessionRiskStep(state, event).state, INITIAL_SESSION_RISK)
+export function foldSessionRisk(
+  events: readonly EnsoRiskEvent[],
+  thresholds: EnsoRiskThresholds = DEFAULT_RISK_THRESHOLDS,
+): EnsoRiskState {
+  return events.reduce((state, event) => sessionRiskStep(state, event, thresholds).state, INITIAL_SESSION_RISK)
 }
 
 function recordOf(value: unknown): Record<string, unknown> | undefined {
@@ -521,7 +579,7 @@ function recordOf(value: unknown): Record<string, unknown> | undefined {
  * entries (the guard, resuming) and Enso's transcript (the server) cannot be walked differently.
  */
 type BranchStep =
-  | { readonly kind: 'calls'; readonly calls: readonly EnsoRiskEvent[] }
+  | { readonly kind: 'calls'; readonly calls: readonly Extract<EnsoRiskEvent, { kind: 'call' }>[] }
   | { readonly kind: 'result'; readonly toolCallId: string }
   | { readonly kind: 'custom'; readonly customType: string; readonly data: unknown }
   | { readonly kind: 'other' }
@@ -562,7 +620,10 @@ function stepOfTranscriptEntry(entry: EnsoTranscriptEntry): BranchStep {
 }
 
 /** The refusal a custom entry records, as an event; undefined for every other entry. */
-function denialEventOf(customType: string, data: unknown): Exclude<EnsoRiskEvent, { kind: 'call' }> | undefined {
+function denialEventOf(
+  customType: string,
+  data: unknown,
+): Extract<EnsoRiskEvent, { kind: 'guard-denial' | 'permission-denial' }> | undefined {
   const guard = readEnsoGuardDenial(customType, data)
   if (guard !== undefined) {
     return guard.via === undefined
@@ -581,7 +642,7 @@ function denialEventOf(customType: string, data: unknown): Exclude<EnsoRiskEvent
 function legacyOperatorDenialOf(
   customType: string,
   data: unknown,
-): Exclude<EnsoRiskEvent, { kind: 'call' }> | undefined {
+): Extract<EnsoRiskEvent, { kind: 'permission-denial' }> | undefined {
   const recorded = readRecordedOperatorDenial(customType, data)
   if (recorded?.kind !== 'engine') return undefined
   const { requestId, surface, value } = recorded
@@ -598,7 +659,7 @@ function legacyOperatorDenialOf(
  */
 function riskEventsOfSteps(steps: readonly BranchStep[]): EnsoRiskEvent[] {
   const events: EnsoRiskEvent[] = []
-  let pending: readonly EnsoRiskEvent[] = []
+  let pending: readonly Extract<EnsoRiskEvent, { kind: 'call' }>[] = []
   const releaseThrough = (toolCallId: string | undefined): void => {
     const position =
       toolCallId === undefined ? pending.length - 1 : pending.findIndex((call) => call.toolCallId === toolCallId)
@@ -612,6 +673,11 @@ function riskEventsOfSteps(steps: readonly BranchStep[]): EnsoRiskEvent[] {
       releaseThrough(undefined)
       pending = step.calls
     } else if (step.kind === 'custom') {
+      if (step.customType === ENSO_INCIDENT_RESOLVED_ENTRY) {
+        releaseThrough(undefined)
+        events.push({ kind: 'incident-resolved' })
+        continue
+      }
       const denial = denialEventOf(step.customType, step.data)
       if (denial === undefined) continue
       releaseThrough(denial.toolCallId)
@@ -640,8 +706,11 @@ function surfaced(state: EnsoRiskState): EnsoSessionRisk {
  *
  * @group Session risk
  */
-export function sessionRiskOfEntries(entries: readonly unknown[]): EnsoSessionRisk {
-  return surfaced(foldSessionRisk(riskEventsOfEntries(entries)))
+export function sessionRiskOfEntries(
+  entries: readonly unknown[],
+  thresholds: EnsoRiskThresholds = DEFAULT_RISK_THRESHOLDS,
+): EnsoSessionRisk {
+  return surfaced(foldSessionRisk(riskEventsOfEntries(entries), thresholds))
 }
 
 /**
@@ -649,6 +718,9 @@ export function sessionRiskOfEntries(entries: readonly unknown[]): EnsoSessionRi
  *
  * @group Session risk
  */
-export function sessionRiskOfTranscript(transcript: readonly EnsoTranscriptEntry[]): EnsoSessionRisk {
-  return surfaced(foldSessionRisk(riskEventsOfSteps(transcript.map(stepOfTranscriptEntry))))
+export function sessionRiskOfTranscript(
+  transcript: readonly EnsoTranscriptEntry[],
+  thresholds: EnsoRiskThresholds = DEFAULT_RISK_THRESHOLDS,
+): EnsoSessionRisk {
+  return surfaced(foldSessionRisk(riskEventsOfSteps(transcript.map(stepOfTranscriptEntry)), thresholds))
 }

@@ -1,6 +1,7 @@
 import { type Static, Type } from 'typebox'
 import { Compile } from 'typebox/compile'
 import { EnsoProjectsConfig } from './project.ts'
+import { EnsoSecurityConfig } from './session-incident.ts'
 import { WebFetchConfig } from './web-fetch.ts'
 import { WebSearchConfig } from './web-search.ts'
 
@@ -59,6 +60,7 @@ export const EnsoConfig = Type.Object(
     webFetch: Type.Optional(WebFetchConfig),
     webSearch: Type.Optional(WebSearchConfig),
     projects: Type.Optional(EnsoProjectsConfig),
+    security: Type.Optional(EnsoSecurityConfig),
   },
   { additionalProperties: false },
 )

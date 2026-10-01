@@ -5,9 +5,12 @@ import {
   type EnsoOpenDialog,
   type EnsoPermissionModeState,
   type EnsoRecordedModel,
+  type EnsoRiskThresholds,
+  type EnsoSessionIncidents,
   type EnsoSessionRiskChange,
   type EnsoSessionUsage,
   type EnsoTranscriptEntry,
+  sessionIncidentsOf,
   sessionRiskOfTranscript,
 } from '@enso/core'
 import type { UIMessage } from '@tanstack/ai-client'
@@ -54,6 +57,11 @@ export interface ThreadReadDeps {
   readonly threads: ThreadRegistry
   readonly host: AgentHost
   readonly projects: ProjectRegistry
+  /**
+   * The risk fold's thresholds from the user's config (#466, `security.incidents`) — the ones the
+   * live guard measures with, so the replayed level is the level the guard reached.
+   */
+  readonly riskThresholds: EnsoRiskThresholds
 }
 
 /** One thread as of this read: what a pane mounts with, and what the follow's snapshot says. */
@@ -80,6 +88,11 @@ export interface ThreadMount {
    * same answer live or cold, since both read the same branch.
    */
   readonly sessionRisk: EnsoSessionRiskChange
+  /**
+   * The session's incidents (#466): the branch's opening and resolution records, folded as the
+   * guard folds them — live or cold, the same records.
+   */
+  readonly incidents: EnsoSessionIncidents
   /**
    * The live session's model and thinking level (#338 slice 2); `null` when not live — nothing is
    * built to say what pi would run, or which levels it would offer (#86).
@@ -137,12 +150,13 @@ export async function readThreadMount(deps: ThreadReadDeps, threadId: string): P
   const transcript = inspection === undefined ? (stored?.transcript ?? []) : inspection.entries
   // A thread that went live during the read is served, wherever its file is.
   const storedOutside = nowLive === undefined ? read.storedOutside : undefined
-  const risk = sessionRiskOfTranscript(transcript)
+  const risk = sessionRiskOfTranscript(transcript, deps.riskThresholds)
   return {
     present: nowLive !== undefined || stored !== undefined,
     storedOutside,
     messages: transcriptToMessages(transcript),
     sessionRisk: { level: risk.level, signals: risk.signals.length },
+    incidents: sessionIncidentsOf(transcript.flatMap((entry) => (entry.kind === 'custom' ? [entry] : []))),
     ...(nowLive === undefined ? coldReading(host, transcript, stored) : liveReading(nowLive, transcript)),
     ...placeOf(projects, threadId, inspection?.cwd ?? stored?.cwd, storedOutside),
   }

@@ -130,6 +130,19 @@ export const ThreadRuntime = Type.Object({
     Type.Function([Type.Unknown()], Type.Unknown()),
   ),
   /**
+   * Record a human's resolution of the thread's incident (#466): refused — the reason returned —
+   * when `incidentResolutionRefusal` refuses it against the live branch; else its
+   * `enso-incident-resolved` record is appended through pi, so it reaches the file and every
+   * follower as a custom entry, and it is emitted on `ENSO_INCIDENT_RESOLVED_CHANNEL` so the live
+   * guard lifts the suspension at once. `undefined` when recorded. Synchronous.
+   *
+   * ⚠ The only writer of a resolution: the guard never lifts a suspension on its own, and no tool
+   * reaches this.
+   */
+  resolveIncident: Type.Unsafe<(incidentId: string, resolution: EnsoIncidentResolution) => string | undefined>(
+    Type.Function([Type.Unknown(), Type.Unknown()], Type.Unknown()),
+  ),
+  /**
    * Receive every observation of this thread (L2, #162 workstream 4): the runtime's events
    * mapped to `EnsoObservation` BELOW this seam, plus what the host itself observes — a
    * dialog it opened, an extension's error, a mode its extension persisted. Nothing of the
@@ -304,8 +317,9 @@ becomes an open dialog; `answerDialog` resolves it, the permission engine's prom
 **Consumed by the server only.** `packages/web/src/server/thread-registry.ts` holds one per live
 thread (`ThreadEntry.hosted.runtime`), subscribes it to the feed, and hands a `ThreadLease.runtime` to
 the run that acquired the thread. `server/follow.ts` calls `prompt`, `continueRun` (#436),
-`listCommands`, `answerDialog`, `openDialogs`, `permissionModeState` from the unary routes; the abort
-route goes through the registry, whose `abort` is the one caller of `clearQueue` and `abort`.
+`resolveIncident` (#466), `listCommands`, `answerDialog`, `openDialogs`, `permissionModeState` from the
+unary routes; the abort route goes through the registry, whose `abort` is the one caller of `clearQueue`
+and `abort`.
 `server/index.ts` reads `permissionModeState` for the thread routes. The browser never sees it: what it
 gets is observations on the follow.
 

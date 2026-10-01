@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import type { EnsoSessionUsage } from '@enso/core'
+import type { EnsoIncidentOpened, EnsoSessionIncidents, EnsoSessionUsage } from '@enso/core'
 import type { UIMessage } from '@tanstack/ai-client'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { countThread, describeActivity, ThreadStatusView } from '../thread-status.tsx'
@@ -174,6 +174,7 @@ const render = (props: Partial<Parameters<typeof ThreadStatusView>[0]>): string 
       refusal={props.refusal}
       refusalSource={props.refusalSource}
       risk={props.risk}
+      incidents={props.incidents}
     />,
   )
 
@@ -207,6 +208,66 @@ test('the risk is said only above low, with its signal count, and never as a ver
   expect(medium).toContain('risk medium · 1 signal')
   expect(medium).toContain('not a verdict')
   expect(render({ risk: { level: 'incident', signals: 5 } })).toContain('risk incident · 5 signals')
+})
+
+// #466: an incident is said in three states — halted (a human must act), open with halting off (an
+// alert), and ended — and a resolved one that resumed says nothing, even with restrictions kept.
+const HALTED_OPENING: EnsoIncidentOpened = {
+  incidentId: 'inc-1',
+  signals: [],
+  halted: true,
+  suspended: ['execute', 'network', 'write'],
+}
+
+test('an open halted incident requires intervention in the refusal colour; halting off only says it is open; an ended thread says so', () => {
+  const halted: EnsoSessionIncidents = {
+    incidents: [{ opened: HALTED_OPENING, resolutions: [] }],
+    suspended: HALTED_OPENING.suspended,
+    ended: false,
+  }
+  expect(render({ incidents: halted })).toMatch(
+    /<span class="[^"]*text-refuse[^"]*"[^>]*>intervention required<\/span>/,
+  )
+
+  const alertOnly: EnsoSessionIncidents = {
+    incidents: [{ opened: { ...HALTED_OPENING, halted: false, suspended: [] }, resolutions: [] }],
+    suspended: [],
+    ended: false,
+  }
+  const open = render({ incidents: alertOnly })
+  expect(open).toContain('incident open')
+  expect(open).not.toContain('intervention required')
+
+  const endedResolution = {
+    incidentId: 'inc-1',
+    classification: 'confirmed-bypass',
+    outcome: 'end-thread',
+    suspended: HALTED_OPENING.suspended,
+  } as const
+  const ended = render({
+    incidents: {
+      incidents: [{ opened: HALTED_OPENING, resolutions: [endedResolution] }],
+      suspended: HALTED_OPENING.suspended,
+      ended: true,
+    },
+  })
+  expect(ended).toContain('thread ended by incident resolution')
+  expect(ended).not.toContain('intervention required')
+
+  const resumed = render({
+    incidents: {
+      incidents: [
+        {
+          opened: HALTED_OPENING,
+          resolutions: [{ ...endedResolution, outcome: 'resume-with-restrictions', suspended: ['network'] }],
+        },
+      ],
+      suspended: ['network'],
+      ended: false,
+    },
+  })
+  expect(resumed).not.toContain('incident')
+  expect(resumed).not.toContain('intervention')
 })
 
 test('disconnected renders as its own word, not pulsing, with the recovery in the title', () => {

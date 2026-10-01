@@ -43,8 +43,9 @@ export {
   type SessionEnsoConfig,
   sessionConfigEnvironment,
   sessionEnsoConfig,
+  userIncidentPolicy,
 } from './session-config.ts'
-export { findSecretPathWord } from './shell-secret-paths.ts'
+export { findDirectoryWord, findSecretPathWord } from './shell-secret-paths.ts'
 export { canonicalToolName } from './tool-identity.ts'
 export { isFetchableContentType, isHostAllowed, isPublicIpAddress, parseWebFetchUrl } from './web-fetch-policy.ts'
 export { resolveModelAuth } from './web-search/auth.ts'

@@ -1,4 +1,4 @@
-import { looksLikeSecret, resolveAgainstCwd, textLooksLikeSecretPath } from './paths.ts'
+import { looksLikeSecret, realpathOfNearestExisting, resolveAgainstCwd, textLooksLikeSecretPath } from './paths.ts'
 import { extractFlatShellCommandSegments, literalShellWord, shellWordsOf } from './shell-segments.ts'
 
 /**
@@ -115,19 +115,30 @@ function textCandidateOf(candidate: string): string {
 }
 
 /**
+ * What a walk asks of each path candidate: of a resolved literal path, and of a word's raw text
+ * when its value is not knowable. The credential question is the reader gate's (`looksLikeSecret`);
+ * the records question (#466) asks only whether the path is inside a directory — never a basename,
+ * so `cat .env` is not a record.
+ */
+interface PathQuestion {
+  readonly resolved: (absolutePath: string) => boolean
+  readonly text: (text: string) => boolean
+}
+
+/**
  * Judge ONE word. A word whose literal value is knowable gets the reader gate's exact
  * question; a word whose value is not gets a scan of its own text, which is where
  * `"$HOME/.enso/secrets.env"` and `.enso/$KEY` are caught.
  */
-function wordFinding(word: string, fragments: readonly string[], cwd: string): SecretPathMatch | undefined {
+function wordFinding(word: string, question: PathQuestion, cwd: string): SecretPathMatch | undefined {
   for (const candidate of pathCandidatesOf(word)) {
     const literal = literalShellWord(candidate)
     if (literal.kind !== 'literal') {
-      if (textLooksLikeSecretPath(textCandidateOf(candidate), fragments)) return { matched: word, via: 'text' }
+      if (question.text(textCandidateOf(candidate))) return { matched: word, via: 'text' }
       continue
     }
     if (literal.value.length === 0) continue
-    if (looksLikeSecret(resolveAgainstCwd(literal.value, cwd), fragments)) return { matched: word, via: 'resolved' }
+    if (question.resolved(resolveAgainstCwd(literal.value, cwd))) return { matched: word, via: 'resolved' }
   }
   return undefined
 }
@@ -137,10 +148,35 @@ function wordFinding(word: string, fragments: readonly string[], cwd: string): S
  * PowerShell always takes this (the segmenter speaks POSIX, not PS), and so does a POSIX
  * command the segmenter declined — the same escalation the other two shell denies make.
  */
-function coarseFinding(command: string, fragments: readonly string[]): SecretPathMatch | undefined {
+function coarseFinding(command: string, question: PathQuestion): SecretPathMatch | undefined {
   for (const token of command.split(COARSE_WORD_BOUNDARY)) {
     for (const candidate of pathCandidatesOf(token)) {
-      if (textLooksLikeSecretPath(textCandidateOf(candidate), fragments)) return { matched: token, via: 'text' }
+      if (question.text(textCandidateOf(candidate))) return { matched: token, via: 'text' }
+    }
+  }
+  return undefined
+}
+
+/** The first word of a shell command the question matches, walking segments then words. */
+function findPathWord(
+  command: string,
+  question: PathQuestion,
+  cwd: string,
+  options: { coarse?: boolean },
+): SecretPathMatch | undefined {
+  if (options.coarse === true) return coarseFinding(command, question)
+  const segments = extractFlatShellCommandSegments(command)
+  if (segments.length === 0) return coarseFinding(command, question)
+  for (const segment of segments) {
+    const words = shellWordsOf(segment.text)
+    if (words === null) {
+      const finding = coarseFinding(segment.text, question)
+      if (finding !== undefined) return finding
+      continue
+    }
+    for (const word of words) {
+      const finding = wordFinding(word, question, cwd)
+      if (finding !== undefined) return finding
     }
   }
   return undefined
@@ -158,20 +194,38 @@ export function findSecretPathWord(
   cwd: string,
   options: { coarse?: boolean } = {},
 ): SecretPathMatch | undefined {
-  if (options.coarse === true) return coarseFinding(command, fragments)
-  const segments = extractFlatShellCommandSegments(command)
-  if (segments.length === 0) return coarseFinding(command, fragments)
-  for (const segment of segments) {
-    const words = shellWordsOf(segment.text)
-    if (words === null) {
-      const finding = coarseFinding(segment.text, fragments)
-      if (finding !== undefined) return finding
-      continue
-    }
-    for (const word of words) {
-      const finding = wordFinding(word, fragments, cwd)
-      if (finding !== undefined) return finding
-    }
+  const question: PathQuestion = {
+    resolved: (absolutePath) => looksLikeSecret(absolutePath, fragments),
+    text: (text) => textLooksLikeSecretPath(text, fragments),
   }
-  return undefined
+  return findPathWord(command, question, cwd, options)
+}
+
+/**
+ * Find the first word of a shell command naming a path inside one of `directories` (absolute), or
+ * undefined — the records deny's question (#466): the session and log directories an incident
+ * rests on. A literal word is judged as resolved against the cwd AND through the realpath of its
+ * nearest existing ancestor, so a symlink into the directory is caught (either is enough: this is
+ * a deny, not a confinement). A word whose value is not knowable is judged by its text, which
+ * sees an absolute spelling and nothing assembled at runtime (`$ENSO_HOME/logs` passes — the
+ * module header's non-coverage).
+ *
+ * @group Guard predicates
+ */
+export function findDirectoryWord(
+  command: string,
+  directories: readonly string[],
+  cwd: string,
+  options: { coarse?: boolean } = {},
+): SecretPathMatch | undefined {
+  const prefixes = directories.map((directory) => `${directory.replace(/\/+$/, '').toLowerCase()}/`)
+  const inside = (path: string): boolean => {
+    const lowered = `${path.toLowerCase()}/`
+    return prefixes.some((prefix) => lowered.startsWith(prefix))
+  }
+  const question: PathQuestion = {
+    resolved: (absolutePath) => inside(absolutePath) || inside(realpathOfNearestExisting(absolutePath)),
+    text: inside,
+  }
+  return findPathWord(command, question, cwd, options)
 }

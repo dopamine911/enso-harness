@@ -12,6 +12,7 @@ import type {
   EnsoThreadStats,
   RuntimeCommand,
 } from '@enso/core'
+import { NO_SESSION_INCIDENTS } from '@enso/core'
 
 /**
  * A scripted server behind `fetch` (#112, #118): one follow body the test writes SSE frames
@@ -268,6 +269,7 @@ export const SNAPSHOT_IDLE: EnsoFollowSnapshot = {
   generation: 0,
   permissionMode: { mode: 'default', available: ['default', 'plan'] },
   sessionRisk: { level: 'low', signals: 0 },
+  incidents: NO_SESSION_INCIDENTS,
   model: null,
   cwd: '/work/project',
   usage: { cost: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, context: null },

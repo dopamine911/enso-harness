@@ -96,6 +96,13 @@ export interface FollowConnection extends SubscribeConnectionAdapter {
    */
   readonly continueRun: () => Promise<ContinueOutcome>
   /**
+   * Resolve the thread's incident (#466): `POST …/incidents/:incidentId/resolve`, the human's
+   * classification and outcome. The resolution arrives on the follow as its `custom-entry`; the
+   * answer only says whether the server took it — and, when not, why, because the card that asked
+   * shows the reason where the person is looking (as `configure` does for its dialog).
+   */
+  readonly resolveIncident: (incidentId: string, resolution: EnsoIncidentResolution) => Promise<IncidentResolveOutcome>
+  /**
    * Release the thread's follow (#272): the socket closes and nothing else opens one on
    * this connection. The page calls it when a thread leaves its live list — a thread whose
    * pane is gone must not keep a stream the browser counts against its six-per-origin
@@ -255,6 +262,13 @@ export interface ThreadStores {
    * guard's `enso-session-risk` entry. Observed evidence, not a verdict.
    */
   readonly sessionRisk: WritableStore<EnsoSessionRiskChange>
+  /**
+   * The session's incidents (#466): every one opened, each with its resolutions, the tool families
+   * suspended now, and whether a resolution ended the thread. Seeded from the history and the
+   * follow's snapshot (the server's fold of the branch), folded live with the same
+   * `sessionIncidentsStep` over the guard's opening and the host's resolution entries.
+   */
+  readonly incidents: WritableStore<EnsoSessionIncidents>
   /**
    * Finished tool results' #18 descriptors, by tool-call id, as they arrive LIVE (#411): TanStack
    * drops the one the AG-UI result carries, so the follow connection hands it over here. A stored

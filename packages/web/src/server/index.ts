@@ -3,6 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { join } from 'node:path'
 import {
   base64DecodedBytes,
+  DEFAULT_RISK_THRESHOLDS,
   ENSO_IMAGE_MAX_BYTES,
   ENSO_LOG_EVENTS,
   ENSO_PROJECT_HEADER,
@@ -14,6 +15,7 @@ import {
   EnsoPermissionPolicyWrite,
   EnsoProjectRegistration,
   type EnsoProjectsConfig,
+  type EnsoRiskThresholds,
   type EnsoStoredThread,
   type EnsoSystemPromptChoice,
   type EnsoThreadCommands,
@@ -46,8 +48,10 @@ import {
   readDialogBody,
   readForkBody,
   readHostCommandBody,
+  readIncidentResolutionBody,
   readModeChangeBody,
   readPromptBody,
+  resolveThreadIncident,
   runHostCommand,
 } from './follow.ts'
 import { MAX_LOG_BODY_BYTES, receiveBrowserLogs } from './logs-route.ts'
@@ -135,6 +139,12 @@ const THREAD_SYSTEM_PROMPT_DRAFT_ROUTE = threadRoute('system-prompt')
 const THREAD_FORK_ROUTE = threadRoute('fork')
 /** `POST …/continue` (#436): continue a torn thread from its stored state — no new prompt. */
 const THREAD_CONTINUE_ROUTE = threadRoute('continue')
+/**
+ * `POST …/incidents/<incidentId>/resolve` (#466): a human's resolution of the thread's incident — the
+ * one way a suspension is lifted. The incident id is the shape both writers mint (a UUID), so it
+ * needs no decoding; any other is no route.
+ */
+const THREAD_INCIDENT_RESOLVE_ROUTE = /^\/api\/threads\/([^/?#]+)\/incidents\/([0-9A-Za-z-]+)\/resolve$/
 /**
  * `/api/prompts/<id>` (#443): a library prompt. The id is its file name in the library's own shape
  * (`LIBRARY_PROMPT_ID_SOURCE`), so it needs no decoding and can never leave the directory.
@@ -389,6 +399,11 @@ export interface EnsoServerOptions {
   /** The prompt library's directory (`ENSO_HOME/prompts`, #443); absent, the server has none and says so. */
   promptsDir?: string
   /**
+   * The risk fold's thresholds, from the user's config (`security.incidents`, #466) — user-only, like
+   * `projectRoots`. Absent, the defaults: what the guard measures with when the config sets none.
+   */
+  riskThresholds?: EnsoRiskThresholds
+  /**
    * The Enso pi package directory, loaded as the ONLY extension source.
    *
    * ⚠ Required, not optional. An optional value here would make "no guards" the default
@@ -521,7 +536,12 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     return prompts === undefined ? { kind: 'refused', reason: NO_PROMPT_LIBRARY } : prompts.pickSystemPrompt(id)
   }
   /** The one live-or-cold read (#214), shared with the follow route's snapshot. */
-  const threadRead: ThreadReadDeps = { threads, host, projects }
+  const threadRead: ThreadReadDeps = {
+    threads,
+    host,
+    projects,
+    riskThresholds: options.riskThresholds ?? DEFAULT_RISK_THRESHOLDS,
+  }
 
   // The permission mode a FRESH thread starts in (#84). The browser asks once on mount,
   // before any run exists, so the header can read the starting mode instead of `unknown`
@@ -677,6 +697,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
       messages: mount.messages,
       permissionMode: mount.permissionMode,
       sessionRisk: mount.sessionRisk,
+      incidents: mount.incidents,
       ...(mount.interrupted === undefined ? {} : { interrupted: mount.interrupted }),
     }
     response.writeHead(200, { 'Content-Type': 'application/json' })
@@ -923,7 +944,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   }
 
   // ── The wire (#112): prompt / follow / dialog ────────────────────────────────────
-  const followDeps: FollowRouteDeps = { threads, host, projects, sseKeepaliveMs }
+  const followDeps: FollowRouteDeps = { ...threadRead, sseKeepaliveMs }
 
   /**
    * The thread routes, one row each, in precedence order (#174, workstream 6): method, the
@@ -986,6 +1007,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     { method: 'POST', route: THREAD_FORK_ROUTE, respond: respondToFork },
     { method: 'POST', route: THREAD_CONTINUE_ROUTE, respond: idOnly(respondToContinue) },
     { method: 'POST', route: THREAD_ABORT_ROUTE, respond: idOnly(respondToAbort) },
+    { method: 'POST', route: THREAD_INCIDENT_RESOLVE_ROUTE, respond: respondToIncidentResolution },
   ]
 
   /**
@@ -1189,6 +1211,25 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
       subject: (change) => ({ mode: change.mode }),
       refused: 'mode change to {mode} refused ({status}): {reason}',
       accepted: () => ({ message: 'mode change to {mode} told' }),
+    })
+  }
+
+  // A classification, an outcome and at most three families; the dialog cap is generous for it.
+  function respondToIncidentResolution(
+    threadId: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+    match: RegExpExecArray,
+  ): Promise<void> {
+    // The pattern has the capture; a match without it is no match.
+    const incidentId = match[2] ?? ''
+    return answerControl(threadId, request, response, {
+      body: 'an incident resolution',
+      parse: readIncidentResolutionBody,
+      run: (resolution) => resolveThreadIncident(followDeps, threadId, incidentId, resolution),
+      subject: (resolution) => ({ incidentId, classification: resolution.classification, outcome: resolution.outcome }),
+      refused: 'incident {incidentId} resolution refused ({status}): {reason}',
+      accepted: () => ({ message: 'incident {incidentId} resolution recorded: {classification}, {outcome}' }),
     })
   }
 

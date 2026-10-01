@@ -11,13 +11,19 @@ import {
   VERSION as PI_VERSION,
   type PromptOptions,
   ProjectTrustStore,
+  type SessionEntry,
   SessionManager,
 } from '@earendil-works/pi-coding-agent'
 import {
   type DialogAnswer,
+  ENSO_INCIDENT_OPENED_ENTRY,
+  ENSO_INCIDENT_RESOLVED_CHANNEL,
+  ENSO_INCIDENT_RESOLVED_ENTRY,
   ENSO_PROJECT_TRUST_ENTRY,
   ENSO_SYSTEM_PROMPT_ENTRY,
   type EnsoForkPoint,
+  type EnsoIncidentOpened,
+  type EnsoIncidentResolution,
   type EnsoHostCommandRun,
   type EnsoModelState,
   type EnsoObservation,
@@ -28,6 +34,7 @@ import {
   type EnsoPermissionVerdict,
   type EnsoPromptAdmission,
   type EnsoRecordedModel,
+  type EnsoSessionIncidents,
   type EnsoSessionUsage,
   type EnsoSystemPromptChoice,
   type EnsoSystemPromptPreview,
@@ -35,13 +42,17 @@ import {
   type EnsoTranscriptEntry,
   ensoLogger,
   type HostFlowOutcome,
+  incidentResolutionRefusal,
+  incidentResolvedOf,
   type PromptOutcome,
   type PromptRequest,
   modeAgentName,
+  openIncidentOf,
   type RuntimeCommand,
   readRecordedMode,
   recordedPermissionMode,
   recordedSystemPrompt,
+  sessionIncidentsOf,
   THREAD_PROJECT_TRUST,
   type ThreadRuntime,
 } from '@enso/core'
@@ -710,6 +721,28 @@ function writeUnflushedSession(session: SessionManager): void {
   writeFileSync(file, lines.join(''), { flag: 'wx' })
 }
 
+/** A branch's incidents (#466): its custom entries, folded as the guard folds them on replay. */
+function branchIncidents(branch: readonly SessionEntry[]): EnsoSessionIncidents {
+  return sessionIncidentsOf(
+    branch.flatMap((entry) => (entry.type === 'custom' ? [{ customType: entry.customType, data: entry.data }] : [])),
+  )
+}
+
+/**
+ * The opening a fork records for the source's open incident (#466 decision 5): its own id, so the
+ * fork is resolved on its own, and the source's signals, halt and suspension, pointing back at the
+ * source's thread and incident.
+ */
+function inheritedOpening(sourceThreadId: string, source: EnsoIncidentOpened): EnsoIncidentOpened {
+  return {
+    incidentId: crypto.randomUUID(),
+    signals: source.signals,
+    halted: source.halted,
+    suspended: source.suspended,
+    inheritedFrom: { threadId: sourceThreadId, incidentId: source.incidentId },
+  }
+}
+
 export function createAgentHost(options: AgentHostOptions): AgentHost {
   const { agentDir, harnessPackageDir, servesDirectory } = options
 
@@ -855,6 +888,10 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       return { kind: 'not-a-user-message', reason: `entry ${entryId} is not a user message; a fork starts at one` }
     }
     const prefill = userMessageText(entry.message.content)
+    // Read off the source's CURRENT branch before `createBranchedSession` turns `source` into the
+    // fork: an open incident passes on whatever the fork point (#466 decision 5) — a fork taken
+    // from before it would otherwise be a way around its suspension. A resolved or ended one does not.
+    const sourceIncident = openIncidentOf(branchIncidents(source.getBranch()))
     // pi's `before`: the fork holds everything up to the message's parent — or nothing, naming its parent.
     let fork: SessionManager
     if (entry.parentId === null) {
@@ -863,6 +900,17 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     } else {
       source.createBranchedSession(entry.parentId)
       fork = source
+    }
+    // A fork taken after the opening already holds it, open: it is not opened twice.
+    if (sourceIncident !== undefined && openIncidentOf(branchIncidents(fork.getBranch())) === undefined) {
+      const opening = inheritedOpening(threadId, sourceIncident.opened)
+      fork.appendCustomEntry(ENSO_INCIDENT_OPENED_ENTRY, opening)
+      log.info('fork {forkThreadId} inherits incident {sourceIncidentId} as {incidentId}', {
+        threadId,
+        forkThreadId: fork.getSessionId(),
+        sourceIncidentId: sourceIncident.opened.incidentId,
+        incidentId: opening.incidentId,
+      })
     }
     writeUnflushedSession(fork)
     return { kind: 'forked', threadId: fork.getSessionId(), prefill }
@@ -914,9 +962,14 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     // The watcher's handler is bound after the session exists (`announceModelState` below);
     // `model_select` cannot fire before it — only the session's own methods emit it.
     let onModelSelect = (): void => undefined
+    // The host's own hold on pi's extension API (#466): a resolution is appended through it, so pi
+    // emits `entry_appended` and every follower folds the record live, and emitted on its event bus,
+    // where the guard listens. Re-set on each load — a reload (`trustGate`) binds a new API.
+    let hostApi: ExtensionAPI | undefined
     const modelWatch: InlineExtension = {
       name: MODEL_WATCH_EXTENSION_NAME,
       factory: (pi: ExtensionAPI): void => {
+        hostApi = pi
         pi.on('model_select', () => onModelSelect())
       },
     }
@@ -1448,19 +1501,30 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       })
     }
 
+    /**
+     * Start a run, or refuse it: an ended thread (#466 decision 8) admits none — read off the branch
+     * at each call, since the ending is a record and a resume refuses the same way — and ⚠ is
+     * refused before the trust question, so it asks nothing either. Then the open trust decision
+     * (#502): the run waits on the question, never the reverse.
+     */
+    function admitRun(outcome: PromptOutcome, start: () => void): void {
+      const incidents = branchIncidents(sessionManager.getBranch())
+      if (incidents.ended) {
+        const ending = incidents.incidents.at(-1)?.opened.incidentId
+        outcome.onRejected(
+          `incident ${ending}'s resolution ended thread ${threadId}; it admits no prompt — fork it to go on`,
+        )
+        return
+      }
+      trustGate.run(start, (reason) => outcome.onRejected(reason))
+    }
+
     const runtime: ThreadRuntime = {
       prompt(request: PromptRequest, outcome: PromptOutcome): void {
-        // The open trust decision first (#502): the run waits on the question, never the reverse.
-        trustGate.run(
-          () => startPrompt(request, outcome),
-          (reason) => outcome.onRejected(reason),
-        )
+        admitRun(outcome, () => startPrompt(request, outcome))
       },
       continueRun(outcome: PromptOutcome): void {
-        trustGate.run(
-          () => startContinue(outcome),
-          (reason) => outcome.onRejected(reason),
-        )
+        admitRun(outcome, () => startContinue(outcome))
       },
       answerDialog(response: DialogAnswer): void {
         ui.answerDialog(response)
@@ -1572,6 +1636,23 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
             mode: choice.mode,
             sha256: choice.sha256,
           })
+        return undefined
+      },
+      resolveIncident(incidentId: string, resolution: EnsoIncidentResolution): string | undefined {
+        const refusal = incidentResolutionRefusal(branchIncidents(sessionManager.getBranch()), incidentId, resolution)
+        if (refusal !== undefined) return refusal
+        if (hostApi === undefined) throw new Error(`thread ${threadId}: the host's extension API was never bound`)
+        const record = incidentResolvedOf(incidentId, resolution)
+        // The record first, then the live guard: were the guard told first, a failed append would
+        // leave a lifted suspension no file records (⚠ #466: the records are the authority).
+        hostApi.appendEntry(ENSO_INCIDENT_RESOLVED_ENTRY, record)
+        hostApi.events.emit(ENSO_INCIDENT_RESOLVED_CHANNEL, record)
+        log.info('incident {incidentId} resolved: {classification}, {outcome}', {
+          threadId,
+          incidentId,
+          classification: record.classification,
+          outcome: record.outcome,
+        })
         return undefined
       },
       setPermissionMode(mode: string, outcome: PromptOutcome): void {

@@ -24,6 +24,8 @@ const GUARD_RULE_VERDICT: Readonly<Record<EnsoGuardRule, string>> = {
   'stale-write': 'changed since read',
   'read-before-write': 'not read before write',
   'secret-read': 'credential read',
+  'incident-suspension': 'suspended by an incident',
+  'protected-records': 'protected records',
 }
 
 /** What a row outside a thread pane reads: nothing refused. */

@@ -10,31 +10,45 @@ import type {
 import {
   ASK_USER_TOOL_NAME,
   DEFAULT_GUARD_POLICY,
+  ENSO_FAMILY_TOOLS,
   ENSO_GUARD_DENIAL_ENTRY,
   ENSO_GUARD_RULE_KINDS,
+  ENSO_INCIDENT_OPENED_ENTRY,
+  ENSO_INCIDENT_RESOLVED_CHANNEL,
+  ENSO_INCIDENT_RESOLVED_ENTRY,
   ENSO_LOG_EVENTS,
   ENSO_PERMISSION_DENIAL_ENTRY,
   ENSO_PERMISSION_DENIAL_RESOLUTIONS,
   ENSO_SECURITY_SIGNAL_ENTRY,
   ENSO_SESSION_RISK_ENTRY,
+  ENSO_TOOL_FAMILIES,
   type EnsoGuardDenial,
   type EnsoGuardRule,
   type EnsoGuardRuleKind,
+  type EnsoIncidentOpened,
+  type EnsoIncidentPolicy,
   type EnsoPermissionDenial,
   type EnsoPermissionDenialResolution,
   type EnsoRiskEvent,
   type EnsoRiskState,
+  type EnsoSessionIncidents,
   type EnsoSessionRiskChange,
   ensoLogger,
   foldSessionRisk,
   type GuardPolicy,
   INITIAL_SESSION_RISK,
+  NO_SESSION_INCIDENTS,
+  openIncidentOf,
+  readEnsoIncidentResolved,
   riskCallOf,
   riskEventsOfEntries,
+  sessionIncidentsOf,
+  sessionIncidentsStep,
   sessionRiskStep,
+  toolFamilyOf,
   WEB_FETCH_TOOL_NAME,
 } from '@enso/core'
-import { findRepoRoot } from '@enso/core/paths'
+import { ensoHome, ensoLogsDir, findRepoRoot } from '@enso/core/paths'
 import { PERMISSIONS_DECISION_CHANNEL } from '@gotgenes/pi-permission-system'
 import { type CheckCommandResult, checkCommand } from 'cc-safety-net/api'
 import {
@@ -43,6 +57,7 @@ import {
   createSessionReadTracker,
   findDeniedNetworkEgress,
   findEnvironmentDump,
+  findDirectoryWord,
   findSecretPathWord,
   isInsideAnyRoot,
   isPersistenceWriteTarget,
@@ -50,6 +65,7 @@ import {
   looksLikeSecret,
   resolveAgainstCwd,
   secretLocationBeneath,
+  userIncidentPolicy,
 } from '../../core/index.ts'
 
 /**
@@ -253,12 +269,14 @@ function pathArgumentOf(event: ToolCallEvent | ToolResultEvent): string | undefi
 }
 
 /**
- * The guard's two seams: the bash analyzer (#9) and the harness root (#160 §4).
+ * The guard's seams: the bash analyzer (#9), the harness root (#160 §4), and the incident policy
+ * and log directory (#466).
  *
- * Production wires cc-safety-net's `checkCommand` and this checkout's root; tests inject known
- * verdicts and a root they built. `checkCommand` reads LOCAL policy per call, so a guard test that
- * touched the real library would vary with the machine's cc-safety-net config (the contract test
- * alone exercises the real one, and pins defaults explicitly).
+ * Production wires cc-safety-net's `checkCommand`, this checkout's root, the user's `config.json`
+ * and `ENSO_HOME`'s log directory; tests inject known verdicts, a root they built, a policy and a
+ * directory. `checkCommand` reads LOCAL policy per call, so a guard test that touched the real
+ * library would vary with the machine's cc-safety-net config (the contract test alone exercises
+ * the real one, and pins defaults explicitly) — and the same holds for the machine's config file.
  */
 export interface GuardDependencies {
   analyzeBashCommand: (input: { command: string; cwd: string }) => CheckCommandResult
@@ -269,10 +287,14 @@ export interface GuardDependencies {
    * login `ENSO_HOME` already had — is still here, and still refused.
    */
   harnessRoot: string
+  /** Whether an incident halts, and the risk thresholds — read at every `session_start` (#466). */
+  incidentPolicy: () => EnsoIncidentPolicy
+  /** The log directory `protected-records` refuses a shell command naming (#466). */
+  logsDirectory: string
 }
 
 /**
- * The guards extension, over its two seams. The bash analyzer is a dependency of this one
+ * The guards extension, over its seams. The bash analyzer is a dependency of this one
  * handler, never an extension of its own.
  *
  * @invariant guarded-tool-call/two-participants Two tool_call participants, structurally.
@@ -288,8 +310,22 @@ export function createGuards(dependencies: GuardDependencies): (pi: ExtensionAPI
   }
 }
 
-/** The pi entry point — the real analyzer and this checkout's root, wired at the composition root. */
-export default createGuards({ analyzeBashCommand: checkCommand, harnessRoot: findRepoRoot(import.meta.url) })
+/** The user's incident policy; an unreadable `config.json` fails closed and says so (#466). */
+function productionIncidentPolicy(): EnsoIncidentPolicy {
+  const { policy, problem } = userIncidentPolicy(ensoHome(process.env))
+  if (problem !== undefined) {
+    log.error('config.json is unreadable, so incidents halt with the default thresholds: {problem}', { problem })
+  }
+  return policy
+}
+
+/** The pi entry point — the real analyzer, this checkout's root and the user's config, wired at the composition root. */
+export default createGuards({
+  analyzeBashCommand: checkCommand,
+  harnessRoot: findRepoRoot(import.meta.url),
+  incidentPolicy: productionIncidentPolicy,
+  logsDirectory: ensoLogsDir(ensoHome(process.env)),
+})
 
 /**
  * A refusal as this guard produces it: pi's `{ block, reason, terminate? }` plus the RULE that
@@ -326,6 +362,8 @@ const ASK_LINE_BY_KIND: Readonly<Record<EnsoGuardRuleKind, string | undefined>> 
   redirect: ASK_WHEN_THE_ROUTE_CANNOT,
   procedure: undefined,
   configuration: undefined,
+  // The suspension's reason says who lifts it (the user's resolution), not "ask".
+  suspension: undefined,
 }
 
 /**
@@ -338,6 +376,7 @@ const ASK_LINE_BY_KIND: Readonly<Record<EnsoGuardRuleKind, string | undefined>> 
  *   (`curl` → `web_fetch`), and names the ask for when that route cannot do it.
  * - A procedural refusal (read the file first) and the configuration floor carry neither: asking
  *   cannot unblock them.
+ * - A suspension (#466) ends the turn and names no ask: only the user's resolution lifts it.
  */
 function deny(rule: EnsoGuardRule, reason: string, egress?: GuardDenial['egress']): GuardDenial {
   const kind = ENSO_GUARD_RULE_KINDS[rule]
@@ -346,7 +385,7 @@ function deny(rule: EnsoGuardRule, reason: string, egress?: GuardDenial['egress'
     block: true,
     reason: askLine === undefined ? reason : `${reason}\n\n${askLine}`,
     rule,
-    ...(kind === 'authorization' ? { terminate: true } : {}),
+    ...(kind === 'authorization' || kind === 'suspension' ? { terminate: true } : {}),
     ...(egress === undefined ? {} : { egress }),
   }
 }
@@ -366,12 +405,20 @@ function permissionDenialOf(raw: unknown, toolCallId: string | undefined): EnsoP
 }
 
 /**
- * The session's security risk (#464, phase 1 of #189): every call, every refusal — the guard's
- * and the permission engine's — folded by `@enso/core`'s `sessionRiskStep`, each signal and each
- * level change appended as an entry and logged.
+ * The session's security (#464, #466, phases 1 and 3 of #189): every call, every refusal — the
+ * guard's and the permission engine's — folded by `@enso/core`'s `sessionRiskStep`, each signal and
+ * each level change appended as an entry and logged; and the session's incidents, folded by
+ * `sessionIncidentsStep` over the same kind of entries.
  *
- * ⚠ OBSERVE ONLY, AND NEVER IN THE WAY. Nothing here decides a call. A throw anywhere in the fold
- * is logged and swallowed: a bug in risk must not become a refusal, and must not become a pass.
+ * ⚠ THE RISK FOLD IS OBSERVE ONLY. A throw anywhere in it is logged and swallowed: a bug in risk
+ * must not become a refusal, and must not become a pass. What decides a call is the INCIDENT state
+ * (`suspension`), which only records change: an opening this observer appends, a resolution the
+ * host appends and announces on `ENSO_INCIDENT_RESOLVED_CHANNEL`.
+ *
+ * ⚠ AN INCIDENT OPENS WHEN THE RISK IS AT `incident` AND NONE IS OPEN — not on the transition
+ * alone, so a session that reached `incident` before #466 existed opens one at its next event after
+ * a resume. A resolution resets the risk to `low` (it is the only reset), so the same signals never
+ * reopen it. With `halt` off (the default) the opening suspends nothing: it is the alert.
  *
  * ⚠ THE ENGINE'S REFUSAL IS ATTRIBUTED HERE. Its decision event names no tool call. This handler
  * is the first `tool_call` participant, and pi prepares a batch's calls one at a time (every
@@ -379,18 +426,54 @@ function permissionDenialOf(raw: unknown, toolCallId: string | undefined): EnsoP
  * guard saw last is the call the engine is deciding. The entry the guard writes names it, which is
  * what lets a replay put the refusal back in its place (`riskEventsOfEntries`).
  */
-function observeSessionRisk(pi: ExtensionAPI): {
+function observeSessionSecurity(
+  pi: ExtensionAPI,
+  readPolicy: () => EnsoIncidentPolicy,
+): {
   resume(branch: () => readonly unknown[]): void
   call(event: ToolCallEvent, signal: AbortSignal | undefined): void
-  guardDenied(denial: EnsoGuardDenial): void
+  /** Folds the guard's own refusal; true when it opened an incident that halted. */
+  guardDenied(denial: EnsoGuardDenial): boolean
+  /** The incident state a call is decided against. */
+  incidents(): EnsoSessionIncidents
 } {
+  // ⚠ Read at every `session_start`, AND lazily at the first event if none fired — the floor's
+  // reasoning (`verifyPolicyToolNames`): pi's ordering is an assumption, and a policy read as
+  // "alert only" until then would fail OPEN through exactly that window.
+  let sessionPolicy: EnsoIncidentPolicy | undefined
+  const policy = (): EnsoIncidentPolicy => {
+    sessionPolicy ??= readPolicy()
+    return sessionPolicy
+  }
   let risk: EnsoRiskState = INITIAL_SESSION_RISK
+  let incidents: EnsoSessionIncidents = NO_SESSION_INCIDENTS
   let currentCall: string | undefined
   let currentSignal: AbortSignal | undefined
 
-  const observe = (event: EnsoRiskEvent): void => {
+  /** Open an incident when the risk calls for one; true when it halted. */
+  const openIfIncident = (): boolean => {
+    if (risk.level !== 'incident' || incidents.ended || openIncidentOf(incidents) !== undefined) return false
+    const { halt } = policy()
+    const opened: EnsoIncidentOpened = {
+      incidentId: crypto.randomUUID(),
+      signals: [...risk.signals],
+      halted: halt,
+      suspended: halt ? [...ENSO_TOOL_FAMILIES] : [],
+    }
+    pi.appendEntry(ENSO_INCIDENT_OPENED_ENTRY, opened)
+    incidents = sessionIncidentsStep(incidents, ENSO_INCIDENT_OPENED_ENTRY, opened)
+    log.warn(ENSO_LOG_EVENTS.incidentOpened, {
+      incidentId: opened.incidentId,
+      halted: opened.halted,
+      suspended: opened.suspended.join(', ') || 'nothing',
+      signals: opened.signals.length,
+    })
+    return opened.halted
+  }
+
+  const observe = (event: EnsoRiskEvent): boolean => {
     try {
-      const step = sessionRiskStep(risk, event)
+      const step = sessionRiskStep(risk, event, policy().thresholds)
       for (const signal of step.raised) {
         log.warn(ENSO_LOG_EVENTS.securitySignal, { ...signal })
         pi.appendEntry(ENSO_SECURITY_SIGNAL_ENTRY, signal)
@@ -401,8 +484,10 @@ function observeSessionRisk(pi: ExtensionAPI): {
         pi.appendEntry(ENSO_SESSION_RISK_ENTRY, change)
       }
       risk = step.state
+      return openIfIncident()
     } catch (error) {
       log.error('the session risk fold failed; no call is decided by it: {error}', { error })
+      return false
     }
   }
 
@@ -422,13 +507,36 @@ function observeSessionRisk(pi: ExtensionAPI): {
     }
   })
 
+  // The host appended the resolution's record and says so here, so the suspension lifts without a
+  // reload — the same step, and the same reset, a replay of that entry makes.
+  pi.events.on(ENSO_INCIDENT_RESOLVED_CHANNEL, (raw: unknown): void => {
+    const resolved = readEnsoIncidentResolved(ENSO_INCIDENT_RESOLVED_ENTRY, raw)
+    if (resolved === undefined) {
+      log.error('an incident resolution arrived malformed; nothing is lifted: {raw}', { raw })
+      return
+    }
+    incidents = sessionIncidentsStep(incidents, ENSO_INCIDENT_RESOLVED_ENTRY, resolved)
+    risk = sessionRiskStep(risk, { kind: 'incident-resolved' }, policy().thresholds).state
+    log.info(ENSO_LOG_EVENTS.incidentResolved, { ...resolved, suspended: resolved.suspended.join(', ') || 'nothing' })
+  })
+
   return {
-    // Rebuilt from the branch, never from stored signals: the same fold over the same events.
+    // Rebuilt from the branch, never from stored signals: the same folds over the same entries.
     resume(branch: () => readonly unknown[]): void {
+      sessionPolicy = readPolicy()
       currentCall = undefined
       currentSignal = undefined
+      // ⚠ Never a throw: this runs in `session_start` (the print-mode wedge, `verifyPolicyToolNames`).
+      let entries: readonly unknown[]
       try {
-        risk = foldSessionRisk(riskEventsOfEntries(branch()))
+        entries = branch()
+      } catch (error) {
+        log.error('the branch could not be read; incidents and risk keep their state: {error}', { error })
+        return
+      }
+      incidents = sessionIncidentsOf(customEntriesOf(entries))
+      try {
+        risk = foldSessionRisk(riskEventsOfEntries(entries), policy().thresholds)
       } catch (error) {
         risk = INITIAL_SESSION_RISK
         log.error('the session risk could not be rebuilt from the branch; it starts low: {error}', { error })
@@ -439,14 +547,49 @@ function observeSessionRisk(pi: ExtensionAPI): {
       currentSignal = signal
       observe(riskCallOf(event.toolCallId, event.toolName, event.input))
     },
-    guardDenied(denial: EnsoGuardDenial): void {
-      observe(
+    guardDenied(denial: EnsoGuardDenial): boolean {
+      return observe(
         denial.via === undefined
           ? { kind: 'guard-denial', toolCallId: denial.toolCallId, rule: denial.rule }
           : { kind: 'guard-denial', toolCallId: denial.toolCallId, rule: denial.rule, via: denial.via },
       )
     },
+    incidents: () => incidents,
   }
+}
+
+/** A branch's custom entries, `{ customType, data }` in order — what the incident fold reads. */
+function customEntriesOf(entries: readonly unknown[]): { customType: string; data: unknown }[] {
+  return entries.flatMap((entry) => {
+    if (typeof entry !== 'object' || entry === null) return []
+    const { type, customType, data } = entry as { type?: unknown; customType?: unknown; data?: unknown }
+    return type === 'custom' && typeof customType === 'string' ? [{ customType, data }] : []
+  })
+}
+
+/**
+ * The refusal of a call to a suspended family (#466), or undefined when its family is not suspended.
+ * The reason names the incident, the family and its tools, what still works, and that only the
+ * user lifts it — no "ask": an answer to `ask_user` cannot, only a resolution in Enso can.
+ */
+function suspensionDenial(toolName: string, incidents: EnsoSessionIncidents): GuardDenial | undefined {
+  const family = toolFamilyOf(toolName)
+  if (family === undefined || !incidents.suspended.includes(family)) return undefined
+  return deny(
+    'incident-suspension',
+    `${toolName} is suspended: ${whySuspended(incidents)} (#466). The ${family} tools (${ENSO_FAMILY_TOOLS[family].join(', ')}) ` +
+      `stay suspended until the user resolves it in Enso; reading and searching still work. Do not try ` +
+      `another way to the same effect. Stop, and tell the user what you were doing and why.`,
+  )
+}
+
+/** Why the thread's tools are suspended: an ended thread, an open incident, or a kept restriction. */
+function whySuspended(incidents: EnsoSessionIncidents): string {
+  if (incidents.ended) return 'the user ended this thread when resolving its security incident'
+  const open = openIncidentOf(incidents)
+  if (open !== undefined) return `security incident ${open.opened.incidentId} is open`
+  const last = incidents.incidents.at(-1)
+  return `the user kept it suspended when resolving security incident ${last?.opened.incidentId ?? '(unknown)'}`
 }
 
 /**
@@ -467,25 +610,29 @@ function observeSessionRisk(pi: ExtensionAPI): {
  *    regression there LOUD: the listing is refused with a reason, instead of quietly
  *    printing a key into the transcript again. `environment-dump.ts` states its
  *    non-coverage (the interpreters), the same as the egress deny.
- * 4. The secret-path deny (#204) — the READER GATE'S OWN POLICY on this route. Measured
+ * 4. The records deny (#466) — a word naming this project's session directory or the log
+ *    directory, resolved and through its realpath (`findDirectoryWord`): the records an
+ *    incident rests on. BEFORE the secret-path deny, which refuses a literal `/.enso/` too,
+ *    so a touch of the records is named as one and raises its own signal.
+ * 5. The secret-path deny (#204) — the READER GATE'S OWN POLICY on this route. Measured
  *    before it existed: `read .enso/secrets.env` was refused and `cat .enso/secrets.env`
  *    was allowed, because nothing on the bash route resolved a path and cc-safety-net's
  *    corpus is `~/.aws`, `~/.ssh`, `.env`-basename — its "secret access THROUGH bash"
- *    half does not know this harness's own credential dir. LAST of the four: a command
+ *    half does not know this harness's own credential dir. LAST of the five: a command
  *    that is destructive, exfiltrating or dumping is refused for that first, which keeps
  *    the older reasons' wording stable. `shell-secret-paths.ts` states its non-coverage.
  *
  * @invariant guarded-tool-call/shell-deny-first Shell: deny first, patch last; the analyzer is a library.
  * For `bash` the cc-safety-net verdict is read first (a throw is a deny, per its contract), then
  * the network deny by name at command position per segment, with a *cannot vouch* refusal for a
- * construct it cannot resolve, then the environment-dump deny, then the secret-path deny.
- * `powershell` skips the analyzer for the coarse raw scan. Only a command that passed them all
- * gets `defaultBashTimeoutSeconds`, so no denied command has mutated input. What the analyzer
- * allows (a redirect into its own config dir) is our layers' job: the division of labour its
- * contract test pins against defaults.
+ * construct it cannot resolve, then the environment-dump deny, then the records deny, then the
+ * secret-path deny. `powershell` skips the analyzer for the coarse raw scan. Only a command that
+ * passed them all gets `defaultBashTimeoutSeconds`, so no denied command has mutated input. What
+ * the analyzer allows (a redirect into its own config dir) is our layers' job: the division of
+ * labour its contract test pins against defaults.
  */
 function shellCommandDenial(
-  call: { toolName: string; command: string; cwd: string },
+  call: { toolName: string; command: string; cwd: string; recordDirectories: readonly string[] },
   dependencies: GuardDependencies,
   policy: GuardPolicy,
 ): GuardDenial | undefined {
@@ -547,6 +694,20 @@ function shellCommandDenial(
     )
   }
 
+  // Before the secret-path deny, which already refuses a literal `/.enso/`: the records are named
+  // for what they are, so a touch is its own signal (#466), and a custom ENSO_HOME (outside any
+  // `.enso` spelling) is covered too.
+  const records = findDirectoryWord(command, call.recordDirectories, cwd, { coarse })
+  if (records !== undefined) {
+    return deny(
+      'protected-records',
+      `${toolName} command refused: "${records.matched}" names the session or log directory ` +
+        `(matched by ${records.via}) — the records a security incident rests on (#466). They are ` +
+        `not the agent's to read or change with a tool; the log-reading path is "bun run logs", a ` +
+        `human command and not a tool call.`,
+    )
+  }
+
   const secret = findSecretPathWord(command, policy.secretPathFragments, cwd, { coarse })
   if (secret !== undefined) {
     return deny(
@@ -568,13 +729,13 @@ function shellCommandDenial(
  * @flow guarded-tool-call A tool call through the guard: one verdict, first block wins, always a record
  * Before any tool runs, the runtime raises `tool_call` and every extension's handler answers in
  * load order; the first `{ block: true, reason }` ends the call, and nothing after it can
- * un-block. Our guard is one handler with an ordered `decide` inside it: the fail-closed floor,
- * the shell denies, the write gates, then every other path-bearing tool as a reader. The bash
- * analyzer is a library under that handler, not a participant of its own, so the count stays at
- * two (#4, #9). Every answer is a log record. A refused call reaches the browser as a result
- * flagged `isError` (the runtime's shape for any failure) and beside it the guard's own custom
- * entry naming the call and the rule, which is what the page draws a refusal from, live and on
- * resume (#387).
+ * un-block. Our guard is one handler with an ordered `decide` inside it: the fail-closed floor
+ * and an incident's suspension (`standingDenial`), the shell denies, the write gates, then every
+ * other path-bearing tool as a reader. The bash analyzer is a library under that handler, not a
+ * participant of its own, so the count stays at two (#4, #9). Every answer is a log record. A
+ * refused call reaches the browser as a result flagged `isError` (the runtime's shape for any
+ * failure) and beside it the guard's own custom entry naming the call and the rule, which is what
+ * the page draws a refusal from, live and on resume (#387).
  * @see docs/seams/guards.md the guards seam: the policy, the dependencies, decide's order and the L5 crossing
  * @see packages/harness/core/network-egress.ts the network bar, and what it does not cover (its header)
  * @see docs/glossary.md the words: guard, verdict, policy, rule, participant, arbiter, boundary vs bar (Permission)
@@ -594,8 +755,12 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
   // extension runtime down on session replacement (fresh closure), and session_start —
   // which also fires for "reload" and "resume", where the runtime survives — resets it.
   const readTracker = createSessionReadTracker()
-  // #464: the session's security risk, observed beside what it has read; rebuilt on every start.
-  const risk = observeSessionRisk(pi)
+  // #464, #466: the session's security risk and incidents, observed beside what it has read;
+  // rebuilt on every start.
+  const security = observeSessionSecurity(pi, dependencies.incidentPolicy)
+  // The session and log directories `protected-records` refuses a shell command naming (#466):
+  // this project's session directory, read off the session at each start, and the log directory.
+  let recordDirectories: readonly string[] = [dependencies.logsDirectory]
 
   let policyToolsChecked = false
   let policyToolMismatch: string | undefined
@@ -637,7 +802,15 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
   pi.on('session_start', (_event, extensionContext): void => {
     readTracker.reset()
     verifyPolicyToolNames()
-    risk.resume(() => extensionContext.sessionManager.getBranch())
+    try {
+      recordDirectories = [extensionContext.sessionManager.getSessionDir(), dependencies.logsDirectory]
+    } catch (error) {
+      log.error('the session directory could not be read; protected-records keeps the log directory: {error}', {
+        error,
+      })
+      recordDirectories = [dependencies.logsDirectory]
+    }
+    security.resume(() => extensionContext.sessionManager.getBranch())
   })
 
   // @invariant guarded-tool-call/knowledge-from-results Knowledge comes from results, never from calls.
@@ -681,7 +854,7 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
   // pi's context builder skips `custom` entries, so the model's view is unchanged.
   pi.on('tool_call', (event, extensionContext): ToolCallEventResult | undefined => {
     // The call first, then its refusal: the order the risk fold and every replay of it read (#464).
-    risk.call(event, extensionContext.signal)
+    security.call(event, extensionContext.signal)
     const verdict = decide(event, extensionContext.cwd)
     const path = pathArgumentOf(event)
     const properties = {
@@ -705,11 +878,36 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
       reason: verdict.reason,
     })
     pi.appendEntry(ENSO_GUARD_DENIAL_ENTRY, denial)
-    risk.guardDenied(denial)
-    return verdict.terminate === true
+    // ⚠ A refusal that tips the session into a halting incident ends the batch (#466), whatever
+    // its own rule's kind: a redirect would otherwise leave the model its turn to try the route.
+    const halted = security.guardDenied(denial)
+    return verdict.terminate === true || halted
       ? { block: verdict.block, reason: verdict.reason, terminate: true }
       : { block: verdict.block, reason: verdict.reason }
   })
+
+  /**
+   * What refuses a call whatever it is: #4's fail-closed floor, then an incident's suspension (#466).
+   * Out of `decide` so it stays under the complexity pin `.fallowrc.jsonc` holds it to.
+   */
+  function standingDenial(toolName: string): GuardDenial | undefined {
+    // --- #4's fail-closed floor: a policy/tool-list mismatch denies EVERYTHING, first.
+    // One reason per denial, so an unattended run's transcript names the mismatch.
+    // The lazy leg: an unchecked state here means this call arrived before session_start
+    // ever fired, and unchecked must not read as "checked, fine" — verify now.
+    if (!policyToolsChecked) {
+      verifyPolicyToolNames()
+    }
+    if (policyToolMismatch !== undefined) {
+      return deny(
+        'policy-mismatch',
+        `All tool calls are blocked until the guard policy matches pi's tools: ${policyToolMismatch}`,
+      )
+    }
+    // --- #466: a family an incident suspended is refused before any other rule — the incident is
+    // the thread's state, not a judgement of this call.
+    return suspensionDenial(toolName, security.incidents())
+  }
 
   /**
    * @invariant guarded-tool-call/writes-included-readers-excluded Writes are an inclusion list; readers are everything else.
@@ -736,20 +934,8 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
    */
   function decide(event: ToolCallEvent, cwd: string): GuardDenial | undefined {
     const toolName = canonicalToolName(event.toolName)
-
-    // --- #4's fail-closed floor: a policy/tool-list mismatch denies EVERYTHING, first.
-    // One reason per denial, so an unattended run's transcript names the mismatch.
-    // The lazy leg: an unchecked state here means this call arrived before session_start
-    // ever fired, and unchecked must not read as "checked, fine" — verify now.
-    if (!policyToolsChecked) {
-      verifyPolicyToolNames()
-    }
-    if (policyToolMismatch !== undefined) {
-      return deny(
-        'policy-mismatch',
-        `All tool calls are blocked until the guard policy matches pi's tools: ${policyToolMismatch}`,
-      )
-    }
+    const standing = standingDenial(toolName)
+    if (standing !== undefined) return standing
 
     // --- bash/powershell (#9): deny first, patch last — a denied command must never
     // have had its input mutated. The four denies live in `shellCommandDenial` so this
@@ -757,7 +943,7 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
     if (toolName === TOOL_BASH || toolName === TOOL_POWERSHELL) {
       const input = inputRecordOf(event)
       const command = typeof input.command === 'string' ? input.command : ''
-      const denial = shellCommandDenial({ toolName, command, cwd }, dependencies, policy)
+      const denial = shellCommandDenial({ toolName, command, cwd, recordDirectories }, dependencies, policy)
       if (denial !== undefined) return denial
 
       // Patch, do not block: a missing timeout means a hung command holds the

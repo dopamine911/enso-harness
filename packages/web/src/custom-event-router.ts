@@ -1,4 +1,5 @@
 import {
+  ENSO_INCIDENT_RESOLVED_ENTRY,
   ENSO_NOTICE_SOURCE,
   EnsoFollowSnapshot,
   EnsoFollowStatus,
@@ -12,6 +13,7 @@ import {
   providerRefusalClass,
   readEnsoGuardDenial,
   readEnsoSessionRiskChange,
+  sessionIncidentsStep,
 } from '@enso/core'
 import { Compile } from 'typebox/compile'
 import { Check } from 'typebox/value'
@@ -105,6 +107,9 @@ export function routeEnsoCustomEvent(stores: ThreadStores, eventType: string, da
     if (!snapshotValidator.Check(data)) return
     applyPermissionMode(stores, data.permissionMode)
     stores.sessionRisk.set(data.sessionRisk)
+    // The incidents as the server folded the branch (#466): the resync, replacing whatever the
+    // live fold held — a resolution from another tab lands here too.
+    stores.incidents.set(data.incidents)
     // The session's model (#338 slice 2) — `null` when the thread is not live, applied as such:
     // a snapshot is the resync, and a model this page cannot vouch for is no model. A cold
     // thread's recorded model (#434) rides beside it, never as live state.
@@ -200,10 +205,19 @@ function applyStatus(stores: ThreadStores, generation: number): void {
 /**
  * A guard refused a call (#387): its entry names the call and the rule, and the tool row and the
  * status bar read it off the store. The session's risk rose (#464): the status bar reads that too.
- * Every other extension's entry is a state receipt rendered by nothing (L3 moved the mode onto its
- * own observation).
+ * An incident opened, or a human resolved one (#466): the same fold the server runs, one step per
+ * entry — an entry that is neither leaves the state as it was. A resolution also starts the risk
+ * over, as the risk fold does on the same entry (`session-risk.ts`). Every other extension's entry
+ * is a state receipt rendered by nothing (L3 moved the mode onto its own observation).
  */
 function applyGuardEntry(stores: ThreadStores, customType: string, data: unknown): void {
+  if (customType === ENSO_INCIDENT_RESOLVED_ENTRY) stores.sessionRisk.set({ level: 'low', signals: 0 })
+  const incidents = stores.incidents.get()
+  const nextIncidents = sessionIncidentsStep(incidents, customType, data)
+  if (nextIncidents !== incidents) {
+    stores.incidents.set(nextIncidents)
+    return
+  }
   const risk = readEnsoSessionRiskChange(customType, data)
   if (risk !== undefined) {
     stores.sessionRisk.set(risk)

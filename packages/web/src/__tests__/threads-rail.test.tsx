@@ -6,6 +6,7 @@ import {
   type EnsoFollowFrame,
   type EnsoProject,
   type EnsoStoredThread,
+  NO_SESSION_INCIDENTS,
 } from '@enso/core'
 import type { StreamChunk } from '@tanstack/ai'
 import type { UIMessage } from '@tanstack/ai-client'
@@ -152,6 +153,7 @@ test('adopting stored history restores dates, title and mode under the stored th
     ],
     permissionMode: { mode: 'plan', available: ['default', 'plan'] },
     sessionRisk: { level: 'low', signals: 0 } as const,
+    incidents: NO_SESSION_INCIDENTS,
   }
   const adopted = adoptThread(history)
   expect(adopted.threadId).toBe('stored-1')
@@ -188,6 +190,7 @@ test('adopting a history seeds the refused calls from its results; a failed resu
     ],
     permissionMode: { mode: 'default', available: [] },
     sessionRisk: { level: 'low', signals: 0 },
+    incidents: NO_SESSION_INCIDENTS,
   })
   expect([...adopted.guardDenials.get()]).toEqual([['c1', 'secret-read']])
 })
@@ -199,6 +202,7 @@ test('⚠ adopting a branch that ends inside a turn opens with a warning that sa
     messages: [{ id: 'u1', role: 'user', parts: [{ type: 'text', content: 'never answered' }] }],
     permissionMode: { mode: 'default', available: [] },
     sessionRisk: { level: 'low', signals: 0 },
+    incidents: NO_SESSION_INCIDENTS,
     interrupted: 'unanswered-prompt',
   })
   expect(torn.notifications.get()).toMatchObject([
@@ -210,6 +214,7 @@ test('⚠ adopting a branch that ends inside a turn opens with a warning that sa
     messages: [],
     permissionMode: { mode: 'default', available: [] },
     sessionRisk: { level: 'low', signals: 0 },
+    incidents: NO_SESSION_INCIDENTS,
   })
   expect(settled.notifications.get()).toEqual([])
 })
@@ -223,6 +228,7 @@ test('⚠ the torn-tail notice offers Continue once: pressing it posts …/conti
       messages: [],
       permissionMode: { mode: 'default', available: [] },
       sessionRisk: { level: 'low', signals: 0 },
+      incidents: NO_SESSION_INCIDENTS,
       interrupted: 'tool-call-without-result',
     },
     (input: string, init?: RequestInit) => {
@@ -273,6 +279,7 @@ function followedTornThread(
       messages: [],
       permissionMode: { mode: 'default', available: [] },
       sessionRisk: { level: 'low', signals: 0 },
+      incidents: NO_SESSION_INCIDENTS,
       interrupted: 'unanswered-prompt',
     },
     (input: string, init?: RequestInit) => {

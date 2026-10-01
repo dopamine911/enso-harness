@@ -1,0 +1,185 @@
+import { afterAll, expect, test } from 'bun:test'
+import type { EnsoIncidentOpened, EnsoIncidentRecord, EnsoSessionIncidents } from '@enso/core'
+import { act } from 'react'
+import type { createRoot as CreateRoot } from 'react-dom/client'
+import type * as FollowConnectionModule from '../follow-connection.ts'
+import type * as IncidentCardModule from '../incident-card.tsx'
+import { ensureDom, releaseDom } from './dom-environment.ts'
+
+/**
+ * The incident card (#466), mounted over a real follow connection whose `fetch` is scripted: what
+ * it shows is the opening's record in three separate sections, and what it posts is the resolve
+ * route's body — refused client-side by the same check the route runs, and the server's reason
+ * shown when the route refuses.
+ */
+
+// ⚠ A DOM before react-dom/client and Radix evaluate.
+ensureDom()
+const { createRoot }: { createRoot: typeof CreateRoot } = await import('react-dom/client')
+const { IncidentCard }: typeof IncidentCardModule = await import('../incident-card.tsx')
+const { createFollowConnection }: typeof FollowConnectionModule = await import('../follow-connection.ts')
+afterAll(releaseDom)
+
+const flush = (work: () => Promise<void> | void): Promise<void> => act(async () => work())
+
+const OPENED: EnsoIncidentOpened = {
+  incidentId: 'inc-1',
+  signals: [
+    {
+      signal: 'alternate-execution-path',
+      toolCallId: 'c7',
+      detail: 'python -c after a refused curl',
+      after: ['c3', 'c5'],
+    },
+  ],
+  halted: true,
+  suspended: ['execute', 'network', 'write'],
+}
+
+const openState = (opened: EnsoIncidentOpened): { record: EnsoIncidentRecord; incidents: EnsoSessionIncidents } => {
+  const record = { opened, resolutions: [] }
+  return { record, incidents: { incidents: [record], suspended: opened.suspended, ended: false } }
+}
+
+interface Posted {
+  readonly url: string
+  readonly body: unknown
+}
+
+/** The card mounted over a connection whose every POST answers `answer`, and every request it made. */
+async function mounted(
+  state: { record: EnsoIncidentRecord; incidents: EnsoSessionIncidents },
+  answer: () => Response = () => new Response(null, { status: 204 }),
+): Promise<{ posted: Posted[]; container: HTMLElement; unmount: () => Promise<void> }> {
+  const posted: Posted[] = []
+  const connection = createFollowConnection({
+    threadId: 't1',
+    fetch: async (input: string, init?: RequestInit) => {
+      posted.push({ url: input, body: typeof init?.body === 'string' ? JSON.parse(init.body) : undefined })
+      return answer()
+    },
+    onProblem: () => undefined,
+  })
+  const container = document.createElement('div')
+  document.body.appendChild(container)
+  const root = createRoot(container)
+  await flush(() =>
+    root.render(
+      <IncidentCard record={state.record} incidents={state.incidents} resolve={connection.resolveIncident} />,
+    ),
+  )
+  return {
+    posted,
+    container,
+    unmount: async () => {
+      await flush(() => root.unmount())
+      container.remove()
+    },
+  }
+}
+
+/** A section found as a screen reader finds it: by the heading that names it. */
+function section(container: HTMLElement, title: string): HTMLElement {
+  const found = [...container.querySelectorAll<HTMLElement>('section[aria-labelledby]')].find(
+    (each) => container.querySelector(`[id="${each.getAttribute('aria-labelledby')}"]`)?.textContent === title,
+  )
+  if (found === undefined) throw new Error(`no section named ${title}: ${container.textContent}`)
+  return found
+}
+
+/** The control a label names, as a user finds it — by the words on the row. */
+function control(container: HTMLElement, label: string): HTMLElement {
+  const row = [...container.querySelectorAll('label')].find((each) => each.textContent?.startsWith(label))
+  const target = row === undefined ? null : container.querySelector<HTMLElement>(`[id="${row.htmlFor}"]`)
+  if (target === null) throw new Error(`no control labelled ${label}: ${container.textContent}`)
+  return target
+}
+
+function button(container: HTMLElement, words: string): HTMLButtonElement {
+  const found = [...container.querySelectorAll('button')].find((each) => each.textContent === words)
+  if (found === undefined) throw new Error(`no ${words} button`)
+  return found
+}
+
+const alertText = (container: HTMLElement): string | null | undefined =>
+  container.querySelector('[role="alert"]')?.textContent
+
+test('observed, inferred and suspended are three labelled sections, each holding only its own', async () => {
+  const card = await mounted(openState(OPENED))
+  const observed = section(card.container, 'Observed').textContent ?? ''
+  expect(observed).toContain('alternate-execution-path')
+  expect(observed).toContain('c7')
+  expect(observed).toContain('c3, c5')
+  expect(observed).toContain('python -c after a refused curl')
+  expect(observed).not.toContain('bash')
+
+  const inferred = section(card.container, 'Inferred risk').textContent ?? ''
+  expect(inferred).toContain('incident')
+  expect(inferred).toContain('not calibrated')
+  expect(inferred).not.toContain('c7')
+
+  const suspended = section(card.container, 'Suspended tools').textContent ?? ''
+  expect(suspended).toContain('execute')
+  expect(suspended).toContain('bash, powershell')
+  expect(suspended).toContain('write, edit')
+  expect(suspended).not.toContain('python -c')
+  expect(card.container.textContent).not.toMatch(/append-only|tamper-proof/)
+  await card.unmount()
+})
+
+test('an inherited incident names the thread and incident it came from; halting off suspends nothing and says why', async () => {
+  const card = await mounted(
+    openState({ ...OPENED, halted: false, suspended: [], inheritedFrom: { threadId: 'src-9', incidentId: 'inc-0' } }),
+  )
+  expect(card.container.textContent).toContain('came from thread src-9, whose incident inc-0 was open')
+  expect(section(card.container, 'Suspended tools').textContent).toBe(
+    'Suspended toolsnothing suspended — halting is off (security.incidents.halt)',
+  )
+  await card.unmount()
+})
+
+test('resume with restrictions and none ticked is refused before posting; ticked, it posts the families that stay suspended', async () => {
+  const card = await mounted(openState(OPENED))
+  await flush(() => control(card.container, 'agent error').click())
+  await flush(() => control(card.container, 'resume with restrictions').click())
+  await flush(() => button(card.container, 'Record resolution').click())
+  expect(card.posted).toEqual([])
+  expect(alertText(card.container)).toBe('resume-with-restrictions names the families that stay suspended')
+
+  await flush(() => control(card.container, 'network').click())
+  await flush(() => button(card.container, 'Record resolution').click())
+  expect(card.posted).toEqual([
+    {
+      url: '/api/threads/t1/incidents/inc-1/resolve',
+      body: { classification: 'agent-error', outcome: 'resume-with-restrictions', restricted: ['network'] },
+    },
+  ])
+  expect(alertText(card.container)).toBeUndefined()
+  await card.unmount()
+})
+
+test("the server's 422 reason is shown on the card, and a resume posts no restricted families", async () => {
+  const card = await mounted(
+    openState(OPENED),
+    () => new Response('a later incident supersedes this one', { status: 422 }),
+  )
+  await flush(() => control(card.container, 'false positive').click())
+  await flush(() => control(card.container, 'resume —').click())
+  await flush(() => button(card.container, 'Record resolution').click())
+  expect(card.posted.map((each) => each.body)).toEqual([{ classification: 'false-positive', outcome: 'resume' }])
+  expect(alertText(card.container)).toBe('the server refused it: a later incident supersedes this one')
+  await card.unmount()
+})
+
+test('ending the thread asks once more before it posts, and Back posts nothing', async () => {
+  const card = await mounted(openState(OPENED))
+  await flush(() => control(card.container, 'confirmed bypass').click())
+  await flush(() => control(card.container, 'end the thread').click())
+  await flush(() => button(card.container, 'Record resolution').click())
+  expect(card.posted).toEqual([])
+  await flush(() => button(card.container, 'Back').click())
+  await flush(() => button(card.container, 'Record resolution').click())
+  await flush(() => button(card.container, 'End the thread').click())
+  expect(card.posted.map((each) => each.body)).toEqual([{ classification: 'confirmed-bypass', outcome: 'end-thread' }])
+  await card.unmount()
+})

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import type { EnsoThreadHistory } from '@enso/core'
+import { type EnsoThreadHistory, NO_SESSION_INCIDENTS } from '@enso/core'
 import {
   createResumeRequests,
   createStoredThreadsStore,
@@ -112,6 +112,7 @@ function controlledHistory(): {
         messages: [],
         permissionMode: { mode: 'default', available: [] },
         sessionRisk: { level: 'low', signals: 0 },
+        incidents: NO_SESSION_INCIDENTS,
       })
       return settled(threadId)
     },

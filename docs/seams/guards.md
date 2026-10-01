@@ -128,12 +128,14 @@ What the extension takes, and what it is:
 <!-- source: packages/harness/extensions/guards/index.ts#GuardDependencies -->
 ```ts
 /**
- * The guard's two seams: the bash analyzer (#9) and the harness root (#160 §4).
+ * The guard's seams: the bash analyzer (#9), the harness root (#160 §4), and the incident policy
+ * and log directory (#466).
  *
- * Production wires cc-safety-net's `checkCommand` and this checkout's root; tests inject known
- * verdicts and a root they built. `checkCommand` reads LOCAL policy per call, so a guard test that
- * touched the real library would vary with the machine's cc-safety-net config (the contract test
- * alone exercises the real one, and pins defaults explicitly).
+ * Production wires cc-safety-net's `checkCommand`, this checkout's root, the user's `config.json`
+ * and `ENSO_HOME`'s log directory; tests inject known verdicts, a root they built, a policy and a
+ * directory. `checkCommand` reads LOCAL policy per call, so a guard test that touched the real
+ * library would vary with the machine's cc-safety-net config (the contract test alone exercises
+ * the real one, and pins defaults explicitly) — and the same holds for the machine's config file.
  */
 export interface GuardDependencies {
   analyzeBashCommand: (input: { command: string; cwd: string }) => CheckCommandResult
@@ -144,13 +146,17 @@ export interface GuardDependencies {
    * login `ENSO_HOME` already had — is still here, and still refused.
    */
   harnessRoot: string
+  /** Whether an incident halts, and the risk thresholds — read at every `session_start` (#466). */
+  incidentPolicy: () => EnsoIncidentPolicy
+  /** The log directory `protected-records` refuses a shell command naming (#466). */
+  logsDirectory: string
 }
 ```
 
 <!-- source: packages/harness/extensions/guards/index.ts#createGuards -->
 ```ts
 /**
- * The guards extension, over its two seams. The bash analyzer is a dependency of this one
+ * The guards extension, over its seams. The bash analyzer is a dependency of this one
  * handler, never an extension of its own.
  *
  * @invariant guarded-tool-call/two-participants Two tool_call participants, structurally.
@@ -212,9 +218,11 @@ and against pi's real loop by `agent-host.test.ts#⚠⚠ a batch the guard refus
 ## Who implements it, who consumes it
 
 **Implemented once**, by `packages/harness/extensions/guards/index.ts`. The default export is
-`createGuards({ analyzeBashCommand: checkCommand, harnessRoot })` — the real analyzer wired at the composition root.
-`guardsWithDependencies` registers three hooks: `session_start` resets the read tracker, rebuilds the
-session's risk from the branch, and verifies the policy's tool names against the live tool list
+`createGuards({ analyzeBashCommand: checkCommand, harnessRoot, incidentPolicy, logsDirectory })` — the
+real analyzer, the user's `config.json` `security` section and `ENSO_HOME`'s log directory, wired at the
+composition root. `guardsWithDependencies` registers three hooks: `session_start` resets the read
+tracker, rebuilds the session's risk and incidents from the branch with the incident policy read
+afresh, and verifies the policy's tool names against the live tool list
 (`guards/index.ts#verifyPolicyToolNames`); `tool_result` records which files the session has seen,
 from *results* only — a blocked call produces no result and a failed one arrives `isError`;
 `tool_call` records the call for the session's risk, calls `decide` and logs the verdict.
@@ -224,20 +232,27 @@ from *results* only — a blocked call produces no result and a failed one arriv
 1. **The fail-closed floor** (#4). If the policy names a tool the runtime does not register, or the tool
    list could not be enumerated, every call is denied with the mismatch in the reason.
    Checked lazily here if `session_start` has not fired yet, so the floor never depends on event order.
-2. **Shell** (`bash`, `powershell`) — `guards/index.ts#shellCommandDenial`, deny first, patch last:
+2. **An incident's suspension** (#466, `guards/index.ts#suspensionDenial`). A tool whose family an
+   incident suspended — execute (`bash`, `powershell`), network (`web_fetch`, `web_search`), write
+   (`write`, `edit`) — is refused under `incident-suspension`, before any other rule: the incident is
+   the thread's state, not a judgement of the call. Reading and searching are never suspended.
+3. **Shell** (`bash`, `powershell`) — `guards/index.ts#shellCommandDenial`, deny first, patch last:
    the analyzer (bash only; a throw is a deny per its contract), then the network deny by
    name at command position per segment, with the *cannot vouch* floor for a construct it cannot
-   resolve, then the environment-dump deny, then the secret-path deny —
-   the reader gate's own policy over every literal word of the command (#204). Only a
-   command that passed all four gets the default timeout injected, back in `decide`, so no denied command
-   has mutated input.
-3. **No `path` argument** → pass.
-4. **Writes** (`write`, `edit`), in order: outside the write roots (the cwd when none are
+   resolve, then the environment-dump deny, then the records deny (#466: a word naming this project's
+   session directory or the log directory, resolved and through its realpath —
+   `shell-secret-paths.ts#findDirectoryWord`), then the secret-path deny —
+   the reader gate's own policy over every literal word of the command (#204). The records deny comes
+   before secret-path, which refuses a literal `/.enso/` too, so a touch of the records is named as one
+   and raises its own signal. Only a command that passed them all gets the default timeout injected,
+   back in `decide`, so no denied command has mutated input.
+4. **No `path` argument** → pass.
+5. **Writes** (`write`, `edit`), in order: outside the write roots (the cwd when none are
    configured), a protected fragment, a persistence target, a credential pattern, then the session's
    knowledge of the file — *stale* refuses both tools, *unknown and existing* refuses `write` only, and
    so does *partial* — read, but only part of it (#10, #11, #57 S2; the comment in `decide` says why
    the messages differ).
-5. **Every other tool with a `path` is a reader**, by exclusion, and a credential pattern denies it
+6. **Every other tool with a `path` is a reader**, by exclusion, and a credential pattern denies it
    (`guards/index.ts#readerDenial`); so does a credential location beneath its path (`grep` over `~`),
    except for `ls` and `find`, which return names only (#160 §4). Exclusion, not inclusion: an inclusion list naming only `read` once let `grep` over
    `~/.aws` through (the header of `guards/index.ts`). Since #204 the same policy also runs on the shell route, so
@@ -246,11 +261,12 @@ from *results* only — a blocked call produces no result and a failed one arriv
 **Every verdict is a record** (#132): a denial at `warn` with the tool, the path and the reason; an
 allow at `debug`; never silent (the `tool_call` handler; pinned by `guards.test.ts`).
 
-**The session's risk is observed here, and decides nothing** (#464, phase 1 of #189;
-`guards/index.ts#observeSessionRisk`). Every call, every guard refusal and every refusal the
-permission engine makes of the agent's call (a person's No, a rule's deny, `auto`'s block — heard on
-the engine's decision bus) go through one pure fold in `@enso/core`, `session-risk.ts#sessionRiskStep`.
-A signal is appended as `enso-security-signal` and logged at `warn`; a rise in level as
+**The session's risk is observed here, and an incident is opened here** (#464, #466, phases 1 and 3
+of #189; `guards/index.ts#observeSessionSecurity`). Every call, every guard refusal and every refusal
+the permission engine makes of the agent's call (a person's No, a rule's deny, `auto`'s block — heard
+on the engine's decision bus) go through one pure fold in `@enso/core`,
+`session-risk.ts#sessionRiskStep`, with the thresholds from `config.json` (`security.incidents`). A
+signal is appended as `enso-security-signal` and logged at `warn`; a rise in level as
 `enso-session-risk`. The engine's decision names no tool call, so the guard — the first participant,
 with pi preparing a batch's calls one at a time — attributes it to the call it saw last and records
 it as `enso-permission-denial` with that call's id; a `user_denied` under an aborted run is the
@@ -259,6 +275,20 @@ in risk becomes neither a refusal nor a pass. On `session_start` the state is re
 the branch through the same fold (`riskEventsOfEntries`), never read from stored signals, and the
 server replays the same branch for the thread snapshot and the session eval — `guards.test.ts`
 drives the guard over a refusal sequence and replays the branch it wrote: same signals, same levels.
+
+**An incident** (`@enso/core` `session-incident.ts`) opens when the risk is at `incident` and none is
+open: the guard appends `enso-incident-opened` with the signals it rests on, whether it halted
+(`security.incidents.halt`, off by default: then it is an alert and suspends nothing) and the families
+it suspended — all three. A refusal that tips the session into a halting incident ends the batch
+(`terminate`), whatever its own rule. The suspension is the fold of the branch's incident records
+(`sessionIncidentsStep`), rebuilt at every `session_start`, so a restart, a resume, a reload or a
+config switched to alert-only since does not lift it. Only a human's resolution does: the host's
+resolve route appends `enso-incident-resolved` and announces it on `ENSO_INCIDENT_RESOLVED_CHANNEL`,
+and the guard applies the same step live; the resolution also resets the risk, the only reset. The
+policy is read at every `session_start` and lazily at the first call if none fired — the floor's
+reasoning. ⚠ The records are **tamper-evident at best, and not yet that** (the hash chain is #526): the
+records deny refuses a shell command naming them, which makes an edit harder and visible as a
+signal, not impossible — the guards are the whole boundary (#24).
 
 **Consumed by the runtime.** Handlers stack; the first `block` returns and cannot be un-blocked by a
 later extension, whatever the load order (the header of `guards/index.ts`). The participants and their load order are

@@ -239,6 +239,20 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
     ],
     { builds: 'yes', factory: follows('export async function continueThread') },
   ),
+  // Idle only, like a mode change: lifting a suspension mid-run would change what the run in flight may do (#466).
+  THREAD_INCIDENT_RESOLVE_ROUTE: threadControl(
+    'respondToIncidentResolution → resolveThreadIncident → ThreadRuntime.resolveIncident',
+    'path: `threadId`, `incidentId` (a UUID); body: `EnsoIncidentResolution` — `classification`, `outcome`, and `restricted` families only for `resume-with-restrictions`',
+    [
+      '204 empty — the `enso-incident-resolved` record is appended and the live guard applies it at once; the record arrives on the follow as a custom entry',
+      `${BODY_ERRORS}; 404 no thread under that id, live or stored; 409 thread busy; 413 body too large; 422 the resolution is refused, with the reason — no such incident, a later one supersedes it, the thread was already ended, or \`restricted\` does not fit the outcome; 500 handler failure`,
+    ],
+    {
+      builds: 'yes',
+      path: '/api/threads/:threadId/incidents/:incidentId/resolve',
+      factory: follows('export async function resolveThreadIncident'),
+    },
+  ),
   // Builds on ask, as the commands route does: a person opening the prompt manager (#443).
   THREAD_SYSTEM_PROMPT_ROUTE: threadRead(
     'respondWithSystemPromptPreview → HostedThread.previewSystemPrompt',

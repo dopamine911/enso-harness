@@ -22,6 +22,9 @@ const REFUSES: Readonly<Record<EnsoGuardRule, string>> = {
   'stale-write': 'An edit to a file that changed on disk since pi last read it.',
   'read-before-write': 'Overwriting an existing file pi never read.',
   'policy-mismatch': 'Everything, when the policy names a tool pi does not have. It fails closed.',
+  'incident-suspension':
+    'The shell, web and write tools, while a security incident has them suspended. Only your resolution of the incident lifts it; reading still works.',
+  'protected-records': 'A shell command that names the session or log directory, the records an incident rests on.',
 }
 
 /** The words a refusal's header says for each rule: the receipt's own (`guard-refusal.tsx`). */
@@ -119,11 +122,14 @@ export const GUARDS_AND_RECEIPTS: FeatureSpec = {
     "pi's own record makes no difference between the first two: both are error results. Enso records every refusal next to the call, so the receipt is still there after a reload, and **Stats** says `{refusedApart}` instead of counting every one as a failure.",
     'A good refusal is one pi recovers from. In the thread above, pi read `.env` and `src/config.ts` together, answers from `src/config.ts`, and tells you it could not confirm the value. After the `curl` refusal it tries `web_fetch`, as the reason told it to.',
     'What a refusal tells pi depends on who can lift it. A refusal only you can lift, such as a credential read or a write outside the workspace, tells pi to ask you with `ask_user` instead of trying another way, and ends its turn when every call it made was refused. A refusal that names another way, such as `web_fetch` for `curl`, lets pi take it, and asks it to ask you if that way cannot do the job. A refusal pi can fix itself, such as reading a file before overwriting it, says only how.',
+    'When what pi does after refusals looks like a way around them, the session\'s risk reaches `incident` and Enso opens an incident: a card at the end of the chat that shows what was observed, the risk it adds up to, and what is suspended, and `intervention required` in the status bar. By default an incident only alerts. With `"security": { "incidents": { "halt": true } }` in your `config.json`, it suspends the shell, web and write tools until you resolve it on the card; reading still works. Resolving says what it was and what happens next: every tool back, some kept suspended, or the thread ended for good. A fork of the thread keeps an open incident.',
   ],
   limits: [
     'The guards are not a sandbox. They refuse known kinds of calls. They do not confine the process. `git push`, interpreters such as `python -c`, and writes made through the shell (`echo x >> ~/.bashrc`) are not checked.',
     'A refusal is not an error in Enso. pi is not stopped when some call in the same reply ran: it reads the reason and carries on, and the ask line tells it not to route around the refusal. The line is advice to the model: nothing but the guards themselves stops it from trying.',
     "The guards apply to pi's tools. They do not check what you type yourself in a terminal.",
+    "An incident's records are kept in the session file. The guards refuse a shell command that names that file or the log, which makes changing them harder and shows up as a signal. They cannot make it impossible: the guards are not a sandbox.",
+    'The thresholds that decide `incident` are first guesses, not yet tuned on real sessions. That is why halting is off until you turn it on.',
   ],
   see: [
     { path: 'docs/seams/guards.md', label: 'Guards seam', why: 'the policy and each rule' },

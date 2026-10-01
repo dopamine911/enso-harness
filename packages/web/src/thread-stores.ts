@@ -6,11 +6,13 @@ import {
   type EnsoToolResultDescriptor,
   type EnsoLoginInProgress,
   type EnsoInterruptedTail,
+  type EnsoSessionIncidents,
   type EnsoSessionRiskChange,
   type EnsoSessionUsage,
   type EnsoThreadHistory,
   ensoLogger,
   type ProviderRefusalClass,
+  NO_SESSION_INCIDENTS,
   readEnsoGuardDenialMetadata,
 } from '@enso/core'
 import type { UIMessage } from '@tanstack/ai-client'
@@ -136,6 +138,13 @@ export interface ThreadStores {
    */
   readonly sessionRisk: WritableStore<EnsoSessionRiskChange>
   /**
+   * The session's incidents (#466): every one opened, each with its resolutions, the tool families
+   * suspended now, and whether a resolution ended the thread. Seeded from the history and the
+   * follow's snapshot (the server's fold of the branch), folded live with the same
+   * `sessionIncidentsStep` over the guard's opening and the host's resolution entries.
+   */
+  readonly incidents: WritableStore<EnsoSessionIncidents>
+  /**
    * Finished tool results' #18 descriptors, by tool-call id, as they arrive LIVE (#411): TanStack
    * drops the one the AG-UI result carries, so the follow connection hands it over here. A stored
    * result carries its descriptor in its own metadata, so nothing is seeded; `EnsoToolResult`
@@ -247,6 +256,7 @@ function createThreadStores(
     refusal: createStore<ProviderRefusalMark | undefined>(undefined),
     guardDenials: createStore<ReadonlyMap<string, EnsoGuardRule>>(guardDenialsIn(history)),
     sessionRisk: createStore<EnsoSessionRiskChange>({ level: 'low', signals: 0 }),
+    incidents: createStore<EnsoSessionIncidents>(NO_SESSION_INCIDENTS),
     toolResultDescriptors,
     startSession: createStore(false),
     branchCompacted: createStore(0),
@@ -571,6 +581,7 @@ export function adoptThread(history: EnsoThreadHistory, fetchImpl?: FetchLike, i
   })
   stores.permissionMode.applyReceipt(history.permissionMode)
   stores.sessionRisk.set(history.sessionRisk)
+  stores.incidents.set(history.incidents)
   if (history.interrupted !== undefined) offerContinue(stores, history.interrupted)
   threads.set(stores.threadId, stores)
   summaries.set(stores.threadId, {

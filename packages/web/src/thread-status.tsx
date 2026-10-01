@@ -1,4 +1,11 @@
-import type { EnsoContextUsage, EnsoSessionRiskChange, EnsoSessionUsage, ProviderRefusalClass } from '@enso/core'
+import {
+  type EnsoContextUsage,
+  type EnsoSessionIncidents,
+  type EnsoSessionRiskChange,
+  type EnsoSessionUsage,
+  openIncidentOf,
+  type ProviderRefusalClass,
+} from '@enso/core'
 import type { UIMessage } from '@tanstack/ai-client'
 import { automaticPartsForMessage, selectMessageUI } from '@tanstack/ai-client/ui'
 import { toolResultState } from './EnsoToolResult.tsx'
@@ -168,6 +175,8 @@ export interface ThreadStatusViewProps {
   readonly git?: GitOutcome | undefined
   /** The session's risk (#464): said only once it is above `low`. */
   readonly risk?: EnsoSessionRiskChange | undefined
+  /** The session's incidents (#466): said while one is open, or once a resolution ended the thread. */
+  readonly incidents?: EnsoSessionIncidents | undefined
 }
 
 const COMPACT_TOKENS = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 })
@@ -253,7 +262,8 @@ function RefusalWord({
 
 /**
  * The session's risk (#464), once it is above `low`: `risk high · 3 signals`. Observed evidence,
- * labelled as such — nothing is blocked because of it, and its thresholds are uncalibrated (#468).
+ * labelled as such — the level itself blocks nothing; reaching `incident` opens an incident, which
+ * suspends tools only with halting on (#466). Its thresholds are uncalibrated (#468).
  */
 function RiskWord({ risk }: { readonly risk: EnsoSessionRiskChange | undefined }): React.ReactNode {
   if (risk === undefined || risk.level === 'low') return null
@@ -261,9 +271,43 @@ function RiskWord({ risk }: { readonly risk: EnsoSessionRiskChange | undefined }
   return (
     <span
       className={serious ? 'text-refuse' : 'text-foreground'}
-      title="security signals observed in this session: what the agent did after a refusal. Evidence, not a verdict — nothing is blocked because of it. The session eval on the Stats tab lists them."
+      title="security signals observed in this session: what the agent did after a refusal. Evidence, not a verdict — the level blocks nothing; reaching incident opens an incident. The session eval on the Stats tab lists them."
     >
       risk {risk.level} · {risk.signals} {risk.signals === 1 ? 'signal' : 'signals'}
+    </span>
+  )
+}
+
+/**
+ * The session's incident (#466), tersely: `intervention required` while an open
+ * incident holds tool families suspended — only a human's resolution lifts it, on the incident's
+ * card; `incident open` when it opened with halting off (an alert, nothing suspended); `thread
+ * ended by incident resolution` once a resolution ended it. Nothing otherwise — a resumed thread's
+ * restrictions are the card's to list.
+ */
+function IncidentWord({ incidents }: { readonly incidents: EnsoSessionIncidents | undefined }): React.ReactNode {
+  if (incidents === undefined) return null
+  if (incidents.ended) {
+    return (
+      <span className="text-refuse" title="a resolution ended this thread: it is read-only, and can still be forked">
+        thread ended by incident resolution
+      </span>
+    )
+  }
+  if (openIncidentOf(incidents) === undefined) return null
+  return incidents.suspended.length > 0 ? (
+    <span
+      className="font-medium text-refuse"
+      title={`an incident suspended ${incidents.suspended.join(', ')} tools — resolve it on its card in the Chat view`}
+    >
+      intervention required
+    </span>
+  ) : (
+    <span
+      className="text-refuse"
+      title="an incident is open — halting is off (security.incidents.halt), so nothing is suspended; its card is in the Chat view"
+    >
+      incident open
     </span>
   )
 }
@@ -306,6 +350,7 @@ export function ThreadStatusView({
   refusalSource,
   git,
   risk,
+  incidents,
 }: ThreadStatusViewProps): React.ReactNode {
   const dotClass = activityDotClass(activity)
   const context = usage?.context ?? null
@@ -331,6 +376,7 @@ export function ThreadStatusView({
       {/* #340: `$0.0000` beside `idle` means "nothing ran" here, not "free" — the line in the
 			    transcript says who refused and why. */}
       <RefusalWord refusal={refusal} source={refusalSource} />
+      <IncidentWord incidents={incidents} />
       <RiskWord risk={risk} />
       <span title="user messages in this transcript">
         {counts.prompts} {counts.prompts === 1 ? 'prompt' : 'prompts'}
@@ -385,6 +431,7 @@ export function ThreadStatusBar({ messages, generating }: ThreadStatusBarProps):
   const refusal = useStore(stores.refusal)
   const guardDenials = useStore(stores.guardDenials)
   const risk = useStore(stores.sessionRisk)
+  const incidents = useStore(stores.incidents)
   const git = useThreadGit(`${settledToolResults(messages)}:${generating}`)
   return (
     <ThreadStatusView
@@ -397,6 +444,7 @@ export function ThreadStatusBar({ messages, generating }: ThreadStatusBarProps):
       refusalSource={refusal?.provider}
       git={git}
       risk={risk}
+      incidents={incidents}
     />
   )
 }

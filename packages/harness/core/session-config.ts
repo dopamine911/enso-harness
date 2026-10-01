@@ -1,4 +1,11 @@
-import { ENSO_PROJECT_TRUST_BY_HOST, type EnsoConfigParseResult, mergeEnsoConfig, parseEnsoConfig } from '@enso/core'
+import {
+  ENSO_PROJECT_TRUST_BY_HOST,
+  type EnsoConfigParseResult,
+  type EnsoIncidentPolicy,
+  incidentPolicyOf,
+  mergeEnsoConfig,
+  parseEnsoConfig,
+} from '@enso/core'
 import { ensoAgentDir, ensoConfigPath, ensoHome, projectConfigPath, readTextIfPresent } from '@enso/core/paths'
 import { createProjectTrustStore, defaultProjectTrust, projectTrustOptions } from './project-trust.ts'
 
@@ -126,9 +133,14 @@ async function resolveSessionConfig(context: SessionConfigContext): Promise<Sess
   const project = parseEnsoConfig(projectText)
   if (project.kind === 'unreadable') return { result: project, path: projectPath, sources: bothSources }
   // `projects.roots` is user-only: which directories may be projects is not a project's to widen.
-  const { projects, ...projectConfig } = project.config
+  // ⚠ So is `security` (#466): a checkout the agent can write must not switch halting off or raise
+  // the thresholds its own incident is measured against.
+  const { projects, security, ...projectConfig } = project.config
   if (projects !== undefined) {
     context.ui.notify(`Enso: ${projectPath} sets projects.roots, which only ${userPath} may set — ignored.`, 'warning')
+  }
+  if (security !== undefined) {
+    context.ui.notify(`Enso: ${projectPath} sets security, which only ${userPath} may set — ignored.`, 'warning')
   }
   const merged = mergeEnsoConfig(user.result.config, projectConfig)
   return { result: { kind: 'ok', config: merged }, path: projectPath, sources: bothSources }
@@ -142,6 +154,22 @@ function readConfig(path: string): { readonly result: EnsoConfigParseResult; rea
   } catch (error: unknown) {
     return { result: { kind: 'unreadable', reason: `could not be read: ${String(error)}` }, present: true }
   }
+}
+
+/**
+ * The incident policy (#466) from the USER's `config.json` alone — `security` is user-only, so
+ * there is no project layer and no trust question, and it can be read synchronously where the
+ * guard needs it (`session_start`, before any call is decided). ⚠ Unreadable fails CLOSED, as every
+ * consumer of this file does: halting on, the default thresholds, and `problem` says why.
+ *
+ * @group Session incident
+ */
+export function userIncidentPolicy(home: string): { readonly policy: EnsoIncidentPolicy; readonly problem?: string } {
+  const { result } = readConfig(ensoConfigPath(home))
+  if (result.kind === 'unreadable') {
+    return { policy: { ...incidentPolicyOf(undefined), halt: true }, problem: result.reason }
+  }
+  return { policy: incidentPolicyOf(result.config.security) }
 }
 
 async function projectTrusted(context: SessionConfigContext, projectPath: string): Promise<boolean> {
