@@ -652,11 +652,14 @@ function crashPropertiesOf(reason: unknown): Record<string, unknown> {
  * third signal or a changed flush order would have reached one of them.
  *
  * ⚠ `on`, not `once`, for the signals, with one guard for everything. A `once` handler is
- * consumed by the first signal, and a SECOND one during the flush then meets the runtime's
- * default — killed on the spot, flush lost, marker left. A second signal is the normal case:
- * a supervisor signals the process group AND the dev launcher signals its children (seen on
- * the first smoke of #385, `timeout` + `bun run dev`). The guard makes a repeat a no-op, so the
- * one dispose runs to its exit; a second throw during the flush is a no-op the same way.
+ * consumed by the first signal, and a SECOND one arriving on its heels can then meet the
+ * runtime's default — killed on the spot, flush lost, marker left. A second signal is the
+ * normal case: a supervisor signals the process group AND the dev launcher signals its
+ * children. Measured on #385 with `timeout -s TERM … bun run dev`: a web marker left behind in
+ * 2 of 3 runs under `once`, 0 of 5 under `on`. A unit test cannot land the second signal in
+ * that window (a repeat sent by a parent is coalesced or absorbed), so the proof is that smoke.
+ * The guard makes a repeat a no-op, so the one dispose runs to its exit; a second throw during
+ * the flush is a no-op the same way.
  *
  * @group Logging
  */
