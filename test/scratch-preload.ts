@@ -21,8 +21,10 @@ import { join } from 'node:path'
  * ⚠ A child given an explicit `env` WITHOUT `TMPDIR` writes to the real `/tmp`. Every such child
  * today (PR #549 review): the fixed-environment git helpers in `secret-scan-gate.test.ts` and
  * `guards.test.ts` make no temporary files; `guards.test.ts`'s nested `bun test` is handed this
- * run's `TMPDIR`; and `cc-safety-net-contract.test.ts`'s probe reads `TMPDIR` only to classify
- * paths in the commands it judges, never to make a file — it is left WITHOUT it on purpose, so
+ * run's `TMPDIR`; and `cc-safety-net-contract.test.ts`'s probe (`checkCommand`, read in the
+ * vendored source of cc-safety-net 2.4.6) reads `TMPDIR` only to classify paths in the commands
+ * it judges, and its only writes are its policy files under `$HOME`, which the probe points at
+ * a directory of its own — nothing under `tmpdir()`. It is left WITHOUT `TMPDIR` on purpose, so
  * the pinned verdicts are the policy's view under the default tmp, not this run's scratch.
  * Playwright's e2e home (`packages/web/e2e/e2e-home.ts`) runs outside `bun test` and is not
  * covered here.
