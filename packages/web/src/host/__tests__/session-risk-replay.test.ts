@@ -42,7 +42,7 @@ const result = (toolCallId: string): Record<string, unknown> =>
     },
   })
 
-test('⚠ the raw branch and its transcript replay to the same risk, a batch, a non-chat message and an old record included', () => {
+test('⚠ the stored branch replays to the live fold’s risk: a batch, a non-chat message and an old record without a call id included', () => {
   const branch = [
     stamped({ type: 'message', message: { role: 'user', content: 'tidy the build' } }),
     stamped({ type: 'model_change', provider: 'acme', modelId: 'm1' }),
@@ -67,8 +67,8 @@ test('⚠ the raw branch and its transcript replay to the same risk, a batch, a 
     custom(ENSO_OPERATOR_DENIAL_ENTRY, { requestId: 'r4', surface: 'bash', value: 'rm -rf build' }),
     result('c4'),
   ]
-  const fromEntries = sessionRiskOfTranscript(transcriptOf(branch))
-  expect(fromEntries.signals.map((signal) => `${signal.signal}@${signal.toolCallId}`)).toEqual([
+  const replayed = sessionRiskOfTranscript(transcriptOf(branch))
+  expect(replayed.signals.map((signal) => `${signal.signal}@${signal.toolCallId}`)).toEqual([
     'alternate-execution-path@c2',
     'denial-retry@c4',
   ])
