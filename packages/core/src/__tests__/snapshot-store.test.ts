@@ -138,6 +138,30 @@ test('⚠ a tracked file a later .gitignore rule covers stays in the snapshot (t
   expect(await snapshotPaths(environment, store, third.hash)).not.toContain('README.md')
 })
 
+test("⚠ the store takes the checkout's object format — a sha256 checkout snapshots with 64-digit hashes and still leans on its objects — whatever `init.defaultObjectFormat` says", async () => {
+  const tree = mkdtempSync(join(tmpdir(), 'enso-snap-sha256-'))
+  git(tree, 'init', '--quiet', '--object-format=sha256')
+  writeFileSync(join(tree, 'a.txt'), 'a\n')
+  git(tree, 'add', '--all')
+  git(tree, 'commit', '--quiet', '-m', 'a')
+  // The user's default says the other format: the checkout's wins, else alternates could not be read.
+  const store = await openSnapshotStore({
+    directory: join(mkdtempSync(join(tmpdir(), 'enso-snap-store-')), 'store'),
+    tree,
+    environment: {
+      ...environment,
+      GIT_CONFIG_COUNT: '1',
+      GIT_CONFIG_KEY_0: 'init.defaultObjectFormat',
+      GIT_CONFIG_VALUE_0: 'sha1',
+    },
+  })
+  if (store === undefined) throw new Error('did not open')
+  const first = await taken(store)
+  expect(first.hash).toMatch(/^[0-9a-f]{64}$/)
+  expect(await snapshotPaths(environment, store, first.hash)).toEqual(['a.txt'])
+  expect(readFileSync(join(store.directory, 'config'), 'utf8')).toContain('objectformat = sha256')
+})
+
 test('a tree that is no git checkout snapshots too — no alternates, no seed, every file hashed', async () => {
   const tree = mkdtempSync(join(tmpdir(), 'enso-snap-plain-'))
   writeFileSync(join(tree, 'a.txt'), 'a\n')

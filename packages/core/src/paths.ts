@@ -416,7 +416,8 @@ export function projectSessionsDir(projectsDir: string, projectId: string): stri
 /**
  * A project's snapshot stores: `<projectsDir>/<id>/snapshots/<thread-id>` is one thread's bare
  * repository of its tree as each run began (#551, `@enso/core/snapshot-store`). Beside the
- * thread's session, under its project — removed with the thread.
+ * thread's session, under its project; to be removed with the thread by #551 slice 2's `dispose`
+ * — nothing removes one yet.
  *
  * @group Workspace paths
  */

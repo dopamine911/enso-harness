@@ -35,7 +35,7 @@
 import { execFile } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { type GitResult, runGitIn, withoutGitLocalVariables } from './git.ts'
+import { exitCode, type GitResult, runGitIn, withoutGitLocalVariables } from './git.ts'
 
 /**
  * How long one git of the store may take. A mint on an unseeded 100k-file tree is the slow case;
@@ -101,11 +101,6 @@ export interface SnapshotStore {
   snapshot(): Promise<{ kind: 'taken'; taken: SnapshotTaken } | { kind: 'refused'; refused: SnapshotRefused }>
 }
 
-function exitCode(error: (Error & { code?: unknown; killed?: boolean }) | null): number {
-  if (error === null) return 0
-  return typeof error.code === 'number' && error.killed !== true ? error.code : -1
-}
-
 /** git with the store as its repository and `tree` as its work tree; the tree's own `.git` is out of the picture. */
 function runStoreGit(
   environment: NodeJS.ProcessEnv,
@@ -133,18 +128,20 @@ function runStoreGit(
 }
 
 /**
- * The tree's own object directory and index, when the tree is a git checkout: the alternates
- * target and the index seed. Read through the read-only runner, so a worktree's `.git` FILE
- * resolves to the common directory as git does, not as a path join would.
+ * The tree's own object directory, index and object format, when the tree is a git checkout: the
+ * alternates target, the index seed, and the format the store must share. Read through the
+ * read-only runner, so a worktree's `.git` FILE resolves to the common directory as git does, not
+ * as a path join would.
  */
 async function treeRepository(
   environment: NodeJS.ProcessEnv,
   tree: string,
-): Promise<{ objects: string; index: string } | undefined> {
+): Promise<{ objects: string; index: string; objectFormat: string } | undefined> {
   const objects = await runGitIn(environment, ['rev-parse', '--path-format=absolute', '--git-path', 'objects'], tree)
   const index = await runGitIn(environment, ['rev-parse', '--path-format=absolute', '--git-path', 'index'], tree)
-  if (objects.code !== 0 || index.code !== 0) return undefined
-  return { objects: objects.stdout.trim(), index: index.stdout.trim() }
+  const format = await runGitIn(environment, ['rev-parse', '--show-object-format'], tree)
+  if (objects.code !== 0 || index.code !== 0 || format.code !== 0) return undefined
+  return { objects: objects.stdout.trim(), index: index.stdout.trim(), objectFormat: format.stdout.trim() }
 }
 
 /**
@@ -168,9 +165,16 @@ export async function openSnapshotStore(options: {
     } catch {
       return undefined
     }
-    const init = await runGitIn(environment, ['init', '--quiet', '--bare', directory], tree)
-    if (init.code !== 0) return undefined
+    // The checkout's repository first: its object FORMAT decides the store's (alternates cannot
+    // mix sha1 and sha256 objects), never the user's `init.defaultObjectFormat`; a tree that is no
+    // checkout gets sha1, said explicitly for the same reason.
     const repository = await treeRepository(environment, tree)
+    const init = await runGitIn(
+      environment,
+      ['init', '--quiet', '--bare', `--object-format=${repository?.objectFormat ?? 'sha1'}`, directory],
+      tree,
+    )
+    if (init.code !== 0) return undefined
     if (repository !== undefined) {
       mkdirSync(join(directory, 'objects', 'info'), { recursive: true })
       writeFileSync(join(directory, 'objects', 'info', 'alternates'), `${repository.objects}\n`)

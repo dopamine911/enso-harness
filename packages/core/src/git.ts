@@ -109,8 +109,13 @@ const GIT_READ_ONLY_CONFIG = [
   'diff.submodule=short',
 ]
 
-/** The exit code in an `execFile` error: git's own, or -1 for a git that never ran or was killed. */
-function exitCode(error: (Error & { code?: unknown; killed?: boolean }) | null): number {
+/**
+ * The exit code in an `execFile` error: git's own, or -1 for a git that never ran or was killed.
+ * Shared with the snapshot store's own runner.
+ *
+ * @group Git
+ */
+export function exitCode(error: (Error & { code?: unknown; killed?: boolean }) | null): number {
   if (error === null) return 0
   return typeof error.code === 'number' && error.killed !== true ? error.code : -1
 }

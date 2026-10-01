@@ -90,11 +90,15 @@ export const EnsoRunContext = Type.Object(
     mode: Type.Union([Type.Object({ rulesHash: Sha256 }, { additionalProperties: false }), Type.Null()]),
     /**
      * The commit the thread's snapshot store holds of the tree as the run began (#551); `null` when
-     * none could be taken; absent on a record from before #551.
+     * none could be taken; absent on a record from before #551. 40 or 64 hex digits: the store takes
+     * the checkout's object format (sha1 or sha256), since alternates cannot mix the two.
      */
     snapshot: Type.Optional(
       Type.Union([
-        Type.Object({ hash: Type.String({ pattern: '^[0-9a-f]{40}$' }) }, { additionalProperties: false }),
+        Type.Object(
+          { hash: Type.String({ pattern: '^([0-9a-f]{40}|[0-9a-f]{64})$' }) },
+          { additionalProperties: false },
+        ),
         Type.Null(),
       ]),
     ),
