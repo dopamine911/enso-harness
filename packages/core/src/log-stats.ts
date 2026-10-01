@@ -550,7 +550,11 @@ function foldOwnEnd(writer: ProcessFold, kind: 'stopped' | 'crashed', at: string
 function foldReportedEnd(fold: Fold, at: string, properties: Properties): void {
   const pid = numberOf(properties.pid)
   const startedAt = stringOf(properties.startedAt)
-  const row = fold.launches.find((launch) => launch.pid === pid && launch.startedAt === startedAt)
+  // A report missing either fact names no launch: never let two absences match an unbooted row.
+  const row =
+    pid === undefined || startedAt === undefined
+      ? undefined
+      : fold.launches.find((launch) => launch.pid === pid && launch.startedAt === startedAt)
   if (row === undefined) {
     fold.uncleanEndsOffFile += 1
     return
