@@ -174,3 +174,35 @@ test('⚠ the repository allowlist keeps every pattern the workflow baseline had
   expect(baseline.length).toBeGreaterThan(0)
   expect(config).toEqual(expect.arrayContaining(baseline))
 })
+
+/**
+ * THE TRIGGER THAT RUNS BEFORE A MERGE (#538). The scan once ran on `merge_group` alone, on the
+ * premise that `main` required a merge queue; it did not, this repository has never had a
+ * `merge_group` run, and so no pull request was scanned before it merged — secrets were caught
+ * only by the push backstop, when they already needed rotating. A test can hold the workflow
+ * file; it cannot see the repository setting, which is why `pull_request` is the trigger held.
+ */
+
+/** The `on:` block of the workflow, as the lines indented under it. */
+function triggerBlockOfWorkflow(): string {
+  const workflow = readFileSync(join(REPOSITORY_ROOT, WORKFLOW), 'utf8')
+  const block = /^on:\n((?:[ \t]+.*\n|\n)*)/m.exec(workflow)?.[1]
+  if (block === undefined) throw new Error(`${WORKFLOW}: no top-level on: block`)
+  return block
+}
+
+test('⚠ the secret scan runs on every push to a pull request, before any merge (#538)', () => {
+  const triggers = triggerBlockOfWorkflow()
+  const pullRequest = /^ {2}pull_request:\n((?:[ ]{4}.*\n)*)/m.exec(triggers)?.[1]
+  expect(pullRequest).toBeDefined()
+  // Not `opened` alone: a push after opening must re-scan, and a draft made ready must be scanned.
+  const types =
+    /types:\s*\[([^\]]*)\]/
+      .exec(pullRequest ?? '')?.[1]
+      ?.split(',')
+      .map((type) => type.trim()) ?? []
+  expect(types).toEqual(expect.arrayContaining(['opened', 'synchronize', 'reopened', 'ready_for_review']))
+  // The other two stay: the queue's authoritative check if one is ever enabled, and the backstop on main.
+  expect(/^ {2}merge_group:/m.test(triggers)).toBe(true)
+  expect(/^ {2}push:\n[ ]{4}branches: \[main\]/m.test(triggers)).toBe(true)
+})
