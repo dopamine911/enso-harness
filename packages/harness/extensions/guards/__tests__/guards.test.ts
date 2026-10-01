@@ -708,12 +708,14 @@ test.skipIf(!isGitAvailable)(
     // An unstaged mutation on top: the shape that has something to lose to `checkout --`.
     writeFileSync(tracked, 'victim-unstaged\n')
 
-    // The child is handed what a git hook hands its children, and nothing else it does not need.
+    // The child is handed what a git hook hands its children, and nothing else it does not need —
+    // plus this run's `TMPDIR`, so the directories it makes land in the run's scratch (#546).
     const child = Bun.spawnSync([process.execPath, 'test', import.meta.path, '-t', 'the incident shape'], {
       cwd: dirname(import.meta.path),
       env: {
         ...FIXTURE_GIT_ENV,
         PATH: dirname(Bun.which('git') ?? '/usr/bin/git'),
+        TMPDIR: tmpdir(),
         GIT_DIR: join(victim, '.git'),
         GIT_INDEX_FILE: join(victim, '.git', 'index'),
         GIT_WORK_TREE: victim,
