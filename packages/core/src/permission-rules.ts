@@ -34,6 +34,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
+import { ENSO_INCIDENT_REPORT_TOOL_NAME } from './incident-report.ts'
 import {
   ENSO_AUTO_AUTHORIZER,
   ENSO_CATCH_ALL,
@@ -90,6 +91,10 @@ export const ENSO_DEFAULT_PERMISSION_POLICY = {
     // the session's own provider. `web_fetch` reaches any URL, so it stays on the `*` ask.
     ask_user: 'allow',
     web_search: 'allow',
+    // The incident report (#467): the harness's own bounded step after a halt, not an agent
+    // capability — the guard lets it through only while a report is owed, and refuses everything
+    // else then. Asking for it would put a permission prompt between a halt and its card.
+    [ENSO_INCIDENT_REPORT_TOOL_NAME]: 'allow',
     path_read: { [ENSO_CATCH_ALL]: 'allow', ...ENV_FILES_DENIED, '*.env.example': 'allow' },
     path_write: { [ENSO_CATCH_ALL]: 'allow', ...ENV_FILES_DENIED },
     external_directory: { [ENSO_CATCH_ALL]: 'ask' },
@@ -158,7 +163,8 @@ export function permissionEngineConfigPath(agentDir: string): string {
  *
  * `movedAside` names where a regular file found at the engine's config path was moved to (see
  * `linkEngineConfig`), so the launch log says so. `catchAllAdded` names the surfaces of a kept
- * file that got Enso's catch-all put first (`withCatchAllFirst`), so the log says that too.
+ * file that got Enso's catch-all put first (`withCatchAllFirst`), so the log says that too;
+ * `reportToolAdded` says the file had no rule for the incident report tool and got `allow` (#467).
  *
  * @group Permission mode
  */
@@ -168,6 +174,7 @@ export type PermissionPolicyPreparation =
       readonly path: string
       readonly surfaces: number
       readonly catchAllAdded: readonly string[]
+      readonly reportToolAdded: boolean
       readonly movedAside?: string
     }
   | {
@@ -430,15 +437,31 @@ function preparePolicyFile(
   return { kind: 'seeded', path: policyPath, was: read.kind === 'absent' ? 'absent' : 'without a permission block' }
 }
 
-/** Keep a user's policy, with Enso's catch-all put first where a mode needs it (#499). */
+/**
+ * Keep a user's policy, with Enso's catch-all put first where a mode needs it (#499), and the
+ * incident report tool allowed when the file says nothing about it (#467) — never over a rule the
+ * user wrote for it.
+ */
 function keepPolicy(
   policyPath: string,
   file: Readonly<Record<string, unknown>>,
   permission: Readonly<Record<string, unknown>>,
 ): FilePreparation {
   const normalized = withCatchAllFirst(permission)
-  if (normalized.added.length > 0) writeJson(policyPath, { ...file, permission: normalized.permission })
-  return { kind: 'kept', path: policyPath, surfaces: Object.keys(permission).length, catchAllAdded: normalized.added }
+  const reportToolAdded = !(ENSO_INCIDENT_REPORT_TOOL_NAME in permission)
+  if (normalized.added.length > 0 || reportToolAdded) {
+    const next = reportToolAdded
+      ? { ...normalized.permission, [ENSO_INCIDENT_REPORT_TOOL_NAME]: 'allow' }
+      : normalized.permission
+    writeJson(policyPath, { ...file, permission: next })
+  }
+  return {
+    kind: 'kept',
+    path: policyPath,
+    surfaces: Object.keys(permission).length,
+    catchAllAdded: normalized.added,
+    reportToolAdded,
+  }
 }
 
 /**
@@ -459,7 +482,10 @@ export function describePermissionPolicy(
       preparation.catchAllAdded.length === 0
         ? ''
         : `; Enso's catch-all (**) put first in ${preparation.catchAllAdded.join(', ')}, so no mode can override a rule written there (#499)`
-    return `permission policy: ${preparation.path}, ${preparation.surfaces} surfaces${added}${moved}`
+    const report = preparation.reportToolAdded
+      ? `; ${ENSO_INCIDENT_REPORT_TOOL_NAME} allowed, as the file had no rule for it (#467)`
+      : ''
+    return `permission policy: ${preparation.path}, ${preparation.surfaces} surfaces${added}${report}${moved}`
   }
   const backup = preparation.piccBackup === undefined ? '' : ` (the old file is kept as ${preparation.piccBackup})`
   return (

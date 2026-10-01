@@ -1,5 +1,5 @@
 import { afterAll, expect, test } from 'bun:test'
-import type { EnsoIncidentOpened, EnsoIncidentRecord, EnsoSessionIncidents } from '@enso/core'
+import type { EnsoIncidentOpened, EnsoIncidentRecord, EnsoIncidentReport, EnsoSessionIncidents } from '@enso/core'
 import { act } from 'react'
 import type { createRoot as CreateRoot } from 'react-dom/client'
 import type * as FollowConnectionModule from '../follow-connection.ts'
@@ -38,7 +38,14 @@ const OPENED: EnsoIncidentOpened = {
 
 const openState = (opened: EnsoIncidentOpened): { record: EnsoIncidentRecord; incidents: EnsoSessionIncidents } => {
   const record = { opened, resolutions: [] }
-  return { record, incidents: { incidents: [record], suspended: opened.suspended, ended: false } }
+  return {
+    record,
+    incidents: {
+      incidents: [record],
+      suspended: opened.suspended,
+      ended: false,
+    },
+  }
 }
 
 interface Posted {
@@ -50,12 +57,19 @@ interface Posted {
 async function mounted(
   state: { record: EnsoIncidentRecord; incidents: EnsoSessionIncidents },
   answer: () => Response = () => new Response(null, { status: 204 }),
-): Promise<{ posted: Posted[]; container: HTMLElement; unmount: () => Promise<void> }> {
+): Promise<{
+  posted: Posted[]
+  container: HTMLElement
+  unmount: () => Promise<void>
+}> {
   const posted: Posted[] = []
   const connection = createFollowConnection({
     threadId: 't1',
     fetch: async (input: string, init?: RequestInit) => {
-      posted.push({ url: input, body: typeof init?.body === 'string' ? JSON.parse(init.body) : undefined })
+      posted.push({
+        url: input,
+        body: typeof init?.body === 'string' ? JSON.parse(init.body) : undefined,
+      })
       return answer()
     },
     onProblem: () => undefined,
@@ -129,7 +143,12 @@ test('observed, inferred and suspended are three labelled sections, each holding
 
 test('an inherited incident names the thread and incident it came from; halting off suspends nothing and says why', async () => {
   const card = await mounted(
-    openState({ ...OPENED, halted: false, suspended: [], inheritedFrom: { threadId: 'src-9', incidentId: 'inc-0' } }),
+    openState({
+      ...OPENED,
+      halted: false,
+      suspended: [],
+      inheritedFrom: { threadId: 'src-9', incidentId: 'inc-0' },
+    }),
   )
   expect(card.container.textContent).toContain('came from thread src-9, whose incident inc-0 was open')
   expect(section(card.container, 'Suspended tools').textContent).toBe(
@@ -151,7 +170,11 @@ test('resume with restrictions and none ticked is refused before posting; ticked
   expect(card.posted).toEqual([
     {
       url: '/api/threads/t1/incidents/inc-1/resolve',
-      body: { classification: 'agent-error', outcome: 'resume-with-restrictions', restricted: ['network'] },
+      body: {
+        classification: 'agent-error',
+        outcome: 'resume-with-restrictions',
+        restricted: ['network'],
+      },
     },
   ])
   expect(alertText(card.container)).toBeUndefined()
@@ -182,4 +205,109 @@ test('ending the thread asks once more before it posts, and Back posts nothing',
   await flush(() => button(card.container, 'End the thread').click())
   expect(card.posted.map((each) => each.body)).toEqual([{ classification: 'confirmed-bypass', outcome: 'end-thread' }])
   await card.unmount()
+})
+
+const REPORT: EnsoIncidentReport = {
+  incidentId: 'inc-1',
+  factual: {
+    task: {
+      text: 'fetching the docs',
+      evidence: [{ ref: 'prompt', quote: 'get the docs', verified: true }],
+      verified: true,
+    },
+    denied: {
+      text: 'curl was refused',
+      evidence: [{ ref: 'c9', quote: 'curl blocked', verified: false }],
+      verified: false,
+    },
+    tried: {
+      text: 'ran python instead',
+      evidence: [{ ref: 'c7', quote: 'python -c', verified: true }],
+      verified: true,
+    },
+  },
+  interpretive: {
+    whyThatAlternative: 'it looked equivalent',
+    recognisedAsBypass: 'only afterwards',
+    shouldHaveDone: 'stopped and asked',
+    sufficientAuthorization: 'an explicit yes for network',
+    patternToAvoid: 'swapping interpreters after a refusal',
+    uncharitableRead: 'it routed around the guard on purpose',
+  },
+  mismatches: ['denied-cites-no-incident-refusal'],
+  submission: 2,
+}
+
+const EXPLANATION = "The agent's explanation"
+
+const reportedState = (
+  attached: Pick<EnsoIncidentRecord, 'report' | 'reportMissing'>,
+): { record: EnsoIncidentRecord; incidents: EnsoSessionIncidents } => {
+  const record: EnsoIncidentRecord = {
+    opened: OPENED,
+    resolutions: [],
+    ...attached,
+  }
+  return {
+    record,
+    incidents: {
+      incidents: [record],
+      suspended: OPENED.suspended,
+      ended: false,
+    },
+  }
+}
+
+test("the agent's explanation is its own section, apart from what was observed", async () => {
+  const card = await mounted(reportedState({ report: REPORT }))
+  const explanation = section(card.container, EXPLANATION).textContent ?? ''
+  const observed = section(card.container, 'Observed').textContent ?? ''
+  expect(explanation).toContain('not the record')
+  expect(explanation).toContain('ran python instead')
+  expect(explanation).not.toContain('alternate-execution-path')
+  expect(observed).not.toContain('ran python instead')
+  expect(observed).not.toContain('it routed around the guard on purpose')
+  await card.unmount()
+})
+
+test('each citation is labelled verified or unverified in words, the prompt named as such, the mismatch flagged', async () => {
+  const card = await mounted(reportedState({ report: REPORT }))
+  const items = [...section(card.container, EXPLANATION).querySelectorAll('li li')].map((each) => each.textContent)
+  expect(items).toEqual([
+    'get the docs — the prompt · verified',
+    'curl blocked — c9 · unverified',
+    'python -c — c7 · verified',
+  ])
+  const explanation = section(card.container, EXPLANATION).textContent ?? ''
+  expect(explanation).toContain("curl was refuseddoes not cite the incident's refusals")
+  expect(explanation).toContain('filed after one correction')
+  expect(explanation).toContain('The uncharitable readit routed around the guard on purpose')
+  expect(explanation).toContain('Recognised as a way around it?only afterwards')
+  await card.unmount()
+})
+
+test('a clean first submission carries no mismatch flag and no correction note', async () => {
+  const card = await mounted(reportedState({ report: { ...REPORT, mismatches: [], submission: 1 } }))
+  const explanation = section(card.container, EXPLANATION).textContent ?? ''
+  expect(explanation).not.toContain('does not cite')
+  expect(explanation).not.toContain('filed after one correction')
+  await card.unmount()
+})
+
+test('a missing report says why; an owed one says it is pending; an alert-only incident has no explanation', async () => {
+  const missing = await mounted(
+    reportedState({
+      reportMissing: { incidentId: 'inc-1', reason: 'the run was cut off' },
+    }),
+  )
+  expect(section(missing.container, EXPLANATION).textContent).toContain('no report filed — the run was cut off')
+  await missing.unmount()
+
+  const pending = await mounted(openState(OPENED))
+  expect(section(pending.container, EXPLANATION).textContent).toContain('report pending — the agent is asked for one')
+  await pending.unmount()
+
+  const alertOnly = await mounted(openState({ ...OPENED, halted: false, suspended: [] }))
+  expect(() => section(alertOnly.container, EXPLANATION)).toThrow()
+  await alertOnly.unmount()
 })

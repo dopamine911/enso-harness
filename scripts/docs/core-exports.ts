@@ -57,6 +57,7 @@ const MODULE_FACTS: Readonly<Record<string, readonly [classification: Classifica
   'git.ts': ['node-only utility', 'Project vocabulary'],
   'git-state.ts': ['wire', 'Thread, Observation'],
   'guard.ts': ['config/policy', 'Permission'],
+  'incident-report.ts': ['wire', 'Permission, Control, Record'],
   'log.ts': ['wire', 'Record'],
   'log-bundle.ts': ['node-only utility', 'Record'],
   'log-process.ts': ['node-only utility', 'Record'],

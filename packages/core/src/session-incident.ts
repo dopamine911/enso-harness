@@ -1,6 +1,12 @@
 import { type Static, Type } from 'typebox'
 import { Compile } from 'typebox/compile'
 import {
+  EnsoIncidentReport,
+  EnsoIncidentReportMissing,
+  readEnsoIncidentReport,
+  readEnsoIncidentReportMissing,
+} from './incident-report.ts'
+import {
   DEFAULT_RISK_THRESHOLDS,
   ENSO_INCIDENT_RESOLVED_ENTRY,
   type EnsoRiskThresholds,
@@ -179,13 +185,19 @@ export function readEnsoIncidentResolved(customType: string, data: unknown): Ens
 }
 
 /**
- * One incident as the thread shows it: its opening, and every resolution of it in order (the last
- * one stands; a resumed-with-restrictions incident can be resolved again to lift them).
+ * One incident as the thread shows it: its opening, every resolution of it in order (the last one
+ * stands; a resumed-with-restrictions incident can be resolved again to lift them), and the
+ * agent's report — or that none was filed (#467). The report sits beside the record, never in it.
  *
  * @group Session incident
  */
 export const EnsoIncidentRecord = Type.Object(
-  { opened: EnsoIncidentOpened, resolutions: Type.Array(EnsoIncidentResolved) },
+  {
+    opened: EnsoIncidentOpened,
+    resolutions: Type.Array(EnsoIncidentResolved),
+    report: Type.Optional(EnsoIncidentReport),
+    reportMissing: Type.Optional(EnsoIncidentReportMissing),
+  },
   { additionalProperties: false },
 )
 /** @group Session incident */
@@ -284,6 +296,37 @@ export function openIncidentOf(state: EnsoSessionIncidents): EnsoIncidentRecord 
   return last !== undefined && last.resolutions.length === 0 ? last : undefined
 }
 
+/**
+ * The incident whose report the agent owes now (#467): open, halted, and neither filed nor
+ * recorded missing. While there is one, the guard lets only the report tool through.
+ *
+ * @group Session incident
+ */
+export function reportOwedOf(state: EnsoSessionIncidents): EnsoIncidentRecord | undefined {
+  const open = openIncidentOf(state)
+  return open?.opened.halted === true && open.report === undefined && open.reportMissing === undefined
+    ? open
+    : undefined
+}
+
+/**
+ * The record with its report — or its absence — attached, once: the first wins, and a report for
+ * an incident that already has either is not one (#467: the report cannot change the record).
+ */
+function withReport(state: EnsoSessionIncidents, customType: string, data: unknown): EnsoSessionIncidents | undefined {
+  const report = readEnsoIncidentReport(customType, data)
+  const missing = report === undefined ? readEnsoIncidentReportMissing(customType, data) : undefined
+  const incidentId = report?.incidentId ?? missing?.incidentId
+  if (incidentId === undefined) return undefined
+  const index = state.incidents.findIndex((record) => record.opened.incidentId === incidentId)
+  const record = state.incidents[index]
+  if (record === undefined || record.report !== undefined || record.reportMissing !== undefined) return state
+  let attached: EnsoIncidentRecord = record
+  if (report !== undefined) attached = { ...record, report }
+  else if (missing !== undefined) attached = { ...record, reportMissing: missing }
+  return { ...state, incidents: state.incidents.map((each, at) => (at === index ? attached : each)) }
+}
+
 /** The families in either list, in `ENSO_TOOL_FAMILIES` order. */
 function unionOf(left: readonly EnsoToolFamily[], right: readonly EnsoToolFamily[]): EnsoToolFamily[] {
   return ENSO_TOOL_FAMILIES.filter((family) => left.includes(family) || right.includes(family))
@@ -307,6 +350,8 @@ export function sessionIncidentsStep(
   data: unknown,
 ): EnsoSessionIncidents {
   if (state.ended) return state
+  const reported = withReport(state, customType, data)
+  if (reported !== undefined) return reported
   const opened = readEnsoIncidentOpened(customType, data)
   if (opened !== undefined) {
     if (openIncidentOf(state) !== undefined) return state

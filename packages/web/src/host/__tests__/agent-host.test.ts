@@ -17,7 +17,11 @@ import {
 import {
   ASK_USER_TOOL_NAME,
   ENSO_RUN_CONTEXT_ENTRY,
+  ENSO_INCIDENT_OPENED_CHANNEL,
   ENSO_INCIDENT_OPENED_ENTRY,
+  ENSO_INCIDENT_REPORT_ENTRY,
+  ENSO_INCIDENT_REPORT_TOOL_NAME,
+  type EnsoIncidentReport,
   ENSO_INCIDENT_RESOLVED_CHANNEL,
   ENSO_INCIDENT_RESOLVED_ENTRY,
   ENSO_SYSTEM_PROMPT_ENTRY,
@@ -117,6 +121,7 @@ const MANIFEST_EXTENSION_MARKERS = [
   'extensions/ask-user/index.ts',
   'extensions/system-prompt/index.ts',
   'extensions/run-context/index.ts',
+  'extensions/incident-report/index.ts',
 ]
 
 /** Collect every event a session emits, from its first subscriber on (the host replays what came before). */
@@ -583,7 +588,8 @@ test('⚠ an entry an extension persists during session_start reaches the first 
 // file the user wrote is kept as they wrote it; either way the engine's path reads it.
 test("⚠ the engine's config path reads the host's policy file: a fresh one is Enso's policy, a user's is theirs (#446)", async () => {
   // Nothing here for the launch to put Enso's catch-all into (#499), so it is kept byte for byte.
-  const userPolicy = `${JSON.stringify({ permission: { read: 'allow' } })}\n`
+  // Holds a rule for the report tool, so launch has nothing to add (#467): the file stays theirs, byte for byte.
+  const userPolicy = `${JSON.stringify({ permission: { read: 'allow', file_incident_report: 'allow' } })}\n`
   const fresh = join(mkdtempSync(join(tmpdir(), 'enso-host-rules-fresh-')), 'permissions.json')
   const written = join(mkdtempSync(join(tmpdir(), 'enso-host-rules-written-')), 'permissions.json')
   writeFileSync(written, userPolicy)
@@ -1711,7 +1717,7 @@ interface FauxModule {
     readonly state: { readonly callCount: number }
   }
   fauxAssistantMessage(content: unknown, options?: { stopReason?: string; errorMessage?: string }): unknown
-  fauxToolCall(name: string, arguments_: Record<string, unknown>): unknown
+  fauxToolCall(name: string, arguments_: Record<string, unknown>, options?: { id?: string }): unknown
 }
 const piCodingAgentDir = dirname(fileURLToPath(import.meta.resolve('@earendil-works/pi-coding-agent')))
 const faux: FauxModule = await import(Bun.resolveSync('@earendil-works/pi-ai', piCodingAgentDir))
@@ -1993,6 +1999,102 @@ test('⚠⚠ a batch the guard refused whole ends the run; a batch where a call 
   expect(await requestsAfterBatch([refused])).toBe(1)
   expect(await requestsAfterBatch([refused, faux.fauxToolCall('read', { path: 'package.json' })])).toBe(2)
   expect(await requestsAfterBatch([faux.fauxToolCall('bash', { command: 'curl https://example.com' })])).toBe(2)
+})
+
+/** The tools a request offered the model: pi's system messages' `toolsAdded` / `toolsRemoved`, folded in order. */
+function declaredTools(request: unknown): string[] {
+  const messages = (request as { messages?: { role?: string; toolsAdded?: unknown; toolsRemoved?: unknown }[] })
+    .messages
+  const names = (tools: unknown): string[] =>
+    Array.isArray(tools) ? tools.map((tool: { name?: unknown }) => String(tool.name)) : []
+  const offered = new Set<string>()
+  for (const message of messages ?? []) {
+    if (message.role !== 'system') continue
+    for (const name of names(message.toolsRemoved)) offered.delete(name)
+    for (const name of names(message.toolsAdded)) offered.add(name)
+  }
+  return [...offered]
+}
+
+/**
+ * A probe that opens a halting incident the way the guard announces one (#467): once `read` has
+ * returned in this run, it appends the opening and announces it on the bus the report extension
+ * listens to. The guard itself is not told, so this pins the report turn, not the guard's window.
+ */
+function incidentOpener(): InlineExtension {
+  return {
+    name: 'enso-host-incident-opener',
+    factory: (pi: ExtensionAPI) => {
+      pi.on('tool_result', (event) => {
+        if (event.toolName !== 'read') return
+        const opened: EnsoIncidentOpened = {
+          incidentId: 'incident-report-e2e',
+          signals: [{ signal: 'denial-retry', toolCallId: event.toolCallId, detail: 'probe', after: [] }],
+          halted: true,
+          suspended: ['execute', 'network', 'write'],
+        }
+        pi.appendEntry(ENSO_INCIDENT_OPENED_ENTRY, opened)
+        pi.events.emit(ENSO_INCIDENT_OPENED_CHANNEL, opened)
+      })
+    },
+  }
+}
+
+// ⚠⚠ #467 through pi's real loop and the real report extension: the request arrives as a follow-up
+// in the SAME run once the model stops, with the report tool the only one on offer; a report
+// missing a field is rejected by pi's schema check; a complete one is recorded and ends the run.
+test('⚠⚠ the report turn: asked in the same run with only the report tool; a missing field is rejected; a report is recorded and ends the run (#467)', async () => {
+  const core = createFauxCore()
+  const requests: unknown[] = []
+  const counted: FauxCore = {
+    ...core,
+    streamSimple: (...call: Parameters<FauxCore['streamSimple']>) => {
+      requests.push(call[1])
+      return core.streamSimple(...call)
+    },
+  }
+  const report = {
+    task: { text: 'Read the manifest.', evidence: [{ ref: 'prompt', quote: 'read the manifest' }] },
+    denied: { text: 'The read.', evidence: [{ ref: 'read-1', quote: 'package.json' }] },
+    tried: { text: 'Nothing else.', evidence: [{ ref: 'read-1', quote: 'package.json' }] },
+    whyThatAlternative: 'none',
+    recognisedAsBypass: 'no',
+    shouldHaveDone: 'asked',
+    sufficientAuthorization: 'none',
+    patternToAvoid: 'none',
+    uncharitableRead: 'none',
+  }
+  const { uncharitableRead: _missing, ...incomplete } = report
+  core.setResponses([
+    faux.fauxAssistantMessage(faux.fauxToolCall('read', { path: 'package.json' }, { id: 'read-1' })),
+    faux.fauxAssistantMessage('Read it.'),
+    faux.fauxAssistantMessage(faux.fauxToolCall(ENSO_INCIDENT_REPORT_TOOL_NAME, incomplete)),
+    faux.fauxAssistantMessage(faux.fauxToolCall(ENSO_INCIDENT_REPORT_TOOL_NAME, report)),
+    faux.fauxAssistantMessage('never asked: the report ended the run'),
+  ])
+  const hosted = await hostedSession([fauxModelExtension(counted), incidentOpener()])
+  const seen = collectEvents(hosted)
+  await runPrompt(hosted, 'Please read the manifest.')
+
+  expect(core.state.callCount).toBe(4)
+  // What the model was offered: pi declares the loadout in system messages, added and removed.
+  expect(declaredTools(requests[0])).not.toContain(ENSO_INCIDENT_REPORT_TOOL_NAME)
+  expect(declaredTools(requests[0])).toContain('read')
+  expect(declaredTools(requests[2])).toEqual([ENSO_INCIDENT_REPORT_TOOL_NAME])
+  const reportResults = seen.flatMap((observation) =>
+    observation.kind === 'tool-result' && observation.toolName === ENSO_INCIDENT_REPORT_TOOL_NAME
+      ? [observation.isError]
+      : [],
+  )
+  expect(reportResults).toEqual([true, false])
+  const recorded = seen.flatMap((observation) =>
+    observation.kind === 'custom-entry' && observation.customType === ENSO_INCIDENT_REPORT_ENTRY
+      ? [observation.data as EnsoIncidentReport]
+      : [],
+  )
+  expect(recorded).toEqual([
+    expect.objectContaining({ incidentId: 'incident-report-e2e', submission: 1, mismatches: [] }),
+  ])
 })
 
 // ⚠⚠ #466 end to end, through the real guard the harness loads: a stored thread whose branch holds

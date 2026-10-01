@@ -13,7 +13,10 @@ import {
   ENSO_FAMILY_TOOLS,
   ENSO_GUARD_DENIAL_ENTRY,
   ENSO_GUARD_RULE_KINDS,
+  ENSO_INCIDENT_OPENED_CHANNEL,
   ENSO_INCIDENT_OPENED_ENTRY,
+  ENSO_INCIDENT_REPORT_CHANNEL,
+  ENSO_INCIDENT_REPORT_TOOL_NAME,
   ENSO_INCIDENT_RESOLVED_CHANNEL,
   ENSO_INCIDENT_RESOLVED_ENTRY,
   ENSO_LOG_EVENTS,
@@ -40,6 +43,7 @@ import {
   NO_SESSION_INCIDENTS,
   openIncidentOf,
   readEnsoIncidentResolved,
+  reportOwedOf,
   riskCallOf,
   riskEventsOfEntries,
   sessionIncidentsOf,
@@ -468,6 +472,8 @@ function observeSessionSecurity(
       suspended: opened.suspended.join(', ') || 'nothing',
       signals: opened.signals.length,
     })
+    // The report extension asks for the report in this same run (#467).
+    if (opened.halted) pi.events.emit(ENSO_INCIDENT_OPENED_CHANNEL, opened)
     return opened.halted
   }
 
@@ -518,6 +524,17 @@ function observeSessionSecurity(
     incidents = sessionIncidentsStep(incidents, ENSO_INCIDENT_RESOLVED_ENTRY, resolved)
     risk = sessionRiskStep(risk, { kind: 'incident-resolved' }, policy().thresholds).state
     log.info(ENSO_LOG_EVENTS.incidentResolved, { ...resolved, suspended: resolved.suspended.join(', ') || 'nothing' })
+  })
+
+  // The report extension appended the report, or its absence, and says so here (#467): the report
+  // window closes at once, and the suspension stands as before — the same step a replay makes.
+  pi.events.on(ENSO_INCIDENT_REPORT_CHANNEL, (raw: unknown): void => {
+    const { customType, data } = (typeof raw === 'object' && raw !== null ? raw : {}) as {
+      customType?: unknown
+      data?: unknown
+    }
+    if (typeof customType !== 'string') return
+    incidents = sessionIncidentsStep(incidents, customType, data)
   })
 
   return {
@@ -573,6 +590,17 @@ function customEntriesOf(entries: readonly unknown[]): { customType: string; dat
  * user lifts it — no "ask": an answer to `ask_user` cannot, only a resolution in Enso can.
  */
 function suspensionDenial(toolName: string, incidents: EnsoSessionIncidents): GuardDenial | undefined {
+  // ⚠ While a report is owed (#467), the report tool is the only one that runs — reads and ask_user
+  // included: the report turn is bounded, and anything else would let it become another run.
+  const owed = reportOwedOf(incidents)
+  if (owed !== undefined) {
+    if (toolName === ENSO_INCIDENT_REPORT_TOOL_NAME) return undefined
+    return deny(
+      'incident-suspension',
+      `${toolName} is not available: security incident ${owed.opened.incidentId} is open and its report is ` +
+        `owed (#467). File it with ${ENSO_INCIDENT_REPORT_TOOL_NAME} — nothing else runs until it is filed.`,
+    )
+  }
   const family = toolFamilyOf(toolName)
   if (family === undefined || !incidents.suspended.includes(family)) return undefined
   return deny(

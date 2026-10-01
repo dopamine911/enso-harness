@@ -8,14 +8,14 @@ exports[`a print launch reads pi --version from PATH, then spawns that pi with t
   participant X as print mirror (print-harness.ts)
   participant P as pi on PATH (a shim)
   U->>Z: bun scripts/enso.ts -p hello · stdin not a TTY
-  Z->>M: read pi.* · 14 declared resource paths, every node_modules/ path present
+  Z->>M: read pi.* · 15 declared resource paths, every node_modules/ path present
   Z->>U: enso: permission policy: ENSO_HOME/permissions.json was absent, so it now holds Enso's default policy · Claude Code's settings are not read (#35;446, #35;496)
   Z->>P: pi --version
   P->>Z: 0.87.1 · exit 0
-  Z->>X: materialize: pi.extensions minus the permission engine (9 of 10), every package-root entry linked
-  Z->>U: enso: vanilla pi 0.87.1 | agent-dir=ENSO_HOME/pi-agent | package=./node_modules/.cache/enso/print-harness (print variant, no permission engine — #35;20) | 14 declared resource path(s)
+  Z->>X: materialize: pi.extensions minus the permission engine (10 of 11), every package-root entry linked
+  Z->>U: enso: vanilla pi 0.87.1 | agent-dir=ENSO_HOME/pi-agent | package=./node_modules/.cache/enso/print-harness (print variant, no permission engine — #35;20) | 15 declared resource path(s)
   Z->>P: spawn pi --no-extensions --no-skills -e ./node_modules/.cache/enso/print-harness -p hello · env PI_CODING_AGENT_DIR=ENSO_HOME/pi-agent
-  X->>P: pi.extensions in manifest order: logging → guards → web-fetch → web-search → permission-modes → pi-multi-account → ask-user → system-prompt → run-context
+  X->>P: pi.extensions in manifest order: logging → guards → web-fetch → web-search → permission-modes → pi-multi-account → ask-user → system-prompt → run-context → incident-report
   P->>Z: exit 0
   Z->>U: exit 0"
 `;

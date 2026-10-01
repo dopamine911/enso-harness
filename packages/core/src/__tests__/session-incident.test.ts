@@ -1,12 +1,22 @@
 import { expect, test } from 'bun:test'
 import { ENSO_GUARD_DENIAL_ENTRY } from '../guard.ts'
 import {
+  checkedIncidentReport,
+  ENSO_INCIDENT_REPORT_ENTRY,
+  ENSO_INCIDENT_REPORT_MISSING_ENTRY,
+  type EnsoIncidentReport,
+  type FileIncidentReportParameters,
+  incidentReportProblems,
+  quoteOccursIn,
+} from '../incident-report.ts'
+import {
   ENSO_INCIDENT_OPENED_ENTRY,
   ENSO_TOOL_FAMILIES,
   type EnsoIncidentOpened,
   type EnsoIncidentResolution,
   incidentResolutionRefusal,
   incidentResolvedOf,
+  reportOwedOf,
   sessionIncidentsOf,
   toolFamilyOf,
 } from '../session-incident.ts'
@@ -120,4 +130,87 @@ test('⚠ a replay resets the risk at a resolution: earlier signals are gone and
   const resolution = { type: 'custom', ...resolved('i1', RESUME) }
   const after = [...before, resolution, assistant('c3', 'python3 -c "print(1)"')]
   expect(sessionRiskOfEntries(after)).toEqual({ level: 'low', signals: [] })
+})
+
+const REPORT_PARAMS: FileIncidentReportParameters = {
+  task: { text: 'the task', evidence: [{ ref: 'prompt', quote: 'fix it' }] },
+  denied: { text: 'curl', evidence: [{ ref: 'c1', quote: 'blocked' }] },
+  tried: { text: 'wget', evidence: [{ ref: 'c2', quote: 'blocked' }] },
+  whyThatAlternative: 'w',
+  recognisedAsBypass: 'r',
+  shouldHaveDone: 's',
+  sufficientAuthorization: 'a',
+  patternToAvoid: 'p',
+  uncharitableRead: 'I tried to get around it.',
+}
+
+function reportOf(
+  incidentId: string,
+  uncharitableRead = REPORT_PARAMS.uncharitableRead,
+): { customType: string; data: unknown } {
+  return {
+    customType: ENSO_INCIDENT_REPORT_ENTRY,
+    data: checkedIncidentReport(
+      incidentId,
+      { ...REPORT_PARAMS, uncharitableRead },
+      { refText: (ref) => (ref === 'prompt' ? 'please fix it' : `${ref} was blocked`), incidentCalls: new Set(['c1']) },
+      1,
+    ),
+  }
+}
+
+// ⚠ #467's acceptance: the report is the agent's explanation and never changes the record. It
+// attaches once — the first wins, a missing record closes it too — and a report, whatever it
+// carries, leaves the opening, its signals, the suspension and every resolution as they were.
+test('⚠ a report attaches once and changes nothing else: not the opening, its signals, the suspension or a resolution', () => {
+  const base = sessionIncidentsOf([opened('i1')])
+  expect(reportOwedOf(base)?.opened.incidentId).toBe('i1')
+  const reported = sessionIncidentsOf([opened('i1'), reportOf('i1')])
+  expect(reportOwedOf(reported)).toBeUndefined()
+  expect(reported.suspended).toEqual(base.suspended)
+  expect(reported.incidents[0]?.opened).toEqual(base.incidents[0]?.opened)
+
+  // A second report, or one after its absence was recorded, is not one.
+  const second = sessionIncidentsOf([opened('i1'), reportOf('i1'), reportOf('i1', 'a different story')])
+  expect(second.incidents[0]?.report?.interpretive.uncharitableRead).toBe('I tried to get around it.')
+  const missing = {
+    customType: ENSO_INCIDENT_REPORT_MISSING_ENTRY,
+    data: { incidentId: 'i1', reason: 'the run was cut off' },
+  }
+  const late = sessionIncidentsOf([opened('i1'), missing, reportOf('i1')])
+  expect(late.incidents[0]).toMatchObject({ reportMissing: missing.data })
+  expect(late.incidents[0]?.report).toBeUndefined()
+
+  // Shaped as a record it is not — an opening's or a resolution's fields — it is no report at all.
+  const disguised = {
+    customType: ENSO_INCIDENT_REPORT_ENTRY,
+    data: { ...(reportOf('i1').data as object), halted: false, suspended: [], outcome: 'resume' },
+  }
+  expect(sessionIncidentsOf([opened('i1'), disguised])).toEqual(base)
+
+  // A report after the resolution does not touch it, and resolving never waited for one.
+  const resolvedFirst = sessionIncidentsOf([opened('i1'), resolved('i1', RESUME)])
+  const reportedAfter = sessionIncidentsOf([opened('i1'), resolved('i1', RESUME), reportOf('i1')])
+  expect(reportedAfter.suspended).toEqual(resolvedFirst.suspended)
+  expect(reportedAfter.incidents[0]?.resolutions).toEqual(resolvedFirst.incidents[0]?.resolutions)
+  // An alert-only incident owes no report.
+  expect(reportOwedOf(sessionIncidentsOf([opened('i2', false)]))).toBeUndefined()
+})
+
+test('a quote checks whitespace-normalised, and "what was denied" must cite one of the incident’s calls', () => {
+  expect(quoteOccursIn('bash network egress is\n  blocked: "curl"', 'egress is blocked:   "curl"')).toBe(true)
+  expect(quoteOccursIn('blocked', '   ')).toBe(false)
+  const report = reportOf('i1').data as EnsoIncidentReport
+  expect(report.mismatches).toEqual([])
+  expect(incidentReportProblems(report)).toEqual([])
+  const offTarget = checkedIncidentReport(
+    'i1',
+    { ...REPORT_PARAMS, denied: { text: 'x', evidence: [{ ref: 'c7', quote: 'blocked' }] } },
+    { refText: () => 'fix it: blocked', incidentCalls: new Set(['c1']) },
+    1,
+  )
+  expect(offTarget.mismatches).toEqual(['denied-cites-no-incident-refusal'])
+  expect(incidentReportProblems(offTarget)).toEqual([
+    "denied: no verified quote cites one of this incident's refused calls",
+  ])
 })

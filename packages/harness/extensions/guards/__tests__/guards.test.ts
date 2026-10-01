@@ -8,7 +8,11 @@ import {
   ENSO_GUARD_DENIAL_ENTRY,
   ENSO_GUARD_RULE_KINDS,
   ENSO_GUARD_RULES,
+  ENSO_INCIDENT_OPENED_CHANNEL,
   ENSO_INCIDENT_OPENED_ENTRY,
+  ENSO_INCIDENT_REPORT_CHANNEL,
+  ENSO_INCIDENT_REPORT_MISSING_ENTRY,
+  ENSO_INCIDENT_REPORT_TOOL_NAME,
   ENSO_INCIDENT_RESOLVED_CHANNEL,
   ENSO_INCIDENT_RESOLVED_ENTRY,
   ENSO_TOOL_FAMILIES,
@@ -44,6 +48,8 @@ interface GuardRuntime {
   entries: { customType: string; data: unknown }[]
   /** Broadcast on the session's bus, as the permission engine does its decisions (#464). */
   emit: (channel: string, data: unknown) => void
+  /** What the guard itself announced on that bus, in order (#467). */
+  announced: { channel: string; data: unknown }[]
 }
 
 /** pi's shipped tool set, as `getAllTools` returns it (probed live 2026-09-04). */
@@ -103,9 +109,18 @@ function loadGuardRuntime(
     options.onAppendEntry?.(customType, data)
     entries.push({ customType, data })
   }
+  const announced: GuardRuntime['announced'] = []
+  const emit = (channel: string, data: unknown): void => {
+    for (const listener of listeners.get(channel) ?? []) listener(data)
+  }
   const events = {
     on: (channel: string, listener: (data: unknown) => void): void => {
       listeners.set(channel, [...(listeners.get(channel) ?? []), listener])
+    },
+    // The guard's own announcements (#467), recorded and delivered, as pi's bus delivers them.
+    emit: (channel: string, data: unknown): void => {
+      announced.push({ channel, data })
+      emit(channel, data)
     },
   }
   guards({ on: (e: string, h: Handler) => handlers.set(e, h), getAllTools, appendEntry, events } as never)
@@ -120,10 +135,7 @@ function loadGuardRuntime(
     const sessionManager = { getBranch: () => [], getSessionDir: () => SESSION_DIR, ...context.sessionManager }
     return sessionStartHandler(event, { ...context, sessionManager })
   }
-  const emit = (channel: string, data: unknown): void => {
-    for (const listener of listeners.get(channel) ?? []) listener(data)
-  }
-  return { toolCall, toolResult, sessionStart, entries, emit }
+  return { toolCall, toolResult, sessionStart, entries, emit, announced }
 }
 
 /** The original single-handler loader — per-call tests that need no cross-call state. */
@@ -1404,17 +1416,48 @@ function suspendedTools(runtime: GuardRuntime): string[] {
 }
 
 const EXECUTE_NETWORK_WRITE = ['bash', 'powershell', 'write', 'edit', 'web_fetch', 'web_search']
+const EVERY_TOOL = ONE_CALL_PER_TOOL.map(([toolName]) => toolName)
 
-// ⚠ #466's first acceptance: with halting on, the sequence that reaches `incident` opens exactly
-// one incident, the call that reached it is refused under `incident-suspension` and ends the
-// batch, and every execute, network and write tool is refused after it — reads are not.
-test('⚠ with halting on, reaching incident opens ONE incident, refuses the call that reached it and ends the batch; reads still work (#466)', () => {
+/** The missing-report record the report extension writes when the report turn ends without one (#467). */
+function missingReport(incidentId: string): { customType: string; data: unknown } {
+  return {
+    customType: ENSO_INCIDENT_REPORT_MISSING_ENTRY,
+    data: { incidentId, reason: 'the report turn ended without a report' },
+  }
+}
+
+/** The guard's open incident's id, from what it appended. */
+function openedId(runtime: GuardRuntime): string {
+  const [opened] = appended(runtime, ENSO_INCIDENT_OPENED_ENTRY) as { incidentId: string }[]
+  if (opened === undefined) throw new Error('no incident opened')
+  return opened.incidentId
+}
+
+/** Settle the owed report as the report extension does: announce its record on the bus. */
+function settleReport(runtime: GuardRuntime): void {
+  runtime.emit(ENSO_INCIDENT_REPORT_CHANNEL, missingReport(openedId(runtime)))
+}
+
+// ⚠ #466's first acceptance, with #467's report window: with halting on, the sequence that reaches
+// `incident` opens exactly one incident and announces it, the call that reached it is refused under
+// `incident-suspension` and ends the batch. While the report is owed, ONLY the report tool runs —
+// reads and ask_user included; once it is settled, the execute, network and write tools stay
+// refused and reads run again.
+test('⚠ with halting on, reaching incident opens ONE incident; only the report tool runs until the report settles, then reads work (#466, #467)', () => {
   const { runtime, verdicts } = escalated(HALTING)
   const opened = appended(runtime, ENSO_INCIDENT_OPENED_ENTRY)
   expect(opened).toEqual([
     expect.objectContaining({ halted: true, suspended: [...ENSO_TOOL_FAMILIES], signals: expect.any(Array) }),
   ])
-  expect(verdicts.at(-1)).toEqual({ block: true, reason: expect.stringContaining('suspended'), terminate: true })
+  expect(runtime.announced).toEqual([{ channel: ENSO_INCIDENT_OPENED_CHANNEL, data: opened[0] }])
+  expect(verdicts.at(-1)).toEqual({
+    block: true,
+    reason: expect.stringContaining(`File it with ${ENSO_INCIDENT_REPORT_TOOL_NAME}`),
+    terminate: true,
+  })
+  expect(suspendedTools(runtime)).toEqual(EVERY_TOOL)
+  expect(callOn(runtime, 'report', ENSO_INCIDENT_REPORT_TOOL_NAME, {})).toBeUndefined()
+  settleReport(runtime)
   expect(suspendedTools(runtime)).toEqual(EXECUTE_NETWORK_WRITE)
   // More signals while it is open do not open a second one.
   drive(runtime, ESCALATION)
@@ -1438,11 +1481,12 @@ test('⚠ a refusal that tips the session into a halting incident ends the batch
   expect(verdicts.at(-1)).toEqual({ block: true, reason: expect.stringContaining('network deny'), terminate: true })
 })
 
-test('with halting off (the default), the same sequence opens the incident as an alert and suspends nothing (#466)', () => {
+test('with halting off (the default), the same sequence opens the incident as an alert, asks no report and suspends nothing (#466)', () => {
   const { runtime, verdicts } = escalated(ALERT_ONLY)
   expect(appended(runtime, ENSO_INCIDENT_OPENED_ENTRY)).toEqual([
     expect.objectContaining({ halted: false, suspended: [] }),
   ])
+  expect(runtime.announced).toEqual([])
   expect(verdicts.at(-1)).toBeUndefined()
   expect(suspendedTools(runtime)).toEqual([])
 })
@@ -1452,7 +1496,15 @@ test('with halting off (the default), the same sequence opens the incident as an
 // the recorded incident is restored, not a new one opened. The resolution's record lifts it, and
 // the risk starts over.
 test('⚠ a suspension survives a resume and a reload; only a resolution record lifts it (#466)', () => {
-  const { branch } = escalated(HALTING)
+  const escalation = escalated(HALTING)
+  // A resumed branch still owing its report holds the report window: it is rebuilt from the record.
+  const owing = loadGuardRuntime(undefined, undefined, undefined, { incidentPolicy: ALERT_ONLY })
+  owing.sessionStart(
+    { type: 'session_start', reason: 'resume' },
+    { cwd, sessionManager: { getBranch: () => escalation.branch } },
+  )
+  expect(suspendedTools(owing)).toEqual(EVERY_TOOL)
+  const branch = [...escalation.branch, { type: 'custom', ...missingReport(openedId(escalation.runtime)) }]
   const resumed = loadGuardRuntime(undefined, undefined, undefined, { incidentPolicy: ALERT_ONLY })
   resumed.sessionStart(
     { type: 'session_start', reason: 'resume' },
@@ -1491,9 +1543,9 @@ function customEntry(entry: unknown): { customType: string; data: unknown }[] {
 // suspension where it was, and a resolution that keeps a family suspended lifts only the others.
 test('⚠ no tool call lifts a suspension; the announced resolution does, keeping what it restricts (#466)', () => {
   const { runtime } = escalated(HALTING)
+  settleReport(runtime)
   for (let round = 0; round < 2; round += 1) expect(suspendedTools(runtime)).toEqual(EXECUTE_NETWORK_WRITE)
-  const [opened] = appended(runtime, ENSO_INCIDENT_OPENED_ENTRY) as { incidentId: string }[]
-  if (opened === undefined) throw new Error('no incident opened')
+  const opened = { incidentId: openedId(runtime) }
   runtime.emit(
     ENSO_INCIDENT_RESOLVED_CHANNEL,
     incidentResolvedOf(opened.incidentId, {
