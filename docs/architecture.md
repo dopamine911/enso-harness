@@ -136,13 +136,14 @@ type-only crossing is still a dependency.
 |---|---|---|
 | `core` | `packages/core/src/` | nothing |
 | `harness-core` | `packages/harness/core/` | `core` |
-| `harness-extensions` | `packages/harness/extensions/` | `core`, `harness-core` |
+| `judge-backends` | `packages/harness/extensions/guards/judge-backends.ts` | `core` |
+| `harness-extensions` | `packages/harness/extensions/` (all else) | `core`, `harness-core`, `judge-backends` |
 | `host` | `packages/web/src/host/` | `core` |
 | `server` | `packages/web/src/server/` | `core`, `host` |
 | `browser` | `packages/web/src/` (all else) | `core` |
 | `site-base` | `scripts/docs/site-base.ts` | nothing |
-| `scripts` | `scripts/` | `core`, `site-base` |
-| `test` | `test/`, `packages/web/e2e/` | `core`, `harness-core`, `harness-extensions`, `host`, `server`, `browser`, `scripts` |
+| `scripts` | `scripts/` | `core`, `site-base`, `judge-backends` |
+| `test` | `test/`, `packages/web/e2e/` | `core`, `harness-core`, `harness-extensions`, `judge-backends`, `host`, `server`, `browser`, `scripts` |
 | `site` | `site/` | `site-base` |
 
 Every owned source file must fall in a zone (`coverage.requireAllFiles`; `index.html` is the one

@@ -3,6 +3,7 @@ import {
   type EnsoConfigParseResult,
   type EnsoIncidentPolicy,
   type EnsoJudgeBackend,
+  type EnsoJudgeConfig,
   incidentPolicyOf,
   mergeEnsoConfig,
   parseEnsoConfig,
@@ -177,14 +178,24 @@ export function userIncidentPolicy(home: string): { readonly policy: EnsoInciden
  * The command judge's backend (#469) from the USER's `config.json` alone, as the incident policy
  * is: `security` is user-only, so a project cannot switch a judge on, or off, for the user. Absent
  * is `off`. ⚠ Unreadable fails CLOSED, which for the judge means OFF — nothing is sent anywhere —
- * and `problem` says why.
+ * and `problem` says why; so does `local` without the router and model it needs (#532).
  *
  * @group Command judge
  */
-export function userJudgeConfig(home: string): { readonly backend: EnsoJudgeBackend; readonly problem?: string } {
+export function userJudgeConfig(
+  home: string,
+):
+  | { readonly backend: Exclude<EnsoJudgeBackend, 'local'>; readonly problem?: string }
+  | { readonly backend: 'local'; readonly local: NonNullable<EnsoJudgeConfig['local']> } {
   const { result } = readConfig(ensoConfigPath(home))
   if (result.kind === 'unreadable') return { backend: 'off', problem: result.reason }
-  return { backend: result.config.security?.judge?.backend ?? 'off' }
+  const judge = result.config.security?.judge
+  const backend = judge?.backend ?? 'off'
+  if (backend !== 'local') return { backend }
+  if (judge?.local === undefined) {
+    return { backend: 'off', problem: '`security.judge.backend` is `local`, but `security.judge.local` is missing' }
+  }
+  return { backend, local: judge.local }
 }
 
 async function projectTrusted(context: SessionConfigContext, projectPath: string): Promise<boolean> {
