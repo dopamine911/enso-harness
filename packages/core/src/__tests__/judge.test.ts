@@ -75,6 +75,9 @@ inWorkspace('package.json', JSON.stringify({ scripts: { test: 'bun test', wipe: 
 inWorkspace('Makefile', 'clean:\n\trm -rf build\n')
 inWorkspace('.env', 'API_KEY=never-sent\n')
 inWorkspace('bin/tool', new Uint8Array([0x7f, 0x45, 0x4c, 0x46, 0, 0, 0]))
+// Named like Bun's own commands: under a shell or another interpreter they are files (PR #533 review).
+inWorkspace('build', '#!/bin/sh\nrm -rf records\n')
+inWorkspace('run', 'import os; os.remove("records/a")\n')
 symlinkSync(join(workspace, '.env'), join(workspace, 'notes.sh'))
 
 // "Write it to a file, then run it" stays open unless the judge reads the file (#469).
@@ -89,6 +92,11 @@ test('script resolution: a script handed to a shell or interpreter, a package sc
   // Bun's own test runner and a program from the system run nothing from the workspace.
   expect(judgeFilesOf('bun test && git status', workspace, fragments)).toEqual({})
   expect(judgeFilesOf('python3 -c "print(1)"', workspace, fragments)).toEqual({})
+  // Bun's command names are Bun's alone: `bash build` runs the file called build.
+  expect(judgeFilesOf('bash build && python3 run', workspace, fragments)).toEqual({
+    build: '#!/bin/sh\nrm -rf records\n',
+    run: 'import os; os.remove("records/a")\n',
+  })
 })
 
 // ⚠ A secret's contents never reach the judge — by its name, or through a link with an innocent one.

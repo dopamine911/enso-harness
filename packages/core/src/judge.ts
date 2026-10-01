@@ -99,7 +99,8 @@ function runsOf(words: readonly string[]): Runs | undefined {
   }
   if (PACKAGE_RUNNERS.has(program) && (program !== 'bun' || isBunScriptCall(first))) return runsOfPackage(words)
   if ((SHELLS.has(program) || INTERPRETERS.has(program)) && first !== undefined && !first.startsWith('-')) {
-    return BUN_BUILTINS.has(first) ? undefined : { kind: 'file', path: first }
+    // Bun's command names are Bun's alone: `bash build` runs a file called build (PR #533 review).
+    return program === 'bun' && BUN_BUILTINS.has(first) ? undefined : { kind: 'file', path: first }
   }
   if (program === 'make' || program === 'gmake') return { kind: 'makefile' }
   return undefined

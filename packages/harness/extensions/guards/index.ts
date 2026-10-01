@@ -63,7 +63,7 @@ import {
 import { createJevJudge, JEV_KEY_NAME } from '@enso/core/jev-judge'
 import { judgeStateOf } from '@enso/core/judge'
 import { ensoHome, ensoLogsDir, findRepoRoot } from '@enso/core/paths'
-import { knownSecretValues, readSecret } from '@enso/core/secrets'
+import { knownSecretValuesTracking, readSecret } from '@enso/core/secrets'
 import { PERMISSIONS_DECISION_CHANNEL } from '@gotgenes/pi-permission-system'
 import { type CheckCommandResult, checkCommand } from 'cc-safety-net/api'
 import {
@@ -371,7 +371,8 @@ export default createGuards({
   incidentPolicy: productionIncidentPolicy,
   logsDirectory: ensoLogsDir(ensoHome(process.env)),
   commandJudge: productionCommandJudge,
-  judgeSecretValues: () => knownSecretValues(ensoHome(process.env)),
+  // The tracking thunk: one `stat` per judged call, re-read only when secrets.env changes (#207).
+  judgeSecretValues: knownSecretValuesTracking(ensoHome(process.env)),
 })
 
 /**
