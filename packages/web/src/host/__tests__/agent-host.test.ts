@@ -2763,6 +2763,45 @@ test('⚠⚠ Continue answers an unanswered prompt from the stored state: one co
   ])
 })
 
+// ⚠ THE ACCEPTANCE (#445): the REAL recorder under pi's private run lifecycle. A Continue emits no
+// `before_agent_start`; pi's `agent_start` still fires for it, and the record written there reads
+// git, the config and the mode NOW, and carries the skills and context files from the last record —
+// the transcript's sections, which a Continue does not patch. The stored record names a skill no
+// loader could produce: re-reading the loader would lose it; carrying the record keeps it.
+test('⚠ a continued run records what moved since the torn prompt, carrying its skills and context files (#445)', async () => {
+  const { threadId, file } = storeTornThread('unanswered-prompt')
+  const stale: EnsoRunContext = {
+    git: null,
+    config: { hash: sha256Of('the config at the torn prompt'), sources: [] },
+    skills: [{ name: 'stored-skill', path: '/skills/stored.md' }],
+    contextFiles: [{ path: '/repo/AGENTS.md', sha256: sha256Of('v1') }],
+    mode: { rulesHash: sha256Of('the rules at the torn prompt') },
+  }
+  SessionManager.open(file).appendCustomEntry(ENSO_RUN_CONTEXT_ENTRY, stale)
+  const core = createFauxCore()
+  core.setResponses([faux.fauxAssistantMessage('continued answer')])
+  const hosted = await resumeTorn(threadId, core)
+  const settled = Promise.withResolvers<void>()
+  hosted.runtime.subscribe((observation) => {
+    if (observation.kind === 'settled') settled.resolve()
+  })
+  hosted.runtime.continueRun({ onAccepted: () => undefined, onRejected: settled.reject })
+  await settled.promise
+  await nextTick()
+
+  const records = runContextsOf(file)
+  expect(records).toHaveLength(2)
+  const [, continued] = records
+  // The prompt's facts are the transcript's — the stored record's, unchanged.
+  expect(continued?.skills).toEqual(stale.skills)
+  expect(continued?.contextFiles).toEqual(stale.contextFiles)
+  // The session's facts are read at the Continue: the real policy's rules, not the stale hash.
+  expect(continued?.mode).toEqual({ rulesHash: expect.stringMatching(/^[0-9a-f]{64}$/) })
+  expect(continued?.mode).not.toEqual(stale.mode)
+  expect(continued?.config.hash).not.toBe(stale.config.hash)
+  expect(storedMessages(file).at(-1)).toBe('assistant: continued answer')
+})
+
 test('⚠ Continue closes a tool call left without its result with an error result, then runs on (#436)', async () => {
   const { threadId, file } = storeTornThread('tool-call-without-result')
   const core = createFauxCore()

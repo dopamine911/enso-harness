@@ -11,22 +11,30 @@ import { createRunContext, type RunContextDependencies } from '../index.ts'
  * record; a changed AGENTS.md, a second) is `agent-host.test.ts`'s.
  */
 
-type BeforeAgentStart = (event: unknown, context: unknown) => Promise<void>
+type Handler = (event: unknown, context: unknown) => Promise<void>
 
 interface Skill {
   readonly name: string
   readonly filePath: string
 }
 
-/** One session under the recorder: `run` is one prompt's `before_agent_start`; the branch is pi's, entries appended in order. */
+/**
+ * One session under the recorder: `run` is one prompt — its `before_agent_start`, then the
+ * `agent_start` pi emits for the loop; `continueRun` is a #436 Continue — the loop's `agent_start`
+ * with no prompt before it (#445). The branch is pi's, entries appended in order.
+ */
 function session(
   dependencies: Partial<RunContextDependencies> = {},
   branch: unknown[] = [],
-): { run: (skills?: readonly Skill[]) => Promise<void>; recorded: () => EnsoRunContext[] } {
-  let handler: BeforeAgentStart | undefined
+): {
+  run: (skills?: readonly Skill[]) => Promise<void>
+  continueRun: () => Promise<void>
+  recorded: () => EnsoRunContext[]
+} {
+  const handlers = new Map<string, Handler>()
   const pi = {
-    on: (event: string, registered: BeforeAgentStart): void => {
-      if (event === 'before_agent_start') handler = registered
+    on: (event: string, registered: Handler): void => {
+      handlers.set(event, registered)
     },
     appendEntry: (customType: string, data: unknown): void => {
       branch.push({ type: 'custom', customType, data })
@@ -39,14 +47,18 @@ function session(
     readPermissionPolicy: () => '{"permission":{"bash":"ask"}}',
     ...dependencies,
   })(pi)
+  const context = { cwd: '/work', sessionManager: { getBranch: () => branch, getEntries: () => branch } }
+  const emit = async (event: string, payload: unknown): Promise<void> => {
+    const handler = handlers.get(event)
+    if (handler === undefined) throw new Error(`the recorder registered no ${event} handler`)
+    await handler(payload, context)
+  }
   return {
     run: async (skills: readonly Skill[] = []): Promise<void> => {
-      if (handler === undefined) throw new Error('the recorder registered no before_agent_start handler')
-      await handler(
-        { systemPromptOptions: { skills, contextFiles: [] } },
-        { cwd: '/work', sessionManager: { getBranch: () => branch, getEntries: () => branch } },
-      )
+      await emit('before_agent_start', { systemPromptOptions: { skills, contextFiles: [] } })
+      await emit('agent_start', { type: 'agent_start' })
     },
+    continueRun: () => emit('agent_start', { type: 'agent_start' }),
     recorded: () =>
       branch.flatMap((entry) => {
         const custom = entry as { type?: string; customType?: string; data?: EnsoRunContext }
@@ -126,4 +138,37 @@ test("⚠ a record this writer made that the reader's schema rejects is still co
   // A real change still appends.
   await recorder.run([{ name: 'tdd', filePath: '/skills/tdd.md' }])
   expect(recorder.recorded()).toHaveLength(2)
+})
+
+// ⚠ A Continue (#436) runs with no `before_agent_start`; what moved since the last prompt — the
+// revision, the config, the mode — must still be recorded, and the skills and context files the
+// model receives are the transcript's: the last record's (#445).
+test('⚠ a continued run after HEAD moved records the new revision, carrying the last prompt’s skills and context files (#445)', async () => {
+  let head = 'f00d\n'
+  const recorder = session({
+    runGit: (args: readonly string[]) =>
+      Promise.resolve(
+        args[0] === 'rev-parse' ? { code: 0, stdout: head, stderr: '' } : { code: 0, stdout: '', stderr: '' },
+      ),
+  })
+  await recorder.run([{ name: 'tdd', filePath: '/skills/tdd.md' }])
+  expect(recorder.recorded()).toHaveLength(1)
+  // The thread is torn, a commit lands, the operator continues.
+  head = 'beef\n'
+  await recorder.continueRun()
+  const [first, second] = recorder.recorded()
+  expect(recorder.recorded()).toHaveLength(2)
+  expect(second?.git?.revision).toBe('beef')
+  expect(second?.skills).toEqual(first?.skills ?? [])
+  expect(second?.contextFiles).toEqual(first?.contextFiles ?? [])
+  // Nothing moved: a second Continue appends nothing — and the prompt that follows it, recording as ever, neither.
+  await recorder.continueRun()
+  await recorder.run([{ name: 'tdd', filePath: '/skills/tdd.md' }])
+  expect(recorder.recorded()).toHaveLength(2)
+})
+
+test('⚠ a continued run on a branch with no record writes none: the skills it runs under have no structured source (#445)', async () => {
+  const recorder = session()
+  await recorder.continueRun()
+  expect(recorder.recorded()).toHaveLength(0)
 })
