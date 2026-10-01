@@ -74,7 +74,6 @@ export {
 export {
   DEFAULT_GUARD_POLICY,
   ENSO_GUARD_DENIAL_ENTRY,
-  ENSO_GUARD_DENIAL_KEY,
   ENSO_GUARD_RULE_KINDS,
   ENSO_GUARD_RULES,
   ENSO_PERSISTENCE_WRITE_BASENAMES,
@@ -88,7 +87,6 @@ export {
   PROC_ENVIRON_IN_COMMAND,
   PROC_ENVIRON_PATH,
   readEnsoGuardDenial,
-  readEnsoGuardDenialMetadata,
   SECRET_BASENAME_PATTERNS,
 } from './guard.ts'
 export {
@@ -371,6 +369,8 @@ export {
   ENSO_SECURITY_SIGNAL_ENTRY,
   ENSO_SECURITY_SIGNALS,
   ENSO_SESSION_RISK_ENTRY,
+  ENSO_TOOL_REFUSAL_KEY,
+  ENSO_TOOL_REFUSERS,
   type EnsoJudgeContext,
   type EnsoJudgeScopeReason,
   type EnsoPermissionDenial,
@@ -383,10 +383,13 @@ export {
   type EnsoSecuritySignalKind,
   EnsoSessionRisk,
   type EnsoSessionRiskChange,
+  EnsoToolRefusal,
+  type EnsoToolRefuser,
   foldSessionRisk,
   INITIAL_SESSION_RISK,
   readEnsoPermissionDenial,
   readEnsoSessionRiskChange,
+  readEnsoToolRefusalMetadata,
   riskCallOf,
   riskEventsOfEntries,
   sessionRiskOfEntries,
@@ -394,6 +397,8 @@ export {
   judgeContextOf,
   judgeContextsOfEntries,
   sessionRiskStep,
+  toolRefusalOf,
+  toolRefuserOf,
 } from './session-risk.ts'
 export {
   ENSO_CONTEXT_ADDITIONS_SHOWN,

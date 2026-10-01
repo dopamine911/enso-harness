@@ -11,9 +11,9 @@ import {
   type EnsoProviderRetrying,
   providerReasonOf,
   providerRefusalClass,
-  readEnsoGuardDenial,
   readEnsoSessionRiskChange,
   sessionIncidentsStep,
+  toolRefusalOf,
 } from '@enso/core'
 import { Compile } from 'typebox/compile'
 import { Check } from 'typebox/value'
@@ -203,9 +203,10 @@ function applyStatus(stores: ThreadStores, generation: number): void {
 }
 
 /**
- * A guard refused a call (#387): its entry names the call and the rule, and the tool row and the
- * status bar read it off the store. The session's risk rose (#464): the status bar reads that too.
- * An incident opened, or a human resolved one (#466): the same fold the server runs, one step per
+ * Something refused a call (#387, #523): the guard's entry names the call and the rule, the
+ * engine's names the call and how it was refused, and the tool row and the status bar read who
+ * refused off the store. The session's risk rose (#464): the status bar reads that too. An
+ * incident opened, or a human resolved one (#466): the same fold the server runs, one step per
  * entry — an entry that is neither leaves the state as it was. A resolution also starts the risk
  * over, as the risk fold does on the same entry (`session-risk.ts`). Every other extension's entry
  * is a state receipt rendered by nothing (L3 moved the mode onto its own observation).
@@ -223,11 +224,11 @@ function applyGuardEntry(stores: ThreadStores, customType: string, data: unknown
     stores.sessionRisk.set(risk)
     return
   }
-  const denial = readEnsoGuardDenial(customType, data)
-  if (denial === undefined) return
-  const denials = new Map(stores.guardDenials.get())
-  denials.set(denial.toolCallId, denial.rule)
-  stores.guardDenials.set(denials)
+  const refused = toolRefusalOf(customType, data)
+  if (refused === undefined) return
+  const refusals = new Map(stores.refusals.get())
+  refusals.set(refused.toolCallId, refused.refusal)
+  stores.refusals.set(refusals)
 }
 
 function routeObservation(stores: ThreadStores, observation: EnsoObservation): void {

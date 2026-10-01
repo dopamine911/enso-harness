@@ -27,12 +27,12 @@ const REFUSES: Readonly<Record<EnsoGuardRule, string>> = {
   'protected-records': 'A shell command that names the session or log directory, the records an incident rests on.',
 }
 
-/** The words a refusal's header says for each rule: the receipt's own (`guard-refusal.tsx`). */
-const VERDICT = stringRecordIn('packages/web/src/guard-refusal.tsx', 'GUARD_RULE_VERDICT')
+/** The words a refusal's header says for each rule: the receipt's own (`tool-refusal.tsx`). */
+const VERDICT = stringRecordIn('packages/web/src/tool-refusal.tsx', 'GUARD_RULE_VERDICT')
 
 function verdictOf(rule: EnsoGuardRule): string {
   const words = VERDICT[rule]
-  if (words === undefined) throw new Error(`guards-and-receipts: guard-refusal.tsx has no verdict for ${rule}`)
+  if (words === undefined) throw new Error(`guards-and-receipts: tool-refusal.tsx has no verdict for ${rule}`)
   return words
 }
 

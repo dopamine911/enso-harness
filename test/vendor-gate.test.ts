@@ -124,7 +124,7 @@ const VENDOR_NAMED_ALLOWED: readonly string[] = [
   // The refusal card's verdict words, one per rule in `ENSO_GUARD_RULES` — and one rule is named
   // after the analyzer whose verdict it carries (`cc-safety-net`). The leak is the vocabulary's,
   // and this file spells it as a key. Leaves when that rule is named for what it guards.
-  'packages/web/src/guard-refusal.tsx',
+  'packages/web/src/tool-refusal.tsx',
   // `PERMISSION_ENGINE_FRAGMENT` — the print variant exists to REMOVE the permission engine from
   // the manifest (#20: no permission prompts under `--print`), so it must name the extension it
   // filters, in the constant and in the shape error that fires when no entry matches. Leaves when

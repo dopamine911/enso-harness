@@ -2,7 +2,7 @@ import {
   ENSO_NOTICE_SOURCE,
   ENSO_PROJECT_HEADER,
   type EnsoDialogSpec,
-  type EnsoGuardRule,
+  type EnsoToolRefusal,
   type EnsoToolResultDescriptor,
   type EnsoLoginInProgress,
   type EnsoInterruptedTail,
@@ -13,7 +13,7 @@ import {
   ensoLogger,
   type ProviderRefusalClass,
   NO_SESSION_INCIDENTS,
-  readEnsoGuardDenialMetadata,
+  readEnsoToolRefusalMetadata,
 } from '@enso/core'
 import type { UIMessage } from '@tanstack/ai-client'
 import type { BrowserLogging, FetchLike } from './browser-logging.ts'
@@ -124,13 +124,14 @@ export interface ThreadStores {
    */
   readonly refusal: WritableStore<ProviderRefusalMark | undefined>
   /**
-   * The calls a guard refused (#387, #407), by tool-call id, with the rule that refused each.
-   * pi hands the page a refusal as an error result shaped like any failed command; this is what
-   * tells them apart. Seeded from the history's results (the server joined the guard's session
-   * entry onto each), then fed by the live `custom-entry` chunk the guard's entry crosses as —
-   * one store either way, so a refusal reads the same live, reloaded and resumed.
+   * The calls something refused (#387, #407, #523), by tool-call id, with who refused each: Enso's
+   * guard and its rule, the user's permission rule, `auto`'s classifier, or the person. pi hands
+   * the page a refusal as an error result shaped like any failed command; this is what tells them
+   * apart. Seeded from the history's results (the server joined the refusing entry onto each),
+   * then fed by the live `custom-entry` chunk the entry crosses as — one store either way, so a
+   * refusal reads the same live, reloaded and resumed.
    */
-  readonly guardDenials: WritableStore<ReadonlyMap<string, EnsoGuardRule>>
+  readonly refusals: WritableStore<ReadonlyMap<string, EnsoToolRefusal>>
   /**
    * The session's risk (#464): its level and how many observed signals it rests on — seeded from
    * the history and the follow's snapshot (the server's replay of the branch), raised live by the
@@ -210,17 +211,17 @@ function namingProject(fetchImpl: FetchLike | undefined, projectId: string | und
   }
 }
 
-/** The refusals a stored history's tool results carry — see {@link ThreadStores.guardDenials}. */
-function guardDenialsIn(history: readonly UIMessage[]): Map<string, EnsoGuardRule> {
-  const denials = new Map<string, EnsoGuardRule>()
+/** The refusals a stored history's tool results carry — see {@link ThreadStores.refusals}. */
+function refusalsIn(history: readonly UIMessage[]): Map<string, EnsoToolRefusal> {
+  const refusals = new Map<string, EnsoToolRefusal>()
   for (const message of history) {
     for (const part of message.parts) {
       if (part.type !== 'tool-result') continue
-      const denial = readEnsoGuardDenialMetadata(part.metadata)
-      if (denial !== undefined) denials.set(denial.toolCallId, denial.rule)
+      const refusal = readEnsoToolRefusalMetadata(part.metadata)
+      if (refusal !== undefined) refusals.set(part.toolCallId, refusal)
     }
   }
-  return denials
+  return refusals
 }
 
 /**
@@ -254,7 +255,7 @@ function createThreadStores(
     disconnected: createStore(false),
     queue: createStore<readonly string[]>([]),
     refusal: createStore<ProviderRefusalMark | undefined>(undefined),
-    guardDenials: createStore<ReadonlyMap<string, EnsoGuardRule>>(guardDenialsIn(history)),
+    refusals: createStore<ReadonlyMap<string, EnsoToolRefusal>>(refusalsIn(history)),
     sessionRisk: createStore<EnsoSessionRiskChange>({ level: 'low', signals: 0 }),
     incidents: createStore<EnsoSessionIncidents>(NO_SESSION_INCIDENTS),
     toolResultDescriptors,

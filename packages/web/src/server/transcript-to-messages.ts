@@ -1,12 +1,12 @@
 import {
-  ENSO_GUARD_DENIAL_KEY,
   ENSO_PROVIDER_REFUSAL_KEY,
+  ENSO_TOOL_REFUSAL_KEY,
   ENSO_TOOL_RESULT_KEY,
-  type EnsoGuardDenial,
   type EnsoInterruptedTail,
+  type EnsoToolRefusal,
   type EnsoTranscriptEntry,
   type EnsoTranscriptPart,
-  readEnsoGuardDenial,
+  toolRefusalOf,
 } from '@enso/core'
 import type { MessagePart, UIMessage } from '@tanstack/ai-client'
 
@@ -58,16 +58,16 @@ function createdAt(at: string | undefined): { createdAt?: Date } {
   return Number.isNaN(parsed.getTime()) ? {} : { createdAt: parsed }
 }
 
-/** The bag a stored result carries: the #18 descriptor, and the guard's refusal (#387) — each only when there is one. */
+/** The bag a stored result carries: the #18 descriptor, and who refused it (#387, #523) — each only when there is one. */
 function resultMetadata(
   result: Extract<EnsoTranscriptEntry, { kind: 'tool-result' }>,
-  denial: EnsoGuardDenial | undefined,
+  refusal: EnsoToolRefusal | undefined,
 ): { metadata?: Record<string, unknown> } {
-  if (result.descriptor === undefined && denial === undefined) return {}
+  if (result.descriptor === undefined && refusal === undefined) return {}
   return {
     metadata: {
       ...(result.descriptor === undefined ? {} : { [ENSO_TOOL_RESULT_KEY]: result.descriptor }),
-      ...(denial === undefined ? {} : { [ENSO_GUARD_DENIAL_KEY]: denial }),
+      ...(refusal === undefined ? {} : { [ENSO_TOOL_REFUSAL_KEY]: refusal }),
     },
   }
 }
@@ -76,7 +76,7 @@ function resultMetadata(
 function attachToolResult(
   messages: UIMessage[],
   result: Extract<EnsoTranscriptEntry, { kind: 'tool-result' }>,
-  denial: EnsoGuardDenial | undefined,
+  refusal: EnsoToolRefusal | undefined,
 ): boolean {
   for (let position = messages.length - 1; position >= 0; position -= 1) {
     const candidate = messages[position]
@@ -92,7 +92,7 @@ function attachToolResult(
       content: result.text,
       state: result.isError ? 'error' : 'complete',
       ...(result.isError ? { error: result.text } : {}),
-      ...resultMetadata(result, denial),
+      ...resultMetadata(result, refusal),
     })
     return true
   }
@@ -115,9 +115,10 @@ function attachToolResult(
  */
 export function transcriptToMessages(transcript: readonly EnsoTranscriptEntry[]): UIMessage[] {
   const messages: UIMessage[] = []
-  // The guard writes its refusal entry before pi builds the error result (#387), so a
-  // refusal is always read before the result it belongs to.
-  const denials = new Map<string, EnsoGuardDenial>()
+  // A refusal's entry is written before pi builds the error result — the guard's in its hook
+  // (#387), the engine's inside its decision (#522) — so a refusal is always read before the
+  // result it belongs to.
+  const refusals = new Map<string, EnsoToolRefusal>()
   for (const transcriptEntry of transcript) {
     if (transcriptEntry.kind === 'message') {
       messages.push({
@@ -131,12 +132,12 @@ export function transcriptToMessages(transcript: readonly EnsoTranscriptEntry[])
           : { metadata: { [ENSO_PROVIDER_REFUSAL_KEY]: transcriptEntry.refusal } }),
       })
     } else if (transcriptEntry.kind === 'custom') {
-      const denial = readEnsoGuardDenial(transcriptEntry.customType, transcriptEntry.data)
-      if (denial !== undefined) denials.set(denial.toolCallId, denial)
+      const refused = toolRefusalOf(transcriptEntry.customType, transcriptEntry.data)
+      if (refused !== undefined) refusals.set(refused.toolCallId, refused.refusal)
     } else if (transcriptEntry.kind === 'tool-result') {
       // A result whose call is not on the transcript (a compacted or edited history) is
       // dropped: TanStack keeps detached results verbatim, which renders as a stray row.
-      attachToolResult(messages, transcriptEntry, denials.get(transcriptEntry.toolCallId))
+      attachToolResult(messages, transcriptEntry, refusals.get(transcriptEntry.toolCallId))
     }
   }
   return messages

@@ -10,21 +10,22 @@ import { type EnsoThreadStats, type EnsoToolCallStats, median } from '@enso/core
  * one it did not; a failure ranking lists only failed calls; a tool's duration says how many of
  * its calls were measured.
  *
- * ⚠ OURS, ON TOP (#407): a failure is an `isError` result a guard did NOT refuse. pi hands a
- * guard's refusal over as the same `isError` result a failed command makes; the thread's
- * `guardDenials` (#387) is what tells them apart, so every function here that counts failures
- * takes it — required, so no caller can count a refusal as a failure by leaving it out.
+ * ⚠ OURS, ON TOP (#407): a failure is an `isError` result nothing refused. pi hands a refusal
+ * over as the same `isError` result a failed command makes — a guard's, a permission rule's,
+ * `auto`'s, the person's (#523); the thread's `refusals` (#387) is what tells them apart, so every
+ * function here that counts failures takes it — required, so no caller can count a refusal as a
+ * failure by leaving it out.
  */
 
-/** The calls a guard refused, by tool-call id — the thread's `guardDenials` store. */
+/** The calls something refused, by tool-call id — the thread's `refusals` store. */
 export type RefusedCalls = ReadonlyMap<string, unknown>
 
-/** Refused by a guard (#387): policy doing its job, said apart from a failure. */
+/** Refused (#387, #523) — by a guard, a permission rule, `auto`, or the person: a decision, said apart from a failure. */
 export function isRefused(call: EnsoToolCallStats, refused: RefusedCalls): boolean {
   return refused.has(call.toolCallId)
 }
 
-/** Failed: an error result no guard refused — the tool ran, or tried to, and failed. */
+/** Failed: an error result nothing refused — the tool ran, or tried to, and failed. */
 function isFailure(call: EnsoToolCallStats, refused: RefusedCalls): boolean {
   return call.isError && !isRefused(call, refused)
 }

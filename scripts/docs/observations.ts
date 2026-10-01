@@ -66,7 +66,7 @@ const CUSTOM_METADATA: Record<string, CustomMetadata> = {
   },
   'custom-entry': {
     consumer:
-      '`recentChunks`; a guard refusal (`enso-guard-denial`, #387) lands in `guardDenials` — every other entry is rendered by nothing (L3)',
+      '`recentChunks`; a refusal (`enso-guard-denial` #387, `enso-permission-denial` #523) lands in `refusals` — every other entry is rendered by nothing (L3)',
     routerBranch: true,
   },
   unmapped: { consumer: '`recentChunks` only; nothing else consumes it', routerBranch: false },

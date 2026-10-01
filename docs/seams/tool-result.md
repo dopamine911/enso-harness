@@ -231,8 +231,8 @@ descriptor to the thread's `toolResultDescriptors` store before it pushes the re
 parts are built from the stored transcript, `metadata` and all.
 
 **Rendered by `EnsoToolResult`** (`packages/web/src/EnsoToolResult.tsx#EnsoToolResult`), reached from every tool
-row but a guard refusal's (`selected-message-part.tsx#ToolCallRow`, `selected-message-part.tsx#SelectedMessagePart`) — a refused call is drawn as a receipt
-by `guard-refusal.tsx` instead, its reason being the result's text (#407). The order is fixed: pending (`running…`) while the run
+row but a refused call's (`selected-message-part.tsx#ToolCallRow`, `selected-message-part.tsx#SelectedMessagePart`) — a refused call is drawn as a receipt
+by `tool-refusal.tsx` instead, naming who refused (#407, #523), its reason being the result's text. The order is fixed: pending (`running…`) while the run
 is open and no result has paired; `aborted` once the run has ended with none (#130); an errored
 envelope renders its error and never consults the descriptor; then the descriptor — the
 store's, else the one on `metadata` (`EnsoToolResult.tsx#useDescriptor`) — picks the rendering: none is the

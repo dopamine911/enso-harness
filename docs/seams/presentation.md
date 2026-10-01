@@ -249,13 +249,14 @@ export interface ThreadStores {
    */
   readonly refusal: WritableStore<ProviderRefusalMark | undefined>
   /**
-   * The calls a guard refused (#387, #407), by tool-call id, with the rule that refused each.
-   * pi hands the page a refusal as an error result shaped like any failed command; this is what
-   * tells them apart. Seeded from the history's results (the server joined the guard's session
-   * entry onto each), then fed by the live `custom-entry` chunk the guard's entry crosses as —
-   * one store either way, so a refusal reads the same live, reloaded and resumed.
+   * The calls something refused (#387, #407, #523), by tool-call id, with who refused each: Enso's
+   * guard and its rule, the user's permission rule, `auto`'s classifier, or the person. pi hands
+   * the page a refusal as an error result shaped like any failed command; this is what tells them
+   * apart. Seeded from the history's results (the server joined the refusing entry onto each),
+   * then fed by the live `custom-entry` chunk the entry crosses as — one store either way, so a
+   * refusal reads the same live, reloaded and resumed.
    */
-  readonly guardDenials: WritableStore<ReadonlyMap<string, EnsoGuardRule>>
+  readonly refusals: WritableStore<ReadonlyMap<string, EnsoToolRefusal>>
   /**
    * The session's risk (#464): its level and how many observed signals it rests on — seeded from
    * the history and the follow's snapshot (the server's replay of the branch), raised live by the

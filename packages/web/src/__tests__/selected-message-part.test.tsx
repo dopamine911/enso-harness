@@ -49,13 +49,13 @@ test('a tool call from an UNREGISTERED name renders its name and result text', (
   expect(rendered).toContain('the visible result text')
 })
 
-// #407 item 1: pi hands a guard refusal over shaped like a failed command. With the call in the
-// thread's denials it is the design's refusal card — the verdict, what was asked, the reason,
-// who refused — and never the word `error`; the same result without a denial stays an error row.
+// #407 item 1: pi hands a refusal over shaped like a failed command. With the call in the
+// thread's refusals it is the design's refusal card — the verdict, what was asked, the reason,
+// who refused — and never the word `error`; the same result without a refusal stays an error row.
 // @pins guarded-tool-call/denial-entry
-test('⚠ a refused call renders as the refusal card; the same error result without a denial is an error row', () => {
+test('⚠ a refused call renders as the refusal card; the same error result without a refusal is an error row', () => {
   const stores = mintThread()
-  stores.guardDenials.set(new Map([['call-1', 'secret-path']]))
+  stores.refusals.set(new Map([['call-1', { by: 'guard', rule: 'secret-path' }]]))
   const selected: ChatUISelectedPart = {
     key: 'toolCall',
     part: toolCallWith({ arguments: '{"command":"cat ~/.aws/credentials"}' }),
@@ -81,6 +81,38 @@ test('⚠ a refused call renders as the refusal card; the same error result with
   expect(noDenial).toContain('data-enso-tool-call="error"')
   expect(noDenial).not.toContain('Refused')
   clearThreadsForTest()
+})
+
+// #523: the engine's refusals used to render as failures — only the guard's entry was read. Each
+// now draws the same card, saying who refused in the reader's words, with no `rule` row (there is
+// no guard rule to name).
+test('⚠ an engine refusal renders as the refusal card, naming your rule, auto, or you (#523)', () => {
+  const cases = [
+    { by: 'rule', verdict: 'Refused · denied by your rule', who: 'your rule' },
+    { by: 'auto', verdict: 'Refused · denied by auto&#x27;s classifier', who: 'auto&#x27;s classifier' },
+    { by: 'operator', verdict: 'Refused · you said no', who: '>you<' },
+  ] as const
+  for (const expected of cases) {
+    const stores = mintThread()
+    stores.refusals.set(new Map([['call-1', { by: expected.by }]]))
+    const selected: ChatUISelectedPart = {
+      key: 'toolCall',
+      part: toolCallWith({ arguments: '{"command":"rm -rf build"}' }),
+      result: toolResultWith({ content: 'Permission denied: rm -rf build', state: 'error', error: 'denied' }),
+    }
+    const inPane = renderToStaticMarkup(
+      <ThreadStoresContext.Provider value={stores}>
+        <SelectedMessagePart selected={selected} isStreaming={false} runOpen={false} renderers={{}} />
+      </ThreadStoresContext.Provider>,
+    )
+    expect(inPane).toContain('data-enso-tool-call="refused"')
+    expect(inPane).toContain(expected.verdict)
+    expect(inPane).toContain(expected.who)
+    expect(inPane).toContain('Permission denied: rm -rf build')
+    expect(inPane).not.toContain('<dt>rule</dt>')
+    expect(inPane).not.toContain('>error<')
+    clearThreadsForTest()
+  }
 })
 
 test('a tool call with no result yet renders the visible pending state', () => {

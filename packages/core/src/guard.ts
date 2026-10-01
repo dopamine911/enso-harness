@@ -145,8 +145,8 @@ export const ENSO_GUARD_DENIAL_ENTRY = 'enso-guard-denial' as const
  * `matched`, what it matched. The session's risk fold tells a plain-name refusal from a
  * cannot-vouch one by `via`, not by the reason's wording.
  *
- * The entry's `data`, and — under {@link ENSO_GUARD_DENIAL_KEY} — the metadata a stored tool
- * result carries, so a surface reads one shape either way.
+ * A stored tool result carries the refusal as `EnsoToolRefusal` (`session-risk.ts`, #523) — who
+ * refused, this entry and the engine's resolving to one shape — under `ENSO_TOOL_REFUSAL_KEY`.
  *
  * @group Guards
  */
@@ -161,14 +161,6 @@ export const EnsoGuardDenial = Type.Object({
 /** @group Guards */
 export type EnsoGuardDenial = Static<typeof EnsoGuardDenial>
 
-/**
- * The tool-result metadata key a refusal rides under on a stored result — beside
- * `ENSO_TOOL_RESULT_KEY`, namespaced the same way and for the same reason (no dot).
- *
- * @group Guards
- */
-export const ENSO_GUARD_DENIAL_KEY = 'enso:guardDenial' as const
-
 const denialValidator = Compile(EnsoGuardDenial)
 
 /**
@@ -179,18 +171,6 @@ const denialValidator = Compile(EnsoGuardDenial)
  */
 export function readEnsoGuardDenial(customType: string, data: unknown): EnsoGuardDenial | undefined {
   return customType === ENSO_GUARD_DENIAL_ENTRY && denialValidator.Check(data) ? data : undefined
-}
-
-/**
- * The refusal a tool result's metadata carries (see {@link ENSO_GUARD_DENIAL_KEY}), or undefined.
- *
- * @group Guards
- */
-export function readEnsoGuardDenialMetadata(
-  metadata: Record<string, unknown> | undefined,
-): EnsoGuardDenial | undefined {
-  const candidate = metadata?.[ENSO_GUARD_DENIAL_KEY]
-  return denialValidator.Check(candidate) ? candidate : undefined
 }
 
 /**

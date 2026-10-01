@@ -1019,9 +1019,11 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
   // and a blocked call never reaches a `tool_result` hook, so before returning the verdict the
   // guard appends a custom entry, `ENSO_GUARD_DENIAL_ENTRY` with `{ toolCallId, rule }`: the one
   // thing of ours pi persists beside it. Live it crosses as a `custom-entry` observation into the
-  // thread's `guardDenials` store; on a cold read `transcript-to-messages.ts` joins it onto its
-  // result as `enso:guardDenial` metadata, and adopting the history seeds the same store. The tool
-  // row and the status bar read only that store: a refusal is never recognised by its wording.
+  // thread's `refusals` store, as who refused (`EnsoToolRefusal`, #523 — the engine's
+  // `enso-permission-denial` resolves to the same shape); on a cold read `transcript-to-messages.ts`
+  // joins it onto its result as `enso:refusal` metadata, and adopting the history seeds the same
+  // store. The tool row and the status bar read only that store: a refusal is never recognised by
+  // its wording.
   // pi's context builder skips `custom` entries, so the model's view is unchanged.
   pi.on('tool_call', (event, extensionContext): ToolCallEventResult | undefined => {
     // The call first, then its refusal: the order the risk fold and every replay of it read (#464).
