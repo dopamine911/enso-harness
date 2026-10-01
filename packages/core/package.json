@@ -16,6 +16,7 @@
     "./pi-manifest": "./src/pi-manifest.ts",
     "./process-marker": "./src/process-marker.ts",
     "./secrets": "./src/secrets.ts",
+    "./snapshot-store": "./src/snapshot-store.ts",
     "./flow-trace": "./src/__tests__/flow-trace.ts",
     "./log-recorder": "./src/__tests__/log-recorder.ts",
     "./observation-kinds": "./src/__tests__/observation-kinds.ts"

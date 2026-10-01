@@ -116,6 +116,17 @@ function exitCode(error: (Error & { code?: unknown; killed?: boolean }) | null):
 }
 
 /**
+ * `environment` without git's repository-locating variables — what every git this package runs
+ * starts from, so an inherited `GIT_DIR` (a hook's shell) never names the repository. The
+ * snapshot store sets its own three on top (`snapshot-store.ts`).
+ *
+ * @group Git
+ */
+export function withoutGitLocalVariables(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return Object.fromEntries(Object.entries(environment).filter(([name]) => GIT_LOCAL_VARIABLES[name] !== true))
+}
+
+/**
  * git in `cwd`, under `environment` without its repository-locating variables and with the
  * read-only settings above. Exported as the test seam: a test hands in an environment, never the
  * process's.
@@ -123,10 +134,7 @@ function exitCode(error: (Error & { code?: unknown; killed?: boolean }) | null):
  * @group Git
  */
 export function runGitIn(environment: NodeJS.ProcessEnv, args: readonly string[], cwd: string): Promise<GitResult> {
-  const env = {
-    ...Object.fromEntries(Object.entries(environment).filter(([name]) => GIT_LOCAL_VARIABLES[name] !== true)),
-    ...GIT_READ_ONLY_VARIABLES,
-  }
+  const env = { ...withoutGitLocalVariables(environment), ...GIT_READ_ONLY_VARIABLES }
   const { promise, resolve } = Promise.withResolvers<GitResult>()
   execFile(
     'git',

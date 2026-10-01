@@ -414,6 +414,17 @@ export function projectSessionsDir(projectsDir: string, projectId: string): stri
 }
 
 /**
+ * A project's snapshot stores: `<projectsDir>/<id>/snapshots/<thread-id>` is one thread's bare
+ * repository of its tree as each run began (#551, `@enso/core/snapshot-store`). Beside the
+ * thread's session, under its project — removed with the thread.
+ *
+ * @group Workspace paths
+ */
+export function projectSnapshotsDir(projectsDir: string, projectId: string): string {
+  return join(projectsDir, projectId, 'snapshots')
+}
+
+/**
  * What `migrateSessionsIntoProjects` did: files moved, files left because the target held one,
  * directories whose cwd is gone.
  *
