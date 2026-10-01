@@ -60,6 +60,7 @@ const DOMAINS_BY_CLASSIFICATION: Readonly<Record<Classification, Readonly<Record
     'prompt-library.ts': 'Thread, Record',
     'provider-refusal.ts': 'Observation, Record',
     'run-context.ts': 'Thread, Record',
+    'runtime-entries.ts': 'Thread, Record',
     'session-eval.ts': 'Thread, Record',
     'session-incident.ts': 'Permission, Control, Record',
     'session-risk.ts': 'Permission, Record',

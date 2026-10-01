@@ -6,6 +6,7 @@ import { hasTrustRequiringProjectResources, ProjectTrustStore } from '@earendil-
 import { ENSO_PROJECT_TRUST_ENTRY, THREAD_PROJECT_TRUST } from '@enso/core'
 import { realpathOrSelf } from '@enso/core/paths'
 import { hasTrustGatedResources, hostedProjectTrust } from '../project-trust.ts'
+import { transcriptOf } from '../transcript.ts'
 
 /**
  * #502: the host's trust decision, against real directories and pi's real `trust.json` store. The
@@ -46,14 +47,18 @@ test('undecided is untrusted even with nothing to load, and asked about only whe
 test("a saved answer beats the thread's record, which beats the default (#502)", () => {
   const refused = directories()
   new ProjectTrustStore(refused.agentDir).set(refused.project, false)
-  const saved = hostedProjectTrust(refused.project, refused.agentDir, threadTrusted)
+  const saved = hostedProjectTrust(refused.project, refused.agentDir, transcriptOf(threadTrusted))
   expect([saved.settingsManager.isProjectTrusted(), saved.open]).toEqual([false, false])
 
   const never = directories()
   writeFileSync(join(never.agentDir, 'settings.json'), JSON.stringify({ defaultProjectTrust: 'never' }))
-  expect(hostedProjectTrust(never.project, never.agentDir, threadTrusted).settingsManager.isProjectTrusted()).toBe(true)
+  expect(
+    hostedProjectTrust(never.project, never.agentDir, transcriptOf(threadTrusted)).settingsManager.isProjectTrusted(),
+  ).toBe(true)
 
   const always = directories()
   writeFileSync(join(always.agentDir, 'settings.json'), JSON.stringify({ defaultProjectTrust: 'always' }))
-  expect(hostedProjectTrust(always.project, always.agentDir, []).settingsManager.isProjectTrusted()).toBe(true)
+  expect(hostedProjectTrust(always.project, always.agentDir, transcriptOf([])).settingsManager.isProjectTrusted()).toBe(
+    true,
+  )
 })

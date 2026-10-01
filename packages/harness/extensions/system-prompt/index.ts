@@ -1,5 +1,5 @@
 import type { BeforeAgentStartEvent, ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent'
-import { type EnsoSystemPromptChoice, recordedSystemPrompt } from '@enso/core'
+import { type EnsoSystemPromptChoice, recordedSystemPrompt, transcriptOf } from '@enso/core'
 
 /**
  * A thread's library system prompt, applied on EVERY surface (#443): at each prompt's run start,
@@ -53,7 +53,7 @@ export const UNREADABLE_SYSTEM_PROMPT_NOTICE =
 
 export default function systemPrompt(pi: ExtensionAPI): void {
   pi.on('before_agent_start', (event: BeforeAgentStartEvent, context: ExtensionContext): undefined => {
-    const recorded = recordedSystemPrompt(context.sessionManager.getBranch())
+    const recorded = recordedSystemPrompt(transcriptOf(context.sessionManager.getBranch()))
     if (recorded.kind === 'chosen') applySystemPrompt(event.systemPromptOptions, recorded.choice)
     if (recorded.kind === 'unreadable') context.ui.notify(UNREADABLE_SYSTEM_PROMPT_NOTICE, 'error')
     return undefined

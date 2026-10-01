@@ -30,6 +30,7 @@ import {
 } from './context-elements.ts'
 import { contextEvents, fileOperations, totalOfItems } from './context-history.ts'
 import { threadSystemPrompt } from './system-prompt.ts'
+import { transcriptOf } from './transcript.ts'
 
 /**
  * A thread's context, request by request (#361) — the host half of `EnsoThreadContext` and of
@@ -219,7 +220,7 @@ export function branchContext(branch: readonly SessionEntry[]): BranchContext {
     requests,
     events: contextEvents(branch, (leafId) => totalOfItems(allItems(contextAt(leafId)))),
     files: fileOperations(branch),
-    systemPrompt: threadSystemPrompt(branch),
+    systemPrompt: threadSystemPrompt(transcriptOf(branch)),
   }
 }
 

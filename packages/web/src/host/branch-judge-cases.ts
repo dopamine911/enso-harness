@@ -1,7 +1,7 @@
 import type { SessionEntry } from '@earendil-works/pi-coding-agent'
-import type { EnsoRiskThresholds, EnsoThreadJudgeCases } from '@enso/core'
-import { judgeContextsOfEntries } from '@enso/core'
+import { type EnsoRiskThresholds, type EnsoThreadJudgeCases, judgeContextsOfTranscript } from '@enso/core'
 import { type JudgeStateInputs, judgeStateOf } from '@enso/core/judge'
+import { transcriptOf } from './transcript.ts'
 
 /**
  * The branch's judge cases (#469), for `bun run judge`: each call the judge would be asked about
@@ -21,7 +21,7 @@ export interface JudgeCaseInputs extends JudgeStateInputs {
 /** Walk one branch, root to leaf. */
 export function branchJudgeCases(branch: readonly SessionEntry[], inputs: JudgeCaseInputs): BranchJudgeCases {
   return {
-    cases: judgeContextsOfEntries(branch, inputs.thresholds).map((context) => ({
+    cases: judgeContextsOfTranscript(transcriptOf(branch), inputs.thresholds).map((context) => ({
       toolCallId: context.toolCallId,
       scope: context.reason,
       state: judgeStateOf(context, inputs),

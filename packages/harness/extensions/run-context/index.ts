@@ -5,9 +5,11 @@ import {
   ENSO_RUN_CONTEXT_ENTRY,
   type EnsoConfigParseResult,
   type EnsoRunContext,
+  type EnsoTranscriptEntry,
   lastCustomEntryData,
   readEnsoRunContext,
   recordedPermissionMode,
+  transcriptOf,
 } from '@enso/core'
 import { type GitRunner, runGit } from '@enso/core/git'
 import { readTextIfPresent } from '@enso/core/paths'
@@ -112,7 +114,7 @@ async function resolvedConfig(
   }
 }
 
-function modeRules(entries: readonly unknown[], policyText: string | undefined): EnsoRunContext['mode'] {
+function modeRules(entries: readonly EnsoTranscriptEntry[], policyText: string | undefined): EnsoRunContext['mode'] {
   if (policyText === undefined) return null
   let policy: unknown
   try {
@@ -144,7 +146,7 @@ async function sessionFactsOf(
   return {
     git,
     config: { hash: sha256(canonicalJson(config.result)), sources: config.sources },
-    mode: modeRules(context.sessionManager.getEntries(), dependencies.readPermissionPolicy()),
+    mode: modeRules(transcriptOf(context.sessionManager.getEntries()), dependencies.readPermissionPolicy()),
   }
 }
 
@@ -177,7 +179,7 @@ async function continuedRunContextOf(
 ): Promise<EnsoRunContext | undefined> {
   const last = readEnsoRunContext(
     ENSO_RUN_CONTEXT_ENTRY,
-    lastCustomEntryData(context.sessionManager.getBranch(), ENSO_RUN_CONTEXT_ENTRY),
+    lastCustomEntryData(transcriptOf(context.sessionManager.getBranch()), ENSO_RUN_CONTEXT_ENTRY),
   )
   if (last === undefined) return undefined
   const facts = await sessionFactsOf(dependencies, context)
@@ -188,7 +190,7 @@ async function continuedRunContextOf(
 function appendIfChanged(pi: ExtensionAPI, context: ExtensionContext, current: EnsoRunContext): void {
   // Compared RAW, not through the reader's schema: a record this writer made that the schema
   // rejects would otherwise read as absent and be appended again every run.
-  const last = lastCustomEntryData(context.sessionManager.getBranch(), ENSO_RUN_CONTEXT_ENTRY)
+  const last = lastCustomEntryData(transcriptOf(context.sessionManager.getBranch()), ENSO_RUN_CONTEXT_ENTRY)
   if (last !== undefined && canonicalJson(last) === canonicalJson(current)) return
   pi.appendEntry(ENSO_RUN_CONTEXT_ENTRY, current)
 }

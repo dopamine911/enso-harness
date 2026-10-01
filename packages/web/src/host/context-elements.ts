@@ -1,6 +1,7 @@
 import { estimateTokens, type ProjectedSessionEntry } from '@earendil-works/pi-coding-agent'
 import {
   base64DecodedBytes,
+  contentToText,
   ENSO_CONTEXT_IMAGE_PREVIEW_BYTES,
   type EnsoContextAddition,
   type EnsoContextBody,
@@ -11,7 +12,6 @@ import {
   estimateTextTokens,
   summarizeToolInput,
 } from '@enso/core'
-import { contentToText } from './map-events.ts'
 
 /**
  * A request's context as ELEMENTS (#361) — dsh-context's browser rows: a prompt section, a tool

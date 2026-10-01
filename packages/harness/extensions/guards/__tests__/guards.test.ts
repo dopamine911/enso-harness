@@ -28,14 +28,16 @@ import {
   ENSO_SECURITY_SIGNAL_ENTRY,
   ENSO_SESSION_RISK_ENTRY,
   incidentPolicyOf,
-  judgeContextsOfEntries,
+  judgeContextsOfTranscript,
+  customEntriesOf,
+  transcriptOf,
   incidentEntriesOf,
   incidentResolvedOf,
   readEnsoGuardDenial,
   readEnsoCommandJudgement,
   replayIncidents,
   sessionIncidentsOf,
-  sessionRiskOfEntries,
+  sessionRiskOfTranscript,
 } from '@enso/core'
 import { type FlowTrace, flowTrace } from '@enso/core/flow-trace'
 import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
@@ -1298,7 +1300,7 @@ test('⚠ live equals replay: the signals and levels the guard records are the o
   const runtime = loadGuardRuntime()
   const { branch, verdicts } = drive(runtime, ESCALATION)
   const live = appended(runtime, ENSO_SECURITY_SIGNAL_ENTRY)
-  const replayed = sessionRiskOfEntries(branch)
+  const replayed = sessionRiskOfTranscript(transcriptOf(branch))
   expect(live).toEqual(replayed.signals)
   expect(replayed.signals.map((signal) => `${signal.signal}@${signal.toolCallId}`)).toEqual([
     'denial-retry@c2',
@@ -1537,7 +1539,7 @@ test('⚠ a suspension survives a resume and a reload; only a resolution record 
   expect(suspendedTools(resumed)).toEqual(EXECUTE_NETWORK_WRITE)
   expect(appended(resumed, ENSO_INCIDENT_OPENED_ENTRY)).toEqual([])
 
-  const [opened] = sessionIncidentsOf(branch.flatMap((entry) => customEntry(entry))).incidents
+  const [opened] = sessionIncidentsOf(customEntriesOf(transcriptOf(branch))).incidents
   if (opened === undefined) throw new Error('the escalation opened no incident')
   const resolved = incidentResolvedOf(opened.opened.incidentId, { classification: 'false-positive', outcome: 'resume' })
   const afterResolution = [...branch, { type: 'custom', customType: ENSO_INCIDENT_RESOLVED_ENTRY, data: resolved }]
@@ -1551,11 +1553,6 @@ test('⚠ a suspension survives a resume and a reload; only a resolution record 
   callOn(restarted, 'after', 'bash', { command: 'python3 -c "print(1)"' })
   expect(appended(restarted, ENSO_INCIDENT_OPENED_ENTRY)).toEqual([])
 })
-
-function customEntry(entry: unknown): { customType: string; data: unknown }[] {
-  const { type, customType, data } = entry as { type?: unknown; customType?: unknown; data?: unknown }
-  return type === 'custom' && typeof customType === 'string' ? [{ customType, data }] : []
-}
 
 // ⚠ #466: only the resolve route restores tools. Live, the host appends the record and announces it
 // on the bus; every tool call the agent can make — a suspended one, a read, ask_user — leaves the
@@ -1625,7 +1622,7 @@ test('⚠ replay equals record: a replay of the guard’s branch opens exactly t
     const { runtime, branch } = twiceEscalated(policy)
     const recorded = appended(runtime, ENSO_INCIDENT_OPENED_ENTRY) as EnsoIncidentOpened[]
     expect(recorded).toHaveLength(2)
-    expect(replayIncidents(branch, DEFAULT_RISK_THRESHOLDS)).toEqual(
+    expect(replayIncidents(transcriptOf(branch), DEFAULT_RISK_THRESHOLDS)).toEqual(
       recorded.map((opened) => ({
         verdict: 'same',
         trigger: opened.signals.at(-1)?.toolCallId ?? '',
@@ -1639,12 +1636,12 @@ test('⚠ replay equals record: a replay of the guard’s branch opens exactly t
 test('a replay under other thresholds says which incidents would open earlier and which it would miss (#468)', () => {
   const { branch } = twiceEscalated(ALERT_ONLY, RETRIES)
   // Five retries each time; the fifth, at c7, reaches the default bar.
-  expect(replayIncidents(branch, DEFAULT_RISK_THRESHOLDS).map(rowOf)).toEqual(['same@c7', 'same@c7b'])
+  expect(replayIncidents(transcriptOf(branch), DEFAULT_RISK_THRESHOLDS).map(rowOf)).toEqual(['same@c7', 'same@c7b'])
   const higher = { ...DEFAULT_RISK_THRESHOLDS, incidentAtSignals: 6 }
-  expect(replayIncidents(branch, higher).map(rowOf)).toEqual(['would-miss@c7', 'would-miss@c7b'])
+  expect(replayIncidents(transcriptOf(branch), higher).map(rowOf)).toEqual(['would-miss@c7', 'would-miss@c7b'])
   // A lower bar opens at the fourth retry; the one the guard recorded later, the replay misses.
   const lower = { ...DEFAULT_RISK_THRESHOLDS, incidentAtSignals: 4 }
-  expect(replayIncidents(branch, lower).map(rowOf)).toEqual([
+  expect(replayIncidents(transcriptOf(branch), lower).map(rowOf)).toEqual([
     'would-open@c6',
     'would-miss@c7',
     'would-open@c6b',
@@ -1658,7 +1655,10 @@ test('an incident’s entries are its own records as stored: opening, its calls�
   const { runtime, branch } = twiceEscalated(ALERT_ONLY, RETRIES)
   const [first] = appended(runtime, ENSO_INCIDENT_OPENED_ENTRY) as EnsoIncidentOpened[]
   if (first === undefined) throw new Error('no incident opened')
-  const exported = incidentEntriesOf(branch, first) as { customType: string; data: Record<string, unknown> }[]
+  const exported = incidentEntriesOf(transcriptOf(branch), first) as {
+    customType: string
+    data: Record<string, unknown>
+  }[]
   const named = exported.map(({ customType, data }) => `${customType}@${String(data.toolCallId ?? data.incidentId)}`)
   expect(named).toEqual([
     'enso-guard-denial@c1',
@@ -1676,8 +1676,9 @@ test('an incident’s entries are its own records as stored: opening, its calls�
     `enso-incident-opened@${first.incidentId}`,
     `enso-incident-resolved@${first.incidentId}`,
   ])
-  // As stored: the branch's own entries, not copies of a reading of them.
-  for (const entry of exported) expect(branch).toContain(entry)
+  // As stored: each record's `data` IS the branch entry's data (#557), not a copy of a reading of it.
+  const storedData = branch.map((entry) => (entry as { data?: unknown }).data)
+  for (const entry of exported) expect(storedData).toContain(entry.data)
 })
 
 // ⚠ A fork inherits its source's open incident as the host's record (#466 decision 5). The guard
@@ -1701,7 +1702,7 @@ test('⚠ an inherited open incident holds the replay as it holds the guard: no 
   const after = drive(fork, ESCALATION.slice(3)).branch
   expect(appended(fork, ENSO_SESSION_RISK_ENTRY)).toContainEqual({ level: 'incident', signals: 5 })
   expect(appended(fork, ENSO_INCIDENT_OPENED_ENTRY)).toEqual([])
-  expect(replayIncidents([...forkBranch, ...after], DEFAULT_RISK_THRESHOLDS)).toEqual([])
+  expect(replayIncidents(transcriptOf([...forkBranch, ...after]), DEFAULT_RISK_THRESHOLDS)).toEqual([])
 })
 
 // ⚠ #466 item 8: the records an incident rests on are refused by name on the shell route — a touch
@@ -1924,7 +1925,7 @@ test('⚠ live equals replay: a replay of the branch selects exactly the calls t
     'c6:after-refusal',
     'c7:after-refusal',
   ])
-  const replayed = judgeContextsOfEntries(branch, DEFAULT_RISK_THRESHOLDS)
+  const replayed = judgeContextsOfTranscript(transcriptOf(branch), DEFAULT_RISK_THRESHOLDS)
   expect(replayed.map(({ toolCallId, reason }) => `${toolCallId}:${reason}`)).toEqual(
     live.map(({ toolCallId, scope }) => `${toolCallId}:${scope}`),
   )

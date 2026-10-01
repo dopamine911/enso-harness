@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { hasTrustRequiringProjectResources, ProjectTrustStore, SettingsManager } from '@earendil-works/pi-coding-agent'
-import { threadTrustsProject } from '@enso/core'
+import { type EnsoTranscriptEntry, threadTrustsProject } from '@enso/core'
 import { projectConfigPath } from '@enso/core/paths'
 
 /**
@@ -34,7 +34,11 @@ export interface HostedProjectTrust {
 }
 
 /** @group Project trust */
-export function hostedProjectTrust(cwd: string, agentDir: string, branch: readonly unknown[]): HostedProjectTrust {
+export function hostedProjectTrust(
+  cwd: string,
+  agentDir: string,
+  branch: readonly EnsoTranscriptEntry[],
+): HostedProjectTrust {
   const settingsManager = SettingsManager.create(cwd, agentDir, { projectTrusted: false })
   const saved = new ProjectTrustStore(agentDir).get(cwd)
   const fallback = settingsManager.getDefaultProjectTrust()

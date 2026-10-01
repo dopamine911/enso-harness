@@ -14,6 +14,7 @@ import {
   EnsoSessionUsage,
   type EnsoToolResultDescriptor,
   type EnsoUsage,
+  contentToText,
   isEnsoDialogSpec,
 } from '@enso/core'
 import type { Static, TSchema } from 'typebox'
@@ -42,11 +43,6 @@ import type { EventDelivery, RuntimeEvent } from './runtime-event.ts'
  */
 const DIALOG_UI_METHODS = new Set(['select', 'confirm', 'input', 'editor', 'questionnaire'])
 
-interface PiContentPart {
-  type?: string
-  text?: string
-}
-
 function readUsage(raw: unknown): EnsoUsage | undefined {
   if (typeof raw !== 'object' || raw === null) return undefined
   const usage = raw as Record<string, unknown>
@@ -60,17 +56,6 @@ function readUsage(raw: unknown): EnsoUsage | undefined {
     cacheWrite: numberAt('cacheWrite'),
     ...(totalCost === undefined ? {} : { totalCost }),
   }
-}
-
-/** Flatten pi's `content` array to text. Non-text parts are named, never dropped. */
-export function contentToText(content: unknown): string {
-  if (typeof content === 'string') return content
-  if (!Array.isArray(content)) return ''
-  return (content as PiContentPart[])
-    .map((part) =>
-      part.type === 'text' && typeof part.text === 'string' ? part.text : `[${part.type ?? 'unknown'} content]`,
-    )
-    .join('')
 }
 
 /**

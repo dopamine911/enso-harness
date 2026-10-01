@@ -404,6 +404,16 @@ reads a stored entry — and hands out `EnsoTranscriptEntry[]` from `readStoredT
 walk reads our `custom` entries. The glossary gate's row for the old reader is gone, and the gate
 now refuses an allowlisted file it cannot find, so it cannot come back unnoticed.
 
+**And since #557, nothing of the runtime's entry envelope reaches a fold in `core`.** Until then
+`recordedPermissionMode`, `lastCustomEntryData`, `incidentEntriesOf`, `replayIncidents` and the
+risk and judge replays took `readonly unknown[]` and matched pi's `{ type: 'custom', customType,
+data }` and `{ type: 'message', message }` themselves (`durable-room.md`'s pivot item 1). Now every
+fold takes `EnsoTranscriptEntry[]`, and the ONE module that names the runtime's envelope is
+`packages/core/src/runtime-entries.ts` (`transcriptOf`): the host's `transcript.ts` is that plus
+what needs the vendor's types (a provider refusal, a result's descriptor); the harness extensions
+call it on `ctx.sessionManager.getBranch()`; the corpus scripts call it on the omp corpus. A
+different runtime is a different `runtime-entries.ts`, and the folds do not move.
+
 **`sessionFile` is a lagging copy.** The runtime persists lazily — nothing reaches disk until the first
 assistant message — so `inspect()` reports the path only once the file exists and `null` before;
 a thread that has only run slash commands has a full branch and no file, and `listSessions` omits it.

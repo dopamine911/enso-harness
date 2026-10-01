@@ -3,8 +3,9 @@ import {
   DEFAULT_RISK_THRESHOLDS,
   type EnsoRiskEvent,
   type EnsoRiskState,
+  type EnsoTranscriptEntry,
   INITIAL_SESSION_RISK,
-  riskEventsOfEntries,
+  riskEventsOfTranscript,
   sessionRiskStep,
 } from '../packages/core/src/index.ts'
 import {
@@ -257,7 +258,7 @@ export interface Refusal {
 
 /** Every refusal in a branch, with what followed — folded by the guard's own risk step. */
 export function refusalsIn(
-  branch: readonly unknown[],
+  branch: readonly EnsoTranscriptEntry[],
   window: number = DEFAULT_RISK_THRESHOLDS.windowCalls,
 ): Refusal[] {
   const { calls, denials, signals } = foldBranch(branch)
@@ -279,12 +280,12 @@ interface FoldedBranch {
 }
 
 /** One pass of the guard's risk step over a branch: its calls, the refusals (each at the index of the call that follows), and the signals raised. */
-function foldBranch(branch: readonly unknown[]): FoldedBranch {
+function foldBranch(branch: readonly EnsoTranscriptEntry[]): FoldedBranch {
   let state: EnsoRiskState = INITIAL_SESSION_RISK
   const calls: RiskCall[] = []
   const denials: { at: number; command: string; reason: string }[] = []
   const signals: { at: number; kind: string }[] = []
-  for (const event of riskEventsOfEntries(branch)) {
+  for (const event of riskEventsOfTranscript(branch)) {
     const step = sessionRiskStep(state, event, DEFAULT_RISK_THRESHOLDS)
     for (const signal of step.raised) signals.push({ at: calls.length, kind: signal.signal })
     state = step.state

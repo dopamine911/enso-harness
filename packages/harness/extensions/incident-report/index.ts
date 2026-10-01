@@ -11,6 +11,7 @@ import {
   type EnsoIncidentReport,
   type EnsoIncidentReportMissing,
   ENSO_LOG_EVENTS,
+  customEntriesOf,
   ensoLogger,
   FileIncidentReportParameters,
   type IncidentReportEvidence,
@@ -19,6 +20,7 @@ import {
   readEnsoIncidentOpened,
   reportOwedOf,
   sessionIncidentsOf,
+  transcriptOf,
 } from '@enso/core'
 
 /**
@@ -102,16 +104,6 @@ function citableTextOf(branch: readonly unknown[]): Map<string, string> {
     texts.set(ref, ref === ENSO_REPORT_PROMPT_REF ? text : [texts.get(ref) ?? '', text].join('\n'))
   }
   return texts
-}
-
-/** The branch's custom entries, `{ customType, data }` in order — what the incident fold reads. */
-function customEntriesOf(branch: readonly unknown[]): { customType: string; data: unknown }[] {
-  return branch.flatMap((entry) => {
-    const record = recordOf(entry)
-    return record?.type === 'custom' && typeof record.customType === 'string'
-      ? [{ customType: record.customType, data: record.data }]
-      : []
-  })
 }
 
 function reportResult(text: string, terminate: boolean): AgentToolResult<undefined> {
@@ -233,7 +225,9 @@ export default function incidentReport(pi: ExtensionAPI): void {
     owed = undefined
     submissions = 0
     try {
-      const still = reportOwedOf(sessionIncidentsOf(customEntriesOf(extensionContext.sessionManager.getBranch())))
+      const still = reportOwedOf(
+        sessionIncidentsOf(customEntriesOf(transcriptOf(extensionContext.sessionManager.getBranch()))),
+      )
       if (still !== undefined) {
         settle(ENSO_INCIDENT_REPORT_MISSING_ENTRY, {
           incidentId: still.opened.incidentId,

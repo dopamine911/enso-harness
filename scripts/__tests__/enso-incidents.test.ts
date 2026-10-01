@@ -1,5 +1,10 @@
 import { expect, test } from 'bun:test'
-import type { EnsoCheckedClaim, EnsoIncidentRecord, EnsoThreadIncidents } from '../../packages/core/src/index.ts'
+import type {
+  EnsoCheckedClaim,
+  EnsoIncidentRecord,
+  EnsoThreadIncidents,
+  EnsoTranscriptCustom,
+} from '../../packages/core/src/index.ts'
 import { exportFiles, parseArguments, renderAgentReport, renderHistory, renderReplay } from '../enso-incidents.ts'
 import { UsageError } from '../server-cli.ts'
 
@@ -51,21 +56,19 @@ const HALTED: EnsoIncidentRecord = {
   resolutions: [{ incidentId: 'incident-1', classification: 'agent-error', outcome: 'resume', suspended: [] }],
 }
 
-/** The entries pi stored for it, as the route returns them: untyped, with pi's own fields. */
-const STORED = [
+/** The entries pi stored for it, as the route returns them: our transcript's records (#557). */
+const STORED: EnsoTranscriptCustom[] = [
   {
-    type: 'custom',
+    kind: 'custom',
     id: 'e1',
-    parentId: 'e0',
-    timestamp: '2026-09-30T10:00:00.000Z',
+    at: '2026-09-30T10:00:00.000Z',
     customType: 'enso-incident-opened',
     data: HALTED.opened,
   },
   {
-    type: 'custom',
+    kind: 'custom',
     id: 'e2',
-    parentId: 'e1',
-    timestamp: '2026-09-30T10:00:01.000Z',
+    at: '2026-09-30T10:00:01.000Z',
     customType: 'enso-incident-resolved',
     data: HALTED.resolutions[0],
   },
@@ -122,9 +125,10 @@ test('the commands: history by default, replay with threshold flags, export of o
   expect(() => parseArguments(['history', '--json'])).toThrow(UsageError)
 })
 
-// ⚠ #468's export contract: `mechanical.json` is the stored entries, byte for byte as JSON — pi's
-// ids, parents and timestamps included — so what is handed over is the record, not a reading of it.
-test('⚠ the export round-trips: mechanical.json is the entries as stored, resolution.json the resolutions', () => {
+// ⚠ #468's export contract, as of #557: `mechanical.json` is the entries as our transcript records
+// them — each stored `data` byte for byte, under our `{ kind, id, at, customType }` envelope — so
+// what is handed over is the record, not a reading of it.
+test('⚠ the export round-trips: mechanical.json is the entries as recorded, resolution.json the resolutions', () => {
   const files = exportFiles({ record: HALTED, entries: STORED })
   expect(Object.keys(files).toSorted()).toEqual(['agent-report.md', 'mechanical.json', 'resolution.json'])
   expect(JSON.parse(files['mechanical.json'] ?? '')).toEqual(STORED)

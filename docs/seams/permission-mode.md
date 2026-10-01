@@ -197,8 +197,8 @@ engine makes, so the mode shown is the mode enforced, even after `/tree` moves t
 <!-- source: packages/core/src/permission-modes.ts#recordedPermissionMode -->
 ```ts
 /**
- * The mode a session is in, from its entries: the LAST `active_agent` entry wins, and a session
- * with none is in `default`.
+ * The mode a session is in, from its entries as our transcript (`transcriptOf`): the LAST
+ * `active_agent` entry wins, and a session with none is in `default`.
  *
  * ⚠ Walk the session's ENTRIES in file order, not its branch. That is what gotgenes walks
  * (`session/active-agent.ts#getActiveAgentName`), so the mode shown is the mode enforced, even
@@ -208,11 +208,11 @@ engine makes, so the mode shown is the mode enforced, even after `/tree` moves t
  * that agent. Only Enso writes the entry in an Enso session; this is the reading to revisit if
  * that ever changes.
  */
-export function recordedPermissionMode(entries: readonly unknown[]): EnsoPermissionModeName {
+export function recordedPermissionMode(entries: readonly EnsoTranscriptEntry[]): EnsoPermissionModeName {
   for (let position = entries.length - 1; position >= 0; position -= 1) {
     const entry = entries[position]
-    if (typeof entry !== 'object' || entry === null || !('type' in entry) || entry.type !== 'custom') continue
-    const recorded = readRecordedMode(entry)
+    if (entry?.kind !== 'custom') continue
+    const recorded = readRecordedMode(entry.customType, entry.data)
     if (recorded !== undefined) return recorded
   }
   return ENSO_DEFAULT_PERMISSION_MODE
@@ -222,18 +222,17 @@ export function recordedPermissionMode(entries: readonly unknown[]): EnsoPermiss
 <!-- source: packages/core/src/permission-modes.ts#readRecordedMode -->
 ```ts
 /**
- * The mode ONE session entry records, or undefined when the entry is not an `active_agent`
- * entry, is malformed, or names an agent that is not one of Enso's modes.
+ * The mode ONE custom entry records — `(customType, data)`, the shape every `readEnso*` reader
+ * takes — or undefined when it is not an `active_agent` entry, is malformed, or names an agent
+ * that is not one of Enso's modes.
  *
- * Reads defensively, as every wire crossing does: an unrelated custom entry is ignored, never a
+ * Reads `data` defensively, as every wire crossing does: an unrelated entry is ignored, never a
  * throw inside a stream loop.
  */
-export function readRecordedMode(entry: unknown): EnsoPermissionModeName | undefined {
-  if (typeof entry !== 'object' || entry === null) return undefined
-  if (!('customType' in entry) || entry.customType !== ACTIVE_AGENT_CUSTOM_TYPE) return undefined
-  if (!('data' in entry) || typeof entry.data !== 'object' || entry.data === null) return undefined
-  if (!('name' in entry.data)) return undefined
-  const { name } = entry.data
+export function readRecordedMode(customType: string, data: unknown): EnsoPermissionModeName | undefined {
+  if (customType !== ACTIVE_AGENT_CUSTOM_TYPE) return undefined
+  if (typeof data !== 'object' || data === null || !('name' in data)) return undefined
+  const { name } = data
   // Not written any more (see the module's ⚠); read as `default`, which is what it asked for.
   if (name === null) return ENSO_DEFAULT_PERMISSION_MODE
   if (typeof name !== 'string' || !name.startsWith(MODE_AGENT_PREFIX)) return undefined
@@ -257,7 +256,7 @@ and a stored one's.
  * cached: entries only grow, but a cache is one more thing to keep in step for microseconds.
  */
 export function livePermissionModeState(
-  entries: readonly unknown[],
+  entries: readonly EnsoTranscriptEntry[],
   registeredCommands: ReadonlySet<string>,
 ): EnsoPermissionModeState {
   return {
@@ -296,7 +295,7 @@ export function storedPermissionModeState(transcript: readonly EnsoTranscriptEnt
   for (let position = transcript.length - 1; position >= 0; position -= 1) {
     const entry = transcript[position]
     if (entry?.kind !== 'custom') continue
-    const recorded = readRecordedMode({ customType: entry.customType, data: entry.data })
+    const recorded = readRecordedMode(entry.customType, entry.data)
     if (recorded !== undefined) return { mode: recorded, available: [...ENSO_PERMISSION_MODES] }
   }
   return freshPermissionModeState()

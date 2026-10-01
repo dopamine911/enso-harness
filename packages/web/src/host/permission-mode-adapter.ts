@@ -42,7 +42,7 @@ export function modeCommand(mode: string): string {
  * cached: entries only grow, but a cache is one more thing to keep in step for microseconds.
  */
 export function livePermissionModeState(
-  entries: readonly unknown[],
+  entries: readonly EnsoTranscriptEntry[],
   registeredCommands: ReadonlySet<string>,
 ): EnsoPermissionModeState {
   return {
@@ -75,7 +75,7 @@ export function storedPermissionModeState(transcript: readonly EnsoTranscriptEnt
   for (let position = transcript.length - 1; position >= 0; position -= 1) {
     const entry = transcript[position]
     if (entry?.kind !== 'custom') continue
-    const recorded = readRecordedMode({ customType: entry.customType, data: entry.data })
+    const recorded = readRecordedMode(entry.customType, entry.data)
     if (recorded !== undefined) return { mode: recorded, available: [...ENSO_PERMISSION_MODES] }
   }
   return freshPermissionModeState()

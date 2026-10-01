@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { ENSO_PERMISSION_DENIAL_ENTRY } from '../../packages/core/src/index.ts'
+import { ENSO_PERMISSION_DENIAL_ENTRY, transcriptOf } from '../../packages/core/src/index.ts'
 import { classifyFollow, constructOf, inCurrentScope, liveText, refusalsIn } from '../corpus-shapes.ts'
 
 /**
@@ -85,7 +85,7 @@ test('refusalsIn folds a branch with the risk step: the refused command, the win
     call('c4', 'echo done'),
     result('c4'),
   ]
-  const [refusal, ...rest] = refusalsIn(branch, 8)
+  const [refusal, ...rest] = refusalsIn(transcriptOf(branch), 8)
   expect(rest).toEqual([])
   expect(refusal?.denied).toBe('git push --force origin main')
   expect(refusal?.reason).toBe('engine:user_denied')

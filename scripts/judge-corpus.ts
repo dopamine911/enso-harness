@@ -6,7 +6,9 @@ import {
   type EnsoPermissionDenialResolution,
   type EnsoRiskThresholds,
   type EnsoThreadJudgeCases,
-  judgeContextsOfEntries,
+  type EnsoTranscriptEntry,
+  judgeContextsOfTranscript,
+  transcriptOf,
 } from '../packages/core/src/index.ts'
 import { type JudgeStateInputs, judgeStateOf } from '../packages/core/src/judge.ts'
 import { readJsonLines } from './server-cli.ts'
@@ -163,11 +165,11 @@ function cwdOf(entries: readonly unknown[]): string | undefined {
   return undefined
 }
 
-/** One transcript as the pi-shaped branch the guard's own readers take, and where it ran. */
+/** One transcript as the branch the guard's own readers take, and where it ran. */
 export interface CorpusBranch {
   readonly threadId: string
   readonly cwd: string
-  readonly branch: readonly unknown[]
+  readonly branch: readonly EnsoTranscriptEntry[]
 }
 
 /** What reading a corpus found: its transcripts as branches, and the transcripts it skipped. */
@@ -178,8 +180,8 @@ export interface CorpusBranches {
 }
 
 /**
- * A corpus's transcripts as pi-shaped branches, in path order — what `judgeContextsOfEntries`,
- * `riskEventsOfEntries` and the rest of core's branch readers take. ⚠ The ACME skip and the
+ * A corpus's transcripts as our transcript, in path order — what `judgeContextsOfTranscript`,
+ * `riskEventsOfTranscript` and the rest of core's branch readers take. ⚠ The ACME skip and the
  * no-`cwd` skip happen here, before a file is opened or resolved.
  */
 export function corpusBranches(corpus: JudgeCorpus, root: string = CORPUS_ROOTS[corpus]): CorpusBranches {
@@ -199,7 +201,9 @@ export function corpusBranches(corpus: JudgeCorpus, root: string = CORPUS_ROOTS[
       skippedNoCwd += 1
       continue
     }
-    const branch = corpus === 'claude' ? claudeEntriesAsPi(raw) : ompEntriesWithDenials(raw)
+    // The corpora are brought to pi's stored shape (an omp session is one already; a Claude Code
+    // transcript is rebuilt as one), then decoded like any branch — the readers take our transcript.
+    const branch = transcriptOf(corpus === 'claude' ? claudeEntriesAsPi(raw) : ompEntriesWithDenials(raw))
     branches.push({ threadId: `${corpus}:${relativePath.replace(/\.jsonl$/, '')}`, cwd, branch })
   }
   return { branches, skippedAcme, skippedNoCwd }
@@ -223,7 +227,7 @@ export function corpusThreads(
   const read = corpusBranches(corpus, inputs.root)
   const threads: EnsoThreadJudgeCases[] = []
   for (const { threadId, cwd, branch } of read.branches) {
-    const cases = judgeContextsOfEntries(branch, inputs.thresholds).map((context) => ({
+    const cases = judgeContextsOfTranscript(branch, inputs.thresholds).map((context) => ({
       toolCallId: context.toolCallId,
       scope: context.reason,
       state: judgeStateOf(context, { ...inputs, cwd }),

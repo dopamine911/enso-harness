@@ -1,6 +1,5 @@
 import type { SessionEntry } from '@earendil-works/pi-coding-agent'
-import type { EnsoPromptStats, EnsoToolCallStats, EnsoTurnStats } from '@enso/core'
-import { contentToText } from './map-events.ts'
+import { contentToText, type EnsoPromptStats, type EnsoToolCallStats, type EnsoTurnStats } from '@enso/core'
 
 /**
  * A thread's branch, analysed (#45 phase 2): per prompt, per turn, per tool — the session half

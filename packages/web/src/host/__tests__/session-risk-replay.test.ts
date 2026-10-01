@@ -3,15 +3,16 @@ import {
   ENSO_GUARD_DENIAL_ENTRY,
   ENSO_OPERATOR_DENIAL_ENTRY,
   ENSO_PERMISSION_DENIAL_ENTRY,
-  sessionRiskOfEntries,
   sessionRiskOfTranscript,
 } from '@enso/core'
 import { transcriptOf } from '../transcript.ts'
 
 /**
- * #464: one branch, two readers. A resumed guard replays pi's raw entries; the thread snapshot and
- * the session eval replay the host's transcript of the same branch. They must agree, or a session
- * would show one risk and run under another.
+ * #464, then #557: one branch, ONE reader. A resumed guard, the thread snapshot and the session
+ * eval all replay the same transcript of the stored branch (`transcriptOf`), so they cannot
+ * disagree by construction; what this pins is the replay over the STORED shape — a batched call,
+ * a message that is not chat, and a person's No recorded before #464 without its call id — reading
+ * as the live fold would.
  */
 
 let clock = Date.parse('2026-09-30T12:00:00.000Z')
@@ -41,7 +42,7 @@ const result = (toolCallId: string): Record<string, unknown> =>
     },
   })
 
-test('⚠ the raw branch and its transcript replay to the same risk, a batch, a non-chat message and an old record included', () => {
+test('⚠ the stored branch replays to the live fold’s risk: a batch, a non-chat message and an old record without a call id included', () => {
   const branch = [
     stamped({ type: 'message', message: { role: 'user', content: 'tidy the build' } }),
     stamped({ type: 'model_change', provider: 'acme', modelId: 'm1' }),
@@ -66,9 +67,8 @@ test('⚠ the raw branch and its transcript replay to the same risk, a batch, a 
     custom(ENSO_OPERATOR_DENIAL_ENTRY, { requestId: 'r4', surface: 'bash', value: 'rm -rf build' }),
     result('c4'),
   ]
-  const fromEntries = sessionRiskOfEntries(branch)
-  expect(sessionRiskOfTranscript(transcriptOf(branch))).toEqual(fromEntries)
-  expect(fromEntries.signals.map((signal) => `${signal.signal}@${signal.toolCallId}`)).toEqual([
+  const replayed = sessionRiskOfTranscript(transcriptOf(branch))
+  expect(replayed.signals.map((signal) => `${signal.signal}@${signal.toolCallId}`)).toEqual([
     'alternate-execution-path@c2',
     'denial-retry@c4',
   ])

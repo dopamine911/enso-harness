@@ -1,5 +1,6 @@
 import { type Static, Type } from 'typebox'
 import { Compile } from 'typebox/compile'
+import type { EnsoTranscriptEntry } from './transcript.ts'
 
 /**
  * The prompt library (#443): markdown files a person writes once and starts sessions with.
@@ -426,16 +427,15 @@ export type EnsoThreadSystemPrompt = Static<typeof EnsoThreadSystemPrompt>
 
 /**
  * The data of the branch's LAST custom entry of `customType`, root to leaf — the rule every reader
- * of a custom entry on the branch follows (the run context, the system prompt): the last
- * one on the path is the one in force. The branch is read as `unknown[]`: this package names no
- * runtime type.
+ * of a custom entry on the branch follows (the run context, the system prompt, the project trust):
+ * the last one on the path is the one in force. The branch is our transcript (`transcriptOf`).
  *
  * @group Prompt library
  */
-export function lastCustomEntryData(branch: readonly unknown[], customType: string): unknown {
+export function lastCustomEntryData(branch: readonly EnsoTranscriptEntry[], customType: string): unknown {
   for (let entryIndex = branch.length - 1; entryIndex >= 0; entryIndex -= 1) {
-    const entry = branch[entryIndex] as { type?: unknown; customType?: unknown; data?: unknown } | undefined
-    if (entry?.type === 'custom' && entry.customType === customType) return entry.data
+    const entry = branch[entryIndex]
+    if (entry?.kind === 'custom' && entry.customType === customType) return entry.data
   }
   return undefined
 }
@@ -454,7 +454,7 @@ export type RecordedSystemPrompt =
  *
  * @group Prompt library
  */
-export function recordedSystemPrompt(branch: readonly unknown[]): RecordedSystemPrompt {
+export function recordedSystemPrompt(branch: readonly EnsoTranscriptEntry[]): RecordedSystemPrompt {
   const data = lastCustomEntryData(branch, ENSO_SYSTEM_PROMPT_ENTRY)
   if (data === undefined || data === null) return { kind: 'none' }
   const choice = readEnsoSystemPromptChoice(data)
