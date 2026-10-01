@@ -491,27 +491,6 @@ test('a view row closes the palette and hands the row to `onOpenView`; nothing i
   await mounted.unmount()
 })
 
-// The #341 case: a thread with no live session gets the `remembered` list, whose host rows the
-// server strips `value` from. No right-hand label — and the row STILL opens its page, because
-// choosing before the first prompt is what the rows are for.
-test('a remembered host row without a value shows no label and still opens its page', async () => {
-  const stripped = HOST_ROWS.map(({ value: _current, ...row }) => row)
-  const mounted = await mountPalette(() =>
-    Response.json({ ...LIVE, commands: [...LIVE.commands, ...stripped], source: 'remembered' }),
-  )
-  await mounted.open()
-  const thinkingRow = await eventually(() => mounted.row('/thinking'))
-  expect(thinkingRow.textContent).toBe('/thinkingset the thinking level')
-  expect(mounted.row('/model').textContent).toBe('/modelswitch the model')
-  await flush(async () => {
-    thinkingRow.click()
-    await tick()
-  })
-  await eventually(() => expect(mounted.rows()).toEqual(['off', 'low', 'medium', 'high']))
-  expect([...mounted.palette().querySelectorAll('[cmdk-item][data-checked="true"]')]).toHaveLength(0)
-  await mounted.unmount()
-})
-
 // An `action` row runs bare (slice 4's `/compact`), and so does a host row with NO kind — the
 // palette's fallthrough. (A kind the schema does not list cannot arrive: `fetchThreadCommands`
 // refuses the payload whole, so "unknown kind" is a code path the wire never reaches.)
@@ -543,15 +522,6 @@ test('an action row — or a host row with no kind — is `onHost(name)` bare', 
   await mounted.unmount()
 })
 
-// #390: the server builds the session when the palette asks, so `none` means that build failed
-// with nothing to fall back on — said as such, not as "no thread has run yet".
-test("`source: 'none'` says the session could not start", async () => {
-  const mounted = await mountPalette(() => Response.json({ threadId: 'thread 1', commands: [], source: 'none' }))
-  await mounted.open()
-  await eventually(() => expect(mounted.palette().textContent).toContain('the session could not start'))
-  await mounted.unmount()
-})
-
 test('a live list with no rows says the session registers no commands', async () => {
   const mounted = await mountPalette(() => Response.json({ threadId: 'thread 1', commands: [], source: 'live' }))
   await mounted.open()
@@ -560,13 +530,17 @@ test('a live list with no rows says the session registers no commands', async ()
   await mounted.unmount()
 })
 
-test("`source: 'remembered'` shows the rows and a footer note that this thread's session could not start", async () => {
-  const mounted = await mountPalette(() => Response.json({ ...LIVE, source: 'remembered' }))
+// ⚠ #484: a thread with no session answers the host's catalogue — the Start dialog's rows. The
+// palette shows NONE of them: the slash commands belong to a running session, and the sentence
+// says what to do instead. Nothing was built to answer.
+test("`source: 'catalogue'` lists no rows, and says a / command needs a running session", async () => {
+  const stripped = HOST_ROWS.map(({ value: _current, ...row }) => row)
+  const mounted = await mountPalette(() =>
+    Response.json({ threadId: 'thread 1', commands: stripped, source: 'catalogue' }),
+  )
   await mounted.open()
-  await eventually(() => {
-    expect(mounted.rows()).toHaveLength(4)
-    expect(mounted.palette().textContent).toContain("from the last session — this thread's session could not start")
-  })
+  await eventually(() => expect(mounted.palette().textContent).toContain('a / command needs a running session'))
+  expect(mounted.rows()).toEqual([])
   await mounted.unmount()
 })
 

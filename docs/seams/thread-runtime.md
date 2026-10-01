@@ -296,7 +296,7 @@ export const RuntimeCommand = Type.Object({
       Type.Literal('view'),
     ]),
   ),
-  /** `host` rows: the current choice, as an `options[].id`. Absent when the list is `remembered` — a thread with no live session has no current value to show. */
+  /** `host` rows: the current choice, as an `options[].id`. Absent when the list is the `catalogue` — a thread with no session has no current value to show. */
   value: Type.Optional(Type.String()),
   /** `host` rows with `kind: 'select' | 'level'`: what may be chosen. */
   options: Type.Optional(Type.Array(HostCommandOption)),
@@ -388,6 +388,16 @@ its own rows — `/model`, `/thinking`, `/login`, `/logout`, `/compact`, `/conte
 palette renders them by kind with no
 per-command UI. A `view` (`/context`, #361) is the one kind the host never runs: the page opens the
 view it names, and a run of it is refused as 422. Small, stated.
+
+**Which requests build a session** (#86, #390, #484). A run does (`POST …/prompt`, `…/continue`),
+and a person's explicit CONTROL of a thread that has not run does (`POST …/command` choosing its
+model or thinking level, `…/flow` starting a login, the system-prompt preview, a permission check —
+`ThreadRegistry.ensure`). Nothing else: every GET is `peek`, and `GET …/commands` for a thread the
+server does not hold answers the host's `catalogue()` — `/model` over pi's available models,
+`/login`, `/logout`, read from the agent dir's auth and models files with no session. The Start
+dialog reads its models there, so opening the page builds nothing; the palette shows a `catalogue`
+list as none, because the slash commands belong to a running session (a prompt beginning with `/`
+cannot start one, and the dialog says so).
 
 **`modelState` and `runHostCommand` are the control half of #44** (#338 slice 2). The state is what
 the session runs with now — model, thinking level, the levels that model offers — on the snapshot

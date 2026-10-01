@@ -160,11 +160,13 @@ what the act caused arrives on the follow, for every follower alike. Nothing her
 - **notify** — a one-way notice from an extension (`info`, `warning`, `error`), shown as a transcript
   line; nothing waits on it. Status-bar text addressed to a terminal is dropped, not shown.
 - **command palette** — the chat page's `/` menu (#338): every slash command the thread can run,
-  grouped by source (extension, prompt, skill — and `host` once ours land), filtered as you type.
-  Its list is `GET …/threads/:id/commands`, which says whether it came from the live session, the
-  last built one (`remembered` — this thread has no live session; every session builds the same
-  set from the same sources, as they stood at that build), or nowhere yet — looking must not
-  build (#86). Selecting an
+  grouped by source (host, extension, prompt, skill), filtered as you type.
+  Its list is `GET …/threads/:id/commands`, which says where it came from: the thread's live
+  session (`live`), or the host's **catalogue** (`catalogue`) when the thread has no session —
+  `/model` over the models the runtime could run, `/login`, `/logout`, read from the agent dir's
+  auth and models files with nothing built (#86, #484). The palette shows a catalogue list as none: the slash commands
+  belong to a running session, and the Start dialog is what a thread without one offers. The
+  Start dialog reads its models from the same catalogue, so opening the page builds nothing. Selecting an
   extension command sends it as a prompt; a template or skill is inserted for its arguments; a
   **host command** runs through `POST …/threads/:id/command`.
 - **host command** — a slash command that is ours, not the runtime's (#338 slice 2): `source: 'host'`,

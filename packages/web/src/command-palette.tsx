@@ -15,6 +15,7 @@ import {
   PromptInputCommandList,
 } from './components/ai-elements/prompt-input.tsx'
 import { optionKeywords } from './model-state.tsx'
+import { SLASH_PROMPT_REFUSAL } from './start-session.tsx'
 
 /**
  * The `/` command palette (#338, slice 1): Claude Code's `/` button in VS Code, as a popup
@@ -109,10 +110,8 @@ type PaletteState =
   | { readonly kind: 'loaded'; readonly commands: EnsoThreadCommands }
   | { readonly kind: 'failed'; readonly detail: string }
 
-const NO_SESSION = 'the session could not start — no commands to offer; the server log says why'
 const NO_COMMANDS = 'this session registers no commands'
 const NO_MATCH = 'no command matches'
-const REMEMBERED_NOTE = "from the last session — this thread's session could not start"
 
 /** One cmdk group per source, in the order the palette shows them — ours first: it is short, and the settings are what a chip points at. */
 const GROUPS: ReadonlyArray<{ readonly source: RuntimeCommand['source']; readonly heading: string }> = [
@@ -148,10 +147,19 @@ export function rankCommand(rowValue: string, search: string, keywords?: readonl
   return inDescription ? 0.25 : 0
 }
 
+/**
+ * The rows the palette lists: a live session's, every one of them; for a thread with no session,
+ * NONE (#484) — the host's `catalogue` is the Start dialog's, and the slash commands belong to a
+ * running session. The sentence says so where the rows would be.
+ */
+function listedRows(commands: EnsoThreadCommands): readonly RuntimeCommand[] {
+  return commands.source === 'live' ? commands.commands : []
+}
+
 /** The sentence cmdk shows when no row is visible — which depends on WHY there is none. */
-function emptyText(commands: EnsoThreadCommands): typeof NO_MATCH | typeof NO_SESSION | typeof NO_COMMANDS {
-  if (commands.commands.length > 0) return NO_MATCH
-  return commands.source === 'none' ? NO_SESSION : NO_COMMANDS
+function emptyText(commands: EnsoThreadCommands): string {
+  if (commands.source !== 'live') return SLASH_PROMPT_REFUSAL
+  return commands.commands.length > 0 ? NO_MATCH : NO_COMMANDS
 }
 
 /** THE SELECTION RULE (header), as what the chosen row does once the menu has closed; undefined for a `level` row, which opens its page instead. */
@@ -372,7 +380,7 @@ export function CommandPalette({
               <>
                 <PromptInputCommandEmpty>{emptyText(state.commands)}</PromptInputCommandEmpty>
                 {GROUPS.map(({ source, heading }) => {
-                  const rows = state.commands.commands.filter((command) => command.source === source)
+                  const rows = listedRows(state.commands).filter((command) => command.source === source)
                   if (rows.length === 0) return null
                   return (
                     <PromptInputCommandGroup key={source} heading={heading}>
@@ -403,9 +411,6 @@ export function CommandPalette({
               </>
             ) : null}
           </PromptInputCommandList>
-          {state.kind === 'loaded' && state.commands.source === 'remembered' ? (
-            <div className="border-t px-2 py-1.5 text-xs text-muted-foreground">{REMEMBERED_NOTE}</div>
-          ) : null}
         </PromptInputCommand>
       </PromptInputActionMenuContent>
     </PromptInputActionMenu>

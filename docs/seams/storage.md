@@ -81,6 +81,15 @@ export interface AgentHost {
   freshPermissionMode(): EnsoPermissionModeState
   /** A stored thread's state from its transcript alone: nothing is built to answer (#86, #95). */
   storedPermissionMode(transcript: readonly EnsoTranscriptEntry[]): EnsoPermissionModeState
+  /**
+   * The host rows a thread with no session can be offered (#484): `/model` with every model pi
+   * could run right now, `/login`, and `/logout` when something is stored — read from pi's own
+   * auth and models files in the agent dir, NOTHING BUILT (#86). No `value` (a thread with no
+   * session has no current model), no `/thinking` (its levels are the chosen model's, carried on
+   * each `/model` option), and none of a session's rows: `/compact`, the views, pi's extension
+   * commands. Read afresh per call, so a login through one thread shows at once.
+   */
+  catalogue(): Promise<RuntimeCommand[]>
 }
 ```
 

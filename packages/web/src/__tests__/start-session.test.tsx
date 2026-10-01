@@ -225,6 +225,26 @@ test('a refused step keeps the dialog open, says which step and why, and sends n
   await mounted.unmount()
 })
 
+// ⚠ #484: the slash commands belong to a running session — pi registers them when one is built —
+// so a prompt beginning with `/` cannot be the one that starts it. Start is disabled and the
+// dialog says why; the words stay, and the same words without the slash start as usual.
+test('a prompt beginning with / cannot start: Start is disabled and the reason is shown; without the slash it starts', async () => {
+  const mounted = await mountStart({ outcome: 'told' })
+  await chooseTypeAndStart(mounted, 'fake/plain', '  /mode plan')
+  await eventually(() => expect(mounted.dialog().textContent).toContain('a / command needs a running session'))
+  const start = [...mounted.dialog().querySelectorAll<HTMLButtonElement>('button')].find(
+    (button) => button.textContent === 'Start session',
+  )
+  expect(start?.disabled).toBe(true)
+  expect(mounted.configured).toEqual([])
+  expect(mounted.sent).toEqual([])
+  // The same words, no longer a command.
+  await chooseTypeAndStart(mounted, 'fake/plain', 'mode plan')
+  await eventually(() => expect(mounted.closes).toEqual([1]))
+  expect(mounted.sent).toEqual(['mode plan'])
+  await mounted.unmount()
+})
+
 /** Open a Radix select by its trigger's id, choose the option whose text starts with `label`; answers what it offered. */
 async function choose(mounted: Mounted, triggerId: string, label: string): Promise<string[]> {
   const trigger = await eventually(() => {
