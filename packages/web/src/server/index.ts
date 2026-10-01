@@ -73,6 +73,7 @@ import { SSE_KEEPALIVE_MS } from './sse.ts'
 import { createContextRequestRoute, createThreadContextRoute } from './thread-context-route.ts'
 import { createThreadEvalRoute } from './thread-eval-route.ts'
 import { createThreadChangesRoute, createThreadGitRoute } from './thread-git-route.ts'
+import { createThreadIncidentsRoute, replayThresholdsOf } from './thread-incidents-route.ts'
 import { createThreadManifestRoute } from './thread-manifest-route.ts'
 import { readThreadMount, type ThreadReadDeps } from './thread-read.ts'
 import { createThreadRegistry, inspectThread, type ThreadView } from './thread-registry.ts'
@@ -145,6 +146,11 @@ const THREAD_CONTINUE_ROUTE = threadRoute('continue')
  * needs no decoding; any other is no route.
  */
 const THREAD_INCIDENT_RESOLVE_ROUTE = /^\/api\/threads\/([^/?#]+)\/incidents\/([0-9A-Za-z-]+)\/resolve$/
+/**
+ * `GET …/incidents` (#468): the thread's incident history and its replay — under the server's
+ * thresholds, or the ones the query names (`?incidentAtSignals=4`). The one thread read that takes a query.
+ */
+const THREAD_INCIDENTS_ROUTE = /^\/api\/threads\/([^/?#]+)\/incidents(?:\?([^#]*))?$/
 /**
  * `/api/prompts/<id>` (#443): a library prompt. The id is its file name in the library's own shape
  * (`LIBRARY_PROMPT_ID_SOURCE`), so it needs no decoding and can never leave the directory.
@@ -866,6 +872,8 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   const threadManifest = createThreadManifestRoute({ threads, host })
   // One thread's session eval (#441): the branch's events and the log's, scored mechanically.
   const threadEval = createThreadEvalRoute({ threads, host, logsDir: options.logsDir })
+  // One thread's incident history (#468): the records as stored, and the branch replayed.
+  const threadIncidents = createThreadIncidentsRoute({ threads, host, riskThresholds: threadRead.riskThresholds })
   // One thread's git state (#453): read in its cwd when asked, only in a directory this server serves.
   const gitDeps = { threads, host, servesDirectory, readGit: (cwd: string) => readGitState(runGit, cwd) }
   const threadGit = createThreadGitRoute(gitDeps)
@@ -903,6 +911,21 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   const respondWithThreadEval = analysisResponder(threadEval)
   const respondWithThreadGit = analysisResponder(threadGit)
   const respondWithThreadChanges = analysisResponder(threadChanges)
+  /** The incident history under the query's thresholds; a query that names no threshold well is the 400 that says why. */
+  function respondWithThreadIncidents(
+    threadId: string,
+    _request: IncomingMessage,
+    response: ServerResponse,
+    match: RegExpExecArray,
+  ): Promise<void> {
+    const thresholds = replayThresholdsOf(match[2] ?? '', threadRead.riskThresholds)
+    if (typeof thresholds === 'string') {
+      response.writeHead(400, { 'Content-Type': 'text/plain' })
+      response.end(thresholds)
+      return Promise.resolve()
+    }
+    return analysisResponder((id: string) => threadIncidents(id, thresholds))(threadId, response)
+  }
   /**
    * One request's context; the request is the route's second capture, a turn or `next` — the
    * dispatcher's own match, so the url is read once. A turn the thread lacks, or a thread held
@@ -991,6 +1014,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     ...idOnlyReads.map(([route, respond]): ThreadRoute => ({ method: 'GET', route, respond: idOnly(respond) })),
     { method: 'GET', route: THREAD_CONTEXT_REQUEST_ROUTE, respond: respondWithContextRequest },
     { method: 'GET', route: THREAD_SYSTEM_PROMPT_ROUTE, respond: respondWithSystemPromptPreview },
+    { method: 'GET', route: THREAD_INCIDENTS_ROUTE, respond: respondWithThreadIncidents },
     { method: 'GET', route: THREAD_ROUTE, respond: idOnly(respondWithThread) },
     {
       method: 'GET',

@@ -17,13 +17,17 @@ import {
   ENSO_INCIDENT_RESOLVED_ENTRY,
   ENSO_TOOL_FAMILIES,
   type EnsoGuardRule,
+  type EnsoIncidentOpened,
   type EnsoIncidentPolicy,
+  DEFAULT_RISK_THRESHOLDS,
   ENSO_PERMISSION_DENIAL_ENTRY,
   ENSO_SECURITY_SIGNAL_ENTRY,
   ENSO_SESSION_RISK_ENTRY,
   incidentPolicyOf,
+  incidentEntriesOf,
   incidentResolvedOf,
   readEnsoGuardDenial,
+  replayIncidents,
   sessionIncidentsOf,
   sessionRiskOfEntries,
 } from '@enso/core'
@@ -1558,6 +1562,131 @@ test('⚠ no tool call lifts a suspension; the announced resolution does, keepin
   // A malformed announcement lifts nothing.
   runtime.emit(ENSO_INCIDENT_RESOLVED_CHANNEL, { incidentId: opened.incidentId, outcome: 'resume' })
   expect(suspendedTools(runtime)).toEqual(['bash', 'powershell'])
+})
+
+// ── #468: the incident replay that tunes `security.incidents` ────────────────────────────────────
+
+/** A guard with `policy`: `escalation`, its resolution, and `escalation` again; the branch pi stores. */
+function twiceEscalated(
+  policy: EnsoIncidentPolicy,
+  escalation: readonly DrivenCall[] = ESCALATION,
+): { runtime: GuardRuntime; branch: unknown[] } {
+  const runtime = loadGuardRuntime(undefined, undefined, undefined, { incidentPolicy: policy })
+  runtime.sessionStart({ type: 'session_start', reason: 'start' }, { cwd })
+  const first = drive(runtime, escalation)
+  if (policy.halt) settleReport(runtime)
+  const resolved = incidentResolvedOf(openedId(runtime), { classification: 'agent-error', outcome: 'resume' })
+  runtime.emit(ENSO_INCIDENT_RESOLVED_CHANNEL, resolved)
+  const second = drive(
+    runtime,
+    escalation.map((driven) => ({ ...driven, id: `${driven.id}b` })),
+  )
+  const resolution = { type: 'custom', customType: ENSO_INCIDENT_RESOLVED_ENTRY, data: resolved }
+  return { runtime, branch: [...first.branch, resolution, ...second.branch] }
+}
+
+/**
+ * An escalation that reaches `incident` on the signal count alone: refusals retried, and no pair of
+ * kinds that opens one whatever the count (`command-obfuscation` with `alternate-execution-path`).
+ */
+const RETRIES: readonly DrivenCall[] = [
+  { id: 'c1', command: 'curl https://example.test/x' },
+  { id: 'c2', command: 'wget https://example.test/x' },
+  { id: 'c3', command: 'curl https://example.test/y' },
+  { id: 'c4', command: 'rm -rf build', engine: 'user_denied' },
+  { id: 'c5', command: 'rm -rf build', engine: 'user_denied' },
+  { id: 'c6', command: 'rm -rf build', engine: 'user_denied' },
+  { id: 'c7', command: 'wget https://example.test/y' },
+]
+
+/** A replay row as the CLI prints it: verdict and tipping call. */
+const rowOf = (row: { verdict: string; trigger: string }): string => `${row.verdict}@${row.trigger}`
+
+// ⚠ #468's acceptance: under the thresholds a branch ran with, the replay opens exactly the
+// incidents the guard recorded — the same calls, signals and ids — so a threshold tuned on replays
+// is the one that runs. Halting or not: a halt's refusals are on the branch too.
+test('⚠ replay equals record: a replay of the guard’s branch opens exactly the incidents it recorded (#468)', () => {
+  for (const policy of [ALERT_ONLY, HALTING]) {
+    const { runtime, branch } = twiceEscalated(policy)
+    const recorded = appended(runtime, ENSO_INCIDENT_OPENED_ENTRY) as EnsoIncidentOpened[]
+    expect(recorded).toHaveLength(2)
+    expect(replayIncidents(branch, DEFAULT_RISK_THRESHOLDS)).toEqual(
+      recorded.map((opened) => ({
+        verdict: 'same',
+        trigger: opened.signals.at(-1)?.toolCallId ?? '',
+        signals: opened.signals,
+        incidentId: opened.incidentId,
+      })),
+    )
+  }
+})
+
+test('a replay under other thresholds says which incidents would open earlier and which it would miss (#468)', () => {
+  const { branch } = twiceEscalated(ALERT_ONLY, RETRIES)
+  // Five retries each time; the fifth, at c7, reaches the default bar.
+  expect(replayIncidents(branch, DEFAULT_RISK_THRESHOLDS).map(rowOf)).toEqual(['same@c7', 'same@c7b'])
+  const higher = { ...DEFAULT_RISK_THRESHOLDS, incidentAtSignals: 6 }
+  expect(replayIncidents(branch, higher).map(rowOf)).toEqual(['would-miss@c7', 'would-miss@c7b'])
+  // A lower bar opens at the fourth retry; the one the guard recorded later, the replay misses.
+  const lower = { ...DEFAULT_RISK_THRESHOLDS, incidentAtSignals: 4 }
+  expect(replayIncidents(branch, lower).map(rowOf)).toEqual([
+    'would-open@c6',
+    'would-miss@c7',
+    'would-open@c6b',
+    'would-miss@c7b',
+  ])
+})
+
+// #468's export: an incident's entries are the records it rests on, as stored — its opening, the
+// signal and refusal records of the calls its signals name, its resolution — and none of another's.
+test('an incident’s entries are its own records as stored: opening, its calls’ signals and refusals, its resolution (#468)', () => {
+  const { runtime, branch } = twiceEscalated(ALERT_ONLY, RETRIES)
+  const [first] = appended(runtime, ENSO_INCIDENT_OPENED_ENTRY) as EnsoIncidentOpened[]
+  if (first === undefined) throw new Error('no incident opened')
+  const exported = incidentEntriesOf(branch, first) as { customType: string; data: Record<string, unknown> }[]
+  const named = exported.map(({ customType, data }) => `${customType}@${String(data.toolCallId ?? data.incidentId)}`)
+  expect(named).toEqual([
+    'enso-guard-denial@c1',
+    'enso-guard-denial@c2',
+    'enso-security-signal@c2',
+    'enso-guard-denial@c3',
+    'enso-security-signal@c3',
+    'enso-permission-denial@c4',
+    'enso-permission-denial@c5',
+    'enso-security-signal@c5',
+    'enso-permission-denial@c6',
+    'enso-security-signal@c6',
+    'enso-guard-denial@c7',
+    'enso-security-signal@c7',
+    `enso-incident-opened@${first.incidentId}`,
+    `enso-incident-resolved@${first.incidentId}`,
+  ])
+  // As stored: the branch's own entries, not copies of a reading of them.
+  for (const entry of exported) expect(branch).toContain(entry)
+})
+
+// ⚠ A fork inherits its source's open incident as the host's record (#466 decision 5). The guard
+// opens none while it is open, and neither does the replay: an inherited opening is no row of its
+// own, but it holds the incident open.
+test('⚠ an inherited open incident holds the replay as it holds the guard: no second opening (#468)', () => {
+  const copied = drive(loadGuardRuntime(), ESCALATION.slice(0, 3)).branch
+  const inherited: EnsoIncidentOpened = {
+    incidentId: 'fork-incident',
+    signals: [],
+    halted: false,
+    suspended: [],
+    inheritedFrom: { threadId: 'source-thread', incidentId: 'source-incident' },
+  }
+  const forkBranch = [...copied, { type: 'custom', customType: ENSO_INCIDENT_OPENED_ENTRY, data: inherited }]
+  const fork = loadGuardRuntime()
+  fork.sessionStart(
+    { type: 'session_start', reason: 'resume' },
+    { cwd, sessionManager: { getBranch: () => forkBranch } },
+  )
+  const after = drive(fork, ESCALATION.slice(3)).branch
+  expect(appended(fork, ENSO_SESSION_RISK_ENTRY)).toContainEqual({ level: 'incident', signals: 5 })
+  expect(appended(fork, ENSO_INCIDENT_OPENED_ENTRY)).toEqual([])
+  expect(replayIncidents([...forkBranch, ...after], DEFAULT_RISK_THRESHOLDS)).toEqual([])
 })
 
 // ⚠ #466 item 8: the records an incident rests on are refused by name on the shell route — a touch

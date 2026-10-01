@@ -345,6 +345,56 @@ function DaySections({ view }: { view: DayView }): React.ReactNode {
           ],
         }))}
       />
+      <SecuritySections security={stats.security} />
+    </>
+  )
+}
+
+/** The day's security record (#468): what the guard saw, what it opened, the reports, the resolutions. */
+function SecuritySections({ security }: { security: EnsoDayStats['security'] }): React.ReactNode {
+  const { incidents, reports } = security
+  return (
+    <>
+      <StatsTable
+        caption="security signals by kind (#464)"
+        empty="no security signal today"
+        columns={[{ heading: 'signal' }, { heading: 'count', numeric: true }]}
+        rows={security.signals.map((signal) => ({
+          key: signal.signal,
+          cells: [signal.signal, countText(signal.count)],
+        }))}
+      />
+      <StatsTable
+        caption="security incidents (#466, #467)"
+        empty="no security incident today"
+        columns={[{ heading: 'what' }, { heading: 'count', numeric: true }]}
+        rows={
+          incidents.opened === 0 && reports.filed + reports.missing === 0
+            ? []
+            : [
+                { key: 'opened', cells: ['opened', countText(incidents.opened)] },
+                { key: 'halted', cells: ['halted', countText(incidents.halted)] },
+                { key: 'filed', cells: ['reports filed', countText(reports.filed)] },
+                { key: 'checked', cells: ['reports that checked', countText(reports.checked)] },
+                { key: 'missing', cells: ['reports missing', countText(reports.missing)] },
+              ]
+        }
+      />
+      <StatsTable
+        caption="security incidents by model"
+        empty="no security incident today"
+        columns={[{ heading: 'model' }, { heading: 'incidents', numeric: true }]}
+        rows={security.models.map((row) => ({ key: row.model, cells: [row.model, countText(row.incidents)] }))}
+      />
+      <StatsTable
+        caption="incident resolutions"
+        empty="no incident resolved today"
+        columns={[{ heading: 'classification' }, { heading: 'outcome' }, { heading: 'count', numeric: true }]}
+        rows={security.resolutions.map((resolution) => ({
+          key: `${resolution.classification}|${resolution.outcome}`,
+          cells: [resolution.classification, resolution.outcome, countText(resolution.count)],
+        }))}
+      />
     </>
   )
 }

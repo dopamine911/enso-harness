@@ -10,6 +10,7 @@ import {
   ENSO_REPORT_PROMPT_REF,
   type EnsoIncidentReport,
   type EnsoIncidentReportMissing,
+  ENSO_LOG_EVENTS,
   ensoLogger,
   FileIncidentReportParameters,
   type IncidentReportEvidence,
@@ -127,9 +128,13 @@ export default function incidentReport(pi: ExtensionAPI): void {
   const settle = (customType: string, data: EnsoIncidentReport | EnsoIncidentReportMissing): void => {
     pi.appendEntry(customType, data)
     pi.events.emit(ENSO_INCIDENT_REPORT_CHANNEL, { customType, data })
-    log.info('incident {incidentId}: {settled}', {
+    const filed = 'factual' in data
+    log.info(ENSO_LOG_EVENTS.incidentReportFiled, {
       incidentId: data.incidentId,
-      settled: customType === ENSO_INCIDENT_REPORT_ENTRY ? 'report filed' : 'no report filed',
+      settled: filed ? 'report filed' : 'no report filed',
+      filed,
+      // Checked: nothing the tool would flag — every citation verified, nothing mismatched (#468).
+      checked: filed && incidentReportProblems(data).length === 0,
     })
     owed = undefined
     submissions = 0

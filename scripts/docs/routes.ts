@@ -155,6 +155,16 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
     'respondWithThreadEval',
     "200 `EnsoSessionEval` JSON — the mechanical timeline and scorecard (#441): the branch's events off pi's entries, the queued prompts and interrupts off the day files the branch spans",
   ),
+  THREAD_INCIDENTS_ROUTE: threadRead(
+    'respondWithThreadIncidents',
+    "200 `EnsoThreadIncidents` JSON (#468) — each incident's record with the custom entries it rests on as stored, and the branch replayed under the thresholds used: same, would open, would miss. What `bun run incidents` reads",
+    '400 malformed thread id, or a query naming no threshold or no whole number from 1; 403 untrusted origin; 404 no session; 500 handler failure',
+    {
+      path: '/api/threads/:threadId/incidents',
+      input:
+        'path: `threadId`; query: optional `windowCalls`, `highAtSignals`, `highAtKinds`, `incidentAtSignals` — the server’s thresholds otherwise',
+    },
+  ),
   THREAD_GIT_ROUTE: threadRead(
     'respondWithThreadGit',
     "200 `EnsoThreadGit` JSON — the thread's cwd and git's state there (#453): repository, branch, upstream, the last-push baseline and the rule that chose it, ahead/behind, and changed files by where they sit; `not-a-repository` or `unavailable` with git's reason otherwise. Read-only, no fetch",

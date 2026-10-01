@@ -308,6 +308,19 @@ recorded as it is. A run that ends without one records the failed try, flagged, 
 announced on `ENSO_INCIDENT_REPORT_CHANNEL`, and the guard's report window closes. The engine lets the
 tool through by policy: the seed allows it, and a launch adds `allow` to a file with no rule for it.
 
+**The history and the replay** (#468; `@enso/core` `session-incident.ts#replayIncidents`, `bun run incidents`).
+The opening records the run's model. A day's security record is a fold of the log
+(`log-stats.ts`, the day stats page): signals by kind, incidents opened and halted, by model, the
+reports filed, checked and missing, and the resolutions — one line per fact, so the host's resolve
+route logs a resolution and the guard's live application logs at debug. `GET /api/threads/:id/incidents`
+returns each incident's record with the custom entries it rests on, as stored (`incidentEntriesOf`),
+and the branch replayed under the server's thresholds or the query's: `replayIncidents` runs the
+guard's own step over the events it met (`riskEventsOfEntries`) and opens by its rule, a fork's
+inherited opening holding the incident open, and says of each opening `same`, `would-open` or
+`would-miss`. Under the thresholds a branch ran with, every row is `same` — `guards.test.ts` pins it
+over the guard's own branch, halting or not. ⚠ The branch is replayed as it happened: a replay that
+opens earlier still reads the calls a halt would have stopped.
+
 **Consumed by the runtime.** Handlers stack; the first `block` returns and cannot be un-blocked by a
 later extension, whatever the load order (the header of `guards/index.ts`). The participants and their load order are
 the manifest, `pi.extensions` in `packages/harness/package.json`: logging, **guards**, web-fetch, web-search, the
