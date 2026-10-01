@@ -36,11 +36,22 @@ test('⚠ redaction: known values (longest first), secret assignments and flags,
   expect(redact('gh auth login --with-token ghp_0123456789abcdefghijABCDEFGHIJ')).toBe(
     'gh auth login --with-token [REDACTED]',
   )
-  expect(redact('git remote set-url origin https://x:ghp_0123456789abcdefghijABCDEFGHIJ@github.com/a/b')).toBe(
-    'git remote set-url origin https://x:[REDACTED:value]@github.com/a/b',
+  expect(redact('gh secret set X --body ghp_0123456789abcdefghijABCDEFGHIJ')).toBe(
+    'gh secret set X --body [REDACTED:value]',
   )
   expect(redact('echo sk-ant-api03-ABCDEFGHIJKLMNOP && echo AKIAABCDEFGHIJKLMNOP')).toBe(
     'echo [REDACTED:value] && echo [REDACTED:value]',
+  )
+  // A password inside a URL, under a name that is no secret's (found in a real transcript, #469).
+  expect(redact(`TARGET_DB='postgres://spb:lX-q^s1_kN@localhost:65432/db' psql "$TARGET_DB"`)).toBe(
+    `TARGET_DB='postgres://spb:[REDACTED]@localhost:65432/db' psql "$TARGET_DB"`,
+  )
+  expect(redact('git clone https://oauth2:abc123@gitlab.example.test/a/b.git')).toBe(
+    'git clone https://oauth2:[REDACTED]@gitlab.example.test/a/b.git',
+  )
+  // A user with no password, and an address with a port, are not credentials.
+  expect(redact('ssh git@github.com && curl http://localhost:8080/x')).toBe(
+    'ssh git@github.com && curl http://localhost:8080/x',
   )
   // A path is not a secret: the judge has to see which file a command reads.
   expect(redact('cat ~/.aws/credentials private.env')).toBe('cat ~/.aws/credentials private.env')

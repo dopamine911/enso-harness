@@ -192,13 +192,16 @@ function nameUnder(cwd: string, absolutePath: string): string {
 
 /**
  * A secret-shaped name assigned a value (`FOO_TOKEN=…`, `export API_KEY="…"`), a secret-shaped
- * flag given one (`--token …`, `--password=…`), an `Authorization` header or a bearer value, and the
- * token shapes vendors print: OpenAI/Anthropic `sk-`, GitHub, Slack, AWS access keys, private keys.
+ * flag given one (`--token …`, `--password=…`), an `Authorization` header or a bearer value, a
+ * password inside a URL (`postgres://user:secret@host`, whatever the variable holding it is
+ * called — found in a real transcript, #469), and the token shapes vendors print: OpenAI/Anthropic
+ * `sk-`, GitHub, Slack, AWS access keys, private keys.
  */
 const ASSIGNMENT = /\b([A-Za-z_][A-Za-z0-9_]*)=("[^"]*"|'[^']*'|[^\s;&|]+)/g
 const SECRET_FLAG = /(--?(?:api[-_]?key|token|secret|password|passwd|auth)(?:[=\s]+))("[^"]*"|'[^']*'|[^\s;&|]+)/gi
 const AUTHORIZATION = /(authorization:\s*)[^\n'"]+/gi
 const BEARER = /(\bbearer\s+)[A-Za-z0-9._~+/=-]+/gi
+const URL_PASSWORD = /(\b[a-z][a-z0-9+.-]*:\/\/[^\s:@/'"]+:)[^\s@/'"]+(?=@)/gi
 const TOKEN_SHAPES =
   /\bsk-[A-Za-z0-9_-]{16,}|\bgh[pousr]_[A-Za-z0-9]{20,}|\bgithub_pat_[A-Za-z0-9_]{20,}|\bxox[abprs]-[A-Za-z0-9-]{10,}|\bAKIA[0-9A-Z]{16}\b|-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g
 
@@ -227,6 +230,7 @@ export function redactJudgeText(text: string, secretValues: readonly string[]): 
     .replace(SECRET_FLAG, (_whole: string, flag: string) => `${flag}${ENSO_REDACTED}`)
     .replace(AUTHORIZATION, (_whole: string, header: string) => `${header}${ENSO_REDACTED}`)
     .replace(BEARER, (_whole: string, scheme: string) => `${scheme}${ENSO_REDACTED}`)
+    .replace(URL_PASSWORD, (_whole: string, userinfo: string) => `${userinfo}${ENSO_REDACTED}`)
     .replace(TOKEN_SHAPES, ENSO_REDACTED_VALUE)
 }
 

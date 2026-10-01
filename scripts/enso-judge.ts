@@ -20,9 +20,11 @@
  * override with ENSO_SERVER_URL. The key is `TYPESAFE_API_KEY` in `ENSO_HOME/secrets.env`.
  */
 
-import { readFileSync, writeFileSync } from 'node:fs'
+import { writeFileSync } from 'node:fs'
 import {
   type CommandJudge,
+  DEFAULT_GUARD_POLICY,
+  DEFAULT_RISK_THRESHOLDS,
   type EnsoJudgeOutcome,
   type EnsoJudgeQuestion,
   type EnsoThreadJudgeCases,
@@ -31,22 +33,30 @@ import {
 } from '../packages/core/src/index.ts'
 import { createJevJudge, JEV_KEY_NAME, jevRequestOf } from '../packages/core/src/jev-judge.ts'
 import { ensoHome } from '../packages/core/src/paths.ts'
-import { readSecret } from '../packages/core/src/secrets.ts'
-import { fetchJson, storedThreadIds, UsageError, wholeNumber } from './server-cli.ts'
+import { knownSecretValues, readSecret } from '../packages/core/src/secrets.ts'
+import { corpusThreads, type JudgeCorpus } from './judge-corpus.ts'
+import { fetchJson, readJsonLines, storedThreadIds, UsageError, wholeNumber } from './server-cli.ts'
+
+/** Where the cases come from: the running server's threads, or a transcript corpus read from disk (#534). */
+export type JudgeSource = 'server' | JudgeCorpus
+
+const SOURCES: readonly JudgeSource[] = ['server', 'claude', 'omp']
+
+/** What `cases` and `replay` both select: the source, and how many unreadable cases ride along. */
+interface Selection {
+  readonly threads: readonly string[]
+  readonly source: JudgeSource
+  readonly unreadable: number
+}
 
 export type JudgeQuery =
-  | { readonly command: 'cases'; readonly threads: readonly string[]; readonly sample: number }
-  | {
-      readonly command: 'replay'
-      readonly threads: readonly string[]
-      readonly outFile: string
-      readonly maxCalls: number
-    }
+  | ({ readonly command: 'cases'; readonly sample: number } & Selection)
+  | ({ readonly command: 'replay'; readonly outFile: string; readonly maxCalls: number } & Selection)
   | { readonly command: 'score'; readonly replayFile: string; readonly labelsFile: string }
 
 export const USAGE = [
-  'usage: bun run judge [cases] [<thread> …] [--sample N]',
-  '       bun run judge replay [<thread> …] --send [--out <file>] [--max-calls N]',
+  'usage: bun run judge [cases] [<thread> …] [--from server|claude|omp] [--unreadable N] [--sample N]',
+  '       bun run judge replay [<thread> …] --send [--from …] [--unreadable N] [--out <file>] [--max-calls N]',
   '       bun run judge score <replay.jsonl> --labels <labels.jsonl>',
 ].join('\n')
 
@@ -88,10 +98,25 @@ function splitArguments(
   return { positionals, flags }
 }
 
+/** The source and the unreadable sample both commands take. */
+function selectionOf(positionals: string[], flags: ReadonlyMap<string, string>): Selection {
+  const source = flags.get('--from') ?? 'server'
+  if (!(SOURCES as readonly string[]).includes(source)) {
+    throw new UsageError(`--from takes ${SOURCES.join(', ')}, not ${source}`)
+  }
+  if (source !== 'server' && positionals.length > 0) throw new UsageError('a corpus takes no thread names')
+  const unreadable = flags.get('--unreadable')
+  return {
+    threads: positionals,
+    source: source as JudgeSource,
+    unreadable: unreadable === undefined ? 200 : wholeNumber('--unreadable', unreadable),
+  }
+}
+
 export function parseArguments(argv: readonly string[], today: Date = new Date()): JudgeQuery {
   const [first, ...rest] = argv
   if (first === 'replay') {
-    const { positionals, flags } = splitArguments(rest, ['--out', '--max-calls'], ['--send'])
+    const { positionals, flags } = splitArguments(rest, ['--out', '--max-calls', '--from', '--unreadable'], ['--send'])
     if (!flags.has('--send')) {
       throw new UsageError(
         'replay sends every case to TypeSafe — read `bun run judge cases` first, then add --send to say so',
@@ -100,9 +125,9 @@ export function parseArguments(argv: readonly string[], today: Date = new Date()
     const maxCalls = flags.get('--max-calls')
     return {
       command: 'replay',
-      threads: positionals,
+      ...selectionOf(positionals, flags),
       outFile: flags.get('--out') ?? `judge-replay-${today.toISOString().slice(0, 10)}.jsonl`,
-      maxCalls: maxCalls === undefined ? 200 : wholeNumber('--max-calls', maxCalls),
+      maxCalls: maxCalls === undefined ? 1000 : wholeNumber('--max-calls', maxCalls),
     }
   }
   if (first === 'score') {
@@ -114,9 +139,52 @@ export function parseArguments(argv: readonly string[], today: Date = new Date()
     }
     return { command: 'score', replayFile, labelsFile }
   }
-  const { positionals, flags } = splitArguments(first === 'cases' ? rest : argv, ['--sample'])
+  const { positionals, flags } = splitArguments(first === 'cases' ? rest : argv, ['--sample', '--from', '--unreadable'])
   const sample = flags.get('--sample')
-  return { command: 'cases', threads: positionals, sample: sample === undefined ? 3 : wholeNumber('--sample', sample) }
+  return {
+    command: 'cases',
+    ...selectionOf(positionals, flags),
+    sample: sample === undefined ? 3 : wholeNumber('--sample', sample),
+  }
+}
+
+/**
+ * What a replay sends: every `after-refusal` case — the scope that matters, and the rare one — and
+ * `unreadable` of the unreadable cases, evenly spaced over all of them so no one transcript fills
+ * the sample. `cases` shows exactly this, so the user approves what is sent.
+ */
+export function sampleCases(threads: readonly EnsoThreadJudgeCases[], unreadable: number): EnsoThreadJudgeCases[] {
+  const unreadableKeys = threads.flatMap((thread) =>
+    thread.cases.flatMap((judgeCase) =>
+      judgeCase.scope === 'unreadable' ? [`${thread.threadId} ${judgeCase.toolCallId}`] : [],
+    ),
+  )
+  const taken = Math.min(unreadable, unreadableKeys.length)
+  const picked = new Set(
+    Array.from(
+      { length: taken },
+      (_, pickIndex) => unreadableKeys[Math.floor((pickIndex * unreadableKeys.length) / taken)],
+    ),
+  )
+  return threads.flatMap((thread) => {
+    const cases = thread.cases.filter(
+      (judgeCase) => judgeCase.scope === 'after-refusal' || picked.has(`${thread.threadId} ${judgeCase.toolCallId}`),
+    )
+    return cases.length === 0 ? [] : [{ ...thread, cases }]
+  })
+}
+
+/** How many cases there were by scope, and how many the sample keeps. */
+export function renderSelection(
+  all: readonly EnsoThreadJudgeCases[],
+  selected: readonly EnsoThreadJudgeCases[],
+): string {
+  const byScope = (threads: readonly EnsoThreadJudgeCases[], scope: string): number =>
+    threads.reduce((sum, thread) => sum + thread.cases.filter((judgeCase) => judgeCase.scope === scope).length, 0)
+  return [
+    `found: ${byScope(all, 'after-refusal')} after-refusal, ${byScope(all, 'unreadable')} unreadable`,
+    `selected: ${byScope(selected, 'after-refusal')} after-refusal (all), ${byScope(selected, 'unreadable')} unreadable (evenly spaced)`,
+  ].join('\n')
 }
 
 const plural = (count: number, noun: string): string => `${count} ${noun}${count === 1 ? '' : 's'}`
@@ -261,13 +329,6 @@ export function renderScore(records: readonly ReplayRecord[], labels: readonly C
   return lines.join('\n')
 }
 
-function readJsonLines(path: string): unknown[] {
-  return readFileSync(path, 'utf8')
-    .split('\n')
-    .filter((line) => line.trim() !== '')
-    .map((line) => JSON.parse(line) as unknown)
-}
-
 async function readThreads(serverUrl: string, named: readonly string[]): Promise<EnsoThreadJudgeCases[]> {
   const threadIds = named.length > 0 ? named : await storedThreadIds(serverUrl)
   const threads: EnsoThreadJudgeCases[] = []
@@ -280,19 +341,38 @@ async function readThreads(serverUrl: string, named: readonly string[]): Promise
   return threads
 }
 
+/** The cases a selection names, and what reading them skipped (a corpus's ACME and cwd-less files). */
+async function casesOf(
+  selection: Selection,
+  serverUrl: string,
+): Promise<{ threads: EnsoThreadJudgeCases[]; note: string }> {
+  if (selection.source === 'server') return { threads: await readThreads(serverUrl, selection.threads), note: '' }
+  const read = corpusThreads(selection.source, {
+    thresholds: DEFAULT_RISK_THRESHOLDS,
+    secretPathFragments: DEFAULT_GUARD_POLICY.secretPathFragments,
+    secretValues: knownSecretValues(ensoHome(process.env)),
+  })
+  return {
+    threads: read.threads,
+    note: `${selection.source}: ${read.skippedAcme} ACME transcript(s) never opened, ${read.skippedNoCwd} without a cwd skipped`,
+  }
+}
+
 async function run(query: JudgeQuery, serverUrl: string): Promise<string> {
   if (query.command === 'score') {
     // ⚠ The files are the user's own replay and labels; they are read as written, not validated field by field.
     const records = readJsonLines(query.replayFile) as ReplayRecord[]
     return renderScore(records, readJsonLines(query.labelsFile) as CaseLabel[])
   }
-  const threads = await readThreads(serverUrl, query.threads)
-  if (query.command === 'cases') return renderCases(threads, query.sample)
+  const { threads, note } = await casesOf(query, serverUrl)
+  const selected = sampleCases(threads, query.unreadable)
+  const header = [note, renderSelection(threads, selected)].filter((line) => line !== '').join('\n')
+  if (query.command === 'cases') return `${header}\n${renderCases(selected, query.sample)}`
   const home = ensoHome(process.env)
   const judge = createJevJudge({ apiKey: () => readSecret(home, JEV_KEY_NAME), timeoutMs: 10_000, retries: 2 })
-  const records = await replayCases(threads, judge, query.maxCalls)
+  const records = await replayCases(selected, judge, query.maxCalls)
   writeFileSync(query.outFile, records.map((record) => `${JSON.stringify(record)}\n`).join(''))
-  return renderReplaySummary(records, query.outFile)
+  return `${header}\n${renderReplaySummary(records, query.outFile)}`
 }
 
 /** A usage error exits 2 with the usage, anything else 1. */

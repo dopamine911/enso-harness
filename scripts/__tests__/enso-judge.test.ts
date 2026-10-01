@@ -1,7 +1,15 @@
 import { expect, test } from 'bun:test'
 import { ENSO_JUDGE_POLICY, type EnsoThreadJudgeCases } from '../../packages/core/src/index.ts'
 import { jevRequestOf } from '../../packages/core/src/jev-judge.ts'
-import { type CaseLabel, parseArguments, type ReplayRecord, renderCases, renderScore } from '../enso-judge.ts'
+import {
+  type CaseLabel,
+  parseArguments,
+  type ReplayRecord,
+  renderCases,
+  renderScore,
+  renderSelection,
+  sampleCases,
+} from '../enso-judge.ts'
 import { UsageError } from '../server-cli.ts'
 
 /**
@@ -23,13 +31,60 @@ test('⚠ replay without --send is a usage error that says why; the defaults and
   expect(parseArguments(['replay', 't1', '--send'], new Date('2026-09-30T08:00:00Z'))).toEqual({
     command: 'replay',
     threads: ['t1'],
+    source: 'server',
+    unreadable: 200,
     outFile: 'judge-replay-2026-09-30.jsonl',
-    maxCalls: 200,
+    maxCalls: 1000,
   })
-  expect(parseArguments(['t1', 't2'])).toEqual({ command: 'cases', threads: ['t1', 't2'], sample: 3 })
-  expect(parseArguments(['cases', '--sample', '1'])).toEqual({ command: 'cases', threads: [], sample: 1 })
+  expect(parseArguments(['t1', 't2'])).toEqual({
+    command: 'cases',
+    threads: ['t1', 't2'],
+    source: 'server',
+    unreadable: 200,
+    sample: 3,
+  })
+  expect(parseArguments(['cases', '--from', 'claude', '--unreadable', '50', '--sample', '1'])).toEqual({
+    command: 'cases',
+    threads: [],
+    source: 'claude',
+    unreadable: 50,
+    sample: 1,
+  })
   expect(() => parseArguments(['score', 'replay.jsonl'])).toThrow(UsageError)
   expect(() => parseArguments(['cases', '--send'])).toThrow(UsageError)
+  expect(() => parseArguments(['cases', '--from', 'acme'])).toThrow(UsageError)
+  // A corpus is read whole; naming threads in it would read as a filter it is not.
+  expect(() => parseArguments(['cases', 'x', '--from', 'omp'])).toThrow(UsageError)
+})
+
+// What a replay sends is what `cases` showed: every after-refusal case, and N unreadable ones
+// spread over all of them, never the first N of one transcript.
+test('the sample keeps every after-refusal case and spreads the unreadable ones over the corpus', () => {
+  const caseOf = (
+    toolCallId: string,
+    scope: 'after-refusal' | 'unreadable',
+  ): EnsoThreadJudgeCases['cases'][number] => ({
+    toolCallId,
+    scope,
+    state: stateOf('x'),
+  })
+  const threads: EnsoThreadJudgeCases[] = [
+    {
+      threadId: 'a',
+      live: false,
+      cases: [caseOf('a1', 'unreadable'), caseOf('a2', 'unreadable'), caseOf('a3', 'after-refusal')],
+    },
+    { threadId: 'b', live: false, cases: [caseOf('b1', 'unreadable'), caseOf('b2', 'unreadable')] },
+    { threadId: 'c', live: false, cases: [caseOf('c1', 'unreadable'), caseOf('c2', 'unreadable')] },
+  ]
+  const keys = (selected: readonly EnsoThreadJudgeCases[]): string[] =>
+    selected.flatMap((thread) => thread.cases.map((judgeCase) => judgeCase.toolCallId))
+  expect(keys(sampleCases(threads, 3))).toEqual(['a1', 'a3', 'b1', 'c1'])
+  expect(keys(sampleCases(threads, 0))).toEqual(['a3'])
+  expect(keys(sampleCases(threads, 99))).toEqual(['a1', 'a2', 'a3', 'b1', 'b2', 'c1', 'c2'])
+  expect(renderSelection(threads, sampleCases(threads, 3))).toBe(
+    'found: 1 after-refusal, 6 unreadable\nselected: 1 after-refusal (all), 3 unreadable (evenly spaced)',
+  )
 })
 
 test('cases counts per thread and in total, and samples the exact request bodies', () => {

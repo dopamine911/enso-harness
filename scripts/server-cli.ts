@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+
 /**
  * What the CLIs that read the running server share (`bun run incidents`, #468; `bun run judge`,
  * #469): a usage error the caller turns into exit 2, the whole-number flag every threshold and
@@ -34,4 +36,21 @@ export async function storedThreadIds(serverUrl: string): Promise<string[]> {
   return listed.flatMap((thread: { threadId?: unknown }) =>
     typeof thread.threadId === 'string' ? [thread.threadId] : [],
   )
+}
+
+/**
+ * A JSON-lines file's records, a line that does not parse skipped: a transcript being written
+ * can end in half a line, and one bad line must not hide the rest.
+ */
+export function readJsonLines(path: string): unknown[] {
+  return readFileSync(path, 'utf8')
+    .split('\n')
+    .filter((line) => line.trim() !== '')
+    .flatMap((line) => {
+      try {
+        return [JSON.parse(line) as unknown]
+      } catch {
+        return []
+      }
+    })
 }
