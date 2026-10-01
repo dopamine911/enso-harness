@@ -12,8 +12,9 @@ import { EnsoRecordedModel } from './thread-runtime.ts'
  * handler's change to the skills and context files is in) and appends it with `pi.appendEntry`
  * only when a field differs from the last {@link ENSO_RUN_CONTEXT_ENTRY} on the branch. A fork
  * inherits the entries on its path, so a fork's first run appends only if something changed. pi's
- * context builder skips `custom` entries: the model never sees it. A #436 Continue records none:
- * pi emits no `before_agent_start` for it, so the latest record is the cut-off run's.
+ * context builder skips `custom` entries: the model never sees it. A #436 Continue, which pi runs
+ * with no `before_agent_start`, is recorded from `agent_start` instead (#445): git, config and mode
+ * read then, skills and context files carried from the last record — the transcript's sections.
  *
  * ⚠ HASHES, NEVER CONTENTS. A context file is its path and a sha256 of what the model received;
  * the config is a sha256 of the resolved `EnsoConfig` (stable key order) and the files it came

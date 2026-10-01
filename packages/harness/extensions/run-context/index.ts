@@ -6,6 +6,7 @@ import {
   type EnsoConfigParseResult,
   type EnsoRunContext,
   lastCustomEntryData,
+  readEnsoRunContext,
   recordedPermissionMode,
 } from '@enso/core'
 import { type GitRunner, runGit } from '@enso/core/git'
@@ -26,10 +27,16 @@ import {
  * one on the branch. Never per turn; a fork inherits the entries on its path, so its first run
  * appends only what changed.
  *
- * ⚠ A CONTINUE RECORDS NONE (PR #438 review). pi emits `before_agent_start` inside `prompt()`
- * only, and a #436 Continue runs through pi's private run lifecycle without it (the host's module
- * header lists it among the accepted differences). The latest record on the branch then describes
- * the run that was cut off — conditions that may have moved since, a revision or a config edit.
+ * ⚠ A CONTINUE IS RECORDED FROM `agent_start` (#445). pi emits `before_agent_start` inside
+ * `prompt()` only, and a #436 Continue runs through pi's private run lifecycle without it — but
+ * `agent_start` fires for every agent loop, that one included. A run that reaches `agent_start`
+ * with no `before_agent_start` before it is a continued run: git, the config and the mode are
+ * read THEN, and the skills and context files are carried from the last record on the branch —
+ * which is what the model receives, since a Continue prepends no prompt-section patch
+ * (`agent-session.js#_preparePromptAndToolLoadout` runs in `prompt()` alone) and the transcript's
+ * sections are those of the last prompt. Appended, as ever, only when something differs. A branch
+ * with no record at all (a thread from before #435) gets none: the sections the model receives
+ * are rendered text with no structured source, and a record claiming no skills would be false.
  *
  * ⚠ LOADED LAST (`package.json` `pi.extensions`). `before_agent_start` handlers run in load order
  * and may change the prompt's skills and context files (`systemPromptOptions` is mutable); the
@@ -128,37 +135,86 @@ function byCodePoint(first: string, second: string): number {
   return first > second ? 1 : 0
 }
 
+/** The facts a record holds that are read from the session, not from the prompt's event: git, config, mode. */
+async function sessionFactsOf(
+  dependencies: RunContextDependencies,
+  context: ExtensionContext,
+): Promise<Pick<EnsoRunContext, 'git' | 'config' | 'mode'>> {
+  const [git, config] = await Promise.all([gitState(dependencies, context.cwd), resolvedConfig(dependencies, context)])
+  return {
+    git,
+    config: { hash: sha256(canonicalJson(config.result)), sources: config.sources },
+    mode: modeRules(context.sessionManager.getEntries(), dependencies.readPermissionPolicy()),
+  }
+}
+
 async function runContextOf(
   dependencies: RunContextDependencies,
   event: BeforeAgentStartEvent,
   context: ExtensionContext,
 ): Promise<EnsoRunContext> {
-  const [git, config] = await Promise.all([gitState(dependencies, context.cwd), resolvedConfig(dependencies, context)])
+  const facts = await sessionFactsOf(dependencies, context)
   const skills = event.systemPromptOptions.skills
     .map((skill) => ({ name: skill.name, path: skill.filePath }))
     .sort((first, second) => byCodePoint(first.name, second.name) || byCodePoint(first.path, second.path))
   return {
-    git,
-    config: { hash: sha256(canonicalJson(config.result)), sources: config.sources },
+    ...facts,
     skills,
     contextFiles: event.systemPromptOptions.contextFiles.map((file) => ({
       path: file.path,
       sha256: sha256(file.content),
     })),
-    mode: modeRules(context.sessionManager.getEntries(), dependencies.readPermissionPolicy()),
   }
+}
+
+/**
+ * A continued run's record (#445): the session's facts now, the prompt's facts as the transcript
+ * holds them — the last record's. Undefined when the branch has no readable record to carry.
+ */
+async function continuedRunContextOf(
+  dependencies: RunContextDependencies,
+  context: ExtensionContext,
+): Promise<EnsoRunContext | undefined> {
+  const last = readEnsoRunContext(
+    ENSO_RUN_CONTEXT_ENTRY,
+    lastCustomEntryData(context.sessionManager.getBranch(), ENSO_RUN_CONTEXT_ENTRY),
+  )
+  if (last === undefined) return undefined
+  const facts = await sessionFactsOf(dependencies, context)
+  return { ...facts, skills: last.skills, contextFiles: last.contextFiles }
+}
+
+/** Append `current` unless it equals the last record on the branch, compared raw (PR #440 review). */
+function appendIfChanged(pi: ExtensionAPI, context: ExtensionContext, current: EnsoRunContext): void {
+  // Compared RAW, not through the reader's schema: a record this writer made that the schema
+  // rejects would otherwise read as absent and be appended again every run.
+  const last = lastCustomEntryData(context.sessionManager.getBranch(), ENSO_RUN_CONTEXT_ENTRY)
+  if (last !== undefined && canonicalJson(last) === canonicalJson(current)) return
+  pi.appendEntry(ENSO_RUN_CONTEXT_ENTRY, current)
 }
 
 /** The run-context recorder, over its dependencies; the default export wires the real ones. */
 export function createRunContext(dependencies: RunContextDependencies): (pi: ExtensionAPI) => void {
   return (pi: ExtensionAPI): void => {
+    // Set by a prompt's `before_agent_start`, cleared by the `agent_start` that follows it; an
+    // `agent_start` that finds it clear is a run that had no prompt — a Continue (#445).
+    // ⚠ A mark left set is a prompt that failed between the hook and its loop: in pi 0.99.2 the one
+    // thing there that can throw is image normalization (`agent-session.js#prompt`, `:1537`), and
+    // that failure rejects `prompt()` itself. The cost is ONE Continue after it recorded as if it
+    // were that prompt's loop; the next prompt sets the mark afresh. Stated rather than closed: the
+    // alternative is a clock on the mark, and a slow image would then misread a real prompt.
+    let promptRecorded = false
     pi.on('before_agent_start', async (event, context) => {
-      const current = await runContextOf(dependencies, event, context)
-      // Compared RAW, not through the reader's schema (PR #440 review): a record this writer made
-      // that the schema rejects would otherwise read as absent and be appended again every run.
-      const last = lastCustomEntryData(context.sessionManager.getBranch(), ENSO_RUN_CONTEXT_ENTRY)
-      if (last !== undefined && canonicalJson(last) === canonicalJson(current)) return
-      pi.appendEntry(ENSO_RUN_CONTEXT_ENTRY, current)
+      promptRecorded = true
+      appendIfChanged(pi, context, await runContextOf(dependencies, event, context))
+    })
+    pi.on('agent_start', async (_event, context) => {
+      if (promptRecorded) {
+        promptRecorded = false
+        return
+      }
+      const current = await continuedRunContextOf(dependencies, context)
+      if (current !== undefined) appendIfChanged(pi, context, current)
     })
   }
 }

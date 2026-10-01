@@ -258,10 +258,10 @@ const log = ensoLogger('host')
  * ends in (`:1331`). Whether the tail CAN be continued is decided here, not by pi
  * (`continuation.ts`): the lifecycle would answer a completed reply again. The accepted differences
  * from a prompt: no `input` or `before_agent_start` for the continued turn — so no permission-mode
- * reminder, no pi-multi-account last-moment account preflight, and the harness's `enso-run-context`
- * is not re-checked for it; no auth preflight (missing credentials become a stored error reply, and
- * the run settles); no pre-prompt compaction check (the post-run one still runs); and the first
- * request reuses the system prompt the transcript holds. `agent-host.test.ts` pins the lifecycle
+ * reminder and no pi-multi-account last-moment account preflight (the harness's `enso-run-context`
+ * IS re-checked, from `agent_start`, #445); no auth preflight (missing credentials become a stored
+ * error reply, and the run settles); no pre-prompt compaction check (the post-run one still runs);
+ * and the first request reuses the system prompt the transcript holds. `agent-host.test.ts` pins the lifecycle
  * through the real host and pi's faux provider, so a pi bump that renames or reshapes the method is
  * a red test, not a silent break. The cast leaves when pi ships a public `AgentSession.continue()`.
  */
