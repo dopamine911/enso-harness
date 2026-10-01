@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
   ensoAgentDir,
@@ -315,4 +315,27 @@ test('⚠ a file with no session header — the tail a running pre-#552 process 
   expect(existsSync(whole)).toBe(false)
   // The tail stays, readable where it was; its directory is not removed around it.
   expect(readFileSync(tail, 'utf8')).toBe('{"type":"message","id":"m1"}\n')
+})
+
+test('a header longer than one 4 KiB read (a fork naming a long parent path) is read whole and the file migrates by its cwd (#552)', () => {
+  const home = mkdtempSync(join(tmpdir(), 'enso-home-'))
+  const agentDir = ensoAgentDir(home)
+  const project = realpathSync(mkdtempSync(join(tmpdir(), 'enso-proj-')))
+  const legacy = join(agentDir, 'sessions', '--encoded--')
+  mkdirSync(legacy, { recursive: true })
+  const file = join(legacy, '2026-01-01T00-00-00-000Z_aaaa.jsonl')
+  // `cwd` sits AFTER a 6 KiB field, so a 4 KiB read truncates the JSON before reaching it.
+  const header = {
+    type: 'session',
+    version: 3,
+    id: 'aaaa',
+    timestamp: 't',
+    parentSession: 'p'.repeat(6 * 1024),
+    cwd: project,
+  }
+  writeFileSync(file, `${JSON.stringify(header)}\n{"type":"message"}\n`)
+
+  const migration = migrateSessionsIntoProjects(agentDir, ensoProjectsDir(home))
+  const target = projectSessionsDir(ensoProjectsDir(home), projectIdOf(project))
+  expect(migration).toEqual({ moved: [join(target, basename(file))], kept: [], orphaned: [], unreadable: [] })
 })

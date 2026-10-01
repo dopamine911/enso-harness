@@ -435,9 +435,12 @@ export async function startLauncher(options: {
     })
   }
   for (const path of sessions.kept) {
-    log.warn('{path} stays where it was: its project folder already holds a file of that name — keep one by hand', {
-      path,
-    })
+    log.warn(
+      "{path} stays where it was: its project folder already holds a file of that name. The project folder's copy is the thread; this one is not listed until it is removed — compare them before deleting",
+      {
+        path,
+      },
+    )
   }
   for (const directory of sessions.orphaned) {
     log.warn(

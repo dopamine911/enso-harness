@@ -59,6 +59,7 @@ import {
   ensoHome,
   ensoPermissionRulesPath,
   ensoProjectsDir,
+  ensoProjectsPath,
   ensoSecretsPath,
   findRepoRoot,
   harnessPackageDir,
@@ -67,6 +68,7 @@ import {
   printHarnessDir,
   projectIdOf,
   projectSessionsDir,
+  readTextIfPresent,
   realpathOrSelf,
 } from '../packages/core/src/paths.ts'
 import { describePermissionPolicy, preparePermissionPolicy } from '../packages/core/src/permission-rules.ts'
@@ -74,9 +76,11 @@ import { declaredResources, missingVendorPaths } from '../packages/core/src/pi-m
 import { quarantineSecrets } from '../packages/core/src/secrets.ts'
 import {
   isPrintRun,
+  isRegisteredProject,
   piArguments,
   piVersionSupported,
   piVersionText,
+  projectLine,
   SUPPORTED_PI_VERSIONS,
   secretsKeptOutLine,
   vanillaPiLine,
@@ -142,7 +146,7 @@ if (sessions.moved.length > 0) {
 }
 for (const path of sessions.kept) {
   process.stderr.write(
-    `enso: ⚠ ${path} stays where it was: its project folder already holds a file of that name — keep one by hand\n`,
+    `enso: ⚠ ${path} stays where it was: its project folder already holds a file of that name. The project folder's copy is the thread; this one is not listed until it is removed — compare them before deleting\n`,
   )
 }
 for (const directory of sessions.orphaned) {
@@ -153,7 +157,32 @@ for (const path of sessions.unreadable) {
     `enso: ⚠ ${path} stays where it was: no session header on its first line — a tail a running pre-#552 process kept appending after the move, or not a session file; join it by hand\n`,
   )
 }
-const sessionDir = projectSessionsDir(projectsDir, projectIdOf(realpathOrSelf(process.cwd())))
+const projectPath = realpathOrSelf(process.cwd())
+const projectId = projectIdOf(projectPath)
+const sessionDir = projectSessionsDir(projectsDir, projectId)
+// `projects.json` read once, loosely: a file that does not parse means "no entries" here — the
+// server refuses it with a reason; this line only tells the user why the web may not list the thread.
+const registeredProjectPaths = ((): string[] => {
+  try {
+    const parsed: unknown = JSON.parse(readTextIfPresent(ensoProjectsPath(home)) ?? '{"projects":[]}')
+    const projects = (parsed as { projects?: unknown }).projects
+    return Array.isArray(projects)
+      ? projects.flatMap((project: unknown) => {
+          const path = (project as { path?: unknown }).path
+          return typeof path === 'string' ? [realpathOrSelf(path)] : []
+        })
+      : []
+  } catch {
+    return []
+  }
+})()
+process.stderr.write(
+  `${projectLine({
+    projectId,
+    cwd: projectPath,
+    registered: isRegisteredProject(projectPath, registeredProjectPaths, realpathOrSelf(repoRoot)),
+  })}\n`,
+)
 
 // The policy the permission engine reads when pi loads it (#446, #496), prepared before the
 // spawn: seeded when it holds none, the engine's config path linked to it, refused when

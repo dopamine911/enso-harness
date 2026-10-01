@@ -903,12 +903,20 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       .sort((first, second) => second.modified.getTime() - first.modified.getTime())
   }
 
-  /** One `listAll` per project folder that has a `sessions/` — every folder, registered or not; none when there is no projects folder. */
+  /**
+   * One `listAll` per project folder that has a `sessions/` — every folder, registered or not; none
+   * when there is no projects folder. In NAME order, not the filesystem's: `everySession` keeps the
+   * first file it sees per thread id, and two folders holding one id (a hand-made copy beside a
+   * moved checkout's) must resolve to the same one on every call and on every machine — the
+   * lexically first folder's.
+   */
   function projectSessionListings(): Promise<SessionInfo[]>[] {
     if (projectsDir === undefined || !existsSync(projectsDir)) return []
     return readdirSync(projectsDir, { withFileTypes: true })
       .filter((entry) => entry.isDirectory() && isEnsoProjectId(entry.name))
-      .map((entry) => projectSessionsDir(projectsDir, entry.name))
+      .map((entry) => entry.name)
+      .toSorted()
+      .map((name) => projectSessionsDir(projectsDir, name))
       .filter((directory) => existsSync(directory))
       .map((directory) => SessionManager.listAll(directory))
   }

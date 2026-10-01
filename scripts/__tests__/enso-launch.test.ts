@@ -6,7 +6,15 @@ import { fileURLToPath } from 'node:url'
 import { flowTrace } from '@enso/core/flow-trace'
 import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
 import { permissionEngineConfigPath } from '@enso/core/permission-rules'
-import { isPrintRun, piArguments, piVersionSupported, piVersionText, SUPPORTED_PI_VERSIONS } from '../enso-launch.ts'
+import {
+  isPrintRun,
+  isRegisteredProject,
+  piArguments,
+  piVersionSupported,
+  piVersionText,
+  projectLine,
+  SUPPORTED_PI_VERSIONS,
+} from '../enso-launch.ts'
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
 
@@ -79,6 +87,18 @@ test("the version read is pi's, whatever else the banner names first (#217)", ()
   expect(piVersionSupported('pi v0.99.7')).toBe(true)
   // A banner that names no pi version at all is no version claim: refused.
   expect(piVersionSupported('bun 1.4.0 (linux x64)')).toBe(false)
+})
+
+// #552: the terminal's project is the directory it is launched in. The web lists that project's
+// threads only if it is registered — or is the web's own launch directory, which has no entry.
+test("a launch directory is 'registered' when projects.json names it OR it is the web's launch directory; a subdirectory of a registered project is neither (#552)", () => {
+  const registered = ['/srv/app', '/srv/lib']
+  expect(isRegisteredProject('/srv/app', registered, '/home/u/enso')).toBe(true)
+  expect(isRegisteredProject('/home/u/enso', registered, '/home/u/enso')).toBe(true)
+  expect(isRegisteredProject('/srv/app/packages/web', registered, '/home/u/enso')).toBe(false)
+  expect(isRegisteredProject('/home/u/enso/packages/web', [], '/home/u/enso')).toBe(false)
+  expect(projectLine({ projectId: 'abcd', cwd: '/srv/app', registered: true })).toBe('enso: project=abcd (/srv/app)')
+  expect(projectLine({ projectId: 'abcd', cwd: '/srv/x', registered: false })).toContain('not in projects.json')
 })
 
 // ── the launch itself: enso.ts, end to end, against a pi shim ─────────────────────────────

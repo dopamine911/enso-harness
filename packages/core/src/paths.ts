@@ -430,6 +430,10 @@ export interface SessionMigration {
   readonly unreadable: string[]
 }
 
+/** The most a session file's first line is read: two `PATH_MAX` paths (8 KiB) and headroom. */
+const HEADER_LINE_BOUND = 64 * 1024
+const NEWLINE = 0x0a
+
 /**
  * The first line of a pi session file: the header, with the cwd the session ran in. `gone` when the
  * file is no longer there — another launcher moved it between the directory read and this open;
@@ -444,9 +448,21 @@ function sessionCwdOf(file: string): { kind: 'cwd'; cwd: string } | { kind: 'gon
     throw error
   }
   try {
-    const buffer = Buffer.alloc(4096)
-    const read = readSync(descriptor, buffer, 0, buffer.length, 0)
-    const firstLine = buffer.toString('utf8', 0, read).split('\n')[0] ?? ''
+    // The first line whole: read until its newline, or EOF, or the bound — a header is two paths
+    // and a few fields, far under it; a line past the bound is not pi's header and is `unreadable`.
+    const chunks: Buffer[] = []
+    let total = 0
+    let position = 0
+    while (total < HEADER_LINE_BOUND) {
+      const chunk = Buffer.alloc(4096)
+      const read = readSync(descriptor, chunk, 0, chunk.length, position)
+      if (read === 0) break
+      chunks.push(chunk.subarray(0, read))
+      total += read
+      position += read
+      if (chunk.subarray(0, read).includes(NEWLINE)) break
+    }
+    const firstLine = Buffer.concat(chunks).toString('utf8').split('\n')[0] ?? ''
     const header: unknown = JSON.parse(firstLine)
     const cwd = (header as { cwd?: unknown }).cwd
     return typeof cwd === 'string' && cwd.length > 0 ? { kind: 'cwd', cwd } : { kind: 'unreadable' }
@@ -505,6 +521,9 @@ export function migrateSessionsIntoProjects(agentDir: string, projectsDir: strin
   const migration: SessionMigration = { moved: [], kept: [], orphaned: [], unreadable: [] }
   if (!existsSync(legacyRoot)) return migration
   for (const entry of readdirSync(legacyRoot, { withFileTypes: true })) {
+    // A real directory only. pi's `listAll` follows a symlinked one too; a launch does not move
+    // files out of a directory the user linked here by hand, nor `rmdir` a link (ENOTDIR). Its
+    // sessions stay listed from where they are.
     if (!entry.isDirectory()) continue
     const directory = join(legacyRoot, entry.name)
     let orphaned = false
