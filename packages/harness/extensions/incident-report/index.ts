@@ -75,27 +75,30 @@ function argumentsText(input: unknown): string {
     .join('\n')
 }
 
+/** What one branch entry makes citable: `[ref, text]` pairs — a prompt, a result, or each call's arguments. */
+function citableOf(entry: unknown): [ref: string, text: string][] {
+  const message = recordOf(recordOf(entry)?.message)
+  if (recordOf(entry)?.type !== 'message' || message === undefined) return []
+  if (message.role === 'user') return [[ENSO_REPORT_PROMPT_REF, textOf(message.content)]]
+  if (message.role === 'toolResult' && typeof message.toolCallId === 'string') {
+    return [[message.toolCallId, textOf(message.content)]]
+  }
+  if (message.role !== 'assistant' || !Array.isArray(message.content)) return []
+  return message.content.flatMap((part): [string, string][] => {
+    const call = recordOf(part)
+    return call?.type === 'toolCall' && typeof call.id === 'string' ? [[call.id, argumentsText(call.arguments)]] : []
+  })
+}
+
 /**
- * The citable text of a branch, by ref: each tool call's arguments and its result, and the last
- * user message before the report was asked for (`prompt`).
+ * The citable text of a branch, by ref: each tool call's arguments and its result together, and
+ * the last user message before the report was asked for (`prompt`).
  */
 function citableTextOf(branch: readonly unknown[]): Map<string, string> {
   const texts = new Map<string, string>()
-  const add = (ref: string, text: string): void => {
-    texts.set(ref, [texts.get(ref) ?? '', text].join('\n'))
-  }
-  for (const entry of branch) {
-    const message = recordOf(recordOf(entry)?.message)
-    if (recordOf(entry)?.type !== 'message' || message === undefined) continue
-    if (message.role === 'user') texts.set(ENSO_REPORT_PROMPT_REF, textOf(message.content))
-    if (message.role === 'toolResult' && typeof message.toolCallId === 'string') {
-      add(message.toolCallId, textOf(message.content))
-    }
-    if (message.role !== 'assistant' || !Array.isArray(message.content)) continue
-    for (const part of message.content) {
-      const call = recordOf(part)
-      if (call?.type === 'toolCall' && typeof call.id === 'string') add(call.id, argumentsText(call.arguments))
-    }
+  for (const [ref, text] of branch.flatMap(citableOf)) {
+    // A later prompt replaces the earlier; a call's arguments and its result join.
+    texts.set(ref, ref === ENSO_REPORT_PROMPT_REF ? text : [texts.get(ref) ?? '', text].join('\n'))
   }
   return texts
 }
