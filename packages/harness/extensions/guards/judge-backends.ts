@@ -17,10 +17,13 @@ import type { CommandJudge, EnsoJudgeAnswer, EnsoJudgeOutcome, EnsoJudgeQuestion
  * `same_as_denied`, a four-level `score` for `obscured` — asked of TypeSafe's Jev (`jev`) or of a
  * llama.cpp model on this machine (`local`, #532).
  *
- * - ⚠ **pi-ai 0.99, not the agent's pi.** `@earendil-works/pi-classifier` is an npm alias of
- *   `@earendil-works/pi-ai@0.99.2`, the first pi-ai with `classify()`, while the agent stays on
- *   0.87.1: pi-multi-account caps pi below 0.88 (#354). Only these two API modules are loaded from
- *   it. The alias leaves when pi itself is upgraded (#535).
+ * - ⚠ **Imported through an alias, never as `@earendil-works/pi-ai/api/…`.**
+ *   `@earendil-works/pi-classifier` is an npm alias of `@earendil-works/pi-ai@0.99.2`, the agent's
+ *   own pi-ai version. pi's extension loader maps `@earendil-works/pi-ai` to its `compat` entry, and
+ *   under Node (the terminal `pi`) jiti rewrites any subpath onto it —
+ *   `…/dist/compat.js/api/llama-cpp-classify` — so the guards extension failed to load at all
+ *   (measured on the 0.99.2 bump). The classifiers are not exported from the root or `compat`; the
+ *   alias is a name no loader alias matches. Keep its version equal to the agent's pi-ai.
  * - **Where the text goes is pinned here**, never read from the environment: Jev's endpoint and
  *   model (`jev-1.13.0`, the spike's, so a replay is reproducible); the local endpoint must be a
  *   loopback address, or nothing is sent at all.

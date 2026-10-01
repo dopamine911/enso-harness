@@ -237,7 +237,7 @@ export function loginDoneText(providerName: string, authType: HostAuthType, sele
 }
 
 /**
- * pi's compaction REFUSALS, as pi says them (`dist/core/agent-session.js:1884,1886,1901,1931`, 0.87.1):
+ * pi's compaction REFUSALS, as pi says them (`dist/core/agent-session.js:2124,2126,2141,2171`, 0.99.2):
  * plain `Error`s distinguishable only by sentence — so, as with its "Login cancelled", the sentence
  * is the contract (PR #347 review). A refusal is a warning; anything else is a failure.
  */

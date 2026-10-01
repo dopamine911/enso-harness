@@ -9,7 +9,7 @@ import type { EnsoSessionUsage } from '@enso/core'
  * branch — assistant messages, summarised tool results, and the model calls behind a compaction,
  * a branch summary, or a `usage` entry an extension wrote. A cold thread has no session to ask
  * (#86: looking must not build one), so `storedSessionUsage` runs the same rule over the file's
- * entries — `AgentSession.getSessionStats` in `@earendil-works/pi-coding-agent@0.87.1`,
+ * entries — `AgentSession.getSessionStats` in `@earendil-works/pi-coding-agent@0.99.2`,
  * `dist/core/agent-session.js`. `agent-host.test.ts` pins the two equal on one session, so a
  * pi bump that changes its rule goes red there rather than showing a resumed thread a
  * different total than the tab that watched it accumulate.

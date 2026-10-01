@@ -4,7 +4,7 @@ import type { RuntimeEvent } from './runtime-event.ts'
 /**
  * `AgentSessionEvent` → the rpc WIRE shape (#69).
  *
- * Replicated from pi-coding-agent 0.87.1 `dist/modes/json-event.js` (`toJsonEvent`,
+ * Replicated from pi-coding-agent 0.87.1 `dist/modes/json-event.js` (`toJsonEvent`, unchanged at 0.99.2;
  * github.com/earendil-works/pi, MIT). pi does not export the function — only the resulting
  * `JsonAgentSessionEvent` type — so it is copied here, and it is copied rather than bypassed
  * so that `map-events.ts` keeps consuming exactly the shape it consumed over the subprocess
