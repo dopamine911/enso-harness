@@ -1,7 +1,7 @@
 import { afterAll, expect, test } from 'bun:test'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { REPOSITORY_ROOT } from './gate-support.ts'
 
 /**
@@ -32,12 +32,13 @@ import { REPOSITORY_ROOT } from './gate-support.ts'
 
 const WORKFLOW = '.github/workflows/secret-scan.yml'
 
-/** The `--log-opts` flags the workflow passes, with its `${BASE_SHA}..${HEAD_SHA}` range removed. */
+/** The `--log-opts` flags the workflow passes, with its `${RANGE}` (the resolver's output) removed. */
 function walkFlagsOfWorkflow(): string[] {
   const workflow = readFileSync(join(REPOSITORY_ROOT, WORKFLOW), 'utf8')
   const logOpts = /--log-opts="([^"]*)"/.exec(workflow)?.[1]
   if (logOpts === undefined) throw new Error(`${WORKFLOW}: no --log-opts to read the walked range from`)
-  expect(logOpts).toContain('${BASE_SHA}..${HEAD_SHA}')
+  expect(logOpts).toContain('${RANGE}')
+  expect(workflow).toContain('RANGE=$(.github/scripts/secret-scan-range.sh)')
   return logOpts.split(/\s+/).filter((flag) => flag.startsWith('-'))
 }
 
@@ -200,4 +201,81 @@ test('⚠ the secret scan runs on every push to every branch, and never cancels 
   expect(/^ {2}merge_group:/m.test(triggers)).toBe(true)
   // A newer push must not cancel the scan of the commit it replaced: that range would never be read.
   expect(/^concurrency:\n(?:[ ]+.*\n)*?[ ]+cancel-in-progress: false$/m.test(workflow)).toBe(true)
+})
+
+/**
+ * THE RANGE A PUSH RESOLVES TO (#538). `github.event.before` is forty zeroes on a branch's first
+ * push and unreachable after a force-push; the old fallback was the head's first parent, which
+ * scans ONE commit of a branch that may carry many. The resolver is the file the workflow runs,
+ * run here against a fixture: a default branch, and a feature branch two commits past it.
+ */
+
+const RANGE_SCRIPT = '.github/scripts/secret-scan-range.sh'
+const NO_BEFORE = '0'.repeat(40)
+/** Absolute, as `GIT` is: under the pre-commit hook `git` resolves inside git's own exec directory, where no `bash` lives. */
+const BASH = Bun.which('bash') ?? 'bash'
+
+/** The resolver, with the event's values in its environment; `[exit code, stdout]`. */
+function resolveRange(root: string, event: Record<string, string>): [number, string] {
+  const run = Bun.spawnSync([BASH, join(REPOSITORY_ROOT, RANGE_SCRIPT)], {
+    cwd: root,
+    // Only git's and bash's directories: the script needs those two and nothing else from the machine.
+    env: {
+      PATH: `${dirname(GIT)}:${dirname(BASH)}`,
+      GIT_CONFIG_GLOBAL: '/dev/null',
+      GIT_CONFIG_SYSTEM: '/dev/null',
+      ...event,
+    },
+  })
+  return [run.exitCode, run.stdout.toString().trim()]
+}
+
+/** `main` with two commits (the second is `origin/main` too), `feature` two commits past it. */
+function fixtureBranches(): { root: string; mainTip: string; featureCommits: string[] } {
+  const root = mkdtempSync(join(tmpdir(), 'enso-secret-scan-'))
+  git(root, 'init', '-q', '-b', 'main', '.')
+  writeFileSync(join(root, 'a.txt'), '1\n')
+  git(root, 'add', '.')
+  git(root, 'commit', '-qm', 'one')
+  writeFileSync(join(root, 'a.txt'), '2\n')
+  git(root, 'commit', '-qam', 'two')
+  const mainTip = git(root, 'rev-parse', 'HEAD').trim()
+  git(root, 'update-ref', 'refs/remotes/origin/main', mainTip)
+  git(root, 'switch', '-qc', 'feature')
+  writeFileSync(join(root, 'a.txt'), '3\n')
+  git(root, 'commit', '-qam', 'three')
+  const three = git(root, 'rev-parse', 'HEAD').trim()
+  writeFileSync(join(root, 'a.txt'), '4\n')
+  git(root, 'commit', '-qam', 'four')
+  const four = git(root, 'rev-parse', 'HEAD').trim()
+  fixtureRoots.push(root)
+  return { root, mainTip, featureCommits: [three, four] }
+}
+
+test("⚠ a branch's first push scans every commit since it left main, not only the tip (#538)", () => {
+  const { root, mainTip, featureCommits } = fixtureBranches()
+  const [four] = [featureCommits[1] ?? '']
+  const event = { HEAD_SHA: four, REF_NAME: 'feature', DEFAULT_BRANCH: 'main' }
+  // No usable `before`: the merge-base with origin/main, so both commits are in the range.
+  expect(resolveRange(root, { ...event, BASE_SHA: NO_BEFORE })).toEqual([0, `${mainTip}..${four}`])
+  // A `before` that exists is used as it is — the second push of the branch scans only what it added.
+  expect(resolveRange(root, { ...event, BASE_SHA: featureCommits[0] ?? '' })).toEqual([
+    0,
+    `${featureCommits[0]}..${four}`,
+  ])
+})
+
+test('on the default branch with no usable before, the first parent; with no SHAs at all, no range and exit 2 (#538)', () => {
+  const { root, mainTip } = fixtureBranches()
+  const parent = git(root, 'rev-parse', `${mainTip}^`).trim()
+  expect(
+    resolveRange(root, { BASE_SHA: NO_BEFORE, HEAD_SHA: mainTip, REF_NAME: 'main', DEFAULT_BRANCH: 'main' }),
+  ).toEqual([0, `${parent}..${mainTip}`])
+  const [code, range] = resolveRange(root, {
+    BASE_SHA: '',
+    HEAD_SHA: mainTip,
+    REF_NAME: 'main',
+    DEFAULT_BRANCH: 'main',
+  })
+  expect([code, range]).toEqual([2, ''])
 })
