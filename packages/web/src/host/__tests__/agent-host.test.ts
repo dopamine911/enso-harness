@@ -1619,6 +1619,43 @@ test('⚠ with no projects folder, sessions file where pi puts them, and a proje
   await expect(host.createSession(other, () => repoRoot)).rejects.toThrow(/not a project this server/)
 })
 
+test("⚠ a thread whose file sits in BOTH its project folder and pi's legacy directory (a copy the migration kept) lists once, as the project folder's — on every call (#552)", async () => {
+  const projectsDir = mkdtempSync(join(tmpdir(), 'enso-projects-'))
+  // ⚠ The host FIRST: creating it pins `PI_CODING_AGENT_DIR` to the scratch agent dir, where the
+  // legacy copy below is filed by default (`stored-session.ts`'s rule — unpinned, it lands in the operator's `~/.pi/agent`).
+  const host = createAgentHost({
+    servesDirectory: servesRepoRoot,
+    agentDir,
+    permissionRulesPath,
+    harnessPackageDir: harnessDir,
+    projectsDir,
+  })
+  const threadId = crypto.randomUUID()
+  const inProject = writeStoredSession({
+    cwd: repoRoot,
+    threadId,
+    turns: [
+      ['the project folder has two turns', 'yes'],
+      ['second', 'answer'],
+    ],
+    sessionDir: projectSessionsDir(projectsDir, projectIdOf(realpathOrSelf(repoRoot))),
+  })
+  // The legacy copy: same id, SAME FILE NAME (what `kept` means), where pi files by cwd — written
+  // later, so it is the newer file; the choice must not follow modification time. pi names a file
+  // by its creation time, so the copy is written aside and renamed to the project copy's name.
+  const aside = writeStoredSession({ cwd: repoRoot, threadId, turns: [['the legacy copy has one', 'yes']] })
+  const legacyFile = join(dirname(aside.file), basename(inProject.file))
+  expect(legacyFile.startsWith(agentDir)).toBe(true)
+  renameSync(aside.file, legacyFile)
+  for (let call = 0; call < 3; call += 1) {
+    const listed = (await host.listSessions()).filter((stored) => stored.id === threadId)
+    expect(listed.map((stored) => stored.path)).toEqual([inProject.file])
+  }
+  // And the read is the project folder's copy: two user turns, not the legacy copy's one.
+  const transcript = (await host.readStoredThread(threadId))?.transcript ?? []
+  expect(transcript.filter((entry) => entry.kind === 'message' && entry.role === 'user')).toHaveLength(2)
+})
+
 // #447: a fork copies its source's messages with their times, and pi's `modified` is the last
 // message's — so a fork taken now of a thread idle for hours read as hours old and sorted with it.
 test('a fork of a thread idle for hours lists as made now, and sorts above a thread active since', async () => {

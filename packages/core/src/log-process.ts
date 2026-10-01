@@ -447,6 +447,14 @@ export async function startLauncher(options: {
       },
     )
   }
+  for (const path of sessions.unreadable) {
+    log.warn(
+      '{path} stays where it was: no session header on its first line — a tail a running pre-#552 process kept appending after the move, or not a session file; join it by hand',
+      {
+        path,
+      },
+    )
+  }
   return { home, logsDir, log, dispose }
 }
 

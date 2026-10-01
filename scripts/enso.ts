@@ -148,6 +148,11 @@ for (const path of sessions.kept) {
 for (const directory of sessions.orphaned) {
   process.stderr.write(`enso: ⚠ ${directory} stays where it was: the directory its sessions ran in no longer exists\n`)
 }
+for (const path of sessions.unreadable) {
+  process.stderr.write(
+    `enso: ⚠ ${path} stays where it was: no session header on its first line — a tail a running pre-#552 process kept appending after the move, or not a session file; join it by hand\n`,
+  )
+}
 const sessionDir = projectSessionsDir(projectsDir, projectIdOf(realpathOrSelf(process.cwd())))
 
 // The policy the permission engine reads when pi loads it (#446, #496), prepared before the

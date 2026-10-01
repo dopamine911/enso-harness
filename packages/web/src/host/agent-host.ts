@@ -866,8 +866,13 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
    * listed — there is nothing to come back to.
    */
   async function everySession(): Promise<StoredThread[]> {
-    const listings = await Promise.all([SessionManager.listAll(), ...projectSessionListings()])
-    const listed = [...new Map(listings.flat().map((info) => [resolve(info.path), info])).values()]
+    const listings = await Promise.all([...projectSessionListings(), SessionManager.listAll()])
+    // One entry per thread id. The project folders are listed FIRST, so when the migration kept a
+    // legacy copy beside a file the folder already held (same name, same id), the folder's copy is
+    // the thread and the legacy one is not listed — one thread, the same one on every call.
+    const byId = new Map<string, SessionInfo>()
+    for (const info of listings.flat()) if (!byId.has(info.id)) byId.set(info.id, info)
+    const listed = [...byId.values()]
     // A fork's header names its parent by FILE (#433); the thread is that file's session id, read
     // off the same listing. The path misses once the parent has moved into its project folder
     // (#552's migration), so the file's NAME — `<timestamp>_<id>.jsonl`, unique by id — is tried

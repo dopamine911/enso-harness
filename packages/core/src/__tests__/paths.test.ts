@@ -274,7 +274,7 @@ test('⚠ a session the project folder already holds is never overwritten: the l
   const legacy = writeSession(join(agentDir, 'sessions', '--encoded--'), '2026-01-01T00-00-00-000Z_aaaa.jsonl', project)
 
   const first = migrateSessionsIntoProjects(agentDir, ensoProjectsDir(home))
-  expect(first).toEqual({ moved: [], kept: [legacy], orphaned: [] })
+  expect(first).toEqual({ moved: [], kept: [legacy], orphaned: [], unreadable: [] })
   expect(readFileSync(join(target, '2026-01-01T00-00-00-000Z_aaaa.jsonl'), 'utf8')).toBe(
     'the project folder had this one first\n',
   )
@@ -283,11 +283,36 @@ test('⚠ a session the project folder already holds is never overwritten: the l
     moved: [],
     kept: [legacy],
     orphaned: [],
+    unreadable: [],
   })
   // No agent dir at all: nothing to do, nothing created.
   expect(migrateSessionsIntoProjects(join(home, 'nowhere'), ensoProjectsDir(home))).toEqual({
     moved: [],
     kept: [],
     orphaned: [],
+    unreadable: [],
   })
+})
+
+test('⚠ a file with no session header — the tail a running pre-#552 process appended after a move — is reported unreadable, by name, and left; the files beside it still move (#552)', () => {
+  const home = mkdtempSync(join(tmpdir(), 'enso-home-'))
+  const agentDir = ensoAgentDir(home)
+  const project = realpathSync(mkdtempSync(join(tmpdir(), 'enso-proj-')))
+  const legacy = join(agentDir, 'sessions', '--encoded--')
+  const whole = writeSession(legacy, '2026-01-01T00-00-00-000Z_aaaa.jsonl', project)
+  mkdirSync(legacy, { recursive: true })
+  const tail = join(legacy, '2026-01-02T00-00-00-000Z_bbbb.jsonl')
+  writeFileSync(tail, '{"type":"message","id":"m1"}\n')
+
+  const migration = migrateSessionsIntoProjects(agentDir, ensoProjectsDir(home))
+  const target = projectSessionsDir(ensoProjectsDir(home), projectIdOf(project))
+  expect(migration).toEqual({
+    moved: [join(target, '2026-01-01T00-00-00-000Z_aaaa.jsonl')],
+    kept: [],
+    orphaned: [],
+    unreadable: [tail],
+  })
+  expect(existsSync(whole)).toBe(false)
+  // The tail stays, readable where it was; its directory is not removed around it.
+  expect(readFileSync(tail, 'utf8')).toBe('{"type":"message","id":"m1"}\n')
 })
