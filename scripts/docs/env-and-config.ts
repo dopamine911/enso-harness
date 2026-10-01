@@ -58,6 +58,22 @@ interface EnvironmentMetadata extends EnvironmentOccurrence {
   readonly phase: 'boot' | 'load' | 'per-call' | 'build' | 'boot / load' | 'boot / load / per-call'
 }
 
+/** A CLI that reads the running server (`ENSO_SERVER_URL`): one row per script, one default. */
+function serverUrlReader(
+  source: string,
+  reader: string,
+  readFor: string,
+  phase: EnvironmentMetadata['phase'] = 'per-call',
+): EnvironmentMetadata {
+  return {
+    key: 'ENSO_SERVER_URL',
+    source,
+    reader,
+    purposeAndDefault: `Optional live-server URL for ${readFor}; defaults to \`http://127.0.0.1:5179\`.`,
+    phase,
+  }
+}
+
 const ENVIRONMENT_METADATA: readonly EnvironmentMetadata[] = [
   {
     key: 'ENSO_SITE_URL',
@@ -162,34 +178,10 @@ const ENVIRONMENT_METADATA: readonly EnvironmentMetadata[] = [
     purposeAndDefault: 'Optional file log level and per-category overrides; defaults to `info`.',
     phase: 'boot / load',
   },
-  {
-    key: 'ENSO_SERVER_URL',
-    source: 'scripts/enso-logs.ts',
-    reader: '`scripts/enso-logs.ts#bundle`',
-    purposeAndDefault: 'Optional live-server URL for bundle retrieval; defaults to `http://127.0.0.1:5179`.',
-    phase: 'per-call',
-  },
-  {
-    key: 'ENSO_SERVER_URL',
-    source: 'scripts/enso-eval.ts',
-    reader: '`scripts/enso-eval.ts#main`',
-    purposeAndDefault: 'Optional live-server URL for the session eval; defaults to `http://127.0.0.1:5179`.',
-    phase: 'per-call',
-  },
-  {
-    key: 'ENSO_SERVER_URL',
-    source: 'scripts/enso-incidents.ts',
-    reader: '`scripts/enso-incidents.ts#main`',
-    purposeAndDefault: 'Optional live-server URL for the incident history; defaults to `http://127.0.0.1:5179`.',
-    phase: 'per-call',
-  },
-  {
-    key: 'ENSO_SERVER_URL',
-    source: 'scripts/enso-thread.ts',
-    reader: '`scripts/enso-thread.ts`',
-    purposeAndDefault: 'Optional live-server URL for thread inspection; defaults to `http://127.0.0.1:5179`.',
-    phase: 'boot',
-  },
+  serverUrlReader('scripts/enso-logs.ts', '`scripts/enso-logs.ts#bundle`', 'bundle retrieval'),
+  serverUrlReader('scripts/enso-eval.ts', '`scripts/enso-eval.ts#main`', 'the session eval'),
+  serverUrlReader('scripts/enso-incidents.ts', '`scripts/enso-incidents.ts#main`', 'the incident history'),
+  serverUrlReader('scripts/enso-thread.ts', '`scripts/enso-thread.ts`', 'thread inspection', 'boot'),
   {
     key: 'npm_config_user_agent',
     source: 'scripts/gate.ts',

@@ -299,21 +299,16 @@ async function run(query: IncidentsQuery, serverUrl: string): Promise<string> {
   return renderHistory(await readThreads(serverUrl, query.threads))
 }
 
+/** One catch for both failures: a usage error exits 2 with the usage, anything else 1. */
 async function main(argv: readonly string[]): Promise<void> {
-  let query: IncidentsQuery
-  try {
-    query = parseArguments(argv)
-  } catch (error) {
-    if (!(error instanceof UsageError)) throw error
-    process.stderr.write(`enso-incidents: ${error.message}\n\n${USAGE}\n`)
-    process.exit(2)
-  }
   const serverUrl = process.env.ENSO_SERVER_URL ?? 'http://127.0.0.1:5179'
   try {
-    process.stdout.write(`${await run(query, serverUrl)}\n`)
+    process.stdout.write(`${await run(parseArguments(argv), serverUrl)}\n`)
   } catch (error) {
-    process.stderr.write(`enso-incidents: ${error instanceof Error ? error.message : String(error)}\n`)
-    process.exit(1)
+    const usage = error instanceof UsageError
+    const reason = error instanceof Error ? error.message : String(error)
+    process.stderr.write(`enso-incidents: ${reason}${usage ? `\n\n${USAGE}` : ''}\n`)
+    process.exit(usage ? 2 : 1)
   }
 }
 

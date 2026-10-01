@@ -851,6 +851,12 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     return (await storedSession(threadId))?.path
   }
 
+  /** A stored thread's branch, root to leaf — one open, nothing built (#86); undefined for no file. */
+  async function storedBranch(threadId: string): Promise<SessionEntry[] | undefined> {
+    const path = await storedSessionPath(threadId)
+    return path === undefined ? undefined : SessionManager.open(path).getBranch()
+  }
+
   async function readStoredThread(threadId: string): Promise<StoredThreadRead | undefined> {
     const located = await storedSession(threadId)
     if (located === undefined) return undefined
@@ -883,8 +889,8 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     threadId: string,
     request: number | 'next',
   ): Promise<BranchRequestDetail | undefined> {
-    const path = await storedSessionPath(threadId)
-    return path === undefined ? undefined : branchRequestDetail(SessionManager.open(path).getBranch(), request)
+    const branch = await storedBranch(threadId)
+    return branch === undefined ? undefined : branchRequestDetail(branch, request)
   }
 
   async function forkThread(threadId: string, entryId: string): Promise<ThreadForkOutcome> {
@@ -938,16 +944,16 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   }
 
   async function readStoredThreadEval(threadId: string): Promise<BranchEval | undefined> {
-    const path = await storedSessionPath(threadId)
-    return path === undefined ? undefined : branchEval(SessionManager.open(path).getBranch())
+    const branch = await storedBranch(threadId)
+    return branch === undefined ? undefined : branchEval(branch)
   }
 
   async function readStoredIncidentHistory(
     threadId: string,
     thresholds: EnsoRiskThresholds,
   ): Promise<BranchIncidentHistory | undefined> {
-    const path = await storedSessionPath(threadId)
-    return path === undefined ? undefined : branchIncidentHistory(SessionManager.open(path).getBranch(), thresholds)
+    const branch = await storedBranch(threadId)
+    return branch === undefined ? undefined : branchIncidentHistory(branch, thresholds)
   }
 
   async function createSession(threadId: string, newSessionDirectory: () => string): Promise<HostedThread> {
