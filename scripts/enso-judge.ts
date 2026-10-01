@@ -40,9 +40,14 @@ import {
   median,
   readEnsoThreadJudgeCases,
 } from '../packages/core/src/index.ts'
-import { createJevJudge, JEV_KEY_NAME, jevRequestOf } from '../packages/core/src/jev-judge.ts'
 import { ensoHome } from '../packages/core/src/paths.ts'
 import { knownSecretValues, readSecret } from '../packages/core/src/secrets.ts'
+import {
+  createJevJudge,
+  createLocalJudge,
+  JEV_KEY_NAME,
+  jevRequestOf,
+} from '../packages/harness/extensions/guards/judge-backends.ts'
 import { corpusThreads, type JudgeCorpus } from './judge-corpus.ts'
 import { fetchJson, readJsonLines, storedThreadIds, UsageError, wholeNumber } from './server-cli.ts'
 
@@ -60,14 +65,35 @@ interface Selection {
   readonly under: readonly string[]
 }
 
+/** Which backend a replay asks: TypeSafe's Jev, or a llama.cpp router on this machine and its model. */
+type ReplayBackend =
+  | { readonly kind: 'jev' }
+  | { readonly kind: 'local'; readonly baseUrl: string; readonly model: string }
+
+/**
+ * The backend a replay asks — the guard's own, with retries and a longer wait, since nobody is
+ * waiting on a replay's tool call.
+ */
+function replayJudge(backend: ReplayBackend): CommandJudge {
+  if (backend.kind === 'local') return createLocalJudge({ ...backend, timeoutMs: 120_000, retries: 1 })
+  const home = ensoHome(process.env)
+  return createJevJudge({ apiKey: () => readSecret(home, JEV_KEY_NAME), timeoutMs: 10_000, retries: 2 })
+}
+
 export type JudgeQuery =
   | ({ readonly command: 'cases'; readonly sample: number } & Selection)
-  | ({ readonly command: 'replay'; readonly outFile: string; readonly maxCalls: number } & Selection)
+  | ({
+      readonly command: 'replay'
+      readonly backend: ReplayBackend
+      readonly outFile: string
+      readonly maxCalls: number
+    } & Selection)
   | { readonly command: 'score'; readonly replayFile: string; readonly labelsFile: string }
 
 export const USAGE = [
   'usage: bun run judge [cases] [<thread> …] [--from server|claude|omp] [--under <dir>[,<dir>]] [--unreadable N] [--sample N]',
   '       bun run judge replay [<thread> …] --send [--from …] [--under …] [--unreadable N] [--out <file>] [--max-calls N]',
+  '       bun run judge replay [<thread> …] --backend local --local-url <router> --local-model <model> [--from …] …',
   '       bun run judge score <replay.jsonl> --labels <labels.jsonl>',
 ].join('\n')
 
@@ -156,27 +182,49 @@ export function casesUnder(
   })
 }
 
+/**
+ * `--backend`: Jev unless told otherwise, and only with `--send`; `local` with the router and model
+ * it asks. ⚠ Only Jev's cases leave the machine — a local router off loopback is sent nothing.
+ */
+function replayBackendOf(flags: ReadonlyMap<string, string>): ReplayBackend {
+  const backend = flags.get('--backend') ?? 'jev'
+  if (backend === 'local') {
+    const baseUrl = flags.get('--local-url')
+    const model = flags.get('--local-model')
+    if (baseUrl === undefined || model === undefined) {
+      throw new UsageError('--backend local takes --local-url <router> and --local-model <model>')
+    }
+    return { kind: 'local', baseUrl, model }
+  }
+  if (backend !== 'jev') throw new UsageError(`--backend takes jev or local, not ${backend}`)
+  if (!flags.has('--send')) {
+    throw new UsageError(
+      'replay sends every case to TypeSafe — read `bun run judge cases` first, then add --send to say so',
+    )
+  }
+  return { kind: 'jev' }
+}
+
+function replayQueryOf(rest: readonly string[], today: Date): JudgeQuery {
+  const { positionals, flags } = splitArguments(
+    rest,
+    ['--out', '--max-calls', '--from', '--unreadable', '--under', '--backend', '--local-url', '--local-model'],
+    ['--send'],
+  )
+  const backend = replayBackendOf(flags)
+  const maxCalls = flags.get('--max-calls')
+  return {
+    command: 'replay',
+    backend,
+    ...selectionOf(positionals, flags),
+    outFile: flags.get('--out') ?? `judge-replay-${backend.kind}-${today.toISOString().slice(0, 10)}.jsonl`,
+    maxCalls: maxCalls === undefined ? 1000 : wholeNumber('--max-calls', maxCalls),
+  }
+}
+
 export function parseArguments(argv: readonly string[], today: Date = new Date()): JudgeQuery {
   const [first, ...rest] = argv
-  if (first === 'replay') {
-    const { positionals, flags } = splitArguments(
-      rest,
-      ['--out', '--max-calls', '--from', '--unreadable', '--under'],
-      ['--send'],
-    )
-    if (!flags.has('--send')) {
-      throw new UsageError(
-        'replay sends every case to TypeSafe — read `bun run judge cases` first, then add --send to say so',
-      )
-    }
-    const maxCalls = flags.get('--max-calls')
-    return {
-      command: 'replay',
-      ...selectionOf(positionals, flags),
-      outFile: flags.get('--out') ?? `judge-replay-${today.toISOString().slice(0, 10)}.jsonl`,
-      maxCalls: maxCalls === undefined ? 1000 : wholeNumber('--max-calls', maxCalls),
-    }
-  }
+  if (first === 'replay') return replayQueryOf(rest, today)
   if (first === 'score') {
     const { positionals, flags } = splitArguments(rest, ['--labels'])
     const [replayFile, ...extra] = positionals
@@ -425,8 +473,7 @@ async function run(query: JudgeQuery, serverUrl: string): Promise<string> {
       : `under ${query.under.join(', ')}: ${kept.length} of ${threads.length} transcripts kept`
   const header = [note, keptNote, renderSelection(kept, selected)].filter((line) => line !== '').join('\n')
   if (query.command === 'cases') return `${header}\n${renderCases(selected, query.sample)}`
-  const home = ensoHome(process.env)
-  const judge = createJevJudge({ apiKey: () => readSecret(home, JEV_KEY_NAME), timeoutMs: 10_000, retries: 2 })
+  const judge = replayJudge(query.backend)
   const records = await replayCases(selected, judge, query.maxCalls)
   writeFileSync(query.outFile, records.map((record) => `${JSON.stringify(record)}\n`).join(''))
   return `${header}\n${renderReplaySummary(records, query.outFile)}`

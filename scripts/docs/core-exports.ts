@@ -83,7 +83,6 @@ const DOMAINS_BY_CLASSIFICATION: Readonly<Record<Classification, Readonly<Record
   },
   'node-only utility': {
     'git.ts': 'Project vocabulary',
-    'jev-judge.ts': 'Permission',
     'judge.ts': 'Permission',
     'log-bundle.ts': 'Record',
     'log-process.ts': 'Record',

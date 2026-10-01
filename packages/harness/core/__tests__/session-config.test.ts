@@ -184,6 +184,17 @@ test('⚠ the command judge is the user’s alone, off by default, and off when 
   const unreadable = fixture()
   writeFileSync(join(unreadable.home, 'config.json'), '{ "security": { "judge": ')
   expect(userJudgeConfig(unreadable.home)).toEqual({ backend: 'off', problem: expect.any(String) })
-  const unknownBackend = fixture({ user: { security: { judge: { backend: 'local' } } } })
+  const unknownBackend = fixture({ user: { security: { judge: { backend: 'openrouter' } } } })
   expect(userJudgeConfig(unknownBackend.home)).toEqual({ backend: 'off', problem: expect.any(String) })
+  // `local` (#532) names its router and model; without them it is off, and says why.
+  const local = { baseUrl: 'http://127.0.0.1:8080/v1', model: 'qwen' }
+  expect(userJudgeConfig(fixture({ user: { security: { judge: { backend: 'local', local } } } }).home)).toEqual({
+    backend: 'local',
+    local,
+  })
+  const bare = fixture({ user: { security: { judge: { backend: 'local' } } } })
+  expect(userJudgeConfig(bare.home)).toEqual({
+    backend: 'off',
+    problem: expect.stringContaining('security.judge.local'),
+  })
 })

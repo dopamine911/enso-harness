@@ -60,7 +60,6 @@ import {
   toolFamilyOf,
   WEB_FETCH_TOOL_NAME,
 } from '@enso/core'
-import { createJevJudge, JEV_KEY_NAME } from '@enso/core/jev-judge'
 import { judgeStateOf } from '@enso/core/judge'
 import { ensoHome, ensoLogsDir, findRepoRoot } from '@enso/core/paths'
 import { knownSecretValuesTracking, readSecret } from '@enso/core/secrets'
@@ -83,6 +82,7 @@ import {
   userIncidentPolicy,
   userJudgeConfig,
 } from '../../core/index.ts'
+import { createJevJudge, createLocalJudge, JEV_KEY_NAME } from './judge-backends.ts'
 
 /**
  * Tier 0 guards — see `docs/concepts/pi-immediate-needs.md`.
@@ -351,16 +351,25 @@ function productionIncidentPolicy(): EnsoIncidentPolicy {
 const JUDGE_TIMEOUT_MS = 5000
 
 /**
+ * Per request for `local` (#532): a llama.cpp model reads the whole state on its first question —
+ * measured 23–42 s on this 12-CPU, GPU-less machine with a 0.5B model over 7–11k-token prompts,
+ * then ~1 s per question from the prompt cache. Jev's 5 s would leave every local call unjudged.
+ * Nobody waits on it (the judge is fire-and-forget), but it still holds a socket until it settles.
+ */
+const LOCAL_JUDGE_TIMEOUT_MS = 90_000
+
+/**
  * The user's command judge (#469): off unless `security.judge.backend` names one. ⚠ An unreadable
  * `config.json` fails closed, which for the judge is OFF — nothing is sent — and says so.
  */
 function productionCommandJudge(): CommandJudge | undefined {
   const home = ensoHome(process.env)
-  const { backend, problem } = userJudgeConfig(home)
-  if (problem !== undefined) {
-    log.error('config.json is unreadable, so the command judge is off: {problem}', { problem })
+  const config = userJudgeConfig(home)
+  if ('problem' in config && config.problem !== undefined) {
+    log.error('the command judge is off: {problem}', { problem: config.problem })
   }
-  if (backend === 'off') return undefined
+  if (config.backend === 'off') return undefined
+  if (config.backend === 'local') return createLocalJudge({ ...config.local, timeoutMs: LOCAL_JUDGE_TIMEOUT_MS })
   return createJevJudge({ apiKey: () => readSecret(home, JEV_KEY_NAME), timeoutMs: JUDGE_TIMEOUT_MS })
 }
 

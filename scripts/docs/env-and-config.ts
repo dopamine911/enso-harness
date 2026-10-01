@@ -223,6 +223,13 @@ function webSearchField(
   }
 }
 
+/** What `userJudgeConfig` reads each `security.judge` field by — the docs check it is still there. */
+const JUDGE_READS: Readonly<Record<string, string>> = {
+  '': 'result.config.security?.judge',
+  '.backend': "judge?.backend ?? 'off'",
+  '.local': 'judge?.local === undefined',
+}
+
 const CONFIG_FIELD_METADATA: readonly ConfigFieldMetadata[] = [
   {
     field: 'webFetch',
@@ -314,7 +321,11 @@ const CONFIG_FIELD_METADATA: readonly ConfigFieldMetadata[] = [
   judgeField('', 'The judge is off: nothing is sent.'),
   judgeField(
     '.backend',
-    '`"off"`: nothing is sent (#469). `"jev"` sends each in-scope `bash` call, redacted, to TypeSafe; recorded only. An unreadable `config.json` leaves it off.',
+    '`"off"`: nothing is sent (#469). `"jev"` sends each in-scope `bash` call, redacted, to TypeSafe; `"local"` asks the llama.cpp model `security.judge.local` names, on this machine (#532). Recorded only. An unreadable `config.json` leaves it off.',
+  ),
+  judgeField(
+    '.local',
+    'None. Required by `"local"`, which is off without it: `{ "baseUrl", "model" }` — a llama.cpp router on a loopback address (anything else is sent nothing) and the model it asks.',
   ),
 ]
 
@@ -334,7 +345,7 @@ function incidentField(suffix: string, defaultWhenOmitted: string, contains: str
 
 /**
  * A `security.judge` field (#469): optional and user-only, read by `userJudgeConfig` at each
- * session start; anything but a readable `"jev"` is off.
+ * session start; anything but a readable `"jev"`, or `"local"` with its router, is off.
  */
 function judgeField(suffix: string, defaultWhenOmitted: string): ConfigFieldMetadata {
   return {
@@ -342,7 +353,7 @@ function judgeField(suffix: string, defaultWhenOmitted: string): ConfigFieldMeta
     required: 'no',
     defaultWhenOmitted,
     reader: '`packages/harness/core/session-config.ts#userJudgeConfig`',
-    check: { file: 'packages/harness/core/session-config.ts', contains: "security?.judge?.backend ?? 'off'" },
+    check: { file: 'packages/harness/core/session-config.ts', contains: JUDGE_READS[suffix] ?? suffix },
   }
 }
 

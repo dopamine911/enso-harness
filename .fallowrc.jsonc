@@ -213,6 +213,7 @@
     "zones": [
       { "name": "core", "patterns": ["packages/core/src/**"] },
       { "name": "harness-core", "patterns": ["packages/harness/core/**"] },
+      { "name": "judge-backends", "patterns": ["packages/harness/extensions/guards/judge-backends.ts"] },
       { "name": "harness-extensions", "patterns": ["packages/harness/extensions/**"] },
       { "name": "host", "patterns": ["packages/web/src/host/**"] },
       { "name": "server", "patterns": ["packages/web/src/server/**"] },
@@ -225,11 +226,16 @@
     "rules": [
       { "from": "core", "allow": [] },
       { "from": "harness-core", "allow": ["core"] },
-      { "from": "harness-extensions", "allow": ["core", "harness-core"] },
+      { "from": "harness-extensions", "allow": ["core", "harness-core", "judge-backends"] },
       { "from": "host", "allow": ["core"] },
       { "from": "server", "allow": ["core", "host"] },
       { "from": "browser", "allow": ["core"] },
-      { "from": "scripts", "allow": ["core", "site-base"] },
+      // The command judge's backends (#535) are their own one-file zone, as `site-base` is: they
+      // must sit where pi's libraries may be named (the vendor gate's roots), and `bun run judge`
+      // must replay with exactly the guard's backends. So `scripts` may reach this ONE file, which
+      // may itself reach only `core` — never the rest of the harness.
+      { "from": "scripts", "allow": ["core", "site-base", "judge-backends"] },
+      { "from": "judge-backends", "allow": ["core"] },
       // The site is presentation over generated output: it renders Astro and Starlight, and its
       // CONTENT arrives as files `scripts/docs/site-content.ts` writes, never as an import. It
       // may read ONE file — the base path the site is served under, which the projector, the
@@ -247,7 +253,16 @@
       { "from": "site-base", "allow": [] },
       {
         "from": "test",
-        "allow": ["core", "harness-core", "harness-extensions", "host", "server", "browser", "scripts"]
+        "allow": [
+          "core",
+          "harness-core",
+          "harness-extensions",
+          "judge-backends",
+          "host",
+          "server",
+          "browser",
+          "scripts"
+        ]
       }
     ],
     // Both HTML entries: an `.html` is the bundler's entry, not a module in any zone. The chat

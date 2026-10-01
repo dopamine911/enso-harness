@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import { homedir } from 'node:os'
 import { ENSO_JUDGE_POLICY, type EnsoThreadJudgeCases } from '../../packages/core/src/index.ts'
-import { jevRequestOf } from '../../packages/core/src/jev-judge.ts'
+import { jevRequestOf } from '../../packages/harness/extensions/guards/judge-backends.ts'
 import {
   type CaseLabel,
   casesUnder,
@@ -32,13 +32,31 @@ test('⚠ replay without --send is a usage error that says why; the defaults and
   expect(() => parseArguments(['replay', 't1'])).toThrow(/--send/)
   expect(parseArguments(['replay', 't1', '--send'], new Date('2026-09-30T08:00:00Z'))).toEqual({
     command: 'replay',
+    backend: { kind: 'jev' },
     threads: ['t1'],
     source: 'server',
     unreadable: 200,
     under: [],
-    outFile: 'judge-replay-2026-09-30.jsonl',
+    outFile: 'judge-replay-jev-2026-09-30.jsonl',
     maxCalls: 1000,
   })
+  // A local replay sends nothing off the machine, so it needs no --send; Jev's always does.
+  expect(
+    parseArguments([
+      'replay',
+      '--from',
+      'omp',
+      '--backend',
+      'local',
+      '--local-url',
+      'http://127.0.0.1:8080/v1',
+      '--local-model',
+      'q',
+    ]),
+  ).toMatchObject({ backend: { kind: 'local', baseUrl: 'http://127.0.0.1:8080/v1', model: 'q' } })
+  expect(() => parseArguments(['replay', '--backend', 'local', '--local-model', 'q'])).toThrow(/--local-url/)
+  expect(() => parseArguments(['replay', '--from', 'omp', '--backend', 'jev'])).toThrow(/--send/)
+  expect(() => parseArguments(['replay', '--send', '--backend', 'openrouter'])).toThrow(UsageError)
   expect(parseArguments(['t1', 't2'])).toEqual({
     command: 'cases',
     threads: ['t1', 't2'],

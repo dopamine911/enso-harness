@@ -332,7 +332,7 @@ opens earlier still reads the calls a halt would have stopped.
 
 **The command judge, recorded only** (#469 PR1; `@enso/core` `command-judge.ts`, `config.json` `security.judge.backend`).
 Off by default, and user-only as the rest of `security` is: an unreadable `config.json` leaves it off.
-Switched on (`jev`), the guard asks it about a `bash` call it let through when the call follows a
+Switched on (`jev` or `local`), the guard asks it about a `bash` call it let through when the call follows a
 refusal in the risk window or is one the guards cannot read — built at run time, decoded, handed to an
 interpreter — the selection `judgeContextOf` makes off the risk fold's own state, so
 `judgeContextsOfEntries` replays exactly the calls the guard judged (`guards.test.ts` pins it). The
@@ -342,6 +342,13 @@ not awaited, and a failure is recorded `unjudged`, never clean. The state is red
 leaves (`@enso/core/judge`): known secret values, secret-shaped assignments, flags, headers and
 token shapes become markers; paths stay, because a path is what the judge has to read, and a file
 whose path looks like a secret is never read for its contents.
+The backends live in the guards extension (`guards/judge-backends.ts`), the one place pi's libraries
+may be named, and ask through pi-ai 0.99's `classify()` (#535) while the agent stays on 0.87.1:
+`@earendil-works/pi-classifier` is an npm alias of `@earendil-works/pi-ai@0.99.2`, because
+pi-multi-account caps pi below 0.88 (#354). `jev` posts to TypeSafe's pinned endpoint and model;
+`local` (#532) asks the llama.cpp router `security.judge.local` names, and ⚠ a router that is not on
+a loopback address is sent nothing. A failed call's reason is its HTTP status, never the server's
+error body, which may echo the request.
 
 **Consumed by the runtime.** Handlers stack; the first `block` returns and cannot be un-blocked by a
 later extension, whatever the load order (the header of `guards/index.ts`). The participants and their load order are

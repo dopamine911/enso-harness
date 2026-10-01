@@ -9,8 +9,8 @@ import { ENSO_JUDGE_SCOPE_REASONS, type EnsoJudgeContext, type EnsoJudgeScopeRea
  *
  * - **The seam is the questions, not a transport.** Every backend answers `risk`, `obscured`,
  *   `unresolved` and `same_as_denied` with a value, and a confidence where it has one — so a
- *   replay compares backends on the same cases. How a backend asks them is its own: Jev takes
- *   typed questions; a local model (#532) may take something else entirely.
+ *   replay compares backends on the same cases. Today both ask them through pi's classifier
+ *   runtime (#535): Jev as typed questions, a local llama.cpp model from its label probabilities.
  * - **Recorded, nothing more (#469 PR1).** A judgement is an `enso-command-judgement` entry and a
  *   log line. ⚠ It feeds no risk signal and asks nothing until a replay over real sessions sets
  *   the thresholds: a signal enters the risk fold, and the fold can open and halt an incident.
@@ -19,7 +19,8 @@ import { ENSO_JUDGE_SCOPE_REASONS, type EnsoJudgeContext, type EnsoJudgeScopeRea
  *   in every string the judge is sent. Paths stay: `private.env` is not a secret, and it is what
  *   the judge has to see. A file whose path looks like a secret is never read for its contents.
  * - **The barrel half is pure** — the questions, the config, the record — so the page can read a
- *   judgement; redaction, script resolution and every backend are node-only subpaths.
+ *   judgement; redaction and script resolution are a node-only subpath, and the backends live in
+ *   the guards extension, the one place pi's libraries may be named.
  *
  * @group Command judge
  */
@@ -37,12 +38,13 @@ export const ENSO_JUDGE_QUESTIONS = ['risk', 'obscured', 'unresolved', 'same_as_
 export type EnsoJudgeQuestion = (typeof ENSO_JUDGE_QUESTIONS)[number]
 
 /**
- * The backends `security.judge.backend` names. `off` is the default and sends nothing; a local
- * backend is #532's.
+ * The backends `security.judge.backend` names. `off` is the default and sends nothing; `jev` sends
+ * the redacted state to TypeSafe; `local` to a llama.cpp model on this machine (#532), never
+ * further.
  *
  * @group Command judge
  */
-export const ENSO_JUDGE_BACKENDS = ['off', 'jev'] as const
+export const ENSO_JUDGE_BACKENDS = ['off', 'jev', 'local'] as const
 
 /** @group Command judge */
 export type EnsoJudgeBackend = (typeof ENSO_JUDGE_BACKENDS)[number]
@@ -50,7 +52,8 @@ export type EnsoJudgeBackend = (typeof ENSO_JUDGE_BACKENDS)[number]
 /**
  * `config.json`'s `security.judge` (#469), user-only as the rest of `security` is: a project cannot
  * switch a judge on, or off, for the user. Scope 1 (around a guard) is the only scope until #469's
- * escalation lands.
+ * escalation lands. `local` names the llama.cpp router (a loopback URL) and the model the `local`
+ * backend asks.
  *
  * @group Command judge
  */
@@ -59,9 +62,19 @@ export const EnsoJudgeConfig = Type.Object(
     backend: Type.Optional(
       Type.Unsafe<EnsoJudgeBackend>(Type.Union(ENSO_JUDGE_BACKENDS.map((backend) => Type.Literal(backend)))),
     ),
+    local: Type.Optional(
+      Type.Object(
+        { baseUrl: Type.String({ minLength: 1 }), model: Type.String({ minLength: 1 }) },
+        { additionalProperties: false },
+      ),
+    ),
   },
   { additionalProperties: false },
 )
+
+/** @group Command judge */
+export type EnsoJudgeConfig = Static<typeof EnsoJudgeConfig>
+
 /**
  * The standing policy the judge reads the command against: Enso's own protections. The refusal
  * that precedes a call (`denied`) supplies the specifics.

@@ -277,7 +277,8 @@ what no mode may allow. Both answer before a tool runs; nothing after it does.
   history, exports one incident (`mechanical.json`, the records as stored; `agent-report.md`;
   `resolution.json`) and replays.
 - **command judge** — a second sensor on `bash` (#469, phase 6 of #189), behind one seam with
-  several **backends**: `off` (the default) or `jev` (TypeSafe's Jev; a local one is #532). Every
+  several **backends**: `off` (the default), `jev` (TypeSafe's Jev) or `local` (a llama.cpp model
+  on this machine, #532), both asked as typed questions (#535). Every
   backend answers the same four questions — `risk`, `obscured`, `unresolved`, `same_as_denied` —
   about a call the guard let through that follows a refusal or that the guards cannot read
   (**scope** 1). What it is sent is **redacted** (secret values and shapes; never a secret file's
