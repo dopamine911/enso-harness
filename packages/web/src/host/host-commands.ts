@@ -4,6 +4,7 @@ import {
   type EnsoHostCommandRun,
   type EnsoModelChoice,
   type EnsoModelState,
+  type HostCommandOption,
   type RuntimeCommand,
 } from '@enso/core'
 
@@ -20,8 +21,8 @@ import {
  * (`modelRuntime.getAvailableSnapshot()` — authenticated providers only, which is why choosing
  * one is the fix for "the default is Cursor, I have no Cursor" without a scratch-file edit,
  * #341), `/thinking` a `level` over what the current model offers. Both carry the current
- * `value` as an option id; the `/commands` route drops it for a `remembered` list, because a
- * thread with no live session has no current value — see `withoutHostValues`.
+ * `value` as an option id. A thread with no session gets `catalogueRows` instead (#484): the
+ * same `/model` options with no value, the flows, and nothing a session alone has.
  *
  * ⚠ A model's option id is `provider/id`, joined and never split: a model id may itself
  * contain `/` (an openrouter id does), so a run's `value` is matched against the joined id of
@@ -49,6 +50,21 @@ export function modelOptionId(model: Pick<EnsoModelChoice, 'provider' | 'id'>): 
   return `${model.provider}/${model.id}`
 }
 
+/** The `/model` options: one per model pi could run right now, each carrying its own thinking levels (#391). */
+function modelOptions<Model extends EnsoModelChoice>(
+  models: readonly Model[],
+  thinkingLevelsOf: (model: Model) => readonly string[],
+): HostCommandOption[] {
+  return models.map((model) => ({
+    id: modelOptionId(model),
+    label: model.name,
+    detail: model.provider,
+    thinkingLevels: [...thinkingLevelsOf(model)],
+  }))
+}
+
+const MODEL_ROW = { name: HOST_COMMAND_MODEL, source: 'host', kind: 'select', description: 'switch the model' } as const
+
 /**
  * The two host rows, in the contract's order: `model`, then `thinking`. Each `/model` option
  * carries that model's thinking levels (#391), read by `thinkingLevelsOf` — the host passes the
@@ -61,17 +77,9 @@ export function hostCommandRows<Model extends EnsoModelChoice>(
 ): RuntimeCommand[] {
   return [
     {
-      name: HOST_COMMAND_MODEL,
-      source: 'host',
-      kind: 'select',
-      description: 'switch the model',
+      ...MODEL_ROW,
       ...(state.model === null ? {} : { value: modelOptionId(state.model) }),
-      options: models.map((model) => ({
-        id: modelOptionId(model),
-        label: model.name,
-        detail: model.provider,
-        thinkingLevels: [...thinkingLevelsOf(model)],
-      })),
+      options: modelOptions(models, thinkingLevelsOf),
     },
     {
       name: HOST_COMMAND_THINKING,
@@ -85,16 +93,22 @@ export function hostCommandRows<Model extends EnsoModelChoice>(
 }
 
 /**
- * The same list for a thread with no live session: host rows keep their `options` (every
- * session offers the same) and lose their `value` (this thread has none yet). pi's rows pass
- * through untouched.
+ * The rows a thread with NO session is offered (#484): `/model` over the same models, with no
+ * `value` (there is no current one), then the `flow` rows among `flows` — `/login` and, when
+ * something is stored, `/logout`, as `hostFlowRows` builds them. ⚠ Not `/thinking`, `/compact`
+ * (an action) or a view, and none of pi's rows: each belongs to a session, and the Start dialog is
+ * what a thread without one offers. `/thinking`'s levels are the chosen model's, carried on its
+ * `/model` option.
  */
-export function withoutHostValues(commands: readonly RuntimeCommand[]): RuntimeCommand[] {
-  return commands.map((command) => {
-    if (command.source !== 'host' || command.value === undefined) return command
-    const { value: _value, ...withoutValue } = command
-    return withoutValue
-  })
+export function catalogueRows<Model extends EnsoModelChoice>(
+  models: readonly Model[],
+  thinkingLevelsOf: (model: Model) => readonly string[],
+  flows: readonly RuntimeCommand[],
+): RuntimeCommand[] {
+  return [
+    { ...MODEL_ROW, options: modelOptions(models, thinkingLevelsOf) },
+    ...flows.filter((row) => row.kind === 'flow'),
+  ]
 }
 
 /**

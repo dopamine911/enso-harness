@@ -37,7 +37,13 @@ import type {
 import type { BranchContext, BranchRequestDetail } from '../../host/branch-context.ts'
 import type { BranchStats } from '../../host/branch-stats.ts'
 import { createEventTail, describeObservation } from '../../host/event-tail.ts'
-import { decideHostCommand, HOST_VIEW_ROWS, HostCommandRefused, hostCommandRows } from '../../host/host-commands.ts'
+import {
+  catalogueRows,
+  decideHostCommand,
+  HOST_VIEW_ROWS,
+  HostCommandRefused,
+  hostCommandRows,
+} from '../../host/host-commands.ts'
 import { compactDoneText, decideHostFlow, hostFlowRows, loginDoneText, logoutDoneText } from '../../host/host-flows.ts'
 import { decideSystemPrompt } from '../../host/system-prompt.ts'
 
@@ -78,6 +84,11 @@ export function fakeHostRows(record: Pick<FakeThreadRecord, 'modelState'>): Runt
     ...hostFlowRows(FAKE_LOGIN_OPTIONS, FAKE_LOGOUT_OPTIONS),
     ...HOST_VIEW_ROWS,
   ]
+}
+
+/** The fake's catalogue (#484): the real host's rule over the same fake models and credentials. */
+function fakeCatalogue(): RuntimeCommand[] {
+  return catalogueRows(FAKE_MODELS, fakeThinkingLevelsOf, hostFlowRows(FAKE_LOGIN_OPTIONS, FAKE_LOGOUT_OPTIONS))
 }
 
 /** The sentence the fake's flow says when a test settles it — the real host's words, by flow. */
@@ -507,6 +518,7 @@ export function createFakeAgentHost(
   return {
     createSession,
     freshPermissionMode: () => fresh,
+    catalogue: () => Promise.resolve(fakeCatalogue()),
     storedPermissionMode: (transcript: readonly EnsoTranscriptEntry[]): EnsoPermissionModeState => {
       const storedThread = Object.values(stored).find((candidate) => candidate.transcript === transcript)
       return { mode: storedThread?.mode ?? fresh.mode, available: fresh.available }

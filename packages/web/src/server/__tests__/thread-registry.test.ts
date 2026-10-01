@@ -171,23 +171,6 @@ test('release starts the idle clock; the session is disposed after the window, a
   expect(built).toHaveLength(2)
 })
 
-// ⚠ THE PALETTE'S `remembered` CASE THE ROUTE TEST CANNOT REACH (#338, PR #343 review): a thread
-// that ran and idled out. `peek` is undefined for it exactly as for a thread that never ran — the
-// registry cannot tell them apart, which is why the palette's note says "no live session", not
-// "has not run" — and the last built session's list is still the answer.
-test('an idled-out thread has no live session to peek, and rememberedCommands still answers with the last build', async () => {
-  const { threads, built, clock } = fakeHost()
-  expect(threads.rememberedCommands()).toBeUndefined()
-  const lease = await take(threads, 't1')
-  lease.release()
-  clock.advance(20)
-  expect(threads.peek('t1')).toBeUndefined()
-  expect(built).toHaveLength(1)
-  const lastBuilt = built[0]
-  if (lastBuilt === undefined) throw new Error('expected one build')
-  expect(threads.rememberedCommands()).toEqual(lastBuilt.hosted.runtime.listCommands())
-})
-
 test("acquire within the idle window cancels the disposal — #43's fix in one assertion", async () => {
   const { threads, built, clock } = fakeHost()
   const first = await take(threads, 't1')

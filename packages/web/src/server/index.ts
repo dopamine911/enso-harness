@@ -30,7 +30,6 @@ import {
 import { readGitChanges, readGitState, runGit } from '@enso/core/git'
 import { missingVendorPaths } from '@enso/core/pi-manifest'
 import { AGENT_RUNTIME_VERSION, type AgentHost, createAgentHost, SessionDirectoryRefused } from '../host/agent-host.ts'
-import { withoutHostValues } from '../host/host-commands.ts'
 import { readPermissionPolicy, resetPermissionPolicy, writePermissionPolicy } from '../host/permission-policy-file.ts'
 import { createAboutRoute, createBundleRoute } from './bundle-route.ts'
 import {
@@ -738,30 +737,19 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   }
 
   /**
-   * The slash commands a thread can run (#338), from ITS session — built here if it is not live
-   * (#390). This route is asked only on a person's explicit act (the `/` palette opening, the model
-   * picker, a typed bare command), so it is not the look #86 forbids to build: inspection keeps
-   * `peek`. Before #390 it answered an unbuilt thread with the last build's list, or nothing after a
-   * restart, and `/login` could not run until something had been prompted. A build that fails
-   * answers as before — the last build's list, host rows without their `value` (#338 slice 2), or
-   * none — said as `source`, so the palette never shows a stale list as live. No record: a reader
-   * opening a menu is not an event.
+   * The slash commands a thread can run (#338): from ITS session when it is live, else the host's
+   * catalogue (#484) — and NOTHING IS BUILT. Before #484 this route built the session for a thread
+   * that had none (#390: after a restart `/login` could not run until something had been
+   * prompted), and the Start dialog read its models here, so every page visit built one. Now the
+   * Start dialog is served from the catalogue, a run or a control route is what builds, and the
+   * palette shows a `catalogue` list as none. No record: a reader opening a menu is not an event.
    */
   async function respondWithThreadCommands(threadId: string, response: ServerResponse): Promise<void> {
-    // Only the BUILD is caught (#392 review): a live session whose listing throws is a fault, and
-    // rejects to `answerOrFail` (500, an error record) — not a failed build answered from memory.
-    let thread: Awaited<ReturnType<typeof threads.ensure>> | undefined
-    try {
-      thread = await threads.ensure(threadId)
-    } catch (error) {
-      log.warn('the session for {threadId} could not be built for its commands: {error}', { threadId, error })
-    }
-    const remembered = threads.rememberedCommands()
-    let payload: EnsoThreadCommands = { threadId, commands: [], source: 'none' }
-    if (thread !== undefined) payload = { threadId, commands: thread.hosted.runtime.listCommands(), source: 'live' }
-    else if (remembered !== undefined) {
-      payload = { threadId, commands: withoutHostValues(remembered), source: 'remembered' }
-    }
+    const thread = threads.peek(threadId)
+    const payload: EnsoThreadCommands =
+      thread === undefined
+        ? { threadId, commands: await host.catalogue(), source: 'catalogue' }
+        : { threadId, commands: thread.hosted.runtime.listCommands(), source: 'live' }
     response.writeHead(200, { 'Content-Type': 'application/json' })
     response.end(JSON.stringify(payload))
   }

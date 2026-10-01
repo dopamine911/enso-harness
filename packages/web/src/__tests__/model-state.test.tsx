@@ -50,7 +50,7 @@ const LIVE_MODEL: EnsoModelState = {
 
 const COMMANDS: EnsoThreadCommands = {
   threadId: 'thread-1',
-  source: 'remembered',
+  source: 'live',
   commands: [
     { name: 'mode', source: 'extension' },
     {

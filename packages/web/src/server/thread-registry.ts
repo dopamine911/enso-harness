@@ -27,7 +27,6 @@ import {
   type EnsoObservation,
   type EnsoThreadInspection,
   ensoLogger,
-  type RuntimeCommand,
   type ThreadRuntime,
 } from '@enso/core'
 import type { HostedThread } from '../host/agent-host.ts'
@@ -151,11 +150,13 @@ export interface ThreadRegistry {
    */
   peek(threadId: string): ThreadView | undefined
   /**
-   * The thread's hosted session, BUILT if it is not live (#390) — for a person's explicit ask
-   * (the `/` palette, the model picker, a typed command), never for inspection: `peek` stays the
-   * look that builds nothing (#86). Takes no lease: it does not wait for a run, does not mark the
-   * thread busy, does not count a generation. A thread it built idles out like a released one.
-   * A build failure is thrown, and leaves no entry behind, as `acquire`'s does.
+   * The thread's hosted session, BUILT if it is not live (#390) — for a person's explicit CONTROL
+   * of a thread that has not run (a `POST …/command` setting its model or thinking level, a
+   * `POST …/flow` starting a login), never for a look: `peek` builds nothing (#86), and since #484
+   * neither does the `/` palette, the model picker nor the Start dialog — their list for a thread
+   * with no session is the host's catalogue. Takes no lease: it does not wait for a run, does not
+   * mark the thread busy, does not count a generation. A thread it built idles out like a released
+   * one. A build failure is thrown, and leaves no entry behind, as `acquire`'s does.
    */
   ensure(threadId: string): Promise<ThreadView>
   /**
@@ -174,14 +175,6 @@ export interface ThreadRegistry {
    * nothing is done, while it runs; `true` once it is gone — or was never live.
    */
   retire(threadId: string, why: string): boolean
-  /**
-   * The slash commands the most recently built session registered (#338), for a thread that
-   * has no live one. Every session builds the set from the same sources under the same
-   * configuration, so the last one's answer is the next one's — until a template or skill file
-   * changes on disk between builds, which the next build picks up — and asking builds nothing
-   * (#86). `undefined` before any session has been built in this process.
-   */
-  rememberedCommands(): readonly RuntimeCommand[] | undefined
   /** Dispose every session — server shutdown. */
   shutdown(): void
   /** Observable state for tests. */
@@ -390,8 +383,6 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
 
   /** Set by `shutdown`: no build may publish a session into a registry that is being torn down. */
   let shutDown = false
-  /** The last built session's `listCommands()` — see `rememberedCommands`. */
-  let lastCommands: readonly RuntimeCommand[] | undefined
 
   async function buildThread(threadId: string): Promise<ThreadEntry> {
     const hosted = await createSession(threadId)
@@ -414,7 +405,6 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
     threads.set(threadId, thread)
     attachFeed(threadId, thread)
     publishStatus(threadId, thread)
-    lastCommands = hosted.runtime.listCommands()
     // ⚠ ONE inspection, read twice (#285). `inspect()` decodes the whole branch into the
     // transcript and stats the session file; for a thread resumed from a long stored
     // session that is the entire history, and this line is at `info`, so nothing drops it.
@@ -615,9 +605,6 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
     },
     sentTail(threadId: string): EventTail | undefined {
       return threads.get(threadId)?.sent
-    },
-    rememberedCommands(): readonly RuntimeCommand[] | undefined {
-      return lastCommands
     },
     list(): ThreadView[] {
       return [...threads.entries()].map(([threadId, thread]) => viewOf(threadId, thread))

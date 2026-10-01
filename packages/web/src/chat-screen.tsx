@@ -94,7 +94,7 @@ import { QuestionnaireControls } from './questionnaire-card.tsx'
 import { providerRefusalLine, providerRefusalSource, RefusedAttemptLine, refusalOfMessage } from './refused-attempt.tsx'
 import { SelectedMessagePart } from './selected-message-part.tsx'
 import { SettingsDialog } from './settings-dialog.tsx'
-import { StartSessionDialog } from './start-session.tsx'
+import { SLASH_PROMPT_REFUSAL, StartSessionDialog } from './start-session.tsx'
 import { ThreadStoresContext, useStore, useThreadStores } from './store.ts'
 import {
   createResumeRequests,
@@ -1308,14 +1308,20 @@ const chatComponents = {
       // row, it does what choosing that row in the palette does — `/login` opens the provider
       // picker — instead of reaching the transcript as a user message the server then refuses
       // ("the run failed", which outlived the login started next). Anything else, or a list that
-      // cannot be read, is sent exactly as before. The lookup builds the thread's session if it is
-      // not live (#390), so this works as the first thing typed after a server restart.
+      // cannot be read, is sent exactly as before. ⚠ A thread with NO session has no commands to
+      // name (#484): the lookup builds nothing, and the words go back with the Start dialog's own
+      // sentence — a session starts with a prompt, and the slash commands are its.
       // The draft clears BEFORE the lookup (#389 review): the composer stays live during it, and a
       // second Enter on a draft still holding `/word` would route or send it twice. A send the
       // fallback refuses (disconnected) gives the words back, as a refused submit keeps them.
       const submitTypedCommand = async (commandName: string, text: string): Promise<void> => {
         setDraft('')
         const listed = await fetchThreadCommands(stores.threadId, stores.fetch).catch((): undefined => undefined)
+        if (listed !== undefined && listed.source !== 'live') {
+          setDraft(text)
+          stores.notifications.push(SLASH_PROMPT_REFUSAL, 'info', 'run', ENSO_NOTICE_SOURCE)
+          return
+        }
         const row = listed?.commands.find((command) => command.source === 'host' && command.name === commandName)
         if (row === undefined) {
           if (!send(text, [])) setDraft(text)

@@ -15,6 +15,7 @@ import {
   PromptInputCommandList,
 } from './components/ai-elements/prompt-input.tsx'
 import { optionKeywords } from './model-state.tsx'
+import { SLASH_PROMPT_REFUSAL } from './start-session.tsx'
 
 /**
  * The `/` command palette (#338, slice 1): Claude Code's `/` button in VS Code, as a popup
@@ -30,7 +31,7 @@ import { optionKeywords } from './model-state.tsx'
  * deciding what a selection does. Nothing under `components/` reads the wire.
  *
  * Fetched on EVERY open, never cached and never polled: the route writes no record, the list
- * changes when a session is built (`remembered` → `live`), and a stale palette would offer a
+ * changes when a session is built (`catalogue` → `live`), and a stale palette would offer a
  * thread commands it cannot run. A response from an earlier open that lands after a later one
  * is dropped — the open counter is the sequencer. A non-2xx renders `<status> <body>` VERBATIM
  * inside the palette, not as a toast: the failure belongs to the popup that asked.
@@ -56,21 +57,18 @@ import { optionKeywords } from './model-state.tsx'
  * the `/` button as the menu does by itself.
  *
  * A `host` row shows its current option's `label` on the right, dim (`Fake One`, `medium`), when
- * the row carries a `value`; a `remembered` list carries none — the server strips it, because a
- * thread with no live session has no current value — and the row still opens its step: choosing
- * the model before the first prompt is the #341 case, not an error. A `flow` row (`/login`,
- * `/logout`, slice 3) opens the same option dialog a `select` does — the choice is the same
- * gesture; what differs is what the server does with it (202: started, and the flow's questions
- * arrive as dialog cards), and that is the route's business, not the palette's.
+ * the row carries a `value`. A `flow` row (`/login`, `/logout`, slice 3) opens the same option
+ * dialog a `select` does — the choice is the same gesture; what differs is what the server does
+ * with it (202: started, and the flow's questions arrive as dialog cards), and that is the
+ * route's business, not the palette's.
  *
- * Empty states say WHICH empty. The server builds the thread's session when the palette asks
- * (#390), so `live` is the normal answer; `none` and `remembered` now mean that build FAILED —
- * `none` (nothing built in this process to fall back on) reads "the session could not start — no
- * commands to offer; the server log says why", and `remembered` shows the last session's rows
- * with a footer note that this thread's session could not start. A live list with zero rows
- * reads "this session registers no commands"; a filter that matches nothing reads "no command
- * matches". A sentence the server cannot back is a sentence the palette must not say (PR #343
- * review) — before #390 these two said "no thread has run yet", which a restart made routine.
+ * Empty states say WHICH empty. The route builds nothing (#86, #484): a thread the server holds
+ * answers its own list (`live`); any other thread answers the host's `catalogue` — the Start
+ * dialog's rows — and the palette lists NONE of those, because the slash commands belong to a
+ * running session; it reads the Start dialog's own sentence, "a / command needs a running
+ * session — start one with a prompt first". A live list with zero rows reads "this session
+ * registers no commands"; a filter that matches nothing reads "no command matches". A sentence
+ * the server cannot back is a sentence the palette must not say (PR #343 review).
  *
  * ⚠ NO RADIX MENU ITEM MAY LIVE INSIDE THIS CONTENT. The dropdown's content feeds every printable
  * key pressed anywhere inside it to its typeahead (`@radix-ui/react-menu`, `MenuContent.onKeyDown`)
@@ -109,10 +107,8 @@ type PaletteState =
   | { readonly kind: 'loaded'; readonly commands: EnsoThreadCommands }
   | { readonly kind: 'failed'; readonly detail: string }
 
-const NO_SESSION = 'the session could not start — no commands to offer; the server log says why'
 const NO_COMMANDS = 'this session registers no commands'
 const NO_MATCH = 'no command matches'
-const REMEMBERED_NOTE = "from the last session — this thread's session could not start"
 
 /** One cmdk group per source, in the order the palette shows them — ours first: it is short, and the settings are what a chip points at. */
 const GROUPS: ReadonlyArray<{ readonly source: RuntimeCommand['source']; readonly heading: string }> = [
@@ -148,10 +144,19 @@ export function rankCommand(rowValue: string, search: string, keywords?: readonl
   return inDescription ? 0.25 : 0
 }
 
+/**
+ * The rows the palette lists: a live session's, every one of them; for a thread with no session,
+ * NONE (#484) — the host's `catalogue` is the Start dialog's, and the slash commands belong to a
+ * running session. The sentence says so where the rows would be.
+ */
+function listedRows(commands: EnsoThreadCommands): readonly RuntimeCommand[] {
+  return commands.source === 'live' ? commands.commands : []
+}
+
 /** The sentence cmdk shows when no row is visible — which depends on WHY there is none. */
-function emptyText(commands: EnsoThreadCommands): typeof NO_MATCH | typeof NO_SESSION | typeof NO_COMMANDS {
-  if (commands.commands.length > 0) return NO_MATCH
-  return commands.source === 'none' ? NO_SESSION : NO_COMMANDS
+function emptyText(commands: EnsoThreadCommands): string {
+  if (commands.source !== 'live') return SLASH_PROMPT_REFUSAL
+  return commands.commands.length > 0 ? NO_MATCH : NO_COMMANDS
 }
 
 /** THE SELECTION RULE (header), as what the chosen row does once the menu has closed; undefined for a `level` row, which opens its page instead. */
@@ -372,7 +377,7 @@ export function CommandPalette({
               <>
                 <PromptInputCommandEmpty>{emptyText(state.commands)}</PromptInputCommandEmpty>
                 {GROUPS.map(({ source, heading }) => {
-                  const rows = state.commands.commands.filter((command) => command.source === source)
+                  const rows = listedRows(state.commands).filter((command) => command.source === source)
                   if (rows.length === 0) return null
                   return (
                     <PromptInputCommandGroup key={source} heading={heading}>
@@ -403,9 +408,6 @@ export function CommandPalette({
               </>
             ) : null}
           </PromptInputCommandList>
-          {state.kind === 'loaded' && state.commands.source === 'remembered' ? (
-            <div className="border-t px-2 py-1.5 text-xs text-muted-foreground">{REMEMBERED_NOTE}</div>
-          ) : null}
         </PromptInputCommand>
       </PromptInputActionMenuContent>
     </PromptInputActionMenu>

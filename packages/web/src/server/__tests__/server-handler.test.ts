@@ -329,38 +329,49 @@ test('⚠ a thread id that is not thread-id shaped is a 400 at every entry point
   expect((await fetch(`${url}/api/threads`)).status).toBe(200)
 })
 
-// ⚠ THE PALETTE'S LIST IS THE THREAD'S OWN (#338, #390). This route is asked only when a person
-// opens the `/` palette or the model picker, or sends a bare command — so a thread with no session
-// is BUILT here (#390: after a restart `/login` could not run until something had been prompted),
-// while inspection keeps the look that builds nothing (#86). The answer still says where its list
-// came from: `live`, the thread's own session; and when the build FAILS, the last build's list with
-// its host rows stripped of their value (`remembered` — another session's current model would be a
-// lie here), or `none` before any build. A palette that quietly showed a stale list would lie.
-test('⚠ GET …/commands builds the thread’s session and answers its own list; a failed build says remembered or none', async () => {
-  const { url, built } = await startWith(settlesAtOnce, {}, (host: AgentHost) => ({
-    ...host,
-    createSession: (threadId: string, directory: () => string): ReturnType<AgentHost['createSession']> =>
-      threadId.startsWith('broken')
-        ? Promise.reject(new Error('the build failed'))
-        : host.createSession(threadId, directory),
-  }))
+// ⚠ LOOKING MUST NOT BUILD (#86, #484). This route used to build a thread's session to list its
+// commands (#390), and the Start dialog read its models here — so opening the page built one. Now a
+// thread the server holds answers its own live list, and any other id answers the host's CATALOGUE:
+// `/model` over the models pi could run (no value: no current one), the flows — nothing a session
+// alone has, and nothing built. A build that fails is not this route's concern any more.
+test('⚠ GET …/commands never builds: a live thread answers its own list; any other id, the catalogue', async () => {
+  const { url, built } = await startWith(settlesAtOnce)
   const commandsOf = async (threadId: string): Promise<EnsoThreadCommands> => {
     const answered: unknown = await (await fetch(`${url}/api/threads/${threadId}/commands`)).json()
     if (!Check(EnsoThreadCommands, answered)) throw new Error('the answer is not an EnsoThreadCommands')
     return answered
   }
 
-  // A failed build before any other: nothing to remember.
-  expect(await commandsOf('broken-first')).toEqual({ threadId: 'broken-first', commands: [], source: 'none' })
+  // A thread nobody has run: the catalogue, and no build. Twice, to show the second read is not special.
+  const fresh = await commandsOf('fresh')
+  await commandsOf('fresh')
+  expect(fresh).toMatchObject({ threadId: 'fresh', source: 'catalogue' })
   expect(built).toHaveLength(0)
+  expect((await (await fetch(`${url}/api/threads`)).json()) as unknown[]).toEqual([])
+  expect(fresh.commands.map((command) => [command.name, command.source, command.kind])).toEqual([
+    ['model', 'host', 'select'],
+    ['login', 'host', 'flow'],
+    ['logout', 'host', 'flow'],
+  ])
+  // The Start dialog's rows: every model with its own thinking levels, and no current value.
+  expect(fresh.commands[0]?.value).toBeUndefined()
+  expect(fresh.commands[0]?.options?.map((option) => [option.id, option.thinkingLevels])).toEqual([
+    ['fake/fake-1', ['off', 'low', 'medium', 'high']],
+    ['fake/fake-2', ['off']],
+  ])
+  expect(fresh.commands[1]).toMatchObject({ options: [{ id: 'fake/oauth' }, { id: 'fake/api_key' }] })
 
-  // No prompt has run: the ask itself builds the session, and the list is live, values and all.
+  // A control route builds (#390: choosing the model before the first prompt is the point) …
+  const set = await fetch(`${url}/api/threads/fresh/command`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name: 'thinking', value: 'high' }),
+  })
+  expect(set.status).toBe(204)
+  expect(built).toHaveLength(1)
+  // … and from then on the thread answers its OWN list, values and pi's rows included.
   const live = await commandsOf('fresh')
   expect(live).toMatchObject({ threadId: 'fresh', source: 'live' })
-  expect(built).toHaveLength(1)
-  expect(built[0]?.prompts).toEqual([])
-  // pi's row first, then the host's (#338 slices 2 and 3, #361, #433) — the settings with their CURRENT
-  // value on a live thread, the flows with none (there is no "current" login), the views last.
   expect(live.commands.map((command) => [command.name, command.source])).toEqual([
     ['mode', 'extension'],
     ['model', 'host'],
@@ -371,31 +382,8 @@ test('⚠ GET …/commands builds the thread’s session and answers its own lis
     ['context', 'host'],
     ['fork', 'host'],
   ])
-  expect(live.commands[3]).toMatchObject({ kind: 'flow', options: [{ id: 'fake/oauth' }, { id: 'fake/api_key' }] })
-  expect(live.commands[3]?.value).toBeUndefined()
   expect(live.commands[1]).toMatchObject({ kind: 'select', value: 'fake/fake-1' })
-  expect(live.commands[1]?.options?.map((option) => option.id)).toEqual(['fake/fake-1', 'fake/fake-2'])
-  expect(live.commands[2]).toMatchObject({
-    kind: 'level',
-    value: 'medium',
-    options: [{ id: 'off' }, { id: 'low' }, { id: 'medium' }, { id: 'high' }],
-  })
-
-  // Asking again reuses the session: an ask is not a build.
-  await commandsOf('fresh')
-  expect(built).toHaveLength(1)
-
-  // A failed build after one: the remembered list. The host rows keep their options (every
-  // session offers the same) and LOSE their value: this thread has no current model.
-  const remembered = await commandsOf('broken-later')
-  expect(remembered).toMatchObject({ threadId: 'broken-later', source: 'remembered' })
-  expect(remembered.commands.map((command) => command.name)).toEqual(live.commands.map((command) => command.name))
-  const rememberedHostRows = remembered.commands.filter((command) => command.source === 'host')
-  expect(rememberedHostRows.every((hostRow) => hostRow.value === undefined)).toBe(true)
-  // An `action` or a `view` row has no options to keep; every other host row keeps its.
-  const withOptions = rememberedHostRows.filter((hostRow) => hostRow.kind !== 'action' && hostRow.kind !== 'view')
-  expect(withOptions.map((hostRow) => hostRow.options?.length ?? 0).every((length) => length > 0)).toBe(true)
-  expect(withOptions).toHaveLength(4)
+  expect(live.commands[2]).toMatchObject({ kind: 'level', value: 'high' })
   expect(built).toHaveLength(1)
 })
 

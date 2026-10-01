@@ -218,7 +218,7 @@ export const RuntimeCommand = Type.Object({
       Type.Literal('view'),
     ]),
   ),
-  /** `host` rows: the current choice, as an `options[].id`. Absent when the list is `remembered` — a thread with no live session has no current value to show. */
+  /** `host` rows: the current choice, as an `options[].id`. Absent when the list is the `catalogue` — a thread with no session has no current value to show. */
   value: Type.Optional(Type.String()),
   /** `host` rows with `kind: 'select' | 'level'`: what may be chosen. */
   options: Type.Optional(Type.Array(HostCommandOption)),
@@ -299,14 +299,14 @@ export function isRuntimeCommand(value: unknown): value is RuntimeCommand {
  * What `GET /api/threads/:id/commands` answers (#338): the slash commands a thread can run,
  * for the palette that lists them.
  *
- * ⚠ `source` is HONEST ABOUT WHERE THE LIST CAME FROM, because looking must not build (#86).
- * A thread has no session until its first prompt, and a session is the only thing that can be
- * asked what it registers. So a live thread answers `live`; a thread without a live session
- * (never built, or idled out — the server cannot tell) answers `remembered` — the list the most
- * recently built session in this process registered, which every session builds from the same
- * sources under the same configuration (the harness package's extensions; the prompt templates
- * and skills under the agent directory as they stood at that build) — or `none` before any
- * session has been built. The palette shows the list either way and says which it is.
+ * ⚠ `source` is HONEST ABOUT WHERE THE LIST CAME FROM, because looking must not build (#86,
+ * #484). A thread has no session until its first prompt, and a session is the only thing that
+ * can be asked what it registers. So a live thread answers `live`, its own session's list; a
+ * thread without a live session (never built, or idled out — the server cannot tell) answers
+ * `catalogue` — the host's own rows over pi's models and credentials, read without building:
+ * `/model` with no current value, `/login`, `/logout` — and nothing a session alone has. The
+ * palette shows a `catalogue` list as none: the slash commands belong to a running session, and
+ * the Start dialog is what a thread without one offers.
  *
  * @group Thread runtime
  */
@@ -314,7 +314,7 @@ export const EnsoThreadCommands = Type.Object(
   {
     threadId: Type.String(),
     commands: Type.Array(RuntimeCommand),
-    source: Type.Union([Type.Literal('live'), Type.Literal('remembered'), Type.Literal('none')]),
+    source: Type.Union([Type.Literal('live'), Type.Literal('catalogue')]),
   },
   { additionalProperties: false },
 )

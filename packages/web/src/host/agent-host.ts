@@ -8,6 +8,7 @@ import {
   type ExtensionError,
   type InlineExtension,
   initTheme,
+  ModelRuntime,
   VERSION as PI_VERSION,
   type PromptOptions,
   ProjectTrustStore,
@@ -72,7 +73,13 @@ import { type ContinuationLead, continuationLead, NO_RUN_LIFECYCLE, NOTHING_TO_C
 import { createEventTail, describeObservation } from './event-tail.ts'
 import { createEnsoExtensionUiContext } from './extension-ui-context.ts'
 import { forkPointOf } from './fork-point.ts'
-import { decideHostCommand, HOST_VIEW_ROWS, HostCommandRefused, hostCommandRows } from './host-commands.ts'
+import {
+  catalogueRows,
+  decideHostCommand,
+  HOST_VIEW_ROWS,
+  HostCommandRefused,
+  hostCommandRows,
+} from './host-commands.ts'
 import {
   authEventText,
   compactDoneText,
@@ -439,6 +446,23 @@ export interface HostedThread {
   checkPermission(request: EnsoPermissionCheckRequest): EnsoPermissionVerdict | undefined
 }
 
+/**
+ * The `/login` facts pi's model runtime knows about each provider — a session's, or the
+ * catalogue's over the agent dir alone (#484); one reading, so the two lists cannot drift.
+ */
+function loginFactsOf(modelRuntime: ModelRuntime): LoginProviderFacts[] {
+  return modelRuntime.getProviders().map((provider) => {
+    const status = modelRuntime.getProviderAuthStatus(provider.id)
+    return {
+      id: provider.id,
+      name: provider.name,
+      offersOAuth: provider.auth.oauth !== undefined,
+      offersApiKeyLogin: provider.auth.apiKey?.login !== undefined,
+      configuredVia: status.configured ? (status.label ?? status.source) : undefined,
+    }
+  })
+}
+
 /** A refusal from the `tool_call` hook, as the runtime's runner returns it — nothing when every handler passed. */
 export interface ToolCallVerdict {
   readonly block: boolean
@@ -580,6 +604,15 @@ export interface AgentHost {
   freshPermissionMode(): EnsoPermissionModeState
   /** A stored thread's state from its transcript alone: nothing is built to answer (#86, #95). */
   storedPermissionMode(transcript: readonly EnsoTranscriptEntry[]): EnsoPermissionModeState
+  /**
+   * The host rows a thread with no session can be offered (#484): `/model` with every model pi
+   * could run right now, `/login`, and `/logout` when something is stored — read from pi's own
+   * auth and models files in the agent dir, NOTHING BUILT (#86). No `value` (a thread with no
+   * session has no current model), no `/thinking` (its levels are the chosen model's, carried on
+   * each `/model` option), and none of a session's rows: `/compact`, the views, pi's extension
+   * commands. Read afresh per call, so a login through one thread shows at once.
+   */
+  catalogue(): Promise<RuntimeCommand[]>
 }
 
 /** One stored session as `readStoredThread` reads it — both halves from one open of the file. */
@@ -1243,17 +1276,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     void refreshStoredCredentials()
 
     function currentLoginOptions(): ReturnType<typeof loginOptions> {
-      const facts: LoginProviderFacts[] = session.modelRuntime.getProviders().map((provider) => {
-        const status = session.modelRuntime.getProviderAuthStatus(provider.id)
-        return {
-          id: provider.id,
-          name: provider.name,
-          offersOAuth: provider.auth.oauth !== undefined,
-          offersApiKeyLogin: provider.auth.apiKey?.login !== undefined,
-          configuredVia: status.configured ? (status.label ?? status.source) : undefined,
-        }
-      })
-      return loginOptions(facts)
+      return loginOptions(loginFactsOf(session.modelRuntime))
     }
 
     /**
@@ -1855,6 +1878,28 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     }
   }
 
+  /**
+   * pi's model runtime over the agent dir alone — what `createAgentSessionServices` builds for
+   * a session, minus the session (`sdk.js`: `ModelRuntime.create({ authPath, modelsPath })`).
+   */
+  async function catalogue(): Promise<RuntimeCommand[]> {
+    const modelRuntime = await ModelRuntime.create({
+      authPath: join(agentDir, 'auth.json'),
+      modelsPath: join(agentDir, 'models.json'),
+    })
+    const providerNameOf = (providerId: string): string => modelRuntime.getProvider(providerId)?.name ?? providerId
+    const credentials = await modelRuntime.listCredentials({ signal: AbortSignal.timeout(15_000) })
+    const login = loginOptions(loginFactsOf(modelRuntime))
+    const logout = logoutOptions(
+      credentials.map((credential) => ({
+        providerId: credential.providerId,
+        providerName: providerNameOf(credential.providerId),
+        type: credential.type,
+      })),
+    )
+    return catalogueRows(modelRuntime.getAvailableSnapshot(), getSupportedThinkingLevels, hostFlowRows(login, logout))
+  }
+
   return {
     createSession,
     listSessions,
@@ -1870,5 +1915,6 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     forkThread,
     freshPermissionMode: freshPermissionModeState,
     storedPermissionMode: storedPermissionModeState,
+    catalogue,
   }
 }

@@ -76,7 +76,18 @@ function hostRow(commands: readonly RuntimeCommand[], name: string): RuntimeComm
   return commands.find((command) => command.source === 'host' && command.name === name)
 }
 
-/** The session's models and current choices, from the thread's own command list (built on ask, #390). */
+/**
+ * Why a prompt beginning with `/` cannot start a session (#484): the slash commands belong to a
+ * running session — pi registers them when one is built — so there is nothing for it to name yet.
+ */
+export const SLASH_PROMPT_REFUSAL = 'a / command needs a running session — start one with a prompt first'
+
+/** A prompt that would be read as a slash command: the first non-blank character is `/`. */
+export function isSlashPrompt(text: string): boolean {
+  return text.trimStart().startsWith('/')
+}
+
+/** The session's models and current choices, from the host's catalogue — nothing built (#484). */
 async function loadCatalogue(threadId: string, fetchImpl: FetchLike | undefined): Promise<Catalogue> {
   try {
     const listed = await fetchThreadCommands(threadId, fetchImpl)
@@ -322,7 +333,8 @@ export function StartSessionDialog(props: StartSessionDialogProps): React.ReactN
     setModel(option.id)
     setThinking((wanted) => effortFor(option.thinkingLevels ?? levels, wanted))
   }
-  const ready = !applying && catalogue.kind === 'loaded' && text.trim().length > 0
+  const slash = isSlashPrompt(text)
+  const ready = !applying && catalogue.kind === 'loaded' && text.trim().length > 0 && !slash
   const start = async (): Promise<void> => {
     if (!ready) return
     setApplying(true)
@@ -361,6 +373,7 @@ export function StartSessionDialog(props: StartSessionDialogProps): React.ReactN
                 onKeyDown={(event: React.KeyboardEvent<HTMLTextAreaElement>): void => startOnEnter(event, start)}
               />
             </Field>
+            {slash ? <FieldError>{SLASH_PROMPT_REFUSAL}</FieldError> : null}
             {refusal === undefined ? null : <FieldError>{refusal}</FieldError>}
           </FieldGroup>
         ) : null}
