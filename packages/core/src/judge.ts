@@ -192,13 +192,16 @@ function nameUnder(cwd: string, absolutePath: string): string {
 
 /**
  * A secret-shaped name assigned a value (`FOO_TOKEN=…`, `export API_KEY="…"`), a secret-shaped
- * flag given one (`--token …`, `--password=…`), an `Authorization` header or a bearer value, a
+ * flag given one (`--token …`, `--password=…`, `--with-token …` — the flag may carry a prefix, but
+ * ⚠ must start at a word boundary: `spb-local-auth git` and `my-token abc` are a directory and a
+ * file, not a flag and its secret, #534), an `Authorization` header or a bearer value, a
  * password inside a URL (`postgres://user:secret@host`, whatever the variable holding it is
  * called — found in a real transcript, #469), and the token shapes vendors print: OpenAI/Anthropic
  * `sk-`, GitHub, Slack, AWS access keys, private keys.
  */
 const ASSIGNMENT = /\b([A-Za-z_][A-Za-z0-9_]*)=("[^"]*"|'[^']*'|[^\s;&|]+)/g
-const SECRET_FLAG = /(--?(?:api[-_]?key|token|secret|password|passwd|auth)(?:[=\s]+))("[^"]*"|'[^']*'|[^\s;&|]+)/gi
+const SECRET_FLAG =
+  /(?<![\w./-])(--?(?:[a-z]+-)*(?:api[-_]?key|token|secret|password|passwd|auth)(?:[=\s]+))("[^"]*"|'[^']*'|[^\s;&|]+)/gi
 const AUTHORIZATION = /(authorization:\s*)[^\n'"]+/gi
 const BEARER = /(\bbearer\s+)[A-Za-z0-9._~+/=-]+/gi
 const URL_PASSWORD = /(\b[a-z][a-z0-9+.-]*:\/\/[^\s:@/'"]+:)[^\s@/'"]+(?=@)/gi

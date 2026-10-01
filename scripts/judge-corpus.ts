@@ -163,23 +163,27 @@ function cwdOf(entries: readonly unknown[]): string | undefined {
   return undefined
 }
 
-/** What reading a corpus found: its cases by transcript, and the transcripts it skipped. */
-export interface CorpusRead {
-  readonly threads: EnsoThreadJudgeCases[]
+/** One transcript as the pi-shaped branch the guard's own readers take, and where it ran. */
+export interface CorpusBranch {
+  readonly threadId: string
+  readonly cwd: string
+  readonly branch: readonly unknown[]
+}
+
+/** What reading a corpus found: its transcripts as branches, and the transcripts it skipped. */
+export interface CorpusBranches {
+  readonly branches: CorpusBranch[]
   readonly skippedAcme: number
   readonly skippedNoCwd: number
 }
 
 /**
- * A corpus's judge cases, one thread per transcript that has any — the redacted state of each,
- * built by `judgeStateOf` exactly as the live guard builds it.
+ * A corpus's transcripts as pi-shaped branches, in path order — what `judgeContextsOfEntries`,
+ * `riskEventsOfEntries` and the rest of core's branch readers take. ⚠ The ACME skip and the
+ * no-`cwd` skip happen here, before a file is opened or resolved.
  */
-export function corpusThreads(
-  corpus: JudgeCorpus,
-  inputs: Omit<JudgeStateInputs, 'cwd'> & { readonly thresholds: EnsoRiskThresholds; readonly root?: string },
-): CorpusRead {
-  const root = inputs.root ?? CORPUS_ROOTS[corpus]
-  const threads: EnsoThreadJudgeCases[] = []
+export function corpusBranches(corpus: JudgeCorpus, root: string = CORPUS_ROOTS[corpus]): CorpusBranches {
+  const branches: CorpusBranch[] = []
   let skippedAcme = 0
   let skippedNoCwd = 0
   for (const relativePath of readdirSync(root, { recursive: true }).map(String).toSorted()) {
@@ -196,13 +200,35 @@ export function corpusThreads(
       continue
     }
     const branch = corpus === 'claude' ? claudeEntriesAsPi(raw) : ompEntriesWithDenials(raw)
+    branches.push({ threadId: `${corpus}:${relativePath.replace(/\.jsonl$/, '')}`, cwd, branch })
+  }
+  return { branches, skippedAcme, skippedNoCwd }
+}
+
+/** What reading a corpus found: its cases by transcript, and the transcripts it skipped. */
+export interface CorpusRead {
+  readonly threads: EnsoThreadJudgeCases[]
+  readonly skippedAcme: number
+  readonly skippedNoCwd: number
+}
+
+/**
+ * A corpus's judge cases, one thread per transcript that has any — the redacted state of each,
+ * built by `judgeStateOf` exactly as the live guard builds it.
+ */
+export function corpusThreads(
+  corpus: JudgeCorpus,
+  inputs: Omit<JudgeStateInputs, 'cwd'> & { readonly thresholds: EnsoRiskThresholds; readonly root?: string },
+): CorpusRead {
+  const read = corpusBranches(corpus, inputs.root)
+  const threads: EnsoThreadJudgeCases[] = []
+  for (const { threadId, cwd, branch } of read.branches) {
     const cases = judgeContextsOfEntries(branch, inputs.thresholds).map((context) => ({
       toolCallId: context.toolCallId,
       scope: context.reason,
       state: judgeStateOf(context, { ...inputs, cwd }),
     }))
-    if (cases.length > 0)
-      threads.push({ threadId: `${corpus}:${relativePath.replace(/\.jsonl$/, '')}`, live: false, cases })
+    if (cases.length > 0) threads.push({ threadId, live: false, cases })
   }
-  return { threads, skippedAcme, skippedNoCwd }
+  return { threads, skippedAcme: read.skippedAcme, skippedNoCwd: read.skippedNoCwd }
 }

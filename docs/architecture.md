@@ -142,8 +142,9 @@ type-only crossing is still a dependency.
 | `server` | `packages/web/src/server/` | `core`, `host` |
 | `browser` | `packages/web/src/` (all else) | `core` |
 | `site-base` | `scripts/docs/site-base.ts` | nothing |
-| `scripts` | `scripts/` | `core`, `site-base`, `judge-backends` |
-| `test` | `test/`, `packages/web/e2e/` | `core`, `harness-core`, `harness-extensions`, `judge-backends`, `host`, `server`, `browser`, `scripts` |
+| `corpus-shapes` | `scripts/corpus-shapes.ts` | `core`, `harness-core` |
+| `scripts` | `scripts/` | `core`, `site-base`, `judge-backends`, `corpus-shapes` |
+| `test` | `test/`, `packages/web/e2e/` | `core`, `harness-core`, `harness-extensions`, `judge-backends`, `host`, `server`, `browser`, `scripts`, `corpus-shapes` |
 | `site` | `site/` | `site-base` |
 
 Every owned source file must fall in a zone (`coverage.requireAllFiles`; `index.html` is the one
