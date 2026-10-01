@@ -570,6 +570,104 @@ export function foldSessionRisk(
   return events.reduce((state, event) => sessionRiskStep(state, event, thresholds).state, INITIAL_SESSION_RISK)
 }
 
+/**
+ * Why a call is in the command judge's first scope (#469): it follows a refusal in the risk
+ * window, or the guards cannot read it — built at run time, decoded, or handed to another
+ * interpreter, where a spelling check has nothing to read.
+ *
+ * @group Session risk
+ */
+export const ENSO_JUDGE_SCOPE_REASONS = ['after-refusal', 'unreadable'] as const
+
+/** @group Session risk */
+export type EnsoJudgeScopeReason = (typeof ENSO_JUDGE_SCOPE_REASONS)[number]
+
+/** A command the guards' spelling checks cannot read; `ONE_LINER` covers an interpreter handed code. */
+const UNREADABLE =
+  /\$\(|`|(?:^|[\s;&|(])eval\s|\|\s*(?:ba|z|da|k)?sh\b|\|\s*(?:python3?|node|perl|ruby|bun|deno)\b|base64\s+(?:-d|--decode)\b|\\x[0-9a-f]{2}/i
+
+/**
+ * A call in the judge's scope, with what it is judged against: the refusal before it in the window
+ * (`denied`, the most recent), and the calls before it there.
+ *
+ * @group Session risk
+ */
+export interface EnsoJudgeContext {
+  readonly toolCallId: string
+  readonly reason: EnsoJudgeScopeReason
+  readonly command: string
+  readonly denied?: { readonly command: string; readonly reason: string }
+  readonly recentCalls: readonly {
+    readonly tool: string
+    readonly command?: string
+    readonly path?: string
+    readonly refused: boolean
+  }[]
+}
+
+function refusalText(denial: DenialFact): string {
+  if (denial.source === 'engine') return `the permission engine denied ${denial.surface} ${denial.value}`
+  return `the guard refused it under ${denial.rule}${denial.via === undefined ? '' : ` (${denial.via})`}`
+}
+
+/**
+ * The judge's context for a `bash` call the fold has just met, or undefined when it is out of
+ * scope (#469 scope 1). Read off the fold's own state, so the live guard and every replay choose
+ * the same calls and judge them against the same refusal.
+ *
+ * @group Session risk
+ */
+export function judgeContextOf(state: EnsoRiskState, toolCallId: string): EnsoJudgeContext | undefined {
+  const position = state.recent.findLastIndex((recent) => recent.toolCallId === toolCallId)
+  const call = state.recent[position]
+  if (call?.tool !== 'bash' || call.command === undefined) return undefined
+  const earlier = state.recent.slice(0, position)
+  const refused = earlier.findLast((recent) => recent.denial !== undefined)
+  const unreadable = ONE_LINER.test(call.command) || UNREADABLE.test(call.command)
+  if (refused?.denial === undefined && !unreadable) return undefined
+  const denied =
+    refused?.denial === undefined
+      ? undefined
+      : { command: refused.command ?? refused.path ?? refused.tool, reason: refusalText(refused.denial) }
+  return {
+    toolCallId,
+    reason: denied === undefined ? 'unreadable' : 'after-refusal',
+    command: call.command,
+    ...(denied === undefined ? {} : { denied }),
+    recentCalls: earlier.map((recent) => ({
+      tool: recent.tool,
+      ...(recent.command === undefined ? {} : { command: recent.command }),
+      ...(recent.path === undefined ? {} : { path: recent.path }),
+      refused: recent.denial !== undefined,
+    })),
+  }
+}
+
+/**
+ * Every call a stored branch's live guard would have judged (#469 scope 1), with its context, in
+ * order — the replay's cases. The guard judges a `bash` call it let through, right after the fold
+ * meets the call and before any refusal of it; so does this, over the events the guard met
+ * (`riskEventsOfEntries`), dropping a call the guard itself refused.
+ *
+ * @group Session risk
+ */
+export function judgeContextsOfEntries(
+  entries: readonly unknown[],
+  thresholds: EnsoRiskThresholds = DEFAULT_RISK_THRESHOLDS,
+): EnsoJudgeContext[] {
+  const events = riskEventsOfEntries(entries)
+  const refusedByGuard = new Set(events.flatMap((event) => (event.kind === 'guard-denial' ? [event.toolCallId] : [])))
+  const contexts: EnsoJudgeContext[] = []
+  let state = INITIAL_SESSION_RISK
+  for (const event of events) {
+    state = sessionRiskStep(state, event, thresholds).state
+    if (event.kind !== 'call' || refusedByGuard.has(event.toolCallId)) continue
+    const context = judgeContextOf(state, event.toolCallId)
+    if (context !== undefined) contexts.push(context)
+  }
+  return contexts
+}
+
 function recordOf(value: unknown): Record<string, unknown> | undefined {
   return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : undefined
 }

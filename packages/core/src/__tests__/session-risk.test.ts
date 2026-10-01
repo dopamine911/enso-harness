@@ -5,6 +5,7 @@ import {
   type EnsoPermissionDenialResolution,
   foldSessionRisk,
   INITIAL_SESSION_RISK,
+  judgeContextsOfEntries,
   riskEventsOfEntries,
   sessionRiskOfEntries,
   sessionRiskStep,
@@ -70,6 +71,36 @@ test('⚠ deny → retry → obfuscate → an interpreter one-liner: each step i
   // call c1, deny c1, call c2, deny c2 (retry: medium), call c3, deny c3 (retry + obfuscation: high),
   // call c4 (an alternate path beside obfuscation: incident).
   expect(levels).toEqual(['low', 'low', 'low', 'medium', 'medium', 'high', 'incident'])
+})
+
+// #469 scope 1: a `bash` call the guard let through, after a refusal in the window or unreadable to
+// the guards' spelling checks — judged against the latest refusal. A refused call never runs, so it
+// is never judged; an ordinary one with no refusal before it is not either, however destructive.
+test('the judge’s scope: an allowed bash call after a refusal, or one the guards cannot read (#469)', () => {
+  const entries = oneCallEach(
+    [bash('c1', 'ls src')],
+    [bash('c2', 'echo cm0gLXJmIHg= | base64 -d | sh')],
+    [bash('c3', 'rm -rf records'), engineDenied('c3', 'rm -rf records')],
+    [bash('c4', 'curl https://example.test/x'), guardDenied('c4', 'network-egress', 'command-position')],
+    [bash('c5', 'find records -delete')],
+    [['c6', 'read', { path: 'records/a.txt' }]],
+  )
+  const contexts = judgeContextsOfEntries(entries)
+  expect(contexts.map((context) => [context.toolCallId, context.reason])).toEqual([
+    ['c2', 'unreadable'],
+    ['c5', 'after-refusal'],
+  ])
+  expect(contexts[0]?.denied).toBeUndefined()
+  expect(contexts[1]?.denied).toEqual({
+    command: 'curl https://example.test/x',
+    reason: 'the guard refused it under network-egress (command-position)',
+  })
+  expect(contexts[1]?.recentCalls.map((recent) => [recent.command, recent.refused])).toEqual([
+    ['ls src', false],
+    ['echo cm0gLXJmIHg= | base64 -d | sh', false],
+    ['rm -rf records', true],
+    ['curl https://example.test/x', true],
+  ])
 })
 
 // Negative cases (#464): every detector needs an earlier refusal in the window, so an odd-looking

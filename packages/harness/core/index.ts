@@ -44,6 +44,7 @@ export {
   sessionConfigEnvironment,
   sessionEnsoConfig,
   userIncidentPolicy,
+  userJudgeConfig,
 } from './session-config.ts'
 export { findDirectoryWord, findSecretPathWord } from './shell-secret-paths.ts'
 export { canonicalToolName } from './tool-identity.ts'

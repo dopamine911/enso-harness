@@ -128,12 +128,14 @@ What the extension takes, and what it is:
 <!-- source: packages/harness/extensions/guards/index.ts#GuardDependencies -->
 ```ts
 /**
- * The guard's seams: the bash analyzer (#9), the harness root (#160 §4), and the incident policy
- * and log directory (#466).
+ * The guard's seams: the bash analyzer (#9), the harness root (#160 §4), the incident policy
+ * and log directory (#466), and the command judge with the secret values its state is redacted
+ * of (#469).
  *
  * Production wires cc-safety-net's `checkCommand`, this checkout's root, the user's `config.json`
- * and `ENSO_HOME`'s log directory; tests inject known verdicts, a root they built, a policy and a
- * directory. `checkCommand` reads LOCAL policy per call, so a guard test that touched the real
+ * and `ENSO_HOME`'s log directory and secrets; tests inject known verdicts, a root they built, a
+ * policy, a directory and a fake judge — a guard test must never reach the network.
+ * `checkCommand` reads LOCAL policy per call, so a guard test that touched the real
  * library would vary with the machine's cc-safety-net config (the contract test alone exercises
  * the real one, and pins defaults explicitly) — and the same holds for the machine's config file.
  */
@@ -150,6 +152,13 @@ export interface GuardDependencies {
   incidentPolicy: () => EnsoIncidentPolicy
   /** The log directory `protected-records` refuses a shell command naming (#466). */
   logsDirectory: string
+  /**
+   * The command judge, or undefined when `security.judge.backend` is `off` (the default) — read at
+   * every `session_start`, as the incident policy is (#469).
+   */
+  commandJudge: () => CommandJudge | undefined
+  /** The known secret values a judge state is redacted of before it leaves (#469), read per judged call. */
+  judgeSecretValues: () => readonly string[]
 }
 ```
 
@@ -320,6 +329,19 @@ inherited opening holding the incident open, and says of each opening `same`, `w
 `would-miss`. Under the thresholds a branch ran with, every row is `same` — `guards.test.ts` pins it
 over the guard's own branch, halting or not. ⚠ The branch is replayed as it happened: a replay that
 opens earlier still reads the calls a halt would have stopped.
+
+**The command judge, recorded only** (#469 PR1; `@enso/core` `command-judge.ts`, `config.json` `security.judge.backend`).
+Off by default, and user-only as the rest of `security` is: an unreadable `config.json` leaves it off.
+Switched on (`jev`), the guard asks it about a `bash` call it let through when the call follows a
+refusal in the risk window or is one the guards cannot read — built at run time, decoded, handed to an
+interpreter — the selection `judgeContextOf` makes off the risk fold's own state, so
+`judgeContextsOfEntries` replays exactly the calls the guard judged (`guards.test.ts` pins it). The
+answer is recorded as `enso-command-judgement` and one `commandJudged` log line, and that is all:
+⚠ it feeds no risk signal and asks nothing, and the call is never kept waiting on it — the judge is
+not awaited, and a failure is recorded `unjudged`, never clean. The state is redacted before it
+leaves (`@enso/core/judge`): known secret values, secret-shaped assignments, flags, headers and
+token shapes become markers; paths stay, because a path is what the judge has to read, and a file
+whose path looks like a secret is never read for its contents.
 
 **Consumed by the runtime.** Handlers stack; the first `block` returns and cannot be un-blocked by a
 later extension, whatever the load order (the header of `guards/index.ts`). The participants and their load order are

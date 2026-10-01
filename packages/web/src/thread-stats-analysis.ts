@@ -1,4 +1,4 @@
-import type { EnsoThreadStats, EnsoToolCallStats } from '@enso/core'
+import { type EnsoThreadStats, type EnsoToolCallStats, median } from '@enso/core'
 
 /**
  * What the stats drawer derives from `EnsoThreadStats` before it draws (#45 phase 2): the
@@ -58,13 +58,6 @@ export interface StatsHeadline {
   readonly failureRate: number
   /** pi's session total beyond what the branch's messages account for; 0 when within noise. */
   readonly offBranchCost: number
-}
-
-function median(values: readonly number[]): number {
-  const sorted = [...values].sort((first, second) => first - second)
-  const middle = Math.floor(sorted.length / 2)
-  if (sorted.length % 2 === 1) return sorted[middle] ?? 0
-  return ((sorted[middle - 1] ?? 0) + (sorted[middle] ?? 0)) / 2
 }
 
 export function headlineOf(stats: EnsoThreadStats, refused: RefusedCalls): StatsHeadline {

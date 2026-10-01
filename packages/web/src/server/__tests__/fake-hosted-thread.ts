@@ -403,6 +403,8 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
     }),
     // A fake thread opens no incident: the history's readings are core's, tested over real guard branches (#468).
     branchIncidentHistory: () => ({ incidents: [], replay: [] }),
+    // Nor any judge case: the selection and redaction are core's and the host's, tested there (#469).
+    branchJudgeCases: () => ({ cases: [] }),
     branchContext: () => options.context ?? FAKE_EMPTY_CONTEXT,
     previewSystemPrompt: (candidate: EnsoSystemPromptChoice | null) =>
       (options.previewSystemPrompt ?? fakeSystemPromptPreview)(candidate),
@@ -576,6 +578,8 @@ export function createFakeAgentHost(
     },
     readStoredIncidentHistory: (threadId: string) =>
       Promise.resolve(served(threadId) === undefined ? undefined : { incidents: [], replay: [] }),
+    readStoredJudgeCases: (threadId: string) =>
+      Promise.resolve(served(threadId) === undefined ? undefined : { cases: [] }),
     // The branch's fork point (#435): the one the thread declares, else its facts with no run context.
     readStoredForkPoint: (threadId: string) => {
       const storedThread = served(threadId)

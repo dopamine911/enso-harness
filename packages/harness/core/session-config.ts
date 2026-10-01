@@ -2,6 +2,7 @@ import {
   ENSO_PROJECT_TRUST_BY_HOST,
   type EnsoConfigParseResult,
   type EnsoIncidentPolicy,
+  type EnsoJudgeBackend,
   incidentPolicyOf,
   mergeEnsoConfig,
   parseEnsoConfig,
@@ -170,6 +171,20 @@ export function userIncidentPolicy(home: string): { readonly policy: EnsoInciden
     return { policy: { ...incidentPolicyOf(undefined), halt: true }, problem: result.reason }
   }
   return { policy: incidentPolicyOf(result.config.security) }
+}
+
+/**
+ * The command judge's backend (#469) from the USER's `config.json` alone, as the incident policy
+ * is: `security` is user-only, so a project cannot switch a judge on, or off, for the user. Absent
+ * is `off`. ⚠ Unreadable fails CLOSED, which for the judge means OFF — nothing is sent anywhere —
+ * and `problem` says why.
+ *
+ * @group Command judge
+ */
+export function userJudgeConfig(home: string): { readonly backend: EnsoJudgeBackend; readonly problem?: string } {
+  const { result } = readConfig(ensoConfigPath(home))
+  if (result.kind === 'unreadable') return { backend: 'off', problem: result.reason }
+  return { backend: result.config.security?.judge?.backend ?? 'off' }
 }
 
 async function projectTrusted(context: SessionConfigContext, projectPath: string): Promise<boolean> {

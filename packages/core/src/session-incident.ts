@@ -1,5 +1,6 @@
 import { type Static, Type } from 'typebox'
 import { Compile } from 'typebox/compile'
+import { EnsoJudgeConfig } from './command-judge.ts'
 import { ENSO_GUARD_DENIAL_ENTRY } from './guard.ts'
 import {
   EnsoIncidentReport,
@@ -220,7 +221,8 @@ export type EnsoIncidentRecord = Static<typeof EnsoIncidentRecord>
  * - `incidents.halt` — whether an incident suspends tools (default `false`: it only alerts, until
  *   the thresholds are tuned on real sessions, #468);
  * - `incidents.windowCalls`, `highAtSignals`, `highAtKinds`, `incidentAtSignals` — the risk fold's
- *   thresholds (`DEFAULT_RISK_THRESHOLDS` when absent).
+ *   thresholds (`DEFAULT_RISK_THRESHOLDS` when absent);
+ * - `judge.backend` — the command judge (#469): `off` (the default) or `jev`.
  *
  * @group Session incident
  */
@@ -238,6 +240,7 @@ export const EnsoSecurityConfig = Type.Object(
         { additionalProperties: false },
       ),
     ),
+    judge: Type.Optional(EnsoJudgeConfig),
   },
   { additionalProperties: false },
 )

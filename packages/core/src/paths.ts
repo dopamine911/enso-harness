@@ -37,9 +37,10 @@ import {
   unlinkSync,
 } from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { basename, dirname, join, sep as pathSeparator, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { ENSO_CONFIG_FILENAME } from './config.ts'
+import { SECRET_BASENAME_PATTERNS } from './guard.ts'
 
 /**
  * Thrown when no ancestor of the start path is a workspace root.
@@ -444,4 +445,39 @@ export function readTextIfPresent(path: string): string | undefined {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
     throw error
   }
+}
+
+/**
+ * True when the path contains any of the fragments, case-insensitively.
+ *
+ * ⚠ The path is compared WITH a trailing separator appended (#53 S1.2). Directory-shaped
+ * fragments carry a trailing `/` (`/.aws/`, `/.ssh/`, `/.git/`) so that they match as a
+ * segment and not as a name prefix — but `resolve()` strips the trailing slash a model
+ * supplies, so the directory ITSELF (`/home/u/.aws`) never contained `/.aws/` and passed.
+ * `grep pattern=aws_secret_access_key path=~/.aws` went through the reader gate that way.
+ * Appending the separator makes the directory match its own fragment; file-shaped fragments
+ * (`/.npmrc`, `/.kube/config`) are unaffected because they still occur as a substring.
+ *
+ * @group Guard predicates
+ */
+export function containsPathFragment(absolutePath: string, fragments: readonly string[]): boolean {
+  const loweredWithTrailingSeparator = absolutePath.toLowerCase() + pathSeparator
+  return fragments.some((fragment) => loweredWithTrailingSeparator.includes(fragment.toLowerCase()))
+}
+
+/**
+ * True when the TEXT of a path-shaped string carries credential material, by directory
+ * fragment or by basename.
+ *
+ * No filesystem access and no resolution: this is the question to ask about a shell word whose
+ * value is not knowable from the text (`"$HOME/.enso/auth.json"` — the harness's
+ * `shell-secret-paths.ts`), where the harness's `looksLikeSecret` realpath leg has nothing to
+ * resolve. Here, not in the harness, so the command judge's script resolution (#469) asks the
+ * same question the guards do.
+ *
+ * @group Guard predicates
+ */
+export function textLooksLikeSecretPath(text: string, fragments: readonly string[]): boolean {
+  if (containsPathFragment(text, fragments)) return true
+  return SECRET_BASENAME_PATTERNS.some((pattern) => pattern.test(basename(text)))
 }

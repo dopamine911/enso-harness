@@ -73,7 +73,7 @@ import { SSE_KEEPALIVE_MS } from './sse.ts'
 import { createContextRequestRoute, createThreadContextRoute } from './thread-context-route.ts'
 import { createThreadEvalRoute } from './thread-eval-route.ts'
 import { createThreadChangesRoute, createThreadGitRoute } from './thread-git-route.ts'
-import { createThreadIncidentsRoute, replayThresholdsOf } from './thread-incidents-route.ts'
+import { createThreadSecurityReads, replayThresholdsOf } from './thread-incidents-route.ts'
 import { createThreadManifestRoute } from './thread-manifest-route.ts'
 import { readThreadMount, type ThreadReadDeps } from './thread-read.ts'
 import { createThreadRegistry, inspectThread, type ThreadView } from './thread-registry.ts'
@@ -109,6 +109,8 @@ const THREAD_EVAL_ROUTE = threadRoute('eval')
 const THREAD_GIT_ROUTE = threadRoute('git')
 /** `GET /api/threads/<threadId>/changes` — every file that differs from the last-push baseline, with its patch (#452). */
 const THREAD_CHANGES_ROUTE = threadRoute('changes')
+/** `GET /api/threads/<threadId>/judge-cases` — the calls the command judge would be asked about, redacted (#469). */
+const THREAD_JUDGE_CASES_ROUTE = threadRoute('judge-cases')
 /** The wire (#112): `POST …/prompt`, `GET …/follow`, `POST …/dialog`, `POST …/abort` (#116). See `follow.ts`. */
 const THREAD_FOLLOW_ROUTE = threadRoute('follow')
 const THREAD_PROMPT_ROUTE = threadRoute('prompt')
@@ -872,8 +874,9 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   const threadManifest = createThreadManifestRoute({ threads, host })
   // One thread's session eval (#441): the branch's events and the log's, scored mechanically.
   const threadEval = createThreadEvalRoute({ threads, host, logsDir: options.logsDir })
-  // One thread's incident history (#468): the records as stored, and the branch replayed.
-  const threadIncidents = createThreadIncidentsRoute({ threads, host, riskThresholds: threadRead.riskThresholds })
+  // One thread's security reads (#468, #469): the incident history and replay, and the judge's cases
+  // — what `bun run judge` shows before it sends anything.
+  const securityReads = createThreadSecurityReads({ threads, host, riskThresholds: threadRead.riskThresholds })
   // One thread's git state (#453): read in its cwd when asked, only in a directory this server serves.
   const gitDeps = { threads, host, servesDirectory, readGit: (cwd: string) => readGitState(runGit, cwd) }
   const threadGit = createThreadGitRoute(gitDeps)
@@ -911,6 +914,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   const respondWithThreadEval = analysisResponder(threadEval)
   const respondWithThreadGit = analysisResponder(threadGit)
   const respondWithThreadChanges = analysisResponder(threadChanges)
+  const respondWithThreadJudgeCases = analysisResponder((threadId: string) => securityReads.judgeCases(threadId))
   /** The incident history under the query's thresholds; a query that names no threshold well is the 400 that says why. */
   function respondWithThreadIncidents(
     threadId: string,
@@ -924,7 +928,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
       response.end(thresholds)
       return Promise.resolve()
     }
-    return analysisResponder((id: string) => threadIncidents(id, thresholds))(threadId, response)
+    return analysisResponder((id: string) => securityReads.incidents(id, thresholds))(threadId, response)
   }
   /**
    * One request's context; the request is the route's second capture, a turn or `next` — the
@@ -1009,6 +1013,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     [THREAD_EVAL_ROUTE, respondWithThreadEval],
     [THREAD_GIT_ROUTE, respondWithThreadGit],
     [THREAD_CHANGES_ROUTE, respondWithThreadChanges],
+    [THREAD_JUDGE_CASES_ROUTE, respondWithThreadJudgeCases],
   ]
   const THREAD_ROUTES: readonly ThreadRoute[] = [
     ...idOnlyReads.map(([route, respond]): ThreadRoute => ({ method: 'GET', route, respond: idOnly(respond) })),

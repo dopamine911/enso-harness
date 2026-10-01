@@ -1,21 +1,26 @@
-import type { EnsoRiskThresholds, EnsoThreadIncidents } from '@enso/core'
+import type { EnsoRiskThresholds, EnsoThreadIncidents, EnsoThreadJudgeCases } from '@enso/core'
 import type { AgentHost } from '../host/agent-host.ts'
 import { liveOrStored } from './live-or-stored.ts'
 import type { ThreadRegistry } from './thread-registry.ts'
 
 /**
- * `GET /api/threads/:threadId/incidents` (#468): one thread's incident history for
- * `bun run incidents` — each incident's record and the custom entries it rests on as stored, and
- * the branch replayed under the thresholds the guard runs with, or the ones the query names
- * (`?incidentAtSignals=4`): what a threshold change would have opened, and what it would have missed.
+ * The thread's security reads (#468, #469), live or cold as `live-or-stored.ts` reads; each writes
+ * no record and builds nothing (#86).
  *
- * ⚠ LIVE-OR-COLD (`live-or-stored.ts`), as the eval route reads. ⚠ WRITES NO RECORD.
+ * - `GET /api/threads/:threadId/incidents` (#468): the incident history for `bun run incidents` —
+ *   each incident's record and the custom entries it rests on as stored, and the branch replayed
+ *   under the thresholds the guard runs with, or the ones the query names (`?incidentAtSignals=4`):
+ *   what a threshold change would have opened, and what it would have missed.
+ * - `GET /api/threads/:threadId/judge-cases` (#469): the command judge's cases for `bun run judge`
+ *   — each call the live guard would have judged, selected under the same thresholds, with the
+ *   REDACTED state a backend would be sent. ⚠ Sends nothing anywhere: it is what the user reads
+ *   before anything leaves the machine.
  */
 
 export interface ThreadIncidentsRouteDeps {
   /** Only the peek: the route reads a live thread and never builds one (#86). */
   readonly threads: Pick<ThreadRegistry, 'peek'>
-  readonly host: Pick<AgentHost, 'readStoredIncidentHistory'>
+  readonly host: Pick<AgentHost, 'readStoredIncidentHistory' | 'readStoredJudgeCases'>
   /** The user's thresholds (`security.incidents`) — what the guard runs with, and the replay's default. */
   readonly riskThresholds: EnsoRiskThresholds
 }
@@ -53,17 +58,33 @@ export function replayThresholdsOf(query: string, defaults: EnsoRiskThresholds):
   return thresholds
 }
 
-export function createThreadIncidentsRoute(
-  deps: ThreadIncidentsRouteDeps,
-): (threadId: string, thresholds: EnsoRiskThresholds) => Promise<EnsoThreadIncidents | undefined> {
-  return async (threadId: string, thresholds: EnsoRiskThresholds): Promise<EnsoThreadIncidents | undefined> => {
-    const source = await liveOrStored(
-      deps.threads,
-      threadId,
-      (view) => view.hosted.branchIncidentHistory(thresholds),
-      () => deps.host.readStoredIncidentHistory(threadId, thresholds),
-    )
-    if (source === undefined) return undefined
-    return { threadId, live: source.live, thresholds, incidents: source.incidents, replay: source.replay }
+/** The thread's two security reads; undefined for a thread held neither live nor on disk (a 404). */
+export interface ThreadSecurityReads {
+  incidents(threadId: string, thresholds: EnsoRiskThresholds): Promise<EnsoThreadIncidents | undefined>
+  judgeCases(threadId: string): Promise<EnsoThreadJudgeCases | undefined>
+}
+
+export function createThreadSecurityReads(deps: ThreadIncidentsRouteDeps): ThreadSecurityReads {
+  return {
+    async incidents(threadId: string, thresholds: EnsoRiskThresholds): Promise<EnsoThreadIncidents | undefined> {
+      const source = await liveOrStored(
+        deps.threads,
+        threadId,
+        (view) => view.hosted.branchIncidentHistory(thresholds),
+        () => deps.host.readStoredIncidentHistory(threadId, thresholds),
+      )
+      if (source === undefined) return undefined
+      return { threadId, live: source.live, thresholds, incidents: source.incidents, replay: source.replay }
+    },
+    // Under the server's thresholds always: the cases are the live guard's selection, as it ran.
+    async judgeCases(threadId: string): Promise<EnsoThreadJudgeCases | undefined> {
+      const source = await liveOrStored(
+        deps.threads,
+        threadId,
+        (view) => view.hosted.branchJudgeCases(deps.riskThresholds),
+        () => deps.host.readStoredJudgeCases(threadId, deps.riskThresholds),
+      )
+      return source === undefined ? undefined : { threadId, live: source.live, cases: source.cases }
+    },
   }
 }

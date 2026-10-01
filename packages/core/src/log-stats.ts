@@ -57,6 +57,11 @@ export const ENSO_LOG_EVENTS = {
   incidentReportFiled: 'security incident {incidentId}: {settled}',
   /** `agent-host.ts#resolveIncident`: a human's resolution recorded — once, by the host (#466, #468). */
   incidentResolved: 'security incident {incidentId} resolved {classification}, {outcome}',
+  /**
+   * `guards/index.ts`: a command judgement recorded (#469 PR1, recorded only). Judged: each
+   * question's answer flattened as a number (`risk`, `obscured`, …); unjudged: `reason`.
+   */
+  commandJudged: 'command {toolCallId} ({scope}) {kind} by {backend} in {latencyMs}ms',
   /** `thread-registry.ts`: the operator's Stop reached the run — the eval's interrupt (#441). */
   runAborted: 'run {generation} told to abort; {restored} queued prompt(s) handed back',
 } as const
@@ -259,6 +264,19 @@ function numberOf(value: unknown): number | undefined {
 
 function stringOf(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined
+}
+
+/**
+ * The middle of a list of numbers — the mean of the two middle ones for an even count — or 0 for
+ * none. One copy for every surface that reports a median (the stats drawer, `bun run judge`).
+ *
+ * @group Logging
+ */
+export function median(values: readonly number[]): number {
+  const sorted = values.toSorted((first, second) => first - second)
+  const middle = Math.floor(sorted.length / 2)
+  if (sorted.length % 2 === 1) return sorted[middle] ?? 0
+  return ((sorted[middle - 1] ?? 0) + (sorted[middle] ?? 0)) / 2
 }
 
 function summarise(durations: readonly number[]): EnsoDurationSummary {

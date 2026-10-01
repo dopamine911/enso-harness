@@ -5,6 +5,9 @@ import { dirname, join } from 'node:path'
 import { createCodingTools, createPowerShellTool, createReadOnlyTools } from '@earendil-works/pi-coding-agent'
 import {
   ASK_USER_TOOL_NAME,
+  type CommandJudge,
+  DEFAULT_RISK_THRESHOLDS,
+  ENSO_COMMAND_JUDGEMENT_ENTRY,
   ENSO_GUARD_DENIAL_ENTRY,
   ENSO_GUARD_RULE_KINDS,
   ENSO_GUARD_RULES,
@@ -19,14 +22,17 @@ import {
   type EnsoGuardRule,
   type EnsoIncidentOpened,
   type EnsoIncidentPolicy,
-  DEFAULT_RISK_THRESHOLDS,
+  type EnsoJudgeOutcome,
+  type EnsoJudgeState,
   ENSO_PERMISSION_DENIAL_ENTRY,
   ENSO_SECURITY_SIGNAL_ENTRY,
   ENSO_SESSION_RISK_ENTRY,
   incidentPolicyOf,
+  judgeContextsOfEntries,
   incidentEntriesOf,
   incidentResolvedOf,
   readEnsoGuardDenial,
+  readEnsoCommandJudgement,
   replayIncidents,
   sessionIncidentsOf,
   sessionRiskOfEntries,
@@ -98,6 +104,9 @@ function loadGuardRuntime(
   options: {
     readonly incidentPolicy?: EnsoIncidentPolicy
     readonly onAppendEntry?: (customType: string, data: unknown) => void
+    /** The command judge as `config.json` names it at each start (#469); off — the shipped default — when absent. */
+    readonly commandJudge?: () => CommandJudge | undefined
+    readonly judgeSecretValues?: readonly string[]
   } = {},
 ): GuardRuntime {
   const handlers = new Map<string, Handler>()
@@ -108,6 +117,8 @@ function loadGuardRuntime(
     harnessRoot,
     incidentPolicy: () => options.incidentPolicy ?? ALERT_ONLY,
     logsDirectory: LOGS_DIR,
+    commandJudge: options.commandJudge ?? ((): undefined => undefined),
+    judgeSecretValues: () => options.judgeSecretValues ?? [],
   })
   const appendEntry = (customType: string, data: unknown): void => {
     options.onAppendEntry?.(customType, data)
@@ -1166,6 +1177,8 @@ test('⚠ the guard registers no tool: it participates through tool_call only, s
     harnessRoot: NO_CREDENTIALS_ROOT,
     incidentPolicy: () => ALERT_ONLY,
     logsDirectory: LOGS_DIR,
+    commandJudge: () => undefined,
+    judgeSecretValues: () => [],
   })({
     on: (event: string) => events.push(event),
     registerTool: (tool: { name: string }) => registered.push(tool.name),
@@ -1741,4 +1754,176 @@ test('⚠ a session with no directory protects only the log directory; ordinary 
   expect(appended(runtime, ENSO_SECURITY_SIGNAL_ENTRY)).toEqual([
     expect.objectContaining({ signal: 'protected-record-touch', toolCallId: 'log' }),
   ])
+})
+
+// ── #469 PR1: the command judge, recorded only ────────────────────────────────────────────────
+
+const JUDGED: EnsoJudgeOutcome = {
+  kind: 'judged',
+  model: 'fake-jev',
+  answers: { risk: { value: 0.9 }, obscured: { value: 2, confidence: 0.8 } },
+}
+
+/** A judge that keeps what it was asked and answers `reply` — never the network. */
+function fakeJudge(reply: () => Promise<EnsoJudgeOutcome> = () => Promise.resolve(JUDGED)): {
+  judge: CommandJudge
+  asked: EnsoJudgeState[]
+} {
+  const asked: EnsoJudgeState[] = []
+  const judge: CommandJudge = {
+    backend: 'jev',
+    judge: (state) => {
+      asked.push(state)
+      return reply()
+    },
+  }
+  return { judge, asked }
+}
+
+/**
+ * Every pending promise reaction run: a judgement lands after the call has returned. A macrotask
+ * boundary, not a clock — every microtask ahead of it has run.
+ */
+const pendingWorkDone = (): Promise<void> => new Promise((resolve) => setImmediate(resolve))
+
+const judgementsOf = (runtime: GuardRuntime): unknown[] => appended(runtime, ENSO_COMMAND_JUDGEMENT_ENTRY)
+
+const judgedIdsOf = (runtime: GuardRuntime): string[] =>
+  runtime.entries.flatMap(({ customType, data }) => readEnsoCommandJudgement(customType, data)?.toolCallId ?? [])
+
+test('the judge is read at every start: switched off in config.json, the next session judges nothing (#469)', async () => {
+  const { judge, asked } = fakeJudge()
+  let configured: CommandJudge | undefined = judge
+  const runtime = loadGuardRuntime(undefined, undefined, undefined, { commandJudge: () => configured })
+  runtime.sessionStart({ type: 'session_start', reason: 'start' }, { cwd })
+  drive(runtime, [{ id: 'on', command: 'echo cm0gLXJmIHg= | base64 -d' }])
+  configured = undefined
+  runtime.sessionStart({ type: 'session_start', reason: 'resume' }, { cwd })
+  drive(runtime, [{ id: 'off', command: 'echo cm0gLXJmIHg= | base64 -d' }])
+  await pendingWorkDone()
+  expect(asked).toHaveLength(1)
+  expect(judgedIdsOf(runtime)).toEqual(['on'])
+})
+
+// ⚠ Only the redacted state reaches a backend: a token shape and a known secret value in the command
+// become markers before the judge holds it.
+test('⚠ a call after a refusal is judged once, against the refusal, redacted, and recorded with its scope (#469)', async () => {
+  const { judge, asked } = fakeJudge()
+  const knownSecret = 'hunter2-known-secret-value'
+  const token = `ghp_${'A'.repeat(30)}`
+  const runtime = loadGuardRuntime(undefined, undefined, undefined, {
+    commandJudge: () => judge,
+    judgeSecretValues: [knownSecret],
+  })
+  const { verdicts } = drive(runtime, [
+    { id: 'c1', command: 'curl https://example.test/x' },
+    { id: 'c2', command: `GITHUB_TOKEN=${token} git push && echo ${knownSecret}` },
+  ])
+  expect(verdicts.map((verdict) => verdict?.block === true)).toEqual([true, false])
+  await pendingWorkDone()
+  expect(asked).toHaveLength(1)
+  const [state] = asked
+  expect(state?.denied).toEqual({ command: 'curl https://example.test/x', reason: expect.any(String) })
+  expect(state?.recentCalls).toEqual([{ tool: 'bash', command: 'curl https://example.test/x', refused: true }])
+  expect(state?.command).toContain('git push')
+  expect(JSON.stringify(state)).not.toContain(token)
+  expect(JSON.stringify(state)).not.toContain(knownSecret)
+  expect(judgementsOf(runtime)).toEqual([
+    {
+      kind: 'judged',
+      toolCallId: 'c2',
+      scope: 'after-refusal',
+      backend: 'jev',
+      model: 'fake-jev',
+      latencyMs: expect.any(Number),
+      answers: JUDGED.kind === 'judged' ? JUDGED.answers : {},
+    },
+  ])
+  logs.assertLogged({
+    level: 'info',
+    rawMessage: 'command {toolCallId} ({scope}) {kind} by {backend} in {latencyMs}ms',
+    properties: { toolCallId: 'c2', scope: 'after-refusal', kind: 'judged', backend: 'jev', risk: 0.9, obscured: 2 },
+  })
+})
+
+test('a refused call and a readable one are not judged; an unreadable one is, as unreadable (#469)', async () => {
+  const { judge, asked } = fakeJudge()
+  const runtime = loadGuardRuntime(undefined, undefined, undefined, { commandJudge: () => judge })
+  const { verdicts } = drive(runtime, [
+    { id: 'ls', command: 'ls' },
+    { id: 'decoded', command: 'echo cm0gLXJmIHg= | base64 -d' },
+    { id: 'refused', command: 'curl https://example.test/x' },
+    // In scope twice over — after a refusal, and built at run time — but the guard refused it.
+    { id: 'refused-again', command: '$(printf cu)rl https://example.test/x' },
+  ])
+  expect(verdicts.map((verdict) => verdict?.block === true)).toEqual([false, false, true, true])
+  await pendingWorkDone()
+  expect(asked).toHaveLength(1)
+  expect(judgementsOf(runtime)).toEqual([expect.objectContaining({ toolCallId: 'decoded', scope: 'unreadable' })])
+})
+
+// ⚠ PR1 adds no latency and no verdict: the handler answers before the judge does, whatever it does.
+test('⚠ a judge that fails or never answers changes no verdict, and the call is answered at once (#469)', async () => {
+  const calls: readonly DrivenCall[] = [
+    { id: 'c1', command: 'curl https://example.test/x' },
+    { id: 'c2', command: 'rm -rf build' },
+    { id: 'c3', command: 'python3 -c "print(1)"' },
+  ]
+  const expected = drive(loadGuardRuntime(), calls).verdicts
+  const hanging = fakeJudge(() => new Promise<EnsoJudgeOutcome>(() => undefined))
+  const failing = fakeJudge(() => Promise.reject(new Error('backend broke its contract')))
+  for (const { judge } of [hanging, failing]) {
+    const runtime = loadGuardRuntime(undefined, undefined, undefined, { commandJudge: () => judge })
+    // A plain value, not a promise: pi is not kept waiting on the judge.
+    expect(drive(runtime, calls).verdicts).toEqual(expected)
+  }
+  expect(hanging.asked).toHaveLength(2)
+  expect(failing.asked).toHaveLength(2)
+  await pendingWorkDone()
+  // A broken backend is recorded unjudged, never clean.
+  const failed = loadGuardRuntime(undefined, undefined, undefined, { commandJudge: () => failing.judge })
+  drive(failed, calls)
+  await pendingWorkDone()
+  expect(judgementsOf(failed)).toEqual([
+    expect.objectContaining({ kind: 'unjudged', toolCallId: 'c2', reason: expect.stringContaining('broke') }),
+    expect.objectContaining({ kind: 'unjudged', toolCallId: 'c3', reason: expect.stringContaining('broke') }),
+  ])
+})
+
+test('a judgement that cannot be recorded — the session gone — is logged, never thrown (#469)', async () => {
+  const { judge } = fakeJudge()
+  const runtime = loadGuardRuntime(undefined, undefined, undefined, {
+    commandJudge: () => judge,
+    onAppendEntry: (customType) => {
+      if (customType === ENSO_COMMAND_JUDGEMENT_ENTRY) throw new Error('the session is gone')
+    },
+  })
+  drive(runtime, [{ id: 'decoded', command: 'echo cm0gLXJmIHg= | base64 -d' }])
+  await pendingWorkDone()
+  logs.assertLogged({
+    level: 'error',
+    rawMessage: 'the judgement of {toolCallId} could not be recorded: {error}',
+    properties: (properties: Readonly<Record<string, unknown>>) =>
+      properties.toolCallId === 'decoded' && String(properties.error).includes('the session is gone'),
+  })
+})
+
+// ⚠ #469's acceptance: the replay judges exactly the calls the live guard judged — so a threshold
+// a replay sets is the one that runs.
+test('⚠ live equals replay: a replay of the branch selects exactly the calls the guard judged (#469)', async () => {
+  const { judge } = fakeJudge()
+  const runtime = loadGuardRuntime(undefined, undefined, undefined, { commandJudge: () => judge })
+  const { branch } = drive(runtime, [...ESCALATION, { id: 'c7', command: 'ls' }])
+  await pendingWorkDone()
+  const live = judgementsOf(runtime) as { toolCallId: string; scope: string }[]
+  expect(live.map(({ toolCallId, scope }) => `${toolCallId}:${scope}`)).toEqual([
+    'c4:after-refusal',
+    'c5:after-refusal',
+    'c6:after-refusal',
+    'c7:after-refusal',
+  ])
+  const replayed = judgeContextsOfEntries(branch, DEFAULT_RISK_THRESHOLDS)
+  expect(replayed.map(({ toolCallId, reason }) => `${toolCallId}:${reason}`)).toEqual(
+    live.map(({ toolCallId, scope }) => `${toolCallId}:${scope}`),
+  )
 })
