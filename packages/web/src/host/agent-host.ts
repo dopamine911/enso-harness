@@ -19,6 +19,7 @@ import {
   ENSO_INCIDENT_OPENED_ENTRY,
   ENSO_INCIDENT_RESOLVED_CHANNEL,
   ENSO_INCIDENT_RESOLVED_ENTRY,
+  ENSO_LOG_EVENTS,
   ENSO_PROJECT_TRUST_ENTRY,
   ENSO_SYSTEM_PROMPT_ENTRY,
   type EnsoForkPoint,
@@ -34,6 +35,7 @@ import {
   type EnsoPermissionVerdict,
   type EnsoPromptAdmission,
   type EnsoRecordedModel,
+  type EnsoRiskThresholds,
   type EnsoSessionIncidents,
   type EnsoSessionUsage,
   type EnsoSystemPromptChoice,
@@ -62,6 +64,7 @@ import { quarantineSecrets } from '@enso/core/secrets'
 import { getPermissionsService } from '@gotgenes/pi-permission-system'
 import { type BranchContext, type BranchRequestDetail, branchContext, branchRequestDetail } from './branch-context.ts'
 import { type BranchEval, branchEval } from './branch-eval.ts'
+import { type BranchIncidentHistory, branchIncidentHistory } from './branch-incident-history.ts'
 import { type BranchStats, branchStats } from './branch-stats.ts'
 import { type ContinuationLead, continuationLead, NO_RUN_LIFECYCLE, NOTHING_TO_CONTINUE } from './continuation.ts'
 import { createEventTail, describeObservation } from './event-tail.ts'
@@ -400,6 +403,8 @@ export interface HostedThread {
   branchStats(): BranchStats
   /** The branch as the session eval reads it (#441): the transcript and the turns' usage. */
   branchEval(): BranchEval
+  /** The branch's incident history (#468): records, their entries as stored, and a replay under `thresholds`. */
+  branchIncidentHistory(thresholds: EnsoRiskThresholds): BranchIncidentHistory
   /** The branch's context, request by request (#361): what each was assembled from, by pi's own assembly. */
   branchContext(): BranchContext
   /**
@@ -553,6 +558,11 @@ export interface AgentHost {
   readStoredForkPoint(threadId: string): Promise<EnsoForkPoint | undefined>
   /** A stored thread as the session eval reads it (#441): one open, nothing built (#86); undefined for no file. */
   readStoredThreadEval(threadId: string): Promise<BranchEval | undefined>
+  /** A stored thread's incident history (#468): one open, nothing built (#86); undefined for no file. */
+  readStoredIncidentHistory(
+    threadId: string,
+    thresholds: EnsoRiskThresholds,
+  ): Promise<BranchIncidentHistory | undefined>
   /**
    * Fork a stored thread at one of its user messages, as pi's `/fork` does (#433; the module
    * header): a new session file naming the source as its parent, holding everything before that
@@ -730,8 +740,8 @@ function branchIncidents(branch: readonly SessionEntry[]): EnsoSessionIncidents 
 
 /**
  * The opening a fork records for the source's open incident (#466 decision 5): its own id, so the
- * fork is resolved on its own, and the source's signals, halt and suspension, pointing back at the
- * source's thread and incident.
+ * fork is resolved on its own, and the source's signals, halt, suspension and model (when it named
+ * one, #468), pointing back at the source's thread and incident.
  */
 function inheritedOpening(sourceThreadId: string, source: EnsoIncidentOpened): EnsoIncidentOpened {
   return {
@@ -739,6 +749,7 @@ function inheritedOpening(sourceThreadId: string, source: EnsoIncidentOpened): E
     signals: source.signals,
     halted: source.halted,
     suspended: source.suspended,
+    ...(source.model === undefined ? {} : { model: source.model }),
     inheritedFrom: { threadId: sourceThreadId, incidentId: source.incidentId },
   }
 }
@@ -840,6 +851,12 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     return (await storedSession(threadId))?.path
   }
 
+  /** A stored thread's branch, root to leaf — one open, nothing built (#86); undefined for no file. */
+  async function storedBranch(threadId: string): Promise<SessionEntry[] | undefined> {
+    const path = await storedSessionPath(threadId)
+    return path === undefined ? undefined : SessionManager.open(path).getBranch()
+  }
+
   async function readStoredThread(threadId: string): Promise<StoredThreadRead | undefined> {
     const located = await storedSession(threadId)
     if (located === undefined) return undefined
@@ -872,8 +889,8 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     threadId: string,
     request: number | 'next',
   ): Promise<BranchRequestDetail | undefined> {
-    const path = await storedSessionPath(threadId)
-    return path === undefined ? undefined : branchRequestDetail(SessionManager.open(path).getBranch(), request)
+    const branch = await storedBranch(threadId)
+    return branch === undefined ? undefined : branchRequestDetail(branch, request)
   }
 
   async function forkThread(threadId: string, entryId: string): Promise<ThreadForkOutcome> {
@@ -927,8 +944,16 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   }
 
   async function readStoredThreadEval(threadId: string): Promise<BranchEval | undefined> {
-    const path = await storedSessionPath(threadId)
-    return path === undefined ? undefined : branchEval(SessionManager.open(path).getBranch())
+    const branch = await storedBranch(threadId)
+    return branch === undefined ? undefined : branchEval(branch)
+  }
+
+  async function readStoredIncidentHistory(
+    threadId: string,
+    thresholds: EnsoRiskThresholds,
+  ): Promise<BranchIncidentHistory | undefined> {
+    const branch = await storedBranch(threadId)
+    return branch === undefined ? undefined : branchIncidentHistory(branch, thresholds)
   }
 
   async function createSession(threadId: string, newSessionDirectory: () => string): Promise<HostedThread> {
@@ -1647,7 +1672,8 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         // leave a lifted suspension no file records (⚠ #466: the records are the authority).
         hostApi.appendEntry(ENSO_INCIDENT_RESOLVED_ENTRY, record)
         hostApi.events.emit(ENSO_INCIDENT_RESOLVED_CHANNEL, record)
-        log.info('incident {incidentId} resolved: {classification}, {outcome}', {
+        // ⚠ The day's one record of a resolution (#468): the guard's live application logs at debug.
+        log.info(ENSO_LOG_EVENTS.incidentResolved, {
           threadId,
           incidentId,
           classification: record.classification,
@@ -1752,6 +1778,8 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       },
       branchStats: () => branchStats(sessionManager.getBranch()),
       branchEval: () => branchEval(sessionManager.getBranch()),
+      branchIncidentHistory: (thresholds: EnsoRiskThresholds) =>
+        branchIncidentHistory(sessionManager.getBranch(), thresholds),
       branchContext: () => branchContext(sessionManager.getBranch()),
       previewSystemPrompt(candidate: EnsoSystemPromptChoice | null): SystemPromptPreviewOutcome {
         if (session.isStreaming || session.isCompacting) return { kind: 'busy' }
@@ -1804,6 +1832,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     readStoredThreadStats,
     readStoredThreadContext,
     readStoredThreadEval,
+    readStoredIncidentHistory,
     readStoredRequestDetail,
     readStoredForkPoint,
     forkThread,

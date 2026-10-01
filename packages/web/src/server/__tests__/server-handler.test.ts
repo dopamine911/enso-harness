@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpath
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+  DEFAULT_RISK_THRESHOLDS,
   ENSO_PROJECT_HEADER,
   EnsoForkPoint,
   type EnsoFollowFrame,
@@ -22,6 +23,7 @@ import {
   type PromptOutcome,
   type PromptRequest,
   type ThreadRuntime,
+  readEnsoThreadIncidents,
 } from '@enso/core'
 import { type FlowTrace, flowTrace } from '@enso/core/flow-trace'
 import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
@@ -1428,6 +1430,43 @@ test('GET …/manifest answers a cold thread from its file without building, a l
   expect(await prompt(url, 'live1', 'hi')).toBe(202)
   const live: unknown = await (await fetch(`${url}/api/threads/live1/manifest`)).json()
   expect(live).toMatchObject({ identity: { threadId: 'session-1' }, conditions: { runContext: null } })
+})
+
+// #468: the incident history replays under the server's thresholds, or the ones the query names —
+// a threshold `config.json` would refuse is a 400 that says why, never a replay under nonsense.
+test('GET …/incidents replays under the server’s thresholds or the query’s; a bad query is a 400, no thread a 404', async () => {
+  const { url, built } = await startWith(settlesAtOnce, {
+    s1: { transcript: [], modified: new Date('2026-09-24T10:00:00.000Z'), firstMessage: 'one' },
+  })
+  const read = async (query: string): Promise<{ status: number; body: string }> => {
+    const response = await fetch(`${url}/api/threads/s1/incidents${query}`)
+    return { status: response.status, body: await response.text() }
+  }
+  const plain = await read('')
+  expect(plain.status).toBe(200)
+  expect(readEnsoThreadIncidents(JSON.parse(plain.body))?.thresholds).toEqual(DEFAULT_RISK_THRESHOLDS)
+  const lowered = await read('?incidentAtSignals=4&windowCalls=12')
+  expect(readEnsoThreadIncidents(JSON.parse(lowered.body))?.thresholds).toEqual({
+    ...DEFAULT_RISK_THRESHOLDS,
+    incidentAtSignals: 4,
+    windowCalls: 12,
+  })
+  expect(await read('?incidentAtSignals=0')).toEqual({
+    status: 400,
+    body: 'incidentAtSignals must be a whole number from 1, not "0"',
+  })
+  expect(await read('?halt=1')).toEqual({
+    status: 400,
+    body: 'halt is no threshold; the thresholds are windowCalls, highAtSignals, highAtKinds, incidentAtSignals',
+  })
+  // Named twice, which value is meant is a guess: refused, not the last one silently.
+  expect(await read('?incidentAtSignals=4&incidentAtSignals=9')).toEqual({
+    status: 400,
+    body: 'incidentAtSignals is named twice',
+  })
+  expect((await fetch(`${url}/api/threads/nowhere/incidents`)).status).toBe(404)
+  // Looking builds nothing (#86).
+  expect(built).toHaveLength(0)
 })
 
 // ⚠ #391: Start applies the new session's settings TOGETHER — the model first (the effort a model

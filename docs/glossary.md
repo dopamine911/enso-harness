@@ -248,7 +248,8 @@ what no mode may allow. Both answer before a tool runs; nothing after it does.
   and a level, `low` / `medium` / `high` / `incident` (#464, phase 1 of #189). Observed by the guards
   extension and replayed from the branch by the same fold; the level decides nothing by itself —
   reaching `incident` opens an **incident** — and its thresholds (`config.json`
-  `security.incidents`) are uncalibrated until #468 replays real sessions. Only a resolution resets it.
+  `security.incidents`) are tuned by **replaying** stored sessions (#468, `bun run incidents replay`).
+  Only a resolution resets it.
 - **security signal** — one observed fact of the session risk, named for what was seen, never for
   intent: `denial-retry`, `command-obfuscation`, `alternate-execution-path`,
   `tool-substitution-after-denial`, `policy-introspection`, `protected-record-touch`. Every one but the
@@ -270,6 +271,11 @@ what no mode may allow. Both answer before a tool runs; nothing after it does.
   three factual answers cite quotes the host checks (**verified** / unverified); "what was denied" not
   citing the incident's own calls is a **mismatch**. Recorded beside the incident, never in it — or
   recorded **missing**. While it is owed, the **report window** lets no other tool run.
+- **incident replay** — a stored branch run through the risk fold again under other thresholds
+  (#468): each opening is `same` as the one recorded, one it **would open**, or one it **would miss**.
+  Under the thresholds the branch ran with, every opening is `same`. `bun run incidents` lists the
+  history, exports one incident (`mechanical.json`, the records as stored; `agent-report.md`;
+  `resolution.json`) and replays.
 
 ## Observation
 

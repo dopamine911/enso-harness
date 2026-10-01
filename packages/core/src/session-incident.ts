@@ -1,5 +1,6 @@
 import { type Static, Type } from 'typebox'
 import { Compile } from 'typebox/compile'
+import { ENSO_GUARD_DENIAL_ENTRY } from './guard.ts'
 import {
   EnsoIncidentReport,
   EnsoIncidentReportMissing,
@@ -9,8 +10,14 @@ import {
 import {
   DEFAULT_RISK_THRESHOLDS,
   ENSO_INCIDENT_RESOLVED_ENTRY,
+  ENSO_PERMISSION_DENIAL_ENTRY,
+  ENSO_SECURITY_SIGNAL_ENTRY,
+  type EnsoRiskEvent,
   type EnsoRiskThresholds,
   EnsoSecuritySignal,
+  INITIAL_SESSION_RISK,
+  riskEventsOfEntries,
+  sessionRiskStep,
 } from './session-risk.ts'
 import { WEB_FETCH_TOOL_NAME } from './web-fetch.ts'
 import { WEB_SEARCH_TOOL_NAME } from './web-search.ts'
@@ -80,8 +87,9 @@ export const ENSO_INCIDENT_OPENED_ENTRY = 'enso-incident-opened' as const
 /**
  * An incident's opening: its id; the signals the risk rests on, as recorded (each names its call
  * and the calls before it, by id); whether it halted — `security.incidents.halt`, off by default —
- * and so which families it suspended; and, for an inherited one, the thread and incident it came
- * from. The record is never edited: a resolution is another record.
+ * and so which families it suspended; the model the run was on (#468: incidents counted per
+ * model), absent when the session named none; and, for an inherited one, the thread and incident
+ * it came from. The record is never edited: a resolution is another record.
  *
  * @group Session incident
  */
@@ -91,6 +99,7 @@ export const EnsoIncidentOpened = Type.Object(
     signals: Type.Array(EnsoSecuritySignal),
     halted: Type.Boolean(),
     suspended: Families,
+    model: Type.Optional(Type.String({ minLength: 1 })),
     inheritedFrom: Type.Optional(
       Type.Object(
         { threadId: Type.String({ minLength: 1 }), incidentId: Type.String({ minLength: 1 }) },
@@ -434,4 +443,209 @@ function suspendedAfter(resolution: EnsoIncidentResolution): EnsoToolFamily[] {
   if (resolution.outcome === 'end-thread') return [...ENSO_TOOL_FAMILIES]
   if (resolution.outcome === 'resume') return []
   return unionOf([], resolution.restricted ?? [])
+}
+
+/**
+ * How a replay's opening compares with the branch's record (#468): the guard recorded one on the
+ * same call (`same`), the replay opens one the guard did not (`would-open`), or the guard recorded
+ * one the replay does not open (`would-miss`).
+ *
+ * @group Session incident
+ */
+export const ENSO_INCIDENT_REPLAY_VERDICTS = ['same', 'would-open', 'would-miss'] as const
+
+/** @group Session incident */
+export type EnsoIncidentReplayVerdict = (typeof ENSO_INCIDENT_REPLAY_VERDICTS)[number]
+
+/**
+ * One opening, replayed or recorded: the call that tipped the risk into `incident` (the last
+ * signal's call), the signals it rests on, and the recorded id when the guard recorded one.
+ *
+ * @group Session incident
+ */
+export const EnsoIncidentReplayRow = Type.Object(
+  {
+    verdict: Type.Unsafe<EnsoIncidentReplayVerdict>(
+      Type.Union(ENSO_INCIDENT_REPLAY_VERDICTS.map((verdict) => Type.Literal(verdict))),
+    ),
+    trigger: Type.String({ minLength: 1 }),
+    signals: Type.Array(EnsoSecuritySignal),
+    incidentId: Type.Optional(Type.String({ minLength: 1 })),
+  },
+  { additionalProperties: false },
+)
+/** @group Session incident */
+export type EnsoIncidentReplayRow = Static<typeof EnsoIncidentReplayRow>
+
+/**
+ * One thread's incidents for `bun run incidents` (#468), from `GET /api/threads/:id/incidents`:
+ * each incident's record with the custom entries it rests on exactly as the session file stores
+ * them (`incidentEntriesOf`), and the branch replayed under `thresholds` — the server's own unless
+ * the request named others.
+ *
+ * @group Session incident
+ */
+export const EnsoThreadIncidents = Type.Object(
+  {
+    threadId: Type.String({ minLength: 1 }),
+    live: Type.Boolean(),
+    thresholds: Type.Object(
+      {
+        windowCalls: Type.Integer({ minimum: 1 }),
+        highAtSignals: Type.Integer({ minimum: 1 }),
+        highAtKinds: Type.Integer({ minimum: 1 }),
+        incidentAtSignals: Type.Integer({ minimum: 1 }),
+      },
+      { additionalProperties: false },
+    ),
+    incidents: Type.Array(
+      Type.Object({ record: EnsoIncidentRecord, entries: Type.Array(Type.Unknown()) }, { additionalProperties: false }),
+    ),
+    replay: Type.Array(EnsoIncidentReplayRow),
+  },
+  { additionalProperties: false },
+)
+/** @group Session incident */
+export type EnsoThreadIncidents = Static<typeof EnsoThreadIncidents>
+
+const threadIncidentsValidator = Compile(EnsoThreadIncidents)
+
+/**
+ * The payload as `EnsoThreadIncidents`, or undefined when it is not one — what the CLI reads.
+ *
+ * @group Session incident
+ */
+export function readEnsoThreadIncidents(payload: unknown): EnsoThreadIncidents | undefined {
+  return threadIncidentsValidator.Check(payload) ? payload : undefined
+}
+
+/** The records an incident's calls left: what each was observed as, and each refusal of one. */
+const EVIDENCE_ENTRIES: ReadonlySet<string> = new Set([
+  ENSO_SECURITY_SIGNAL_ENTRY,
+  ENSO_GUARD_DENIAL_ENTRY,
+  ENSO_PERMISSION_DENIAL_ENTRY,
+])
+
+/**
+ * The custom entries an incident rests on, as stored (#468's export): every entry naming it — the
+ * opening, the report or its absence, each resolution — and the signal and refusal records of the
+ * calls its signals name. Each is the session file's entry, untouched.
+ *
+ * @group Session incident
+ */
+export function incidentEntriesOf(entries: readonly unknown[], opened: EnsoIncidentOpened): unknown[] {
+  const calls = new Set(opened.signals.flatMap((signal) => [...signal.after, signal.toolCallId]))
+  return entries.filter((branchEntry) => {
+    const custom = customOf(branchEntry)
+    if (custom === undefined || typeof custom.data !== 'object' || custom.data === null) return false
+    const { incidentId, toolCallId } = custom.data as Record<string, unknown>
+    if (incidentId === opened.incidentId) return true
+    return EVIDENCE_ENTRIES.has(custom.customType) && typeof toolCallId === 'string' && calls.has(toolCallId)
+  })
+}
+
+/** An opening's tipping call: its last signal's call (the step that raised it), or its id when it has none. */
+function triggerOf(signals: readonly EnsoSecuritySignal[], fallback: string): string {
+  return signals.at(-1)?.toolCallId ?? fallback
+}
+
+/** The custom entry a raw pi entry is, or undefined. */
+function customOf(entry: unknown): { readonly customType: string; readonly data: unknown } | undefined {
+  if (typeof entry !== 'object' || entry === null) return undefined
+  const { type, customType, data } = entry as Record<string, unknown>
+  return type === 'custom' && typeof customType === 'string' ? { customType, data } : undefined
+}
+
+/** A replayed opening, before it is compared: its tipping call and the event index it opened at. */
+interface ReplayedOpening {
+  readonly trigger: string
+  readonly signals: readonly EnsoSecuritySignal[]
+  readonly at: number
+}
+
+/**
+ * The openings the risk fold makes over `events` under `thresholds`, by the guard's own rule: one
+ * opens when the risk reaches `incident` and none is open; a resolution closes it and resets the
+ * risk. `openAt` holds the event indexes where an inherited incident opens (a fork's, #466).
+ */
+function replayedOpenings(
+  events: readonly EnsoRiskEvent[],
+  openAt: ReadonlySet<number>,
+  thresholds: EnsoRiskThresholds,
+): ReplayedOpening[] {
+  const openings: ReplayedOpening[] = []
+  let risk = INITIAL_SESSION_RISK
+  let open = false
+  for (const [at, event] of events.entries()) {
+    if (openAt.has(at)) open = true
+    risk = sessionRiskStep(risk, event, thresholds).state
+    if (event.kind === 'incident-resolved') open = false
+    else if (risk.level === 'incident' && !open) {
+      open = true
+      openings.push({ trigger: triggerOf(risk.signals, String(at)), signals: [...risk.signals], at })
+    }
+  }
+  return openings
+}
+
+/**
+ * A branch's incident openings replayed under `thresholds`, beside the ones the guard recorded
+ * (#468) — what tunes `security.incidents` against real sessions. Rows are in branch order.
+ *
+ * - With the thresholds the branch ran under, every row is `same`: the replay is the guard's own
+ *   fold (`sessionRiskStep`) over the events it met (`riskEventsOfEntries`), and opens by its rule.
+ * - An inherited opening (a fork's, written by the host) is not the guard's: it is no row, but it
+ *   holds the incident open from where it stands, as it does live.
+ * - ⚠ The branch is replayed as it happened. A replay that opens earlier than the guard did still
+ *   reads the calls a halt would have stopped, and so may count signals a halted session never had.
+ * - An `end-thread` resolution is not modelled: an ended thread takes no further calls.
+ *
+ * @group Session incident
+ */
+export function replayIncidents(
+  entries: readonly unknown[],
+  thresholds: EnsoRiskThresholds = DEFAULT_RISK_THRESHOLDS,
+): EnsoIncidentReplayRow[] {
+  // The branch splits at each inherited opening, so its event index is known; nothing in a fork
+  // after the opening refers to a call before it, so the split rebuilds the same order.
+  const events: EnsoRiskEvent[] = []
+  const openAt = new Set<number>()
+  const recorded: EnsoIncidentOpened[] = []
+  let segment: unknown[] = []
+  for (const branchEntry of [...entries, undefined]) {
+    const custom = branchEntry === undefined ? undefined : customOf(branchEntry)
+    const opened = custom === undefined ? undefined : readEnsoIncidentOpened(custom.customType, custom.data)
+    if (branchEntry !== undefined && opened?.inheritedFrom === undefined) {
+      segment.push(branchEntry)
+      if (opened !== undefined) recorded.push(opened)
+      continue
+    }
+    events.push(...riskEventsOfEntries(segment))
+    segment = []
+    if (opened !== undefined) openAt.add(events.length)
+  }
+  return compareOpenings(replayedOpenings(events, openAt, thresholds), recorded, events)
+}
+
+/** The replayed openings against the recorded ones, matched by tipping call, in branch order. */
+function compareOpenings(
+  replayed: readonly ReplayedOpening[],
+  recorded: readonly EnsoIncidentOpened[],
+  events: readonly EnsoRiskEvent[],
+): EnsoIncidentReplayRow[] {
+  const recordedBy = new Map(recorded.map((opened) => [triggerOf(opened.signals, opened.incidentId), opened]))
+  const rows: (EnsoIncidentReplayRow & { readonly at: number })[] = replayed.map((opening) => {
+    const match = recordedBy.get(opening.trigger)
+    recordedBy.delete(opening.trigger)
+    const row = { trigger: opening.trigger, signals: [...opening.signals], at: opening.at }
+    return match === undefined
+      ? { verdict: 'would-open', ...row }
+      : { verdict: 'same', ...row, incidentId: match.incidentId }
+  })
+  for (const [trigger, opened] of recordedBy) {
+    // A recorded opening the replay misses sits where its tipping call was last met.
+    const at = events.findLastIndex((event) => 'toolCallId' in event && event.toolCallId === trigger)
+    rows.push({ verdict: 'would-miss', trigger, signals: opened.signals, incidentId: opened.incidentId, at })
+  }
+  return rows.toSorted((left, right) => left.at - right.at).map(({ at: _at, ...row }) => row)
 }

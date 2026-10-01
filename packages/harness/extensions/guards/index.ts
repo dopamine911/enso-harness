@@ -435,7 +435,7 @@ function observeSessionSecurity(
   readPolicy: () => EnsoIncidentPolicy,
 ): {
   resume(branch: () => readonly unknown[]): void
-  call(event: ToolCallEvent, signal: AbortSignal | undefined): void
+  call(event: ToolCallEvent, signal: AbortSignal | undefined, model: string | undefined): void
   /** Folds the guard's own refusal; true when it opened an incident that halted. */
   guardDenied(denial: EnsoGuardDenial): boolean
   /** The incident state a call is decided against. */
@@ -453,6 +453,7 @@ function observeSessionSecurity(
   let incidents: EnsoSessionIncidents = NO_SESSION_INCIDENTS
   let currentCall: string | undefined
   let currentSignal: AbortSignal | undefined
+  let currentModel: string | undefined
 
   /** Open an incident when the risk calls for one; true when it halted. */
   const openIfIncident = (): boolean => {
@@ -463,6 +464,7 @@ function observeSessionSecurity(
       signals: [...risk.signals],
       halted: halt,
       suspended: halt ? [...ENSO_TOOL_FAMILIES] : [],
+      ...(currentModel === undefined ? {} : { model: currentModel }),
     }
     pi.appendEntry(ENSO_INCIDENT_OPENED_ENTRY, opened)
     incidents = sessionIncidentsStep(incidents, ENSO_INCIDENT_OPENED_ENTRY, opened)
@@ -471,6 +473,7 @@ function observeSessionSecurity(
       halted: opened.halted,
       suspended: opened.suspended.join(', ') || 'nothing',
       signals: opened.signals.length,
+      model: opened.model ?? '(unknown)',
     })
     // The report extension asks for the report in this same run (#467).
     if (opened.halted) pi.events.emit(ENSO_INCIDENT_OPENED_CHANNEL, opened)
@@ -523,7 +526,8 @@ function observeSessionSecurity(
     }
     incidents = sessionIncidentsStep(incidents, ENSO_INCIDENT_RESOLVED_ENTRY, resolved)
     risk = sessionRiskStep(risk, { kind: 'incident-resolved' }, policy().thresholds).state
-    log.info(ENSO_LOG_EVENTS.incidentResolved, { ...resolved, suspended: resolved.suspended.join(', ') || 'nothing' })
+    // Debug, not the event: the host's resolve path records the day's one line of it (#468).
+    log.debug('security incident {incidentId} resolution applied live', { incidentId: resolved.incidentId })
   })
 
   // The report extension appended the report, or its absence, and says so here (#467): the report
@@ -559,9 +563,10 @@ function observeSessionSecurity(
         log.error('the session risk could not be rebuilt from the branch; it starts low: {error}', { error })
       }
     },
-    call(event: ToolCallEvent, signal: AbortSignal | undefined): void {
+    call(event: ToolCallEvent, signal: AbortSignal | undefined, model: string | undefined): void {
       currentCall = event.toolCallId
       currentSignal = signal
+      currentModel = model
       observe(riskCallOf(event.toolCallId, event.toolName, event.input))
     },
     guardDenied(denial: EnsoGuardDenial): boolean {
@@ -882,7 +887,7 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
   // pi's context builder skips `custom` entries, so the model's view is unchanged.
   pi.on('tool_call', (event, extensionContext): ToolCallEventResult | undefined => {
     // The call first, then its refusal: the order the risk fold and every replay of it read (#464).
-    security.call(event, extensionContext.signal)
+    security.call(event, extensionContext.signal, extensionContext.model?.id)
     const verdict = decide(event, extensionContext.cwd)
     const path = pathArgumentOf(event)
     const properties = {

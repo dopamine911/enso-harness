@@ -51,10 +51,12 @@ export const ENSO_LOG_EVENTS = {
   securitySignal: 'security signal {signal} on {toolCallId}: {detail}',
   /** `guards/index.ts`: the session's risk level rose (#464, observe only). */
   sessionRiskChanged: 'session risk is {level} ({signals} signal(s))',
-  /** `guards/index.ts`: the session's risk reached `incident`, and an incident was opened (#466). */
+  /** `guards/index.ts`: the session's risk reached `incident`, and an incident was opened (#466); `model` is the run's (#468). */
   incidentOpened: 'security incident {incidentId} opened; halted {halted}, suspended {suspended}',
-  /** `guards/index.ts`: a human's resolution reached the live guard (#466). */
-  incidentResolved: 'security incident {incidentId} resolved {classification}, {outcome}; suspended {suspended}',
+  /** `incident-report/index.ts`: the agent's report filed, or recorded missing (#467). */
+  incidentReportFiled: 'security incident {incidentId}: {settled}',
+  /** `agent-host.ts#resolveIncident`: a human's resolution recorded — once, by the host (#466, #468). */
+  incidentResolved: 'security incident {incidentId} resolved {classification}, {outcome}',
   /** `thread-registry.ts`: the operator's Stop reached the run — the eval's interrupt (#441). */
   runAborted: 'run {generation} told to abort; {restored} queued prompt(s) handed back',
 } as const
@@ -181,6 +183,44 @@ export const EnsoDayStats = Type.Object(
         },
         { additionalProperties: false },
       ),
+    ),
+    /**
+     * The day's security record (#468), from the log alone: signals by kind, incidents opened
+     * (halting ones apart) and by the run's model, the agents' reports (filed — `checked` when
+     * every factual claim verified and nothing mismatched — or missing), and the human
+     * resolutions by classification and outcome. One line per fact, so nothing counts twice.
+     */
+    security: Type.Object(
+      {
+        signals: Type.Array(
+          Type.Object({ signal: Type.String(), count: Type.Integer({ minimum: 0 }) }, { additionalProperties: false }),
+        ),
+        incidents: Type.Object(
+          { opened: Type.Integer({ minimum: 0 }), halted: Type.Integer({ minimum: 0 }) },
+          { additionalProperties: false },
+        ),
+        models: Type.Array(
+          Type.Object(
+            { model: Type.String(), incidents: Type.Integer({ minimum: 0 }) },
+            { additionalProperties: false },
+          ),
+        ),
+        reports: Type.Object(
+          {
+            filed: Type.Integer({ minimum: 0 }),
+            checked: Type.Integer({ minimum: 0 }),
+            missing: Type.Integer({ minimum: 0 }),
+          },
+          { additionalProperties: false },
+        ),
+        resolutions: Type.Array(
+          Type.Object(
+            { classification: Type.String(), outcome: Type.String(), count: Type.Integer({ minimum: 0 }) },
+            { additionalProperties: false },
+          ),
+        ),
+      },
+      { additionalProperties: false },
     ),
     totals: Type.Object(
       {
@@ -310,6 +350,49 @@ interface Fold {
   readonly denials: Map<string, number>
   /** Provider refusals (#340), keyed `provider|status`. */
   readonly refusals: Map<string, { readonly provider: string; readonly status: number | undefined; count: number }>
+  readonly security: SecurityFold
+}
+
+/** The day's security lines (#468), counted as they come. */
+interface SecurityFold {
+  readonly signals: Map<string, number>
+  readonly incidents: { opened: number; halted: number }
+  readonly models: Map<string, number>
+  readonly reports: { filed: number; checked: number; missing: number }
+  /** Keyed `classification|outcome`. */
+  readonly resolutions: Map<string, number>
+}
+
+function countInto(counts: Map<string, number>, key: string): void {
+  counts.set(key, (counts.get(key) ?? 0) + 1)
+}
+
+/** One security line into the fold; false when the line is no security event. */
+function foldSecurity(security: SecurityFold, message: string, properties: Properties): boolean {
+  switch (message) {
+    case ENSO_LOG_EVENTS.securitySignal:
+      countInto(security.signals, stringOf(properties.signal) ?? '(unknown)')
+      return true
+    case ENSO_LOG_EVENTS.incidentOpened:
+      security.incidents.opened += 1
+      if (properties.halted === true) security.incidents.halted += 1
+      countInto(security.models, stringOf(properties.model) ?? '(unknown)')
+      return true
+    case ENSO_LOG_EVENTS.incidentReportFiled:
+      if (properties.filed === true) {
+        security.reports.filed += 1
+        if (properties.checked === true) security.reports.checked += 1
+      } else security.reports.missing += 1
+      return true
+    case ENSO_LOG_EVENTS.incidentResolved:
+      countInto(
+        security.resolutions,
+        `${stringOf(properties.classification) ?? '(unknown)'}|${stringOf(properties.outcome) ?? '(unknown)'}`,
+      )
+      return true
+    default:
+      return false
+  }
 }
 
 function foldOf(lines: readonly EnsoLogLine[]): Fold {
@@ -322,9 +405,29 @@ function foldOf(lines: readonly EnsoLogLine[]): Fold {
     models: new Map(),
     denials: new Map(),
     refusals: new Map(),
+    security: {
+      signals: new Map(),
+      incidents: { opened: 0, halted: 0 },
+      models: new Map(),
+      reports: { filed: 0, checked: 0, missing: 0 },
+      resolutions: new Map(),
+    },
   }
   for (const line of lines) foldLine(fold, line)
   return fold
+}
+
+function securityOf(security: SecurityFold): EnsoDayStats['security'] {
+  return {
+    signals: [...security.signals.entries()].map(([signal, count]) => ({ signal, count })),
+    incidents: { ...security.incidents },
+    models: [...security.models.entries()].map(([model, incidents]) => ({ model, incidents })),
+    reports: { ...security.reports },
+    resolutions: [...security.resolutions.entries()].map(([key, count]) => {
+      const [classification = '(unknown)', outcome = '(unknown)'] = key.split('|')
+      return { classification, outcome, count }
+    }),
+  }
 }
 
 function runOf(fold: Fold, properties: Properties): RunFold | undefined {
@@ -445,6 +548,7 @@ function foldLine(fold: Fold, line: EnsoLogLine): void {
   const properties = line.properties ?? {}
   const instant = Date.parse(line['@timestamp'])
   const writer = foldWriter(fold, line, properties)
+  if (line.message !== undefined && foldSecurity(fold.security, line.message, properties)) return
   switch (line.message) {
     case ENSO_LOG_EVENTS.loggingConfigured:
       foldBoot(writer, properties)
@@ -599,6 +703,7 @@ function statsOf(day: string, fold: Fold, records: number, malformed: number): E
     refusals: [...fold.refusals.values()].map(({ provider, status, count }) =>
       status === undefined ? { provider, count } : { provider, status, count },
     ),
+    security: securityOf(fold.security),
     totals: {
       runs: runRows.length,
       prompts: summarise(runRows.flatMap((run) => (run.promptMs === undefined ? [] : [run.promptMs]))),

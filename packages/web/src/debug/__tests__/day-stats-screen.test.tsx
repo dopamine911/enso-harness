@@ -130,6 +130,13 @@ const DAY: EnsoDayStats = {
   ],
   denials: [{ rule: 'no-shell-grep', count: 4 }],
   refusals: [{ provider: 'anthropic', status: 429, count: 3 }],
+  security: {
+    signals: [{ signal: 'secret-read', count: 2 }],
+    incidents: { opened: 2, halted: 1 },
+    models: [{ model: 'claude-sonnet', incidents: 2 }],
+    reports: { filed: 1, checked: 0, missing: 1 },
+    resolutions: [{ classification: 'false-positive', outcome: 'resume', count: 1 }],
+  },
   totals: {
     runs: 2,
     prompts: { count: 1, minMs: 11_000, maxMs: 11_000, meanMs: 11_000, totalMs: 11_000 },
@@ -330,6 +337,23 @@ test('a denial row is its rule and count', async () => {
     const [row] = rowTexts(page.container, 'denials by rule')
     expect(row).toContain('no-shell-grep')
     expect(row).toContain('4')
+  })
+  await page.unmount()
+})
+
+test('the security tables say the day’s signals, incidents, reports and resolutions', async () => {
+  const page = await mountStats(healthy())
+  await eventually(() => {
+    expect(rowCells(page.container, 'security signals by kind (#464)')).toEqual([['secret-read', '2']])
+    expect(rowCells(page.container, 'security incidents (#466, #467)')).toEqual([
+      ['opened', '2'],
+      ['halted', '1'],
+      ['reports filed', '1'],
+      ['reports that checked', '0'],
+      ['reports missing', '1'],
+    ])
+    expect(rowCells(page.container, 'security incidents by model')).toEqual([['claude-sonnet', '2']])
+    expect(rowCells(page.container, 'incident resolutions')).toEqual([['false-positive', 'resume', '1']])
   })
   await page.unmount()
 })

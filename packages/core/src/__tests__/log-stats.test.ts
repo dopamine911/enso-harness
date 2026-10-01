@@ -161,6 +161,56 @@ test('denials count by rule, and a record from before the rule existed is not dr
   ])
 })
 
+// #468: the day's security record, one line per fact. A line that predates `model` or `checked`
+// still counts, under `(unknown)` or as an unchecked report.
+test('security lines count signals, incidents by model, reports and resolutions — each once', () => {
+  const guards = { level: 'WARN' as const, logger: 'enso.extension.guards' }
+  const lines = [
+    ...aRun(),
+    record(at(6), ENSO_LOG_EVENTS.securitySignal, { signal: 'denial-retry', toolCallId: 'c1', detail: '' }, guards),
+    record(at(6), ENSO_LOG_EVENTS.securitySignal, { signal: 'denial-retry', toolCallId: 'c2', detail: '' }, guards),
+    record(at(6), ENSO_LOG_EVENTS.securitySignal, { signal: 'policy-introspection', toolCallId: 'c3' }, guards),
+    record(at(7), ENSO_LOG_EVENTS.incidentOpened, { incidentId: 'i1', halted: true, model: 'claude-sonnet' }, guards),
+    record(at(7), ENSO_LOG_EVENTS.incidentOpened, { incidentId: 'i2', halted: false }, guards),
+    record(at(8), ENSO_LOG_EVENTS.incidentReportFiled, { incidentId: 'i1', filed: true, checked: true }),
+    record(at(8), ENSO_LOG_EVENTS.incidentReportFiled, { incidentId: 'i3', filed: true }),
+    record(at(8), ENSO_LOG_EVENTS.incidentReportFiled, { incidentId: 'i4', filed: false }),
+    record(at(9), ENSO_LOG_EVENTS.incidentResolved, {
+      incidentId: 'i1',
+      classification: 'agent-error',
+      outcome: 'resume',
+    }),
+    record(at(9), ENSO_LOG_EVENTS.incidentResolved, {
+      incidentId: 'i2',
+      classification: 'agent-error',
+      outcome: 'resume',
+    }),
+    record(at(9), ENSO_LOG_EVENTS.incidentResolved, {
+      incidentId: 'i3',
+      classification: 'confirmed-bypass',
+      outcome: 'end-thread',
+    }),
+  ]
+  const stats = dayStats('2026-09-22', lines, 0)
+  expect(Check(EnsoDayStats, stats)).toBe(true)
+  expect(stats.security).toEqual({
+    signals: [
+      { signal: 'denial-retry', count: 2 },
+      { signal: 'policy-introspection', count: 1 },
+    ],
+    incidents: { opened: 2, halted: 1 },
+    models: [
+      { model: 'claude-sonnet', incidents: 1 },
+      { model: '(unknown)', incidents: 1 },
+    ],
+    reports: { filed: 2, checked: 1, missing: 1 },
+    resolutions: [
+      { classification: 'agent-error', outcome: 'resume', count: 2 },
+      { classification: 'confirmed-bypass', outcome: 'end-thread', count: 1 },
+    ],
+  })
+})
+
 test('spend sums per thread and per model; a message without a model is attributed to none', () => {
   const lines = [
     ...aRun(),

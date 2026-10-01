@@ -185,7 +185,7 @@ function knobsText(process: EnsoDayStats['processes'][number]): string {
   return knobs.length === 0 ? ABSENT : knobs.join(' · ')
 }
 
-/** The sections, in reading order: what it cost, who was here, what ran, what it used, what was refused. */
+/** The sections, in reading order: what it cost, who was here, what ran, what it used, what was refused, and the security record (#468). */
 function DaySections({ view }: { view: DayView }): React.ReactNode {
   const { stats, live } = view
   const threads = stats.threads.toSorted((left, right) => right.cost - left.cost)
@@ -323,30 +323,91 @@ function DaySections({ view }: { view: DayView }): React.ReactNode {
           }
         })}
       />
-      <StatsTable
+      <CountTable
         caption="denials by rule"
         empty="no denial today"
-        columns={[{ heading: 'rule' }, { heading: 'count', numeric: true }]}
-        rows={stats.denials.map((denial) => ({
-          key: denial.rule,
-          cells: [denial.rule, countText(denial.count)],
-        }))}
+        headings={['rule']}
+        counts={stats.denials.map((denial) => [[denial.rule], denial.count])}
       />
-      <StatsTable
+      <CountTable
         caption="provider refusals by provider and status (#340)"
         empty="no provider refusal today"
-        columns={[{ heading: 'provider' }, { heading: 'status' }, { heading: 'count', numeric: true }]}
-        rows={stats.refusals.map((refusal) => ({
-          key: `${refusal.provider}|${refusal.status ?? ''}`,
-          cells: [
-            refusal.provider,
-            refusal.status === undefined ? ABSENT : String(refusal.status),
-            countText(refusal.count),
-          ],
-        }))}
+        headings={['provider', 'status']}
+        counts={stats.refusals.map((refusal) => [
+          [refusal.provider, refusal.status === undefined ? ABSENT : String(refusal.status)],
+          refusal.count,
+        ])}
       />
+      {securityTables(stats.security).map((table) => (
+        <CountTable key={table.caption} {...table} />
+      ))}
     </>
   )
+}
+
+interface CountTableProps {
+  readonly caption: string
+  readonly empty: string
+  /** The label columns, before the count. */
+  readonly headings: readonly string[]
+  readonly countHeading?: string
+  readonly counts: readonly (readonly [labels: readonly string[], count: number])[]
+}
+
+/** A table of labelled counts — one of the day's tallies. */
+function CountTable({ caption, empty, headings, countHeading = 'count', counts }: CountTableProps): React.ReactNode {
+  return (
+    <StatsTable
+      caption={caption}
+      empty={empty}
+      columns={[...headings.map((heading) => ({ heading })), { heading: countHeading, numeric: true }]}
+      rows={counts.map(([labels, count]) => ({ key: labels.join('|'), cells: [...labels, countText(count)] }))}
+    />
+  )
+}
+
+/** The day's security record (#468), as its tables: what the guard saw, what it opened, the reports, the resolutions. */
+function securityTables(security: EnsoDayStats['security']): CountTableProps[] {
+  const { incidents, reports } = security
+  const anyIncident = incidents.opened > 0 || reports.filed + reports.missing > 0
+  const incidentCounts: CountTableProps['counts'] = [
+    [['opened'], incidents.opened],
+    [['halted'], incidents.halted],
+    [['reports filed'], reports.filed],
+    [['reports that checked'], reports.checked],
+    [['reports missing'], reports.missing],
+  ]
+  const noIncident = 'no security incident today'
+  return [
+    {
+      caption: 'security signals by kind (#464)',
+      empty: 'no security signal today',
+      headings: ['signal'],
+      counts: security.signals.map((signal) => [[signal.signal], signal.count]),
+    },
+    {
+      caption: 'security incidents (#466, #467)',
+      empty: noIncident,
+      headings: ['what'],
+      counts: anyIncident ? incidentCounts : [],
+    },
+    {
+      caption: 'security incidents by model',
+      empty: noIncident,
+      headings: ['model'],
+      countHeading: 'incidents',
+      counts: security.models.map((row) => [[row.model], row.incidents]),
+    },
+    {
+      caption: 'incident resolutions',
+      empty: 'no incident resolved today',
+      headings: ['classification', 'outcome'],
+      counts: security.resolutions.map((resolution) => [
+        [resolution.classification, resolution.outcome],
+        resolution.count,
+      ]),
+    },
+  ]
 }
 
 /** The page. `fetch` is the test seam (#118's convention) — the browser's own otherwise. */
