@@ -181,8 +181,9 @@ interface Classification {
   readonly apiKey?: string
   /**
    * ⚠ A llama.cpp router closes kept-alive connections Bun still pools, and a POST on one dies at
-   * 0 ms ("socket connection was closed unexpectedly") — measured: one call in four on the router
-   * #535's smoke ran. On loopback a new connection costs nothing beside seconds of inference.
+   * 0 ms ("socket connection was closed unexpectedly") — measured on #535's router: 5 of 12 calls
+   * in a row failed so with pooling, 0 of 12 with a fresh connection each. On loopback a new
+   * connection costs nothing beside seconds of inference.
    */
   readonly freshConnections?: boolean
 }
@@ -276,27 +277,25 @@ export function createLocalJudge(
   options: TransportOptions & { readonly baseUrl: string; readonly model: string },
 ): CommandJudge {
   const endpoint = loopbackUrlOf(options.baseUrl)
-  const model: ClassifierModel<'llama-cpp-classify'> | undefined =
-    'problem' in endpoint
-      ? undefined
-      : {
-          type: 'classifier',
-          id: options.model,
-          name: options.model,
-          api: 'llama-cpp-classify',
-          provider: 'llama.cpp',
-          baseUrl: endpoint.url,
-          input: ['text'],
-          cost: NO_COST,
-          contextWindow: 32_768,
-        }
+  if ('problem' in endpoint) {
+    const { problem } = endpoint
+    return { backend: 'local', judge: async (): Promise<EnsoJudgeOutcome> => ({ kind: 'unjudged', reason: problem }) }
+  }
+  const model: ClassifierModel<'llama-cpp-classify'> = {
+    type: 'classifier',
+    id: options.model,
+    name: options.model,
+    api: 'llama-cpp-classify',
+    provider: 'llama.cpp',
+    baseUrl: endpoint.url,
+    input: ['text'],
+    cost: NO_COST,
+    contextWindow: 32_768,
+  }
+  const call = { classify: classifyLlamaCpp, model, label: 'llama.cpp', freshConnections: true }
   return {
     backend: 'local',
-    async judge(state: EnsoJudgeState, signal?: AbortSignal): Promise<EnsoJudgeOutcome> {
-      if (model === undefined)
-        return { kind: 'unjudged', reason: 'problem' in endpoint ? endpoint.problem : 'no model' }
-      const call = { classify: classifyLlamaCpp, model, label: 'llama.cpp', freshConnections: true }
-      return judgeWith(call, state, { ...options, ...(signal === undefined ? {} : { signal }) })
-    },
+    judge: (state: EnsoJudgeState, signal?: AbortSignal): Promise<EnsoJudgeOutcome> =>
+      judgeWith(call, state, { ...options, ...(signal === undefined ? {} : { signal }) }),
   }
 }
