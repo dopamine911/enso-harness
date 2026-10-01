@@ -160,8 +160,9 @@ for (const path of sessions.unreadable) {
 const projectPath = realpathOrSelf(process.cwd())
 const projectId = projectIdOf(projectPath)
 const sessionDir = projectSessionsDir(projectsDir, projectId)
-// `projects.json` read once, loosely: a file that does not parse means "no entries" here — the
-// server refuses it with a reason; this line only tells the user why the web may not list the thread.
+// `projects.json` read once, loosely: a file that cannot be read (anything but absent — a
+// permission error too) or does not parse means "no entries" HERE — the server is what refuses it,
+// with a reason; this line only tells the user why the web may not list the thread.
 const registeredProjectPaths = ((): string[] => {
   try {
     const parsed: unknown = JSON.parse(readTextIfPresent(ensoProjectsPath(home)) ?? '{"projects":[]}')
