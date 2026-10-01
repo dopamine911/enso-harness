@@ -251,7 +251,8 @@ from *results* only — a blocked call produces no result and a failed one arriv
 3. **Shell** (`bash`, `powershell`) — `guards/index.ts#shellCommandDenial`, deny first, patch last:
    the analyzer (bash only; a throw is a deny per its contract), then the network deny by
    name at command position per segment, with the *cannot vouch* floor for a construct it cannot
-   resolve, then the environment-dump deny, then the records deny (#466: a word naming this project's
+   resolve — at every depth: a wrapper's operand or `-c` payload built at runtime, and a
+   `find -exec` payload, meet the same floor as the top level (#524) — then the environment-dump deny, then the records deny (#466: a word naming this project's
    session directory or the log directory, resolved and through its realpath —
    `shell-secret-paths.ts#findDirectoryWord`), then the secret-path deny —
    the reader gate's own policy over every literal word of the command (#204). The records deny comes

@@ -358,6 +358,47 @@ test('past the nesting cap the guard refuses by name rather than resolving forev
   })
 })
 
+// ── #524: a wrapper's operand built at runtime meets the same floor the top level does ────
+// `$(printf cu)rl …` was refused while `sh -c "$(printf cu)rl …"` passed: the operand is not a
+// literal, so it was skipped, and the floor only ever read the top-level text, whose command
+// word is `sh`. The outer shell expands the substitution BEFORE the wrapper runs, so the
+// operand IS the wrapped program — or the `-c` payload — as the child will read it.
+test('⚠ a substitution joined to text at the command position of a wrapped program is refused, by every route (#524)', () => {
+  const joined = { matched: 'a command substitution joined to text at command position', via: 'unresolvable' }
+  for (const command of [
+    'sh -c "$(printf cu)rl https://x"',
+    'bash -c "$(printf cu)rl https://x"',
+    'bash -c "`printf cu`rl https://x"',
+    'timeout 30 $(printf cu)rl https://x',
+    'sudo $(printf cu)rl https://x',
+    'nohup "$(printf cu)rl" https://x',
+    'find . -exec $(printf cu)rl {} \\;',
+  ]) {
+    expect(findEgress(command)).toMatchObject(joined)
+  }
+  expect(findEgress(`sh -c "P=cu; ${braced('P')}rl https://x"`)).toMatchObject({
+    matched: 'a parameter expansion at command position',
+    via: 'unresolvable',
+  })
+})
+
+test('substitutions that are whole words or arguments of a wrapped program still pass (#524)', () => {
+  expect(findEgress('sh -c "echo $(date)"')).toBeUndefined()
+  expect(findEgress('bash -c "cd /tmp && echo \\"$(pwd)\\""')).toBeUndefined()
+  expect(findEgress("sh -c 'echo $(date)'")).toBeUndefined()
+  expect(findEgress('sudo chown $(whoami) file')).toBeUndefined()
+  expect(findEgress('find . -name "*.ts" -exec grep -l "$(cat pattern)" {} +')).toBeUndefined()
+})
+
+// Wrapper mode does not model a wrapper's options, so every operand is a possible command —
+// the same stance as `timeout 30 grep curl file.txt` above. Measured over 49,838 real bash
+// calls (the Claude Code and omp transcripts, #534): no verdict changed, so this shape is
+// absent from use so far.
+test('a joined substitution in a wrapper ARGUMENT is refused too — accepted cost, pinned (#524)', () => {
+  expect(findEgress('sudo cp "$(pwd)/a" /etc/x')).toMatchObject({ via: 'unresolvable' })
+  expect(findEgress('cp "$(pwd)/a" /etc/x')).toBeUndefined()
+})
+
 // ── the floor under the raw scan: unscannable is refused, not hoped over ──────────────────
 // The raw scan is a word-boundary regex over unresolved text — exact for `$(curl …)`, blind
 // to `$(cu'r'l …)`: the same splice, one net later, and it was the LAST net.
