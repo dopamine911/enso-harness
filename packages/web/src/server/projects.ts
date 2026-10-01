@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto'
 import {
   type Dirent,
   existsSync,
@@ -21,7 +20,7 @@ import {
   ensoLogger,
   isEnsoProjectId,
 } from '@enso/core'
-import { realpathOrSelf } from '@enso/core/paths'
+import { projectIdOf, realpathOrSelf } from '@enso/core/paths'
 import { Compile } from 'typebox/compile'
 
 /**
@@ -148,11 +147,6 @@ function listingOf(
     directories: directories.slice(0, MAX_BROWSED_DIRECTORIES),
     truncated: directories.length > MAX_BROWSED_DIRECTORIES,
   }
-}
-
-/** The id of a canonical directory: its path, hashed. Sixteen hex digits (`isEnsoProjectId`). */
-function projectIdOf(canonicalPath: string): string {
-  return createHash('sha256').update(canonicalPath).digest('hex').slice(0, 16)
 }
 
 function isDirectory(path: string): boolean {

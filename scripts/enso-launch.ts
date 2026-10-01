@@ -158,6 +158,39 @@ export function secretsKeptOutLine(removed: readonly string[]): string {
   return `enso: secrets kept out of pi's environment (#89): ${removed.join(', ')}`
 }
 
+/**
+ * Whether the web surface would list threads of `projectPath` (#552): a `projects.json` entry names
+ * it, or it is the directory the web server launches in — Enso's own checkout under `bun run dev`,
+ * which is a project without an entry (`server/projects.ts`: the launch project, never removable).
+ * Paths are compared canonical; the caller canonicalises both sides.
+ */
+export function isRegisteredProject(
+  projectPath: string,
+  registered: readonly string[],
+  webLaunchDirectory: string,
+): boolean {
+  return projectPath === webLaunchDirectory || registered.includes(projectPath)
+}
+
+/**
+ * The launch's line naming the project its threads file under (#552): the directory pi is
+ * launched in, by id. When the web surface would not list it, say so — it lists a project's
+ * threads only once the directory is registered, and a terminal launched in a subdirectory of a
+ * registered project is its own, unregistered project.
+ */
+export function projectLine(launch: {
+  readonly projectId: string
+  readonly cwd: string
+  readonly registered: boolean
+}): string {
+  return (
+    `enso: project=${launch.projectId} (${launch.cwd})` +
+    (launch.registered
+      ? ''
+      : ' — not in projects.json: the web surface lists these threads once this directory is registered as a project')
+  )
+}
+
 /** What the launch is about to spawn, as its last line before pi's own screen says it. */
 export interface VanillaPiLaunch {
   readonly piVersion: string

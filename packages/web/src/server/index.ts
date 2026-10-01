@@ -405,6 +405,8 @@ export interface EnsoServerOptions {
   projectsStatePath?: string
   /** The prompt library's directory (`ENSO_HOME/prompts`, #443); absent, the server has none and says so. */
   promptsDir?: string
+  /** The project folders (`ENSO_HOME/projects`, #552): where a thread's session is filed, under its project's id; absent, pi's default. */
+  projectsDir?: string
   /**
    * The risk fold's thresholds, from the user's config (`security.incidents`, #466) — user-only, like
    * `projectRoots`. Absent, the defaults: what the guard measures with when the config sets none.
@@ -525,6 +527,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
       agentDir: options.agentDir,
       harnessPackageDir: options.harnessPackageDir,
       permissionRulesPath: options.permissionRulesPath,
+      ...(options.projectsDir === undefined ? {} : { projectsDir: options.projectsDir }),
     })
   const threads = createThreadRegistry({
     // A thread with a session on disk is opened where pi recorded it; a new one where its project

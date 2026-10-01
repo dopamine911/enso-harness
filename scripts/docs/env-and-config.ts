@@ -154,6 +154,14 @@ const ENVIRONMENT_METADATA: readonly EnvironmentMetadata[] = [
     phase: 'boot',
   },
   {
+    key: 'PI_CODING_AGENT_SESSION_DIR',
+    source: 'scripts/enso.ts',
+    reader: '`scripts/enso.ts` (pi child environment write)',
+    purposeAndDefault:
+      'Always set, to the launch directory’s project folder — `ENSO_HOME/projects/<projectIdOf(cwd)>/sessions` — so the terminal and the web surface file and read one project’s threads in one place (#552). Unset, pi would file by encoded cwd under the agent dir.',
+    phase: 'boot',
+  },
+  {
     key: 'PI_CODING_AGENT_DIR',
     source: 'packages/harness/extensions/run-context/index.ts',
     reader: '`packages/harness/extensions/run-context/index.ts` (the default export’s `readPermissionPolicy`)',
@@ -417,6 +425,15 @@ const RUNTIME_PATH_METADATA: readonly RuntimePathMetadata[] = [
     writer: 'The web server, when a page registers or removes a project (#395); written whole and renamed over.',
     lifetime: 'Per-user until a project is removed; entries outside the configured roots are kept but not served.',
     check: { file: 'packages/web/src/server/projects.ts', contains: 'renameSync(staging, statePath)' },
+  },
+  {
+    helper: 'ensoProjectsDir',
+    path: 'ENSO_HOME/projects',
+    writer:
+      'One folder per project, named by `projectIdOf` (sixteen hex digits of the real path’s SHA-256; `projects.json` is the only id↔path map). Under it, `sessions/` holds the project’s thread logs — pi’s session files (#552): the web host and `bun run enso` both file there (`PI_CODING_AGENT_SESSION_DIR`), and a launch first moves the sessions pi filed by encoded cwd under the agent dir into their folders, never over an existing file. Reserved beside it: `trees/` and `snapshots/` (#551).',
+    lifetime:
+      'Per-user; a moved checkout changes its id, so its threads stay under the old one until moved by hand. Trust (`pi-agent/trust.json`) and the checkout’s `.enso/config.json` stay where they are.',
+    check: { file: 'packages/core/src/paths.ts', contains: 'export function migrateSessionsIntoProjects' },
   },
   {
     helper: 'ensoPromptsDir',

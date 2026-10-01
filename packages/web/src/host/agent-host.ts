@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { basename, join, resolve } from 'node:path'
 import { getSupportedThinkingLevels } from '@earendil-works/pi-ai'
 import {
   createAgentSessionFromServices,
@@ -13,6 +13,7 @@ import {
   type PromptOptions,
   ProjectTrustStore,
   type SessionEntry,
+  type SessionInfo,
   SessionManager,
 } from '@earendil-works/pi-coding-agent'
 import {
@@ -59,8 +60,16 @@ import {
   THREAD_PROJECT_TRUST,
   type ThreadRuntime,
   DEFAULT_GUARD_POLICY,
+  isEnsoProjectId,
 } from '@enso/core'
-import { ensoHome, ensoSecretsPath, findRepoRoot } from '@enso/core/paths'
+import {
+  ensoHome,
+  ensoSecretsPath,
+  findRepoRoot,
+  projectIdOf,
+  projectSessionsDir,
+  realpathOrSelf,
+} from '@enso/core/paths'
 import { describePermissionPolicy, preparePermissionPolicy } from '@enso/core/permission-rules'
 import { knownSecretValues, quarantineSecrets } from '@enso/core/secrets'
 import { getPermissionsService } from '@gotgenes/pi-permission-system'
@@ -362,6 +371,14 @@ export interface AgentHostOptions {
    * held, not the user's policy.
    */
   permissionRulesPath: string
+  /**
+   * The project folders (`ENSO_HOME/projects`, #552): a thread's session is filed under its
+   * project's `sessions/` — `projectSessionsDir(projectsDir, projectIdOf(cwd))` — whatever cwd it
+   * runs in, and every project's folder is listed beside pi's own session directories. Absent, pi
+   * files sessions where it does by default (`<agentDir>/sessions/<encoded-cwd>/`): tests, and a
+   * launcher that has not set a home.
+   */
+  projectsDir?: string
   /**
    * The environment the secrets quarantine (#89) scrubs — `process.env` in production, the
    * one pi and every `bash` child inherit. A seam so the quarantine is testable without a
@@ -794,7 +811,10 @@ function inheritedOpening(sourceThreadId: string, source: EnsoIncidentOpened): E
 }
 
 export function createAgentHost(options: AgentHostOptions): AgentHost {
-  const { agentDir, harnessPackageDir, servesDirectory } = options
+  const { agentDir, harnessPackageDir, servesDirectory, projectsDir } = options
+  /** Where a thread in `cwd` is filed (#552): its project's `sessions/`; pi's default when no projects folder is set. */
+  const sessionDirFor = (cwd: string): string | undefined =>
+    projectsDir === undefined ? undefined : projectSessionsDir(projectsDir, projectIdOf(realpathOrSelf(cwd)))
 
   // Order matters, and it is the module header's ⚠⚠ items: env before any pi module can
   // be imported by the loader, the proxy pin and the independent-roots switch before the first
@@ -836,22 +856,33 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   initTheme()
 
   /**
-   * pi's listing, through its API — never a directory scan: the file naming is pi's to
-   * change, and `listAll` reads each file's header for the id and the directory. Every session
-   * this host ever built is under the ONE agent dir (the env pin above), whatever its directory,
-   * so `listAll` is the whole set; cost is one parse per file, paid per call. Sessions pi has not
-   * flushed yet (no assistant message) have no file and are not listed — there is nothing to
-   * come back to.
+   * pi's listing, through its API — never a directory scan of the files: the file naming is pi's
+   * to change, and `listAll` reads each file's header for the id and the directory. Two places are
+   * listed (#552): pi's default session directories under the ONE agent dir (the env pin above),
+   * where the terminal launcher filed sessions before the project folders and where a session of
+   * a project whose directory is gone still sits; and every project folder's `sessions/`,
+   * registered or not — `locate` must tell "none" from "not yours". Cost is one parse per file,
+   * paid per call. Sessions pi has not flushed yet (no assistant message) have no file and are not
+   * listed — there is nothing to come back to.
    */
   async function everySession(): Promise<StoredThread[]> {
-    const listed = await SessionManager.listAll()
+    const listings = await Promise.all([...projectSessionListings(), SessionManager.listAll()])
+    // One entry per thread id. The project folders are listed FIRST, so when the migration kept a
+    // legacy copy beside a file the folder already held (same name, same id), the folder's copy is
+    // the thread and the legacy one is not listed — one thread, the same one on every call.
+    const byId = new Map<string, SessionInfo>()
+    for (const info of listings.flat()) if (!byId.has(info.id)) byId.set(info.id, info)
+    const listed = [...byId.values()]
     // A fork's header names its parent by FILE (#433); the thread is that file's session id, read
-    // off the same listing. A parent file that is gone names no thread, so the fork carries none.
+    // off the same listing. The path misses once the parent has moved into its project folder
+    // (#552's migration), so the file's NAME — `<timestamp>_<id>.jsonl`, unique by id — is tried
+    // next. A parent file that is gone names no thread, so the fork carries none.
     const idByPath = new Map(listed.map((info) => [resolve(info.path), info.id]))
+    const idByName = new Map(listed.map((info) => [basename(info.path), info.id]))
+    const parentOf = (path: string): string | undefined => idByPath.get(resolve(path)) ?? idByName.get(basename(path))
     return listed
       .map((info) => {
-        const parentThreadId =
-          info.parentSessionPath === undefined ? undefined : idByPath.get(resolve(info.parentSessionPath))
+        const parentThreadId = info.parentSessionPath === undefined ? undefined : parentOf(info.parentSessionPath)
         // ⚠ pi's `modified` is the last message's time, and a fork COPIES its source's messages
         // with their timestamps (#447): a fork taken now of a thread idle for hours read as hours
         // old, and sorted with it. The header's `created` is when the fork was made; for any other
@@ -870,6 +901,24 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         }
       })
       .sort((first, second) => second.modified.getTime() - first.modified.getTime())
+  }
+
+  /**
+   * One `listAll` per project folder that has a `sessions/` — every folder, registered or not; none
+   * when there is no projects folder. In NAME order, not the filesystem's: `everySession` keeps the
+   * first file it sees per thread id, and two folders holding one id (a hand-made copy beside a
+   * moved checkout's) must resolve to the same one on every call and on every machine — the
+   * lexically first folder's.
+   */
+  function projectSessionListings(): Promise<SessionInfo[]>[] {
+    if (projectsDir === undefined || !existsSync(projectsDir)) return []
+    return readdirSync(projectsDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && isEnsoProjectId(entry.name))
+      .map((entry) => entry.name)
+      .toSorted()
+      .map((name) => projectSessionsDir(projectsDir, name))
+      .filter((directory) => existsSync(directory))
+      .map((directory) => SessionManager.listAll(directory))
   }
 
   async function listSessions(): Promise<StoredThread[]> {
@@ -1035,7 +1084,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     // `active_agent` entries and the transcript land where the TUI's would; `permissionModeState()` below walks them.
     const sessionManager =
       located === undefined
-        ? SessionManager.create(cwd, undefined, { id: threadId })
+        ? SessionManager.create(cwd, sessionDirFor(cwd), { id: threadId })
         : SessionManager.open(located.path)
     // The thread's system prompt (#443): the one its branch recorded, else pi's default until a
     // Start chooses one (`setSystemPrompt` below). An entry that does not read refuses the build —

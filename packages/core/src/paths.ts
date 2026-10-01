@@ -20,15 +20,19 @@
  * @module
  */
 
+import { createHash } from 'node:crypto'
 import {
+  closeSync,
   constants,
   copyFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
+  openSync,
   readdirSync,
   readFileSync,
   readlinkSync,
+  readSync,
   realpathSync,
   renameSync,
   rmdirSync,
@@ -370,6 +374,186 @@ export function ensoLogsDir(home: string): string {
  */
 export function ensoProjectsPath(home: string): string {
   return join(home, 'projects.json')
+}
+
+/**
+ * The id of a canonical project directory: its path, hashed — sixteen hex digits
+ * (`isEnsoProjectId`). The key everything Enso holds ABOUT a project is filed under
+ * (`ensoProjectsDir`, #552), and `projects.json` the only id↔path map. ⚠ The path must be the
+ * CANONICAL one (`realpath`), as the registry makes it: the same directory, one id. A moved
+ * checkout is a new id; its folder stays behind until moved by hand (#552's decision).
+ *
+ * @group Workspace paths
+ */
+export function projectIdOf(canonicalPath: string): string {
+  return createHash('sha256').update(canonicalPath).digest('hex').slice(0, 16)
+}
+
+/**
+ * Everything Enso holds ABOUT its projects (#552): `ENSO_HOME/projects/<id>/`, one folder per
+ * project id, holding the project's sessions (`projectSessionsDir`) and, with #551, its threads'
+ * trees and snapshots. What a project says about ITSELF (`<project>/.enso/config.json`) stays in
+ * the checkout, trust-gated; pi's trust store stays pi's. The registry (`ensoProjectsPath`) is the
+ * one map from id to path.
+ *
+ * @group Workspace paths
+ */
+export function ensoProjectsDir(home: string): string {
+  return join(home, 'projects')
+}
+
+/**
+ * A project's sessions: `<projectsDir>/<id>/sessions`, the directory pi is handed as its session
+ * directory for every thread of the project — whatever cwd the thread runs in (a #551 tree is not
+ * the project), so the thread is always filed under its project and found there.
+ *
+ * @group Workspace paths
+ */
+export function projectSessionsDir(projectsDir: string, projectId: string): string {
+  return join(projectsDir, projectId, 'sessions')
+}
+
+/**
+ * What `migrateSessionsIntoProjects` did: files moved, files left because the target held one,
+ * directories whose cwd is gone.
+ *
+ * @group Workspace paths
+ */
+export interface SessionMigration {
+  /** Files now in their project folder. */
+  readonly moved: string[]
+  /** Legacy files left in place: the project folder already held one of that name. */
+  readonly kept: string[]
+  /** Legacy directories left in place: a session's cwd no longer exists, so it has no project. */
+  readonly orphaned: string[]
+  /** Legacy files left in place: no header with a cwd on the first line — not pi's shape, or the tail a pre-#552 process kept appending after a move. */
+  readonly unreadable: string[]
+}
+
+/** The most a session file's first line is read: two `PATH_MAX` paths (8 KiB) and headroom. */
+const HEADER_LINE_BOUND = 64 * 1024
+const NEWLINE = 0x0a
+
+/**
+ * The first line of a pi session file: the header, with the cwd the session ran in. `gone` when the
+ * file is no longer there — another launcher moved it between the directory read and this open;
+ * `unreadable` when the first line is not a header with a cwd.
+ */
+function sessionCwdOf(file: string): { kind: 'cwd'; cwd: string } | { kind: 'gone' } | { kind: 'unreadable' } {
+  let descriptor: number
+  try {
+    descriptor = openSync(file, 'r')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { kind: 'gone' }
+    throw error
+  }
+  try {
+    // The first line whole: read until its newline, or EOF, or the bound — a header is two paths
+    // and a few fields, far under it; a line past the bound is not pi's header and is `unreadable`.
+    const chunks: Buffer[] = []
+    let total = 0
+    let position = 0
+    while (total < HEADER_LINE_BOUND) {
+      const chunk = Buffer.alloc(4096)
+      const read = readSync(descriptor, chunk, 0, chunk.length, position)
+      if (read === 0) break
+      chunks.push(chunk.subarray(0, read))
+      total += read
+      position += read
+      if (chunk.subarray(0, read).includes(NEWLINE)) break
+    }
+    const firstLine = Buffer.concat(chunks).toString('utf8').split('\n')[0] ?? ''
+    const header: unknown = JSON.parse(firstLine)
+    const cwd = (header as { cwd?: unknown }).cwd
+    return typeof cwd === 'string' && cwd.length > 0 ? { kind: 'cwd', cwd } : { kind: 'unreadable' }
+  } catch {
+    return { kind: 'unreadable' }
+  } finally {
+    closeSync(descriptor)
+  }
+}
+
+/** A directory's `.jsonl` names; none when another launcher removed the directory first. */
+function sessionFileNames(directory: string): string[] {
+  try {
+    return readdirSync(directory).filter((name) => name.endsWith('.jsonl'))
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
+    throw error
+  }
+}
+
+/** Remove an emptied legacy directory; one already gone, or refilled meanwhile, stays as it is. */
+function removeIfEmpty(directory: string): void {
+  try {
+    if (readdirSync(directory).length === 0) rmdirSync(directory)
+  } catch (error) {
+    const { code } = error as NodeJS.ErrnoException
+    if (code !== 'ENOENT' && code !== 'ENOTEMPTY') throw error
+  }
+}
+
+/**
+ * The migration a LAUNCH runs after `migrateCheckoutEnsoOnLaunch` (#552): every session pi filed
+ * under its default `<agentDir>/sessions/<encoded-cwd>/` moves to its project's folder,
+ * `projects/<projectIdOf(realpath(cwd))>/sessions/`, so both surfaces read and write one place.
+ * Each file is moved by `moveEntry`: never over one the target already holds (`kept`). Two
+ * launchers may run this at once (the web and a terminal start together): a file or directory the
+ * other moved or removed first is gone, not an error, at every step. A session whose cwd no longer
+ * exists has no canonical path and no project; its directory is reported `orphaned` and left where
+ * it is. A file with no readable header is `unreadable` and left too. Emptied legacy directories
+ * are removed.
+ *
+ * ⚠ A file a RUNNING pre-#552 process still appends to is split by the move: pi appends by path
+ * (`appendFileSync(this.sessionFile)`), so its next entry recreates a headerless file at the old
+ * path — which the next launch reports `unreadable`, by name, for the user to join by hand. The
+ * launchers say so; a server of this version opens legacy files only for orphans, whose directory
+ * is never moved while it is an orphan.
+ *
+ * ⚠ A fork's header names its parent by FILE PATH (#433); after a move that path is stale. The
+ * host resolves a parent by its file's basename when the path misses (`agent-host.ts#everySession`),
+ * since pi names a file `<timestamp>_<id>.jsonl`. pi's own headers are not rewritten.
+ *
+ * @group Workspace paths
+ */
+export function migrateSessionsIntoProjects(agentDir: string, projectsDir: string): SessionMigration {
+  const legacyRoot = join(agentDir, 'sessions')
+  const migration: SessionMigration = { moved: [], kept: [], orphaned: [], unreadable: [] }
+  if (!existsSync(legacyRoot)) return migration
+  for (const entry of readdirSync(legacyRoot, { withFileTypes: true })) {
+    // A real directory only. pi's `listAll` follows a symlinked one too; a launch does not move
+    // files out of a directory the user linked here by hand, nor `rmdir` a link (ENOTDIR). Its
+    // sessions stay listed from where they are.
+    if (!entry.isDirectory()) continue
+    const directory = join(legacyRoot, entry.name)
+    let orphaned = false
+    for (const name of sessionFileNames(directory)) {
+      const source = join(directory, name)
+      const header = sessionCwdOf(source)
+      if (header.kind === 'gone') continue
+      if (header.kind === 'unreadable') {
+        migration.unreadable.push(source)
+        continue
+      }
+      let canonical: string | undefined
+      try {
+        canonical = realpathSync(header.cwd)
+      } catch {
+        canonical = undefined
+      }
+      if (canonical === undefined) {
+        orphaned = true
+        continue
+      }
+      const target = join(projectSessionsDir(projectsDir, projectIdOf(canonical)), name)
+      const outcome = moveEntry(source, target)
+      if (outcome === 'moved') migration.moved.push(target)
+      else if (outcome === 'kept') migration.kept.push(source)
+    }
+    if (orphaned) migration.orphaned.push(directory)
+    else removeIfEmpty(directory)
+  }
+  return migration
 }
 
 /**
