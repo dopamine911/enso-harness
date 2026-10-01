@@ -108,6 +108,14 @@ const ENVIRONMENT_METADATA: readonly EnvironmentMetadata[] = [
     phase: 'load',
   },
   {
+    key: 'TMPDIR',
+    source: 'test/scratch-preload.ts',
+    reader: '`test/scratch-preload.ts` (process write, before any test file loads)',
+    purposeAndDefault:
+      'Set by the test preload to a per-run scratch directory, so every temporary directory a suite or a spawned child makes lands in one place that is removed when the run ends — the suites leaked ~1,000 directories per gate run and filled a tmpfs’s inodes (#546). Never read by Enso itself.',
+    phase: 'load',
+  },
+  {
     key: 'FORCE_COLOR',
     source: 'scripts/gate.ts',
     reader: '`scripts/gate.ts#runGate` (child environment write)',

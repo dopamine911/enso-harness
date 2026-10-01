@@ -198,6 +198,12 @@ const GATE_METADATA: Readonly<Record<string, GateMetadata>> = {
     limitation:
       'Matches provenance text and static imports; dynamically assembled dependencies are outside the import matcher.',
   },
+  'test/scratch-gate.test.ts': {
+    roots: ['test/scratch-preload.ts'],
+    exceptions: [],
+    limitation:
+      'Runs one real `bun test` child under a fresh `TMPDIR` and holds that it is empty afterwards; a child a suite spawns with a hand-built environment that omits `TMPDIR` still writes to the real `/tmp`, and only review catches that.',
+  },
   'test/secret-scan-gate.test.ts': {
     roots: ['.github/workflows/secret-scan.yml'],
     exceptions: [],

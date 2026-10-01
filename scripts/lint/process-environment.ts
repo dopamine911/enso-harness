@@ -34,4 +34,5 @@ export const PROCESS_ENVIRONMENT_READERS: readonly string[] = [
   'scripts/dev.ts', // launcher of both surfaces: ENSO_HOME + levels for its own records (#385)
   'scripts/docs/site-base.ts', // ENSO_SITE_BASE: where the published site is served from
   'packages/web/e2e/e2e-home.ts', // the browser suite: its seeded home for the stack, ENSO_E2E_MODEL, PI_CODING_AGENT_DIR for the seed writer (#486)
+  'test/scratch-preload.ts', // the test run's TMPDIR, repointed at a per-run scratch directory before any test loads (#546)
 ]
