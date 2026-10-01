@@ -31,7 +31,7 @@ import { SLASH_PROMPT_REFUSAL } from './start-session.tsx'
  * deciding what a selection does. Nothing under `components/` reads the wire.
  *
  * Fetched on EVERY open, never cached and never polled: the route writes no record, the list
- * changes when a session is built (`remembered` → `live`), and a stale palette would offer a
+ * changes when a session is built (`catalogue` → `live`), and a stale palette would offer a
  * thread commands it cannot run. A response from an earlier open that lands after a later one
  * is dropped — the open counter is the sequencer. A non-2xx renders `<status> <body>` VERBATIM
  * inside the palette, not as a toast: the failure belongs to the popup that asked.
@@ -57,21 +57,18 @@ import { SLASH_PROMPT_REFUSAL } from './start-session.tsx'
  * the `/` button as the menu does by itself.
  *
  * A `host` row shows its current option's `label` on the right, dim (`Fake One`, `medium`), when
- * the row carries a `value`; a `remembered` list carries none — the server strips it, because a
- * thread with no live session has no current value — and the row still opens its step: choosing
- * the model before the first prompt is the #341 case, not an error. A `flow` row (`/login`,
- * `/logout`, slice 3) opens the same option dialog a `select` does — the choice is the same
- * gesture; what differs is what the server does with it (202: started, and the flow's questions
- * arrive as dialog cards), and that is the route's business, not the palette's.
+ * the row carries a `value`. A `flow` row (`/login`, `/logout`, slice 3) opens the same option
+ * dialog a `select` does — the choice is the same gesture; what differs is what the server does
+ * with it (202: started, and the flow's questions arrive as dialog cards), and that is the
+ * route's business, not the palette's.
  *
- * Empty states say WHICH empty. The server builds the thread's session when the palette asks
- * (#390), so `live` is the normal answer; `none` and `remembered` now mean that build FAILED —
- * `none` (nothing built in this process to fall back on) reads "the session could not start — no
- * commands to offer; the server log says why", and `remembered` shows the last session's rows
- * with a footer note that this thread's session could not start. A live list with zero rows
- * reads "this session registers no commands"; a filter that matches nothing reads "no command
- * matches". A sentence the server cannot back is a sentence the palette must not say (PR #343
- * review) — before #390 these two said "no thread has run yet", which a restart made routine.
+ * Empty states say WHICH empty. The route builds nothing (#86, #484): a thread the server holds
+ * answers its own list (`live`); any other thread answers the host's `catalogue` — the Start
+ * dialog's rows — and the palette lists NONE of those, because the slash commands belong to a
+ * running session; it reads the Start dialog's own sentence, "a / command needs a running
+ * session — start one with a prompt first". A live list with zero rows reads "this session
+ * registers no commands"; a filter that matches nothing reads "no command matches". A sentence
+ * the server cannot back is a sentence the palette must not say (PR #343 review).
  *
  * ⚠ NO RADIX MENU ITEM MAY LIVE INSIDE THIS CONTENT. The dropdown's content feeds every printable
  * key pressed anywhere inside it to its typeahead (`@radix-ui/react-menu`, `MenuContent.onKeyDown`)

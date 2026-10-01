@@ -51,7 +51,7 @@ import { createStore, type Store, useStore, useThreadStores } from './store.ts'
  * not-yet-run thread BUILDS on `POST …/command` so the choice lands in the session the first
  * prompt will run in. The dialog's options do not come from this store (which has nothing then):
  * they come from a fresh `GET …/commands`, whose `model` row lists what the host offers — the
- * same list for every session, so the `remembered` list is right for a thread that never ran.
+ * host's `catalogue` for a thread that never ran (#484), the same models a session would list.
  *
  * ⓘ ONE STORE PER THREAD (#90 PR 3): created by `thread-stores.ts`, read through `useThreadStores()`.
  *

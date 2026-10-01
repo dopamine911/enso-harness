@@ -6,12 +6,11 @@ import type { FetchLike } from './browser-logging.ts'
  * The `/` palette's one read (#338, slice 1): `GET /api/threads/:id/commands` — the slash
  * commands the thread's session registers, grouped by the server into extension commands,
  * prompt templates and skills, with a `source` that says whose list it is (`live`: this
- * thread's session; `remembered`: the last built session's, because every session builds it
- * from the same sources under the same configuration and this thread has no live session —
- * never ran, or ran and idled out; the server cannot tell; `none`: no session has been built in
- * this process). The route writes no record, so the palette calls this on EVERY open rather than
- * caching: the list changes when a session is built, and a stale palette would offer commands
- * a thread cannot run.
+ * thread's session; `catalogue`: the host's own rows over pi's models and credentials, for a
+ * thread with no live session — never ran, or ran and idled out; the server cannot tell — read
+ * with nothing built, #484). The route writes no record, so the palette calls this on EVERY open
+ * rather than caching: the list changes when a session is built, and a stale palette would offer
+ * commands a thread cannot run.
  *
  * Validated with the wire's own schema (`Check`), the shape `thread-debug.tsx` reads its
  * inspection with — a payload the schema refuses is an error, not a best-effort render. A
