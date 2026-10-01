@@ -133,7 +133,8 @@ function selectionOf(positionals: string[], flags: ReadonlyMap<string, string>):
   return {
     threads: positionals,
     source: source as JudgeSource,
-    unreadable: unreadable === undefined ? 200 : wholeNumber('--unreadable', unreadable),
+    // 0 is a real choice here — after-refusal cases only — where every other count starts at 1.
+    unreadable: unreadable === '0' ? 0 : wholeNumber('--unreadable', unreadable ?? '200'),
     under: directoriesOf(flags.get('--under')),
   }
 }

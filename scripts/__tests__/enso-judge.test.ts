@@ -58,6 +58,9 @@ test('⚠ replay without --send is a usage error that says why; the defaults and
     sample: 1,
   })
   expect(() => parseArguments(['cases', '--under', 'own'])).toThrow(/absolute/)
+  // After-refusal cases only.
+  expect(parseArguments(['cases', '--unreadable', '0'])).toMatchObject({ unreadable: 0 })
+  expect(() => parseArguments(['cases', '--unreadable', '-1'])).toThrow(UsageError)
   expect(() => parseArguments(['score', 'replay.jsonl'])).toThrow(UsageError)
   expect(() => parseArguments(['cases', '--send'])).toThrow(UsageError)
   expect(() => parseArguments(['cases', '--from', 'acme'])).toThrow(UsageError)
