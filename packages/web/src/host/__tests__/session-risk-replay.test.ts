@@ -8,9 +8,11 @@ import {
 import { transcriptOf } from '../transcript.ts'
 
 /**
- * #464: one branch, two readers. A resumed guard replays pi's raw entries; the thread snapshot and
- * the session eval replay the host's transcript of the same branch. They must agree, or a session
- * would show one risk and run under another.
+ * #464, then #557: one branch, ONE reader. A resumed guard, the thread snapshot and the session
+ * eval all replay the same transcript of the stored branch (`transcriptOf`), so they cannot
+ * disagree by construction; what this pins is the replay over the STORED shape — a batched call,
+ * a message that is not chat, and a person's No recorded before #464 without its call id — reading
+ * as the live fold would.
  */
 
 let clock = Date.parse('2026-09-30T12:00:00.000Z')
