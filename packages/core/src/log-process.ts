@@ -81,7 +81,14 @@ import {
   EnsoLogLine,
   ensoLogger,
 } from './log.ts'
-import { ensoHome, ensoLogsDir, migrateCheckoutEnsoOnLaunch } from './paths.ts'
+import {
+  ensoAgentDir,
+  ensoHome,
+  ensoLogsDir,
+  ensoProjectsDir,
+  migrateCheckoutEnsoOnLaunch,
+  migrateSessionsIntoProjects,
+} from './paths.ts'
 import {
   type EnsoProcessMarker,
   reconcileProcessMarkers,
@@ -415,6 +422,28 @@ export async function startLauncher(options: {
       {
         from,
         to,
+      },
+    )
+  }
+  // The sessions pi filed by cwd move into their project folders (#552), after the `.enso` move
+  // above put the agent dir where it now lives. Said like the move above: what moved, what stayed.
+  const sessions = migrateSessionsIntoProjects(ensoAgentDir(home), ensoProjectsDir(home))
+  if (sessions.moved.length > 0) {
+    log.info('moved {count} session file(s) into their project folders under {projectsDir} (#552)', {
+      count: sessions.moved.length,
+      projectsDir: ensoProjectsDir(home),
+    })
+  }
+  for (const path of sessions.kept) {
+    log.warn('{path} stays where it was: its project folder already holds a file of that name — keep one by hand', {
+      path,
+    })
+  }
+  for (const directory of sessions.orphaned) {
+    log.warn(
+      '{directory} stays where it was: the directory its sessions ran in no longer exists, so they have no project',
+      {
+        directory,
       },
     )
   }

@@ -58,11 +58,16 @@ import {
   ensoAgentDir,
   ensoHome,
   ensoPermissionRulesPath,
+  ensoProjectsDir,
   ensoSecretsPath,
   findRepoRoot,
   harnessPackageDir,
   migrateCheckoutEnsoOnLaunch,
+  migrateSessionsIntoProjects,
   printHarnessDir,
+  projectIdOf,
+  projectSessionsDir,
+  realpathOrSelf,
 } from '../packages/core/src/paths.ts'
 import { describePermissionPolicy, preparePermissionPolicy } from '../packages/core/src/permission-rules.ts'
 import { declaredResources, missingVendorPaths } from '../packages/core/src/pi-manifest.ts'
@@ -124,6 +129,26 @@ if (migration.held) {
 }
 const agentDir: string = ensoAgentDir(home)
 mkdirSync(agentDir, { recursive: true })
+
+// The project folders (#552): sessions pi filed by cwd move under their project's id, and this
+// launch's sessions are filed there too (`PI_CODING_AGENT_SESSION_DIR`), so the web surface and
+// the terminal read and write one place. The project is the directory pi is launched in.
+const projectsDir = ensoProjectsDir(home)
+const sessions = migrateSessionsIntoProjects(agentDir, projectsDir)
+if (sessions.moved.length > 0) {
+  process.stderr.write(
+    `enso: moved ${sessions.moved.length} session file(s) into their project folders under ${projectsDir} (#552)\n`,
+  )
+}
+for (const path of sessions.kept) {
+  process.stderr.write(
+    `enso: ⚠ ${path} stays where it was: its project folder already holds a file of that name — keep one by hand\n`,
+  )
+}
+for (const directory of sessions.orphaned) {
+  process.stderr.write(`enso: ⚠ ${directory} stays where it was: the directory its sessions ran in no longer exists\n`)
+}
+const sessionDir = projectSessionsDir(projectsDir, projectIdOf(realpathOrSelf(process.cwd())))
 
 // The policy the permission engine reads when pi loads it (#446, #496), prepared before the
 // spawn: seeded when it holds none, the engine's config path linked to it, refused when
@@ -272,7 +297,7 @@ process.stderr.write(
 
 const pi = Bun.spawn(['pi', ...args], {
   stdio: ['inherit', 'inherit', 'inherit'],
-  env: { ...process.env, PI_CODING_AGENT_DIR: agentDir },
+  env: { ...process.env, PI_CODING_AGENT_DIR: agentDir, PI_CODING_AGENT_SESSION_DIR: sessionDir },
 })
 // `exited` resolves with the exit code (never null, unlike Node's `exit` event).
 process.exit(await pi.exited)

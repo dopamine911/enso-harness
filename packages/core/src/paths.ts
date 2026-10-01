@@ -20,15 +20,19 @@
  * @module
  */
 
+import { createHash } from 'node:crypto'
 import {
+  closeSync,
   constants,
   copyFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
+  openSync,
   readdirSync,
   readFileSync,
   readlinkSync,
+  readSync,
   realpathSync,
   renameSync,
   rmdirSync,
@@ -370,6 +374,122 @@ export function ensoLogsDir(home: string): string {
  */
 export function ensoProjectsPath(home: string): string {
   return join(home, 'projects.json')
+}
+
+/**
+ * The id of a canonical project directory: its path, hashed — sixteen hex digits
+ * (`isEnsoProjectId`). The key everything Enso holds ABOUT a project is filed under
+ * (`ensoProjectDir`, #552), so a moved checkout keeps its threads when its registration is
+ * updated; an encoded path, as pi's and Claude Code's session directories use, loses them on a
+ * rename. ⚠ The path must be the CANONICAL one (`realpath`), as the registry makes it: the same
+ * directory, one id.
+ *
+ * @group Workspace paths
+ */
+export function projectIdOf(canonicalPath: string): string {
+  return createHash('sha256').update(canonicalPath).digest('hex').slice(0, 16)
+}
+
+/**
+ * Everything Enso holds ABOUT its projects (#552): `ENSO_HOME/projects/<id>/`, one folder per
+ * project id, holding the project's sessions (`projectSessionsDir`) and, with #551, its threads'
+ * trees and snapshots. What a project says about ITSELF (`<project>/.enso/config.json`) stays in
+ * the checkout, trust-gated; pi's trust store stays pi's. The registry (`ensoProjectsPath`) is the
+ * one map from id to path.
+ *
+ * @group Workspace paths
+ */
+export function ensoProjectsDir(home: string): string {
+  return join(home, 'projects')
+}
+
+/**
+ * A project's sessions: `<projectsDir>/<id>/sessions`, the directory pi is handed as its session
+ * directory for every thread of the project — whatever cwd the thread runs in (a #551 tree is not
+ * the project), so the thread is always filed under its project and found there.
+ *
+ * @group Workspace paths
+ */
+export function projectSessionsDir(projectsDir: string, projectId: string): string {
+  return join(projectsDir, projectId, 'sessions')
+}
+
+/**
+ * What `migrateSessionsIntoProjects` did: files moved, files left because the target held one,
+ * directories whose cwd is gone.
+ *
+ * @group Workspace paths
+ */
+export interface SessionMigration {
+  readonly moved: string[]
+  readonly kept: string[]
+  /** Session directories left in place: their cwd no longer exists, so no project id can be made for them. */
+  readonly orphaned: string[]
+}
+
+/** The first line of a pi session file: the header, with the cwd the session ran in. */
+function sessionCwdOf(file: string): string | undefined {
+  const descriptor = openSync(file, 'r')
+  try {
+    const buffer = Buffer.alloc(4096)
+    const read = readSync(descriptor, buffer, 0, buffer.length, 0)
+    const firstLine = buffer.toString('utf8', 0, read).split('\n')[0] ?? ''
+    const header: unknown = JSON.parse(firstLine)
+    const cwd = (header as { cwd?: unknown }).cwd
+    return typeof cwd === 'string' && cwd.length > 0 ? cwd : undefined
+  } catch {
+    return undefined
+  } finally {
+    closeSync(descriptor)
+  }
+}
+
+/**
+ * The migration a LAUNCH runs after `migrateCheckoutEnsoOnLaunch` (#552): every session pi filed
+ * under its default `<agentDir>/sessions/<encoded-cwd>/` moves to its project's folder,
+ * `projects/<projectIdOf(realpath(cwd))>/sessions/`, so both surfaces read and write one place.
+ * Each file is moved by `moveEntry`: never over one the target already holds (`kept`), and a file
+ * another launcher moved first is `gone`, not an error — the two dev launchers start at once. A
+ * session whose cwd no longer exists has no canonical path and no project; its directory is
+ * reported `orphaned` and left where it is. Emptied legacy directories are removed.
+ *
+ * ⚠ A fork's header names its parent by FILE PATH (#433); after a move that path is stale. The
+ * host resolves a parent by its file's basename when the path misses (`agent-host.ts#everySession`),
+ * since pi names a file `<timestamp>_<id>.jsonl`. pi's own headers are not rewritten.
+ *
+ * @group Workspace paths
+ */
+export function migrateSessionsIntoProjects(agentDir: string, projectsDir: string): SessionMigration {
+  const legacyRoot = join(agentDir, 'sessions')
+  const migration: SessionMigration = { moved: [], kept: [], orphaned: [] }
+  if (!existsSync(legacyRoot)) return migration
+  for (const entry of readdirSync(legacyRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue
+    const directory = join(legacyRoot, entry.name)
+    const files = readdirSync(directory).filter((name) => name.endsWith('.jsonl'))
+    let orphaned = false
+    for (const name of files) {
+      const source = join(directory, name)
+      const cwd = sessionCwdOf(source)
+      let canonical: string | undefined
+      try {
+        canonical = cwd === undefined ? undefined : realpathSync(cwd)
+      } catch {
+        canonical = undefined
+      }
+      if (canonical === undefined) {
+        orphaned = true
+        continue
+      }
+      const target = join(projectSessionsDir(projectsDir, projectIdOf(canonical)), name)
+      const outcome = moveEntry(source, target)
+      if (outcome === 'moved') migration.moved.push(target)
+      else if (outcome === 'kept') migration.kept.push(source)
+    }
+    if (orphaned) migration.orphaned.push(directory)
+    else if (readdirSync(directory).length === 0) rmdirSync(directory)
+  }
+  return migration
 }
 
 /**

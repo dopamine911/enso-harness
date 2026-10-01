@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, expect, setSystemTime, test } from 'bun:test'
 import { createHash } from 'node:crypto'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   createAgentSessionFromServices,
@@ -46,7 +46,7 @@ import {
 } from '@enso/core'
 import { flowTrace } from '@enso/core/flow-trace'
 import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
-import { findRepoRoot, harnessPackageDir, realpathOrSelf } from '@enso/core/paths'
+import { findRepoRoot, harnessPackageDir, projectIdOf, projectSessionsDir, realpathOrSelf } from '@enso/core/paths'
 import { ENSO_DEFAULT_PERMISSION_POLICY, permissionEngineConfigPath } from '@enso/core/permission-rules'
 import { getPermissionsService } from '@gotgenes/pi-permission-system'
 import type { LogRecorder } from '@logtape/testing/recorder'
@@ -1537,6 +1537,86 @@ test("⚠ forking a cold thread at turn two's prompt gives a new thread holding 
   const listed = await host.listSessions()
   expect(listed.find((stored) => stored.id === forked.threadId)?.parentThreadId).toBe(source)
   expect(listed.find((stored) => stored.id === source)?.parentThreadId).toBeUndefined()
+})
+
+// ── The project folders (#552) ────────────────────────────────────────────────────────────────
+
+// ⚠ With a projects folder, a thread's session is filed under ITS PROJECT'S id — not under pi's
+// cwd-encoded directory — and is listed, resumed and forked from there; a fork's parent is found
+// by its file NAME when the path the header names has moved (the migration moves it).
+test("⚠ a thread's session lives under ENSO_HOME/projects/<id>/sessions, is resumed from there, and its fork files beside it (#552)", async () => {
+  const projectsDir = mkdtempSync(join(tmpdir(), 'enso-projects-'))
+  const host = createAgentHost({
+    servesDirectory: servesRepoRoot,
+    agentDir,
+    permissionRulesPath,
+    harnessPackageDir: harnessDir,
+    projectsDir,
+    extensionFactories: [fauxModelExtension(createFauxCore())],
+  })
+  const threadId = crypto.randomUUID()
+  const hosted = await host.createSession(threadId, () => repoRoot)
+  openSessions.push(hosted)
+  await runPrompt(hosted, 'first')
+  const file = hosted.inspect().sessionFile
+  if (file === null) throw new Error('the session was not flushed')
+  const expectedDir = projectSessionsDir(projectsDir, projectIdOf(realpathOrSelf(repoRoot)))
+  expect(dirname(file)).toBe(expectedDir)
+  expect(hosted.inspect().sessionDir).toBe(expectedDir)
+  hosted.runtime.dispose()
+
+  // Listed from the project folder, and resumed from it — the same file.
+  expect((await host.listSessions()).find((stored) => stored.id === threadId)?.path).toBe(file)
+  const resumed = await host.createSession(threadId, () => {
+    throw new Error('a thread with a file was asked for a directory')
+  })
+  openSessions.push(resumed)
+  expect(resumed.inspect().sessionFile).toBe(file)
+  resumed.runtime.dispose()
+
+  // A fork of it files beside it, naming the parent by thread id.
+  const userEntryId = SessionManager.open(file)
+    .getBranch()
+    .find((entry) => entry.type === 'message' && entry.message.role === 'user')?.id
+  const forked = await host.forkThread(threadId, userEntryId ?? '')
+  if (forked.kind !== 'forked') throw new Error(`the fork was refused: ${forked.reason}`)
+  const listed = await host.listSessions()
+  const fork = listed.find((stored) => stored.id === forked.threadId)
+  expect(dirname(fork?.path ?? '')).toBe(expectedDir)
+  expect(fork?.parentThreadId).toBe(threadId)
+
+  // The parent moved to a directory the fork's header does NOT name (the reverse of what the
+  // launcher's migration does, same effect): the path misses, and the fork still finds its
+  // parent — by the file's name, read off the listing of pi's own session directories.
+  const elsewhere = join(agentDir, 'sessions', 'moved-by-hand')
+  mkdirSync(elsewhere, { recursive: true })
+  renameSync(file, join(elsewhere, basename(file)))
+  expect((await host.listSessions()).find((stored) => stored.id === forked.threadId)?.parentThreadId).toBe(threadId)
+})
+
+test('⚠ with no projects folder, sessions file where pi puts them, and a project folder that holds a thread of a directory this host does not serve is listed to locate but never served (#552)', async () => {
+  const projectsDir = mkdtempSync(join(tmpdir(), 'enso-projects-'))
+  const elsewhere = realpathOrSelf(mkdtempSync(join(tmpdir(), 'enso-other-project-')))
+  // A thread of ANOTHER project, already in its folder — as another server of the same home would leave it.
+  const other = crypto.randomUUID()
+  writeStoredSession({
+    cwd: elsewhere,
+    threadId: other,
+    turns: [['q', 'a']],
+    at: Date.now,
+    sessionDir: projectSessionsDir(projectsDir, projectIdOf(elsewhere)),
+  })
+  const host = createAgentHost({
+    servesDirectory: servesRepoRoot,
+    agentDir,
+    permissionRulesPath,
+    harnessPackageDir: harnessDir,
+    projectsDir,
+  })
+  expect((await host.listSessions()).some((stored) => stored.id === other)).toBe(false)
+  expect(await host.readStoredThread(other)).toBeUndefined()
+  // "Not yours", not "none": a create under that id is refused as not served, never built fresh.
+  await expect(host.createSession(other, () => repoRoot)).rejects.toThrow(/not a project this server/)
 })
 
 // #447: a fork copies its source's messages with their times, and pi's `modified` is the last

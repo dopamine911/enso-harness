@@ -21,9 +21,11 @@ export function writeStoredSession(options: {
   readonly turns: ReadonlyArray<readonly [user: string, assistant: string]>
   /** When the messages say they were sent; now unless a test needs an old thread. */
   readonly at?: () => number
+  /** Where to file it — a project folder's `sessions/` (#552); pi's cwd-encoded default when absent. */
+  readonly sessionDir?: string
 }): { file: string; userEntryIds: string[] } {
   const at = options.at ?? Date.now
-  const sessionDir = SessionManager.inMemory(options.cwd).getSessionDir()
+  const sessionDir = options.sessionDir ?? SessionManager.inMemory(options.cwd).getSessionDir()
   const stored = SessionManager.create(options.cwd, sessionDir, { id: options.threadId })
   const userEntryIds = options.turns.map(([userText, assistantText]) => {
     const userEntryId = stored.appendMessage({ role: 'user', content: userText, timestamp: at() })

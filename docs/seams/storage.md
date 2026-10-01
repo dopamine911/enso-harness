@@ -325,8 +325,14 @@ export const EnsoInterruptedTail = Type.Union([
 ## Who implements it, who consumes it
 
 **Implemented once**, in `packages/web/src/host/agent-host.ts`, the only file that imports the runtime's
-`SessionManager`. `listSessions` goes through the runtime's own listing (`SessionManager.listAll`), never a
-directory scan, newest first, and keeps only the sessions whose own directory — the one the runtime's
+`SessionManager`. A thread's file is filed under its project's folder,
+`ENSO_HOME/projects/<projectIdOf(cwd)>/sessions/` (#552) — the host hands that directory to the runtime at
+create, a fork inherits its source's, and `bun run enso` hands the terminal runtime the same directory
+(`PI_CODING_AGENT_SESSION_DIR`); a launch first moves the sessions the runtime filed by encoded cwd under
+its agent dir into their folders (`migrateSessionsIntoProjects`, never over an existing file).
+`listSessions` goes through the runtime's own listing (`SessionManager.listAll`, once per project folder
+and once over the runtime's own session directories), never a directory scan of the files, newest first,
+and keeps only the sessions whose own directory — the one the runtime's
 header records — passes the host's required `servesDirectory` rule: the server's projects (#395). A
 session made in any other directory is not listed, not read, and not reopened; building under its id
 is refused (`SessionDirectoryRefused`, answered 409 with its reason) rather than creating a second
