@@ -1510,6 +1510,7 @@ test('⚠ no tool call lifts a suspension; the announced resolution does, keepin
 
 // ⚠ #466 item 8: the records an incident rests on are refused by name on the shell route — a touch
 // is itself a signal — and a credential basename is not a record (it stays `secret-path`'s).
+// @pins guarded-tool-call/shell-deny-first
 test('⚠ a shell command naming the session or log directory is refused as protected-records and is a signal (#466)', () => {
   const runtime = loadGuardRuntime()
   runtime.sessionStart({ type: 'session_start', reason: 'start' }, { cwd })

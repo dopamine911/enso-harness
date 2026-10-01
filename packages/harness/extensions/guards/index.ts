@@ -610,22 +610,26 @@ function whySuspended(incidents: EnsoSessionIncidents): string {
  *    regression there LOUD: the listing is refused with a reason, instead of quietly
  *    printing a key into the transcript again. `environment-dump.ts` states its
  *    non-coverage (the interpreters), the same as the egress deny.
- * 4. The secret-path deny (#204) — the READER GATE'S OWN POLICY on this route. Measured
+ * 4. The records deny (#466) — a word naming this project's session directory or the log
+ *    directory, resolved and through its realpath (`findDirectoryWord`): the records an
+ *    incident rests on. BEFORE the secret-path deny, which refuses a literal `/.enso/` too,
+ *    so a touch of the records is named as one and raises its own signal.
+ * 5. The secret-path deny (#204) — the READER GATE'S OWN POLICY on this route. Measured
  *    before it existed: `read .enso/secrets.env` was refused and `cat .enso/secrets.env`
  *    was allowed, because nothing on the bash route resolved a path and cc-safety-net's
  *    corpus is `~/.aws`, `~/.ssh`, `.env`-basename — its "secret access THROUGH bash"
- *    half does not know this harness's own credential dir. LAST of the four: a command
+ *    half does not know this harness's own credential dir. LAST of the five: a command
  *    that is destructive, exfiltrating or dumping is refused for that first, which keeps
  *    the older reasons' wording stable. `shell-secret-paths.ts` states its non-coverage.
  *
  * @invariant guarded-tool-call/shell-deny-first Shell: deny first, patch last; the analyzer is a library.
  * For `bash` the cc-safety-net verdict is read first (a throw is a deny, per its contract), then
  * the network deny by name at command position per segment, with a *cannot vouch* refusal for a
- * construct it cannot resolve, then the environment-dump deny, then the secret-path deny.
- * `powershell` skips the analyzer for the coarse raw scan. Only a command that passed them all
- * gets `defaultBashTimeoutSeconds`, so no denied command has mutated input. What the analyzer
- * allows (a redirect into its own config dir) is our layers' job: the division of labour its
- * contract test pins against defaults.
+ * construct it cannot resolve, then the environment-dump deny, then the records deny, then the
+ * secret-path deny. `powershell` skips the analyzer for the coarse raw scan. Only a command that
+ * passed them all gets `defaultBashTimeoutSeconds`, so no denied command has mutated input. What
+ * the analyzer allows (a redirect into its own config dir) is our layers' job: the division of
+ * labour its contract test pins against defaults.
  */
 function shellCommandDenial(
   call: { toolName: string; command: string; cwd: string; recordDirectories: readonly string[] },
@@ -725,8 +729,9 @@ function shellCommandDenial(
  * @flow guarded-tool-call A tool call through the guard: one verdict, first block wins, always a record
  * Before any tool runs, the runtime raises `tool_call` and every extension's handler answers in
  * load order; the first `{ block: true, reason }` ends the call, and nothing after it can
- * un-block. Our guard is one handler with an ordered `decide` inside it: the fail-closed floor,
- * the shell denies, the write gates, then every other path-bearing tool as a reader. The bash
+ * un-block. Our guard is one handler with an ordered `decide` inside it: the fail-closed floor
+ * and an incident's suspension (`standingDenial`), the shell denies, the write gates, then every
+ * other path-bearing tool as a reader. The bash
  * analyzer is a library under that handler, not a participant of its own, so the count stays at
  * two (#4, #9). Every answer is a log record. A refused call reaches the browser as a result
  * flagged `isError` (the runtime's shape for any failure) and beside it the guard's own custom
