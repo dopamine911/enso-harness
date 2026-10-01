@@ -225,6 +225,27 @@ effective level (`log-process.ts#file`), and wraps the file sink — and the con
 (`log-process.ts#startLauncher`), which first moves a checkout's old `.enso/` into `ENSO_HOME` (#421), and
 the runtime as a child (`logging/index.ts#createLoggingExtension`, `'pi'`).
 
+**Four, since the dev launcher writes too** (`scripts/dev.ts`, `process: 'dev'`, #385): a child's exit
+code or signal is the one fact about its end the child cannot record, so `{label} exited ({exit})`
+(`log-stats.ts#ENSO_LOG_EVENTS`, `devChildExited`) goes to the file and not only to the terminal.
+
+**How a process ends is in the file too** (#385). `installLoggingShutdown`
+(`log-process.ts#installLoggingShutdown`) is one contract for both launchers and the dev launcher:
+a signal writes `process stopping on {signal}` *before* the flush, so the flush carries it, then exits
+`128 + the signal` (#267); an error outside every handler or an unhandled rejection writes one `fatal`
+`process crashed: {error}` with the stack, flushes, and exits 1 — installing the handlers replaces
+the runtime's own, so the explicit exit is what keeps a crashed server from running on half-dead.
+What no process can record — SIGKILL, OOM, power loss — is noticed by the *next* start: every
+process leaves a marker under `ENSO_HOME/logs/processes/` while it runs (`process-marker.ts#writeProcessMarker`,
+its role, pid and start time) and removes it on any end that still runs code; a start reconciles the
+directory (`process-marker.ts#reconcileProcessMarkers`) and writes `previous {role} pid {pid} started
+{startedAt} ended without a record` for each marker whose owner is gone. Liveness is the pid *and* its
+kernel start time (`/proc/<pid>/stat` on Linux), since a pid is reused after the very reboot a power
+loss is. The runtime as a child (`'pi'`) gets the marker and the reconciliation but not the signal and
+crash handlers — those are the runtime's own to install — so its unclean end is still said, by the
+next start. The day's stats fold the three outcomes per launch (`log-stats.ts#EnsoDayStats`, `processes[].ended`,
+`totals.stops/crashes/uncleanEnds`), and the Stats page shows them beside the provider refusals (#340).
+
 The extension is the interesting one: in-process under the web host the
 server configured before the runtime existed, `isLoggingConfigured()` is true, and it configures
 nothing — the extensions' records land in the server's file through the server's sinks. As a child

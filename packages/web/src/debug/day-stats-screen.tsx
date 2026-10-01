@@ -129,6 +129,8 @@ function describeTotals(stats: EnsoDayStats): string {
     `${countText(totals.toolCalls)} tool calls`,
     `${countText(totals.denials)} denials`,
     `${countText(totals.refusals)} provider refusals`,
+    // How the day's processes ended (#385): "why did it disconnect?" has an answer on the page.
+    `${countText(totals.stops)} stops / ${countText(totals.crashes)} crashes / ${countText(totals.uncleanEnds)} unclean ends`,
     `cost ${costText(totals.cost)}`,
     `${countText(totals.input)} in / ${countText(totals.output)} out`,
   ].join(' · ')
@@ -185,6 +187,18 @@ function knobsText(process: EnsoDayStats['processes'][number]): string {
   return knobs.length === 0 ? ABSENT : knobs.join(' · ')
 }
 
+/**
+ * How a launch ended (#385), or `—` while nothing says: still writing, or ended in a way no
+ * record and no later start has noticed. An unclean end's time is when it was NOTICED.
+ */
+function endedText(process: EnsoDayStats['processes'][number]): string {
+  const { ended } = process
+  if (ended === undefined) return ABSENT
+  if (ended.kind === 'stopped') return `stopped on ${ended.detail} at ${timeOfDay(ended.at)}`
+  if (ended.kind === 'crashed') return `crashed at ${timeOfDay(ended.at)}: ${ended.detail}`
+  return `ended without a record (noticed ${timeOfDay(ended.at)})`
+}
+
 /** The sections, in reading order: what it cost, who was here, what ran, what it used, what was refused, and the security record (#468). */
 function DaySections({ view }: { view: DayView }): React.ReactNode {
   const { stats, live } = view
@@ -211,10 +225,12 @@ function DaySections({ view }: { view: DayView }): React.ReactNode {
           { heading: 'first write' },
           { heading: 'last write' },
           { heading: 'records', numeric: true },
+          { heading: 'ended' },
           { heading: 'knobs' },
         ]}
         rows={stats.processes.map((process) => ({
-          key: process.process,
+          // One row per LAUNCH (#385): a writer's second start of the day is its own row.
+          key: `${process.process}#${process.pid ?? process.firstAt}`,
           cells: [
             process.process,
             process.pid === undefined ? ABSENT : String(process.pid),
@@ -222,6 +238,7 @@ function DaySections({ view }: { view: DayView }): React.ReactNode {
             timeOfDay(process.firstAt),
             timeOfDay(process.lastAt),
             countText(process.records),
+            endedText(process),
             knobsText(process),
           ],
         }))}

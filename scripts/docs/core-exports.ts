@@ -88,6 +88,7 @@ const DOMAINS_BY_CLASSIFICATION: Readonly<Record<Classification, Readonly<Record
     'log-process.ts': 'Record',
     'paths.ts': 'Project vocabulary',
     'pi-manifest.ts': 'Project vocabulary',
+    'process-marker.ts': 'Record',
     'permission-rules.ts': 'Permission',
     'secrets.ts': 'Permission',
   },
