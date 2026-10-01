@@ -58,7 +58,8 @@ for (const corpus of ['claude', 'omp'] as const) {
 lines.push(`# bash calls: ${commands.length}`, '')
 
 // 1. shapes
-const shapes = commands.map(shapeOf)
+const analysed = commands.map((command) => ({ command, shape: shapeOf(command) }))
+const shapes = analysed.map((item) => item.shape)
 const shapeRow = (label: string, holds: (shape: Shape) => boolean): string =>
   row(label, shapes.filter(holds).length, commands.length)
 lines.push('## 1. Shapes, as the guard segments them')
@@ -70,11 +71,9 @@ lines.push(shapeRow('four or more segments', (shape) => shape.segments >= 4))
 lines.push(shapeRow('a pipe', (shape) => shape.pipes))
 lines.push(shapeRow('a heredoc', (shape) => shape.heredoc))
 // #469 §5's pre-filter candidate: segmentable, every program a literal word, nothing hidden in the live text.
-const plain = commands.filter(
-  (command, index) =>
-    !(shapes[index]?.unsegmentable ?? true) &&
-    (shapes[index]?.programs ?? []).every((program) => program !== '?') &&
-    constructOf(command) === undefined,
+const plain = analysed.filter(
+  ({ command, shape }) =>
+    !shape.unsegmentable && shape.programs.every((program) => program !== '?') && constructOf(command) === undefined,
 )
 lines.push(
   row(
