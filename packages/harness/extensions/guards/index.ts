@@ -733,10 +733,9 @@ function shellCommandDenial(
  * and an incident's suspension (`standingDenial`), the shell denies, the write gates, then every
  * other path-bearing tool as a reader. The bash analyzer is a library under that handler, not a
  * participant of its own, so the count stays at two (#4, #9). Every answer is a log record. A
- * refused call reaches the browser as a result
- * flagged `isError` (the runtime's shape for any failure) and beside it the guard's own custom
- * entry naming the call and the rule, which is what the page draws a refusal from, live and on
- * resume (#387).
+ * refused call reaches the browser as a result flagged `isError` (the runtime's shape for any
+ * failure) and beside it the guard's own custom entry naming the call and the rule, which is what
+ * the page draws a refusal from, live and on resume (#387).
  * @see docs/seams/guards.md the guards seam: the policy, the dependencies, decide's order and the L5 crossing
  * @see packages/harness/core/network-egress.ts the network bar, and what it does not cover (its header)
  * @see docs/glossary.md the words: guard, verdict, policy, rule, participant, arbiter, boundary vs bar (Permission)
