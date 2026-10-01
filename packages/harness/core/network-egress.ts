@@ -315,6 +315,103 @@ type WrappedWordFinding =
   | { kind: 'unresolvable' }
 
 /**
+ * A word as the program it is handed to will read it: this shell's double quotes and their
+ * escapes (`\"`, `\\`, `\$`, `` \` ``) gone, single-quoted text left quoted — its content is
+ * literal to the child too — and every substitution left in place, unexpanded.
+ */
+function withoutOuterDoubleQuotes(word: string): string {
+  let text = ''
+  let inSingle = false
+  let inDouble = false
+  for (let characterIndex = 0; characterIndex < word.length; characterIndex += 1) {
+    const character = word[characterIndex] ?? ''
+    const next = word[characterIndex + 1] ?? ''
+    if (inSingle) {
+      inSingle = character !== "'"
+      text += character
+    } else if (character === "'" && !inDouble) {
+      inSingle = true
+      text += character
+    } else if (character === '"') {
+      inDouble = !inDouble
+    } else if (inDouble && character === '\\' && '"\\$`'.includes(next)) {
+      text += next
+      characterIndex += 1
+    } else {
+      text += character
+    }
+  }
+  return text
+}
+
+/**
+ * ⚠ A wrapper operand that becomes the wrapped program at runtime (#524): `sh -c "$(printf cu)rl …"`,
+ * `sudo $(printf cu)rl …`. The wrapped program — or the `-c` payload — is whatever the
+ * substitution yields, so the floor that refuses `$(printf cu)rl …` at the top level reads the
+ * operand as the child will: a substitution joined to text, or a `${…}`, at its command
+ * position is refused by the construct's name. Like every word in wrapper mode, an operand
+ * is treated as a possible command, since the wrapper's own options are not modelled.
+ *
+ * Two routes reach it. A segmented command hands the operand over as written (`text` is the
+ * child's command line with its substitutions in place); the floor's own path hands it over
+ * MASKED (`commandPositionFinding`), where a substitution is one mask character that would
+ * otherwise read as a plain letter.
+ */
+function runtimeOperandFinding(
+  text: string,
+  denied: Set<string>,
+  deniedBinaries: readonly string[],
+  depth: number,
+): NetworkEgressMatch | undefined {
+  if (depth + 1 > MAX_SHELL_NESTING) {
+    return { matched: `a shell nested more than ${MAX_SHELL_NESTING} deep`, via: 'unresolvable' }
+  }
+  return text.includes(SUBSTITUTION_MASK)
+    ? commandPositionFinding(text, denied, deniedBinaries, depth + 1)
+    : unscannableFloor(text, denied, deniedBinaries, depth + 1)
+}
+
+const asDenied = (match: NetworkEgressMatch): WrappedWordFinding => ({
+  kind: 'denied',
+  word: match.matched,
+  via: match.via,
+})
+
+/**
+ * One operand of a wrapper-led segment: denied, synthesised, only knowable at runtime, or
+ * clean (undefined).
+ *
+ * ⚠ The resolved literal IS the command line the child shell will parse (#57): a `-c`
+ * payload's outer quoting is gone, and whatever quoting it still carries is the child's to
+ * resolve — `cu'r'l` inside `"…"` is `curl` to that child. So the whole guard runs on it, one
+ * level down, rather than a whitespace split that sees the inner quotes as part of the name
+ * (the hole every classifier in the #57 spike shared). A plain wrapper operand (`timeout 30
+ * curl …` → `30`, `curl`) is a one-word command line to the same call, so this is the
+ * round-3 word treatment too.
+ */
+function wrappedOperandFinding(
+  rawWord: string,
+  denied: Set<string>,
+  deniedBinaries: readonly string[],
+  depth: number,
+): WrappedWordFinding | undefined {
+  const resolved = literalShellWord(rawWord)
+  if (resolved.kind === 'word-synthesis') return { kind: 'synthesis', word: rawWord }
+  if (resolved.kind !== 'literal') {
+    const floor = runtimeOperandFinding(withoutOuterDoubleQuotes(rawWord), denied, deniedBinaries, depth)
+    return floor === undefined ? { kind: 'unresolvable' } : asDenied(floor)
+  }
+  if (EXEC_TERMINATORS.has(resolved.value)) return undefined
+  if (resolved.value.includes(SUBSTITUTION_MASK)) {
+    const floor = runtimeOperandFinding(resolved.value, denied, deniedBinaries, depth)
+    if (floor !== undefined) return asDenied(floor)
+  }
+  const verdict = gateCommandLine(resolved.value, denied, deniedBinaries, depth + 1)
+  if (verdict === 'escalate' || verdict === 'escalate-unparseable') return { kind: 'unresolvable' }
+  return verdict === undefined ? undefined : asDenied(verdict)
+}
+
+/**
  * Scan every word of a wrapper-led segment with the command-word treatment. A word's
  * LITERAL value is checked by EVERY internal whitespace token — a quoted `-c`/`eval`
  * payload is a full shell script (`bash -c "echo hi && curl …"`), and checking only its
@@ -323,8 +420,10 @@ type WrappedWordFinding =
  * value silencing the fallback that would have caught it. All-token scanning is the
  * wrapper-mode philosophy applied inside the payload; each token is basename'd and
  * case-folded. `NAME=value` words (env's assignments) and the exempted `[`/`{}` are
- * skipped; synthesis and runtime-expansion words report as themselves so the caller
- * denies or escalates exactly as it would at command position.
+ * skipped. A synthesis word reports as itself, for the caller to deny as it would at command
+ * position; a word built at runtime is run through the same floor the top level uses
+ * (`wrappedOperandFinding` → `runtimeOperandFinding`, #524), so the caller gets a denial or
+ * `unresolvable` — never a word to re-check.
  */
 function deniedWordInWrappedSegment(
   segmentText: string,
@@ -338,26 +437,9 @@ function deniedWordInWrappedSegment(
   for (const rawWord of rawWords.slice(1)) {
     if (WRAPPER_WORD_EXEMPTIONS.has(rawWord)) continue
     if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(rawWord)) continue
-    const resolved = literalShellWord(rawWord)
-    if (resolved.kind === 'word-synthesis') return { kind: 'synthesis', word: rawWord }
-    if (resolved.kind !== 'literal') {
-      sawUnresolvable = true
-      continue
-    }
-    if (EXEC_TERMINATORS.has(resolved.value)) continue
-    // ⚠ The resolved literal IS the command line the child shell will parse (#57): a
-    // `-c` payload's outer quoting is gone, and whatever quoting it still carries is
-    // the child's to resolve — `cu'r'l` inside `"…"` is `curl` to that child. So the
-    // whole guard runs on it, one level down, rather than a whitespace split that sees
-    // the inner quotes as part of the name (the hole every classifier in the #57 spike
-    // shared). A plain wrapper operand (`timeout 30 curl …` → `30`, `curl`) is a
-    // one-word command line to the same call, so this is the round-3 word treatment too.
-    const verdict = gateCommandLine(resolved.value, denied, deniedBinaries, depth + 1)
-    if (verdict === 'escalate' || verdict === 'escalate-unparseable') {
-      sawUnresolvable = true
-      continue
-    }
-    if (verdict !== undefined) return { kind: 'denied', word: verdict.matched, via: verdict.via }
+    const finding = wrappedOperandFinding(rawWord, denied, deniedBinaries, depth)
+    if (finding?.kind === 'unresolvable') sawUnresolvable = true
+    else if (finding !== undefined) return finding
   }
   return sawUnresolvable ? { kind: 'unresolvable' } : undefined
 }
@@ -390,7 +472,13 @@ function findExecFinding(
   if (words === null) return 'escalate'
   let sawUnresolvable = false
   for (const payload of findExecPayloads(words.slice(1))) {
-    const verdict = gateCommandLine(payload.join(' '), denied, deniedBinaries, depth + 1)
+    const line = payload.join(' ')
+    // The floor's path hands this segment over masked (#524): `-exec $(printf cu)rl {} ;`.
+    const floor = line.includes(SUBSTITUTION_MASK)
+      ? runtimeOperandFinding(line, denied, deniedBinaries, depth)
+      : undefined
+    if (floor !== undefined) return floor
+    const verdict = gateCommandLine(line, denied, deniedBinaries, depth + 1)
     if (verdict === 'escalate' || verdict === 'escalate-unparseable') {
       sawUnresolvable = true
       continue
