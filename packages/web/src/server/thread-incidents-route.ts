@@ -37,13 +37,17 @@ const WHOLE_NUMBER = /^[1-9]\d{0,5}$/
 
 /**
  * The replay's thresholds: `defaults`, with what the query names in their place. A string says
- * why the query is refused — a key no threshold has, or a value that is no whole number from 1.
+ * why the query is refused — a key no threshold has, one named twice (which is meant is a guess),
+ * or a value that is no whole number from 1.
  */
 export function replayThresholdsOf(query: string, defaults: EnsoRiskThresholds): EnsoRiskThresholds | string {
   const thresholds: Record<ThresholdKey, number> = { ...defaults }
+  const named = new Set<string>()
   for (const [key, given] of new URLSearchParams(query)) {
     if (!isThresholdKey(key)) return `${key} is no threshold; the thresholds are ${THRESHOLD_KEYS.join(', ')}`
+    if (named.has(key)) return `${key} is named twice`
     if (!WHOLE_NUMBER.test(given)) return `${key} must be a whole number from 1, not ${JSON.stringify(given)}`
+    named.add(key)
     thresholds[key] = Number(given)
   }
   return thresholds

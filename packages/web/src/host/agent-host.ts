@@ -740,8 +740,8 @@ function branchIncidents(branch: readonly SessionEntry[]): EnsoSessionIncidents 
 
 /**
  * The opening a fork records for the source's open incident (#466 decision 5): its own id, so the
- * fork is resolved on its own, and the source's signals, halt and suspension, pointing back at the
- * source's thread and incident.
+ * fork is resolved on its own, and the source's signals, halt, suspension and model (when it named
+ * one, #468), pointing back at the source's thread and incident.
  */
 function inheritedOpening(sourceThreadId: string, source: EnsoIncidentOpened): EnsoIncidentOpened {
   return {

@@ -185,7 +185,7 @@ function knobsText(process: EnsoDayStats['processes'][number]): string {
   return knobs.length === 0 ? ABSENT : knobs.join(' · ')
 }
 
-/** The sections, in reading order: what it cost, who was here, what ran, what it used, what was refused. */
+/** The sections, in reading order: what it cost, who was here, what ran, what it used, what was refused, and the security record (#468). */
 function DaySections({ view }: { view: DayView }): React.ReactNode {
   const { stats, live } = view
   const threads = stats.threads.toSorted((left, right) => right.cost - left.cost)

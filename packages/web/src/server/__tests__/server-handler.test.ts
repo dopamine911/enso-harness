@@ -1459,6 +1459,11 @@ test('GET …/incidents replays under the server’s thresholds or the query’s
     status: 400,
     body: 'halt is no threshold; the thresholds are windowCalls, highAtSignals, highAtKinds, incidentAtSignals',
   })
+  // Named twice, which value is meant is a guess: refused, not the last one silently.
+  expect(await read('?incidentAtSignals=4&incidentAtSignals=9')).toEqual({
+    status: 400,
+    body: 'incidentAtSignals is named twice',
+  })
   expect((await fetch(`${url}/api/threads/nowhere/incidents`)).status).toBe(404)
   // Looking builds nothing (#86).
   expect(built).toHaveLength(0)
