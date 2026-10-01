@@ -1,3 +1,4 @@
+import { isAbsolute } from 'node:path'
 import { looksLikeSecret, realpathOfNearestExisting, resolveAgainstCwd, textLooksLikeSecretPath } from './paths.ts'
 import { extractFlatShellCommandSegments, literalShellWord, shellWordsOf } from './shell-segments.ts'
 
@@ -208,7 +209,9 @@ export function findSecretPathWord(
  * nearest existing ancestor, so a symlink into the directory is caught (either is enough: this is
  * a deny, not a confinement). A word whose value is not knowable is judged by its text, which
  * sees an absolute spelling and nothing assembled at runtime (`$ENSO_HOME/logs` passes — the
- * module header's non-coverage).
+ * module header's non-coverage). ⚠ A directory that is not absolute is skipped (#530): pi's
+ * in-memory session answers its directory as `""`, which would become the prefix `/` and match
+ * every path.
  *
  * @group Guard predicates
  */
@@ -218,7 +221,9 @@ export function findDirectoryWord(
   cwd: string,
   options: { coarse?: boolean } = {},
 ): SecretPathMatch | undefined {
-  const prefixes = directories.map((directory) => `${directory.replace(/\/+$/, '').toLowerCase()}/`)
+  const prefixes = directories
+    .filter((directory) => isAbsolute(directory))
+    .map((directory) => `${directory.replace(/\/+$/, '').toLowerCase()}/`)
   const inside = (path: string): boolean => {
     const lowered = `${path.toLowerCase()}/`
     return prefixes.some((prefix) => lowered.startsWith(prefix))

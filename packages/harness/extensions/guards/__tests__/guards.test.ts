@@ -1721,3 +1721,24 @@ test('⚠ a shell command naming the session or log directory is refused as prot
   const envRefusal = runtime.entries.slice(before).find((entry) => entry.customType === ENSO_GUARD_DENIAL_ENTRY)
   expect(readEnsoGuardDenial(ENSO_GUARD_DENIAL_ENTRY, envRefusal?.data)?.rule).toBe('secret-path')
 })
+
+// ⚠ #530: pi's in-memory session (`--no-session`) has no session directory and answers `""`. An
+// empty directory is no directory: it must not become the prefix `/`, under which every absolute
+// path — so every shell command — reads as a touch of the records. The log directory stays protected.
+test('⚠ a session with no directory protects only the log directory; ordinary commands pass (#530)', () => {
+  const runtime = loadGuardRuntime()
+  runtime.sessionStart({ type: 'session_start', reason: 'start' }, { cwd, sessionManager: { getSessionDir: () => '' } })
+  const ruleOf = (id: string, command: string): string | undefined => {
+    const before = runtime.entries.length
+    runtime.toolCall({ type: 'tool_call', toolCallId: id, toolName: 'bash', input: { command } }, { cwd })
+    const refusal = runtime.entries.slice(before).find((entry) => entry.customType === ENSO_GUARD_DENIAL_ENTRY)
+    return refusal === undefined ? undefined : readEnsoGuardDenial(refusal.customType, refusal.data)?.rule
+  }
+  expect(ruleOf('ls', 'ls -la')).toBeUndefined()
+  expect(ruleOf('rm', 'rm -rf build')).toBeUndefined()
+  expect(ruleOf('cat', `cat /etc/hostname`)).toBeUndefined()
+  expect(ruleOf('log', `cat ${join(LOGS_DIR, 'enso-2026-09-30.jsonl')}`)).toBe('protected-records')
+  expect(appended(runtime, ENSO_SECURITY_SIGNAL_ENTRY)).toEqual([
+    expect.objectContaining({ signal: 'protected-record-touch', toolCallId: 'log' }),
+  ])
+})
