@@ -198,6 +198,11 @@ export function createRunContext(dependencies: RunContextDependencies): (pi: Ext
   return (pi: ExtensionAPI): void => {
     // Set by a prompt's `before_agent_start`, cleared by the `agent_start` that follows it; an
     // `agent_start` that finds it clear is a run that had no prompt — a Continue (#445).
+    // ⚠ A mark left set is a prompt that failed between the hook and its loop: in pi 0.99.2 the one
+    // thing there that can throw is image normalization (`agent-session.js#prompt`, `:1537`), and
+    // that failure rejects `prompt()` itself. The cost is ONE Continue after it recorded as if it
+    // were that prompt's loop; the next prompt sets the mark afresh. Stated rather than closed: the
+    // alternative is a clock on the mark, and a slow image would then misread a real prompt.
     let promptRecorded = false
     pi.on('before_agent_start', async (event, context) => {
       promptRecorded = true
