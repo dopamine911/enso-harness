@@ -68,6 +68,8 @@ export interface AgentHost {
     threadId: string,
     thresholds: EnsoRiskThresholds,
   ): Promise<BranchIncidentHistory | undefined>
+  /** A stored thread's judge cases (#469): one open, nothing built (#86); undefined for no file. */
+  readStoredJudgeCases(threadId: string, thresholds: EnsoRiskThresholds): Promise<BranchJudgeCases | undefined>
   /**
    * Fork a stored thread at one of its user messages, as pi's `/fork` does (#433; the module
    * header): a new session file naming the source as its parent, holding everything before that
@@ -104,6 +106,8 @@ export interface HostedThread {
   branchEval(): BranchEval
   /** The branch's incident history (#468): records, their entries as stored, and a replay under `thresholds`. */
   branchIncidentHistory(thresholds: EnsoRiskThresholds): BranchIncidentHistory
+  /** The branch's judge cases (#469): each call the judge would be asked about, and its redacted state. */
+  branchJudgeCases(thresholds: EnsoRiskThresholds): BranchJudgeCases
   /** The branch's context, request by request (#361): what each was assembled from, by pi's own assembly. */
   branchContext(): BranchContext
   /**

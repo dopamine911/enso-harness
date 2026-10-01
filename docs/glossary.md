@@ -276,6 +276,13 @@ what no mode may allow. Both answer before a tool runs; nothing after it does.
   Under the thresholds the branch ran with, every opening is `same`. `bun run incidents` lists the
   history, exports one incident (`mechanical.json`, the records as stored; `agent-report.md`;
   `resolution.json`) and replays.
+- **command judge** — a second sensor on `bash` (#469, phase 6 of #189), behind one seam with
+  several **backends**: `off` (the default) or `jev` (TypeSafe's Jev; a local one is #532). Every
+  backend answers the same four questions — `risk`, `obscured`, `unresolved`, `same_as_denied` —
+  about a call the guard let through that follows a refusal or that the guards cannot read
+  (**scope** 1). What it is sent is **redacted** (secret values and shapes; never a secret file's
+  contents). Recorded as `enso-command-judgement`, judged or **unjudged** with a reason; it never
+  allows or blocks, and feeds no risk signal and asks nothing until a replay sets its thresholds.
 
 ## Observation
 

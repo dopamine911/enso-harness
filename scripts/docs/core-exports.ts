@@ -20,22 +20,18 @@ const BARREL = join(CORE_SOURCE, 'index.ts')
 /**
  * The node-only subpaths (#211): declared in package.json `exports`, never on the barrel, so
  * the browser graph cannot reach `node:*` through `@enso/core`. Each is read like the barrel is.
+ * Read off the manifest, so a new subpath is documented the day it is declared; the test-only
+ * recorders under `__tests__` are not public surface.
  */
-const SUBPATH_MODULES: readonly { readonly file: string; readonly entrypoint: SubpathEntrypoint }[] = [
-  { file: 'git.ts', entrypoint: '@enso/core/git' },
-  { file: 'log-process.ts', entrypoint: '@enso/core/log-process' },
-  { file: 'paths.ts', entrypoint: '@enso/core/paths' },
-  { file: 'permission-rules.ts', entrypoint: '@enso/core/permission-rules' },
-  { file: 'pi-manifest.ts', entrypoint: '@enso/core/pi-manifest' },
-  { file: 'secrets.ts', entrypoint: '@enso/core/secrets' },
-]
-type SubpathEntrypoint =
-  | '@enso/core/git'
-  | '@enso/core/log-process'
-  | '@enso/core/paths'
-  | '@enso/core/permission-rules'
-  | '@enso/core/pi-manifest'
-  | '@enso/core/secrets'
+const SUBPATH_MODULES: readonly { readonly file: string; readonly entrypoint: SubpathEntrypoint }[] = Object.entries(
+  (JSON.parse(readFileSync(join(ROOT, 'packages/core/package.json'), 'utf8')) as { exports: Record<string, string> })
+    .exports,
+).flatMap(([subpath, target]) =>
+  subpath === '.' || target.includes('/__tests__/')
+    ? []
+    : [{ file: target.replace(/^\.\/src\//, ''), entrypoint: `@enso/core${subpath.slice(1)}` as SubpathEntrypoint }],
+)
+type SubpathEntrypoint = `@enso/core/${string}`
 
 type Classification = 'wire' | 'host contract' | 'config/policy' | 'node-only utility'
 type Region = 'web/host' | 'web/server' | 'web/browser' | 'harness' | 'scripts'
@@ -45,50 +41,66 @@ const REGIONS: readonly Region[] = ['web/host', 'web/server', 'web/browser', 'ha
 
 /**
  * Per public module: its classification, and the glossary sections it belongs to — assigned by
- * module rather than inferred from symbol spelling. One row each, so a module cannot gain one
- * without the other. Checked by `exportsOf`: a newly public module cannot acquire either by
- * accident, and a row for a module that exports nothing is refused.
+ * module rather than inferred from symbol spelling. Grouped by classification, one row per module,
+ * so a module cannot gain one without the other. Checked by `exportsOf`: a newly public module
+ * cannot acquire either by accident, and a row for a module that exports nothing is refused.
  */
-const MODULE_FACTS: Readonly<Record<string, readonly [classification: Classification, domain: string]>> = {
-  'ask-user.ts': ['wire', 'Control'],
-  'config.ts': ['config/policy', 'Record, Permission'],
-  'dialog.ts': ['wire', 'Control'],
-  'follow.ts': ['wire', 'Control, Observation'],
-  'git.ts': ['node-only utility', 'Project vocabulary'],
-  'git-state.ts': ['wire', 'Thread, Observation'],
-  'guard.ts': ['config/policy', 'Permission'],
-  'incident-report.ts': ['wire', 'Permission, Control, Record'],
-  'log.ts': ['wire', 'Record'],
-  'log-bundle.ts': ['node-only utility', 'Record'],
-  'log-process.ts': ['node-only utility', 'Record'],
-  'log-stats.ts': ['wire', 'Record, Observation'],
-  'log-tail.ts': ['wire', 'Record, Observation'],
-  'observation.ts': ['wire', 'Observation'],
-  'paths.ts': ['node-only utility', 'Project vocabulary'],
-  'pi-manifest.ts': ['node-only utility', 'Project vocabulary'],
-  'permission-mode.ts': ['config/policy', 'Permission'],
-  'permission-modes.ts': ['config/policy', 'Permission'],
-  'permission-policy.ts': ['config/policy', 'Permission'],
-  'permission-rules.ts': ['node-only utility', 'Permission'],
-  'project.ts': ['wire', 'Thread, Permission'],
-  'prompt-library.ts': ['wire', 'Thread, Record'],
-  'provider-refusal.ts': ['wire', 'Observation, Record'],
-  'run-context.ts': ['wire', 'Thread, Record'],
-  'secrets.ts': ['node-only utility', 'Permission'],
-  'session-eval.ts': ['wire', 'Thread, Record'],
-  'session-incident.ts': ['wire', 'Permission, Control, Record'],
-  'session-risk.ts': ['wire', 'Permission, Record'],
-  'thread-inspection.ts': ['wire', 'Thread, Observation'],
-  'thread-timeline.ts': ['wire', 'Thread, Observation, Record'],
-  'thread-context.ts': ['wire', 'Thread, Observation'],
-  'thread-stats.ts': ['wire', 'Thread, Observation, Record'],
-  'thread-runtime.ts': ['host contract', 'Thread, Control'],
-  'tool-input.ts': ['wire', 'Surface'],
-  'tool-result.ts': ['wire', 'Surface, Observation'],
-  'transcript.ts': ['wire', 'Thread, Record'],
-  'web-fetch.ts': ['config/policy', 'Permission, Control'],
-  'web-search.ts': ['config/policy', 'Permission, Control'],
+const DOMAINS_BY_CLASSIFICATION: Readonly<Record<Classification, Readonly<Record<string, string>>>> = {
+  wire: {
+    'ask-user.ts': 'Control',
+    'dialog.ts': 'Control',
+    'follow.ts': 'Control, Observation',
+    'git-state.ts': 'Thread, Observation',
+    'incident-report.ts': 'Permission, Control, Record',
+    'log.ts': 'Record',
+    'log-stats.ts': 'Record, Observation',
+    'log-tail.ts': 'Record, Observation',
+    'observation.ts': 'Observation',
+    'project.ts': 'Thread, Permission',
+    'prompt-library.ts': 'Thread, Record',
+    'provider-refusal.ts': 'Observation, Record',
+    'run-context.ts': 'Thread, Record',
+    'session-eval.ts': 'Thread, Record',
+    'session-incident.ts': 'Permission, Control, Record',
+    'session-risk.ts': 'Permission, Record',
+    'thread-inspection.ts': 'Thread, Observation',
+    'thread-timeline.ts': 'Thread, Observation, Record',
+    'thread-context.ts': 'Thread, Observation',
+    'thread-stats.ts': 'Thread, Observation, Record',
+    'tool-input.ts': 'Surface',
+    'tool-result.ts': 'Surface, Observation',
+    'transcript.ts': 'Thread, Record',
+  },
+  'config/policy': {
+    'command-judge.ts': 'Permission, Record',
+    'config.ts': 'Record, Permission',
+    'guard.ts': 'Permission',
+    'permission-mode.ts': 'Permission',
+    'permission-modes.ts': 'Permission',
+    'permission-policy.ts': 'Permission',
+    'web-fetch.ts': 'Permission, Control',
+    'web-search.ts': 'Permission, Control',
+  },
+  'node-only utility': {
+    'git.ts': 'Project vocabulary',
+    'jev-judge.ts': 'Permission',
+    'judge.ts': 'Permission',
+    'log-bundle.ts': 'Record',
+    'log-process.ts': 'Record',
+    'paths.ts': 'Project vocabulary',
+    'pi-manifest.ts': 'Project vocabulary',
+    'permission-rules.ts': 'Permission',
+    'secrets.ts': 'Permission',
+  },
+  'host contract': { 'thread-runtime.ts': 'Thread, Control' },
 }
+
+const MODULE_FACTS: Readonly<Record<string, readonly [classification: Classification, domain: string]>> =
+  Object.fromEntries(
+    Object.entries(DOMAINS_BY_CLASSIFICATION).flatMap(([classification, domains]) =>
+      Object.entries(domains).map(([module, domain]) => [module, [classification as Classification, domain]] as const),
+    ),
+  )
 
 interface PublicExport {
   readonly symbol: string

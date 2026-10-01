@@ -31,6 +31,7 @@ import {
   incidentReportProblems,
   readEnsoThreadIncidents,
 } from '../packages/core/src/index.ts'
+import { fetchJson, storedThreadIds, UsageError, wholeNumber } from './server-cli.ts'
 
 type ThresholdKey = keyof EnsoRiskThresholds
 
@@ -56,20 +57,6 @@ export const USAGE = [
   '       bun run incidents export <incident> [--out <dir>]',
   '       bun run incidents replay [<thread> …] [--window-calls N] [--high-at-signals N] [--high-at-kinds N] [--incident-at-signals N]',
 ].join('\n')
-
-export class UsageError extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = 'UsageError'
-  }
-}
-
-function wholeNumber(flag: string, given: string | undefined): number {
-  if (given === undefined || !/^[1-9]\d{0,5}$/.test(given)) {
-    throw new UsageError(`${flag} takes a whole number from 1, not ${given ?? 'nothing'}`)
-  }
-  return Number(given)
-}
 
 function parseReplay(argv: readonly string[]): IncidentsQuery {
   const threads: string[] = []
@@ -241,20 +228,6 @@ export function exportFiles(incident: EnsoThreadIncidents['incidents'][number]):
     'agent-report.md': renderAgentReport(incident.record),
     'resolution.json': `${JSON.stringify(incident.record.resolutions, null, 2)}\n`,
   }
-}
-
-async function fetchJson(url: URL): Promise<unknown> {
-  const response = await fetch(url)
-  if (!response.ok) throw new Error(`${url.href} answered ${response.status}: ${await response.text()}`)
-  return response.json()
-}
-
-async function storedThreadIds(serverUrl: string): Promise<string[]> {
-  const listed = await fetchJson(new URL('/api/stored-threads', serverUrl))
-  if (!Array.isArray(listed)) throw new Error('/api/stored-threads did not answer a list')
-  return listed.flatMap((thread: { threadId?: unknown }) =>
-    typeof thread.threadId === 'string' ? [thread.threadId] : [],
-  )
 }
 
 async function fetchIncidents(

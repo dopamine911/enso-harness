@@ -7,9 +7,8 @@ import {
   PERSISTENCE_WRITE_BASENAMES,
   PERSISTENCE_WRITE_DIRECTORIES,
   PROC_ENVIRON_PATH,
-  SECRET_BASENAME_PATTERNS,
 } from '@enso/core'
-import { fileUrlToPath, isFileUrl } from '@enso/core/paths'
+import { containsPathFragment, fileUrlToPath, isFileUrl, textLooksLikeSecretPath } from '@enso/core/paths'
 
 /**
  * The full directory-segment deny set: the shared persistence corpus plus the enso additions
@@ -182,37 +181,6 @@ export function isInsideAnyRoot(absolutePath: string, roots: readonly string[]):
   if (roots.length === 0) return false
   const viaSymlink = realpathOfNearestExisting(absolutePath)
   return roots.some((root) => isInsideRoot(absolutePath, root) && isInsideRoot(viaSymlink, resolve(root)))
-}
-
-/**
- * True when the path contains any of the fragments, case-insensitively.
- *
- * ⚠ The path is compared WITH a trailing separator appended (#53 S1.2). Directory-shaped
- * fragments carry a trailing `/` (`/.aws/`, `/.ssh/`, `/.git/`) so that they match as a
- * segment and not as a name prefix — but `resolve()` strips the trailing slash a model
- * supplies, so the directory ITSELF (`/home/u/.aws`) never contained `/.aws/` and passed.
- * `grep pattern=aws_secret_access_key path=~/.aws` went through the reader gate that way.
- * Appending the separator makes the directory match its own fragment; file-shaped fragments
- * (`/.npmrc`, `/.kube/config`) are unaffected because they still occur as a substring.
- */
-function containsPathFragment(absolutePath: string, fragments: readonly string[]): boolean {
-  const loweredWithTrailingSeparator = absolutePath.toLowerCase() + pathSeparator
-  return fragments.some((fragment) => loweredWithTrailingSeparator.includes(fragment.toLowerCase()))
-}
-
-/**
- * True when the TEXT of a path-shaped string carries credential material, by directory
- * fragment or by basename.
- *
- * No filesystem access and no resolution: this is the question to ask about a shell word whose
- * value is not knowable from the text (`"$HOME/.enso/auth.json"` — see `shell-secret-paths.ts`),
- * where {@link looksLikeSecret}'s realpath leg has nothing to resolve.
- *
- * @group Guard predicates
- */
-export function textLooksLikeSecretPath(text: string, fragments: readonly string[]): boolean {
-  if (containsPathFragment(text, fragments)) return true
-  return SECRET_BASENAME_PATTERNS.some((pattern) => pattern.test(basename(text)))
 }
 
 /**

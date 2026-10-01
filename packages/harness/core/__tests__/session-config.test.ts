@@ -4,7 +4,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ensoAgentDir, projectConfigPath } from '@enso/core/paths'
 import { createProjectTrustStore } from '../project-trust.ts'
-import { type SessionConfigContext, type SessionEnsoConfig, sessionEnsoConfig } from '../session-config.ts'
+import {
+  type SessionConfigContext,
+  type SessionEnsoConfig,
+  sessionEnsoConfig,
+  userJudgeConfig,
+} from '../session-config.ts'
 
 /**
  * #421: the session's config — the user's, and over it a trusted project's `.enso/config.json`.
@@ -167,4 +172,18 @@ test('⚠ one question per session: two tools resolving for the same session sha
   ])
   expect(f.asked).toHaveLength(1)
   expect(second).toBe(first)
+})
+
+// ⚠ #469: the judge sends command text off the machine, so only the user switches it on — never a
+// project — and a config.json that cannot be read leaves it off, saying why.
+test('⚠ the command judge is the user’s alone, off by default, and off when config.json is unreadable (#469)', () => {
+  const jev = { security: { judge: { backend: 'jev' } } }
+  expect(userJudgeConfig(fixture({ user: jev }).home)).toEqual({ backend: 'jev' })
+  expect(userJudgeConfig(fixture().home)).toEqual({ backend: 'off' })
+  expect(userJudgeConfig(fixture({ project: jev }).home)).toEqual({ backend: 'off' })
+  const unreadable = fixture()
+  writeFileSync(join(unreadable.home, 'config.json'), '{ "security": { "judge": ')
+  expect(userJudgeConfig(unreadable.home)).toEqual({ backend: 'off', problem: expect.any(String) })
+  const unknownBackend = fixture({ user: { security: { judge: { backend: 'local' } } } })
+  expect(userJudgeConfig(unknownBackend.home)).toEqual({ backend: 'off', problem: expect.any(String) })
 })

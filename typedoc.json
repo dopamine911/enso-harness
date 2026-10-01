@@ -8,6 +8,8 @@
     "packages/core/src/secrets.ts",
     "packages/core/src/pi-manifest.ts",
     "packages/core/src/log-process.ts",
+    "packages/core/src/judge.ts",
+    "packages/core/src/jev-judge.ts",
     "packages/harness/core/index.ts"
   ],
   "tsconfig": "tsconfig.typedoc.json",
@@ -46,6 +48,7 @@
     "Session risk",
     "Session incident",
     "Incident report",
+    "Command judge",
     "Dialogs",
     "Permission mode",
     "Permission policy",

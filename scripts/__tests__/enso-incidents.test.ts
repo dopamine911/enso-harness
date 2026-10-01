@@ -1,13 +1,7 @@
 import { expect, test } from 'bun:test'
 import type { EnsoCheckedClaim, EnsoIncidentRecord, EnsoThreadIncidents } from '../../packages/core/src/index.ts'
-import {
-  exportFiles,
-  parseArguments,
-  renderAgentReport,
-  renderHistory,
-  renderReplay,
-  UsageError,
-} from '../enso-incidents.ts'
+import { exportFiles, parseArguments, renderAgentReport, renderHistory, renderReplay } from '../enso-incidents.ts'
+import { UsageError } from '../server-cli.ts'
 
 /**
  * `bun run incidents` (#468): the commands and their flags, the export's three files — the entries

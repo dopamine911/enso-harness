@@ -57,14 +57,16 @@ import {
   sessionIncidentsOf,
   THREAD_PROJECT_TRUST,
   type ThreadRuntime,
+  DEFAULT_GUARD_POLICY,
 } from '@enso/core'
 import { ensoHome, ensoSecretsPath, findRepoRoot } from '@enso/core/paths'
 import { describePermissionPolicy, preparePermissionPolicy } from '@enso/core/permission-rules'
-import { quarantineSecrets } from '@enso/core/secrets'
+import { knownSecretValues, quarantineSecrets } from '@enso/core/secrets'
 import { getPermissionsService } from '@gotgenes/pi-permission-system'
 import { type BranchContext, type BranchRequestDetail, branchContext, branchRequestDetail } from './branch-context.ts'
 import { type BranchEval, branchEval } from './branch-eval.ts'
 import { type BranchIncidentHistory, branchIncidentHistory } from './branch-incident-history.ts'
+import { type BranchJudgeCases, branchJudgeCases, type JudgeCaseInputs } from './branch-judge-cases.ts'
 import { type BranchStats, branchStats } from './branch-stats.ts'
 import { type ContinuationLead, continuationLead, NO_RUN_LIFECYCLE, NOTHING_TO_CONTINUE } from './continuation.ts'
 import { createEventTail, describeObservation } from './event-tail.ts'
@@ -405,6 +407,8 @@ export interface HostedThread {
   branchEval(): BranchEval
   /** The branch's incident history (#468): records, their entries as stored, and a replay under `thresholds`. */
   branchIncidentHistory(thresholds: EnsoRiskThresholds): BranchIncidentHistory
+  /** The branch's judge cases (#469): each call the judge would be asked about, and its redacted state. */
+  branchJudgeCases(thresholds: EnsoRiskThresholds): BranchJudgeCases
   /** The branch's context, request by request (#361): what each was assembled from, by pi's own assembly. */
   branchContext(): BranchContext
   /**
@@ -563,6 +567,8 @@ export interface AgentHost {
     threadId: string,
     thresholds: EnsoRiskThresholds,
   ): Promise<BranchIncidentHistory | undefined>
+  /** A stored thread's judge cases (#469): one open, nothing built (#86); undefined for no file. */
+  readStoredJudgeCases(threadId: string, thresholds: EnsoRiskThresholds): Promise<BranchJudgeCases | undefined>
   /**
    * Fork a stored thread at one of its user messages, as pi's `/fork` does (#433; the module
    * header): a new session file naming the source as its parent, holding everything before that
@@ -954,6 +960,29 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   ): Promise<BranchIncidentHistory | undefined> {
     const branch = await storedBranch(threadId)
     return branch === undefined ? undefined : branchIncidentHistory(branch, thresholds)
+  }
+
+  /**
+   * What a judge case is built from in `cwd` (#469): the guard's default fragments and the user's
+   * secret values (`ENSO_HOME`, as the quarantine above reads it), read per call so a key added
+   * since is still scrubbed.
+   */
+  function judgeCaseInputs(cwd: string, thresholds: EnsoRiskThresholds): JudgeCaseInputs {
+    return {
+      thresholds,
+      cwd,
+      secretPathFragments: DEFAULT_GUARD_POLICY.secretPathFragments,
+      secretValues: knownSecretValues(ensoHome(environment), environment),
+    }
+  }
+
+  async function readStoredJudgeCases(
+    threadId: string,
+    thresholds: EnsoRiskThresholds,
+  ): Promise<BranchJudgeCases | undefined> {
+    const stored = await storedSession(threadId)
+    if (stored === undefined) return undefined
+    return branchJudgeCases(SessionManager.open(stored.path).getBranch(), judgeCaseInputs(stored.cwd, thresholds))
   }
 
   async function createSession(threadId: string, newSessionDirectory: () => string): Promise<HostedThread> {
@@ -1780,6 +1809,8 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       branchEval: () => branchEval(sessionManager.getBranch()),
       branchIncidentHistory: (thresholds: EnsoRiskThresholds) =>
         branchIncidentHistory(sessionManager.getBranch(), thresholds),
+      branchJudgeCases: (thresholds: EnsoRiskThresholds) =>
+        branchJudgeCases(sessionManager.getBranch(), judgeCaseInputs(sessionManager.getCwd(), thresholds)),
       branchContext: () => branchContext(sessionManager.getBranch()),
       previewSystemPrompt(candidate: EnsoSystemPromptChoice | null): SystemPromptPreviewOutcome {
         if (session.isStreaming || session.isCompacting) return { kind: 'busy' }
@@ -1833,6 +1864,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     readStoredThreadContext,
     readStoredThreadEval,
     readStoredIncidentHistory,
+    readStoredJudgeCases,
     readStoredRequestDetail,
     readStoredForkPoint,
     forkThread,

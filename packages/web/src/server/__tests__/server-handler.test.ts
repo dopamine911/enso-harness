@@ -24,6 +24,7 @@ import {
   type PromptRequest,
   type ThreadRuntime,
   readEnsoThreadIncidents,
+  readEnsoThreadJudgeCases,
 } from '@enso/core'
 import { type FlowTrace, flowTrace } from '@enso/core/flow-trace'
 import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
@@ -1466,6 +1467,18 @@ test('GET …/incidents replays under the server’s thresholds or the query’s
   })
   expect((await fetch(`${url}/api/threads/nowhere/incidents`)).status).toBe(404)
   // Looking builds nothing (#86).
+  expect(built).toHaveLength(0)
+})
+
+// #469: the judge cases are read live-or-cold like the incidents; looking builds nothing.
+test('GET …/judge-cases answers a stored thread with its cases, no thread a 404, and builds nothing', async () => {
+  const { url, built } = await startWith(settlesAtOnce, {
+    s1: { transcript: [], modified: new Date('2026-09-24T10:00:00.000Z'), firstMessage: 'one' },
+  })
+  const cold = await fetch(`${url}/api/threads/s1/judge-cases`)
+  expect(cold.status).toBe(200)
+  expect(readEnsoThreadJudgeCases(await cold.json())).toEqual({ threadId: 's1', live: false, cases: [] })
+  expect((await fetch(`${url}/api/threads/nowhere/judge-cases`)).status).toBe(404)
   expect(built).toHaveLength(0)
 })
 

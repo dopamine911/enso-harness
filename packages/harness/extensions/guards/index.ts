@@ -9,7 +9,10 @@ import type {
 } from '@earendil-works/pi-coding-agent'
 import {
   ASK_USER_TOOL_NAME,
+  type CommandJudge,
+  commandJudgementOf,
   DEFAULT_GUARD_POLICY,
+  ENSO_COMMAND_JUDGEMENT_ENTRY,
   ENSO_FAMILY_TOOLS,
   ENSO_GUARD_DENIAL_ENTRY,
   ENSO_GUARD_RULE_KINDS,
@@ -25,11 +28,15 @@ import {
   ENSO_SECURITY_SIGNAL_ENTRY,
   ENSO_SESSION_RISK_ENTRY,
   ENSO_TOOL_FAMILIES,
+  type EnsoCommandJudgement,
   type EnsoGuardDenial,
   type EnsoGuardRule,
   type EnsoGuardRuleKind,
   type EnsoIncidentOpened,
   type EnsoIncidentPolicy,
+  type EnsoJudgeContext,
+  type EnsoJudgeOutcome,
+  type EnsoJudgeState,
   type EnsoPermissionDenial,
   type EnsoPermissionDenialResolution,
   type EnsoRiskEvent,
@@ -40,6 +47,7 @@ import {
   foldSessionRisk,
   type GuardPolicy,
   INITIAL_SESSION_RISK,
+  judgeContextOf,
   NO_SESSION_INCIDENTS,
   openIncidentOf,
   readEnsoIncidentResolved,
@@ -52,7 +60,10 @@ import {
   toolFamilyOf,
   WEB_FETCH_TOOL_NAME,
 } from '@enso/core'
+import { createJevJudge, JEV_KEY_NAME } from '@enso/core/jev-judge'
+import { judgeStateOf } from '@enso/core/judge'
 import { ensoHome, ensoLogsDir, findRepoRoot } from '@enso/core/paths'
+import { knownSecretValuesTracking, readSecret } from '@enso/core/secrets'
 import { PERMISSIONS_DECISION_CHANNEL } from '@gotgenes/pi-permission-system'
 import { type CheckCommandResult, checkCommand } from 'cc-safety-net/api'
 import {
@@ -70,6 +81,7 @@ import {
   resolveAgainstCwd,
   secretLocationBeneath,
   userIncidentPolicy,
+  userJudgeConfig,
 } from '../../core/index.ts'
 
 /**
@@ -273,12 +285,14 @@ function pathArgumentOf(event: ToolCallEvent | ToolResultEvent): string | undefi
 }
 
 /**
- * The guard's seams: the bash analyzer (#9), the harness root (#160 §4), and the incident policy
- * and log directory (#466).
+ * The guard's seams: the bash analyzer (#9), the harness root (#160 §4), the incident policy
+ * and log directory (#466), and the command judge with the secret values its state is redacted
+ * of (#469).
  *
  * Production wires cc-safety-net's `checkCommand`, this checkout's root, the user's `config.json`
- * and `ENSO_HOME`'s log directory; tests inject known verdicts, a root they built, a policy and a
- * directory. `checkCommand` reads LOCAL policy per call, so a guard test that touched the real
+ * and `ENSO_HOME`'s log directory and secrets; tests inject known verdicts, a root they built, a
+ * policy, a directory and a fake judge — a guard test must never reach the network.
+ * `checkCommand` reads LOCAL policy per call, so a guard test that touched the real
  * library would vary with the machine's cc-safety-net config (the contract test alone exercises
  * the real one, and pins defaults explicitly) — and the same holds for the machine's config file.
  */
@@ -295,6 +309,13 @@ export interface GuardDependencies {
   incidentPolicy: () => EnsoIncidentPolicy
   /** The log directory `protected-records` refuses a shell command naming (#466). */
   logsDirectory: string
+  /**
+   * The command judge, or undefined when `security.judge.backend` is `off` (the default) — read at
+   * every `session_start`, as the incident policy is (#469).
+   */
+  commandJudge: () => CommandJudge | undefined
+  /** The known secret values a judge state is redacted of before it leaves (#469), read per judged call. */
+  judgeSecretValues: () => readonly string[]
 }
 
 /**
@@ -323,12 +344,35 @@ function productionIncidentPolicy(): EnsoIncidentPolicy {
   return policy
 }
 
+/**
+ * Per attempt, and the live path makes one: a judgement nobody waits for still holds a socket and
+ * a session reference until it settles (#469).
+ */
+const JUDGE_TIMEOUT_MS = 5000
+
+/**
+ * The user's command judge (#469): off unless `security.judge.backend` names one. ⚠ An unreadable
+ * `config.json` fails closed, which for the judge is OFF — nothing is sent — and says so.
+ */
+function productionCommandJudge(): CommandJudge | undefined {
+  const home = ensoHome(process.env)
+  const { backend, problem } = userJudgeConfig(home)
+  if (problem !== undefined) {
+    log.error('config.json is unreadable, so the command judge is off: {problem}', { problem })
+  }
+  if (backend === 'off') return undefined
+  return createJevJudge({ apiKey: () => readSecret(home, JEV_KEY_NAME), timeoutMs: JUDGE_TIMEOUT_MS })
+}
+
 /** The pi entry point — the real analyzer, this checkout's root and the user's config, wired at the composition root. */
 export default createGuards({
   analyzeBashCommand: checkCommand,
   harnessRoot: findRepoRoot(import.meta.url),
   incidentPolicy: productionIncidentPolicy,
   logsDirectory: ensoLogsDir(ensoHome(process.env)),
+  commandJudge: productionCommandJudge,
+  // The tracking thunk: one `stat` per judged call, re-read only when secrets.env changes (#207).
+  judgeSecretValues: knownSecretValuesTracking(ensoHome(process.env)),
 })
 
 /**
@@ -440,6 +484,8 @@ function observeSessionSecurity(
   guardDenied(denial: EnsoGuardDenial): boolean
   /** The incident state a call is decided against. */
   incidents(): EnsoSessionIncidents
+  /** The command judge's context for a call the fold has met, or undefined when out of scope (#469). */
+  judgeContext(toolCallId: string): EnsoJudgeContext | undefined
 } {
   // ⚠ Read at every `session_start`, AND lazily at the first event if none fired — the floor's
   // reasoning (`verifyPolicyToolNames`): pi's ordering is an assumption, and a policy read as
@@ -577,6 +623,8 @@ function observeSessionSecurity(
       )
     },
     incidents: () => incidents,
+    // Off the fold's own state, right after the call's step: what `judgeContextsOfEntries` replays.
+    judgeContext: (toolCallId) => judgeContextOf(risk, toolCallId),
   }
 }
 
@@ -587,6 +635,51 @@ function customEntriesOf(entries: readonly unknown[]): { customType: string; dat
     const { type, customType, data } = entry as { type?: unknown; customType?: unknown; data?: unknown }
     return type === 'custom' && typeof customType === 'string' ? [{ customType, data }] : []
   })
+}
+
+/** The judgement's log properties: each answer as a number when judged, why not when unjudged. */
+function judgementProperties(judgement: EnsoCommandJudgement): Record<string, string | number> {
+  const { toolCallId, scope, backend, kind, latencyMs } = judgement
+  const base = { toolCallId, scope, backend, kind, latencyMs }
+  if (judgement.kind === 'unjudged') return { ...base, reason: judgement.reason }
+  const answers = Object.entries(judgement.answers).flatMap(([question, answer]) =>
+    answer === undefined ? [] : [[question, answer.value] as const],
+  )
+  return { ...base, ...Object.fromEntries(answers) }
+}
+
+/**
+ * Ask the judge about a call and record what it answered (#469 PR1: recorded, nothing more).
+ *
+ * ⚠ NOT AWAITED: the call runs while the judge thinks, so the judge adds no latency to it — and
+ * nothing it answers can change the verdict. A rejection (a backend breaking its never-throws
+ * contract) is recorded as `unjudged`, never as clean; a record that cannot be written (the
+ * session is gone by the time the answer lands) is logged. Neither reaches pi.
+ */
+function judgeInBackground(
+  pi: ExtensionAPI,
+  judge: CommandJudge,
+  request: {
+    readonly context: EnsoJudgeContext
+    readonly state: EnsoJudgeState
+    readonly signal: AbortSignal | undefined
+  },
+): void {
+  const started = performance.now()
+  const record = (outcome: EnsoJudgeOutcome): void => {
+    const judgement = commandJudgementOf(request.context, judge.backend, performance.now() - started, outcome)
+    pi.appendEntry(ENSO_COMMAND_JUDGEMENT_ENTRY, judgement)
+    log.info(ENSO_LOG_EVENTS.commandJudged, judgementProperties(judgement))
+  }
+  // The executor runs now, so the request leaves now; a synchronous throw becomes a rejection.
+  new Promise<EnsoJudgeOutcome>((resolve) => resolve(judge.judge(request.state, request.signal)))
+    .then(record, (error: unknown) => record({ kind: 'unjudged', reason: `the judge failed: ${String(error)}` }))
+    .catch((error: unknown) => {
+      log.error('the judgement of {toolCallId} could not be recorded: {error}', {
+        toolCallId: request.context.toolCallId,
+        error,
+      })
+    })
 }
 
 /**
@@ -794,6 +887,41 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
   // The session and log directories `protected-records` refuses a shell command naming (#466):
   // this project's session directory, read off the session at each start, and the log directory.
   let recordDirectories: readonly string[] = [dependencies.logsDirectory]
+  // #469: the command judge, read at every start — and lazily at the first call if none fired, as
+  // the incident policy is. `{ judge: undefined }` is a read that found it off.
+  let sessionJudge: { readonly judge: CommandJudge | undefined } | undefined
+  const readJudge = (): { readonly judge: CommandJudge | undefined } => {
+    // ⚠ Never a throw: this runs in `session_start` (the print-mode wedge). Failing, it is off.
+    try {
+      return { judge: dependencies.commandJudge() }
+    } catch (error) {
+      log.error('the command judge could not be read; it is off: {error}', { error })
+      return { judge: undefined }
+    }
+  }
+
+  /**
+   * Judge a `bash` call the guard let through, when it is in the judge's scope (#469 scope 1, the
+   * selection core's `judgeContextOf` makes). Recorded only — it feeds no risk signal and asks
+   * nothing — and ⚠ observe only as the risk fold is: a throw here is logged, never a verdict.
+   */
+  function judgeIfInScope(toolCallId: string, cwd: string, signal: AbortSignal | undefined): void {
+    try {
+      sessionJudge ??= readJudge()
+      const { judge } = sessionJudge
+      if (judge === undefined) return
+      const context = security.judgeContext(toolCallId)
+      if (context === undefined) return
+      const state = judgeStateOf(context, {
+        cwd,
+        secretPathFragments: policy.secretPathFragments,
+        secretValues: dependencies.judgeSecretValues(),
+      })
+      judgeInBackground(pi, judge, { context, state, signal })
+    } catch (error) {
+      log.error('the command judge could not be asked about {toolCallId}: {error}', { toolCallId, error })
+    }
+  }
 
   let policyToolsChecked = false
   let policyToolMismatch: string | undefined
@@ -844,6 +972,7 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
       recordDirectories = [dependencies.logsDirectory]
     }
     security.resume(() => extensionContext.sessionManager.getBranch())
+    sessionJudge = readJudge()
   })
 
   // @invariant guarded-tool-call/knowledge-from-results Knowledge comes from results, never from calls.
@@ -897,6 +1026,7 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
     }
     if (verdict === undefined) {
       log.debug('{toolName} allowed', properties)
+      judgeIfInScope(event.toolCallId, extensionContext.cwd, extensionContext.signal)
       return undefined
     }
     const denial: EnsoGuardDenial = {

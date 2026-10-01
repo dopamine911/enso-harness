@@ -1,5 +1,6 @@
 import { isAbsolute } from 'node:path'
-import { looksLikeSecret, realpathOfNearestExisting, resolveAgainstCwd, textLooksLikeSecretPath } from './paths.ts'
+import { textLooksLikeSecretPath } from '@enso/core/paths'
+import { looksLikeSecret, realpathOfNearestExisting, resolveAgainstCwd } from './paths.ts'
 import { extractFlatShellCommandSegments, literalShellWord, shellWordsOf } from './shell-segments.ts'
 
 /**

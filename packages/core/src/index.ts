@@ -120,6 +120,7 @@ export {
   EnsoDayStats,
   EnsoDurationSummary,
   foldDay,
+  median,
   mergeDurationSummaries,
 } from './log-stats.ts'
 export {
@@ -342,8 +343,27 @@ export {
   toolFamilyOf,
 } from './session-incident.ts'
 export {
+  type CommandJudge,
+  commandJudgementOf,
+  ENSO_COMMAND_JUDGEMENT_ENTRY,
+  ENSO_JUDGE_BACKENDS,
+  ENSO_JUDGE_POLICY,
+  ENSO_JUDGE_QUESTIONS,
+  EnsoCommandJudgement,
+  type EnsoJudgeAnswer,
+  type EnsoJudgeBackend,
+  EnsoJudgeConfig,
+  type EnsoJudgeOutcome,
+  type EnsoJudgeQuestion,
+  type EnsoJudgeState,
+  EnsoThreadJudgeCases,
+  readEnsoCommandJudgement,
+  readEnsoThreadJudgeCases,
+} from './command-judge.ts'
+export {
   DEFAULT_RISK_THRESHOLDS,
   ENSO_INCIDENT_RESOLVED_ENTRY,
+  ENSO_JUDGE_SCOPE_REASONS,
   ENSO_OPERATOR_DENIAL_ENTRY,
   ENSO_PERMISSION_DENIAL_ENTRY,
   ENSO_PERMISSION_DENIAL_RESOLUTIONS,
@@ -351,6 +371,8 @@ export {
   ENSO_SECURITY_SIGNAL_ENTRY,
   ENSO_SECURITY_SIGNALS,
   ENSO_SESSION_RISK_ENTRY,
+  type EnsoJudgeContext,
+  type EnsoJudgeScopeReason,
   type EnsoPermissionDenial,
   type EnsoPermissionDenialResolution,
   type EnsoRiskEvent,
@@ -369,6 +391,8 @@ export {
   riskEventsOfEntries,
   sessionRiskOfEntries,
   sessionRiskOfTranscript,
+  judgeContextOf,
+  judgeContextsOfEntries,
   sessionRiskStep,
 } from './session-risk.ts'
 export {

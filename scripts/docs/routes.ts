@@ -165,6 +165,10 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
         'path: `threadId`; query: optional `windowCalls`, `highAtSignals`, `highAtKinds`, `incidentAtSignals` — the server’s thresholds otherwise',
     },
   ),
+  THREAD_JUDGE_CASES_ROUTE: threadRead(
+    'respondWithThreadJudgeCases',
+    "200 `EnsoThreadJudgeCases` JSON (#469) — each call the command judge would be asked about (core's selection under the server's thresholds), why it is in scope, and the REDACTED state a backend would be sent. Sends nothing. What `bun run judge` reads",
+  ),
   THREAD_GIT_ROUTE: threadRead(
     'respondWithThreadGit',
     "200 `EnsoThreadGit` JSON — the thread's cwd and git's state there (#453): repository, branch, upstream, the last-push baseline and the rule that chose it, ahead/behind, and changed files by where they sit; `not-a-repository` or `unavailable` with git's reason otherwise. Read-only, no fetch",

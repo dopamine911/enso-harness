@@ -181,6 +181,7 @@ const ENVIRONMENT_METADATA: readonly EnvironmentMetadata[] = [
   serverUrlReader('scripts/enso-logs.ts', '`scripts/enso-logs.ts#bundle`', 'bundle retrieval'),
   serverUrlReader('scripts/enso-eval.ts', '`scripts/enso-eval.ts#main`', 'the session eval'),
   serverUrlReader('scripts/enso-incidents.ts', '`scripts/enso-incidents.ts#main`', 'the incident history'),
+  serverUrlReader('scripts/enso-judge.ts', '`scripts/enso-judge.ts#main`', 'the command-judge cases and replay'),
   serverUrlReader('scripts/enso-thread.ts', '`scripts/enso-thread.ts`', 'thread inspection', 'boot'),
   {
     key: 'npm_config_user_agent',
@@ -310,6 +311,11 @@ const CONFIG_FIELD_METADATA: readonly ConfigFieldMetadata[] = [
     '`5` signals for `incident`.',
     'incidents?.incidentAtSignals ?? DEFAULT_RISK_THRESHOLDS.incidentAtSignals',
   ),
+  judgeField('', 'The judge is off: nothing is sent.'),
+  judgeField(
+    '.backend',
+    '`"off"`: nothing is sent (#469). `"jev"` sends each in-scope `bash` call, redacted, to TypeSafe; recorded only. An unreadable `config.json` leaves it off.',
+  ),
 ]
 
 /**
@@ -323,6 +329,20 @@ function incidentField(suffix: string, defaultWhenOmitted: string, contains: str
     defaultWhenOmitted,
     reader: '`packages/core/src/session-incident.ts#incidentPolicyOf`',
     check: { file: 'packages/core/src/session-incident.ts', contains },
+  }
+}
+
+/**
+ * A `security.judge` field (#469): optional and user-only, read by `userJudgeConfig` at each
+ * session start; anything but a readable `"jev"` is off.
+ */
+function judgeField(suffix: string, defaultWhenOmitted: string): ConfigFieldMetadata {
+  return {
+    field: `security.judge${suffix}`,
+    required: 'no',
+    defaultWhenOmitted,
+    reader: '`packages/harness/core/session-config.ts#userJudgeConfig`',
+    check: { file: 'packages/harness/core/session-config.ts', contains: "security?.judge?.backend ?? 'off'" },
   }
 }
 
@@ -584,12 +604,14 @@ function configInventory(): { fields: ConfigFieldMetadata[] } {
   const webSearchSource = readFileSync(join(ROOT, 'packages/core/src/web-search.ts'), 'utf8')
   const projectSource = readFileSync(join(ROOT, 'packages/core/src/project.ts'), 'utf8')
   const incidentSource = readFileSync(join(ROOT, 'packages/core/src/session-incident.ts'), 'utf8')
+  const judgeSource = readFileSync(join(ROOT, 'packages/core/src/command-judge.ts'), 'utf8')
   const discovered = [
     ...objectFields(configSource, 'EnsoConfig'),
     ...objectFields(webFetchSource, 'WebFetchConfig', 'webFetch.'),
     ...objectFields(webSearchSource, 'WebSearchConfig', 'webSearch.'),
     ...objectFields(projectSource, 'EnsoProjectsConfig', 'projects.'),
     ...objectFields(incidentSource, 'EnsoSecurityConfig', 'security.'),
+    ...objectFields(judgeSource, 'EnsoJudgeConfig', 'security.judge.'),
   ].sort()
   const metadata = [...CONFIG_FIELD_METADATA].sort((left, right) => compareText(left.field, right.field))
   const classified = metadata.map((row) => row.field)

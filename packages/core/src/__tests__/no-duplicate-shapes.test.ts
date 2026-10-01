@@ -22,6 +22,8 @@ test('every module is reachable: from the barrel, or from a subpath package.json
   // undeclared file either), and every one is a module the BROWSER MUST NEVER SEE:
   //
   //   `git.ts`          `node:child_process` — the one git runner, and the repository reader (#453)
+  //   `jev-judge.ts`    the TypeSafe SDK, a network client holding an API key — never a page's (#469)
+  //   `judge.ts`        `node:fs` — the command judge's script resolution, and secret redaction (#469)
   //   `log-process.ts`  `@logtape/file` builds its sinks on `node:fs` at import
   //   `paths.ts`        `node:fs`/`node:url` — the repo-root walker and the harness's paths (#211)
   //   `permission-rules.ts` `node:fs` — the permission rules file, seeded before pi loads (#446)
@@ -47,6 +49,8 @@ test('every module is reachable: from the barrel, or from a subpath package.json
     .map(([, target]) => target.replace(/^\.\/src\//, ''))
   expect(subpathModules).toEqual([
     'git.ts',
+    'jev-judge.ts',
+    'judge.ts',
     'log-process.ts',
     'paths.ts',
     'permission-rules.ts',
