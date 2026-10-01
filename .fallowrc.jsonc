@@ -13,6 +13,7 @@
     "packages/harness/extensions/ask-user/index.ts",
     "packages/harness/extensions/system-prompt/index.ts",
     "packages/harness/extensions/run-context/index.ts",
+    "packages/harness/extensions/incident-report/index.ts",
     "packages/harness/extensions/permission-modes/index.ts",
     // Loaded by Bun from `packages/web/bunfig.toml` → `plugins`.
     "packages/web/src/server/bun-plugin-strict-binding-workaround.ts",

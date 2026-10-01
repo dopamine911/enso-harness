@@ -262,8 +262,14 @@ what no mode may allow. Both answer before a tool runs; nothing after it does.
   edited. A fork inherits an open one.
 - **suspension** — what a halted incident does to the **tool families** execute (`bash`,
   `powershell`), network (`web_fetch`, `web_search`) and write (`write`, `edit`): every call to one is
-  refused under `incident-suspension` until a resolution lifts it. Reading is never suspended. Folded
-  from the records at every session start, so it is the server's, not the page's or the model's.
+  refused under `incident-suspension` until a resolution lifts it. Reading is never suspended once the
+  report is settled. Folded from the records at every session start, so it is the server's, not the
+  page's or the model's.
+- **incident report** — the agent's explanation of a halting incident (#467): one bounded **report
+  turn** in the halted run, with one tool, `file_incident_report`, answering #189's nine questions. The
+  three factual answers cite quotes the host checks (**verified** / unverified); "what was denied" not
+  citing the incident's own calls is a **mismatch**. Recorded beside the incident, never in it — or
+  recorded **missing**. While it is owed, the **report window** lets no other tool run.
 
 ## Observation
 

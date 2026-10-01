@@ -359,6 +359,10 @@ export const ENSO_DEFAULT_PERMISSION_POLICY = {
     // the session's own provider. `web_fetch` reaches any URL, so it stays on the `*` ask.
     ask_user: 'allow',
     web_search: 'allow',
+    // The incident report (#467): the harness's own bounded step after a halt, not an agent
+    // capability — the guard lets it through only while a report is owed, and refuses everything
+    // else then. Asking for it would put a permission prompt between a halt and its card.
+    [ENSO_INCIDENT_REPORT_TOOL_NAME]: 'allow',
     path_read: { [ENSO_CATCH_ALL]: 'allow', ...ENV_FILES_DENIED, '*.env.example': 'allow' },
     path_write: { [ENSO_CATCH_ALL]: 'allow', ...ENV_FILES_DENIED },
     external_directory: { [ENSO_CATCH_ALL]: 'ask' },

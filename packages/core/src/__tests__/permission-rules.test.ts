@@ -74,16 +74,30 @@ test('a fresh ENSO_HOME gets Enso’s policy, the engine reads it through the li
 })
 
 test('a file that holds a permission block, with nothing for a mode to override, is kept byte for byte', () => {
-  const content = `${JSON.stringify({ permission: { read: 'allow', bash: { '**': 'ask', 'rm *': 'deny' } }, note: 'mine' })}\n`
+  const permission = { read: 'allow', bash: { '**': 'ask', 'rm *': 'deny' }, file_incident_report: 'allow' }
+  const content = `${JSON.stringify({ permission, note: 'mine' })}\n`
   const { policyPath, agentDir } = launch(content)
   expect(preparePermissionPolicy(policyPath, agentDir)).toEqual({
     kind: 'kept',
     path: policyPath,
-    surfaces: 2,
+    surfaces: 3,
     catchAllAdded: [],
+    reportToolAdded: false,
   })
   expect(readFileSync(policyPath, 'utf8')).toBe(content)
   expectLinked(agentDir, policyPath)
+})
+
+// #467: the incident report is the harness's own step after a halt; a file with no rule for it
+// would put a permission prompt between the halt and its card. A rule the user wrote — even a
+// deny — is never overridden.
+test('⚠ a kept file with no rule for the incident report tool gets allow; one with any rule keeps it', () => {
+  const silent = launch(JSON.stringify({ permission: { read: 'allow' } }))
+  expect(preparePermissionPolicy(silent.policyPath, silent.agentDir)).toMatchObject({ reportToolAdded: true })
+  expect(readBack(silent.policyPath)).toEqual({ permission: { read: 'allow', file_incident_report: 'allow' } })
+  const denied = launch(JSON.stringify({ permission: { read: 'allow', file_incident_report: 'deny' } }))
+  expect(preparePermissionPolicy(denied.policyPath, denied.agentDir)).toMatchObject({ reportToolAdded: false })
+  expect(readBack(denied.policyPath)).toEqual({ permission: { read: 'allow', file_incident_report: 'deny' } })
 })
 
 // #499: a mode's preset replaces only Enso's catch-all, so every surface map a preset touches

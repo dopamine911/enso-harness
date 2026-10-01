@@ -8,10 +8,14 @@ import {
   type EnsoIncidentRecord,
   type EnsoIncidentResolution,
   type EnsoIncidentResolved,
+  type EnsoCheckedClaim,
+  type EnsoIncidentReport,
+  ENSO_REPORT_PROMPT_REF,
   type EnsoSessionIncidents,
   type EnsoToolFamily,
   incidentResolutionRefusal,
   openIncidentOf,
+  reportOwedOf,
 } from '@enso/core'
 import { SirenIcon } from 'lucide-react'
 import { useId, useRef, useState } from 'react'
@@ -130,6 +134,98 @@ function Suspended({ record }: { readonly record: EnsoIncidentRecord }): React.R
         </p>
       )}
     </>
+  )
+}
+
+/** The six interpretive questions of #189 in the reader's words, in the report's order (#467). */
+const ANSWER_LABEL: Readonly<Record<keyof EnsoIncidentReport['interpretive'], string>> = {
+  whyThatAlternative: 'Why that alternative',
+  recognisedAsBypass: 'Recognised as a way around it?',
+  shouldHaveDone: 'What it should have done',
+  sufficientAuthorization: 'Authorization that would have been enough',
+  patternToAvoid: 'Pattern to avoid',
+  uncharitableRead: 'The uncharitable read',
+}
+
+/**
+ * One factual claim and its citations (#467). ⚠ "verified" is said in words: it means the quote is
+ * in the cited text, not that the agent's reading of it is right, and colour alone would hide that.
+ * The ref is not linked: the transcript's tool rows carry no per-call anchor to link to.
+ */
+function Claim({
+  label,
+  claim,
+  flag,
+}: {
+  readonly label: string
+  readonly claim: EnsoCheckedClaim
+  readonly flag?: string | undefined
+}): React.ReactNode {
+  return (
+    <li className="grid gap-0.5">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="text-sm break-words">{claim.text}</p>
+      {flag === undefined ? null : <p className="text-xs text-refuse">{flag}</p>}
+      <ul className="grid gap-0.5 pl-3">
+        {claim.evidence.map((citation) => (
+          <li key={`${citation.ref}:${citation.quote}`} className="text-xs break-words">
+            <q>{citation.quote}</q> —{' '}
+            {citation.ref === ENSO_REPORT_PROMPT_REF ? 'the prompt' : <span className="font-mono">{citation.ref}</span>}{' '}
+            · {citation.verified ? 'verified' : 'unverified'}
+          </li>
+        ))}
+      </ul>
+    </li>
+  )
+}
+
+function Report({ report }: { readonly report: EnsoIncidentReport }): React.ReactNode {
+  const deniedFlag = report.mismatches.includes('denied-cites-no-incident-refusal')
+    ? "does not cite the incident's refusals"
+    : undefined
+  return (
+    <>
+      {report.submission === 2 ? <p className="text-xs text-muted-foreground">filed after one correction</p> : null}
+      <ul className="grid gap-2">
+        <Claim label="Task" claim={report.factual.task} />
+        <Claim label="What was denied" claim={report.factual.denied} flag={deniedFlag} />
+        <Claim label="What was tried" claim={report.factual.tried} />
+      </ul>
+      <dl className="grid gap-1.5">
+        {Object.entries(ANSWER_LABEL).map(([key, question]) => (
+          <div key={key}>
+            <dt className="text-xs text-muted-foreground">{question}</dt>
+            <dd className="text-sm break-words">{report.interpretive[key as keyof typeof ANSWER_LABEL]}</dd>
+          </div>
+        ))}
+      </dl>
+    </>
+  )
+}
+
+/**
+ * The agent's account of the incident (#467), its own section after the record so it is never
+ * read as part of it. Nothing when no report was ever asked for (halting off, or resolved first).
+ */
+function Explanation({
+  record,
+  incidents,
+}: {
+  readonly record: EnsoIncidentRecord
+  readonly incidents: EnsoSessionIncidents
+}): React.ReactNode {
+  let body: React.ReactNode
+  if (record.report !== undefined) body = <Report report={record.report} />
+  else if (record.reportMissing !== undefined)
+    body = <p className="text-sm">no report filed — {record.reportMissing.reason}</p>
+  else if (reportOwedOf(incidents) === record)
+    body = <p className="text-sm">report pending — the agent is asked for one</p>
+  else return null
+  return (
+    <Section title="The agent's explanation">
+      <p className="text-xs text-muted-foreground">the agent's account of what happened — not the record</p>
+      {body}
+    </Section>
   )
 }
 
@@ -391,6 +487,7 @@ export function IncidentCard({ record, incidents, resolve }: IncidentCardProps):
       <Section title="Suspended tools">
         <Suspended record={record} />
       </Section>
+      <Explanation record={record} incidents={incidents} />
       {record.resolutions.length === 0 ? null : (
         <Section title="Resolutions">
           <Resolutions resolutions={record.resolutions} />

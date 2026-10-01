@@ -232,10 +232,13 @@ from *results* only — a blocked call produces no result and a failed one arriv
 1. **The fail-closed floor** (#4). If the policy names a tool the runtime does not register, or the tool
    list could not be enumerated, every call is denied with the mismatch in the reason.
    Checked lazily here if `session_start` has not fired yet, so the floor never depends on event order.
-2. **An incident's suspension** (#466, `guards/index.ts#suspensionDenial`). A tool whose family an
-   incident suspended — execute (`bash`, `powershell`), network (`web_fetch`, `web_search`), write
-   (`write`, `edit`) — is refused under `incident-suspension`, before any other rule: the incident is
-   the thread's state, not a judgement of the call. Reading and searching are never suspended.
+2. **An incident's suspension** (#466, `guards/index.ts#suspensionDenial`). While a halting incident's
+   **report is owed** (#467), every tool but `file_incident_report` is refused under
+   `incident-suspension` — reads and `ask_user` included: the report turn is bounded. Otherwise a tool
+   whose family an incident suspended — execute (`bash`, `powershell`), network (`web_fetch`,
+   `web_search`), write (`write`, `edit`) — is refused under the same rule, before any other: the
+   incident is the thread's state, not a judgement of the call. Reading and searching are never
+   suspended once the report is settled.
 3. **Shell** (`bash`, `powershell`) — `guards/index.ts#shellCommandDenial`, deny first, patch last:
    the analyzer (bash only; a throw is a deny per its contract), then the network deny by
    name at command position per segment, with the *cannot vouch* floor for a construct it cannot
@@ -290,10 +293,25 @@ reasoning. ⚠ The records are **tamper-evident at best, and not yet that** (the
 records deny refuses a shell command naming them, which makes an edit harder and visible as a
 signal, not impossible — the guards are the whole boundary (#24).
 
+**The report turn** (#467; `extensions/incident-report/index.ts`, `@enso/core` `incident-report.ts`).
+A halting opening is announced on `ENSO_INCIDENT_OPENED_CHANNEL`. The `incident-report` extension —
+loaded after the permission engine, which re-adds every registered tool at each prompt's start —
+narrows the active tools to `file_incident_report` and sends the request as a follow-up, so pi's
+loop delivers it after the halted batch, before the run ends; at every session start and prompt start
+the tool is out of the active set again. The tool's nine fields are #189's questions: the task, what
+was denied and what was tried cite `{ ref, quote }` (a tool call id the model can see, or `prompt`), and
+the extension — never the model — checks each quote against the branch, whitespace-normalised; "what
+was denied" must cite one of the incident's own calls, or it is flagged. At most two submissions: a
+first that checks is recorded; one that does not is named back for one correction, and the second is
+recorded as it is. A run that ends without one records the failed try, flagged, or
+`enso-incident-report-missing`, and so does a session that starts still owing it. Every settlement is
+announced on `ENSO_INCIDENT_REPORT_CHANNEL`, and the guard's report window closes. The engine lets the
+tool through by policy: the seed allows it, and a launch adds `allow` to a file with no rule for it.
+
 **Consumed by the runtime.** Handlers stack; the first `block` returns and cannot be un-blocked by a
 later extension, whatever the load order (the header of `guards/index.ts`). The participants and their load order are
 the manifest, `pi.extensions` in `packages/harness/package.json`: logging, **guards**, web-fetch, web-search, the
-permission engine, the mode extension, the multi-account extension, ask-user, system-prompt and run-context. Two of those register a `tool_call` handler — guards and
+permission engine, the mode extension, the multi-account extension, ask-user, system-prompt, run-context and incident-report. Two of those register a `tool_call` handler — guards and
 the permission engine, in that order (#496; the mode extension registers none).
 
 **Second implementation:** the injected analyzer. `guards.test.ts#loadGuardRuntime` builds the extension over a
