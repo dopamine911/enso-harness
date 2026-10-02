@@ -677,6 +677,21 @@ html:has(.landing) {
   justify-content: center;
 }
 
+/* The way to the origin page (#574), between the closing line and the actions. */
+.landing .final .final-origin {
+  margin-top: -14px;
+  font-size: 16px;
+}
+
+.landing .final .final-origin a {
+  color: var(--cyan);
+  text-decoration: none;
+}
+
+.landing .final .final-origin a:hover {
+  text-decoration: underline;
+}
+
 /* ── Lightbox ── */
 .landing-lightbox {
   position: fixed;

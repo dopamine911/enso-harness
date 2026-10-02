@@ -1,0 +1,437 @@
+---
+/**
+ * The origin page (#574): how Enso came out of a run of experiments, told as one investigation
+ * rather than a list of projects. It shares the landing's look (`landing.css`, under `.landing`),
+ * and its own pieces are in `origin.css`, under `.origin`.
+ *
+ * ⚠ EACH PROJECT'S LINE SAYS WHAT ITS OWN PAGE SAYS. The trail below was written from each
+ * project's page or README, read when the page was written; a project that changes is the reason
+ * to change its line, never a reason to embellish it. Magpie's repository is not public yet, so it
+ * carries no link until it is.
+ *
+ * Links into the docs go through the site's base, as the landing's do.
+ */
+import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro'
+import { Image } from 'astro:assets'
+import smile from '../assets/landing/enso-smile.png'
+import '../styles/landing.css'
+import '../styles/origin.css'
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, '')
+const feature = (slug: string): string => `${base}/features/${slug}/`
+const github = 'https://github.com/dopamine911/zen-harness-foundation'
+const acme = 'https://github.com/brewpirate/acme-frontier-ai/tree/main/catalog'
+
+interface Source {
+  readonly label: string
+  readonly href: string
+}
+
+interface Experiment {
+  readonly name: string
+  readonly theme: string
+  readonly question: string
+  readonly did: readonly string[]
+  readonly livesOn: string
+  readonly sources: readonly Source[]
+  /** Why there is no link, when there is none. */
+  readonly unlinked?: string
+}
+
+const trail: readonly Experiment[] = [
+  {
+    name: 'ArgusForge',
+    theme: 'Autonomy',
+    question: 'How much of the software-development process can agents own?',
+    did: [
+      'ArgusForge turns business requirements into software on its own: it plans the work, builds it, tests it and delivers it. Every build runs the test suite, the lint checks and the build pipeline, and code does not move forward until it passes. Then an AI from a different provider audits what the first one built.',
+    ],
+    livesOn:
+      'Agents should have real room to work. The answer is not to shrink them back into autocomplete. Once an agent owns that much of the process, its reliability stops being an abstract worry and becomes an engineering problem.',
+    sources: [{ label: 'ArgusForge', href: 'https://www.viaanix.com/ai/argusforge' }],
+  },
+  {
+    name: 'flaky-tests',
+    theme: 'Evidence across time',
+    question: 'What do you do when the run in front of you looks healthy, and the system is still broken some of the time?',
+    did: [
+      'flaky-tests hooks into the test runner and records every failure to a database. It compares two equal windows of time and flags the tests that have newly started failing intermittently, then writes an investigation prompt for an agent and opens an issue.',
+    ],
+    livesOn:
+      'A single snapshot can lie. Receipts kept across runs make intermittent behaviour something you can investigate. Time and trajectory are part of the evidence.',
+    sources: [{ label: 'flaky-tests', href: 'https://github.com/brewpirate/flaky-tests' }],
+  },
+  {
+    name: 'System Prompt Time Machine',
+    theme: 'Harness visibility',
+    question: 'What is actually shaping the agent, underneath what looks like the model?',
+    did: [
+      "The Time Machine captures Claude Code's system prompts and tool definitions, CLI and SDK, version by version and model by model, and charts how they changed. Every finding carries its evidence tier: a verified capture, a source read, an inference.",
+    ],
+    livesOn:
+      'The harness is part of the agent system. It cannot be treated as an invisible implementation detail: what the model was told, and which tools it was handed, change what it does.',
+    sources: [{ label: 'cc-sys-prompt-time-machine', href: 'https://github.com/brewpirate/cc-sys-prompt-time-machine' }],
+  },
+  {
+    name: 'ACME Frontier AI',
+    theme: 'Context, memory, posture, verification',
+    question: 'What does an agent need to keep working well over a long session, and how would you know it did?',
+    did: [
+      'A working laboratory of experiments in how people and agents build software together, where that breaks down, and what can be recovered. Its rule: "We measure; we don\'t trust. Self-report is not evidence." A few of the experiments:',
+      '**Total Recall** finds short trigger phrases that bring the model\'s attention back to content already loaded, so a long session does not drift away from rules set early on. **Field Notes** is an append-only work journal per project. Two hooks make sure the right instructions actually reach the context: one restores memory and git state after a compaction, the other has the model read the skill file on disk when a skill is invoked, leaving a receipt of the read. **The Craft** backs claims with receipts (grep output, test runs, file reads) instead of reasoning, and stops when surprised.',
+    ],
+    livesOn:
+      'Context is state. Memory needs provenance and currency. An explanation is a claim, not evidence. Human and agent should challenge each other, and verification needs receipts.',
+    sources: [
+      { label: 'the catalog', href: acme },
+      { label: 'Total Recall', href: `${acme}/projects/total-recall` },
+      { label: 'Field Notes', href: `${acme}/projects/field-notes` },
+      { label: 'The Craft', href: `${acme}/projects/the-craft` },
+      { label: 'restore-context', href: `${acme}/hooks/restore-context` },
+      { label: 'inject-skill', href: `${acme}/hooks/inject-skill` },
+    ],
+  },
+  {
+    name: 'Slop Factory',
+    theme: 'Physical gates',
+    question: 'What happens when important expectations stop being instructions, and become properties the environment enforces?',
+    did: [
+      'Slop Factory starts a TypeScript project with its guardrails already in place: one gate command, a coverage floor that fails the build, a pre-commit hook, CI, a secret scanner, and rules an agent can read. Its test-quality skill defends against tests that pass without verifying anything, tests weakened to hide a bug, and tests whose names claim more than they check.',
+    ],
+    livesOn:
+      'Where a boundary can be enforced mechanically, do not depend on the agent remembering prose.',
+    sources: [
+      { label: 'the node-npm example', href: 'https://github.com/vx-daniel/slop-factory/tree/main/examples/node-npm' },
+      {
+        label: 'test-quality',
+        href: 'https://github.com/vx-daniel/slop-factory/tree/main/examples/bun/.claude/skills/test-quality',
+      },
+    ],
+  },
+  {
+    name: 'Magpie',
+    theme: 'Telemetry',
+    question: 'What are the agents actually doing?',
+    did: [
+      "Magpie watches Claude Code's own records (its session files, its OpenTelemetry output and its hook activity) and builds a local command center from them: sessions, token and cost accounting, tool and MCP latency, tasks, decisions, field notes and live state.",
+      'It also showed the limit of watching from outside. Reconstructing another harness from the artifacts it leaves behind is not the same as owning the boundary where the work runs, where it can be observed and steered as it happens.',
+    ],
+    livesOn: 'Telemetry should be independent of the agent it describes, and observation belongs at the boundary where execution happens.',
+    sources: [],
+    unlinked: 'Its repository is not public yet.',
+  },
+]
+
+/** **bold** spans in trail prose, as `<strong>`: the prose is ours, so this is all the markup it needs. */
+const withStrong = (text: string): string =>
+  text
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+
+const layers = [
+  'model',
+  'harness',
+  'prompt',
+  'context',
+  'memory',
+  'tools',
+  'filesystem',
+  'codebase',
+  'tests',
+  'telemetry',
+  'agent',
+  'human',
+] as const
+
+const chain = ['human', 'harness', 'model', 'context', 'tools', 'filesystem', 'program'] as const
+
+const loop: readonly (readonly [step: string, how: string, link?: Source])[] = [
+  ['Unexpected outcome', 'The result is not what you meant, or not what you expected.'],
+  [
+    'Locate the divergence',
+    'Find where the run went somewhere else: the timeline of the session, the context events.',
+    { label: 'Session eval', href: feature('session-eval') },
+  ],
+  [
+    'Inspect the receipts',
+    'What the model was sent, what ran, what was refused, what changed on disk.',
+    { label: 'Context Browser', href: feature('context-browser') },
+  ],
+  ['Choose a lever', 'The model, the prompt, the context, the permissions, a gate, the task itself.'],
+  [
+    'Rewind or fork',
+    'Go back to the prompt before the divergence, without losing the run you have.',
+    { label: 'Forks and lineage', href: feature('lineage') },
+  ],
+  ['Change the condition', 'One lever at a time, so the next result says something about it.'],
+  ['Rerun', 'Send the prompt again, under the new condition.'],
+  [
+    'Compare the receipts',
+    "Did changing the lever change the outcome? Session eval's command line puts the two runs side by side.",
+    { label: 'Session eval', href: feature('session-eval') },
+  ],
+]
+
+const primitives: readonly (readonly [primitive: string, why: string])[] = [
+  ['Context inspection', 'exposes an input to behaviour.'],
+  ['Telemetry', 'records what actually happened.'],
+  ['Filesystem and state history', 'preserve the trajectory.'],
+  ['Rewind', 'restores an earlier state to experiment from.'],
+  ['Fork', 'changes a condition without destroying the original path.'],
+  ['Gates', 'turn assumptions into enforced properties.'],
+  ['Scorecards and comparison', 'show whether changing the lever changed the outcome.'],
+]
+
+const receipts = [
+  'tool output',
+  'file state and the diff',
+  'how the tests behaved',
+  'what the runtime observed',
+  'the context the model was actually given',
+  'provenance: the directory, the branch, the commit',
+  'independent records of what occurred',
+] as const
+
+const inheritance: readonly (readonly [project: string, idea: string])[] = [
+  ['ArgusForge', 'autonomy'],
+  ['flaky-tests', 'durable evidence across time, and intermittent failure'],
+  ['Time Machine', 'harness visibility'],
+  ['Total Recall · Field Notes', 'context, continuity and history'],
+  ['The Craft', 'mutual verification'],
+  ['Slop Factory', 'physical gates'],
+  ['Magpie', 'telemetry and observability'],
+]
+---
+
+<StarlightPage
+  frontmatter={{
+    title: 'Where Enso came from',
+    description:
+      'How Enso grew out of a run of experiments into agent autonomy, context, memory, verification, gates and telemetry: there was no single layer to fix.',
+    template: 'splash',
+    tableOfContents: false,
+    prev: false,
+    next: false,
+    editUrl: false,
+  }}
+>
+  <div class="landing origin not-content">
+    <section class="section origin-opening" aria-labelledby="origin-opening">
+      <div class="kicker">Origin</div>
+      <h2 id="origin-opening">There was no magic bullet, and no single layer to fix.</h2>
+      <p class="section-intro">
+        Enso did not start as a product. It started as an investigation into what actually shapes the work of a coding agent.
+        Each experiment along the way found part of the answer, and every one of them lives on in Enso.
+      </p>
+      <p class="section-intro">
+        It began with autonomy. Once agents own a real part of building software, their reliability stops being an abstract
+        concern. So I went looking for the thing that decides how an agent behaves: the model, the harness, the system prompt,
+        the context, memory, the tools, the codebase, the tests, the telemetry, and the human in front of it.
+      </p>
+      <p class="section-intro">
+        I did not find one trusted layer. Every layer mattered, and every layer could fail. So, experiment by experiment, the
+        important expectations moved out of prose and into physical gates, independent telemetry, observable state and evidence.
+      </p>
+    </section>
+
+    <hr class="rule" />
+
+    <section class="section" aria-labelledby="origin-trail">
+      <div class="section-head">
+        <div class="kicker">The research trail</div>
+        <div>
+          <h2 id="origin-trail">Six experiments, each a question.</h2>
+          <p class="section-intro">
+            Each one asked a different question, and each answer survived into Enso. The links go to the projects themselves.
+          </p>
+        </div>
+      </div>
+      <ol class="trail">
+        {
+          trail.map((experiment) => (
+            <li class="trail-entry">
+              <div class="trail-name">
+                <div class="kicker">{experiment.theme}</div>
+                <h3>{experiment.name}</h3>
+              </div>
+              <div class="trail-body">
+                <p class="trail-question">{experiment.question}</p>
+                {experiment.did.map((paragraph) => (
+                  <p set:html={withStrong(paragraph)} />
+                ))}
+                <p class="trail-lives">
+                  <span class="trail-label">What lives on</span> {experiment.livesOn}
+                </p>
+                {experiment.sources.length > 0 ? (
+                  <nav class="chapter-links" aria-label={`${experiment.name} sources`}>
+                    {experiment.sources.map((source) => (
+                      <a href={source.href}>{source.label} ↗</a>
+                    ))}
+                  </nav>
+                ) : (
+                  <p class="quiet trail-unlinked">{experiment.unlinked}</p>
+                )}
+              </div>
+            </li>
+          ))
+        }
+      </ol>
+    </section>
+
+    <section class="section proof" aria-labelledby="origin-no-bullet">
+      <div class="no-bullet">
+        <div class="kicker">Every layer</div>
+        <h2 id="origin-no-bullet">There wasn't a magic bullet.</h2>
+        <ul class="layers" aria-label="The layers investigated">
+          {layers.map((layer) => <li>{layer}</li>)}
+        </ul>
+        <p class="no-bullet-pair">
+          Every layer helped.<br />
+          Every layer could also be wrong.
+        </p>
+        <p class="no-bullet-assume">Assume everything is broken.</p>
+        <p class="section-intro">
+          Not that everything is broken. That no layer gets unconditional trust because it usually works: not the model, not
+          the harness, not the tests, not the agent, and not me.
+        </p>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="origin-debugger">
+      <div class="section-head">
+        <div class="kicker">Debug the development process</div>
+        <div>
+          <h2 id="origin-debugger">Enso is the missing debugger for developing with agents.</h2>
+          <p class="section-intro">
+            The thing being debugged is not only the program the agent writes. It is the whole system that produced it:
+          </p>
+        </div>
+      </div>
+      <p class="chain" aria-label="The system being debugged, from the human to the program">
+        {
+          chain.map((part, index) => (
+            <>
+              <span class:list={['chain-part', { program: part === 'program' }]}>{part}</span>
+              {index < chain.length - 1 && (
+                <span class="chain-arrow" aria-hidden="true">
+                  →
+                </span>
+              )}
+            </>
+          ))
+        }
+      </p>
+      <p class="section-intro chain-note">
+        Developer tools are strong near the program: debuggers, tests, profilers. Agent interfaces show some of the
+        conversation. Enso fills the middle, where the harness, the model, the context and the tools meet. No single lever
+        reliably fixes an agent, so the job is to know which lever to throw, when, and whether it changed the outcome.
+      </p>
+      <ol class="loop" aria-label="The debugging loop">
+        {
+          loop.map(([step, how, link], index) => (
+            <li>
+              <span class="loop-number">{String(index + 1).padStart(2, '0')}</span>
+              <h3>{step}</h3>
+              <p>{how}</p>
+              {link && (
+                <a class="loop-link" href={link.href}>
+                  {link.label} →
+                </a>
+              )}
+            </li>
+          ))
+        }
+      </ol>
+      <div class="primitives">
+        <h3>That loop is why Enso's pieces belong together.</h3>
+        <dl>
+          {
+            primitives.map(([primitive, why]) => (
+              <div>
+                <dt>{primitive}</dt>
+                <dd>{why}</dd>
+              </div>
+            ))
+          }
+        </dl>
+        <p class="note">
+          The goal is not to discover one correct configuration. It is to make the causal system legible enough that the human
+          and the agent can experiment deliberately, rather than prompt at random.
+        </p>
+      </div>
+    </section>
+
+    <section class="section proof" aria-labelledby="origin-receipts">
+      <div class="section-head">
+        <div class="kicker">Receipts are the common ground</div>
+        <div>
+          <h2 id="origin-receipts">A claim is not a receipt.</h2>
+          <p class="section-intro">
+            When I say the code is correct, that is a claim. When the agent says the code is correct, that is a claim too. A
+            receipt is evidence outside the claim:
+          </p>
+        </div>
+      </div>
+      <div class="receipts-grid">
+        <ul class="receipts">
+          {receipts.map((receipt) => <li>{receipt}</li>)}
+        </ul>
+        <div class="receipts-copy">
+          <p>
+            A receipt belongs to neither of us. Both of us can inspect it. That is what makes it possible to say, and mean:
+          </p>
+          <p class="receipts-line">I check your work. You check mine.</p>
+          <p class="receipts-line">Equals, not superiors.</p>
+          <p>
+            Equals does not mean equally capable. It means neither of us gets to substitute authority for evidence: not the
+            agent's confident summary, and not my certainty that I already know what went wrong.
+          </p>
+          <nav class="chapter-links" aria-label="Receipts in Enso">
+            <a href={feature('guards-and-receipts')}>Guards and receipts →</a>
+            <a href={feature('diff')}>Diff →</a>
+            <a href={feature('context')}>Context →</a>
+            <a href={feature('logs-and-debugging')}>Logs and debugging →</a>
+          </nav>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="origin-inheritance">
+      <div class="section-head">
+        <div class="kicker">Those experiments became Enso</div>
+        <div>
+          <h2 id="origin-inheritance">Enso is where the ideas converge.</h2>
+          <p class="section-intro">
+            It is not a replacement for the earlier projects. It is the system those lessons add up to.
+          </p>
+        </div>
+      </div>
+      <dl class="inheritance">
+        {
+          inheritance.map(([project, idea]) => (
+            <div>
+              <dt>{project}</dt>
+              <dd>{idea}</dd>
+            </div>
+          ))
+        }
+        <div class="inheritance-enso">
+          <dt>Enso</dt>
+          <dd>the system where those ideas converge</dd>
+        </div>
+      </dl>
+    </section>
+
+    <hr class="rule" />
+    <section class="final">
+      <Image class="enso-smile" src={smile} alt="" width={74} height={74} />
+      <h2>None of these projects disappeared.<br />They live here now.</h2>
+      <div class="hero-actions">
+        <a class="button primary" href={`${base}/`}>What Enso does</a>
+        <a class="button" href={`${base}/features/`}>Read the docs</a>
+        <a class="button" href={github}>View on GitHub</a>
+      </div>
+    </section>
+  </div>
+</StarlightPage>

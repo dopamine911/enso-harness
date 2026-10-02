@@ -117,6 +117,8 @@ export default defineConfig({
       // rather than a group carrying `autogenerate` itself: Starlight removed the latter in
       // v0.39.0, and the build error — not the editor types — is what says so.
       sidebar: [
+        // The origin story (#574): a page of the site's own (`src/pages/origin.astro`), not projected docs.
+        { label: 'Where Enso came from', link: '/origin/' },
         { label: 'Features', items: [{ autogenerate: { directory: 'features' } }] },
         {
           label: 'Architecture',

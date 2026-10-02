@@ -1,0 +1,328 @@
+/*
+ * The origin page (`src/pages/origin.astro`, #574): its own pieces, on top of the landing's look.
+ * The page's wrapper carries `.landing` too, so the sections, kickers, headings, buttons and the
+ * dark bands are the landing's rules; everything here is scoped under `.origin` and uses the
+ * landing's variables, so it follows the theme in dark and light alike.
+ */
+
+.landing.origin .origin-opening {
+  max-width: 860px;
+  padding-top: 40px;
+}
+
+.landing.origin .origin-opening h2 {
+  margin: 14px 0 28px;
+}
+
+.landing.origin .origin-opening .section-intro + .section-intro {
+  margin-top: 18px;
+}
+
+/* ── The research trail ── */
+.landing.origin .trail {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--border);
+}
+
+.landing.origin .trail-entry {
+  display: grid;
+  grid-template-columns: minmax(0, 0.75fr) minmax(0, 1.25fr);
+  gap: 70px;
+  padding: 36px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.landing.origin .trail-name h3 {
+  font: 600 27px/1.2 var(--display);
+  margin: 10px 0 0;
+}
+
+.landing.origin .trail-body p {
+  color: var(--soft);
+  margin: 12px 0 0;
+}
+
+.landing.origin .trail-body p:first-child {
+  margin-top: 0;
+}
+
+.landing.origin .trail-body strong {
+  color: var(--fg);
+  font-weight: 500;
+}
+
+.landing.origin .trail-body .trail-question {
+  color: var(--fg);
+  font: 500 19px/1.45 var(--display);
+}
+
+.landing.origin .trail-lives {
+  padding-left: 16px;
+  border-left: 2px solid var(--violet);
+}
+
+.landing.origin .trail-label {
+  display: block;
+  font: 500 11px/1.6 var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.landing.origin .trail-unlinked {
+  margin-top: 24px;
+  font-size: 14px;
+}
+
+/* ── No magic bullet ── */
+.landing.origin .no-bullet {
+  max-width: 900px;
+  margin: 0 auto;
+  text-align: center;
+}
+
+.landing.origin .no-bullet h2 {
+  margin-top: 14px;
+}
+
+.landing.origin .layers {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  list-style: none;
+  margin: 36px 0 0;
+  padding: 0;
+}
+
+.landing.origin .layers li {
+  font: 500 14px var(--mono);
+  padding: 6px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--soft);
+}
+
+.landing.origin .no-bullet-pair {
+  font: 600 clamp(24px, 3vw, 34px) / 1.3 var(--display);
+  color: var(--sl-color-white);
+  margin: 44px 0 0;
+}
+
+.landing.origin .no-bullet-assume {
+  display: inline-block;
+  font: 600 clamp(22px, 2.6vw, 30px) / 1.3 var(--display);
+  color: var(--cyan);
+  margin: 36px 0 0;
+  padding: 10px 22px;
+  border: 1px solid var(--cyan);
+  border-radius: var(--radius);
+  background: linear-gradient(145deg, var(--enso-glow-cyan), var(--enso-glow-violet));
+}
+
+.landing.origin .no-bullet .section-intro {
+  margin: 22px auto 0;
+}
+
+/* ── The debugger ── */
+.landing.origin .chain {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 0;
+  padding: 22px 24px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  font: 500 15px var(--mono);
+}
+
+.landing.origin .chain-part {
+  color: var(--fg);
+}
+
+.landing.origin .chain-part.program {
+  color: var(--muted);
+}
+
+.landing.origin .chain-arrow {
+  color: var(--muted);
+}
+
+.landing.origin .chain-note {
+  margin-top: 24px;
+}
+
+.landing.origin .loop {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  list-style: none;
+  margin: 40px 0 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--border);
+}
+
+.landing.origin .loop li {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 22px;
+  background: var(--surface);
+}
+
+.landing.origin .loop-number {
+  font: 500 12px var(--mono);
+  color: var(--cyan);
+}
+
+.landing.origin .loop h3 {
+  font: 600 18px/1.3 var(--display);
+  margin: 0;
+}
+
+.landing.origin .loop p {
+  color: var(--muted);
+  font-size: 15px;
+  margin: 0;
+}
+
+.landing.origin .loop-link {
+  margin-top: auto;
+  padding-top: 6px;
+  font-size: 14px;
+  color: var(--cyan);
+  text-decoration: none;
+}
+
+.landing.origin .loop-link:hover {
+  text-decoration: underline;
+}
+
+.landing.origin .primitives {
+  max-width: 840px;
+  margin-top: 48px;
+}
+
+.landing.origin .primitives h3 {
+  font: 600 27px/1.2 var(--display);
+  margin: 0 0 18px;
+}
+
+.landing.origin .primitives dl,
+.landing.origin .inheritance {
+  display: grid;
+  margin: 0;
+  border-top: 1px solid var(--border);
+}
+
+.landing.origin .primitives dl > div,
+.landing.origin .inheritance > div {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 20px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.landing.origin .primitives dt,
+.landing.origin .inheritance dt {
+  font: 500 12px/1.9 var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+}
+
+.landing.origin .primitives dd,
+.landing.origin .inheritance dd {
+  margin: 0;
+  color: var(--fg);
+}
+
+/* ── Receipts ── */
+.landing.origin .receipts-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.75fr) minmax(0, 1.25fr);
+  gap: 70px;
+  align-items: start;
+}
+
+.landing.origin .receipts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--border);
+}
+
+.landing.origin .receipts li {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+  font: 500 14px var(--mono);
+  color: var(--soft);
+}
+
+.landing.origin .receipts-copy p {
+  color: var(--soft);
+  margin: 0 0 16px;
+}
+
+.landing.origin .receipts-copy .receipts-line {
+  font: 600 clamp(22px, 2.4vw, 28px) / 1.25 var(--display);
+  color: var(--sl-color-white);
+  margin: 8px 0;
+}
+
+.landing.origin .receipts-copy .receipts-line + p:not(.receipts-line) {
+  margin-top: 20px;
+}
+
+/* ── Inheritance ── */
+.landing.origin .inheritance {
+  max-width: 840px;
+}
+
+.landing.origin .inheritance .inheritance-enso dt,
+.landing.origin .inheritance .inheritance-enso dd {
+  color: var(--cyan);
+}
+
+.landing.origin .final .hero-actions {
+  margin-top: 34px;
+}
+
+/* ── Narrow screens, as the landing breaks ── */
+@media (max-width: 850px) {
+  .landing.origin .trail-entry,
+  .landing.origin .receipts-grid {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+
+  .landing.origin .loop {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .landing.origin .primitives dl > div,
+  .landing.origin .inheritance > div {
+    grid-template-columns: 160px 1fr;
+  }
+}
+
+@media (max-width: 520px) {
+  .landing.origin .loop {
+    grid-template-columns: 1fr;
+  }
+
+  .landing.origin .primitives dl > div,
+  .landing.origin .inheritance > div {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}
