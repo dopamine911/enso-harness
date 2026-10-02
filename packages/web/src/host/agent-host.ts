@@ -464,6 +464,12 @@ export interface HostedThread {
    * never a second matcher. `undefined` when the engine has published no service for the session.
    */
   checkPermission(request: EnsoPermissionCheckRequest): EnsoPermissionVerdict | undefined
+  /**
+   * Whether the session reads its project's own configuration NOW (#502): pi's `trust.json`, the
+   * thread's "Trust this thread" record, or the default — and true after a Trust answered in this
+   * session. What the project's own prompt library is gated on (#470).
+   */
+  projectTrusted(): boolean
 }
 
 /**
@@ -633,6 +639,12 @@ export interface AgentHost {
    * commands. Read afresh per call, so a login through one thread shows at once.
    */
   catalogue(): Promise<RuntimeCommand[]>
+  /**
+   * Whether a session built for `branch` in `cwd` would read the project's own configuration (#470):
+   * the decision a build makes first (`hostedProjectTrust`), asked without building — so the Start
+   * dialog lists a project's prompts for a thread nothing has built yet (#484's rule, #86).
+   */
+  projectTrusted(cwd: string, branch: readonly EnsoTranscriptEntry[]): boolean
 }
 
 /** One stored session as `readStoredThread` reads it — both halves from one open of the file. */
@@ -1871,6 +1883,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         if (result === undefined) return undefined
         return { block: result.block === true, reason: result.reason }
       },
+      projectTrusted: () => projectTrust.settingsManager.isProjectTrusted(),
       checkPermission(request: EnsoPermissionCheckRequest): EnsoPermissionVerdict | undefined {
         const service = getPermissionsService(sessionManager.getSessionId())
         if (service === undefined) return undefined
@@ -1972,5 +1985,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     freshPermissionMode: freshPermissionModeState,
     storedPermissionMode: storedPermissionModeState,
     catalogue,
+    projectTrusted: (cwd: string, branch: readonly EnsoTranscriptEntry[]) =>
+      hostedProjectTrust(cwd, agentDir, branch).settingsManager.isProjectTrusted(),
   }
 }

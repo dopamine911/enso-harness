@@ -1,9 +1,31 @@
-import type { EnsoLibraryPromptCategory, EnsoLibraryPromptSummary } from '@enso/core'
+import {
+  type EnsoLibraryPromptCategory,
+  type EnsoLibraryPromptRefusal,
+  type EnsoLibraryPromptSummary,
+  libraryPromptRefOf,
+  parseLibraryPromptRef,
+} from '@enso/core'
 import { useEffect, useRef, useState } from 'react'
 import type { FetchLike } from './browser-logging.ts'
 import { Field, FieldDescription, FieldError, FieldLabel } from './components/ui/field.tsx'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './components/ui/select.tsx'
-import { fetchLibraryPrompt, fetchPromptLibrary, type LibraryListing } from './prompt-library-connection.ts'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from './components/ui/select.tsx'
+import {
+  fetchLibraryPrompt,
+  fetchProjectPrompt,
+  fetchProjectPromptLibrary,
+  fetchPromptLibrary,
+  type LibraryListing,
+  type LibraryPromptRead,
+  type ProjectLibraryRead,
+} from './prompt-library-connection.ts'
 
 /**
  * The Start dialog's two library fields (#443): the session's **system prompt** — pi's default, or
@@ -13,6 +35,11 @@ import { fetchLibraryPrompt, fetchPromptLibrary, type LibraryListing } from './p
  * ⚠ A FILE THE LIBRARY REFUSED IS NAMED HERE, not left out: a prompt someone saved that does not
  * appear would read as lost, and picking a different one by mistake is how a session runs with the
  * wrong instructions. Choosing pi's default is always possible, and is the default.
+ *
+ * ⚠ TWO LIBRARIES, LISTED APART (#470). The user's prompts, then the project's own
+ * (`<project>/.enso/prompts`) under their own heading, each chosen by its prompt reference
+ * (`project:<id>` for the project's), so two prompts with one id are two choices. A project the
+ * thread does not trust is not read: the field says where its prompts are and that they wait on trust.
  */
 
 /**
@@ -41,17 +68,44 @@ function usePromptLibrary(open: boolean, fetchImpl: FetchLike | undefined): Libr
   return library
 }
 
-/** The library, and the system prompt chosen from it — pi's default until one is picked. */
+type ProjectState = { readonly kind: 'loading' } | ProjectLibraryRead
+
+/** The thread's project library (#470), read afresh each time the dialog opens. */
+function useProjectPromptLibrary(open: boolean, threadId: string, fetchImpl: FetchLike | undefined): ProjectState {
+  const [project, setProject] = useState<ProjectState>({ kind: 'loading' })
+  useEffect(() => {
+    if (!open) return
+    let current = true
+    setProject({ kind: 'loading' })
+    void fetchProjectPromptLibrary(threadId, fetchImpl).then((loaded) => {
+      if (current) setProject(loaded)
+    })
+    return (): void => {
+      current = false
+    }
+  }, [open, threadId, fetchImpl])
+  return project
+}
+
+/** Both libraries, and the system prompt chosen from them — pi's default until one is picked. */
 export interface SystemPromptChoice {
   readonly library: LibraryState
+  readonly project: ProjectState
+  readonly threadId: string
+  /** A prompt reference, or {@link PI_DEFAULT_SYSTEM_PROMPT}. */
   readonly systemPrompt: string
   readonly setSystemPrompt: (value: string) => void
 }
 
-export function useSystemPromptChoice(open: boolean, fetchImpl: FetchLike | undefined): SystemPromptChoice {
+export function useSystemPromptChoice(
+  open: boolean,
+  threadId: string,
+  fetchImpl: FetchLike | undefined,
+): SystemPromptChoice {
   const library = usePromptLibrary(open, fetchImpl)
+  const project = useProjectPromptLibrary(open, threadId, fetchImpl)
   const [systemPrompt, setSystemPrompt] = useState(PI_DEFAULT_SYSTEM_PROMPT)
-  return { library, systemPrompt, setSystemPrompt }
+  return { library, project, threadId, systemPrompt, setSystemPrompt }
 }
 
 /** Both library fields, as the dialog places them: the system prompt, then a saved prompt for the box. */
@@ -60,13 +114,27 @@ export function PromptLibraryFields(props: {
   fetch: FetchLike | undefined
   onPick: (text: string) => void
 }): React.ReactNode {
-  const { library, systemPrompt, setSystemPrompt } = props.choice
+  const { library, project, threadId, systemPrompt, setSystemPrompt } = props.choice
   return (
     <>
-      <SystemPromptField library={library} value={systemPrompt} onChoose={setSystemPrompt} />
-      <SessionPromptPicker library={library} fetch={props.fetch} onPick={props.onPick} />
+      <SystemPromptField library={library} project={project} value={systemPrompt} onChoose={setSystemPrompt} />
+      <SessionPromptPicker
+        library={library}
+        project={project}
+        read={(ref) => readByRef(ref, threadId, props.fetch)}
+        onPick={props.onPick}
+      />
     </>
   )
+}
+
+/** A prompt by its reference, from whichever library the reference names. */
+function readByRef(ref: string, threadId: string, fetchImpl: FetchLike | undefined): Promise<LibraryPromptRead> {
+  const parsed = parseLibraryPromptRef(ref)
+  if (parsed === undefined) return Promise.resolve({ kind: 'unavailable', detail: `${ref} names no library prompt` })
+  return parsed.source === 'project'
+    ? fetchProjectPrompt(threadId, parsed.id, fetchImpl)
+    : fetchLibraryPrompt(parsed.id, fetchImpl)
 }
 
 function promptsOf(
@@ -74,6 +142,15 @@ function promptsOf(
   keep: (prompt: EnsoLibraryPromptSummary) => boolean,
 ): EnsoLibraryPromptSummary[] {
   return library.kind === 'loaded' ? library.listing.prompts.filter(keep) : []
+}
+
+function projectPromptsOf(
+  project: ProjectState,
+  keep: (prompt: EnsoLibraryPromptSummary) => boolean,
+): EnsoLibraryPromptSummary[] {
+  return project.kind === 'loaded' && project.project.kind === 'listed'
+    ? project.project.listing.prompts.filter(keep)
+    : []
 }
 
 /** A prompt's size as its row says it: the same estimate the Context tab prices the text with. */
@@ -88,10 +165,10 @@ const CATEGORY_WORDS: Readonly<Record<EnsoLibraryPromptCategory, string | undefi
   session: undefined,
 }
 
-function PromptItem({ prompt }: { prompt: EnsoLibraryPromptSummary }): React.ReactNode {
+function PromptItem({ prompt, value }: { prompt: EnsoLibraryPromptSummary; value: string }): React.ReactNode {
   const words = CATEGORY_WORDS[prompt.category]
   return (
-    <SelectItem value={prompt.id}>
+    <SelectItem value={value}>
       <span>{prompt.name}</span>
       <span className="text-xs text-muted-foreground">
         {estimateLabel(prompt)}
@@ -101,27 +178,70 @@ function PromptItem({ prompt }: { prompt: EnsoLibraryPromptSummary }): React.Rea
   )
 }
 
-/** Every refused file by name, and a library that could not be read at all. */
-function LibraryProblems({ library }: { library: LibraryState }): React.ReactNode {
-  if (library.kind === 'unavailable') return <FieldError>prompt library: {library.detail}</FieldError>
-  if (library.kind !== 'loaded' || library.listing.refused.length === 0) return null
+function RefusedFiles({
+  refused,
+  where,
+}: {
+  refused: readonly EnsoLibraryPromptRefusal[]
+  where: string
+}): React.ReactNode {
+  if (refused.length === 0) return null
   return (
     <FieldError>
-      {library.listing.refused.map((refused) => (
-        <span key={refused.file} className="block">
-          refused {refused.reason}
+      {refused.map((file) => (
+        <span key={file.file} className="block">
+          refused {where}
+          {file.reason}
         </span>
       ))}
     </FieldError>
   )
 }
 
+/** Every refused file by name, and a library that could not be read at all. */
+function LibraryProblems({ library }: { library: LibraryState }): React.ReactNode {
+  if (library.kind === 'unavailable') return <FieldError>prompt library: {library.detail}</FieldError>
+  return library.kind === 'loaded' ? <RefusedFiles refused={library.listing.refused} where="" /> : null
+}
+
+/**
+ * What the project library says beside the field (#470): where its prompts are and that they wait on
+ * trust, its refused files by name, or that it could not be read. A trusted project with none says nothing.
+ */
+function ProjectLibraryNote({ project }: { project: ProjectState }): React.ReactNode {
+  if (project.kind === 'loading') return null
+  if (project.kind === 'unavailable') return <FieldError>project prompts: {project.detail}</FieldError>
+  if (project.project.kind === 'untrusted') {
+    return (
+      <FieldDescription>
+        project prompts in {project.project.directory} are not read: the project is not trusted
+      </FieldDescription>
+    )
+  }
+  return <RefusedFiles refused={project.project.listing.refused} where="project " />
+}
+
+/** The project's prompts as a group of their own, each chosen by its `project:<id>` reference. */
+function ProjectGroup({ prompts }: { prompts: readonly EnsoLibraryPromptSummary[] }): React.ReactNode {
+  if (prompts.length === 0) return null
+  return (
+    <SelectGroup>
+      <SelectLabel>Project</SelectLabel>
+      {prompts.map((prompt) => (
+        <PromptItem key={prompt.id} prompt={prompt} value={libraryPromptRefOf('project', prompt.id)} />
+      ))}
+    </SelectGroup>
+  )
+}
+
 function SystemPromptField(props: {
   library: LibraryState
+  project: ProjectState
   value: string
   onChoose: (value: string) => void
 }): React.ReactNode {
-  const choices = promptsOf(props.library, (prompt) => prompt.category !== 'session')
+  const isSystem = (prompt: EnsoLibraryPromptSummary): boolean => prompt.category !== 'session'
+  const choices = promptsOf(props.library, isSystem)
   return (
     <Field>
       <FieldLabel htmlFor="start-session-system-prompt">System prompt</FieldLabel>
@@ -132,12 +252,14 @@ function SystemPromptField(props: {
         <SelectContent>
           <SelectItem value={PI_DEFAULT_SYSTEM_PROMPT}>pi default</SelectItem>
           {choices.map((prompt) => (
-            <PromptItem key={prompt.id} prompt={prompt} />
+            <PromptItem key={prompt.id} prompt={prompt} value={prompt.id} />
           ))}
+          <ProjectGroup prompts={projectPromptsOf(props.project, isSystem)} />
         </SelectContent>
       </Select>
       <FieldDescription>fixed for the whole session</FieldDescription>
       <LibraryProblems library={props.library} />
+      <ProjectLibraryNote project={props.project} />
     </Field>
   )
 }
@@ -145,22 +267,25 @@ function SystemPromptField(props: {
 /** A saved session prompt, read in full and handed to the prompt box; a read that fails is said here. */
 function SessionPromptPicker(props: {
   library: LibraryState
-  fetch: FetchLike | undefined
+  project: ProjectState
+  read: (ref: string) => Promise<LibraryPromptRead>
   onPick: (text: string) => void
 }): React.ReactNode {
-  const choices = promptsOf(props.library, (prompt) => prompt.category === 'session')
+  const isSession = (prompt: EnsoLibraryPromptSummary): boolean => prompt.category === 'session'
+  const choices = promptsOf(props.library, isSession)
+  const projectChoices = projectPromptsOf(props.project, isSession)
   const [picked, setPicked] = useState('')
   const [failure, setFailure] = useState<string | undefined>(undefined)
   // ⚠ Only the latest pick may fill the box: a slow read of an earlier one lands after it otherwise,
   // and the prompt box holds A's text while the field says B.
   const latest = useRef('')
-  if (choices.length === 0) return null
-  const pick = async (id: string): Promise<void> => {
-    latest.current = id
-    setPicked(id)
+  if (choices.length === 0 && projectChoices.length === 0) return null
+  const pick = async (ref: string): Promise<void> => {
+    latest.current = ref
+    setPicked(ref)
     setFailure(undefined)
-    const read = await fetchLibraryPrompt(id, props.fetch)
-    if (latest.current !== id) return
+    const read = await props.read(ref)
+    if (latest.current !== ref) return
     if (read.kind === 'loaded') props.onPick(read.prompt.body)
     else setFailure(read.detail)
   }
@@ -173,8 +298,9 @@ function SessionPromptPicker(props: {
         </SelectTrigger>
         <SelectContent>
           {choices.map((prompt) => (
-            <PromptItem key={prompt.id} prompt={prompt} />
+            <PromptItem key={prompt.id} prompt={prompt} value={prompt.id} />
           ))}
+          <ProjectGroup prompts={projectChoices} />
         </SelectContent>
       </Select>
       {failure === undefined ? null : <FieldError>{failure}</FieldError>}

@@ -628,6 +628,17 @@ export function projectConfigPath(projectDirectory: string): string {
 }
 
 /**
+ * A project's own prompt library (#470): `<project>/.enso/prompts/<id>.md`, committed with the
+ * project and shared by everyone who works in it. Read only once the project is trusted, like its
+ * config, and never written by Enso: a shared file is changed in the repository, not from the manager.
+ *
+ * @group Workspace paths
+ */
+export function projectPromptsDir(projectDirectory: string): string {
+  return join(projectDirectory, ENSO_RUNTIME_DIRECTORY, 'prompts')
+}
+
+/**
  * A file's text, or `undefined` when there is no file — for a file whose absence means its
  * defaults (the config). Any other failure to read it throws: a file that is there and unreadable
  * is not a missing one.

@@ -28,6 +28,12 @@ import type { EnsoTranscriptEntry } from './transcript.ts'
  * an unknown key, a nested value, a missing `category` — refuses the file BY NAME, the way the
  * config refuses a typo (`config.ts`): a prompt that silently read as something else is the failure
  * this exists to prevent. This is no YAML parser, and says so rather than half-being one.
+ *
+ * ⚠ TWO LIBRARIES, NEVER ONE LIST (#470). The user's (`ENSO_HOME/prompts/`) and a trusted project's
+ * own (`<project>/.enso/prompts/`, committed with it) are listed apart, and a prompt is named by a
+ * **prompt reference** that says which: `<id>` for the user's, `project:<id>` for the project's. Two
+ * files with the same id never shadow each other, so which text a session ran is never a question of
+ * precedence — and the reference is what a recorded choice keeps as its `id`.
  */
 
 /**
@@ -64,6 +70,58 @@ const CATEGORIES: ReadonlySet<string> = new Set(['system', 'append', 'session'])
  */
 export const LIBRARY_PROMPT_ID_SOURCE = '[a-z0-9][a-z0-9-]{0,63}'
 const LIBRARY_PROMPT_ID_PATTERN = new RegExp(`^${LIBRARY_PROMPT_ID_SOURCE}$`)
+
+/**
+ * What a project prompt's reference starts with (#470). ⚠ Outside the id grammar (no `:`), so no
+ * user prompt's id can be read as a project prompt's, nor the other way round.
+ *
+ * @group Prompt library
+ */
+export const PROJECT_PROMPT_PREFIX = 'project:'
+
+/**
+ * A prompt reference, unanchored: a user prompt's id, or `project:` and a project prompt's id. The
+ * routes that take a reference embed it, as they embed {@link LIBRARY_PROMPT_ID_SOURCE}.
+ *
+ * @group Prompt library
+ */
+export const LIBRARY_PROMPT_REF_SOURCE = `(?:${PROJECT_PROMPT_PREFIX})?${LIBRARY_PROMPT_ID_SOURCE}`
+
+/**
+ * Which library a prompt is in: the user's, or the project's own.
+ *
+ * @group Prompt library
+ */
+export const EnsoLibraryPromptSource = Type.Union([Type.Literal('user'), Type.Literal('project')])
+/** @group Prompt library */
+export type EnsoLibraryPromptSource = Static<typeof EnsoLibraryPromptSource>
+
+/** @group Prompt library */
+export interface LibraryPromptRef {
+  readonly source: EnsoLibraryPromptSource
+  readonly id: string
+}
+
+/**
+ * A prompt reference read: the library and the id, or `undefined` when it names neither.
+ *
+ * @group Prompt library
+ */
+export function parseLibraryPromptRef(value: string): LibraryPromptRef | undefined {
+  const project = value.startsWith(PROJECT_PROMPT_PREFIX)
+  const id = project ? value.slice(PROJECT_PROMPT_PREFIX.length) : value
+  if (!LIBRARY_PROMPT_ID_PATTERN.test(id)) return undefined
+  return { source: project ? 'project' : 'user', id }
+}
+
+/**
+ * The reference a prompt in `source` with `id` is named by.
+ *
+ * @group Prompt library
+ */
+export function libraryPromptRefOf(source: EnsoLibraryPromptSource, id: string): string {
+  return source === 'project' ? `${PROJECT_PROMPT_PREFIX}${id}` : id
+}
 
 /**
  * True for a string that can name a library prompt, and therefore a file: no separator, no dot,
@@ -181,6 +239,24 @@ export const EnsoLibraryPromptListing = Type.Object(
 )
 /** @group Prompt library */
 export type EnsoLibraryPromptListing = Static<typeof EnsoLibraryPromptListing>
+
+/**
+ * `GET /api/threads/:id/project-prompts` (#470): the thread's project library — its prompts and
+ * refused files when the thread trusts the project (`listed`; none when the directory does not
+ * exist), or `untrusted`: the files are not read at all, so not even their names are listed.
+ * `directory` is where they are, either way, so a person knows where to look.
+ *
+ * @group Prompt library
+ */
+export const EnsoProjectPromptLibrary = Type.Union([
+  Type.Object(
+    { kind: Type.Literal('listed'), directory: Type.String(), listing: EnsoLibraryPromptListing },
+    { additionalProperties: false },
+  ),
+  Type.Object({ kind: Type.Literal('untrusted'), directory: Type.String() }, { additionalProperties: false }),
+])
+/** @group Prompt library */
+export type EnsoProjectPromptLibrary = Static<typeof EnsoProjectPromptLibrary>
 
 /** @group Prompt library */
 export type LibraryPromptParse =
@@ -309,7 +385,10 @@ export const ENSO_SYSTEM_PROMPT_ENTRY = 'enso-system-prompt' as const
  */
 export const EnsoSystemPromptChoice = Type.Object(
   {
-    /** The library prompt's id at session start. */
+    /**
+     * The library prompt's reference at session start: its id for the user's library,
+     * `project:<id>` for the project's (#470). `draft` for an unsaved preview, never recorded.
+     */
     id: Type.String({ minLength: 1 }),
     name: Type.String({ minLength: 1 }),
     mode: EnsoSystemPromptMode,

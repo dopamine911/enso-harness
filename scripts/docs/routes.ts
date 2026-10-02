@@ -225,10 +225,10 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
   ),
   THREAD_CONFIGURE_ROUTE: threadControl(
     'respondToConfigure → configureThread',
-    "path: `threadId`; body: `EnsoSessionConfiguration` — optional `systemPrompt` (a library prompt id, `system` or `append`, or `null` for pi's default; absent leaves the session's as it is), `model` (`provider/id`), `thinking` (a level that model supports) and `mode`; applied in that order under one lease, a value equal to the current one left alone",
+    "path: `threadId`; body: `EnsoSessionConfiguration` — optional `systemPrompt` (a prompt reference — a user prompt's id, or `project:<id>` for the project's own, #470 — `system` or `append`, or `null` for pi's default; absent leaves the session's as it is), `model` (`provider/id`), `thinking` (a level that model supports) and `mode`; applied in that order under one lease, a value equal to the current one left alone",
     [
       '204 empty — every step applied (the changes arrive on the follow as `model` and `permission-mode`)',
-      `${BODY_ERRORS}; 409 thread busy; 413 body too large; 422 JSON \`EnsoConfigurationRefusal\` — the step that refused (\`systemPrompt\`, \`model\`, \`thinking\`, \`mode\`) and the reason, the steps before it applied — a system prompt is refused by name when its id is not a library name, its file is missing, unreadable or unparseable, a session prompt, or empty, or the session already sent a request (before it, a new choice — pi's default included — replaces the last); 500 handler failure`,
+      `${BODY_ERRORS}; 409 thread busy; 413 body too large; 422 JSON \`EnsoConfigurationRefusal\` — the step that refused (\`systemPrompt\`, \`model\`, \`thinking\`, \`mode\`) and the reason, the steps before it applied — a system prompt is refused by name when its reference names no library prompt, a project prompt's project is not trusted by the thread, its file is missing, unreadable or unparseable, a session prompt, or empty, or the session already sent a request (before it, a new choice — pi's default included — replaces the last); 500 handler failure`,
     ],
     { builds: 'yes' },
   ),
@@ -271,12 +271,27 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
   THREAD_SYSTEM_PROMPT_ROUTE: threadRead(
     'respondWithSystemPromptPreview → HostedThread.previewSystemPrompt',
     "200 `EnsoSystemPromptPreview` JSON — pi's rendering of the next request's system prompt with that prompt, section by section (who wrote each: the library or pi), the tool definitions sent beside it, and the total the Context tab prices a first request made with it at; the thread's own choice is untouched",
-    "400 malformed thread id; 403 untrusted origin; 404 a prompt named on a server without a library; 409 thread running; 422 the prompt is refused, with the reason naming it — missing, unreadable, not UTF-8 or unparseable, a session prompt, or empty; 500 pi's rendering does not split back into its sections (the prompt's own text is matched whole, so it cannot cause this), or handler failure",
+    "400 malformed thread id; 403 untrusted origin; 404 a prompt named on a server without a library; 409 thread running; 422 the prompt is refused, with the reason naming it — missing, unreadable, not UTF-8 or unparseable, a session prompt, empty, or a project prompt the thread does not trust its project for; 500 pi's rendering does not split back into its sections (the prompt's own text is matched whole, so it cannot cause this), or handler failure",
     {
       path: '/api/threads/:threadId/system-prompt',
       input:
-        "path: `threadId`; query: optional `prompt` — a library prompt id (`system` or `append`); absent is pi's default",
+        "path: `threadId`; query: optional `prompt` — a prompt reference (`system` or `append`): a user prompt's id, or `project:<id>` for the project's own (#470, the colon unencoded); absent is pi's default",
       builds: 'yes',
+    },
+  ),
+  // Builds nothing, as the commands route (#484): the Start dialog opens on threads no run has built.
+  THREAD_PROJECT_PROMPTS_ROUTE: threadRead(
+    'respondWithProjectPrompts → projectPromptListing',
+    "200 `EnsoProjectPromptLibrary` JSON (#470) — `listed`: the project's own prompts (`<project>/.enso/prompts`) without their bodies and every file refused, when the thread trusts the project (none when the directory does not exist); `untrusted`: only the directory, nothing read. A thread no run built answers as its build would: pi's `trust.json`, a stored thread's own record, or the default",
+    '400 malformed thread id; 403 untrusted origin; 409 the project a new thread is claimed for is gone, or a stored thread is in a directory that is no project here; 500 handler failure',
+  ),
+  THREAD_PROJECT_PROMPT_ROUTE: threadRead(
+    'respondWithProjectPrompt → PromptLibrary.read',
+    "200 `EnsoLibraryPrompt` JSON with its `ETag` (#470) — one project prompt, read-only: no route writes or deletes one, as the project's files are committed and shared",
+    "400 malformed thread id; 403 untrusted origin, or the thread does not trust its project — the file is not read, and the reason names the directory; 404 no such file; 409 as the listing's; 422 the file is refused, with the reason naming it; 500 handler failure",
+    {
+      path: '/api/threads/:threadId/project-prompts/:id',
+      input: 'path: `threadId`, `id` — the file name under `<project>/.enso/prompts` without `.md`',
     },
   ),
   THREAD_SYSTEM_PROMPT_DRAFT_ROUTE: {
@@ -505,10 +520,11 @@ export function discoverRoutes(): ResolvedRoute[] {
 
   // A route constant is a regex literal, `threadRoute('<action>')` — the server's builder for
   // `/api/threads/<threadId>/<action>`, whose path is derived here rather than restated — or a
-  // pattern built around the library's prompt id (`promptRoute()`, `new RegExp(`), whose metadata states its path.
+  // pattern built around the library's prompt id (`promptRoute()`, `new RegExp(` — its pattern on the
+  // next lines, or the whole call on one), whose metadata states its path.
   const regexRoutes: DetectedRoute[] = [
     ...server.matchAll(
-      /^const ([A-Z][A-Z_]*_ROUTE) = (?:\/.*\/|threadRoute\('([a-z/-]+)'\)|promptRoute\(\)|new RegExp\()$/gm,
+      /^const ([A-Z][A-Z_]*_ROUTE) = (?:\/.*\/|threadRoute\('([a-z/-]+)'\)|promptRoute\(\)|new RegExp\((?:`.*`\))?)$/gm,
     ),
   ].map((match) => {
     const key = match[1] ?? ''
@@ -605,7 +621,7 @@ function generate(): string {
     '',
     "Every `/api/threads/:threadId…` route also reads the `X-Enso-Project` header (#395): a page names a new thread's project with it, and an id that is no registered project is a 400 before the route runs.",
     '',
-    '> Parser limitation: discovery recognizes top-level `const *_ROUTE = /…/`, `const *_ROUTE = threadRoute(…)`, `const *_ROUTE = promptRoute()` and `const *_ROUTE = new RegExp(` declarations (only `threadRoute` derives its path; every other form states it in its metadata) plus direct `request.method` branches using `url === …` or `url.startsWith(…)`. Statuses, input shapes, classes, acquisition, and self-logging are intentionally explicit checked metadata rather than inferred behavior.',
+    '> Parser limitation: discovery recognizes top-level `const *_ROUTE = /…/`, `const *_ROUTE = threadRoute(…)`, `const *_ROUTE = promptRoute()` and `const *_ROUTE = new RegExp(…)` declarations — the call open at the end of its line, or whole on one — (only `threadRoute` derives its path; every other form states it in its metadata) plus direct `request.method` branches using `url === …` or `url.startsWith(…)`. Statuses, input shapes, classes, acquisition, and self-logging are intentionally explicit checked metadata rather than inferred behavior.',
     '',
     '| Method | Rendered path | Handler / factory | Input shape | Success | Named error statuses | Class | Builds / acquires? | Logs itself? | Source |',
     '|---|---|---|---|---|---|---|---|---|---|',

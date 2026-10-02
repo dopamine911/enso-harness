@@ -25,6 +25,7 @@ import {
   ensoLogger,
   isEnsoThreadId,
   LIBRARY_PROMPT_ID_SOURCE,
+  LIBRARY_PROMPT_REF_SOURCE,
   withEnsoLogContext,
 } from '@enso/core'
 import { readGitChanges, readGitState, runGit } from '@enso/core/git'
@@ -63,9 +64,14 @@ import {
   type LibraryRead,
   draftChoice,
   type PromptLibrary,
+  pickLibrarySystemPrompt,
+  type ProjectLibraryAccess,
+  projectLibraryAccess,
+  projectPromptListing,
   readPromptWriteBody,
   readSystemPromptDraftBody,
   type SystemPromptPick,
+  untrustedProjectReason,
   type WriteCondition,
 } from './prompt-library.ts'
 import { SSE_KEEPALIVE_MS } from './sse.ts'
@@ -127,14 +133,25 @@ const THREAD_CONFIGURE_ROUTE = threadRoute('configure')
  */
 const THREAD_PERMISSION_CHECK_ROUTE = threadRoute('permissions/check')
 /**
- * `GET …/system-prompt[?prompt=<id>]` (#443): the system prompt the thread's next request would carry
+ * `GET …/system-prompt[?prompt=<ref>]` (#443): the system prompt the thread's next request would carry
  * with a library prompt — pi's default without one — section by section. Builds the thread on ask.
- * The one query parameter is part of the pattern on purpose: its id is the library's own shape
- * (`LIBRARY_PROMPT_ID_SOURCE`), so a malformed id or any other parameter is a 404, never a file lookup.
+ * The one query parameter is part of the pattern on purpose: its value is a prompt reference in the
+ * library's own shape (`LIBRARY_PROMPT_REF_SOURCE`: an id, or `project:` and an id, #470 — the colon
+ * sent as it is), so a malformed one or any other parameter is a 404, never a file lookup.
  */
 const THREAD_SYSTEM_PROMPT_ROUTE = new RegExp(
-  `^/api/threads/([^/?#]+)/system-prompt(?:\\?prompt=(${LIBRARY_PROMPT_ID_SOURCE}))?$`,
+  `^/api/threads/([^/?#]+)/system-prompt(?:\\?prompt=(${LIBRARY_PROMPT_REF_SOURCE}))?$`,
 )
+/**
+ * `GET …/project-prompts` (#470): the thread's project library — listed when the thread trusts its
+ * project, else only where it is. Builds nothing: a thread with no session answers as a build would.
+ */
+const THREAD_PROJECT_PROMPTS_ROUTE = threadRoute('project-prompts')
+/**
+ * `GET …/project-prompts/<id>` (#470): one project prompt, read-only — there is no route that writes
+ * one. The id is the library's own shape, as `/api/prompts/<id>`'s is.
+ */
+const THREAD_PROJECT_PROMPT_ROUTE = new RegExp(`^/api/threads/([^/?#]+)/project-prompts/(${LIBRARY_PROMPT_ID_SOURCE})$`)
 /** `POST …/system-prompt` (#443): the same preview for an unsaved prompt's text — the editor's breakdown. */
 const THREAD_SYSTEM_PROMPT_DRAFT_ROUTE = threadRoute('system-prompt')
 /** `POST …/fork` (#433): fork the thread at one of its user messages — a new thread naming this one as its parent. */
@@ -541,9 +558,41 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   })
   const prompts: PromptLibrary | undefined =
     options.promptsDir === undefined ? undefined : createPromptLibrary(options.promptsDir)
-  /** A library prompt as a session's system prompt, or why not — the configure route's first step (#443). */
-  function pickSystemPrompt(id: string): SystemPromptPick {
-    return prompts === undefined ? { kind: 'refused', reason: NO_PROMPT_LIBRARY } : prompts.pickSystemPrompt(id)
+  /**
+   * A prompt reference as `threadId`'s system prompt, or why not — the configure route's first step
+   * (#443). A project reference (#470) is read through the LIVE thread, under its own trust: both
+   * callers have built it by now (configure holds its lease, the preview ensures it first).
+   */
+  function pickSystemPrompt(threadId: string, ref: string): SystemPromptPick {
+    return pickLibrarySystemPrompt(ref, prompts, () => {
+      const live = threads.peek(threadId)
+      if (live === undefined) throw new Error(`thread ${threadId}: a project prompt is picked only on a built thread`)
+      return liveProjectLibrary(live)
+    })
+  }
+  /** A built thread's project library: its own cwd, its own trust (#470). */
+  function liveProjectLibrary(thread: ThreadView): ProjectLibraryAccess {
+    return projectLibraryAccess(thread.hosted.inspect().cwd, thread.hosted.projectTrusted())
+  }
+  /**
+   * `threadId`'s project library, built or not (#470): a live thread's own answer; else the one a
+   * build would make — a stored thread's directory and branch, or the project a new one is claimed
+   * for — and nothing is built (#484). A stored thread in a directory that is no project here is
+   * refused as a build of it would be.
+   */
+  async function projectLibraryOf(threadId: string): Promise<ProjectLibraryAccess> {
+    const live = threads.peek(threadId)
+    if (live !== undefined) return liveProjectLibrary(live)
+    const storedDirectory = await host.storedThreadDirectory(threadId)
+    if (storedDirectory === undefined) {
+      const cwd = projects.directoryForNewThread(threadId)
+      return projectLibraryAccess(cwd, host.projectTrusted(cwd, []))
+    }
+    const stored = await host.readStoredThread(threadId)
+    if (stored === undefined) {
+      throw new SessionDirectoryRefused(`stored in ${storedDirectory} — not a project here; add it as one to open it`)
+    }
+    return projectLibraryAccess(stored.cwd, host.projectTrusted(stored.cwd, stored.transcript))
   }
   /** The one live-or-cold read (#214), shared with the follow route's snapshot. */
   const threadRead: ThreadReadDeps = {
@@ -780,10 +829,12 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     response: ServerResponse,
     match: RegExpExecArray,
   ): Promise<void> {
-    const promptId = match[2]
-    const pick = promptId === undefined ? undefined : pickSystemPrompt(promptId)
+    const ref = match[2]
+    // Built first: a project reference is read through the thread, under its trust (#470).
+    if (ref !== undefined) await threads.ensure(threadId)
+    const pick = ref === undefined ? undefined : pickSystemPrompt(threadId, ref)
     if (pick?.kind === 'refused') {
-      refuseWith(response, { status: prompts === undefined ? 404 : 422, reason: pick.reason })
+      refuseWith(response, { status: pick.reason === NO_PROMPT_LIBRARY ? 404 : 422, reason: pick.reason })
       return
     }
     await answerPreview(threadId, pick?.choice ?? null, response)
@@ -1010,6 +1061,8 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     ...idOnlyReads.map(([route, respond]): ThreadRoute => ({ method: 'GET', route, respond: idOnly(respond) })),
     { method: 'GET', route: THREAD_CONTEXT_REQUEST_ROUTE, respond: respondWithContextRequest },
     { method: 'GET', route: THREAD_SYSTEM_PROMPT_ROUTE, respond: respondWithSystemPromptPreview },
+    { method: 'GET', route: THREAD_PROJECT_PROMPTS_ROUTE, respond: idOnly(respondWithProjectPrompts) },
+    { method: 'GET', route: THREAD_PROJECT_PROMPT_ROUTE, respond: respondWithProjectPrompt },
     { method: 'GET', route: THREAD_INCIDENTS_ROUTE, respond: respondWithThreadIncidents },
     { method: 'GET', route: THREAD_ROUTE, respond: idOnly(respondWithThread) },
     {
@@ -1285,7 +1338,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
       parse: readConfigureBody,
     })
     if (configuration === undefined) return
-    const outcome = await configureThread(followDeps, threadId, configuration, pickSystemPrompt)
+    const outcome = await configureThread(followDeps, threadId, configuration, (ref) => pickSystemPrompt(threadId, ref))
     if (outcome.status === 409) {
       log.warn('configure refused (409): {reason}', { threadId, reason: outcome.reason })
       refuseWith(response, outcome)
@@ -1473,6 +1526,30 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   /** `GET /api/prompts/:id`: the prompt, 404 when there is no such file, 422 naming why a file is refused. */
   function respondWithPrompt(library: PromptLibrary, id: string, response: ServerResponse): void {
     answerLibraryRead(response, library.read(id), 422)
+  }
+
+  /** `GET …/project-prompts` (#470): the thread's project library, or where it is and that it is not trusted. */
+  async function respondWithProjectPrompts(threadId: string, response: ServerResponse): Promise<void> {
+    answerJson(response, projectPromptListing(await projectLibraryOf(threadId)))
+  }
+
+  /**
+   * `GET …/project-prompts/:id` (#470): one project prompt, as `GET /api/prompts/:id` answers one; 403
+   * naming the directory when the thread does not trust its project — the file is not read.
+   */
+  async function respondWithProjectPrompt(
+    threadId: string,
+    _request: IncomingMessage,
+    response: ServerResponse,
+    match: RegExpExecArray,
+  ): Promise<void> {
+    const id = match[2] ?? ''
+    const access = await projectLibraryOf(threadId)
+    if (access.kind === 'untrusted') {
+      refuseWith(response, { status: 403, reason: untrustedProjectReason(access.directory) })
+      return
+    }
+    answerLibraryRead(response, access.library.read(id), 422)
   }
 
   /** `GET /api/prompts`: the library's prompts, and every file it refused, by name. */

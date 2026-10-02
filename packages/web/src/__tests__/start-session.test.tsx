@@ -2,6 +2,7 @@ import { afterAll, afterEach, expect, test } from 'bun:test'
 import {
   type EnsoLibraryPrompt,
   type EnsoLibraryPromptListing,
+  type EnsoProjectPromptLibrary,
   type EnsoSessionConfiguration,
   type EnsoThreadCommands,
   summarizeLibraryPrompt,
@@ -102,9 +103,47 @@ const LIBRARY: EnsoLibraryPromptListing = {
   refused: [{ file: 'broken.md', reason: 'broken.md: frontmatter category must be system, append or session' }],
 }
 
-/** The server the dialog reads: the thread's commands, and the library unless a test says it is gone. */
-function serverFetch(library: 'present' | 'absent'): (input: string) => Promise<Response> {
+/** Where the project's own prompts are (#470) — named whether or not they are read. */
+const PROJECT_PROMPTS_DIR = '/work/repo/.enso/prompts'
+
+/** A project prompt sharing the user's `reviewer` id (#470), and a session one, body included. */
+const KICKOFF: EnsoLibraryPrompt = {
+  id: 'kickoff',
+  name: 'Kickoff',
+  description: '',
+  category: 'session',
+  bytes: 50,
+  tokens: 6,
+  body: 'Read the README first.',
+}
+const TRUSTED_PROJECT: EnsoProjectPromptLibrary = {
+  kind: 'listed',
+  directory: PROJECT_PROMPTS_DIR,
+  listing: {
+    prompts: [
+      { id: 'reviewer', name: 'Team reviewer', description: '', category: 'system', bytes: 80, tokens: 20 },
+      summarizeLibraryPrompt(KICKOFF),
+    ],
+    refused: [{ file: 'odd.md', reason: 'odd.md: frontmatter has no name' }],
+  },
+}
+/** A project with no prompts of its own: what the dialog sees in most projects. */
+const EMPTY_PROJECT: EnsoProjectPromptLibrary = {
+  kind: 'listed',
+  directory: PROJECT_PROMPTS_DIR,
+  listing: { prompts: [], refused: [] },
+}
+
+/** The server the dialog reads: the thread's commands, the library unless a test says it is gone, and the project's. */
+function serverFetch(
+  library: 'present' | 'absent',
+  project: EnsoProjectPromptLibrary = EMPTY_PROJECT,
+): (input: string) => Promise<Response> {
   return (input: string): Promise<Response> => {
+    if (input === '/api/threads/thread-1/project-prompts') return Promise.resolve(Response.json(project))
+    if (input === '/api/threads/thread-1/project-prompts/kickoff') {
+      return Promise.resolve(Response.json(KICKOFF, { headers: { ETag: `"${'d'.repeat(64)}"` } }))
+    }
     if (input === '/api/prompts') {
       return Promise.resolve(
         library === 'present'
@@ -127,7 +166,11 @@ interface Mounted {
   readonly unmount: () => Promise<void>
 }
 
-async function mountStart(answer: ConfigureOutcome, library: 'present' | 'absent' = 'present'): Promise<Mounted> {
+async function mountStart(
+  answer: ConfigureOutcome,
+  library: 'present' | 'absent' = 'present',
+  project: EnsoProjectPromptLibrary = EMPTY_PROJECT,
+): Promise<Mounted> {
   const configured: EnsoSessionConfiguration[] = []
   const sent: string[] = []
   const closes: number[] = []
@@ -150,7 +193,7 @@ async function mountStart(answer: ConfigureOutcome, library: 'present' | 'absent
           sent.push(text)
           return true
         }}
-        fetch={serverFetch(library)}
+        fetch={serverFetch(library, project)}
       />,
     )
   })
@@ -332,4 +375,49 @@ test("#443: a refused system prompt keeps the dialog open and says so; a missing
   await eventually(() => expect(bare.closes).toEqual([1]))
   expect(bare.configured).toEqual([{ model: 'fake/deep', thinking: 'high', mode: 'default', systemPrompt: null }])
   await bare.unmount()
+})
+
+test("#470: a trusted project's own prompts are offered apart from the user's, chosen by `project:<id>` — the user's prompt of the same id stays its own", async () => {
+  const mounted = await mountStart({ outcome: 'told' }, 'present', TRUSTED_PROJECT)
+  await eventually(() =>
+    expect(mounted.dialog().textContent).toContain('refused project odd.md: frontmatter has no name'),
+  )
+  const offered = await choose(mounted, 'start-session-system-prompt', 'Team reviewer')
+  expect(offered).toEqual([
+    'pi default',
+    "Reviewer≈1,234 tokens · replaces pi's prompt",
+    "Haiku≈9 tokens · adds to pi's prompt",
+    "Shadow≈5 tokens · replaces pi's prompt",
+    "Team reviewer≈20 tokens · replaces pi's prompt",
+  ])
+  await chooseTypeAndStart(mounted, 'fake/deep', 'review this')
+  await eventually(() => expect(mounted.closes).toEqual([1]))
+  expect(mounted.configured).toEqual([
+    { model: 'fake/deep', thinking: 'high', mode: 'default', systemPrompt: 'project:reviewer' },
+  ])
+  await mounted.unmount()
+})
+
+test("#470: a project's session prompt fills the prompt box, read from the project's own route", async () => {
+  const mounted = await mountStart({ outcome: 'told' }, 'present', TRUSTED_PROJECT)
+  await choose(mounted, 'start-session-saved-prompt', 'Kickoff')
+  await eventually(() =>
+    expect(mounted.dialog().querySelector<HTMLTextAreaElement>('#start-session-prompt')?.value).toBe(KICKOFF.body),
+  )
+  await mounted.unmount()
+})
+
+test("#470: an untrusted project's prompts are not offered, and the dialog says where they are and why", async () => {
+  const mounted = await mountStart({ outcome: 'told' }, 'present', {
+    kind: 'untrusted',
+    directory: PROJECT_PROMPTS_DIR,
+  })
+  await eventually(() =>
+    expect(mounted.dialog().textContent).toContain(
+      `project prompts in ${PROJECT_PROMPTS_DIR} are not read: the project is not trusted`,
+    ),
+  )
+  const offered = await choose(mounted, 'start-session-system-prompt', 'Reviewer')
+  expect(offered.some((label) => label.startsWith('Team reviewer'))).toBe(false)
+  await mounted.unmount()
 })

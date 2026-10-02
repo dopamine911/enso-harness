@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { hasTrustRequiringProjectResources, ProjectTrustStore, SettingsManager } from '@earendil-works/pi-coding-agent'
 import { type EnsoTranscriptEntry, threadTrustsProject } from '@enso/core'
-import { projectConfigPath } from '@enso/core/paths'
+import { projectConfigPath, projectPromptsDir } from '@enso/core/paths'
 
 /**
  * Whether a hosted session may read its project's own configuration (#502): decided HERE, before pi
@@ -51,13 +51,16 @@ export function hostedProjectTrust(
 /**
  * The project holds something trust would load: pi's list (`.pi/settings.json`, `extensions`,
  * `skills`, `prompts`, `themes`, `SYSTEM.md`, `APPEND_SYSTEM.md`, a `.agents/skills` above it),
- * plus the two pi does not know: the engine's `.pi/agents/` and Enso's `.enso/config.json`.
+ * plus what pi does not know: the engine's `.pi/agents/`, Enso's `.enso/config.json`, and the
+ * project's own prompt library, `.enso/prompts/` (#470) — so a project that holds only prompts is
+ * asked about too, and "Trust project" lists them for the threads after this one.
  */
 export function hasTrustGatedResources(cwd: string): boolean {
   return (
     hasTrustRequiringProjectResources(cwd) ||
     existsSync(join(cwd, '.pi', 'agents')) ||
-    existsSync(projectConfigPath(cwd))
+    existsSync(projectConfigPath(cwd)) ||
+    existsSync(projectPromptsDir(cwd))
   )
 }
 
@@ -71,8 +74,8 @@ export const PROJECT_TRUST_OPTIONS: readonly string[] = [TRUST_PROJECT, TRUST_TH
 export function projectTrustQuestion(cwd: string): string {
   return (
     `Trust the project ${cwd}? It has its own configuration — .pi/ settings, skills, prompts, permission ` +
-    `rules and modes, or .enso/config.json — which can change what the agent may do without asking. Until ` +
-    `you trust it, only your own configuration applies. The run waits for your answer.`
+    `rules and modes, .enso/config.json or .enso/prompts — which can change what the agent may do without ` +
+    `asking. Until you trust it, only your own configuration applies. The run waits for your answer.`
   )
 }
 

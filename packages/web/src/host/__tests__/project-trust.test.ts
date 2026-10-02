@@ -35,6 +35,14 @@ test("the engine's .pi/agents and Enso's .enso/config.json are trust-gated, thou
   expect(hasTrustGatedResources(directories().project)).toBe(false)
 })
 
+test("a project's own prompt library, .enso/prompts, is trust-gated too: a project holding only prompts is asked about (#470)", () => {
+  const { project, agentDir } = directories()
+  mkdirSync(join(project, '.enso', 'prompts'), { recursive: true })
+  expect(hasTrustGatedResources(project)).toBe(true)
+  expect(hostedProjectTrust(project, agentDir, []).open).toBe(true)
+  expect(hostedProjectTrust(project, agentDir, []).settingsManager.isProjectTrusted()).toBe(false)
+})
+
 test('undecided is untrusted even with nothing to load, and asked about only when there is something (#502)', () => {
   const plain = directories()
   expect(hostedProjectTrust(plain.project, plain.agentDir, [])).toMatchObject({ open: false })
