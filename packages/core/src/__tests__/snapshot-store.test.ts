@@ -69,6 +69,32 @@ async function taken(store: SnapshotStore): Promise<SnapshotTaken> {
   return outcome.taken
 }
 
+/**
+ * A repository whose project is its subdirectory `packages/app` (#566): the repository's
+ * `.gitignore` covers `.env`, `node_modules/` and `*.log`, its `info/exclude` names
+ * `/packages/app/local.txt` — rules git applies to the project but finds only ABOVE it. In the
+ * project: one of each ignored file, a tracked file `*.log` covers, a tracked source, and an
+ * untracked unignored note.
+ */
+function subdirectoryProject(): { repository: string; project: string } {
+  const repository = mkdtempSync(join(tmpdir(), 'enso-snap-mono-'))
+  const project = join(repository, 'packages', 'app')
+  git(repository, 'init', '--quiet')
+  writeFileSync(join(repository, '.gitignore'), '.env\nnode_modules/\n*.log\n')
+  writeFileSync(join(repository, '.git', 'info', 'exclude'), '/packages/app/local.txt\n')
+  mkdirSync(join(project, 'node_modules', 'x'), { recursive: true })
+  writeFileSync(join(project, 'src.ts'), 'export const one = 1\n')
+  writeFileSync(join(project, 'kept.log'), 'tracked, though *.log covers it\n')
+  git(repository, 'add', '--all')
+  git(repository, 'add', '--force', 'packages/app/kept.log')
+  git(repository, 'commit', '--quiet', '-m', 'one')
+  writeFileSync(join(project, '.env'), 'SECRET=hunter2\n')
+  writeFileSync(join(project, 'local.txt'), 'only info/exclude hides this\n')
+  writeFileSync(join(project, 'node_modules', 'x', 'i.js'), 'installed\n')
+  writeFileSync(join(project, 'notes.md'), 'untracked, not ignored\n')
+  return { repository, project }
+}
+
 test('⚠ a snapshot is the tracked set plus the unignored untracked files: `.env` and an ignored directory never enter the store; the tree’s own repository is untouched', async () => {
   const tree = checkout()
   writeFileSync(join(tree, '.env'), 'SECRET=hunter2\n')
@@ -186,10 +212,11 @@ test('a mint that cannot write refuses the store as undefined, and a snapshot gi
   expect(await openSnapshotStore({ directory: join(unwritable, 'store'), tree, environment })).toBeUndefined()
 
   const store = await opened(tree)
-  // The tree vanishes under the store: `add` fails, and the outcome says where.
+  // The tree vanishes under the store: its first git, asking which rules apply, fails, and the
+  // outcome says where.
   execFileSync('rm', ['-rf', tree])
   const outcome = await store.snapshot()
-  expect(outcome.kind === 'refused' ? outcome.refused.step : outcome.taken.hash).toBe('add')
+  expect(outcome.kind === 'refused' ? outcome.refused.step : outcome.taken.hash).toBe('rev-parse')
 })
 
 test('⚠ materializing a snapshot makes the tree exactly it — an edit undone, a deleted file back, an unignored untracked file gone — and never touches an ignored file', async () => {
@@ -213,6 +240,34 @@ test('⚠ materializing a snapshot makes the tree exactly it — an edit undone,
   // An unknown hash is refused by step, the tree as it was.
   const unknown = await materializeSnapshot({ directory: store.directory, tree, hash: 'f'.repeat(40), environment })
   expect(unknown.kind === 'refused' ? unknown.refused.step : unknown.kind).toBe('read-tree')
+})
+
+test("⚠ a subdirectory project snapshots under its repository's ignore rules — the `.gitignore` above it and `info/exclude` — and a materialize neither deletes nor overwrites a file they ignore (#566)", async () => {
+  const { project } = subdirectoryProject()
+  const store = await opened(project)
+  const first = await taken(store)
+  expect((await snapshotPaths(environment, store, first.hash)).toSorted()).toEqual(['kept.log', 'notes.md', 'src.ts'])
+  const blobs = git(store.directory, 'cat-file', '--batch-all-objects', '--batch-check')
+  expect(blobs).not.toContain(git(project, 'hash-object', '.env'))
+
+  // Ignored files made since, and the ignored ones there were, all survive a materialize; the
+  // unignored file it lacks goes.
+  writeFileSync(join(project, 'debug.log'), 'made after the snapshot\n')
+  writeFileSync(join(project, '.env'), 'SECRET=rotated\n')
+  writeFileSync(join(project, 'stray.md'), 'unignored, untracked\n')
+  const outcome = await materializeSnapshot({
+    directory: store.directory,
+    tree: project,
+    hash: first.hash,
+    environment,
+  })
+  expect(outcome).toEqual({ kind: 'materialized' })
+  expect(existsSync(join(project, 'stray.md'))).toBe(false)
+  expect(readFileSync(join(project, 'debug.log'), 'utf8')).toBe('made after the snapshot\n')
+  expect(readFileSync(join(project, '.env'), 'utf8')).toBe('SECRET=rotated\n')
+  expect(readFileSync(join(project, 'local.txt'), 'utf8')).toBe('only info/exclude hides this\n')
+  expect(readFileSync(join(project, 'node_modules', 'x', 'i.js'), 'utf8')).toBe('installed\n')
+  expect(await taken(store)).toEqual({ hash: first.hash, changed: false })
 })
 
 test("⚠ a store minted with another store's objects as an alternate materializes that store's snapshot into a plain directory, in that store's object format", async () => {
