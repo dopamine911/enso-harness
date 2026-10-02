@@ -67,9 +67,10 @@ const trail: readonly Experiment[] = [
     question: 'What is actually shaping the agent, underneath what looks like the model?',
     did: [
       "The Time Machine captures Claude Code's system prompts and tool definitions, CLI and SDK, version by version and model by model, and charts how they changed. Every finding carries its evidence tier: a verified capture, a source read, an inference.",
+      "Its captures come from a small proxy on loopback, built on one rule: a model's account of its own prompt is not evidence. The proxy records the system prompt the CLI actually puts on the wire, byte for byte, before forwarding the request untouched. (The proxy's repository is not public yet.)",
     ],
     livesOn:
-      'The harness is part of the agent system. It cannot be treated as an invisible implementation detail: what the model was told, and which tools it was handed, change what it does.',
+      'The harness is part of the agent system. It cannot be treated as an invisible implementation detail: what the model was told, and which tools it was handed, change what it does. So Enso shows the request as it was sent, not as anyone remembers it.',
     sources: [{ label: 'cc-sys-prompt-time-machine', href: 'https://github.com/brewpirate/cc-sys-prompt-time-machine' }],
   },
   {
