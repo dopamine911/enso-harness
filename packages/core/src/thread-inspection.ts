@@ -275,6 +275,19 @@ export const EnsoRestoreRequest = Type.Object(
 export type EnsoRestoreRequest = Static<typeof EnsoRestoreRequest>
 
 /**
+ * The body of `POST …/restore/undo` (#565): the safety snapshot the undo puts back — the one the
+ * restore's notice promised. The host undoes only the NEWEST restore, and only when this is its
+ * safety, so a notice of an older restore can never undo a later one (PR #561 review).
+ * @group Thread inspection
+ */
+export const EnsoRestoreUndoRequest = Type.Object(
+  { safety: Type.String({ pattern: '^(?:[0-9a-f]{40}|[0-9a-f]{64})$' }) },
+  { additionalProperties: false },
+)
+/** @group Thread inspection */
+export type EnsoRestoreUndoRequest = Static<typeof EnsoRestoreUndoRequest>
+
+/**
  * What a fork answers (#433): the new thread, and the forked message's text — pi's `/fork` puts it
  * in the editor, so the new thread's composer opens holding it, ready to send again or edit.
  *

@@ -9,6 +9,7 @@ import {
   type EnsoForkReceipt,
   EnsoForkRequest,
   EnsoRestoreRequest,
+  EnsoRestoreUndoRequest,
   EnsoHostCommandRun,
   EnsoIncidentResolution,
   EnsoPermissionModeChange,
@@ -933,6 +934,7 @@ const RESTORE_REFUSAL_STATUS = {
   'no-tree': 409,
   'no-snapshot': 409,
   'no-restore': 409,
+  superseded: 409,
   refused: 409,
 } as const
 
@@ -979,15 +981,32 @@ export function restoreThreadAt(
 
 /**
  * Undo the thread's last restore (#565): its tree back to that restore's safety snapshot — itself a
- * restore, with its own safety, so a second undo puts the first restore back.
+ * restore, with its own safety, so a second undo puts the first restore back. The body names the
+ * safety the caller was promised; a later restore since is a 409 (PR #561 review).
  */
-export function undoLastRestore(deps: ThreadReadDeps, threadId: string): Promise<RestoreRouteOutcome> {
-  return restoreUnderLease(deps, threadId, 'undo its last restore', () => deps.host.undoLastRestore(threadId))
+export function undoLastRestore(
+  deps: ThreadReadDeps,
+  threadId: string,
+  request: EnsoRestoreUndoRequest,
+): Promise<RestoreRouteOutcome> {
+  return restoreUnderLease(deps, threadId, 'undo its last restore', () =>
+    deps.host.undoLastRestore(threadId, request.safety),
+  )
 }
 
 /** The restore body, checked against its closed schema — `entryId`, nothing else. */
 export function readRestoreBody(raw: string): EnsoRestoreRequest {
   return readClosedBody(raw, EnsoRestoreRequest, 'restore', 'restore body needs a non-empty `entryId` and nothing else')
+}
+
+/** The undo body, checked against its closed schema — `safety`, a commit hash, nothing else. */
+export function readRestoreUndoBody(raw: string): EnsoRestoreUndoRequest {
+  return readClosedBody(
+    raw,
+    EnsoRestoreUndoRequest,
+    'restore undo',
+    'undo body needs `safety`, the commit hash the restore kept, and nothing else',
+  )
 }
 
 export type AbortRouteOutcome = { readonly status: 200; readonly receipt: EnsoAbortReceipt } | Refusal<404 | 409>

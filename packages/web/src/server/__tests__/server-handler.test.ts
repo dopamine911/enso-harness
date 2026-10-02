@@ -939,7 +939,12 @@ test('⚠ a restore holds its thread until it settles: a mode change meanwhile i
   const { url } = await startWith(settlesAtOnce, { held: { ...thread, restore: finish.promise } })
   const changeMode = (): Promise<Response> =>
     fetch(`${url}/api/threads/held/mode`, { method: 'POST', body: JSON.stringify({ mode: 'acceptEdits' }) })
-  const undo = fetch(`${url}/api/threads/held/restore/undo`, { method: 'POST' })
+  const undoOf = (threadId: string, body: unknown): Promise<Response> =>
+    fetch(`${url}/api/threads/${threadId}/restore/undo`, { method: 'POST', body: JSON.stringify(body) })
+  // The undo names the safety its notice promised (PR #561 review): without one it is no undo.
+  expect((await undoOf('held', {})).status).toBe(400)
+  expect((await undoOf('held', { safety: 'not-a-hash' })).status).toBe(400)
+  const undo = undoOf('held', { safety: 'b'.repeat(40) })
   await Bun.sleep(50)
   const meanwhile = await changeMode()
   expect(meanwhile.status).toBe(409)
@@ -948,7 +953,7 @@ test('⚠ a restore holds its thread until it settles: a mode change meanwhile i
   expect(undone.status).toBe(200)
   expect(await undone.json()).toEqual({ hash: 'c'.repeat(40), safety: 'd'.repeat(40) })
   expect((await changeMode()).status).toBe(204)
-  expect((await fetch(`${url}/api/threads/never-stored/restore/undo`, { method: 'POST' })).status).toBe(404)
+  expect((await undoOf('never-stored', { safety: 'b'.repeat(40) })).status).toBe(404)
 })
 
 test('GET /api/threads/:id returns the branch as the transcript of ours, with sessionFile null while unflushed', async () => {

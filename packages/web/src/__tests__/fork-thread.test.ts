@@ -112,7 +112,7 @@ test('⚠ a second fork press while one is outstanding forks nothing and says so
 /** A thread whose `/history` is BRANCH and whose `/restore` answers `answer`; the bodies it was posted. */
 function restoringThread(
   answer: () => Response,
-  undo: () => Response = (): Response => new Response('not scripted', { status: 404 }),
+  undo: (body: string) => Response = (): Response => new Response('not scripted', { status: 404 }),
 ): { stores: ThreadStores; posts: string[] } {
   const posts: string[] = []
   const stores = mintThread((input: string, init?: RequestInit) => {
@@ -128,7 +128,9 @@ function restoringThread(
         }),
       )
     }
-    if (input.endsWith('/restore/undo') && init?.method === 'POST') return Promise.resolve(undo())
+    if (input.endsWith('/restore/undo') && init?.method === 'POST') {
+      return Promise.resolve(undo(typeof init.body === 'string' ? init.body : ''))
+    }
     if (input.endsWith('/restore') && init?.method === 'POST') {
       posts.push(typeof init.body === 'string' ? init.body : '')
       return Promise.resolve(answer())
@@ -167,8 +169,8 @@ test('⚠ a restore\'s notice offers "Undo last restore": a refused press keeps 
   const undoPosts: string[] = []
   const { stores } = restoringThread(
     () => Response.json({ hash: 'a'.repeat(40), safety: 'b'.repeat(40) }),
-    () => {
-      undoPosts.push('undo')
+    (body) => {
+      undoPosts.push(body)
       return undoAnswers.shift() ?? new Response('none left', { status: 500 })
     },
   )
@@ -191,5 +193,20 @@ test('⚠ a restore\'s notice offers "Undo last restore": a refused press keeps 
   expect(undoneLine?.message).toContain('last restore undone: files back to bbbbbbb')
   expect(undoneLine?.action?.label).toBe(UNDO_RESTORE_LABEL)
   expect(stores.notifications.get().find((line) => line.id === restoredLine?.id)?.action).toBeUndefined()
-  expect(undoPosts).toHaveLength(2)
+  // Each press named the safety its notice promised (PR #561 review): the server undoes that
+  // restore or none, never a later one.
+  expect(undoPosts).toEqual([`{"safety":"${'b'.repeat(40)}"}`, `{"safety":"${'b'.repeat(40)}"}`])
+})
+
+// PR #561 review: only the newest restore can be undone, so a notice a later restore replaced must
+// not keep offering an undo of it.
+test('a later restore takes the undo off the notice before it, and says why', async () => {
+  const { stores } = restoringThread(() => Response.json({ hash: 'a'.repeat(40), safety: 'b'.repeat(40) }))
+  await restoreFromPage(stores, BRANCH, 'e-u1')
+  const first = stores.notifications.get().at(-1)
+  await restoreFromPage(stores, BRANCH, 'e-u1')
+  const lines = stores.notifications.get()
+  expect(lines.find((line) => line.id === first?.id)?.action).toBeUndefined()
+  expect(lines.find((line) => line.id === first?.id)?.message).toContain('a later restore replaced it')
+  expect(lines.at(-1)?.action?.label).toBe(UNDO_RESTORE_LABEL)
 })

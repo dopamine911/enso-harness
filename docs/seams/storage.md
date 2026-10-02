@@ -80,7 +80,7 @@ export interface AgentHost {
   /** Restore the thread's tree to the snapshot recorded at or before `entryId` (#551); the conversation is unchanged. */
   restoreThreadAt(threadId: string, entryId: string): Promise<ThreadRestoreOutcome>
   /** Undo the thread's last restore (#565): its tree back to that restore's safety snapshot, itself recorded as a restore. */
-  undoLastRestore(threadId: string): Promise<ThreadRestoreOutcome>
+  undoLastRestore(threadId: string, safety: string): Promise<ThreadRestoreOutcome>
   /** Whether a NEW thread in `project` gets a tree of its own (#551): a projects folder, and trees not `off` for it. */
   mintsTreesIn(project: string): boolean
   /** What a fresh thread starts in — served before any run exists, so the header never guesses. */

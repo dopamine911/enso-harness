@@ -79,7 +79,7 @@ import {
 } from '@enso/core/paths'
 import { describePermissionPolicy, preparePermissionPolicy } from '@enso/core/permission-rules'
 import { knownSecretValues, quarantineSecrets } from '@enso/core/secrets'
-import { mintThreadTree, restoreThreadTree, treeKindFor } from '@enso/core/thread-tree'
+import { disposeThreadTree, mintThreadTree, restoreThreadTree, treeKindFor } from '@enso/core/thread-tree'
 import { getPermissionsService } from '@gotgenes/pi-permission-system'
 import { type BranchContext, type BranchRequestDetail, branchContext, branchRequestDetail } from './branch-context.ts'
 import { type BranchEval, branchEval } from './branch-eval.ts'
@@ -552,7 +552,10 @@ export type ThreadForkOutcome =
  */
 export type ThreadRestoreOutcome =
   | { readonly kind: 'restored'; readonly hash: string; readonly safety: string }
-  | { readonly kind: 'no-thread' | 'no-entry' | 'no-tree' | 'no-snapshot' | 'no-restore'; readonly reason: string }
+  | {
+      readonly kind: 'no-thread' | 'no-entry' | 'no-tree' | 'no-snapshot' | 'no-restore' | 'superseded'
+      readonly reason: string
+    }
   | { readonly kind: 'refused'; readonly reason: string }
 
 /**
@@ -656,7 +659,7 @@ export interface AgentHost {
   /** Restore the thread's tree to the snapshot recorded at or before `entryId` (#551); the conversation is unchanged. */
   restoreThreadAt(threadId: string, entryId: string): Promise<ThreadRestoreOutcome>
   /** Undo the thread's last restore (#565): its tree back to that restore's safety snapshot, itself recorded as a restore. */
-  undoLastRestore(threadId: string): Promise<ThreadRestoreOutcome>
+  undoLastRestore(threadId: string, safety: string): Promise<ThreadRestoreOutcome>
   /** Whether a NEW thread in `project` gets a tree of its own (#551): a projects folder, and trees not `off` for it. */
   mintsTreesIn(project: string): boolean
   /** What a fresh thread starts in — served before any run exists, so the header never guesses. */
@@ -950,20 +953,23 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
 
   /**
    * The session a new thread built in its checkout moves onto its tree with (#551): everything it
-   * holds — what was chosen before its first run — plus the tree's record, written now as its file
-   * under a header naming the tree, then opened from that file. Written at once, not at pi's first
-   * flush (PR #561 review): a thread disposed before its first message would otherwise have no file
-   * to be found by, and its next build would mint again over the tree that exists. Opened from the
-   * file so pi appends to it, never writes it a second time (its first flush opens the file `wx`).
+   * holds — what was chosen before its first run — written now as its file under a header naming
+   * the tree, opened from that file, and the tree's record appended to it. Written at once, not at
+   * pi's first flush (PR #561 review): a thread disposed before its first message would otherwise
+   * have no file to be found by, and its next build would mint again over the tree that exists.
+   * Opened from the file so pi appends to it, never writes it a second time (its first flush opens
+   * the file `wx`). The checkout session is not touched: a move undone leaves it as it was, naming
+   * no tree.
    */
   function sessionOnTree(checkoutSession: SessionManager, tree: ThreadTreeRecord): SessionManager {
-    checkoutSession.appendCustomEntry(ENSO_THREAD_TREE_ENTRY, tree)
     const file = checkoutSession.getSessionFile()
     if (file === undefined) throw new Error(`thread ${checkoutSession.getSessionId()} has no session file path`)
     const header = { ...checkoutSession.getHeader(), cwd: tree.path }
     const lines = [header, ...checkoutSession.getEntries()].map((fileEntry) => `${JSON.stringify(fileEntry)}\n`)
     writeFileSync(file, lines.join(''))
-    return SessionManager.open(file)
+    const onTree = SessionManager.open(file)
+    onTree.appendCustomEntry(ENSO_THREAD_TREE_ENTRY, tree)
+    return onTree
   }
 
   /** A thread's snapshot store (#551): beside its session, under its project — the checkout's or its tree's. */
@@ -1314,13 +1320,21 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   /**
    * Undo the thread's last restore (#565): back to the safety snapshot its newest `enso-tree-restored`
    * record names. That is a restore too — recorded, with its own safety — so undoing again re-applies
-   * the restore it undid; each undo reverses the restore before it.
+   * the restore it undid; each undo reverses the restore before it. ⚠ Only when `safety` IS that
+   * record's (PR #561 review): an undo pressed on an older restore's notice — or one another tab
+   * replaced since — is refused, never applied to a restore it does not name.
    */
-  async function undoLastRestore(threadId: string): Promise<ThreadRestoreOutcome> {
+  async function undoLastRestore(threadId: string, safety: string): Promise<ThreadRestoreOutcome> {
     const target = await restoreSession(threadId)
     if ('kind' in target) return target
     const last = lastRestoreOf(transcriptOf(target.session.getBranch()))
     if (last === undefined) return { kind: 'no-restore', reason: `thread ${threadId} has no restore to undo` }
+    if (last.safety !== safety) {
+      return {
+        kind: 'superseded',
+        reason: `a later restore replaced these files (its safety is ${last.safety.slice(0, 7)}); undo that one instead`,
+      }
+    }
     return restoreTreeTo(threadId, target, last.safety)
   }
 
@@ -1393,7 +1407,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     // A new thread whose project gives threads a tree (#551) is built in the checkout and gets its
     // tree at its first RUN, not here (PR #561 review): a thread only built — a preview looked at,
     // a permission checked, a model chosen — leaves no worktree, branch or file behind.
-    return treeKindOf(directory) === undefined ? hosted : treeOnFirstRun(threadId, directory, hosted)
+    return treeKindOf(directory) === undefined ? hosted : treeOnFirstRun(threadId, directory, hosted, created)
   }
 
   /**
@@ -1406,23 +1420,72 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
    * and every observer stays subscribed across the move. Runs that arrive while it moves wait for
    * it. A mint that is refused refuses the run, never runs it in the checkout instead, and the next
    * run tries again.
+   *
+   * ⚠ A MOVE THAT FAILS AFTER THE MINT IS UNDONE (PR #561 review): the tree and its branch are named
+   * by the thread's id, so a tree left behind would refuse every later mint for this thread. Any
+   * step failing after the mint — the write, the build, a dispose that came meanwhile — removes the
+   * tree, its branch and store, and the file the move wrote, and puts the checkout session back.
+   *
+   * ⚠ DISPOSE STOPS THE MOVE: a build that finishes after the thread was disposed (the registry's
+   * shutdown disposes busy threads too) is disposed in turn, and the run that waited is refused —
+   * no pi is left running that nothing would dispose.
+   *
+   * ⚠ NO CHANGE WHILE IT MOVES: a mode, system prompt, host command or incident resolution would
+   * land on the checkout session after its entries were written for the tree, and be lost. The
+   * server's control routes cannot reach this (a moving run holds the thread's lease); the wrapper
+   * refuses them itself, so no caller can.
    */
-  function treeOnFirstRun(threadId: string, project: string, first: HostedThread): HostedThread {
+  function treeOnFirstRun(
+    threadId: string,
+    project: string,
+    first: HostedThread,
+    checkoutSession: SessionManager,
+  ): HostedThread {
     let current = first
     let moved = false
+    let disposed = false
     let moving: Promise<string | undefined> | undefined
     const observers = new Set<(observation: EnsoObservation) => void>()
     const fanOut = (observation: EnsoObservation): void => {
       for (const observer of observers) observer(observation)
     }
     let unbind = current.runtime.subscribe(fanOut)
+    const whileMoving = `thread ${threadId} is moving onto its tree; try again once its first run has started`
+    const isMoving = (): boolean => moving !== undefined && !moved
+
+    /** The mint undone: the tree, its branch and store, the file the move wrote; the checkout session back. */
+    async function undoMove(tree: ThreadTreeRecord, why: string): Promise<string> {
+      const file = checkoutSession.getSessionFile()
+      if (file !== undefined && existsSync(file)) unlinkSync(file)
+      if (!disposed) liveSessionManagers.set(threadId, checkoutSession)
+      const store = storeOf(threadId, tree.path)
+      const removed =
+        store === undefined ? undefined : await disposeThreadTree({ record: tree, store, force: true, environment })
+      if (removed?.kind !== 'disposed') {
+        log.error('thread {threadId}: the tree {tree} of a failed move could not be removed: {reason}', {
+          threadId,
+          tree: tree.path,
+          reason: removed?.reason ?? 'no projects folder',
+        })
+      }
+      return why
+    }
 
     async function moveOntoTree(): Promise<string | undefined> {
       const minted = await mintTree({ threadId, project, name: threadId, from: { kind: 'checkout' } })
       if (minted.kind === 'refused') return minted.reason
-      const checkoutSession = liveSessionManagers.get(threadId)
-      if (checkoutSession === undefined) return `thread ${threadId} was disposed before it ran`
-      const next = await buildHosted(threadId, sessionOnTree(checkoutSession, minted.record))
+      if (disposed) return undoMove(minted.record, `thread ${threadId} was disposed before it ran`)
+      let next: HostedThread
+      try {
+        next = await buildHosted(threadId, sessionOnTree(checkoutSession, minted.record))
+      } catch (error) {
+        log.error('thread {threadId} could not be built on its tree: {error}', { threadId, error })
+        return undoMove(minted.record, `its build on the tree failed: ${String(error)}`)
+      }
+      if (disposed) {
+        next.runtime.dispose()
+        return `thread ${threadId} was disposed before it ran`
+      }
       unbind()
       const previous = current
       current = next
@@ -1433,6 +1496,10 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     }
     /** Run `start` on the build on the tree — moving there first, once. */
     function onTree(outcome: PromptOutcome, start: () => void): void {
+      if (disposed) {
+        outcome.onRejected(`thread ${threadId} was disposed`)
+        return
+      }
       if (moved) {
         start()
         return
@@ -1463,14 +1530,18 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       listCommands: () => current.runtime.listCommands(),
       modelState: () => current.runtime.modelState(),
       sessionUsage: () => current.runtime.sessionUsage(),
-      runHostCommand: (run) => current.runtime.runHostCommand(run),
-      startHostFlow: (run, outcome) => current.runtime.startHostFlow(run, outcome),
+      runHostCommand: (run) =>
+        isMoving() ? Promise.reject(new HostCommandRefused(whileMoving)) : current.runtime.runHostCommand(run),
+      startHostFlow: (run, outcome) =>
+        isMoving() ? outcome.onRejected(whileMoving) : current.runtime.startHostFlow(run, outcome),
       loginInProgress: () => current.runtime.loginInProgress(),
       cancelLogin: () => current.runtime.cancelLogin(),
       permissionModeState: () => current.runtime.permissionModeState(),
-      setPermissionMode: (mode, outcome) => current.runtime.setPermissionMode(mode, outcome),
-      setSystemPrompt: (choice) => current.runtime.setSystemPrompt(choice),
-      resolveIncident: (incidentId, resolution) => current.runtime.resolveIncident(incidentId, resolution),
+      setPermissionMode: (mode, outcome) =>
+        isMoving() ? outcome.onRejected(whileMoving) : current.runtime.setPermissionMode(mode, outcome),
+      setSystemPrompt: (choice) => (isMoving() ? whileMoving : current.runtime.setSystemPrompt(choice)),
+      resolveIncident: (incidentId, resolution) =>
+        isMoving() ? whileMoving : current.runtime.resolveIncident(incidentId, resolution),
       subscribe: (observer) => {
         observers.add(observer)
         return () => observers.delete(observer)
@@ -1482,6 +1553,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       },
       clearQueue: () => current.runtime.clearQueue(),
       dispose: () => {
+        disposed = true
         unbind()
         current.runtime.dispose()
       },

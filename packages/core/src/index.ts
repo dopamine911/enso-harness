@@ -425,6 +425,7 @@ export {
   EnsoForkReceipt,
   EnsoForkRequest,
   EnsoRestoreRequest,
+  EnsoRestoreUndoRequest,
   EnsoInterruptedTail,
   EnsoStoredThread,
   EnsoThreadEvent,

@@ -1794,6 +1794,102 @@ test('⚠ a new thread gets its tree at its first run, not its build: built and 
   expect(fixtureGit(project, 'worktree', 'list').split('\n')).toHaveLength(2)
 })
 
+/** What a project's repository holds of its threads' trees: the worktrees beside the checkout, and the `enso/*` branches. */
+function treesIn(project: string): { worktrees: number; branches: string } {
+  return {
+    worktrees: fixtureGit(project, 'worktree', 'list').split('\n').length - 1,
+    branches: fixtureGit(project, 'branch', '--list', 'enso/*'),
+  }
+}
+
+// ⚠ PR #561 review: a thread's tree and branch are named by its id, so a move that failed after the
+// mint and left the tree behind refused every later mint — the thread could never run again.
+test('⚠ a move whose build on the tree fails is undone — no worktree, branch or file left — and the next run mints again (#551)', async () => {
+  const project = dirtyCheckout()
+  const core = createFauxCore()
+  core.setResponses([faux.fauxAssistantMessage('ran')])
+  // On the checkout build only: an entry the next build cannot read — the build on the tree throws.
+  let poisoned = false
+  const poison: InlineExtension = {
+    name: 'enso-host-unreadable-system-prompt',
+    factory: (pi: ExtensionAPI) => {
+      pi.on('session_start', (_event, extensionContext) => {
+        if (poisoned || extensionContext.cwd !== project) return
+        poisoned = true
+        pi.appendEntry(ENSO_SYSTEM_PROMPT_ENTRY, { not: 'a system prompt' })
+      })
+    },
+  }
+  const { host } = treeHost(project, [fauxModelExtension(core), poison])
+  new ProjectTrustStore(agentDir).set(project, true)
+  const threadId = crypto.randomUUID()
+  const hosted = await host.createSession(threadId, () => project)
+  openSessions.push(hosted)
+  await expect(runPrompt(hosted, 'first')).rejects.toThrow('its build on the tree failed')
+  expect(treesIn(project)).toEqual({ worktrees: 0, branches: '' })
+  expect((await host.listSessions()).some((stored) => stored.id === threadId)).toBe(false)
+  expect(hosted.inspect().cwd).toBe(project)
+  expect(core.state.callCount).toBe(0)
+  // Tried again — refused for the same unreadable entry, never for a tree left in the way.
+  await expect(runPrompt(hosted, 'again')).rejects.toThrow('its build on the tree failed')
+  expect(treesIn(project)).toEqual({ worktrees: 0, branches: '' })
+})
+
+// ⚠ PR #561 review: the registry disposes busy threads at shutdown. A dispose that comes while the
+// tree is minted undoes the mint; one that comes while pi is built on the tree disposes that build
+// too — and the run that waited never starts on a pi nothing would dispose. Changes made while the
+// thread moves are refused: they would land on the checkout session after it was written.
+test('⚠ a dispose while the thread moves stops it: during the mint the tree is undone, during the build no run starts; changes meanwhile are refused (#551)', async () => {
+  const project = dirtyCheckout()
+  const core = createFauxCore()
+  core.setResponses([faux.fauxAssistantMessage('should not run')])
+  const { host } = treeHost(project, [fauxModelExtension(core)])
+  new ProjectTrustStore(agentDir).set(project, true)
+
+  const minting = await host.createSession(crypto.randomUUID(), () => project)
+  const duringMint = runPrompt(minting, 'first')
+  minting.runtime.dispose()
+  await expect(duringMint).rejects.toThrow('was disposed before it ran')
+  expect(treesIn(project)).toEqual({ worktrees: 0, branches: '' })
+
+  // The build on the tree held open at its session start, until the test lets it go.
+  const building = Promise.withResolvers<void>()
+  const release = Promise.withResolvers<void>()
+  const hold: InlineExtension = {
+    name: 'enso-host-hold-the-tree-build',
+    factory: (pi: ExtensionAPI) => {
+      pi.on('session_start', async (_event, extensionContext) => {
+        if (extensionContext.cwd === project) return
+        building.resolve()
+        await release.promise
+      })
+    },
+  }
+  const held = treeHost(project, [fauxModelExtension(core), hold]).host
+  const threadId = crypto.randomUUID()
+  const moving = await held.createSession(threadId, () => project)
+  const duringBuild = runPrompt(moving, 'first')
+  await building.promise
+  expect(moving.runtime.setSystemPrompt(null)).toContain('is moving onto its tree')
+  const modeRefused = Promise.withResolvers<string>()
+  moving.runtime.setPermissionMode('plan', {
+    onAccepted: () => modeRefused.reject(new Error('accepted')),
+    onRejected: modeRefused.resolve,
+  })
+  expect(await modeRefused.promise).toContain('is moving onto its tree')
+  moving.runtime.dispose()
+  release.resolve()
+  await expect(duringBuild).rejects.toThrow('was disposed before it ran')
+  expect(core.state.callCount).toBe(0)
+  // The move had finished its file: the thread is found again on its tree.
+  const reopened = await held.createSession(threadId, () => {
+    throw new Error('a thread on its tree was asked for a new directory')
+  })
+  openSessions.push(reopened)
+  expect(reopened.inspect().cwd).not.toBe(project)
+  expect(treesIn(project).worktrees).toBe(1)
+})
+
 // The isolation is the point: a thread whose tree cannot be made does not quietly run in the
 // checkout instead. The move is tried again at the next run.
 test('⚠ a first run whose tree cannot be made is refused with the reason — nothing ran in the checkout — and the next run tries again (#551)', async () => {
@@ -1944,18 +2040,22 @@ test("⚠ a fork's tree is the parent's at the fork point; a restore brings a tu
 
   // Undo (#565): the files the restore replaced come back — the edit and the file made after —
   // and that is a restore too, so undoing again puts the first restore back.
-  const undone = await host.undoLastRestore(threadId)
+  const undone = await host.undoLastRestore(threadId, restored.safety)
   if (undone.kind !== 'restored') throw new Error(`undo refused: ${undone.reason}`)
   expect(undone.hash).toBe(restored.safety)
   expect(readFileSync(join(tree, 'a.txt'), 'utf8')).toBe('agent edit\n')
   expect(readFileSync(join(tree, 'later.txt'), 'utf8')).toBe('made after\n')
-  const redone = await host.undoLastRestore(threadId)
+  // ⚠ The first restore's undo, pressed again: a later restore (the undo) replaced those files —
+  // refused, and nothing moves (PR #561 review).
+  expect((await host.undoLastRestore(threadId, restored.safety)).kind).toBe('superseded')
+  expect(readFileSync(join(tree, 'a.txt'), 'utf8')).toBe('agent edit\n')
+  const redone = await host.undoLastRestore(threadId, undone.safety)
   // The undo's own safety: the restored files, snapshotted again as a commit of their own.
   expect(redone).toMatchObject({ kind: 'restored', hash: undone.safety })
   expect(readFileSync(join(tree, 'a.txt'), 'utf8')).toBe('dirty\n')
   expect(existsSync(join(tree, 'later.txt'))).toBe(false)
   // A tree thread with no restore has nothing to undo.
-  expect((await host.undoLastRestore(atFirst.threadId)).kind).toBe('no-restore')
+  expect((await host.undoLastRestore(atFirst.threadId, restored.safety)).kind).toBe('no-restore')
 
   // A thread in its checkout has no tree to restore — said as that, not as a missing thread.
   const plainCore = createFauxCore()

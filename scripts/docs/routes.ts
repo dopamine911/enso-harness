@@ -255,10 +255,10 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
   ),
   THREAD_RESTORE_UNDO_ROUTE: threadControl(
     'respondToRestoreUndo → undoLastRestore → AgentHost.undoLastRestore',
-    "path: `threadId`; no body. The thread's tree back to its newest `enso-tree-restored` record's `safety` (#565) — itself a restore, recorded with a safety of its own, so a second undo puts the first restore back. Held as a restore is",
+    "path: `threadId`; body: `EnsoRestoreUndoRequest` — `safety`, the snapshot the restore kept. The thread's tree back to its newest `enso-tree-restored` record's `safety` (#565), only when it is that one — itself a restore, recorded with a safety of its own, so a second undo puts the first restore back. Held as a restore is",
     [
       '200 `{ hash, safety }` JSON — the snapshot put back, and the snapshot of the files it replaced',
-      '403 untrusted origin; 404 no such thread (before anything is built); 409 thread busy, the thread on no tree, no restore to undo, or the restore refused; 500 handler failure',
+      "400 malformed id/body; 403 untrusted origin; 404 no such thread (before anything is built); 409 thread busy, the thread on no tree, no restore to undo, a later restore since (the `safety` is not the newest restore's), or the restore refused; 413 body too large; 500 handler failure",
     ],
     { builds: 'yes', factory: follows('export function undoLastRestore') },
   ),

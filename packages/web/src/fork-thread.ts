@@ -191,27 +191,39 @@ async function restoreReceiptOf(response: Response): Promise<RestoreReceipt> {
 }
 
 /**
+ * The thread's newest restore notice that still offers its undo, per thread (#565): a later
+ * restore takes the action off it, since only the newest restore can be undone (PR #561 review).
+ */
+const offeredUndo = new WeakMap<RestoreStores['notifications'], { readonly line: number; readonly message: string }>()
+
+/**
  * Say a restore — or an undo, which is one — on the thread, with "Undo last restore" on the line
- * (#565): the safety the dialog promised, one press away. Pressed, it undoes; a press that did not
- * (the server refused, or was not reached) puts the action back, so the only way to undo is not
- * used up by a press that undid nothing.
+ * (#565): the safety the dialog promised, one press away. Pressed, it undoes THAT restore — the
+ * undo names the notice's safety, and the server refuses it once a later restore replaced those
+ * files — and a press that did not (refused, or not reached) puts the action back, so the only way
+ * to undo is not used up by a press that undid nothing. The notice before loses its undo.
  */
 function sayRestored(stores: RestoreStores, receipt: RestoreReceipt, what: string): void {
+  const before = offeredUndo.get(stores.notifications)
+  if (before !== undefined)
+    stores.notifications.resolveLine(before.line, `${before.message} — a later restore replaced it`)
+  const message = `thread ${stores.threadId}: ${what} ${receipt.hash.slice(0, SHORT_HASH)}; the files before are kept as ${receipt.safety.slice(0, SHORT_HASH)}`
   const action = {
     label: UNDO_RESTORE_LABEL,
     run: (): void => {
-      void undoFromPage(stores).then((undone) => {
+      void undoFromPage(stores, receipt.safety).then((undone) => {
         if (undone === undefined) stores.notifications.restoreAction(line, action)
       })
     },
   }
   const line = stores.notifications.pushWithAction({
-    message: `thread ${stores.threadId}: ${what} ${receipt.hash.slice(0, SHORT_HASH)}; the files before are kept as ${receipt.safety.slice(0, SHORT_HASH)}`,
+    message,
     notifyType: 'info',
     origin: 'run',
     source: ENSO_NOTICE_SOURCE,
     action,
   })
+  offeredUndo.set(stores.notifications, { line, message })
 }
 
 /**
@@ -261,12 +273,11 @@ export async function restoreFromPage(
   return postRestore(stores, 'restore', init, { done: 'files restored to', action: 'restore' })
 }
 
-/** Undo the thread's last restore (#565): `POST …/restore/undo`, said as a restore of its own — undoable in turn. */
-function undoFromPage(stores: RestoreStores): Promise<RestoreReceipt | undefined> {
-  return postRestore(
-    stores,
-    'restore/undo',
-    { method: 'POST' },
-    { done: 'last restore undone: files back to', action: 'undo' },
-  )
+/**
+ * Undo the restore that kept `safety` (#565): `POST …/restore/undo { safety }`, said as a restore of
+ * its own — undoable in turn. The server refuses it when a later restore replaced those files.
+ */
+function undoFromPage(stores: RestoreStores, safety: string): Promise<RestoreReceipt | undefined> {
+  const init = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ safety }) }
+  return postRestore(stores, 'restore/undo', init, { done: 'last restore undone: files back to', action: 'undo' })
 }
