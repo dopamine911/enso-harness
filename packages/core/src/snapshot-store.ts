@@ -5,11 +5,20 @@
  * ⚠ THE TREE'S OWN `.git` IS NEVER WRITTEN. Every git that writes runs with `GIT_DIR` at the store,
  * `GIT_WORK_TREE` at the tree and `GIT_INDEX_FILE` at the store's own index — the mechanic
  * `@ayulab/pi-checkpoint` uses (borrowed, not adopted: GPL-3.0). The user's repository is only
- * read, with `GIT_OPTIONAL_LOCKS=0` as `@enso/core/git` reads it: at mint, its object directory,
- * named in `objects/info/alternates` so a base snapshot writes no blob the checkout already holds,
- * and — when the tree is the repository's top level — its index, copied as the store's seed, so a
- * snapshot re-hashes only files whose stat changed (measured: a 3k-file tree mints in 2.2 s
- * unseeded, in milliseconds seeded — #551); at every snapshot, the list of the files it holds.
+ * read, with `GIT_OPTIONAL_LOCKS=0` as `@enso/core/git` reads it: at mint — when the tree is the
+ * repository's top level — its index, copied as the store's seed, so a snapshot re-hashes only
+ * files whose stat changed (measured: a 3k-file tree mints in 2.2 s unseeded, in milliseconds
+ * seeded — #551), and the blobs that index names, copied out of its objects; at every snapshot,
+ * the list of the files it holds.
+ *
+ * ⚠ THE PROJECT'S OBJECT STORE OWNS EVERY OBJECT (#573). The thread stores of one project
+ * (`snapshots/<thread-id>`) keep their objects in one bare repository beside them,
+ * `snapshots/.objects`: each store's `objects` is a symlink to its `objects`. Nothing is borrowed
+ * from the checkout — a store that named the checkout's objects as an alternate lost every blob
+ * and tree the checkout stopped referencing to the user's own `git gc`. A fork's store shares its
+ * parent's snapshots through it, its lineage in `enso-forked-from`. No git prunes there but
+ * {@link collectSnapshotGarbage}, which keeps every store's history; stores minted before #573 are
+ * moved onto it by {@link migrateSnapshotStores}.
  *
  * ⚠ WHAT A SNAPSHOT IS: the checkout's tracked set plus its unignored untracked files — never a
  * force-add — AS THE TREE'S REPOSITORY LISTS THEM (`ls-files --cached --others --exclude-standard`),
@@ -57,18 +66,23 @@
 import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import {
+  appendFileSync,
   copyFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmdirSync,
   rmSync,
+  statSync,
+  symlinkSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { exitCode, type GitResult, runGitIn, withoutGitLocalVariables } from './git.ts'
 
 /**
@@ -140,6 +154,8 @@ export interface SnapshotStore {
   readonly tree: string
   /** The tree as it is now, as a commit: a new one when it differs from the last, else the last. */
   snapshot(): Promise<{ kind: 'taken'; taken: SnapshotTaken } | { kind: 'refused'; refused: SnapshotRefused }>
+  /** The project's pre-#573 stores this open moved onto the object store, when it moved any (#573). */
+  readonly migration?: StoreMigration
 }
 
 /** A store and the tree it is opened for. */
@@ -152,14 +168,14 @@ interface StorePlace {
 type Refusal = { readonly kind: 'refused'; readonly refused: SnapshotRefused }
 
 /**
- * git in `cwd` under `env`, with the store's config and bounds. `input`, when given, is its stdin
- * as the NUL-ended list a `-z --stdin` reads; stdin is closed either way.
+ * git in `cwd` under `env`, with the store's config and bounds. `input`, when given, is its stdin:
+ * a list as the NUL-ended records a `-z --stdin` reads, or text as it is; stdin is closed either way.
  */
 function spawnGit(
   args: readonly string[],
   cwd: string,
   env: NodeJS.ProcessEnv,
-  input?: readonly string[],
+  input?: readonly string[] | string,
 ): Promise<GitResult> {
   const { promise, resolve: settle } = Promise.withResolvers<GitResult>()
   const child = execFile(
@@ -172,7 +188,7 @@ function spawnGit(
   )
   // A git that dies before reading its list breaks the pipe: its exit code says so, never a throw.
   child.stdin?.on('error', () => undefined)
-  child.stdin?.end(input?.map((record) => `${record}\0`).join(''))
+  child.stdin?.end(typeof input === 'string' ? input : input?.map((record) => `${record}\0`).join(''))
   return promise
 }
 
@@ -241,11 +257,11 @@ function canonical(path: string): string {
 
 /**
  * The tree's own object directory, index, object format and place in its repository, when the tree
- * is a git checkout: the alternates target, the index seed, the format the store must share, and
- * whether the tree is the repository's top level (`--show-prefix` empty) — a subdirectory's index
- * names paths from the top level, no seed for a store whose paths start at the tree. Read through
- * the read-only runner, so a worktree's `.git` FILE resolves to the common directory as git does,
- * not as a path join would.
+ * is a git checkout: where the seed's objects are read from, the index seed, the format the store
+ * must share, and whether the tree is the repository's top level (`--show-prefix` empty) — a
+ * subdirectory's index names paths from the top level, no seed for a store whose paths start at
+ * the tree. Read through the read-only runner, so a worktree's `.git` FILE resolves to the common
+ * directory as git does, not as a path join would.
  */
 async function treeRepository(
   environment: NodeJS.ProcessEnv,
@@ -256,7 +272,7 @@ async function treeRepository(
   const prefix = await runGitIn(environment, ['rev-parse', '--show-prefix'], tree)
   if (objects.code !== 0 || index.code !== 0 || prefix.code !== 0) return undefined
   // `--show-object-format` is git ≥ 2.32; a git without it has no sha256 repositories either, so
-  // the alternates and the seed keep their fast path and the format is sha1.
+  // the seed keeps its fast path and the format is sha1.
   const format = await runGitIn(environment, ['rev-parse', '--show-object-format'], tree)
   return {
     objects: objects.stdout.trim(),
@@ -267,61 +283,453 @@ async function treeRepository(
 }
 
 /**
- * Mint the store at `directory`: `git init --bare` in the format its objects must share, the
- * tree's object directory and `alternates` named in `objects/info/alternates`, and the tree's index
- * copied as the seed when the tree is its repository's top level. False when the directory or the
- * init fails — never a half-made store to use.
+ * The project's object store (#573), beside its thread stores: a bare repository that OWNS every
+ * object any of the project's snapshots need. A thread store's `objects` is a symlink to its
+ * `objects`. A dot name, so it is never a thread's (`snapshots/<thread-id>`).
+ */
+const OBJECT_STORE = '.objects'
+
+/** The lock one migration or garbage collection of a project's stores holds (a directory: `mkdir` is atomic). */
+const STORES_LOCK = '.lock'
+
+/** A lock older than this is a crashed holder's: every git under it is bounded by {@link SNAPSHOT_TIMEOUT_MS}. */
+const STALE_LOCK_MS = 10 * 60_000
+
+/** The file in a fork's store naming its ancestors' thread ids, nearest last, one per line (#573). */
+const FORKED_FROM_FILE = 'enso-forked-from'
+
+/** The file a pre-#573 store kept for its forks carried (#571): its thread was deleted. */
+const LEGACY_ORPHANED_FILE = 'enso-orphaned'
+
+/**
+ * Never git's own pruning in a store or the object store: a `git gc` run there by hand would see
+ * one store's refs and prune every other thread's objects. Written into each repository's config,
+ * so it holds for any git, Enso's or a person's; {@link collectSnapshotGarbage} prunes explicitly.
+ */
+const NO_PRUNING_CONFIG = '[gc]\n\tauto = 0\n\tpruneExpire = never\n'
+
+function objectStoreOf(snapshotsDir: string): string {
+  return join(snapshotsDir, OBJECT_STORE)
+}
+
+/** git against the project's object store, no work tree; `alternate` an object directory it may read from. */
+function runObjectStoreGit(
+  environment: NodeJS.ProcessEnv,
+  objectStore: string,
+  args: readonly string[],
+  { alternate, input }: { alternate?: string; input?: string } = {},
+): Promise<GitResult> {
+  const env = {
+    ...withoutGitLocalVariables(environment),
+    GIT_DIR: objectStore,
+    ...(alternate === undefined ? {} : { GIT_ALTERNATE_OBJECT_DIRECTORIES: alternate }),
+    GIT_TERMINAL_PROMPT: '0',
+    GIT_PAGER: 'cat',
+    LC_ALL: 'C',
+  }
+  return spawnGit(args, objectStore, env, input)
+}
+
+async function objectFormatOf(environment: NodeJS.ProcessEnv, repository: string): Promise<string | undefined> {
+  const format = await runObjectStoreGit(environment, repository, ['rev-parse', '--show-object-format'])
+  return format.code === 0 ? format.stdout.trim() : undefined
+}
+
+/** The project's object store, minted in `objectFormat` when absent; its format, or undefined when it cannot be made. */
+async function ensureObjectStore(
+  environment: NodeJS.ProcessEnv,
+  objectStore: string,
+  objectFormat: string,
+): Promise<string | undefined> {
+  if (!existsSync(join(objectStore, 'HEAD'))) {
+    const init = await runGitIn(
+      environment,
+      ['init', '--quiet', '--bare', `--object-format=${objectFormat}`, objectStore],
+      dirname(objectStore),
+    )
+    if (init.code !== 0) return undefined
+    try {
+      appendFileSync(join(objectStore, 'config'), NO_PRUNING_CONFIG)
+    } catch {
+      return undefined
+    }
+  }
+  return objectFormatOf(environment, objectStore)
+}
+
+/** `store`'s `objects` made the symlink to the project's object store's, and git's pruning turned off there. */
+function linkObjects(store: string): void {
+  symlinkSync(join('..', OBJECT_STORE, 'objects'), join(store, 'objects'))
+  appendFileSync(join(store, 'config'), NO_PRUNING_CONFIG)
+}
+
+/** Whether `store`'s objects are its own directory: a store minted before #573, not yet migrated. */
+function isLegacyStore(store: string): boolean {
+  try {
+    return !lstatSync(join(store, 'objects')).isSymbolicLink()
+  } catch {
+    return false
+  }
+}
+
+/** The thread stores in a project's `snapshots/`, by path: every directory but the dot ones. */
+function threadStoresIn(snapshotsDir: string): string[] {
+  try {
+    return readdirSync(snapshotsDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
+      .map((entry) => join(snapshotsDir, entry.name))
+      .toSorted()
+  } catch {
+    return []
+  }
+}
+
+/**
+ * `work` while holding the project's stores lock; `busy` when another holds it. A lock older than
+ * {@link STALE_LOCK_MS} is taken over once.
+ */
+async function withStoresLock<T>(snapshotsDir: string, work: () => Promise<T>): Promise<T | 'busy'> {
+  const lock = join(snapshotsDir, STORES_LOCK)
+  const take = (): boolean => {
+    try {
+      mkdirSync(lock)
+      return true
+    } catch {
+      return false
+    }
+  }
+  let taken = take()
+  if (!taken) {
+    let stale = false
+    try {
+      stale = Date.now() - statSync(lock).mtimeMs > STALE_LOCK_MS
+    } catch {
+      stale = true
+    }
+    if (stale) {
+      rmSync(lock, { recursive: true, force: true })
+      taken = take()
+    }
+  }
+  if (!taken) return 'busy'
+  try {
+    return await work()
+  } finally {
+    rmSync(lock, { recursive: true, force: true })
+  }
+}
+
+/**
+ * Copy into the object store every blob the store's seeded index names that it lacks, read from the
+ * tree's repository through an alternate given to this one git only — the repository is read,
+ * never written (`pack-objects` writes its pack into the object store). False when it cannot: the
+ * caller then drops the seed, and the first snapshot hashes every file itself. ⚠ Listed from the
+ * COPIED index, never the tree's own: a stage between the two would leave an entry whose blob was
+ * never copied, which a snapshot would trust by its stat and commit without.
+ */
+async function seedObjects(
+  environment: NodeJS.ProcessEnv,
+  store: StorePlace,
+  objectStore: string,
+  repositoryObjects: string,
+): Promise<boolean> {
+  const listed = await runStoreGit(environment, store, ['ls-files', '--stage', '-z'])
+  if (listed.code !== 0) return false
+  // A gitlink names a commit of another repository: never an object of this one.
+  const blobs = [
+    ...new Set(
+      nulList(listed.stdout)
+        .filter((entry) => !entry.startsWith('160000 '))
+        .map((entry) => entry.split(' ')[1] ?? ''),
+    ),
+  ]
+  if (blobs.length === 0) return true
+  const present = await runObjectStoreGit(environment, objectStore, ['cat-file', '--batch-check=%(objectname)'], {
+    input: `${blobs.join('\n')}\n`,
+  })
+  if (present.code !== 0) return false
+  const missing = present.stdout
+    .split('\n')
+    .filter((line) => line.endsWith(' missing'))
+    .map((line) => line.slice(0, -' missing'.length))
+  if (missing.length === 0) return true
+  const packed = await runObjectStoreGit(
+    environment,
+    objectStore,
+    ['pack-objects', '--quiet', join(objectStore, 'objects', 'pack', 'pack')],
+    { alternate: repositoryObjects, input: `${missing.join('\n')}\n` },
+  )
+  return packed.code === 0
+}
+
+/**
+ * Mint the store at `directory`: `git init --bare` in the format of the project's object store —
+ * minted first, in the checkout's format, else sha1 — with its `objects` the object store's; the
+ * tree's index copied as the seed when the tree is its repository's top level, its blobs copied
+ * into the object store. A fork's store records its lineage (`forkOf`, the parent's store). False
+ * when the directory, the init or a format that does not match fails — never a half-made store to
+ * use.
  */
 async function mintStore(
   directory: string,
   tree: string,
   environment: NodeJS.ProcessEnv,
-  alternates: readonly string[],
+  forkOf: string | undefined,
 ): Promise<boolean> {
   try {
     mkdirSync(directory, { recursive: true })
   } catch {
     return false
   }
-  // The checkout's repository first: its object FORMAT decides the store's (alternates cannot
-  // mix sha1 and sha256 objects), never the user's `init.defaultObjectFormat`; a tree that is no
-  // checkout takes the format of its first alternate's repository (`<repository>/objects`), else
-  // sha1, said explicitly for the same reason.
+  // The checkout's object FORMAT decides the object store's, never the user's
+  // `init.defaultObjectFormat`; a store whose checkout disagrees with the project's object store
+  // cannot share it, and is refused.
   const repository = await treeRepository(environment, tree)
-  const first = alternates[0]
-  const alternateFormat =
-    repository !== undefined || first === undefined
-      ? undefined
-      : await runGitIn(environment, ['--git-dir', dirname(first), 'rev-parse', '--show-object-format'], tree)
-  const objectFormat =
-    repository?.objectFormat ?? (alternateFormat?.code === 0 ? alternateFormat.stdout.trim() : 'sha1')
+  const objectStore = objectStoreOf(dirname(directory))
+  const objectFormat = await ensureObjectStore(environment, objectStore, repository?.objectFormat ?? 'sha1')
+  if (objectFormat === undefined) return false
+  if (repository !== undefined && repository.objectFormat !== objectFormat) return false
   const init = await runGitIn(
     environment,
     ['init', '--quiet', '--bare', `--object-format=${objectFormat}`, directory],
     tree,
   )
   if (init.code !== 0) return false
-  // Deduplicated, order kept: a fork's flattened alternates repeat the checkout's objects.
-  const objectDirectories = [...new Set([...(repository === undefined ? [] : [repository.objects]), ...alternates])]
-  if (objectDirectories.length > 0) {
-    mkdirSync(join(directory, 'objects', 'info'), { recursive: true })
-    writeFileSync(join(directory, 'objects', 'info', 'alternates'), `${objectDirectories.join('\n')}\n`)
+  try {
+    rmSync(join(directory, 'objects'), { recursive: true, force: true })
+    linkObjects(directory)
+    if (forkOf !== undefined) {
+      writeFileSync(join(directory, FORKED_FROM_FILE), [...lineageOf(forkOf), basename(forkOf)].join('\n') + '\n')
+    }
+  } catch {
+    return false
   }
   if (repository?.topLevel === true && existsSync(repository.index)) {
-    copyFileSync(repository.index, join(directory, 'enso-index'))
+    const seed = join(directory, 'enso-index')
+    copyFileSync(repository.index, seed)
+    if (!(await seedObjects(environment, { directory, tree }, objectStore, repository.objects)))
+      rmSync(seed, { force: true })
   }
   return true
 }
 
+/** The thread ids a store's fork lineage names, farthest first; none for a store that is no fork. */
+function lineageOf(store: string): string[] {
+  try {
+    return readFileSync(join(store, FORKED_FROM_FILE), 'utf8')
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line !== '')
+  } catch {
+    return []
+  }
+}
+
 /**
- * Open the store at `dir` for `tree`, minting it when absent: `git init --bare`, the tree's object
- * directory as an alternate and its index as the seed when the tree is a checkout's top level.
- * Opening an existing store reads nothing from the tree's repository again. Refused as `undefined`
- * when the mint's git fails — the caller records no snapshot, never a half-made store.
+ * The thread ids of the stores beside `store` forked from it, at any depth (#571, #573): their
+ * histories reach its snapshots up to where each was forked, so deleting it keeps those.
  *
- * `alternates` are further object directories the mint names after the tree's own — a fork's
- * parent store's `objects`, so the parent's snapshots are reachable from the fork's store without
- * a copy. Ignored when the store exists.
+ * @group Snapshot store
+ */
+export function forksOfStore(store: string): string[] {
+  const threadId = basename(store)
+  return threadStoresIn(dirname(store))
+    .filter((sibling) => sibling !== store && lineageOf(sibling).includes(threadId))
+    .map((sibling) => basename(sibling))
+}
+
+/**
+ * What a migration of a project's pre-#573 stores did: the stores moved onto the object store, by
+ * path; those that had lost objects to the checkout's gc before it, with how many, by path.
+ *
+ * @group Snapshot store
+ */
+export interface StoreMigration {
+  readonly migrated: string[]
+  readonly pruned: { readonly store: string; readonly missing: number }[]
+}
+
+/**
+ * Move every pre-#573 store in `snapshotsDir` (one project's `snapshots/`) onto the project's
+ * object store (#573), so the checkout's gc can no longer take objects its snapshots borrowed:
+ * 1. each store's history, borrowed objects included, packed into the object store — an object
+ *    already pruned is counted, never fatal (`--missing=allow-any`);
+ * 2. only once ALL are packed, each store's `objects` replaced by the symlink — a fork's alternates
+ *    name its parent's `objects`, so a parent moved first still serves the fork; a fork's lineage
+ *    is read off its alternates first;
+ * 3. the stores kept for forks of deleted threads (#571) removed: their forks' histories, packed,
+ *    hold what they kept.
+ *
+ * `busy` while another migration or a garbage collection holds the project's stores; a failed git
+ * refuses the whole migration and leaves every store as it was. A store a crash left between
+ * steps 2's rename and link is linked.
+ *
+ * @group Snapshot store
+ */
+export async function migrateSnapshotStores(
+  snapshotsDir: string,
+  environment: NodeJS.ProcessEnv,
+): Promise<StoreMigration | 'busy' | Refusal> {
+  const pending = (): string[] =>
+    threadStoresIn(snapshotsDir).filter((store) => isLegacyStore(store) || interruptedMigration(store))
+  if (pending().length === 0) return { migrated: [], pruned: [] }
+  return withStoresLock(snapshotsDir, async () => {
+    const stores = pending()
+    const legacy = stores.filter(isLegacyStore)
+    const objectStore = objectStoreOf(snapshotsDir)
+    const first = legacy[0]
+    const format = first === undefined ? 'sha1' : ((await objectFormatOf(environment, first)) ?? 'sha1')
+    if ((await ensureObjectStore(environment, objectStore, format)) !== format) {
+      return refusedBy('object-store', {
+        code: 1,
+        stdout: '',
+        stderr: `the object store at ${objectStore} is not ${format}`,
+      })
+    }
+    const pruned: { store: string; missing: number }[] = []
+    const kept = legacy.filter((store) => !existsSync(join(store, LEGACY_ORPHANED_FILE)))
+    for (const store of kept) {
+      const packed = await packLegacyStore(environment, objectStore, store)
+      if (typeof packed !== 'number') return packed
+      if (packed > 0) pruned.push({ store, missing: packed })
+    }
+    // A line of a fork's alternates is `<store>/objects`: matched by the store, never through the
+    // objects path, which for a store migrated already resolves to the object store's.
+    const storeIds = new Map(threadStoresIn(snapshotsDir).map((store) => [canonical(store), basename(store)]))
+    for (const store of kept) recordLegacyLineage(store, storeIds)
+    for (const store of stores) {
+      if (!existsSync(join(store, LEGACY_ORPHANED_FILE))) linkMigratedStore(store)
+    }
+    for (const store of legacy) {
+      if (existsSync(join(store, LEGACY_ORPHANED_FILE))) rmSync(store, { recursive: true, force: true })
+    }
+    return { migrated: stores.filter((store) => existsSync(store)), pruned }
+  })
+}
+
+/** Whether a crash left `store` between a migration's rename of its objects and their link. */
+function interruptedMigration(store: string): boolean {
+  try {
+    return readdirSync(store).some((entry) => entry.startsWith('objects.legacy-'))
+  } catch {
+    return false
+  }
+}
+
+/**
+ * A pre-#573 store's history, borrowed objects included, packed into the object store, read
+ * through the store's own objects (and so its alternates) for this one git; how many objects it
+ * reaches are missing — pruned by the checkout's gc before the migration.
+ */
+async function packLegacyStore(
+  environment: NodeJS.ProcessEnv,
+  objectStore: string,
+  store: string,
+): Promise<number | Refusal> {
+  const head = await runObjectStoreGit(environment, store, ['rev-parse', '--verify', '--quiet', 'HEAD'])
+  if (head.code !== 0) return 0
+  const alternate = join(store, 'objects')
+  const packed = await runObjectStoreGit(
+    environment,
+    objectStore,
+    ['pack-objects', '--revs', '--missing=allow-any', '--quiet', join(objectStore, 'objects', 'pack', 'pack')],
+    { alternate, input: head.stdout },
+  )
+  if (packed.code !== 0) return refusedBy('pack-objects', packed)
+  const walked = await runObjectStoreGit(
+    environment,
+    objectStore,
+    ['rev-list', '--objects', '--missing=print', head.stdout.trim()],
+    { alternate },
+  )
+  if (walked.code !== 0) return refusedBy('rev-list', walked)
+  return walked.stdout.split('\n').filter((line) => line.startsWith('?')).length
+}
+
+/** A pre-#573 fork's lineage, read off the alternates naming its ancestors' stores (`storeIds`, by canonical path). */
+function recordLegacyLineage(store: string, storeIds: ReadonlyMap<string, string>): void {
+  if (existsSync(join(store, FORKED_FROM_FILE))) return
+  let alternates: string[]
+  try {
+    alternates = readFileSync(join(store, 'objects', 'info', 'alternates'), 'utf8').split('\n')
+  } catch {
+    return
+  }
+  const ancestors = alternates.flatMap((line) => {
+    const id = line.trim() === '' ? undefined : storeIds.get(canonical(dirname(line.trim())))
+    return id === undefined ? [] : [id]
+  })
+  if (ancestors.length > 0) writeFileSync(join(store, FORKED_FROM_FILE), `${ancestors.join('\n')}\n`)
+}
+
+/** A packed pre-#573 store's own objects set aside, the link to the object store's made, then the old ones removed. */
+function linkMigratedStore(store: string): void {
+  if (isLegacyStore(store)) renameSync(join(store, 'objects'), join(store, `objects.legacy-${randomUUID()}`))
+  if (!existsSync(join(store, 'objects'))) linkObjects(store)
+  for (const entry of readdirSync(store)) {
+    if (entry.startsWith('objects.legacy-')) rmSync(join(store, entry), { recursive: true, force: true })
+  }
+}
+
+/**
+ * Remove the objects in `snapshotsDir`'s object store that no thread store's history reaches (#573):
+ * each store's `HEAD` written as `refs/enso/<thread-id>` — a ref for a store gone is deleted — then
+ * `git gc --prune=1.hour.ago`, so an object a snapshot in flight just wrote, which no `HEAD` names
+ * yet, is kept. `busy` while a migration or another collection holds the project's stores; a
+ * store still pre-#573 holds its own objects, so the collection waits for its migration.
+ *
+ * @group Snapshot store
+ */
+export async function collectSnapshotGarbage(
+  snapshotsDir: string,
+  environment: NodeJS.ProcessEnv,
+): Promise<'collected' | 'busy' | Refusal> {
+  const objectStore = objectStoreOf(snapshotsDir)
+  if (!existsSync(join(objectStore, 'HEAD'))) return 'collected'
+  return withStoresLock(snapshotsDir, async () => {
+    const stores = threadStoresIn(snapshotsDir)
+    if (stores.some(isLegacyStore)) return 'busy'
+    const heads = new Map<string, string>()
+    for (const store of stores) {
+      const head = await runObjectStoreGit(environment, store, ['rev-parse', '--verify', '--quiet', 'HEAD'])
+      if (head.code === 0) heads.set(`refs/enso/${basename(store)}`, head.stdout.trim())
+    }
+    const listed = await runObjectStoreGit(environment, objectStore, [
+      'for-each-ref',
+      '--format=%(refname)',
+      'refs/enso/',
+    ])
+    if (listed.code !== 0) return refusedBy('for-each-ref', listed)
+    const stale = listed.stdout.split('\n').filter((ref) => ref !== '' && !heads.has(ref))
+    const commands = [
+      ...stale.map((ref) => `delete ${ref}`),
+      ...[...heads].map(([ref, hash]) => `update ${ref} ${hash}`),
+    ]
+    if (commands.length > 0) {
+      const updated = await runObjectStoreGit(environment, objectStore, ['update-ref', '--stdin'], {
+        input: `${commands.join('\n')}\n`,
+      })
+      if (updated.code !== 0) return refusedBy('update-ref', updated)
+    }
+    const collected = await runObjectStoreGit(environment, objectStore, ['gc', '--quiet', '--prune=1.hour.ago'])
+    return collected.code === 0 ? 'collected' : refusedBy('gc', collected)
+  })
+}
+
+/**
+ * Open the store at `dir` for `tree`, minting it when absent: `git init --bare` with its objects in
+ * the project's object store (#573), and the tree's index as the seed when the tree is a
+ * checkout's top level. Opening an existing store reads nothing from the tree's repository again.
+ * Refused as `undefined` when the mint's git fails — the caller records no snapshot, never a
+ * half-made store.
+ *
+ * A mint, or an open of a store from before #573, first migrates the project's pre-#573 stores
+ * ({@link migrateSnapshotStores}): a fork's base must be in the object store, and a store must not
+ * keep borrowing from the checkout. What it did is `migration` on the store; a migration that is
+ * busy or refused leaves the old stores working as they were.
+ *
+ * `forkOf`, the parent thread's store, records a minted fork's lineage ({@link forksOfStore}); its
+ * snapshots are in the object store already. Ignored when the store exists.
  *
  * `copyOf` records, minting or not, that the store's trees are copies of that project (#566): a
  * tree other than the project then lists its untracked files under the project repository's ignore
@@ -333,14 +741,17 @@ export async function openSnapshotStore(options: {
   readonly directory: string
   readonly tree: string
   readonly environment: NodeJS.ProcessEnv
-  readonly alternates?: readonly string[]
+  readonly forkOf?: string | undefined
   readonly copyOf?: string | undefined
 }): Promise<SnapshotStore | undefined> {
-  const { directory, tree, environment, alternates = [], copyOf } = options
+  const { directory, tree, environment, forkOf, copyOf } = options
   const store = { directory, tree }
-  if (!existsSync(join(directory, 'HEAD')) && !(await mintStore(directory, tree, environment, alternates))) {
-    return undefined
-  }
+  const minting = !existsSync(join(directory, 'HEAD'))
+  const migrated =
+    minting || isLegacyStore(directory) ? await migrateSnapshotStores(dirname(directory), environment) : undefined
+  const migration =
+    migrated !== undefined && typeof migrated === 'object' && 'migrated' in migrated ? migrated : undefined
+  if (minting && !(await mintStore(directory, tree, environment, forkOf))) return undefined
   if (copyOf !== undefined) {
     try {
       writeFileSync(join(directory, COPY_OF_FILE), `${copyOf}\n`)
@@ -358,6 +769,7 @@ export async function openSnapshotStore(options: {
   return {
     directory,
     tree,
+    ...(migration === undefined || migration.migrated.length === 0 ? {} : { migration }),
     snapshot: () => serialized(() => takeSnapshot(environment, store)),
   }
 }

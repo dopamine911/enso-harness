@@ -91,7 +91,7 @@ export const EnsoRunContext = Type.Object(
     /**
      * The commit the thread's snapshot store holds of the tree as the run began (#551); `null` when
      * none could be taken; absent on a record from before #551. 40 or 64 hex digits: the store takes
-     * the checkout's object format (sha1 or sha256), since alternates cannot mix the two.
+     * the checkout's object format (sha1 or sha256), since its blobs are copied from the checkout's objects.
      */
     snapshot: Type.Optional(
       Type.Union([

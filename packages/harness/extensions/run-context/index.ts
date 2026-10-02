@@ -186,6 +186,14 @@ async function snapshotOf(
     log.warn('no snapshot store for {tree}: the run records no snapshot', { tree: context.cwd })
     return null
   }
+  if (store.migration !== undefined) {
+    log.info('snapshot stores moved onto the project object store (#573): {stores}', {
+      stores: store.migration.migrated.join(', '),
+    })
+    for (const lost of store.migration.pruned) {
+      log.warn("snapshot store {store} had lost {missing} objects to the checkout's gc before it moved (#573)", lost)
+    }
+  }
   const outcome = await store.snapshot()
   if (outcome.kind === 'refused') {
     log.warn('snapshot of {tree} refused at {step} (git exit {code}): {stderr}', {

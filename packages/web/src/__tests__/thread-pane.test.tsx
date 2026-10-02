@@ -2104,7 +2104,7 @@ test('a thread in the checkout: the dialog says the checkout is not touched, and
 })
 
 /** A tree thread's preview whose snapshots the forks `keptFor` keep. */
-const treeKeptFor = (keptFor: { threadId: string; deleted: boolean }[]): EnsoThreadDeletePreview => ({
+const treeKeptFor = (keptFor: { threadId: string }[]): EnsoThreadDeletePreview => ({
   tree: { kind: 'worktree', path: '/work/.enso/trees/stored-delete', branch: 'enso/stored-delete' },
   holdsWork: null,
   keptFor,
@@ -2123,26 +2123,22 @@ const storedFork = (threadId: string, title?: string): EnsoStoredThread => ({
 const TREE_GOES =
   "This cannot be undone. The conversation is deleted, and so is the thread's tree at /work/.enso/trees/stored-delete (branch enso/stored-delete)."
 
-test('a tree whose snapshots a live fork keeps: the dialog quotes the fork by its rail title and says the snapshots stay', async () => {
+test('a tree whose snapshots a fork keeps: the dialog quotes the fork by its rail title and says its snapshots up to the fork stay', async () => {
   // A title that reads as a sentence of its own: quoted, it cannot run into the dialog's.
   const page = await openDeletable({
-    deletePreview: treeKeptFor([{ threadId: 'stored-fork-live', deleted: false }]),
+    deletePreview: treeKeptFor([{ threadId: 'stored-fork-live' }]),
     others: [storedFork('stored-fork-live', 'Reply with the single word one.')],
   })
   const dialog = await openPreviewedDialog(page)
   expect(dialog.querySelector('[data-slot="dialog-description"]')?.textContent).toBe(
-    `${TREE_GOES} Its snapshots stay while the fork “Reply with the single word one.” uses them, and are deleted with it. The fork itself is not deleted.`,
+    `${TREE_GOES} Its snapshots up to where the fork “Reply with the single word one.” branched stay with that fork; the rest go. The fork itself is not deleted.`,
   )
   await page.unmount()
 })
 
-test('two live forks keep the snapshots: each is named, a long title cut and quoted, an untitled one by its short id', async () => {
+test('two forks keep the snapshots: each is named, a long title cut and quoted, an untitled one by its short id', async () => {
   const page = await openDeletable({
-    deletePreview: treeKeptFor([
-      { threadId: 'stored-fork-long', deleted: false },
-      { threadId: 'a1b2c3d4-untitled-fork', deleted: false },
-      { threadId: 'stored-fork-gone', deleted: true },
-    ]),
+    deletePreview: treeKeptFor([{ threadId: 'stored-fork-long' }, { threadId: 'a1b2c3d4-untitled-fork' }]),
     others: [
       storedFork('stored-fork-long', 'rewrite the parser and the lexer, then port every test to the new API'),
       storedFork('a1b2c3d4-untitled-fork'),
@@ -2150,7 +2146,7 @@ test('two live forks keep the snapshots: each is named, a long title cut and quo
   })
   const dialog = await openPreviewedDialog(page)
   expect(dialog.querySelector('[data-slot="dialog-description"]')?.textContent).toBe(
-    `${TREE_GOES} Its snapshots stay while 2 forks (“rewrite the parser and the lexer, then…”, a1b2c3d4) use them, and are deleted with the last of them. The forks themselves are not deleted.`,
+    `${TREE_GOES} Its snapshots up to where each of 2 forks (“rewrite the parser and the lexer, then…”, a1b2c3d4) branched stay with them; the rest go. The forks themselves are not deleted.`,
   )
   await page.unmount()
 })
