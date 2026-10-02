@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, dirname, isAbsolute, join, sep as pathSeparator, relative } from 'node:path'
+import { basename, dirname, isAbsolute, join, sep as pathSeparator, relative, resolve } from 'node:path'
 import {
   type EnsoDirectoryEntry,
   type EnsoDirectoryListing,
@@ -20,7 +20,7 @@ import {
   ensoLogger,
   isEnsoProjectId,
 } from '@enso/core'
-import { projectIdOf, realpathOrSelf } from '@enso/core/paths'
+import { projectIdOf, realpathOrSelf, treeProjectId } from '@enso/core/paths'
 import { Compile } from 'typebox/compile'
 
 /**
@@ -67,6 +67,11 @@ export interface ProjectRegistryOptions {
   readonly statePath?: string
   /** Where `~/` points; the running user's home unless a test says otherwise. */
   readonly homeDirectory?: string
+  /**
+   * The project folders (`ENSO_HOME/projects`, #552): a directory under `<id>/trees/` is a thread's
+   * own tree (#551) and resolves to project `<id>`. Absent, no directory is a tree (tests).
+   */
+  readonly projectsDir?: string
 }
 
 export type ProjectRegistrationOutcome =
@@ -160,6 +165,15 @@ function isDirectory(path: string): boolean {
 function expandHome(path: string, home: string): string {
   if (path === '~') return home
   return path.startsWith('~/') ? join(home, path.slice(2)) : path
+}
+
+/**
+ * A project path as the user's config writes it — absolute or `~/`, maybe with a trailing slash or
+ * through a symlink — as the canonical path a project is known by (#551 `threads.projects`, PR #561
+ * review): the form `projects.roots` accepts, resolved the way a registered project is.
+ */
+export function canonicalConfigPath(path: string, home: string = homedir()): string {
+  return realpathOrSelf(resolve(expandHome(path, home)))
 }
 
 function readRegistrations(statePath: string): Registration[] {
@@ -287,6 +301,10 @@ export function createProjectRegistry(options: ProjectRegistryOptions): ProjectR
   }
 
   function byDirectory(directory: string): EnsoProject | undefined {
+    // A thread's own tree (#551) is no registered directory: it belongs to the project its path
+    // names, served exactly when that project is.
+    const treeProject = options.projectsDir === undefined ? undefined : treeProjectId(options.projectsDir, directory)
+    if (treeProject !== undefined) return get(treeProject)
     const canonical = realpathOrSelf(directory)
     if (canonical === launch.path) return viewOf(launch.path, launch.title, true)
     const registration = served().find((candidate) => candidate.path === canonical)

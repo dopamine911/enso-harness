@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'bun:test'
 import type { UIMessage } from '@tanstack/ai-client'
-import { forkEntryFor, forkFromPage } from '../fork-thread.ts'
-import { clearThreadsForTest, mintThread } from '../thread-stores.ts'
+import { forkEntryFor, forkFromPage, restoreFromPage, UNDO_RESTORE_LABEL } from '../fork-thread.ts'
+import { clearThreadsForTest, mintThread, type ThreadStores } from '../thread-stores.ts'
 
 afterEach(() => clearThreadsForTest())
 
@@ -107,4 +107,109 @@ test('⚠ a second fork press while one is outstanding forks nothing and says so
   expect(await first).toEqual({ threadId: 'fork-1', prefill: 'second' })
   expect(await forkFromPage(stores, BRANCH, 'e-u2')).toEqual({ threadId: 'fork-2', prefill: 'second' })
   expect(forkPosts).toEqual(['{"entryId":"e-u2"}', '{"entryId":"e-u2"}'])
+})
+
+/** A thread whose `/history` is BRANCH and whose `/restore` answers `answer`; the bodies it was posted. */
+function restoringThread(
+  answer: () => Response,
+  undo: (body: string) => Response = (): Response => new Response('not scripted', { status: 404 }),
+): { stores: ThreadStores; posts: string[] } {
+  const posts: string[] = []
+  const stores = mintThread((input: string, init?: RequestInit) => {
+    if (input.endsWith('/history')) {
+      return Promise.resolve(
+        Response.json({
+          threadId: 't',
+          projectId: 'p',
+          messages: BRANCH,
+          permissionMode: { mode: 'default', available: [] },
+          sessionRisk: { level: 'low', signals: 0 },
+          incidents: { incidents: [], suspended: [], ended: false },
+        }),
+      )
+    }
+    if (input.endsWith('/restore/undo') && init?.method === 'POST') {
+      return Promise.resolve(undo(typeof init.body === 'string' ? init.body : ''))
+    }
+    if (input.endsWith('/restore') && init?.method === 'POST') {
+      posts.push(typeof init.body === 'string' ? init.body : '')
+      return Promise.resolve(answer())
+    }
+    return Promise.resolve(new Response('not scripted', { status: 404 }))
+  })
+  return { stores, posts }
+}
+
+test('restoring files posts the entry a fork would find and says the short restored and safety hashes (#551)', async () => {
+  const { stores, posts } = restoringThread(() => Response.json({ hash: 'a'.repeat(40), safety: 'b'.repeat(40) }))
+  const page = [prompt('e-u1', 'first'), reply('e-a1'), prompt('client-7', 'second')]
+  expect(await restoreFromPage(stores, page, 'client-7')).toEqual({ hash: 'a'.repeat(40), safety: 'b'.repeat(40) })
+  expect(posts).toEqual(['{"entryId":"e-u2"}'])
+  const [notice] = stores.notifications.get()
+  expect(notice?.message).toContain('restored to aaaaaaa;')
+  expect(notice?.message).toContain('kept as bbbbbbb')
+  expect(notice?.message).not.toContain('a'.repeat(8))
+})
+
+test('⚠ a refused restore says its reason and restores nothing; a prompt off the branch is not posted (#551)', async () => {
+  const { stores, posts } = restoringThread(() => new Response('thread t has no tree', { status: 409 }))
+  expect(await restoreFromPage(stores, BRANCH, 'e-u1')).toBeUndefined()
+  expect(stores.notifications.get().at(-1)?.message).toContain('thread t has no tree')
+  expect(await restoreFromPage(stores, [...BRANCH, prompt('client-9', 'third')], 'client-9')).toBeUndefined()
+  expect(posts).toEqual(['{"entryId":"e-u1"}'])
+})
+
+// #565: the dialog promises the replaced files are kept — the notice is where they come back from.
+// A press that undid nothing puts the action back; an undo is a restore, said with its own undo.
+test('⚠ a restore\'s notice offers "Undo last restore": a refused press keeps the offer, a done one says the files are back and offers to undo that (#565)', async () => {
+  const undoAnswers = [
+    new Response('thread t is running', { status: 409 }),
+    Response.json({ hash: 'b'.repeat(40), safety: 'c'.repeat(40) }),
+  ]
+  const undoPosts: string[] = []
+  const { stores } = restoringThread(
+    () => Response.json({ hash: 'a'.repeat(40), safety: 'b'.repeat(40) }),
+    (body) => {
+      undoPosts.push(body)
+      return undoAnswers.shift() ?? new Response('none left', { status: 500 })
+    },
+  )
+  await restoreFromPage(stores, BRANCH, 'e-u1')
+  const restoredLine = stores.notifications.get().at(-1)
+  expect(restoredLine?.action?.label).toBe(UNDO_RESTORE_LABEL)
+  const press = async (id: number): Promise<void> => {
+    stores.notifications.takeAction(id)?.run()
+    await Bun.sleep(0)
+    await Bun.sleep(0)
+  }
+  await press(restoredLine?.id ?? -1)
+  expect(stores.notifications.get().at(-1)?.message).toContain('undo refused: 409 thread t is running')
+  // Refused: the offer is back on the restore's line.
+  expect(stores.notifications.get().find((line) => line.id === restoredLine?.id)?.action?.label).toBe(
+    UNDO_RESTORE_LABEL,
+  )
+  await press(restoredLine?.id ?? -1)
+  const undoneLine = stores.notifications.get().at(-1)
+  expect(undoneLine?.message).toContain('last restore undone: files back to bbbbbbb')
+  expect(undoneLine?.action?.label).toBe(UNDO_RESTORE_LABEL)
+  const undoneRestore = stores.notifications.get().find((line) => line.id === restoredLine?.id)
+  expect(undoneRestore?.action).toBeUndefined()
+  // Said as what happened to it (PR #561 review): undone — not "replaced by a later restore".
+  expect(undoneRestore?.message).toEndWith('— undone')
+  // Each press named the safety its notice promised (PR #561 review): the server undoes that
+  // restore or none, never a later one.
+  expect(undoPosts).toEqual([`{"safety":"${'b'.repeat(40)}"}`, `{"safety":"${'b'.repeat(40)}"}`])
+})
+
+// PR #561 review: only the newest restore can be undone, so a notice a later restore replaced must
+// not keep offering an undo of it.
+test('a later restore takes the undo off the notice before it, and says why', async () => {
+  const { stores } = restoringThread(() => Response.json({ hash: 'a'.repeat(40), safety: 'b'.repeat(40) }))
+  await restoreFromPage(stores, BRANCH, 'e-u1')
+  const first = stores.notifications.get().at(-1)
+  await restoreFromPage(stores, BRANCH, 'e-u1')
+  const lines = stores.notifications.get()
+  expect(lines.find((line) => line.id === first?.id)?.action).toBeUndefined()
+  expect(lines.find((line) => line.id === first?.id)?.message).toContain('a later restore replaced it')
+  expect(lines.at(-1)?.action?.label).toBe(UNDO_RESTORE_LABEL)
 })

@@ -108,31 +108,184 @@ export async function forkFromPage(
   }
 }
 
+/** The thread's stored branch, as messages — or why it could not be read. */
+async function storedBranch(stores: Pick<ThreadStores, 'threadId' | 'fetch'>): Promise<UIMessage[] | string> {
+  try {
+    const response = await stores.fetch(`/api/threads/${encodeURIComponent(stores.threadId)}/history`)
+    if (!response.ok) throw new Error(await describeFailedResponse(response))
+    const history: unknown = await response.json()
+    if (!Check(EnsoThreadHistory, history)) throw new Error("the server's history payload did not match its schema")
+    return reviveHistoryMessages(history.messages)
+  } catch (error) {
+    return `the thread's branch could not be read: ${error instanceof Error ? error.message : String(error)}`
+  }
+}
+
+/** The pi entry for `messageId` on the stored branch, or the refusal that says why there is none. */
+async function entryOnBranch(
+  stores: Pick<ThreadStores, 'threadId' | 'fetch'>,
+  page: readonly UIMessage[],
+  messageId: string | undefined,
+  verb: string,
+): Promise<{ entryId: string } | { refusal: string }> {
+  const branch = await storedBranch(stores)
+  if (typeof branch === 'string') return { refusal: `${verb}: ${branch}` }
+  const entryId = forkEntryFor(page, messageId, branch)
+  if (entryId !== undefined) return { entryId }
+  return {
+    refusal: page.some((message) => message.role === 'user')
+      ? `${verb}: that prompt is not in its place on the thread's stored branch — ${UNMATCHED_PROMPT}`
+      : `${verb}: there is no prompt on this thread to ${verb} from`,
+  }
+}
+
 async function forkOnce(
   stores: Pick<ThreadStores, 'threadId' | 'fetch' | 'connection'>,
   page: readonly UIMessage[],
   messageId: string | undefined,
   say: (text: string) => void,
 ): Promise<EnsoForkReceipt | undefined> {
-  let branch: UIMessage[]
+  const found = await entryOnBranch(stores, page, messageId, 'fork')
+  if ('refusal' in found) {
+    say(found.refusal)
+    return undefined
+  }
+  return stores.connection.fork(found.entryId)
+}
+
+/**
+ * Restore the thread's files to a prompt on this pane (#551): the conversation stays as it is,
+ * the tree's current files are kept as a safety snapshot first. Set where a page offers it.
+ */
+export const RestoreContext = createContext<((messageId: string) => void) | undefined>(undefined)
+
+/** What the restore route answers on success: the restored snapshot and the safety one. */
+export interface RestoreReceipt {
+  readonly hash: string
+  readonly safety: string
+}
+
+/** A commit hash as the notice shows it. */
+const SHORT_HASH = 7
+
+/** The notice action that undoes the last restore (#565). */
+export const UNDO_RESTORE_LABEL = 'Undo last restore'
+
+type RestoreStores = Pick<ThreadStores, 'threadId' | 'fetch' | 'notifications'>
+
+/** A restore route's answer read as its receipt; a refusal or a mis-shaped body throws its words. */
+async function restoreReceiptOf(response: Response): Promise<RestoreReceipt> {
+  if (!response.ok) throw new Error(await describeFailedResponse(response))
+  const receipt: unknown = await response.json()
+  if (
+    typeof receipt !== 'object' ||
+    receipt === null ||
+    !('hash' in receipt) ||
+    !('safety' in receipt) ||
+    typeof receipt.hash !== 'string' ||
+    typeof receipt.safety !== 'string'
+  ) {
+    throw new Error("the server's restore receipt did not match its shape")
+  }
+  return { hash: receipt.hash, safety: receipt.safety }
+}
+
+/**
+ * The thread's newest restore notice that still offers its undo, per thread (#565): a later
+ * restore takes the action off it, since only the newest restore can be undone (PR #561 review).
+ */
+const offeredUndo = new WeakMap<RestoreStores['notifications'], { readonly line: number; readonly message: string }>()
+
+/**
+ * Say a restore — or an undo, which is one — on the thread, with "Undo last restore" on the line
+ * (#565): the safety the dialog promised, one press away. Pressed, it undoes THAT restore — the
+ * undo names the notice's safety, and the server refuses it once a later restore replaced those
+ * files — and a press that did not (refused, or not reached) puts the action back, so the only way
+ * to undo is not used up by a press that undid nothing. The notice before loses its undo, and says
+ * what became of it: `before` — undone, or replaced by a later restore.
+ */
+function sayRestored(stores: RestoreStores, receipt: RestoreReceipt, what: string, before: string): void {
+  const previous = offeredUndo.get(stores.notifications)
+  if (previous !== undefined) stores.notifications.resolveLine(previous.line, `${previous.message} — ${before}`)
+  const message = `thread ${stores.threadId}: ${what} ${receipt.hash.slice(0, SHORT_HASH)}; the files before are kept as ${receipt.safety.slice(0, SHORT_HASH)}`
+  const action = {
+    label: UNDO_RESTORE_LABEL,
+    run: (): void => {
+      void undoFromPage(stores, receipt.safety).then((undone) => {
+        if (undone === undefined) stores.notifications.restoreAction(line, action)
+      })
+    },
+  }
+  const line = stores.notifications.pushWithAction({
+    message,
+    notifyType: 'info',
+    origin: 'run',
+    source: ENSO_NOTICE_SOURCE,
+    action,
+  })
+  offeredUndo.set(stores.notifications, { line, message })
+}
+
+/**
+ * Post a restore route of the thread and say how it went: the receipt with its undo, or the
+ * refusal's reason as `<action> refused: …`. The receipt only when the files moved.
+ */
+async function postRestore(
+  stores: RestoreStores,
+  route: 'restore' | 'restore/undo',
+  init: RequestInit,
+  said: { readonly done: string; readonly action: string; readonly before: string },
+): Promise<RestoreReceipt | undefined> {
   try {
-    const response = await stores.fetch(`/api/threads/${encodeURIComponent(stores.threadId)}/history`)
-    if (!response.ok) throw new Error(await describeFailedResponse(response))
-    const history: unknown = await response.json()
-    if (!Check(EnsoThreadHistory, history)) throw new Error("the server's history payload did not match its schema")
-    branch = reviveHistoryMessages(history.messages)
-  } catch (error) {
-    say(`fork: the thread's branch could not be read: ${error instanceof Error ? error.message : String(error)}`)
-    return undefined
-  }
-  const entryId = forkEntryFor(page, messageId, branch)
-  if (entryId === undefined) {
-    say(
-      page.some((message) => message.role === 'user')
-        ? `fork: that prompt is not in its place on the thread's stored branch — ${UNMATCHED_PROMPT}`
-        : 'fork: there is no prompt on this thread to fork from',
+    const receipt = await restoreReceiptOf(
+      await stores.fetch(`/api/threads/${encodeURIComponent(stores.threadId)}/${route}`, init),
     )
+    sayRestored(stores, receipt, said.done, said.before)
+    return receipt
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error)
+    const line = `thread ${stores.threadId}: ${said.action} refused: ${reason}`
+    stores.notifications.push(line, 'warning', 'run', ENSO_NOTICE_SOURCE)
     return undefined
   }
-  return stores.connection.fork(entryId)
+}
+
+/**
+ * Restore the pane's thread's files to the snapshot at a user message on `page`: the entry found
+ * as a fork finds it, then `POST …/restore`. The outcome — the short hashes, with the undo, or the
+ * refusal's reason — is a notice on this thread; the receipt only when the files were restored.
+ */
+export async function restoreFromPage(
+  stores: RestoreStores,
+  page: readonly UIMessage[],
+  messageId: string,
+): Promise<RestoreReceipt | undefined> {
+  const found = await entryOnBranch(stores, page, messageId, 'restore')
+  if ('refusal' in found) {
+    stores.notifications.push(`thread ${stores.threadId}: ${found.refusal}`, 'warning', 'run', ENSO_NOTICE_SOURCE)
+    return undefined
+  }
+  const init = {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ entryId: found.entryId }),
+  }
+  return postRestore(stores, 'restore', init, {
+    done: 'files restored to',
+    action: 'restore',
+    before: 'a later restore replaced it',
+  })
+}
+
+/**
+ * Undo the restore that kept `safety` (#565): `POST …/restore/undo { safety }`, said as a restore of
+ * its own — undoable in turn. The server refuses it when a later restore replaced those files.
+ */
+function undoFromPage(stores: RestoreStores, safety: string): Promise<RestoreReceipt | undefined> {
+  const init = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ safety }) }
+  return postRestore(stores, 'restore/undo', init, {
+    done: 'last restore undone: files back to',
+    action: 'undo',
+    before: 'undone',
+  })
 }

@@ -115,6 +115,7 @@ export function routeEnsoCustomEvent(stores: ThreadStores, eventType: string, da
     // thread's recorded model (#434) rides beside it, never as live state.
     stores.model.applySnapshot(data.model, data.recordedModel)
     stores.cwd.set(data.cwd)
+    stores.tree.set(data.tree)
     stores.usage.set(data.usage)
     // The status bar's refusal word, resynced (#381): set when the branch's last reply is a
     // refused attempt — how a resumed thread still says it — and cleared when it is not. The

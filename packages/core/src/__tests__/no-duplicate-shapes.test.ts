@@ -30,6 +30,7 @@ test('every module is reachable: from the barrel, or from a subpath package.json
   //   `process-marker.ts` `node:fs` — the per-process marker a start reconciles (#385)
   //   `secrets.ts`      `node:fs` — the secrets file's reader (#211)
   //   `snapshot-store.ts` `node:child_process`, `node:fs` — a thread's bare repository of its tree (#551)
+  //   `thread-tree.ts`  `node:child_process`, `node:fs` — a thread's own worktree or copy, minted and disposed (#551)
   //
   // ⚠ Tree-shaking does not save a bundle from a bare `node:*` specifier: it is resolved at
   // link time, before anything is shaken, so a node-only module ON the barrel breaks a
@@ -58,6 +59,7 @@ test('every module is reachable: from the barrel, or from a subpath package.json
     'process-marker.ts',
     'secrets.ts',
     'snapshot-store.ts',
+    'thread-tree.ts',
     '__tests__/flow-trace.ts',
     '__tests__/log-recorder.ts',
     '__tests__/observation-kinds.ts',

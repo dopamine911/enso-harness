@@ -71,6 +71,8 @@ export interface ThreadStores {
   readonly model: ModelStore
   /** The tree pi runs this thread in (#44), from every snapshot; undefined until the follow's first one. */
   readonly cwd: WritableStore<string | undefined>
+  /** Whether the thread runs on a tree of its own (#551), from every snapshot — what makes "Restore files to here" an offer. */
+  readonly tree: WritableStore<boolean>
   /**
    * What the session has spent and how full its context is (#45): the snapshot's `usage`, then
    * each `session-usage` observation, each the WHOLE state from pi's session totals — so a
@@ -246,6 +248,7 @@ function createThreadStores(
     permissionMode: createPermissionModeStore(),
     model: createModelStore(),
     cwd: createStore<string | undefined>(undefined),
+    tree: createStore(false),
     usage: createStore<EnsoSessionUsage | undefined>(undefined),
     notifications,
     modeLines: createModeLines(notifications),
