@@ -53,6 +53,7 @@ import {
   openSnapshotStore,
   SNAPSHOT_TIMEOUT_MS,
   type SnapshotRefused,
+  unmigratedForksOf,
 } from './snapshot-store.ts'
 import type { ThreadTreeKind, ThreadTreeRecord } from './thread-tree-record.ts'
 
@@ -591,9 +592,11 @@ async function removeWorktree(
  * Let go of a deleted thread's store (#571, #573): the project's pre-#573 stores migrated first —
  * a fork's alternates may still name this one's objects — then the store removed, and the project's
  * object store collected, so what only this thread's snapshots reached goes. Its forks keep their
- * histories, the parent's snapshots up to where each forked among them. Refused, the store kept,
- * while the migration is busy or fails; a collection that is busy or fails leaves the garbage for
- * the next, `uncollected` saying why.
+ * histories, the parent's snapshots up to where each forked among them. The store is kept — `busy`
+ * while another migration or collection holds the project's stores, refused when the migration
+ * fails or a fork it could not move still reads this store's objects through its alternates (#575
+ * review). A collection that is busy or fails leaves the garbage for the next, `uncollected`
+ * saying why.
  *
  * @group Thread tree
  */
@@ -601,33 +604,51 @@ export async function releaseThreadStore(
   store: string,
   environment: NodeJS.ProcessEnv,
 ): Promise<
-  { readonly kind: 'removed'; readonly uncollected?: string } | { readonly kind: 'refused'; readonly reason: string }
+  | { readonly kind: 'removed'; readonly uncollected?: string }
+  | { readonly kind: 'busy' | 'refused'; readonly reason: string }
 > {
-  const migrated = await migrateStoresFor(store, environment)
-  if (migrated !== undefined) return { kind: 'refused', reason: migrated }
+  const held = await prepareRelease(store, environment)
+  if (held !== undefined) return held
   rmSync(store, { recursive: true, force: true })
   const collected = await collectSnapshotGarbage(dirname(store), environment)
   if (collected === 'collected') return { kind: 'removed' }
   return {
     kind: 'removed',
     uncollected:
-      collected === 'busy' ? 'the snapshot stores are busy' : `the object store: ${storeReason(collected.refused)}`,
+      collected === 'busy'
+        ? 'the snapshot stores are busy, or one is not yet migrated'
+        : `the object store: ${storeReason(collected.refused)}`,
   }
 }
 
-/** The project's pre-#573 stores migrated (#573); undefined when done, else why not. */
-async function migrateStoresFor(store: string, environment: NodeJS.ProcessEnv): Promise<string | undefined> {
+/**
+ * The project's pre-#573 stores migrated (#573), and no fork the migration could not move still
+ * reading `store`'s objects; undefined when the store may go, else what holds it.
+ */
+async function prepareRelease(
+  store: string,
+  environment: NodeJS.ProcessEnv,
+): Promise<{ readonly kind: 'busy' | 'refused'; readonly reason: string } | undefined> {
   const migrated = await migrateSnapshotStores(dirname(store), environment)
-  if (migrated === 'busy') return 'the snapshot stores are being migrated or collected; try again'
-  return 'kind' in migrated ? `the snapshot stores could not be migrated: ${storeReason(migrated.refused)}` : undefined
+  if (migrated === 'busy')
+    return { kind: 'busy', reason: 'the snapshot stores are being migrated or collected; try again' }
+  if ('kind' in migrated) {
+    return { kind: 'refused', reason: `the snapshot stores could not be migrated: ${storeReason(migrated.refused)}` }
+  }
+  const forks = unmigratedForksOf(store)
+  if (forks.length === 0) return undefined
+  return {
+    kind: 'refused',
+    reason: `the snapshot store is kept: ${forks.join(', ')} could not be migrated and still read its objects`,
+  }
 }
 
 /**
- * Dispose of a thread's tree: the project's pre-#573 stores migrated first (refused, nothing
- * removed, when they cannot be), then the inventory, refused while it holds work (unless `force`).
- * Then the worktree is removed with its registration (`--force` only when forced), its branch
- * deleted when merged (`-D` only when forced; an unmerged branch is otherwise kept), a copy's
- * directory removed, and the store released ({@link releaseThreadStore}).
+ * Dispose of a thread's tree: the store's release prepared first ({@link releaseThreadStore}:
+ * `busy` or refused, nothing removed, when it cannot go), then the inventory, refused while it holds
+ * work (unless `force`). Then the worktree is removed with its registration (`--force` only when
+ * forced), its branch deleted when merged (`-D` only when forced; an unmerged branch is otherwise
+ * kept), a copy's directory removed, and the store released.
  *
  * @group Thread tree
  */
@@ -637,11 +658,14 @@ export async function disposeThreadTree(options: {
   readonly force: boolean
   readonly environment: NodeJS.ProcessEnv
 }): Promise<
-  { kind: 'disposed'; uncollected?: string } | { kind: 'refused'; inventory?: ThreadTreeInventory; reason: string }
+  | { kind: 'disposed'; uncollected?: string }
+  | { kind: 'busy'; reason: string }
+  | { kind: 'refused'; inventory?: ThreadTreeInventory; reason: string }
 > {
   const { record, store, force, environment } = options
-  const migrated = await migrateStoresFor(store, environment)
-  if (migrated !== undefined) return { kind: 'refused', reason: migrated }
+  const held = await prepareRelease(store, environment)
+  if (held !== undefined)
+    return held.kind === 'busy' ? { kind: 'busy', reason: held.reason } : { kind: 'refused', reason: held.reason }
   const inventory = await inventoryThreadTree({ record, store, environment })
   const holding = force ? undefined : holdingReason(inventory)
   if (holding !== undefined) return { kind: 'refused', inventory, reason: holding }
@@ -652,7 +676,11 @@ export async function disposeThreadTree(options: {
     rmSync(record.path, { recursive: true, force: true })
   }
   const released = await releaseThreadStore(store, environment)
-  if (released.kind === 'refused') return { kind: 'refused', inventory, reason: released.reason }
+  if (released.kind !== 'removed') {
+    return released.kind === 'busy'
+      ? { kind: 'busy', reason: released.reason }
+      : { kind: 'refused', inventory, reason: released.reason }
+  }
   return released.uncollected === undefined
     ? { kind: 'disposed' }
     : { kind: 'disposed', uncollected: released.uncollected }

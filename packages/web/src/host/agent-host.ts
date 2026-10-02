@@ -1432,8 +1432,9 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   /**
    * A deleting thread's tree and store gone (#571, #573): its tree disposed with the store, or a
    * store alone released. Undefined when done; the outcome to answer when not — `busy` while the
-   * project's stores are migrated or collected (no inventory: nothing went), else the tree's work.
-   * A collection that could not run is logged, never a refusal: the store is gone.
+   * project's stores are migrated or collected, `refused` when they cannot be migrated or a fork
+   * left unmigrated still reads this store (no inventory: nothing went), else the tree's work. A
+   * collection that could not run is logged, never a refusal: the store is gone.
    */
   async function removeTreeAndStore(
     threadId: string,
@@ -1444,15 +1445,16 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     let uncollected: string | undefined
     if (tree !== undefined && store !== undefined) {
       const disposed = await disposeThreadTree({ record: tree, store, force, environment })
+      if (disposed.kind === 'busy') return { kind: 'busy', reason: disposed.reason }
       if (disposed.kind === 'refused') {
         return disposed.inventory === undefined
-          ? { kind: 'busy', reason: disposed.reason }
+          ? { kind: 'refused', reason: disposed.reason }
           : { kind: 'holds-work', reason: disposed.reason }
       }
       uncollected = disposed.uncollected
     } else if (store !== undefined && existsSync(store)) {
       const released = await releaseThreadStore(store, environment)
-      if (released.kind === 'refused') return { kind: 'busy', reason: released.reason }
+      if (released.kind !== 'removed') return { kind: released.kind, reason: released.reason }
       uncollected = released.uncollected
     }
     if (uncollected !== undefined) {

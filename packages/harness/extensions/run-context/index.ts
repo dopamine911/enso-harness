@@ -193,6 +193,9 @@ async function snapshotOf(
     for (const lost of store.migration.pruned) {
       log.warn("snapshot store {store} had lost {missing} objects to the checkout's gc before it moved (#573)", lost)
     }
+    for (const stuck of store.migration.unmigrated) {
+      log.warn('snapshot store {store} could not be moved onto the project object store (#573): {reason}', stuck)
+    }
   }
   const outcome = await store.snapshot()
   if (outcome.kind === 'refused') {

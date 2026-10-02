@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process'
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -25,6 +26,7 @@ import {
   type SnapshotTaken,
   snapshotPaths,
 } from '../snapshot-store.ts'
+import { releaseThreadStore } from '../thread-tree.ts'
 
 /**
  * The per-thread snapshot store (#551 slice 1), on real git. ⚠ Every environment handed in carries
@@ -525,7 +527,11 @@ test("⚠ a pre-#573 store is migrated when opened: its snapshots borrowed from 
   })
 
   const reopened = await openSnapshotStore({ directory: join(snapshots, 'parent'), tree, environment })
-  expect(reopened?.migration).toEqual({ migrated: [join(snapshots, 'fork'), join(snapshots, 'parent')], pruned: [] })
+  expect(reopened?.migration).toEqual({
+    migrated: [join(snapshots, 'fork'), join(snapshots, 'parent')],
+    pruned: [],
+    unmigrated: [],
+  })
   expect(existsSync(join(snapshots, 'orphan'))).toBe(false)
   expect(forksOfStore(join(snapshots, 'parent'))).toEqual(['fork'])
   expect(readFileSync(join(snapshots, 'fork', 'enso-forked-from'), 'utf8')).toBe('orphan\nparent\n')
@@ -586,7 +592,13 @@ test("⚠ a migration refuses, the store as it was, when a pre-#573 store's HEAD
   const old = join(snapshots, 'old')
   const at = legacyStore(old, tree)
   const migrated = await withUnreadableHead(old, () => migrateSnapshotStores(snapshots, environment))
-  expect(refusedStep(migrated)).toBe('rev-parse')
+  // Per store: the store is reported, left as it was, and retried at the next migration.
+  expect(
+    typeof migrated === 'object' && 'unmigrated' in migrated
+      ? migrated.unmigrated.map((stuck) => stuck.store)
+      : migrated,
+  ).toEqual([old])
+  expect(lstatSync(join(old, 'objects')).isSymbolicLink()).toBe(false)
   expect(holds(old, at)).toBe(true)
 })
 
@@ -610,7 +622,7 @@ test('⚠ a migration keeps the objects it finds set aside, unpacked: a snapshot
   const snapshots = mkdtempSync(join(tmpdir(), 'enso-snap-project-'))
   await opened(tree, snapshots)
   const { store, at } = interruptedStore(snapshots, tree)
-  expect(await migrateSnapshotStores(snapshots, environment)).toEqual({ migrated: [store], pruned: [] })
+  expect(await migrateSnapshotStores(snapshots, environment)).toEqual({ migrated: [store], pruned: [], unmigrated: [] })
   expect(holds(store, at)).toBe(true)
 })
 
@@ -641,7 +653,7 @@ test("⚠ an interrupted store of a sha256 project heals: the object store's own
   const snapshots = mkdtempSync(join(tmpdir(), 'enso-snap-project-'))
   await opened(tree, snapshots)
   const { store, at } = interruptedStore(snapshots, tree, 'sha256')
-  expect(await migrateSnapshotStores(snapshots, environment)).toEqual({ migrated: [store], pruned: [] })
+  expect(await migrateSnapshotStores(snapshots, environment)).toEqual({ migrated: [store], pruned: [], unmigrated: [] })
   expect(holds(store, at)).toBe(true)
 })
 
@@ -669,4 +681,91 @@ test('a pre-#573 store opens as `undefined` while another migration holds the pr
   expect(await openSnapshotStore({ directory: old, tree, environment })).toBeUndefined()
   rmSync(join(snapshots, '.lock'), { recursive: true })
   expect((await openSnapshotStore({ directory: old, tree, environment }))?.migration?.migrated).toEqual([old])
+})
+
+// #575 review: a `snapshots/` that could not be listed read as "no stores", and the collection
+// pruned every live history.
+test("⚠ a collection refuses, every object kept, when the project's stores cannot be listed (#573)", async () => {
+  const tree = checkout()
+  const snapshots = mkdtempSync(join(tmpdir(), 'enso-snap-project-'))
+  const live = await opened(tree, snapshots)
+  writeFileSync(join(tree, 'live-only.txt'), 'only the live thread has this\n')
+  const kept = await taken(live)
+  aged(join(snapshots, '.objects', 'objects'))
+  // Writable and searchable — the lock can be taken — but not readable.
+  chmodSync(snapshots, 0o333)
+  let collected: unknown
+  try {
+    collected = await collectSnapshotGarbage(snapshots, environment)
+  } finally {
+    chmodSync(snapshots, 0o755)
+  }
+  expect(refusedStep(collected)).toBe('list')
+  expect(holds(live.directory, kept.hash)).toBe(true)
+})
+
+// #575 review: git answers an unreadable branch ref as it answers an unborn HEAD (exit 1), and the
+// collection pruned that live history.
+test("⚠ a collection refuses, every object kept, when a live store's branch ref cannot be read (#573)", async () => {
+  const tree = checkout()
+  const snapshots = mkdtempSync(join(tmpdir(), 'enso-snap-project-'))
+  const live = await opened(tree, snapshots)
+  writeFileSync(join(tree, 'live-only.txt'), 'only the live thread has this\n')
+  const kept = await taken(live)
+  aged(join(snapshots, '.objects', 'objects'))
+  const branch = join(live.directory, readFileSync(join(live.directory, 'HEAD'), 'utf8').replace('ref: ', '').trim())
+  chmodSync(branch, 0o000)
+  let collected: unknown
+  try {
+    collected = await collectSnapshotGarbage(snapshots, environment)
+  } finally {
+    chmodSync(branch, 0o644)
+  }
+  expect(refusedStep(collected)).toBe('for-each-ref')
+  expect(holds(live.directory, kept.hash)).toBe(true)
+})
+
+// #575 review: one store that could not be linked refused the whole migration, every time — and
+// the old stores sorting after it never opened again.
+test('⚠ a pre-#573 store that cannot be linked holds back no other: the rest migrate and open, it stays as it was and is reported (#573)', async () => {
+  const tree = checkout()
+  const snapshots = mkdtempSync(join(tmpdir(), 'enso-snap-project-'))
+  const stuck = join(snapshots, 'thread-0')
+  const other = join(snapshots, 'thread-a')
+  const stuckAt = legacyStore(stuck, tree)
+  legacyStore(other, tree)
+  chmodSync(stuck, 0o555)
+  try {
+    const reopened = await openSnapshotStore({ directory: other, tree, environment })
+    expect(reopened?.migration?.migrated).toEqual([other])
+    expect(reopened?.migration?.unmigrated.map((failed) => failed.store)).toEqual([stuck])
+    expect(await openSnapshotStore({ directory: other, tree, environment })).toBeDefined()
+    // The stuck store still works the pre-#573 way: its own objects, its alternates.
+    expect(holds(stuck, stuckAt)).toBe(true)
+  } finally {
+    chmodSync(stuck, 0o755)
+  }
+})
+
+// #575 review: an old fork left unlinked reads its parent's snapshots through `<parent>/objects`
+// in its alternates; removing the parent's store would break it.
+test("⚠ a store an unmigrated fork's alternates still name is never released: the delete is refused, naming the fork (#573)", async () => {
+  const tree = checkout()
+  writeFileSync(join(tree, 'parent.txt'), 'the parent wrote this\n')
+  const snapshots = mkdtempSync(join(tmpdir(), 'enso-snap-project-'))
+  const parent = join(snapshots, 'parent')
+  const parentAt = legacyStore(parent, tree)
+  const fork = join(snapshots, 'fork')
+  legacyStore(fork, tree, [join(parent, 'objects')])
+  execFileSync('git', ['--git-dir', fork, 'update-ref', 'HEAD', parentAt], { env: { PATH: environment.PATH } })
+  chmodSync(fork, 0o555)
+  let released: unknown
+  try {
+    released = await releaseThreadStore(parent, environment)
+  } finally {
+    chmodSync(fork, 0o755)
+  }
+  expect(released).toMatchObject({ kind: 'refused', reason: expect.stringContaining(fork) })
+  expect(lstatSync(join(parent, 'objects')).isSymbolicLink()).toBe(true)
+  expect(holds(fork, parentAt)).toBe(true)
 })
