@@ -19,6 +19,7 @@ import { openSnapshotStore, type SnapshotTaken } from '../snapshot-store.ts'
 import type { ThreadTreeKind, ThreadTreeRecord } from '../thread-tree-record.ts'
 import {
   diskUsageOf,
+  measureBudget,
   disposeThreadTree,
   inventoryThreadTree,
   mintThreadTree,
@@ -68,6 +69,52 @@ test('a directory that is gone frees nothing; one that cannot be read is `unread
   }
   const capped = await diskUsageOf(directory, Date.now() - 1)
   expect(capped).toMatchObject({ kind: 'partial', reason: expect.stringContaining('time') })
+})
+
+// #579 review: an entry whose stat failed was skipped as if it were not there, and the count said
+// `measured` — a directory whose names can be read but not searched measured 0 B.
+test('⚠ entries that cannot be stat-ed make the count `partial`, naming them — never a complete 0 (#578)', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'enso-du-'))
+  mkdirSync(join(directory, 'names-only'))
+  writeFileSync(join(directory, 'names-only', 'big.bin'), Buffer.alloc(1_000_000, 1))
+  chmodSync(join(directory, 'names-only'), 0o444)
+  try {
+    const counted = await diskUsageOf(directory, Date.now() + 10_000)
+    expect(counted).toMatchObject({ kind: 'partial', reason: expect.stringContaining('could not be read') })
+  } finally {
+    chmodSync(join(directory, 'names-only'), 0o755)
+  }
+})
+
+// #579 review: the deadline was checked only between directories, so one wide directory (a flat
+// build output) ignored it, and a cut in the last directory still said `measured`.
+test('⚠ the time cap holds inside one wide directory: past it, the count is `partial`, not finished in time (#578)', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'enso-du-wide-'))
+  for (let file = 0; file < 20_000; file += 1) writeFileSync(join(directory, `f${file}`), 'x')
+  const started = Date.now()
+  const counted = await diskUsageOf(directory, started + 5)
+  expect(counted).toMatchObject({ kind: 'partial', reason: 'not finished in time' })
+  // Stopped soon after the cap: nothing new was launched past it.
+  expect(Date.now() - started).toBeLessThan(1000)
+})
+
+// #579 review: the listing measured trees in batches against one deadline, so the last batches
+// were never walked. One budget, served in rotation, shares the time: a small tree measured beside
+// a huge one finishes, however much the huge one has queued.
+test('⚠ measurements sharing one budget are served in rotation: a small tree beside a huge one is measured in full, the huge one cut (#578)', async () => {
+  const huge = mkdtempSync(join(tmpdir(), 'enso-du-huge-'))
+  for (let file = 0; file < 30_000; file += 1) writeFileSync(join(huge, `f${file}`), 'x')
+  const small = mkdtempSync(join(tmpdir(), 'enso-du-small-'))
+  mkdirSync(join(small, 'src'))
+  for (let file = 0; file < 20; file += 1) writeFileSync(join(small, 'src', `f${file}`), 'x')
+  const budget = measureBudget()
+  const deadline = Date.now() + 40
+  const [hugeCount, smallCount] = await Promise.all([
+    diskUsageOf(huge, deadline, budget),
+    diskUsageOf(small, deadline, budget),
+  ])
+  expect(hugeCount.kind).toBe('partial')
+  expect(smallCount.kind).toBe('measured')
 })
 
 /**

@@ -21,11 +21,12 @@ export function formatBytes(bytes: number): string {
 }
 
 /**
- * A size as words (#578): `412 MB`, `at least 412 MB`, or why it could not be read — an unread
- * size has no number to say, and is never 0.
+ * A size as words (#578): `412 MB`, `at least 412 MB (not finished in time)`, or why it could not
+ * be read — an unread size has no number to say, and is never 0. ⚠ A partial count always says
+ * why (#579 review): alone, "at least 0 B" read as a small tree.
  */
 export function describeSize(size: EnsoDiskUsage): string {
   if (size.kind === 'measured') return formatBytes(size.bytes)
-  if (size.kind === 'partial') return `at least ${formatBytes(size.bytes)}`
+  if (size.kind === 'partial') return `at least ${formatBytes(size.bytes)} (${size.reason})`
   return `size could not be read (${size.reason})`
 }

@@ -12,7 +12,7 @@ import {
   DialogTrigger,
 } from './components/ui/dialog.tsx'
 import { type DeletePreviewRead, type DeleteTarget, deleteThread, readDeletePreview } from './delete-thread.ts'
-import { describeSize } from './disk-usage.ts'
+import { formatBytes } from './disk-usage.ts'
 
 /**
  * A thread's Delete (#571), behind a confirmation that says what goes before it is confirmed:
@@ -127,11 +127,15 @@ export function DeleteThread({
   )
 }
 
-/** The tree's size in the confirmation (#578): what deleting it frees. An unreadable one is said as such, never as 0. */
+/**
+ * The tree's size in the confirmation (#578): what deleting it frees. An unreadable one is said as
+ * such, never as 0; a partial one as at least that much, and why (#579 review).
+ */
 function sizePhrase(size: EnsoDiskUsage | null): string {
   if (size === null) return ''
   if (size.kind === 'unreadable') return `; its size could not be read (${size.reason})`
-  return `, ${describeSize(size)} on disk`
+  if (size.kind === 'partial') return `, at least ${formatBytes(size.bytes)} on disk (${size.reason})`
+  return `, ${formatBytes(size.bytes)} on disk`
 }
 
 /** The confirmation's words: while the preview is read, why it could not be, or what goes and what forks keep. */

@@ -42,7 +42,7 @@
  */
 
 import { execFile } from 'node:child_process'
-import { existsSync, mkdirSync, realpathSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, realpathSync, rmSync, type Stats } from 'node:fs'
 import { lstat, readdir } from 'node:fs/promises'
 import { basename, dirname, join, resolve } from 'node:path'
 import { exitCode, type GitResult, withoutGitLocalVariables } from './git.ts'
@@ -696,94 +696,192 @@ export async function disposeThreadTree(options: {
     : { kind: 'disposed', uncollected: released.uncollected }
 }
 
-/** How many directories one measurement reads at once: the libuv pool does the stats. */
-const MEASURE_CONCURRENCY = 16
+/** How many filesystem calls a budget keeps in flight at once (#579 review). */
+const MEASURE_CALLS_IN_FLIGHT = 32
+
+/**
+ * One lane of a {@link MeasureBudget}: a measurement's own queue of calls.
+ *
+ * @group Thread tree
+ */
+interface MeasureLane {
+  /** `call` once the budget grants it a slot — or `skipped`, never run, when `deadline` has passed by then. */
+  readonly run: <T>(call: () => Promise<T>) => Promise<{ readonly ran: T } | 'skipped'>
+  /** The measurement is done: the lane leaves the rotation. */
+  readonly close: () => void
+}
+
+/**
+ * Filesystem calls shared by several measurements (#579 review): at most
+ * {@link MEASURE_CALLS_IN_FLIGHT} at once across all of them, each free slot granted to the next
+ * lane in turn. ⚠ Turns, not first come: a wide `node_modules` that queues thousands of stats
+ * holds back a small tree's few by at most one call each round, so under one shared deadline every
+ * tree is counted for an equal share of the time, and none is left unwalked. Bounded in flight, so
+ * a listing never floods the libuv pool the server's other file reads share.
+ *
+ * @group Thread tree
+ */
+export interface MeasureBudget {
+  readonly lane: (deadline: number) => MeasureLane
+}
+
+/** @group Thread tree */
+export function measureBudget(limit = MEASURE_CALLS_IN_FLIGHT): MeasureBudget {
+  /** A queued call: started, holding a slot until it settles, or — past its deadline — not started at all. */
+  type Queued = () => 'started' | 'skipped'
+  const rotation: Queued[][] = []
+  let inFlight = 0
+  let next = 0
+  // ⚠ Iterative: a skipped call takes no slot and is resolved here, in the loop — settling it
+  // through `grant` again would recurse once per call past the deadline (thousands, in a wide tree).
+  const grant = (): void => {
+    while (inFlight < limit) {
+      let waiting: Queued[] | undefined
+      for (let turn = 0; turn < rotation.length && waiting === undefined; turn += 1) {
+        const candidate = rotation[(next + turn) % rotation.length]
+        if (candidate !== undefined && candidate.length > 0) {
+          waiting = candidate
+          next = (next + turn + 1) % rotation.length
+        }
+      }
+      const start = waiting?.shift()
+      if (start === undefined) return
+      if (start() === 'started') inFlight += 1
+    }
+  }
+  return {
+    lane: (deadline) => {
+      const queue: Queued[] = []
+      rotation.push(queue)
+      return {
+        run: <T>(call: () => Promise<T>): Promise<{ readonly ran: T } | 'skipped'> => {
+          const { promise, resolve, reject } = Promise.withResolvers<{ readonly ran: T } | 'skipped'>()
+          queue.push(() => {
+            if (Date.now() >= deadline) {
+              resolve('skipped')
+              return 'skipped'
+            }
+            // Settled asynchronously, so a freed slot's `grant` never runs inside this one.
+            const settle = (): void => {
+              inFlight -= 1
+              grant()
+            }
+            call().then(
+              (ran) => {
+                resolve({ ran })
+                settle()
+              },
+              (error: unknown) => {
+                reject(error)
+                settle()
+              },
+            )
+            return 'started'
+          })
+          grant()
+          return promise
+        },
+        close: () => {
+          const at = rotation.indexOf(queue)
+          if (at >= 0) rotation.splice(at, 1)
+          if (rotation.length > 0) next %= rotation.length
+          else next = 0
+        },
+      }
+    },
+  }
+}
+
+/** A filesystem call that failed for a reason other than the entry being gone. */
+function vanished(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException).code === 'ENOENT'
+}
 
 /**
  * What `directory` takes on disk (#578), as `du` counts it: every entry's allocated blocks — files,
  * directories, symlinks themselves, never what a symlink names — and a hard-linked file once.
- * Read asynchronously, a few directories at a time, until `deadline` (epoch ms), so a large tree
- * (an install, a build) neither blocks the server nor is waited on forever. A directory that is
- * gone frees nothing (`measured`, 0); one that cannot be read is `unreadable`; a subdirectory that
- * cannot be read, or the deadline, makes the count `partial` — at least what was counted.
+ * Every filesystem call goes through `budget` (its own, unless several measurements share one) and
+ * none starts past `deadline` (epoch ms), so a large tree (an install, a build) neither blocks the
+ * server nor is waited on forever. A directory that is gone frees nothing (`measured`, 0); one that
+ * cannot be read is `unreadable`. ⚠ Never `measured` for what was not counted (#579 review): a
+ * subdirectory or entry that cannot be read (only one that vanished is skipped), or the deadline
+ * cutting the walk anywhere, makes the count `partial` — at least what was counted, and why.
  *
  * @group Thread tree
  */
-export async function diskUsageOf(directory: string, deadline: number): Promise<EnsoDiskUsage> {
-  let root: Awaited<ReturnType<typeof lstat>>
+export async function diskUsageOf(
+  directory: string,
+  deadline: number,
+  budget: MeasureBudget = measureBudget(),
+): Promise<EnsoDiskUsage> {
+  let root: Stats
   try {
     root = await lstat(directory)
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { kind: 'measured', bytes: 0 }
+    if (vanished(error)) return { kind: 'measured', bytes: 0 }
     return { kind: 'unreadable', reason: String(error) }
   }
   let bytes = root.blocks * 512
   if (!root.isDirectory()) return { kind: 'measured', bytes }
+  const lane = budget.lane(deadline)
   const seen = new Set<string>()
   const unread: string[] = []
   let rootUnreadable: string | undefined
-  let timedOut = false
-  const visit = async (at: string): Promise<string[]> => {
-    let names: string[]
+  let cut = false
+  const visit = async (at: string): Promise<void> => {
+    let listed: { readonly ran: string[] } | 'skipped'
     try {
-      names = await readdir(at)
+      listed = await lane.run(() => readdir(at))
     } catch (error) {
+      if (vanished(error)) return
       if (at === directory) rootUnreadable = String(error)
       else unread.push(at)
-      return []
+      return
     }
-    const stats = await Promise.all(
-      names.map((entryName) =>
-        lstat(join(at, entryName)).then(
-          (stat) => ({ path: join(at, entryName), stat }),
-          () => undefined,
-        ),
-      ),
-    )
+    if (listed === 'skipped') {
+      cut = true
+      return
+    }
     const below: string[] = []
-    for (const statted of stats) {
-      if (statted === undefined) continue
-      const { stat, path } = statted
-      if (!stat.isDirectory() && stat.nlink > 1) {
-        const key = `${stat.dev}:${stat.ino}`
-        if (seen.has(key)) continue
-        seen.add(key)
-      }
-      bytes += stat.blocks * 512
-      if (stat.isDirectory()) below.push(path)
-    }
-    return below
-  }
-  const queue = [directory]
-  let active = 0
-  await new Promise<void>((settle) => {
-    const pump = (): void => {
-      if (Date.now() >= deadline) timedOut = true
-      if (!timedOut) {
-        while (active < MEASURE_CONCURRENCY && queue.length > 0) {
-          const next = queue.pop() as string
-          active += 1
-          void visit(next).then((below) => {
-            active -= 1
-            queue.push(...below)
-            pump()
-          })
+    await Promise.all(
+      listed.ran.map(async (entryName) => {
+        const path = join(at, entryName)
+        let statted: { readonly ran: Stats } | 'skipped'
+        try {
+          statted = await lane.run(() => lstat(path))
+        } catch (error) {
+          if (!vanished(error)) unread.push(path)
+          return
         }
-      }
-      if (active === 0 && (queue.length === 0 || timedOut)) settle()
-    }
-    pump()
-  })
+        if (statted === 'skipped') {
+          cut = true
+          return
+        }
+        const stat = statted.ran
+        if (!stat.isDirectory() && stat.nlink > 1) {
+          const key = `${stat.dev}:${stat.ino}`
+          if (seen.has(key)) return
+          seen.add(key)
+        }
+        bytes += stat.blocks * 512
+        if (stat.isDirectory()) below.push(path)
+      }),
+    )
+    await Promise.all(below.map(visit))
+  }
+  try {
+    await visit(directory)
+  } finally {
+    lane.close()
+  }
   if (rootUnreadable !== undefined) return { kind: 'unreadable', reason: rootUnreadable }
-  if (timedOut && queue.length > 0) {
-    return { kind: 'partial', bytes, reason: 'measuring took longer than its time allows; at least this much' }
-  }
-  if (unread.length > 0) {
-    return {
-      kind: 'partial',
-      bytes,
-      reason: `${unread.length} ${unread.length === 1 ? 'directory' : 'directories'} under it could not be read: ${unread.slice(0, 3).join(', ')}`,
-    }
-  }
-  return { kind: 'measured', bytes }
+  const reasons = [
+    ...(cut ? ['not finished in time'] : []),
+    ...(unread.length === 0
+      ? []
+      : [
+          `${unread.length} ${unread.length === 1 ? 'entry' : 'entries'} could not be read, ${unread.slice(0, 2).join(', ')}${unread.length > 2 ? '…' : ''}`,
+        ]),
+  ]
+  return reasons.length === 0 ? { kind: 'measured', bytes } : { kind: 'partial', bytes, reason: reasons.join('; ') }
 }

@@ -101,6 +101,7 @@ import {
   mintThreadTree,
   releaseThreadStore,
   diskUsageOf,
+  measureBudget,
   restoreThreadTree,
   treeKindFor,
 } from '@enso/core/thread-tree'
@@ -1590,12 +1591,16 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
    * What thread trees cost on disk (#578). Every served thread whose branch records a tree, by the
    * project its tree is under; then every directory under that project's `trees/` no thread records
    * — a mint or a delete that stopped partway — named with no thread. A project with no tree but a
-   * snapshot object store (threads run in the checkout snapshot too) is listed for the store. Sizes
-   * share one deadline; a tree's work is the delete inventory's, a few at a time.
+   * snapshot object store (threads run in the checkout snapshot too) is listed for the store.
+   * ⚠ Every size starts at once, under one deadline and one {@link measureBudget} served in turns
+   * (#579 review): measured a batch at a time, the trees in the last batches started past the
+   * deadline and were never walked. A tree's work is the delete inventory's, a few at a time — each
+   * one runs git.
    */
   async function listTrees(): Promise<EnsoTreesListing> {
     if (projectsDir === undefined) return { projects: [] }
     const deadline = Date.now() + TREES_MEASURE_MS
+    const budget = measureBudget()
     const recorded = new Map<string, { threadId: string; record: ThreadTreeRecord; cwd: string }[]>()
     for (const stored of await listSessions()) {
       const projectId = projectIdOfCwd(projectsDir, stored.cwd)
@@ -1611,19 +1616,28 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
           const known = new Set(threads.map(({ record }) => realpathOrSelf(record.path)))
           const orphans = treeDirectoriesOf(projectId).filter((path) => !known.has(realpathOrSelf(path)))
           const objects = join(projectSnapshotsDir(projectsDir, projectId), '.objects')
+          // Every size is started here, before any is awaited; the inventories run alongside, a few at a time.
+          const works = inBatches(threads.map((thread) => (): Promise<string | undefined> => workIn(thread)))
           const [trees, objectStore] = await Promise.all([
-            inBatches([
-              ...threads.map((thread) => (): Promise<EnsoTreeOnDisk> => recordedTreeOnDisk(thread, deadline)),
-              ...orphans.map((path) => async (): Promise<EnsoTreeOnDisk> => ({
+            Promise.all([
+              ...threads.map(async ({ threadId, record }, at): Promise<EnsoTreeOnDisk> => ({
+                threadId,
+                path: record.path,
+                kind: record.kind,
+                branch: record.branch,
+                size: await diskUsageOf(record.path, deadline, budget),
+                holdsWork: (await works)[at] ?? null,
+              })),
+              ...orphans.map(async (path): Promise<EnsoTreeOnDisk> => ({
                 threadId: null,
                 path,
                 kind: existsSync(join(path, '.git')) ? 'worktree' : 'copy',
                 branch: null,
-                size: await diskUsageOf(path, deadline),
+                size: await diskUsageOf(path, deadline, budget),
                 holdsWork: null,
               })),
             ]),
-            existsSync(objects) ? diskUsageOf(objects, deadline) : null,
+            existsSync(objects) ? diskUsageOf(objects, deadline, budget) : null,
           ])
           return { projectId, objectStore, trees }
         }),
@@ -1631,18 +1645,15 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     return { projects: projects.filter((project) => project.trees.length > 0 || project.objectStore !== null) }
   }
 
-  /** One recorded tree's size and the work it holds — refused work as the delete would name it. */
-  async function recordedTreeOnDisk(
-    thread: { threadId: string; record: ThreadTreeRecord; cwd: string },
-    deadline: number,
-  ): Promise<EnsoTreeOnDisk> {
-    const { threadId, record } = thread
-    const store = storeOf(threadId, thread.cwd)
-    const [size, holdsWork] = await Promise.all([
-      diskUsageOf(record.path, deadline),
-      store === undefined ? undefined : inventoryThreadTree({ record, store, environment }).then(holdingReason),
-    ])
-    return { threadId, path: record.path, kind: record.kind, branch: record.branch, size, holdsWork: holdsWork ?? null }
+  /** The work a recorded tree holds, as the delete would refuse for it; none without a store to compare with. */
+  async function workIn(thread: {
+    threadId: string
+    record: ThreadTreeRecord
+    cwd: string
+  }): Promise<string | undefined> {
+    const store = storeOf(thread.threadId, thread.cwd)
+    if (store === undefined) return undefined
+    return holdingReason(await inventoryThreadTree({ record: thread.record, store, environment }))
   }
 
   /** The directories under a project's `trees/`, by path; none when it has no such folder or it cannot be read. */

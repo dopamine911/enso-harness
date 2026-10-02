@@ -19,7 +19,10 @@ test.each([
   expect(formatBytes(bytes)).toBe(said)
 })
 
-test('a partial size is said as at least its bytes; an unreadable one by its reason, never as 0', () => {
-  expect(describeSize({ kind: 'partial', bytes: 412_000_000, reason: 'timed out' })).toBe('at least 412 MB')
+// #579 review: "at least 0 B" alone read as a small tree; a partial count says why it is one.
+test('a partial size is said as at least its bytes, and why; an unreadable one by its reason, never as 0', () => {
+  expect(describeSize({ kind: 'partial', bytes: 412_000_000, reason: 'not finished in time' })).toBe(
+    'at least 412 MB (not finished in time)',
+  )
   expect(describeSize({ kind: 'unreadable', reason: 'EACCES' })).toBe('size could not be read (EACCES)')
 })

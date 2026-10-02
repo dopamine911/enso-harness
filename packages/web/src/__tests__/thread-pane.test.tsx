@@ -2131,9 +2131,12 @@ const TREE_AT =
 const TREE_GOES = `${TREE_AT}, 412 MB on disk.`
 
 // #578: the tree's size is said in the sentence naming it — at least what was read when the walk
-// was cut short, and an unreadable one by its reason, never as 0.
+// was cut short, with why (#579 review), and an unreadable one by its reason, never as 0.
 for (const [size, said] of [
-  [{ kind: 'partial', bytes: 412_000_000, reason: 'timed out' }, `${TREE_AT}, at least 412 MB on disk.`],
+  [
+    { kind: 'partial', bytes: 412_000_000, reason: 'not finished in time' },
+    `${TREE_AT}, at least 412 MB on disk (not finished in time).`,
+  ],
   [
     { kind: 'unreadable', reason: 'EACCES: permission denied' },
     `${TREE_AT}; its size could not be read (EACCES: permission denied).`,
