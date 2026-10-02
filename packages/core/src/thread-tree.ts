@@ -537,6 +537,34 @@ function holdingReason(inventory: ThreadTreeInventory): string | undefined {
 }
 
 /**
+ * The worktree's registration and directory removed, then its branch: `-d`, so a branch git does
+ * not see merged into HEAD is kept (`-D` only when forced). Undefined when removed, else why not
+ * — a failed `remove` leaves the branch and store alone, for the caller to refuse.
+ */
+async function removeWorktree(
+  record: ThreadTreeRecord,
+  force: boolean,
+  environment: NodeJS.ProcessEnv,
+): Promise<string | undefined> {
+  // A tree directory that is gone still has its registration: `remove` drops it all the same.
+  const removed = await runTreeGit(
+    environment,
+    ['worktree', 'remove', ...(force ? ['--force'] : []), record.path],
+    record.project,
+  )
+  if (removed.code !== 0) return `git worktree remove: ${gitReason(removed)}`
+  if (record.branch === null) return undefined
+  const exists = await runTreeGit(
+    environment,
+    ['rev-parse', '--verify', '--quiet', `refs/heads/${record.branch}`],
+    record.project,
+  )
+  // The tree is gone either way; a kept branch is not a failed dispose.
+  if (exists.code === 0) await runTreeGit(environment, ['branch', force ? '-D' : '-d', record.branch], record.project)
+  return undefined
+}
+
+/**
  * Dispose of a thread's tree: inventory first, refused while it holds work (unless `force`) or
  * while a fork's store leans on this store (even forced). Then the worktree is removed with its
  * registration (`--force` only when forced), its branch deleted when merged (`-D` only when
@@ -562,25 +590,8 @@ export async function disposeThreadTree(options: {
   const holding = force ? undefined : holdingReason(inventory)
   if (holding !== undefined) return { kind: 'refused', inventory, reason: holding }
   if (record.kind === 'worktree') {
-    // A tree directory that is gone still has its registration: `remove` drops it all the same.
-    const removed = await runTreeGit(
-      environment,
-      ['worktree', 'remove', ...(force ? ['--force'] : []), record.path],
-      record.project,
-    )
-    if (removed.code !== 0) {
-      return { kind: 'refused', inventory, reason: `git worktree remove: ${gitReason(removed)}` }
-    }
-    if (record.branch !== null) {
-      const exists = await runTreeGit(
-        environment,
-        ['rev-parse', '--verify', '--quiet', `refs/heads/${record.branch}`],
-        record.project,
-      )
-      // `-d` keeps a branch git does not see merged into HEAD; the tree is gone either way.
-      if (exists.code === 0)
-        await runTreeGit(environment, ['branch', force ? '-D' : '-d', record.branch], record.project)
-    }
+    const failed = await removeWorktree(record, force, environment)
+    if (failed !== undefined) return { kind: 'refused', inventory, reason: failed }
   } else {
     rmSync(record.path, { recursive: true, force: true })
   }

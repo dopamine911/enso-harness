@@ -162,6 +162,51 @@ async function treeRepository(
 }
 
 /**
+ * Mint the store at `directory`: `git init --bare` in the format its objects must share, the
+ * tree's object directory and `alternates` named in `objects/info/alternates`, the tree's index
+ * copied as the seed. False when the directory or the init fails — never a half-made store to use.
+ */
+async function mintStore(
+  directory: string,
+  tree: string,
+  environment: NodeJS.ProcessEnv,
+  alternates: readonly string[],
+): Promise<boolean> {
+  try {
+    mkdirSync(directory, { recursive: true })
+  } catch {
+    return false
+  }
+  // The checkout's repository first: its object FORMAT decides the store's (alternates cannot
+  // mix sha1 and sha256 objects), never the user's `init.defaultObjectFormat`; a tree that is no
+  // checkout takes the format of its first alternate's repository (`<repository>/objects`), else
+  // sha1, said explicitly for the same reason.
+  const repository = await treeRepository(environment, tree)
+  const first = alternates[0]
+  const alternateFormat =
+    repository !== undefined || first === undefined
+      ? undefined
+      : await runGitIn(environment, ['--git-dir', dirname(first), 'rev-parse', '--show-object-format'], tree)
+  const objectFormat =
+    repository?.objectFormat ?? (alternateFormat?.code === 0 ? alternateFormat.stdout.trim() : 'sha1')
+  const init = await runGitIn(
+    environment,
+    ['init', '--quiet', '--bare', `--object-format=${objectFormat}`, directory],
+    tree,
+  )
+  if (init.code !== 0) return false
+  const objectDirectories = [...(repository === undefined ? [] : [repository.objects]), ...alternates]
+  if (objectDirectories.length > 0) {
+    mkdirSync(join(directory, 'objects', 'info'), { recursive: true })
+    writeFileSync(join(directory, 'objects', 'info', 'alternates'), `${objectDirectories.join('\n')}\n`)
+  }
+  if (repository !== undefined && existsSync(repository.index)) {
+    copyFileSync(repository.index, join(directory, 'enso-index'))
+  }
+  return true
+}
+
+/**
  * Open the store at `dir` for `tree`, minting it when absent: `git init --bare`, the tree's object
  * directory as an alternate and its index as the seed when the tree is a checkout. Opening an
  * existing store reads nothing from the tree's repository again. Refused as `undefined` when the
@@ -181,38 +226,8 @@ export async function openSnapshotStore(options: {
 }): Promise<SnapshotStore | undefined> {
   const { directory, tree, environment, alternates = [] } = options
   const store = { directory, tree }
-  if (!existsSync(join(directory, 'HEAD'))) {
-    try {
-      mkdirSync(directory, { recursive: true })
-    } catch {
-      return undefined
-    }
-    // The checkout's repository first: its object FORMAT decides the store's (alternates cannot
-    // mix sha1 and sha256 objects), never the user's `init.defaultObjectFormat`; a tree that is no
-    // checkout takes the format of its first alternate's repository (`<repository>/objects`), else
-    // sha1, said explicitly for the same reason.
-    const repository = await treeRepository(environment, tree)
-    const first = alternates[0]
-    const alternateFormat =
-      repository !== undefined || first === undefined
-        ? undefined
-        : await runGitIn(environment, ['--git-dir', dirname(first), 'rev-parse', '--show-object-format'], tree)
-    const objectFormat =
-      repository?.objectFormat ?? (alternateFormat?.code === 0 ? alternateFormat.stdout.trim() : 'sha1')
-    const init = await runGitIn(
-      environment,
-      ['init', '--quiet', '--bare', `--object-format=${objectFormat}`, directory],
-      tree,
-    )
-    if (init.code !== 0) return undefined
-    const objectDirectories = [...(repository === undefined ? [] : [repository.objects]), ...alternates]
-    if (objectDirectories.length > 0) {
-      mkdirSync(join(directory, 'objects', 'info'), { recursive: true })
-      writeFileSync(join(directory, 'objects', 'info', 'alternates'), `${objectDirectories.join('\n')}\n`)
-    }
-    if (repository !== undefined && existsSync(repository.index)) {
-      copyFileSync(repository.index, join(directory, 'enso-index'))
-    }
+  if (!existsSync(join(directory, 'HEAD')) && !(await mintStore(directory, tree, environment, alternates))) {
+    return undefined
   }
   // One git at a time per store: a second `add` would meet the first's `index.lock`.
   let queue: Promise<unknown> = Promise.resolve()

@@ -1123,34 +1123,54 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       fork = source
     }
     if (plan !== undefined) {
-      const minted = await mintTree({
-        threadId: fork.getSessionId(),
-        project: plan.project,
-        name: plan.name,
-        from: plan.from,
-        kind: plan.treeKind,
-      })
-      if (minted.kind === 'refused') {
-        // No tree, no fork: the file pi may already have written for it goes too.
-        const file = fork.getSessionFile()
-        if (file !== undefined && existsSync(file)) unlinkSync(file)
-        return { kind: 'tree-refused', reason: `the fork's ${minted.reason}` }
-      }
-      fork.appendCustomEntry(ENSO_THREAD_TREE_ENTRY, minted.record)
+      const refusal = await giveForkItsTree(fork, plan)
+      if (refusal !== undefined) return { kind: 'tree-refused', reason: refusal }
     }
-    // A fork taken after the opening already holds it, open: it is not opened twice.
-    if (sourceIncident !== undefined && openIncidentOf(branchIncidents(fork.getBranch())) === undefined) {
-      const opening = inheritedOpening(threadId, sourceIncident.opened)
-      fork.appendCustomEntry(ENSO_INCIDENT_OPENED_ENTRY, opening)
-      log.info('fork {forkThreadId} inherits incident {sourceIncidentId} as {incidentId}', {
-        threadId,
-        forkThreadId: fork.getSessionId(),
-        sourceIncidentId: sourceIncident.opened.incidentId,
-        incidentId: opening.incidentId,
-      })
-    }
+    if (sourceIncident !== undefined) inheritOpenIncident(threadId, fork, sourceIncident)
     writeUnflushedSession(fork)
     return { kind: 'forked', threadId: fork.getSessionId(), prefill }
+  }
+
+  /**
+   * Mint the fork's tree under the fork's own id (pi picks it only as it branches) and record it on
+   * the fork. The reason when it cannot be made: then there is no fork — the file pi may already
+   * have written for it goes too, so no thread is left pointing at a tree that does not exist.
+   */
+  async function giveForkItsTree(
+    fork: SessionManager,
+    plan: Extract<ReturnType<typeof forkTreePlan>, { kind: 'planned' }>,
+  ): Promise<string | undefined> {
+    const minted = await mintTree({
+      threadId: fork.getSessionId(),
+      project: plan.project,
+      name: plan.name,
+      from: plan.from,
+      kind: plan.treeKind,
+    })
+    if (minted.kind === 'refused') {
+      const file = fork.getSessionFile()
+      if (file !== undefined && existsSync(file)) unlinkSync(file)
+      return `the fork's ${minted.reason}`
+    }
+    fork.appendCustomEntry(ENSO_THREAD_TREE_ENTRY, minted.record)
+    return undefined
+  }
+
+  /** The source's open incident, opened again on the fork (#466 decision 5) — unless a fork taken after the opening already holds it, open. */
+  function inheritOpenIncident(
+    threadId: string,
+    fork: SessionManager,
+    sourceIncident: NonNullable<ReturnType<typeof openIncidentOf>>,
+  ): void {
+    if (openIncidentOf(branchIncidents(fork.getBranch())) !== undefined) return
+    const opening = inheritedOpening(threadId, sourceIncident.opened)
+    fork.appendCustomEntry(ENSO_INCIDENT_OPENED_ENTRY, opening)
+    log.info('fork {forkThreadId} inherits incident {sourceIncidentId} as {incidentId}', {
+      threadId,
+      forkThreadId: fork.getSessionId(),
+      sourceIncidentId: sourceIncident.opened.incidentId,
+      incidentId: opening.incidentId,
+    })
   }
 
   /**
