@@ -9,7 +9,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs'
-import { basename, dirname, join, resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import { getSupportedThinkingLevels } from '@earendil-works/pi-ai'
 import {
   createAgentSessionFromServices,
@@ -90,16 +90,14 @@ import {
 } from '@enso/core/paths'
 import { describePermissionPolicy, preparePermissionPolicy } from '@enso/core/permission-rules'
 import { knownSecretValues, quarantineSecrets } from '@enso/core/secrets'
+import { forksOfStore } from '@enso/core/snapshot-store'
 import {
-  dependentStores,
   disposeThreadTree,
   holdingReason,
   inventoryThreadTree,
-  isOrphanedStore,
   mintThreadTree,
   releaseThreadStore,
   restoreThreadTree,
-  sweepOrphanedStores,
   treeKindFor,
 } from '@enso/core/thread-tree'
 import { getPermissionsService } from '@gotgenes/pi-permission-system'
@@ -687,9 +685,8 @@ export interface AgentHost {
   /** A stored thread's judge cases (#469): one open, nothing built (#86); undefined for no file. */
   readStoredJudgeCases(threadId: string, thresholds: EnsoRiskThresholds): Promise<BranchJudgeCases | undefined>
   /**
-   * Whether the id is a deleted thread's (#571): deleted since this host started, or — durably,
-   * across a restart (PR #572 review) — its store kept for its forks under some project's folder.
-   * Such an id is never given to a new thread; the history route answers it 410.
+   * Whether the id is a deleted thread's (#571): deleted since this host started. Such an id is
+   * never given to a new thread; the history route answers it 410.
    */
   threadDeleted(threadId: string): boolean
   /**
@@ -704,12 +701,12 @@ export interface AgentHost {
   /** Undo the thread's last restore (#565): its tree back to that restore's safety snapshot, itself recorded as a restore. */
   undoLastRestore(threadId: string, safety: string): Promise<ThreadRestoreOutcome>
   /**
-   * Delete the thread (#571): its tree through the inventory, its store — kept, orphaned, while a
-   * fork leans on it — then every session file under its id. A tree holding work is deleted only
-   * `force`d AND with `confirmedWork` the sha256 (hex) of the work's words as the user was shown
-   * them (PR #572 review): work gained since is refused, named, never taken unseen. `retire`
-   * disposes the live session and refuses a busy one: the registry's, which the host does not
-   * hold. Hard: nothing is kept to undo it.
+   * Delete the thread (#571): its tree through the inventory, its store — the project's object
+   * store then collected, its forks' histories kept (#573) — then every session file under its id.
+   * A tree holding work is deleted only `force`d AND with `confirmedWork` the sha256 (hex) of the
+   * work's words as the user was shown them (PR #572 review): work gained since is refused, named,
+   * never taken unseen. `retire` disposes the live session and refuses a busy one: the registry's,
+   * which the host does not hold. Hard: nothing is kept to undo it.
    */
   deleteThread(
     threadId: string,
@@ -721,8 +718,8 @@ export interface AgentHost {
   ): Promise<ThreadDeleteOutcome>
   /**
    * What deleting the thread would do (#571), deleting nothing and taking no snapshot: its tree,
-   * the work in it a delete is refused for, and the threads whose stores keep its snapshots — the
-   * delete dialog's text.
+   * the work in it a delete is refused for, and the forks whose histories keep its snapshots up to
+   * where each forked — the delete dialog's text.
    */
   previewThreadDelete(
     threadId: string,
@@ -1428,26 +1425,49 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       .map((info) => info.path)
   }
 
-  /** Whether a project folder holds `threadId`'s store kept for its forks (`isOrphanedStore`): the tombstone a restart keeps. */
-  function orphanedStoreUnder(threadId: string): boolean {
-    if (projectsDir === undefined || !existsSync(projectsDir)) return false
-    return readdirSync(projectsDir, { withFileTypes: true }).some(
-      (dirent) =>
-        dirent.isDirectory() &&
-        isEnsoProjectId(dirent.name) &&
-        isOrphanedStore(join(projectSnapshotsDir(projectsDir, dirent.name), threadId)),
-    )
+  function threadDeleted(threadId: string): boolean {
+    return deletedThreads.has(threadId)
   }
 
-  function threadDeleted(threadId: string): boolean {
-    return deletedThreads.has(threadId) || orphanedStoreUnder(threadId)
+  /**
+   * A deleting thread's tree and store gone (#571, #573): its tree disposed with the store, or a
+   * store alone released. Undefined when done; the outcome to answer when not — `busy` while the
+   * project's stores are migrated or collected, `refused` when they cannot be migrated or a fork
+   * left unmigrated still reads this store (no inventory: nothing went), else the tree's work. A
+   * collection that could not run is logged, never a refusal: the store is gone.
+   */
+  async function removeTreeAndStore(
+    threadId: string,
+    tree: ThreadTreeRecord | undefined,
+    store: string | undefined,
+    force: boolean,
+  ): Promise<ThreadDeleteOutcome | undefined> {
+    let uncollected: string | undefined
+    if (tree !== undefined && store !== undefined) {
+      const disposed = await disposeThreadTree({ record: tree, store, force, environment })
+      if (disposed.kind === 'busy') return { kind: 'busy', reason: disposed.reason }
+      if (disposed.kind === 'refused') {
+        return disposed.inventory === undefined
+          ? { kind: 'refused', reason: disposed.reason }
+          : { kind: 'holds-work', reason: disposed.reason }
+      }
+      uncollected = disposed.uncollected
+    } else if (store !== undefined && existsSync(store)) {
+      const released = await releaseThreadStore(store, environment)
+      if (released.kind !== 'removed') return { kind: released.kind, reason: released.reason }
+      uncollected = released.uncollected
+    }
+    if (uncollected !== undefined) {
+      log.warn('thread {threadId}: snapshot objects not collected: {reason}', { threadId, reason: uncollected })
+    }
+    return undefined
   }
 
   /**
    * Delete the thread (#571). Fail-closed, in this order: the tree's inventory first (refused, the
    * thread is untouched — not even retired); then the live session retired; then the tree and the
-   * store — kept for its forks, orphaned — and the project's orphans swept; the session files last,
-   * so a delete that stops partway leaves a thread that still lists and can be deleted again.
+   * store, the project's object store collected (#573); the session files last, so a delete that
+   * stops partway leaves a thread that still lists and can be deleted again.
    */
   async function deleteThread(
     threadId: string,
@@ -1485,13 +1505,8 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         if (held !== undefined && !confirmed) return { kind: 'holds-work', reason: held }
       }
       if (!retire()) return { kind: 'busy', reason: `thread ${threadId} is running; delete it when it settles` }
-      if (tree !== undefined && store !== undefined) {
-        const disposed = await disposeThreadTree({ record: tree, store, force, environment })
-        if (disposed.kind === 'refused') return { kind: 'holds-work', reason: disposed.reason }
-      } else if (store !== undefined && existsSync(store)) {
-        releaseThreadStore(store)
-      }
-      if (store !== undefined) sweepOrphanedStores(dirname(store))
+      const removed = await removeTreeAndStore(threadId, tree, store, force)
+      if (removed !== undefined) return removed
       for (const file of await sessionFilesOf(threadId)) rmSync(file, { force: true })
       deletedThreads.add(threadId)
       log.info('thread {threadId} deleted: session, {tree} and store', {
@@ -1509,8 +1524,8 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
 
   /**
    * What `deleteThread` would do (#571), read the way it reads: the tree from the branch, the work
-   * from the same inventory and rule (`holdingReason`), the stores that name this one's objects. A
-   * dependent store is a thread's by its directory name (`snapshots/<thread-id>`).
+   * from the same inventory and rule (`holdingReason`), the forks whose histories keep this
+   * thread's snapshots ({@link forksOfStore}).
    */
   async function previewThreadDelete(
     threadId: string,
@@ -1529,10 +1544,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       tree !== undefined && store !== undefined
         ? holdingReason(await inventoryThreadTree({ record: tree, store, environment }))
         : undefined
-    const keptFor = (store === undefined ? [] : dependentStores(store)).map((dependent) => ({
-      threadId: basename(dependent),
-      deleted: isOrphanedStore(dependent),
-    }))
+    const keptFor = (store === undefined ? [] : forksOfStore(store)).map((fork) => ({ threadId: fork }))
     return {
       kind: 'preview',
       preview: {

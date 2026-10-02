@@ -1,7 +1,17 @@
 import { afterAll, beforeAll, expect, setSystemTime, test } from 'bun:test'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -2257,9 +2267,9 @@ test('⚠ deleting a thread on its worktree: one holding work is refused, naming
   expect(fixtureGit(project, 'status', '--porcelain')).toBe(statusBefore)
 })
 
-// #571 decision 2: a fork's store names its parent's objects, and the fork's turns before the fork
-// point were snapshotted into the PARENT's store — so the parent's store outlives the parent.
-test("⚠ deleting a forked parent keeps its store for the fork — the fork still restores to a turn the parent took — and deleting the fork then sweeps the parent's store too (#571)", async () => {
+// #571, #573: the fork's turns before the fork point were snapshotted by the PARENT; the fork's
+// history in the project's object store reaches them, so the parent's store goes with the parent.
+test("⚠ deleting a forked parent removes its store, and the fork still restores to a turn the parent took — after the delete's collection of what only the parent reached (#571, #573)", async () => {
   const project = dirtyCheckout()
   const core = createFauxCore()
   core.setResponses(Array.from({ length: 3 }, (_, at) => faux.fauxAssistantMessage(`reply ${at + 1}`)))
@@ -2285,19 +2295,18 @@ test("⚠ deleting a forked parent keeps its store for the fork — the fork sti
     preview: {
       tree: { kind: 'worktree', path: parentTree, branch: `enso/${parentId}` },
       holdsWork: expect.stringContaining('a.txt'),
-      keptFor: [{ threadId: forked.threadId, deleted: false }],
+      keptFor: [{ threadId: forked.threadId }],
     },
   })
   expect(existsSync(parentTree) && existsSync(join(snapshots, parentId, 'HEAD'))).toBe(true)
+  // Past the collection's one-hour grace, so the delete's collection prunes what nothing reaches.
+  const then = new Date(Date.now() - 2 * 60 * 60_000)
+  for (const entry of readdirSync(join(snapshots, '.objects'), { recursive: true, withFileTypes: true })) {
+    if (entry.isFile()) utimesSync(join(entry.parentPath, entry.name), then, then)
+  }
   expect(await deleteAsPreviewed(host, parentId)).toEqual({ kind: 'deleted' })
-  expect(existsSync(parentTree)).toBe(false)
-  expect(existsSync(join(snapshots, parentId, 'HEAD'))).toBe(true)
-  // PR #572 review: the in-memory tombstone does not survive a restart, but the kept store does —
-  // a new thread under the parent's id would mint onto it and be swept from under itself later.
-  const restarted = treeHost(project, [fauxModelExtension(core)]).host
-  expect(restarted.threadDeleted(parentId)).toBe(true)
-  await expect(restarted.createSession(parentId, () => project)).rejects.toBeInstanceOf(ThreadDeleted)
-  // "first" was the parent's turn: its snapshot is in the parent's store, which the fork leans on.
+  expect(existsSync(parentTree) || existsSync(join(snapshots, parentId))).toBe(false)
+  // "first" was the parent's turn: its snapshot is in the fork's history.
   const forkTree = fork.inspect().cwd
   writeFileSync(join(forkTree, 'a.txt'), 'fork edit\n')
   const restored = await host.restoreThreadAt(forked.threadId, userEntryOf(fork.inspect().entries, 'first'))
@@ -2307,8 +2316,6 @@ test("⚠ deleting a forked parent keeps its store for the fork — the fork sti
   fork.runtime.dispose()
   expect(await deleteAsPreviewed(host, forked.threadId)).toEqual({ kind: 'deleted' })
   expect(existsSync(join(snapshots, forked.threadId)) || existsSync(join(snapshots, parentId))).toBe(false)
-  // Once the store is swept, nothing of the id is left to collide with.
-  expect(restarted.threadDeleted(parentId)).toBe(false)
 })
 
 // #447: a fork copies its source's messages with their times, and pi's `modified` is the last

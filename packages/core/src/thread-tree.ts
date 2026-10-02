@@ -42,15 +42,18 @@
  */
 
 import { execFile } from 'node:child_process'
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, realpathSync, rmSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { exitCode, type GitResult, withoutGitLocalVariables } from './git.ts'
 import {
+  collectSnapshotGarbage,
   compareTreeWithSnapshots,
   materializeSnapshot,
+  migrateSnapshotStores,
   openSnapshotStore,
   SNAPSHOT_TIMEOUT_MS,
   type SnapshotRefused,
+  unmigratedForksOf,
 } from './snapshot-store.ts'
 import type { ThreadTreeKind, ThreadTreeRecord } from './thread-tree-record.ts'
 
@@ -236,7 +239,7 @@ async function makeTree(
 
 /**
  * A new thread's base: the checkout snapshotted into the new store BEFORE the tree is made, so
- * the store's work tree — and its alternates and index seed — is the checkout's; then the tree.
+ * the store's work tree — and its index seed — is the checkout's; then the tree.
  */
 async function seedFromCheckout(
   place: MintPlace,
@@ -257,30 +260,10 @@ async function seedFromCheckout(
 }
 
 /**
- * The object directories a fork's store must name: the parent store's own alternates, then the
- * parent's `objects`. ⚠ FLAT, NEVER CHAINED: git follows an alternate's alternates only five
- * deep, so a fork that named its parent alone would lose its great-great-…-grandparent's objects
- * at the sixth generation. Every ancestor store is then named directly, which also makes each one
- * a `dependentStores` hold on its descendants' dispose.
- */
-function forkAlternates(parentStore: string): string[] {
-  let inherited: string[]
-  try {
-    inherited = readFileSync(join(parentStore, 'objects', 'info', 'alternates'), 'utf8')
-      .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => line !== '')
-  } catch {
-    inherited = []
-  }
-  return [...inherited, join(parentStore, 'objects')]
-}
-
-/**
- * A fork's base is the parent's snapshot: the tree first, then the new store minted for it with
- * every ancestor store's objects as alternates — after the tree exists, since the store's mint
- * reads the tree's repository (a worktree's is the project's). A copy's store names the project,
- * whose repository's ignore rules it follows (#566).
+ * A fork's base is the parent's snapshot, already in the project's object store (#573): the tree
+ * first, then the new store minted for it, its lineage the parent's — after the tree exists, since
+ * the store's mint reads the tree's repository (a worktree's is the project's). A copy's store
+ * names the project, whose repository's ignore rules it follows (#566).
  */
 async function seedFromSnapshot(
   place: MintPlace,
@@ -295,7 +278,7 @@ async function seedFromSnapshot(
     directory: store,
     tree,
     environment,
-    alternates: forkAlternates(from.storeDirectory),
+    forkOf: from.storeDirectory,
     copyOf: kind === 'copy' ? project : undefined,
   })
   if (opened === undefined) return { step: 'store', reason: `the snapshot store could not be minted at ${store}` }
@@ -305,8 +288,8 @@ async function seedFromSnapshot(
 /**
  * Mint a thread's tree at `tree`, which must not exist, with the content of a snapshot: the
  * checkout's current state (`from: checkout` — snapshotted into `store` first, so the checkout's
- * uncommitted edits arrive as uncommitted changes in a worktree) or a parent's snapshot (`from:
- * snapshot`, a fork — `store` is minted with the parent store's objects as an alternate). A
+ * snapshot`, a fork — `store` is minted beside the parent's store, its snapshots shared through the
+ * project's object store). A
  * worktree is on its own new `branch` at the checkout's HEAD or the fork's `revision`; a branch
  * that exists already is refused, never reused.
  *
@@ -347,8 +330,8 @@ export async function mintThreadTree(options: {
   const materialized = await materializeSnapshot({ directory: store, tree, hash: base, environment })
   if (materialized.kind === 'refused') return undoMint(place, made, 'materialize', storeReason(materialized.refused))
   if (from.kind === 'snapshot') {
-    // The fork's store has no snapshot of its own yet: the parent's, reachable through the
-    // alternate, is its last, so the next snapshot of the unchanged tree is `base` again.
+    // The fork's store has no snapshot of its own yet: the parent's, in the shared objects, is
+    // its last, so the next snapshot of the unchanged tree is `base` again.
     const pointed = await runTreeGit(environment, ['--git-dir', store, 'update-ref', 'HEAD', base], tree)
     if (pointed.code !== 0) return undoMint(place, made, 'update-ref', gitReason(pointed))
   }
@@ -402,8 +385,6 @@ export async function restoreThreadTree(options: {
  * - `unsnapshotted`: paths where the tree differs from the store's last snapshot.
  * - `unmergedCommits`: commits on the worktree's branch that no other branch or remote reaches.
  * - `unreadable`: a listing git that failed — refuses like work, never reads as "clean".
- * - `dependents`: sibling stores (forks) whose alternates name this store's objects — never a
- *   refusal: a dispose keeps the store for them (#571), see {@link releaseThreadStore}.
  *
  * @group Thread tree
  */
@@ -414,35 +395,6 @@ export interface ThreadTreeInventory {
   readonly unsnapshotted: string[]
   readonly unmergedCommits: number
   readonly unreadable: string[]
-  readonly dependents: string[]
-}
-
-/**
- * The sibling stores (directories beside `store`) whose alternates name `store`'s objects, by name:
- * the forks — and their forks, the alternates being flat — a delete keeps `store` for (#571).
- *
- * @group Thread tree
- */
-export function dependentStores(store: string): string[] {
-  const objects = canonical(join(store, 'objects'))
-  let siblings: string[]
-  try {
-    siblings = readdirSync(dirname(store), { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() && entry.name !== basename(store))
-      .map((entry) => join(dirname(store), entry.name))
-      .toSorted()
-  } catch {
-    return []
-  }
-  return siblings.filter((sibling) => {
-    let alternates: string
-    try {
-      alternates = readFileSync(join(sibling, 'objects', 'info', 'alternates'), 'utf8')
-    } catch {
-      return false
-    }
-    return alternates.split('\n').some((line) => line.trim() !== '' && canonical(line.trim()) === objects)
-  })
 }
 
 /**
@@ -536,7 +488,7 @@ async function unmergedCommitsOf(
 
 /**
  * The inventory of a tree, for a dispose or a surface to show. A tree directory that is gone has
- * nothing to lose; its branch and dependents are still counted. Never throws.
+ * nothing to lose; its branch is still counted. Never throws.
  *
  * @group Thread tree
  */
@@ -553,7 +505,6 @@ export async function inventoryThreadTree(options: {
     unsnapshotted: [],
     unmergedCommits: 0,
     unreadable: [],
-    dependents: dependentStores(store),
   }
   if (existsSync(record.path)) {
     if (record.kind === 'worktree') await readWorktreeStatus(environment, record.path, inventory)
@@ -637,82 +588,74 @@ async function removeWorktree(
   return undefined
 }
 
-/** The file a store kept for its forks carries (#571): its thread is gone; the store goes with its last dependent. */
-const ORPHANED_STORE_MARKER = 'enso-orphaned'
-
 /**
- * What became of a deleted thread's store (#571): removed, or kept for the forks — by store path —
- * that lean on it.
+ * Let go of a deleted thread's store (#571, #573): the project's pre-#573 stores migrated first —
+ * a fork's alternates may still name this one's objects — then the store removed, and the project's
+ * object store collected, so what only this thread's snapshots reached goes. Its forks keep their
+ * histories, the parent's snapshots up to where each forked among them. The store is kept — `busy`
+ * while another migration or collection holds the project's stores, refused when the migration
+ * fails or a fork it could not move still reads this store's objects through its alternates (#575
+ * review). Refused, never thrown, when the store cannot be removed — what of it is left keeps its
+ * last-pinned ref. A collection that is busy or fails leaves the garbage for the next,
+ * `uncollected` saying why.
  *
  * @group Thread tree
  */
-export type ThreadStoreRelease = { readonly kind: 'removed' } | { readonly kind: 'kept'; readonly dependents: string[] }
-
-/**
- * Let go of a deleted thread's store (#571): removed, or — while a fork's store names its objects
- * as an alternate — kept and marked orphaned, because removing it would break every snapshot the
- * fork holds of the parent's files. {@link sweepOrphanedStores} removes it once nothing depends on
- * it. A store that is gone already is removed, whoever still names it (PR #572 review: marking a
- * store that is not there threw on every attempt, and the thread could never be deleted).
- *
- * @group Thread tree
- */
-export function releaseThreadStore(store: string): ThreadStoreRelease {
-  if (!existsSync(store)) return { kind: 'removed' }
-  const dependents = dependentStores(store)
-  if (dependents.length === 0) {
+export async function releaseThreadStore(
+  store: string,
+  environment: NodeJS.ProcessEnv,
+): Promise<
+  | { readonly kind: 'removed'; readonly uncollected?: string }
+  | { readonly kind: 'busy' | 'refused'; readonly reason: string }
+> {
+  const held = await prepareRelease(store, environment)
+  if (held !== undefined) return held
+  // A store that cannot be removed (another user's, a read-only directory) is a refusal, never a
+  // throw (#575 review); what of it is left still holds its last-pinned ref.
+  try {
     rmSync(store, { recursive: true, force: true })
-    return { kind: 'removed' }
+  } catch (error) {
+    return { kind: 'refused', reason: `the snapshot store could not be removed: ${String(error)}` }
   }
-  writeFileSync(join(store, ORPHANED_STORE_MARKER), `kept for ${dependents.join(', ')}\n`)
-  return { kind: 'kept', dependents }
-}
-
-/**
- * Whether `store` is a deleted thread's, kept for its forks (#571). ⚠ A DURABLE TOMBSTONE (PR #572
- * review): its thread's id must never be given to a new thread — a new thread minted or snapshotted
- * on this store would be swept from under it once the last fork goes.
- *
- * @group Thread tree
- */
-export function isOrphanedStore(store: string): boolean {
-  return existsSync(join(store, ORPHANED_STORE_MARKER))
-}
-
-/**
- * Remove every orphaned store in `snapshotsDir` (one project's `snapshots/`) that no store depends
- * on any more, until none is left to remove: the alternates are flat (#561), so a grandparent kept
- * for a parent that was itself kept goes in a later round, once the parent has. A store without
- * the marker is a live thread's and is never touched. The removed stores, by path.
- *
- * @group Thread tree
- */
-export function sweepOrphanedStores(snapshotsDir: string): string[] {
-  const removed: string[] = []
-  for (;;) {
-    let orphans: string[]
-    try {
-      orphans = readdirSync(snapshotsDir, { withFileTypes: true })
-        .filter((dirent) => dirent.isDirectory() && existsSync(join(snapshotsDir, dirent.name, ORPHANED_STORE_MARKER)))
-        .map((dirent) => join(snapshotsDir, dirent.name))
-        .toSorted()
-    } catch {
-      return removed
-    }
-    const free = orphans.filter((orphan) => dependentStores(orphan).length === 0)
-    if (free.length === 0) return removed
-    for (const orphan of free) {
-      rmSync(orphan, { recursive: true, force: true })
-      removed.push(orphan)
-    }
+  const collected = await collectSnapshotGarbage(dirname(store), environment)
+  if (collected === 'collected') return { kind: 'removed' }
+  return {
+    kind: 'removed',
+    uncollected:
+      collected === 'busy'
+        ? 'the snapshot stores are busy, or one is not yet migrated'
+        : `the object store: ${storeReason(collected.refused)}`,
   }
 }
 
 /**
- * Dispose of a thread's tree: inventory first, refused while it holds work (unless `force`). Then
- * the worktree is removed with its registration (`--force` only when forced), its branch deleted
- * when merged (`-D` only when forced; an unmerged branch is otherwise kept), a copy's directory
- * removed, and the store released — removed, or kept for the forks that lean on it (#571).
+ * The project's pre-#573 stores migrated (#573), and no fork the migration could not move still
+ * reading `store`'s objects; undefined when the store may go, else what holds it.
+ */
+async function prepareRelease(
+  store: string,
+  environment: NodeJS.ProcessEnv,
+): Promise<{ readonly kind: 'busy' | 'refused'; readonly reason: string } | undefined> {
+  const migrated = await migrateSnapshotStores(dirname(store), environment)
+  if (migrated === 'busy')
+    return { kind: 'busy', reason: 'the snapshot stores are being migrated or collected; try again' }
+  if ('kind' in migrated) {
+    return { kind: 'refused', reason: `the snapshot stores could not be migrated: ${storeReason(migrated.refused)}` }
+  }
+  const forks = unmigratedForksOf(store)
+  if (forks.length === 0) return undefined
+  return {
+    kind: 'refused',
+    reason: `the snapshot store is kept: ${forks.join(', ')} could not be migrated and still read its objects`,
+  }
+}
+
+/**
+ * Dispose of a thread's tree: the store's release prepared first ({@link releaseThreadStore}:
+ * `busy` or refused, nothing removed, when it cannot go), then the inventory, refused while it holds
+ * work (unless `force`). Then the worktree is removed with its registration (`--force` only when
+ * forced), its branch deleted when merged (`-D` only when forced; an unmerged branch is otherwise
+ * kept), a copy's directory removed, and the store released.
  *
  * @group Thread tree
  */
@@ -722,9 +665,14 @@ export async function disposeThreadTree(options: {
   readonly force: boolean
   readonly environment: NodeJS.ProcessEnv
 }): Promise<
-  { kind: 'disposed'; store: ThreadStoreRelease } | { kind: 'refused'; inventory: ThreadTreeInventory; reason: string }
+  | { kind: 'disposed'; uncollected?: string }
+  | { kind: 'busy'; reason: string }
+  | { kind: 'refused'; inventory?: ThreadTreeInventory; reason: string }
 > {
   const { record, store, force, environment } = options
+  const held = await prepareRelease(store, environment)
+  if (held !== undefined)
+    return held.kind === 'busy' ? { kind: 'busy', reason: held.reason } : { kind: 'refused', reason: held.reason }
   const inventory = await inventoryThreadTree({ record, store, environment })
   const holding = force ? undefined : holdingReason(inventory)
   if (holding !== undefined) return { kind: 'refused', inventory, reason: holding }
@@ -734,5 +682,14 @@ export async function disposeThreadTree(options: {
   } else {
     rmSync(record.path, { recursive: true, force: true })
   }
-  return { kind: 'disposed', store: releaseThreadStore(store) }
+  const released = await releaseThreadStore(store, environment)
+  if (released.kind !== 'removed') {
+    // The tree is gone: no inventory, so the host answers a refusal, never work to force.
+    return released.kind === 'busy'
+      ? { kind: 'busy', reason: released.reason }
+      : { kind: 'refused', reason: released.reason }
+  }
+  return released.uncollected === undefined
+    ? { kind: 'disposed' }
+    : { kind: 'disposed', uncollected: released.uncollected }
 }

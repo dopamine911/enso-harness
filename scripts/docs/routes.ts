@@ -182,7 +182,7 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
   THREAD_HISTORY_ROUTE: threadRead(
     'respondWithThreadHistory',
     '200 `EnsoThreadHistory` JSON',
-    '400 malformed thread id; 403 untrusted origin, or a session stored in a directory that is no project here (named, #378); 404 no session — an id nobody has used, which a page starts; 410 a deleted thread (#571) — this server deleted it, or its store is kept for its forks — never started again; 500 handler failure',
+    '400 malformed thread id; 403 untrusted origin, or a session stored in a directory that is no project here (named, #378); 404 no session — an id nobody has used, which a page starts; 410 a deleted thread (#571) — this server deleted it — never started again; 500 handler failure',
   ),
   THREAD_DELETE_PREVIEW_ROUTE: threadRead(
     'respondWithDeletePreview → AgentHost.previewThreadDelete',
@@ -269,10 +269,10 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
   ),
   THREAD_DELETE_ROUTE: threadControl(
     'respondToDelete → deleteThreadAt → AgentHost.deleteThread',
-    "path: `threadId`; query: `?force=1` or none — no other; header: `If-Match: \"<sha256 hex of the work's words>\"` with `?force=1`, the work the page showed (PR #572 review); no body. Deletes the thread (#571): its tree through the inventory, its snapshot store — kept, marked `enso-orphaned`, while a fork's store names its objects, and swept once none does — then every session file under the id. The live session is retired only once the inventory has passed, and the id is refused for the server's lifetime after",
+    "path: `threadId`; query: `?force=1` or none — no other; header: `If-Match: \"<sha256 hex of the work's words>\"` with `?force=1`, the work the page showed (PR #572 review); no body. Deletes the thread (#571): the project's pre-#573 snapshot stores migrated first, then its tree through the inventory, its snapshot store, and the project's object store collected — what only this thread's snapshots reached goes, its forks' histories stay (#573) — then every session file under the id. The live session is retired only once the inventory has passed, and the id is refused for the server's lifetime after",
     [
       '204 empty — the session file, the tree (worktree, its registration and `enso/<thread-id>` branch, or the copy) and the store are gone',
-      '400 malformed thread id, or an `If-Match` that is no strong sha256 tag; 403 untrusted origin; 404 no session file in a served project, or a query other than `?force=1`; 409 a run holds the thread, or a move, a restore or another delete does; 422 the tree holds work — untracked, modified or unsnapshotted files, or commits on its branch no other ref reaches — named in the text: deleted with `?force=1` only when `If-Match` confirms those very words, so work gained since is named again, never taken unseen; 500 a removal failed',
+      "400 malformed thread id, or an `If-Match` that is no strong sha256 tag; 403 untrusted origin; 404 no session file in a served project, or a query other than `?force=1`; 409 a run holds the thread, or a move, a restore or another delete does, or the project's snapshot stores are being migrated or collected (#573); 422 the tree holds work — untracked, modified or unsnapshotted files, or commits on its branch no other ref reaches — named in the text: deleted with `?force=1` only when `If-Match` confirms those very words, so work gained since is named again, never taken unseen; 500 a removal failed, the project's snapshot stores cannot be migrated, or a fork's store that could not be migrated still reads this store's objects (#573), named in the text",
     ],
     {
       builds: 'no',

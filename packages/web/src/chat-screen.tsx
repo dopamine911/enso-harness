@@ -2084,14 +2084,12 @@ function describeDelete(read: DeletePreviewRead | undefined, stored: readonly En
   if (tree === null) return 'This cannot be undone. The conversation is deleted. Your checkout is not touched.'
   const named = tree.branch === null ? tree.path : `${tree.path} (branch ${tree.branch})`
   const goes = `This cannot be undone. The conversation is deleted, and so is the thread's tree at ${named}.`
-  const liveForks = keptFor.filter((fork) => !fork.deleted)
-  if (liveForks.length > 0) {
-    const forks = liveForks.map((fork) => forkName(fork.threadId, stored))
+  if (keptFor.length > 0) {
+    const forks = keptFor.map((fork) => forkName(fork.threadId, stored))
     if (forks.length === 1)
-      return `${goes} Its snapshots stay while the fork ${forks[0]} uses them, and are deleted with it. The fork itself is not deleted.`
-    return `${goes} Its snapshots stay while ${forks.length} forks (${forks.join(', ')}) use them, and are deleted with the last of them. The forks themselves are not deleted.`
+      return `${goes} Its snapshots up to where the fork ${forks[0]} branched stay with that fork; the rest go. The fork itself is not deleted.`
+    return `${goes} Its snapshots up to where each of ${forks.length} forks (${forks.join(', ')}) branched stay with them; the rest go. The forks themselves are not deleted.`
   }
-  if (keptFor.length > 0) return `${goes} Its snapshots are kept for forks of already-deleted threads.`
   return `${goes} Its snapshots go too.`
 }
 

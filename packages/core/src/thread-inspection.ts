@@ -308,9 +308,8 @@ export type EnsoForkReceipt = Static<typeof EnsoForkReceipt>
  * - `holdsWork`: the work in it a delete is refused for, in the inventory's own words ("the tree
  *   holds work — modified: a.txt"), or null — "Delete anyway" confirms exactly these words (their
  *   sha256 as `If-Match`), so work gained since is named before it is deleted;
- * - `keptFor`: the threads whose stores lean on this thread's snapshots (fork stores name every
- *   ancestor's), for which the store is kept until the last of them goes — `deleted` for one
- *   already deleted, whose own store is kept for a fork of its own.
+ * - `keptFor`: the forks of this thread, at any depth, whose histories keep its snapshots up to
+ *   where each forked (#573) — the rest of its snapshots go with it.
  *
  * @group Thread inspection
  */
@@ -328,9 +327,7 @@ export const EnsoThreadDeletePreview = Type.Object(
       Type.Null(),
     ]),
     holdsWork: Type.Union([Type.String(), Type.Null()]),
-    keptFor: Type.Array(
-      Type.Object({ threadId: Type.String(), deleted: Type.Boolean() }, { additionalProperties: false }),
-    ),
+    keptFor: Type.Array(Type.Object({ threadId: Type.String() }, { additionalProperties: false })),
   },
   { additionalProperties: false },
 )
