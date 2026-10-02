@@ -1,4 +1,5 @@
 import { afterAll, afterEach, expect, spyOn, test } from 'bun:test'
+import { createHash } from 'node:crypto'
 import {
   ENSO_GUARD_DENIAL_ENTRY,
   ENSO_PROVIDER_REFUSAL_KEY,
@@ -2154,7 +2155,10 @@ test('two live forks keep the snapshots: each is named, a long title cut and quo
   await page.unmount()
 })
 
-test('a tree holding work by the preview: the work is named before any click, and the first confirm sends force', async () => {
+/** The `If-Match` a "Delete anyway" confirms `work` with: the sha256 of the text shown, quoted. */
+const workTag = (work: string): string => `"${createHash('sha256').update(work, 'utf8').digest('hex')}"`
+
+test('a tree holding work by the preview: the work is named before any click, and "Delete anyway" confirms that text', async () => {
   const work = 'the tree holds work — modified: src/parse.ts'
   const page = await openDeletable({
     deletePreview: { tree: { kind: 'copy', path: '/work/copy', branch: null }, holdsWork: work, keptFor: [] },
@@ -2163,6 +2167,34 @@ test('a tree holding work by the preview: the work is named before any click, an
   expect(dialog.querySelector('[role="alert"]')?.textContent).toBe(work)
   await page.click(dialogButton('Delete anyway'))
   await eventually(() => expect(page.server.deletes).toEqual([`/api/threads/${DELETABLE}?force=1`]))
+  expect(page.server.deleteTags).toEqual([workTag(work)])
+  await page.unmount()
+})
+
+// PR #572 review: a forced delete confirms the work it was shown. A run that wrote more files since
+// makes the server refuse it (422) with the list as it is now — shown in place of the old one, and
+// confirmed by the next click.
+test('a "Delete anyway" refused (422) for work changed since: the new list is shown as changed, and the next click confirms it', async () => {
+  const shown = 'the tree holds work — modified: src/parse.ts'
+  const now = 'the tree holds work — modified: src/parse.ts, src/lexer.ts'
+  const page = await openDeletable({
+    deletePreview: { tree: { kind: 'copy', path: '/work/copy', branch: null }, holdsWork: shown, keptFor: [] },
+    deleteAnswers: [{ status: 422, reason: now }, { status: 204 }],
+  })
+  await openPreviewedDialog(page)
+  await page.click(dialogButton('Delete anyway'))
+  await eventually(() => {
+    const alert = deleteDialog()?.querySelector('[role="alert"]')?.textContent ?? ''
+    expect(alert).toContain('The tree changed since')
+    expect(alert).toContain(now)
+  })
+  expect(new URLSearchParams(window.location.search).get('thread')).toBe(DELETABLE)
+  await page.click(dialogButton('Delete anyway'))
+  await eventually(() => {
+    expect(page.server.deletes).toEqual([`/api/threads/${DELETABLE}?force=1`, `/api/threads/${DELETABLE}?force=1`])
+    expect(new URLSearchParams(window.location.search).get('thread')).not.toBe(DELETABLE)
+  })
+  expect(page.server.deleteTags).toEqual([workTag(shown), workTag(now)])
   await page.unmount()
 })
 
@@ -2207,6 +2239,7 @@ test('a tree holding work (422) is named in the dialog, and "Delete anyway" repe
   await page.click(dialogButton('Delete anyway'))
   await eventually(() => {
     expect(page.server.deletes).toEqual([`/api/threads/${DELETABLE}`, `/api/threads/${DELETABLE}?force=1`])
+    expect(page.server.deleteTags).toEqual([null, workTag(reason)])
     expect(new URLSearchParams(window.location.search).get('thread')).not.toBe(DELETABLE)
   })
   await page.unmount()

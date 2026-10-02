@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join, relative } from 'node:path'
+import { basename, dirname, join, relative } from 'node:path'
 import { openSnapshotStore, type SnapshotTaken } from '../snapshot-store.ts'
 import type { ThreadTreeKind, ThreadTreeRecord } from '../thread-tree-record.ts'
 import {
@@ -421,6 +421,29 @@ test('a store already gone, though a fork still names it, releases as removed, a
     store: { kind: 'removed' },
   })
   expect(existsSync(parent.path) || existsSync(where.store('gone'))).toBe(false)
+})
+
+// PR #572 review: a delete that stopped after its worktree was removed (or a user's `git worktree
+// prune`) left a tree git no longer knows; `worktree remove` refused it, and the thread could never
+// be deleted. A tree neither on disk nor registered is already removed — a present one still refuses.
+test('a worktree already removed and unregistered disposes: its branch and store go; one still on disk but unregistered is refused', async () => {
+  const project = checkout()
+  const where = home()
+  const pruned = await mintFromCheckout(project, where, 'pruned')
+  rmSync(pruned.path, { recursive: true, force: true })
+  git(project, 'worktree', 'prune')
+  expect(await disposeThreadTree({ record: pruned, store: where.store('pruned'), force: false, environment })).toEqual({
+    kind: 'disposed',
+    store: { kind: 'removed' },
+  })
+  expect(git(project, 'branch', '--list', 'enso/pruned')).toBe('')
+  expect(existsSync(where.store('pruned'))).toBe(false)
+
+  const stray = await mintFromCheckout(project, where, 'stray')
+  rmSync(join(project, '.git', 'worktrees', basename(stray.path)), { recursive: true, force: true })
+  const refused = await disposeThreadTree({ record: stray, store: where.store('stray'), force: true, environment })
+  expect(refused.kind).toBe('refused')
+  expect(existsSync(stray.path) && existsSync(join(where.store('stray'), 'HEAD'))).toBe(true)
 })
 
 test('⚠ a file the checkout ignores only through `.git/info/exclude` is never minted into a tree, and a restore leaves it in place — in the worktree and in a copy forked from it', async () => {

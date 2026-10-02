@@ -1212,18 +1212,29 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   }
 
   /**
-   * `DELETE …[?force=1]` (#571): 204 once the thread is gone; 404 an unknown thread; 409 a run, a
-   * move, a restore or another delete holding it; 422 a tree that holds work — the reason names it,
-   * and `?force=1` deletes it anyway. No body.
+   * `DELETE …[?force=1]` (#571): 204 once the thread is gone; 400 an `If-Match` that is no strong
+   * sha256 tag; 404 an unknown thread; 409 a run, a move, a restore or another delete holding it;
+   * 422 a tree that holds work — the reason names it — deleted by `?force=1` only with `If-Match`
+   * the sha256 of those very words (PR #572 review): work gained since the page showed its list is
+   * named first, never taken unseen. No body.
    */
   async function respondToDelete(
     threadId: string,
-    _request: IncomingMessage,
+    request: IncomingMessage,
     response: ServerResponse,
     match: RegExpExecArray,
   ): Promise<void> {
     const force = match[2] !== undefined
-    const outcome = await deleteThreadAt(threadRead, threadId, force)
+    const ifMatch = request.headers['if-match']
+    if (ifMatch !== undefined && !PROMPT_ETAG.test(ifMatch)) {
+      refuseWith(response, {
+        status: 400,
+        reason: 'If-Match names the work a delete confirms: a strong tag, "<sha256 hex of its words>"',
+      })
+      return
+    }
+    const confirmedWork = ifMatch?.slice(1, -1)
+    const outcome = await deleteThreadAt(threadRead, threadId, force, confirmedWork)
     if (outcome.status !== 204) {
       log.warn('delete refused ({status}): {reason}', {
         threadId,

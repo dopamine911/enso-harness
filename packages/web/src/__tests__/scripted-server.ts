@@ -41,6 +41,8 @@ export interface ScriptedFetch {
   readonly abortCount: () => number
   /** Every `DELETE /api/threads/:id` the server saw (#571), as path and query: `?force=1` included. */
   readonly deletes: string[]
+  /** Each delete's `If-Match` header (#571), in step with `deletes`; `null` when it carried none. */
+  readonly deleteTags: (string | null)[]
   /** Hold the next prompt's answer; returns the release. */
   readonly holdPrompt: () => () => void
   /** Hold every later delete's answer (#571) — the server has it, and has not answered; returns the release. */
@@ -153,6 +155,7 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
   const modeChanges: unknown[] = []
   const hostCommands: unknown[] = []
   const deletes: string[] = []
+  const deleteTags: (string | null)[] = []
   let storedThreads = options.storedThreads ?? []
   /** Question ids the server has TAKEN an answer for — the shape of the real route's 404. */
   const spentQuestions = new Set<string>()
@@ -258,10 +261,11 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
    * `DELETE /api/threads/:id` (#571): the next scripted answer; a 204 drops the thread from the
    * listing. Recorded as it arrives, answered once the gate opens.
    */
-  const deleteThread = async (threadId: string, url: URL): Promise<Response> => {
+  const deleteThread = async (threadId: string, url: URL, init: RequestInit): Promise<Response> => {
     const answers = options.deleteAnswers ?? []
     const answer = answers[Math.min(deletes.length, answers.length - 1)] ?? { status: 204 }
     deletes.push(`${url.pathname}${url.search}`)
+    deleteTags.push(new Headers(init.headers).get('If-Match'))
     await deleteGate
     if (answer.status !== 204) return new Response(answer.reason ?? 'no', { status: answer.status })
     storedThreads = storedThreads.filter((stored) => stored.threadId !== threadId)
@@ -272,7 +276,7 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
     const url = new URL(requestedUrl(input), 'http://localhost')
     const path = url.pathname
     const deleted = init?.method === 'DELETE' ? /^\/api\/threads\/([^/]+)$/.exec(path)?.[1] : undefined
-    if (deleted !== undefined) return deleteThread(decodeURIComponent(deleted), url)
+    if (deleted !== undefined && init !== undefined) return deleteThread(decodeURIComponent(deleted), url, init)
     if (/^\/api\/threads\/[^/]+\/delete-preview$/.test(path)) {
       const preview = options.deletePreview ?? { tree: null, holdsWork: null, keptFor: [] }
       return Promise.resolve(
@@ -294,6 +298,7 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
     hostCommands,
     abortCount: () => aborts,
     deletes,
+    deleteTags,
     holdPrompt: () => {
       const gate = Promise.withResolvers<void>()
       promptGate = gate

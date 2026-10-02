@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import type {
   DialogAnswer,
@@ -648,13 +649,15 @@ export function createFakeAgentHost(
       if (storedThread === undefined) return Promise.resolve({ kind: 'no-thread', reason: `no thread ${threadId}` })
       return Promise.resolve(storedThread.restore ?? { kind: 'no-tree', reason: `thread ${threadId} has no tree` })
     },
-    // The real host's order (#571): unknown, then the inventory (unless forced), then the live
-    // session's retire; deleted, the thread is gone from the fake's disk.
-    deleteThread: (threadId, { force, retire }): Promise<ThreadDeleteOutcome> => {
+    // The real host's order (#571): unknown, then the inventory — force takes only the work its
+    // digest confirms (PR #572 review) — then the live session's retire; deleted, the thread is
+    // gone from the fake's disk.
+    deleteThread: (threadId, { force, confirmedWork, retire }): Promise<ThreadDeleteOutcome> => {
       const storedThread = served(threadId)
       if (storedThread === undefined) return Promise.resolve({ kind: 'no-thread', reason: `no thread ${threadId}` })
-      if (!force && storedThread.holdsWork !== undefined) {
-        return Promise.resolve({ kind: 'holds-work', reason: storedThread.holdsWork })
+      const held = storedThread.holdsWork
+      if (held !== undefined && !(force && confirmedWork === createHash('sha256').update(held).digest('hex'))) {
+        return Promise.resolve({ kind: 'holds-work', reason: held })
       }
       if (!retire()) return Promise.resolve({ kind: 'busy', reason: `thread ${threadId} is running` })
       Reflect.deleteProperty(stored, threadId)

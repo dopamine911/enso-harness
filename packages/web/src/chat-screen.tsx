@@ -1975,9 +1975,11 @@ function AppHeader({
  * opening it reads the server's delete preview (`delete-thread.ts`), and the words come from that —
  * the conversation, the thread's tree by path and branch when it has one, and whether forks keep
  * its snapshots (they stay while a live fork needs them). Delete waits for the preview. Work the
- * tree holds is named up front, and the confirm is "Delete anyway" from the start. A preview that
- * fails is said, and a plain Delete stays: the server's answer to it is authoritative. A tree that
- * gained work after the preview is still refused (422) and named, offering "Delete anyway". Any
+ * tree holds is named up front, and the confirm is "Delete anyway" from the start; it confirms the
+ * text shown (its digest, `If-Match`), and work changed since is refused (422) with the new list,
+ * said as changed, for the next click to confirm. A preview that fails is said, and a plain Delete
+ * stays: the server's answer to it is authoritative. A tree that gained work after the preview is
+ * still refused (422) and named, offering "Delete anyway". Any
  * other refusal closes the dialog and is said on the thread. ⚠ Once sent, a delete cannot be called
  * back, so until the server answers nothing dismisses the dialog (PR #572 review): Cancel is
  * disabled, the close button is gone, and Esc and the backdrop do nothing.
@@ -1997,8 +1999,11 @@ function DeleteThread({
   const [deleting, setDeleting] = useState(false)
   /** The server's preview while the dialog is open; `undefined` while it is read. */
   const [preview, setPreview] = useState<DeletePreviewRead | undefined>(undefined)
-  /** The work the tree holds, as the server named it on a refused delete (422) — a race with the preview. */
-  const [refusedForWork, setRefusedForWork] = useState<string | undefined>(undefined)
+  /**
+   * The work the tree holds, as the server named it on a refused delete (422) — a race with the
+   * preview. `changed` when it answered a "Delete anyway": the work moved since it was shown.
+   */
+  const [refusedForWork, setRefusedForWork] = useState<{ reason: string; changed: boolean } | undefined>(undefined)
   useEffect(() => {
     if (!open) return
     let current = true
@@ -2018,13 +2023,14 @@ function DeleteThread({
     }
   }
   const previewed = preview?.kind === 'read' ? preview.preview : undefined
-  const holdsWork = refusedForWork ?? previewed?.holdsWork ?? undefined
-  const confirm = (force: boolean): void => {
+  /** The holds-work text on screen, and what "Delete anyway" confirms (its digest is the `If-Match`). */
+  const holdsWork = refusedForWork?.reason ?? previewed?.holdsWork ?? undefined
+  const confirm = (confirmedWork: string | undefined): void => {
     setDeleting(true)
-    void deleteThread(stores, force).then((outcome) => {
+    void deleteThread(stores, confirmedWork).then((outcome) => {
       setDeleting(false)
       if (outcome.kind === 'holds-work') {
-        setRefusedForWork(outcome.reason)
+        setRefusedForWork({ reason: outcome.reason, changed: confirmedWork !== undefined })
         return
       }
       // `deleting` in `changeOpen` is this render's; the answer is in, so close directly.
@@ -2048,6 +2054,7 @@ function DeleteThread({
         </DialogHeader>
         {holdsWork === undefined ? null : (
           <p role="alert" className="text-sm text-destructive">
+            {refusedForWork?.changed === true ? 'The tree changed since: ' : null}
             {holdsWork}
           </p>
         )}
@@ -2058,7 +2065,7 @@ function DeleteThread({
           <Button
             variant="destructive"
             disabled={deleting || preview === undefined}
-            onClick={(): void => confirm(holdsWork !== undefined)}
+            onClick={(): void => confirm(holdsWork)}
           >
             {holdsWork === undefined ? 'Delete' : 'Delete anyway'}
           </Button>

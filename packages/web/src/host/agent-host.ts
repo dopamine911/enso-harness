@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import {
   existsSync,
   mkdirSync,
@@ -703,18 +704,25 @@ export interface AgentHost {
   /** Undo the thread's last restore (#565): its tree back to that restore's safety snapshot, itself recorded as a restore. */
   undoLastRestore(threadId: string, safety: string): Promise<ThreadRestoreOutcome>
   /**
-   * Delete the thread (#571): its tree through the inventory (`force` deletes a tree holding work
-   * too), its store — kept, orphaned, while a fork leans on it — then every session file under its
-   * id. `retire` disposes the live session and refuses a busy one: the registry's, which the host
-   * does not hold. Hard: nothing is kept to undo it.
+   * Delete the thread (#571): its tree through the inventory, its store — kept, orphaned, while a
+   * fork leans on it — then every session file under its id. A tree holding work is deleted only
+   * `force`d AND with `confirmedWork` the sha256 (hex) of the work's words as the user was shown
+   * them (PR #572 review): work gained since is refused, named, never taken unseen. `retire`
+   * disposes the live session and refuses a busy one: the registry's, which the host does not
+   * hold. Hard: nothing is kept to undo it.
    */
   deleteThread(
     threadId: string,
-    options: { readonly force: boolean; readonly retire: () => boolean },
+    options: {
+      readonly force: boolean
+      readonly confirmedWork?: string | undefined
+      readonly retire: () => boolean
+    },
   ): Promise<ThreadDeleteOutcome>
   /**
-   * What deleting the thread would do (#571), changing nothing: its tree, the work in it a delete
-   * is refused for, and the threads whose stores keep its snapshots — the delete dialog's text.
+   * What deleting the thread would do (#571), deleting nothing and taking no snapshot: its tree,
+   * the work in it a delete is refused for, and the threads whose stores keep its snapshots — the
+   * delete dialog's text.
    */
   previewThreadDelete(
     threadId: string,
@@ -1443,7 +1451,11 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
    */
   async function deleteThread(
     threadId: string,
-    { force, retire }: { readonly force: boolean; readonly retire: () => boolean },
+    {
+      force,
+      confirmedWork,
+      retire,
+    }: { readonly force: boolean; readonly confirmedWork?: string | undefined; readonly retire: () => boolean },
   ): Promise<ThreadDeleteOutcome> {
     if (deletedThreads.has(threadId)) return { kind: 'no-thread', reason: `thread ${threadId} was deleted` }
     if (deletingThreads.has(threadId)) return { kind: 'busy', reason: `thread ${threadId} is being deleted` }
@@ -1460,9 +1472,17 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       }
       const tree = treeRecordOf(transcriptOf(SessionManager.open(located.path).getBranch()))
       const store = storeOf(threadId, located.cwd)
-      if (tree !== undefined && store !== undefined && !force) {
+      // The inventory always runs: force takes only the work the user confirmed (PR #572 review) —
+      // a run that wrote more since the list was shown has that named first, never deleted unseen.
+      if (tree !== undefined && store !== undefined) {
         const held = holdingReason(await inventoryThreadTree({ record: tree, store, environment }))
-        if (held !== undefined) return { kind: 'holds-work', reason: held }
+        const confirmed =
+          force &&
+          confirmedWork ===
+            createHash('sha256')
+              .update(held ?? '')
+              .digest('hex')
+        if (held !== undefined && !confirmed) return { kind: 'holds-work', reason: held }
       }
       if (!retire()) return { kind: 'busy', reason: `thread ${threadId} is running; delete it when it settles` }
       if (tree !== undefined && store !== undefined) {
@@ -1591,13 +1611,25 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     // is found next time, and the browser adopts under the history's `threadId` (`thread-stores.ts#adoptThread`). The
     // file sits under the agent dir pi resolves from the env the host set, where `pi --mode rpc` put it, so the mode's
     // `active_agent` entries and the transcript land where the TUI's would; `permissionModeState()` below walks them.
-    if (located !== undefined) return buildHosted(threadId, SessionManager.open(located.path))
+    if (located !== undefined)
+      return fencedFromDelete(threadId, await buildHosted(threadId, SessionManager.open(located.path)))
     const created = SessionManager.create(directory, sessionDirFor(directory), { id: threadId })
-    const hosted = await buildHosted(threadId, created)
+    const hosted = fencedFromDelete(threadId, await buildHosted(threadId, created))
     // A new thread whose project gives threads a tree (#551) is built in the checkout and gets its
     // tree at its first RUN, not here (PR #561 review): a thread only built — a preview looked at,
     // a permission checked, a model chosen — leaves no worktree, branch or file behind.
     return treeKindOf(directory) === undefined ? hosted : treeOnFirstRun(threadId, directory, hosted, created)
+  }
+
+  /**
+   * A build that finished after its thread was deleted, or while it was (PR #572 review): the check
+   * at `createSession`'s top runs before its awaits, and the registry's `retire` cannot see a build
+   * under way — so the build is disposed here, before anything can run on it or write its file again.
+   */
+  function fencedFromDelete(threadId: string, hosted: HostedThread): HostedThread {
+    if (!deletingThreads.has(threadId) && !deletedThreads.has(threadId)) return hosted
+    hosted.runtime.dispose()
+    throw new ThreadDeleted(`thread ${threadId} was deleted while it was being built`)
   }
 
   /**
@@ -2341,9 +2373,10 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         )
         return
       }
-      // A delete holds the thread (#571): its session is going, and nothing more may run on it.
-      if (deletingThreads.has(threadId)) {
-        outcome.onRejected(`thread ${threadId} is being deleted`)
+      // A delete holds the thread, or has deleted it (#571; PR #572 review: a session the registry
+      // never held outlives the delete) — nothing more may run on it, nor write its file again.
+      if (deletingThreads.has(threadId) || deletedThreads.has(threadId)) {
+        outcome.onRejected(`thread ${threadId} is being deleted, or was deleted`)
         return
       }
       // ⚠ The restore route leases the thread, but a prompt that finds it held JOINS the holder

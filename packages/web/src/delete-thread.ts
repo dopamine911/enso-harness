@@ -11,7 +11,9 @@ import type { ThreadStores } from './thread-stores.ts'
  * - 204: deleted — the page leaves the thread (`chat-screen.tsx`).
  * - 422: the tree holds work, named by the reason. Forceable: the dialog shows the server's words
  *   as they are — they already say "the tree holds work — …", so no status and no label of the
- *   page's — and offers "Delete anyway", the same call with `?force=1`.
+ *   page's — and offers "Delete anyway": the same call with `?force=1`, confirming the work shown
+ *   by `If-Match: "<sha256 hex of that text>"` (PR #572 review). A forced delete whose text is stale
+ *   (a run wrote more since) is refused 422 again, with the list as it is now.
  * - 409 (a run, a move or a restore holds the thread), 404 (no such thread), or no answer at
  *   all: never forceable, so the dialog closes and the reason is a warning on the thread, as a
  *   refused restore is (`fork-thread.ts`).
@@ -27,15 +29,16 @@ export type DeleteOutcome =
 const HOLDS_WORK = 422
 
 /**
- * `DELETE` the pane's thread, `force` to take the work its tree holds with it. A refusal that
- * force cannot change is said on the thread as `delete refused: …`; the outcome says what the
- * dialog does next.
+ * `DELETE` the pane's thread. `confirmedWork` is the holds-work text the dialog showed, when the
+ * user chose to take that work with it: sent as `?force=1` with its digest in `If-Match`, so the
+ * server deletes only the work that was shown. A refusal that force cannot change is said on the
+ * thread as `delete refused: …`; the outcome says what the dialog does next.
  */
 export async function deleteThread(
   stores: Pick<ThreadStores, 'threadId' | 'fetch' | 'notifications'>,
-  force: boolean,
+  confirmedWork: string | undefined,
 ): Promise<DeleteOutcome> {
-  const outcome = await askToDelete(stores, force)
+  const outcome = await askToDelete(stores, confirmedWork)
   if (outcome.kind === 'refused') {
     stores.notifications.push(
       `thread ${stores.threadId}: delete refused: ${outcome.reason}`,
@@ -47,10 +50,21 @@ export async function deleteThread(
   return outcome
 }
 
-async function askToDelete(stores: Pick<ThreadStores, 'threadId' | 'fetch'>, force: boolean): Promise<DeleteOutcome> {
+/** The entity tag a forced delete confirms `work` by: its UTF-8 sha256, lowercase hex, quoted. */
+async function workTag(work: string): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(work)))
+  return `"${Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('')}"`
+}
+
+async function askToDelete(
+  stores: Pick<ThreadStores, 'threadId' | 'fetch'>,
+  confirmedWork: string | undefined,
+): Promise<DeleteOutcome> {
+  const force = confirmedWork !== undefined
   const route = `/api/threads/${encodeURIComponent(stores.threadId)}${force ? '?force=1' : ''}`
   try {
-    const response = await stores.fetch(route, { method: 'DELETE' })
+    const headers: Record<string, string> = force ? { 'If-Match': await workTag(confirmedWork) } : {}
+    const response = await stores.fetch(route, { method: 'DELETE', headers })
     if (response.ok) return { kind: 'deleted' }
     if (response.status === HOLDS_WORK) {
       // Whole, not bounded to a line's length: the reason is the list of what force would destroy.

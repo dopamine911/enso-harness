@@ -956,11 +956,22 @@ test('⚠ a restore holds its thread until it settles: a mode change meanwhile i
   expect((await undoOf('never-stored', { safety: 'b'.repeat(40) })).status).toBe(404)
 })
 
-/** `DELETE …` (#571), with `query` appended; the status and the text it answered. */
-async function deleteOf(url: string, threadId: string, query = ''): Promise<{ status: number; body: string }> {
-  const response = await fetch(`${url}/api/threads/${threadId}${query}`, { method: 'DELETE' })
+/** `DELETE …` (#571), with `query` appended and `ifMatch` as its `If-Match`; the status and the text it answered. */
+async function deleteOf(
+  url: string,
+  threadId: string,
+  query = '',
+  ifMatch?: string,
+): Promise<{ status: number; body: string }> {
+  const response = await fetch(`${url}/api/threads/${threadId}${query}`, {
+    method: 'DELETE',
+    ...(ifMatch === undefined ? {} : { headers: { 'If-Match': ifMatch } }),
+  })
   return { status: response.status, body: await response.text() }
 }
+
+/** The `If-Match` a page sends to confirm the work it showed (PR #572 review): its words' sha256, a strong tag. */
+const confirming = (work: string): string => `"${createHash('sha256').update(work).digest('hex')}"`
 
 test('⚠ DELETE /api/threads/:id answers 204 and the thread is gone; a tree holding work is a 422 naming it, deleted with ?force=1 and no other query; an unknown thread 404; a running one 409 (#571)', async () => {
   const thread = { transcript: STORED_BRANCH, modified: new Date(0), firstMessage: 'earlier question' }
@@ -987,7 +998,19 @@ test('⚠ DELETE /api/threads/:id answers 204 and the thread is gone; a tree hol
   expect(await deleteOf(url, 'working')).toEqual({ status: 422, body: 'the tree holds work — untracked: work.md' })
   expect((await deleteOf(url, 'working', '?force=0')).status).toBe(404)
   expect((await deleteOf(url, 'working', '?force=1&x=1')).status).toBe(404)
-  expect(await deleteOf(url, 'working', '?force=1')).toEqual({ status: 204, body: '' })
+  // PR #572 review: force takes only the work the page showed — named by its digest in `If-Match`.
+  expect(await deleteOf(url, 'working', '?force=1')).toEqual({
+    status: 422,
+    body: 'the tree holds work — untracked: work.md',
+  })
+  expect(
+    (await deleteOf(url, 'working', '?force=1', confirming('the tree holds work — untracked: other.md'))).status,
+  ).toBe(422)
+  expect((await deleteOf(url, 'working', '?force=1', 'not-a-tag')).status).toBe(400)
+  expect(await deleteOf(url, 'working', '?force=1', confirming('the tree holds work — untracked: work.md'))).toEqual({
+    status: 204,
+    body: '',
+  })
   expect((await deleteOf(url, 'never-stored')).status).toBe(404)
   // A run holds the thread: refused before the host is asked, never forceable.
   await prompt(url, 'running', '/mode')

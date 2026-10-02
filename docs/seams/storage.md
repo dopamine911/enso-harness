@@ -88,18 +88,25 @@ export interface AgentHost {
   /** Undo the thread's last restore (#565): its tree back to that restore's safety snapshot, itself recorded as a restore. */
   undoLastRestore(threadId: string, safety: string): Promise<ThreadRestoreOutcome>
   /**
-   * Delete the thread (#571): its tree through the inventory (`force` deletes a tree holding work
-   * too), its store — kept, orphaned, while a fork leans on it — then every session file under its
-   * id. `retire` disposes the live session and refuses a busy one: the registry's, which the host
-   * does not hold. Hard: nothing is kept to undo it.
+   * Delete the thread (#571): its tree through the inventory, its store — kept, orphaned, while a
+   * fork leans on it — then every session file under its id. A tree holding work is deleted only
+   * `force`d AND with `confirmedWork` the sha256 (hex) of the work's words as the user was shown
+   * them (PR #572 review): work gained since is refused, named, never taken unseen. `retire`
+   * disposes the live session and refuses a busy one: the registry's, which the host does not
+   * hold. Hard: nothing is kept to undo it.
    */
   deleteThread(
     threadId: string,
-    options: { readonly force: boolean; readonly retire: () => boolean },
+    options: {
+      readonly force: boolean
+      readonly confirmedWork?: string | undefined
+      readonly retire: () => boolean
+    },
   ): Promise<ThreadDeleteOutcome>
   /**
-   * What deleting the thread would do (#571), changing nothing: its tree, the work in it a delete
-   * is refused for, and the threads whose stores keep its snapshots — the delete dialog's text.
+   * What deleting the thread would do (#571), deleting nothing and taking no snapshot: its tree,
+   * the work in it a delete is refused for, and the threads whose stores keep its snapshots — the
+   * delete dialog's text.
    */
   previewThreadDelete(
     threadId: string,

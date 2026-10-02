@@ -1003,19 +1003,23 @@ const DELETE_REFUSAL_STATUS = { 'no-thread': 404, busy: 409, 'holds-work': 422, 
 
 /**
  * Delete the thread (#571): its session file, its tree and its store — a 422 while the tree holds
- * work, unless `force`. Refused 409 while a run holds it, as every control route is; the live
- * session is retired by the host only once the inventory has passed, so a refusal leaves the open
- * page as it was. A claim for the id, from a page that named its project, goes with it.
+ * work, unless `force` AND `confirmedWork`, the sha256 of the work's words as the page showed them,
+ * matches the work the tree holds now (PR #572 review). Refused 409 while a run holds it, as every
+ * control route is; the live session is retired by the host only once the inventory has passed, so
+ * a refusal leaves the open page as it was. A claim for the id, from a page that named its
+ * project, goes with it.
  */
 export async function deleteThreadAt(
   deps: ThreadReadDeps,
   threadId: string,
   force: boolean,
+  confirmedWork: string | undefined,
 ): Promise<DeleteRouteOutcome> {
   const running = runningRefusal(deps.threads, threadId, 'delete it')
   if (running !== undefined) return running
   const outcome = await deps.host.deleteThread(threadId, {
     force,
+    confirmedWork,
     retire: () => deps.threads.retire(threadId, 'the thread was deleted'),
   })
   if (outcome.kind !== 'deleted') return { status: DELETE_REFUSAL_STATUS[outcome.kind], reason: outcome.reason }

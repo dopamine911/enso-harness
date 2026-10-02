@@ -588,22 +588,44 @@ export function holdingReason(inventory: ThreadTreeInventory): string | undefine
 }
 
 /**
+ * Whether the checkout's repository still lists `record.path` among its worktrees; undefined when
+ * the listing failed — never read as "not registered".
+ */
+async function worktreeRegistered(
+  record: ThreadTreeRecord,
+  environment: NodeJS.ProcessEnv,
+): Promise<boolean | undefined> {
+  const listed = await runTreeGit(environment, ['worktree', 'list', '--porcelain'], record.project)
+  if (listed.code !== 0) return undefined
+  const path = canonical(record.path)
+  return listed.stdout
+    .split('\n')
+    .some((line) => line.startsWith('worktree ') && canonical(line.slice('worktree '.length)) === path)
+}
+
+/**
  * The worktree's registration and directory removed, then its branch: `-d`, so a branch git does
  * not see merged into HEAD is kept (`-D` only when forced). Undefined when removed, else why not
- * — a failed `remove` leaves the branch and store alone, for the caller to refuse.
+ * — a failed `remove` leaves the branch and store alone, for the caller to refuse. ⚠ A tree
+ * neither on disk nor registered is ALREADY removed (PR #572 review: a delete that stopped after
+ * this step, or a user's `git worktree prune`) — the dispose goes on to its branch and store; a
+ * tree still on disk is removed by git or refused, never assumed gone.
  */
 async function removeWorktree(
   record: ThreadTreeRecord,
   force: boolean,
   environment: NodeJS.ProcessEnv,
 ): Promise<string | undefined> {
-  // A tree directory that is gone still has its registration: `remove` drops it all the same.
-  const removed = await runTreeGit(
-    environment,
-    ['worktree', 'remove', ...(force ? ['--force'] : []), record.path],
-    record.project,
-  )
-  if (removed.code !== 0) return `git worktree remove: ${gitReason(removed)}`
+  const alreadyGone = !existsSync(record.path) && (await worktreeRegistered(record, environment)) === false
+  if (!alreadyGone) {
+    // A tree directory that is gone still has its registration: `remove` drops it all the same.
+    const removed = await runTreeGit(
+      environment,
+      ['worktree', 'remove', ...(force ? ['--force'] : []), record.path],
+      record.project,
+    )
+    if (removed.code !== 0) return `git worktree remove: ${gitReason(removed)}`
+  }
   if (record.branch === null) return undefined
   const exists = await runTreeGit(
     environment,

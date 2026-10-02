@@ -73,6 +73,7 @@ import {
   seedMultiAccountConfig,
   stopRunSettlingDialogs,
   ThreadDeleted,
+  type ThreadDeleteOutcome,
 } from '../agent-host.ts'
 import { LOST_TOOL_RESULT_TEXT, NOTHING_TO_CONTINUE } from '../continuation.ts'
 import { storedPermissionModeState } from '../permission-mode-adapter.ts'
@@ -2086,6 +2087,17 @@ function userEntryOf(entries: HostedThreadInspection['entries'], text: string): 
 /** A `retire` for a thread the test has already disposed: the host's own suite drives no registry. */
 const NOTHING_LIVE = (): boolean => true
 
+/** A forced delete confirming the work the preview showed, as the dialog's "Delete anyway" sends it (PR #572 review). */
+async function deleteAsPreviewed(host: AgentHost, threadId: string): Promise<ThreadDeleteOutcome> {
+  const read = await host.previewThreadDelete(threadId)
+  const work = read.kind === 'preview' ? read.preview.holdsWork : null
+  return host.deleteThread(threadId, {
+    force: true,
+    ...(work === null ? {} : { confirmedWork: sha256Of(work) }),
+    retire: NOTHING_LIVE,
+  })
+}
+
 // #571: a delete removes what the thread has on disk — its session file and its store, which
 // run-context mints for every thread, tree or not — and the id stays refused, so a page still
 // showing it cannot prompt a new thread into being under it.
@@ -2143,6 +2155,49 @@ test('two deletes of one thread at once: one deletes it, the other is refused as
   expect(outcomes.map((outcome) => outcome.kind).toSorted()).toEqual(['busy', 'deleted'])
 })
 
+// PR #572 review: the tombstone was checked only before a build's awaits, so a build already under
+// way finished after the delete and came back live — the registry's `retire` cannot see a build —
+// and its next prompt wrote the deleted session file again. A session the registry never held
+// (here: one the test keeps) must not run on a deleted id either.
+test('a build under way when its thread is deleted is refused when it finishes, and a session still held admits no prompt (#571)', async () => {
+  const project = dirtyCheckout()
+  const core = createFauxCore()
+  core.setResponses([faux.fauxAssistantMessage('one'), faux.fauxAssistantMessage('two')])
+  const building = Promise.withResolvers<void>()
+  const release = Promise.withResolvers<void>()
+  let holdNext = false
+  const hold: InlineExtension = {
+    name: 'enso-host-hold-a-build',
+    factory: (pi: ExtensionAPI) => {
+      pi.on('session_start', async () => {
+        if (!holdNext) return
+        holdNext = false
+        building.resolve()
+        await release.promise
+      })
+    },
+  }
+  const { host } = treeHost(project, [fauxModelExtension(core), hold], 'off')
+  new ProjectTrustStore(agentDir).set(project, true)
+  const threadId = crypto.randomUUID()
+  const held = await host.createSession(threadId, () => project)
+  await runPrompt(held, 'first')
+  const file = held.inspect().sessionFile ?? ''
+
+  holdNext = true
+  const rebuilt = host.createSession(threadId, () => project)
+  await building.promise
+  expect(await host.deleteThread(threadId, { force: false, retire: NOTHING_LIVE })).toEqual({ kind: 'deleted' })
+  release.resolve()
+  await expect(rebuilt).rejects.toBeInstanceOf(ThreadDeleted)
+
+  const refused = Promise.withResolvers<string>()
+  held.runtime.prompt({ message: 'after the delete' }, { onAccepted: () => undefined, onRejected: refused.resolve })
+  expect(await refused.promise).toContain('deleted')
+  held.runtime.dispose()
+  expect(existsSync(file)).toBe(false)
+})
+
 test('⚠ deleting a thread on its worktree: one holding work is refused, naming it, with nothing removed and the thread not retired; forced, the worktree, its branch, its store and its session go, and the checkout is untouched (#571)', async () => {
   const project = dirtyCheckout()
   const statusBefore = fixtureGit(project, 'status', '--porcelain')
@@ -2171,8 +2226,25 @@ test('⚠ deleting a thread on its worktree: one holding work is refused, naming
   expect(retired).toBe(false)
   expect([existsSync(tree), existsSync(file), existsSync(join(store, 'HEAD'))]).toEqual([true, true, true])
 
+  // PR #572 review: force takes the work the user was SHOWN, and nothing more. Forced without
+  // naming it, or naming a list the tree has since outgrown, is refused with the list as it is now.
+  const reasonOf = (outcome: Awaited<ReturnType<AgentHost['deleteThread']>>): string =>
+    outcome.kind === 'deleted' ? '' : outcome.reason
+  const shown = reasonOf(refused)
+  expect((await host.deleteThread(threadId, { force: true, retire: NOTHING_LIVE })).kind).toBe('holds-work')
+  writeFileSync(join(tree, 'more.md'), 'written after the list was shown\n')
+  const outgrown = await host.deleteThread(threadId, {
+    force: true,
+    confirmedWork: sha256Of(shown),
+    retire: NOTHING_LIVE,
+  })
+  expect(outgrown.kind).toBe('holds-work')
+  expect(reasonOf(outgrown)).toContain('more.md')
+  expect(existsSync(join(tree, 'more.md')) && existsSync(file)).toBe(true)
+
   const forced = await host.deleteThread(threadId, {
     force: true,
+    confirmedWork: sha256Of(reasonOf(outgrown)),
     retire: () => {
       hosted.runtime.dispose()
       return true
@@ -2207,7 +2279,7 @@ test("⚠ deleting a forked parent keeps its store for the fork — the fork sti
   const snapshots = projectSnapshotsDir(projectsDir, projectIdOf(project))
 
   // Before deleting, the preview says what goes and what stays: the tree with its branch, the work
-  // in it, and the fork its snapshots are kept for — read without changing anything.
+  // in it, and the fork its snapshots are kept for — deleting nothing.
   expect(await host.previewThreadDelete(parentId)).toEqual({
     kind: 'preview',
     preview: {
@@ -2217,7 +2289,7 @@ test("⚠ deleting a forked parent keeps its store for the fork — the fork sti
     },
   })
   expect(existsSync(parentTree) && existsSync(join(snapshots, parentId, 'HEAD'))).toBe(true)
-  expect(await host.deleteThread(parentId, { force: true, retire: NOTHING_LIVE })).toEqual({ kind: 'deleted' })
+  expect(await deleteAsPreviewed(host, parentId)).toEqual({ kind: 'deleted' })
   expect(existsSync(parentTree)).toBe(false)
   expect(existsSync(join(snapshots, parentId, 'HEAD'))).toBe(true)
   // PR #572 review: the in-memory tombstone does not survive a restart, but the kept store does —
@@ -2233,9 +2305,7 @@ test("⚠ deleting a forked parent keeps its store for the fork — the fork sti
   expect(readFileSync(join(forkTree, 'a.txt'), 'utf8')).toBe('dirty\n')
 
   fork.runtime.dispose()
-  expect(await host.deleteThread(forked.threadId, { force: true, retire: NOTHING_LIVE })).toEqual({
-    kind: 'deleted',
-  })
+  expect(await deleteAsPreviewed(host, forked.threadId)).toEqual({ kind: 'deleted' })
   expect(existsSync(join(snapshots, forked.threadId)) || existsSync(join(snapshots, parentId))).toBe(false)
   // Once the store is swept, nothing of the id is left to collide with.
   expect(restarted.threadDeleted(parentId)).toBe(false)

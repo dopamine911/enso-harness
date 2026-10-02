@@ -301,11 +301,13 @@ export const EnsoForkReceipt = Type.Object(
 export type EnsoForkReceipt = Static<typeof EnsoForkReceipt>
 
 /**
- * What deleting a thread would do (#571, `GET …/delete-preview`), read before the dialog asks —
- * nothing is changed by it:
+ * What deleting a thread would do (#571, `GET …/delete-preview`), read before the dialog asks. It
+ * moves nothing — nothing is deleted and no snapshot is taken; its inventory only stages the tree
+ * into a scratch index, which leaves loose objects in the thread's store (PR #572 review):
  * - `tree`: the tree a delete removes with its thread, or null for a thread in its checkout;
  * - `holdsWork`: the work in it a delete is refused for, in the inventory's own words ("the tree
- *   holds work — modified: a.txt"), or null — "Delete anyway" deletes it;
+ *   holds work — modified: a.txt"), or null — "Delete anyway" confirms exactly these words (their
+ *   sha256 as `If-Match`), so work gained since is named before it is deleted;
  * - `keptFor`: the threads whose stores lean on this thread's snapshots (fork stores name every
  *   ancestor's), for which the store is kept until the last of them goes — `deleted` for one
  *   already deleted, whose own store is kept for a fork of its own.
