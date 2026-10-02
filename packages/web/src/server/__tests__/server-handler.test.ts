@@ -144,7 +144,7 @@ function fakeHost(
     },
     stored,
     FRESH_MODE,
-    servesDirectory,
+    { servesDirectory },
   )
   return { host, built, requested, builtIn }
 }
@@ -985,7 +985,7 @@ test('⚠ DELETE /api/threads/:id answers 204 and the thread is gone; a tree hol
   const preview = await fetch(`${url}/api/threads/working/delete-preview`)
   expect([preview.status, await preview.json()]).toEqual([
     200,
-    { tree: null, holdsWork: 'the tree holds work — untracked: work.md', keptFor: [] },
+    { tree: null, size: null, holdsWork: 'the tree holds work — untracked: work.md', keptFor: [] },
   ])
   expect(await deleteOf(url, 'plain')).toEqual({ status: 204, body: '' })
   expect((await deleteOf(url, 'plain')).status).toBe(404)

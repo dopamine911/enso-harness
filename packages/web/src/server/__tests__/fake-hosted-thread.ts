@@ -16,6 +16,7 @@ import type {
   EnsoSystemPromptChoice,
   EnsoSystemPromptSection,
   EnsoTranscriptEntry,
+  EnsoTreesListing,
   HostFlowOutcome,
   PromptOutcome,
   PromptRequest,
@@ -514,7 +515,14 @@ export function createFakeAgentHost(
   createSession: AgentHost['createSession'],
   stored: Record<string, FakeStoredThread> = {},
   fresh: EnsoPermissionModeState = FAKE_FRESH_MODE,
-  servesDirectory: (directory: string) => boolean = () => true,
+  {
+    servesDirectory = () => true,
+    trees = { projects: [] },
+  }: {
+    readonly servesDirectory?: (directory: string) => boolean
+    /** What `listTrees` answers (#578): no projects' trees by default — the fake has no disk. */
+    readonly trees?: EnsoTreesListing
+  } = {},
 ): AgentHost {
   const directoryOf = (storedThread: FakeStoredThread): string => storedThread.cwd ?? FAKE_PROJECT_DIRECTORY
   /** The stored thread under this id if its directory is served — what the real host reads. */
@@ -671,8 +679,9 @@ export function createFakeAgentHost(
       if (storedThread === undefined) return Promise.resolve({ kind: 'no-thread', reason: `no thread ${threadId}` })
       return Promise.resolve({
         kind: 'preview',
-        preview: { tree: null, holdsWork: storedThread.holdsWork ?? null, keptFor: [] },
+        preview: { tree: null, size: null, holdsWork: storedThread.holdsWork ?? null, keptFor: [] },
       })
     },
+    listTrees: () => Promise.resolve(trees),
   }
 }

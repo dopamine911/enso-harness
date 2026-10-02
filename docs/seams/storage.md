@@ -113,6 +113,12 @@ export interface AgentHost {
     | { readonly kind: 'preview'; readonly preview: EnsoThreadDeletePreview }
     | { readonly kind: 'no-thread'; readonly reason: string }
   >
+  /**
+   * What thread trees cost on disk (#578), per project this host serves a thread of: each tree —
+   * the thread whose branch records it, or none — with its size and the work it holds, and the
+   * project's snapshot object store. Reads only; every size under one time cap.
+   */
+  listTrees(): Promise<EnsoTreesListing>
   /** Whether a NEW thread in `project` gets a tree of its own (#551): a projects folder, and trees not `off` for it. */
   mintsTreesIn(project: string): boolean
   /** What a fresh thread starts in — served before any run exists, so the header never guesses. */

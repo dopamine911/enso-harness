@@ -3,11 +3,13 @@ import { execFileSync } from 'node:child_process'
 import {
   chmodSync,
   existsSync,
+  linkSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   utimesSync,
   writeFileSync,
 } from 'node:fs'
@@ -16,6 +18,7 @@ import { basename, dirname, join, relative } from 'node:path'
 import { openSnapshotStore, type SnapshotTaken } from '../snapshot-store.ts'
 import type { ThreadTreeKind, ThreadTreeRecord } from '../thread-tree-record.ts'
 import {
+  diskUsageOf,
   disposeThreadTree,
   inventoryThreadTree,
   mintThreadTree,
@@ -23,6 +26,49 @@ import {
   restoreThreadTree,
   treeKindFor,
 } from '../thread-tree.ts'
+
+// #578: what a tree costs on disk, as `du` counts it — allocated blocks, a hard link once, a
+// symlink never followed — and never a `0` for what was not counted.
+test('⚠ a directory measures as `du -sk` does: blocks, a hard-linked file once, a symlink not followed (#578)', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'enso-du-'))
+  writeFileSync(join(directory, 'small.txt'), 'a\n')
+  mkdirSync(join(directory, 'deep', 'deeper'), { recursive: true })
+  writeFileSync(join(directory, 'deep', 'deeper', 'big.bin'), Buffer.alloc(300_000, 1))
+  linkSync(join(directory, 'deep', 'deeper', 'big.bin'), join(directory, 'hardlink.bin'))
+  const outside = mkdtempSync(join(tmpdir(), 'enso-du-outside-'))
+  writeFileSync(join(outside, 'elsewhere.bin'), Buffer.alloc(500_000, 1))
+  symlinkSync(outside, join(directory, 'link-to-outside'))
+  const du = Number(execFileSync('du', ['-sk', directory], { encoding: 'utf8' }).split('\t')[0]) * 1024
+  const measured = await diskUsageOf(directory, Date.now() + 10_000)
+  expect(measured.kind).toBe('measured')
+  // `du -sk` rounds the total up to a KiB.
+  expect(Math.abs((measured.kind === 'measured' ? measured.bytes : 0) - du)).toBeLessThan(1024)
+})
+
+test('a directory that is gone frees nothing; one that cannot be read is `unreadable`; an unreadable subdirectory or the time cap is `partial` — at least what was counted (#578)', async () => {
+  expect(await diskUsageOf(join(tmpdir(), 'enso-du-never-made'), Date.now() + 1000)).toEqual({
+    kind: 'measured',
+    bytes: 0,
+  })
+  const directory = mkdtempSync(join(tmpdir(), 'enso-du-'))
+  writeFileSync(join(directory, 'counted.bin'), Buffer.alloc(100_000, 1))
+  mkdirSync(join(directory, 'locked'))
+  writeFileSync(join(directory, 'locked', 'hidden.bin'), Buffer.alloc(100_000, 1))
+  chmodSync(join(directory, 'locked'), 0o000)
+  try {
+    const partial = await diskUsageOf(directory, Date.now() + 10_000)
+    expect(partial.kind).toBe('partial')
+    expect(partial.kind === 'partial' ? partial.bytes : 0).toBeGreaterThanOrEqual(100_000)
+    expect(partial.kind === 'partial' ? partial.reason : '').toContain('could not be read')
+    chmodSync(directory, 0o000)
+    expect((await diskUsageOf(directory, Date.now() + 10_000)).kind).toBe('unreadable')
+  } finally {
+    chmodSync(directory, 0o755)
+    chmodSync(join(directory, 'locked'), 0o755)
+  }
+  const capped = await diskUsageOf(directory, Date.now() - 1)
+  expect(capped).toMatchObject({ kind: 'partial', reason: expect.stringContaining('time') })
+})
 
 /**
  * A thread's own tree (#551 slice 2), on real git: temp checkouts only, never a worktree of this

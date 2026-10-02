@@ -11,6 +11,7 @@ import type {
   EnsoThreadHistory,
   EnsoThreadInspection,
   EnsoThreadStats,
+  EnsoTreesListing,
   RuntimeCommand,
 } from '@enso/core'
 import { NO_SESSION_INCIDENTS } from '@enso/core'
@@ -43,6 +44,10 @@ export interface ScriptedFetch {
   readonly deletes: string[]
   /** Each delete's `If-Match` header (#571), in step with `deletes`; `null` when it carried none. */
   readonly deleteTags: (string | null)[]
+  /** Every `GET /api/threads/:id/delete-preview` path the server saw (#571). */
+  readonly previewReads: string[]
+  /** Every `GET /api/trees` the server saw (#578). */
+  readonly treeReads: string[]
   /** Hold the next prompt's answer; returns the release. */
   readonly holdPrompt: () => () => void
   /** Hold every later delete's answer (#571) — the server has it, and has not answered; returns the release. */
@@ -110,6 +115,11 @@ export interface ScriptedFetchOptions {
    * words. Absent: a thread in the checkout, nothing held, no forks.
    */
   readonly deletePreview?: EnsoThreadDeletePreview | { readonly status: number; readonly reason: string }
+  /**
+   * What `GET /api/trees` answers (#578), asked per read so a delete can move the listing on; no
+   * projects when absent.
+   */
+  readonly trees?: () => EnsoTreesListing | { readonly status: number; readonly reason: string }
 }
 
 /** The launch project a scripted server lists by default — the id the fixtures' stored threads carry. */
@@ -156,6 +166,8 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
   const hostCommands: unknown[] = []
   const deletes: string[] = []
   const deleteTags: (string | null)[] = []
+  const previewReads: string[] = []
+  const treeReads: string[] = []
   let storedThreads = options.storedThreads ?? []
   /** Question ids the server has TAKEN an answer for — the shape of the real route's 404. */
   const spentQuestions = new Set<string>()
@@ -278,9 +290,17 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
     const deleted = init?.method === 'DELETE' ? /^\/api\/threads\/([^/]+)$/.exec(path)?.[1] : undefined
     if (deleted !== undefined && init !== undefined) return deleteThread(decodeURIComponent(deleted), url, init)
     if (/^\/api\/threads\/[^/]+\/delete-preview$/.test(path)) {
-      const preview = options.deletePreview ?? { tree: null, holdsWork: null, keptFor: [] }
+      const preview = options.deletePreview ?? { tree: null, size: null, holdsWork: null, keptFor: [] }
+      previewReads.push(path)
       return Promise.resolve(
         'status' in preview ? new Response(preview.reason, { status: preview.status }) : Response.json(preview),
+      )
+    }
+    if (path === '/api/trees') {
+      treeReads.push(path)
+      const trees = options.trees?.() ?? { projects: [] }
+      return Promise.resolve(
+        'status' in trees ? new Response(trees.reason, { status: trees.status }) : Response.json(trees),
       )
     }
     const action = threadAction(path)
@@ -298,6 +318,8 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
     hostCommands,
     abortCount: () => aborts,
     deletes,
+    previewReads,
+    treeReads,
     deleteTags,
     holdPrompt: () => {
       const gate = Promise.withResolvers<void>()

@@ -43,6 +43,7 @@
 
 import { execFile } from 'node:child_process'
 import { existsSync, mkdirSync, realpathSync, rmSync } from 'node:fs'
+import { lstat, readdir } from 'node:fs/promises'
 import { basename, dirname, join, resolve } from 'node:path'
 import { exitCode, type GitResult, withoutGitLocalVariables } from './git.ts'
 import {
@@ -55,6 +56,7 @@ import {
   type SnapshotRefused,
   unmigratedForksOf,
 } from './snapshot-store.ts'
+import type { EnsoDiskUsage } from './thread-inspection.ts'
 import type { ThreadTreeKind, ThreadTreeRecord } from './thread-tree-record.ts'
 
 const TREE_MAX_OUTPUT_BYTES = 32 * 1024 * 1024
@@ -692,4 +694,96 @@ export async function disposeThreadTree(options: {
   return released.uncollected === undefined
     ? { kind: 'disposed' }
     : { kind: 'disposed', uncollected: released.uncollected }
+}
+
+/** How many directories one measurement reads at once: the libuv pool does the stats. */
+const MEASURE_CONCURRENCY = 16
+
+/**
+ * What `directory` takes on disk (#578), as `du` counts it: every entry's allocated blocks — files,
+ * directories, symlinks themselves, never what a symlink names — and a hard-linked file once.
+ * Read asynchronously, a few directories at a time, until `deadline` (epoch ms), so a large tree
+ * (an install, a build) neither blocks the server nor is waited on forever. A directory that is
+ * gone frees nothing (`measured`, 0); one that cannot be read is `unreadable`; a subdirectory that
+ * cannot be read, or the deadline, makes the count `partial` — at least what was counted.
+ *
+ * @group Thread tree
+ */
+export async function diskUsageOf(directory: string, deadline: number): Promise<EnsoDiskUsage> {
+  let root: Awaited<ReturnType<typeof lstat>>
+  try {
+    root = await lstat(directory)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { kind: 'measured', bytes: 0 }
+    return { kind: 'unreadable', reason: String(error) }
+  }
+  let bytes = root.blocks * 512
+  if (!root.isDirectory()) return { kind: 'measured', bytes }
+  const seen = new Set<string>()
+  const unread: string[] = []
+  let rootUnreadable: string | undefined
+  let timedOut = false
+  const visit = async (at: string): Promise<string[]> => {
+    let names: string[]
+    try {
+      names = await readdir(at)
+    } catch (error) {
+      if (at === directory) rootUnreadable = String(error)
+      else unread.push(at)
+      return []
+    }
+    const stats = await Promise.all(
+      names.map((entryName) =>
+        lstat(join(at, entryName)).then(
+          (stat) => ({ path: join(at, entryName), stat }),
+          () => undefined,
+        ),
+      ),
+    )
+    const below: string[] = []
+    for (const statted of stats) {
+      if (statted === undefined) continue
+      const { stat, path } = statted
+      if (!stat.isDirectory() && stat.nlink > 1) {
+        const key = `${stat.dev}:${stat.ino}`
+        if (seen.has(key)) continue
+        seen.add(key)
+      }
+      bytes += stat.blocks * 512
+      if (stat.isDirectory()) below.push(path)
+    }
+    return below
+  }
+  const queue = [directory]
+  let active = 0
+  await new Promise<void>((settle) => {
+    const pump = (): void => {
+      if (Date.now() >= deadline) timedOut = true
+      if (!timedOut) {
+        while (active < MEASURE_CONCURRENCY && queue.length > 0) {
+          const next = queue.pop() as string
+          active += 1
+          void visit(next).then((below) => {
+            active -= 1
+            queue.push(...below)
+            pump()
+          })
+        }
+      }
+      if (active === 0 && (queue.length === 0 || timedOut)) settle()
+    }
+    pump()
+  })
+  if (rootUnreadable !== undefined) return { kind: 'unreadable', reason: rootUnreadable }
+  if (timedOut && queue.length > 0) {
+    return { kind: 'partial', bytes, reason: 'measuring took longer than its time allows; at least this much' }
+  }
+  if (unread.length > 0) {
+    return {
+      kind: 'partial',
+      bytes,
+      reason: `${unread.length} ${unread.length === 1 ? 'directory' : 'directories'} under it could not be read: ${unread.slice(0, 3).join(', ')}`,
+    }
+  }
+  return { kind: 'measured', bytes }
 }
