@@ -418,6 +418,78 @@ test('⚠ a file the checkout ignores only through `.git/info/exclude` is never 
   expect(readFileSync(join(fork.path, 'local.secret'), 'utf8')).toBe('the copy’s own\n')
 })
 
+test("⚠ a copy of a subdirectory project follows its repository's ignore rules (#566): none of its ignored files is minted, one made in the copy is never snapshotted, and a restore leaves it — in the copy and in a copy forked from it", async () => {
+  const repository = checkout()
+  writeFileSync(join(repository, '.gitignore'), '.env\nnode_modules/\n')
+  writeFileSync(join(repository, '.git', 'info', 'exclude'), '/app/local.txt\n')
+  const project = join(repository, 'app')
+  mkdirSync(join(project, 'node_modules', 'x'), { recursive: true })
+  writeFileSync(join(project, 'a.ts'), 'export const a = 1\n')
+  writeFileSync(join(project, '.env'), 'SECRET=hunter2\n')
+  writeFileSync(join(project, 'local.txt'), 'only info/exclude hides this\n')
+  writeFileSync(join(project, 'node_modules', 'x', 'i.js'), 'installed\n')
+  const where = home()
+  expect(await treeKindFor(project, 'worktree', environment)).toBe('copy')
+
+  const record = await mintFromCheckout(project, where, 'sub', 'copy')
+  expect(files(record.path)).toEqual({ 'a.ts': 'export const a = 1\n' })
+
+  const ignoredInCopy = (tree: string): void => {
+    mkdirSync(join(tree, 'node_modules', 'y'), { recursive: true })
+    writeFileSync(join(tree, 'node_modules', 'y', 'j.js'), 'installed in the copy\n')
+    writeFileSync(join(tree, '.env'), 'SECRET=the copy’s own\n')
+    writeFileSync(join(tree, 'local.txt'), 'the copy’s own\n')
+    writeFileSync(join(tree, 'stray.md'), 'unignored, untracked\n')
+  }
+  const ignoredSurvived = (tree: string): void => {
+    expect(files(tree)).toEqual({
+      'a.ts': 'export const a = 1\n',
+      '.env': 'SECRET=the copy’s own\n',
+      'local.txt': 'the copy’s own\n',
+      'node_modules/y/j.js': 'installed in the copy\n',
+    })
+  }
+  ignoredInCopy(record.path)
+  const restored = await restoreThreadTree({
+    store: where.store('sub'),
+    tree: record.path,
+    hash: record.base,
+    environment,
+  })
+  if (restored.kind !== 'restored') throw new Error(`refused at ${restored.step}: ${restored.reason}`)
+  expect(git(where.store('sub'), 'ls-tree', '-r', '--name-only', restored.safety).split('\n').toSorted()).toEqual([
+    'a.ts',
+    'stray.md',
+  ])
+  ignoredSurvived(record.path)
+  // The copy's inventory calls them ignored, never untracked: a dispose is not held by them.
+  const inventory = await inventoryThreadTree({ record, store: where.store('sub'), environment })
+  expect(inventory.untracked).toEqual([])
+  expect(inventory.ignored.toSorted()).toEqual(['.env', 'local.txt', 'node_modules/y/j.js'])
+
+  const fork = minted(
+    await mintThreadTree({
+      project,
+      tree: where.tree('sub-fork'),
+      store: where.store('sub-fork'),
+      kind: 'copy',
+      branch: 'enso/sub-fork',
+      from: { kind: 'snapshot', hash: record.base, revision: null, storeDirectory: where.store('sub') },
+      environment,
+    }),
+  )
+  expect(files(fork.path)).toEqual({ 'a.ts': 'export const a = 1\n' })
+  ignoredInCopy(fork.path)
+  const restoredFork = await restoreThreadTree({
+    store: where.store('sub-fork'),
+    tree: fork.path,
+    hash: fork.base,
+    environment,
+  })
+  expect(restoredFork.kind).toBe('restored')
+  ignoredSurvived(fork.path)
+})
+
 test('⚠ a chain of seven forks mints — the deepest tree holds every generation’s file, past git’s five-deep alternates limit — and a grandparent’s dispose is held by its grandchild', async () => {
   const project = mkdtempSync(join(tmpdir(), 'enso-tree-chain-'))
   writeFileSync(join(project, 'root.txt'), 'root\n')

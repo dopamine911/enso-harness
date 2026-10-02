@@ -9,9 +9,11 @@
  * the file tools inside the tree; nothing here confines a command.
  *
  * ⚠ IGNORED FILES ARE NOT IN A TREE. A tree holds the checkout's tracked and unignored untracked
- * files — never `node_modules`, `.env`, build output, or what `.git/info/exclude` lists — so a
- * build or test in a fresh tree may need its install step first. By design: the snapshot store
- * never force-adds an ignored file.
+ * files — never `node_modules`, `.env`, build output, or what `.git/info/exclude` lists, whether the
+ * rule sits in the project or above it in its repository (#566) — so a build or test in a fresh
+ * tree may need its install step first. By design: the snapshot store never force-adds an ignored
+ * file. A copy's store records its project, so what its repository ignores stays out of the copy's
+ * snapshots, and a restore never removes it.
  *
  * ⚠ THIS MODULE WRITES THE USER'S REPOSITORY — the only one that does (`@enso/core/git` reads, and
  * the snapshot store writes only its own bare repository). A `worktree` tree must be registered
@@ -40,7 +42,7 @@
  */
 
 import { execFile } from 'node:child_process'
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { exitCode, type GitResult, withoutGitLocalVariables } from './git.ts'
 import {
@@ -144,6 +146,7 @@ interface MintPlace {
   readonly tree: string
   readonly store: string
   readonly branch: string
+  readonly kind: ThreadTreeKind
   readonly environment: NodeJS.ProcessEnv
 }
 
@@ -240,8 +243,13 @@ async function seedFromCheckout(
   revision: string | undefined,
   made: MintMade,
 ): Promise<string | { readonly step: string; readonly reason: string }> {
-  const { project, store, environment } = place
-  const opened = await openSnapshotStore({ directory: store, tree: project, environment })
+  const { project, store, kind, environment } = place
+  const opened = await openSnapshotStore({
+    directory: store,
+    tree: project,
+    environment,
+    copyOf: kind === 'copy' ? project : undefined,
+  })
   if (opened === undefined) return { step: 'store', reason: `the snapshot store could not be minted at ${store}` }
   const taken = await opened.snapshot()
   if (taken.kind === 'refused') return { step: 'snapshot', reason: storeReason(taken.refused) }
@@ -271,7 +279,8 @@ function forkAlternates(parentStore: string): string[] {
 /**
  * A fork's base is the parent's snapshot: the tree first, then the new store minted for it with
  * every ancestor store's objects as alternates — after the tree exists, since the store's mint
- * reads the tree's repository (a worktree's is the project's, its `info/exclude` included).
+ * reads the tree's repository (a worktree's is the project's). A copy's store names the project,
+ * whose repository's ignore rules it follows (#566).
  */
 async function seedFromSnapshot(
   place: MintPlace,
@@ -279,7 +288,7 @@ async function seedFromSnapshot(
   revision: string | undefined,
   made: MintMade,
 ): Promise<string | { readonly step: string; readonly reason: string }> {
-  const { tree, store, environment } = place
+  const { project, tree, store, kind, environment } = place
   const failed = await makeTree(place, revision, made)
   if (failed !== undefined) return failed
   const opened = await openSnapshotStore({
@@ -287,19 +296,9 @@ async function seedFromSnapshot(
     tree,
     environment,
     alternates: forkAlternates(from.storeDirectory),
+    copyOf: kind === 'copy' ? project : undefined,
   })
   if (opened === undefined) return { step: 'store', reason: `the snapshot store could not be minted at ${store}` }
-  // A copy has no repository for the mint to read ignore rules from: the parent store's
-  // `info/exclude` (the checkout's, copied at its mint) carries on, so the fork ignores what the
-  // parent did.
-  const parentExclude = join(from.storeDirectory, 'info', 'exclude')
-  if (revision === undefined && made.store && existsSync(parentExclude)) {
-    try {
-      copyFileSync(parentExclude, join(store, 'info', 'exclude'))
-    } catch (error) {
-      return { step: 'store', reason: `the parent's exclude file could not be copied: ${String(error)}` }
-    }
-  }
   return from.hash
 }
 
@@ -334,7 +333,7 @@ export async function mintThreadTree(options: {
   readonly environment: NodeJS.ProcessEnv
 }): Promise<{ kind: 'minted'; record: ThreadTreeRecord } | MintRefused> {
   const { project, tree, store, kind, branch, from, environment } = options
-  const place: MintPlace = { project, tree, store, branch, environment }
+  const place: MintPlace = { project, tree, store, branch, kind, environment }
   const checked = await mintPreconditions(place, kind, from.kind === 'snapshot' ? from.revision : null)
   if ('kind' in checked) return checked
   const { revision } = checked

@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import {
@@ -67,6 +67,32 @@ async function taken(store: SnapshotStore): Promise<SnapshotTaken> {
   const outcome = await store.snapshot()
   if (outcome.kind !== 'taken') throw new Error(`refused at ${outcome.refused.step}: ${outcome.refused.stderr}`)
   return outcome.taken
+}
+
+/**
+ * A repository whose project is its subdirectory `packages/app` (#566): the repository's
+ * `.gitignore` covers `.env`, `node_modules/` and `*.log`, its `info/exclude` names
+ * `/packages/app/local.txt` — rules git applies to the project but finds only ABOVE it. In the
+ * project: one of each ignored file, a tracked file `*.log` covers, a tracked source, and an
+ * untracked unignored note.
+ */
+function subdirectoryProject(): { repository: string; project: string } {
+  const repository = mkdtempSync(join(tmpdir(), 'enso-snap-mono-'))
+  const project = join(repository, 'packages', 'app')
+  git(repository, 'init', '--quiet')
+  writeFileSync(join(repository, '.gitignore'), '.env\nnode_modules/\n*.log\n')
+  writeFileSync(join(repository, '.git', 'info', 'exclude'), '/packages/app/local.txt\n')
+  mkdirSync(join(project, 'node_modules', 'x'), { recursive: true })
+  writeFileSync(join(project, 'src.ts'), 'export const one = 1\n')
+  writeFileSync(join(project, 'kept.log'), 'tracked, though *.log covers it\n')
+  git(repository, 'add', '--all')
+  git(repository, 'add', '--force', 'packages/app/kept.log')
+  git(repository, 'commit', '--quiet', '-m', 'one')
+  writeFileSync(join(project, '.env'), 'SECRET=hunter2\n')
+  writeFileSync(join(project, 'local.txt'), 'only info/exclude hides this\n')
+  writeFileSync(join(project, 'node_modules', 'x', 'i.js'), 'installed\n')
+  writeFileSync(join(project, 'notes.md'), 'untracked, not ignored\n')
+  return { repository, project }
 }
 
 test('⚠ a snapshot is the tracked set plus the unignored untracked files: `.env` and an ignored directory never enter the store; the tree’s own repository is untouched', async () => {
@@ -179,6 +205,37 @@ test('a tree that is no git checkout snapshots too — no alternates, no seed, e
   expect(existsSync(join(tree, '.git'))).toBe(false)
 })
 
+/** Whether git speaks German here: a machine without the locale or git's catalog prints English. */
+function gitSpeaksGerman(): boolean {
+  try {
+    execFileSync('git', ['rev-parse'], {
+      cwd: mkdtempSync(join(tmpdir(), 'enso-snap-locale-')),
+      env: { PATH: environment.PATH, LC_ALL: 'de_DE.UTF-8' },
+      stdio: 'pipe',
+    })
+    return false
+  } catch (error) {
+    return error instanceof Error && 'stderr' in error && String(error.stderr).includes('Kein Git-Repository')
+  }
+}
+
+// PR #567 review: whether a tree is in a repository is read from git's words, which git translates.
+test.skipIf(!gitSpeaksGerman())(
+  'a tree in no repository snapshots under a locale git translates its messages into',
+  async () => {
+    const tree = mkdtempSync(join(tmpdir(), 'enso-snap-plain-'))
+    writeFileSync(join(tree, 'a.txt'), 'a\n')
+    const store = await openSnapshotStore({
+      directory: join(mkdtempSync(join(tmpdir(), 'enso-snap-store-')), 'store'),
+      tree,
+      environment: { ...environment, LC_ALL: 'de_DE.UTF-8', LANGUAGE: 'de' },
+    })
+    if (store === undefined) throw new Error('the store did not open')
+    const first = await taken(store)
+    expect(await snapshotPaths(environment, store, first.hash)).toEqual(['a.txt'])
+  },
+)
+
 test('a mint that cannot write refuses the store as undefined, and a snapshot git that fails is refused by step, never thrown', async () => {
   const tree = checkout()
   const unwritable = join(mkdtempSync(join(tmpdir(), 'enso-snap-ro-')), 'ro')
@@ -186,10 +243,11 @@ test('a mint that cannot write refuses the store as undefined, and a snapshot gi
   expect(await openSnapshotStore({ directory: join(unwritable, 'store'), tree, environment })).toBeUndefined()
 
   const store = await opened(tree)
-  // The tree vanishes under the store: `add` fails, and the outcome says where.
+  // The tree vanishes under the store: its first git, asking which rules apply, fails, and the
+  // outcome says where.
   execFileSync('rm', ['-rf', tree])
   const outcome = await store.snapshot()
-  expect(outcome.kind === 'refused' ? outcome.refused.step : outcome.taken.hash).toBe('add')
+  expect(outcome.kind === 'refused' ? outcome.refused.step : outcome.taken.hash).toBe('rev-parse')
 })
 
 test('⚠ materializing a snapshot makes the tree exactly it — an edit undone, a deleted file back, an unignored untracked file gone — and never touches an ignored file', async () => {
@@ -213,6 +271,89 @@ test('⚠ materializing a snapshot makes the tree exactly it — an edit undone,
   // An unknown hash is refused by step, the tree as it was.
   const unknown = await materializeSnapshot({ directory: store.directory, tree, hash: 'f'.repeat(40), environment })
   expect(unknown.kind === 'refused' ? unknown.refused.step : unknown.kind).toBe('read-tree')
+})
+
+test("⚠ a subdirectory project snapshots under its repository's ignore rules — the `.gitignore` above it and `info/exclude` — and a materialize neither deletes nor overwrites a file they ignore (#566)", async () => {
+  const { project } = subdirectoryProject()
+  const store = await opened(project)
+  const first = await taken(store)
+  expect((await snapshotPaths(environment, store, first.hash)).toSorted()).toEqual(['kept.log', 'notes.md', 'src.ts'])
+  const blobs = git(store.directory, 'cat-file', '--batch-all-objects', '--batch-check')
+  expect(blobs).not.toContain(git(project, 'hash-object', '.env'))
+
+  // Ignored files made since, and the ignored ones there were, all survive a materialize; the
+  // unignored file it lacks goes.
+  writeFileSync(join(project, 'debug.log'), 'made after the snapshot\n')
+  writeFileSync(join(project, '.env'), 'SECRET=rotated\n')
+  writeFileSync(join(project, 'stray.md'), 'unignored, untracked\n')
+  const outcome = await materializeSnapshot({
+    directory: store.directory,
+    tree: project,
+    hash: first.hash,
+    environment,
+  })
+  expect(outcome).toEqual({ kind: 'materialized' })
+  expect(existsSync(join(project, 'stray.md'))).toBe(false)
+  expect(readFileSync(join(project, 'debug.log'), 'utf8')).toBe('made after the snapshot\n')
+  expect(readFileSync(join(project, '.env'), 'utf8')).toBe('SECRET=rotated\n')
+  expect(readFileSync(join(project, 'local.txt'), 'utf8')).toBe('only info/exclude hides this\n')
+  expect(readFileSync(join(project, 'node_modules', 'x', 'i.js'), 'utf8')).toBe('installed\n')
+  expect(await taken(store)).toEqual({ hash: first.hash, changed: false })
+})
+
+// PR #567 review: a path whose leading directory is a symlink is not the tree's. Removing it would
+// remove what the link points at — outside the tree — and staging it is refused by git.
+test('⚠ nothing is removed through a symlinked directory: a tracked directory replaced by a symlink snapshots as the symlink, and a materialize removes through neither that symlink nor one it checks out itself', async () => {
+  const outside = mkdtempSync(join(tmpdir(), 'enso-snap-outside-'))
+  writeFileSync(join(outside, 'f.txt'), 'not the tree’s\n')
+
+  // The tree's own symlink: `d/f.txt` is still in the checkout's index, `d` now points outside.
+  const tree = checkout()
+  const store = await opened(tree)
+  const before = await taken(store)
+  mkdirSync(join(tree, 'd'))
+  writeFileSync(join(tree, 'd', 'f.txt'), 'tracked\n')
+  git(tree, 'add', '--all')
+  git(tree, 'commit', '--quiet', '-m', 'd')
+  rmSync(join(tree, 'd'), { recursive: true })
+  symlinkSync(outside, join(tree, 'd'))
+  const linked = await taken(store)
+  expect(await snapshotPaths(environment, store, linked.hash)).toContain('d')
+  expect(await snapshotPaths(environment, store, linked.hash)).not.toContain('d/f.txt')
+  expect(await materializeSnapshot({ directory: store.directory, tree, hash: before.hash, environment })).toEqual({
+    kind: 'materialized',
+  })
+  expect(readFileSync(join(outside, 'f.txt'), 'utf8')).toBe('not the tree’s\n')
+
+  // A symlink the materialize itself checks out where the tree has a directory holding `f.txt`.
+  const other = checkout()
+  symlinkSync(outside, join(other, 'd'))
+  const otherStore = await opened(other)
+  const withLink = await taken(otherStore)
+  rmSync(join(other, 'd'))
+  mkdirSync(join(other, 'd'))
+  writeFileSync(join(other, 'd', 'f.txt'), 'the tree’s own\n')
+  expect(
+    await materializeSnapshot({ directory: otherStore.directory, tree: other, hash: withLink.hash, environment }),
+  ).toEqual({ kind: 'materialized' })
+  expect(readFileSync(join(outside, 'f.txt'), 'utf8')).toBe('not the tree’s\n')
+})
+
+// PR #567 review: a sparse checkout leaves paths off disk that are still the commit's.
+test('a sparse checkout snapshots the whole commit: a path it leaves off disk keeps the blob its index records', async () => {
+  const tree = checkout()
+  mkdirSync(join(tree, 'in'))
+  mkdirSync(join(tree, 'out'))
+  writeFileSync(join(tree, 'in', 'x'), 'x\n')
+  writeFileSync(join(tree, 'out', 'y'), 'y\n')
+  git(tree, 'add', '--all')
+  git(tree, 'commit', '--quiet', '-m', 'two directories')
+  git(tree, 'sparse-checkout', 'set', 'in')
+  expect(existsSync(join(tree, 'out', 'y'))).toBe(false)
+  const store = await opened(tree)
+  const first = await taken(store)
+  expect(await snapshotPaths(environment, store, first.hash)).toContain('out/y')
+  expect(git(store.directory, 'rev-parse', `${first.hash}:out/y`)).toBe(git(tree, 'rev-parse', 'HEAD:out/y'))
 })
 
 test("⚠ a store minted with another store's objects as an alternate materializes that store's snapshot into a plain directory, in that store's object format", async () => {
