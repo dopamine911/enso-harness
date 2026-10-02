@@ -1830,6 +1830,18 @@ function useNarrowRail(): {
  * The page's header: the threads button (narrow screens), the mark, where you are — the active
  * thread's title, the same one the rail shows — then the view tabs, settings and `?debug`'s switch.
  */
+/**
+ * The header's prompt manager, on the thread on screen (#470). ⚠ The thread id and the fetch come
+ * from ONE source, the thread's own stores: that fetch names the thread's project (#395), so the
+ * project library listed is the thread's own even before the server has built it. While the page
+ * is still resuming a thread (`active` not yet in the list) the manager is given no thread at all,
+ * so nothing is asked about it without its project.
+ */
+export function HeaderPromptManager({ active }: { active: ThreadSummary | undefined }): React.ReactNode {
+  if (active === undefined) return <PromptManagerDialog threadId={undefined} />
+  return <PromptManagerDialog threadId={active.threadId} fetch={getThreadStores(active.threadId).fetch} />
+}
+
 function AppHeader({
   active,
   activeThreadId,
@@ -1863,12 +1875,7 @@ function AppHeader({
         <span className="rounded-full border px-2 py-0.5 text-xs text-muted-foreground">fixture</span>
       ) : null}
       <ViewTabs view={view} onView={onView} threadId={active?.threadId} />
-      {/* The thread's own fetch names its project (#395), so the manager lists that project's
-          prompts (#470) even for a thread the server has not built yet. */}
-      <PromptManagerDialog
-        threadId={activeThreadId}
-        {...(active === undefined ? {} : { fetch: getThreadStores(active.threadId).fetch })}
-      />
+      <HeaderPromptManager active={active} />
       <SettingsDialog threadId={activeThreadId} />
       {isDebugMode ? (
         <PaneSwitch
