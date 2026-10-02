@@ -1863,7 +1863,12 @@ function AppHeader({
         <span className="rounded-full border px-2 py-0.5 text-xs text-muted-foreground">fixture</span>
       ) : null}
       <ViewTabs view={view} onView={onView} threadId={active?.threadId} />
-      <PromptManagerDialog threadId={activeThreadId} />
+      {/* The thread's own fetch names its project (#395), so the manager lists that project's
+          prompts (#470) even for a thread the server has not built yet. */}
+      <PromptManagerDialog
+        threadId={activeThreadId}
+        {...(active === undefined ? {} : { fetch: getThreadStores(active.threadId).fetch })}
+      />
       <SettingsDialog threadId={activeThreadId} />
       {isDebugMode ? (
         <PaneSwitch
