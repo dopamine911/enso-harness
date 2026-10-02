@@ -182,7 +182,7 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
   THREAD_HISTORY_ROUTE: threadRead(
     'respondWithThreadHistory',
     '200 `EnsoThreadHistory` JSON',
-    '400 malformed thread id; 403 untrusted origin, or a session stored in a directory that is no project here (named, #378); 404 no session — an id nobody has used, which a page starts; 500 handler failure',
+    '400 malformed thread id; 403 untrusted origin, or a session stored in a directory that is no project here (named, #378); 404 no session — an id nobody has used, which a page starts; 410 a deleted thread (#571) — this server deleted it, or its store is kept for its forks — never started again; 500 handler failure',
   ),
   THREAD_FOLLOW_ROUTE: threadRead(
     'followThread',

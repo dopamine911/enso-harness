@@ -972,6 +972,10 @@ test('⚠ DELETE /api/threads/:id answers 204 and the thread is gone; a tree hol
   const { url } = await startWith(asksAndWaits, stored)
   expect(await deleteOf(url, 'plain')).toEqual({ status: 204, body: '' })
   expect((await deleteOf(url, 'plain')).status).toBe(404)
+  // PR #572 review: a deleted id's history is a 410, not the 404 a page takes for "start it under this id".
+  const gone = await fetch(`${url}/api/threads/plain/history`)
+  expect([gone.status, await gone.text()]).toEqual([410, 'thread plain was deleted'])
+  expect((await fetch(`${url}/api/threads/never-stored/history`)).status).toBe(404)
   expect(await deleteOf(url, 'working')).toEqual({ status: 422, body: 'the tree holds work — untracked: work.md' })
   expect((await deleteOf(url, 'working', '?force=0')).status).toBe(404)
   expect((await deleteOf(url, 'working', '?force=1&x=1')).status).toBe(404)

@@ -1974,7 +1974,9 @@ function AppHeader({
  * The header's Delete (#571), behind a confirmation naming what goes: the conversation, and the
  * thread's tree when it runs on one of its own. A tree holding work is refused with the work
  * named (422): the dialog says it and offers "Delete anyway". Any other refusal closes it and is
- * said on the thread (`delete-thread.ts`).
+ * said on the thread (`delete-thread.ts`). ⚠ Once sent, a delete cannot be called back, so until
+ * the server answers nothing dismisses the dialog (PR #572 review): Cancel is disabled, the close
+ * button is gone, and Esc and the backdrop do nothing — a dialog that closed would read as cancelled.
  */
 function DeleteThread({
   threadId,
@@ -1990,6 +1992,7 @@ function DeleteThread({
   /** The work the tree holds, as the server named it — set while "Delete anyway" is offered. */
   const [holdsWork, setHoldsWork] = useState<string | undefined>(undefined)
   const changeOpen = (next: boolean): void => {
+    if (!next && deleting) return
     setOpen(next)
     if (!next) setHoldsWork(undefined)
   }
@@ -2001,7 +2004,9 @@ function DeleteThread({
         setHoldsWork(outcome.reason)
         return
       }
-      changeOpen(false)
+      // `deleting` in `changeOpen` is this render's; the answer is in, so close directly.
+      setOpen(false)
+      setHoldsWork(undefined)
       if (outcome.kind === 'deleted') onDeleted(threadId)
     })
   }
@@ -2012,7 +2017,7 @@ function DeleteThread({
           <Trash2Icon />
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md" showCloseButton={!deleting}>
         <DialogHeader>
           <DialogTitle>Delete this thread?</DialogTitle>
           <DialogDescription>
@@ -2027,7 +2032,7 @@ function DeleteThread({
           </p>
         )}
         <DialogFooter>
-          <Button variant="ghost" onClick={(): void => changeOpen(false)}>
+          <Button variant="ghost" disabled={deleting} onClick={(): void => changeOpen(false)}>
             Cancel
           </Button>
           <Button variant="destructive" disabled={deleting} onClick={(): void => confirm(holdsWork !== undefined)}>
@@ -2219,17 +2224,24 @@ export function ChatScreen(): React.ReactNode {
     },
     [resume],
   )
-  // A deleted thread (#571) leaves the page the way a failed resume does: a fresh thread, in the
-  // deleted one's project, written over its URL so back does not ask for the deleted id. Its pane
-  // goes, and the listing refreshes so the rail cannot offer it again.
+  // A deleted thread (#571) leaves the page; its pane goes, and the listing refreshes so the rail
+  // cannot offer it again. On screen still, it is left the way a failed resume leaves one: for a
+  // fresh thread in its project, written over its URL so back does not ask for the deleted id. ⚠
+  // Not on screen — the user moved while the server worked (PR #572 review) — nothing moves them:
+  // the answer is said on the thread they are on, and its history entry stays its own.
   const leaveDeleted = useCallback(
     (threadId: string): void => {
-      const { projectId } = getThreadStores(threadId)
+      // Off screen while the server worked, its stores may already be gone: the follow budget drops
+      // idle threads. Only the one on screen is read, and that one the budget never drops.
+      const wasShown = activePane.current === threadId
+      const projectId = wasShown ? getThreadStores(threadId).projectId : undefined
+      // Dropped before the fresh one is minted, so the deleted thread is not what pushes another out of the budget.
       dropThread(threadId)
-      const fresh = mintPageThread(projectId)
-      navigate(fresh.threadId, 'replace')
-      fresh.notifications.push(`thread ${threadId} deleted`, 'info', 'run', ENSO_NOTICE_SOURCE)
+      const shown = wasShown ? mintPageThread(projectId).threadId : activePane.current
       void storedThreads.refresh()
+      if (shown === undefined) return
+      if (wasShown) navigate(shown, 'replace')
+      getThreadStores(shown).notifications.push(`thread ${threadId} deleted`, 'info', 'run', ENSO_NOTICE_SOURCE)
     },
     [navigate],
   )

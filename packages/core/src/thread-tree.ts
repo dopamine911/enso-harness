@@ -625,11 +625,13 @@ export type ThreadStoreRelease = { readonly kind: 'removed' } | { readonly kind:
  * Let go of a deleted thread's store (#571): removed, or — while a fork's store names its objects
  * as an alternate — kept and marked orphaned, because removing it would break every snapshot the
  * fork holds of the parent's files. {@link sweepOrphanedStores} removes it once nothing depends on
- * it. A store that is gone already is removed.
+ * it. A store that is gone already is removed, whoever still names it (PR #572 review: marking a
+ * store that is not there threw on every attempt, and the thread could never be deleted).
  *
  * @group Thread tree
  */
 export function releaseThreadStore(store: string): ThreadStoreRelease {
+  if (!existsSync(store)) return { kind: 'removed' }
   const dependents = dependentStores(store)
   if (dependents.length === 0) {
     rmSync(store, { recursive: true, force: true })
@@ -637,6 +639,17 @@ export function releaseThreadStore(store: string): ThreadStoreRelease {
   }
   writeFileSync(join(store, ORPHANED_STORE_MARKER), `kept for ${dependents.join(', ')}\n`)
   return { kind: 'kept', dependents }
+}
+
+/**
+ * Whether `store` is a deleted thread's, kept for its forks (#571). ⚠ A DURABLE TOMBSTONE (PR #572
+ * review): its thread's id must never be given to a new thread — a new thread minted or snapshotted
+ * on this store would be swept from under it once the last fork goes.
+ *
+ * @group Thread tree
+ */
+export function isOrphanedStore(store: string): boolean {
+  return existsSync(join(store, ORPHANED_STORE_MARKER))
 }
 
 /**

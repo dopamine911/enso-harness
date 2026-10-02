@@ -521,6 +521,8 @@ export function createFakeAgentHost(
     const storedThread = stored[threadId]
     return storedThread !== undefined && servesDirectory(directoryOf(storedThread)) ? storedThread : undefined
   }
+  /** The ids `deleteThread` removed — the real host's tombstone (#571). */
+  const deleted = new Set<string>()
   return {
     createSession,
     freshPermissionMode: () => fresh,
@@ -656,7 +658,9 @@ export function createFakeAgentHost(
       }
       if (!retire()) return Promise.resolve({ kind: 'busy', reason: `thread ${threadId} is running` })
       Reflect.deleteProperty(stored, threadId)
+      deleted.add(threadId)
       return Promise.resolve({ kind: 'deleted' })
     },
+    threadDeleted: (threadId) => deleted.has(threadId),
   }
 }

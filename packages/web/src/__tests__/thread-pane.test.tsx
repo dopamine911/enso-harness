@@ -2177,6 +2177,72 @@ test('a delete refused while the thread runs (409) is said on the thread and off
   await page.unmount()
 })
 
+// PR #572 review: a delete the server has not answered cannot be called back — so nothing in the
+// dialog may read as calling it back. Cancel, Esc and the close button would close the dialog while
+// the request ran on, and the 204 then pulled the user off whatever they had turned to.
+test('while the server has not answered a delete, the dialog cannot be dismissed: Cancel is disabled and Esc does nothing', async () => {
+  const page = await openDeletable()
+  const release = page.server.holdDelete()
+  await openDeleteDialog(page)
+  await page.click(dialogButton('Delete'))
+  await eventually(() => expect(page.server.deletes).toEqual([`/api/threads/${DELETABLE}`]))
+  expect(dialogButton('Cancel').disabled).toBe(true)
+  // The close button would claim the same thing Cancel does.
+  expect(deleteDialog()?.querySelector('button[data-slot="dialog-close"]')).toBeNull()
+  await flush(async () => {
+    deleteDialog()?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    await tick()
+  })
+  expect(deleteDialog()).not.toBeUndefined()
+  // Answered: the delete it could not cancel goes through, and the page leaves the thread.
+  await flush(async () => {
+    release()
+    await tick()
+  })
+  await eventually(() => {
+    expect(deleteDialog()).toBeUndefined()
+    expect(new URLSearchParams(window.location.search).get('thread')).not.toBe(DELETABLE)
+  })
+  await page.unmount()
+})
+
+test('a 204 that arrives after the user moved to another thread leaves them there; the deleted thread is gone from the rail', async () => {
+  const page = await openDeletable()
+  const newThread = [...page.container.querySelectorAll('button')].find((button) => button.textContent === 'New Thread')
+  if (newThread === undefined) throw new Error('expected a New Thread button')
+  await page.click(newThread)
+  const other = new URLSearchParams(window.location.search).get('thread') ?? ''
+  expect(other).not.toBe(DELETABLE)
+  const stored = page.activeRows().find((row) => row.textContent?.includes('try the parser rewrite'))
+  if (stored === undefined) throw new Error('expected the stored thread on the rail')
+  await page.click(stored)
+  const release = page.server.holdDelete()
+  await openDeleteDialog(page)
+  await page.click(dialogButton('Delete'))
+  await eventually(() => expect(page.server.deletes).toEqual([`/api/threads/${DELETABLE}`]))
+  // Back, while the server works: the thread before is on screen again.
+  await visitThreadUrl(other)
+  await eventually(() =>
+    expect(page.activeRows().find((row) => row.getAttribute('aria-current') === 'true')?.textContent).not.toContain(
+      'try the parser rewrite',
+    ),
+  )
+  await flush(async () => {
+    release()
+    await tick()
+  })
+  await eventually(() => {
+    expect(threadListStore.get().map((thread) => thread.threadId)).toEqual([other])
+    expect(page.container.querySelector('#threads-rail')?.textContent).not.toContain('try the parser rewrite')
+  })
+  expect(new URLSearchParams(window.location.search).get('thread')).toBe(other)
+  // Said on the thread the user is on.
+  const shownPane = page.visiblePanes()[0]?.closest('.absolute.inset-0')
+  const said = [...(shownPane?.querySelectorAll('[role="status"]') ?? [])].map((notice) => notice.textContent ?? '')
+  expect(said.some((notice) => notice.endsWith(`thread ${DELETABLE} deleted`))).toBe(true)
+  await page.unmount()
+})
+
 // docs/flows/resume.md, stated gap: the reader was pinned to produce an image part from the file
 // (transcript-to-messages.test.ts); nothing asserted the PAGE renders it. A resumed thread's
 // image must come back as an <img> from the server's history — no page state involved.
@@ -2370,6 +2436,49 @@ test('a thread stored outside the projects is said on its own rail line, never a
     await eventually(() => expect(railAlerts(container)).toEqual([`could not open the thread: 403 ${refusal}`]))
     // Not started under its id: it is someone's stored thread, just not one this server serves.
     expect(threadListStore.get().map((thread) => thread.threadId)).not.toContain(outside)
+  } finally {
+    window.history.replaceState(null, '', '/')
+    await flush(async () => root.unmount())
+    container.remove()
+  }
+})
+
+// #571: a deleted id is refused for the server's lifetime — its history answers 410, not #378's
+// 404. A URL naming it (Back to it, or a reload) must not start a thread under the deleted id: the
+// page says it would not open, and stays on a thread of its own.
+test('a URL naming a deleted thread (410) is said on the rail and never started under that id (#571)', async () => {
+  const server = createScriptedFetch()
+  const deleted = crypto.randomUUID()
+  const refusal = `thread ${deleted} was deleted`
+  globalThis.fetch = server.fetch
+  const container = document.createElement('div')
+  document.body.appendChild(container)
+  const root: Root = createRoot(container)
+  const answeringDeleted = ((input: string | URL | Request, init?: RequestInit): Promise<Response> =>
+    requestedUrl(input).endsWith(`/api/threads/${deleted}/history`)
+      ? Promise.resolve(new Response(refusal, { status: 410 }))
+      : server.fetch(input, init)) as typeof fetch
+  try {
+    await flush(async () => {
+      root.render(<ChatScreen />)
+    })
+    await flush(tick)
+    const newThread = [...container.querySelectorAll('button')].find((button) => button.textContent === 'New Thread')
+    if (newThread === undefined) throw new Error('expected a New Thread button')
+    await flush(async () => {
+      newThread.click()
+      await tick()
+    })
+    const shown = new URLSearchParams(window.location.search).get('thread') ?? ''
+    globalThis.fetch = answeringDeleted
+    await visitThreadUrl(deleted)
+    await eventually(() => {
+      // Not started under the deleted id — what #378's 404 branch would do — and still on the thread before.
+      expect(threadListStore.get().map((thread) => thread.threadId)).not.toContain(deleted)
+      expect(railAlerts(container)).toEqual([`could not open the thread: 410 ${refusal}`])
+    })
+    expect(threadListStore.get().map((thread) => thread.threadId)).toContain(shown)
+    expect(container.querySelector('ol[aria-label^="open threads in"] button[aria-current="true"]')).not.toBeNull()
   } finally {
     window.history.replaceState(null, '', '/')
     await flush(async () => root.unmount())

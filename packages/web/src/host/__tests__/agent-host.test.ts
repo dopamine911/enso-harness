@@ -2119,6 +2119,25 @@ test('⚠ deleting a thread in its checkout removes its session file and its sna
   expect(fixtureGit(project, 'status', '--porcelain')).toBe(statusBefore)
 })
 
+// PR #572 review: the id was claimed only after an await, so a second delete from another tab ran
+// the whole delete again beside the first, and the first one's `finally` released the claim early.
+test('two deletes of one thread at once: one deletes it, the other is refused as busy (#571)', async () => {
+  const project = dirtyCheckout()
+  const core = createFauxCore()
+  core.setResponses([faux.fauxAssistantMessage('one')])
+  const { host } = treeHost(project, [fauxModelExtension(core)], 'off')
+  new ProjectTrustStore(agentDir).set(project, true)
+  const threadId = crypto.randomUUID()
+  const hosted = await host.createSession(threadId, () => project)
+  await runPrompt(hosted, 'first')
+  hosted.runtime.dispose()
+  const outcomes = await Promise.all([
+    host.deleteThread(threadId, { force: false, retire: NOTHING_LIVE }),
+    host.deleteThread(threadId, { force: false, retire: NOTHING_LIVE }),
+  ])
+  expect(outcomes.map((outcome) => outcome.kind).toSorted()).toEqual(['busy', 'deleted'])
+})
+
 test('⚠ deleting a thread on its worktree: one holding work is refused, naming it, with nothing removed and the thread not retired; forced, the worktree, its branch, its store and its session go, and the checkout is untouched (#571)', async () => {
   const project = dirtyCheckout()
   const statusBefore = fixtureGit(project, 'status', '--porcelain')
@@ -2185,6 +2204,11 @@ test("⚠ deleting a forked parent keeps its store for the fork — the fork sti
   expect(await host.deleteThread(parentId, { force: true, retire: NOTHING_LIVE })).toEqual({ kind: 'deleted' })
   expect(existsSync(parentTree)).toBe(false)
   expect(existsSync(join(snapshots, parentId, 'HEAD'))).toBe(true)
+  // PR #572 review: the in-memory tombstone does not survive a restart, but the kept store does —
+  // a new thread under the parent's id would mint onto it and be swept from under itself later.
+  const restarted = treeHost(project, [fauxModelExtension(core)]).host
+  expect(restarted.threadDeleted(parentId)).toBe(true)
+  await expect(restarted.createSession(parentId, () => project)).rejects.toBeInstanceOf(ThreadDeleted)
   // "first" was the parent's turn: its snapshot is in the parent's store, which the fork leans on.
   const forkTree = fork.inspect().cwd
   writeFileSync(join(forkTree, 'a.txt'), 'fork edit\n')
@@ -2197,6 +2221,8 @@ test("⚠ deleting a forked parent keeps its store for the fork — the fork sti
     kind: 'deleted',
   })
   expect(existsSync(join(snapshots, forked.threadId)) || existsSync(join(snapshots, parentId))).toBe(false)
+  // Once the store is swept, nothing of the id is left to collide with.
+  expect(restarted.threadDeleted(parentId)).toBe(false)
 })
 
 // #447: a fork copies its source's messages with their times, and pi's `modified` is the last

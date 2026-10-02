@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative } from 'node:path'
 import { openSnapshotStore, type SnapshotTaken } from '../snapshot-store.ts'
@@ -396,6 +396,31 @@ test("⚠ a parent a fork leans on disposes its tree but keeps its store, marked
   expect(existsSync(where.store('parent'))).toBe(false)
   expect(existsSync(join(where.store('live'), 'HEAD'))).toBe(true)
   expect(await snapshotOf(where.store('live'), live.path)).toEqual({ hash: live.base, changed: false })
+})
+
+// PR #572 review: a store gone by hand while a fork's alternates still name it. Marking it kept
+// threw ENOENT on every attempt, so the thread could never be deleted.
+test('a store already gone, though a fork still names it, releases as removed, and its tree still disposes', async () => {
+  const project = checkout()
+  const where = home()
+  const parent = await mintFromCheckout(project, where, 'gone', 'copy')
+  minted(
+    await mintThreadTree({
+      project,
+      tree: where.tree('gone-fork'),
+      store: where.store('gone-fork'),
+      kind: 'copy',
+      branch: 'enso/gone-fork',
+      from: { kind: 'snapshot', hash: parent.base, revision: null, storeDirectory: where.store('gone') },
+      environment,
+    }),
+  )
+  rmSync(where.store('gone'), { recursive: true, force: true })
+  expect(await disposeThreadTree({ record: parent, store: where.store('gone'), force: true, environment })).toEqual({
+    kind: 'disposed',
+    store: { kind: 'removed' },
+  })
+  expect(existsSync(parent.path) || existsSync(where.store('gone'))).toBe(false)
 })
 
 test('⚠ a file the checkout ignores only through `.git/info/exclude` is never minted into a tree, and a restore leaves it in place — in the worktree and in a copy forked from it', async () => {

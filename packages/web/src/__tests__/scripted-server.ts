@@ -42,6 +42,8 @@ export interface ScriptedFetch {
   readonly deletes: string[]
   /** Hold the next prompt's answer; returns the release. */
   readonly holdPrompt: () => () => void
+  /** Hold every later delete's answer (#571) — the server has it, and has not answered; returns the release. */
+  readonly holdDelete: () => () => void
 }
 
 export interface ScriptedFetchOptions {
@@ -244,11 +246,17 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
       return Promise.resolve(Response.json({ threadId: 't1', restored: options.queued ?? [] }))
     },
   }
-  /** `DELETE /api/threads/:id` (#571): the next scripted answer; a 204 drops the thread from the listing. */
-  const deleteThread = (threadId: string, url: URL): Response => {
+  /** The delete route answers only once this resolves — open by default; a test may hold it. */
+  let deleteGate = Promise.resolve()
+  /**
+   * `DELETE /api/threads/:id` (#571): the next scripted answer; a 204 drops the thread from the
+   * listing. Recorded as it arrives, answered once the gate opens.
+   */
+  const deleteThread = async (threadId: string, url: URL): Promise<Response> => {
     const answers = options.deleteAnswers ?? []
     const answer = answers[Math.min(deletes.length, answers.length - 1)] ?? { status: 204 }
     deletes.push(`${url.pathname}${url.search}`)
+    await deleteGate
     if (answer.status !== 204) return new Response(answer.reason ?? 'no', { status: answer.status })
     storedThreads = storedThreads.filter((stored) => stored.threadId !== threadId)
     return new Response(null, { status: 204 })
@@ -258,7 +266,7 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
     const url = new URL(requestedUrl(input), 'http://localhost')
     const path = url.pathname
     const deleted = init?.method === 'DELETE' ? /^\/api\/threads\/([^/]+)$/.exec(path)?.[1] : undefined
-    if (deleted !== undefined) return Promise.resolve(deleteThread(decodeURIComponent(deleted), url))
+    if (deleted !== undefined) return deleteThread(decodeURIComponent(deleted), url)
     const action = threadAction(path)
     const respond = action === undefined ? undefined : threadActions[action]
     if (respond !== undefined) return respond(init)
@@ -277,6 +285,11 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
     holdPrompt: () => {
       const gate = Promise.withResolvers<void>()
       promptGate = gate
+      return gate.resolve
+    },
+    holdDelete: () => {
+      const gate = Promise.withResolvers<void>()
+      deleteGate = gate.promise
       return gate.resolve
     },
   }

@@ -720,6 +720,13 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
       response.end(`stored in ${mount.storedOutside} — not a project here; add it as one to open it`)
       return
     }
+    // A deleted id (#571) is GONE, not unknown (PR #572 review): a 404 for the URL's own thread
+    // starts a new thread under it (#378), and the page must take this one as a failure instead.
+    if (!mount.present && host.threadDeleted(threadId)) {
+      response.writeHead(410, { 'Content-Type': 'text/plain' })
+      response.end(`thread ${threadId} was deleted`)
+      return
+    }
     if (!mount.present || mount.projectId === undefined) {
       response.writeHead(404, { 'Content-Type': 'text/plain' })
       response.end(`no session for thread ${threadId}`)

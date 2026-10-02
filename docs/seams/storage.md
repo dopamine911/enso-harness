@@ -71,6 +71,12 @@ export interface AgentHost {
   /** A stored thread's judge cases (#469): one open, nothing built (#86); undefined for no file. */
   readStoredJudgeCases(threadId: string, thresholds: EnsoRiskThresholds): Promise<BranchJudgeCases | undefined>
   /**
+   * Whether the id is a deleted thread's (#571): deleted since this host started, or — durably,
+   * across a restart (PR #572 review) — its store kept for its forks under some project's folder.
+   * Such an id is never given to a new thread; the history route answers it 410.
+   */
+  threadDeleted(threadId: string): boolean
+  /**
    * Fork a stored thread at one of its user messages, as pi's `/fork` does (#433; the module
    * header): a new session file naming the source as its parent, holding everything before that
    * message, and the message's text to prefill with. The source's file is not written; nothing is

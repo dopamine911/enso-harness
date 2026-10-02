@@ -92,6 +92,7 @@ import {
   disposeThreadTree,
   holdingReason,
   inventoryThreadTree,
+  isOrphanedStore,
   mintThreadTree,
   releaseThreadStore,
   restoreThreadTree,
@@ -682,6 +683,12 @@ export interface AgentHost {
   ): Promise<BranchIncidentHistory | undefined>
   /** A stored thread's judge cases (#469): one open, nothing built (#86); undefined for no file. */
   readStoredJudgeCases(threadId: string, thresholds: EnsoRiskThresholds): Promise<BranchJudgeCases | undefined>
+  /**
+   * Whether the id is a deleted thread's (#571): deleted since this host started, or — durably,
+   * across a restart (PR #572 review) — its store kept for its forks under some project's folder.
+   * Such an id is never given to a new thread; the history route answers it 410.
+   */
+  threadDeleted(threadId: string): boolean
   /**
    * Fork a stored thread at one of its user messages, as pi's `/fork` does (#433; the module
    * header): a new session file naming the source as its parent, holding everything before that
@@ -1401,6 +1408,21 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       .map((info) => info.path)
   }
 
+  /** Whether a project folder holds `threadId`'s store kept for its forks (`isOrphanedStore`): the tombstone a restart keeps. */
+  function orphanedStoreUnder(threadId: string): boolean {
+    if (projectsDir === undefined || !existsSync(projectsDir)) return false
+    return readdirSync(projectsDir, { withFileTypes: true }).some(
+      (dirent) =>
+        dirent.isDirectory() &&
+        isEnsoProjectId(dirent.name) &&
+        isOrphanedStore(join(projectSnapshotsDir(projectsDir, dirent.name), threadId)),
+    )
+  }
+
+  function threadDeleted(threadId: string): boolean {
+    return deletedThreads.has(threadId) || orphanedStoreUnder(threadId)
+  }
+
   /**
    * Delete the thread (#571). Fail-closed, in this order: the tree's inventory first (refused, the
    * thread is untouched — not even retired); then the live session retired; then the tree and the
@@ -1416,12 +1438,14 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     if (restoringTrees.has(threadId)) {
       return { kind: 'busy', reason: `thread ${threadId} is restoring its files; delete it once that is done` }
     }
-    const located = await storedSession(threadId)
-    if (located === undefined) {
-      return { kind: 'no-thread', reason: `thread ${threadId} has no session file in a project this server serves` }
-    }
+    // Claimed before the first await (PR #572 review): a second delete meanwhile is `busy`, never a
+    // second run of this one beside it.
     deletingThreads.add(threadId)
     try {
+      const located = await storedSession(threadId)
+      if (located === undefined) {
+        return { kind: 'no-thread', reason: `thread ${threadId} has no session file in a project this server serves` }
+      }
       const tree = treeRecordOf(transcriptOf(SessionManager.open(located.path).getBranch()))
       const store = storeOf(threadId, located.cwd)
       if (tree !== undefined && store !== undefined && !force) {
@@ -1502,7 +1526,9 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     // id decides the directory — pi fixed it at creation — and one this host does not serve is a
     // refusal, never a fresh session beside it under the same id. Only a thread with no file asks
     // where a new one goes, so a stale answer to that question cannot block a resume.
-    if (deletingThreads.has(threadId) || deletedThreads.has(threadId)) {
+    // A deleted id is never built again (#571), across a restart too (PR #572 review: its store,
+    // kept for its forks, would be adopted by the new thread and swept from under it).
+    if (deletingThreads.has(threadId) || threadDeleted(threadId)) {
       throw new ThreadDeleted(`thread ${threadId} is deleted, or being deleted`)
     }
     const located = await locate(threadId)
@@ -2603,6 +2629,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     restoreThreadAt,
     undoLastRestore,
     deleteThread,
+    threadDeleted,
     mintsTreesIn: (project: string) => treeKindOf(project) !== undefined,
     freshPermissionMode: freshPermissionModeState,
     storedPermissionMode: storedPermissionModeState,
