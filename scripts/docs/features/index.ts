@@ -3,6 +3,7 @@ import { CONTEXT_BROWSER } from './context-browser.ts'
 import { CONTEXT } from './context.ts'
 import { DIFF } from './diff.ts'
 import { GUARDS_AND_RECEIPTS } from './guards-and-receipts.ts'
+import { INCIDENTS } from './incidents.ts'
 import { LINEAGE } from './lineage.ts'
 import { LOGS_AND_DEBUGGING } from './logs-and-debugging.ts'
 import { PERMISSION_MODES } from './permission-modes.ts'
@@ -14,6 +15,7 @@ import { SETTINGS } from './settings.ts'
 import type { FeatureSpec } from './spec.ts'
 import { STATS } from './stats.ts'
 import { TERMINAL } from './terminal.ts'
+import { THREAD_TREES } from './thread-trees.ts'
 import { WEB_ACCESS } from './web-access.ts'
 
 /**
@@ -24,6 +26,8 @@ import { WEB_ACCESS } from './web-access.ts'
 export const FEATURE_SPECS: readonly FeatureSpec[] = [
   CHAT,
   GUARDS_AND_RECEIPTS,
+  // Its shots are of a thread of its own, played after every other page's: its place here is the page's, not the capture's.
+  INCIDENTS,
   WEB_ACCESS,
   PERMISSION_MODES,
   CONTEXT,
@@ -37,6 +41,8 @@ export const FEATURE_SPECS: readonly FeatureSpec[] = [
   QUESTIONS_AND_DIALOGS,
   SESSIONS_AND_PROJECTS,
   TERMINAL,
+  // Before LINEAGE: it confirms nothing, so the thread is as it was; LINEAGE's fork would add a second tree.
+  THREAD_TREES,
   // ⚠ LAST: its first shot forks the thread, adding a second thread to the rail, and leaves the page on the fork.
   LINEAGE,
 ]

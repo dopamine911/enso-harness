@@ -25,7 +25,7 @@ export type ThreadTab = 'Chat' | 'Context' | 'Stats' | 'Diff'
 /** The UI a shot reaches its screen through. Each call but `scrollTo` records the step a reader would take. */
 export interface FeatureUi {
   readonly page: Page
-  /** Open the finished demo thread, the way a reader picks it in the rail. */
+  /** Open the spec's demo thread (`FeatureSpec.thread`), the way a reader picks it in the rail. */
   readonly openThread: () => Promise<void>
   readonly tab: (name: ThreadTab) => Promise<void>
   /** Click what a reader would: the step names it by the text or name it was found by. */
@@ -109,6 +109,11 @@ export interface FeatureSpec {
    * its GROUP on that page is `features/landing.ts#LANDING_FEATURE_GROUPS`.
    */
   readonly landingTagline: string
+  /**
+   * The demo thread the shots are of: the shared one, or (`'incident'`) the Incidents page's own,
+   * which the capture plays only after every other shot, so no other page sees it.
+   */
+  readonly thread?: 'incident'
   /** **What it shows**: paragraphs (a table or a code block is one paragraph). */
   readonly shows: readonly string[]
   /**

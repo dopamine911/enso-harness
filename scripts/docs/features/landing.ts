@@ -40,14 +40,14 @@ export const LANDING_FEATURE_GROUPS: readonly LandingFeatureGroup[] = [
   {
     kicker: 'Experiment',
     title: 'Change the conditions without erasing the evidence.',
-    text: 'Fork a thread at a prompt, start from a prompt of your own, and retain a record of the conditions each run operated under.',
-    features: ['lineage', 'prompts'],
+    text: 'Fork a thread at a prompt, run each thread in a tree of its own, start from a prompt of your own, and retain a record of the conditions each run operated under.',
+    features: ['lineage', 'thread-trees', 'prompts'],
   },
   {
     kicker: 'Verify & operate',
     title: 'Keep receipts for the parts that matter.',
-    text: 'Distinguish refusals from failures, see what changed, inspect the logs, and give the agent deliberate paths to external information.',
-    features: ['guards-and-receipts', 'diff', 'logs-and-debugging', 'web-access', 'terminal', 'settings'],
+    text: 'Distinguish refusals from failures, catch the agent working around one, see what changed, inspect the logs, and give the agent deliberate paths to external information.',
+    features: ['guards-and-receipts', 'incidents', 'diff', 'logs-and-debugging', 'web-access', 'terminal', 'settings'],
   },
 ]
 
