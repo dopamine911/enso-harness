@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import {
   type DialogAnswer,
   ENSO_INCIDENT_OPENED_ENTRY,
+  ENSO_THREAD_TREE_ENTRY,
   ENSO_IMAGE_MAX_BYTES,
   ENSO_PROMPT_BODY_MAX_BYTES,
   ENSO_PROMPT_MAX_IMAGES,
@@ -605,6 +606,41 @@ test('⚠ a stored thread is followed cold from its file, and the same follow go
   ])
   expect(fake.built).toHaveLength(1)
   follow.close()
+})
+
+// #551, PR #561 review: the snapshot says whether the thread has files to restore — from its own
+// `enso-thread-tree` record, or, for a thread not built yet, from what the host will mint. Not from
+// the cwd's shape, and not true for a stored thread that runs in its checkout.
+test("the snapshot's tree: a stored thread's own record says it; one without runs in its checkout; a new thread asks the host (#551)", async () => {
+  const record = {
+    kind: 'worktree',
+    project: '/p',
+    path: '/h/projects/x/trees/t',
+    branch: 'enso/t',
+    base: 'a'.repeat(40),
+  }
+  const onTree: FakeStoredThread = {
+    ...(RESUMED.t1 as FakeStoredThread),
+    transcript: [
+      { kind: 'custom', id: 'tr', customType: ENSO_THREAD_TREE_ENTRY, data: record },
+      ...(RESUMED.t1?.transcript ?? []),
+    ],
+  }
+  const fake = fakeHost(['mode'], {}, { ...RESUMED, onTree })
+  const treeOf = async (url: string, threadId: string): Promise<boolean | undefined> => {
+    const follow = await openFollow(url, threadId)
+    await follow.untilFrames(1)
+    follow.close()
+    const [snapshot] = follow.frames
+    return snapshot?.type === 'snapshot' ? snapshot.tree : undefined
+  }
+  const url = await startWith(fake)
+  expect(await treeOf(url, 'onTree')).toBe(true)
+  expect(await treeOf(url, 't1')).toBe(false)
+  expect(await treeOf(url, crypto.randomUUID())).toBe(false)
+  const minting = await startWith({ host: { ...fake.host, mintsTreesIn: () => true } })
+  expect(await treeOf(minting, crypto.randomUUID())).toBe(true)
+  expect(await treeOf(minting, 't1')).toBe(false)
 })
 
 // ── continue: a torn thread resumed from its stored state (#436) ─────────────────────

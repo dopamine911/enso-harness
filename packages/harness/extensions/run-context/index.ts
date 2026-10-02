@@ -21,6 +21,7 @@ import {
   projectSnapshotsDir,
   readTextIfPresent,
   realpathOrSelf,
+  treeProjectId,
 } from '@enso/core/paths'
 import { permissionEngineConfigPath } from '@enso/core/permission-rules'
 import { openSnapshotStore, type SnapshotStore } from '@enso/core/snapshot-store'
@@ -289,14 +290,15 @@ export default createRunContext({
     }
   },
   // The store beside the thread's session, under its project's folder (#552): the tree is the
-  // session's cwd, its project id the canonical path's. Opened per run; minted on the first.
-  openSnapshotStore: (tree, threadId) =>
-    openSnapshotStore({
-      directory: join(
-        projectSnapshotsDir(ensoProjectsDir(ensoHome(process.env)), projectIdOf(realpathOrSelf(tree))),
-        threadId,
-      ),
+  // session's cwd; its project id the one a minted tree's path names (#551), else the canonical
+  // path's. Opened per run; minted on the first — a thread on a tree finds the store its mint made.
+  openSnapshotStore: (tree, threadId) => {
+    const projectsDir = ensoProjectsDir(ensoHome(process.env))
+    const projectId = treeProjectId(projectsDir, tree) ?? projectIdOf(realpathOrSelf(tree))
+    return openSnapshotStore({
+      directory: join(projectSnapshotsDir(projectsDir, projectId), threadId),
       tree,
       environment: process.env,
-    }),
+    })
+  },
 })

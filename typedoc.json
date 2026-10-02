@@ -42,6 +42,7 @@
     "Thread stats",
     "Thread context",
     "Run context",
+    "Thread tree",
     "Git",
     "Session eval",
     "Session risk",

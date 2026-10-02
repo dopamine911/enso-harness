@@ -66,6 +66,7 @@ const snapshot = (overrides: Partial<EnsoFollowSnapshot> = {}): EnsoFollowSnapsh
   incidents: NO_SESSION_INCIDENTS,
   model: null,
   cwd: '/work/project',
+  tree: false,
   messages: [],
   usage: NO_USAGE,
   openDialogs: [],
@@ -126,6 +127,16 @@ test("the snapshot's cwd is the thread's project, replaced by every later snapsh
   expect(stores.cwd.get()).toBe('/work/project')
   route('snapshot', snapshot({ cwd: '/work/other' }))
   expect(stores.cwd.get()).toBe('/work/other')
+})
+
+// #551, PR #561 review: the page offers a restore only on a thread with a tree to restore — the
+// snapshot says which, and a later one replaces it.
+test("the snapshot's tree says whether the thread has files to restore, replaced by every later snapshot", () => {
+  expect(stores.tree.get()).toBe(false)
+  route('snapshot', snapshot({ tree: true }))
+  expect(stores.tree.get()).toBe(true)
+  route('snapshot', snapshot({ tree: false }))
+  expect(stores.tree.get()).toBe(false)
 })
 
 // #45: the thread's spend is pi's session total, whole — the snapshot seeds it (so a resumed or

@@ -2,7 +2,8 @@ import { expect, test } from 'bun:test'
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { createProjectRegistry, ProjectUnavailable } from '../projects.ts'
+import { projectIdOf, projectTreesDir } from '@enso/core/paths'
+import { canonicalConfigPath, createProjectRegistry, ProjectUnavailable } from '../projects.ts'
 
 /**
  * The project boundary (#395), decided in `projects.ts`: which directories a page may make
@@ -50,6 +51,28 @@ test('with no roots declared, only the launch directory is a project, and regist
   expect(refusal).toEqual({ kind: 'refused', reason: expect.stringContaining(configPath) })
   // Registering the launch directory is not a new project — it already is one.
   expect(projects.register({ path: launch })).toMatchObject({ kind: 'existing', project: { launch: true } })
+})
+
+// ⚠ #551: a thread on its own tree runs in a directory no one registered. The tree belongs to the
+// project its path names, and is served exactly when that project is — removed, it is not.
+test("⚠ a thread's tree is its project's: served while the project is, not once it is removed; a lookalike path is no tree (#551)", () => {
+  const { launch, root, statePath } = layout()
+  const app = join(root, 'app')
+  mkdirSync(app)
+  const projectsDir = join(dirname(statePath), 'projects')
+  const projects = createProjectRegistry({ launchDirectory: launch, roots: [root], statePath, projectsDir })
+  const registered = projects.register({ path: app })
+  if (registered.kind === 'refused') throw new Error(registered.reason)
+  const tree = join(projectTreesDir(projectsDir, projectIdOf(app)), 'thread-1')
+  expect(projects.byDirectory(tree)).toMatchObject({ projectId: registered.project.projectId, path: app })
+  expect(projects.byDirectory(join(tree, 'src'))?.projectId).toBe(registered.project.projectId)
+  // The launch project's trees too.
+  expect(projects.byDirectory(join(projectTreesDir(projectsDir, projectIdOf(launch)), 't'))?.launch).toBe(true)
+  // A tree of no project this server knows, and the same layout outside the projects folder.
+  expect(projects.byDirectory(join(projectTreesDir(projectsDir, 'ffffffffffffffff'), 't'))).toBeUndefined()
+  expect(projects.byDirectory(join(root, projectIdOf(app), 'trees', 't'))).toBeUndefined()
+  projects.remove(registered.project.projectId)
+  expect(projects.byDirectory(tree)).toBeUndefined()
 })
 
 test('registrations outlive the process; a root taken out of the config hides its projects without forgetting them', () => {
@@ -215,4 +238,17 @@ test('⚠ browsing a directory the server may enter but not read is a refusal sa
   } finally {
     chmodSync(locked, 0o700)
   }
+})
+
+// PR #561 review: a `threads.projects` key matched as written silently fell through to the default
+// for `~/app`, `app/` or a symlink — each must name the project's canonical path.
+test('a config path written with ~/, a trailing slash or through a symlink is the canonical path of the directory it names (#551)', () => {
+  const home = realpathSync(mkdtempSync(join(tmpdir(), 'enso-home-')))
+  mkdirSync(join(home, 'app'))
+  symlinkSync(join(home, 'app'), join(home, 'link'))
+  const app = join(home, 'app')
+  expect(canonicalConfigPath('~/app', home)).toBe(app)
+  expect(canonicalConfigPath(`${app}/`, home)).toBe(app)
+  expect(canonicalConfigPath('~/link', home)).toBe(app)
+  expect(canonicalConfigPath(app, home)).toBe(app)
 })

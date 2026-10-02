@@ -47,6 +47,27 @@ export const ENSO_CONFIG_FILENAME = 'config.json'
 export const ENSO_CONFIG_EXAMPLE = `{ "webFetch": { "allowedHosts": ["docs.example.com"] } }`
 
 /**
+ * A new thread's tree (#551): its own worktree of the checkout, a copy, or none.
+ *
+ * @group Configuration
+ */
+export const EnsoThreadTreeMode = Type.Union([Type.Literal('worktree'), Type.Literal('copy'), Type.Literal('off')])
+/** @group Configuration */
+export type EnsoThreadTreeMode = Static<typeof EnsoThreadTreeMode>
+
+/**
+ * The `threads` section (#551): `tree`, every project's default; `projects`, per canonical project
+ * path, an override — `{ "/home/me/big-monorepo": "off" }`. Read only through `threadTreeFor`.
+ */
+const EnsoThreadsConfig = Type.Object(
+  {
+    tree: Type.Optional(EnsoThreadTreeMode),
+    projects: Type.Optional(Type.Record(Type.String({ minLength: 1 }), EnsoThreadTreeMode)),
+  },
+  { additionalProperties: false },
+)
+
+/**
  * The whole config file.
  *
  * One section per consumer; every section's schema lives with its owner. ⚠ New sections are
@@ -61,11 +82,38 @@ export const EnsoConfig = Type.Object(
     webSearch: Type.Optional(WebSearchConfig),
     projects: Type.Optional(EnsoProjectsConfig),
     security: Type.Optional(EnsoSecurityConfig),
+    threads: Type.Optional(EnsoThreadsConfig),
   },
   { additionalProperties: false },
 )
 /** @group Configuration */
 export type EnsoConfig = Static<typeof EnsoConfig>
+
+/**
+ * The tree a new thread runs in (#551), as the user's config chooses it, for the project at
+ * `project` (a canonical path): its entry in `threads.projects`, else `threads.tree`, else
+ * `'off'`. ⚠ OFF BY DEFAULT until a thread's tree can be disposed with it (decided on PR #561):
+ * every tree adds a worktree registration and an `enso/*` branch to the user's repository, and
+ * nothing removes them yet. `'off'` runs the project's threads in the checkout itself and records
+ * no tree; the conversation still forks and continues, but there is no filesystem restore.
+ *
+ * `canonical` turns a key as the user wrote it — `~/code/app`, a trailing slash, a symlink — into
+ * the canonical path `project` is (PR #561 review): matched as written, such a key silently fell
+ * through to the default. The caller supplies it, since resolving a path is not this module's
+ * (it is browser-safe). ⚠ USER-ONLY, like `security`: read from the user's file before any trust
+ * is decided, so a project's own config cannot move its threads in or out of their trees.
+ *
+ * @group Configuration
+ */
+export function threadTreeFor(
+  config: EnsoConfig,
+  project: string,
+  canonical: (key: string) => string,
+): EnsoThreadTreeMode {
+  const overrides = Object.entries(config.threads?.projects ?? {})
+  const own = overrides.find(([key]) => canonical(key) === project)?.[1]
+  return own ?? config.threads?.tree ?? 'off'
+}
 
 const ensoConfigValidator = Compile(EnsoConfig)
 
