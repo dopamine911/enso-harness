@@ -3,11 +3,13 @@ import { execFileSync } from 'node:child_process'
 import {
   chmodSync,
   existsSync,
+  linkSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   utimesSync,
   writeFileSync,
 } from 'node:fs'
@@ -16,6 +18,8 @@ import { basename, dirname, join, relative } from 'node:path'
 import { openSnapshotStore, type SnapshotTaken } from '../snapshot-store.ts'
 import type { ThreadTreeKind, ThreadTreeRecord } from '../thread-tree-record.ts'
 import {
+  diskUsageOf,
+  measureBudget,
   disposeThreadTree,
   inventoryThreadTree,
   mintThreadTree,
@@ -23,6 +27,95 @@ import {
   restoreThreadTree,
   treeKindFor,
 } from '../thread-tree.ts'
+
+// #578: what a tree costs on disk, as `du` counts it — allocated blocks, a hard link once, a
+// symlink never followed — and never a `0` for what was not counted.
+test('⚠ a directory measures as `du -sk` does: blocks, a hard-linked file once, a symlink not followed (#578)', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'enso-du-'))
+  writeFileSync(join(directory, 'small.txt'), 'a\n')
+  mkdirSync(join(directory, 'deep', 'deeper'), { recursive: true })
+  writeFileSync(join(directory, 'deep', 'deeper', 'big.bin'), Buffer.alloc(300_000, 1))
+  linkSync(join(directory, 'deep', 'deeper', 'big.bin'), join(directory, 'hardlink.bin'))
+  const outside = mkdtempSync(join(tmpdir(), 'enso-du-outside-'))
+  writeFileSync(join(outside, 'elsewhere.bin'), Buffer.alloc(500_000, 1))
+  symlinkSync(outside, join(directory, 'link-to-outside'))
+  const du = Number(execFileSync('du', ['-sk', directory], { encoding: 'utf8' }).split('\t')[0]) * 1024
+  const measured = await diskUsageOf(directory, Date.now() + 10_000)
+  expect(measured.kind).toBe('measured')
+  // `du -sk` rounds the total up to a KiB.
+  expect(Math.abs((measured.kind === 'measured' ? measured.bytes : 0) - du)).toBeLessThan(1024)
+})
+
+test('a directory that is gone frees nothing; one that cannot be read is `unreadable`; an unreadable subdirectory or the time cap is `partial` — at least what was counted (#578)', async () => {
+  expect(await diskUsageOf(join(tmpdir(), 'enso-du-never-made'), Date.now() + 1000)).toEqual({
+    kind: 'measured',
+    bytes: 0,
+  })
+  const directory = mkdtempSync(join(tmpdir(), 'enso-du-'))
+  writeFileSync(join(directory, 'counted.bin'), Buffer.alloc(100_000, 1))
+  mkdirSync(join(directory, 'locked'))
+  writeFileSync(join(directory, 'locked', 'hidden.bin'), Buffer.alloc(100_000, 1))
+  chmodSync(join(directory, 'locked'), 0o000)
+  try {
+    const partial = await diskUsageOf(directory, Date.now() + 10_000)
+    expect(partial.kind).toBe('partial')
+    expect(partial.kind === 'partial' ? partial.bytes : 0).toBeGreaterThanOrEqual(100_000)
+    expect(partial.kind === 'partial' ? partial.reason : '').toContain('could not be read')
+    chmodSync(directory, 0o000)
+    expect((await diskUsageOf(directory, Date.now() + 10_000)).kind).toBe('unreadable')
+  } finally {
+    chmodSync(directory, 0o755)
+    chmodSync(join(directory, 'locked'), 0o755)
+  }
+  const capped = await diskUsageOf(directory, Date.now() - 1)
+  expect(capped).toMatchObject({ kind: 'partial', reason: expect.stringContaining('time') })
+})
+
+// #579 review: an entry whose stat failed was skipped as if it were not there, and the count said
+// `measured` — a directory whose names can be read but not searched measured 0 B.
+test('⚠ entries that cannot be stat-ed make the count `partial`, naming them — never a complete 0 (#578)', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'enso-du-'))
+  mkdirSync(join(directory, 'names-only'))
+  writeFileSync(join(directory, 'names-only', 'big.bin'), Buffer.alloc(1_000_000, 1))
+  chmodSync(join(directory, 'names-only'), 0o444)
+  try {
+    const counted = await diskUsageOf(directory, Date.now() + 10_000)
+    expect(counted).toMatchObject({ kind: 'partial', reason: expect.stringContaining('could not be read') })
+  } finally {
+    chmodSync(join(directory, 'names-only'), 0o755)
+  }
+})
+
+// #579 review: the deadline was checked only between directories, so one wide directory (a flat
+// build output) ignored it, and a cut in the last directory still said `measured`.
+test('⚠ the time cap holds inside one wide directory: past it, the count is `partial`, not finished in time (#578)', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'enso-du-wide-'))
+  for (let file = 0; file < 20_000; file += 1) writeFileSync(join(directory, `f${file}`), 'x')
+  const started = Date.now()
+  const counted = await diskUsageOf(directory, started + 5)
+  expect(counted).toMatchObject({ kind: 'partial', reason: 'not finished in time' })
+  // Stopped soon after the cap: nothing new was launched past it.
+  expect(Date.now() - started).toBeLessThan(1000)
+})
+
+// #579 review: the listing measured trees in batches against one deadline, so the last batches
+// were never walked. One budget, served in rotation, shares the time: a small tree measured beside
+// a huge one finishes, however much the huge one has queued.
+test('⚠ measurements sharing one budget are served in rotation: a small tree beside a huge one is measured in full, the huge one cut (#578)', async () => {
+  const huge = mkdtempSync(join(tmpdir(), 'enso-du-huge-'))
+  for (let file = 0; file < 30_000; file += 1) writeFileSync(join(huge, `f${file}`), 'x')
+  const small = mkdtempSync(join(tmpdir(), 'enso-du-small-'))
+  mkdirSync(join(small, 'src'))
+  for (let file = 0; file < 20; file += 1) writeFileSync(join(small, 'src', `f${file}`), 'x')
+  const budget = measureBudget()
+  const deadline = Date.now() + 40
+  const [hugeCount, smallCount] = await Promise.all([
+    diskUsageOf(huge, deadline, budget),
+    diskUsageOf(small, deadline, budget),
+  ])
+  expect(hugeCount.kind).toBe('partial')
+  expect(smallCount.kind).toBe('measured')
+})
 
 /**
  * A thread's own tree (#551 slice 2), on real git: temp checkouts only, never a worktree of this

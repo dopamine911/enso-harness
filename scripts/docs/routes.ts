@@ -186,7 +186,7 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
   ),
   THREAD_DELETE_PREVIEW_ROUTE: threadRead(
     'respondWithDeletePreview → AgentHost.previewThreadDelete',
-    "200 `EnsoThreadDeletePreview` JSON — the tree a delete would remove (or null), the work in it a delete is refused for (the inventory's words), and the threads whose stores keep this one's snapshots (#571); nothing is deleted and no snapshot taken — the inventory's scratch staging leaves loose objects in the store",
+    "200 `EnsoThreadDeletePreview` JSON — the tree a delete would remove (or null) and its size on disk (#578; at least, past a 5 s cap), the work in it a delete is refused for (the inventory's words), and the forks whose histories keep this one's snapshots (#571); nothing is deleted and no snapshot taken — the inventory's scratch staging leaves loose objects in the store",
     '400 malformed thread id; 403 untrusted origin; 404 no session file in a served project; 410 a deleted thread; 500 handler failure',
   ),
   THREAD_FOLLOW_ROUTE: threadRead(
@@ -456,6 +456,12 @@ const LITERAL_ROUTE_METADATA: Record<string, Omit<RouteMetadata, 'method' | 'pat
     builds: 'no',
     logs: 'yes',
   },
+  'GET /api/trees': literalRead({
+    handler: 'respondWithTrees → AgentHost.listTrees',
+    success:
+      "200 `EnsoTreesListing` JSON (#578) — per project this server serves a thread of: each thread tree on disk (the thread whose branch records it, or `null` for a tree directory no thread records), its kind, branch, size (`measured`; `partial` — at least, cut short by the listing's time cap or an unreadable directory; `unreadable` — never `0`) and the work it holds in the delete inventory's words; and the project's snapshot object store's size. Reads only",
+    errors: '403 untrusted origin; 500 handler failure',
+  }),
   'GET /api/about': literalRead({
     handler: 'createAboutRoute → about',
     success: '200 `EnsoBundleAbout` JSON',

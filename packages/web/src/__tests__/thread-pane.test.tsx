@@ -8,6 +8,8 @@ import {
   type EnsoGitRepository,
   type EnsoStoredThread,
   type EnsoThreadDeletePreview,
+  type EnsoTreeOnDisk,
+  type EnsoTreesListing,
   type EnsoThreadHistory,
   type EnsoThreadStats,
   NO_SESSION_INCIDENTS,
@@ -1990,7 +1992,7 @@ const DELETABLE = 'stored-delete'
 
 /** The page with one stored thread, opened from the rail and on screen: one the server holds, so Delete is offered. */
 async function openDeletable(
-  options: Pick<ScriptedFetchOptions, 'deleteAnswers' | 'deletePreview'> & {
+  options: Pick<ScriptedFetchOptions, 'deleteAnswers' | 'deletePreview' | 'trees'> & {
     readonly others?: readonly EnsoStoredThread[]
   } = {},
 ): Promise<MountedPage> {
@@ -2090,7 +2092,7 @@ async function openPreviewedDialog(page: MountedPage): Promise<HTMLElement> {
 
 // The preview (#571): the dialog says before the click what the delete takes and what it leaves.
 test('a thread in the checkout: the dialog says the checkout is not touched, and names no tree', async () => {
-  const page = await openDeletable({ deletePreview: { tree: null, holdsWork: null, keptFor: [] } })
+  const page = await openDeletable({ deletePreview: { tree: null, size: null, holdsWork: null, keptFor: [] } })
   // The follow snapshot's flag says a tree; the server's preview, which the dialog reads, says none.
   await flush(async () => {
     getThreadStores(DELETABLE).tree.set(true)
@@ -2103,9 +2105,13 @@ test('a thread in the checkout: the dialog says the checkout is not touched, and
   await page.unmount()
 })
 
-/** A tree thread's preview whose snapshots the forks `keptFor` keep. */
-const treeKeptFor = (keptFor: { threadId: string }[]): EnsoThreadDeletePreview => ({
+/** A tree thread's preview whose snapshots the forks `keptFor` keep; 412 MB on disk unless `size` says. */
+const treeKeptFor = (
+  keptFor: { threadId: string }[],
+  size: EnsoThreadDeletePreview['size'] = { kind: 'measured', bytes: 412_000_000 },
+): EnsoThreadDeletePreview => ({
   tree: { kind: 'worktree', path: '/work/.enso/trees/stored-delete', branch: 'enso/stored-delete' },
+  size,
   holdsWork: null,
   keptFor,
 })
@@ -2120,8 +2126,30 @@ const storedFork = (threadId: string, title?: string): EnsoStoredThread => ({
   busy: false,
 })
 
-const TREE_GOES =
-  "This cannot be undone. The conversation is deleted, and so is the thread's tree at /work/.enso/trees/stored-delete (branch enso/stored-delete)."
+const TREE_AT =
+  "This cannot be undone. The conversation is deleted, and so is the thread's tree at /work/.enso/trees/stored-delete (branch enso/stored-delete)"
+const TREE_GOES = `${TREE_AT}, 412 MB on disk.`
+
+// #578: the tree's size is said in the sentence naming it — at least what was read when the walk
+// was cut short, with why (#579 review), and an unreadable one by its reason, never as 0.
+for (const [size, said] of [
+  [
+    { kind: 'partial', bytes: 412_000_000, reason: 'not finished in time' },
+    `${TREE_AT}, at least 412 MB on disk (not finished in time).`,
+  ],
+  [
+    { kind: 'unreadable', reason: 'EACCES: permission denied' },
+    `${TREE_AT}; its size could not be read (EACCES: permission denied).`,
+  ],
+  [null, `${TREE_AT}.`],
+] as const satisfies readonly (readonly [EnsoThreadDeletePreview['size'], string])[]) {
+  test(`the dialog names a ${size?.kind ?? 'missing'} tree size as "${said.slice(TREE_AT.length)}"`, async () => {
+    const page = await openDeletable({ deletePreview: treeKeptFor([], size) })
+    const dialog = await openPreviewedDialog(page)
+    expect(dialog.querySelector('[data-slot="dialog-description"]')?.textContent).toBe(`${said} Its snapshots go too.`)
+    await page.unmount()
+  })
+}
 
 test('a tree whose snapshots a fork keeps: the dialog quotes the fork by its rail title and says its snapshots up to the fork stay', async () => {
   // A title that reads as a sentence of its own: quoted, it cannot run into the dialog's.
@@ -2157,7 +2185,12 @@ const workTag = (work: string): string => `"${createHash('sha256').update(work, 
 test('a tree holding work by the preview: the work is named before any click, and "Delete anyway" confirms that text', async () => {
   const work = 'the tree holds work — modified: src/parse.ts'
   const page = await openDeletable({
-    deletePreview: { tree: { kind: 'copy', path: '/work/copy', branch: null }, holdsWork: work, keptFor: [] },
+    deletePreview: {
+      tree: { kind: 'copy', path: '/work/copy', branch: null },
+      size: { kind: 'measured', bytes: 1300 },
+      holdsWork: work,
+      keptFor: [],
+    },
   })
   const dialog = await openPreviewedDialog(page)
   expect(dialog.querySelector('[role="alert"]')?.textContent).toBe(work)
@@ -2174,7 +2207,12 @@ test('a "Delete anyway" refused (422) for work changed since: the new list is sh
   const shown = 'the tree holds work — modified: src/parse.ts'
   const now = 'the tree holds work — modified: src/parse.ts, src/lexer.ts'
   const page = await openDeletable({
-    deletePreview: { tree: { kind: 'copy', path: '/work/copy', branch: null }, holdsWork: shown, keptFor: [] },
+    deletePreview: {
+      tree: { kind: 'copy', path: '/work/copy', branch: null },
+      size: { kind: 'measured', bytes: 1300 },
+      holdsWork: shown,
+      keptFor: [],
+    },
     deleteAnswers: [{ status: 422, reason: now }, { status: 204 }],
   })
   await openPreviewedDialog(page)
@@ -2200,6 +2238,114 @@ test('a preview the server refuses: its reason is shown, and Delete still sends 
   expect(dialog.textContent).toContain(`410 thread ${DELETABLE} was deleted`)
   await page.click(dialogButton('Delete'))
   await eventually(() => expect(page.server.deletes).toEqual([`/api/threads/${DELETABLE}`]))
+  await page.unmount()
+})
+
+/** Settings opened on its Trees tab (#578): Radix activates a tab on mousedown, as a pointer does. */
+async function openTreesTab(page: MountedPage): Promise<HTMLElement> {
+  const gear = page.container.querySelector<HTMLButtonElement>('header button[aria-label="settings"]')
+  if (gear === null) throw new Error('expected the settings button')
+  await page.click(gear)
+  const settings = await eventually(() => {
+    const found = [...document.querySelectorAll<HTMLElement>('[role="dialog"]')].find((dialog) =>
+      dialog.textContent?.includes('Settings'),
+    )
+    if (found === undefined) throw new Error('expected Settings to be open')
+    return found
+  })
+  const tab = [...settings.querySelectorAll<HTMLElement>('[role="tab"]')].find((found) => found.textContent === 'Trees')
+  if (tab === undefined) throw new Error('expected a Trees tab')
+  await flush(async () => {
+    tab.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }))
+    await tick()
+  })
+  return settings
+}
+
+const TREES_WORK = 'the tree holds work — modified: src/parse.ts'
+
+/** A tree no thread records, its size unreadable. */
+const ORPHAN_TREE: EnsoTreeOnDisk = {
+  threadId: null,
+  path: '/work/.enso/trees/orphan',
+  kind: 'copy',
+  branch: null,
+  size: { kind: 'unreadable', reason: 'EACCES: permission denied' },
+  holdsWork: null,
+}
+
+/** The launch project's trees and snapshot store, before any delete. */
+const LAUNCH_TREES: EnsoTreesListing['projects'][number] = {
+  projectId: 'p-launch',
+  objectStore: { kind: 'measured', bytes: 2_100_000_000 },
+  trees: [
+    ORPHAN_TREE,
+    {
+      threadId: DELETABLE,
+      path: '/work/.enso/trees/stored-delete',
+      kind: 'worktree',
+      branch: 'enso/stored-delete',
+      size: { kind: 'measured', bytes: 412_000_000 },
+      holdsWork: TREES_WORK,
+    },
+  ],
+}
+
+/** A launch project with the deletable thread's tree, holding work, and a tree no thread records. */
+const TREES_LISTING: EnsoTreesListing = { projects: [LAUNCH_TREES] }
+
+test("Settings' Trees lists each tree by its thread's title with size and held work, an unreadable size as such, and the snapshot store", async () => {
+  const page = await openDeletable({ trees: () => TREES_LISTING })
+  const settings = await openTreesTab(page)
+  await eventually(() => expect(settings.textContent).not.toContain('Measuring…'))
+  const section = settings.querySelector('section[aria-label="trees of launch"]')
+  expect(section?.querySelector('h3')?.textContent).toBe('launchsnapshots 2.1 GB')
+  const rows = [...(section?.querySelectorAll('li') ?? [])].map((row) => row.textContent ?? '')
+  // Largest first: the unreadable one orders as 0, and is never said as 0.
+  expect(rows[0]).toContain('try the parser rewrite')
+  expect(rows[0]).toContain('412 MB')
+  expect(rows[0]).toContain(TREES_WORK)
+  expect(rows[1]).toContain('no thread records this tree')
+  expect(rows[1]).toContain('size could not be read (EACCES: permission denied)')
+  expect(rows[1]).toContain('work not checked: no thread records it')
+  expect(rows[1]).not.toMatch(/\b0 B\b/)
+  await page.unmount()
+})
+
+test("a delete from Settings' Trees goes through the header's preview and forced DELETE, then the listing is read again", async () => {
+  let listing = TREES_LISTING
+  const page = await openDeletable({
+    trees: () => listing,
+    deletePreview: {
+      tree: { kind: 'worktree', path: '/work/.enso/trees/stored-delete', branch: 'enso/stored-delete' },
+      size: { kind: 'measured', bytes: 412_000_000 },
+      holdsWork: TREES_WORK,
+      keptFor: [],
+    },
+  })
+  // A browser's `fetch` refuses any `this` but the window (`Illegal invocation`): the tab's delete
+  // once called it as `target.fetch(…)`, which the scripted server never noticed.
+  const scripted = globalThis.fetch
+  globalThis.fetch = function strictFetch(this: unknown, input: string | URL | Request, init?: RequestInit) {
+    if (this !== undefined && this !== globalThis) {
+      throw new TypeError("Failed to execute 'fetch' on 'Window': Illegal invocation")
+    }
+    return scripted(input, init)
+  } as typeof fetch
+  const settings = await openTreesTab(page)
+  const trigger = await eventually(() => {
+    const found = settings.querySelector<HTMLButtonElement>('button[aria-label="delete thread try the parser rewrite"]')
+    if (found === null) throw new Error("expected the tree's Delete")
+    return found
+  })
+  await page.click(trigger)
+  await eventually(() => expect(deleteDialog()?.querySelector('[role="alert"]')?.textContent).toBe(TREES_WORK))
+  listing = { projects: [{ ...LAUNCH_TREES, trees: [ORPHAN_TREE] }] }
+  await page.click(dialogButton('Delete anyway'))
+  await eventually(() => expect(page.server.treeReads).toHaveLength(2))
+  expect(page.server.previewReads).toEqual([`/api/threads/${DELETABLE}/delete-preview`])
+  expect(page.server.deletes).toEqual([`/api/threads/${DELETABLE}?force=1`])
+  expect(page.server.deleteTags).toEqual([workTag(TREES_WORK)])
   await page.unmount()
 })
 

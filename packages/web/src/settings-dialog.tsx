@@ -1,3 +1,4 @@
+import type { EnsoProject, EnsoStoredThread } from '@enso/core'
 import { Settings2Icon } from 'lucide-react'
 import { useState } from 'react'
 import type { FetchLike } from './browser-logging.ts'
@@ -34,6 +35,7 @@ import {
 } from './fonts.ts'
 import { PermissionsSection, usePermissionPolicy } from './permissions-settings.tsx'
 import { applyTheme, isThemeId, pageStorage, readSavedTheme, saveTheme, THEME_FAMILIES, type ThemeId } from './theme.ts'
+import { TreesSection } from './trees-settings.tsx'
 
 /**
  * The page's settings (the header's gear), in two tabs. Appearance: its colour theme, and a font per
@@ -41,7 +43,9 @@ import { applyTheme, isThemeId, pageStorage, readSavedTheme, saveTheme, THEME_FA
  * option draws itself — a theme's swatch wears `data-theme`, so its colours are that theme's
  * variables, and a font's name is set in that font — so nothing here restates a value the page
  * already holds. Permissions (#474): the rules pi runs under, saved on the server
- * (`permissions-settings.tsx`); its draft is held here, so closing the dialog keeps it.
+ * (`permissions-settings.tsx`); its draft is held here, so closing the dialog keeps it. Trees
+ * (#578): what each thread tree and snapshot store costs on disk, measured when the tab opens, with
+ * each tree's Delete (`trees-settings.tsx`).
  */
 
 /** A theme in its own colours: its background, then its primary and three of its chart colours. */
@@ -149,9 +153,18 @@ function AppearanceFields(): React.ReactNode {
 export function SettingsDialog({
   threadId,
   fetch,
+  projects,
+  stored,
+  onDeleted,
 }: {
   threadId: string | undefined
   fetch?: FetchLike
+  /** The page's projects, heading the Trees tab's (#578). */
+  projects: readonly EnsoProject[]
+  /** The stored listing: the Trees tab names each tree's thread by it. */
+  stored: readonly EnsoStoredThread[]
+  /** A thread deleted from the Trees tab: the page leaves it, as the header's Delete does. */
+  onDeleted: (threadId: string) => void
 }): React.ReactNode {
   const [open, setOpen] = useState(false)
   const permissions = usePermissionPolicy(open, fetch)
@@ -162,7 +175,7 @@ export function SettingsDialog({
           variant="ghost"
           size="icon-sm"
           aria-label="settings"
-          title="settings — the colour theme, fonts and permissions"
+          title="settings — the colour theme, fonts, permissions and thread trees"
         >
           <Settings2Icon />
         </Button>
@@ -170,18 +183,24 @@ export function SettingsDialog({
       <DialogContent className="flex max-h-5/6 flex-col sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>Settings</DialogTitle>
-          <DialogDescription>appearance is kept in this browser; permissions are saved on the server</DialogDescription>
+          <DialogDescription>
+            appearance is kept in this browser; permissions are saved on the server; trees are measured on it
+          </DialogDescription>
         </DialogHeader>
         <Tabs defaultValue="appearance" className="min-h-0 flex-1">
           <TabsList>
             <TabsTrigger value="appearance">Appearance</TabsTrigger>
             <TabsTrigger value="permissions">Permissions</TabsTrigger>
+            <TabsTrigger value="trees">Trees</TabsTrigger>
           </TabsList>
           <TabsContent value="appearance" className="max-w-sm">
             <AppearanceFields />
           </TabsContent>
           <TabsContent value="permissions" className="min-h-0 overflow-y-auto pr-1">
             <PermissionsSection editor={permissions} threadId={threadId} fetch={fetch} />
+          </TabsContent>
+          <TabsContent value="trees" className="min-h-0 overflow-y-auto pr-1">
+            <TreesSection fetch={fetch} projects={projects} stored={stored} onDeleted={onDeleted} />
           </TabsContent>
         </Tabs>
       </DialogContent>

@@ -2127,7 +2127,7 @@ test('⚠ deleting a thread in its checkout removes its session file and its sna
   // The preview (#571): a thread in its checkout takes no tree with it, and nothing leans on its store.
   expect(await host.previewThreadDelete(threadId)).toEqual({
     kind: 'preview',
-    preview: { tree: null, holdsWork: null, keptFor: [] },
+    preview: { tree: null, size: null, holdsWork: null, keptFor: [] },
   })
 
   let retired = 0
@@ -2288,16 +2288,52 @@ test("⚠ deleting a forked parent removes its store, and the fork still restore
   const fork = await host.createSession(forked.threadId, () => project)
   const snapshots = projectSnapshotsDir(projectsDir, projectIdOf(project))
 
-  // Before deleting, the preview says what goes and what stays: the tree with its branch, the work
-  // in it, and the fork its snapshots are kept for — deleting nothing.
-  expect(await host.previewThreadDelete(parentId)).toEqual({
+  // Before deleting, the preview says what goes and what stays: the tree with its branch and its
+  // size on disk (#578, as `du` counts it), the work in it, and the fork its snapshots are kept for
+  // — deleting nothing.
+  const preview = await host.previewThreadDelete(parentId)
+  expect(preview).toEqual({
     kind: 'preview',
     preview: {
       tree: { kind: 'worktree', path: parentTree, branch: `enso/${parentId}` },
+      size: { kind: 'measured', bytes: expect.any(Number) },
       holdsWork: expect.stringContaining('a.txt'),
       keptFor: [{ threadId: forked.threadId }],
     },
   })
+  const du = Number(execFileSync('du', ['-sk', parentTree], { encoding: 'utf8' }).split('\t')[0]) * 1024
+  const measured =
+    preview.kind === 'preview' && preview.preview.size?.kind === 'measured' ? preview.preview.size.bytes : -1
+  expect(Math.abs(measured - du)).toBeLessThan(1024)
+
+  // The trees listing (#578): both threads' trees under the project, by thread, with their sizes,
+  // and the project's snapshot object store.
+  const listing = await host.listTrees()
+  const listed = listing.projects.find((entry) => entry.projectId === projectIdOf(project))
+  expect(listed?.objectStore).toMatchObject({ kind: 'measured' })
+  const byThread = new Map(listed?.trees.map((tree) => [tree.threadId, [tree.kind, tree.size.kind]]))
+  expect(byThread).toEqual(
+    new Map([
+      [parentId, ['worktree', 'measured']],
+      [forked.threadId, ['worktree', 'measured']],
+    ]),
+  )
+  expect(listed?.trees.find((tree) => tree.threadId === parentId)?.holdsWork).toContain('a.txt')
+  // A tree directory no thread records (a mint or a delete that stopped partway) is listed too —
+  // named, with its size, and no thread to delete it through.
+  const stray = join(dirname(parentTree), 'stray-tree')
+  mkdirSync(stray)
+  writeFileSync(join(stray, 'left.txt'), 'left behind\n')
+  const withStray = (await host.listTrees()).projects.find((entry) => entry.projectId === projectIdOf(project))
+  expect(withStray?.trees.find((tree) => tree.path === stray)).toEqual({
+    threadId: null,
+    path: stray,
+    kind: 'copy',
+    branch: null,
+    size: { kind: 'measured', bytes: expect.any(Number) },
+    holdsWork: null,
+  })
+  rmSync(stray, { recursive: true })
   expect(existsSync(parentTree) && existsSync(join(snapshots, parentId, 'HEAD'))).toBe(true)
   // Past the collection's one-hour grace, so the delete's collection prunes what nothing reaches.
   const then = new Date(Date.now() - 2 * 60 * 60_000)

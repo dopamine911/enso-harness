@@ -301,10 +301,33 @@ export const EnsoForkReceipt = Type.Object(
 export type EnsoForkReceipt = Static<typeof EnsoForkReceipt>
 
 /**
+ * How much a directory takes on disk (#578), as `du` counts it: allocated blocks, every file and
+ * directory under it, a hard-linked file once, a symlink never followed.
+ * - `measured`: every entry was read;
+ * - `partial`: at least `bytes` — the walk hit its time cap, or a directory under it could not be
+ *   read; `reason` says which;
+ * - `unreadable`: the directory itself could not be read. ⚠ Never a `0` for what was not counted.
+ *
+ * @group Thread inspection
+ */
+export const EnsoDiskUsage = Type.Union([
+  Type.Object({ kind: Type.Literal('measured'), bytes: Type.Integer({ minimum: 0 }) }, { additionalProperties: false }),
+  Type.Object(
+    { kind: Type.Literal('partial'), bytes: Type.Integer({ minimum: 0 }), reason: Type.String() },
+    { additionalProperties: false },
+  ),
+  Type.Object({ kind: Type.Literal('unreadable'), reason: Type.String() }, { additionalProperties: false }),
+])
+/** @group Thread inspection */
+export type EnsoDiskUsage = Static<typeof EnsoDiskUsage>
+
+/**
  * What deleting a thread would do (#571, `GET …/delete-preview`), read before the dialog asks. It
  * moves nothing — nothing is deleted and no snapshot is taken; its inventory only stages the tree
  * into a scratch index, which leaves loose objects in the thread's store (PR #572 review):
  * - `tree`: the tree a delete removes with its thread, or null for a thread in its checkout;
+ * - `size`: what that tree takes on disk, ignored files included — what the delete frees of it
+ *   (#578); null with no tree;
  * - `holdsWork`: the work in it a delete is refused for, in the inventory's own words ("the tree
  *   holds work — modified: a.txt"), or null — "Delete anyway" confirms exactly these words (their
  *   sha256 as `If-Match`), so work gained since is named before it is deleted;
@@ -326,6 +349,7 @@ export const EnsoThreadDeletePreview = Type.Object(
       ),
       Type.Null(),
     ]),
+    size: Type.Union([EnsoDiskUsage, Type.Null()]),
     holdsWork: Type.Union([Type.String(), Type.Null()]),
     keptFor: Type.Array(Type.Object({ threadId: Type.String() }, { additionalProperties: false })),
   },
@@ -333,6 +357,57 @@ export const EnsoThreadDeletePreview = Type.Object(
 )
 /** @group Thread inspection */
 export type EnsoThreadDeletePreview = Static<typeof EnsoThreadDeletePreview>
+
+/**
+ * One thread tree on disk (#578), as the trees listing names it:
+ * - `threadId`: the served thread whose branch records this tree, or null for a tree directory no
+ *   thread records (a mint or a delete that stopped partway) — named, never deletable from here;
+ * - `kind`, `branch`: a worktree on its branch, or a copy (null);
+ * - `size`: what it takes on disk, ignored files and installs included;
+ * - `holdsWork`: what deleting it is refused for, in the delete inventory's own words, or null —
+ *   also null for a tree no thread records, which has no store to compare with.
+ *
+ * @group Thread inspection
+ */
+export const EnsoTreeOnDisk = Type.Object(
+  {
+    threadId: Type.Union([Type.String(), Type.Null()]),
+    path: Type.String(),
+    kind: Type.Union([Type.Literal('worktree'), Type.Literal('copy')]),
+    branch: Type.Union([Type.String(), Type.Null()]),
+    size: EnsoDiskUsage,
+    holdsWork: Type.Union([Type.String(), Type.Null()]),
+  },
+  { additionalProperties: false },
+)
+/** @group Thread inspection */
+export type EnsoTreeOnDisk = Static<typeof EnsoTreeOnDisk>
+
+/**
+ * What thread trees cost on disk (#578, `GET /api/trees`), per project this server serves a thread
+ * of: its trees, and its snapshot object store (`snapshots/.objects`, #573; null when it has none).
+ * Sizes are bounded — one time cap for the whole listing — so a slow tree is `partial`, never waited
+ * on forever.
+ *
+ * @group Thread inspection
+ */
+export const EnsoTreesListing = Type.Object(
+  {
+    projects: Type.Array(
+      Type.Object(
+        {
+          projectId: Type.String(),
+          objectStore: Type.Union([EnsoDiskUsage, Type.Null()]),
+          trees: Type.Array(EnsoTreeOnDisk),
+        },
+        { additionalProperties: false },
+      ),
+    ),
+  },
+  { additionalProperties: false },
+)
+/** @group Thread inspection */
+export type EnsoTreesListing = Static<typeof EnsoTreesListing>
 
 /**
  * The palette's `/fork` (#433): a `host` row of kind `view` — the page does it, forking at the

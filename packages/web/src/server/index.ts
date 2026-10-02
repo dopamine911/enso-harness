@@ -676,6 +676,11 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     response.end(JSON.stringify(payload))
   }
 
+  /** `GET /api/trees` (#578): what the served threads' trees and object stores cost on disk. Reads only. */
+  async function respondWithTrees(response: ServerResponse): Promise<void> {
+    answerJson(response, await host.listTrees())
+  }
+
   /**
    * The thread's branch as the messages a chat mounts with (#95), plus its permission mode.
    * Read-only — looking must not build (#86).
@@ -1881,6 +1886,10 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     }
     if (request.method === 'GET' && url === '/api/stored-threads') {
       answerOrFail(respondWithStoredThreads(response), response)
+      return true
+    }
+    if (request.method === 'GET' && url === '/api/trees') {
+      answerOrFail(respondWithTrees(response), response)
       return true
     }
     if (request.method === 'GET' && url === '/api/about') {

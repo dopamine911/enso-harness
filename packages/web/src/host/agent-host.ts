@@ -76,6 +76,8 @@ import {
   ENSO_THREAD_TREE_ENTRY,
   ENSO_TREE_RESTORED_ENTRY,
   type EnsoThreadDeletePreview,
+  type EnsoTreeOnDisk,
+  type EnsoTreesListing,
   isEnsoProjectId,
   type ThreadTreeKind,
   type ThreadTreeRecord,
@@ -86,6 +88,7 @@ import {
   findRepoRoot,
   projectSessionsDir,
   projectSnapshotsDir,
+  projectTreesDir,
   realpathOrSelf,
 } from '@enso/core/paths'
 import { describePermissionPolicy, preparePermissionPolicy } from '@enso/core/permission-rules'
@@ -97,6 +100,8 @@ import {
   inventoryThreadTree,
   mintThreadTree,
   releaseThreadStore,
+  diskUsageOf,
+  measureBudget,
   restoreThreadTree,
   treeKindFor,
 } from '@enso/core/thread-tree'
@@ -727,6 +732,12 @@ export interface AgentHost {
     | { readonly kind: 'preview'; readonly preview: EnsoThreadDeletePreview }
     | { readonly kind: 'no-thread'; readonly reason: string }
   >
+  /**
+   * What thread trees cost on disk (#578), per project this host serves a thread of: each tree —
+   * the thread whose branch records it, or none — with its size and the work it holds, and the
+   * project's snapshot object store. Reads only; every size under one time cap.
+   */
+  listTrees(): Promise<EnsoTreesListing>
   /** Whether a NEW thread in `project` gets a tree of its own (#551): a projects folder, and trees not `off` for it. */
   mintsTreesIn(project: string): boolean
   /** What a fresh thread starts in — served before any run exists, so the header never guesses. */
@@ -924,6 +935,24 @@ function inheritedOpening(sourceThreadId: string, source: EnsoIncidentOpened): E
     ...(source.model === undefined ? {} : { model: source.model }),
     inheritedFrom: { threadId: sourceThreadId, incidentId: source.incidentId },
   }
+}
+
+/** How long a delete preview measures its tree (#578): past it, the size is `partial` — at least. */
+const PREVIEW_MEASURE_MS = 5000
+
+/** How long the trees listing measures every tree and object store in all (#578). */
+const TREES_MEASURE_MS = 15_000
+
+/** How many trees the listing reads at once: each inventory runs git, each measurement a walk. */
+const TREES_AT_ONCE = 4
+
+/** `jobs` run `TREES_AT_ONCE` at a time; their results in `jobs`' order. */
+async function inBatches<T>(jobs: readonly (() => Promise<T>)[]): Promise<T[]> {
+  const results: T[] = []
+  for (let start = 0; start < jobs.length; start += TREES_AT_ONCE) {
+    results.push(...(await Promise.all(jobs.slice(start, start + TREES_AT_ONCE).map((job) => job()))))
+  }
+  return results
 }
 
 export function createAgentHost(options: AgentHostOptions): AgentHost {
@@ -1540,18 +1569,104 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     }
     const tree = treeRecordOf(transcriptOf(SessionManager.open(located.path).getBranch()))
     const store = storeOf(threadId, located.cwd)
-    const holdsWork =
+    const [holdsWork, size] = await Promise.all([
       tree !== undefined && store !== undefined
-        ? holdingReason(await inventoryThreadTree({ record: tree, store, environment }))
-        : undefined
+        ? inventoryThreadTree({ record: tree, store, environment }).then(holdingReason)
+        : undefined,
+      tree === undefined ? null : diskUsageOf(tree.path, Date.now() + PREVIEW_MEASURE_MS),
+    ])
     const keptFor = (store === undefined ? [] : forksOfStore(store)).map((fork) => ({ threadId: fork }))
     return {
       kind: 'preview',
       preview: {
         tree: tree === undefined ? null : { kind: tree.kind, path: tree.path, branch: tree.branch },
+        size,
         holdsWork: holdsWork ?? null,
         keptFor,
       },
+    }
+  }
+
+  /**
+   * What thread trees cost on disk (#578). Every served thread whose branch records a tree, by the
+   * project its tree is under; then every directory under that project's `trees/` no thread records
+   * — a mint or a delete that stopped partway — named with no thread. A project with no tree but a
+   * snapshot object store (threads run in the checkout snapshot too) is listed for the store.
+   * ⚠ Every size starts at once, under one deadline and one {@link measureBudget} served in turns
+   * (#579 review): measured a batch at a time, the trees in the last batches started past the
+   * deadline and were never walked. A tree's work is the delete inventory's, a few at a time — each
+   * one runs git.
+   */
+  async function listTrees(): Promise<EnsoTreesListing> {
+    if (projectsDir === undefined) return { projects: [] }
+    const deadline = Date.now() + TREES_MEASURE_MS
+    const budget = measureBudget()
+    const recorded = new Map<string, { threadId: string; record: ThreadTreeRecord; cwd: string }[]>()
+    for (const stored of await listSessions()) {
+      const projectId = projectIdOfCwd(projectsDir, stored.cwd)
+      const record = treeRecordOf(transcriptOf(SessionManager.open(stored.path).getBranch()))
+      const trees = recorded.get(projectId) ?? []
+      if (record !== undefined) trees.push({ threadId: stored.id, record, cwd: stored.cwd })
+      recorded.set(projectId, trees)
+    }
+    const projects = await Promise.all(
+      [...recorded]
+        .toSorted(([first], [second]) => first.localeCompare(second))
+        .map(async ([projectId, threads]) => {
+          const known = new Set(threads.map(({ record }) => realpathOrSelf(record.path)))
+          const orphans = treeDirectoriesOf(projectId).filter((path) => !known.has(realpathOrSelf(path)))
+          const objects = join(projectSnapshotsDir(projectsDir, projectId), '.objects')
+          // Every size is started here, before any is awaited; the inventories run alongside, a few at a time.
+          const works = inBatches(threads.map((thread) => (): Promise<string | undefined> => workIn(thread)))
+          const [trees, objectStore] = await Promise.all([
+            Promise.all([
+              ...threads.map(async ({ threadId, record }, at): Promise<EnsoTreeOnDisk> => ({
+                threadId,
+                path: record.path,
+                kind: record.kind,
+                branch: record.branch,
+                size: await diskUsageOf(record.path, deadline, budget),
+                holdsWork: (await works)[at] ?? null,
+              })),
+              ...orphans.map(async (path): Promise<EnsoTreeOnDisk> => ({
+                threadId: null,
+                path,
+                kind: existsSync(join(path, '.git')) ? 'worktree' : 'copy',
+                branch: null,
+                size: await diskUsageOf(path, deadline, budget),
+                holdsWork: null,
+              })),
+            ]),
+            existsSync(objects) ? diskUsageOf(objects, deadline, budget) : null,
+          ])
+          return { projectId, objectStore, trees }
+        }),
+    )
+    return { projects: projects.filter((project) => project.trees.length > 0 || project.objectStore !== null) }
+  }
+
+  /** The work a recorded tree holds, as the delete would refuse for it; none without a store to compare with. */
+  async function workIn(thread: {
+    threadId: string
+    record: ThreadTreeRecord
+    cwd: string
+  }): Promise<string | undefined> {
+    const store = storeOf(thread.threadId, thread.cwd)
+    if (store === undefined) return undefined
+    return holdingReason(await inventoryThreadTree({ record: thread.record, store, environment }))
+  }
+
+  /** The directories under a project's `trees/`, by path; none when it has no such folder or it cannot be read. */
+  function treeDirectoriesOf(projectId: string): string[] {
+    if (projectsDir === undefined) return []
+    const trees = projectTreesDir(projectsDir, projectId)
+    try {
+      return readdirSync(trees, { withFileTypes: true })
+        .filter((treeEntry) => treeEntry.isDirectory())
+        .map((treeEntry) => join(trees, treeEntry.name))
+        .toSorted()
+    } catch {
+      return []
     }
   }
 
@@ -2724,6 +2839,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     deleteThread,
     threadDeleted,
     previewThreadDelete,
+    listTrees,
     mintsTreesIn: (project: string) => treeKindOf(project) !== undefined,
     freshPermissionMode: freshPermissionModeState,
     storedPermissionMode: storedPermissionModeState,

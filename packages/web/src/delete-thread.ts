@@ -1,7 +1,13 @@
-import { ENSO_NOTICE_SOURCE, EnsoThreadDeletePreview } from '@enso/core'
+import { EnsoThreadDeletePreview } from '@enso/core'
 import { Check } from 'typebox/value'
+import type { FetchLike } from './browser-logging.ts'
 import { describeFailedResponse } from './stored-threads.ts'
-import type { ThreadStores } from './thread-stores.ts'
+
+/** The thread a delete is for, and the `fetch` that reaches its server: a pane's, or Settings' (#578). */
+export interface DeleteTarget {
+  readonly threadId: string
+  readonly fetch: FetchLike
+}
 
 /**
  * Deleting a thread from the page (#571): the header's Delete, behind a confirmation, is one
@@ -15,8 +21,8 @@ import type { ThreadStores } from './thread-stores.ts'
  *   by `If-Match: "<sha256 hex of that text>"` (PR #572 review). A forced delete whose text is stale
  *   (a run wrote more since) is refused 422 again, with the list as it is now.
  * - 409 (a run, a move or a restore holds the thread), 404 (no such thread), or no answer at
- *   all: never forceable, so the dialog closes and the reason is a warning on the thread, as a
- *   refused restore is (`fork-thread.ts`).
+ *   all: never forceable, so the dialog closes and its caller says the reason (`onRefused`) — the
+ *   header as a warning on the thread, as a refused restore is (`fork-thread.ts`).
  */
 
 /** What a delete came to: gone, refused for the work its tree holds (forceable), or refused. */
@@ -29,42 +35,16 @@ export type DeleteOutcome =
 const HOLDS_WORK = 422
 
 /**
- * `DELETE` the pane's thread. `confirmedWork` is the holds-work text the dialog showed, when the
+ * `DELETE` the thread. `confirmedWork` is the holds-work text the dialog showed, when the
  * user chose to take that work with it: sent as `?force=1` with its digest in `If-Match`, so the
- * server deletes only the work that was shown. A refusal that force cannot change is said on the
- * thread as `delete refused: …`; the outcome says what the dialog does next.
+ * server deletes only the work that was shown. The outcome says what the dialog does next.
  */
-export async function deleteThread(
-  stores: Pick<ThreadStores, 'threadId' | 'fetch' | 'notifications'>,
-  confirmedWork: string | undefined,
-): Promise<DeleteOutcome> {
-  const outcome = await askToDelete(stores, confirmedWork)
-  if (outcome.kind === 'refused') {
-    stores.notifications.push(
-      `thread ${stores.threadId}: delete refused: ${outcome.reason}`,
-      'warning',
-      'run',
-      ENSO_NOTICE_SOURCE,
-    )
-  }
-  return outcome
-}
-
-/** The entity tag a forced delete confirms `work` by: its UTF-8 sha256, lowercase hex, quoted. */
-async function workTag(work: string): Promise<string> {
-  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(work)))
-  return `"${Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('')}"`
-}
-
-async function askToDelete(
-  stores: Pick<ThreadStores, 'threadId' | 'fetch'>,
-  confirmedWork: string | undefined,
-): Promise<DeleteOutcome> {
+export async function deleteThread(target: DeleteTarget, confirmedWork: string | undefined): Promise<DeleteOutcome> {
   const force = confirmedWork !== undefined
-  const route = `/api/threads/${encodeURIComponent(stores.threadId)}${force ? '?force=1' : ''}`
+  const route = `/api/threads/${encodeURIComponent(target.threadId)}${force ? '?force=1' : ''}`
   try {
     const headers: Record<string, string> = force ? { 'If-Match': await workTag(confirmedWork) } : {}
-    const response = await stores.fetch(route, { method: 'DELETE', headers })
+    const response = await target.fetch(route, { method: 'DELETE', headers })
     if (response.ok) return { kind: 'deleted' }
     if (response.status === HOLDS_WORK) {
       // Whole, not bounded to a line's length: the reason is the list of what force would destroy.
@@ -77,6 +57,12 @@ async function askToDelete(
   }
 }
 
+/** The entity tag a forced delete confirms `work` by: its UTF-8 sha256, lowercase hex, quoted. */
+async function workTag(work: string): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(work)))
+  return `"${Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('')}"`
+}
+
 /** What the dialog knows before a delete is sent: the server's preview, or why it could not say. */
 export type DeletePreviewRead =
   | { readonly kind: 'read'; readonly preview: EnsoThreadDeletePreview }
@@ -87,9 +73,9 @@ export type DeletePreviewRead =
  * and the forks that keep its snapshots. Read-only. A refusal (404, 410), no answer, or a payload off
  * its schema is a reason to show; the dialog still offers a plain Delete, whose answer is authoritative.
  */
-export async function readDeletePreview(stores: Pick<ThreadStores, 'threadId' | 'fetch'>): Promise<DeletePreviewRead> {
+export async function readDeletePreview(target: DeleteTarget): Promise<DeletePreviewRead> {
   try {
-    const response = await stores.fetch(`/api/threads/${encodeURIComponent(stores.threadId)}/delete-preview`)
+    const response = await target.fetch(`/api/threads/${encodeURIComponent(target.threadId)}/delete-preview`)
     if (!response.ok) return { kind: 'failed', reason: await describeFailedResponse(response) }
     const payload: unknown = await response.json()
     if (!Check(EnsoThreadDeletePreview, payload))
