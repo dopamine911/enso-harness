@@ -40,15 +40,19 @@ interface Experiment {
 
 const trail: readonly Experiment[] = [
   {
-    name: 'ArgusForge',
+    name: 'barf → ArgusForge',
     theme: 'Autonomy',
     question: 'How much of the software-development process can agents own?',
     did: [
-      'ArgusForge turns business requirements into software on its own: it plans the work, builds it, tests it and delivers it. Every build runs the test suite, the lint checks and the build pipeline, and code does not move forward until it passes. Then an AI from a different provider audits what the first one built.',
+      "It started with **barf**, a project of mine that orchestrated Claude agents issue by issue, from triage to completion. It built on Geoffrey Huntley's Ralph loop (one fresh context per task) and added what managing agents turned out to need. Each issue moved through a state machine with validated transitions. Each phase got its own scoped prompt. An issue that outgrew its context window was split automatically. A failed build, lint or test run became a fix sub-issue. A different provider's model audited the result, and a dashboard showed every message as it streamed.",
+      'barf evolved into **ArgusForge**, which began as my idea. ArgusForge turns business requirements into software on its own: it plans the work, builds it, tests it and delivers it. Code does not move forward until the test suite, the lint checks and the build pass, and then an AI from a different provider audits what the first one built.',
     ],
     livesOn:
-      'Agents should have real room to work. The answer is not to shrink them back into autocomplete. Once an agent owns that much of the process, its reliability stops being an abstract worry and becomes an engineering problem.',
-    sources: [{ label: 'ArgusForge', href: 'https://www.viaanix.com/ai/argusforge' }],
+      'Agents should have real room to work. The answer is not to shrink them back into autocomplete. And once an agent owns that much of the process, its reliability stops being an abstract worry and becomes an engineering problem: "done" is a claim until the build says so.',
+    sources: [
+      { label: 'the barf presentation', href: 'https://vx-daniel.github.io/barf-presentation/' },
+      { label: 'ArgusForge', href: 'https://www.viaanix.com/ai/argusforge' },
+    ],
   },
   {
     name: 'flaky-tests',
@@ -195,7 +199,7 @@ const receipts = [
 ] as const
 
 const inheritance: readonly (readonly [project: string, idea: string])[] = [
-  ['ArgusForge', 'autonomy'],
+  ['barf · ArgusForge', 'autonomy'],
   ['flaky-tests', 'durable evidence across time, and intermittent failure'],
   ['Time Machine', 'harness visibility'],
   ['Total Recall · Field Notes', 'context, continuity and history'],
@@ -226,9 +230,10 @@ const inheritance: readonly (readonly [project: string, idea: string])[] = [
         Each experiment along the way found part of the answer, and every one of them lives on in Enso.
       </p>
       <p class="section-intro">
-        It began with autonomy. Once agents own a real part of building software, their reliability stops being an abstract
-        concern. So I went looking for the thing that decides how an agent behaves: the model, the harness, the system prompt,
-        the context, memory, the tools, the codebase, the tests, the telemetry, and the human in front of it.
+        It began with autonomy, first in barf and then in ArgusForge. Once agents own a real part of building software, their
+        reliability stops being an abstract concern. So I went looking for the thing that decides how an agent behaves: the
+        model, the harness, the system prompt, the context, memory, the tools, the codebase, the tests, the telemetry, and the
+        human in front of it.
       </p>
       <p class="section-intro">
         I did not find one trusted layer. Every layer mattered, and every layer could fail. So, experiment by experiment, the
