@@ -234,7 +234,7 @@ test('the manifest joins screenshots to threads and keeps the agent’s notes ap
   expect(manifest.agentNotes.wish).toEqual([
     {
       at: '2026-10-01T12:00:10.000Z',
-      elapsedMs: 10000,
+      elapsedMs: 10_000,
       trying: 'see the diff',
       happened: 'no button',
       wanted: 'a diff tab',
