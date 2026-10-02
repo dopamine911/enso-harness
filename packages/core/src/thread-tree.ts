@@ -1,7 +1,17 @@
 /**
- * A thread's own tree (#551 slice 2): the directory a thread works in, never the user's checkout.
+ * A thread's own tree (#551 slice 2): the directory a thread works in, not the user's checkout.
  * Minted when the thread starts (or forks), put back to a snapshot on request, disposed when the
  * thread is done with.
+ *
+ * ⚠ THE ISOLATION IS OF WORKING FILES, NOT OF THE REPOSITORY (#564). A `worktree` shares the
+ * checkout's git directory, so bash `git` in the tree still moves the user's refs, writes its
+ * config and pushes from its remotes — exactly as a thread in the checkout could. The guards keep
+ * the file tools inside the tree; nothing here confines a command.
+ *
+ * ⚠ IGNORED FILES ARE NOT IN A TREE. A tree holds the checkout's tracked and unignored untracked
+ * files — never `node_modules`, `.env`, build output, or what `.git/info/exclude` lists — so a
+ * build or test in a fresh tree may need its install step first. By design: the snapshot store
+ * never force-adds an ignored file.
  *
  * ⚠ THIS MODULE WRITES THE USER'S REPOSITORY — the only one that does (`@enso/core/git` reads, and
  * the snapshot store writes only its own bare repository). A `worktree` tree must be registered
@@ -30,7 +40,7 @@
  */
 
 import { execFile } from 'node:child_process'
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { exitCode, type GitResult, withoutGitLocalVariables } from './git.ts'
 import {
@@ -239,9 +249,29 @@ async function seedFromCheckout(
 }
 
 /**
+ * The object directories a fork's store must name: the parent store's own alternates, then the
+ * parent's `objects`. ⚠ FLAT, NEVER CHAINED: git follows an alternate's alternates only five
+ * deep, so a fork that named its parent alone would lose its great-great-…-grandparent's objects
+ * at the sixth generation. Every ancestor store is then named directly, which also makes each one
+ * a `dependentStores` hold on its descendants' dispose.
+ */
+function forkAlternates(parentStore: string): string[] {
+  let inherited: string[]
+  try {
+    inherited = readFileSync(join(parentStore, 'objects', 'info', 'alternates'), 'utf8')
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line !== '')
+  } catch {
+    inherited = []
+  }
+  return [...inherited, join(parentStore, 'objects')]
+}
+
+/**
  * A fork's base is the parent's snapshot: the tree first, then the new store minted for it with
- * the parent store's objects as an alternate — after the tree exists, since the store's mint reads
- * the tree's repository (a worktree's is the project's).
+ * every ancestor store's objects as alternates — after the tree exists, since the store's mint
+ * reads the tree's repository (a worktree's is the project's, its `info/exclude` included).
  */
 async function seedFromSnapshot(
   place: MintPlace,
@@ -256,9 +286,20 @@ async function seedFromSnapshot(
     directory: store,
     tree,
     environment,
-    alternates: [join(from.storeDirectory, 'objects')],
+    alternates: forkAlternates(from.storeDirectory),
   })
   if (opened === undefined) return { step: 'store', reason: `the snapshot store could not be minted at ${store}` }
+  // A copy has no repository for the mint to read ignore rules from: the parent store's
+  // `info/exclude` (the checkout's, copied at its mint) carries on, so the fork ignores what the
+  // parent did.
+  const parentExclude = join(from.storeDirectory, 'info', 'exclude')
+  if (revision === undefined && made.store && existsSync(parentExclude)) {
+    try {
+      copyFileSync(parentExclude, join(store, 'info', 'exclude'))
+    } catch (error) {
+      return { step: 'store', reason: `the parent's exclude file could not be copied: ${String(error)}` }
+    }
+  }
   return from.hash
 }
 

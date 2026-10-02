@@ -29,6 +29,7 @@ import {
   readTextIfPresent,
 } from '@enso/core/paths'
 import { startEnsoServer } from './index.ts'
+import { canonicalConfigPath } from './projects.ts'
 
 const cwdArgument: string | undefined = process.argv[2]
 const cwd: string = cwdArgument === undefined || cwdArgument.length === 0 ? process.cwd() : cwdArgument
@@ -70,8 +71,8 @@ const { listening } = startEnsoServer({
   projectsStatePath: ensoProjectsPath(home),
   promptsDir: ensoPromptsDir(home),
   projectsDir: ensoProjectsDir(home),
-  // Each new thread in its own tree (#551): the user's `threads` section, default on.
-  threadTree: (project) => threadTreeFor(config.config, project),
+  // Each new thread in its own tree (#551) when the user's `threads` section says so — off by default.
+  threadTree: (project) => threadTreeFor(config.config, project, (key) => canonicalConfigPath(key)),
   harnessPackageDir: harnessPackageDir(repoRoot),
   agentDir,
   permissionRulesPath: ensoPermissionRulesPath(home),

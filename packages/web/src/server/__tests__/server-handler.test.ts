@@ -36,6 +36,7 @@ import {
   type HostedThread,
   type HostedThreadInspection,
   SessionDirectoryRefused,
+  type ThreadRestoreOutcome,
 } from '../../host/agent-host.ts'
 import { transcriptOf } from '../../host/transcript.ts'
 import { startEnsoServer } from '../index.ts'
@@ -910,7 +911,6 @@ test('⚠ POST …/restore answers the restored and safety hashes; refuses an un
   const restored = await restore(url, 'restored', { entryId: 'u1' })
   expect(restored.status).toBe(200)
   expect(JSON.parse(restored.body)).toEqual({ hash: 'a'.repeat(40), safety: 'b'.repeat(40) })
-  expect(built).toHaveLength(0)
   expect(await restore(url, 'treeless', { entryId: 'u1' })).toEqual({
     status: 409,
     body: 'thread treeless has no tree',
@@ -918,7 +918,10 @@ test('⚠ POST …/restore answers the restored and safety hashes; refuses an un
   expect(await restore(url, 'unsnapshotted', { entryId: 'u1' })).toEqual({ status: 409, body: 'no snapshot at u1' })
   expect(await restore(url, 'refusing', { entryId: 'u1' })).toEqual({ status: 409, body: 'checkout-index failed' })
   expect((await restore(url, 'restored', { entryId: 'nope' })).status).toBe(404)
+  // An unknown thread is answered before the lease: nothing is BUILT under its id.
+  const builtBefore = built.length
   expect((await restore(url, 'never-stored', { entryId: 'u1' })).status).toBe(404)
+  expect(built).toHaveLength(builtBefore)
   expect((await restore(url, 'restored', { entryId: 'u1', extra: 1 })).status).toBe(400)
   expect((await restore(url, 'restored', { entryId: '' })).status).toBe(400)
   // A run holds the thread: it is writing the very files a restore would replace.
@@ -926,6 +929,26 @@ test('⚠ POST …/restore answers the restored and safety hashes; refuses an un
   const busy = await restore(url, 'restored', { entryId: 'u1' })
   expect(busy.status).toBe(409)
   expect(busy.body).toContain('is running')
+})
+
+// ⚠ PR #561 review: the restore routes HOLD the thread for the whole restore, as a run does — a
+// control route that comes meanwhile is refused, and the hold is given back once it settles.
+test('⚠ a restore holds its thread until it settles: a mode change meanwhile is refused (409), and accepted after; POST …/restore/undo answers the same way (#551, #565)', async () => {
+  const finish = Promise.withResolvers<ThreadRestoreOutcome>()
+  const thread = { transcript: STORED_BRANCH, modified: new Date(0), firstMessage: 'earlier question' }
+  const { url } = await startWith(settlesAtOnce, { held: { ...thread, restore: finish.promise } })
+  const changeMode = (): Promise<Response> =>
+    fetch(`${url}/api/threads/held/mode`, { method: 'POST', body: JSON.stringify({ mode: 'acceptEdits' }) })
+  const undo = fetch(`${url}/api/threads/held/restore/undo`, { method: 'POST' })
+  await Bun.sleep(50)
+  const meanwhile = await changeMode()
+  expect(meanwhile.status).toBe(409)
+  finish.resolve({ kind: 'restored', hash: 'c'.repeat(40), safety: 'd'.repeat(40) })
+  const undone = await undo
+  expect(undone.status).toBe(200)
+  expect(await undone.json()).toEqual({ hash: 'c'.repeat(40), safety: 'd'.repeat(40) })
+  expect((await changeMode()).status).toBe(204)
+  expect((await fetch(`${url}/api/threads/never-stored/restore/undo`, { method: 'POST' })).status).toBe(404)
 })
 
 test('GET /api/threads/:id returns the branch as the transcript of ours, with sessionFile null while unflushed', async () => {

@@ -139,24 +139,30 @@ function runStoreGit(
 }
 
 /**
- * The tree's own object directory, index and object format, when the tree is a git checkout: the
- * alternates target, the index seed, and the format the store must share. Read through the
- * read-only runner, so a worktree's `.git` FILE resolves to the common directory as git does, not
- * as a path join would.
+ * The tree's own object directory, index, exclude file and object format, when the tree is a git
+ * checkout: the alternates target, the index seed, the ignore rules beyond `.gitignore`, and the
+ * format the store must share. Read through the read-only runner, so a worktree's `.git` FILE
+ * resolves to the common directory as git does, not as a path join would.
  */
 async function treeRepository(
   environment: NodeJS.ProcessEnv,
   tree: string,
-): Promise<{ objects: string; index: string; objectFormat: string } | undefined> {
+): Promise<{ objects: string; index: string; exclude: string; objectFormat: string } | undefined> {
   const objects = await runGitIn(environment, ['rev-parse', '--path-format=absolute', '--git-path', 'objects'], tree)
   const index = await runGitIn(environment, ['rev-parse', '--path-format=absolute', '--git-path', 'index'], tree)
-  if (objects.code !== 0 || index.code !== 0) return undefined
+  const exclude = await runGitIn(
+    environment,
+    ['rev-parse', '--path-format=absolute', '--git-path', 'info/exclude'],
+    tree,
+  )
+  if (objects.code !== 0 || index.code !== 0 || exclude.code !== 0) return undefined
   // `--show-object-format` is git ≥ 2.32; a git without it has no sha256 repositories either, so
   // the alternates and the seed keep their fast path and the format is sha1.
   const format = await runGitIn(environment, ['rev-parse', '--show-object-format'], tree)
   return {
     objects: objects.stdout.trim(),
     index: index.stdout.trim(),
+    exclude: exclude.stdout.trim(),
     objectFormat: format.code === 0 ? format.stdout.trim() : 'sha1',
   }
 }
@@ -164,7 +170,8 @@ async function treeRepository(
 /**
  * Mint the store at `directory`: `git init --bare` in the format its objects must share, the
  * tree's object directory and `alternates` named in `objects/info/alternates`, the tree's index
- * copied as the seed. False when the directory or the init fails — never a half-made store to use.
+ * copied as the seed and its `info/exclude` as the store's. False when the directory or the init
+ * fails — never a half-made store to use.
  */
 async function mintStore(
   directory: string,
@@ -195,13 +202,22 @@ async function mintStore(
     tree,
   )
   if (init.code !== 0) return false
-  const objectDirectories = [...(repository === undefined ? [] : [repository.objects]), ...alternates]
+  // Deduplicated, order kept: a fork's flattened alternates repeat the checkout's objects.
+  const objectDirectories = [...new Set([...(repository === undefined ? [] : [repository.objects]), ...alternates])]
   if (objectDirectories.length > 0) {
     mkdirSync(join(directory, 'objects', 'info'), { recursive: true })
     writeFileSync(join(directory, 'objects', 'info', 'alternates'), `${objectDirectories.join('\n')}\n`)
   }
   if (repository !== undefined && existsSync(repository.index)) {
     copyFileSync(repository.index, join(directory, 'enso-index'))
+  }
+  // ⚠ The repository's `info/exclude` applies under the repository's own GIT_DIR, never under
+  // the store's: without this copy a file ignored only there is captured, minted into a new tree,
+  // and cleaned away by a restore. Copied ONCE, at mint: a later edit of the repository's exclude
+  // file is not followed. Absent, the store keeps the one `init` wrote.
+  if (repository !== undefined && existsSync(repository.exclude)) {
+    mkdirSync(join(directory, 'info'), { recursive: true })
+    copyFileSync(repository.exclude, join(directory, 'info', 'exclude'))
   }
   return true
 }

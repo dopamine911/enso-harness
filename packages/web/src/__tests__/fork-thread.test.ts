@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from 'bun:test'
 import type { UIMessage } from '@tanstack/ai-client'
-import { forkEntryFor, forkFromPage, restoreFromPage } from '../fork-thread.ts'
+import { forkEntryFor, forkFromPage, restoreFromPage, UNDO_RESTORE_LABEL } from '../fork-thread.ts'
 import { clearThreadsForTest, mintThread, type ThreadStores } from '../thread-stores.ts'
 
 afterEach(() => clearThreadsForTest())
@@ -110,7 +110,10 @@ test('⚠ a second fork press while one is outstanding forks nothing and says so
 })
 
 /** A thread whose `/history` is BRANCH and whose `/restore` answers `answer`; the bodies it was posted. */
-function restoringThread(answer: () => Response): { stores: ThreadStores; posts: string[] } {
+function restoringThread(
+  answer: () => Response,
+  undo: () => Response = (): Response => new Response('not scripted', { status: 404 }),
+): { stores: ThreadStores; posts: string[] } {
   const posts: string[] = []
   const stores = mintThread((input: string, init?: RequestInit) => {
     if (input.endsWith('/history')) {
@@ -125,6 +128,7 @@ function restoringThread(answer: () => Response): { stores: ThreadStores; posts:
         }),
       )
     }
+    if (input.endsWith('/restore/undo') && init?.method === 'POST') return Promise.resolve(undo())
     if (input.endsWith('/restore') && init?.method === 'POST') {
       posts.push(typeof init.body === 'string' ? init.body : '')
       return Promise.resolve(answer())
@@ -151,4 +155,41 @@ test('⚠ a refused restore says its reason and restores nothing; a prompt off t
   expect(stores.notifications.get().at(-1)?.message).toContain('thread t has no tree')
   expect(await restoreFromPage(stores, [...BRANCH, prompt('client-9', 'third')], 'client-9')).toBeUndefined()
   expect(posts).toEqual(['{"entryId":"e-u1"}'])
+})
+
+// #565: the dialog promises the replaced files are kept — the notice is where they come back from.
+// A press that undid nothing puts the action back; an undo is a restore, said with its own undo.
+test('⚠ a restore\'s notice offers "Undo last restore": a refused press keeps the offer, a done one says the files are back and offers to undo that (#565)', async () => {
+  const undoAnswers = [
+    new Response('thread t is running', { status: 409 }),
+    Response.json({ hash: 'b'.repeat(40), safety: 'c'.repeat(40) }),
+  ]
+  const undoPosts: string[] = []
+  const { stores } = restoringThread(
+    () => Response.json({ hash: 'a'.repeat(40), safety: 'b'.repeat(40) }),
+    () => {
+      undoPosts.push('undo')
+      return undoAnswers.shift() ?? new Response('none left', { status: 500 })
+    },
+  )
+  await restoreFromPage(stores, BRANCH, 'e-u1')
+  const restoredLine = stores.notifications.get().at(-1)
+  expect(restoredLine?.action?.label).toBe(UNDO_RESTORE_LABEL)
+  const press = async (id: number): Promise<void> => {
+    stores.notifications.takeAction(id)?.run()
+    await Bun.sleep(0)
+    await Bun.sleep(0)
+  }
+  await press(restoredLine?.id ?? -1)
+  expect(stores.notifications.get().at(-1)?.message).toContain('undo refused: 409 thread t is running')
+  // Refused: the offer is back on the restore's line.
+  expect(stores.notifications.get().find((line) => line.id === restoredLine?.id)?.action?.label).toBe(
+    UNDO_RESTORE_LABEL,
+  )
+  await press(restoredLine?.id ?? -1)
+  const undoneLine = stores.notifications.get().at(-1)
+  expect(undoneLine?.message).toContain('last restore undone: files back to bbbbbbb')
+  expect(undoneLine?.action?.label).toBe(UNDO_RESTORE_LABEL)
+  expect(stores.notifications.get().find((line) => line.id === restoredLine?.id)?.action).toBeUndefined()
+  expect(undoPosts).toHaveLength(2)
 })

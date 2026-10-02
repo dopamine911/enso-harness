@@ -1754,6 +1754,50 @@ test("⚠ two threads on one project each get their own worktree at the checkout
   expect(readFileSync(join(project, 'a.txt'), 'utf8')).toBe('dirty\n')
 })
 
+// ⚠ PR #561 review: pi writes a session's file only at its first message, so a new thread built
+// and disposed before one (a preview looked at, a restart) had no file to be found by — its next
+// build minted again over the tree that existed, and was refused, for good.
+test('a new thread built and disposed before any message builds again, on the same tree, with no second worktree (#551)', async () => {
+  const project = dirtyCheckout()
+  const { host } = treeHost(project)
+  const threadId = crypto.randomUUID()
+  const first = await host.createSession(threadId, () => project)
+  const tree = first.inspect().cwd
+  first.runtime.dispose()
+  const again = await host.createSession(threadId, () => {
+    throw new Error('a thread whose tree was minted was asked for a new directory')
+  })
+  openSessions.push(again)
+  expect(again.inspect().cwd).toBe(tree)
+  expect(fixtureGit(project, 'worktree', 'list').split('\n')).toHaveLength(2)
+})
+
+// ⚠ PR #561 review: a prompt that finds the thread held JOINS the holder (#75), and pi starts a run
+// for it when none streams — so the restore's lease alone would let a run read a half-restored tree.
+test('⚠ a prompt while the thread restores its files is refused with that reason, and admitted once the restore is done (#551)', async () => {
+  const project = dirtyCheckout()
+  const core = createFauxCore()
+  core.setResponses(Array.from({ length: 3 }, (_, index) => faux.fauxAssistantMessage(`reply ${index + 1}`)))
+  const { host } = treeHost(project, [fauxModelExtension(core)])
+  new ProjectTrustStore(agentDir).set(project, true)
+  const threadId = crypto.randomUUID()
+  const hosted = await host.createSession(threadId, () => project)
+  openSessions.push(hosted)
+  await runPrompt(hosted, 'first')
+  const first = hosted.inspect().entries.find((entry) => entry.kind === 'message' && entry.role === 'user')?.id ?? ''
+  const restoring = host.restoreThreadAt(threadId, first)
+  // Past the lookups, into the git of it.
+  await Bun.sleep(0)
+  const refused = Promise.withResolvers<string>()
+  hosted.runtime.prompt(
+    { message: 'during' },
+    { onAccepted: () => refused.reject(new Error('admitted')), onRejected: refused.resolve },
+  )
+  expect(await refused.promise).toBe(`thread ${threadId} is restoring its files; prompt again once that is done`)
+  expect((await restoring).kind).toBe('restored')
+  await runPrompt(hosted, 'after')
+})
+
 // ⚠ #502 meets #551: every tree is a fresh path, so trust keyed by the path would ask on every
 // new thread and a "Trust project" answer would trust one tree. It is the project's.
 test('⚠ a thread on its tree is trusted by its project\'s answer, and "Trust project" there trusts the project, not the tree (#551)', async () => {
@@ -1776,7 +1820,11 @@ test('⚠ a thread on its tree is trusted by its project\'s answer, and "Trust p
     () => asking,
   )
   openSessions.push(answered)
+  // The question names the project its answer is stored for, never the tree's own path.
+  const asked = untilObservation(answered, isTrustQuestion)
   await promptAnswering(answered, [], 'Trust project')
+  const title = String(((await asked) as { dialog?: { title?: unknown } }).dialog?.title)
+  expect(title).toStartWith(`Trust the project ${asking}?`)
   expect(new ProjectTrustStore(agentDir).get(asking)).toBe(true)
   expect(new ProjectTrustStore(agentDir).get(answered.inspect().cwd)).toBeNull()
 })
@@ -1825,6 +1873,8 @@ test("⚠ a fork's tree is the parent's at the fork point; a restore brings a tu
   const forkedFirst = await host.createSession(atFirst.threadId, () => project)
   openSessions.push(forkedSecond, forkedFirst)
   expect(forkedSecond.inspect().cwd).not.toBe(tree)
+  // Its branch in the user's repository names the fork's thread (PR #561 review), not the tree's directory.
+  expect(fixtureGit(project, 'branch', '--list', `enso/${atSecond.threadId}`)).toContain(`enso/${atSecond.threadId}`)
   expect(readFileSync(join(forkedSecond.inspect().cwd, 'a.txt'), 'utf8')).toBe('agent edit\n')
   expect(readFileSync(join(forkedFirst.inspect().cwd, 'a.txt'), 'utf8')).toBe('dirty\n')
   expect(readFileSync(join(tree, 'a.txt'), 'utf8')).toBe('agent edit\n')
@@ -1840,6 +1890,21 @@ test("⚠ a fork's tree is the parent's at the fork point; a restore brings a tu
   expect(
     stored?.transcript.some((entry) => entry.kind === 'custom' && entry.customType === ENSO_TREE_RESTORED_ENTRY),
   ).toBe(true)
+
+  // Undo (#565): the files the restore replaced come back — the edit and the file made after —
+  // and that is a restore too, so undoing again puts the first restore back.
+  const undone = await host.undoLastRestore(threadId)
+  if (undone.kind !== 'restored') throw new Error(`undo refused: ${undone.reason}`)
+  expect(undone.hash).toBe(restored.safety)
+  expect(readFileSync(join(tree, 'a.txt'), 'utf8')).toBe('agent edit\n')
+  expect(readFileSync(join(tree, 'later.txt'), 'utf8')).toBe('made after\n')
+  const redone = await host.undoLastRestore(threadId)
+  // The undo's own safety: the restored files, snapshotted again as a commit of their own.
+  expect(redone).toMatchObject({ kind: 'restored', hash: undone.safety })
+  expect(readFileSync(join(tree, 'a.txt'), 'utf8')).toBe('dirty\n')
+  expect(existsSync(join(tree, 'later.txt'))).toBe(false)
+  // A tree thread with no restore has nothing to undo.
+  expect((await host.undoLastRestore(atFirst.threadId)).kind).toBe('no-restore')
 
   // A thread in its checkout has no tree to restore — said as that, not as a missing thread.
   const plainCore = createFauxCore()

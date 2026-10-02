@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, 
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { projectIdOf, projectTreesDir } from '@enso/core/paths'
-import { createProjectRegistry, ProjectUnavailable } from '../projects.ts'
+import { canonicalConfigPath, createProjectRegistry, ProjectUnavailable } from '../projects.ts'
 
 /**
  * The project boundary (#395), decided in `projects.ts`: which directories a page may make
@@ -238,4 +238,17 @@ test('⚠ browsing a directory the server may enter but not read is a refusal sa
   } finally {
     chmodSync(locked, 0o700)
   }
+})
+
+// PR #561 review: a `threads.projects` key matched as written silently fell through to the default
+// for `~/app`, `app/` or a symlink — each must name the project's canonical path.
+test('a config path written with ~/, a trailing slash or through a symlink is the canonical path of the directory it names (#551)', () => {
+  const home = realpathSync(mkdtempSync(join(tmpdir(), 'enso-home-')))
+  mkdirSync(join(home, 'app'))
+  symlinkSync(join(home, 'app'), join(home, 'link'))
+  const app = join(home, 'app')
+  expect(canonicalConfigPath('~/app', home)).toBe(app)
+  expect(canonicalConfigPath(`${app}/`, home)).toBe(app)
+  expect(canonicalConfigPath('~/link', home)).toBe(app)
+  expect(canonicalConfigPath(app, home)).toBe(app)
 })

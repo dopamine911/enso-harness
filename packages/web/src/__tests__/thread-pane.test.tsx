@@ -2,6 +2,7 @@ import { afterAll, afterEach, expect, spyOn, test } from 'bun:test'
 import {
   ENSO_GUARD_DENIAL_ENTRY,
   ENSO_PROVIDER_REFUSAL_KEY,
+  type EnsoForkReceipt,
   type EnsoGitFileChange,
   type EnsoGitRepository,
   type EnsoThreadHistory,
@@ -122,6 +123,8 @@ async function mountPane(
     globalFetch?: typeof fetch
     /** Mount a STORED thread, as a reload does (`adoptThread`), instead of minting a new one. */
     history?: EnsoThreadHistory
+    /** The page opens what a fork answers (#433) — and so offers fork and restore on prompts. */
+    onForked?: (receipt: EnsoForkReceipt) => void
   } = {},
 ): Promise<MountedPane> {
   const server = createScriptedFetch(options.server ?? {})
@@ -145,6 +148,7 @@ async function mountPane(
         onView={(view: ThreadView): void => {
           requestedViews.push(view)
         }}
+        {...(options.onForked === undefined ? {} : { onForked: options.onForked })}
       />,
     )
   await flush(async () => {
@@ -382,6 +386,31 @@ test("the snapshot's mode is the select's value; the host's mode observation mov
     observation: { kind: 'permission-mode', mode: 'auto', available: ['default', 'plan', 'auto'] },
   })
   await eventually(() => expect(pane.modeSelect().value).toBe('auto'))
+  await pane.unmount()
+})
+
+// #551, PR #561 review: "Restore files to here" is offered only on a thread with a tree of its own —
+// on a thread in its checkout it was a confirm, then a 409 every time.
+test('a prompt offers "Restore files to here" only while the snapshot says the thread has a tree; fork is offered either way', async () => {
+  const prompted: UIMessage = { id: 'e-u1', role: 'user', parts: [{ type: 'text', content: 'first' }] }
+  const pane = await mountPane({
+    onForked: () => undefined,
+    history: {
+      threadId: crypto.randomUUID(),
+      projectId: 'p-launch',
+      messages: [prompted],
+      permissionMode: { mode: 'default', available: ['default'] },
+      sessionRisk: { level: 'low', signals: 0 },
+      incidents: NO_SESSION_INCIDENTS,
+    },
+  })
+  const buttons = (): string[] =>
+    [...pane.container.querySelectorAll('button')].map((button) => button.textContent ?? '')
+  await pane.settle({ ...SNAPSHOT_IDLE, messages: [prompted], tree: false })
+  await eventually(() => expect(buttons()).toContain('fork from here'))
+  expect(buttons()).not.toContain('Restore files to here')
+  await pane.settle({ ...SNAPSHOT_IDLE, messages: [prompted], tree: true })
+  await eventually(() => expect(buttons()).toContain('Restore files to here'))
   await pane.unmount()
 })
 

@@ -15,6 +15,7 @@ import {
 } from '@enso/core'
 import type { UIMessage } from '@tanstack/ai-client'
 import type { AgentHost, StoredThreadRead } from '../host/agent-host.ts'
+import { treeRecordOf } from '../host/thread-trees.ts'
 import type { ProjectRegistry } from './projects.ts'
 import type { ThreadRegistry, ThreadView } from './thread-registry.ts'
 import { interruptedTail, transcriptToMessages } from './transcript-to-messages.ts'
@@ -116,6 +117,8 @@ export interface ThreadMount {
   readonly cwd: string
   /** The project that directory is (#395); `undefined` when it is no registered project — the thread is not served. */
   readonly projectId: string | undefined
+  /** Whether the thread runs on a tree of its own (#551) — `EnsoFollowSnapshot.tree`. */
+  readonly tree: boolean
   /** What the session has spent and how full its context is (#45): pi's live totals, or the file's with no context. */
   readonly usage: EnsoSessionUsage
 }
@@ -151,6 +154,7 @@ export async function readThreadMount(deps: ThreadReadDeps, threadId: string): P
   // A thread that went live during the read is served, wherever its file is.
   const storedOutside = nowLive === undefined ? read.storedOutside : undefined
   const risk = sessionRiskOfTranscript(transcript, deps.riskThresholds)
+  const place = placeOf(projects, threadId, inspection?.cwd ?? stored?.cwd, storedOutside)
   return {
     present: nowLive !== undefined || stored !== undefined,
     storedOutside,
@@ -158,7 +162,11 @@ export async function readThreadMount(deps: ThreadReadDeps, threadId: string): P
     sessionRisk: { level: risk.level, signals: risk.signals.length },
     incidents: sessionIncidentsOf(transcript.flatMap((entry) => (entry.kind === 'custom' ? [entry] : []))),
     ...(nowLive === undefined ? coldReading(host, transcript, stored) : liveReading(nowLive, transcript)),
-    ...placeOf(projects, threadId, inspection?.cwd ?? stored?.cwd, storedOutside),
+    ...place,
+    // Our record (#555 rule 5), else — nothing built or stored yet — what the host will mint (#551).
+    tree:
+      treeRecordOf(transcript) !== undefined ||
+      (nowLive === undefined && stored === undefined && place.cwd !== '' && host.mintsTreesIn(place.cwd)),
   }
 }
 

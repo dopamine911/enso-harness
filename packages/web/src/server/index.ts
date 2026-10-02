@@ -43,6 +43,7 @@ import {
   followThread,
   forkThreadAt,
   restoreThreadAt,
+  undoLastRestore,
   promptThread,
   readClosedBody,
   readConfigureBody,
@@ -144,6 +145,8 @@ const THREAD_SYSTEM_PROMPT_DRAFT_ROUTE = threadRoute('system-prompt')
 const THREAD_FORK_ROUTE = threadRoute('fork')
 /** `POST …/restore` (#551): restore the thread's files to an entry's snapshot — the conversation is unchanged. */
 const THREAD_RESTORE_ROUTE = threadRoute('restore')
+/** `POST …/restore/undo` (#565): undo the thread's last restore — its files back to that restore's safety snapshot. */
+const THREAD_RESTORE_UNDO_ROUTE = threadRoute('restore/undo')
 /** `POST …/continue` (#436): continue a torn thread from its stored state — no new prompt. */
 const THREAD_CONTINUE_ROUTE = threadRoute('continue')
 /**
@@ -1035,6 +1038,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     { method: 'POST', route: THREAD_PERMISSION_CHECK_ROUTE, respond: respondToPermissionCheck },
     { method: 'POST', route: THREAD_FORK_ROUTE, respond: respondToFork },
     { method: 'POST', route: THREAD_RESTORE_ROUTE, respond: respondToRestore },
+    { method: 'POST', route: THREAD_RESTORE_UNDO_ROUTE, respond: idOnly(respondToRestoreUndo) },
     { method: 'POST', route: THREAD_CONTINUE_ROUTE, respond: idOnly(respondToContinue) },
     { method: 'POST', route: THREAD_ABORT_ROUTE, respond: idOnly(respondToAbort) },
     { method: 'POST', route: THREAD_INCIDENT_RESOLVE_ROUTE, respond: respondToIncidentResolution },
@@ -1356,6 +1360,22 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
         response.end(JSON.stringify(outcome.receipt))
       },
     })
+  }
+
+  /**
+   * `POST …/restore/undo` (#565): the thread's tree back to its last restore's safety snapshot —
+   * no body. 200 with the snapshot put back and the new safety; 404 an unknown thread; 409 no tree,
+   * no restore to undo, a refused restore, or a run holding the thread.
+   */
+  async function respondToRestoreUndo(threadId: string, response: ServerResponse): Promise<void> {
+    const outcome = await undoLastRestore(threadRead, threadId)
+    if (outcome.status !== 200) {
+      log.warn('undo of the last restore refused ({status}): {reason}', { threadId, ...outcome })
+      refuseWith(response, outcome)
+      return
+    }
+    log.info('last restore undone: files back to {hash} (safety {safety})', { threadId, ...outcome.receipt })
+    answerJson(response, outcome.receipt)
   }
 
   // ── Projects (#395): the directories threads run in — listed, registered under a declared

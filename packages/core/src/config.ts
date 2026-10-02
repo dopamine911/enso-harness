@@ -92,15 +92,27 @@ export type EnsoConfig = Static<typeof EnsoConfig>
 /**
  * The tree a new thread runs in (#551), as the user's config chooses it, for the project at
  * `project` (a canonical path): its entry in `threads.projects`, else `threads.tree`, else
- * `'worktree'` — the default is on (#551 decision 1). `'off'` runs the project's threads in the
- * checkout itself and records no tree; the conversation still forks and continues, but there is no
- * filesystem restore. ⚠ USER-ONLY, like `security`: read from the user's file before any trust is
- * decided, so a project's own config cannot take its threads out of their trees.
+ * `'off'`. ⚠ OFF BY DEFAULT until a thread's tree can be disposed with it (decided on PR #561):
+ * every tree adds a worktree registration and an `enso/*` branch to the user's repository, and
+ * nothing removes them yet. `'off'` runs the project's threads in the checkout itself and records
+ * no tree; the conversation still forks and continues, but there is no filesystem restore.
+ *
+ * `canonical` turns a key as the user wrote it — `~/code/app`, a trailing slash, a symlink — into
+ * the canonical path `project` is (PR #561 review): matched as written, such a key silently fell
+ * through to the default. The caller supplies it, since resolving a path is not this module's
+ * (it is browser-safe). ⚠ USER-ONLY, like `security`: read from the user's file before any trust
+ * is decided, so a project's own config cannot move its threads in or out of their trees.
  *
  * @group Configuration
  */
-export function threadTreeFor(config: EnsoConfig, project: string): EnsoThreadTreeMode {
-  return config.threads?.projects?.[project] ?? config.threads?.tree ?? 'worktree'
+export function threadTreeFor(
+  config: EnsoConfig,
+  project: string,
+  canonical: (key: string) => string,
+): EnsoThreadTreeMode {
+  const overrides = Object.entries(config.threads?.projects ?? {})
+  const own = overrides.find(([key]) => canonical(key) === project)?.[1]
+  return own ?? config.threads?.tree ?? 'off'
 }
 
 const ensoConfigValidator = Compile(EnsoConfig)

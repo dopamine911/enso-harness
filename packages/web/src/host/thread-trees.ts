@@ -1,10 +1,13 @@
 import { join } from 'node:path'
 import {
   ENSO_THREAD_TREE_ENTRY,
+  ENSO_TREE_RESTORED_ENTRY,
   type EnsoTranscriptEntry,
+  type EnsoTreeRestored,
   lastCustomEntryData,
   readEnsoRunContext,
   readEnsoThreadTree,
+  readEnsoTreeRestored,
   type ThreadTreeRecord,
 } from '@enso/core'
 import {
@@ -41,7 +44,13 @@ export function sessionDirectoryFor(projectsDir: string, cwd: string): string {
   return projectSessionsDir(projectsDir, projectIdOfCwd(projectsDir, cwd))
 }
 
-/** Where a thread's tree and its snapshot store go, under its project's folder. `name` is the tree's directory name (a new thread's id; a fresh one for a fork, whose id pi picks only when it branches). */
+/**
+ * Where a thread's tree and its snapshot store go, under its project's folder, and its branch.
+ * `name` is the tree's directory name — a new thread's id; a fresh one for a fork, whose tree is
+ * its cwd from before pi picks its id as it branches. The branch and the store are named by the
+ * thread's id, so an `enso/*` branch in the user's repository says which thread it is (PR #561
+ * review): a fork's tree is minted after the branching, when the id is known.
+ */
 export function treeLocation(
   projectsDir: string,
   project: string,
@@ -52,13 +61,18 @@ export function treeLocation(
   return {
     tree: join(projectTreesDir(projectsDir, projectId), name),
     store: join(projectSnapshotsDir(projectsDir, projectId), threadId),
-    branch: `enso/${name}`,
+    branch: `enso/${threadId}`,
   }
 }
 
 /** The thread's tree as its branch records it: the last `enso-thread-tree` entry that reads; `undefined` for a thread in its checkout. */
 export function treeRecordOf(transcript: readonly EnsoTranscriptEntry[]): ThreadTreeRecord | undefined {
   return readEnsoThreadTree(ENSO_THREAD_TREE_ENTRY, lastCustomEntryData(transcript, ENSO_THREAD_TREE_ENTRY))
+}
+
+/** The thread's last restore (#565): the newest `enso-tree-restored` record on its branch — what Undo puts back. */
+export function lastRestoreOf(transcript: readonly EnsoTranscriptEntry[]): EnsoTreeRestored | undefined {
+  return readEnsoTreeRestored(ENSO_TREE_RESTORED_ENTRY, lastCustomEntryData(transcript, ENSO_TREE_RESTORED_ENTRY))
 }
 
 /**

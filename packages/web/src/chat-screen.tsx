@@ -1088,7 +1088,10 @@ const MessageBody = memo(function MessageBody({
 /** A prompt's actions: fork from it (#433) and restore the files to it (#551), each where the page offers it. */
 function PromptActions({ messageId }: { messageId: string }): React.ReactNode {
   const forkAt = useContext(ForkContext)
-  const restoreAt = useContext(RestoreContext)
+  const offeredRestore = useContext(RestoreContext)
+  // Restore only where there are files to restore (PR #561 review): a thread on a tree of its own.
+  const onTree = useStore(useThreadStores().tree)
+  const restoreAt = onTree ? offeredRestore : undefined
   const [confirming, setConfirming] = useState(false)
   if (forkAt === undefined && restoreAt === undefined) return null
   return (
@@ -1125,7 +1128,7 @@ function PromptActions({ messageId }: { messageId: string }): React.ReactNode {
                 <DialogTitle>Restore files to here?</DialogTitle>
                 <DialogDescription>
                   The thread's files go back to how they were at this prompt. The conversation is not changed, and the
-                  current files are kept as a safety snapshot.
+                  current files are kept as a safety snapshot: "Undo last restore" on the notice puts them back.
                 </DialogDescription>
               </DialogHeader>
               <DialogFooter>

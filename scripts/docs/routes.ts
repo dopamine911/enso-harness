@@ -246,15 +246,21 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
   ),
   THREAD_RESTORE_ROUTE: threadControl(
     'respondToRestore → restoreThreadAt → AgentHost.restoreThreadAt',
-    "path: `threadId`; body: `EnsoRestoreRequest` — `entryId`, a user message on the thread's branch; the thread's tree is put back to the snapshot its run began with (#551), the conversation untouched",
+    "path: `threadId`; body: `EnsoRestoreRequest` — `entryId`, a user message on the thread's branch; the thread's tree is put back to the snapshot its run began with (#551), the conversation untouched. The thread is held for the whole restore, as a run holds it, and the host admits no run meanwhile",
     [
       '200 `{ hash, safety }` JSON — the snapshot restored, and the snapshot of the files it replaced, recorded on the thread as `enso-tree-restored`',
-      '400 malformed id/body; 403 untrusted origin; 404 no such thread or entry; 409 thread busy, the thread on no tree, no snapshot at that entry, or the restore refused; 413 body too large; 500 handler failure',
+      '400 malformed id/body; 403 untrusted origin; 404 no such thread (before anything is built) or entry; 409 thread busy, the thread on no tree, no snapshot at that entry, or the restore refused; 413 body too large; 500 handler failure',
     ],
-    {
-      builds: 'no',
-      factory: { path: FOLLOW_PATH, declaration: 'export async function restoreThreadAt', reaches: 'storage' },
-    },
+    { builds: 'yes', factory: follows('export function restoreThreadAt') },
+  ),
+  THREAD_RESTORE_UNDO_ROUTE: threadControl(
+    'respondToRestoreUndo → undoLastRestore → AgentHost.undoLastRestore',
+    "path: `threadId`; no body. The thread's tree back to its newest `enso-tree-restored` record's `safety` (#565) — itself a restore, recorded with a safety of its own, so a second undo puts the first restore back. Held as a restore is",
+    [
+      '200 `{ hash, safety }` JSON — the snapshot put back, and the snapshot of the files it replaced',
+      '403 untrusted origin; 404 no such thread (before anything is built); 409 thread busy, the thread on no tree, no restore to undo, or the restore refused; 500 handler failure',
+    ],
+    { builds: 'yes', factory: follows('export function undoLastRestore') },
   ),
   THREAD_CONTINUE_ROUTE: threadControl(
     'respondToContinue → continueThread → ThreadRuntime.continueRun',

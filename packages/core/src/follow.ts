@@ -47,14 +47,22 @@ export const EnsoFollowSnapshot = Type.Object(
      * own cwd; when the thread is not live, the stored session's (pi fixed it at creation); and
      * for a thread with neither, its project's (#395), where it will be built — or `''` when that
      * project has been removed, so it will be built nowhere (its prompt is refused). Not re-sent when a
-     * session is built mid-follow: it cannot differ, since a new thread is built in exactly that
-     * directory. What makes a wrong-project session visible.
+     * session is built mid-follow. ⚠ Since #551 a new thread on a tree of its own is built in that
+     * tree, not its project's directory, so until the next snapshot this still names the project;
+     * `tree` below says it from the start. What makes a wrong-project session visible.
      *
      * ⚠ Adding a field here is wire-breaking for an OPEN TAB: the schema is closed, so a page and
      * server of different versions reject each other's snapshots. The page says so and asks for a
      * reload (`follow-connection.ts`) rather than going quietly stale.
      */
     cwd: Type.String(),
+    /**
+     * Whether this thread runs on a tree of its own (#551) — its branch records one, or, for a
+     * thread not built yet, the host gives new threads in its project one. Where it is not, there
+     * is no file to restore, and the page offers no restore (PR #561 review). Stable over a follow,
+     * unlike `cwd`: a new thread's tree is decided before it is built.
+     */
+    tree: Type.Boolean(),
     /**
      * What the session has spent and how full its context is (#45), as of this snapshot — pi's
      * totals from the live session, or from the file when the thread is not live (then with no

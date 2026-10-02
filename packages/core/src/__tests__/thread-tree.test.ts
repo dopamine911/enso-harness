@@ -375,3 +375,87 @@ test("⚠ a parent whose store a fork leans on is refused even forced, naming th
   })
   expect(existsSync(parent.path) || existsSync(where.store('parent'))).toBe(false)
 })
+
+test('⚠ a file the checkout ignores only through `.git/info/exclude` is never minted into a tree, and a restore leaves it in place — in the worktree and in a copy forked from it', async () => {
+  const project = checkout()
+  writeFileSync(join(project, '.git', 'info', 'exclude'), 'local.secret\n')
+  writeFileSync(join(project, 'local.secret'), 'only info/exclude hides this\n')
+  const where = home()
+
+  const record = await mintFromCheckout(project, where, 'x')
+  expect(existsSync(join(record.path, 'local.secret'))).toBe(false)
+
+  writeFileSync(join(record.path, 'local.secret'), 'the tree’s own\n')
+  const restored = await restoreThreadTree({
+    store: where.store('x'),
+    tree: record.path,
+    hash: record.base,
+    environment,
+  })
+  expect(restored.kind).toBe('restored')
+  expect(readFileSync(join(record.path, 'local.secret'), 'utf8')).toBe('the tree’s own\n')
+
+  // A copy has no repository to read the rule from: it carries on from the parent's store.
+  const fork = minted(
+    await mintThreadTree({
+      project,
+      tree: where.tree('x-copy'),
+      store: where.store('x-copy'),
+      kind: 'copy',
+      branch: 'enso/x-copy',
+      from: { kind: 'snapshot', hash: record.base, revision: null, storeDirectory: where.store('x') },
+      environment,
+    }),
+  )
+  writeFileSync(join(fork.path, 'local.secret'), 'the copy’s own\n')
+  const restoredCopy = await restoreThreadTree({
+    store: where.store('x-copy'),
+    tree: fork.path,
+    hash: fork.base,
+    environment,
+  })
+  expect(restoredCopy.kind).toBe('restored')
+  expect(readFileSync(join(fork.path, 'local.secret'), 'utf8')).toBe('the copy’s own\n')
+})
+
+test('⚠ a chain of seven forks mints — the deepest tree holds every generation’s file, past git’s five-deep alternates limit — and a grandparent’s dispose is held by its grandchild', async () => {
+  const project = mkdtempSync(join(tmpdir(), 'enso-tree-chain-'))
+  writeFileSync(join(project, 'root.txt'), 'root\n')
+  const where = home()
+  const records = [await mintFromCheckout(project, where, 'g0', 'copy')]
+  for (let generation = 1; generation <= 7; generation += 1) {
+    const parent = records[generation - 1] as ThreadTreeRecord
+    writeFileSync(join(parent.path, `g${generation - 1}.txt`), `generation ${generation - 1}\n`)
+    const atFork = await snapshotOf(where.store(`g${generation - 1}`), parent.path)
+    records.push(
+      minted(
+        await mintThreadTree({
+          project,
+          tree: where.tree(`g${generation}`),
+          store: where.store(`g${generation}`),
+          kind: 'copy',
+          branch: `enso/g${generation}`,
+          from: {
+            kind: 'snapshot',
+            hash: atFork.hash,
+            revision: null,
+            storeDirectory: where.store(`g${generation - 1}`),
+          },
+          environment,
+        }),
+      ),
+    )
+  }
+  const deepest = records[7] as ThreadTreeRecord
+  expect(files(deepest.path)).toEqual({
+    'root.txt': 'root\n',
+    ...Object.fromEntries(Array.from({ length: 7 }, (_, at) => [`g${at}.txt`, `generation ${at}\n`])),
+  })
+
+  const grandparent = records[5] as ThreadTreeRecord
+  const held = await disposeThreadTree({ record: grandparent, store: where.store('g5'), force: true, environment })
+  expect(held.kind === 'refused' ? held.inventory.dependents.toSorted() : []).toEqual([
+    where.store('g6'),
+    where.store('g7'),
+  ])
+})

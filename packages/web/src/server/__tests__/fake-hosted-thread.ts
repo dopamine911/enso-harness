@@ -462,8 +462,8 @@ export interface FakeStoredThread {
   readonly parentThreadId?: string
   /** Its fork point (#435); assembled from the fields above, with no run context, when absent. */
   readonly forkPoint?: EnsoForkPoint
-  /** What restoring its files answers (#551) once the thread and entry are found; `no-tree` when absent. */
-  readonly restore?: ThreadRestoreOutcome
+  /** What restoring its files answers (#551) once the thread and entry are found; `no-tree` when absent. A promise holds the restore open. */
+  readonly restore?: ThreadRestoreOutcome | Promise<ThreadRestoreOutcome>
 }
 
 const FAKE_FRESH_MODE: EnsoPermissionModeState = { mode: 'default', available: ['default'] }
@@ -629,12 +629,18 @@ export function createFakeAgentHost(
       return Promise.resolve({ kind: 'forked', threadId: `${threadId}-fork`, prefill })
     },
     // The real host's lookups over the stored transcript; past them, the thread's scripted outcome.
+    mintsTreesIn: () => false,
     restoreThreadAt: (threadId: string, entryId: string): Promise<ThreadRestoreOutcome> => {
       const storedThread = served(threadId)
       if (storedThread === undefined) return Promise.resolve({ kind: 'no-thread', reason: `no thread ${threadId}` })
       if (!storedThread.transcript.some((candidate) => candidate.id === entryId)) {
         return Promise.resolve({ kind: 'no-entry', reason: `no entry ${entryId}` })
       }
+      return Promise.resolve(storedThread.restore ?? { kind: 'no-tree', reason: `thread ${threadId} has no tree` })
+    },
+    undoLastRestore: (threadId: string): Promise<ThreadRestoreOutcome> => {
+      const storedThread = served(threadId)
+      if (storedThread === undefined) return Promise.resolve({ kind: 'no-thread', reason: `no thread ${threadId}` })
       return Promise.resolve(storedThread.restore ?? { kind: 'no-tree', reason: `thread ${threadId} has no tree` })
     },
   }
