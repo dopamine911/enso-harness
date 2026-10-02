@@ -2102,6 +2102,11 @@ test('⚠ deleting a thread in its checkout removes its session file and its sna
   const file = hosted.inspect().sessionFile ?? ''
   const store = join(projectSnapshotsDir(projectsDir, projectIdOf(project)), threadId)
   expect(existsSync(file) && existsSync(join(store, 'HEAD'))).toBe(true)
+  // The preview (#571): a thread in its checkout takes no tree with it, and nothing leans on its store.
+  expect(await host.previewThreadDelete(threadId)).toEqual({
+    kind: 'preview',
+    preview: { tree: null, holdsWork: null, keptFor: [] },
+  })
 
   let retired = 0
   const retire = (): boolean => {
@@ -2201,6 +2206,17 @@ test("⚠ deleting a forked parent keeps its store for the fork — the fork sti
   const fork = await host.createSession(forked.threadId, () => project)
   const snapshots = projectSnapshotsDir(projectsDir, projectIdOf(project))
 
+  // Before deleting, the preview says what goes and what stays: the tree with its branch, the work
+  // in it, and the fork its snapshots are kept for — read without changing anything.
+  expect(await host.previewThreadDelete(parentId)).toEqual({
+    kind: 'preview',
+    preview: {
+      tree: { kind: 'worktree', path: parentTree, branch: `enso/${parentId}` },
+      holdsWork: expect.stringContaining('a.txt'),
+      keptFor: [{ threadId: forked.threadId, deleted: false }],
+    },
+  })
+  expect(existsSync(parentTree) && existsSync(join(snapshots, parentId, 'HEAD'))).toBe(true)
   expect(await host.deleteThread(parentId, { force: true, retire: NOTHING_LIVE })).toEqual({ kind: 'deleted' })
   expect(existsSync(parentTree)).toBe(false)
   expect(existsSync(join(snapshots, parentId, 'HEAD'))).toBe(true)

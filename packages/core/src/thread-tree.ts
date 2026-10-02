@@ -417,8 +417,13 @@ export interface ThreadTreeInventory {
   readonly dependents: string[]
 }
 
-/** The sibling stores (directories beside `store`) whose alternates name `store`'s objects, by name. */
-function dependentStores(store: string): string[] {
+/**
+ * The sibling stores (directories beside `store`) whose alternates name `store`'s objects, by name:
+ * the forks — and their forks, the alternates being flat — a delete keeps `store` for (#571).
+ *
+ * @group Thread tree
+ */
+export function dependentStores(store: string): string[] {
   const objects = canonical(join(store, 'objects'))
   let siblings: string[]
   try {

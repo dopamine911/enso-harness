@@ -1,4 +1,5 @@
-import { ENSO_NOTICE_SOURCE } from '@enso/core'
+import { ENSO_NOTICE_SOURCE, EnsoThreadDeletePreview } from '@enso/core'
+import { Check } from 'typebox/value'
 import { describeFailedResponse } from './stored-threads.ts'
 import type { ThreadStores } from './thread-stores.ts'
 
@@ -59,5 +60,28 @@ async function askToDelete(stores: Pick<ThreadStores, 'threadId' | 'fetch'>, for
     return { kind: 'refused', reason: await describeFailedResponse(response) }
   } catch (error) {
     return { kind: 'refused', reason: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+/** What the dialog knows before a delete is sent: the server's preview, or why it could not say. */
+export type DeletePreviewRead =
+  | { readonly kind: 'read'; readonly preview: EnsoThreadDeletePreview }
+  | { readonly kind: 'failed'; readonly reason: string }
+
+/**
+ * `GET /api/threads/:id/delete-preview`: what a delete would take — the tree, whether it holds work,
+ * and the forks that keep its snapshots. Read-only. A refusal (404, 410), no answer, or a payload off
+ * its schema is a reason to show; the dialog still offers a plain Delete, whose answer is authoritative.
+ */
+export async function readDeletePreview(stores: Pick<ThreadStores, 'threadId' | 'fetch'>): Promise<DeletePreviewRead> {
+  try {
+    const response = await stores.fetch(`/api/threads/${encodeURIComponent(stores.threadId)}/delete-preview`)
+    if (!response.ok) return { kind: 'failed', reason: await describeFailedResponse(response) }
+    const payload: unknown = await response.json()
+    if (!Check(EnsoThreadDeletePreview, payload))
+      return { kind: 'failed', reason: "the server's delete preview did not match its schema" }
+    return { kind: 'read', preview: payload }
+  } catch (error) {
+    return { kind: 'failed', reason: error instanceof Error ? error.message : String(error) }
   }
 }

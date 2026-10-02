@@ -6,6 +6,7 @@ import type {
   EnsoProject,
   EnsoSessionEval,
   EnsoStoredThread,
+  EnsoThreadDeletePreview,
   EnsoThreadEvents,
   EnsoThreadHistory,
   EnsoThreadInspection,
@@ -102,6 +103,11 @@ export interface ScriptedFetchOptions {
    * when absent. A 204 takes the thread out of `storedThreads`, as deleting its session file does.
    */
   readonly deleteAnswers?: readonly { readonly status: number; readonly reason?: string }[]
+  /**
+   * What `GET /api/threads/:id/delete-preview` answers (#571): a preview, or a refusal's status and
+   * words. Absent: a thread in the checkout, nothing held, no forks.
+   */
+  readonly deletePreview?: EnsoThreadDeletePreview | { readonly status: number; readonly reason: string }
 }
 
 /** The launch project a scripted server lists by default — the id the fixtures' stored threads carry. */
@@ -267,6 +273,12 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
     const path = url.pathname
     const deleted = init?.method === 'DELETE' ? /^\/api\/threads\/([^/]+)$/.exec(path)?.[1] : undefined
     if (deleted !== undefined) return deleteThread(decodeURIComponent(deleted), url)
+    if (/^\/api\/threads\/[^/]+\/delete-preview$/.test(path)) {
+      const preview = options.deletePreview ?? { tree: null, holdsWork: null, keptFor: [] }
+      return Promise.resolve(
+        'status' in preview ? new Response(preview.reason, { status: preview.status }) : Response.json(preview),
+      )
+    }
     const action = threadAction(path)
     const respond = action === undefined ? undefined : threadActions[action]
     if (respond !== undefined) return respond(init)

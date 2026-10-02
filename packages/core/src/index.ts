@@ -426,6 +426,7 @@ export {
   EnsoForkRequest,
   EnsoRestoreRequest,
   EnsoRestoreUndoRequest,
+  EnsoThreadDeletePreview,
   EnsoInterruptedTail,
   EnsoStoredThread,
   EnsoThreadEvent,

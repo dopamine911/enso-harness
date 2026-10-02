@@ -91,7 +91,7 @@ import {
 import { Input } from './components/ui/input.tsx'
 import { Textarea } from './components/ui/textarea.tsx'
 import { routeEnsoCustomEvent } from './custom-event-router.ts'
-import { deleteThread } from './delete-thread.ts'
+import { type DeletePreviewRead, deleteThread, readDeletePreview } from './delete-thread.ts'
 import { EnsoRing, EnsoSmile } from './enso-mark.tsx'
 import type { EnsoRendererMap } from './EnsoToolResult.tsx'
 import { createFixtureChat, fixtureFetch } from './fixture-conversation.ts'
@@ -1949,7 +1949,7 @@ function AppHeader({
         </span>
       </div>
       {active !== undefined && onServer ? (
-        <DeleteThread key={active.threadId} threadId={active.threadId} onDeleted={onDeleted} />
+        <DeleteThread key={active.threadId} threadId={active.threadId} onDeleted={onDeleted} stored={stored} />
       ) : null}
       {isFixtureMode ? (
         <span className="rounded-full border px-2 py-0.5 text-xs text-muted-foreground">fixture</span>
@@ -1971,42 +1971,66 @@ function AppHeader({
 }
 
 /**
- * The header's Delete (#571), behind a confirmation naming what goes: the conversation, and the
- * thread's tree when it runs on one of its own. A tree holding work is refused with the work
- * named (422): the dialog says it and offers "Delete anyway". Any other refusal closes it and is
- * said on the thread (`delete-thread.ts`). ⚠ Once sent, a delete cannot be called back, so until
- * the server answers nothing dismisses the dialog (PR #572 review): Cancel is disabled, the close
- * button is gone, and Esc and the backdrop do nothing — a dialog that closed would read as cancelled.
+ * The header's Delete (#571), behind a confirmation that says what goes before it is confirmed:
+ * opening it reads the server's delete preview (`delete-thread.ts`), and the words come from that —
+ * the conversation, the thread's tree by path and branch when it has one, and whether forks keep
+ * its snapshots (they stay while a live fork needs them). Delete waits for the preview. Work the
+ * tree holds is named up front, and the confirm is "Delete anyway" from the start. A preview that
+ * fails is said, and a plain Delete stays: the server's answer to it is authoritative. A tree that
+ * gained work after the preview is still refused (422) and named, offering "Delete anyway". Any
+ * other refusal closes the dialog and is said on the thread. ⚠ Once sent, a delete cannot be called
+ * back, so until the server answers nothing dismisses the dialog (PR #572 review): Cancel is
+ * disabled, the close button is gone, and Esc and the backdrop do nothing.
  */
 function DeleteThread({
   threadId,
   onDeleted,
+  stored,
 }: {
   threadId: string
   onDeleted: (threadId: string) => void
+  /** The stored listing, for the rail titles of the forks that keep the thread's snapshots. */
+  stored: readonly EnsoStoredThread[]
 }): React.ReactNode {
   const stores = getThreadStores(threadId)
-  const onTree = useStore(stores.tree)
   const [open, setOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
-  /** The work the tree holds, as the server named it — set while "Delete anyway" is offered. */
-  const [holdsWork, setHoldsWork] = useState<string | undefined>(undefined)
+  /** The server's preview while the dialog is open; `undefined` while it is read. */
+  const [preview, setPreview] = useState<DeletePreviewRead | undefined>(undefined)
+  /** The work the tree holds, as the server named it on a refused delete (422) — a race with the preview. */
+  const [refusedForWork, setRefusedForWork] = useState<string | undefined>(undefined)
+  useEffect(() => {
+    if (!open) return
+    let current = true
+    void readDeletePreview(stores).then((read) => {
+      if (current) setPreview(read)
+    })
+    return (): void => {
+      current = false
+    }
+  }, [open, stores])
   const changeOpen = (next: boolean): void => {
     if (!next && deleting) return
     setOpen(next)
-    if (!next) setHoldsWork(undefined)
+    if (!next) {
+      setRefusedForWork(undefined)
+      setPreview(undefined)
+    }
   }
+  const previewed = preview?.kind === 'read' ? preview.preview : undefined
+  const holdsWork = refusedForWork ?? previewed?.holdsWork ?? undefined
   const confirm = (force: boolean): void => {
     setDeleting(true)
     void deleteThread(stores, force).then((outcome) => {
       setDeleting(false)
       if (outcome.kind === 'holds-work') {
-        setHoldsWork(outcome.reason)
+        setRefusedForWork(outcome.reason)
         return
       }
       // `deleting` in `changeOpen` is this render's; the answer is in, so close directly.
       setOpen(false)
-      setHoldsWork(undefined)
+      setRefusedForWork(undefined)
+      setPreview(undefined)
       if (outcome.kind === 'deleted') onDeleted(threadId)
     })
   }
@@ -2020,11 +2044,7 @@ function DeleteThread({
       <DialogContent className="sm:max-w-md" showCloseButton={!deleting}>
         <DialogHeader>
           <DialogTitle>Delete this thread?</DialogTitle>
-          <DialogDescription>
-            {onTree
-              ? "This cannot be undone. The conversation is deleted, and so is the thread's tree: its files, its branch and its snapshots."
-              : 'This cannot be undone. The conversation is deleted. Your checkout is not touched.'}
-          </DialogDescription>
+          <DialogDescription>{describeDelete(preview, stored)}</DialogDescription>
         </DialogHeader>
         {holdsWork === undefined ? null : (
           <p role="alert" className="text-sm text-destructive">
@@ -2035,13 +2055,48 @@ function DeleteThread({
           <Button variant="ghost" disabled={deleting} onClick={(): void => changeOpen(false)}>
             Cancel
           </Button>
-          <Button variant="destructive" disabled={deleting} onClick={(): void => confirm(holdsWork !== undefined)}>
+          <Button
+            variant="destructive"
+            disabled={deleting || preview === undefined}
+            onClick={(): void => confirm(holdsWork !== undefined)}
+          >
             {holdsWork === undefined ? 'Delete' : 'Delete anyway'}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   )
+}
+
+/** The confirmation's words: while the preview is read, why it could not be, or what goes and what forks keep. */
+function describeDelete(read: DeletePreviewRead | undefined, stored: readonly EnsoStoredThread[]): string {
+  if (read === undefined) return 'Checking what a delete would take…'
+  if (read.kind === 'failed')
+    return `This cannot be undone. The conversation is deleted. What else goes could not be read: ${read.reason}`
+  const { tree, keptFor } = read.preview
+  if (tree === null) return 'This cannot be undone. The conversation is deleted. Your checkout is not touched.'
+  const named = tree.branch === null ? tree.path : `${tree.path} (branch ${tree.branch})`
+  const goes = `This cannot be undone. The conversation is deleted, and so is the thread's tree at ${named}.`
+  const liveForks = keptFor.filter((fork) => !fork.deleted)
+  if (liveForks.length > 0) {
+    const forks = liveForks.map((fork) => forkName(fork.threadId, stored))
+    if (forks.length === 1)
+      return `${goes} Its snapshots stay while the fork ${forks[0]} uses them, and are deleted with it. The fork itself is not deleted.`
+    return `${goes} Its snapshots stay while ${forks.length} forks (${forks.join(', ')}) use them, and are deleted with the last of them. The forks themselves are not deleted.`
+  }
+  if (keptFor.length > 0) return `${goes} Its snapshots are kept for forks of already-deleted threads.`
+  return `${goes} Its snapshots go too.`
+}
+
+/** The longest fork title the dialog quotes whole; a longer one is cut, with an ellipsis. */
+const FORK_TITLE_LIMIT = 40
+
+/** A fork as the dialog names it: its rail title, quoted and bounded, else its short id. */
+function forkName(threadId: string, stored: readonly EnsoStoredThread[]): string {
+  const title = stored.find((row) => row.threadId === threadId)?.title?.trim()
+  if (title === undefined || title.length === 0) return threadId.slice(0, 8)
+  const bounded = title.length > FORK_TITLE_LIMIT ? `${title.slice(0, FORK_TITLE_LIMIT - 1).trimEnd()}…` : title
+  return `“${bounded}”`
 }
 
 /** The header's threads button: on a narrow screen, the rail is a page of its own (#407). */

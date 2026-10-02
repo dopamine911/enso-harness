@@ -74,6 +74,7 @@ import {
   DEFAULT_GUARD_POLICY,
   ENSO_THREAD_TREE_ENTRY,
   ENSO_TREE_RESTORED_ENTRY,
+  type EnsoThreadDeletePreview,
   isEnsoProjectId,
   type ThreadTreeKind,
   type ThreadTreeRecord,
@@ -89,6 +90,7 @@ import {
 import { describePermissionPolicy, preparePermissionPolicy } from '@enso/core/permission-rules'
 import { knownSecretValues, quarantineSecrets } from '@enso/core/secrets'
 import {
+  dependentStores,
   disposeThreadTree,
   holdingReason,
   inventoryThreadTree,
@@ -710,6 +712,16 @@ export interface AgentHost {
     threadId: string,
     options: { readonly force: boolean; readonly retire: () => boolean },
   ): Promise<ThreadDeleteOutcome>
+  /**
+   * What deleting the thread would do (#571), changing nothing: its tree, the work in it a delete
+   * is refused for, and the threads whose stores keep its snapshots — the delete dialog's text.
+   */
+  previewThreadDelete(
+    threadId: string,
+  ): Promise<
+    | { readonly kind: 'preview'; readonly preview: EnsoThreadDeletePreview }
+    | { readonly kind: 'no-thread'; readonly reason: string }
+  >
   /** Whether a NEW thread in `project` gets a tree of its own (#551): a projects folder, and trees not `off` for it. */
   mintsTreesIn(project: string): boolean
   /** What a fresh thread starts in — served before any run exists, so the header never guesses. */
@@ -1472,6 +1484,42 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       return { kind: 'refused', reason: `thread ${threadId} could not be deleted: ${String(error)}` }
     } finally {
       deletingThreads.delete(threadId)
+    }
+  }
+
+  /**
+   * What `deleteThread` would do (#571), read the way it reads: the tree from the branch, the work
+   * from the same inventory and rule (`holdingReason`), the stores that name this one's objects. A
+   * dependent store is a thread's by its directory name (`snapshots/<thread-id>`).
+   */
+  async function previewThreadDelete(
+    threadId: string,
+  ): Promise<
+    | { readonly kind: 'preview'; readonly preview: EnsoThreadDeletePreview }
+    | { readonly kind: 'no-thread'; readonly reason: string }
+  > {
+    if (threadDeleted(threadId)) return { kind: 'no-thread', reason: `thread ${threadId} was deleted` }
+    const located = await storedSession(threadId)
+    if (located === undefined) {
+      return { kind: 'no-thread', reason: `thread ${threadId} has no session file in a project this server serves` }
+    }
+    const tree = treeRecordOf(transcriptOf(SessionManager.open(located.path).getBranch()))
+    const store = storeOf(threadId, located.cwd)
+    const holdsWork =
+      tree !== undefined && store !== undefined
+        ? holdingReason(await inventoryThreadTree({ record: tree, store, environment }))
+        : undefined
+    const keptFor = (store === undefined ? [] : dependentStores(store)).map((dependent) => ({
+      threadId: basename(dependent),
+      deleted: isOrphanedStore(dependent),
+    }))
+    return {
+      kind: 'preview',
+      preview: {
+        tree: tree === undefined ? null : { kind: tree.kind, path: tree.path, branch: tree.branch },
+        holdsWork: holdsWork ?? null,
+        keptFor,
+      },
     }
   }
 
@@ -2630,6 +2678,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     undoLastRestore,
     deleteThread,
     threadDeleted,
+    previewThreadDelete,
     mintsTreesIn: (project: string) => treeKindOf(project) !== undefined,
     freshPermissionMode: freshPermissionModeState,
     storedPermissionMode: storedPermissionModeState,

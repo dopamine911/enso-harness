@@ -662,5 +662,14 @@ export function createFakeAgentHost(
       return Promise.resolve({ kind: 'deleted' })
     },
     threadDeleted: (threadId) => deleted.has(threadId),
+    // The real host's preview (#571), as far as the fake's disk goes: no trees, no forks.
+    previewThreadDelete: (threadId) => {
+      const storedThread = served(threadId)
+      if (storedThread === undefined) return Promise.resolve({ kind: 'no-thread', reason: `no thread ${threadId}` })
+      return Promise.resolve({
+        kind: 'preview',
+        preview: { tree: null, holdsWork: storedThread.holdsWork ?? null, keptFor: [] },
+      })
+    },
   }
 }

@@ -97,6 +97,16 @@ export interface AgentHost {
     threadId: string,
     options: { readonly force: boolean; readonly retire: () => boolean },
   ): Promise<ThreadDeleteOutcome>
+  /**
+   * What deleting the thread would do (#571), changing nothing: its tree, the work in it a delete
+   * is refused for, and the threads whose stores keep its snapshots — the delete dialog's text.
+   */
+  previewThreadDelete(
+    threadId: string,
+  ): Promise<
+    | { readonly kind: 'preview'; readonly preview: EnsoThreadDeletePreview }
+    | { readonly kind: 'no-thread'; readonly reason: string }
+  >
   /** Whether a NEW thread in `project` gets a tree of its own (#551): a projects folder, and trees not `off` for it. */
   mintsTreesIn(project: string): boolean
   /** What a fresh thread starts in — served before any run exists, so the header never guesses. */

@@ -105,6 +105,8 @@ const THREAD_ROUTE = /^\/api\/threads\/([^/?#]+)$/
  * `force` deletes a tree that holds work; it is the only query the route takes.
  */
 const THREAD_DELETE_ROUTE = /^\/api\/threads\/([^/?#]+)(\?force=1)?$/
+/** `GET …/delete-preview` (#571): what deleting the thread would do — its tree, the work in it, the forks that keep its snapshots. */
+const THREAD_DELETE_PREVIEW_ROUTE = threadRoute('delete-preview')
 /** `GET /api/threads/<threadId>/events` — the thread's two event tails (#97). */
 const THREAD_EVENTS_ROUTE = threadRoute('events')
 /** `GET /api/threads/<threadId>/history` — the branch as messages, live or stored (#95). */
@@ -747,6 +749,20 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   }
 
   /**
+   * `GET …/delete-preview` (#571): the delete dialog's text, read before it asks — 200
+   * `EnsoThreadDeletePreview`; 410 a deleted thread, as `…/history` answers it; 404 no session.
+   * Reads only: the tree's inventory, as the delete itself takes it.
+   */
+  async function respondWithDeletePreview(threadId: string, response: ServerResponse): Promise<void> {
+    const outcome = await host.previewThreadDelete(threadId)
+    if (outcome.kind === 'preview') {
+      answerJson(response, outcome.preview)
+      return
+    }
+    refuseWith(response, { status: host.threadDeleted(threadId) ? 410 : 404, reason: outcome.reason })
+  }
+
+  /**
    * ⚠ The dispatcher is synchronous and a throw in the request listener has nothing above
    * it (PR #87). Every handler that awaits (the thread routes, the listing, the browser log) runs
    * through here: a rejection is reported and answered as a 500 whose text names no route (it
@@ -1041,6 +1057,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     [THREAD_GIT_ROUTE, respondWithThreadGit],
     [THREAD_CHANGES_ROUTE, respondWithThreadChanges],
     [THREAD_JUDGE_CASES_ROUTE, respondWithThreadJudgeCases],
+    [THREAD_DELETE_PREVIEW_ROUTE, respondWithDeletePreview],
   ]
   const THREAD_ROUTES: readonly ThreadRoute[] = [
     ...idOnlyReads.map(([route, respond]): ThreadRoute => ({ method: 'GET', route, respond: idOnly(respond) })),

@@ -184,6 +184,11 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
     '200 `EnsoThreadHistory` JSON',
     '400 malformed thread id; 403 untrusted origin, or a session stored in a directory that is no project here (named, #378); 404 no session — an id nobody has used, which a page starts; 410 a deleted thread (#571) — this server deleted it, or its store is kept for its forks — never started again; 500 handler failure',
   ),
+  THREAD_DELETE_PREVIEW_ROUTE: threadRead(
+    'respondWithDeletePreview → AgentHost.previewThreadDelete',
+    "200 `EnsoThreadDeletePreview` JSON — the tree a delete would remove (or null), the work in it a delete is refused for (the inventory's words), and the threads whose stores keep this one's snapshots (#571); nothing is changed",
+    '400 malformed thread id; 403 untrusted origin; 404 no session file in a served project; 410 a deleted thread; 500 handler failure',
+  ),
   THREAD_FOLLOW_ROUTE: threadRead(
     'followThread',
     '200 SSE stream',
