@@ -3,6 +3,7 @@ import { CONTEXT_BROWSER } from './context-browser.ts'
 import { CONTEXT } from './context.ts'
 import { DIFF } from './diff.ts'
 import { GUARDS_AND_RECEIPTS } from './guards-and-receipts.ts'
+import { INCIDENTS } from './incidents.ts'
 import { LINEAGE } from './lineage.ts'
 import { LOGS_AND_DEBUGGING } from './logs-and-debugging.ts'
 import { PERMISSION_MODES } from './permission-modes.ts'
@@ -25,6 +26,8 @@ import { WEB_ACCESS } from './web-access.ts'
 export const FEATURE_SPECS: readonly FeatureSpec[] = [
   CHAT,
   GUARDS_AND_RECEIPTS,
+  // Its shots are of a thread of its own, played after every other page's: its place here is the page's, not the capture's.
+  INCIDENTS,
   WEB_ACCESS,
   PERMISSION_MODES,
   CONTEXT,

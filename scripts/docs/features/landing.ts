@@ -46,8 +46,8 @@ export const LANDING_FEATURE_GROUPS: readonly LandingFeatureGroup[] = [
   {
     kicker: 'Verify & operate',
     title: 'Keep receipts for the parts that matter.',
-    text: 'Distinguish refusals from failures, see what changed, inspect the logs, and give the agent deliberate paths to external information.',
-    features: ['guards-and-receipts', 'diff', 'logs-and-debugging', 'web-access', 'terminal', 'settings'],
+    text: 'Distinguish refusals from failures, catch the agent working around one, see what changed, inspect the logs, and give the agent deliberate paths to external information.',
+    features: ['guards-and-receipts', 'incidents', 'diff', 'logs-and-debugging', 'web-access', 'terminal', 'settings'],
   },
 ]
 

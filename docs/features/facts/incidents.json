@@ -1,0 +1,31 @@
+{
+  "feature": "incidents",
+  "shots": [
+    {
+      "image": "incidents-open",
+      "steps": ["open a thread from the rail"],
+      "shown": ["open · tools suspended", "Observed", "Inferred risk", "Suspended tools", "intervention required"],
+      "measured": {}
+    },
+    {
+      "image": "incidents-resolved",
+      "steps": [
+        "open a thread from the rail",
+        "choose **probable bypass**",
+        "choose **resume with restrictions — the families ticked below stay suspended**",
+        "choose **network (web_fetch, web_search)**",
+        "choose **Record resolution**"
+      ],
+      "shown": [
+        "The agent's explanation",
+        "What was denied",
+        "The uncharitable read",
+        "Resolutions",
+        "Change what stays suspended"
+      ],
+      "measured": {
+        "stateAfter": "resolved · resume-with-restrictions"
+      }
+    }
+  ]
+}

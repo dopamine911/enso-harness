@@ -12,6 +12,7 @@ If you want to know how Enso works inside, start at [the architecture](../archit
 | [Forks and lineage](./lineage.md) | Forking a thread at a prompt, and the record of the conditions each thread ran under. |
 | [Thread trees](./thread-trees.md) | Each thread working in a tree of its own: restoring its files to a prompt, deleting it, and what trees cost on disk. |
 | [Guards and receipts](./guards-and-receipts.md) | What Enso refuses before a tool runs, and the receipt that says which rule refused it. |
+| [Incidents and the command judge](./incidents.md) | When pi works around a refusal: the signals, the incident card, halting, pi's report and your resolution, and the command judge's second opinion. |
 | [Permission modes](./permission-modes.md) | How much pi may do without asking, and how to change it. |
 | [Questions and dialogs](./questions-and-dialogs.md) | Answering pi from the browser: `ask_user` questionnaires and pi's own prompts. |
 | [Context](./context.md) | What the next request is made of, and how the context grew request by request. |
