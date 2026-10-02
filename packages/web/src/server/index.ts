@@ -25,6 +25,7 @@ import {
   ensoLogger,
   isEnsoThreadId,
   LIBRARY_PROMPT_ID_SOURCE,
+  type ThreadTreeKind,
   withEnsoLogContext,
 } from '@enso/core'
 import { readGitChanges, readGitState, runGit } from '@enso/core/git'
@@ -41,11 +42,13 @@ import {
   type FollowRouteDeps,
   followThread,
   forkThreadAt,
+  restoreThreadAt,
   promptThread,
   readClosedBody,
   readConfigureBody,
   readDialogBody,
   readForkBody,
+  readRestoreBody,
   readHostCommandBody,
   readIncidentResolutionBody,
   readModeChangeBody,
@@ -139,6 +142,8 @@ const THREAD_SYSTEM_PROMPT_ROUTE = new RegExp(
 const THREAD_SYSTEM_PROMPT_DRAFT_ROUTE = threadRoute('system-prompt')
 /** `POST …/fork` (#433): fork the thread at one of its user messages — a new thread naming this one as its parent. */
 const THREAD_FORK_ROUTE = threadRoute('fork')
+/** `POST …/restore` (#551): restore the thread's files to an entry's snapshot — the conversation is unchanged. */
+const THREAD_RESTORE_ROUTE = threadRoute('restore')
 /** `POST …/continue` (#436): continue a torn thread from its stored state — no new prompt. */
 const THREAD_CONTINUE_ROUTE = threadRoute('continue')
 /**
@@ -407,6 +412,8 @@ export interface EnsoServerOptions {
   promptsDir?: string
   /** The project folders (`ENSO_HOME/projects`, #552): where a thread's session is filed, under its project's id; absent, pi's default. */
   projectsDir?: string
+  /** Each new thread's own tree, per project (#551, `AgentHostOptions.threadTree`); absent, threads run in the checkout. */
+  threadTree?: (project: string) => ThreadTreeKind | 'off'
   /**
    * The risk fold's thresholds, from the user's config (`security.incidents`, #466) — user-only, like
    * `projectRoots`. Absent, the defaults: what the guard measures with when the config sets none.
@@ -518,6 +525,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     roots: options.projectRoots ?? [],
     ...(options.projectsConfigPath === undefined ? {} : { configPath: options.projectsConfigPath }),
     ...(options.projectsStatePath === undefined ? {} : { statePath: options.projectsStatePath }),
+    ...(options.projectsDir === undefined ? {} : { projectsDir: options.projectsDir }),
   })
   const servesDirectory = (directory: string): boolean => projects.byDirectory(directory) !== undefined
   const host: AgentHost =
@@ -528,6 +536,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
       harnessPackageDir: options.harnessPackageDir,
       permissionRulesPath: options.permissionRulesPath,
       ...(options.projectsDir === undefined ? {} : { projectsDir: options.projectsDir }),
+      ...(options.threadTree === undefined ? {} : { threadTree: options.threadTree }),
     })
   const threads = createThreadRegistry({
     // A thread with a session on disk is opened where pi recorded it; a new one where its project
@@ -1025,6 +1034,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     { method: 'POST', route: THREAD_SYSTEM_PROMPT_DRAFT_ROUTE, respond: respondWithDraftPreview },
     { method: 'POST', route: THREAD_PERMISSION_CHECK_ROUTE, respond: respondToPermissionCheck },
     { method: 'POST', route: THREAD_FORK_ROUTE, respond: respondToFork },
+    { method: 'POST', route: THREAD_RESTORE_ROUTE, respond: respondToRestore },
     { method: 'POST', route: THREAD_CONTINUE_ROUTE, respond: idOnly(respondToContinue) },
     { method: 'POST', route: THREAD_ABORT_ROUTE, respond: idOnly(respondToAbort) },
     { method: 'POST', route: THREAD_INCIDENT_RESOLVE_ROUTE, respond: respondToIncidentResolution },
@@ -1317,6 +1327,29 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
       accepted: (outcome) => ({
         message: 'forked at {entryId} as {forkThreadId}',
         facts: { forkThreadId: outcome.receipt.threadId },
+      }),
+      answer: (outcome) => {
+        response.writeHead(200, { 'Content-Type': 'application/json' })
+        response.end(JSON.stringify(outcome.receipt))
+      },
+    })
+  }
+
+  /**
+   * `POST …/restore` (#551): the restored snapshot's hash and the safety snapshot of the files it
+   * replaced. An unknown thread or entry is a 404; no tree, no snapshot, a refused restore or a
+   * thread a run holds a 409 — each with its reason as text.
+   */
+  function respondToRestore(threadId: string, request: IncomingMessage, response: ServerResponse): Promise<void> {
+    return answerControl(threadId, request, response, {
+      body: 'a restore request',
+      parse: readRestoreBody,
+      run: (restore) => restoreThreadAt(threadRead, threadId, restore),
+      subject: (restore) => restore,
+      refused: 'restore at {entryId} refused ({status}): {reason}',
+      accepted: (outcome) => ({
+        message: 'restored files at {entryId} to {hash} (safety {safety})',
+        facts: { hash: outcome.receipt.hash, safety: outcome.receipt.safety },
       }),
       answer: (outcome) => {
         response.writeHead(200, { 'Content-Type': 'application/json' })

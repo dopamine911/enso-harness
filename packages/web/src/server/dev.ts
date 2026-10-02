@@ -15,7 +15,7 @@
  */
 
 import { mkdirSync } from 'node:fs'
-import { incidentPolicyOf, parseEnsoConfig } from '@enso/core'
+import { incidentPolicyOf, parseEnsoConfig, threadTreeFor } from '@enso/core'
 import { startLauncher } from '@enso/core/log-process'
 import {
   ensoAgentDir,
@@ -70,6 +70,8 @@ const { listening } = startEnsoServer({
   projectsStatePath: ensoProjectsPath(home),
   promptsDir: ensoPromptsDir(home),
   projectsDir: ensoProjectsDir(home),
+  // Each new thread in its own tree (#551): the user's `threads` section, default on.
+  threadTree: (project) => threadTreeFor(config.config, project),
   harnessPackageDir: harnessPackageDir(repoRoot),
   agentDir,
   permissionRulesPath: ensoPermissionRulesPath(home),

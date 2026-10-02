@@ -34,6 +34,7 @@ import {
   ExternalLinkIcon,
   FileDiffIcon,
   GitForkIcon,
+  HistoryIcon,
   LayersIcon,
   MenuIcon,
   MessagesSquareIcon,
@@ -76,6 +77,14 @@ import {
 } from './components/ai-elements/queue.tsx'
 import { Alert, AlertDescription, AlertTitle } from './components/ui/alert.tsx'
 import { Button } from './components/ui/button.tsx'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from './components/ui/dialog.tsx'
 import { Input } from './components/ui/input.tsx'
 import { Textarea } from './components/ui/textarea.tsx'
 import { routeEnsoCustomEvent } from './custom-event-router.ts'
@@ -83,7 +92,7 @@ import { EnsoRing, EnsoSmile } from './enso-mark.tsx'
 import type { EnsoRendererMap } from './EnsoToolResult.tsx'
 import { createFixtureChat, fixtureFetch } from './fixture-conversation.ts'
 import type { DialogAnswerOutcome, FollowConnection } from './follow-connection.ts'
-import { ForkContext, forkFromPage } from './fork-thread.ts'
+import { ForkContext, forkFromPage, RestoreContext, restoreFromPage } from './fork-thread.ts'
 import { ThreadIncidents } from './incident-card.tsx'
 import { ModelChip, ModelChoiceDialog, ThinkingLevelSelect, useModelState, useRecordedModel } from './model-state.tsx'
 import { ThreadNotifications } from './notifications.tsx'
@@ -1071,31 +1080,71 @@ const MessageBody = memo(function MessageBody({
 				    empty bubble where the refusal had been said live. */}
         {refusal === undefined ? null : <RefusedAttemptLine refusal={refusal} />}
       </MessageContent>
-      {role === 'user' ? <ForkPromptButton messageId={messageId} /> : null}
+      {role === 'user' ? <PromptActions messageId={messageId} /> : null}
     </Message>
   )
 }, sameRenderedMessage)
 
-/**
- * A prompt's fork action (#433): a new thread holding everything before this prompt, its composer
- * holding the prompt's words — pi's `/fork`. Not offered where no page opens the fork.
- */
-function ForkPromptButton({ messageId }: { messageId: string }): React.ReactNode {
+/** A prompt's actions: fork from it (#433) and restore the files to it (#551), each where the page offers it. */
+function PromptActions({ messageId }: { messageId: string }): React.ReactNode {
   const forkAt = useContext(ForkContext)
-  if (forkAt === undefined) return null
+  const restoreAt = useContext(RestoreContext)
+  const [confirming, setConfirming] = useState(false)
+  if (forkAt === undefined && restoreAt === undefined) return null
   return (
     <div className="flex justify-end ledger:justify-start">
-      <Button
-        type="button"
-        size="sm"
-        variant="ghost"
-        className="h-7 gap-1 px-2 text-xs text-muted-foreground"
-        title="a new thread holding everything before this prompt, with its words ready to send again"
-        onClick={(): void => forkAt(messageId)}
-      >
-        <GitForkIcon aria-hidden="true" />
-        fork from here
-      </Button>
+      {forkAt === undefined ? null : (
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="h-7 gap-1 px-2 text-xs text-muted-foreground"
+          title="a new thread holding everything before this prompt, with its words ready to send again"
+          onClick={(): void => forkAt(messageId)}
+        >
+          <GitForkIcon aria-hidden="true" />
+          fork from here
+        </Button>
+      )}
+      {restoreAt === undefined ? null : (
+        <>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-7 gap-1 px-2 text-xs text-muted-foreground"
+            title="put the thread's files back as they were at this prompt"
+            onClick={(): void => setConfirming(true)}
+          >
+            <HistoryIcon aria-hidden="true" />
+            Restore files to here
+          </Button>
+          <Dialog open={confirming} onOpenChange={setConfirming}>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>Restore files to here?</DialogTitle>
+                <DialogDescription>
+                  The thread's files go back to how they were at this prompt. The conversation is not changed, and the
+                  current files are kept as a safety snapshot.
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <Button variant="ghost" onClick={(): void => setConfirming(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  onClick={(): void => {
+                    setConfirming(false)
+                    restoreAt(messageId)
+                  }}
+                >
+                  Restore files
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </>
+      )}
     </div>
   )
 }
@@ -1440,6 +1489,7 @@ const chatComponents = {
       const chat = useChatContext()
       const debugOpen = useContext(DebugOpenContext)
       const { shown, open } = useContext(PaneViewContext)
+      const threadProject = useThreadProject(useThreadStores().projectId)
       const scroller = useRef<TranscriptScroller | null>(null)
       const revealInTranscript = useCallback<RevealStatsTarget>(
         (target, stats) => {
@@ -1572,7 +1622,11 @@ const chatComponents = {
           </div>
           {/* The status bar (#90): activity, prompts, tool calls, cost — always visible, full
 					    width under transcript AND debug pane, so it is the one place to look. */}
-          <ThreadStatusBar messages={chat.messages} generating={chat.sessionGenerating} />
+          <ThreadStatusBar
+            messages={chat.messages}
+            generating={chat.sessionGenerating}
+            projectTitle={threadProject?.title}
+          />
         </div>
       )
     },
@@ -1676,6 +1730,16 @@ export function ThreadPane({
           },
     [stores, onForked],
   )
+  // Restoring files (#551) is offered beside the fork: on a page, not on a pane mounted alone.
+  const restoreAt = useMemo(
+    () =>
+      onForked === undefined
+        ? undefined
+        : (messageId: string): void => {
+            void restoreFromPage(stores, latestMessages.current, messageId)
+          },
+    [stores, onForked],
+  )
   // ⚠ The title depends on the FIRST user message and nothing else, but `chat.messages`
   // gets a new identity on every streamed chunk — so an effect over the list re-derived it
   // per token and threw the answer away (#283). Depend on that message instead; the list's
@@ -1703,7 +1767,9 @@ export function ThreadPane({
         <DebugOpenContext.Provider value={debugOpen && active}>
           <PaneViewContext.Provider value={paneView}>
             <ForkContext.Provider value={forkAt}>
-              <chat.AppChat />
+              <RestoreContext.Provider value={restoreAt}>
+                <chat.AppChat />
+              </RestoreContext.Provider>
             </ForkContext.Provider>
           </PaneViewContext.Provider>
         </DebugOpenContext.Provider>

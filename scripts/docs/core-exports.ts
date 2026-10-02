@@ -68,6 +68,7 @@ const DOMAINS_BY_CLASSIFICATION: Readonly<Record<Classification, Readonly<Record
     'thread-timeline.ts': 'Thread, Observation, Record',
     'thread-context.ts': 'Thread, Observation',
     'thread-stats.ts': 'Thread, Observation, Record',
+    'thread-tree-record.ts': 'Thread, Record',
     'tool-input.ts': 'Surface',
     'tool-result.ts': 'Surface, Observation',
     'transcript.ts': 'Thread, Record',
@@ -93,6 +94,7 @@ const DOMAINS_BY_CLASSIFICATION: Readonly<Record<Classification, Readonly<Record
     'permission-rules.ts': 'Permission',
     'secrets.ts': 'Permission',
     'snapshot-store.ts': 'Thread, Record',
+    'thread-tree.ts': 'Thread, Record',
   },
   'host contract': { 'thread-runtime.ts': 'Thread, Control' },
 }

@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, expect, setSystemTime, test } from 'bun:test'
+import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
@@ -43,6 +44,7 @@ import {
   withRule,
   readEnsoRunContext,
   threadTrustsProject,
+  ENSO_TREE_RESTORED_ENTRY,
 } from '@enso/core'
 import { flowTrace } from '@enso/core/flow-trace'
 import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
@@ -53,7 +55,9 @@ import {
   projectIdOf,
   projectSessionsDir,
   projectSnapshotsDir,
+  projectTreesDir,
   realpathOrSelf,
+  treeProjectId,
 } from '@enso/core/paths'
 import { ENSO_DEFAULT_PERMISSION_POLICY, permissionEngineConfigPath } from '@enso/core/permission-rules'
 import { snapshotPaths } from '@enso/core/snapshot-store'
@@ -1663,6 +1667,189 @@ test("⚠ a thread whose file sits in BOTH its project folder and pi's legacy di
   // And the read is the project folder's copy: two user turns, not the legacy copy's one.
   const transcript = (await host.readStoredThread(threadId))?.transcript ?? []
   expect(transcript.filter((entry) => entry.kind === 'message' && entry.role === 'user')).toHaveLength(2)
+})
+
+// ── #551 slice 2: each thread in its own tree ──────────────────────────────────────────────────
+
+/** git in a fixture checkout, hermetic: no user or system config, a fixed identity. */
+function fixtureGit(cwd: string, ...args: string[]): string {
+  return execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...args], {
+    cwd,
+    env: {
+      PATH: dirname(Bun.which('git') ?? '/usr/bin/git'),
+      GIT_CONFIG_GLOBAL: '/dev/null',
+      GIT_CONFIG_SYSTEM: '/dev/null',
+    },
+    encoding: 'utf8',
+  }).trim()
+}
+
+/** A checkout with a commit, then a dirty edit, an untracked file and an ignored `.env` — the state a user leaves. */
+function dirtyCheckout(): string {
+  const project = realpathOrSelf(mkdtempSync(join(tmpdir(), 'enso-tree-project-')))
+  fixtureGit(project, 'init', '--quiet')
+  writeFileSync(join(project, '.gitignore'), '.env\n')
+  writeFileSync(join(project, 'a.txt'), 'committed\n')
+  fixtureGit(project, 'add', '--all')
+  fixtureGit(project, 'commit', '--quiet', '-m', 'one')
+  writeFileSync(join(project, 'a.txt'), 'dirty\n')
+  writeFileSync(join(project, 'notes.md'), 'untracked\n')
+  writeFileSync(join(project, '.env'), 'SECRET=1\n')
+  return project
+}
+
+/** A host that gives every new thread a worktree, serving `project` and its trees. */
+function treeHost(
+  project: string,
+  extensionFactories: InlineExtension[] = [],
+): { host: AgentHost; projectsDir: string } {
+  // ⚠ The run's ENSO_HOME's projects folder (the preload's `<scratch>/enso-home`, which `tmpdir()`
+  // names), not a folder of the test's own: the run-context extension files each run's snapshot in
+  // `ENSO_HOME/projects/<id>/snapshots/`, and the host's stores must be the same ones — as they are
+  // in production, where both resolve ENSO_HOME. Threads and trees are named by fresh ids.
+  const projectsDir = ensoProjectsDir(join(tmpdir(), 'enso-home'))
+  const host = createAgentHost({
+    servesDirectory: (directory) =>
+      realpathOrSelf(directory) === project || treeProjectId(projectsDir, directory) === projectIdOf(project),
+    agentDir,
+    permissionRulesPath,
+    harnessPackageDir: harnessDir,
+    projectsDir,
+    threadTree: () => 'worktree',
+    extensionFactories,
+  })
+  return { host, projectsDir }
+}
+
+// ⚠ The acceptance's first item: two threads on one project each run in a tree of their own,
+// minted at the checkout's CURRENT state, and the guard's boundary follows the tree — one thread's
+// write into the other's tree is refused, with no rule of its own.
+test("⚠ two threads on one project each get their own worktree at the checkout's current state; a write into the other's tree is refused; the checkout is untouched (#551)", async () => {
+  const project = dirtyCheckout()
+  const statusBefore = fixtureGit(project, 'status', '--porcelain')
+  const { host, projectsDir } = treeHost(project)
+  const first = await host.createSession(crypto.randomUUID(), () => project)
+  const second = await host.createSession(crypto.randomUUID(), () => project)
+  openSessions.push(first, second)
+  const firstTree = first.inspect().cwd
+  const secondTree = second.inspect().cwd
+  expect(dirname(firstTree)).toBe(projectTreesDir(projectsDir, projectIdOf(project)))
+  expect(secondTree).not.toBe(firstTree)
+  // The checkout as the user left it: the edit and the untracked file, never the ignored secret.
+  expect(readFileSync(join(firstTree, 'a.txt'), 'utf8')).toBe('dirty\n')
+  expect(readFileSync(join(firstTree, 'notes.md'), 'utf8')).toBe('untracked\n')
+  expect(existsSync(join(firstTree, '.env'))).toBe(false)
+  expect(fixtureGit(project, 'worktree', 'list')).toContain(firstTree)
+  // One thread's file is not the other's.
+  writeFileSync(join(firstTree, 'a.txt'), 'first thread\n')
+  expect(readFileSync(join(secondTree, 'a.txt'), 'utf8')).toBe('dirty\n')
+  // The boundary follows the tree: into the other thread's tree is outside this one's workspace.
+  const crossed = await second.probeToolCall('write', { path: join(firstTree, 'a.txt'), content: 'x' })
+  expect(crossed).toMatchObject({ block: true })
+  expect(crossed?.reason).toContain(`outside the workspace (${secondTree})`)
+  const own = await second.probeToolCall('write', { path: join(secondTree, 'a.txt'), content: 'x' })
+  expect(own?.reason ?? '').not.toContain('outside the workspace')
+  // Nothing of it reached the checkout.
+  expect(fixtureGit(project, 'status', '--porcelain')).toBe(statusBefore)
+  expect(readFileSync(join(project, 'a.txt'), 'utf8')).toBe('dirty\n')
+})
+
+// ⚠ #502 meets #551: every tree is a fresh path, so trust keyed by the path would ask on every
+// new thread and a "Trust project" answer would trust one tree. It is the project's.
+test('⚠ a thread on its tree is trusted by its project\'s answer, and "Trust project" there trusts the project, not the tree (#551)', async () => {
+  const trusted = yoloRepository()
+  fixtureGit(trusted, 'init', '--quiet')
+  fixtureGit(trusted, 'commit', '--quiet', '--allow-empty', '-m', 'one')
+  new ProjectTrustStore(agentDir).set(trusted, true)
+  const onTree = await treeHost(trusted).host.createSession(crypto.randomUUID(), () => trusted)
+  openSessions.push(onTree)
+  expect(onTree.inspect().cwd).not.toBe(trusted)
+  expect(await writeAsks(onTree)).toBe(false)
+
+  const asking = yoloRepository()
+  fixtureGit(asking, 'init', '--quiet')
+  fixtureGit(asking, 'commit', '--quiet', '--allow-empty', '-m', 'one')
+  const core = createFauxCore()
+  core.setResponses([faux.fauxAssistantMessage('hi')])
+  const answered = await treeHost(asking, [fauxModelExtension(core)]).host.createSession(
+    crypto.randomUUID(),
+    () => asking,
+  )
+  openSessions.push(answered)
+  await promptAnswering(answered, [], 'Trust project')
+  expect(new ProjectTrustStore(agentDir).get(asking)).toBe(true)
+  expect(new ProjectTrustStore(agentDir).get(answered.inspect().cwd)).toBeNull()
+})
+
+// ⚠ The rest of the acceptance through the real harness: each run records the tree's snapshot; a
+// fork's tree is at the parent's snapshot AT THE FORK POINT, not the parent's files now; a restore
+// brings a turn's files back, keeps the replaced ones as the safety, and is recorded.
+test("⚠ a fork's tree is the parent's at the fork point; a restore brings a turn's files back and keeps the replaced ones; a thread in its checkout has nothing to restore (#551)", async () => {
+  const project = dirtyCheckout()
+  const core = createFauxCore()
+  core.setResponses(Array.from({ length: 4 }, (_, index) => faux.fauxAssistantMessage(`reply ${index + 1}`)))
+  const { host } = treeHost(project, [fauxModelExtension(core)])
+  const threadId = crypto.randomUUID()
+  const hosted = await host.createSession(threadId, () => project)
+  openSessions.push(hosted)
+  const tree = hosted.inspect().cwd
+  new ProjectTrustStore(agentDir).set(project, true)
+  await runPrompt(hosted, 'first')
+  // The agent's edit between the turns.
+  writeFileSync(join(tree, 'a.txt'), 'agent edit\n')
+  await runPrompt(hosted, 'second')
+  const entries = hosted.inspect().entries
+  const userEntry = (text: string): string => {
+    const found = entries.find(
+      (entry) =>
+        entry.kind === 'message' &&
+        entry.role === 'user' &&
+        entry.parts.some((part) => part.type === 'text' && part.text === text),
+    )
+    if (found === undefined) throw new Error(`no user entry "${text}"`)
+    return found.id
+  }
+  const snapshots = entries.flatMap((entry) =>
+    entry.kind === 'custom' ? [readEnsoRunContext(entry.customType, entry.data)?.snapshot?.hash].filter(Boolean) : [],
+  )
+  expect(new Set(snapshots).size).toBe(2)
+  hosted.runtime.dispose()
+
+  // Forks: at "second" the tree held the edit; at "first" it did not.
+  const atSecond = await host.forkThread(threadId, userEntry('second'))
+  const atFirst = await host.forkThread(threadId, userEntry('first'))
+  if (atSecond.kind !== 'forked' || atFirst.kind !== 'forked') {
+    throw new Error(`a fork was refused: ${JSON.stringify([atSecond, atFirst])}`)
+  }
+  const forkedSecond = await host.createSession(atSecond.threadId, () => project)
+  const forkedFirst = await host.createSession(atFirst.threadId, () => project)
+  openSessions.push(forkedSecond, forkedFirst)
+  expect(forkedSecond.inspect().cwd).not.toBe(tree)
+  expect(readFileSync(join(forkedSecond.inspect().cwd, 'a.txt'), 'utf8')).toBe('agent edit\n')
+  expect(readFileSync(join(forkedFirst.inspect().cwd, 'a.txt'), 'utf8')).toBe('dirty\n')
+  expect(readFileSync(join(tree, 'a.txt'), 'utf8')).toBe('agent edit\n')
+
+  // Restore the parent to "first": the files come back; the edit is kept as the safety.
+  writeFileSync(join(tree, 'later.txt'), 'made after\n')
+  const restored = await host.restoreThreadAt(threadId, userEntry('first'))
+  if (restored.kind !== 'restored') throw new Error(`restore refused: ${restored.reason}`)
+  expect(readFileSync(join(tree, 'a.txt'), 'utf8')).toBe('dirty\n')
+  expect(existsSync(join(tree, 'later.txt'))).toBe(false)
+  expect(restored.safety).not.toBe(restored.hash)
+  const stored = await host.readStoredThread(threadId)
+  expect(
+    stored?.transcript.some((entry) => entry.kind === 'custom' && entry.customType === ENSO_TREE_RESTORED_ENTRY),
+  ).toBe(true)
+
+  // A thread in its checkout has no tree to restore — said as that, not as a missing thread.
+  const plainCore = createFauxCore()
+  plainCore.setResponses([faux.fauxAssistantMessage('hi')])
+  const plainHost = hostWith([fauxModelExtension(plainCore)])
+  const plain = await plainHost.createSession(crypto.randomUUID(), () => repoRoot)
+  openSessions.push(plain)
+  await runPrompt(plain, 'hello')
+  const plainUser = plain.inspect().entries.find((entry) => entry.kind === 'message' && entry.role === 'user')?.id ?? ''
+  expect((await plainHost.restoreThreadAt(plain.inspect().sessionId, plainUser)).kind).toBe('no-tree')
 })
 
 // #447: a fork copies its source's messages with their times, and pi's `modified` is the last

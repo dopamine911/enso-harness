@@ -47,6 +47,27 @@ export const ENSO_CONFIG_FILENAME = 'config.json'
 export const ENSO_CONFIG_EXAMPLE = `{ "webFetch": { "allowedHosts": ["docs.example.com"] } }`
 
 /**
+ * A new thread's tree (#551): its own worktree of the checkout, a copy, or none.
+ *
+ * @group Configuration
+ */
+export const EnsoThreadTreeMode = Type.Union([Type.Literal('worktree'), Type.Literal('copy'), Type.Literal('off')])
+/** @group Configuration */
+export type EnsoThreadTreeMode = Static<typeof EnsoThreadTreeMode>
+
+/**
+ * The `threads` section (#551): `tree`, every project's default; `projects`, per canonical project
+ * path, an override — `{ "/home/me/big-monorepo": "off" }`. Read only through `threadTreeFor`.
+ */
+const EnsoThreadsConfig = Type.Object(
+  {
+    tree: Type.Optional(EnsoThreadTreeMode),
+    projects: Type.Optional(Type.Record(Type.String({ minLength: 1 }), EnsoThreadTreeMode)),
+  },
+  { additionalProperties: false },
+)
+
+/**
  * The whole config file.
  *
  * One section per consumer; every section's schema lives with its owner. ⚠ New sections are
@@ -61,11 +82,26 @@ export const EnsoConfig = Type.Object(
     webSearch: Type.Optional(WebSearchConfig),
     projects: Type.Optional(EnsoProjectsConfig),
     security: Type.Optional(EnsoSecurityConfig),
+    threads: Type.Optional(EnsoThreadsConfig),
   },
   { additionalProperties: false },
 )
 /** @group Configuration */
 export type EnsoConfig = Static<typeof EnsoConfig>
+
+/**
+ * The tree a new thread runs in (#551), as the user's config chooses it, for the project at
+ * `project` (a canonical path): its entry in `threads.projects`, else `threads.tree`, else
+ * `'worktree'` — the default is on (#551 decision 1). `'off'` runs the project's threads in the
+ * checkout itself and records no tree; the conversation still forks and continues, but there is no
+ * filesystem restore. ⚠ USER-ONLY, like `security`: read from the user's file before any trust is
+ * decided, so a project's own config cannot take its threads out of their trees.
+ *
+ * @group Configuration
+ */
+export function threadTreeFor(config: EnsoConfig, project: string): EnsoThreadTreeMode {
+  return config.threads?.projects?.[project] ?? config.threads?.tree ?? 'worktree'
+}
 
 const ensoConfigValidator = Compile(EnsoConfig)
 

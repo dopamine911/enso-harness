@@ -244,6 +244,18 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
       factory: { path: FOLLOW_PATH, declaration: 'export async function forkThreadAt', reaches: 'storage' },
     },
   ),
+  THREAD_RESTORE_ROUTE: threadControl(
+    'respondToRestore → restoreThreadAt → AgentHost.restoreThreadAt',
+    "path: `threadId`; body: `EnsoRestoreRequest` — `entryId`, a user message on the thread's branch; the thread's tree is put back to the snapshot its run began with (#551), the conversation untouched",
+    [
+      '200 `{ hash, safety }` JSON — the snapshot restored, and the snapshot of the files it replaced, recorded on the thread as `enso-tree-restored`',
+      '400 malformed id/body; 403 untrusted origin; 404 no such thread or entry; 409 thread busy, the thread on no tree, no snapshot at that entry, or the restore refused; 413 body too large; 500 handler failure',
+    ],
+    {
+      builds: 'no',
+      factory: { path: FOLLOW_PATH, declaration: 'export async function restoreThreadAt', reaches: 'storage' },
+    },
+  ),
   THREAD_CONTINUE_ROUTE: threadControl(
     'respondToContinue → continueThread → ThreadRuntime.continueRun',
     'path: `threadId`; no body',

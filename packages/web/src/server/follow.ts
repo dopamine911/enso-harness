@@ -8,6 +8,7 @@ import {
   type EnsoFollowFrame,
   type EnsoForkReceipt,
   EnsoForkRequest,
+  EnsoRestoreRequest,
   EnsoHostCommandRun,
   EnsoIncidentResolution,
   EnsoPermissionModeChange,
@@ -890,7 +891,12 @@ export type ForkRouteOutcome =
   | { readonly status: 400 | 404 | 409; readonly reason: string }
 
 /** The host's fork refusal → the status the route answers it with. */
-const FORK_REFUSAL_STATUS = { 'no-thread': 404, 'no-entry': 404, 'not-a-user-message': 400 } as const
+const FORK_REFUSAL_STATUS = {
+  'no-thread': 404,
+  'no-entry': 404,
+  'not-a-user-message': 400,
+  'tree-refused': 409,
+} as const
 
 /**
  * Fork a thread at one of its user messages (#433): a new thread whose session file names this
@@ -913,6 +919,41 @@ export async function forkThreadAt(
 /** The fork body, checked against its closed schema — `entryId`, nothing else. */
 export function readForkBody(raw: string): EnsoForkRequest {
   return readClosedBody(raw, EnsoForkRequest, 'fork', 'fork body needs a non-empty `entryId` and nothing else')
+}
+
+export type RestoreRouteOutcome =
+  | { readonly status: 200; readonly receipt: { readonly hash: string; readonly safety: string } }
+  | { readonly status: 400 | 404 | 409; readonly reason: string }
+
+/** The host's restore refusal → the status the route answers it with. */
+const RESTORE_REFUSAL_STATUS = {
+  'no-thread': 404,
+  'no-entry': 404,
+  'no-tree': 409,
+  'no-snapshot': 409,
+  refused: 409,
+} as const
+
+/**
+ * Restore a thread's tree to the snapshot at one of its entries (#551): the current files are
+ * kept as a safety snapshot first, the conversation is untouched. Refused while a run holds the
+ * thread (409): the run is writing the very files a restore would replace.
+ */
+export async function restoreThreadAt(
+  deps: ThreadReadDeps,
+  threadId: string,
+  request: EnsoRestoreRequest,
+): Promise<RestoreRouteOutcome> {
+  const running = runningRefusal(deps.threads, threadId, 'restore its files')
+  if (running !== undefined) return running
+  const outcome = await deps.host.restoreThreadAt(threadId, request.entryId)
+  if (outcome.kind !== 'restored') return { status: RESTORE_REFUSAL_STATUS[outcome.kind], reason: outcome.reason }
+  return { status: 200, receipt: { hash: outcome.hash, safety: outcome.safety } }
+}
+
+/** The restore body, checked against its closed schema — `entryId`, nothing else. */
+export function readRestoreBody(raw: string): EnsoRestoreRequest {
+  return readClosedBody(raw, EnsoRestoreRequest, 'restore', 'restore body needs a non-empty `entryId` and nothing else')
 }
 
 export type AbortRouteOutcome = { readonly status: 200; readonly receipt: EnsoAbortReceipt } | Refusal<404 | 409>

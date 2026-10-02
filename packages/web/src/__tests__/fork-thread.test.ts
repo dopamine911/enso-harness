@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'bun:test'
 import type { UIMessage } from '@tanstack/ai-client'
-import { forkEntryFor, forkFromPage } from '../fork-thread.ts'
-import { clearThreadsForTest, mintThread } from '../thread-stores.ts'
+import { forkEntryFor, forkFromPage, restoreFromPage } from '../fork-thread.ts'
+import { clearThreadsForTest, mintThread, type ThreadStores } from '../thread-stores.ts'
 
 afterEach(() => clearThreadsForTest())
 
@@ -107,4 +107,48 @@ test('⚠ a second fork press while one is outstanding forks nothing and says so
   expect(await first).toEqual({ threadId: 'fork-1', prefill: 'second' })
   expect(await forkFromPage(stores, BRANCH, 'e-u2')).toEqual({ threadId: 'fork-2', prefill: 'second' })
   expect(forkPosts).toEqual(['{"entryId":"e-u2"}', '{"entryId":"e-u2"}'])
+})
+
+/** A thread whose `/history` is BRANCH and whose `/restore` answers `answer`; the bodies it was posted. */
+function restoringThread(answer: () => Response): { stores: ThreadStores; posts: string[] } {
+  const posts: string[] = []
+  const stores = mintThread((input: string, init?: RequestInit) => {
+    if (input.endsWith('/history')) {
+      return Promise.resolve(
+        Response.json({
+          threadId: 't',
+          projectId: 'p',
+          messages: BRANCH,
+          permissionMode: { mode: 'default', available: [] },
+          sessionRisk: { level: 'low', signals: 0 },
+          incidents: { incidents: [], suspended: [], ended: false },
+        }),
+      )
+    }
+    if (input.endsWith('/restore') && init?.method === 'POST') {
+      posts.push(typeof init.body === 'string' ? init.body : '')
+      return Promise.resolve(answer())
+    }
+    return Promise.resolve(new Response('not scripted', { status: 404 }))
+  })
+  return { stores, posts }
+}
+
+test('restoring files posts the entry a fork would find and says the short restored and safety hashes (#551)', async () => {
+  const { stores, posts } = restoringThread(() => Response.json({ hash: 'a'.repeat(40), safety: 'b'.repeat(40) }))
+  const page = [prompt('e-u1', 'first'), reply('e-a1'), prompt('client-7', 'second')]
+  expect(await restoreFromPage(stores, page, 'client-7')).toEqual({ hash: 'a'.repeat(40), safety: 'b'.repeat(40) })
+  expect(posts).toEqual(['{"entryId":"e-u2"}'])
+  const [notice] = stores.notifications.get()
+  expect(notice?.message).toContain('restored to aaaaaaa;')
+  expect(notice?.message).toContain('kept as bbbbbbb')
+  expect(notice?.message).not.toContain('a'.repeat(8))
+})
+
+test('⚠ a refused restore says its reason and restores nothing; a prompt off the branch is not posted (#551)', async () => {
+  const { stores, posts } = restoringThread(() => new Response('thread t has no tree', { status: 409 }))
+  expect(await restoreFromPage(stores, BRANCH, 'e-u1')).toBeUndefined()
+  expect(stores.notifications.get().at(-1)?.message).toContain('thread t has no tree')
+  expect(await restoreFromPage(stores, [...BRANCH, prompt('client-9', 'third')], 'client-9')).toBeUndefined()
+  expect(posts).toEqual(['{"entryId":"e-u1"}'])
 })

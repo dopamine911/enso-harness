@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { ENSO_CONFIG_EXAMPLE, mergeEnsoConfig, parseEnsoConfig } from '../config.ts'
+import { ENSO_CONFIG_EXAMPLE, mergeEnsoConfig, parseEnsoConfig, threadTreeFor } from '../config.ts'
 import { ensoConfigPath } from '../paths.ts'
 
 /**
@@ -26,6 +26,17 @@ test('⚠ no config file is the defaults, not a failure; nor is a file with no s
   expect(parseEnsoConfig(undefined)).toEqual({ kind: 'ok', config: {} })
   expect(parseEnsoConfig('{}')).toEqual({ kind: 'ok', config: {} })
   expect(parseEnsoConfig('').kind).toBe('unreadable')
+})
+
+// #551 decision 1: trees are on by default; a project's own entry beats the user's default; a mode
+// the schema does not know is a config that fails closed, not one that silently runs in place.
+test("⚠ a thread's tree: the project's entry, else the user's default, else worktree; an unknown mode is unreadable (#551)", () => {
+  const parsed = parseEnsoConfig(JSON.stringify({ threads: { tree: 'copy', projects: { '/srv/legacy': 'off' } } }))
+  if (parsed.kind !== 'ok') throw new Error(parsed.reason)
+  expect(threadTreeFor(parsed.config, '/srv/legacy')).toBe('off')
+  expect(threadTreeFor(parsed.config, '/srv/app')).toBe('copy')
+  expect(threadTreeFor({}, '/srv/app')).toBe('worktree')
+  expect(parseEnsoConfig(JSON.stringify({ threads: { tree: 'none' } })).kind).toBe('unreadable')
 })
 
 test('invalid JSON is unreadable, naming the file and the failure', () => {

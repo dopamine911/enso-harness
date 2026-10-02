@@ -33,14 +33,20 @@ export interface HostedProjectTrust {
   readonly open: boolean
 }
 
-/** @group Project trust */
+/**
+ * `cwd` is where the session runs (its `.pi/` is what trust gates); `trustDirectory` is what
+ * `trust.json` names — the project, which is `cwd` unless the thread runs on a tree of it (#551).
+ *
+ * @group Project trust
+ */
 export function hostedProjectTrust(
   cwd: string,
+  trustDirectory: string,
   agentDir: string,
   branch: readonly EnsoTranscriptEntry[],
 ): HostedProjectTrust {
   const settingsManager = SettingsManager.create(cwd, agentDir, { projectTrusted: false })
-  const saved = new ProjectTrustStore(agentDir).get(cwd)
+  const saved = new ProjectTrustStore(agentDir).get(trustDirectory)
   const fallback = settingsManager.getDefaultProjectTrust()
   const trusted = saved ?? (threadTrustsProject(branch) || fallback === 'always')
   settingsManager.setProjectTrusted(trusted)

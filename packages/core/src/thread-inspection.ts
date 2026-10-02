@@ -263,6 +263,18 @@ export const EnsoForkRequest = Type.Object({ entryId: Type.String({ minLength: 1
 export type EnsoForkRequest = Static<typeof EnsoForkRequest>
 
 /**
+ * The body of `POST …/restore` (#551): the entry whose run-context snapshot the thread's tree is
+ * restored to. The conversation is not changed.
+ * @group Thread inspection
+ */
+export const EnsoRestoreRequest = Type.Object(
+  { entryId: Type.String({ minLength: 1 }) },
+  { additionalProperties: false },
+)
+/** @group Thread inspection */
+export type EnsoRestoreRequest = Static<typeof EnsoRestoreRequest>
+
+/**
  * What a fork answers (#433): the new thread, and the forked message's text — pi's `/fork` puts it
  * in the editor, so the new thread's composer opens holding it, ready to send again or edit.
  *

@@ -108,31 +108,108 @@ export async function forkFromPage(
   }
 }
 
+/** The thread's stored branch, as messages — or why it could not be read. */
+async function storedBranch(stores: Pick<ThreadStores, 'threadId' | 'fetch'>): Promise<UIMessage[] | string> {
+  try {
+    const response = await stores.fetch(`/api/threads/${encodeURIComponent(stores.threadId)}/history`)
+    if (!response.ok) throw new Error(await describeFailedResponse(response))
+    const history: unknown = await response.json()
+    if (!Check(EnsoThreadHistory, history)) throw new Error("the server's history payload did not match its schema")
+    return reviveHistoryMessages(history.messages)
+  } catch (error) {
+    return `the thread's branch could not be read: ${error instanceof Error ? error.message : String(error)}`
+  }
+}
+
+/** The pi entry for `messageId` on the stored branch, or the refusal that says why there is none. */
+async function entryOnBranch(
+  stores: Pick<ThreadStores, 'threadId' | 'fetch'>,
+  page: readonly UIMessage[],
+  messageId: string | undefined,
+  verb: string,
+): Promise<{ entryId: string } | { refusal: string }> {
+  const branch = await storedBranch(stores)
+  if (typeof branch === 'string') return { refusal: `${verb}: ${branch}` }
+  const entryId = forkEntryFor(page, messageId, branch)
+  if (entryId !== undefined) return { entryId }
+  return {
+    refusal: page.some((message) => message.role === 'user')
+      ? `${verb}: that prompt is not in its place on the thread's stored branch — ${UNMATCHED_PROMPT}`
+      : `${verb}: there is no prompt on this thread to ${verb} from`,
+  }
+}
+
 async function forkOnce(
   stores: Pick<ThreadStores, 'threadId' | 'fetch' | 'connection'>,
   page: readonly UIMessage[],
   messageId: string | undefined,
   say: (text: string) => void,
 ): Promise<EnsoForkReceipt | undefined> {
-  let branch: UIMessage[]
+  const found = await entryOnBranch(stores, page, messageId, 'fork')
+  if ('refusal' in found) {
+    say(found.refusal)
+    return undefined
+  }
+  return stores.connection.fork(found.entryId)
+}
+
+/**
+ * Restore the thread's files to a prompt on this pane (#551): the conversation stays as it is,
+ * the tree's current files are kept as a safety snapshot first. Set where a page offers it.
+ */
+export const RestoreContext = createContext<((messageId: string) => void) | undefined>(undefined)
+
+/** What the restore route answers on success: the restored snapshot and the safety one. */
+export interface RestoreReceipt {
+  readonly hash: string
+  readonly safety: string
+}
+
+/** A commit hash as the notice shows it. */
+const SHORT_HASH = 7
+
+/**
+ * Restore the pane's thread's files to the snapshot at a user message on `page`: the entry found
+ * as a fork finds it, then `POST …/restore`. The outcome — the short hashes, or the refusal's
+ * reason — is a notice on this thread; the receipt only when the files were restored.
+ */
+export async function restoreFromPage(
+  stores: Pick<ThreadStores, 'threadId' | 'fetch' | 'notifications'>,
+  page: readonly UIMessage[],
+  messageId: string,
+): Promise<RestoreReceipt | undefined> {
+  const say = (text: string, level: 'info' | 'warning'): void =>
+    stores.notifications.push(`thread ${stores.threadId}: ${text}`, level, 'run', ENSO_NOTICE_SOURCE)
+  const found = await entryOnBranch(stores, page, messageId, 'restore')
+  if ('refusal' in found) {
+    say(found.refusal, 'warning')
+    return undefined
+  }
   try {
-    const response = await stores.fetch(`/api/threads/${encodeURIComponent(stores.threadId)}/history`)
+    const response = await stores.fetch(`/api/threads/${encodeURIComponent(stores.threadId)}/restore`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ entryId: found.entryId }),
+    })
     if (!response.ok) throw new Error(await describeFailedResponse(response))
-    const history: unknown = await response.json()
-    if (!Check(EnsoThreadHistory, history)) throw new Error("the server's history payload did not match its schema")
-    branch = reviveHistoryMessages(history.messages)
-  } catch (error) {
-    say(`fork: the thread's branch could not be read: ${error instanceof Error ? error.message : String(error)}`)
-    return undefined
-  }
-  const entryId = forkEntryFor(page, messageId, branch)
-  if (entryId === undefined) {
+    const receipt: unknown = await response.json()
+    if (
+      typeof receipt !== 'object' ||
+      receipt === null ||
+      !('hash' in receipt) ||
+      !('safety' in receipt) ||
+      typeof receipt.hash !== 'string' ||
+      typeof receipt.safety !== 'string'
+    ) {
+      throw new Error("the server's restore receipt did not match its shape")
+    }
     say(
-      page.some((message) => message.role === 'user')
-        ? `fork: that prompt is not in its place on the thread's stored branch — ${UNMATCHED_PROMPT}`
-        : 'fork: there is no prompt on this thread to fork from',
+      `files restored to ${receipt.hash.slice(0, SHORT_HASH)}; the files before are kept as ${receipt.safety.slice(0, SHORT_HASH)}`,
+      'info',
     )
+    return { hash: receipt.hash, safety: receipt.safety }
+  } catch (error) {
+    say(`restore refused: ${error instanceof Error ? error.message : String(error)}`, 'warning')
     return undefined
   }
-  return stores.connection.fork(entryId)
 }

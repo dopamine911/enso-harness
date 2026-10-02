@@ -37,28 +37,53 @@ test("the engine's .pi/agents and Enso's .enso/config.json are trust-gated, thou
 
 test('undecided is untrusted even with nothing to load, and asked about only when there is something (#502)', () => {
   const plain = directories()
-  expect(hostedProjectTrust(plain.project, plain.agentDir, [])).toMatchObject({ open: false })
-  expect(hostedProjectTrust(plain.project, plain.agentDir, []).settingsManager.isProjectTrusted()).toBe(false)
+  expect(hostedProjectTrust(plain.project, plain.project, plain.agentDir, [])).toMatchObject({ open: false })
+  expect(hostedProjectTrust(plain.project, plain.project, plain.agentDir, []).settingsManager.isProjectTrusted()).toBe(
+    false,
+  )
   const gated = directories()
   mkdirSync(join(gated.project, '.pi', 'agents'), { recursive: true })
-  expect(hostedProjectTrust(gated.project, gated.agentDir, []).open).toBe(true)
+  expect(hostedProjectTrust(gated.project, gated.project, gated.agentDir, []).open).toBe(true)
 })
 
 test("a saved answer beats the thread's record, which beats the default (#502)", () => {
   const refused = directories()
   new ProjectTrustStore(refused.agentDir).set(refused.project, false)
-  const saved = hostedProjectTrust(refused.project, refused.agentDir, transcriptOf(threadTrusted))
+  const saved = hostedProjectTrust(refused.project, refused.project, refused.agentDir, transcriptOf(threadTrusted))
   expect([saved.settingsManager.isProjectTrusted(), saved.open]).toEqual([false, false])
 
   const never = directories()
   writeFileSync(join(never.agentDir, 'settings.json'), JSON.stringify({ defaultProjectTrust: 'never' }))
   expect(
-    hostedProjectTrust(never.project, never.agentDir, transcriptOf(threadTrusted)).settingsManager.isProjectTrusted(),
+    hostedProjectTrust(
+      never.project,
+      never.project,
+      never.agentDir,
+      transcriptOf(threadTrusted),
+    ).settingsManager.isProjectTrusted(),
   ).toBe(true)
 
   const always = directories()
   writeFileSync(join(always.agentDir, 'settings.json'), JSON.stringify({ defaultProjectTrust: 'always' }))
-  expect(hostedProjectTrust(always.project, always.agentDir, transcriptOf([])).settingsManager.isProjectTrusted()).toBe(
-    true,
-  )
+  expect(
+    hostedProjectTrust(
+      always.project,
+      always.project,
+      always.agentDir,
+      transcriptOf([]),
+    ).settingsManager.isProjectTrusted(),
+  ).toBe(true)
+})
+
+// ⚠ #551: a thread on a tree runs in a directory no one trusted by path. Its trust is its
+// PROJECT's answer — the tree's own `.pi/` is what that answer gates.
+test("a thread on a tree is trusted by its project's saved answer, never by the tree's path; the tree's .pi/ is what is gated (#551)", () => {
+  const project = directories()
+  const tree = directories().project
+  mkdirSync(join(tree, '.pi', 'agents'), { recursive: true })
+  new ProjectTrustStore(project.agentDir).set(project.project, true)
+  expect(hostedProjectTrust(tree, project.project, project.agentDir, []).settingsManager.isProjectTrusted()).toBe(true)
+  // Undecided project: the tree's gated .pi/ is what makes the question open.
+  const undecided = directories()
+  expect(hostedProjectTrust(tree, undecided.project, undecided.agentDir, []).open).toBe(true)
 })

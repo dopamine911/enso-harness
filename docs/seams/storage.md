@@ -77,6 +77,8 @@ export interface AgentHost {
    * built for either thread (#86).
    */
   forkThread(threadId: string, entryId: string): Promise<ThreadForkOutcome>
+  /** Restore the thread's tree to the snapshot recorded at or before `entryId` (#551); the conversation is unchanged. */
+  restoreThreadAt(threadId: string, entryId: string): Promise<ThreadRestoreOutcome>
   /** What a fresh thread starts in — served before any run exists, so the header never guesses. */
   freshPermissionMode(): EnsoPermissionModeState
   /** A stored thread's state from its transcript alone: nothing is built to answer (#86, #95). */
@@ -330,6 +332,11 @@ export const EnsoInterruptedTail = Type.Union([
 create, a fork inherits its source's, and `bun run enso` hands the terminal runtime the same directory
 (`PI_CODING_AGENT_SESSION_DIR`); a launch first moves the sessions the runtime filed by encoded cwd under
 its agent dir into their folders (`migrateSessionsIntoProjects`, never over an existing file).
+Since #551 a new thread's cwd — the directory its header records — is usually not the checkout but its
+own tree, `ENSO_HOME/projects/<id>/trees/<name>`, which the host mints before the runtime is built and
+records as an `enso-thread-tree` entry; the folder is still the project's (`treeProjectId` reads the id
+off a tree's path), a fork's tree is minted from the source's snapshot at the fork point, and
+`restoreThreadAt` puts a tree back to the snapshot an `enso-run-context` record names.
 `listSessions` goes through the runtime's own listing (`SessionManager.listAll`, once per project folder
 and once over the runtime's own session directories), never a directory scan of the files, newest first,
 and keeps only the sessions whose own directory — the one the runtime's

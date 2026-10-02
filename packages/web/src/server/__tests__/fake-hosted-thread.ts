@@ -33,6 +33,7 @@ import type {
   HostedThread,
   HostedThreadInspection,
   SystemPromptPreviewOutcome,
+  ThreadRestoreOutcome,
 } from '../../host/agent-host.ts'
 import type { BranchContext, BranchRequestDetail } from '../../host/branch-context.ts'
 import type { BranchStats } from '../../host/branch-stats.ts'
@@ -461,6 +462,8 @@ export interface FakeStoredThread {
   readonly parentThreadId?: string
   /** Its fork point (#435); assembled from the fields above, with no run context, when absent. */
   readonly forkPoint?: EnsoForkPoint
+  /** What restoring its files answers (#551) once the thread and entry are found; `no-tree` when absent. */
+  readonly restore?: ThreadRestoreOutcome
 }
 
 const FAKE_FRESH_MODE: EnsoPermissionModeState = { mode: 'default', available: ['default'] }
@@ -624,6 +627,15 @@ export function createFakeAgentHost(
       }
       const prefill = entry.parts.map((part) => (part.type === 'text' ? part.text : '')).join('')
       return Promise.resolve({ kind: 'forked', threadId: `${threadId}-fork`, prefill })
+    },
+    // The real host's lookups over the stored transcript; past them, the thread's scripted outcome.
+    restoreThreadAt: (threadId: string, entryId: string): Promise<ThreadRestoreOutcome> => {
+      const storedThread = served(threadId)
+      if (storedThread === undefined) return Promise.resolve({ kind: 'no-thread', reason: `no thread ${threadId}` })
+      if (!storedThread.transcript.some((candidate) => candidate.id === entryId)) {
+        return Promise.resolve({ kind: 'no-entry', reason: `no entry ${entryId}` })
+      }
+      return Promise.resolve(storedThread.restore ?? { kind: 'no-tree', reason: `thread ${threadId} has no tree` })
     },
   }
 }

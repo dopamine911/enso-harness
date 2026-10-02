@@ -24,8 +24,10 @@ export {
   ENSO_CONFIG_FILENAME,
   EnsoConfig,
   type EnsoConfigParseResult,
+  EnsoThreadTreeMode,
   mergeEnsoConfig,
   parseEnsoConfig,
+  threadTreeFor,
 } from './config.ts'
 export {
   EnsoDialogAnswer,
@@ -422,6 +424,7 @@ export {
   EnsoEventProvenance,
   EnsoForkReceipt,
   EnsoForkRequest,
+  EnsoRestoreRequest,
   EnsoInterruptedTail,
   EnsoStoredThread,
   EnsoThreadEvent,
@@ -456,6 +459,17 @@ export {
 } from './thread-runtime.ts'
 export { EnsoPromptStats, EnsoThreadStats, EnsoToolCallStats, EnsoTurnStats } from './thread-stats.ts'
 export { type EnsoTimelineEntry, threadTimeline, timelineJoinKeys } from './thread-timeline.ts'
+export {
+  ENSO_THREAD_TREE_ENTRY,
+  ENSO_TREE_RESTORED_ENTRY,
+  EnsoThreadTreeKind,
+  EnsoThreadTreeRecord,
+  EnsoTreeRestored,
+  readEnsoThreadTree,
+  readEnsoTreeRestored,
+  type ThreadTreeKind,
+  type ThreadTreeRecord,
+} from './thread-tree-record.ts'
 export { summarizeToolInput } from './tool-input.ts'
 export {
   ENSO_TOOL_RESULT_KEY,
