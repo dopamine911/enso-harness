@@ -52,12 +52,15 @@ const DIALOG: MarkTarget = { role: 'dialog', name: 'Settings' }
 export const SETTINGS: FeatureSpec = {
   id: 'settings',
   title: 'Settings',
-  landingTagline: 'themes · fonts · permissions',
+  landingTagline: 'themes · fonts · permissions · trees',
   shows: [
     `**Appearance**: the look of the page, a colour theme and a font for each of ${ROLE_COUNT} roles. ${DEFAULT.label} is the default theme, and the others include ${listed(OTHER_FAMILIES)}, in dark and light variants.`,
     "**Permissions**: the rules pi runs under, from `ENSO_HOME/permissions.json` in the permission engine's own format, in the order the engine reads them. You can view them as written or as each mode runs them, change a rule's pattern or decision, move or remove it, add rules and drafted groups of rules, save, and reset to Enso's policy. **Try a command** asks the open thread's engine what it would decide.",
+    '**Trees**: every thread tree with what it takes on disk, and a Delete for each. See [Thread trees](./thread-trees.md).',
   ],
-  opens: ['{steps}, the sliders icon at the right of the header. **Permissions** is the second tab.'],
+  opens: [
+    '{steps}, the sliders icon at the right of the header. **Permissions** is the second tab, **Trees** the third.',
+  ],
   shots: [
     {
       image: 'settings',

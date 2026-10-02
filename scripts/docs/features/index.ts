@@ -14,6 +14,7 @@ import { SETTINGS } from './settings.ts'
 import type { FeatureSpec } from './spec.ts'
 import { STATS } from './stats.ts'
 import { TERMINAL } from './terminal.ts'
+import { THREAD_TREES } from './thread-trees.ts'
 import { WEB_ACCESS } from './web-access.ts'
 
 /**
@@ -37,6 +38,8 @@ export const FEATURE_SPECS: readonly FeatureSpec[] = [
   QUESTIONS_AND_DIALOGS,
   SESSIONS_AND_PROJECTS,
   TERMINAL,
+  // Before LINEAGE: it confirms nothing, so the thread is as it was; LINEAGE's fork would add a second tree.
+  THREAD_TREES,
   // ⚠ LAST: its first shot forks the thread, adding a second thread to the rail, and leaves the page on the fork.
   LINEAGE,
 ]
