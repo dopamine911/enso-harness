@@ -1,11 +1,11 @@
 import { spawnSync } from 'node:child_process'
 import { appendFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
-import { createConnection } from 'node:net'
 import { join } from 'node:path'
 import { type BrowserContext, chromium, type Locator, type Page } from '@playwright/test'
 import type { Subprocess } from 'bun'
 import { redactJudgeText } from '../../packages/core/src/judge.ts'
 import { knownSecretValues } from '../../packages/core/src/secrets.ts'
+import { isListening } from '../loopback.ts'
 import {
   type ArenaAction,
   type ArenaTarget,
@@ -73,17 +73,6 @@ export interface ArenaControl {
 /** The file a live run's control address is in, inside its run directory. */
 export function controlFilePath(runDirectory: string): string {
   return join(runDirectory, 'control.json')
-}
-
-function isListening(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const socket = createConnection({ host: '127.0.0.1', port })
-    socket.once('connect', () => {
-      socket.end()
-      resolve(true)
-    })
-    socket.once('error', () => resolve(false))
-  })
 }
 
 async function waitForWeb(timeoutMs: number): Promise<boolean> {

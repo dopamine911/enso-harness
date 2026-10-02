@@ -84,75 +84,76 @@ function parseGotoPath(path: string): string | undefined {
   return path
 }
 
+const fail = (error: string): ArenaActionParse => ({ ok: false, error })
+const accept = (action: ArenaAction): ArenaActionParse => ({ ok: true, action })
+
+/** The request's target, handed to `build`, or why it is not one. */
+function withTarget(request: Fields, build: (target: ArenaTarget) => ArenaAction): ArenaActionParse {
+  const target = parseTarget(request.target)
+  return typeof target === 'string' ? fail(target) : accept(build(target))
+}
+
+function parseNote(request: Fields): ArenaActionParse {
+  const note = NOTE_KINDS.find((kind) => kind === request.note)
+  const trying = text(request, 'trying')
+  const happened = text(request, 'happened')
+  if (note === undefined || trying === undefined || happened === undefined) {
+    return fail(
+      `note takes "note" (${NOTE_KINDS.join(' | ')}), "trying" and "happened", and "wanted" if you can say it`,
+    )
+  }
+  const wanted = text(request, 'wanted')
+  return accept({ action: 'note', note, trying, happened, ...(wanted === undefined ? {} : { wanted }) })
+}
+
+/** One parser per action name: each checks its own fields. */
+const ACTION_PARSERS: Readonly<Record<string, (request: Fields) => ArenaActionParse>> = {
+  goto: (request) => {
+    const path = parseGotoPath(text(request, 'path') ?? '')
+    return path === undefined
+      ? fail('goto takes a path on the web origin ("/?thread=…"), not a URL and not /api')
+      : accept({ action: 'goto', path })
+  },
+  click: (request) => withTarget(request, (target) => ({ action: 'click', target })),
+  hover: (request) => withTarget(request, (target) => ({ action: 'hover', target })),
+  fill: (request) => {
+    const typed = request.text
+    if (typeof typed !== 'string') return fail('fill takes "text"')
+    return withTarget(request, (target) => ({ action: 'fill', target, text: typed }))
+  },
+  select: (request) => {
+    const option = text(request, 'option')
+    if (option === undefined) return fail('select takes "option"')
+    return withTarget(request, (target) => ({ action: 'select', target, option }))
+  },
+  press: (request) => {
+    const key = text(request, 'key')
+    if (key === undefined) return fail('press takes "key" (Enter, Escape, Control+K, …)')
+    if (request.target === undefined) return accept({ action: 'press', key })
+    return withTarget(request, (target) => ({ action: 'press', key, target }))
+  },
+  wait: (request) => {
+    const ms = request.ms
+    if (typeof ms !== 'number' || !Number.isFinite(ms) || ms < 0) return fail('wait takes "ms"')
+    return accept({ action: 'wait', ms: Math.min(ms, LONGEST_WAIT_MS) })
+  },
+  note: parseNote,
+  stop: (request) => {
+    const reason = text(request, 'reason')
+    return accept({ action: 'stop', ...(reason === undefined ? {} : { reason }) })
+  },
+  read: () => accept({ action: 'read' }),
+  screenshot: () => accept({ action: 'screenshot' }),
+  back: () => accept({ action: 'back' }),
+  reload: () => accept({ action: 'reload' }),
+  'restart-enso': () => accept({ action: 'restart-enso' }),
+}
+
 /** The ARENA action a request names, checked field by field. Unknown fields are ignored. */
 export function parseArenaAction(request: unknown): ArenaActionParse {
-  if (!isFields(request)) return { ok: false, error: 'an action is a JSON object with an "action" field' }
-  const fail = (error: string): ArenaActionParse => ({ ok: false, error })
-  const withTarget = (build: (target: ArenaTarget) => ArenaAction): ArenaActionParse => {
-    const target = parseTarget(request.target)
-    return typeof target === 'string' ? fail(target) : { ok: true, action: build(target) }
-  }
-  switch (request.action) {
-    case 'goto': {
-      const path = parseGotoPath(text(request, 'path') ?? '')
-      return path === undefined
-        ? fail('goto takes a path on the web origin ("/?thread=…"), not a URL and not /api')
-        : { ok: true, action: { action: 'goto', path } }
-    }
-    case 'click':
-    case 'hover':
-      return withTarget((target) => ({ action: request.action as 'click' | 'hover', target }))
-    case 'fill': {
-      const typed = typeof request.text === 'string' ? request.text : undefined
-      if (typed === undefined) return fail('fill takes "text"')
-      return withTarget((target) => ({ action: 'fill', target, text: typed }))
-    }
-    case 'select': {
-      const option = text(request, 'option')
-      if (option === undefined) return fail('select takes "option"')
-      return withTarget((target) => ({ action: 'select', target, option }))
-    }
-    case 'press': {
-      const key = text(request, 'key')
-      if (key === undefined) return fail('press takes "key" (Enter, Escape, Control+K, …)')
-      if (request.target === undefined) return { ok: true, action: { action: 'press', key } }
-      return withTarget((target) => ({ action: 'press', key, target }))
-    }
-    case 'wait': {
-      const ms = request.ms
-      if (typeof ms !== 'number' || !Number.isFinite(ms) || ms < 0) return fail('wait takes "ms"')
-      return { ok: true, action: { action: 'wait', ms: Math.min(ms, LONGEST_WAIT_MS) } }
-    }
-    case 'note': {
-      const note = NOTE_KINDS.find((kind) => kind === request.note)
-      const trying = text(request, 'trying')
-      const happened = text(request, 'happened')
-      if (note === undefined || trying === undefined || happened === undefined) {
-        return fail(
-          `note takes "note" (${NOTE_KINDS.join(' | ')}), "trying" and "happened", and "wanted" if you can say it`,
-        )
-      }
-      const wanted = text(request, 'wanted')
-      return {
-        ok: true,
-        action: { action: 'note', note, trying, happened, ...(wanted === undefined ? {} : { wanted }) },
-      }
-    }
-    case 'stop': {
-      const reason = text(request, 'reason')
-      return { ok: true, action: { action: 'stop', ...(reason === undefined ? {} : { reason }) } }
-    }
-    case 'read':
-    case 'screenshot':
-    case 'back':
-    case 'reload':
-    case 'restart-enso':
-      return { ok: true, action: { action: request.action } }
-    default:
-      return fail(
-        'unknown action: goto, click, fill, press, hover, select, read, screenshot, wait, back, reload, note, restart-enso, stop',
-      )
-  }
+  if (!isFields(request)) return fail('an action is a JSON object with an "action" field')
+  const parser = typeof request.action === 'string' ? ACTION_PARSERS[request.action] : undefined
+  return parser === undefined ? fail(`unknown action: ${Object.keys(ACTION_PARSERS).join(', ')}`) : parser(request)
 }
 
 /**

@@ -17,13 +17,17 @@ export type ArenaEvidence =
   | { readonly kind: string; readonly status: 'collected'; readonly path: string }
   | { readonly kind: string; readonly status: 'missing'; readonly reason: string }
 
-export interface ArenaShotIndexEntry {
+/** When a manifest row happened, and in which thread: the timeline's own stamp, carried over. */
+interface ArenaStamped {
   readonly at: string
   readonly elapsedMs: number
+  readonly threadId?: string
+}
+
+export interface ArenaShotIndexEntry extends ArenaStamped {
   readonly cause: ArenaShotCause
   readonly path: string
   readonly url?: string
-  readonly threadId?: string
 }
 
 export interface ArenaThreadSpan {
@@ -35,13 +39,10 @@ export interface ArenaThreadSpan {
   readonly actions: number
 }
 
-export interface ArenaNote {
-  readonly at: string
-  readonly elapsedMs: number
+export interface ArenaNote extends ArenaStamped {
   readonly trying: string
   readonly happened: string
   readonly wanted?: string
-  readonly threadId?: string
 }
 
 export interface ArenaManifest {
