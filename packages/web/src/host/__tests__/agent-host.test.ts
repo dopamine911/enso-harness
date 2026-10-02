@@ -67,10 +67,13 @@ import {
   type AgentHost,
   createAgentHost,
   type HostedThread,
+  type HostedThreadInspection,
   MODEL_WATCH_EXTENSION_PATH,
   SessionDirectoryRefused,
   seedMultiAccountConfig,
   stopRunSettlingDialogs,
+  ThreadDeleted,
+  type ThreadDeleteOutcome,
 } from '../agent-host.ts'
 import { LOST_TOOL_RESULT_TEXT, NOTHING_TO_CONTINUE } from '../continuation.ts'
 import { storedPermissionModeState } from '../permission-mode-adapter.ts'
@@ -1698,10 +1701,11 @@ function dirtyCheckout(): string {
   return project
 }
 
-/** A host that gives every new thread a worktree, serving `project` and its trees. */
+/** A host that gives every new thread a worktree — or `tree` — serving `project` and its trees. */
 function treeHost(
   project: string,
   extensionFactories: InlineExtension[] = [],
+  tree: 'worktree' | 'copy' | 'off' = 'worktree',
 ): { host: AgentHost; projectsDir: string } {
   // ⚠ The run's ENSO_HOME's projects folder (the preload's `<scratch>/enso-home`, which `tmpdir()`
   // names), not a folder of the test's own: the run-context extension files each run's snapshot in
@@ -1715,7 +1719,7 @@ function treeHost(
     permissionRulesPath,
     harnessPackageDir: harnessDir,
     projectsDir,
-    threadTree: () => 'worktree',
+    threadTree: () => tree,
     extensionFactories,
   })
   return { host, projectsDir }
@@ -2066,6 +2070,245 @@ test("⚠ a fork's tree is the parent's at the fork point; a restore brings a tu
   await runPrompt(plain, 'hello')
   const plainUser = plain.inspect().entries.find((entry) => entry.kind === 'message' && entry.role === 'user')?.id ?? ''
   expect((await plainHost.restoreThreadAt(plain.inspect().sessionId, plainUser)).kind).toBe('no-tree')
+})
+
+/** The id of the user message that says `text`, on `entries`. */
+function userEntryOf(entries: HostedThreadInspection['entries'], text: string): string {
+  const found = entries.find(
+    (entry) =>
+      entry.kind === 'message' &&
+      entry.role === 'user' &&
+      entry.parts.some((part) => part.type === 'text' && part.text === text),
+  )
+  if (found === undefined) throw new Error(`no user entry "${text}"`)
+  return found.id
+}
+
+/** A `retire` for a thread the test has already disposed: the host's own suite drives no registry. */
+const NOTHING_LIVE = (): boolean => true
+
+/** A forced delete confirming the work the preview showed, as the dialog's "Delete anyway" sends it (PR #572 review). */
+async function deleteAsPreviewed(host: AgentHost, threadId: string): Promise<ThreadDeleteOutcome> {
+  const read = await host.previewThreadDelete(threadId)
+  const work = read.kind === 'preview' ? read.preview.holdsWork : null
+  return host.deleteThread(threadId, {
+    force: true,
+    ...(work === null ? {} : { confirmedWork: sha256Of(work) }),
+    retire: NOTHING_LIVE,
+  })
+}
+
+// #571: a delete removes what the thread has on disk — its session file and its store, which
+// run-context mints for every thread, tree or not — and the id stays refused, so a page still
+// showing it cannot prompt a new thread into being under it.
+test('⚠ deleting a thread in its checkout removes its session file and its snapshot store, and its id is never built again; the checkout is untouched (#571)', async () => {
+  const project = dirtyCheckout()
+  const statusBefore = fixtureGit(project, 'status', '--porcelain')
+  const core = createFauxCore()
+  core.setResponses([faux.fauxAssistantMessage('one')])
+  const { host, projectsDir } = treeHost(project, [fauxModelExtension(core)], 'off')
+  new ProjectTrustStore(agentDir).set(project, true)
+  const threadId = crypto.randomUUID()
+  const hosted = await host.createSession(threadId, () => project)
+  await runPrompt(hosted, 'first')
+  const file = hosted.inspect().sessionFile ?? ''
+  const store = join(projectSnapshotsDir(projectsDir, projectIdOf(project)), threadId)
+  expect(existsSync(file) && existsSync(join(store, 'HEAD'))).toBe(true)
+  // The preview (#571): a thread in its checkout takes no tree with it, and nothing leans on its store.
+  expect(await host.previewThreadDelete(threadId)).toEqual({
+    kind: 'preview',
+    preview: { tree: null, holdsWork: null, keptFor: [] },
+  })
+
+  let retired = 0
+  const retire = (): boolean => {
+    retired += 1
+    hosted.runtime.dispose()
+    return true
+  }
+  expect(await host.deleteThread(threadId, { force: false, retire })).toEqual({ kind: 'deleted' })
+  expect(retired).toBe(1)
+  expect(existsSync(file) || existsSync(store)).toBe(false)
+  expect((await host.listSessions()).some((stored) => stored.id === threadId)).toBe(false)
+  expect(await host.readStoredThread(threadId)).toBeUndefined()
+  await expect(host.createSession(threadId, () => project)).rejects.toBeInstanceOf(ThreadDeleted)
+  expect((await host.deleteThread(threadId, { force: false, retire: NOTHING_LIVE })).kind).toBe('no-thread')
+  expect(fixtureGit(project, 'status', '--porcelain')).toBe(statusBefore)
+})
+
+// PR #572 review: the id was claimed only after an await, so a second delete from another tab ran
+// the whole delete again beside the first, and the first one's `finally` released the claim early.
+test('two deletes of one thread at once: one deletes it, the other is refused as busy (#571)', async () => {
+  const project = dirtyCheckout()
+  const core = createFauxCore()
+  core.setResponses([faux.fauxAssistantMessage('one')])
+  const { host } = treeHost(project, [fauxModelExtension(core)], 'off')
+  new ProjectTrustStore(agentDir).set(project, true)
+  const threadId = crypto.randomUUID()
+  const hosted = await host.createSession(threadId, () => project)
+  await runPrompt(hosted, 'first')
+  hosted.runtime.dispose()
+  const outcomes = await Promise.all([
+    host.deleteThread(threadId, { force: false, retire: NOTHING_LIVE }),
+    host.deleteThread(threadId, { force: false, retire: NOTHING_LIVE }),
+  ])
+  expect(outcomes.map((outcome) => outcome.kind).toSorted()).toEqual(['busy', 'deleted'])
+})
+
+// PR #572 review: the tombstone was checked only before a build's awaits, so a build already under
+// way finished after the delete and came back live — the registry's `retire` cannot see a build —
+// and its next prompt wrote the deleted session file again. A session the registry never held
+// (here: one the test keeps) must not run on a deleted id either.
+test('a build under way when its thread is deleted is refused when it finishes, and a session still held admits no prompt (#571)', async () => {
+  const project = dirtyCheckout()
+  const core = createFauxCore()
+  core.setResponses([faux.fauxAssistantMessage('one'), faux.fauxAssistantMessage('two')])
+  const building = Promise.withResolvers<void>()
+  const release = Promise.withResolvers<void>()
+  let holdNext = false
+  const hold: InlineExtension = {
+    name: 'enso-host-hold-a-build',
+    factory: (pi: ExtensionAPI) => {
+      pi.on('session_start', async () => {
+        if (!holdNext) return
+        holdNext = false
+        building.resolve()
+        await release.promise
+      })
+    },
+  }
+  const { host } = treeHost(project, [fauxModelExtension(core), hold], 'off')
+  new ProjectTrustStore(agentDir).set(project, true)
+  const threadId = crypto.randomUUID()
+  const held = await host.createSession(threadId, () => project)
+  await runPrompt(held, 'first')
+  const file = held.inspect().sessionFile ?? ''
+
+  holdNext = true
+  const rebuilt = host.createSession(threadId, () => project)
+  await building.promise
+  expect(await host.deleteThread(threadId, { force: false, retire: NOTHING_LIVE })).toEqual({ kind: 'deleted' })
+  release.resolve()
+  await expect(rebuilt).rejects.toBeInstanceOf(ThreadDeleted)
+
+  const refused = Promise.withResolvers<string>()
+  held.runtime.prompt({ message: 'after the delete' }, { onAccepted: () => undefined, onRejected: refused.resolve })
+  expect(await refused.promise).toContain('deleted')
+  held.runtime.dispose()
+  expect(existsSync(file)).toBe(false)
+})
+
+test('⚠ deleting a thread on its worktree: one holding work is refused, naming it, with nothing removed and the thread not retired; forced, the worktree, its branch, its store and its session go, and the checkout is untouched (#571)', async () => {
+  const project = dirtyCheckout()
+  const statusBefore = fixtureGit(project, 'status', '--porcelain')
+  const core = createFauxCore()
+  core.setResponses([faux.fauxAssistantMessage('one')])
+  const { host, projectsDir } = treeHost(project, [fauxModelExtension(core)])
+  new ProjectTrustStore(agentDir).set(project, true)
+  const threadId = crypto.randomUUID()
+  const hosted = await host.createSession(threadId, () => project)
+  await runPrompt(hosted, 'first')
+  const tree = hosted.inspect().cwd
+  const file = hosted.inspect().sessionFile ?? ''
+  const store = join(projectSnapshotsDir(projectsDir, projectIdOf(project)), threadId)
+  writeFileSync(join(tree, 'work.md'), 'not yet anywhere\n')
+
+  let retired = false
+  const refused = await host.deleteThread(threadId, {
+    force: false,
+    retire: () => {
+      retired = true
+      return true
+    },
+  })
+  expect(refused.kind).toBe('holds-work')
+  expect(refused.kind === 'deleted' ? '' : refused.reason).toContain('work.md')
+  expect(retired).toBe(false)
+  expect([existsSync(tree), existsSync(file), existsSync(join(store, 'HEAD'))]).toEqual([true, true, true])
+
+  // PR #572 review: force takes the work the user was SHOWN, and nothing more. Forced without
+  // naming it, or naming a list the tree has since outgrown, is refused with the list as it is now.
+  const reasonOf = (outcome: Awaited<ReturnType<AgentHost['deleteThread']>>): string =>
+    outcome.kind === 'deleted' ? '' : outcome.reason
+  const shown = reasonOf(refused)
+  expect((await host.deleteThread(threadId, { force: true, retire: NOTHING_LIVE })).kind).toBe('holds-work')
+  writeFileSync(join(tree, 'more.md'), 'written after the list was shown\n')
+  const outgrown = await host.deleteThread(threadId, {
+    force: true,
+    confirmedWork: sha256Of(shown),
+    retire: NOTHING_LIVE,
+  })
+  expect(outgrown.kind).toBe('holds-work')
+  expect(reasonOf(outgrown)).toContain('more.md')
+  expect(existsSync(join(tree, 'more.md')) && existsSync(file)).toBe(true)
+
+  const forced = await host.deleteThread(threadId, {
+    force: true,
+    confirmedWork: sha256Of(reasonOf(outgrown)),
+    retire: () => {
+      hosted.runtime.dispose()
+      return true
+    },
+  })
+  expect(forced).toEqual({ kind: 'deleted' })
+  expect(existsSync(tree) || existsSync(store) || existsSync(file)).toBe(false)
+  expect(fixtureGit(project, 'worktree', 'list')).not.toContain(tree)
+  expect(fixtureGit(project, 'branch', '--list', `enso/${threadId}`)).toBe('')
+  expect(fixtureGit(project, 'status', '--porcelain')).toBe(statusBefore)
+})
+
+// #571 decision 2: a fork's store names its parent's objects, and the fork's turns before the fork
+// point were snapshotted into the PARENT's store — so the parent's store outlives the parent.
+test("⚠ deleting a forked parent keeps its store for the fork — the fork still restores to a turn the parent took — and deleting the fork then sweeps the parent's store too (#571)", async () => {
+  const project = dirtyCheckout()
+  const core = createFauxCore()
+  core.setResponses(Array.from({ length: 3 }, (_, at) => faux.fauxAssistantMessage(`reply ${at + 1}`)))
+  const { host, projectsDir } = treeHost(project, [fauxModelExtension(core)])
+  new ProjectTrustStore(agentDir).set(project, true)
+  const parentId = crypto.randomUUID()
+  const parent = await host.createSession(parentId, () => project)
+  await runPrompt(parent, 'first')
+  const parentTree = parent.inspect().cwd
+  writeFileSync(join(parentTree, 'a.txt'), 'agent edit\n')
+  await runPrompt(parent, 'second')
+  const atSecond = userEntryOf(parent.inspect().entries, 'second')
+  parent.runtime.dispose()
+  const forked = await host.forkThread(parentId, atSecond)
+  if (forked.kind !== 'forked') throw new Error(`the fork was refused: ${forked.reason}`)
+  const fork = await host.createSession(forked.threadId, () => project)
+  const snapshots = projectSnapshotsDir(projectsDir, projectIdOf(project))
+
+  // Before deleting, the preview says what goes and what stays: the tree with its branch, the work
+  // in it, and the fork its snapshots are kept for — deleting nothing.
+  expect(await host.previewThreadDelete(parentId)).toEqual({
+    kind: 'preview',
+    preview: {
+      tree: { kind: 'worktree', path: parentTree, branch: `enso/${parentId}` },
+      holdsWork: expect.stringContaining('a.txt'),
+      keptFor: [{ threadId: forked.threadId, deleted: false }],
+    },
+  })
+  expect(existsSync(parentTree) && existsSync(join(snapshots, parentId, 'HEAD'))).toBe(true)
+  expect(await deleteAsPreviewed(host, parentId)).toEqual({ kind: 'deleted' })
+  expect(existsSync(parentTree)).toBe(false)
+  expect(existsSync(join(snapshots, parentId, 'HEAD'))).toBe(true)
+  // PR #572 review: the in-memory tombstone does not survive a restart, but the kept store does —
+  // a new thread under the parent's id would mint onto it and be swept from under itself later.
+  const restarted = treeHost(project, [fauxModelExtension(core)]).host
+  expect(restarted.threadDeleted(parentId)).toBe(true)
+  await expect(restarted.createSession(parentId, () => project)).rejects.toBeInstanceOf(ThreadDeleted)
+  // "first" was the parent's turn: its snapshot is in the parent's store, which the fork leans on.
+  const forkTree = fork.inspect().cwd
+  writeFileSync(join(forkTree, 'a.txt'), 'fork edit\n')
+  const restored = await host.restoreThreadAt(forked.threadId, userEntryOf(fork.inspect().entries, 'first'))
+  if (restored.kind !== 'restored') throw new Error(`restore refused: ${restored.reason}`)
+  expect(readFileSync(join(forkTree, 'a.txt'), 'utf8')).toBe('dirty\n')
+
+  fork.runtime.dispose()
+  expect(await deleteAsPreviewed(host, forked.threadId)).toEqual({ kind: 'deleted' })
+  expect(existsSync(join(snapshots, forked.threadId)) || existsSync(join(snapshots, parentId))).toBe(false)
+  // Once the store is swept, nothing of the id is left to collide with.
+  expect(restarted.threadDeleted(parentId)).toBe(false)
 })
 
 // #447: a fork copies its source's messages with their times, and pi's `modified` is the last

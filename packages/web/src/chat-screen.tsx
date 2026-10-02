@@ -12,6 +12,7 @@ import {
   type EnsoProject,
   type EnsoPromptImage,
   type EnsoProviderRefusal,
+  type EnsoStoredThread,
   type EnsoThreadHistory,
   isEnsoImageMimeType,
   type RuntimeCommand,
@@ -40,6 +41,7 @@ import {
   MessagesSquareIcon,
   PaperclipIcon,
   SquareIcon,
+  Trash2Icon,
 } from 'lucide-react'
 import { Tabs as TabsPrimitive } from 'radix-ui'
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
@@ -84,10 +86,12 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  DialogTrigger,
 } from './components/ui/dialog.tsx'
 import { Input } from './components/ui/input.tsx'
 import { Textarea } from './components/ui/textarea.tsx'
 import { routeEnsoCustomEvent } from './custom-event-router.ts'
+import { type DeletePreviewRead, deleteThread, readDeletePreview } from './delete-thread.ts'
 import { EnsoRing, EnsoSmile } from './enso-mark.tsx'
 import type { EnsoRendererMap } from './EnsoToolResult.tsx'
 import { createFixtureChat, fixtureFetch } from './fixture-conversation.ts'
@@ -120,6 +124,7 @@ import { ThreadStatsDrawer } from './thread-stats.tsx'
 import { ThreadStatusBar } from './thread-status.tsx'
 import {
   adoptThread,
+  dropThread,
   getThreadStores,
   markThreadActive,
   mintThread,
@@ -1897,7 +1902,8 @@ function useNarrowRail(): {
 
 /**
  * The page's header: the threads button (narrow screens), the mark, where you are — the active
- * thread's title, the same one the rail shows — then the view tabs, settings and `?debug`'s switch.
+ * thread's title, the same one the rail shows — and its Delete, then the view tabs, settings and
+ * `?debug`'s switch.
  */
 function AppHeader({
   active,
@@ -1907,6 +1913,8 @@ function AppHeader({
   onView,
   debugOpen,
   onToggleDebug,
+  onDeleted,
+  stored,
 }: {
   active: ThreadSummary | undefined
   activeThreadId: string | undefined
@@ -1915,7 +1923,19 @@ function AppHeader({
   onView: (view: ThreadView) => void
   debugOpen: boolean
   onToggleDebug: () => void
+  /** The server deleted this thread (#571): the page leaves it. */
+  onDeleted: (threadId: string) => void
+  /** The server's stored-thread listing (#95): a thread in it has a session file. */
+  stored: readonly EnsoStoredThread[]
 }): React.ReactNode {
+  // Delete is offered once the server holds the thread (#571): listed among its stored sessions (a
+  // fork, written by its route before any prompt), adopted from a stored branch, or prompted here
+  // (its title is that prompt's). A thread minted and never prompted is this page's only.
+  const onServer =
+    active !== undefined &&
+    (active.title !== undefined ||
+      getThreadStores(active.threadId).history.length > 0 ||
+      stored.some((row) => row.threadId === active.threadId))
   return (
     <header className="flex min-h-14 items-center gap-3 border-b bg-sidebar px-3 py-2">
       <RailToggle open={rail.open} onToggle={rail.toggle} />
@@ -1928,6 +1948,9 @@ function AppHeader({
           {active?.title ?? (activeThreadId === undefined ? 'resuming…' : UNTITLED_THREAD)}
         </span>
       </div>
+      {active !== undefined && onServer ? (
+        <DeleteThread key={active.threadId} threadId={active.threadId} onDeleted={onDeleted} stored={stored} />
+      ) : null}
       {isFixtureMode ? (
         <span className="rounded-full border px-2 py-0.5 text-xs text-muted-foreground">fixture</span>
       ) : null}
@@ -1945,6 +1968,142 @@ function AppHeader({
       ) : null}
     </header>
   )
+}
+
+/**
+ * The header's Delete (#571), behind a confirmation that says what goes before it is confirmed:
+ * opening it reads the server's delete preview (`delete-thread.ts`), and the words come from that —
+ * the conversation, the thread's tree by path and branch when it has one, and whether forks keep
+ * its snapshots (they stay while a live fork needs them). Delete waits for the preview. Work the
+ * tree holds is named up front, and the confirm is "Delete anyway" from the start; it confirms the
+ * text shown (its digest, `If-Match`), and work changed since is refused (422) with the new list,
+ * said as changed, for the next click to confirm. A preview that fails is said, and a plain Delete
+ * stays: the server's answer to it is authoritative. A tree that gained work after the preview is
+ * still refused (422) and named, offering "Delete anyway". Any
+ * other refusal closes the dialog and is said on the thread. ⚠ Once sent, a delete cannot be called
+ * back, so until the server answers nothing dismisses the dialog (PR #572 review): Cancel is
+ * disabled, the close button is gone, and Esc and the backdrop do nothing.
+ */
+function DeleteThread({
+  threadId,
+  onDeleted,
+  stored,
+}: {
+  threadId: string
+  onDeleted: (threadId: string) => void
+  /** The stored listing, for the rail titles of the forks that keep the thread's snapshots. */
+  stored: readonly EnsoStoredThread[]
+}): React.ReactNode {
+  const stores = getThreadStores(threadId)
+  const [open, setOpen] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  /** The server's preview while the dialog is open; `undefined` while it is read. */
+  const [preview, setPreview] = useState<DeletePreviewRead | undefined>(undefined)
+  /**
+   * The work the tree holds, as the server named it on a refused delete (422) — a race with the
+   * preview. `changed` when it answered a "Delete anyway": the work moved since it was shown.
+   */
+  const [refusedForWork, setRefusedForWork] = useState<{ reason: string; changed: boolean } | undefined>(undefined)
+  useEffect(() => {
+    if (!open) return
+    let current = true
+    void readDeletePreview(stores).then((read) => {
+      if (current) setPreview(read)
+    })
+    return (): void => {
+      current = false
+    }
+  }, [open, stores])
+  const changeOpen = (next: boolean): void => {
+    if (!next && deleting) return
+    setOpen(next)
+    if (!next) {
+      setRefusedForWork(undefined)
+      setPreview(undefined)
+    }
+  }
+  const previewed = preview?.kind === 'read' ? preview.preview : undefined
+  /** The holds-work text on screen, and what "Delete anyway" confirms (its digest is the `If-Match`). */
+  const holdsWork = refusedForWork?.reason ?? previewed?.holdsWork ?? undefined
+  const confirm = (confirmedWork: string | undefined): void => {
+    setDeleting(true)
+    void deleteThread(stores, confirmedWork).then((outcome) => {
+      setDeleting(false)
+      if (outcome.kind === 'holds-work') {
+        setRefusedForWork({ reason: outcome.reason, changed: confirmedWork !== undefined })
+        return
+      }
+      // `deleting` in `changeOpen` is this render's; the answer is in, so close directly.
+      setOpen(false)
+      setRefusedForWork(undefined)
+      setPreview(undefined)
+      if (outcome.kind === 'deleted') onDeleted(threadId)
+    })
+  }
+  return (
+    <Dialog open={open} onOpenChange={changeOpen}>
+      <DialogTrigger asChild>
+        <Button variant="ghost" size="icon-sm" aria-label="delete thread" title="delete this thread">
+          <Trash2Icon />
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-md" showCloseButton={!deleting}>
+        <DialogHeader>
+          <DialogTitle>Delete this thread?</DialogTitle>
+          <DialogDescription>{describeDelete(preview, stored)}</DialogDescription>
+        </DialogHeader>
+        {holdsWork === undefined ? null : (
+          <p role="alert" className="text-sm text-destructive">
+            {refusedForWork?.changed === true ? 'The tree changed since: ' : null}
+            {holdsWork}
+          </p>
+        )}
+        <DialogFooter>
+          <Button variant="ghost" disabled={deleting} onClick={(): void => changeOpen(false)}>
+            Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            disabled={deleting || preview === undefined}
+            onClick={(): void => confirm(holdsWork)}
+          >
+            {holdsWork === undefined ? 'Delete' : 'Delete anyway'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/** The confirmation's words: while the preview is read, why it could not be, or what goes and what forks keep. */
+function describeDelete(read: DeletePreviewRead | undefined, stored: readonly EnsoStoredThread[]): string {
+  if (read === undefined) return 'Checking what a delete would take…'
+  if (read.kind === 'failed')
+    return `This cannot be undone. The conversation is deleted. What else goes could not be read: ${read.reason}`
+  const { tree, keptFor } = read.preview
+  if (tree === null) return 'This cannot be undone. The conversation is deleted. Your checkout is not touched.'
+  const named = tree.branch === null ? tree.path : `${tree.path} (branch ${tree.branch})`
+  const goes = `This cannot be undone. The conversation is deleted, and so is the thread's tree at ${named}.`
+  const liveForks = keptFor.filter((fork) => !fork.deleted)
+  if (liveForks.length > 0) {
+    const forks = liveForks.map((fork) => forkName(fork.threadId, stored))
+    if (forks.length === 1)
+      return `${goes} Its snapshots stay while the fork ${forks[0]} uses them, and are deleted with it. The fork itself is not deleted.`
+    return `${goes} Its snapshots stay while ${forks.length} forks (${forks.join(', ')}) use them, and are deleted with the last of them. The forks themselves are not deleted.`
+  }
+  if (keptFor.length > 0) return `${goes} Its snapshots are kept for forks of already-deleted threads.`
+  return `${goes} Its snapshots go too.`
+}
+
+/** The longest fork title the dialog quotes whole; a longer one is cut, with an ellipsis. */
+const FORK_TITLE_LIMIT = 40
+
+/** A fork as the dialog names it: its rail title, quoted and bounded, else its short id. */
+function forkName(threadId: string, stored: readonly EnsoStoredThread[]): string {
+  const title = stored.find((row) => row.threadId === threadId)?.title?.trim()
+  if (title === undefined || title.length === 0) return threadId.slice(0, 8)
+  const bounded = title.length > FORK_TITLE_LIMIT ? `${title.slice(0, FORK_TITLE_LIMIT - 1).trimEnd()}…` : title
+  return `“${bounded}”`
 }
 
 /** The header's threads button: on a narrow screen, the rail is a page of its own (#407). */
@@ -2127,6 +2286,27 @@ export function ChatScreen(): React.ReactNode {
     },
     [resume],
   )
+  // A deleted thread (#571) leaves the page; its pane goes, and the listing refreshes so the rail
+  // cannot offer it again. On screen still, it is left the way a failed resume leaves one: for a
+  // fresh thread in its project, written over its URL so back does not ask for the deleted id. ⚠
+  // Not on screen — the user moved while the server worked (PR #572 review) — nothing moves them:
+  // the answer is said on the thread they are on, and its history entry stays its own.
+  const leaveDeleted = useCallback(
+    (threadId: string): void => {
+      // Off screen while the server worked, its stores may already be gone: the follow budget drops
+      // idle threads. Only the one on screen is read, and that one the budget never drops.
+      const wasShown = activePane.current === threadId
+      const projectId = wasShown ? getThreadStores(threadId).projectId : undefined
+      // Dropped before the fresh one is minted, so the deleted thread is not what pushes another out of the budget.
+      dropThread(threadId)
+      const shown = wasShown ? mintPageThread(projectId).threadId : activePane.current
+      void storedThreads.refresh()
+      if (shown === undefined) return
+      if (wasShown) navigate(shown, 'replace')
+      getThreadStores(shown).notifications.push(`thread ${threadId} deleted`, 'info', 'run', ENSO_NOTICE_SOURCE)
+    },
+    [navigate],
+  )
   // Boot: the URL named a thread — adopt it. Once per page; the coordinator drops a stale answer.
   useEffect(() => {
     if (BOOT.kind === 'resume') resumeFrom(BOOT.threadId, 'pop', true)
@@ -2173,6 +2353,8 @@ export function ChatScreen(): React.ReactNode {
         onView={setView}
         debugOpen={debugOpen}
         onToggleDebug={() => setDebugOpen((open) => !open)}
+        onDeleted={leaveDeleted}
+        stored={stored.rows}
       />
       <div className="flex min-h-0 flex-1">
         <ThreadsRail

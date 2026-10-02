@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join, relative } from 'node:path'
+import { basename, dirname, join, relative } from 'node:path'
 import { openSnapshotStore, type SnapshotTaken } from '../snapshot-store.ts'
 import type { ThreadTreeKind, ThreadTreeRecord } from '../thread-tree-record.ts'
 import {
@@ -10,6 +10,7 @@ import {
   inventoryThreadTree,
   mintThreadTree,
   restoreThreadTree,
+  sweepOrphanedStores,
   treeKindFor,
 } from '../thread-tree.ts'
 
@@ -325,7 +326,10 @@ test('⚠ a dispose refuses a tree holding an untracked file or a commit no othe
 
   git(record.path, 'reset', '--quiet', '--hard', 'HEAD~1')
   await snapshotOf(store, record.path)
-  expect(await disposeThreadTree({ record, store, force: false, environment })).toEqual({ kind: 'disposed' })
+  expect(await disposeThreadTree({ record, store, force: false, environment })).toEqual({
+    kind: 'disposed',
+    store: { kind: 'removed' },
+  })
   expect(existsSync(record.path)).toBe(false)
   expect(git(project, 'worktree', 'list', '--porcelain')).not.toContain(record.path)
   expect(git(project, 'branch', '--list', 'enso/d')).toBe('')
@@ -337,13 +341,15 @@ test('⚠ a dispose refuses a tree holding an untracked file or a commit no othe
   git(dirty.path, 'commit', '--quiet', '-m', 'lost too')
   writeFileSync(join(dirty.path, 'README.md'), 'modified\n')
   const forced = await disposeThreadTree({ record: dirty, store: where.store('forced'), force: true, environment })
-  expect(forced).toEqual({ kind: 'disposed' })
+  expect(forced).toEqual({ kind: 'disposed', store: { kind: 'removed' } })
   expect(existsSync(dirty.path)).toBe(false)
   expect(git(project, 'branch', '--list', 'enso/forced')).toBe('')
   expect(existsSync(where.store('forced'))).toBe(false)
 })
 
-test("⚠ a parent whose store a fork leans on is refused even forced, naming the fork's store; once the fork is disposed the parent disposes; a copy's dispose names a new file", async () => {
+// #571: a parent's store holds the objects of every snapshot its forks were minted from (their
+// alternates name it). Deleting the parent must not break them: the store stays until they go.
+test("⚠ a parent a fork leans on disposes its tree but keeps its store, marked orphaned — the fork still restores to the parent's snapshot — and a sweep removes it once the fork is gone, never a live thread's store", async () => {
   const project = checkout()
   const where = home()
   const parent = await mintFromCheckout(project, where, 'parent', 'copy')
@@ -358,22 +364,86 @@ test("⚠ a parent whose store a fork leans on is refused even forced, naming th
       environment,
     }),
   )
-  const held = await disposeThreadTree({ record: parent, store: where.store('parent'), force: true, environment })
-  expect(held.kind === 'refused' ? held.inventory.dependents : []).toEqual([where.store('child')])
-  expect(held.kind === 'refused' ? held.reason : held.kind).toContain(where.store('child'))
-  expect(existsSync(parent.path)).toBe(true)
+  const live = await mintFromCheckout(project, where, 'live', 'copy')
+  expect(await disposeThreadTree({ record: parent, store: where.store('parent'), force: false, environment })).toEqual({
+    kind: 'disposed',
+    store: { kind: 'kept', dependents: [where.store('child')] },
+  })
+  expect(existsSync(parent.path)).toBe(false)
+  expect(existsSync(join(where.store('parent'), 'HEAD'))).toBe(true)
+  // Nothing depends on it yet only through the fork, which is still here: the sweep keeps it.
+  expect(sweepOrphanedStores(dirname(where.store('parent')))).toEqual([])
+
+  // The fork's base is the parent's snapshot, reachable only through the kept store.
+  writeFileSync(join(fork.path, 'src.ts'), 'export const one = 9\n')
+  const restored = await restoreThreadTree({
+    store: where.store('child'),
+    tree: fork.path,
+    hash: fork.base,
+    environment,
+  })
+  expect(restored.kind).toBe('restored')
+  expect(readFileSync(join(fork.path, 'src.ts'), 'utf8')).toBe('export const one = 1\n')
 
   writeFileSync(join(fork.path, 'new.md'), 'since the base\n')
   const unforced = await disposeThreadTree({ record: fork, store: where.store('child'), force: false, environment })
   expect(unforced.kind === 'refused' ? unforced.inventory.untracked : []).toEqual(['new.md'])
   expect(await disposeThreadTree({ record: fork, store: where.store('child'), force: true, environment })).toEqual({
     kind: 'disposed',
+    store: { kind: 'removed' },
   })
-  expect(existsSync(fork.path) || existsSync(where.store('child'))).toBe(false)
-  expect(await disposeThreadTree({ record: parent, store: where.store('parent'), force: false, environment })).toEqual({
+  expect(sweepOrphanedStores(dirname(where.store('parent')))).toEqual([where.store('parent')])
+  expect(existsSync(where.store('parent'))).toBe(false)
+  expect(existsSync(join(where.store('live'), 'HEAD'))).toBe(true)
+  expect(await snapshotOf(where.store('live'), live.path)).toEqual({ hash: live.base, changed: false })
+})
+
+// PR #572 review: a store gone by hand while a fork's alternates still name it. Marking it kept
+// threw ENOENT on every attempt, so the thread could never be deleted.
+test('a store already gone, though a fork still names it, releases as removed, and its tree still disposes', async () => {
+  const project = checkout()
+  const where = home()
+  const parent = await mintFromCheckout(project, where, 'gone', 'copy')
+  minted(
+    await mintThreadTree({
+      project,
+      tree: where.tree('gone-fork'),
+      store: where.store('gone-fork'),
+      kind: 'copy',
+      branch: 'enso/gone-fork',
+      from: { kind: 'snapshot', hash: parent.base, revision: null, storeDirectory: where.store('gone') },
+      environment,
+    }),
+  )
+  rmSync(where.store('gone'), { recursive: true, force: true })
+  expect(await disposeThreadTree({ record: parent, store: where.store('gone'), force: true, environment })).toEqual({
     kind: 'disposed',
+    store: { kind: 'removed' },
   })
-  expect(existsSync(parent.path) || existsSync(where.store('parent'))).toBe(false)
+  expect(existsSync(parent.path) || existsSync(where.store('gone'))).toBe(false)
+})
+
+// PR #572 review: a delete that stopped after its worktree was removed (or a user's `git worktree
+// prune`) left a tree git no longer knows; `worktree remove` refused it, and the thread could never
+// be deleted. A tree neither on disk nor registered is already removed — a present one still refuses.
+test('a worktree already removed and unregistered disposes: its branch and store go; one still on disk but unregistered is refused', async () => {
+  const project = checkout()
+  const where = home()
+  const pruned = await mintFromCheckout(project, where, 'pruned')
+  rmSync(pruned.path, { recursive: true, force: true })
+  git(project, 'worktree', 'prune')
+  expect(await disposeThreadTree({ record: pruned, store: where.store('pruned'), force: false, environment })).toEqual({
+    kind: 'disposed',
+    store: { kind: 'removed' },
+  })
+  expect(git(project, 'branch', '--list', 'enso/pruned')).toBe('')
+  expect(existsSync(where.store('pruned'))).toBe(false)
+
+  const stray = await mintFromCheckout(project, where, 'stray')
+  rmSync(join(project, '.git', 'worktrees', basename(stray.path)), { recursive: true, force: true })
+  const refused = await disposeThreadTree({ record: stray, store: where.store('stray'), force: true, environment })
+  expect(refused.kind).toBe('refused')
+  expect(existsSync(stray.path) && existsSync(join(where.store('stray'), 'HEAD'))).toBe(true)
 })
 
 test('⚠ a file the checkout ignores only through `.git/info/exclude` is never minted into a tree, and a restore leaves it in place — in the worktree and in a copy forked from it', async () => {
@@ -490,7 +560,7 @@ test("⚠ a copy of a subdirectory project follows its repository's ignore rules
   ignoredSurvived(fork.path)
 })
 
-test('⚠ a chain of seven forks mints — the deepest tree holds every generation’s file, past git’s five-deep alternates limit — and a grandparent’s dispose is held by its grandchild', async () => {
+test('⚠ a chain of seven forks mints — the deepest tree holds every generation’s file, past git’s five-deep alternates limit — and deleted from the middle down, each kept store is swept only once no store names it', async () => {
   const project = mkdtempSync(join(tmpdir(), 'enso-tree-chain-'))
   writeFileSync(join(project, 'root.txt'), 'root\n')
   const where = home()
@@ -524,10 +594,22 @@ test('⚠ a chain of seven forks mints — the deepest tree holds every generati
     ...Object.fromEntries(Array.from({ length: 7 }, (_, at) => [`g${at}.txt`, `generation ${at}\n`])),
   })
 
-  const grandparent = records[5] as ThreadTreeRecord
-  const held = await disposeThreadTree({ record: grandparent, store: where.store('g5'), force: true, environment })
-  expect(held.kind === 'refused' ? held.inventory.dependents.toSorted() : []).toEqual([
-    where.store('g6'),
-    where.store('g7'),
-  ])
+  // #571: g5 and g6 are kept for the generations below them; once g7 goes, the sweep removes g6,
+  // then — a round later, nothing naming it any more — g5. The ancestors above are live threads'.
+  const disposed = async (generation: number): Promise<unknown> => {
+    const outcome = await disposeThreadTree({
+      record: records[generation] as ThreadTreeRecord,
+      store: where.store(`g${generation}`),
+      force: true,
+      environment,
+    })
+    return outcome.kind === 'disposed' ? outcome.store : outcome
+  }
+  expect(await disposed(5)).toEqual({ kind: 'kept', dependents: [where.store('g6'), where.store('g7')] })
+  expect(await disposed(6)).toEqual({ kind: 'kept', dependents: [where.store('g7')] })
+  expect(await disposed(7)).toEqual({ kind: 'removed' })
+  expect(sweepOrphanedStores(dirname(where.store('g5')))).toEqual([where.store('g6'), where.store('g5')])
+  expect(Array.from({ length: 5 }, (_, generation) => existsSync(join(where.store(`g${generation}`), 'HEAD')))).toEqual(
+    [true, true, true, true, true],
+  )
 })

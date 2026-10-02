@@ -6,6 +6,7 @@ import type {
   EnsoProject,
   EnsoSessionEval,
   EnsoStoredThread,
+  EnsoThreadDeletePreview,
   EnsoThreadEvents,
   EnsoThreadHistory,
   EnsoThreadInspection,
@@ -38,8 +39,14 @@ export interface ScriptedFetch {
   readonly hostCommands: unknown[]
   /** How many `POST …/abort` the server saw (#116). */
   readonly abortCount: () => number
+  /** Every `DELETE /api/threads/:id` the server saw (#571), as path and query: `?force=1` included. */
+  readonly deletes: string[]
+  /** Each delete's `If-Match` header (#571), in step with `deletes`; `null` when it carried none. */
+  readonly deleteTags: (string | null)[]
   /** Hold the next prompt's answer; returns the release. */
   readonly holdPrompt: () => () => void
+  /** Hold every later delete's answer (#571) — the server has it, and has not answered; returns the release. */
+  readonly holdDelete: () => () => void
 }
 
 export interface ScriptedFetchOptions {
@@ -93,6 +100,16 @@ export interface ScriptedFetchOptions {
   readonly git?: () => EnsoGitState
   /** What the Diff view's read answers (#452), asked per read; 404 when absent. */
   readonly changes?: () => { git: EnsoGitState; files: EnsoGitFileChange[]; truncated: boolean }
+  /**
+   * What each `DELETE /api/threads/:id` answers (#571), in turn; the last one repeats, and 204
+   * when absent. A 204 takes the thread out of `storedThreads`, as deleting its session file does.
+   */
+  readonly deleteAnswers?: readonly { readonly status: number; readonly reason?: string }[]
+  /**
+   * What `GET /api/threads/:id/delete-preview` answers (#571): a preview, or a refusal's status and
+   * words. Absent: a thread in the checkout, nothing held, no forks.
+   */
+  readonly deletePreview?: EnsoThreadDeletePreview | { readonly status: number; readonly reason: string }
 }
 
 /** The launch project a scripted server lists by default — the id the fixtures' stored threads carry. */
@@ -137,6 +154,9 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
   const dialogs: unknown[] = []
   const modeChanges: unknown[] = []
   const hostCommands: unknown[] = []
+  const deletes: string[] = []
+  const deleteTags: (string | null)[] = []
+  let storedThreads = options.storedThreads ?? []
   /** Question ids the server has TAKEN an answer for — the shape of the real route's 404. */
   const spentQuestions = new Set<string>()
   /** The follow: one SSE body per subscription; the latest one is where `frame` writes. */
@@ -150,11 +170,11 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
     })
     return new Response(body, { status: 200 })
   }
-  /** The page-level lists and the mode seed, by exact path. */
-  const literalReads: Readonly<Record<string, unknown>> = {
-    '/api/mode': mode,
-    '/api/stored-threads': options.storedThreads ?? [],
-    '/api/projects': options.projects ?? [SCRIPTED_LAUNCH_PROJECT],
+  /** The page-level lists and the mode seed, by exact path — read per request, as a delete changes the listing. */
+  const literalReads: Readonly<Record<string, () => unknown>> = {
+    '/api/mode': () => mode,
+    '/api/stored-threads': () => storedThreads,
+    '/api/projects': () => options.projects ?? [SCRIPTED_LAUNCH_PROJECT],
   }
   /** A thread analysis each view reads (#45, #441, #453), without its `threadId`; undefined is the 404. */
   const analysisReads: Readonly<Record<string, () => object | undefined>> = {
@@ -166,7 +186,7 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
   /** The page's own reads — mode seed, the rail's stored list, a resume click's history. Exact paths. */
   const pageRead = (path: string): Response | undefined => {
     const literal = literalReads[path]
-    if (literal !== undefined) return Response.json(literal)
+    if (literal !== undefined) return Response.json(literal())
     const history = /^\/api\/threads\/([^/]+)\/history$/.exec(path)
     if (history?.[1] !== undefined) {
       const found = options.histories?.[decodeURIComponent(history[1])]
@@ -235,9 +255,34 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
       return Promise.resolve(Response.json({ threadId: 't1', restored: options.queued ?? [] }))
     },
   }
+  /** The delete route answers only once this resolves — open by default; a test may hold it. */
+  let deleteGate = Promise.resolve()
+  /**
+   * `DELETE /api/threads/:id` (#571): the next scripted answer; a 204 drops the thread from the
+   * listing. Recorded as it arrives, answered once the gate opens.
+   */
+  const deleteThread = async (threadId: string, url: URL, init: RequestInit): Promise<Response> => {
+    const answers = options.deleteAnswers ?? []
+    const answer = answers[Math.min(deletes.length, answers.length - 1)] ?? { status: 204 }
+    deletes.push(`${url.pathname}${url.search}`)
+    deleteTags.push(new Headers(init.headers).get('If-Match'))
+    await deleteGate
+    if (answer.status !== 204) return new Response(answer.reason ?? 'no', { status: answer.status })
+    storedThreads = storedThreads.filter((stored) => stored.threadId !== threadId)
+    return new Response(null, { status: 204 })
+  }
   const fetchImpl = ((input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     // Relative URLs, as the browser issues them; the base only makes `pathname` parse.
-    const path = new URL(requestedUrl(input), 'http://localhost').pathname
+    const url = new URL(requestedUrl(input), 'http://localhost')
+    const path = url.pathname
+    const deleted = init?.method === 'DELETE' ? /^\/api\/threads\/([^/]+)$/.exec(path)?.[1] : undefined
+    if (deleted !== undefined && init !== undefined) return deleteThread(decodeURIComponent(deleted), url, init)
+    if (/^\/api\/threads\/[^/]+\/delete-preview$/.test(path)) {
+      const preview = options.deletePreview ?? { tree: null, holdsWork: null, keptFor: [] }
+      return Promise.resolve(
+        'status' in preview ? new Response(preview.reason, { status: preview.status }) : Response.json(preview),
+      )
+    }
     const action = threadAction(path)
     const respond = action === undefined ? undefined : threadActions[action]
     if (respond !== undefined) return respond(init)
@@ -252,9 +297,16 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
     modeChanges,
     hostCommands,
     abortCount: () => aborts,
+    deletes,
+    deleteTags,
     holdPrompt: () => {
       const gate = Promise.withResolvers<void>()
       promptGate = gate
+      return gate.resolve
+    },
+    holdDelete: () => {
+      const gate = Promise.withResolvers<void>()
+      deleteGate = gate.promise
       return gate.resolve
     },
   }

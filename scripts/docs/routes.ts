@@ -182,7 +182,12 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
   THREAD_HISTORY_ROUTE: threadRead(
     'respondWithThreadHistory',
     '200 `EnsoThreadHistory` JSON',
-    '400 malformed thread id; 403 untrusted origin, or a session stored in a directory that is no project here (named, #378); 404 no session — an id nobody has used, which a page starts; 500 handler failure',
+    '400 malformed thread id; 403 untrusted origin, or a session stored in a directory that is no project here (named, #378); 404 no session — an id nobody has used, which a page starts; 410 a deleted thread (#571) — this server deleted it, or its store is kept for its forks — never started again; 500 handler failure',
+  ),
+  THREAD_DELETE_PREVIEW_ROUTE: threadRead(
+    'respondWithDeletePreview → AgentHost.previewThreadDelete',
+    "200 `EnsoThreadDeletePreview` JSON — the tree a delete would remove (or null), the work in it a delete is refused for (the inventory's words), and the threads whose stores keep this one's snapshots (#571); nothing is deleted and no snapshot taken — the inventory's scratch staging leaves loose objects in the store",
+    '400 malformed thread id; 403 untrusted origin; 404 no session file in a served project; 410 a deleted thread; 500 handler failure',
   ),
   THREAD_FOLLOW_ROUTE: threadRead(
     'followThread',
@@ -261,6 +266,20 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
       "400 malformed id/body; 403 untrusted origin; 404 no such thread (before anything is built); 409 thread busy, the thread on no tree, no restore to undo, a later restore since (the `safety` is not the newest restore's), or the restore refused; 413 body too large; 500 handler failure",
     ],
     { builds: 'yes', factory: follows('export function undoLastRestore') },
+  ),
+  THREAD_DELETE_ROUTE: threadControl(
+    'respondToDelete → deleteThreadAt → AgentHost.deleteThread',
+    "path: `threadId`; query: `?force=1` or none — no other; header: `If-Match: \"<sha256 hex of the work's words>\"` with `?force=1`, the work the page showed (PR #572 review); no body. Deletes the thread (#571): its tree through the inventory, its snapshot store — kept, marked `enso-orphaned`, while a fork's store names its objects, and swept once none does — then every session file under the id. The live session is retired only once the inventory has passed, and the id is refused for the server's lifetime after",
+    [
+      '204 empty — the session file, the tree (worktree, its registration and `enso/<thread-id>` branch, or the copy) and the store are gone',
+      '400 malformed thread id, or an `If-Match` that is no strong sha256 tag; 403 untrusted origin; 404 no session file in a served project, or a query other than `?force=1`; 409 a run holds the thread, or a move, a restore or another delete does; 422 the tree holds work — untracked, modified or unsnapshotted files, or commits on its branch no other ref reaches — named in the text: deleted with `?force=1` only when `If-Match` confirms those very words, so work gained since is named again, never taken unseen; 500 a removal failed',
+    ],
+    {
+      builds: 'no',
+      path: '/api/threads/:threadId',
+      method: 'DELETE',
+      factory: { path: FOLLOW_PATH, declaration: 'export async function deleteThreadAt', reaches: 'storage' },
+    },
   ),
   THREAD_CONTINUE_ROUTE: threadControl(
     'respondToContinue → continueThread → ThreadRuntime.continueRun',
