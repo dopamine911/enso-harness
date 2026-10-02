@@ -175,6 +175,7 @@ const render = (props: Partial<Parameters<typeof ThreadStatusView>[0]>): string 
       counts={props.counts ?? { prompts: 0, toolCalls: 0, refused: 0, failed: 0 }}
       usage={'usage' in props ? props.usage : NO_USAGE}
       cwd={props.cwd}
+      projectTitle={props.projectTitle}
       refusal={props.refusal}
       refusalSource={props.refusalSource}
       risk={props.risk}
@@ -333,6 +334,15 @@ test('the project is the directory name with the full path in its title; absent 
   expect(rendered).toContain(
     'title="the tree pi reads and writes for this thread: /home/dev/work/zen-harness-foundation/"',
   )
+})
+
+// #551: a thread on its own tree runs in `…/trees/<thread-id>` — the directory's name is an id, not
+// the project. The page's project title names it; the tree's path stays on hover.
+test("on a thread's tree the bar names its project's title, with the tree's path in its title", () => {
+  const tree = '/home/dev/.enso/projects/0123456789abcdef/trees/a4d027f5-c6f9-4c39-a77e-bb75005e4da7'
+  const rendered = render({ cwd: tree, projectTitle: 'zen-harness-foundation' })
+  expect(rendered).toContain('project zen-harness-foundation<')
+  expect(rendered).toContain(`title="the tree pi reads and writes for this thread: ${tree}"`)
 })
 
 // #395, PR #399 review: the server's empty directory means a new thread's project was removed —

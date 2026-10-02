@@ -8,6 +8,8 @@ import {
   type EnsoFollowFrame,
   type EnsoForkReceipt,
   EnsoForkRequest,
+  EnsoRestoreRequest,
+  EnsoRestoreUndoRequest,
   EnsoHostCommandRun,
   EnsoIncidentResolution,
   EnsoPermissionModeChange,
@@ -252,6 +254,7 @@ export async function followThread(deps: FollowRouteDeps, threadId: string, resp
     model: mount.model,
     ...(mount.recordedModel === undefined ? {} : { recordedModel: mount.recordedModel }),
     cwd: mount.cwd,
+    tree: mount.tree,
     usage: mount.usage,
     messages: mount.messages,
     openDialogs: mount.openDialogs,
@@ -890,7 +893,12 @@ export type ForkRouteOutcome =
   | { readonly status: 400 | 404 | 409; readonly reason: string }
 
 /** The host's fork refusal → the status the route answers it with. */
-const FORK_REFUSAL_STATUS = { 'no-thread': 404, 'no-entry': 404, 'not-a-user-message': 400 } as const
+const FORK_REFUSAL_STATUS = {
+  'no-thread': 404,
+  'no-entry': 404,
+  'not-a-user-message': 400,
+  'tree-refused': 409,
+} as const
 
 /**
  * Fork a thread at one of its user messages (#433): a new thread whose session file names this
@@ -913,6 +921,92 @@ export async function forkThreadAt(
 /** The fork body, checked against its closed schema — `entryId`, nothing else. */
 export function readForkBody(raw: string): EnsoForkRequest {
   return readClosedBody(raw, EnsoForkRequest, 'fork', 'fork body needs a non-empty `entryId` and nothing else')
+}
+
+export type RestoreRouteOutcome =
+  | { readonly status: 200; readonly receipt: { readonly hash: string; readonly safety: string } }
+  | { readonly status: 400 | 404 | 409; readonly reason: string }
+
+/** The host's restore refusal → the status the route answers it with. */
+const RESTORE_REFUSAL_STATUS = {
+  'no-thread': 404,
+  'no-entry': 404,
+  'no-tree': 409,
+  'no-snapshot': 409,
+  'no-restore': 409,
+  superseded: 409,
+  refused: 409,
+} as const
+
+/**
+ * Run a restore of the thread's tree holding the thread (#551, PR #561 review): a run started
+ * while the files are put back would read a half-restored tree, and its snapshot would race the
+ * restore on the same store's index. So the thread is LEASED, as a run is, for the whole restore
+ * — refused 409 while one runs, or if one wins it meanwhile. An unknown thread is answered before
+ * the lease, which would otherwise build a NEW thread under the id.
+ */
+async function restoreUnderLease(
+  deps: ThreadReadDeps,
+  threadId: string,
+  action: string,
+  restore: () => ReturnType<ThreadReadDeps['host']['restoreThreadAt']>,
+): Promise<RestoreRouteOutcome> {
+  if (deps.threads.peek(threadId) === undefined && (await deps.host.storedThreadDirectory(threadId)) === undefined) {
+    return { status: 404, reason: `thread ${threadId} has no session in a project this server serves` }
+  }
+  const lease = await controlLease(deps.threads, threadId, action)
+  if ('reason' in lease) return lease
+  try {
+    const outcome = await restore()
+    if (outcome.kind !== 'restored') return { status: RESTORE_REFUSAL_STATUS[outcome.kind], reason: outcome.reason }
+    return { status: 200, receipt: { hash: outcome.hash, safety: outcome.safety } }
+  } finally {
+    lease.release()
+  }
+}
+
+/**
+ * Restore a thread's tree to the snapshot at one of its entries (#551): the current files are
+ * kept as a safety snapshot first, the conversation is untouched.
+ */
+export function restoreThreadAt(
+  deps: ThreadReadDeps,
+  threadId: string,
+  request: EnsoRestoreRequest,
+): Promise<RestoreRouteOutcome> {
+  return restoreUnderLease(deps, threadId, 'restore its files', () =>
+    deps.host.restoreThreadAt(threadId, request.entryId),
+  )
+}
+
+/**
+ * Undo the thread's last restore (#565): its tree back to that restore's safety snapshot — itself a
+ * restore, with its own safety, so a second undo puts the first restore back. The body names the
+ * safety the caller was promised; a later restore since is a 409 (PR #561 review).
+ */
+export function undoLastRestore(
+  deps: ThreadReadDeps,
+  threadId: string,
+  request: EnsoRestoreUndoRequest,
+): Promise<RestoreRouteOutcome> {
+  return restoreUnderLease(deps, threadId, 'undo its last restore', () =>
+    deps.host.undoLastRestore(threadId, request.safety),
+  )
+}
+
+/** The restore body, checked against its closed schema — `entryId`, nothing else. */
+export function readRestoreBody(raw: string): EnsoRestoreRequest {
+  return readClosedBody(raw, EnsoRestoreRequest, 'restore', 'restore body needs a non-empty `entryId` and nothing else')
+}
+
+/** The undo body, checked against its closed schema — `safety`, a commit hash, nothing else. */
+export function readRestoreUndoBody(raw: string): EnsoRestoreUndoRequest {
+  return readClosedBody(
+    raw,
+    EnsoRestoreUndoRequest,
+    'restore undo',
+    'undo body needs `safety`, the commit hash the restore kept, and nothing else',
+  )
 }
 
 export type AbortRouteOutcome = { readonly status: 200; readonly receipt: EnsoAbortReceipt } | Refusal<404 | 409>

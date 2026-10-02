@@ -165,6 +165,8 @@ export interface ThreadStatusViewProps {
   readonly usage?: EnsoSessionUsage | undefined
   /** The tree pi runs this thread in (#44); undefined until the follow's first snapshot. */
   readonly cwd?: string | undefined
+  /** The thread's project's title, when the page lists it — the bar's name for where the thread runs (#551). */
+  readonly projectTitle?: string | undefined
   /** A question from pi is open for this thread — said here too, since only the transcript shows it. */
   readonly questionWaiting?: boolean
   /** The provider's last refusal while no reply has got through since (#340) — its class word. */
@@ -227,8 +229,18 @@ function activityDotClass(activity: Activity): typeof DOT_DISCONNECTED | typeof 
   return DOT_IN_FLIGHT
 }
 
-/** Where the thread runs (#44): nothing before the first snapshot, and the server's `''` said as what it means. */
-function ProjectIndicator({ cwd }: { readonly cwd: string | undefined }): React.ReactNode {
+/**
+ * Where the thread runs (#44): nothing before the first snapshot, and the server's `''` said as what
+ * it means. Named by its project's title when the page knows it — since #551 the cwd is usually the
+ * thread's own tree, whose directory name is a thread id, not a name a reader knows the project by.
+ */
+function ProjectIndicator({
+  cwd,
+  projectTitle,
+}: {
+  readonly cwd: string | undefined
+  readonly projectTitle: string | undefined
+}): React.ReactNode {
   if (cwd === undefined) return null
   if (cwd === '') {
     // A new thread whose project was removed (#395): it will be built nowhere.
@@ -238,7 +250,11 @@ function ProjectIndicator({ cwd }: { readonly cwd: string | undefined }): React.
       </span>
     )
   }
-  return <span title={`the tree pi reads and writes for this thread: ${cwd}`}>project {projectName(cwd)}</span>
+  return (
+    <span title={`the tree pi reads and writes for this thread: ${cwd}`}>
+      project {projectTitle ?? projectName(cwd)}
+    </span>
+  )
 }
 
 /** The provider's refusal (#340), named for who refused (#387): `Anthropic: rate-limited`; nothing without one. */
@@ -345,6 +361,7 @@ export function ThreadStatusView({
   counts,
   usage,
   cwd,
+  projectTitle,
   questionWaiting,
   refusal,
   refusalSource,
@@ -395,7 +412,7 @@ export function ThreadStatusView({
           {counts.failed} failed
         </span>
       )}
-      <ProjectIndicator cwd={cwd} />
+      <ProjectIndicator cwd={cwd} projectTitle={projectTitle} />
       {git === undefined ? null : <GitIndicator outcome={git} />}
       {context === null ? null : (
         <span className="ml-auto">
@@ -415,6 +432,8 @@ export function ThreadStatusView({
 export interface ThreadStatusBarProps {
   readonly messages: ReadonlyArray<UIMessage>
   readonly generating: boolean
+  /** The thread's project's title as the page lists it (#551); the bar falls back to the cwd's name. */
+  readonly projectTitle?: string | undefined
 }
 
 /**
@@ -422,7 +441,7 @@ export interface ThreadStatusBarProps {
  * (the chat hook is bound inside chat-screen.tsx, and this module stays free of it), the
  * thread's usage store and its disconnected flag (#119) are read from context.
  */
-export function ThreadStatusBar({ messages, generating }: ThreadStatusBarProps): React.ReactNode {
+export function ThreadStatusBar({ messages, generating, projectTitle }: ThreadStatusBarProps): React.ReactNode {
   const stores = useThreadStores()
   const usage = useStore(stores.usage)
   const disconnected = useStore(stores.disconnected)
@@ -439,6 +458,7 @@ export function ThreadStatusBar({ messages, generating }: ThreadStatusBarProps):
       counts={countThread(messages, refusals)}
       usage={usage}
       cwd={cwd}
+      projectTitle={projectTitle}
       questionWaiting={questionWaiting}
       refusal={refusal?.refusalClass}
       refusalSource={refusal?.provider}

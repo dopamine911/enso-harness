@@ -77,6 +77,12 @@ export interface AgentHost {
    * built for either thread (#86).
    */
   forkThread(threadId: string, entryId: string): Promise<ThreadForkOutcome>
+  /** Restore the thread's tree to the snapshot recorded at or before `entryId` (#551); the conversation is unchanged. */
+  restoreThreadAt(threadId: string, entryId: string): Promise<ThreadRestoreOutcome>
+  /** Undo the thread's last restore (#565): its tree back to that restore's safety snapshot, itself recorded as a restore. */
+  undoLastRestore(threadId: string, safety: string): Promise<ThreadRestoreOutcome>
+  /** Whether a NEW thread in `project` gets a tree of its own (#551): a projects folder, and trees not `off` for it. */
+  mintsTreesIn(project: string): boolean
   /** What a fresh thread starts in — served before any run exists, so the header never guesses. */
   freshPermissionMode(): EnsoPermissionModeState
   /** A stored thread's state from its transcript alone: nothing is built to answer (#86, #95). */
@@ -91,11 +97,12 @@ export interface AgentHost {
    */
   catalogue(): Promise<RuntimeCommand[]>
   /**
-   * Whether a session built for `branch` in `cwd` would read the project's own configuration (#470):
-   * the decision a build makes first (`hostedProjectTrust`), asked without building — so the Start
-   * dialog lists a project's prompts for a thread nothing has built yet (#484's rule, #86).
+   * The project a session built for `branch` in `cwd` would answer to, and whether it would read
+   * that project's own configuration (#470): the decision a build makes first (`hostedProjectTrust`,
+   * keyed as the build keys it, #551), asked without building — so the Start dialog lists a
+   * project's prompts for a thread nothing has built yet (#484's rule, #86).
    */
-  projectTrusted(cwd: string, branch: readonly EnsoTranscriptEntry[]): boolean
+  projectTrust(cwd: string, branch: readonly EnsoTranscriptEntry[]): ProjectTrustState
 }
 ```
 
@@ -152,11 +159,12 @@ export interface HostedThread {
    */
   checkPermission(request: EnsoPermissionCheckRequest): EnsoPermissionVerdict | undefined
   /**
-   * Whether the session reads its project's own configuration NOW (#502): pi's `trust.json`, the
-   * thread's "Trust this thread" record, or the default — and true after a Trust answered in this
-   * session. What the project's own prompt library is gated on (#470).
+   * The project this session answers to, and whether it reads that project's own configuration NOW
+   * (#502): pi's `trust.json`, the thread's "Trust this thread" record, or the default — and true
+   * after a Trust answered in this session. What the project's own prompt library is read from and
+   * gated on (#470). ⚠ The PROJECT, not the cwd: a thread on a tree (#551) answers with its checkout.
    */
-  projectTrusted(): boolean
+  projectTrust(): ProjectTrustState
 }
 ```
 
@@ -342,6 +350,14 @@ export const EnsoInterruptedTail = Type.Union([
 create, a fork inherits its source's, and `bun run enso` hands the terminal runtime the same directory
 (`PI_CODING_AGENT_SESSION_DIR`); a launch first moves the sessions the runtime filed by encoded cwd under
 its agent dir into their folders (`migrateSessionsIntoProjects`, never over an existing file).
+Since #551 a new thread's cwd — the directory its header records — can be its own tree,
+`ENSO_HOME/projects/<id>/trees/<name>`, rather than the checkout. The host builds a new thread in
+the checkout and moves it onto its tree at its FIRST RUN: it mints the tree, writes the session — its
+`enso-thread-tree` record, a header naming the tree, everything chosen before — as the thread's file,
+and builds the runtime again on it (PR #561 review: a thread only built leaves nothing behind). The
+folder is still the project's (`treeProjectId` reads the id off a tree's path), a fork's tree is
+minted from the source's snapshot at the fork point, and `restoreThreadAt` puts a tree back to the
+snapshot an `enso-run-context` record names.
 `listSessions` goes through the runtime's own listing (`SessionManager.listAll`, once per project folder
 and once over the runtime's own session directories), never a directory scan of the files, newest first,
 and keeps only the sessions whose own directory — the one the runtime's

@@ -27,8 +27,10 @@ import {
   printHarnessDir,
   projectIdOf,
   projectSessionsDir,
+  projectTreesDir,
   RepoRootNotFoundError,
   realpathOrSelf,
+  treeProjectId,
   webPackageDir,
 } from '../paths.ts'
 
@@ -338,4 +340,19 @@ test('a header longer than one 4 KiB read (a fork naming a long parent path) is 
   const migration = migrateSessionsIntoProjects(agentDir, ensoProjectsDir(home))
   const target = projectSessionsDir(ensoProjectsDir(home), projectIdOf(project))
   expect(migration).toEqual({ moved: [join(target, basename(file))], kept: [], orphaned: [], unreadable: [] })
+})
+
+// ⚠ #551: the one way a thread's cwd becomes its project. A tree's path names its project's id;
+// nothing else under the projects folder does, and nothing outside it can.
+test("a thread tree's path — its root or anything under it — names its project's id; a project's sessions, the trees folder itself and any other path name none (#551)", () => {
+  const projectsDir = '/h/.enso/projects'
+  const id = '0123456789abcdef'
+  const tree = join(projectTreesDir(projectsDir, id), 'thread-1')
+  expect(treeProjectId(projectsDir, tree)).toBe(id)
+  expect(treeProjectId(projectsDir, join(tree, 'src', 'a.ts'))).toBe(id)
+  expect(treeProjectId(projectsDir, projectTreesDir(projectsDir, id))).toBeUndefined()
+  expect(treeProjectId(projectsDir, join(projectSessionsDir(projectsDir, id), 'x.jsonl'))).toBeUndefined()
+  expect(treeProjectId(projectsDir, join(projectsDir, 'not-an-id', 'trees', 't'))).toBeUndefined()
+  expect(treeProjectId(projectsDir, `/h/.enso/projects-elsewhere/${id}/trees/t`)).toBeUndefined()
+  expect(treeProjectId(projectsDir, '/srv/app')).toBeUndefined()
 })

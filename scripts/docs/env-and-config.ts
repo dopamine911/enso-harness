@@ -293,6 +293,17 @@ const CONFIG_FIELD_METADATA: readonly ConfigFieldMetadata[] = [
       contains: 'is not an absolute or ~/ path — fix ${configPath}',
     },
   },
+  {
+    field: 'threads',
+    required: 'no',
+    defaultWhenOmitted:
+      'Off: threads run in the checkout, with nothing to restore files to. Trees stay off by default until a thread\'s tree can be removed with it (#551, PR #561): each one adds a worktree registration and an `enso/<thread-id>` branch to the repository, and nothing removes them yet. `tree` sets every project\'s mode (`"worktree"` — a worktree when the project is a repository\'s top level, else a copy — `"copy"`, or `"off"`); `projects` maps a project path (absolute or `~/`, resolved to the canonical path) to its own mode, which beats `tree`. A tree holds no ignored file (`node_modules`, `.env`), so a build may need its install step first. User-only: a project\'s `threads` is ignored, and said.',
+    reader: '`packages/core/src/config.ts#threadTreeFor`, from `packages/web/src/server/dev.ts`',
+    check: {
+      file: 'packages/core/src/config.ts',
+      contains: "return own ?? config.threads?.tree ?? 'off'",
+    },
+  },
   webSearchField('', '`{}`; current-model routing with no Tavily domain filters.', 'parsed.config.webSearch ?? {}'),
   webSearchField(
     '.backend',
@@ -438,9 +449,9 @@ const RUNTIME_PATH_METADATA: readonly RuntimePathMetadata[] = [
     helper: 'ensoProjectsDir',
     path: 'ENSO_HOME/projects',
     writer:
-      'One folder per project, named by `projectIdOf` (sixteen hex digits of the real path’s SHA-256; `projects.json` is the only id↔path map). Under it, `sessions/` holds the project’s thread logs — pi’s session files (#552): the web host and `bun run enso` both file there (`PI_CODING_AGENT_SESSION_DIR`), and a launch first moves the sessions pi filed by encoded cwd under the agent dir into their folders, never over an existing file. `snapshots/<thread-id>` is one thread’s snapshot store (#551): a bare repository the `run-context` extension writes at every run start through `@enso/core/snapshot-store` — the tree’s tracked set and unignored untracked files, never a force-add, with `objects/info/alternates` to the checkout’s objects so a base snapshot stores no blob the checkout holds. Reserved beside them: `trees/` (#551 slice 2).',
+      'One folder per project, named by `projectIdOf` (sixteen hex digits of the real path’s SHA-256; `projects.json` is the only id↔path map). Under it, `sessions/` holds the project’s thread logs — pi’s session files (#552): the web host and `bun run enso` both file there (`PI_CODING_AGENT_SESSION_DIR`), and a launch first moves the sessions pi filed by encoded cwd under the agent dir into their folders, never over an existing file. `snapshots/<thread-id>` is one thread’s snapshot store (#551): a bare repository the `run-context` extension writes at every run start through `@enso/core/snapshot-store` — the tree’s tracked set and unignored untracked files, never a force-add, with `objects/info/alternates` to the checkout’s objects so a base snapshot stores no blob the checkout holds (a fork’s store also to its parent’s). `trees/<name>` is one thread’s tree, its cwd (#551), where trees are on: a worktree on `enso/<thread-id>` or a copy, minted by the web host at a new thread’s first run (named by its id) and at each fork (a fresh id; its `enso-thread-tree` entry names it).',
     lifetime:
-      'Per-user; a moved checkout changes its id, so its threads stay under the old one until moved by hand. A snapshot store is to be removed with its thread by #551 slice 2’s `dispose`; nothing removes one yet. Trust (`pi-agent/trust.json`) and the checkout’s `.enso/config.json` stay where they are.',
+      'Per-user; a moved checkout changes its id, so its threads stay under the old one until moved by hand. `disposeThreadTree` removes a tree with its store after an inventory, but no route calls it — Enso has no thread delete — so trees and stores stay until removed by hand (`git worktree remove`, then the folders). Trust (`pi-agent/trust.json`) and the checkout’s `.enso/config.json` stay where they are.',
     check: { file: 'packages/core/src/paths.ts', contains: 'export function migrateSessionsIntoProjects' },
   },
   {

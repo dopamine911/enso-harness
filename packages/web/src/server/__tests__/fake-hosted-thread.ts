@@ -33,6 +33,7 @@ import type {
   HostedThread,
   HostedThreadInspection,
   SystemPromptPreviewOutcome,
+  ThreadRestoreOutcome,
 } from '../../host/agent-host.ts'
 import type { BranchContext, BranchRequestDetail } from '../../host/branch-context.ts'
 import type { BranchStats } from '../../host/branch-stats.ts'
@@ -172,7 +173,7 @@ export interface FakeHostedThreadOptions {
   readonly forkPoint?: EnsoForkPoint
   /** What `previewSystemPrompt` answers (#443); {@link fakeSystemPromptPreview} when absent. */
   readonly previewSystemPrompt?: (candidate: EnsoSystemPromptChoice | null) => SystemPromptPreviewOutcome
-  /** What `projectTrusted()` answers (#470); untrusted when absent, as a project nobody decided is. */
+  /** Whether `projectTrust()` answers trusted (#470); untrusted when absent, as a project nobody decided is. */
   readonly projectTrusted?: boolean
 }
 
@@ -408,7 +409,7 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
     probeToolCall: async (): Promise<undefined> => undefined,
     // …and no permission engine publishes a service for it.
     checkPermission: (): undefined => undefined,
-    projectTrusted: () => options.projectTrusted ?? false,
+    projectTrust: () => ({ directory: inspection.cwd, trusted: options.projectTrusted ?? false }),
     branchStats: () => options.branch ?? FAKE_EMPTY_BRANCH,
     // The eval reads the transcript the inspection holds and the branch's turns (#441).
     branchEval: () => ({
@@ -464,6 +465,8 @@ export interface FakeStoredThread {
   readonly parentThreadId?: string
   /** Its fork point (#435); assembled from the fields above, with no run context, when absent. */
   readonly forkPoint?: EnsoForkPoint
+  /** What restoring its files answers (#551) once the thread and entry are found; `no-tree` when absent. A promise holds the restore open. */
+  readonly restore?: ThreadRestoreOutcome | Promise<ThreadRestoreOutcome>
 }
 
 const FAKE_FRESH_MODE: EnsoPermissionModeState = { mode: 'default', available: ['default'] }
@@ -523,7 +526,7 @@ export function createFakeAgentHost(
     freshPermissionMode: () => fresh,
     catalogue: () => Promise.resolve(fakeCatalogue()),
     // A project nobody decided is untrusted (#470); a test about a trusted one replaces this.
-    projectTrusted: () => false,
+    projectTrust: (cwd: string) => ({ directory: cwd, trusted: false }),
     storedPermissionMode: (transcript: readonly EnsoTranscriptEntry[]): EnsoPermissionModeState => {
       const storedThread = Object.values(stored).find((candidate) => candidate.transcript === transcript)
       return { mode: storedThread?.mode ?? fresh.mode, available: fresh.available }
@@ -629,6 +632,21 @@ export function createFakeAgentHost(
       }
       const prefill = entry.parts.map((part) => (part.type === 'text' ? part.text : '')).join('')
       return Promise.resolve({ kind: 'forked', threadId: `${threadId}-fork`, prefill })
+    },
+    // The real host's lookups over the stored transcript; past them, the thread's scripted outcome.
+    mintsTreesIn: () => false,
+    restoreThreadAt: (threadId: string, entryId: string): Promise<ThreadRestoreOutcome> => {
+      const storedThread = served(threadId)
+      if (storedThread === undefined) return Promise.resolve({ kind: 'no-thread', reason: `no thread ${threadId}` })
+      if (!storedThread.transcript.some((candidate) => candidate.id === entryId)) {
+        return Promise.resolve({ kind: 'no-entry', reason: `no entry ${entryId}` })
+      }
+      return Promise.resolve(storedThread.restore ?? { kind: 'no-tree', reason: `thread ${threadId} has no tree` })
+    },
+    undoLastRestore: (threadId: string): Promise<ThreadRestoreOutcome> => {
+      const storedThread = served(threadId)
+      if (storedThread === undefined) return Promise.resolve({ kind: 'no-thread', reason: `no thread ${threadId}` })
+      return Promise.resolve(storedThread.restore ?? { kind: 'no-tree', reason: `thread ${threadId} has no tree` })
     },
   }
 }

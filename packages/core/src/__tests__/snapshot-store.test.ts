@@ -3,7 +3,13 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { openSnapshotStore, type SnapshotStore, type SnapshotTaken, snapshotPaths } from '../snapshot-store.ts'
+import {
+  materializeSnapshot,
+  openSnapshotStore,
+  type SnapshotStore,
+  type SnapshotTaken,
+  snapshotPaths,
+} from '../snapshot-store.ts'
 
 /**
  * The per-thread snapshot store (#551 slice 1), on real git. ⚠ Every environment handed in carries
@@ -184,4 +190,60 @@ test('a mint that cannot write refuses the store as undefined, and a snapshot gi
   execFileSync('rm', ['-rf', tree])
   const outcome = await store.snapshot()
   expect(outcome.kind === 'refused' ? outcome.refused.step : outcome.taken.hash).toBe('add')
+})
+
+test('⚠ materializing a snapshot makes the tree exactly it — an edit undone, a deleted file back, an unignored untracked file gone — and never touches an ignored file', async () => {
+  const tree = checkout()
+  const store = await opened(tree)
+  const first = await taken(store)
+  writeFileSync(join(tree, 'src.ts'), 'export const one = 2\n')
+  execFileSync('rm', [join(tree, 'README.md')])
+  mkdirSync(join(tree, 'scratch'))
+  writeFileSync(join(tree, 'scratch', 'notes.md'), 'unignored, untracked\n')
+  writeFileSync(join(tree, '.env'), 'SECRET=hunter2\n')
+
+  const outcome = await materializeSnapshot({ directory: store.directory, tree, hash: first.hash, environment })
+  expect(outcome).toEqual({ kind: 'materialized' })
+  expect(readFileSync(join(tree, 'src.ts'), 'utf8')).toBe('export const one = 1\n')
+  expect(readFileSync(join(tree, 'README.md'), 'utf8')).toBe('# t\n')
+  expect(existsSync(join(tree, 'scratch'))).toBe(false)
+  expect(readFileSync(join(tree, '.env'), 'utf8')).toBe('SECRET=hunter2\n')
+  // The tree is the snapshot again: the next one is the same, not a new commit.
+  expect(await taken(store)).toEqual({ hash: first.hash, changed: false })
+  // An unknown hash is refused by step, the tree as it was.
+  const unknown = await materializeSnapshot({ directory: store.directory, tree, hash: 'f'.repeat(40), environment })
+  expect(unknown.kind === 'refused' ? unknown.refused.step : unknown.kind).toBe('read-tree')
+})
+
+test("⚠ a store minted with another store's objects as an alternate materializes that store's snapshot into a plain directory, in that store's object format", async () => {
+  // A sha256 checkout: a store for a plain directory would otherwise be sha1, and could not read
+  // the parent's objects at all.
+  const tree = mkdtempSync(join(tmpdir(), 'enso-snap-sha256-'))
+  git(tree, 'init', '--quiet', '--object-format=sha256')
+  writeFileSync(join(tree, 'a.txt'), 'a\n')
+  git(tree, 'add', '--all')
+  git(tree, 'commit', '--quiet', '-m', 'a')
+  writeFileSync(join(tree, 'b.txt'), 'untracked\n')
+  const parent = await opened(tree)
+  const snapshot = await taken(parent)
+
+  const copy = mkdtempSync(join(tmpdir(), 'enso-snap-copy-'))
+  const fork = await openSnapshotStore({
+    directory: join(mkdtempSync(join(tmpdir(), 'enso-snap-store-')), 'store'),
+    tree: copy,
+    environment,
+    alternates: [join(parent.directory, 'objects')],
+  })
+  if (fork === undefined) throw new Error('did not open')
+  expect(readFileSync(join(fork.directory, 'objects', 'info', 'alternates'), 'utf8').trim()).toBe(
+    join(parent.directory, 'objects'),
+  )
+  expect(
+    await materializeSnapshot({ directory: fork.directory, tree: copy, hash: snapshot.hash, environment }),
+  ).toEqual({
+    kind: 'materialized',
+  })
+  expect(readFileSync(join(copy, 'a.txt'), 'utf8')).toBe('a\n')
+  expect(readFileSync(join(copy, 'b.txt'), 'utf8')).toBe('untracked\n')
+  expect(existsSync(join(copy, '.git'))).toBe(false)
 })

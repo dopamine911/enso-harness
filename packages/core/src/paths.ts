@@ -41,7 +41,7 @@ import {
   unlinkSync,
 } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, dirname, join, sep as pathSeparator, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, sep as pathSeparator, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { ENSO_CONFIG_FILENAME } from './config.ts'
 import { SECRET_BASENAME_PATTERNS } from './guard.ts'
@@ -423,6 +423,36 @@ export function projectSessionsDir(projectsDir: string, projectId: string): stri
  */
 export function projectSnapshotsDir(projectsDir: string, projectId: string): string {
   return join(projectsDir, projectId, 'snapshots')
+}
+
+/**
+ * A project's thread trees: `<projectsDir>/<id>/trees/<thread-id>` is the directory one thread
+ * runs in (#551 slice 2, `@enso/core/thread-tree`) — a worktree of the checkout, or a copy — never
+ * the checkout itself. pi's cwd for the thread, so the session header records it.
+ *
+ * @group Workspace paths
+ */
+export function projectTreesDir(projectsDir: string, projectId: string): string {
+  return join(projectsDir, projectId, 'trees')
+}
+
+/**
+ * The project id a minted tree's path names — `<projectsDir>/<id>/trees/<thread-id>`, the tree's
+ * root or anything under it — or `undefined` for any other path. ⚠ The one way a thread's cwd
+ * becomes its project: a thread on a tree runs in a directory that is no project, and every
+ * reader that files or serves by project (the session directory, the snapshot store, the
+ * server's projects) asks this first. Read off the path alone, so it holds for a tree whose
+ * project is no longer registered (it is then simply not served).
+ *
+ * @group Workspace paths
+ */
+export function treeProjectId(projectsDir: string, path: string): string | undefined {
+  const fromProjects = relative(resolve(projectsDir), resolve(path))
+  if (fromProjects === '' || fromProjects.startsWith('..') || isAbsolute(fromProjects)) return undefined
+  const [projectId, trees, threadId] = fromProjects.split(pathSeparator)
+  return projectId !== undefined && /^[0-9a-f]{16}$/.test(projectId) && trees === 'trees' && threadId !== undefined
+    ? projectId
+    : undefined
 }
 
 /**
