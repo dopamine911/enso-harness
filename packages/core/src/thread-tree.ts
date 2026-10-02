@@ -595,8 +595,9 @@ async function removeWorktree(
  * histories, the parent's snapshots up to where each forked among them. The store is kept — `busy`
  * while another migration or collection holds the project's stores, refused when the migration
  * fails or a fork it could not move still reads this store's objects through its alternates (#575
- * review). A collection that is busy or fails leaves the garbage for the next, `uncollected`
- * saying why.
+ * review). Refused, never thrown, when the store cannot be removed — what of it is left keeps its
+ * last-pinned ref. A collection that is busy or fails leaves the garbage for the next,
+ * `uncollected` saying why.
  *
  * @group Thread tree
  */
@@ -609,7 +610,13 @@ export async function releaseThreadStore(
 > {
   const held = await prepareRelease(store, environment)
   if (held !== undefined) return held
-  rmSync(store, { recursive: true, force: true })
+  // A store that cannot be removed (another user's, a read-only directory) is a refusal, never a
+  // throw (#575 review); what of it is left still holds its last-pinned ref.
+  try {
+    rmSync(store, { recursive: true, force: true })
+  } catch (error) {
+    return { kind: 'refused', reason: `the snapshot store could not be removed: ${String(error)}` }
+  }
   const collected = await collectSnapshotGarbage(dirname(store), environment)
   if (collected === 'collected') return { kind: 'removed' }
   return {
@@ -677,9 +684,10 @@ export async function disposeThreadTree(options: {
   }
   const released = await releaseThreadStore(store, environment)
   if (released.kind !== 'removed') {
+    // The tree is gone: no inventory, so the host answers a refusal, never work to force.
     return released.kind === 'busy'
       ? { kind: 'busy', reason: released.reason }
-      : { kind: 'refused', inventory, reason: released.reason }
+      : { kind: 'refused', reason: released.reason }
   }
   return released.uncollected === undefined
     ? { kind: 'disposed' }

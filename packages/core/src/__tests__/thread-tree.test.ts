@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
 import { execFileSync } from 'node:child_process'
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -18,6 +19,7 @@ import {
   disposeThreadTree,
   inventoryThreadTree,
   mintThreadTree,
+  releaseThreadStore,
   restoreThreadTree,
   treeKindFor,
 } from '../thread-tree.ts'
@@ -424,6 +426,27 @@ test('a store already gone, though a fork was forked from it, releases as remove
     kind: 'disposed',
   })
   expect(existsSync(parent.path) || existsSync(where.store('gone'))).toBe(false)
+})
+
+// #575 review: a store that cannot be removed (owned by another user, a read-only directory)
+// threw out of the release — and out of the dispose, its tree already gone — not the refusal its
+// type promises.
+test('a store that cannot be removed is refused, never thrown — by the release, and by a dispose whose tree is already gone', async () => {
+  const project = checkout()
+  const where = home()
+  const record = await mintFromCheckout(project, where, 'stuck', 'copy')
+  const store = where.store('stuck')
+  chmodSync(store, 0o555)
+  try {
+    const released = await releaseThreadStore(store, environment)
+    expect(released.kind === 'removed' ? released : released.kind).toBe('refused')
+    const disposed = await disposeThreadTree({ record, store, force: true, environment })
+    // No inventory: the tree is gone, nothing of it is left to force — never a 422 to retry with.
+    expect(disposed).toEqual({ kind: 'refused', reason: expect.stringContaining('could not be removed') })
+    expect(existsSync(record.path)).toBe(false)
+  } finally {
+    chmodSync(store, 0o755)
+  }
 })
 
 // PR #572 review: a delete that stopped after its worktree was removed (or a user's `git worktree
