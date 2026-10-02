@@ -19,7 +19,10 @@
  * only, so a tracked file that a later rule covers stays in (vx-pm: 4,696 of 5,701 tracked files
  * are under an ignored `screenshots/` directory), and `.env`-shaped files, ignored AND untracked,
  * stay out of the store. The tree's `.git` is excluded by git itself; a nested repository is a
- * gitlink, its contents not captured — stated, not hidden.
+ * gitlink, its contents not captured — stated, not hidden. A path a sparse checkout leaves off disk
+ * (skip-worktree) keeps the blob its index records, so the snapshot is still the whole commit; a
+ * path beyond a symlinked directory is not the tree's (git calls it "beyond a symbolic link") —
+ * the symlink is snapshotted, never what it points at.
  *
  * ⚠ A COPY HAS NO REPOSITORY: IT FOLLOWS ITS PROJECT'S (#566). A store told it holds a copy of a
  * project (`copyOf`, recorded in the store) lists the copy as the store's own tracked set plus the
@@ -27,7 +30,9 @@
  * repository ignore (`check-ignore`, run in the project) — so a `node_modules` installed or a
  * `.env` written in a copy of `repo/packages/app` stays out, as it would in the checkout. A tree in
  * no repository, copy or not, has the store's own rules only: its `.gitignore` files and
- * `core.excludesFile`.
+ * `core.excludesFile`. ⚠ A copy's store minted before #566 names no project, and nothing writes
+ * one later: it keeps the store's own rules — what a project ignores only above itself is captured
+ * there — until the tree is minted again.
  *
  * ⚠ KEYED TO OUR RECORD, NOT pi's ENTRY (#555 rule 5). The store names a snapshot by its commit
  * hash alone; the link to a point in the conversation is the `enso-run-context` record that
@@ -207,6 +212,8 @@ function readRepositoryGit(
   const env = {
     ...withoutGitLocalVariables(environment),
     GIT_OPTIONAL_LOCKS: '0',
+    // git translates its messages; `inWorkTree` reads one. `C` also overrides `LANGUAGE`.
+    LC_ALL: 'C',
     GIT_TERMINAL_PROMPT: '0',
     GIT_PAGER: 'cat',
   }
@@ -402,20 +409,44 @@ async function ignoreRulesOf(environment: NodeJS.ProcessEnv, store: StorePlace):
 
 /**
  * The tree's files as a snapshot holds them, ready to stage: `paths` for `update-index --add
- * --remove` (a tracked path gone from disk is a removal), and `gitlinks` — submodules with no
- * checkout under them, which `update-index` cannot read — as the `--index-info` records their index
- * holds. `ignoredByProject`: a copy's untracked files only its project's repository ignores.
+ * --remove` (a tracked path gone from disk is a removal), and `recorded` — entries `update-index`
+ * cannot read from disk, as the `--index-info` records their index holds: a submodule with no
+ * checkout under it, a path a sparse checkout leaves off disk. `ignoredByProject`: a copy's
+ * untracked files only its project's repository ignores.
  */
 interface TreeFiles {
   readonly paths: string[]
-  readonly gitlinks: { readonly path: string; readonly record: string }[]
+  readonly recorded: { readonly path: string; readonly record: string }[]
   readonly ignoredByProject: string[]
 }
 
 /**
- * `ls-files --stage -z` records and untracked paths as {@link TreeFiles}. An unmerged path's three
- * stages are one path; an untracked nested repository's trailing `/` is dropped, so it stages as a
- * gitlink.
+ * Whether a leading directory of `path` under `tree` is a symlink — the path is then "beyond a
+ * symbolic link", as git says: not the tree's to stage, and removing it would remove what the link
+ * points at, outside the tree. `checked` caches the directories one pass has looked at.
+ */
+function beyondSymlink(tree: string, path: string, checked: Map<string, boolean>): boolean {
+  let directory = tree
+  for (const part of path.split('/').slice(0, -1)) {
+    directory = join(directory, part)
+    let linked = checked.get(directory)
+    if (linked === undefined) {
+      try {
+        linked = lstatSync(directory).isSymbolicLink()
+      } catch {
+        linked = false
+      }
+      checked.set(directory, linked)
+    }
+    if (linked) return true
+  }
+  return false
+}
+
+/**
+ * `ls-files --stage -t -z` records and untracked paths as {@link TreeFiles}, less every path beyond
+ * a symlinked directory. An unmerged path's three stages are one path; an untracked nested
+ * repository's trailing `/` is dropped, so it stages as a gitlink.
  */
 function treeFilesOf(
   tree: string,
@@ -423,20 +454,26 @@ function treeFilesOf(
   untracked: readonly string[],
   ignoredByProject: string[],
 ): TreeFiles {
+  const checked = new Map<string, boolean>()
   const paths = new Set<string>()
-  const gitlinks = new Map<string, string>()
+  const recorded = new Map<string, string>()
   for (const record of nulList(staged)) {
-    // `<mode> <hash> <stage>\t<path>`
+    // `<tag> <mode> <hash> <stage>\t<path>`; tag `S`: skip-worktree, not on disk.
     const tab = record.indexOf('\t')
-    const [mode, hash] = record.slice(0, tab).split(' ')
+    const [tag, mode, hash] = record.slice(0, tab).split(' ')
     const path = record.slice(tab + 1)
-    if (mode === '160000' && !existsSync(join(tree, path, '.git'))) gitlinks.set(path, `160000 ${hash}\t${path}`)
-    else paths.add(path)
+    if (beyondSymlink(tree, path, checked)) continue
+    if (tag === 'S' || (mode === '160000' && !existsSync(join(tree, path, '.git')))) {
+      recorded.set(path, `${mode} ${hash}\t${path}`)
+    } else paths.add(path)
   }
-  for (const path of untracked) paths.add(path.endsWith('/') ? path.slice(0, -1) : path)
+  for (const listed of untracked) {
+    const path = listed.endsWith('/') ? listed.slice(0, -1) : listed
+    if (!beyondSymlink(tree, path, checked)) paths.add(path)
+  }
   return {
-    paths: [...paths],
-    gitlinks: [...gitlinks].map(([path, record]) => ({ path, record })),
+    paths: [...paths].filter((path) => !recorded.has(path)),
+    recorded: [...recorded].map(([path, record]) => ({ path, record })),
     ignoredByProject,
   }
 }
@@ -452,7 +489,7 @@ async function listTreeFiles(
   rules: IgnoreRules,
   index: string,
 ): Promise<TreeFiles | Refusal> {
-  const tracked = ['ls-files', '--cached', '--stage', '-z']
+  const tracked = ['ls-files', '--cached', '--stage', '-t', '-z']
   const untracked = ['ls-files', '--others', '--exclude-standard', '-z']
   if (rules.kind === 'repository') {
     const staged = await readRepositoryGit(environment, tracked, store.tree)
@@ -480,8 +517,8 @@ async function listTreeFiles(
 /**
  * The index at `index` made exactly `files`: entries the listing lacks force-removed, the listed
  * paths added, refreshed or (gone from disk) removed — `update-index` reads each path literally,
- * never as a pathspec, and re-hashes only a file whose stat changed — then the bare gitlinks
- * recorded as listed.
+ * never as a pathspec, and re-hashes only a file whose stat changed — then the entries it cannot
+ * read from disk set as recorded.
  */
 async function stageTreeFiles(
   environment: NodeJS.ProcessEnv,
@@ -491,12 +528,12 @@ async function stageTreeFiles(
 ): Promise<Refusal | undefined> {
   const indexed = await runStoreGit(environment, store, ['ls-files', '-z'], { index })
   if (indexed.code !== 0) return refusedBy('ls-files', indexed)
-  const listed = new Set([...files.paths, ...files.gitlinks.map((gitlink) => gitlink.path)])
+  const listed = new Set([...files.paths, ...files.recorded.map((indexEntry) => indexEntry.path)])
   const stale = [...new Set(nulList(indexed.stdout))].filter((path) => !listed.has(path))
   const steps: [readonly string[], readonly string[]][] = [
     [['update-index', '--force-remove', '-z', '--stdin'], stale],
     [['update-index', '--add', '--remove', '-z', '--stdin'], files.paths],
-    [['update-index', '-z', '--index-info'], files.gitlinks.map((gitlink) => gitlink.record)],
+    [['update-index', '-z', '--index-info'], files.recorded.map((indexEntry) => indexEntry.record)],
   ]
   for (const [args, entries] of steps) {
     if (entries.length === 0) continue
@@ -575,13 +612,16 @@ export async function snapshotPaths(
 /**
  * Each of `paths` under `tree` removed, then each directory that leaves empty, up to the tree. A
  * directory on the list — a nested repository, a gitlink — is left where it is; a path already gone
- * is no failure. The first other failure, in words.
+ * is no failure. ⚠ A path beyond a symlinked directory is never removed, looked at NOW, not at
+ * listing: `checkout-index` may have just put a snapshot's symlink where a directory was, and
+ * removing through it would remove a file outside the tree. The first other failure, in words.
  */
 function removeFiles(tree: string, paths: readonly string[]): string | undefined {
+  const checked = new Map<string, boolean>()
   for (const path of paths) {
     const absolute = join(tree, path)
     try {
-      if (lstatSync(absolute).isDirectory()) continue
+      if (beyondSymlink(tree, path, checked) || lstatSync(absolute).isDirectory()) continue
       unlinkSync(absolute)
     } catch (error) {
       const failure = error as NodeJS.ErrnoException
