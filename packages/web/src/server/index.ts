@@ -30,7 +30,13 @@ import {
 } from '@enso/core'
 import { readGitChanges, readGitState, runGit } from '@enso/core/git'
 import { missingVendorPaths } from '@enso/core/pi-manifest'
-import { AGENT_RUNTIME_VERSION, type AgentHost, createAgentHost, SessionDirectoryRefused } from '../host/agent-host.ts'
+import {
+  AGENT_RUNTIME_VERSION,
+  type AgentHost,
+  createAgentHost,
+  SessionDirectoryRefused,
+  ThreadDeleted,
+} from '../host/agent-host.ts'
 import { readPermissionPolicy, resetPermissionPolicy, writePermissionPolicy } from '../host/permission-policy-file.ts'
 import { createAboutRoute, createBundleRoute } from './bundle-route.ts'
 import {
@@ -41,6 +47,7 @@ import {
   continueThread,
   type FollowRouteDeps,
   followThread,
+  deleteThreadAt,
   forkThreadAt,
   restoreThreadAt,
   undoLastRestore,
@@ -93,6 +100,11 @@ function threadRoute(action: string): RegExp {
 
 /** `GET /api/threads/<threadId>` — the id is one path segment, percent-encoded by the caller. */
 const THREAD_ROUTE = /^\/api\/threads\/([^/?#]+)$/
+/**
+ * `DELETE /api/threads/<threadId>[?force=1]` (#571): delete the thread — its session, tree and store.
+ * `force` deletes a tree that holds work; it is the only query the route takes.
+ */
+const THREAD_DELETE_ROUTE = /^\/api\/threads\/([^/?#]+)(\?force=1)?$/
 /** `GET /api/threads/<threadId>/events` — the thread's two event tails (#97). */
 const THREAD_EVENTS_ROUTE = threadRoute('events')
 /** `GET /api/threads/<threadId>/history` — the branch as messages, live or stored (#95). */
@@ -740,7 +752,11 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
    */
   function answerOrFail(work: Promise<void>, response: ServerResponse): void {
     work.catch((error: unknown) => {
-      if (error instanceof ProjectUnavailable || error instanceof SessionDirectoryRefused) {
+      if (
+        error instanceof ProjectUnavailable ||
+        error instanceof SessionDirectoryRefused ||
+        error instanceof ThreadDeleted
+      ) {
         log.warn('a thread could not be built where it belongs: {reason}', { reason: error.message })
         if (response.headersSent) response.end()
         else refuseWith(response, { status: 409, reason: error.message })
@@ -996,7 +1012,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     match: RegExpExecArray,
   ) => void | Promise<void>
   interface ThreadRoute {
-    readonly method: 'GET' | 'POST'
+    readonly method: 'GET' | 'POST' | 'DELETE'
     readonly route: RegExp
     readonly respond: ThreadRouteHandler
   }
@@ -1043,6 +1059,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     { method: 'POST', route: THREAD_CONTINUE_ROUTE, respond: idOnly(respondToContinue) },
     { method: 'POST', route: THREAD_ABORT_ROUTE, respond: idOnly(respondToAbort) },
     { method: 'POST', route: THREAD_INCIDENT_RESOLVE_ROUTE, respond: respondToIncidentResolution },
+    { method: 'DELETE', route: THREAD_DELETE_ROUTE, respond: respondToDelete },
   ]
 
   /**
@@ -1167,6 +1184,34 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     }
     log.info('continue accepted', { threadId })
     response.writeHead(202)
+    response.end()
+  }
+
+  /**
+   * `DELETE …[?force=1]` (#571): 204 once the thread is gone; 404 an unknown thread; 409 a run, a
+   * move, a restore or another delete holding it; 422 a tree that holds work — the reason names it,
+   * and `?force=1` deletes it anyway. No body.
+   */
+  async function respondToDelete(
+    threadId: string,
+    _request: IncomingMessage,
+    response: ServerResponse,
+    match: RegExpExecArray,
+  ): Promise<void> {
+    const force = match[2] !== undefined
+    const outcome = await deleteThreadAt(threadRead, threadId, force)
+    if (outcome.status !== 204) {
+      log.warn('delete refused ({status}): {reason}', {
+        threadId,
+        force,
+        status: outcome.status,
+        reason: outcome.reason,
+      })
+      refuseWith(response, outcome)
+      return
+    }
+    log.info('thread deleted', { threadId, force })
+    response.writeHead(204)
     response.end()
   }
 

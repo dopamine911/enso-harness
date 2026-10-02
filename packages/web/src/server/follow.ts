@@ -994,6 +994,35 @@ export function undoLastRestore(
   )
 }
 
+export type DeleteRouteOutcome =
+  | { readonly status: 204 }
+  | { readonly status: 404 | 409 | 422 | 500; readonly reason: string }
+
+/** The host's delete refusal → the status the route answers it with: only `holds-work` is forceable. */
+const DELETE_REFUSAL_STATUS = { 'no-thread': 404, busy: 409, 'holds-work': 422, refused: 500 } as const
+
+/**
+ * Delete the thread (#571): its session file, its tree and its store — a 422 while the tree holds
+ * work, unless `force`. Refused 409 while a run holds it, as every control route is; the live
+ * session is retired by the host only once the inventory has passed, so a refusal leaves the open
+ * page as it was. A claim for the id, from a page that named its project, goes with it.
+ */
+export async function deleteThreadAt(
+  deps: ThreadReadDeps,
+  threadId: string,
+  force: boolean,
+): Promise<DeleteRouteOutcome> {
+  const running = runningRefusal(deps.threads, threadId, 'delete it')
+  if (running !== undefined) return running
+  const outcome = await deps.host.deleteThread(threadId, {
+    force,
+    retire: () => deps.threads.retire(threadId, 'the thread was deleted'),
+  })
+  if (outcome.kind !== 'deleted') return { status: DELETE_REFUSAL_STATUS[outcome.kind], reason: outcome.reason }
+  deps.projects.dropClaim(threadId)
+  return { status: 204 }
+}
+
 /** The restore body, checked against its closed schema — `entryId`, nothing else. */
 export function readRestoreBody(raw: string): EnsoRestoreRequest {
   return readClosedBody(raw, EnsoRestoreRequest, 'restore', 'restore body needs a non-empty `entryId` and nothing else')

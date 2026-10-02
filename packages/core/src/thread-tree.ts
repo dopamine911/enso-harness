@@ -42,7 +42,7 @@
  */
 
 import { execFile } from 'node:child_process'
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { exitCode, type GitResult, withoutGitLocalVariables } from './git.ts'
 import {
@@ -402,8 +402,8 @@ export async function restoreThreadTree(options: {
  * - `unsnapshotted`: paths where the tree differs from the store's last snapshot.
  * - `unmergedCommits`: commits on the worktree's branch that no other branch or remote reaches.
  * - `unreadable`: a listing git that failed — refuses like work, never reads as "clean".
- * - `dependents`: sibling stores (forks) whose alternates name this store's objects — refuses even
- *   a forced dispose, which would corrupt their history.
+ * - `dependents`: sibling stores (forks) whose alternates name this store's objects — never a
+ *   refusal: a dispose keeps the store for them (#571), see {@link releaseThreadStore}.
  *
  * @group Thread tree
  */
@@ -417,7 +417,7 @@ export interface ThreadTreeInventory {
   readonly dependents: string[]
 }
 
-/** The sibling stores (directories beside `store`) whose alternates name `store`'s objects. */
+/** The sibling stores (directories beside `store`) whose alternates name `store`'s objects, by name. */
 function dependentStores(store: string): string[] {
   const objects = canonical(join(store, 'objects'))
   let siblings: string[]
@@ -425,6 +425,7 @@ function dependentStores(store: string): string[] {
     siblings = readdirSync(dirname(store), { withFileTypes: true })
       .filter((entry) => entry.isDirectory() && entry.name !== basename(store))
       .map((entry) => join(dirname(store), entry.name))
+      .toSorted()
   } catch {
     return []
   }
@@ -562,8 +563,13 @@ function named(paths: readonly string[]): string {
   return paths.length > 5 ? `${shown} and ${paths.length - 5} more` : shown
 }
 
-/** What in an inventory holds a dispose that is not forced; undefined when nothing does. */
-function holdingReason(inventory: ThreadTreeInventory): string | undefined {
+/**
+ * What in an inventory holds a dispose that is not forced; undefined when nothing does. The
+ * dispose's own rule, for a caller that must ask before it does anything else (#571's delete).
+ *
+ * @group Thread tree
+ */
+export function holdingReason(inventory: ThreadTreeInventory): string | undefined {
   const holds = [
     inventory.untracked.length > 0 ? `untracked: ${named(inventory.untracked)}` : undefined,
     inventory.modified.length > 0 ? `modified: ${named(inventory.modified)}` : undefined,
@@ -604,11 +610,69 @@ async function removeWorktree(
   return undefined
 }
 
+/** The file a store kept for its forks carries (#571): its thread is gone; the store goes with its last dependent. */
+const ORPHANED_STORE_MARKER = 'enso-orphaned'
+
 /**
- * Dispose of a thread's tree: inventory first, refused while it holds work (unless `force`) or
- * while a fork's store leans on this store (even forced). Then the worktree is removed with its
- * registration (`--force` only when forced), its branch deleted when merged (`-D` only when
- * forced; an unmerged branch is otherwise kept), a copy's directory removed, and the store.
+ * What became of a deleted thread's store (#571): removed, or kept for the forks — by store path —
+ * that lean on it.
+ *
+ * @group Thread tree
+ */
+export type ThreadStoreRelease = { readonly kind: 'removed' } | { readonly kind: 'kept'; readonly dependents: string[] }
+
+/**
+ * Let go of a deleted thread's store (#571): removed, or — while a fork's store names its objects
+ * as an alternate — kept and marked orphaned, because removing it would break every snapshot the
+ * fork holds of the parent's files. {@link sweepOrphanedStores} removes it once nothing depends on
+ * it. A store that is gone already is removed.
+ *
+ * @group Thread tree
+ */
+export function releaseThreadStore(store: string): ThreadStoreRelease {
+  const dependents = dependentStores(store)
+  if (dependents.length === 0) {
+    rmSync(store, { recursive: true, force: true })
+    return { kind: 'removed' }
+  }
+  writeFileSync(join(store, ORPHANED_STORE_MARKER), `kept for ${dependents.join(', ')}\n`)
+  return { kind: 'kept', dependents }
+}
+
+/**
+ * Remove every orphaned store in `snapshotsDir` (one project's `snapshots/`) that no store depends
+ * on any more, until none is left to remove: the alternates are flat (#561), so a grandparent kept
+ * for a parent that was itself kept goes in a later round, once the parent has. A store without
+ * the marker is a live thread's and is never touched. The removed stores, by path.
+ *
+ * @group Thread tree
+ */
+export function sweepOrphanedStores(snapshotsDir: string): string[] {
+  const removed: string[] = []
+  for (;;) {
+    let orphans: string[]
+    try {
+      orphans = readdirSync(snapshotsDir, { withFileTypes: true })
+        .filter((dirent) => dirent.isDirectory() && existsSync(join(snapshotsDir, dirent.name, ORPHANED_STORE_MARKER)))
+        .map((dirent) => join(snapshotsDir, dirent.name))
+        .toSorted()
+    } catch {
+      return removed
+    }
+    const free = orphans.filter((orphan) => dependentStores(orphan).length === 0)
+    if (free.length === 0) return removed
+    for (const orphan of free) {
+      rmSync(orphan, { recursive: true, force: true })
+      removed.push(orphan)
+    }
+  }
+}
+
+/**
+ * Dispose of a thread's tree: inventory first, refused while it holds work (unless `force`). Then
+ * the worktree is removed with its registration (`--force` only when forced), its branch deleted
+ * when merged (`-D` only when forced; an unmerged branch is otherwise kept), a copy's directory
+ * removed, and the store released — removed, or kept for the forks that lean on it (#571).
  *
  * @group Thread tree
  */
@@ -617,16 +681,11 @@ export async function disposeThreadTree(options: {
   readonly store: string
   readonly force: boolean
   readonly environment: NodeJS.ProcessEnv
-}): Promise<{ kind: 'disposed' } | { kind: 'refused'; inventory: ThreadTreeInventory; reason: string }> {
+}): Promise<
+  { kind: 'disposed'; store: ThreadStoreRelease } | { kind: 'refused'; inventory: ThreadTreeInventory; reason: string }
+> {
   const { record, store, force, environment } = options
   const inventory = await inventoryThreadTree({ record, store, environment })
-  if (inventory.dependents.length > 0) {
-    return {
-      kind: 'refused',
-      inventory,
-      reason: `forked threads' stores lean on this store's snapshots: ${named(inventory.dependents)} — dispose them first`,
-    }
-  }
   const holding = force ? undefined : holdingReason(inventory)
   if (holding !== undefined) return { kind: 'refused', inventory, reason: holding }
   if (record.kind === 'worktree') {
@@ -635,6 +694,5 @@ export async function disposeThreadTree(options: {
   } else {
     rmSync(record.path, { recursive: true, force: true })
   }
-  rmSync(store, { recursive: true, force: true })
-  return { kind: 'disposed' }
+  return { kind: 'disposed', store: releaseThreadStore(store) }
 }

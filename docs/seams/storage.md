@@ -81,6 +81,16 @@ export interface AgentHost {
   restoreThreadAt(threadId: string, entryId: string): Promise<ThreadRestoreOutcome>
   /** Undo the thread's last restore (#565): its tree back to that restore's safety snapshot, itself recorded as a restore. */
   undoLastRestore(threadId: string, safety: string): Promise<ThreadRestoreOutcome>
+  /**
+   * Delete the thread (#571): its tree through the inventory (`force` deletes a tree holding work
+   * too), its store — kept, orphaned, while a fork leans on it — then every session file under its
+   * id. `retire` disposes the live session and refuses a busy one: the registry's, which the host
+   * does not hold. Hard: nothing is kept to undo it.
+   */
+  deleteThread(
+    threadId: string,
+    options: { readonly force: boolean; readonly retire: () => boolean },
+  ): Promise<ThreadDeleteOutcome>
   /** Whether a NEW thread in `project` gets a tree of its own (#551): a projects folder, and trees not `off` for it. */
   mintsTreesIn(project: string): boolean
   /** What a fresh thread starts in — served before any run exists, so the header never guesses. */

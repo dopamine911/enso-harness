@@ -12,6 +12,7 @@ import {
   type EnsoProject,
   type EnsoPromptImage,
   type EnsoProviderRefusal,
+  type EnsoStoredThread,
   type EnsoThreadHistory,
   isEnsoImageMimeType,
   type RuntimeCommand,
@@ -40,6 +41,7 @@ import {
   MessagesSquareIcon,
   PaperclipIcon,
   SquareIcon,
+  Trash2Icon,
 } from 'lucide-react'
 import { Tabs as TabsPrimitive } from 'radix-ui'
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
@@ -84,10 +86,12 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  DialogTrigger,
 } from './components/ui/dialog.tsx'
 import { Input } from './components/ui/input.tsx'
 import { Textarea } from './components/ui/textarea.tsx'
 import { routeEnsoCustomEvent } from './custom-event-router.ts'
+import { deleteThread } from './delete-thread.ts'
 import { EnsoRing, EnsoSmile } from './enso-mark.tsx'
 import type { EnsoRendererMap } from './EnsoToolResult.tsx'
 import { createFixtureChat, fixtureFetch } from './fixture-conversation.ts'
@@ -120,6 +124,7 @@ import { ThreadStatsDrawer } from './thread-stats.tsx'
 import { ThreadStatusBar } from './thread-status.tsx'
 import {
   adoptThread,
+  dropThread,
   getThreadStores,
   markThreadActive,
   mintThread,
@@ -1897,7 +1902,8 @@ function useNarrowRail(): {
 
 /**
  * The page's header: the threads button (narrow screens), the mark, where you are — the active
- * thread's title, the same one the rail shows — then the view tabs, settings and `?debug`'s switch.
+ * thread's title, the same one the rail shows — and its Delete, then the view tabs, settings and
+ * `?debug`'s switch.
  */
 function AppHeader({
   active,
@@ -1907,6 +1913,8 @@ function AppHeader({
   onView,
   debugOpen,
   onToggleDebug,
+  onDeleted,
+  stored,
 }: {
   active: ThreadSummary | undefined
   activeThreadId: string | undefined
@@ -1915,7 +1923,19 @@ function AppHeader({
   onView: (view: ThreadView) => void
   debugOpen: boolean
   onToggleDebug: () => void
+  /** The server deleted this thread (#571): the page leaves it. */
+  onDeleted: (threadId: string) => void
+  /** The server's stored-thread listing (#95): a thread in it has a session file. */
+  stored: readonly EnsoStoredThread[]
 }): React.ReactNode {
+  // Delete is offered once the server holds the thread (#571): listed among its stored sessions (a
+  // fork, written by its route before any prompt), adopted from a stored branch, or prompted here
+  // (its title is that prompt's). A thread minted and never prompted is this page's only.
+  const onServer =
+    active !== undefined &&
+    (active.title !== undefined ||
+      getThreadStores(active.threadId).history.length > 0 ||
+      stored.some((row) => row.threadId === active.threadId))
   return (
     <header className="flex min-h-14 items-center gap-3 border-b bg-sidebar px-3 py-2">
       <RailToggle open={rail.open} onToggle={rail.toggle} />
@@ -1928,6 +1948,9 @@ function AppHeader({
           {active?.title ?? (activeThreadId === undefined ? 'resuming…' : UNTITLED_THREAD)}
         </span>
       </div>
+      {active !== undefined && onServer ? (
+        <DeleteThread key={active.threadId} threadId={active.threadId} onDeleted={onDeleted} />
+      ) : null}
       {isFixtureMode ? (
         <span className="rounded-full border px-2 py-0.5 text-xs text-muted-foreground">fixture</span>
       ) : null}
@@ -1944,6 +1967,75 @@ function AppHeader({
         />
       ) : null}
     </header>
+  )
+}
+
+/**
+ * The header's Delete (#571), behind a confirmation naming what goes: the conversation, and the
+ * thread's tree when it runs on one of its own. A tree holding work is refused with the work
+ * named (422): the dialog says it and offers "Delete anyway". Any other refusal closes it and is
+ * said on the thread (`delete-thread.ts`).
+ */
+function DeleteThread({
+  threadId,
+  onDeleted,
+}: {
+  threadId: string
+  onDeleted: (threadId: string) => void
+}): React.ReactNode {
+  const stores = getThreadStores(threadId)
+  const onTree = useStore(stores.tree)
+  const [open, setOpen] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  /** The work the tree holds, as the server named it — set while "Delete anyway" is offered. */
+  const [holdsWork, setHoldsWork] = useState<string | undefined>(undefined)
+  const changeOpen = (next: boolean): void => {
+    setOpen(next)
+    if (!next) setHoldsWork(undefined)
+  }
+  const confirm = (force: boolean): void => {
+    setDeleting(true)
+    void deleteThread(stores, force).then((outcome) => {
+      setDeleting(false)
+      if (outcome.kind === 'holds-work') {
+        setHoldsWork(outcome.reason)
+        return
+      }
+      changeOpen(false)
+      if (outcome.kind === 'deleted') onDeleted(threadId)
+    })
+  }
+  return (
+    <Dialog open={open} onOpenChange={changeOpen}>
+      <DialogTrigger asChild>
+        <Button variant="ghost" size="icon-sm" aria-label="delete thread" title="delete this thread">
+          <Trash2Icon />
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Delete this thread?</DialogTitle>
+          <DialogDescription>
+            {onTree
+              ? "This cannot be undone. The conversation is deleted, and so is the thread's tree: its files, its branch and its snapshots."
+              : 'This cannot be undone. The conversation is deleted. Your checkout is not touched.'}
+          </DialogDescription>
+        </DialogHeader>
+        {holdsWork === undefined ? null : (
+          <p role="alert" className="text-sm text-destructive">
+            {holdsWork}
+          </p>
+        )}
+        <DialogFooter>
+          <Button variant="ghost" onClick={(): void => changeOpen(false)}>
+            Cancel
+          </Button>
+          <Button variant="destructive" disabled={deleting} onClick={(): void => confirm(holdsWork !== undefined)}>
+            {holdsWork === undefined ? 'Delete' : 'Delete anyway'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -2127,6 +2219,20 @@ export function ChatScreen(): React.ReactNode {
     },
     [resume],
   )
+  // A deleted thread (#571) leaves the page the way a failed resume does: a fresh thread, in the
+  // deleted one's project, written over its URL so back does not ask for the deleted id. Its pane
+  // goes, and the listing refreshes so the rail cannot offer it again.
+  const leaveDeleted = useCallback(
+    (threadId: string): void => {
+      const { projectId } = getThreadStores(threadId)
+      dropThread(threadId)
+      const fresh = mintPageThread(projectId)
+      navigate(fresh.threadId, 'replace')
+      fresh.notifications.push(`thread ${threadId} deleted`, 'info', 'run', ENSO_NOTICE_SOURCE)
+      void storedThreads.refresh()
+    },
+    [navigate],
+  )
   // Boot: the URL named a thread — adopt it. Once per page; the coordinator drops a stale answer.
   useEffect(() => {
     if (BOOT.kind === 'resume') resumeFrom(BOOT.threadId, 'pop', true)
@@ -2173,6 +2279,8 @@ export function ChatScreen(): React.ReactNode {
         onView={setView}
         debugOpen={debugOpen}
         onToggleDebug={() => setDebugOpen((open) => !open)}
+        onDeleted={leaveDeleted}
+        stored={stored.rows}
       />
       <div className="flex min-h-0 flex-1">
         <ThreadsRail

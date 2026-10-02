@@ -467,10 +467,11 @@ function leastRecentlyActiveIdle(): ThreadSummary | undefined {
  * The thread leaves this page (#272): its follow closes, its stores are forgotten, and the
  * rail stops listing it — so its pane unmounts and the connection is released twice over
  * (here, and again by TanStack's dispose). The pi session is the SERVER's: a dropped thread
- * that ran reappears among the rail's earlier threads and `/history` rebuilds its transcript.
+ * that ran reappears among the rail's earlier threads and `/history` rebuilds its transcript —
+ * unless it was dropped because it was deleted (#571), the one caller outside this budget.
  * Idempotent — dropping a thread this page does not hold does nothing.
  */
-function dropThread(threadId: string): void {
+export function dropThread(threadId: string): void {
   const stores = threads.get(threadId)
   if (stores === undefined) return
   stores.connection.close()

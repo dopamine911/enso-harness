@@ -956,6 +956,34 @@ test('⚠ a restore holds its thread until it settles: a mode change meanwhile i
   expect((await undoOf('never-stored', { safety: 'b'.repeat(40) })).status).toBe(404)
 })
 
+/** `DELETE …` (#571), with `query` appended; the status and the text it answered. */
+async function deleteOf(url: string, threadId: string, query = ''): Promise<{ status: number; body: string }> {
+  const response = await fetch(`${url}/api/threads/${threadId}${query}`, { method: 'DELETE' })
+  return { status: response.status, body: await response.text() }
+}
+
+test('⚠ DELETE /api/threads/:id answers 204 and the thread is gone; a tree holding work is a 422 naming it, deleted with ?force=1 and no other query; an unknown thread 404; a running one 409 (#571)', async () => {
+  const thread = { transcript: STORED_BRANCH, modified: new Date(0), firstMessage: 'earlier question' }
+  const stored = {
+    plain: thread,
+    working: { ...thread, holdsWork: 'the tree holds work — untracked: work.md' },
+    running: thread,
+  }
+  const { url } = await startWith(asksAndWaits, stored)
+  expect(await deleteOf(url, 'plain')).toEqual({ status: 204, body: '' })
+  expect((await deleteOf(url, 'plain')).status).toBe(404)
+  expect(await deleteOf(url, 'working')).toEqual({ status: 422, body: 'the tree holds work — untracked: work.md' })
+  expect((await deleteOf(url, 'working', '?force=0')).status).toBe(404)
+  expect((await deleteOf(url, 'working', '?force=1&x=1')).status).toBe(404)
+  expect(await deleteOf(url, 'working', '?force=1')).toEqual({ status: 204, body: '' })
+  expect((await deleteOf(url, 'never-stored')).status).toBe(404)
+  // A run holds the thread: refused before the host is asked, never forceable.
+  await prompt(url, 'running', '/mode')
+  const busy = await deleteOf(url, 'running', '?force=1')
+  expect(busy.status).toBe(409)
+  expect(busy.body).toContain('is running')
+})
+
 test('GET /api/threads/:id returns the branch as the transcript of ours, with sessionFile null while unflushed', async () => {
   const { url } = await startWith(settlesAtOnce)
   await prompt(url, 't1', 'hello')

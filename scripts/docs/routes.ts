@@ -262,6 +262,20 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
     ],
     { builds: 'yes', factory: follows('export function undoLastRestore') },
   ),
+  THREAD_DELETE_ROUTE: threadControl(
+    'respondToDelete → deleteThreadAt → AgentHost.deleteThread',
+    "path: `threadId`; query: `?force=1` or none — no other; no body. Deletes the thread (#571): its tree through the inventory, its snapshot store — kept, marked `enso-orphaned`, while a fork's store names its objects, and swept once none does — then every session file under the id. The live session is retired only once the inventory has passed, and the id is refused for the server's lifetime after",
+    [
+      '204 empty — the session file, the tree (worktree, its registration and `enso/<thread-id>` branch, or the copy) and the store are gone',
+      '400 malformed thread id; 403 untrusted origin; 404 no session file in a served project, or a query other than `?force=1`; 409 a run holds the thread, or a move, a restore or another delete does; 422 the tree holds work — untracked, modified or unsnapshotted files, or commits on its branch no other ref reaches — named in the text, deleted anyway with `?force=1`; 500 a removal failed',
+    ],
+    {
+      builds: 'no',
+      path: '/api/threads/:threadId',
+      method: 'DELETE',
+      factory: { path: FOLLOW_PATH, declaration: 'export async function deleteThreadAt', reaches: 'storage' },
+    },
+  ),
   THREAD_CONTINUE_ROUTE: threadControl(
     'respondToContinue → continueThread → ThreadRuntime.continueRun',
     'path: `threadId`; no body',
