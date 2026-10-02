@@ -67,7 +67,20 @@ export interface ArenaManifest {
     readonly ensoExits: number
   }
   readonly agentNotes: Readonly<Record<ArenaNoteKind, readonly ArenaNote[]>>
+  /**
+   * What the recorder itself failed to do, in order — a trace chunk not written, for one. Without
+   * this a missing chunk read as a shorter `traceChunks` and nothing more (PR #562 review); the
+   * evidence's own gaps are evidence too.
+   */
+  readonly recorderErrors: readonly ArenaRecorderError[]
   readonly evidence: readonly ArenaEvidence[]
+}
+
+export interface ArenaRecorderError {
+  readonly at: string
+  readonly elapsedMs: number
+  readonly during: string
+  readonly error: string
 }
 
 /** What the fold needs beyond the timeline: the run's id and the evidence collected at the end. */
@@ -161,6 +174,11 @@ export function foldArenaManifest({ runId, events, evidence }: ArenaManifestInpu
       ensoExits: count('enso-exit'),
     },
     agentNotes: notesByKind(events),
+    recorderErrors: events.flatMap((event): ArenaRecorderError[] =>
+      event.kind === 'recorder-error'
+        ? [{ at: event.at, elapsedMs: event.elapsedMs, during: event.during, error: event.error }]
+        : [],
+    ),
     evidence,
   }
 }

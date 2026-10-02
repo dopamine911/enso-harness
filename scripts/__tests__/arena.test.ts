@@ -196,6 +196,7 @@ test('the manifest joins screenshots to threads and keeps the agent’s notes ap
   timeline.record({ kind: 'console-error', text: 'boom' }, inThread)
   timeline.record({ kind: 'enso-exit', exit: '1' })
   timeline.record({ kind: 'trace-chunk', path: '/t/trace-000.zip' })
+  timeline.record({ kind: 'recorder-error', during: 'trace chunk', error: 'Must start tracing before stopping' })
   timeline.record(
     { kind: 'note', note: 'wish', trying: 'see the diff', happened: 'no button', wanted: 'a diff tab' },
     inThread,
@@ -225,15 +226,15 @@ test('the manifest joins screenshots to threads and keeps the agent’s notes ap
     {
       threadId: THREAD,
       firstSeenAt: '2026-10-01T12:00:03.000Z',
-      lastSeenAt: '2026-10-01T12:00:09.000Z',
+      lastSeenAt: '2026-10-01T12:00:10.000Z',
       screenshots: 1,
       actions: 2,
     },
   ])
   expect(manifest.agentNotes.wish).toEqual([
     {
-      at: '2026-10-01T12:00:09.000Z',
-      elapsedMs: 9000,
+      at: '2026-10-01T12:00:10.000Z',
+      elapsedMs: 10000,
       trying: 'see the diff',
       happened: 'no button',
       wanted: 'a diff tab',
@@ -241,6 +242,15 @@ test('the manifest joins screenshots to threads and keeps the agent’s notes ap
     },
   ])
   expect(manifest.agentNotes.friction).toEqual([])
+  // A chunk the recorder failed to write is named, not only absent from `traceChunks`.
+  expect(manifest.recorderErrors).toEqual([
+    {
+      at: '2026-10-01T12:00:09.000Z',
+      elapsedMs: 9000,
+      during: 'trace chunk',
+      error: 'Must start tracing before stopping',
+    },
+  ])
 })
 
 test('a run whose recorder died says so', () => {
