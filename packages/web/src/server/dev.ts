@@ -71,7 +71,7 @@ const { listening } = startEnsoServer({
   projectsStatePath: ensoProjectsPath(home),
   promptsDir: ensoPromptsDir(home),
   projectsDir: ensoProjectsDir(home),
-  // Each new thread in its own tree (#551) when the user's `threads` section says so — off by default.
+  // Each new thread in its own tree (#551): a worktree by default, as the user's `threads` section overrides it.
   threadTree: (project) => threadTreeFor(config.config, project, (key) => canonicalConfigPath(key)),
   harnessPackageDir: harnessPackageDir(repoRoot),
   agentDir,
