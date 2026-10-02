@@ -57,6 +57,15 @@ if (config.kind === 'unreadable') {
 if (configText === undefined) {
   log.info('no {configPath}: the defaults — no project roots, an empty web_fetch allowlist', { configPath })
 }
+// Trees became the default (#551 decision 1): said at every launch that relies on it, since an
+// upgrade changes where a new thread's edits land with nothing in the user's own file saying so.
+if (config.config.threads?.tree === undefined) {
+  // The setting is a property, never in the template: `{"tree": "off"}` there is read as a placeholder.
+  log.info(
+    'new threads run in a tree of their own by default (#551): their edits stay out of your checkout — set {setting} in {configPath} to keep them there',
+    { setting: '"threads": {"tree": "off"}', configPath },
+  )
+}
 const projectRoots: readonly string[] = config.config.projects?.roots ?? []
 // Same scratch dir the TUI launcher uses, so both surfaces share one isolated config.
 const agentDir = ensoAgentDir(home)
@@ -71,7 +80,7 @@ const { listening } = startEnsoServer({
   projectsStatePath: ensoProjectsPath(home),
   promptsDir: ensoPromptsDir(home),
   projectsDir: ensoProjectsDir(home),
-  // Each new thread in its own tree (#551) when the user's `threads` section says so — off by default.
+  // Each new thread in its own tree (#551): a worktree by default, as the user's `threads` section overrides it.
   threadTree: (project) => threadTreeFor(config.config, project, (key) => canonicalConfigPath(key)),
   harnessPackageDir: harnessPackageDir(repoRoot),
   agentDir,

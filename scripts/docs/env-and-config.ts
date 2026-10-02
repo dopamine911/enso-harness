@@ -297,11 +297,11 @@ const CONFIG_FIELD_METADATA: readonly ConfigFieldMetadata[] = [
     field: 'threads',
     required: 'no',
     defaultWhenOmitted:
-      'Off: threads run in the checkout, with nothing to restore files to. Trees stay off by default until a thread\'s tree can be removed with it (#551, PR #561): each one adds a worktree registration and an `enso/<thread-id>` branch to the repository, and nothing removes them yet. `tree` sets every project\'s mode (`"worktree"` — a worktree when the project is a repository\'s top level, else a copy — `"copy"`, or `"off"`); `projects` maps a project path (absolute or `~/`, resolved to the canonical path) to its own mode, which beats `tree`. A tree holds no ignored file (`node_modules`, `.env`), so a build may need its install step first. User-only: a project\'s `threads` is ignored, and said.',
+      'A worktree for every new thread (#551 decision 1): a git worktree on branch `enso/<thread-id>` when the project is a repository\'s top level, else a copy — each one adds a worktree registration and that branch to the repository until the thread is deleted (#571). `tree` sets every project\'s mode (`"worktree"`, `"copy"`, or `"off"`: threads run in the checkout, with nothing to restore files to); `projects` maps a project path (absolute or `~/`, resolved to the canonical path) to its own mode, which beats `tree`. A tree holds no ignored file (`node_modules`, `.env`), so a build may need its install step first. User-only: a project\'s `threads` is ignored, and said.',
     reader: '`packages/core/src/config.ts#threadTreeFor`, from `packages/web/src/server/dev.ts`',
     check: {
       file: 'packages/core/src/config.ts',
-      contains: "return own ?? config.threads?.tree ?? 'off'",
+      contains: "return own ?? config.threads?.tree ?? 'worktree'",
     },
   },
   webSearchField('', '`{}`; current-model routing with no Tavily domain filters.', 'parsed.config.webSearch ?? {}'),
