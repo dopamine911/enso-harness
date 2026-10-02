@@ -167,6 +167,8 @@ export interface ThreadStatusViewProps {
   readonly cwd?: string | undefined
   /** The thread's project's title, when the page lists it — the bar's name for where the thread runs (#551). */
   readonly projectTitle?: string | undefined
+  /** Whether the thread runs on a tree of its own (#551), not the checkout — the follow snapshot's `tree`. */
+  readonly onTree?: boolean | undefined
   /** A question from pi is open for this thread — said here too, since only the transcript shows it. */
   readonly questionWaiting?: boolean
   /** The provider's last refusal while no reply has got through since (#340) — its class word. */
@@ -233,13 +235,19 @@ function activityDotClass(activity: Activity): typeof DOT_DISCONNECTED | typeof 
  * Where the thread runs (#44): nothing before the first snapshot, and the server's `''` said as what
  * it means. Named by its project's title when the page knows it — since #551 the cwd is usually the
  * thread's own tree, whose directory name is a thread id, not a name a reader knows the project by.
+ * ⚠ A thread on its own tree says so on the bar, never only on hover (#576 review): with trees on
+ * by default, its edits are not in the user's checkout, and nothing else on the page says where
+ * they went. Its title names no path — until the next snapshot a new thread's cwd still names the
+ * project.
  */
 function ProjectIndicator({
   cwd,
   projectTitle,
+  onTree,
 }: {
   readonly cwd: string | undefined
   readonly projectTitle: string | undefined
+  readonly onTree: boolean | undefined
 }): React.ReactNode {
   if (cwd === undefined) return null
   if (cwd === '') {
@@ -251,9 +259,19 @@ function ProjectIndicator({
     )
   }
   return (
-    <span title={`the tree pi reads and writes for this thread: ${cwd}`}>
-      project {projectTitle ?? projectName(cwd)}
-    </span>
+    <>
+      <span title={`the tree pi reads and writes for this thread: ${cwd}`}>
+        project {projectTitle ?? projectName(cwd)}
+      </span>
+      {onTree === true ? (
+        <span
+          className="text-foreground"
+          title="this thread reads and writes a tree of its own — its edits are not in your checkout until you bring them back"
+        >
+          own tree, not your checkout
+        </span>
+      ) : null}
+    </>
   )
 }
 
@@ -362,6 +380,7 @@ export function ThreadStatusView({
   usage,
   cwd,
   projectTitle,
+  onTree,
   questionWaiting,
   refusal,
   refusalSource,
@@ -412,7 +431,7 @@ export function ThreadStatusView({
           {counts.failed} failed
         </span>
       )}
-      <ProjectIndicator cwd={cwd} projectTitle={projectTitle} />
+      <ProjectIndicator cwd={cwd} projectTitle={projectTitle} onTree={onTree} />
       {git === undefined ? null : <GitIndicator outcome={git} />}
       {context === null ? null : (
         <span className="ml-auto">
@@ -446,6 +465,7 @@ export function ThreadStatusBar({ messages, generating, projectTitle }: ThreadSt
   const usage = useStore(stores.usage)
   const disconnected = useStore(stores.disconnected)
   const cwd = useStore(stores.cwd)
+  const onTree = useStore(stores.tree)
   const questionWaiting = useStore(stores.dialog) !== undefined
   const refusal = useStore(stores.refusal)
   const refusals = useStore(stores.refusals)
@@ -459,6 +479,7 @@ export function ThreadStatusBar({ messages, generating, projectTitle }: ThreadSt
       usage={usage}
       cwd={cwd}
       projectTitle={projectTitle}
+      onTree={onTree}
       questionWaiting={questionWaiting}
       refusal={refusal?.refusalClass}
       refusalSource={refusal?.provider}

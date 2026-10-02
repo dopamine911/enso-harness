@@ -57,6 +57,14 @@ if (config.kind === 'unreadable') {
 if (configText === undefined) {
   log.info('no {configPath}: the defaults — no project roots, an empty web_fetch allowlist', { configPath })
 }
+// Trees became the default (#551 decision 1): said at every launch that relies on it, since an
+// upgrade changes where a new thread's edits land with nothing in the user's own file saying so.
+if (config.config.threads?.tree === undefined) {
+  log.info(
+    'new threads run in a tree of their own by default (#551): their edits stay out of your checkout — set "threads": {"tree": "off"} in {configPath} to keep them there',
+    { configPath },
+  )
+}
 const projectRoots: readonly string[] = config.config.projects?.roots ?? []
 // Same scratch dir the TUI launcher uses, so both surfaces share one isolated config.
 const agentDir = ensoAgentDir(home)
