@@ -199,7 +199,7 @@ export function describeArenaAction(action: ArenaAction, secretValues: readonly 
     case 'fill':
       return `fill ${describeTarget(action.target)} with ${JSON.stringify(redact(action.text))}`
     case 'select':
-      return `select ${JSON.stringify(action.option)} in ${describeTarget(action.target)}`
+      return `select ${JSON.stringify(redact(action.option))} in ${describeTarget(action.target)}`
     case 'press':
       return `press ${action.key}${action.target === undefined ? '' : ` in ${describeTarget(action.target)}`}`
     case 'wait':

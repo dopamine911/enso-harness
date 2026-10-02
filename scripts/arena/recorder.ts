@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process'
 import { appendFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { type BrowserContext, chromium, type Locator, type Page } from '@playwright/test'
+import { type Browser, type BrowserContext, chromium, type Locator, type Page } from '@playwright/test'
 import type { Subprocess } from 'bun'
 import { redactJudgeText } from '../../packages/core/src/judge.ts'
 import { knownSecretValues } from '../../packages/core/src/secrets.ts'
@@ -115,6 +115,26 @@ function locate(page: Page, target: ArenaTarget): Locator {
   return target.nth === undefined ? found : found.nth(target.nth)
 }
 
+/** A browser with one page, tracing, its first chunk open. A failure on the way closes what it opened. */
+async function openTracedPage(
+  options: ArenaRunOptions,
+  runId: string,
+): Promise<{ readonly browser: Browser; readonly context: BrowserContext; readonly page: Page }> {
+  const browser = await chromium.launch({
+    headless: !options.headed,
+    ...(options.chromiumPath === undefined ? {} : { executablePath: options.chromiumPath }),
+  })
+  try {
+    const context = await browser.newContext({ viewport: VIEWPORT })
+    await context.tracing.start({ screenshots: true, snapshots: true, title: `arena ${runId}` })
+    await context.tracing.startChunk()
+    return { browser, context, page: await context.newPage() }
+  } catch (error) {
+    await browser.close().catch(() => undefined)
+    throw error
+  }
+}
+
 /** Run one arena: start Enso and the browser, serve the agent's actions, stop on a condition, write the manifest. */
 export async function runArena(options: ArenaRunOptions): Promise<void> {
   const { scenario, runDirectory, project } = options
@@ -140,6 +160,32 @@ export async function runArena(options: ArenaRunOptions): Promise<void> {
     project,
     ...(commit === undefined ? {} : { ensoCommit: commit }),
   })
+
+  // ── Screenshots, over a page that does not exist until the browser is up ───────────────────
+  // ⚠ Defined BEFORE Enso starts (PR #562 review): Enso's exit handler takes one, and Enso can
+  // die while the recorder is still waiting for it to answer — before there is any page.
+  let livePage: Page | undefined
+  let shotNumber = 0
+  const lastShotAt = new Map<ArenaShotCause, number>()
+  const shoot = async (cause: ArenaShotCause): Promise<string | undefined> => {
+    const shown = livePage
+    if (shown === undefined) return undefined
+    const now = Date.now()
+    if (cause !== 'sample' && cause !== 'requested' && cause !== 'final') {
+      if (now - (lastShotAt.get(cause) ?? 0) < EVENT_SHOT_SPACING_MS) return undefined
+    }
+    lastShotAt.set(cause, now)
+    const stamp = new Date(now).toISOString().replaceAll(':', '-')
+    const path = join(shotsDirectory, `${String(shotNumber).padStart(5, '0')}-${stamp}-${cause}.png`)
+    shotNumber += 1
+    try {
+      await shown.screenshot({ path, timeout: 10_000 })
+    } catch {
+      return undefined
+    }
+    timeline.record({ kind: 'screenshot', cause, path }, pagePlace(shown.url()))
+    return path
+  }
 
   // ── Enso, as a child the recorder outlives ─────────────────────────────────────────────────
   const stackLog = join(ensoDirectory, 'stack.log')
@@ -183,42 +229,27 @@ export async function runArena(options: ArenaRunOptions): Promise<void> {
   }
 
   // ── The browser, its trace and its listeners ───────────────────────────────────────────────
-  const browser = await chromium.launch({
-    headless: !options.headed,
-    ...(options.chromiumPath === undefined ? {} : { executablePath: options.chromiumPath }),
+  // ⚠ A browser that fails to start must not leave Enso holding the dev ports (PR #562 review):
+  // every later `arena start` would refuse them until someone killed the stack by hand.
+  const { browser, context, page } = await openTracedPage(options, runId).catch(async (error: unknown) => {
+    await stopEnso()
+    throw error
   })
-  const context: BrowserContext = await browser.newContext({ viewport: VIEWPORT })
-  await context.tracing.start({ screenshots: true, snapshots: true, title: `arena ${runId}` })
+  livePage = page
   let chunkNumber = 0
-  const writeChunk = async (): Promise<void> => {
+  /**
+   * Write the trace so far. ⚠ `stopChunk` ends the chunk; between chunks nothing is traced, so
+   * every chunk but the last is followed by `startChunk` (PR #562 review: the first version
+   * never restarted, and traced only the run's first five minutes).
+   */
+  const writeChunk = async (then: 'continue' | 'last'): Promise<void> => {
     const path = join(traceDirectory, `trace-${String(chunkNumber).padStart(3, '0')}.zip`)
     chunkNumber += 1
     await context.tracing.stopChunk({ path })
     timeline.record({ kind: 'trace-chunk', path })
+    if (then === 'continue') await context.tracing.startChunk()
   }
-  await context.tracing.startChunk()
-  const page = await context.newPage()
   const here = (): ArenaPagePlace => pagePlace(page.url())
-
-  let shotNumber = 0
-  const lastShotAt = new Map<ArenaShotCause, number>()
-  const shoot = async (cause: ArenaShotCause): Promise<string | undefined> => {
-    const now = Date.now()
-    if (cause !== 'sample' && cause !== 'requested' && cause !== 'final') {
-      if (now - (lastShotAt.get(cause) ?? 0) < EVENT_SHOT_SPACING_MS) return undefined
-    }
-    lastShotAt.set(cause, now)
-    const stamp = new Date(now).toISOString().replaceAll(':', '-')
-    const path = join(shotsDirectory, `${String(shotNumber).padStart(5, '0')}-${stamp}-${cause}.png`)
-    shotNumber += 1
-    try {
-      await page.screenshot({ path, timeout: 10_000 })
-    } catch {
-      return undefined
-    }
-    timeline.record({ kind: 'screenshot', cause, path }, here())
-    return path
-  }
 
   page.on('console', (message) => {
     if (message.type() !== 'error') return
@@ -253,7 +284,13 @@ export async function runArena(options: ArenaRunOptions): Promise<void> {
     void shoot('dialog')
   })
 
-  await page.goto(ARENA_WEB_ORIGIN)
+  try {
+    await page.goto(ARENA_WEB_ORIGIN)
+  } catch (error) {
+    await browser.close().catch(() => undefined)
+    await stopEnso()
+    throw error
+  }
 
   // ── The run's clock: samples, trace chunks, the budget ─────────────────────────────────────
   let resolveStop: (reason: string) => void = () => undefined
@@ -267,7 +304,12 @@ export async function runArena(options: ArenaRunOptions): Promise<void> {
     queue = next.catch(() => undefined)
     return next
   }
-  const chunker = setInterval(() => void serialized(writeChunk), scenario.traceChunkMs)
+  // A chunk that fails is a line on the timeline, never an unhandled rejection that ends the recorder.
+  const chunker = setInterval(() => {
+    serialized(() => writeChunk('continue')).catch((error: unknown) => {
+      timeline.record({ kind: 'recorder-error', during: 'trace chunk', error: redact(String(error)) }, here())
+    })
+  }, scenario.traceChunkMs)
   const budget = setTimeout(
     () => resolveStop(`budget: ${options.budgetMinutes} minutes`),
     options.budgetMinutes * 60_000,
@@ -417,7 +459,9 @@ export async function runArena(options: ArenaRunOptions): Promise<void> {
   await serialized(async () => {
     if (browser.isConnected()) {
       await shoot('final')
-      await writeChunk().catch(() => undefined)
+      await writeChunk('last').catch((error: unknown) => {
+        timeline.record({ kind: 'recorder-error', during: 'last trace chunk', error: redact(String(error)) })
+      })
     }
   })
   timeline.record({ kind: 'run-stop', reason }, browser.isConnected() ? here() : undefined)

@@ -57,6 +57,8 @@ export type ArenaEventBody =
   | { readonly kind: 'enso-exit'; readonly exit: string }
   | { readonly kind: 'enso-start' }
   | { readonly kind: 'trace-chunk'; readonly path: string }
+  /** Something the recorder itself failed to do — a trace chunk not written — recorded, not thrown. */
+  | { readonly kind: 'recorder-error'; readonly during: string; readonly error: string }
   | {
       readonly kind: 'note'
       readonly note: ArenaNoteKind

@@ -34,6 +34,9 @@ import { readTimeline } from './arena/timeline.ts'
 
 const [command, ...rest] = process.argv.slice(2)
 
+/** The flags that take a value: the argument after one is that value, never the action (PR #562 review). */
+const VALUED_FLAGS = new Set(['--scenario', '--minutes', '--home', '--out', '--chromium', '--run'])
+
 function flag(name: string): string | undefined {
   const index = rest.indexOf(`--${name}`)
   return index === -1 ? undefined : rest[index + 1]
@@ -85,7 +88,7 @@ async function start(): Promise<void> {
 }
 
 async function act(): Promise<void> {
-  const body = rest.find((argument) => !argument.startsWith('--') && argument !== flag('run'))
+  const body = rest.find((argument, index) => !argument.startsWith('--') && !VALUED_FLAGS.has(rest[index - 1] ?? ''))
   if (body === undefined) fail(`act takes one JSON action — \`bun run arena brief\` lists them`)
   const runDirectory = flag('run') ?? (existsSync(currentFile) ? readFileSync(currentFile, 'utf8').trim() : undefined)
   if (runDirectory === undefined) fail('no live run — start one with `bun run arena start`')

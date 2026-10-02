@@ -128,6 +128,10 @@ test('what the agent typed reaches the timeline redacted', () => {
   const line = describeArenaAction(parsed.action, [secret])
   expect(line).toStartWith('fill label "Prompt" with ')
   expect(line).not.toContain(secret)
+  // A refused `select` is recorded by this line too (PR #562 review): its option is redacted the same way.
+  const selected = parseArenaAction({ action: 'select', target: { label: 'Key' }, option: secret })
+  if (!selected.ok) throw new Error(selected.error)
+  expect(describeArenaAction(selected.action, [secret])).not.toContain(secret)
 })
 
 test('text that looks like a credential is never typed into the page', () => {
