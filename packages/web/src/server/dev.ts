@@ -60,9 +60,10 @@ if (configText === undefined) {
 // Trees became the default (#551 decision 1): said at every launch that relies on it, since an
 // upgrade changes where a new thread's edits land with nothing in the user's own file saying so.
 if (config.config.threads?.tree === undefined) {
+  // The setting is a property, never in the template: `{"tree": "off"}` there is read as a placeholder.
   log.info(
-    'new threads run in a tree of their own by default (#551): their edits stay out of your checkout — set "threads": {"tree": "off"} in {configPath} to keep them there',
-    { configPath },
+    'new threads run in a tree of their own by default (#551): their edits stay out of your checkout — set {setting} in {configPath} to keep them there',
+    { setting: '"threads": {"tree": "off"}', configPath },
   )
 }
 const projectRoots: readonly string[] = config.config.projects?.roots ?? []
