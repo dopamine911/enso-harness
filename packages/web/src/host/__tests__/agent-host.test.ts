@@ -1727,10 +1727,15 @@ function treeHost(
 test("⚠ two threads on one project each get their own worktree at the checkout's current state; a write into the other's tree is refused; the checkout is untouched (#551)", async () => {
   const project = dirtyCheckout()
   const statusBefore = fixtureGit(project, 'status', '--porcelain')
-  const { host, projectsDir } = treeHost(project)
+  const core = createFauxCore()
+  core.setResponses(Array.from({ length: 2 }, (_, index) => faux.fauxAssistantMessage(`reply ${index + 1}`)))
+  const { host, projectsDir } = treeHost(project, [fauxModelExtension(core)])
+  new ProjectTrustStore(agentDir).set(project, true)
   const first = await host.createSession(crypto.randomUUID(), () => project)
   const second = await host.createSession(crypto.randomUUID(), () => project)
   openSessions.push(first, second)
+  await runPrompt(first, 'one')
+  await runPrompt(second, 'two')
   const firstTree = first.inspect().cwd
   const secondTree = second.inspect().cwd
   expect(dirname(firstTree)).toBe(projectTreesDir(projectsDir, projectIdOf(project)))
@@ -1754,22 +1759,62 @@ test("⚠ two threads on one project each get their own worktree at the checkout
   expect(readFileSync(join(project, 'a.txt'), 'utf8')).toBe('dirty\n')
 })
 
-// ⚠ PR #561 review: pi writes a session's file only at its first message, so a new thread built
-// and disposed before one (a preview looked at, a restart) had no file to be found by — its next
-// build minted again over the tree that existed, and was refused, for good.
-test('a new thread built and disposed before any message builds again, on the same tree, with no second worktree (#551)', async () => {
+// ⚠ PR #561 review: a thread only BUILT — a preview looked at, a permission checked, a model chosen —
+// must leave nothing in the user's repository or the rail; the tree comes with the first run, and
+// keeps what was chosen before it. pi writes a session's file only at its first message, so the
+// file is written at the move: a thread disposed before its first reply is found again on its tree.
+test('⚠ a new thread gets its tree at its first run, not its build: built and disposed it leaves nothing; its first run keeps the mode chosen before it; rebuilt, it opens on its tree (#551)', async () => {
   const project = dirtyCheckout()
-  const { host } = treeHost(project)
+  const core = createFauxCore()
+  core.setResponses(Array.from({ length: 2 }, (_, index) => faux.fauxAssistantMessage(`reply ${index + 1}`)))
+  const { host } = treeHost(project, [fauxModelExtension(core)])
+  new ProjectTrustStore(agentDir).set(project, true)
   const threadId = crypto.randomUUID()
-  const first = await host.createSession(threadId, () => project)
-  const tree = first.inspect().cwd
-  first.runtime.dispose()
+  const looked = await host.createSession(threadId, () => project)
+  expect(looked.inspect().cwd).toBe(project)
+  looked.runtime.dispose()
+  expect(fixtureGit(project, 'worktree', 'list').split('\n')).toHaveLength(1)
+  expect(fixtureGit(project, 'branch', '--list', 'enso/*')).toBe('')
+  expect((await host.listSessions()).some((stored) => stored.id === threadId)).toBe(false)
+
+  const hosted = await host.createSession(threadId, () => project)
+  await switchMode(hosted, 'plan')
+  await runPrompt(hosted, 'first')
+  const tree = hosted.inspect().cwd
+  expect(tree).not.toBe(project)
+  expect(fixtureGit(project, 'worktree', 'list')).toContain(tree)
+  // What was chosen in the checkout build is the tree build's too.
+  expect(hosted.runtime.permissionModeState().mode).toBe('plan')
+  hosted.runtime.dispose()
   const again = await host.createSession(threadId, () => {
-    throw new Error('a thread whose tree was minted was asked for a new directory')
+    throw new Error('a thread on its tree was asked for a new directory')
   })
   openSessions.push(again)
   expect(again.inspect().cwd).toBe(tree)
   expect(fixtureGit(project, 'worktree', 'list').split('\n')).toHaveLength(2)
+})
+
+// The isolation is the point: a thread whose tree cannot be made does not quietly run in the
+// checkout instead. The move is tried again at the next run.
+test('⚠ a first run whose tree cannot be made is refused with the reason — nothing ran in the checkout — and the next run tries again (#551)', async () => {
+  const project = dirtyCheckout()
+  const core = createFauxCore()
+  core.setResponses([faux.fauxAssistantMessage('ran')])
+  const { host, projectsDir } = treeHost(project, [fauxModelExtension(core)])
+  new ProjectTrustStore(agentDir).set(project, true)
+  const threadId = crypto.randomUUID()
+  // Something already sits where the thread's tree goes: the mint refuses.
+  const blocking = join(projectTreesDir(projectsDir, projectIdOf(project)), threadId)
+  mkdirSync(blocking, { recursive: true })
+  const hosted = await host.createSession(threadId, () => project)
+  openSessions.push(hosted)
+  await expect(runPrompt(hosted, 'first')).rejects.toThrow(`thread ${threadId} has no tree to run in:`)
+  expect(core.state.callCount).toBe(0)
+  expect(hosted.inspect().cwd).toBe(project)
+  rmSync(blocking, { recursive: true })
+  await runPrompt(hosted, 'again')
+  expect(hosted.inspect().cwd).toBe(blocking)
+  expect(core.state.callCount).toBe(1)
 })
 
 // ⚠ PR #561 review: a prompt that finds the thread held JOINS the holder (#75), and pi starts a run
@@ -1805,8 +1850,14 @@ test('⚠ a thread on its tree is trusted by its project\'s answer, and "Trust p
   fixtureGit(trusted, 'init', '--quiet')
   fixtureGit(trusted, 'commit', '--quiet', '--allow-empty', '-m', 'one')
   new ProjectTrustStore(agentDir).set(trusted, true)
-  const onTree = await treeHost(trusted).host.createSession(crypto.randomUUID(), () => trusted)
+  const trustedCore = createFauxCore()
+  trustedCore.setResponses([faux.fauxAssistantMessage('hi')])
+  const onTree = await treeHost(trusted, [fauxModelExtension(trustedCore)]).host.createSession(
+    crypto.randomUUID(),
+    () => trusted,
+  )
   openSessions.push(onTree)
+  await runPrompt(onTree, 'no question')
   expect(onTree.inspect().cwd).not.toBe(trusted)
   expect(await writeAsks(onTree)).toBe(false)
 
@@ -1840,9 +1891,9 @@ test("⚠ a fork's tree is the parent's at the fork point; a restore brings a tu
   const threadId = crypto.randomUUID()
   const hosted = await host.createSession(threadId, () => project)
   openSessions.push(hosted)
-  const tree = hosted.inspect().cwd
   new ProjectTrustStore(agentDir).set(project, true)
   await runPrompt(hosted, 'first')
+  const tree = hosted.inspect().cwd
   // The agent's edit between the turns.
   writeFileSync(join(tree, 'a.txt'), 'agent edit\n')
   await runPrompt(hosted, 'second')

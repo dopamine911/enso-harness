@@ -163,10 +163,14 @@ export async function readThreadMount(deps: ThreadReadDeps, threadId: string): P
     incidents: sessionIncidentsOf(transcript.flatMap((entry) => (entry.kind === 'custom' ? [entry] : []))),
     ...(nowLive === undefined ? coldReading(host, transcript, stored) : liveReading(nowLive, transcript)),
     ...place,
-    // Our record (#555 rule 5), else — nothing built or stored yet — what the host will mint (#551).
+    // Our record (#555 rule 5), else — no file yet, live or not: a new thread, which the host moves
+    // onto a tree at its first run (#551) — whether the host gives its project's threads one.
     tree:
       treeRecordOf(transcript) !== undefined ||
-      (nowLive === undefined && stored === undefined && place.cwd !== '' && host.mintsTreesIn(place.cwd)),
+      (stored === undefined &&
+        (inspection === undefined || inspection.sessionFile === null) &&
+        place.cwd !== '' &&
+        host.mintsTreesIn(place.cwd)),
   }
 }
 

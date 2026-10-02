@@ -949,20 +949,21 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   }
 
   /**
-   * A new thread's session. When it has a tree, the tree's record and pi's header are written at
-   * once rather than at pi's first flush (#551, PR #561 review): pi writes nothing until the first
-   * message, so a thread built and disposed before one — a preview looked at, a restart — would
-   * have no file to be found by, its next build would mint again over a tree that exists, and that
-   * tree would sit in the repository with no record naming it. Reopened from the file so pi appends
-   * to it, never writes it a second time (its first flush opens the file `wx`).
+   * The session a new thread built in its checkout moves onto its tree with (#551): everything it
+   * holds — what was chosen before its first run — plus the tree's record, written now as its file
+   * under a header naming the tree, then opened from that file. Written at once, not at pi's first
+   * flush (PR #561 review): a thread disposed before its first message would otherwise have no file
+   * to be found by, and its next build would mint again over the tree that exists. Opened from the
+   * file so pi appends to it, never writes it a second time (its first flush opens the file `wx`).
    */
-  function recordedNewSession(threadId: string, cwd: string, tree: ThreadTreeRecord | undefined): SessionManager {
-    const created = SessionManager.create(cwd, sessionDirFor(cwd), { id: threadId })
-    if (tree === undefined) return created
-    created.appendCustomEntry(ENSO_THREAD_TREE_ENTRY, tree)
-    writeUnflushedSession(created)
-    const file = created.getSessionFile()
-    return file === undefined ? created : SessionManager.open(file)
+  function sessionOnTree(checkoutSession: SessionManager, tree: ThreadTreeRecord): SessionManager {
+    checkoutSession.appendCustomEntry(ENSO_THREAD_TREE_ENTRY, tree)
+    const file = checkoutSession.getSessionFile()
+    if (file === undefined) throw new Error(`thread ${checkoutSession.getSessionId()} has no session file path`)
+    const header = { ...checkoutSession.getHeader(), cwd: tree.path }
+    const lines = [header, ...checkoutSession.getEntries()].map((fileEntry) => `${JSON.stringify(fileEntry)}\n`)
+    writeFileSync(file, lines.join(''))
+    return SessionManager.open(file)
   }
 
   /** A thread's snapshot store (#551): beside its session, under its project — the checkout's or its tree's. */
@@ -1381,23 +1382,133 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         `thread ${threadId}: ${directory} is not a project this server runs sessions in`,
       )
     }
-    // A new thread gets its own tree (#551), minted HERE — before pi is built, so pi's cwd, the
-    // session header and the guards' write root are the tree, not the checkout (its files; a
-    // worktree shares the checkout's git directory, #564). A thread with a file keeps the
-    // directory pi fixed at creation, a tree or the checkout.
-    const minted =
-      located === undefined && treeKindOf(directory) !== undefined
-        ? await mintTree({ threadId, project: directory, name: threadId, from: { kind: 'checkout' } })
-        : undefined
-    if (minted?.kind === 'refused') throw new SessionDirectoryRefused(`thread ${threadId}: ${minted.reason}`)
-    const cwd = minted?.record.path ?? directory
     // @invariant resume/one-id One id, end to end: a file under the thread's id is OPENED, none means one is created under it.
     // `locate` resolves the id through the same listing `readStoredThread` uses (#95), so the file this later flushes
     // is found next time, and the browser adopts under the history's `threadId` (`thread-stores.ts#adoptThread`). The
     // file sits under the agent dir pi resolves from the env the host set, where `pi --mode rpc` put it, so the mode's
     // `active_agent` entries and the transcript land where the TUI's would; `permissionModeState()` below walks them.
-    const sessionManager =
-      located === undefined ? recordedNewSession(threadId, cwd, minted?.record) : SessionManager.open(located.path)
+    if (located !== undefined) return buildHosted(threadId, SessionManager.open(located.path))
+    const created = SessionManager.create(directory, sessionDirFor(directory), { id: threadId })
+    const hosted = await buildHosted(threadId, created)
+    // A new thread whose project gives threads a tree (#551) is built in the checkout and gets its
+    // tree at its first RUN, not here (PR #561 review): a thread only built — a preview looked at,
+    // a permission checked, a model chosen — leaves no worktree, branch or file behind.
+    return treeKindOf(directory) === undefined ? hosted : treeOnFirstRun(threadId, directory, hosted)
+  }
+
+  /**
+   * A new thread that moves onto its own tree when it first runs (#551, PR #561 review). Until
+   * then it runs nowhere — it is pi built in the checkout, answering previews and permission
+   * checks there. At the first `prompt` (or `continueRun`) the tree is minted from the checkout as
+   * it is THEN, the session — everything chosen before (model, thinking, mode, system prompt), the
+   * tree's record, a header naming the tree — is written as the thread's file, and pi is built
+   * again on it; the old build is disposed. Every runtime call goes to the build of the moment,
+   * and every observer stays subscribed across the move. Runs that arrive while it moves wait for
+   * it. A mint that is refused refuses the run, never runs it in the checkout instead, and the next
+   * run tries again.
+   */
+  function treeOnFirstRun(threadId: string, project: string, first: HostedThread): HostedThread {
+    let current = first
+    let moved = false
+    let moving: Promise<string | undefined> | undefined
+    const observers = new Set<(observation: EnsoObservation) => void>()
+    const fanOut = (observation: EnsoObservation): void => {
+      for (const observer of observers) observer(observation)
+    }
+    let unbind = current.runtime.subscribe(fanOut)
+
+    async function moveOntoTree(): Promise<string | undefined> {
+      const minted = await mintTree({ threadId, project, name: threadId, from: { kind: 'checkout' } })
+      if (minted.kind === 'refused') return minted.reason
+      const checkoutSession = liveSessionManagers.get(threadId)
+      if (checkoutSession === undefined) return `thread ${threadId} was disposed before it ran`
+      const next = await buildHosted(threadId, sessionOnTree(checkoutSession, minted.record))
+      unbind()
+      const previous = current
+      current = next
+      unbind = next.runtime.subscribe(fanOut)
+      moved = true
+      previous.runtime.dispose()
+      return undefined
+    }
+    /** Run `start` on the build on the tree — moving there first, once. */
+    function onTree(outcome: PromptOutcome, start: () => void): void {
+      if (moved) {
+        start()
+        return
+      }
+      moving ??= moveOntoTree()
+      moving.then(
+        (refusal) => {
+          if (refusal === undefined) {
+            start()
+            return
+          }
+          moving = undefined
+          outcome.onRejected(`thread ${threadId} has no tree to run in: ${refusal}`)
+        },
+        (error: unknown) => {
+          moving = undefined
+          log.error('thread {threadId} could not move onto its tree: {error}', { threadId, error })
+          outcome.onRejected(`thread ${threadId} could not move onto its tree: ${String(error)}`)
+        },
+      )
+    }
+
+    const runtime: ThreadRuntime = {
+      prompt: (request, outcome) => onTree(outcome, () => current.runtime.prompt(request, outcome)),
+      continueRun: (outcome) => onTree(outcome, () => current.runtime.continueRun(outcome)),
+      answerDialog: (response) => current.runtime.answerDialog(response),
+      openDialogs: () => current.runtime.openDialogs(),
+      listCommands: () => current.runtime.listCommands(),
+      modelState: () => current.runtime.modelState(),
+      sessionUsage: () => current.runtime.sessionUsage(),
+      runHostCommand: (run) => current.runtime.runHostCommand(run),
+      startHostFlow: (run, outcome) => current.runtime.startHostFlow(run, outcome),
+      loginInProgress: () => current.runtime.loginInProgress(),
+      cancelLogin: () => current.runtime.cancelLogin(),
+      permissionModeState: () => current.runtime.permissionModeState(),
+      setPermissionMode: (mode, outcome) => current.runtime.setPermissionMode(mode, outcome),
+      setSystemPrompt: (choice) => current.runtime.setSystemPrompt(choice),
+      resolveIncident: (incidentId, resolution) => current.runtime.resolveIncident(incidentId, resolution),
+      subscribe: (observer) => {
+        observers.add(observer)
+        return () => observers.delete(observer)
+      },
+      // A Stop while the thread moves stops the run it is about to start.
+      abort: async () => {
+        await moving
+        return current.runtime.abort()
+      },
+      clearQueue: () => current.runtime.clearQueue(),
+      dispose: () => {
+        unbind()
+        current.runtime.dispose()
+      },
+    }
+    return {
+      runtime,
+      get loadedExtensionPaths() {
+        return current.loadedExtensionPaths
+      },
+      inspect: () => current.inspect(),
+      emittedEvents: () => current.emittedEvents(),
+      branchStats: () => current.branchStats(),
+      branchEval: () => current.branchEval(),
+      branchIncidentHistory: (thresholds) => current.branchIncidentHistory(thresholds),
+      branchJudgeCases: (thresholds) => current.branchJudgeCases(thresholds),
+      branchContext: () => current.branchContext(),
+      previewSystemPrompt: (candidate) => current.previewSystemPrompt(candidate),
+      branchRequestDetail: (request) => current.branchRequestDetail(request),
+      forkPoint: () => current.forkPoint(),
+      probeToolCall: (toolName, input) => current.probeToolCall(toolName, input),
+      checkPermission: (request) => current.checkPermission(request),
+    }
+  }
+
+  /** pi built on `sessionManager` — a thread's whole session, events flowing, extensions bound. */
+  async function buildHosted(threadId: string, sessionManager: SessionManager): Promise<HostedThread> {
+    const cwd = sessionManager.getCwd()
     liveSessionManagers.set(threadId, sessionManager)
     // The thread's system prompt (#443): the one its branch recorded, else pi's default until a
     // Start chooses one (`setSystemPrompt` below). An entry that does not read refuses the build —
