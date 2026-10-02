@@ -201,12 +201,12 @@ const offeredUndo = new WeakMap<RestoreStores['notifications'], { readonly line:
  * (#565): the safety the dialog promised, one press away. Pressed, it undoes THAT restore — the
  * undo names the notice's safety, and the server refuses it once a later restore replaced those
  * files — and a press that did not (refused, or not reached) puts the action back, so the only way
- * to undo is not used up by a press that undid nothing. The notice before loses its undo.
+ * to undo is not used up by a press that undid nothing. The notice before loses its undo, and says
+ * what became of it: `before` — undone, or replaced by a later restore.
  */
-function sayRestored(stores: RestoreStores, receipt: RestoreReceipt, what: string): void {
-  const before = offeredUndo.get(stores.notifications)
-  if (before !== undefined)
-    stores.notifications.resolveLine(before.line, `${before.message} — a later restore replaced it`)
+function sayRestored(stores: RestoreStores, receipt: RestoreReceipt, what: string, before: string): void {
+  const previous = offeredUndo.get(stores.notifications)
+  if (previous !== undefined) stores.notifications.resolveLine(previous.line, `${previous.message} — ${before}`)
   const message = `thread ${stores.threadId}: ${what} ${receipt.hash.slice(0, SHORT_HASH)}; the files before are kept as ${receipt.safety.slice(0, SHORT_HASH)}`
   const action = {
     label: UNDO_RESTORE_LABEL,
@@ -234,13 +234,13 @@ async function postRestore(
   stores: RestoreStores,
   route: 'restore' | 'restore/undo',
   init: RequestInit,
-  said: { readonly done: string; readonly action: string },
+  said: { readonly done: string; readonly action: string; readonly before: string },
 ): Promise<RestoreReceipt | undefined> {
   try {
     const receipt = await restoreReceiptOf(
       await stores.fetch(`/api/threads/${encodeURIComponent(stores.threadId)}/${route}`, init),
     )
-    sayRestored(stores, receipt, said.done)
+    sayRestored(stores, receipt, said.done, said.before)
     return receipt
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error)
@@ -270,7 +270,11 @@ export async function restoreFromPage(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ entryId: found.entryId }),
   }
-  return postRestore(stores, 'restore', init, { done: 'files restored to', action: 'restore' })
+  return postRestore(stores, 'restore', init, {
+    done: 'files restored to',
+    action: 'restore',
+    before: 'a later restore replaced it',
+  })
 }
 
 /**
@@ -279,5 +283,9 @@ export async function restoreFromPage(
  */
 function undoFromPage(stores: RestoreStores, safety: string): Promise<RestoreReceipt | undefined> {
   const init = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ safety }) }
-  return postRestore(stores, 'restore/undo', init, { done: 'last restore undone: files back to', action: 'undo' })
+  return postRestore(stores, 'restore/undo', init, {
+    done: 'last restore undone: files back to',
+    action: 'undo',
+    before: 'undone',
+  })
 }

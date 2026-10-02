@@ -192,7 +192,10 @@ test('⚠ a restore\'s notice offers "Undo last restore": a refused press keeps 
   const undoneLine = stores.notifications.get().at(-1)
   expect(undoneLine?.message).toContain('last restore undone: files back to bbbbbbb')
   expect(undoneLine?.action?.label).toBe(UNDO_RESTORE_LABEL)
-  expect(stores.notifications.get().find((line) => line.id === restoredLine?.id)?.action).toBeUndefined()
+  const undoneRestore = stores.notifications.get().find((line) => line.id === restoredLine?.id)
+  expect(undoneRestore?.action).toBeUndefined()
+  // Said as what happened to it (PR #561 review): undone — not "replaced by a later restore".
+  expect(undoneRestore?.message).toEndWith('— undone')
   // Each press named the safety its notice promised (PR #561 review): the server undoes that
   // restore or none, never a later one.
   expect(undoPosts).toEqual([`{"safety":"${'b'.repeat(40)}"}`, `{"safety":"${'b'.repeat(40)}"}`])

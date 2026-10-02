@@ -1453,11 +1453,19 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     const whileMoving = `thread ${threadId} is moving onto its tree; try again once its first run has started`
     const isMoving = (): boolean => moving !== undefined && !moved
 
-    /** The mint undone: the tree, its branch and store, the file the move wrote; the checkout session back. */
-    async function undoMove(tree: ThreadTreeRecord, why: string): Promise<string> {
+    /**
+     * The mint undone: the tree, its branch and store, the file the move wrote; the checkout session
+     * back. The live-session entry is touched only while it still holds `treeSession`, the one this
+     * move built (a build that threw had set it): the checkout session takes it back, or — the thread
+     * disposed meanwhile — it goes. Any other entry is a newer build's under the same id, and stays.
+     */
+    async function undoMove(tree: ThreadTreeRecord, why: string, treeSession?: SessionManager): Promise<string> {
       const file = checkoutSession.getSessionFile()
       if (file !== undefined && existsSync(file)) unlinkSync(file)
-      if (!disposed) liveSessionManagers.set(threadId, checkoutSession)
+      if (treeSession !== undefined && liveSessionManagers.get(threadId) === treeSession) {
+        if (disposed) liveSessionManagers.delete(threadId)
+        else liveSessionManagers.set(threadId, checkoutSession)
+      }
       const store = storeOf(threadId, tree.path)
       const removed =
         store === undefined ? undefined : await disposeThreadTree({ record: tree, store, force: true, environment })
@@ -1476,11 +1484,13 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       if (minted.kind === 'refused') return minted.reason
       if (disposed) return undoMove(minted.record, `thread ${threadId} was disposed before it ran`)
       let next: HostedThread
+      let treeSession: SessionManager | undefined
       try {
-        next = await buildHosted(threadId, sessionOnTree(checkoutSession, minted.record))
+        treeSession = sessionOnTree(checkoutSession, minted.record)
+        next = await buildHosted(threadId, treeSession)
       } catch (error) {
         log.error('thread {threadId} could not be built on its tree: {error}', { threadId, error })
-        return undoMove(minted.record, `its build on the tree failed: ${String(error)}`)
+        return undoMove(minted.record, `its build on the tree failed: ${String(error)}`, treeSession)
       }
       if (disposed) {
         next.runtime.dispose()
