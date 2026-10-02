@@ -1,11 +1,13 @@
 import { expect, test } from 'bun:test'
 import { execFileSync } from 'node:child_process'
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   symlinkSync,
   utimesSync,
@@ -17,6 +19,7 @@ import {
   collectSnapshotGarbage,
   forksOfStore,
   materializeSnapshot,
+  migrateSnapshotStores,
   openSnapshotStore,
   type SnapshotStore,
   type SnapshotTaken,
@@ -477,9 +480,14 @@ test("⚠ a collection removes what only a deleted thread's store reached, and k
  * A store as #560 minted it: its own `objects`, the checkout's named in `objects/info/alternates`
  * (and `alternates` after them), the checkout's index as its seed, one snapshot taken by hand.
  */
-function legacyStore(directory: string, tree: string, alternates: readonly string[] = []): string {
+function legacyStore(
+  directory: string,
+  tree: string,
+  alternates: readonly string[] = [],
+  objectFormat = 'sha1',
+): string {
   const env = { PATH: environment.PATH, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' }
-  execFileSync('git', ['init', '--quiet', '--bare', directory], { env })
+  execFileSync('git', ['init', '--quiet', '--bare', `--object-format=${objectFormat}`, directory], { env })
   writeFileSync(
     join(directory, 'objects', 'info', 'alternates'),
     `${[join(tree, '.git', 'objects'), ...alternates].join('\n')}\n`,
@@ -535,4 +543,130 @@ test("⚠ a pre-#573 store is migrated when opened: its snapshots borrowed from 
     })
     expect(readFileSync(join(copy, 'src.ts'), 'utf8')).toBe('export const one = 2\n')
   }
+})
+
+/** `store`'s HEAD made unreadable while `during` runs — exit 128, as a timeout, a spawn failure or a permission error would be, never the unborn HEAD's 1 — then put back. */
+async function withUnreadableHead<T>(store: string, during: () => Promise<T>): Promise<T> {
+  const head = readFileSync(join(store, 'HEAD'), 'utf8')
+  writeFileSync(join(store, 'HEAD'), 'not a ref\n')
+  try {
+    return await during()
+  } finally {
+    writeFileSync(join(store, 'HEAD'), head)
+  }
+}
+
+/** The step a store-wide operation was refused at, or what it returned instead. */
+function refusedStep(outcome: unknown): unknown {
+  return typeof outcome === 'object' && outcome !== null && 'refused' in outcome
+    ? (outcome as { refused: { step: string } }).refused.step
+    : outcome
+}
+
+// #575 review: a HEAD read that failed was taken for "no history", so the collection named no ref
+// for that store and pruned every snapshot of a live thread.
+test("⚠ a collection refuses, every object kept, when a live store's HEAD cannot be read (#573)", async () => {
+  const tree = checkout()
+  const snapshots = mkdtempSync(join(tmpdir(), 'enso-snap-project-'))
+  const live = await opened(tree, snapshots)
+  writeFileSync(join(tree, 'live-only.txt'), 'only the live thread has this\n')
+  const kept = await taken(live)
+  aged(join(snapshots, '.objects', 'objects'))
+  const collected = await withUnreadableHead(live.directory, () => collectSnapshotGarbage(snapshots, environment))
+  expect(refusedStep(collected)).toBe('rev-parse')
+  expect(holds(live.directory, kept.hash)).toBe(true)
+})
+
+// #575 review: the same read in a migration was taken for "nothing to pack", and the store's own
+// objects — never packed — were deleted with its old `objects` directory.
+test("⚠ a migration refuses, the store as it was, when a pre-#573 store's HEAD cannot be read (#573)", async () => {
+  const tree = checkout()
+  writeFileSync(join(tree, 'own.txt'), 'only in the old store\n')
+  const snapshots = mkdtempSync(join(tmpdir(), 'enso-snap-project-'))
+  const old = join(snapshots, 'old')
+  const at = legacyStore(old, tree)
+  const migrated = await withUnreadableHead(old, () => migrateSnapshotStores(snapshots, environment))
+  expect(refusedStep(migrated)).toBe('rev-parse')
+  expect(holds(old, at)).toBe(true)
+})
+
+/**
+ * A pre-#573 store in `snapshots` (whose object store exists) as a migration left it between the
+ * rename of its `objects` and the link: its own objects set aside, unpacked — what a snapshot
+ * written after the migration's pack leaves too.
+ */
+function interruptedStore(snapshots: string, tree: string, objectFormat = 'sha1'): { store: string; at: string } {
+  const store = join(snapshots, 'interrupted')
+  const at = legacyStore(store, tree, [], objectFormat)
+  renameSync(join(store, 'objects'), join(store, 'objects.legacy-crashed'))
+  return { store, at }
+}
+
+// #575 review: the set-aside objects were deleted once linked — and with them every object a
+// snapshot wrote there after the pack, by a handle opened before the migration.
+test('⚠ a migration keeps the objects it finds set aside, unpacked: a snapshot written after the pack is still readable (#573)', async () => {
+  const tree = checkout()
+  writeFileSync(join(tree, 'late.txt'), 'written after the pack\n')
+  const snapshots = mkdtempSync(join(tmpdir(), 'enso-snap-project-'))
+  await opened(tree, snapshots)
+  const { store, at } = interruptedStore(snapshots, tree)
+  expect(await migrateSnapshotStores(snapshots, environment)).toEqual({ migrated: [store], pruned: [] })
+  expect(holds(store, at)).toBe(true)
+})
+
+test('⚠ a store a migration left between rename and link is healed by its own open, and snapshots again (#573)', async () => {
+  const tree = checkout()
+  const snapshots = mkdtempSync(join(tmpdir(), 'enso-snap-project-'))
+  await opened(tree, snapshots)
+  const { store, at } = interruptedStore(snapshots, tree)
+  const reopened = await openSnapshotStore({ directory: store, tree, environment })
+  if (reopened === undefined) throw new Error('did not open')
+  writeFileSync(join(tree, 'src.ts'), 'export const one = 5\n')
+  const next = await taken(reopened)
+  // The new snapshot's parent is the store's last, which only the set-aside objects held.
+  expect(
+    execFileSync('git', ['--git-dir', store, 'rev-parse', `${next.hash}^`], {
+      encoding: 'utf8',
+      env: { PATH: environment.PATH },
+    }).trim(),
+  ).toBe(at)
+})
+
+test("⚠ an interrupted store of a sha256 project heals: the object store's own format decides, never sha1 assumed (#573)", async () => {
+  const tree = mkdtempSync(join(tmpdir(), 'enso-snap-sha256-'))
+  git(tree, 'init', '--quiet', '--object-format=sha256')
+  writeFileSync(join(tree, 'a.txt'), 'a\n')
+  git(tree, 'add', '--all')
+  git(tree, 'commit', '--quiet', '-m', 'a')
+  const snapshots = mkdtempSync(join(tmpdir(), 'enso-snap-project-'))
+  await opened(tree, snapshots)
+  const { store, at } = interruptedStore(snapshots, tree, 'sha256')
+  expect(await migrateSnapshotStores(snapshots, environment)).toEqual({ migrated: [store], pruned: [] })
+  expect(holds(store, at)).toBe(true)
+})
+
+test('a pre-#573 store whose migration cannot link it opens as `undefined`, never a thrown open (#573)', async () => {
+  const tree = checkout()
+  const snapshots = mkdtempSync(join(tmpdir(), 'enso-snap-project-'))
+  const old = join(snapshots, 'old')
+  legacyStore(old, tree)
+  chmodSync(old, 0o555)
+  try {
+    expect(await openSnapshotStore({ directory: old, tree, environment })).toBeUndefined()
+  } finally {
+    chmodSync(old, 0o755)
+  }
+})
+
+// #575 review: a busy migration was ignored and the old store handed out, its next snapshot
+// written where the migration was about to set aside.
+test('a pre-#573 store opens as `undefined` while another migration holds the project, and migrated once it is free (#573)', async () => {
+  const tree = checkout()
+  const snapshots = mkdtempSync(join(tmpdir(), 'enso-snap-project-'))
+  const old = join(snapshots, 'old')
+  legacyStore(old, tree)
+  mkdirSync(join(snapshots, '.lock'))
+  expect(await openSnapshotStore({ directory: old, tree, environment })).toBeUndefined()
+  rmSync(join(snapshots, '.lock'), { recursive: true })
+  expect((await openSnapshotStore({ directory: old, tree, environment }))?.migration?.migrated).toEqual([old])
 })

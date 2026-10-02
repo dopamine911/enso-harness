@@ -577,15 +577,8 @@ export async function migrateSnapshotStores(
     const stores = pending()
     const legacy = stores.filter(isLegacyStore)
     const objectStore = objectStoreOf(snapshotsDir)
-    const first = legacy[0]
-    const format = first === undefined ? 'sha1' : ((await objectFormatOf(environment, first)) ?? 'sha1')
-    if ((await ensureObjectStore(environment, objectStore, format)) !== format) {
-      return refusedBy('object-store', {
-        code: 1,
-        stdout: '',
-        stderr: `the object store at ${objectStore} is not ${format}`,
-      })
-    }
+    const format = await migrationFormat(environment, objectStore, legacy)
+    if (typeof format !== 'string') return format
     const pruned: { store: string; missing: number }[] = []
     const kept = legacy.filter((store) => !existsSync(join(store, LEGACY_ORPHANED_FILE)))
     for (const store of kept) {
@@ -593,26 +586,61 @@ export async function migrateSnapshotStores(
       if (typeof packed !== 'number') return packed
       if (packed > 0) pruned.push({ store, missing: packed })
     }
-    // A line of a fork's alternates is `<store>/objects`: matched by the store, never through the
-    // objects path, which for a store migrated already resolves to the object store's.
-    const storeIds = new Map(threadStoresIn(snapshotsDir).map((store) => [canonical(store), basename(store)]))
-    for (const store of kept) recordLegacyLineage(store, storeIds)
-    for (const store of stores) {
-      if (!existsSync(join(store, LEGACY_ORPHANED_FILE))) linkMigratedStore(store)
-    }
-    for (const store of legacy) {
-      if (existsSync(join(store, LEGACY_ORPHANED_FILE))) rmSync(store, { recursive: true, force: true })
+    // A failed write here leaves stores between rename and link: a refusal, healed by the next
+    // migration, never a throw out of an open.
+    try {
+      // A line of a fork's alternates is `<store>/objects`: matched by the store, never through the
+      // objects path, which for a store migrated already resolves to the object store's.
+      const storeIds = new Map(threadStoresIn(snapshotsDir).map((store) => [canonical(store), basename(store)]))
+      for (const store of kept) recordLegacyLineage(store, storeIds)
+      for (const store of stores) {
+        if (!existsSync(join(store, LEGACY_ORPHANED_FILE))) linkMigratedStore(store, objectStore)
+      }
+      for (const store of legacy) {
+        if (existsSync(join(store, LEGACY_ORPHANED_FILE))) rmSync(store, { recursive: true, force: true })
+      }
+    } catch (error) {
+      return refusedBy('link', { code: 1, stdout: '', stderr: String(error) })
     }
     return { migrated: stores.filter((store) => existsSync(store)), pruned }
   })
 }
 
-/** Whether a crash left `store` between a migration's rename of its objects and their link. */
+/**
+ * The format a migration's object store has: its own when it exists — a store left between rename
+ * and link has none to read — else the first pre-#573 store's, else sha1. Refused when the object
+ * store cannot be made in it, or a pre-#573 store's format differs: it could not share it.
+ */
+async function migrationFormat(
+  environment: NodeJS.ProcessEnv,
+  objectStore: string,
+  legacy: readonly string[],
+): Promise<string | Refusal> {
+  const existing = existsSync(join(objectStore, 'HEAD')) ? await objectFormatOf(environment, objectStore) : undefined
+  const first = legacy[0]
+  const format = existing ?? (first === undefined ? undefined : await objectFormatOf(environment, first)) ?? 'sha1'
+  const refused = (stderr: string): Refusal => refusedBy('object-store', { code: 1, stdout: '', stderr })
+  if ((await ensureObjectStore(environment, objectStore, format)) !== format) {
+    return refused(`the object store at ${objectStore} is not ${format}`)
+  }
+  for (const store of legacy) {
+    const own = await objectFormatOf(environment, store)
+    if (own !== undefined && own !== format) return refused(`the store at ${store} is ${own}, its project's ${format}`)
+  }
+  return format
+}
+
+/**
+ * Whether a crash left `store` between a migration's rename of its objects and their link: a
+ * `HEAD`, and no `objects` at all.
+ */
 function interruptedMigration(store: string): boolean {
+  if (!existsSync(join(store, 'HEAD'))) return false
   try {
-    return readdirSync(store).some((entry) => entry.startsWith('objects.legacy-'))
-  } catch {
+    lstatSync(join(store, 'objects'))
     return false
+  } catch {
+    return true
   }
 }
 
@@ -627,7 +655,10 @@ async function packLegacyStore(
   store: string,
 ): Promise<number | Refusal> {
   const head = await runObjectStoreGit(environment, store, ['rev-parse', '--verify', '--quiet', 'HEAD'])
-  if (head.code !== 0) return 0
+  // Exit 1 is an unborn HEAD: nothing to pack. Any other failure is a history unread, which the
+  // link would then delete with the old objects — refused, every store as it was.
+  if (head.code === 1) return 0
+  if (head.code !== 0) return refusedBy('rev-parse', head)
   const alternate = join(store, 'objects')
   const packed = await runObjectStoreGit(
     environment,
@@ -662,14 +693,88 @@ function recordLegacyLineage(store: string, storeIds: ReadonlyMap<string, string
   if (ancestors.length > 0) writeFileSync(join(store, FORKED_FROM_FILE), `${ancestors.join('\n')}\n`)
 }
 
-/** A packed pre-#573 store's own objects set aside, the link to the object store's made, then the old ones removed. */
-function linkMigratedStore(store: string): void {
-  if (isLegacyStore(store)) renameSync(join(store, 'objects'), join(store, `objects.legacy-${randomUUID()}`))
-  if (!existsSync(join(store, 'objects'))) linkObjects(store)
-  for (const entry of readdirSync(store)) {
-    if (entry.startsWith('objects.legacy-')) rmSync(join(store, entry), { recursive: true, force: true })
+/** The old object directories a migration set `store`'s own aside as, by path. */
+function setAsideOf(store: string): string[] {
+  try {
+    return readdirSync(store)
+      .filter((entry) => entry.startsWith(SET_ASIDE_PREFIX))
+      .map((entry) => join(store, entry))
+  } catch {
+    return []
   }
 }
+
+/** The directory a migration sets a pre-#573 store's own objects aside as, before its link. */
+const SET_ASIDE_PREFIX = 'objects.legacy-'
+
+/**
+ * A packed pre-#573 store's own objects set aside, the link to the object store's made, then every
+ * object set aside MOVED into the object store — never deleted: a handle opened before the
+ * migration may have written a snapshot there after the pack (#575 review). The emptied directory
+ * stays until {@link collectSnapshotGarbage} finds nothing new in it for the grace.
+ */
+function linkMigratedStore(store: string, objectStore: string): void {
+  if (isLegacyStore(store)) renameSync(join(store, 'objects'), join(store, `${SET_ASIDE_PREFIX}${randomUUID()}`))
+  if (interruptedMigration(store)) linkObjects(store)
+  for (const aside of setAsideOf(store)) moveObjects(aside, join(objectStore, 'objects'))
+}
+
+/**
+ * Every object in the object directory `from` moved into `to`: each loose object, then each pack —
+ * its index last, since git finds a pack by its index. One `to` holds already is dropped from
+ * `from` (same name, same content); git's temporary files are left.
+ */
+function moveObjects(from: string, to: string): void {
+  const move = (source: string, target: string): void => {
+    if (existsSync(target)) rmSync(source, { force: true })
+    else renameSync(source, target)
+  }
+  for (const entry of readdirSync(from, { withFileTypes: true })) {
+    if (!entry.isDirectory() || !/^[0-9a-f]{2}$/.test(entry.name)) continue
+    mkdirSync(join(to, entry.name), { recursive: true })
+    for (const name of readdirSync(join(from, entry.name))) {
+      if (/^[0-9a-f]+$/.test(name)) move(join(from, entry.name, name), join(to, entry.name, name))
+    }
+  }
+  let packs: string[]
+  try {
+    packs = readdirSync(join(from, 'pack')).filter((name) => name.startsWith('pack-'))
+  } catch {
+    return
+  }
+  mkdirSync(join(to, 'pack'), { recursive: true })
+  for (const name of [
+    ...packs.filter((pack) => !pack.endsWith('.idx')),
+    ...packs.filter((pack) => pack.endsWith('.idx')),
+  ]) {
+    move(join(from, 'pack', name), join(to, 'pack', name))
+  }
+}
+
+/** The newest change under a set-aside directory: itself, its fan-out directories and its packs'. */
+function newestChangeIn(directory: string): number {
+  let newest = statSync(directory).mtimeMs
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    if (entry.isDirectory()) newest = Math.max(newest, statSync(join(directory, entry.name)).mtimeMs)
+  }
+  return newest
+}
+
+/**
+ * Each store's set-aside objects moved into the object store again — what a late writer put there
+ * since — and a set-aside directory removed once nothing has changed in it for the grace.
+ */
+function settleSetAside(stores: readonly string[], objectStore: string): void {
+  for (const store of stores) {
+    for (const aside of setAsideOf(store)) {
+      moveObjects(aside, join(objectStore, 'objects'))
+      if (Date.now() - newestChangeIn(aside) > COLLECTION_GRACE_MS) rmSync(aside, { recursive: true, force: true })
+    }
+  }
+}
+
+/** How long an object no ref reaches is kept: a snapshot in flight writes its objects before its HEAD. */
+const COLLECTION_GRACE_MS = 60 * 60_000
 
 /**
  * Remove the objects in `snapshotsDir`'s object store that no thread store's history reaches (#573):
@@ -688,11 +793,19 @@ export async function collectSnapshotGarbage(
   if (!existsSync(join(objectStore, 'HEAD'))) return 'collected'
   return withStoresLock(snapshotsDir, async () => {
     const stores = threadStoresIn(snapshotsDir)
-    if (stores.some(isLegacyStore)) return 'busy'
+    if (stores.some((store) => isLegacyStore(store) || interruptedMigration(store))) return 'busy'
+    try {
+      settleSetAside(stores, objectStore)
+    } catch (error) {
+      return refusedBy('set-aside', { code: 1, stdout: '', stderr: String(error) })
+    }
     const heads = new Map<string, string>()
     for (const store of stores) {
       const head = await runObjectStoreGit(environment, store, ['rev-parse', '--verify', '--quiet', 'HEAD'])
+      // Exit 1 is an unborn HEAD: no history to keep. Any other failure is a history unread, which
+      // the collection would then prune — refused before a ref is touched, every object kept.
       if (head.code === 0) heads.set(`refs/enso/${basename(store)}`, head.stdout.trim())
+      else if (head.code !== 1) return refusedBy('rev-parse', head)
     }
     const listed = await runObjectStoreGit(environment, objectStore, [
       'for-each-ref',
@@ -723,10 +836,11 @@ export async function collectSnapshotGarbage(
  * Refused as `undefined` when the mint's git fails — the caller records no snapshot, never a
  * half-made store.
  *
- * A mint, or an open of a store from before #573, first migrates the project's pre-#573 stores
- * ({@link migrateSnapshotStores}): a fork's base must be in the object store, and a store must not
- * keep borrowing from the checkout. What it did is `migration` on the store; a migration that is
- * busy or refused leaves the old stores working as they were.
+ * A mint, or an open of a store from before #573 (or one a migration left between rename and
+ * link), first migrates the project's pre-#573 stores ({@link migrateSnapshotStores}): a fork's
+ * base must be in the object store, and a store must not keep borrowing from the checkout. What it
+ * did is `migration` on the store. ⚠ An old store whose migration is busy or refused opens as
+ * `undefined` (#575 review): a snapshot it took would land where the migration sets aside.
  *
  * `forkOf`, the parent thread's store, records a minted fork's lineage ({@link forksOfStore}); its
  * snapshots are in the object store already. Ignored when the store exists.
@@ -747,10 +861,11 @@ export async function openSnapshotStore(options: {
   const { directory, tree, environment, forkOf, copyOf } = options
   const store = { directory, tree }
   const minting = !existsSync(join(directory, 'HEAD'))
-  const migrated =
-    minting || isLegacyStore(directory) ? await migrateSnapshotStores(dirname(directory), environment) : undefined
+  const unmigrated = !minting && (isLegacyStore(directory) || interruptedMigration(directory))
+  const migrated = minting || unmigrated ? await migrateSnapshotStores(dirname(directory), environment) : undefined
   const migration =
     migrated !== undefined && typeof migrated === 'object' && 'migrated' in migrated ? migrated : undefined
+  if (unmigrated && migration === undefined) return undefined
   if (minting && !(await mintStore(directory, tree, environment, forkOf))) return undefined
   if (copyOf !== undefined) {
     try {
