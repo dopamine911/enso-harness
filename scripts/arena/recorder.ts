@@ -8,6 +8,7 @@ import { knownSecretValues } from '../../packages/core/src/secrets.ts'
 import { isListening } from '../loopback.ts'
 import {
   ARENA_REFUSED_DETAIL,
+  ARENA_RUNNER_STILL_RUNNING,
   type ArenaAction,
   type ArenaTarget,
   describeArenaAction,
@@ -206,6 +207,26 @@ function drive(
       run.resolveStop(`the agent runner failed: ${message}`)
     },
   )
+}
+
+/**
+ * Wait for the runner to end after the stop, at most `settleMs`. A runner still going then — a
+ * model call the abort did not cut short — gets an `agent-end` line saying so (PR #585 review):
+ * without it the manifest folds with no end at all, and the score would lose the signal. If the
+ * runner ends later, its own line comes after this one and the fold reads the last.
+ */
+export async function awaitDriverEnd(
+  done: Promise<void>,
+  timeline: { readonly record: (body: ArenaEventBody) => unknown },
+  settleMs: number = DRIVER_SETTLE_MS,
+): Promise<void> {
+  const ended = await Promise.race([done.then(() => true), Bun.sleep(settleMs).then(() => false)])
+  if (!ended) {
+    timeline.record({
+      kind: 'agent-end',
+      reason: `${ARENA_RUNNER_STILL_RUNNING} ${settleMs / 1000} s after the run stopped: its end is unknown`,
+    })
+  }
 }
 
 /** Score the stopped run and say the verdict; a scoring failure is said on stderr and costs nothing else. */
@@ -620,7 +641,7 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
   // Not forced: the `stop` action that got here is still in flight, and its answer is owed.
   await control?.stop()
   // The runner ends on `stopped`; its transcript is flushed before the page it describes closes.
-  if (driverDone !== undefined) await Promise.race([driverDone, Bun.sleep(DRIVER_SETTLE_MS)])
+  if (driverDone !== undefined) await awaitDriverEnd(driverDone, timeline)
   await serialized(async () => {
     if (browser.isConnected()) {
       await shoot('final')

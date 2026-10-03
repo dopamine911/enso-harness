@@ -10,7 +10,7 @@ import {
   fauxToolCall,
 } from '@earendil-works/pi-ai/providers/faux'
 import { arenaAgentDriver, arenaToolResult, arenaUiTool, parseModelReference } from '../arena/agent.ts'
-import type { ArenaActOutcome, ArenaDriverSession } from '../arena/recorder.ts'
+import { type ArenaActOutcome, type ArenaDriverSession, awaitDriverEnd } from '../arena/recorder.ts'
 import type { ArenaEventBody } from '../arena/timeline.ts'
 
 /**
@@ -164,4 +164,16 @@ test('a model reference is provider/model-id, split at the first slash', () => {
   expect(parseModelReference('anthropic')).toBeUndefined()
   expect(parseModelReference('/m')).toBeUndefined()
   expect(parseModelReference('anthropic/')).toBeUndefined()
+})
+
+test('a runner still going after the stop is recorded as such; one that ends in time is not', async () => {
+  const recorded: ArenaEventBody[] = []
+  const timeline = { record: (body: ArenaEventBody) => recorded.push(body) }
+  await awaitDriverEnd(new Promise<void>(() => undefined), timeline, 20)
+  expect(recorded).toEqual([
+    { kind: 'agent-end', reason: 'still running 0.02 s after the run stopped: its end is unknown' },
+  ])
+  recorded.length = 0
+  await awaitDriverEnd(Promise.resolve(), timeline, 1000)
+  expect(recorded).toEqual([])
 })

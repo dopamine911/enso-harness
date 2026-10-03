@@ -5,7 +5,7 @@ import { bundleRecordsText } from '../../packages/core/src/log-bundle.ts'
 import type { EnsoLogLine } from '../../packages/core/src/log.ts'
 import { projectIdOf, realpathOrSelf } from '../../packages/core/src/paths.ts'
 import { type EnsoSessionEval, readEnsoSessionEval } from '../../packages/core/src/session-eval.ts'
-import { ARENA_REFUSED_DETAIL } from './actions.ts'
+import { ARENA_REFUSED_DETAIL, ARENA_RUNNER_STILL_RUNNING } from './actions.ts'
 import { type ArenaProjectThread, projectThreads } from './evidence.ts'
 import type { ArenaManifest } from './manifest.ts'
 import { type ArenaEvent, readJsonLines, readTimeline } from './timeline.ts'
@@ -205,10 +205,22 @@ function noThreadOutsideUi(input: ArenaScoreInput): ArenaUiCheck {
     }
   }
   const shown = threadsShown(input.events)
-  const onScreen = (threadId: string | undefined): boolean => threadId !== undefined && shown.has(threadId)
-  const unseen = stored.filter(
-    (thread) => thread.messageCount > 0 && !onScreen(thread.threadId) && !onScreen(thread.parentThreadId),
+  const parentOf = new Map(
+    stored.flatMap((thread) =>
+      thread.parentThreadId === undefined ? [] : [[thread.threadId, thread.parentThreadId] as const],
+    ),
   )
+  // A fork of a fork of a shown thread came from the UI too (PR #585 review): walk the whole chain.
+  const fromShown = (threadId: string): boolean => {
+    const walked = new Set<string>()
+    for (let current: string | undefined = threadId; current !== undefined; current = parentOf.get(current)) {
+      if (shown.has(current)) return true
+      if (walked.has(current)) return false
+      walked.add(current)
+    }
+    return false
+  }
+  const unseen = stored.filter((thread) => thread.messageCount > 0 && !fromShown(thread.threadId))
   return verdictOf(
     'no-thread-outside-ui',
     unseen.length === 0,
@@ -269,6 +281,10 @@ function runProblems(input: ArenaScoreInput): Occurrence[] {
     at('warning', 'the run ran out of budget before the agent finished', manifest.stopReason)
   if (manifest.stopReason.includes('runner failed')) at('error', 'the agent runner failed', manifest.stopReason)
   const endReason = manifest.driver.kind === 'agent' ? manifest.driver.endReason : undefined
+  if (manifest.driver.kind === 'agent' && endReason === undefined)
+    at('warning', "the agent runner's end was not recorded", manifest.stopReason)
+  if (endReason?.startsWith(ARENA_RUNNER_STILL_RUNNING) === true)
+    at('warning', 'the agent runner was still running when the run was folded', endReason)
   if (endReason?.includes('without stopping') === true)
     at('warning', 'the agent ended without stopping the run', endReason)
   if (endReason?.startsWith('the model call failed') === true) at('error', "the agent's model call failed", endReason)

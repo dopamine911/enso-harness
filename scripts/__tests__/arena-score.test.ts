@@ -104,6 +104,8 @@ test('the UI checks fail on what Enso recorded, not only on what the recorder sa
     projectThreads: [
       { threadId: SHOWN, messageCount: 12 },
       { threadId: FORK, messageCount: 4, parentThreadId: SHOWN },
+      // A fork of that fork: its chain reaches a shown thread, so it came from the UI too.
+      { threadId: '4d5e6f70-5a3b-4c55-9d43-6c1f0a8e2b75', messageCount: 1, parentThreadId: FORK },
       { threadId: UNSEEN, messageCount: 2 },
       { threadId: '3c4d5e6f-5a3b-4c55-9d43-6c1f0a8e2b74', messageCount: 0 },
     ],
@@ -113,6 +115,7 @@ test('the UI checks fail on what Enso recorded, not only on what the recorder sa
   expect(unseen?.status).toBe('fail')
   expect(unseen?.detail).toContain(UNSEEN)
   expect(unseen?.detail).not.toContain(FORK)
+  expect(unseen?.detail).not.toContain('4d5e6f70')
   // Files changed with no Enso tool call: the work was done outside Enso.
   const noTools = inputOf(AGENT_RUN, {
     evals: new Map([[SHOWN, sessionEval(SHOWN, { humanMessages: 1, toolCalls: 0 })]]),
@@ -304,4 +307,17 @@ test("stored threads are the project's only, and a body that is not a list is un
       'p',
     ),
   ).toEqual([{ threadId: 'a', messageCount: 2, parentThreadId: 'b' }])
+})
+
+test('an agent runner whose end is missing, or that outlived the stop, is a warning, not silence', () => {
+  const noEnd = AGENT_RUN.filter((body) => body.kind !== 'agent-end')
+  const missing = scoreArenaRun(inputOf(noEnd)).problems.map((problem) => problem.message)
+  expect(missing).toContain("the agent runner's end was not recorded")
+  const outlived = scoreArenaRun(
+    inputOf([...noEnd, { kind: 'agent-end', reason: 'still running 15 s after the run stopped: its end is unknown' }]),
+  ).problems.map((problem) => problem.message)
+  expect(outlived).toContain('the agent runner was still running when the run was folded')
+  // A runner that ended normally carries neither.
+  const clean = scoreArenaRun(inputOf(AGENT_RUN)).problems.map((problem) => problem.message)
+  expect(clean.join('\n')).not.toContain('runner')
 })
