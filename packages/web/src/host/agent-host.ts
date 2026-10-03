@@ -512,6 +512,22 @@ export interface HostedThread {
    * never a second matcher. `undefined` when the engine has published no service for the session.
    */
   checkPermission(request: EnsoPermissionCheckRequest): EnsoPermissionVerdict | undefined
+  /**
+   * The project this session answers to, and whether it reads that project's own configuration NOW
+   * (#502): pi's `trust.json`, the thread's "Trust this thread" record, or the default — and true
+   * after a Trust answered in this session. What the project's own prompt library is read from and
+   * gated on (#470). ⚠ The PROJECT, not the cwd: a thread on a tree (#551) answers with its checkout.
+   */
+  projectTrust(): ProjectTrustState
+}
+
+/**
+ * A project's trust as a thread sees it (#470): the project's directory — a tree's checkout (#551),
+ * else the session's cwd — and whether the thread reads that project's own configuration.
+ */
+export interface ProjectTrustState {
+  readonly directory: string
+  readonly trusted: boolean
 }
 
 /**
@@ -753,6 +769,13 @@ export interface AgentHost {
    * commands. Read afresh per call, so a login through one thread shows at once.
    */
   catalogue(): Promise<RuntimeCommand[]>
+  /**
+   * The project a session built for `branch` in `cwd` would answer to, and whether it would read
+   * that project's own configuration (#470): the decision a build makes first (`hostedProjectTrust`,
+   * keyed as the build keys it, #551), asked without building — so the Start dialog lists a
+   * project's prompts for a thread nothing has built yet (#484's rule, #86).
+   */
+  projectTrust(cwd: string, branch: readonly EnsoTranscriptEntry[]): ProjectTrustState
 }
 
 /** One stored session as `readStoredThread` reads it — both halves from one open of the file. */
@@ -1934,6 +1957,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       forkPoint: () => current.forkPoint(),
       probeToolCall: (toolName, input) => current.probeToolCall(toolName, input),
       checkPermission: (request) => current.checkPermission(request),
+      projectTrust: () => current.projectTrust(),
     }
   }
 
@@ -2736,6 +2760,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         if (result === undefined) return undefined
         return { block: result.block === true, reason: result.reason }
       },
+      projectTrust: () => ({ directory: trustDirectory, trusted: projectTrust.settingsManager.isProjectTrusted() }),
       checkPermission(request: EnsoPermissionCheckRequest): EnsoPermissionVerdict | undefined {
         const service = getPermissionsService(sessionManager.getSessionId())
         if (service === undefined) return undefined
@@ -2844,5 +2869,13 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     freshPermissionMode: freshPermissionModeState,
     storedPermissionMode: storedPermissionModeState,
     catalogue,
+    projectTrust(cwd: string, branch: readonly EnsoTranscriptEntry[]): ProjectTrustState {
+      // Keyed as `buildHosted` keys it: a thread on a tree (#551) answers to its checkout.
+      const directory = treeRecordOf(branch)?.project ?? cwd
+      return {
+        directory,
+        trusted: hostedProjectTrust(cwd, directory, agentDir, branch).settingsManager.isProjectTrusted(),
+      }
+    },
   }
 }

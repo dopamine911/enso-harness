@@ -1,4 +1,9 @@
-import type { EnsoLibraryPromptCategory, EnsoLibraryPromptListing, EnsoSystemPromptPreview } from '@enso/core'
+import type {
+  EnsoLibraryPrompt,
+  EnsoLibraryPromptCategory,
+  EnsoLibraryPromptListing,
+  EnsoSystemPromptPreview,
+} from '@enso/core'
 import { TextPart } from '@tanstack/ai-react/ui'
 import { CopyIcon, FilePlusIcon, SaveIcon, ScrollTextIcon, Trash2Icon } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -42,9 +47,13 @@ import {
 import {
   deleteLibraryPrompt,
   fetchLibraryPrompt,
+  fetchProjectPrompt,
+  fetchProjectPromptLibrary,
   fetchPromptLibrary,
   fetchSystemPromptPreview,
   type LibraryListing,
+  type LibraryPromptRead,
+  type ProjectLibraryRead,
 } from './prompt-library-connection.ts'
 import { type HeadState, PromptBreakdown, PromptSizeBar, useDraftHead } from './prompt-size.tsx'
 import { Choice } from './view-parts.tsx'
@@ -63,11 +72,18 @@ import { Choice } from './view-parts.tsx'
  * The editor is ai-elements' `artifact.tsx` (ported) over shadcn's `Textarea` in the mono face;
  * upstream has no markdown editor, and the rendered view is the chat's own safe markdown
  * (`TextPart` with `TEXT_PART_COMPONENTS`, whose remote images wait for a click).
+ *
+ * ⚠ A PROJECT'S PROMPTS ARE READ HERE, NEVER WRITTEN (#470). Below the user's library, the thread's
+ * project library (`<project>/.enso/prompts`) when the thread trusts the project: each opens
+ * read-only, with what the model would receive with it, and can be copied into the user's library.
+ * Its files are committed and shared, so they are changed in the repository, not from here.
  */
 
 type Selection =
   | { readonly kind: 'pi-default' }
   | { readonly kind: 'prompt'; readonly id: string }
+  /** A project prompt (#470), open read-only. */
+  | { readonly kind: 'project'; readonly id: string }
   | { readonly kind: 'new' }
 
 /** A move held behind the discard guard, as data: open a selection, start a new draft, or close the manager. */
@@ -95,12 +111,40 @@ function listingOf(library: LibraryState): EnsoLibraryPromptListing | undefined 
   return library.kind === 'loaded' ? library.listing : undefined
 }
 
+type ProjectState = { readonly kind: 'loading' } | { readonly kind: 'none' } | ProjectLibraryRead
+
+/** The thread's project library (#470), read when the manager opens; none without a thread. */
+function useProjectLibrary(
+  open: boolean,
+  threadId: string | undefined,
+  fetchImpl: FetchLike | undefined,
+): ProjectState {
+  const [project, setProject] = useState<ProjectState>({ kind: 'loading' })
+  useEffect(() => {
+    if (!open) return
+    if (threadId === undefined) {
+      setProject({ kind: 'none' })
+      return
+    }
+    let current = true
+    setProject({ kind: 'loading' })
+    void fetchProjectPromptLibrary(threadId, fetchImpl).then((read) => {
+      if (current) setProject(read)
+    })
+    return (): void => {
+      current = false
+    }
+  }, [open, threadId, fetchImpl])
+  return project
+}
+
 /** The library and pi's default, read when the manager opens; `reload` after a write. */
 function useLibrary(
   open: boolean,
   threadId: string | undefined,
   fetchImpl: FetchLike | undefined,
-): { library: LibraryState; runtimeDefault: HeadState; reload: () => void } {
+): { library: LibraryState; project: ProjectState; runtimeDefault: HeadState; reload: () => void } {
+  const project = useProjectLibrary(open, threadId, fetchImpl)
   const [library, setLibrary] = useState<LibraryState>({ kind: 'loading' })
   const [runtimeDefault, setRuntimeDefault] = useState<HeadState>({ kind: 'none' })
   const [generation, setGeneration] = useState(0)
@@ -130,7 +174,7 @@ function useLibrary(
       current = false
     }
   }, [open, threadId, fetchImpl])
-  return { library, runtimeDefault, reload: useCallback(() => setGeneration((value) => value + 1), []) }
+  return { library, project, runtimeDefault, reload: useCallback(() => setGeneration((value) => value + 1), []) }
 }
 
 function ListButton({
@@ -154,12 +198,70 @@ function ListButton({
   )
 }
 
+/**
+ * The project's prompts (#470), every category in one read-only section — or where they are and
+ * that the project is not trusted, or why they could not be listed.
+ */
+function ProjectSection({
+  project,
+  selection,
+  onSelect,
+}: {
+  project: ProjectState
+  selection: Selection
+  onSelect: (next: Selection) => void
+}): React.ReactNode {
+  if (project.kind === 'loading' || project.kind === 'none') return null
+  if (project.kind === 'unavailable') return <FieldError>project prompts: {project.detail}</FieldError>
+  const heading = <h3 className="px-2 text-xs font-semibold text-muted-foreground">Project prompts</h3>
+  if (project.project.kind === 'untrusted') {
+    return (
+      <section aria-label="Project prompts" className="grid gap-0.5">
+        {heading}
+        <p className="px-2 text-xs text-muted-foreground">
+          not read: the project is not trusted ({project.project.directory})
+        </p>
+      </section>
+    )
+  }
+  const { prompts, refused } = project.project.listing
+  if (prompts.length === 0 && refused.length === 0) return null
+  return (
+    <section aria-label="Project prompts" className="grid gap-0.5">
+      {heading}
+      {prompts.map((prompt) => (
+        <ListButton
+          key={prompt.id}
+          selected={selection.kind === 'project' && selection.id === prompt.id}
+          onSelect={() => onSelect({ kind: 'project', id: prompt.id })}
+        >
+          <span className="truncate">{prompt.name}</span>
+          <span className="font-mono text-xs text-muted-foreground">
+            {prompt.category} · ≈{prompt.tokens.toLocaleString('en')}
+          </span>
+        </ListButton>
+      ))}
+      {refused.length === 0 ? null : (
+        <FieldError>
+          {refused.map((file) => (
+            <span key={file.file} className="block">
+              refused project {file.reason}
+            </span>
+          ))}
+        </FieldError>
+      )}
+    </section>
+  )
+}
+
 function PromptList({
   library,
+  project,
   selection,
   onSelect,
 }: {
   library: LibraryState
+  project: ProjectState
   selection: Selection
   onSelect: (next: Selection) => void
 }): React.ReactNode {
@@ -198,6 +300,7 @@ function PromptList({
           ))}
         </FieldError>
       )}
+      <ProjectSection project={project} selection={selection} onSelect={onSelect} />
     </nav>
   )
 }
@@ -269,6 +372,83 @@ function RuntimeDefaultPanel({
       <ArtifactContent className="grid content-start gap-3">
         <BodyField body={preview?.sections.map((section) => section.text).join('\n\n') ?? ''} readOnly={true} />
       </ArtifactContent>
+      <PromptBreakdown head={head} />
+    </Artifact>
+  )
+}
+
+/** A project prompt as a draft for the user's library: the same file name and fields, not yet saved. */
+function userCopyOf(prompt: EnsoLibraryPrompt): EditorDraft {
+  const { id, name, description, category, body } = prompt
+  return { id, name, description, category, body }
+}
+
+/** A project prompt, read fresh each time it is selected; `undefined` while the read is in flight. */
+function useProjectPrompt(
+  threadId: string | undefined,
+  id: string,
+  fetchImpl: FetchLike | undefined,
+): LibraryPromptRead | undefined {
+  const [read, setRead] = useState<LibraryPromptRead | undefined>(undefined)
+  useEffect(() => {
+    if (threadId === undefined) return
+    let current = true
+    setRead(undefined)
+    void fetchProjectPrompt(threadId, id, fetchImpl).then((loaded) => {
+      if (current) setRead(loaded)
+    })
+    return (): void => {
+      current = false
+    }
+  }, [threadId, id, fetchImpl])
+  return read
+}
+
+/**
+ * A project prompt (#470), read-only: its fields, its markdown, and what the model would receive
+ * with it. Copy puts it in the user's library as a new prompt under the same file name.
+ */
+function ProjectPromptPanel(props: {
+  threadId: string | undefined
+  id: string
+  onCopy: (draft: EditorDraft) => void
+  window: EnsoSystemPromptPreview | undefined
+  fetch: FetchLike | undefined
+}): React.ReactNode {
+  const read = useProjectPrompt(props.threadId, props.id, props.fetch)
+  if (read === undefined) return <p className="p-4 text-sm text-muted-foreground">opening…</p>
+  if (read.kind === 'unavailable') return <FieldError>{read.detail}</FieldError>
+  return <ProjectPromptView prompt={read.prompt} {...props} />
+}
+
+function ProjectPromptView(props: {
+  prompt: EnsoLibraryPrompt
+  threadId: string | undefined
+  onCopy: (draft: EditorDraft) => void
+  window: EnsoSystemPromptPreview | undefined
+  fetch: FetchLike | undefined
+}): React.ReactNode {
+  const { prompt } = props
+  const draft = userCopyOf(prompt)
+  const head = useDraftHead(props.threadId, draft, props.fetch)
+  return (
+    <Artifact className="h-full">
+      <ArtifactHeader>
+        <div>
+          <ArtifactTitle>{prompt.name}</ArtifactTitle>
+          <ArtifactDescription>
+            .enso/prompts/{prompt.id}.md · {CATEGORY_LABELS[prompt.category]} · the project's — read-only
+          </ArtifactDescription>
+        </div>
+        <ArtifactActions>
+          <ArtifactAction icon={CopyIcon} label="Copy to my library" onClick={() => props.onCopy(draft)} />
+        </ArtifactActions>
+      </ArtifactHeader>
+      <ArtifactContent className="grid content-start gap-3">
+        {prompt.description.length === 0 ? null : <p className="text-sm text-muted-foreground">{prompt.description}</p>}
+        <BodyField body={prompt.body} readOnly={true} />
+      </ArtifactContent>
+      <PromptSizeBar draft={draft} head={head} window={props.window} />
       <PromptBreakdown head={head} />
     </Artifact>
   )
@@ -644,6 +824,18 @@ function SelectedPanel({
       />
     )
   }
+  if (manager.selection.kind === 'project') {
+    return (
+      <ProjectPromptPanel
+        key={manager.selection.id}
+        threadId={threadId}
+        id={manager.selection.id}
+        onCopy={(draft) => manager.start(newState(draft))}
+        window={runtimeDefault.kind === 'loaded' ? runtimeDefault.preview : undefined}
+        fetch={fetchImpl}
+      />
+    )
+  }
   const { editor } = manager
   if (editor === undefined) {
     return manager.refusal === undefined ? (
@@ -673,12 +865,14 @@ function SelectedPanel({
 
 function ManagerBody({
   library,
+  project,
   runtimeDefault,
   manager,
   threadId,
   fetch: fetchImpl,
 }: {
   library: LibraryState
+  project: ProjectState
   runtimeDefault: HeadState
   manager: ManagerState
   threadId: string | undefined
@@ -692,7 +886,7 @@ function ManagerBody({
             <FilePlusIcon /> New
           </Button>
         </div>
-        <PromptList library={library} selection={manager.selection} onSelect={manager.select} />
+        <PromptList library={library} project={project} selection={manager.selection} onSelect={manager.select} />
       </div>
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {manager.pending === undefined ? (
@@ -724,7 +918,7 @@ export function PromptManagerDialog({
   fetch?: FetchLike
 }): React.ReactNode {
   const [open, setOpen] = useState(false)
-  const { library, runtimeDefault, reload } = useLibrary(open, threadId, fetch)
+  const { library, project, runtimeDefault, reload } = useLibrary(open, threadId, fetch)
   const manager = useManagerState(library, reload, fetch, () => setOpen(false))
   return (
     <Dialog open={open} onOpenChange={(next: boolean) => (next ? setOpen(true) : manager.close())}>
@@ -741,10 +935,14 @@ export function PromptManagerDialog({
       <DialogContent className="flex h-5/6 flex-col sm:max-w-6xl">
         <DialogHeader>
           <DialogTitle>Prompts</DialogTitle>
-          <DialogDescription>markdown files in ENSO_HOME/prompts — edit, copy and name them here</DialogDescription>
+          <DialogDescription>
+            markdown files in ENSO_HOME/prompts — edit, copy and name them here; a trusted project's own, in
+            .enso/prompts, are read-only
+          </DialogDescription>
         </DialogHeader>
         <ManagerBody
           library={library}
+          project={project}
           runtimeDefault={runtimeDefault}
           manager={manager}
           threadId={threadId}

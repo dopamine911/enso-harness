@@ -7,14 +7,19 @@ import {
   type EnsoLibraryPromptRefusal,
   type EnsoLibraryPromptSummary,
   EnsoLibraryPromptWrite,
+  type EnsoProjectPromptLibrary,
   type EnsoSystemPromptChoice,
   EnsoSystemPromptDraft,
   ensoLogger,
+  type EnsoLibraryPromptSource,
   isLibraryPromptId,
+  libraryPromptRefOf,
+  PROJECT_PROMPT_PREFIX,
   parseLibraryPrompt,
   serializeLibraryPrompt,
   summarizeLibraryPrompt,
 } from '@enso/core'
+import { projectPromptsDir } from '@enso/core/paths'
 import { readClosedBody } from './follow.ts'
 
 /**
@@ -32,8 +37,11 @@ import { readClosedBody } from './follow.ts'
  * (its `etag`), so a file edited in another editor since is not overwritten unseen. The one exception
  * is asked for by name: `present`, "whatever is there, mine wins".
  *
- * The user's library only, for now: a project library (committed under `.pi/`) is a later slice,
- * and when it lands its precedence is stated here.
+ * ⚠ TWO LIBRARIES, NO PRECEDENCE (#470). The same module reads the user's library and a project's
+ * own (`<project>/.enso/prompts/`, `projectPromptsDir`); they are listed apart, and a choice names
+ * its library in its reference (`project:<id>`), so neither shadows the other. A project's is read
+ * only when the thread trusts the project (`server/index.ts`), and only READ: the routes that write
+ * take the user's library alone, so a committed, shared file is changed in the repository.
  */
 
 const log = ensoLogger('server', 'prompts')
@@ -188,7 +196,11 @@ function libraryIds(directory: string): string[] {
   }
 }
 
-export function createPromptLibrary(directory: string): PromptLibrary {
+/**
+ * The library in `directory`. `source` is which one it is: the choices it picks are named by
+ * `project:<id>` for a project's, by the bare id for the user's (`libraryPromptRefOf`).
+ */
+export function createPromptLibrary(directory: string, source: EnsoLibraryPromptSource = 'user'): PromptLibrary {
   return {
     directory,
     list(): EnsoLibraryPromptListing {
@@ -262,7 +274,62 @@ export function createPromptLibrary(directory: string): PromptLibrary {
       }
       // pi reads an empty custom preamble as none and builds its default: say so, never run it silently.
       if (body.trim().length === 0) return { kind: 'refused', reason: `${name} has no text to send` }
-      return { kind: 'chosen', choice: { id, name, mode: category, sha256: sha256Of(body), text: body } }
+      return {
+        kind: 'chosen',
+        choice: { id: libraryPromptRefOf(source, id), name, mode: category, sha256: sha256Of(body), text: body },
+      }
     },
   }
+}
+
+/**
+ * A thread's project library (#470): read when the thread trusts its project, else not read at all
+ * — only where it would be is known, so a refusal can say where to look.
+ */
+export type ProjectLibraryAccess =
+  | { readonly kind: 'trusted'; readonly library: PromptLibrary }
+  | { readonly kind: 'untrusted'; readonly directory: string }
+
+/** The project library of `cwd`, as a thread that does (or does not) trust the project reads it. */
+export function projectLibraryAccess(cwd: string, trusted: boolean): ProjectLibraryAccess {
+  const directory = projectPromptsDir(cwd)
+  return trusted
+    ? { kind: 'trusted', library: createPromptLibrary(directory, 'project') }
+    : { kind: 'untrusted', directory }
+}
+
+/** Why a project's prompt is not read: the project is not trusted — and how it becomes so. */
+export function untrustedProjectReason(directory: string): string {
+  return (
+    `the project's prompts (${directory}) are read only once the project is trusted: ` +
+    'answer "Trust project" when a run in it asks, then start a new session'
+  )
+}
+
+/** `GET …/project-prompts`: the listing, or that the project is not trusted. */
+export function projectPromptListing(access: ProjectLibraryAccess): EnsoProjectPromptLibrary {
+  return access.kind === 'trusted'
+    ? { kind: 'listed', directory: access.library.directory, listing: access.library.list() }
+    : { kind: 'untrusted', directory: access.directory }
+}
+
+/**
+ * A prompt reference as a session's system prompt (#443, #470): a bare id from the user's library
+ * (`user`, absent when the server has none), `project:<id>` from the thread's project library
+ * (`project`, asked only for a project reference) — or why it cannot be one.
+ */
+export function pickLibrarySystemPrompt(
+  ref: string,
+  user: PromptLibrary | undefined,
+  project: () => ProjectLibraryAccess,
+): SystemPromptPick {
+  // Anything without the prefix is the user's, as before #470: an id off the grammar is refused by
+  // the library, by name. A project reference's id is the project library's to refuse the same way.
+  if (!ref.startsWith(PROJECT_PROMPT_PREFIX)) {
+    return user === undefined ? { kind: 'refused', reason: NO_PROMPT_LIBRARY } : user.pickSystemPrompt(ref)
+  }
+  const access = project()
+  return access.kind === 'trusted'
+    ? access.library.pickSystemPrompt(ref.slice(PROJECT_PROMPT_PREFIX.length))
+    : { kind: 'refused', reason: untrustedProjectReason(access.directory) }
 }

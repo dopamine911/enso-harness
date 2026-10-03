@@ -1903,6 +1903,18 @@ function useNarrowRail(): {
  * thread's title, the same one the rail shows — and its Delete, then the view tabs, settings and
  * `?debug`'s switch.
  */
+/**
+ * The header's prompt manager, on the thread on screen (#470). ⚠ The thread id and the fetch come
+ * from ONE source, the thread's own stores: that fetch names the thread's project (#395), so the
+ * project library listed is the thread's own even before the server has built it. While the page
+ * is still resuming a thread (`active` not yet in the list) the manager is given no thread at all,
+ * so nothing is asked about it without its project.
+ */
+export function HeaderPromptManager({ active }: { active: ThreadSummary | undefined }): React.ReactNode {
+  if (active === undefined) return <PromptManagerDialog threadId={undefined} />
+  return <PromptManagerDialog threadId={active.threadId} fetch={getThreadStores(active.threadId).fetch} />
+}
+
 function AppHeader({
   active,
   activeThreadId,
@@ -1967,7 +1979,7 @@ function AppHeader({
         <span className="rounded-full border px-2 py-0.5 text-xs text-muted-foreground">fixture</span>
       ) : null}
       <ViewTabs view={view} onView={onView} threadId={active?.threadId} />
-      <PromptManagerDialog threadId={activeThreadId} />
+      <HeaderPromptManager active={active} />
       <SettingsDialog threadId={activeThreadId} projects={projects} stored={stored} onDeleted={onDeleted} />
       {isDebugMode ? (
         <PaneSwitch

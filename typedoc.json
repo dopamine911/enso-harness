@@ -66,6 +66,7 @@
     "Secrets",
     "pi manifest",
     "Logging",
+    "Dogfood Arena",
     "*"
   ],
   "disableSources": false,

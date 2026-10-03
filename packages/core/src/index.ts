@@ -233,8 +233,10 @@ export {
   EnsoLibraryPromptCategory,
   EnsoLibraryPromptListing,
   EnsoLibraryPromptRefusal,
+  EnsoLibraryPromptSource,
   EnsoLibraryPromptSummary,
   EnsoLibraryPromptWrite,
+  EnsoProjectPromptLibrary,
   EnsoSystemPromptChoice,
   EnsoSystemPromptDraft,
   EnsoSystemPromptMode,
@@ -244,9 +246,14 @@ export {
   estimateTextTokens,
   isLibraryPromptId,
   LIBRARY_PROMPT_ID_SOURCE,
+  LIBRARY_PROMPT_REF_SOURCE,
   lastCustomEntryData,
   type LibraryPromptParse,
+  type LibraryPromptRef,
+  libraryPromptRefOf,
+  PROJECT_PROMPT_PREFIX,
   parseLibraryPrompt,
+  parseLibraryPromptRef,
   readEnsoSystemPromptChoice,
   type RecordedSystemPrompt,
   recordedSystemPrompt,
@@ -504,3 +511,4 @@ export {
   WebFetchToolParameters,
 } from './web-fetch.ts'
 export { WEB_SEARCH_TIMEOUT_MS, WEB_SEARCH_TOOL_NAME, WebSearchConfig, WebSearchToolParameters } from './web-search.ts'
+export { ArenaActToolParameters } from './arena.ts'

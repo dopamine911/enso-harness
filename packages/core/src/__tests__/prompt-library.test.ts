@@ -3,7 +3,10 @@ import {
   ENSO_SYSTEM_PROMPT_ENTRY,
   estimateTextTokens,
   isLibraryPromptId,
+  LIBRARY_PROMPT_REF_SOURCE,
+  libraryPromptRefOf,
   parseLibraryPrompt,
+  parseLibraryPromptRef,
   readEnsoSystemPromptChoice,
   serializeLibraryPrompt,
   summarizeLibraryPrompt,
@@ -97,6 +100,29 @@ test('an id is a file name that cannot leave its directory', () => {
   expect(isLibraryPromptId('code-review-2')).toBe(true)
   for (const bad of ['', '../x', 'a/b', 'a.md', '-lead', 'Upper', 'a'.repeat(65)])
     expect(isLibraryPromptId(bad)).toBe(false)
+})
+
+test("#470: a prompt reference names its library — a bare id is the user's, `project:<id>` the project's — and nothing off the id grammar", () => {
+  expect(parseLibraryPromptRef('reviewer')).toEqual({ source: 'user', id: 'reviewer' })
+  expect(parseLibraryPromptRef('project:reviewer')).toEqual({ source: 'project', id: 'reviewer' })
+  for (const ref of ['reviewer', 'project:reviewer']) {
+    const parsed = parseLibraryPromptRef(ref)
+    expect(parsed === undefined ? undefined : libraryPromptRefOf(parsed.source, parsed.id)).toBe(ref)
+  }
+  for (const bad of [
+    '',
+    'project:',
+    'project:../x',
+    'project:Upper',
+    'team:reviewer',
+    ':pi-default',
+    'project:project:x',
+  ])
+    expect(parseLibraryPromptRef(bad)).toBeUndefined()
+  // The routes' pattern accepts exactly what the parser does.
+  const anchored = new RegExp(`^${LIBRARY_PROMPT_REF_SOURCE}$`)
+  for (const ref of ['reviewer', 'project:reviewer', 'project:', 'team:reviewer', 'project:../x'])
+    expect(anchored.test(ref)).toBe(parseLibraryPromptRef(ref) !== undefined)
 })
 
 test('sizes: bytes are UTF-8 and exact, tokens are characters over four rounded up', () => {

@@ -60,7 +60,10 @@
     "oxlint": "1.85.0",
     "oxlint-tsgolint": "7.0.2003",
     "react-doctor": "0.9.14",
-    "typedoc": "0.28.20"
+    "typedoc": "0.28.20",
+    "@earendil-works/pi-agent-core": "^0.99.2",
+    "@earendil-works/pi-ai": "^0.99.2",
+    "@earendil-works/pi-coding-agent": "^0.99.2"
   },
   "overrides": {
     "@tanstack/ai": "0.58.0",

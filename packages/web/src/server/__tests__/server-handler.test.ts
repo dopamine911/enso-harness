@@ -11,6 +11,7 @@ import {
   type EnsoModelState,
   type EnsoObservation,
   EnsoProject,
+  EnsoProjectPromptLibrary,
   EnsoStoredThread,
   EnsoSystemPromptPreview,
   EnsoThreadCommands,
@@ -209,10 +210,13 @@ async function startWith(
     projectRoots = [],
     promptsDir,
     permissionRulesPath = join(tmpdir(), 'enso-unread-permissions.json'),
+    launch = tmpdir(),
   }: {
     readonly projectRoots?: readonly string[]
     readonly promptsDir?: string
     readonly permissionRulesPath?: string
+    /** The launch directory — where a new thread is built (#395); the shared temp dir when absent. */
+    readonly launch?: string
   } = {},
 ): Promise<{ url: string; built: FakeThreadRecord[]; requested: string[]; builtIn: string[] }> {
   // The fake is made before the server, whose projects' rule it must apply — bound when the server asks.
@@ -221,7 +225,7 @@ async function startWith(
     servesDirectory(directory),
   )
   const started = startEnsoServer({
-    cwd: tmpdir(),
+    cwd: launch,
     projectRoots,
     ...(promptsDir === undefined ? {} : { promptsDir }),
     harnessPackageDir: emptyHarnessDir(),
@@ -1951,6 +1955,164 @@ test('⚠ POST …/system-prompt previews an unsaved draft as a saved prompt is 
     400,
   )
   expect((await send(url, '/api/threads/t-draft/system-prompt', 'POST', { ...draft, text: '' })).status).toBe(400)
+})
+
+// ── #470: a project's own prompt library — `<project>/.enso/prompts`, read only under trust, never written.
+
+/** A host whose project decision is `trusted`, for a thread it builds and for one it has not. */
+function trusting(trusted: boolean): (host: AgentHost) => AgentHost {
+  return (host: AgentHost) => ({
+    ...host,
+    projectTrust: (cwd: string) => ({ directory: cwd, trusted }),
+    createSession: async (threadId: string, newSessionDirectory: () => string) => {
+      const hosted = await host.createSession(threadId, newSessionDirectory)
+      return { ...hosted, projectTrust: () => ({ directory: hosted.inspect().cwd, trusted }) }
+    },
+  })
+}
+
+/** A launch project holding a project library — a `system` prompt sharing the user's `reviewer` id, and a session one. */
+async function projectLibrary(trusted: boolean): Promise<{ url: string; built: FakeThreadRecord[]; project: string }> {
+  const project = mkdtempSync(join(tmpdir(), 'enso-470-project-'))
+  const directory = join(project, '.enso', 'prompts')
+  mkdirSync(directory, { recursive: true })
+  writeFileSync(join(directory, 'reviewer.md'), '---\nname: "Team reviewer"\ncategory: system\n---\nOur house rules.')
+  writeFileSync(join(directory, 'kickoff.md'), '---\nname: "Kickoff"\ncategory: session\n---\nRead the README first.')
+  writeFileSync(join(directory, 'broken.md'), 'no frontmatter')
+  const promptsDir = join(mkdtempSync(join(tmpdir(), 'enso-470-user-')), 'prompts')
+  const { url, built } = await startWith(settlesAtOnce, {}, trusting(trusted), { promptsDir, launch: project })
+  await createPrompt(url, 'reviewer', REVIEWER)
+  return { url, built, project }
+}
+
+test("⚠ GET …/project-prompts lists a trusted project's own prompts apart from the user's, reads one, and offers no write (#470)", async () => {
+  const { url, built, project } = await projectLibrary(true)
+  const directory = join(project, '.enso', 'prompts')
+
+  // Nothing built: a thread no run has touched answers as its build would (#484).
+  const listed = JSON.parse((await send(url, '/api/threads/t-470/project-prompts', 'GET')).body)
+  expect(built).toEqual([])
+  expect(Check(EnsoProjectPromptLibrary, listed)).toBe(true)
+  expect(listed).toMatchObject({
+    kind: 'listed',
+    directory,
+    listing: {
+      prompts: [
+        { id: 'kickoff', name: 'Kickoff', category: 'session' },
+        { id: 'reviewer', name: 'Team reviewer', category: 'system' },
+      ],
+      refused: [{ file: 'broken.md', reason: expect.stringContaining('broken.md: it does not open') }],
+    },
+  })
+  // The user's library is its own list: the same id there is a different prompt, never shadowed.
+  const user = JSON.parse((await send(url, '/api/prompts', 'GET')).body)
+  expect(user.prompts.map((prompt: { name: string }) => prompt.name)).toEqual(['Reviewer'])
+
+  const read = await send(url, '/api/threads/t-470/project-prompts/kickoff', 'GET')
+  expect(read.status).toBe(200)
+  expect(JSON.parse(read.body)).toMatchObject({ id: 'kickoff', body: 'Read the README first.' })
+  expect((await send(url, '/api/threads/t-470/project-prompts/nobody', 'GET')).status).toBe(404)
+  expect((await send(url, '/api/threads/t-470/project-prompts/broken', 'GET')).status).toBe(422)
+  // ⚠ READ-ONLY: no method writes or deletes a project's file, and the user's routes never reach it.
+  expect(
+    (
+      await request(url, '/api/threads/t-470/project-prompts/kickoff', {
+        method: 'PUT',
+        body: REVIEWER,
+        headers: CREATE,
+      })
+    ).status,
+  ).toBe(404)
+  expect(
+    (
+      await request(url, '/api/threads/t-470/project-prompts/kickoff', {
+        method: 'DELETE',
+        headers: { 'If-Match': '*' },
+      })
+    ).status,
+  ).toBe(404)
+  expect(readFileSync(join(directory, 'kickoff.md'), 'utf8')).toContain('Read the README first.')
+})
+
+test("⚠ an untrusted project's prompts are not read: the listing names only the directory, a read is 403, and configure refuses a project prompt by saying why (#470)", async () => {
+  const { url, built, project } = await projectLibrary(false)
+  const directory = join(project, '.enso', 'prompts')
+  expect(JSON.parse((await send(url, '/api/threads/t-470/project-prompts', 'GET')).body)).toEqual({
+    kind: 'untrusted',
+    directory,
+  })
+  const read = await send(url, '/api/threads/t-470/project-prompts/reviewer', 'GET')
+  expect(read.status).toBe(403)
+  expect(read.body).toContain(`the project's prompts (${directory}) are read only once the project is trusted`)
+
+  const configured = await send(url, '/api/threads/t-470/configure', 'POST', { systemPrompt: 'project:reviewer' })
+  expect(configured.status).toBe(422)
+  expect(JSON.parse(configured.body)).toEqual({ step: 'systemPrompt', reason: expect.stringContaining('is trusted') })
+  expect(built.at(-1)?.systemPrompt).toBeUndefined()
+  expect((await send(url, '/api/threads/t-470/system-prompt?prompt=project:reviewer', 'GET')).status).toBe(422)
+  // The user's own prompt is not gated on the project's trust.
+  expect((await send(url, '/api/threads/t-470/configure', 'POST', { systemPrompt: 'reviewer' })).status).toBe(204)
+})
+
+test("⚠ the project library is the one the host names, not the thread's cwd: a thread on a tree (#551) reads its checkout's prompts (#470)", async () => {
+  const checkout = mkdtempSync(join(tmpdir(), 'enso-470-checkout-'))
+  mkdirSync(join(checkout, '.enso', 'prompts'), { recursive: true })
+  writeFileSync(join(checkout, '.enso', 'prompts', 'house.md'), '---\nname: "House"\ncategory: append\n---\nOur rules.')
+  // The thread runs in a tree that has no `.enso/prompts` of its own; the host answers with the checkout.
+  const tree = mkdtempSync(join(tmpdir(), 'enso-470-tree-'))
+  const onCheckout = (host: AgentHost): AgentHost => ({
+    ...host,
+    projectTrust: () => ({ directory: checkout, trusted: true }),
+    createSession: async (threadId: string, newSessionDirectory: () => string) => {
+      const hosted = await host.createSession(threadId, newSessionDirectory)
+      return { ...hosted, projectTrust: () => ({ directory: checkout, trusted: true }) }
+    },
+  })
+  const { url } = await startWith(settlesAtOnce, {}, onCheckout, { launch: tree })
+  const listing = { kind: 'listed', directory: join(checkout, '.enso', 'prompts') }
+  expect(JSON.parse((await send(url, '/api/threads/t-tree/project-prompts', 'GET')).body)).toMatchObject(listing)
+  // Built, it answers the same: the live thread's project, not its cwd.
+  expect((await send(url, '/api/threads/t-tree/configure', 'POST', { systemPrompt: 'project:house' })).status).toBe(204)
+  expect(JSON.parse((await send(url, '/api/threads/t-tree/project-prompts', 'GET')).body)).toMatchObject({
+    ...listing,
+    listing: { prompts: [{ id: 'house', name: 'House' }] },
+  })
+})
+
+test("⚠ a project prompt is chosen and previewed by its reference, `project:<id>`, and recorded under it — the user's prompt of the same id stays its own (#470)", async () => {
+  const { url, built } = await projectLibrary(true)
+  const preview = JSON.parse((await send(url, '/api/threads/t-470/system-prompt?prompt=project:reviewer', 'GET')).body)
+  expect(preview.prompt).toEqual({ id: 'project:reviewer', name: 'Team reviewer', mode: 'system' })
+  expect(preview.sections[0]).toMatchObject({ name: 'preamble', origin: 'library', text: 'Our house rules.' })
+
+  expect((await send(url, '/api/threads/t-470/configure', 'POST', { systemPrompt: 'project:reviewer' })).status).toBe(
+    204,
+  )
+  expect(built.at(-1)?.systemPrompt).toEqual({
+    id: 'project:reviewer',
+    name: 'Team reviewer',
+    mode: 'system',
+    sha256: createHash('sha256').update('Our house rules.').digest('hex'),
+    text: 'Our house rules.',
+  })
+  // Before the first request another replaces it: the bare id is the user's prompt, not the project's.
+  expect((await send(url, '/api/threads/t-470/configure', 'POST', { systemPrompt: 'reviewer' })).status).toBe(204)
+  expect(built.at(-1)?.systemPrompt).toMatchObject({ id: 'reviewer', name: 'Reviewer', text: REVIEWER.body })
+
+  const refusal = async (ref: string): Promise<unknown> => {
+    const answered = await send(url, '/api/threads/t-470/configure', 'POST', { systemPrompt: ref })
+    expect(answered.status).toBe(422)
+    return JSON.parse(answered.body)
+  }
+  expect(await refusal('project:kickoff')).toMatchObject({ reason: expect.stringContaining('is a session prompt') })
+  // ⚠ A project reference's id is held to the same shape before any disk is touched.
+  expect(await refusal('project:../escape')).toEqual({
+    step: 'systemPrompt',
+    reason: '../escape.md: the name is not lowercase words joined by hyphens',
+  })
+  expect(await refusal('team:reviewer')).toMatchObject({
+    reason: 'team:reviewer.md: the name is not lowercase words joined by hyphens',
+  })
 })
 
 /** A server over its own policy file (#474), holding `text`. */

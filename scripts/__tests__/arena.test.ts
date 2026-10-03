@@ -12,8 +12,8 @@ import {
 } from '../arena/actions.ts'
 import { collectEnsoEvidence } from '../arena/evidence.ts'
 import { foldArenaManifest } from '../arena/manifest.ts'
-import { arenaActCommand, arenaBrief, githubRepositoryOf, SNAKE_SCENARIO } from '../arena/scenario.ts'
-import { type ArenaClock, openTimeline, pagePlace, readTimeline } from '../arena/timeline.ts'
+import { arenaActCommand, arenaBrief, arenaReviewBrief, githubRepositoryOf, SNAKE_SCENARIO } from '../arena/scenario.ts'
+import { type ArenaClock, type ArenaEventBody, openTimeline, pagePlace, readTimeline } from '../arena/timeline.ts'
 
 /**
  * Dogfood Arena's own logic (#556): what the agent may send, how the timeline is stamped and read
@@ -194,11 +194,19 @@ test('the manifest joins screenshots to threads and keeps the agent’s notes ap
   timeline.record({ kind: 'run-start', scenario: 'snake', project: '/p', ensoCommit: 'abc123' })
   timeline.record({ kind: 'screenshot', cause: 'sample', path: '/s/0.png' }, pagePlace('http://127.0.0.1:5178/'))
   timeline.record(
-    { kind: 'action', action: 'click', detail: 'click button "x"', outcome: 'ok', durationMs: 5 },
+    { kind: 'action', via: 'control', action: 'click', detail: 'click button "x"', outcome: 'ok', durationMs: 5 },
     inThread,
   )
   timeline.record(
-    { kind: 'action', action: 'click', detail: 'click button "y"', outcome: 'failed', error: 'timeout', durationMs: 9 },
+    {
+      kind: 'action',
+      via: 'control',
+      action: 'click',
+      detail: 'click button "y"',
+      outcome: 'failed',
+      error: 'timeout',
+      durationMs: 9,
+    },
     inThread,
   )
   timeline.record({ kind: 'screenshot', cause: 'action-failed', path: '/s/1.png' }, inThread)
@@ -207,7 +215,7 @@ test('the manifest joins screenshots to threads and keeps the agent’s notes ap
   timeline.record({ kind: 'trace-chunk', path: '/t/trace-000.zip' })
   timeline.record({ kind: 'recorder-error', during: 'trace chunk', error: 'Must start tracing before stopping' })
   timeline.record(
-    { kind: 'note', note: 'wish', trying: 'see the diff', happened: 'no button', wanted: 'a diff tab' },
+    { kind: 'note', via: 'control', note: 'wish', trying: 'see the diff', happened: 'no button', wanted: 'a diff tab' },
     inThread,
   )
   timeline.record({ kind: 'run-stop', reason: 'budget: 1 minutes' })
@@ -226,6 +234,9 @@ test('the manifest joins screenshots to threads and keeps the agent’s notes ap
     traceChunks: ['/t/trace-000.zip'],
     actions: { total: 2, failed: 1 },
     observed: { consoleErrors: 1, ensoExits: 1, pageErrors: 0 },
+    // No agent runner: whoever sent these had a shell, and the manifest says the boundary did not hold.
+    driver: { kind: 'control' },
+    boundary: { held: false, actionsBy: { agent: 0, control: 3 } },
   })
   expect(manifest.screenshots.map((shot) => [shot.cause, shot.threadId])).toEqual([
     ['sample', undefined],
@@ -267,6 +278,7 @@ test('every observed signal is counted by its own kind', () => {
   const timeline = openTimeline(path, steppingClock())
   timeline.record({ kind: 'request-failed', request: 'GET /x', failure: 'net::ERR_ABORTED' })
   timeline.record({ kind: 'request-failed', request: 'GET /y', failure: 'net::ERR_FAILED' })
+  timeline.record({ kind: 'response-error', request: 'GET /z', status: 404 })
   timeline.record({ kind: 'dialog', dialog: 'confirm', message: 'leave?' })
   timeline.record({ kind: 'page-crash' })
   timeline.record({ kind: 'page-error', text: 'TypeError' })
@@ -277,6 +289,7 @@ test('every observed signal is counted by its own kind', () => {
     consoleErrors: 1,
     pageErrors: 1,
     failedRequests: 2,
+    httpErrors: 1,
     dialogs: 1,
     pageCrashes: 1,
     ensoExits: 2,
@@ -343,37 +356,111 @@ test('Enso evidence: collected bodies are redacted, everything else is a missing
 })
 
 test('the brief carries the assignment verbatim and no internals', () => {
-  const brief = arenaBrief(SNAKE_SCENARIO, { act: arenaActCommand() })
-  expect(brief).toContain(SNAKE_SCENARIO.assignment)
-  expect(brief).toContain("bun run arena act '<json>'")
-  expect(brief).not.toContain('/api')
-  expect(brief).not.toContain('5179')
+  for (const channel of ['tool', 'command'] as const) {
+    const brief = arenaBrief(SNAKE_SCENARIO, channel)
+    expect(brief).toContain(SNAKE_SCENARIO.assignment)
+    expect(brief).not.toContain('/api')
+    expect(brief).not.toContain('5179')
+  }
+  // The agent runner's brief names its one tool and no command: it has no shell to run one in.
+  expect(arenaBrief(SNAKE_SCENARIO, 'tool')).not.toContain('bun run')
+  expect(arenaBrief(SNAKE_SCENARIO, 'tool')).toContain('only tool you have')
+  expect(arenaBrief(SNAKE_SCENARIO, 'command')).toContain('bun run arena act')
 })
 
-test('the brief runs in three phases, naming the run, its evidence and where bugs go', () => {
+test('the boundary holds only when the agent had the one UI tool and every action came through it', () => {
+  const fold = (bodies: readonly ArenaEventBody[]): ReturnType<typeof foldArenaManifest> => {
+    const path = join(mkdtempSync(join(tmpdir(), 'arena-boundary-')), 'timeline.jsonl')
+    const timeline = openTimeline(path, steppingClock())
+    for (const body of bodies) timeline.record(body)
+    return foldArenaManifest({ runId: 'r', events: readTimeline(path), evidence: [] })
+  }
+  const agentStart = (tools: readonly string[]): ArenaEventBody => ({
+    kind: 'agent-start',
+    provider: 'anthropic',
+    model: 'm',
+    thinking: 'medium',
+    tools,
+  })
+  const read = (via: 'agent' | 'control'): ArenaEventBody => ({
+    kind: 'action',
+    via,
+    action: 'read',
+    detail: 'read',
+    outcome: 'ok',
+    durationMs: 1,
+  })
+
+  const held = fold([
+    agentStart(['act']),
+    read('agent'),
+    { kind: 'agent-tool-refused', tool: 'bash' },
+    { kind: 'note', via: 'agent', note: 'friction', trying: 'a', happened: 'b' },
+    { kind: 'agent-end', reason: 'it stopped the run' },
+  ])
+  expect(held.boundary).toMatchObject({ held: true, actionsBy: { agent: 2, control: 0 } })
+  expect(held.driver).toEqual({
+    kind: 'agent',
+    provider: 'anthropic',
+    model: 'm',
+    thinking: 'medium',
+    tools: ['act'],
+    refusedToolCalls: ['bash'],
+    endReason: 'it stopped the run',
+  })
+  // A tool beyond the UI, an action that came in another way, or no UI tool at all: not held, and why.
+  expect(fold([agentStart(['act', 'bash']), read('agent')]).boundary).toMatchObject({
+    held: false,
+    why: expect.stringContaining('bash'),
+  })
+  expect(fold([agentStart(['act']), read('agent'), read('control')]).boundary).toMatchObject({
+    held: false,
+    why: expect.stringContaining('control endpoint'),
+  })
+  expect(fold([agentStart([])]).boundary).toMatchObject({ held: false })
+  // A line written before `via` existed counts as the control endpoint's, never as the agent's.
+  const legacy = JSON.parse(JSON.stringify(read('agent'))) as Record<string, unknown>
+  delete legacy.via
+  expect(fold([agentStart(['act']), legacy as unknown as ArenaEventBody]).boundary.held).toBe(false)
+})
+
+test('over the act command the brief runs in three phases, naming the run, its evidence and where bugs go', () => {
   const run = '/runs/snake-2026-10-03T14-00-00Z'
-  const brief = arenaBrief(SNAKE_SCENARIO, {
+  const brief = arenaBrief(SNAKE_SCENARIO, 'command', {
     act: arenaActCommand('/runs'),
     runDirectory: run,
     repository: 'owner/enso',
   })
-  const phases = ['# Phase 1: the assignment', '# Phase 2: review your experience', '# Phase 3: file the bugs']
+  const phases = ['# Phase 1: the assignment', '# Phase 2: review the experience', '# Phase 3: file the bugs']
   const at = phases.map((phase) => brief.indexOf(phase))
   expect(at.every((index) => index >= 0)).toBe(true)
   expect(at).toEqual(at.toSorted((left, right) => left - right))
   expect(brief).toContain(`bun run arena act --out '/runs' '<json>'`)
   expect(brief).toContain(`${run}/manifest.json`)
   expect(brief).toContain(`${run}/review.md`)
+  expect(brief).toContain('Your memory of the run is not the evidence')
   // Duplicates are searched before anything is filed, and what is filed says it is unverified (#556).
   expect(brief).toContain('gh issue list --repo owner/enso --state all')
-  expect(brief).toContain('not yet verified by a\n     person')
+  expect(brief).toContain('not yet verified by a person')
   expect(brief.indexOf('Search first')).toBeLessThan(brief.indexOf('Otherwise open one'))
 })
 
-test('without a run or a repository the brief asks for them instead of guessing', () => {
-  const brief = arenaBrief(SNAKE_SCENARIO, { act: arenaActCommand() })
-  expect(brief).toContain('`<run directory>/review.md`')
-  expect(brief).toContain('<the Enso repository, owner/name>')
+test('the runner gets the assignment alone, and its review is a prompt of its own for afterwards', () => {
+  // The runner's agent has no files: a review or a `gh` command in its brief could not be done.
+  const tool = arenaBrief(SNAKE_SCENARIO, 'tool', { repository: 'owner/enso' })
+  expect(tool).not.toContain('Phase 2')
+  expect(tool).not.toContain('gh issue')
+  const review = arenaReviewBrief({ runDirectory: '/runs/r', repository: 'owner/enso' }, 'other')
+  expect(review).toStartWith('You are reviewing a Dogfood Arena run')
+  expect(review).toContain('`/runs/r/brief.md`')
+  expect(review).toContain("The agent's notes are its account, not the evidence")
+  expect(review).toContain('# Phase 3: file the bugs')
+})
+
+test('without a run or a repository the review asks for them instead of guessing', () => {
+  const review = arenaReviewBrief({}, 'other')
+  expect(review).toContain('`<run directory>/review.md`')
+  expect(review).toContain('<the Enso repository, owner/name>')
 })
 
 test('the repository is read from a GitHub remote, and only from one', () => {

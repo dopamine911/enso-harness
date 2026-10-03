@@ -176,6 +176,8 @@ export interface FakeHostedThreadOptions {
   readonly forkPoint?: EnsoForkPoint
   /** What `previewSystemPrompt` answers (#443); {@link fakeSystemPromptPreview} when absent. */
   readonly previewSystemPrompt?: (candidate: EnsoSystemPromptChoice | null) => SystemPromptPreviewOutcome
+  /** Whether `projectTrust()` answers trusted (#470); untrusted when absent, as a project nobody decided is. */
+  readonly projectTrusted?: boolean
 }
 
 /** The fake model's context window, as a preview reports it. */
@@ -410,6 +412,7 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
     probeToolCall: async (): Promise<undefined> => undefined,
     // …and no permission engine publishes a service for it.
     checkPermission: (): undefined => undefined,
+    projectTrust: () => ({ directory: inspection.cwd, trusted: options.projectTrusted ?? false }),
     branchStats: () => options.branch ?? FAKE_EMPTY_BRANCH,
     // The eval reads the transcript the inspection holds and the branch's turns (#441).
     branchEval: () => ({
@@ -536,6 +539,8 @@ export function createFakeAgentHost(
     createSession,
     freshPermissionMode: () => fresh,
     catalogue: () => Promise.resolve(fakeCatalogue()),
+    // A project nobody decided is untrusted (#470); a test about a trusted one replaces this.
+    projectTrust: (cwd: string) => ({ directory: cwd, trusted: false }),
     storedPermissionMode: (transcript: readonly EnsoTranscriptEntry[]): EnsoPermissionModeState => {
       const storedThread = Object.values(stored).find((candidate) => candidate.transcript === transcript)
       return { mode: storedThread?.mode ?? fresh.mode, available: fresh.available }

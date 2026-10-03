@@ -310,7 +310,7 @@ function SessionStatus({
 export function StartSessionDialog(props: StartSessionDialogProps): React.ReactNode {
   const { threadId, open, onClose, fetch: fetchImpl } = props
   const catalogue = useSessionCatalogue(open, threadId, fetchImpl)
-  const promptChoice = useSystemPromptChoice(open, fetchImpl)
+  const promptChoice = useSystemPromptChoice(open, threadId, fetchImpl)
   const [model, setModel] = useState<string | undefined>(undefined)
   const [thinking, setThinking] = useState<string | undefined>(undefined)
   const [mode, setMode] = useState<string | undefined>(undefined)
