@@ -12,7 +12,7 @@ import {
 } from '../arena/actions.ts'
 import { collectEnsoEvidence } from '../arena/evidence.ts'
 import { foldArenaManifest } from '../arena/manifest.ts'
-import { arenaBrief, SNAKE_SCENARIO } from '../arena/scenario.ts'
+import { arenaActCommand, arenaBrief, arenaReviewBrief, githubRepositoryOf, SNAKE_SCENARIO } from '../arena/scenario.ts'
 import { type ArenaClock, type ArenaEventBody, openTimeline, pagePlace, readTimeline } from '../arena/timeline.ts'
 
 /**
@@ -422,4 +422,62 @@ test('the boundary holds only when the agent had the one UI tool and every actio
   const legacy = JSON.parse(JSON.stringify(read('agent'))) as Record<string, unknown>
   delete legacy.via
   expect(fold([agentStart(['act']), legacy as unknown as ArenaEventBody]).boundary.held).toBe(false)
+})
+
+test('over the act command the brief runs in three phases, naming the run, its evidence and where bugs go', () => {
+  const run = '/runs/snake-2026-10-03T14-00-00Z'
+  const brief = arenaBrief(SNAKE_SCENARIO, 'command', {
+    act: arenaActCommand('/runs'),
+    runDirectory: run,
+    repository: 'owner/enso',
+  })
+  const phases = ['# Phase 1: the assignment', '# Phase 2: review the experience', '# Phase 3: file the bugs']
+  const at = phases.map((phase) => brief.indexOf(phase))
+  expect(at.every((index) => index >= 0)).toBe(true)
+  expect(at).toEqual(at.toSorted((left, right) => left - right))
+  expect(brief).toContain(`bun run arena act --out '/runs' '<json>'`)
+  expect(brief).toContain(`${run}/manifest.json`)
+  expect(brief).toContain(`${run}/review.md`)
+  expect(brief).toContain('Your memory of the run is not the evidence')
+  // Duplicates are searched before anything is filed, and what is filed says it is unverified (#556).
+  expect(brief).toContain('gh issue list --repo owner/enso --state all')
+  expect(brief).toContain('not yet verified by a person')
+  expect(brief.indexOf('Search first')).toBeLessThan(brief.indexOf('Otherwise open one'))
+})
+
+test('the runner gets the assignment alone, and its review is a prompt of its own for afterwards', () => {
+  // The runner's agent has no files: a review or a `gh` command in its brief could not be done.
+  const tool = arenaBrief(SNAKE_SCENARIO, 'tool', { repository: 'owner/enso' })
+  expect(tool).not.toContain('Phase 2')
+  expect(tool).not.toContain('gh issue')
+  const review = arenaReviewBrief({ runDirectory: '/runs/r', repository: 'owner/enso' }, 'other')
+  expect(review).toStartWith('You are reviewing a Dogfood Arena run')
+  expect(review).toContain('`/runs/r/brief.md`')
+  expect(review).toContain("The agent's notes are its account, not the evidence")
+  // On its own the review has no assignment before it, so it numbers its own phases from 1.
+  expect(review).toContain('# Phase 1: review the experience')
+  expect(review).toContain('# Phase 2: file the bugs')
+  expect(review).not.toContain('Phase 3')
+})
+
+test('without a run or a repository the review asks for them instead of guessing', () => {
+  const review = arenaReviewBrief({}, 'other')
+  expect(review).toContain('`<run directory>/review.md`')
+  expect(review).toContain('<the Enso repository, owner/name>')
+})
+
+test('the repository is read from a GitHub remote, and only from one', () => {
+  expect(githubRepositoryOf('https://github.com/dopamine911/zen-harness-foundation\n')).toBe(
+    'dopamine911/zen-harness-foundation',
+  )
+  expect(githubRepositoryOf('https://github.com/o/n.git')).toBe('o/n')
+  expect(githubRepositoryOf('git@github.com:o/n.git')).toBe('o/n')
+  expect(githubRepositoryOf('https://gitlab.com/o/n.git')).toBeUndefined()
+  expect(githubRepositoryOf('/local/path')).toBeUndefined()
+})
+
+test('the act command carries a non-default --out, quoted', () => {
+  expect(arenaActCommand()).toBe('bun run arena act')
+  expect(arenaActCommand('/my runs')).toBe("bun run arena act --out '/my runs'")
+  expect(arenaActCommand("/it's")).toBe("bun run arena act --out '/it'\\''s'")
 })

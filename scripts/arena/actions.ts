@@ -10,8 +10,9 @@ import type { ArenaNoteKind } from './timeline.ts'
  * accessible name, visible text, a label, a placeholder — never a CSS selector or a test id, and
  * there is no `evaluate`: the agent may not reach into the page's code. `goto` stays on the web
  * origin and off `/api`, so the server's routes are reached through the UI or not at all. What
- * this does NOT hold: the agent's own shell. An agent that can run `curl` can reach the API on
- * loopback; that boundary is the agent runner's (its tools), not the recorder's.
+ * this does NOT hold: the agent's own shell. Under `--agent` the runner gives it none (`agent.ts`);
+ * under `--manual`, an agent that can run `curl` can reach the API on loopback, which its prompt
+ * (`arenaBrief`) forbids and nothing here enforces.
  */
 
 /** The one tool the agent runner gives the model (`agent.ts`): every move it makes on Enso is a call to it. */

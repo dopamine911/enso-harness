@@ -13,9 +13,11 @@
  *   bun run arena start --manual [...]
  *       the same run with no agent: actions come over `bun run arena act` from whoever has a shell,
  *       and the manifest says the UI-only boundary was not held
- *   bun run arena brief [--scenario snake] [--manual]
+ *   bun run arena brief [--scenario snake] [--manual] [--review] [--out DIR] [--run DIR] [--repo OWNER/NAME]
  *       what the agent under test is told: the assignment, and how to act on the UI (its tool, or
- *       with --manual the `act` command)
+ *       with --manual the `act` command, then the review and the bugs); --review prints the review
+ *       and bug-filing prompt on its own, for after an --agent run (`start` writes it as
+ *       `<run>/review-brief.md`). Bugs go to --repo, else the checkout's GitHub origin
  *   bun run arena act '<json>' [--run DIR]
  *       one UI action on the live run (the agent's only way in); prints the result as JSON
  *   bun run arena manifest <run directory>
@@ -35,6 +37,7 @@
  * empty, so the work the run produces is all in it.
  */
 
+import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { ensoHome, findRepoRoot } from '../packages/core/src/paths.ts'
@@ -42,7 +45,16 @@ import { knownSecretValues } from '../packages/core/src/secrets.ts'
 import { ARENA_THINKING_LEVELS, arenaAgentDriver, resolveArenaModel } from './arena/agent.ts'
 import { foldArenaManifest } from './arena/manifest.ts'
 import { type ArenaControl, type ArenaDriver, controlFilePath, runArena } from './arena/recorder.ts'
-import { ARENA_SCENARIOS, arenaBrief, type ArenaScenario, SNAKE_SCENARIO } from './arena/scenario.ts'
+import {
+  ARENA_SCENARIOS,
+  arenaActCommand,
+  arenaBrief,
+  type ArenaBriefContext,
+  arenaReviewBrief,
+  type ArenaScenario,
+  githubRepositoryOf,
+  SNAKE_SCENARIO,
+} from './arena/scenario.ts'
 import { renderArenaScore, writeArenaScore } from './arena/score.ts'
 import { readTimeline } from './arena/timeline.ts'
 
@@ -53,7 +65,7 @@ const [command, ...rest] = process.argv.slice(2)
  * review). ONE list: `flag` accepts only these names, so a flag read here cannot be missing from
  * what `act` skips.
  */
-const VALUED_FLAGS = ['scenario', 'minutes', 'home', 'out', 'chromium', 'run', 'agent', 'thinking'] as const
+const VALUED_FLAGS = ['scenario', 'minutes', 'home', 'out', 'chromium', 'run', 'agent', 'thinking', 'repo'] as const
 type ValuedFlag = (typeof VALUED_FLAGS)[number]
 const VALUED_FLAG_ARGUMENTS = new Set<string>(VALUED_FLAGS.map((name) => `--${name}`))
 
@@ -75,6 +87,25 @@ function scenarioNamed(): ArenaScenario {
 const home = resolve(flag('home') ?? ensoHome(process.env))
 const outDirectory = resolve(flag('out') ?? join(ensoHome(process.env), 'arena'))
 const currentFile = join(outDirectory, 'current')
+const repoRoot = findRepoRoot(import.meta.url)
+
+/** Where bugs are filed: `--repo`, else the checkout's GitHub `origin`, else left for the brief to ask. */
+function bugRepository(): string | undefined {
+  const named = flag('repo')
+  if (named !== undefined) return named
+  const origin = spawnSync('git', ['remote', 'get-url', 'origin'], { cwd: repoRoot, encoding: 'utf8' })
+  return origin.status === 0 ? githubRepositoryOf(origin.stdout) : undefined
+}
+
+/** What a brief names for this invocation: the `act` command for its `--out`, the run, the repository. */
+function briefContext(runDirectory?: string): ArenaBriefContext {
+  const repository = bugRepository()
+  return {
+    act: arenaActCommand(flag('out') === undefined ? undefined : outDirectory),
+    ...(runDirectory === undefined ? {} : { runDirectory }),
+    ...(repository === undefined ? {} : { repository }),
+  }
+}
 
 /**
  * The agent runner `start` drives the run with, or undefined for `--manual`. One of the two is
@@ -82,11 +113,12 @@ const currentFile = join(outDirectory, 'current')
  */
 async function driverNamed(
   scenario: ArenaScenario,
+  context: ArenaBriefContext,
 ): Promise<{ readonly driver?: ArenaDriver; readonly brief: string }> {
   const reference = flag('agent')
   if (rest.includes('--manual')) {
     if (reference !== undefined) fail('--manual and --agent are two ways to drive one run: name one')
-    return { brief: arenaBrief(scenario, 'command') }
+    return { brief: arenaBrief(scenario, 'command', context) }
   }
   if (reference === undefined) {
     fail('start takes --agent PROVIDER/MODEL (the agent under test, UI only) or --manual (actions over `arena act`)')
@@ -111,15 +143,25 @@ async function start(): Promise<void> {
     .replace(/\.\d+Z$/, 'Z')}`
   const runDirectory = join(outDirectory, runId)
   const chromiumPath = flag('chromium')
-  const { driver, brief } = await driverNamed(scenario)
+  const context = briefContext(runDirectory)
+  const { driver, brief } = await driverNamed(scenario, context)
   mkdirSync(runDirectory, { recursive: true })
-  writeFileSync(join(runDirectory, 'brief.md'), brief)
+  const briefPath = join(runDirectory, 'brief.md')
+  writeFileSync(briefPath, brief)
   writeFileSync(currentFile, runDirectory)
+  if (driver === undefined) {
+    process.stdout.write(`arena: the agent's prompt is ${briefPath}\n`)
+  } else {
+    // The runner's agent has no files to review the run with: the review is a prompt for afterwards.
+    const reviewPath = join(runDirectory, 'review-brief.md')
+    writeFileSync(reviewPath, arenaReviewBrief(context, 'other'))
+    process.stdout.write(`arena: once the run stops, the review and bug-filing prompt is ${reviewPath}\n`)
+  }
   let passed = false
   try {
     const score = await runArena({
       scenario,
-      repoRoot: findRepoRoot(import.meta.url),
+      repoRoot,
       runDirectory,
       project: join(runDirectory, 'project'),
       home,
@@ -186,7 +228,11 @@ switch (command) {
     await start()
     break
   case 'brief':
-    process.stdout.write(arenaBrief(scenarioNamed(), rest.includes('--manual') ? 'command' : 'tool'))
+    if (rest.includes('--review')) process.stdout.write(arenaReviewBrief(briefContext(flag('run')), 'other'))
+    else {
+      const channel = rest.includes('--manual') ? 'command' : 'tool'
+      process.stdout.write(arenaBrief(scenarioNamed(), channel, briefContext(flag('run'))))
+    }
     break
   case 'act':
     await act()
