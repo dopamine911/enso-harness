@@ -86,36 +86,73 @@ test('⚠ entries that cannot be stat-ed make the count `partial`, naming them �
   }
 })
 
+/**
+ * The two fixtures below are the largest the suite writes — 20,000 and 30,000 files, together 50,000
+ * of a run's ~58,000 scratch entries. Each test removes its own, so their cost lands on the test that
+ * made them; left to the run's one teardown (`test/scratch-preload.ts`), deleting them pushed that
+ * hook past bun's 5 s default on a CI runner, and the whole gate failed on an `(unnamed)` hook
+ * (PR #562). Each test also carries its own timeout, and needs it with or without the removal:
+ * measured 2026-10-03 in a loaded container, the two tests UNCHANGED hit bun's 5 s test default in
+ * 3 of 4 runs (5.5–8 s, the writes alone), and with the removal took 4.2–6.4 s.
+ */
+const LARGE_FIXTURE_TIMEOUT = { timeout: 60_000 } as const
+
+/**
+ * `body` over one fresh directory per prefix; every directory made is removed afterwards, and the
+ * removal is checked. Each is made INSIDE the `try` (PR #582 review): made before it, a second
+ * `mkdtempSync` that threw would have left the first behind.
+ */
+async function withLargeFixtures(
+  prefixes: readonly string[],
+  body: (directories: readonly string[]) => Promise<void>,
+): Promise<void> {
+  const made: string[] = []
+  try {
+    for (const prefix of prefixes) made.push(mkdtempSync(join(tmpdir(), prefix)))
+    await body(made)
+  } finally {
+    for (const directory of made) rmSync(directory, { recursive: true, force: true })
+  }
+  for (const directory of made) expect(existsSync(directory)).toBe(false)
+}
+
 // #579 review: the deadline was checked only between directories, so one wide directory (a flat
 // build output) ignored it, and a cut in the last directory still said `measured`.
-test('⚠ the time cap holds inside one wide directory: past it, the count is `partial`, not finished in time (#578)', async () => {
-  const directory = mkdtempSync(join(tmpdir(), 'enso-du-wide-'))
-  for (let file = 0; file < 20_000; file += 1) writeFileSync(join(directory, `f${file}`), 'x')
-  const started = Date.now()
-  const counted = await diskUsageOf(directory, started + 5)
-  expect(counted).toMatchObject({ kind: 'partial', reason: 'not finished in time' })
-  // Stopped soon after the cap: nothing new was launched past it.
-  expect(Date.now() - started).toBeLessThan(1000)
-})
+test(
+  '⚠ the time cap holds inside one wide directory: past it, the count is `partial`, not finished in time (#578)',
+  () =>
+    withLargeFixtures(['enso-du-wide-'], async ([directory = '']) => {
+      for (let file = 0; file < 20_000; file += 1) writeFileSync(join(directory, `f${file}`), 'x')
+      const started = Date.now()
+      const counted = await diskUsageOf(directory, started + 5)
+      expect(counted).toMatchObject({ kind: 'partial', reason: 'not finished in time' })
+      // Stopped soon after the cap: nothing new was launched past it.
+      expect(Date.now() - started).toBeLessThan(1000)
+    }),
+  LARGE_FIXTURE_TIMEOUT,
+)
 
 // #579 review: the listing measured trees in batches against one deadline, so the last batches
 // were never walked. One budget, served in rotation, shares the time: a small tree measured beside
 // a huge one finishes, however much the huge one has queued.
-test('⚠ measurements sharing one budget are served in rotation: a small tree beside a huge one is measured in full, the huge one cut (#578)', async () => {
-  const huge = mkdtempSync(join(tmpdir(), 'enso-du-huge-'))
-  for (let file = 0; file < 30_000; file += 1) writeFileSync(join(huge, `f${file}`), 'x')
-  const small = mkdtempSync(join(tmpdir(), 'enso-du-small-'))
-  mkdirSync(join(small, 'src'))
-  for (let file = 0; file < 20; file += 1) writeFileSync(join(small, 'src', `f${file}`), 'x')
-  const budget = measureBudget()
-  const deadline = Date.now() + 40
-  const [hugeCount, smallCount] = await Promise.all([
-    diskUsageOf(huge, deadline, budget),
-    diskUsageOf(small, deadline, budget),
-  ])
-  expect(hugeCount.kind).toBe('partial')
-  expect(smallCount.kind).toBe('measured')
-})
+test(
+  '⚠ measurements sharing one budget are served in rotation: a small tree beside a huge one is measured in full, the huge one cut (#578)',
+  () =>
+    withLargeFixtures(['enso-du-huge-', 'enso-du-small-'], async ([huge = '', small = '']) => {
+      for (let file = 0; file < 30_000; file += 1) writeFileSync(join(huge, `f${file}`), 'x')
+      mkdirSync(join(small, 'src'))
+      for (let file = 0; file < 20; file += 1) writeFileSync(join(small, 'src', `f${file}`), 'x')
+      const budget = measureBudget()
+      const deadline = Date.now() + 40
+      const [hugeCount, smallCount] = await Promise.all([
+        diskUsageOf(huge, deadline, budget),
+        diskUsageOf(small, deadline, budget),
+      ])
+      expect(hugeCount.kind).toBe('partial')
+      expect(smallCount.kind).toBe('measured')
+    }),
+  LARGE_FIXTURE_TIMEOUT,
+)
 
 /**
  * A thread's own tree (#551 slice 2), on real git: temp checkouts only, never a worktree of this
