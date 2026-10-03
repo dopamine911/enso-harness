@@ -12,7 +12,7 @@ import {
 } from '../arena/actions.ts'
 import { collectEnsoEvidence } from '../arena/evidence.ts'
 import { foldArenaManifest } from '../arena/manifest.ts'
-import { arenaBrief, SNAKE_SCENARIO } from '../arena/scenario.ts'
+import { arenaActCommand, arenaBrief, githubRepositoryOf, SNAKE_SCENARIO } from '../arena/scenario.ts'
 import { type ArenaClock, openTimeline, pagePlace, readTimeline } from '../arena/timeline.ts'
 
 /**
@@ -343,9 +343,51 @@ test('Enso evidence: collected bodies are redacted, everything else is a missing
 })
 
 test('the brief carries the assignment verbatim and no internals', () => {
-  const brief = arenaBrief(SNAKE_SCENARIO)
+  const brief = arenaBrief(SNAKE_SCENARIO, { act: arenaActCommand() })
   expect(brief).toContain(SNAKE_SCENARIO.assignment)
-  expect(brief).toContain('bun run arena act')
+  expect(brief).toContain("bun run arena act '<json>'")
   expect(brief).not.toContain('/api')
   expect(brief).not.toContain('5179')
+})
+
+test('the brief runs in three phases, naming the run, its evidence and where bugs go', () => {
+  const run = '/runs/snake-2026-10-03T14-00-00Z'
+  const brief = arenaBrief(SNAKE_SCENARIO, {
+    act: arenaActCommand('/runs'),
+    runDirectory: run,
+    repository: 'owner/enso',
+  })
+  const phases = ['# Phase 1: the assignment', '# Phase 2: review your experience', '# Phase 3: file the bugs']
+  const at = phases.map((phase) => brief.indexOf(phase))
+  expect(at.every((index) => index >= 0)).toBe(true)
+  expect(at).toEqual(at.toSorted((left, right) => left - right))
+  expect(brief).toContain(`bun run arena act --out '/runs' '<json>'`)
+  expect(brief).toContain(`${run}/manifest.json`)
+  expect(brief).toContain(`${run}/review.md`)
+  // Duplicates are searched before anything is filed, and what is filed says it is unverified (#556).
+  expect(brief).toContain('gh issue list --repo owner/enso --state all')
+  expect(brief).toContain('not yet verified by a\n     person')
+  expect(brief.indexOf('Search first')).toBeLessThan(brief.indexOf('Otherwise open one'))
+})
+
+test('without a run or a repository the brief asks for them instead of guessing', () => {
+  const brief = arenaBrief(SNAKE_SCENARIO, { act: arenaActCommand() })
+  expect(brief).toContain('`<run directory>/review.md`')
+  expect(brief).toContain('<the Enso repository, owner/name>')
+})
+
+test('the repository is read from a GitHub remote, and only from one', () => {
+  expect(githubRepositoryOf('https://github.com/dopamine911/zen-harness-foundation\n')).toBe(
+    'dopamine911/zen-harness-foundation',
+  )
+  expect(githubRepositoryOf('https://github.com/o/n.git')).toBe('o/n')
+  expect(githubRepositoryOf('git@github.com:o/n.git')).toBe('o/n')
+  expect(githubRepositoryOf('https://gitlab.com/o/n.git')).toBeUndefined()
+  expect(githubRepositoryOf('/local/path')).toBeUndefined()
+})
+
+test('the act command carries a non-default --out, quoted', () => {
+  expect(arenaActCommand()).toBe('bun run arena act')
+  expect(arenaActCommand('/my runs')).toBe("bun run arena act --out '/my runs'")
+  expect(arenaActCommand("/it's")).toBe("bun run arena act --out '/it'\\''s'")
 })

@@ -6,10 +6,12 @@
  * every significant event, a timeline joining them to Enso's thread ids, Enso's own records, and
  * the agent's notes as it worked.
  *
- *   bun run arena start [--scenario snake] [--minutes N] [--home DIR] [--out DIR] [--chromium PATH] [--headed]
- *       start Enso over a fresh project and a recorded browser; runs until a stop condition
- *   bun run arena brief [--scenario snake]
- *       what the agent under test is told: the assignment, and how to act on the UI
+ *   bun run arena start [--scenario snake] [--minutes N] [--home DIR] [--out DIR] [--chromium PATH] [--repo OWNER/NAME] [--headed]
+ *       start Enso over a fresh project and a recorded browser, write the agent's prompt
+ *       (`<run>/brief.md`) and print where it is; runs until a stop condition
+ *   bun run arena brief [--scenario snake] [--out DIR] [--run DIR] [--repo OWNER/NAME]
+ *       the agent's prompt: do the assignment through the UI, review the run against its
+ *       evidence and recommend improvements, file the bugs (in --repo, else the checkout's origin)
  *   bun run arena act '<json>' [--run DIR]
  *       one UI action on the live run (the agent's only way in); prints the result as JSON
  *   bun run arena manifest <run directory>
@@ -24,12 +26,21 @@
  * empty, so the work the run produces is all in it.
  */
 
+import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { ensoHome, findRepoRoot } from '../packages/core/src/paths.ts'
 import { foldArenaManifest } from './arena/manifest.ts'
 import { type ArenaControl, controlFilePath, runArena } from './arena/recorder.ts'
-import { ARENA_SCENARIOS, arenaBrief, type ArenaScenario, SNAKE_SCENARIO } from './arena/scenario.ts'
+import {
+  ARENA_SCENARIOS,
+  arenaActCommand,
+  arenaBrief,
+  type ArenaBriefContext,
+  type ArenaScenario,
+  githubRepositoryOf,
+  SNAKE_SCENARIO,
+} from './arena/scenario.ts'
 import { readTimeline } from './arena/timeline.ts'
 
 const [command, ...rest] = process.argv.slice(2)
@@ -39,7 +50,7 @@ const [command, ...rest] = process.argv.slice(2)
  * review). ONE list: `flag` accepts only these names, so a flag read here cannot be missing from
  * what `act` skips.
  */
-const VALUED_FLAGS = ['scenario', 'minutes', 'home', 'out', 'chromium', 'run'] as const
+const VALUED_FLAGS = ['scenario', 'minutes', 'home', 'out', 'chromium', 'run', 'repo'] as const
 type ValuedFlag = (typeof VALUED_FLAGS)[number]
 const VALUED_FLAG_ARGUMENTS = new Set<string>(VALUED_FLAGS.map((name) => `--${name}`))
 
@@ -61,6 +72,25 @@ function scenarioNamed(): ArenaScenario {
 const home = resolve(flag('home') ?? ensoHome(process.env))
 const outDirectory = resolve(flag('out') ?? join(ensoHome(process.env), 'arena'))
 const currentFile = join(outDirectory, 'current')
+const repoRoot = findRepoRoot(import.meta.url)
+
+/** Where the agent files bugs: `--repo`, else the checkout's GitHub `origin`, else left for the brief to ask. */
+function bugRepository(): string | undefined {
+  const named = flag('repo')
+  if (named !== undefined) return named
+  const origin = spawnSync('git', ['remote', 'get-url', 'origin'], { cwd: repoRoot, encoding: 'utf8' })
+  return origin.status === 0 ? githubRepositoryOf(origin.stdout) : undefined
+}
+
+/** What the brief names for this invocation: the `act` command for its `--out`, the run, the repository. */
+function briefContext(runDirectory?: string): ArenaBriefContext {
+  const repository = bugRepository()
+  return {
+    act: arenaActCommand(flag('out') === undefined ? undefined : outDirectory),
+    ...(runDirectory === undefined ? {} : { runDirectory }),
+    ...(repository === undefined ? {} : { repository }),
+  }
+}
 
 async function start(): Promise<void> {
   const scenario = scenarioNamed()
@@ -73,12 +103,14 @@ async function start(): Promise<void> {
   const runDirectory = join(outDirectory, runId)
   const chromiumPath = flag('chromium')
   mkdirSync(runDirectory, { recursive: true })
-  writeFileSync(join(runDirectory, 'brief.md'), arenaBrief(scenario))
+  const briefPath = join(runDirectory, 'brief.md')
+  writeFileSync(briefPath, arenaBrief(scenario, briefContext(runDirectory)))
   writeFileSync(currentFile, runDirectory)
+  process.stdout.write(`arena: the agent's prompt is ${briefPath}\n`)
   try {
     await runArena({
       scenario,
-      repoRoot: findRepoRoot(import.meta.url),
+      repoRoot,
       runDirectory,
       project: join(runDirectory, 'project'),
       home,
@@ -133,7 +165,7 @@ switch (command) {
     await start()
     break
   case 'brief':
-    process.stdout.write(arenaBrief(scenarioNamed()))
+    process.stdout.write(arenaBrief(scenarioNamed(), briefContext(flag('run'))))
     break
   case 'act':
     await act()

@@ -11,7 +11,7 @@ import type { ArenaNoteKind } from './timeline.ts'
  * there is no `evaluate`: the agent may not reach into the page's code. `goto` stays on the web
  * origin and off `/api`, so the server's routes are reached through the UI or not at all. What
  * this does NOT hold: the agent's own shell. An agent that can run `curl` can reach the API on
- * loopback; that boundary is the agent runner's (its tools), not the recorder's.
+ * loopback; the prompt it is given (`arenaBrief`) forbids that, and nothing here enforces it.
  */
 
 /** How the agent names an element: what a person reading the page would see. */

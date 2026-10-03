@@ -8,7 +8,7 @@ by what a reader of the page sees, and is told nothing about Enso's internals.
 
 ```bash
 bun run arena start                 # Enso over a fresh project + a recorded browser; runs until a stop condition
-bun run arena brief                 # what the agent under test is told (the assignment, the act command)
+bun run arena brief                 # the agent's prompt (also written to <run>/brief.md by start)
 bun run arena act '{"action":"read"}'   # one UI action on the live run, as the agent
 bun run arena manifest <run dir>    # fold the manifest again from the timeline (after a recorder that died)
 ```
@@ -16,10 +16,30 @@ bun run arena manifest <run dir>    # fold the manifest again from the timeline 
 `start` takes `--scenario snake` (the default), `--minutes N` (the budget, 120 by default),
 `--home DIR` (the `ENSO_HOME` the stack runs over: yours by default, because the agent's prompts
 reach a real model with your login), `--out DIR` (`ENSO_HOME/arena` by default), `--chromium PATH`
-and `--headed`. Ports 5178 and 5179 must be free: the arena starts its own stack.
+`--repo OWNER/NAME` (where the agent files bugs: the checkout's GitHub `origin` by default) and
+`--headed`. Ports 5178 and 5179 must be free: the arena starts its own stack.
 
-Point the agent under test at the brief (`<run dir>/brief.md`) and let it work. Do not prescribe its
-features or script its failures.
+## The agent's prompt
+
+`start` writes `<run>/brief.md` and prints where it is: hand that file to the agent under test.
+It names this run's directory, the exact `act` command (with `--out` when you gave one) and the
+repository, and asks for three phases, in order:
+
+1. **The assignment**, through `act` only: no reading Enso's source, calling its API or opening its
+   files. Wishes and friction are noted as they happen; a retrospective and `stop` end it.
+2. **A review** in `<run>/review.md`, written against the run's evidence (manifest, timeline,
+   screenshots, Enso's records), each point citing an `elapsedMs`, a screenshot or a thread id: the
+   application outcome kept apart from Enso; the session; each piece of friction, classified as an
+   Enso defect, something undiscoverable, the agent's own mistake, or not needed; recommendations,
+   most valuable first.
+3. **Bugs** for the defects only: existing issues searched first (a match gets a comment with the
+   evidence), new ones titled `[dogfood-arena] …` with reproduction, expected, impact, observed vs
+   inferred, evidence and workaround, and marked as not yet verified by a person.
+
+`bun run arena brief` prints the same prompt without a run (`--run`, `--out`, `--repo` fill it in).
+
+Do not add to the prompt what to build or where it should fail: the features, the approach and
+the trouble are the agent's.
 
 ## What a run leaves
 
@@ -46,13 +66,14 @@ and the session file are keyed by: that is the jump from a screenshot to its tur
 - **Every UI action goes through the recorder**, so each is in the trace (as a named group) and on the
   timeline. There is no selector, no `evaluate`, and `goto` refuses `/api`.
 - **Not held here: the agent's own shell.** An agent that can run `curl` can reach the API on
-  loopback. Keeping it to the UI is the agent runner's job (the tools it is given).
+  loopback. The prompt forbids it; nothing enforces it, so the review's evidence is what shows a
+  run that left the UI.
 - **Secrets.** Typed text that looks like a credential is refused, not typed: what is typed is in the
   trace's DOM snapshots and on screenshots, and a PNG cannot be scrubbed. Text the recorder writes
   (timeline, Enso's output, evidence) is redacted with the home's known secret values. A secret Enso
   itself puts on screen is not scrubbed from screenshots or the trace.
-- **The agent's notes are observations, not findings.** The manifest keeps them apart from what the
-  recorder observed. Verifying a gap, and the triaged findings report, is a reviewer's step after the
-  run; the agent under test certifies nothing.
+- **The agent's account is not proof.** The manifest keeps its notes apart from what the recorder
+  observed; its review must cite the evidence for each point, and every bug it files says it is
+  unverified and names the run. Verifying those, and triaging the filed bugs, stays a person's step.
 - **Not collected yet:** the Diff Viewer's data (no read route for a run). The snapshot store (#551)
   is recorded when it exists, and marked missing when it does not.
