@@ -1,4 +1,5 @@
-import type { ArenaEvent, ArenaNoteKind, ArenaShotCause } from './timeline.ts'
+import { ARENA_UI_TOOL } from './actions.ts'
+import type { ArenaActionSource, ArenaEvent, ArenaNoteKind, ArenaShotCause } from './timeline.ts'
 
 /**
  * The run's evidence manifest (#556), folded from its timeline: which screenshots exist and why,
@@ -45,11 +46,37 @@ export interface ArenaNote extends ArenaStamped {
   readonly wanted?: string
 }
 
+/** What drove the UI: the agent runner (its model and the tools it was given), or the control endpoint. */
+export type ArenaDriverRecord =
+  | {
+      readonly kind: 'agent'
+      readonly provider: string
+      readonly model: string
+      readonly thinking: string
+      readonly tools: readonly string[]
+      /** Calls the model made to a tool it was not given: asked for, refused, nothing ran. */
+      readonly refusedToolCalls: readonly string[]
+      readonly endReason?: string
+    }
+  | { readonly kind: 'control' }
+
+/**
+ * Whether this run's UI-only boundary held, read off the timeline rather than asserted: an agent
+ * drove it, its tools were exactly the one UI tool, and no action reached the page any other way.
+ */
+export interface ArenaBoundary {
+  readonly held: boolean
+  readonly why: string
+  readonly actionsBy: Readonly<Record<ArenaActionSource, number>>
+}
+
 export interface ArenaManifest {
   readonly runId: string
   readonly scenario: string
   readonly project: string
   readonly ensoCommit?: string
+  readonly driver: ArenaDriverRecord
+  readonly boundary: ArenaBoundary
   readonly startedAt?: string
   readonly stoppedAt?: string
   /** Why the run ended — or `not stopped`: the recorder died, and this manifest was folded after. */
@@ -147,17 +174,59 @@ function notesByKind(events: readonly ArenaEvent[]): Record<ArenaNoteKind, Arena
   return notes
 }
 
+function driverRecord(events: readonly ArenaEvent[]): ArenaDriverRecord {
+  const start = events.find((event) => event.kind === 'agent-start')
+  if (start === undefined) return { kind: 'control' }
+  const end = events.findLast((event) => event.kind === 'agent-end')
+  return {
+    kind: 'agent',
+    provider: start.provider,
+    model: start.model,
+    thinking: start.thinking,
+    tools: start.tools,
+    refusedToolCalls: events.flatMap((event) => (event.kind === 'agent-tool-refused' ? [event.tool] : [])),
+    ...(end === undefined ? {} : { endReason: end.reason }),
+  }
+}
+
+/** Every UI action and note, by who sent it. A line from before `via` existed came over the control endpoint. */
+function actionsBySource(events: readonly ArenaEvent[]): Record<ArenaActionSource, number> {
+  const counts: Record<ArenaActionSource, number> = { agent: 0, control: 0 }
+  for (const event of events) {
+    if (event.kind === 'action' || event.kind === 'note') counts[event.via === 'agent' ? 'agent' : 'control'] += 1
+  }
+  return counts
+}
+
+function boundaryOf(driver: ArenaDriverRecord, actionsBy: Record<ArenaActionSource, number>): ArenaBoundary {
+  if (driver.kind === 'control') {
+    return { held: false, why: 'no agent runner: actions came over the control endpoint, from a shell', actionsBy }
+  }
+  const extra = driver.tools.filter((tool) => tool !== ARENA_UI_TOOL)
+  if (extra.length > 0)
+    return { held: false, why: `the agent was given more than the UI: ${extra.join(', ')}`, actionsBy }
+  if (actionsBy.control > 0) {
+    return { held: false, why: `${actionsBy.control} action(s) reached the page over the control endpoint`, actionsBy }
+  }
+  if (!driver.tools.includes(ARENA_UI_TOOL))
+    return { held: false, why: `the agent was not given ${ARENA_UI_TOOL}`, actionsBy }
+  return { held: true, why: `the agent's only tool was ${ARENA_UI_TOOL}, and every action came through it`, actionsBy }
+}
+
 /** The manifest for a run, from its events in timeline order. */
 export function foldArenaManifest({ runId, events, evidence }: ArenaManifestInput): ArenaManifest {
   const start = events.find((event) => event.kind === 'run-start')
   const stop = events.findLast((event) => event.kind === 'run-stop')
   const count = (kind: ArenaEvent['kind']): number => events.filter((event) => event.kind === kind).length
   const actions = events.filter((event) => event.kind === 'action')
+  const driver = driverRecord(events)
   return {
     runId,
     scenario: start?.scenario ?? 'unknown',
     project: start?.project ?? 'unknown',
     ...(start?.ensoCommit === undefined ? {} : { ensoCommit: start.ensoCommit }),
+    driver,
+    boundary: boundaryOf(driver, actionsBySource(events)),
     ...(start === undefined ? {} : { startedAt: start.at }),
     ...(stop === undefined ? {} : { stoppedAt: stop.at }),
     stopReason: stop?.reason ?? 'not stopped',

@@ -6,10 +6,16 @@
  * every significant event, a timeline joining them to Enso's thread ids, Enso's own records, and
  * the agent's notes as it worked.
  *
- *   bun run arena start [--scenario snake] [--minutes N] [--home DIR] [--out DIR] [--chromium PATH] [--headed]
- *       start Enso over a fresh project and a recorded browser; runs until a stop condition
- *   bun run arena brief [--scenario snake]
- *       what the agent under test is told: the assignment, and how to act on the UI
+ *   bun run arena start --agent PROVIDER/MODEL [--thinking LEVEL] [--scenario snake] [--minutes N]
+ *                       [--home DIR] [--out DIR] [--chromium PATH] [--headed]
+ *       start Enso over a fresh project and a recorded browser, and the agent under test with the
+ *       brief and ONE tool, `act` (`arena/agent.ts`): no shell, no files, so the UI is its only way in
+ *   bun run arena start --manual [...]
+ *       the same run with no agent: actions come over `bun run arena act` from whoever has a shell,
+ *       and the manifest says the UI-only boundary was not held
+ *   bun run arena brief [--scenario snake] [--manual]
+ *       what the agent under test is told: the assignment, and how to act on the UI (its tool, or
+ *       with --manual the `act` command)
  *   bun run arena act '<json>' [--run DIR]
  *       one UI action on the live run (the agent's only way in); prints the result as JSON
  *   bun run arena manifest <run directory>
@@ -27,8 +33,10 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { ensoHome, findRepoRoot } from '../packages/core/src/paths.ts'
+import { knownSecretValues } from '../packages/core/src/secrets.ts'
+import { ARENA_THINKING_LEVELS, arenaAgentDriver, resolveArenaModel } from './arena/agent.ts'
 import { foldArenaManifest } from './arena/manifest.ts'
-import { type ArenaControl, controlFilePath, runArena } from './arena/recorder.ts'
+import { type ArenaControl, type ArenaDriver, controlFilePath, runArena } from './arena/recorder.ts'
 import { ARENA_SCENARIOS, arenaBrief, type ArenaScenario, SNAKE_SCENARIO } from './arena/scenario.ts'
 import { readTimeline } from './arena/timeline.ts'
 
@@ -39,7 +47,7 @@ const [command, ...rest] = process.argv.slice(2)
  * review). ONE list: `flag` accepts only these names, so a flag read here cannot be missing from
  * what `act` skips.
  */
-const VALUED_FLAGS = ['scenario', 'minutes', 'home', 'out', 'chromium', 'run'] as const
+const VALUED_FLAGS = ['scenario', 'minutes', 'home', 'out', 'chromium', 'run', 'agent', 'thinking'] as const
 type ValuedFlag = (typeof VALUED_FLAGS)[number]
 const VALUED_FLAG_ARGUMENTS = new Set<string>(VALUED_FLAGS.map((name) => `--${name}`))
 
@@ -62,6 +70,31 @@ const home = resolve(flag('home') ?? ensoHome(process.env))
 const outDirectory = resolve(flag('out') ?? join(ensoHome(process.env), 'arena'))
 const currentFile = join(outDirectory, 'current')
 
+/**
+ * The agent runner `start` drives the run with, or undefined for `--manual`. One of the two is
+ * required: a run with no agent does not hold the UI-only boundary, so it is never the default.
+ */
+async function driverNamed(
+  scenario: ArenaScenario,
+): Promise<{ readonly driver?: ArenaDriver; readonly brief: string }> {
+  const reference = flag('agent')
+  if (rest.includes('--manual')) {
+    if (reference !== undefined) fail('--manual and --agent are two ways to drive one run: name one')
+    return { brief: arenaBrief(scenario, 'command') }
+  }
+  if (reference === undefined) {
+    fail('start takes --agent PROVIDER/MODEL (the agent under test, UI only) or --manual (actions over `arena act`)')
+  }
+  const thinking = ARENA_THINKING_LEVELS.find((level) => level === (flag('thinking') ?? 'medium'))
+  if (thinking === undefined) fail(`--thinking takes one of ${ARENA_THINKING_LEVELS.join(', ')}`)
+  const { model, streamFn } = await resolveArenaModel(home, reference).catch((error: unknown) =>
+    fail(error instanceof Error ? error.message : String(error)),
+  )
+  const brief = arenaBrief(scenario, 'tool')
+  const driver = arenaAgentDriver({ model, streamFn, thinking, brief, secretValues: knownSecretValues(home) })
+  return { driver, brief }
+}
+
 async function start(): Promise<void> {
   const scenario = scenarioNamed()
   const minutes = Number(flag('minutes') ?? scenario.budgetMinutes)
@@ -72,8 +105,9 @@ async function start(): Promise<void> {
     .replace(/\.\d+Z$/, 'Z')}`
   const runDirectory = join(outDirectory, runId)
   const chromiumPath = flag('chromium')
+  const { driver, brief } = await driverNamed(scenario)
   mkdirSync(runDirectory, { recursive: true })
-  writeFileSync(join(runDirectory, 'brief.md'), arenaBrief(scenario))
+  writeFileSync(join(runDirectory, 'brief.md'), brief)
   writeFileSync(currentFile, runDirectory)
   try {
     await runArena({
@@ -86,6 +120,7 @@ async function start(): Promise<void> {
       headed: rest.includes('--headed'),
       environment: process.env,
       ...(chromiumPath === undefined ? {} : { chromiumPath }),
+      ...(driver === undefined ? {} : { driver }),
     })
   } finally {
     rmSync(currentFile, { force: true })
@@ -103,6 +138,9 @@ async function act(): Promise<void> {
   const controlFile = controlFilePath(runDirectory)
   if (!existsSync(controlFile)) fail(`the run at ${runDirectory} is not live`)
   const control = JSON.parse(readFileSync(controlFile, 'utf8')) as ArenaControl
+  if (control.port === undefined) {
+    fail(`the run at ${runDirectory} is driven by its agent: the page takes actions only through the agent's tool`)
+  }
   let parsed: unknown
   try {
     parsed = JSON.parse(body)
@@ -133,7 +171,7 @@ switch (command) {
     await start()
     break
   case 'brief':
-    process.stdout.write(arenaBrief(scenarioNamed()))
+    process.stdout.write(arenaBrief(scenarioNamed(), rest.includes('--manual') ? 'command' : 'tool'))
     break
   case 'act':
     await act()
@@ -142,5 +180,7 @@ switch (command) {
     refold()
     break
   default:
-    fail('usage: bun run arena start | brief | act <json> | manifest <run directory>')
+    fail(
+      'usage: bun run arena start --agent PROVIDER/MODEL | start --manual | brief | act <json> | manifest <run directory>',
+    )
 }

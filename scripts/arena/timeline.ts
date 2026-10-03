@@ -36,11 +36,18 @@ export type ArenaShotCause =
 /** A note the agent wrote: a wish, a piece of friction, or its end-of-run retrospective. */
 export type ArenaNoteKind = 'wish' | 'friction' | 'retrospective'
 
+/**
+ * Who sent an action: the agent runner's one tool (`agent`), or the loopback control endpoint
+ * that `bun run arena act` posts to (`control`). The manifest's boundary is read off this.
+ */
+export type ArenaActionSource = 'agent' | 'control'
+
 export type ArenaEventBody =
   | { readonly kind: 'run-start'; readonly scenario: string; readonly project: string; readonly ensoCommit?: string }
   | { readonly kind: 'screenshot'; readonly cause: ArenaShotCause; readonly path: string }
   | {
       readonly kind: 'action'
+      readonly via: ArenaActionSource
       readonly action: string
       /** The action as the agent sent it, with any typed text redacted. */
       readonly detail: string
@@ -59,8 +66,20 @@ export type ArenaEventBody =
   | { readonly kind: 'trace-chunk'; readonly path: string }
   /** Something the recorder itself failed to do — a trace chunk not written — recorded, not thrown. */
   | { readonly kind: 'recorder-error'; readonly during: string; readonly error: string }
+  /** The agent runner started: the model that drives the UI, and the only tools it was given. */
+  | {
+      readonly kind: 'agent-start'
+      readonly provider: string
+      readonly model: string
+      readonly thinking: string
+      readonly tools: readonly string[]
+    }
+  /** The model asked for a tool it was not given; nothing ran. */
+  | { readonly kind: 'agent-tool-refused'; readonly tool: string }
+  | { readonly kind: 'agent-end'; readonly reason: string }
   | {
       readonly kind: 'note'
+      readonly via: ArenaActionSource
       readonly note: ArenaNoteKind
       readonly trying: string
       readonly happened: string
