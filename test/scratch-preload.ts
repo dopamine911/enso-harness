@@ -44,6 +44,16 @@ process.env['TMPDIR'] = scratch
 // `PI_CODING_AGENT_DIR` once filed fixtures under `~/.pi`, PR #554). A test that means the real
 // home passes its own environment; none does.
 process.env['ENSO_HOME'] = join(scratch, 'enso-home')
-afterAll(() => {
-  rmSync(scratch, { recursive: true, force: true })
-})
+/**
+ * ⚠ The teardown's cost grows with the whole suite, so it is not held to bun's 5 s hook default
+ * (PR #562): with #578's two large fixtures left here it deleted ~58,000 entries, past 5 s on a CI
+ * runner, and the gate failed on an `(unnamed)` hook after whichever file ran last. Those fixtures
+ * now remove themselves; this limit is what keeps the next growth from failing the gate again.
+ */
+const TEARDOWN_TIMEOUT_MS = 60_000
+afterAll(
+  () => {
+    rmSync(scratch, { recursive: true, force: true })
+  },
+  { timeout: TEARDOWN_TIMEOUT_MS },
+)
