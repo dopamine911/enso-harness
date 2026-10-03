@@ -12,6 +12,7 @@ bun run arena start --manual        # the same run with no agent: you act over `
 bun run arena brief                 # what the agent under test is told (`--manual`: the act-command version)
 bun run arena act '{"action":"read"}'   # one UI action on a --manual run
 bun run arena manifest <run dir>    # fold the manifest again from the timeline (after a recorder that died)
+bun run arena score <run dir>       # score a run again: its logs read for problems, and whether the UI was used
 ```
 
 `start` needs one of `--agent PROVIDER/MODEL` (a model the home is logged in to, through Enso's own
@@ -23,6 +24,44 @@ and `--headed`. Ports 5178 and 5179 must be free: the arena starts its own stack
 With `--agent`, the run starts the agent under test itself and stops when the agent stops it, ends
 without stopping (after three nudges), or runs out of budget. Do not prescribe its features or
 script its failures.
+
+## The score
+
+Every run ends with a score (`score.ts`), written to `score.json` and `score.md`. `start` and
+`score` exit 1 when it is FAIL, so a caller can gate on a run. It follows the session eval's rules
+(#441): every line traces to a record, and there is **no composite number**. It reports named UI
+checks and problems at two severities. One error fails the run, and the score says which.
+
+**The UI checks.** Any check that fails or can't be made (`unknown`) is an error, because the score
+won't say the UI was used without evidence. Only the first two come from the recorder. The other
+three are checked against Enso's own records and the files on disk:
+
+| Check | Passes when |
+|---|---|
+| `agent-only-tool` | the manifest's boundary held: the agent's only tool was `act`, and every action came through it |
+| `acted-on-page` | the agent made at least one move on the page (click, fill, press, …) through its tool |
+| `prompted-enso` | Enso's session evals count at least one prompt (`humanMessages`) |
+| `no-thread-outside-ui` | every stored thread of the run's project that has messages was shown in the UI, or is a fork of one that was |
+| `enso-did-the-work` | if the project or a thread's tree changed, Enso's sessions ran tool calls |
+
+Enso runs a thread in a tree of its own (#551), so the work is counted across the project *and*
+each thread's `cwd`. A live run's `snake.js` was only in the tree.
+
+**The problems**, grouped so a repeated one is one line with a count and examples:
+
+| Read from | Error | Warning |
+|---|---|---|
+| the run | the recorder died; the runner failed; the agent's model call failed | budget ran out; ended without `stop`; no retrospective |
+| the timeline | page crash, Enso exit, uncaught page error, HTTP 5xx, a recorder failure | console error, HTTP 4xx, failed request (not `ERR_ABORTED`), failed action |
+| the agent's transcript | a model call that failed | each nudge |
+| the agent's own moves | | a tool it wasn't given; an action refused before the page (`goto /api`) |
+| Enso's log records (the thread bundles) | `ERROR`, `FATAL` | `WARN` |
+| Enso's session evals | a provider refusal | tool errors, failed gates, guard and rule refusals, denied prompts, retry after error |
+| the evidence | | each piece not collected |
+| the work | | nothing built anywhere |
+
+The score doesn't judge whether the game is good, or whether a wish is a real gap. That is the
+findings report's job.
 
 ## The UI-only boundary (#584)
 
@@ -54,8 +93,9 @@ in Enso's records.
 | `screenshots/` | one every 30 s (`sample`), plus one per error, dialog, navigation, failed action, Enso exit |
 | `trace/trace-NNN.zip` | the Playwright trace in five-minute chunks (`bunx playwright show-trace <zip>`) |
 | `enso/stack.log` | Enso's own output, redacted |
-| `enso/evidence/` | what the server holds for each thread the UI named, the log bundle, Stats |
+| `enso/evidence/` | what the server holds for each thread the UI named or the project stores: record, events, session eval, log bundle; plus Stats |
 | `agent/transcript.jsonl` | the agent under test's own transcript (`--agent`), redacted, image bytes left out |
+| `score.json`, `score.md` | the score: verdict, UI checks, problems, metrics |
 | `manifest.json` | the fold: what drove the run and whether the boundary held, screenshot index, threads with their time spans, actions, observed signals, the agent's notes, and every piece of Enso evidence as `collected` or `missing` with why |
 
 The thread id on a timeline line is the id `bun scripts/enso-thread.ts`, `/api/logs/bundle?thread=`

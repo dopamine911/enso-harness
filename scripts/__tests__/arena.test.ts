@@ -278,6 +278,7 @@ test('every observed signal is counted by its own kind', () => {
   const timeline = openTimeline(path, steppingClock())
   timeline.record({ kind: 'request-failed', request: 'GET /x', failure: 'net::ERR_ABORTED' })
   timeline.record({ kind: 'request-failed', request: 'GET /y', failure: 'net::ERR_FAILED' })
+  timeline.record({ kind: 'response-error', request: 'GET /z', status: 404 })
   timeline.record({ kind: 'dialog', dialog: 'confirm', message: 'leave?' })
   timeline.record({ kind: 'page-crash' })
   timeline.record({ kind: 'page-error', text: 'TypeError' })
@@ -288,6 +289,7 @@ test('every observed signal is counted by its own kind', () => {
     consoleErrors: 1,
     pageErrors: 1,
     failedRequests: 2,
+    httpErrors: 1,
     dialogs: 1,
     pageCrashes: 1,
     ensoExits: 2,

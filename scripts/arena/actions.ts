@@ -17,6 +17,9 @@ import type { ArenaNoteKind } from './timeline.ts'
 /** The one tool the agent runner gives the model (`agent.ts`): every move it makes on Enso is a call to it. */
 export const ARENA_UI_TOOL = 'act'
 
+/** The timeline `detail` of an action refused before it reached the page: a selector, `goto /api`, an unknown move. */
+export const ARENA_REFUSED_DETAIL = 'refused before it reached the page'
+
 /** How the agent names an element: what a person reading the page would see. */
 export type ArenaTarget =
   | { readonly role: string; readonly name?: string; readonly exact?: boolean; readonly nth?: number }

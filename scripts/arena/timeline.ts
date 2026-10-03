@@ -59,6 +59,8 @@ export type ArenaEventBody =
   | { readonly kind: 'console-error'; readonly text: string }
   | { readonly kind: 'page-error'; readonly text: string }
   | { readonly kind: 'request-failed'; readonly request: string; readonly failure: string }
+  /** A response with an HTTP error status: the route that answered 4xx or 5xx, which a console line does not name. */
+  | { readonly kind: 'response-error'; readonly request: string; readonly status: number }
   | { readonly kind: 'dialog'; readonly dialog: string; readonly message: string }
   | { readonly kind: 'page-crash' }
   | { readonly kind: 'enso-exit'; readonly exit: string }

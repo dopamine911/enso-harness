@@ -7,6 +7,7 @@ import { redactJudgeText } from '../../packages/core/src/judge.ts'
 import { knownSecretValues } from '../../packages/core/src/secrets.ts'
 import { isListening } from '../loopback.ts'
 import {
+  ARENA_REFUSED_DETAIL,
   type ArenaAction,
   type ArenaTarget,
   describeArenaAction,
@@ -16,6 +17,7 @@ import {
 import { collectEnsoEvidence } from './evidence.ts'
 import { foldArenaManifest } from './manifest.ts'
 import type { ArenaScenario } from './scenario.ts'
+import { type ArenaScore, writeArenaScore } from './score.ts'
 import {
   type ArenaActionSource,
   type ArenaEventBody,
@@ -208,8 +210,12 @@ async function openTracedPage(
   }
 }
 
-/** Run one arena: start Enso and the browser, serve the agent's actions, stop on a condition, write the manifest. */
-export async function runArena(options: ArenaRunOptions): Promise<void> {
+/**
+ * Run one arena: start Enso and the browser, serve the agent's actions, stop on a condition, write
+ * the manifest, then score the run (`score.ts`). Settles with the score — undefined only when the
+ * scoring itself failed, which is said on stderr and never costs the manifest.
+ */
+export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | undefined> {
   const { scenario, runDirectory, project } = options
   const runId = runDirectory.split('/').at(-1) ?? 'run'
   const shotsDirectory = join(runDirectory, 'screenshots')
@@ -343,6 +349,17 @@ export async function runArena(options: ArenaRunOptions): Promise<void> {
       here(),
     )
   })
+  page.on('response', (response) => {
+    if (response.status() < 400) return
+    timeline.record(
+      {
+        kind: 'response-error',
+        request: `${response.request().method()} ${response.url()}`,
+        status: response.status(),
+      },
+      here(),
+    )
+  })
   page.on('framenavigated', (frame) => {
     if (frame !== page.mainFrame()) return
     timeline.record({ kind: 'navigation' }, here())
@@ -465,7 +482,7 @@ export async function runArena(options: ArenaRunOptions): Promise<void> {
           kind: 'action',
           via,
           action: refusedActionName(request, redact),
-          detail: 'refused before it reached the page',
+          detail: ARENA_REFUSED_DETAIL,
           outcome: 'failed',
           error: parsed.error,
           durationMs: 0,
@@ -598,4 +615,15 @@ export async function runArena(options: ArenaRunOptions): Promise<void> {
   const manifest = foldArenaManifest({ runId, events: readTimeline(timeline.path), evidence })
   writeFileSync(join(runDirectory, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`)
   process.stdout.write(`arena: stopped (${reason}) — ${join(runDirectory, 'manifest.json')}\n`)
+  try {
+    const score = writeArenaScore(runDirectory)
+    process.stdout.write(
+      `arena: score ${score.verdict.toUpperCase()} — ${score.errors} error(s), ${score.warnings} warning(s), ` +
+        `UI used: ${score.uiUsed ? 'yes' : 'not shown'} — ${join(runDirectory, 'score.md')}\n`,
+    )
+    return score
+  } catch (error) {
+    process.stderr.write(`arena: the run could not be scored: ${redact(String(error))}\n`)
+    return undefined
+  }
 }

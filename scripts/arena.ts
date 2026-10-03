@@ -19,7 +19,12 @@
  *   bun run arena act '<json>' [--run DIR]
  *       one UI action on the live run (the agent's only way in); prints the result as JSON
  *   bun run arena manifest <run directory>
- *       fold a run's manifest again from its timeline — after a recorder that died, for one
+ *       fold a run's manifest again from its timeline — after a recorder that died, for one — and score it
+ *   bun run arena score <run directory>
+ *       score a run (`arena/score.ts`): its logs read for problems, and whether the UI was the
+ *       only way in. Writes `score.json` and `score.md`, prints the Markdown, exits 1 on FAIL.
+ *
+ * `start` exits 1 too when its run's score is FAIL, so a caller can gate on the run.
  *
  * Runs live under `--out`, `ENSO_HOME/arena` by default: `<scenario>-<time>/` with the project,
  * `timeline.jsonl`, `screenshots/`, `trace/`, `enso/` and `manifest.json`. `<out>/current` names
@@ -38,6 +43,7 @@ import { ARENA_THINKING_LEVELS, arenaAgentDriver, resolveArenaModel } from './ar
 import { foldArenaManifest } from './arena/manifest.ts'
 import { type ArenaControl, type ArenaDriver, controlFilePath, runArena } from './arena/recorder.ts'
 import { ARENA_SCENARIOS, arenaBrief, type ArenaScenario, SNAKE_SCENARIO } from './arena/scenario.ts'
+import { renderArenaScore, writeArenaScore } from './arena/score.ts'
 import { readTimeline } from './arena/timeline.ts'
 
 const [command, ...rest] = process.argv.slice(2)
@@ -109,8 +115,9 @@ async function start(): Promise<void> {
   mkdirSync(runDirectory, { recursive: true })
   writeFileSync(join(runDirectory, 'brief.md'), brief)
   writeFileSync(currentFile, runDirectory)
+  let passed = false
   try {
-    await runArena({
+    const score = await runArena({
       scenario,
       repoRoot: findRepoRoot(import.meta.url),
       runDirectory,
@@ -122,10 +129,11 @@ async function start(): Promise<void> {
       ...(chromiumPath === undefined ? {} : { chromiumPath }),
       ...(driver === undefined ? {} : { driver }),
     })
+    passed = score?.verdict === 'pass'
   } finally {
     rmSync(currentFile, { force: true })
   }
-  process.exit(0)
+  process.exit(passed ? 0 : 1)
 }
 
 async function act(): Promise<void> {
@@ -164,6 +172,13 @@ function refold(): void {
   const manifest = foldArenaManifest({ runId, events: readTimeline(join(runDirectory, 'timeline.jsonl')), evidence })
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
   process.stdout.write(`${manifestPath}\n`)
+  scoreRun(runDirectory)
+}
+
+function scoreRun(runDirectory: string): void {
+  const scored = writeArenaScore(runDirectory)
+  process.stdout.write(renderArenaScore(scored))
+  process.exitCode = scored.verdict === 'pass' ? 0 : 1
 }
 
 switch (command) {
@@ -179,8 +194,11 @@ switch (command) {
   case 'manifest':
     refold()
     break
+  case 'score':
+    scoreRun(rest[0] ?? fail('score takes a run directory'))
+    break
   default:
     fail(
-      'usage: bun run arena start --agent PROVIDER/MODEL | start --manual | brief | act <json> | manifest <run directory>',
+      'usage: bun run arena start --agent PROVIDER/MODEL | start --manual | brief | act <json> | manifest <run directory> | score <run directory>',
     )
 }

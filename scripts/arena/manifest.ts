@@ -89,6 +89,8 @@ export interface ArenaManifest {
     readonly consoleErrors: number
     readonly pageErrors: number
     readonly failedRequests: number
+    /** Responses with an HTTP error status (4xx, 5xx), by count; the score names their routes. */
+    readonly httpErrors: number
     readonly dialogs: number
     readonly pageCrashes: number
     readonly ensoExits: number
@@ -238,6 +240,7 @@ export function foldArenaManifest({ runId, events, evidence }: ArenaManifestInpu
       consoleErrors: count('console-error'),
       pageErrors: count('page-error'),
       failedRequests: count('request-failed'),
+      httpErrors: count('response-error'),
       dialogs: count('dialog'),
       pageCrashes: count('page-crash'),
       ensoExits: count('enso-exit'),
