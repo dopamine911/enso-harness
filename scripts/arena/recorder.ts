@@ -7,6 +7,8 @@ import { redactJudgeText } from '../../packages/core/src/judge.ts'
 import { knownSecretValues } from '../../packages/core/src/secrets.ts'
 import { isListening } from '../loopback.ts'
 import {
+  ARENA_REFUSED_DETAIL,
+  ARENA_RUNNER_STILL_RUNNING,
   type ArenaAction,
   type ArenaTarget,
   describeArenaAction,
@@ -16,7 +18,17 @@ import {
 import { collectEnsoEvidence } from './evidence.ts'
 import { foldArenaManifest } from './manifest.ts'
 import type { ArenaScenario } from './scenario.ts'
-import { type ArenaPagePlace, type ArenaShotCause, openTimeline, pagePlace, readTimeline } from './timeline.ts'
+import { type ArenaScore, writeArenaScore } from './score.ts'
+import {
+  type ArenaActionSource,
+  type ArenaEventBody,
+  type ArenaPagePlace,
+  type ArenaShotCause,
+  type ArenaTimeline,
+  openTimeline,
+  pagePlace,
+  readTimeline,
+} from './timeline.ts'
 
 /**
  * The arena recorder (#556): it starts Enso, owns the browser, and is the agent's only hands on
@@ -28,9 +40,13 @@ import { type ArenaPagePlace, type ArenaShotCause, openTimeline, pagePlace, read
  *   • THE TRACE IN CHUNKS. A Playwright trace is written only when its chunk stops, so it is
  *     stopped and restarted every `traceChunkMs`: a recorder killed outright loses one chunk,
  *     not the run. The timeline and screenshots are on disk as they happen.
- *   • ONE PAGE, ACTED ON HERE. The agent sends an action to the control endpoint; the recorder
- *     performs it on its own page, inside a named trace group, and records it. So every
+ *   • ONE PAGE, ACTED ON HERE. The agent sends an action — through the agent runner's one tool
+ *     (`agent.ts`), or to the control endpoint when no runner drives the run — and the recorder
+ *     performs it on its own page, inside a named trace group, and records who sent it. So every
  *     interaction is in the trace and on the timeline, and none can bypass either.
+ *   • WITH AN AGENT, NO SECOND DOOR. When a driver runs the agent, the control endpoint is not
+ *     served at all: the agent's tool is the only way an action reaches the page, and the
+ *     manifest's boundary checks that every action on the timeline came through it.
  *
  * Event screenshots (an error, a dialog, a navigation, a failed action, a crash) come on top of
  * the periodic sample, at most one per cause per `EVENT_SHOT_SPACING_MS`, so a burst of console
@@ -46,6 +62,8 @@ const EVENT_SHOT_SPACING_MS = 2000
 const VIEWPORT = { width: 1440, height: 900 } as const
 /** A single action's own timeout: a control that never appears fails the action, not the run. */
 const ACTION_TIMEOUT_MS = 15_000
+/** How long a stopped run waits for its agent runner to finish writing before closing the page. */
+const DRIVER_SETTLE_MS = 15_000
 
 export interface ArenaRunOptions {
   readonly scenario: ArenaScenario
@@ -61,13 +79,43 @@ export interface ArenaRunOptions {
   readonly headed: boolean
   /** The launcher's environment, which the stack inherits with `ENSO_HOME` set to `home`. */
   readonly environment: Readonly<Record<string, string | undefined>>
+  /**
+   * The agent runner (`agent.ts`), when an agent drives the run. Absent, the run is driven over
+   * the control endpoint by `bun run arena act` — by whoever holds a shell, which no one checks.
+   */
+  readonly driver?: ArenaDriver
 }
 
-/** The control endpoint's address, written beside the run so `bun run arena act` can find it. */
+/** What one action came to: its result, or why it failed or was refused. */
+export interface ArenaActOutcome {
+  readonly ok: boolean
+  readonly result?: unknown
+  readonly error?: string
+}
+
+/** What the recorder hands an agent runner: its one way into the page, and the run's end. */
+export interface ArenaDriverSession {
+  /** Perform one action on the page, recorded as sent by the agent. */
+  readonly act: (request: unknown) => Promise<ArenaActOutcome>
+  /** Settles with the stop reason when the run stops, whoever stopped it: the runner must end then. */
+  readonly stopped: Promise<string>
+  /** Put one of the runner's own events on the timeline: what drove the run, a tool it refused. */
+  readonly record: (body: ArenaEventBody) => void
+  readonly runDirectory: string
+}
+
+/** An agent runner: drives the run through `session.act` and settles with why the agent ended. */
+export type ArenaDriver = (session: ArenaDriverSession) => Promise<string>
+
+/**
+ * The control endpoint's address, written beside the run so `bun run arena act` can find it. A
+ * run an agent drives has no endpoint: `port` is absent, and `act` says the run is the agent's.
+ */
 export interface ArenaControl {
-  readonly port: number
+  readonly port?: number
   readonly pid: number
   readonly runDirectory: string
+  readonly driver: 'agent' | 'control'
 }
 
 /** The file a live run's control address is in, inside its run directory. */
@@ -115,6 +163,107 @@ function locate(page: Page, target: ArenaTarget): Locator {
   return target.nth === undefined ? found : found.nth(target.nth)
 }
 
+/** The name a refused request gave its action, short and redacted, for the timeline line that records the refusal. */
+function refusedActionName(request: unknown, redact: (text: string) => string): string {
+  const named =
+    typeof request === 'object' && request !== null && 'action' in request && typeof request.action === 'string'
+      ? request.action
+      : '(none)'
+  return redact(named).slice(0, 40)
+}
+
+/** What `control.json` says: the endpoint's port, or — with an agent driving — that there is none. */
+function controlRecordOf(control: ReturnType<typeof Bun.serve> | undefined, runDirectory: string): ArenaControl {
+  return control === undefined
+    ? { pid: process.pid, runDirectory, driver: 'agent' }
+    : { port: control.port ?? 0, pid: process.pid, runDirectory, driver: 'control' }
+}
+
+/**
+ * Start the agent runner on its session. Its end is a stop condition — a run nobody is driving has
+ * nothing more to record — and is on the timeline either way, a failure included. Settles when
+ * the runner has, never rejecting.
+ */
+function drive(
+  driver: ArenaDriver,
+  session: Omit<ArenaDriverSession, 'record'>,
+  timeline: ArenaTimeline,
+  run: { readonly resolveStop: (reason: string) => void; readonly redact: (text: string) => string },
+): Promise<void> {
+  const driven = driver({
+    ...session,
+    record: (body) => {
+      timeline.record(body)
+    },
+  })
+  return driven.then(
+    (reason) => {
+      timeline.record({ kind: 'agent-end', reason })
+      run.resolveStop(`the agent ended: ${reason}`)
+    },
+    (error: unknown) => {
+      const message = run.redact(String(error))
+      timeline.record({ kind: 'agent-end', reason: `the runner failed: ${message}` })
+      run.resolveStop(`the agent runner failed: ${message}`)
+    },
+  )
+}
+
+/**
+ * Wait for the runner to end after the stop, at most `settleMs`. A runner still going then — a
+ * model call the abort did not cut short — gets an `agent-end` line saying so (PR #585 review):
+ * without it the manifest folds with no end at all, and the score would lose the signal. If the
+ * runner ends later, its own line comes after this one and the fold reads the last.
+ */
+export async function awaitDriverEnd(
+  done: Promise<void>,
+  timeline: { readonly record: (body: ArenaEventBody) => unknown },
+  settleMs: number = DRIVER_SETTLE_MS,
+): Promise<void> {
+  const ended = await Promise.race([done.then(() => true), Bun.sleep(settleMs).then(() => false)])
+  if (!ended) {
+    timeline.record({
+      kind: 'agent-end',
+      reason: `${ARENA_RUNNER_STILL_RUNNING} ${settleMs / 1000} s after the run stopped: its end is unknown`,
+    })
+  }
+}
+
+/** Score the stopped run and say the verdict; a scoring failure is said on stderr and costs nothing else. */
+function scoreAndSay(runDirectory: string, redact: (text: string) => string): ArenaScore | undefined {
+  try {
+    const score = writeArenaScore(runDirectory)
+    process.stdout.write(
+      `arena: score ${score.verdict.toUpperCase()} — ${score.errors} error(s), ${score.warnings} warning(s), ` +
+        `UI used: ${score.uiUsed ? 'yes' : 'not shown'} — ${join(runDirectory, 'score.md')}\n`,
+    )
+    return score
+  } catch (error) {
+    process.stderr.write(`arena: the run could not be scored: ${redact(String(error))}\n`)
+    return undefined
+  }
+}
+
+/** The loopback endpoint `bun run arena act` posts to: one route, `POST /act`, a JSON action. */
+function serveControl(act: (body: unknown) => Promise<ArenaActOutcome>): ReturnType<typeof Bun.serve> {
+  return Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    fetch: async (request: Request): Promise<Response> => {
+      if (request.method !== 'POST' || new URL(request.url).pathname !== '/act') {
+        return new Response('POST /act', { status: 404 })
+      }
+      let body: unknown
+      try {
+        body = await request.json()
+      } catch {
+        return Response.json({ ok: false, error: 'the body is not JSON' }, { status: 400 })
+      }
+      return Response.json(await act(body))
+    },
+  })
+}
+
 /** A browser with one page, tracing, its first chunk open. A failure on the way closes what it opened. */
 async function openTracedPage(
   options: ArenaRunOptions,
@@ -135,8 +284,12 @@ async function openTracedPage(
   }
 }
 
-/** Run one arena: start Enso and the browser, serve the agent's actions, stop on a condition, write the manifest. */
-export async function runArena(options: ArenaRunOptions): Promise<void> {
+/**
+ * Run one arena: start Enso and the browser, serve the agent's actions, stop on a condition, write
+ * the manifest, then score the run (`score.ts`). Settles with the score — undefined only when the
+ * scoring itself failed, which is said on stderr and never costs the manifest.
+ */
+export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | undefined> {
   const { scenario, runDirectory, project } = options
   const runId = runDirectory.split('/').at(-1) ?? 'run'
   const shotsDirectory = join(runDirectory, 'screenshots')
@@ -270,6 +423,17 @@ export async function runArena(options: ArenaRunOptions): Promise<void> {
       here(),
     )
   })
+  page.on('response', (response) => {
+    if (response.status() < 400) return
+    timeline.record(
+      {
+        kind: 'response-error',
+        request: `${response.request().method()} ${response.url()}`,
+        status: response.status(),
+      },
+      here(),
+    )
+  })
   page.on('framenavigated', (frame) => {
     if (frame !== page.mainFrame()) return
     timeline.record({ kind: 'navigation' }, here())
@@ -293,10 +457,16 @@ export async function runArena(options: ArenaRunOptions): Promise<void> {
   }
 
   // ── The run's clock: samples, trace chunks, the budget ─────────────────────────────────────
-  let resolveStop: (reason: string) => void = () => undefined
+  let settleStop: (reason: string) => void = () => undefined
   const stopped = new Promise<string>((resolve) => {
-    resolveStop = resolve
+    settleStop = resolve
   })
+  /** Set once, by the first stop: an action that arrives after it is refused, not performed on a closing page. */
+  let stopReason: string | undefined
+  const resolveStop = (reason: string): void => {
+    stopReason ??= reason
+    settleStop(stopReason)
+  }
   const sampler = setInterval(() => void shoot('sample'), scenario.sampleIntervalMs)
   let queue: Promise<unknown> = Promise.resolve()
   const serialized = <Result>(work: () => Promise<Result>): Promise<Result> => {
@@ -318,7 +488,7 @@ export async function runArena(options: ArenaRunOptions): Promise<void> {
   for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => resolveStop(`signal ${signal}`))
 
   // ── The agent's actions ────────────────────────────────────────────────────────────────────
-  const perform = async (action: ArenaAction): Promise<unknown> => {
+  const perform = async (action: ArenaAction, via: ArenaActionSource): Promise<unknown> => {
     const timeout = ACTION_TIMEOUT_MS
     switch (action.action) {
       case 'goto':
@@ -357,6 +527,7 @@ export async function runArena(options: ArenaRunOptions): Promise<void> {
         timeline.record(
           {
             kind: 'note',
+            via,
             note: action.note,
             trying: redact(action.trying),
             happened: redact(action.happened),
@@ -374,16 +545,34 @@ export async function runArena(options: ArenaRunOptions): Promise<void> {
     }
   }
 
-  const act = async (request: unknown): Promise<{ ok: boolean; result?: unknown; error?: string }> => {
+  const act = async (request: unknown, via: ArenaActionSource): Promise<ArenaActOutcome> => {
     const parsed = parseArenaAction(request)
-    if (!parsed.ok) return { ok: false, error: parsed.error }
+    if (!parsed.ok) {
+      // ⚠ Recorded, not only answered (#584): a refused move — `goto /api/…`, a selector — is
+      // what the agent tried to do, and an attempt to leave the UI is evidence. Only the action's
+      // name is kept, redacted and cut short: the rest of a malformed request is not trusted.
+      timeline.record(
+        {
+          kind: 'action',
+          via,
+          action: refusedActionName(request, redact),
+          detail: ARENA_REFUSED_DETAIL,
+          outcome: 'failed',
+          error: parsed.error,
+          durationMs: 0,
+        },
+        here(),
+      )
+      return { ok: false, error: parsed.error }
+    }
     const { action } = parsed
     return serialized(async () => {
+      if (stopReason !== undefined) return { ok: false, error: `the run has stopped (${stopReason})` }
       const detail = describeArenaAction(action, secretValues)
       const refusal = typedSecretRefusal(action, secretValues)
       if (refusal !== undefined) {
         timeline.record(
-          { kind: 'action', action: action.action, detail, outcome: 'failed', error: refusal, durationMs: 0 },
+          { kind: 'action', via, action: action.action, detail, outcome: 'failed', error: refusal, durationMs: 0 },
           here(),
         )
         return { ok: false, error: refusal }
@@ -391,11 +580,12 @@ export async function runArena(options: ArenaRunOptions): Promise<void> {
       const began = performance.now()
       await context.tracing.group(detail)
       try {
-        const result = await perform(action)
+        const result = await perform(action, via)
         if (action.action !== 'note') {
           timeline.record(
             {
               kind: 'action',
+              via,
               action: action.action,
               detail,
               outcome: 'ok',
@@ -410,6 +600,7 @@ export async function runArena(options: ArenaRunOptions): Promise<void> {
         timeline.record(
           {
             kind: 'action',
+            via,
             action: action.action,
             detail,
             outcome: 'failed',
@@ -426,27 +617,20 @@ export async function runArena(options: ArenaRunOptions): Promise<void> {
     })
   }
 
-  const control = Bun.serve({
-    hostname: '127.0.0.1',
-    port: 0,
-    fetch: async (request: Request): Promise<Response> => {
-      if (request.method !== 'POST' || new URL(request.url).pathname !== '/act') {
-        return new Response('POST /act', { status: 404 })
-      }
-      let body: unknown
-      try {
-        body = await request.json()
-      } catch {
-        return Response.json({ ok: false, error: 'the body is not JSON' }, { status: 400 })
-      }
-      return Response.json(await act(body))
-    },
-  })
+  // ⚠ With a driver there is no endpoint (#584): a second door would let anything with
+  // a shell act on the page as the agent, and the boundary is that the agent has no shell.
+  const control = options.driver === undefined ? serveControl((body) => act(body, 'control')) : undefined
   const controlFile = controlFilePath(runDirectory)
-  const controlRecord: ArenaControl = { port: control.port ?? 0, pid: process.pid, runDirectory }
-  writeFileSync(controlFile, JSON.stringify(controlRecord, null, 2))
+  writeFileSync(controlFile, JSON.stringify(controlRecordOf(control, runDirectory), null, 2))
   await shoot('sample')
   process.stdout.write(`arena: run ${runId} is live — ${runDirectory}\n`)
+  const driverDone =
+    options.driver === undefined
+      ? undefined
+      : drive(options.driver, { act: (request) => act(request, 'agent'), stopped, runDirectory }, timeline, {
+          resolveStop,
+          redact,
+        })
 
   // ── Stop, then make the evidence whole ─────────────────────────────────────────────────────
   const reason = await stopped
@@ -455,7 +639,9 @@ export async function runArena(options: ArenaRunOptions): Promise<void> {
   clearTimeout(budget)
   rmSync(controlFile, { force: true })
   // Not forced: the `stop` action that got here is still in flight, and its answer is owed.
-  await control.stop()
+  await control?.stop()
+  // The runner ends on `stopped`; its transcript is flushed before the page it describes closes.
+  if (driverDone !== undefined) await awaitDriverEnd(driverDone, timeline)
   await serialized(async () => {
     if (browser.isConnected()) {
       await shoot('final')
@@ -486,4 +672,5 @@ export async function runArena(options: ArenaRunOptions): Promise<void> {
   const manifest = foldArenaManifest({ runId, events: readTimeline(timeline.path), evidence })
   writeFileSync(join(runDirectory, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`)
   process.stdout.write(`arena: stopped (${reason}) — ${join(runDirectory, 'manifest.json')}\n`)
+  return scoreAndSay(runDirectory, redact)
 }

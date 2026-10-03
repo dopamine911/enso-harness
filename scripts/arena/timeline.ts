@@ -36,11 +36,18 @@ export type ArenaShotCause =
 /** A note the agent wrote: a wish, a piece of friction, or its end-of-run retrospective. */
 export type ArenaNoteKind = 'wish' | 'friction' | 'retrospective'
 
+/**
+ * Who sent an action: the agent runner's one tool (`agent`), or the loopback control endpoint
+ * that `bun run arena act` posts to (`control`). The manifest's boundary is read off this.
+ */
+export type ArenaActionSource = 'agent' | 'control'
+
 export type ArenaEventBody =
   | { readonly kind: 'run-start'; readonly scenario: string; readonly project: string; readonly ensoCommit?: string }
   | { readonly kind: 'screenshot'; readonly cause: ArenaShotCause; readonly path: string }
   | {
       readonly kind: 'action'
+      readonly via: ArenaActionSource
       readonly action: string
       /** The action as the agent sent it, with any typed text redacted. */
       readonly detail: string
@@ -59,14 +66,32 @@ export type ArenaEventBody =
   | { readonly kind: 'trace-chunk'; readonly path: string }
   /** Something the recorder itself failed to do — a trace chunk not written — recorded, not thrown. */
   | { readonly kind: 'recorder-error'; readonly during: string; readonly error: string }
+  /** The agent runner started: the model that drives the UI, and the only tools it was given. */
+  | {
+      readonly kind: 'agent-start'
+      readonly provider: string
+      readonly model: string
+      readonly thinking: string
+      readonly tools: readonly string[]
+    }
+  /** The model asked for a tool it was not given; nothing ran. */
+  | { readonly kind: 'agent-tool-refused'; readonly tool: string }
+  | { readonly kind: 'agent-end'; readonly reason: string }
   | {
       readonly kind: 'note'
+      readonly via: ArenaActionSource
       readonly note: ArenaNoteKind
       readonly trying: string
       readonly happened: string
       readonly wanted?: string
     }
   | { readonly kind: 'run-stop'; readonly reason: string }
+  /** A response with an HTTP error status: the route that answered 4xx or 5xx, which a console line does not name. */
+  | {
+      readonly kind: 'response-error'
+      readonly request: string
+      readonly status: number
+    }
 
 /** One timeline line: the body, when it happened, and where the page was. */
 export type ArenaEvent = ArenaEventBody & {
@@ -124,20 +149,25 @@ export function openTimeline(path: string, clock: ArenaClock = SYSTEM_CLOCK): Ar
   }
 }
 
+/** Every JSON line a file holds, in order: a torn or malformed line is skipped, never fatal. */
+export function readJsonLines(path: string): unknown[] {
+  if (!existsSync(path)) return []
+  return readFileSync(path, 'utf8')
+    .split('\n')
+    .filter((line) => line.trim().length > 0)
+    .flatMap((line): unknown[] => {
+      try {
+        return [JSON.parse(line)]
+      } catch {
+        return []
+      }
+    })
+}
+
 /**
  * Every event a timeline file holds, oldest first. A torn last line — the recorder killed
  * mid-write — is skipped, not fatal: the rest of the run is still evidence.
  */
 export function readTimeline(path: string): ArenaEvent[] {
-  if (!existsSync(path)) return []
-  return readFileSync(path, 'utf8')
-    .split('\n')
-    .filter((line) => line.trim().length > 0)
-    .flatMap((line): ArenaEvent[] => {
-      try {
-        return [JSON.parse(line) as ArenaEvent]
-      } catch {
-        return []
-      }
-    })
+  return readJsonLines(path) as ArenaEvent[]
 }
