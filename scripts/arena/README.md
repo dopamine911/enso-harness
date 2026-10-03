@@ -1,25 +1,86 @@
 # Dogfood Arena
 
 An agent uses Enso through its real UI on an assignment, and a recorder outside Enso keeps the
-evidence (#556). The agent is a *user* of Enso: it reaches the page only through `bun run arena act`,
+evidence (#556). The agent is a *user* of Enso: it reaches the page only through one tool, `act`,
 by what a reader of the page sees, and is told nothing about Enso's internals.
 
 ## Run
 
 ```bash
-bun run arena start                 # Enso over a fresh project + a recorded browser; runs until a stop condition
-bun run arena brief                 # what the agent under test is told (the assignment, the act command)
-bun run arena act '{"action":"read"}'   # one UI action on the live run, as the agent
+bun run arena start --agent anthropic/<model-id>   # Enso + a recorded browser + the agent under test, UI only
+bun run arena start --manual        # the same run with no agent: you act over `arena act`; the boundary is not held
+bun run arena brief                 # what the agent under test is told (`--manual`: the act-command version)
+bun run arena act '{"action":"read"}'   # one UI action on a --manual run
 bun run arena manifest <run dir>    # fold the manifest again from the timeline (after a recorder that died)
+bun run arena score <run dir>       # score a run again: its logs read for problems, and whether the UI was used
 ```
 
-`start` takes `--scenario snake` (the default), `--minutes N` (the budget, 120 by default),
+`start` needs one of `--agent PROVIDER/MODEL` (a model the home is logged in to, through Enso's own
+login; `--thinking LEVEL`, `medium` by default) or `--manual`. It also takes `--scenario snake` (the default), `--minutes N` (the budget, 120 by default),
 `--home DIR` (the `ENSO_HOME` the stack runs over: yours by default, because the agent's prompts
 reach a real model with your login), `--out DIR` (`ENSO_HOME/arena` by default), `--chromium PATH`
 and `--headed`. Ports 5178 and 5179 must be free: the arena starts its own stack.
 
-Point the agent under test at the brief (`<run dir>/brief.md`) and let it work. Do not prescribe its
-features or script its failures.
+With `--agent`, the run starts the agent under test itself and stops when the agent stops it, ends
+without stopping (after three nudges), or runs out of budget. Do not prescribe its features or
+script its failures.
+
+## The score
+
+Every run ends with a score (`score.ts`), written to `score.json` and `score.md`. `start` and
+`score` exit 1 when it is FAIL, so a caller can gate on a run. It follows the session eval's rules
+(#441): every line traces to a record, and there is **no composite number**. It reports named UI
+checks and problems at two severities. One error fails the run, and the score says which.
+
+**The UI checks.** Any check that fails or can't be made (`unknown`) is an error, because the score
+won't say the UI was used without evidence. Only the first two come from the recorder. The other
+three are checked against Enso's own records and the files on disk:
+
+| Check | Passes when |
+|---|---|
+| `agent-only-tool` | the manifest's boundary held: the agent's only tool was `act`, and every action came through it |
+| `acted-on-page` | the agent made at least one move on the page (click, fill, press, …) through its tool |
+| `prompted-enso` | Enso's session evals count at least one prompt (`humanMessages`) |
+| `no-thread-outside-ui` | every stored thread of the run's project that has messages was shown in the UI, or is a fork of one that was |
+| `enso-did-the-work` | if the project or a thread's tree changed, Enso's sessions ran tool calls |
+
+Enso runs a thread in a tree of its own (#551), so the work is counted across the project *and*
+each thread's `cwd`. A live run's `snake.js` was only in the tree.
+
+**The problems**, grouped so a repeated one is one line with a count and examples:
+
+| Read from | Error | Warning |
+|---|---|---|
+| the run | the recorder died; the runner failed; the agent's model call failed | budget ran out; ended without `stop`; no retrospective |
+| the timeline | page crash, Enso exit, uncaught page error, HTTP 5xx, a recorder failure | console error, HTTP 4xx, failed request (not `ERR_ABORTED`), failed action |
+| the agent's transcript | a model call that failed | each nudge |
+| the agent's own moves | | a tool it wasn't given; an action refused before the page (`goto /api`) |
+| Enso's log records (the thread bundles) | `ERROR`, `FATAL` | `WARN` |
+| Enso's session evals | a provider refusal | tool errors, failed gates, guard and rule refusals, denied prompts, retry after error |
+| the evidence | | each piece not collected |
+| the work | | nothing built anywhere |
+
+The score doesn't judge whether the game is good, or whether a wish is a real gap. That is the
+findings report's job.
+
+## The UI-only boundary (#584)
+
+The agent runner (`agent.ts`) is a pi `Agent` over a bare model call, given the brief and **one
+tool, `act`**. It has no shell, no file access and no web: a call to any other tool is answered
+"Tool … not found" with nothing run, and is recorded as `agent-tool-refused`. `act` hands the action
+to the recorder in the same process. So the agent can't write the project's files itself, can't
+reach Enso's API, and can't read Enso's source. The work gets done only by using Enso through its page.
+
+While an agent drives, the control endpoint is **not served**: `bun run arena act` is refused, so
+nothing with a shell can act as the agent. Every action and note on the timeline carries `via`
+(`agent` or `control`), and a refused action (`goto /api/…`, a selector) is recorded too. The
+manifest's `boundary` is computed from the timeline, not asserted: `held` is true only when the
+agent was given exactly `act` and every action came through it. A `--manual` run is always
+`held: false`.
+
+What it does not bound is Enso's own agent. The agent under test can ask Enso, through the prompt box,
+to run anything Enso's permissions allow. That is using the product: it goes through the UI and is
+in Enso's records.
 
 ## What a run leaves
 
@@ -32,8 +93,10 @@ features or script its failures.
 | `screenshots/` | one every 30 s (`sample`), plus one per error, dialog, navigation, failed action, Enso exit |
 | `trace/trace-NNN.zip` | the Playwright trace in five-minute chunks (`bunx playwright show-trace <zip>`) |
 | `enso/stack.log` | Enso's own output, redacted |
-| `enso/evidence/` | what the server holds for each thread the UI named, the log bundle, Stats |
-| `manifest.json` | the fold: screenshot index, threads with their time spans, actions, observed signals, the agent's notes, and every piece of Enso evidence as `collected` or `missing` with why |
+| `enso/evidence/` | what the server holds for each thread the UI named or the project stores: record, events, session eval, log bundle; plus Stats |
+| `agent/transcript.jsonl` | the agent under test's own transcript (`--agent`), redacted, image bytes left out |
+| `score.json`, `score.md` | the score: verdict, UI checks, problems, metrics |
+| `manifest.json` | the fold: what drove the run and whether the boundary held, screenshot index, threads with their time spans, actions, observed signals, the agent's notes, and every piece of Enso evidence as `collected` or `missing` with why |
 
 The thread id on a timeline line is the id `bun scripts/enso-thread.ts`, `/api/logs/bundle?thread=`
 and the session file are keyed by: that is the jump from a screenshot to its turn.
@@ -45,8 +108,8 @@ and the session file are keyed by: that is the jump from a screenshot to its tur
   lost at most one chunk at a time.
 - **Every UI action goes through the recorder**, so each is in the trace (as a named group) and on the
   timeline. There is no selector, no `evaluate`, and `goto` refuses `/api`.
-- **Not held here: the agent's own shell.** An agent that can run `curl` can reach the API on
-  loopback. Keeping it to the UI is the agent runner's job (the tools it is given).
+- **The agent has no shell** under `--agent` (above). Under `--manual` it is whatever you give it, and
+  the manifest says the boundary was not held.
 - **Secrets.** Typed text that looks like a credential is refused, not typed: what is typed is in the
   trace's DOM snapshots and on screenshots, and a PNG cannot be scrubbed. Text the recorder writes
   (timeline, Enso's output, evidence) is redacted with the home's known secret values. A secret Enso

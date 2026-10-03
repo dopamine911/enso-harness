@@ -47,6 +47,7 @@ const REGIONS: readonly Region[] = ['web/host', 'web/server', 'web/browser', 'ha
  */
 const DOMAINS_BY_CLASSIFICATION: Readonly<Record<Classification, Readonly<Record<string, string>>>> = {
   wire: {
+    'arena.ts': 'Surface, Control',
     'ask-user.ts': 'Control',
     'dialog.ts': 'Control',
     'follow.ts': 'Control, Observation',

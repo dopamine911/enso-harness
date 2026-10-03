@@ -34,24 +34,37 @@ export const SNAKE_SCENARIO: ArenaScenario = {
 }
 
 /**
- * What the agent under test reads before it starts: the assignment, then how to reach Enso — the
- * one `act` command and its moves — and how to write a note. It says nothing about Enso's
- * internals, its routes or its source: the agent meets the interface as shipped.
+ * How the agent under test reaches the UI: the agent runner's one tool (`tool`), or the
+ * `bun run arena act` command when a person or an unrestricted agent drives the run (`command`).
  */
-export function arenaBrief(scenario: ArenaScenario): string {
+export type ArenaChannel = 'tool' | 'command'
+
+const HOW_YOU_ACT: Readonly<Record<ArenaChannel, string>> = {
+  tool: `Enso is open in a browser that a recorder controls. You act on it with your one tool, \`act\`,
+which takes one action object and returns what happened. It is the only tool you have: there is no
+shell and no file access. Everything you do — writing code, running it, testing it — you do by
+using Enso through its page, as a person at the keyboard would. Actions look like this:`,
+  command: `Enso is open in a browser that a recorder controls. You act on it with one command, which prints
+what happened as JSON:
+
+    bun run arena act '<json>'
+
+where <json> is one action, like these:`,
+}
+
+/**
+ * What the agent under test reads before it starts: the assignment, then how to reach Enso — the
+ * one way in and its moves — and how to write a note. It says nothing about Enso's internals, its
+ * routes or its source: the agent meets the interface as shipped.
+ */
+export function arenaBrief(scenario: ArenaScenario, channel: ArenaChannel = 'command'): string {
   return `# Your assignment
 
 ${scenario.assignment}
 
 # How you use Enso
 
-Enso is open in a browser that a recorder controls. You act on it with one command, which prints
-what happened as JSON:
-
-    bun run arena act '<json>'
-
-Find things the way a person reading the page would: by role and accessible name, visible text,
-label or placeholder. Start with \`read\`, which returns the page's accessibility tree and URL.
+${HOW_YOU_ACT[channel]}
 
     {"action":"read"}
     {"action":"click","target":{"role":"button","name":"…"}}
@@ -60,6 +73,8 @@ label or placeholder. Start with \`read\`, which returns the page's accessibilit
     {"action":"goto","path":"/"}
     {"action":"hover"|"select"|"back"|"reload"|"screenshot"|"wait", …}
 
+Find things the way a person reading the page would: by role and accessible name, visible text,
+label or placeholder. Start with \`read\`, which returns the page's accessibility tree and URL.
 A target may add "exact": true and "nth": <index> when a name matches more than one element.
 Everything on screen is recorded, so text that looks like a credential is refused, not typed.
 
