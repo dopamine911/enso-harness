@@ -49,13 +49,14 @@ export interface ArenaBriefContext {
   readonly repository?: string
 }
 
-function howYouAct(channel: ArenaChannel, act: string): string {
-  if (channel === 'tool') {
-    return `Enso is open in a browser that a recorder controls. You act on it with your one tool, \`act\`,
+/** How the runner's agent acts: its one tool. */
+const HOW_THE_TOOL_ACTS = `Enso is open in a browser that a recorder controls. You act on it with your one tool, \`act\`,
 which takes one action object and returns what happened. It is the only tool you have: there is no
 shell and no file access. Everything you do — writing code, running it, testing it — you do by
 using Enso through its page, as a person at the keyboard would. Actions look like this:`
-  }
+
+/** How an agent with a shell acts: the `act` command, its only way in by the brief's rule. */
+function howTheCommandActs(act: string): string {
   return `Enso is open in a browser that a recorder controls. You act on it with one command, which prints
 what happened as JSON:
 
@@ -88,7 +89,7 @@ ${scenario.assignment}
 
 # How you use Enso
 
-${howYouAct(channel, context.act ?? arenaActCommand())}
+${reviewed ? howTheCommandActs(context.act ?? arenaActCommand()) : HOW_THE_TOOL_ACTS}
 
     {"action":"read"}
     {"action":"click","target":{"role":"button","name":"…"}}
@@ -151,11 +152,13 @@ friction as it worked and wrote a retrospective; it had no files, so the review 
 two phases: review the run against what was recorded, then file the bugs it shows.
 
 `
+  // Embedded after the assignment, the review is phases 2 and 3; on its own, it is phases 1 and 2.
+  const first = reviewer === 'self' ? 2 : 1
   const memory =
     reviewer === 'self'
       ? 'Your memory of the run is not the evidence'
       : "The agent's notes are its account, not the evidence"
-  return `${intro}# Phase 2: review the experience
+  return `${intro}# Phase ${first}: review the experience
 
 Wait until \`${run}/manifest.json\` exists. The recorder writes it once the run has stopped.
 The run's evidence is in that directory:
@@ -184,7 +187,7 @@ sections:
    is traced to the friction above, with the evidence, and states what you would expect to
    change. The agent's wishes are inputs, not conclusions: say which of them the evidence supports.
 
-# Phase 3: file the bugs
+# Phase ${first + 1}: file the bugs
 
 File a bug for each item in section 3 classified as an Enso defect. Do not file the agent's own
 mistakes or wishes the evidence does not support; those belong in the review only. Bugs go to

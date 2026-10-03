@@ -454,7 +454,10 @@ test('the runner gets the assignment alone, and its review is a prompt of its ow
   expect(review).toStartWith('You are reviewing a Dogfood Arena run')
   expect(review).toContain('`/runs/r/brief.md`')
   expect(review).toContain("The agent's notes are its account, not the evidence")
-  expect(review).toContain('# Phase 3: file the bugs')
+  // On its own the review has no assignment before it, so it numbers its own phases from 1.
+  expect(review).toContain('# Phase 1: review the experience')
+  expect(review).toContain('# Phase 2: file the bugs')
+  expect(review).not.toContain('Phase 3')
 })
 
 test('without a run or a repository the review asks for them instead of guessing', () => {
