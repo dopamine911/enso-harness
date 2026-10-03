@@ -3,6 +3,7 @@ import {
   type EnsoLibraryPrompt,
   type EnsoLibraryPromptListing,
   type EnsoLibraryPromptWrite,
+  type EnsoProjectPromptLibrary,
   type EnsoSystemPromptDraft,
   type EnsoSystemPromptPreview,
   estimateTextTokens,
@@ -76,6 +77,28 @@ const LISTING: EnsoLibraryPromptListing = {
   refused: [{ file: 'broken.md', reason: 'broken.md: it does not open with a --- frontmatter block' }],
 }
 
+/** The project's own library (#470): a prompt sharing the user's `reviewer` id, and one the user has not. */
+const HOUSE_STYLE: EnsoLibraryPrompt = {
+  id: 'house-style',
+  name: 'House style',
+  description: 'How this repo writes',
+  category: 'append',
+  body: 'Name what it walks.',
+  bytes: 70,
+  tokens: 5,
+}
+const PROJECT: EnsoProjectPromptLibrary = {
+  kind: 'listed',
+  directory: '/work/repo/.enso/prompts',
+  listing: {
+    prompts: [
+      summarizeLibraryPrompt(HOUSE_STYLE),
+      { id: 'reviewer', name: 'Team reviewer', description: '', category: 'system', bytes: 80, tokens: 20 },
+    ],
+    refused: [],
+  },
+}
+
 const section = (name: string, text: string, library = false): EnsoSystemPromptPreview['sections'][number] => ({
   name,
   origin: library ? 'library' : 'pi',
@@ -131,12 +154,21 @@ const etagOf = (fields: unknown): { readonly ETag: string } => ({
   ETag: `"${new Bun.CryptoHasher('sha256').update(JSON.stringify(fields)).digest('hex')}"`,
 })
 
-function answer(input: string, init: RequestInit | undefined, written: Mounted['written']): Response {
+function answer(
+  input: string,
+  init: RequestInit | undefined,
+  written: Mounted['written'],
+  project: EnsoProjectPromptLibrary = PROJECT,
+): Response {
   const method = init?.method ?? 'GET'
   if (input === '/api/prompts') return Response.json(LISTING)
   if (input === '/api/prompts/reviewer' && method === 'GET')
     return Response.json(REVIEWER, { headers: etagOf(REVIEWER) })
   if (input === '/api/prompts/haiku' && method === 'GET') return Response.json(HAIKU, { headers: etagOf(HAIKU) })
+  if (input === '/api/threads/t1/project-prompts') return Response.json(project)
+  if (input === '/api/threads/t1/project-prompts/house-style' && method === 'GET') {
+    return Response.json(HOUSE_STYLE, { headers: etagOf(HOUSE_STYLE) })
+  }
   if (input.startsWith('/api/threads/t1/system-prompt')) {
     return Response.json(method === 'POST' ? draftPreview(bodyOf(init) as EnsoSystemPromptDraft) : PI_DEFAULT)
   }
@@ -169,7 +201,11 @@ function preconditionOf(init: RequestInit | undefined): string {
   return 'none'
 }
 
-async function mountManager(hold?: Hold, override?: Override): Promise<Mounted> {
+async function mountManager(
+  hold?: Hold,
+  override?: Override,
+  project: EnsoProjectPromptLibrary = PROJECT,
+): Promise<Mounted> {
   const asked: string[] = []
   const written: Mounted['written'] = []
   const preconditions: string[] = []
@@ -180,7 +216,7 @@ async function mountManager(hold?: Hold, override?: Override): Promise<Mounted> 
     const request = `${init?.method ?? 'GET'} ${input}`
     asked.push(request)
     if (init?.method === 'PUT' || init?.method === 'DELETE') preconditions.push(`${request} ${preconditionOf(init)}`)
-    const answered = (): Response => override?.(request) ?? answer(input, init, written)
+    const answered = (): Response => override?.(request) ?? answer(input, init, written, project)
     const late = hold?.(request)
     return late === undefined ? Promise.resolve(answered()) : late.then(answered)
   }
@@ -537,5 +573,58 @@ test('a delete refused because the file changed on disk offers Reload, which dro
   await click(mounted, 'Reload from disk')
   await eventually(() => expect(mounted.asked.filter((asked) => asked === 'GET /api/prompts/reviewer')).toHaveLength(2))
   await eventually(() => expect(mounted.dialog().querySelector('[aria-label="changed on disk"]')).toBeNull())
+  await mounted.unmount()
+})
+
+test("#470: a trusted project's prompts are listed apart and open read-only — no Save, no Delete — with what the model receives", async () => {
+  const mounted = await mountManager()
+  await eventually(() => expect(textOf(mounted, 'Project prompts')).toContain('House style'))
+  expect(textOf(mounted, 'Project prompts')).toContain('Team reviewer')
+  await openListed(mounted, 'House style')
+  await eventually(() => expect(mounted.dialog().textContent).toContain('.enso/prompts/house-style.md'))
+  const body = mounted.dialog().querySelector<HTMLTextAreaElement>('#prompt-body')
+  expect(body?.readOnly).toBe(true)
+  expect(body?.value).toBe(HOUSE_STYLE.body)
+  expect(mounted.dialog().textContent).toContain('How this repo writes')
+  expect(() => buttonNamed(mounted, 'Save')).toThrow()
+  expect(() => buttonNamed(mounted, 'Delete')).toThrow()
+  await eventually(() => expect(textOf(mounted, 'what the model receives')).toContain('this prompt'))
+  await mounted.unmount()
+})
+
+test("#470: ⚠ Copy to my library makes a new prompt in the user's library under the same name — a create, and nothing is ever written to the project", async () => {
+  const mounted = await mountManager()
+  await openListed(mounted, 'House style')
+  await click(mounted, 'Copy to my library')
+  expect(mounted.dialog().querySelector<HTMLInputElement>('#prompt-id')?.value).toBe('house-style')
+  await click(mounted, 'Save')
+  await eventually(() =>
+    expect(mounted.written).toEqual([
+      {
+        id: 'house-style',
+        fields: {
+          name: 'House style',
+          description: 'How this repo writes',
+          category: 'append',
+          body: HOUSE_STYLE.body,
+        },
+      },
+    ]),
+  )
+  expect(mounted.preconditions).toEqual(['PUT /api/prompts/house-style If-None-Match: *'])
+  expect(mounted.asked.filter((request) => request.includes('project-prompts') && !request.startsWith('GET'))).toEqual(
+    [],
+  )
+  await mounted.unmount()
+})
+
+test("#470: an untrusted project's prompts are not listed; the manager says where they are and why", async () => {
+  const mounted = await mountManager(undefined, undefined, { kind: 'untrusted', directory: '/work/repo/.enso/prompts' })
+  await eventually(() =>
+    expect(textOf(mounted, 'Project prompts')).toContain(
+      'not read: the project is not trusted (/work/repo/.enso/prompts)',
+    ),
+  )
+  expect(mounted.asked.some((request) => request.includes('project-prompts/'))).toBe(false)
   await mounted.unmount()
 })

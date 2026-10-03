@@ -259,7 +259,8 @@ export const EnsoSessionConfiguration = Type.Object(
     thinking: Type.Optional(Type.String({ minLength: 1 })),
     mode: Type.Optional(Type.String({ minLength: 1 })),
     /**
-     * A library prompt's id (#443), `system` or `append`, or `null` for pi's default. Applied FIRST.
+     * A library prompt's reference (#443, #470) — its id in the user's library, `project:<id>` in the
+     * project's — `system` or `append`, or `null` for pi's default. Applied FIRST.
      * Absent leaves the session's as it is; `null` is how a Start retried after a later step refused
      * goes back to pi's default over a prompt the first attempt already applied.
      */

@@ -2,6 +2,7 @@ import {
   EnsoLibraryPrompt,
   EnsoLibraryPromptListing,
   type EnsoLibraryPromptWrite,
+  EnsoProjectPromptLibrary,
   type EnsoSystemPromptDraft,
   EnsoSystemPromptPreview,
 } from '@enso/core'
@@ -102,6 +103,46 @@ export async function fetchPromptLibrary(fetchImpl: FetchLike = fetch): Promise<
     : { kind: 'unavailable', detail: read.detail }
 }
 
+export type ProjectLibraryRead =
+  | { readonly kind: 'loaded'; readonly project: EnsoProjectPromptLibrary }
+  | { readonly kind: 'unavailable'; readonly detail: string }
+
+/**
+ * `threadId`'s project library (#470): its prompts when the thread trusts the project, else where
+ * it is. Read-only — nothing here writes a project's file.
+ */
+export async function fetchProjectPromptLibrary(
+  threadId: string,
+  fetchImpl: FetchLike = fetch,
+): Promise<ProjectLibraryRead> {
+  const read = await readChecked(
+    `/api/threads/${encodeURIComponent(threadId)}/project-prompts`,
+    EnsoProjectPromptLibrary,
+    'project prompt listing',
+    fetchImpl,
+  )
+  return read.kind === 'loaded'
+    ? { kind: 'loaded', project: read.payload }
+    : { kind: 'unavailable', detail: read.detail }
+}
+
+/** One of `threadId`'s project prompts, body included (#470). */
+export async function fetchProjectPrompt(
+  threadId: string,
+  id: string,
+  fetchImpl: FetchLike = fetch,
+): Promise<LibraryPromptRead> {
+  const read = promptOf(
+    await readChecked(
+      `/api/threads/${encodeURIComponent(threadId)}/project-prompts/${encodeURIComponent(id)}`,
+      EnsoLibraryPrompt,
+      'prompt',
+      fetchImpl,
+    ),
+  )
+  return read.kind === 'conflict' ? { kind: 'unavailable', detail: read.detail } : read
+}
+
 /** One library prompt, body included, and the ETag of the version read. */
 export async function fetchLibraryPrompt(id: string, fetchImpl: FetchLike = fetch): Promise<LibraryPromptRead> {
   const read = promptOf(
@@ -148,8 +189,9 @@ export type SystemPromptPreviewRead =
   | { readonly kind: 'unavailable'; readonly detail: string }
 
 /**
- * The system prompt `threadId`'s next request would carry: with a saved prompt (`promptId`), with
- * an unsaved draft, or pi's default when neither is given.
+ * The system prompt `threadId`'s next request would carry: with a saved prompt (`promptId`, a prompt
+ * reference — `project:<id>` for the project's, #470), with an unsaved draft, or pi's default when
+ * neither is given.
  */
 export async function fetchSystemPromptPreview(
   threadId: string,
@@ -166,7 +208,8 @@ export async function fetchSystemPromptPreview(
           fetchImpl,
         )
       : await readChecked(
-          candidate === null ? base : `${base}?prompt=${encodeURIComponent(candidate.promptId)}`,
+          // The colon a project reference starts with is sent as it is: the route matches it unencoded.
+          candidate === null ? base : `${base}?prompt=${encodeURIComponent(candidate.promptId).replace('%3A', ':')}`,
           EnsoSystemPromptPreview,
           'preview',
           fetchImpl,

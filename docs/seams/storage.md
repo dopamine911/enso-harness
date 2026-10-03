@@ -134,6 +134,13 @@ export interface AgentHost {
    * commands. Read afresh per call, so a login through one thread shows at once.
    */
   catalogue(): Promise<RuntimeCommand[]>
+  /**
+   * The project a session built for `branch` in `cwd` would answer to, and whether it would read
+   * that project's own configuration (#470): the decision a build makes first (`hostedProjectTrust`,
+   * keyed as the build keys it, #551), asked without building — so the Start dialog lists a
+   * project's prompts for a thread nothing has built yet (#484's rule, #86).
+   */
+  projectTrust(cwd: string, branch: readonly EnsoTranscriptEntry[]): ProjectTrustState
 }
 ```
 
@@ -189,6 +196,13 @@ export interface HostedThread {
    * never a second matcher. `undefined` when the engine has published no service for the session.
    */
   checkPermission(request: EnsoPermissionCheckRequest): EnsoPermissionVerdict | undefined
+  /**
+   * The project this session answers to, and whether it reads that project's own configuration NOW
+   * (#502): pi's `trust.json`, the thread's "Trust this thread" record, or the default — and true
+   * after a Trust answered in this session. What the project's own prompt library is read from and
+   * gated on (#470). ⚠ The PROJECT, not the cwd: a thread on a tree (#551) answers with its checkout.
+   */
+  projectTrust(): ProjectTrustState
 }
 ```
 
