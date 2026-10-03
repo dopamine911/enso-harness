@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import type {
   DialogAnswer,
@@ -15,6 +16,7 @@ import type {
   EnsoSystemPromptChoice,
   EnsoSystemPromptSection,
   EnsoTranscriptEntry,
+  EnsoTreesListing,
   HostFlowOutcome,
   PromptOutcome,
   PromptRequest,
@@ -33,6 +35,7 @@ import type {
   HostedThread,
   HostedThreadInspection,
   SystemPromptPreviewOutcome,
+  ThreadDeleteOutcome,
   ThreadRestoreOutcome,
 } from '../../host/agent-host.ts'
 import type { BranchContext, BranchRequestDetail } from '../../host/branch-context.ts'
@@ -464,6 +467,8 @@ export interface FakeStoredThread {
   readonly forkPoint?: EnsoForkPoint
   /** What restoring its files answers (#551) once the thread and entry are found; `no-tree` when absent. A promise holds the restore open. */
   readonly restore?: ThreadRestoreOutcome | Promise<ThreadRestoreOutcome>
+  /** What its tree's inventory says when a delete is not forced (#571): the work, as the real host words it. Absent: nothing holds it. */
+  readonly holdsWork?: string
 }
 
 const FAKE_FRESH_MODE: EnsoPermissionModeState = { mode: 'default', available: ['default'] }
@@ -510,7 +515,14 @@ export function createFakeAgentHost(
   createSession: AgentHost['createSession'],
   stored: Record<string, FakeStoredThread> = {},
   fresh: EnsoPermissionModeState = FAKE_FRESH_MODE,
-  servesDirectory: (directory: string) => boolean = () => true,
+  {
+    servesDirectory = () => true,
+    trees = { projects: [] },
+  }: {
+    readonly servesDirectory?: (directory: string) => boolean
+    /** What `listTrees` answers (#578): no projects' trees by default — the fake has no disk. */
+    readonly trees?: EnsoTreesListing
+  } = {},
 ): AgentHost {
   const directoryOf = (storedThread: FakeStoredThread): string => storedThread.cwd ?? FAKE_PROJECT_DIRECTORY
   /** The stored thread under this id if its directory is served — what the real host reads. */
@@ -518,6 +530,8 @@ export function createFakeAgentHost(
     const storedThread = stored[threadId]
     return storedThread !== undefined && servesDirectory(directoryOf(storedThread)) ? storedThread : undefined
   }
+  /** The ids `deleteThread` removed — the real host's tombstone (#571). */
+  const deleted = new Set<string>()
   return {
     createSession,
     freshPermissionMode: () => fresh,
@@ -643,5 +657,31 @@ export function createFakeAgentHost(
       if (storedThread === undefined) return Promise.resolve({ kind: 'no-thread', reason: `no thread ${threadId}` })
       return Promise.resolve(storedThread.restore ?? { kind: 'no-tree', reason: `thread ${threadId} has no tree` })
     },
+    // The real host's order (#571): unknown, then the inventory — force takes only the work its
+    // digest confirms (PR #572 review) — then the live session's retire; deleted, the thread is
+    // gone from the fake's disk.
+    deleteThread: (threadId, { force, confirmedWork, retire }): Promise<ThreadDeleteOutcome> => {
+      const storedThread = served(threadId)
+      if (storedThread === undefined) return Promise.resolve({ kind: 'no-thread', reason: `no thread ${threadId}` })
+      const held = storedThread.holdsWork
+      if (held !== undefined && !(force && confirmedWork === createHash('sha256').update(held).digest('hex'))) {
+        return Promise.resolve({ kind: 'holds-work', reason: held })
+      }
+      if (!retire()) return Promise.resolve({ kind: 'busy', reason: `thread ${threadId} is running` })
+      Reflect.deleteProperty(stored, threadId)
+      deleted.add(threadId)
+      return Promise.resolve({ kind: 'deleted' })
+    },
+    threadDeleted: (threadId) => deleted.has(threadId),
+    // The real host's preview (#571), as far as the fake's disk goes: no trees, no forks.
+    previewThreadDelete: (threadId) => {
+      const storedThread = served(threadId)
+      if (storedThread === undefined) return Promise.resolve({ kind: 'no-thread', reason: `no thread ${threadId}` })
+      return Promise.resolve({
+        kind: 'preview',
+        preview: { tree: null, size: null, holdsWork: storedThread.holdsWork ?? null, keptFor: [] },
+      })
+    },
+    listTrees: () => Promise.resolve(trees),
   }
 }

@@ -12,6 +12,7 @@ import {
   type EnsoProject,
   type EnsoPromptImage,
   type EnsoProviderRefusal,
+  type EnsoStoredThread,
   type EnsoThreadHistory,
   isEnsoImageMimeType,
   type RuntimeCommand,
@@ -88,6 +89,7 @@ import {
 import { Input } from './components/ui/input.tsx'
 import { Textarea } from './components/ui/textarea.tsx'
 import { routeEnsoCustomEvent } from './custom-event-router.ts'
+import { DeleteThread } from './delete-thread-dialog.tsx'
 import { EnsoRing, EnsoSmile } from './enso-mark.tsx'
 import type { EnsoRendererMap } from './EnsoToolResult.tsx'
 import { createFixtureChat, fixtureFetch } from './fixture-conversation.ts'
@@ -120,6 +122,7 @@ import { ThreadStatsDrawer } from './thread-stats.tsx'
 import { ThreadStatusBar } from './thread-status.tsx'
 import {
   adoptThread,
+  dropThread,
   getThreadStores,
   markThreadActive,
   mintThread,
@@ -1897,7 +1900,8 @@ function useNarrowRail(): {
 
 /**
  * The page's header: the threads button (narrow screens), the mark, where you are — the active
- * thread's title, the same one the rail shows — then the view tabs, settings and `?debug`'s switch.
+ * thread's title, the same one the rail shows — and its Delete, then the view tabs, settings and
+ * `?debug`'s switch.
  */
 function AppHeader({
   active,
@@ -1907,6 +1911,8 @@ function AppHeader({
   onView,
   debugOpen,
   onToggleDebug,
+  onDeleted,
+  stored,
 }: {
   active: ThreadSummary | undefined
   activeThreadId: string | undefined
@@ -1915,7 +1921,20 @@ function AppHeader({
   onView: (view: ThreadView) => void
   debugOpen: boolean
   onToggleDebug: () => void
+  /** The server deleted this thread (#571): the page leaves it. */
+  onDeleted: (threadId: string) => void
+  /** The server's stored-thread listing (#95): a thread in it has a session file. */
+  stored: readonly EnsoStoredThread[]
 }): React.ReactNode {
+  const projects = useStore(projectList).rows
+  // Delete is offered once the server holds the thread (#571): listed among its stored sessions (a
+  // fork, written by its route before any prompt), adopted from a stored branch, or prompted here
+  // (its title is that prompt's). A thread minted and never prompted is this page's only.
+  const onServer =
+    active !== undefined &&
+    (active.title !== undefined ||
+      getThreadStores(active.threadId).history.length > 0 ||
+      stored.some((row) => row.threadId === active.threadId))
   return (
     <header className="flex min-h-14 items-center gap-3 border-b bg-sidebar px-3 py-2">
       <RailToggle open={rail.open} onToggle={rail.toggle} />
@@ -1928,12 +1947,28 @@ function AppHeader({
           {active?.title ?? (activeThreadId === undefined ? 'resuming…' : UNTITLED_THREAD)}
         </span>
       </div>
+      {active !== undefined && onServer ? (
+        <DeleteThread
+          key={active.threadId}
+          target={getThreadStores(active.threadId)}
+          onDeleted={onDeleted}
+          onRefused={(reason): void =>
+            getThreadStores(active.threadId).notifications.push(
+              `thread ${active.threadId}: delete refused: ${reason}`,
+              'warning',
+              'run',
+              ENSO_NOTICE_SOURCE,
+            )
+          }
+          stored={stored}
+        />
+      ) : null}
       {isFixtureMode ? (
         <span className="rounded-full border px-2 py-0.5 text-xs text-muted-foreground">fixture</span>
       ) : null}
       <ViewTabs view={view} onView={onView} threadId={active?.threadId} />
       <PromptManagerDialog threadId={activeThreadId} />
-      <SettingsDialog threadId={activeThreadId} />
+      <SettingsDialog threadId={activeThreadId} projects={projects} stored={stored} onDeleted={onDeleted} />
       {isDebugMode ? (
         <PaneSwitch
           open={debugOpen}
@@ -2127,6 +2162,27 @@ export function ChatScreen(): React.ReactNode {
     },
     [resume],
   )
+  // A deleted thread (#571) leaves the page; its pane goes, and the listing refreshes so the rail
+  // cannot offer it again. On screen still, it is left the way a failed resume leaves one: for a
+  // fresh thread in its project, written over its URL so back does not ask for the deleted id. ⚠
+  // Not on screen — the user moved while the server worked (PR #572 review) — nothing moves them:
+  // the answer is said on the thread they are on, and its history entry stays its own.
+  const leaveDeleted = useCallback(
+    (threadId: string): void => {
+      // Off screen while the server worked, its stores may already be gone: the follow budget drops
+      // idle threads. Only the one on screen is read, and that one the budget never drops.
+      const wasShown = activePane.current === threadId
+      const projectId = wasShown ? getThreadStores(threadId).projectId : undefined
+      // Dropped before the fresh one is minted, so the deleted thread is not what pushes another out of the budget.
+      dropThread(threadId)
+      const shown = wasShown ? mintPageThread(projectId).threadId : activePane.current
+      void storedThreads.refresh()
+      if (shown === undefined) return
+      if (wasShown) navigate(shown, 'replace')
+      getThreadStores(shown).notifications.push(`thread ${threadId} deleted`, 'info', 'run', ENSO_NOTICE_SOURCE)
+    },
+    [navigate],
+  )
   // Boot: the URL named a thread — adopt it. Once per page; the coordinator drops a stale answer.
   useEffect(() => {
     if (BOOT.kind === 'resume') resumeFrom(BOOT.threadId, 'pop', true)
@@ -2173,6 +2229,8 @@ export function ChatScreen(): React.ReactNode {
         onView={setView}
         debugOpen={debugOpen}
         onToggleDebug={() => setDebugOpen((open) => !open)}
+        onDeleted={leaveDeleted}
+        stored={stored.rows}
       />
       <div className="flex min-h-0 flex-1">
         <ThreadsRail

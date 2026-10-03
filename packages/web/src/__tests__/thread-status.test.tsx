@@ -176,6 +176,7 @@ const render = (props: Partial<Parameters<typeof ThreadStatusView>[0]>): string 
       usage={'usage' in props ? props.usage : NO_USAGE}
       cwd={props.cwd}
       projectTitle={props.projectTitle}
+      onTree={props.onTree}
       refusal={props.refusal}
       refusalSource={props.refusalSource}
       risk={props.risk}
@@ -343,6 +344,15 @@ test("on a thread's tree the bar names its project's title, with the tree's path
   const rendered = render({ cwd: tree, projectTitle: 'zen-harness-foundation' })
   expect(rendered).toContain('project zen-harness-foundation<')
   expect(rendered).toContain(`title="the tree pi reads and writes for this thread: ${tree}"`)
+})
+
+// #576 review: on by default, a thread's edits land in its own tree, not the user's checkout — said
+// on the bar itself, never only on hover; a thread in the checkout says nothing of the kind.
+test('a thread on its own tree says, on the bar, that its edits are not in the checkout; one in the checkout does not', () => {
+  const tree = '/home/dev/.enso/projects/0123456789abcdef/trees/a4d027f5-c6f9-4c39-a77e-bb75005e4da7'
+  const onTree = render({ cwd: tree, projectTitle: 'zen-harness-foundation', onTree: true })
+  expect(onTree).toContain('>own tree, not your checkout<')
+  expect(render({ cwd: '/home/dev/work/zen-harness-foundation/', onTree: false })).not.toContain('own tree')
 })
 
 // #395, PR #399 review: the server's empty directory means a new thread's project was removed —

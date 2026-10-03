@@ -13,6 +13,8 @@ import {
   DEMO_PROJECT,
   demoModelsJson,
   FEATURE_SCRIPT,
+  INCIDENT_PROMPT,
+  INCIDENT_SCRIPT,
   PROMPTS,
   PROMPT_LIBRARY,
   SECOND_MODEL,
@@ -63,6 +65,9 @@ import {
  *   • The real dev stack (`bun run dev <project>`), driven through the page like a user: the
  *     Start dialog, the composer, the questionnaire, the permission prompt. The guards, the tools,
  *     the session file and every panel are the product's own.
+ *   • Then, after every other shot, a second thread for the Incidents page (`INCIDENT_SCRIPT`),
+ *     whose refusals open an incident. The home turns halting on (`config.json`), so the incident
+ *     suspends tools and asks the agent for its report, as a user who turned it on would see.
  *
  * ⚠ It needs ports 5178, 5179 and 5199 FREE, and refuses to start otherwise: a dev server already
  * running is serving YOUR home, and these pages must not show it.
@@ -95,6 +100,19 @@ const PI_SETTINGS = { compaction: { keepRecentTokens: 300 }, defaultProjectTrust
 
 /** The `demo` provider, served by the scripted model on `MODEL_PORT` (`feature-model.ts`). */
 const MODELS_JSON = demoModelsJson(MODEL_PORT)
+
+/**
+ * Enso's own `config.json` for the throwaway home: halting on (#466), so the Incidents page's
+ * thread shows an incident that suspends and asks for a report. The shared thread never reaches
+ * `incident`, so for every other page it changes nothing.
+ */
+const ENSO_CONFIG = { security: { incidents: { halt: true } } } as const
+
+/** A finished demo thread: its id, and the prompt that shows its transcript is on screen. */
+interface DemoThread {
+  readonly id: string
+  readonly lastPrompt: string
+}
 
 interface Annotation {
   readonly target: Locator
@@ -363,11 +381,28 @@ async function playSession(page: Page, modelLog: string): Promise<string> {
   return threadId
 }
 
+/** Plays the Incidents page's thread (`INCIDENT_SCRIPT`) in a new thread of its own; returns its id. */
+async function playIncidentThread(page: Page): Promise<string> {
+  const threadId = crypto.randomUUID()
+  await page.goto(`${WEB}/?thread=${threadId}`)
+  const dialog = page.getByRole('dialog', { name: 'Start a session' })
+  await dialog
+    .getByText(/^Claude Sonnet 4\.5$/)
+    .first()
+    .click()
+  await dialog.getByPlaceholder('ask pi something').fill(INCIDENT_PROMPT)
+  await dialog.getByRole('button', { name: 'Start session' }).click()
+  // A recorded report ends the run, so the thread is done once the card shows it.
+  await page.getByText('The uncharitable read', { exact: true }).waitFor({ timeout: STEP_TIMEOUT_MS })
+  await page.locator('#thread-status').getByText('idle', { exact: true }).waitFor({ timeout: STEP_TIMEOUT_MS })
+  return threadId
+}
+
 // --- the shots taken afterwards, off the finished thread ---------------------------------------
 
-async function openThread(page: Page, threadId: string): Promise<void> {
-  await page.goto(`${WEB}/?thread=${threadId}`)
-  await page.getByText(PROMPTS[3]).first().waitFor()
+async function openThread(page: Page, thread: DemoThread): Promise<void> {
+  await page.goto(`${WEB}/?thread=${thread.id}`)
+  await page.getByText(thread.lastPrompt).first().waitFor()
   // The transcript mounts, then scrolls to its end; let both settle before anything is measured.
   await page.waitForTimeout(800)
 }
@@ -425,12 +460,13 @@ function threadOnScreen(page: Page, fallback: string): string {
 }
 
 /** The UI a shot's `go` drives: every call does what a reader would, and records it as their step. */
-function featureUi(page: Page, threadId: string, steps: string[]): FeatureUi {
+function featureUi(page: Page, thread: DemoThread, steps: string[]): FeatureUi {
+  const threadId = thread.id
   return {
     page,
     openThread: async () => {
       steps.push('open a thread from the rail')
-      await openThread(page, threadId)
+      await openThread(page, thread)
     },
     tab: async (name) => {
       steps.push(`choose the **${name}** tab at the top of the thread`)
@@ -529,11 +565,11 @@ async function sessionShots(page: Page, moment: SessionMoment): Promise<void> {
 }
 
 /** A feature's shots of the finished thread: the live ones, or (`cold`) the ones after the restart. */
-async function captureFeature(page: Page, spec: FeatureSpec, threadId: string, cold: boolean): Promise<void> {
+async function captureFeature(page: Page, spec: FeatureSpec, thread: DemoThread, cold: boolean): Promise<void> {
   for (const shot of spec.shots) {
     if ('during' in shot || (shot.cold === true) !== cold) continue
     const steps: string[] = []
-    await shot.go(featureUi(page, threadId, steps))
+    await shot.go(featureUi(page, thread, steps))
     await captureShot(page, spec, shot, steps)
   }
 }
@@ -598,23 +634,49 @@ function wantedFeatures(): readonly FeatureSpec[] {
 /** What the finished thread's shots run in: the browser, the thread, how to restart the stack, the failures so far. */
 interface FinishedThread {
   readonly browser: Browser
-  readonly threadId: string
+  readonly thread: DemoThread
   readonly restart: () => Promise<void>
   readonly failed: string[]
 }
 
 /** Every wanted feature's shots of the finished thread: the live ones, then, after a restart, the cold ones. */
 async function captureFinishedThread(wanted: readonly FeatureSpec[], run: FinishedThread): Promise<void> {
-  const { browser, threadId, failed } = run
+  const { browser, thread, failed } = run
   for (const spec of wanted) {
-    await attempt(browser, spec.id, (page) => captureFeature(page, spec, threadId, false), failed)
+    await attempt(browser, spec.id, (page) => captureFeature(page, spec, thread, false), failed)
   }
   const cold = wanted.filter((spec) => spec.shots.some((shot) => 'go' in shot && shot.cold === true))
   if (cold.length === 0) return
   // A cold thread is one no session holds: restart the stack, and the thread is read off its file.
   await run.restart()
   for (const spec of cold) {
-    await attempt(browser, `${spec.id} (cold)`, (page) => captureFeature(page, spec, threadId, true), failed)
+    await attempt(browser, `${spec.id} (cold)`, (page) => captureFeature(page, spec, thread, true), failed)
+  }
+}
+
+/**
+ * The Incidents page's shots: its thread played, then its shots taken — after every other page's,
+ * cold ones included, so no other page's rail, counts or day stats see a second thread.
+ */
+async function captureIncidentThread(
+  wanted: readonly FeatureSpec[],
+  browser: Browser,
+  failed: string[],
+): Promise<void> {
+  if (wanted.length === 0) return
+  let threadId = ''
+  await attempt(
+    browser,
+    'incident thread',
+    async (page) => {
+      threadId = await playIncidentThread(page)
+    },
+    failed,
+  )
+  if (threadId === '') return
+  const thread = { id: threadId, lastPrompt: INCIDENT_PROMPT }
+  for (const spec of wanted) {
+    await attempt(browser, spec.id, (page) => captureFeature(page, spec, thread, false), failed)
   }
 }
 
@@ -637,6 +699,7 @@ async function main(): Promise<void> {
   mkdirSync(join(home, 'pi-agent'), { recursive: true })
   writeFileSync(join(home, 'pi-agent', 'models.json'), JSON.stringify(MODELS_JSON, null, 2))
   writeFileSync(join(home, 'pi-agent', 'settings.json'), JSON.stringify(PI_SETTINGS, null, 2))
+  writeFileSync(join(home, 'config.json'), JSON.stringify(ENSO_CONFIG, null, 2))
   // The permission policy (#496): Enso's default, with `web_fetch` allowed. The default asks before
   // every fetch, and prompt 2's fetch is scripted to reach web_fetch's OWN allowlist refusal — what
   // Web access documents — not a permission question the script has no answer for. (Found when the
@@ -670,7 +733,7 @@ async function main(): Promise<void> {
   git('add', '--all')
   git('commit', '--quiet', '--message', 'shop-api')
   const modelLog = join(scratch, 'model.log')
-  const stopModel = startFeatureModel(MODEL_PORT, FEATURE_SCRIPT, modelLog)
+  const stopModel = startFeatureModel(MODEL_PORT, [FEATURE_SCRIPT, INCIDENT_SCRIPT], modelLog)
   let stack = startStack(home, project)
   let browser: Browser | undefined
   const failed: string[] = []
@@ -698,7 +761,16 @@ async function main(): Promise<void> {
       stack = startStack(home, project)
       await waitFor(async () => (await isListening(5178)) && (await isListening(5179)), 'the dev stack, again')
     }
-    await captureFinishedThread(wanted, { browser, threadId, restart, failed })
+    const shared = { id: threadId, lastPrompt: PROMPTS[3] }
+    await captureFinishedThread(
+      wanted.filter((spec) => spec.thread === undefined),
+      { browser, thread: shared, restart, failed },
+    )
+    await captureIncidentThread(
+      wanted.filter((spec) => spec.thread === 'incident'),
+      browser,
+      failed,
+    )
     if (failed.length > 0) throw new Error(`feature-screenshots: ${failed.length} failed\n${failed.join('\n')}`)
   } finally {
     await browser?.close()

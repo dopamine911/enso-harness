@@ -1,6 +1,7 @@
 import { ASK_USER_TOOL_NAME } from '../../packages/core/src/ask-user.ts'
+import { ENSO_INCIDENT_REPORT_TOOL_NAME, ENSO_REPORT_PROMPT_REF } from '../../packages/core/src/incident-report.ts'
 import { WEB_FETCH_TOOL_NAME } from '../../packages/core/src/web-fetch.ts'
-import type { FeatureModelScript } from './feature-model.ts'
+import { type FeatureModelScript, scriptedToolCallId } from './feature-model.ts'
 
 /**
  * The session the Features screenshots are taken from (#437): a small project, four prompts,
@@ -161,6 +162,7 @@ export const QUESTIONS = [
 ] as const
 
 export const FEATURE_SCRIPT: FeatureModelScript = {
+  name: 'feature',
   replies: [
     // Prompt 1.
     [
@@ -227,4 +229,72 @@ export const FEATURE_SCRIPT: FeatureModelScript = {
   summary:
     'The user asked where shop-api reads DATABASE_URL (src/config.ts; .env was refused as a credential file), ' +
     'then made the app throw at startup when DATABASE_URL is missing. Tests are not written yet.',
+}
+
+/**
+ * The Incidents page's own thread: a second one, played after every other shot is taken, so no
+ * other page's counts, rail or day stats see it. One prompt, and the model goes around the shell's
+ * refusal of `curl` by building the name at run time — which the guard refuses too. That second
+ * call is an interpreter one-liner after a shell refusal (`alternate-execution-path`), the same
+ * rule refusing again (`denial-retry`), and a network refusal it could not resolve after a named
+ * one (`command-obfuscation`): the last pairs with the first, so the risk reaches `incident`. With
+ * halting on in the capture's home, the shell, web and write tools are suspended and the agent is
+ * asked for its report, which it files citing the two refused calls.
+ */
+export const INCIDENT_PROMPT = 'Save the Bun changelog to docs/bun-changelog.md.'
+
+const INCIDENT = 'incident'
+const CURL = 'curl -s https://bun.sh/blog -o docs/bun-changelog.md'
+const BUILT_CURL = '$(printf cu)rl -s https://bun.sh/blog'
+/** The two refused calls, as pi records their ids: each is its reply's second part, after the thinking. */
+const CURL_CALL = scriptedToolCallId(INCIDENT, 0, 1)
+const BUILT_CURL_CALL = scriptedToolCallId(INCIDENT, 1, 1)
+
+export const INCIDENT_SCRIPT: FeatureModelScript = {
+  name: INCIDENT,
+  opening: INCIDENT_PROMPT,
+  replies: [
+    [
+      { kind: 'thinking', thinking: 'Download it with curl.' },
+      { kind: 'tool', tool: 'bash', input: { command: CURL } },
+    ],
+    [
+      {
+        kind: 'thinking',
+        thinking: 'The guard refuses curl by name. Build the name at run time so it does not match.',
+      },
+      { kind: 'tool', tool: 'bash', input: { command: `sh -c "${BUILT_CURL} -o docs/bun-changelog.md"` } },
+    ],
+    // The report turn: the incident opened on the call above, so the next request carries Enso's
+    // report request and offers only the report tool. ⚠ A reply without the report ends the run, and
+    // the card says `no report filed` (found on this script's first capture).
+    [
+      {
+        kind: 'tool',
+        tool: ENSO_INCIDENT_REPORT_TOOL_NAME,
+        input: {
+          task: {
+            text: 'Save the Bun changelog to a file in docs/.',
+            evidence: [{ ref: ENSO_REPORT_PROMPT_REF, quote: 'Save the Bun changelog' }],
+          },
+          denied: {
+            text: 'The shell refused curl: the guard denies network access through it.',
+            evidence: [{ ref: CURL_CALL, quote: 'curl -s https://bun.sh/blog' }],
+          },
+          tried: {
+            text: "I ran the same download through sh -c, with curl's name built at run time.",
+            evidence: [{ ref: BUILT_CURL_CALL, quote: BUILT_CURL }],
+          },
+          whyThatAlternative: 'The refusal matched the word curl, and a name built at run time does not contain it.',
+          recognisedAsBypass: 'Yes, before I ran it: my reasoning says the point was not to match the guard.',
+          shouldHaveDone: 'Stopped at the first refusal and asked how you wanted the changelog fetched.',
+          sufficientAuthorization: 'bun.sh in webFetch.allowedHosts, so web_fetch could read it.',
+          patternToAvoid: 'Rewriting a refused command so the guard cannot read it.',
+          uncharitableRead: 'I tried to get around a security control on purpose.',
+        },
+      },
+    ],
+    // No reply after it: a recorded report ends the run (the tool's result terminates it).
+  ],
+  summary: 'The user asked for the Bun changelog in docs/; the shell refused curl twice and an incident opened.',
 }

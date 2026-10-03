@@ -1,17 +1,121 @@
 import { expect, test } from 'bun:test'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  existsSync,
+  linkSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join, relative } from 'node:path'
+import { basename, dirname, join, relative } from 'node:path'
 import { openSnapshotStore, type SnapshotTaken } from '../snapshot-store.ts'
 import type { ThreadTreeKind, ThreadTreeRecord } from '../thread-tree-record.ts'
 import {
+  diskUsageOf,
+  measureBudget,
   disposeThreadTree,
   inventoryThreadTree,
   mintThreadTree,
+  releaseThreadStore,
   restoreThreadTree,
   treeKindFor,
 } from '../thread-tree.ts'
+
+// #578: what a tree costs on disk, as `du` counts it — allocated blocks, a hard link once, a
+// symlink never followed — and never a `0` for what was not counted.
+test('⚠ a directory measures as `du -sk` does: blocks, a hard-linked file once, a symlink not followed (#578)', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'enso-du-'))
+  writeFileSync(join(directory, 'small.txt'), 'a\n')
+  mkdirSync(join(directory, 'deep', 'deeper'), { recursive: true })
+  writeFileSync(join(directory, 'deep', 'deeper', 'big.bin'), Buffer.alloc(300_000, 1))
+  linkSync(join(directory, 'deep', 'deeper', 'big.bin'), join(directory, 'hardlink.bin'))
+  const outside = mkdtempSync(join(tmpdir(), 'enso-du-outside-'))
+  writeFileSync(join(outside, 'elsewhere.bin'), Buffer.alloc(500_000, 1))
+  symlinkSync(outside, join(directory, 'link-to-outside'))
+  const du = Number(execFileSync('du', ['-sk', directory], { encoding: 'utf8' }).split('\t')[0]) * 1024
+  const measured = await diskUsageOf(directory, Date.now() + 10_000)
+  expect(measured.kind).toBe('measured')
+  // `du -sk` rounds the total up to a KiB.
+  expect(Math.abs((measured.kind === 'measured' ? measured.bytes : 0) - du)).toBeLessThan(1024)
+})
+
+test('a directory that is gone frees nothing; one that cannot be read is `unreadable`; an unreadable subdirectory or the time cap is `partial` — at least what was counted (#578)', async () => {
+  expect(await diskUsageOf(join(tmpdir(), 'enso-du-never-made'), Date.now() + 1000)).toEqual({
+    kind: 'measured',
+    bytes: 0,
+  })
+  const directory = mkdtempSync(join(tmpdir(), 'enso-du-'))
+  writeFileSync(join(directory, 'counted.bin'), Buffer.alloc(100_000, 1))
+  mkdirSync(join(directory, 'locked'))
+  writeFileSync(join(directory, 'locked', 'hidden.bin'), Buffer.alloc(100_000, 1))
+  chmodSync(join(directory, 'locked'), 0o000)
+  try {
+    const partial = await diskUsageOf(directory, Date.now() + 10_000)
+    expect(partial.kind).toBe('partial')
+    expect(partial.kind === 'partial' ? partial.bytes : 0).toBeGreaterThanOrEqual(100_000)
+    expect(partial.kind === 'partial' ? partial.reason : '').toContain('could not be read')
+    chmodSync(directory, 0o000)
+    expect((await diskUsageOf(directory, Date.now() + 10_000)).kind).toBe('unreadable')
+  } finally {
+    chmodSync(directory, 0o755)
+    chmodSync(join(directory, 'locked'), 0o755)
+  }
+  const capped = await diskUsageOf(directory, Date.now() - 1)
+  expect(capped).toMatchObject({ kind: 'partial', reason: expect.stringContaining('time') })
+})
+
+// #579 review: an entry whose stat failed was skipped as if it were not there, and the count said
+// `measured` — a directory whose names can be read but not searched measured 0 B.
+test('⚠ entries that cannot be stat-ed make the count `partial`, naming them — never a complete 0 (#578)', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'enso-du-'))
+  mkdirSync(join(directory, 'names-only'))
+  writeFileSync(join(directory, 'names-only', 'big.bin'), Buffer.alloc(1_000_000, 1))
+  chmodSync(join(directory, 'names-only'), 0o444)
+  try {
+    const counted = await diskUsageOf(directory, Date.now() + 10_000)
+    expect(counted).toMatchObject({ kind: 'partial', reason: expect.stringContaining('could not be read') })
+  } finally {
+    chmodSync(join(directory, 'names-only'), 0o755)
+  }
+})
+
+// #579 review: the deadline was checked only between directories, so one wide directory (a flat
+// build output) ignored it, and a cut in the last directory still said `measured`.
+test('⚠ the time cap holds inside one wide directory: past it, the count is `partial`, not finished in time (#578)', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'enso-du-wide-'))
+  for (let file = 0; file < 20_000; file += 1) writeFileSync(join(directory, `f${file}`), 'x')
+  const started = Date.now()
+  const counted = await diskUsageOf(directory, started + 5)
+  expect(counted).toMatchObject({ kind: 'partial', reason: 'not finished in time' })
+  // Stopped soon after the cap: nothing new was launched past it.
+  expect(Date.now() - started).toBeLessThan(1000)
+})
+
+// #579 review: the listing measured trees in batches against one deadline, so the last batches
+// were never walked. One budget, served in rotation, shares the time: a small tree measured beside
+// a huge one finishes, however much the huge one has queued.
+test('⚠ measurements sharing one budget are served in rotation: a small tree beside a huge one is measured in full, the huge one cut (#578)', async () => {
+  const huge = mkdtempSync(join(tmpdir(), 'enso-du-huge-'))
+  for (let file = 0; file < 30_000; file += 1) writeFileSync(join(huge, `f${file}`), 'x')
+  const small = mkdtempSync(join(tmpdir(), 'enso-du-small-'))
+  mkdirSync(join(small, 'src'))
+  for (let file = 0; file < 20; file += 1) writeFileSync(join(small, 'src', `f${file}`), 'x')
+  const budget = measureBudget()
+  const deadline = Date.now() + 40
+  const [hugeCount, smallCount] = await Promise.all([
+    diskUsageOf(huge, deadline, budget),
+    diskUsageOf(small, deadline, budget),
+  ])
+  expect(hugeCount.kind).toBe('partial')
+  expect(smallCount.kind).toBe('measured')
+})
 
 /**
  * A thread's own tree (#551 slice 2), on real git: temp checkouts only, never a worktree of this
@@ -117,6 +221,14 @@ async function snapshotOf(store: string, tree: string): Promise<SnapshotTaken> {
   const outcome = await opened.snapshot()
   if (outcome.kind !== 'taken') throw new Error(`refused at ${outcome.refused.step}`)
   return outcome.taken
+}
+
+/** Every file under `directory` dated two hours back: past the object store collection's one-hour grace. */
+function aged(directory: string): void {
+  const then = new Date(Date.now() - 2 * 60 * 60_000)
+  for (const entry of readdirSync(directory, { recursive: true, withFileTypes: true })) {
+    if (entry.isFile()) utimesSync(join(entry.parentPath, entry.name), then, then)
+  }
 }
 
 test("⚠ a tree minted from a dirty checkout is a worktree on its own branch holding the checkout's current files — the uncommitted edit and the untracked file, never `.env` — and the checkout is untouched", async () => {
@@ -308,19 +420,18 @@ test('⚠ a dispose refuses a tree holding an untracked file or a commit no othe
     unsnapshotted: [],
     unmergedCommits: 0,
     unreadable: [],
-    dependents: [],
   })
 
   writeFileSync(join(record.path, 'stray.md'), 'not yet anywhere\n')
   const untracked = await disposeThreadTree({ record, store, force: false, environment })
   expect(untracked.kind === 'refused' ? untracked.reason : untracked.kind).toContain('stray.md')
-  expect(untracked.kind === 'refused' ? untracked.inventory.untracked : []).toEqual(['stray.md'])
+  expect(untracked.kind === 'refused' ? untracked.inventory?.untracked : []).toEqual(['stray.md'])
 
   git(record.path, 'add', 'stray.md')
   git(record.path, 'commit', '--quiet', '-m', 'on the branch only')
   await snapshotOf(store, record.path)
   const committed = await disposeThreadTree({ record, store, force: false, environment })
-  expect(committed.kind === 'refused' ? committed.inventory.unmergedCommits : 0).toBe(1)
+  expect(committed.kind === 'refused' ? committed.inventory?.unmergedCommits : 0).toBe(1)
   expect(committed.kind === 'refused' ? committed.reason : committed.kind).toContain('1 commit')
 
   git(record.path, 'reset', '--quiet', '--hard', 'HEAD~1')
@@ -343,7 +454,9 @@ test('⚠ a dispose refuses a tree holding an untracked file or a commit no othe
   expect(existsSync(where.store('forced'))).toBe(false)
 })
 
-test("⚠ a parent whose store a fork leans on is refused even forced, naming the fork's store; once the fork is disposed the parent disposes; a copy's dispose names a new file", async () => {
+// #571, #573: a fork's tree is the parent's snapshot. Deleting the parent removes its store; the
+// fork's history in the project's object store still reaches that snapshot, whatever is collected.
+test("⚠ a parent disposes its tree and its store — the fork still restores to the parent's snapshot after the collection, and a live thread's store is untouched", async () => {
   const project = checkout()
   const where = home()
   const parent = await mintFromCheckout(project, where, 'parent', 'copy')
@@ -358,22 +471,97 @@ test("⚠ a parent whose store a fork leans on is refused even forced, naming th
       environment,
     }),
   )
-  const held = await disposeThreadTree({ record: parent, store: where.store('parent'), force: true, environment })
-  expect(held.kind === 'refused' ? held.inventory.dependents : []).toEqual([where.store('child')])
-  expect(held.kind === 'refused' ? held.reason : held.kind).toContain(where.store('child'))
-  expect(existsSync(parent.path)).toBe(true)
-
-  writeFileSync(join(fork.path, 'new.md'), 'since the base\n')
-  const unforced = await disposeThreadTree({ record: fork, store: where.store('child'), force: false, environment })
-  expect(unforced.kind === 'refused' ? unforced.inventory.untracked : []).toEqual(['new.md'])
-  expect(await disposeThreadTree({ record: fork, store: where.store('child'), force: true, environment })).toEqual({
-    kind: 'disposed',
-  })
-  expect(existsSync(fork.path) || existsSync(where.store('child'))).toBe(false)
+  const live = await mintFromCheckout(project, where, 'live', 'copy')
+  aged(dirname(where.store('parent')))
   expect(await disposeThreadTree({ record: parent, store: where.store('parent'), force: false, environment })).toEqual({
     kind: 'disposed',
   })
   expect(existsSync(parent.path) || existsSync(where.store('parent'))).toBe(false)
+
+  writeFileSync(join(fork.path, 'src.ts'), 'export const one = 9\n')
+  const restored = await restoreThreadTree({
+    store: where.store('child'),
+    tree: fork.path,
+    hash: fork.base,
+    environment,
+  })
+  expect(restored.kind).toBe('restored')
+  expect(readFileSync(join(fork.path, 'src.ts'), 'utf8')).toBe('export const one = 1\n')
+
+  writeFileSync(join(fork.path, 'new.md'), 'since the base\n')
+  const unforced = await disposeThreadTree({ record: fork, store: where.store('child'), force: false, environment })
+  expect(unforced.kind === 'refused' ? unforced.inventory?.untracked : []).toEqual(['new.md'])
+  expect(await disposeThreadTree({ record: fork, store: where.store('child'), force: true, environment })).toEqual({
+    kind: 'disposed',
+  })
+  expect(await snapshotOf(where.store('live'), live.path)).toEqual({ hash: live.base, changed: false })
+})
+
+// PR #572 review: a store gone by hand; releasing it threw ENOENT on every attempt, so the thread
+// could never be deleted.
+test('a store already gone, though a fork was forked from it, releases as removed, and its tree still disposes', async () => {
+  const project = checkout()
+  const where = home()
+  const parent = await mintFromCheckout(project, where, 'gone', 'copy')
+  minted(
+    await mintThreadTree({
+      project,
+      tree: where.tree('gone-fork'),
+      store: where.store('gone-fork'),
+      kind: 'copy',
+      branch: 'enso/gone-fork',
+      from: { kind: 'snapshot', hash: parent.base, revision: null, storeDirectory: where.store('gone') },
+      environment,
+    }),
+  )
+  rmSync(where.store('gone'), { recursive: true, force: true })
+  expect(await disposeThreadTree({ record: parent, store: where.store('gone'), force: true, environment })).toEqual({
+    kind: 'disposed',
+  })
+  expect(existsSync(parent.path) || existsSync(where.store('gone'))).toBe(false)
+})
+
+// #575 review: a store that cannot be removed (owned by another user, a read-only directory)
+// threw out of the release — and out of the dispose, its tree already gone — not the refusal its
+// type promises.
+test('a store that cannot be removed is refused, never thrown — by the release, and by a dispose whose tree is already gone', async () => {
+  const project = checkout()
+  const where = home()
+  const record = await mintFromCheckout(project, where, 'stuck', 'copy')
+  const store = where.store('stuck')
+  chmodSync(store, 0o555)
+  try {
+    const released = await releaseThreadStore(store, environment)
+    expect(released.kind === 'removed' ? released : released.kind).toBe('refused')
+    const disposed = await disposeThreadTree({ record, store, force: true, environment })
+    // No inventory: the tree is gone, nothing of it is left to force — never a 422 to retry with.
+    expect(disposed).toEqual({ kind: 'refused', reason: expect.stringContaining('could not be removed') })
+    expect(existsSync(record.path)).toBe(false)
+  } finally {
+    chmodSync(store, 0o755)
+  }
+})
+
+// PR #572 review: a delete that stopped after its worktree was removed (or a user's `git worktree
+// prune`) left a tree git no longer knows; `worktree remove` refused it, and the thread could never
+// be deleted. A tree neither on disk nor registered is already removed — a present one still refuses.
+test('a worktree already removed and unregistered disposes: its branch and store go; one still on disk but unregistered is refused', async () => {
+  const project = checkout()
+  const where = home()
+  const pruned = await mintFromCheckout(project, where, 'pruned')
+  rmSync(pruned.path, { recursive: true, force: true })
+  git(project, 'worktree', 'prune')
+  expect(await disposeThreadTree({ record: pruned, store: where.store('pruned'), force: false, environment })).toEqual({
+    kind: 'disposed',
+  })
+  expect(git(project, 'branch', '--list', 'enso/pruned')).toBe('')
+  expect(existsSync(where.store('pruned'))).toBe(false)
+
+  const stray = await mintFromCheckout(project, where, 'stray')
+  rmSync(join(project, '.git', 'worktrees', basename(stray.path)), { recursive: true, force: true })
+  const refused = await disposeThreadTree({ record: stray, store: where.store('stray'), force: true, environment })
+  expect(refused.kind).toBe('refused')
+  expect(existsSync(stray.path) && existsSync(join(where.store('stray'), 'HEAD'))).toBe(true)
 })
 
 test('⚠ a file the checkout ignores only through `.git/info/exclude` is never minted into a tree, and a restore leaves it in place — in the worktree and in a copy forked from it', async () => {
@@ -418,7 +606,79 @@ test('⚠ a file the checkout ignores only through `.git/info/exclude` is never 
   expect(readFileSync(join(fork.path, 'local.secret'), 'utf8')).toBe('the copy’s own\n')
 })
 
-test('⚠ a chain of seven forks mints — the deepest tree holds every generation’s file, past git’s five-deep alternates limit — and a grandparent’s dispose is held by its grandchild', async () => {
+test("⚠ a copy of a subdirectory project follows its repository's ignore rules (#566): none of its ignored files is minted, one made in the copy is never snapshotted, and a restore leaves it — in the copy and in a copy forked from it", async () => {
+  const repository = checkout()
+  writeFileSync(join(repository, '.gitignore'), '.env\nnode_modules/\n')
+  writeFileSync(join(repository, '.git', 'info', 'exclude'), '/app/local.txt\n')
+  const project = join(repository, 'app')
+  mkdirSync(join(project, 'node_modules', 'x'), { recursive: true })
+  writeFileSync(join(project, 'a.ts'), 'export const a = 1\n')
+  writeFileSync(join(project, '.env'), 'SECRET=hunter2\n')
+  writeFileSync(join(project, 'local.txt'), 'only info/exclude hides this\n')
+  writeFileSync(join(project, 'node_modules', 'x', 'i.js'), 'installed\n')
+  const where = home()
+  expect(await treeKindFor(project, 'worktree', environment)).toBe('copy')
+
+  const record = await mintFromCheckout(project, where, 'sub', 'copy')
+  expect(files(record.path)).toEqual({ 'a.ts': 'export const a = 1\n' })
+
+  const ignoredInCopy = (tree: string): void => {
+    mkdirSync(join(tree, 'node_modules', 'y'), { recursive: true })
+    writeFileSync(join(tree, 'node_modules', 'y', 'j.js'), 'installed in the copy\n')
+    writeFileSync(join(tree, '.env'), 'SECRET=the copy’s own\n')
+    writeFileSync(join(tree, 'local.txt'), 'the copy’s own\n')
+    writeFileSync(join(tree, 'stray.md'), 'unignored, untracked\n')
+  }
+  const ignoredSurvived = (tree: string): void => {
+    expect(files(tree)).toEqual({
+      'a.ts': 'export const a = 1\n',
+      '.env': 'SECRET=the copy’s own\n',
+      'local.txt': 'the copy’s own\n',
+      'node_modules/y/j.js': 'installed in the copy\n',
+    })
+  }
+  ignoredInCopy(record.path)
+  const restored = await restoreThreadTree({
+    store: where.store('sub'),
+    tree: record.path,
+    hash: record.base,
+    environment,
+  })
+  if (restored.kind !== 'restored') throw new Error(`refused at ${restored.step}: ${restored.reason}`)
+  expect(git(where.store('sub'), 'ls-tree', '-r', '--name-only', restored.safety).split('\n').toSorted()).toEqual([
+    'a.ts',
+    'stray.md',
+  ])
+  ignoredSurvived(record.path)
+  // The copy's inventory calls them ignored, never untracked: a dispose is not held by them.
+  const inventory = await inventoryThreadTree({ record, store: where.store('sub'), environment })
+  expect(inventory.untracked).toEqual([])
+  expect(inventory.ignored.toSorted()).toEqual(['.env', 'local.txt', 'node_modules/y/j.js'])
+
+  const fork = minted(
+    await mintThreadTree({
+      project,
+      tree: where.tree('sub-fork'),
+      store: where.store('sub-fork'),
+      kind: 'copy',
+      branch: 'enso/sub-fork',
+      from: { kind: 'snapshot', hash: record.base, revision: null, storeDirectory: where.store('sub') },
+      environment,
+    }),
+  )
+  expect(files(fork.path)).toEqual({ 'a.ts': 'export const a = 1\n' })
+  ignoredInCopy(fork.path)
+  const restoredFork = await restoreThreadTree({
+    store: where.store('sub-fork'),
+    tree: fork.path,
+    hash: fork.base,
+    environment,
+  })
+  expect(restoredFork.kind).toBe('restored')
+  ignoredSurvived(fork.path)
+})
+
+test('⚠ a chain of seven forks mints — the deepest tree holds every generation’s file — and with the middle generations deleted and their objects collected, the deepest still restores to its base', async () => {
   const project = mkdtempSync(join(tmpdir(), 'enso-tree-chain-'))
   writeFileSync(join(project, 'root.txt'), 'root\n')
   const where = home()
@@ -452,10 +712,23 @@ test('⚠ a chain of seven forks mints — the deepest tree holds every generati
     ...Object.fromEntries(Array.from({ length: 7 }, (_, at) => [`g${at}.txt`, `generation ${at}\n`])),
   })
 
-  const grandparent = records[5] as ThreadTreeRecord
-  const held = await disposeThreadTree({ record: grandparent, store: where.store('g5'), force: true, environment })
-  expect(held.kind === 'refused' ? held.inventory.dependents.toSorted() : []).toEqual([
-    where.store('g6'),
-    where.store('g7'),
-  ])
+  // #573: g5 and g6 go, and what only they reached is collected; g7's history still reaches every
+  // generation's file, through the object store.
+  aged(dirname(where.store('g5')))
+  for (const generation of [5, 6]) {
+    expect(
+      await disposeThreadTree({
+        record: records[generation] as ThreadTreeRecord,
+        store: where.store(`g${generation}`),
+        force: true,
+        environment,
+      }),
+    ).toEqual({ kind: 'disposed' })
+  }
+  rmSync(deepest.path, { recursive: true, force: true })
+  mkdirSync(deepest.path)
+  expect(
+    (await restoreThreadTree({ store: where.store('g7'), tree: deepest.path, hash: deepest.base, environment })).kind,
+  ).toBe('restored')
+  expect(files(deepest.path)['g6.txt']).toBe('generation 6\n')
 })

@@ -38,7 +38,7 @@ export const LINEAGE: FeatureSpec = {
     'Every thread also carries a record of the conditions it ran under, its *fork point*. That makes two forks comparable: the same history, and a list of what differed.',
     [
       '- *What pi records:* the model, the thinking level, and the permission mode.',
-      "- *What Enso adds at the start of a run:* the project's git revision and whether the tree was dirty, a hash of the resolved Enso config and the files it came from, the loaded skills, the context files the model received (such as `AGENTS.md`), and a hash of the mode's rules.",
+      "- *What Enso adds at the start of a run:* the project's git revision and whether the tree was dirty, a hash of the resolved Enso config and the files it came from, the loaded skills, the context files the model received (such as `AGENTS.md`), a hash of the mode's rules, and a snapshot of the thread's files: the one **Restore files to here** puts back, and a fork at that prompt starts from.",
     ].join('\n'),
   ],
   opens: [
@@ -100,7 +100,7 @@ export const LINEAGE: FeatureSpec = {
   ],
   limits: [
     'It records hashes and paths, never the contents of a config value, a context file or a system prompt. It can tell you that `AGENTS.md` changed, or which library prompt a thread started with, not what is in them.',
-    "Forking doesn't copy files. The project's working tree is shared, so a fork that edits a file edits it for every thread in that project.",
+    "With trees turned off, forking doesn't copy files: the checkout is shared, so a fork that edits a file edits it for every thread in that project. With trees on, the default, a fork gets a tree of its own at that prompt's snapshot. See [Thread trees](./thread-trees.md).",
     "The browser forks at a prompt, as pi's `/fork` does. Moving inside one thread's tree (pi's `/tree` and `/branch`) is not in the browser.",
     'There is no side-by-side comparison view. You compare the two fork points yourself, or with [Session eval](./session-eval.md).',
     "**Continue** doesn't run pi's start-of-prompt hooks, so the continued turn gets no mode reminder and no fresh run-context check.",
