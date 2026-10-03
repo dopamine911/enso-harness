@@ -1,11 +1,11 @@
 import { type ChildProcess, spawn, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { createConnection } from 'node:net'
 import { tmpdir } from 'node:os'
 import { delimiter, dirname, join, relative } from 'node:path'
 import { type Browser, chromium, type Locator, type Page } from '@playwright/test'
 import { findRepoRoot } from '../../packages/core/src/paths.ts'
 import { ENSO_DEFAULT_PERMISSION_POLICY } from '../../packages/core/src/permission-rules.ts'
+import { isListening } from '../loopback.ts'
 import { startFeatureModel } from './feature-model.ts'
 import {
   ANSWER_ENDINGS,
@@ -117,18 +117,6 @@ interface DemoThread {
 interface Annotation {
   readonly target: Locator
   readonly label: string
-}
-
-/** Whether something is listening on `port` on loopback. */
-function isListening(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const socket = createConnection({ host: '127.0.0.1', port })
-    socket.once('connect', () => {
-      socket.end()
-      resolve(true)
-    })
-    socket.once('error', () => resolve(false))
-  })
 }
 
 async function waitFor(check: () => Promise<boolean>, what: string, timeoutMs = 60_000): Promise<void> {
