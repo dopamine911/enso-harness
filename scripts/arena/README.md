@@ -15,7 +15,7 @@ bun run arena manifest <run dir>    # fold the manifest again from the timeline 
 
 `start` takes `--scenario snake` (the default), `--minutes N` (the budget, 120 by default),
 `--home DIR` (the `ENSO_HOME` the stack runs over: yours by default, because the agent's prompts
-reach a real model with your login), `--out DIR` (`ENSO_HOME/arena` by default), `--chromium PATH`
+reach a real model with your login), `--out DIR` (`ENSO_HOME/arena` by default), `--chromium PATH`,
 `--repo OWNER/NAME` (where the agent files bugs: the checkout's GitHub `origin` by default) and
 `--headed`. Ports 5178 and 5179 must be free: the arena starts its own stack.
 
