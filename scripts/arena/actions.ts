@@ -76,10 +76,48 @@ function parseTarget(value: unknown): ArenaTarget | string {
   return 'a target names a role, text, label or placeholder — what a reader of the page sees'
 }
 
-/** A `goto` path on the web origin: a path and query, never another origin, never `/api`. */
+/** An origin no request is ever sent to: the base `parseGotoPath` resolves a path against. */
+const RESOLVING_ORIGIN = 'http://arena.invalid'
+
+/** A pathname decoded until it stops changing, so `%2561` is read as `a` too; undefined when it does not decode. */
+function fullyDecoded(pathname: string): string | undefined {
+  let current = pathname
+  for (let round = 0; round < 5; round += 1) {
+    let next: string
+    try {
+      next = decodeURIComponent(current)
+    } catch {
+      return undefined
+    }
+    if (next === current) return current
+    current = next
+  }
+  return undefined
+}
+
+/**
+ * A `goto` path on the web origin: a path and query, never another origin, never `/api`.
+ *
+ * ⚠ CHECKED AS THE BROWSER WILL READ IT, not as typed (PR #562 review). The first version
+ * compared the raw text, so `/%61pi/threads`, `/x/../api/threads` and `/./api` passed it and
+ * reached the API, and `/\evil.com/` passed it and left the origin — the URL parser treats `\`
+ * as `/`. The path is resolved against a fixed origin first (dot segments collapse, a `\` that
+ * names a host shows as another origin), then decoded until stable and compared without case.
+ * Still not the hard boundary: an agent with a shell can reach the API directly (module header).
+ */
 function parseGotoPath(path: string): string | undefined {
   if (!path.startsWith('/') || path.startsWith('//')) return undefined
-  const pathname = path.split(/[?#]/, 1)[0] ?? ''
+  let resolved: URL
+  try {
+    resolved = new URL(path, RESOLVING_ORIGIN)
+  } catch {
+    return undefined
+  }
+  if (resolved.origin !== RESOLVING_ORIGIN) return undefined
+  const decoded = fullyDecoded(resolved.pathname)
+  if (decoded === undefined) return undefined
+  // Resolved again: an encoded `..` (`%252e%252e`) is a dot segment only once decoded.
+  const pathname = new URL(decoded, RESOLVING_ORIGIN).pathname.toLowerCase()
   if (pathname === '/api' || pathname.startsWith('/api/')) return undefined
   return path
 }

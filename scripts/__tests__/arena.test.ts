@@ -101,6 +101,15 @@ test('goto stays on the web origin and off the API', () => {
     'http://127.0.0.1:5179/api/threads',
     '//evil.example/',
     'debug.html',
+    // As the browser reads them, not as typed (PR #562 review): encoded, dot-segment, case and backslash forms.
+    '/%61pi/threads',
+    '/%2561pi/threads',
+    '/x/../api/threads',
+    '/./api',
+    '/x/%252e%252e/api/threads',
+    '/API/threads',
+    '/\\evil.example/',
+    '/%E0%A4%A',
   ]) {
     expect(parseArenaAction({ action: 'goto', path })).toMatchObject({ ok: false })
   }
@@ -251,6 +260,27 @@ test('the manifest joins screenshots to threads and keeps the agent’s notes ap
       error: 'Must start tracing before stopping',
     },
   ])
+})
+
+test('every observed signal is counted by its own kind', () => {
+  const path = join(mkdtempSync(join(tmpdir(), 'arena-observed-')), 'timeline.jsonl')
+  const timeline = openTimeline(path, steppingClock())
+  timeline.record({ kind: 'request-failed', request: 'GET /x', failure: 'net::ERR_ABORTED' })
+  timeline.record({ kind: 'request-failed', request: 'GET /y', failure: 'net::ERR_FAILED' })
+  timeline.record({ kind: 'dialog', dialog: 'confirm', message: 'leave?' })
+  timeline.record({ kind: 'page-crash' })
+  timeline.record({ kind: 'page-error', text: 'TypeError' })
+  timeline.record({ kind: 'console-error', text: 'boom' })
+  timeline.record({ kind: 'enso-exit', exit: '1' })
+  timeline.record({ kind: 'enso-exit', exit: 'SIGKILL' })
+  expect(foldArenaManifest({ runId: 'r', events: readTimeline(path), evidence: [] }).observed).toEqual({
+    consoleErrors: 1,
+    pageErrors: 1,
+    failedRequests: 2,
+    dialogs: 1,
+    pageCrashes: 1,
+    ensoExits: 2,
+  })
 })
 
 test('a run whose recorder died says so', () => {
