@@ -97,23 +97,38 @@ test('⚠ entries that cannot be stat-ed make the count `partial`, naming them �
  */
 const LARGE_FIXTURE_TIMEOUT = { timeout: 60_000 } as const
 
+/**
+ * `body` over one fresh directory per prefix; every directory made is removed afterwards, and the
+ * removal is checked. Each is made INSIDE the `try` (PR #582 review): made before it, a second
+ * `mkdtempSync` that threw would have left the first behind.
+ */
+async function withLargeFixtures(
+  prefixes: readonly string[],
+  body: (directories: readonly string[]) => Promise<void>,
+): Promise<void> {
+  const made: string[] = []
+  try {
+    for (const prefix of prefixes) made.push(mkdtempSync(join(tmpdir(), prefix)))
+    await body(made)
+  } finally {
+    for (const directory of made) rmSync(directory, { recursive: true, force: true })
+  }
+  for (const directory of made) expect(existsSync(directory)).toBe(false)
+}
+
 // #579 review: the deadline was checked only between directories, so one wide directory (a flat
 // build output) ignored it, and a cut in the last directory still said `measured`.
 test(
   '⚠ the time cap holds inside one wide directory: past it, the count is `partial`, not finished in time (#578)',
-  async () => {
-    const directory = mkdtempSync(join(tmpdir(), 'enso-du-wide-'))
-    try {
+  () =>
+    withLargeFixtures(['enso-du-wide-'], async ([directory = '']) => {
       for (let file = 0; file < 20_000; file += 1) writeFileSync(join(directory, `f${file}`), 'x')
       const started = Date.now()
       const counted = await diskUsageOf(directory, started + 5)
       expect(counted).toMatchObject({ kind: 'partial', reason: 'not finished in time' })
       // Stopped soon after the cap: nothing new was launched past it.
       expect(Date.now() - started).toBeLessThan(1000)
-    } finally {
-      rmSync(directory, { recursive: true, force: true })
-    }
-  },
+    }),
   LARGE_FIXTURE_TIMEOUT,
 )
 
@@ -122,10 +137,8 @@ test(
 // a huge one finishes, however much the huge one has queued.
 test(
   '⚠ measurements sharing one budget are served in rotation: a small tree beside a huge one is measured in full, the huge one cut (#578)',
-  async () => {
-    const huge = mkdtempSync(join(tmpdir(), 'enso-du-huge-'))
-    const small = mkdtempSync(join(tmpdir(), 'enso-du-small-'))
-    try {
+  () =>
+    withLargeFixtures(['enso-du-huge-', 'enso-du-small-'], async ([huge = '', small = '']) => {
       for (let file = 0; file < 30_000; file += 1) writeFileSync(join(huge, `f${file}`), 'x')
       mkdirSync(join(small, 'src'))
       for (let file = 0; file < 20; file += 1) writeFileSync(join(small, 'src', `f${file}`), 'x')
@@ -137,11 +150,7 @@ test(
       ])
       expect(hugeCount.kind).toBe('partial')
       expect(smallCount.kind).toBe('measured')
-    } finally {
-      rmSync(huge, { recursive: true, force: true })
-      rmSync(small, { recursive: true, force: true })
-    }
-  },
+    }),
   LARGE_FIXTURE_TIMEOUT,
 )
 
