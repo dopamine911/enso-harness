@@ -28,6 +28,7 @@
     "dev": "bun scripts/dev.ts",
     "logs": "bun scripts/enso-logs.ts",
     "eval": "bun scripts/enso-eval.ts",
+    "arena": "bun scripts/arena.ts",
     "incidents": "bun scripts/enso-incidents.ts",
     "judge": "bun scripts/enso-judge.ts",
     "corpus": "bun scripts/enso-corpus.ts",

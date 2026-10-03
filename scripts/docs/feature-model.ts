@@ -17,10 +17,14 @@ import { appendFileSync } from 'node:fs'
  * cold cache, and a compaction really does keep the system prompt and tools cached — nothing is
  * hand-tuned.
  *
- * ⚠ The script is a QUEUE: each request that offers tools takes the next reply. A request that
- * offers none is an auxiliary call (pi's compaction summary), and gets `summary`. A request past
- * the end is answered with an error naming it, so a drift between the capture and the script
- * shows up as a refusal in the chat, and in `log` — never as a silent extra turn.
+ * ⚠ Each script is a QUEUE: each request that offers tools takes its thread's next reply. A
+ * request that offers none is an auxiliary call (pi's compaction summary), and gets `summary`. A
+ * request past the end is answered with an error naming it, so a drift between the capture and the
+ * script shows up as a refusal in the chat, and in `log` — never as a silent extra turn.
+ *
+ * A request is its thread's by its first prompt: the script whose `opening` that prompt holds, else
+ * the one with no `opening`. So a second thread (the Incidents page's) has its own queue, and the
+ * order the capture plays the threads in cannot hand one thread's reply to the other.
  */
 
 /** One content block of a scripted reply, tagged by `kind` so a new kind is a compile error where parts are read. */
@@ -30,8 +34,17 @@ export type ScriptedPart =
   | { readonly kind: 'tool'; readonly tool: string; readonly input: Record<string, unknown> }
 
 export interface FeatureModelScript {
+  /** In every id the script's replies carry (`scriptedToolCallId`), so two threads' calls never share one. */
+  readonly name: string
+  /** Words the first prompt of this script's thread holds; absent, the script answers every other thread. */
+  readonly opening?: string
   readonly replies: readonly (readonly ScriptedPart[])[]
   readonly summary: string
+}
+
+/** The id pi records for a scripted tool call: the script, the reply's place in it, the part's in the reply. */
+export function scriptedToolCallId(script: string, reply: number, part: number): string {
+  return `toolu_${script}_${reply}_${part}`
 }
 
 interface MessagesRequest {
@@ -57,7 +70,7 @@ function event(type: string, data: Record<string, unknown>): string {
 }
 
 /** The content blocks of one reply, as the stream events that carry them. */
-function blockEvents(parts: readonly ScriptedPart[], replyIndex: number): string[] {
+function blockEvents(parts: readonly ScriptedPart[], script: string, replyIndex: number): string[] {
   return parts.flatMap((part, index) => {
     switch (part.kind) {
       case 'thinking':
@@ -74,7 +87,7 @@ function blockEvents(parts: readonly ScriptedPart[], replyIndex: number): string
           event('content_block_stop', { index }),
         ]
       case 'tool': {
-        const id = `toolu_feature_${replyIndex}_${index}`
+        const id = scriptedToolCallId(script, replyIndex, index)
         return [
           event('content_block_start', { index, content_block: { type: 'tool_use', id, name: part.tool, input: {} } }),
           event('content_block_delta', {
@@ -88,9 +101,22 @@ function blockEvents(parts: readonly ScriptedPart[], replyIndex: number): string
   })
 }
 
-/** Starts the model on `port`; returns a stopper. `log` receives one line per request. */
-export function startFeatureModel(port: number, script: FeatureModelScript, log: string): () => void {
-  let next = 0
+/** The text of a request's first user message, as JSON: where a thread's opening prompt is. */
+function firstPromptOf(messages: readonly unknown[]): string {
+  const first = messages.find(
+    (message) => typeof message === 'object' && message !== null && 'role' in message && message.role === 'user',
+  )
+  return JSON.stringify(first ?? null)
+}
+
+/**
+ * Starts the model on `port`, answering each thread from its script (`opening`); returns a
+ * stopper. `log` receives one line per request.
+ */
+export function startFeatureModel(port: number, scripts: readonly FeatureModelScript[], log: string): () => void {
+  const fallback = scripts.find((script) => script.opening === undefined)
+  if (fallback === undefined) throw new Error('feature model: one script must answer the threads no opening names')
+  const nextReply = new Map<string, number>()
   const promptsByModel = new Map<string, string[]>()
   const server = Bun.serve({
     hostname: '127.0.0.1',
@@ -102,22 +128,29 @@ export function startFeatureModel(port: number, script: FeatureModelScript, log:
         return new Response('not found', { status: 404 })
       }
       const body = (await request.json()) as MessagesRequest
+      const firstPrompt = firstPromptOf(body.messages)
+      const script =
+        scripts.find((each) => each.opening !== undefined && firstPrompt.includes(each.opening)) ?? fallback
+      const next = nextReply.get(script.name) ?? 0
       const auxiliary = (body.tools ?? []).length === 0
       const parts: readonly ScriptedPart[] | undefined = auxiliary
         ? [{ kind: 'text', text: script.summary }]
         : script.replies[next]
-      appendFileSync(log, `${auxiliary ? 'auxiliary' : `reply ${next}`} · ${body.model}\n`)
+      appendFileSync(log, `${auxiliary ? 'auxiliary' : `reply ${next}`} · ${script.name} · ${body.model}\n`)
       if (parts === undefined) {
         return Response.json(
           {
             type: 'error',
-            error: { type: 'invalid_request_error', message: `feature model: no reply ${next} scripted` },
+            error: {
+              type: 'invalid_request_error',
+              message: `feature model: no reply ${next} scripted for ${script.name}`,
+            },
           },
           { status: 400 },
         )
       }
       const replyIndex = next
-      if (!auxiliary) next += 1
+      if (!auxiliary) nextReply.set(script.name, next + 1)
 
       // The provider's count: the whole prompt, the part a previous request to this model cached.
       const prompt = JSON.stringify({ system: body.system, tools: body.tools, messages: body.messages })
@@ -134,7 +167,7 @@ export function startFeatureModel(port: number, script: FeatureModelScript, log:
       const stream = [
         event('message_start', {
           message: {
-            id: `msg_feature_${replyIndex}`,
+            id: `msg_${script.name}_${replyIndex}`,
             type: 'message',
             role: 'assistant',
             model: body.model,
@@ -149,7 +182,7 @@ export function startFeatureModel(port: number, script: FeatureModelScript, log:
             },
           },
         }),
-        ...blockEvents(parts, replyIndex),
+        ...blockEvents(parts, script.name, replyIndex),
         event('message_delta', {
           delta: { stop_reason: usesTool ? 'tool_use' : 'end_turn', stop_sequence: null },
           usage: { output_tokens: output },

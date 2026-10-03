@@ -28,10 +28,11 @@ test('⚠ no config file is the defaults, not a failure; nor is a file with no s
   expect(parseEnsoConfig('').kind).toBe('unreadable')
 })
 
-// #551: trees are OFF by default until a tree can be disposed with its thread (PR #561); a
-// project's own entry beats the user's default, matched by the key's canonical form (a `~/` key
-// silently fell through before); a mode the schema does not know is a config that fails closed.
-test("⚠ a thread's tree: the project's entry by its canonical path, else the user's default, else off; an unknown mode is unreadable (#551)", () => {
+// #551 decision 1: trees are ON by default, now a tree goes with its thread (#571) and its
+// snapshots survive the checkout's gc (#573); a project's own entry beats the user's default,
+// matched by the key's canonical form (a `~/` key silently fell through before); a mode the schema
+// does not know is a config that fails closed.
+test("⚠ a thread's tree: the project's entry by its canonical path, else the user's default, else a worktree; an unknown mode is unreadable (#551)", () => {
   const parsed = parseEnsoConfig(
     JSON.stringify({ threads: { tree: 'copy', projects: { '~/legacy': 'off', '/srv/big': 'worktree' } } }),
   )
@@ -40,7 +41,8 @@ test("⚠ a thread's tree: the project's entry by its canonical path, else the u
   expect(threadTreeFor(parsed.config, '/home/me/legacy', canonical)).toBe('off')
   expect(threadTreeFor(parsed.config, '/srv/big', canonical)).toBe('worktree')
   expect(threadTreeFor(parsed.config, '/srv/app', canonical)).toBe('copy')
-  expect(threadTreeFor({}, '/srv/app', canonical)).toBe('off')
+  expect(threadTreeFor({}, '/srv/app', canonical)).toBe('worktree')
+  expect(threadTreeFor({ threads: { projects: { '/srv/big': 'off' } } }, '/srv/big', canonical)).toBe('off')
   expect(parseEnsoConfig(JSON.stringify({ threads: { tree: 'none' } })).kind).toBe('unreadable')
 })
 

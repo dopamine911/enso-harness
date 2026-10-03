@@ -10,7 +10,9 @@ If you want to know how Enso works inside, start at [the architecture](../archit
 | [Sessions and projects](./sessions-and-projects.md) | Choosing where a thread runs and on what: projects, the start dialog, and resuming a thread later. |
 | [Prompts](./prompts.md) | Your prompt library: system, append and session prompts, what each costs, and the manager to write them in. |
 | [Forks and lineage](./lineage.md) | Forking a thread at a prompt, and the record of the conditions each thread ran under. |
+| [Thread trees](./thread-trees.md) | Each thread working in a tree of its own: restoring its files to a prompt, deleting it, and what trees cost on disk. |
 | [Guards and receipts](./guards-and-receipts.md) | What Enso refuses before a tool runs, and the receipt that says which rule refused it. |
+| [Incidents and the command judge](./incidents.md) | When pi works around a refusal: the signals, the incident card, halting, pi's report and your resolution, and the command judge's second opinion. |
 | [Permission modes](./permission-modes.md) | How much pi may do without asking, and how to change it. |
 | [Questions and dialogs](./questions-and-dialogs.md) | Answering pi from the browser: `ask_user` questionnaires and pi's own prompts. |
 | [Context](./context.md) | What the next request is made of, and how the context grew request by request. |
@@ -21,7 +23,7 @@ If you want to know how Enso works inside, start at [the architecture](../archit
 | [Web access](./web-access.md) | How pi reads the web: `web_fetch` with an allowlist, and `web_search`. |
 | [Logs and debugging](./logs-and-debugging.md) | Reading the day's log, the debug views, and a bundle to attach to an issue. |
 | [Terminal](./terminal.md) | Running pi in your terminal with Enso loaded, sharing one login with the browser. |
-| [Settings](./settings.md) | The page's colour theme and fonts. |
+| [Settings](./settings.md) | The page's colour theme and fonts, and the permission rules pi runs under. |
 
 ## How the screenshots are made
 

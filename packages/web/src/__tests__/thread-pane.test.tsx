@@ -1,10 +1,15 @@
 import { afterAll, afterEach, expect, spyOn, test } from 'bun:test'
+import { createHash } from 'node:crypto'
 import {
   ENSO_GUARD_DENIAL_ENTRY,
   ENSO_PROVIDER_REFUSAL_KEY,
   type EnsoForkReceipt,
   type EnsoGitFileChange,
   type EnsoGitRepository,
+  type EnsoStoredThread,
+  type EnsoThreadDeletePreview,
+  type EnsoTreeOnDisk,
+  type EnsoTreesListing,
   type EnsoThreadHistory,
   type EnsoThreadStats,
   NO_SESSION_INCIDENTS,
@@ -1981,6 +1986,529 @@ test("the rail lists the server's stored threads; a click resumes one with its h
   await page.unmount()
 })
 
+// ── deleting a thread (#571): the header's Delete, its confirmation, and what each answer does ──
+
+const DELETABLE = 'stored-delete'
+
+/** The page with one stored thread, opened from the rail and on screen: one the server holds, so Delete is offered. */
+async function openDeletable(
+  options: Pick<ScriptedFetchOptions, 'deleteAnswers' | 'deletePreview' | 'trees'> & {
+    readonly others?: readonly EnsoStoredThread[]
+  } = {},
+): Promise<MountedPage> {
+  const { others = [], ...scripted } = options
+  const page = await mountPage({
+    storedThreads: [
+      {
+        threadId: DELETABLE,
+        projectId: 'p-launch',
+        title: 'try the parser rewrite',
+        lastActivityAt: new Date().toISOString(),
+        messageCount: 2,
+        busy: false,
+      },
+      ...others,
+    ],
+    histories: {
+      [DELETABLE]: {
+        threadId: DELETABLE,
+        projectId: 'p-launch',
+        messages: [
+          { id: 'u1', role: 'user', parts: [{ type: 'text', content: 'try the parser rewrite' }] },
+          { id: 'a1', role: 'assistant', parts: [{ type: 'text', content: 'Rewriting parse.ts' }] },
+        ],
+        permissionMode: { mode: 'default', available: ['default', 'plan'] },
+        sessionRisk: { level: 'low', signals: 0 },
+        incidents: NO_SESSION_INCIDENTS,
+      },
+    },
+    ...scripted,
+  })
+  const row = await eventually(() => {
+    const found = page.previousRows().find((stored) => stored.textContent?.includes('try the parser rewrite'))
+    if (found === undefined) throw new Error('expected the stored row')
+    return found
+  })
+  await page.click(row)
+  await eventually(() => expect(new URLSearchParams(window.location.search).get('thread')).toBe(DELETABLE))
+  return page
+}
+
+const deleteButton = (page: MountedPage): HTMLButtonElement | null =>
+  page.container.querySelector<HTMLButtonElement>('header button[aria-label="delete thread"]')
+
+/**
+ * The open delete confirmation, or `undefined` — Radix renders dialogs into `document.body`, and a
+ * fresh thread's Start-a-session dialog may be open beside it.
+ */
+const deleteDialog = (): HTMLElement | undefined =>
+  [...document.querySelectorAll<HTMLElement>('[role="dialog"]')].find((dialog) =>
+    dialog.textContent?.includes('Delete this thread?'),
+  )
+
+/** The delete confirmation's button reading `text`. */
+function dialogButton(text: string): HTMLButtonElement {
+  const found = [...(deleteDialog()?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find(
+    (button) => button.textContent === text,
+  )
+  if (found === undefined) throw new Error(`expected a ${text} button in the delete dialog`)
+  return found
+}
+
+async function openDeleteDialog(page: MountedPage): Promise<HTMLElement> {
+  const button = deleteButton(page)
+  if (button === null) throw new Error('expected Delete in the header')
+  await page.click(button)
+  return eventually(() => {
+    const dialog = deleteDialog()
+    if (dialog === undefined) throw new Error('expected the delete dialog')
+    return dialog
+  })
+}
+
+const notices = (page: MountedPage): string[] =>
+  [...page.container.querySelectorAll('[role="status"]')].map((notice) => notice.textContent ?? '')
+
+test('Delete is offered only on a thread the server holds', async () => {
+  const page = await openDeletable()
+  // A thread minted here and never prompted is the page's alone: nothing to delete.
+  const newThread = [...page.container.querySelectorAll('button')].find((button) => button.textContent === 'New Thread')
+  if (newThread === undefined) throw new Error('expected a New Thread button')
+  await page.click(newThread)
+  await eventually(() => expect(deleteButton(page)).toBeNull())
+  const stored = page.activeRows().find((row) => row.textContent?.includes('try the parser rewrite'))
+  if (stored === undefined) throw new Error('expected the stored thread on the rail')
+  await page.click(stored)
+  await eventually(() => expect(deleteButton(page)).not.toBeNull())
+  await page.unmount()
+})
+
+/** The dialog once the preview is in: Delete enabled, its description past the loading line. */
+async function openPreviewedDialog(page: MountedPage): Promise<HTMLElement> {
+  const dialog = await openDeleteDialog(page)
+  await eventually(() => expect(dialog.textContent).not.toContain('Checking what a delete would take'))
+  return dialog
+}
+
+// The preview (#571): the dialog says before the click what the delete takes and what it leaves.
+test('a thread in the checkout: the dialog says the checkout is not touched, and names no tree', async () => {
+  const page = await openDeletable({ deletePreview: { tree: null, size: null, holdsWork: null, keptFor: [] } })
+  // The follow snapshot's flag says a tree; the server's preview, which the dialog reads, says none.
+  await flush(async () => {
+    getThreadStores(DELETABLE).tree.set(true)
+    await tick()
+  })
+  const dialog = await openPreviewedDialog(page)
+  expect(dialog.textContent).toContain('Your checkout is not touched')
+  expect(dialog.textContent).not.toContain('tree')
+  expect(page.server.deletes).toEqual([])
+  await page.unmount()
+})
+
+/** A tree thread's preview whose snapshots the forks `keptFor` keep; 412 MB on disk unless `size` says. */
+const treeKeptFor = (
+  keptFor: { threadId: string }[],
+  size: EnsoThreadDeletePreview['size'] = { kind: 'measured', bytes: 412_000_000 },
+): EnsoThreadDeletePreview => ({
+  tree: { kind: 'worktree', path: '/work/.enso/trees/stored-delete', branch: 'enso/stored-delete' },
+  size,
+  holdsWork: null,
+  keptFor,
+})
+
+/** A stored fork the rail lists under `title`. */
+const storedFork = (threadId: string, title?: string): EnsoStoredThread => ({
+  threadId,
+  projectId: 'p-launch',
+  ...(title === undefined ? {} : { title }),
+  lastActivityAt: new Date().toISOString(),
+  messageCount: 1,
+  busy: false,
+})
+
+const TREE_AT =
+  "This cannot be undone. The conversation is deleted, and so is the thread's tree at /work/.enso/trees/stored-delete (branch enso/stored-delete)"
+const TREE_GOES = `${TREE_AT}, 412 MB on disk.`
+
+// #578: the tree's size is said in the sentence naming it — at least what was read when the walk
+// was cut short, with why (#579 review), and an unreadable one by its reason, never as 0.
+for (const [size, said] of [
+  [
+    { kind: 'partial', bytes: 412_000_000, reason: 'not finished in time' },
+    `${TREE_AT}, at least 412 MB on disk (not finished in time).`,
+  ],
+  [
+    { kind: 'unreadable', reason: 'EACCES: permission denied' },
+    `${TREE_AT}; its size could not be read (EACCES: permission denied).`,
+  ],
+  [null, `${TREE_AT}.`],
+] as const satisfies readonly (readonly [EnsoThreadDeletePreview['size'], string])[]) {
+  test(`the dialog names a ${size?.kind ?? 'missing'} tree size as "${said.slice(TREE_AT.length)}"`, async () => {
+    const page = await openDeletable({ deletePreview: treeKeptFor([], size) })
+    const dialog = await openPreviewedDialog(page)
+    expect(dialog.querySelector('[data-slot="dialog-description"]')?.textContent).toBe(`${said} Its snapshots go too.`)
+    await page.unmount()
+  })
+}
+
+test('a tree whose snapshots a fork keeps: the dialog quotes the fork by its rail title and says its snapshots up to the fork stay', async () => {
+  // A title that reads as a sentence of its own: quoted, it cannot run into the dialog's.
+  const page = await openDeletable({
+    deletePreview: treeKeptFor([{ threadId: 'stored-fork-live' }]),
+    others: [storedFork('stored-fork-live', 'Reply with the single word one.')],
+  })
+  const dialog = await openPreviewedDialog(page)
+  expect(dialog.querySelector('[data-slot="dialog-description"]')?.textContent).toBe(
+    `${TREE_GOES} Its snapshots up to where the fork “Reply with the single word one.” branched stay with that fork; the rest go. The fork itself is not deleted.`,
+  )
+  await page.unmount()
+})
+
+test('two forks keep the snapshots: each is named, a long title cut and quoted, an untitled one by its short id', async () => {
+  const page = await openDeletable({
+    deletePreview: treeKeptFor([{ threadId: 'stored-fork-long' }, { threadId: 'a1b2c3d4-untitled-fork' }]),
+    others: [
+      storedFork('stored-fork-long', 'rewrite the parser and the lexer, then port every test to the new API'),
+      storedFork('a1b2c3d4-untitled-fork'),
+    ],
+  })
+  const dialog = await openPreviewedDialog(page)
+  expect(dialog.querySelector('[data-slot="dialog-description"]')?.textContent).toBe(
+    `${TREE_GOES} Its snapshots up to where each of 2 forks (“rewrite the parser and the lexer, then…”, a1b2c3d4) branched stay with them; the rest go. The forks themselves are not deleted.`,
+  )
+  await page.unmount()
+})
+
+/** The `If-Match` a "Delete anyway" confirms `work` with: the sha256 of the text shown, quoted. */
+const workTag = (work: string): string => `"${createHash('sha256').update(work, 'utf8').digest('hex')}"`
+
+test('a tree holding work by the preview: the work is named before any click, and "Delete anyway" confirms that text', async () => {
+  const work = 'the tree holds work — modified: src/parse.ts'
+  const page = await openDeletable({
+    deletePreview: {
+      tree: { kind: 'copy', path: '/work/copy', branch: null },
+      size: { kind: 'measured', bytes: 1300 },
+      holdsWork: work,
+      keptFor: [],
+    },
+  })
+  const dialog = await openPreviewedDialog(page)
+  expect(dialog.querySelector('[role="alert"]')?.textContent).toBe(work)
+  await page.click(dialogButton('Delete anyway'))
+  await eventually(() => expect(page.server.deletes).toEqual([`/api/threads/${DELETABLE}?force=1`]))
+  expect(page.server.deleteTags).toEqual([workTag(work)])
+  await page.unmount()
+})
+
+// PR #572 review: a forced delete confirms the work it was shown. A run that wrote more files since
+// makes the server refuse it (422) with the list as it is now — shown in place of the old one, and
+// confirmed by the next click.
+test('a "Delete anyway" refused (422) for work changed since: the new list is shown as changed, and the next click confirms it', async () => {
+  const shown = 'the tree holds work — modified: src/parse.ts'
+  const now = 'the tree holds work — modified: src/parse.ts, src/lexer.ts'
+  const page = await openDeletable({
+    deletePreview: {
+      tree: { kind: 'copy', path: '/work/copy', branch: null },
+      size: { kind: 'measured', bytes: 1300 },
+      holdsWork: shown,
+      keptFor: [],
+    },
+    deleteAnswers: [{ status: 422, reason: now }, { status: 204 }],
+  })
+  await openPreviewedDialog(page)
+  await page.click(dialogButton('Delete anyway'))
+  await eventually(() => {
+    const alert = deleteDialog()?.querySelector('[role="alert"]')?.textContent ?? ''
+    expect(alert).toContain('The tree changed since')
+    expect(alert).toContain(now)
+  })
+  expect(new URLSearchParams(window.location.search).get('thread')).toBe(DELETABLE)
+  await page.click(dialogButton('Delete anyway'))
+  await eventually(() => {
+    expect(page.server.deletes).toEqual([`/api/threads/${DELETABLE}?force=1`, `/api/threads/${DELETABLE}?force=1`])
+    expect(new URLSearchParams(window.location.search).get('thread')).not.toBe(DELETABLE)
+  })
+  expect(page.server.deleteTags).toEqual([workTag(shown), workTag(now)])
+  await page.unmount()
+})
+
+test('a preview the server refuses: its reason is shown, and Delete still sends a plain delete', async () => {
+  const page = await openDeletable({ deletePreview: { status: 410, reason: `thread ${DELETABLE} was deleted` } })
+  const dialog = await openPreviewedDialog(page)
+  expect(dialog.textContent).toContain(`410 thread ${DELETABLE} was deleted`)
+  await page.click(dialogButton('Delete'))
+  await eventually(() => expect(page.server.deletes).toEqual([`/api/threads/${DELETABLE}`]))
+  await page.unmount()
+})
+
+/** Settings opened on its Trees tab (#578): Radix activates a tab on mousedown, as a pointer does. */
+async function openTreesTab(page: MountedPage): Promise<HTMLElement> {
+  const gear = page.container.querySelector<HTMLButtonElement>('header button[aria-label="settings"]')
+  if (gear === null) throw new Error('expected the settings button')
+  await page.click(gear)
+  const settings = await eventually(() => {
+    const found = [...document.querySelectorAll<HTMLElement>('[role="dialog"]')].find((dialog) =>
+      dialog.textContent?.includes('Settings'),
+    )
+    if (found === undefined) throw new Error('expected Settings to be open')
+    return found
+  })
+  const tab = [...settings.querySelectorAll<HTMLElement>('[role="tab"]')].find((found) => found.textContent === 'Trees')
+  if (tab === undefined) throw new Error('expected a Trees tab')
+  await flush(async () => {
+    tab.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }))
+    await tick()
+  })
+  return settings
+}
+
+const TREES_WORK = 'the tree holds work — modified: src/parse.ts'
+
+/** A tree no thread records, its size unreadable. */
+const ORPHAN_TREE: EnsoTreeOnDisk = {
+  threadId: null,
+  path: '/work/.enso/trees/orphan',
+  kind: 'copy',
+  branch: null,
+  size: { kind: 'unreadable', reason: 'EACCES: permission denied' },
+  holdsWork: null,
+}
+
+/** The launch project's trees and snapshot store, before any delete. */
+const LAUNCH_TREES: EnsoTreesListing['projects'][number] = {
+  projectId: 'p-launch',
+  objectStore: { kind: 'measured', bytes: 2_100_000_000 },
+  trees: [
+    ORPHAN_TREE,
+    {
+      threadId: DELETABLE,
+      path: '/work/.enso/trees/stored-delete',
+      kind: 'worktree',
+      branch: 'enso/stored-delete',
+      size: { kind: 'measured', bytes: 412_000_000 },
+      holdsWork: TREES_WORK,
+    },
+  ],
+}
+
+/** A launch project with the deletable thread's tree, holding work, and a tree no thread records. */
+const TREES_LISTING: EnsoTreesListing = { projects: [LAUNCH_TREES] }
+
+test("Settings' Trees lists each tree by its thread's title with size and held work, an unreadable size as such, and the snapshot store", async () => {
+  const page = await openDeletable({ trees: () => TREES_LISTING })
+  const settings = await openTreesTab(page)
+  await eventually(() => expect(settings.textContent).not.toContain('Measuring…'))
+  const section = settings.querySelector('section[aria-label="trees of launch"]')
+  expect(section?.querySelector('h3')?.textContent).toBe('launchsnapshots 2.1 GB')
+  const rows = [...(section?.querySelectorAll('li') ?? [])].map((row) => row.textContent ?? '')
+  // Largest first: the unreadable one orders as 0, and is never said as 0.
+  expect(rows[0]).toContain('try the parser rewrite')
+  expect(rows[0]).toContain('412 MB')
+  expect(rows[0]).toContain(TREES_WORK)
+  expect(rows[1]).toContain('no thread records this tree')
+  expect(rows[1]).toContain('size could not be read (EACCES: permission denied)')
+  expect(rows[1]).toContain('work not checked: no thread records it')
+  expect(rows[1]).not.toMatch(/\b0 B\b/)
+  await page.unmount()
+})
+
+test("a delete from Settings' Trees goes through the header's preview and forced DELETE, then the listing is read again", async () => {
+  let listing = TREES_LISTING
+  const page = await openDeletable({
+    trees: () => listing,
+    deletePreview: {
+      tree: { kind: 'worktree', path: '/work/.enso/trees/stored-delete', branch: 'enso/stored-delete' },
+      size: { kind: 'measured', bytes: 412_000_000 },
+      holdsWork: TREES_WORK,
+      keptFor: [],
+    },
+  })
+  // A browser's `fetch` refuses any `this` but the window (`Illegal invocation`): the tab's delete
+  // once called it as `target.fetch(…)`, which the scripted server never noticed.
+  const scripted = globalThis.fetch
+  globalThis.fetch = function strictFetch(this: unknown, input: string | URL | Request, init?: RequestInit) {
+    if (this !== undefined && this !== globalThis) {
+      throw new TypeError("Failed to execute 'fetch' on 'Window': Illegal invocation")
+    }
+    return scripted(input, init)
+  } as typeof fetch
+  const settings = await openTreesTab(page)
+  const trigger = await eventually(() => {
+    const found = settings.querySelector<HTMLButtonElement>('button[aria-label="delete thread try the parser rewrite"]')
+    if (found === null) throw new Error("expected the tree's Delete")
+    return found
+  })
+  await page.click(trigger)
+  await eventually(() => expect(deleteDialog()?.querySelector('[role="alert"]')?.textContent).toBe(TREES_WORK))
+  listing = { projects: [{ ...LAUNCH_TREES, trees: [ORPHAN_TREE] }] }
+  await page.click(dialogButton('Delete anyway'))
+  await eventually(() => expect(page.server.treeReads).toHaveLength(2))
+  expect(page.server.previewReads).toEqual([`/api/threads/${DELETABLE}/delete-preview`])
+  expect(page.server.deletes).toEqual([`/api/threads/${DELETABLE}?force=1`])
+  expect(page.server.deleteTags).toEqual([workTag(TREES_WORK)])
+  await page.unmount()
+})
+
+test('a delete the server takes (204) leaves the thread for a fresh one, and the rail lists it nowhere', async () => {
+  const page = await openDeletable()
+  await openDeleteDialog(page)
+  await page.click(dialogButton('Delete'))
+  await eventually(() => {
+    expect(page.server.deletes).toEqual([`/api/threads/${DELETABLE}`])
+    const shown = new URLSearchParams(window.location.search).get('thread') ?? ''
+    expect(shown).not.toBe(DELETABLE)
+    // The deleted pane left the page; the one on screen is the fresh thread the URL now names.
+    expect(threadListStore.get().map((thread) => thread.threadId)).toEqual([shown])
+    // Neither open nor earlier: the refreshed listing no longer holds it.
+    expect(page.container.querySelector('#threads-rail')?.textContent).not.toContain('try the parser rewrite')
+    expect(page.container.textContent).not.toContain('Rewriting parse.ts')
+    expect(notices(page).some((notice) => notice.endsWith(`thread ${DELETABLE} deleted`))).toBe(true)
+  })
+  await page.unmount()
+})
+
+test('a tree holding work (422) is named in the dialog, and "Delete anyway" repeats the delete with force', async () => {
+  // The server's words, longer than a failure line's bound: every file force would destroy is named.
+  const reason =
+    'the tree holds work — modified: src/parse.ts, src/lexer.ts, README.md; untracked: notes/plan.md, notes/next.md; 2 commits on enso/stored-delete that no other ref reaches'
+  const page = await openDeletable({ deleteAnswers: [{ status: 422, reason }, { status: 204 }] })
+  await openDeleteDialog(page)
+  await page.click(dialogButton('Delete'))
+  // Said once, as the server said it: no status before it, no label of the page's around it.
+  await eventually(() => expect(deleteDialog()?.querySelector('[role="alert"]')?.textContent).toBe(reason))
+  // Refused, so still here: nothing left the page.
+  expect(new URLSearchParams(window.location.search).get('thread')).toBe(DELETABLE)
+  await page.click(dialogButton('Delete anyway'))
+  await eventually(() => {
+    expect(page.server.deletes).toEqual([`/api/threads/${DELETABLE}`, `/api/threads/${DELETABLE}?force=1`])
+    expect(page.server.deleteTags).toEqual([null, workTag(reason)])
+    expect(new URLSearchParams(window.location.search).get('thread')).not.toBe(DELETABLE)
+  })
+  await page.unmount()
+})
+
+// A fork at a thread's first prompt opens empty, its words in the composer — yet the fork route has
+// already written its session, and the listing says so. Reopened from the rail it is the same: an
+// adopted thread with no branch yet. The listing is what says the server holds it.
+test('a thread the stored listing holds offers Delete before anything is prompted on it', async () => {
+  const forked = 'stored-fork'
+  const page = await mountPage({
+    storedThreads: [
+      {
+        threadId: forked,
+        projectId: 'p-launch',
+        lastActivityAt: new Date().toISOString(),
+        messageCount: 0,
+        busy: false,
+      },
+    ],
+    histories: {
+      [forked]: {
+        threadId: forked,
+        projectId: 'p-launch',
+        messages: [],
+        permissionMode: { mode: 'default', available: ['default', 'plan'] },
+        sessionRisk: { level: 'low', signals: 0 },
+        incidents: NO_SESSION_INCIDENTS,
+      },
+    },
+  })
+  const row = await eventually(() => {
+    const found = page.previousRows()[0]
+    if (found === undefined) throw new Error('expected the stored row')
+    return found
+  })
+  await page.click(row)
+  await eventually(() => {
+    expect(new URLSearchParams(window.location.search).get('thread')).toBe(forked)
+    expect(deleteButton(page)).not.toBeNull()
+  })
+  await page.unmount()
+})
+
+test('a delete refused while the thread runs (409) is said on the thread and offers no force; the thread stays', async () => {
+  const reason = 'thread stored-delete is running; stop it first'
+  const page = await openDeletable({ deleteAnswers: [{ status: 409, reason }] })
+  await openDeleteDialog(page)
+  await page.click(dialogButton('Delete'))
+  await eventually(() => {
+    expect(deleteDialog()).toBeUndefined()
+    expect(notices(page).some((notice) => notice.endsWith(`thread ${DELETABLE}: delete refused: 409 ${reason}`))).toBe(
+      true,
+    )
+  })
+  expect(page.server.deletes).toEqual([`/api/threads/${DELETABLE}`])
+  expect(new URLSearchParams(window.location.search).get('thread')).toBe(DELETABLE)
+  expect(page.container.textContent).toContain('Rewriting parse.ts')
+  await page.unmount()
+})
+
+// PR #572 review: a delete the server has not answered cannot be called back — so nothing in the
+// dialog may read as calling it back. Cancel, Esc and the close button would close the dialog while
+// the request ran on, and the 204 then pulled the user off whatever they had turned to.
+test('while the server has not answered a delete, the dialog cannot be dismissed: Cancel is disabled and Esc does nothing', async () => {
+  const page = await openDeletable()
+  const release = page.server.holdDelete()
+  await openDeleteDialog(page)
+  await page.click(dialogButton('Delete'))
+  await eventually(() => expect(page.server.deletes).toEqual([`/api/threads/${DELETABLE}`]))
+  expect(dialogButton('Cancel').disabled).toBe(true)
+  // The close button would claim the same thing Cancel does.
+  expect(deleteDialog()?.querySelector('button[data-slot="dialog-close"]')).toBeNull()
+  await flush(async () => {
+    deleteDialog()?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    await tick()
+  })
+  expect(deleteDialog()).not.toBeUndefined()
+  // Answered: the delete it could not cancel goes through, and the page leaves the thread.
+  await flush(async () => {
+    release()
+    await tick()
+  })
+  await eventually(() => {
+    expect(deleteDialog()).toBeUndefined()
+    expect(new URLSearchParams(window.location.search).get('thread')).not.toBe(DELETABLE)
+  })
+  await page.unmount()
+})
+
+test('a 204 that arrives after the user moved to another thread leaves them there; the deleted thread is gone from the rail', async () => {
+  const page = await openDeletable()
+  const newThread = [...page.container.querySelectorAll('button')].find((button) => button.textContent === 'New Thread')
+  if (newThread === undefined) throw new Error('expected a New Thread button')
+  await page.click(newThread)
+  const other = new URLSearchParams(window.location.search).get('thread') ?? ''
+  expect(other).not.toBe(DELETABLE)
+  const stored = page.activeRows().find((row) => row.textContent?.includes('try the parser rewrite'))
+  if (stored === undefined) throw new Error('expected the stored thread on the rail')
+  await page.click(stored)
+  const release = page.server.holdDelete()
+  await openDeleteDialog(page)
+  await page.click(dialogButton('Delete'))
+  await eventually(() => expect(page.server.deletes).toEqual([`/api/threads/${DELETABLE}`]))
+  // Back, while the server works: the thread before is on screen again.
+  await visitThreadUrl(other)
+  await eventually(() =>
+    expect(page.activeRows().find((row) => row.getAttribute('aria-current') === 'true')?.textContent).not.toContain(
+      'try the parser rewrite',
+    ),
+  )
+  await flush(async () => {
+    release()
+    await tick()
+  })
+  await eventually(() => {
+    expect(threadListStore.get().map((thread) => thread.threadId)).toEqual([other])
+    expect(page.container.querySelector('#threads-rail')?.textContent).not.toContain('try the parser rewrite')
+  })
+  expect(new URLSearchParams(window.location.search).get('thread')).toBe(other)
+  // Said on the thread the user is on.
+  const shownPane = page.visiblePanes()[0]?.closest('.absolute.inset-0')
+  const said = [...(shownPane?.querySelectorAll('[role="status"]') ?? [])].map((notice) => notice.textContent ?? '')
+  expect(said.some((notice) => notice.endsWith(`thread ${DELETABLE} deleted`))).toBe(true)
+  await page.unmount()
+})
+
 // docs/flows/resume.md, stated gap: the reader was pinned to produce an image part from the file
 // (transcript-to-messages.test.ts); nothing asserted the PAGE renders it. A resumed thread's
 // image must come back as an <img> from the server's history — no page state involved.
@@ -2174,6 +2702,49 @@ test('a thread stored outside the projects is said on its own rail line, never a
     await eventually(() => expect(railAlerts(container)).toEqual([`could not open the thread: 403 ${refusal}`]))
     // Not started under its id: it is someone's stored thread, just not one this server serves.
     expect(threadListStore.get().map((thread) => thread.threadId)).not.toContain(outside)
+  } finally {
+    window.history.replaceState(null, '', '/')
+    await flush(async () => root.unmount())
+    container.remove()
+  }
+})
+
+// #571: a deleted id is refused for the server's lifetime — its history answers 410, not #378's
+// 404. A URL naming it (Back to it, or a reload) must not start a thread under the deleted id: the
+// page says it would not open, and stays on a thread of its own.
+test('a URL naming a deleted thread (410) is said on the rail and never started under that id (#571)', async () => {
+  const server = createScriptedFetch()
+  const deleted = crypto.randomUUID()
+  const refusal = `thread ${deleted} was deleted`
+  globalThis.fetch = server.fetch
+  const container = document.createElement('div')
+  document.body.appendChild(container)
+  const root: Root = createRoot(container)
+  const answeringDeleted = ((input: string | URL | Request, init?: RequestInit): Promise<Response> =>
+    requestedUrl(input).endsWith(`/api/threads/${deleted}/history`)
+      ? Promise.resolve(new Response(refusal, { status: 410 }))
+      : server.fetch(input, init)) as typeof fetch
+  try {
+    await flush(async () => {
+      root.render(<ChatScreen />)
+    })
+    await flush(tick)
+    const newThread = [...container.querySelectorAll('button')].find((button) => button.textContent === 'New Thread')
+    if (newThread === undefined) throw new Error('expected a New Thread button')
+    await flush(async () => {
+      newThread.click()
+      await tick()
+    })
+    const shown = new URLSearchParams(window.location.search).get('thread') ?? ''
+    globalThis.fetch = answeringDeleted
+    await visitThreadUrl(deleted)
+    await eventually(() => {
+      // Not started under the deleted id — what #378's 404 branch would do — and still on the thread before.
+      expect(threadListStore.get().map((thread) => thread.threadId)).not.toContain(deleted)
+      expect(railAlerts(container)).toEqual([`could not open the thread: 410 ${refusal}`])
+    })
+    expect(threadListStore.get().map((thread) => thread.threadId)).toContain(shown)
+    expect(container.querySelector('ol[aria-label^="open threads in"] button[aria-current="true"]')).not.toBeNull()
   } finally {
     window.history.replaceState(null, '', '/')
     await flush(async () => root.unmount())

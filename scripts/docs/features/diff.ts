@@ -45,6 +45,7 @@ export const DIFF: FeatureSpec = {
   shows: [
     "The **Diff** tab shows every file in the thread's project that differs from the last push, and what changed in it. The files are on the left as a tree, and the one you pick is on the right, side by side: the file at the last push on the left, the file now on the right.",
     "When the project is a folder inside a larger repository, only that folder's files are compared, and the header says `in <folder>/`. Files elsewhere in the repository are never listed or read. The status bar's counts cover the same folder, while its commits ahead and behind are the whole repository's.",
+    "On a thread with a tree of its own, the default, those are the tree's files on the tree's branch, `enso/<thread-id>`, not your checkout's. See [Thread trees](./thread-trees.md).",
     "It reads git, not pi's tool calls. So a change shows up however it was made: an `edit`, a `write`, a `sed -i` or a formatter run through `bash`, or your own editor. Commits you have not pushed yet count, and so do staged and unstaged edits, deletions, renames and new files.",
   ],
   opens: [

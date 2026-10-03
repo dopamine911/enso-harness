@@ -117,7 +117,17 @@ async function mountSettings(
     return Promise.resolve(options.override?.(request) ?? answer(request, body, options.file ?? FILE, writes))
   }
   await act(async () => {
-    root.render(<SettingsDialog threadId={options.threadId} fetch={fetch} />)
+    root.render(
+      <SettingsDialog
+        threadId={options.threadId}
+        fetch={fetch}
+        projects={[]}
+        stored={[]}
+        onDeleted={(threadId): void => {
+          throw new Error(`the Permissions tests delete no thread, yet ${threadId} was`)
+        }}
+      />,
+    )
   })
   const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="settings"]')
   if (trigger === null) throw new Error('expected the settings button')

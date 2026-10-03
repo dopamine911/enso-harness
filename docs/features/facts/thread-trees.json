@@ -1,0 +1,21 @@
+{
+  "feature": "thread-trees",
+  "shots": [
+    {
+      "image": "thread-trees-status",
+      "steps": ["open a thread from the rail"],
+      "shown": ["own tree, not your checkout", "enso/6c0457a4-846e-4cb5-8b13-2f72e85d88f6"],
+      "measured": {
+        "branch": "enso/6c0457a4-846e-4cb5-8b13-2f72e85d88f6"
+      }
+    },
+    {
+      "image": "thread-trees-listing",
+      "steps": ["open a thread from the rail", "choose **settings**", "choose **Trees**"],
+      "shown": ["snapshots 123 kB", "20 kB", "the tree holds work — modified: src/config.ts", ""],
+      "measured": {
+        "treeSize": "20 kB"
+      }
+    }
+  ]
+}

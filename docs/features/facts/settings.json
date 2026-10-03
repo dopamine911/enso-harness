@@ -4,7 +4,11 @@
     {
       "image": "settings",
       "steps": ["open a thread from the rail", "choose **settings**"],
-      "shown": ["Theme", "Body", "appearance is kept in this browser; permissions are saved on the server"],
+      "shown": [
+        "Theme",
+        "Body",
+        "appearance is kept in this browser; permissions are saved on the server; trees are measured on it"
+      ],
       "measured": {
         "themeFont": "the theme's font"
       }

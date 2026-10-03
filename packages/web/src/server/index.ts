@@ -31,7 +31,13 @@ import {
 } from '@enso/core'
 import { readGitChanges, readGitState, runGit } from '@enso/core/git'
 import { missingVendorPaths } from '@enso/core/pi-manifest'
-import { AGENT_RUNTIME_VERSION, type AgentHost, createAgentHost, SessionDirectoryRefused } from '../host/agent-host.ts'
+import {
+  AGENT_RUNTIME_VERSION,
+  type AgentHost,
+  createAgentHost,
+  SessionDirectoryRefused,
+  ThreadDeleted,
+} from '../host/agent-host.ts'
 import { readPermissionPolicy, resetPermissionPolicy, writePermissionPolicy } from '../host/permission-policy-file.ts'
 import { createAboutRoute, createBundleRoute } from './bundle-route.ts'
 import {
@@ -42,6 +48,7 @@ import {
   continueThread,
   type FollowRouteDeps,
   followThread,
+  deleteThreadAt,
   forkThreadAt,
   restoreThreadAt,
   undoLastRestore,
@@ -99,6 +106,13 @@ function threadRoute(action: string): RegExp {
 
 /** `GET /api/threads/<threadId>` — the id is one path segment, percent-encoded by the caller. */
 const THREAD_ROUTE = /^\/api\/threads\/([^/?#]+)$/
+/**
+ * `DELETE /api/threads/<threadId>[?force=1]` (#571): delete the thread — its session, tree and store.
+ * `force` deletes a tree that holds work; it is the only query the route takes.
+ */
+const THREAD_DELETE_ROUTE = /^\/api\/threads\/([^/?#]+)(\?force=1)?$/
+/** `GET …/delete-preview` (#571): what deleting the thread would do — its tree, the work in it, the forks that keep its snapshots. */
+const THREAD_DELETE_PREVIEW_ROUTE = threadRoute('delete-preview')
 /** `GET /api/threads/<threadId>/events` — the thread's two event tails (#97). */
 const THREAD_EVENTS_ROUTE = threadRoute('events')
 /** `GET /api/threads/<threadId>/history` — the branch as messages, live or stored (#95). */
@@ -713,6 +727,11 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     response.end(JSON.stringify(payload))
   }
 
+  /** `GET /api/trees` (#578): what the served threads' trees and object stores cost on disk. Reads only. */
+  async function respondWithTrees(response: ServerResponse): Promise<void> {
+    answerJson(response, await host.listTrees())
+  }
+
   /**
    * The thread's branch as the messages a chat mounts with (#95), plus its permission mode.
    * Read-only — looking must not build (#86).
@@ -759,6 +778,13 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
       response.end(`stored in ${mount.storedOutside} — not a project here; add it as one to open it`)
       return
     }
+    // A deleted id (#571) is GONE, not unknown (PR #572 review): a 404 for the URL's own thread
+    // starts a new thread under it (#378), and the page must take this one as a failure instead.
+    if (!mount.present && host.threadDeleted(threadId)) {
+      response.writeHead(410, { 'Content-Type': 'text/plain' })
+      response.end(`thread ${threadId} was deleted`)
+      return
+    }
     if (!mount.present || mount.projectId === undefined) {
       response.writeHead(404, { 'Content-Type': 'text/plain' })
       response.end(`no session for thread ${threadId}`)
@@ -779,6 +805,20 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   }
 
   /**
+   * `GET …/delete-preview` (#571): the delete dialog's text, read before it asks — 200
+   * `EnsoThreadDeletePreview`; 410 a deleted thread, as `…/history` answers it; 404 no session.
+   * Reads only: the tree's inventory, as the delete itself takes it.
+   */
+  async function respondWithDeletePreview(threadId: string, response: ServerResponse): Promise<void> {
+    const outcome = await host.previewThreadDelete(threadId)
+    if (outcome.kind === 'preview') {
+      answerJson(response, outcome.preview)
+      return
+    }
+    refuseWith(response, { status: host.threadDeleted(threadId) ? 410 : 404, reason: outcome.reason })
+  }
+
+  /**
    * ⚠ The dispatcher is synchronous and a throw in the request listener has nothing above
    * it (PR #87). Every handler that awaits (the thread routes, the listing, the browser log) runs
    * through here: a rejection is reported and answered as a 500 whose text names no route (it
@@ -791,7 +831,11 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
    */
   function answerOrFail(work: Promise<void>, response: ServerResponse): void {
     work.catch((error: unknown) => {
-      if (error instanceof ProjectUnavailable || error instanceof SessionDirectoryRefused) {
+      if (
+        error instanceof ProjectUnavailable ||
+        error instanceof SessionDirectoryRefused ||
+        error instanceof ThreadDeleted
+      ) {
         log.warn('a thread could not be built where it belongs: {reason}', { reason: error.message })
         if (response.headersSent) response.end()
         else refuseWith(response, { status: 409, reason: error.message })
@@ -1049,7 +1093,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     match: RegExpExecArray,
   ) => void | Promise<void>
   interface ThreadRoute {
-    readonly method: 'GET' | 'POST'
+    readonly method: 'GET' | 'POST' | 'DELETE'
     readonly route: RegExp
     readonly respond: ThreadRouteHandler
   }
@@ -1071,6 +1115,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     [THREAD_GIT_ROUTE, respondWithThreadGit],
     [THREAD_CHANGES_ROUTE, respondWithThreadChanges],
     [THREAD_JUDGE_CASES_ROUTE, respondWithThreadJudgeCases],
+    [THREAD_DELETE_PREVIEW_ROUTE, respondWithDeletePreview],
   ]
   const THREAD_ROUTES: readonly ThreadRoute[] = [
     ...idOnlyReads.map(([route, respond]): ThreadRoute => ({ method: 'GET', route, respond: idOnly(respond) })),
@@ -1098,6 +1143,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     { method: 'POST', route: THREAD_CONTINUE_ROUTE, respond: idOnly(respondToContinue) },
     { method: 'POST', route: THREAD_ABORT_ROUTE, respond: idOnly(respondToAbort) },
     { method: 'POST', route: THREAD_INCIDENT_RESOLVE_ROUTE, respond: respondToIncidentResolution },
+    { method: 'DELETE', route: THREAD_DELETE_ROUTE, respond: respondToDelete },
   ]
 
   /**
@@ -1222,6 +1268,45 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     }
     log.info('continue accepted', { threadId })
     response.writeHead(202)
+    response.end()
+  }
+
+  /**
+   * `DELETE …[?force=1]` (#571): 204 once the thread is gone; 400 an `If-Match` that is no strong
+   * sha256 tag; 404 an unknown thread; 409 a run, a move, a restore or another delete holding it;
+   * 422 a tree that holds work — the reason names it — deleted by `?force=1` only with `If-Match`
+   * the sha256 of those very words (PR #572 review): work gained since the page showed its list is
+   * named first, never taken unseen. No body.
+   */
+  async function respondToDelete(
+    threadId: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+    match: RegExpExecArray,
+  ): Promise<void> {
+    const force = match[2] !== undefined
+    const ifMatch = request.headers['if-match']
+    if (ifMatch !== undefined && !PROMPT_ETAG.test(ifMatch)) {
+      refuseWith(response, {
+        status: 400,
+        reason: 'If-Match names the work a delete confirms: a strong tag, "<sha256 hex of its words>"',
+      })
+      return
+    }
+    const confirmedWork = ifMatch?.slice(1, -1)
+    const outcome = await deleteThreadAt(threadRead, threadId, force, confirmedWork)
+    if (outcome.status !== 204) {
+      log.warn('delete refused ({status}): {reason}', {
+        threadId,
+        force,
+        status: outcome.status,
+        reason: outcome.reason,
+      })
+      refuseWith(response, outcome)
+      return
+    }
+    log.info('thread deleted', { threadId, force })
+    response.writeHead(204)
     response.end()
   }
 
@@ -1880,6 +1965,10 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     }
     if (request.method === 'GET' && url === '/api/stored-threads') {
       answerOrFail(respondWithStoredThreads(response), response)
+      return true
+    }
+    if (request.method === 'GET' && url === '/api/trees') {
+      answerOrFail(respondWithTrees(response), response)
       return true
     }
     if (request.method === 'GET' && url === '/api/about') {

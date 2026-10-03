@@ -145,7 +145,7 @@ function fakeHost(
     },
     stored,
     FRESH_MODE,
-    servesDirectory,
+    { servesDirectory },
   )
   return { host, built, requested, builtIn }
 }
@@ -958,6 +958,69 @@ test('⚠ a restore holds its thread until it settles: a mode change meanwhile i
   expect(await undone.json()).toEqual({ hash: 'c'.repeat(40), safety: 'd'.repeat(40) })
   expect((await changeMode()).status).toBe(204)
   expect((await undoOf('never-stored', { safety: 'b'.repeat(40) })).status).toBe(404)
+})
+
+/** `DELETE …` (#571), with `query` appended and `ifMatch` as its `If-Match`; the status and the text it answered. */
+async function deleteOf(
+  url: string,
+  threadId: string,
+  query = '',
+  ifMatch?: string,
+): Promise<{ status: number; body: string }> {
+  const response = await fetch(`${url}/api/threads/${threadId}${query}`, {
+    method: 'DELETE',
+    ...(ifMatch === undefined ? {} : { headers: { 'If-Match': ifMatch } }),
+  })
+  return { status: response.status, body: await response.text() }
+}
+
+/** The `If-Match` a page sends to confirm the work it showed (PR #572 review): its words' sha256, a strong tag. */
+const confirming = (work: string): string => `"${createHash('sha256').update(work).digest('hex')}"`
+
+test('⚠ DELETE /api/threads/:id answers 204 and the thread is gone; a tree holding work is a 422 naming it, deleted with ?force=1 and no other query; an unknown thread 404; a running one 409 (#571)', async () => {
+  const thread = { transcript: STORED_BRANCH, modified: new Date(0), firstMessage: 'earlier question' }
+  const stored = {
+    plain: thread,
+    working: { ...thread, holdsWork: 'the tree holds work — untracked: work.md' },
+    running: thread,
+  }
+  const { url } = await startWith(asksAndWaits, stored)
+  // The preview (#571): what a delete would do, read before it — nothing deleted by asking.
+  const preview = await fetch(`${url}/api/threads/working/delete-preview`)
+  expect([preview.status, await preview.json()]).toEqual([
+    200,
+    { tree: null, size: null, holdsWork: 'the tree holds work — untracked: work.md', keptFor: [] },
+  ])
+  expect(await deleteOf(url, 'plain')).toEqual({ status: 204, body: '' })
+  expect((await deleteOf(url, 'plain')).status).toBe(404)
+  // PR #572 review: a deleted id's history is a 410, not the 404 a page takes for "start it under this id".
+  const gone = await fetch(`${url}/api/threads/plain/history`)
+  expect([gone.status, await gone.text()]).toEqual([410, 'thread plain was deleted'])
+  expect((await fetch(`${url}/api/threads/never-stored/history`)).status).toBe(404)
+  expect((await fetch(`${url}/api/threads/plain/delete-preview`)).status).toBe(410)
+  expect((await fetch(`${url}/api/threads/never-stored/delete-preview`)).status).toBe(404)
+  expect(await deleteOf(url, 'working')).toEqual({ status: 422, body: 'the tree holds work — untracked: work.md' })
+  expect((await deleteOf(url, 'working', '?force=0')).status).toBe(404)
+  expect((await deleteOf(url, 'working', '?force=1&x=1')).status).toBe(404)
+  // PR #572 review: force takes only the work the page showed — named by its digest in `If-Match`.
+  expect(await deleteOf(url, 'working', '?force=1')).toEqual({
+    status: 422,
+    body: 'the tree holds work — untracked: work.md',
+  })
+  expect(
+    (await deleteOf(url, 'working', '?force=1', confirming('the tree holds work — untracked: other.md'))).status,
+  ).toBe(422)
+  expect((await deleteOf(url, 'working', '?force=1', 'not-a-tag')).status).toBe(400)
+  expect(await deleteOf(url, 'working', '?force=1', confirming('the tree holds work — untracked: work.md'))).toEqual({
+    status: 204,
+    body: '',
+  })
+  expect((await deleteOf(url, 'never-stored')).status).toBe(404)
+  // A run holds the thread: refused before the host is asked, never forceable.
+  await prompt(url, 'running', '/mode')
+  const busy = await deleteOf(url, 'running', '?force=1')
+  expect(busy.status).toBe(409)
+  expect(busy.body).toContain('is running')
 })
 
 test('GET /api/threads/:id returns the branch as the transcript of ours, with sessionFile null while unflushed', async () => {
