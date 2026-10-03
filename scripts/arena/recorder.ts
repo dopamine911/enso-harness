@@ -23,6 +23,7 @@ import {
   type ArenaEventBody,
   type ArenaPagePlace,
   type ArenaShotCause,
+  type ArenaTimeline,
   openTimeline,
   pagePlace,
   readTimeline,
@@ -168,6 +169,58 @@ function refusedActionName(request: unknown, redact: (text: string) => string): 
       ? request.action
       : '(none)'
   return redact(named).slice(0, 40)
+}
+
+/** What `control.json` says: the endpoint's port, or — with an agent driving — that there is none. */
+function controlRecordOf(control: ReturnType<typeof Bun.serve> | undefined, runDirectory: string): ArenaControl {
+  return control === undefined
+    ? { pid: process.pid, runDirectory, driver: 'agent' }
+    : { port: control.port ?? 0, pid: process.pid, runDirectory, driver: 'control' }
+}
+
+/**
+ * Start the agent runner on its session. Its end is a stop condition — a run nobody is driving has
+ * nothing more to record — and is on the timeline either way, a failure included. Settles when
+ * the runner has, never rejecting.
+ */
+function drive(
+  driver: ArenaDriver,
+  session: Omit<ArenaDriverSession, 'record'>,
+  timeline: ArenaTimeline,
+  run: { readonly resolveStop: (reason: string) => void; readonly redact: (text: string) => string },
+): Promise<void> {
+  const driven = driver({
+    ...session,
+    record: (body) => {
+      timeline.record(body)
+    },
+  })
+  return driven.then(
+    (reason) => {
+      timeline.record({ kind: 'agent-end', reason })
+      run.resolveStop(`the agent ended: ${reason}`)
+    },
+    (error: unknown) => {
+      const message = run.redact(String(error))
+      timeline.record({ kind: 'agent-end', reason: `the runner failed: ${message}` })
+      run.resolveStop(`the agent runner failed: ${message}`)
+    },
+  )
+}
+
+/** Score the stopped run and say the verdict; a scoring failure is said on stderr and costs nothing else. */
+function scoreAndSay(runDirectory: string, redact: (text: string) => string): ArenaScore | undefined {
+  try {
+    const score = writeArenaScore(runDirectory)
+    process.stdout.write(
+      `arena: score ${score.verdict.toUpperCase()} — ${score.errors} error(s), ${score.warnings} warning(s), ` +
+        `UI used: ${score.uiUsed ? 'yes' : 'not shown'} — ${join(runDirectory, 'score.md')}\n`,
+    )
+    return score
+  } catch (error) {
+    process.stderr.write(`arena: the run could not be scored: ${redact(String(error))}\n`)
+    return undefined
+  }
 }
 
 /** The loopback endpoint `bun run arena act` posts to: one route, `POST /act`, a JSON action. */
@@ -547,33 +600,16 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
   // a shell act on the page as the agent, and the boundary is that the agent has no shell.
   const control = options.driver === undefined ? serveControl((body) => act(body, 'control')) : undefined
   const controlFile = controlFilePath(runDirectory)
-  const controlRecord: ArenaControl =
-    control === undefined
-      ? { pid: process.pid, runDirectory, driver: 'agent' }
-      : { port: control.port ?? 0, pid: process.pid, runDirectory, driver: 'control' }
-  writeFileSync(controlFile, JSON.stringify(controlRecord, null, 2))
+  writeFileSync(controlFile, JSON.stringify(controlRecordOf(control, runDirectory), null, 2))
   await shoot('sample')
   process.stdout.write(`arena: run ${runId} is live — ${runDirectory}\n`)
-  const driven = options.driver?.({
-    act: (request) => act(request, 'agent'),
-    stopped,
-    record: (body) => {
-      timeline.record(body)
-    },
-    runDirectory,
-  })
-  // The agent ending is a stop condition: a run nobody is driving has nothing more to record.
-  const driverDone = driven?.then(
-    (reason) => {
-      timeline.record({ kind: 'agent-end', reason })
-      resolveStop(`the agent ended: ${reason}`)
-    },
-    (error: unknown) => {
-      const message = redact(String(error))
-      timeline.record({ kind: 'agent-end', reason: `the runner failed: ${message}` })
-      resolveStop(`the agent runner failed: ${message}`)
-    },
-  )
+  const driverDone =
+    options.driver === undefined
+      ? undefined
+      : drive(options.driver, { act: (request) => act(request, 'agent'), stopped, runDirectory }, timeline, {
+          resolveStop,
+          redact,
+        })
 
   // ── Stop, then make the evidence whole ─────────────────────────────────────────────────────
   const reason = await stopped
@@ -615,15 +651,5 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
   const manifest = foldArenaManifest({ runId, events: readTimeline(timeline.path), evidence })
   writeFileSync(join(runDirectory, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`)
   process.stdout.write(`arena: stopped (${reason}) — ${join(runDirectory, 'manifest.json')}\n`)
-  try {
-    const score = writeArenaScore(runDirectory)
-    process.stdout.write(
-      `arena: score ${score.verdict.toUpperCase()} — ${score.errors} error(s), ${score.warnings} warning(s), ` +
-        `UI used: ${score.uiUsed ? 'yes' : 'not shown'} — ${join(runDirectory, 'score.md')}\n`,
-    )
-    return score
-  } catch (error) {
-    process.stderr.write(`arena: the run could not be scored: ${redact(String(error))}\n`)
-    return undefined
-  }
+  return scoreAndSay(runDirectory, redact)
 }

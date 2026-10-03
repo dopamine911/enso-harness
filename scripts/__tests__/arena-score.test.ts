@@ -81,12 +81,14 @@ test('a clean agent run passes: the boundary held, Enso was prompted, every thre
     ['enso-did-the-work', 'pass'],
   ])
   expect(score).toMatchObject({ verdict: 'pass', errors: 0, uiUsed: true })
-  expect(score.metrics).toMatchObject({
-    actions: 3,
-    ensoPrompts: 2,
-    ensoToolCalls: 9,
-    threadsShown: 1,
-    projectThreads: 1,
+  expect(score.metrics).toEqual({
+    minutes: 0.1,
+    actions: { total: 3, failed: 0 },
+    enso: { prompts: 2, toolCalls: 9, toolErrors: 0 },
+    threads: { shown: 1, stored: 1 },
+    screenshots: 0,
+    notes: { wish: 0, friction: 0, retrospective: 1 },
+    work: { changedFiles: 3, commits: 1, workspaces: ['/runs/p'] },
   })
 })
 

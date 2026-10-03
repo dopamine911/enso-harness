@@ -59,8 +59,6 @@ export type ArenaEventBody =
   | { readonly kind: 'console-error'; readonly text: string }
   | { readonly kind: 'page-error'; readonly text: string }
   | { readonly kind: 'request-failed'; readonly request: string; readonly failure: string }
-  /** A response with an HTTP error status: the route that answered 4xx or 5xx, which a console line does not name. */
-  | { readonly kind: 'response-error'; readonly request: string; readonly status: number }
   | { readonly kind: 'dialog'; readonly dialog: string; readonly message: string }
   | { readonly kind: 'page-crash' }
   | { readonly kind: 'enso-exit'; readonly exit: string }
@@ -88,6 +86,12 @@ export type ArenaEventBody =
       readonly wanted?: string
     }
   | { readonly kind: 'run-stop'; readonly reason: string }
+  /** A response with an HTTP error status: the route that answered 4xx or 5xx, which a console line does not name. */
+  | {
+      readonly kind: 'response-error'
+      readonly request: string
+      readonly status: number
+    }
 
 /** One timeline line: the body, when it happened, and where the page was. */
 export type ArenaEvent = ArenaEventBody & {
@@ -145,20 +149,25 @@ export function openTimeline(path: string, clock: ArenaClock = SYSTEM_CLOCK): Ar
   }
 }
 
+/** Every JSON line a file holds, in order: a torn or malformed line is skipped, never fatal. */
+export function readJsonLines(path: string): unknown[] {
+  if (!existsSync(path)) return []
+  return readFileSync(path, 'utf8')
+    .split('\n')
+    .filter((line) => line.trim().length > 0)
+    .flatMap((line): unknown[] => {
+      try {
+        return [JSON.parse(line)]
+      } catch {
+        return []
+      }
+    })
+}
+
 /**
  * Every event a timeline file holds, oldest first. A torn last line — the recorder killed
  * mid-write — is skipped, not fatal: the rest of the run is still evidence.
  */
 export function readTimeline(path: string): ArenaEvent[] {
-  if (!existsSync(path)) return []
-  return readFileSync(path, 'utf8')
-    .split('\n')
-    .filter((line) => line.trim().length > 0)
-    .flatMap((line): ArenaEvent[] => {
-      try {
-        return [JSON.parse(line) as ArenaEvent]
-      } catch {
-        return []
-      }
-    })
+  return readJsonLines(path) as ArenaEvent[]
 }

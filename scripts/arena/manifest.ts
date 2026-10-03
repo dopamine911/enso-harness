@@ -75,8 +75,6 @@ export interface ArenaManifest {
   readonly scenario: string
   readonly project: string
   readonly ensoCommit?: string
-  readonly driver: ArenaDriverRecord
-  readonly boundary: ArenaBoundary
   readonly startedAt?: string
   readonly stoppedAt?: string
   /** Why the run ended — or `not stopped`: the recorder died, and this manifest was folded after. */
@@ -103,6 +101,9 @@ export interface ArenaManifest {
    */
   readonly recorderErrors: readonly ArenaRecorderError[]
   readonly evidence: readonly ArenaEvidence[]
+  /** What drove the UI, and whether the UI-only boundary held over the whole run (#584). */
+  readonly driver: ArenaDriverRecord
+  readonly boundary: ArenaBoundary
 }
 
 export interface ArenaRecorderError {

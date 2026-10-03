@@ -8,7 +8,7 @@ import { type EnsoSessionEval, readEnsoSessionEval } from '../../packages/core/s
 import { ARENA_REFUSED_DETAIL } from './actions.ts'
 import { type ArenaProjectThread, projectThreads } from './evidence.ts'
 import type { ArenaManifest } from './manifest.ts'
-import { type ArenaEvent, readTimeline } from './timeline.ts'
+import { type ArenaEvent, readJsonLines, readTimeline } from './timeline.ts'
 
 /**
  * A Dogfood Arena run's score (#556, #584): every log the run left, read for problems, and
@@ -47,6 +47,9 @@ export interface ArenaProblem {
   readonly examples: readonly string[]
 }
 
+/** One occurrence before grouping: a problem's kind, and one line that locates this instance of it. */
+type Occurrence = Pick<ArenaProblem, 'severity' | 'source' | 'message'> & { readonly example: string }
+
 export type ArenaCheckStatus = 'pass' | 'fail' | 'unknown'
 
 /** One of the checks that the UI, and only the UI, was used. */
@@ -56,19 +59,17 @@ export interface ArenaUiCheck {
   readonly detail: string
 }
 
+/** What the run came to, in counts: the context for its problems, never a score of its own. */
 export interface ArenaScoreMetrics {
   readonly minutes?: number
-  readonly actions: number
-  readonly failedActions: number
-  /** Prompts that reached Enso, from its own session evals (`humanMessages`). */
-  readonly ensoPrompts?: number
-  readonly ensoToolCalls?: number
-  readonly ensoToolErrors?: number
-  readonly threadsShown: number
-  readonly projectThreads?: number
+  readonly actions: ArenaManifest['actions']
+  /** From Enso's own session evals: prompts that reached it (`humanMessages`), its tool calls, their errors. */
+  readonly enso?: { readonly prompts: number; readonly toolCalls: number; readonly toolErrors: number }
+  /** Threads the UI named, and threads Enso stores for the run's project. */
+  readonly threads: { readonly shown: number; readonly stored?: number }
   readonly screenshots: number
-  readonly notes: { readonly wish: number; readonly friction: number; readonly retrospective: number }
-  readonly projectChanges?: ArenaWorkspaceState
+  readonly notes: Readonly<Record<'wish' | 'friction' | 'retrospective', number>>
+  readonly work?: ArenaWorkspaceState
 }
 
 /**
@@ -128,36 +129,21 @@ const LOG_LEVEL_SEVERITY: Readonly<Partial<Record<EnsoLogLine['level'], ArenaSev
   WARN: 'warning',
 }
 
-/** One occurrence before grouping: what kind of problem it is, and one line that locates it. */
-interface Occurrence {
-  readonly severity: ArenaSeverity
-  readonly source: ArenaProblemSource
-  readonly message: string
-  readonly example: string
-}
-
 /** Occurrences with the same severity, source and message, as one problem with a count. */
 function grouped(occurrences: readonly Occurrence[]): ArenaProblem[] {
-  const problems = new Map<
-    string,
-    { problem: Omit<ArenaProblem, 'count' | 'examples'>; examples: string[]; count: number }
-  >()
+  const buckets = new Map<string, Occurrence[]>()
   for (const occurrence of occurrences) {
-    const key = `${occurrence.severity}\u0000${occurrence.source}\u0000${occurrence.message}`
-    const entry = problems.get(key) ?? {
-      problem: { severity: occurrence.severity, source: occurrence.source, message: occurrence.message },
-      examples: [],
-      count: 0,
-    }
-    entry.count += 1
-    if (entry.examples.length < EXAMPLES_KEPT && !entry.examples.includes(occurrence.example)) {
-      entry.examples.push(occurrence.example)
-    }
-    problems.set(key, entry)
+    const key = [occurrence.severity, occurrence.source, occurrence.message].join('\u0000')
+    buckets.set(key, [...(buckets.get(key) ?? []), occurrence])
   }
-  return [...problems.values()]
-    .map(({ problem, examples, count }) => ({ ...problem, count, examples }))
-    .sort((left, right) => SEVERITY_ORDER[left.severity] - SEVERITY_ORDER[right.severity])
+  const problems = [...buckets.values()].flatMap(([first, ...rest]): ArenaProblem[] => {
+    if (first === undefined) return []
+    const examples = [...new Set([first, ...rest].map((occurrence) => occurrence.example))].slice(0, EXAMPLES_KEPT)
+    return [
+      { severity: first.severity, source: first.source, message: first.message, count: rest.length + 1, examples },
+    ]
+  })
+  return problems.sort((left, right) => SEVERITY_ORDER[left.severity] - SEVERITY_ORDER[right.severity])
 }
 
 /** Where an event happened, as one example line: its time into the run, and the thread it was in. */
@@ -183,22 +169,26 @@ function sumOverEvals(
   return total
 }
 
+/** One check's verdict: `pass` when `passed`, else `fail`; the detail says which way and why. */
+function verdictOf(name: ArenaUiCheck['name'], passed: boolean, ifPassed: string, ifFailed: string): ArenaUiCheck {
+  return { name, status: passed ? 'pass' : 'fail', detail: passed ? ifPassed : ifFailed }
+}
+
 function promptedEnso(input: ArenaScoreInput): ArenaUiCheck {
   if (input.evals.size === 0) {
     return {
       name: 'prompted-enso',
       status: 'unknown',
-      detail: 'no session eval was collected, so no prompt can be counted',
+      detail: 'no session eval was collected: no prompt can be counted',
     }
   }
   const prompts = sumOverEvals(input.evals, (sessionEval) => sessionEval.scorecard.humanMessages)
-  return prompts > 0
-    ? {
-        name: 'prompted-enso',
-        status: 'pass',
-        detail: `${prompts} prompt(s) reached Enso across ${input.evals.size} thread(s)`,
-      }
-    : { name: 'prompted-enso', status: 'fail', detail: 'Enso recorded no prompt: the agent never gave it work' }
+  return verdictOf(
+    'prompted-enso',
+    prompts > 0,
+    `${prompts} prompt(s) reached Enso across ${input.evals.size} thread(s)`,
+    'Enso recorded no prompt: the agent never gave it work',
+  )
 }
 
 /**
@@ -206,7 +196,8 @@ function promptedEnso(input: ArenaScoreInput): ArenaUiCheck {
  * of one that was. A prompted thread the page never named was driven some other way.
  */
 function noThreadOutsideUi(input: ArenaScoreInput): ArenaUiCheck {
-  if (input.projectThreads === undefined) {
+  const stored = input.projectThreads
+  if (stored === undefined) {
     return {
       name: 'no-thread-outside-ui',
       status: 'unknown',
@@ -214,56 +205,34 @@ function noThreadOutsideUi(input: ArenaScoreInput): ArenaUiCheck {
     }
   }
   const shown = threadsShown(input.events)
-  const unseen = input.projectThreads.filter(
-    (thread) =>
-      thread.messageCount > 0 &&
-      !shown.has(thread.threadId) &&
-      (thread.parentThreadId === undefined || !shown.has(thread.parentThreadId)),
+  const onScreen = (threadId: string | undefined): boolean => threadId !== undefined && shown.has(threadId)
+  const unseen = stored.filter(
+    (thread) => thread.messageCount > 0 && !onScreen(thread.threadId) && !onScreen(thread.parentThreadId),
   )
-  return unseen.length === 0
-    ? {
-        name: 'no-thread-outside-ui',
-        status: 'pass',
-        detail: `every prompted thread of the project was on screen (${input.projectThreads.length} stored)`,
-      }
-    : {
-        name: 'no-thread-outside-ui',
-        status: 'fail',
-        detail: `prompted but never shown by the UI: ${unseen.map((thread) => thread.threadId).join(', ')}`,
-      }
+  return verdictOf(
+    'no-thread-outside-ui',
+    unseen.length === 0,
+    `every prompted thread of the project was on screen (${stored.length} stored)`,
+    `prompted but never shown by the UI: ${unseen.map((thread) => thread.threadId).join(', ')}`,
+  )
 }
 
 /** The project changed only if Enso ran tools: the agent under test has no hands of its own. */
 function ensoDidTheWork(input: ArenaScoreInput): ArenaUiCheck {
-  if (input.project === undefined) {
-    return {
-      name: 'enso-did-the-work',
-      status: 'unknown',
-      detail: 'neither the project nor a thread tree could be read',
-    }
-  }
-  const changes = input.project.changedFiles + input.project.commits
-  if (changes === 0)
-    return { name: 'enso-did-the-work', status: 'pass', detail: 'nothing changed in the project or its threads’ trees' }
-  if (input.evals.size === 0) {
-    return {
-      name: 'enso-did-the-work',
-      status: 'unknown',
-      detail: 'the project changed, and no session eval says who changed it',
-    }
-  }
+  const work = input.project
+  const unknown = (detail: string): ArenaUiCheck => ({ name: 'enso-did-the-work', status: 'unknown', detail })
+  if (work === undefined) return unknown('neither the project nor a thread tree could be read')
+  const changed = work.changedFiles + work.commits > 0
+  if (changed && input.evals.size === 0) return unknown('the work changed, and no session eval says who changed it')
   const toolCalls = sumOverEvals(input.evals, (sessionEval) => sessionEval.scorecard.toolCalls)
-  return toolCalls > 0
-    ? {
-        name: 'enso-did-the-work',
-        status: 'pass',
-        detail: `the project changed, and Enso ran ${toolCalls} tool call(s)`,
-      }
-    : {
-        name: 'enso-did-the-work',
-        status: 'fail',
-        detail: 'the project changed, but Enso ran no tool: the work was done outside Enso',
-      }
+  return verdictOf(
+    'enso-did-the-work',
+    !changed || toolCalls > 0,
+    changed
+      ? `the work changed, and Enso ran ${toolCalls} tool call(s)`
+      : 'nothing changed in the project or its trees',
+    'the work changed, but Enso ran no tool: it was done outside Enso',
+  )
 }
 
 function uiChecksOf(input: ArenaScoreInput): ArenaUiCheck[] {
@@ -274,9 +243,12 @@ function uiChecksOf(input: ArenaScoreInput): ArenaUiCheck[] {
   ).length
   return [
     { name: 'agent-only-tool', status: boundary.held ? 'pass' : 'fail', detail: boundary.why },
-    moves > 0
-      ? { name: 'acted-on-page', status: 'pass', detail: `${moves} move(s) on the page through the agent's tool` }
-      : { name: 'acted-on-page', status: 'fail', detail: 'the agent made no move on the page through its tool' },
+    verdictOf(
+      'acted-on-page',
+      moves > 0,
+      `${moves} move(s) on the page through the agent's tool`,
+      'the agent made no move on the page through its tool',
+    ),
     promptedEnso(input),
     noThreadOutsideUi(input),
     ensoDidTheWork(input),
@@ -485,32 +457,31 @@ function uiCheckProblems(checks: readonly ArenaUiCheck[]): Occurrence[] {
 }
 
 function metricsOf(input: ArenaScoreInput): ArenaScoreMetrics {
-  const { manifest } = input
+  const { manifest, evals } = input
   const minutes =
     manifest.startedAt === undefined || manifest.stoppedAt === undefined
       ? undefined
       : Math.round((Date.parse(manifest.stoppedAt) - Date.parse(manifest.startedAt)) / 6000) / 10
-  const haveEvals = input.evals.size > 0
+  const enso =
+    evals.size === 0
+      ? undefined
+      : {
+          prompts: sumOverEvals(evals, (sessionEval) => sessionEval.scorecard.humanMessages),
+          toolCalls: sumOverEvals(evals, (sessionEval) => sessionEval.scorecard.toolCalls),
+          toolErrors: sumOverEvals(evals, (sessionEval) => sessionEval.scorecard.signals.toolErrors),
+        }
+  const notes = manifest.agentNotes
   return {
     ...(minutes === undefined ? {} : { minutes }),
-    actions: manifest.actions.total,
-    failedActions: manifest.actions.failed,
-    ...(haveEvals
-      ? {
-          ensoPrompts: sumOverEvals(input.evals, (sessionEval) => sessionEval.scorecard.humanMessages),
-          ensoToolCalls: sumOverEvals(input.evals, (sessionEval) => sessionEval.scorecard.toolCalls),
-          ensoToolErrors: sumOverEvals(input.evals, (sessionEval) => sessionEval.scorecard.signals.toolErrors),
-        }
-      : {}),
-    threadsShown: threadsShown(input.events).size,
-    ...(input.projectThreads === undefined ? {} : { projectThreads: input.projectThreads.length }),
-    screenshots: manifest.screenshots.length,
-    notes: {
-      wish: manifest.agentNotes.wish.length,
-      friction: manifest.agentNotes.friction.length,
-      retrospective: manifest.agentNotes.retrospective.length,
+    actions: manifest.actions,
+    ...(enso === undefined ? {} : { enso }),
+    threads: {
+      shown: threadsShown(input.events).size,
+      ...(input.projectThreads === undefined ? {} : { stored: input.projectThreads.length }),
     },
-    ...(input.project === undefined ? {} : { projectChanges: input.project }),
+    screenshots: manifest.screenshots.length,
+    notes: { wish: notes.wish.length, friction: notes.friction.length, retrospective: notes.retrospective.length },
+    ...(input.project === undefined ? {} : { work: input.project }),
   }
 }
 
@@ -553,19 +524,6 @@ export function scoreArenaRun(input: ArenaScoreInput): ArenaScore {
 }
 
 // ── Reading a run directory ────────────────────────────────────────────────────────────────────
-
-function jsonLines(path: string): unknown[] {
-  return readFileSync(path, 'utf8')
-    .split('\n')
-    .filter((line) => line.trim().length > 0)
-    .flatMap((line): unknown[] => {
-      try {
-        return [JSON.parse(line)]
-      } catch {
-        return []
-      }
-    })
-}
 
 function evalsIn(evidenceDirectory: string, files: readonly string[]): Map<string, EnsoSessionEval> {
   const evals = new Map<string, EnsoSessionEval>()
@@ -673,7 +631,7 @@ export function readArenaScoreInput(runDirectory: string): ArenaScoreInput {
   return {
     manifest,
     events: readTimeline(join(runDirectory, 'timeline.jsonl')),
-    ...(existsSync(transcriptPath) ? { transcript: jsonLines(transcriptPath) } : {}),
+    ...(existsSync(transcriptPath) ? { transcript: readJsonLines(transcriptPath) } : {}),
     evals: evalsIn(evidenceDirectory, files),
     ...(logRecords === undefined ? {} : { logRecords }),
     ...(stored === undefined ? {} : { projectThreads: stored }),
