@@ -18,6 +18,19 @@ export type ArenaEvidence =
   | { readonly kind: string; readonly status: 'collected'; readonly path: string }
   | { readonly kind: string; readonly status: 'missing'; readonly reason: string }
 
+/** One evidence row read back from a manifest on disk, field by field; undefined when it is not one. */
+export function arenaEvidenceRowOf(value: unknown): ArenaEvidence | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  if (!('kind' in value) || typeof value.kind !== 'string' || !('status' in value)) return undefined
+  if (value.status === 'collected' && 'path' in value && typeof value.path === 'string') {
+    return { kind: value.kind, status: 'collected', path: value.path }
+  }
+  if (value.status === 'missing' && 'reason' in value && typeof value.reason === 'string') {
+    return { kind: value.kind, status: 'missing', reason: value.reason }
+  }
+  return undefined
+}
+
 /** When a manifest row happened, and in which thread: the timeline's own stamp, carried over. */
 interface ArenaStamped {
   readonly at: string

@@ -334,7 +334,8 @@ test('Enso evidence: collected bodies are redacted, everything else is a missing
   expect(byKind.get('snapshot store')).toMatchObject({ status: 'missing' })
   expect(byKind.get('diff viewer')).toMatchObject({ status: 'missing' })
 
-  // With a thread in the project's snapshot store (#551), the store is collected.
+  // With a thread in the project's snapshot store (#551), the store is collected — as the run's
+  // own copy (#607): the row names the copy, never the home.
   const store = projectSnapshotsDir(ensoProjectsDir(home), projectIdOf(realpathOrSelf(project)))
   mkdirSync(join(store, THREAD), { recursive: true })
   const again = await collectEnsoEvidence({
@@ -346,11 +347,13 @@ test('Enso evidence: collected bodies are redacted, everything else is a missing
     secretValues: [],
     fetchText: () => Promise.resolve({ status: 200, text: '[]' }),
   })
+  const copy = join(root, 'evidence-2', 'snapshot-store')
   expect(again.find((row) => row.kind === 'snapshot store')).toEqual({
     kind: 'snapshot store',
     status: 'collected',
-    path: store,
+    path: copy,
   })
+  expect(existsSync(join(copy, THREAD))).toBe(true)
   expect(again.find((row) => row.kind === 'threads')).toMatchObject({ status: 'missing' })
   expect(existsSync(join(root, 'evidence-2', 'stats.json'))).toBe(true)
 })
