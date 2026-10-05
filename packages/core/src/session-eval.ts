@@ -656,7 +656,7 @@ function withSignalEvents(
     ]
   })
   // Stable: a signal goes after every branch event at or before its place.
-  return [...events, ...placed].sort((left, right) => (left.index ?? 0) - (right.index ?? 0))
+  return [...events, ...placed].toSorted((left, right) => (left.index ?? 0) - (right.index ?? 0))
 }
 
 /**
@@ -717,7 +717,7 @@ interface ToolCallRow {
 
 function canonicalArgs(args: unknown): string {
   if (typeof args !== 'object' || args === null) return JSON.stringify(args) ?? 'null'
-  const keys = Object.keys(args).sort((first, second) => (first < second ? -1 : 1))
+  const keys = Object.keys(args).toSorted((first, second) => (first < second ? -1 : 1))
   return JSON.stringify(args, keys)
 }
 
@@ -816,7 +816,7 @@ function rareCommands(calls: readonly ToolCallRow[]): { matches: number; familie
     families.add(family)
     matches += 1
   }
-  return { matches, families: [...families].sort((first, second) => (first < second ? -1 : 1)) }
+  return { matches, families: [...families].toSorted((first, second) => (first < second ? -1 : 1)) }
 }
 
 const HUMAN_KINDS: ReadonlySet<EvalEventKind> = new Set(['human', 'human-correction', 'human-confusion'])
@@ -889,7 +889,7 @@ function longestQueuedRun(log: readonly EnsoLogLine[]): number {
 function spanOf(transcript: readonly EnsoTranscriptEntry[]): [string, string] | null {
   const stamps = transcript
     .flatMap((transcriptEntry) => (transcriptEntry.at === undefined ? [] : [transcriptEntry.at]))
-    .sort()
+    .toSorted()
   const first = stamps[0]
   const last = stamps.at(-1)
   return first === undefined || last === undefined ? null : [first, last]

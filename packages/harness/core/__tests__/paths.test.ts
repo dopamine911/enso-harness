@@ -355,7 +355,7 @@ test('every secret path fragment is load-bearing on its own — a basename regex
     '/.zen/': '/home/u/project/.zen/pi-agent/auth.json',
   }
   // The map must cover the policy exactly — a fragment added without a case here is a gap.
-  expect(Object.keys(onlyTheFragmentCatches).sort()).toEqual([...fragments].sort())
+  expect(Object.keys(onlyTheFragmentCatches).toSorted()).toEqual([...fragments].toSorted())
   for (const [fragment, path] of Object.entries(onlyTheFragmentCatches)) {
     expect(looksLikeSecret(path, fragments)).toBe(true)
     // The receipt that the basename alone does NOT catch it: without its fragment, it passes.

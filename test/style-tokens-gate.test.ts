@@ -99,7 +99,7 @@ test('the matchers catch the literals and pass the tokens', () => {
   ])
     expect(colourOrArbitrary(token)).toBe(false)
   // The template is assembled, so the fixture is not itself a template-looking string.
-  const interpolatedPixels = `minWidth: \`$${'{'}n}px\``
+  const interpolatedPixels = `minWidth: \`\${n}px\``
   for (const pixels of ["boxShadow: '0 0 0 2px red'", 'style={{ height: ROW_HEIGHT_PX }}', interpolatedPixels])
     expect(PIXELS.test(pixels)).toBe(true)
   for (const variable of ['calc(var(--spacing) * 2.5)', 'className="h-5.5 px-4"'])

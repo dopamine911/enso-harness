@@ -198,7 +198,7 @@ function tableRowCount(page: string, regionStart: string): number | string {
     if (line.startsWith('|')) table.push(line)
     else if (table.length > 0) break
   }
-  if (table.length < 3 || (table[1] ?? '').startsWith('|---') === false) {
+  if (table.length < 3 || !(table[1] ?? '').startsWith('|---')) {
     return `${page}: "${regionStart}" opens no header-and-rows table`
   }
   return table.length - 2

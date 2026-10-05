@@ -528,7 +528,7 @@ export function ThreadStatsView({
   const data = stats.turnStats.map((turn) => ({ ...turn, label: String(turn.turn) }))
   const costliest = stats.promptStats
     .filter((prompt) => prompt.turnCount > 0)
-    .sort((first, second) => second.cost - first.cost)
+    .toSorted((first, second) => second.cost - first.cost)
     .slice(0, COSTLIEST_PROMPTS)
   const noTurn = headline.turnCount === 0
   const onTurn = onNavigate === undefined ? undefined : (turn: number): void => onNavigate({ kind: 'turn', turn })

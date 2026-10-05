@@ -170,7 +170,7 @@ function legacyCheckout(): { repoRoot: string; home: string } {
 test("⚠ the checkout's .enso moves into ENSO_HOME whole, and the emptied .enso is gone (#421)", () => {
   const { repoRoot, home } = legacyCheckout()
   const migration = migrateCheckoutEnso(repoRoot, home)
-  expect([...migration.moved].sort()).toEqual([
+  expect([...migration.moved].toSorted()).toEqual([
     'pi-agent/auth.json',
     'pi-agent/sessions/--project--/s1.jsonl',
     'secrets.env',

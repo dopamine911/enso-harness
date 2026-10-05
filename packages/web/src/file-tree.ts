@@ -78,7 +78,7 @@ function finish(building: Building, name: string, path: string): TreeDirectory {
   const directories = [...building.directories].map(([childName, child]) =>
     finish(child, childName, path === '' ? childName : `${path}/${childName}`),
   )
-  const children = [...directories.sort(byName), ...[...building.files].sort(byName)]
+  const children = [...directories.toSorted(byName), ...[...building.files].toSorted(byName)]
   return { kind: 'directory', name, path, children, ...totals(children) }
 }
 

@@ -63,7 +63,7 @@ test('a fresh ENSO_HOME gets Enso’s policy, the engine reads it through the li
   expect(preparePermissionPolicy(policyPath, agentDir)).toEqual({ kind: 'seeded', path: policyPath, was: 'absent' })
   expect(readBack(policyPath)).toEqual(ENSO_DEFAULT_PERMISSION_POLICY)
   expectLinked(agentDir, policyPath)
-  expect(readdirSync(join(agentDir, 'agents')).sort()).toEqual([
+  expect(readdirSync(join(agentDir, 'agents')).toSorted()).toEqual([
     'enso-mode-acceptEdits.md',
     'enso-mode-auto.md',
     'enso-mode-bypassPermissions.md',
@@ -117,7 +117,7 @@ test('⚠ Enso’s catch-all is put first wherever a mode could otherwise overri
   const { policyPath, agentDir } = launch(JSON.stringify({ permission, note: 'mine' }))
   const preparation = preparePermissionPolicy(policyPath, agentDir)
   expect(preparation).toMatchObject({ kind: 'kept' })
-  expect(preparation.kind === 'kept' ? [...preparation.catchAllAdded].sort() : []).toEqual([
+  expect(preparation.kind === 'kept' ? [...preparation.catchAllAdded].toSorted() : []).toEqual([
     'bash',
     'edit',
     'external_directory_read',

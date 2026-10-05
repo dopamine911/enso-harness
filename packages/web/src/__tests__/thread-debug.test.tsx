@@ -152,7 +152,7 @@ test('the fork point lists identity, then the conditions — the system prompt a
   ]
   const positions = order.map((text) => rendered.indexOf(text))
   expect(positions.every((position) => position >= 0)).toBe(true)
-  expect(positions).toEqual([...positions].sort((first, second) => first - second))
+  expect(positions).toEqual([...positions].toSorted((first, second) => first - second))
   expect(rendered).toContain(`/repo/AGENTS.md ${'c'.repeat(12)}`)
   expect(rendered).not.toContain('c'.repeat(13))
   expect(rendered).not.toContain('e'.repeat(13))

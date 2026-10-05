@@ -141,7 +141,7 @@ function grouped(occurrences: readonly Occurrence[]): ArenaProblem[] {
       { severity: first.severity, source: first.source, message: first.message, count: rest.length + 1, examples },
     ]
   })
-  return problems.sort((left, right) => SEVERITY_ORDER[left.severity] - SEVERITY_ORDER[right.severity])
+  return problems.toSorted((left, right) => SEVERITY_ORDER[left.severity] - SEVERITY_ORDER[right.severity])
 }
 
 /** Where an event happened, as one example line: its time into the run, and the thread it was in. */

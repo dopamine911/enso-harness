@@ -326,11 +326,13 @@ export function withRule(
   pattern: string,
   decision: EnsoPermissionDecision,
 ): EnsoPermissionMap {
-  let updated = permission
+  // One copy, written in place: the loop visits each target surface once, so this is the spread
+  // per surface it replaced without copying the whole map again for each (#596).
+  const updated: Record<string, EnsoSurfaceValue> = { ...permission }
   for (const target of targetSurfaces(permission, surface)) {
     const current = updated[target]
     const map = current === undefined ? {} : toPatternMap(current)
-    updated = { ...updated, [target]: { ...map, [pattern]: decision } }
+    updated[target] = { ...map, [pattern]: decision }
   }
   return updated
 }

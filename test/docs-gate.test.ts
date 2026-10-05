@@ -461,9 +461,7 @@ test('the extractor takes the doc comment, the whole statement, and nothing afte
   expect(extractDeclaration(source, 'Templated')?.text).toBe(source.split('\n').slice(14, 20).join('\n'))
   expect(extractDeclaration(source, 'Missing')).toBeUndefined()
   // A template nested in a template's `${…}` is refused, never scanned as code (PR #169 review, round 2).
-  const nested = [`export const Nested = \`outer $${'{`inner`}'}`, '  still outer`', 'export const After = 1'].join(
-    '\n',
-  )
+  const nested = [`export const Nested = \`outer \${\`inner\`}`, '  still outer`', 'export const After = 1'].join('\n')
   expect(() => extractDeclaration(nested, 'Nested')).toThrow(/nested in another/)
 })
 
@@ -513,10 +511,10 @@ test('the seams table has one row per page under docs/seams, the named non-seams
   const generated = seamsTableOver(() => undefined)
   expect(generated.stderr).toBe('')
   expect(generated.exitCode).toBe(0)
-  const listed = [...generated.stdout.matchAll(/]\(\.\/seams\/([^)]+)\)/g)].map((row) => row[1] ?? '').sort()
+  const listed = [...generated.stdout.matchAll(/]\(\.\/seams\/([^)]+)\)/g)].map((row) => row[1] ?? '').toSorted()
   const onDisk = readdirSync(join(DOCS_ROOT, 'seams'))
     .filter((file) => file.endsWith('.md') && file !== 'README.md' && file !== 'ported-provenance.md')
-    .sort()
+    .toSorted()
   expect(listed).toEqual(onDisk)
 })
 

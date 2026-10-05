@@ -28,10 +28,10 @@ test('⚠ every repository extension in the harness manifest is a fallow entry, 
   const declared = manifest.pi.extensions
     .filter((path) => path.startsWith('./'))
     .map((path) => `packages/harness/${path.slice(2)}`)
-    .sort()
+    .toSorted()
   const listed = (fallowConfig as { entry: string[] }).entry
     .filter((path) => path.startsWith('packages/harness/extensions/'))
-    .sort()
+    .toSorted()
   expect(listed).toEqual(declared)
 })
 
@@ -46,8 +46,8 @@ test('⚠ the ignored font packages are exactly the web package’s @fontsource 
     dependencies: Record<string, string>
   }
   const isFont = (name: string): boolean => name.startsWith('@fontsource')
-  const ignored = (fallowConfig as { ignoreDependencies: string[] }).ignoreDependencies.filter(isFont).sort()
-  expect(ignored).toEqual(Object.keys(webPackage.dependencies).filter(isFont).sort())
+  const ignored = (fallowConfig as { ignoreDependencies: string[] }).ignoreDependencies.filter(isFont).toSorted()
+  expect(ignored).toEqual(Object.keys(webPackage.dependencies).filter(isFont).toSorted())
 })
 
 /**

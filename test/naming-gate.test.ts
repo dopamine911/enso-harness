@@ -86,7 +86,7 @@ function namingGateDiagnostics(source: string): NamingDiagnostic[] {
         `naming gate: oxlint exited ${linted.exitCode} and this parser read no naming diagnostic from:\n${linted.stdout.toString()}${linted.stderr.toString()}`,
       )
     }
-    return found.sort((left, right) => left.line - right.line)
+    return found.toSorted((left, right) => left.line - right.line)
   } finally {
     rmSync(directory, { recursive: true, force: true })
   }
@@ -160,7 +160,7 @@ function filesSpellingKey(name: string): string[] {
       if (asKey.test(readFileSync(path, 'utf8'))) found.push(repositoryRelative)
     }
   }
-  return found.sort()
+  return found.toSorted()
 }
 
 test('⚠ every key exemption is spelled by a receipted file, and every receipted file is found (#251)', () => {
@@ -177,5 +177,5 @@ test('⚠ every key exemption is spelled by a receipted file, and every receipte
   // files: the receipt is per file (a second wire key in an already-receipted file is the
   // same contract, not a new site), and `readdirSync` order is not something to assert on.
   expect(drift).toEqual([])
-  expect([...spelled].sort()).toEqual([...EXEMPTED_KEY_SITES])
+  expect([...spelled].toSorted()).toEqual([...EXEMPTED_KEY_SITES])
 })

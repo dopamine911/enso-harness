@@ -919,7 +919,7 @@ test('⚠ back to default after bypassPermissions, the engine asks again: the mo
   expect((await hosted.probeToolCall('write', write))?.block ?? false).toBe(false)
   await switchMode(hosted, 'default')
   expect(hosted.runtime.permissionModeState().mode).toBe('default')
-  const asked = untilObservation(hosted, (event) => event.kind === 'extension-ui-request' && event.blocking === true)
+  const asked = untilObservation(hosted, (event) => event.kind === 'extension-ui-request' && event.blocking)
   const verdict = hosted.probeToolCall('write', write)
   // Asking is a dialog, not a verdict: the probe waits on it. A bypass still in force would answer.
   const first = await Promise.race([verdict.then(() => 'answered without asking'), asked.then(() => 'asked')])
@@ -983,7 +983,7 @@ const isTrustQuestion = (event: EnsoObservation): boolean =>
 async function writeAsks(hosted: HostedThread): Promise<boolean> {
   const asked = untilObservation(
     hosted,
-    (event) => event.kind === 'extension-ui-request' && event.blocking === true && !isTrustQuestion(event),
+    (event) => event.kind === 'extension-ui-request' && event.blocking && !isTrustQuestion(event),
   )
   const verdict = hosted.probeToolCall('write', { path: 'enso-502-probe.txt', content: 'x' })
   const first = await Promise.race([verdict.then(() => 'answered'), asked.then(() => 'asked')])
@@ -3571,7 +3571,7 @@ test('⚠⚠ Continue answers an unanswered prompt from the stored state: one co
   const userTexts = sent.messages.filter((message) => message.role === 'user').map((message) => textOf(message.content))
   expect(userTexts).toEqual(['first question', 'second question'])
   // pi's own system messages (instructions, not turns) may trail it; the last TURN is the prompt.
-  expect(sent.messages.filter((message) => message.role !== 'system').at(-1)?.role).toBe('user')
+  expect(sent.messages.findLast((message) => message.role !== 'system')?.role).toBe('user')
 
   // Mid-run the thread is RUNNING to pi: a prompt is queued behind the run, not lost.
   const queued = Promise.withResolvers<void>()

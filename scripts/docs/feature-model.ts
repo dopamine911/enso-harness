@@ -69,36 +69,38 @@ function event(type: string, data: Record<string, unknown>): string {
   return `event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`
 }
 
-/** The content blocks of one reply, as the stream events that carry them. */
-function blockEvents(parts: readonly ScriptedPart[], script: string, replyIndex: number): string[] {
-  return parts.flatMap((part, index) => {
-    switch (part.kind) {
-      case 'thinking':
-        return [
-          event('content_block_start', { index, content_block: { type: 'thinking', thinking: '', signature: '' } }),
-          event('content_block_delta', { index, delta: { type: 'thinking_delta', thinking: part.thinking } }),
-          event('content_block_delta', { index, delta: { type: 'signature_delta', signature: 'feature-shot' } }),
-          event('content_block_stop', { index }),
-        ]
-      case 'text':
-        return [
-          event('content_block_start', { index, content_block: { type: 'text', text: '' } }),
-          event('content_block_delta', { index, delta: { type: 'text_delta', text: part.text } }),
-          event('content_block_stop', { index }),
-        ]
-      case 'tool': {
-        const id = scriptedToolCallId(script, replyIndex, index)
-        return [
-          event('content_block_start', { index, content_block: { type: 'tool_use', id, name: part.tool, input: {} } }),
-          event('content_block_delta', {
-            index,
-            delta: { type: 'input_json_delta', partial_json: JSON.stringify(part.input) },
-          }),
-          event('content_block_stop', { index }),
-        ]
-      }
+/**
+ * One scripted part's stream events. A function of its own, with its return type, so TypeScript
+ * proves every `kind` returns — inline in `flatMap` the switch read as a callback that might not
+ * (`array-callback-return`, #596).
+ */
+function partEvents(part: ScriptedPart, index: number, script: string, replyIndex: number): string[] {
+  switch (part.kind) {
+    case 'thinking':
+      return [
+        event('content_block_start', { index, content_block: { type: 'thinking', thinking: '', signature: '' } }),
+        event('content_block_delta', { index, delta: { type: 'thinking_delta', thinking: part.thinking } }),
+        event('content_block_delta', { index, delta: { type: 'signature_delta', signature: 'feature-shot' } }),
+        event('content_block_stop', { index }),
+      ]
+    case 'text':
+      return [
+        event('content_block_start', { index, content_block: { type: 'text', text: '' } }),
+        event('content_block_delta', { index, delta: { type: 'text_delta', text: part.text } }),
+        event('content_block_stop', { index }),
+      ]
+    case 'tool': {
+      const id = scriptedToolCallId(script, replyIndex, index)
+      return [
+        event('content_block_start', { index, content_block: { type: 'tool_use', id, name: part.tool, input: {} } }),
+        event('content_block_delta', {
+          index,
+          delta: { type: 'input_json_delta', partial_json: JSON.stringify(part.input) },
+        }),
+        event('content_block_stop', { index }),
+      ]
     }
-  })
+  }
 }
 
 /** The text of a request's first user message, as JSON: where a thread's opening prompt is. */
@@ -182,7 +184,7 @@ export function startFeatureModel(port: number, scripts: readonly FeatureModelSc
             },
           },
         }),
-        ...blockEvents(parts, script.name, replyIndex),
+        ...parts.flatMap((part, index) => partEvents(part, index, script.name, replyIndex)),
         event('message_delta', {
           delta: { stop_reason: usesTool ? 'tool_use' : 'end_turn', stop_sequence: null },
           usage: { output_tokens: output },

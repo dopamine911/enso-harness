@@ -60,7 +60,7 @@ const texts = new Map<string, string>([
     .map((name): [string, string] => [name, readFileSync(join(FEATURES, name), 'utf8')]),
   ...renderedFeaturePages().map(({ page, text }): [string, string] => [basename(page), text]),
 ])
-const pages = [...texts.keys()].sort()
+const pages = [...texts.keys()].toSorted()
 const textOf = (page: string): string => texts.get(page) ?? ''
 
 /** Comments, removed so a label named only in prose does not count as rendered. */

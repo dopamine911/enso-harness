@@ -170,7 +170,7 @@ export class RetiredEnvironmentError extends Error {
 export function retiredEnvironmentNames(environment: Readonly<Record<string, string | undefined>>): string[] {
   return Object.keys(environment)
     .filter((variableName) => variableName.startsWith('ZEN_') && environment[variableName] !== undefined)
-    .sort()
+    .toSorted()
 }
 
 /**
@@ -266,7 +266,7 @@ function lowestOf(levels: EnsoLogLevels): LogLevel {
  * or a key and its rotation. Reproduced before this line existed: `[REDACTED:value]def99`.
  */
 function valueScrubber(values: readonly string[]): ((value: unknown) => unknown) | undefined {
-  const scannable = values.filter((secret) => secret.length > 0).sort((left, right) => right.length - left.length)
+  const scannable = values.filter((secret) => secret.length > 0).toSorted((left, right) => right.length - left.length)
   if (scannable.length === 0) return undefined
   const pattern = new RegExp(scannable.map((secret) => secret.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g')
   const scrubbed = (value: unknown): unknown => {

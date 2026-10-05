@@ -635,7 +635,7 @@ export function discoverRoutes(): ResolvedRoute[] {
         factoryLine: declarationLine(source, metadata.factory.declaration, metadata.factory.path),
       }
     })
-    .sort((left, right) => {
+    .toSorted((left, right) => {
       if (left.path !== right.path) return left.path < right.path ? -1 : 1
       if (left.method === right.method) return 0
       return left.method < right.method ? -1 : 1

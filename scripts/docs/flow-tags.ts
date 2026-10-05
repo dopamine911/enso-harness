@@ -241,7 +241,7 @@ function recordedDiagrams(root: string, problems: string[]): RecordedDiagram[] {
   // and `core/`, the launchers under `scripts/__tests__/`.
   const snapshots = [...new Bun.Glob('{packages,scripts,test}/**/__snapshots__/*.snap').scanSync({ cwd: root })]
     .filter((snapshot) => !snapshot.includes('/node_modules/'))
-    .sort()
+    .toSorted()
   for (const snapshot of snapshots) {
     const file = join(dirname(dirname(snapshot)), basename(snapshot, '.snap'))
     for (const { key, value: snapshotValue } of snapshotEntries(snapshot, readFileSync(join(root, snapshot), 'utf8'))) {

@@ -337,10 +337,10 @@ function searchOperations(
 }
 
 /** The tools File Activity follows, named as one list so the Context browser page reads it from here (#482). */
-const FILE_TOOLS: readonly string[] = ['read', 'write', 'edit', 'grep', 'find', 'ls']
+const FILE_TOOLS: ReadonlySet<string> = new Set(['read', 'write', 'edit', 'grep', 'find', 'ls'])
 
 function operationsOf(call: CallFacts): Operation[] {
-  if (!FILE_TOOLS.includes(call.tool)) return []
+  if (!FILE_TOOLS.has(call.tool)) return []
   if (call.tool === 'read') return readOperation(call.input)
   if (call.tool === 'write' || call.tool === 'edit') return writeOperation(call.tool, call.input)
   if (call.tool === 'grep' || call.tool === 'find' || call.tool === 'ls')

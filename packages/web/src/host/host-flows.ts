@@ -71,7 +71,7 @@ const AUTH_TYPE_LABEL: Readonly<Record<HostAuthType, string>> = { oauth: 'subscr
 /** The `/login` options: one per provider per way in, sorted by name — pi's own selector's order. */
 export function loginOptions(providers: readonly LoginProviderFacts[]): HostCommandOption[] {
   const options: HostCommandOption[] = []
-  for (const provider of [...providers].sort((left, right) => left.name.localeCompare(right.name))) {
+  for (const provider of [...providers].toSorted((left, right) => left.name.localeCompare(right.name))) {
     const detail = provider.configuredVia === undefined ? 'not configured' : `via ${provider.configuredVia}`
     if (provider.offersOAuth) {
       options.push({ id: `${provider.id}/oauth`, label: `${provider.name} · ${AUTH_TYPE_LABEL.oauth}`, detail })
@@ -86,7 +86,7 @@ export function loginOptions(providers: readonly LoginProviderFacts[]): HostComm
 /** The `/logout` options: every stored credential, by provider. Environment variables are not credentials pi saved, so they are not here. */
 export function logoutOptions(credentials: readonly StoredCredentialFacts[]): HostCommandOption[] {
   return [...credentials]
-    .sort((left, right) => left.providerName.localeCompare(right.providerName))
+    .toSorted((left, right) => left.providerName.localeCompare(right.providerName))
     .map((credential) => ({
       id: credential.providerId,
       label: credential.providerName,

@@ -822,7 +822,7 @@ function heredocTerminatorEnd(command: string, start: number, delimiter: string,
 /** The text with the `[start, end)` ranges cut out. */
 function withoutRanges(text: string, ranges: readonly (readonly [number, number])[]): string {
   if (ranges.length === 0) return text
-  const sorted = [...ranges].sort((left, right) => left[0] - right[0])
+  const sorted = [...ranges].toSorted((left, right) => left[0] - right[0])
   let kept = ''
   let cursor = 0
   for (const [start, end] of sorted) {

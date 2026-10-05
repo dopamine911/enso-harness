@@ -100,7 +100,7 @@ export function touchedComments(
   read: (file: string) => string | undefined,
 ): TouchedComment[] {
   const touched: TouchedComment[] = []
-  for (const [file, ranges] of [...changes].sort(([left], [right]) => left.localeCompare(right))) {
+  for (const [file, ranges] of [...changes].toSorted(([left], [right]) => left.localeCompare(right))) {
     const source = read(file)
     if (source === undefined || ranges.length === 0) continue
     const comments = commentsIn(file, source)
@@ -170,7 +170,7 @@ export function renderTouched(touched: readonly TouchedComment[], model: FlowMod
       const invariants = invariantsIn(model, touchedComment.comment)
       return { ...touchedComment, invariants, risk: risk(touchedComment, invariants) }
     })
-    .sort((left, right) => left.risk - right.risk)
+    .toSorted((left, right) => left.risk - right.risk)
   let budget = QUOTE_BUDGET
   const quoted: string[] = []
   const listed: string[] = []

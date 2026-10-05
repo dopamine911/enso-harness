@@ -79,7 +79,7 @@ export function ContextEvents({
   onOpen: OpenInBrowser
 }): React.ReactNode {
   const [hidden, setHidden] = useState<ReadonlySet<EnsoContextEventKind>>(() => new Set())
-  const shown = [...events].reverse().filter((event) => !hidden.has(event.kind))
+  const shown = [...events].toReversed().filter((event) => !hidden.has(event.kind))
   const countOf = (kind: EnsoContextEventKind): number => events.filter((event) => event.kind === kind).length
   return (
     <Card title="Context Events" sub="when and why the window changed">

@@ -11,7 +11,7 @@ import { type ContinuationLead, continuationLead, LOST_TOOL_RESULT_TEXT } from '
 const NOW = 1_790_000_000_000
 
 const user = (text: string): ContextMessage => ({ role: 'user', content: text, timestamp: 1 })
-const system = (): ContextMessage => ({ role: 'system', content: 'instructions', timestamp: 1 }) as ContextMessage
+const system = (): ContextMessage => ({ role: 'system', content: 'instructions', timestamp: 1 })
 const assistant = (...calls: Array<{ id: string; name: string }>): ContextMessage =>
   ({
     role: 'assistant',

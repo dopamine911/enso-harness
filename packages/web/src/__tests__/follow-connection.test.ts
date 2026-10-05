@@ -458,7 +458,7 @@ test('configure: only the 422 naming its step is a refusal; a fault is `failed` 
   const answering = (status: number, body: string): FollowConnection =>
     createFollowConnection({
       threadId: 't1',
-      fetch: (() => Promise.resolve(new Response(body, { status }))) as unknown as typeof fetch,
+      fetch: () => Promise.resolve(new Response(body, { status })),
       onProblem: () => undefined,
     })
   const refusal = JSON.stringify({ step: 'thinking', reason: 'thinking level high is not offered' })
@@ -592,7 +592,7 @@ test('prompt() names what the server did: taken when the run had ended, refused 
   const problems: string[] = []
   const dead = createFollowConnection({
     threadId: 't1',
-    fetch: (() => Promise.reject(new TypeError('fetch failed'))) as unknown as typeof fetch,
+    fetch: () => Promise.reject(new TypeError('fetch failed')),
     onProblem: (problem: unknown) => problems.push(String(problem)),
   })
   expect(await dead.prompt('x')).toBe('unreachable')
@@ -663,7 +663,7 @@ test('⚠ when pi CLAIMS a queued prompt (a user message-start after an assistan
   const secondMessageId = starts[1]?.messageId
   expect(secondMessageId).not.toBe(firstMessageId)
   // The second answer's text streams into the NEW message.
-  const lastDelta = [...server.chunks].reverse().find((chunk) => chunk.type === EventType.TEXT_MESSAGE_CONTENT) as {
+  const lastDelta = [...server.chunks].toReversed().find((chunk) => chunk.type === EventType.TEXT_MESSAGE_CONTENT) as {
     messageId: string
     delta: string
   }
@@ -679,7 +679,7 @@ test('a unary POST that never gets an answer is `unreachable` — reported once,
     const problems: string[] = []
     const connection = createFollowConnection({
       threadId: 't1',
-      fetch: (() => Promise.reject(new TypeError('fetch failed'))) as unknown as typeof fetch,
+      fetch: () => Promise.reject(new TypeError('fetch failed')),
       onProblem: (problem: unknown) => problems.push(String(problem)),
     })
     expect(await connection.abort()).toEqual({ outcome: 'unreachable', restored: [] })
@@ -838,7 +838,7 @@ async function subscribeOverFailingFetch(
   const problems: string[] = []
   const connection = createFollowConnection({
     threadId: 't1',
-    fetch: fetchImpl as unknown as typeof fetch,
+    fetch: fetchImpl,
     onProblem: (problem: unknown) => problems.push(String(problem)),
   })
   const chunks: StreamChunk[] = []
@@ -914,12 +914,12 @@ test('close() during the opening fetch ends the subscription instead of throwing
   })
   const connection = createFollowConnection({
     threadId: 't1',
-    fetch: ((_input: string, init?: RequestInit) =>
+    fetch: (_input: string, init?: RequestInit) =>
       new Promise<Response>((_resolve, reject) => {
         socketOpening?.()
         // The socket never opens; the abort is what settles it, as a real fetch does.
         init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))
-      })) as typeof fetch,
+      }),
   })
   const chunks: StreamChunk[] = []
   const drained = (async () => {

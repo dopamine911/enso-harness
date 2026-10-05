@@ -74,7 +74,7 @@ test('⚠ a provider response is one record with the request id — and ONLY the
       'set-cookie': 'session=secret',
     },
   })
-  const [record] = logs.filter({ category: ['enso', 'extension', 'provider'] })
+  const record = logs.find({ category: ['enso', 'extension', 'provider'] })
   if (record === undefined) throw new Error('no provider record was written')
   expect(record.properties?.requestId).toBe('req_011CeuyWx4MNKpUQuh59rXHp')
   expect(record.properties?.status).toBe(200)

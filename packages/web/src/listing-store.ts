@@ -41,7 +41,7 @@ export function createListingStore<Schema extends TSchema>(
         if (!(Array.isArray(listed) && listed.every((row) => Check(schema, row)))) {
           throw new Error(`the server's ${what} did not match its schema`)
         }
-        store.set({ rows: listed as Static<Schema>[], error: undefined })
+        store.set({ rows: listed, error: undefined })
       } catch (error) {
         store.set({ rows: store.get().rows, error: error instanceof Error ? error.message : String(error) })
       }

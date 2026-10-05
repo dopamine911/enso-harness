@@ -34,8 +34,8 @@ const MANIFEST = {
 // ⚠ BOTH SOURCES. `@enso/core` appears in no manifest path — only in `dependencies` — and a
 // manifest-only sweep once left it unlinked, failing the extension at load (header).
 test('required packages are every dependency plus every node_modules/… manifest path, scopes intact, once each', () => {
-  expect(requiredPackageNames(MANIFEST).sort()).toEqual(
-    ['@example/permission-engine', '@mammothb/pi-tokyonight-storm', '@enso/core', 'cc-safety-net'].sort(),
+  expect(requiredPackageNames(MANIFEST).toSorted()).toEqual(
+    ['@example/permission-engine', '@mammothb/pi-tokyonight-storm', '@enso/core', 'cc-safety-net'].toSorted(),
   )
   expect(requiredPackageNames({})).toEqual([])
   expect(requiredPackageNames({ pi: { extensions: ['./local/only.ts'] } })).toEqual([])
@@ -62,8 +62,8 @@ test('verify-or-fix: a present package is verified, an absent one is linked from
   mkdirSync(join(packageRoot, 'node_modules', 'cc-safety-net'), { recursive: true })
   const outcome = linkVendorPackages(repoRoot, packageRoot, MANIFEST)
   expect(outcome.verified).toEqual(['cc-safety-net'])
-  expect(outcome.linked.sort()).toEqual(
-    ['@example/permission-engine', '@mammothb/pi-tokyonight-storm', '@enso/core'].sort(),
+  expect(outcome.linked.toSorted()).toEqual(
+    ['@example/permission-engine', '@mammothb/pi-tokyonight-storm', '@enso/core'].toSorted(),
   )
   const linked = join(packageRoot, 'node_modules', '@enso', 'core')
   expect(lstatSync(linked).isSymbolicLink()).toBe(true)

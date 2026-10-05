@@ -37,7 +37,7 @@ function builtPages(): string[] {
     }
   }
   walk(join(ROOT, DIST))
-  return pages.sort()
+  return pages.toSorted()
 }
 
 /**

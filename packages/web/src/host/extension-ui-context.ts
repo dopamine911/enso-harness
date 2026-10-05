@@ -504,7 +504,7 @@ export function createEnsoExtensionUiContext(options: EnsoExtensionUiContextOpti
       }
       disposeQuietly(component)
       // pi's rpc contract, stated in TypeScript: an unknown component is "no component".
-      resolve(undefined as T)
+      resolve(undefined)
       return promise
     },
     pasteToEditor: () => undefined,

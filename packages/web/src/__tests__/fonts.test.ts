@@ -105,5 +105,7 @@ test('⚠ the faces are declared once per document, each from a stylesheet the f
     expect({ href, exists: existsSync(join(packageDir, ...file)) }).toEqual({ href, exists: true })
   }
   // And the other direction: no font package is shipped that the page never links.
-  expect([...linkedPackages].sort()).toEqual(dependencies.filter((name) => name.startsWith('@fontsource')).sort())
+  expect([...linkedPackages].toSorted()).toEqual(
+    dependencies.filter((name) => name.startsWith('@fontsource')).toSorted(),
+  )
 })

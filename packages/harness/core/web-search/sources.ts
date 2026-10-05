@@ -54,10 +54,7 @@ export function normalizeSearchUrl(url: string): string {
 export function titleFromUrl(url: string): string {
   try {
     const parsed = new URL(url)
-    const lastSegment = parsed.pathname
-      .split('/')
-      .filter((segment) => segment.length > 0)
-      .pop()
+    const lastSegment = parsed.pathname.split('/').findLast((segment) => segment.length > 0)
     if (lastSegment !== undefined && lastSegment.length > 0) return lastSegment
     return parsed.hostname.length > 0 ? parsed.hostname : url
   } catch {

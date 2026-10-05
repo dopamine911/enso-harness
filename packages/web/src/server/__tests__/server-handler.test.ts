@@ -1426,7 +1426,7 @@ test("⚠ GET /api/about answers the bundle's own header, and writes no record",
   expect(response.status).toBe(200)
   const about = (await response.json()) as Record<string, unknown>
   // Every field the bundle's header carries, and nothing undefined among them.
-  expect(Object.keys(about).sort()).toEqual(['at', 'bun', 'enso', 'os', 'pi', 'selection'])
+  expect(Object.keys(about).toSorted()).toEqual(['at', 'bun', 'enso', 'os', 'pi', 'selection'])
   expect(Number.isNaN(new Date(String(about.at)).getTime())).toBe(false)
   for (const twice of [0, 1]) await fetch(`${url}/api/about?call=${twice}`)
   expect(logs.records.length).toBe(before)

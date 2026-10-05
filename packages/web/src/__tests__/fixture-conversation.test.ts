@@ -32,7 +32,7 @@ interface MaterializedPart {
 function materializedPartKinds(): string[] {
   const messages = createFixtureChat().get() as ReadonlyArray<{ parts?: readonly MaterializedPart[] }>
   const kinds = new Set(messages.flatMap((message) => (message.parts ?? []).map((part) => part.type)))
-  return [...kinds].sort()
+  return [...kinds].toSorted()
 }
 
 test('⚠ the fixture materializes thinking, tool-call, tool-result and text through @shadcn/helpers (#218)', () => {

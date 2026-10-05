@@ -206,7 +206,7 @@ function exportsOf(): PublicExport[] {
   for (const module of Object.keys(MODULE_FACTS)) {
     if (!detectedModules.has(module)) throw new Error(`${module} is classified but exports no public symbol`)
   }
-  return exports.sort(
+  return exports.toSorted(
     (left, right) => left.symbol.localeCompare(right.symbol) || left.entrypoint.localeCompare(right.entrypoint),
   )
 }
@@ -268,7 +268,7 @@ function importerCounts(exports: readonly PublicExport[]): Map<string, Readonly<
     )
 
   const roots = [join(ROOT, 'packages/web/src'), join(ROOT, 'packages/harness'), join(ROOT, 'scripts')]
-  for (const path of roots.flatMap(sourceFiles).sort()) {
+  for (const path of roots.flatMap(sourceFiles).toSorted()) {
     if (path === join(ROOT, 'scripts/docs/core-exports.ts')) continue
     const region = regionOf(path)
     if (region === undefined) continue

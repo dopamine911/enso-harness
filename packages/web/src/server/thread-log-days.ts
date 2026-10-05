@@ -19,7 +19,7 @@ export function logDaysOnDisk(logsDir: string): string[] {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
     throw error
   }
-  return names.flatMap((filename) => ensoLogDay(filename) ?? []).sort()
+  return names.flatMap((filename) => ensoLogDay(filename) ?? []).toSorted()
 }
 
 /** The local day a moment falls on, as the day files name it. */

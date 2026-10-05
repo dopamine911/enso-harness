@@ -225,7 +225,8 @@ async function main(argv: readonly string[]): Promise<void> {
   }
   // A terminal gets colors and wraps to its width; a pipe (`| less`, `> file`) gets plain,
   // whole lines. `--color` keeps colors through a pipe (`| less -R`).
-  const onTerminal = process.stdout.isTTY === true
+  // `?? false`: typed `boolean`, but `undefined` off a terminal at runtime (#596).
+  const onTerminal = process.stdout.isTTY ?? false
   const render = ensoLogLineRenderer({ wordWrap: onTerminal, colors: onTerminal || query.color })
   const notBefore = query.sinceMs === undefined ? 0 : Date.now() - query.sinceMs
 

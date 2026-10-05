@@ -79,7 +79,7 @@ const PROVENANCE_RECEIPTS: Record<string, string> = {
  */
 const WEB_SOURCE_ROOT = 'packages/web/src'
 /** All a ported file may reach inside our sources: the ui primitives, the class-name helper, each other. */
-const PRESENTATION_DIRECTORIES = ['components', 'lib']
+const PRESENTATION_DIRECTORIES = new Set(['components', 'lib'])
 const FORBIDDEN_PACKAGE = /^(?:@enso\/core(?:\/.+)?|@tanstack\/.+)$/
 /** `from "x"`, a bare `import "x"` and a dynamic `import("x")` — every spelling that pulls a module in. */
 const IMPORT_SPECIFIER = /(?:from|import)\s*\(?\s*["']([^"']+)["']/g
@@ -102,7 +102,7 @@ function stateLayerTarget(fromFile: string, specifier: string): string | undefin
   // import lives — reading that as "allowed" would reopen by spelling exactly what resolving
   // closed by shape. Refused, named by the path it really reaches.
   if (inside === '' || inside === '..' || inside.startsWith(`..${sep}`)) return relative(repositoryRoot, resolved)
-  return PRESENTATION_DIRECTORIES.includes(inside.split(sep)[0] ?? '') ? undefined : `${WEB_SOURCE_ROOT}/${inside}`
+  return PRESENTATION_DIRECTORIES.has(inside.split(sep)[0] ?? '') ? undefined : `${WEB_SOURCE_ROOT}/${inside}`
 }
 
 /** A module beside the app, whatever its extension — the class the old `\.ts` pattern could not see. */
@@ -123,11 +123,11 @@ test('⚠ every vendored subdirectory has a receipt, and every receipt a subdire
   const onDisk = readdirSync(join(repositoryRoot, PORTED_DIRECTORY), { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
-    .sort()
+    .toSorted()
   // Both directions, because each is a different rot: a subdirectory with no receipt is
   // upstream code that inherited three exclusions without saying where it came from, and a
   // receipt with no subdirectory is a pin nobody can check (the `v` shape of #251).
-  expect(onDisk).toEqual(Object.keys(PROVENANCE_RECEIPTS).sort())
+  expect(onDisk).toEqual(Object.keys(PROVENANCE_RECEIPTS).toSorted())
 })
 
 test('⚠ every ported presentation file names its subdirectory’s receipt (#31, #121, #253)', () => {

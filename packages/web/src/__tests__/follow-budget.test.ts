@@ -90,7 +90,7 @@ test('the page holds at most MAX_LIVE_THREADS follows, however many threads it m
   expect(probe.live()).toBe(MAX_LIVE_THREADS)
   // The oldest go, in order, and the rail lists exactly the survivors (newest first).
   expect(probe.releasedThreads()).toEqual(minted.slice(0, 8))
-  expect(threadListStore.get().map((summary) => summary.threadId)).toEqual(minted.slice(-MAX_LIVE_THREADS).reverse())
+  expect(threadListStore.get().map((summary) => summary.threadId)).toEqual(minted.slice(-MAX_LIVE_THREADS).toReversed())
 })
 
 test('⚠ a thread with a run in flight keeps its follow: the page goes over budget rather than cut a live run', async () => {

@@ -45,7 +45,7 @@ function documentedFiles(): string[] {
       files.add(relative(REPOSITORY_ROOT, join(REPOSITORY_ROOT, dirname(entryPoint), specifier)))
     }
   }
-  return [...files].sort()
+  return [...files].toSorted()
 }
 
 /** An ORDER list from the config, minus the `*` catch-all: it orders the unnamed, names nothing. */
@@ -143,8 +143,8 @@ test('every group and category used is declared in its order, and every declared
     ['categoryOrder', usedCategories],
   ] as const) {
     const declared = declaredOrder(key)
-    expect([...used].filter((entry) => !declared.includes(entry)).sort()).toEqual([])
-    expect(declared.filter((entry) => !used.has(entry)).sort()).toEqual([])
+    expect([...used].filter((entry) => !declared.includes(entry)).toSorted()).toEqual([])
+    expect(declared.filter((entry) => !used.has(entry)).toSorted()).toEqual([])
   }
 })
 

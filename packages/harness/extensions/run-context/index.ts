@@ -105,7 +105,7 @@ function canonicalJson(value: unknown): string {
     const entries = Object.entries(value)
       .filter(([, field]) => field !== undefined)
       // Keys of one object are distinct: never equal.
-      .sort(([first], [second]) => (first < second ? -1 : 1))
+      .toSorted(([first], [second]) => (first < second ? -1 : 1))
     return `{${entries.map(([key, field]) => `${JSON.stringify(key)}:${canonicalJson(field)}`).join(',')}}`
   }
   return JSON.stringify(value) ?? 'null'
@@ -216,7 +216,7 @@ async function runContextOf(
   const facts = await sessionFactsOf(dependencies, context)
   const skills = event.systemPromptOptions.skills
     .map((skill) => ({ name: skill.name, path: skill.filePath }))
-    .sort((first, second) => byCodePoint(first.name, second.name) || byCodePoint(first.path, second.path))
+    .toSorted((first, second) => byCodePoint(first.name, second.name) || byCodePoint(first.path, second.path))
   return {
     ...facts,
     skills,

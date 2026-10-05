@@ -56,7 +56,7 @@ export function applyTextCitations(text: string, citations: readonly CitedTextCi
   }
 
   let result = text
-  for (const insertion of insertions.sort((first, second) => second.index - first.index)) {
+  for (const insertion of insertions.toSorted((first, second) => second.index - first.index)) {
     result = result.slice(0, insertion.index) + insertion.marker + result.slice(insertion.index)
   }
   return { text: result, sources }
@@ -71,7 +71,7 @@ export function applyIndexCitations(text: string, citations: readonly IndexCitat
       index: Math.max(0, Math.min(citation.endIndex ?? 0, text.length)),
       marker: `[${pushUniqueSource(sources, citation) + 1}]`,
     }))
-    .sort((first, second) => second.index - first.index)
+    .toSorted((first, second) => second.index - first.index)
 
   let result = text
   const usedInsertionKeys = new Set<string>()
@@ -107,7 +107,7 @@ export function applyByteIndexCitations(text: string, insertions: readonly ByteI
 
   const parts: Uint8Array[] = []
   let unwrittenEnd = textBytes.length
-  const descending = [...insertions].sort((first, second) => second.byteIndex - first.byteIndex)
+  const descending = [...insertions].toSorted((first, second) => second.byteIndex - first.byteIndex)
   for (const insertion of descending) {
     const position = Math.min(insertion.byteIndex, unwrittenEnd)
     if (position < unwrittenEnd) parts.unshift(textBytes.subarray(position, unwrittenEnd))
