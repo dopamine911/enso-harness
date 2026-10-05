@@ -166,14 +166,14 @@ export default defineConfig({
     },
     {
       // Each spells a literal `${…}` on purpose, never a template written with the wrong quotes:
-      //   • scripts/docs/env-and-config.ts — a source line it checks a file `contains`, verbatim;
+      //   • scripts/docs/inventory/env-and-config.ts — a source line its row checks a file `contains`;
       //   • scripts/docs/feature-session.ts — the source text of a fixture file it writes;
       //   • test/e2e-selectors.test.ts — an interpolated template the literal reader must skip;
       //   • test/secret-scan-gate.test.ts — the workflow's shell range `${RANGE}`;
       //   • test/site-gate.test.ts — the workflow's `${{ … }}` expressions;
       //   • test/source-comments.test.ts — a test title spelled with a substitution, as source.
       files: [
-        'scripts/docs/env-and-config.ts',
+        'scripts/docs/inventory/env-and-config.ts',
         'scripts/docs/feature-session.ts',
         'test/e2e-selectors.test.ts',
         'test/secret-scan-gate.test.ts',

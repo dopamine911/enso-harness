@@ -101,13 +101,12 @@ const COUNT_WORDS_TWENTY: readonly string[] = [
   'twenty-four',
   'twenty-five',
 ]
-const COUNT_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'] as const
 
 test('⚠ docs/verification.md counts and numbers the gates the file actually runs (#188)', async () => {
   const page = await Bun.file(join(import.meta.dir, '..', 'docs', 'verification.md')).text()
   const steps = [...page.matchAll(NUMBERED_STEP)].map((match) => Number(match[1]))
   expect(steps).toEqual(GATES.map((_gate, index) => index + 1))
-  const word = COUNT_WORDS[GATES.length]
+  const word = COUNT_WORDS_TWENTY[GATES.length]
   if (word === undefined) throw new Error(`gate-abort: no English word for ${GATES.length} gates`)
   // Both statements: the lead sentence and the CI paragraph's "<word>-step gate".
   expect(page).toContain(`${word.charAt(0).toUpperCase()}${word.slice(1)} gates, in order`)
@@ -131,6 +130,7 @@ const GATE_PROSE_MARKS: Readonly<Record<string, RegExp>> = {
   typecheck: /typecheck|tsc/i,
   'dead-code': /dead-code|fallow dead-code|baseline/i,
   complexity: /complexity|cognitive/i,
+  duplication: /duplicat|dupes|clone/i,
   'react-doctor': /react-doctor/i,
   test: /bun test|the suite/i,
   coverage: /coverage/i,

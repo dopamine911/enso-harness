@@ -333,7 +333,7 @@ choose whether and where to share the bundle.
 ## How this repo proves it works
 
 `bun run check:all` is the only definition of green. The pre-commit hook and CI both run exactly it —
-**ten steps, stopping at the first failure**:
+**eleven steps, stopping at the first failure**:
 
 | # | Step | What it does |
 |---|---|---|
@@ -342,11 +342,12 @@ choose whether and where to share the bundle.
 | 3 | `typecheck` | `tsc -b` across every package |
 | 4 | `dead-code` | unused files, exports and dependencies, against a committed baseline |
 | 5 | `complexity` | every function under a cognitive ceiling of 25, or under its own pin (fallow) |
-| 6 | `react-doctor` | react-doctor over the web surface, offline, failing on an error-severity finding |
-| 7 | `test` | the whole suite |
-| 8 | `coverage` | line and function floors over *every* source file, not just imported ones |
-| 9 | `api-docs` | TypeDoc over the public contracts, with warnings fatal |
-| 10 | `site` | builds the docs site and crawls every built page for dead links |
+| 6 | `duplication` | duplicated lines under a ratchet that may only fall (fallow, semantic mode) |
+| 7 | `react-doctor` | react-doctor over the web surface, offline, failing on an error-severity finding |
+| 8 | `test` | the whole suite |
+| 9 | `coverage` | line and function floors over *every* source file, not just imported ones |
+| 10 | `api-docs` | TypeDoc over the public contracts, with warnings fatal |
+| 11 | `site` | builds the docs site and crawls every built page for dead links |
 
 Twenty-three of those tests are **gates**: tests about the source tree rather than about behaviour — "no
 production `console.*`", "every documented export is grouped", "every diagram parses". Each one names

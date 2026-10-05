@@ -93,7 +93,7 @@
   "ignoreFindings": ["packages/web/src/components/**"],
   // Clone detection (#174). `semantic` is the mode this repo reads: `mild` (the default) found
   // three groups and 0.29 % by tokens; the same structure under renamed identifiers is 51
-  // groups, and that is the repeated shape, so that is the number the baseline holds. Two
+  // groups, and that is the repeated shape, so that is the number the baseline holds. Four
   // classes are excluded by decision, each with its reason:
   // - the vendored components, for the reason `ignoreFindings` gives above — dupes has its own
   //   ignore list, so the decision is written twice;
@@ -104,11 +104,17 @@
   //   every palette block names the same variables with its own values — the tool pairs the names.
   //   Nothing is shared to fold: a theme that borrowed another's values would be the drift
   //   `__tests__/theme.test.ts` checks for (every theme defines every variable).
-  // What stays in the count and is NOT excluded: consecutive metadata rows in the generators,
-  // Playwright arrange/act blocks, the dispatcher's route branches — inventory. `threshold` is
-  // the ratchet: fallow 3.25's regression baseline carries dead-code categories only, so the
-  // duplicated-line percentage is the number that can only fall. Lower it when a fold lands,
-  // never raise it. Read by the advisory `fallow-audit` job (`.github/workflows/ci.yml`).
+  // - `scripts/docs/inventory/`: the doc generators' checked metadata tables (#593) — one row per
+  //   finding a detector makes, every row the same shape with different words. The tool pairs
+  //   uniform rows as clones and there is nothing to fold: a row that borrowed another's fields
+  //   would be wrong. Until #593 these rows stayed in the count, and they were most of what it
+  //   measured (`env-and-config.ts`'s three tables alone: 364 of 1,740 lines). By DIRECTORY, so
+  //   a generator's logic stays counted: only tables live there, which that directory's modules say.
+  // What stays in the count and is NOT excluded: Playwright arrange/act blocks, the dispatcher's
+  // route branches, a table still inline in a generator. `threshold` is the ratchet: fallow 3.25's
+  // regression baseline carries dead-code categories only, so the duplicated-line percentage is
+  // the number that can only fall. Lower it when a fold lands, never raise it. Read by the
+  // blocking `duplication` step of `scripts/gate.ts` (`dupes:check`) since #593.
   //
   // ⚠ A ratchet that is red before any PR touches it reports nothing — every PR sees the same
   // red, so a genuine increase is indistinguishable from the standing state (#260). The 4.5
@@ -131,18 +137,26 @@
   // added its routes; the server's route table (a `threadRoute` builder, compact rows), its JSON control
   // routes (one `answerControl`), `follow.ts`'s lease and refusal types, and the routes page's metadata
   // (positional rows, paths derived) were folded: 2.509718172983479 % (1,033 of 41,160), pinned at
-  // 2.52. Re-measure with
+  // 2.52. `main` then crossed it unseen again: 2.7137888547499105 % (1,740 of 64,095) on
+  // 2026-10-05, up from 2.51 % at `777f985` six days earlier. #593 moved the generators' tables
+  // into `scripts/docs/inventory/` (an exclusion, not a fold, as the themes' was):
+  // 2.433242806235381 % (1,550 of 63,701), pinned at 2.44. Re-measure with
   // `bunx fallow dupes --format json` (`stats.duplication_percentage`), and lower it the moment
   // a fold makes a smaller number pass.
   //
-  // Still advisory, not promoted: the promotion condition this comment has always stated —
-  // "red for a real regression once" — cannot have been met while the ratchet was red for a
-  // stale pin instead. Re-pinning is what makes the first real crossing observable; promote
-  // after one.
+  // PROMOTED to a blocking gate step (#593). The condition this comment used to set — "red for a
+  // real regression once" — had been met four times over (4.79, 3.9, 3.0, 2.71), each crossing
+  // landing unseen because the step was advisory and already red. Blocking is what makes the
+  // next crossing the commit that causes it, not a number found weeks later.
   "duplicates": {
     "mode": "semantic",
-    "ignore": ["packages/web/src/components/**", "packages/core/src/**", "packages/web/src/styles/themes.css"],
-    "threshold": 2.52
+    "ignore": [
+      "packages/web/src/components/**",
+      "packages/core/src/**",
+      "packages/web/src/styles/themes.css",
+      "scripts/docs/inventory/**"
+    ],
+    "threshold": 2.44
   },
   // Complexity. Two readers of this block:
   //
