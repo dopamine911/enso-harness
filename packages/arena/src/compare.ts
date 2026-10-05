@@ -81,16 +81,20 @@ function namesOf(first: readonly { readonly name: string }[], second: readonly {
   return [...new Set([...first, ...second].map((named) => named.name))]
 }
 
-/** A thread id: each run has its own, so the same problem in two runs names two of them. */
-const THREAD_ID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g
+/**
+ * A thread's segment of an API path: each run has its own thread ids, so the same problem in two runs
+ * names two of them. Matched by its place in the path, not its shape (PR #622 review): a thread id
+ * need not be a UUID (`isEnsoThreadId`), and the routes are where problems name one.
+ */
+const THREAD_SEGMENT = /\/api\/threads\/[^/?\s]+/g
 
 /**
- * Each problem once, by which run has it: only the first, only the second, or both. Thread ids read as
- * `<thread>`: a 404 on one thread's `/git` in each run is one problem the two runs share, not two.
+ * Each problem once, by which run has it: only the first, only the second, or both. A thread's path
+ * segment reads as `<thread>`: a 404 on one thread's `/git` in each run is one problem, not two.
  */
 function problemLines(first: ArenaScore, second: ArenaScore): string[] {
   const label = (problem: ArenaScore['problems'][number]): string =>
-    `**${problem.severity}** (${problem.source}) ${problem.message.replace(THREAD_ID, '<thread>')}`
+    `**${problem.severity}** (${problem.source}) ${problem.message.replace(THREAD_SEGMENT, '/api/threads/<thread>')}`
   const firstLabels = new Set(first.problems.map(label))
   const secondLabels = new Set(second.problems.map(label))
   const section = (title: string, labels: readonly string[]): string[] =>

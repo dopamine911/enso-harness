@@ -134,7 +134,8 @@ test('⚠ two run directories compare side by side: outcome, problems by which r
     read(),
   ])
   const after = runDirectory('snake-b', [
-    thread('11956af4-6dff-499a-9065-ded1d26eb127'),
+    // A thread id need not be a UUID (`isEnsoThreadId`): the comparison matches the path segment.
+    thread('stored-1'),
     ...[1, 2, 3].flatMap(() => [wait(30_000), read(), action('click', 'click button "Yes, allow write"')]),
   ])
 

@@ -738,7 +738,7 @@ export function readArenaScoreInput(runDirectory: string): ArenaScoreInput {
 
 const STATUS_MARK: Readonly<Record<ArenaCheckStatus, string>> = { pass: '✓', fail: '✗', unknown: '?' }
 
-/** The score as Markdown: verdict, the UI checks, the problems by severity, the metrics. */
+/** The score as Markdown: verdict, the UI checks, the problems by severity, the observed friction, the metrics. */
 export function renderArenaScore(score: ArenaScore): string {
   const lines = [
     `# Arena score — ${score.runId}`,
