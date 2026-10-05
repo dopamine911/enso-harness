@@ -394,7 +394,7 @@ export function sessionIncidentsOf(
   entries: readonly { readonly customType: string; readonly data: unknown }[],
 ): EnsoSessionIncidents {
   return entries.reduce(
-    (state, entry) => sessionIncidentsStep(state, entry.customType, entry.data),
+    (state, customEntry) => sessionIncidentsStep(state, customEntry.customType, customEntry.data),
     NO_SESSION_INCIDENTS,
   )
 }
@@ -546,11 +546,12 @@ export function incidentEntriesOf(
   opened: EnsoIncidentOpened,
 ): EnsoTranscriptCustom[] {
   const calls = new Set(opened.signals.flatMap((signal) => [...signal.after, signal.toolCallId]))
-  return entries.filter((entry): entry is EnsoTranscriptCustom => {
-    if (entry.kind !== 'custom' || typeof entry.data !== 'object' || entry.data === null) return false
-    const { incidentId, toolCallId } = entry.data as Record<string, unknown>
+  return entries.filter((transcriptEntry): transcriptEntry is EnsoTranscriptCustom => {
+    if (transcriptEntry.kind !== 'custom' || typeof transcriptEntry.data !== 'object' || transcriptEntry.data === null)
+      return false
+    const { incidentId, toolCallId } = transcriptEntry.data as Record<string, unknown>
     if (incidentId === opened.incidentId) return true
-    return EVIDENCE_ENTRIES.has(entry.customType) && typeof toolCallId === 'string' && calls.has(toolCallId)
+    return EVIDENCE_ENTRIES.has(transcriptEntry.customType) && typeof toolCallId === 'string' && calls.has(toolCallId)
   })
 }
 
@@ -615,10 +616,13 @@ export function replayIncidents(
   const openAt = new Set<number>()
   const recorded: EnsoIncidentOpened[] = []
   let segment: EnsoTranscriptEntry[] = []
-  for (const entry of [...entries, undefined]) {
-    const opened = entry?.kind === 'custom' ? readEnsoIncidentOpened(entry.customType, entry.data) : undefined
-    if (entry !== undefined && opened?.inheritedFrom === undefined) {
-      segment.push(entry)
+  for (const transcriptEntry of [...entries, undefined]) {
+    const opened =
+      transcriptEntry?.kind === 'custom'
+        ? readEnsoIncidentOpened(transcriptEntry.customType, transcriptEntry.data)
+        : undefined
+    if (transcriptEntry !== undefined && opened?.inheritedFrom === undefined) {
+      segment.push(transcriptEntry)
       if (opened !== undefined) recorded.push(opened)
       continue
     }

@@ -148,10 +148,10 @@ export function foldSystem(sources: readonly SystemSource[]): SystemItem[] {
       at: replayed.instructionsAt,
     })
   }
-  for (const [sectionName, { text, at }] of replayed.sections) {
+  for (const [sectionName, { text: sectionText, at }] of replayed.sections) {
     const category = BASE_SECTIONS[sectionName] === true ? 'system' : 'injected'
     folded.push({
-      item: textItem(`section:${sectionName}`, category, { kind: 'section', name: sectionName, text }),
+      item: textItem(`section:${sectionName}`, category, { kind: 'section', name: sectionName, text: sectionText }),
       at,
     })
   }

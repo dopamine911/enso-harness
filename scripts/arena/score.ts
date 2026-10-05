@@ -580,9 +580,9 @@ function logRecordsIn(evidenceDirectory: string, files: readonly string[]): Enso
 /** Every file under a directory but `.git`: what a workspace that is not a repository holds. */
 function filesUnder(directory: string): number {
   let count = 0
-  for (const entry of readdirSync(directory, { withFileTypes: true })) {
-    if (entry.name === '.git') continue
-    count += entry.isDirectory() ? filesUnder(join(directory, entry.name)) : 1
+  for (const directoryEntry of readdirSync(directory, { withFileTypes: true })) {
+    if (directoryEntry.name === '.git') continue
+    count += directoryEntry.isDirectory() ? filesUnder(join(directory, directoryEntry.name)) : 1
   }
   return count
 }

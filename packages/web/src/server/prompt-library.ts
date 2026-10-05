@@ -187,8 +187,8 @@ function readFile(directory: string, id: string): LibraryRead {
 function libraryIds(directory: string): string[] {
   try {
     return readdirSync(directory)
-      .filter((name) => name.endsWith(EXTENSION))
-      .map((name) => name.slice(0, -EXTENSION.length))
+      .filter((fileName) => fileName.endsWith(EXTENSION))
+      .map((fileName) => fileName.slice(0, -EXTENSION.length))
       .toSorted()
   } catch (error: unknown) {
     if (errorCode(error) === 'ENOENT') return []
@@ -206,10 +206,10 @@ export function createPromptLibrary(directory: string, source: EnsoLibraryPrompt
     list(): EnsoLibraryPromptListing {
       const prompts: EnsoLibraryPromptSummary[] = []
       const refused: EnsoLibraryPromptRefusal[] = []
-      for (const id of libraryIds(directory)) {
-        const read = readFile(directory, id)
+      for (const promptId of libraryIds(directory)) {
+        const read = readFile(directory, promptId)
         if (read.kind === 'prompt') prompts.push(summarizeLibraryPrompt(read.prompt))
-        else if (read.kind === 'refused') refused.push({ file: `${id}${EXTENSION}`, reason: read.reason })
+        else if (read.kind === 'refused') refused.push({ file: `${promptId}${EXTENSION}`, reason: read.reason })
       }
       prompts.sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id))
       return { prompts, refused }

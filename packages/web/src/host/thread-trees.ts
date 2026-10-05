@@ -102,5 +102,5 @@ export function snapshotAtEntry(
 
 /** True when `entryId` is on the branch at all — `snapshotAtEntry`'s `undefined` says why not otherwise. */
 export function hasEntry(transcript: readonly EnsoTranscriptEntry[], entryId: string): boolean {
-  return transcript.some((entry) => entry.id === entryId)
+  return transcript.some((transcriptEntry) => transcriptEntry.id === entryId)
 }

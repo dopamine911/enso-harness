@@ -160,7 +160,9 @@ export async function readThreadMount(deps: ThreadReadDeps, threadId: string): P
     storedOutside,
     messages: transcriptToMessages(transcript),
     sessionRisk: { level: risk.level, signals: risk.signals.length },
-    incidents: sessionIncidentsOf(transcript.flatMap((entry) => (entry.kind === 'custom' ? [entry] : []))),
+    incidents: sessionIncidentsOf(
+      transcript.flatMap((transcriptEntry) => (transcriptEntry.kind === 'custom' ? [transcriptEntry] : [])),
+    ),
     ...(nowLive === undefined ? coldReading(host, transcript, stored) : liveReading(nowLive, transcript)),
     ...place,
     // Our record (#555 rule 5), else — no file yet, live or not: a new thread, which the host moves

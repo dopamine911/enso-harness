@@ -52,7 +52,9 @@ function extractGroundingDetails(groundingMetadata: Record<string, unknown> | un
     const segment = asRecord(supportRecord?.segment)
     const endIndex = typeof segment?.endIndex === 'number' ? segment.endIndex : undefined
     const chunkIndices = Array.isArray(supportRecord?.groundingChunkIndices)
-      ? supportRecord.groundingChunkIndices.filter((index): index is number => typeof index === 'number')
+      ? supportRecord.groundingChunkIndices.filter(
+          (groundingIndex): groundingIndex is number => typeof groundingIndex === 'number',
+        )
       : []
     if (endIndex === undefined || chunkIndices.length === 0) continue
     insertions.push({ byteIndex: endIndex, marker: chunkIndices.map((chunkIndex) => `[${chunkIndex + 1}]`).join('') })

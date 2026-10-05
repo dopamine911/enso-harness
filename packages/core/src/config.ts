@@ -167,7 +167,7 @@ function mergeValues(base: unknown, override: unknown): unknown {
   if (Array.isArray(base) && Array.isArray(override)) return [...new Set([...base, ...override])]
   if (isPlainObject(base) && isPlainObject(override)) {
     const merged: Record<string, unknown> = { ...base }
-    for (const [key, value] of Object.entries(override)) merged[key] = mergeValues(base[key], value)
+    for (const [key, overrideValue] of Object.entries(override)) merged[key] = mergeValues(base[key], overrideValue)
     return merged
   }
   return override

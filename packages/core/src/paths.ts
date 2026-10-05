@@ -251,9 +251,9 @@ function moveTree(
   relativeDirectory: string,
   migration: { moved: string[]; kept: string[] },
 ): void {
-  for (const entry of readdirSync(join(from, relativeDirectory), { withFileTypes: true })) {
-    const relativePath = join(relativeDirectory, entry.name)
-    if (entry.isDirectory()) {
+  for (const child of readdirSync(join(from, relativeDirectory), { withFileTypes: true })) {
+    const relativePath = join(relativeDirectory, child.name)
+    if (child.isDirectory()) {
       moveTree(from, to, relativePath, migration)
       continue
     }
@@ -283,8 +283,8 @@ function moveEntry(source: string, target: string): 'moved' | 'kept' | 'gone' {
 }
 
 function removeEmptyDirectories(directory: string): void {
-  for (const entry of readdirSync(directory, { withFileTypes: true })) {
-    if (entry.isDirectory()) removeEmptyDirectories(join(directory, entry.name))
+  for (const child of readdirSync(directory, { withFileTypes: true })) {
+    if (child.isDirectory()) removeEmptyDirectories(join(directory, child.name))
   }
   if (readdirSync(directory).length === 0) rmdirSync(directory)
 }
@@ -518,7 +518,7 @@ function sessionCwdOf(file: string): { kind: 'cwd'; cwd: string } | { kind: 'gon
 /** A directory's `.jsonl` names; none when another launcher removed the directory first. */
 function sessionFileNames(directory: string): string[] {
   try {
-    return readdirSync(directory).filter((name) => name.endsWith('.jsonl'))
+    return readdirSync(directory).filter((fileName) => fileName.endsWith('.jsonl'))
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
     throw error
@@ -562,15 +562,15 @@ export function migrateSessionsIntoProjects(agentDir: string, projectsDir: strin
   const legacyRoot = join(agentDir, 'sessions')
   const migration: SessionMigration = { moved: [], kept: [], orphaned: [], unreadable: [] }
   if (!existsSync(legacyRoot)) return migration
-  for (const entry of readdirSync(legacyRoot, { withFileTypes: true })) {
+  for (const legacyDirectory of readdirSync(legacyRoot, { withFileTypes: true })) {
     // A real directory only. pi's `listAll` follows a symlinked one too; a launch does not move
     // files out of a directory the user linked here by hand, nor `rmdir` a link (ENOTDIR). Its
     // sessions stay listed from where they are.
-    if (!entry.isDirectory()) continue
-    const directory = join(legacyRoot, entry.name)
+    if (!legacyDirectory.isDirectory()) continue
+    const directory = join(legacyRoot, legacyDirectory.name)
     let orphaned = false
-    for (const name of sessionFileNames(directory)) {
-      const source = join(directory, name)
+    for (const fileName of sessionFileNames(directory)) {
+      const source = join(directory, fileName)
       const header = sessionCwdOf(source)
       if (header.kind === 'gone') continue
       if (header.kind === 'unreadable') {
@@ -587,7 +587,7 @@ export function migrateSessionsIntoProjects(agentDir: string, projectsDir: strin
         orphaned = true
         continue
       }
-      const target = join(projectSessionsDir(projectsDir, projectIdOf(canonical)), name)
+      const target = join(projectSessionsDir(projectsDir, projectIdOf(canonical)), fileName)
       const outcome = moveEntry(source, target)
       if (outcome === 'moved') migration.moved.push(target)
       else if (outcome === 'kept') migration.kept.push(source)

@@ -44,7 +44,7 @@ export function createThreadEvalRoute(
       () => deps.host.readStoredThreadEval(threadId),
     )
     if (source === undefined) return undefined
-    const firstAt = source.transcript.find((entry) => entry.at !== undefined)?.at
+    const firstAt = source.transcript.find((transcriptEntry) => transcriptEntry.at !== undefined)?.at
     const firstDay = localDayOf(firstAt === undefined ? now() : new Date(firstAt))
     const logDays = logDaysOnDisk(deps.logsDir).filter((day) => day >= firstDay)
     const log = logDays.flatMap((day) => threadLines(deps.logsDir, day, threadId))

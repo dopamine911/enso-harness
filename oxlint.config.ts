@@ -31,9 +31,10 @@ export default defineConfig({
   categories: { correctness: 'error' },
   options: {
     typeAware: true,
-    // A warning never fails the run. The only rule registered at `warn` is the advisory naming
-    // tier (`enso/generic-iteration`) — turning this on would make it block.
-    denyWarnings: false,
+    // No warning tier (#592): a rule joins at `error` or not at all. `maxWarnings: 0` is what holds
+    // it — a rule registered at `warn`, or one a plugin upgrade adds at `warn`, fails the run the day
+    // it first fires instead of piling up unread (82 had, by 2026-10-05, under `denyWarnings: false`).
+    maxWarnings: 0,
     reportUnusedDisableDirectives: 'error',
   },
   ignorePatterns: [
@@ -88,9 +89,9 @@ export default defineConfig({
     'no-empty': 'error',
     'no-empty-function': 'error',
     'no-empty-static-block': 'error',
-    // `warn`, as Biome's `noTemplateCurlyInString` was: three tests spell a literal `${…}` on purpose
-    // (a workflow expression, a shell range, a source fixture) and say so beside it.
-    'no-template-curly-in-string': 'warn',
+    // A `${…}` in a plain string is almost always a template literal written with the wrong quotes.
+    // The files that spell one ON PURPOSE are exempted by name in `overrides`, each with its reason.
+    'no-template-curly-in-string': 'error',
 
     // ── style ──
     'no-nested-ternary': 'error',
@@ -137,7 +138,7 @@ export default defineConfig({
     // ── this repository's own ──
     'enso/abbreviated-binding': 'error',
     'enso/abbreviated-key': 'error',
-    'enso/generic-iteration': 'warn',
+    'enso/generic-iteration': 'error',
     'enso/no-export-all': 'error',
   },
   overrides: [
@@ -162,6 +163,24 @@ export default defineConfig({
         'enso/abbreviated-key': 'off',
         'enso/generic-iteration': 'off',
       },
+    },
+    {
+      // Each spells a literal `${…}` on purpose, never a template written with the wrong quotes:
+      //   • scripts/docs/env-and-config.ts — a source line it checks a file `contains`, verbatim;
+      //   • scripts/docs/feature-session.ts — the source text of a fixture file it writes;
+      //   • test/e2e-selectors.test.ts — an interpolated template the literal reader must skip;
+      //   • test/secret-scan-gate.test.ts — the workflow's shell range `${RANGE}`;
+      //   • test/site-gate.test.ts — the workflow's `${{ … }}` expressions;
+      //   • test/source-comments.test.ts — a test title spelled with a substitution, as source.
+      files: [
+        'scripts/docs/env-and-config.ts',
+        'scripts/docs/feature-session.ts',
+        'test/e2e-selectors.test.ts',
+        'test/secret-scan-gate.test.ts',
+        'test/site-gate.test.ts',
+        'test/source-comments.test.ts',
+      ],
+      rules: { 'no-template-curly-in-string': 'off' },
     },
     {
       // bun-types declares `expect(p).rejects`/`.resolves` matchers as returning `void`, but at

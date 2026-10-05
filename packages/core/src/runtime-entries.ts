@@ -153,5 +153,5 @@ export function transcriptOf(entries: readonly unknown[]): EnsoTranscriptEntry[]
  * @group Transcript
  */
 export function customEntriesOf(transcript: readonly EnsoTranscriptEntry[]): EnsoTranscriptCustom[] {
-  return transcript.flatMap((entry) => (entry.kind === 'custom' ? [entry] : []))
+  return transcript.flatMap((transcriptEntry) => (transcriptEntry.kind === 'custom' ? [transcriptEntry] : []))
 }

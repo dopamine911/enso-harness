@@ -77,8 +77,8 @@ export function promptBubbleIndex(
   const occurrence = prompted.slice(0, position).filter((stats) => promptStem(stats).stem === stem).length
   const readsAs = (text: string): boolean => (truncated ? comparable(text).startsWith(stem) : comparable(text) === stem)
   let seen = 0
-  for (const [bubbleIndex, text] of bubbleTexts.entries()) {
-    if (!readsAs(text)) continue
+  for (const [bubbleIndex, bubbleText] of bubbleTexts.entries()) {
+    if (!readsAs(bubbleText)) continue
     if (seen === occurrence) return bubbleIndex
     seen += 1
   }

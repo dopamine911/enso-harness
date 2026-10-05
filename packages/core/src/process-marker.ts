@@ -145,8 +145,8 @@ export function reconcileProcessMarkers(logsDir: string, ownPid: number = proces
     return []
   }
   const dead: DeadProcessMarker[] = []
-  for (const name of names) {
-    const path = join(directory, name)
+  for (const markerName of names) {
+    const path = join(directory, markerName)
     let parsed: unknown
     try {
       parsed = JSON.parse(readFileSync(path, 'utf8'))

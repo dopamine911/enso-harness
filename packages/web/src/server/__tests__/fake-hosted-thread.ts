@@ -205,7 +205,7 @@ function fakeSystemPromptPreview(candidate: EnsoSystemPromptChoice | null): Syst
     section('cwd', `<cwd>\n${FAKE_PROJECT_DIRECTORY}\n</cwd>`, false),
   ]
   const prompt = candidate === null ? null : { id: candidate.id, name: candidate.name, mode: candidate.mode }
-  const totalTokens = sections.reduce((sum, item) => sum + item.tokens, 0)
+  const totalTokens = sections.reduce((sum, section) => sum + section.tokens, 0)
   return { kind: 'preview', preview: { prompt, sections, tools: [], totalTokens, contextWindow: FAKE_CONTEXT_WINDOW } }
 }
 
@@ -357,7 +357,7 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
     resolveIncident: (incidentId: string, resolution: EnsoIncidentResolution) => {
       // The real host's rule (#466), over the inspection's branch and what was resolved since.
       const branch = [
-        ...inspection.entries.flatMap((entry) => (entry.kind === 'custom' ? [entry] : [])),
+        ...inspection.entries.flatMap((inspected) => (inspected.kind === 'custom' ? [inspected] : [])),
         ...record.incidentResolutions.map((resolved) => ({ customType: ENSO_INCIDENT_RESOLVED_ENTRY, data: resolved })),
       ]
       const refusal = incidentResolutionRefusal(sessionIncidentsOf(branch), incidentId, resolution)

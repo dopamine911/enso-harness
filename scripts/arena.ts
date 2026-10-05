@@ -67,7 +67,7 @@ const [command, ...rest] = process.argv.slice(2)
  */
 const VALUED_FLAGS = ['scenario', 'minutes', 'home', 'out', 'chromium', 'run', 'agent', 'thinking', 'repo'] as const
 type ValuedFlag = (typeof VALUED_FLAGS)[number]
-const VALUED_FLAG_ARGUMENTS = new Set<string>(VALUED_FLAGS.map((name) => `--${name}`))
+const VALUED_FLAG_ARGUMENTS = new Set<string>(VALUED_FLAGS.map((flagName) => `--${flagName}`))
 
 function flag(name: ValuedFlag): string | undefined {
   const index = rest.indexOf(`--${name}`)

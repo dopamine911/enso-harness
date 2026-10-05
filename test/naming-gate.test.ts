@@ -23,8 +23,9 @@ import { REPOSITORY_ROOT } from './gate-support.ts'
  * …` beside it exited 1. A gate that collects only the LINES a rule reported on cannot tell
  * those two apart, which is how a non-blocking tier passed for a blocking one. Reading the
  * severity is what closes that: the assertions below name `error` per line, so demoting any
- * flagging tier is a red gate rather than a quiet downgrade. (The advisory `generic-iteration`
- * tier is deliberately `warn` and says so in `oxlint.config.ts`; nothing here asserts on it.)
+ * flagging tier is a red gate rather than a quiet downgrade. (`generic-iteration` was the one
+ * tier left at `warn`; since #592 it is `error` too, and `maxWarnings: 0` in `oxlint.config.ts`
+ * fails the run on ANY warning, so a demoted tier no longer lands quietly either way.)
  */
 
 const oxlintBinary = join(REPOSITORY_ROOT, 'node_modules', '.bin', 'oxlint')

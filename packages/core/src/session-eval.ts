@@ -607,10 +607,10 @@ function branchEvents(transcript: readonly EnsoTranscriptEntry[]): {
     askByCall: new Map(),
     lastMode: undefined,
   }
-  transcript.forEach((entry, index) => {
-    if (entry.kind === 'message') walkMessage(walk, index, entry)
-    else if (entry.kind === 'tool-result') walkToolResult(walk, index, entry)
-    else if (entry.kind === 'custom') walkCustom(walk, index, entry)
+  transcript.forEach((transcriptEntry, index) => {
+    if (transcriptEntry.kind === 'message') walkMessage(walk, index, transcriptEntry)
+    else if (transcriptEntry.kind === 'tool-result') walkToolResult(walk, index, transcriptEntry)
+    else if (transcriptEntry.kind === 'custom') walkCustom(walk, index, transcriptEntry)
   })
   return { events: walk.events, refused: walk.refused }
 }
@@ -630,16 +630,16 @@ function withSignalEvents(
 ): EnsoEvalEvent[] {
   const messageOfCall = new Map<string, number>()
   const refusalOfCall = new Map<string, number>()
-  transcript.forEach((entry, index) => {
-    if (entry.kind === 'custom') {
+  transcript.forEach((transcriptEntry, index) => {
+    if (transcriptEntry.kind === 'custom') {
       const toolCallId =
-        readEnsoGuardDenial(entry.customType, entry.data)?.toolCallId ??
-        readEnsoPermissionDenial(entry.customType, entry.data)?.toolCallId
+        readEnsoGuardDenial(transcriptEntry.customType, transcriptEntry.data)?.toolCallId ??
+        readEnsoPermissionDenial(transcriptEntry.customType, transcriptEntry.data)?.toolCallId
       if (toolCallId !== undefined) refusalOfCall.set(toolCallId, index)
       return
     }
-    if (entry.kind !== 'message') return
-    for (const part of entry.parts) if (part.type === 'tool-call') messageOfCall.set(part.toolCallId, index)
+    if (transcriptEntry.kind !== 'message') return
+    for (const part of transcriptEntry.parts) if (part.type === 'tool-call') messageOfCall.set(part.toolCallId, index)
   })
   const placed = signals.flatMap((signal): EnsoEvalEvent[] => {
     const refusal = REFUSAL_SIGNALS.has(signal.signal) ? refusalOfCall.get(signal.toolCallId) : undefined
@@ -723,16 +723,16 @@ function canonicalArgs(args: unknown): string {
 
 function toolCallRows(transcript: readonly EnsoTranscriptEntry[]): ToolCallRow[] {
   const rows: ToolCallRow[] = []
-  for (const entry of transcript) {
-    if (entry.kind !== 'message' || entry.role !== 'assistant') continue
-    for (const part of entry.parts) {
+  for (const transcriptEntry of transcript) {
+    if (transcriptEntry.kind !== 'message' || transcriptEntry.role !== 'assistant') continue
+    for (const part of transcriptEntry.parts) {
       if (part.type !== 'tool-call') continue
       rows.push({
         position: rows.length,
         toolCallId: part.toolCallId,
         name: part.toolName.toLowerCase(),
         payload: canonicalArgs(part.args),
-        at: Date.parse(entry.at ?? ''),
+        at: Date.parse(transcriptEntry.at ?? ''),
       })
     }
   }
@@ -792,8 +792,9 @@ function outputCollapseSpans(turnStats: readonly EnsoTurnStats[]): number {
 /** S19: a tool call whose result arrived the threshold or more later. */
 function timeGaps(transcript: readonly EnsoTranscriptEntry[], calls: readonly ToolCallRow[]): number {
   const resultAt = new Map<string, number>()
-  for (const entry of transcript) {
-    if (entry.kind === 'tool-result') resultAt.set(entry.toolCallId, Date.parse(entry.at ?? ''))
+  for (const transcriptEntry of transcript) {
+    if (transcriptEntry.kind === 'tool-result')
+      resultAt.set(transcriptEntry.toolCallId, Date.parse(transcriptEntry.at ?? ''))
   }
   let fires = 0
   for (const call of calls) {
@@ -848,7 +849,7 @@ function authorizationDrift(
     if (lastHuman === undefined || actSeen || !OBSERVE_VERB_RE.test(lastHuman.text)) continue
     const unattendedRun = transcript
       .slice(lastHuman.index + 1, event.index)
-      .filter((entry) => entry.kind === 'message' && entry.role === 'assistant').length
+      .filter((transcriptEntry) => transcriptEntry.kind === 'message' && transcriptEntry.role === 'assistant').length
     fires.push({
       eventIndex: event.index,
       humanIndex: lastHuman.index,
@@ -886,7 +887,9 @@ function longestQueuedRun(log: readonly EnsoLogLine[]): number {
 }
 
 function spanOf(transcript: readonly EnsoTranscriptEntry[]): [string, string] | null {
-  const stamps = transcript.flatMap((entry) => (entry.at === undefined ? [] : [entry.at])).sort()
+  const stamps = transcript
+    .flatMap((transcriptEntry) => (transcriptEntry.at === undefined ? [] : [transcriptEntry.at]))
+    .sort()
   const first = stamps[0]
   const last = stamps.at(-1)
   return first === undefined || last === undefined ? null : [first, last]
@@ -911,14 +914,16 @@ export function sessionEvalOf(input: SessionEvalInput): SessionEvalResult {
   const events = mergeByTime(withSignalEvents(branchOnly, transcript, risk.signals), logEvents(log))
   const calls = toolCallRows(transcript)
   const errors = new Map<string, string>()
-  for (const entry of transcript) {
-    if (entry.kind === 'tool-result' && entry.isError && !refused.has(entry.toolCallId)) {
-      errors.set(entry.toolCallId, entry.toolName.toLowerCase())
+  for (const transcriptEntry of transcript) {
+    if (transcriptEntry.kind === 'tool-result' && transcriptEntry.isError && !refused.has(transcriptEntry.toolCallId)) {
+      errors.set(transcriptEntry.toolCallId, transcriptEntry.toolName.toLowerCase())
     }
   }
   const humans = events.filter((event) => HUMAN_KINDS.has(event.kind))
   const humanDenominator = Math.max(1, humans.length)
-  const assistantMessages = transcript.filter((entry) => entry.kind === 'message' && entry.role === 'assistant').length
+  const assistantMessages = transcript.filter(
+    (transcriptEntry) => transcriptEntry.kind === 'message' && transcriptEntry.role === 'assistant',
+  ).length
   const histogram: Record<string, number> = {}
   for (const call of calls) histogram[call.name] = (histogram[call.name] ?? 0) + 1
   const askCalls = count(events, 'ask-options')
@@ -930,9 +935,9 @@ export function sessionEvalOf(input: SessionEvalInput): SessionEvalResult {
   const firstCorrection = events.find((event) => event.kind === 'human-correction')
   const logRead = logDays.length > 0
   const transcriptText = transcript
-    .flatMap((entry) => {
-      if (entry.kind === 'message') return [textOf(entry)]
-      return entry.kind === 'tool-result' ? [entry.text] : []
+    .flatMap((transcriptEntry) => {
+      if (transcriptEntry.kind === 'message') return [textOf(transcriptEntry)]
+      return transcriptEntry.kind === 'tool-result' ? [transcriptEntry.text] : []
     })
     .join('\n')
   return {

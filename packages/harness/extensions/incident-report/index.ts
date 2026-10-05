@@ -99,9 +99,9 @@ function citableOf(entry: unknown): [ref: string, text: string][] {
  */
 function citableTextOf(branch: readonly unknown[]): Map<string, string> {
   const texts = new Map<string, string>()
-  for (const [ref, text] of branch.flatMap(citableOf)) {
+  for (const [ref, citable] of branch.flatMap(citableOf)) {
     // A later prompt replaces the earlier; a call's arguments and its result join.
-    texts.set(ref, ref === ENSO_REPORT_PROMPT_REF ? text : [texts.get(ref) ?? '', text].join('\n'))
+    texts.set(ref, ref === ENSO_REPORT_PROMPT_REF ? citable : [texts.get(ref) ?? '', citable].join('\n'))
   }
   return texts
 }
@@ -214,7 +214,7 @@ export default function incidentReport(pi: ExtensionAPI): void {
     if (owed !== undefined) return
     const active = pi.getActiveTools()
     if (active.includes(ENSO_INCIDENT_REPORT_TOOL_NAME)) {
-      pi.setActiveTools(active.filter((name) => name !== ENSO_INCIDENT_REPORT_TOOL_NAME))
+      pi.setActiveTools(active.filter((toolName) => toolName !== ENSO_INCIDENT_REPORT_TOOL_NAME))
     }
   }
 

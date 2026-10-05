@@ -156,7 +156,7 @@ export class RetiredEnvironmentError extends Error {
   constructor(names: readonly string[]) {
     super(
       `${names.join(', ')} ${names.length === 1 ? 'is' : 'are'} from before the Enso rename and nothing reads ` +
-        `${names.length === 1 ? 'it' : 'them'}. Rename to ${names.map((name) => name.replace(/^ZEN_/, 'ENSO_')).join(', ')}.`,
+        `${names.length === 1 ? 'it' : 'them'}. Rename to ${names.map((retiredName) => retiredName.replace(/^ZEN_/, 'ENSO_')).join(', ')}.`,
     )
     this.name = 'RetiredEnvironmentError'
   }
@@ -169,7 +169,7 @@ export class RetiredEnvironmentError extends Error {
  */
 export function retiredEnvironmentNames(environment: Readonly<Record<string, string | undefined>>): string[] {
   return Object.keys(environment)
-    .filter((name) => name.startsWith('ZEN_') && environment[name] !== undefined)
+    .filter((variableName) => variableName.startsWith('ZEN_') && environment[variableName] !== undefined)
     .sort()
 }
 

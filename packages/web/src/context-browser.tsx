@@ -62,7 +62,7 @@ const matchesKey = (element: EnsoContextElement, key: string): boolean =>
  * replaced whole when its request changes — so place is identity here.
  */
 function keyedByPlace<Item>(items: readonly Item[], prefix: string): Array<{ item: Item; slot: string }> {
-  return items.map((item, place) => ({ item, slot: `${prefix}-${place}` }))
+  return items.map((placed, place) => ({ item: placed, slot: `${prefix}-${place}` }))
 }
 
 // ── an element's body ──────────────────────────────────────────────────────────────────────────

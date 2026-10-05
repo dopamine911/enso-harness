@@ -194,7 +194,7 @@ function collectComment(file: string, comment: SourceComment, into: Collected): 
 
 function collectFile(root: string, path: string, into: Collected): void {
   const source = readFileSync(path, 'utf8')
-  if (!TAG_NAMES.some((name) => source.includes(name))) return
+  if (!TAG_NAMES.some((tagName) => source.includes(tagName))) return
   const file = relative(root, path).replaceAll('\\', '/')
   for (const comment of commentsIn(path, source)) collectComment(file, comment, into)
 }
@@ -244,10 +244,10 @@ function recordedDiagrams(root: string, problems: string[]): RecordedDiagram[] {
     .sort()
   for (const snapshot of snapshots) {
     const file = join(dirname(dirname(snapshot)), basename(snapshot, '.snap'))
-    for (const { key, value } of snapshotEntries(snapshot, readFileSync(join(root, snapshot), 'utf8'))) {
+    for (const { key, value: snapshotValue } of snapshotEntries(snapshot, readFileSync(join(root, snapshot), 'utf8'))) {
       const recorded = flowKey(key)
       if (recorded === undefined) continue
-      const text = value.trim()
+      const text = snapshotValue.trim()
       if (!text.startsWith('"sequenceDiagram') || !text.endsWith('"')) {
         problems.push(`${snapshot}: "${key}" is not a recorded sequence diagram`)
         continue

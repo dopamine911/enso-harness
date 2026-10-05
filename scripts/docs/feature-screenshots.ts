@@ -716,10 +716,10 @@ async function main(): Promise<void> {
     ),
   )
   mkdirSync(join(home, 'prompts'))
-  for (const [file, text] of Object.entries(PROMPT_LIBRARY)) writeFileSync(join(home, 'prompts', file), text)
-  for (const [path, text] of Object.entries(DEMO_FILES)) {
+  for (const [file, prompt] of Object.entries(PROMPT_LIBRARY)) writeFileSync(join(home, 'prompts', file), prompt)
+  for (const [path, contents] of Object.entries(DEMO_FILES)) {
     mkdirSync(dirname(join(project, path)), { recursive: true })
-    writeFileSync(join(project, path), text)
+    writeFileSync(join(project, path), contents)
   }
   // A repository, so the run context records a revision — and, once pi's edit lands, `dirty`.
   const git = (...args: string[]): void => {

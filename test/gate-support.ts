@@ -169,9 +169,9 @@ export interface CodeLine {
 /** A file's code lines, comment-only lines dropped. The one read-and-split. */
 function codeLinesOf(path: string, repositoryRelative: string): CodeLine[] {
   const lines: CodeLine[] = []
-  for (const [lineIndex, text] of readFileSync(path, 'utf8').split('\n').entries()) {
-    if (COMMENT_LINE.test(text)) continue
-    lines.push({ file: repositoryRelative, number: lineIndex + 1, text })
+  for (const [lineIndex, lineText] of readFileSync(path, 'utf8').split('\n').entries()) {
+    if (COMMENT_LINE.test(lineText)) continue
+    lines.push({ file: repositoryRelative, number: lineIndex + 1, text: lineText })
   }
   return lines
 }
