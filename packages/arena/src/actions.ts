@@ -51,6 +51,13 @@ export type ArenaAction =
       readonly wanted?: string
     }
   | { readonly action: 'restart-enso' }
+  /**
+   * A native browser dialog (`alert`, `confirm`, `prompt`, `beforeunload`) blocks the page until it
+   * is answered (#609): the recorder leaves it open for the agent, as a person would face it, and
+   * `read` reports it. `text` is a `prompt`'s answer.
+   */
+  | { readonly action: 'accept-dialog'; readonly text?: string }
+  | { readonly action: 'dismiss-dialog' }
   | { readonly action: 'stop'; readonly reason?: string }
 
 /** The longest single `wait`: a run that needs longer waits again, and the timeline shows it waited. */
@@ -195,6 +202,12 @@ const ACTION_PARSERS: Readonly<Record<string, (request: Fields) => ArenaActionPa
   back: () => accept({ action: 'back' }),
   reload: () => accept({ action: 'reload' }),
   'restart-enso': () => accept({ action: 'restart-enso' }),
+  'accept-dialog': (request) => {
+    const typed = request.text
+    if (typed !== undefined && typeof typed !== 'string') return fail('accept-dialog takes "text" only as a string')
+    return accept({ action: 'accept-dialog', ...(typed === undefined ? {} : { text: typed }) })
+  },
+  'dismiss-dialog': () => accept({ action: 'dismiss-dialog' }),
 }
 
 /** The ARENA action a request names, checked field by field. Unknown fields are ignored. */
@@ -216,7 +229,7 @@ export function parseArenaAction(request: unknown): ArenaActionParse {
  */
 export function typedSecretRefusal(action: ArenaAction, secretValues: readonly string[]): string | undefined {
   let typed: string | undefined
-  if (action.action === 'fill') typed = action.text
+  if (action.action === 'fill' || action.action === 'accept-dialog') typed = action.text
   if (action.action === 'select') typed = action.option
   if (typed === undefined || redactJudgeText(typed, secretValues) === typed) return undefined
   return 'refused: the text looks like a credential, and anything typed into the page is kept in the trace and screenshots'
@@ -256,6 +269,8 @@ export function describeArenaAction(action: ArenaAction, secretValues: readonly 
       return `note ${action.note}`
     case 'stop':
       return `stop${action.reason === undefined ? '' : `: ${redact(action.reason)}`}`
+    case 'accept-dialog':
+      return `accept-dialog${action.text === undefined ? '' : ` with ${JSON.stringify(redact(action.text))}`}`
     default:
       return action.action
   }

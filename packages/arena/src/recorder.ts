@@ -3,7 +3,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileS
 import { join } from 'node:path'
 import { redactJudgeText } from '@enso/core/judge'
 import { isListening } from '@enso/core/loopback'
-import { type Browser, type BrowserContext, chromium, type Locator, type Page } from '@playwright/test'
+import { type Browser, type BrowserContext, chromium, type Dialog, type Locator, type Page } from '@playwright/test'
 import type { Subprocess } from 'bun'
 import {
   ARENA_REFUSED_DETAIL,
@@ -16,6 +16,7 @@ import {
 } from './actions.ts'
 import { collectEnsoEvidence, threadIdsShown } from './evidence.ts'
 import { type ArenaEvidence, foldArenaManifest } from './manifest.ts'
+import { ARENA_GRACE_MS, type ArenaBounds, createRunControl, ensoSpendUsd } from './run-control.ts'
 import { arenaSecretSource, arenaSecretValues, runHomeOf } from './run-home.ts'
 import type { ArenaScenario } from './scenario.ts'
 import { type ArenaScore, writeArenaScore } from './score.ts'
@@ -73,9 +74,11 @@ export interface ArenaRunOptions {
   readonly runDirectory: string
   /** The fresh repository the agent works in; Enso serves it as its project. */
   readonly project: string
-  /** The `ENSO_HOME` the stack runs over — the operator's, by default, for their model login. */
+  /** The `ENSO_HOME` the stack runs over — the run's own `<run>/.enso` by default (#610), `--home` otherwise. */
   readonly home: string
   readonly budgetMinutes: number
+  /** The bounds besides the budget (#609, `run-control.ts`); `maxCostUsd` only over the run's own home. */
+  readonly limits: { readonly idleMinutes?: number; readonly maxRestarts: number; readonly maxCostUsd?: number }
   readonly chromiumPath?: string
   readonly headed: boolean
   /** The launcher's environment, which the stack inherits with `ENSO_HOME` set to `home`. */
@@ -87,11 +90,16 @@ export interface ArenaRunOptions {
   readonly driver?: ArenaDriver
 }
 
-/** What one action came to: its result, or why it failed or was refused. */
+/**
+ * What one action came to: its result, or why it failed or was refused — and, while the run lasts,
+ * where it is: `running` with the budget left, or `grace` with the time left for the retrospective.
+ */
 export interface ArenaActOutcome {
   readonly ok: boolean
   readonly result?: unknown
   readonly error?: string
+  readonly phase?: 'running' | 'grace'
+  readonly remainingMs?: number
 }
 
 /** What the recorder hands an agent runner: its one way into the page, and the run's end. */
@@ -362,6 +370,18 @@ async function openTracedPage(
   }
 }
 
+/** The run's bounds as the run control takes them (#609): the budget, the grace window, the limits that are on. */
+function boundsOf(options: Pick<ArenaRunOptions, 'budgetMinutes' | 'limits'>): ArenaBounds {
+  const { idleMinutes, maxRestarts, maxCostUsd } = options.limits
+  return {
+    budgetMs: options.budgetMinutes * 60_000,
+    graceMs: ARENA_GRACE_MS,
+    maxRestarts,
+    ...(idleMinutes === undefined ? {} : { idleMs: idleMinutes * 60_000 }),
+    ...(maxCostUsd === undefined ? {} : { maxCostUsd }),
+  }
+}
+
 /**
  * Run one arena: start Enso and the browser, serve the agent's actions, stop on a condition, write
  * the manifest, then score the run (`score.ts`). Settles with the score — undefined only when the
@@ -515,11 +535,21 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
     // line, and the crash's missing picture is said rather than never attempted.
     void shoot('page-crash')
   })
-  // A dialog is left OPEN for the agent to answer: it is part of the interface. Only the capture is ours.
+  // A native dialog is left OPEN for the agent to answer (#609): it is part of the interface, and it
+  // blocks the page until answered — `read` says it is there, `accept-dialog`/`dismiss-dialog` answer it.
+  let pendingDialog: Dialog | undefined
   page.on('dialog', (dialog) => {
+    pendingDialog = dialog
     timeline.record({ kind: 'dialog', dialog: dialog.type(), message: redact(dialog.message()) }, here())
     void shoot('dialog')
   })
+  const answerDialog = async (answer: (dialog: Dialog) => Promise<void>): Promise<ArenaPagePlace> => {
+    const dialog = pendingDialog
+    if (dialog === undefined) throw new Error('no dialog is open')
+    pendingDialog = undefined
+    await answer(dialog)
+    return here()
+  }
 
   try {
     await page.goto(ARENA_WEB_ORIGIN)
@@ -553,10 +583,15 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
       timeline.record({ kind: 'recorder-error', during: 'trace chunk', error: redact(String(error)) }, here())
     })
   }, scenario.traceChunkMs)
-  const budget = setTimeout(
-    () => resolveStop(`budget: ${options.budgetMinutes} minutes`),
-    options.budgetMinutes * 60_000,
-  )
+  // The clock and the bounds (#609): a tick a second; the budget opens a grace window for the
+  // retrospective, and every bound stops the run with its own reason.
+  const runClock = createRunControl({
+    bounds: boundsOf(options),
+    onGrace: () => timeline.record({ kind: 'budget-spent', graceMs: ARENA_GRACE_MS }, here()),
+    onStop: resolveStop,
+    readCost: () => ensoSpendUsd(options.home),
+  })
+  const ticker = setInterval(() => runClock.tick(), 1000)
   browser.on('disconnected', () => resolveStop('the browser closed'))
   for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => resolveStop(`signal ${signal}`))
 
@@ -584,6 +619,10 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
         else await locate(page, action.target).press(action.key, { timeout })
         return here()
       case 'read':
+        // ⚠ An open native dialog blocks the page, the snapshot included: say the dialog instead.
+        if (pendingDialog !== undefined) {
+          return { ...here(), dialog: { type: pendingDialog.type(), message: redact(pendingDialog.message()) } }
+        }
         return { ...here(), page: await page.locator('body').ariaSnapshot({ timeout }) }
       case 'screenshot':
         return { ...here(), screenshot: await shoot('requested') }
@@ -609,16 +648,23 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
           here(),
         )
         return { recorded: action.note }
-      case 'restart-enso':
+      case 'restart-enso': {
+        const refused = runClock.restart()
+        if (refused !== undefined) throw new Error(refused)
         await stopEnso()
         return { restarted: await startEnso() }
+      }
+      case 'accept-dialog':
+        return answerDialog((dialog) => dialog.accept(action.text))
+      case 'dismiss-dialog':
+        return answerDialog((dialog) => dialog.dismiss())
       case 'stop':
         resolveStop(`the agent stopped the run${action.reason === undefined ? '' : `: ${redact(action.reason)}`}`)
         return { stopping: true }
     }
   }
 
-  const act = async (request: unknown, via: ArenaActionSource): Promise<ArenaActOutcome> => {
+  const actOnce = async (request: unknown, via: ArenaActionSource): Promise<ArenaActOutcome> => {
     const parsed = parseArenaAction(request)
     if (!parsed.ok) {
       // ⚠ Recorded, not only answered (#584): a refused move — `goto /api/…`, a selector — is
@@ -642,7 +688,8 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
     return serialized(async () => {
       if (stopReason !== undefined) return { ok: false, error: `the run has stopped (${stopReason})` }
       const detail = describeArenaAction(action, secrets())
-      const refusal = typedSecretRefusal(action, secrets())
+      // In the grace window only the retrospective and the stop are taken (#609); refused, it is a line.
+      const refusal = runClock.refusal(action.action) ?? typedSecretRefusal(action, secrets())
       if (refusal !== undefined) {
         timeline.record(
           { kind: 'action', via, action: action.action, detail, outcome: 'failed', error: refusal, durationMs: 0 },
@@ -689,6 +736,16 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
       }
     })
   }
+  /** The run's place, on every answer while it lasts: the agent sees the end coming. */
+  const withClock = (outcome: ArenaActOutcome): ArenaActOutcome => {
+    const now = runClock.phase()
+    return now.phase === 'over' ? outcome : { ...outcome, phase: now.phase, remainingMs: now.remainingMs }
+  }
+
+  const act = async (request: unknown, via: ArenaActionSource): Promise<ArenaActOutcome> => {
+    runClock.acted()
+    return withClock(await actOnce(request, via))
+  }
 
   // ⚠ With a driver there is no endpoint (#584): a second door would let anything with
   // a shell act on the page as the agent, and the boundary is that the agent has no shell.
@@ -709,7 +766,7 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
   const reason = await stopped
   clearInterval(sampler)
   clearInterval(chunker)
-  clearTimeout(budget)
+  clearInterval(ticker)
   rmSync(controlFile, { force: true })
   // Not forced: the `stop` action that got here is still in flight, and its answer is owed.
   await control?.stop()

@@ -117,7 +117,12 @@ When you are finished — or out of time — write one retrospective note, then 
 
 If Enso stops responding, \`{"action":"restart-enso"}\` restarts it; note what you saw first.
 
-The run stops on its own after ${scenario.budgetMinutes} minutes.
+If the browser shows a native dialog (an alert, a confirm, a prompt), \`read\` says so and the page waits
+for your answer: \`{"action":"accept-dialog"}\` (with "text" for a prompt) or \`{"action":"dismiss-dialog"}\`.
+
+The run stops on its own after ${scenario.budgetMinutes} minutes. Every answer says how much time is
+left (\`remainingMs\`). When it runs out, the answers say \`"phase": "grace"\`: you have one more minute,
+in which only your retrospective note and \`stop\` are taken.
 `
   if (!reviewed) return assignment
   return `You are testing Enso, an interface for working with a coding agent, by using it as a
