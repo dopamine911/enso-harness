@@ -1222,6 +1222,59 @@ function sameRenderedMessage(previous: MessageBodyProps, next: MessageBodyProps)
 }
 
 /**
+ * The thread's lines by where they read (#382), for the transcript `messages` is. Also hands the
+ * store the transcript's last message: a line the page raises between runs follows it — as
+ * rendered, which is what a reader saw when they acted.
+ */
+function usePlacedLines(messages: readonly UIMessage[]): PlacedLines {
+  const { notifications } = useThreadStores()
+  useEffect(() => {
+    notifications.setTranscriptTail(messages.at(-1)?.id)
+  }, [notifications, messages])
+  const lines = useStore(notifications)
+  return useMemo(() => placeLines(lines, new Set(messages.map((message) => message.id))), [lines, messages])
+}
+
+/**
+ * The transcript's own content: the empty state or the messages, and pi's notify lines (#29), each
+ * where it happened (#382) — the startup notices and anything said before the first message head
+ * it, the rest follow the message they came after (`ChatMessageRow`), and the lines whose message
+ * the transcript no longer holds (a re-read replaced it) close it.
+ */
+function TranscriptContent({
+  Messages,
+  empty,
+  selection,
+  placedLines,
+}: {
+  Messages: LayoutProps<ThreadChatOptions>['Messages']
+  empty: boolean
+  selection: TranscriptSelection
+  placedLines: PlacedLines
+}): React.ReactNode {
+  return (
+    <>
+      {empty ? (
+        <ConversationEmptyState>
+          <EnsoSmile className="size-28" />
+          <h2 className="font-heading text-xl font-semibold">Give agents room to work. Keep the receipts.</h2>
+          <p className="text-sm text-muted-foreground">ask pi something to get started</p>
+        </ConversationEmptyState>
+      ) : null}
+      <NotificationLines lines={placedLines.head} />
+      {empty ? null : (
+        <TranscriptSelectionContext.Provider value={selection}>
+          <PlacedLinesContext.Provider value={placedLines}>
+            <Messages />
+          </PlacedLinesContext.Provider>
+        </TranscriptSelectionContext.Provider>
+      )}
+      <NotificationLines lines={placedLines.tail} />
+    </>
+  )
+}
+
+/**
  * The widget map every per-thread factory is built from — declared once, so all threads
  * render identically. Type-annotated by inference through `createThreadChatHook`.
  */
@@ -1528,18 +1581,8 @@ const chatComponents = {
       const chat = useChatContext()
       const debugOpen = useContext(DebugOpenContext)
       const { shown, open } = useContext(PaneViewContext)
-      const stores = useThreadStores()
-      const threadProject = useThreadProject(stores.projectId)
-      // A line the page raises between runs follows the transcript's last message (#382) — as
-      // rendered, which is what a reader saw when they acted.
-      useEffect(() => {
-        stores.notifications.setTranscriptTail(chat.messages.at(-1)?.id)
-      }, [stores, chat.messages])
-      const notificationLines = useStore(stores.notifications)
-      const placedLines = useMemo(
-        () => placeLines(notificationLines, new Set(chat.messages.map((message) => message.id))),
-        [notificationLines, chat.messages],
-      )
+      const threadProject = useThreadProject(useThreadStores().projectId)
+      const placedLines = usePlacedLines(chat.messages)
       const scroller = useRef<TranscriptScroller | null>(null)
       const revealInTranscript = useCallback<RevealStatsTarget>(
         (target, stats) => {
@@ -1601,28 +1644,12 @@ const chatComponents = {
                 <Conversation>
                   <TranscriptRevealBridge into={scroller} />
                   <ConversationContent className="w-full gap-4 px-6 py-4 ledger:gap-0">
-                    {chat.messages.length === 0 ? (
-                      <ConversationEmptyState>
-                        <EnsoSmile className="size-28" />
-                        <h2 className="font-heading text-xl font-semibold">
-                          Give agents room to work. Keep the receipts.
-                        </h2>
-                        <p className="text-sm text-muted-foreground">ask pi something to get started</p>
-                      </ConversationEmptyState>
-                    ) : null}
-                    {/* pi's notify lines (#29), each where it happened (#382): the startup notices
-										    and anything said before the first message head the transcript; the rest
-										    follow the message they came after (`ChatMessageRow`). */}
-                    <NotificationLines lines={placedLines.head} />
-                    {chat.messages.length === 0 ? null : (
-                      <TranscriptSelectionContext.Provider value={selection}>
-                        <PlacedLinesContext.Provider value={placedLines}>
-                          <Messages />
-                        </PlacedLinesContext.Provider>
-                      </TranscriptSelectionContext.Provider>
-                    )}
-                    {/* The lines whose message the transcript no longer holds (a re-read replaced it). */}
-                    <NotificationLines lines={placedLines.tail} />
+                    <TranscriptContent
+                      Messages={Messages}
+                      empty={chat.messages.length === 0}
+                      selection={selection}
+                      placedLines={placedLines}
+                    />
                     {/* The thread's incidents (#466): below the run that opened them, above any
 										    question — a halted thread waits on this card. */}
                     <ThreadIncidents />
