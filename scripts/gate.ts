@@ -32,7 +32,12 @@
  *                  function under the cognitive ceiling of 25, or under its own per-function pin
  *                  in `.fallowrc.jsonc` (`health.thresholdOverrides`). Cyclomatic is lifted out of
  *                  reach on purpose: it is the advisory audit's signal, never a gate.
- *   6. react-doctor — `react-doctor --project packages/web --scope full --no-score --no-supply-chain --blocking error`:
+ *   6. duplication — `fallow dupes --quiet --summary`: duplicated lines under `duplicates.threshold`
+ *                  in `.fallowrc.jsonc`, a ratchet that may only fall (#593). Semantic mode; what is
+ *                  excluded from the count, and why, is recorded beside the threshold. `--summary`
+ *                  prints the rate and the counts, not every clone group: on a pass the listing was
+ *                  ~95 lines per commit, and `bunx fallow dupes` prints it when a failure needs it.
+ *   7. react-doctor — `react-doctor --project packages/web --scope full --no-score --no-supply-chain --blocking error`:
  *                  react-doctor's lint pass over the web surface, failing on an error-severity
  *                  finding (#342). Offline by construction: `--no-score` skips the score API, the
  *                  share URL and the crash trace, `--no-supply-chain` the Socket.dev lookups — a
@@ -43,17 +48,17 @@
  *                  `bun test`. The human-facing `doctor` script (`bunx react-doctor --verbose`) keeps
  *                  the score and the share URL because a developer reading a report wants them; it
  *                  runs the same pin, with a developer's ambient credentials, never in the gate.
- *   7. test      — `bun test`, not `vitest run`. bunfig keeps coverage always on, so this
- *                  writes `coverage/lcov.info` for gate 8.
- *   8. coverage  — `bun scripts/check-coverage.ts`: the TOTAL line and function floors over the
+ *   8. test      — `bun test`, not `vitest run`. bunfig keeps coverage always on, so this
+ *                  writes `coverage/lcov.info` for gate 9.
+ *   9. coverage  — `bun scripts/check-coverage.ts`: the TOTAL line and function floors over the
  *                  full denominator, which bun's own per-file `coverageThreshold` cannot express.
- *   9. api-docs  — `typedoc --emit none`: the owned contract surface across both barrels, with warnings
+ *   10. api-docs — `typedoc --emit none`: the owned contract surface across both barrels, with warnings
  *                  FATAL. TypeDoc's warnings are documentation drift — a `{@link}` whose target
  *                  was renamed, a type a documented signature exposes but nothing exports — and
  *                  none of them is visible to `tsc`. `--emit none`: it VALIDATES, and the site
  *                  renders the same surface as native pages (`starlight-typedoc`), so the
  *                  contract is converted once for checking and once for reading (#188).
- *   10. site     — `bun scripts/docs/build-docs.ts && bun scripts/docs/site-content.ts && bunx astro build --root site && bun scripts/docs/site-links.ts`:
+ *   11. site     — `bun scripts/docs/build-docs.ts && bun scripts/docs/site-content.ts && bunx astro build --root site && bun scripts/docs/site-links.ts`:
  *                  builds every generated and flow page (#482), projects `docs/` into the Starlight site, builds it, and
  *                  crawls every built page for dead internal links. The BUILD is not the check —
  *                  `astro build` reported success over 139 dead links, because a page's
@@ -171,6 +176,15 @@ export const GATES: readonly Gate[] = [
     name: 'complexity',
     describe: 'fallow health: cognitive complexity under 25, or under its function pin',
     script: 'complexity:check',
+  },
+  {
+    // Beside complexity: the same tool, syntactic, and cheap (well under a second). The threshold
+    // is `.fallowrc.jsonc` → `duplicates.threshold`, a ratchet that may only fall; its comment holds
+    // the measurement history and what is excluded from the count, and why. Advisory in CI until
+    // #593, which promoted it: it had been crossed four times unseen, each time already red.
+    name: 'duplication',
+    describe: 'fallow dupes: duplicated lines under the ratchet in .fallowrc.jsonc',
+    script: 'dupes:check',
   },
   {
     // AFTER typecheck, as dead-code is: react-doctor's pass is syntactic (#342). Promoted from

@@ -1,15 +1,16 @@
 # CI — the enforced quality gate.
 #
 # Runs the SAME gate as the local pre-commit hook (`bun run check:all` = oxfmt → oxlint → tsc →
-# fallow dead-code → fallow complexity → react-doctor → bun test → the total-coverage floor →
-# typedoc → the docs site and its link crawl), so "green"
+# fallow dead-code → fallow complexity → fallow dupes → react-doctor → bun test → the
+# total-coverage floor → typedoc → the docs site and its link crawl), so "green"
 # means one thing whether it ran on a machine or here. A commit made with `--no-verify`, or by
 # someone without the hook installed, is caught at the PR instead of slipping into main.
 #
-# The coverage floor needs no separate step: it is gate 8 inside check:all
+# The coverage floor needs no separate step: it is gate 9 inside check:all
 # (scripts/check-coverage.ts — the TOTAL floor bun's own per-file coverageThreshold
 # cannot express; see that file's header for the 2026-09-04 measurement). Nor does the site:
-# gate 10 builds it and crawls every built page for dead links (scripts/docs/site-links.ts).
+# gate 11 builds it and crawls every built page for dead links (scripts/docs/site-links.ts).
+# Nor does the duplication ratchet: since #593 the dupes check is gate 6, blocking.
 name: CI
 
 on:
@@ -83,10 +84,3 @@ jobs:
         env:
           BASE_REF: ${{ github.base_ref }} # through env, never interpolated into the shell line
         run: bunx fallow audit --base "origin/$BASE_REF" --dead-code-baseline fallow-baseline.json
-
-      # The duplication ratchet (#174): `.fallowrc.jsonc` → `duplicates.threshold` is today's
-      # duplicated-line percentage; this step goes red when a PR raises it. Advisory here
-      # for the same reason as the audit above — promote once it has caught a real one.
-      - name: fallow dupes (advisory — the threshold is the ratchet)
-        if: ${{ !cancelled() }} # its own verdict, even when the audit above is red
-        run: bunx fallow dupes

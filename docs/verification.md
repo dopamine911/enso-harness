@@ -7,7 +7,7 @@ how to use it. It does not repeat the inventory.
 
 ## One definition of green
 
-`bun run check` (the same script as `check:all`) runs `scripts/gate.ts`. Ten gates, in order, stopping
+`bun run check` (the same script as `check:all`) runs `scripts/gate.ts`. Eleven gates, in order, stopping
 at the first failure:
 
 1. **Format** — `oxfmt --check`: formatting, import order and Tailwind class order, check-only.
@@ -38,20 +38,26 @@ at the first failure:
    per FUNCTION in `.fallowrc.jsonc` (`health.thresholdOverrides`), each pinned at the exact score its
    function measures, and `test/complexity-ratchet.test.ts` refuses a pin that is looser than that
    score, names a function that no longer exists, or covers one already under the ceiling.
-6. **react-doctor** — `react-doctor --project packages/web --scope full --no-score --no-supply-chain --blocking error`
+6. **Duplication** — `fallow dupes` in semantic mode (#593): fails when the duplicated-line
+   percentage rises above `duplicates.threshold` in `.fallowrc.jsonc`, a ratchet that may only fall.
+   It was an advisory CI step until #593 and was crossed four times unseen, each time already red; a
+   crossing is now the commit that causes it. What the count excludes (vendored components, core's
+   schema pairs, the colour palettes, the doc generators' inventory tables) is recorded beside the
+   threshold, each with its reason.
+7. **react-doctor** — `react-doctor --project packages/web --scope full --no-score --no-supply-chain --blocking error`
    (#342): the web surface, failing on an error-severity finding. Offline flags are part of the
    command, not options — a pre-commit hook must not phone home — and so is `--scope full`: on a
    terminal, with changes on the branch, react-doctor otherwise asks what to scan and waits. The rule set is upstream's, so
    a bump of the pinned `react-doctor` is a gate change.
-7. **Bun test** — the complete test tree, with text and LCOV coverage reporters.
-8. **Aggregate coverage** — `scripts/check-coverage.ts` reads LCOV and enforces the total line and
+8. **Bun test** — the complete test tree, with text and LCOV coverage reporters.
+9. **Aggregate coverage** — `scripts/check-coverage.ts` reads LCOV and enforces the total line and
    function floors. The current values are generated under *Ratchets* in the inventory.
-9. **API docs** — `typedoc` over both barrels with `treatWarningsAsErrors` (#188). TypeDoc's warnings
+10. **API docs** — `typedoc` over both barrels with `treatWarningsAsErrors` (#188). TypeDoc's warnings
    *are* documentation drift — a `{@link}` whose target was renamed, a type a documented signature
    exposes but nothing exports — and none of them is visible to `tsc`. It runs with `--emit none`:
    the step validates, and the site renders the same surface as native pages from the same
    `typedoc.json` (`starlight-typedoc`), so nothing here produces an artifact to keep in step.
-10. **Site** — projects `docs/` into the Starlight site, builds it, then crawls every built page for
+11. **Site** — projects `docs/` into the Starlight site, builds it, then crawls every built page for
    dead internal links (#188). **The build is not the check.** `astro build` reported success over 139
    dead links on the first run, because a page's `./routes.md` and `../../packages/…#L47` are both
    correct on GitHub and both 404 as routes; `scripts/docs/site-links.ts` is what notices.
@@ -63,7 +69,7 @@ the site's navigation, theme and search instead of TypeDoc's own HTML shell.
 Publishing is separate and **manual**: `.github/workflows/docs-site.yml` runs on
 `workflow_dispatch`, builds the same two steps, and deploys to GitHub Pages only when the run is
 asked to (`deploy: true`); otherwise it uploads the built site as an artifact. Nothing publishes on
-a push, because gate 10 has already proved the build on every PR and a second one would buy only
+a push, because gate 11 has already proved the build on every PR and a second one would buy only
 Actions minutes. ⚠ The workflow reads the site's base path and origin from the Pages configuration
 (`actions/configure-pages` → `ENSO_SITE_BASE` / `ENSO_SITE_URL` → `scripts/docs/site-base.ts`, the
 one reader Astro, the projector and the crawl all share). A project site is served from
@@ -79,7 +85,7 @@ two exceptions are `git commit -a` and `git commit -- <path>`, where git hands t
 temporary index; there it gates the working tree and says so on the first line of its output.
 CI adds independent jobs or advisory steps — secret
 scan, automated review, `fallow audit` over the changed files — but none replaces the
-ten-step gate (react-doctor was one of them until #342 promoted it into the gate). A green editor or a
+eleven-step gate (react-doctor was one of them until #342 promoted it into the gate, and the duplication ratchet until #593). A green editor or a
 single test is not repository green.
 
 `test/coverage-manifest.test.ts` closes Bun's denominator hole: Bun reports coverage only for files a

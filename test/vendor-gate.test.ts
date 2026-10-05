@@ -176,8 +176,9 @@ const VENDOR_NAMED_ALLOWED: readonly string[] = [
   // Leaves when that extension leaves the manifest.
   'packages/web/src/__tests__/notifications.test.tsx',
   // The env reference lists the switch the host sets for pi-multi-account (#351): the
-  // variable's own name is the vendor's. Leaves when that extension leaves the manifest.
-  'scripts/docs/env-and-config.ts',
+  // variable's own name is the vendor's. Its row lives in the generator's inventory tables (#593).
+  // Leaves when that extension leaves the manifest.
+  'scripts/docs/inventory/env-and-config.ts',
 ]
 
 function offendersMatching(lineMatches: (line: string) => boolean, allowed: readonly string[]): string[] {
