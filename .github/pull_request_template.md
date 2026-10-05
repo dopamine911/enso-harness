@@ -29,7 +29,7 @@ Commit them from a separate worktree, so this checkout never switches branch:
   git -C ../enso-screenshots push origin screenshots
   git worktree remove ../enso-screenshots
 
-The pre-commit hook skips the gate on the `screenshots` branch: it holds only images.
+No gate runs there: `core.hooksPath` is `.githooks`, resolved in each worktree, and the branch has none.
 
 Embed each one here, with a sentence that says what it proves:
 
