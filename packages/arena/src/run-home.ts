@@ -48,7 +48,7 @@ export function defaultArenaOut(environment: Readonly<Record<string, string | un
 
 /** True when the guard keeps Enso's agent out of `directory` — no run's project can live there. */
 export function isGuardedForAgent(directory: string): boolean {
-  return containsPathFragment(`${resolve(directory)}/`, DEFAULT_GUARD_POLICY.secretPathFragments)
+  return containsPathFragment(resolve(directory), DEFAULT_GUARD_POLICY.secretPathFragments)
 }
 
 /**
@@ -107,6 +107,10 @@ export function arenaSecretValues(home: string): readonly string[] {
  * the run rewrites `auth.json` with a new token. A snapshot taken at the start never knew it, and a
  * set replaced at the stop would forget the token it replaced; either may be in a file the run wrote.
  * A changed file is noticed by its size and mtime, read on every call, which is two `stat`s.
+ *
+ * Not core's `knownSecretValuesTracking`, on purpose: that thunk watches `secrets.env` alone and
+ * REPLACES its set on a change, which is right for redaction going forward and wrong here, where a
+ * value that rotated away may already be in a file the run kept.
  */
 export function arenaSecretSource(home: string): () => readonly string[] {
   const watched = [ensoSecretsPath(home), join(ensoAgentDir(home), 'auth.json')]
