@@ -12,7 +12,7 @@ bun run arena start --manual        # the same run with no agent: you act over `
 bun run arena brief                 # what the agent under test is told (`--manual`: the act-command version, review and bugs included)
 bun run arena brief --review --run <run dir>   # the review and bug-filing prompt for after an --agent run
 bun run arena act '{"action":"read"}'   # one UI action on a --manual run
-bun run arena manifest <run dir>    # fold the manifest again from the timeline (after a recorder that died)
+bun run arena manifest <run dir>    # fold the manifest again; after a recorder that died, collect Enso's evidence too
 bun run arena score <run dir>       # score a run again: its logs read for problems, and whether the UI was used
 ```
 
@@ -119,10 +119,11 @@ in Enso's records.
 |---|---|
 | `project/` | the fresh git repository the agent worked in: the application outcome |
 | `timeline.jsonl` | one line per event, wall clock + elapsed + URL + the thread the URL names |
-| `screenshots/` | one every 30 s (`sample`), plus one per error, dialog, navigation, failed action, Enso exit |
+| `screenshots/` | one every 30 s (`sample`), plus one per error, dialog, navigation, failed action, page crash, Enso exit; a shot that could not be taken is a `recorder-error` line instead |
 | `trace/trace-NNN.zip` | the Playwright trace in five-minute chunks (`bunx playwright show-trace <zip>`) |
 | `enso/stack.log` | Enso's own output, redacted |
 | `enso/evidence/` | what the server holds for each thread the UI named or the project stores: record, events, session eval, log bundle; plus Stats |
+| `enso/evidence/snapshot-store/` | a copy of the project's snapshot store (#551), so pruning the home costs the run nothing |
 | `agent/transcript.jsonl` | the agent under test's own transcript (`--agent`), redacted, image bytes left out |
 | `score.json`, `score.md` | the score: verdict, UI checks, problems, metrics |
 | `manifest.json` | the fold: what drove the run and whether the boundary held, screenshot index, threads with their time spans, actions, observed signals, the agent's notes, and every piece of Enso evidence as `collected` or `missing` with why |
@@ -135,6 +136,17 @@ and the session file are keyed by: that is the jump from a screenshot to its tur
 - **The recorder is not Enso.** Enso is its child; an Enso exit is recorded, sampling continues, and
   the agent may `restart-enso`. The timeline and screenshots are on disk as they happen; a trace is
   lost at most one chunk at a time.
+- **Enso down at the stop still leaves evidence (#607).** Each server route becomes its own `missing` row
+  with the reason, and the rows read from disk (the snapshot store) are taken all the same.
+- **A recorder that dies before its stop** (SIGKILL, a closed terminal) leaves `control.json`, which
+  names its home and its Enso stack. `bun run arena manifest <run dir>` then collects the evidence:
+  - from the stack, if it is still up, and then stops it;
+  - else every route `missing` and the disk read.
+
+  `start` refuses while a dead run's stack holds the ports, and names that run; `act` on a dead run
+  says so. A stack is stopped only when it is `bun run dev <that run's project>` exactly. Observed
+  2026-10-05: a recorder killed with SIGKILL took its stack down within 2 s, so a surviving stack is
+  the rarer case.
 - **Every UI action goes through the recorder**, so each is in the trace (as a named group) and on the
   timeline. There is no selector, no `evaluate`, and `goto` refuses `/api`.
 - **The agent has no shell** under `--agent` (above). Under `--manual` it is whatever you give it, and
@@ -147,4 +159,4 @@ and the session file are keyed by: that is the jump from a screenshot to its tur
   observed; the review must cite the evidence for each point, and every bug filed says it is
   unverified and names the run. Verifying those, and triaging the filed bugs, stays a person's step.
 - **Not collected yet:** the Diff Viewer's data (no read route for a run). The snapshot store (#551)
-  is recorded when it exists, and marked missing when it does not.
+  is copied into the run when it exists, and marked missing when it does not.

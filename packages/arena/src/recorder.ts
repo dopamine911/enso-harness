@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { appendFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { redactJudgeText } from '@enso/core/judge'
 import { isListening } from '@enso/core/loopback'
@@ -15,8 +15,8 @@ import {
   parseArenaAction,
   typedSecretRefusal,
 } from './actions.ts'
-import { collectEnsoEvidence } from './evidence.ts'
-import { foldArenaManifest } from './manifest.ts'
+import { collectEnsoEvidence, threadIdsShown } from './evidence.ts'
+import { type ArenaEvidence, foldArenaManifest } from './manifest.ts'
 import type { ArenaScenario } from './scenario.ts'
 import { type ArenaScore, writeArenaScore } from './score.ts'
 import {
@@ -110,12 +110,18 @@ export type ArenaDriver = (session: ArenaDriverSession) => Promise<string>
 /**
  * The control endpoint's address, written beside the run so `bun run arena act` can find it. A
  * run an agent drives has no endpoint: `port` is absent, and `act` says the run is the agent's.
+ * It also names what a recorder that dies leaves behind (#584 A13, #607): the home the stack runs
+ * over and the stack's own process, so `arena manifest` can collect from it and stop it. The file
+ * is removed at the stop, so one that outlives its recorder's `pid` marks a run that never stopped.
  */
 export interface ArenaControl {
   readonly port?: number
   readonly pid: number
   readonly runDirectory: string
   readonly driver: 'agent' | 'control'
+  readonly home?: string
+  /** `bun run dev <project>`, the run's Enso stack — rewritten when `restart-enso` starts another. */
+  readonly stackPid?: number
 }
 
 /** The file a live run's control address is in, inside its run directory. */
@@ -173,10 +179,81 @@ function refusedActionName(request: unknown, redact: (text: string) => string): 
 }
 
 /** What `control.json` says: the endpoint's port, or — with an agent driving — that there is none. */
-function controlRecordOf(control: ReturnType<typeof Bun.serve> | undefined, runDirectory: string): ArenaControl {
+function controlRecordOf(
+  control: ReturnType<typeof Bun.serve> | undefined,
+  runDirectory: string,
+  home: string,
+): ArenaControl {
   return control === undefined
-    ? { pid: process.pid, runDirectory, driver: 'agent' }
-    : { port: control.port ?? 0, pid: process.pid, runDirectory, driver: 'control' }
+    ? { pid: process.pid, runDirectory, driver: 'agent', home }
+    : { port: control.port ?? 0, pid: process.pid, runDirectory, driver: 'control', home }
+}
+
+/** An error's first line, redacted: what a timeline line or an answer says of a failure. */
+function errorLine(error: unknown, redact: (text: string) => string): string {
+  return redact(error instanceof Error ? (error.message.split('\n')[0] ?? '') : String(error))
+}
+
+/** What a screenshot needs of a page: Playwright's `Page`, or a test's stand-in. */
+export interface ArenaShotPage {
+  screenshot(options: { readonly path: string; readonly timeout: number }): Promise<unknown>
+  url(): string
+}
+
+/** The run's camera: `show` it the page once there is one; `shoot` settles with the file, or undefined. */
+export interface ArenaShooter {
+  readonly show: (page: ArenaShotPage) => void
+  readonly shoot: (cause: ArenaShotCause) => Promise<string | undefined>
+}
+
+/**
+ * The run's screenshots: numbered files under `directory`, each a `screenshot` line on the
+ * timeline. An event cause is taken at most once per `EVENT_SHOT_SPACING_MS`; a sample, a
+ * requested shot and the final one always. Before a page is shown, nothing is taken.
+ *
+ * ⚠ A SHOT THAT FAILS IS A LINE (#584 A9, #607): a `recorder-error` naming the cause. Swallowed, a
+ * gap in the 30 s cadence read the same as "no sample was due", and a crash's picture that could
+ * not be taken looked like one never attempted.
+ */
+export function createShooter(options: {
+  readonly directory: string
+  readonly timeline: ArenaTimeline
+  readonly redact: (text: string) => string
+  readonly now?: () => number
+}): ArenaShooter {
+  const now = options.now ?? Date.now
+  let shown: ArenaShotPage | undefined
+  let shotNumber = 0
+  const lastShotAt = new Map<ArenaShotCause, number>()
+  const shoot = async (cause: ArenaShotCause): Promise<string | undefined> => {
+    const page = shown
+    if (page === undefined) return undefined
+    const at = now()
+    if (cause !== 'sample' && cause !== 'requested' && cause !== 'final') {
+      if (at - (lastShotAt.get(cause) ?? 0) < EVENT_SHOT_SPACING_MS) return undefined
+    }
+    lastShotAt.set(cause, at)
+    const stamp = new Date(at).toISOString().replaceAll(':', '-')
+    const path = join(options.directory, `${String(shotNumber).padStart(5, '0')}-${stamp}-${cause}.png`)
+    shotNumber += 1
+    try {
+      await page.screenshot({ path, timeout: 10_000 })
+    } catch (error) {
+      options.timeline.record(
+        { kind: 'recorder-error', during: `screenshot (${cause})`, error: errorLine(error, options.redact) },
+        pagePlace(page.url()),
+      )
+      return undefined
+    }
+    options.timeline.record({ kind: 'screenshot', cause, path }, pagePlace(page.url()))
+    return path
+  }
+  return {
+    show: (page) => {
+      shown = page
+    },
+    shoot,
+  }
 }
 
 /**
@@ -317,27 +394,15 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
   // ── Screenshots, over a page that does not exist until the browser is up ───────────────────
   // ⚠ Defined BEFORE Enso starts (PR #562 review): Enso's exit handler takes one, and Enso can
   // die while the recorder is still waiting for it to answer — before there is any page.
-  let livePage: Page | undefined
-  let shotNumber = 0
-  const lastShotAt = new Map<ArenaShotCause, number>()
-  const shoot = async (cause: ArenaShotCause): Promise<string | undefined> => {
-    const shown = livePage
-    if (shown === undefined) return undefined
-    const now = Date.now()
-    if (cause !== 'sample' && cause !== 'requested' && cause !== 'final') {
-      if (now - (lastShotAt.get(cause) ?? 0) < EVENT_SHOT_SPACING_MS) return undefined
-    }
-    lastShotAt.set(cause, now)
-    const stamp = new Date(now).toISOString().replaceAll(':', '-')
-    const path = join(shotsDirectory, `${String(shotNumber).padStart(5, '0')}-${stamp}-${cause}.png`)
-    shotNumber += 1
-    try {
-      await shown.screenshot({ path, timeout: 10_000 })
-    } catch {
-      return undefined
-    }
-    timeline.record({ kind: 'screenshot', cause, path }, pagePlace(shown.url()))
-    return path
+  const { show, shoot } = createShooter({ directory: shotsDirectory, timeline, redact })
+
+  // ── The control record, rewritten whenever the stack it names changes ──────────────────────
+  const controlFile = controlFilePath(runDirectory)
+  let controlRecord: ArenaControl | undefined
+  const publishControl = (stackPid: number | undefined): void => {
+    if (controlRecord === undefined) return
+    const record = { ...controlRecord, ...(stackPid === undefined ? {} : { stackPid }) }
+    writeFileSync(controlFile, JSON.stringify(record, null, 2))
   }
 
   // ── Enso, as a child the recorder outlives ─────────────────────────────────────────────────
@@ -362,6 +427,7 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
       },
     })
     enso = child
+    publishControl(child.pid)
     void pipeToLog(child.stdout)
     void pipeToLog(child.stderr)
     timeline.record({ kind: 'enso-start' })
@@ -388,7 +454,7 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
     await stopEnso()
     throw error
   })
-  livePage = page
+  show(page)
   let chunkNumber = 0
   /**
    * Write the trace so far. ⚠ `stopChunk` ends the chunk; between chunks nothing is traced, so
@@ -441,6 +507,9 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
   })
   page.on('crash', () => {
     timeline.record({ kind: 'page-crash' }, here())
+    // ⚠ Taken even though a crashed page may not render (#584 A9): then it is a `recorder-error`
+    // line, and the crash's missing picture is said rather than never attempted.
+    void shoot('page-crash')
   })
   // A dialog is left OPEN for the agent to answer: it is part of the interface. Only the capture is ours.
   page.on('dialog', (dialog) => {
@@ -596,7 +665,7 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
         }
         return { ok: true, result }
       } catch (error) {
-        const message = redact(error instanceof Error ? (error.message.split('\n')[0] ?? '') : String(error))
+        const message = errorLine(error, redact)
         timeline.record(
           {
             kind: 'action',
@@ -620,8 +689,8 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
   // ⚠ With a driver there is no endpoint (#584): a second door would let anything with
   // a shell act on the page as the agent, and the boundary is that the agent has no shell.
   const control = options.driver === undefined ? serveControl((body) => act(body, 'control')) : undefined
-  const controlFile = controlFilePath(runDirectory)
-  writeFileSync(controlFile, JSON.stringify(controlRecordOf(control, runDirectory), null, 2))
+  controlRecord = controlRecordOf(control, runDirectory, options.home)
+  publishControl(enso?.pid)
   await shoot('sample')
   process.stdout.write(`arena: run ${runId} is live — ${runDirectory}\n`)
   const driverDone =
@@ -652,20 +721,17 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
   })
   timeline.record({ kind: 'run-stop', reason }, browser.isConnected() ? here() : undefined)
   const events = readTimeline(timeline.path)
-  const threadIds = [
-    ...new Set(events.flatMap((event) => (event.page?.threadId === undefined ? [] : [event.page.threadId]))),
-  ]
-  const evidence =
-    enso === undefined
-      ? [{ kind: 'enso server', status: 'missing' as const, reason: 'Enso was not running when the run stopped' }]
-      : await collectEnsoEvidence({
-          serverOrigin: ARENA_SERVER_ORIGIN,
-          directory: join(ensoDirectory, 'evidence'),
-          threadIds,
-          home: options.home,
-          project,
-          secretValues,
-        })
+  // ⚠ Enso down at the stop still gets every row the disk can give (#584 A1, #607): the server's
+  // routes are each a `missing` row with the reason, and the snapshot store is copied all the same.
+  const evidence = await collectEnsoEvidence({
+    serverOrigin: ARENA_SERVER_ORIGIN,
+    directory: join(ensoDirectory, 'evidence'),
+    threadIds: threadIdsShown(events),
+    home: options.home,
+    project,
+    secretValues,
+    ...(enso === undefined ? { serverDown: 'Enso was not running when the run stopped' } : {}),
+  })
   stopping = true
   await browser.close().catch(() => undefined)
   await stopEnso()
@@ -673,4 +739,143 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
   writeFileSync(join(runDirectory, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`)
   process.stdout.write(`arena: stopped (${reason}) — ${join(runDirectory, 'manifest.json')}\n`)
   return scoreAndSay(runDirectory, redact)
+}
+
+// ── A recorder that died before its stop (#584 A13, #607) ──────────────────────────────────────
+// SIGKILL, an OOM, a closed terminal: no `run-stop`, no evidence, `control.json` left behind, and
+// the stack — a child the recorder never got to stop — still holding 5178/5179.
+
+/** Is a process with this id running? Signal 0 asks without sending anything. */
+function isRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    // EPERM: it runs, as someone else. Only ESRCH means gone.
+    return error instanceof Error && 'code' in error && error.code === 'EPERM'
+  }
+}
+
+/**
+ * Is `pid` the stack a run started — `bun run dev <project>`, exactly — and not a process that
+ * reused the id? ⚠ The one check before anything is stopped: a pid alone is a number the system
+ * hands out again, and the operator's own `bun run dev` on another project must never be touched.
+ */
+export function isRunStack(pid: number, project: string): boolean {
+  if (!isRunning(pid)) return false
+  const shown = spawnSync('ps', ['-o', 'args=', '-p', String(pid)], { encoding: 'utf8' })
+  if (shown.status !== 0) return false
+  const args = shown.stdout.trim()
+  const tail = ` run dev ${project}`
+  return args.endsWith(tail) && /(^|\/)bun$/.test(args.slice(0, -tail.length))
+}
+
+/** The run's control record, when the run left one that reads as one. */
+export function readArenaControl(runDirectory: string): ArenaControl | undefined {
+  const path = controlFilePath(runDirectory)
+  if (!existsSync(path)) return undefined
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(readFileSync(path, 'utf8'))
+  } catch {
+    return undefined
+  }
+  return arenaControlOf(parsed)
+}
+
+/** One field of a parsed object, `unknown` until it is checked. */
+const fieldOf = (value: object, key: string): unknown => (key in value ? Reflect.get(value, key) : undefined)
+
+/** A control record, field by field: a file on disk is not trusted to be one. */
+function arenaControlOf(value: unknown): ArenaControl | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const [pid, runDirectory, driver, port, stackPid, home] = [
+    'pid',
+    'runDirectory',
+    'driver',
+    'port',
+    'stackPid',
+    'home',
+  ].map((key) => fieldOf(value, key))
+  if (typeof pid !== 'number' || typeof runDirectory !== 'string') return undefined
+  if (driver !== 'agent' && driver !== 'control') return undefined
+  if (!optionalOf(port, 'number') || !optionalOf(stackPid, 'number') || !optionalOf(home, 'string')) return undefined
+  return {
+    pid,
+    runDirectory,
+    driver,
+    ...(port === undefined ? {} : { port }),
+    ...(stackPid === undefined ? {} : { stackPid }),
+    ...(home === undefined ? {} : { home }),
+  }
+}
+
+function optionalOf(value: unknown, type: 'number'): value is number | undefined
+function optionalOf(value: unknown, type: 'string'): value is string | undefined
+function optionalOf(value: unknown, type: 'number' | 'string'): boolean {
+  return value === undefined || typeof value === type
+}
+
+/**
+ * A run whose recorder is gone but whose control record is not: the record, and whether its
+ * stack is still up (verified, `isRunStack`). Undefined for a run that stopped, or is still live.
+ */
+export function deadRecorderRun(
+  runDirectory: string,
+): { readonly control: ArenaControl; readonly stackPid?: number } | undefined {
+  const control = readArenaControl(runDirectory)
+  if (control === undefined || isRunning(control.pid)) return undefined
+  const project = runProjectOf(runDirectory)
+  const stackPid =
+    control.stackPid !== undefined && project !== undefined && isRunStack(control.stackPid, project)
+      ? control.stackPid
+      : undefined
+  return stackPid === undefined ? { control } : { control, stackPid }
+}
+
+/** The project a run served, from its `run-start` line. */
+function runProjectOf(runDirectory: string): string | undefined {
+  const path = join(runDirectory, 'timeline.jsonl')
+  if (!existsSync(path)) return undefined
+  const start = readTimeline(path).find((event) => event.kind === 'run-start')
+  return start?.kind === 'run-start' ? start.project : undefined
+}
+
+/**
+ * Enso's evidence for a run whose recorder died before its stop, as the stop would have taken it:
+ * from the stack when it is still up — then stopped, so the ports are free again — else every
+ * route a `missing` row and the disk read all the same. `home` is the record's; `fallbackHome`
+ * only when the recorder died before writing one. Refuses a run whose recorder is still running.
+ */
+export async function collectAfterRecorderDied(runDirectory: string, fallbackHome: string): Promise<ArenaEvidence[]> {
+  const control = readArenaControl(runDirectory)
+  if (control !== undefined && isRunning(control.pid)) {
+    throw new Error(
+      `the run at ${runDirectory} is live (recorder pid ${control.pid}): stop it with its \`stop\` action`,
+    )
+  }
+  const dead = deadRecorderRun(runDirectory)
+  const home = control?.home ?? fallbackHome
+  const project = runProjectOf(runDirectory) ?? join(runDirectory, 'project')
+  const evidence = await collectEnsoEvidence({
+    serverOrigin: ARENA_SERVER_ORIGIN,
+    directory: join(runDirectory, 'enso', 'evidence'),
+    threadIds: threadIdsShown(readTimeline(join(runDirectory, 'timeline.jsonl'))),
+    home,
+    project,
+    secretValues: knownSecretValues(home),
+    ...(dead?.stackPid === undefined
+      ? { serverDown: 'the recorder died before its stop, and the run’s Enso stack is not running' }
+      : {}),
+  })
+  if (dead?.stackPid !== undefined) await stopStack(dead.stackPid)
+  rmSync(controlFilePath(runDirectory), { force: true })
+  return evidence
+}
+
+/** SIGTERM, as the recorder's own stop sends, then wait until it is gone (at most 10 s). */
+async function stopStack(pid: number): Promise<void> {
+  process.kill(pid, 'SIGTERM')
+  const deadline = Date.now() + 10_000
+  while (isRunning(pid) && Date.now() < deadline) await Bun.sleep(200)
 }

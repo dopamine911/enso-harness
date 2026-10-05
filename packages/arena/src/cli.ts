@@ -21,7 +21,8 @@
  *   bun run arena act '<json>' [--run DIR]
  *       one UI action on the live run (the agent's only way in); prints the result as JSON
  *   bun run arena manifest <run directory>
- *       fold a run's manifest again from its timeline — after a recorder that died, for one — and score it
+ *       fold a run's manifest again from its timeline, and score it. After a recorder that died,
+ *       it also collects Enso's evidence — from the run's stack if it is still up, then stopped
  *   bun run arena score <run directory>
  *       score a run (`arena/score.ts`): its logs read for problems, and whether the UI was the
  *       only way in. Writes `score.json` and `score.md`, prints the Markdown, exits 1 on FAIL.
@@ -43,8 +44,8 @@ import { join, resolve } from 'node:path'
 import { ensoHome, findRepoRoot } from '@enso/core/paths'
 import { knownSecretValues } from '@enso/core/secrets'
 import { ARENA_THINKING_LEVELS, arenaAgentDriver, resolveArenaModel } from './agent.ts'
-import { foldArenaManifest } from './manifest.ts'
-import { type ArenaControl, type ArenaDriver, controlFilePath, runArena } from './recorder.ts'
+import { type ArenaEvidence, arenaEvidenceRowOf, foldArenaManifest } from './manifest.ts'
+import { type ArenaDriver, collectAfterRecorderDied, deadRecorderRun, readArenaControl, runArena } from './recorder.ts'
 import {
   ARENA_SCENARIOS,
   arenaActCommand,
@@ -133,7 +134,24 @@ async function driverNamed(
   return { driver, brief }
 }
 
+/**
+ * A run whose recorder died with its stack still up holds the ports every `start` needs (#607):
+ * say which run, and the command that collects its evidence and frees them, before the port check
+ * says only "in use".
+ */
+function refuseOverDeadRun(): void {
+  if (!existsSync(currentFile)) return
+  const runDirectory = readFileSync(currentFile, 'utf8').trim()
+  const dead = deadRecorderRun(runDirectory)
+  if (dead?.stackPid === undefined) return
+  fail(
+    `the last run's recorder died and its Enso stack (pid ${dead.stackPid}) still holds the ports — ` +
+      `\`bun run arena manifest ${runDirectory}\` collects its evidence and stops it`,
+  )
+}
+
 async function start(): Promise<void> {
+  refuseOverDeadRun()
   const scenario = scenarioNamed()
   const minutes = Number(flag('minutes') ?? scenario.budgetMinutes)
   if (!Number.isFinite(minutes) || minutes <= 0) fail('--minutes takes a positive number')
@@ -185,9 +203,13 @@ async function act(): Promise<void> {
   if (body === undefined) fail(`act takes one JSON action — \`bun run arena brief\` lists them`)
   const runDirectory = flag('run') ?? (existsSync(currentFile) ? readFileSync(currentFile, 'utf8').trim() : undefined)
   if (runDirectory === undefined) fail('no live run — start one with `bun run arena start`')
-  const controlFile = controlFilePath(runDirectory)
-  if (!existsSync(controlFile)) fail(`the run at ${runDirectory} is not live`)
-  const control = JSON.parse(readFileSync(controlFile, 'utf8')) as ArenaControl
+  const control = readArenaControl(runDirectory) ?? fail(`the run at ${runDirectory} is not live`)
+  if (deadRecorderRun(runDirectory) !== undefined) {
+    fail(
+      `the recorder of the run at ${runDirectory} is gone (pid ${control.pid}) — ` +
+        `\`bun run arena manifest ${runDirectory}\` collects its evidence`,
+    )
+  }
   if (control.port === undefined) {
     fail(`the run at ${runDirectory} is driven by its agent: the page takes actions only through the agent's tool`)
   }
@@ -203,14 +225,32 @@ async function act(): Promise<void> {
   process.exit(answer.ok ? 0 : 1)
 }
 
-function refold(): void {
-  const runDirectory = rest[0] ?? fail('manifest takes a run directory')
-  const runId = runDirectory.replace(/\/+$/, '').split('/').at(-1) ?? 'run'
+/** The evidence a manifest kept, row by row; undefined when it kept none that reads as evidence. */
+function keptEvidenceOf(manifest: unknown): ArenaEvidence[] | undefined {
+  if (typeof manifest !== 'object' || manifest === null || !('evidence' in manifest)) return undefined
+  if (!Array.isArray(manifest.evidence)) return undefined
+  const rows: Array<ArenaEvidence | undefined> = manifest.evidence.map(arenaEvidenceRowOf)
+  return rows.every((row): row is ArenaEvidence => row !== undefined) ? rows : undefined
+}
+
+/**
+ * Fold a run's manifest again. A run that stopped keeps the evidence its stop collected; one whose
+ * recorder died has none, so it is collected now (#584 A13, #607) and the dead run's `current`
+ * pointer, which its `start` never got to clear, goes with it.
+ */
+async function refold(): Promise<void> {
+  const runDirectory = resolve(rest[0] ?? fail('manifest takes a run directory'))
+  const runId = runDirectory.split('/').at(-1) ?? 'run'
   const manifestPath = join(runDirectory, 'manifest.json')
-  const kept = existsSync(manifestPath)
-    ? (JSON.parse(readFileSync(manifestPath, 'utf8')) as { readonly evidence?: [] }).evidence
-    : undefined
-  const evidence = kept ?? [{ kind: 'enso', status: 'missing' as const, reason: 'the recorder did not reach its stop' }]
+  const kept = existsSync(manifestPath) ? keptEvidenceOf(JSON.parse(readFileSync(manifestPath, 'utf8'))) : undefined
+  const evidence =
+    kept ??
+    (await collectAfterRecorderDied(runDirectory, home).catch((error: unknown) =>
+      fail(error instanceof Error ? error.message : String(error)),
+    ))
+  if (kept === undefined && existsSync(currentFile) && readFileSync(currentFile, 'utf8').trim() === runDirectory) {
+    rmSync(currentFile, { force: true })
+  }
   const manifest = foldArenaManifest({ runId, events: readTimeline(join(runDirectory, 'timeline.jsonl')), evidence })
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
   process.stdout.write(`${manifestPath}\n`)
@@ -238,7 +278,7 @@ switch (command) {
     await act()
     break
   case 'manifest':
-    refold()
+    await refold()
     break
   case 'score':
     scoreRun(rest[0] ?? fail('score takes a run directory'))

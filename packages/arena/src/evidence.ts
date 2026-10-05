@@ -1,8 +1,9 @@
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { redactJudgeText } from '@enso/core/judge'
 import { ensoProjectsDir, projectIdOf, projectSnapshotsDir, realpathOrSelf } from '@enso/core/paths'
 import type { ArenaEvidence } from './manifest.ts'
+import type { ArenaEvent } from './timeline.ts'
 
 /**
  * Enso's side of an arena run's evidence (#556), collected when the run stops: what the server
@@ -14,6 +15,12 @@ import type { ArenaEvidence } from './manifest.ts'
  * that does not exist yet (#551 slice 1 writes snapshots; the Diff Viewer data is a later slice)
  * each become a `missing` row naming why, so a findings report can say "no record" rather than
  * read silence as "nothing happened".
+ *
+ * ⚠ THE DISK SIDE DOES NOT WAIT FOR THE SERVER (#584 A1, #607). A run that ends with Enso down is
+ * the run whose evidence matters most, so `serverDown` turns every route into its own `missing`
+ * row and the rows read from disk are still made. The snapshot store is COPIED into the run (A3):
+ * a path into the home breaks when the store is pruned or the home deleted. The copy is the
+ * store's bytes, unredacted, like the run's own `project/`: what the agent wrote is the evidence.
  *
  * ⚠ REDACTED ON THE WAY TO DISK. A transcript can quote a key the agent pasted; every body is put
  * through the judge's redactor with the run's known secret values before it is written.
@@ -31,6 +38,12 @@ export interface ArenaEvidenceSources {
   readonly home: string
   readonly project: string
   readonly secretValues: readonly string[]
+  /**
+   * Why the server cannot be asked, when it cannot: Enso was not running at the stop, or the
+   * recorder died and its stack with it. Every route is then a `missing` row with this reason,
+   * nothing is fetched, and only the URL's threads are known (the project's list is a route).
+   */
+  readonly serverDown?: string
   /** `fetch`, or a test's stand-in. */
   readonly fetchText?: (url: string) => Promise<{ readonly status: number; readonly text: string }>
 }
@@ -48,6 +61,10 @@ export async function collectEnsoEvidence(sources: ArenaEvidenceSources): Promis
 
   /** Save one route's body, redacted, and say so in a row. Returns the body saved, or undefined. */
   const save = async (kind: string, route: string, fileName: string): Promise<string | undefined> => {
+    if (sources.serverDown !== undefined) {
+      rows.push({ kind, status: 'missing', reason: sources.serverDown })
+      return undefined
+    }
     let answer: { readonly status: number; readonly text: string }
     try {
       answer = await fetchText(`${sources.serverOrigin}${route}`)
@@ -91,7 +108,7 @@ export async function collectEnsoEvidence(sources: ArenaEvidenceSources): Promis
     rows.push({ kind: 'threads', status: 'missing', reason: 'no thread was named by the UI or stored for the project' })
   }
 
-  rows.push(snapshotStoreRow(sources.home, sources.project))
+  rows.push(snapshotStoreRow(sources.home, sources.project, join(sources.directory, 'snapshot-store')))
   rows.push({
     kind: 'diff viewer',
     status: 'missing',
@@ -139,14 +156,27 @@ export function projectThreads(
   })
 }
 
-/** The project's snapshot store (#551): where it is and which threads it holds, or why there is none. */
-function snapshotStoreRow(home: string, project: string): ArenaEvidence {
+/**
+ * The project's snapshot store (#551), copied to `copy` so the run keeps it: the copy's row, or why
+ * there is none. A copy that fails is a `missing` row naming the store and the error.
+ */
+function snapshotStoreRow(home: string, project: string, copy: string): ArenaEvidence {
   const directory = projectSnapshotsDir(ensoProjectsDir(home), projectIdOf(realpathOrSelf(project)))
   if (!existsSync(directory)) {
     return { kind: 'snapshot store', status: 'missing', reason: `no snapshot store at ${directory}` }
   }
-  const threads = readdirSync(directory)
-  return threads.length === 0
-    ? { kind: 'snapshot store', status: 'missing', reason: `the snapshot store at ${directory} holds no thread` }
-    : { kind: 'snapshot store', status: 'collected', path: directory }
+  if (readdirSync(directory).length === 0) {
+    return { kind: 'snapshot store', status: 'missing', reason: `the snapshot store at ${directory} holds no thread` }
+  }
+  try {
+    cpSync(directory, copy, { recursive: true })
+  } catch (error) {
+    return { kind: 'snapshot store', status: 'missing', reason: `${directory} could not be copied: ${String(error)}` }
+  }
+  return { kind: 'snapshot store', status: 'collected', path: copy }
+}
+
+/** The thread ids the UI named during a run (`?thread=`), in the order first shown. */
+export function threadIdsShown(events: readonly ArenaEvent[]): string[] {
+  return [...new Set(events.flatMap((event) => (event.page?.threadId === undefined ? [] : [event.page.threadId])))]
 }
