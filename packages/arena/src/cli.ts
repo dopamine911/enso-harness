@@ -242,7 +242,13 @@ async function refold(): Promise<void> {
   const runDirectory = resolve(rest[0] ?? fail('manifest takes a run directory'))
   const runId = runDirectory.split('/').at(-1) ?? 'run'
   const manifestPath = join(runDirectory, 'manifest.json')
-  const kept = existsSync(manifestPath) ? keptEvidenceOf(JSON.parse(readFileSync(manifestPath, 'utf8'))) : undefined
+  const manifestKept = existsSync(manifestPath)
+  const kept = manifestKept ? keptEvidenceOf(JSON.parse(readFileSync(manifestPath, 'utf8'))) : undefined
+  // ⚠ A manifest is only written once evidence was taken (PR #612 review): one whose evidence does
+  // not read is damaged, not a dead recorder's run. Collecting again would read whatever home this
+  // command defaults to, since a stopped run left no control record naming its own.
+  if (manifestKept && kept === undefined)
+    fail(`${manifestPath} has no evidence that reads as evidence — not refolding over it`)
   const evidence =
     kept ??
     (await collectAfterRecorderDied(runDirectory, home).catch((error: unknown) =>

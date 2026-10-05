@@ -868,14 +868,21 @@ export async function collectAfterRecorderDied(runDirectory: string, fallbackHom
       ? { serverDown: 'the recorder died before its stop, and the run’s Enso stack is not running' }
       : {}),
   })
-  if (dead?.stackPid !== undefined) await stopStack(dead.stackPid)
+  if (dead?.stackPid !== undefined && !(await stopStack(dead.stackPid))) {
+    // ⚠ Said, not swallowed (PR #612 review): the control record goes regardless, so nothing later
+    // would name the process still holding the ports — only a bare "port in use".
+    process.stderr.write(
+      `arena: the run's Enso stack (pid ${dead.stackPid}) did not stop within 10 s of SIGTERM — stop it with \`kill ${dead.stackPid}\`\n`,
+    )
+  }
   rmSync(controlFilePath(runDirectory), { force: true })
   return evidence
 }
 
-/** SIGTERM, as the recorder's own stop sends, then wait until it is gone (at most 10 s). */
-async function stopStack(pid: number): Promise<void> {
+/** SIGTERM, as the recorder's own stop sends, then wait until it is gone (at most 10 s). True when it went. */
+async function stopStack(pid: number): Promise<boolean> {
   process.kill(pid, 'SIGTERM')
   const deadline = Date.now() + 10_000
   while (isRunning(pid) && Date.now() < deadline) await Bun.sleep(200)
+  return !isRunning(pid)
 }
