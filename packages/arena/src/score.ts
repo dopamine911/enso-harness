@@ -378,21 +378,30 @@ function timelineProblems(events: readonly ArenaEvent[]): Occurrence[] {
   })
 }
 
-/** The agent's own session: model calls that failed, and how often it had to be nudged to go on. */
+/**
+ * The agent's own session: model calls that failed, and how often it had to be nudged to go on.
+ *
+ * ⚠ NOT A FAILURE: THE CALL THE RUNNER ABORTED AFTER THE AGENT'S OWN STOP. An agent that sends its
+ * retrospective note and `stop` in one batch gets one more model call — pi goes on unless every call
+ * of a batch terminates — and the runner aborts it when the run stops (`agent.ts`). That call's
+ * "The operation was aborted" made the first agent that finished cleanly score FAIL (#611's reference
+ * run). Once the transcript holds the answer to a successful `stop`, an error after it is that abort.
+ */
 function agentProblems(transcript: readonly unknown[] | undefined): Occurrence[] {
   if (transcript === undefined) return []
   const found: Occurrence[] = []
   let userMessages = 0
+  let stopped = false
   for (const message of transcript) {
     if (typeof message !== 'object' || message === null || !('role' in message)) continue
     if (message.role === 'user') userMessages += 1
-    if (message.role === 'assistant' && 'stopReason' in message && message.stopReason === 'error') {
-      const text =
-        'errorMessage' in message && typeof message.errorMessage === 'string' ? message.errorMessage : 'no message'
+    stopped ||= isStopAnswer(message)
+    const failure = stopped ? undefined : modelFailureOf(message)
+    if (failure !== undefined) {
       found.push({
         severity: 'error',
         source: 'agent',
-        message: `a model call failed: ${short(text)}`,
+        message: `a model call failed: ${short(failure)}`,
         example: 'agent/transcript.jsonl',
       })
     }
@@ -406,6 +415,45 @@ function agentProblems(transcript: readonly unknown[] | undefined): Occurrence[]
     })
   }
   return found
+}
+
+/** A model call that ended in an error: its message, or undefined for any other transcript entry. */
+function modelFailureOf(message: object): string | undefined {
+  if (!('role' in message) || message.role !== 'assistant') return undefined
+  if (!('stopReason' in message) || message.stopReason !== 'error') return undefined
+  return 'errorMessage' in message && typeof message.errorMessage === 'string' ? message.errorMessage : 'no message'
+}
+
+/**
+ * The `act` tool's answer to a `stop` the recorder took: `{ "ok": true, "result": { "stopping": true } }`,
+ * the runner's own JSON (`arenaToolResult`), read back structurally rather than by its wording.
+ */
+function isStopAnswer(message: object): boolean {
+  if (!('role' in message) || message.role !== 'toolResult' || !('content' in message)) return false
+  if (!Array.isArray(message.content)) return false
+  return message.content.some((part: unknown) => {
+    if (typeof part !== 'object' || part === null || !('text' in part) || typeof part.text !== 'string') return false
+    const answer = parsedOrUndefined(part.text)
+    return (
+      typeof answer === 'object' &&
+      answer !== null &&
+      'ok' in answer &&
+      answer.ok === true &&
+      'result' in answer &&
+      typeof answer.result === 'object' &&
+      answer.result !== null &&
+      'stopping' in answer.result &&
+      answer.result.stopping === true
+    )
+  })
+}
+
+function parsedOrUndefined(text: string): unknown {
+  try {
+    return JSON.parse(text)
+  } catch {
+    return undefined
+  }
 }
 
 /** Enso's own log records for the run's threads: an ERROR or FATAL fails the run, a WARN is reported. */

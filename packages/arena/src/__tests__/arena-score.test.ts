@@ -355,3 +355,28 @@ test('⚠ a known secret in a file the run keeps fails a run that otherwise pass
   expect(unread).toMatchObject({ verdict: 'pass', errors: 0 })
   expect(unread.problems.map((problem) => problem.message)).toContain('not scanned for secrets')
 })
+
+test('⚠ the call the runner aborts after the agent’s own stop is not a failed model call; one before it still is (#611)', () => {
+  const stopAnswer = {
+    role: 'toolResult',
+    content: [{ type: 'text', text: JSON.stringify({ ok: true, result: { stopping: true }, phase: 'running' }) }],
+  }
+  const aborted = { role: 'assistant', stopReason: 'error', errorMessage: 'The operation was aborted.' }
+  const failures = (transcript: unknown[]): string[] =>
+    scoreArenaRun(inputOf(AGENT_RUN, { transcript }))
+      .problems.filter((problem) => problem.message.startsWith('a model call failed'))
+      .map((problem) => problem.message)
+
+  // The reference run's shape: note and stop in one batch, then the call the stop aborted.
+  expect(failures([{ role: 'user' }, stopAnswer, aborted])).toEqual([])
+  // A model call that fails before any stop is still the agent's failure.
+  expect(failures([{ role: 'user' }, aborted, stopAnswer])).toEqual(['a model call failed: The operation was aborted.'])
+  // A stop the recorder refused (the run had already stopped) is not the agent's own stop.
+  const refusedStop = {
+    role: 'toolResult',
+    content: [{ type: 'text', text: JSON.stringify({ ok: false, error: 'stopped' }) }],
+  }
+  expect(failures([{ role: 'user' }, refusedStop, aborted])).toEqual([
+    'a model call failed: The operation was aborted.',
+  ])
+})
