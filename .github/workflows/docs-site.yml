@@ -1,7 +1,7 @@
 # Docs site — built and published ON REQUEST, never on a push.
 #
 # Manual by design. The site is a build product of `docs/` and TypeDoc, and `bun run check:all`
-# already builds it and crawls its links on every PR (gate 11), so a push-triggered publish would
+# already builds it and crawls its links on every PR (gate 12), so a push-triggered publish would
 # spend Actions minutes re-proving what the gate just proved. What this workflow adds is the one
 # thing the gate does not do: put the built site somewhere a person can read it.
 #

@@ -158,19 +158,28 @@
     ],
     "threshold": 2.44
   },
-  // Complexity. Two readers of this block:
+  // Complexity. The `complexity` gate (scripts/gate.ts → `complexity:check`) reads this block
+  // twice, both blocking:
   //
-  //   • `fallow audit` (the advisory job) applies these thresholds to CHANGED functions. CRAP is
-  //     OFF, not raised: it is cyclomatic × (1 − coverage)³, and fallow can only ESTIMATE coverage
-  //     here — Bun's LCOV has no function spans for `--coverage`, so every score is
-  //     `coverage_source: estimated`, and the estimate reads from export references, which a
-  //     request listener or a generator's `generate()` never has. Every complexity finding the
-  //     audit raised on #180, #181 and #182 was `exceeded: crap` on a function the suite drives;
-  //     cyclomatic (20) and cognitive (15) are fallow's defaults and stay advisory.
-  //   • The `complexity` gate (scripts/gate.ts → `complexity:check`) runs `fallow health` over
-  //     EVERY function at a cognitive ceiling of 25 — the ceiling that keeps us from writing
-  //     functions a human cannot read. It gates cognitive only (`--max-cyclomatic` is lifted
-  //     there); cyclomatic stays the audit's advisory signal, as it has always been.
+  //   • the CEILING: `fallow health` over EVERY function at a cognitive ceiling of 25 — the
+  //     ceiling that keeps us from writing functions a human cannot read — with the per-function
+  //     pins below as its only exceptions;
+  //   • NEW CODE (#594): the same over every function at 15 (fallow's own default), against
+  //     `complexity-baseline.json`, an identity baseline (file + function name) of the functions
+  //     already over 15 when it was taken. A function not in it — new, or renamed — must be under
+  //     15; one in it is held by the ceiling instead. The list only shrinks: a listed function that
+  //     no longer needs its entry fails — fallow's `--fail-on-stale-baseline` catches a FILE with no
+  //     finding left, and `test/complexity-ratchet.test.ts` catches the single function (measured on
+  //     #594: fallow alone passed a stale entry in a file with other findings). Re-save with
+  //     `bun run complexity:baseline` to drop it. A re-save that ADDS an entry is an exception,
+  //     reviewed as one.
+  //
+  // Both gate cognitive only (`--max-cyclomatic` is lifted). CRAP is OFF, not raised: it is
+  // cyclomatic × (1 − coverage)³, and fallow can only ESTIMATE coverage here — Bun's LCOV has no
+  // function spans (0 `FN:` records, re-measured on #591), so every score is `coverage_source:
+  // estimated`, read from export references a request listener or a generator's `generate()`
+  // never has. Every complexity finding the old advisory audit raised on #180, #181 and #182 was
+  // `exceeded: crap` on a function the suite drives.
   //
   // `thresholdOverrides` are the exceptions to the gate's ceiling, pinned per FUNCTION at the
   // exact score it measures today, so the rule still fails the moment that function grows. A
@@ -182,7 +191,7 @@
   //
   // `ignore`: the vendored components, for the reason `ignoreFindings` gives above — their
   // functions are upstream's, kept diffable (the shadcn `chart.tsx` #45 fetched arrived with a
-  // 22-branch tooltip formatter the audit then called ours).
+  // 22-branch tooltip formatter fallow then called ours).
   "health": {
     "maxCrap": 0,
     "ignore": ["packages/web/src/components/**"],
@@ -213,9 +222,23 @@
       }
     ]
   },
-  // `error` since the day-one list (five, all `rpc/`, recorded on #173) reached zero: a crossing
-  // now fails the dead-code gate step. Coverage and forbidden-call findings share the severity.
-  "rules": { "boundary-violation": "error" },
+  // The dead-code rules that can fire in this repository are `error` (#594), so a finding fails the
+  // gate outright — and there is no baseline since #594, so nothing can be accepted by re-saving one.
+  // Rules for stacks it does not use (Vue, Svelte, Pinia, server actions) and the CSS analytics keep
+  // fallow's defaults. The five promoted from `warn` had no finding when they were promoted.
+  // `boundary-violation` has been `error` since the day-one list (five, all `rpc/`, recorded on
+  // #173) reached zero; coverage and forbidden-call findings share its severity. `policy-violation`
+  // is OFF: it reads rule packs, and none are configured — on, it printed a "nothing was measured"
+  // diagnostic on every run.
+  "rules": {
+    "boundary-violation": "error",
+    "unused-dev-dependencies": "error",
+    "re-export-cycle": "error",
+    "test-only-dependencies": "error",
+    "type-only-dependencies": "error",
+    "stale-suppressions": "error",
+    "policy-violation": "off"
+  },
   // Architecture boundaries (#173, #162 workstream 9): the vendor gate and the storage seam read
   // TEXT; this reads the IMPORT GRAPH, and catches what text cannot — a re-export chain, a
   // type-only import, a barrel that leaks a zone. Zones are the TARGET layout of the re-cut,

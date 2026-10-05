@@ -25,19 +25,27 @@
  *                  2026-09-18, `error TS6310: Referenced project '…/packages/core' may not
  *                  disable emit`. So this gate WRITES: `emitDeclarationOnly` declarations into
  *                  each package's `dist-types/`, gitignored, and fallow skips them.
- *   4. dead-code — `fallow dead-code --quiet --baseline fallow-baseline.json`: fails on a finding
- *                  that is not already in the committed identity baseline. After typecheck,
- *                  because fallow's graph is syntactic.
+ *   4. dead-code — `fallow dead-code --quiet`: fails on ANY unused file, export, type or dependency.
+ *                  No baseline since #594 — it had held zero findings since #263, and re-saving it
+ *                  was the one way to accept a finding silently. After typecheck, because
+ *                  fallow's graph is syntactic.
  *   5. complexity — `fallow health --complexity --max-cognitive 25 --max-cyclomatic 1000 --quiet`: every
  *                  function under the cognitive ceiling of 25, or under its own per-function pin
  *                  in `.fallowrc.jsonc` (`health.thresholdOverrides`). Cyclomatic is lifted out of
- *                  reach on purpose: it is the advisory audit's signal, never a gate.
- *   6. duplication — `fallow dupes --quiet --summary`: duplicated lines under `duplicates.threshold`
+ *                  reach on purpose: cognitive is what a reader pays for.
+ *   6. new-complexity — `fallow health --complexity --max-cognitive 15 --max-cyclomatic 1000 --quiet --baseline complexity-baseline.json --baseline-mode identity --fail-on-stale-baseline`:
+ *                  every function NOT in `complexity-baseline.json` (an identity baseline of the
+ *                  functions already over 15 when it was taken, #594) under 15, fallow's default.
+ *                  New or renamed code meets the stricter number; listed code is held by the
+ *                  ceiling. A listed function that no longer needs its entry fails: here when its
+ *                  whole file has none left, and in `test/complexity-ratchet.test.ts` for the single
+ *                  function. `bun run complexity:baseline` re-saves the list.
+ *   7. duplication — `fallow dupes --quiet --summary`: duplicated lines under `duplicates.threshold`
  *                  in `.fallowrc.jsonc`, a ratchet that may only fall (#593). Semantic mode; what is
  *                  excluded from the count, and why, is recorded beside the threshold. `--summary`
  *                  prints the rate and the counts, not every clone group: on a pass the listing was
  *                  ~95 lines per commit, and `bunx fallow dupes` prints it when a failure needs it.
- *   7. react-doctor — `react-doctor --project packages/web --scope full --no-score --no-supply-chain --blocking error`:
+ *   8. react-doctor — `react-doctor --project packages/web --scope full --no-score --no-supply-chain --blocking error`:
  *                  react-doctor's lint pass over the web surface, failing on an error-severity
  *                  finding (#342). Offline by construction: `--no-score` skips the score API, the
  *                  share URL and the crash trace, `--no-supply-chain` the Socket.dev lookups — a
@@ -48,17 +56,17 @@
  *                  `bun test`. The human-facing `doctor` script (`bunx react-doctor --verbose`) keeps
  *                  the score and the share URL because a developer reading a report wants them; it
  *                  runs the same pin, with a developer's ambient credentials, never in the gate.
- *   8. test      — `bun test`, not `vitest run`. bunfig keeps coverage always on, so this
- *                  writes `coverage/lcov.info` for gate 9.
- *   9. coverage  — `bun scripts/check-coverage.ts`: the TOTAL line and function floors over the
+ *   9. test      — `bun test`, not `vitest run`. bunfig keeps coverage always on, so this
+ *                  writes `coverage/lcov.info` for gate 10.
+ *   10. coverage — `bun scripts/check-coverage.ts`: the TOTAL line and function floors over the
  *                  full denominator, which bun's own per-file `coverageThreshold` cannot express.
- *   10. api-docs — `typedoc --emit none`: the owned contract surface across both barrels, with warnings
+ *   11. api-docs — `typedoc --emit none`: the owned contract surface across both barrels, with warnings
  *                  FATAL. TypeDoc's warnings are documentation drift — a `{@link}` whose target
  *                  was renamed, a type a documented signature exposes but nothing exports — and
  *                  none of them is visible to `tsc`. `--emit none`: it VALIDATES, and the site
  *                  renders the same surface as native pages (`starlight-typedoc`), so the
  *                  contract is converted once for checking and once for reading (#188).
- *   11. site     — `bun scripts/docs/build-docs.ts && bun scripts/docs/site-content.ts && bunx astro build --root site && bun scripts/docs/site-links.ts`:
+ *   12. site     — `bun scripts/docs/build-docs.ts && bun scripts/docs/site-content.ts && bunx astro build --root site && bun scripts/docs/site-links.ts`:
  *                  builds every generated and flow page (#482), projects `docs/` into the Starlight site, builds it, and
  *                  crawls every built page for dead internal links. The BUILD is not the check —
  *                  `astro build` reported success over 139 dead links, because a page's
@@ -161,11 +169,11 @@ export const GATES: readonly Gate[] = [
   },
   {
     // AFTER typecheck: fallow's graph is syntactic, so a file tsc refuses would be reported
-    // as findings rather than as the parse error it is. Identity baseline (#163): fails only
-    // on a finding that is NOT in `fallow-baseline.json` — the backlog is inventory, growth
-    // is the regression. Re-save the baseline only when a finding is deliberately accepted.
+    // as findings rather than as the parse error it is. No baseline (#594): the identity
+    // baseline of #163 had held zero findings since #263, and a baseline re-save was the one
+    // way to accept new dead code without anyone deciding to.
     name: 'dead-code',
-    describe: 'fallow: no dead-code finding beyond the committed baseline',
+    describe: 'fallow: no dead-code finding',
     script: 'deadcode:check',
   },
   {
@@ -176,6 +184,15 @@ export const GATES: readonly Gate[] = [
     name: 'complexity',
     describe: 'fallow health: cognitive complexity under 25, or under its function pin',
     script: 'complexity:check',
+  },
+  {
+    // The stricter number for code that is not already over it (#594). In place of `fallow
+    // audit`, which was the plan: its verdict also counts every new clone group — the ratchet
+    // owns duplication — and styling, and it needs a git base a hook or a shallow CI checkout
+    // may not have. An identity baseline needs neither.
+    name: 'new-complexity',
+    describe: 'fallow health: new or renamed functions under cognitive 15',
+    script: 'complexity:new',
   },
   {
     // Beside complexity: the same tool, syntactic, and cheap (well under a second). The threshold
