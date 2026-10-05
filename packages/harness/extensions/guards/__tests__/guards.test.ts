@@ -363,8 +363,9 @@ test('⚠ a thread in its own tree under a home named .enso writes, reads and ru
   const inTree = (toolName: string, input: Record<string, unknown>): GuardVerdict =>
     runtime.toolCall({ type: 'tool_call', toolCallId: 't', toolName, input }, { cwd: tree })
 
-  // Its own work: a new file, a read, a search, a shell command whose every word resolves into the tree.
+  // Its own work: a new file, an edit, a read, a search, a shell command whose every word resolves into the tree.
   expect(inTree('write', { path: 'index.html', content: '<h1>Snake</h1>' })).toBeUndefined()
+  expect(inTree('edit', { path: 'src/a.ts', oldText: '1', newText: '2' })).toBeUndefined()
   expect(inTree('read', { path: 'src/a.ts' })).toBeUndefined()
   expect(inTree('grep', { pattern: 'export', path: '.' })).toBeUndefined()
   expect(inTree('bash', { command: 'bun test src && ls -la' })).toBeUndefined()

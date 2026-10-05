@@ -289,12 +289,12 @@ function pathArgumentOf(event: ToolCallEvent | ToolResultEvent): string | undefi
 
 /**
  * The guard's seams: the bash analyzer (#9), the harness root (#160 §4), the incident policy
- * and log directory (#466), and the command judge with the secret values its state is redacted
- * of (#469).
+ * and log directory (#466), the projects directory thread trees are minted in (#615), and the
+ * command judge with the secret values its state is redacted of (#469).
  *
  * Production wires cc-safety-net's `checkCommand`, this checkout's root, the user's `config.json`
- * and `ENSO_HOME`'s log directory and secrets; tests inject known verdicts, a root they built, a
- * policy, a directory and a fake judge — a guard test must never reach the network.
+ * and `ENSO_HOME`'s log and projects directories and secrets; tests inject known verdicts, a root
+ * they built, a policy, directories and a fake judge — a guard test must never reach the network.
  * `checkCommand` reads LOCAL policy per call, so a guard test that touched the real
  * library would vary with the machine's cc-safety-net config (the contract test alone exercises
  * the real one, and pins defaults explicitly) — and the same holds for the machine's config file.

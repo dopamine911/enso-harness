@@ -447,12 +447,8 @@ export function projectTreesDir(projectsDir: string, projectId: string): string 
  * @group Workspace paths
  */
 export function treeProjectId(projectsDir: string, path: string): string | undefined {
-  const fromProjects = relative(resolve(projectsDir), resolve(path))
-  if (fromProjects === '' || fromProjects.startsWith('..') || isAbsolute(fromProjects)) return undefined
-  const [projectId, trees, threadId] = fromProjects.split(pathSeparator)
-  return projectId !== undefined && /^[0-9a-f]{16}$/.test(projectId) && trees === 'trees' && threadId !== undefined
-    ? projectId
-    : undefined
+  const root = threadTreeRoot(projectsDir, path)
+  return root === undefined ? undefined : basename(dirname(dirname(root)))
 }
 
 /**
@@ -464,11 +460,12 @@ export function treeProjectId(projectsDir: string, path: string): string | undef
  * @group Workspace paths
  */
 export function threadTreeRoot(projectsDir: string, path: string): string | undefined {
-  if (treeProjectId(projectsDir, path) === undefined) return undefined
-  const [projectId, trees, threadId] = relative(resolve(projectsDir), resolve(path)).split(pathSeparator)
-  return projectId === undefined || trees === undefined || threadId === undefined
-    ? undefined
-    : join(resolve(projectsDir), projectId, trees, threadId)
+  const fromProjects = relative(resolve(projectsDir), resolve(path))
+  if (fromProjects === '' || fromProjects.startsWith('..') || isAbsolute(fromProjects)) return undefined
+  const [projectId, trees, threadId] = fromProjects.split(pathSeparator)
+  return projectId !== undefined && /^[0-9a-f]{16}$/.test(projectId) && trees === 'trees' && threadId !== undefined
+    ? join(resolve(projectsDir), projectId, trees, threadId)
+    : undefined
 }
 
 /**
