@@ -1,0 +1,422 @@
+{
+  "kind": "health",
+  "finding_counts": {
+    "packages/core/src/__tests__/no-duplicate-paths.test.ts": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/core/src/log-process.ts": {
+      "complexity_moderate": {
+        "count": 2
+      }
+    },
+    "packages/core/src/paths.ts": {
+      "complexity_high": {
+        "count": 1
+      }
+    },
+    "packages/core/src/runtime-entries.ts": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/core/src/snapshot-store.ts": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/harness/core/environment-dump.ts": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/harness/core/network-egress.ts": {
+      "complexity_moderate": {
+        "count": 4
+      }
+    },
+    "packages/harness/core/shell-segments.ts": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/harness/core/web-search/providers/anthropic.ts": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/harness/core/web-search/sse.ts": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/web/src/chat-screen.tsx": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/web/src/command-palette.tsx": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/web/src/debug/log-tail-connection.ts": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/web/src/follow-connection.ts": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/web/src/host/agent-host.ts": {
+      "complexity_moderate": {
+        "count": 2
+      }
+    },
+    "packages/web/src/host/continuation.ts": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/web/src/host/map-events.ts": {
+      "complexity_high": {
+        "count": 1
+      }
+    },
+    "packages/web/src/host/system-prompt-preview.ts": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/web/src/host/transcript.ts": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/web/src/server/__tests__/logs-tail-route.test.ts": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/web/src/server/index.ts": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/web/src/start-session.tsx": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/web/src/thread-debug.tsx": {
+      "complexity_high": {
+        "count": 1
+      },
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/web/src/thread-status.tsx": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/web/src/thread-stores.ts": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/web/src/to-agui.ts": {
+      "complexity_high": {
+        "count": 1
+      }
+    },
+    "scripts/docs/core-exports.ts": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "scripts/docs/decisions.ts": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "scripts/docs/env-and-config.ts": {
+      "complexity_moderate": {
+        "count": 2
+      }
+    },
+    "scripts/docs/extract-declaration.ts": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "scripts/docs/gate-source.ts": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "scripts/docs/observations.ts": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "scripts/docs/refresh-fences.ts": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "test/dependency-gate.test.ts": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "test/docs-gate.test.ts": {
+      "complexity_moderate": {
+        "count": 4
+      }
+    },
+    "test/gate-support.ts": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    }
+  },
+  "identity_finding_counts": {
+    "packages/core/src/__tests__/no-duplicate-paths.test.ts\u0000collectScannableSources": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/core/src/log-process.ts\u0000parseEnsoLogLevels": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/core/src/log-process.ts\u0000step": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/core/src/paths.ts\u0000migrateSessionsIntoProjects": {
+      "complexity_high": {
+        "count": 1
+      }
+    },
+    "packages/core/src/runtime-entries.ts\u0000partsOf": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/core/src/snapshot-store.ts\u0000<arrow>": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/harness/core/environment-dump.ts\u0000gateWords": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/harness/core/network-egress.ts\u0000commandPositionFinding": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/harness/core/network-egress.ts\u0000commandPositionPieces": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/harness/core/network-egress.ts\u0000findExecPayloads": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/harness/core/network-egress.ts\u0000shellFedByStream": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/harness/core/shell-segments.ts\u0000withoutLeadingEnvironmentAssignments": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/harness/core/web-search/providers/anthropic.ts\u0000runAnthropicProviderSearch": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/harness/core/web-search/sse.ts\u0000readSseEvents": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/web/src/chat-screen.tsx\u0000ChatScreen": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/web/src/command-palette.tsx\u0000CommandPalette": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/web/src/debug/log-tail-connection.ts\u0000readOneTail": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/web/src/follow-connection.ts\u0000observe": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/web/src/host/agent-host.ts\u0000deleteThread": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/web/src/host/agent-host.ts\u0000forkThread": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/web/src/host/continuation.ts\u0000continuationLead": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/web/src/host/map-events.ts\u0000mapPiEvent": {
+      "complexity_high": {
+        "count": 1
+      }
+    },
+    "packages/web/src/host/system-prompt-preview.ts\u0000splitRenderedPrompt": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/web/src/host/transcript.ts\u0000recordedModelOf": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/web/src/server/__tests__/logs-tail-route.test.ts\u0000<arrow>": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/web/src/server/index.ts\u0000dispatchLiteralRoute": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/web/src/start-session.tsx\u0000StartSessionDialog": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/web/src/thread-debug.tsx\u0000ThreadDebugDrawer": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/web/src/thread-debug.tsx\u0000ThreadDebugView": {
+      "complexity_high": {
+        "count": 1
+      }
+    },
+    "packages/web/src/thread-status.tsx\u0000ThreadStatusView": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/web/src/thread-stores.ts\u0000reviveHistoryMessages": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "packages/web/src/to-agui.ts\u0000observationToAguiEvents": {
+      "complexity_high": {
+        "count": 1
+      }
+    },
+    "scripts/docs/core-exports.ts\u0000importerCounts": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "scripts/docs/decisions.ts\u0000leadingHeader": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "scripts/docs/env-and-config.ts\u0000scanObjectReads": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "scripts/docs/env-and-config.ts\u0000scanProcessEnvironmentReads": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "scripts/docs/extract-declaration.ts\u0000bracketDelta": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "scripts/docs/gate-source.ts\u0000arrayBody": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "scripts/docs/observations.ts\u0000generate": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "scripts/docs/refresh-fences.ts\u0000refreshFences": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "test/dependency-gate.test.ts\u0000directImportGraph": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "test/docs-gate.test.ts\u0000<arrow>": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "test/docs-gate.test.ts\u0000architectureTreePaths": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "test/docs-gate.test.ts\u0000generatedOffenders": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "test/docs-gate.test.ts\u0000sourcedFenceOffenders": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "test/gate-support.ts\u0000codeOffenders": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    }
+  },
+  "runtime_coverage_findings": [],
+  "target_keys": []
+}

@@ -7,7 +7,7 @@ how to use it. It does not repeat the inventory.
 
 ## One definition of green
 
-`bun run check` (the same script as `check:all`) runs `scripts/gate.ts`. Eleven gates, in order, stopping
+`bun run check` (the same script as `check:all`) runs `scripts/gate.ts`. Twelve gates, in order, stopping
 at the first failure:
 
 1. **Format** — `oxfmt --check`: formatting, import order and Tailwind class order, check-only.
@@ -23,14 +23,15 @@ at the first failure:
    faster (1.0 s against 6.4 s cold over this tree), and that speed was given up for the generated
    API reference. `test/dependency-gate.test.ts` holds the pin against TypeDoc's own peer range, so
    a bump back to 7 fails naming TypeDoc rather than surfacing as a broken docs build later.
-4. **Dead code** — `fallow dead-code --baseline fallow-baseline.json` (#163): fails on any unused file,
-   export, type or dependency that is *not* in the committed identity baseline. The baseline is the
-   backlog as inventory; growth is the regression. **It is empty since #263**, and the last 17 rows
-   are why it should stay that way: they were the harness barrel's unconsumed exports, carried under
-   a note deferring the question to #173's zone rule, which shipped without taking it. A baseline row
-   does not age — it reads the same whether the leak is still there or long gone — so the barrel's
-   surface is now derived from what the extensions import and held by
-   `test/harness-barrel-gate.test.ts`, which names the lines to delete instead of hiding them.
+4. **Dead code** — `fallow dead-code` (#163): fails on any unused file, export, type or dependency.
+   **No baseline since #594.** The identity baseline #163 introduced (the backlog as inventory,
+   growth as the regression) had been empty since #263, and the last 17 rows were why it should
+   stay so: they were the harness barrel's unconsumed exports, carried under a note deferring the
+   question to #173's zone rule, which shipped without taking it. A baseline row does not age — it
+   reads the same whether the leak is still there or long gone — and re-saving one was the way to
+   accept a finding without deciding to. The barrel's surface is derived from what the extensions
+   import and held by `test/harness-barrel-gate.test.ts`, which names the lines to delete instead.
+   Every dead-code rule that can fire here is an error.
    `.fallowrc.jsonc` names every program fallow cannot see a loader for (the harness extensions, the
    Bun plugin, the direct-run scripts), and `test/fallow-config.test.ts` holds its extension entries
    equal to the harness manifest.
@@ -38,26 +39,35 @@ at the first failure:
    per FUNCTION in `.fallowrc.jsonc` (`health.thresholdOverrides`), each pinned at the exact score its
    function measures, and `test/complexity-ratchet.test.ts` refuses a pin that is looser than that
    score, names a function that no longer exists, or covers one already under the ceiling.
-6. **Duplication** — `fallow dupes` in semantic mode (#593): fails when the duplicated-line
+6. **New complexity** — `fallow health` again at fallow's default of 15 (#594), against
+   `complexity-baseline.json`: an identity baseline of the functions already over 15 when it was
+   taken. A function not listed — new, or renamed — must be under 15; a listed one is held by the
+   ceiling. The list only shrinks: a listed function that no longer needs its entry fails — the
+   gate when its whole file has none left (fallow's `--fail-on-stale-baseline`), and
+   `test/complexity-ratchet.test.ts` for the single function, which fallow does not check.
+   `bun run complexity:baseline` re-saves it; an entry a re-save ADDS is an exception to review.
+   This is what `fallow audit` was going to do on every push; its verdict also counts every new
+   clone group and styling finding, and it needs a git base a hook may not have.
+7. **Duplication** — `fallow dupes` in semantic mode (#593): fails when the duplicated-line
    percentage rises above `duplicates.threshold` in `.fallowrc.jsonc`, a ratchet that may only fall.
    It was an advisory CI step until #593 and was crossed four times unseen, each time already red; a
    crossing is now the commit that causes it. What the count excludes (vendored components, core's
    schema pairs, the colour palettes, the doc generators' inventory tables) is recorded beside the
    threshold, each with its reason.
-7. **react-doctor** — `react-doctor --project packages/web --scope full --no-score --no-supply-chain --blocking error`
+8. **react-doctor** — `react-doctor --project packages/web --scope full --no-score --no-supply-chain --blocking error`
    (#342): the web surface, failing on an error-severity finding. Offline flags are part of the
    command, not options — a pre-commit hook must not phone home — and so is `--scope full`: on a
    terminal, with changes on the branch, react-doctor otherwise asks what to scan and waits. The rule set is upstream's, so
    a bump of the pinned `react-doctor` is a gate change.
-8. **Bun test** — the complete test tree, with text and LCOV coverage reporters.
-9. **Aggregate coverage** — `scripts/check-coverage.ts` reads LCOV and enforces the total line and
+9. **Bun test** — the complete test tree, with text and LCOV coverage reporters.
+10. **Aggregate coverage** — `scripts/check-coverage.ts` reads LCOV and enforces the total line and
    function floors. The current values are generated under *Ratchets* in the inventory.
-10. **API docs** — `typedoc` over both barrels with `treatWarningsAsErrors` (#188). TypeDoc's warnings
+11. **API docs** — `typedoc` over both barrels with `treatWarningsAsErrors` (#188). TypeDoc's warnings
    *are* documentation drift — a `{@link}` whose target was renamed, a type a documented signature
    exposes but nothing exports — and none of them is visible to `tsc`. It runs with `--emit none`:
    the step validates, and the site renders the same surface as native pages from the same
    `typedoc.json` (`starlight-typedoc`), so nothing here produces an artifact to keep in step.
-11. **Site** — projects `docs/` into the Starlight site, builds it, then crawls every built page for
+12. **Site** — projects `docs/` into the Starlight site, builds it, then crawls every built page for
    dead internal links (#188). **The build is not the check.** `astro build` reported success over 139
    dead links on the first run, because a page's `./routes.md` and `../../packages/…#L47` are both
    correct on GitHub and both 404 as routes; `scripts/docs/site-links.ts` is what notices.
@@ -69,7 +79,7 @@ the site's navigation, theme and search instead of TypeDoc's own HTML shell.
 Publishing is separate and **manual**: `.github/workflows/docs-site.yml` runs on
 `workflow_dispatch`, builds the same two steps, and deploys to GitHub Pages only when the run is
 asked to (`deploy: true`); otherwise it uploads the built site as an artifact. Nothing publishes on
-a push, because gate 11 has already proved the build on every PR and a second one would buy only
+a push, because gate 12 has already proved the build on every PR and a second one would buy only
 Actions minutes. ⚠ The workflow reads the site's base path and origin from the Pages configuration
 (`actions/configure-pages` → `ENSO_SITE_BASE` / `ENSO_SITE_URL` → `scripts/docs/site-base.ts`, the
 one reader Astro, the projector and the crawl all share). A project site is served from
@@ -83,9 +93,9 @@ committed, not over the working tree: the unstaged remainder is stashed for the 
 restored afterwards, so a partial commit (`git add -p`) is gated on what CI will see (#259). The
 two exceptions are `git commit -a` and `git commit -- <path>`, where git hands the hook a
 temporary index; there it gates the working tree and says so on the first line of its output.
-CI adds independent jobs or advisory steps — secret
-scan, automated review, `fallow audit` over the changed files — but none replaces the
-eleven-step gate (react-doctor was one of them until #342 promoted it into the gate, and the duplication ratchet until #593). A green editor or a
+CI adds independent jobs — secret scan, automated review — but none replaces the
+twelve-step gate (react-doctor was one of them until #342 promoted it into the gate, the duplication
+ratchet until #593, and the advisory `fallow audit` job until #594 replaced it with the new-code gate). A green editor or a
 single test is not repository green.
 
 `test/coverage-manifest.test.ts` closes Bun's denominator hole: Bun reports coverage only for files a

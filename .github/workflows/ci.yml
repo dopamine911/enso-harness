@@ -1,16 +1,18 @@
 # CI — the enforced quality gate.
 #
 # Runs the SAME gate as the local pre-commit hook (`bun run check:all` = oxfmt → oxlint → tsc →
-# fallow dead-code → fallow complexity → fallow dupes → react-doctor → bun test → the
-# total-coverage floor → typedoc → the docs site and its link crawl), so "green"
+# fallow dead-code → fallow complexity, ceiling and new code → fallow dupes → react-doctor →
+# bun test → the total-coverage floor → typedoc → the docs site and its link crawl), so "green"
 # means one thing whether it ran on a machine or here. A commit made with `--no-verify`, or by
 # someone without the hook installed, is caught at the PR instead of slipping into main.
 #
-# The coverage floor needs no separate step: it is gate 9 inside check:all
+# The coverage floor needs no separate step: it is gate 10 inside check:all
 # (scripts/check-coverage.ts — the TOTAL floor bun's own per-file coverageThreshold
 # cannot express; see that file's header for the 2026-09-04 measurement). Nor does the site:
-# gate 11 builds it and crawls every built page for dead links (scripts/docs/site-links.ts).
-# Nor does the duplication ratchet: since #593 the dupes check is gate 6, blocking.
+# gate 12 builds it and crawls every built page for dead links (scripts/docs/site-links.ts).
+# Nor does the duplication ratchet: since #593 the dupes check is gate 7, blocking. The
+# advisory `fallow audit` job is gone since #594: new code's complexity is gate 6, every
+# dead-code finding fails gate 4, and duplication is the ratchet's.
 name: CI
 
 on:
@@ -51,36 +53,3 @@ jobs:
 
       - name: Gate (oxfmt + oxlint + tsc + fallow + tests + coverage floor + docs)
         run: bun run check:all
-
-  # ADVISORY, deliberately (#163): the blocking gate refuses a NEW dead-code finding; this
-  # job adds what the baseline cannot see on a PR — a changed function over the complexity
-  # ceiling, a semantic clone the diff introduces — and reports without blocking. Promote
-  # by dropping continue-on-error once a week of PRs shows its verdicts are worth a block.
-  #
-  # Runs once per PR (open/reopen/ready-for-review), not on every push: this is advisory only
-  # (never blocks a merge, unlike `gate`), so re-running it on each `synchronize` bought no
-  # additional safety for real Actions-minutes cost. `gate` keeps running on every push — it
-  # is the required check and its status must track the exact head SHA.
-  fallow-audit:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    continue-on-error: true
-    if: github.event_name == 'pull_request' && github.event.action != 'synchronize'
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0 # the base branch, for `--base`
-
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.4"
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      # The pinned dev dependency, never `bunx fallow@latest`: an audit that changes its
-      # own rules between runs is not a signal.
-      - name: fallow audit (advisory — never blocks)
-        env:
-          BASE_REF: ${{ github.base_ref }} # through env, never interpolated into the shell line
-        run: bunx fallow audit --base "origin/$BASE_REF" --dead-code-baseline fallow-baseline.json
