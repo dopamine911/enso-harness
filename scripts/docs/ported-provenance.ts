@@ -47,7 +47,7 @@ function portOf(file: string): Port {
 function generate(): string {
   const ports = readdirSync(join(ROOT, PORTED_DIRECTORY))
     .filter((fileName) => /\.tsx?$/.test(fileName))
-    .sort()
+    .toSorted()
     .map(portOf)
 
   return [

@@ -237,6 +237,6 @@ export function quarantineSecrets(
     delete environment[doomedName]
     removed.push(doomedName)
   }
-  const misplaced = [...rootDotenv.keys()].filter((definedName) => isSecretShapedName(definedName)).sort()
-  return { removed: removed.sort(), misplaced }
+  const misplaced = [...rootDotenv.keys()].filter((definedName) => isSecretShapedName(definedName)).toSorted()
+  return { removed: removed.toSorted(), misplaced }
 }

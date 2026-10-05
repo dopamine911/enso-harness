@@ -30,7 +30,7 @@ import { WEB_FETCH_MAX_URL_LENGTH } from '@enso/core'
 export type WebFetchUrlDecision = { kind: 'ok'; url: URL } | { kind: 'refused'; reason: string }
 
 /** The schemes web_fetch accepts, named so the Web access page reads them rather than retyping (#482). */
-const FETCHABLE_PROTOCOLS: readonly string[] = ['http:', 'https:']
+const FETCHABLE_PROTOCOLS: ReadonlySet<string> = new Set(['http:', 'https:'])
 
 /**
  * Parse and gate a raw URL string. Refusal reasons are written for the model to read.
@@ -50,7 +50,7 @@ export function parseWebFetchUrl(rawUrl: string): WebFetchUrlDecision {
   } catch {
     return { kind: 'refused', reason: 'it is not parseable as an absolute URL' }
   }
-  if (!FETCHABLE_PROTOCOLS.includes(url.protocol)) {
+  if (!FETCHABLE_PROTOCOLS.has(url.protocol)) {
     return { kind: 'refused', reason: `only http and https URLs are fetchable, got "${url.protocol}"` }
   }
   if (url.username.length > 0 || url.password.length > 0) {
@@ -75,7 +75,11 @@ export function isHostAllowed(hostname: string, allowedHosts: readonly string[])
 }
 
 /** Media types fetchable beyond the `text/` prefix. */
-const FETCHABLE_EXACT_MEDIA_TYPES: readonly string[] = ['application/json', 'application/xml', 'application/xhtml+xml']
+const FETCHABLE_EXACT_MEDIA_TYPES: ReadonlySet<string> = new Set([
+  'application/json',
+  'application/xml',
+  'application/xhtml+xml',
+])
 /** Structured-syntax suffixes (RFC 6839) that stay textual whatever the vendor prefix. */
 const FETCHABLE_MEDIA_TYPE_SUFFIXES: readonly string[] = ['+json', '+xml']
 
@@ -91,7 +95,7 @@ export function isFetchableContentType(contentTypeHeader: string | null): boolea
   if (contentTypeHeader === null) return false
   const mediaType = (contentTypeHeader.split(';')[0] ?? '').trim().toLowerCase()
   if (mediaType.startsWith('text/')) return true
-  if (FETCHABLE_EXACT_MEDIA_TYPES.includes(mediaType)) return true
+  if (FETCHABLE_EXACT_MEDIA_TYPES.has(mediaType)) return true
   return FETCHABLE_MEDIA_TYPE_SUFFIXES.some((suffix) => mediaType.endsWith(suffix))
 }
 

@@ -242,7 +242,7 @@ test("a failed read is not shown as another request's while that one is read", a
       )
     })
   await render(2)
-  await waitUntil(() => container.textContent?.includes('no detail') === true)
+  await waitUntil(() => container.textContent?.includes('no detail'))
   await render('next')
   expect(container.textContent).not.toContain('no detail')
   expect(container.textContent).toContain("reading the request's context…")

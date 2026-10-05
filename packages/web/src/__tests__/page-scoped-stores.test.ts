@@ -43,9 +43,9 @@ function moduleLevelStores(): string[] {
     const source = readFileSync(absolutePath, 'utf8')
     for (const match of source.matchAll(MODULE_LEVEL_STORE)) found.push(`${sourceRelative}:${match[1]}`)
   }
-  return found.sort()
+  return found.toSorted()
 }
 
 test('⚠ every module-level store is page state, named here with its reason — thread state is created per thread', () => {
-  expect(moduleLevelStores()).toEqual([...PAGE_SCOPED_BY_DESIGN].sort())
+  expect(moduleLevelStores()).toEqual([...PAGE_SCOPED_BY_DESIGN].toSorted())
 })

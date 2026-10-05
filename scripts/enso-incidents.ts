@@ -137,7 +137,7 @@ export function renderHistory(threads: readonly EnsoThreadIncidents[]): string {
 }
 
 function thresholdsText(thresholds: EnsoRiskThresholds): string {
-  return (Object.keys(THRESHOLD_FLAGS) as string[])
+  return Object.keys(THRESHOLD_FLAGS)
     .map((flag) => {
       const key = THRESHOLD_FLAGS[flag] as ThresholdKey
       return `${flag} ${thresholds[key]}`

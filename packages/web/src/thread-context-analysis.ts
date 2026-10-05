@@ -119,7 +119,7 @@ export function operationsUpTo(
   operations: readonly EnsoFileOperation[],
   turn: number | undefined,
 ): EnsoFileOperation[] {
-  return operations.filter((operation) => turn === undefined || operation.turn <= turn).reverse()
+  return operations.filter((operation) => turn === undefined || operation.turn <= turn).toReversed()
 }
 
 /** A path as the card shows it: under the thread's tree, `./`-relative; elsewhere, as given. */

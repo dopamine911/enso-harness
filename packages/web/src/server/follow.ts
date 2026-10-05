@@ -278,7 +278,7 @@ export function readPromptBody(raw: string): PromptBody {
   try {
     parsed = JSON.parse(raw)
   } catch (error) {
-    throw new Error(`malformed prompt body: ${String(error)}`)
+    throw new Error(`malformed prompt body: ${String(error)}`, { cause: error })
   }
   if (!Check(EnsoPromptBody, parsed)) {
     const first = Errors(EnsoPromptBody, parsed)[0]
@@ -491,7 +491,7 @@ export function readDialogBody(raw: string): DialogAnswer {
   try {
     body = JSON.parse(raw) as typeof body
   } catch (error) {
-    throw new Error(`malformed dialog body: ${String(error)}`)
+    throw new Error(`malformed dialog body: ${String(error)}`, { cause: error })
   }
   if (typeof body.id !== 'string' || body.id.length === 0) throw new Error('dialog body needs the request id')
   if (body.cancelled === true) return { id: body.id, cancelled: true }
@@ -649,7 +649,7 @@ export function readClosedBody<Schema extends TSchema>(
   try {
     body = JSON.parse(raw)
   } catch (error) {
-    throw new Error(`malformed ${name} body: ${String(error)}`)
+    throw new Error(`malformed ${name} body: ${String(error)}`, { cause: error })
   }
   if (!Check(schema, body)) throw new Error(requirement)
   return body

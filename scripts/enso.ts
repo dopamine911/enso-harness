@@ -209,7 +209,8 @@ const passthroughArgs = process.argv.slice(2)
  * selection upstream
  * (#13) is the durable fix; this is the honest interim. The trigger: `enso-launch.ts#isPrintRun`.
  */
-const printRun = isPrintRun(passthroughArgs, process.stdin.isTTY === true)
+// `?? false`: `isTTY` is typed `boolean` but is `undefined` when stdin is not a terminal (#596).
+const printRun = isPrintRun(passthroughArgs, process.stdin.isTTY ?? false)
 
 const packageToLoad: string = printRun
   ? materializePrintHarness(printHarnessDir(repoRoot), packageRoot, buildPrintManifest(manifest))

@@ -366,7 +366,7 @@ function detectedGateFiles(): string[] {
       (file.includes('gate') && file.endsWith('.test.ts')) || (EXTRA_GATE_FILES as readonly string[]).includes(file),
   })
     .map((path) => relative(ROOT, path).replaceAll('\\', '/'))
-    .sort()
+    .toSorted()
 }
 
 function firstHeaderSentence(source: string, file: string): string {
@@ -486,13 +486,13 @@ function testFiles(): string[] {
   return ['packages', 'scripts', 'test']
     .flatMap(repositoryFilesUnder)
     .filter((path) => /\.test\.tsx?$/.test(path))
-    .sort()
+    .toSorted()
 }
 
 function supportFiles(): string[] {
   return repositoryFilesUnder('packages')
     .filter((path) => path.includes('/__tests__/') && !/\.test\.tsx?$/.test(path) && /\.tsx?$/.test(path))
-    .sort()
+    .toSorted()
 }
 
 function exportedDoubleKeys(): string[] {
@@ -506,7 +506,7 @@ function exportedDoubleKeys(): string[] {
     }
     if (/^export\s+const\s+SNAPSHOT_IDLE\b/m.test(source)) keys.push(`${file}#SNAPSHOT_IDLE`)
   }
-  return keys.sort()
+  return keys.toSorted()
 }
 
 function validateDouble(metadata: DoubleMetadata): void {
@@ -561,7 +561,7 @@ function consumersOf(metadata: DoubleMetadata, tests: readonly string[]): string
 
 function generate(): string {
   const gateFiles = detectedGateFiles()
-  assertExactKeys('gate', gateFiles, Object.keys(GATE_METADATA).sort())
+  assertExactKeys('gate', gateFiles, Object.keys(GATE_METADATA).toSorted())
 
   const gateRows: string[] = []
   const allowlistRatchets: Ratchet[] = []
@@ -569,8 +569,8 @@ function generate(): string {
     const source = repositoryFile(file)
     const metadata = GATE_METADATA[file]
     if (metadata === undefined) throw new Error(`${file}: missing gate metadata`)
-    const detectedExceptions = detectedExceptionConstants(source, file).sort()
-    const recordedExceptions = metadata.exceptions.map((exception) => exception.constant).sort()
+    const detectedExceptions = detectedExceptionConstants(source, file).toSorted()
+    const recordedExceptions = metadata.exceptions.map((exception) => exception.constant).toSorted()
     assertExactKeys(`${file} exception`, detectedExceptions, recordedExceptions)
     const exceptionCounts = metadata.exceptions.map((exception) => {
       const count = stringArray(source, exception.constant, file).length
@@ -623,11 +623,11 @@ function generate(): string {
   for (const metadata of DOUBLE_METADATA) validateDouble(metadata)
   const exportedMetadata = DOUBLE_METADATA.filter((double) => double.exported)
     .map((double) => `${double.file}#${double.symbol}`)
-    .sort()
+    .toSorted()
   assertExactKeys('exported test double', exportedDoubleKeys(), exportedMetadata)
   const tests = testFiles()
   const doubleRows = [...DOUBLE_METADATA]
-    .sort((left, right) => `${left.file}#${left.symbol}`.localeCompare(`${right.file}#${right.symbol}`))
+    .toSorted((left, right) => `${left.file}#${left.symbol}`.localeCompare(`${right.file}#${right.symbol}`))
     .map((metadata) => {
       const consumers = consumersOf(metadata, tests)
       if (consumers.length === 0) throw new Error(`${metadata.file}#${metadata.symbol}: nothing consumes this double`)

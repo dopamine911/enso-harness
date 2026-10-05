@@ -215,5 +215,5 @@ export function commentsIn(path: string, source: string): SourceComment[] {
     for (const child of node.getChildren(file)) visit(child)
   }
   for (const child of file.getChildren(file)) visit(child)
-  return comments.sort((left, right) => left.line - right.line)
+  return comments.toSorted((left, right) => left.line - right.line)
 }

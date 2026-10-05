@@ -1151,7 +1151,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
           ...(parentThreadId === undefined ? {} : { parentThreadId }),
         }
       })
-      .sort((first, second) => second.modified.getTime() - first.modified.getTime())
+      .toSorted((first, second) => second.modified.getTime() - first.modified.getTime())
   }
 
   /**

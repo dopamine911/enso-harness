@@ -60,7 +60,7 @@ function distance(flow: FlowDeclaration, file: string): number {
 }
 
 function outward<T>(flow: FlowDeclaration, items: readonly T[], fileOf: (item: T) => string): T[] {
-  return [...items].sort(
+  return [...items].toSorted(
     (left, right) =>
       distance(flow, fileOf(left)) - distance(flow, fileOf(right)) || fileOf(left).localeCompare(fileOf(right)),
   )

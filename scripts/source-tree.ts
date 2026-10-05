@@ -16,7 +16,7 @@ import { join } from 'node:path'
  */
 
 /** Build outputs and dependencies: never entered, by any caller. */
-const SKIPPED_DIRECTORIES: readonly string[] = ['node_modules', 'dist', 'dist-types', 'coverage']
+const SKIPPED_DIRECTORIES: ReadonlySet<string> = new Set(['node_modules', 'dist', 'dist-types', 'coverage'])
 
 /**
  * A TypeScript or JavaScript module, any flavour. Exported because a reader of source
@@ -39,13 +39,13 @@ export interface WalkOptions {
 export function filesUnder(directory: string, options: WalkOptions = {}): string[] {
   const keep = options.keep ?? ((): boolean => true)
   const found: string[] = []
-  const entries = readdirSync(directory, { withFileTypes: true }).sort((left, right) =>
+  const entries = readdirSync(directory, { withFileTypes: true }).toSorted((left, right) =>
     left.name.localeCompare(right.name),
   )
   for (const dirent of entries) {
     const path = join(directory, dirent.name)
     if (dirent.isDirectory()) {
-      if (SKIPPED_DIRECTORIES.includes(dirent.name) || options.skipDirectories?.includes(dirent.name)) continue
+      if (SKIPPED_DIRECTORIES.has(dirent.name) || options.skipDirectories?.includes(dirent.name)) continue
       found.push(...filesUnder(path, options))
     } else if (dirent.isFile() && SOURCE_FILE.test(dirent.name) && keep(dirent.name, path)) {
       found.push(path)

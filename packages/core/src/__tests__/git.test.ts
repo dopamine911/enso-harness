@@ -369,7 +369,7 @@ test("⚠ a project inside a larger repository reads its own directory only, in 
   // From the top level the scope is the whole working tree.
   const whole = await repositoryAt(directory)
   expect(whole.scope).toBe('')
-  expect((await readGitChanges(runGit, whole)).files.map((file) => file.path).sort()).toEqual([
+  expect((await readGitChanges(runGit, whole)).files.map((file) => file.path).toSorted()).toEqual([
     'README.md',
     'proj [x]/app.ts',
     'proj [x]/new.ts',

@@ -98,7 +98,7 @@ function firstCompleteSentence(text: string): string | undefined {
 function decisions(): DecisionRow[] {
   const rows: DecisionRow[] = []
   const seen = new Set<string>()
-  const files = SOURCE_ROOTS.flatMap((sourceRoot) => sourceFiles(join(ROOT, sourceRoot))).sort()
+  const files = SOURCE_ROOTS.flatMap((sourceRoot) => sourceFiles(join(ROOT, sourceRoot))).toSorted()
   for (const path of files) {
     const file = relative(ROOT, path).replaceAll('\\', '/')
     if (seen.has(file)) throw new Error(`duplicate decision path: ${file}`)
@@ -108,7 +108,7 @@ function decisions(): DecisionRow[] {
     const text = normalizedHeader(header)
     const issues = [...new Set([...text.matchAll(ISSUE)].map((match) => Number(match[1])))]
       .filter((issue) => Number.isInteger(issue))
-      .sort((left, right) => left - right)
+      .toSorted((left, right) => left - right)
     if (issues.length === 0) continue
     const sentence = firstCompleteSentence(text)
     rows.push({

@@ -8,7 +8,7 @@ const partWith = (overrides: Partial<ToolResultPart>): ToolResultPart => ({
   type: 'tool-result',
   toolCallId: 'call-1',
   content: 'PLAIN TEXT FORM',
-  state: 'complete' as ToolResultPart['state'],
+  state: 'complete',
   ...overrides,
 })
 

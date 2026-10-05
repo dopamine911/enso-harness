@@ -487,7 +487,14 @@ export function createEnsoExtensionUiContext(options: EnsoExtensionUiContextOpti
      * once, exactly as pi's rpc mode does.
      */
     async custom<T>(factory: CustomComponentFactory<T>): Promise<T> {
-      const { promise, resolve } = Promise.withResolvers<T>()
+      // pi's rpc contract, stated in TypeScript: an unknown component is "no component", so this
+      // promise may settle `undefined` where pi's interface promises a `T`. The resolver says so in
+      // its type, and `contracted` is the one place that hands it back as `Promise<T>` (#603 review).
+      // ⚠ Not a cast on `resolve`'s argument: bun-types declares `resolve` as `(value?: T | …)`, so
+      // there `resolve(undefined)` compiles for any `T` and the linter calls any cast unnecessary —
+      // the unsoundness would be invisible, and a compile error under TypeScript's own `lib`.
+      const { promise, resolve } = Promise.withResolvers<T | undefined>()
+      const contracted = promise as Promise<T>
       const component = await buildComponent(factory, resolve)
       const questionnaire = liftQuestionnaire(component)
       if (questionnaire !== undefined) {
@@ -500,12 +507,11 @@ export function createEnsoExtensionUiContext(options: EnsoExtensionUiContextOpti
         )
         // `T` for the asking tool is `EnsoQuestionnaireResult` — what its component's `done` takes.
         resolve(result as T)
-        return promise
+        return contracted
       }
       disposeQuietly(component)
-      // pi's rpc contract, stated in TypeScript: an unknown component is "no component".
-      resolve(undefined as T)
-      return promise
+      resolve(undefined)
+      return contracted
     },
     pasteToEditor: () => undefined,
     getEditorText: () => '',

@@ -98,7 +98,7 @@ test('⚠ the quarantine removes secret-shaped and file-defined names, and nothi
   const report = quarantineSecrets(environment, { repoRoot: root, home: root })
   expect(report.removed).toEqual(['CLIENT_SECRET', 'GH_TOKEN', 'HARMLESS_LOOKING', 'TAVILY_API_KEY'])
   expect(report.misplaced).toEqual([])
-  expect(Object.keys(environment).sort()).toEqual(['HOME', 'PATH', 'PI_CODING_AGENT_DIR', 'TOKENIZER_PATH'])
+  expect(Object.keys(environment).toSorted()).toEqual(['HOME', 'PATH', 'PI_CODING_AGENT_DIR', 'TOKENIZER_PATH'])
   // Idempotent: nothing left to remove, nothing else touched.
   expect(quarantineSecrets(environment, { repoRoot: root, home: root }).removed).toEqual([])
   expect(environment.PATH).toBe('/usr/bin')
@@ -149,7 +149,7 @@ test("⚠ the logger's value set is the secrets file plus secret-shaped env name
     // Not secret-shaped: never scanned for, however long.
     PUBLIC_URL: 'https://example.com/a-very-long-public-url',
   })
-  expect([...values].sort()).toEqual([
+  expect([...values].toSorted()).toEqual([
     'but-in-the-file-so-secret', // in the file, so a secret by definition whatever its name
     'ghp-notarealsecret-fixture',
     'tvly-long-enough-to-scan',

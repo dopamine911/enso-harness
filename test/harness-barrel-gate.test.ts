@@ -89,7 +89,7 @@ test('the brace reader stops at its own list, and takes type-only names (#263)',
   ].join('\n')
   // ⚠ The first line must NOT be swallowed: a lazy body would run from its `{` to the brace
   // of the next matching specifier and report `alpha` as imported through the barrel.
-  expect(namesFrom(source, 'import', /[^']*core\/index\.ts/).sort()).toEqual(
-    ['Beta', 'Gamma', 'Epsilon', 'delta'].sort(),
+  expect(namesFrom(source, 'import', /[^']*core\/index\.ts/).toSorted()).toEqual(
+    ['Beta', 'Gamma', 'Epsilon', 'delta'].toSorted(),
   )
 })

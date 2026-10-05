@@ -138,7 +138,7 @@ export function browserSection(lines: readonly EnsoLogLine[], pageUrl?: string):
 export function buildLogBundle(inputs: EnsoBundleInputs): string {
   const { about } = inputs
   const manifest = redactionManifest(inputs.lines)
-  const redacted = Object.entries(manifest).sort(([left], [right]) => left.localeCompare(right))
+  const redacted = Object.entries(manifest).toSorted(([left], [right]) => left.localeCompare(right))
   const parts = [
     BUNDLE_HEADING,
     '',

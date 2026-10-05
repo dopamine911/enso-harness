@@ -411,7 +411,7 @@ const summaries = new Map<string, ThreadSummary>()
 const threadList = createStore<readonly ThreadSummary[]>([])
 
 function publishThreadList(): void {
-  threadList.set([...summaries.values()].reverse())
+  threadList.set([...summaries.values()].toReversed())
 }
 
 /**

@@ -70,7 +70,7 @@ export function threadTimeline(
   for (const event of events?.sent ?? []) entries.push({ source: 'sent', at: instantOf(event.at), event })
   for (const line of lines) entries.push({ source: 'log', at: instantOf(line['@timestamp']), line })
   // `Array.prototype.sort` is stable (ES2019), so a tie keeps the concatenation order above.
-  return entries.sort((left, right) => left.at - right.at)
+  return entries.toSorted((left, right) => left.at - right.at)
 }
 
 /**

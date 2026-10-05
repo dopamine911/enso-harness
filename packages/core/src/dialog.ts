@@ -290,8 +290,8 @@ function questionAnswerRefusal(
   number: number,
 ): string | undefined {
   if (answer === undefined) return `question ${number} has no answer`
-  const offered = question.options.map((option) => option.label)
-  const stranger = answer.selected.find((label) => !offered.includes(label))
+  const offered = new Set(question.options.map((option) => option.label))
+  const stranger = answer.selected.find((label) => !offered.has(label))
   if (stranger !== undefined) return `'${stranger}' is not one of question ${number}'s options`
   if (new Set(answer.selected).size !== answer.selected.length) return `question ${number} names an option twice`
   if (answer.other?.trim() === '') return `question ${number}'s other answer is blank`

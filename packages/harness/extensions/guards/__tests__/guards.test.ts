@@ -502,9 +502,9 @@ test('session_start resets the read-set on a live instance', () => {
 
 /** Run pi's own `read` over a file in `cwd` and hand the guard the tool_result it produces. */
 async function readThroughPi(runtime: GuardRuntime, cwd: string, input: Record<string, unknown>): Promise<void> {
-  const [read] = createReadOnlyTools(cwd).filter((tool) => tool.name === 'read')
+  const read = createReadOnlyTools(cwd).find((tool) => tool.name === 'read')
   if (read === undefined) throw new Error("pi's read-only tools have no read")
-  const result = await read.execute('t', input as never)
+  const result = await read.execute('t', input)
   runtime.toolResult(
     {
       type: 'tool_result',
@@ -1114,12 +1114,12 @@ test('a read through the @ prefix confers knowledge of the plain path (#10 agree
 // unnoticed — and `GUARD_POLICY_TOOL_NAMES` must name only tools pi actually registers.
 test("⚠ PI_SHIPPED_TOOL_NAMES matches the tools pi's factories build, and the guard policy names only real tools", () => {
   const piTools = [...createCodingTools(cwd), ...createReadOnlyTools(cwd), createPowerShellTool(cwd)]
-  const realNames = [...new Set(piTools.map((tool) => tool.name))].sort()
-  expect(realNames).toEqual([...PI_SHIPPED_TOOL_NAMES].sort())
+  const realNames = [...new Set(piTools.map((tool) => tool.name))].toSorted()
+  expect(realNames).toEqual([...PI_SHIPPED_TOOL_NAMES].toSorted())
   for (const policyName of GUARD_POLICY_TOOL_NAMES) expect(realNames).toContain(policyName)
   // And the policy list is EXACTLY the gated set — the audit's mutation (drop `edit`) failed
   // no test, because the session_start check iterates whatever the list happens to hold.
-  expect([...GUARD_POLICY_TOOL_NAMES].sort()).toEqual(['bash', 'edit', 'powershell', 'read', 'write'])
+  expect([...GUARD_POLICY_TOOL_NAMES].toSorted()).toEqual(['bash', 'edit', 'powershell', 'read', 'write'])
 })
 
 // ── #53 S3: a tool event with no `input` must not throw out of a must-not-throw handler ──

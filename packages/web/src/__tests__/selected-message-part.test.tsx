@@ -22,7 +22,7 @@ const toolCallWith = (overrides: Partial<ToolCallPart>): ToolCallPart => ({
   id: 'call-1',
   name: 'bash',
   arguments: '{}',
-  state: 'complete' as ToolCallPart['state'],
+  state: 'complete',
   ...overrides,
 })
 
@@ -30,7 +30,7 @@ const toolResultWith = (overrides: Partial<ToolResultPart>): ToolResultPart => (
   type: 'tool-result',
   toolCallId: 'call-1',
   content: 'PLAIN TEXT FORM',
-  state: 'complete' as ToolResultPart['state'],
+  state: 'complete',
   ...overrides,
 })
 
@@ -174,7 +174,7 @@ test('mid-stream, before the arguments parse, the row still shows the raw argume
     part: toolCallWith({
       name: 'bash',
       arguments: '{"command":"ls -',
-      state: 'input-streaming' as ToolCallPart['state'],
+      state: 'input-streaming',
     }),
   })
   expect(rendered).toContain('data-enso-tool-call="pending"')

@@ -92,6 +92,14 @@ export default defineConfig({
     // A `${…}` in a plain string is almost always a template literal written with the wrong quotes.
     // The files that spell one ON PURPOSE are exempted by name in `overrides`, each with its reason.
     'no-template-curly-in-string': 'error',
+    // #596: rules from `suspicious` and `pedantic` with few findings when measured, each a real bug
+    // class. `==` coerces; a `map`/`filter` callback that forgets to return yields `undefined`; a
+    // rejection with a non-Error loses its stack; a rethrow without `{ cause }` loses the original.
+    // `== null` stays allowed: it is the one deliberate loose comparison, "null or undefined".
+    eqeqeq: ['error', 'always', { null: 'ignore' }],
+    'array-callback-return': 'error',
+    'prefer-promise-reject-errors': 'error',
+    'preserve-caught-error': 'error',
 
     // ── style ──
     'no-nested-ternary': 'error',
@@ -109,6 +117,11 @@ export default defineConfig({
     'typescript/no-implied-eval': 'error',
     'typescript/no-unnecessary-type-conversion': 'error',
     'typescript/prefer-nullish-coalescing': 'error',
+    // #596: a cast, template or `=== true` the types already make true reads as if something
+    // were being converted or checked, and hides the place where one later becomes necessary.
+    'typescript/no-unnecessary-type-assertion': 'error',
+    'typescript/no-unnecessary-template-expression': 'error',
+    'typescript/no-unnecessary-boolean-literal-compare': 'error',
     // A `default` arm counts as exhaustive: the check is that every arm EXISTS, and
     // `noFallthroughCasesInSwitch` (tsconfig.base.json) is what proves none runs into the next.
     'typescript/switch-exhaustiveness-check': ['error', { considerDefaultExhaustiveForUnions: true }],
@@ -125,6 +138,17 @@ export default defineConfig({
     ],
     'typescript/explicit-module-boundary-types': 'error',
     'no-unmodified-loop-condition': 'error',
+
+    // ── arrays and allocation (#596) ──
+    // `sort()` and `reverse()` mutate the array they are called on and return it, so a sorted COPY
+    // written `.sort()` also reorders the caller's array — the codebase already writes `toSorted()`
+    // / `toReversed()`; these make it the only spelling. A statement whose whole point is the
+    // in-place reorder stays allowed (the rules' `allowExpressionStatement` default).
+    'unicorn/no-array-sort': 'error',
+    'unicorn/no-array-reverse': 'error',
+    'unicorn/prefer-set-has': 'error',
+    'unicorn/prefer-array-find': 'error',
+    'oxc/no-accumulating-spread': 'error',
 
     // ── tests ──
     'jest-js/max-nested-describe': ['error', { max: 5 }],
@@ -181,6 +205,12 @@ export default defineConfig({
         'test/source-comments.test.ts',
       ],
       rules: { 'no-template-curly-in-string': 'off' },
+    },
+    {
+      // The connection under test must survive a fetch that rejects with something that is not an
+      // Error (a string, as some runtimes and polyfills do), so the test rejects with one.
+      files: ['packages/web/src/__tests__/prompt-library-connection.test.ts'],
+      rules: { 'prefer-promise-reject-errors': 'off' },
     },
     {
       // bun-types declares `expect(p).rejects`/`.resolves` matchers as returning `void`, but at

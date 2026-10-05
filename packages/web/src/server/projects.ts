@@ -183,7 +183,9 @@ function readRegistrations(statePath: string): Registration[] {
   try {
     parsed = JSON.parse(text)
   } catch (error) {
-    throw new Error(`enso-server: ${statePath} is not valid JSON (${String(error)}) — fix it or delete it`)
+    throw new Error(`enso-server: ${statePath} is not valid JSON (${String(error)}) — fix it or delete it`, {
+      cause: error,
+    })
   }
   if (!storedProjectsValidator.Check(parsed)) {
     throw new Error(
@@ -382,7 +384,7 @@ export function createProjectRegistry(options: ProjectRegistryOptions): ProjectR
         continue
       entries.push(entryOf(canonical, child.name))
     }
-    return entries.sort((left, right) => left.name.localeCompare(right.name))
+    return entries.toSorted((left, right) => left.name.localeCompare(right.name))
   }
 
   function entryOf(canonical: string, name: string): EnsoDirectoryEntry {

@@ -115,7 +115,7 @@ function isCommentedAt(source: string, index: number): boolean {
 function scanEnvironment(): EnvironmentScan {
   const found = new Map<string, EnvironmentOccurrence>()
   const directFiles = new Set<string>()
-  const files = SOURCE_ROOTS.flatMap((sourceRoot) => filesUnder(join(ROOT, sourceRoot))).sort()
+  const files = SOURCE_ROOTS.flatMap((sourceRoot) => filesUnder(join(ROOT, sourceRoot))).toSorted()
   for (const path of files) {
     const source = relative(ROOT, path).replaceAll('\\', '/')
     const sourceText = readFileSync(path, 'utf8')
@@ -131,10 +131,10 @@ function scanEnvironment(): EnvironmentScan {
     if (!isTestSource && declaresEnvironmentSeam) scanObjectReads(sourceText, 'environment', source, found)
   }
   return {
-    occurrences: [...found.values()].sort(
+    occurrences: [...found.values()].toSorted(
       (left, right) => compareText(left.key, right.key) || compareText(left.source, right.source),
     ),
-    directFiles: [...directFiles].sort(),
+    directFiles: [...directFiles].toSorted(),
   }
 }
 
@@ -174,7 +174,7 @@ function sameRows(left: readonly string[], right: readonly string[]): boolean {
 }
 
 function assertEnvironmentInventory(scan: EnvironmentScan): void {
-  const allowlist = [...PROCESS_ENVIRONMENT_READERS].sort()
+  const allowlist = [...PROCESS_ENVIRONMENT_READERS].toSorted()
   if (!sameRows(scan.directFiles, allowlist)) {
     const detectedOnly = scan.directFiles.filter((file) => !allowlist.includes(file))
     const allowlistOnly = allowlist.filter((file) => !scan.directFiles.includes(file))
@@ -184,8 +184,8 @@ function assertEnvironmentInventory(scan: EnvironmentScan): void {
         `allowlist only: ${allowlistOnly.join(', ') || '(none)'}`,
     )
   }
-  const discovered = scan.occurrences.map((row) => `${row.key}\0${row.source}`).sort()
-  const classified = ENVIRONMENT_METADATA.map((row) => `${row.key}\0${row.source}`).sort()
+  const discovered = scan.occurrences.map((row) => `${row.key}\0${row.source}`).toSorted()
+  const classified = ENVIRONMENT_METADATA.map((row) => `${row.key}\0${row.source}`).toSorted()
   if (!sameRows(discovered, classified)) {
     const unclassified = discovered.filter((row) => !classified.includes(row)).map((row) => row.replace('\0', ' @ '))
     const stale = classified.filter((row) => !discovered.includes(row)).map((row) => row.replace('\0', ' @ '))
@@ -251,8 +251,8 @@ function configInventory(): { fields: ConfigFieldMetadata[] } {
     ...objectFields(projectSource, 'EnsoProjectsConfig', 'projects.'),
     ...objectFields(incidentSource, 'EnsoSecurityConfig', 'security.'),
     ...objectFields(judgeSource, 'EnsoJudgeConfig', 'security.judge.'),
-  ].sort()
-  const metadata = [...CONFIG_FIELD_METADATA].sort((left, right) => compareText(left.field, right.field))
+  ].toSorted()
+  const metadata = [...CONFIG_FIELD_METADATA].toSorted((left, right) => compareText(left.field, right.field))
   const classified = metadata.map((row) => row.field)
   if (!sameRows(discovered, classified)) {
     const unclassified = discovered.filter((field) => !classified.includes(field))
@@ -273,8 +273,8 @@ function runtimePathInventory(): RuntimePathMetadata[] {
       helper: match[1] ?? '',
       path: `${match[2] === 'home' ? 'ENSO_HOME' : 'node_modules'}/${(match[3] ?? '').replaceAll("'", '').split(', ').join('/')}`,
     }))
-    .sort((left, right) => compareText(left.path, right.path))
-  const metadata = [...RUNTIME_PATH_METADATA].sort((left, right) => compareText(left.path, right.path))
+    .toSorted((left, right) => compareText(left.path, right.path))
+  const metadata = [...RUNTIME_PATH_METADATA].toSorted((left, right) => compareText(left.path, right.path))
   if (
     !sameRows(
       discovered.map((row) => `${row.helper}\0${row.path}`),
@@ -327,7 +327,7 @@ function generate(): string {
   const runtimePaths = runtimePathInventory()
   const resources = manifestResources()
   const environmentRows = [...ENVIRONMENT_METADATA]
-    .sort((left, right) => compareText(left.key, right.key) || compareText(left.reader, right.reader))
+    .toSorted((left, right) => compareText(left.key, right.key) || compareText(left.reader, right.reader))
     .map((row) => `| \`${row.key}\` | ${row.reader} | ${tableText(row.purposeAndDefault)} | ${row.phase} |`)
   const configRows = config.fields.map(
     (row) => `| \`${row.field}\` | ${row.required} | ${tableText(row.defaultWhenOmitted)} | ${row.reader} |`,

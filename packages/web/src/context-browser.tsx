@@ -309,8 +309,8 @@ const TOOL_ORDERS: ReadonlyArray<readonly [ToolOrder, string]> = [
 ]
 
 function ordered(elements: readonly EnsoContextElement[], order: ToolOrder): EnsoContextElement[] {
-  if (order === 'size') return [...elements].sort((first, second) => second.tokens - first.tokens)
-  if (order === 'name') return [...elements].sort((first, second) => first.label.localeCompare(second.label))
+  if (order === 'size') return [...elements].toSorted((first, second) => second.tokens - first.tokens)
+  if (order === 'name') return [...elements].toSorted((first, second) => first.label.localeCompare(second.label))
   return [...elements]
 }
 
@@ -444,7 +444,7 @@ function requestOptions(
   return [
     ['next', `Next request · ${estimateText(totalOf(next))}`],
     ...[...requests]
-      .reverse()
+      .toReversed()
       .map(
         (candidate) =>
           [

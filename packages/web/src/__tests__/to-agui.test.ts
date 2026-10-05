@@ -239,7 +239,7 @@ test('nothing is silently dropped: every kind except an in-flight result and a b
   // every member covered — the oracle is the union itself, never a hard-coded count (the
   // count here and in the mapper sweep drifted apart once; a set diff names the missing kind)
   const coveredKinds: string[] = [...new Set(observations.map((observation) => observation.kind))]
-  expect(coveredKinds.sort()).toEqual(observationKindsDeclaredByTheUnion())
+  expect(coveredKinds.toSorted()).toEqual(observationKindsDeclaredByTheUnion())
 })
 
 // ⚠⚠ #18's descriptor must survive the LAST hop: EnsoObservation → AG-UI StreamChunk, and

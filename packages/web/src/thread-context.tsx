@@ -350,7 +350,7 @@ function TrendPlot(props: TrendPlotProps): React.ReactNode {
                   ) : null}
                   <span className="flex min-h-0 flex-1 flex-col justify-end">
                     {[...CONTEXT_CATEGORIES]
-                      .reverse()
+                      .toReversed()
                       .map((category) => (makeup[category] > 0 ? segment(category, makeup[category], false) : null))}
                   </span>
                   {mode === 'delta' ? (

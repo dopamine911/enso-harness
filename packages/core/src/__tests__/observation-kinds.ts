@@ -11,5 +11,5 @@ import { EnsoObservation } from '../observation.ts'
  */
 export function observationKindsDeclaredByTheUnion(): string[] {
   const kinds: string[] = EnsoObservation.anyOf.map((member) => member.properties.kind.const)
-  return kinds.sort()
+  return kinds.toSorted()
 }

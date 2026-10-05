@@ -212,7 +212,7 @@ export function lineReferencesIn(
     ...found(PATH_LINE).filter((reference) => filesNamed(reference.path, files).length > 0),
     ...(bare ? [...found(BARE_LINE), ...found(BARE_SUFFIX)] : []),
   ]
-    .sort((left, right) => left.at - right.at)
+    .toSorted((left, right) => left.at - right.at)
     .map(({ line, text }) => ({ line, text }))
 }
 

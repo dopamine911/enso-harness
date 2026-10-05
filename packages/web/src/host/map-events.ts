@@ -46,9 +46,9 @@ const DIALOG_UI_METHODS = new Set(['select', 'confirm', 'input', 'editor', 'ques
 function readUsage(raw: unknown): EnsoUsage | undefined {
   if (typeof raw !== 'object' || raw === null) return undefined
   const usage = raw as Record<string, unknown>
-  const numberAt = (key: string): number => (typeof usage[key] === 'number' ? (usage[key] as number) : 0)
+  const numberAt = (key: string): number => (typeof usage[key] === 'number' ? usage[key] : 0)
   const cost = usage.cost as Record<string, unknown> | undefined
-  const totalCost = typeof cost?.total === 'number' ? (cost.total as number) : undefined
+  const totalCost = typeof cost?.total === 'number' ? cost.total : undefined
   return {
     input: numberAt('input'),
     output: numberAt('output'),

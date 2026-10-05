@@ -154,7 +154,7 @@ async function proseGatePages(): Promise<string[]> {
     'README.md',
     'scripts/gate.ts',
     ...(await globbed('.github/workflows/*.yml')),
-  ].sort()
+  ].toSorted()
 }
 
 const CLAUSE_MARKS = [',', ';', ':', '(', ')', '\n']

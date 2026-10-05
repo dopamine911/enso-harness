@@ -101,8 +101,8 @@ function declaredExtensionTrees(): { root: string; prefix: string }[] {
 test("⚠ exactly the two known tool_call participants — a third means #4's arbiter is due", () => {
   const found = declaredExtensionTrees()
     .flatMap(({ root, prefix }) => registrationSitesUnder(root).map((site) => join(prefix, site)))
-    .sort()
-  expect(found).toEqual([...ALLOWED_TOOL_CALL_PARTICIPANTS].sort())
+    .toSorted()
+  expect(found).toEqual([...ALLOWED_TOOL_CALL_PARTICIPANTS].toSorted())
 })
 
 test('the vendored participant list itself is current — every declared vendor tree was scanned', () => {

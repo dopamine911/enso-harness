@@ -132,7 +132,9 @@ function readTrustFile(path: string): Record<string, boolean | null> {
   try {
     parsed = JSON.parse(readFileSync(path, 'utf8').replace(/^\uFEFF/, ''))
   } catch (error: unknown) {
-    throw new Error(`Failed to read trust store ${path}: ${error instanceof Error ? error.message : String(error)}`)
+    throw new Error(`Failed to read trust store ${path}: ${error instanceof Error ? error.message : String(error)}`, {
+      cause: error,
+    })
   }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     throw new Error(`Invalid trust store ${path}: expected an object`)
@@ -149,7 +151,7 @@ function readTrustFile(path: string): Record<string, boolean | null> {
 
 function writeTrustFile(path: string, data: Record<string, boolean | null>): void {
   const sorted: Record<string, boolean | null> = {}
-  for (const key of Object.keys(data).sort()) sorted[key] = data[key] ?? null
+  for (const key of Object.keys(data).toSorted()) sorted[key] = data[key] ?? null
   mkdirSync(dirname(path), { recursive: true })
   writeFileSync(path, `${JSON.stringify(sorted, null, 2)}\n`, 'utf8')
 }

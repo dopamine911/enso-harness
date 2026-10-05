@@ -46,11 +46,11 @@ const FACTS: FeatureFacts = { feature: 'demo', shots: [CAPTURED] }
 test('⚠ a stale capture is refused by what disagrees, and each refusal names the recapture (#482)', () => {
   const recapture = 'recapture with `bun run docs:screenshots --only demo`'
   expect(featureProblems(SPEC, undefined)).toEqual([`demo: no docs/features/facts/demo.json; ${recapture}`])
-  expect(featureProblems(SPEC, FACTS).sort()).toEqual(
+  expect(featureProblems(SPEC, FACTS).toSorted()).toEqual(
     [
       `demo: demo has 2 marks, the capture rang 1; ${recapture}`,
       'demo: "{never}" is quoted but the capture measured no value for it',
-    ].sort(),
+    ].toSorted(),
   )
   expect(featureProblems(SPEC, { ...FACTS, shots: [{ ...CAPTURED, image: 'other' }] })).toContain(
     `demo: shot demo was not captured; ${recapture}`,

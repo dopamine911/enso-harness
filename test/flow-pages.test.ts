@@ -77,7 +77,7 @@ function plantedTree(): string {
 test('⚠ each disagreement is refused by name, and an @unpinned invariant is not (#482, PR #488 review)', () => {
   const { problems, invariants } = collectFlows(plantedTree())
   const tests = 'packages/demo/src/__tests__/start.test.ts'
-  expect([...problems].sort()).toEqual(
+  expect([...problems].toSorted()).toEqual(
     [
       '@invariant demo/pinned is declared twice',
       'packages/demo/src/start.ts: @invariant demo/unpinned is pinned by no test and says no @unpinned',
@@ -87,7 +87,7 @@ test('⚠ each disagreement is refused by name, and an @unpinned invariant is no
       `${tests}: "the pinning test" pins unrecorded/none, which no @invariant declares`,
       '@flow unrecorded: no test records its diagram',
       `packages/demo/src/__tests__/start.test.ts: "the pinning test" records flow ghost, which no @flow declares`,
-    ].sort(),
+    ].toSorted(),
   )
   expect(invariants.find((invariant) => invariant.id === 'demo/excused')?.unpinned).toBe('the double cannot drive it')
 })

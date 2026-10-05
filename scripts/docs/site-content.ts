@@ -53,7 +53,7 @@ export function contentPath(page: string): string {
 export function documentationPages(): string[] {
   const pages: string[] = []
   const walk = (directory: string): void => {
-    for (const childName of readdirSync(directory).sort()) {
+    for (const childName of readdirSync(directory).toSorted()) {
       const path = join(directory, childName)
       if (statSync(path).isDirectory()) walk(path)
       else if (childName.endsWith('.md')) pages.push(relative(join(ROOT, DOCS), path))
@@ -77,7 +77,7 @@ function isAsset(path: string): boolean {
 export function documentationAssets(): string[] {
   const assets: string[] = []
   const walk = (directory: string): void => {
-    for (const childName of readdirSync(directory).sort()) {
+    for (const childName of readdirSync(directory).toSorted()) {
       const path = join(directory, childName)
       if (statSync(path).isDirectory()) walk(path)
       else if (isAsset(childName)) assets.push(relative(join(ROOT, DOCS), path))

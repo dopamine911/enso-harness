@@ -125,7 +125,7 @@ export function attributeNotices(loaded: LoadExtensionsResult, harnessPackageDir
   for (const extension of loaded.extensions) {
     const sender = extensionSender(extension.path, harnessPackageDir)
     if (sender === undefined) continue
-    for (const list of extension.handlers.values()) wrapHandlerList(list as Registered[], sender)
+    for (const list of extension.handlers.values()) wrapHandlerList(list, sender)
     for (const [commandName, command] of extension.commands) {
       extension.commands.set(commandName, { ...command, handler: speakingAs(command.handler, sender) })
     }

@@ -141,7 +141,7 @@ test('google: grounding-redirect URLs resolve through a HEAD and keep originals 
     return sseResponse(events)
   }
   const outcome = await runGoogleProviderSearch(modelRequest(GOOGLE_MODEL, fetchUrl))
-  expect(headRequests.sort()).toEqual([redirectUrl, unresolvableUrl].sort())
+  expect(headRequests.toSorted()).toEqual([redirectUrl, unresolvableUrl].toSorted())
   if (outcome.kind !== 'searched') throw new Error('expected searched')
   expect(outcome.sources[0]).toEqual({ title: 'page', url: 'https://real.example/page' })
   expect(outcome.sources[1]?.url).toBe(unresolvableUrl)

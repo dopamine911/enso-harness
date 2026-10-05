@@ -104,8 +104,8 @@ function directImportGraph(): Map<string, string[]> {
 const imports = directImportGraph()
 
 test('⚠ the root `overrides` block is exactly the state-layer packages the code imports (#223)', () => {
-  expect(Object.keys(root.overrides ?? {}).sort()).toEqual(
-    [...imports.keys()].filter((name) => STATE_LAYER_SCOPE.test(name)).sort(),
+  expect(Object.keys(root.overrides ?? {}).toSorted()).toEqual(
+    [...imports.keys()].filter((name) => STATE_LAYER_SCOPE.test(name)).toSorted(),
   )
 })
 
@@ -178,7 +178,7 @@ test('⚠ @shadcn/helpers’ peer ranges are knowingly violated — re-probe whe
     optionalPeers: Object.entries(helper.peerDependenciesMeta ?? {})
       .filter(([, meta]) => meta.optional === true)
       .map(([name]) => name)
-      .sort(),
+      .toSorted(),
     weRun: {
       '@tanstack/ai': web.dependencies?.['@tanstack/ai'],
       '@tanstack/ai-client': web.dependencies?.['@tanstack/ai-client'],

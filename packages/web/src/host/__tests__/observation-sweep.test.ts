@@ -90,5 +90,5 @@ test('EVERY observation the mapper can emit validates against EnsoObservation', 
       ...synthesised.map((observation) => observation.kind),
     ]),
   ]
-  expect(coveredKinds.sort()).toEqual(observationKindsDeclaredByTheUnion())
+  expect(coveredKinds.toSorted()).toEqual(observationKindsDeclaredByTheUnion())
 })

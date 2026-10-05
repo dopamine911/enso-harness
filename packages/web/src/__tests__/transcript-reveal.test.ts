@@ -33,7 +33,7 @@ test('unequal counts: found by text, markdown and truncation aside, the n-th of 
   const bubbles = ['continue', 'fix the build', 'held, not yet sent', 'continue']
   expect(promptBubbleIndex(bubbles, prompts, 2)).toBe(1)
   expect(promptBubbleIndex(bubbles, prompts, 3)).toBe(3)
-  const long = `${'word '.repeat(30)}`.trim()
+  const long = 'word '.repeat(30).trim()
   const truncated = [prompt(1, `${long.slice(0, 119)}…`)]
   expect(promptBubbleIndex(['queued elsewhere', long], truncated, 1)).toBe(1)
 })

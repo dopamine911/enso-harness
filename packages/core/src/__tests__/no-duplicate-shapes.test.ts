@@ -72,7 +72,7 @@ test('every module is reachable: from the barrel, or from a subpath package.json
   const reExported = new Set([...barrel.matchAll(/ from '\.\/([^']+)'$/gm)].map((match) => match[1] ?? ''))
   const inBarrel = modules.filter((module) => reExported.has(module))
   const expectedInBarrel = modules.filter((module) => !subpathModules.includes(module))
-  expect(inBarrel.sort()).toEqual(expectedInBarrel.sort())
+  expect(inBarrel.toSorted()).toEqual(expectedInBarrel.toSorted())
 })
 
 test('the schemas the rest of the repo depends on are actually exported', () => {

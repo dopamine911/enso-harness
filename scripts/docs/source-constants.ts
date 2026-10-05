@@ -169,7 +169,7 @@ export function constantIn(path: string, name: string): LiteralValue {
 /** A constant that must be an array of strings. */
 export function stringsIn(path: string, name: string): string[] {
   const value = constantIn(path, name)
-  if (Array.isArray(value) && value.every((listed) => typeof listed === 'string')) return value as string[]
+  if (Array.isArray(value) && value.every((listed) => typeof listed === 'string')) return value
   throw new Error(`source-constants: ${path}: ${name} is not an array of strings`)
 }
 

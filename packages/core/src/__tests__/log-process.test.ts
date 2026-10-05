@@ -200,8 +200,8 @@ async function stdoutSays(running: EndingChild, word: string): Promise<void> {
 }
 
 const dayRecordsOf = (logsDir: string): EnsoLogLine[] => {
-  const written = readdirSync(logsDir).filter((name) => /^enso-\d{4}-\d{2}-\d{2}\.jsonl$/.test(name))
-  return linesOf(join(logsDir, written[0] ?? '')).map((line) => JSON.parse(line) as EnsoLogLine)
+  const written = readdirSync(logsDir).find((name) => /^enso-\d{4}-\d{2}-\d{2}\.jsonl$/.test(name))
+  return linesOf(join(logsDir, written ?? '')).map((line) => JSON.parse(line) as EnsoLogLine)
 }
 
 test('⚠ a stop signal — even twice, as a supervisor and a parent both send it — leaves ONE `process stopping` record, flushes, and exits 128 + the signal (#267, #385)', async () => {

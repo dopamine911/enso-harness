@@ -514,7 +514,7 @@ export function latestWins<T>(issue: () => Promise<T>): () => Promise<T | undefi
       return mine === latest ? value : undefined
     } catch (failure) {
       if (mine !== latest) return undefined
-      if (failure === undefined || failure === null) throw new Error('rejected without a reason')
+      if (failure === undefined || failure === null) throw new Error('rejected without a reason', { cause: failure })
       throw failure
     }
   }

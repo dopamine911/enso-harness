@@ -106,7 +106,7 @@ export function toolSummaries(calls: readonly EnsoToolCallStats[], refused: Refu
     }
     byName.set(call.toolName, summary)
   }
-  return [...byName.values()].sort(
+  return [...byName.values()].toSorted(
     (first, second) => second.calls - first.calls || first.toolName.localeCompare(second.toolName),
   )
 }
@@ -123,7 +123,7 @@ export function toolUsageValue(tool: ToolSummary, metric: ToolUsageMetric): numb
 export function rankTools(tools: readonly ToolSummary[], metric: ToolUsageMetric): ToolSummary[] {
   return tools
     .filter((tool) => metric !== 'duration' || tool.measured > 0)
-    .sort((first, second) => toolUsageValue(second, metric) - toolUsageValue(first, metric))
+    .toSorted((first, second) => toolUsageValue(second, metric) - toolUsageValue(first, metric))
 }
 
 /** What "costliest calls" ranks by. */
@@ -149,6 +149,6 @@ export function rankCalls(
       if (metric === 'duration') return call.durationMs !== undefined
       return metric !== 'failure' || isFailure(call, refused)
     })
-    .sort((first, second) => callValue(second, metric, refused) - callValue(first, metric, refused))
+    .toSorted((first, second) => callValue(second, metric, refused) - callValue(first, metric, refused))
     .slice(0, RANKED_CALLS)
 }

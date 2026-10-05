@@ -94,7 +94,7 @@ function seamRow(file: string): SeamRow {
 function generate(): string {
   const pages = readdirSync(SEAMS_DIRECTORY)
     .filter((file) => file.endsWith('.md') && NON_SEAM_PAGES[file] !== true)
-    .sort()
+    .toSorted()
   assertExactKeys('seam page', pages, Object.keys(SEAM_METADATA))
   const rows = pages.map(seamRow).map((row) => {
     const metadata = SEAM_METADATA[row.file]

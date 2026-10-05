@@ -286,13 +286,13 @@ function generate(): string {
         consumers: consumers.join('<br>'),
       }
     })
-    .sort((left, right) => left.kind.localeCompare(right.kind))
+    .toSorted((left, right) => left.kind.localeCompare(right.kind))
     .map(
       (row) =>
         `| \`${row.kind}\` | [\`${row.schema}\`](../../${OBSERVATION_PATH}#L${row.line}) | ${row.producer} | ${row.carrier} | ${row.adapter} | ${row.consumers} |`,
     )
 
-  const recordedOnly = customKinds.filter((kind) => CUSTOM_METADATA[kind]?.routerBranch === false).sort()
+  const recordedOnly = customKinds.filter((kind) => CUSTOM_METADATA[kind]?.routerBranch === false).toSorted()
   const frameRows = Object.entries(FRAME_METADATA).map(
     ([name, consumer]) =>
       `| \`${name}\` | ${name === 'follow-ended' ? `the adapter, when the follow closes under the page ([\`follow-connection.ts\`](../../${FOLLOW_CONNECTION_PATH}))` : `the follow's \`${name}\` frame, whole ([\`follow.ts\`](../../packages/core/src/follow.ts))`} | ${consumer} |`,
@@ -324,7 +324,7 @@ function generate(): string {
       noProducer.length === 0
         ? 'none'
         : noProducer
-            .sort()
+            .toSorted()
             .map((kind) => `\`${kind}\``)
             .join(', ')
     }`,
@@ -333,7 +333,7 @@ function generate(): string {
       unclassified.length === 0
         ? 'none'
         : `${unclassified
-            .sort()
+            .toSorted()
             .map((kind) => `\`${kind}\``)
             .join(', ')} — a finding, not a generation failure: the kind is printed, never omitted`
     }`,
