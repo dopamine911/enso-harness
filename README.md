@@ -408,6 +408,7 @@ The same content, with search and the generated API reference, is at
 
 ```
 packages/core/       schemas and shared contracts (@enso/core)
+packages/arena/      Dogfood Arena: an agent drives Enso's UI while a recorder keeps the evidence (test bench)
 packages/harness/    the pi package: extensions (guards, web_fetch, web_search, logging) + core helpers
 packages/web/        the web surface — Bun server hosting pi, plus the browser app
 scripts/             launchers, the gate, the docs generators   (all TypeScript, no exceptions)

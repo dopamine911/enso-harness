@@ -3,9 +3,9 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os'
 import { delimiter, dirname, join, relative } from 'node:path'
 import { type Browser, chromium, type Locator, type Page } from '@playwright/test'
+import { isListening } from '../../packages/core/src/loopback.ts'
 import { findRepoRoot } from '../../packages/core/src/paths.ts'
 import { ENSO_DEFAULT_PERMISSION_POLICY } from '../../packages/core/src/permission-rules.ts'
-import { isListening } from '../loopback.ts'
 import { startFeatureModel } from './feature-model.ts'
 import {
   ANSWER_ENDINGS,

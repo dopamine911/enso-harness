@@ -2,18 +2,18 @@ import { expect, test } from 'bun:test'
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { ensoProjectsDir, projectIdOf, projectSnapshotsDir, realpathOrSelf } from '../../packages/core/src/paths.ts'
+import { ensoProjectsDir, projectIdOf, projectSnapshotsDir, realpathOrSelf } from '@enso/core/paths'
 import {
   type ArenaAction,
   describeArenaAction,
   LONGEST_WAIT_MS,
   parseArenaAction,
   typedSecretRefusal,
-} from '../arena/actions.ts'
-import { collectEnsoEvidence } from '../arena/evidence.ts'
-import { foldArenaManifest } from '../arena/manifest.ts'
-import { arenaActCommand, arenaBrief, arenaReviewBrief, githubRepositoryOf, SNAKE_SCENARIO } from '../arena/scenario.ts'
-import { type ArenaClock, type ArenaEventBody, openTimeline, pagePlace, readTimeline } from '../arena/timeline.ts'
+} from '../actions.ts'
+import { collectEnsoEvidence } from '../evidence.ts'
+import { foldArenaManifest } from '../manifest.ts'
+import { arenaActCommand, arenaBrief, arenaReviewBrief, githubRepositoryOf, SNAKE_SCENARIO } from '../scenario.ts'
+import { type ArenaClock, type ArenaEventBody, openTimeline, pagePlace, readTimeline } from '../timeline.ts'
 
 /**
  * Dogfood Arena's own logic (#556): what the agent may send, how the timeline is stamped and read

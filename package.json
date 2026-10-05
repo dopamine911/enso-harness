@@ -27,7 +27,7 @@
     "dev": "bun scripts/dev.ts",
     "logs": "bun scripts/enso-logs.ts",
     "eval": "bun scripts/enso-eval.ts",
-    "arena": "bun scripts/arena.ts",
+    "arena": "bun packages/arena/src/cli.ts",
     "incidents": "bun scripts/enso-incidents.ts",
     "judge": "bun scripts/enso-judge.ts",
     "corpus": "bun scripts/enso-corpus.ts",
@@ -62,10 +62,7 @@
     "oxlint": "1.85.0",
     "oxlint-tsgolint": "7.0.2003",
     "react-doctor": "0.9.14",
-    "typedoc": "0.28.20",
-    "@earendil-works/pi-agent-core": "^0.99.2",
-    "@earendil-works/pi-ai": "^0.99.2",
-    "@earendil-works/pi-coding-agent": "^0.99.2"
+    "typedoc": "0.28.20"
   },
   "overrides": {
     "@tanstack/ai": "0.58.0",
