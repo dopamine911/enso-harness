@@ -41,6 +41,15 @@
 # `git init` before the first install — still gets a comprehensible failure from the gate itself.
 set -e
 
+# ⚠ The `screenshots` branch holds only images, committed under `<issue>/` from a worktree of their own
+# (the PR template's procedure): it has no package.json, so there is nothing to gate and the gate
+# cannot run. Skipped by BRANCH NAME, never by a missing package.json — a code commit that deleted the
+# manifest must still meet the gate, and fail it.
+if [ "$(git symbolic-ref --quiet --short HEAD 2>/dev/null)" = 'screenshots' ]; then
+  echo "pre-commit: the screenshots branch holds only images — no gate to run."
+  exit 0
+fi
+
 run_gate() {
   if [ -f bun.lock ] || [ -f bun.lockb ]; then
     bun run check:all

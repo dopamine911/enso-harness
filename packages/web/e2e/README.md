@@ -58,7 +58,7 @@ The names are fixed, so these are the paths every run writes.
 
 ## Getting screenshots into a PR
 
-`gh pr create` and `gh pr comment` cannot upload images. Drag the PNGs into the PR description or a comment in the GitHub web UI, and GitHub hosts them. Do not commit them.
+A pull request that changes what the web page shows carries screenshots, committed to the `screenshots` branch under the number of the issue it closes (`382/`; a PR with no issue uses `pr-<PR number>/`) and embedded in the description. The commands and the naming are in [the PR template](../../../.github/pull_request_template.md). Never commit them to the PR's own branch.
 
 ## Selectors are what a reader sees
 
