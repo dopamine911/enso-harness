@@ -2,11 +2,11 @@ import { type Static, Type } from 'typebox'
 
 /**
  * Dogfood Arena's agent tool (#556, #584): the parameters of `act`, the ONE tool the agent under
- * test is given (`scripts/arena/agent.ts`). Each call is one move a person makes in a browser —
+ * test is given (`agent.ts`). Each call is one move a person makes in a browser —
  * read the page, click, type, go to a path — performed by the recorder on its page.
  *
  * Every field but `action` is optional: the schema tells the model the shape, and the recorder's
- * own parser (`scripts/arena/actions.ts#parseArenaAction`) is the check — it refuses a selector, a
+ * own parser (`actions.ts#parseArenaAction`) is the check — it refuses a selector, a
  * script, a `goto` off the page or onto `/api`, and records the refusal.
  */
 

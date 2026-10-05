@@ -5,7 +5,10 @@ import { filesUnder } from '../scripts/source-tree.ts'
 import { REPOSITORY_ROOT } from './gate-support.ts'
 
 /**
- * One place for every shape: no TypeBox schema is declared outside `@enso/core` (#53, #255).
+ * One place for every shape: no TypeBox schema is declared outside `@enso/core` (#53, #255) —
+ * except the one test bench that is not the product. Dogfood Arena's `act` tool schema
+ * (`packages/arena/src/act-tool.ts`, #556) lives with the arena, so deleting the package
+ * leaves no schema in core that nothing reads. A third root is a design conversation.
  *
  * ⚠ Enforcement, not a unit test — the shape of `vendor-gate.test.ts`. Nothing else stops the
  * next session declaring `Type.Object` beside a consumer, which is exactly the drift that made
@@ -22,19 +25,19 @@ import { REPOSITORY_ROOT } from './gate-support.ts'
  * stayed there.
  */
 
-/** Where a second declaration site could appear. `packages/core` is the one place, and is skipped. */
+/** Where a second declaration site could appear. The declaration roots are skipped. */
 const SEARCHED_ROOTS = ['packages', 'scripts', 'test'] as const
-const CORE_PACKAGE = join('packages', 'core')
+const DECLARATION_ROOTS = [join('packages', 'core'), join('packages', 'arena')] as const
 
 /**
- * Is this path inside `packages/core`? A SEGMENT test, not a substring one (PR #321 review).
+ * Is this path inside a declaration root? A SEGMENT test, not a substring one (PR #321 review).
  * `path.includes('packages/core')` also swallows a future `packages/core-extensions/`, which
  * would leave a whole package unscanned by the gate whose job is to say where a schema may be
  * declared — and silently, because an excluded file can never be an offender.
  */
-function insideCore(path: string): boolean {
+function insideDeclarationRoot(path: string): boolean {
   const relative = path.slice(REPOSITORY_ROOT.length + 1)
-  return relative === CORE_PACKAGE || relative.startsWith(`${CORE_PACKAGE}${sep}`)
+  return DECLARATION_ROOTS.some((root) => relative === root || relative.startsWith(`${root}${sep}`))
 }
 
 /**
@@ -58,9 +61,9 @@ function insideCore(path: string): boolean {
 const SCHEMA_DECLARATION =
   /(?:^|\n)\s*(?:export\s+default\s+Type\.|(?:export\s+)?(?:const|let|var)\s+[A-Za-z][A-Za-z0-9_]*\s*(?::[^=\n]*)?=\s*Type\.)/
 
-test('⚠ no TypeBox schema is declared outside @enso/core (#53, #255)', () => {
+test('⚠ no TypeBox schema is declared outside @enso/core and the arena (#53, #255, #556)', () => {
   const offenders = SEARCHED_ROOTS.flatMap((root) => filesUnder(join(REPOSITORY_ROOT, root)))
-    .filter((path) => !insideCore(path))
+    .filter((path) => !insideDeclarationRoot(path))
     .filter((path) => SCHEMA_DECLARATION.test(readFileSync(path, 'utf8')))
     .map((path) => path.slice(REPOSITORY_ROOT.length + 1))
   // Named, not counted — a count cannot say which file to look at.
@@ -70,12 +73,14 @@ test('⚠ no TypeBox schema is declared outside @enso/core (#53, #255)', () => {
 // The exclusion decides what the scan never looks at, so its edge is asserted rather than
 // assumed: an excluded file cannot be an offender, and a widened exclusion is a gate that
 // reports nothing about a whole package while staying green.
-test('the core exclusion is a path segment, so a sibling package is still scanned (#321 review)', () => {
-  const inside = (relative: string): boolean => insideCore(join(REPOSITORY_ROOT, relative))
+test('the declaration roots are path segments, so a sibling package is still scanned (#321 review)', () => {
+  const inside = (relative: string): boolean => insideDeclarationRoot(join(REPOSITORY_ROOT, relative))
   expect(inside(join('packages', 'core', 'src', 'follow.ts'))).toBe(true)
   expect(inside(join('packages', 'core'))).toBe(true)
+  expect(inside(join('packages', 'arena', 'src', 'act-tool.ts'))).toBe(true)
   // The shape a substring match would swallow: a sibling whose name starts with the same word.
   expect(inside(join('packages', 'core-extensions', 'src', 'shape.ts'))).toBe(false)
+  expect(inside(join('packages', 'arena-extensions', 'src', 'shape.ts'))).toBe(false)
   expect(inside(join('packages', 'web', 'src', 'store.ts'))).toBe(false)
 })
 

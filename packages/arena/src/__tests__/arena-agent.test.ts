@@ -9,9 +9,9 @@ import {
   fauxText,
   fauxToolCall,
 } from '@earendil-works/pi-ai/providers/faux'
-import { arenaAgentDriver, arenaToolResult, arenaUiTool, parseModelReference } from '../arena/agent.ts'
-import { type ArenaActOutcome, type ArenaDriverSession, awaitDriverEnd } from '../arena/recorder.ts'
-import type { ArenaEventBody } from '../arena/timeline.ts'
+import { arenaAgentDriver, arenaToolResult, arenaUiTool, parseModelReference } from '../agent.ts'
+import { type ArenaActOutcome, type ArenaDriverSession, awaitDriverEnd } from '../recorder.ts'
+import type { ArenaEventBody } from '../timeline.ts'
 
 /**
  * Dogfood Arena's agent runner (#556, #584): the agent under test has one tool, and that tool is

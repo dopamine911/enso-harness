@@ -9,9 +9,9 @@ import {
 } from '@earendil-works/pi-agent-core'
 import type { Api, ImageContent, Model, TextContent } from '@earendil-works/pi-ai'
 import { ModelRuntime } from '@earendil-works/pi-coding-agent'
-import { ArenaActToolParameters } from '../../packages/core/src/arena.ts'
-import { redactJudgeText } from '../../packages/core/src/judge.ts'
-import { ensoAgentDir } from '../../packages/core/src/paths.ts'
+import { redactJudgeText } from '@enso/core/judge'
+import { ensoAgentDir } from '@enso/core/paths'
+import { ArenaActToolParameters } from './act-tool.ts'
 import { ARENA_UI_TOOL } from './actions.ts'
 import type { ArenaActOutcome, ArenaDriver, ArenaDriverSession } from './recorder.ts'
 

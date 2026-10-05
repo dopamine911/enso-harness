@@ -1,4 +1,4 @@
-import { redactJudgeText } from '../../packages/core/src/judge.ts'
+import { redactJudgeText } from '@enso/core/judge'
 import type { ArenaNoteKind } from './timeline.ts'
 
 /**

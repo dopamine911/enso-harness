@@ -47,7 +47,6 @@ const REGIONS: readonly Region[] = ['web/host', 'web/server', 'web/browser', 'ha
  */
 const DOMAINS_BY_CLASSIFICATION: Readonly<Record<Classification, Readonly<Record<string, string>>>> = {
   wire: {
-    'arena.ts': 'Surface, Control',
     'ask-user.ts': 'Control',
     'dialog.ts': 'Control',
     'follow.ts': 'Control, Observation',
@@ -89,6 +88,7 @@ const DOMAINS_BY_CLASSIFICATION: Readonly<Record<Classification, Readonly<Record
     'judge.ts': 'Permission',
     'log-bundle.ts': 'Record',
     'log-process.ts': 'Record',
+    'loopback.ts': 'Project vocabulary',
     'paths.ts': 'Project vocabulary',
     'pi-manifest.ts': 'Project vocabulary',
     'process-marker.ts': 'Record',

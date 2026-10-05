@@ -1,8 +1,10 @@
 # `@enso/core`
 
-**Every TypeBox schema in Enso lives here** — plus, since #59, the two pieces of
+**Every TypeBox schema in Enso's product lives here** — plus, since #59, the two pieces of
 runtime the whole workspace shares: the config loader and the path helpers.
-Nothing else does.
+Nothing else in the product does. The one schema outside it is Dogfood Arena's `act` tool
+(`packages/arena/src/act-tool.ts`, #556): a test bench's, kept with the bench so removing it
+leaves nothing here (`test/duplicate-shapes-gate.test.ts`).
 
 ## Why one package
 

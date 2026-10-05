@@ -30,7 +30,7 @@ script its failures.
 ## The review and the bugs
 
 After the run, the experience is reviewed against its evidence and the Enso defects it shows are
-filed (`arenaReviewBrief` in `scenario.ts`):
+filed (`arenaReviewBrief` in `src/scenario.ts`):
 
 - **The review**, in `<run>/review.md`. It is written against the run's evidence (manifest,
   timeline, screenshots, Enso's records), and each point cites an `elapsedMs`, a screenshot or a
@@ -56,7 +56,7 @@ them in).
 
 ## The score
 
-Every run ends with a score (`score.ts`), written to `score.json` and `score.md`. `start` and
+Every run ends with a score (`src/score.ts`), written to `score.json` and `score.md`. `start` and
 `score` exit 1 when it is FAIL, so a caller can gate on a run. It follows the session eval's rules
 (#441): every line traces to a record, and there is **no composite number**. It reports named UI
 checks and problems at two severities. One error fails the run, and the score says which.
@@ -94,7 +94,7 @@ findings report's job.
 
 ## The UI-only boundary (#584)
 
-The agent runner (`agent.ts`) is a pi `Agent` over a bare model call, given the brief and **one
+The agent runner (`src/agent.ts`) is a pi `Agent` over a bare model call, given the brief and **one
 tool, `act`**. It has no shell, no file access and no web: a call to any other tool is answered
 "Tool … not found" with nothing run, and is recorded as `agent-tool-refused`. `act` hands the action
 to the recorder in the same process. So the agent can't write the project's files itself, can't

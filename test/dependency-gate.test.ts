@@ -263,7 +263,7 @@ test('⚠ the installed TypeScript is one TypeDoc supports — the reason the ma
  * #228 drew it and states the exception where the installer put it.
  */
 test('⚠ only the root declares TypeScript — a second copy is a vendor’s, never a workspace’s (#228, #188)', () => {
-  const workspaces = ['packages/core', 'packages/harness', 'packages/web'].map((workspace) => ({
+  const workspaces = ['packages/arena', 'packages/core', 'packages/harness', 'packages/web'].map((workspace) => ({
     workspace,
     declares: manifest(`${workspace}/package.json`).devDependencies?.typescript,
   }))

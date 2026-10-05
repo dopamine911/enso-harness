@@ -1,5 +1,5 @@
 import { appendFileSync, existsSync, readFileSync } from 'node:fs'
-import { isEnsoThreadId } from '../../packages/core/src/thread-inspection.ts'
+import { isEnsoThreadId } from '@enso/core'
 
 /**
  * The arena run's shared timeline (#556): one JSON line per thing that happened — a screenshot,

@@ -40,11 +40,11 @@
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { ensoHome, findRepoRoot } from '../packages/core/src/paths.ts'
-import { knownSecretValues } from '../packages/core/src/secrets.ts'
-import { ARENA_THINKING_LEVELS, arenaAgentDriver, resolveArenaModel } from './arena/agent.ts'
-import { foldArenaManifest } from './arena/manifest.ts'
-import { type ArenaControl, type ArenaDriver, controlFilePath, runArena } from './arena/recorder.ts'
+import { ensoHome, findRepoRoot } from '@enso/core/paths'
+import { knownSecretValues } from '@enso/core/secrets'
+import { ARENA_THINKING_LEVELS, arenaAgentDriver, resolveArenaModel } from './agent.ts'
+import { foldArenaManifest } from './manifest.ts'
+import { type ArenaControl, type ArenaDriver, controlFilePath, runArena } from './recorder.ts'
 import {
   ARENA_SCENARIOS,
   arenaActCommand,
@@ -54,9 +54,9 @@ import {
   type ArenaScenario,
   githubRepositoryOf,
   SNAKE_SCENARIO,
-} from './arena/scenario.ts'
-import { renderArenaScore, writeArenaScore } from './arena/score.ts'
-import { readTimeline } from './arena/timeline.ts'
+} from './scenario.ts'
+import { renderArenaScore, writeArenaScore } from './score.ts'
+import { readTimeline } from './timeline.ts'
 
 const [command, ...rest] = process.argv.slice(2)
 

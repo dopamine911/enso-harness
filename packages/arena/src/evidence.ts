@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { redactJudgeText } from '../../packages/core/src/judge.ts'
-import { ensoProjectsDir, projectIdOf, projectSnapshotsDir, realpathOrSelf } from '../../packages/core/src/paths.ts'
+import { redactJudgeText } from '@enso/core/judge'
+import { ensoProjectsDir, projectIdOf, projectSnapshotsDir, realpathOrSelf } from '@enso/core/paths'
 import type { ArenaEvidence } from './manifest.ts'
 
 /**

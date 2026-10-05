@@ -1,11 +1,11 @@
 import { spawnSync } from 'node:child_process'
 import { appendFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { redactJudgeText } from '@enso/core/judge'
+import { isListening } from '@enso/core/loopback'
+import { knownSecretValues } from '@enso/core/secrets'
 import { type Browser, type BrowserContext, chromium, type Locator, type Page } from '@playwright/test'
 import type { Subprocess } from 'bun'
-import { redactJudgeText } from '../../packages/core/src/judge.ts'
-import { knownSecretValues } from '../../packages/core/src/secrets.ts'
-import { isListening } from '../loopback.ts'
 import {
   ARENA_REFUSED_DETAIL,
   ARENA_RUNNER_STILL_RUNNING,
