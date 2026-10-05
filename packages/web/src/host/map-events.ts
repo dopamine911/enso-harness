@@ -179,7 +179,7 @@ function countOf(value: unknown): number {
 
 /** The strings of an array field pi carries, in order; anything that is not a string is dropped, an absent field is empty. */
 function textsOf(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : []
+  return Array.isArray(value) ? value.filter((element): element is string => typeof element === 'string') : []
 }
 
 /**

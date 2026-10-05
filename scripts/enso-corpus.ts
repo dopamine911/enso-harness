@@ -34,7 +34,7 @@ const percent = (part: number, whole: number): string => `${((100 * part) / Math
 
 function tally<Key extends string>(items: Iterable<Key>): [Key, number][] {
   const counts = new Map<Key, number>()
-  for (const item of items) counts.set(item, (counts.get(item) ?? 0) + 1)
+  for (const key of items) counts.set(key, (counts.get(key) ?? 0) + 1)
   return [...counts].toSorted((left, right) => right[1] - left[1])
 }
 const row = (label: string, number: number, whole?: number): string =>
@@ -59,7 +59,7 @@ lines.push(`# bash calls: ${commands.length}`, '')
 
 // 1. shapes
 const analysed = commands.map((command) => ({ command, shape: shapeOf(command) }))
-const shapes = analysed.map((item) => item.shape)
+const shapes = analysed.map((analysis) => analysis.shape)
 const shapeRow = (label: string, holds: (shape: Shape) => boolean): string =>
   row(label, shapes.filter(holds).length, commands.length)
 lines.push('## 1. Shapes, as the guard segments them')
@@ -167,12 +167,12 @@ const BYPASS: [string, RegExp][] = [
   ['curl|wget into a shell', /(?:curl|wget)\b[^|]*\|\s*(?:ba|z|da|k)?sh\b/],
   ['base64 decode into a shell', /base64\s+(?:-d|--decode)\b[^|]*\|\s*(?:ba|z|da|k)?sh\b/],
 ]
-for (const [name, pattern] of BYPASS) {
+for (const [bypassName, pattern] of BYPASS) {
   const all = commands.filter((command) => pattern.test(command)).length
   const after = refusals.filter((refusal) =>
     refusal.next.some((next) => next.command !== undefined && pattern.test(next.command)),
   ).length
-  lines.push(`  ${String(all).padStart(6)} / ${String(after).padStart(4)}  ${name}`)
+  lines.push(`  ${String(all).padStart(6)} / ${String(after).padStart(4)}  ${bypassName}`)
 }
 
 process.stdout.write(`${lines.join('\n')}\n`)

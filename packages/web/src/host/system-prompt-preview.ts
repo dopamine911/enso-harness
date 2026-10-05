@@ -169,7 +169,7 @@ export function previewOf({
     name: tool.name,
     tokens: estimateTextTokens(JSON.stringify(toToolDeclaration(tool))),
   }))
-  const totalTokens = [...sections, ...declared].reduce((sum, item) => sum + item.tokens, 0)
+  const totalTokens = [...sections, ...declared].reduce((sum, counted) => sum + counted.tokens, 0)
   const prompt = candidate === null ? null : { id: candidate.id, name: candidate.name, mode: candidate.mode }
   return { prompt, sections, tools: declared, totalTokens, contextWindow: contextWindow ?? null }
 }

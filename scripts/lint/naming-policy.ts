@@ -147,8 +147,8 @@ export const SINGLE_CHARACTER_EXEMPTIONS: readonly string[] = ['_', 'z']
 export const SINGLE_CHARACTER_KEY_EXEMPTIONS: readonly string[] = ['e']
 
 /**
- * The advisory tier's generic iteration names: where the surrounding collection NAMES a better
- * variable for free (`sessions.map((s) => …)` → `(session) => …`). Reported, never blocking.
+ * The generic iteration names: where the surrounding collection NAMES a better variable for free
+ * (`sessions.map((s) => …)` → `(session) => …`). Blocking since #592, as the other tiers are.
  */
 export const GENERIC_ITERATION_NAMES: readonly string[] = [
   'index',

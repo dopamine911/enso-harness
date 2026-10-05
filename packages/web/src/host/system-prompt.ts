@@ -81,7 +81,7 @@ export function threadSystemPrompt(branch: readonly EnsoTranscriptEntry[]): Enso
 
 /** True once the branch holds a message: a request has gone, with whatever prompt it had. */
 export function hasSentRequest(branch: readonly SessionEntry[]): boolean {
-  return branch.some((entry) => entry.type === 'message')
+  return branch.some((sessionEntry) => sessionEntry.type === 'message')
 }
 
 /**

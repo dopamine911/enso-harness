@@ -380,8 +380,8 @@ function isLegacyStore(store: string): boolean {
 function listThreadStores(snapshotsDir: string): string[] | Refusal {
   try {
     return readdirSync(snapshotsDir, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
-      .map((entry) => join(snapshotsDir, entry.name))
+      .filter((storeDirectory) => storeDirectory.isDirectory() && !storeDirectory.name.startsWith('.'))
+      .map((storeDirectory) => join(snapshotsDir, storeDirectory.name))
       .toSorted()
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
@@ -489,8 +489,8 @@ async function seedObjects(
   const blobs = [
     ...new Set(
       nulList(listed.stdout)
-        .filter((entry) => !entry.startsWith('160000 '))
-        .map((entry) => entry.split(' ')[1] ?? ''),
+        .filter((treeLine) => !treeLine.startsWith('160000 '))
+        .map((treeLine) => treeLine.split(' ')[1] ?? ''),
     ),
   ]
   if (blobs.length === 0) return true
@@ -768,8 +768,8 @@ function recordLegacyLineage(store: string, storeIds: ReadonlyMap<string, string
 function setAsideOf(store: string): string[] {
   try {
     return readdirSync(store)
-      .filter((entry) => entry.startsWith(SET_ASIDE_PREFIX))
-      .map((entry) => join(store, entry))
+      .filter((fileName) => fileName.startsWith(SET_ASIDE_PREFIX))
+      .map((fileName) => join(store, fileName))
   } catch {
     return []
   }
@@ -800,33 +800,33 @@ function moveObjects(from: string, to: string): void {
     if (existsSync(target)) rmSync(source, { force: true })
     else renameSync(source, target)
   }
-  for (const entry of readdirSync(from, { withFileTypes: true })) {
-    if (!entry.isDirectory() || !/^[0-9a-f]{2}$/.test(entry.name)) continue
-    mkdirSync(join(to, entry.name), { recursive: true })
-    for (const name of readdirSync(join(from, entry.name))) {
-      if (/^[0-9a-f]+$/.test(name)) move(join(from, entry.name, name), join(to, entry.name, name))
+  for (const fanOut of readdirSync(from, { withFileTypes: true })) {
+    if (!fanOut.isDirectory() || !/^[0-9a-f]{2}$/.test(fanOut.name)) continue
+    mkdirSync(join(to, fanOut.name), { recursive: true })
+    for (const objectName of readdirSync(join(from, fanOut.name))) {
+      if (/^[0-9a-f]+$/.test(objectName)) move(join(from, fanOut.name, objectName), join(to, fanOut.name, objectName))
     }
   }
   let packs: string[]
   try {
-    packs = readdirSync(join(from, 'pack')).filter((name) => name.startsWith('pack-'))
+    packs = readdirSync(join(from, 'pack')).filter((fileName) => fileName.startsWith('pack-'))
   } catch {
     return
   }
   mkdirSync(join(to, 'pack'), { recursive: true })
-  for (const name of [
+  for (const packFile of [
     ...packs.filter((pack) => !pack.endsWith('.idx')),
     ...packs.filter((pack) => pack.endsWith('.idx')),
   ]) {
-    move(join(from, 'pack', name), join(to, 'pack', name))
+    move(join(from, 'pack', packFile), join(to, 'pack', packFile))
   }
 }
 
 /** The newest change under a set-aside directory: itself, its fan-out directories and its packs'. */
 function newestChangeIn(directory: string): number {
   let newest = statSync(directory).mtimeMs
-  for (const entry of readdirSync(directory, { withFileTypes: true })) {
-    if (entry.isDirectory()) newest = Math.max(newest, statSync(join(directory, entry.name)).mtimeMs)
+  for (const child of readdirSync(directory, { withFileTypes: true })) {
+    if (child.isDirectory()) newest = Math.max(newest, statSync(join(directory, child.name)).mtimeMs)
   }
   return newest
 }

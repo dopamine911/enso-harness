@@ -37,10 +37,10 @@ const COMMENT_OR_STRING = /\/\*[\s\S]*?\*\/|\/\/[^\n]*|'(?:\\.|[^'\\\n])*'|"(?:\
 function arrayBody(source: string, start: number): string | undefined {
   let depth = 1
   let quote = ''
-  for (let index = start; index < source.length; index += 1) {
-    const character = source[index] ?? ''
+  for (let position = start; position < source.length; position += 1) {
+    const character = source[position] ?? ''
     if (quote !== '') {
-      if (character === '\\') index += 1
+      if (character === '\\') position += 1
       else if (character === quote) quote = ''
       continue
     }
@@ -48,7 +48,7 @@ function arrayBody(source: string, start: number): string | undefined {
     else if (character === '[') depth += 1
     else if (character === ']') {
       depth -= 1
-      if (depth === 0) return source.slice(start, index)
+      if (depth === 0) return source.slice(start, position)
     }
   }
   return undefined

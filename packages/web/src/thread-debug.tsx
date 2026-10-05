@@ -373,8 +373,8 @@ export function ThreadDebugView({
               <div>commands: {session.commands.map((command) => `/${command}`).join(' ')}</div>
               <h4 className="mt-1 text-foreground">branch ({session.entries.length} entries)</h4>
               <ol>
-                {session.entries.map((entry, position) => (
-                  <li key={entryKey(entry, position)}>{describeTranscriptEntry(entry)}</li>
+                {session.entries.map((branchEntry, position) => (
+                  <li key={entryKey(branchEntry, position)}>{describeTranscriptEntry(branchEntry)}</li>
                 ))}
               </ol>
             </>

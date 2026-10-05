@@ -64,7 +64,7 @@ export function createPermissionModeStore(): PermissionModeStore {
     const receipt = data as { mode?: unknown; available?: unknown }
     if (typeof receipt.mode !== 'string' || receipt.mode.length === 0) return
     const available = Array.isArray(receipt.available)
-      ? receipt.available.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)
+      ? receipt.available.filter((mode): mode is string => typeof mode === 'string' && mode.length > 0)
       : store.get().available
     store.set({ mode: receipt.mode, available })
   }

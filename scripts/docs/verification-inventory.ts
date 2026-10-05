@@ -464,14 +464,14 @@ function complexityRatchets(): Ratchet[] {
       location: `${linkedPath('package.json')} — \`${COMPLEXITY_SCRIPT}\``,
       reason: 'Global cognitive-complexity ceiling for code without a narrower pin.',
     },
-    ...overrides.map((entry: unknown): Ratchet => {
-      if (!isComplexityPin(entry))
+    ...overrides.map((override: unknown): Ratchet => {
+      if (!isComplexityPin(override))
         throw new Error(`${FALLOW_CONFIG}: a complexity override is not one file + one function`)
       return {
         kind: 'Complexity pin',
-        value: `cognitive max \`${entry.maxCognitive}\``,
-        location: `${linkedPath(FALLOW_CONFIG)} — \`${entry.files[0]}:${entry.functions[0]}\``,
-        reason: entry.reason,
+        value: `cognitive max \`${override.maxCognitive}\``,
+        location: `${linkedPath(FALLOW_CONFIG)} — \`${override.files[0]}:${override.functions[0]}\``,
+        reason: override.reason,
       }
     }),
   ]

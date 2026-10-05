@@ -81,13 +81,13 @@ function systemEvents(walk: EventWalk, sessionEntry: Extract<SessionEntry, { typ
   }
   walk.sawPrompt = true
   // The fold decides what a section is — pi's own, or injected — so this file does not again.
-  for (const { item } of foldSystem([{ message, at: sessionEntry.timestamp }])) {
-    if (item.source.kind !== 'section' || item.category !== 'injected') continue
+  for (const { item: contextItem } of foldSystem([{ message, at: sessionEntry.timestamp }])) {
+    if (contextItem.source.kind !== 'section' || contextItem.category !== 'injected') continue
     push(
       walk,
       sessionEntry,
-      { kind: 'inject', label: item.source.name, tokens: item.tokens },
-      `${sessionEntry.id}:${item.key}`,
+      { kind: 'inject', label: contextItem.source.name, tokens: contextItem.tokens },
+      `${sessionEntry.id}:${contextItem.key}`,
     )
   }
 }

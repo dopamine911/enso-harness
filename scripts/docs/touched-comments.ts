@@ -129,14 +129,14 @@ function statedInvariants(comment: SourceComment): string[] {
  * block is what filled the list on PR #488.
  */
 function invariantsIn(model: FlowModel, comment: SourceComment): string[] {
-  return statedInvariants(comment).map((id) => {
-    const pins = model.pins.filter((pin) => pin.invariants.includes(id))
-    const unpinned = model.invariants.find((invariant) => invariant.id === id)?.unpinned
+  return statedInvariants(comment).map((invariantId) => {
+    const pins = model.pins.filter((pin) => pin.invariants.includes(invariantId))
+    const unpinned = model.invariants.find((invariant) => invariant.id === invariantId)?.unpinned
     const pinned =
       pins.length > 0
         ? pins.map((pin) => `\`${pin.file}:${pin.line}\` (${pin.title})`).join('; ')
         : `no test (\`@unpinned\`: ${unpinned ?? 'none given'})`
-    return `\`${id}\`, pinned by ${pinned}`
+    return `\`${invariantId}\`, pinned by ${pinned}`
   })
 }
 
@@ -166,9 +166,9 @@ export function renderTouched(touched: readonly TouchedComment[], model: FlowMod
   ]
   if (touched.length === 0) return [...header, 'None: this diff changes no commented declaration.', ''].join('\n')
   const entries = touched
-    .map((entry) => {
-      const invariants = invariantsIn(model, entry.comment)
-      return { ...entry, invariants, risk: risk(entry, invariants) }
+    .map((touchedComment) => {
+      const invariants = invariantsIn(model, touchedComment.comment)
+      return { ...touchedComment, invariants, risk: risk(touchedComment, invariants) }
     })
     .sort((left, right) => left.risk - right.risk)
   let budget = QUOTE_BUDGET

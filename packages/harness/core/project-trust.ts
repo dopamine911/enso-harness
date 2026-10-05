@@ -138,11 +138,11 @@ function readTrustFile(path: string): Record<string, boolean | null> {
     throw new Error(`Invalid trust store ${path}: expected an object`)
   }
   const data: Record<string, boolean | null> = {}
-  for (const [key, value] of Object.entries(parsed)) {
-    if (value !== true && value !== false && value !== null) {
+  for (const [key, trusted] of Object.entries(parsed)) {
+    if (trusted !== true && trusted !== false && trusted !== null) {
       throw new Error(`Invalid trust store ${path}: value for ${JSON.stringify(key)} must be true, false, or null`)
     }
-    data[key] = value
+    data[key] = trusted
   }
   return data
 }

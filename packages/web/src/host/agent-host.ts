@@ -1164,10 +1164,10 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   function projectSessionListings(): Promise<SessionInfo[]>[] {
     if (projectsDir === undefined || !existsSync(projectsDir)) return []
     return readdirSync(projectsDir, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() && isEnsoProjectId(entry.name))
-      .map((entry) => entry.name)
+      .filter((directoryEntry) => directoryEntry.isDirectory() && isEnsoProjectId(directoryEntry.name))
+      .map((directoryEntry) => directoryEntry.name)
       .toSorted()
-      .map((name) => projectSessionsDir(projectsDir, name))
+      .map((projectId) => projectSessionsDir(projectsDir, projectId))
       .filter((directory) => existsSync(directory))
       .map((directory) => SessionManager.listAll(directory))
   }

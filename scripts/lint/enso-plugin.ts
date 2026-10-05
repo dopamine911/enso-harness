@@ -16,8 +16,8 @@ import {
  *     load one package under two aliases, so the tiers are two names for the same rule here.
  *     Its reports are rewritten into this repo's messages and carry NO fix or suggestion:
  *     the gate names the problem, the author picks the word.
- *   • `generic-iteration` — the advisory tier: generic names in iteration callbacks and loop
- *     headers. Registered at `warn`, which oxlint does not fail on.
+ *   • `generic-iteration` — generic names in iteration callbacks and loop headers. The advisory
+ *     tier until #592; `error` since, like the rest.
  *   • `no-export-all` — `export * from …`, which Biome's `noReExportAll` refused and oxlint has
  *     no native rule for.
  *
@@ -176,7 +176,7 @@ function namingTier(tier: Tier, upstream: Rule): Rule {
   }
 }
 
-// ── the advisory tier ─────────────────────────────────────────────────────────
+// ── generic iteration names ───────────────────────────────────────────────────
 
 const GENERIC_ITERATION_MESSAGE = `Generic iteration variable — name what it walks (\`sessions.map((s) => …)\` → \`(session) => …\`, \`for (let i = 0; i < rows.length; ...)\` → \`rowIndex\`). Greppability wins in an agent codebase. ${NAMING_DOCUMENT}`
 

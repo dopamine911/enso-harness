@@ -50,8 +50,8 @@ export function parseArguments(argv: readonly string[]): EvalQuery {
   let json = false
   let row = false
   let rowHeader = false
-  for (let index = 0; index < argv.length; index += 1) {
-    const argument = argv[index] ?? ''
+  for (let argumentIndex = 0; argumentIndex < argv.length; argumentIndex += 1) {
+    const argument = argv[argumentIndex] ?? ''
     if (argument === '--json') json = true
     else if (argument === '--row') row = true
     else if (argument === '--row-header') rowHeader = true
@@ -219,11 +219,11 @@ export function renderComparison(evaluated: readonly EnsoSessionEval[]): string 
   const lines = [
     '## Comparison',
     '',
-    `| Metric | ${evaluated.map((item) => `\`${item.threadId.slice(0, 8)}\``).join(' | ')} |`,
+    `| Metric | ${evaluated.map((sessionEval) => `\`${sessionEval.threadId.slice(0, 8)}\``).join(' | ')} |`,
   ]
   lines.push(`|---${'|---'.repeat(evaluated.length)}|`)
   for (const key of COMPARISON_KEYS) {
-    lines.push(`| \`${key}\` | ${evaluated.map((item) => cell(item.scorecard[key])).join(' | ')} |`)
+    lines.push(`| \`${key}\` | ${evaluated.map((sessionEval) => cell(sessionEval.scorecard[key])).join(' | ')} |`)
   }
   return lines.join('\n')
 }
