@@ -455,6 +455,30 @@ function evidenceProblems(manifest: ArenaManifest): Occurrence[] {
   )
 }
 
+/**
+ * The stop's secret scan (#610): a hit is an error — a known secret is in a file the run keeps, and
+ * the run must not be shared as it is. A file that could not be read is a warning: not scanned is not
+ * clean. Named by file and zip entry, never by value.
+ */
+function secretScanProblems(manifest: ArenaManifest): Occurrence[] {
+  const scan = manifest.secretScan
+  if (scan === undefined) return []
+  return [
+    ...scan.hits.map((hit): Occurrence => ({
+      severity: 'error',
+      source: 'evidence',
+      message: 'a known secret is in a file the run keeps',
+      example: hit.entry === undefined ? hit.path : `${hit.path} › ${hit.entry}`,
+    })),
+    ...scan.unreadable.map((file): Occurrence => ({
+      severity: 'warning',
+      source: 'evidence',
+      message: 'not scanned for secrets',
+      example: short(`${file.path}: ${file.error}`),
+    })),
+  ]
+}
+
 function uiCheckProblems(checks: readonly ArenaUiCheck[]): Occurrence[] {
   return checks.flatMap((check): Occurrence[] =>
     check.status === 'pass'
@@ -521,6 +545,7 @@ export function scoreArenaRun(input: ArenaScoreInput): ArenaScore {
     ...ensoLogProblems(input.logRecords),
     ...ensoEvalProblems(input.evals),
     ...evidenceProblems(input.manifest),
+    ...secretScanProblems(input.manifest),
     ...nothingBuilt,
   ])
   const errors = problems.filter((problem) => problem.severity === 'error').length

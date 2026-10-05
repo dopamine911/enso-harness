@@ -29,23 +29,25 @@
  *
  * `start` exits 1 too when its run's score is FAIL, so a caller can gate on the run.
  *
- * Runs live under `--out`, `ENSO_HOME/arena` by default: `<scenario>-<time>/` with the project,
- * `timeline.jsonl`, `screenshots/`, `trace/`, `enso/` and `manifest.json`. `<out>/current` names
- * the live run, which is how `act` finds it without `--run`.
+ * Runs live under `--out`, `$XDG_DATA_HOME/enso/arena` (`~/.local/share/enso/arena`) by default:
+ * `<scenario>-<time>/` with the project, `timeline.jsonl`, `screenshots/`, `trace/`, `enso/` and
+ * `manifest.json`. `<out>/current` names the live run, which is how `act` finds it without `--run`.
  *
- * ⚠ The stack runs over the operator's `ENSO_HOME` unless `--home` names another: the agent's
- * prompts reach a real model, and that needs the operator's login. The project is new and
- * empty, so the work the run produces is all in it.
+ * ⚠ Each run gets its own Enso home, `<run>/.enso` (#610, `run-home.ts`): its own projects, threads,
+ * logs and Stats, with the operator's login linked in so the agent's prompts reach a real model.
+ * `--home DIR` runs over DIR instead, shared with whatever else uses it. An `--out` under a `.enso`
+ * directory is refused: the guard keeps Enso's agent out of it, so the agent could not touch its
+ * own project.
  */
 
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { ensoHome, findRepoRoot } from '@enso/core/paths'
-import { knownSecretValues } from '@enso/core/secrets'
 import { ARENA_THINKING_LEVELS, arenaAgentDriver, resolveArenaModel } from './agent.ts'
 import { type ArenaEvidence, arenaEvidenceRowOf, foldArenaManifest } from './manifest.ts'
 import { type ArenaDriver, collectAfterRecorderDied, deadRecorderRun, readArenaControl, runArena } from './recorder.ts'
+import { arenaSecretValues, defaultArenaOut, isGuardedForAgent, prepareRunHome, runHomeOf } from './run-home.ts'
 import {
   ARENA_SCENARIOS,
   arenaActCommand,
@@ -57,6 +59,7 @@ import {
   SNAKE_SCENARIO,
 } from './scenario.ts'
 import { renderArenaScore, writeArenaScore } from './score.ts'
+import { scanRunForSecrets } from './secret-scan.ts'
 import { readTimeline } from './timeline.ts'
 
 const [command, ...rest] = process.argv.slice(2)
@@ -85,8 +88,9 @@ function scenarioNamed(): ArenaScenario {
   return ARENA_SCENARIOS[id] ?? fail(`no scenario "${id}" — known: ${Object.keys(ARENA_SCENARIOS).join(', ')}`)
 }
 
-const home = resolve(flag('home') ?? ensoHome(process.env))
-const outDirectory = resolve(flag('out') ?? join(ensoHome(process.env), 'arena'))
+/** The operator's Enso home: the login a run borrows, and the home a `--home` run runs over. */
+const operatorHome = resolve(flag('home') ?? ensoHome(process.env))
+const outDirectory = resolve(flag('out') ?? defaultArenaOut(process.env))
 const currentFile = join(outDirectory, 'current')
 const repoRoot = findRepoRoot(import.meta.url)
 
@@ -126,11 +130,11 @@ async function driverNamed(
   }
   const thinking = ARENA_THINKING_LEVELS.find((level) => level === (flag('thinking') ?? 'medium'))
   if (thinking === undefined) fail(`--thinking takes one of ${ARENA_THINKING_LEVELS.join(', ')}`)
-  const { model, streamFn } = await resolveArenaModel(home, reference).catch((error: unknown) =>
+  const { model, streamFn } = await resolveArenaModel(operatorHome, reference).catch((error: unknown) =>
     fail(error instanceof Error ? error.message : String(error)),
   )
   const brief = arenaBrief(scenario, 'tool')
-  const driver = arenaAgentDriver({ model, streamFn, thinking, brief, secretValues: knownSecretValues(home) })
+  const driver = arenaAgentDriver({ model, streamFn, thinking, brief, secretValues: arenaSecretValues(operatorHome) })
   return { driver, brief }
 }
 
@@ -152,6 +156,12 @@ function refuseOverDeadRun(): void {
 
 async function start(): Promise<void> {
   refuseOverDeadRun()
+  if (isGuardedForAgent(outDirectory)) {
+    fail(
+      `--out ${outDirectory} is under a .enso directory, which the guard keeps Enso's agent out of: ` +
+        'it could not read or write its own project there. Name another --out.',
+    )
+  }
   const scenario = scenarioNamed()
   const minutes = Number(flag('minutes') ?? scenario.budgetMinutes)
   if (!Number.isFinite(minutes) || minutes <= 0) fail('--minutes takes a positive number')
@@ -164,6 +174,7 @@ async function start(): Promise<void> {
   const context = briefContext(runDirectory)
   const { driver, brief } = await driverNamed(scenario, context)
   mkdirSync(runDirectory, { recursive: true })
+  const home = flag('home') === undefined ? prepareRunHome(runDirectory, operatorHome) : operatorHome
   const briefPath = join(runDirectory, 'brief.md')
   writeFileSync(briefPath, brief)
   writeFileSync(currentFile, runDirectory)
@@ -251,13 +262,15 @@ async function refold(): Promise<void> {
     fail(`${manifestPath} has no evidence that reads as evidence — not refolding over it`)
   const evidence =
     kept ??
-    (await collectAfterRecorderDied(runDirectory, home).catch((error: unknown) =>
+    (await collectAfterRecorderDied(runDirectory, operatorHome).catch((error: unknown) =>
       fail(error instanceof Error ? error.message : String(error)),
     ))
   if (kept === undefined && existsSync(currentFile) && readFileSync(currentFile, 'utf8').trim() === runDirectory) {
     rmSync(currentFile, { force: true })
   }
-  const manifest = foldArenaManifest({ runId, events: readTimeline(join(runDirectory, 'timeline.jsonl')), evidence })
+  const secretScan = scanRunForSecrets(runDirectory, arenaSecretValues(runHomeOf(runDirectory, operatorHome)))
+  const events = readTimeline(join(runDirectory, 'timeline.jsonl'))
+  const manifest = foldArenaManifest({ runId, events, evidence, secretScan })
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
   process.stdout.write(`${manifestPath}\n`)
   scoreRun(runDirectory)

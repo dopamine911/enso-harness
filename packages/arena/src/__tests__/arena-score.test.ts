@@ -320,3 +320,38 @@ test('an agent runner whose end is missing, or that outlived the stop, is a warn
   const clean = scoreArenaRun(inputOf(AGENT_RUN)).problems.map((problem) => problem.message)
   expect(clean.join('\n')).not.toContain('runner')
 })
+
+test('⚠ a known secret in a file the run keeps fails a run that otherwise passes; an unreadable trace only warns (#610)', () => {
+  const clean = inputOf(AGENT_RUN)
+  const withScan = (secretScan: NonNullable<ArenaScoreInput['manifest']['secretScan']>): ArenaScoreInput => ({
+    ...clean,
+    manifest: { ...clean.manifest, secretScan },
+  })
+  const leaked = scoreArenaRun(
+    withScan({
+      files: 9,
+      entries: 40,
+      hits: [{ path: 'trace/trace-000.zip', entry: 'resources/abc.json' }],
+      unreadable: [],
+    }),
+  )
+  expect(leaked).toMatchObject({ verdict: 'fail', errors: 1 })
+  expect(leaked.problems[0]).toEqual({
+    severity: 'error',
+    source: 'evidence',
+    message: 'a known secret is in a file the run keeps',
+    count: 1,
+    examples: ['trace/trace-000.zip › resources/abc.json'],
+  })
+
+  const unread = scoreArenaRun(
+    withScan({
+      files: 9,
+      entries: 0,
+      hits: [],
+      unreadable: [{ path: 'trace/trace-001.zip', error: 'zip64 is not read' }],
+    }),
+  )
+  expect(unread).toMatchObject({ verdict: 'pass', errors: 0 })
+  expect(unread.problems.map((problem) => problem.message)).toContain('not scanned for secrets')
+})

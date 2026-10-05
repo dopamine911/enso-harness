@@ -1,4 +1,5 @@
 import { ARENA_UI_TOOL } from './actions.ts'
+import type { ArenaSecretScan } from './secret-scan.ts'
 import type { ArenaActionSource, ArenaEvent, ArenaNoteKind, ArenaShotCause } from './timeline.ts'
 
 /**
@@ -114,6 +115,8 @@ export interface ArenaManifest {
    */
   readonly recorderErrors: readonly ArenaRecorderError[]
   readonly evidence: readonly ArenaEvidence[]
+  /** Every file the run keeps, read for its secret values at the stop (#610): absent on a run from before it. */
+  readonly secretScan?: ArenaSecretScan
   /** What drove the UI, and whether the UI-only boundary held over the whole run (#584). */
   readonly driver: ArenaDriverRecord
   readonly boundary: ArenaBoundary
@@ -126,11 +129,12 @@ export interface ArenaRecorderError {
   readonly error: string
 }
 
-/** What the fold needs beyond the timeline: the run's id and the evidence collected at the end. */
+/** What the fold needs beyond the timeline: the run's id, the evidence collected at the end, the stop's secret scan. */
 export interface ArenaManifestInput {
   readonly runId: string
   readonly events: readonly ArenaEvent[]
   readonly evidence: readonly ArenaEvidence[]
+  readonly secretScan?: ArenaSecretScan
 }
 
 interface ThreadTally {
@@ -230,7 +234,7 @@ function boundaryOf(driver: ArenaDriverRecord, actionsBy: Record<ArenaActionSour
 }
 
 /** The manifest for a run, from its events in timeline order. */
-export function foldArenaManifest({ runId, events, evidence }: ArenaManifestInput): ArenaManifest {
+export function foldArenaManifest({ runId, events, evidence, secretScan }: ArenaManifestInput): ArenaManifest {
   const start = events.find((event) => event.kind === 'run-start')
   const stop = events.findLast((event) => event.kind === 'run-stop')
   const count = (kind: ArenaEvent['kind']): number => events.filter((event) => event.kind === kind).length
@@ -266,5 +270,6 @@ export function foldArenaManifest({ runId, events, evidence }: ArenaManifestInpu
         : [],
     ),
     evidence,
+    ...(secretScan === undefined ? {} : { secretScan }),
   }
 }
