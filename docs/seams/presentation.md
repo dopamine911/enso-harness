@@ -113,6 +113,14 @@ export interface FollowConnection extends SubscribeConnectionAdapter {
    * problem. `disconnected` states a server that dropped the page, which this is not.
    */
   readonly close: () => void
+  /**
+   * The assistant message of the chunk TanStack is processing now, in STREAM order (#382) — the
+   * last `TEXT_MESSAGE_START` this adapter has handed over, which a run opens and a rotation moves.
+   * Undefined until the first. A line the router adds while processing a chunk follows this
+   * message: React's committed transcript lags the stream, and a line placed by it would land in
+   * the bubble before a rotation the same batch made.
+   */
+  readonly streamMessageId: () => string | undefined
 }
 ```
 
@@ -317,7 +325,9 @@ observation's `kind` or the frame's `type` (#162 workstream 5) — a `snapshot` 
 model, the project, the session's `usage`, the dialog slot and `generation`; a `status` to `generation`
 (and clears `disconnected`); `permission-mode` to the current mode and the mode lines; a `model` to the
 model store; a blocking `extension-ui-request` to the dialog slot when it is free (the oldest question
-holds it, #271) and a notify to `notifications`; `dialog-settled` to the slot; `session-usage` to
+holds it, #271) and a notify to `notifications` — each line anchored, as it is pushed, to the message it
+follows (`streamMessageId`, else the transcript's last; #382), so it renders after that message's bubble
+rather than after the whole transcript; `dialog-settled` to the slot; `session-usage` to
 `usage`, whole (#45);
 `queue` to `queue`; `permission-mode-rejected` to a warning notice; `follow-ended` to `disconnected`
 plus a notice. Every value is validated against its schema: a malformed one moves no store rather than
@@ -340,7 +350,7 @@ primitives beneath the same fence are receipted by [`components/ui/README.md`](.
 instead, because the shadcn registry is re-fetched by style and version rather than by commit.
 The renderers that stay ours are outside the ported directory: the dialog card is `EnsoDialogCard` in
 `chat-screen.tsx` itself (`#EnsoDialogCard`), and the tool-result descriptor renderer, notices, the mode select
-and the status bar are the `SelectedMessagePart`, `ThreadNotifications`, `PermissionModeSelect`,
+and the status bar are the `SelectedMessagePart`, `NotificationLines`, `PermissionModeSelect`,
 `ThreadStatusBar` and `EnsoRendererMap` imports.
 
 **A second connection today: the fixture.** `?fixture` swaps the live adapter for the scripted

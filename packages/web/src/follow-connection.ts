@@ -110,7 +110,10 @@ export interface FollowConnectionOptions {
 /** One run this adapter has open: its AG-UI ids and, once the receipt is in, the acquisition it took or queued behind. */
 interface OpenRun {
   readonly runId: string
-  /** The assistant message the view is streaming into. Rotates when pi claims a queued prompt (#75). */
+  /**
+   * The assistant message the view is streaming into. Rotates when pi claims a queued prompt (#75),
+   * and when pi starts a new attempt after a refused one (#382).
+   */
   messageId: string
   /** The receipt's `messageId` — how a `prompt-rejected` names this run. Undefined for a run another client started. */
   promptMessageId: string | undefined
@@ -122,6 +125,12 @@ interface OpenRun {
    * after its question rather than inside the previous answer.
    */
   assistantMessages: number
+  /**
+   * A provider refused this run's current attempt (#382). pi's retry then begins a new assistant
+   * message, and the view gives it a new bubble: the refused attempt keeps its own, and the lines
+   * said about it (`refused: …`, `retrying in …`) read between the two, not after the reply.
+   */
+  refused: boolean
 }
 /** The parts of the last user message, whichever shape TanStack hands over — `UIMessage.parts` or `ModelMessage.content`. */
 function latestUserParts(messages: Array<UIMessage> | Array<ModelMessage>): readonly MessagePart[] {
@@ -309,6 +318,14 @@ export interface FollowConnection extends SubscribeConnectionAdapter {
    * problem. `disconnected` states a server that dropped the page, which this is not.
    */
   readonly close: () => void
+  /**
+   * The assistant message of the chunk TanStack is processing now, in STREAM order (#382) — the
+   * last `TEXT_MESSAGE_START` this adapter has handed over, which a run opens and a rotation moves.
+   * Undefined until the first. A line the router adds while processing a chunk follows this
+   * message: React's committed transcript lags the stream, and a line placed by it would land in
+   * the bubble before a rotation the same batch made.
+   */
+  readonly streamMessageId: () => string | undefined
 }
 
 export type ModeChangeOutcome = 'told' | 'busy' | 'refused' | 'unreachable'
@@ -410,7 +427,14 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
   }
 
   function openRun(runId: string, promptMessageId: string | undefined, generation: number | undefined): OpenRun {
-    const run: OpenRun = { runId, messageId: crypto.randomUUID(), promptMessageId, generation, assistantMessages: 0 }
+    const run: OpenRun = {
+      runId,
+      messageId: crypto.randomUUID(),
+      promptMessageId,
+      generation,
+      assistantMessages: 0,
+      refused: false,
+    }
     runs.set(runId, run)
     current = run
     push(
@@ -426,26 +450,38 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     push(chunk)
   }
 
+  /** End the run's assistant bubble and open a new one after it: everything that follows lands there. */
+  function rotateMessage(run: OpenRun): void {
+    const ended = run.messageId
+    run.messageId = crypto.randomUUID()
+    run.refused = false
+    push(
+      { type: EventType.TEXT_MESSAGE_END, messageId: ended },
+      { type: EventType.TEXT_MESSAGE_START, messageId: run.messageId, role: 'assistant' },
+    )
+  }
+
   /**
-   * A message boundary inside the run (#75). Assistant: count it. User, after an assistant
-   * message has begun: pi claimed a queued prompt — end the current assistant bubble and
-   * open a new one after it. The run's own prompt arrives before any assistant message and
-   * rotates nothing.
+   * A message boundary inside the run. Two of them rotate the assistant bubble:
+   * - a USER message after an assistant message has begun: pi claimed a queued prompt (#75), so
+   *   the reply lands after its question rather than inside the previous answer. The run's own
+   *   prompt arrives before any assistant message and rotates nothing;
+   * - an ASSISTANT message after a refused attempt: pi's retry (#382). Without it the refused
+   *   attempt and the reply that got through share one bubble, and a line said between them has
+   *   nowhere to go but after both.
    */
   function observeMessageStart(role: string): void {
     if (current === undefined) return
     if (role === 'assistant') {
+      // Whatever began before the refusal — the attempt's own message, or none when the provider
+      // refused before pi started one — stays in the bubble the refusal's lines follow.
+      if (current.refused) rotateMessage(current)
       current.assistantMessages += 1
       return
     }
     if (role !== 'user' || current.assistantMessages === 0) return
-    const ended = current.messageId
-    current.messageId = crypto.randomUUID()
+    rotateMessage(current)
     current.assistantMessages = 0
-    push(
-      { type: EventType.TEXT_MESSAGE_END, messageId: ended },
-      { type: EventType.TEXT_MESSAGE_START, messageId: current.messageId, role: 'assistant' },
-    )
   }
 
   function idsOf(run: OpenRun | undefined): AguiIdentifiers {
@@ -455,6 +491,9 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
   /** The server's latest word on the thread, from the last snapshot or status frame. */
   let serverGeneration = 0
   let serverBusy = false
+
+  /** The assistant message of the chunk TanStack is processing — see {@link FollowConnection.streamMessageId}. */
+  let streamMessageId: string | undefined
 
   /**
    * Close every run the server has moved past: `RUN_FINISHED` for each, so TanStack's
@@ -520,6 +559,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
       return
     }
     if (observation.kind === 'message-start') observeMessageStart(observation.role)
+    if (observation.kind === 'provider-refused' && current !== undefined) current.refused = true
     if (observation.kind === 'prompt-rejected') {
       // A prompt this tab queued behind the run (#75): pi would not take it. Said where the
       // human looks; the composer got its text back when `prompt` reported `refused`.
@@ -650,6 +690,10 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
       while (!abort.aborted) {
         const next = queue.shift()
         if (next !== undefined) {
+          // Read here, at the yield, not where the chunk was queued: TanStack processes one chunk
+          // to the end — custom events included — before it asks for the next, so this is the
+          // message of the chunk being processed, whatever the pump has queued behind it.
+          if (next.type === EventType.TEXT_MESSAGE_START) streamMessageId = next.messageId
           yield next
           continue
         }
@@ -926,5 +970,6 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     continueRun,
     resolveIncident,
     close,
+    streamMessageId: () => streamMessageId,
   }
 }

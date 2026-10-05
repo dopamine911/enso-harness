@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import {
   ENSO_GUARD_DENIAL_ENTRY,
   ENSO_PROVIDER_REFUSAL_KEY,
+  type EnsoFollowFrame,
   type EnsoForkReceipt,
   type EnsoGitFileChange,
   type EnsoGitRepository,
@@ -1384,6 +1385,146 @@ test('⚠ a tool result the wire lands on a LATER message still completes the ca
     expect(pane.container.textContent).toContain('a.ts b.ts')
     expect(pane.container.textContent).not.toContain('running…')
   })
+  await pane.unmount()
+})
+
+// ── #382: a run line reads where it happened, not after the whole transcript ─────────────────
+
+/** Send `text` from the composer, as a person would. */
+async function sendPrompt(pane: MountedPane, text: string): Promise<void> {
+  await flush(async () => {
+    typeInto(pane.composer(), text)
+    pressEnter(pane.composer())
+    await tick()
+  })
+}
+
+/** A provider's refusal of the current attempt (#340), its words carrying `marker`. */
+function refusedFrame(seq: number, status: number, marker: string): EnsoFollowFrame {
+  return {
+    type: 'observation',
+    seq,
+    observation: {
+      kind: 'provider-refused',
+      provider: 'anthropic',
+      providerName: 'Anthropic',
+      model: 'claude-sonnet-4-5',
+      status,
+      message: `${status} {"type":"error","error":{"type":"rate_limit_error","message":"${marker}"}}`,
+    },
+  }
+}
+
+/** Where each of `needles` first appears in the pane's text, as the reader meets them. */
+function readingOrder(pane: MountedPane, needles: readonly string[]): string[] {
+  const text = pane.container.textContent ?? ''
+  for (const needle of needles) expect(text).toContain(needle)
+  return needles.toSorted((left, right) => text.indexOf(left) - text.indexOf(right))
+}
+
+const assistantBubbles = (pane: MountedPane): string[] =>
+  [...pane.container.querySelectorAll('[data-role="assistant"]')].map((bubble) => bubble.textContent ?? '')
+
+test('⚠ refused → retry → reply reads in order, and stays in order under a later turn; the refused attempt draws no empty bubble (#382)', async () => {
+  const pane = await mountPane()
+  await pane.settle(SNAPSHOT_IDLE)
+  await sendPrompt(pane, 'first prompt')
+  await pane.settle(
+    { type: 'observation', seq: 1, observation: { kind: 'message-start', role: 'assistant' } },
+    refusedFrame(2, 429, 'RATE-LIMITED'),
+    { type: 'observation', seq: 3, observation: { kind: 'provider-retry', attempt: 1, maxAttempts: 2, delayMs: 4000 } },
+    { type: 'observation', seq: 4, observation: { kind: 'message-start', role: 'assistant' } },
+    { type: 'observation', seq: 5, observation: { kind: 'text-delta', contentIndex: 0, delta: 'FIRST-REPLY' } },
+    { type: 'observation', seq: 6, observation: { kind: 'provider-retry-ended', success: true, attempt: 1 } },
+    { type: 'observation', seq: 7, observation: { kind: 'settled' } },
+    { type: 'status', live: true, busy: false, generation: 1 },
+  )
+  const firstRun = ['first prompt', 'RATE-LIMITED', 'retrying in 4 s', 'FIRST-REPLY']
+  await eventually(() => expect(readingOrder(pane, firstRun)).toEqual(firstRun))
+  await sendPrompt(pane, 'second prompt')
+  await pane.settle(
+    { type: 'observation', seq: 8, observation: { kind: 'message-start', role: 'assistant' } },
+    { type: 'observation', seq: 9, observation: { kind: 'text-delta', contentIndex: 0, delta: 'SECOND-REPLY' } },
+    { type: 'observation', seq: 10, observation: { kind: 'settled' } },
+    { type: 'status', live: true, busy: false, generation: 2 },
+  )
+  const bothRuns = [...firstRun, 'second prompt', 'SECOND-REPLY']
+  await eventually(() => expect(readingOrder(pane, bothRuns)).toEqual(bothRuns))
+  // The attempt refused before any token is no bubble of its own, and the reply speaks as pi.
+  expect(assistantBubbles(pane)).toEqual(['piFIRST-REPLY', 'piSECOND-REPLY'])
+  await pane.unmount()
+})
+
+// The retry's own refusal arrives in the same batch as the retry's message: the page has not
+// rendered that message yet, and a line placed by the rendered transcript lands one bubble early.
+test('⚠ a mid-stream refusal keeps its partial text; the retry’s refusal and `no reply after …` follow the retry, not the first attempt (#382)', async () => {
+  const pane = await mountPane()
+  await pane.settle(SNAPSHOT_IDLE)
+  await sendPrompt(pane, 'first prompt')
+  await pane.settle(
+    { type: 'observation', seq: 1, observation: { kind: 'message-start', role: 'assistant' } },
+    { type: 'observation', seq: 2, observation: { kind: 'text-delta', contentIndex: 0, delta: 'FIRST-PARTIAL' } },
+    refusedFrame(3, 529, 'OVERLOADED-ONE'),
+    { type: 'observation', seq: 4, observation: { kind: 'provider-retry', attempt: 1, maxAttempts: 1, delayMs: 2000 } },
+    { type: 'observation', seq: 5, observation: { kind: 'message-start', role: 'assistant' } },
+    { type: 'observation', seq: 6, observation: { kind: 'text-delta', contentIndex: 0, delta: 'RETRY-PARTIAL' } },
+    refusedFrame(7, 529, 'OVERLOADED-TWO'),
+    {
+      type: 'observation',
+      seq: 8,
+      observation: { kind: 'provider-retry-ended', success: false, attempt: 1, finalError: '529 overloaded' },
+    },
+    { type: 'observation', seq: 9, observation: { kind: 'settled' } },
+    { type: 'status', live: true, busy: false, generation: 1 },
+  )
+  await sendPrompt(pane, 'second prompt')
+  await pane.settle(
+    { type: 'observation', seq: 10, observation: { kind: 'message-start', role: 'assistant' } },
+    { type: 'observation', seq: 11, observation: { kind: 'text-delta', contentIndex: 0, delta: 'SECOND-REPLY' } },
+    { type: 'observation', seq: 12, observation: { kind: 'settled' } },
+    { type: 'status', live: true, busy: false, generation: 2 },
+  )
+  const expected = [
+    'first prompt',
+    'FIRST-PARTIAL',
+    'OVERLOADED-ONE',
+    'retrying in 2 s',
+    'RETRY-PARTIAL',
+    'OVERLOADED-TWO',
+    'no reply after 1 retry',
+    'second prompt',
+    'SECOND-REPLY',
+  ]
+  await eventually(() => expect(readingOrder(pane, expected)).toEqual(expected))
+  // Each attempt's partial text in its own bubble: the reply that never came is not glued to the first.
+  expect(assistantBubbles(pane)).toEqual(['piFIRST-PARTIAL', 'RETRY-PARTIAL', 'piSECOND-REPLY'])
+  await pane.unmount()
+})
+
+test('a `Mode:` line set between runs reads after the run before it and before the next prompt (#382)', async () => {
+  const pane = await mountPane()
+  await pane.settle(SNAPSHOT_IDLE)
+  await sendPrompt(pane, 'first prompt')
+  await pane.settle(
+    { type: 'observation', seq: 1, observation: { kind: 'message-start', role: 'assistant' } },
+    { type: 'observation', seq: 2, observation: { kind: 'text-delta', contentIndex: 0, delta: 'FIRST-REPLY' } },
+    { type: 'observation', seq: 3, observation: { kind: 'settled' } },
+    { type: 'status', live: true, busy: false, generation: 1 },
+  )
+  await pane.settle({
+    type: 'observation',
+    seq: 4,
+    observation: { kind: 'permission-mode', mode: 'plan', available: ['default', 'plan'] },
+  })
+  await sendPrompt(pane, 'second prompt')
+  await pane.settle(
+    { type: 'observation', seq: 5, observation: { kind: 'message-start', role: 'assistant' } },
+    { type: 'observation', seq: 6, observation: { kind: 'text-delta', contentIndex: 0, delta: 'SECOND-REPLY' } },
+    { type: 'observation', seq: 7, observation: { kind: 'settled' } },
+    { type: 'status', live: true, busy: false, generation: 2 },
+  )
+  const expected = ['first prompt', 'FIRST-REPLY', 'Mode: plan', 'second prompt', 'SECOND-REPLY']
+  await eventually(() => expect(readingOrder(pane, expected)).toEqual(expected))
   await pane.unmount()
 })
 
