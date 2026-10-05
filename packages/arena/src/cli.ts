@@ -8,6 +8,10 @@
  *
  *   bun run arena start --agent PROVIDER/MODEL [--thinking LEVEL] [--scenario snake] [--minutes N]
  *                       [--home DIR] [--out DIR] [--chromium PATH] [--headed]
+ *                       [--idle-minutes N] [--max-restarts N] [--max-cost-usd N]
+ *       the run stops at the budget (plus a minute's grace for the retrospective), or at a bound:
+ *       no action for --idle-minutes (10; 0 = off), a restart of Enso past --max-restarts (3), or
+ *       Enso's own spend over --max-cost-usd (10; only over the run's own home)
  *       start Enso over a fresh project and a recorded browser, and the agent under test with the
  *       brief and ONE tool, `act` (`arena/agent.ts`): no shell, no files, so the UI is its only way in
  *   bun run arena start --manual [...]
@@ -76,7 +80,20 @@ const [command, ...rest] = process.argv.slice(2)
  * review). ONE list: `flag` accepts only these names, so a flag read here cannot be missing from
  * what `act` skips.
  */
-const VALUED_FLAGS = ['scenario', 'minutes', 'home', 'out', 'chromium', 'run', 'agent', 'thinking', 'repo'] as const
+const VALUED_FLAGS = [
+  'scenario',
+  'minutes',
+  'home',
+  'out',
+  'chromium',
+  'run',
+  'agent',
+  'thinking',
+  'repo',
+  'idle-minutes',
+  'max-restarts',
+  'max-cost-usd',
+] as const
 type ValuedFlag = (typeof VALUED_FLAGS)[number]
 const VALUED_FLAG_ARGUMENTS = new Set<string>(VALUED_FLAGS.map((flagName) => `--${flagName}`))
 
@@ -93,6 +110,32 @@ function fail(message: string): never {
 function scenarioNamed(): ArenaScenario {
   const id = flag('scenario') ?? SNAKE_SCENARIO.id
   return ARENA_SCENARIOS[id] ?? fail(`no scenario "${id}" — known: ${Object.keys(ARENA_SCENARIOS).join(', ')}`)
+}
+
+/** A non-negative number flag, or its default; anything else fails with the flag's name. */
+function numberFlag(name: ValuedFlag, fallback: number): number {
+  const given = flag(name)
+  const value = given === undefined ? fallback : Number(given)
+  if (!Number.isFinite(value) || value < 0) fail(`--${name} takes a number, 0 or more`)
+  return value
+}
+
+/**
+ * The run's bounds besides the budget (#609). `--idle-minutes 0` turns the idle stop off. The cost
+ * bound reads Enso's spend from the home's logs, which is the run's own only in the run home (#610):
+ * over a shared `--home` it would count everything else that home ran, so it is off there.
+ */
+function runLimits(): { readonly idleMinutes?: number; readonly maxRestarts: number; readonly maxCostUsd?: number } {
+  const idleMinutes = numberFlag('idle-minutes', 10)
+  const maxCostUsd = numberFlag('max-cost-usd', 10)
+  if (flag('home') !== undefined && flag('max-cost-usd') !== undefined) {
+    fail('--max-cost-usd reads the run home’s own spend; over a shared --home it cannot, so drop one of them')
+  }
+  return {
+    maxRestarts: numberFlag('max-restarts', 3),
+    ...(idleMinutes === 0 ? {} : { idleMinutes }),
+    ...(flag('home') === undefined ? { maxCostUsd } : {}),
+  }
 }
 
 /** The operator's Enso home: the login a run borrows, and the home a `--home` run runs over. */
@@ -169,9 +212,11 @@ async function start(): Promise<void> {
         'it could not read or write its own project there. Name another --out.',
     )
   }
-  const scenario = scenarioNamed()
-  const minutes = Number(flag('minutes') ?? scenario.budgetMinutes)
+  const named = scenarioNamed()
+  const minutes = Number(flag('minutes') ?? named.budgetMinutes)
   if (!Number.isFinite(minutes) || minutes <= 0) fail('--minutes takes a positive number')
+  // The brief says how long the run has: the run's own budget, not the scenario's default (#609).
+  const scenario = { ...named, budgetMinutes: minutes }
   const runId = `${scenario.id}-${new Date()
     .toISOString()
     .replaceAll(':', '-')
@@ -202,6 +247,7 @@ async function start(): Promise<void> {
       project: join(runDirectory, 'project'),
       home,
       budgetMinutes: minutes,
+      limits: runLimits(),
       headed: rest.includes('--headed'),
       environment: process.env,
       ...(chromiumPath === undefined ? {} : { chromiumPath }),

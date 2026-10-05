@@ -24,6 +24,23 @@ default; one under a `.enso` directory is refused), `--chromium PATH`,
 `--repo OWNER/NAME` (where bugs are filed: the checkout's GitHub `origin` by default) and
 `--headed`. Ports 5178 and 5179 must be free: the arena starts its own stack.
 
+**When a run stops (#609).** Besides the agent's own `stop`:
+- **The budget (`--minutes`).** Every `act` answer carries `phase` and `remainingMs`. When the budget is
+  spent, a one-minute grace window opens in which only a `note` (the retrospective) and `stop` are
+  taken; anything else is refused and recorded. The run stops when the window closes.
+- **`--idle-minutes N`** (10; `0` turns it off): no action, refused ones included, for N minutes.
+- **`--max-restarts N`** (3): a `restart-enso` past N is refused, and the run stops.
+- **`--max-cost-usd N`** (10): Enso's own spend, read from the run home's logs, past N. Over a shared
+  `--home` the logs hold other spend too, so the bound is off there. The agent under test's own
+  model calls are not in Enso's logs and are not counted.
+
+Each bound gives its own `stopReason` in the manifest, and the score warns that the run stopped at a
+bound.
+
+A native browser dialog (`alert`, `confirm`, `prompt`) blocks the page until it is answered. `read`
+reports it, and `accept-dialog` (with `text` for a prompt) or `dismiss-dialog` answers it. Enso raises
+none today.
+
 **Each run has its own Enso home, `<run>/.enso` (#610).** It holds the run's projects, threads, logs
 and Stats, so the agent under test sees only the run's project, the evidence covers only the run,
 and your own Stats and logs are untouched. Your login comes in by symlink:
@@ -39,7 +56,7 @@ read nor write under it. The same fragment is why runs are not kept under `~/.en
 be under it too, and the agent could not touch its own work.
 
 With `--agent`, the run starts the agent under test itself and stops when the agent stops it, ends
-without stopping (after three nudges), or runs out of budget. Do not prescribe its features or
+without stopping (after three nudges), or reaches its budget or a bound. Do not prescribe its features or
 script its failures.
 
 ## The review and the bugs

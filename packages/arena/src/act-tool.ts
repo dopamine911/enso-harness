@@ -29,10 +29,10 @@ const ArenaTargetParameters = Type.Object({
 export const ArenaActToolParameters = Type.Object({
   action: Type.String({
     description:
-      'read | click | fill | press | hover | select | goto | back | reload | screenshot | wait | note | restart-enso | stop',
+      'read | click | fill | press | hover | select | goto | back | reload | screenshot | wait | note | accept-dialog | dismiss-dialog | restart-enso | stop',
   }),
   target: Type.Optional(ArenaTargetParameters),
-  text: Type.Optional(Type.String({ description: 'fill: what to type' })),
+  text: Type.Optional(Type.String({ description: 'fill: what to type; accept-dialog: a prompt dialog’s answer' })),
   key: Type.Optional(Type.String({ description: 'press: Enter, Escape, Control+K, …' })),
   path: Type.Optional(Type.String({ description: 'goto: a path on Enso’s page, like "/"' })),
   option: Type.Optional(Type.String({ description: 'select: the option' })),

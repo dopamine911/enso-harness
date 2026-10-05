@@ -99,6 +99,8 @@ export type ArenaEventBody =
       readonly request: string
       readonly status: number
     }
+  /** The budget is spent and its grace window opened (#609): only a note and the stop are taken now. */
+  | { readonly kind: 'budget-spent'; readonly graceMs: number }
 
 /** One timeline line: the body, when it happened, and where the page was. */
 export type ArenaEvent = ArenaEventBody & {

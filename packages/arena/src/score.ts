@@ -6,6 +6,7 @@ import { projectIdOf, realpathOrSelf } from '@enso/core/paths'
 import { ARENA_REFUSED_DETAIL, ARENA_RUNNER_STILL_RUNNING } from './actions.ts'
 import { type ArenaProjectThread, projectThreads } from './evidence.ts'
 import type { ArenaManifest } from './manifest.ts'
+import { ARENA_BOUND_STOP_PREFIXES } from './run-control.ts'
 import { type ArenaEvent, readJsonLines, readTimeline } from './timeline.ts'
 
 /**
@@ -277,6 +278,9 @@ function runProblems(input: ArenaScoreInput): Occurrence[] {
     at('error', 'the run never stopped cleanly: the recorder died', manifest.stopReason)
   if (manifest.stopReason.startsWith('budget'))
     at('warning', 'the run ran out of budget before the agent finished', manifest.stopReason)
+  // A bound other than the budget (#609): the run was stopped for it, not finished.
+  if (ARENA_BOUND_STOP_PREFIXES.some((prefix) => manifest.stopReason.startsWith(prefix)))
+    at('warning', 'the run stopped at a bound before the agent finished', manifest.stopReason)
   if (manifest.stopReason.includes('runner failed')) at('error', 'the agent runner failed', manifest.stopReason)
   const endReason = manifest.driver.kind === 'agent' ? manifest.driver.endReason : undefined
   if (manifest.driver.kind === 'agent' && endReason === undefined)
