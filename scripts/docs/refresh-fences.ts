@@ -46,39 +46,55 @@ const FENCE_CLOSE = /^```\s*$/
 const BLOCK_OPEN = /^<!--\s*generated-block:\s*(\S+)\s*-->$/
 const BLOCK_CLOSE = /^<!--\s*\/generated-block\s*-->$/
 
+/** What replaces a refreshed block: the lines after its opening line, and the index of its closing line. */
+interface RefreshedSpan {
+  readonly lines: readonly string[]
+  readonly closeIndex: number
+}
+
+function refreshGeneratedBlock(lines: readonly string[], openIndex: number, script: string): RefreshedSpan {
+  const closeIndex = lines.findIndex((candidate, index) => index > openIndex && BLOCK_CLOSE.test(candidate))
+  // Refuse, never truncate: a page with an unclosed block is left exactly as it was.
+  if (closeIndex === -1) throw new Error(`line ${openIndex + 1}: generated-block for ${script} is never closed`)
+  const generated = Bun.spawnSync(['bun', script], { cwd: ROOT })
+  if (generated.exitCode !== 0)
+    throw new Error(`${script} exited ${generated.exitCode}: ${generated.stderr.toString()}`)
+  return { lines: [generated.stdout.toString().trimEnd(), lines[closeIndex] ?? ''], closeIndex }
+}
+
+function refreshSourcedFence(lines: readonly string[], markerIndex: number, marker: RegExpExecArray): RefreshedSpan {
+  // Refuse, never skip: a marker above a fence the extractor cannot fill — a diagram, a shell
+  // block — is exactly what the gate refuses, so the repair tool must not quietly walk past it.
+  if (!SOURCEABLE_FENCE_LANGUAGE.test(fenceLanguage(lines[markerIndex + 1] ?? '')))
+    throw new Error(`line ${markerIndex + 1}: source marker is not above a TypeScript or JavaScript fence`)
+  const closeIndex = lines.findIndex((candidate, index) => index > markerIndex + 1 && FENCE_CLOSE.test(candidate))
+  // Refuse, never truncate — the same rule as the generated block.
+  if (closeIndex === -1) throw new Error(`line ${markerIndex + 2}: sourced fence is never closed`)
+  const declaration = extractDeclarationFromFile(join(ROOT, marker[1] ?? ''), marker[2] ?? '')
+  return { lines: [lines[markerIndex + 1] ?? '', declaration.text, lines[closeIndex] ?? ''], closeIndex }
+}
+
+/** The refresh for the block opened at `lineIndex`, or `undefined` when that line opens none. */
+function refreshedSpanAt(lines: readonly string[], lineIndex: number): RefreshedSpan | undefined {
+  const line = lines[lineIndex] ?? ''
+  const block = BLOCK_OPEN.exec(line)
+  if (block !== null) return refreshGeneratedBlock(lines, lineIndex, block[1] ?? '')
+  const marker = SOURCE_MARKER.exec(line)
+  if (marker !== null) return refreshSourcedFence(lines, lineIndex, marker)
+  return undefined
+}
+
 export function refreshFences(text: string): { text: string; refreshed: number } {
   const lines = text.split('\n')
   const output: string[] = []
   let refreshed = 0
   for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
-    const line = lines[lineIndex] ?? ''
-    output.push(line)
-    const block = BLOCK_OPEN.exec(line)
-    if (block !== null) {
-      const closeIndex = lines.findIndex((candidate, index) => index > lineIndex && BLOCK_CLOSE.test(candidate))
-      // Refuse, never truncate: a page with an unclosed block is left exactly as it was.
-      if (closeIndex === -1) throw new Error(`line ${lineIndex + 1}: generated-block for ${block[1]} is never closed`)
-      const generated = Bun.spawnSync(['bun', block[1] ?? ''], { cwd: ROOT })
-      if (generated.exitCode !== 0)
-        throw new Error(`${block[1]} exited ${generated.exitCode}: ${generated.stderr.toString()}`)
-      output.push(generated.stdout.toString().trimEnd(), lines[closeIndex] ?? '')
-      refreshed += 1
-      lineIndex = closeIndex
-      continue
-    }
-    const marker = SOURCE_MARKER.exec(line)
-    if (marker === null) continue
-    // Refuse, never skip: a marker above a fence the extractor cannot fill — a diagram, a shell
-    // block — is exactly what the gate refuses, so the repair tool must not quietly walk past it.
-    if (!SOURCEABLE_FENCE_LANGUAGE.test(fenceLanguage(lines[lineIndex + 1] ?? '')))
-      throw new Error(`line ${lineIndex + 1}: source marker is not above a TypeScript or JavaScript fence`)
-    const closeIndex = lines.findIndex((candidate, index) => index > lineIndex + 1 && FENCE_CLOSE.test(candidate))
-    // Refuse, never truncate — the same rule as the generated block above.
-    if (closeIndex === -1) throw new Error(`line ${lineIndex + 2}: sourced fence is never closed`)
-    const declaration = extractDeclarationFromFile(join(ROOT, marker[1] ?? ''), marker[2] ?? '')
-    output.push(lines[lineIndex + 1] ?? '', declaration.text, lines[closeIndex] ?? '')
+    output.push(lines[lineIndex] ?? '')
+    const span = refreshedSpanAt(lines, lineIndex)
+    if (span === undefined) continue
+    output.push(...span.lines)
     refreshed += 1
-    lineIndex = closeIndex
+    lineIndex = span.closeIndex
   }
   return { text: output.join('\n'), refreshed }
 }

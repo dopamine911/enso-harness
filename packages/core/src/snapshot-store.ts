@@ -635,32 +635,11 @@ export async function migrateSnapshotStores(
     const objectStore = objectStoreOf(snapshotsDir)
     const format = await migrationFormat(environment, objectStore, stores.filter(isLegacyStore))
     if (typeof format !== 'string') return format
-    const pruned: { store: string; missing: number }[] = []
-    const unmigrated: { store: string; reason: string }[] = []
-    const packed: string[] = []
-    for (const store of stores) {
-      if (existsSync(join(store, LEGACY_ORPHANED_FILE))) continue
-      const outcome = isLegacyStore(store) ? await packLegacyStore(environment, objectStore, store, format) : 0
-      if (typeof outcome !== 'number') {
-        unmigrated.push({ store, reason: refusalText(outcome) })
-        continue
-      }
-      if (outcome > 0) pruned.push({ store, missing: outcome })
-      packed.push(store)
-    }
+    const { packed, pruned, unmigrated } = await packPendingStores(environment, objectStore, stores, format)
     // A line of a fork's alternates is `<store>/objects`: matched by the store, never through the
     // objects path, which for a store migrated already resolves to the object store's.
     const storeIds = new Map(listed.map((store) => [canonical(store), basename(store)]))
-    const migrated: string[] = []
-    for (const store of packed) {
-      try {
-        if (isLegacyStore(store)) recordLegacyLineage(store, storeIds)
-        linkMigratedStore(store, objectStore)
-        migrated.push(store)
-      } catch (error) {
-        unmigrated.push({ store, reason: `link: ${String(error)}` })
-      }
-    }
+    const migrated = linkPackedStores(packed, objectStore, storeIds, unmigrated)
     if (unmigrated.length === 0) {
       for (const store of stores) {
         if (existsSync(join(store, LEGACY_ORPHANED_FILE))) rmSync(store, { recursive: true, force: true })
@@ -668,6 +647,61 @@ export async function migrateSnapshotStores(
     }
     return { migrated, pruned, unmigrated }
   })
+}
+
+/**
+ * Step 1 of a migration: each pending store's history packed into the object store — a store left
+ * between rename and link has nothing to pack — skipping stores kept for forks of deleted threads.
+ * A store whose pack is refused is `unmigrated`; one that reached pruned objects is `pruned`.
+ */
+async function packPendingStores(
+  environment: NodeJS.ProcessEnv,
+  objectStore: string,
+  stores: readonly string[],
+  format: string,
+): Promise<{
+  packed: string[]
+  pruned: { store: string; missing: number }[]
+  unmigrated: { store: string; reason: string }[]
+}> {
+  const pruned: { store: string; missing: number }[] = []
+  const unmigrated: { store: string; reason: string }[] = []
+  const packed: string[] = []
+  for (const store of stores) {
+    if (existsSync(join(store, LEGACY_ORPHANED_FILE))) continue
+    const outcome = isLegacyStore(store) ? await packLegacyStore(environment, objectStore, store, format) : 0
+    if (typeof outcome !== 'number') {
+      unmigrated.push({ store, reason: refusalText(outcome) })
+      continue
+    }
+    if (outcome > 0) pruned.push({ store, missing: outcome })
+    packed.push(store)
+  }
+  return { packed, pruned, unmigrated }
+}
+
+/**
+ * Step 2 of a migration: each packed store's lineage recorded off its alternates (a pre-#573 store)
+ * and its `objects` linked to the object store. The stores linked; one whose link throws is pushed
+ * onto `unmigrated`.
+ */
+function linkPackedStores(
+  packed: readonly string[],
+  objectStore: string,
+  storeIds: ReadonlyMap<string, string>,
+  unmigrated: { store: string; reason: string }[],
+): string[] {
+  const migrated: string[] = []
+  for (const store of packed) {
+    try {
+      if (isLegacyStore(store)) recordLegacyLineage(store, storeIds)
+      linkMigratedStore(store, objectStore)
+      migrated.push(store)
+    } catch (error) {
+      unmigrated.push({ store, reason: `link: ${String(error)}` })
+    }
+  }
+  return migrated
 }
 
 /** A refusal as one line: its step and git's words. */

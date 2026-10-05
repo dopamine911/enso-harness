@@ -23,23 +23,16 @@ export interface SseEvent {
   data: unknown
 }
 
-export async function readSseEvents(
-  response: Response,
-  signal: AbortSignal | undefined,
-  onEvent: (event: SseEvent) => boolean | undefined,
-): Promise<void> {
-  const responseBody = response.body
-  if (responseBody === null) {
-    throw new Error('the streaming response has no body')
-  }
+interface SseFrameParser {
+  /** Feeds one stream line; returns `true` when the callback asked to stop reading. */
+  acceptLine: (line: string) => boolean
+  /** Flushes the final event, which may end at EOF without the blank-line terminator. */
+  finish: (remainder: string) => void
+}
 
-  const reader = responseBody.getReader()
-  const decoder = new TextDecoder()
-  let lineBuffer = ''
+function createSseFrameParser(onEvent: (event: SseEvent) => boolean | undefined): SseFrameParser {
   let currentEventData = ''
   let currentEventName = ''
-  let stopRequested = false
-  let reachedEndOfStream = false
 
   const flushEvent = (): boolean => {
     if (currentEventData.length === 0) return false
@@ -69,6 +62,38 @@ export async function readSseEvents(
     }
   }
 
+  return {
+    acceptLine: (line: string): boolean => {
+      if (line === '' || line === '\r') return flushEvent()
+      bufferLine(line)
+      return false
+    },
+    finish: (remainder: string): void => {
+      if (remainder.trim().length > 0) {
+        bufferLine(remainder.trim())
+      }
+      flushEvent()
+    },
+  }
+}
+
+export async function readSseEvents(
+  response: Response,
+  signal: AbortSignal | undefined,
+  onEvent: (event: SseEvent) => boolean | undefined,
+): Promise<void> {
+  const responseBody = response.body
+  if (responseBody === null) {
+    throw new Error('the streaming response has no body')
+  }
+
+  const reader = responseBody.getReader()
+  const decoder = new TextDecoder()
+  const parser = createSseFrameParser(onEvent)
+  let lineBuffer = ''
+  let stopRequested = false
+  let reachedEndOfStream = false
+
   try {
     readLoop: for (;;) {
       if (signal?.aborted === true) {
@@ -86,22 +111,15 @@ export async function readSseEvents(
       lineBuffer = lines.pop() ?? ''
 
       for (const line of lines) {
-        if (line === '' || line === '\r') {
-          if (flushEvent()) {
-            stopRequested = true
-            break readLoop
-          }
-          continue
+        if (parser.acceptLine(line)) {
+          stopRequested = true
+          break readLoop
         }
-        bufferLine(line)
       }
     }
 
     // A final event may end at EOF without the blank-line terminator.
-    if (!stopRequested && lineBuffer.trim().length > 0) {
-      bufferLine(lineBuffer.trim())
-    }
-    if (!stopRequested) flushEvent()
+    if (!stopRequested) parser.finish(lineBuffer)
   } finally {
     if (!reachedEndOfStream) {
       try {

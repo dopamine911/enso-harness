@@ -240,6 +240,25 @@ function importedEntrypoint(importer: string, specifier: string): PublicExport['
   return byFile?.entrypoint
 }
 
+/** Adds one to `region` for each public export `path` imports, counting a symbol once per file. */
+function countFileImports(path: string, region: Region, counts: Map<string, Record<Region, number>>): void {
+  const source = readFileSync(path, 'utf8')
+  const importedHere = new Set<string>()
+  const imports = source.matchAll(/^import\s+(type\s+)?{([\s\S]*?)}\s+from\s+['"]([^'"]+)['"]\s*;?$/gm)
+  for (const statement of imports) {
+    const entrypoint = importedEntrypoint(path, statement[3] ?? '')
+    if (entrypoint === undefined) continue
+    for (const specifier of namedSpecifiers(statement[2] ?? '', statement[1] !== undefined)) {
+      const key = `${entrypoint}:${specifier.symbol}`
+      const symbolCounts = counts.get(key)
+      if (symbolCounts === undefined) throw new Error(`${relative(ROOT, path)} imports non-public ${key}`)
+      if (importedHere.has(key)) continue
+      importedHere.add(key)
+      symbolCounts[region] += 1
+    }
+  }
+}
+
 function importerCounts(exports: readonly PublicExport[]): Map<string, Readonly<Record<Region, number>>> {
   const counts = new Map<string, Record<Region, number>>()
   for (const publicExport of exports)
@@ -253,21 +272,7 @@ function importerCounts(exports: readonly PublicExport[]): Map<string, Readonly<
     if (path === join(ROOT, 'scripts/docs/core-exports.ts')) continue
     const region = regionOf(path)
     if (region === undefined) continue
-    const source = readFileSync(path, 'utf8')
-    const importedHere = new Set<string>()
-    const imports = source.matchAll(/^import\s+(type\s+)?{([\s\S]*?)}\s+from\s+['"]([^'"]+)['"]\s*;?$/gm)
-    for (const statement of imports) {
-      const entrypoint = importedEntrypoint(path, statement[3] ?? '')
-      if (entrypoint === undefined) continue
-      for (const specifier of namedSpecifiers(statement[2] ?? '', statement[1] !== undefined)) {
-        const key = `${entrypoint}:${specifier.symbol}`
-        const symbolCounts = counts.get(key)
-        if (symbolCounts === undefined) throw new Error(`${relative(ROOT, path)} imports non-public ${key}`)
-        if (importedHere.has(key)) continue
-        importedHere.add(key)
-        symbolCounts[region] += 1
-      }
-    }
+    countFileImports(path, region, counts)
   }
   return counts
 }

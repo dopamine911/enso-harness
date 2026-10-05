@@ -270,7 +270,7 @@ an error wins over a descriptor. The reader and validator are pinned pure. The t
 in `@enso/core` and consumed by name. Two facts to know, neither a leak of this seam:
 
 - **The descriptor is derived from the runtime's `details` field**, read by the mapper as the
-  vendor's own type (`TruncationResult`, imported by `host/map-events.ts`; `result?.details` in `host/map-events.ts#mapPiEvent`). That is L2's
+  vendor's own type (`TruncationResult`, imported by `host/map-events.ts`; `result?.details` in `host/map-events.ts#mapToolExecutionEnd`). That is L2's
   event-side half, inventoried on the thread-runtime page; the mapper is the one place it is read.
 - **The `kind` values in use are the runtime's tool names** — `pi.tool.bash`, `pi.tool.read` — minted
   by `descriptorFrom`. A kind is a string by contract and the renderer map has no entry for any

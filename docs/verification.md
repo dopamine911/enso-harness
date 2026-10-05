@@ -35,7 +35,7 @@ at the first failure:
    `.fallowrc.jsonc` names every program fallow cannot see a loader for (the harness extensions, the
    Bun plugin, the direct-run scripts), and `test/fallow-config.test.ts` holds its extension entries
    equal to the harness manifest.
-5. **Complexity** — `fallow health` over every function at a cognitive ceiling of 25. Exceptions are
+5. **Complexity** — `fallow health` over every function at a cognitive ceiling of 20 (25 until #595). Exceptions are
    per FUNCTION in `.fallowrc.jsonc` (`health.thresholdOverrides`), each pinned at the exact score its
    function measures, and `test/complexity-ratchet.test.ts` refuses a pin that is looser than that
    score, names a function that no longer exists, or covers one already under the ceiling.

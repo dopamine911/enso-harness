@@ -262,6 +262,87 @@ function ForkPointList({ reading }: { reading: ForkPointReading }): React.ReactN
   )
 }
 
+/** The drawer's buttons, with the last copy's and bundle's outcome said beside them. */
+function DebugActions({
+  copyState,
+  bundleState,
+  onRefresh,
+  onCopy,
+  onBundle,
+}: Pick<ThreadDebugViewProps, 'copyState' | 'bundleState' | 'onRefresh' | 'onCopy' | 'onBundle'>): React.ReactNode {
+  return (
+    <span className="flex gap-1">
+      <Button type="button" size="sm" variant="outline" onClick={onRefresh}>
+        refresh
+      </Button>
+      <Button type="button" size="sm" variant="outline" onClick={onCopy}>
+        copy as JSON
+      </Button>
+      <Button type="button" size="sm" variant="outline" onClick={onBundle} disabled={bundleState === 'building'}>
+        download log bundle
+      </Button>
+      {copyState === 'copied' ? <span role="status">copied</span> : null}
+      {copyState === 'failed' ? (
+        <span role="status" className="text-destructive">
+          copy failed — clipboard needs a secure context or permission
+        </span>
+      ) : null}
+      {bundleState === 'building' ? <span role="status">building the bundle…</span> : null}
+      {bundleState === 'saved' ? <span role="status">bundle saved — open it before you attach it</span> : null}
+      {typeof bundleState === 'object' ? (
+        <span role="status" className="text-destructive">
+          bundle failed — {bundleState.failed}
+        </span>
+      ) : null}
+    </span>
+  )
+}
+
+/** What pi's session holds: identity, state, and its branch — or why the last refresh produced nothing. */
+function SessionSection({
+  session,
+  error,
+}: {
+  session: EnsoThreadInspection | undefined
+  error: string | undefined
+}): React.ReactNode {
+  return (
+    <section>
+      <h3 className="font-semibold text-foreground">pi's session has</h3>
+      {error !== undefined ? <div className="text-destructive">{error}</div> : null}
+      {session === undefined ? (
+        <div>{error === undefined ? 'not fetched yet — press refresh' : null}</div>
+      ) : (
+        <>
+          <div className="break-all">session {session.sessionId}</div>
+          <div className="break-all">cwd {session.cwd}</div>
+          <div className="break-all">dir {session.sessionDir}</div>
+          <div className="break-all">
+            file{' '}
+            {session.sessionFile ?? (
+              <span title="pi flushes a session to disk only after its first assistant message; until then the branch below is the only copy">
+                in memory, not flushed yet
+              </span>
+            )}
+          </div>
+          <div>host mode: {session.permissionMode.mode}</div>
+          <div>
+            {session.busy ? 'busy' : 'idle'}, run #{session.generation}, last activity{' '}
+            {session.lastActivityAt.slice(11, 19)}
+          </div>
+          <div>commands: {session.commands.map((command) => `/${command}`).join(' ')}</div>
+          <h4 className="mt-1 text-foreground">branch ({session.entries.length} entries)</h4>
+          <ol>
+            {session.entries.map((branchEntry, position) => (
+              <li key={entryKey(branchEntry, position)}>{describeTranscriptEntry(branchEntry)}</li>
+            ))}
+          </ol>
+        </>
+      )}
+    </section>
+  )
+}
+
 export function ThreadDebugView({
   threadId,
   browser,
@@ -285,30 +366,13 @@ export function ThreadDebugView({
     <aside aria-label="session debug" className="flex flex-col gap-3 p-3 font-mono text-xs text-muted-foreground">
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-semibold text-foreground">session debug</span>
-        <span className="flex gap-1">
-          <Button type="button" size="sm" variant="outline" onClick={onRefresh}>
-            refresh
-          </Button>
-          <Button type="button" size="sm" variant="outline" onClick={onCopy}>
-            copy as JSON
-          </Button>
-          <Button type="button" size="sm" variant="outline" onClick={onBundle} disabled={bundleState === 'building'}>
-            download log bundle
-          </Button>
-          {copyState === 'copied' ? <span role="status">copied</span> : null}
-          {copyState === 'failed' ? (
-            <span role="status" className="text-destructive">
-              copy failed — clipboard needs a secure context or permission
-            </span>
-          ) : null}
-          {bundleState === 'building' ? <span role="status">building the bundle…</span> : null}
-          {bundleState === 'saved' ? <span role="status">bundle saved — open it before you attach it</span> : null}
-          {typeof bundleState === 'object' ? (
-            <span role="status" className="text-destructive">
-              bundle failed — {bundleState.failed}
-            </span>
-          ) : null}
-        </span>
+        <DebugActions
+          copyState={copyState}
+          bundleState={bundleState}
+          onRefresh={onRefresh}
+          onCopy={onCopy}
+          onBundle={onBundle}
+        />
         <span className="w-full break-all">thread {threadId}</span>
       </div>
       <div className="flex flex-col gap-3">
@@ -347,39 +411,7 @@ export function ThreadDebugView({
             ))}
           </ol>
         </section>
-        <section>
-          <h3 className="font-semibold text-foreground">pi's session has</h3>
-          {error !== undefined ? <div className="text-destructive">{error}</div> : null}
-          {session === undefined ? (
-            <div>{error === undefined ? 'not fetched yet — press refresh' : null}</div>
-          ) : (
-            <>
-              <div className="break-all">session {session.sessionId}</div>
-              <div className="break-all">cwd {session.cwd}</div>
-              <div className="break-all">dir {session.sessionDir}</div>
-              <div className="break-all">
-                file{' '}
-                {session.sessionFile ?? (
-                  <span title="pi flushes a session to disk only after its first assistant message; until then the branch below is the only copy">
-                    in memory, not flushed yet
-                  </span>
-                )}
-              </div>
-              <div>host mode: {hostMode}</div>
-              <div>
-                {session.busy ? 'busy' : 'idle'}, run #{session.generation}, last activity{' '}
-                {session.lastActivityAt.slice(11, 19)}
-              </div>
-              <div>commands: {session.commands.map((command) => `/${command}`).join(' ')}</div>
-              <h4 className="mt-1 text-foreground">branch ({session.entries.length} entries)</h4>
-              <ol>
-                {session.entries.map((branchEntry, position) => (
-                  <li key={entryKey(branchEntry, position)}>{describeTranscriptEntry(branchEntry)}</li>
-                ))}
-              </ol>
-            </>
-          )}
-        </section>
+        <SessionSection session={session} error={error} />
         {/* The event tails (#97): the ordering view. `emitted` is what the host's funnel saw,
 				    with how each was delivered; `sent` is what the server wrote to this browser.
 				    A disagreement with the two sections above names the layer a bug lives in.
