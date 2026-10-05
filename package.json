@@ -46,7 +46,7 @@
     "docs:social-card": "bun scripts/docs/social-card.ts",
     "format:check": "bun --bun oxfmt --check",
     "complexity:check": "fallow health --complexity --max-cognitive 25 --max-cyclomatic 1000 --quiet",
-    "dupes:check": "fallow dupes --quiet"
+    "dupes:check": "fallow dupes --quiet --summary"
   },
   "devDependencies": {
     "typescript": "~6.0.3",

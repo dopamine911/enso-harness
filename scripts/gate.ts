@@ -32,9 +32,11 @@
  *                  function under the cognitive ceiling of 25, or under its own per-function pin
  *                  in `.fallowrc.jsonc` (`health.thresholdOverrides`). Cyclomatic is lifted out of
  *                  reach on purpose: it is the advisory audit's signal, never a gate.
- *   6. duplication — `fallow dupes --quiet`: duplicated lines under `duplicates.threshold` in
- *                  `.fallowrc.jsonc`, a ratchet that may only fall (#593). Semantic mode; what is
- *                  excluded from the count, and why, is recorded beside the threshold.
+ *   6. duplication — `fallow dupes --quiet --summary`: duplicated lines under `duplicates.threshold`
+ *                  in `.fallowrc.jsonc`, a ratchet that may only fall (#593). Semantic mode; what is
+ *                  excluded from the count, and why, is recorded beside the threshold. `--summary`
+ *                  prints the rate and the counts, not every clone group: on a pass the listing was
+ *                  ~95 lines per commit, and `bunx fallow dupes` prints it when a failure needs it.
  *   7. react-doctor — `react-doctor --project packages/web --scope full --no-score --no-supply-chain --blocking error`:
  *                  react-doctor's lint pass over the web surface, failing on an error-severity
  *                  finding (#342). Offline by construction: `--no-score` skips the score API, the
