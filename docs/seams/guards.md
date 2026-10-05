@@ -129,12 +129,12 @@ What the extension takes, and what it is:
 ```ts
 /**
  * The guard's seams: the bash analyzer (#9), the harness root (#160 §4), the incident policy
- * and log directory (#466), and the command judge with the secret values its state is redacted
- * of (#469).
+ * and log directory (#466), the projects directory thread trees are minted in (#615), and the
+ * command judge with the secret values its state is redacted of (#469).
  *
  * Production wires cc-safety-net's `checkCommand`, this checkout's root, the user's `config.json`
- * and `ENSO_HOME`'s log directory and secrets; tests inject known verdicts, a root they built, a
- * policy, a directory and a fake judge — a guard test must never reach the network.
+ * and `ENSO_HOME`'s log and projects directories and secrets; tests inject known verdicts, a root
+ * they built, a policy, directories and a fake judge — a guard test must never reach the network.
  * `checkCommand` reads LOCAL policy per call, so a guard test that touched the real
  * library would vary with the machine's cc-safety-net config (the contract test alone exercises
  * the real one, and pins defaults explicitly) — and the same holds for the machine's config file.
@@ -152,6 +152,11 @@ export interface GuardDependencies {
   incidentPolicy: () => EnsoIncidentPolicy
   /** The log directory `protected-records` refuses a shell command naming (#466). */
   logsDirectory: string
+  /**
+   * Where thread trees are minted, `ENSO_HOME/projects` (#551): a session whose cwd is a tree there
+   * has its own files judged relative to the tree, not as the harness's own directory (#615).
+   */
+  projectsDirectory: string
   /**
    * The command judge, or undefined when `security.judge.backend` is `off` (the default) — read at
    * every `session_start`, as the incident policy is (#469).
@@ -227,8 +232,8 @@ and against pi's real loop by `agent-host.test.ts#⚠⚠ a batch the guard refus
 ## Who implements it, who consumes it
 
 **Implemented once**, by `packages/harness/extensions/guards/index.ts`. The default export is
-`createGuards({ analyzeBashCommand: checkCommand, harnessRoot, incidentPolicy, logsDirectory })` — the
-real analyzer, the user's `config.json` `security` section and `ENSO_HOME`'s log directory, wired at the
+`createGuards({ analyzeBashCommand: checkCommand, harnessRoot, incidentPolicy, logsDirectory, projectsDirectory })` — the
+real analyzer, the user's `config.json` `security` section, and `ENSO_HOME`'s log and projects directories, wired at the
 composition root. `guardsWithDependencies` registers three hooks: `session_start` resets the read
 tracker, rebuilds the session's risk and incidents from the branch with the incident policy read
 afresh, and verifies the policy's tool names against the live tool list

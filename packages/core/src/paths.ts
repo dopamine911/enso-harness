@@ -447,11 +447,24 @@ export function projectTreesDir(projectsDir: string, projectId: string): string 
  * @group Workspace paths
  */
 export function treeProjectId(projectsDir: string, path: string): string | undefined {
+  const root = threadTreeRoot(projectsDir, path)
+  return root === undefined ? undefined : basename(dirname(dirname(root)))
+}
+
+/**
+ * The root of the minted tree a path is in — `<projectsDir>/<id>/trees/<thread-id>` for the tree's
+ * root or anything under it — or `undefined` for any other path. The shape `treeProjectId` reads,
+ * cut at the tree: what the guard judges a session's own files relative to (#615), so a tree under
+ * `ENSO_HOME` is a workspace like any checkout and not the harness's own directory.
+ *
+ * @group Workspace paths
+ */
+export function threadTreeRoot(projectsDir: string, path: string): string | undefined {
   const fromProjects = relative(resolve(projectsDir), resolve(path))
   if (fromProjects === '' || fromProjects.startsWith('..') || isAbsolute(fromProjects)) return undefined
   const [projectId, trees, threadId] = fromProjects.split(pathSeparator)
   return projectId !== undefined && /^[0-9a-f]{16}$/.test(projectId) && trees === 'trees' && threadId !== undefined
-    ? projectId
+    ? join(resolve(projectsDir), projectId, trees, threadId)
     : undefined
 }
 
