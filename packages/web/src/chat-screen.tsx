@@ -96,6 +96,7 @@ import { createFixtureChat, fixtureFetch } from './fixture-conversation.ts'
 import type { DialogAnswerOutcome, FollowConnection } from './follow-connection.ts'
 import { ForkContext, forkFromPage, RestoreContext, restoreFromPage } from './fork-thread.ts'
 import { ThreadIncidents } from './incident-card.tsx'
+import type { ListingState } from './listing-store.ts'
 import { ModelChip, ModelChoiceDialog, ThinkingLevelSelect, useModelState, useRecordedModel } from './model-state.tsx'
 import { NotificationLines, type PlacedLines, placeLines } from './notifications.tsx'
 import { PermissionModeSelect, usePermissionMode } from './permission-mode.tsx'
@@ -2163,52 +2164,34 @@ function ViewTabs({
   )
 }
 
-/** The page (#90): header, the sessions rail, and one mounted pane per live thread. */
-export function ChatScreen(): React.ReactNode {
-  const threads = useStore(threadListStore)
-  const stored = useStore(storedThreads)
-  const projects = useStore(projectList)
-  // Undefined only while a URL-named thread is being adopted: no pane, nothing active.
-  const [activeThreadId, setActiveThreadId] = useState<string | undefined>(FIRST_THREAD_ID)
-  const [resumeError, setResumeError] = useState<string | undefined>(BOOT.kind === 'fresh' ? BOOT.notice : undefined)
-  const anyBusy = threads.some((thread) => thread.busy)
-  useEffect(() => {
-    // Load, and every time the page goes from a run in flight to none: something settled.
-    if (!(anyBusy || isFixtureMode)) void storedThreads.refresh()
-  }, [anyBusy])
-  useEffect(() => {
-    if (!isFixtureMode) void projectList.refresh()
-  }, [])
-  const pageThreadIds = new Set(threads.map((thread) => thread.threadId))
-  // ⚠ Two things a resume's outcome must know, and cannot read from shared state (PR #143
-  // review — a shared "how" slot plus a "no threads yet" check desynced the URL from the
-  // pane the moment the boot's resume overlapped a rail click):
-  // - HOW its own request meant to reach history: it rides with the request (`intent`).
-  // - WHETHER a navigation happened since it was issued: `epoch` counts every navigation,
-  //   and an outcome from before the current one is dropped whole. New Thread during the
-  //   boot's "resuming…" therefore wins outright: the URL says the new thread, the pane
-  //   shows it, and the boot's answer arrives to nobody.
-  // `activePane` mirrors `activeThreadId` for the same closures.
-  const epoch = useRef(0)
-  const activePane = useRef<string | undefined>(FIRST_THREAD_ID)
-  /** Make `threadId` the active pane, and tell history how it happened. History state is `null`: the URL is read back, never the state object. */
-  const navigate = useCallback((threadId: string, how: ThreadNavigation): void => {
-    epoch.current += 1
-    activePane.current = threadId
-    // The follow budget needs this too: the visible thread is not a drop candidate, and
-    // being looked at is what counts as activity for the one being left behind (#272).
-    markThreadActive(threadId)
-    setActiveThreadId(threadId)
-    if (how === 'pop' || typeof window === 'undefined') return
-    const url = urlForThread(window.location.search, threadId)
-    if (how === 'push') window.history.pushState(null, '', url)
-    else window.history.replaceState(null, '', url)
-  }, [])
-  const resume = useMemo(
+/** How a resume's request means to reach history, and the navigation it was issued under. */
+interface ResumeIntent {
+  how: ThreadNavigation
+  epoch: number
+  prefill?: string
+  fromUrl?: boolean
+}
+
+/** What a resume's outcome reaches back into: the navigation count, the shown pane, the move itself, and the rail's error. */
+interface ResumeOutcomeTargets {
+  readonly epoch: React.RefObject<number>
+  readonly activePane: React.RefObject<string | undefined>
+  readonly navigate: (threadId: string, how: ThreadNavigation) => void
+  readonly setResumeError: (error: string | undefined) => void
+}
+
+/** The page's resume coordinator: each outcome lands only if no navigation happened since its request. */
+function useResumeRequests({
+  epoch,
+  activePane,
+  navigate,
+  setResumeError,
+}: ResumeOutcomeTargets): (threadId: string, intent: ResumeIntent) => void {
+  return useMemo(
     () =>
       // `prefill` rides with a fork's open (#433): the new thread's composer opens holding it.
       // `fromUrl`: the id is the URL's (the boot, back/forward), not a row or a fork (#378).
-      createResumeRequests<{ how: ThreadNavigation; epoch: number; prefill?: string; fromUrl?: boolean }>(
+      createResumeRequests<ResumeIntent>(
         fetchThreadHistory,
         (history, intent) => {
           if (intent.epoch !== epoch.current) return // a navigation happened since — superseded
@@ -2239,8 +2222,112 @@ export function ChatScreen(): React.ReactNode {
           if (activePane.current === undefined) navigate(mintPageThread().threadId, 'replace')
         },
       ),
-    [navigate],
+    [epoch, activePane, navigate, setResumeError],
   )
+}
+
+/**
+ * Back/forward: the URL moved; the page follows it — a thread on this page is a switch, one
+ * that is not is a resume. Neither writes history again.
+ */
+function useFollowUrlHistory(
+  navigate: (threadId: string, how: ThreadNavigation) => void,
+  resumeFrom: (threadId: string, how: ThreadNavigation, fromUrl?: boolean) => void,
+): void {
+  useEffect(() => {
+    const onPopState = (): void => {
+      const named = readThreadUrl(window.location.search)
+      if (named.kind !== 'resume') return
+      if (threadListStore.get().some((thread) => thread.threadId === named.threadId)) {
+        navigate(named.threadId, 'pop')
+        return
+      }
+      resumeFrom(named.threadId, 'pop', true)
+    }
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [navigate, resumeFrom])
+}
+
+/** The page's three listings: its own threads, the server's stored sessions, and the projects. */
+interface PageListings {
+  readonly threads: readonly ThreadSummary[]
+  readonly stored: ListingState<EnsoStoredThread>
+  readonly projects: ListingState<EnsoProject>
+}
+
+/** The page's listings, fetched on load; the stored sessions again each time the page's runs settle. */
+function usePageListings(): PageListings {
+  const threads = useStore(threadListStore)
+  const stored = useStore(storedThreads)
+  const projects = useStore(projectList)
+  const anyBusy = threads.some((thread) => thread.busy)
+  useEffect(() => {
+    // Load, and every time the page goes from a run in flight to none: something settled.
+    if (!(anyBusy || isFixtureMode)) void storedThreads.refresh()
+  }, [anyBusy])
+  useEffect(() => {
+    if (!isFixtureMode) void projectList.refresh()
+  }, [])
+  return { threads, stored, projects }
+}
+
+/** The rail's project controls: whether the add dialog is open, what a refused removal said, and the removal itself. */
+interface ProjectEditing {
+  readonly addingProject: boolean
+  readonly setAddingProject: (adding: boolean) => void
+  readonly projectNotice: string | undefined
+  readonly setProjectNotice: (notice: string | undefined) => void
+  readonly forgetProject: (projectId: string) => Promise<void>
+}
+
+/**
+ * Adding and removing projects (#395 slice 3). A refused removal is said on the rail; a removed
+ * project's open threads stay, under "other" — the server ended them, and the rail never drops one.
+ */
+function useProjectEditing(): ProjectEditing {
+  const [addingProject, setAddingProject] = useState(false)
+  const [projectNotice, setProjectNotice] = useState<string | undefined>(undefined)
+  const forgetProject = async (projectId: string): Promise<void> => {
+    const outcome = await removeProject(projectId)
+    setProjectNotice(outcome.kind === 'ok' ? undefined : `could not remove the project: ${outcome.reason}`)
+    await Promise.all([projectList.refresh(), storedThreads.refresh()])
+  }
+  return { addingProject, setAddingProject, projectNotice, setProjectNotice, forgetProject }
+}
+
+/** The page (#90): header, the sessions rail, and one mounted pane per live thread. */
+export function ChatScreen(): React.ReactNode {
+  const { threads, stored, projects } = usePageListings()
+  // Undefined only while a URL-named thread is being adopted: no pane, nothing active.
+  const [activeThreadId, setActiveThreadId] = useState<string | undefined>(FIRST_THREAD_ID)
+  const [resumeError, setResumeError] = useState<string | undefined>(BOOT.kind === 'fresh' ? BOOT.notice : undefined)
+  const pageThreadIds = new Set(threads.map((thread) => thread.threadId))
+  // ⚠ Two things a resume's outcome must know, and cannot read from shared state (PR #143
+  // review — a shared "how" slot plus a "no threads yet" check desynced the URL from the
+  // pane the moment the boot's resume overlapped a rail click):
+  // - HOW its own request meant to reach history: it rides with the request (`intent`).
+  // - WHETHER a navigation happened since it was issued: `epoch` counts every navigation,
+  //   and an outcome from before the current one is dropped whole. New Thread during the
+  //   boot's "resuming…" therefore wins outright: the URL says the new thread, the pane
+  //   shows it, and the boot's answer arrives to nobody.
+  // `activePane` mirrors `activeThreadId` for the same closures.
+  const epoch = useRef(0)
+  const activePane = useRef<string | undefined>(FIRST_THREAD_ID)
+  /** Make `threadId` the active pane, and tell history how it happened. History state is `null`: the URL is read back, never the state object. */
+  const navigate = useCallback((threadId: string, how: ThreadNavigation): void => {
+    epoch.current += 1
+    activePane.current = threadId
+    // The follow budget needs this too: the visible thread is not a drop candidate, and
+    // being looked at is what counts as activity for the one being left behind (#272).
+    markThreadActive(threadId)
+    setActiveThreadId(threadId)
+    if (how === 'pop' || typeof window === 'undefined') return
+    const url = urlForThread(window.location.search, threadId)
+    if (how === 'push') window.history.pushState(null, '', url)
+    else window.history.replaceState(null, '', url)
+  }, [])
+  const resume = useResumeRequests({ epoch, activePane, navigate, setResumeError })
   const resumeFrom = useCallback(
     (threadId: string, how: ThreadNavigation, fromUrl = false): void =>
       resume(threadId, { how, epoch: epoch.current, fromUrl }),
@@ -2280,34 +2367,12 @@ export function ChatScreen(): React.ReactNode {
   useEffect(() => {
     if (BOOT.kind === 'resume') resumeFrom(BOOT.threadId, 'pop', true)
   }, [resumeFrom])
-  // Back/forward: the URL moved; the page follows it — a thread on this page is a switch, one
-  // that is not is a resume. Neither writes history again.
-  useEffect(() => {
-    const onPopState = (): void => {
-      const named = readThreadUrl(window.location.search)
-      if (named.kind !== 'resume') return
-      if (threadListStore.get().some((thread) => thread.threadId === named.threadId)) {
-        navigate(named.threadId, 'pop')
-        return
-      }
-      resumeFrom(named.threadId, 'pop', true)
-    }
-    window.addEventListener('popstate', onPopState)
-    return () => window.removeEventListener('popstate', onPopState)
-  }, [navigate, resumeFrom])
+  useFollowUrlHistory(navigate, resumeFrom)
+  const { addingProject, setAddingProject, projectNotice, setProjectNotice, forgetProject } = useProjectEditing()
   // The debug column (#86) is a right-hand pane, not a bottom drawer: stacked under the
   // transcript it took forty percent of the height and squeezed the conversation it
   // exists to explain. Opt-in by `?debug`; open by default when it is, and collapsible
   // from the header so it can get out of the way without a reload.
-  // Adding and removing projects (#395 slice 3). A refused removal is said on the rail; a removed
-  // project's open threads stay, under "other" — the server ended them, and the rail never drops one.
-  const [addingProject, setAddingProject] = useState(false)
-  const [projectNotice, setProjectNotice] = useState<string | undefined>(undefined)
-  const forgetProject = async (projectId: string): Promise<void> => {
-    const outcome = await removeProject(projectId)
-    setProjectNotice(outcome.kind === 'ok' ? undefined : `could not remove the project: ${outcome.reason}`)
-    await Promise.all([projectList.refresh(), storedThreads.refresh()])
-  }
   const [debugOpen, setDebugOpen] = useState(isDebugMode)
   const [view, setView] = useState<ThreadView>('chat')
   const rail = useNarrowRail()

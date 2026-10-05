@@ -273,6 +273,91 @@ function mapCompactionEnd(event: RuntimeEvent): EnsoObservation {
   return { kind: 'unmapped', event }
 }
 
+/** One streamed delta of the in-flight message: its text or its thinking, with the usage pi attaches. */
+function mapMessageUpdate(event: RuntimeEvent): EnsoObservation {
+  const delta = event.assistantMessageEvent as { type?: string; contentIndex?: number; delta?: string } | undefined
+  const usage = readUsage(event.usage)
+  const contentIndex = typeof delta?.contentIndex === 'number' ? delta.contentIndex : 0
+  const text = typeof delta?.delta === 'string' ? delta.delta : ''
+  if (delta?.type === 'text_delta') {
+    return { kind: 'text-delta', contentIndex, delta: text, ...(usage ? { usage } : {}) }
+  }
+  if (delta?.type === 'thinking_delta') {
+    return { kind: 'thinking-delta', contentIndex, delta: text, ...(usage ? { usage } : {}) }
+  }
+  // start/end markers and any future delta type: carried, not dropped.
+  return { kind: 'unmapped', event }
+}
+
+/** A running tool's partial result: never complete, never an error. */
+function mapToolExecutionUpdate(event: RuntimeEvent): EnsoObservation {
+  const partial = event.partialResult as { content?: unknown; details?: unknown } | undefined
+  const toolName = String(event.toolName)
+  const descriptor = descriptorFrom(toolName, partial?.details)
+  return {
+    kind: 'tool-result',
+    toolCallId: String(event.toolCallId),
+    toolName,
+    text: contentToText(partial?.content),
+    complete: false,
+    isError: false,
+    ...(descriptor === undefined ? {} : { descriptor }),
+  }
+}
+
+/** A tool's final result — a refused call included. */
+function mapToolExecutionEnd(event: RuntimeEvent): EnsoObservation {
+  const result = event.result as { content?: unknown; details?: unknown } | undefined
+  const toolName = String(event.toolName)
+  const descriptor = descriptorFrom(toolName, result?.details)
+  return {
+    kind: 'tool-result',
+    toolCallId: String(event.toolCallId),
+    toolName,
+    text: contentToText(result?.content),
+    complete: true,
+    // ⚠ `isError` is the only signal a refused call has: the runtime turns a guard's
+    // `{block: true, reason}` into an error result with the reason as its content —
+    // `@earendil-works/pi-agent-core@0.99.2` (bun.lock), `dist/agent-loop.js`, the
+    // `beforeResult?.block` branch: `createErrorToolResult(reason)`, `isError: true` —
+    // pinned by `__tests__/agent-loop-contract.test.ts`, so a bump that moves it goes red. No distinct
+    // "blocked" event exists. Treating any error result as displayable covers it — see
+    // also `extension_error` below.
+    isError: event.isError === true,
+    ...(descriptor === undefined ? {} : { descriptor }),
+  }
+}
+
+/**
+ * The host's own record (#114) — emitted by `extension-ui-context.ts` at the one
+ * point every settle path crosses, in stream order with the request it closes.
+ * An outcome the union does not name is a host/mapper drift, not a pi event to
+ * carry through: it stays unmapped so the debug pane shows it.
+ */
+function mapExtensionUiSettled(event: RuntimeEvent): EnsoObservation {
+  const { id, outcome } = event
+  if (typeof id === 'string' && id.length > 0 && Check(EnsoDialogOutcome, outcome)) {
+    return { kind: 'dialog-settled', id, outcome }
+  }
+  return { kind: 'unmapped', event }
+}
+
+/**
+ * ⚠ Only CUSTOM entries are promoted (#29): an extension persisting state via
+ * `pi.appendEntry(customType, data)` is a receipt a surface may want (the mode's
+ * `active_agent` entry is how a mode change is recorded, #496; the host follows it with
+ * its own `permission_mode` event). Every other entry
+ * kind (messages, compaction, labels) duplicates information that already flows
+ * as first-class observations, so those stay unmapped, exactly as before.
+ */
+function mapEntryAppended(event: RuntimeEvent): EnsoObservation {
+  const entry = event.entry as { type?: string; customType?: string; data?: unknown } | undefined
+  if (entry?.type === 'custom' && typeof entry.customType === 'string') {
+    return { kind: 'custom-entry', customType: entry.customType, data: entry.data }
+  }
+  return { kind: 'unmapped', event }
+}
+
 /**
  * Map one pi rpc event. Never returns undefined — see the design rule above.
  *
@@ -282,20 +367,8 @@ function mapCompactionEnd(event: RuntimeEvent): EnsoObservation {
  */
 export function mapPiEvent(event: RuntimeEvent, delivery: EventDelivery = 'live'): EnsoObservation {
   switch (event.type) {
-    case 'message_update': {
-      const delta = event.assistantMessageEvent as { type?: string; contentIndex?: number; delta?: string } | undefined
-      const usage = readUsage(event.usage)
-      const contentIndex = typeof delta?.contentIndex === 'number' ? delta.contentIndex : 0
-      const text = typeof delta?.delta === 'string' ? delta.delta : ''
-      if (delta?.type === 'text_delta') {
-        return { kind: 'text-delta', contentIndex, delta: text, ...(usage ? { usage } : {}) }
-      }
-      if (delta?.type === 'thinking_delta') {
-        return { kind: 'thinking-delta', contentIndex, delta: text, ...(usage ? { usage } : {}) }
-      }
-      // start/end markers and any future delta type: carried, not dropped.
-      return { kind: 'unmapped', event }
-    }
+    case 'message_update':
+      return mapMessageUpdate(event)
 
     case 'message_start':
       return mapMessageStart(event)
@@ -322,57 +395,17 @@ export function mapPiEvent(event: RuntimeEvent, delivery: EventDelivery = 'live'
         args: event.args,
       }
 
-    case 'tool_execution_update': {
-      const partial = event.partialResult as { content?: unknown; details?: unknown } | undefined
-      const toolName = String(event.toolName)
-      const descriptor = descriptorFrom(toolName, partial?.details)
-      return {
-        kind: 'tool-result',
-        toolCallId: String(event.toolCallId),
-        toolName,
-        text: contentToText(partial?.content),
-        complete: false,
-        isError: false,
-        ...(descriptor === undefined ? {} : { descriptor }),
-      }
-    }
+    case 'tool_execution_update':
+      return mapToolExecutionUpdate(event)
 
-    case 'tool_execution_end': {
-      const result = event.result as { content?: unknown; details?: unknown } | undefined
-      const toolName = String(event.toolName)
-      const descriptor = descriptorFrom(toolName, result?.details)
-      return {
-        kind: 'tool-result',
-        toolCallId: String(event.toolCallId),
-        toolName,
-        text: contentToText(result?.content),
-        complete: true,
-        // ⚠ `isError` is the only signal a refused call has: the runtime turns a guard's
-        // `{block: true, reason}` into an error result with the reason as its content —
-        // `@earendil-works/pi-agent-core@0.99.2` (bun.lock), `dist/agent-loop.js`, the
-        // `beforeResult?.block` branch: `createErrorToolResult(reason)`, `isError: true` —
-        // pinned by `__tests__/agent-loop-contract.test.ts`, so a bump that moves it goes red. No distinct
-        // "blocked" event exists. Treating any error result as displayable covers it — see
-        // also `extension_error` below.
-        isError: event.isError === true,
-        ...(descriptor === undefined ? {} : { descriptor }),
-      }
-    }
+    case 'tool_execution_end':
+      return mapToolExecutionEnd(event)
 
     case 'extension_ui_request':
       return mapExtensionUiRequest(event, delivery)
 
-    case 'extension_ui_settled': {
-      // The host's own record (#114) — emitted by `extension-ui-context.ts` at the one
-      // point every settle path crosses, in stream order with the request it closes.
-      // An outcome the union does not name is a host/mapper drift, not a pi event to
-      // carry through: it stays unmapped so the debug pane shows it.
-      const { id, outcome } = event
-      if (typeof id === 'string' && id.length > 0 && Check(EnsoDialogOutcome, outcome)) {
-        return { kind: 'dialog-settled', id, outcome }
-      }
-      return { kind: 'unmapped', event }
-    }
+    case 'extension_ui_settled':
+      return mapExtensionUiSettled(event)
 
     case 'permission_mode':
       return hostState(event, EnsoPermissionModeState, (mode) => ({ kind: 'permission-mode', ...mode }))
@@ -400,19 +433,8 @@ export function mapPiEvent(event: RuntimeEvent, delivery: EventDelivery = 'live'
     case 'compaction_end':
       return mapCompactionEnd(event)
 
-    case 'entry_appended': {
-      // ⚠ Only CUSTOM entries are promoted (#29): an extension persisting state via
-      // `pi.appendEntry(customType, data)` is a receipt a surface may want (the mode's
-      // `active_agent` entry is how a mode change is recorded, #496; the host follows it with
-      // its own `permission_mode` event). Every other entry
-      // kind (messages, compaction, labels) duplicates information that already flows
-      // as first-class observations, so those stay unmapped, exactly as before.
-      const entry = event.entry as { type?: string; customType?: string; data?: unknown } | undefined
-      if (entry?.type === 'custom' && typeof entry.customType === 'string') {
-        return { kind: 'custom-entry', customType: entry.customType, data: entry.data }
-      }
-      return { kind: 'unmapped', event }
-    }
+    case 'entry_appended':
+      return mapEntryAppended(event)
 
     case 'extension_error':
       return {

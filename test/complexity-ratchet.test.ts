@@ -6,7 +6,7 @@ import { REPOSITORY_ROOT } from './gate-support.ts'
 /**
  * Re-measures the cognitive-complexity pins, per FUNCTION (#264).
  *
- * The complexity gate (`complexity:check`) is fallow `health` at a cognitive ceiling of 25, and
+ * The complexity gate (`complexity:check`) is fallow `health` at a cognitive ceiling of 20, and
  * its exceptions are `.fallowrc.jsonc` → `health.thresholdOverrides`, each naming ONE function.
  * That granularity is the point: under Biome an exception could only pin a FILE, so a file
  * pinned at 68 for one function admitted every other function in it up to 68 — measured at

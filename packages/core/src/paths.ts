@@ -568,34 +568,42 @@ export function migrateSessionsIntoProjects(agentDir: string, projectsDir: strin
     // sessions stay listed from where they are.
     if (!legacyDirectory.isDirectory()) continue
     const directory = join(legacyRoot, legacyDirectory.name)
-    let orphaned = false
-    for (const fileName of sessionFileNames(directory)) {
-      const source = join(directory, fileName)
-      const header = sessionCwdOf(source)
-      if (header.kind === 'gone') continue
-      if (header.kind === 'unreadable') {
-        migration.unreadable.push(source)
-        continue
-      }
-      let canonical: string | undefined
-      try {
-        canonical = realpathSync(header.cwd)
-      } catch {
-        canonical = undefined
-      }
-      if (canonical === undefined) {
-        orphaned = true
-        continue
-      }
-      const target = join(projectSessionsDir(projectsDir, projectIdOf(canonical)), fileName)
-      const outcome = moveEntry(source, target)
-      if (outcome === 'moved') migration.moved.push(target)
-      else if (outcome === 'kept') migration.kept.push(source)
-    }
-    if (orphaned) migration.orphaned.push(directory)
+    if (migrateLegacyDirectory(directory, projectsDir, migration)) migration.orphaned.push(directory)
     else removeIfEmpty(directory)
   }
   return migration
+}
+
+/**
+ * One legacy `<agentDir>/sessions/<encoded-cwd>/` directory's sessions moved into their projects'
+ * folders, recorded on `migration`; whether any of them names a cwd that no longer exists.
+ */
+function migrateLegacyDirectory(directory: string, projectsDir: string, migration: SessionMigration): boolean {
+  let orphaned = false
+  for (const fileName of sessionFileNames(directory)) {
+    const source = join(directory, fileName)
+    const header = sessionCwdOf(source)
+    if (header.kind === 'gone') continue
+    if (header.kind === 'unreadable') {
+      migration.unreadable.push(source)
+      continue
+    }
+    let canonical: string | undefined
+    try {
+      canonical = realpathSync(header.cwd)
+    } catch {
+      canonical = undefined
+    }
+    if (canonical === undefined) {
+      orphaned = true
+      continue
+    }
+    const target = join(projectSessionsDir(projectsDir, projectIdOf(canonical)), fileName)
+    const outcome = moveEntry(source, target)
+    if (outcome === 'moved') migration.moved.push(target)
+    else if (outcome === 'kept') migration.kept.push(source)
+  }
+  return orphaned
 }
 
 /**

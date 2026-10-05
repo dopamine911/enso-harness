@@ -158,16 +158,17 @@
     ],
     "threshold": 2.44
   },
-  // Complexity. The `complexity` gate (scripts/gate.ts → `complexity:check`) reads this block
-  // twice, both blocking:
+  // Complexity. Two gate steps read this block, both blocking:
   //
-  //   • the CEILING: `fallow health` over EVERY function at a cognitive ceiling of 25 — the
-  //     ceiling that keeps us from writing functions a human cannot read — with the per-function
-  //     pins below as its only exceptions;
-  //   • NEW CODE (#594): the same over every function at 15 (fallow's own default), against
-  //     `complexity-baseline.json`, an identity baseline (file + function name) of the functions
-  //     already over 15 when it was taken. A function not in it — new, or renamed — must be under
-  //     15; one in it is held by the ceiling instead. The list only shrinks: a listed function that
+  //   • the CEILING (`complexity`, `complexity:check`): `fallow health` over EVERY function at a
+  //     cognitive ceiling of 20 — 25 until #595, which reduced eight of the nine functions between
+  //     the two and pinned the ninth — the ceiling that keeps us from writing functions a human
+  //     cannot read, with the per-function pins below as its only exceptions;
+  //   • NEW CODE (`new-complexity`, `complexity:new`, #594): the same over every function at 15
+  //     (fallow's own default), against `complexity-baseline.json`, an identity baseline (file +
+  //     function name) of the functions already over 15 when it was taken (46 at #594, 39 after
+  //     #595). A function not in it — new, or renamed — must be under 15; one in it is held by the
+  //     ceiling instead. The list only shrinks: a listed function that
   //     no longer needs its entry fails — fallow's `--fail-on-stale-baseline` catches a FILE with no
   //     finding left, and `test/complexity-ratchet.test.ts` catches the single function (measured on
   //     #594: fallow alone passed a stale entry in a file with other findings). Re-save with
@@ -187,7 +188,7 @@
   // grammar or protocol that must be read top-to-bottom, where extracting helpers would scatter
   // a state machine rather than simplify it. To retire one: reduce the function, then lower (or
   // delete) its entry. `test/complexity-ratchet.test.ts` refuses an entry that is looser than
-  // its function's score, names a function that no longer exists, or pins one already under 25.
+  // its function's score, names a function that no longer exists, or pins one already under the ceiling.
   //
   // `ignore`: the vendored components, for the reason `ignoreFindings` gives above — their
   // functions are upstream's, kept diffable (the shadcn `chart.tsx` #45 fetched arrived with a
@@ -213,6 +214,12 @@
         "functions": ["skipShellWord"],
         "maxCognitive": 32,
         "reason": "Same scanner: the word skipper."
+      },
+      {
+        "files": ["packages/harness/core/shell-segments.ts"],
+        "functions": ["withoutLeadingEnvironmentAssignments"],
+        "maxCognitive": 21,
+        "reason": "Same scanner: the leading NAME=value skipper, the scanner's word grammar read once per assignment. Pinned when the ceiling moved from 25 to 20 (#595)."
       },
       {
         "files": ["packages/harness/extensions/guards/index.ts"],

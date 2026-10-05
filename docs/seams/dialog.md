@@ -322,7 +322,7 @@ including the fail-closed lift (`EnsoExtensionUiContextOptions.liftDialog`).
   (an injection seam, closed at the server: `server/follow.ts#answerThreadDialog`).
 - **The settle funnel**: `finish` is the one place a settle record is emitted (`extension-ui-context.ts#finish`);
   the mapper turns an outcome the union does not name into `unmapped`, not a guess
-  (`map-events.ts#mapPiEvent`).
+  (`map-events.ts#mapExtensionUiSettled`).
 - **The kinds agree twice**: the host's `BlockingDialogRequest` (`extension-ui-context.ts#BlockingDialogRequest`) and
   the mapper's `DIALOG_UI_METHODS` (`map-events.ts#DIALOG_UI_METHODS`) name the same five methods, and the
   host's comment says so.

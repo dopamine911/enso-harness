@@ -29,8 +29,8 @@
  *                  No baseline since #594 — it had held zero findings since #263, and re-saving it
  *                  was the one way to accept a finding silently. After typecheck, because
  *                  fallow's graph is syntactic.
- *   5. complexity — `fallow health --complexity --max-cognitive 25 --max-cyclomatic 1000 --quiet`: every
- *                  function under the cognitive ceiling of 25, or under its own per-function pin
+ *   5. complexity — `fallow health --complexity --max-cognitive 20 --max-cyclomatic 1000 --quiet`: every
+ *                  function under the cognitive ceiling of 20 (25 until #595), or under its own per-function pin
  *                  in `.fallowrc.jsonc` (`health.thresholdOverrides`). Cyclomatic is lifted out of
  *                  reach on purpose: cognitive is what a reader pays for.
  *   6. new-complexity — `fallow health --complexity --max-cognitive 15 --max-cyclomatic 1000 --quiet --baseline complexity-baseline.json --baseline-mode identity --fail-on-stale-baseline`:
@@ -179,10 +179,10 @@ export const GATES: readonly Gate[] = [
   {
     // Beside dead-code: the same tool, syntactic. A per-function ceiling rather than the lint
     // gate's per-file overrides — the pins in `.fallowrc.jsonc` name the FUNCTION, so a pinned
-    // file's other functions stay under 25. `test/complexity-ratchet.test.ts` holds each pin
+    // file's other functions stay under 20. `test/complexity-ratchet.test.ts` holds each pin
     // equal to its function's score, so a number may go down, never up.
     name: 'complexity',
-    describe: 'fallow health: cognitive complexity under 25, or under its function pin',
+    describe: 'fallow health: cognitive complexity under 20, or under its function pin',
     script: 'complexity:check',
   },
   {

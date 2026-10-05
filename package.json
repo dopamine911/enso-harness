@@ -44,7 +44,7 @@
     "docs:screenshots": "bun scripts/docs/feature-screenshots.ts",
     "docs:social-card": "bun scripts/docs/social-card.ts",
     "format:check": "bun --bun oxfmt --check",
-    "complexity:check": "fallow health --complexity --max-cognitive 25 --max-cyclomatic 1000 --quiet",
+    "complexity:check": "fallow health --complexity --max-cognitive 20 --max-cyclomatic 1000 --quiet",
     "complexity:new": "fallow health --complexity --max-cognitive 15 --max-cyclomatic 1000 --quiet --baseline complexity-baseline.json --baseline-mode identity --fail-on-stale-baseline",
     "complexity:baseline": "fallow health --complexity --max-cognitive 15 --max-cyclomatic 1000 --quiet --save-baseline complexity-baseline.json --baseline-mode identity; bun --bun oxfmt complexity-baseline.json",
     "dupes:check": "fallow dupes --quiet --summary"

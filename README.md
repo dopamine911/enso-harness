@@ -341,7 +341,7 @@ choose whether and where to share the bundle.
 | 2 | `lint` | oxlint, type-aware, with this repo's naming rules |
 | 3 | `typecheck` | `tsc -b` across every package |
 | 4 | `dead-code` | unused files, exports and dependencies — none at all, no baseline |
-| 5 | `complexity` | every function under a cognitive ceiling of 25, or under its own pin (fallow) |
+| 5 | `complexity` | every function under a cognitive ceiling of 20, or under its own pin (fallow) |
 | 6 | `new-complexity` | new or renamed functions under cognitive 15; the ones already over it are listed |
 | 7 | `duplication` | duplicated lines under a ratchet that may only fall (fallow, semantic mode) |
 | 8 | `react-doctor` | react-doctor over the web surface, offline, failing on an error-severity finding |
