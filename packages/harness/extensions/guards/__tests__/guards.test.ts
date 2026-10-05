@@ -88,6 +88,8 @@ const SESSION_DIR = mkdtempSync(join(tmpdir(), 'enso-guard-sessions-'))
 // Under a `.enso` directory, as the default ENSO_HOME's is: `secret-path` refuses `/.enso/` too, so
 // this pins that the records are refused as records — the rule the signal needs — not as secrets.
 const LOGS_DIR = join(mkdtempSync(join(tmpdir(), 'enso-guard-home-')), '.enso', 'logs')
+/** Where trees are minted, in that same home named `.enso` — the shape every real user has (#615). */
+const PROJECTS_DIR = join(dirname(LOGS_DIR), 'projects')
 /** The shipped default: an incident alerts and suspends nothing (#466). */
 const ALERT_ONLY: EnsoIncidentPolicy = incidentPolicyOf(undefined)
 const HALTING: EnsoIncidentPolicy = incidentPolicyOf({ incidents: { halt: true } })
@@ -119,6 +121,7 @@ function loadGuardRuntime(
     harnessRoot,
     incidentPolicy: () => options.incidentPolicy ?? ALERT_ONLY,
     logsDirectory: LOGS_DIR,
+    projectsDirectory: PROJECTS_DIR,
     commandJudge: options.commandJudge ?? ((): undefined => undefined),
     judgeSecretValues: () => options.judgeSecretValues ?? [],
   })
@@ -340,6 +343,46 @@ test('⚠ a bash redirect into the user config is refused on the shell route (#4
     const result = call('bash', { command: `echo '{"webFetch":{"allowedHosts":["evil.example"]}}' > ${target}` })
     expect(result?.block).toBe(true)
   }
+})
+
+// #615: a thread runs in its own tree, minted under ENSO_HOME (`<home>/.enso/projects/<id>/trees/<thread>`,
+// #551). Every path there carries `.enso`, so the guard refused the thread its own work — every write
+// as persistence, every read as a credential, every shell command (each word resolves under the cwd).
+// Found by Dogfood Arena's first agent run. The tree is now judged as a checkout is; the home is not.
+test('⚠ a thread in its own tree under a home named .enso writes, reads and runs commands there; the rest of the home stays refused (#615)', () => {
+  const home = dirname(PROJECTS_DIR)
+  const tree = join(PROJECTS_DIR, '0123456789abcdef', 'trees', '11956af4-6dff-499a-9065-ded1d26eb127')
+  const otherTree = join(PROJECTS_DIR, '0123456789abcdef', 'trees', 'another-thread')
+  mkdirSync(join(tree, 'src'), { recursive: true })
+  mkdirSync(otherTree, { recursive: true })
+  writeFileSync(join(tree, 'src', 'a.ts'), 'export const a = 1\n')
+  writeFileSync(join(otherTree, 'b.ts'), 'export const b = 2\n')
+  writeFileSync(join(home, 'secrets.env'), 'ANTHROPIC_API_KEY=x\n')
+  symlinkSync(join(home, 'secrets.env'), join(tree, 'notes.txt'))
+  const runtime = loadGuardRuntime()
+  const inTree = (toolName: string, input: Record<string, unknown>): GuardVerdict =>
+    runtime.toolCall({ type: 'tool_call', toolCallId: 't', toolName, input }, { cwd: tree })
+
+  // Its own work: a new file, a read, a search, a shell command whose every word resolves into the tree.
+  expect(inTree('write', { path: 'index.html', content: '<h1>Snake</h1>' })).toBeUndefined()
+  expect(inTree('read', { path: 'src/a.ts' })).toBeUndefined()
+  expect(inTree('grep', { pattern: 'export', path: '.' })).toBeUndefined()
+  expect(inTree('bash', { command: 'bun test src && ls -la' })).toBeUndefined()
+
+  // Inside the tree, what a checkout's own path is refused for still is.
+  expect(inTree('write', { path: '.enso/config.json' })?.reason).toContain('persistence')
+  expect(inTree('write', { path: '.git/hooks/pre-commit' })?.block).toBe(true)
+  expect(inTree('read', { path: '.env' })?.block).toBe(true)
+  // A link in the tree is judged where it points: into the home.
+  expect(inTree('read', { path: 'notes.txt' })?.block).toBe(true)
+  // Everything else under the home: its credentials, by any route, and another thread's tree.
+  expect(inTree('read', { path: join(home, 'secrets.env') })?.block).toBe(true)
+  expect(inTree('bash', { command: `cat ${join(home, 'pi-agent', 'auth.json')}` })?.block).toBe(true)
+  expect(inTree('read', { path: join(otherTree, 'b.ts') })?.block).toBe(true)
+  // A cwd under the home that is NOT a tree — a project's sessions folder — has no own tree to be judged by.
+  const sessions = join(PROJECTS_DIR, '0123456789abcdef', 'sessions')
+  mkdirSync(sessions, { recursive: true })
+  expect(runtime.toolCall(toolCallEvent('write', 'x.jsonl'), { cwd: sessions })?.block).toBe(true)
 })
 test('read of .env is blocked', () => {
   const r = call('read', { path: '.env' })
@@ -1181,6 +1224,7 @@ test('⚠ the guard registers no tool: it participates through tool_call only, s
     harnessRoot: NO_CREDENTIALS_ROOT,
     incidentPolicy: () => ALERT_ONLY,
     logsDirectory: LOGS_DIR,
+    projectsDirectory: PROJECTS_DIR,
     commandJudge: () => undefined,
     judgeSecretValues: () => [],
   })({

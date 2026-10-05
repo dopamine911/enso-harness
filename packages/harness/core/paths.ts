@@ -1,6 +1,6 @@
 import { existsSync, realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, dirname, isAbsolute, join, sep as pathSeparator, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, sep as pathSeparator, resolve } from 'node:path'
 import {
   ENSO_PERSISTENCE_WRITE_BASENAMES,
   ENSO_PERSISTENCE_WRITE_DIRECTORIES,
@@ -184,6 +184,32 @@ export function isInsideAnyRoot(absolutePath: string, roots: readonly string[]):
 }
 
 /**
+ * A path as the guard judges it (#615): inside the session's OWN thread tree — `ownTree`, a minted
+ * `ENSO_HOME/projects/<id>/trees/<thread>` — re-rooted at the tree, so `<tree>/src/a.ts` is judged as
+ * `/src/a.ts`, the way the same file in a checkout would be; anywhere else, unchanged.
+ *
+ * ⚠ Why a tree is not the harness's own directory: it sits under `ENSO_HOME`, and every path there
+ * carries the `.enso` the credential fragment (`/.enso/`) and the persistence set (`.enso`) refuse —
+ * so a thread could neither write nor read its own work, nor run any shell command, whose every word
+ * resolves under its cwd. Other tools keep their worktrees in their own home too (omp `~/.omp/wt`,
+ * Codex `~/.codex/worktrees`); the guard was the outlier.
+ *
+ * ⚠ What stays refused: everything under `ENSO_HOME` outside that ONE tree (secrets, logins, config,
+ * logs, snapshots, sessions, other threads' trees), and, inside it, whatever a checkout's own path
+ * would be refused for — a project's `.enso/config.json`, `.git/`, a `.env`. Each caller judges the
+ * realpath as well as the literal path, so a link in the tree that points out of it is judged where
+ * it points. File-local, as `isInsideRoot` is: the predicates below are the only callers, and a check
+ * that re-rooted one candidate but not the other would be the mistake this file exists to prevent.
+ */
+function withinOwnTree(candidate: string, ownTree: string | undefined): string {
+  if (ownTree === undefined) return candidate
+  for (const root of new Set([resolve(ownTree), realpathOfNearestExisting(resolve(ownTree))])) {
+    if (isInsideRoot(candidate, root)) return pathSeparator + relative(root, candidate)
+  }
+  return candidate
+}
+
+/**
  * True when the path looks like credential material, by directory fragment, by basename,
  * or because it is a process's environment.
  *
@@ -195,8 +221,9 @@ export function isInsideAnyRoot(absolutePath: string, roots: readonly string[]):
  *
  * @group Guard predicates
  */
-export function looksLikeSecret(absolutePath: string, fragments: readonly string[]): boolean {
-  for (const candidate of [absolutePath, realpathOfNearestExisting(absolutePath)]) {
+export function looksLikeSecret(absolutePath: string, fragments: readonly string[], ownTree?: string): boolean {
+  for (const literalOrReal of [absolutePath, realpathOfNearestExisting(absolutePath)]) {
+    const candidate = withinOwnTree(literalOrReal, ownTree)
     if (textLooksLikeSecretPath(candidate, fragments)) return true
     if (PROC_ENVIRON_PATH.test(candidate)) return true
   }
@@ -280,8 +307,9 @@ export function isProtectedForWrite(absolutePath: string, fragments: readonly st
  *
  * @group Guard predicates
  */
-export function isPersistenceWriteTarget(absolutePath: string): boolean {
-  for (const candidate of [absolutePath, realpathOfNearestExisting(absolutePath)]) {
+export function isPersistenceWriteTarget(absolutePath: string, ownTree?: string): boolean {
+  for (const literalOrReal of [absolutePath, realpathOfNearestExisting(absolutePath)]) {
+    const candidate = withinOwnTree(literalOrReal, ownTree)
     const name = basename(candidate).toLowerCase()
     if (ALL_PERSISTENCE_WRITE_BASENAMES.some((dangerous) => dangerous === name)) return true
     const segments = candidate.toLowerCase().split(pathSeparator)

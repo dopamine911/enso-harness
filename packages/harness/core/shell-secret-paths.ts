@@ -186,7 +186,10 @@ function findPathWord(
 
 /**
  * Find the first word of a shell command that names credential material, or undefined when
- * none does. `coarse` forces the text pass (the PowerShell path).
+ * none does. `coarse` forces the text pass (the PowerShell path). `ownTree` is the session's own
+ * thread tree (#615): a word that resolves inside it is judged relative to it, as the reader gate
+ * judges it — without it every word of a command run in a tree under `ENSO_HOME` (`bun`, `test`,
+ * `src/a.ts`) resolved under `/.enso/` and refused the command.
  *
  * @group Guard predicates
  */
@@ -194,10 +197,10 @@ export function findSecretPathWord(
   command: string,
   fragments: readonly string[],
   cwd: string,
-  options: { coarse?: boolean } = {},
+  options: { coarse?: boolean; ownTree?: string | undefined } = {},
 ): SecretPathMatch | undefined {
   const question: PathQuestion = {
-    resolved: (absolutePath) => looksLikeSecret(absolutePath, fragments),
+    resolved: (absolutePath) => looksLikeSecret(absolutePath, fragments, options.ownTree),
     text: (text) => textLooksLikeSecretPath(text, fragments),
   }
   return findPathWord(command, question, cwd, options)

@@ -153,6 +153,11 @@ export interface GuardDependencies {
   /** The log directory `protected-records` refuses a shell command naming (#466). */
   logsDirectory: string
   /**
+   * Where thread trees are minted, `ENSO_HOME/projects` (#551): a session whose cwd is a tree there
+   * has its own files judged relative to the tree, not as the harness's own directory (#615).
+   */
+  projectsDirectory: string
+  /**
    * The command judge, or undefined when `security.judge.backend` is `off` (the default) — read at
    * every `session_start`, as the incident policy is (#469).
    */
@@ -227,8 +232,8 @@ and against pi's real loop by `agent-host.test.ts#⚠⚠ a batch the guard refus
 ## Who implements it, who consumes it
 
 **Implemented once**, by `packages/harness/extensions/guards/index.ts`. The default export is
-`createGuards({ analyzeBashCommand: checkCommand, harnessRoot, incidentPolicy, logsDirectory })` — the
-real analyzer, the user's `config.json` `security` section and `ENSO_HOME`'s log directory, wired at the
+`createGuards({ analyzeBashCommand: checkCommand, harnessRoot, incidentPolicy, logsDirectory, projectsDirectory })` — the
+real analyzer, the user's `config.json` `security` section, and `ENSO_HOME`'s log and projects directories, wired at the
 composition root. `guardsWithDependencies` registers three hooks: `session_start` resets the read
 tracker, rebuilds the session's risk and incidents from the branch with the incident policy read
 afresh, and verifies the policy's tool names against the live tool list

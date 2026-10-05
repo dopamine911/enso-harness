@@ -64,7 +64,7 @@ import {
   WEB_FETCH_TOOL_NAME,
 } from '@enso/core'
 import { judgeStateOf } from '@enso/core/judge'
-import { ensoHome, ensoLogsDir, findRepoRoot } from '@enso/core/paths'
+import { ensoHome, ensoLogsDir, ensoProjectsDir, findRepoRoot, threadTreeRoot } from '@enso/core/paths'
 import { knownSecretValuesTracking, readSecret } from '@enso/core/secrets'
 import { PERMISSIONS_DECISION_CHANNEL } from '@gotgenes/pi-permission-system'
 import { type CheckCommandResult, checkCommand } from 'cc-safety-net/api'
@@ -313,6 +313,11 @@ export interface GuardDependencies {
   /** The log directory `protected-records` refuses a shell command naming (#466). */
   logsDirectory: string
   /**
+   * Where thread trees are minted, `ENSO_HOME/projects` (#551): a session whose cwd is a tree there
+   * has its own files judged relative to the tree, not as the harness's own directory (#615).
+   */
+  projectsDirectory: string
+  /**
    * The command judge, or undefined when `security.judge.backend` is `off` (the default) — read at
    * every `session_start`, as the incident policy is (#469).
    */
@@ -382,6 +387,7 @@ export default createGuards({
   harnessRoot: findRepoRoot(import.meta.url),
   incidentPolicy: productionIncidentPolicy,
   logsDirectory: ensoLogsDir(ensoHome(process.env)),
+  projectsDirectory: ensoProjectsDir(ensoHome(process.env)),
   commandJudge: productionCommandJudge,
   // The tracking thunk: one `stat` per judged call, re-read only when secrets.env changes (#207).
   judgeSecretValues: knownSecretValuesTracking(ensoHome(process.env)),
@@ -761,7 +767,13 @@ function whySuspended(incidents: EnsoSessionIncidents): string {
  * labour its contract test pins against defaults.
  */
 function shellCommandDenial(
-  call: { toolName: string; command: string; cwd: string; recordDirectories: readonly string[] },
+  call: {
+    toolName: string
+    command: string
+    cwd: string
+    recordDirectories: readonly string[]
+    readonly ownTree: string | undefined
+  },
   dependencies: GuardDependencies,
   policy: GuardPolicy,
 ): GuardDenial | undefined {
@@ -837,7 +849,7 @@ function shellCommandDenial(
     )
   }
 
-  const secret = findSecretPathWord(command, policy.secretPathFragments, cwd, { coarse })
+  const secret = findSecretPathWord(command, policy.secretPathFragments, cwd, { coarse, ownTree: call.ownTree })
   if (secret !== undefined) {
     return deny(
       'secret-path',
@@ -1104,6 +1116,8 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
     const toolName = canonicalToolName(event.toolName)
     const standing = standingDenial(toolName)
     if (standing !== undefined) return standing
+    // The session's own thread tree, when its cwd is one (#615): judged like a checkout, never as ENSO_HOME.
+    const ownTree = threadTreeRoot(dependencies.projectsDirectory, cwd)
 
     // --- bash/powershell (#9): deny first, patch last — a denied command must never
     // have had its input mutated. The four denies live in `shellCommandDenial` so this
@@ -1111,7 +1125,7 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
     if (toolName === TOOL_BASH || toolName === TOOL_POWERSHELL) {
       const input = inputRecordOf(event)
       const command = typeof input.command === 'string' ? input.command : ''
-      const denial = shellCommandDenial({ toolName, command, cwd, recordDirectories }, dependencies, policy)
+      const denial = shellCommandDenial({ toolName, command, cwd, recordDirectories, ownTree }, dependencies, policy)
       if (denial !== undefined) return denial
 
       // Patch, do not block: a missing timeout means a hung command holds the
@@ -1143,7 +1157,7 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
       }
       // ⚠ Checked on the write path ONLY, deliberately: READING ~/.bashrc or .mcp.json is
       // routine and harmless. The danger is installation, not disclosure (#21).
-      if (isPersistenceWriteTarget(target)) {
+      if (isPersistenceWriteTarget(target, ownTree)) {
         return deny(
           'persistence-write',
           `Writing to "${candidate}" is blocked: it targets a shell-init, git, editor or ` +
@@ -1151,7 +1165,7 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
             `later, outside this session, as the user.`,
         )
       }
-      if (looksLikeSecret(target, policy.secretPathFragments)) {
+      if (looksLikeSecret(target, policy.secretPathFragments, ownTree)) {
         return deny('secret-write', `Writing to "${candidate}" is blocked: it matches a credential pattern.`)
       }
       // --- #10 + #11: the session's knowledge of the target, in two distinct refusals.
@@ -1182,7 +1196,7 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
       return undefined
     }
 
-    return readerDenial(toolName, candidate, { target, cwd })
+    return readerDenial(toolName, candidate, { target, cwd, ownTree })
   }
 
   /**
@@ -1200,9 +1214,9 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
   function readerDenial(
     toolName: string,
     candidate: string,
-    { target, cwd }: { target: string; cwd: string },
+    { target, cwd, ownTree }: { target: string; cwd: string; ownTree: string | undefined },
   ): GuardDenial | undefined {
-    if (looksLikeSecret(target, policy.secretPathFragments)) {
+    if (looksLikeSecret(target, policy.secretPathFragments, ownTree)) {
       return deny(
         'secret-read',
         `Reading "${candidate}" via ${toolName} is blocked: it matches a credential pattern. ` +

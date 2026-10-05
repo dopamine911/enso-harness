@@ -30,6 +30,7 @@ import {
   projectTreesDir,
   RepoRootNotFoundError,
   realpathOrSelf,
+  threadTreeRoot,
   treeProjectId,
   webPackageDir,
 } from '../paths.ts'
@@ -355,4 +356,18 @@ test("a thread tree's path — its root or anything under it — names its proje
   expect(treeProjectId(projectsDir, join(projectsDir, 'not-an-id', 'trees', 't'))).toBeUndefined()
   expect(treeProjectId(projectsDir, `/h/.enso/projects-elsewhere/${id}/trees/t`)).toBeUndefined()
   expect(treeProjectId(projectsDir, '/srv/app')).toBeUndefined()
+})
+
+// #615: the guard judges a session's files relative to this root, so it must be the tree's own —
+// never a parent that would also take in the project's sessions, snapshots or other threads' trees.
+test("a path in a thread tree is cut to that tree's root; a path in no tree has none (#615)", () => {
+  const projectsDir = '/h/.enso/projects'
+  const tree = join(projectTreesDir(projectsDir, '0123456789abcdef'), 'thread-1')
+  expect(threadTreeRoot(projectsDir, tree)).toBe(tree)
+  expect(threadTreeRoot(projectsDir, join(tree, 'src', 'a.ts'))).toBe(tree)
+  expect(threadTreeRoot(projectsDir, projectTreesDir(projectsDir, '0123456789abcdef'))).toBeUndefined()
+  expect(
+    threadTreeRoot(projectsDir, join(projectSessionsDir(projectsDir, '0123456789abcdef'), 'x.jsonl')),
+  ).toBeUndefined()
+  expect(threadTreeRoot(projectsDir, '/srv/app')).toBeUndefined()
 })
