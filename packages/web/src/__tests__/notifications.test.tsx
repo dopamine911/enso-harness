@@ -3,11 +3,12 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import {
   createNotificationsStore,
   NotificationLine,
+  NotificationLines,
   type NotificationsStore,
-  ThreadNotifications,
+  placeLines,
 } from '../notifications.tsx'
 import { ThreadStoresContext } from '../store.ts'
-import { clearThreadsForTest, mintThread } from '../thread-stores.ts'
+import { clearThreadsForTest, mintThread, type ThreadStores } from '../thread-stores.ts'
 
 /**
  * #29's browser half: notify messages become visible transcript lines. One store per
@@ -53,10 +54,57 @@ test('the store keeps only the newest 100, dropping the oldest', () => {
   expect(snapshot.at(-1)?.message).toBe('n105')
 })
 
+// ⚠ #382: a line follows the message it happened after. The stream's message wins over the
+// rendered transcript's last (React lags the stream), the transcript's last stands in when the
+// stream names none, and a startup notice is never anchored — it precedes every run.
+test('⚠ a line anchors to the stream’s message, else the transcript’s last; a startup notice to neither', () => {
+  let streaming: string | undefined
+  const anchored = createNotificationsStore(() => streaming)
+  anchored.push('before anything', 'info', 'run')
+  anchored.setTranscriptTail('stored-reply')
+  anchored.push('after the stored reply', 'info', 'run')
+  streaming = 'live-bubble'
+  anchored.push('mid-run', 'error', 'run')
+  anchored.push('replayed startup notice', 'error', 'session-start')
+  expect(anchored.get().map(({ message, after }) => [message, after])).toEqual([
+    ['before anything', undefined],
+    ['after the stored reply', 'stored-reply'],
+    ['mid-run', 'live-bubble'],
+    ['replayed startup notice', undefined],
+  ])
+})
+
+test('placed lines: unanchored head the transcript, anchored follow their message, an anchor gone falls to the tail — each in arrival order', () => {
+  let current: string | undefined
+  const placed = createNotificationsStore(() => current)
+  placed.push('h1', 'info', 'run')
+  current = 'm1'
+  placed.push('a1', 'info', 'run')
+  current = 'gone'
+  placed.push('t1', 'info', 'run')
+  current = 'm1'
+  placed.push('a2', 'info', 'run')
+  placed.push('h2', 'info', 'session-start')
+  const { head, after, tail } = placeLines(placed.get(), new Set(['m1', 'm2']))
+  const messages = (lines: readonly { message: string }[] | undefined): string[] =>
+    (lines ?? []).map(({ message }) => message)
+  expect(messages(head)).toEqual(['h1', 'h2'])
+  expect(messages(after.get('m1'))).toEqual(['a1', 'a2'])
+  expect(after.has('m2')).toBe(false)
+  expect(messages(tail)).toEqual(['t1'])
+})
+
 test('a notification line renders its message', () => {
   const rendered = renderToStaticMarkup(
     <NotificationLine
-      notification={{ id: 1, message: 'Mode set to Plan Mode', notifyType: 'info', origin: 'run', at: new Date(0) }}
+      notification={{
+        id: 1,
+        message: 'Mode set to Plan Mode',
+        notifyType: 'info',
+        origin: 'run',
+        at: new Date(0),
+        after: undefined,
+      }}
     />,
   )
   expect(rendered).toContain('Mode set to Plan Mode')
@@ -76,6 +124,7 @@ test('a line’s source leads its message; a line without one has no label', () 
           origin: 'run',
           source,
           at: new Date(0),
+          after: undefined,
         }}
       />,
     ).replace(/<[^>]*>/g, '')
@@ -91,14 +140,18 @@ test('a line’s source leads its message; a line without one has no label', () 
 // which lucide icon renders; neither is behaviour a test can pin without pinning a vendored
 // component's markup, so it is deliberately NOT gated. Do not restore a class assertion here.
 
+/** A minted thread's head block: with no message and no stream yet, every line is there. */
+function blockOf(thread: ThreadStores): string {
+  return renderToStaticMarkup(
+    <ThreadStoresContext.Provider value={thread}>
+      <NotificationLines lines={placeLines(thread.notifications.get(), new Set()).head} />
+    </ThreadStoresContext.Provider>,
+  )
+}
+
 test("the session block renders nothing while the thread's store is empty, then every line", () => {
   const thread = mintThread()
-  const block = (): string =>
-    renderToStaticMarkup(
-      <ThreadStoresContext.Provider value={thread}>
-        <ThreadNotifications />
-      </ThreadStoresContext.Provider>,
-    )
+  const block = (): string => blockOf(thread)
   expect(block()).toBe('')
   thread.notifications.push('one', 'info', 'run')
   thread.notifications.push('two', 'warning', 'run')
@@ -113,12 +166,7 @@ test("⚠ a notification belongs to its thread: another thread's block does not 
   const first = mintThread()
   const second = mintThread()
   first.notifications.push('only in the first', 'info', 'run')
-  const rendered = renderToStaticMarkup(
-    <ThreadStoresContext.Provider value={second}>
-      <ThreadNotifications />
-    </ThreadStoresContext.Provider>,
-  )
-  expect(rendered).toBe('')
+  expect(blockOf(second)).toBe('')
 })
 
 // ── startup notices fold (#96) ────────────────────────────────────────────────────
@@ -128,14 +176,6 @@ test("⚠ a notification belongs to its thread: another thread's block does not 
 
 const STARTUP_ONE = 'pi-multi-account v1.21.0: seamless in-place resume is not available on this Pi build'
 const STARTUP_TWO = 'pi-multi-account v1.21.0 loaded (enabled). 1 account(s) in rotation.'
-
-function blockOf(thread: ReturnType<typeof mintThread>): string {
-  return renderToStaticMarkup(
-    <ThreadStoresContext.Provider value={thread}>
-      <ThreadNotifications />
-    </ThreadStoresContext.Provider>,
-  )
-}
 
 test('⚠ session-start info notices render as ONE collapsed line; the notices are inside it verbatim, not open', () => {
   const thread = mintThread()
@@ -202,6 +242,7 @@ test('a URL in a line links the whole address, reads as host and path, and leave
         notifyType: 'info',
         origin: 'run',
         at: new Date(0),
+        after: undefined,
       }}
     />,
   )

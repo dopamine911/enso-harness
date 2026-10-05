@@ -97,7 +97,7 @@ import type { DialogAnswerOutcome, FollowConnection } from './follow-connection.
 import { ForkContext, forkFromPage, RestoreContext, restoreFromPage } from './fork-thread.ts'
 import { ThreadIncidents } from './incident-card.tsx'
 import { ModelChip, ModelChoiceDialog, ThinkingLevelSelect, useModelState, useRecordedModel } from './model-state.tsx'
-import { ThreadNotifications } from './notifications.tsx'
+import { NotificationLines, type PlacedLines, placeLines } from './notifications.tsx'
 import { PermissionModeSelect, usePermissionMode } from './permission-mode.tsx'
 import { createProjectsStore, projectOf, removeProject } from './project-list.ts'
 import { PromptManagerDialog } from './prompt-manager.tsx'
@@ -976,15 +976,48 @@ interface TranscriptSelection {
   /**
    * The messages that CONTINUE the one before them — same role, so no speaker line of their own:
    * one pi turn is several assistant messages (each tool round is one), and "pi" says it once.
+   * Counted over the messages that are drawn: a hidden one (below) neither continues nor is continued.
    */
   readonly continuedMessageIds: ReadonlySet<string>
+  /**
+   * Assistant messages with nothing to draw that a later message has superseded (#382): a refused
+   * attempt the provider turned down before any token. Their bubble would be a bare speaker line;
+   * the lines said about them (`refused: …`, `retrying in …`) still read in their place. The last
+   * message is never hidden — it is the one a run is about to stream into.
+   */
+  readonly hiddenMessageIds: ReadonlySet<string>
 }
 
 const TranscriptSelectionContext = createContext<TranscriptSelection>({
   partsByMessageId: new Map(),
   openRunMessageIds: new Set(),
   continuedMessageIds: new Set(),
+  hiddenMessageIds: new Set(),
 })
+
+/** The thread's lines by where they read (#382), grouped once in `ChatLayout` for every row. */
+const PlacedLinesContext = createContext<PlacedLines>({ head: [], after: new Map(), tail: [] })
+
+/** Which messages a selection hides, and which continue the one drawn before them — see {@link TranscriptSelection}. */
+function drawnMessages(
+  messages: readonly UIMessage[],
+  partsByMessageId: ReadonlyMap<string, KeyedPart[]>,
+): Pick<TranscriptSelection, 'continuedMessageIds' | 'hiddenMessageIds'> {
+  const continuedMessageIds = new Set<string>()
+  const hiddenMessageIds = new Set<string>()
+  let drawnRole: UIMessage['role'] | undefined
+  messages.forEach((message, position) => {
+    const superseded = position < messages.length - 1
+    const empty = (partsByMessageId.get(message.id)?.length ?? 0) === 0 && refusalOfMessage(message) === undefined
+    if (superseded && empty && message.role === 'assistant') {
+      hiddenMessageIds.add(message.id)
+      return
+    }
+    if (drawnRole === message.role) continuedMessageIds.add(message.id)
+    drawnRole = message.role
+  })
+  return { continuedMessageIds, hiddenMessageIds }
+}
 
 /**
  * The empty selection, for a lookup that finds nothing.
@@ -1495,7 +1528,18 @@ const chatComponents = {
       const chat = useChatContext()
       const debugOpen = useContext(DebugOpenContext)
       const { shown, open } = useContext(PaneViewContext)
-      const threadProject = useThreadProject(useThreadStores().projectId)
+      const stores = useThreadStores()
+      const threadProject = useThreadProject(stores.projectId)
+      // A line the page raises between runs follows the transcript's last message (#382) — as
+      // rendered, which is what a reader saw when they acted.
+      useEffect(() => {
+        stores.notifications.setTranscriptTail(chat.messages.at(-1)?.id)
+      }, [stores, chat.messages])
+      const notificationLines = useStore(stores.notifications)
+      const placedLines = useMemo(
+        () => placeLines(notificationLines, new Set(chat.messages.map((message) => message.id))),
+        [notificationLines, chat.messages],
+      )
       const scroller = useRef<TranscriptScroller | null>(null)
       const revealInTranscript = useCallback<RevealStatsTarget>(
         (target, stats) => {
@@ -1526,10 +1570,6 @@ const chatComponents = {
         for (const selected of selectChatUI({ messages: chat.messages }).messages) {
           partsByMessageId.set(selected.message.id, keyedParts(automaticPartsForMessage(selected)))
         }
-        const continuedMessageIds = new Set<string>()
-        chat.messages.forEach((message, position) => {
-          if (position > 0 && chat.messages[position - 1]?.role === message.role) continuedMessageIds.add(message.id)
-        })
         const openRunMessageIds = new Set<string>()
         if (chat.sessionGenerating) {
           for (const message of chat.messages.toReversed()) {
@@ -1537,7 +1577,7 @@ const chatComponents = {
             openRunMessageIds.add(message.id)
           }
         }
-        return { partsByMessageId, openRunMessageIds, continuedMessageIds }
+        return { partsByMessageId, openRunMessageIds, ...drawnMessages(chat.messages, partsByMessageId) }
       }, [chat.messages, chat.sessionGenerating])
       return (
         <div className="flex min-h-0 flex-1 flex-col">
@@ -1569,14 +1609,20 @@ const chatComponents = {
                         </h2>
                         <p className="text-sm text-muted-foreground">ask pi something to get started</p>
                       </ConversationEmptyState>
-                    ) : (
+                    ) : null}
+                    {/* pi's notify lines (#29), each where it happened (#382): the startup notices
+										    and anything said before the first message head the transcript; the rest
+										    follow the message they came after (`ChatMessageRow`). */}
+                    <NotificationLines lines={placedLines.head} />
+                    {chat.messages.length === 0 ? null : (
                       <TranscriptSelectionContext.Provider value={selection}>
-                        <Messages />
+                        <PlacedLinesContext.Provider value={placedLines}>
+                          <Messages />
+                        </PlacedLinesContext.Provider>
                       </TranscriptSelectionContext.Provider>
                     )}
-                    {/* pi's notify lines (#29) — the transcript tail, above the question,
-										    so "Mode set to X" reads next to the run it belongs to. */}
-                    <ThreadNotifications />
+                    {/* The lines whose message the transcript no longer holds (a re-read replaced it). */}
+                    <NotificationLines lines={placedLines.tail} />
                     {/* The thread's incidents (#466): below the run that opened them, above any
 										    question — a halted thread waits on this card. */}
                     <ThreadIncidents />
@@ -1652,19 +1698,27 @@ const chatComponents = {
      * context: it still runs for every message on every chunk (it consumes the indexed
      * selection, and React re-renders a context consumer), but all it does is a `Map` lookup
      * and hand `MessageBody` its props — and that memo is what keeps the redraw to the one
-     * bubble that changed.
+     * bubble that changed. The lines that follow the message (#382) are another lookup, grouped
+     * once in `ChatLayout`; a hidden message (a refused attempt with nothing drawn) keeps them.
      */
     message: function ChatMessageRow({ message }: MessageProps<ThreadChatOptions>): React.ReactNode {
-      const { partsByMessageId, openRunMessageIds, continuedMessageIds } = useContext(TranscriptSelectionContext)
+      const { partsByMessageId, openRunMessageIds, continuedMessageIds, hiddenMessageIds } =
+        useContext(TranscriptSelectionContext)
+      const lines = useContext(PlacedLinesContext).after.get(message.id)
       return (
-        <MessageBody
-          messageId={message.id}
-          role={message.role}
-          parts={partsByMessageId.get(message.id) ?? NO_PARTS}
-          runOpen={openRunMessageIds.has(message.id)}
-          refusal={refusalOfMessage(message)}
-          speaker={!continuedMessageIds.has(message.id)}
-        />
+        <>
+          {hiddenMessageIds.has(message.id) ? null : (
+            <MessageBody
+              messageId={message.id}
+              role={message.role}
+              parts={partsByMessageId.get(message.id) ?? NO_PARTS}
+              runOpen={openRunMessageIds.has(message.id)}
+              refusal={refusalOfMessage(message)}
+              speaker={!continuedMessageIds.has(message.id)}
+            />
+          )}
+          {lines === undefined ? null : <NotificationLines lines={lines} />}
+        </>
       )
     },
   },

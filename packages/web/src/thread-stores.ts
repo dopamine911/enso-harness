@@ -238,9 +238,24 @@ function createThreadStores(
   opening: { readonly projectId: string | undefined; readonly initialDraft: string },
 ): ThreadStores {
   const { projectId, initialDraft } = opening
-  const notifications = createNotificationsStore()
+  // The follow is made below, after the store whose lines its problems become; the anchor is read
+  // at push time, so the late binding is safe (#382).
+  let connection: FollowConnection | undefined
+  const notifications = createNotificationsStore(() => connection?.streamMessageId())
+  notifications.setTranscriptTail(history.at(-1)?.id)
   const toolResultDescriptors = createStore<ReadonlyMap<string, EnsoToolResultDescriptor>>(new Map())
   const threadFetch = namingProject(fetchImpl, projectId)
+  connection = createFollowConnection({
+    threadId,
+    fetch: threadFetch,
+    // The page's own connection to the server — a busy thread (409), a refused answer, the
+    // network: Enso's lines (#387).
+    onProblem: (problem: unknown) => notifications.push(String(problem), 'warning', 'run', ENSO_NOTICE_SOURCE),
+    onToolResultDescriptor: (toolCallId: string, descriptor: EnsoToolResultDescriptor) => {
+      toolResultDescriptors.set(new Map(toolResultDescriptors.get()).set(toolCallId, descriptor))
+    },
+    onTurnStart: () => retireTornTail(threadId),
+  })
   return {
     threadId,
     history,
@@ -267,17 +282,7 @@ function createThreadStores(
     login: createStore<EnsoLoginInProgress | undefined>(undefined),
     projectId,
     fetch: threadFetch,
-    connection: createFollowConnection({
-      threadId,
-      fetch: threadFetch,
-      // The page's own connection to the server — a busy thread (409), a refused answer, the
-      // network: Enso's lines (#387).
-      onProblem: (problem: unknown) => notifications.push(String(problem), 'warning', 'run', ENSO_NOTICE_SOURCE),
-      onToolResultDescriptor: (toolCallId: string, descriptor: EnsoToolResultDescriptor) => {
-        toolResultDescriptors.set(new Map(toolResultDescriptors.get()).set(toolCallId, descriptor))
-      },
-      onTurnStart: () => retireTornTail(threadId),
-    }),
+    connection,
   }
 }
 

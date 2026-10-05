@@ -2,7 +2,7 @@ import type { EnsoNotifyType, EnsoUiRequestOrigin } from '@enso/core'
 import { ChevronRightIcon, InfoIcon, OctagonAlertIcon, TriangleAlertIcon } from 'lucide-react'
 import { cn } from '@/lib/utils.ts'
 import { Button } from './components/ui/button.tsx'
-import { createStore, type Store, useStore, useThreadStores } from './store.ts'
+import { createStore, type Store, useThreadStores } from './store.ts'
 
 /**
  * pi's `notify` messages, rendered (#29).
@@ -10,13 +10,21 @@ import { createStore, type Store, useStore, useThreadStores } from './store.ts'
  * A notify arrives as an AG-UI CUSTOM chunk (`extension-ui-request`), and TanStack's designated
  * path for those is the `onCustomEvent` chat option — an imperative callback on the
  * OPTIONS object. So the bridge to React state is this store, one per thread
- * (`thread-stores.ts`): `custom-event-router.ts` pushes into it, and
- * `ThreadNotifications` subscribes to the rendering thread's.
+ * (`thread-stores.ts`): `custom-event-router.ts` pushes into it, and the chat layout groups the
+ * rendering thread's lines by where they read (`placeLines`).
  *
  * ⚠ Notifications are DURABLE lines, not toasts, on purpose: this harness's standing rule
  * is that a silent success is indistinguishable from a dropped one, and a toast that
  * auto-dismisses while the user is in another window reproduces exactly that. The list is
- * session-lived and renders at the tail of the transcript.
+ * session-lived.
+ *
+ * ⚠ A LINE READS WHERE IT HAPPENED (#382). Each is anchored, as it is pushed, to the message it
+ * follows (`after`) and renders after that message's bubble — not in one block after the whole
+ * transcript, where a refusal ended up below the reply it preceded, and under every later turn.
+ * The anchor is the stream's current assistant message when there is one (`FollowConnection.
+ * streamMessageId`), else the transcript's last message; a line with neither heads the
+ * transcript. A line whose message the transcript no longer holds (a re-read after compaction
+ * replaced the ids) falls to the tail, still in order.
  *
  * ⚠ Startup notices are GROUPED, not dropped (#96). Every thread opens with the same
  * extension lines (multi-account's two, on every screenshot from #84 to #94) — infra facts
@@ -47,6 +55,12 @@ export interface EnsoNotification {
   /** The one thing a reader can do about it (#436: Continue on a torn tail); gone once pressed. */
   action?: NotificationAction | undefined
   at: Date
+  /**
+   * The message this line follows (#382): set once, as it is pushed — see the module's
+   * "A line reads where it happened". Undefined for a session-start notice (it precedes every
+   * run), and for a line pushed before the transcript held any message: both head the transcript.
+   */
+  after: string | undefined
 }
 
 /**
@@ -65,8 +79,8 @@ export interface NotificationAction {
  */
 const MAX_KEPT_NOTIFICATIONS = 100
 
-/** A line to add: everything a notification holds but the id and the time the store gives it. */
-type NotificationLineInput = Omit<EnsoNotification, 'id' | 'at'>
+/** A line to add: everything a notification holds but what the store gives it — its id, time and anchor. */
+type NotificationLineInput = Omit<EnsoNotification, 'id' | 'at' | 'after'>
 
 export interface NotificationsStore extends Store<ReadonlyArray<EnsoNotification>> {
   readonly push: (
@@ -90,16 +104,31 @@ export interface NotificationsStore extends Store<ReadonlyArray<EnsoNotification
    * already resolved, or dropped off the bound, stays as it is.
    */
   readonly restoreAction: (id: number, action: NotificationAction) => void
+  /**
+   * The transcript's last message, as the page last rendered it (#382): the anchor of a line
+   * pushed while the stream names none — a reloaded thread before its first run, a line the page
+   * raises itself between runs.
+   */
+  readonly setTranscriptTail: (messageId: string | undefined) => void
 }
 
-export function createNotificationsStore(): NotificationsStore {
+/**
+ * `streamMessageId` is the thread's follow, read at push time: the assistant message of the chunk
+ * being processed (`FollowConnection.streamMessageId`). Absent, every line anchors to the
+ * transcript's tail.
+ */
+export function createNotificationsStore(
+  streamMessageId: () => string | undefined = () => undefined,
+): NotificationsStore {
   const store = createStore<ReadonlyArray<EnsoNotification>>([])
   let nextNotificationId = 1
+  let transcriptTail: string | undefined
   /** Lines a later fact has answered (`resolveLine`) — never given an action back. */
   const resolved = new Set<number>()
   const append = (line: NotificationLineInput): number => {
     const id = nextNotificationId++
-    const appended = [...store.get(), { ...line, id, at: new Date() }]
+    const after = line.origin === 'session-start' ? undefined : (streamMessageId() ?? transcriptTail)
+    const appended = [...store.get(), { ...line, id, at: new Date(), after }]
     store.set(appended.slice(-MAX_KEPT_NOTIFICATIONS))
     return id
   }
@@ -125,6 +154,9 @@ export function createNotificationsStore(): NotificationsStore {
     },
     restoreAction: (id: number, action: NotificationAction) => {
       if (!resolved.has(id)) rewrite(id, (notification) => ({ ...notification, action }))
+    },
+    setTranscriptTail: (messageId: string | undefined) => {
+      transcriptTail = messageId
     },
   }
 }
@@ -304,16 +336,48 @@ function StartupNotices({ notifications }: { notifications: readonly EnsoNotific
 }
 
 /**
- * The transcript-tail block: every notification the rendering thread has received, in
- * order — the startup notices folded at its head (they precede every run's by
- * construction: the host replays them before the first prompt), the rest as lines.
+ * The thread's lines by where they read (#382) — see the module's "A line reads where it happened":
+ * - `head`: before the first message — the startup notices (they precede every run by
+ *   construction: the host replays them before the first prompt), then the lines that came
+ *   before any message;
+ * - `after`: by message id, the lines that follow that message's bubble;
+ * - `tail`: after the last message — the lines whose message the transcript no longer holds.
+ *
+ * Each list keeps the order the lines arrived in. Grouped once per change of the lines or the
+ * transcript, not per row: every row re-renders on every streamed chunk.
  */
-export function ThreadNotifications(): React.ReactNode {
+export interface PlacedLines {
+  readonly head: readonly EnsoNotification[]
+  readonly after: ReadonlyMap<string, readonly EnsoNotification[]>
+  readonly tail: readonly EnsoNotification[]
+}
+
+export function placeLines(
+  notifications: readonly EnsoNotification[],
+  transcriptIds: ReadonlySet<string>,
+): PlacedLines {
+  const head: EnsoNotification[] = []
+  const after = new Map<string, EnsoNotification[]>()
+  const tail: EnsoNotification[] = []
+  for (const notification of notifications) {
+    const anchor = notification.after
+    if (anchor === undefined) head.push(notification)
+    else if (!transcriptIds.has(anchor)) tail.push(notification)
+    else {
+      const lines = after.get(anchor)
+      if (lines === undefined) after.set(anchor, [notification])
+      else lines.push(notification)
+    }
+  }
+  return { head, after, tail }
+}
+
+/** One block of the rendering thread's lines: its startup notices folded first, then the rest open. */
+export function NotificationLines({ lines }: { lines: readonly EnsoNotification[] | undefined }): React.ReactNode {
   const { notifications } = useThreadStores()
-  const currentNotifications = useStore(notifications)
-  if (currentNotifications.length === 0) return null
-  const startup = currentNotifications.filter(isStartupNotice)
-  const open = currentNotifications.filter((notification) => !isStartupNotice(notification))
+  if (lines === undefined || lines.length === 0) return null
+  const startup = lines.filter(isStartupNotice)
+  const open = lines.filter((notification) => !isStartupNotice(notification))
   return (
     <div className="flex flex-col gap-1.5">
       <StartupNotices notifications={startup} />
