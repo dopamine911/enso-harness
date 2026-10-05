@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, readFileSync, symlinkSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, symlinkSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { DEFAULT_GUARD_POLICY } from '@enso/core'
@@ -73,8 +73,12 @@ export function prepareRunHome(runDirectory: string, operatorHome: string): stri
   return home
 }
 
-/** The home a run ran over: its own `.enso` when it has one, else `fallback` (a `--home` run, or one from before #610). */
-export function runHomeOf(runDirectory: string, fallback: string): string {
+/**
+ * The home a run ran over: the one its `run-start` line `recorded` (#610), else its own `.enso` when it
+ * has one, else `fallback` — only for a run from before either existed.
+ */
+export function runHomeOf(runDirectory: string, fallback: string, recorded?: string): string {
+  if (recorded !== undefined) return recorded
   const home = join(runDirectory, ARENA_RUN_HOME)
   return existsSync(home) ? home : fallback
 }
@@ -93,6 +97,40 @@ export function arenaSecretValues(home: string): readonly string[] {
   const values = new Set(knownSecretValues(home))
   for (const credential of credentialValues(join(ensoAgentDir(home), 'auth.json'))) values.add(credential)
   return [...values]
+}
+
+/**
+ * The run's secret values as they GROW (PR #613 review): `arenaSecretValues`, read again whenever
+ * `secrets.env` or `auth.json` changes, and added to what was already known — never replaced.
+ *
+ * ⚠ Why a source and not a snapshot: the login is linked (`prepareRunHome`), so an OAuth refresh during
+ * the run rewrites `auth.json` with a new token. A snapshot taken at the start never knew it, and a
+ * set replaced at the stop would forget the token it replaced; either may be in a file the run wrote.
+ * A changed file is noticed by its size and mtime, read on every call, which is two `stat`s.
+ */
+export function arenaSecretSource(home: string): () => readonly string[] {
+  const watched = [ensoSecretsPath(home), join(ensoAgentDir(home), 'auth.json')]
+  const known = new Set<string>()
+  let stamp: string | undefined
+  let values: readonly string[] = []
+  return () => {
+    const now = watched.map(fileStamp).join('|')
+    if (now !== stamp) {
+      stamp = now
+      for (const secretValue of arenaSecretValues(home)) known.add(secretValue)
+      values = [...known]
+    }
+    return values
+  }
+}
+
+function fileStamp(path: string): string {
+  try {
+    const stats = statSync(path)
+    return `${stats.mtimeMs}:${stats.size}`
+  } catch {
+    return 'absent'
+  }
 }
 
 function credentialValues(authPath: string): string[] {

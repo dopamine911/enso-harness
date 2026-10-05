@@ -1,11 +1,13 @@
-import { expect, test } from 'bun:test'
+import { afterEach, expect, test } from 'bun:test'
 import {
+  chmodSync,
   existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   readlinkSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs'
@@ -13,8 +15,16 @@ import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { deflateRawSync } from 'node:zlib'
 import { ensoAgentDir, ensoSecretsPath } from '@enso/core/paths'
-import { ARENA_RUN_HOME, arenaSecretValues, defaultArenaOut, isGuardedForAgent, prepareRunHome } from '../run-home.ts'
-import { scanRunForSecrets, zipEntries } from '../secret-scan.ts'
+import {
+  ARENA_RUN_HOME,
+  arenaSecretSource,
+  arenaSecretValues,
+  defaultArenaOut,
+  isGuardedForAgent,
+  prepareRunHome,
+  runHomeOf,
+} from '../run-home.ts'
+import { type ArenaSecretScan, scanRunForSecrets, withEarlierHits, zipEntries } from '../secret-scan.ts'
 
 /**
  * A run's own Enso home and the secret scan of what it keeps (#584 A4, A11; #610). The live half —
@@ -181,3 +191,72 @@ test('⚠ a secret in a response body inside the trace is found, named by file a
   // The report names where, never what.
   expect(JSON.stringify(scan)).not.toContain(API_KEY)
 })
+
+test('⚠ a token the login rotates mid-run joins the secret set, and the one it replaced stays in it (PR #613 review)', () => {
+  const root = mkdtempSync(join(tmpdir(), 'arena-rotate-'))
+  const runDirectory = join(root, 'run')
+  const home = prepareRunHome(runDirectory, operatorHome(root))
+  const secrets = arenaSecretSource(home)
+  expect(secrets()).toEqual(expect.arrayContaining([ACCESS, REFRESH]))
+
+  // pi's refresh rewrites auth.json in place — through the link, as `prepareRunHome` set it up.
+  const rotated = 'oauth-access-rotated-mid-run-0123456789'
+  writeFileSync(
+    join(ensoAgentDir(home), 'auth.json'),
+    JSON.stringify({ anthropic: { type: 'oauth', access: rotated, refresh: 'oauth-refresh-rotated-0123456789' } }),
+  )
+  expect(secrets()).toEqual(expect.arrayContaining([rotated, ACCESS, REFRESH]))
+  writeFileSync(join(runDirectory, 'response.json'), `{"token":"${rotated}","old":"${ACCESS}"}`)
+  expect(scanRunForSecrets(runDirectory, secrets()).hits).toEqual([{ path: 'response.json' }])
+})
+
+/** A scan result with these hits and nothing else. */
+const scanWith = (hits: ArenaSecretScan['hits']): ArenaSecretScan => ({ files: 1, entries: 0, hits, unreadable: [] })
+
+test('⚠ a refold never clears a recorded hit it cannot re-check, and drops one whose file is gone (PR #613 review)', () => {
+  const runDirectory = mkdtempSync(join(tmpdir(), 'arena-refold-'))
+  writeFileSync(join(runDirectory, 'response.json'), 'a value this refold does not know')
+  const earlier = { secretScan: scanWith([{ path: 'response.json' }, { path: 'deleted.json' }]) }
+  // A rescan with another home's values, or after the token rotated, finds nothing.
+  expect(withEarlierHits(scanWith([]), earlier, runDirectory).hits).toEqual([{ path: 'response.json' }])
+  // A hit the rescan finds again is one hit, not two.
+  expect(withEarlierHits(scanWith([{ path: 'response.json' }]), earlier, runDirectory).hits).toEqual([
+    { path: 'response.json' },
+  ])
+  // A manifest from before the scan, or one that is not one, carries nothing.
+  expect(withEarlierHits(scanWith([]), { evidence: [] }, runDirectory).hits).toEqual([])
+  expect(withEarlierHits(scanWith([]), 'not a manifest', runDirectory).hits).toEqual([])
+})
+
+test('the home a run recorded is the one a refold scans with — not the invoking shell’s, not a guess', () => {
+  const runDirectory = mkdtempSync(join(tmpdir(), 'arena-recorded-'))
+  mkdirSync(join(runDirectory, ARENA_RUN_HOME))
+  expect(runHomeOf(runDirectory, '/shell/home', '/the/run/home')).toBe('/the/run/home')
+  expect(runHomeOf(runDirectory, '/shell/home')).toBe(join(runDirectory, ARENA_RUN_HOME))
+  rmSync(join(runDirectory, ARENA_RUN_HOME), { recursive: true })
+  expect(runHomeOf(runDirectory, '/shell/home')).toBe('/shell/home')
+})
+
+const locked: string[] = []
+afterEach(() => {
+  for (const path of locked.splice(0)) chmodSync(path, 0o755)
+})
+
+// Root reads a mode-000 file regardless, so there is nothing unreadable to make.
+test.skipIf(process.getuid?.() === 0)(
+  '⚠ a file or directory the scan cannot read is an unreadable row, and the rest is still scanned (PR #613 review)',
+  () => {
+    const runDirectory = mkdtempSync(join(tmpdir(), 'arena-locked-'))
+    mkdirSync(join(runDirectory, 'project', 'closed'), { recursive: true })
+    writeFileSync(join(runDirectory, 'project', 'locked.txt'), API_KEY)
+    writeFileSync(join(runDirectory, 'project', 'open.txt'), API_KEY)
+    for (const path of [join(runDirectory, 'project', 'locked.txt'), join(runDirectory, 'project', 'closed')]) {
+      chmodSync(path, 0o000)
+      locked.push(path)
+    }
+    const scan = scanRunForSecrets(runDirectory, [API_KEY])
+    expect(scan.hits).toEqual([{ path: 'project/open.txt' }])
+    expect(scan.unreadable.map((row) => row.path).toSorted()).toEqual(['project/closed', 'project/locked.txt'])
+    expect(scan.unreadable.every((row) => row.error.includes('EACCES'))).toBe(true)
+  },
+)

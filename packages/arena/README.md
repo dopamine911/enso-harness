@@ -171,11 +171,16 @@ and the session file are keyed by: that is the jump from a screenshot to its tur
   trace's DOM snapshots and on screenshots, and a PNG cannot be scrubbed. Text the recorder writes
   (timeline, Enso's output, evidence) is redacted with the run's secret values: `secrets.env`, the
   environment's secret-shaped names, and the OAuth tokens and keys in `auth.json`.
+  - The set grows during the run: when a refresh rotates a token, the new one is added and the old
+    one stays.
 - **At the stop, every file the run keeps is scanned for those values (#610).** That includes each
   trace zip entry by entry, where Playwright keeps the network response bodies.
   - The manifest's `secretScan` names each hit by file and entry, never by value, and any hit fails the
     score.
-  - A zip it cannot read is a warning: not scanned is not clean.
+  - A file or directory it cannot read is an `unreadable` warning, and the rest is still scanned:
+    not scanned is not clean.
+  - `arena manifest` scans again with the home the run recorded, and keeps every earlier hit whose file
+    still exists. A rotated token is a value it can no longer look for, so a hit it cannot re-check stands.
   - Not read: `.enso/` (the links, by design), symlinks, and PNGs. A secret Enso puts on screen is
     still not caught in a screenshot.
 - **The agent's account is not proof.** The manifest keeps its notes apart from what the recorder

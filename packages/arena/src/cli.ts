@@ -46,7 +46,14 @@ import { join, resolve } from 'node:path'
 import { ensoHome, findRepoRoot } from '@enso/core/paths'
 import { ARENA_THINKING_LEVELS, arenaAgentDriver, resolveArenaModel } from './agent.ts'
 import { type ArenaEvidence, arenaEvidenceRowOf, foldArenaManifest } from './manifest.ts'
-import { type ArenaDriver, collectAfterRecorderDied, deadRecorderRun, readArenaControl, runArena } from './recorder.ts'
+import {
+  type ArenaDriver,
+  collectAfterRecorderDied,
+  deadRecorderRun,
+  readArenaControl,
+  recordedRunHome,
+  runArena,
+} from './recorder.ts'
 import { arenaSecretValues, defaultArenaOut, isGuardedForAgent, prepareRunHome, runHomeOf } from './run-home.ts'
 import {
   ARENA_SCENARIOS,
@@ -59,7 +66,7 @@ import {
   SNAKE_SCENARIO,
 } from './scenario.ts'
 import { renderArenaScore, writeArenaScore } from './score.ts'
-import { scanRunForSecrets } from './secret-scan.ts'
+import { scanRunForSecrets, withEarlierHits } from './secret-scan.ts'
 import { readTimeline } from './timeline.ts'
 
 const [command, ...rest] = process.argv.slice(2)
@@ -254,7 +261,8 @@ async function refold(): Promise<void> {
   const runId = runDirectory.split('/').at(-1) ?? 'run'
   const manifestPath = join(runDirectory, 'manifest.json')
   const manifestKept = existsSync(manifestPath)
-  const kept = manifestKept ? keptEvidenceOf(JSON.parse(readFileSync(manifestPath, 'utf8'))) : undefined
+  const earlier: unknown = manifestKept ? JSON.parse(readFileSync(manifestPath, 'utf8')) : undefined
+  const kept = manifestKept ? keptEvidenceOf(earlier) : undefined
   // ⚠ A manifest is only written once evidence was taken (PR #612 review): one whose evidence does
   // not read is damaged, not a dead recorder's run. Collecting again would read whatever home this
   // command defaults to, since a stopped run left no control record naming its own.
@@ -268,7 +276,9 @@ async function refold(): Promise<void> {
   if (kept === undefined && existsSync(currentFile) && readFileSync(currentFile, 'utf8').trim() === runDirectory) {
     rmSync(currentFile, { force: true })
   }
-  const secretScan = scanRunForSecrets(runDirectory, arenaSecretValues(runHomeOf(runDirectory, operatorHome)))
+  // The home the run recorded, not this shell's; and a hit an earlier scan found stands (PR #613 review).
+  const home = runHomeOf(runDirectory, operatorHome, recordedRunHome(runDirectory))
+  const secretScan = withEarlierHits(scanRunForSecrets(runDirectory, arenaSecretValues(home)), earlier, runDirectory)
   const events = readTimeline(join(runDirectory, 'timeline.jsonl'))
   const manifest = foldArenaManifest({ runId, events, evidence, secretScan })
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)

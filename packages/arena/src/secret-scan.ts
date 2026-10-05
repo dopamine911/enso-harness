@@ -1,4 +1,4 @@
-import { lstatSync, readdirSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { inflateRawSync } from 'node:zlib'
 import { ARENA_RUN_HOME } from './run-home.ts'
@@ -35,62 +35,115 @@ export interface ArenaSecretScan {
   readonly unreadable: readonly { readonly path: string; readonly error: string }[]
 }
 
-/** Scan every file under `runDirectory` for `secretValues` (see the module header for what is skipped). */
+/**
+ * Scan every file under `runDirectory` for `secretValues` (see the module header for what is skipped).
+ *
+ * ⚠ NEVER THROWS ON A FILE (PR #613 review). The project is the agent's to shape, and a `chmod 000`
+ * file or directory is a legitimate outcome: thrown, it cost the run its manifest, because the scan
+ * runs before the manifest is written, and `arena manifest` could not fold it either. Whatever cannot
+ * be read is an `unreadable` row, and everything reachable is still scanned.
+ */
 export function scanRunForSecrets(runDirectory: string, secretValues: readonly string[]): ArenaSecretScan {
   const needles = secretValues.map((secretValue) => Buffer.from(secretValue))
   const found = (bytes: Uint8Array): boolean => {
     const haystack = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength)
     return needles.some((needle) => haystack.includes(needle))
   }
-  const files = filesToScan(runDirectory).map((path) => scanFile(path, relative(runDirectory, path), found))
+  const walked = filesToScan(runDirectory)
+  const files = walked.files.map((path) => scanFile(path, relative(runDirectory, path), found))
   return {
     files: files.length,
     entries: files.reduce((total, file) => total + file.entries, 0),
     hits: files.flatMap((file) => file.hits),
-    unreadable: files.flatMap((file) => (file.unreadable === undefined ? [] : [file.unreadable])),
+    unreadable: [
+      ...walked.unreadable,
+      ...files.flatMap((file) => (file.unreadable === undefined ? [] : [file.unreadable])),
+    ],
   }
 }
 
-/** One file's scan: the whole file, or a zip entry by entry. A zip that does not read is said, not skipped. */
+/**
+ * The scan a refold writes (`arena manifest`): this scan, plus every hit an earlier scan of the run
+ * recorded whose file is still there.
+ *
+ * ⚠ NEVER DOWNGRADED (PR #613 review). A rescan can only look for the values it knows NOW: an OAuth
+ * token that has since rotated, or a `--home` run refolded without its `--home`, is a value it cannot
+ * see, and the leaked file would read as clean. A recorded hit cannot be re-checked without its value,
+ * so it stands until its file is gone.
+ */
+export function withEarlierHits(
+  current: ArenaSecretScan,
+  earlierManifest: unknown,
+  runDirectory: string,
+): ArenaSecretScan {
+  const key = (hit: ArenaSecretHit): string => `${hit.path}\u0000${hit.entry ?? ''}`
+  const seen = new Set(current.hits.map(key))
+  const carried = earlierHitsOf(earlierManifest).filter(
+    (hit) => !seen.has(key(hit)) && existsSync(join(runDirectory, hit.path)),
+  )
+  return carried.length === 0 ? current : { ...current, hits: [...current.hits, ...carried] }
+}
+
+/** The hits a manifest on disk recorded, field by field. */
+function earlierHitsOf(manifest: unknown): ArenaSecretHit[] {
+  if (typeof manifest !== 'object' || manifest === null || !('secretScan' in manifest)) return []
+  const scan: unknown = manifest.secretScan
+  if (typeof scan !== 'object' || scan === null || !('hits' in scan) || !Array.isArray(scan.hits)) return []
+  return scan.hits.flatMap((hit: unknown): ArenaSecretHit[] => {
+    if (typeof hit !== 'object' || hit === null || !('path' in hit) || typeof hit.path !== 'string') return []
+    const entry: unknown = 'entry' in hit ? hit.entry : undefined
+    return [typeof entry === 'string' ? { path: hit.path, entry } : { path: hit.path }]
+  })
+}
+
+type Unreadable = ArenaSecretScan['unreadable'][number]
+
+const unreadableOf = (path: string, error: unknown): Unreadable => ({
+  path,
+  error: error instanceof Error ? error.message : String(error),
+})
+
+/** One file's scan: the whole file, or a zip entry by entry. A file or zip that does not read is said, not skipped. */
 function scanFile(
   path: string,
   shown: string,
   found: (bytes: Uint8Array) => boolean,
-): {
-  readonly entries: number
-  readonly hits: readonly ArenaSecretHit[]
-  readonly unreadable?: ArenaSecretScan['unreadable'][number]
-} {
-  const bytes = readFileSync(path)
-  if (!path.endsWith('.zip')) return { entries: 0, hits: found(bytes) ? [{ path: shown }] : [] }
+): { readonly entries: number; readonly hits: readonly ArenaSecretHit[]; readonly unreadable?: Unreadable } {
   try {
+    const bytes = readFileSync(path)
+    if (!path.endsWith('.zip')) return { entries: 0, hits: found(bytes) ? [{ path: shown }] : [] }
     const entries = zipEntries(bytes)
     const hits = entries
       .filter((zipEntry) => found(zipEntry.data))
       .map((zipEntry) => ({ path: shown, entry: zipEntry.name }))
     return { entries: entries.length, hits }
   } catch (error) {
-    return {
-      entries: 0,
-      hits: [],
-      unreadable: { path: shown, error: error instanceof Error ? error.message : String(error) },
-    }
+    return { entries: 0, hits: [], unreadable: unreadableOf(shown, error) }
   }
 }
 
-function filesToScan(runDirectory: string): string[] {
+/** The files to read, and the directories that could not be listed. Links are skipped by their entry's own type. */
+function filesToScan(runDirectory: string): { readonly files: string[]; readonly unreadable: Unreadable[] } {
   const files: string[] = []
+  const unreadable: Unreadable[] = []
   const walk = (directory: string): void => {
-    for (const child of readdirSync(directory, { withFileTypes: true })) {
+    let children
+    try {
+      children = readdirSync(directory, { withFileTypes: true })
+    } catch (error) {
+      unreadable.push(unreadableOf(relative(runDirectory, directory), error))
+      return
+    }
+    for (const child of children) {
       const path = join(directory, child.name)
       if (directory === runDirectory && child.name === ARENA_RUN_HOME) continue
-      if (lstatSync(path).isSymbolicLink()) continue
+      if (child.isSymbolicLink()) continue
       if (child.isDirectory()) walk(path)
       else if (child.isFile() && !child.name.endsWith('.png')) files.push(path)
     }
   }
   walk(runDirectory)
-  return files
+  return { files, unreadable }
 }
 
 const END_OF_CENTRAL_DIRECTORY = 0x06_05_4b_50
