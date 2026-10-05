@@ -75,6 +75,14 @@ export const ENVIRONMENT_METADATA: readonly EnvironmentMetadata[] = [
     phase: 'load',
   },
   {
+    key: 'XDG_DATA_HOME',
+    source: 'packages/arena/src/run-home.ts',
+    reader: '`packages/arena/src/run-home.ts#defaultArenaOut` (`bun run arena` start)',
+    purposeAndDefault:
+      'Optional; where Dogfood Arena keeps its runs when `--out` is not given: `$XDG_DATA_HOME/enso/arena`, else `~/.local/share/enso/arena` (#610). Deliberately not under `ENSO_HOME`: a project under `/.enso/` is one the guard keeps Enso’s agent out of.',
+    phase: 'load',
+  },
+  {
     key: 'TMPDIR',
     source: 'test/scratch-preload.ts',
     reader: '`test/scratch-preload.ts` (process write, before any test file loads)',

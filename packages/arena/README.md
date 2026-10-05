@@ -18,10 +18,25 @@ bun run arena score <run dir>       # score a run again: its logs read for probl
 
 `start` needs one of `--agent PROVIDER/MODEL` (a model the home is logged in to, through Enso's own
 login; `--thinking LEVEL`, `medium` by default) or `--manual`. It also takes `--scenario snake` (the default), `--minutes N` (the budget, 120 by default),
-`--home DIR` (the `ENSO_HOME` the stack runs over: yours by default, because the agent's prompts
-reach a real model with your login), `--out DIR` (`ENSO_HOME/arena` by default), `--chromium PATH`,
+`--home DIR` (an `ENSO_HOME` to run over, shared with whatever else uses it; by default each run
+gets its own, below), `--out DIR` (`$XDG_DATA_HOME/enso/arena`, i.e. `~/.local/share/enso/arena`, by
+default; one under a `.enso` directory is refused), `--chromium PATH`,
 `--repo OWNER/NAME` (where bugs are filed: the checkout's GitHub `origin` by default) and
 `--headed`. Ports 5178 and 5179 must be free: the arena starts its own stack.
+
+**Each run has its own Enso home, `<run>/.enso` (#610).** It holds the run's projects, threads, logs
+and Stats, so the agent under test sees only the run's project, the evidence covers only the run,
+and your own Stats and logs are untouched. Your login comes in by symlink:
+- `secrets.env`, `pi-agent/auth.json` and `pi-agent/models.json` are linked, and `settings.json` is
+  copied.
+- Linked, never copied: an OAuth refresh rewrites `auth.json` in place, so a copy would leave your
+  own login holding a revoked refresh token. Through the link, the refresh lands in your file.
+- pi's lock on that file is taken beside the link, so your own pi refreshing the same provider at
+  the same instant is not serialized with the run.
+
+The home is named `.enso` because that is the guard's credential fragment: Enso's agent can neither
+read nor write under it. The same fragment is why runs are not kept under `~/.enso`: the project would
+be under it too, and the agent could not touch its own work.
 
 With `--agent`, the run starts the agent under test itself and stops when the agent stops it, ends
 without stopping (after three nudges), or runs out of budget. Do not prescribe its features or
@@ -118,6 +133,7 @@ in Enso's records.
 | Path | What |
 |---|---|
 | `project/` | the fresh git repository the agent worked in: the application outcome |
+| `.enso/` | the run's own Enso home: its threads, sessions and logs as Enso wrote them (unredacted), and links to your login. Share `enso/evidence/`, not this |
 | `timeline.jsonl` | one line per event, wall clock + elapsed + URL + the thread the URL names |
 | `screenshots/` | one every 30 s (`sample`), plus one per error, dialog, navigation, failed action, page crash, Enso exit; a shot that could not be taken is a `recorder-error` line instead |
 | `trace/trace-NNN.zip` | the Playwright trace in five-minute chunks (`bunx playwright show-trace <zip>`) |
@@ -126,7 +142,7 @@ in Enso's records.
 | `enso/evidence/snapshot-store/` | a copy of the project's snapshot store (#551), so pruning the home costs the run nothing |
 | `agent/transcript.jsonl` | the agent under test's own transcript (`--agent`), redacted, image bytes left out |
 | `score.json`, `score.md` | the score: verdict, UI checks, problems, metrics |
-| `manifest.json` | the fold: what drove the run and whether the boundary held, screenshot index, threads with their time spans, actions, observed signals, the agent's notes, and every piece of Enso evidence as `collected` or `missing` with why |
+| `manifest.json` | the fold: what drove the run and whether the boundary held, screenshot index, threads with their time spans, actions, observed signals, the agent's notes, every piece of Enso evidence as `collected` or `missing` with why, and the secret scan |
 
 The thread id on a timeline line is the id `bun scripts/enso-thread.ts`, `/api/logs/bundle?thread=`
 and the session file are keyed by: that is the jump from a screenshot to its turn.
@@ -153,8 +169,20 @@ and the session file are keyed by: that is the jump from a screenshot to its tur
   the manifest says the boundary was not held.
 - **Secrets.** Typed text that looks like a credential is refused, not typed: what is typed is in the
   trace's DOM snapshots and on screenshots, and a PNG cannot be scrubbed. Text the recorder writes
-  (timeline, Enso's output, evidence) is redacted with the home's known secret values. A secret Enso
-  itself puts on screen is not scrubbed from screenshots or the trace.
+  (timeline, Enso's output, evidence) is redacted with the run's secret values: `secrets.env`, the
+  environment's secret-shaped names, and the OAuth tokens and keys in `auth.json`.
+  - The set grows during the run: when a refresh rotates a token, the new one is added and the old
+    one stays.
+- **At the stop, every file the run keeps is scanned for those values (#610).** That includes each
+  trace zip entry by entry, where Playwright keeps the network response bodies.
+  - The manifest's `secretScan` names each hit by file and entry, never by value, and any hit fails the
+    score.
+  - A file or directory it cannot read is an `unreadable` warning, and the rest is still scanned:
+    not scanned is not clean.
+  - `arena manifest` scans again with the home the run recorded, and keeps every earlier hit whose file
+    still exists. A rotated token is a value it can no longer look for, so a hit it cannot re-check stands.
+  - Not read: `.enso/` (the links, by design), symlinks, and PNGs. A secret Enso puts on screen is
+    still not caught in a screenshot.
 - **The agent's account is not proof.** The manifest keeps its notes apart from what the recorder
   observed; the review must cite the evidence for each point, and every bug filed says it is
   unverified and names the run. Verifying those, and triaging the filed bugs, stays a person's step.

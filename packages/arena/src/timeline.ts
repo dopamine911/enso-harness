@@ -43,7 +43,14 @@ export type ArenaNoteKind = 'wish' | 'friction' | 'retrospective'
 export type ArenaActionSource = 'agent' | 'control'
 
 export type ArenaEventBody =
-  | { readonly kind: 'run-start'; readonly scenario: string; readonly project: string; readonly ensoCommit?: string }
+  | {
+      readonly kind: 'run-start'
+      readonly scenario: string
+      readonly project: string
+      readonly ensoCommit?: string
+      /** The `ENSO_HOME` the stack ran over (#610): a refold scans with its secrets, not the invoking shell's. */
+      readonly home?: string
+    }
   | { readonly kind: 'screenshot'; readonly cause: ArenaShotCause; readonly path: string }
   | {
       readonly kind: 'action'

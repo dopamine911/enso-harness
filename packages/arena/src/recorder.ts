@@ -3,7 +3,6 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileS
 import { join } from 'node:path'
 import { redactJudgeText } from '@enso/core/judge'
 import { isListening } from '@enso/core/loopback'
-import { knownSecretValues } from '@enso/core/secrets'
 import { type Browser, type BrowserContext, chromium, type Locator, type Page } from '@playwright/test'
 import type { Subprocess } from 'bun'
 import {
@@ -17,8 +16,10 @@ import {
 } from './actions.ts'
 import { collectEnsoEvidence, threadIdsShown } from './evidence.ts'
 import { type ArenaEvidence, foldArenaManifest } from './manifest.ts'
+import { arenaSecretSource, arenaSecretValues, runHomeOf } from './run-home.ts'
 import type { ArenaScenario } from './scenario.ts'
 import { type ArenaScore, writeArenaScore } from './score.ts'
+import { scanRunForSecrets } from './secret-scan.ts'
 import {
   type ArenaActionSource,
   type ArenaEventBody,
@@ -380,14 +381,17 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
     }
   }
   makeProject(project)
-  const secretValues = knownSecretValues(options.home)
-  const redact = (text: string): string => redactJudgeText(text, secretValues)
+  // A source, not a snapshot (PR #613 review): an OAuth refresh rewrites the linked auth.json during
+  // the run, and a rotated token must be redacted and scanned for like the one it replaced.
+  const secrets = arenaSecretSource(options.home)
+  const redact = (text: string): string => redactJudgeText(text, secrets())
   const timeline = openTimeline(join(runDirectory, 'timeline.jsonl'))
   const commit = checkoutCommit(options.repoRoot)
   timeline.record({
     kind: 'run-start',
     scenario: scenario.id,
     project,
+    home: options.home,
     ...(commit === undefined ? {} : { ensoCommit: commit }),
   })
 
@@ -637,8 +641,8 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
     const { action } = parsed
     return serialized(async () => {
       if (stopReason !== undefined) return { ok: false, error: `the run has stopped (${stopReason})` }
-      const detail = describeArenaAction(action, secretValues)
-      const refusal = typedSecretRefusal(action, secretValues)
+      const detail = describeArenaAction(action, secrets())
+      const refusal = typedSecretRefusal(action, secrets())
       if (refusal !== undefined) {
         timeline.record(
           { kind: 'action', via, action: action.action, detail, outcome: 'failed', error: refusal, durationMs: 0 },
@@ -729,13 +733,15 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
     threadIds: threadIdsShown(events),
     home: options.home,
     project,
-    secretValues,
+    secretValues: secrets(),
     ...(enso === undefined ? { serverDown: 'Enso was not running when the run stopped' } : {}),
   })
   stopping = true
   await browser.close().catch(() => undefined)
   await stopEnso()
-  const manifest = foldArenaManifest({ runId, events: readTimeline(timeline.path), evidence })
+  // ⚠ After Enso is stopped and the last chunk written: every file the run keeps is final (#610).
+  const secretScan = scanRunForSecrets(runDirectory, secrets())
+  const manifest = foldArenaManifest({ runId, events: readTimeline(timeline.path), evidence, secretScan })
   writeFileSync(join(runDirectory, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`)
   process.stdout.write(`arena: stopped (${reason}) — ${join(runDirectory, 'manifest.json')}\n`)
   return scoreAndSay(runDirectory, redact)
@@ -835,10 +841,19 @@ export function deadRecorderRun(
 
 /** The project a run served, from its `run-start` line. */
 function runProjectOf(runDirectory: string): string | undefined {
+  return runStartOf(runDirectory)?.project
+}
+
+/** The `ENSO_HOME` a run ran over, as its `run-start` line recorded it (#610); undefined for a run from before. */
+export function recordedRunHome(runDirectory: string): string | undefined {
+  return runStartOf(runDirectory)?.home
+}
+
+function runStartOf(runDirectory: string): { readonly project: string; readonly home?: string } | undefined {
   const path = join(runDirectory, 'timeline.jsonl')
   if (!existsSync(path)) return undefined
   const start = readTimeline(path).find((event) => event.kind === 'run-start')
-  return start?.kind === 'run-start' ? start.project : undefined
+  return start?.kind === 'run-start' ? start : undefined
 }
 
 /**
@@ -855,7 +870,7 @@ export async function collectAfterRecorderDied(runDirectory: string, fallbackHom
     )
   }
   const dead = deadRecorderRun(runDirectory)
-  const home = control?.home ?? fallbackHome
+  const home = control?.home ?? runHomeOf(runDirectory, fallbackHome, recordedRunHome(runDirectory))
   const project = runProjectOf(runDirectory) ?? join(runDirectory, 'project')
   const evidence = await collectEnsoEvidence({
     serverOrigin: ARENA_SERVER_ORIGIN,
@@ -863,7 +878,7 @@ export async function collectAfterRecorderDied(runDirectory: string, fallbackHom
     threadIds: threadIdsShown(readTimeline(join(runDirectory, 'timeline.jsonl'))),
     home,
     project,
-    secretValues: knownSecretValues(home),
+    secretValues: arenaSecretValues(home),
     ...(dead?.stackPid === undefined
       ? { serverDown: 'the recorder died before its stop, and the run’s Enso stack is not running' }
       : {}),
