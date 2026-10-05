@@ -5,6 +5,7 @@ import { bundleRecordsText, type EnsoLogLine, type EnsoSessionEval, readEnsoSess
 import { projectIdOf, realpathOrSelf } from '@enso/core/paths'
 import { ARENA_REFUSED_DETAIL, ARENA_RUNNER_STILL_RUNNING } from './actions.ts'
 import { type ArenaProjectThread, projectThreads } from './evidence.ts'
+import { type ArenaFriction, observedFriction } from './friction.ts'
 import type { ArenaManifest } from './manifest.ts'
 import { ARENA_BOUND_STOP_PREFIXES } from './run-control.ts'
 import { type ArenaEvent, readJsonLines, readTimeline } from './timeline.ts'
@@ -87,6 +88,8 @@ export interface ArenaWorkspaceState {
 export interface ArenaScore {
   readonly runId: string
   readonly scenario: string
+  /** Friction the timeline shows (#611 B3, `friction.ts`): findings with their seconds, never part of the verdict. */
+  readonly friction: readonly ArenaFriction[]
   readonly verdict: 'pass' | 'fail'
   readonly errors: number
   readonly warnings: number
@@ -610,6 +613,7 @@ export function scoreArenaRun(input: ArenaScoreInput): ArenaScore {
     uiUsed: uiChecks.every((check) => check.status === 'pass'),
     uiChecks,
     problems,
+    friction: observedFriction(input.events),
     metrics: metricsOf(input),
   }
 }
@@ -753,6 +757,15 @@ export function renderArenaScore(score: ArenaScore): string {
           (problem) =>
             `- **${problem.severity}** (${problem.source}) ${problem.message}${problem.count > 1 ? ` ×${problem.count}` : ''}` +
             (problem.examples.length === 0 ? '' : ` — ${problem.examples.join('; ')}`),
+        )),
+    '',
+    '## Observed friction',
+    '',
+    ...(score.friction.length === 0
+      ? ['None.']
+      : score.friction.map(
+          (friction) =>
+            `- **${friction.pattern}** — ${friction.summary} (at ${friction.at.map((second) => `${second}s`).join(', ')})`,
         )),
     '',
     '## Metrics',
