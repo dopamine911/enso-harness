@@ -2,10 +2,11 @@
  * The browser suite (#71, #486): drive the real chat surface in Chromium.
  *
  * Two tiers, split by cost:
- *   - default: model-free, in CI on every pull request. `/mode` is an extension command that
- *     raises a select dialog and completes without a model turn, so it exercises composer →
- *     server → pi → dialog park (#27) → answer → quick-close end to end for free; the seeded
- *     threads (`e2e-home.ts`) give long transcripts with no model at all.
+ *   - default: model-free, run by hand before merging browser-surface work (in CI from #486 until
+ *     #501; README.md). `/mode` is an extension command that raises a select dialog and completes
+ *     without a model turn, so it exercises composer → server → pi → dialog park (#27) → answer →
+ *     quick-close end to end for free; the seeded threads (`e2e-home.ts`) give long transcripts
+ *     with no model at all.
  *   - `@model`: one real model turn. Costs tokens and needs a working provider identity
  *     (`.enso/pi-agent`); run by hand with `bun run e2e:model` (see README.md).
  *
@@ -107,6 +108,21 @@ async function openNewThread(page: Page): Promise<void> {
   await expect(composer(page)).toBeVisible()
 }
 
+/**
+ * Build the thread's session with no model, by choosing `mode` in the composer's select (#604).
+ *
+ * ⚠ A slash command needs a running session since #484 ("a page visit builds no session"): `/mode`
+ * sent in a thread that has none comes back to the composer with the Start dialog's sentence, and
+ * the `/` palette lists no rows. The select is a control route (`POST …/mode`) that acquires the
+ * thread — a fresh one, or a stored one cold off its file — so this builds it without a prompt
+ * reaching a provider (the seeded home's `demo` points at a port nothing listens on). The `Mode:`
+ * line is the host's receipt: the session is live and in that mode.
+ */
+async function chooseMode(page: Page, mode: string): Promise<void> {
+  await modeControl(page).selectOption(mode)
+  await expect(page.getByText(`Mode: ${mode}`)).toBeVisible()
+}
+
 async function typeAndSend(page: Page, message: string): Promise<void> {
   await composer(page).fill(message)
   await composer(page).press('Enter')
@@ -133,7 +149,23 @@ test.describe('chat surface', () => {
     await expect(page.getByPlaceholder('filter commands…')).toBeVisible()
     await page.keyboard.press('Escape')
 
+    // Before a session, `/mode` is refused (#484): nothing is built, and the words go back to the
+    // composer. The refusal's sentence is pinned in `start-session.test.tsx`; this holds that the
+    // composer gets the words BACK through the real server — so it waits for the commands lookup the
+    // send makes, after which the draft was cleared and restored (the value before it proves nothing).
+    // A REQUEST issued from here on: the palette above fetched the same route, and its response may
+    // still be arriving.
+    const lookup = page.waitForRequest((request) =>
+      /\/api\/threads\/[^/]+\/commands$/.test(new URL(request.url()).pathname),
+    )
     await typeAndSend(page, MODE_COMMAND)
+    expect((await (await lookup).response())?.ok()).toBe(true)
+    await expect(composer(page)).toHaveValue(MODE_COMMAND)
+    await expect(page.getByRole('button', { name: MODE_OPTION_LABEL })).toHaveCount(0)
+
+    // A session built with no model; the same words, sent again, now reach pi.
+    await chooseMode(page, 'plan')
+    await composer(page).press('Enter')
     // The dialog parks the run (#27): the composer flips to stop, then the select options
     // render as buttons. Either order is fine; the option button is what we need.
     const modeOption = page.getByRole('button', { name: MODE_OPTION_LABEL })
@@ -217,13 +249,8 @@ test.describe('chat surface', () => {
     await expect(page).toHaveURL(/\?thread=[0-9a-f-]{36}$/)
     const first = new URL(page.url()).searchParams.get('thread') ?? ''
 
-    // /mode builds the session on the server (no model), so the thread exists to come back to.
-    await typeAndSend(page, MODE_COMMAND)
-    const modeOption = page.getByRole('button', { name: MODE_OPTION_LABEL })
-    await expect(modeOption).toBeVisible()
-    await modeOption.click()
-    await waitForRunToSettle(page)
-    await expect(page.getByText(MODE_ANSWERED_STATUS)).toBeVisible()
+    // A thread to come back to: choosing a mode builds its session on the server (no model, #484).
+    await chooseMode(page, 'acceptEdits')
 
     // Reload: the same thread with its persisted mode — not a fresh one (the #68 check that
     // failed). The mode CONTROL is the receipt: the "Mode: acceptEdits" line was a live notice.
@@ -268,9 +295,7 @@ test.describe('chat surface', () => {
     // A thread to come back to, with a mode that tells it apart from a fresh one.
     await openNewThread(page)
     const first = new URL(page.url()).searchParams.get('thread') ?? ''
-    await typeAndSend(page, MODE_COMMAND)
-    await page.getByRole('button', { name: MODE_OPTION_LABEL }).click()
-    await waitForRunToSettle(page)
+    await chooseMode(page, 'acceptEdits')
     await expect(modeControl(page)).toHaveValue('acceptEdits')
 
     // The boot's /history is slow; the user does not wait.
@@ -361,6 +386,9 @@ test.describe('seeded threads (#486)', () => {
   test('⚠ Escape on /model or /context from the palette puts focus back in the composer (#367)', async ({ page }) => {
     await page.goto(`/?thread=${SEEDED.first}`)
     await expect(composer(page)).toBeVisible()
+    // The palette lists a thread's commands only once it has a session (#484); a seeded thread
+    // opens cold, so one is built first, with no model.
+    await chooseMode(page, 'plan')
     for (const [command, dialogName] of [
       ['model', /model/i],
       ['context', /context/i],

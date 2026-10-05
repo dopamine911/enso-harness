@@ -33,7 +33,7 @@ To add a seeded thread, add it to `seededHome` in `e2e-home.ts` with the turns a
 
 | Test | Held behaviour |
 |---|---|
-| empty state, `/mode` dialog, answer, settle | a dialog round trip through pi, with no model: Enso's mode select ("Accept edits"), then the `Mode: acceptEdits` line from the host's `permission-mode` (#496) |
+| empty state, `/mode` refused, then dialog, answer, settle | before a session `/mode` is refused and its words come back to the composer (#484); the mode select builds the session with no model; then a dialog round trip through pi: Enso's mode select ("Accept edits"), then the `Mode: acceptEdits` line from the host's `permission-mode` (#496) |
 | fonts load from `/fonts` | the web server's font route, wired to the page |
 | paste an image | the image reaches the prompt POST as `EnsoPromptImage` |
 | the URL names the thread | reload, back/forward, a pasted link, a malformed id (#142) |
@@ -44,6 +44,8 @@ To add a seeded thread, add it to `seededHome` in `e2e-home.ts` with the turns a
 | a URL naming an unused thread id | that thread is started with no alert; one outside the projects is refused by name (#378) |
 
 Each of the last four was shown failing with its fix reverted (#486).
+
+⚠ **A slash command needs a running session (#484)**, and a page visit builds none. A test that drives one first builds the thread's session with `chooseMode`: the composer's mode select is a control route that builds it with no model. All four tests that drove a slash command into a session-less thread had failed since #484, unnoticed because this suite is not in CI (#604).
 
 ## Output
 
