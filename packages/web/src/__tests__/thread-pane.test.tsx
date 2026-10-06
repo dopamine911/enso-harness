@@ -2010,6 +2010,22 @@ const TWO_CALL_STATS: Omit<EnsoThreadStats, 'threadId'> = {
   logDays: [],
 }
 
+// ⚠ PR #661 review: a resync nulls the model when the session idles out, and a thread minted on this
+// page has no stored history — readability keyed on those two read a thread that ran as never run.
+test('⚠ Stats keeps reading a thread that ran after its session idles out and the model is gone (#659)', async () => {
+  const pane = await mountPane({ view: 'stats', server: { stats: TWO_CALL_STATS } })
+  const panel = (): string => pane.container.querySelector('#thread-view-stats')?.textContent ?? ''
+  await pane.settle(SNAPSHOT_LIVE)
+  await eventually(() => expect(panel()).toContain('Session analysis'))
+  // The session idles out: the resync says no model, and this page-minted thread has no stored history.
+  await pane.settle(SNAPSHOT_IDLE)
+  await flush(tick)
+  expect(panel()).toContain('Session analysis')
+  // The stats' own line: this scripted server serves no `/eval`, whose 404 says nothing has run on its own.
+  expect(panel()).not.toContain('no stats')
+  await pane.unmount()
+})
+
 // #359, #361: a stats row is a way into THIS pane's transcript — through the bridge inside
 // `<Conversation>`, the layout's reveal, and the step row's `data-tool-call-id`. The transcript
 // is under the Stats view, still mounted: the row finds its call there, asks the page for the
