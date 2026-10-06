@@ -21,12 +21,17 @@ import { join, relative } from 'node:path'
 export interface ArenaEnsoBuild {
   readonly commit: string
   readonly dirty: boolean
-  /** sha256 of the tracked diff against HEAD and the untracked files' names and bytes; present when dirty. */
+  /** sha256 of the tracked diff against HEAD and each untracked file's path and git blob id; present when dirty. */
   readonly diffHash?: string
 }
 
-const git = (repoRoot: string, args: readonly string[]): string | undefined => {
-  const result = spawnSync('git', args, { cwd: repoRoot, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+const git = (repoRoot: string, args: readonly string[], input?: string): string | undefined => {
+  const result = spawnSync('git', args, {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+    ...(input === undefined ? {} : { input }),
+  })
   return result.status === 0 ? result.stdout : undefined
 }
 
@@ -39,14 +44,14 @@ export function ensoBuildOf(repoRoot: string): ArenaEnsoBuild | undefined {
   const untracked = (git(repoRoot, ['ls-files', '--others', '--exclude-standard', '-z']) ?? '')
     .split('\0')
     .filter(Boolean)
-  for (const path of untracked.toSorted()) {
-    hash.update(`\0${path}\0`)
-    try {
-      hash.update(readFileSync(join(repoRoot, path)))
-    } catch {
-      hash.update('(unreadable)')
-    }
-  }
+    .toSorted()
+  // ⚠ git streams each file and answers its blob id (PR #623 review): an un-ignored build output
+  // is never read whole into the recorder's memory, and the content is hashed the way git would.
+  const blobs =
+    untracked.length === 0
+      ? ''
+      : (git(repoRoot, ['hash-object', '--stdin-paths'], `${untracked.join('\n')}\n`) ?? '(unhashed)')
+  hash.update(`\0${untracked.join('\0')}\0${blobs}`)
   return { commit, dirty: true, diffHash: hash.digest('hex') }
 }
 
