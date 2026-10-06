@@ -62,9 +62,9 @@ And what crosses the other way — the one thing the browser may say about the m
 /**
  * The body of `POST /api/threads/:threadId/mode` (L3 step C): the mode to switch to.
  *
- * A control route, not a prompt — the server refuses a mode the thread does not offer (422) and
- * a busy thread (409); the change itself arrives on the follow as `permission-mode`, never from
- * the click.
+ * A control route, not a prompt — the server refuses a mode the thread does not offer (422), and a
+ * thread a restore or a delete holds (409); during a run the change applies from the run's next tool
+ * call (#618). The change itself arrives on the follow as `permission-mode`, never from the click.
  */
 export const EnsoPermissionModeChange = Type.Object({
   mode: Type.String({ minLength: 1 }),
@@ -530,8 +530,9 @@ counted by the debug pane, rendered by nothing.
 *both* views (`custom-event-router.ts`): `permission-mode.tsx` (the composer's `<select>`, which says
 `unknown` until a real value has arrived) and `mode-lines.ts` (one transcript line per distinct value).
 **Changing the mode is a control route**: `POST …/mode` with `EnsoPermissionModeChange`
-(`follow-connection.ts#changeMode`) → `changeThreadMode` (`server/follow.ts`: 409 while busy, 422 for
-a mode the thread does not offer) → `ThreadRuntime.setPermissionMode` → the host runs `/<mode>` as a
+(`follow-connection.ts#changeMode`) → `changeThreadMode` (`server/follow.ts`: during a run it applies from
+the run's next tool call (#618); 409 when a restore or a delete holds the thread, 422 for a mode the
+thread does not offer) → `ThreadRuntime.setPermissionMode` → the host runs `/<mode>` as a
 prompt. The click moves no store.
 
 **Print runs have no modes.** `scripts/print-harness.ts#buildPrintManifest` drops the engine from the

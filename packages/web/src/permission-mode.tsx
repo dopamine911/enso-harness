@@ -102,8 +102,6 @@ export function usePermissionMode(): PermissionModeState {
 export interface PermissionModeSelectProps {
   mode: string | undefined
   available: readonly string[]
-  /** True while a run is in flight — the same rule the send button follows, so a change never collides with a running turn (#75). */
-  disabled: boolean
   /** Called with the chosen mode; never with the current one (selecting it is a no-op here). */
   onSelect: (mode: string) => void
 }
@@ -117,14 +115,10 @@ export interface PermissionModeSelectProps {
  * out of the box, and this repo has spent effort on what each vendored dependency costs.
  *
  * ⓘ Empty `available` (nothing received yet) disables the control rather than offering a
- * hardcoded list: the options are the mode extension's to declare, not ours to assume.
+ * hardcoded list: the options are the mode extension's to declare, not ours to assume. A run in
+ * flight does not (#618): a mode chosen then governs the run's next tool call.
  */
-export function PermissionModeSelect({
-  mode,
-  available,
-  disabled,
-  onSelect,
-}: PermissionModeSelectProps): React.ReactNode {
+export function PermissionModeSelect({ mode, available, onSelect }: PermissionModeSelectProps): React.ReactNode {
   const known = mode !== undefined
   return (
     <label
@@ -139,7 +133,7 @@ export function PermissionModeSelect({
       <select
         aria-label="permission mode"
         className="rounded-md border bg-background px-1.5 py-0.5 text-xs text-foreground disabled:opacity-60"
-        disabled={disabled || available.length === 0}
+        disabled={available.length === 0}
         value={known ? mode : ''}
         onChange={(event: React.ChangeEvent<HTMLSelectElement>) => {
           const next = event.currentTarget.value

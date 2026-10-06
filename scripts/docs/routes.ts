@@ -391,7 +391,7 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
     'path: `threadId`; body: `EnsoPermissionModeChange`',
     [
       '204 empty; the change arrives on the follow as `permission-mode`',
-      `${BODY_ERRORS}; 409 thread busy; 413 body too large; 422 mode not offered; 500 handler failure`,
+      `${BODY_ERRORS}; 409 a restore or delete holds the thread; 413 body too large; 422 mode not offered; 500 handler failure`,
     ],
     { builds: 'yes', factory: follows('export async function changeThreadMode') },
   ),

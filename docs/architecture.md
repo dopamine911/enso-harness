@@ -203,7 +203,7 @@ stateDiagram-v2
   busy --> idle: acceptance IS completion → release() with no settle — an extension command, and the mode route
   busy --> busy: POST …/prompt → queued behind the run, listed for every follower (#75)
   busy --> busy: POST …/abort → pi's queue cleared, texts back to the stopping tab (#75) · pi.abort() · settle still ends it
-  busy --> busy: POST …/mode → 409, never queued behind a run (#75) · the composer's select is disabled for the same reason
+  busy --> busy: POST …/mode → told to the runtime at once, governs the run's next tool call (#618) · 409 only while a restore or delete holds the thread
   idle --> [*]: idle timer → dispose · generation counter kept
 ```
 
@@ -233,10 +233,11 @@ question so a reconnect renders the card at once.
 2. **A route tells pi; the feed ends the run.** Four control routes, each answering before its effect
    is visible: `prompt` at admission (202 + receipt), `abort` 200 with the queue it handed back
    (`EnsoAbortReceipt`, #116 / #75) once pi was told, `dialog` 204 when the question was spent, and
-   `mode` 204 once the runtime was told — refused 409 while a run is in flight, since a mode change
-   is not queued behind one, and 422 for a mode the thread does not offer (`server/follow.ts#changeThreadMode`).
+   `mode` 204 once the runtime was told — during a run too, where the change governs the run's next
+   tool call rather than waiting behind it (#618); 409 only when the host refuses it (a restore or a
+   delete holds the thread), and 422 for a mode the thread does not offer (`server/follow.ts#changeThreadMode`).
    Their effects arrive on the follow for every follower alike. `mode` is also the second route that
-   ACQUIRES ([`routes.md`](./reference/routes.md): *Builds / acquires? yes*), which is why the rule is
+   ACQUIRES an idle thread ([`routes.md`](./reference/routes.md): *Builds / acquires? yes*), which is why the rule is
    not "a route never releases": the settle observer ends a *run*, and a route releases where
    acceptance IS completion — an extension command (`server/follow.ts#promptThread`, on `onAccepted`) and a
    mode change (`#changeThreadMode`, likewise) — or where the prompt was refused before it became one.

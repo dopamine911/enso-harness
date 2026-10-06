@@ -280,7 +280,7 @@ test("every request a pane makes goes through its thread's fetch, never the page
 
 // ── #125 item 1: the in-flight readings flip with the wire's status frames ───────────────
 
-test('⚠ busy on the wire → working, stop offered, mode select disabled, rail busy; settled → idle, all back', async () => {
+test('⚠ busy on the wire → working, stop offered, rail busy, and the mode select still offered (#618); settled → idle, all back', async () => {
   const pane = await mountPane()
   expect(pane.status()).toContain('idle')
   expect(pane.stopButton()).toBeNull()
@@ -293,7 +293,8 @@ test('⚠ busy on the wire → working, stop offered, mode select disabled, rail
   await eventually(() => {
     expect(pane.status()).toContain('working')
     expect(pane.stopButton()).not.toBeNull()
-    expect(pane.modeSelect().disabled).toBe(true)
+    // A run that asks before every call is the one whose mode a user needs to change (#618).
+    expect(pane.modeSelect().disabled).toBe(false)
     expect(railBusy(pane.stores.threadId)).toBe(true)
   })
 

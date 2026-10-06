@@ -1949,6 +1949,14 @@ test('⚠ a prompt while the thread restores its files is refused with that reas
     { onAccepted: () => refused.reject(new Error('admitted')), onRejected: refused.resolve },
   )
   expect(await refused.promise).toBe(`thread ${threadId} is restoring its files; prompt again once that is done`)
+  // …and so is a mode change (#618): the mode route now tells a held thread's runtime directly, so
+  // this refusal is what keeps a mode entry from being written while the files are put back.
+  const modeRefused = Promise.withResolvers<string>()
+  hosted.runtime.setPermissionMode(hosted.runtime.permissionModeState().available[0] ?? 'default', {
+    onAccepted: () => modeRefused.reject(new Error('accepted')),
+    onRejected: modeRefused.resolve,
+  })
+  expect(await modeRefused.promise).toBe(`thread ${threadId} is restoring its files; prompt again once that is done`)
   expect((await restoring).kind).toBe('restored')
   await runPrompt(hosted, 'after')
 })

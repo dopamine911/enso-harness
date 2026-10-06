@@ -549,18 +549,43 @@ test('⚠ a mode the thread does not offer is a 422 and moves nothing; a malform
   }
 })
 
-test('⚠ a mode change while the thread is busy is a 409 — not queued behind the run', async () => {
+// #618: a run that asks before every call could only be approved call by call, or stopped. A mode
+// change during it is told to the runtime at once — the engine reads the mode at every tool call —
+// and the run keeps its lease: the change neither waits behind the run nor takes the thread from it.
+test('⚠ a mode change during a run is told to the runtime at once (204), and the run keeps the thread (#618)', async () => {
   const fake = fakeHost()
   const url = await startWith(fake)
   await prompt(url, 't1', 'hello')
   expect(await threadSummary(url, 't1')).toMatchObject({ busy: true })
-  const busy = await fetch(`${url}/api/threads/t1/mode`, {
+  const during = await fetch(`${url}/api/threads/t1/mode`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ mode: 'plan' }),
   })
-  expect(busy.status).toBe(409)
-  expect(fake.built[0]?.modeChanges).toEqual([])
+  expect(during.status).toBe(204)
+  expect(fake.built[0]?.modeChanges).toEqual(['plan'])
+  expect(await threadSummary(url, 't1')).toMatchObject({ busy: true })
+  fake.emit(SETTLED)
+})
+
+test('a mode change the runtime refuses while the thread is held is the 409, with the runtime’s reason', async () => {
+  const fake = fakeHost(['mode'], {
+    setPermissionMode: (_mode: string, outcome: PromptOutcome) =>
+      outcome.onRejected('thread t1 is restoring its files; prompt again once that is done'),
+  })
+  const url = await startWith(fake)
+  await prompt(url, 't1', 'hello')
+  const refused = await fetch(`${url}/api/threads/t1/mode`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode: 'plan' }),
+  })
+  // The host's reason names the thread and what holds it: the body is that, not a second prefix.
+  expect([refused.status, await refused.text()]).toEqual([
+    409,
+    'thread t1 is restoring its files; prompt again once that is done',
+  ])
+  expect(await threadSummary(url, 't1')).toMatchObject({ busy: true })
   fake.emit(SETTLED)
 })
 

@@ -408,15 +408,14 @@ function RunProblem(): React.ReactNode {
  * `permission-mode` receipt the host emits once the mode is persisted — the mode actually set —
  * never from the click. Invariant 2: a route tells pi; the feed ends the story.
  *
- * ⚠ Disabled while a run is in flight, the same rule the send button follows: a mode
- * change mid-run would collide with the busy-thread semantics #75 is deciding.
+ * ⓘ Offered while a run is in flight too (#618): a run that asks before every call is the one
+ * a user most needs to change, and the change governs its next tool call (`changeThreadMode`).
  *
  * On mount it asks the server what a fresh thread starts in, so the control reads
  * `default` from the first paint rather than `unknown` until the first run. In fixture
  * mode there is no server; the fetch fails and the store honestly stays `unknown`.
  */
 function PermissionModeControl(): React.ReactNode {
-  const chat = useChatContext()
   const stores = useThreadStores()
   const { mode, available } = usePermissionMode()
   useEffect(() => {
@@ -426,7 +425,6 @@ function PermissionModeControl(): React.ReactNode {
     <PermissionModeSelect
       mode={mode}
       available={available}
-      disabled={chat.sessionGenerating}
       onSelect={(next: string) => void stores.connection.changeMode(next)}
     />
   )
@@ -545,12 +543,17 @@ export function DialogAnswerControls({
         )}
         <div className="flex flex-wrap gap-2">
           {dialog.options.map((option) => (
+            // ⚠ An option can be a long rule — `Yes, allow write "<a thread tree's absolute path>/*" for
+            // this session` — and it is what the user consents to (#625). The button's own
+            // `whitespace-nowrap` and fixed height clipped it at the card's edge; here it wraps, at any
+            // character since a path has no spaces, and grows to hold every line.
             <Button
               key={option}
               type="button"
               variant="outline"
               disabled={disabled}
               onClick={() => answer({ value: option })}
+              className="h-auto min-h-8 max-w-full py-1.5 text-left wrap-anywhere whitespace-normal"
             >
               {option}
             </Button>

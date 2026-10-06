@@ -57,12 +57,13 @@ import type { ThreadFeedFrame, ThreadLease, ThreadRegistry, ThreadView } from '.
  *                                  inside pi, the run keeps going on the follow.
  *   POST /api/threads/:id/mode     unary (L3 step C, #162 workstream 4). Switch the thread's
  *                                  permission mode as a control route, not a prompt: 204 once the
- *                                  runtime was told, 409 while a run is in flight (a mode change is
- *                                  never queued behind one), 422 for a mode this thread does not
- *                                  offer. The second route that ACQUIRES, and it releases on
- *                                  acceptance — an extension command's acceptance IS its
- *                                  completion. The change arrives on the follow as
- *                                  `permission-mode`; a rejection after the 204, as
+ *                                  runtime was told, 422 for a mode this thread does not offer.
+ *                                  During a run it applies at once, from the run's next tool call
+ *                                  (#618), never queued behind it; 409 only when the host refuses
+ *                                  it (a restore or a delete holds the thread). An idle thread is
+ *                                  ACQUIRED, released on acceptance — an extension command's
+ *                                  acceptance IS its completion. The change arrives on the follow
+ *                                  as `permission-mode`; a rejection after the 204, as
  *                                  `permission-mode-rejected`.
  *   POST /api/threads/:id/abort    unary (#116). Stop the run in flight: pi is told, and the
  *                                  prompts waiting behind the run come back in the answer
@@ -543,16 +544,22 @@ export type ModeChangeOutcome = { readonly status: 204 } | Refusal<409 | 422>
 
 /**
  * Switch a thread's permission mode (L3 step C, #162 workstream 4): a control route, not a
- * prompt.
+ * prompt. The mode must be one the thread offers now (422).
  *
- * The thread is acquired like a prompt would acquire it — a fresh page changes mode before its
- * first prompt — and refused while busy (409): a mode change is not queued behind a run (#75's
- * rule), and the composer's select is disabled then for the same reason. The mode must be one
- * the thread offers now (422). The change itself arrives on the follow as `permission-mode`,
- * said by the host when its extension has persisted it; an extension command's acceptance is
- * its completion, so the lease is released on acceptance as `promptThread` releases a slash
- * command's. A rejection after the 204 is announced on the feed as `permission-mode-rejected`,
- * as `promptThread` announces its own.
+ * ⚠ DURING A RUN IT APPLIES AT ONCE (#618). A run that asks before every write and command was
+ * stuck there: the user could approve each ask or stop the run, nothing else. Changing the mode
+ * mid-run is safe where queueing behind the run was not (#75): pi runs an extension command
+ * immediately even while it streams, and the permission engine reads the mode at EVERY tool call
+ * (`resolveAgentName` in its gate), so the change governs the run's next call, never one already
+ * decided. The route asks the runtime and waits for its answer: accepted is 204, refused is 409 with
+ * the host's reason — the host refuses while a restore or a delete holds the thread
+ * (`agent-host.ts#admitRun`), the one holder besides a run.
+ *
+ * An idle thread is acquired like a prompt would acquire it — a fresh page changes mode before its
+ * first prompt — and released on acceptance, since an extension command's acceptance is its
+ * completion. A rejection after that 204 is announced on the feed as `permission-mode-rejected`, as
+ * `promptThread` announces its own. Either way the change itself arrives on the follow as
+ * `permission-mode`, said by the host when its extension has persisted it.
  */
 export async function changeThreadMode(
   deps: FollowRouteDeps,
@@ -560,15 +567,14 @@ export async function changeThreadMode(
   change: EnsoPermissionModeChange,
 ): Promise<ModeChangeOutcome> {
   const { threads } = deps
+  const held = threads.peek(threadId)
+  if (held?.busy === true) return changeModeWhileHeld(held.hosted.runtime, change)
   const lease = await controlLease(threads, threadId, 'change the mode')
   if ('reason' in lease) return lease
-  const { available } = lease.runtime.permissionModeState()
-  if (!available.includes(change.mode)) {
+  const notOffered = modeNotOffered(lease.runtime, change)
+  if (notOffered !== undefined) {
     lease.release()
-    return {
-      status: 422,
-      reason: `mode ${change.mode} is not offered here. Available: ${available.length === 0 ? 'none' : available.join(', ')}`,
-    }
+    return notOffered
   }
   lease.runtime.setPermissionMode(change.mode, {
     onAccepted: () => lease.release(),
@@ -580,6 +586,35 @@ export async function changeThreadMode(
     },
   })
   return { status: 204 }
+}
+
+/** The 422 for a mode the thread does not offer now, or `undefined`. */
+function modeNotOffered(runtime: ThreadRuntime, change: EnsoPermissionModeChange): Refusal<422> | undefined {
+  const { available } = runtime.permissionModeState()
+  if (available.includes(change.mode)) return undefined
+  return {
+    status: 422,
+    reason: `mode ${change.mode} is not offered here. Available: ${available.length === 0 ? 'none' : available.join(', ')}`,
+  }
+}
+
+/**
+ * A mode change on a thread something holds (#618): told to the runtime directly — the holder keeps
+ * the lease — and answered by what the runtime says, so a refusal is the 409 rather than a feed line.
+ * The host's reason is the body verbatim: each already names the thread and what holds it.
+ */
+async function changeModeWhileHeld(
+  runtime: ThreadRuntime,
+  change: EnsoPermissionModeChange,
+): Promise<ModeChangeOutcome> {
+  const notOffered = modeNotOffered(runtime, change)
+  if (notOffered !== undefined) return notOffered
+  const answered = Promise.withResolvers<ModeChangeOutcome>()
+  runtime.setPermissionMode(change.mode, {
+    onAccepted: () => answered.resolve({ status: 204 }),
+    onRejected: (reason: string) => answered.resolve({ status: 409, reason }),
+  })
+  return answered.promise
 }
 
 /** The mode-change body, checked against its schema — a control route takes exactly its shape. */
