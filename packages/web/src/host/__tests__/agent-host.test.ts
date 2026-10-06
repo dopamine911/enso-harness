@@ -1927,11 +1927,11 @@ test('⚠ a first run whose tree cannot be made is refused with the reason — n
   expect(core.state.callCount).toBe(1)
 })
 
-/** A faux model's definition, as `registerProvider` takes it. */
+/** A faux model's definition, as `registerProvider` takes it: a reasoning model, so it offers levels. */
 const fauxModelDefinition = (id: string, name: string): NonNullable<ProviderConfig['models']>[number] => ({
   id,
   name,
-  reasoning: false,
+  reasoning: true,
   input: ['text'],
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   contextWindow: 50_000,
@@ -1967,11 +1967,10 @@ function twoFauxModels(core: FauxCore, calledWith: string[]): InlineExtension {
   }
 }
 
-// ⚠ #616, measured on a live run: the Start dialog's model reached the session (`model_change` to
-// Haiku) and was undone 119 ms later, when the first run rebuilt the thread on its tree — pi restores
-// a session's model only once it has messages, and a thread configured before its first prompt has
-// none, so the rebuild took the default. The choice must be the model the first run runs on.
-test('⚠ a model chosen before the first prompt is the model the first run runs on, across the move onto its tree (#616)', async () => {
+/** A thread on the two faux models, configured by `choose` before its first prompt, then run once — on its tree. */
+async function firstRunAfter(
+  choose: (hosted: HostedThread) => Promise<void>,
+): Promise<{ hosted: HostedThread; project: string; calledWith: string[] }> {
   const project = dirtyCheckout()
   const core = faux.createFauxCore({
     provider: 'enso-faux',
@@ -1988,14 +1987,38 @@ test('⚠ a model chosen before the first prompt is the model the first run runs
   const hosted = await host.createSession(crypto.randomUUID(), () => project)
   openSessions.push(hosted)
   expect(hosted.runtime.modelState().model?.id).toBe('faux-1')
-  await hosted.runtime.runHostCommand({ name: 'model', value: 'enso-faux/faux-2' })
-  expect(hosted.runtime.modelState().model?.id).toBe('faux-2')
-
+  await choose(hosted)
   await runPrompt(hosted, 'hi')
-  // The run happened on the tree, and its request went to the chosen model.
+  return { hosted, project, calledWith }
+}
+
+// ⚠ #616, measured on a live run: the Start dialog's model reached the session (`model_change` to
+// Haiku) and was undone 119 ms later, when the first run rebuilt the thread on its tree — pi restores
+// a session's model and level only once it has messages, and a thread configured before its first
+// prompt has none, so the rebuild took the default. The choice must be what the first run runs on.
+test('⚠ a model and effort chosen before the first prompt are what the first run runs on, across the move onto its tree (#616)', async () => {
+  const { hosted, project, calledWith } = await firstRunAfter(async (thread) => {
+    await thread.runtime.runHostCommand({ name: 'model', value: 'enso-faux/faux-2' })
+    await thread.runtime.runHostCommand({ name: 'thinking', value: 'high' })
+  })
+  // The run happened on the tree, and its request went to the chosen model, at the chosen level.
   expect(hosted.inspect().cwd).not.toBe(project)
   expect(calledWith).toEqual(['faux-2'])
-  expect(hosted.runtime.modelState().model).toMatchObject({ provider: 'enso-faux', id: 'faux-2' })
+  expect(hosted.runtime.modelState()).toMatchObject({
+    model: { provider: 'enso-faux', id: 'faux-2' },
+    thinkingLevel: 'high',
+  })
+})
+
+// PR #631 review: the dialog sends no `/model` when the model is left as it was (`applyConfiguration`),
+// so the branch holds a level chosen alone. The model it pairs with is the one pi recorded when it
+// built the session — a new session's first entries are its model and level — so that is restored too.
+test('an effort chosen alone before the first prompt survives the move too, on the model the session started with (#616)', async () => {
+  const { hosted, calledWith } = await firstRunAfter(async (thread) => {
+    await thread.runtime.runHostCommand({ name: 'thinking', value: 'high' })
+  })
+  expect(calledWith).toEqual(['faux-1'])
+  expect(hosted.runtime.modelState()).toMatchObject({ model: { id: 'faux-1' }, thinkingLevel: 'high' })
 })
 
 // ⚠ PR #561 review: a prompt that finds the thread held JOINS the holder (#75), and pi starts a run
