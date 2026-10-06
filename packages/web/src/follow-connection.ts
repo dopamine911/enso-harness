@@ -685,10 +685,13 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
             message: 'the follow closed before the run settled',
           })
         }
-        // The server went away under this page (#103 receipt, step 8) — not this page
-        // leaving. Said as a chunk so the page can show it and the debug pane refetches:
+        // The follow ended under this page (#103 receipt, step 8) — not this page releasing it
+        // (`abort`). Said as a chunk so the page can show it and the debug pane refetches:
         // with no run open nothing else would mention it, and the pane would keep
         // presenting its last fetch of a session that may no longer exist as current.
+        // ⚠ Said even while the page is leaving (#664, PR #668 review): the follow HAS ended, and
+        // a page the back/forward cache restores must know it — a live-looking page over a dead
+        // follow is what #274 ended. Only the "failed" log line was false; that one is gated.
         if (!abort.aborted) {
           push({ type: EventType.CUSTOM, name: FOLLOW_ENDED_CUSTOM_EVENT, value: { threadId } })
         }
