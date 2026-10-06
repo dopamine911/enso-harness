@@ -81,10 +81,26 @@ export function isChangeWait(detail: string): boolean {
  * every five seconds or so — and while Enso works, the page changes only at real events.
  */
 const RELATIVE_AGE = / (?:now|\d+[smhd])"/g
+/** The rail's line in a page read; every line indented under it is the rail's. */
+const RAIL_LINE = '- navigation "threads"'
 
-/** A page read as a wait until change compares it: the rail's ages aside, so the clock is no change. */
+/**
+ * A page read as a wait until change compares it: the rail's ages aside, so the clock is no change.
+ * ⚠ IN THE RAIL ONLY (PR #646 review): the ages were measured there, and the same shape elsewhere —
+ * a control named "Snooze 1h" — is the page's words, whose change is a change.
+ */
 export function pageForChange(page: string): string {
-  return page.replaceAll(RELATIVE_AGE, ' ·"')
+  let railIndent: number | undefined
+  return page
+    .split('\n')
+    .map((line) => {
+      const indent = line.length - line.trimStart().length
+      if (railIndent !== undefined && indent <= railIndent) railIndent = undefined
+      if (railIndent !== undefined) return line.replaceAll(RELATIVE_AGE, ' ·"')
+      if (line.trimStart().startsWith(RAIL_LINE)) railIndent = indent
+      return line
+    })
+    .join('\n')
 }
 
 /** What a wait until change came to: the page differed after `waitedMs`, or the limit passed with none. */

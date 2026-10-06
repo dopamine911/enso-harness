@@ -70,6 +70,8 @@ const VIEWPORT = { width: 1440, height: 900 } as const
 const ACTION_TIMEOUT_MS = 15_000
 /** How often a wait until change looks at the page (#637): a card is seen within about a second. */
 const CHANGE_POLL_MS = 1000
+/** The actions that do not move the page: after any other, the wait's baseline is the page it left (#637). */
+const LEAVES_THE_PAGE: ReadonlySet<ArenaAction['action']> = new Set(['read', 'screenshot', 'wait', 'note', 'stop'])
 /** How long a stopped run waits for its agent runner to finish writing before closing the page. */
 const DRIVER_SETTLE_MS = 15_000
 
@@ -640,9 +642,11 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
 
   // ── The agent's actions ────────────────────────────────────────────────────────────────────
   /**
-   * The page as the agent last read it, for a wait until change (#637): the snapshot with the rail's
-   * ages aside, or the native dialog the read reported. Undefined before the first read: the wait
-   * then compares with the page as it found it.
+   * The page as the agent last saw it, for a wait until change (#637): its last `read`, or the page
+   * right after its last action that moves the page (PR #646 review) — its own click is no change
+   * for its next wait. The snapshot has the rail's ages aside, or names the native dialog blocking
+   * the page. Undefined before either, or when that snapshot failed: the wait then compares with
+   * the page as it found it.
    */
   let lastRead: string | undefined
   const pageNow = async (): Promise<string> =>
@@ -779,6 +783,7 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
             here(),
           )
         }
+        if (!LEAVES_THE_PAGE.has(action.action)) lastRead = await pageNow().catch(() => undefined)
         return { ok: true, result }
       } catch (error) {
         const message = errorLine(error, redact)

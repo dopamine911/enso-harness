@@ -107,9 +107,10 @@ While Enso works, wait for it to show you something rather than sleeping a fixed
 
     {"action":"wait","until":"change","ms":60000}
 
-returns as soon as the page differs from your last \`read\` — a question for you, a reply, the run
-ending — with \`"changed": true\`, or after \`ms\` (at most a minute) with \`"changed": false\`. Then
-\`read\` to see what changed. A plain \`{"action":"wait","ms":…}\` sleeps the whole time.
+returns as soon as the page differs from what you last saw — your last \`read\`, or the page just after
+your last click, fill or key press — with \`"changed": true\`: a question for you, a reply, the run
+ending. After \`ms\` (at most a minute) with nothing new it says \`"changed": false\`. Then \`read\` to
+see what changed. A plain \`{"action":"wait","ms":…}\` sleeps the whole time.
 
 # Notes — write them when they happen, not at the end
 

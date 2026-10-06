@@ -149,13 +149,16 @@ test('a wait until change is parsed, capped and worded as one; any other `until`
 
 // ⚠ #637, measured on a live run: while a permission card waits, the rail's relative age is the only
 // thing on the page that moves (now → 6s → 11s … → 1m). A wait that counted it would return at once.
-test('⚠ the rail’s ages are not a change; a new control is', () => {
-  const waiting = (age: string): string =>
-    `- button "waiting on you Write notes.md… ${age}"\n- button "Yes"\n- text: limit 5s per call`
-  for (const age of ['6s', '1m', '3h', '2d']) expect(pageForChange(waiting(age))).toBe(pageForChange(waiting('now')))
-  // A count of seconds inside a name, not ending it, is the page's words and stays.
-  expect(pageForChange('- text: limit 5s per call')).toBe('- text: limit 5s per call')
-  expect(pageForChange(`${waiting('6s')}\n- button "No"`)).not.toBe(pageForChange(waiting('6s')))
+test('⚠ the rail’s ages are not a change; a new control is, and so is an age-shaped name outside the rail', () => {
+  // The shape of a live read: the rail's navigation, then the chat with the card.
+  const page = (age: string, chat = '  - button "Yes"'): string =>
+    `- navigation "threads":\n  - button "waiting on you Write notes.md… ${age}"\n- tabpanel "Chat":\n${chat}`
+  for (const age of ['6s', '1m', '3h', '2d']) expect(pageForChange(page(age))).toBe(pageForChange(page('now')))
+  expect(pageForChange(page('6s', '  - button "Yes"\n  - button "No"'))).not.toBe(pageForChange(page('6s')))
+  // PR #646 review: the same shape outside the rail is the page's words, and its change counts.
+  expect(pageForChange(page('6s', '  - button "Snooze 2h"'))).not.toBe(
+    pageForChange(page('6s', '  - button "Snooze 1h"')),
+  )
 })
 
 /** A clock that moves only when the wait sleeps: each outcome's `waitedMs` is exact. */

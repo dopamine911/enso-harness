@@ -68,10 +68,10 @@ export function observedFriction(events: readonly ArenaEvent[]): ArenaFriction[]
  * when Enso does something — so neither its cycles nor its minutes count here.
  */
 function polling(actions: readonly ActionEvent[], runMs: number): ArenaFriction | undefined {
-  const sleeps = actions.filter((action) => action.action === 'wait' && !isChangeWait(action.detail))
-  const cycles = sleeps.filter((action) => LOOKS.has(actions[actions.indexOf(action) + 1]?.action ?? ''))
+  const isSleep = (action: ActionEvent): boolean => action.action === 'wait' && !isChangeWait(action.detail)
+  const cycles = actions.filter((action, index) => isSleep(action) && LOOKS.has(actions[index + 1]?.action ?? ''))
   if (cycles.length < POLLING_MIN_CYCLES) return undefined
-  const waitedMs = sleeps.reduce((total, action) => total + action.durationMs, 0)
+  const waitedMs = actions.filter(isSleep).reduce((total, action) => total + action.durationMs, 0)
   const minutes = (ms: number): string => (ms / 60_000).toFixed(1)
   return {
     pattern: 'polling',
