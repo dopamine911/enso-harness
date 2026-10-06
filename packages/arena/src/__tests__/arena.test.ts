@@ -574,6 +574,7 @@ test('⚠ a deleted thread and a never-run one are each one skipped row; a store
   const neverRan = '22222222-2222-4222-8222-222222222222'
   const ranAndBroken = '33333333-3333-4333-8333-333333333333'
   const projectId = projectIdOf(realpathOrSelf(project))
+  const asked: string[] = []
   const rows = await collectEnsoEvidence({
     serverOrigin: 'http://enso',
     directory: join(root, 'evidence'),
@@ -582,6 +583,7 @@ test('⚠ a deleted thread and a never-run one are each one skipped row; a store
     project,
     secretValues: [],
     fetchText: (url) => {
+      asked.push(url)
       if (url.endsWith('/api/stored-threads')) {
         return Promise.resolve({
           status: 200,
@@ -604,6 +606,8 @@ test('⚠ a deleted thread and a never-run one are each one skipped row; a store
   // Stored, so it ran: every route that fails is its own missing row, as before.
   expect(about(ranAndBroken).length).toBeGreaterThan(1)
   expect(about(ranAndBroken).every((row) => row.status === 'missing')).toBe(true)
+  // PR #673 review: the probe's answer is the thread's history read — each route is asked once.
+  expect(asked.length).toBe(new Set(asked).size)
 })
 
 test('the brief carries the assignment verbatim and no internals', () => {

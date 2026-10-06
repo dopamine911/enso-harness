@@ -57,11 +57,23 @@ async function defaultFetchText(url: string): Promise<{ readonly status: number;
   return { status: response.status, text: await response.text() }
 }
 
-/** Every piece of Enso-side evidence for the run: one row each, collected or missing. */
+/** Every piece of Enso-side evidence for the run: one row each, collected, missing, or skipped (#671). */
 export async function collectEnsoEvidence(sources: ArenaEvidenceSources): Promise<ArenaEvidence[]> {
   mkdirSync(sources.directory, { recursive: true })
   const fetchText = sources.fetchText ?? defaultFetchText
   const rows: ArenaEvidence[] = []
+  /**
+   * Each route asked once (PR #673 review): the history probe below and the thread's history read
+   * are the same GET, and its answer — or its failure — serves both.
+   */
+  const answers = new Map<string, Promise<{ readonly status: number; readonly text: string }>>()
+  const ask = (route: string): Promise<{ readonly status: number; readonly text: string }> => {
+    const known = answers.get(route)
+    if (known !== undefined) return known
+    const asked = fetchText(`${sources.serverOrigin}${route}`)
+    answers.set(route, asked)
+    return asked
+  }
 
   /** Save one route's body, redacted, and say so in a row. Returns the body saved, or undefined. */
   const save = async (kind: string, route: string, fileName: string): Promise<string | undefined> => {
@@ -71,7 +83,7 @@ export async function collectEnsoEvidence(sources: ArenaEvidenceSources): Promis
     }
     let answer: { readonly status: number; readonly text: string }
     try {
-      answer = await fetchText(`${sources.serverOrigin}${route}`)
+      answer = await ask(route)
     } catch (error) {
       rows.push({ kind, status: 'missing', reason: `GET ${route} failed: ${String(error)}` })
       return undefined
@@ -99,7 +111,7 @@ export async function collectEnsoEvidence(sources: ArenaEvidenceSources): Promis
   ): Promise<string | undefined> => {
     if (sources.serverDown !== undefined) return undefined
     const route = `/api/threads/${id}/history`
-    const answer = await fetchText(`${sources.serverOrigin}${route}`).catch(() => undefined)
+    const answer = await ask(route).catch(() => undefined)
     if (answer?.status === 410) return `deleted during the run: GET ${route} answered 410`
     if (answer?.status === 404 && !storedIds.has(threadId)) {
       return `never ran: GET ${route} answered 404, and the project stores no such thread`
