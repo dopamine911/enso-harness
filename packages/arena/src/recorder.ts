@@ -13,10 +13,11 @@ import {
   type ArenaTarget,
   createChangeBaseline,
   describeArenaAction,
+  dialogForChange,
   pageForChange,
-  waitForPageChange,
   parseArenaAction,
   typedSecretRefusal,
+  waitForPage,
 } from './actions.ts'
 import { collectEnsoEvidence, threadIdsShown } from './evidence.ts'
 import { type ArenaEvidence, foldArenaManifest } from './manifest.ts'
@@ -642,11 +643,11 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
   for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => resolveStop(`signal ${signal}`))
 
   // ── The agent's actions ────────────────────────────────────────────────────────────────────
-  /** The page as the agent sees it, for a wait until change (#637): the rail's ages aside, or the native dialog blocking it. */
+  /** The page as the agent sees it, for a wait on the page (#637, #648): the rail's ages aside, or the native dialog blocking it. */
   const pageNow = async (): Promise<string> =>
     pendingDialog === undefined
       ? pageForChange(await page.locator('body').ariaSnapshot({ timeout: ACTION_TIMEOUT_MS }))
-      : `dialog ${pendingDialog.type()}: ${pendingDialog.message()}`
+      : dialogForChange(pendingDialog.type(), pendingDialog.message())
   /** What the agent last saw: its last read, or the page right after its last move (`createChangeBaseline`). */
   const lastSeen = createChangeBaseline(pageNow)
   const perform = async (action: ArenaAction, via: ArenaActionSource): Promise<unknown> => {
@@ -685,11 +686,12 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
       case 'screenshot':
         return { ...here(), screenshot: await shoot('requested') }
       case 'wait': {
-        if (action.until !== 'change') {
+        if (action.until === undefined) {
           await page.waitForTimeout(action.ms)
           return here()
         }
-        const waited = await waitForPageChange({
+        const waited = await waitForPage({
+          until: action.until,
           baseline: await lastSeen.baseline(),
           look: pageNow,
           sleep: (ms) => page.waitForTimeout(ms),

@@ -68,6 +68,7 @@ const DOMAINS_BY_CLASSIFICATION: Readonly<Record<Classification, Readonly<Record
     'thread-timeline.ts': 'Thread, Observation, Record',
     'thread-context.ts': 'Thread, Observation',
     'thread-pages.ts': 'Thread, Observation',
+    'thread-status-words.ts': 'Thread, Surface',
     'thread-stats.ts': 'Thread, Observation, Record',
     'thread-tree-record.ts': 'Thread, Record',
     'tool-input.ts': 'Surface',

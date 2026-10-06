@@ -1,4 +1,4 @@
-import { isChangeWait } from './actions.ts'
+import { isPageWait } from './actions.ts'
 import type { ArenaEvent } from './timeline.ts'
 
 /**
@@ -64,11 +64,12 @@ export function observedFriction(events: readonly ArenaEvent[]): ArenaFriction[]
 }
 
 /**
- * Fixed sleeps followed by a look: waiting blind. A wait until change (#637) is not one — it returns
- * when Enso does something — so neither its cycles nor its minutes count here.
+ * Fixed sleeps followed by a look: waiting blind. A wait on the page — until change (#637) or
+ * attention (#648) — is not one: it returns when Enso does something, so neither its cycles nor its
+ * minutes count here.
  */
 function polling(actions: readonly ActionEvent[], runMs: number): ArenaFriction | undefined {
-  const isSleep = (action: ActionEvent): boolean => action.action === 'wait' && !isChangeWait(action.detail)
+  const isSleep = (action: ActionEvent): boolean => action.action === 'wait' && !isPageWait(action.detail)
   const cycles = actions.filter((action, index) => isSleep(action) && LOOKS.has(actions[index + 1]?.action ?? ''))
   if (cycles.length < POLLING_MIN_CYCLES) return undefined
   const waitedMs = actions.filter(isSleep).reduce((total, action) => total + action.durationMs, 0)
