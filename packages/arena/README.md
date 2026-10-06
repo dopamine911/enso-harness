@@ -100,7 +100,9 @@ bun run arena container start --agent anthropic/claude-sonnet-5-5 --scenario ite
   stored readable by its owner only. The volume is writable: a token an OAuth refresh rotates is
   kept for the next run, through the run home's link or the #639 reconcile.
 - **What runs is the image, not your checkout.** Run `container build` again after pulling changes.
-  The manifest's `ensoBuild` names the commit the image was built from.
+  The manifest's `ensoBuild` names the commit the image was built from. The image is built for
+  **your** uid and gid, because the runs directory is a bind mount and a container user of another
+  uid couldn't write to it on native Linux Docker. Build it as the user who runs it.
 - **Refused in a container:** `--home`, `--out`, `--chromium`, `--headed` (the container decides
   them) and `--manual`, whose `act` could not reach a recorder inside the container.
 - The image is Playwright's 1.63.0 image (Chromium at the version the arena drives), with bun 1.4.2,

@@ -38,9 +38,28 @@ const CONTAINER_AGENT_DIRECTORY = '/home/pwuser/.enso/pi-agent'
  */
 const CONTAINER_OWNED_FLAGS = ['--home', '--out', '--chromium', '--headed', '--manual'] as const
 
-/** The arguments to `docker` that build the image from the repository at `repoRoot`. */
-function containerBuildArgs(repoRoot: string, image: string = ARENA_IMAGE): string[] {
-  return ['build', '--file', join(repoRoot, 'packages/arena/container/Dockerfile'), '--tag', image, repoRoot]
+/**
+ * The arguments to `docker` that build the image from the repository at `repoRoot`, its user taking
+ * the building user's uid and gid (`owner`): the runs directory is a bind mount, which keeps host
+ * ownership on native Linux Docker, so the container's user must be the host's to write a run.
+ */
+export function containerBuildArgs(
+  repoRoot: string,
+  owner: { readonly uid: number; readonly gid: number },
+  image: string = ARENA_IMAGE,
+): string[] {
+  return [
+    'build',
+    '--file',
+    join(repoRoot, 'packages/arena/container/Dockerfile'),
+    '--build-arg',
+    `ARENA_UID=${owner.uid}`,
+    '--build-arg',
+    `ARENA_GID=${owner.gid}`,
+    '--tag',
+    image,
+    repoRoot,
+  ]
 }
 
 /** Why a `start` argument list cannot run in the container, or undefined when it can. */
@@ -217,7 +236,9 @@ export async function runContainerCommand(
   const [subcommand, ...rest] = argumentList
   switch (subcommand) {
     case 'build':
-      return docker(containerBuildArgs(context.repoRoot))
+      return docker(
+        containerBuildArgs(context.repoRoot, { uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000 }),
+      )
     case 'credential':
       return await credentialCommand(rest)
     case 'start':
