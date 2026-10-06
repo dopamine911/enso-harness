@@ -30,6 +30,9 @@
  *   bun run arena score <run directory>
  *       score a run (`arena/score.ts`): its logs read for problems, and whether the UI was the
  *       only way in. Writes `score.json` and `score.md`, prints the Markdown, exits 1 on FAIL.
+ *   bun run arena compare <run directory> <run directory>
+ *       two runs side by side (`arena/compare.ts`): outcome, UI checks, which problems each has, the
+ *       friction each shows. Reads only: each run is scored afresh, nothing on disk is rewritten.
  *
  * `start` exits 1 too when its run's score is FAIL, so a caller can gate on the run.
  *
@@ -49,6 +52,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { join, resolve } from 'node:path'
 import { ensoHome, findRepoRoot } from '@enso/core/paths'
 import { ARENA_THINKING_LEVELS, arenaAgentDriver, resolveArenaModel } from './agent.ts'
+import { compareRunDirectories } from './compare.ts'
 import { type ArenaEvidence, arenaEvidenceRowOf, foldArenaManifest } from './manifest.ts'
 import {
   type ArenaDriver,
@@ -358,8 +362,16 @@ switch (command) {
   case 'score':
     scoreRun(rest[0] ?? fail('score takes a run directory'))
     break
+  case 'compare':
+    process.stdout.write(
+      compareRunDirectories(
+        resolve(rest[0] ?? fail('compare takes two run directories')),
+        resolve(rest[1] ?? fail('compare takes two run directories')),
+      ),
+    )
+    break
   default:
     fail(
-      'usage: bun run arena start --agent PROVIDER/MODEL | start --manual | brief | act <json> | manifest <run directory> | score <run directory>',
+      'usage: bun run arena start --agent PROVIDER/MODEL | start --manual | brief | act <json> | manifest <run directory> | score <run directory> | compare <run directory> <run directory>',
     )
 }

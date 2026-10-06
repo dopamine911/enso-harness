@@ -14,6 +14,7 @@ bun run arena brief --review --run <run dir>   # the review and bug-filing promp
 bun run arena act '{"action":"read"}'   # one UI action on a --manual run
 bun run arena manifest <run dir>    # fold the manifest again; after a recorder that died, collect Enso's evidence too
 bun run arena score <run dir>       # score a run again: its logs read for problems, and whether the UI was used
+bun run arena compare <run dir> <run dir>   # two runs side by side; reads only, rewrites nothing
 ```
 
 `start` needs one of `--agent PROVIDER/MODEL` (a model the home is logged in to, through Enso's own
@@ -123,6 +124,33 @@ each thread's `cwd`. A live run's `snake.js` was only in the tree.
 
 The score doesn't judge whether the game is good, or whether a wish is a real gap. That is the
 findings report's job.
+
+### Observed friction (#611)
+
+`score.md` also lists **friction the timeline shows**, whatever the agent wrote about it. Each line
+cites the seconds it rests on, and none of it changes the verdict (`src/friction.ts`):
+
+| Pattern | Counted from | What it means |
+|---|---|---|
+| `polling` | 3 wait→read cycles | the agent waited on Enso and looked again; the line says how much of the run was spent waiting |
+| `approvals` | 3 taken "Yes / Allow / Approve …" clicks | the agent had to let Enso's agent go on, call by call |
+| `retry` | 1 action tried again within 3 actions of failing | a control that did not work the first time |
+| `backtracking` | 2 `back` / `reload` | the agent undid where it went |
+| `repeated-navigation` | the same `goto` 3 times | the agent kept returning to one place |
+
+The thresholds are constants in `src/friction.ts`. On the 2026-10-05 reference run, which built Snake
+in 6.1 minutes, the detector found 9 polling cycles (5.4 minutes of waiting) and 7 approval clicks.
+
+### Comparing runs
+
+`bun run arena compare <runA> <runB>` scores both runs afresh, so runs folded by different versions
+of the score are compared by the same rules. It prints:
+- the outcome, metrics and UI checks side by side;
+- each problem once, under "Only in A", "Only in B" or "In both" (thread ids read as `<thread>`, so the
+  same 404 in two runs is one problem);
+- the friction count per pattern.
+
+It writes nothing.
 
 ## The UI-only boundary (#584)
 
