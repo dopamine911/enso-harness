@@ -1550,6 +1550,9 @@ const chatComponents = {
             project={threadProject}
             open={startSessionOpen}
             onClose={(): void => stores.startSession.set(false)}
+            keepPrompt={(text: string): void =>
+              setDraft((current) => (current.trim().length > 0 ? `${current}\n\n${text}` : text))
+            }
             mode={permission.mode}
             modes={permission.available}
             configure={stores.connection.configure}

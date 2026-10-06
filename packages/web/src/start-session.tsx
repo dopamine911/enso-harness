@@ -41,8 +41,13 @@ import { PI_DEFAULT_SYSTEM_PROMPT, PromptLibraryFields, useSystemPromptChoice } 
 export interface StartSessionDialogProps {
   readonly threadId: string
   readonly open: boolean
-  /** Escape, the close button, or a Start that went through. The composer stays as it is. */
+  /** A Start that went through: the prompt was sent, and the dialog is done. */
   readonly onClose: () => void
+  /**
+   * The dialog dismissed — Escape, the close button, outside — with a prompt typed: the words go to
+   * the composer (#638), since nothing reopens this dialog for the thread.
+   */
+  readonly keepPrompt: (text: string) => void
   /** The thread's permission mode and the modes it offers — the composer's own store. */
   readonly mode: string | undefined
   readonly modes: readonly string[]
@@ -139,16 +144,22 @@ function ModelField({
   models,
   chosen,
   onChoose,
+  filter,
+  onFilter,
 }: {
   models: readonly HostCommandOption[]
   chosen: string | undefined
   onChoose: (option: HostCommandOption) => void
+  filter: string
+  onFilter: (filter: string) => void
 }): React.ReactNode {
   return (
     <Field>
-      <FieldLabel htmlFor="start-session-model">Model</FieldLabel>
-      <Command className="rounded-md border">
-        <CommandInput id="start-session-model" placeholder="filter models…" />
+      <FieldLabel>Model</FieldLabel>
+      {/* ⚠ cmdk sets the input's id itself, after ours: a `FieldLabel htmlFor` named nothing, and the
+          filter read as a bare `combobox`. cmdk's own label is the one it wires to the input. */}
+      <Command className="rounded-md border" label="Model">
+        <CommandInput placeholder="filter models…" value={filter} onValueChange={onFilter} />
         <CommandList className="max-h-48">
           <CommandEmpty>no model matches</CommandEmpty>
           {models.map((option) => (
@@ -315,6 +326,7 @@ export function StartSessionDialog(props: StartSessionDialogProps): React.ReactN
   const [thinking, setThinking] = useState<string | undefined>(undefined)
   const [mode, setMode] = useState<string | undefined>(undefined)
   const [text, setText] = useState('')
+  const [modelFilter, setModelFilter] = useState('')
   const [applying, setApplying] = useState(false)
   const [refusal, setRefusal] = useState<string | undefined>(undefined)
   const promptField = useRef<HTMLTextAreaElement | null>(null)
@@ -349,13 +361,35 @@ export function StartSessionDialog(props: StartSessionDialogProps): React.ReactN
     else setRefusal(refused)
   }
 
+  // Any close but a Start (#638): a typed prompt is the composer's now, not gone with the dialog.
+  const dismiss = (): void => {
+    if (text.trim().length > 0) props.keepPrompt(text)
+    setText('')
+    onClose()
+  }
+  // ⚠ Escape in the model filter is the filter's (#638): Radix closes the dialog from a capture
+  // listener on the document, so the input cannot stop it — prevented here, as the command
+  // palette's pages do. It clears the filter; Escape anywhere else closes. The filter is the
+  // dialog's one `cmdk-input` (cmdk overrides any id we give it).
+  const escapeFromFilter = (event: KeyboardEvent): void => {
+    if (!(event.target instanceof HTMLElement) || !event.target.matches('input[cmdk-input]')) return
+    event.preventDefault()
+    setModelFilter('')
+  }
+
   return (
-    <Dialog open={open} onOpenChange={(next: boolean): void => (next ? undefined : onClose())}>
-      <DialogContent className="sm:max-w-lg">
+    <Dialog open={open} onOpenChange={(next: boolean): void => (next ? undefined : dismiss())}>
+      <DialogContent className="sm:max-w-lg" onEscapeKeyDown={escapeFromFilter}>
         <SessionStatus catalogue={catalogue} project={props.project} />
         {catalogue.kind === 'loaded' ? (
           <FieldGroup>
-            <ModelField models={catalogue.models} chosen={model} onChoose={chooseModel} />
+            <ModelField
+              models={catalogue.models}
+              chosen={model}
+              onChoose={chooseModel}
+              filter={modelFilter}
+              onFilter={setModelFilter}
+            />
             <div className="grid grid-cols-2 gap-3">
               <ChoiceField field={EFFORT_FIELD} value={thinking} choices={levels} onChoose={setThinking} />
               <ChoiceField field={MODE_FIELD} value={mode} choices={props.modes} onChoose={setMode} />
@@ -378,7 +412,7 @@ export function StartSessionDialog(props: StartSessionDialogProps): React.ReactN
           </FieldGroup>
         ) : null}
         <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>
+          <Button variant="ghost" onClick={dismiss}>
             Close
           </Button>
           <Button disabled={!ready} onClick={(): void => void start()}>

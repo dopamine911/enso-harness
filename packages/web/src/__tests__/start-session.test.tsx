@@ -162,6 +162,8 @@ interface Mounted {
   readonly configured: EnsoSessionConfiguration[]
   readonly sent: string[]
   readonly closes: number[]
+  /** Prompts the dialog handed to the composer when dismissed (#638). */
+  readonly kept: string[]
   readonly dialog: () => HTMLElement
   readonly unmount: () => Promise<void>
 }
@@ -174,6 +176,7 @@ async function mountStart(
   const configured: EnsoSessionConfiguration[] = []
   const sent: string[] = []
   const closes: number[] = []
+  const kept: string[] = []
   const container = document.createElement('div')
   document.body.appendChild(container)
   const root: Root = createRoot(container)
@@ -183,6 +186,7 @@ async function mountStart(
         threadId="thread-1"
         open={true}
         onClose={(): void => void closes.push(1)}
+        keepPrompt={(text: string): void => void kept.push(text)}
         mode="default"
         modes={['default', 'plan']}
         configure={(configuration: EnsoSessionConfiguration): Promise<ConfigureOutcome> => {
@@ -206,6 +210,7 @@ async function mountStart(
     configured,
     sent,
     closes,
+    kept,
     dialog,
     unmount: async (): Promise<void> => {
       if (!leftOpen.delete(mounted)) return
@@ -244,6 +249,83 @@ async function chooseTypeAndStart(mounted: Mounted, modelId: string, prompt: str
     await tick()
   })
 }
+
+/** Set a field's value the way typing does, so React's controlled value sees it. */
+async function typeInto(field: HTMLInputElement | HTMLTextAreaElement, text: string): Promise<void> {
+  const prototype = field instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype
+  await flush(async () => {
+    Object.getOwnPropertyDescriptor(prototype, 'value')?.set?.call(field, text)
+    field.dispatchEvent(new Event('input', { bubbles: true }))
+    await tick()
+  })
+}
+
+async function pressEscape(target: HTMLElement): Promise<void> {
+  await flush(async () => {
+    target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    await tick()
+  })
+}
+
+// ⚠ #638, reproduced live: Escape in the model filter closed the whole dialog — the always-open
+// list had nothing to close, so Radix's dialog took it — and the typed prompt went with it.
+test('⚠ Escape in the model filter clears the filter and keeps the dialog; Escape elsewhere closes it, the prompt kept (#638)', async () => {
+  const mounted = await mountStart({ outcome: 'told' })
+  const filter = await eventually(() => {
+    const found = mounted.dialog().querySelector<HTMLInputElement>('input[cmdk-input]')
+    if (found === null) throw new Error('expected the model filter')
+    return found
+  })
+  // The filter is named: cmdk's label, wired to the input it ids itself.
+  const labelId = filter.getAttribute('aria-labelledby')
+  expect(labelId === null ? undefined : document.getElementById(labelId)?.textContent).toBe('Model')
+  const prompt = mounted.dialog().querySelector<HTMLTextAreaElement>('#start-session-prompt')
+  if (prompt === null) throw new Error('expected the prompt field')
+  await typeInto(prompt, 'a prompt I typed')
+  await typeInto(filter, 'plain')
+  expect(mounted.dialog().querySelectorAll('[cmdk-item]')).toHaveLength(1)
+
+  await pressEscape(filter)
+  expect(mounted.closes).toEqual([])
+  expect(filter.value).toBe('')
+  expect(mounted.dialog().querySelectorAll('[cmdk-item]').length).toBeGreaterThan(1)
+  expect(prompt.value).toBe('a prompt I typed')
+
+  // Escape from the prompt is a close — and the words are the composer's, not lost.
+  await pressEscape(prompt)
+  expect(mounted.closes).toEqual([1])
+  expect(mounted.kept).toEqual(['a prompt I typed'])
+  await mounted.unmount()
+})
+
+test('Close with a prompt typed hands it to the composer; with none, or after a Start, nothing is handed (#638)', async () => {
+  const closing = await mountStart({ outcome: 'told' })
+  const closeButton = (): HTMLButtonElement | undefined =>
+    [...closing.dialog().querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Close')
+  await eventually(() => expect(closing.dialog().querySelector('#start-session-prompt')).not.toBeNull())
+  await flush(async () => {
+    closeButton()?.click()
+    await tick()
+  })
+  expect(closing.closes).toEqual([1])
+  expect(closing.kept).toEqual([])
+  const prompt = closing.dialog().querySelector<HTMLTextAreaElement>('#start-session-prompt')
+  if (prompt === null) throw new Error('expected the prompt field')
+  await typeInto(prompt, 'keep me')
+  await flush(async () => {
+    closeButton()?.click()
+    await tick()
+  })
+  expect(closing.kept).toEqual(['keep me'])
+  await closing.unmount()
+
+  const starting = await mountStart({ outcome: 'told' })
+  await chooseTypeAndStart(starting, 'fake/plain', 'sent, not kept')
+  await eventually(() => expect(starting.closes).toEqual([1]))
+  expect(starting.sent).toEqual(['sent, not kept'])
+  expect(starting.kept).toEqual([])
+  await starting.unmount()
+})
 
 test('Start sends the four settings in one call — the effort the CHOSEN model offers — then the prompt, then closes', async () => {
   const mounted = await mountStart({ outcome: 'told' })
