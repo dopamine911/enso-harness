@@ -990,6 +990,13 @@ interface TranscriptSelection {
    * message is never hidden — it is the one a run is about to stream into.
    */
   readonly hiddenMessageIds: ReadonlySet<string>
+  /**
+   * Each user prompt's name for its fork and restore (#651): its number among the prompts, and its
+   * words as the rail shortens them — `prompt 3: “continue”`. Numbered (PR #654 review): two prompts
+   * with the same words ("continue", "ok") would share a name again. Built once per selection, not
+   * per row per chunk.
+   */
+  readonly promptNames: ReadonlyMap<string, string>
 }
 
 const TranscriptSelectionContext = createContext<TranscriptSelection>({
@@ -997,20 +1004,26 @@ const TranscriptSelectionContext = createContext<TranscriptSelection>({
   openRunMessageIds: new Set(),
   continuedMessageIds: new Set(),
   hiddenMessageIds: new Set(),
+  promptNames: new Map(),
 })
 
 /** The thread's lines by where they read (#382), grouped once in `ChatLayout` for every row. */
 const PlacedLinesContext = createContext<PlacedLines>({ head: [], after: new Map(), tail: [] })
 
-/** Which messages a selection hides, and which continue the one drawn before them — see {@link TranscriptSelection}. */
+/** Which messages a selection hides, which continue the one drawn before them, and each prompt's name — see {@link TranscriptSelection}. */
 function drawnMessages(
   messages: readonly UIMessage[],
   partsByMessageId: ReadonlyMap<string, KeyedPart[]>,
-): Pick<TranscriptSelection, 'continuedMessageIds' | 'hiddenMessageIds'> {
+): Pick<TranscriptSelection, 'continuedMessageIds' | 'hiddenMessageIds' | 'promptNames'> {
   const continuedMessageIds = new Set<string>()
   const hiddenMessageIds = new Set<string>()
+  const promptNames = new Map<string, string>()
   let drawnRole: UIMessage['role'] | undefined
   messages.forEach((message, position) => {
+    if (message.role === 'user') {
+      const title = titleFromMessage(message)
+      promptNames.set(message.id, `prompt ${promptNames.size + 1}${title === undefined ? '' : `: “${title}”`}`)
+    }
     const superseded = position < messages.length - 1
     const empty = (partsByMessageId.get(message.id)?.length ?? 0) === 0 && refusalOfMessage(message) === undefined
     if (superseded && empty && message.role === 'assistant') {
@@ -1020,7 +1033,7 @@ function drawnMessages(
     if (drawnRole === message.role) continuedMessageIds.add(message.id)
     drawnRole = message.role
   })
-  return { continuedMessageIds, hiddenMessageIds }
+  return { continuedMessageIds, hiddenMessageIds, promptNames }
 }
 
 /**
@@ -1043,8 +1056,8 @@ interface MessageBodyProps {
   readonly refusal: EnsoProviderRefusal | undefined
   /** Whether the speaker line is drawn — not when the message before it is the same speaker's. */
   readonly speaker: boolean
-  /** A user prompt's words, shortened as the rail shortens them: named by its fork and restore (#651). */
-  readonly promptTitle: string | undefined
+  /** A user prompt's name for its fork and restore (#651): `prompt 2: “…”` (`TranscriptSelection.promptNames`). */
+  readonly promptName: string | undefined
 }
 
 /**
@@ -1094,7 +1107,7 @@ const MessageBody = memo(function MessageBody({
   runOpen,
   refusal,
   speaker,
-  promptTitle,
+  promptName,
 }: MessageBodyProps): React.ReactNode {
   return (
     <Message
@@ -1123,7 +1136,7 @@ const MessageBody = memo(function MessageBody({
 				    empty bubble where the refusal had been said live. */}
         {refusal === undefined ? null : <RefusedAttemptLine refusal={refusal} />}
       </MessageContent>
-      {role === 'user' ? <PromptActions messageId={messageId} promptTitle={promptTitle} /> : null}
+      {role === 'user' ? <PromptActions messageId={messageId} promptName={promptName} /> : null}
     </Message>
   )
 }, sameRenderedMessage)
@@ -1137,12 +1150,12 @@ const MessageBody = memo(function MessageBody({
  */
 function PromptActions({
   messageId,
-  promptTitle,
+  promptName,
 }: {
   readonly messageId: string
-  readonly promptTitle: string | undefined
+  readonly promptName: string | undefined
 }): React.ReactNode {
-  const quoted = promptTitle === undefined ? '' : `: “${promptTitle}”`
+  const named = promptName === undefined ? '' : `, ${promptName}`
   const forkAt = useContext(ForkContext)
   const offeredRestore = useContext(RestoreContext)
   // Restore only where there are files to restore (PR #561 review): a thread on a tree of its own.
@@ -1159,7 +1172,7 @@ function PromptActions({
           variant="ghost"
           className="h-7 gap-1 px-2 text-xs text-muted-foreground"
           title="a new thread holding everything before this prompt, with its words ready to send again"
-          aria-label={`fork from here${quoted}`}
+          aria-label={`fork from here${named}`}
           onClick={(): void => forkAt(messageId)}
         >
           <GitForkIcon aria-hidden="true" />
@@ -1174,7 +1187,7 @@ function PromptActions({
             variant="ghost"
             className="h-7 gap-1 px-2 text-xs text-muted-foreground"
             title="put the thread's files back as they were at this prompt"
-            aria-label={`Restore files to here${quoted}`}
+            aria-label={`Restore files to here${named}`}
             onClick={(): void => setConfirming(true)}
           >
             <HistoryIcon aria-hidden="true" />
@@ -1185,9 +1198,9 @@ function PromptActions({
               <DialogHeader>
                 <DialogTitle>Restore files to here?</DialogTitle>
                 <DialogDescription>
-                  The thread's files go back to how they were at the prompt
-                  {promptTitle === undefined ? '' : ` “${promptTitle}”`}. The conversation is not changed, and the
-                  current files are kept as a safety snapshot: "Undo last restore" on the notice puts them back.
+                  The thread's files go back to how they were at {promptName ?? 'this prompt'}. The conversation is not
+                  changed, and the current files are kept as a safety snapshot: "Undo last restore" on the notice puts
+                  them back.
                 </DialogDescription>
               </DialogHeader>
               <DialogFooter>
@@ -1228,7 +1241,7 @@ function sameRefusal(before: EnsoProviderRefusal | undefined, after: EnsoProvide
  */
 function sameRenderedMessage(previous: MessageBodyProps, next: MessageBodyProps): boolean {
   if (previous.runOpen !== next.runOpen || previous.speaker !== next.speaker) return false
-  if (previous.promptTitle !== next.promptTitle) return false
+  if (previous.promptName !== next.promptName) return false
   if (!sameRefusal(previous.refusal, next.refusal)) return false
   if (previous.parts.length !== next.parts.length) return false
   return previous.parts.every((part, index) => {
@@ -1754,7 +1767,7 @@ const chatComponents = {
      * once in `ChatLayout`; a hidden message (a refused attempt with nothing drawn) keeps them.
      */
     message: function ChatMessageRow({ message }: MessageProps<ThreadChatOptions>): React.ReactNode {
-      const { partsByMessageId, openRunMessageIds, continuedMessageIds, hiddenMessageIds } =
+      const { partsByMessageId, openRunMessageIds, continuedMessageIds, hiddenMessageIds, promptNames } =
         useContext(TranscriptSelectionContext)
       const lines = useContext(PlacedLinesContext).after.get(message.id)
       return (
@@ -1767,7 +1780,7 @@ const chatComponents = {
               runOpen={openRunMessageIds.has(message.id)}
               refusal={refusalOfMessage(message)}
               speaker={!continuedMessageIds.has(message.id)}
-              promptTitle={message.role === 'user' ? titleFromMessage(message) : undefined}
+              promptName={promptNames.get(message.id)}
             />
           )}
           {lines === undefined ? null : <NotificationLines lines={lines} />}

@@ -563,12 +563,15 @@ test('a prompt offers "Restore files to here" only while the snapshot says the t
 })
 
 // ⚠ #651, from an arena run: three "Restore files to here" buttons shared one accessible name, and
-// the agent had to guess which prompt by index; the confirmation named none.
-test('⚠ each prompt’s restore and fork are named for their prompt, and the restore confirmation quotes it (#651)', async () => {
+// the agent had to guess which prompt by index; the confirmation named none. Numbered (PR #654
+// review): two prompts with the same words would otherwise share a name again.
+test('⚠ each prompt’s restore and fork are named for their prompt, uniquely, and the restore confirmation names it (#651)', async () => {
   const messages: UIMessage[] = [
     { id: 'e-u1', role: 'user', parts: [{ type: 'text', content: 'Create a minimal to-do app' }] },
     { id: 'e-a1', role: 'assistant', parts: [{ type: 'text', content: 'Done.' }] },
-    { id: 'e-u2', role: 'user', parts: [{ type: 'text', content: 'Add priorities to it' }] },
+    { id: 'e-u2', role: 'user', parts: [{ type: 'text', content: 'continue' }] },
+    { id: 'e-a2', role: 'assistant', parts: [{ type: 'text', content: 'Done.' }] },
+    { id: 'e-u3', role: 'user', parts: [{ type: 'text', content: 'continue' }] },
   ]
   const pane = await mountPane({
     onForked: () => undefined,
@@ -588,25 +591,27 @@ test('⚠ each prompt’s restore and fork are named for their prompt, and the r
       .map((button) => button.getAttribute('aria-label'))
   await eventually(() =>
     expect(named('Restore files to here')).toEqual([
-      'Restore files to here: “Create a minimal to-do app”',
-      'Restore files to here: “Add priorities to it”',
+      'Restore files to here, prompt 1: “Create a minimal to-do app”',
+      'Restore files to here, prompt 2: “continue”',
+      'Restore files to here, prompt 3: “continue”',
     ]),
   )
   expect(named('fork from here')).toEqual([
-    'fork from here: “Create a minimal to-do app”',
-    'fork from here: “Add priorities to it”',
+    'fork from here, prompt 1: “Create a minimal to-do app”',
+    'fork from here, prompt 2: “continue”',
+    'fork from here, prompt 3: “continue”',
   ])
 
-  const second = [...pane.container.querySelectorAll('button')].find(
-    (button) => button.getAttribute('aria-label') === 'Restore files to here: “Add priorities to it”',
+  const third = [...pane.container.querySelectorAll('button')].find(
+    (button) => button.getAttribute('aria-label') === 'Restore files to here, prompt 3: “continue”',
   )
   await flush(async () => {
-    second?.click()
+    third?.click()
     await tick()
   })
   await eventually(() =>
     expect(document.querySelector('[role="dialog"]')?.textContent).toContain(
-      'go back to how they were at the prompt “Add priorities to it”',
+      'go back to how they were at prompt 3: “continue”.',
     ),
   )
   await pane.unmount()
