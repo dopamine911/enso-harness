@@ -530,8 +530,9 @@ counted by the debug pane, rendered by nothing.
 *both* views (`custom-event-router.ts`): `permission-mode.tsx` (the composer's `<select>`, which says
 `unknown` until a real value has arrived) and `mode-lines.ts` (one transcript line per distinct value).
 **Changing the mode is a control route**: `POST …/mode` with `EnsoPermissionModeChange`
-(`follow-connection.ts#changeMode`) → `changeThreadMode` (`server/follow.ts`: 409 while busy, 422 for
-a mode the thread does not offer) → `ThreadRuntime.setPermissionMode` → the host runs `/<mode>` as a
+(`follow-connection.ts#changeMode`) → `changeThreadMode` (`server/follow.ts`: during a run it applies from
+the run's next tool call (#618); 409 when a restore or a delete holds the thread, 422 for a mode the
+thread does not offer) → `ThreadRuntime.setPermissionMode` → the host runs `/<mode>` as a
 prompt. The click moves no store.
 
 **Print runs have no modes.** `scripts/print-harness.ts#buildPrintManifest` drops the engine from the

@@ -568,7 +568,7 @@ export async function changeThreadMode(
 ): Promise<ModeChangeOutcome> {
   const { threads } = deps
   const held = threads.peek(threadId)
-  if (held?.busy === true) return changeModeWhileHeld(threadId, held.hosted.runtime, change)
+  if (held?.busy === true) return changeModeWhileHeld(held.hosted.runtime, change)
   const lease = await controlLease(threads, threadId, 'change the mode')
   if ('reason' in lease) return lease
   const notOffered = modeNotOffered(lease.runtime, change)
@@ -601,9 +601,9 @@ function modeNotOffered(runtime: ThreadRuntime, change: EnsoPermissionModeChange
 /**
  * A mode change on a thread something holds (#618): told to the runtime directly — the holder keeps
  * the lease — and answered by what the runtime says, so a refusal is the 409 rather than a feed line.
+ * The host's reason is the body verbatim: each already names the thread and what holds it.
  */
 async function changeModeWhileHeld(
-  threadId: string,
   runtime: ThreadRuntime,
   change: EnsoPermissionModeChange,
 ): Promise<ModeChangeOutcome> {
@@ -612,7 +612,7 @@ async function changeModeWhileHeld(
   const answered = Promise.withResolvers<ModeChangeOutcome>()
   runtime.setPermissionMode(change.mode, {
     onAccepted: () => answered.resolve({ status: 204 }),
-    onRejected: (reason: string) => answered.resolve({ status: 409, reason: `thread ${threadId}: ${reason}` }),
+    onRejected: (reason: string) => answered.resolve({ status: 409, reason }),
   })
   return answered.promise
 }

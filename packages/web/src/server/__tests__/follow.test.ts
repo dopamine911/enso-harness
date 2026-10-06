@@ -570,7 +570,8 @@ test('⚠ a mode change during a run is told to the runtime at once (204), and t
 
 test('a mode change the runtime refuses while the thread is held is the 409, with the runtime’s reason', async () => {
   const fake = fakeHost(['mode'], {
-    setPermissionMode: (_mode: string, outcome: PromptOutcome) => outcome.onRejected('held for a reason'),
+    setPermissionMode: (_mode: string, outcome: PromptOutcome) =>
+      outcome.onRejected('thread t1 is restoring its files; prompt again once that is done'),
   })
   const url = await startWith(fake)
   await prompt(url, 't1', 'hello')
@@ -579,7 +580,11 @@ test('a mode change the runtime refuses while the thread is held is the 409, wit
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ mode: 'plan' }),
   })
-  expect([refused.status, await refused.text()]).toEqual([409, 'thread t1: held for a reason'])
+  // The host's reason names the thread and what holds it: the body is that, not a second prefix.
+  expect([refused.status, await refused.text()]).toEqual([
+    409,
+    'thread t1 is restoring its files; prompt again once that is done',
+  ])
   expect(await threadSummary(url, 't1')).toMatchObject({ busy: true })
   fake.emit(SETTLED)
 })
