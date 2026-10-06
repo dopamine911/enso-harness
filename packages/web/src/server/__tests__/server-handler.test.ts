@@ -1,6 +1,15 @@
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -1486,6 +1495,62 @@ test('⚠ a cross-site page cannot prompt, an opaque origin cannot escalate, and
   // resolves to 127.0.0.1 still is not loopback.
   const rebound = await fetch(`${url}/api/about`, { headers: { Host: 'attacker.example' } })
   expect(rebound.status).toBe(403)
+})
+
+// ⚠ #619: a thread's built page is agent-written, and the control plane trusts a loopback origin —
+// so a page served as Enso's own could switch the thread to `bypassPermissions`. The preview carries
+// a CSP sandbox WITHOUT `allow-same-origin`: the browser gives it an opaque origin, its requests say
+// `Origin: null`, and that is refused. This pins both halves: the header the page is served with,
+// and the refusal of what the page can send. And it reads the tree and nothing out of it.
+test('⚠ a preview serves the tree under an opaque-origin sandbox, the page cannot reach the control plane, and nothing outside the tree is served (#619)', async () => {
+  const outside = mkdtempSync(join(tmpdir(), 'enso-preview-outside-'))
+  writeFileSync(join(outside, 'secret.txt'), 'not the tree')
+  const tree = join(outside, 'tree')
+  mkdirSync(join(tree, 'assets'), { recursive: true })
+  writeFileSync(join(tree, 'index.html'), '<!doctype html><script src="game.js"></script>')
+  writeFileSync(join(tree, 'game.js'), 'console.log("snake")')
+  writeFileSync(join(tree, 'assets', 'about.html'), '<p>about</p>')
+  symlinkSync(join(outside, 'secret.txt'), join(tree, 'escape.txt'))
+  const { url, built } = await startWith(
+    settlesAtOnce,
+    { built: { transcript: STORED_BRANCH, modified: new Date(0), firstMessage: 'snake', cwd: tree } },
+    (host) => host,
+    { launch: tree },
+  )
+
+  const listing = await fetch(`${url}/api/threads/built/tree`)
+  expect(await listing.json()).toEqual({
+    threadId: 'built',
+    path: tree,
+    pages: ['index.html', 'assets/about.html'],
+    truncated: false,
+  })
+
+  for (const [path, type] of [
+    ['', 'text/html; charset=utf-8'],
+    ['game.js', 'text/javascript; charset=utf-8'],
+    ['assets/about.html', 'text/html; charset=utf-8'],
+  ] as const) {
+    const served = await fetch(`${url}/preview/threads/built/${path}`)
+    expect([served.status, served.headers.get('content-type')]).toEqual([200, type])
+    const policy = served.headers.get('content-security-policy') ?? ''
+    expect(policy.split(' ')).toContain('sandbox')
+    expect(policy).not.toContain('allow-same-origin')
+    expect(served.headers.get('x-content-type-options')).toBe('nosniff')
+  }
+  for (const escape of ['..%2Fsecret.txt', '../secret.txt', 'escape.txt', 'assets/..%2F..%2Fsecret.txt', 'nope.html']) {
+    expect((await fetch(`${url}/preview/threads/built/${escape}`)).status).toBe(404)
+  }
+
+  // What the sandboxed page sends to the server: `Origin: null`. The escalation is refused, and no
+  // session was built on the way (the mode change acquires — a build would be proof it went through).
+  const fromThePage = await fetch(`${url}/api/threads/built/mode`, {
+    method: 'POST',
+    headers: { Origin: 'null', 'Content-Type': 'text/plain' },
+    body: JSON.stringify({ mode: 'acceptEdits' }),
+  })
+  expect(fromThePage.status).toBe(403)
+  expect(built.length).toBe(0)
 })
 
 test('the dev page and the header-less CLIs are unaffected', async () => {

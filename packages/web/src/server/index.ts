@@ -92,6 +92,7 @@ import { createThreadEvalRoute } from './thread-eval-route.ts'
 import { createThreadChangesRoute, createThreadGitRoute } from './thread-git-route.ts'
 import { createThreadSecurityReads, replayThresholdsOf } from './thread-incidents-route.ts'
 import { createThreadManifestRoute } from './thread-manifest-route.ts'
+import { createPreviewRoute, createThreadPagesRoute, PREVIEW_CSP } from './thread-preview-route.ts'
 import { readThreadMount, type ThreadReadDeps } from './thread-read.ts'
 import { createThreadRegistry, inspectThread, type ThreadView } from './thread-registry.ts'
 import { createThreadStatsRoute } from './thread-stats-route.ts'
@@ -133,6 +134,14 @@ const THREAD_EVAL_ROUTE = threadRoute('eval')
 const THREAD_GIT_ROUTE = threadRoute('git')
 /** `GET /api/threads/<threadId>/changes` — every file that differs from the last-push baseline, with its patch (#452). */
 const THREAD_CHANGES_ROUTE = threadRoute('changes')
+/** `GET /api/threads/<threadId>/tree` — where the thread works, and the HTML pages a preview can open (#619). */
+const THREAD_PAGES_ROUTE = threadRoute('tree')
+/**
+ * `GET /preview/threads/<threadId>/<path>` — one file of the thread's tree, read-only, under a CSP
+ * sandbox that gives it an opaque origin (#619, `thread-preview-route.ts`). Outside `/api/`: it is
+ * the thread's work, not the control plane, and a query string is ignored.
+ */
+const PREVIEW_ROUTE = /^\/preview\/threads\/([^/?#]+)\/([^?#]*)(?:\?[^#]*)?$/
 /** `GET /api/threads/<threadId>/judge-cases` — the calls the command judge would be asked about, redacted (#469). */
 const THREAD_JUDGE_CASES_ROUTE = threadRoute('judge-cases')
 /** The wire (#112): `POST …/prompt`, `GET …/follow`, `POST …/dialog`, `POST …/abort` (#116). See `follow.ts`. */
@@ -986,6 +995,9 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     ...gitDeps,
     readChanges: (repository) => readGitChanges(runGit, repository),
   })
+  // What the thread built (#619): where it works and its pages, and one file of it, sandboxed.
+  const threadPages = createThreadPagesRoute(gitDeps)
+  const previewFile = createPreviewRoute(gitDeps)
 
   /**
    * A thread analysis — stats (#45), context (#361), manifest (#435), git (#453), changes (#452) — or 404 for a thread the
@@ -1016,6 +1028,33 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   const respondWithThreadGit = analysisResponder(threadGit)
   const respondWithThreadChanges = analysisResponder(threadChanges)
   const respondWithThreadJudgeCases = analysisResponder((threadId: string) => securityReads.judgeCases(threadId))
+  const respondWithThreadPages = analysisResponder(threadPages)
+  /** One file of the thread's tree, never with Enso's origin; a miss is the 404 every outside-the-tree path gets. */
+  async function respondWithPreview(
+    threadId: string,
+    _request: IncomingMessage,
+    response: ServerResponse,
+    match: RegExpExecArray,
+  ): Promise<void> {
+    const file = await previewFile(threadId, match[2] ?? '')
+    const common = {
+      'X-Content-Type-Options': 'nosniff',
+      'Referrer-Policy': 'no-referrer',
+      'Cache-Control': 'no-store',
+    }
+    if (file === undefined) {
+      response.writeHead(404, { ...common, 'Content-Type': 'text/plain' })
+      response.end(`no such file in thread ${threadId}'s tree`)
+      return
+    }
+    response.writeHead(200, {
+      ...common,
+      'Content-Type': file.contentType,
+      'Content-Length': file.body.length,
+      'Content-Security-Policy': PREVIEW_CSP,
+    })
+    response.end(file.body)
+  }
   /** The incident history under the query's thresholds; a query that names no threshold well is the 400 that says why. */
   function respondWithThreadIncidents(
     threadId: string,
@@ -1116,10 +1155,12 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     [THREAD_CHANGES_ROUTE, respondWithThreadChanges],
     [THREAD_JUDGE_CASES_ROUTE, respondWithThreadJudgeCases],
     [THREAD_DELETE_PREVIEW_ROUTE, respondWithDeletePreview],
+    [THREAD_PAGES_ROUTE, respondWithThreadPages],
   ]
   const THREAD_ROUTES: readonly ThreadRoute[] = [
     ...idOnlyReads.map(([route, respond]): ThreadRoute => ({ method: 'GET', route, respond: idOnly(respond) })),
     { method: 'GET', route: THREAD_CONTEXT_REQUEST_ROUTE, respond: respondWithContextRequest },
+    { method: 'GET', route: PREVIEW_ROUTE, respond: respondWithPreview },
     { method: 'GET', route: THREAD_SYSTEM_PROMPT_ROUTE, respond: respondWithSystemPromptPreview },
     { method: 'GET', route: THREAD_PROJECT_PROMPTS_ROUTE, respond: idOnly(respondWithProjectPrompts) },
     { method: 'GET', route: THREAD_PROJECT_PROMPT_ROUTE, respond: respondWithProjectPrompt },

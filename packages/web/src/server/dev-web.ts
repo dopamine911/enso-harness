@@ -68,6 +68,9 @@ try {
       '/': homepage,
       '/debug': debugPage,
       '/api/*': proxyToApiServer,
+      // A thread's built pages (#619), served by the enso server under its CSP sandbox; the hop keeps
+      // the server's headers, so the page's opaque origin is the server's to give.
+      '/preview/*': proxyToApiServer,
       '/fonts/*': fontFiles,
       // Everything else falls through to the public assets (favicon, logos). Bun's
       // directory route rejects non-canonical paths and clamps symlink escapes, and a
