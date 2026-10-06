@@ -1,5 +1,4 @@
 import { expect, test } from 'bun:test'
-import { spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -7,6 +6,7 @@ import { collectEnsoEvidence } from '../evidence.ts'
 import { foldArenaManifest } from '../manifest.ts'
 import { ensoBuildOf, sampleWorkspaces, threadHistoriesIn, turnAt } from '../run-state.ts'
 import { type ArenaClock, openTimeline, pagePlace, readTimeline } from '../timeline.ts'
+import { gitIn } from './fixture-git.ts'
 
 /**
  * The run's state beside the UI's (#608): the build Enso ran from, the work at each sample, and the
@@ -15,13 +15,6 @@ import { type ArenaClock, openTimeline, pagePlace, readTimeline } from '../timel
  */
 
 const THREAD = '4465dc39-7bd9-4cd3-83fd-d20af4fa2aa6'
-
-/** git in a fixture repository; the identity a commit needs comes as flags, not from the machine. */
-function gitIn(directory: string, ...args: string[]): void {
-  spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...args], {
-    cwd: directory,
-  })
-}
 
 test('⚠ the build record says when the checkout was dirty, and two dirty trees at one commit differ by their hash (#608 A12)', () => {
   const repo = mkdtempSync(join(tmpdir(), 'arena-build-'))
