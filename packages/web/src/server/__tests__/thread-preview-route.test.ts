@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { EnsoThreadPages } from '@enso/core'
-import { createThreadPagesRoute } from '../thread-preview-route.ts'
+import { createPreviewRoute, createThreadPagesRoute } from '../thread-preview-route.ts'
 
 /** The listing over a stored thread whose tree is `tree`, served. */
 const listingOf = (tree: string): Promise<EnsoThreadPages | undefined> =>
@@ -49,4 +49,19 @@ test('a thread with no served directory has no listing', async () => {
     servesDirectory: () => false,
   })('t1')
   expect(listing).toBeUndefined()
+})
+
+// PR #634 review: the cap is the one bound on what a preview reads into memory per request.
+test('a preview serves a file of 10 MiB and refuses one a byte larger (#619)', async () => {
+  const tree = mkdtempSync(join(tmpdir(), 'enso-preview-cap-'))
+  const limit = 10 * 1024 * 1024
+  writeFileSync(join(tree, 'at-limit.bin'), Buffer.alloc(limit))
+  writeFileSync(join(tree, 'over-limit.bin'), Buffer.alloc(limit + 1))
+  const preview = createPreviewRoute({
+    threads: { peek: () => undefined },
+    host: { storedThreadDirectory: () => Promise.resolve(tree) },
+    servesDirectory: () => true,
+  })
+  expect((await preview('t1', 'at-limit.bin'))?.body.length).toBe(limit)
+  expect(await preview('t1', 'over-limit.bin')).toBeUndefined()
 })
