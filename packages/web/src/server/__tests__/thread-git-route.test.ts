@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test'
 import type { EnsoGitFileChange, EnsoGitState } from '@enso/core'
+import type { ThreadTreePlace } from '../../host/agent-host.ts'
 import { createThreadChangesRoute, createThreadGitRoute } from '../thread-git-route.ts'
 import type { ThreadView } from '../thread-registry.ts'
 import { createFakeAgentHost, createFakeHostedThread } from './fake-hosted-thread.ts'
@@ -70,11 +71,22 @@ const CHANGE: EnsoGitFileChange = {
   omitted: null,
 }
 
-function changesRoute(readChanges: () => Promise<{ files: EnsoGitFileChange[]; truncated: boolean }>): {
+/** The stored thread's tree, by default none: a thread in its checkout. */
+interface ChangesRouteOptions {
+  readonly tree?: ThreadTreePlace
+  readonly readCopyChanges?: (copy: ThreadTreePlace) => Promise<{ files: EnsoGitFileChange[]; truncated: boolean }>
+}
+
+function changesRoute(
+  readChanges: () => Promise<{ files: EnsoGitFileChange[]; truncated: boolean }>,
+  options: ChangesRouteOptions = {},
+): {
   read: ReturnType<typeof createThreadChangesRoute>
   diffed: string[]
+  copied: string[]
 } {
   const diffed: string[] = []
+  const copied: string[] = []
   const live = createFakeHostedThread({ inspect: { cwd: '/work/live' } })
   const read = createThreadChangesRoute({
     threads: {
@@ -89,18 +101,24 @@ function changesRoute(readChanges: () => Promise<{ files: EnsoGitFileChange[]; t
       diffed.push(repository.root)
       return readChanges()
     },
+    threadTree: (threadId: string) => Promise.resolve(threadId === 'stored' ? options.tree : undefined),
+    readCopyChanges: (copy) => {
+      copied.push(copy.store)
+      return options.readCopyChanges?.(copy) ?? Promise.reject(new Error('no copy to read'))
+    },
   })
-  return { read, diffed }
+  return { read, diffed, copied }
 }
 
 test("a repository's changes come with its state; outside one there is nothing to diff, and git is not asked", async () => {
-  const { read, diffed } = changesRoute(() => Promise.resolve({ files: [CHANGE], truncated: false }))
+  const { read, diffed, copied } = changesRoute(() => Promise.resolve({ files: [CHANGE], truncated: false }))
   expect(await read('live')).toEqual({
     threadId: 'live',
     cwd: '/work/live',
     git: REPOSITORY,
     files: [CHANGE],
     truncated: false,
+    copy: null,
   })
   expect(await read('stored')).toEqual({
     threadId: 'stored',
@@ -108,9 +126,11 @@ test("a repository's changes come with its state; outside one there is nothing t
     git: { kind: 'not-a-repository' },
     files: [],
     truncated: false,
+    copy: null,
   })
   expect(await read('nowhere')).toBeUndefined()
   expect(diffed).toEqual(['/work/live'])
+  expect(copied).toEqual([])
 })
 
 test('⚠ a diff git cannot make reads as git unavailable with its reason, never as nothing changed', async () => {
@@ -121,5 +141,61 @@ test('⚠ a diff git cannot make reads as git unavailable with its reason, never
     git: { kind: 'unavailable', reason: 'fatal: bad object f00d' },
     files: [],
     truncated: false,
+    copy: null,
   })
+})
+
+const COPY_TREE: ThreadTreePlace = {
+  record: { kind: 'copy', project: '/work/shop-api', path: '/work/stored', branch: null, base: 'a'.repeat(40) },
+  store: '/enso/snapshots/stored',
+}
+
+const ADDED: EnsoGitFileChange = { ...CHANGE, path: 'src/new.ts', status: 'added', added: 1, removed: 0 }
+
+// #650: a project with no commit yet runs in a copy, whose cwd git calls no repository.
+test("⚠ a thread whose tree is a copy answers its store's changes since `base`, naming the project; `git` stays what git said", async () => {
+  const { read, diffed, copied } = changesRoute(() => Promise.reject(new Error('git is not asked')), {
+    tree: COPY_TREE,
+    readCopyChanges: () => Promise.resolve({ files: [CHANGE, ADDED], truncated: true }),
+  })
+  expect(await read('stored')).toEqual({
+    threadId: 'stored',
+    cwd: '/work/stored',
+    git: { kind: 'not-a-repository' },
+    files: [CHANGE, ADDED],
+    truncated: true,
+    copy: { project: '/work/shop-api', base: 'a'.repeat(40) },
+  })
+  expect(copied).toEqual(['/enso/snapshots/stored'])
+  expect(diffed).toEqual([])
+})
+
+test("⚠ a copy's store that cannot be read is git unavailable with its reason, never nothing changed (#650)", async () => {
+  const { read } = changesRoute(() => Promise.reject(new Error('git is not asked')), {
+    tree: COPY_TREE,
+    readCopyChanges: () => Promise.reject(new Error('ls-files: fatal: not a git repository')),
+  })
+  expect(await read('stored')).toEqual({
+    threadId: 'stored',
+    cwd: '/work/stored',
+    git: { kind: 'unavailable', reason: 'ls-files: fatal: not a git repository' },
+    files: [],
+    truncated: false,
+    copy: null,
+  })
+})
+
+test("a worktree's tree outside a repository reads as before: nothing to diff, no store asked (#650)", async () => {
+  const { read, copied } = changesRoute(() => Promise.reject(new Error('git is not asked')), {
+    tree: { ...COPY_TREE, record: { ...COPY_TREE.record, kind: 'worktree', branch: 'enso/stored' } },
+  })
+  expect(await read('stored')).toEqual({
+    threadId: 'stored',
+    cwd: '/work/stored',
+    git: { kind: 'not-a-repository' },
+    files: [],
+    truncated: false,
+    copy: null,
+  })
+  expect(copied).toEqual([])
 })

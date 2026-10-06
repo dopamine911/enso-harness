@@ -1,5 +1,5 @@
 import type { EnsoGitFileChange, EnsoGitRepository, EnsoGitState, EnsoThreadChanges, EnsoThreadGit } from '@enso/core'
-import type { AgentHost } from '../host/agent-host.ts'
+import type { AgentHost, ThreadTreePlace } from '../host/agent-host.ts'
 import type { ThreadRegistry } from './thread-registry.ts'
 
 /**
@@ -31,6 +31,10 @@ export interface ThreadGitRouteDeps extends ThreadCwdDeps {
 export interface ThreadChangesRouteDeps extends ThreadGitRouteDeps {
   /** `readGitChanges` over the real git runner; a test hands in its own. */
   readonly readChanges: (repository: EnsoGitRepository) => Promise<{ files: EnsoGitFileChange[]; truncated: boolean }>
+  /** The thread's tree record and its store (#650): the host's `threadTree`; a test hands in its own. */
+  readonly threadTree: (threadId: string) => Promise<ThreadTreePlace | undefined>
+  /** A copy's changes since its `base`, from its store: the host's `readCopyChanges`; a test hands in its own. */
+  readonly readCopyChanges: (copy: ThreadTreePlace) => Promise<{ files: EnsoGitFileChange[]; truncated: boolean }>
 }
 
 /** The thread's cwd, when it may be read: live or stored, and in a directory this server serves. */
@@ -48,9 +52,16 @@ export function createThreadGitRoute(
   }
 }
 
+/** A diff that could not be produced, as git unavailable with its reason. */
+function unavailable(error: unknown, fallback: string): EnsoGitState {
+  return { kind: 'unavailable', reason: error instanceof Error && error.message !== '' ? error.message : fallback }
+}
+
 /**
  * A diff git could not produce after naming the repository reads as git unavailable, with its
- * reason — never as a tree with nothing changed.
+ * reason — never as a tree with nothing changed. A thread whose tree is a copy (#650) has no
+ * repository in its cwd: its changes since the copy was made come from its snapshot store, with
+ * `copy` naming the project and `base`, and a store that cannot be read is unavailable too.
  */
 export function createThreadChangesRoute(
   deps: ThreadChangesRouteDeps,
@@ -59,12 +70,37 @@ export function createThreadChangesRoute(
     const cwd = await servedCwd(deps, threadId)
     if (cwd === undefined) return undefined
     const git = await deps.readGit(cwd)
-    if (git.kind !== 'repository') return { threadId, cwd, git, files: [], truncated: false }
-    try {
-      return { threadId, cwd, git, ...(await deps.readChanges(git)) }
-    } catch (error) {
-      const reason = error instanceof Error && error.message !== '' ? error.message : 'git could not diff the tree'
-      return { threadId, cwd, git: { kind: 'unavailable', reason }, files: [], truncated: false }
+    if (git.kind === 'not-a-repository') {
+      const tree = await deps.threadTree(threadId)
+      if (tree?.record.kind === 'copy') return readCopy(deps, { threadId, cwd, git }, tree)
     }
+    if (git.kind !== 'repository') return { threadId, cwd, git, files: [], truncated: false, copy: null }
+    try {
+      return { threadId, cwd, git, ...(await deps.readChanges(git)), copy: null }
+    } catch (error) {
+      return {
+        threadId,
+        cwd,
+        git: unavailable(error, 'git could not diff the tree'),
+        files: [],
+        truncated: false,
+        copy: null,
+      }
+    }
+  }
+}
+
+/** A copy's changes from its store, under the cwd's own `git`; a store that cannot be read, as git unavailable. */
+async function readCopy(
+  deps: ThreadChangesRouteDeps,
+  read: Pick<EnsoThreadChanges, 'threadId' | 'cwd' | 'git'>,
+  tree: ThreadTreePlace,
+): Promise<EnsoThreadChanges> {
+  try {
+    const copy = { project: tree.record.project, base: tree.record.base }
+    return { ...read, ...(await deps.readCopyChanges(tree)), copy }
+  } catch (error) {
+    const git = unavailable(error, "the copy's snapshot store could not be read")
+    return { ...read, git, files: [], truncated: false, copy: null }
   }
 }

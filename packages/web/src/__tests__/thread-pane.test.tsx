@@ -562,6 +562,61 @@ test('a prompt offers "Restore files to here" only while the snapshot says the t
   await pane.unmount()
 })
 
+// ⚠ #651, from an arena run: three "Restore files to here" buttons shared one accessible name, and
+// the agent had to guess which prompt by index; the confirmation named none. Numbered (PR #654
+// review): two prompts with the same words would otherwise share a name again.
+test('⚠ each prompt’s restore and fork are named for their prompt, uniquely, and the restore confirmation names it (#651)', async () => {
+  const messages: UIMessage[] = [
+    { id: 'e-u1', role: 'user', parts: [{ type: 'text', content: 'Create a minimal to-do app' }] },
+    { id: 'e-a1', role: 'assistant', parts: [{ type: 'text', content: 'Done.' }] },
+    { id: 'e-u2', role: 'user', parts: [{ type: 'text', content: 'continue' }] },
+    { id: 'e-a2', role: 'assistant', parts: [{ type: 'text', content: 'Done.' }] },
+    { id: 'e-u3', role: 'user', parts: [{ type: 'text', content: 'continue' }] },
+  ]
+  const pane = await mountPane({
+    onForked: () => undefined,
+    history: {
+      threadId: crypto.randomUUID(),
+      projectId: 'p-launch',
+      messages,
+      permissionMode: { mode: 'default', available: ['default'] },
+      sessionRisk: { level: 'low', signals: 0 },
+      incidents: NO_SESSION_INCIDENTS,
+    },
+  })
+  await pane.settle({ ...SNAPSHOT_IDLE, messages, tree: true })
+  const named = (visible: string): Array<string | null> =>
+    [...pane.container.querySelectorAll('button')]
+      .filter((button) => button.textContent === visible)
+      .map((button) => button.getAttribute('aria-label'))
+  await eventually(() =>
+    expect(named('Restore files to here')).toEqual([
+      'Restore files to here, prompt 1: “Create a minimal to-do app”',
+      'Restore files to here, prompt 2: “continue”',
+      'Restore files to here, prompt 3: “continue”',
+    ]),
+  )
+  expect(named('fork from here')).toEqual([
+    'fork from here, prompt 1: “Create a minimal to-do app”',
+    'fork from here, prompt 2: “continue”',
+    'fork from here, prompt 3: “continue”',
+  ])
+
+  const third = [...pane.container.querySelectorAll('button')].find(
+    (button) => button.getAttribute('aria-label') === 'Restore files to here, prompt 3: “continue”',
+  )
+  await flush(async () => {
+    third?.click()
+    await tick()
+  })
+  await eventually(() =>
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain(
+      'go back to how they were at prompt 3: “continue”.',
+    ),
+  )
+  await pane.unmount()
+})
+
 // ── dialogs through the pane (#112, #114) ────────────────────────────────────────────────
 
 test('a blocking question on the wire is the card; its settle from elsewhere removes it', async () => {
@@ -1847,7 +1902,7 @@ test('the Diff view lists the tree, shows the chosen file, folds a directory, an
   let files = [edit('src/a.ts', 'alpha-old', 'alpha-new'), edit('src/b.ts', 'beta-old', 'beta-new')]
   const pane = await mountPane({
     view: 'changes',
-    server: { changes: () => ({ git: repository, files, truncated: false }) },
+    server: { changes: () => ({ git: repository, files, truncated: false, copy: null }) },
   })
   await pane.settle(SNAPSHOT_IDLE)
   const panel = (): HTMLElement => {

@@ -15,7 +15,7 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, relative } from 'node:path'
-import { openSnapshotStore, type SnapshotTaken } from '../snapshot-store.ts'
+import { openSnapshotStore, readCopyChanges, type SnapshotTaken } from '../snapshot-store.ts'
 import type { ThreadTreeKind, ThreadTreeRecord } from '../thread-tree-record.ts'
 import {
   diskUsageOf,
@@ -335,6 +335,71 @@ test('⚠ a project that is no checkout mints a copy — its files, no `.git` �
   expect(await treeKindFor(join(repository, 'sub'), 'worktree', environment)).toBe('copy')
   expect(await treeKindFor(repository, 'worktree', environment)).toBe('worktree')
   expect(await treeKindFor(repository, 'copy', environment)).toBe('copy')
+})
+
+/** Every file under `directory`, by relative path, as its bytes: what a read must leave as it was. */
+function bytesUnder(directory: string): Record<string, string> {
+  const found: Record<string, string> = {}
+  for (const entry of readdirSync(directory, { recursive: true, withFileTypes: true })) {
+    const path = join(entry.parentPath, entry.name)
+    const kind = entry.isSymbolicLink() ? 'link' : 'directory'
+    found[relative(directory, path)] = entry.isFile() ? readFileSync(path).toString('base64') : kind
+  }
+  return found
+}
+
+// #650: a project with no commit yet always gets a copy, which has no `.git` — its Diff tab read
+// git in the copy and said "not a git repository". Its store holds `base`, the tree as copied.
+test("⚠ a copy's changes since `base` are read from its store — modified, deleted, added before and after the last snapshot, each with its patch — what the project ignores is not listed, and the store is not written (#650)", async () => {
+  const project = mkdtempSync(join(tmpdir(), 'enso-tree-uncommitted-'))
+  git(project, 'init', '--quiet')
+  writeFileSync(join(project, 'a.txt'), 'a\n')
+  writeFileSync(join(project, 'b.txt'), 'b\n')
+  // Only the project's repository says so: the copy holds no `.git/info/exclude`.
+  writeFileSync(join(project, '.git', 'info', 'exclude'), 'secret.txt\n')
+  const where = home()
+  expect(await treeKindFor(project, 'worktree', environment)).toBe('copy')
+  const record = await mintFromCheckout(project, where, 'copy', 'copy')
+  expect(existsSync(join(record.path, '.git'))).toBe(false)
+
+  writeFileSync(join(record.path, 'a.txt'), 'a\nmore\n')
+  rmSync(join(record.path, 'b.txt'))
+  writeFileSync(join(record.path, 'snapped.txt'), 'in the last snapshot\n')
+  await snapshotOf(where.store('copy'), record.path)
+  writeFileSync(join(record.path, 'late.txt'), 'after it\n')
+  writeFileSync(join(record.path, 'secret.txt'), 'SECRET=hunter2\n')
+  const storesBefore = bytesUnder(dirname(where.store('copy')))
+
+  const read = await readCopyChanges({
+    directory: where.store('copy'),
+    tree: record.path,
+    base: record.base,
+    environment,
+  })
+  expect(read.truncated).toBe(false)
+  expect(read.files.map((file) => [file.path, file.status, file.added, file.removed, file.omitted])).toEqual([
+    ['a.txt', 'modified', 1, 0, null],
+    ['b.txt', 'deleted', 0, 1, null],
+    ['snapped.txt', 'added', 1, 0, null],
+    ['late.txt', 'added', 1, 0, null],
+  ])
+  const patchOf = (path: string): string => read.files.find((file) => file.path === path)?.patch ?? ''
+  expect(patchOf('a.txt')).toContain('+more')
+  expect(patchOf('b.txt')).toContain('-b')
+  expect(patchOf('snapped.txt')).toContain('+in the last snapshot')
+  expect(patchOf('late.txt')).toContain('+after it')
+  // Nothing written: the store's index, its HEAD, its refs and objects, no lock or scratch left.
+  expect(bytesUnder(dirname(where.store('copy')))).toEqual(storesBefore)
+})
+
+test("a copy's store that cannot be read throws with git's words — never an empty list (#650)", async () => {
+  const project = mkdtempSync(join(tmpdir(), 'enso-tree-uncommitted-'))
+  writeFileSync(join(project, 'a.txt'), 'a\n')
+  const where = home()
+  const record = await mintFromCheckout(project, where, 'copy', 'copy')
+  await expect(
+    readCopyChanges({ directory: where.store('copy'), tree: record.path, base: 'f'.repeat(40), environment }),
+  ).rejects.toThrow(/bad object|unknown revision|bad revision/i)
 })
 
 test("⚠ a fork minted from a parent's snapshot after the parent's tree was edited holds the edit, and the parent's tree and store are unchanged", async () => {

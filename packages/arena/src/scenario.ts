@@ -34,6 +34,29 @@ export const SNAKE_SCENARIO: ArenaScenario = {
 }
 
 /**
+ * Work in rounds, as a person maintains something (the Snake scenario's run is one prompt and done).
+ * The assignment names outcomes, never controls: checking a round's changes, taking a round back,
+ * trying another way, and the work's cost and context are what a person does over several rounds,
+ * and Enso's Changes, restore, fork, Stats and Context views are where it offers them — whether
+ * the agent finds them is the finding.
+ */
+const ITERATE_SCENARIO: ArenaScenario = {
+  id: 'iterate',
+  assignment: [
+    'Build a small command-line to-do list app, in at least three separate rounds of requests to Enso:',
+    'start minimal, and add features in later rounds. After each round, check what actually changed',
+    'before you ask for the next one. Partway through, change your mind about one round: take it back',
+    'and try a different approach instead. Before you finish, find out what the work cost and how much',
+    "of the model's context it used. Use Enso's UI to manage the work. When something is difficult,",
+    'missing, or confusing, record what you were trying to do, what happened, and what you wish the',
+    'interface had provided.',
+  ].join(' '),
+  budgetMinutes: 120,
+  sampleIntervalMs: 30_000,
+  traceChunkMs: 5 * 60_000,
+}
+
+/**
  * How the agent under test reaches the UI: the agent runner's one tool (`tool`), or the
  * `bun run arena act` command when a person or an unrestricted agent drives the run (`command`).
  */
@@ -269,4 +292,6 @@ export function arenaActCommand(outDirectory?: string): string {
 }
 
 /** Every scenario by id: what `bun run arena start --scenario <id>` accepts. */
-export const ARENA_SCENARIOS: Readonly<Record<string, ArenaScenario>> = { [SNAKE_SCENARIO.id]: SNAKE_SCENARIO }
+export const ARENA_SCENARIOS: Readonly<Record<string, ArenaScenario>> = Object.fromEntries(
+  [SNAKE_SCENARIO, ITERATE_SCENARIO].map((scenario) => [scenario.id, scenario]),
+)

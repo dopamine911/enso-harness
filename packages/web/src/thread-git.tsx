@@ -125,7 +125,7 @@ export function GitIndicator({ outcome }: { readonly outcome: GitOutcome }): Rea
   if (outcome.kind === 'failed') return <span title={`git state could not be read: ${outcome.problem}`}>git ?</span>
   const { git } = outcome.payload
   if (git.kind === 'not-a-repository')
-    return <span title="this thread's project is not in a git repository">no git</span>
+    return <span title="this thread's folder is not in a git repository">no git</span>
   if (git.kind === 'unavailable') return <span title={`git could not answer: ${git.reason}`}>git unavailable</span>
   return <RepositoryReadout repository={git} />
 }

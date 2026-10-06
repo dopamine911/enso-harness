@@ -132,14 +132,36 @@ export function withoutGitLocalVariables(environment: NodeJS.ProcessEnv): NodeJS
 }
 
 /**
- * git in `cwd`, under `environment` without its repository-locating variables and with the
- * read-only settings above. Exported as the test seam: a test hands in an environment, never the
- * process's.
+ * A repository git is pointed at rather than finds from its cwd: a bare `gitDirectory`, the
+ * `workTree` it holds the files of and the `index` it reads — a thread's snapshot store
+ * (`snapshot-store.ts`).
  *
  * @group Git
  */
-export function runGitIn(environment: NodeJS.ProcessEnv, args: readonly string[], cwd: string): Promise<GitResult> {
-  const env = { ...withoutGitLocalVariables(environment), ...GIT_READ_ONLY_VARIABLES }
+export interface GitPlace {
+  readonly gitDirectory: string
+  readonly workTree: string
+  readonly index: string
+}
+
+/**
+ * git in `cwd`, under `environment` without its repository-locating variables and with the
+ * read-only settings above — or, given a `place`, with exactly that repository's three (never an
+ * inherited one). Exported as the test seam: a test hands in an environment, never the process's.
+ *
+ * @group Git
+ */
+export function runGitIn(
+  environment: NodeJS.ProcessEnv,
+  args: readonly string[],
+  cwd: string,
+  place?: GitPlace,
+): Promise<GitResult> {
+  const located =
+    place === undefined
+      ? {}
+      : { GIT_DIR: place.gitDirectory, GIT_WORK_TREE: place.workTree, GIT_INDEX_FILE: place.index }
+  const env = { ...withoutGitLocalVariables(environment), ...located, ...GIT_READ_ONLY_VARIABLES }
   const { promise, resolve } = Promise.withResolvers<GitResult>()
   execFile(
     'git',
@@ -516,15 +538,14 @@ async function emptyTree(runGit: GitRunner, root: string): Promise<string | null
 /** Tracked files under `scope` that differ from `base`, in the working tree: committed, staged or not. */
 async function trackedChanges(
   runGit: GitRunner,
-  repository: EnsoGitRepository,
-  base: string,
+  comparison: TreeComparison,
   budget: { left: number },
 ): Promise<EnsoGitFileChange[]> {
   const listing = ['diff', ...DIFF_OPTIONS, '--raw', '--numstat', '-z']
-  const range = [base, '--', scopePathspec(repository.scope)]
-  const whole = await runGit([...listing, '--patch', ...range], repository.root)
+  const range = [comparison.base, '--', scopePathspec(comparison.scope)]
+  const whole = await runGit([...listing, '--patch', ...range], comparison.root)
   // Too much output to hold, or no answer in time: the files and their counts, without patches.
-  const read = whole.code === 0 ? whole : await runGit([...listing, ...range], repository.root)
+  const read = whole.code === 0 ? whole : await runGit([...listing, ...range], comparison.root)
   if (read.code !== 0) throw new Error(reasonOf(read))
   const { listed, counts, parts } = parseDiff(read.stdout)
   // A split that does not account for the list sends no patch rather than risk pairing a file
@@ -555,6 +576,51 @@ async function untrackedChange(
 }
 
 /**
+ * What {@link readTreeChanges} compares: the work tree at `root` — the files under `scope`, `''`
+ * for all of them — against `base`, a commit or tree, with the files there git does not track as
+ * `listUntracked` names them.
+ *
+ * @group Git
+ */
+export interface TreeComparison {
+  readonly root: string
+  readonly scope: string
+  readonly base: string
+  /**
+   * The untracked files under `scope`, relative to `root`, asked after the tracked diff. Throws
+   * when they cannot be listed: no list is not an empty one — the view would say nothing differs.
+   */
+  readonly listUntracked: () => Promise<readonly string[]>
+}
+
+/**
+ * Every file of `comparison`'s work tree that differs from its `base` — through `runGit`, run from
+ * `root` so every path is the root's — and every untracked file `listUntracked` names, each with
+ * its patch while the answer has room (`MAX_*` above). {@link readGitChanges} over a repository's
+ * own git; a thread's copy over its snapshot store (#650, `snapshot-store.ts`).
+ *
+ * @group Git
+ */
+export async function readTreeChanges(
+  runGit: GitRunner,
+  comparison: TreeComparison,
+): Promise<{ files: EnsoGitFileChange[]; truncated: boolean }> {
+  const budget = { left: MAX_TOTAL_PATCH_CHARS }
+  const tracked = await trackedChanges(runGit, comparison, budget)
+  // A nested repository is listed as its directory (`vendor/lib/`), which has no diff of its own.
+  const untrackedPaths = (await comparison.listUntracked()).filter((path) => path !== '' && !path.endsWith('/'))
+  const room = Math.max(0, MAX_CHANGED_FILES - tracked.length)
+  const untracked: EnsoGitFileChange[] = []
+  for (const path of untrackedPaths.slice(0, room)) {
+    untracked.push(await untrackedChange(runGit, comparison.root, path, budget))
+  }
+  return {
+    files: [...tracked.slice(0, MAX_CHANGED_FILES), ...untracked],
+    truncated: tracked.length > MAX_CHANGED_FILES || untrackedPaths.length > room,
+  }
+}
+
+/**
  * Every file under `repository.scope` that differs from its baseline commit — commits not yet
  * pushed, staged and unstaged edits, deletions, renames — and every untracked file there, each with
  * its patch while the answer has room (`MAX_*` above). ⚠ Only the scope: a project inside a larger
@@ -568,24 +634,20 @@ export async function readGitChanges(
   runGit: GitRunner,
   repository: EnsoGitRepository,
 ): Promise<{ files: EnsoGitFileChange[]; truncated: boolean }> {
-  const { root } = repository
+  const { root, scope } = repository
   const base = repository.baseline.commit ?? (await emptyTree(runGit, root))
   if (base === null) throw new Error('git could not name the empty tree to compare with')
-  const budget = { left: MAX_TOTAL_PATCH_CHARS }
-  const tracked = await trackedChanges(runGit, repository, base, budget)
-  const listed = await runGit(
-    ['ls-files', '--others', '--exclude-standard', '-z', '--', scopePathspec(repository.scope)],
+  return readTreeChanges(runGit, {
     root,
-  )
-  // No list is not an empty one: the view would say nothing differs.
-  if (listed.code !== 0) throw new Error(reasonOf(listed))
-  // A nested repository is listed as its directory (`vendor/lib/`), which has no diff of its own.
-  const untrackedPaths = listed.stdout.split('\0').filter((path) => path !== '' && !path.endsWith('/'))
-  const room = Math.max(0, MAX_CHANGED_FILES - tracked.length)
-  const untracked: EnsoGitFileChange[] = []
-  for (const path of untrackedPaths.slice(0, room)) untracked.push(await untrackedChange(runGit, root, path, budget))
-  return {
-    files: [...tracked.slice(0, MAX_CHANGED_FILES), ...untracked],
-    truncated: tracked.length > MAX_CHANGED_FILES || untrackedPaths.length > room,
-  }
+    scope,
+    base,
+    listUntracked: async () => {
+      const listed = await runGit(
+        ['ls-files', '--others', '--exclude-standard', '-z', '--', scopePathspec(scope)],
+        root,
+      )
+      if (listed.code !== 0) throw new Error(reasonOf(listed))
+      return listed.stdout.split('\0')
+    },
+  })
 }

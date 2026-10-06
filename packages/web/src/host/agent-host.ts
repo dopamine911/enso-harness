@@ -77,6 +77,7 @@ import {
   DEFAULT_GUARD_POLICY,
   ENSO_THREAD_TREE_ENTRY,
   ENSO_TREE_RESTORED_ENTRY,
+  type EnsoGitFileChange,
   type EnsoThreadDeletePreview,
   type EnsoTreeOnDisk,
   type EnsoTreesListing,
@@ -95,7 +96,7 @@ import {
 } from '@enso/core/paths'
 import { describePermissionPolicy, preparePermissionPolicy } from '@enso/core/permission-rules'
 import { knownSecretValues, quarantineSecrets } from '@enso/core/secrets'
-import { forksOfStore } from '@enso/core/snapshot-store'
+import { forksOfStore, readCopyChanges } from '@enso/core/snapshot-store'
 import {
   disposeThreadTree,
   holdingReason,
@@ -601,6 +602,12 @@ export type ThreadRestoreOutcome =
     }
   | { readonly kind: 'refused'; readonly reason: string }
 
+/** A thread's tree as its branch records it, and the snapshot store beside its session (#551). */
+export interface ThreadTreePlace {
+  readonly record: ThreadTreeRecord
+  readonly store: string
+}
+
 /**
  * What deleting a thread answers (#571): deleted — its session file, its tree and its store, or the
  * store kept for the forks that lean on it — or why nothing was deleted. `holds-work` is the
@@ -723,6 +730,17 @@ export interface AgentHost {
   restoreThreadAt(threadId: string, entryId: string): Promise<ThreadRestoreOutcome>
   /** Undo the thread's last restore (#565): its tree back to that restore's safety snapshot, itself recorded as a restore. */
   undoLastRestore(threadId: string, safety: string): Promise<ThreadRestoreOutcome>
+  /**
+   * The thread's tree and its snapshot store (#650), live or stored — one open, nothing built
+   * (#86); `undefined` for a thread in its checkout, no session in a served project, or a host
+   * with no projects folder.
+   */
+  threadTree(threadId: string): Promise<ThreadTreePlace | undefined>
+  /**
+   * A copy's files changed since its `base` (#650), read from its store under the host's
+   * environment and writing nothing (`readCopyChanges`); throws when the store cannot be read.
+   */
+  readCopyChanges(copy: ThreadTreePlace): Promise<{ files: EnsoGitFileChange[]; truncated: boolean }>
   /**
    * Delete the thread (#571): its tree through the inventory, its store — the project's object
    * store then collected, its forks' histories kept (#573) — then every session file under its id.
@@ -1395,6 +1413,16 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       }
     }
     return { session, live: live !== undefined, tree }
+  }
+
+  async function threadTree(threadId: string): Promise<ThreadTreePlace | undefined> {
+    const live = liveSessionManagers.get(threadId)
+    const located = live === undefined ? await storedSession(threadId) : undefined
+    const session = live ?? (located === undefined ? undefined : SessionManager.open(located.path))
+    if (session === undefined) return undefined
+    const record = treeRecordOf(transcriptOf(session.getBranch()))
+    const store = storeOf(threadId, session.getCwd())
+    return record === undefined || store === undefined ? undefined : { record, store }
   }
 
   /** Threads whose tree a restore is putting back right now: no run is admitted on one (`admitRun`). */
@@ -2898,6 +2926,9 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     forkThread,
     restoreThreadAt,
     undoLastRestore,
+    threadTree,
+    readCopyChanges: ({ record, store }) =>
+      readCopyChanges({ directory: store, tree: record.path, base: record.base, environment }),
     deleteThread,
     threadDeleted,
     previewThreadDelete,

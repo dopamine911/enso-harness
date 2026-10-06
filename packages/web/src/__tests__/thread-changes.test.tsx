@@ -1,7 +1,9 @@
 import { expect, test } from 'bun:test'
 import type { EnsoGitFileChange, EnsoGitRepository } from '@enso/core'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { type ChangesOutcome, readThreadChanges, ThreadChangesView } from '../thread-changes.tsx'
+import { ThreadStoresContext } from '../store.ts'
+import { type ChangesOutcome, readThreadChanges, ThreadChanges, ThreadChangesView } from '../thread-changes.tsx'
+import { clearThreadsForTest, mintThread } from '../thread-stores.ts'
 
 /**
  * #452: the Diff view as a static render — every state said as what it is, the tree, and the
@@ -46,7 +48,7 @@ const LOGO: EnsoGitFileChange = {
 const render = (outcome: ChangesOutcome): string => renderToStaticMarkup(<ThreadChangesView outcome={outcome} />)
 const read = (files: EnsoGitFileChange[], truncated = false): ChangesOutcome => ({
   kind: 'read',
-  payload: { threadId: 't1', cwd: '/work/shop-api', git: CHANGES_REPOSITORY, files, truncated },
+  payload: { threadId: 't1', cwd: '/work/shop-api', git: CHANGES_REPOSITORY, files, truncated, copy: null },
 })
 
 test('the tree lists every changed file, and the first in it is shown side by side', () => {
@@ -77,9 +79,18 @@ test('a rename names both paths; too many files says so; nothing changed says so
 test('outside a repository, git unable to answer, a failed read and no answer yet are each said apart', () => {
   const outside: ChangesOutcome = {
     kind: 'read',
-    payload: { threadId: 't1', cwd: '/tmp', git: { kind: 'not-a-repository' }, files: [], truncated: false },
+    payload: {
+      threadId: 't1',
+      cwd: '/tmp',
+      git: { kind: 'not-a-repository' },
+      files: [],
+      truncated: false,
+      copy: null,
+    },
   }
-  expect(render(outside)).toContain('not in a git repository')
+  // #650: the cwd is what git was asked about — never claimed of the project, which may be a repository.
+  expect(render(outside)).toContain('folder is not in a git repository, so there is nothing to compare with.')
+  expect(render(outside)).not.toContain('project is not')
   const unavailable: ChangesOutcome = {
     kind: 'read',
     payload: {
@@ -88,6 +99,7 @@ test('outside a repository, git unable to answer, a failed read and no answer ye
       git: { kind: 'unavailable', reason: 'fatal: bad object' },
       files: [],
       truncated: false,
+      copy: null,
     },
   }
   expect(render(unavailable)).toContain('git could not answer: fatal: bad object')
@@ -95,9 +107,58 @@ test('outside a repository, git unable to answer, a failed read and no answer ye
   expect(render({ kind: 'none' })).toContain('Nothing has run in this thread yet.')
 })
 
+// ⚠ #657, from an arena run: the tab said "Nothing has run in this thread yet" until its first read
+// came back, and an agent that looked at once was told so on a thread that had run. A static render
+// runs no effect, so it shows exactly what the tab shows before any answer.
+test('⚠ the Diff tab says it is reading until its first answer, never that nothing has run', () => {
+  const stores = mintThread(() => new Promise<Response>(() => undefined))
+  try {
+    const first = renderToStaticMarkup(
+      <ThreadStoresContext.Provider value={stores}>
+        <ThreadChanges moment="" />
+      </ThreadStoresContext.Provider>,
+    )
+    expect(first).toContain('reading the changes…')
+    expect(first).not.toContain('Nothing has run')
+  } finally {
+    clearThreadsForTest()
+  }
+})
+
+// #650: a project with no commit yet runs in a copy, which has no `.git`; its changes come from its store.
+test("a copy's files show in the same tree and diff, under a header naming the project's copy — no baseline, no branch", () => {
+  const copied: ChangesOutcome = {
+    kind: 'read',
+    payload: {
+      threadId: 't1',
+      cwd: '/enso/projects/p/trees/t1',
+      git: { kind: 'not-a-repository' },
+      files: [APP_CHANGE, { ...APP_CHANGE, path: 'src/new.ts', status: 'added' }],
+      truncated: false,
+      copy: { project: '/work/shop-api', base: 'a'.repeat(40) },
+    },
+  }
+  const markup = render(copied)
+  expect(markup).toContain('copy of shop-api since the copy was made')
+  expect(markup).toContain('2 files')
+  expect(markup).toContain('changes to src/app.ts')
+  expect(markup).toMatch(/bg-ok\/15[^>]*>.*after/s)
+  expect(markup).not.toContain('not in a git repository')
+  expect(markup).not.toContain('measured from')
+  const unchanged: ChangesOutcome = { ...copied, payload: { ...copied.payload, files: [] } }
+  expect(render(unchanged)).toContain('Nothing differs: the copy matches the project as it was copied.')
+})
+
 test('the route read: a payload, a thread nothing has run in, and a schema miss', async () => {
   const answering = (response: Response) => (): Promise<Response> => Promise.resolve(response)
-  const payload = { threadId: 't1', cwd: '/work', git: CHANGES_REPOSITORY, files: [APP_CHANGE], truncated: false }
+  const payload = {
+    threadId: 't1',
+    cwd: '/work',
+    git: CHANGES_REPOSITORY,
+    files: [APP_CHANGE],
+    truncated: false,
+    copy: null,
+  }
   expect(await readThreadChanges('t1', answering(Response.json(payload)))).toEqual({ kind: 'read', payload })
   expect(await readThreadChanges('t1', answering(new Response('no', { status: 404 })))).toEqual({ kind: 'none' })
   expect(await readThreadChanges('t1', answering(Response.json({ threadId: 't1' })))).toEqual({

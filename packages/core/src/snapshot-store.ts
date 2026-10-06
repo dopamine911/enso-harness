@@ -83,7 +83,8 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
-import { exitCode, type GitResult, runGitIn, withoutGitLocalVariables } from './git.ts'
+import type { EnsoGitFileChange } from './git-state.ts'
+import { exitCode, type GitResult, readTreeChanges, runGitIn, withoutGitLocalVariables } from './git.ts'
 
 /**
  * How long one git of the store may take. A mint on an unseeded 100k-file tree is the slow case;
@@ -1117,6 +1118,29 @@ function treeFilesOf(
 }
 
 /**
+ * The tree's untracked files by the store's own listing against `index`, less — for a copy — what
+ * its project's repository ignores: `kept`, and `ignored`, the paths only the project ignores.
+ */
+async function storeUntrackedFiles(
+  environment: NodeJS.ProcessEnv,
+  store: StorePlace,
+  rules: IgnoreRules,
+  index: string,
+): Promise<{ readonly kept: string[]; readonly ignored: string[] } | Refusal> {
+  const others = await runStoreGit(environment, store, ['ls-files', '--others', '--exclude-standard', '-z'], { index })
+  if (others.code !== 0) return refusedBy('ls-files', others)
+  const candidates = nulList(others.stdout)
+  if (rules.kind !== 'copy' || candidates.length === 0) return { kept: candidates, ignored: [] }
+  // The copy's paths are the project's: `check-ignore` in the project answers for them, its index
+  // too (a path the project tracks is never ignored). Exit 1: none ignored.
+  const checked = await readRepositoryGit(environment, ['check-ignore', '-z', '--stdin'], rules.project, candidates)
+  if (checked.code !== 0 && checked.code !== 1) return refusedBy('check-ignore', checked)
+  const ignored = nulList(checked.stdout)
+  const ignoredSet = new Set(ignored)
+  return { kept: candidates.filter((path) => !ignoredSet.has(path)), ignored }
+}
+
+/**
  * The tree's files under `rules`, read without writing anything: the tree's repository's own
  * listing, or the store's index (`index`) and the store's untracked listing — a copy's then less
  * what its project's repository ignores.
@@ -1128,28 +1152,22 @@ async function listTreeFiles(
   index: string,
 ): Promise<TreeFiles | Refusal> {
   const tracked = ['ls-files', '--cached', '--stage', '-t', '-z']
-  const untracked = ['ls-files', '--others', '--exclude-standard', '-z']
   if (rules.kind === 'repository') {
     const staged = await readRepositoryGit(environment, tracked, store.tree)
     if (staged.code !== 0) return refusedBy('ls-files', staged)
-    const others = await readRepositoryGit(environment, untracked, store.tree)
+    const others = await readRepositoryGit(
+      environment,
+      ['ls-files', '--others', '--exclude-standard', '-z'],
+      store.tree,
+    )
     if (others.code !== 0) return refusedBy('ls-files', others)
     return treeFilesOf(store.tree, staged.stdout, nulList(others.stdout), [])
   }
   const staged = await runStoreGit(environment, store, tracked, { index })
   if (staged.code !== 0) return refusedBy('ls-files', staged)
-  const others = await runStoreGit(environment, store, untracked, { index })
-  if (others.code !== 0) return refusedBy('ls-files', others)
-  const candidates = nulList(others.stdout)
-  if (rules.kind === 'store' || candidates.length === 0) return treeFilesOf(store.tree, staged.stdout, candidates, [])
-  // The copy's paths are the project's: `check-ignore` in the project answers for them, its index
-  // too (a path the project tracks is never ignored). Exit 1: none ignored.
-  const checked = await readRepositoryGit(environment, ['check-ignore', '-z', '--stdin'], rules.project, candidates)
-  if (checked.code !== 0 && checked.code !== 1) return refusedBy('check-ignore', checked)
-  const ignored = nulList(checked.stdout)
-  const ignoredSet = new Set(ignored)
-  const kept = candidates.filter((path) => !ignoredSet.has(path))
-  return treeFilesOf(store.tree, staged.stdout, kept, ignored)
+  const untracked = await storeUntrackedFiles(environment, store, rules, index)
+  if ('refused' in untracked) return untracked
+  return treeFilesOf(store.tree, staged.stdout, untracked.kept, untracked.ignored)
 }
 
 /**
@@ -1382,5 +1400,50 @@ export async function compareTreeWithSnapshots(options: {
     return { kind: 'refused', refused: { step: 'scratch-index', code: -1, stderr: String(error) } }
   } finally {
     rmSync(scratch, { force: true })
+  }
+}
+
+/**
+ * A copy's files changed since `base` (#650) — the snapshot of the tree as the copy was made — as
+ * the Diff view reads a repository's (`readTreeChanges`): git with the store as its repository,
+ * the copy as its work tree and the store's own index, whose stat facts spare a re-hash, through
+ * `@enso/core/git`'s read-only runner (`GIT_OPTIONAL_LOCKS=0`, no inherited `GIT_DIR`). Its
+ * untracked files are the ones a snapshot would take (`ignoreRulesOf`): what the project's
+ * repository ignores — a `node_modules` it installed — is not listed. A file new since `base` is
+ * `added`: a copy has no repository of its own to leave a file untracked in.
+ *
+ * ⚠ WRITES NOTHING — no index refresh, no lock, no object: `diff` and `ls-files` only read, and
+ * a file new since the last snapshot is diffed with `--no-index`, never hashed into the store.
+ * Throws, with the step and git's words, when the store cannot be read.
+ *
+ * @group Snapshot store
+ */
+export async function readCopyChanges(options: {
+  readonly directory: string
+  readonly tree: string
+  readonly base: string
+  readonly environment: NodeJS.ProcessEnv
+}): Promise<{ files: EnsoGitFileChange[]; truncated: boolean }> {
+  const { directory, tree, base, environment } = options
+  const store = { directory, tree }
+  const index = join(directory, 'enso-index')
+  const read = await readTreeChanges(
+    (args, cwd) => runGitIn(environment, args, cwd, { gitDirectory: directory, workTree: tree, index }),
+    {
+      root: tree,
+      scope: '',
+      base,
+      listUntracked: async () => {
+        const rules = await ignoreRulesOf(environment, store)
+        if ('refused' in rules) throw new Error(refusalText(rules))
+        const untracked = await storeUntrackedFiles(environment, store, rules, index)
+        if ('refused' in untracked) throw new Error(refusalText(untracked))
+        return untracked.kept
+      },
+    },
+  )
+  return {
+    files: read.files.map((file) => (file.status === 'untracked' ? { ...file, status: 'added' } : file)),
+    truncated: read.truncated,
   }
 }

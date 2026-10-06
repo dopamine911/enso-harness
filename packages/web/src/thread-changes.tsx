@@ -5,7 +5,7 @@ import type { FetchLike } from './browser-logging.ts'
 import { type DiffHunk, type DiffLine, hiddenBefore, parsePatch, type SplitRow, splitRows } from './diff-rows.ts'
 import { buildFileTree, filesInOrder, type TreeNode } from './file-tree.ts'
 import { useReadOnUsage } from './read-on-usage.ts'
-import { readThreadRoute, THREAD_READ_NONE, type ThreadReadOutcome } from './route-read.ts'
+import { ANALYSIS_READING, readThreadRoute, type ThreadReadOutcome } from './route-read.ts'
 import { baselineText } from './thread-git.tsx'
 
 /**
@@ -14,7 +14,8 @@ import { baselineText } from './thread-git.tsx'
  * A project inside a larger repository shows its own directory's files only (`scope`).
  * Off `GET /api/threads/:threadId/changes`, which diffs the working tree against the baseline #453
  * resolves, so unpushed commits, staged and unstaged edits and new files all show, however they
- * were made: an `edit`, a `write`, or a `sed -i` in `bash`.
+ * were made: an `edit`, a `write`, or a `sed -i` in `bash`. A thread whose tree is a copy of its
+ * project (#650) has no repository: its files changed since the copy was made, off its store.
  *
  * ⚠ READ WHEN THE TREE MAY HAVE MOVED — the status bar's git readout's rule: on open, whenever a
  * tool result settles or the run flag changes (`moment`), and when the thread's usage moves. The
@@ -25,12 +26,19 @@ import { baselineText } from './thread-git.tsx'
  * so instead of a diff. Nothing here reads the files themselves.
  */
 
-/** What the view holds: nothing yet (a thread nothing has run in), the changes, or why not. */
-export type ChangesOutcome = ThreadReadOutcome<EnsoThreadChanges>
+/**
+ * What the view holds: not read yet, nothing (a thread nothing has run in: the route's 404), the
+ * changes, or why not. ⚠ `reading` is its own state (#657): the shared `THREAD_READ_NONE` is also
+ * where a read STARTS, and the tab said "Nothing has run in this thread yet" until its first answer
+ * came back — an agent that looked at once was told so on a thread that had run.
+ */
+export type ChangesOutcome = ThreadReadOutcome<EnsoThreadChanges> | typeof ANALYSIS_READING
 
-/** `GET /api/threads/:threadId/changes`, as the view holds it. */
-export const readThreadChanges = (threadId: string, fetchImpl: FetchLike): Promise<ChangesOutcome> =>
-  readThreadRoute(threadId, 'changes', EnsoThreadChanges, fetchImpl)
+/** `GET /api/threads/:threadId/changes`: the settled half of what the view holds — the changes, nothing (404), or why not. */
+export const readThreadChanges = (
+  threadId: string,
+  fetchImpl: FetchLike,
+): Promise<ThreadReadOutcome<EnsoThreadChanges>> => readThreadRoute(threadId, 'changes', EnsoThreadChanges, fetchImpl)
 
 // ── the tree ─────────────────────────────────────────────────────────────────────────────────
 
@@ -257,14 +265,20 @@ function toggled(set: ReadonlySet<string>, path: string): ReadonlySet<string> {
   return next
 }
 
-function RepositoryChanges({
-  repository,
+/**
+ * The Diff header — `description` says what the files are compared with — then the changed files
+ * as a tree and the chosen file's diff: a repository's and a copy's alike.
+ */
+function ChangedFiles({
+  description,
   files,
   truncated,
+  nothingText,
 }: {
-  readonly repository: EnsoGitRepository
+  readonly description: React.ReactNode
   readonly files: readonly EnsoGitFileChange[]
   readonly truncated: boolean
+  readonly nothingText: string
 }): React.ReactNode {
   const [chosen, setChosen] = useState<string | undefined>(undefined)
   const [closed, setClosed] = useState<ReadonlySet<string>>(new Set())
@@ -278,17 +292,7 @@ function RepositoryChanges({
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b px-4 py-2 text-sm">
         <h2 className="font-medium text-foreground">Diff</h2>
-        <span className="text-muted-foreground" title="as this clone last saw the remote — Enso never fetches">
-          {baselineText(repository)}
-        </span>
-        {repository.scope === '' ? null : (
-          <span
-            className="font-mono text-xs text-muted-foreground"
-            title="files outside this directory are not compared"
-          >
-            in {repository.scope}
-          </span>
-        )}
+        {description}
         <span className="ml-auto text-xs text-muted-foreground">
           {files.length}
           {truncated ? '+' : ''} {files.length === 1 ? 'file' : 'files'} · <Counts added={added} removed={removed} />
@@ -300,7 +304,7 @@ function RepositoryChanges({
         </p>
       ) : null}
       {files.length === 0 ? (
-        <p className="px-4 py-6 text-sm text-muted-foreground">Nothing differs: the tree matches the baseline.</p>
+        <p className="px-4 py-6 text-sm text-muted-foreground">{nothingText}</p>
       ) : (
         <div className="flex min-h-0 flex-1">
           <nav
@@ -323,19 +327,85 @@ function RepositoryChanges({
   )
 }
 
+function RepositoryChanges({
+  repository,
+  files,
+  truncated,
+}: {
+  readonly repository: EnsoGitRepository
+  readonly files: readonly EnsoGitFileChange[]
+  readonly truncated: boolean
+}): React.ReactNode {
+  return (
+    <ChangedFiles
+      description={
+        <>
+          <span className="text-muted-foreground" title="as this clone last saw the remote — Enso never fetches">
+            {baselineText(repository)}
+          </span>
+          {repository.scope === '' ? null : (
+            <span
+              className="font-mono text-xs text-muted-foreground"
+              title="files outside this directory are not compared"
+            >
+              in {repository.scope}
+            </span>
+          )}
+        </>
+      }
+      files={files}
+      truncated={truncated}
+      nothingText="Nothing differs: the tree matches the baseline."
+    />
+  )
+}
+
+/**
+ * A thread's copy of its project (#650): no repository, so no branch, baseline or ahead/behind —
+ * the files changed since the copy was made, off its snapshot store.
+ */
+function CopyChanges({
+  project,
+  files,
+  truncated,
+}: {
+  readonly project: string
+  readonly files: readonly EnsoGitFileChange[]
+  readonly truncated: boolean
+}): React.ReactNode {
+  // The project directory's name; the whole path is its title.
+  const name = project.split('/').findLast((part) => part !== '') ?? project
+  return (
+    <ChangedFiles
+      description={
+        <span className="text-muted-foreground" title={project}>
+          Changes in this thread&apos;s copy of {name} since the copy was made
+        </span>
+      }
+      files={files}
+      truncated={truncated}
+      nothingText="Nothing differs: the copy matches the project as it was copied."
+    />
+  )
+}
+
 /** Pure view of the outcome: every state said as what it is. */
 export function ThreadChangesView({ outcome }: { readonly outcome: ChangesOutcome }): React.ReactNode {
+  if (outcome.kind === 'reading') {
+    return <p className="px-4 py-6 text-sm text-muted-foreground">reading the changes…</p>
+  }
   if (outcome.kind === 'none') {
     return <p className="px-4 py-6 text-sm text-muted-foreground">Nothing has run in this thread yet.</p>
   }
   if (outcome.kind === 'failed') {
     return <p className="px-4 py-6 text-sm text-refuse">The changes could not be read: {outcome.problem}</p>
   }
-  const { git, files, truncated } = outcome.payload
+  const { git, files, truncated, copy } = outcome.payload
+  if (copy !== null) return <CopyChanges project={copy.project} files={files} truncated={truncated} />
   if (git.kind === 'not-a-repository') {
     return (
       <p className="px-4 py-6 text-sm text-muted-foreground">
-        This thread&apos;s project is not in a git repository, so there is nothing to compare with.
+        This thread&apos;s folder is not in a git repository, so there is nothing to compare with.
       </p>
     )
   }
@@ -350,6 +420,6 @@ export function ThreadChangesView({ outcome }: { readonly outcome: ChangesOutcom
  * run started or ended) and whenever the thread's usage moves.
  */
 export function ThreadChanges({ moment }: { readonly moment: string }): React.ReactNode {
-  const outcome = useReadOnUsage(readThreadChanges, THREAD_READ_NONE, moment)
+  const outcome = useReadOnUsage<ChangesOutcome>(readThreadChanges, ANALYSIS_READING, moment)
   return <ThreadChangesView outcome={outcome} />
 }
