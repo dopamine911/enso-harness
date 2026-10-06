@@ -593,6 +593,9 @@ export function createFakeAgentHost(
       const storedThread = stored[threadId]
       return Promise.resolve(storedThread === undefined ? undefined : directoryOf(storedThread))
     },
+    // No thread of the fake runs on a tree of its own (#650): a route test hands in its own.
+    threadTree: () => Promise.resolve(undefined),
+    readCopyChanges: () => Promise.reject(new Error('the fake host holds no snapshot store')),
     readStoredThread: (threadId: string) => {
       const storedThread = served(threadId)
       return Promise.resolve(

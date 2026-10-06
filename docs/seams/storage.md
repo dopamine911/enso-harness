@@ -87,6 +87,17 @@ export interface AgentHost {
   /** Undo the thread's last restore (#565): its tree back to that restore's safety snapshot, itself recorded as a restore. */
   undoLastRestore(threadId: string, safety: string): Promise<ThreadRestoreOutcome>
   /**
+   * The thread's tree and its snapshot store (#650), live or stored — one open, nothing built
+   * (#86); `undefined` for a thread in its checkout, no session in a served project, or a host
+   * with no projects folder.
+   */
+  threadTree(threadId: string): Promise<ThreadTreePlace | undefined>
+  /**
+   * A copy's files changed since its `base` (#650), read from its store under the host's
+   * environment and writing nothing (`readCopyChanges`); throws when the store cannot be read.
+   */
+  readCopyChanges(copy: ThreadTreePlace): Promise<{ files: EnsoGitFileChange[]; truncated: boolean }>
+  /**
    * Delete the thread (#571): its tree through the inventory, its store — the project's object
    * store then collected, its forks' histories kept (#573) — then every session file under its id.
    * A tree holding work is deleted only `force`d AND with `confirmedWork` the sha256 (hex) of the

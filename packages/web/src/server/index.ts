@@ -990,10 +990,13 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   // One thread's git state (#453): read in its cwd when asked, only in a directory this server serves.
   const gitDeps = { threads, host, servesDirectory, readGit: (cwd: string) => readGitState(runGit, cwd) }
   const threadGit = createThreadGitRoute(gitDeps)
-  // What changed since the last push (#452): the same state, with every file and its patch.
+  // What changed since the last push (#452): the same state, with every file and its patch — or,
+  // for a thread whose tree is a copy, what changed since the copy was made, from its store (#650).
   const threadChanges = createThreadChangesRoute({
     ...gitDeps,
     readChanges: (repository) => readGitChanges(runGit, repository),
+    threadTree: (threadId) => host.threadTree(threadId),
+    readCopyChanges: (copy) => host.readCopyChanges(copy),
   })
   // What the thread built (#619): where it works and its pages, and one file of it, sandboxed.
   const threadPages = createThreadPagesRoute(gitDeps)

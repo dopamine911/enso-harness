@@ -176,7 +176,7 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
   ),
   THREAD_CHANGES_ROUTE: threadRead(
     'respondWithThreadChanges',
-    "200 `EnsoThreadChanges` JSON — git's state in the thread's cwd and every file that differs from its last-push baseline (#452): unpushed commits, staged and unstaged edits, deletions, renames and untracked files, each with its unified diff unless binary or too large; `truncated` past 500 files. A diff git cannot produce reads as `unavailable`. Read-only, no fetch",
+    "200 `EnsoThreadChanges` JSON — git's state in the thread's cwd and every file that differs from its last-push baseline (#452): unpushed commits, staged and unstaged edits, deletions, renames and untracked files, each with its unified diff unless binary or too large; `truncated` past 500 files. A thread whose tree is a copy (#650) answers its copy's files changed since the copy was made, read from its snapshot store, with `copy` naming the project and `base`. A diff git cannot produce, or a copy's store that cannot be read, reads as `unavailable`. Read-only, no fetch",
     GIT_READ_ERRORS,
   ),
   THREAD_PAGES_ROUTE: threadRead(

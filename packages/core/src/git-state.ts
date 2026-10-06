@@ -193,7 +193,8 @@ export type EnsoGitFileChange = Static<typeof EnsoGitFileChange>
 
 /**
  * `GET /api/threads/:threadId/changes`: git's state in the thread's cwd, and every file that differs
- * from its baseline. No files outside a repository or when git could not answer.
+ * from its baseline. No files outside a repository or when git could not answer — unless the
+ * thread's tree is a copy (#650), whose changes come from its snapshot store.
  *
  * @group Git
  */
@@ -205,6 +206,20 @@ export const EnsoThreadChanges = Type.Object(
     files: Type.Array(EnsoGitFileChange),
     /** More files differ than a page is sent; `files` holds the first of them, in git's order. */
     truncated: Type.Boolean(),
+    /**
+     * Non-null when the thread's tree is a copy of its project and its changes were read from the
+     * copy's snapshot store (#650): `files` and `truncated` are then the copy's changes since
+     * `base` — the snapshot of the tree as the copy was made — and `git` stays what git said in the
+     * cwd (a copy has no `.git`: `not-a-repository`). `project` is the checkout it was copied from.
+     * `null` otherwise.
+     */
+    copy: Type.Union([
+      Type.Null(),
+      Type.Object(
+        { project: Type.String({ minLength: 1 }), base: Type.String({ minLength: 1 }) },
+        { additionalProperties: false },
+      ),
+    ]),
   },
   { additionalProperties: false },
 )

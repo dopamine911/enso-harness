@@ -1902,7 +1902,7 @@ test('the Diff view lists the tree, shows the chosen file, folds a directory, an
   let files = [edit('src/a.ts', 'alpha-old', 'alpha-new'), edit('src/b.ts', 'beta-old', 'beta-new')]
   const pane = await mountPane({
     view: 'changes',
-    server: { changes: () => ({ git: repository, files, truncated: false }) },
+    server: { changes: () => ({ git: repository, files, truncated: false, copy: null }) },
   })
   await pane.settle(SNAPSHOT_IDLE)
   const panel = (): HTMLElement => {

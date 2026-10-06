@@ -1,11 +1,11 @@
 import type {
   EnsoFollowFrame,
   EnsoFollowSnapshot,
-  EnsoGitFileChange,
   EnsoGitState,
   EnsoProject,
   EnsoSessionEval,
   EnsoStoredThread,
+  EnsoThreadChanges,
   EnsoThreadDeletePreview,
   EnsoThreadEvents,
   EnsoThreadHistory,
@@ -106,7 +106,7 @@ export interface ScriptedFetchOptions {
    */
   readonly git?: () => EnsoGitState
   /** What the Diff view's read answers (#452), asked per read; 404 when absent. */
-  readonly changes?: () => { git: EnsoGitState; files: EnsoGitFileChange[]; truncated: boolean }
+  readonly changes?: () => Omit<EnsoThreadChanges, 'threadId' | 'cwd'>
   /** What `GET /api/threads/:id/tree` answers (#619), without its `threadId`; absent is the 404. */
   readonly pages?: () => { path: string; pages: string[]; truncated: boolean }
   /**
