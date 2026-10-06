@@ -93,7 +93,8 @@ test('⚠ a screenshot that fails is a recorder-error line naming its cause, red
   const root = mkdtempSync(join(tmpdir(), 'arena-shot-'))
   const timeline = openTimeline(join(root, 'timeline.jsonl'), steppingClock())
   const redact = (text: string): string => text.replaceAll(SECRET, '[redacted]')
-  const shooter = createShooter({ directory: root, timeline, redact })
+  // The second try's pause (#665) is the test's: a camera that fails twice, with no real wait.
+  const shooter = createShooter({ directory: root, timeline, redact, sleep: (): Promise<void> => Promise.resolve() })
   const url = `http://127.0.0.1:5178/?thread=${THREAD}`
 
   // No page yet: nothing taken, nothing said — the run has no picture to miss.
@@ -116,6 +117,40 @@ test('⚠ a screenshot that fails is a recorder-error line naming its cause, red
       page: pagePlace(url),
     }),
     expect.objectContaining({ kind: 'screenshot', cause: 'sample', path: taken, page: pagePlace(url) }),
+  ])
+})
+
+// ⚠ #665: a capture racing a reload failed once, and as one recorder error it failed a whole run.
+test('⚠ a screenshot that fails once and then works is a shot, after one pause — no recorder error (#665)', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'arena-shot-retry-'))
+  const timeline = openTimeline(join(root, 'timeline.jsonl'), steppingClock())
+  const paused: number[] = []
+  const shooter = createShooter({
+    directory: root,
+    timeline,
+    redact: (text: string): string => text,
+    sleep: (ms: number): Promise<void> => {
+      paused.push(ms)
+      return Promise.resolve()
+    },
+  })
+  const url = `http://127.0.0.1:5178/?thread=${THREAD}`
+  let tries = 0
+  shooter.show({
+    screenshot: (): Promise<unknown> => {
+      tries += 1
+      return tries === 1
+        ? Promise.reject(new Error('Protocol error (Page.captureScreenshot): Unable to capture screenshot'))
+        : Promise.resolve(Buffer.alloc(0))
+    },
+    url: () => url,
+  })
+  const taken = await shooter.shoot('navigation')
+  expect(taken).toBeDefined()
+  expect(tries).toBe(2)
+  expect(paused).toHaveLength(1)
+  expect(readTimeline(timeline.path)).toEqual([
+    expect.objectContaining({ kind: 'screenshot', cause: 'navigation', path: taken }),
   ])
 })
 

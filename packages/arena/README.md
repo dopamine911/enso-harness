@@ -26,10 +26,11 @@ default; one under a `.enso` directory is refused), `--chromium PATH`,
 `--repo OWNER/NAME` (where bugs are filed: the checkout's GitHub `origin` by default) and
 `--headed`. Ports 5178 and 5179 must be free: the arena starts its own stack.
 
-Three scenarios, told only what to achieve, never which controls to use:
+Four scenarios, told only what to achieve, never which controls to use:
 - **`snake`** (the default): a Snake game with five features of the agent's choosing. One prompt and done: it exercises starting a session, approvals, and seeing what was built.
 - **`iterate`**: a to-do CLI in at least three rounds, checking each round's changes, taking one round back for another approach, and finding the work's cost and context. It reaches what Snake doesn't: the Diff view, restore, forks, Stats and Context. Its first run found #650 and #651.
 - **`compare`**: a Markdown-to-HTML converter in two approaches kept side by side, compared by what each changed and cost, one kept and the other cleaned up, then exactly what the model was given in its last request. It reaches parallel threads, deleting a thread and its tree, and Context. Its first run found #659.
+- **`resume`**: a password generator whose work is interrupted and picked up: one request stopped midway and redirected, the page reloaded and the conversation continued, a branch off an earlier request, and another model for one request. It reaches stopping a run, persistence across a reload, forks and the model control. Its first run found #664 and #665.
 
 **When a run stops (#609).** Besides the agent's own `stop`:
 - **The budget (`--minutes`).** Every `act` answer carries `phase` and `remainingMs`. When the budget is

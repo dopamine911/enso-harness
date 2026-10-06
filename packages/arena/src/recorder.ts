@@ -67,6 +67,8 @@ const ARENA_SERVER_ORIGIN = 'http://127.0.0.1:5179'
 const STACK_PORTS = [5178, 5179] as const
 const STACK_STARTUP_TIMEOUT_MS = 90_000
 const EVENT_SHOT_SPACING_MS = 2000
+/** The pause before a failed screenshot's second try (#665): long enough for a reload to settle. */
+const SHOT_RETRY_MS = 500
 const VIEWPORT = { width: 1440, height: 900 } as const
 /** A single action's own timeout: a control that never appears fails the action, not the run. */
 const ACTION_TIMEOUT_MS = 15_000
@@ -231,15 +233,20 @@ export interface ArenaShooter {
  *
  * ⚠ A SHOT THAT FAILS IS A LINE (#584 A9, #607): a `recorder-error` naming the cause. Swallowed, a
  * gap in the 30 s cadence read the same as "no sample was due", and a crash's picture that could
- * not be taken looked like one never attempted.
+ * not be taken looked like one never attempted. ⚠ BUT ONLY AFTER A SECOND TRY (#665): a capture
+ * racing a reload fails once ("Unable to capture screenshot") and works a moment later — as one
+ * error it failed a whole run. A camera that really fails fails twice and is still the line.
  */
 export function createShooter(options: {
   readonly directory: string
   readonly timeline: ArenaTimeline
   readonly redact: (text: string) => string
   readonly now?: () => number
+  /** The pause before the second try; injected by tests. */
+  readonly sleep?: (ms: number) => Promise<void>
 }): ArenaShooter {
   const now = options.now ?? Date.now
+  const sleep = options.sleep ?? ((ms: number): Promise<void> => Bun.sleep(ms))
   let shown: ArenaShotPage | undefined
   let shotNumber = 0
   const lastShotAt = new Map<ArenaShotCause, number>()
@@ -254,11 +261,22 @@ export function createShooter(options: {
     const stamp = new Date(at).toISOString().replaceAll(':', '-')
     const path = join(options.directory, `${String(shotNumber).padStart(5, '0')}-${stamp}-${cause}.png`)
     shotNumber += 1
-    try {
-      await page.screenshot({ path, timeout: 10_000 })
-    } catch (error) {
+    const capture = async (): Promise<{ readonly failed: unknown } | undefined> => {
+      try {
+        await page.screenshot({ path, timeout: 10_000 })
+        return undefined
+      } catch (error) {
+        return { failed: error }
+      }
+    }
+    let outcome = await capture()
+    if (outcome !== undefined) {
+      await sleep(SHOT_RETRY_MS)
+      outcome = await capture()
+    }
+    if (outcome !== undefined) {
       options.timeline.record(
-        { kind: 'recorder-error', during: `screenshot (${cause})`, error: errorLine(error, options.redact) },
+        { kind: 'recorder-error', during: `screenshot (${cause})`, error: errorLine(outcome.failed, options.redact) },
         pagePlace(page.url()),
       )
       return undefined
