@@ -1,4 +1,15 @@
-import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, symlinkSync } from 'node:fs'
+import {
+  copyFileSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { DEFAULT_GUARD_POLICY } from '@enso/core'
@@ -22,6 +33,15 @@ import { knownSecretValues } from '@enso/core/secrets'
  * directory. ⚠ What the link does not cover: pi's lock is taken beside the link (`realpath: false`),
  * not beside the operator's file, so the operator's own pi refreshing the same provider at the same
  * instant is not serialized with the run.
+ *
+ * ⚠⚠ A LINK CAN BE REPLACED, AND THEN THE OPERATOR IS LOGGED OUT (#639). The harness loads
+ * pi-multi-account, which writes `auth.json` and `models.json` ATOMICALLY — a temp file, then a
+ * rename onto the path (`auth-file-transaction.ts`) — and a rename onto a symlink replaces the link
+ * with a regular file. Measured: a refresh in one run rotated the Anthropic token into that run's
+ * home, the operator's file kept the old refresh token, the provider revoked it, and the next run's
+ * first model call failed with `invalid_grant`. So the recorder reconciles the links while the run
+ * lives and at its stop (`reconcileLinkedFiles`): a link found replaced has its content returned to
+ * the operator's file, and is linked again.
  *
  * ⚠ NAMED `.enso`, ON PURPOSE. `/.enso/` is the guard's credential fragment (`DEFAULT_GUARD_POLICY`):
  * Enso's own agent can neither read nor write under it, so the links are out of its reach. The same
@@ -51,26 +71,73 @@ export function isGuardedForAgent(directory: string): boolean {
   return containsPathFragment(resolve(directory), DEFAULT_GUARD_POLICY.secretPathFragments)
 }
 
+/** Every file the run home links to the operator's: `[the run home's path, the operator's]`. */
+function linkedPairs(runHome: string, operatorHome: string): Array<readonly [linked: string, source: string]> {
+  return [
+    [ensoSecretsPath(runHome), ensoSecretsPath(operatorHome)],
+    ...LINKED_AGENT_FILES.map(
+      (fileName) => [join(ensoAgentDir(runHome), fileName), join(ensoAgentDir(operatorHome), fileName)] as const,
+    ),
+  ]
+}
+
 /**
  * Make `<run>/.enso` from the operator's home: the credential files linked, the settings copied,
  * nothing else. A file the operator's home does not have is left out, never created. Returns the run home.
  */
 export function prepareRunHome(runDirectory: string, operatorHome: string): string {
   const home = join(runDirectory, ARENA_RUN_HOME)
-  const agentDirectory = ensoAgentDir(home)
-  mkdirSync(agentDirectory, { recursive: true, mode: 0o700 })
-  const link = (source: string, target: string): void => {
-    if (existsSync(source)) symlinkSync(source, target)
-  }
-  link(ensoSecretsPath(operatorHome), ensoSecretsPath(home))
-  for (const fileName of LINKED_AGENT_FILES) {
-    link(join(ensoAgentDir(operatorHome), fileName), join(agentDirectory, fileName))
+  mkdirSync(ensoAgentDir(home), { recursive: true, mode: 0o700 })
+  for (const [linked, source] of linkedPairs(home, operatorHome)) {
+    if (existsSync(source)) symlinkSync(source, linked)
   }
   for (const fileName of COPIED_AGENT_FILES) {
     const source = join(ensoAgentDir(operatorHome), fileName)
-    if (existsSync(source)) copyFileSync(source, join(agentDirectory, fileName))
+    if (existsSync(source)) copyFileSync(source, join(ensoAgentDir(home), fileName))
   }
   return home
+}
+
+/**
+ * What reconciling found for one linked file that was no longer a link: its content went back to
+ * the operator's file, or the operator's had changed after it and stood.
+ */
+export interface ArenaRelink {
+  /** The run home's path that had been a link. */
+  readonly path: string
+  readonly outcome: 'returned' | 'operator-newer'
+}
+
+/**
+ * Put every replaced link back (#639). A linked file that is a regular file now was written by an
+ * atomic rename: its content goes back to the operator's file when it is the newer of the two (a
+ * refresh's rotated token), and the link is restored either way. An operator file changed after it
+ * is left alone — overwriting it could revoke the login another process just refreshed — and the
+ * caller says so. A link still in place, and a file neither side has, are untouched.
+ */
+export function reconcileLinkedFiles(runHome: string, operatorHome: string): ArenaRelink[] {
+  const relinked: ArenaRelink[] = []
+  for (const [linked, source] of linkedPairs(runHome, operatorHome)) {
+    const stats = lstatSync(linked, { throwIfNoEntry: false })
+    if (stats === undefined || stats.isSymbolicLink()) continue
+    const operatorStats = statSync(source, { throwIfNoEntry: false })
+    const newer = operatorStats === undefined || stats.mtimeMs >= operatorStats.mtimeMs
+    if (newer) writeFileSync(source, readFileSync(linked), { mode: 0o600 })
+    // ⚠ The link goes back by RENAME (PR #642 review): removing the file and then linking left a
+    // moment with no file, in which a credential write of pi-multi-account's own could land and make
+    // the link throw. A rename onto the path replaces whatever is there, at once.
+    const pendingLink = `${linked}.relink-${process.pid}`
+    symlinkSync(source, pendingLink)
+    try {
+      renameSync(pendingLink, linked)
+    } catch (error) {
+      // A rename that fails leaves no stray link behind; the caller hears why (PR #642 review).
+      rmSync(pendingLink, { force: true })
+      throw error
+    }
+    relinked.push({ path: linked, outcome: newer ? 'returned' : 'operator-newer' })
+  }
+  return relinked
 }
 
 /**

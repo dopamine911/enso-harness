@@ -7,8 +7,11 @@ import {
   mkdtempSync,
   readFileSync,
   readlinkSync,
+  renameSync,
   rmSync,
+  statSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
@@ -22,6 +25,7 @@ import {
   defaultArenaOut,
   isGuardedForAgent,
   prepareRunHome,
+  reconcileLinkedFiles,
   runHomeOf,
 } from '../run-home.ts'
 import { type ArenaSecretScan, scanRunForSecrets, withEarlierHits, zipEntries } from '../secret-scan.ts'
@@ -85,6 +89,55 @@ test('a file the operator home lacks is left out of the run home, never created'
   expect(existsSync(ensoSecretsPath(home))).toBe(false)
   expect(existsSync(join(ensoAgentDir(home), 'auth.json'))).toBe(false)
   expect(existsSync(join(ensoAgentDir(home), 'settings.json'))).toBe(false)
+})
+
+/** What pi-multi-account does to write a credential file (`auth-file-transaction.ts`): a temp file, renamed onto the path. */
+function atomicWrite(path: string, content: string): void {
+  const temp = `${path}.${process.pid}.tmp`
+  writeFileSync(temp, content)
+  renameSync(temp, path)
+}
+
+// ⚠ #639, measured: a refresh in a run home replaced the linked auth.json with a regular file, the
+// rotated token stayed in the run, the operator's refresh token was revoked, and the next run's first
+// model call failed with `invalid_grant`. The reconcile returns the run's newer file and relinks.
+test('⚠ a credential file renamed over its link goes back to the operator, and the link is restored (#639)', () => {
+  const root = mkdtempSync(join(tmpdir(), 'arena-relink-'))
+  const operator = operatorHome(root)
+  const home = prepareRunHome(join(root, 'run'), operator)
+  const runAuth = join(ensoAgentDir(home), 'auth.json')
+  const operatorAuth = join(ensoAgentDir(operator), 'auth.json')
+  chmodSync(operatorAuth, 0o600)
+
+  atomicWrite(runAuth, '{"anthropic":{"refresh":"rotated-in-the-run"}}')
+  // The bug as it was: the link is gone, and the operator's file still holds the old token.
+  expect(lstatSync(runAuth).isSymbolicLink()).toBe(false)
+  expect(readFileSync(operatorAuth, 'utf8')).toContain(REFRESH)
+
+  expect(reconcileLinkedFiles(home, operator)).toEqual([{ path: runAuth, outcome: 'returned' }])
+  expect(readFileSync(operatorAuth, 'utf8')).toContain('rotated-in-the-run')
+  expect(lstatSync(runAuth).isSymbolicLink()).toBe(true)
+  expect(readlinkSync(runAuth)).toBe(operatorAuth)
+  // The operator's file keeps its mode: still only its owner reads the credentials.
+  expect(statSync(operatorAuth).mode & 0o777).toBe(0o600)
+  // Nothing replaced, nothing done.
+  expect(reconcileLinkedFiles(home, operator)).toEqual([])
+})
+
+test('an operator file changed after the run’s is not overwritten; the link is restored and the conflict said', () => {
+  const root = mkdtempSync(join(tmpdir(), 'arena-relink-conflict-'))
+  const operator = operatorHome(root)
+  const home = prepareRunHome(join(root, 'run'), operator)
+  const runModels = join(ensoAgentDir(home), 'models.json')
+  const operatorModels = join(ensoAgentDir(operator), 'models.json')
+  atomicWrite(runModels, '{"from":"the run"}')
+  // Long before the operator's write below: the operator's is the newer file.
+  utimesSync(runModels, 1, 1)
+  writeFileSync(operatorModels, '{"from":"the operator, later"}')
+
+  expect(reconcileLinkedFiles(home, operator)).toEqual([{ path: runModels, outcome: 'operator-newer' }])
+  expect(readFileSync(operatorModels, 'utf8')).toContain('the operator, later')
+  expect(lstatSync(runModels).isSymbolicLink()).toBe(true)
 })
 
 test('⚠ a run under ~/.enso is a project the guard keeps Enso’s agent out of; the default is not, and the run home is (#610)', () => {
