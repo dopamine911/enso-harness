@@ -48,6 +48,8 @@ export interface ScriptedFetch {
   readonly previewReads: string[]
   /** Every `GET /api/trees` the server saw (#578). */
   readonly treeReads: string[]
+  /** Every `GET /api/threads/:id/git` the server saw (#620): a thread with no session must ask none. */
+  readonly gitReads: string[]
   /** Hold the next prompt's answer; returns the release. */
   readonly holdPrompt: () => () => void
   /** Hold every later delete's answer (#571) — the server has it, and has not answered; returns the release. */
@@ -168,6 +170,7 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
   const deleteTags: (string | null)[] = []
   const previewReads: string[] = []
   const treeReads: string[] = []
+  const gitReads: string[] = []
   let storedThreads = options.storedThreads ?? []
   /** Question ids the server has TAKEN an answer for — the shape of the real route's 404. */
   const spentQuestions = new Set<string>()
@@ -306,6 +309,7 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
     const action = threadAction(path)
     const respond = action === undefined ? undefined : threadActions[action]
     if (respond !== undefined) return respond(init)
+    if (/^\/api\/threads\/[^/]+\/git$/.test(path)) gitReads.push(path)
     return Promise.resolve(pageRead(path) ?? new Response('not found', { status: 404 }))
   }) as typeof fetch
   return {
@@ -320,6 +324,7 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
     deletes,
     previewReads,
     treeReads,
+    gitReads,
     deleteTags,
     holdPrompt: () => {
       const gate = Promise.withResolvers<void>()
@@ -350,4 +355,15 @@ export const SNAPSHOT_IDLE: EnsoFollowSnapshot = {
   usage: { cost: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, context: null },
   messages: [],
   openDialogs: [],
+}
+
+/** The same thread with a session built: live, and saying its model. */
+export const SNAPSHOT_LIVE: EnsoFollowSnapshot = {
+  ...SNAPSHOT_IDLE,
+  live: true,
+  model: {
+    model: { provider: 'fake', id: 'fake-1', name: 'Fake One' },
+    thinkingLevel: 'off',
+    availableThinkingLevels: ['off'],
+  },
 }

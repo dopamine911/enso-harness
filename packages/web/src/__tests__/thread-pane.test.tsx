@@ -34,6 +34,7 @@ import {
   type ScriptedFetch,
   type ScriptedFetchOptions,
   SNAPSHOT_IDLE,
+  SNAPSHOT_LIVE,
 } from './scripted-server.ts'
 
 // ⚠ Loaded HERE, not statically: react-dom/client probes the DOM when its module evaluates
@@ -242,6 +243,26 @@ test('a live thread titles its rail row from the first user message (#283)', asy
   })
   await eventually(() => expect(pane.server.prompts.length).toBe(2))
   expect(railTitle(pane.stores.threadId)).toBe('fix the login bug before the release')
+  await pane.unmount()
+})
+
+// ⚠ #620: a new thread has no session until one is built (#484), and the git route has nothing to
+// read before then — every read was a 404 and a console error, three per new thread. The bar asks
+// once the thread has a live session, and shows its git from that moment.
+test('⚠ a new thread asks for no git state until its session is live, then reads it (#620)', async () => {
+  const pane = await mountPane({ server: { git: () => ({ kind: 'not-a-repository' }) } })
+  await pane.settle(SNAPSHOT_IDLE)
+  // Usage moving is one of the readout's triggers: it must not ask for a thread with no session.
+  await pane.settle({ ...SNAPSHOT_IDLE, usage: { ...SNAPSHOT_IDLE.usage, input: 1 } })
+  expect(pane.server.gitReads).toEqual([])
+  expect(pane.status()).not.toContain('no git')
+
+  // The session is built (a Start, a first prompt): the snapshot says its model.
+  await pane.settle(SNAPSHOT_LIVE)
+  await eventually(() => {
+    expect(pane.server.gitReads.length).toBeGreaterThan(0)
+    expect(pane.status()).toContain('no git')
+  })
   await pane.unmount()
 })
 
@@ -1643,7 +1664,8 @@ test('the status bar reads git on mount and again when a tool result settles (#4
       },
     },
   })
-  await pane.settle(SNAPSHOT_IDLE)
+  // A thread with a session (#620): a new one with none asks for nothing.
+  await pane.settle(SNAPSHOT_LIVE)
   await eventually(() => expect(pane.status()).toContain('main· clean'))
   const beforeRun = reads
   await flush(async () => {
