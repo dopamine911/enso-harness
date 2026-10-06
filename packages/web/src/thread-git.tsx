@@ -17,8 +17,13 @@ import { readThreadRoute, THREAD_READ_NONE, type ThreadReadOutcome } from './rou
  * says a tool touched the tree, so every settled result asks. Only the latest read is shown.
  *
  * ⚠ SAID AS WHAT IT IS. "Last push" is what this clone last saw of the remote; Enso never
- * fetches, and the tooltip says so. A thread nothing has run in yet (404) shows nothing; a
- * failed read shows `git ?` with the server's words, never a stale readout.
+ * fetches, and the tooltip says so. A failed read shows `git ?` with the server's words, never a
+ * stale readout.
+ *
+ * ⚠ A THREAD WITH NOTHING TO READ IS NOT ASKED (#620). The route serves a live session's tree or a
+ * stored thread's; a new thread has neither until its session is built (#484), and every read
+ * before that was a 404 — three per new thread, each a console error the browser logs on its own.
+ * The bar asks once the thread has a live model or messages, and shows nothing until then.
  */
 
 /** What the bar holds: nothing yet (or a thread nothing has run in), git's state, or why not. */
@@ -37,12 +42,17 @@ export function settledToolResults(messages: ReadonlyArray<UIMessage>): number {
   return settled
 }
 
+/** A thread with nothing the route could serve: nothing is asked, and nothing is shown (#620). */
+const readNothing = (): Promise<GitOutcome> => Promise.resolve(THREAD_READ_NONE)
+
 /**
  * The thread's git state, read on mount, whenever `moment` changes (a tool result settled, the run
- * started or ended) and whenever the thread's usage moves (`read-on-usage.ts`).
+ * started or ended) and whenever the thread's usage moves (`read-on-usage.ts`) — once `readable`:
+ * the thread has a live session or a stored branch. The reader changing re-runs the read, so the
+ * first one goes out as the session appears.
  */
-export function useThreadGit(moment: string): GitOutcome {
-  return useReadOnUsage(readThreadGit, THREAD_READ_NONE, moment)
+export function useThreadGit(moment: string, readable: boolean): GitOutcome {
+  return useReadOnUsage(readable ? readThreadGit : readNothing, THREAD_READ_NONE, moment)
 }
 
 /** Where the baseline came from, in words — the tooltip's first line. */

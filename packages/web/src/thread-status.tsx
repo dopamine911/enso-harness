@@ -9,6 +9,7 @@ import {
 import type { UIMessage } from '@tanstack/ai-client'
 import { automaticPartsForMessage, selectMessageUI } from '@tanstack/ai-client/ui'
 import { toolResultState } from './EnsoToolResult.tsx'
+import { useModelState } from './model-state.tsx'
 import { useStore, useThreadStores } from './store.ts'
 import { GitIndicator, type GitOutcome, settledToolResults, useThreadGit } from './thread-git.tsx'
 
@@ -471,7 +472,9 @@ export function ThreadStatusBar({ messages, generating, projectTitle }: ThreadSt
   const refusals = useStore(stores.refusals)
   const risk = useStore(stores.sessionRisk)
   const incidents = useStore(stores.incidents)
-  const git = useThreadGit(`${settledToolResults(messages)}:${generating}`)
+  // A live session says its model; a stored thread has messages. A new thread has neither (#620).
+  const readable = useModelState() !== null || messages.length > 0
+  const git = useThreadGit(`${settledToolResults(messages)}:${generating}`, readable)
   return (
     <ThreadStatusView
       activity={describeActivity(messages, generating, disconnected)}
