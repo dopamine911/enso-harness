@@ -93,7 +93,8 @@ test('⚠ a screenshot that fails is a recorder-error line naming its cause, red
   const root = mkdtempSync(join(tmpdir(), 'arena-shot-'))
   const timeline = openTimeline(join(root, 'timeline.jsonl'), steppingClock())
   const redact = (text: string): string => text.replaceAll(SECRET, '[redacted]')
-  const shooter = createShooter({ directory: root, timeline, redact })
+  // The second try's pause (#665) is the test's: a camera that fails twice, with no real wait.
+  const shooter = createShooter({ directory: root, timeline, redact, sleep: (): Promise<void> => Promise.resolve() })
   const url = `http://127.0.0.1:5178/?thread=${THREAD}`
 
   // No page yet: nothing taken, nothing said — the run has no picture to miss.
