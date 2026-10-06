@@ -103,14 +103,18 @@ label or placeholder. Start with \`read\`, which returns the page's accessibilit
 A target may add "exact": true and "nth": <index> when a name matches more than one element.
 Everything on screen is recorded, so text that looks like a credential is refused, not typed.
 
-While Enso works, wait for it to show you something rather than sleeping a fixed time:
+While Enso works, wait for it to need you rather than sleeping a fixed time:
 
-    {"action":"wait","until":"change","ms":60000}
+    {"action":"wait","until":"attention","ms":60000}
 
-returns as soon as the page differs from what you last saw — your last \`read\`, or the page just after
-your last click, fill or key press — with \`"changed": true\`: a question for you, a reply, the run
-ending. After \`ms\` (at most a minute) with nothing new it says \`"changed": false\`. Then \`read\` to
-see what changed. A plain \`{"action":"wait","ms":…}\` sleeps the whole time.
+returns when Enso needs you or is done — \`"attention"\` says which: \`"question"\` (it asks you
+something: answer it), \`"idle"\` (its run ended, finished or failed), \`"disconnected"\` (the server
+went), \`"dialog"\` (a browser dialog is open). It passes over Enso merely working, so send it right
+after your click. After \`ms\` (at most a minute) with none of those, it returns without
+\`"attention"\`: wait again. Then \`read\` to see the page.
+
+\`{"action":"wait","until":"change","ms":…}\` returns on any change to the page since you last saw
+it, Enso's own progress included. A plain \`{"action":"wait","ms":…}\` sleeps the whole time.
 
 # Notes — write them when they happen, not at the end
 

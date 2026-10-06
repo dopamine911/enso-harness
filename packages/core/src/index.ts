@@ -74,6 +74,7 @@ export {
   EnsoThreadGit,
 } from './git-state.ts'
 export { EnsoThreadPages } from './thread-pages.ts'
+export { THREAD_STATUS_WORDS } from './thread-status-words.ts'
 export {
   DEFAULT_GUARD_POLICY,
   ENSO_GUARD_DENIAL_ENTRY,

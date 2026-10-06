@@ -1,3 +1,4 @@
+import { THREAD_STATUS_WORDS } from '@enso/core'
 import { redactJudgeText } from '@enso/core/judge'
 import type { ArenaNoteKind } from './timeline.ts'
 
@@ -41,10 +42,11 @@ export type ArenaAction =
   | { readonly action: 'read' }
   | { readonly action: 'screenshot' }
   /**
-   * A fixed sleep, or with `until: 'change'` (#637) a wait that returns as soon as the page differs
-   * from the agent's last read — `ms` its limit — and says which: `changed`, `waitedMs`.
+   * A fixed sleep; or with `until` a wait on the page, `ms` its limit: `'change'` (#637) returns as
+   * soon as the page differs from what the agent last saw, `'attention'` (#648) once Enso needs the
+   * agent or is done. Either says `changed`, `waitedMs`, and for attention which (`attention`).
    */
-  | { readonly action: 'wait'; readonly ms: number; readonly until?: 'change' }
+  | { readonly action: 'wait'; readonly ms: number; readonly until?: ArenaWaitUntil }
   | { readonly action: 'back' }
   | { readonly action: 'reload' }
   | {
@@ -67,12 +69,17 @@ export type ArenaAction =
 /** The longest single `wait`: a run that needs longer waits again, and the timeline shows it waited. */
 export const LONGEST_WAIT_MS = 60_000
 
-/** How a wait until change is worded on the timeline — and how the friction tells it from a fixed sleep. */
-const CHANGE_WAIT = 'wait until change'
+/** What a wait on the page waits for: any change (#637), or Enso needing the agent (#648). */
+export type ArenaWaitUntil = 'change' | 'attention'
+const WAIT_UNTIL: readonly ArenaWaitUntil[] = ['change', 'attention']
+const isWaitUntil = (value: unknown): value is ArenaWaitUntil => WAIT_UNTIL.some((kind) => kind === value)
 
-/** True for a timeline detail of a wait until change, never a fixed sleep's. */
-export function isChangeWait(detail: string): boolean {
-  return detail.startsWith(CHANGE_WAIT)
+/** How a wait on the page is worded on the timeline — and how the friction tells it from a fixed sleep. */
+const PAGE_WAIT = 'wait until'
+
+/** True for a timeline detail of a wait on the page (either kind), never a fixed sleep's. */
+export function isPageWait(detail: string): boolean {
+  return detail.startsWith(`${PAGE_WAIT} `)
 }
 
 /**
@@ -103,33 +110,94 @@ export function pageForChange(page: string): string {
     .join('\n')
 }
 
-/** What a wait until change came to: the page differed after `waitedMs`, or the limit passed with none. */
-export interface ArenaChangeWait {
+/** A native dialog as a wait sees the page: it blocks the page, so it is the page. */
+export function dialogForChange(type: string, message: string): string {
+  return `${DIALOG_PAGE}${type}: ${message}`
+}
+const DIALOG_PAGE = 'dialog '
+
+/** Why Enso needs the agent (#648): pi asks, the run ended (done or failed), the server went, a browser dialog. */
+export type ArenaAttention = 'question' | 'idle' | 'disconnected' | 'dialog'
+
+/**
+ * What on the page needs the agent, read off the status bar in Enso's own words (core's
+ * `THREAD_STATUS_WORDS`, which the bar renders): a question waiting, or the run at rest —
+ * `idle` after a reply or a failure, `disconnected` once the follow ended. Undefined while Enso works.
+ */
+export function attentionOf(page: string): ArenaAttention | undefined {
+  if (page.startsWith(DIALOG_PAGE)) return 'dialog'
+  const bar = linesUnder(page, `"${THREAD_STATUS_WORDS.region}":`)
+  if (bar.includes(`- status: ${THREAD_STATUS_WORDS.questionWaiting}`)) return 'question'
+  if (bar.includes(`- text: ${THREAD_STATUS_WORDS.idle}`)) return 'idle'
+  if (bar.includes(`- text: ${THREAD_STATUS_WORDS.disconnected}`)) return 'disconnected'
+  return undefined
+}
+
+/** The lines indented under the first line ending with `header`, trimmed: one region of a page read. */
+function linesUnder(page: string, header: string): string[] {
+  const lines = page.split('\n')
+  const start = lines.findIndex((line) => line.trimEnd().endsWith(header))
+  if (start === -1) return []
+  const indentOf = (line: string): number => line.length - line.trimStart().length
+  const headerIndent = indentOf(lines[start] ?? '')
+  const end = lines.findIndex((line, index) => index > start && indentOf(line) <= headerIndent)
+  return lines.slice(start + 1, end === -1 ? undefined : end).map((line) => line.trim())
+}
+
+/** What a wait on the page came to: whether the page changed, after `waitedMs`, and — for attention — why it returned. */
+export interface ArenaPageWait {
   readonly changed: boolean
   readonly waitedMs: number
+  readonly attention?: ArenaAttention
 }
 
 /**
- * Look every `pollMs` until `look()` differs from `baseline`, or `ms` runs out (#637). `look` is the
- * page as `pageForChange` words it, or the native dialog blocking it; `sleep` and `now` are the
- * page's clock, injected so both outcomes can be tested without a browser.
+ * Look every `pollMs` until the page answers `until`, or `ms` runs out. `look` is the page as
+ * `pageForChange` words it (or `dialogForChange`); `sleep` and `now` are the page's clock, injected
+ * so the outcomes can be tested without a browser.
+ *
+ * `change` (#637): the first look that differs from `baseline`.
+ *
+ * `attention` (#648): a look that differs and needs the agent. ⚠ Not every such look does — measured,
+ * a wait sent with its own click returned on Enso merely starting, and the agent gave up on it:
+ * - an attention state the baseline did not have returns at once;
+ * - `idle` again returns only after the wait has seen Enso work. After Start the baseline is often
+ *   already `idle` — the run not begun — and the page changes while still idle as the dialog
+ *   closes; the run's end is `idle` again;
+ * - a `question` again returns on any change. A question stands until answered and the page holds
+ *   still while it waits (measured, #637), so a page that changed and still asks is the NEXT
+ *   question: after an approval, a quick tool runs and the next card arrives inside one look —
+ *   live, the wait had sat out its minute behind that card.
+ * A run begun and ended between two looks is missed: the wait then runs to its limit.
  */
-export async function waitForPageChange(options: {
+export async function waitForPage(options: {
+  readonly until: ArenaWaitUntil
   readonly baseline: string
   readonly look: () => Promise<string>
   readonly sleep: (ms: number) => Promise<void>
   readonly ms: number
   readonly pollMs: number
   readonly now?: () => number
-}): Promise<ArenaChangeWait> {
+}): Promise<ArenaPageWait> {
   const now = options.now ?? Date.now
   const started = now()
   const waited = (): number => now() - started
+  const startedIn = attentionOf(options.baseline)
+  let changed = false
+  let sawWork = startedIn === undefined
   while (waited() < options.ms) {
     await options.sleep(Math.min(options.pollMs, options.ms - waited()))
-    if ((await options.look()) !== options.baseline) return { changed: true, waitedMs: waited() }
+    const page = await options.look()
+    if (page === options.baseline) continue
+    changed = true
+    if (options.until === 'change') return { changed, waitedMs: waited() }
+    const attention = attentionOf(page)
+    if (attention === undefined) sawWork = true
+    else if (sawWork || attention !== startedIn || attention === 'question') {
+      return { changed, waitedMs: waited(), attention }
+    }
   }
-  return { changed: false, waitedMs: waited() }
+  return { changed, waitedMs: waited() }
 }
 
 /** What a wait until change compares with, kept as the agent acts (#637). */
@@ -293,8 +361,10 @@ const ACTION_PARSERS: Readonly<Record<string, (request: Fields) => ArenaActionPa
     const ms = request.ms
     if (typeof ms !== 'number' || !Number.isFinite(ms) || ms < 0) return fail('wait takes "ms"')
     const until = request.until
-    if (until !== undefined && until !== 'change') return fail('wait "until" takes "change"')
-    return accept({ action: 'wait', ms: Math.min(ms, LONGEST_WAIT_MS), ...(until === 'change' ? { until } : {}) })
+    if (until !== undefined && !isWaitUntil(until)) {
+      return fail(`wait "until" takes ${WAIT_UNTIL.map((kind) => `"${kind}"`).join(' or ')}`)
+    }
+    return accept({ action: 'wait', ms: Math.min(ms, LONGEST_WAIT_MS), ...(until === undefined ? {} : { until }) })
   },
   note: parseNote,
   stop: (request) => {
@@ -368,7 +438,7 @@ export function describeArenaAction(action: ArenaAction, secretValues: readonly 
     case 'press':
       return `press ${action.key}${action.target === undefined ? '' : ` in ${describeTarget(action.target)}`}`
     case 'wait':
-      return action.until === 'change' ? `${CHANGE_WAIT}, up to ${action.ms} ms` : `wait ${action.ms} ms`
+      return action.until === undefined ? `wait ${action.ms} ms` : `${PAGE_WAIT} ${action.until}, up to ${action.ms} ms`
     case 'note':
       return `note ${action.note}`
     case 'stop':

@@ -2,16 +2,19 @@ import { expect, test } from 'bun:test'
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { THREAD_STATUS_WORDS } from '@enso/core'
 import { ensoProjectsDir, projectIdOf, projectSnapshotsDir, realpathOrSelf } from '@enso/core/paths'
 import {
   type ArenaAction,
+  attentionOf,
   createChangeBaseline,
   describeArenaAction,
+  dialogForChange,
   LONGEST_WAIT_MS,
   pageForChange,
   parseArenaAction,
-  waitForPageChange,
   typedSecretRefusal,
+  waitForPage,
 } from '../actions.ts'
 import { collectEnsoEvidence } from '../evidence.ts'
 import { foldArenaManifest } from '../manifest.ts'
@@ -140,10 +143,17 @@ test('a wait until change is parsed, capped and worded as one; any other `until`
   })
   expect(parseArenaAction({ action: 'wait', ms: 1000, until: 'idle' })).toEqual({
     ok: false,
-    error: 'wait "until" takes "change"',
+    error: 'wait "until" takes "change" or "attention"',
+  })
+  expect(parseArenaAction({ action: 'wait', ms: 1000, until: 'attention' })).toEqual({
+    ok: true,
+    action: { action: 'wait', ms: 1000, until: 'attention' },
   })
   expect(describeArenaAction({ action: 'wait', ms: 60_000, until: 'change' }, [])).toBe(
     'wait until change, up to 60000 ms',
+  )
+  expect(describeArenaAction({ action: 'wait', ms: 60_000, until: 'attention' }, [])).toBe(
+    'wait until attention, up to 60000 ms',
   )
   expect(describeArenaAction({ action: 'wait', ms: 30_000 }, [])).toBe('wait 30000 ms')
 })
@@ -176,7 +186,8 @@ function sleepingClock(): { readonly now: () => number; readonly sleep: (ms: num
 
 test('⚠ a wait until change returns at the first look that differs, and at its limit unchanged (#637)', async () => {
   const looks = ['same', 'same', 'card']
-  const changed = await waitForPageChange({
+  const changed = await waitForPage({
+    until: 'change',
     baseline: 'same',
     look: () => Promise.resolve(looks.shift() ?? 'card'),
     ms: 60_000,
@@ -187,7 +198,8 @@ test('⚠ a wait until change returns at the first look that differs, and at its
   expect(looks).toEqual([])
 
   // Nothing moves: it waits out the limit exactly, the last sleep cut to fit.
-  const unchanged = await waitForPageChange({
+  const unchanged = await waitForPage({
+    until: 'change',
     baseline: 'same',
     look: () => Promise.resolve('same'),
     ms: 2500,
@@ -207,7 +219,8 @@ test('⚠ a card that appears between the agent’s move and its wait is a chang
   page = 'the page, prompt typed'
   await lastSeen.moved()
   page = 'the page, prompt typed, a card' // Enso asks while the agent is still thinking.
-  const waited = await waitForPageChange({
+  const waited = await waitForPage({
+    until: 'change',
     baseline: await lastSeen.baseline(),
     look: () => Promise.resolve(page),
     ms: 60_000,
@@ -221,6 +234,89 @@ test('⚠ a card that appears between the agent’s move and its wait is a chang
   failing.saw('stale')
   await failing.moved()
   await expect(failing.baseline()).rejects.toThrow('the page closed')
+})
+
+/** A page read with the bar as Enso renders it: the activity word, and the question when one waits. */
+const barPage = (activity: string, question = false, chat = '  - paragraph: hello'): string =>
+  [
+    '- tabpanel "Chat":',
+    chat,
+    `- contentinfo "${THREAD_STATUS_WORDS.region}":`,
+    `  - text: ${activity}`,
+    ...(question ? [`  - status: ${THREAD_STATUS_WORDS.questionWaiting}`] : []),
+    '  - text: 1 prompt 2 tool calls',
+  ].join('\n')
+
+test('the bar says what needs the agent: a question, the run at rest, the server gone, a browser dialog (#648)', () => {
+  expect(attentionOf(barPage('running write', true))).toBe('question')
+  expect(attentionOf(barPage(THREAD_STATUS_WORDS.idle))).toBe('idle')
+  expect(attentionOf(barPage(THREAD_STATUS_WORDS.disconnected))).toBe('disconnected')
+  expect(attentionOf(dialogForChange('alert', 'Game over'))).toBe('dialog')
+  for (const working of ['working', 'thinking', 'responding', 'running bash']) {
+    expect(attentionOf(barPage(working))).toBeUndefined()
+  }
+  // The words count in the bar only: "idle" said in the chat is the chat's.
+  expect(attentionOf(barPage('working', false, '  - text: idle'))).toBeUndefined()
+})
+
+/** A wait until attention over these looks, one a second, from `baseline`. */
+function attentionWait(baseline: string, looks: readonly string[]): ReturnType<typeof waitForPage> {
+  const queue = [...looks]
+  return waitForPage({
+    until: 'attention',
+    baseline,
+    look: () => Promise.resolve(queue.length > 1 ? (queue.shift() ?? '') : (queue[0] ?? '')),
+    ms: 10_000,
+    pollMs: 1000,
+    ...sleepingClock(),
+  })
+}
+
+// ⚠ #648, measured: a change wait sent with its own click returned on Enso merely starting, and the
+// agent gave up on it. Attention returns when there is something for the agent — and only then.
+test('⚠ a wait until attention passes over Enso working, and returns at the card or the run’s end (#648)', async () => {
+  const idle = barPage(THREAD_STATUS_WORDS.idle)
+  // Start just clicked: the baseline is idle, the run not begun. Working is no return; the card is.
+  expect(
+    await attentionWait(idle, [barPage('working'), barPage('running write'), barPage('running write', true)]),
+  ).toEqual({
+    changed: true,
+    waitedMs: 3000,
+    attention: 'question',
+  })
+  // The same `idle` as the baseline returns once Enso has been seen working: the run's end.
+  const done = barPage(THREAD_STATUS_WORDS.idle, false, '  - paragraph: the reply')
+  expect(await attentionWait(idle, [barPage('responding'), done])).toEqual({
+    changed: true,
+    waitedMs: 2000,
+    attention: 'idle',
+  })
+  // A state the baseline did not have returns at once, work seen or not.
+  expect(await attentionWait(barPage('running bash', true), [barPage(THREAD_STATUS_WORDS.disconnected)])).toMatchObject(
+    {
+      attention: 'disconnected',
+      waitedMs: 1000,
+    },
+  )
+})
+
+// ⚠ Live (#648): after the agent's Yes the baseline still showed the card; the tool ran inside one
+// look and the next card came — same `question`, no work seen — and the wait sat out its minute.
+test('⚠ the next card after an answer returns; idle changing as the dialog closes does not; a still page waits out the limit (#648)', async () => {
+  const firstCard = barPage('running write', true, '  - group: write a.md')
+  const nextCard = barPage('running write', true, '  - group: write a.md\n  - group: write b.md')
+  expect(await attentionWait(firstCard, [nextCard])).toEqual({ changed: true, waitedMs: 1000, attention: 'question' })
+  // Start just clicked: the dialog closes while the thread is still idle — not the run's end.
+  const idleDialog = barPage(THREAD_STATUS_WORDS.idle, false, '  - dialog "Start a session"')
+  const idleClosed = barPage(THREAD_STATUS_WORDS.idle, false, '  - paragraph: the prompt')
+  expect(await attentionWait(idleDialog, [idleClosed])).toEqual({ changed: true, waitedMs: 10_000 })
+  expect(await attentionWait(idleDialog, [idleClosed, barPage('working'), firstCard])).toMatchObject({
+    attention: 'question',
+    waitedMs: 3000,
+  })
+  // A card nobody answers: the page holds still, and the wait runs to its limit unchanged.
+  expect(await attentionWait(firstCard, [firstCard])).toEqual({ changed: false, waitedMs: 10_000 })
+  expect(await attentionWait(firstCard, [dialogForChange('confirm', 'Leave?')])).toMatchObject({ attention: 'dialog' })
 })
 
 test('what the agent typed reaches the timeline redacted', () => {

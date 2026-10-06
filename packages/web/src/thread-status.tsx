@@ -5,6 +5,7 @@ import {
   type EnsoSessionUsage,
   openIncidentOf,
   type ProviderRefusalClass,
+  THREAD_STATUS_WORDS,
 } from '@enso/core'
 import type { UIMessage } from '@tanstack/ai-client'
 import { automaticPartsForMessage, selectMessageUI } from '@tanstack/ai-client/ui'
@@ -155,8 +156,13 @@ export function countThread(
   return { prompts, toolCalls, refused, failed }
 }
 
-/** `running read` — the tool named as pi names it, so it matches the transcript's step row. */
+/**
+ * `running read` — the tool named as pi names it, so it matches the transcript's step row. The
+ * resting words are core's (#648): the arena's attention wait reads them back off the page.
+ */
 function activityLabel(activity: Activity): string {
+  if (activity.kind === 'idle') return THREAD_STATUS_WORDS.idle
+  if (activity.kind === 'disconnected') return THREAD_STATUS_WORDS.disconnected
   return activity.kind === 'running' ? `running ${activity.tool}` : activity.kind
 }
 
@@ -366,7 +372,7 @@ function QuestionWaiting({ waiting }: { waiting: boolean | undefined }): React.R
   return (
     <>
       <span role="status" className="sr-only">
-        {waiting ? 'a question is waiting' : ''}
+        {waiting ? THREAD_STATUS_WORDS.questionWaiting : ''}
       </span>
       {waiting ? (
         <span
@@ -374,7 +380,8 @@ function QuestionWaiting({ waiting }: { waiting: boolean | undefined }): React.R
           className="flex items-center gap-2 font-medium text-human"
           title="pi is waiting for your answer — it is in the Chat view"
         >
-          <span className="size-2 shrink-0 rounded-full bg-human signal:shadow-glow-human" />a question is waiting
+          <span className="size-2 shrink-0 rounded-full bg-human signal:shadow-glow-human" />
+          {THREAD_STATUS_WORDS.questionWaiting}
         </span>
       ) : null}
     </>
@@ -402,7 +409,7 @@ export function ThreadStatusView({
   return (
     <footer
       id="thread-status"
-      aria-label="thread status"
+      aria-label={THREAD_STATUS_WORDS.region}
       className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t px-5 py-2 font-mono text-xs text-muted-foreground"
     >
       <span
