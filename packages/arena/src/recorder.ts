@@ -675,13 +675,17 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
         if (action.target === undefined) await page.keyboard.press(action.key)
         else await locate(page, action.target).press(action.key, { timeout })
         return here()
-      case 'read':
-        lastRead = await pageNow()
+      case 'read': {
         // ⚠ An open native dialog blocks the page, the snapshot included: say the dialog instead.
         if (pendingDialog !== undefined) {
+          lastRead = await pageNow()
           return { ...here(), dialog: { type: pendingDialog.type(), message: redact(pendingDialog.message()) } }
         }
-        return { ...here(), page: await page.locator('body').ariaSnapshot({ timeout }) }
+        // One snapshot (PR #646 review): the page the agent reads is the wait's baseline too.
+        const snapshot = await page.locator('body').ariaSnapshot({ timeout })
+        lastRead = pageForChange(snapshot)
+        return { ...here(), page: snapshot }
+      }
       case 'screenshot':
         return { ...here(), screenshot: await shoot('requested') }
       case 'wait': {
