@@ -588,7 +588,8 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
   const relink = (): void => {
     if (options.linkedFrom === undefined) return
     const failed = (error: string): void => {
-      timeline.record({ kind: 'recorder-error', during: 'credential relink', error })
+      // Redacted like every other line the recorder writes: an error names paths today, but this is a credential file.
+      timeline.record({ kind: 'recorder-error', during: 'credential relink', error: redact(error) })
     }
     try {
       for (const relinked of reconcileLinkedFiles(options.home, options.linkedFrom)) {

@@ -5,6 +5,7 @@ import {
   mkdirSync,
   readFileSync,
   renameSync,
+  rmSync,
   statSync,
   symlinkSync,
   writeFileSync,
@@ -127,7 +128,13 @@ export function reconcileLinkedFiles(runHome: string, operatorHome: string): Are
     // the link throw. A rename onto the path replaces whatever is there, at once.
     const pendingLink = `${linked}.relink-${process.pid}`
     symlinkSync(source, pendingLink)
-    renameSync(pendingLink, linked)
+    try {
+      renameSync(pendingLink, linked)
+    } catch (error) {
+      // A rename that fails leaves no stray link behind; the caller hears why (PR #642 review).
+      rmSync(pendingLink, { force: true })
+      throw error
+    }
     relinked.push({ path: linked, outcome: newer ? 'returned' : 'operator-newer' })
   }
   return relinked
