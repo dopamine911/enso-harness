@@ -39,6 +39,11 @@ export interface FollowConnectionOptions {
    * starts a turn, so what must key on "a run answered this thread" keys on this, not on `busy`.
    */
   readonly onTurnStart?: () => void
+  /**
+   * Whether the page is going away (#664; `page-leaving.ts` by default): a stream the browser cuts
+   * as the page leaves is not a failed follow. Test seam.
+   */
+  readonly leaving?: () => boolean
 }
 ```
 

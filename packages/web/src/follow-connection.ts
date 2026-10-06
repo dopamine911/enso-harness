@@ -24,6 +24,7 @@ import { Compile } from 'typebox/compile'
 import { Check } from 'typebox/value'
 import type { FetchLike } from './browser-logging.ts'
 import { FOLLOW_ENDED_CUSTOM_EVENT } from './custom-event-router.ts'
+import { pageLeaving } from './page-leaving.ts'
 import { type AguiIdentifiers, observationToAguiEvents } from './to-agui.ts'
 
 /**
@@ -105,6 +106,11 @@ export interface FollowConnectionOptions {
    * starts a turn, so what must key on "a run answered this thread" keys on this, not on `busy`.
    */
   readonly onTurnStart?: () => void
+  /**
+   * Whether the page is going away (#664; `page-leaving.ts` by default): a stream the browser cuts
+   * as the page leaves is not a failed follow. Test seam.
+   */
+  readonly leaving?: () => boolean
 }
 
 /** One run this adapter has open: its AG-UI ids and, once the receipt is in, the acquisition it took or queued behind. */
@@ -358,6 +364,7 @@ export type IncidentResolveOutcome =
 
 export function createFollowConnection(options: FollowConnectionOptions): FollowConnection {
   const { threadId } = options
+  const leaving = options.leaving ?? pageLeaving
   // The global is looked up per call, not captured: a thread minted at module load (the
   // page's first) must still see a `fetch` a test installs afterwards (#118).
   const fetchImpl: (input: string, init?: RequestInit) => Promise<Response> =
@@ -651,7 +658,8 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     if (opening.kind === 'refused') {
       // A throwing fetch is the same fact as a refusing one (#274) — unless the CALLER is the
       // one leaving, in which case there is nothing to report and the cancel is theirs to see.
-      if (!abort.aborted) yield* followNeverOpened(opening.detail)
+      // The page leaving is no refusal either (#664): the browser cancelled the open, not the server.
+      if (!abort.aborted && !leaving()) yield* followNeverOpened(opening.detail)
       throw opening.failure
     }
     const frames = readSseFrames(opening.body, abort)
@@ -664,7 +672,9 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
           if (admitted(raw)) observe(raw)
         }
       } catch (error) {
-        if (!abort.aborted) problem('the follow failed: {error}', { error: String(error) })
+        // ⚠ #664: a stream the browser cut because the page is leaving is not a failure — every
+        // reload logged "the follow failed: TypeError: network error" for each followed thread.
+        if (!abort.aborted && !leaving()) problem('the follow failed: {error}', { error: String(error) })
       } finally {
         ended = true
         // The follow closed under open runs: the client would otherwise wait forever.

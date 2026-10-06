@@ -901,6 +901,36 @@ test('a fetch that throws is the same fact, and this page leaving is not (#274)'
   expect(leaving.problems).toEqual([])
 })
 
+/** A follow that opens, then has its stream cut — what the browser does to every stream when the page leaves. */
+async function followCutMidStream(leaving: boolean): Promise<string[]> {
+  const cut = new ReadableStream<Uint8Array>({
+    start: (controller: ReadableStreamDefaultController<Uint8Array>): void =>
+      controller.error(new TypeError('network error')),
+  })
+  const problems: string[] = []
+  const connection = createFollowConnection({
+    threadId: 't1',
+    fetch: () => Promise.resolve(new Response(cut, { status: 200 })),
+    onProblem: (problem: unknown) => problems.push(String(problem)),
+    leaving: () => leaving,
+  })
+  try {
+    for await (const chunk of connection.subscribe()) void chunk
+  } catch {
+    // The stream's end reaches the caller either way; what is said about it is the question.
+  }
+  return problems
+}
+
+// ⚠ #664, from an arena run: every reload logged "the follow failed: TypeError: network error" —
+// the browser cut the stream because the page was leaving, and nothing had aborted it.
+test('⚠ a stream cut because the page is leaving is said nowhere; cut while the page stays, it is a failure (#664)', async () => {
+  expect(await followCutMidStream(false)).toEqual([
+    expect.stringContaining('the follow failed: TypeError: network error'),
+  ])
+  expect(await followCutMidStream(true)).toEqual([])
+})
+
 // ⚠ The race the latch does not cover (PR #301 review): released while the socket is still
 // OPENING. The abort lands on the fetch itself, and its rejection had nowhere to go but out of
 // the generator, at whoever is iterating — a thrown AbortError for the page's own silent close,
