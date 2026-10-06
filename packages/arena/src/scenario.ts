@@ -79,6 +79,29 @@ const COMPARE_SCENARIO: ArenaScenario = {
 }
 
 /**
+ * Work interrupted and picked up again: what no other scenario reaches. Stopping a request midway is
+ * the stop control; coming back later is a reload and a resume from the rail (what persists, what
+ * the page restores); branching off an earlier request is "fork from here"; and another model for
+ * one request is the model control mid-thread. Outcomes, never controls.
+ */
+const RESUME_SCENARIO: ArenaScenario = {
+  id: 'resume',
+  assignment: [
+    'Build a small command-line password generator with options for length and character sets.',
+    'Partway through one of your requests, while Enso is still working on it, stop it and redirect',
+    'it to something different. Then come back to the work as if returning the next day: reload',
+    'the page and carry on in the same conversation, checking nothing was lost. Branch off from one',
+    'of your earlier requests to try a variant, without losing the original line of work. Use a',
+    "different model for at least one request. Use Enso's UI to manage the work. When something is",
+    'difficult, missing, or confusing, record what you were trying to do, what happened, and what',
+    'you wish the interface had provided.',
+  ].join(' '),
+  budgetMinutes: 120,
+  sampleIntervalMs: 30_000,
+  traceChunkMs: 5 * 60_000,
+}
+
+/**
  * How the agent under test reaches the UI: the agent runner's one tool (`tool`), or the
  * `bun run arena act` command when a person or an unrestricted agent drives the run (`command`).
  */
@@ -315,5 +338,5 @@ export function arenaActCommand(outDirectory?: string): string {
 
 /** Every scenario by id: what `bun run arena start --scenario <id>` accepts. */
 export const ARENA_SCENARIOS: Readonly<Record<string, ArenaScenario>> = Object.fromEntries(
-  [SNAKE_SCENARIO, ITERATE_SCENARIO, COMPARE_SCENARIO].map((scenario) => [scenario.id, scenario]),
+  [SNAKE_SCENARIO, ITERATE_SCENARIO, COMPARE_SCENARIO, RESUME_SCENARIO].map((scenario) => [scenario.id, scenario]),
 )
