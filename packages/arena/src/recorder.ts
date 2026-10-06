@@ -1,8 +1,9 @@
 import { spawnSync } from 'node:child_process'
-import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { redactJudgeText } from '@enso/core/judge'
 import { isListening } from '@enso/core/loopback'
+import { ensoProjectsDir, projectIdOf, projectTreesDir, realpathOrSelf } from '@enso/core/paths'
 import { type Browser, type BrowserContext, chromium, type Dialog, type Locator, type Page } from '@playwright/test'
 import type { Subprocess } from 'bun'
 import {
@@ -18,6 +19,7 @@ import { collectEnsoEvidence, threadIdsShown } from './evidence.ts'
 import { type ArenaEvidence, foldArenaManifest } from './manifest.ts'
 import { ARENA_GRACE_MS, type ArenaBounds, createRunControl, ensoSpendUsd } from './run-control.ts'
 import { arenaSecretSource, arenaSecretValues, runHomeOf } from './run-home.ts'
+import { ensoBuildOf, sampleWorkspaces, threadHistoriesIn } from './run-state.ts'
 import type { ArenaScenario } from './scenario.ts'
 import { type ArenaScore, writeArenaScore } from './score.ts'
 import { scanRunForSecrets } from './secret-scan.ts'
@@ -150,12 +152,6 @@ async function waitForWeb(timeoutMs: number): Promise<boolean> {
     await Bun.sleep(500)
   }
   return false
-}
-
-/** The commit the checkout is at: the build under test, for comparing runs. */
-function checkoutCommit(repoRoot: string): string | undefined {
-  const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, encoding: 'utf8' })
-  return head.status === 0 ? head.stdout.trim() : undefined
 }
 
 /** A fresh git repository for the agent: nothing in it, so everything in it is the run's. */
@@ -406,13 +402,13 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
   const secrets = arenaSecretSource(options.home)
   const redact = (text: string): string => redactJudgeText(text, secrets())
   const timeline = openTimeline(join(runDirectory, 'timeline.jsonl'))
-  const commit = checkoutCommit(options.repoRoot)
+  const ensoBuild = ensoBuildOf(options.repoRoot)
   timeline.record({
     kind: 'run-start',
     scenario: scenario.id,
     project,
     home: options.home,
-    ...(commit === undefined ? {} : { ensoCommit: commit }),
+    ...(ensoBuild === undefined ? {} : { ensoBuild }),
   })
 
   // ── Screenshots, over a page that does not exist until the browser is up ───────────────────
@@ -570,7 +566,19 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
     stopReason ??= reason
     settleStop(stopReason)
   }
-  const sampler = setInterval(() => void shoot('sample'), scenario.sampleIntervalMs)
+  // The work beside each periodic screenshot (#608): the project and the run's thread trees, sampled
+  // at the same tick so a screenshot and the files it shows are one moment of the filesystem timeline.
+  const workspaces = (): string[] => {
+    const trees = projectTreesDir(ensoProjectsDir(options.home), projectIdOf(realpathOrSelf(project)))
+    const threadTrees = existsSync(trees) ? readdirSync(trees).map((threadId) => join(trees, threadId)) : []
+    return [project, ...threadTrees]
+  }
+  /** A periodic sample: the screenshot and the work at the same tick, so neither is without the other. */
+  const takeSample = async (): Promise<void> => {
+    timeline.record({ kind: 'workspace-sample', workspaces: sampleWorkspaces(runDirectory, workspaces()) })
+    await shoot('sample')
+  }
+  const sampler = setInterval(() => void takeSample(), scenario.sampleIntervalMs)
   let queue: Promise<unknown> = Promise.resolve()
   const serialized = <Result>(work: () => Promise<Result>): Promise<Result> => {
     const next = queue.then(work, work)
@@ -752,7 +760,7 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
   const control = options.driver === undefined ? serveControl((body) => act(body, 'control')) : undefined
   controlRecord = controlRecordOf(control, runDirectory, options.home)
   publishControl(enso?.pid)
-  await shoot('sample')
+  await takeSample()
   process.stdout.write(`arena: run ${runId} is live — ${runDirectory}\n`)
   const driverDone =
     options.driver === undefined
@@ -798,7 +806,8 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
   await stopEnso()
   // ⚠ After Enso is stopped and the last chunk written: every file the run keeps is final (#610).
   const secretScan = scanRunForSecrets(runDirectory, secrets())
-  const manifest = foldArenaManifest({ runId, events: readTimeline(timeline.path), evidence, secretScan })
+  const histories = threadHistoriesIn(join(ensoDirectory, 'evidence'))
+  const manifest = foldArenaManifest({ runId, events: readTimeline(timeline.path), evidence, secretScan, histories })
   writeFileSync(join(runDirectory, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`)
   process.stdout.write(`arena: stopped (${reason}) — ${join(runDirectory, 'manifest.json')}\n`)
   return scoreAndSay(runDirectory, redact)

@@ -1,4 +1,4 @@
-import { type ArenaScore, readArenaScoreInput, scoreArenaRun } from './score.ts'
+import { type ArenaScore, scoreRunDirectory } from './score.ts'
 
 /**
  * Two arena runs side by side (#556 B6, #611): `bun run arena compare <runA> <runB>`. The scenario is
@@ -9,11 +9,6 @@ import { type ArenaScore, readArenaScoreInput, scoreArenaRun } from './score.ts'
  * ⚠ IT READS, IT DOES NOT WRITE: no `score.json` is rewritten. Comparing is not re-scoring a run on
  * disk; `arena score <run>` is that, on purpose.
  */
-
-/** Score a run directory the way `arena score` does, without writing the score beside it. */
-function scoreRunDirectory(runDirectory: string): ArenaScore {
-  return scoreArenaRun(readArenaScoreInput(runDirectory))
-}
 
 /** Both runs' scores read from their directories, compared. */
 export function compareRunDirectories(first: string, second: string): string {

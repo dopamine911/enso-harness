@@ -1,4 +1,6 @@
 import { ARENA_UI_TOOL } from './actions.ts'
+import type { ArenaEnsoBuild, ArenaHistoryMessage, ArenaTurnPlace, ArenaWorkspaceSample } from './run-state.ts'
+import { turnAt } from './run-state.ts'
 import type { ArenaSecretScan } from './secret-scan.ts'
 import type { ArenaActionSource, ArenaEvent, ArenaNoteKind, ArenaShotCause } from './timeline.ts'
 
@@ -43,6 +45,15 @@ export interface ArenaShotIndexEntry extends ArenaStamped {
   readonly cause: ArenaShotCause
   readonly path: string
   readonly url?: string
+  /** The turn of its thread the screenshot shows (#608), from the thread's collected history. */
+  readonly turn?: ArenaTurnPlace
+}
+
+/** The work at one sample (#608): when, and each workspace's counts and fingerprint. */
+export interface ArenaFilesystemSample {
+  readonly at: string
+  readonly elapsedMs: number
+  readonly workspaces: readonly ArenaWorkspaceSample[]
 }
 
 export interface ArenaThreadSpan {
@@ -88,7 +99,8 @@ export interface ArenaManifest {
   readonly runId: string
   readonly scenario: string
   readonly project: string
-  readonly ensoCommit?: string
+  /** The checkout the run's Enso came from: its commit, and whether it was dirty (#608). */
+  readonly ensoBuild?: ArenaEnsoBuild
   readonly startedAt?: string
   readonly stoppedAt?: string
   /** Why the run ended — or `not stopped`: the recorder died, and this manifest was folded after. */
@@ -96,6 +108,8 @@ export interface ArenaManifest {
   readonly screenshots: readonly ArenaShotIndexEntry[]
   readonly traceChunks: readonly string[]
   readonly threads: readonly ArenaThreadSpan[]
+  /** The work over time (#608): one sample per periodic screenshot, of the project and its thread trees. */
+  readonly filesystem: readonly ArenaFilesystemSample[]
   readonly actions: { readonly total: number; readonly failed: number }
   readonly observed: {
     readonly consoleErrors: number
@@ -129,12 +143,16 @@ export interface ArenaRecorderError {
   readonly error: string
 }
 
-/** What the fold needs beyond the timeline: the run's id, the evidence collected at the end, the stop's secret scan. */
+/**
+ * What the fold needs beyond the timeline: the run's id, the evidence collected at the end, the stop's
+ * secret scan, and each thread's history (`threadHistoriesIn`), which places each screenshot on a turn.
+ */
 export interface ArenaManifestInput {
   readonly runId: string
   readonly events: readonly ArenaEvent[]
   readonly evidence: readonly ArenaEvidence[]
   readonly secretScan?: ArenaSecretScan
+  readonly histories?: ReadonlyMap<string, readonly ArenaHistoryMessage[]>
 }
 
 interface ThreadTally {
@@ -159,20 +177,38 @@ function threadSpans(events: readonly ArenaEvent[]): ArenaThreadSpan[] {
   return [...threads].map(([threadId, tally]) => ({ threadId, ...tally }))
 }
 
-/** The screenshot index: every capture, sampled or event-driven, with the page it showed. */
-function shotIndex(events: readonly ArenaEvent[]): ArenaShotIndexEntry[] {
-  return events.flatMap((event): ArenaShotIndexEntry[] =>
-    event.kind === 'screenshot'
-      ? [
-          {
-            at: event.at,
-            elapsedMs: event.elapsedMs,
-            cause: event.cause,
-            path: event.path,
-            ...(event.page === undefined ? {} : { url: event.page.url }),
-            ...(event.page?.threadId === undefined ? {} : { threadId: event.page.threadId }),
-          },
-        ]
+/**
+ * The screenshot index: every capture, sampled or event-driven, with the page it showed and — when its
+ * thread's history was collected — the turn it falls in (#608). The recorder's clock and Enso's are
+ * the same machine's, so the two timestamps compare directly.
+ */
+function shotIndex(
+  events: readonly ArenaEvent[],
+  histories: ReadonlyMap<string, readonly ArenaHistoryMessage[]>,
+): ArenaShotIndexEntry[] {
+  return events.flatMap((event): ArenaShotIndexEntry[] => {
+    if (event.kind !== 'screenshot') return []
+    const threadId = event.page?.threadId
+    const history = threadId === undefined ? undefined : histories.get(threadId)
+    const turn = history === undefined ? undefined : turnAt(history, Date.parse(event.at))
+    return [
+      {
+        at: event.at,
+        elapsedMs: event.elapsedMs,
+        cause: event.cause,
+        path: event.path,
+        ...(event.page === undefined ? {} : { url: event.page.url }),
+        ...(threadId === undefined ? {} : { threadId }),
+        ...(turn === undefined ? {} : { turn }),
+      },
+    ]
+  })
+}
+
+function filesystemTimeline(events: readonly ArenaEvent[]): ArenaFilesystemSample[] {
+  return events.flatMap((event): ArenaFilesystemSample[] =>
+    event.kind === 'workspace-sample'
+      ? [{ at: event.at, elapsedMs: event.elapsedMs, workspaces: event.workspaces }]
       : [],
   )
 }
@@ -234,7 +270,13 @@ function boundaryOf(driver: ArenaDriverRecord, actionsBy: Record<ArenaActionSour
 }
 
 /** The manifest for a run, from its events in timeline order. */
-export function foldArenaManifest({ runId, events, evidence, secretScan }: ArenaManifestInput): ArenaManifest {
+export function foldArenaManifest({
+  runId,
+  events,
+  evidence,
+  secretScan,
+  histories = new Map(),
+}: ArenaManifestInput): ArenaManifest {
   const start = events.find((event) => event.kind === 'run-start')
   const stop = events.findLast((event) => event.kind === 'run-stop')
   const count = (kind: ArenaEvent['kind']): number => events.filter((event) => event.kind === kind).length
@@ -244,15 +286,16 @@ export function foldArenaManifest({ runId, events, evidence, secretScan }: Arena
     runId,
     scenario: start?.scenario ?? 'unknown',
     project: start?.project ?? 'unknown',
-    ...(start?.ensoCommit === undefined ? {} : { ensoCommit: start.ensoCommit }),
+    ...(start?.ensoBuild === undefined ? {} : { ensoBuild: start.ensoBuild }),
     driver,
     boundary: boundaryOf(driver, actionsBySource(events)),
     ...(start === undefined ? {} : { startedAt: start.at }),
     ...(stop === undefined ? {} : { stoppedAt: stop.at }),
     stopReason: stop?.reason ?? 'not stopped',
-    screenshots: shotIndex(events),
+    screenshots: shotIndex(events, histories),
     traceChunks: events.flatMap((event) => (event.kind === 'trace-chunk' ? [event.path] : [])),
     threads: threadSpans(events),
+    filesystem: filesystemTimeline(events),
     actions: { total: actions.length, failed: actions.filter((event) => event.outcome === 'failed').length },
     observed: {
       consoleErrors: count('console-error'),

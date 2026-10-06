@@ -215,6 +215,25 @@ mistakes or wishes the evidence does not support; those belong in the review onl
 
 Finish by adding a fifth section to \`review.md\`, **Bugs filed**, linking each issue you
 opened or commented on, and listing anything you decided not to file and why.
+
+Then record every item of section 3, whatever its class, in \`${run}/findings.json\`, the file
+the run's report reads:
+
+    {"gaps": [{
+      "title": "what goes wrong, in a line",
+      "classification": "defect" | "undiscoverable" | "agent-mistake" | "not-needed",
+      "reproduction": "the actions sent",
+      "impact": "what it cost the assignment",
+      "observed": "what the evidence shows",
+      "inferred": "what you believe the cause is (leave it out if you do not know)",
+      "workaround": "what was done instead (leave it out if nothing)",
+      "issue": "the issue that covers it, existing or the one you filed, as owner/name#N",
+      "evidence": [{"elapsedMs": 120000}, {"screenshot": "<a screenshot path from manifest.json>"}, {"threadId": "<thread id>"}]
+    }]}
+
+A defect needs its \`issue\`. \`bun run arena report ${run}\` checks every citation against the
+run: a second outside it, a screenshot it did not keep, or a thread it was not in marks that gap
+unverified.
 `
 }
 

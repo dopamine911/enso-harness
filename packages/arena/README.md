@@ -15,6 +15,7 @@ bun run arena act '{"action":"read"}'   # one UI action on a --manual run
 bun run arena manifest <run dir>    # fold the manifest again; after a recorder that died, collect Enso's evidence too
 bun run arena score <run dir>       # score a run again: its logs read for problems, and whether the UI was used
 bun run arena compare <run dir> <run dir>   # two runs side by side; reads only, rewrites nothing
+bun run arena report <run dir> [--run-tests]   # the application outcome apart from Enso's findings; the gaps' evidence checked
 ```
 
 `start` needs one of `--agent PROVIDER/MODEL` (a model the home is logged in to, through Enso's own
@@ -152,6 +153,32 @@ of the score are compared by the same rules. It prints:
 
 It writes nothing.
 
+## The report (#624)
+
+`bun run arena report <run dir>` writes `report.md` and `report.json`. It has two parts that never
+mix, since #556 asks for the app's completion to be reported apart from Enso's usability:
+
+- **Application outcome:** for the project and each thread's tree: its files (largest first), its
+  git history (a tree that is no repository of its own says so, rather than borrowing a parent's),
+  and the test files the agent wrote. `--run-tests` runs them: the package's `test` script if there
+  is one, else each file under bun (`*.test.*` through `bun test`, others as scripts). They are
+  agent-written code run after the run with no approval, so they get `PATH`, a throwaway `HOME` and
+  60 seconds each, never your environment. Their output is redacted with the run's secrets.
+- **Enso findings,** three kinds under their own headings:
+  - **Observed friction:** the score's friction and problems. Each friction moment links the
+    screenshot nearest it and the turn that screenshot shows.
+  - **The agent's account:** its wish, friction and retrospective notes as written, with the same
+    links. These are observations, never promoted to findings here.
+  - **Verified gaps:** read from the `findings.json` the review brief asks for. Each gap has a
+    classification (`defect`, `undiscoverable`, `agent-mistake`, `not-needed`), reproduction,
+    impact, observed and inferred cause kept apart, workaround, the issue that covers it, and its
+    evidence (`elapsedMs`, screenshot, thread id).
+
+The report checks every citation in `findings.json` against the run. A second outside it, a
+screenshot it did not keep, or a thread it was not in marks the gap **unverified**, with what failed
+to resolve. A gap that cites nothing is unverified too, and a defect with no issue is flagged as not
+mapped. The judgement stays the reviewer's; the report checks only that the evidence exists.
+
 ## The UI-only boundary (#584)
 
 The agent runner (`src/agent.ts`) is a pi `Agent` over a bare model call, given the brief and **one
@@ -183,14 +210,21 @@ in Enso's records.
 | `screenshots/` | one every 30 s (`sample`), plus one per error, dialog, navigation, failed action, page crash, Enso exit; a shot that could not be taken is a `recorder-error` line instead |
 | `trace/trace-NNN.zip` | the Playwright trace in five-minute chunks (`bunx playwright show-trace <zip>`) |
 | `enso/stack.log` | Enso's own output, redacted |
-| `enso/evidence/` | what the server holds for each thread the UI named or the project stores: record, events, session eval, log bundle; plus Stats |
+| `enso/evidence/` | every read route the server has for each thread the UI named or the project stores, one `thread-<id>-<route>` file each: record, events, session eval, log bundle, history, stats, context, incidents, judge cases, run conditions (`manifest`), git, changes; plus Stats, the about page and the trees' disk use (`trees.json`) |
 | `enso/evidence/snapshot-store/` | a copy of the project's snapshot store (#551), so pruning the home costs the run nothing |
 | `agent/transcript.jsonl` | the agent under test's own transcript (`--agent`), redacted, image bytes left out |
-| `score.json`, `score.md` | the score: verdict, UI checks, problems, metrics |
-| `manifest.json` | the fold: what drove the run and whether the boundary held, screenshot index, threads with their time spans, actions, observed signals, the agent's notes, every piece of Enso evidence as `collected` or `missing` with why, and the secret scan |
+| `score.json`, `score.md` | the score: verdict, UI checks, problems, observed friction, metrics |
+| `review.md`, `findings.json` | the reviewer's account and its gaps, written after the run from `review-brief.md` |
+| `report.json`, `report.md` | `arena report`: the application outcome apart from Enso's findings, each gap's evidence checked |
+| `manifest.json` | the fold: the build Enso ran from (`ensoBuild`: commit, whether the checkout was dirty, a hash of the uncommitted work), what drove the run and whether the boundary held, the screenshot index (each shot in a thread with the `turn` it shows), threads with their time spans, the filesystem timeline (`filesystem`: the project and each thread tree at every periodic screenshot, file count and a fingerprint), actions, observed signals, the agent's notes, every piece of Enso evidence as `collected` or `missing` with why, and the secret scan |
+
+A shot's `turn` comes from the thread's collected history: its `turnId` is the user message that opened the turn and its
+`messageId` the last message at or before the shot, both entry ids of the session file. It is joined after the run from
+Enso's own timestamps; a shot before the thread's first prompt has none. A workspace's `fingerprint` hashes each file's
+path, size and mtime (`.git` and `node_modules` skipped), so it moves when any file is written and only then.
 
 The thread id on a timeline line is the id `bun scripts/enso-thread.ts`, `/api/logs/bundle?thread=`
-and the session file are keyed by: that is the jump from a screenshot to its turn.
+and the session file are keyed by: the jump from a screenshot to its thread, where its `turn` names the entry.
 
 ## What holds, and where it stops
 

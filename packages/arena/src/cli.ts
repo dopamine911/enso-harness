@@ -33,6 +33,11 @@
  *   bun run arena compare <run directory> <run directory>
  *       two runs side by side (`arena/compare.ts`): outcome, UI checks, which problems each has, the
  *       friction each shows. Reads only: each run is scored afresh, nothing on disk is rewritten.
+ *   bun run arena report <run directory> [--run-tests]
+ *       the run's report (`arena/report.ts`): the application outcome (files, git, tests) apart from
+ *       Enso's findings (observed friction, the agent's account, the reviewer's gaps with every
+ *       citation checked). Writes `report.md` and `report.json`. `--run-tests` runs the work's own
+ *       tests with only PATH, a throwaway HOME and a time limit: they are agent-written code.
  *
  * `start` exits 1 too when its run's score is FAIL, so a caller can gate on the run.
  *
@@ -50,6 +55,7 @@
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { redactJudgeText } from '@enso/core/judge'
 import { ensoHome, findRepoRoot } from '@enso/core/paths'
 import { ARENA_THINKING_LEVELS, arenaAgentDriver, resolveArenaModel } from './agent.ts'
 import { compareRunDirectories } from './compare.ts'
@@ -62,7 +68,9 @@ import {
   recordedRunHome,
   runArena,
 } from './recorder.ts'
+import { writeArenaReport } from './report.ts'
 import { arenaSecretValues, defaultArenaOut, isGuardedForAgent, prepareRunHome, runHomeOf } from './run-home.ts'
+import { threadHistoriesIn } from './run-state.ts'
 import {
   ARENA_SCENARIOS,
   arenaActCommand,
@@ -330,7 +338,8 @@ async function refold(): Promise<void> {
   const home = runHomeOf(runDirectory, operatorHome, recordedRunHome(runDirectory))
   const secretScan = withEarlierHits(scanRunForSecrets(runDirectory, arenaSecretValues(home)), earlier, runDirectory)
   const events = readTimeline(join(runDirectory, 'timeline.jsonl'))
-  const manifest = foldArenaManifest({ runId, events, evidence, secretScan })
+  const histories = threadHistoriesIn(join(runDirectory, 'enso', 'evidence'))
+  const manifest = foldArenaManifest({ runId, events, evidence, secretScan, histories })
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
   process.stdout.write(`${manifestPath}\n`)
   scoreRun(runDirectory)
@@ -370,8 +379,21 @@ switch (command) {
       ),
     )
     break
+  case 'report': {
+    const runDirectory = resolve(rest[0] ?? fail('report takes a run directory'))
+    // Test output is redacted with the run's own secrets, like everything else the run keeps (#610).
+    const secrets = arenaSecretValues(runHomeOf(runDirectory, operatorHome, recordedRunHome(runDirectory)))
+    writeArenaReport(runDirectory, {
+      runTests: rest.includes('--run-tests'),
+      path: process.env['PATH'] ?? '/usr/bin:/bin',
+      redact: (text) => redactJudgeText(text, secrets),
+      bun: process.execPath,
+    })
+    process.stdout.write(`${join(runDirectory, 'report.md')}\n`)
+    break
+  }
   default:
     fail(
-      'usage: bun run arena start --agent PROVIDER/MODEL | start --manual | brief | act <json> | manifest <run directory> | score <run directory> | compare <run directory> <run directory>',
+      'usage: bun run arena start --agent PROVIDER/MODEL | start --manual | brief | act <json> | manifest <run directory> | score <run directory> | compare <run directory> <run directory> | report <run directory> [--run-tests]',
     )
 }

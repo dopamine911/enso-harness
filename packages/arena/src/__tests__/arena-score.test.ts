@@ -1,5 +1,4 @@
 import { expect, test } from 'bun:test'
-import { spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -10,6 +9,7 @@ import { projectThreads } from '../evidence.ts'
 import { foldArenaManifest } from '../manifest.ts'
 import { type ArenaScoreInput, readArenaScoreInput, scoreArenaRun, writeArenaScore } from '../score.ts'
 import { type ArenaClock, type ArenaEventBody, openTimeline, pagePlace, readTimeline } from '../timeline.ts'
+import { gitIn } from './fixture-git.ts'
 
 /**
  * Dogfood Arena's score (#556, #584): a run's logs read for problems, and whether the agent really
@@ -234,7 +234,7 @@ test('a run directory is read and scored to score.json and score.md', () => {
   const runDirectory = mkdtempSync(join(tmpdir(), 'arena-scored-'))
   const project = join(runDirectory, 'project')
   mkdirSync(project)
-  spawnSync('git', ['init', '--quiet', '--initial-branch=main'], { cwd: project })
+  gitIn(project, 'init', '--quiet', '--initial-branch=main')
   writeFileSync(join(project, 'snake.js'), 'game()\n')
   const timeline = openTimeline(join(runDirectory, 'timeline.jsonl'), steppingClock())
   const inThread = pagePlace(`http://127.0.0.1:5178/?thread=${SHOWN}`)
