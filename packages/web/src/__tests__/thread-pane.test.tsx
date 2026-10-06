@@ -2022,7 +2022,8 @@ test('⚠ a costliest-calls row opens Chat at its call; a call not drawn there i
   })
   try {
     const pane = await mountPane({ view: 'stats', server: { stats: TWO_CALL_STATS } })
-    await pane.settle(SNAPSHOT_IDLE)
+    // A thread that runs is live: its snapshot says its model (#659: no read before that).
+    await pane.settle(SNAPSHOT_LIVE)
     await flush(async () => {
       typeInto(pane.composer(), 'run it')
       pressEnter(pane.composer())
