@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs'
+import { statSync } from 'node:fs'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 
 /**
@@ -149,7 +149,10 @@ function citationProblems(citation: ArenaCitation, extent: ArenaRunExtent): stri
     const path = resolve(extent.runDirectory, citation.screenshot)
     const inside =
       !relative(extent.runDirectory, path).startsWith('..') && !isAbsolute(relative(extent.runDirectory, path))
-    if (!inside || !existsSync(path)) problems.push(`no screenshot ${citation.screenshot} in the run`)
+    // A file, not merely a path that exists (PR #626 review): `""`, `.` and `screenshots` all resolve
+    // to a directory of the run, and none of them is a screenshot.
+    const isFile = statSync(path, { throwIfNoEntry: false })?.isFile() === true
+    if (!inside || !isFile) problems.push(`no screenshot ${citation.screenshot} in the run`)
   }
   if (citation.threadId !== undefined && !extent.threadIds.has(citation.threadId)) {
     problems.push(`thread ${citation.threadId} is not one the run was in`)

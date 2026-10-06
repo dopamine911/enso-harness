@@ -62,6 +62,17 @@ test('⚠ a gap stands as verified only when everything it cites is in the run (
   expect(emptyCitation?.unresolved).toEqual(['evidence 1: names no second, screenshot or thread'])
 })
 
+test('a screenshot citation that names a directory of the run is not a screenshot: "", "." and "screenshots" (PR #626 review)', () => {
+  const run = mkdtempSync(join(tmpdir(), 'arena-directory-citation-'))
+  mkdirSync(join(run, 'screenshots'))
+  const gaps = checkedGaps(run, [
+    gap([{ screenshot: '' }]),
+    gap([{ screenshot: '.' }]),
+    gap([{ screenshot: 'screenshots' }]),
+  ])
+  expect(gaps.map((checked) => checked.verified)).toEqual([false, false, false])
+})
+
 test('a defect with no issue is flagged unmapped; a gap of another class needs none', () => {
   const run = mkdtempSync(join(tmpdir(), 'arena-unmapped-'))
   const [defect, mistake] = checkedGaps(run, [

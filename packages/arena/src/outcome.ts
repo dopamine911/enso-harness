@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { extname, join, relative } from 'node:path'
 
@@ -187,12 +187,16 @@ function runTestFile(workspace: string, path: string, options: ArenaOutcomeOptio
 
 function runCommand(workspace: string, command: readonly string[], options: ArenaOutcomeOptions): ArenaTestRun {
   const [, ...args] = command
+  // A HOME of its own per run, removed when the run ends (PR #626 review): nothing the agent's tests
+  // leave in it outlives them, and repeated reports leave no directories behind.
+  const home = mkdtempSync(join(tmpdir(), 'arena-test-home-'))
   const result = spawnSync(options.bun, args, {
     cwd: workspace,
     encoding: 'utf8',
     timeout: TEST_TIME_LIMIT_MS,
-    env: { PATH: options.path, HOME: mkdtempSync(join(tmpdir(), 'arena-test-home-')), CI: '1' },
+    env: { PATH: options.path, HOME: home, CI: '1' },
   })
+  rmSync(home, { recursive: true, force: true })
   const output = `${result.stdout ?? ''}${result.stderr ?? ''}`.trimEnd()
   const timedOut = result.error !== undefined && 'code' in result.error && result.error.code === 'ETIMEDOUT'
   return {
