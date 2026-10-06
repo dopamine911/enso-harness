@@ -545,12 +545,17 @@ export function DialogAnswerControls({
         )}
         <div className="flex flex-wrap gap-2">
           {dialog.options.map((option) => (
+            // ⚠ An option can be a long rule — `Yes, allow write "<a thread tree's absolute path>/*" for
+            // this session` — and it is what the user consents to (#625). The button's own
+            // `whitespace-nowrap` and fixed height clipped it at the card's edge; here it wraps, at any
+            // character since a path has no spaces, and grows to hold every line.
             <Button
               key={option}
               type="button"
               variant="outline"
               disabled={disabled}
               onClick={() => answer({ value: option })}
+              className="h-auto min-h-8 max-w-full py-1.5 text-left wrap-anywhere whitespace-normal"
             >
               {option}
             </Button>
