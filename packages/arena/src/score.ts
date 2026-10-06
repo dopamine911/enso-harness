@@ -711,6 +711,16 @@ function threadDirectories(evidenceDirectory: string, files: readonly string[]):
     })
 }
 
+/**
+ * The places a run's work can be: its project and each collected thread's working directory (the
+ * record's `cwd`), once each. The score counts the work over them; the report lists it.
+ */
+export function runWorkspaces(runDirectory: string, manifest: ArenaManifest): string[] {
+  const evidenceDirectory = join(runDirectory, 'enso', 'evidence')
+  const files = existsSync(evidenceDirectory) ? readdirSync(evidenceDirectory) : []
+  return [...new Set([manifest.project, ...threadDirectories(evidenceDirectory, files)])]
+}
+
 /** Everything a run directory holds that the score reads. Throws when there is no manifest to score. */
 export function readArenaScoreInput(runDirectory: string): ArenaScoreInput {
   const manifest = JSON.parse(readFileSync(join(runDirectory, 'manifest.json'), 'utf8')) as ArenaManifest
@@ -722,7 +732,7 @@ export function readArenaScoreInput(runDirectory: string): ArenaScoreInput {
     ? projectThreads(readFileSync(storedPath, 'utf8'), projectIdOf(realpathOrSelf(manifest.project)))
     : undefined
   const logRecords = logRecordsIn(evidenceDirectory, files)
-  const project = workspaceState([manifest.project, ...threadDirectories(evidenceDirectory, files)])
+  const project = workspaceState(runWorkspaces(runDirectory, manifest))
   return {
     manifest,
     events: readTimeline(join(runDirectory, 'timeline.jsonl')),
@@ -778,9 +788,14 @@ export function renderArenaScore(score: ArenaScore): string {
   return lines.join('\n')
 }
 
+/** Score a run directory the way `arena score` does, in memory: the score files are not touched. */
+export function scoreRunDirectory(runDirectory: string): ArenaScore {
+  return scoreArenaRun(readArenaScoreInput(runDirectory))
+}
+
 /** Score a run directory and write `score.json` and `score.md` beside its manifest. */
 export function writeArenaScore(runDirectory: string): ArenaScore {
-  const score = scoreArenaRun(readArenaScoreInput(runDirectory))
+  const score = scoreRunDirectory(runDirectory)
   writeFileSync(join(runDirectory, 'score.json'), `${JSON.stringify(score, null, 2)}\n`)
   writeFileSync(join(runDirectory, 'score.md'), renderArenaScore(score))
   return score

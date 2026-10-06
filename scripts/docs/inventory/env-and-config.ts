@@ -145,6 +145,14 @@ export const ENVIRONMENT_METADATA: readonly EnvironmentMetadata[] = [
     phase: 'boot',
   },
   {
+    key: 'PATH',
+    source: 'packages/arena/src/cli.ts',
+    reader: '`packages/arena/src/cli.ts` (`arena report --run-tests`)',
+    purposeAndDefault:
+      'Handed on as the only variable the work’s own tests get (#624), beside a throwaway `HOME`: they are agent-written code run after an arena run, so nothing else of the operator’s environment reaches them. Unset, `/usr/bin:/bin`.',
+    phase: 'per-call',
+  },
+  {
     key: 'PI_CODING_AGENT_DIR',
     source: 'packages/harness/extensions/run-context/index.ts',
     reader: '`packages/harness/extensions/run-context/index.ts` (the default export’s `readPermissionPolicy`)',
