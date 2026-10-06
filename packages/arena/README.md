@@ -48,8 +48,15 @@ and Stats, so the agent under test sees only the run's project, the evidence cov
 and your own Stats and logs are untouched. Your login comes in by symlink:
 - `secrets.env`, `pi-agent/auth.json` and `pi-agent/models.json` are linked, and `settings.json` is
   copied.
-- Linked, never copied: an OAuth refresh rewrites `auth.json` in place, so a copy would leave your
-  own login holding a revoked refresh token. Through the link, the refresh lands in your file.
+- Linked, never copied: an OAuth refresh rotates the refresh token, so a copy would leave your own
+  login holding a revoked one. pi rewrites `auth.json` in place, and through the link the refresh
+  lands in your file.
+- **A link can be replaced (#639).** The harness's multi-account extension writes `auth.json` and
+  `models.json` by renaming a temp file onto the path, which replaces a link with a plain file. The
+  recorder checks the links at every 30 s sample and at the stop, and `arena manifest` checks them
+  too. A replaced link's content goes back to your file when it is the newer, and the link is
+  restored. If your file changed after the run's, yours stands and the run's change is dropped: the
+  timeline says so as a recorder error.
 - pi's lock on that file is taken beside the link, so your own pi refreshing the same provider at
   the same instant is not serialized with the run.
 

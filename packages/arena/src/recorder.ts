@@ -18,7 +18,7 @@ import {
 import { collectEnsoEvidence, threadIdsShown } from './evidence.ts'
 import { type ArenaEvidence, foldArenaManifest } from './manifest.ts'
 import { ARENA_GRACE_MS, type ArenaBounds, createRunControl, ensoSpendUsd } from './run-control.ts'
-import { arenaSecretSource, arenaSecretValues, runHomeOf } from './run-home.ts'
+import { arenaSecretSource, arenaSecretValues, reconcileLinkedFiles, runHomeOf } from './run-home.ts'
 import { ensoBuildOf, sampleWorkspaces, threadHistoriesIn } from './run-state.ts'
 import type { ArenaScenario } from './scenario.ts'
 import { type ArenaScore, writeArenaScore } from './score.ts'
@@ -78,6 +78,11 @@ export interface ArenaRunOptions {
   readonly project: string
   /** The `ENSO_HOME` the stack runs over — the run's own `<run>/.enso` by default (#610), `--home` otherwise. */
   readonly home: string
+  /**
+   * The operator's home whose credentials the run home links (`prepareRunHome`, #610): the recorder
+   * puts back a link a credential write replaced (#639). Absent over `--home`, which links nothing.
+   */
+  readonly linkedFrom?: string
   readonly budgetMinutes: number
   /** The bounds besides the budget (#609, `run-control.ts`); `maxCostUsd` only over the run's own home. */
   readonly limits: { readonly idleMinutes?: number; readonly maxRestarts: number; readonly maxCostUsd?: number }
@@ -573,8 +578,26 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
     const threadTrees = existsSync(trees) ? readdirSync(trees).map((threadId) => join(trees, threadId)) : []
     return [project, ...threadTrees]
   }
+  /**
+   * A replaced credential link put back (#639): a run-home write that renamed over a link is the
+   * operator's again, before the operator's next refresh uses the revoked token. A conflict — the
+   * operator's file changed after the run's — keeps the operator's, and is the recorder's error.
+   */
+  const relink = (): void => {
+    if (options.linkedFrom === undefined) return
+    for (const relinked of reconcileLinkedFiles(options.home, options.linkedFrom)) {
+      if (relinked.outcome === 'operator-newer') {
+        timeline.record({
+          kind: 'recorder-error',
+          during: 'credential relink',
+          error: `${relinked.path} was replaced in the run and changed in the operator's home after: the operator's stands, the run's change is dropped`,
+        })
+      }
+    }
+  }
   /** A periodic sample: the screenshot and the work at the same tick, so neither is without the other. */
   const takeSample = async (): Promise<void> => {
+    relink()
     timeline.record({ kind: 'workspace-sample', workspaces: sampleWorkspaces(runDirectory, workspaces()) })
     await shoot('sample')
   }
@@ -804,7 +827,9 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
   stopping = true
   await browser.close().catch(() => undefined)
   await stopEnso()
-  // ⚠ After Enso is stopped and the last chunk written: every file the run keeps is final (#610).
+  // ⚠ After Enso is stopped and the last chunk written: every file the run keeps is final (#610) —
+  // and no credential write can come after the last relink (#639).
+  relink()
   const secretScan = scanRunForSecrets(runDirectory, secrets())
   const histories = threadHistoriesIn(join(ensoDirectory, 'evidence'))
   const manifest = foldArenaManifest({ runId, events: readTimeline(timeline.path), evidence, secretScan, histories })

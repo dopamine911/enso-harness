@@ -69,7 +69,15 @@ import {
   runArena,
 } from './recorder.ts'
 import { writeArenaReport } from './report.ts'
-import { arenaSecretValues, defaultArenaOut, isGuardedForAgent, prepareRunHome, runHomeOf } from './run-home.ts'
+import {
+  ARENA_RUN_HOME,
+  arenaSecretValues,
+  defaultArenaOut,
+  isGuardedForAgent,
+  prepareRunHome,
+  reconcileLinkedFiles,
+  runHomeOf,
+} from './run-home.ts'
 import { threadHistoriesIn } from './run-state.ts'
 import {
   ARENA_SCENARIOS,
@@ -258,6 +266,8 @@ async function start(): Promise<void> {
       runDirectory,
       project: join(runDirectory, 'project'),
       home,
+      // The run home links the operator's login (#610); the recorder puts a replaced link back (#639).
+      ...(home === operatorHome ? {} : { linkedFrom: operatorHome }),
       budgetMinutes: minutes,
       limits: runLimits(),
       headed: rest.includes('--headed'),
@@ -336,6 +346,8 @@ async function refold(): Promise<void> {
   }
   // The home the run recorded, not this shell's; and a hit an earlier scan found stands (PR #613 review).
   const home = runHomeOf(runDirectory, operatorHome, recordedRunHome(runDirectory))
+  // A recorder that died never ran its last relink (#639): a run home's replaced link is put back here.
+  if (home === join(runDirectory, ARENA_RUN_HOME)) reconcileLinkedFiles(home, operatorHome)
   const secretScan = withEarlierHits(scanRunForSecrets(runDirectory, arenaSecretValues(home)), earlier, runDirectory)
   const events = readTimeline(join(runDirectory, 'timeline.jsonl'))
   const histories = threadHistoriesIn(join(runDirectory, 'enso', 'evidence'))
