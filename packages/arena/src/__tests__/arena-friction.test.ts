@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { describeArenaAction } from '../actions.ts'
 import { compareRunDirectories } from '../compare.ts'
 import { observedFriction } from '../friction.ts'
 import { foldArenaManifest } from '../manifest.ts'
@@ -65,6 +66,20 @@ test('⚠ waiting then looking is polling from its third cycle; the share of the
   expect(
     observedFriction(timelineOf([wait(1), action('click', 'click button "x"'), wait(1), read(), wait(1)])),
   ).toEqual([])
+})
+
+// ⚠ #637: a wait until change returns when Enso does something — it is not waiting blind, and a
+// comparison counting it as polling would read the cure as more of the disease.
+test('a wait until change, then a look, is not polling; fixed sleeps around it still are', () => {
+  const changeWait = action('wait', describeArenaAction({ action: 'wait', ms: 60_000, until: 'change' }, []), {
+    durationMs: 4000,
+  })
+  expect(observedFriction(timelineOf([changeWait, read(), changeWait, read(), changeWait, read()]))).toEqual([])
+  expect(
+    observedFriction(
+      timelineOf([changeWait, read(), wait(30_000), read(), wait(30_000), read(), wait(30_000), read()]),
+    ),
+  ).toEqual([expect.objectContaining({ pattern: 'polling', count: 3, summary: expect.stringContaining('1.5 of') })])
 })
 
 test('⚠ approval clicks count from the third, taken ones only; a click on any other button is not one', () => {

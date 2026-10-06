@@ -12,6 +12,8 @@ import {
   type ArenaAction,
   type ArenaTarget,
   describeArenaAction,
+  pageForChange,
+  waitForPageChange,
   parseArenaAction,
   typedSecretRefusal,
 } from './actions.ts'
@@ -66,6 +68,8 @@ const EVENT_SHOT_SPACING_MS = 2000
 const VIEWPORT = { width: 1440, height: 900 } as const
 /** A single action's own timeout: a control that never appears fails the action, not the run. */
 const ACTION_TIMEOUT_MS = 15_000
+/** How often a wait until change looks at the page (#637): a card is seen within about a second. */
+const CHANGE_POLL_MS = 1000
 /** How long a stopped run waits for its agent runner to finish writing before closing the page. */
 const DRIVER_SETTLE_MS = 15_000
 
@@ -635,6 +639,16 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
   for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => resolveStop(`signal ${signal}`))
 
   // ── The agent's actions ────────────────────────────────────────────────────────────────────
+  /**
+   * The page as the agent last read it, for a wait until change (#637): the snapshot with the rail's
+   * ages aside, or the native dialog the read reported. Undefined before the first read: the wait
+   * then compares with the page as it found it.
+   */
+  let lastRead: string | undefined
+  const pageNow = async (): Promise<string> =>
+    pendingDialog === undefined
+      ? pageForChange(await page.locator('body').ariaSnapshot({ timeout: ACTION_TIMEOUT_MS }))
+      : `dialog ${pendingDialog.type()}: ${pendingDialog.message()}`
   const perform = async (action: ArenaAction, via: ArenaActionSource): Promise<unknown> => {
     const timeout = ACTION_TIMEOUT_MS
     switch (action.action) {
@@ -658,6 +672,7 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
         else await locate(page, action.target).press(action.key, { timeout })
         return here()
       case 'read':
+        lastRead = await pageNow()
         // ⚠ An open native dialog blocks the page, the snapshot included: say the dialog instead.
         if (pendingDialog !== undefined) {
           return { ...here(), dialog: { type: pendingDialog.type(), message: redact(pendingDialog.message()) } }
@@ -665,9 +680,20 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
         return { ...here(), page: await page.locator('body').ariaSnapshot({ timeout }) }
       case 'screenshot':
         return { ...here(), screenshot: await shoot('requested') }
-      case 'wait':
-        await page.waitForTimeout(action.ms)
-        return here()
+      case 'wait': {
+        if (action.until !== 'change') {
+          await page.waitForTimeout(action.ms)
+          return here()
+        }
+        const waited = await waitForPageChange({
+          baseline: lastRead ?? (await pageNow()),
+          look: pageNow,
+          sleep: (ms) => page.waitForTimeout(ms),
+          ms: action.ms,
+          pollMs: CHANGE_POLL_MS,
+        })
+        return { ...here(), ...waited }
+      }
       case 'back':
         await page.goBack({ timeout })
         return here()

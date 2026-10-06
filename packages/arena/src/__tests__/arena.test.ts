@@ -7,7 +7,9 @@ import {
   type ArenaAction,
   describeArenaAction,
   LONGEST_WAIT_MS,
+  pageForChange,
   parseArenaAction,
+  waitForPageChange,
   typedSecretRefusal,
 } from '../actions.ts'
 import { collectEnsoEvidence } from '../evidence.ts'
@@ -128,6 +130,67 @@ test('a wait is capped, a note needs what was tried and what happened', () => {
     ok: true,
     action: { action: 'note', note: 'wish', trying: 'a', happened: 'b', wanted: 'c' },
   })
+})
+
+test('a wait until change is parsed, capped and worded as one; any other `until` is refused (#637)', () => {
+  expect(parseArenaAction({ action: 'wait', ms: 10 * LONGEST_WAIT_MS, until: 'change' })).toEqual({
+    ok: true,
+    action: { action: 'wait', ms: LONGEST_WAIT_MS, until: 'change' },
+  })
+  expect(parseArenaAction({ action: 'wait', ms: 1000, until: 'idle' })).toEqual({
+    ok: false,
+    error: 'wait "until" takes "change"',
+  })
+  expect(describeArenaAction({ action: 'wait', ms: 60_000, until: 'change' }, [])).toBe(
+    'wait until change, up to 60000 ms',
+  )
+  expect(describeArenaAction({ action: 'wait', ms: 30_000 }, [])).toBe('wait 30000 ms')
+})
+
+// ⚠ #637, measured on a live run: while a permission card waits, the rail's relative age is the only
+// thing on the page that moves (now → 6s → 11s … → 1m). A wait that counted it would return at once.
+test('⚠ the rail’s ages are not a change; a new control is', () => {
+  const waiting = (age: string): string =>
+    `- button "waiting on you Write notes.md… ${age}"\n- button "Yes"\n- text: limit 5s per call`
+  for (const age of ['6s', '1m', '3h', '2d']) expect(pageForChange(waiting(age))).toBe(pageForChange(waiting('now')))
+  // A count of seconds inside a name, not ending it, is the page's words and stays.
+  expect(pageForChange('- text: limit 5s per call')).toBe('- text: limit 5s per call')
+  expect(pageForChange(`${waiting('6s')}\n- button "No"`)).not.toBe(pageForChange(waiting('6s')))
+})
+
+/** A clock that moves only when the wait sleeps: each outcome's `waitedMs` is exact. */
+function sleepingClock(): { readonly now: () => number; readonly sleep: (ms: number) => Promise<void> } {
+  let at = 0
+  return {
+    now: () => at,
+    sleep: (ms) => {
+      at += ms
+      return Promise.resolve()
+    },
+  }
+}
+
+test('⚠ a wait until change returns at the first look that differs, and at its limit unchanged (#637)', async () => {
+  const looks = ['same', 'same', 'card']
+  const changed = await waitForPageChange({
+    baseline: 'same',
+    look: () => Promise.resolve(looks.shift() ?? 'card'),
+    ms: 60_000,
+    pollMs: 1000,
+    ...sleepingClock(),
+  })
+  expect(changed).toEqual({ changed: true, waitedMs: 3000 })
+  expect(looks).toEqual([])
+
+  // Nothing moves: it waits out the limit exactly, the last sleep cut to fit.
+  const unchanged = await waitForPageChange({
+    baseline: 'same',
+    look: () => Promise.resolve('same'),
+    ms: 2500,
+    pollMs: 1000,
+    ...sleepingClock(),
+  })
+  expect(unchanged).toEqual({ changed: false, waitedMs: 2500 })
 })
 
 test('what the agent typed reaches the timeline redacted', () => {

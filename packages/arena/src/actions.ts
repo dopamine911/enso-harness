@@ -40,7 +40,11 @@ export type ArenaAction =
   | { readonly action: 'select'; readonly target: ArenaTarget; readonly option: string }
   | { readonly action: 'read' }
   | { readonly action: 'screenshot' }
-  | { readonly action: 'wait'; readonly ms: number }
+  /**
+   * A fixed sleep, or with `until: 'change'` (#637) a wait that returns as soon as the page differs
+   * from the agent's last read — `ms` its limit — and says which: `changed`, `waitedMs`.
+   */
+  | { readonly action: 'wait'; readonly ms: number; readonly until?: 'change' }
   | { readonly action: 'back' }
   | { readonly action: 'reload' }
   | {
@@ -62,6 +66,55 @@ export type ArenaAction =
 
 /** The longest single `wait`: a run that needs longer waits again, and the timeline shows it waited. */
 export const LONGEST_WAIT_MS = 60_000
+
+/** How a wait until change is worded on the timeline — and how the friction tells it from a fixed sleep. */
+const CHANGE_WAIT = 'wait until change'
+
+/** True for a timeline detail of a wait until change, never a fixed sleep's. */
+export function isChangeWait(detail: string): boolean {
+  return detail.startsWith(CHANGE_WAIT)
+}
+
+/**
+ * The rail's relative ages: the last word of a thread's button, `now`, `6s`, `1m`, `3h`, `2d`.
+ * Measured (#637): while a permission card waits, they are the ONLY thing on the page that moves —
+ * every five seconds or so — and while Enso works, the page changes only at real events.
+ */
+const RELATIVE_AGE = / (?:now|\d+[smhd])"/g
+
+/** A page read as a wait until change compares it: the rail's ages aside, so the clock is no change. */
+export function pageForChange(page: string): string {
+  return page.replaceAll(RELATIVE_AGE, ' ·"')
+}
+
+/** What a wait until change came to: the page differed after `waitedMs`, or the limit passed with none. */
+export interface ArenaChangeWait {
+  readonly changed: boolean
+  readonly waitedMs: number
+}
+
+/**
+ * Look every `pollMs` until `look()` differs from `baseline`, or `ms` runs out (#637). `look` is the
+ * page as `pageForChange` words it, or the native dialog blocking it; `sleep` and `now` are the
+ * page's clock, injected so both outcomes can be tested without a browser.
+ */
+export async function waitForPageChange(options: {
+  readonly baseline: string
+  readonly look: () => Promise<string>
+  readonly sleep: (ms: number) => Promise<void>
+  readonly ms: number
+  readonly pollMs: number
+  readonly now?: () => number
+}): Promise<ArenaChangeWait> {
+  const now = options.now ?? Date.now
+  const started = now()
+  const waited = (): number => now() - started
+  while (waited() < options.ms) {
+    await options.sleep(Math.min(options.pollMs, options.ms - waited()))
+    if ((await options.look()) !== options.baseline) return { changed: true, waitedMs: waited() }
+  }
+  return { changed: false, waitedMs: waited() }
+}
 
 const NOTE_KINDS: readonly ArenaNoteKind[] = ['wish', 'friction', 'retrospective']
 
@@ -190,7 +243,9 @@ const ACTION_PARSERS: Readonly<Record<string, (request: Fields) => ArenaActionPa
   wait: (request) => {
     const ms = request.ms
     if (typeof ms !== 'number' || !Number.isFinite(ms) || ms < 0) return fail('wait takes "ms"')
-    return accept({ action: 'wait', ms: Math.min(ms, LONGEST_WAIT_MS) })
+    const until = request.until
+    if (until !== undefined && until !== 'change') return fail('wait "until" takes "change"')
+    return accept({ action: 'wait', ms: Math.min(ms, LONGEST_WAIT_MS), ...(until === 'change' ? { until } : {}) })
   },
   note: parseNote,
   stop: (request) => {
@@ -264,7 +319,7 @@ export function describeArenaAction(action: ArenaAction, secretValues: readonly 
     case 'press':
       return `press ${action.key}${action.target === undefined ? '' : ` in ${describeTarget(action.target)}`}`
     case 'wait':
-      return `wait ${action.ms} ms`
+      return action.until === 'change' ? `${CHANGE_WAIT}, up to ${action.ms} ms` : `wait ${action.ms} ms`
     case 'note':
       return `note ${action.note}`
     case 'stop':

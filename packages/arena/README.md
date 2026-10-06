@@ -140,8 +140,8 @@ cites the seconds it rests on, and none of it changes the verdict (`src/friction
 
 | Pattern | Counted from | What it means |
 |---|---|---|
-| `polling` | 3 wait→read cycles | the agent waited on Enso and looked again; the line says how much of the run was spent waiting |
-| `approvals` | 3 taken "Yes / Allow / Approve …" clicks | the agent had to let Enso's agent go on, call by call |
+| `polling` | 3 fixed-sleep→read cycles | the agent slept a fixed time and looked again; the line says how much of the run went to those sleeps. A `wait` with `"until": "change"` (#637) returns when the page changes, and is not counted |
+| `approvals` | 3 taken "Yes / Allow / Approve …" clicks, by role or by text (#641) | the agent had to let Enso's agent go on, call by call |
 | `retry` | 1 action tried again within 3 actions of failing | a control that did not work the first time |
 | `backtracking` | 2 `back` / `reload` | the agent undid where it went |
 | `repeated-navigation` | the same `goto` 3 times | the agent kept returning to one place |
