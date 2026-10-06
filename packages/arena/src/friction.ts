@@ -28,7 +28,7 @@ export interface ArenaFriction {
 
 /** A wait the driver followed with a look at the page: the shape of polling for Enso to finish. */
 const POLLING_MIN_CYCLES = 3
-/** Clicks on an approval button ("Yes, allow …", "Allow", "Approve") before it counts as friction. */
+/** Clicks on an approval ("Yes, allow …", "Allow", "Approve"), by role or by text, before it counts as friction. */
 const APPROVALS_MIN_CLICKS = 3
 /** `back` and `reload` actions before they count as backtracking. */
 const BACKTRACKING_MIN_MOVES = 2
