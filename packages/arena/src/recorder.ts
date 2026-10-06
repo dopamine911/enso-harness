@@ -582,17 +582,24 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
    * A replaced credential link put back (#639): a run-home write that renamed over a link is the
    * operator's again, before the operator's next refresh uses the revoked token. A conflict — the
    * operator's file changed after the run's — keeps the operator's, and is the recorder's error.
+   * ⚠ A failure is a timeline line too, never a throw (PR #642 review): at the stop it would cost
+   * the run its manifest and score, and from the sampler it would be an unhandled rejection.
    */
   const relink = (): void => {
     if (options.linkedFrom === undefined) return
-    for (const relinked of reconcileLinkedFiles(options.home, options.linkedFrom)) {
-      if (relinked.outcome === 'operator-newer') {
-        timeline.record({
-          kind: 'recorder-error',
-          during: 'credential relink',
-          error: `${relinked.path} was replaced in the run and changed in the operator's home after: the operator's stands, the run's change is dropped`,
-        })
+    const failed = (error: string): void => {
+      timeline.record({ kind: 'recorder-error', during: 'credential relink', error })
+    }
+    try {
+      for (const relinked of reconcileLinkedFiles(options.home, options.linkedFrom)) {
+        if (relinked.outcome === 'operator-newer') {
+          failed(
+            `${relinked.path} was replaced in the run and changed in the operator's home after: the operator's stands, the run's change is dropped`,
+          )
+        }
       }
+    } catch (error) {
+      failed(error instanceof Error ? error.message : String(error))
     }
   }
   /** A periodic sample: the screenshot and the work at the same tick, so neither is without the other. */

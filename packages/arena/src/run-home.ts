@@ -4,7 +4,7 @@ import {
   lstatSync,
   mkdirSync,
   readFileSync,
-  rmSync,
+  renameSync,
   statSync,
   symlinkSync,
   writeFileSync,
@@ -122,8 +122,12 @@ export function reconcileLinkedFiles(runHome: string, operatorHome: string): Are
     const operatorStats = statSync(source, { throwIfNoEntry: false })
     const newer = operatorStats === undefined || stats.mtimeMs >= operatorStats.mtimeMs
     if (newer) writeFileSync(source, readFileSync(linked), { mode: 0o600 })
-    rmSync(linked)
-    symlinkSync(source, linked)
+    // ⚠ The link goes back by RENAME (PR #642 review): removing the file and then linking left a
+    // moment with no file, in which a credential write of pi-multi-account's own could land and make
+    // the link throw. A rename onto the path replaces whatever is there, at once.
+    const pendingLink = `${linked}.relink-${process.pid}`
+    symlinkSync(source, pendingLink)
+    renameSync(pendingLink, linked)
     relinked.push({ path: linked, outcome: newer ? 'returned' : 'operator-newer' })
   }
   return relinked

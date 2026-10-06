@@ -346,8 +346,17 @@ async function refold(): Promise<void> {
   }
   // The home the run recorded, not this shell's; and a hit an earlier scan found stands (PR #613 review).
   const home = runHomeOf(runDirectory, operatorHome, recordedRunHome(runDirectory))
-  // A recorder that died never ran its last relink (#639): a run home's replaced link is put back here.
-  if (home === join(runDirectory, ARENA_RUN_HOME)) reconcileLinkedFiles(home, operatorHome)
+  // A recorder that died never ran its last relink (#639): a run home's replaced link is put back
+  // here. Its timeline is finished, so a conflict is said here (PR #642 review).
+  if (home === join(runDirectory, ARENA_RUN_HOME)) {
+    for (const relinked of reconcileLinkedFiles(home, operatorHome)) {
+      if (relinked.outcome === 'operator-newer') {
+        process.stderr.write(
+          `arena: ${relinked.path} was replaced in the run and your login changed after; yours stands, the run's change is dropped\n`,
+        )
+      }
+    }
+  }
   const secretScan = withEarlierHits(scanRunForSecrets(runDirectory, arenaSecretValues(home)), earlier, runDirectory)
   const events = readTimeline(join(runDirectory, 'timeline.jsonl'))
   const histories = threadHistoriesIn(join(runDirectory, 'enso', 'evidence'))
