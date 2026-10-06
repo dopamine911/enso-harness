@@ -14,7 +14,11 @@ import type { ArenaEvent } from './timeline.ts'
  * ⚠ MISSING IS RECORDED, NEVER SKIPPED. A server that is down, a route that answers 404, a store
  * that does not exist yet (#551 slice 1 writes snapshots; the Diff Viewer data is a later slice)
  * each become a `missing` row naming why, so a findings report can say "no record" rather than
- * read silence as "nothing happened".
+ * read silence as "nothing happened". ⚠ Two threads have NOTHING to collect, and say so in one
+ * `skipped` row each instead of eleven `missing` ones (#671): a thread the run DELETED (its history
+ * answers 410 Gone), and one that NEVER RAN (no session: its history answers 404, and the project
+ * stores no such thread — the fresh thread Enso opens after a delete, #571). A thread that ran and
+ * still exists is read in full, and every route that fails for it is still `missing`.
  *
  * ⚠ THE DISK SIDE DOES NOT WAIT FOR THE SERVER (#584 A1, #607). A run that ends with Enso down is
  * the run whose evidence matters most, so `serverDown` turns every route into its own `missing`
@@ -53,11 +57,23 @@ async function defaultFetchText(url: string): Promise<{ readonly status: number;
   return { status: response.status, text: await response.text() }
 }
 
-/** Every piece of Enso-side evidence for the run: one row each, collected or missing. */
+/** Every piece of Enso-side evidence for the run: one row each, collected, missing, or skipped (#671). */
 export async function collectEnsoEvidence(sources: ArenaEvidenceSources): Promise<ArenaEvidence[]> {
   mkdirSync(sources.directory, { recursive: true })
   const fetchText = sources.fetchText ?? defaultFetchText
   const rows: ArenaEvidence[] = []
+  /**
+   * Each route asked once (PR #673 review): the history probe below and the thread's history read
+   * are the same GET, and its answer — or its failure — serves both.
+   */
+  const answers = new Map<string, Promise<{ readonly status: number; readonly text: string }>>()
+  const ask = (route: string): Promise<{ readonly status: number; readonly text: string }> => {
+    const known = answers.get(route)
+    if (known !== undefined) return known
+    const asked = fetchText(`${sources.serverOrigin}${route}`)
+    answers.set(route, asked)
+    return asked
+  }
 
   /** Save one route's body, redacted, and say so in a row. Returns the body saved, or undefined. */
   const save = async (kind: string, route: string, fileName: string): Promise<string | undefined> => {
@@ -67,7 +83,7 @@ export async function collectEnsoEvidence(sources: ArenaEvidenceSources): Promis
     }
     let answer: { readonly status: number; readonly text: string }
     try {
-      answer = await fetchText(`${sources.serverOrigin}${route}`)
+      answer = await ask(route)
     } catch (error) {
       rows.push({ kind, status: 'missing', reason: `GET ${route} failed: ${String(error)}` })
       return undefined
@@ -83,6 +99,26 @@ export async function collectEnsoEvidence(sources: ArenaEvidenceSources): Promis
     return body
   }
 
+  /**
+   * Why a thread has nothing to collect (#671), or undefined when it is read in full: deleted during
+   * the run (its history answers 410), or never run (404, and the project stores no such thread). A
+   * down server, a failed probe or any other answer reads the thread in full, so a failure is a row.
+   */
+  const threadWithNothing = async (
+    threadId: string,
+    id: string,
+    storedIds: ReadonlySet<string>,
+  ): Promise<string | undefined> => {
+    if (sources.serverDown !== undefined) return undefined
+    const route = `/api/threads/${id}/history`
+    const answer = await ask(route).catch(() => undefined)
+    if (answer?.status === 410) return `deleted during the run: GET ${route} answered 410`
+    if (answer?.status === 404 && !storedIds.has(threadId)) {
+      return `never ran: GET ${route} answered 404, and the project stores no such thread`
+    }
+    return undefined
+  }
+
   await save('live threads', '/api/threads', 'threads.json')
   const storedThreads = await save('stored threads', '/api/stored-threads', 'stored-threads.json')
   await save('stats', '/api/logs/stats', 'stats.json')
@@ -90,16 +126,19 @@ export async function collectEnsoEvidence(sources: ArenaEvidenceSources): Promis
   await save('thread trees', '/api/trees', 'trees.json')
   // ⚠ The run's project's threads too, not only the ones the URL named (#584): a thread the UI
   // never showed is exactly the one the score must look at — prompted some other way, or a fork.
-  const threadIds = [
-    ...new Set([
-      ...sources.threadIds,
-      ...(projectThreads(storedThreads, projectIdOf(realpathOrSelf(sources.project))) ?? []).map(
-        (thread) => thread.threadId,
-      ),
-    ]),
-  ]
+  const storedIds = new Set(
+    (projectThreads(storedThreads, projectIdOf(realpathOrSelf(sources.project))) ?? []).map(
+      (thread) => thread.threadId,
+    ),
+  )
+  const threadIds = [...new Set([...sources.threadIds, ...storedIds])]
   for (const threadId of threadIds) {
     const id = encodeURIComponent(threadId)
+    const nothingToCollect = await threadWithNothing(threadId, id, storedIds)
+    if (nothingToCollect !== undefined) {
+      rows.push({ kind: `thread ${threadId}`, status: 'skipped', reason: nothingToCollect })
+      continue
+    }
     for (const read of THREAD_READS) {
       const fileName = `thread-${threadId}${read.suffix === '' ? '' : `-${read.suffix}`}.${read.extension}`
       const label = read.suffix === '' ? `thread ${threadId}` : `thread ${threadId} ${read.label}`
