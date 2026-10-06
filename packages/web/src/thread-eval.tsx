@@ -8,8 +8,9 @@ import {
 } from '@enso/core'
 import type { FetchLike } from './browser-logging.ts'
 import { cn } from './lib/utils.ts'
+import { useThreadReadable } from './model-state.tsx'
 import { useReadOnUsage } from './read-on-usage.ts'
-import { ANALYSIS_READING, type AnalysisOutcome, readThreadAnalysis } from './route-read.ts'
+import { ANALYSIS_READING, type AnalysisOutcome, readNothingRan, readThreadAnalysis } from './route-read.ts'
 import { countText } from './stats-table.tsx'
 import { Card, Empty, Metric, Section } from './view-parts.tsx'
 
@@ -216,6 +217,6 @@ function SignalRow({ label, value }: { label: string; value: number }): React.Re
 
 /** The eval wired to its thread: read on open and whenever the thread's usage moves (`read-on-usage.ts`). */
 export function ThreadEvalDrawer(): React.ReactNode {
-  const outcome = useReadOnUsage<EvalOutcome>(readThreadEval, ANALYSIS_READING)
+  const outcome = useReadOnUsage<EvalOutcome>(useThreadReadable() ? readThreadEval : readNothingRan, ANALYSIS_READING)
   return <ThreadEvalView outcome={outcome} />
 }

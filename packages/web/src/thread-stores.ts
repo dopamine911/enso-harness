@@ -74,6 +74,13 @@ export interface ThreadStores {
   /** Whether the thread runs on a tree of its own (#551), from every snapshot — what makes "Restore files to here" an offer. */
   readonly tree: WritableStore<boolean>
   /**
+   * Whether the server can answer this thread's reads (#659): it has been seen with a session or
+   * messages — stored history, a snapshot's model or messages, a `model` observation. ⚠ LATCHED,
+   * never reset (PR #661 review): a snapshot nulls the model when the session idles out, and a
+   * thread minted on this page has no stored history, yet the thread ran and its routes answer.
+   */
+  readonly readable: WritableStore<boolean>
+  /**
    * What the session has spent and how full its context is (#45): the snapshot's `usage`, then
    * each `session-usage` observation, each the WHOLE state from pi's session totals — so a
    * reload, a resume or a second tab shows what the first tab saw accumulate. Undefined until
@@ -264,6 +271,7 @@ function createThreadStores(
     model: createModelStore(),
     cwd: createStore<string | undefined>(undefined),
     tree: createStore(false),
+    readable: createStore(history.length > 0),
     usage: createStore<EnsoSessionUsage | undefined>(undefined),
     notifications,
     modeLines: createModeLines(notifications),

@@ -14,9 +14,10 @@ import {
 import type { FetchLike } from './browser-logging.ts'
 import { type ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from './components/ui/chart.tsx'
 import { cn } from './lib/utils.ts'
+import { useThreadReadable } from './model-state.tsx'
 import { OptionSelect } from './option-select.tsx'
 import { useReadOnUsage } from './read-on-usage.ts'
-import { ANALYSIS_READING, type AnalysisOutcome, readThreadAnalysis } from './route-read.ts'
+import { ANALYSIS_READING, type AnalysisOutcome, readNothingRan, readThreadAnalysis } from './route-read.ts'
 import { COMPACT, costText, countText, durationsText } from './stats-table.tsx'
 import { useStore, useThreadStores } from './store.ts'
 import {
@@ -656,7 +657,8 @@ export function ThreadStatsView({
  * that pane's transcript and says whether it could.
  */
 export function ThreadStatsDrawer({ onNavigate }: { readonly onNavigate?: RevealStatsTarget }): React.ReactNode {
-  const outcome = useReadOnUsage<StatsOutcome>(readThreadStats, ANALYSIS_READING)
+  // #659: no request until the thread can answer — a never-run thread's 404s were console errors.
+  const outcome = useReadOnUsage<StatsOutcome>(useThreadReadable() ? readThreadStats : readNothingRan, ANALYSIS_READING)
   const [missed, setMissed] = useState<string | undefined>(undefined)
   const navigate =
     onNavigate === undefined || outcome.kind !== 'read'

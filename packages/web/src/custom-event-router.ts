@@ -116,6 +116,8 @@ export function routeEnsoCustomEvent(stores: ThreadStores, eventType: string, da
     stores.model.applySnapshot(data.model, data.recordedModel)
     stores.cwd.set(data.cwd)
     stores.tree.set(data.tree)
+    // #659: a session or messages means the routes answer — latched, never cleared by a later resync.
+    if (data.model !== null || data.messages.length > 0) stores.readable.set(true)
     stores.usage.set(data.usage)
     // The status bar's refusal word, resynced (#381): set when the branch's last reply is a
     // refused attempt — how a resumed thread still says it — and cleared when it is not. The
@@ -252,6 +254,7 @@ function routeObservation(stores: ThreadStores, observation: EnsoObservation): v
       // The host applied a `/model` or `/thinking` run (#338 slice 2) — the state after, from
       // pi's own event, never the option clicked. One store, the composer chip reads it.
       stores.model.applyObservation(observation)
+      stores.readable.set(true)
       return
     case 'extension-ui-request':
       routeUiRequest(stores, observation)

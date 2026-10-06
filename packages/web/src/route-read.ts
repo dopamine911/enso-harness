@@ -50,6 +50,9 @@ type SettledRead<Payload> =
 /** Where every analysis view starts. */
 export const ANALYSIS_READING = { kind: 'reading' } as const
 
+/** What an analysis of a thread nothing has run in says: its route's 404, or no route asked at all (#659). */
+const NOTHING_HAS_RUN = { kind: 'failed', problem: 'nothing has run in this thread yet' } as const
+
 /**
  * `GET /api/threads/:threadId/<analysis>` — `stats`, `context`, `eval`. A 404 is a thread nothing has run
  * in yet: held neither live nor on disk.
@@ -61,8 +64,14 @@ export async function readThreadAnalysis<Schema extends TSchema>(
   fetchImpl: FetchLike = fetch,
 ): Promise<AnalysisOutcome<Static<Schema>>> {
   const read = await readThreadRoute(threadId, analysis, schema, fetchImpl)
-  return read.kind === 'none' ? { kind: 'failed', problem: 'nothing has run in this thread yet' } : read
+  return read.kind === 'none' ? NOTHING_HAS_RUN : read
 }
+
+/**
+ * An analysis view's reader while its thread cannot answer yet (#659): what the 404 would have said,
+ * without asking. Stable, so `useReadOnUsage` reads afresh when the view swaps in the real one.
+ */
+export const readNothingRan = (): Promise<typeof NOTHING_HAS_RUN> => Promise.resolve(NOTHING_HAS_RUN)
 
 /**
  * A thread read a readout holds (#452, #453): nothing yet — or a thread nothing has run in, which

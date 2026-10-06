@@ -17,8 +17,9 @@ import {
   timeText,
 } from './context-parts.tsx'
 import { cn } from './lib/utils.ts'
+import { useThreadReadable } from './model-state.tsx'
 import { useReadOnUsage } from './read-on-usage.ts'
-import { ANALYSIS_READING, type AnalysisOutcome, readThreadAnalysis } from './route-read.ts'
+import { ANALYSIS_READING, type AnalysisOutcome, readNothingRan, readThreadAnalysis } from './route-read.ts'
 import { COMPACT, countText } from './stats-table.tsx'
 import { useStore, useThreadStores } from './store.ts'
 import {
@@ -702,7 +703,11 @@ export function ThreadContextView({ outcome }: { readonly outcome: ContextOutcom
 
 /** The Context view wired to its thread: read on open and whenever the thread's usage moves. */
 export function ThreadContextDrawer(): React.ReactNode {
-  return <ThreadContextView outcome={useReadOnUsage<ContextOutcome>(readThreadContext, ANALYSIS_READING)} />
+  const outcome = useReadOnUsage<ContextOutcome>(
+    useThreadReadable() ? readThreadContext : readNothingRan,
+    ANALYSIS_READING,
+  )
+  return <ThreadContextView outcome={outcome} />
 }
 
 /** `/context`'s two cards: what the next request holds, and every request's elements. */
@@ -724,7 +729,10 @@ function ContextComposition({ context }: { context: EnsoThreadContext }): React.
 
 /** The dialog's body: mounted only while the dialog is open, so the read happens then. */
 function ContextDialogBody(): React.ReactNode {
-  const outcome = useReadOnUsage<ContextOutcome>(readThreadContext, ANALYSIS_READING)
+  const outcome = useReadOnUsage<ContextOutcome>(
+    useThreadReadable() ? readThreadContext : readNothingRan,
+    ANALYSIS_READING,
+  )
   return whenRead(outcome, (context: EnsoThreadContext) => <ContextComposition context={context} />)
 }
 

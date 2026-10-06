@@ -57,6 +57,28 @@ const ITERATE_SCENARIO: ArenaScenario = {
 }
 
 /**
+ * Two approaches side by side, compared and one cleaned away: what `iterate` barely reached. Keeping
+ * both is where a fork is the tool; comparing them is the Diff and Stats of two threads; cleaning up
+ * is deleting a thread and its tree; and "what the model was given" is the Context view. Outcomes,
+ * never controls.
+ */
+const COMPARE_SCENARIO: ArenaScenario = {
+  id: 'compare',
+  assignment: [
+    'Write a small command-line Markdown-to-HTML converter. Try two different implementation',
+    'approaches side by side, keeping both available at the same time, then compare them: what each',
+    'one changed and what each one cost. Keep only the better one and clean up the other. Before you',
+    'finish, find out exactly what the model was given in its last request: its instructions, the',
+    "files, and the earlier conversation. Use Enso's UI to manage the work. When something is",
+    'difficult, missing, or confusing, record what you were trying to do, what happened, and what you',
+    'wish the interface had provided.',
+  ].join(' '),
+  budgetMinutes: 120,
+  sampleIntervalMs: 30_000,
+  traceChunkMs: 5 * 60_000,
+}
+
+/**
  * How the agent under test reaches the UI: the agent runner's one tool (`tool`), or the
  * `bun run arena act` command when a person or an unrestricted agent drives the run (`command`).
  */
@@ -293,5 +315,5 @@ export function arenaActCommand(outDirectory?: string): string {
 
 /** Every scenario by id: what `bun run arena start --scenario <id>` accepts. */
 export const ARENA_SCENARIOS: Readonly<Record<string, ArenaScenario>> = Object.fromEntries(
-  [SNAKE_SCENARIO, ITERATE_SCENARIO].map((scenario) => [scenario.id, scenario]),
+  [SNAKE_SCENARIO, ITERATE_SCENARIO, COMPARE_SCENARIO].map((scenario) => [scenario.id, scenario]),
 )
