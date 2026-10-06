@@ -34,7 +34,7 @@ import { baselineText } from './thread-git.tsx'
  */
 export type ChangesOutcome = ThreadReadOutcome<EnsoThreadChanges> | typeof ANALYSIS_READING
 
-/** `GET /api/threads/:threadId/changes`, as the view holds it. */
+/** `GET /api/threads/:threadId/changes`: the settled half of what the view holds — the changes, nothing (404), or why not. */
 export const readThreadChanges = (
   threadId: string,
   fetchImpl: FetchLike,
