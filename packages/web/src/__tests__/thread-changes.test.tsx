@@ -1,7 +1,9 @@
 import { expect, test } from 'bun:test'
 import type { EnsoGitFileChange, EnsoGitRepository } from '@enso/core'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { type ChangesOutcome, readThreadChanges, ThreadChangesView } from '../thread-changes.tsx'
+import { ThreadStoresContext } from '../store.ts'
+import { type ChangesOutcome, readThreadChanges, ThreadChanges, ThreadChangesView } from '../thread-changes.tsx'
+import { clearThreadsForTest, mintThread } from '../thread-stores.ts'
 
 /**
  * #452: the Diff view as a static render — every state said as what it is, the tree, and the
@@ -103,6 +105,24 @@ test('outside a repository, git unable to answer, a failed read and no answer ye
   expect(render(unavailable)).toContain('git could not answer: fatal: bad object')
   expect(render({ kind: 'failed', problem: '500 boom' })).toContain('could not be read: 500 boom')
   expect(render({ kind: 'none' })).toContain('Nothing has run in this thread yet.')
+})
+
+// ⚠ #657, from an arena run: the tab said "Nothing has run in this thread yet" until its first read
+// came back, and an agent that looked at once was told so on a thread that had run. A static render
+// runs no effect, so it shows exactly what the tab shows before any answer.
+test('⚠ the Diff tab says it is reading until its first answer, never that nothing has run', () => {
+  const stores = mintThread(() => new Promise<Response>(() => undefined))
+  try {
+    const first = renderToStaticMarkup(
+      <ThreadStoresContext.Provider value={stores}>
+        <ThreadChanges moment="" />
+      </ThreadStoresContext.Provider>,
+    )
+    expect(first).toContain('reading the changes…')
+    expect(first).not.toContain('Nothing has run')
+  } finally {
+    clearThreadsForTest()
+  }
 })
 
 // #650: a project with no commit yet runs in a copy, which has no `.git`; its changes come from its store.

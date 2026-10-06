@@ -5,7 +5,7 @@ import type { FetchLike } from './browser-logging.ts'
 import { type DiffHunk, type DiffLine, hiddenBefore, parsePatch, type SplitRow, splitRows } from './diff-rows.ts'
 import { buildFileTree, filesInOrder, type TreeNode } from './file-tree.ts'
 import { useReadOnUsage } from './read-on-usage.ts'
-import { readThreadRoute, THREAD_READ_NONE, type ThreadReadOutcome } from './route-read.ts'
+import { ANALYSIS_READING, readThreadRoute, type ThreadReadOutcome } from './route-read.ts'
 import { baselineText } from './thread-git.tsx'
 
 /**
@@ -26,12 +26,19 @@ import { baselineText } from './thread-git.tsx'
  * so instead of a diff. Nothing here reads the files themselves.
  */
 
-/** What the view holds: nothing yet (a thread nothing has run in), the changes, or why not. */
-export type ChangesOutcome = ThreadReadOutcome<EnsoThreadChanges>
+/**
+ * What the view holds: not read yet, nothing (a thread nothing has run in: the route's 404), the
+ * changes, or why not. ⚠ `reading` is its own state (#657): the shared `THREAD_READ_NONE` is also
+ * where a read STARTS, and the tab said "Nothing has run in this thread yet" until its first answer
+ * came back — an agent that looked at once was told so on a thread that had run.
+ */
+export type ChangesOutcome = ThreadReadOutcome<EnsoThreadChanges> | typeof ANALYSIS_READING
 
 /** `GET /api/threads/:threadId/changes`, as the view holds it. */
-export const readThreadChanges = (threadId: string, fetchImpl: FetchLike): Promise<ChangesOutcome> =>
-  readThreadRoute(threadId, 'changes', EnsoThreadChanges, fetchImpl)
+export const readThreadChanges = (
+  threadId: string,
+  fetchImpl: FetchLike,
+): Promise<ThreadReadOutcome<EnsoThreadChanges>> => readThreadRoute(threadId, 'changes', EnsoThreadChanges, fetchImpl)
 
 // ── the tree ─────────────────────────────────────────────────────────────────────────────────
 
@@ -384,6 +391,9 @@ function CopyChanges({
 
 /** Pure view of the outcome: every state said as what it is. */
 export function ThreadChangesView({ outcome }: { readonly outcome: ChangesOutcome }): React.ReactNode {
+  if (outcome.kind === 'reading') {
+    return <p className="px-4 py-6 text-sm text-muted-foreground">reading the changes…</p>
+  }
   if (outcome.kind === 'none') {
     return <p className="px-4 py-6 text-sm text-muted-foreground">Nothing has run in this thread yet.</p>
   }
@@ -410,6 +420,6 @@ export function ThreadChangesView({ outcome }: { readonly outcome: ChangesOutcom
  * run started or ended) and whenever the thread's usage moves.
  */
 export function ThreadChanges({ moment }: { readonly moment: string }): React.ReactNode {
-  const outcome = useReadOnUsage(readThreadChanges, THREAD_READ_NONE, moment)
+  const outcome = useReadOnUsage<ChangesOutcome>(readThreadChanges, ANALYSIS_READING, moment)
   return <ThreadChangesView outcome={outcome} />
 }
