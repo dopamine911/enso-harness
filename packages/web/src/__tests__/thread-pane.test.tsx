@@ -266,6 +266,49 @@ test('⚠ a new thread asks for no git state until its session is live, then rea
   await pane.unmount()
 })
 
+// ⚠ #619: a thread's work is in its own tree (#551), and the arena runs found no way to reach it —
+// nor to play the game it built. The bar's "own tree" opens what the thread built: the tree's path,
+// and each of its pages as a link to the server's sandboxed preview, in a new tab, holding no handle
+// on this page.
+test('⚠ "own tree" opens what the thread built: its path, and each page as a sandboxed preview in a new tab (#619)', async () => {
+  const pane = await mountPane({
+    server: {
+      pages: () => ({
+        path: '/home/me/.enso/projects/p/trees/t',
+        pages: ['index.html', 'game/my page.html'],
+        truncated: false,
+      }),
+    },
+  })
+  await pane.settle({ ...SNAPSHOT_LIVE, tree: true })
+  const opener = [...pane.container.querySelectorAll<HTMLButtonElement>('button')].find(
+    (button) => button.textContent === 'own tree, not your checkout',
+  )
+  if (opener === undefined) throw new Error('expected the "own tree" button on the bar')
+  await flush(async () => {
+    opener.click()
+    await tick()
+  })
+  const panel = await eventually(() => {
+    const dialog = [...document.querySelectorAll<HTMLElement>('[role="dialog"]')].find((open) =>
+      open.textContent?.includes('What this thread built'),
+    )
+    expect(dialog?.textContent).toContain('/home/me/.enso/projects/p/trees/t')
+    return dialog
+  })
+  const links = [...(panel?.querySelectorAll<HTMLAnchorElement>('a') ?? [])].map((link) => [
+    link.getAttribute('href'),
+    link.getAttribute('target'),
+    link.getAttribute('rel'),
+  ])
+  const id = encodeURIComponent(pane.stores.threadId)
+  expect(links).toEqual([
+    [`/preview/threads/${id}/index.html`, '_blank', 'noopener noreferrer'],
+    [`/preview/threads/${id}/game/my%20page.html`, '_blank', 'noopener noreferrer'],
+  ])
+  await pane.unmount()
+})
+
 // ⚠ #404: a thread's requests go through ITS fetch — the seam the fixture page closes (its threads
 // get one that refuses), and the one that carries the project header (#395). A request a pane
 // issues on the page's GLOBAL fetch instead escapes both: on the fixture page that ran a real

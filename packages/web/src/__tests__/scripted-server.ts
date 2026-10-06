@@ -107,6 +107,8 @@ export interface ScriptedFetchOptions {
   readonly git?: () => EnsoGitState
   /** What the Diff view's read answers (#452), asked per read; 404 when absent. */
   readonly changes?: () => { git: EnsoGitState; files: EnsoGitFileChange[]; truncated: boolean }
+  /** What `GET /api/threads/:id/tree` answers (#619), without its `threadId`; absent is the 404. */
+  readonly pages?: () => { path: string; pages: string[]; truncated: boolean }
   /**
    * What each `DELETE /api/threads/:id` answers (#571), in turn; the last one repeats, and 204
    * when absent. A 204 takes the thread out of `storedThreads`, as deleting its session file does.
@@ -197,6 +199,7 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
     eval: () => options.eval,
     git: () => (options.git === undefined ? undefined : { cwd: '/scripted/launch', git: options.git() }),
     changes: () => (options.changes === undefined ? undefined : { cwd: '/scripted/launch', ...options.changes() }),
+    tree: () => options.pages?.(),
   }
   /** The page's own reads — mode seed, the rail's stored list, a resume click's history. Exact paths. */
   const pageRead = (path: string): Response | undefined => {
@@ -217,7 +220,7 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
       const threadId = decodeURIComponent(commands[1])
       return Response.json({ threadId, commands: options.commands ?? [], source: 'live' })
     }
-    const analysis = /^\/api\/threads\/([^/]+)\/(stats|eval|git|changes)$/.exec(path)
+    const analysis = /^\/api\/threads\/([^/]+)\/(stats|eval|git|changes|tree)$/.exec(path)
     if (analysis?.[1] !== undefined && analysis[2] !== undefined) {
       const payload = analysisReads[analysis[2]]?.()
       if (payload === undefined) return new Response('nothing has run in this thread', { status: 404 })
