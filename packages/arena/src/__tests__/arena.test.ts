@@ -17,7 +17,7 @@ import {
   waitForPage,
 } from '../actions.ts'
 import { collectEnsoEvidence } from '../evidence.ts'
-import { foldArenaManifest } from '../manifest.ts'
+import { type ArenaEvidence, foldArenaManifest } from '../manifest.ts'
 import { arenaActCommand, arenaBrief, arenaReviewBrief, githubRepositoryOf, SNAKE_SCENARIO } from '../scenario.ts'
 import { type ArenaClock, type ArenaEventBody, openTimeline, pagePlace, readTimeline } from '../timeline.ts'
 
@@ -561,6 +561,49 @@ test('Enso evidence: collected bodies are redacted, everything else is a missing
   expect(existsSync(join(copy, THREAD))).toBe(true)
   expect(again.find((row) => row.kind === 'threads')).toMatchObject({ status: 'missing' })
   expect(existsSync(join(root, 'evidence-2', 'stats.json'))).toBe(true)
+})
+
+// ⚠ #671, from an arena run: a deleted thread and the fresh thread Enso opens after it filled the
+// score with 11 'not collected' rows that said nothing about Enso. Each is now one skipped row — and
+// a thread that ran and exists keeps every failing route as a warning row.
+test('⚠ a deleted thread and a never-run one are each one skipped row; a stored thread whose routes fail stays missing', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'arena-evidence-skip-'))
+  const project = join(root, 'project')
+  mkdirSync(project, { recursive: true })
+  const deleted = '11111111-1111-4111-8111-111111111111'
+  const neverRan = '22222222-2222-4222-8222-222222222222'
+  const ranAndBroken = '33333333-3333-4333-8333-333333333333'
+  const projectId = projectIdOf(realpathOrSelf(project))
+  const rows = await collectEnsoEvidence({
+    serverOrigin: 'http://enso',
+    directory: join(root, 'evidence'),
+    threadIds: [deleted, neverRan, ranAndBroken],
+    home: join(root, 'home'),
+    project,
+    secretValues: [],
+    fetchText: (url) => {
+      if (url.endsWith('/api/stored-threads')) {
+        return Promise.resolve({
+          status: 200,
+          text: JSON.stringify([{ threadId: ranAndBroken, projectId, messageCount: 4 }]),
+        })
+      }
+      if (url.includes(deleted)) return Promise.resolve({ status: url.endsWith('/history') ? 410 : 404, text: 'gone' })
+      if (url.includes(neverRan) || url.includes(ranAndBroken))
+        return Promise.resolve({ status: 404, text: 'no session' })
+      return Promise.resolve({ status: 200, text: '{}' })
+    },
+  })
+  const about = (threadId: string): ArenaEvidence[] => rows.filter((row) => row.kind.includes(threadId))
+  expect(about(deleted)).toEqual([
+    { kind: `thread ${deleted}`, status: 'skipped', reason: expect.stringContaining('deleted during the run') },
+  ])
+  expect(about(neverRan)).toEqual([
+    { kind: `thread ${neverRan}`, status: 'skipped', reason: expect.stringContaining('never ran') },
+  ])
+  // Stored, so it ran: every route that fails is its own missing row, as before.
+  expect(about(ranAndBroken).length).toBeGreaterThan(1)
+  expect(about(ranAndBroken).every((row) => row.status === 'missing')).toBe(true)
 })
 
 test('the brief carries the assignment verbatim and no internals', () => {

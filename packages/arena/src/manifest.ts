@@ -16,10 +16,13 @@ import type { ArenaActionSource, ArenaEvent, ArenaNoteKind, ArenaShotCause } fro
  * nothing about the third.
  */
 
-/** One piece of Enso-side evidence: where it was saved, or why it was not. */
+/**
+ * One piece of Enso-side evidence: where it was saved, why it was not, or why there was nothing to
+ * collect (#671): a thread the run deleted, or one it never ran. Only `missing` is a problem.
+ */
 export type ArenaEvidence =
   | { readonly kind: string; readonly status: 'collected'; readonly path: string }
-  | { readonly kind: string; readonly status: 'missing'; readonly reason: string }
+  | { readonly kind: string; readonly status: 'missing' | 'skipped'; readonly reason: string }
 
 /** One evidence row read back from a manifest on disk, field by field; undefined when it is not one. */
 export function arenaEvidenceRowOf(value: unknown): ArenaEvidence | undefined {
@@ -28,8 +31,12 @@ export function arenaEvidenceRowOf(value: unknown): ArenaEvidence | undefined {
   if (value.status === 'collected' && 'path' in value && typeof value.path === 'string') {
     return { kind: value.kind, status: 'collected', path: value.path }
   }
-  if (value.status === 'missing' && 'reason' in value && typeof value.reason === 'string') {
-    return { kind: value.kind, status: 'missing', reason: value.reason }
+  if (
+    (value.status === 'missing' || value.status === 'skipped') &&
+    'reason' in value &&
+    typeof value.reason === 'string'
+  ) {
+    return { kind: value.kind, status: value.status, reason: value.reason }
   }
   return undefined
 }
