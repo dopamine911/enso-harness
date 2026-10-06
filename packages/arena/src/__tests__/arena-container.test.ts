@@ -67,12 +67,14 @@ test('the flags the container decides are refused, and a container run needs an 
 
 // ⚠ PR #678 review: the base image's pwuser is uid 1001; a bind mount keeps host ownership on native
 // Linux Docker, so a container user who is not the host's could not write a run.
-test('⚠ the image is built for the building user: its uid and gid go in as build arguments', () => {
+test('⚠ the image is built for the building user: its uid and gid go in as build arguments, and root is refused', () => {
   const dockerArguments = containerBuildArgs('/repo', { uid: 1234, gid: 5678 })
   const buildArguments = dockerArguments.flatMap((argument, index) =>
     dockerArguments[index - 1] === '--build-arg' ? [argument] : [],
   )
   expect(buildArguments).toEqual(['ARENA_UID=1234', 'ARENA_GID=5678'])
+  // Under sudo the remap would make the container's user root, and the run's bash with it.
+  expect(() => containerBuildArgs('/repo', { uid: 0, gid: 0 })).toThrow('root is not one')
 })
 
 test('⚠ the credential reaches the volume through stdin only: never an argument, never the environment', () => {

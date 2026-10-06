@@ -48,6 +48,10 @@ export function containerBuildArgs(
   owner: { readonly uid: number; readonly gid: number },
   image: string = ARENA_IMAGE,
 ): string[] {
+  // ⚠ PR #678 review: built as root (under sudo, say), the remap would make the container's user
+  // root — the run's bash with it. The image is for the unprivileged user who runs it.
+  if (owner.uid === 0)
+    throw new Error('the image is built for the user who runs it, and root is not one: build without sudo')
   return [
     'build',
     '--file',
@@ -236,9 +240,14 @@ export async function runContainerCommand(
   const [subcommand, ...rest] = argumentList
   switch (subcommand) {
     case 'build':
-      return docker(
-        containerBuildArgs(context.repoRoot, { uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000 }),
-      )
+      try {
+        return docker(
+          containerBuildArgs(context.repoRoot, { uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000 }),
+        )
+      } catch (error) {
+        process.stderr.write(`arena: ${error instanceof Error ? error.message : String(error)}\n`)
+        return 1
+      }
     case 'credential':
       return await credentialCommand(rest)
     case 'start':
