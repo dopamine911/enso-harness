@@ -482,7 +482,9 @@ export function ThreadStatusBar({ messages, generating, projectTitle }: ThreadSt
   const incidents = useStore(stores.incidents)
   // A live session says its model; a stored thread has messages. A new thread has neither (#620).
   const readable = useModelState() !== null || messages.length > 0
-  const git = useThreadGit(`${settledToolResults(messages)}:${generating}`, readable)
+  // When the tree may have moved: a settled tool result, the run starting or ending.
+  const moment = `${settledToolResults(messages)}:${generating}`
+  const git = useThreadGit(moment, readable)
   return (
     <ThreadStatusView
       activity={describeActivity(messages, generating, disconnected)}
@@ -491,7 +493,7 @@ export function ThreadStatusBar({ messages, generating, projectTitle }: ThreadSt
       cwd={cwd}
       projectTitle={projectTitle}
       onTree={onTree}
-      treeControl={<ThreadTreeButton />}
+      treeControl={<ThreadTreeButton moment={moment} readable={readable} />}
       questionWaiting={questionWaiting}
       refusal={refusal?.refusalClass}
       refusalSource={refusal?.provider}

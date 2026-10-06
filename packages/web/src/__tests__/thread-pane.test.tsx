@@ -336,6 +336,56 @@ test('⚠ "own tree" opens what the thread built: its path, and each page as a s
   await pane.unmount()
 })
 
+// ⚠ #640: the first agent run after the preview shipped read the "own tree" button and concluded
+// Enso had no preview. Once the tree holds a page, the bar says "Preview", and it opens the panel.
+test('⚠ the bar offers "Preview" once the thread’s tree holds a page, and not before (#640)', async () => {
+  let pages: string[] = []
+  const pane = await mountPane({ server: { pages: () => ({ path: '/trees/t', pages, truncated: false }) } })
+  const previewButton = (): HTMLButtonElement | undefined =>
+    [...pane.container.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent?.trim() === 'Preview',
+    )
+  await pane.settle({ ...SNAPSHOT_LIVE, tree: true })
+  await eventually(() => expect(pane.status()).toContain('own tree, not your checkout'))
+  expect(previewButton()).toBeUndefined()
+
+  // The run writes a page: a tool result settles, and the bar reads the tree again.
+  pages = ['index.html']
+  await pane.settle(
+    { type: 'observation', seq: 1, observation: { kind: 'message-start', role: 'assistant' } },
+    {
+      type: 'observation',
+      seq: 2,
+      observation: { kind: 'tool-call', toolCallId: 'w1', toolName: 'write', args: { path: 'index.html' } },
+    },
+    {
+      type: 'observation',
+      seq: 3,
+      observation: {
+        kind: 'tool-result',
+        toolCallId: 'w1',
+        toolName: 'write',
+        text: 'ok',
+        complete: true,
+        isError: false,
+      },
+    },
+  )
+  const preview = await eventually(() => {
+    const found = previewButton()
+    expect(found).toBeDefined()
+    return found
+  })
+  await flush(async () => {
+    preview?.click()
+    await tick()
+  })
+  await eventually(() =>
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain('What this thread built'),
+  )
+  await pane.unmount()
+})
+
 // ⚠ #404: a thread's requests go through ITS fetch — the seam the fixture page closes (its threads
 // get one that refuses), and the one that carries the project header (#395). A request a pane
 // issues on the page's GLOBAL fetch instead escapes both: on the fixture page that ran a real
