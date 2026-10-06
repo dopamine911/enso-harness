@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { ensoProjectsDir, projectIdOf, projectSnapshotsDir, realpathOrSelf } from '@enso/core/paths'
 import {
   type ArenaAction,
+  createChangeBaseline,
   describeArenaAction,
   LONGEST_WAIT_MS,
   pageForChange,
@@ -194,6 +195,32 @@ test('⚠ a wait until change returns at the first look that differs, and at its
     ...sleepingClock(),
   })
   expect(unchanged).toEqual({ changed: false, waitedMs: 2500 })
+})
+
+// ⚠ PR #646 review proposed, twice, forgetting the page at the agent's move and looking at the wait's
+// start instead. A card that appears in between — during the agent's own model call — then becomes
+// the baseline, the page holds still, and the wait sits out its limit: the bug #637 fixes.
+test('⚠ a card that appears between the agent’s move and its wait is a change; a failed look leaves nothing', async () => {
+  let page = 'the page'
+  const lastSeen = createChangeBaseline(() => Promise.resolve(page))
+  lastSeen.saw('the page')
+  page = 'the page, prompt typed'
+  await lastSeen.moved()
+  page = 'the page, prompt typed, a card' // Enso asks while the agent is still thinking.
+  const waited = await waitForPageChange({
+    baseline: await lastSeen.baseline(),
+    look: () => Promise.resolve(page),
+    ms: 60_000,
+    pollMs: 1000,
+    ...sleepingClock(),
+  })
+  expect(waited).toEqual({ changed: true, waitedMs: 1000 })
+
+  // A move whose look fails leaves no baseline: the wait starts from the page it finds.
+  const failing = createChangeBaseline(() => Promise.reject(new Error('the page closed')))
+  failing.saw('stale')
+  await failing.moved()
+  await expect(failing.baseline()).rejects.toThrow('the page closed')
 })
 
 test('what the agent typed reaches the timeline redacted', () => {

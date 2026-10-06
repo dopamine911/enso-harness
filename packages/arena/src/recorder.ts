@@ -11,6 +11,7 @@ import {
   ARENA_RUNNER_STILL_RUNNING,
   type ArenaAction,
   type ArenaTarget,
+  createChangeBaseline,
   describeArenaAction,
   pageForChange,
   waitForPageChange,
@@ -641,18 +642,13 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
   for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => resolveStop(`signal ${signal}`))
 
   // ── The agent's actions ────────────────────────────────────────────────────────────────────
-  /**
-   * The page as the agent last saw it, for a wait until change (#637): its last `read`, or the page
-   * right after its last action that moves the page (PR #646 review) — its own click is no change
-   * for its next wait. The snapshot has the rail's ages aside, or names the native dialog blocking
-   * the page. Undefined before either, or when that snapshot failed: the wait then compares with
-   * the page as it found it.
-   */
-  let lastRead: string | undefined
+  /** The page as the agent sees it, for a wait until change (#637): the rail's ages aside, or the native dialog blocking it. */
   const pageNow = async (): Promise<string> =>
     pendingDialog === undefined
       ? pageForChange(await page.locator('body').ariaSnapshot({ timeout: ACTION_TIMEOUT_MS }))
       : `dialog ${pendingDialog.type()}: ${pendingDialog.message()}`
+  /** What the agent last saw: its last read, or the page right after its last move (`createChangeBaseline`). */
+  const lastSeen = createChangeBaseline(pageNow)
   const perform = async (action: ArenaAction, via: ArenaActionSource): Promise<unknown> => {
     const timeout = ACTION_TIMEOUT_MS
     switch (action.action) {
@@ -678,12 +674,12 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
       case 'read': {
         // ⚠ An open native dialog blocks the page, the snapshot included: say the dialog instead.
         if (pendingDialog !== undefined) {
-          lastRead = await pageNow()
+          lastSeen.saw(await pageNow())
           return { ...here(), dialog: { type: pendingDialog.type(), message: redact(pendingDialog.message()) } }
         }
         // One snapshot (PR #646 review): the page the agent reads is the wait's baseline too.
         const snapshot = await page.locator('body').ariaSnapshot({ timeout })
-        lastRead = pageForChange(snapshot)
+        lastSeen.saw(pageForChange(snapshot))
         return { ...here(), page: snapshot }
       }
       case 'screenshot':
@@ -694,7 +690,7 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
           return here()
         }
         const waited = await waitForPageChange({
-          baseline: lastRead ?? (await pageNow()),
+          baseline: await lastSeen.baseline(),
           look: pageNow,
           sleep: (ms) => page.waitForTimeout(ms),
           ms: action.ms,
@@ -787,7 +783,7 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
             here(),
           )
         }
-        if (!LEAVES_THE_PAGE.has(action.action)) lastRead = await pageNow().catch(() => undefined)
+        if (!LEAVES_THE_PAGE.has(action.action)) await lastSeen.moved()
         return { ok: true, result }
       } catch (error) {
         const message = errorLine(error, redact)

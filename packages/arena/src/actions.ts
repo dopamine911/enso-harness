@@ -132,6 +132,39 @@ export async function waitForPageChange(options: {
   return { changed: false, waitedMs: waited() }
 }
 
+/** What a wait until change compares with, kept as the agent acts (#637). */
+export interface ArenaChangeBaseline {
+  /** The agent read the page: this is what it saw. */
+  readonly saw: (page: string) => void
+  /** The agent moved the page (a click, a fill, a key): what it left is what it knows. */
+  readonly moved: () => Promise<void>
+  /** The page a wait starts from: the last seen, or — with none — the page as the wait finds it. */
+  readonly baseline: () => Promise<string>
+}
+
+/**
+ * The page as the agent last saw it: its last read, or the page right after its last move.
+ *
+ * ⚠ TAKEN AT THE MOVE, NOT AT THE WAIT (PR #646 review, twice proposed otherwise). Between the
+ * agent's click and its wait lies its own model call — a median 2.1 s in the Sonnet run. Forgetting
+ * the page at the move and looking at the wait's start would fold a card that appeared in that gap
+ * into the baseline: the page then holds still, and the wait sits out its whole limit — the bug
+ * #637 fixes. The look costs a median 7 ms (121 reads, measured). A look that fails leaves nothing,
+ * and the wait starts from the page it finds.
+ */
+export function createChangeBaseline(look: () => Promise<string>): ArenaChangeBaseline {
+  let seen: string | undefined
+  return {
+    saw: (page) => {
+      seen = page
+    },
+    moved: async () => {
+      seen = await look().catch(() => undefined)
+    },
+    baseline: async () => seen ?? (await look()),
+  }
+}
+
 const NOTE_KINDS: readonly ArenaNoteKind[] = ['wish', 'friction', 'retrospective']
 
 /** The parsed action, or why the request is not one. */
