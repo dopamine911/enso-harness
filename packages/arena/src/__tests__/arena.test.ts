@@ -5,9 +5,12 @@ import { join } from 'node:path'
 import { ensoProjectsDir, projectIdOf, projectSnapshotsDir, realpathOrSelf } from '@enso/core/paths'
 import {
   type ArenaAction,
+  createChangeBaseline,
   describeArenaAction,
   LONGEST_WAIT_MS,
+  pageForChange,
   parseArenaAction,
+  waitForPageChange,
   typedSecretRefusal,
 } from '../actions.ts'
 import { collectEnsoEvidence } from '../evidence.ts'
@@ -128,6 +131,96 @@ test('a wait is capped, a note needs what was tried and what happened', () => {
     ok: true,
     action: { action: 'note', note: 'wish', trying: 'a', happened: 'b', wanted: 'c' },
   })
+})
+
+test('a wait until change is parsed, capped and worded as one; any other `until` is refused (#637)', () => {
+  expect(parseArenaAction({ action: 'wait', ms: 10 * LONGEST_WAIT_MS, until: 'change' })).toEqual({
+    ok: true,
+    action: { action: 'wait', ms: LONGEST_WAIT_MS, until: 'change' },
+  })
+  expect(parseArenaAction({ action: 'wait', ms: 1000, until: 'idle' })).toEqual({
+    ok: false,
+    error: 'wait "until" takes "change"',
+  })
+  expect(describeArenaAction({ action: 'wait', ms: 60_000, until: 'change' }, [])).toBe(
+    'wait until change, up to 60000 ms',
+  )
+  expect(describeArenaAction({ action: 'wait', ms: 30_000 }, [])).toBe('wait 30000 ms')
+})
+
+// ⚠ #637, measured on a live run: while a permission card waits, the rail's relative age is the only
+// thing on the page that moves (now → 6s → 11s … → 1m). A wait that counted it would return at once.
+test('⚠ the rail’s ages are not a change; a new control is, and so is an age-shaped name outside the rail', () => {
+  // The shape of a live read: the rail's navigation, then the chat with the card.
+  const page = (age: string, chat = '  - button "Yes"'): string =>
+    `- navigation "threads":\n  - button "waiting on you Write notes.md… ${age}"\n- tabpanel "Chat":\n${chat}`
+  for (const age of ['6s', '1m', '3h', '2d']) expect(pageForChange(page(age))).toBe(pageForChange(page('now')))
+  expect(pageForChange(page('6s', '  - button "Yes"\n  - button "No"'))).not.toBe(pageForChange(page('6s')))
+  // PR #646 review: the same shape outside the rail is the page's words, and its change counts.
+  expect(pageForChange(page('6s', '  - button "Snooze 2h"'))).not.toBe(
+    pageForChange(page('6s', '  - button "Snooze 1h"')),
+  )
+})
+
+/** A clock that moves only when the wait sleeps: each outcome's `waitedMs` is exact. */
+function sleepingClock(): { readonly now: () => number; readonly sleep: (ms: number) => Promise<void> } {
+  let at = 0
+  return {
+    now: () => at,
+    sleep: (ms) => {
+      at += ms
+      return Promise.resolve()
+    },
+  }
+}
+
+test('⚠ a wait until change returns at the first look that differs, and at its limit unchanged (#637)', async () => {
+  const looks = ['same', 'same', 'card']
+  const changed = await waitForPageChange({
+    baseline: 'same',
+    look: () => Promise.resolve(looks.shift() ?? 'card'),
+    ms: 60_000,
+    pollMs: 1000,
+    ...sleepingClock(),
+  })
+  expect(changed).toEqual({ changed: true, waitedMs: 3000 })
+  expect(looks).toEqual([])
+
+  // Nothing moves: it waits out the limit exactly, the last sleep cut to fit.
+  const unchanged = await waitForPageChange({
+    baseline: 'same',
+    look: () => Promise.resolve('same'),
+    ms: 2500,
+    pollMs: 1000,
+    ...sleepingClock(),
+  })
+  expect(unchanged).toEqual({ changed: false, waitedMs: 2500 })
+})
+
+// ⚠ PR #646 review proposed, twice, forgetting the page at the agent's move and looking at the wait's
+// start instead. A card that appears in between — during the agent's own model call — then becomes
+// the baseline, the page holds still, and the wait sits out its limit: the bug #637 fixes.
+test('⚠ a card that appears between the agent’s move and its wait is a change; a failed look leaves nothing', async () => {
+  let page = 'the page'
+  const lastSeen = createChangeBaseline(() => Promise.resolve(page))
+  lastSeen.saw('the page')
+  page = 'the page, prompt typed'
+  await lastSeen.moved()
+  page = 'the page, prompt typed, a card' // Enso asks while the agent is still thinking.
+  const waited = await waitForPageChange({
+    baseline: await lastSeen.baseline(),
+    look: () => Promise.resolve(page),
+    ms: 60_000,
+    pollMs: 1000,
+    ...sleepingClock(),
+  })
+  expect(waited).toEqual({ changed: true, waitedMs: 1000 })
+
+  // A move whose look fails leaves no baseline: the wait starts from the page it finds.
+  const failing = createChangeBaseline(() => Promise.reject(new Error('the page closed')))
+  failing.saw('stale')
+  await failing.moved()
+  await expect(failing.baseline()).rejects.toThrow('the page closed')
 })
 
 test('what the agent typed reaches the timeline redacted', () => {

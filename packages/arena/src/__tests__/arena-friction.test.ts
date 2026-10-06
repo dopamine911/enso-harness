@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { describeArenaAction } from '../actions.ts'
 import { compareRunDirectories } from '../compare.ts'
 import { observedFriction } from '../friction.ts'
 import { foldArenaManifest } from '../manifest.ts'
@@ -67,6 +68,20 @@ test('⚠ waiting then looking is polling from its third cycle; the share of the
   ).toEqual([])
 })
 
+// ⚠ #637: a wait until change returns when Enso does something — it is not waiting blind, and a
+// comparison counting it as polling would read the cure as more of the disease.
+test('a wait until change, then a look, is not polling; fixed sleeps around it still are', () => {
+  const changeWait = action('wait', describeArenaAction({ action: 'wait', ms: 60_000, until: 'change' }, []), {
+    durationMs: 4000,
+  })
+  expect(observedFriction(timelineOf([changeWait, read(), changeWait, read(), changeWait, read()]))).toEqual([])
+  expect(
+    observedFriction(
+      timelineOf([changeWait, read(), wait(30_000), read(), wait(30_000), read(), wait(30_000), read()]),
+    ),
+  ).toEqual([expect.objectContaining({ pattern: 'polling', count: 3, summary: expect.stringContaining('1.5 of') })])
+})
+
 test('⚠ approval clicks count from the third, taken ones only; a click on any other button is not one', () => {
   const approvals = [
     action('click', 'click button "Yes, allow write"'),
@@ -78,6 +93,24 @@ test('⚠ approval clicks count from the third, taken ones only; a click on any 
   expect(observedFriction(timelineOf([...approvals, action('click', 'click button "Allow"')]))).toEqual([
     { pattern: 'approvals', summary: "3 approval clicks to let Enso's agent go on", count: 3, at: [10, 20, 50] },
   ])
+})
+
+// ⚠ #641: an agent clicked all three approvals of a run by TEXT, and the pattern that took `button`
+// alone counted none — `arena compare` read the 7 → 3 as 7 → none. Every target kind counts the same.
+test('⚠ an approval counts whatever named its target: by role or by text', () => {
+  const byText = [
+    action('click', 'click text "Yes, allow write"'),
+    action('click', 'click text "Yes, allow bash"'),
+    action('click', 'click text "Yes, for this session"'),
+  ]
+  expect(observedFriction(timelineOf(byText))).toEqual([
+    { pattern: 'approvals', summary: "3 approval clicks to let Enso's agent go on", count: 3, at: [10, 20, 30] },
+  ])
+  // A text or option that merely contains the word is not one: the name must start with it.
+  const lookalikes = ['click text "Not yet"', 'click option "Okay later"', 'click text "Say yes"'].map((detail) =>
+    action('click', detail),
+  )
+  expect(observedFriction(timelineOf([...lookalikes, ...lookalikes]))).toEqual([])
 })
 
 test('⚠ an action tried again after it failed is a retry; the same action twice with no failure is not', () => {

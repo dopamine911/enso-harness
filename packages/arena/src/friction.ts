@@ -1,3 +1,4 @@
+import { isChangeWait } from './actions.ts'
 import type { ArenaEvent } from './timeline.ts'
 
 /**
@@ -28,7 +29,7 @@ export interface ArenaFriction {
 
 /** A wait the driver followed with a look at the page: the shape of polling for Enso to finish. */
 const POLLING_MIN_CYCLES = 3
-/** Clicks on an approval button ("Yes, allow …", "Allow", "Approve") before it counts as friction. */
+/** Clicks on an approval ("Yes, allow …", "Allow", "Approve"), by role or by text, before it counts as friction. */
 const APPROVALS_MIN_CLICKS = 3
 /** `back` and `reload` actions before they count as backtracking. */
 const BACKTRACKING_MIN_MOVES = 2
@@ -37,7 +38,12 @@ const REPEATED_NAVIGATION_MIN = 3
 /** How many actions after a failure the same action counts as its retry. */
 const RETRY_WINDOW = 3
 
-const APPROVAL_CLICK = /^click button "(yes|allow|approve|ok|confirm)\b/i
+/**
+ * A click on an approval, whatever named its target (#641): `click button "Yes…"` by role, and
+ * `click text "Yes, allow write…"` by text — the second is how an agent clicked all three approvals
+ * of one run, and the pattern that took `button` alone counted none of them.
+ */
+const APPROVAL_CLICK = /^click \w+ "(yes|allow|approve|ok|confirm)\b/i
 const LOOKS = new Set(['read', 'screenshot'])
 
 type ActionEvent = Extract<ArenaEvent, { kind: 'action' }>
@@ -57,14 +63,15 @@ export function observedFriction(events: readonly ArenaEvent[]): ArenaFriction[]
   ].flatMap((found) => (found === undefined ? [] : [found]))
 }
 
+/**
+ * Fixed sleeps followed by a look: waiting blind. A wait until change (#637) is not one — it returns
+ * when Enso does something — so neither its cycles nor its minutes count here.
+ */
 function polling(actions: readonly ActionEvent[], runMs: number): ArenaFriction | undefined {
-  const cycles = actions.filter(
-    (action, index) => action.action === 'wait' && LOOKS.has(actions[index + 1]?.action ?? ''),
-  )
+  const isSleep = (action: ActionEvent): boolean => action.action === 'wait' && !isChangeWait(action.detail)
+  const cycles = actions.filter((action, index) => isSleep(action) && LOOKS.has(actions[index + 1]?.action ?? ''))
   if (cycles.length < POLLING_MIN_CYCLES) return undefined
-  const waitedMs = actions
-    .filter((action) => action.action === 'wait')
-    .reduce((total, action) => total + action.durationMs, 0)
+  const waitedMs = actions.filter(isSleep).reduce((total, action) => total + action.durationMs, 0)
   const minutes = (ms: number): string => (ms / 60_000).toFixed(1)
   return {
     pattern: 'polling',

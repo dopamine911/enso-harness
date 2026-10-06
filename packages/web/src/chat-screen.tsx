@@ -106,7 +106,7 @@ import { QuestionnaireControls } from './questionnaire-card.tsx'
 import { providerRefusalLine, providerRefusalSource, RefusedAttemptLine, refusalOfMessage } from './refused-attempt.tsx'
 import { SelectedMessagePart } from './selected-message-part.tsx'
 import { SettingsDialog } from './settings-dialog.tsx'
-import { SLASH_PROMPT_REFUSAL, StartSessionDialog } from './start-session.tsx'
+import { draftWithKeptPrompt, SLASH_PROMPT_REFUSAL, StartSessionDialog } from './start-session.tsx'
 import { ThreadStoresContext, useStore, useThreadStores } from './store.ts'
 import {
   createResumeRequests,
@@ -1550,6 +1550,7 @@ const chatComponents = {
             project={threadProject}
             open={startSessionOpen}
             onClose={(): void => stores.startSession.set(false)}
+            keepPrompt={(text: string): void => setDraft((current) => draftWithKeptPrompt(current, text))}
             mode={permission.mode}
             modes={permission.available}
             configure={stores.connection.configure}

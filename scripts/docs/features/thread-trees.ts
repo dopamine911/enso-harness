@@ -60,7 +60,7 @@ export const THREAD_TREES: FeatureSpec = {
       },
       after: [
         "**Restore files to here**, under a prompt, first asks: the thread's files go back to how they were at that prompt, the conversation is not changed, and the current files are kept as a safety snapshot. Once it is done, a notice names both snapshots, with **Undo last restore**, which puts the files from before back.",
-        "**What this thread built** opens from the bar's **own tree, not your checkout**: the tree's full path, with **Copy path**, and the HTML pages at its top two levels. **Open preview** opens a page in a new tab, served from the tree as it is now, so you can try what the thread built.",
+        "**What this thread built** opens from the bar's **own tree, not your checkout**, and from **Preview** beside it once the tree holds an HTML page: the tree's full path, with **Copy path**, and the HTML pages at its top two levels. **Open preview** opens a page in a new tab, served from the tree as it is now, so you can try what the thread built.",
       ],
     },
     {

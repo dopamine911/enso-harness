@@ -1,9 +1,18 @@
 import { EnsoThreadPages } from '@enso/core'
-import { CopyIcon, ExternalLinkIcon } from 'lucide-react'
+import { CopyIcon, ExternalLinkIcon, EyeIcon } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import type { FetchLike } from './browser-logging.ts'
 import { Button } from './components/ui/button.tsx'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './components/ui/dialog.tsx'
-import { ANALYSIS_READING, type AnalysisOutcome, readThreadAnalysis } from './route-read.ts'
+import { useReadOnUsage } from './read-on-usage.ts'
+import {
+  ANALYSIS_READING,
+  type AnalysisOutcome,
+  readThreadAnalysis,
+  readThreadRoute,
+  THREAD_READ_NONE,
+  type ThreadReadOutcome,
+} from './route-read.ts'
 import { useThreadStores } from './store.ts'
 
 /**
@@ -87,12 +96,34 @@ function ThreadTreePagesBody({
   )
 }
 
+/** `GET /api/threads/:id/tree`, as the bar holds it: nothing yet (or no session), the listing, or why not. */
+const readThreadPages = (threadId: string, fetchImpl: FetchLike): Promise<ThreadReadOutcome<EnsoThreadPages>> =>
+  readThreadRoute(threadId, 'tree', EnsoThreadPages, fetchImpl)
+const readNoPages = (): Promise<ThreadReadOutcome<EnsoThreadPages>> => Promise.resolve(THREAD_READ_NONE)
+
 /**
- * The bar's "own tree, not your checkout", as a button that opens the panel. Read each time it
- * opens: the tree moves under a run, and nothing here is cached.
+ * The bar's "own tree, not your checkout", as a button that opens the panel — and, once the tree
+ * holds an HTML page, a **Preview** beside it that opens the same panel (#640).
+ *
+ * ⚠ NAMED FOR WHAT IT DOES. The first agent run after the preview shipped read the "own tree"
+ * button and concluded Enso had no preview: the words say where the work is, not that it can be
+ * opened. So the bar also says "Preview" while there is something to preview. It reads the tree's
+ * pages as the git readout reads git (`thread-git.tsx`): once the thread has a session, and again
+ * at every settled tool result, so a page built mid-run brings the control in without a reload.
+ * The panel reads its own listing each time it opens: the tree moves under a run.
  */
-export function ThreadTreeButton(): React.ReactNode {
+export function ThreadTreeButton({
+  moment,
+  readable,
+}: {
+  /** When the tree may have moved: settled tool results and the run flag, as the git readout's. */
+  readonly moment: string
+  /** The thread has a live session or a stored branch — a tree the route can read. */
+  readonly readable: boolean
+}): React.ReactNode {
   const stores = useThreadStores()
+  const listed = useReadOnUsage(readable ? readThreadPages : readNoPages, THREAD_READ_NONE, moment)
+  const hasPages = listed.kind === 'read' && listed.payload.pages.length > 0
   const [open, setOpen] = useState(false)
   const [outcome, setOutcome] = useState<AnalysisOutcome<EnsoThreadPages>>(ANALYSIS_READING)
   const [copy, setCopy] = useState<CopyState>('idle')
@@ -124,6 +155,17 @@ export function ThreadTreeButton(): React.ReactNode {
       >
         own tree, not your checkout
       </button>
+      {hasPages ? (
+        <button
+          type="button"
+          className="inline-flex items-center gap-1 text-foreground underline decoration-dotted underline-offset-2 hover:decoration-solid"
+          title="open a page this thread built, in a new tab"
+          onClick={() => setOpen(true)}
+        >
+          <EyeIcon aria-hidden="true" className="size-3" />
+          Preview
+        </button>
+      ) : null}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>

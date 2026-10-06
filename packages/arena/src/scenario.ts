@@ -96,12 +96,21 @@ ${reviewed ? howTheCommandActs(context.act ?? arenaActCommand()) : HOW_THE_TOOL_
     {"action":"fill","target":{"placeholder":"…"},"text":"…"}
     {"action":"press","key":"Enter"}
     {"action":"goto","path":"/"}
-    {"action":"hover"|"select"|"back"|"reload"|"screenshot"|"wait", …}
+    {"action":"hover"|"select"|"back"|"reload"|"screenshot", …}
 
 Find things the way a person reading the page would: by role and accessible name, visible text,
 label or placeholder. Start with \`read\`, which returns the page's accessibility tree and URL.
 A target may add "exact": true and "nth": <index> when a name matches more than one element.
 Everything on screen is recorded, so text that looks like a credential is refused, not typed.
+
+While Enso works, wait for it to show you something rather than sleeping a fixed time:
+
+    {"action":"wait","until":"change","ms":60000}
+
+returns as soon as the page differs from what you last saw — your last \`read\`, or the page just after
+your last click, fill or key press — with \`"changed": true\`: a question for you, a reply, the run
+ending. After \`ms\` (at most a minute) with nothing new it says \`"changed": false\`. Then \`read\` to
+see what changed. A plain \`{"action":"wait","ms":…}\` sleeps the whole time.
 
 # Notes — write them when they happen, not at the end
 
