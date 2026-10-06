@@ -17,7 +17,7 @@ import { ensureDom, releaseDom } from './dom-environment.ts'
 // measurement. The dialog is a Radix portal.
 ensureDom()
 const { createRoot }: { createRoot: typeof CreateRoot } = await import('react-dom/client')
-const { StartSessionDialog }: typeof StartSessionModule = await import('../start-session.tsx')
+const { draftWithKeptPrompt, StartSessionDialog }: typeof StartSessionModule = await import('../start-session.tsx')
 
 /**
  * The Start-a-session dialog (#391), MOUNTED under happy-dom over a fetch seam: what Start sends is
@@ -291,11 +291,18 @@ test('⚠ Escape in the model filter clears the filter and keeps the dialog; Esc
   expect(mounted.dialog().querySelectorAll('[cmdk-item]').length).toBeGreaterThan(1)
   expect(prompt.value).toBe('a prompt I typed')
 
-  // Escape from the prompt is a close — and the words are the composer's, not lost.
-  await pressEscape(prompt)
+  // Escape again, with nothing left to clear, closes from the filter too (PR #645 review) — and the
+  // words are the composer's, not lost.
+  await pressEscape(filter)
   expect(mounted.closes).toEqual([1])
   expect(mounted.kept).toEqual(['a prompt I typed'])
   await mounted.unmount()
+})
+
+test('a kept prompt fills an empty composer, and follows what a composer already holds (#638)', () => {
+  expect(draftWithKeptPrompt('', 'the dialog’s prompt')).toBe('the dialog’s prompt')
+  expect(draftWithKeptPrompt('  \n', 'the dialog’s prompt')).toBe('the dialog’s prompt')
+  expect(draftWithKeptPrompt('already typed', 'the dialog’s prompt')).toBe('already typed\n\nthe dialog’s prompt')
 })
 
 test('Close with a prompt typed hands it to the composer; with none, or after a Start, nothing is handed (#638)', async () => {

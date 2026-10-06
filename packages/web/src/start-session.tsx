@@ -318,6 +318,14 @@ function SessionStatus({
   )
 }
 
+/**
+ * The composer's draft once a dismissed dialog hands it a prompt (#638): the prompt itself in an
+ * empty composer, after what is there otherwise — neither the composer's words nor the dialog's lost.
+ */
+export function draftWithKeptPrompt(draft: string, prompt: string): string {
+  return draft.trim().length > 0 ? `${draft}\n\n${prompt}` : prompt
+}
+
 export function StartSessionDialog(props: StartSessionDialogProps): React.ReactNode {
   const { threadId, open, onClose, fetch: fetchImpl } = props
   const catalogue = useSessionCatalogue(open, threadId, fetchImpl)
@@ -369,10 +377,12 @@ export function StartSessionDialog(props: StartSessionDialogProps): React.ReactN
   }
   // ⚠ Escape in the model filter is the filter's (#638): Radix closes the dialog from a capture
   // listener on the document, so the input cannot stop it — prevented here, as the command
-  // palette's pages do. It clears the filter; Escape anywhere else closes. The filter is the
-  // dialog's one `cmdk-input` (cmdk overrides any id we give it).
+  // palette's pages do. It clears the filter; with nothing left to clear it closes, like Escape
+  // anywhere else (PR #645 review), as the palette's Backspace does. The filter is the dialog's
+  // one `cmdk-input` (cmdk overrides any id we give it).
   const escapeFromFilter = (event: KeyboardEvent): void => {
     if (!(event.target instanceof HTMLElement) || !event.target.matches('input[cmdk-input]')) return
+    if (modelFilter.length === 0) return
     event.preventDefault()
     setModelFilter('')
   }
