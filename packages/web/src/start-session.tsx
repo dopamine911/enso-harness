@@ -41,7 +41,10 @@ import { PI_DEFAULT_SYSTEM_PROMPT, PromptLibraryFields, useSystemPromptChoice } 
 export interface StartSessionDialogProps {
   readonly threadId: string
   readonly open: boolean
-  /** A Start that went through: the prompt was sent, and the dialog is done. */
+  /**
+   * The dialog is done, either way: a Start that went through, or a dismissal — Escape, the close
+   * button, outside — which first hands a typed prompt to `keepPrompt`.
+   */
   readonly onClose: () => void
   /**
    * The dialog dismissed — Escape, the close button, outside — with a prompt typed: the words go to
@@ -373,6 +376,7 @@ export function StartSessionDialog(props: StartSessionDialogProps): React.ReactN
   const dismiss = (): void => {
     if (text.trim().length > 0) props.keepPrompt(text)
     setText('')
+    setModelFilter('')
     onClose()
   }
   // ⚠ Escape in the model filter is the filter's (#638): Radix closes the dialog from a capture
