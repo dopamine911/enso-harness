@@ -1927,6 +1927,77 @@ test('⚠ a first run whose tree cannot be made is refused with the reason — n
   expect(core.state.callCount).toBe(1)
 })
 
+/** A faux model's definition, as `registerProvider` takes it. */
+const fauxModelDefinition = (id: string, name: string): NonNullable<ProviderConfig['models']>[number] => ({
+  id,
+  name,
+  reasoning: false,
+  input: ['text'],
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  contextWindow: 50_000,
+  maxTokens: 1000,
+})
+
+/**
+ * `core` as a provider of TWO models, and the settings default's stand-in: a session that has recorded
+ * no choice of this provider starts on `faux-1` — what pi's `findInitialModel` does with
+ * `defaultModel` in a real home. `calledWith` gets the id of the model each request ran on.
+ */
+function twoFauxModels(core: FauxCore, calledWith: string[]): InlineExtension {
+  return {
+    name: 'enso-host-faux-two-models',
+    factory: (pi: ExtensionAPI) => {
+      pi.registerProvider('enso-faux', {
+        api: 'enso-faux',
+        baseUrl: 'http://faux.invalid',
+        apiKey: 'faux',
+        streamSimple: (model, context, options) => {
+          calledWith.push(model.id)
+          return core.streamSimple(model, context, options)
+        },
+        models: [fauxModelDefinition('faux-1', 'Faux One'), fauxModelDefinition('faux-2', 'Faux Two')],
+      })
+      pi.on('session_start', async (_event, context) => {
+        const chosen = context.sessionManager
+          .getBranch()
+          .some((entry) => entry.type === 'model_change' && entry.provider === 'enso-faux')
+        if (!chosen && !(await pi.setModel(core.getModel()))) throw new Error('pi refused the faux model')
+      })
+    },
+  }
+}
+
+// ⚠ #616, measured on a live run: the Start dialog's model reached the session (`model_change` to
+// Haiku) and was undone 119 ms later, when the first run rebuilt the thread on its tree — pi restores
+// a session's model only once it has messages, and a thread configured before its first prompt has
+// none, so the rebuild took the default. The choice must be the model the first run runs on.
+test('⚠ a model chosen before the first prompt is the model the first run runs on, across the move onto its tree (#616)', async () => {
+  const project = dirtyCheckout()
+  const core = faux.createFauxCore({
+    provider: 'enso-faux',
+    api: 'enso-faux',
+    models: [
+      { id: 'faux-1', contextWindow: 50_000 },
+      { id: 'faux-2', contextWindow: 50_000 },
+    ],
+  })
+  core.setResponses([faux.fauxAssistantMessage('ok')])
+  const calledWith: string[] = []
+  const { host } = treeHost(project, [twoFauxModels(core, calledWith)])
+  new ProjectTrustStore(agentDir).set(project, true)
+  const hosted = await host.createSession(crypto.randomUUID(), () => project)
+  openSessions.push(hosted)
+  expect(hosted.runtime.modelState().model?.id).toBe('faux-1')
+  await hosted.runtime.runHostCommand({ name: 'model', value: 'enso-faux/faux-2' })
+  expect(hosted.runtime.modelState().model?.id).toBe('faux-2')
+
+  await runPrompt(hosted, 'hi')
+  // The run happened on the tree, and its request went to the chosen model.
+  expect(hosted.inspect().cwd).not.toBe(project)
+  expect(calledWith).toEqual(['faux-2'])
+  expect(hosted.runtime.modelState().model).toMatchObject({ provider: 'enso-faux', id: 'faux-2' })
+})
+
 // ⚠ PR #561 review: a prompt that finds the thread held JOINS the holder (#75), and pi starts a run
 // for it when none streams — so the restore's lease alone would let a run read a half-restored tree.
 test('⚠ a prompt while the thread restores its files is refused with that reason, and admitted once the restore is done (#551)', async () => {

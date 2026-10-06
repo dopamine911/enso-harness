@@ -12,6 +12,8 @@ import {
 import { basename, join, resolve } from 'node:path'
 import { getSupportedThinkingLevels } from '@earendil-works/pi-ai'
 import {
+  type AgentSessionServices,
+  type CreateAgentSessionFromServicesOptions,
   createAgentSessionFromServices,
   createAgentSessionServices,
   type ExtensionAPI,
@@ -2034,6 +2036,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     const { session } = await createAgentSessionFromServices({
       services: { ...services, resourceLoader: withSystemPrompt(services.resourceLoader, () => systemPrompt) },
       sessionManager,
+      ...selectionBeforeFirstMessage(sessionManager, services.modelRuntime),
     })
 
     // ── The event fan-out. Subscribers receive OBSERVATIONS (L2, #162 workstream 4): the
@@ -2822,6 +2825,40 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         }
       },
     }
+  }
+
+  /**
+   * The model and effort a thread chose BEFORE its first message (#616), for its next build.
+   *
+   * ⚠ pi restores a session's model and thinking level only when the session has messages
+   * (`createAgentSession`: `hasExistingSession` is `messages.length > 0`); otherwise it takes the
+   * settings' default and records it. Since #484 a thread is configured before its first prompt — the
+   * Start dialog's model and effort are `model_change` and `thinking_level_change` entries on a branch
+   * with no message yet — and its first run REBUILDS it on its tree (#551, `treeOnFirstRun`). That
+   * build took the default over the choice: measured on a live run, the chosen Haiku entry was
+   * followed 119 ms later by pi's Sonnet. A branch with messages is pi's to restore and is left to it.
+   * A recorded model that is gone or has no credentials falls back to pi's default, as pi's own
+   * restore does.
+   */
+  function selectionBeforeFirstMessage(
+    sessionManager: SessionManager,
+    modelRuntime: AgentSessionServices['modelRuntime'],
+  ): Pick<CreateAgentSessionFromServicesOptions, 'model' | 'thinkingLevel'> {
+    if (sessionManager.buildSessionContext().messages.length > 0) return {}
+    const branch = sessionManager.getBranch()
+    const modelEntry = branch.findLast((entry) => entry.type === 'model_change')
+    const thinkingEntry = branch.findLast((entry) => entry.type === 'thinking_level_change')
+    const recorded =
+      modelEntry?.type === 'model_change' ? modelRuntime.getModel(modelEntry.provider, modelEntry.modelId) : undefined
+    const model = recorded !== undefined && modelRuntime.hasConfiguredAuth(recorded.provider) ? recorded : undefined
+    if (model === undefined) return {}
+    // The lookup is how the entry's string becomes pi's level without a cast, as `runHostCommand`
+    // does it — and a level this model does not offer is not restored.
+    const thinkingLevel =
+      thinkingEntry?.type === 'thinking_level_change'
+        ? getSupportedThinkingLevels(model).find((offered) => offered === thinkingEntry.thinkingLevel)
+        : undefined
+    return { model, ...(thinkingLevel === undefined ? {} : { thinkingLevel }) }
   }
 
   /**
