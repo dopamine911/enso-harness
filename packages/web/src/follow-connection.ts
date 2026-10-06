@@ -608,7 +608,9 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
    * alert, which names the wrong thing.
    */
   function* followNeverOpened(detail: string): Generator<StreamChunk> {
-    problem('the follow could not be opened: {detail}', { detail })
+    // Leaving, the refusal is the browser's cancel, not the server's (#664): no failure to log —
+    // but the follow is still ended, as the pump says it (a restored page must know).
+    if (!leaving()) problem('the follow could not be opened: {detail}', { detail })
     yield { type: EventType.CUSTOM, name: FOLLOW_ENDED_CUSTOM_EVENT, value: { threadId } }
   }
 
@@ -658,8 +660,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     if (opening.kind === 'refused') {
       // A throwing fetch is the same fact as a refusing one (#274) — unless the CALLER is the
       // one leaving, in which case there is nothing to report and the cancel is theirs to see.
-      // The page leaving is no refusal either (#664): the browser cancelled the open, not the server.
-      if (!abort.aborted && !leaving()) yield* followNeverOpened(opening.detail)
+      if (!abort.aborted) yield* followNeverOpened(opening.detail)
       throw opening.failure
     }
     const frames = readSseFrames(opening.body, abort)

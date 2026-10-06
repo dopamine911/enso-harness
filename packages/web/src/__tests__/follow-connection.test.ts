@@ -6,6 +6,7 @@ import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
 import type { StreamChunk } from '@tanstack/ai'
 import { FOLLOW_ENDED_CUSTOM_EVENT } from '../custom-event-router.ts'
 import { createFollowConnection, type FollowConnection } from '../follow-connection.ts'
+import { pageLeaving } from '../page-leaving.ts'
 import { createScriptedFetch, type ScriptedFetch, SNAPSHOT_IDLE } from './scripted-server.ts'
 
 /**
@@ -901,8 +902,11 @@ test('a fetch that throws is the same fact, and this page leaving is not (#274)'
   expect(leaving.problems).toEqual([])
 })
 
-/** A follow that opens, then has its stream cut — what the browser does to every stream when the page leaves. */
-async function followCutMidStream(leaving: boolean): Promise<string[]> {
+/** A follow whose open fails or whose stream is cut, as the browser does to both when the page leaves. */
+async function followThatEnds(
+  leaving: boolean,
+  how: 'cut mid-stream' | 'refused open',
+): Promise<{ problems: string[]; chunks: StreamChunk[] }> {
   const cut = new ReadableStream<Uint8Array>({
     start: (controller: ReadableStreamDefaultController<Uint8Array>): void =>
       controller.error(new TypeError('network error')),
@@ -910,25 +914,61 @@ async function followCutMidStream(leaving: boolean): Promise<string[]> {
   const problems: string[] = []
   const connection = createFollowConnection({
     threadId: 't1',
-    fetch: () => Promise.resolve(new Response(cut, { status: 200 })),
+    fetch: () =>
+      how === 'cut mid-stream'
+        ? Promise.resolve(new Response(cut, { status: 200 }))
+        : Promise.reject(new TypeError('Failed to fetch')),
     onProblem: (problem: unknown) => problems.push(String(problem)),
     leaving: () => leaving,
   })
+  const chunks: StreamChunk[] = []
   try {
-    for await (const chunk of connection.subscribe()) void chunk
+    for await (const chunk of connection.subscribe()) chunks.push(chunk)
   } catch {
-    // The stream's end reaches the caller either way; what is said about it is the question.
+    // The end reaches the caller either way; what is said about it is the question.
   }
-  return problems
+  return { problems, chunks }
+}
+
+const FOLLOW_ENDED_CHUNK: StreamChunk = {
+  type: EventType.CUSTOM,
+  name: FOLLOW_ENDED_CUSTOM_EVENT,
+  value: { threadId: 't1' },
 }
 
 // ⚠ #664, from an arena run: every reload logged "the follow failed: TypeError: network error" —
 // the browser cut the stream because the page was leaving, and nothing had aborted it.
 test('⚠ a stream cut because the page is leaving is said nowhere; cut while the page stays, it is a failure (#664)', async () => {
-  expect(await followCutMidStream(false)).toEqual([
-    expect.stringContaining('the follow failed: TypeError: network error'),
-  ])
-  expect(await followCutMidStream(true)).toEqual([])
+  const staying = await followThatEnds(false, 'cut mid-stream')
+  expect(staying.problems).toEqual([expect.stringContaining('the follow failed: TypeError: network error')])
+  const leaving = await followThatEnds(true, 'cut mid-stream')
+  expect(leaving.problems).toEqual([])
+  // ⚠ PR #668 review, a decision pinned: the follow HAS ended either way, and is said so — a page
+  // the back/forward cache restores must not look live over a dead follow (#274).
+  expect(staying.chunks).toContainEqual(FOLLOW_ENDED_CHUNK)
+  expect(leaving.chunks).toContainEqual(FOLLOW_ENDED_CHUNK)
+})
+
+test('an open the page cancels by leaving logs nothing, and still says the follow ended (#664)', async () => {
+  const staying = await followThatEnds(false, 'refused open')
+  expect(staying.problems).toEqual([expect.stringContaining('the follow could not be opened')])
+  const leaving = await followThatEnds(true, 'refused open')
+  expect(leaving.problems).toEqual([])
+  expect(staying.chunks).toEqual([FOLLOW_ENDED_CHUNK])
+  expect(leaving.chunks).toEqual([FOLLOW_ENDED_CHUNK])
+})
+
+test('the page is leaving from beforeunload or pagehide, and staying again once it is shown (#664)', () => {
+  globalThis.dispatchEvent(new Event('pageshow'))
+  expect(pageLeaving()).toBe(false)
+  globalThis.dispatchEvent(new Event('beforeunload'))
+  expect(pageLeaving()).toBe(true)
+  globalThis.dispatchEvent(new Event('pageshow'))
+  expect(pageLeaving()).toBe(false)
+  globalThis.dispatchEvent(new Event('pagehide'))
+  expect(pageLeaving()).toBe(true)
+  globalThis.dispatchEvent(new Event('pageshow'))
+  expect(pageLeaving()).toBe(false)
 })
 
 // ⚠ The race the latch does not cover (PR #301 review): released while the socket is still
