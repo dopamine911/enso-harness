@@ -14,12 +14,16 @@ import type { ThreadRegistry } from './thread-registry.ts'
  * answer: git is never run in a directory the server does not serve.
  */
 
-export interface ThreadGitRouteDeps {
+/** What finds a thread's cwd and says whether this server serves it: the git routes' and the preview's (#619). */
+export interface ThreadCwdDeps {
   /** Only the peek: the route reads a live thread and never builds one (#86). */
   readonly threads: Pick<ThreadRegistry, 'peek'>
   readonly host: Pick<AgentHost, 'storedThreadDirectory'>
-  /** The server's projects rule (#395): a directory git may be run in. */
+  /** The server's projects rule (#395): a directory the server may read or run git in. */
   readonly servesDirectory: (directory: string) => boolean
+}
+
+export interface ThreadGitRouteDeps extends ThreadCwdDeps {
   /** `readGitState` over the real git runner; a test hands in its own. */
   readonly readGit: (cwd: string) => Promise<EnsoGitState>
 }
@@ -29,8 +33,8 @@ export interface ThreadChangesRouteDeps extends ThreadGitRouteDeps {
   readonly readChanges: (repository: EnsoGitRepository) => Promise<{ files: EnsoGitFileChange[]; truncated: boolean }>
 }
 
-/** The thread's cwd, when git may be run there: live or stored, and in a directory this server serves. */
-async function servedCwd(deps: ThreadGitRouteDeps, threadId: string): Promise<string | undefined> {
+/** The thread's cwd, when it may be read: live or stored, and in a directory this server serves. */
+export async function servedCwd(deps: ThreadCwdDeps, threadId: string): Promise<string | undefined> {
   const cwd = deps.threads.peek(threadId)?.hosted.inspect().cwd ?? (await deps.host.storedThreadDirectory(threadId))
   return cwd !== undefined && deps.servesDirectory(cwd) ? cwd : undefined
 }

@@ -73,6 +73,7 @@ export {
   EnsoThreadChanges,
   EnsoThreadGit,
 } from './git-state.ts'
+export { EnsoThreadPages } from './thread-pages.ts'
 export {
   DEFAULT_GUARD_POLICY,
   ENSO_GUARD_DENIAL_ENTRY,

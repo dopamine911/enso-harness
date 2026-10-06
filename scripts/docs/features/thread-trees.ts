@@ -44,7 +44,7 @@ export const THREAD_TREES: FeatureSpec = {
       marks: [
         {
           target: { text: 'own tree, not your checkout', exact: true, within: STATUS },
-          says: "**{shown}**: this thread's edits land in its tree. Your checkout is not touched.",
+          says: "**{shown}**: this thread's edits land in its tree. Your checkout is not touched. Click it to see where the tree is and what it built.",
         },
         {
           target: { text: /^enso\//, within: STATUS },
@@ -60,6 +60,7 @@ export const THREAD_TREES: FeatureSpec = {
       },
       after: [
         "**Restore files to here**, under a prompt, first asks: the thread's files go back to how they were at that prompt, the conversation is not changed, and the current files are kept as a safety snapshot. Once it is done, a notice names both snapshots, with **Undo last restore**, which puts the files from before back.",
+        "**What this thread built** opens from the bar's **own tree, not your checkout**: the tree's full path, with **Copy path**, and the HTML pages at its top two levels. **Open preview** opens a page in a new tab, served from the tree as it is now, so you can try what the thread built.",
       ],
     },
     {
@@ -114,6 +115,7 @@ export const THREAD_TREES: FeatureSpec = {
     'A tree is kept until its thread is deleted. Nothing removes old trees on its own.',
     'A restore and its undo change the files only. The conversation, and anything pi did outside the tree, stay as they were.',
     "Turning trees off for a project doesn't move a thread that already has one.",
+    "A preview runs sandboxed: it cannot reach Enso, and a page's own `fetch()` of its files is blocked. Pages that load their scripts, styles and images by tag work; nothing builds the work or runs a dev server.",
   ],
   see: [
     {

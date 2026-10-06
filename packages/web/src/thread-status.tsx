@@ -12,6 +12,7 @@ import { toolResultState } from './EnsoToolResult.tsx'
 import { useModelState } from './model-state.tsx'
 import { useStore, useThreadStores } from './store.ts'
 import { GitIndicator, type GitOutcome, settledToolResults, useThreadGit } from './thread-git.tsx'
+import { ThreadTreeButton } from './thread-tree-pages.tsx'
 
 /**
  * The status bar (#90 PR 1): the always-on line that says what this session is doing and
@@ -170,6 +171,8 @@ export interface ThreadStatusViewProps {
   readonly projectTitle?: string | undefined
   /** Whether the thread runs on a tree of its own (#551), not the checkout — the follow snapshot's `tree`. */
   readonly onTree?: boolean | undefined
+  /** What stands for "own tree" on the bar: the wired bar's button that opens the tree's panel (#619); the words alone when absent. */
+  readonly treeControl?: React.ReactNode
   /** A question from pi is open for this thread — said here too, since only the transcript shows it. */
   readonly questionWaiting?: boolean
   /** The provider's last refusal while no reply has got through since (#340) — its class word. */
@@ -245,10 +248,12 @@ function ProjectIndicator({
   cwd,
   projectTitle,
   onTree,
+  treeControl,
 }: {
   readonly cwd: string | undefined
   readonly projectTitle: string | undefined
   readonly onTree: boolean | undefined
+  readonly treeControl: React.ReactNode
 }): React.ReactNode {
   if (cwd === undefined) return null
   if (cwd === '') {
@@ -264,14 +269,16 @@ function ProjectIndicator({
       <span title={`the tree pi reads and writes for this thread: ${cwd}`}>
         project {projectTitle ?? projectName(cwd)}
       </span>
-      {onTree === true ? (
-        <span
-          className="text-foreground"
-          title="this thread reads and writes a tree of its own — its edits are not in your checkout until you bring them back"
-        >
-          own tree, not your checkout
-        </span>
-      ) : null}
+      {onTree !== true
+        ? null
+        : (treeControl ?? (
+            <span
+              className="text-foreground"
+              title="this thread reads and writes a tree of its own — its edits are not in your checkout until you bring them back"
+            >
+              own tree, not your checkout
+            </span>
+          ))}
     </>
   )
 }
@@ -382,6 +389,7 @@ export function ThreadStatusView({
   cwd,
   projectTitle,
   onTree,
+  treeControl,
   questionWaiting,
   refusal,
   refusalSource,
@@ -432,7 +440,7 @@ export function ThreadStatusView({
           {counts.failed} failed
         </span>
       )}
-      <ProjectIndicator cwd={cwd} projectTitle={projectTitle} onTree={onTree} />
+      <ProjectIndicator cwd={cwd} projectTitle={projectTitle} onTree={onTree} treeControl={treeControl} />
       {git === undefined ? null : <GitIndicator outcome={git} />}
       {context === null ? null : (
         <span className="ml-auto">
@@ -483,6 +491,7 @@ export function ThreadStatusBar({ messages, generating, projectTitle }: ThreadSt
       cwd={cwd}
       projectTitle={projectTitle}
       onTree={onTree}
+      treeControl={<ThreadTreeButton />}
       questionWaiting={questionWaiting}
       refusal={refusal?.refusalClass}
       refusalSource={refusal?.provider}
