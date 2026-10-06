@@ -1043,6 +1043,8 @@ interface MessageBodyProps {
   readonly refusal: EnsoProviderRefusal | undefined
   /** Whether the speaker line is drawn — not when the message before it is the same speaker's. */
   readonly speaker: boolean
+  /** A user prompt's words, shortened as the rail shortens them: named by its fork and restore (#651). */
+  readonly promptTitle: string | undefined
 }
 
 /**
@@ -1092,6 +1094,7 @@ const MessageBody = memo(function MessageBody({
   runOpen,
   refusal,
   speaker,
+  promptTitle,
 }: MessageBodyProps): React.ReactNode {
   return (
     <Message
@@ -1120,13 +1123,26 @@ const MessageBody = memo(function MessageBody({
 				    empty bubble where the refusal had been said live. */}
         {refusal === undefined ? null : <RefusedAttemptLine refusal={refusal} />}
       </MessageContent>
-      {role === 'user' ? <PromptActions messageId={messageId} /> : null}
+      {role === 'user' ? <PromptActions messageId={messageId} promptTitle={promptTitle} /> : null}
     </Message>
   )
 }, sameRenderedMessage)
 
-/** A prompt's actions: fork from it (#433) and restore the files to it (#551), each where the page offers it. */
-function PromptActions({ messageId }: { messageId: string }): React.ReactNode {
+/**
+ * A prompt's actions: fork from it (#433) and restore the files to it (#551), each where the page
+ * offers it. ⚠ NAMED FOR THEIR PROMPT (#651): every prompt has them, and a name the same on every
+ * prompt left a screen reader — and an agent reading the page — unable to tell which prompt a
+ * restore would go back to. The visible words stay short; the accessible name starts with them
+ * (label in name) and quotes the prompt, and the confirmation names it too.
+ */
+function PromptActions({
+  messageId,
+  promptTitle,
+}: {
+  readonly messageId: string
+  readonly promptTitle: string | undefined
+}): React.ReactNode {
+  const quoted = promptTitle === undefined ? '' : `: “${promptTitle}”`
   const forkAt = useContext(ForkContext)
   const offeredRestore = useContext(RestoreContext)
   // Restore only where there are files to restore (PR #561 review): a thread on a tree of its own.
@@ -1143,6 +1159,7 @@ function PromptActions({ messageId }: { messageId: string }): React.ReactNode {
           variant="ghost"
           className="h-7 gap-1 px-2 text-xs text-muted-foreground"
           title="a new thread holding everything before this prompt, with its words ready to send again"
+          aria-label={`fork from here${quoted}`}
           onClick={(): void => forkAt(messageId)}
         >
           <GitForkIcon aria-hidden="true" />
@@ -1157,6 +1174,7 @@ function PromptActions({ messageId }: { messageId: string }): React.ReactNode {
             variant="ghost"
             className="h-7 gap-1 px-2 text-xs text-muted-foreground"
             title="put the thread's files back as they were at this prompt"
+            aria-label={`Restore files to here${quoted}`}
             onClick={(): void => setConfirming(true)}
           >
             <HistoryIcon aria-hidden="true" />
@@ -1167,7 +1185,8 @@ function PromptActions({ messageId }: { messageId: string }): React.ReactNode {
               <DialogHeader>
                 <DialogTitle>Restore files to here?</DialogTitle>
                 <DialogDescription>
-                  The thread's files go back to how they were at this prompt. The conversation is not changed, and the
+                  The thread's files go back to how they were at the prompt
+                  {promptTitle === undefined ? '' : ` “${promptTitle}”`}. The conversation is not changed, and the
                   current files are kept as a safety snapshot: "Undo last restore" on the notice puts them back.
                 </DialogDescription>
               </DialogHeader>
@@ -1209,6 +1228,7 @@ function sameRefusal(before: EnsoProviderRefusal | undefined, after: EnsoProvide
  */
 function sameRenderedMessage(previous: MessageBodyProps, next: MessageBodyProps): boolean {
   if (previous.runOpen !== next.runOpen || previous.speaker !== next.speaker) return false
+  if (previous.promptTitle !== next.promptTitle) return false
   if (!sameRefusal(previous.refusal, next.refusal)) return false
   if (previous.parts.length !== next.parts.length) return false
   return previous.parts.every((part, index) => {
@@ -1747,6 +1767,7 @@ const chatComponents = {
               runOpen={openRunMessageIds.has(message.id)}
               refusal={refusalOfMessage(message)}
               speaker={!continuedMessageIds.has(message.id)}
+              promptTitle={message.role === 'user' ? titleFromMessage(message) : undefined}
             />
           )}
           {lines === undefined ? null : <NotificationLines lines={lines} />}
