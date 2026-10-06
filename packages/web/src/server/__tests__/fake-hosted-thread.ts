@@ -535,8 +535,33 @@ export function createFakeAgentHost(
   }
   /** The ids `deleteThread` removed — the real host's tombstone (#571). */
   const deleted = new Set<string>()
+  /**
+   * The ids whose restore or undo is in flight. The real host refuses a mode change then
+   * (`agent-host.ts#admitRun`), and a mode change on a held thread reaches the runtime (#618).
+   */
+  const restoring = new Set<string>()
+  const whileRestoring = (
+    threadId: string,
+    outcome: ThreadRestoreOutcome | Promise<ThreadRestoreOutcome>,
+  ): Promise<ThreadRestoreOutcome> => {
+    restoring.add(threadId)
+    return Promise.resolve(outcome).finally(() => restoring.delete(threadId))
+  }
   return {
-    createSession,
+    createSession: async (threadId: string, newSessionDirectory: () => string): Promise<HostedThread> => {
+      const hosted = await createSession(threadId, newSessionDirectory)
+      const { setPermissionMode } = hosted.runtime
+      return {
+        ...hosted,
+        runtime: {
+          ...hosted.runtime,
+          setPermissionMode: (mode: string, outcome: PromptOutcome) =>
+            restoring.has(threadId)
+              ? outcome.onRejected(`thread ${threadId} is restoring its files; prompt again once that is done`)
+              : setPermissionMode(mode, outcome),
+        },
+      }
+    },
     freshPermissionMode: () => fresh,
     catalogue: () => Promise.resolve(fakeCatalogue()),
     // A project nobody decided is untrusted (#470); a test about a trusted one replaces this.
@@ -655,12 +680,16 @@ export function createFakeAgentHost(
       if (!storedThread.transcript.some((candidate) => candidate.id === entryId)) {
         return Promise.resolve({ kind: 'no-entry', reason: `no entry ${entryId}` })
       }
-      return Promise.resolve(storedThread.restore ?? { kind: 'no-tree', reason: `thread ${threadId} has no tree` })
+      return storedThread.restore === undefined
+        ? Promise.resolve({ kind: 'no-tree', reason: `thread ${threadId} has no tree` })
+        : whileRestoring(threadId, storedThread.restore)
     },
     undoLastRestore: (threadId: string): Promise<ThreadRestoreOutcome> => {
       const storedThread = served(threadId)
       if (storedThread === undefined) return Promise.resolve({ kind: 'no-thread', reason: `no thread ${threadId}` })
-      return Promise.resolve(storedThread.restore ?? { kind: 'no-tree', reason: `thread ${threadId} has no tree` })
+      return storedThread.restore === undefined
+        ? Promise.resolve({ kind: 'no-tree', reason: `thread ${threadId} has no tree` })
+        : whileRestoring(threadId, storedThread.restore)
     },
     // The real host's order (#571): unknown, then the inventory — force takes only the work its
     // digest confirms (PR #572 review) — then the live session's retire; deleted, the thread is

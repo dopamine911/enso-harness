@@ -131,7 +131,7 @@ const noop = (): void => {
 
 test("⚠ an unknown mode renders as `unknown` and offers nothing — the options are the host's to declare", () => {
   const control = selectIn(
-    renderToStaticMarkup(<PermissionModeSelect mode={undefined} available={[]} disabled={false} onSelect={noop} />),
+    renderToStaticMarkup(<PermissionModeSelect mode={undefined} available={[]} onSelect={noop} />),
   )
   expect(control.labels).toEqual(['unknown'])
   expect(control.selected).toBe('')
@@ -142,12 +142,7 @@ test("⚠ an unknown mode renders as `unknown` and offers nothing — the option
 test('a known mode is the selected option, and every available mode is offered', () => {
   const control = selectIn(
     renderToStaticMarkup(
-      <PermissionModeSelect
-        mode="acceptEdits"
-        available={['default', 'acceptEdits', 'plan']}
-        disabled={false}
-        onSelect={noop}
-      />,
+      <PermissionModeSelect mode="acceptEdits" available={['default', 'acceptEdits', 'plan']} onSelect={noop} />,
     ),
   )
   expect(control.selected).toBe('acceptEdits')
@@ -161,12 +156,7 @@ test('a known mode is the selected option, and every available mode is offered',
 test('a current mode missing from the option list is still shown as selected', () => {
   const control = selectIn(
     renderToStaticMarkup(
-      <PermissionModeSelect
-        mode="bypassPermissions"
-        available={['default', 'plan']}
-        disabled={false}
-        onSelect={noop}
-      />,
+      <PermissionModeSelect mode="bypassPermissions" available={['default', 'plan']} onSelect={noop} />,
     ),
   )
   expect(control.selected).toBe('bypassPermissions')
@@ -175,8 +165,7 @@ test('a current mode missing from the option list is still shown as selected', (
 
 // ⚠ DELETED (#236): "the control is disabled while a run is in flight" asserted
 // `toContain('disabled')` against markup whose `disabled:opacity-60` class contains that
-// substring in every render — it stayed green with `disabled={disabled || available.length === 0}`
-// deleted from the component. The in-flight case is asserted through the DOM, over the wire's
-// status frames, in `thread-pane.test.tsx` ("busy on the wire → working, stop offered, mode
-// select disabled"); the empty-`available` case is the first test above. Do not re-add a
-// substring form here.
+// substring in every render. Since #618 the control is offered during a run; that is asserted
+// through the DOM, over the wire's status frames, in `thread-pane.test.tsx` ("busy on the wire →
+// … the mode select still offered"); the empty-`available` case is the first test above. Do not
+// re-add a substring form here.

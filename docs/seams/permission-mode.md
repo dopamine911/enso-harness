@@ -62,9 +62,9 @@ And what crosses the other way — the one thing the browser may say about the m
 /**
  * The body of `POST /api/threads/:threadId/mode` (L3 step C): the mode to switch to.
  *
- * A control route, not a prompt — the server refuses a mode the thread does not offer (422) and
- * a busy thread (409); the change itself arrives on the follow as `permission-mode`, never from
- * the click.
+ * A control route, not a prompt — the server refuses a mode the thread does not offer (422), and a
+ * thread a restore or a delete holds (409); during a run the change applies from the run's next tool
+ * call (#618). The change itself arrives on the follow as `permission-mode`, never from the click.
  */
 export const EnsoPermissionModeChange = Type.Object({
   mode: Type.String({ minLength: 1 }),
