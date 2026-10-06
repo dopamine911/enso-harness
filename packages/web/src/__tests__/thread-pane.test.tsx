@@ -306,6 +306,33 @@ test('⚠ "own tree" opens what the thread built: its path, and each page as a s
     [`/preview/threads/${id}/index.html`, '_blank', 'noopener noreferrer'],
     [`/preview/threads/${id}/game/my%20page.html`, '_blank', 'noopener noreferrer'],
   ])
+
+  // PR #635 review: a refused copy is said; a done one says Copied.
+  const copyButton = (): HTMLButtonElement | undefined =>
+    [...(panel?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find((button) =>
+      /Copy path|Copied/.test(button.textContent ?? ''),
+    )
+  const clipboard = (writeText: (text: string) => Promise<void>): void => {
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+  }
+  clipboard(() => Promise.reject(new Error('denied')))
+  await flush(async () => {
+    copyButton()?.click()
+    await tick()
+  })
+  expect(panel?.textContent).toContain('The clipboard refused the copy: select the path to copy it.')
+  const copiedText: string[] = []
+  clipboard((text) => {
+    copiedText.push(text)
+    return Promise.resolve()
+  })
+  await flush(async () => {
+    copyButton()?.click()
+    await tick()
+  })
+  expect(copiedText).toEqual(['/home/me/.enso/projects/p/trees/t'])
+  expect(copyButton()?.textContent).toContain('Copied')
+  expect(panel?.textContent).not.toContain('The clipboard refused')
   await pane.unmount()
 })
 

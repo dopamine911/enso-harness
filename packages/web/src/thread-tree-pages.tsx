@@ -23,17 +23,20 @@ function previewUrl(threadId: string, page: string): string {
   return `/preview/threads/${encodeURIComponent(threadId)}/${page.split('/').map(encodeURIComponent).join('/')}`
 }
 
+/** What the last copy of the path came to: not tried yet, done, or refused by the clipboard. */
+type CopyState = 'idle' | 'copied' | 'failed'
+
 /** The panel's body: the path and its copy, then the pages. */
 function ThreadTreePagesBody({
   threadId,
   outcome,
   onCopy,
-  copied,
+  copy,
 }: {
   readonly threadId: string
   readonly outcome: AnalysisOutcome<EnsoThreadPages>
   readonly onCopy: (path: string) => void
-  readonly copied: boolean
+  readonly copy: CopyState
 }): React.ReactNode {
   if (outcome.kind === 'reading') return <p className="text-sm text-muted-foreground">reading the tree…</p>
   if (outcome.kind === 'failed') {
@@ -48,9 +51,13 @@ function ThreadTreePagesBody({
           <code className="flex-1 rounded-md border bg-muted/50 px-2 py-1 font-mono text-xs wrap-anywhere">{path}</code>
           <Button type="button" variant="outline" size="sm" onClick={() => onCopy(path)}>
             <CopyIcon />
-            {copied ? 'Copied' : 'Copy path'}
+            {copy === 'copied' ? 'Copied' : 'Copy path'}
           </Button>
         </div>
+        {/* PR #635 review: a refused copy is said, never a button that silently did nothing. */}
+        {copy === 'failed' ? (
+          <span className="text-muted-foreground">The clipboard refused the copy: select the path to copy it.</span>
+        ) : null}
       </div>
       <div className="grid gap-1.5">
         <span className="text-muted-foreground">Pages it can show:</span>
@@ -88,12 +95,12 @@ export function ThreadTreeButton(): React.ReactNode {
   const stores = useThreadStores()
   const [open, setOpen] = useState(false)
   const [outcome, setOutcome] = useState<AnalysisOutcome<EnsoThreadPages>>(ANALYSIS_READING)
-  const [copied, setCopied] = useState(false)
+  const [copy, setCopy] = useState<CopyState>('idle')
   useEffect(() => {
     if (!open) return
     let current = true
     setOutcome(ANALYSIS_READING)
-    setCopied(false)
+    setCopy('idle')
     void readThreadAnalysis(stores.threadId, 'tree', EnsoThreadPages, stores.fetch).then((read) => {
       if (current) setOutcome(read)
     })
@@ -101,10 +108,10 @@ export function ThreadTreeButton(): React.ReactNode {
       current = false
     }
   }, [open, stores])
-  const copy = (path: string): void => {
+  const copyPath = (path: string): void => {
     void navigator.clipboard.writeText(path).then(
-      () => setCopied(true),
-      () => setCopied(false),
+      () => setCopy('copied'),
+      () => setCopy('failed'),
     )
   }
   return (
@@ -123,7 +130,7 @@ export function ThreadTreeButton(): React.ReactNode {
             <DialogTitle>What this thread built</DialogTitle>
             <DialogDescription>Its edits are in a tree of its own until you bring them back.</DialogDescription>
           </DialogHeader>
-          <ThreadTreePagesBody threadId={stores.threadId} outcome={outcome} onCopy={copy} copied={copied} />
+          <ThreadTreePagesBody threadId={stores.threadId} outcome={outcome} onCopy={copyPath} copy={copy} />
         </DialogContent>
       </Dialog>
     </>
