@@ -37,7 +37,12 @@ const REPEATED_NAVIGATION_MIN = 3
 /** How many actions after a failure the same action counts as its retry. */
 const RETRY_WINDOW = 3
 
-const APPROVAL_CLICK = /^click button "(yes|allow|approve|ok|confirm)\b/i
+/**
+ * A click on an approval, whatever named its target (#641): `click button "Yes…"` by role, and
+ * `click text "Yes, allow write…"` by text — the second is how an agent clicked all three approvals
+ * of one run, and the pattern that took `button` alone counted none of them.
+ */
+const APPROVAL_CLICK = /^click \w+ "(yes|allow|approve|ok|confirm)\b/i
 const LOOKS = new Set(['read', 'screenshot'])
 
 type ActionEvent = Extract<ArenaEvent, { kind: 'action' }>

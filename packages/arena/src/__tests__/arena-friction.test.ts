@@ -80,6 +80,24 @@ test('⚠ approval clicks count from the third, taken ones only; a click on any 
   ])
 })
 
+// ⚠ #641: an agent clicked all three approvals of a run by TEXT, and the pattern that took `button`
+// alone counted none — `arena compare` read the 7 → 3 as 7 → none. Every target kind counts the same.
+test('⚠ an approval counts whatever named its target: by role or by text', () => {
+  const byText = [
+    action('click', 'click text "Yes, allow write"'),
+    action('click', 'click text "Yes, allow bash"'),
+    action('click', 'click text "Yes, for this session"'),
+  ]
+  expect(observedFriction(timelineOf(byText))).toEqual([
+    { pattern: 'approvals', summary: "3 approval clicks to let Enso's agent go on", count: 3, at: [10, 20, 30] },
+  ])
+  // A text or option that merely contains the word is not one: the name must start with it.
+  const lookalikes = ['click text "Not yet"', 'click option "Okay later"', 'click text "Say yes"'].map((detail) =>
+    action('click', detail),
+  )
+  expect(observedFriction(timelineOf([...lookalikes, ...lookalikes]))).toEqual([])
+})
+
 test('⚠ an action tried again after it failed is a retry; the same action twice with no failure is not', () => {
   const start = action('click', 'click button "Start session"')
   expect(observedFriction(timelineOf([start, read(), start]))).toEqual([])
