@@ -183,14 +183,19 @@ in Enso's records.
 | `screenshots/` | one every 30 s (`sample`), plus one per error, dialog, navigation, failed action, page crash, Enso exit; a shot that could not be taken is a `recorder-error` line instead |
 | `trace/trace-NNN.zip` | the Playwright trace in five-minute chunks (`bunx playwright show-trace <zip>`) |
 | `enso/stack.log` | Enso's own output, redacted |
-| `enso/evidence/` | what the server holds for each thread the UI named or the project stores: record, events, session eval, log bundle; plus Stats |
+| `enso/evidence/` | every read route the server has for each thread the UI named or the project stores, one `thread-<id>-<route>` file each: record, events, session eval, log bundle, history, stats, context, incidents, judge cases, run conditions (`manifest`), git, changes; plus Stats, the about page and the trees' disk use (`trees.json`) |
 | `enso/evidence/snapshot-store/` | a copy of the project's snapshot store (#551), so pruning the home costs the run nothing |
 | `agent/transcript.jsonl` | the agent under test's own transcript (`--agent`), redacted, image bytes left out |
 | `score.json`, `score.md` | the score: verdict, UI checks, problems, metrics |
-| `manifest.json` | the fold: what drove the run and whether the boundary held, screenshot index, threads with their time spans, actions, observed signals, the agent's notes, every piece of Enso evidence as `collected` or `missing` with why, and the secret scan |
+| `manifest.json` | the fold: the build Enso ran from (`ensoBuild`: commit, whether the checkout was dirty, a hash of the uncommitted work), what drove the run and whether the boundary held, the screenshot index (each shot in a thread with the `turn` it shows), threads with their time spans, the filesystem timeline (`filesystem`: the project and each thread tree at every periodic screenshot, file count and a fingerprint), actions, observed signals, the agent's notes, every piece of Enso evidence as `collected` or `missing` with why, and the secret scan |
+
+A shot's `turn` comes from the thread's collected history: its `turnId` is the user message that opened the turn and its
+`messageId` the last message at or before the shot, both entry ids of the session file. It is joined after the run from
+Enso's own timestamps; a shot before the thread's first prompt has none. A workspace's `fingerprint` hashes each file's
+path, size and mtime (`.git` and `node_modules` skipped), so it moves when any file is written and only then.
 
 The thread id on a timeline line is the id `bun scripts/enso-thread.ts`, `/api/logs/bundle?thread=`
-and the session file are keyed by: that is the jump from a screenshot to its turn.
+and the session file are keyed by: the jump from a screenshot to its thread, where its `turn` names the entry.
 
 ## What holds, and where it stops
 

@@ -1,5 +1,6 @@
 import { appendFileSync, existsSync, readFileSync } from 'node:fs'
 import { isEnsoThreadId } from '@enso/core'
+import type { ArenaEnsoBuild, ArenaWorkspaceSample } from './run-state.ts'
 
 /**
  * The arena run's shared timeline (#556): one JSON line per thing that happened — a screenshot,
@@ -47,7 +48,8 @@ export type ArenaEventBody =
       readonly kind: 'run-start'
       readonly scenario: string
       readonly project: string
-      readonly ensoCommit?: string
+      /** The checkout the run's Enso came from, and whether it was dirty (#608). */
+      readonly ensoBuild?: ArenaEnsoBuild
       /** The `ENSO_HOME` the stack ran over (#610): a refold scans with its secrets, not the invoking shell's. */
       readonly home?: string
     }
@@ -101,6 +103,8 @@ export type ArenaEventBody =
     }
   /** The budget is spent and its grace window opened (#609): only a note and the stop are taken now. */
   | { readonly kind: 'budget-spent'; readonly graceMs: number }
+  /** The work at a sample (#608): the project and each thread tree of it, with a fingerprint each. */
+  | { readonly kind: 'workspace-sample'; readonly workspaces: readonly ArenaWorkspaceSample[] }
 
 /** One timeline line: the body, when it happened, and where the page was. */
 export type ArenaEvent = ArenaEventBody & {

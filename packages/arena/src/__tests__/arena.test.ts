@@ -191,7 +191,12 @@ test('the manifest joins screenshots to threads and keeps the agent’s notes ap
   const path = join(mkdtempSync(join(tmpdir(), 'arena-manifest-')), 'timeline.jsonl')
   const timeline = openTimeline(path, steppingClock())
   const inThread = pagePlace(`http://127.0.0.1:5178/?thread=${THREAD}`)
-  timeline.record({ kind: 'run-start', scenario: 'snake', project: '/p', ensoCommit: 'abc123' })
+  timeline.record({
+    kind: 'run-start',
+    scenario: 'snake',
+    project: '/p',
+    ensoBuild: { commit: 'abc123', dirty: true, diffHash: 'f00d' },
+  })
   timeline.record({ kind: 'screenshot', cause: 'sample', path: '/s/0.png' }, pagePlace('http://127.0.0.1:5178/'))
   timeline.record(
     { kind: 'action', via: 'control', action: 'click', detail: 'click button "x"', outcome: 'ok', durationMs: 5 },
@@ -218,6 +223,10 @@ test('the manifest joins screenshots to threads and keeps the agent’s notes ap
     { kind: 'note', via: 'control', note: 'wish', trying: 'see the diff', happened: 'no button', wanted: 'a diff tab' },
     inThread,
   )
+  timeline.record({
+    kind: 'workspace-sample',
+    workspaces: [{ path: 'project', files: 1, bytes: 4, fingerprint: 'aa' }],
+  })
   timeline.record({ kind: 'run-stop', reason: 'budget: 1 minutes' })
 
   const manifest = foldArenaManifest({
@@ -229,7 +238,14 @@ test('the manifest joins screenshots to threads and keeps the agent’s notes ap
     runId: 'snake-1',
     scenario: 'snake',
     project: '/p',
-    ensoCommit: 'abc123',
+    ensoBuild: { commit: 'abc123', dirty: true, diffHash: 'f00d' },
+    filesystem: [
+      {
+        at: expect.any(String),
+        elapsedMs: expect.any(Number),
+        workspaces: [{ path: 'project', files: 1, bytes: 4, fingerprint: 'aa' }],
+      },
+    ],
     stopReason: 'budget: 1 minutes',
     traceChunks: ['/t/trace-000.zip'],
     actions: { total: 2, failed: 1 },

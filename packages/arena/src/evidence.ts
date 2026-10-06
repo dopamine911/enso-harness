@@ -87,6 +87,7 @@ export async function collectEnsoEvidence(sources: ArenaEvidenceSources): Promis
   const storedThreads = await save('stored threads', '/api/stored-threads', 'stored-threads.json')
   await save('stats', '/api/logs/stats', 'stats.json')
   await save('about', '/api/about', 'about.json')
+  await save('thread trees', '/api/trees', 'trees.json')
   // ⚠ The run's project's threads too, not only the ones the URL named (#584): a thread the UI
   // never showed is exactly the one the score must look at — prompted some other way, or a fork.
   const threadIds = [
@@ -99,10 +100,11 @@ export async function collectEnsoEvidence(sources: ArenaEvidenceSources): Promis
   ]
   for (const threadId of threadIds) {
     const id = encodeURIComponent(threadId)
-    await save(`thread ${threadId}`, `/api/threads/${id}`, `thread-${threadId}.json`)
-    await save(`thread ${threadId} events`, `/api/threads/${id}/events`, `thread-${threadId}-events.json`)
-    await save(`thread ${threadId} eval`, `/api/threads/${id}/eval`, `thread-${threadId}-eval.json`)
-    await save(`thread ${threadId} log bundle`, `/api/logs/bundle?thread=${id}`, `thread-${threadId}-bundle.md`)
+    for (const read of THREAD_READS) {
+      const fileName = `thread-${threadId}${read.suffix === '' ? '' : `-${read.suffix}`}.${read.extension}`
+      const label = read.suffix === '' ? `thread ${threadId}` : `thread ${threadId} ${read.label}`
+      await save(label, read.route(id), fileName)
+    }
   }
   if (threadIds.length === 0) {
     rows.push({ kind: 'threads', status: 'missing', reason: 'no thread was named by the UI or stored for the project' })
@@ -116,6 +118,35 @@ export async function collectEnsoEvidence(sources: ArenaEvidenceSources): Promis
   })
   return rows
 }
+
+/**
+ * What the stop reads for each thread (#584 A2, #608): every read route the server has for one
+ * thread, each saved beside the others as `thread-<id>-<suffix>.<extension>`. The record, events,
+ * eval and log bundle were the first four (#562, #585); the rest are what Enso already served and
+ * the bench did not keep — the transcript, the analysis, the context, the incidents, the judge's
+ * cases, the run conditions, git and the changes. Each is a row: collected, or missing with why.
+ * The empty suffix is the thread's own record (`thread-<id>.json`), which the score reads by that
+ * exact name.
+ */
+const THREAD_READS: readonly {
+  readonly label: string
+  readonly suffix: string
+  readonly extension: 'json' | 'md'
+  readonly route: (id: string) => string
+}[] = [
+  { label: 'record', suffix: '', extension: 'json', route: (id) => `/api/threads/${id}` },
+  { label: 'events', suffix: 'events', extension: 'json', route: (id) => `/api/threads/${id}/events` },
+  { label: 'eval', suffix: 'eval', extension: 'json', route: (id) => `/api/threads/${id}/eval` },
+  { label: 'log bundle', suffix: 'bundle', extension: 'md', route: (id) => `/api/logs/bundle?thread=${id}` },
+  { label: 'history', suffix: 'history', extension: 'json', route: (id) => `/api/threads/${id}/history` },
+  { label: 'stats', suffix: 'stats', extension: 'json', route: (id) => `/api/threads/${id}/stats` },
+  { label: 'context', suffix: 'context', extension: 'json', route: (id) => `/api/threads/${id}/context` },
+  { label: 'incidents', suffix: 'incidents', extension: 'json', route: (id) => `/api/threads/${id}/incidents` },
+  { label: 'judge cases', suffix: 'judge-cases', extension: 'json', route: (id) => `/api/threads/${id}/judge-cases` },
+  { label: 'manifest', suffix: 'manifest', extension: 'json', route: (id) => `/api/threads/${id}/manifest` },
+  { label: 'git', suffix: 'git', extension: 'json', route: (id) => `/api/threads/${id}/git` },
+  { label: 'changes', suffix: 'changes', extension: 'json', route: (id) => `/api/threads/${id}/changes` },
+]
 
 /** One stored thread of the run's project, as `GET /api/stored-threads` lists it: what the score reads. */
 export interface ArenaProjectThread {

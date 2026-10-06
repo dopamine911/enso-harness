@@ -63,6 +63,7 @@ import {
   runArena,
 } from './recorder.ts'
 import { arenaSecretValues, defaultArenaOut, isGuardedForAgent, prepareRunHome, runHomeOf } from './run-home.ts'
+import { threadHistoriesIn } from './run-state.ts'
 import {
   ARENA_SCENARIOS,
   arenaActCommand,
@@ -330,7 +331,8 @@ async function refold(): Promise<void> {
   const home = runHomeOf(runDirectory, operatorHome, recordedRunHome(runDirectory))
   const secretScan = withEarlierHits(scanRunForSecrets(runDirectory, arenaSecretValues(home)), earlier, runDirectory)
   const events = readTimeline(join(runDirectory, 'timeline.jsonl'))
-  const manifest = foldArenaManifest({ runId, events, evidence, secretScan })
+  const histories = threadHistoriesIn(join(runDirectory, 'enso', 'evidence'))
+  const manifest = foldArenaManifest({ runId, events, evidence, secretScan, histories })
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
   process.stdout.write(`${manifestPath}\n`)
   scoreRun(runDirectory)
