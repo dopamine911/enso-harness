@@ -74,6 +74,38 @@ With `--agent`, the run starts the agent under test itself and stops when the ag
 without stopping (after three nudges), or reaches its budget or a bound. Do not prescribe its features or
 script its failures.
 
+### In a container (#676)
+
+On the host, a run borrows your own login (above) and Enso's coding agent runs its `bash` on your
+machine. `bun run arena container` runs the same thing in a Docker image instead, with a **test
+account's** credential injected into it:
+
+```bash
+bun run arena container build                                   # the image, from this checkout
+bun run arena container credential --api-key-stdin < key.txt    # an Anthropic API key, or:
+bun run arena container credential --from test-account-auth.json # a pi auth.json (API key or OAuth)
+bun run arena container credential --status                     # which providers it holds, never a value
+bun run arena container start --agent anthropic/claude-sonnet-5-5 --scenario iterate [--runs DIR]
+```
+
+- **The host is reachable through two mounts and nothing else.**
+  - The runs directory (`--runs`, the arena's default otherwise) is mounted at its own host path,
+    so the paths a run records (its project, every screenshot) hold on the host too. `score`,
+    `report` and `compare` read a containerized run as they read any other.
+  - The `enso-arena-credentials` volume is the container's `pi-agent` directory. A Docker volume,
+    not a host path, so the container never sees your `~/.enso`.
+- **Not mounted:** your home, the Docker socket, the host network. The container gets no added
+  privilege.
+- **The credential goes in through stdin only**, never an argument or the environment, and is
+  stored readable by its owner only. The volume is writable: a token an OAuth refresh rotates is
+  kept for the next run, through the run home's link or the #639 reconcile.
+- **What runs is the image, not your checkout.** Run `container build` again after pulling changes.
+  The manifest's `ensoBuild` names the commit the image was built from.
+- **Refused in a container:** `--home`, `--out`, `--chromium`, `--headed` (the container decides
+  them) and `--manual`, whose `act` could not reach a recorder inside the container.
+- The image is Playwright's 1.63.0 image (Chromium at the version the arena drives), with bun 1.4.2,
+  git and Python. It is about 6 GB.
+
 ## The review and the bugs
 
 After the run, the experience is reviewed against its evidence and the Enso defects it shows are
