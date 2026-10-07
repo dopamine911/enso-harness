@@ -552,8 +552,8 @@ function CostliestCalls({
 /** livecraft shows the five prompts that cost the most. */
 const COSTLIEST_PROMPTS = 5
 
-/** The drawer's word for a target the transcript on screen does not have (`transcript-reveal.ts`). */
-function missedText(target: StatsTarget): string {
+/** The drawer's word for a target the transcript on screen does not have (`transcript-reveal.ts`); the eval's too (#727). */
+export function missedText(target: StatsTarget): string {
   if (target.kind === 'turn') return `turn ${target.turn} is not in the transcript on screen`
   if (target.kind === 'prompt') return 'that prompt is not in the transcript on screen'
   return 'that call is not in the transcript on screen'

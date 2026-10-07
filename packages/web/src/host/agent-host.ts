@@ -146,6 +146,7 @@ import {
 } from './host-flows.ts'
 import { mapPiEvent } from './map-events.ts'
 import { attributeNotices, ENSO_SENDER } from './notice-sender.ts'
+import { createPermissionCallQuestions } from './permission-call-questions.ts'
 import {
   freshPermissionModeState,
   livePermissionModeState,
@@ -2068,6 +2069,11 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         pi.on('model_select', () => onModelSelect())
       },
     }
+    // Where each permission card stands among its call's questions (#728), asked of this session's engine.
+    const callQuestions = createPermissionCallQuestions(
+      (surface, value, agentName) =>
+        getPermissionsService(sessionManager.getSessionId())?.checkPermission(surface, value, agentName).state,
+    )
     // Trust before anything loads (#502): pi's `trust.json`, the thread's own record, the default —
     // else untrusted, and asked before the first run (`trustGate` below). ⚠ Keyed by the PROJECT: a
     // thread on a tree (#551) is trusted as its checkout is, never as a path no one trusted.
@@ -2082,12 +2088,17 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         // no discovery (`--no-extensions`), no ~/.agents skills (`--no-skills`), and the
         // harness package as the one extension source (`-e <dir>` — pi resolves a
         // directory's `pi` manifest for extensions, skills, prompts AND themes). Inline
-        // extensions load after the manifest's: the host's watcher and its restore note (#652)
-        // first, then any probes.
+        // extensions load after the manifest's: the host's watcher, its restore note (#652) and
+        // its ear for the engine's questions (#728) first, then any probes.
         noExtensions: true,
         noSkills: true,
         additionalExtensionPaths: [harnessPackageDir],
-        extensionFactories: [modelWatch, restoreNoteExtension, ...(options.extensionFactories ?? [])],
+        extensionFactories: [
+          modelWatch,
+          restoreNoteExtension,
+          callQuestions.extension,
+          ...(options.extensionFactories ?? []),
+        ],
         // Who said a notice (#387): each extension's registrations get a context whose
         // `ui.notify` names that extension, read off the path pi loaded it from.
         extensionsOverride: (loaded) => attributeNotices(loaded, harnessPackageDir),
@@ -2161,6 +2172,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     const ui = createEnsoExtensionUiContext({
       emit,
       threadId,
+      selectTitle: callQuestions.selectTitle,
     })
 
     // The open trust decision, asked before a run (#502). A Trust is recorded where its answer says —

@@ -68,6 +68,14 @@ const EVALUATED: EnsoSessionEval = {
     dropped: ['S6 plan mode entries and exits: pi has no plan mode attachment'],
     riskLevel: 'medium',
     securitySignals: 1,
+    riskSignals: [
+      {
+        signal: 'tool-substitution-after-denial',
+        toolCallId: 'c7',
+        detail: 'bash ran /tmp/splice.sh, written after a shell refusal',
+        after: ['c5', 'c6'],
+      },
+    ],
   },
 }
 
@@ -115,6 +123,22 @@ test('a log-side count with no day file read is —, not 0, and the panel says w
   expect(rendered).toContain('interrupts —')
   expect(rendered).toContain('unknown, not zero')
   expect(rendered).not.toContain('longest run')
+})
+
+// #727: the status bar's risk word leads here, so the eval lists each signal — its kind, what was
+// observed, the call it was raised on and the calls it followed — not only how many there are.
+test('each security signal is listed with its kind, its detail, its call and the calls it followed', () => {
+  const rendered = text(renderToStaticMarkup(<ThreadEvalView outcome={{ kind: 'read', payload: EVALUATED }} />))
+  expect(rendered).toContain(
+    'Security signals observed · not a verdict tool-substitution-after-denial on c7 after c5 , c6 bash ran /tmp/splice.sh, written after a shell refusal',
+  )
+  const none: EnsoSessionEval = {
+    ...EVALUATED,
+    scorecard: { ...EVALUATED.scorecard, riskLevel: 'low', securitySignals: 0, riskSignals: [] },
+  }
+  expect(text(renderToStaticMarkup(<ThreadEvalView outcome={{ kind: 'read', payload: none }} />))).toContain(
+    'Security signals observed · not a verdict no security signal observed on this branch',
+  )
 })
 
 test('reading and failed outcomes are said as such', () => {
