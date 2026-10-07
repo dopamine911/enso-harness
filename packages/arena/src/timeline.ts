@@ -73,6 +73,8 @@ export type ArenaEventBody =
       readonly home?: string
       /** How the agent perceived the page (#680); absent on a run from before, which was `tree`. */
       readonly perception?: ArenaPerception
+      /** The model Enso's sessions were set to start on (#674, `--enso-model`); absent when the run left it as configured. */
+      readonly ensoModel?: string | undefined
     }
   | { readonly kind: 'screenshot'; readonly cause: ArenaShotCause; readonly path: string }
   | {
@@ -158,6 +160,25 @@ export function pagePlace(url: string): ArenaPagePlace {
     return { url }
   }
   return isEnsoThreadId(named) ? { url, threadId: named } : { url }
+}
+
+/** Where the arena serves Enso's page: the dev stack's web origin (`bun run dev`'s port). */
+export const ARENA_WEB_ORIGIN = 'http://127.0.0.1:5178'
+
+/**
+ * Whether a page is the built application rather than Enso (#675): Preview's `/preview/…` on Enso's
+ * origin, or a page on another http(s) origin — the dev server the work started, as the first
+ * sighted agent played through. A missing URL, a blank tab, and Enso's own pages are not.
+ */
+export function isTheApplication(url: string | undefined): boolean {
+  let parsed: URL
+  try {
+    parsed = new URL(url ?? '')
+  } catch {
+    return false
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false
+  return parsed.origin !== ARENA_WEB_ORIGIN || parsed.pathname.startsWith('/preview/')
 }
 
 /** A timeline writer over one file: `record` stamps an event and appends it before returning. */

@@ -110,6 +110,8 @@ export interface ArenaManifest {
   readonly ensoBuild?: ArenaEnsoBuild
   /** How the agent perceived the page (#680): `tree`, the only kind before it was recorded, or `visual`. */
   readonly perception: ArenaPerception
+  /** The model the run set Enso's sessions to start on (#674); what they ran on is the score's `modelUse.enso`. */
+  readonly ensoModel?: string
   readonly startedAt?: string
   readonly stoppedAt?: string
   /** Why the run ended — or `not stopped`: the recorder died, and this manifest was folded after. */
@@ -297,6 +299,7 @@ export function foldArenaManifest({
     project: start?.project ?? 'unknown',
     ...(start?.ensoBuild === undefined ? {} : { ensoBuild: start.ensoBuild }),
     perception: start?.perception ?? 'tree',
+    ...(start?.ensoModel === undefined ? {} : { ensoModel: start.ensoModel }),
     driver,
     boundary: boundaryOf(driver, actionsBySource(events)),
     ...(start === undefined ? {} : { startedAt: start.at }),
