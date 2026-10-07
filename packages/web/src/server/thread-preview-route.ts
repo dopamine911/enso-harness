@@ -2,9 +2,11 @@ import { type Dirent, readdirSync, readFileSync, realpathSync, statSync } from '
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { extname, isAbsolute, join, relative, sep as separator } from 'node:path'
-import type { EnsoThreadPages } from '@enso/core'
+import { type EnsoThreadPages, ensoLogger } from '@enso/core'
 import { isLoopbackAuthority, LOOPBACK_ONLY } from './loopback.ts'
 import { servedCwd, type ThreadCwdDeps } from './thread-git-route.ts'
+
+const log = ensoLogger('server', 'preview')
 
 /**
  * What a thread built, reachable from the page (#619). The thread works in a tree of its own (#551),
@@ -225,15 +227,27 @@ export function createPreviewOrigins(previewFile: ReturnType<typeof createPrevie
       })
     })
     const origin = new Promise<string>((resolve, reject) => {
-      // A listener that could not start (no port, no file descriptor) is forgotten, so the thread's
-      // next tree read tries again rather than answering this failure for the server's life (PR #719 review).
-      server.once('error', (error) => {
+      let listening = false
+      // ⚠ For the server's life, not once: a server emits `error` for a failed accept too (EMFILE
+      // while taking a connection), and an `error` with no listener crashes the process. A listener
+      // that could not START (no port, no file descriptor) is forgotten, so the thread's next tree
+      // read tries again (PR #719 review); a running one stays the thread's origin, and is closed
+      // with the others — a failed accept costs one connection, not the listener.
+      server.on('error', (error) => {
+        if (listening) {
+          log.warn('the preview listener of thread {threadId} failed to accept a connection: {error}', {
+            threadId,
+            error,
+          })
+          return
+        }
         if (listeners.get(threadId)?.server === server) listeners.delete(threadId)
         reject(error)
       })
-      server.listen(0, LOOPBACK_ONLY, () =>
-        resolve(`http://${LOOPBACK_ONLY}:${(server.address() as AddressInfo).port}`),
-      )
+      server.listen(0, LOOPBACK_ONLY, () => {
+        listening = true
+        resolve(`http://${LOOPBACK_ONLY}:${(server.address() as AddressInfo).port}`)
+      })
     })
     listeners.set(threadId, { server, origin })
     return origin
