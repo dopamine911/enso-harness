@@ -21,6 +21,7 @@ import {
   type EnsoThreadCommands,
   type EnsoThreadEvents,
   type EnsoThreadHistory,
+  type EnsoThreadPages,
   type EnsoThreadSummary,
   ensoLogger,
   isEnsoThreadId,
@@ -69,6 +70,7 @@ import {
 import { MAX_LOG_BODY_BYTES, receiveBrowserLogs } from './logs-route.ts'
 import { createLogStatsRoute } from './logs-stats-route.ts'
 import { followLogTail, type LogTailRouteDeps } from './logs-tail-route.ts'
+import { isLoopbackAuthority, LOOPBACK_ONLY } from './loopback.ts'
 import { createProjectRegistry, ProjectUnavailable } from './projects.ts'
 import {
   createPromptLibrary,
@@ -92,12 +94,7 @@ import { createThreadEvalRoute } from './thread-eval-route.ts'
 import { createThreadChangesRoute, createThreadGitRoute } from './thread-git-route.ts'
 import { createThreadSecurityReads, replayThresholdsOf } from './thread-incidents-route.ts'
 import { createThreadManifestRoute } from './thread-manifest-route.ts'
-import {
-  createPreviewRoute,
-  createThreadPagesRoute,
-  fromPreviewModuleLoader,
-  PREVIEW_CSP,
-} from './thread-preview-route.ts'
+import { createPreviewOrigins, createPreviewRoute, createThreadPagesRoute } from './thread-preview-route.ts'
 import { readThreadMount, type ThreadReadDeps } from './thread-read.ts'
 import { createThreadRegistry, inspectThread, type ThreadView } from './thread-registry.ts'
 import { createThreadStatsRoute } from './thread-stats-route.ts'
@@ -139,14 +136,11 @@ const THREAD_EVAL_ROUTE = threadRoute('eval')
 const THREAD_GIT_ROUTE = threadRoute('git')
 /** `GET /api/threads/<threadId>/changes` — every file that differs from the last-push baseline, with its patch (#452). */
 const THREAD_CHANGES_ROUTE = threadRoute('changes')
-/** `GET /api/threads/<threadId>/tree` — where the thread works, and the HTML pages a preview can open (#619). */
-const THREAD_PAGES_ROUTE = threadRoute('tree')
 /**
- * `GET /preview/threads/<threadId>/<path>` — one file of the thread's tree, read-only, under a CSP
- * sandbox that gives it an opaque origin (#619, `thread-preview-route.ts`). Outside `/api/`: it is
- * the thread's work, not the control plane, and a query string is ignored.
+ * `GET /api/threads/<threadId>/tree` — where the thread works, the HTML pages it holds, and the origin
+ * its preview is served from (#619, #713: an origin of its own, not a route of this server).
  */
-const PREVIEW_ROUTE = /^\/preview\/threads\/([^/?#]+)\/([^?#]*)(?:\?[^#]*)?$/
+const THREAD_PAGES_ROUTE = threadRoute('tree')
 /** `GET /api/threads/<threadId>/judge-cases` — the calls the command judge would be asked about, redacted (#469). */
 const THREAD_JUDGE_CASES_ROUTE = threadRoute('judge-cases')
 /** The wire (#112): `POST …/prompt`, `GET …/follow`, `POST …/dialog`, `POST …/abort` (#116). See `follow.ts`. */
@@ -233,7 +227,6 @@ const PROJECT_ROUTE = /^\/api\/projects\/([0-9a-f]{16})$/
  * that the page names projects by id; a path never reaches a session from a request.
  */
 const DEFAULT_PORT = 5179
-const LOOPBACK_ONLY = '127.0.0.1'
 /** A dialog answer is an id and a short value — kilobytes, not megabytes. */
 const MAX_DIALOG_BODY_BYTES = 64 * 1024
 /** A permission policy is a hand-sized JSON file; a megabyte is far past any real one (#474). */
@@ -242,13 +235,15 @@ const MAX_POLICY_BODY_BYTES = 1024 * 1024
 const MAX_PROMPT_BODY_BYTES = 512 * 1024
 
 /**
- * Is this `Host`/`Origin` authority the machine itself? Port is irrelevant (either dev
- * surface may ask); the NAME is the whole point, because a hostname that merely resolves
- * to 127.0.0.1 today is a rebinding attack, not localhost.
+ * Whether a browser says this request came from Enso's own page (#717): `Sec-Fetch-Site` is
+ * `same-origin`, or `none` — a navigation the person made (a typed URL, a bookmark). Absent, the
+ * caller is no browser that sends Fetch Metadata (`curl`, the repo's CLIs, an old browser), and the
+ * `Origin` rule alone judges it. A page on another loopback port says `same-site`; another host,
+ * `cross-site`.
  */
-function isLoopbackAuthority(authority: string): boolean {
-  const host = authority.startsWith('[') ? authority.slice(0, authority.indexOf(']') + 1) : authority.split(':')[0]
-  return host === LOOPBACK_ONLY || host === 'localhost' || host === '[::1]'
+function fromEnsosOwnPage(headers: IncomingMessage['headers']): boolean {
+  const site = headers['sec-fetch-site']
+  return site === undefined || site === 'same-origin' || site === 'none'
 }
 
 const log = ensoLogger('server', 'http')
@@ -1003,9 +998,15 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     threadTree: (threadId) => host.threadTree(threadId),
     readCopyChanges: (copy) => host.readCopyChanges(copy),
   })
-  // What the thread built (#619): where it works and its pages, and one file of it, sandboxed.
-  const threadPages = createThreadPagesRoute(gitDeps)
-  const previewFile = createPreviewRoute(gitDeps)
+  // What the thread built (#619): where it works and its pages — and, once it holds one, the origin
+  // its preview is served from, a listener of its own (#713, `thread-preview-route.ts`).
+  const pagesOf = createThreadPagesRoute(gitDeps)
+  const previews = createPreviewOrigins(createPreviewRoute(gitDeps))
+  const threadPages = async (threadId: string): Promise<EnsoThreadPages | undefined> => {
+    const listed = await pagesOf(threadId)
+    if (listed === undefined || listed.pages.length === 0) return listed
+    return { ...listed, previewOrigin: await previews.originOf(threadId) }
+  }
 
   /**
    * A thread analysis — stats (#45), context (#361), manifest (#435), git (#453), changes (#452) — or 404 for a thread the
@@ -1037,37 +1038,6 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   const respondWithThreadChanges = analysisResponder(threadChanges)
   const respondWithThreadJudgeCases = analysisResponder((threadId: string) => securityReads.judgeCases(threadId))
   const respondWithThreadPages = analysisResponder(threadPages)
-  /**
-   * One file of the thread's tree, never with Enso's origin; a miss is the 404 every outside-the-tree path gets.
-   * The page's module loader gets CORS for its opaque origin on either answer (#689), so a missing
-   * module reads as the 404 it is, not as a CORS block.
-   */
-  async function respondWithPreview(
-    threadId: string,
-    request: IncomingMessage,
-    response: ServerResponse,
-    match: RegExpExecArray,
-  ): Promise<void> {
-    const file = await previewFile(threadId, match[2] ?? '')
-    const common = {
-      'X-Content-Type-Options': 'nosniff',
-      'Referrer-Policy': 'no-referrer',
-      'Cache-Control': 'no-store',
-      ...(fromPreviewModuleLoader(request.headers) ? { 'Access-Control-Allow-Origin': 'null' } : {}),
-    }
-    if (file === undefined) {
-      response.writeHead(404, { ...common, 'Content-Type': 'text/plain' })
-      response.end(`no such file in thread ${threadId}'s tree`)
-      return
-    }
-    response.writeHead(200, {
-      ...common,
-      'Content-Type': file.contentType,
-      'Content-Length': file.body.length,
-      'Content-Security-Policy': PREVIEW_CSP,
-    })
-    response.end(file.body)
-  }
   /** The incident history under the query's thresholds; a query that names no threshold well is the 400 that says why. */
   function respondWithThreadIncidents(
     threadId: string,
@@ -1173,7 +1143,6 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   const THREAD_ROUTES: readonly ThreadRoute[] = [
     ...idOnlyReads.map(([route, respond]): ThreadRoute => ({ method: 'GET', route, respond: idOnly(respond) })),
     { method: 'GET', route: THREAD_CONTEXT_REQUEST_ROUTE, respond: respondWithContextRequest },
-    { method: 'GET', route: PREVIEW_ROUTE, respond: respondWithPreview },
     { method: 'GET', route: THREAD_SYSTEM_PROMPT_ROUTE, respond: respondWithSystemPromptPreview },
     { method: 'GET', route: THREAD_PROJECT_PROMPTS_ROUTE, respond: idOnly(respondWithProjectPrompts) },
     { method: 'GET', route: THREAD_PROJECT_PROMPT_ROUTE, respond: respondWithProjectPrompt },
@@ -1962,12 +1931,21 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
    * `Content-Type`, so `text/plain` reaches the handler with no preflight — and
    * `threads.acquire` mints a session for any id matching the pattern, so no existing
    * thread need be known. The reply is opaque to the attacker, but the side effect is a
-   * full agent run. Two independent checks, both here so every route inherits them:
+   * full agent run. Three independent checks, all here so every route inherits them:
    *
    * 1. `Host` must name loopback. Node does not validate it, and a DNS name that resolves
    *    to 127.0.0.1 (rebinding) makes the READ side — `/api/threads/:id`, the verbatim
    *    branch, and the log bundle — same-origin readable. A rebound name is not loopback.
-   * 2. `Origin`, when the header is PRESENT, must parse and name loopback. Browsers always
+   * 2. ⚠ A browser's `Sec-Fetch-Site` must say `same-origin` (or `none`, a navigation the
+   *    person made), when the header is present (#717). `Origin` names a HOST, and loopback
+   *    on any port passed check 3: measured, a page on `localhost:5173` — a dev server
+   *    running agent-written code — switched a thread to `bypassPermissions` (204). Enso's
+   *    own page calls its API same-origin (through the 5178 proxy, which forwards the header,
+   *    or served by this server); a page on another port is `same-site` or `cross-site`.
+   *    Fetch Metadata needs no list of Enso's own origins, which the server does not know.
+   *    The header is absent from `curl`, the repo's CLIs and browsers too old to send it,
+   *    and those are judged by check 3 alone.
+   * 3. `Origin`, when the header is PRESENT, must parse and name loopback. Browsers always
    *    send it on cross-origin POSTs; `curl` and the repo's own CLIs send none, so they are
    *    unaffected. Either dev port satisfies it, and the 5178 proxy forwards both headers
    *    unchanged.
@@ -1981,21 +1959,13 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
    * permission dialog that run opened (204). `new URL('null')` throws, so the string needs
    * no arm of its own — it fails the parse below. Only the absent header is trusted, and
    * only because no browser can produce it.
-   *
-   * ⚠ The one `null` admitted (#689): a preview page's module loader fetching a script of its
-   * own tree — a GET under `/preview/`, never `/api/`, and `Sec-Fetch-Dest: script`, which a
-   * page's `fetch()` cannot send. A module script is fetched in CORS mode, so without this no
-   * ES-module page could run in Preview; what it opens is what a classic `<script src>` (which
-   * sends no `Origin`) already had: a file of the tree, run, not read.
    */
   function fromTrustedOrigin(request: IncomingMessage): boolean {
     const hostHeader = request.headers.host
     if (hostHeader === undefined || !isLoopbackAuthority(hostHeader)) return false
+    if (!fromEnsosOwnPage(request.headers)) return false
     const origin = request.headers.origin
     if (origin === undefined) return true
-    if (request.method === 'GET' && PREVIEW_ROUTE.test(request.url ?? '') && fromPreviewModuleLoader(request.headers)) {
-      return true
-    }
     let originHost: string
     try {
       originHost = new URL(origin).host
@@ -2130,6 +2100,10 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     server,
     url: `http://${LOOPBACK_ONLY}:${port}`,
     listening,
-    close: (): Promise<void> => new Promise<void>((resolve) => server.close(() => resolve())),
+    // The previews close with it (#713): their listeners are this server's.
+    close: async (): Promise<void> => {
+      await previews.close()
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    },
   }
 }

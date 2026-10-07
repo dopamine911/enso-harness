@@ -166,9 +166,10 @@ export function pagePlace(url: string): ArenaPagePlace {
 export const ARENA_WEB_ORIGIN = 'http://127.0.0.1:5178'
 
 /**
- * Whether a page is the built application rather than Enso (#675): Preview's `/preview/…` on Enso's
- * origin, or a page on another http(s) origin — the dev server the work started, as the first
- * sighted agent played through. A missing URL, a blank tab, and Enso's own pages are not.
+ * Whether a page is the built application rather than Enso (#675): a page on another http(s) origin
+ * than Enso's — the thread's preview, an origin of its own (#713), or the dev server the work
+ * started, as the first sighted agent played through. A missing URL, a blank tab, and Enso's own
+ * pages are not.
  */
 export function isTheApplication(url: string | undefined): boolean {
   let parsed: URL
@@ -177,8 +178,7 @@ export function isTheApplication(url: string | undefined): boolean {
   } catch {
     return false
   }
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false
-  return parsed.origin !== ARENA_WEB_ORIGIN || parsed.pathname.startsWith('/preview/')
+  return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && parsed.origin !== ARENA_WEB_ORIGIN
 }
 
 /** A timeline writer over one file: `record` stamps an event and appends it before returning. */

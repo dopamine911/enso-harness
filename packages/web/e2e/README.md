@@ -22,7 +22,7 @@ First time on a machine: `bunx playwright install chromium`. The pinned `@playwr
 - **Stored threads**, written the way pi writes them, by `packages/web/src/host/__tests__/stored-session.ts` (the host's own test helper, because only the host may import pi):
   - `first` and `second`: `SEEDED_TURNS` (25) turns each, in the checkout's project, several screens tall;
   - `outside`: one turn in a folder no project covers, which the server refuses to open (#378);
-  - `modules`: one turn, in a tree of its own under the checkout's project (#551), holding `index.html`, `app.mjs` and the `game-logic.mjs` it imports: a page built of ES modules, for Preview (#689).
+  - `modules`: one turn, in a tree of its own under the checkout's project (#551), holding `index.html`, the `app.mjs` it loads from the root (`/app.mjs`) and the `game-logic.mjs` that imports, keeping a score in `localStorage`: a page as people build them, for Preview (#689, #713).
 
   A test reads their ids with `e2eHome().threads` and their rail titles from `SEEDED_TITLES`.
 
@@ -44,9 +44,9 @@ To add a seeded thread, add it to `seededHome` in `e2e-home.ts` with the turns a
 | every off-screen pane is inert and `content-visibility: hidden` | no pointer, focus or layout work for a pane off screen (#472) |
 | a URL naming an unused thread id | that thread is started with no alert; one outside the projects is refused by name (#378) |
 | a long prompt leaves the Start dialog in the window | at 1440×900 and 800×480, a 14-line prompt scrolls inside its capped box, the dialog is not clipped at the top, and Start session is in the window and clickable without scrolling (#679) |
-| a preview page built of ES modules runs | `modules`' page, opened at `/preview/threads/<id>/index.html`, runs its module script and the module it imports with no console error, while its origin is still `null` and its own `fetch()` of a file and of `/api/about` are still refused (#689) |
+| a preview page runs on its own origin | `modules`' page, opened at the thread's `previewOrigin` from its tree route, runs its root-loaded module and the module it imports and keeps its score in `localStorage`, with no console error; its origin is its own, it reads its own file, and a request it sends Enso to escalate a fresh thread builds nothing (#713, #717) |
 
-Each of the four before #679's row was shown failing with its fix reverted (#486), and #689's was too.
+Each of the four before #679's row was shown failing with its fix reverted (#486), and #713's was too.
 
 ⚠ **A slash command needs a running session (#484)**, and a page visit builds none. A test that drives one first builds the thread's session with `chooseMode`: the composer's mode select is a control route that builds it with no model. All four tests that drove a slash command into a session-less thread had failed since #484, unnoticed because this suite is not in CI (#604).
 
