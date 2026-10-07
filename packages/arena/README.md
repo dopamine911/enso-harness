@@ -8,6 +8,7 @@ by what a reader of the page sees, and is told nothing about Enso's internals.
 
 ```bash
 bun run arena start --agent anthropic/<model-id>   # Enso + a recorded browser + the agent under test, UI only
+bun run arena start --agents <model>,<model>       # the same scenario once per agent model, one after another
 bun run arena start --manual        # the same run with no agent: you act over `arena act`; the boundary is not held
 bun run arena brief                 # what the agent under test is told (`--manual`: the act-command version, review and bugs included)
 bun run arena brief --review --run <run dir>   # the review and bug-filing prompt for after an --agent run
@@ -15,6 +16,7 @@ bun run arena act '{"action":"read"}'   # one UI action on a --manual run
 bun run arena manifest <run dir>    # fold the manifest again; after a recorder that died, collect Enso's evidence too
 bun run arena score <run dir>       # score a run again: its logs read for problems, and whether the UI was used
 bun run arena compare <run dir> <run dir>   # two runs side by side; reads only, rewrites nothing
+bun run arena compare --by-model <run dir>…   # any number of runs, grouped by agent model and perception
 bun run arena report <run dir> [--run-tests]   # the application outcome apart from Enso's findings; the gaps' evidence checked
 ```
 
@@ -42,15 +44,19 @@ and acts on the page:
     and name (`button "Start session"`). That's for the review only; the agent never sees it.
   - A native dialog never shows in a page capture, so every visual answer says when one is open.
   - It needs a model that takes images. Each mode refuses the other's moves, so the two stay comparable.
+  - **Its cost, as measured so far:** one view per action, which in GPT-6.1 Sol runs was 59–67 views
+    in 10–15 minutes (4.5–6.8 MB of PNG, each one an image in the model's context). The money isn't
+    measured yet: those runs were on a subscription, where Stats shows $0.0000 (#692).
 
 Run each scenario in both modes and put the two side by side with `arena compare`, which shows each
 run's perception and agent: they find different things.
 
-Four scenarios, told only what to achieve, never which controls to use:
+Five scenarios, told only what to achieve, never which controls to use:
 - **`snake`** (the default): a Snake game with five features of the agent's choosing. One prompt and done: it exercises starting a session, approvals, and seeing what was built.
 - **`iterate`**: a to-do CLI in at least three rounds, checking each round's changes, taking one round back for another approach, and finding the work's cost and context. It reaches what Snake doesn't: the Diff view, restore, forks, Stats and Context. Its first run found #650 and #651.
 - **`compare`**: a Markdown-to-HTML converter in two approaches kept side by side, compared by what each changed and cost, one kept and the other cleaned up, then exactly what the model was given in its last request. It reaches parallel threads, deleting a thread and its tree, and Context. Its first run found #659.
 - **`resume`**: a password generator whose work is interrupted and picked up: one request stopped midway and redirected, the page reloaded and the conversation continued, a branch off an earlier request, and another model for one request. It reaches stopping a run, persistence across a reload, forks and the model control. Its first run found #664 and #665.
+- **`play`** (#675): a small browser game, then played by the agent the way a player would: it finds something wrong or missing, has it changed, and plays again, at least twice. It is never told there is a preview; whether it finds a way to play is the finding. It reaches Preview, iteration on a running application, and what only using it shows.
 
 **When a run stops (#609).** Besides the agent's own `stop`:
 - **The budget (`--minutes`).** Every `act` answer carries `phase` and `remainingMs`. When the budget is
@@ -66,17 +72,19 @@ Each bound gives its own `stopReason` in the manifest, and the score warns that 
 bound.
 
 A native browser dialog (`alert`, `confirm`, `prompt`) blocks the page until it is answered. `read`
-reports it, and `accept-dialog` (with `text` for a prompt) or `dismiss-dialog` answers it. Enso raises
-none today.
+reports it, and `accept-dialog` (with `text` for a prompt) or `dismiss-dialog` answers it. An action
+that opens one answers at once, with the dialog in its answer (#691), rather than waiting out its
+timeout for a dialog nobody has answered. Enso raises none today; the pages it builds do.
 
 **Tabs (#675).** A tab the page opens (Preview's **Open preview**, a link) comes to the front, as a
 browser shows it, and every action goes to the tab in front. `tabs` lists the open tabs by number
 (Enso's is 0, and a number is never reused), `switch-tab` brings one to the front, and `close-tab`
 closes one; the last tab stays open. Every tab is watched and traced. A timeline line names its tab
 when it is not the first, and event screenshots are taken of the tab in front. What the built page
-itself logs in its Preview tab (a console error, a missing file, an uncaught error, a failed action)
-is scored under **application**, as a warning: a bug in the game doesn't fail Enso's run. A 5xx
-serving that page is still Enso's.
+itself logs — in Preview's tab, or on any page of another origin, such as a dev server the work
+started — is scored under **application**, as a warning: a bug in the game doesn't fail Enso's run.
+Two failures there are still Enso's: a 5xx serving the page, and a script Preview's sandbox blocks
+by CORS (#689).
 
 **Each run has its own Enso home, `<run>/.enso` (#610).** It holds the run's projects, threads, logs
 and Stats, so the agent under test sees only the run's project, the evidence covers only the run,
@@ -222,12 +230,42 @@ in 6.1 minutes, the detector found 9 polling cycles (5.4 minutes of waiting) and
 
 `bun run arena compare <runA> <runB>` scores both runs afresh, so runs folded by different versions
 of the score are compared by the same rules. It prints:
-- the outcome, metrics and UI checks side by side;
+- the outcome, metrics and UI checks side by side, with the model Enso's sessions ran on and the
+  agent's own cost;
 - each problem once, under "Only in A", "Only in B" or "In both" (thread ids read as `<thread>`, so the
   same 404 in two runs is one problem);
 - the friction count per pattern.
 
 It writes nothing.
+
+### Across models (#674)
+
+`bun run arena start --agents A,B` runs the scenario once per agent model, one after another (the
+ports are one stack at a time). Every model resolves before the first run, and each one's likely
+cost is printed first: the mean of the earlier runs under `--out` with that agent and perception.
+Then `bun run arena compare --by-model <run>…` groups runs by agent model and perception. Each
+column says how many runs it has, since one run per model can't tell a model's difference from
+noise. It shows:
+- how many passed, the models Enso's sessions ran on, and the means of the agent's cost, minutes,
+  actions, failed actions and notes;
+- the problems that appear under one model only;
+- each friction pattern's mean per run.
+
+**What a run costs.** The agent's own cost is its calls at the model's listed price: what an API
+key would be billed, whatever account ran it. A model with no listed price shows "unpriced". Enso's
+spend is separate and bounded by `--max-cost-usd`. Measured so far (the agent's calls only):
+
+| agent · perception | runs | mean per run |
+|---|---|---|
+| `anthropic/claude-sonnet-5-5` · tree | 12 | $0.12 |
+| `openai-codex/gpt-6.1-sol` · tree | 6 | $1.12 |
+| `openai-codex/gpt-6.1-sol` · visual | 3 | $2.41 |
+
+**Enso's model.** `--enso-model PROVIDER/ID` sets the model Enso's sessions start on, in the run
+home's own copy of the settings (`defaultProvider`/`defaultModel`; yours are untouched, so it's
+refused over a shared `--home`). The Start dialog preselects it when its list offers it. The
+manifest records the model set, and each thread's record names the model its session ran on; the
+score and both comparisons show it, and the score warns when Enso never ran on the model set.
 
 ## The report (#624)
 
@@ -240,6 +278,9 @@ mix, since #556 asks for the app's completion to be reported apart from Enso's u
   is one, else each file under bun (`*.test.*` through `bun test`, others as scripts). They are
   agent-written code run after the run with no approval, so they get `PATH`, a throwaway `HOME` and
   60 seconds each, never your environment. Their output is redacted with the run's secrets.
+- **What playing found** (#675), part of the application outcome: the moves made on the
+  application's own page (Preview's, or another origin's) and their span, what that page logged, and
+  the notes written while it was in front. A run that never used the application says so.
 - **Enso findings,** three kinds under their own headings:
   - **Observed friction:** the score's friction and problems. Each friction moment links the
     screenshot nearest it and the turn that screenshot shows.

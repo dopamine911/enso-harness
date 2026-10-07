@@ -55,6 +55,7 @@ import {
   readEnsoRunContext,
   threadTrustsProject,
   ENSO_TREE_RESTORED_ENTRY,
+  type RuntimeCommand,
 } from '@enso/core'
 import { flowTrace } from '@enso/core/flow-trace'
 import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
@@ -2019,6 +2020,86 @@ test('an effort chosen alone before the first prompt survives the move too, on t
   })
   expect(calledWith).toEqual(['faux-1'])
   expect(hosted.runtime.modelState()).toMatchObject({ model: { id: 'faux-1' }, thinkingLevel: 'high' })
+})
+
+/**
+ * An account's provider, as pi-multi-account registers its Codex one (#688): known as the extension
+ * loads, its model list REPLACED on `session_start` by what the account serves. pi's built-in
+ * `openai` list is the agent dir's; the account serves `gpt-account` alone.
+ */
+const accountCatalog: InlineExtension = {
+  name: 'enso-host-account-catalog',
+  factory: (pi: ExtensionAPI) => {
+    pi.registerProvider('openai', { name: 'OpenAI (account)' })
+    pi.on('session_start', () => {
+      pi.registerProvider('openai', {
+        api: 'openai-responses',
+        baseUrl: 'http://account.invalid',
+        models: [fauxModelDefinition('gpt-account', 'GPT Account')],
+      })
+    })
+  },
+}
+
+// ⚠ #688, measured in the arena: the Start dialog offered pi's built-in Codex models, the session's
+// list was the account's live catalog, and `…/configure` refused the dialog's own default with a
+// 422. The dialog's list for a thread nothing has built is the list a session holds after its start.
+test("⚠ the catalogue offers a session's models, not the agent dir's: every one, its first (the dialog's default) included, starts (#688)", async () => {
+  const catalogueAgentDir = scratchAgentDir('enso-host-catalogue-')
+  writeFileSync(join(catalogueAgentDir, 'auth.json'), JSON.stringify({ openai: { type: 'api_key', key: 'sk-688' } }))
+  const host = createAgentHost({
+    servesDirectory: servesRepoRoot,
+    agentDir: catalogueAgentDir,
+    permissionRulesPath,
+    harnessPackageDir: harnessDir,
+    extensionFactories: [accountCatalog],
+  })
+  const offered = async (): Promise<string[]> =>
+    (await host.catalogue()).find((row) => row.name === 'model')?.options?.map((option) => option.id) ?? []
+
+  // No thread exists yet — a fresh process, the arena's case — and none is built to answer.
+  const beforeAnyThread = await offered()
+  expect(beforeAnyThread.filter((id) => id.startsWith('openai/'))).toEqual(['openai/gpt-account'])
+  expect(await host.listSessions()).toEqual([])
+  expect(readdirSync(catalogueAgentDir)).not.toContain('sessions')
+
+  const hosted = await host.createSession(crypto.randomUUID(), () => repoRoot)
+  openSessions.push(hosted)
+  expect(await offered()).toEqual(beforeAnyThread)
+  // What the Start dialog sends: its default (the first option) — then any other it offers.
+  const dialogDefault = beforeAnyThread[0] ?? 'nothing offered'
+  await hosted.runtime.runHostCommand({ name: 'model', value: dialogDefault })
+  const started = hosted.runtime.modelState().model
+  expect(started === null ? undefined : `${started.provider}/${started.id}`).toBe(dialogDefault)
+  for (const id of beforeAnyThread) await hosted.runtime.runHostCommand({ name: 'model', value: id })
+})
+
+// #674: pi starts a session on the configured default (`defaultProvider`/`defaultModel`), and the Start
+// dialog preselects the `/model` row's value — none until now, so the dialog took its first model,
+// whatever the settings named. A default the session's list lacks is no value: preselecting it would
+// be the 422 of #688 again.
+test('the catalogue’s model row carries the configured default when it is offered, and none when it is not', async () => {
+  const modelRowWith = async (settings: Record<string, string> | undefined): Promise<RuntimeCommand | undefined> => {
+    const catalogueAgentDir = scratchAgentDir('enso-host-default-')
+    writeFileSync(join(catalogueAgentDir, 'auth.json'), JSON.stringify({ openai: { type: 'api_key', key: 'sk-674' } }))
+    if (settings !== undefined) writeFileSync(join(catalogueAgentDir, 'settings.json'), JSON.stringify(settings))
+    const host = createAgentHost({
+      servesDirectory: servesRepoRoot,
+      agentDir: catalogueAgentDir,
+      permissionRulesPath,
+      harnessPackageDir: harnessDir,
+      extensionFactories: [accountCatalog],
+    })
+    return (await host.catalogue()).find((row) => row.name === 'model')
+  }
+  expect((await modelRowWith({ defaultProvider: 'openai', defaultModel: 'gpt-account' }))?.value).toBe(
+    'openai/gpt-account',
+  )
+  // A built-in model the account's list replaced, and no settings at all: no value, the first is taken.
+  expect((await modelRowWith({ defaultProvider: 'openai', defaultModel: 'gpt-5.5' }))?.value).toBeUndefined()
+  expect((await modelRowWith(undefined))?.value).toBeUndefined()
+  // Half a default is none, as for pi (`findInitialModel` uses the pair only when both are set).
+  expect((await modelRowWith({ defaultModel: 'gpt-account' }))?.value).toBeUndefined()
 })
 
 // ⚠ PR #561 review: a prompt that finds the thread held JOINS the holder (#75), and pi starts a run

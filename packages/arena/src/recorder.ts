@@ -41,6 +41,7 @@ import type { ArenaScenario } from './scenario.ts'
 import { type ArenaScore, writeArenaScore } from './score.ts'
 import { scanRunForSecrets } from './secret-scan.ts'
 import {
+  ARENA_WEB_ORIGIN,
   type ArenaActionSource,
   type ArenaEventBody,
   type ArenaPagePlace,
@@ -75,8 +76,7 @@ import {
  * errors is one picture and a short-lived state is still caught.
  */
 
-/** Where the dev stack serves — the ports `bun run dev` uses (`dev-web.ts`, `server/dev.ts`). */
-const ARENA_WEB_ORIGIN = 'http://127.0.0.1:5178'
+/** Where the dev stack's server answers; its web origin is `ARENA_WEB_ORIGIN` (`timeline.ts`). */
 const ARENA_SERVER_ORIGIN = 'http://127.0.0.1:5179'
 const STACK_PORTS = [5178, 5179] as const
 const STACK_STARTUP_TIMEOUT_MS = 90_000
@@ -133,6 +133,8 @@ export interface ArenaRunOptions {
   readonly headed: boolean
   /** How the agent perceives the page (#680): the accessibility tree (the default), or a screenshot after each action. */
   readonly perception?: ArenaPerception
+  /** The model Enso's sessions were set to start on (#674), recorded on the run's start; the run home's settings carry it. */
+  readonly ensoModel?: string
   /** The launcher's environment, which the stack inherits with `ENSO_HOME` set to `home`. */
   readonly environment: Readonly<Record<string, string | undefined>>
   /**
@@ -220,6 +222,19 @@ function makeProject(project: string): void {
   })
 }
 
+/**
+ * What a page read can show: no element a modal dialog hid (`aria-hidden`, which Radix sets on
+ * everything beside an open dialog) or made `inert`. `getByRole` leaves those out by itself; the
+ * text, label and placeholder locators do not.
+ */
+const READABLE = ':not([aria-hidden="true"], [aria-hidden="true"] *, [inert], [inert] *)'
+
+/**
+ * The control a target names, among what the agent can read (found live): with the Start dialog
+ * open, `placeholder: "ask pi something"` matched both the dialog's prompt and the composer behind
+ * it, so the agent's first fill failed on a box its read never showed — and after a fork, it sent
+ * the fork's prompt unchanged.
+ */
 function locate(page: Page, target: ArenaTarget): Locator {
   const exact = target.exact === true
   let found: Locator
@@ -228,9 +243,9 @@ function locate(page: Page, target: ArenaTarget): Locator {
       ...(target.name === undefined ? {} : { name: target.name }),
       exact,
     })
-  } else if ('text' in target) found = page.getByText(target.text, { exact })
-  else if ('label' in target) found = page.getByLabel(target.label, { exact })
-  else found = page.getByPlaceholder(target.placeholder, { exact })
+  } else if ('text' in target) found = page.getByText(target.text, { exact }).and(page.locator(READABLE))
+  else if ('label' in target) found = page.getByLabel(target.label, { exact }).and(page.locator(READABLE))
+  else found = page.getByPlaceholder(target.placeholder, { exact }).and(page.locator(READABLE))
   return target.nth === undefined ? found : found.nth(target.nth)
 }
 
@@ -493,6 +508,8 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
     home: options.home,
     perception,
     ...(ensoBuild === undefined ? {} : { ensoBuild }),
+    // Absent when unset: the line is JSON, which leaves an undefined field out.
+    ensoModel: options.ensoModel,
   })
 
   // ── Screenshots, over a page that does not exist until the browser is up ───────────────────
@@ -612,6 +629,36 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
   // agent is the front tab's — a game's alert in tab 1 must not answer for Enso's tab, nor block it.
   const dialogs = new Map<number, Dialog>()
   const frontDialog = (): Dialog | undefined => dialogs.get(front)
+  /** Who is waiting for the front tab's next dialog: an action in flight (#691). */
+  const dialogWaiters = new Set<(tabNumber: number) => void>()
+  /**
+   * An action raced against the front tab opening a native dialog (#691). Playwright does not finish
+   * a click whose dialog is unanswered, and the arena leaves dialogs open (#609), so the click would
+   * time out though it worked. The answer is the dialog, at once; the click finishes in the background
+   * once the dialog is answered, and its outcome is not anyone's to report.
+   */
+  const untilDialogOrDone = async (work: Promise<unknown>): Promise<unknown> => {
+    const atFront = front
+    let waiter: ((tabNumber: number) => void) | undefined
+    const opened = new Promise<'dialog'>((resolve) => {
+      waiter = (tabNumber) => {
+        if (tabNumber === atFront) resolve('dialog')
+      }
+      dialogWaiters.add(waiter)
+    })
+    try {
+      const first = await Promise.race([work, opened])
+      if (first !== 'dialog') return first
+      void work.catch(() => undefined)
+      const dialog = frontDialog()
+      return {
+        ...here(),
+        ...(dialog === undefined ? {} : { dialog: { type: dialog.type(), message: redact(dialog.message()) } }),
+      }
+    } finally {
+      if (waiter !== undefined) dialogWaiters.delete(waiter)
+    }
+  }
   const answerDialog = async (answer: (dialog: Dialog) => Promise<void>): Promise<ArenaPagePlace> => {
     const dialog = frontDialog()
     if (dialog === undefined) throw new Error('no dialog is open')
@@ -670,6 +717,7 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
       dialogs.set(tabNumber, dialog)
       timeline.record({ kind: 'dialog', dialog: dialog.type(), message: redact(dialog.message()) }, there())
       shootIfInFront('dialog')
+      for (const waiter of dialogWaiters) waiter(tabNumber)
     })
     tabPage.on('close', () => {
       // The browser closing at the stop closes every tab: that is the run ending, not the agent.
@@ -931,6 +979,21 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
     const view = await shoot('view')
     return view === undefined ? {} : { view }
   }
+  /**
+   * What the answer shows the agent, and — when the action moved nothing — what it now acts from
+   * (#693, found live). A visual agent sees the page in every answer: a wait that returned on a
+   * card hands it the card, so the card it answers next is one it has SEEN. Left uncounted, the page
+   * before its click was the one its last move left, older than the card, and the card on its way
+   * out read as a new question: the wait returned at once on a stale one, inviting a second answer.
+   * A move's view is not counted: the page before the move stays what the agent acted from.
+   */
+  const shownAfter = async (action: ArenaAction, moved: boolean): Promise<Pick<ArenaActOutcome, 'view' | 'dialog'>> => {
+    const shown = await forTheEyes(action)
+    if (moved || (shown.view === undefined && shown.dialog === undefined)) return shown
+    const page = await pageNow().catch(() => undefined)
+    if (page !== undefined) lastSeen.saw(page)
+    return shown
+  }
   /** The actions on a control named the way a reader names it (`ArenaTarget`): a tree agent's hands. */
   const performOnControl = async (
     action: Extract<ArenaAction, { readonly action: 'click' | 'hover' | 'fill' | 'select' | 'press' }>,
@@ -970,6 +1033,7 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
     const waited = await waitForPage({
       until: action.until,
       baseline: await lastSeen.baseline(),
+      before: lastSeen.before(),
       look: pageNow,
       sleep: (ms) => inFront().waitForTimeout(ms),
       ms: action.ms,
@@ -1082,7 +1146,7 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
       await context.tracing.group(detail)
       try {
         pointedAt = undefined
-        const result = await perform(action, via)
+        const result = await untilDialogOrDone(perform(action, via))
         if (action.action !== 'note') {
           timeline.record(
             {
@@ -1097,8 +1161,9 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
             here(),
           )
         }
-        if (!LEAVES_THE_PAGE.has(action.action)) await lastSeen.moved()
-        return { ok: true, result, ...(await forTheEyes(action)) }
+        const moved = !LEAVES_THE_PAGE.has(action.action)
+        if (moved) await lastSeen.moved()
+        return { ok: true, result, ...(await shownAfter(action, moved)) }
       } catch (error) {
         const message = errorLine(error, redact)
         timeline.record(
@@ -1115,7 +1180,7 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
           here(),
         )
         await shoot('action-failed')
-        return { ok: false, error: message, ...(await forTheEyes(action)) }
+        return { ok: false, error: message, ...(await shownAfter(action, false)) }
       } finally {
         await context.tracing.groupEnd()
       }

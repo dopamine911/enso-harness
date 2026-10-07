@@ -1,4 +1,4 @@
-import { type EnsoThreadStats, type EnsoToolCallStats, median } from '@enso/core'
+import { type EnsoThreadStats, type EnsoToolCallStats, type EnsoTurnStats, median } from '@enso/core'
 
 /**
  * What the stats drawer derives from `EnsoThreadStats` before it draws (#45 phase 2): the
@@ -33,6 +33,33 @@ function isFailure(call: EnsoToolCallStats, refused: RefusedCalls): boolean {
 /** A difference below a hundredth of a cent is float noise, not spend. */
 const COST_EPSILON = 0.00005
 
+/**
+ * ⚠ A MODEL WITH NO PRICE BILLS $0 (#692). pi prices a turn from its model's per-token rates, and
+ * a model it has no price for carries zero rates — the Codex subscription models multi-account
+ * learns from the live catalog do — so each of its turns costs exactly 0 for thousands of tokens,
+ * which reads as free. A priced turn that used tokens costs more than 0, so a turn at 0 that used
+ * tokens had no price; a turn that used none (an aborted request) really cost nothing.
+ */
+export function isUnpriced(turn: EnsoTurnStats): boolean {
+  return turn.cost === 0 && turn.input + turn.output + turn.cacheRead + turn.cacheWrite > 0
+}
+
+/**
+ * Whether the branch's turn costs are known: all of them, none (every turn that used tokens had
+ * no price), or some — a thread can switch to a model with no price and back.
+ */
+type Pricing = 'priced' | 'unpriced' | 'partly'
+
+function pricingOf(turnStats: readonly EnsoTurnStats[], unpricedTurnCount: number): Pricing {
+  if (unpricedTurnCount === 0) return 'priced'
+  return turnStats.some((turn) => turn.cost > 0) ? 'partly' : 'unpriced'
+}
+
+/** The prompts with a turn that had no price: their cost counts only their priced turns. */
+export function unpricedPrompts(turnStats: readonly EnsoTurnStats[]): ReadonlySet<number> {
+  return new Set(turnStats.filter(isUnpriced).map((turn) => turn.prompt))
+}
+
 /** One tool, its calls summed — livecraft's `ToolSummary`. */
 export interface ToolSummary {
   readonly toolName: string
@@ -49,8 +76,12 @@ export interface ToolSummary {
 /** The drawer's headline figures — livecraft's summary cards and context block. */
 export interface StatsHeadline {
   readonly turnCount: number
-  readonly averageTurnCost: number
-  readonly medianTurnCost: number
+  /** Undefined with no turn, or when a turn had no price — a mean counting it as 0 reads as cheap (#692). */
+  readonly averageTurnCost: number | undefined
+  readonly medianTurnCost: number | undefined
+  readonly pricing: Pricing
+  /** The turns that used tokens on a model with no price — counted, their cost is not. */
+  readonly unpricedTurnCount: number
   readonly averageToolsPerTurn: number
   readonly toolCalls: number
   readonly failedToolCalls: number
@@ -64,14 +95,18 @@ export interface StatsHeadline {
 export function headlineOf(stats: EnsoThreadStats, refused: RefusedCalls): StatsHeadline {
   const turnCosts = stats.turnStats.map((turn) => turn.cost)
   const turnCount = turnCosts.length
+  const unpricedTurnCount = stats.turnStats.filter(isUnpriced).length
+  const costsKnown = turnCount > 0 && unpricedTurnCount === 0
   const toolCalls = stats.callStats.length
   const failedToolCalls = stats.callStats.filter((call) => isFailure(call, refused)).length
   const refusedToolCalls = stats.callStats.filter((call) => isRefused(call, refused)).length
   const offBranch = stats.usage.cost - stats.branchCost
   return {
     turnCount,
-    averageTurnCost: turnCount === 0 ? 0 : turnCosts.reduce((total, cost) => total + cost, 0) / turnCount,
-    medianTurnCost: median(turnCosts),
+    averageTurnCost: costsKnown ? turnCosts.reduce((total, cost) => total + cost, 0) / turnCount : undefined,
+    medianTurnCost: costsKnown ? median(turnCosts) : undefined,
+    pricing: pricingOf(stats.turnStats, unpricedTurnCount),
+    unpricedTurnCount,
     averageToolsPerTurn: turnCount === 0 ? 0 : toolCalls / turnCount,
     toolCalls,
     failedToolCalls,
