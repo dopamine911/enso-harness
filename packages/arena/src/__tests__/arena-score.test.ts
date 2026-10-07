@@ -349,6 +349,14 @@ test('a run directory is read and scored to score.json and score.md', () => {
   for (const name of [`thread-${SHOWN}-bundle.md`, `thread-${UNSEEN}-bundle.md`]) {
     writeFileSync(join(evidence, name), `# bundle\n\n## log\n\`\`\`jsonl\n${record}\n\`\`\`\n`)
   }
+  // What each thread's session ran on (#674), from its record of its conditions — the models a
+  // comparison by Enso's model reads, each once, whatever else the evidence holds.
+  const ranOn = (provider: string, modelId: string): string =>
+    JSON.stringify({ conditions: { model: { provider, modelId } } })
+  writeFileSync(join(evidence, `thread-${SHOWN}-manifest.json`), ranOn('anthropic', 'claude-fable-5'))
+  writeFileSync(join(evidence, `thread-${UNSEEN}-manifest.json`), ranOn('anthropic', 'claude-haiku-4-5'))
+  writeFileSync(join(evidence, `thread-${FORK}-manifest.json`), ranOn('anthropic', 'claude-fable-5'))
+  writeFileSync(join(evidence, 'thread-torn-manifest.json'), '{"conditions":')
   const projectId = projectIdOf(realpathOrSelf(project))
   writeFileSync(
     join(evidence, 'stored-threads.json'),
@@ -357,18 +365,21 @@ test('a run directory is read and scored to score.json and score.md', () => {
       { threadId: UNSEEN, projectId: 'another-project', messageCount: 9, lastActivityAt: 'x', busy: false },
     ]),
   )
-  writeFileSync(
-    join(runDirectory, 'manifest.json'),
-    JSON.stringify(
-      foldArenaManifest({ runId: 'snake-2', events: readTimeline(join(runDirectory, 'timeline.jsonl')), evidence: [] }),
-    ),
-  )
+  // A manifest written before #680 names no perception: every run then read the tree.
+  const { perception: _dropped, ...beforePerception } = foldArenaManifest({
+    runId: 'snake-2',
+    events: readTimeline(join(runDirectory, 'timeline.jsonl')),
+    evidence: [],
+  })
+  writeFileSync(join(runDirectory, 'manifest.json'), JSON.stringify(beforePerception))
 
   const input = readArenaScoreInput(runDirectory)
   // The project (git, one untracked file) and the thread's own tree (not a repository, one file): both counted.
   expect(input.project).toEqual({ changedFiles: 2, commits: 0, workspaces: [project, tree] })
   expect(input.projectThreads).toEqual([{ threadId: SHOWN, messageCount: 4 }])
   expect(input.logRecords).toHaveLength(1)
+  expect(input.ensoModels).toEqual(['anthropic/claude-fable-5', 'anthropic/claude-haiku-4-5'])
+  expect(input.manifest.perception).toBe('tree')
 
   const score = writeArenaScore(runDirectory)
   expect(score).toMatchObject({ verdict: 'fail', uiUsed: true, errors: 1 })
