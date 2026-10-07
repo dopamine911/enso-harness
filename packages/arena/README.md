@@ -49,11 +49,12 @@ and acts on the page:
 Run each scenario in both modes and put the two side by side with `arena compare`, which shows each
 run's perception and agent: they find different things.
 
-Four scenarios, told only what to achieve, never which controls to use:
+Five scenarios, told only what to achieve, never which controls to use:
 - **`snake`** (the default): a Snake game with five features of the agent's choosing. One prompt and done: it exercises starting a session, approvals, and seeing what was built.
 - **`iterate`**: a to-do CLI in at least three rounds, checking each round's changes, taking one round back for another approach, and finding the work's cost and context. It reaches what Snake doesn't: the Diff view, restore, forks, Stats and Context. Its first run found #650 and #651.
 - **`compare`**: a Markdown-to-HTML converter in two approaches kept side by side, compared by what each changed and cost, one kept and the other cleaned up, then exactly what the model was given in its last request. It reaches parallel threads, deleting a thread and its tree, and Context. Its first run found #659.
 - **`resume`**: a password generator whose work is interrupted and picked up: one request stopped midway and redirected, the page reloaded and the conversation continued, a branch off an earlier request, and another model for one request. It reaches stopping a run, persistence across a reload, forks and the model control. Its first run found #664 and #665.
+- **`play`** (#675): a small browser game, then played by the agent the way a player would: it finds something wrong or missing, has it changed, and plays again, at least twice. It is never told there is a preview; whether it finds a way to play is the finding. It reaches Preview, iteration on a running application, and what only using it shows.
 
 **When a run stops (#609).** Besides the agent's own `stop`:
 - **The budget (`--minutes`).** Every `act` answer carries `phase` and `remainingMs`. When the budget is
@@ -78,9 +79,10 @@ browser shows it, and every action goes to the tab in front. `tabs` lists the op
 (Enso's is 0, and a number is never reused), `switch-tab` brings one to the front, and `close-tab`
 closes one; the last tab stays open. Every tab is watched and traced. A timeline line names its tab
 when it is not the first, and event screenshots are taken of the tab in front. What the built page
-itself logs in its Preview tab (a console error, a missing file, an uncaught error, a failed action)
-is scored under **application**, as a warning: a bug in the game doesn't fail Enso's run. A 5xx
-serving that page is still Enso's.
+itself logs — in Preview's tab, or on any page of another origin, such as a dev server the work
+started — is scored under **application**, as a warning: a bug in the game doesn't fail Enso's run.
+Two failures there are still Enso's: a 5xx serving the page, and a script Preview's sandbox blocks
+by CORS (#689).
 
 **Each run has its own Enso home, `<run>/.enso` (#610).** It holds the run's projects, threads, logs
 and Stats, so the agent under test sees only the run's project, the evidence covers only the run,
@@ -244,6 +246,9 @@ mix, since #556 asks for the app's completion to be reported apart from Enso's u
   is one, else each file under bun (`*.test.*` through `bun test`, others as scripts). They are
   agent-written code run after the run with no approval, so they get `PATH`, a throwaway `HOME` and
   60 seconds each, never your environment. Their output is redacted with the run's secrets.
+- **What playing found** (#675), part of the application outcome: the moves made on the
+  application's own page (Preview's, or another origin's) and their span, what that page logged, and
+  the notes written while it was in front. A run that never used the application says so.
 - **Enso findings,** three kinds under their own headings:
   - **Observed friction:** the score's friction and problems. Each friction moment links the
     screenshot nearest it and the turn that screenshot shows.

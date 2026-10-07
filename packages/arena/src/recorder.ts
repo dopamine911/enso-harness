@@ -41,6 +41,7 @@ import type { ArenaScenario } from './scenario.ts'
 import { type ArenaScore, writeArenaScore } from './score.ts'
 import { scanRunForSecrets } from './secret-scan.ts'
 import {
+  ARENA_WEB_ORIGIN,
   type ArenaActionSource,
   type ArenaEventBody,
   type ArenaPagePlace,
@@ -75,8 +76,7 @@ import {
  * errors is one picture and a short-lived state is still caught.
  */
 
-/** Where the dev stack serves — the ports `bun run dev` uses (`dev-web.ts`, `server/dev.ts`). */
-const ARENA_WEB_ORIGIN = 'http://127.0.0.1:5178'
+/** Where the dev stack's server answers; its web origin is `ARENA_WEB_ORIGIN` (`timeline.ts`). */
 const ARENA_SERVER_ORIGIN = 'http://127.0.0.1:5179'
 const STACK_PORTS = [5178, 5179] as const
 const STACK_STARTUP_TIMEOUT_MS = 90_000

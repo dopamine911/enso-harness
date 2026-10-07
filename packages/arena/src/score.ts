@@ -9,7 +9,7 @@ import { type ArenaProjectThread, projectThreads } from './evidence.ts'
 import { type ArenaFriction, observedFriction } from './friction.ts'
 import type { ArenaManifest } from './manifest.ts'
 import { ARENA_BOUND_STOP_PREFIXES } from './run-control.ts'
-import { type ArenaEvent, type ArenaPerception, readJsonLines, readTimeline } from './timeline.ts'
+import { type ArenaEvent, type ArenaPerception, isTheApplication, readJsonLines, readTimeline } from './timeline.ts'
 
 /**
  * A Dogfood Arena run's score (#556, #584): every log the run left, read for problems, and
@@ -403,13 +403,9 @@ function eventOccurrence(event: ArenaEvent): Occurrence | undefined {
   }
 }
 
-/** Whether an event happened on the built application's own page: Preview serves it under `/preview/` (#675). */
+/** Whether an event happened on the built application's own page, not Enso's (#675: `isTheApplication`). */
 function onTheApplication(event: ArenaEvent): boolean {
-  try {
-    return new URL(event.page?.url ?? '').pathname.startsWith('/preview/')
-  } catch {
-    return false
-  }
+  return isTheApplication(event.page?.url)
 }
 
 /** Chromium's words for a resource its CORS check refused: "… has been blocked by CORS policy". */

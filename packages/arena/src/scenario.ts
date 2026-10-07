@@ -22,19 +22,27 @@ export interface ArenaScenario {
   readonly traceChunkMs: number
 }
 
-/** The first arena scenario: a Snake game with five features of the agent's own choosing. */
-export const SNAKE_SCENARIO: ArenaScenario = {
-  id: 'snake',
-  assignment: [
-    'Build a playable Snake game with five additional features of your own choosing.',
-    "You own the design, implementation, and testing. Use Enso's UI to manage the work.",
-    'When something is difficult, missing, or confusing, record what you were trying to do,',
-    'what happened, and what you wish the interface had provided.',
-  ].join(' '),
-  budgetMinutes: 120,
-  sampleIntervalMs: 30_000,
-  traceChunkMs: 5 * 60_000,
+/** What every assignment ends with: work through Enso's UI, and say what was hard as it happens. */
+const WORK_AND_NOTE =
+  "Use Enso's UI to manage the work. When something is difficult, missing, or confusing, record what you were " +
+  'trying to do, what happened, and what you wish the interface had provided.'
+
+/** A scenario: its task, then the shared closing, with the bounds every scenario runs under. */
+function scenarioOf(id: string, task: readonly string[]): ArenaScenario {
+  return {
+    id,
+    assignment: [...task, WORK_AND_NOTE].join(' '),
+    budgetMinutes: 120,
+    sampleIntervalMs: 30_000,
+    traceChunkMs: 5 * 60_000,
+  }
 }
+
+/** The first arena scenario: a Snake game with five features of the agent's own choosing. */
+export const SNAKE_SCENARIO: ArenaScenario = scenarioOf('snake', [
+  'Build a playable Snake game with five additional features of your own choosing.',
+  'You own the design, implementation, and testing.',
+])
 
 /**
  * Work in rounds, as a person maintains something (the Snake scenario's run is one prompt and done).
@@ -43,21 +51,13 @@ export const SNAKE_SCENARIO: ArenaScenario = {
  * and Enso's Changes, restore, fork, Stats and Context views are where it offers them — whether
  * the agent finds them is the finding.
  */
-const ITERATE_SCENARIO: ArenaScenario = {
-  id: 'iterate',
-  assignment: [
-    'Build a small command-line to-do list app, in at least three separate rounds of requests to Enso:',
-    'start minimal, and add features in later rounds. After each round, check what actually changed',
-    'before you ask for the next one. Partway through, change your mind about one round: take it back',
-    'and try a different approach instead. Before you finish, find out what the work cost and how much',
-    "of the model's context it used. Use Enso's UI to manage the work. When something is difficult,",
-    'missing, or confusing, record what you were trying to do, what happened, and what you wish the',
-    'interface had provided.',
-  ].join(' '),
-  budgetMinutes: 120,
-  sampleIntervalMs: 30_000,
-  traceChunkMs: 5 * 60_000,
-}
+const ITERATE_SCENARIO = scenarioOf('iterate', [
+  'Build a small command-line to-do list app, in at least three separate rounds of requests to Enso:',
+  'start minimal, and add features in later rounds. After each round, check what actually changed',
+  'before you ask for the next one. Partway through, change your mind about one round: take it back',
+  'and try a different approach instead. Before you finish, find out what the work cost and how much',
+  "of the model's context it used.",
+])
 
 /**
  * Two approaches side by side, compared and one cleaned away: what `iterate` barely reached. Keeping
@@ -65,21 +65,13 @@ const ITERATE_SCENARIO: ArenaScenario = {
  * is deleting a thread and its tree; and "what the model was given" is the Context view. Outcomes,
  * never controls.
  */
-const COMPARE_SCENARIO: ArenaScenario = {
-  id: 'compare',
-  assignment: [
-    'Write a small command-line Markdown-to-HTML converter. Try two different implementation',
-    'approaches side by side, keeping both available at the same time, then compare them: what each',
-    'one changed and what each one cost. Keep only the better one and clean up the other. Before you',
-    'finish, find out exactly what the model was given in its last request: its instructions, the',
-    "files, and the earlier conversation. Use Enso's UI to manage the work. When something is",
-    'difficult, missing, or confusing, record what you were trying to do, what happened, and what you',
-    'wish the interface had provided.',
-  ].join(' '),
-  budgetMinutes: 120,
-  sampleIntervalMs: 30_000,
-  traceChunkMs: 5 * 60_000,
-}
+const COMPARE_SCENARIO = scenarioOf('compare', [
+  'Write a small command-line Markdown-to-HTML converter. Try two different implementation',
+  'approaches side by side, keeping both available at the same time, then compare them: what each',
+  'one changed and what each one cost. Keep only the better one and clean up the other. Before you',
+  'finish, find out exactly what the model was given in its last request: its instructions, the',
+  'files, and the earlier conversation.',
+])
 
 /**
  * Work interrupted and picked up again: what no other scenario reaches. Stopping a request midway is
@@ -87,22 +79,30 @@ const COMPARE_SCENARIO: ArenaScenario = {
  * the page restores); branching off an earlier request is "fork from here"; and another model for
  * one request is the model control mid-thread. Outcomes, never controls.
  */
-const RESUME_SCENARIO: ArenaScenario = {
-  id: 'resume',
-  assignment: [
-    'Build a small command-line password generator with options for length and character sets.',
-    'Partway through one of your requests, while Enso is still working on it, stop it and redirect',
-    'it to something different. Then come back to the work as if returning the next day: reload',
-    'the page and carry on in the same conversation, checking nothing was lost. Branch off from one',
-    'of your earlier requests to try a variant, without losing the original line of work. Use a',
-    "different model for at least one request. Use Enso's UI to manage the work. When something is",
-    'difficult, missing, or confusing, record what you were trying to do, what happened, and what',
-    'you wish the interface had provided.',
-  ].join(' '),
-  budgetMinutes: 120,
-  sampleIntervalMs: 30_000,
-  traceChunkMs: 5 * 60_000,
-}
+const RESUME_SCENARIO = scenarioOf('resume', [
+  'Build a small command-line password generator with options for length and character sets.',
+  'Partway through one of your requests, while Enso is still working on it, stop it and redirect',
+  'it to something different. Then come back to the work as if returning the next day: reload',
+  'the page and carry on in the same conversation, checking nothing was lost. Branch off from one',
+  'of your earlier requests to try a variant, without losing the original line of work. Use a',
+  'different model for at least one request.',
+])
+
+/**
+ * Use what was built, as its own user would (#675): build a game, play it, find what's wrong or
+ * missing, have it changed, play again. No other scenario has the agent use the application —
+ * every one ends at "it was built and its tests passed". Seeing the running page is where Enso's
+ * Preview is the tool; whether the agent finds a way to play at all is the finding. Outcomes,
+ * never controls: it is never told there is a preview.
+ */
+const PLAY_SCENARIO = scenarioOf('play', [
+  'Have a small browser game built that a person plays with the keyboard or the mouse: Breakout,',
+  'Tetris, Asteroids or one you prefer. Then play it yourself, in the browser, the way a player',
+  'would: start a game, play it until you lose or win, and try what a player would try. Find at',
+  'least one thing that is wrong or missing, have it fixed or added, and play again to check the',
+  'change. Do this at least twice. Report what you found by playing, apart from what the tests',
+  'said.',
+])
 
 /**
  * How the agent under test reaches the UI: the agent runner's one tool (`tool`), or the
@@ -390,5 +390,8 @@ export function arenaActCommand(outDirectory?: string): string {
 
 /** Every scenario by id: what `bun run arena start --scenario <id>` accepts. */
 export const ARENA_SCENARIOS: Readonly<Record<string, ArenaScenario>> = Object.fromEntries(
-  [SNAKE_SCENARIO, ITERATE_SCENARIO, COMPARE_SCENARIO, RESUME_SCENARIO].map((scenario) => [scenario.id, scenario]),
+  [SNAKE_SCENARIO, ITERATE_SCENARIO, COMPARE_SCENARIO, RESUME_SCENARIO, PLAY_SCENARIO].map((scenario) => [
+    scenario.id,
+    scenario,
+  ]),
 )
