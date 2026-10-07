@@ -1520,6 +1520,16 @@ test('⚠ a name given to a stored thread is in its file: the listing, a cold re
   // Renamed again, the newest name is the name.
   await later.renameThread(stored, 'Approach A (kept)')
   expect((await hostWith().listSessions()).find((row) => row.id === stored)?.name).toBe('Approach A (kept)')
+  // A blank name is no name: pi trims it and reads an empty one as a clear, so the title shows —
+  // the listing, a cold read and a live session alike (PR #722 review; pinned, as Enso relies on it).
+  const blank = crypto.randomUUID()
+  storeSession(blank, 'a thread named with spaces', 'done')
+  await hostWith().renameThread(blank, '   ')
+  expect((await hostWith().listSessions()).find((row) => row.id === blank)?.name).toBeUndefined()
+  expect((await hostWith().readStoredThread(blank))?.name).toBeUndefined()
+  const blankLive = await hostWith().createSession(blank, () => repoRoot)
+  openSessions.push(blankLive)
+  expect(blankLive.inspect().name).toBeUndefined()
 
   const live = crypto.randomUUID()
   storeSession(live, 'approach B', 'done')

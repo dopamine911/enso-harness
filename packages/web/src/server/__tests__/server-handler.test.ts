@@ -956,7 +956,13 @@ async function rename(url: string, threadId: string, body: unknown): Promise<{ s
 
 test('⚠ POST …/name names a thread — trimmed — and the listing carries it, as the history carries a stored name; refuses a blank or too long name or a bad body (400), an unknown thread (404) and a running one (409) (#670)', async () => {
   const branch = { transcript: STORED_BRANCH, modified: new Date(0), firstMessage: 'earlier question' }
-  const stored = { 'stored-1': branch, named: { ...branch, name: 'Approach B: a parser' }, plain: branch }
+  // `long`: a name pi's own `/name` wrote, past the 120 a rename takes (PR #722 review).
+  const stored = {
+    'stored-1': branch,
+    named: { ...branch, name: 'Approach B: a parser' },
+    plain: branch,
+    long: { ...branch, name: 'n'.repeat(200) },
+  }
   const { url, built } = await startWith(asksAndWaits, stored)
   expect(await rename(url, 'stored-1', { name: '  Approach A: regex  ' })).toEqual({ status: 204, body: '' })
   const listed = (await (await fetch(`${url}/api/stored-threads`)).json()) as EnsoStoredThread[]
@@ -964,6 +970,9 @@ test('⚠ POST …/name names a thread — trimmed — and the listing carries i
     name: 'Approach A: regex',
     title: 'earlier question',
   })
+  // Every row is still a listing row the page takes, and the history the page mounts.
+  expect(listed.every((row) => Check(EnsoStoredThread, row))).toBe(true)
+  expect(Check(EnsoThreadHistory, await (await fetch(`${url}/api/threads/long/history`)).json())).toBe(true)
   // A resume mounts from the history: a named thread comes back named. (A live one's name is its
   // session's — the host test's.)
   const history = (await (await fetch(`${url}/api/threads/named/history`)).json()) as EnsoThreadHistory

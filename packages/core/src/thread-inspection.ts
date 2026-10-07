@@ -242,8 +242,11 @@ export const EnsoStoredThread = Type.Object(
     projectId: Type.String(),
     /** The first user message, or undefined for a session with none — the rail's title, as deepseek does. */
     title: Type.Optional(Type.String()),
-    /** The name a person gave the thread (#670) — its newest `session_info` — shown instead of the title; absent when none. */
-    name: Type.Optional(EnsoThreadName),
+    /**
+     * The name a person gave the thread (#670) — its newest `session_info` — shown instead of the
+     * title; absent when none. Not bounded as a rename is: pi's own `/name` writes it too.
+     */
+    name: Type.Optional(Type.String({ minLength: 1 })),
     /** The file's mtime, ISO 8601 — when the session last grew. */
     lastActivityAt: Type.String(),
     messageCount: Type.Integer({ minimum: 0 }),
@@ -491,8 +494,8 @@ export const EnsoThreadHistory = Type.Object(
     incidents: EnsoSessionIncidents,
     /** Present only when the branch ends inside a turn — see {@link EnsoInterruptedTail}. */
     interrupted: Type.Optional(EnsoInterruptedTail),
-    /** The name a person gave the thread (#670) — its newest `session_info` — absent when none. */
-    name: Type.Optional(EnsoThreadName),
+    /** The name a person gave the thread (#670) — its newest `session_info`, as the listing's `name` — absent when none. */
+    name: Type.Optional(Type.String({ minLength: 1 })),
   },
   { additionalProperties: false },
 )

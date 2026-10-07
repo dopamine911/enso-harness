@@ -609,6 +609,14 @@ test('⚠ two prompts that start alike read apart on the rail — the words past
   // `regex` and its fork share everything: the part past what `parser` shares is what they read.
   expect(labels.get('regex')).toBe('…Approach A: regular expressions per line.')
   expect(labels.get('fork')).toBe('…Approach A: regular expressions per line.')
+  // A shared run with no space to cut at — a long path — cuts nothing, so nothing is said cut (PR #722 review).
+  const path = '/home/someone/projects/converter/src/markdown'
+  const unbroken = railLabels({
+    project: LAUNCH,
+    threads: [page('path-a', `${path}/inline.py is slow`), page('path-b', `${path}/blocks.py is wrong`)],
+    earlier: [],
+  })
+  expect(unbroken.get('path-a')).toBe(`${path}/inline.py is slow`)
 
   // Drawn, the two rows' names differ — what a screen reader says, and what a person reads.
   const rendered = renderToStaticMarkup(

@@ -254,10 +254,11 @@ function lookalikeLabel(
     .filter((peer) => peer.threadId !== row.threadId && peer.title.slice(0, RAIL_TITLE_SHOWN) === head)
     .map((peer) => partingAt(row.title, peer.title))
     .filter((at) => at < row.title.length)
-  if (parting.length === 0) return row.title
-  // A page title cut at its cap ends in `…`: that alone tells nothing apart.
-  const tail = row.title.slice(Math.max(...parting)).trim()
-  return tail === '' || tail === '…' ? row.title : `…${tail}`
+  const from = parting.length === 0 ? 0 : Math.max(...parting)
+  // Parting at the start (a shared run with no space to cut at, PR #722 review) cuts nothing; and a
+  // page title cut at its cap ends in `…`, which alone tells nothing apart.
+  const tail = row.title.slice(from).trim()
+  return from === 0 || tail === '' || tail === '…' ? row.title : `…${tail}`
 }
 
 /**

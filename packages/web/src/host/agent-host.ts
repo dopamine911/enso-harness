@@ -1191,7 +1191,8 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
           messageCount: info.messageCount,
           // pi says `(no messages)` for a file with none — an empty fork's (#433) — which is no title.
           firstMessage: info.messageCount === 0 ? '' : info.firstMessage,
-          ...(info.name === undefined || info.name.trim() === '' ? {} : { name: info.name }),
+          // pi's listing already reads a blank `session_info` as no name: it clears the title.
+          ...(info.name === undefined ? {} : { name: info.name }),
           ...(parentThreadId === undefined ? {} : { parentThreadId }),
         }
       })
