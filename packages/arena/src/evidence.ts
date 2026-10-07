@@ -258,8 +258,12 @@ function copyTreeWithoutChmod(directory: string, copy: string): void {
     const source = join(directory, storeEntry.name)
     const destination = join(copy, storeEntry.name)
     if (storeEntry.isDirectory()) copyTreeWithoutChmod(source, destination)
+    // Verbatim, not resolved (cpSync made a relative target absolute — into the HOME's store, so the
+    // copy broke once the home was pruned, which is what #607 copies the store to survive).
     else if (storeEntry.isSymbolicLink()) symlinkSync(readlinkSync(source), destination)
     else if (storeEntry.isFile()) copyFileSync(source, destination)
+    // A socket, FIFO or device is not a snapshot: a failed copy, recorded as missing, never a gap.
+    else throw new Error(`${source} is not a file, directory or symlink`)
   }
 }
 
