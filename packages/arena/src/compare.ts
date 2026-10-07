@@ -17,6 +17,15 @@ export function compareRunDirectories(first: string, second: string): string {
 
 const cell = (value: number | string | undefined): string => (value === undefined ? '—' : String(value))
 
+/** The agent's own calls at its model's listed price; `unpriced` when it lists none, `—` with no calls (#674). */
+function agentCostOf(score: ArenaScore): string | undefined {
+  const usage = score.metrics.modelUse.agent
+  if (usage === undefined) return undefined
+  return usage.costUsd === undefined
+    ? `unpriced (${usage.calls} calls)`
+    : `$${usage.costUsd.toFixed(2)} (${usage.calls} calls)`
+}
+
 /** Two scores as Markdown: the outcome, the UI checks, the problems by which run has them, the friction. */
 function compareArenaScores(first: ArenaScore, second: ArenaScore): string {
   const row = (label: string, pick: (score: ArenaScore) => number | string | undefined): string =>
@@ -29,6 +38,9 @@ function compareArenaScores(first: ArenaScore, second: ArenaScore): string {
     // How each run saw the page, and who drove it (#680): a tree run and a visual run find different things.
     row('perception', (score) => score.perception),
     row('agent', (score) => score.agent),
+    // What Enso's sessions ran on, and what the agent's own calls cost at its model's listed price (#674).
+    row('Enso model', (score) => score.metrics.modelUse.enso.join(', ') || undefined),
+    row('agent cost', (score) => agentCostOf(score)),
     row('verdict', (score) => score.verdict.toUpperCase()),
     row('errors / warnings', (score) => `${score.errors} / ${score.warnings}`),
     row('UI used', (score) => (score.uiUsed ? 'yes' : 'not shown')),
@@ -112,4 +124,95 @@ function problemLines(first: ArenaScore, second: ArenaScore): string[] {
     ),
   ]
   return lines.length === 0 ? ['None in either run.'] : lines
+}
+
+/** One agent model in one perception: its runs' scores. */
+interface ArenaModelGroup {
+  readonly label: string
+  readonly scores: readonly ArenaScore[]
+}
+
+/** The runs grouped by agent model and perception, in first-seen order. */
+function groupsOf(scores: readonly ArenaScore[]): ArenaModelGroup[] {
+  const groups = new Map<string, ArenaScore[]>()
+  for (const score of scores) {
+    const label = `${score.agent ?? 'no agent (manual)'} · ${score.perception}`
+    groups.set(label, [...(groups.get(label) ?? []), score])
+  }
+  return [...groups].map(([label, grouped]) => ({ label, scores: grouped }))
+}
+
+/** The mean of the measured figures, to two places; undefined when none was measured. */
+function meanOf(figures: readonly (number | undefined)[]): string | undefined {
+  const measured = figures.filter((figure) => figure !== undefined)
+  if (measured.length === 0) return undefined
+  return (measured.reduce((sum, figure) => sum + figure, 0) / measured.length).toFixed(2)
+}
+
+/**
+ * Runs side by side by model (#674): `bun run arena compare --by-model <run>…`. Each agent model, in
+ * each perception, is one column, and says how many runs it has: one run per model cannot tell a
+ * model's difference from noise, and the column says so rather than hiding it.
+ */
+export function compareByModel(runDirectories: readonly string[]): string {
+  const groups = groupsOf(runDirectories.map((runDirectory) => scoreRunDirectory(runDirectory)))
+  const header = `| | ${groups.map((group) => group.label).join(' | ')} |`
+  const rule = `|---|${groups.map(() => '---').join('|')}|`
+  const row = (label: string, pick: (group: ArenaModelGroup) => string | undefined): string =>
+    `| ${label} | ${groups.map((group) => cell(pick(group))).join(' | ')} |`
+  const labelOf = (problem: ArenaScore['problems'][number]): string =>
+    `**${problem.severity}** (${problem.source}) ${problem.message.replace(THREAD_SEGMENT, '/api/threads/<thread>')}`
+  const problemsOf = (group: ArenaModelGroup): Set<string> =>
+    new Set(group.scores.flatMap((score) => score.problems.map(labelOf)))
+  const patterns = [
+    ...new Set(
+      groups.flatMap((group) => group.scores.flatMap((score) => score.friction.map((friction) => friction.pattern))),
+    ),
+  ]
+  return [
+    `# Arena compare by model — ${runDirectories.length} run(s)`,
+    '',
+    header,
+    rule,
+    row('runs', (group) => String(group.scores.length)),
+    row(
+      'passed',
+      (group) => `${group.scores.filter((score) => score.verdict === 'pass').length} of ${group.scores.length}`,
+    ),
+    row(
+      'Enso models',
+      (group) => [...new Set(group.scores.flatMap((score) => score.metrics.modelUse.enso))].join(', ') || undefined,
+    ),
+    row('mean agent cost ($)', (group) => meanOf(group.scores.map((score) => score.metrics.modelUse.agent?.costUsd))),
+    row('mean minutes', (group) => meanOf(group.scores.map((score) => score.metrics.minutes))),
+    row('mean actions', (group) => meanOf(group.scores.map((score) => score.metrics.actions.total))),
+    row('mean failed actions', (group) => meanOf(group.scores.map((score) => score.metrics.actions.failed))),
+    row('mean notes', (group) =>
+      meanOf(
+        group.scores.map(
+          (score) => score.metrics.notes.wish + score.metrics.notes.friction + score.metrics.notes.retrospective,
+        ),
+      ),
+    ),
+    '',
+    '## Problems by which models have them',
+    '',
+    ...groups.flatMap((group) => {
+      const others = new Set(groups.filter((other) => other !== group).flatMap((other) => [...problemsOf(other)]))
+      const only = [...problemsOf(group)].filter((problem) => !others.has(problem))
+      return only.length === 0 ? [] : [`Only under ${group.label}:`, ...only.map((problem) => `- ${problem}`), '']
+    }),
+    '## Observed friction, mean per run',
+    '',
+    `| pattern | ${groups.map((group) => group.label).join(' | ')} |`,
+    rule,
+    ...patterns.map((pattern) =>
+      row(pattern, (group) =>
+        meanOf(
+          group.scores.map((score) => score.friction.find((friction) => friction.pattern === pattern)?.count ?? 0),
+        ),
+      ),
+    ),
+    '',
+  ].join('\n')
 }
