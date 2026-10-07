@@ -1696,7 +1696,8 @@ const chatComponents = {
         return { partsByMessageId, openRunMessageIds, ...drawnMessages(chat.messages, partsByMessageId) }
       }, [chat.messages, chat.sessionGenerating])
       return (
-        <div className="flex min-h-0 flex-1 flex-col">
+        // `data-thread-layout`: a panel the bar opens finds this layout's composer from it (#714).
+        <div data-thread-layout="" className="flex min-h-0 flex-1 flex-col">
           <div className="flex min-h-0 flex-1">
             {/* The main column: the views' box, then the composer under every view (#707). */}
             <div className="flex min-h-0 min-w-0 flex-1 flex-col">

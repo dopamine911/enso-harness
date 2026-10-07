@@ -419,6 +419,41 @@ test('⚠ the bar offers "Preview" once the thread’s tree holds a page, and no
   await pane.unmount()
 })
 
+// ⚠ #714, from an arena run: the panel stayed open over the chat once its preview tab opened, so the
+// agent's report of what it found by playing met a blocked chat, and its Enter — focus still on Open
+// preview — opened a second preview tab. Open preview closes the panel and hands focus to the composer.
+test('⚠ Open preview closes the panel and puts focus in the composer (#714)', async () => {
+  const pane = await mountPane({
+    server: { pages: () => ({ path: '/trees/t', pages: ['index.html'], truncated: false }) },
+  })
+  await pane.settle({ ...SNAPSHOT_LIVE, tree: true })
+  const preview = await eventually(() => {
+    const found = [...pane.container.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent?.trim() === 'Preview',
+    )
+    expect(found).toBeDefined()
+    return found
+  })
+  await flush(async () => {
+    preview?.click()
+    await tick()
+  })
+  const open = await eventually(() => {
+    const link = [...document.querySelectorAll<HTMLAnchorElement>('[role="dialog"] a')].find((anchor) =>
+      anchor.textContent?.includes('Open preview'),
+    )
+    expect(link).toBeDefined()
+    return link
+  })
+  await flush(async () => {
+    open?.click()
+    await tick()
+  })
+  await eventually(() => expect(document.querySelector('[role="dialog"]')).toBeNull())
+  await eventually(() => expect(document.activeElement?.getAttribute('name')).toBe('message'))
+  await pane.unmount()
+})
+
 // ⚠ #404: a thread's requests go through ITS fetch — the seam the fixture page closes (its threads
 // get one that refuses), and the one that carries the project header (#395). A request a pane
 // issues on the page's GLOBAL fetch instead escapes both: on the fixture page that ran a real
