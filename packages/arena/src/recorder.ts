@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { gitChildEnvironment } from '@enso/core/git'
 import { redactJudgeText } from '@enso/core/judge'
 import { isListening } from '@enso/core/loopback'
 import { ensoProjectsDir, projectIdOf, projectTreesDir, realpathOrSelf } from '@enso/core/paths'
@@ -176,10 +177,16 @@ async function waitForWeb(timeoutMs: number): Promise<boolean> {
   return false
 }
 
-/** A fresh git repository for the agent: nothing in it, so everything in it is the run's. */
+/**
+ * A fresh git repository for the agent: nothing in it, so everything in it is the run's. Without the
+ * inherited repository variables: under a git hook, `git init` would re-initialise the HOOK's repository.
+ */
 function makeProject(project: string): void {
   mkdirSync(project, { recursive: true })
-  spawnSync('git', ['init', '--quiet', '--initial-branch=main'], { cwd: project })
+  spawnSync('git', ['init', '--quiet', '--initial-branch=main'], {
+    cwd: project,
+    env: gitChildEnvironment(),
+  })
 }
 
 function locate(page: Page, target: ArenaTarget): Locator {

@@ -46,6 +46,10 @@ that reproduces the fetch — style plus CLI version — and the diff procedure 
 - **Intra-`ui` imports carry `.tsx`** (`@/components/ui/dialog.tsx`), for the reason `cn`'s does.
 - **`cn` comes from `@/lib/utils.ts`, not the `cn` package.** The registry at `shadcn@4.20.1`
   emits `import { cn } from "cn"` and adds that package; this repo has one `cn` and it is ours.
+- **`dialog.tsx`'s `DialogContent` caps its height and scrolls** (`max-h-[calc(100%-2rem)]
+  overflow-y-auto`, #679). The registry's content is centred with no cap, so a dialog taller than
+  the window was clipped top and bottom with nothing to scroll: a long prompt in the Start dialog
+  put Start session out of reach. The cap mirrors the registry's own `max-w-[calc(100%-2rem)]`.
 
 Nothing else. These files are otherwise the registry's output, which is the point: an
 unportable primitive is one nobody can re-fetch.

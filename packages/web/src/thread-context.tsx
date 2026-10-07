@@ -759,7 +759,7 @@ export function ThreadContextDialog({
       }}
     >
       <DialogContent
-        className="max-h-dialog overflow-y-auto sm:max-w-context-dialog"
+        className="sm:max-w-context-dialog"
         onCloseAutoFocus={(event: Event): void => {
           event.preventDefault()
           returnFocus()

@@ -393,7 +393,10 @@ export function StartSessionDialog(props: StartSessionDialogProps): React.ReactN
 
   return (
     <Dialog open={open} onOpenChange={(next: boolean): void => (next ? undefined : dismiss())}>
-      <DialogContent className="sm:max-w-lg" onEscapeKeyDown={escapeFromFilter}>
+      {/* The dialog scrolls once it is taller than the window (`DialogContent`, #679); the footer stays
+          pinned to its bottom so Start session never scrolls out of reach, and the scroll padding keeps
+          a focused field — the prompt's caret — from being revealed underneath it. */}
+      <DialogContent className="scroll-pb-20 sm:max-w-lg" onEscapeKeyDown={escapeFromFilter}>
         <SessionStatus catalogue={catalogue} project={props.project} />
         {catalogue.kind === 'loaded' ? (
           <FieldGroup>
@@ -411,7 +414,10 @@ export function StartSessionDialog(props: StartSessionDialogProps): React.ReactN
             <PromptLibraryFields choice={promptChoice} fetch={fetchImpl} onPick={setText} />
             <Field>
               <FieldLabel htmlFor="start-session-prompt">Prompt</FieldLabel>
+              {/* Capped (#679): the Textarea grows with its text, and a long prompt pushed the dialog's
+                  footer below the window; past this height it scrolls inside itself. */}
               <Textarea
+                className="max-h-40"
                 ref={promptField}
                 id="start-session-prompt"
                 value={text}
@@ -425,7 +431,9 @@ export function StartSessionDialog(props: StartSessionDialogProps): React.ReactN
             {refusal === undefined ? null : <FieldError>{refusal}</FieldError>}
           </FieldGroup>
         ) : null}
-        <DialogFooter>
+        {/* Opaque while pinned: the footer's own `bg-muted/50` would show the fields scrolling under it;
+            `bg-dialog-footer` is that same tint mixed over the dialog's background. */}
+        <DialogFooter className="sticky bottom-0 bg-dialog-footer">
           <Button variant="ghost" onClick={dismiss}>
             Close
           </Button>
