@@ -1,6 +1,6 @@
 import { EnsoThreadPages } from '@enso/core'
 import { CopyIcon, ExternalLinkIcon, EyeIcon } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { FetchLike } from './browser-logging.ts'
 import { Button } from './components/ui/button.tsx'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './components/ui/dialog.tsx'
@@ -41,11 +41,14 @@ function ThreadTreePagesBody({
   outcome,
   onCopy,
   copy,
+  onOpened,
 }: {
   readonly threadId: string
   readonly outcome: AnalysisOutcome<EnsoThreadPages>
   readonly onCopy: (path: string) => void
   readonly copy: CopyState
+  /** A preview opened in its tab: the panel's work is done (#714). */
+  readonly onOpened: () => void
 }): React.ReactNode {
   if (outcome.kind === 'reading') return <p className="text-sm text-muted-foreground">reading the tree…</p>
   if (outcome.kind === 'failed') {
@@ -78,7 +81,7 @@ function ThreadTreePagesBody({
               <li key={page} className="flex items-center justify-between gap-3">
                 <code className="font-mono text-xs wrap-anywhere">{page}</code>
                 <Button asChild variant="outline" size="sm">
-                  <a href={previewUrl(threadId, page)} target="_blank" rel="noopener noreferrer">
+                  <a href={previewUrl(threadId, page)} target="_blank" rel="noopener noreferrer" onClick={onOpened}>
                     <ExternalLinkIcon />
                     Open preview
                   </a>
@@ -102,8 +105,26 @@ const readThreadPages = (threadId: string, fetchImpl: FetchLike): Promise<Thread
 const readNoPages = (): Promise<ThreadReadOutcome<EnsoThreadPages>> => Promise.resolve(THREAD_READ_NONE)
 
 /**
+ * Focus the composer of the thread layout `inside` sits in (#714): the chat screen marks its
+ * layout `data-thread-layout`, and the composer is its `PromptInputTextarea` (`name="message"`).
+ * Without either (the markup changed), focus goes to `inside`, the bar's own button, close to where
+ * Radix would have returned it (PR #715 review): never to nowhere, which is the page's body.
+ */
+function focusComposerNear(inside: HTMLElement | null): void {
+  const composer = inside
+    ?.closest('[data-thread-layout]')
+    ?.querySelector<HTMLTextAreaElement>('textarea[name="message"]')
+  ;(composer ?? inside)?.focus()
+}
+
+/**
  * The bar's "own tree, not your checkout", as a button that opens the panel — and, once the tree
  * holds an HTML page, a **Preview** beside it that opens the same panel (#640).
+ *
+ * ⚠ OPEN PREVIEW CLOSES THE PANEL, AND FOCUS GOES TO THE COMPOSER (#714). Found by an arena run: the
+ * panel stayed open over the chat once its preview tab opened, so coming back to Enso to say what
+ * playing found met a blocked chat, and the natural Enter — focus still on Open preview — opened a
+ * second preview tab. What follows a preview is the next prompt.
  *
  * ⚠ NAMED FOR WHAT IT DOES. The first agent run after the preview shipped read the "own tree"
  * button and concluded Enso had no preview: the words say where the work is, not that it can be
@@ -122,6 +143,8 @@ export function ThreadTreeButton({
   readonly readable: boolean
 }): React.ReactNode {
   const stores = useThreadStores()
+  // The bar's own button: where this thread's layout, and so its composer, is found from (#714).
+  const trigger = useRef<HTMLButtonElement | null>(null)
   const listed = useReadOnUsage(readable ? readThreadPages : readNoPages, THREAD_READ_NONE, moment)
   const hasPages = listed.kind === 'read' && listed.payload.pages.length > 0
   const [open, setOpen] = useState(false)
@@ -148,6 +171,7 @@ export function ThreadTreeButton({
   return (
     <>
       <button
+        ref={trigger}
         type="button"
         className="text-foreground underline decoration-dotted underline-offset-2 hover:decoration-solid"
         title="this thread reads and writes a tree of its own — open to see where, and to preview its pages"
@@ -167,12 +191,24 @@ export function ThreadTreeButton({
         </button>
       ) : null}
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent
+          className="sm:max-w-lg"
+          onCloseAutoFocus={(event: Event): void => {
+            event.preventDefault()
+            focusComposerNear(trigger.current)
+          }}
+        >
           <DialogHeader>
             <DialogTitle>What this thread built</DialogTitle>
             <DialogDescription>Its edits are in a tree of its own until you bring them back.</DialogDescription>
           </DialogHeader>
-          <ThreadTreePagesBody threadId={stores.threadId} outcome={outcome} onCopy={copyPath} copy={copy} />
+          <ThreadTreePagesBody
+            threadId={stores.threadId}
+            outcome={outcome}
+            onCopy={copyPath}
+            copy={copy}
+            onOpened={() => setOpen(false)}
+          />
         </DialogContent>
       </Dialog>
     </>
