@@ -50,6 +50,8 @@ export interface ScriptedFetch {
   readonly treeReads: string[]
   /** Every `GET /api/threads/:id/git` the server saw (#620): a thread with no session must ask none. */
   readonly gitReads: string[]
+  /** Every `GET /api/threads/:id/tree` the server saw (#682): like `/git`, none before a session. */
+  readonly threadTreeReads: string[]
   /** Hold the next prompt's answer; returns the release. */
   readonly holdPrompt: () => () => void
   /** Hold every later delete's answer (#571) — the server has it, and has not answered; returns the release. */
@@ -173,6 +175,7 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
   const previewReads: string[] = []
   const treeReads: string[] = []
   const gitReads: string[] = []
+  const threadTreeReads: string[] = []
   let storedThreads = options.storedThreads ?? []
   /** Question ids the server has TAKEN an answer for — the shape of the real route's 404. */
   const spentQuestions = new Set<string>()
@@ -201,6 +204,8 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
     changes: () => (options.changes === undefined ? undefined : { cwd: '/scripted/launch', ...options.changes() }),
     tree: () => options.pages?.(),
   }
+  /** The thread reads a test counts (#620, #682): a thread with no session must ask neither. */
+  const countedReads: Readonly<Record<string, string[]>> = { git: gitReads, tree: threadTreeReads }
   /** The page's own reads — mode seed, the rail's stored list, a resume click's history. Exact paths. */
   const pageRead = (path: string): Response | undefined => {
     const literal = literalReads[path]
@@ -312,7 +317,7 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
     const action = threadAction(path)
     const respond = action === undefined ? undefined : threadActions[action]
     if (respond !== undefined) return respond(init)
-    if (/^\/api\/threads\/[^/]+\/git$/.test(path)) gitReads.push(path)
+    if (action !== undefined) countedReads[action]?.push(path)
     return Promise.resolve(pageRead(path) ?? new Response('not found', { status: 404 }))
   }) as typeof fetch
   return {
@@ -328,6 +333,7 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
     previewReads,
     treeReads,
     gitReads,
+    threadTreeReads,
     deleteTags,
     holdPrompt: () => {
       const gate = Promise.withResolvers<void>()

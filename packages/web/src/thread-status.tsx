@@ -10,7 +10,7 @@ import {
 import type { UIMessage } from '@tanstack/ai-client'
 import { automaticPartsForMessage, selectMessageUI } from '@tanstack/ai-client/ui'
 import { toolResultState } from './EnsoToolResult.tsx'
-import { useModelState } from './model-state.tsx'
+import { useThreadReadable } from './model-state.tsx'
 import { useStore, useThreadStores } from './store.ts'
 import { GitIndicator, type GitOutcome, settledToolResults, useThreadGit } from './thread-git.tsx'
 import { ThreadTreeButton } from './thread-tree-pages.tsx'
@@ -487,8 +487,10 @@ export function ThreadStatusBar({ messages, generating, projectTitle }: ThreadSt
   const refusals = useStore(stores.refusals)
   const risk = useStore(stores.sessionRisk)
   const incidents = useStore(stores.incidents)
-  // A live session says its model; a stored thread has messages. A new thread has neither (#620).
-  const readable = useModelState() !== null || messages.length > 0
+  // A live session, or a thread the server has seen messages in (#620, #659). ⚠ Not the transcript's
+  // own length (#682): a first prompt is in it the moment it is sent, a second before the server has
+  // built the session, and `/git` and `/tree` each answered that read with a 404.
+  const readable = useThreadReadable()
   // When the tree may have moved: a settled tool result, the run starting or ending.
   const moment = `${settledToolResults(messages)}:${generating}`
   const git = useThreadGit(moment, readable)
