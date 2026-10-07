@@ -2269,45 +2269,55 @@ function useResumeRequests({
   navigate,
   setResumeError,
 }: ResumeOutcomeTargets): (threadId: string, intent: ResumeIntent) => void {
-  return useMemo(
-    () =>
-      // `prefill` rides with a fork's open (#433): the new thread's composer opens holding it.
-      // `fromUrl`: the id is the URL's (the boot, back/forward), not a row or a fork (#378).
-      createResumeRequests<ResumeIntent>(
-        fetchThreadHistory,
-        (history, intent) => {
-          if (intent.epoch !== epoch.current) return // a navigation happened since — superseded
+  return useMemo(() => {
+    /**
+     * The thread a resume leaves on screen, with the intent's notice said on it: the adopted thread,
+     * or the fresh one a failure leaves — a delete whose next thread could not be resumed still says
+     * the delete (#721 review).
+     */
+    const showing = (threadId: string, intent: ResumeIntent): string => {
+      if (intent.notice !== undefined) {
+        getThreadStores(threadId).notifications.push(intent.notice, 'info', 'run', ENSO_NOTICE_SOURCE)
+      }
+      return threadId
+    }
+    // The page must show SOMETHING: a resume that failed with no pane behind it (the boot's, a rail
+    // click while the boot was still out, or a delete's next thread) leaves a fresh thread, said
+    // (the error is on the rail), and the URL rewritten so a reload does not ask again.
+    const freshIfNothingShown = (intent: ResumeIntent): void => {
+      if (activePane.current === undefined) navigate(showing(mintPageThread().threadId, intent), 'replace')
+    }
+    // `prefill` rides with a fork's open (#433): the new thread's composer opens holding it.
+    // `fromUrl`: the id is the URL's (the boot, back/forward), not a row or a fork (#378).
+    return createResumeRequests<ResumeIntent>(
+      fetchThreadHistory,
+      (history, intent) => {
+        if (intent.epoch !== epoch.current) return // a navigation happened since — superseded
+        setResumeError(undefined)
+        navigate(showing(adoptPageThread(history, intent.prefill).threadId, intent), intent.how)
+      },
+      (message, intent) => {
+        if (intent.epoch !== epoch.current) return
+        setResumeError(message)
+        freshIfNothingShown(intent)
+      },
+      (threadId, intent) => {
+        if (intent.epoch !== epoch.current) return
+        // ⚠ #378: the server holds nothing under the URL's own id — the page wrote it before the
+        // first prompt, and the server restarted or dropped the empty thread since. Not an error:
+        // the thread is started under the id the URL already names. A 403 (a file outside the
+        // projects) is a failure above, never this.
+        if (intent.fromUrl === true) {
           setResumeError(undefined)
-          const adopted = adoptPageThread(history, intent.prefill)
-          if (intent.notice !== undefined) adopted.notifications.push(intent.notice, 'info', 'run', ENSO_NOTICE_SOURCE)
-          navigate(adopted.threadId, intent.how)
-        },
-        (message, intent) => {
-          if (intent.epoch !== epoch.current) return
-          setResumeError(message)
-          // The page must show SOMETHING: a resume that failed with no pane behind it (the
-          // boot's, or a rail click while the boot was still out) leaves a fresh thread, said
-          // (the error is on the rail), and the URL rewritten so a reload does not ask again.
-          if (activePane.current === undefined) navigate(mintPageThread().threadId, 'replace')
-        },
-        (threadId, intent) => {
-          if (intent.epoch !== epoch.current) return
-          // ⚠ #378: the server holds nothing under the URL's own id — the page wrote it before the
-          // first prompt, and the server restarted or dropped the empty thread since. Not an error:
-          // the thread is started under the id the URL already names. A 403 (a file outside the
-          // projects) is a failure above, never this.
-          if (intent.fromUrl === true) {
-            setResumeError(undefined)
-            navigate(mintPageThread(undefined, threadId).threadId, intent.how)
-            return
-          }
-          // A rail row or a fork the server no longer holds: the listing was stale. Said.
-          setResumeError(`the server holds no session for thread ${threadId}`)
-          if (activePane.current === undefined) navigate(mintPageThread().threadId, 'replace')
-        },
-      ),
-    [epoch, activePane, navigate, setResumeError],
-  )
+          navigate(mintPageThread(undefined, threadId).threadId, intent.how)
+          return
+        }
+        // A rail row or a fork the server no longer holds: the listing was stale. Said.
+        setResumeError(`the server holds no session for thread ${threadId}`)
+        freshIfNothingShown(intent)
+      },
+    )
+  }, [epoch, activePane, navigate, setResumeError])
 }
 
 /**

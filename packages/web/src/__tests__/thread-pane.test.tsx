@@ -2864,6 +2864,33 @@ test('⚠ a delete of the thread on screen goes to its project’s newest other 
   await page.unmount()
 })
 
+// #721 review: the next thread a delete chose can be gone too (the listing was stale). The page then
+// starts a fresh thread, as any resume with nothing behind it does — and still says the delete.
+test('a delete whose next thread the server no longer holds leaves a fresh thread, and says the delete on it (#663)', async () => {
+  const page = await openDeletable({
+    others: [
+      {
+        threadId: 'stored-gone',
+        projectId: 'p-launch',
+        title: 'a thread deleted elsewhere',
+        lastActivityAt: new Date(Date.now() - 60_000).toISOString(),
+        messageCount: 2,
+        busy: false,
+      },
+    ],
+  })
+  await openDeleteDialog(page)
+  await page.click(dialogButton('Delete'))
+  await eventually(() => {
+    const shown = new URLSearchParams(window.location.search).get('thread') ?? ''
+    expect([DELETABLE, 'stored-gone', '']).not.toContain(shown)
+    expect(threadListStore.get().some((thread) => thread.threadId === shown)).toBe(true)
+    expect(page.container.textContent).toContain('the server holds no session for thread stored-gone')
+    expect(notices(page).some((notice) => notice.endsWith(`thread ${DELETABLE} deleted`))).toBe(true)
+  })
+  await page.unmount()
+})
+
 test('a tree holding work (422) is named in the dialog, and "Delete anyway" repeats the delete with force', async () => {
   // The server's words, longer than a failure line's bound: every file force would destroy is named.
   const reason =
