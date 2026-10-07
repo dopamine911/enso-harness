@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { extname, join, relative } from 'node:path'
+import { gitChildEnvironment } from '@enso/core/git'
 
 /**
  * What the run built, measured apart from anything about Enso (#556 "report app completion separately",
@@ -139,8 +140,13 @@ function isTestFile(path: string): boolean {
   return TEST_NAME.test(name.slice(0, name.length - extname(name).length)) || TEST_DIRECTORY.test(path)
 }
 
+/** git in the workspace — without the inherited repository variables, which under a hook name the hook's. */
 function git(workspace: string, args: readonly string[]): string | undefined {
-  const result = spawnSync('git', args, { cwd: workspace, encoding: 'utf8' })
+  const result = spawnSync('git', args, {
+    cwd: workspace,
+    env: gitChildEnvironment(),
+    encoding: 'utf8',
+  })
   return result.status === 0 ? result.stdout : undefined
 }
 
