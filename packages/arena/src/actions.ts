@@ -538,10 +538,10 @@ export function typedSecretRefusal(action: ArenaAction, secretValues: readonly s
 /** A point as the timeline writes it: `512,300`, in view pixels. */
 const describePoint = (point: ArenaPoint): string => `${Math.round(point.left)},${Math.round(point.top)}`
 
-/** A pointer click as one word: `click`, `double-click`, `right-click`. */
+/** A pointer click as one word: `click`, `double-click`, `right-click`, `double-right-click`. */
 function clickWord(action: { readonly button?: 'right' | 'middle'; readonly double?: boolean }): string {
-  if (action.double === true) return 'double-click'
-  return action.button === undefined ? 'click' : `${action.button}-click`
+  const button = action.button === undefined ? '' : `${action.button}-`
+  return `${action.double === true ? 'double-' : ''}${button}click`
 }
 
 /**

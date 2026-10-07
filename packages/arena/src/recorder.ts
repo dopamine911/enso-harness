@@ -267,7 +267,8 @@ export interface ArenaShooter {
 /**
  * The run's screenshots: numbered files under `directory`, each a `screenshot` line on the
  * timeline. An event cause is taken at most once per `EVENT_SHOT_SPACING_MS`; a sample, a
- * requested shot and the final one always. Before a page is shown, nothing is taken.
+ * requested shot, the final one and a visual agent's view (#680) always. Before a page is shown,
+ * nothing is taken.
  *
  * ⚠ A SHOT THAT FAILS IS A LINE (#584 A9, #607): a `recorder-error` naming the cause. Swallowed, a
  * gap in the 30 s cadence read the same as "no sample was due", and a crash's picture that could
@@ -569,12 +570,12 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
   let nextTab = 1
   let front = 0
   const inFront = (): Page => tabs.get(front) ?? firstPage
-  const bringToFront = (tabNumber: number): void => {
+  const bringToFront = (tabNumber: number): Promise<void> => {
     const tabPage = tabs.get(tabNumber)
-    if (tabPage === undefined) return
+    if (tabPage === undefined) return Promise.resolve()
     front = tabNumber
     show(tabPage)
-    void tabPage.bringToFront().catch(() => undefined)
+    return tabPage.bringToFront().catch(() => undefined)
   }
   show(firstPage)
   let chunkNumber = 0
@@ -598,12 +599,16 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
   const here = (): ArenaPagePlace => tabPlace(front, inFront())
 
   // A native dialog is left OPEN for the agent to answer (#609): it is part of the interface, and it
-  // blocks the page until answered — `read` says it is there, `accept-dialog`/`dismiss-dialog` answer it.
-  let pendingDialog: Dialog | undefined
+  // blocks the page until answered — `read` says it is there (a visual run's every answer does, #680),
+  // and `accept-dialog`/`dismiss-dialog` answer it.
+  // ⚠ Per tab (PR #684 review): a browser shows a dialog over its own tab, so the one that blocks the
+  // agent is the front tab's — a game's alert in tab 1 must not answer for Enso's tab, nor block it.
+  const dialogs = new Map<number, Dialog>()
+  const frontDialog = (): Dialog | undefined => dialogs.get(front)
   const answerDialog = async (answer: (dialog: Dialog) => Promise<void>): Promise<ArenaPagePlace> => {
-    const dialog = pendingDialog
+    const dialog = frontDialog()
     if (dialog === undefined) throw new Error('no dialog is open')
-    pendingDialog = undefined
+    dialogs.delete(front)
     await answer(dialog)
     return here()
   }
@@ -655,7 +660,7 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
       shootIfInFront('page-crash')
     })
     tabPage.on('dialog', (dialog) => {
-      pendingDialog = dialog
+      dialogs.set(tabNumber, dialog)
       timeline.record({ kind: 'dialog', dialog: dialog.type(), message: redact(dialog.message()) }, there())
       shootIfInFront('dialog')
     })
@@ -663,8 +668,26 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
       // The browser closing at the stop closes every tab: that is the run ending, not the agent.
       if (stopping) return
       tabs.delete(tabNumber)
+      dialogs.delete(tabNumber)
       timeline.record({ kind: 'tab-closed', tab: tabNumber })
-      if (front === tabNumber) bringToFront(Math.max(...tabs.keys()))
+      if (front !== tabNumber) return
+      const newest = Math.max(...tabs.keys())
+      if (Number.isFinite(newest)) {
+        void bringToFront(newest)
+        return
+      }
+      // ⚠ The page closed the last tab itself (`window.close()`; PR #684 review): a browser with no
+      // tab has no page to act on, so Enso opens again in a new one — its `page` listener makes it the front.
+      void context
+        .newPage()
+        .then((reopened) => reopened.goto(ARENA_WEB_ORIGIN))
+        .catch((error: unknown) => {
+          timeline.record({
+            kind: 'recorder-error',
+            during: 'reopening Enso after the last tab closed',
+            error: redact(String(error)),
+          })
+        })
     })
   }
   watch(firstPage, 0)
@@ -675,7 +698,7 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
     tabs.set(tabNumber, opened)
     watch(opened, tabNumber)
     timeline.record({ kind: 'tab-opened', tab: tabNumber, opener: front }, tabPlace(tabNumber, opened))
-    bringToFront(tabNumber)
+    void bringToFront(tabNumber)
     void opened
       .waitForLoadState()
       .catch(() => undefined)
@@ -766,10 +789,12 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
 
   // ── The agent's actions ────────────────────────────────────────────────────────────────────
   /** The page as the agent sees it, for a wait on the page (#637, #648): the rail's ages aside, or the native dialog blocking it. */
-  const pageNow = async (): Promise<string> =>
-    pendingDialog === undefined
+  const pageNow = async (): Promise<string> => {
+    const dialog = frontDialog()
+    return dialog === undefined
       ? pageForChange(await inFront().locator('body').ariaSnapshot({ timeout: ACTION_TIMEOUT_MS }))
-      : dialogForChange(pendingDialog.type(), pendingDialog.message())
+      : dialogForChange(dialog.type(), dialog.message())
+  }
   /** What the agent last saw: its last read, or the page right after its last move (`createChangeBaseline`). */
   const lastSeen = createChangeBaseline(pageNow)
   /** The tab actions (#675): list the tabs, bring one to the front, close one but never the last. */
@@ -792,8 +817,7 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
     const tabPage = tabs.get(tabNumber)
     if (tabPage === undefined) throw new Error(`no tab ${tabNumber} — \`tabs\` lists them`)
     if (action.action === 'switch-tab') {
-      bringToFront(tabNumber)
-      await tabPage.bringToFront()
+      await bringToFront(tabNumber)
       return here()
     }
     if (tabs.size === 1) throw new Error('the last tab stays open: there would be no page to act on')
@@ -890,13 +914,13 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
   }
   /**
    * What a visual agent is shown with every answer (#680): the view after the action, and a native
-   * dialog it would see over the page. ⚠ No capture while one is open: it blocks the page's rendering.
+   * dialog over the front tab, which a page capture never shows. ⚠ No capture while one is open: it
+   * blocks the page's rendering.
    */
   const forTheEyes = async (action: ArenaAction): Promise<Pick<ArenaActOutcome, 'view' | 'dialog'>> => {
     if (perception !== 'visual' || action.action === 'note' || action.action === 'stop') return {}
-    if (pendingDialog !== undefined) {
-      return { dialog: { type: pendingDialog.type(), message: redact(pendingDialog.message()) } }
-    }
+    const dialog = frontDialog()
+    if (dialog !== undefined) return { dialog: { type: dialog.type(), message: redact(dialog.message()) } }
     const view = await shoot('view')
     return view === undefined ? {} : { view }
   }
@@ -920,9 +944,10 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
   }
   /** `read`: the tab in front as its accessibility tree — or the native dialog over it, which blocks the snapshot. */
   const performRead = async (): Promise<unknown> => {
-    if (pendingDialog !== undefined) {
+    const dialog = frontDialog()
+    if (dialog !== undefined) {
       lastSeen.saw(await pageNow())
-      return { ...here(), dialog: { type: pendingDialog.type(), message: redact(pendingDialog.message()) } }
+      return { ...here(), dialog: { type: dialog.type(), message: redact(dialog.message()) } }
     }
     // One snapshot (PR #646 review): the page the agent reads is the wait's baseline too.
     const snapshot = await inFront().locator('body').ariaSnapshot({ timeout: ACTION_TIMEOUT_MS })
