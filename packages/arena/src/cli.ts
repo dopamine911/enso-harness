@@ -223,7 +223,7 @@ async function driverNamed(
   const reference = flag('agent')
   if (rest.includes('--manual')) {
     if (reference !== undefined) fail('--manual and --agent are two ways to drive one run: name one')
-    return { brief: arenaBrief(scenario, 'command', context, perceptionNamed()) }
+    return { brief: arenaBrief(scenario, 'command', context) }
   }
   if (reference === undefined) {
     fail('start takes --agent PROVIDER/MODEL (the agent under test, UI only) or --manual (actions over `arena act`)')
@@ -238,7 +238,7 @@ async function driverNamed(
   if (perception === 'visual' && !model.input.includes('image')) {
     fail(`--perception visual needs a model that takes images, and ${reference} does not`)
   }
-  const brief = arenaBrief(scenario, 'tool', {}, perception)
+  const brief = arenaBrief(scenario, 'tool', { perception })
   const driver = arenaAgentDriver({
     model,
     streamFn,
@@ -426,7 +426,7 @@ switch (command) {
     if (rest.includes('--review')) process.stdout.write(arenaReviewBrief(briefContext(flag('run')), 'other'))
     else {
       const channel = rest.includes('--manual') ? 'command' : 'tool'
-      process.stdout.write(arenaBrief(scenarioNamed(), channel, briefContext(flag('run')), perceptionNamed()))
+      process.stdout.write(arenaBrief(scenarioNamed(), channel, briefContext(flag('run'))))
     }
     break
   case 'act':

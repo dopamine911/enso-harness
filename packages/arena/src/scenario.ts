@@ -182,10 +182,10 @@ export function arenaBrief(
   scenario: ArenaScenario,
   channel: ArenaChannel = 'command',
   context: ArenaBriefContext = {},
-  perception: ArenaPerception = 'tree',
 ): string {
   const reviewed = channel === 'command'
-  const visual = perception === 'visual'
+  // One source for the moves and the review alike (PR #695 review): the context's perception.
+  const visual = context.perception === 'visual'
   const look = visual ? 'look at the screenshot' : '`read` to see the page'
   const assignment = `# ${reviewed ? 'Phase 1: the assignment' : 'Your assignment'}
 

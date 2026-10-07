@@ -864,6 +864,11 @@ test('⚠ the review says what the run’s perception allows it to judge, and wh
   expect(arenaReviewBrief({ runDirectory: '/runs/r' }, 'other')).toContain('it never\nsaw the page')
   // The outcome is each thread's tree, not `project/` (#681).
   expect(tree).toContain('.enso/projects/<project id>/trees/<thread id>/')
+  // PR #695 review: one source for both halves — a visual command brief's moves and its review agree.
+  const command = arenaBrief(SNAKE_SCENARIO, 'command', { runDirectory: '/runs/r', perception: 'visual' })
+  expect(command).toContain('{"action":"click","x":512,"y":300}')
+  expect(command).not.toContain('{"action":"read"}')
+  expect(command).toContain('saw the page only as screenshots')
 })
 
 test('without a run or a repository the review asks for them instead of guessing', () => {
