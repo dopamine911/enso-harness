@@ -2451,11 +2451,11 @@ const DELETABLE = 'stored-delete'
 
 /** The page with one stored thread, opened from the rail and on screen: one the server holds, so Delete is offered. */
 async function openDeletable(
-  options: Pick<ScriptedFetchOptions, 'deleteAnswers' | 'deletePreview' | 'trees'> & {
+  options: Pick<ScriptedFetchOptions, 'deleteAnswers' | 'deletePreview' | 'trees' | 'histories'> & {
     readonly others?: readonly EnsoStoredThread[]
   } = {},
 ): Promise<MountedPage> {
-  const { others = [], ...scripted } = options
+  const { others = [], histories = {}, ...scripted } = options
   const page = await mountPage({
     storedThreads: [
       {
@@ -2480,6 +2480,7 @@ async function openDeletable(
         sessionRisk: { level: 'low', signals: 0 },
         incidents: NO_SESSION_INCIDENTS,
       },
+      ...histories,
     },
     ...scripted,
   })
@@ -2821,6 +2822,77 @@ test('a delete the server takes (204) leaves the thread for a fresh one, and the
     // Neither open nor earlier: the refreshed listing no longer holds it.
     expect(page.container.querySelector('#threads-rail')?.textContent).not.toContain('try the parser rewrite')
     expect(page.container.textContent).not.toContain('Rewriting parse.ts')
+    expect(notices(page).some((notice) => notice.endsWith(`thread ${DELETABLE} deleted`))).toBe(true)
+  })
+  await page.unmount()
+})
+
+// ⚠ #663, from an arena run: deleting one of two approaches opened a new empty thread and its Start
+// dialog, the other right there in the rail. The page goes to the project's newest other thread —
+// here a stored one, resumed — and says the delete on it (#721 review: the notice was lost on this path).
+test('⚠ a delete of the thread on screen goes to its project’s newest other thread — a stored one resumed with its history — and says the delete there; no Start dialog (#663)', async () => {
+  const sibling = 'stored-sibling'
+  const page = await openDeletable({
+    others: [
+      {
+        threadId: sibling,
+        projectId: 'p-launch',
+        title: 'try the regex rewrite',
+        lastActivityAt: new Date(Date.now() - 60_000).toISOString(),
+        messageCount: 2,
+        busy: false,
+      },
+    ],
+    histories: {
+      [sibling]: {
+        threadId: sibling,
+        projectId: 'p-launch',
+        messages: [
+          { id: 'u2', role: 'user', parts: [{ type: 'text', content: 'try the regex rewrite' }] },
+          { id: 'a2', role: 'assistant', parts: [{ type: 'text', content: 'Rewriting with regexes' }] },
+        ],
+        permissionMode: { mode: 'default', available: ['default', 'plan'] },
+        sessionRisk: { level: 'low', signals: 0 },
+        incidents: NO_SESSION_INCIDENTS,
+      },
+    },
+  })
+  await openDeleteDialog(page)
+  await page.click(dialogButton('Delete'))
+  await eventually(() => {
+    expect(new URLSearchParams(window.location.search).get('thread')).toBe(sibling)
+    expect(page.container.textContent).toContain('Rewriting with regexes')
+    expect(page.container.textContent).not.toContain('Rewriting parse.ts')
+    expect(notices(page).some((notice) => notice.endsWith(`thread ${DELETABLE} deleted`))).toBe(true)
+  })
+  expect(
+    [...document.querySelectorAll('[role="dialog"]')].some((dialog) => dialog.textContent?.includes('Start a session')),
+  ).toBe(false)
+  await page.unmount()
+})
+
+// #721 review: the next thread a delete chose can be gone too (the listing was stale). The page then
+// starts a fresh thread, as any resume with nothing behind it does — and still says the delete.
+test('a delete whose next thread the server no longer holds leaves a fresh thread, and says the delete on it (#663)', async () => {
+  const page = await openDeletable({
+    others: [
+      {
+        threadId: 'stored-gone',
+        projectId: 'p-launch',
+        title: 'a thread deleted elsewhere',
+        lastActivityAt: new Date(Date.now() - 60_000).toISOString(),
+        messageCount: 2,
+        busy: false,
+      },
+    ],
+  })
+  await openDeleteDialog(page)
+  await page.click(dialogButton('Delete'))
+  await eventually(() => {
+    const shown = new URLSearchParams(window.location.search).get('thread') ?? ''
+    expect([DELETABLE, 'stored-gone', '']).not.toContain(shown)
+    expect(threadListStore.get().some((thread) => thread.threadId === shown)).toBe(true)
+    expect(page.container.textContent).toContain('the server holds no session for thread stored-gone')
     expect(notices(page).some((notice) => notice.endsWith(`thread ${DELETABLE} deleted`))).toBe(true)
   })
   await page.unmount()
