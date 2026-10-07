@@ -29,6 +29,8 @@
   --color-ok: var(--ok);
   --color-refuse: var(--refuse);
   --color-border-strong: var(--border-strong);
+  /* A dialog footer pinned over fields scrolling under it (#679): the footer's own `bg-muted/50`, made opaque over the dialog. */
+  --color-dialog-footer: color-mix(in srgb, var(--muted) 50%, var(--popover));
   /* Signal's glow — kept for its two live states and nowhere else (`signal:shadow-glow-evidence`). */
   --shadow-glow-evidence: 0 0 0 3px color-mix(in srgb, var(--evidence) 22%, transparent), 0 0 12px var(--evidence);
   --shadow-glow-human: 0 0 0 3px color-mix(in srgb, var(--human) 22%, transparent), 0 0 12px var(--human);
@@ -86,11 +88,6 @@
   --container-changes-tree: 20rem; /* the Changes tab's file tree */
   --container-command-palette: 28rem; /* the / palette's popup */
   --container-provider-label: 16ch; /* the model chip's provider */
-}
-
-/* A tall dialog stops short of the viewport and scrolls inside. */
-@utility max-h-dialog {
-  max-height: 85vh;
 }
 
 /* A label column as wide as its longest label, the value taking the rest. */
