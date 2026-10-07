@@ -102,7 +102,7 @@ test('findings that do not read as gaps say which gap and why; no file is absent
  * whose prompt came at 15 s; three wait→read cycles (polling); one wish at 45 s; a screenshot every
  * 10 seconds.
  */
-function recordedRun(): string {
+function recordedRun(options: { readonly played?: boolean } = {}): string {
   const run = mkdtempSync(join(tmpdir(), 'arena-report-'))
   const project = join(run, 'project')
   mkdirSync(project)
@@ -167,6 +167,19 @@ function recordedRun(): string {
         inThread,
       )
     }
+    // #675: the agent plays the built page in Preview's tab, finds an error, and notes it there.
+    if (options.played === true && second === 50) {
+      const game = { ...pagePlace(`http://127.0.0.1:5178/preview/threads/${THREAD}/index.html`), tab: 1 }
+      timeline.record(
+        { kind: 'action', via: 'control', action: 'press', detail: 'press ArrowLeft', outcome: 'ok', durationMs: 4 },
+        game,
+      )
+      timeline.record({ kind: 'page-error', text: 'TypeError: paddle is undefined' }, game)
+      timeline.record(
+        { kind: 'note', via: 'control', note: 'friction', trying: 'move the paddle', happened: 'the game froze' },
+        game,
+      )
+    }
   }
   timeline.record({ kind: 'run-stop', reason: 'the agent stopped the run' })
   const manifest = foldArenaManifest({
@@ -221,11 +234,41 @@ test('⚠ the report keeps what was built apart from Enso’s findings, and plac
     '# Arena report — snake-r',
     '## Application outcome',
     '### `project`',
+    '### What playing found',
     '## Enso findings',
     '### Observed friction',
     '### The agent’s account',
     '### Verified gaps',
   ])
+})
+
+// ⚠ #675: what the agent found by using the built page is the application's outcome, kept apart from
+// Enso's findings — its moves there, what the page itself logged, and what it noted while there.
+test('⚠ what playing found is read off the application’s own page, and a run that never played says so', () => {
+  const played = buildArenaReport(recordedRun({ played: true }), { ...OPTIONS, runTests: false })
+  // Rendered first: bun's `toMatchObject` with an asymmetric matcher inside an array replaces the
+  // matched element in the received object (measured here: `examples` was gone after it).
+  const markdown = renderArenaReport(played)
+  expect(played.played).toMatchObject({
+    moves: 1,
+    from: { second: 50 },
+    problems: [
+      expect.objectContaining({
+        source: 'application',
+        message: 'uncaught error in the page: TypeError: paddle is undefined',
+      }),
+    ],
+    notes: [expect.objectContaining({ kind: 'friction', trying: 'move the paddle' })],
+  })
+  // The note made on Enso's page is not one of playing's.
+  expect(played.played?.notes.map((note) => note.trying)).not.toContain('see the game')
+  const section = markdown.slice(markdown.indexOf('### What playing found'), markdown.indexOf('## Enso findings'))
+  expect(section).toContain('1 move(s)')
+  expect(section).toContain('TypeError: paddle is undefined')
+
+  const never = buildArenaReport(recordedRun(), { ...OPTIONS, runTests: false })
+  expect(never.played).toBeUndefined()
+  expect(renderArenaReport(never)).toContain('never acted on the application’s own page')
 })
 
 test('the tests run only when asked: by default the report names them and says how to run them', () => {

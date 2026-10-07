@@ -67,5 +67,28 @@ export function MarkdownImage(props: ComponentPropsWithoutRef<'img'>): React.Rea
   )
 }
 
-/** The intrinsic elements `TextPart` renders through ours — a remote image waits for a click. */
-export const TEXT_PART_COMPONENTS: NonNullable<TextPartProps['components']> = { img: MarkdownImage }
+/**
+ * `TextPart`'s `a`: a link out of the reply opens in a new tab with no opener and no referrer,
+ * like Enso's own links — rendered plain, it navigated Enso's tab away from the thread (#690).
+ * The link filter has already run: a refused scheme never reaches here as an anchor. An in-page
+ * fragment (a footnote and its back-reference) stays in this tab, where its target is.
+ */
+function MarkdownLink({ children, ...anchor }: ComponentPropsWithoutRef<'a'>): React.ReactNode {
+  if (anchor.href?.startsWith('#')) return <a {...anchor}>{children}</a>
+  return (
+    <a {...anchor} rel="noopener noreferrer" target="_blank">
+      {children}
+    </a>
+  )
+}
+
+/**
+ * The intrinsic elements `TextPart` renders through ours — a remote image waits for a click, a
+ * link opens a new tab. The keys are HTML tag names, TanStack's contract: `'a'` is spelled
+ * computed so the naming gate does not read it as an abbreviation of ours, without exempting
+ * every `{ a: … }` in the codebase as an external-contract key would.
+ */
+export const TEXT_PART_COMPONENTS: NonNullable<TextPartProps['components']> = {
+  ['a']: MarkdownLink,
+  img: MarkdownImage,
+}

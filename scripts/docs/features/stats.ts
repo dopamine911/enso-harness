@@ -62,6 +62,7 @@ export const STATS: FeatureSpec = {
     'It covers the current branch only. Cost spent on a branch you forked away from, or on a compaction, is named as not attributed to a turn, rather than spread over the ones you see.',
     `Times come from the log, which keeps ${LOG_KEEP_DAYS} days. An older thread still has every token and cost figure, but its **Latency** says no day file covers it.`,
     "Tool figures are in characters, not tokens. A tool's cost is the tokens its result adds to later requests, which the **Context** tab shows.",
+    'It has no price for a model pi has none for, such as the Codex models a ChatGPT login offers. Their tokens are counted as usual, but the cost reads `unknown` rather than $0.0000. If only part of a thread ran on such a model, the total reads `≥` what the priced part cost, and the line under it counts the model calls it leaves out.',
   ],
   see: [
     { path: 'docs/features/context.md', label: 'Context', why: 'the same requests, by what they were made of' },

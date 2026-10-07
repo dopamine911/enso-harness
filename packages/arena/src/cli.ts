@@ -14,6 +14,12 @@
  *       Enso's own spend over --max-cost-usd (10; only over the run's own home)
  *       start Enso over a fresh project and a recorded browser, and the agent under test with the
  *       brief and ONE tool, `act` (`arena/agent.ts`): no shell, no files, so the UI is its only way in
+ *   bun run arena start --agents PROVIDER/MODEL,PROVIDER/MODEL [...]
+ *       the same scenario once per agent model, one after another (#674); every model resolves, and
+ *       each one's cost is estimated from earlier runs, before the first run starts
+ *   bun run arena start … --enso-model PROVIDER/ID
+ *       the model Enso's sessions start on, set in the run home's own settings (#674); refused
+ *       over a shared --home, where it would change the operator's own default
  *   bun run arena start --manual [...]
  *       the same run with no agent: actions come over `bun run arena act` from whoever has a shell,
  *       and the manifest says the UI-only boundary was not held
@@ -33,6 +39,9 @@
  *   bun run arena compare <run directory> <run directory>
  *       two runs side by side (`arena/compare.ts`): outcome, UI checks, which problems each has, the
  *       friction each shows. Reads only: each run is scored afresh, nothing on disk is rewritten.
+ *   bun run arena compare --by-model <run directory>…
+ *       any number of runs grouped by agent model and perception (#674): runs per model, cost,
+ *       the problems one model alone has, friction per run
  *   bun run arena report <run directory> [--run-tests]
  *       the run's report (`arena/report.ts`): the application outcome (files, git, tests) apart from
  *       Enso's findings (observed friction, the agent's account, the reviewer's gaps with every
@@ -62,7 +71,7 @@ import { gitChildEnvironment } from '@enso/core/git'
 import { redactJudgeText } from '@enso/core/judge'
 import { ensoHome, findRepoRoot } from '@enso/core/paths'
 import { ARENA_THINKING_LEVELS, arenaAgentDriver, resolveArenaModel } from './agent.ts'
-import { compareRunDirectories } from './compare.ts'
+import { compareByModel, compareRunDirectories } from './compare.ts'
 import { runContainerCommand } from './container.ts'
 import { type ArenaEvidence, arenaEvidenceRowOf, foldArenaManifest } from './manifest.ts'
 import {
@@ -79,9 +88,12 @@ import {
   arenaSecretValues,
   defaultArenaOut,
   isGuardedForAgent,
+  type EnsoModelSetting,
+  parseEnsoModel,
   prepareRunHome,
   reconcileLinkedFiles,
   runHomeOf,
+  setRunHomeModel,
 } from './run-home.ts'
 import { threadHistoriesIn } from './run-state.ts'
 import {
@@ -97,6 +109,7 @@ import {
 import { renderArenaScore, writeArenaScore } from './score.ts'
 import { scanRunForSecrets, withEarlierHits } from './secret-scan.ts'
 import { type ArenaPerception, readTimeline } from './timeline.ts'
+import { costEstimate } from './usage.ts'
 
 const [command, ...rest] = process.argv.slice(2)
 
@@ -113,6 +126,8 @@ const VALUED_FLAGS = [
   'chromium',
   'run',
   'agent',
+  'agents',
+  'enso-model',
   'thinking',
   'repo',
   'idle-minutes',
@@ -191,13 +206,24 @@ function bugRepository(): string | undefined {
   return origin.status === 0 ? githubRepositoryOf(origin.stdout) : undefined
 }
 
-/** What a brief names for this invocation: the `act` command for its `--out`, the run, the repository. */
+/** How a run's agent perceived the page (#680): its own `run-start` record when it has one, else `--perception`. */
+function perceptionOf(runDirectory?: string): ArenaPerception {
+  const timelinePath = runDirectory === undefined ? undefined : join(runDirectory, 'timeline.jsonl')
+  if (timelinePath !== undefined && existsSync(timelinePath)) {
+    const start = readTimeline(timelinePath).find((event) => event.kind === 'run-start')
+    if (start?.kind === 'run-start' && start.perception !== undefined) return start.perception
+  }
+  return perceptionNamed()
+}
+
+/** What a brief names for this invocation: the `act` command for its `--out`, the run, the repository, the perception. */
 function briefContext(runDirectory?: string): ArenaBriefContext {
   const repository = bugRepository()
   return {
     act: arenaActCommand(flag('out') === undefined ? undefined : outDirectory),
     ...(runDirectory === undefined ? {} : { runDirectory }),
     ...(repository === undefined ? {} : { repository }),
+    perception: perceptionOf(runDirectory),
   }
 }
 
@@ -208,26 +234,20 @@ function briefContext(runDirectory?: string): ArenaBriefContext {
 async function driverNamed(
   scenario: ArenaScenario,
   context: ArenaBriefContext,
+  reference: string | undefined,
 ): Promise<{ readonly driver?: ArenaDriver; readonly brief: string }> {
-  const reference = flag('agent')
   if (rest.includes('--manual')) {
     if (reference !== undefined) fail('--manual and --agent are two ways to drive one run: name one')
-    return { brief: arenaBrief(scenario, 'command', context, perceptionNamed()) }
+    return { brief: arenaBrief(scenario, 'command', context) }
   }
   if (reference === undefined) {
     fail('start takes --agent PROVIDER/MODEL (the agent under test, UI only) or --manual (actions over `arena act`)')
   }
   const thinking = ARENA_THINKING_LEVELS.find((level) => level === (flag('thinking') ?? 'medium'))
   if (thinking === undefined) fail(`--thinking takes one of ${ARENA_THINKING_LEVELS.join(', ')}`)
-  const { model, streamFn } = await resolveArenaModel(operatorHome, reference).catch((error: unknown) =>
-    fail(error instanceof Error ? error.message : String(error)),
-  )
+  const { model, streamFn } = await agentModelNamed(reference)
   const perception = perceptionNamed()
-  // A visual agent knows the page only by its screenshots: a model that cannot take one cannot see.
-  if (perception === 'visual' && !model.input.includes('image')) {
-    fail(`--perception visual needs a model that takes images, and ${reference} does not`)
-  }
-  const brief = arenaBrief(scenario, 'tool', {}, perception)
+  const brief = arenaBrief(scenario, 'tool', { perception })
   const driver = arenaAgentDriver({
     model,
     streamFn,
@@ -255,7 +275,96 @@ function refuseOverDeadRun(): void {
   )
 }
 
+/** The agents `start` runs, one run each (#674): `--agents A,B`, else `--agent A`, else none for `--manual`. */
+function agentsNamed(): readonly (string | undefined)[] {
+  const many = flag('agents')
+  if (many === undefined) return [flag('agent')]
+  if (flag('agent') !== undefined || rest.includes('--manual')) {
+    fail('--agents runs one run per agent: drop --agent and --manual')
+  }
+  const references = many.split(',').map((reference) => reference.trim())
+  // An empty entry (`a,,b`, a trailing comma) is a typo, not a model to skip.
+  if (references.some((reference) => reference === ''))
+    fail(`--agents takes PROVIDER/MODEL,PROVIDER/MODEL…, not "${many}"`)
+  return references
+}
+
+/**
+ * The agent's model, resolved and checked against the run's perception — the one check a single
+ * run and a matrix's up-front pass both make (PR #705 review). A visual agent knows the page only by
+ * its screenshots: a model that cannot take one cannot see.
+ */
+async function agentModelNamed(reference: string): Promise<Awaited<ReturnType<typeof resolveArenaModel>>> {
+  const resolved = await resolveArenaModel(operatorHome, reference).catch((error: unknown) =>
+    fail(`${reference}: ${error instanceof Error ? error.message : String(error)}`),
+  )
+  if (perceptionNamed() === 'visual' && !resolved.model.input.includes('image')) {
+    fail(`--perception visual needs a model that takes images, and ${reference} does not`)
+  }
+  return resolved
+}
+
+/** What each agent's run is likely to cost, from earlier runs under `--out` (#674): measured, never guessed. */
+function sayEstimates(agents: readonly string[]): void {
+  const perception = perceptionNamed()
+  for (const agent of agents) {
+    const estimate = costEstimate(outDirectory, agent, perception)
+    let said = `about $${estimate.meanCostUsd?.toFixed(2)} a run, the mean of ${estimate.runs} earlier ${perception} run(s)`
+    if (estimate.runs === 0) said = `no earlier ${perception} run to estimate from`
+    else if (estimate.meanCostUsd === undefined) said = `${estimate.runs} earlier run(s), none priced`
+    process.stdout.write(`arena: ${agent}: ${said} (its own calls; Enso's spend is bounded by --max-cost-usd)\n`)
+  }
+}
+
+/**
+ * The model Enso's sessions start on, when `--enso-model` names one (#674). Only the run's own home
+ * can carry it: over a shared `--home` it would change the operator's own default.
+ */
+function ensoModelNamed(): EnsoModelSetting | undefined {
+  const named = flag('enso-model')
+  if (named === undefined) return undefined
+  if (flag('home') !== undefined)
+    fail('--enso-model sets the run home’s own settings; over a shared --home it would change yours')
+  try {
+    return parseEnsoModel(named)
+  } catch (error) {
+    return fail(error instanceof Error ? error.message : String(error))
+  }
+}
+
+/**
+ * `start`: one run, or with `--agents` one run per agent, one after another — the ports are one
+ * stack at a time. Exits 1 when any run's score is FAIL.
+ */
 async function start(): Promise<void> {
+  const ensoModel = ensoModelNamed()
+  const agents = agentsNamed()
+  const matrix = agents.filter((agent) => agent !== undefined)
+  if (matrix.length > 1) {
+    // Every model resolves and suits the perception before the first run: a bad third model must
+    // not fail after two paid runs.
+    for (const agent of new Set(matrix)) await agentModelNamed(agent)
+    sayEstimates([...new Set(matrix)])
+  }
+  const runs: string[] = []
+  let passed = true
+  for (const agent of agents) {
+    const run = await startRun(agent, ensoModel)
+    runs.push(run.runDirectory)
+    passed &&= run.passed
+  }
+  if (runs.length > 1) {
+    process.stdout.write(
+      `arena: ${runs.length} runs done; by model: bun run arena compare --by-model ${runs.join(' ')}\n`,
+    )
+  }
+  process.exit(passed ? 0 : 1)
+}
+
+async function startRun(
+  agent: string | undefined,
+  ensoModel: EnsoModelSetting | undefined,
+): Promise<{ readonly runDirectory: string; readonly passed: boolean }> {
   refuseOverDeadRun()
   if (isGuardedForAgent(outDirectory)) {
     fail(
@@ -275,9 +384,10 @@ async function start(): Promise<void> {
   const runDirectory = join(outDirectory, runId)
   const chromiumPath = flag('chromium')
   const context = briefContext(runDirectory)
-  const { driver, brief } = await driverNamed(scenario, context)
+  const { driver, brief } = await driverNamed(scenario, context, agent)
   mkdirSync(runDirectory, { recursive: true })
   const home = flag('home') === undefined ? prepareRunHome(runDirectory, operatorHome) : operatorHome
+  if (ensoModel !== undefined) setRunHomeModel(home, ensoModel)
   const briefPath = join(runDirectory, 'brief.md')
   writeFileSync(briefPath, brief)
   writeFileSync(currentFile, runDirectory)
@@ -303,6 +413,7 @@ async function start(): Promise<void> {
       limits: runLimits(),
       headed: rest.includes('--headed'),
       perception: perceptionNamed(),
+      ...(ensoModel === undefined ? {} : { ensoModel: `${ensoModel.provider}/${ensoModel.id}` }),
       environment: process.env,
       ...(chromiumPath === undefined ? {} : { chromiumPath }),
       ...(driver === undefined ? {} : { driver }),
@@ -311,7 +422,7 @@ async function start(): Promise<void> {
   } finally {
     rmSync(currentFile, { force: true })
   }
-  process.exit(passed ? 0 : 1)
+  return { runDirectory, passed }
 }
 
 async function act(): Promise<void> {
@@ -415,7 +526,7 @@ switch (command) {
     if (rest.includes('--review')) process.stdout.write(arenaReviewBrief(briefContext(flag('run')), 'other'))
     else {
       const channel = rest.includes('--manual') ? 'command' : 'tool'
-      process.stdout.write(arenaBrief(scenarioNamed(), channel, briefContext(flag('run')), perceptionNamed()))
+      process.stdout.write(arenaBrief(scenarioNamed(), channel, briefContext(flag('run'))))
     }
     break
   case 'act':
@@ -427,14 +538,22 @@ switch (command) {
   case 'score':
     scoreRun(rest[0] ?? fail('score takes a run directory'))
     break
-  case 'compare':
+  case 'compare': {
+    // --by-model (#674): any number of runs, grouped by agent model and perception.
+    const runDirectories = rest.filter((argument) => argument !== '--by-model').map((argument) => resolve(argument))
+    if (rest.includes('--by-model')) {
+      if (runDirectories.length === 0) fail('compare --by-model takes the run directories to group')
+      process.stdout.write(compareByModel(runDirectories))
+      break
+    }
     process.stdout.write(
       compareRunDirectories(
-        resolve(rest[0] ?? fail('compare takes two run directories')),
-        resolve(rest[1] ?? fail('compare takes two run directories')),
+        runDirectories[0] ?? fail('compare takes two run directories'),
+        runDirectories[1] ?? fail('compare takes two run directories'),
       ),
     )
     break
+  }
   case 'report': {
     const runDirectory = resolve(rest[0] ?? fail('report takes a run directory'))
     // Test output is redacted with the run's own secrets, like everything else the run keeps (#610).
@@ -450,6 +569,6 @@ switch (command) {
   }
   default:
     fail(
-      'usage: bun run arena start --agent PROVIDER/MODEL | start --manual | brief | act <json> | manifest <run directory> | score <run directory> | compare <run directory> <run directory> | report <run directory> [--run-tests] | container build|credential|start',
+      'usage: bun run arena start --agent PROVIDER/MODEL | start --agents A,B | start --manual | brief | act <json> | manifest <run directory> | score <run directory> | compare <run directory> <run directory> | compare --by-model <run directory>… | report <run directory> [--run-tests] | container build|credential|start',
     )
 }
