@@ -24,8 +24,12 @@ export type StatsTarget =
   | { readonly kind: 'turn'; readonly turn: number }
   | { readonly kind: 'tool-call'; readonly toolCallId: string }
 
-/** Reveals a target in the pane's transcript; `false` when it is not there to reveal. */
-export type RevealStatsTarget = (target: StatsTarget, stats: EnsoThreadStats) => boolean
+/**
+ * Reveals a target in the pane's transcript; `false` when it is not there to reveal. A prompt or a
+ * turn is found through the thread's stats; a tool call by its id alone, so the session eval's
+ * signals (#727), which hold no stats, reveal theirs with none.
+ */
+export type RevealStatsTarget = (target: StatsTarget, stats?: EnsoThreadStats) => boolean
 
 const USER_BUBBLES = '[data-role="user"]'
 const BUBBLES = '[data-role="user"], [data-role="assistant"]'
@@ -122,19 +126,19 @@ function turnBubbleOf(root: ParentNode, stats: EnsoThreadStats, turn: EnsoTurnSt
 }
 
 /** The transcript element a target names, under `root` (one pane's conversation), or undefined. */
-export function locateStatsTarget(root: ParentNode, stats: EnsoThreadStats, target: StatsTarget): Element | undefined {
-  switch (target.kind) {
-    case 'tool-call':
-      return toolCallRow(root, target.toolCallId)
-    case 'prompt':
-      return target.prompt === 0 ? (root.querySelector(BUBBLES) ?? undefined) : userBubbleOf(root, stats, target.prompt)
-    case 'turn': {
-      const turn = stats.turnStats.find((candidate) => candidate.turn === target.turn)
-      if (turn === undefined) return undefined
-      const firstCall = stats.callStats.find((call) => call.turn === target.turn)
-      return firstCall === undefined ? turnBubbleOf(root, stats, turn) : toolCallRow(root, firstCall.toolCallId)
-    }
-  }
+export function locateStatsTarget(
+  root: ParentNode,
+  stats: EnsoThreadStats | undefined,
+  target: StatsTarget,
+): Element | undefined {
+  if (target.kind === 'tool-call') return toolCallRow(root, target.toolCallId)
+  if (stats === undefined) return undefined
+  if (target.kind === 'prompt')
+    return target.prompt === 0 ? (root.querySelector(BUBBLES) ?? undefined) : userBubbleOf(root, stats, target.prompt)
+  const turn = stats.turnStats.find((candidate) => candidate.turn === target.turn)
+  if (turn === undefined) return undefined
+  const firstCall = stats.callStats.find((call) => call.turn === target.turn)
+  return firstCall === undefined ? turnBubbleOf(root, stats, turn) : toolCallRow(root, firstCall.toolCallId)
 }
 
 /** A ring and a tint that fade: the row the eye just landed on, then the transcript as it was. */

@@ -73,6 +73,7 @@ const BASE: EnsoSessionEval = {
     dropped: ['S6 plan mode: none'],
     riskLevel: 'low',
     securitySignals: 0,
+    riskSignals: [],
   },
 }
 
