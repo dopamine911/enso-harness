@@ -102,7 +102,6 @@ export function buildArenaReport(runDirectory: string, options: ArenaOutcomeOpti
   const { manifest } = input
   const score = scoreArenaRun(input)
   const momentAt = (elapsedMs: number): ArenaMoment => momentOf(runDirectory, manifest.screenshots, elapsedMs)
-  const findingsFile = findingsPath(runDirectory)
   const played = playedIn(input.events, score.problems, momentAt)
   return {
     runId: score.runId,
@@ -120,13 +119,22 @@ export function buildArenaReport(runDirectory: string, options: ArenaOutcomeOpti
     notes: (['wish', 'friction', 'retrospective'] as const).flatMap((kind) =>
       manifest.agentNotes[kind].map((note) => reportedNote(kind, note, momentAt(note.elapsedMs))),
     ),
-    findings: readFindings(existsSync(findingsFile) ? readFileSync(findingsFile, 'utf8') : undefined, {
-      runDirectory,
-      runMs: runLength(manifest),
-      threadIds: threadIdsOf(manifest),
-    }),
+    findings: readRunFindings(runDirectory, manifest),
     ...(played === undefined ? {} : { played }),
   }
+}
+
+/**
+ * The run's findings, each citation checked against the run (#624): what the report shows, and
+ * what `arena publish` (#677) refuses to publish while any is unresolved.
+ */
+export function readRunFindings(runDirectory: string, manifest: ArenaManifest): ArenaFindings {
+  const findingsFile = findingsPath(runDirectory)
+  return readFindings(existsSync(findingsFile) ? readFileSync(findingsFile, 'utf8') : undefined, {
+    runDirectory,
+    runMs: runLength(manifest),
+    threadIds: threadIdsOf(manifest),
+  })
 }
 
 function reportedNote(kind: ArenaReportedNote['kind'], note: ArenaNote, moment: ArenaMoment): ArenaReportedNote {
@@ -172,8 +180,8 @@ function playedLines(played: ArenaPlayed | undefined): string[] {
   ]
 }
 
-/** The screenshot nearest a moment, and the turn it shows. */
-function momentOf(runDirectory: string, shots: readonly ArenaShotIndexEntry[], elapsedMs: number): ArenaMoment {
+/** The screenshot nearest a moment, and the turn it shows — the report's, and a published finding's (#677). */
+export function momentOf(runDirectory: string, shots: readonly ArenaShotIndexEntry[], elapsedMs: number): ArenaMoment {
   const nearest = shots.reduce<ArenaShotIndexEntry | undefined>(
     (best, shot) =>
       best === undefined || Math.abs(shot.elapsedMs - elapsedMs) < Math.abs(best.elapsedMs - elapsedMs) ? shot : best,
