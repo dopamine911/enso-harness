@@ -106,6 +106,12 @@ export interface EnsoExtensionUiContextOptions {
   threadId: string
   /** How long an ASYNC component factory may take to produce its component. Defaults to `CUSTOM_COMPONENT_BUILD_TIMEOUT_MS`; injectable for tests. */
   componentBuildTimeoutMs?: number
+  /**
+   * The title a select's card shows, from the one its asker gave (#728): the permission engine's
+   * question led by where it stands among its tool call's questions (`permission-call-questions.ts`).
+   * Absent, every title as asked.
+   */
+  selectTitle?: ((title: string) => string) | undefined
 }
 
 /**
@@ -248,6 +254,7 @@ function createNeutralTheme(): PiTheme {
 
 export function createEnsoExtensionUiContext(options: EnsoExtensionUiContextOptions): EnsoExtensionUiContext {
   const { emit } = options
+  const selectTitle = options.selectTitle ?? ((title: string): string => title)
   const log = hostLog.with({ threadId: options.threadId })
   const componentBuildTimeoutMs = options.componentBuildTimeoutMs ?? CUSTOM_COMPONENT_BUILD_TIMEOUT_MS
 
@@ -395,7 +402,7 @@ export function createEnsoExtensionUiContext(options: EnsoExtensionUiContextOpti
       return awaitDialog(
         {
           method: 'select',
-          title,
+          title: selectTitle(title),
           options,
           ...(dialogOptions?.timeout === undefined ? {} : { timeout: dialogOptions.timeout }),
         },
