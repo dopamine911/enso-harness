@@ -16,7 +16,7 @@ import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from './c
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './components/ui/select.tsx'
 import { Textarea } from './components/ui/textarea.tsx'
 import type { ConfigureOutcome } from './follow-connection.ts'
-import { OptionDetail, optionKeywords } from './model-state.tsx'
+import { ChosenMark, OptionDetail, optionKeywords } from './model-state.tsx'
 import { PI_DEFAULT_SYSTEM_PROMPT, PromptLibraryFields, useSystemPromptChoice } from './start-session-prompts.tsx'
 
 /**
@@ -175,6 +175,7 @@ function ModelField({
             >
               <span>{option.label}</span>
               <OptionDetail option={option} />
+              <ChosenMark chosen={option.id === chosen} />
             </CommandItem>
           ))}
         </CommandList>

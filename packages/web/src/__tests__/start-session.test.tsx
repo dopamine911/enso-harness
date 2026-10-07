@@ -346,6 +346,25 @@ test('Start sends the four settings in one call — the effort the CHOSEN model 
   await mounted.unmount()
 })
 
+// Found by a Dogfood Arena run reading the dialog: the check beside the chosen model is drawn by
+// CSS, and cmdk's `aria-selected` is its keyboard highlight, on the first row — so a reader was told
+// the first model was selected whatever was chosen. The chosen row says so in words.
+test('the chosen model is named as chosen in the accessibility tree, and the mark follows a new choice', async () => {
+  const mounted = await mountStart({ outcome: 'told' })
+  const rowText = (modelId: string): string =>
+    mounted.dialog().querySelector<HTMLElement>(`[cmdk-item][data-value="${modelId}"]`)?.textContent ?? 'no row'
+  // The session runs Deep: it is the chosen one, Plain is not.
+  await eventually(() => expect(rowText('fake/deep')).toBe('Deepfake, chosen'))
+  expect(rowText('fake/plain')).toBe('Plainfake')
+  await flush(async () => {
+    mounted.dialog().querySelector<HTMLElement>('[cmdk-item][data-value="fake/plain"]')?.click()
+    await tick()
+  })
+  expect(rowText('fake/plain')).toBe('Plainfake, chosen')
+  expect(rowText('fake/deep')).toBe('Deepfake')
+  await mounted.unmount()
+})
+
 test('a refused step keeps the dialog open, says which step and why, and sends nothing', async () => {
   const mounted = await mountStart({ outcome: 'refused', step: 'model', reason: 'No API key for fake/plain' })
   await chooseTypeAndStart(mounted, 'fake/plain', 'hello there')
