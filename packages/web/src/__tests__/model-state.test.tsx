@@ -201,7 +201,9 @@ test('opening the dialog reads a fresh /commands and lists the select row’s op
   )
   expect(mounted.asked).toEqual(['/api/threads/thread%201/commands'])
   const [first, second] = mounted.rows()
-  expect(first?.textContent).toBe('Fake Onefake')
+  // The current one is marked for the eye (the check, `data-checked`) and for a reader, in words.
+  expect(first?.textContent).toBe('Fake Onefake, chosen')
+  expect(second?.textContent).toBe('Fake Twofake')
   expect(first?.getAttribute('data-checked')).toBe('true')
   expect(second?.getAttribute('data-checked')).toBe('false')
   // The group is headed by the row's description; the sr-only title says the same.
