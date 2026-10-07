@@ -12,10 +12,11 @@
 FROM mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
 
 # bun as the repository pins it; git (the project is a repository, and the run's build record reads
-# git); python3 (the scenarios' agents build Python CLIs as often as web pages).
+# git); python3 with venv and pip (the scenarios' agents build Python CLIs as often as web pages, and
+# an arena run found `python -m venv` failing for want of ensurepip).
 COPY --from=oven/bun:1.4.2@sha256:9114c058aeae42162ee16dd5084b95fe9473970bb6bcb5b232ab1630f0546895 /usr/local/bin/bun /usr/local/bin/bun
 RUN apt-get update \
-  && apt-get install --yes --no-install-recommends git python3 python-is-python3 \
+  && apt-get install --yes --no-install-recommends git python3 python-is-python3 python3-venv python3-pip \
   && rm -rf /var/lib/apt/lists/*
 
 # ⚠ The image's user takes the HOST's uid and gid (PR #678 review): the runs directory is a bind
