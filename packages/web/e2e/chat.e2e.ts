@@ -482,4 +482,37 @@ test.describe('seeded threads (#486)', () => {
     await page.goto(`/?thread=${SEEDED.outside}`)
     await expect(page.locator('[role="alert"]').filter({ hasText: 'could not open the thread:' })).toHaveCount(1)
   })
+
+  // #679: the Start dialog grew with its prompt until Start session was below the window, and the
+  // dialog could not scroll, so a click on it timed out. A prompt far past the box's cap, in the
+  // window the arena found it in and in a small one.
+  test('⚠ a long prompt leaves the Start dialog in the window and Start session clickable, at 1440×900 and in a small window (#679)', async ({
+    page,
+  }) => {
+    const longPrompt = Array.from(
+      { length: 14 },
+      (_unused, line) =>
+        `Line ${line + 1}: build and test a polished playable browser Snake game with neon arcade design and five features.`,
+    ).join('\n')
+    for (const size of [
+      { width: 1440, height: 900 },
+      { width: 800, height: 480 },
+    ]) {
+      await page.setViewportSize(size)
+      await page.goto('/')
+      const dialog = page.getByRole('dialog', { name: 'Start a session' })
+      const prompt = dialog.locator('#start-session-prompt')
+      await prompt.fill(longPrompt)
+      // The box stopped growing and scrolls inside itself.
+      expect(await prompt.evaluate((field) => field.scrollHeight > field.clientHeight), `${size.height}px`).toBe(true)
+      // Not clipped at the top either: the dialog starts inside the window.
+      expect((await dialog.boundingBox())?.y, `${size.height}px`).toBeGreaterThanOrEqual(0)
+      // In the window as it stands: unlike a click, `toBeInViewport` scrolls nothing into view.
+      const start = dialog.getByRole('button', { name: 'Start session' })
+      await expect(start).toBeInViewport({ ratio: 1 })
+      // Nothing over it: a trial click runs the actionability checks, the hit test included, and
+      // sends nothing, so no session is started against the refused `demo` provider.
+      await start.click({ trial: true })
+    }
+  })
 })

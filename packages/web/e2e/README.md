@@ -42,8 +42,9 @@ To add a seeded thread, add it to `seededHome` in `e2e-home.ts` with the turns a
 | switching threads keeps a scrolled-up reader's place | an off-screen pane keeps its scroll position (#370) |
 | every off-screen pane is inert and `content-visibility: hidden` | no pointer, focus or layout work for a pane off screen (#472) |
 | a URL naming an unused thread id | that thread is started with no alert; one outside the projects is refused by name (#378) |
+| a long prompt leaves the Start dialog in the window | at 1440×900 and 800×480, a 14-line prompt scrolls inside its capped box, the dialog is not clipped at the top, and Start session is in the window and clickable without scrolling (#679) |
 
-Each of the last four was shown failing with its fix reverted (#486).
+Each of the four before the last was shown failing with its fix reverted (#486).
 
 ⚠ **A slash command needs a running session (#484)**, and a page visit builds none. A test that drives one first builds the thread's session with `chooseMode`: the composer's mode select is a control route that builds it with no model. All four tests that drove a slash command into a session-less thread had failed since #484, unnoticed because this suite is not in CI (#604).
 
