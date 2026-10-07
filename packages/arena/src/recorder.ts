@@ -4,18 +4,30 @@ import { join } from 'node:path'
 import { redactJudgeText } from '@enso/core/judge'
 import { isListening } from '@enso/core/loopback'
 import { ensoProjectsDir, projectIdOf, projectTreesDir, realpathOrSelf } from '@enso/core/paths'
-import { type Browser, type BrowserContext, chromium, type Dialog, type Locator, type Page } from '@playwright/test'
+import {
+  type Browser,
+  type BrowserContext,
+  type CDPSession,
+  chromium,
+  type Dialog,
+  type Locator,
+  type Page,
+} from '@playwright/test'
 import type { Subprocess } from 'bun'
 import {
   ARENA_REFUSED_DETAIL,
   ARENA_RUNNER_STILL_RUNNING,
+  ARENA_VIEW,
   type ArenaAction,
+  type ArenaPoint,
   type ArenaTarget,
   createChangeBaseline,
   describeArenaAction,
   dialogForChange,
   pageForChange,
   parseArenaAction,
+  perceptionRefusal,
+  POINT_FIELDS,
   typedSecretRefusal,
   waitForPage,
 } from './actions.ts'
@@ -31,6 +43,7 @@ import {
   type ArenaActionSource,
   type ArenaEventBody,
   type ArenaPagePlace,
+  type ArenaPerception,
   type ArenaShotCause,
   type ArenaTimeline,
   openTimeline,
@@ -74,6 +87,18 @@ const VIEWPORT = { width: 1440, height: 900 } as const
 const ACTION_TIMEOUT_MS = 15_000
 /** How often a wait until change looks at the page (#637): a card is seen within about a second. */
 const CHANGE_POLL_MS = 1000
+/**
+ * Accessibility roles that name nothing a person would point at (#680): text runs and wrappers. What
+ * was under a click is the nearest node with any other role — the button, not the text inside it.
+ */
+const ROLELESS: ReadonlySet<string> = new Set([
+  'generic',
+  'none',
+  'presentation',
+  'StaticText',
+  'InlineTextBox',
+  'LineBreak',
+])
 /** The actions that do not move the page: after any other, the wait's baseline is the page it left (#637). */
 const LEAVES_THE_PAGE: ReadonlySet<ArenaAction['action']> = new Set([
   'read',
@@ -105,6 +130,8 @@ export interface ArenaRunOptions {
   readonly limits: { readonly idleMinutes?: number; readonly maxRestarts: number; readonly maxCostUsd?: number }
   readonly chromiumPath?: string
   readonly headed: boolean
+  /** How the agent perceives the page (#680): the accessibility tree (the default), or a screenshot after each action. */
+  readonly perception?: ArenaPerception
   /** The launcher's environment, which the stack inherits with `ENSO_HOME` set to `home`. */
   readonly environment: Readonly<Record<string, string | undefined>>
   /**
@@ -124,6 +151,10 @@ export interface ArenaActOutcome {
   readonly error?: string
   readonly phase?: 'running' | 'grace'
   readonly remainingMs?: number
+  /** A visual run's view after the action (#680): the screenshot the agent is shown. */
+  readonly view?: string
+  /** A native dialog open over the page (#680): a page capture never shows one, so the answer says it. */
+  readonly dialog?: { readonly type: string; readonly message: string }
 }
 
 /** What the recorder hands an agent runner: its one way into the page, and the run's end. */
@@ -249,7 +280,11 @@ export function createShooter(options: {
   readonly timeline: ArenaTimeline
   readonly redact: (text: string) => string
   readonly now?: () => number
-  /** The pause before the second try; injected by tests. */
+  /**
+   * The visual agent's view (#680), written to `path`: the tab in front scaled to `ARENA_VIEW`. Only
+   * the recorder can take it (it needs the browser's own capture); absent, a `view` is a full shot.
+   */
+  readonly view?: (path: string) => Promise<void>
   readonly sleep?: (ms: number) => Promise<void>
 }): ArenaShooter {
   const now = options.now ?? Date.now
@@ -261,7 +296,7 @@ export function createShooter(options: {
     const page = shown
     if (page === undefined) return undefined
     const at = now()
-    if (cause !== 'sample' && cause !== 'requested' && cause !== 'final') {
+    if (cause !== 'sample' && cause !== 'requested' && cause !== 'final' && cause !== 'view') {
       if (at - (lastShotAt.get(cause) ?? 0) < EVENT_SHOT_SPACING_MS) return undefined
     }
     lastShotAt.set(cause, at)
@@ -270,7 +305,8 @@ export function createShooter(options: {
     shotNumber += 1
     const capture = async (): Promise<{ readonly failed: unknown } | undefined> => {
       try {
-        await page.screenshot({ path, timeout: 10_000 })
+        if (cause === 'view' && options.view !== undefined) await options.view(path)
+        else await page.screenshot({ path, timeout: 10_000 })
         return undefined
       } catch (error) {
         return { failed: error }
@@ -441,18 +477,27 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
   const redact = (text: string): string => redactJudgeText(text, secrets())
   const timeline = openTimeline(join(runDirectory, 'timeline.jsonl'))
   const ensoBuild = ensoBuildOf(options.repoRoot)
+  const perception = options.perception ?? 'tree'
   timeline.record({
     kind: 'run-start',
     scenario: scenario.id,
     project,
     home: options.home,
+    perception,
     ...(ensoBuild === undefined ? {} : { ensoBuild }),
   })
 
   // ── Screenshots, over a page that does not exist until the browser is up ───────────────────
   // ⚠ Defined BEFORE Enso starts (PR #562 review): Enso's exit handler takes one, and Enso can
   // die while the recorder is still waiting for it to answer — before there is any page.
-  const { show, shoot } = createShooter({ directory: shotsDirectory, timeline, redact })
+  // The view is taken by the browser's own capture once there is a browser (#680); before, nothing asks for one.
+  let captureView: (path: string) => Promise<void> = () => Promise.reject(new Error('no browser yet'))
+  const { show, shoot } = createShooter({
+    directory: shotsDirectory,
+    timeline,
+    redact,
+    view: (path) => captureView(path),
+  })
 
   // ── The control record, rewritten whenever the stack it names changes ──────────────────────
   const controlFile = controlFilePath(runDirectory)
@@ -756,6 +801,150 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
     await tabPage.close()
     return here()
   }
+
+  // ── The visual agent's eyes and hands (#680) ───────────────────────────────────────────────
+  /** One DevTools session per tab, opened when first needed: the view's capture and the point's element. */
+  const devtools = new WeakMap<Page, CDPSession>()
+  const devtoolsOf = async (tabPage: Page): Promise<CDPSession> => {
+    const known = devtools.get(tabPage)
+    if (known !== undefined) return known
+    const session = await context.newCDPSession(tabPage)
+    devtools.set(tabPage, session)
+    return session
+  }
+  // The tab in front, as the window shows it, scaled by Chromium itself to the view's size.
+  captureView = async (path: string): Promise<void> => {
+    const session = await devtoolsOf(inFront())
+    const { cssVisualViewport } = await session.send('Page.getLayoutMetrics')
+    const { data } = await session.send('Page.captureScreenshot', {
+      format: 'png',
+      // The protocol's own field names, from `POINT_FIELDS`: the page's scroll offset, the whole window.
+      clip: {
+        [POINT_FIELDS.horizontal]: cssVisualViewport.pageX,
+        [POINT_FIELDS.vertical]: cssVisualViewport.pageY,
+        width: VIEWPORT.width,
+        height: VIEWPORT.height,
+        scale: 1 / ARENA_VIEW.scale,
+      },
+    })
+    writeFileSync(path, Buffer.from(data, 'base64'))
+  }
+  /**
+   * What is at a window point, as the browser's accessibility tree names it: the nearest element with
+   * a meaningful role, `button "Start session"`. The same words a tree agent reads, so the two kinds of
+   * run can be read click for click. For the record only; the agent is never told.
+   */
+  const underThePoint = async (point: ArenaPoint): Promise<string> => {
+    try {
+      const session = await devtoolsOf(inFront())
+      await session.send('DOM.getDocument', { depth: 0 })
+      const { backendNodeId } = await session.send('DOM.getNodeForLocation', {
+        [POINT_FIELDS.horizontal]: Math.round(point.left),
+        [POINT_FIELDS.vertical]: Math.round(point.top),
+        includeUserAgentShadowDOM: false,
+      })
+      const { nodes } = await session.send('Accessibility.getPartialAXTree', { backendNodeId, fetchRelatives: true })
+      const byId = new Map(nodes.map((node) => [node.nodeId, node]))
+      let node = nodes.find((candidate) => candidate.backendDOMNodeId === backendNodeId)
+      while (node !== undefined && (node.ignored || ROLELESS.has(String(node.role?.value ?? '')))) {
+        node = node.parentId === undefined ? undefined : byId.get(node.parentId)
+      }
+      if (node === undefined) return 'nothing with a role'
+      const name = String(node.name?.value ?? '')
+        .replaceAll(/\s+/g, ' ')
+        .trim()
+      const role = String(node.role?.value ?? 'unknown')
+      return name.length === 0 ? role : `${role} "${name.length > 60 ? `${name.slice(0, 59)}…` : name}"`
+    } catch {
+      return 'unknown'
+    }
+  }
+  /** What the last pointer action pointed at; read into its timeline line, then cleared. */
+  let pointedAt: string | undefined
+  /** A point of the view the agent saw, in the window's pixels. */
+  const toWindow = (point: ArenaPoint): ArenaPoint => ({
+    left: point.left * ARENA_VIEW.scale,
+    top: point.top * ARENA_VIEW.scale,
+  })
+  /** The pointer actions: a point of the view the agent saw, mapped to the window. */
+  const performWithPointer = async (action: Extract<ArenaAction, { readonly at: ArenaPoint }>): Promise<unknown> => {
+    const mouse = inFront().mouse
+    const from = toWindow(action.at)
+    pointedAt = await underThePoint(from)
+    if (action.action === 'click') {
+      await mouse.click(from.left, from.top, {
+        button: action.button ?? 'left',
+        clickCount: action.double === true ? 2 : 1,
+      })
+    } else if (action.action === 'drag') {
+      const to = toWindow(action.to)
+      await mouse.move(from.left, from.top)
+      await mouse.down()
+      await mouse.move(to.left, to.top, { steps: 12 })
+      await mouse.up()
+    } else {
+      await mouse.move(from.left, from.top)
+      if (action.action === 'scroll') await mouse.wheel(action.dx * ARENA_VIEW.scale, action.dy * ARENA_VIEW.scale)
+    }
+    return here()
+  }
+  /**
+   * What a visual agent is shown with every answer (#680): the view after the action, and a native
+   * dialog it would see over the page. ⚠ No capture while one is open: it blocks the page's rendering.
+   */
+  const forTheEyes = async (action: ArenaAction): Promise<Pick<ArenaActOutcome, 'view' | 'dialog'>> => {
+    if (perception !== 'visual' || action.action === 'note' || action.action === 'stop') return {}
+    if (pendingDialog !== undefined) {
+      return { dialog: { type: pendingDialog.type(), message: redact(pendingDialog.message()) } }
+    }
+    const view = await shoot('view')
+    return view === undefined ? {} : { view }
+  }
+  /** The actions on a control named the way a reader names it (`ArenaTarget`): a tree agent's hands. */
+  const performOnControl = async (
+    action: Extract<ArenaAction, { readonly action: 'click' | 'hover' | 'fill' | 'select' | 'press' }>,
+  ): Promise<unknown> => {
+    const timeout = ACTION_TIMEOUT_MS
+    if (action.action === 'press' && action.target === undefined) {
+      await inFront().keyboard.press(action.key)
+      return here()
+    }
+    if (!('target' in action) || action.target === undefined) throw new Error(`${action.action} needs a target`)
+    const control = locate(inFront(), action.target)
+    if (action.action === 'click') await control.click({ timeout })
+    else if (action.action === 'hover') await control.hover({ timeout })
+    else if (action.action === 'fill') await control.fill(action.text, { timeout })
+    else if (action.action === 'select') await control.selectOption(action.option, { timeout })
+    else await control.press(action.key, { timeout })
+    return here()
+  }
+  /** `read`: the tab in front as its accessibility tree — or the native dialog over it, which blocks the snapshot. */
+  const performRead = async (): Promise<unknown> => {
+    if (pendingDialog !== undefined) {
+      lastSeen.saw(await pageNow())
+      return { ...here(), dialog: { type: pendingDialog.type(), message: redact(pendingDialog.message()) } }
+    }
+    // One snapshot (PR #646 review): the page the agent reads is the wait's baseline too.
+    const snapshot = await inFront().locator('body').ariaSnapshot({ timeout: ACTION_TIMEOUT_MS })
+    lastSeen.saw(pageForChange(snapshot))
+    return { ...here(), page: snapshot }
+  }
+  /** `wait`: a fixed sleep, or a wait on the page until it changes or needs the agent (#637, #648). */
+  const performWait = async (action: Extract<ArenaAction, { readonly action: 'wait' }>): Promise<unknown> => {
+    if (action.until === undefined) {
+      await inFront().waitForTimeout(action.ms)
+      return here()
+    }
+    const waited = await waitForPage({
+      until: action.until,
+      baseline: await lastSeen.baseline(),
+      look: pageNow,
+      sleep: (ms) => inFront().waitForTimeout(ms),
+      ms: action.ms,
+      pollMs: CHANGE_POLL_MS,
+    })
+    return { ...here(), ...waited }
+  }
   const perform = async (action: ArenaAction, via: ArenaActionSource): Promise<unknown> => {
     const timeout = ACTION_TIMEOUT_MS
     switch (action.action) {
@@ -763,49 +952,25 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
         await inFront().goto(new URL(action.path, ARENA_WEB_ORIGIN).toString(), { timeout })
         return here()
       case 'click':
-        await locate(inFront(), action.target).click({ timeout })
+        return 'at' in action ? performWithPointer(action) : performOnControl(action)
+      case 'move':
+      case 'scroll':
+      case 'drag':
+        return performWithPointer(action)
+      case 'type':
+        await inFront().keyboard.type(action.text)
         return here()
       case 'hover':
-        await locate(inFront(), action.target).hover({ timeout })
-        return here()
       case 'fill':
-        await locate(inFront(), action.target).fill(action.text, { timeout })
-        return here()
       case 'select':
-        await locate(inFront(), action.target).selectOption(action.option, { timeout })
-        return here()
       case 'press':
-        if (action.target === undefined) await inFront().keyboard.press(action.key)
-        else await locate(inFront(), action.target).press(action.key, { timeout })
-        return here()
-      case 'read': {
-        // ⚠ An open native dialog blocks the page, the snapshot included: say the dialog instead.
-        if (pendingDialog !== undefined) {
-          lastSeen.saw(await pageNow())
-          return { ...here(), dialog: { type: pendingDialog.type(), message: redact(pendingDialog.message()) } }
-        }
-        // One snapshot (PR #646 review): the page the agent reads is the wait's baseline too.
-        const snapshot = await inFront().locator('body').ariaSnapshot({ timeout })
-        lastSeen.saw(pageForChange(snapshot))
-        return { ...here(), page: snapshot }
-      }
+        return performOnControl(action)
+      case 'read':
+        return performRead()
       case 'screenshot':
         return { ...here(), screenshot: await shoot('requested') }
-      case 'wait': {
-        if (action.until === undefined) {
-          await inFront().waitForTimeout(action.ms)
-          return here()
-        }
-        const waited = await waitForPage({
-          until: action.until,
-          baseline: await lastSeen.baseline(),
-          look: pageNow,
-          sleep: (ms) => inFront().waitForTimeout(ms),
-          ms: action.ms,
-          pollMs: CHANGE_POLL_MS,
-        })
-        return { ...here(), ...waited }
-      }
+      case 'wait':
+        return performWait(action)
       case 'back':
         await inFront().goBack({ timeout })
         return here()
@@ -870,7 +1035,10 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
       if (stopReason !== undefined) return { ok: false, error: `the run has stopped (${stopReason})` }
       const detail = describeArenaAction(action, secrets())
       // In the grace window only the retrospective and the stop are taken (#609); refused, it is a line.
-      const refusal = runClock.refusal(action.action) ?? typedSecretRefusal(action, secrets())
+      const refusal =
+        perceptionRefusal(action, perception) ??
+        runClock.refusal(action.action) ??
+        typedSecretRefusal(action, secrets())
       if (refusal !== undefined) {
         timeline.record(
           { kind: 'action', via, action: action.action, detail, outcome: 'failed', error: refusal, durationMs: 0 },
@@ -881,6 +1049,7 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
       const began = performance.now()
       await context.tracing.group(detail)
       try {
+        pointedAt = undefined
         const result = await perform(action, via)
         if (action.action !== 'note') {
           timeline.record(
@@ -891,12 +1060,13 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
               detail,
               outcome: 'ok',
               durationMs: Math.round(performance.now() - began),
+              ...(pointedAt === undefined ? {} : { under: pointedAt }),
             },
             here(),
           )
         }
         if (!LEAVES_THE_PAGE.has(action.action)) await lastSeen.moved()
-        return { ok: true, result }
+        return { ok: true, result, ...(await forTheEyes(action)) }
       } catch (error) {
         const message = errorLine(error, redact)
         timeline.record(
@@ -908,11 +1078,12 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
             outcome: 'failed',
             error: message,
             durationMs: Math.round(performance.now() - began),
+            ...(pointedAt === undefined ? {} : { under: pointedAt }),
           },
           here(),
         )
         await shoot('action-failed')
-        return { ok: false, error: message }
+        return { ok: false, error: message, ...(await forTheEyes(action)) }
       } finally {
         await context.tracing.groupEnd()
       }

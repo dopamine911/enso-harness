@@ -26,6 +26,7 @@ import {
   LONGEST_WAIT_MS,
   pageForChange,
   parseArenaAction,
+  perceptionRefusal,
   typedSecretRefusal,
   waitForPage,
 } from '../actions.ts'
@@ -83,6 +84,13 @@ test('every action reads back as one line, and a malformed one says what it take
     { action: 'switch-tab', tab: 1 },
     { action: 'close-tab' },
     { action: 'close-tab', tab: 2 },
+    { action: 'click', x: 512.4, y: 300 },
+    { action: 'click', x: 10, y: 20, double: true },
+    { action: 'click', x: 10, y: 20, button: 'right' },
+    { action: 'move', x: 643, y: 588 },
+    { action: 'scroll', x: 512, y: 400, dy: 600 },
+    { action: 'drag', x: 100, y: 200, toX: 300, toY: 200 },
+    { action: 'type', text: 'hello' },
   ].map((request) => {
     const parsed = parseArenaAction(request)
     if (!parsed.ok) throw new Error(parsed.error)
@@ -103,6 +111,13 @@ test('every action reads back as one line, and a malformed one says what it take
     'switch-tab 1',
     'close-tab',
     'close-tab 2',
+    'click at 512,300',
+    'double-click at 10,20',
+    'right-click at 10,20',
+    'move to 643,588',
+    'scroll 0,600 at 512,400',
+    'drag 100,200 to 300,200',
+    'type "hello"',
   ])
   for (const malformed of [
     { action: 'fill', target: { label: 'x' } },
@@ -114,9 +129,59 @@ test('every action reads back as one line, and a malformed one says what it take
     { action: 'switch-tab' },
     { action: 'switch-tab', tab: -1 },
     { action: 'close-tab', tab: 1.5 },
+    // A point must be on the 1024×640 view the agent was shown (#680).
+    { action: 'click', x: 1100, y: 10 },
+    { action: 'click', x: 10 },
+    { action: 'move', x: -1, y: 10 },
+    { action: 'scroll', x: 10, y: 10 },
+    { action: 'drag', x: 10, y: 10, toX: 20 },
+    { action: 'type', text: '' },
   ]) {
     expect(parseArenaAction(malformed)).toMatchObject({ ok: false })
   }
+})
+
+// ⚠ #680: the two perceptions are compared run against run, so neither may borrow the other's sense:
+// a visual agent never gets the tree or a control by name; a tree agent never points at a picture.
+test('⚠ each perception refuses the other’s moves, and both keep keys, tabs, waits, notes and the stop', () => {
+  const parsed = (request: object): ArenaAction => {
+    const result = parseArenaAction(request)
+    if (!result.ok) throw new Error(result.error)
+    return result.action
+  }
+  const tree = [
+    { action: 'read' },
+    { action: 'click', target: { role: 'button', name: 'Start session' } },
+    { action: 'fill', target: { label: 'Prompt' }, text: 'x' },
+    { action: 'press', key: 'Enter', target: { role: 'textbox' } },
+  ].map(parsed)
+  const visual = [
+    { action: 'click', x: 10, y: 10 },
+    { action: 'move', x: 10, y: 10 },
+    { action: 'scroll', x: 10, y: 10, dy: 5 },
+    { action: 'drag', x: 1, y: 1, toX: 2, toY: 2 },
+  ].map(parsed)
+  const both = [
+    { action: 'type', text: 'x' },
+    { action: 'press', key: 'Enter' },
+    { action: 'screenshot' },
+    { action: 'wait', ms: 5, until: 'attention' },
+    { action: 'goto', path: '/' },
+    { action: 'tabs' },
+    { action: 'note', note: 'friction', trying: 'a', happened: 'b' },
+    { action: 'stop' },
+  ].map(parsed)
+  for (const action of tree) expect(perceptionRefusal(action, 'visual')).toContain('screenshot')
+  for (const action of visual) expect(perceptionRefusal(action, 'tree')).toContain('by name')
+  for (const action of [...tree, ...both]) expect(perceptionRefusal(action, 'tree')).toBeUndefined()
+  for (const action of [...visual, ...both]) expect(perceptionRefusal(action, 'visual')).toBeUndefined()
+})
+
+test('typed text that looks like a credential is refused from type as from fill (#680)', () => {
+  const secret = 'sk-live-notarealsecret-0123456789'
+  const typed = parseArenaAction({ action: 'type', text: `my key is ${secret}` })
+  if (!typed.ok) throw new Error(typed.error)
+  expect(typedSecretRefusal(typed.action, [secret])).toContain('looks like a credential')
 })
 
 test('goto stays on the web origin and off the API', () => {

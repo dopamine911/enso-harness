@@ -2,7 +2,7 @@ import { ARENA_UI_TOOL } from './actions.ts'
 import type { ArenaEnsoBuild, ArenaHistoryMessage, ArenaTurnPlace, ArenaWorkspaceSample } from './run-state.ts'
 import { turnAt } from './run-state.ts'
 import type { ArenaSecretScan } from './secret-scan.ts'
-import type { ArenaActionSource, ArenaEvent, ArenaNoteKind, ArenaShotCause } from './timeline.ts'
+import type { ArenaActionSource, ArenaEvent, ArenaNoteKind, ArenaPerception, ArenaShotCause } from './timeline.ts'
 
 /**
  * The run's evidence manifest (#556), folded from its timeline: which screenshots exist and why,
@@ -108,6 +108,8 @@ export interface ArenaManifest {
   readonly project: string
   /** The checkout the run's Enso came from: its commit, and whether it was dirty (#608). */
   readonly ensoBuild?: ArenaEnsoBuild
+  /** How the agent perceived the page (#680): `tree`, the only kind before it was recorded, or `visual`. */
+  readonly perception: ArenaPerception
   readonly startedAt?: string
   readonly stoppedAt?: string
   /** Why the run ended — or `not stopped`: the recorder died, and this manifest was folded after. */
@@ -294,6 +296,7 @@ export function foldArenaManifest({
     scenario: start?.scenario ?? 'unknown',
     project: start?.project ?? 'unknown',
     ...(start?.ensoBuild === undefined ? {} : { ensoBuild: start.ensoBuild }),
+    perception: start?.perception ?? 'tree',
     driver,
     boundary: boundaryOf(driver, actionsBySource(events)),
     ...(start === undefined ? {} : { startedAt: start.at }),

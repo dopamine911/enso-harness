@@ -26,6 +26,26 @@ default; one under a `.enso` directory is refused), `--chromium PATH`,
 `--repo OWNER/NAME` (where bugs are filed: the checkout's GitHub `origin` by default) and
 `--headed`. Ports 5178 and 5179 must be free: the arena starts its own stack.
 
+**Perception (#680): `--perception tree` (the default) or `visual`.** How the agent under test sees
+and acts on the page:
+- **`tree`** reads the page's accessibility tree (`read`) and acts on controls by name (role and
+  accessible name, text, label, placeholder). A screen-reader user who also has a list of every
+  control. It finds broken flows, errors, wrong state, and unnamed or ambiguous controls well. It
+  can't judge what a sighted user sees, and it finds controls a sighted user might not notice.
+- **`visual`** sees a **1024×640 screenshot** of the tab in front after every action, and nothing else:
+  no tree, no control by name. It acts like a mouse and keyboard: `click` at `x`,`y` (also
+  `"double": true` or `"button": "right"`), `move`, `scroll` (`dx`, `dy`), `drag` (`toX`, `toY`),
+  `type` into whatever has focus, `press`, plus `goto`, the tabs, `wait`, `note` and `stop`.
+  - The view is 1024×640, not the 1440×900 window: GPT's image pipeline would shrink 1440×900 to
+    1229×768, and its points would land about 15% short. The recorder maps a point back to the window.
+  - Each pointer action's timeline line records what was under the point, by its accessible role
+    and name (`button "Start session"`). That's for the review only; the agent never sees it.
+  - A native dialog never shows in a page capture, so every visual answer says when one is open.
+  - It needs a model that takes images. Each mode refuses the other's moves, so the two stay comparable.
+
+Run each scenario in both modes and put the two side by side with `arena compare`, which shows each
+run's perception and agent: they find different things.
+
 Four scenarios, told only what to achieve, never which controls to use:
 - **`snake`** (the default): a Snake game with five features of the agent's choosing. One prompt and done: it exercises starting a session, approvals, and seeing what was built.
 - **`iterate`**: a to-do CLI in at least three rounds, checking each round's changes, taking one round back for another approach, and finding the work's cost and context. It reaches what Snake doesn't: the Diff view, restore, forks, Stats and Context. Its first run found #650 and #651.
