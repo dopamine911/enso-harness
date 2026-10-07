@@ -7,6 +7,7 @@ import { readRecordedMode } from './permission-modes.ts'
 import {
   ENSO_RISK_LEVELS,
   type EnsoRiskLevel,
+  EnsoSecuritySignal,
   readEnsoPermissionDenial,
   readRecordedOperatorDenial,
   sessionRiskOfTranscript,
@@ -232,6 +233,12 @@ export const EnsoEvalScorecard = Type.Object(
      */
     riskLevel: Type.Unsafe<EnsoRiskLevel>(Type.Union(ENSO_RISK_LEVELS.map((level) => Type.Literal(level)))),
     securitySignals: Type.Integer({ minimum: 0 }),
+    /**
+     * Each signal `securitySignals` counts, in the order observed (#727): its kind, the call it was
+     * observed on, what was observed, and the earlier calls it followed. A count nobody can read
+     * cannot be judged — one of a run's two was a false positive (#726), and only this says which.
+     */
+    riskSignals: Type.Array(EnsoSecuritySignal),
   },
   { additionalProperties: false },
 )
@@ -990,6 +997,7 @@ export function sessionEvalOf(input: SessionEvalInput): SessionEvalResult {
       dropped: [...EVAL_DROPPED],
       riskLevel: risk.level,
       securitySignals: risk.signals.length,
+      riskSignals: risk.signals,
     },
   }
 }

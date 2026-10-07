@@ -148,6 +148,12 @@ export interface ThreadStores {
    */
   readonly sessionRisk: WritableStore<EnsoSessionRiskChange>
   /**
+   * The Stats view is to open at the session risk's signals (#727): raised by the status bar's risk
+   * word as it asks for Stats, lowered by the session eval once it has landed there — or once its
+   * read failed — so the next visit to Stats opens at the top.
+   */
+  readonly landOnRiskSignals: WritableStore<boolean>
+  /**
    * The session's incidents (#466): every one opened, each with its resolutions, the tool families
    * suspended now, and whether a resolution ended the thread. Seeded from the history and the
    * follow's snapshot (the server's fold of the branch), folded live with the same
@@ -283,6 +289,7 @@ function createThreadStores(
     refusal: createStore<ProviderRefusalMark | undefined>(undefined),
     refusals: createStore<ReadonlyMap<string, EnsoToolRefusal>>(refusalsIn(history)),
     sessionRisk: createStore<EnsoSessionRiskChange>({ level: 'low', signals: 0 }),
+    landOnRiskSignals: createStore(false),
     incidents: createStore<EnsoSessionIncidents>(NO_SESSION_INCIDENTS),
     toolResultDescriptors,
     startSession: createStore(false),

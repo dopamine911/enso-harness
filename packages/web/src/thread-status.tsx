@@ -189,6 +189,8 @@ export interface ThreadStatusViewProps {
   readonly git?: GitOutcome | undefined
   /** The session's risk (#464): said only once it is above `low`. */
   readonly risk?: EnsoSessionRiskChange | undefined
+  /** Opens the Stats view at the risk's signals (#727); the risk is words alone when absent (a static render). */
+  readonly onRiskSignals?: (() => void) | undefined
   /** The session's incidents (#466): said while one is open, or once a resolution ended the thread. */
   readonly incidents?: EnsoSessionIncidents | undefined
 }
@@ -308,21 +310,45 @@ function RefusalWord({
   )
 }
 
+const RISK_TITLE =
+  'security signals observed in this session: what the agent did after a refusal. Evidence, not a verdict — the level blocks nothing; reaching incident opens an incident.'
+
 /**
  * The session's risk (#464), once it is above `low`: `risk high · 3 signals`. Observed evidence,
  * labelled as such — the level itself blocks nothing; reaching `incident` opens an incident, which
  * suspends tools only with halting on (#466). Its thresholds are uncalibrated (#468).
+ *
+ * ⚠ A BUTTON TO THE SIGNALS, NOT A TOOLTIP (#727). An arena agent clicked `risk high · 2 signals`
+ * and nothing opened; the tooltip it never got sent it to a Stats tab that only counted them, and
+ * its guess at the cause was wrong. It opens Stats at the session eval's list of each signal.
  */
-function RiskWord({ risk }: { readonly risk: EnsoSessionRiskChange | undefined }): React.ReactNode {
+function RiskWord({
+  risk,
+  onShow,
+}: {
+  readonly risk: EnsoSessionRiskChange | undefined
+  readonly onShow: (() => void) | undefined
+}): React.ReactNode {
   if (risk === undefined || risk.level === 'low') return null
-  const serious = risk.level === 'high' || risk.level === 'incident'
+  const tone = risk.level === 'high' || risk.level === 'incident' ? 'text-refuse' : 'text-foreground'
+  const words = `risk ${risk.level} · ${risk.signals} ${risk.signals === 1 ? 'signal' : 'signals'}`
+  if (onShow === undefined) {
+    return (
+      <span className={tone} title={RISK_TITLE}>
+        {words}
+      </span>
+    )
+  }
   return (
-    <span
-      className={serious ? 'text-refuse' : 'text-foreground'}
-      title="security signals observed in this session: what the agent did after a refusal. Evidence, not a verdict — the level blocks nothing; reaching incident opens an incident. The session eval on the Stats tab lists them."
+    <button
+      type="button"
+      className={`${tone} underline decoration-dotted underline-offset-2 hover:decoration-solid`}
+      aria-label={`${words}: show them on the Stats tab`}
+      title={`${RISK_TITLE} Open the Stats tab to read each one.`}
+      onClick={onShow}
     >
-      risk {risk.level} · {risk.signals} {risk.signals === 1 ? 'signal' : 'signals'}
-    </span>
+      {words}
+    </button>
   )
 }
 
@@ -402,6 +428,7 @@ export function ThreadStatusView({
   refusalSource,
   git,
   risk,
+  onRiskSignals,
   incidents,
 }: ThreadStatusViewProps): React.ReactNode {
   const dotClass = activityDotClass(activity)
@@ -429,7 +456,7 @@ export function ThreadStatusView({
 			    transcript says who refused and why. */}
       <RefusalWord refusal={refusal} source={refusalSource} />
       <IncidentWord incidents={incidents} />
-      <RiskWord risk={risk} />
+      <RiskWord risk={risk} onShow={onRiskSignals} />
       <span title="user messages in this transcript">
         {counts.prompts} {counts.prompts === 1 ? 'prompt' : 'prompts'}
       </span>
@@ -469,6 +496,8 @@ export interface ThreadStatusBarProps {
   readonly generating: boolean
   /** The thread's project's title as the page lists it (#551); the bar falls back to the cwd's name. */
   readonly projectTitle?: string | undefined
+  /** Asks the page for a view (#361) — the risk word asks for Stats (#727). */
+  readonly openView: (view: 'stats') => void
 }
 
 /**
@@ -476,7 +505,12 @@ export interface ThreadStatusBarProps {
  * (the chat hook is bound inside chat-screen.tsx, and this module stays free of it), the
  * thread's usage store and its disconnected flag (#119) are read from context.
  */
-export function ThreadStatusBar({ messages, generating, projectTitle }: ThreadStatusBarProps): React.ReactNode {
+export function ThreadStatusBar({
+  messages,
+  generating,
+  projectTitle,
+  openView,
+}: ThreadStatusBarProps): React.ReactNode {
   const stores = useThreadStores()
   const usage = useStore(stores.usage)
   const disconnected = useStore(stores.disconnected)
@@ -508,6 +542,10 @@ export function ThreadStatusBar({ messages, generating, projectTitle }: ThreadSt
       refusalSource={refusal?.provider}
       git={git}
       risk={risk}
+      onRiskSignals={(): void => {
+        stores.landOnRiskSignals.set(true)
+        openView('stats')
+      }}
       incidents={incidents}
     />
   )

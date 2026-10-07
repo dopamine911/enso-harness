@@ -277,9 +277,16 @@ test('the security signals are on the timeline where they were observed, and the
     // A one-liner is the call's own: at the message that made it.
     '6:security-signal:alternate-execution-path',
   ])
+  // #727: each signal the count counts, readable — kind, the call, what was seen, what it followed.
+  expect(out.scorecard.riskSignals.map((signal) => [signal.signal, signal.toolCallId, signal.after])).toEqual([
+    ['denial-retry', 'c2', ['c1']],
+    ['alternate-execution-path', 'c3', ['c1', 'c2']],
+  ])
+  expect(out.scorecard.riskSignals.every((signal) => signal.detail.length > 0)).toBe(true)
   expect(evalOf([call('c1', 'bash', { command: 'python3 -c "print(1)"' })]).scorecard).toMatchObject({
     riskLevel: 'low',
     securitySignals: 0,
+    riskSignals: [],
   })
 })
 
