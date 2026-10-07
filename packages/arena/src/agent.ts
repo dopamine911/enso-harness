@@ -61,7 +61,7 @@ export function arenaToolResult(outcome: ArenaActOutcome, imagesAccepted: boolea
  * attaches one after every action (#680) and a tree run one per `screenshot`, and none was ever
  * dropped: at about 600 KB each in base64, Opus's 68 took a 43-minute run past the API's request
  * size (413 request_too_large). Up to twice this many all go; past that the oldest are dropped this
- * many at a time, so a call carries between this many and twice it.
+ * many at a time, so a call then carries from this many to one short of twice it (4 to 7).
  *
  * ⚠ IN STEPS, NOT ONE AT A TIME (PR #725 review). A window that slid by one image on every call
  * changed the request a few messages from its end each time — inside every prefix the provider had

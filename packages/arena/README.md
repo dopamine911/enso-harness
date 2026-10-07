@@ -50,7 +50,7 @@ and acts on the page:
 
 **A model call carries at most twice `ARENA_IMAGE_STEP` screenshots (#724; `src/agent.ts`)**, in either mode.
 Up to that, all go; past it, the oldest are dropped a whole step at a time, each replaced in the request by a line
-saying one was there. In steps, so the request's start stays the same for several calls and the provider's prompt
+saying one was there, so a call then carries 4 to 7. In steps, so the request's start stays the same for several calls and the provider's prompt
 cache holds (PR #725 review). Before, every screenshot stayed, and an Opus tree run that took 68 (about 41 MB in
 base64) died at 43 minutes when the API refused the request (413 `request_too_large`).
 
