@@ -78,49 +78,57 @@ for in_progress in MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD; do
   fi
 done
 
-# ⚠ ONE HOOK AT A TIME ACROSS WORKTREES, AND THE STASH BY ITS SHA. `refs/stash` is shared by every
+# ⚠ THE SHARED STASH, TOUCHED UNDER A LOCK AND RESTORED BY ITS SHA. `refs/stash` is shared by every
 # worktree of a repository. Measured 2026-10-07, four worktrees committing at once: one hook popped
 # another's `stash@{0}` into its own tree and committed it, and one took another's push for its own
-# (`stash_before` ≠ `stash_after`). So the stash section — push, gate, pop — holds a lock in the
-# COMMON git dir, and the restore applies and drops the entry it pushed, by sha, never `stash@{0}`.
-# A lock whose holder is gone (a hook killed mid-run) is taken over; a live one is waited for.
+# (`stash_before` ≠ `stash_after`). So the two steps that read or move the shared list hold a lock
+# in the COMMON git dir: the push with the reads that bracket it, and the drop (an entry's index
+# shifts when another push lands). The gate itself runs unlocked, so worktrees still gate in
+# parallel; the restore applies the entry it pushed by sha, never `stash@{0}`, and touches only
+# this worktree.
 lock="$(git rev-parse --git-common-dir)/pre-commit-gate.lock"
+take_lock() {
+  empty_polls=0
+  until mkdir "${lock}" 2>/dev/null; do
+    holder=$(cat "${lock}/pid" 2>/dev/null || true)
+    # A holder that is gone, or one killed between its `mkdir` and writing its pid (the pid then
+    # never appears): the lock is taken over. The lock is held for a git command or two, so an
+    # empty pid three polls running is no live holder.
+    if [ -z "${holder}" ]; then empty_polls=$((empty_polls + 1)); else empty_polls=0; fi
+    if { [ -n "${holder}" ] && ! kill -0 "${holder}" 2>/dev/null; } || [ "${empty_polls}" -ge 3 ]; then
+      echo "pre-commit: the stash lock's holder (pid ${holder:-unwritten}) is gone; taking the lock over."
+      rm -rf "${lock}"
+      empty_polls=0
+      continue
+    fi
+    sleep 1
+  done
+  echo $$ >"${lock}/pid"
+}
 release_lock() {
   rm -rf "${lock}"
 }
-waited=0
-until mkdir "${lock}" 2>/dev/null; do
-  holder=$(cat "${lock}/pid" 2>/dev/null || true)
-  if [ -n "${holder}" ] && ! kill -0 "${holder}" 2>/dev/null; then
-    echo "pre-commit: the gate lock's holder (pid ${holder}) is gone; taking the lock over."
-    rm -rf "${lock}"
-    continue
-  fi
-  if [ "${waited}" -eq 0 ]; then echo "pre-commit: another worktree's commit is being gated; waiting for it."; fi
-  waited=$((waited + 1))
-  sleep 2
-done
-echo $$ >"${lock}/pid"
 
 stash_message="pre-commit gate: unstaged remainder, restored automatically"
+take_lock
 stash_before=$(git rev-parse -q --verify refs/stash || true)
 git stash push --keep-index --include-untracked --quiet --message "${stash_message}" || {
   release_lock
   exit 1
 }
 stash_after=$(git rev-parse -q --verify refs/stash || true)
+release_lock
 
 # Compare the ref, never `git stash list`: with nothing unstaged to save, `stash push` succeeds and
 # creates NOTHING, and a restore that assumed otherwise would pop a stash the developer made
-# earlier and call it cleanup. Nothing stashed, nothing to hold the lock for.
+# earlier and call it cleanup.
 if [ "${stash_before}" = "${stash_after}" ]; then
-  release_lock
   run_gate
   exit 0
 fi
 
-# Drop the entry holding this sha, wherever it now sits: a developer's own `git stash` in another
-# worktree, during the gate, may have pushed above it.
+# Drop the entry holding this sha, wherever it now sits: another worktree's push, during the gate,
+# may have landed above it.
 drop_by_sha() {
   git stash list --format='%gd %H' | while read -r entry sha; do
     if [ "${sha}" = "${stash_after}" ]; then
@@ -139,11 +147,11 @@ restore() {
   # from. Nothing is lost by it — every change, staged and unstaged, is inside the stash entry, and
   # `apply --index` puts both halves back where they were. Ignored build output is not touched.
   if git reset --hard --quiet && git stash apply --index --quiet "${stash_after}"; then
+    take_lock
     drop_by_sha
     release_lock
     exit "${status}"
   fi
-  release_lock
   echo "pre-commit: could not restore your working tree automatically." >&2
   echo "pre-commit: nothing is lost — your changes are the stash entry ${stash_after}:" >&2
   echo "pre-commit:   git stash apply --index ${stash_after}   # \"${stash_message}\"" >&2
