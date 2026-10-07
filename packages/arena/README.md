@@ -280,7 +280,8 @@ in Enso's records.
 
 | Path | What |
 |---|---|
-| `project/` | the fresh git repository the agent worked in: the application outcome |
+| `project/` | the fresh git repository the run opened in Enso. It usually stays empty: each Enso thread works in its own tree (below), not in this checkout |
+| `.enso/projects/<project id>/trees/<thread id>/` | **the application outcome**: what each thread built, one tree per thread (a compare or a fork has several). Open its `index.html`, or use the thread's Preview. The history of each tree is the snapshot store beside it, `…/snapshots/` |
 | `.enso/` | the run's own Enso home: its threads, sessions and logs as Enso wrote them (unredacted), and links to your login. Share `enso/evidence/`, not this |
 | `timeline.jsonl` | one line per event, wall clock + elapsed + URL + the thread the URL names |
 | `screenshots/` | one every 30 s (`sample`), plus one per error, dialog, navigation, failed action, page crash, Enso exit; a shot that could not be taken is a `recorder-error` line instead |

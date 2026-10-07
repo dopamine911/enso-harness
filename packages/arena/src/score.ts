@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { bundleRecordsText, type EnsoLogLine, type EnsoSessionEval, readEnsoSessionEval } from '@enso/core'
+import { gitChildEnvironment } from '@enso/core/git'
 import { projectIdOf, realpathOrSelf } from '@enso/core/paths'
 import { ARENA_REFUSED_DETAIL, ARENA_RUNNER_STILL_RUNNING } from './actions.ts'
 import { type ArenaProjectThread, projectThreads } from './evidence.ts'
@@ -719,13 +720,20 @@ function filesUnder(directory: string): number {
 /** One workspace's work: git's view when it is a repository, its files when it is not; undefined when it is gone. */
 function workspaceWork(directory: string): { readonly changedFiles: number; readonly commits: number } | undefined {
   if (!existsSync(directory)) return undefined
+  // Without the inherited repository variables: under a git hook they name the hook's repository.
+  const environment = gitChildEnvironment()
   const status = spawnSync('git', ['status', '--porcelain', '--untracked-files=all'], {
     cwd: directory,
+    env: environment,
     encoding: 'utf8',
   })
   if (status.status !== 0) return { changedFiles: filesUnder(directory), commits: 0 }
   const changedFiles = status.stdout.split('\n').filter((line) => line.trim().length > 0).length
-  const count = spawnSync('git', ['rev-list', '--count', 'HEAD'], { cwd: directory, encoding: 'utf8' })
+  const count = spawnSync('git', ['rev-list', '--count', 'HEAD'], {
+    cwd: directory,
+    env: environment,
+    encoding: 'utf8',
+  })
   // No HEAD yet is a repository with no commit: zero, not unknown.
   return { changedFiles, commits: count.status === 0 ? Number(count.stdout.trim()) : 0 }
 }

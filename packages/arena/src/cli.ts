@@ -58,6 +58,7 @@
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { gitChildEnvironment } from '@enso/core/git'
 import { redactJudgeText } from '@enso/core/judge'
 import { ensoHome, findRepoRoot } from '@enso/core/paths'
 import { ARENA_THINKING_LEVELS, arenaAgentDriver, resolveArenaModel } from './agent.ts'
@@ -180,7 +181,13 @@ const repoRoot = findRepoRoot(import.meta.url)
 function bugRepository(): string | undefined {
   const named = flag('repo')
   if (named !== undefined) return named
-  const origin = spawnSync('git', ['remote', 'get-url', 'origin'], { cwd: repoRoot, encoding: 'utf8' })
+  // Without a hook's repository variables (PR #683 review): run under another repository's hook,
+  // the origin read would be that repository's, and bugs would be filed there.
+  const origin = spawnSync('git', ['remote', 'get-url', 'origin'], {
+    cwd: repoRoot,
+    env: gitChildEnvironment(),
+    encoding: 'utf8',
+  })
   return origin.status === 0 ? githubRepositoryOf(origin.stdout) : undefined
 }
 
