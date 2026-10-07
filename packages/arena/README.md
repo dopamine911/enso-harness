@@ -45,8 +45,14 @@ and acts on the page:
   - A native dialog never shows in a page capture, so every visual answer says when one is open.
   - It needs a model that takes images. Each mode refuses the other's moves, so the two stay comparable.
   - **Its cost, as measured so far:** one view per action, which in GPT-6.1 Sol runs was 59–67 views
-    in 10–15 minutes (4.5–6.8 MB of PNG, each one an image in the model's context). The money isn't
-    measured yet: those runs were on a subscription, where Stats shows $0.0000 (#692).
+    in 10–15 minutes (4.5–6.8 MB of PNG). The money isn't measured yet: those runs were on a
+    subscription, where Stats shows $0.0000 (#692).
+
+**A model call carries at most twice `ARENA_IMAGE_STEP` screenshots (#724; `src/agent.ts`)**, in either mode.
+Up to that, all go; past it, the oldest are dropped a whole step at a time, each replaced in the request by a line
+saying one was there, so a call then carries 4 to 7. In steps, so the request's start stays the same for several calls and the provider's prompt
+cache holds (PR #725 review). Before, every screenshot stayed, and an Opus tree run that took 68 (about 41 MB in
+base64) died at 43 minutes when the API refused the request (413 `request_too_large`).
 
 Run each scenario in both modes and put the two side by side with `arena compare`, which shows each
 run's perception and agent: they find different things.

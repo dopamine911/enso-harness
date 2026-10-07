@@ -2,6 +2,7 @@ import { appendFileSync, mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   Agent,
+  type AgentMessage,
   type AgentTool,
   type AgentToolResult,
   type StreamFn,
@@ -53,6 +54,53 @@ export function arenaToolResult(outcome: ArenaActOutcome, imagesAccepted: boolea
     content.push({ type: 'image', data: readFileSync(shot).toString('base64'), mimeType: 'image/png' })
   }
   return { content, details: undefined, ...(outcome.ok ? {} : { isError: true }) }
+}
+
+/**
+ * How the screenshots a model call carries are bounded (#724), in steps of this many. A visual run
+ * attaches one after every action (#680) and a tree run one per `screenshot`, and none was ever
+ * dropped: at about 600 KB each in base64, Opus's 68 took a 43-minute run past the API's request
+ * size (413 request_too_large). Up to twice this many all go; past that the oldest are dropped this
+ * many at a time, so a call then carries from this many to one short of twice it (4 to 7).
+ *
+ * ⚠ IN STEPS, NOT ONE AT A TIME (PR #725 review). A window that slid by one image on every call
+ * changed the request a few messages from its end each time — inside every prefix the provider had
+ * cached — so a screenshot-heavy run re-read its whole conversation on each call. Dropped in steps,
+ * the request's start stays the same for this many calls in a row.
+ */
+export const ARENA_IMAGE_STEP = 4
+
+/** What an older screenshot reads as in the request, so the model knows one was there. */
+export const DROPPED_IMAGE_TEXT =
+  '[an earlier screenshot, no longer attached: only the newest few go with each request. Take one to see the page now.]'
+
+/** How many of `images` the request drops, oldest first: none up to twice the step, then whole steps. */
+function imagesDropped(images: number): number {
+  return images <= 2 * ARENA_IMAGE_STEP ? 0 : (Math.floor(images / ARENA_IMAGE_STEP) - 1) * ARENA_IMAGE_STEP
+}
+
+/**
+ * The messages a model call sends (#724): the oldest images replaced by a line saying so, as many
+ * as `imagesDropped` says. Nothing else changes, and the agent's own state is not touched: this is
+ * applied to each request.
+ */
+function withRecentImages(messages: readonly AgentMessage[]): AgentMessage[] {
+  const partsOf = (message: AgentMessage): readonly (TextContent | ImageContent | { readonly type: string })[] =>
+    'content' in message && Array.isArray(message.content) ? message.content : []
+  const images = messages.reduce(
+    (count, message) => count + partsOf(message).filter((part) => part.type === 'image').length,
+    0,
+  )
+  let toDrop = imagesDropped(images)
+  return messages.map((message): AgentMessage => {
+    if (toDrop === 0 || !partsOf(message).some((part) => part.type === 'image')) return message
+    const content = partsOf(message).map((part) => {
+      if (part.type !== 'image' || toDrop === 0) return part
+      toDrop -= 1
+      return { type: 'text' as const, text: DROPPED_IMAGE_TEXT }
+    })
+    return { ...message, content } as AgentMessage
+  })
 }
 
 /** `act`: the agent's one tool. Each call is one action on the recorder's page, recorded as the agent's. */
@@ -158,6 +206,9 @@ export function arenaAgentDriver(options: ArenaAgentOptions): ArenaDriver {
           ),
         ],
       },
+      // Only the newest screenshots go with each call (#724): every one stayed, and a 43-minute run
+      // died at 413. The conversation and its transcript keep all of them; this shapes the request.
+      transformContext: (messages) => Promise.resolve(withRecentImages(messages)),
       streamFn: options.streamFn,
       toolExecution: 'sequential',
     })

@@ -9,7 +9,14 @@ import {
   fauxText,
   fauxToolCall,
 } from '@earendil-works/pi-ai/providers/faux'
-import { arenaAgentDriver, arenaToolResult, arenaUiTool, parseModelReference } from '../agent.ts'
+import {
+  ARENA_IMAGE_STEP,
+  arenaAgentDriver,
+  arenaToolResult,
+  arenaUiTool,
+  DROPPED_IMAGE_TEXT,
+  parseModelReference,
+} from '../agent.ts'
 import { type ArenaActOutcome, type ArenaDriverSession, awaitDriverEnd } from '../recorder.ts'
 import type { ArenaEventBody } from '../timeline.ts'
 
@@ -156,6 +163,72 @@ test('a screenshot reaches a model that takes images as the picture, and an erro
   expect(arenaToolResult(outcome, false).content).toHaveLength(1)
   expect(arenaToolResult({ ok: false, error: 'no such button' }, true)).toMatchObject({ isError: true })
   expect(arenaUiTool(fakeSession(), false, () => undefined).name).toBe('act')
+})
+
+// ⚠ #724, from Opus's snake run: every screenshot the agent took stayed in its conversation and went
+// with every call — 68 of them, ~41 MB — until the API refused the request (413) at 43 minutes. And
+// PR #725 review: dropped one at a time, the request changed near its end on every call, so the
+// provider's cached prefix never held; dropped in steps, it holds for a step's worth of calls.
+test('⚠ a model call carries at most twice the step of screenshots, the oldest dropped a whole step at a time and each said, not sent (#724)', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'arena-shots-'))
+  const taking = 3 * ARENA_IMAGE_STEP + 1
+  const shots = Array.from({ length: taking }, (_, index) => {
+    const path = join(directory, `${index + 1}.png`)
+    writeFileSync(path, `${index + 1}`)
+    return path
+  })
+  // Each call's images, as their bytes, and how many were said instead of sent.
+  const calls: Array<{ readonly sent: string[]; readonly said: number }> = []
+  const recording =
+    (next: FauxResponseStep): FauxResponseStep =>
+    (context, options, state, model) => {
+      const parts = context.messages.flatMap((message) =>
+        message.role === 'toolResult' && Array.isArray(message.content) ? message.content : [],
+      )
+      calls.push({
+        sent: parts.flatMap((part) =>
+          part.type === 'image' ? [Buffer.from(part.data, 'base64').toString('utf8')] : [],
+        ),
+        said: parts.filter((part) => part.type === 'text' && part.text === DROPPED_IMAGE_TEXT).length,
+      })
+      return typeof next === 'function' ? next(context, options, state, model) : next
+    }
+  const core = scripted(
+    [
+      ...shots.map(() => recording(toolUse('act', { action: 'screenshot' }))),
+      recording(toolUse('act', { action: 'stop', reason: 'done' })),
+    ],
+    ['text', 'image'],
+  )
+  let taken = 0
+  const session = fakeSession((request) => {
+    const isShot =
+      typeof request === 'object' && request !== null && 'action' in request && request.action === 'screenshot'
+    return isShot ? { ok: true, result: { screenshot: shots[taken++] } } : { ok: true, result: {} }
+  })
+  const agentRun = arenaAgentDriver({
+    model: core.getModel(),
+    streamFn: core.streamSimple,
+    thinking: 'off',
+    brief: 'b',
+    secretValues: [],
+  })
+  expect(await agentRun(session)).toBe('it stopped the run')
+
+  // Shots `from`..`to` sent, and each one before `from` said instead.
+  const span = (from: number, to: number): { sent: string[]; said: number } => ({
+    sent: Array.from({ length: to - from + 1 }, (_, index) => String(from + index)),
+    said: from - 1,
+  })
+  const step = ARENA_IMAGE_STEP
+  expect(calls).toEqual([
+    // None, then each one, up to twice the step: all of them go.
+    ...Array.from({ length: 2 * step + 1 }, (_, count) => span(1, count)),
+    // Past it, the oldest step goes, and the same ones stay gone until the next whole step.
+    ...Array.from({ length: step - 1 }, (_, index) => span(step + 1, 2 * step + 1 + index)),
+    span(2 * step + 1, 3 * step),
+    span(2 * step + 1, 3 * step + 1),
+  ])
 })
 
 // ⚠ #680: a visual agent knows the page only by the view each answer carries. A failed action is
