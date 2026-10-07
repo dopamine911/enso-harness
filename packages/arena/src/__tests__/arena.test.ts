@@ -27,6 +27,7 @@ import {
   pageForChange,
   parseArenaAction,
   perceptionRefusal,
+  questionOf,
   typedSecretRefusal,
   waitForPage,
 } from '../actions.ts'
@@ -408,6 +409,59 @@ test('⚠ the next card after an answer returns; idle changing as the dialog clo
   // A card nobody answers: the page holds still, and the wait runs to its limit unchanged.
   expect(await attentionWait(firstCard, [firstCard])).toEqual({ changed: false, waitedMs: 10_000 })
   expect(await attentionWait(firstCard, [dialogForChange('confirm', 'Leave?')])).toMatchObject({ attention: 'dialog' })
+})
+
+/**
+ * A question card as a real page read shows it (`EnsoDialogCard`), copied from an arena transcript:
+ * its group named by the question's title, and its first line going on with the dialog's method.
+ */
+const cardFor = (title: string): string =>
+  `  - 'group "Permission Required ${title}"':\n    - text: pi is asking select\n    - button "Yes"`
+
+// ⚠ #693, from two arena runs: after a Yes the next card was on screen before the move's look, so the
+// baseline already asked it, the page held still, and the wait sat out its minute behind a question.
+test('⚠ a question the agent had not seen before its move returns at once; the one it just answered does not', async () => {
+  const asking = (title: string): string => barPage('running bash', true, cardFor(title))
+  const holdStill = (page: string, before: string | undefined): ReturnType<typeof waitForPage> =>
+    waitForPage({
+      until: 'attention',
+      baseline: page,
+      before,
+      look: () => Promise.resolve(page),
+      ms: 10_000,
+      pollMs: 1000,
+      ...sleepingClock(),
+    })
+  // The agent answered `sort`; the card for `node *` came before the move's look.
+  expect(await holdStill(asking('command : node *'), asking('command : sort'))).toEqual({
+    changed: true,
+    waitedMs: 0,
+    attention: 'question',
+  })
+  // It sent a prompt with no question open, and a card came before the look: new, so at once too.
+  expect(await holdStill(asking('command : sort'), barPage('working'))).toMatchObject({
+    waitedMs: 0,
+    attention: 'question',
+  })
+  // ⚠ The SAME question still on screen — the card just answered, on its way out — is no return: a
+  // second answer to it would be a double approval. The #648 rule stands, and a still page waits out.
+  expect(await holdStill(asking('command : sort'), asking('command : sort'))).toEqual({
+    changed: false,
+    waitedMs: 10_000,
+  })
+  // With nothing known from before the move (the agent read the page since), the #648 rule stands too.
+  expect(await holdStill(asking('command : node *'), undefined)).toEqual({ changed: false, waitedMs: 10_000 })
+
+  // The baseline keeps what the agent saw before each move: its read, then the page each move left.
+  let page = asking('command : sort')
+  const lastSeen = createChangeBaseline(() => Promise.resolve(page))
+  lastSeen.saw(page)
+  page = asking('command : node *')
+  await lastSeen.moved()
+  expect(questionOf(lastSeen.before() ?? '')).toContain('command : sort')
+  expect(questionOf(await lastSeen.baseline())).toContain('command : node *')
+  lastSeen.saw(page)
+  expect(lastSeen.before()).toBeUndefined()
 })
 
 test('what the agent typed reaches the timeline redacted', () => {
@@ -849,6 +903,26 @@ test('the runner gets the assignment alone, and its review is a prompt of its ow
   expect(review).toContain('# Phase 1: review the experience')
   expect(review).toContain('# Phase 2: file the bugs')
   expect(review).not.toContain('Phase 3')
+})
+
+// ⚠ #680: a tree agent never saw the page, so a review must not take its account as a judgment of how
+// the page looks; a visual agent's view is in the run, and its judgments are checked against it.
+test('⚠ the review says what the run’s perception allows it to judge, and where the work really is', () => {
+  const tree = arenaReviewBrief({ runDirectory: '/runs/r', perception: 'tree' }, 'other')
+  const visual = arenaReviewBrief({ runDirectory: '/runs/r', perception: 'visual' }, 'other')
+  expect(tree).toContain('it never\nsaw the page')
+  expect(tree).toContain("Don't judge how the page looks")
+  expect(visual).toContain('saw the page only as screenshots')
+  expect(visual).toContain('(`under`)')
+  // A run from before perception was recorded was a tree run.
+  expect(arenaReviewBrief({ runDirectory: '/runs/r' }, 'other')).toContain('it never\nsaw the page')
+  // The outcome is each thread's tree, not `project/` (#681).
+  expect(tree).toContain('.enso/projects/<project id>/trees/<thread id>/')
+  // PR #695 review: one source for both halves — a visual command brief's moves and its review agree.
+  const command = arenaBrief(SNAKE_SCENARIO, 'command', { runDirectory: '/runs/r', perception: 'visual' })
+  expect(command).toContain('{"action":"click","x":512,"y":300}')
+  expect(command).not.toContain('{"action":"read"}')
+  expect(command).toContain('saw the page only as screenshots')
 })
 
 test('without a run or a repository the review asks for them instead of guessing', () => {

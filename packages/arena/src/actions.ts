@@ -189,6 +189,25 @@ function linesUnder(page: string, header: string): string[] {
   return lines.slice(start + 1, end === -1 ? undefined : end).map((line) => line.trim())
 }
 
+/**
+ * The line a question card's body starts with (`EnsoDialogCard` in web's `chat-screen.tsx`).
+ * ⚠ If the card's words change, `questionOf` finds no question in either page, and the wait falls
+ * back to its #648 rule — slower, never wrong.
+ */
+const QUESTION_CARD_LINE = '- text: pi is asking'
+
+/**
+ * Which question a page asks (#693): the card's own line, its group named by the question's title
+ * (`group "Permission Required tool : bash … command : …"`), or undefined when none is open. Two
+ * cards with one title read as one question, so the safe rule applies to them.
+ */
+export function questionOf(page: string): string | undefined {
+  const lines = page.split('\n')
+  // A prefix: the card's first line goes on with the dialog's method (`pi is asking select`).
+  const body = lines.findIndex((line) => line.trim().startsWith(QUESTION_CARD_LINE))
+  return body > 0 ? lines[body - 1]?.trim() : undefined
+}
+
 /** What a wait on the page came to: whether the page changed, after `waitedMs`, and — for attention — why it returned. */
 export interface ArenaPageWait {
   readonly changed: boolean
@@ -213,11 +232,18 @@ export interface ArenaPageWait {
  *   still while it waits (measured, #637), so a page that changed and still asks is the NEXT
  *   question: after an approval, a quick tool runs and the next card arrives inside one look —
  *   live, the wait had sat out its minute behind that card.
+ * - ⚠ the next question already in the baseline (#693): it arrived between the agent's click and
+ *   the look the move took, so the page holds still and nothing above returns. `before` is the page
+ *   the agent saw before that move: a baseline asking a question it did not (`questionOf`) is new,
+ *   and returns at once. The SAME question still on screen — the card the agent just answered, on
+ *   its way out — is not: returning then would invite a second answer to it.
  * A run begun and ended between two looks is missed: the wait then runs to its limit.
  */
 export async function waitForPage(options: {
   readonly until: ArenaWaitUntil
   readonly baseline: string
+  /** The page the agent saw before its last move, when it moved since it last looked (#693). */
+  readonly before?: string | undefined
   readonly look: () => Promise<string>
   readonly sleep: (ms: number) => Promise<void>
   readonly ms: number
@@ -228,6 +254,12 @@ export async function waitForPage(options: {
   const started = now()
   const waited = (): number => now() - started
   const startedIn = attentionOf(options.baseline)
+  if (options.until === 'attention' && startedIn === 'question' && options.before !== undefined) {
+    const asked = questionOf(options.baseline)
+    if (asked !== undefined && asked !== questionOf(options.before)) {
+      return { changed: true, waitedMs: 0, attention: 'question' }
+    }
+  }
   let changed = false
   let sawWork = startedIn === undefined
   while (waited() < options.ms) {
@@ -253,6 +285,8 @@ export interface ArenaChangeBaseline {
   readonly moved: () => Promise<void>
   /** The page a wait starts from: the last seen, or — with none — the page as the wait finds it. */
   readonly baseline: () => Promise<string>
+  /** What the agent saw before its last move, when it has not looked since (#693); undefined otherwise. */
+  readonly before: () => string | undefined
 }
 
 /**
@@ -267,14 +301,20 @@ export interface ArenaChangeBaseline {
  */
 export function createChangeBaseline(look: () => Promise<string>): ArenaChangeBaseline {
   let seen: string | undefined
+  let seenBeforeMove: string | undefined
   return {
     saw: (page) => {
       seen = page
+      seenBeforeMove = undefined
     },
     moved: async () => {
+      // What the agent saw before this move: its read, or — a visual agent, which never reads — the
+      // view after its previous action, which is the page as the previous move left it.
+      seenBeforeMove = seen
       seen = await look().catch(() => undefined)
     },
     baseline: async () => seen ?? (await look()),
+    before: () => seenBeforeMove,
   }
 }
 
