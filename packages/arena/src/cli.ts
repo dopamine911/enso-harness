@@ -245,14 +245,8 @@ async function driverNamed(
   }
   const thinking = ARENA_THINKING_LEVELS.find((level) => level === (flag('thinking') ?? 'medium'))
   if (thinking === undefined) fail(`--thinking takes one of ${ARENA_THINKING_LEVELS.join(', ')}`)
-  const { model, streamFn } = await resolveArenaModel(operatorHome, reference).catch((error: unknown) =>
-    fail(error instanceof Error ? error.message : String(error)),
-  )
+  const { model, streamFn } = await agentModelNamed(reference)
   const perception = perceptionNamed()
-  // A visual agent knows the page only by its screenshots: a model that cannot take one cannot see.
-  if (perception === 'visual' && !model.input.includes('image')) {
-    fail(`--perception visual needs a model that takes images, and ${reference} does not`)
-  }
   const brief = arenaBrief(scenario, 'tool', { perception })
   const driver = arenaAgentDriver({
     model,
@@ -288,11 +282,26 @@ function agentsNamed(): readonly (string | undefined)[] {
   if (flag('agent') !== undefined || rest.includes('--manual')) {
     fail('--agents runs one run per agent: drop --agent and --manual')
   }
-  const references = many
-    .split(',')
-    .map((reference) => reference.trim())
-    .filter((reference) => reference !== '')
-  return references.length > 0 ? references : fail('--agents takes PROVIDER/MODEL,PROVIDER/MODEL…')
+  const references = many.split(',').map((reference) => reference.trim())
+  // An empty entry (`a,,b`, a trailing comma) is a typo, not a model to skip.
+  if (references.some((reference) => reference === ''))
+    fail(`--agents takes PROVIDER/MODEL,PROVIDER/MODEL…, not "${many}"`)
+  return references
+}
+
+/**
+ * The agent's model, resolved and checked against the run's perception — the one check a single
+ * run and a matrix's up-front pass both make (PR #705 review). A visual agent knows the page only by
+ * its screenshots: a model that cannot take one cannot see.
+ */
+async function agentModelNamed(reference: string): Promise<Awaited<ReturnType<typeof resolveArenaModel>>> {
+  const resolved = await resolveArenaModel(operatorHome, reference).catch((error: unknown) =>
+    fail(`${reference}: ${error instanceof Error ? error.message : String(error)}`),
+  )
+  if (perceptionNamed() === 'visual' && !resolved.model.input.includes('image')) {
+    fail(`--perception visual needs a model that takes images, and ${reference} does not`)
+  }
+  return resolved
 }
 
 /** What each agent's run is likely to cost, from earlier runs under `--out` (#674): measured, never guessed. */
@@ -332,12 +341,9 @@ async function start(): Promise<void> {
   const agents = agentsNamed()
   const matrix = agents.filter((agent) => agent !== undefined)
   if (matrix.length > 1) {
-    // Every model resolves before the first run: a bad third model must not fail after two paid runs.
-    for (const agent of matrix) {
-      await resolveArenaModel(operatorHome, agent).catch((error: unknown) =>
-        fail(`${agent}: ${error instanceof Error ? error.message : String(error)}`),
-      )
-    }
+    // Every model resolves and suits the perception before the first run: a bad third model must
+    // not fail after two paid runs.
+    for (const agent of new Set(matrix)) await agentModelNamed(agent)
     sayEstimates([...new Set(matrix)])
   }
   const runs: string[] = []
