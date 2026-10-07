@@ -301,15 +301,16 @@ test("⚠ a new thread's first prompt asks for no git state or tree until the se
 
 // ⚠ #619: a thread's work is in its own tree (#551), and the arena runs found no way to reach it —
 // nor to play the game it built. The bar's "own tree" opens what the thread built: the tree's path,
-// and each of its pages as a link to the server's sandboxed preview, in a new tab, holding no handle
-// on this page.
-test('⚠ "own tree" opens what the thread built: its path, and each page as a sandboxed preview in a new tab (#619)', async () => {
+// and each of its pages as a link on the thread's own preview origin (#713), in a new tab, holding no
+// handle on this page.
+test('⚠ "own tree" opens what the thread built: its path, and each page on its preview origin in a new tab (#619, #713)', async () => {
   const pane = await mountPane({
     server: {
       pages: () => ({
         path: '/home/me/.enso/projects/p/trees/t',
         pages: ['index.html', 'game/my page.html'],
         truncated: false,
+        previewOrigin: 'http://127.0.0.1:41234',
       }),
     },
   })
@@ -334,10 +335,9 @@ test('⚠ "own tree" opens what the thread built: its path, and each page as a s
     link.getAttribute('target'),
     link.getAttribute('rel'),
   ])
-  const id = encodeURIComponent(pane.stores.threadId)
   expect(links).toEqual([
-    [`/preview/threads/${id}/index.html`, '_blank', 'noopener noreferrer'],
-    [`/preview/threads/${id}/game/my%20page.html`, '_blank', 'noopener noreferrer'],
+    ['http://127.0.0.1:41234/index.html', '_blank', 'noopener noreferrer'],
+    ['http://127.0.0.1:41234/game/my%20page.html', '_blank', 'noopener noreferrer'],
   ])
 
   // PR #635 review: a refused copy is said; a done one says Copied.
@@ -424,7 +424,14 @@ test('⚠ the bar offers "Preview" once the thread’s tree holds a page, and no
 // preview — opened a second preview tab. Open preview closes the panel and hands focus to the composer.
 test('⚠ Open preview closes the panel and puts focus in the composer (#714)', async () => {
   const pane = await mountPane({
-    server: { pages: () => ({ path: '/trees/t', pages: ['index.html'], truncated: false }) },
+    server: {
+      pages: () => ({
+        path: '/trees/t',
+        pages: ['index.html'],
+        truncated: false,
+        previewOrigin: 'http://127.0.0.1:41234',
+      }),
+    },
   })
   await pane.settle({ ...SNAPSHOT_LIVE, tree: true })
   const preview = await eventually(() => {

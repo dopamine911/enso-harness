@@ -81,10 +81,9 @@ browser shows it, and every action goes to the tab in front. `tabs` lists the op
 (Enso's is 0, and a number is never reused), `switch-tab` brings one to the front, and `close-tab`
 closes one; the last tab stays open. Every tab is watched and traced. A timeline line names its tab
 when it is not the first, and event screenshots are taken of the tab in front. What the built page
-itself logs — in Preview's tab, or on any page of another origin, such as a dev server the work
-started — is scored under **application**, as a warning: a bug in the game doesn't fail Enso's run.
-Two failures there are still Enso's: a 5xx serving the page, and a script Preview's sandbox blocks
-by CORS (#689).
+itself logs — in Preview's tab, served on the thread's own origin (#713), or on any page of another
+origin, such as a dev server the work started — is scored under **application**, as a warning: a
+bug in the game doesn't fail Enso's run. A 5xx serving the page is still Enso's.
 
 **Each run has its own Enso home, `<run>/.enso` (#610).** It holds the run's projects, threads, logs
 and Stats, so the agent under test sees only the run's project, the evidence covers only the run,

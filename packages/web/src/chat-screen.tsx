@@ -1256,8 +1256,8 @@ function PromptActions({
                 <DialogTitle>Restore files to here?</DialogTitle>
                 <DialogDescription>
                   The thread's files go back to how they were at {promptName ?? 'this prompt'}. The conversation is not
-                  changed, and the current files are kept as a safety snapshot: "Undo last restore" on the notice puts
-                  them back.
+                  changed; pi is told on your next prompt that the files went back (#652). The current files are kept as
+                  a safety snapshot: "Undo last restore" on the notice puts them back.
                 </DialogDescription>
               </DialogHeader>
               <DialogFooter>

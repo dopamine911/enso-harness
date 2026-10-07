@@ -21,7 +21,7 @@ import { join } from 'node:path'
 import type { Page } from '@playwright/test'
 import { expect, test } from '@playwright/test'
 import { e2eHome, SEEDED_TITLES, SEEDED_TURNS } from './e2e-home.ts'
-import { OUTPUT_DIRECTORY } from './playwright.config.ts'
+import { OUTPUT_DIRECTORY, WEB_ORIGIN } from './playwright.config.ts'
 
 const SCREENSHOT_DIRECTORY = join(OUTPUT_DIRECTORY, 'screenshots')
 
@@ -516,30 +516,44 @@ test.describe('seeded threads (#486)', () => {
     }
   })
 
-  // #689: a module script is fetched in CORS mode, and the sandboxed preview's origin is opaque, so
-  // every `<script type="module">` and `import` was refused and an ES-module page never ran. The
-  // page's own `fetch()` and the control plane stay out of its reach (#619).
-  test('⚠ a preview page built of ES modules runs, and its sandbox still keeps fetch() and Enso out of reach (#689)', async ({
+  // #713, from two arena runs: in a sandbox under Enso's origin, a built page had no `localStorage`
+  // and its root-relative `/app.mjs` missed, so it showed broken. Each thread's preview is an origin
+  // of its own now: the page runs as it would anywhere, and still cannot reach Enso (#717).
+  test('⚠ a preview page runs on its own origin — a root-relative module, localStorage — and still cannot reach Enso (#713)', async ({
     page,
   }) => {
     const errors: string[] = []
     page.on('console', (message) => {
       if (message.type() === 'error') errors.push(message.text())
     })
-    await page.goto(`/preview/threads/${SEEDED.modules}/index.html`)
-    await expect(page.locator('#status')).toHaveText('both modules ran')
+    const listing = (await (await page.request.get(`/api/threads/${SEEDED.modules}/tree`)).json()) as {
+      readonly previewOrigin?: string
+    }
+    const previewOrigin = listing.previewOrigin ?? 'no origin'
+    expect(previewOrigin).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/)
+    await page.goto(`${previewOrigin}/index.html`)
+    await expect(page.locator('#status')).toHaveText('both modules ran, best 12')
     expect(errors).toEqual([])
 
-    // What the server answers `/api/` from this origin, writes included, is the route tests' to pin;
-    // here, what the page itself can read.
-    const reached = await page.evaluate(async () => {
-      const attempt = (path: string): Promise<string> =>
-        fetch(path).then(
+    // Its origin is its own, its files are its to read, and a request it sends Enso's control plane
+    // to escalate a fresh thread builds nothing: the server refuses another origin (#717).
+    const freshThread = randomUUID()
+    const reached = await page.evaluate(
+      async ({ ensoOrigin, threadId }) => {
+        const ownFile = await fetch('/app.mjs').then(
           (response) => `read ${response.status}`,
           () => 'refused',
         )
-      return { origin: window.origin, ownFile: await attempt('app.mjs'), control: await attempt('/api/about') }
-    })
-    expect(reached).toEqual({ origin: 'null', ownFile: 'refused', control: 'refused' })
+        await fetch(`${ensoOrigin}/api/threads/${threadId}/mode`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain' },
+          body: JSON.stringify({ mode: 'bypassPermissions' }),
+        }).catch(() => undefined)
+        return { origin: window.origin, ownFile }
+      },
+      { ensoOrigin: WEB_ORIGIN, threadId: freshThread },
+    )
+    expect(reached).toEqual({ origin: previewOrigin, ownFile: 'read 200' })
+    expect((await page.request.get(`/api/threads/${freshThread}`)).status()).toBe(404)
   })
 })
