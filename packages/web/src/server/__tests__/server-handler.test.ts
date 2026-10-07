@@ -1553,6 +1553,58 @@ test('⚠ a preview serves the tree under an opaque-origin sandbox, the page can
   expect(built.length).toBe(0)
 })
 
+// #689: a module script — `<script type="module">`, every `import` — is fetched in CORS mode, so the
+// sandboxed page asks for its own `app.mjs` with `Origin: null`. Refused by the origin gate and sent
+// with no CORS answer, no ES-module page ran in Preview. The script destination, which the browser
+// sets and a page's `fetch()` cannot, is admitted and answered for `null`; the page's `fetch()` and
+// every `/api/` request with the same headers stay refused.
+test('⚠ a preview page loads its module scripts from its opaque origin, and nothing else is opened to it (#689)', async () => {
+  const tree = mkdtempSync(join(tmpdir(), 'enso-preview-modules-'))
+  writeFileSync(join(tree, 'index.html'), '<!doctype html><script type="module" src="app.mjs"></script>')
+  writeFileSync(join(tree, 'app.mjs'), "import { step } from './logic.mjs'\nstep()")
+  writeFileSync(join(tree, 'logic.mjs'), 'export const step = () => 1')
+  const { url, built } = await startWith(
+    settlesAtOnce,
+    { built: { transcript: STORED_BRANCH, modified: new Date(0), firstMessage: 'snake', cwd: tree } },
+    (host) => host,
+    { launch: tree },
+  )
+  const moduleLoader = { Origin: 'null', 'Sec-Fetch-Dest': 'script', 'Sec-Fetch-Mode': 'cors' }
+  const answer = async (
+    path: string,
+    headers: Record<string, string>,
+    method = 'GET',
+  ): Promise<[number, string | null, string]> => {
+    const response = await fetch(`${url}${path}`, { method, headers })
+    return [response.status, response.headers.get('access-control-allow-origin'), await response.text()]
+  }
+
+  expect(await answer('/preview/threads/built/app.mjs', moduleLoader)).toEqual([
+    200,
+    'null',
+    "import { step } from './logic.mjs'\nstep()",
+  ])
+  expect(await answer('/preview/threads/built/logic.mjs', moduleLoader)).toEqual([
+    200,
+    'null',
+    'export const step = () => 1',
+  ])
+  // A module that is not there is the 404 the page can see, not a CORS block in its place.
+  expect((await answer('/preview/threads/built/missing.mjs', moduleLoader)).slice(0, 2)).toEqual([404, 'null'])
+
+  // The page's own fetch() of the same file says `Sec-Fetch-Dest: empty`: still refused, as the panel says.
+  const fromFetch = { ...moduleLoader, 'Sec-Fetch-Dest': 'empty' }
+  expect((await answer('/preview/threads/built/app.mjs', fromFetch)).slice(0, 2)).toEqual([403, null])
+  // A named cross-site origin is no opaque page of Enso's: refused, script or not.
+  const crossSite = { ...moduleLoader, Origin: 'http://evil.example' }
+  expect((await answer('/preview/threads/built/app.mjs', crossSite)).slice(0, 2)).toEqual([403, null])
+
+  // The control plane: the module loader's headers open nothing under /api/, read or write.
+  expect((await answer('/api/threads/built/tree', moduleLoader)).slice(0, 2)).toEqual([403, null])
+  expect((await answer('/api/threads/built/mode', moduleLoader, 'POST')).slice(0, 2)).toEqual([403, null])
+  expect(built.length).toBe(0)
+})
+
 test('the dev page and the header-less CLIs are unaffected', async () => {
   const { url } = await startWith(settlesAtOnce)
   for (const origin of ['http://127.0.0.1:5178', 'http://localhost:5178', 'http://127.0.0.1:5179']) {
