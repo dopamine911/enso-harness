@@ -2933,6 +2933,8 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
    * it is trusted, and the catalogue serves threads of every project.
    */
   function configuredDefaultModel(): string | undefined {
+    // The cwd argument only locates PROJECT settings, which an untrusted manager never reads:
+    // the agent dir stands in for it, so only the global `settings.json` is read.
     const settings = SettingsManager.create(agentDir, agentDir, { projectTrusted: false })
     const provider = settings.getDefaultProvider()
     const model = settings.getDefaultModel()

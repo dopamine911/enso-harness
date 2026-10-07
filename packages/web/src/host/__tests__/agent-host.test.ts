@@ -2098,6 +2098,8 @@ test('the catalogue’s model row carries the configured default when it is offe
   // A built-in model the account's list replaced, and no settings at all: no value, the first is taken.
   expect((await modelRowWith({ defaultProvider: 'openai', defaultModel: 'gpt-5.5' }))?.value).toBeUndefined()
   expect((await modelRowWith(undefined))?.value).toBeUndefined()
+  // Half a default is none, as for pi (`findInitialModel` uses the pair only when both are set).
+  expect((await modelRowWith({ defaultModel: 'gpt-account' }))?.value).toBeUndefined()
 })
 
 // ⚠ PR #561 review: a prompt that finds the thread held JOINS the holder (#75), and pi starts a run
