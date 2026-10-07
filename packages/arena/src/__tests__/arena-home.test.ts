@@ -24,9 +24,11 @@ import {
   arenaSecretValues,
   defaultArenaOut,
   isGuardedForAgent,
+  parseEnsoModel,
   prepareRunHome,
   reconcileLinkedFiles,
   runHomeOf,
+  setRunHomeModel,
 } from '../run-home.ts'
 import { type ArenaSecretScan, scanRunForSecrets, withEarlierHits, zipEntries } from '../secret-scan.ts'
 
@@ -89,6 +91,36 @@ test('a file the operator home lacks is left out of the run home, never created'
   expect(existsSync(ensoSecretsPath(home))).toBe(false)
   expect(existsSync(join(ensoAgentDir(home), 'auth.json'))).toBe(false)
   expect(existsSync(join(ensoAgentDir(home), 'settings.json'))).toBe(false)
+})
+
+// #674: Enso's model for a run is the run home's own settings — never the operator's, whatever the
+// operator's file holds besides.
+test('a run sets the model Enso starts on in its own settings, keeping the rest; the operator’s are untouched', () => {
+  const root = mkdtempSync(join(tmpdir(), 'arena-home-model-'))
+  const operator = operatorHome(root)
+  writeFileSync(join(ensoAgentDir(operator), 'settings.json'), '{"defaultModel":"m","theme":"dark"}')
+  const home = prepareRunHome(join(root, 'run'), operator)
+  // An id may hold a slash of its own (`openrouter/anthropic/claude-…`).
+  setRunHomeModel(home, parseEnsoModel('openrouter/anthropic/claude-sonnet-5-5'))
+  expect(JSON.parse(readFileSync(join(ensoAgentDir(home), 'settings.json'), 'utf8'))).toEqual({
+    defaultModel: 'anthropic/claude-sonnet-5-5',
+    defaultProvider: 'openrouter',
+    theme: 'dark',
+  })
+  expect(readFileSync(join(ensoAgentDir(operator), 'settings.json'), 'utf8')).toBe(
+    '{"defaultModel":"m","theme":"dark"}',
+  )
+  // A run home with no settings gets a file of the two.
+  const bare = join(root, 'bare', '.enso')
+  mkdirSync(ensoAgentDir(bare), { recursive: true })
+  setRunHomeModel(bare, parseEnsoModel('anthropic/claude-fable-5'))
+  expect(JSON.parse(readFileSync(join(ensoAgentDir(bare), 'settings.json'), 'utf8'))).toEqual({
+    defaultProvider: 'anthropic',
+    defaultModel: 'claude-fable-5',
+  })
+  for (const wrong of ['claude-fable-5', '/claude', 'anthropic/']) {
+    expect(() => parseEnsoModel(wrong)).toThrow('provider/id')
+  }
 })
 
 /** What pi-multi-account does to write a credential file (`auth-file-transaction.ts`): a temp file, renamed onto the path. */

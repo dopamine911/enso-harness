@@ -24,9 +24,9 @@
 # when the hook holds the real index, and the run says which mode it took.
 #
 # RECOVERY. The stash is a normal stash entry with a named message, not a detached object: if the
-# automatic restore ever fails, the working tree is one `git stash pop --index` away, and the hook
-# prints that command rather than leaving you to guess. Ignored paths (`coverage/`, `dist-types/`)
-# are never stashed, so the gate's own output is untouched by any of this.
+# automatic restore ever fails, the working tree is one `git stash apply --index <sha>` away, and the
+# hook prints that command, with the sha, rather than leaving you to guess. Ignored paths
+# (`coverage/`, `dist-types/`) are never stashed, so the gate's own output is untouched by any of this.
 #
 # WHY THE MANAGER IS DETECTED RATHER THAN NAMED. This file is copied VERBATIM into the generated
 # project — it is not a template — so the package manager cannot be interpolated into it. Hardcoding
@@ -78,10 +78,46 @@ for in_progress in MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD; do
   fi
 done
 
+# ⚠ THE SHARED STASH, TOUCHED UNDER A LOCK AND RESTORED BY ITS SHA. `refs/stash` is shared by every
+# worktree of a repository. Measured 2026-10-07, four worktrees committing at once: one hook popped
+# another's `stash@{0}` into its own tree and committed it, and one took another's push for its own
+# (`stash_before` ≠ `stash_after`). So the two steps that read or move the shared list hold a lock
+# in the COMMON git dir: the push with the reads that bracket it, and the drop (an entry's index
+# shifts when another push lands). The gate itself runs unlocked, so worktrees still gate in
+# parallel; the restore applies the entry it pushed by sha, never `stash@{0}`, and touches only
+# this worktree.
+#
+# The lock is a SYMLINK whose target is the holder's pid, made by one `ln -s` — atomic, and failing
+# when the lock exists — so a lock never exists without its holder named (PR #703 review: a
+# directory lock with a pid written after it left a window in which a live but stalled holder read
+# as gone). A holder that is gone (a hook killed mid-run) is taken over. The removal, and the
+# release, check the link still names that holder: a waiter does not remove a lock another waiter
+# has just taken (between the check and the removal lies one command, not a stall of seconds).
+lock="$(git rev-parse --git-common-dir)/pre-commit-gate.lock"
+take_lock() {
+  until ln -s "$$" "${lock}" 2>/dev/null; do
+    holder=$(readlink "${lock}" 2>/dev/null || true)
+    if [ -n "${holder}" ] && ! kill -0 "${holder}" 2>/dev/null; then
+      echo "pre-commit: the stash lock's holder (pid ${holder}) is gone; taking the lock over."
+      if [ "$(readlink "${lock}" 2>/dev/null || true)" = "${holder}" ]; then rm -f "${lock}"; fi
+      continue
+    fi
+    sleep 1
+  done
+}
+release_lock() {
+  if [ "$(readlink "${lock}" 2>/dev/null || true)" = "$$" ]; then rm -f "${lock}"; fi
+}
+
 stash_message="pre-commit gate: unstaged remainder, restored automatically"
+take_lock
 stash_before=$(git rev-parse -q --verify refs/stash || true)
-git stash push --keep-index --include-untracked --quiet --message "${stash_message}"
+git stash push --keep-index --include-untracked --quiet --message "${stash_message}" || {
+  release_lock
+  exit 1
+}
 stash_after=$(git rev-parse -q --verify refs/stash || true)
+release_lock
 
 # Compare the ref, never `git stash list`: with nothing unstaged to save, `stash push` succeeds and
 # creates NOTHING, and a restore that assumed otherwise would pop a stash the developer made
@@ -91,20 +127,34 @@ if [ "${stash_before}" = "${stash_after}" ]; then
   exit 0
 fi
 
+# Drop the entry holding this sha, wherever it now sits: another worktree's push, during the gate,
+# may have landed above it.
+drop_by_sha() {
+  git stash list --format='%gd %H' | while read -r entry sha; do
+    if [ "${sha}" = "${stash_after}" ]; then
+      git stash drop --quiet "${entry}"
+      break
+    fi
+  done
+}
+
 restore() {
   status=$?
   trap - EXIT INT TERM HUP
-  # `reset --hard` first: `stash pop` applies a diff against HEAD, and after --keep-index the
-  # working tree already carries the staged half of it, so popping straight onto it conflicts on
+  # `reset --hard` first: applying the stash puts a diff against HEAD, and after --keep-index the
+  # working tree already carries the staged half of it, so applying straight onto it conflicts on
   # exactly the files a partial commit touches. Resetting to HEAD is the state the stash was taken
   # from. Nothing is lost by it — every change, staged and unstaged, is inside the stash entry, and
-  # `pop --index` puts both halves back where they were. Ignored build output is not touched.
-  if git reset --hard --quiet && git stash pop --index --quiet; then
+  # `apply --index` puts both halves back where they were. Ignored build output is not touched.
+  if git reset --hard --quiet && git stash apply --index --quiet "${stash_after}"; then
+    take_lock
+    drop_by_sha
+    release_lock
     exit "${status}"
   fi
   echo "pre-commit: could not restore your working tree automatically." >&2
-  echo "pre-commit: nothing is lost — your changes are the top stash entry:" >&2
-  echo "pre-commit:   git stash pop --index   # \"${stash_message}\"" >&2
+  echo "pre-commit: nothing is lost — your changes are the stash entry ${stash_after}:" >&2
+  echo "pre-commit:   git stash apply --index ${stash_after}   # \"${stash_message}\"" >&2
   exit 1
 }
 trap restore EXIT INT TERM HUP

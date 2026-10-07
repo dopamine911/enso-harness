@@ -98,6 +98,34 @@ export function prepareRunHome(runDirectory: string, operatorHome: string): stri
   return home
 }
 
+/** A model as pi's settings name it: its provider and its id. */
+export interface EnsoModelSetting {
+  readonly provider: string
+  readonly id: string
+}
+
+/** `provider/id` as its two parts — the id may itself hold a `/` — or throws saying what was wrong. */
+export function parseEnsoModel(model: string): EnsoModelSetting {
+  const split = model.indexOf('/')
+  if (split <= 0 || split === model.length - 1) throw new Error(`an Enso model is provider/id, not "${model}"`)
+  return { provider: model.slice(0, split), id: model.slice(split + 1) }
+}
+
+/**
+ * Set the model Enso's sessions start on, in the run home's own copy of the settings (#674):
+ * `defaultProvider` and `defaultModel`, which pi starts a session on and the Start dialog
+ * preselects. Every other setting is kept; a run home with no settings gets a file of these two.
+ */
+export function setRunHomeModel(home: string, model: EnsoModelSetting): void {
+  const path = join(ensoAgentDir(home), 'settings.json')
+  const settings: unknown = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : {}
+  if (typeof settings !== 'object' || settings === null || Array.isArray(settings)) {
+    throw new Error(`${path} is not a settings object`)
+  }
+  const updated = { ...settings, defaultProvider: model.provider, defaultModel: model.id }
+  writeFileSync(path, `${JSON.stringify(updated, null, 2)}\n`)
+}
+
 /**
  * What reconciling found for one linked file that was no longer a link: its content went back to
  * the operator's file, or the operator's had changed after it and stood.

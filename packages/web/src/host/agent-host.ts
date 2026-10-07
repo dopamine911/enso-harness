@@ -27,6 +27,7 @@ import {
   type SessionEntry,
   type SessionInfo,
   SessionManager,
+  SettingsManager,
 } from '@earendil-works/pi-coding-agent'
 import {
   type DialogAnswer,
@@ -161,6 +162,7 @@ import {
 import { builtinProviderName, providerRefusalOf } from './provider-refusal.ts'
 import type { RuntimeEvent } from './runtime-event.ts'
 import { toRpcWireEvent } from './session-events.ts'
+import { sessionModels } from './session-models.ts'
 import { growsSessionSpend, liveSessionUsage, storedSessionUsage } from './session-usage.ts'
 import { previewOf, renderedUnder } from './system-prompt-preview.ts'
 import { decideSystemPrompt, hasSentRequest, withSystemPrompt } from './system-prompt.ts'
@@ -781,12 +783,14 @@ export interface AgentHost {
   /** A stored thread's state from its transcript alone: nothing is built to answer (#86, #95). */
   storedPermissionMode(transcript: readonly EnsoTranscriptEntry[]): EnsoPermissionModeState
   /**
-   * The host rows a thread with no session can be offered (#484): `/model` with every model pi
-   * could run right now, `/login`, and `/logout` when something is stored — read from pi's own
-   * auth and models files in the agent dir, NOTHING BUILT (#86). No `value` (a thread with no
-   * session has no current model), no `/thinking` (its levels are the chosen model's, carried on
-   * each `/model` option), and none of a session's rows: `/compact`, the views, pi's extension
-   * commands. Read afresh per call, so a login through one thread shows at once.
+   * The host rows a thread with no session can be offered (#484): `/model` with every model a
+   * session would offer — the latest bound session's list, else a probe session's, built once per
+   * process and never a thread (#688: extensions register models on `session_start`, so the agent
+   * dir's files alone list models a session refuses) — then `/login`, and `/logout` when something
+   * is stored, read from pi's own auth and models files in the agent dir. NO THREAD IS BUILT (#86).
+   * No `value` (a thread with no session has no current model), no `/thinking` (its levels are the
+   * chosen model's, carried on each `/model` option), and none of a session's rows: `/compact`, the
+   * views, pi's extension commands. Read afresh per call, so a login through one thread shows at once.
    */
   catalogue(): Promise<RuntimeCommand[]>
   /**
@@ -1000,6 +1004,14 @@ async function inBatches<T>(jobs: readonly (() => Promise<T>)[]): Promise<T[]> {
 
 export function createAgentHost(options: AgentHostOptions): AgentHost {
   const { agentDir, harnessPackageDir, servesDirectory, projectsDir } = options
+  /** The models a thread with no session is offered (#688): a bound session's list — see the module. */
+  const catalogueModels = sessionModels({
+    agentDir,
+    harnessPackageDir,
+    extensionFactories: options.extensionFactories ?? [],
+    // The probe is no thread: no session file.
+    inMemorySession: () => SessionManager.inMemory(agentDir),
+  })
   /** Where a thread in `cwd` is filed (#552): its project's `sessions/` — the checkout's or a tree's; pi's default when no projects folder is set. */
   const sessionDirFor = (cwd: string): string | undefined =>
     projectsDir === undefined ? undefined : sessionDirectoryFor(projectsDir, cwd)
@@ -2478,6 +2490,8 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         emit({ type: 'extension_error', extensionPath: error.extensionPath, event: error.event, error: error.error })
       },
     })
+    // This session's runtime, its extensions' providers registered, is the catalogue's list now (#688).
+    catalogueModels.adopt(session.modelRuntime)
     // The model the session STARTS with is on the feed too, not only later changes. It used to
     // arrive by accident: pi-multi-account 1.21 re-applied its remembered model at `session_start`
     // through `pi.setModel`, which fires `model_select`. From 1.22 it follows the session branch
@@ -2890,8 +2904,9 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   }
 
   /**
-   * pi's model runtime over the agent dir alone — what `createAgentSessionServices` builds for
-   * a session, minus the session (`sdk.js`: `ModelRuntime.create({ authPath, modelsPath })`).
+   * The catalogue's rows (#484). The logins and stored credentials are read from pi's runtime over
+   * the agent dir alone (`sdk.js`: `ModelRuntime.create({ authPath, modelsPath })`); the MODELS are
+   * a bound session's (#688), the agent dir's alone only when no session could be had.
    */
   async function catalogue(): Promise<RuntimeCommand[]> {
     const modelRuntime = await ModelRuntime.create({
@@ -2908,7 +2923,22 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         type: credential.type,
       })),
     )
-    return catalogueRows(modelRuntime.getAvailableSnapshot(), getSupportedThinkingLevels, hostFlowRows(login, logout))
+    const models = (await catalogueModels.available()) ?? modelRuntime.getAvailableSnapshot()
+    return catalogueRows(models, getSupportedThinkingLevels, hostFlowRows(login, logout), configuredDefaultModel())
+  }
+
+  /**
+   * The model pi starts a session on when none is chosen: the agent dir's `defaultProvider` and
+   * `defaultModel` (#674), as `provider/id`. Global settings only — a project's are read only once
+   * it is trusted, and the catalogue serves threads of every project.
+   */
+  function configuredDefaultModel(): string | undefined {
+    // The cwd argument only locates PROJECT settings, which an untrusted manager never reads:
+    // the agent dir stands in for it, so only the global `settings.json` is read.
+    const settings = SettingsManager.create(agentDir, agentDir, { projectTrusted: false })
+    const provider = settings.getDefaultProvider()
+    const model = settings.getDefaultModel()
+    return provider === undefined || model === undefined ? undefined : `${provider}/${model}`
   }
 
   return {

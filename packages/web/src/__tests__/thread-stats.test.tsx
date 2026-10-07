@@ -80,6 +80,8 @@ test("the headline is livecraft's cards: mean and median cost per turn, tools pe
     turnCount: 2,
     averageTurnCost: 0.25,
     medianTurnCost: 0.25,
+    pricing: 'priced',
+    unpricedTurnCount: 0,
     averageToolsPerTurn: 1.5,
     toolCalls: 3,
     failedToolCalls: 1,
@@ -90,6 +92,68 @@ test("the headline is livecraft's cards: mean and median cost per turn, tools pe
   // Spend the branch does not account for is its own figure — and float noise is not spend.
   expect(headlineOf({ ...STATS, usage: { ...STATS.usage, cost: 0.75 } }, NONE_REFUSED).offBranchCost).toBe(0.25)
   expect(headlineOf({ ...STATS, usage: { ...STATS.usage, cost: 0.50001 } }, NONE_REFUSED).offBranchCost).toBe(0)
+})
+
+/** STATS run on a model pi has no price for: every turn billed 0, every token still counted. */
+const UNPRICED: EnsoThreadStats = {
+  ...STATS,
+  usage: { ...STATS.usage, cost: 0 },
+  branchCost: 0,
+  turnStats: STATS.turnStats.map((turn) => ({ ...turn, model: 'gpt-5.6-luna', cost: 0 })),
+  promptStats: STATS.promptStats.map((prompt) => ({ ...prompt, cost: 0 })),
+}
+
+// #692: a model pi has no price for (the Codex subscription models multi-account learns from the
+// live catalog) bills every turn 0, and Stats said $0.0000 — read as free, not unknown. Its cost
+// says unknown; its tokens are what they were.
+test('⚠ a model with no price shows its cost as unknown, not $0.0000; its tokens stay', () => {
+  expect(headlineOf(UNPRICED, NONE_REFUSED)).toMatchObject({
+    pricing: 'unpriced',
+    unpricedTurnCount: 2,
+    averageTurnCost: undefined,
+    medianTurnCost: undefined,
+  })
+  const rendered = text(UNPRICED)
+  expect(rendered).not.toContain('$0.0000')
+  expect(rendered).toContain('total cost  unknown')
+  expect(rendered).toContain('no price for this model — its tokens are counted, not its cost')
+  expect(rendered).toContain('average cost / turn  unknown')
+  expect(rendered).toContain('median unknown')
+  expect(rendered).toContain('no price for this model, so no cost to chart')
+  // The costliest prompt names its cost unknown too, and the tokens read as before.
+  expect(rendered).toMatch(/list the files\s+2 model calls · 3 tools\s+unknown/)
+  expect(rendered).toContain('cache miss  3,943')
+  expect(rendered).toContain('output  853')
+})
+
+// A turn that used no tokens really cost nothing, priced or not: $0, not unknown. And a thread
+// that switched models mid-way says the priced part as a floor and names the turns left out.
+test('a turn that really cost nothing still shows $0; a partly priced thread shows a floor', () => {
+  const nothingUsed = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 }
+  const free: EnsoThreadStats = {
+    ...UNPRICED,
+    usage: { ...UNPRICED.usage, ...nothingUsed },
+    turnStats: UNPRICED.turnStats.map((turn) => ({ ...turn, ...nothingUsed })),
+  }
+  expect(headlineOf(free, NONE_REFUSED).pricing).toBe('priced')
+  expect(text(free)).toContain('total cost  $0.0000')
+  expect(text(free)).not.toContain('unknown')
+
+  const [priced, unpriced] = STATS.turnStats
+  if (priced === undefined || unpriced === undefined) throw new Error('STATS has a first and a second turn')
+  const partly: EnsoThreadStats = {
+    ...STATS,
+    usage: { ...STATS.usage, cost: 0.2 },
+    branchCost: 0.2,
+    turnStats: [priced, { ...unpriced, cost: 0 }],
+    promptStats: STATS.promptStats.map((prompt) => ({ ...prompt, cost: 0.2 })),
+  }
+  expect(headlineOf(partly, NONE_REFUSED)).toMatchObject({ pricing: 'partly', unpricedTurnCount: 1 })
+  const rendered = text(partly)
+  expect(rendered).toContain('total cost  ≥ $0.2000')
+  expect(rendered).toContain('1 turn on a model with no price — not in the cost')
+  expect(rendered).toContain('average cost / turn  unknown')
+  expect(rendered).toMatch(/list the files\s+2 model calls · 3 tools\s+≥ \$0\.2000/)
 })
 
 // ⚠ livecraft's rules: a duration ranking lists only what the log timed — an untimed call is not
