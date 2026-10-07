@@ -9,7 +9,8 @@ import { type ArenaProjectThread, projectThreads } from './evidence.ts'
 import { type ArenaFriction, observedFriction } from './friction.ts'
 import type { ArenaManifest } from './manifest.ts'
 import { ARENA_BOUND_STOP_PREFIXES } from './run-control.ts'
-import { type ArenaEvent, type ArenaPerception, readJsonLines, readTimeline } from './timeline.ts'
+import { type ArenaEvent, type ArenaPerception, isTheApplication, readJsonLines, readTimeline } from './timeline.ts'
+import { type ArenaModelUse, agentUsageOf, ensoModelsIn } from './usage.ts'
 
 /**
  * A Dogfood Arena run's score (#556, #584): every log the run left, read for problems, and
@@ -73,6 +74,8 @@ export interface ArenaUiCheck {
 export interface ArenaScoreMetrics {
   readonly minutes?: number
   readonly actions: ArenaManifest['actions']
+  /** What the models used (#674): the agent's own calls and price, and the models Enso's sessions ran on. */
+  readonly modelUse: ArenaModelUse
   /** From Enso's own session evals: prompts that reached it (`humanMessages`), its tool calls, their errors. */
   readonly enso?: { readonly prompts: number; readonly toolCalls: number; readonly toolErrors: number }
   /** Threads the UI named, and threads Enso stores for the run's project. */
@@ -127,6 +130,8 @@ export interface ArenaScoreInput {
   readonly projectThreads?: readonly ArenaProjectThread[]
   /** What the project and the threads' trees hold at the end; absent when none could be read. */
   readonly project?: ArenaWorkspaceState
+  /** The models Enso's sessions ran on, `provider/model`; empty when no thread's record was collected. */
+  readonly ensoModels?: readonly string[]
 }
 
 /** How many examples a problem keeps: enough to find it, few enough to read. */
@@ -327,6 +332,25 @@ function runProblems(input: ArenaScoreInput): Occurrence[] {
   return found
 }
 
+/**
+ * The run set Enso's model (#674), and Enso's sessions never ran on it: a comparison by Enso's model
+ * would put this run in the wrong column. A session that switched away later still ran on it first.
+ * Unknown — no thread's record collected — is no problem: there is nothing to compare.
+ */
+function ensoModelProblems(input: ArenaScoreInput): Occurrence[] {
+  const asked = input.manifest.ensoModel
+  const ran = input.ensoModels ?? []
+  if (asked === undefined || ran.length === 0 || ran.includes(asked)) return []
+  return [
+    {
+      severity: 'warning',
+      source: 'run',
+      message: "Enso's sessions never ran on the model the run set (--enso-model)",
+      example: `set ${asked}; ran ${ran.join(', ')}`,
+    },
+  ]
+}
+
 /** A failed request worth reporting: an aborted one is the page cancelling its own fetch on navigation. */
 function requestPath(request: string): string {
   const [method, url] = request.split(' ')
@@ -403,27 +427,29 @@ function eventOccurrence(event: ArenaEvent): Occurrence | undefined {
   }
 }
 
-/** Whether an event happened on the built application's own page: Preview serves it under `/preview/` (#675). */
+/** Whether an event happened on the built application's own page, not Enso's (#675: `isTheApplication`). */
 function onTheApplication(event: ArenaEvent): boolean {
-  try {
-    return new URL(event.page?.url ?? '').pathname.startsWith('/preview/')
-  } catch {
-    return false
-  }
+  return isTheApplication(event.page?.url)
 }
+
+/** Chromium's words for a resource its CORS check refused: "… has been blocked by CORS policy". */
+const CORS_BLOCKED = 'blocked by CORS policy'
 
 /**
  * The timeline's problems. ⚠ What the built page logs in its Preview tab — a console error, a
  * missing asset, a crash, an action that failed on it — is the APPLICATION's (#675): a warning
- * under `application`, never an Enso error that fails the run. A 5xx is still Enso's: its server
- * failed to serve the page.
+ * under `application`, never an Enso error that fails the run. Two failures on that page are still
+ * Enso's: a 5xx (its server failed to serve the page), and a script blocked by CORS (#689: Preview
+ * serves the page sandboxed, and a module script it could not load is Enso's serving, not the app).
  */
 function timelineProblems(events: readonly ArenaEvent[]): Occurrence[] {
   return events.flatMap((event): Occurrence[] => {
     const occurrence = eventOccurrence(event)
     if (occurrence === undefined) return []
-    const serverFailed = event.kind === 'response-error' && event.status >= 500
-    if (occurrence.source !== 'timeline' || serverFailed || !onTheApplication(event)) return [occurrence]
+    const servedBadly =
+      (event.kind === 'response-error' && event.status >= 500) ||
+      (event.kind === 'console-error' && event.text.includes(CORS_BLOCKED))
+    if (occurrence.source !== 'timeline' || servedBadly || !onTheApplication(event)) return [occurrence]
     return [{ ...occurrence, severity: 'warning', source: 'application' }]
   })
 }
@@ -611,6 +637,11 @@ function metricsOf(input: ArenaScoreInput): ArenaScoreMetrics {
           toolErrors: sumOverEvals(evals, (sessionEval) => sessionEval.scorecard.signals.toolErrors),
         }
   const notes = manifest.agentNotes
+  const agentUsage = agentUsageOf(input.transcript)
+  const modelUse: ArenaModelUse = {
+    ...(agentUsage === undefined ? {} : { agent: agentUsage }),
+    enso: input.ensoModels ?? [],
+  }
   return {
     ...(minutes === undefined ? {} : { minutes }),
     actions: manifest.actions,
@@ -622,6 +653,7 @@ function metricsOf(input: ArenaScoreInput): ArenaScoreMetrics {
     screenshots: manifest.screenshots.length,
     notes: { wish: notes.wish.length, friction: notes.friction.length, retrospective: notes.retrospective.length },
     ...(input.project === undefined ? {} : { work: input.project }),
+    modelUse,
   }
 }
 
@@ -642,6 +674,7 @@ export function scoreArenaRun(input: ArenaScoreInput): ArenaScore {
   const problems = grouped([
     ...uiCheckProblems(uiChecks),
     ...runProblems(input),
+    ...ensoModelProblems(input),
     ...timelineProblems(input.events),
     ...agentProblems(input.transcript),
     ...ensoLogProblems(input.logRecords),
@@ -781,7 +814,13 @@ export function runWorkspaces(runDirectory: string, manifest: ArenaManifest): st
 
 /** Everything a run directory holds that the score reads. Throws when there is no manifest to score. */
 export function readArenaScoreInput(runDirectory: string): ArenaScoreInput {
-  const manifest = JSON.parse(readFileSync(join(runDirectory, 'manifest.json'), 'utf8')) as ArenaManifest
+  // A manifest written before #680 names no perception: every run then read the tree.
+  const written = JSON.parse(readFileSync(join(runDirectory, 'manifest.json'), 'utf8')) as Omit<
+    ArenaManifest,
+    'perception'
+  > &
+    Partial<Pick<ArenaManifest, 'perception'>>
+  const manifest: ArenaManifest = { ...written, perception: written.perception ?? 'tree' }
   const transcriptPath = join(runDirectory, 'agent', 'transcript.jsonl')
   const evidenceDirectory = join(runDirectory, 'enso', 'evidence')
   const files = existsSync(evidenceDirectory) ? readdirSync(evidenceDirectory) : []
@@ -799,6 +838,7 @@ export function readArenaScoreInput(runDirectory: string): ArenaScoreInput {
     ...(logRecords === undefined ? {} : { logRecords }),
     ...(stored === undefined ? {} : { projectThreads: stored }),
     ...(project === undefined ? {} : { project }),
+    ensoModels: ensoModelsIn(evidenceDirectory, files),
   }
 }
 

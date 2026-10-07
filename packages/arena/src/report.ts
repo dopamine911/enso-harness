@@ -5,6 +5,7 @@ import type { ArenaManifest, ArenaNote, ArenaShotIndexEntry } from './manifest.t
 import { type ArenaOutcomeOptions, type ArenaTestRun, type ArenaWorkOutcome, workOutcomes } from './outcome.ts'
 import type { ArenaTurnPlace } from './run-state.ts'
 import { type ArenaScore, readArenaScoreInput, runWorkspaces, scoreArenaRun } from './score.ts'
+import { type ArenaEvent, isTheApplication } from './timeline.ts'
 
 /**
  * A run's report (#556 deliverables, #584 B4 and B5, #624): `bun run arena report <run>` writes
@@ -51,6 +52,49 @@ export interface ArenaReport {
   readonly problems: ArenaScore['problems']
   readonly notes: readonly ArenaReportedNote[]
   readonly findings: ArenaFindings
+  /** What the agent found by using the application itself (#675); absent when it never did. */
+  readonly played?: ArenaPlayed
+}
+
+/**
+ * The agent's time on the built application's own page (#675): Preview's, or the dev server's
+ * (`isTheApplication`). What playing found belongs to the application outcome, apart from Enso.
+ */
+export interface ArenaPlayed {
+  /** Its moves on the application's page, and the span they took. */
+  readonly moves: number
+  readonly from: ArenaMoment
+  readonly to: ArenaMoment
+  /** What the page itself logged (the score's `application` problems). */
+  readonly problems: ArenaScore['problems']
+  /** The notes it wrote while the application's page was in front. */
+  readonly notes: readonly ArenaReportedNote[]
+}
+
+/** The agent's time on the application's page, from the timeline; undefined when it never acted there. */
+function playedIn(
+  events: readonly ArenaEvent[],
+  problems: ArenaScore['problems'],
+  momentAt: (elapsedMs: number) => ArenaMoment,
+): ArenaPlayed | undefined {
+  // Whoever drove (an agent, or a person over `arena act`): what playing found is the run's either way.
+  const moves = events.filter(
+    (event) => event.kind === 'action' && event.outcome === 'ok' && isTheApplication(event.page?.url),
+  )
+  const first = moves.at(0)
+  const last = moves.at(-1)
+  if (first === undefined || last === undefined) return undefined
+  return {
+    moves: moves.length,
+    from: momentAt(first.elapsedMs),
+    to: momentAt(last.elapsedMs),
+    problems: problems.filter((problem) => problem.source === 'application'),
+    notes: events.flatMap((event) =>
+      event.kind === 'note' && isTheApplication(event.page?.url)
+        ? [reportedNote(event.note, event, momentAt(event.elapsedMs))]
+        : [],
+    ),
+  }
 }
 
 export function buildArenaReport(runDirectory: string, options: ArenaOutcomeOptions): ArenaReport {
@@ -59,6 +103,7 @@ export function buildArenaReport(runDirectory: string, options: ArenaOutcomeOpti
   const score = scoreArenaRun(input)
   const momentAt = (elapsedMs: number): ArenaMoment => momentOf(runDirectory, manifest.screenshots, elapsedMs)
   const findingsFile = findingsPath(runDirectory)
+  const played = playedIn(input.events, score.problems, momentAt)
   return {
     runId: score.runId,
     scenario: score.scenario,
@@ -80,6 +125,7 @@ export function buildArenaReport(runDirectory: string, options: ArenaOutcomeOpti
       runMs: runLength(manifest),
       threadIds: threadIdsOf(manifest),
     }),
+    ...(played === undefined ? {} : { played }),
   }
 }
 
@@ -91,6 +137,39 @@ function reportedNote(kind: ArenaReportedNote['kind'], note: ArenaNote, moment: 
     ...(note.wanted === undefined ? {} : { wanted: note.wanted }),
     moment,
   }
+}
+
+/** The playing part of the application outcome (#675): what the agent found on the application's own page. */
+function playedLines(played: ArenaPlayed | undefined): string[] {
+  if (played === undefined) {
+    return [
+      '### What playing found',
+      '',
+      'The agent never acted on the application’s own page: nothing here was found by using it.',
+      '',
+    ]
+  }
+  return [
+    '### What playing found',
+    '',
+    `The agent made ${played.moves} move(s) on the application’s own page (Preview, or the page the work served), ` +
+      `from ${momentLine(played.from)} to ${momentLine(played.to)}.`,
+    '',
+    ...(played.problems.length === 0
+      ? ['The page logged no error while it was used.']
+      : [
+          'What the page itself logged:',
+          ...played.problems.map(
+            (problem) =>
+              `- ${problem.message}${problem.count > 1 ? ` ×${problem.count}` : ''} (${problem.examples[0] ?? ''})`,
+          ),
+        ]),
+    '',
+    ...(played.notes.length === 0
+      ? ['It wrote no note while the application was in front.']
+      : ['What it noted while the application was in front:', ...played.notes.map(noteLine)]),
+    '',
+  ]
 }
 
 /** The screenshot nearest a moment, and the turn it shows. */
@@ -145,6 +224,7 @@ export function renderArenaReport(report: ArenaReport): string {
     ...(report.outcome.length === 0
       ? ['No workspace of the run is left to read.', '']
       : report.outcome.flatMap((work) => workLines(work, report.testsRun))),
+    ...playedLines(report.played),
     '## Enso findings',
     '',
     '### Observed friction',
