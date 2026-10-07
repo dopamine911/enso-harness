@@ -200,16 +200,14 @@ test('⚠ what the built page logs in its Preview tab is the application’s; a 
   for (const body of AGENT_RUN) {
     timeline.record(body, body.kind.startsWith('run-') || body.kind.startsWith('agent-') ? undefined : inThread)
   }
-  const preview = { ...pagePlace(`http://127.0.0.1:5178/preview/threads/${SHOWN}/index.html`), tab: 1 }
+  // The thread's preview, on an origin of its own (#713).
+  const preview = { ...pagePlace('http://127.0.0.1:41234/index.html'), tab: 1 }
   timeline.record({ kind: 'tab-opened', tab: 1, opener: 0 }, preview)
   timeline.record({ kind: 'page-error', text: 'ReferenceError: score is not defined' }, preview)
   timeline.record(
     { kind: 'response-error', request: `GET ${preview.url.replace('index.html', 'sprite.png')}`, status: 404 },
     preview,
   )
-  // #689, as the arena saw it: Preview's sandbox blocked the page's own module script. Enso's, not the app's.
-  const corsBlocked = `Access to script at '${preview.url.replace('index.html', 'app.mjs')}' from origin 'null' has been blocked by CORS policy`
-  timeline.record({ kind: 'console-error', text: corsBlocked }, preview)
   const scoreOf = (): ReturnType<typeof scoreArenaRun> => {
     const events = readTimeline(path)
     return scoreArenaRun({
@@ -226,13 +224,10 @@ test('⚠ what the built page logs in its Preview tab is the application’s; a 
       .map((problem) => [problem.severity, problem.message])
       .toSorted((left, right) => String(left[1]).localeCompare(String(right[1]))),
   ).toEqual([
-    ['warning', `HTTP 404: GET /preview/threads/${SHOWN}/sprite.png`],
+    ['warning', 'HTTP 404: GET /sprite.png'],
     ['warning', 'uncaught error in the page: ReferenceError: score is not defined'],
   ])
   expect(application[0]?.examples[0]).toContain('tab 1')
-
-  const cors = played.problems.find((problem) => problem.message.includes('blocked by CORS policy'))
-  expect(cors).toMatchObject({ severity: 'warning', source: 'timeline' })
 
   timeline.record({ kind: 'response-error', request: `GET ${preview.url}`, status: 500 }, preview)
   const failedToServe = scoreOf()
@@ -241,7 +236,7 @@ test('⚠ what the built page logs in its Preview tab is the application’s; a 
     expect.objectContaining({
       severity: 'error',
       source: 'timeline',
-      message: `HTTP 500: GET /preview/threads/${SHOWN}/index.html`,
+      message: 'HTTP 500: GET /index.html',
     }),
   )
 })

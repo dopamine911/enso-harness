@@ -85,13 +85,16 @@ function seedThread(cwd: string, title: string, turnCount: number): string {
 }
 
 /**
- * The page #689's arena run found: an `index.html` whose code is a module importing another. It
- * says it ran by writing into the page, which only the imported module's answer can.
+ * The page #689's and #713's arena runs found: an `index.html` whose code is a module importing
+ * another, loaded from the ROOT (`/app.mjs`, as Vite's default page loads `/src/main.js`), keeping a
+ * score in `localStorage`. It says it ran by writing into the page, which only the imported
+ * module's answer and the stored score can; it runs only on an origin of its own (#713).
  */
 const MODULE_PAGE = {
   'index.html':
-    '<!doctype html><title>Modules</title><p id="status">the modules did not run</p><script type="module" src="app.mjs"></script>',
-  'app.mjs': "import { status } from './game-logic.mjs'\ndocument.getElementById('status').textContent = status()\n",
+    '<!doctype html><title>Modules</title><p id="status">the modules did not run</p><script type="module" src="/app.mjs"></script>',
+  'app.mjs':
+    "import { status } from './game-logic.mjs'\nlocalStorage.setItem('best', '12')\ndocument.getElementById('status').textContent = status() + ', best ' + localStorage.getItem('best')\n",
   'game-logic.mjs': "export const status = () => 'both modules ran'\n",
 }
 

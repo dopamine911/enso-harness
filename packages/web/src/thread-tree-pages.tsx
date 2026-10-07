@@ -18,18 +18,18 @@ import { useThreadStores } from './store.ts'
 /**
  * What a thread built, reachable from the page (#619). A thread runs in a tree of its own (#551),
  * so its work is not in the user's checkout. The status bar's "own tree" opens this: the tree's
- * path, to copy, and the HTML pages in it, each opened in a new tab through the server's preview
- * route (`server/thread-preview-route.ts`).
+ * path, to copy, and the HTML pages in it, each opened in a new tab on the thread's preview origin
+ * (`server/thread-preview-route.ts`).
  *
- * ⚠ A NEW TAB, AND THE SERVER'S SANDBOX. The preview is agent-written; the server serves it under
- * a CSP sandbox that gives it an opaque origin, so it cannot use Enso's control plane. The tab is
- * opened `noopener noreferrer` so it holds no handle on this page either. A page's own `fetch()` of
- * its files fails under that sandbox, and the panel says so.
+ * ⚠ A NEW TAB, ON AN ORIGIN OF ITS OWN (#713). The preview is agent-written; it is served from the
+ * thread's own loopback port, the tree at `/`, so it runs as it would anywhere — its storage, its
+ * root paths — and Enso trusts no request from it (#717). The tab is opened `noopener noreferrer`
+ * so it holds no handle on this page either.
  */
 
-/** The preview URL of one page of the thread's tree, each segment encoded. */
-function previewUrl(threadId: string, page: string): string {
-  return `/preview/threads/${encodeURIComponent(threadId)}/${page.split('/').map(encodeURIComponent).join('/')}`
+/** The preview URL of one page of the thread's tree, on the thread's preview origin, each segment encoded. */
+function previewUrl(previewOrigin: string, page: string): string {
+  return `${previewOrigin}/${page.split('/').map(encodeURIComponent).join('/')}`
 }
 
 /** What the last copy of the path came to: not tried yet, done, or refused by the clipboard. */
@@ -37,13 +37,11 @@ type CopyState = 'idle' | 'copied' | 'failed'
 
 /** The panel's body: the path and its copy, then the pages. */
 function ThreadTreePagesBody({
-  threadId,
   outcome,
   onCopy,
   copy,
   onOpened,
 }: {
-  readonly threadId: string
   readonly outcome: AnalysisOutcome<EnsoThreadPages>
   readonly onCopy: (path: string) => void
   readonly copy: CopyState
@@ -54,7 +52,7 @@ function ThreadTreePagesBody({
   if (outcome.kind === 'failed') {
     return <p className="text-sm text-muted-foreground">the tree could not be read: {outcome.problem}</p>
   }
-  const { path, pages, truncated } = outcome.payload
+  const { path, pages, truncated, previewOrigin } = outcome.payload
   return (
     <div className="grid gap-4 text-sm">
       <div className="grid gap-1.5">
@@ -73,7 +71,7 @@ function ThreadTreePagesBody({
       </div>
       <div className="grid gap-1.5">
         <span className="text-muted-foreground">Pages it can show:</span>
-        {pages.length === 0 ? (
+        {pages.length === 0 || previewOrigin === undefined ? (
           <p>No HTML page at the top two levels of the tree.</p>
         ) : (
           <ul className="grid gap-1">
@@ -81,7 +79,12 @@ function ThreadTreePagesBody({
               <li key={page} className="flex items-center justify-between gap-3">
                 <code className="font-mono text-xs wrap-anywhere">{page}</code>
                 <Button asChild variant="outline" size="sm">
-                  <a href={previewUrl(threadId, page)} target="_blank" rel="noopener noreferrer" onClick={onOpened}>
+                  <a
+                    href={previewUrl(previewOrigin, page)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={onOpened}
+                  >
                     <ExternalLinkIcon />
                     Open preview
                   </a>
@@ -92,7 +95,7 @@ function ThreadTreePagesBody({
         )}
         {truncated ? <p className="text-muted-foreground">More pages than listed here; open others by path.</p> : null}
         <p className="text-xs text-muted-foreground">
-          A preview opens in a new tab, sandboxed: it cannot reach Enso, and its own fetch() of its files is blocked.
+          A preview opens in a new tab, on an origin of its own: it runs as it would anywhere, and it can't reach Enso.
         </p>
       </div>
     </div>
@@ -202,13 +205,7 @@ export function ThreadTreeButton({
             <DialogTitle>What this thread built</DialogTitle>
             <DialogDescription>Its edits are in a tree of its own until you bring them back.</DialogDescription>
           </DialogHeader>
-          <ThreadTreePagesBody
-            threadId={stores.threadId}
-            outcome={outcome}
-            onCopy={copyPath}
-            copy={copy}
-            onOpened={() => setOpen(false)}
-          />
+          <ThreadTreePagesBody outcome={outcome} onCopy={copyPath} copy={copy} onOpened={() => setOpen(false)} />
         </DialogContent>
       </Dialog>
     </>

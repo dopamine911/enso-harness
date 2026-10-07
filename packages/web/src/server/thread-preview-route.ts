@@ -1,49 +1,31 @@
 import { type Dirent, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
-import type { IncomingHttpHeaders } from 'node:http'
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { extname, isAbsolute, join, relative, sep as separator } from 'node:path'
 import type { EnsoThreadPages } from '@enso/core'
+import { isLoopbackAuthority, LOOPBACK_ONLY } from './loopback.ts'
 import { servedCwd, type ThreadCwdDeps } from './thread-git-route.ts'
 
 /**
  * What a thread built, reachable from the page (#619). The thread works in a tree of its own (#551),
  * not the user's checkout, so its work is not where they would look.
  *
- * `GET /api/threads/:threadId/tree` says where that is and which HTML pages it holds;
- * `GET /preview/threads/:threadId/<path>` serves one of its files, read-only.
+ * `GET /api/threads/:threadId/tree` says where that is, which HTML pages it holds, and — once it
+ * holds one — the origin its preview is served from (`previewOrigin`).
  *
- * ⚠ A PREVIEW NEVER RUNS WITH ENSO'S AUTHORITY. The page is agent-written. The control plane trusts
- * a request whose `Origin` names loopback (`server/index.ts#fromTrustedOrigin`), so a page served
- * as Enso's own origin — or from any loopback port — could switch the thread to
- * `bypassPermissions` and drive runs. Every preview response carries `Content-Security-Policy:
- * sandbox` without `allow-same-origin`: the document gets an OPAQUE origin even as a top-level tab,
- * its requests say `Origin: null`, and the server refuses that string (#205, #160 §3). It can still
- * load its own scripts, styles and images by tag; its own `fetch()` of a file is cross-origin and
- * fails, with no CORS opened for it on purpose.
- *
- * ⚠ ONE CORS ANSWER: A MODULE SCRIPT (#689). `<script type="module">` and `import` fetch in CORS
- * mode, so the opaque page asks for its own `app.mjs` with `Origin: null`, and both the server's
- * origin gate and the browser's CORS check refused it. Only a request that says it is a script —
- * `Sec-Fetch-Dest: script`, which the browser sets and no page can — is admitted from `null` and
- * answered `Access-Control-Allow-Origin: null` (`fromPreviewModuleLoader`). That opens nothing a
- * classic `<script src>` did not already: the file runs, it is not read. `fetch()` is
- * `Sec-Fetch-Dest: empty`, so it stays refused, and `/api/` never sees the exception.
+ * ⚠ EACH THREAD'S PREVIEW IS AN ORIGIN OF ITS OWN (#713): a listener on a loopback port of its own,
+ * serving the tree at `/`, read-only. Served under Enso's origin in a CSP sandbox (#619), the page
+ * had an opaque origin, so it had no `localStorage` and a root-relative `/src/main.js` missed its
+ * sub-path: measured, both apps two arena runs built showed broken in Preview and ran anywhere
+ * else. Its own origin is a browser's own isolation. ⚠ Safe only because Enso trusts no other
+ * loopback origin (#717: a browser's request must be `Sec-Fetch-Site: same-origin`), so the page
+ * can no more drive Enso than any other site; and its storage is its thread's, not shared.
  *
  * ⚠ THE TREE AND NOTHING ELSE. A path's REALPATH must stay inside the tree's, so `..` and a symlink
  * out of the tree are the same 404. Looking builds nothing, and a directory this server does not
- * serve (#395) is no answer, as the git route's rule.
+ * serve (#395) is no answer, as the git route's rule. `Host` must name loopback (a rebound name is
+ * not), and only GET and HEAD are served.
  */
-
-/** The page's sandbox: scripts, forms, pointer lock and `alert` (a game's "game over") — never its own origin. */
-export const PREVIEW_CSP = 'sandbox allow-scripts allow-forms allow-pointer-lock allow-modals'
-
-/**
- * Whether a preview request is a sandboxed page's module loader fetching one of its scripts
- * (#689): the page's opaque `Origin: null`, and a script destination, which the browser sets and
- * a page's `fetch()` cannot. Admitted past the origin gate and answered with CORS for `null`.
- */
-export function fromPreviewModuleLoader(headers: IncomingHttpHeaders): boolean {
-  return headers.origin === 'null' && headers['sec-fetch-dest'] === 'script'
-}
 
 /** How many pages the listing names, and how deep it looks: the work's top, not the whole tree. */
 const MAX_PAGES = 50
@@ -184,4 +166,80 @@ function fileInside(tree: string, candidate: string): string | undefined {
   if (stats?.isDirectory() === true)
     return candidate.endsWith('index.html') ? undefined : fileInside(tree, join(real, 'index.html'))
   return stats?.isFile() === true && stats.size <= MAX_PREVIEW_BYTES ? real : undefined
+}
+
+/** Each thread's preview origin (#713): started on first ask, closed with the server. */
+export interface PreviewOrigins {
+  /** `http://127.0.0.1:<port>`, serving `threadId`'s tree at `/`; the same origin each time. */
+  readonly originOf: (threadId: string) => Promise<string>
+  readonly close: () => Promise<void>
+}
+
+/** What every preview answer carries: no sniffing, no referrer out, never a stale copy of a file the agent rewrote. */
+const PREVIEW_HEADERS = {
+  'X-Content-Type-Options': 'nosniff',
+  'Referrer-Policy': 'no-referrer',
+  'Cache-Control': 'no-store',
+} as const
+
+/** One thread's files at `/` (#713): its tree, as `previewFile` reads it, to a loopback Host and GET/HEAD only. */
+async function answerPreview(
+  previewFile: ReturnType<typeof createPreviewRoute>,
+  threadId: string,
+  request: IncomingMessage,
+  response: ServerResponse,
+): Promise<void> {
+  if (request.headers.host === undefined || !isLoopbackAuthority(request.headers.host)) {
+    response.writeHead(403, { ...PREVIEW_HEADERS, 'Content-Type': 'text/plain' })
+    response.end('a preview answers the machine it runs on')
+    return
+  }
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    response.writeHead(405, { ...PREVIEW_HEADERS, Allow: 'GET, HEAD', 'Content-Type': 'text/plain' })
+    response.end('a preview is read-only')
+    return
+  }
+  const path = (request.url ?? '/').split(/[?#]/)[0] ?? '/'
+  const file = await previewFile(threadId, path)
+  if (file === undefined) {
+    response.writeHead(404, { ...PREVIEW_HEADERS, 'Content-Type': 'text/plain' })
+    response.end(`no such file in thread ${threadId}'s tree`)
+    return
+  }
+  response.writeHead(200, { ...PREVIEW_HEADERS, 'Content-Type': file.contentType, 'Content-Length': file.body.length })
+  response.end(request.method === 'HEAD' ? undefined : file.body)
+}
+
+/**
+ * One loopback listener per thread previewed (#713), on a port the system picks: each thread's page
+ * is an origin of its own, at `/`, with storage of its own. Started the first time the thread's
+ * origin is asked for, and kept until `close`.
+ */
+export function createPreviewOrigins(previewFile: ReturnType<typeof createPreviewRoute>): PreviewOrigins {
+  const listeners = new Map<string, { readonly server: Server; readonly origin: Promise<string> }>()
+  const start = (threadId: string): Promise<string> => {
+    const server = createServer((request, response) => {
+      answerPreview(previewFile, threadId, request, response).catch(() => {
+        if (!response.headersSent) response.writeHead(500, { ...PREVIEW_HEADERS, 'Content-Type': 'text/plain' })
+        response.end('the preview failed to read the file')
+      })
+    })
+    const origin = new Promise<string>((resolve, reject) => {
+      server.once('error', reject)
+      server.listen(0, LOOPBACK_ONLY, () =>
+        resolve(`http://${LOOPBACK_ONLY}:${(server.address() as AddressInfo).port}`),
+      )
+    })
+    listeners.set(threadId, { server, origin })
+    return origin
+  }
+  return {
+    originOf: (threadId) => listeners.get(threadId)?.origin ?? start(threadId),
+    close: async () => {
+      await Promise.all(
+        [...listeners.values()].map(({ server }) => new Promise<void>((resolve) => server.close(() => resolve()))),
+      )
+      listeners.clear()
+    },
+  }
 }
