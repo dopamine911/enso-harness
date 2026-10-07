@@ -169,7 +169,8 @@ function recordedRun(options: { readonly played?: boolean } = {}): string {
     }
     // #675: the agent plays the built page in Preview's tab, finds an error, and notes it there.
     if (options.played === true && second === 50) {
-      const game = { ...pagePlace(`http://127.0.0.1:5178/preview/threads/${THREAD}/index.html`), tab: 1 }
+      // The thread's preview, on an origin of its own (#713).
+      const game = { ...pagePlace('http://127.0.0.1:41234/index.html'), tab: 1 }
       timeline.record(
         { kind: 'action', via: 'control', action: 'press', detail: 'press ArrowLeft', outcome: 'ok', durationMs: 4 },
         game,
