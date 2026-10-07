@@ -78,6 +78,7 @@ function ThreadTreePagesBody({
             {pages.map((page) => (
               <li key={page} className="flex items-center justify-between gap-3">
                 <code className="font-mono text-xs wrap-anywhere">{page}</code>
+                {/* #729: each link's name says which page ("Open preview of debug.html"), not N identical ones. */}
                 <Button asChild variant="outline" size="sm">
                   <a
                     href={previewUrl(previewOrigin, page)}
@@ -87,6 +88,7 @@ function ThreadTreePagesBody({
                   >
                     <ExternalLinkIcon />
                     Open preview
+                    <span className="sr-only"> of {page}</span>
                   </a>
                 </Button>
               </li>
