@@ -14,6 +14,7 @@ export const SESSIONS_AND_PROJECTS: FeatureSpec = {
   shows: [
     "A project is a folder pi works in. The rail lists your projects, and each project's threads under it. A new thread asks how to start: which model, how much effort, which permission mode, which system prompt, and the first prompt. They are applied together when you start.",
     "A thread you ran before is still there after a restart. Until you run it again it is *cold*: Enso reads it from pi's session file, and nothing is running.",
+    "A thread is titled by its first prompt. **Rename** in the header (the pencil) gives it a name of its own, which the rail and the header show and the thread keeps: it is pi's own session name, the one pi's `/name` sets. When two prompts in a project start alike, the rail shows each from the words where they part (\"…Approach B: a parser\"), with the whole prompt as the row's hover.",
   ],
   opens: [
     'The folder you ran `bun run dev` in is always a project.',

@@ -53,6 +53,7 @@ import {
   forkThreadAt,
   restoreThreadAt,
   undoLastRestore,
+  renameThreadAt,
   promptThread,
   readClosedBody,
   readConfigureBody,
@@ -60,6 +61,7 @@ import {
   readForkBody,
   readRestoreBody,
   readRestoreUndoBody,
+  readRenameBody,
   readHostCommandBody,
   readIncidentResolutionBody,
   readModeChangeBody,
@@ -189,6 +191,8 @@ const THREAD_RESTORE_ROUTE = threadRoute('restore')
 const THREAD_RESTORE_UNDO_ROUTE = threadRoute('restore/undo')
 /** `POST …/continue` (#436): continue a torn thread from its stored state — no new prompt. */
 const THREAD_CONTINUE_ROUTE = threadRoute('continue')
+/** `POST …/name` (#670): name the thread — pi's `session_info`, which the listing and the history carry. */
+const THREAD_NAME_ROUTE = threadRoute('name')
 /**
  * `POST …/incidents/<incidentId>/resolve` (#466): a human's resolution of the thread's incident — the
  * one way a suspension is lifted. The incident id is the shape both writers mint (a UUID), so it
@@ -729,6 +733,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
           messageCount: session.messageCount,
           busy: threads.peek(session.id)?.busy === true,
           ...(session.parentThreadId === undefined ? {} : { parentThreadId: session.parentThreadId }),
+          ...(session.name === undefined ? {} : { name: session.name }),
         },
       ]
     })
@@ -808,6 +813,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
       sessionRisk: mount.sessionRisk,
       incidents: mount.incidents,
       ...(mount.interrupted === undefined ? {} : { interrupted: mount.interrupted }),
+      ...(mount.name === undefined ? {} : { name: mount.name }),
     }
     response.writeHead(200, { 'Content-Type': 'application/json' })
     response.end(JSON.stringify(payload))
@@ -1163,6 +1169,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     { method: 'POST', route: THREAD_FORK_ROUTE, respond: respondToFork },
     { method: 'POST', route: THREAD_RESTORE_ROUTE, respond: respondToRestore },
     { method: 'POST', route: THREAD_RESTORE_UNDO_ROUTE, respond: respondToRestoreUndo },
+    { method: 'POST', route: THREAD_NAME_ROUTE, respond: respondToRename },
     { method: 'POST', route: THREAD_CONTINUE_ROUTE, respond: idOnly(respondToContinue) },
     { method: 'POST', route: THREAD_ABORT_ROUTE, respond: idOnly(respondToAbort) },
     { method: 'POST', route: THREAD_INCIDENT_RESOLVE_ROUTE, respond: respondToIncidentResolution },
@@ -1541,6 +1548,22 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
         facts: { kept: outcome.receipt.safety },
       }),
       answer: (outcome) => answerJson(response, outcome.receipt),
+    })
+  }
+
+  /**
+   * `POST …/name` (#670): name the thread — body `{ name }`, not blank, at most 120 characters,
+   * trimmed. 204 once pi's `session_info` holds it; 400 a bad body; 404 an unknown thread; 409 a
+   * thread a run holds. The listing and the history carry it from then on.
+   */
+  function respondToRename(threadId: string, request: IncomingMessage, response: ServerResponse): Promise<void> {
+    return answerControl(threadId, request, response, {
+      body: 'a rename request',
+      parse: readRenameBody,
+      run: (rename) => renameThreadAt(threadRead, threadId, rename),
+      subject: (rename) => rename,
+      refused: 'rename to {name} refused ({status}): {reason}',
+      accepted: () => ({ message: 'thread named {name}' }),
     })
   }
 

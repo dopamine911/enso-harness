@@ -17,11 +17,11 @@ import {
   clearThreadsForTest,
   mintThread,
   reviveHistoryMessages,
-  TITLE_MAX_CHARS,
+  THREAD_TITLE_MAX_CHARS,
   type ThreadStores,
   type ThreadSummary,
   threadListStore,
-  titleFromMessages,
+  threadTitleFromMessages,
   TORN_TAIL_CONTINUED,
   TORN_TAIL_SUPERSEDED,
   updateThreadSummary,
@@ -29,6 +29,7 @@ import {
 import {
   forkParentTitles,
   groupByProject,
+  railLabels,
   relativeAge,
   STORED_ROWS_SHOWN,
   ThreadsRail,
@@ -76,29 +77,33 @@ test('the title is the FIRST user message, one line, clipped', () => {
     { id: 'a', role: 'assistant', parts: [{ type: 'text', content: 'sure' }] },
     user('second question'),
   ]
-  expect(titleFromMessages(messages)).toBe('fix the login bug')
-  expect(titleFromMessages([user('x'.repeat(TITLE_MAX_CHARS + 10))])).toBe(`${'x'.repeat(TITLE_MAX_CHARS)}…`)
-  expect(titleFromMessages([])).toBeUndefined()
+  expect(threadTitleFromMessages(messages)).toBe('fix the login bug')
+  expect(threadTitleFromMessages([user('x'.repeat(THREAD_TITLE_MAX_CHARS + 10))])).toBe(
+    `${'x'.repeat(THREAD_TITLE_MAX_CHARS)}…`,
+  )
+  expect(threadTitleFromMessages([])).toBeUndefined()
   // A user message with no text (an image only) titles nothing rather than an empty string.
   expect(
-    titleFromMessages([{ id: 'u', role: 'user', parts: [{ type: 'image', source: { type: 'url', value: 'x.png' } }] }]),
+    threadTitleFromMessages([
+      { id: 'u', role: 'user', parts: [{ type: 'image', source: { type: 'url', value: 'x.png' } }] },
+    ]),
   ).toBeUndefined()
 })
 
-// #283: the title is derived over a 120-character window instead of the whole prompt, which
+// #283: the title is derived over a window twice its cap instead of the whole prompt, which
 // re-derived per streamed token (14.9 µs for a 20 KB paste). The window is an optimisation
 // only while it cannot change the answer — these are the three shapes that could.
 test('⚠ a title bounded to a window reads the same as one derived from the whole prompt', () => {
   const paste = 'fix the login bug in auth.ts — here is the whole file:\n'.repeat(400)
   const unbounded = paste.replace(/\s+/g, ' ').trim()
-  expect(titleFromMessages([user(paste)])).toBe(`${unbounded.slice(0, TITLE_MAX_CHARS)}…`)
+  expect(threadTitleFromMessages([user(paste)])).toBe(`${unbounded.slice(0, THREAD_TITLE_MAX_CHARS)}…`)
   // The window collapses to LESS than the cap — a prompt that opens with more whitespace
   // than text. Slicing to the window and stopping there would title it `fix the login`.
   const indented = `${'\n   '.repeat(60)}fix the login bug in the auth module, please`
-  expect(titleFromMessages([user(indented)])).toBe('fix the login bug in the auth module, please')
+  expect(threadTitleFromMessages([user(indented)])).toBe('fix the login bug in the auth module, please')
   // Several text parts are one line, joined by a single space.
   expect(
-    titleFromMessages([
+    threadTitleFromMessages([
       {
         id: 'u',
         role: 'user',
@@ -567,6 +572,72 @@ test("each project is a section with its own threads — the page's open ones, t
   expect(gone).toMatch(
     /aria-label="new thread in gone"[^>]*disabled=""|disabled=""[^>]*aria-label="new thread in gone"/,
   )
+})
+
+// #670, from two arena runs: two approaches in two threads, both prompts starting "Write a small CLI
+// Markdown-to-HTML converter in Python as md…", read the same on the rail — and to a screen reader.
+test('⚠ two prompts that start alike read apart on the rail — the words past their shared start — while a name, a fork and an unlike title read as they are (#670)', () => {
+  const shared = 'Write a small CLI Markdown-to-HTML converter in Python as md2html.py, standard library only.'
+  const now = pageClock.get()
+  const page = (threadId: string, title: string | undefined, name?: string): ThreadSummary => ({
+    threadId,
+    title,
+    ...(name === undefined ? {} : { name }),
+    lastActivityAt: now,
+    busy: false,
+    waiting: false,
+    projectId: undefined,
+  })
+  const labels = railLabels({
+    project: LAUNCH,
+    threads: [
+      page('regex', `${shared} Approach A: regular expressions per line.`),
+      page('parser', `${shared} Approach B: a small block parser.`),
+      page('named', `${shared} Approach C.`, 'C: the one to keep'),
+      page('other', 'Write a small test for the converter'),
+      page('untitled', undefined),
+    ],
+    earlier: [
+      // A fork's prompt is its parent's whole prompt: nothing tells them apart but the fork line.
+      storedIn('p-launch', 'fork', { title: `${shared} Approach A: regular expressions per line.` }),
+    ],
+  })
+  expect(labels.get('parser')).toBe('…Approach B: a small block parser.')
+  expect(labels.get('named')).toBe('C: the one to keep')
+  expect(labels.get('other')).toBe('Write a small test for the converter')
+  expect(labels.get('untitled')).toBeUndefined()
+  // `regex` and its fork share everything: the part past what `parser` shares is what they read.
+  expect(labels.get('regex')).toBe('…Approach A: regular expressions per line.')
+  expect(labels.get('fork')).toBe('…Approach A: regular expressions per line.')
+  // A shared run with no space to cut at — a long path — cuts nothing, so nothing is said cut (PR #722 review).
+  const path = '/home/someone/projects/converter/src/markdown'
+  const unbroken = railLabels({
+    project: LAUNCH,
+    threads: [page('path-a', `${path}/inline.py is slow`), page('path-b', `${path}/blocks.py is wrong`)],
+    earlier: [],
+  })
+  expect(unbroken.get('path-a')).toBe(`${path}/inline.py is slow`)
+
+  // Drawn, the two rows' names differ — what a screen reader says, and what a person reads.
+  const rendered = renderToStaticMarkup(
+    <ThreadsRail
+      projects={[LAUNCH]}
+      threads={[page('regex', `${shared} Approach A.`), page('parser', `${shared} Approach B.`)]}
+      activeThreadId="regex"
+      earlier={[]}
+      earlierError={undefined}
+      onSelect={noop}
+      onResume={noop}
+      onNew={noop}
+      onAddProject={noop}
+      onRemoveProject={noop}
+      projectNotice={undefined}
+    />,
+  )
+  expect(rendered).toContain('>…Approach A.</span>')
+  expect(rendered).toContain('>…Approach B.</span>')
+  // The whole prompt stays the row's hover.
+  expect(rendered).toContain(`title="${shared} Approach B."`)
 })
 
 test('a fork says which thread it came from, by that thread’s title — a stored one’s, an open one’s, or that it is not listed (#433)', () => {

@@ -272,6 +272,15 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
     ],
     { builds: 'yes', factory: follows('export function undoLastRestore') },
   ),
+  THREAD_NAME_ROUTE: threadControl(
+    'respondToRename → renameThreadAt → AgentHost.renameThread',
+    "path: `threadId`; body: `EnsoThreadRenameRequest` — `name`, not blank, at most 120 characters, trimmed. Names the thread (#670) with pi's own `session_info` entry — what pi's `/name` writes — appended to the live session or the stored file; the stored listing and the history carry it as `name`, and the first prompt stays the title of a thread with none. Held as a restore is, so a name never lands between a run's messages",
+    [
+      '204 empty — the name is recorded',
+      '400 malformed id/body; 403 untrusted origin; 404 no such thread (before anything is built); 409 thread busy; 413 body too large; 500 handler failure',
+    ],
+    { builds: 'yes', factory: follows('export function renameThreadAt') },
+  ),
   THREAD_DELETE_ROUTE: threadControl(
     'respondToDelete → deleteThreadAt → AgentHost.deleteThread',
     "path: `threadId`; query: `?force=1` or none — no other; header: `If-Match: \"<sha256 hex of the work's words>\"` with `?force=1`, the work the page showed (PR #572 review); no body. Deletes the thread (#571): the project's pre-#573 snapshot stores migrated first, then its tree through the inventory, its snapshot store, and the project's object store collected — what only this thread's snapshots reached goes, its forks' histories stay (#573) — then every session file under the id. The live session is retired only once the inventory has passed, and the id is refused for the server's lifetime after",

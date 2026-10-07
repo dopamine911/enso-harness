@@ -468,6 +468,8 @@ export interface HostedThreadInspection {
   readonly entries: readonly EnsoTranscriptEntry[]
   /** Slash commands this session registers. */
   readonly commands: readonly string[]
+  /** The name a person gave the thread (#670): pi's newest `session_info`; `undefined` when none. */
+  readonly name: string | undefined
 }
 
 export interface HostedThread {
@@ -576,6 +578,8 @@ export interface StoredThread {
   readonly messageCount: number
   /** The first user message, verbatim; empty for a session with none. */
   readonly firstMessage: string
+  /** The name a person gave it (#670): pi's newest `session_info`; absent when none. */
+  readonly name?: string
   /**
    * The thread it was forked from (#433): its header's `parentSession` file, as that file's
    * session id. Absent for a thread that is no fork, and for one whose parent file is gone.
@@ -604,6 +608,9 @@ export type ThreadRestoreOutcome =
       readonly reason: string
     }
   | { readonly kind: 'refused'; readonly reason: string }
+
+/** A rename (#670), or why not: `no-thread` — no session under the id, live or in a served project. */
+export type ThreadRenameOutcome = { readonly kind: 'renamed' } | { readonly kind: 'no-thread'; readonly reason: string }
 
 /** A thread's tree as its branch records it, and the snapshot store beside its session (#551). */
 export interface ThreadTreePlace {
@@ -733,6 +740,8 @@ export interface AgentHost {
   restoreThreadAt(threadId: string, entryId: string): Promise<ThreadRestoreOutcome>
   /** Undo the thread's last restore (#565): its tree back to that restore's safety snapshot, itself recorded as a restore. */
   undoLastRestore(threadId: string, safety: string): Promise<ThreadRestoreOutcome>
+  /** Name the thread (#670) — pi's `session_info`, live or stored; the first prompt stays its title otherwise. */
+  renameThread(threadId: string, name: string): Promise<ThreadRenameOutcome>
   /**
    * The thread's tree and its snapshot store (#650), live or stored — one open, nothing built
    * (#86); `undefined` for a thread in its checkout, no session in a served project, or a host
@@ -813,6 +822,8 @@ export interface StoredThreadRead {
   readonly usage: EnsoSessionUsage
   /** What the branch records it last ran on (#434); `undefined` when it records neither a model nor a level. */
   readonly recordedModel: EnsoRecordedModel | undefined
+  /** The name a person gave it (#670): pi's newest `session_info`; `undefined` when none. */
+  readonly name: string | undefined
 }
 
 /** A stored thread as `readStoredThreadStats` reads it. */
@@ -1181,6 +1192,8 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
           messageCount: info.messageCount,
           // pi says `(no messages)` for a file with none — an empty fork's (#433) — which is no title.
           firstMessage: info.messageCount === 0 ? '' : info.firstMessage,
+          // pi's listing already reads a blank `session_info` as no name: it clears the title.
+          ...(info.name === undefined ? {} : { name: info.name }),
           ...(parentThreadId === undefined ? {} : { parentThreadId }),
         }
       })
@@ -1240,6 +1253,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       transcript: transcriptOf(branch),
       usage: storedSessionUsage(stored.getEntries()),
       recordedModel: recordedModelOf(branch),
+      name: stored.getSessionName(),
     }
   }
 
@@ -1402,30 +1416,53 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     }
   }
 
-  /**
-   * The session a restore reads and records on (#551), with the tree it restores: the live one when
-   * the thread is built — the route leases the thread, so it is — else the file.
-   */
+  /** The thread's session, live or stored (one `open`, nothing built, #86), or why there is none. */
+  async function threadSession(
+    threadId: string,
+  ): Promise<
+    | { readonly session: SessionManager; readonly live: boolean }
+    | { readonly kind: 'no-thread'; readonly reason: string }
+  > {
+    const live = liveSessionManagers.get(threadId)
+    if (live !== undefined) return { session: live, live: true }
+    const located = await storedSession(threadId)
+    if (located === undefined) {
+      return { kind: 'no-thread', reason: `thread ${threadId} has no session in a project this server serves` }
+    }
+    return { session: SessionManager.open(located.path), live: false }
+  }
+
   async function restoreSession(
     threadId: string,
   ): Promise<
     | { readonly session: SessionManager; readonly live: boolean; readonly tree: ThreadTreeRecord }
     | { readonly kind: 'no-thread' | 'no-tree'; readonly reason: string }
   > {
-    const live = liveSessionManagers.get(threadId)
-    const located = live === undefined ? await storedSession(threadId) : undefined
-    if (live === undefined && located === undefined) {
-      return { kind: 'no-thread', reason: `thread ${threadId} has no session in a project this server serves` }
-    }
-    const session = live ?? SessionManager.open(located?.path ?? '')
-    const tree = treeRecordOf(transcriptOf(session.getBranch()))
+    const found = await threadSession(threadId)
+    if ('kind' in found) return found
+    const tree = treeRecordOf(transcriptOf(found.session.getBranch()))
     if (tree === undefined) {
       return {
         kind: 'no-tree',
         reason: `thread ${threadId} runs in its checkout, not a tree of its own: nothing to restore`,
       }
     }
-    return { session, live: live !== undefined, tree }
+    return { ...found, tree }
+  }
+
+  /**
+   * Name the thread (#670): pi's own `session_info` entry — what pi's `/name` writes, and what its
+   * listing reads back as the newest name — appended to the live session or to the stored file. A
+   * file pi opened from disk takes the entry at once, an empty fork's too; a live thread not yet
+   * written keeps it for its first write. The route holds the thread while it is written, so a name
+   * never lands between a run's messages.
+   */
+  async function renameThread(threadId: string, name: string): Promise<ThreadRenameOutcome> {
+    const found = await threadSession(threadId)
+    if ('kind' in found) return found
+    found.session.appendSessionInfo(name)
+    log.info('thread {threadId} named {name}', { threadId, name })
+    return { kind: 'renamed' }
   }
 
   async function threadTree(threadId: string): Promise<ThreadTreePlace | undefined> {
@@ -2866,6 +2903,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
           sessionFile: plannedFile !== undefined && existsSync(plannedFile) ? plannedFile : null,
           entries: transcriptOf(sessionManager.getBranch()),
           commands: runtime.listCommands().map((command) => command.name),
+          name: sessionManager.getSessionName(),
         }
       },
     }
@@ -2958,6 +2996,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     forkThread,
     restoreThreadAt,
     undoLastRestore,
+    renameThread,
     threadTree,
     readCopyChanges: ({ record, store }) =>
       readCopyChanges({ directory: store, tree: record.path, base: record.base, environment }),

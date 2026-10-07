@@ -1509,6 +1509,57 @@ test('listSessions names stored sessions newest first with the first user messag
   expect(await host.readStoredThread('never-stored')).toBeUndefined()
 })
 
+// #670: two runs in a row could not tell their threads apart, and nothing renamed one. A name is
+// pi's own `session_info` — what `/name` writes — so the file keeps it for every later read.
+test('⚠ a name given to a stored thread is in its file: the listing, a cold read, and a host started later all carry it; a live thread names itself the same way (#670)', async () => {
+  const stored = crypto.randomUUID()
+  storeSession(stored, 'Write a small CLI converter, approach A', 'done')
+  expect(await hostWith().renameThread(stored, 'Approach A: regex')).toEqual({ kind: 'renamed' })
+  // A host started afterwards has nothing but the file to go on.
+  const later = hostWith()
+  expect((await later.listSessions()).find((row) => row.id === stored)).toMatchObject({
+    name: 'Approach A: regex',
+    firstMessage: 'Write a small CLI converter, approach A',
+  })
+  expect((await later.readStoredThread(stored))?.name).toBe('Approach A: regex')
+  // Renamed again, the newest name is the name.
+  await later.renameThread(stored, 'Approach A (kept)')
+  expect((await hostWith().listSessions()).find((row) => row.id === stored)?.name).toBe('Approach A (kept)')
+  // A blank name is no name: pi trims it and reads an empty one as a clear, so the title shows —
+  // the listing, a cold read and a live session alike (PR #722 review; pinned, as Enso relies on it).
+  const blank = crypto.randomUUID()
+  storeSession(blank, 'a thread named with spaces', 'done')
+  await hostWith().renameThread(blank, '   ')
+  expect((await hostWith().listSessions()).find((row) => row.id === blank)?.name).toBeUndefined()
+  expect((await hostWith().readStoredThread(blank))?.name).toBeUndefined()
+  const blankLive = await hostWith().createSession(blank, () => repoRoot)
+  openSessions.push(blankLive)
+  expect(blankLive.inspect().name).toBeUndefined()
+
+  const live = crypto.randomUUID()
+  storeSession(live, 'approach B', 'done')
+  const host = hostWith()
+  const hosted = await host.createSession(live, () => repoRoot)
+  openSessions.push(hosted)
+  expect(hosted.inspect().name).toBeUndefined()
+  await host.renameThread(live, 'Approach B: a parser')
+  expect(hosted.inspect().name).toBe('Approach B: a parser')
+  expect((await hostWith().listSessions()).find((row) => row.id === live)?.name).toBe('Approach B: a parser')
+  expect(await host.renameThread('never-stored', 'x')).toMatchObject({ kind: 'no-thread' })
+
+  // A fork at the first prompt holds no message (#433): pi holds such a file back from writing
+  // until a reply comes. The name is written to it all the same.
+  const source = crypto.randomUUID()
+  const { userEntryIds } = storeTurns(source, [['the first prompt', 'its reply']])
+  const forked = await hostWith().forkThread(source, userEntryIds[0] ?? '')
+  if (forked.kind !== 'forked') throw new Error(`the fork was refused: ${forked.reason}`)
+  expect(await hostWith().renameThread(forked.threadId, 'a fork to try later')).toEqual({ kind: 'renamed' })
+  expect((await hostWith().listSessions()).find((row) => row.id === forked.threadId)).toMatchObject({
+    messageCount: 0,
+    name: 'a fork to try later',
+  })
+})
+
 // #395: the host serves the server's projects and nothing else. A session pi keeps for another
 // directory is invisible here — and, the part that matters, its id is not free: building under it
 // is a refusal, never a fresh session beside the stored one in a directory nobody chose.

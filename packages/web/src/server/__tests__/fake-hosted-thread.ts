@@ -36,6 +36,7 @@ import type {
   HostedThreadInspection,
   SystemPromptPreviewOutcome,
   ThreadDeleteOutcome,
+  ThreadRenameOutcome,
   ThreadRestoreOutcome,
 } from '../../host/agent-host.ts'
 import type { BranchContext, BranchRequestDetail } from '../../host/branch-context.ts'
@@ -401,6 +402,7 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
     sessionFile: null,
     entries: [],
     commands: [],
+    name: undefined,
     ...options.inspect,
   }
   const hosted: HostedThread = {
@@ -466,6 +468,8 @@ export interface FakeStoredThread {
   readonly details?: Readonly<Record<string, BranchRequestDetail>>
   /** The thread it was forked from (#433); none when absent. */
   readonly parentThreadId?: string
+  /** The name its file holds (#670); none when absent. */
+  readonly name?: string
   /** Its fork point (#435); assembled from the fields above, with no run context, when absent. */
   readonly forkPoint?: EnsoForkPoint
   /** What restoring its files answers (#551) once the thread and entry are found; `no-tree` when absent. A promise holds the restore open. */
@@ -535,6 +539,12 @@ export function createFakeAgentHost(
   }
   /** The ids `deleteThread` removed — the real host's tombstone (#571). */
   const deleted = new Set<string>()
+  /** Each thread's name (#670), by id — the session_info its file holds: the stored one's, then what `renameThread` gave. */
+  const names = new Map<string, string>(
+    Object.entries(stored).flatMap(([threadId, storedThread]) =>
+      storedThread.name === undefined ? [] : [[threadId, storedThread.name] as const],
+    ),
+  )
   /**
    * The ids whose restore or undo is in flight. The real host refuses a mode change then
    * (`agent-host.ts#admitRun`), and a mode change on a held thread reaches the runtime (#618).
@@ -583,6 +593,7 @@ export function createFakeAgentHost(
                   messageCount: storedThread.transcript.filter((transcriptEntry) => transcriptEntry.kind === 'message')
                     .length,
                   firstMessage: storedThread.firstMessage,
+                  ...(names.get(threadId) === undefined ? {} : { name: names.get(threadId) ?? '' }),
                   ...(storedThread.parentThreadId === undefined ? {} : { parentThreadId: storedThread.parentThreadId }),
                 },
               ]
@@ -606,6 +617,7 @@ export function createFakeAgentHost(
               transcript: storedThread.transcript,
               usage: storedThread.usage ?? { ...FAKE_NO_USAGE },
               recordedModel: storedThread.recordedModel,
+              name: names.get(threadId),
             },
       )
     },
@@ -693,6 +705,12 @@ export function createFakeAgentHost(
       return storedThread.restore === undefined
         ? Promise.resolve({ kind: 'no-tree', reason: `thread ${threadId} has no tree` })
         : whileRestoring(threadId, storedThread.restore)
+    },
+    // A name lands on the file (#670): the listing and the history read it back from then on.
+    renameThread: (threadId: string, name: string): Promise<ThreadRenameOutcome> => {
+      if (served(threadId) === undefined) return Promise.resolve({ kind: 'no-thread', reason: `no thread ${threadId}` })
+      names.set(threadId, name)
+      return Promise.resolve({ kind: 'renamed' })
     },
     // The real host's order (#571): unknown, then the inventory — force takes only the work its
     // digest confirms (PR #572 review) — then the live session's retire; deleted, the thread is

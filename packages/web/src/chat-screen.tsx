@@ -104,6 +104,7 @@ import { createProjectsStore, projectOf, removeProject, threadAfterDelete } from
 import { PromptManagerDialog } from './prompt-manager.tsx'
 import { QuestionnaireControls } from './questionnaire-card.tsx'
 import { providerRefusalLine, providerRefusalSource, RefusedAttemptLine, refusalOfMessage } from './refused-attempt.tsx'
+import { RenameThread } from './rename-thread.tsx'
 import { SelectedMessagePart } from './selected-message-part.tsx'
 import { SettingsDialog } from './settings-dialog.tsx'
 import { draftWithKeptPrompt, SLASH_PROMPT_REFUSAL, StartSessionDialog } from './start-session.tsx'
@@ -127,9 +128,11 @@ import {
   getThreadStores,
   markThreadActive,
   mintThread,
+  nameThreadSummary,
   type ThreadStores,
   type ThreadSummary,
   threadListStore,
+  threadTitleFromMessage,
   titleFromMessage,
   updateThreadSummary,
 } from './thread-stores.ts'
@@ -1914,7 +1917,7 @@ export function ThreadPane({
   // churn does not reach it, and `updateThreadSummary` is no longer called per token.
   const firstUserMessage = chat.messages.find((message) => message.role === 'user')
   const title = useMemo(
-    () => (firstUserMessage === undefined ? undefined : titleFromMessage(firstUserMessage)),
+    () => (firstUserMessage === undefined ? undefined : threadTitleFromMessage(firstUserMessage)),
     [firstUserMessage],
   )
   const waiting = useStore(stores.dialog) !== undefined
@@ -2101,14 +2104,6 @@ function AppHeader({
   stored: readonly EnsoStoredThread[]
 }): React.ReactNode {
   const projects = useStore(projectList).rows
-  // Delete is offered once the server holds the thread (#571): listed among its stored sessions (a
-  // fork, written by its route before any prompt), adopted from a stored branch, or prompted here
-  // (its title is that prompt's). A thread minted and never prompted is this page's only.
-  const onServer =
-    active !== undefined &&
-    (active.title !== undefined ||
-      getThreadStores(active.threadId).history.length > 0 ||
-      stored.some((row) => row.threadId === active.threadId))
   return (
     <header className="flex min-h-14 items-center gap-3 border-b bg-sidebar px-3 py-2">
       <RailToggle open={rail.open} onToggle={rail.toggle} />
@@ -2118,25 +2113,10 @@ function AppHeader({
           Enso · pi runtime
         </h1>
         <span className="truncate font-heading text-base font-semibold" title={activeThreadId ?? ''}>
-          {active?.title ?? (activeThreadId === undefined ? 'resuming…' : UNTITLED_THREAD)}
+          {active?.name ?? active?.title ?? (activeThreadId === undefined ? 'resuming…' : UNTITLED_THREAD)}
         </span>
       </div>
-      {active !== undefined && onServer ? (
-        <DeleteThread
-          key={active.threadId}
-          target={getThreadStores(active.threadId)}
-          onDeleted={onDeleted}
-          onRefused={(reason): void =>
-            getThreadStores(active.threadId).notifications.push(
-              `thread ${active.threadId}: delete refused: ${reason}`,
-              'warning',
-              'run',
-              ENSO_NOTICE_SOURCE,
-            )
-          }
-          stored={stored}
-        />
-      ) : null}
+      {active === undefined ? null : <ThreadControls active={active} onDeleted={onDeleted} stored={stored} />}
       {isFixtureMode ? (
         <span className="rounded-full border px-2 py-0.5 text-xs text-muted-foreground">fixture</span>
       ) : null}
@@ -2153,6 +2133,54 @@ function AppHeader({
         />
       ) : null}
     </header>
+  )
+}
+
+/**
+ * The header's Rename (#670) and Delete (#571), offered once the server holds the thread: listed
+ * among its stored sessions (a fork, written by its route before any prompt), adopted from a stored
+ * branch, or prompted here (its title is that prompt's). A thread minted and never prompted is this
+ * page's only.
+ */
+function ThreadControls({
+  active,
+  onDeleted,
+  stored,
+}: {
+  active: ThreadSummary
+  onDeleted: (threadId: string) => void
+  stored: readonly EnsoStoredThread[]
+}): React.ReactNode {
+  const stores = getThreadStores(active.threadId)
+  const onServer =
+    active.title !== undefined || stores.history.length > 0 || stored.some((row) => row.threadId === active.threadId)
+  if (!onServer) return null
+  return (
+    <>
+      <RenameThread
+        key={`rename-${active.threadId}`}
+        target={stores}
+        current={active.name ?? active.title}
+        onRenamed={(name): void => {
+          nameThreadSummary(active.threadId, name)
+          void storedThreads.refresh()
+        }}
+      />
+      <DeleteThread
+        key={active.threadId}
+        target={stores}
+        onDeleted={onDeleted}
+        onRefused={(reason): void =>
+          stores.notifications.push(
+            `thread ${active.threadId}: delete refused: ${reason}`,
+            'warning',
+            'run',
+            ENSO_NOTICE_SOURCE,
+          )
+        }
+        stored={stored}
+      />
+    </>
   )
 }
 

@@ -86,6 +86,8 @@ export interface AgentHost {
   restoreThreadAt(threadId: string, entryId: string): Promise<ThreadRestoreOutcome>
   /** Undo the thread's last restore (#565): its tree back to that restore's safety snapshot, itself recorded as a restore. */
   undoLastRestore(threadId: string, safety: string): Promise<ThreadRestoreOutcome>
+  /** Name the thread (#670) — pi's `session_info`, live or stored; the first prompt stays its title otherwise. */
+  renameThread(threadId: string, name: string): Promise<ThreadRenameOutcome>
   /**
    * The thread's tree and its snapshot store (#650), live or stored — one open, nothing built
    * (#86); `undefined` for a thread in its checkout, no session in a served project, or a host
@@ -238,6 +240,8 @@ export interface HostedThreadInspection {
   readonly entries: readonly EnsoTranscriptEntry[]
   /** Slash commands this session registers. */
   readonly commands: readonly string[]
+  /** The name a person gave the thread (#670): pi's newest `session_info`; `undefined` when none. */
+  readonly name: string | undefined
 }
 ```
 
@@ -256,6 +260,8 @@ export interface StoredThread {
   readonly messageCount: number
   /** The first user message, verbatim; empty for a session with none. */
   readonly firstMessage: string
+  /** The name a person gave it (#670): pi's newest `session_info`; absent when none. */
+  readonly name?: string
   /**
    * The thread it was forked from (#433): its header's `parentSession` file, as that file's
    * session id. Absent for a thread that is no fork, and for one whose parent file is gone.
@@ -283,6 +289,11 @@ export const EnsoStoredThread = Type.Object(
     projectId: Type.String(),
     /** The first user message, or undefined for a session with none — the rail's title, as deepseek does. */
     title: Type.Optional(Type.String()),
+    /**
+     * The name a person gave the thread (#670) — its newest `session_info` — shown instead of the
+     * title; absent when none. Not bounded as a rename is: pi's own `/name` writes it too.
+     */
+    name: Type.Optional(Type.String({ minLength: 1 })),
     /** The file's mtime, ISO 8601 — when the session last grew. */
     lastActivityAt: Type.String(),
     messageCount: Type.Integer({ minimum: 0 }),
@@ -363,6 +374,8 @@ export const EnsoThreadHistory = Type.Object(
     incidents: EnsoSessionIncidents,
     /** Present only when the branch ends inside a turn — see {@link EnsoInterruptedTail}. */
     interrupted: Type.Optional(EnsoInterruptedTail),
+    /** The name a person gave the thread (#670) — its newest `session_info`, as the listing's `name` — absent when none. */
+    name: Type.Optional(Type.String({ minLength: 1 })),
   },
   { additionalProperties: false },
 )

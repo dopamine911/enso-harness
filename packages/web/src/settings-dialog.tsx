@@ -2,15 +2,6 @@ import type { EnsoProject, EnsoStoredThread } from '@enso/core'
 import { Settings2Icon } from 'lucide-react'
 import { useState } from 'react'
 import type { FetchLike } from './browser-logging.ts'
-import { Button } from './components/ui/button.tsx'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from './components/ui/dialog.tsx'
 import { Field, FieldDescription, FieldGroup, FieldLabel } from './components/ui/field.tsx'
 import {
   Select,
@@ -33,6 +24,7 @@ import {
   readSavedFonts,
   saveFonts,
 } from './fonts.ts'
+import { HeaderDialog } from './header-dialog.tsx'
 import { PermissionsSection, usePermissionPolicy } from './permissions-settings.tsx'
 import { applyTheme, isThemeId, pageStorage, readSavedTheme, saveTheme, THEME_FAMILIES, type ThemeId } from './theme.ts'
 import { TreesSection } from './trees-settings.tsx'
@@ -169,41 +161,32 @@ export function SettingsDialog({
   const [open, setOpen] = useState(false)
   const permissions = usePermissionPolicy(open, fetch)
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label="settings"
-          title="settings — the colour theme, fonts, permissions and thread trees"
-        >
-          <Settings2Icon />
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="flex max-h-5/6 flex-col sm:max-w-3xl">
-        <DialogHeader>
-          <DialogTitle>Settings</DialogTitle>
-          <DialogDescription>
-            appearance is kept in this browser; permissions are saved on the server; trees are measured on it
-          </DialogDescription>
-        </DialogHeader>
-        <Tabs defaultValue="appearance" className="min-h-0 flex-1">
-          <TabsList>
-            <TabsTrigger value="appearance">Appearance</TabsTrigger>
-            <TabsTrigger value="permissions">Permissions</TabsTrigger>
-            <TabsTrigger value="trees">Trees</TabsTrigger>
-          </TabsList>
-          <TabsContent value="appearance" className="max-w-sm">
-            <AppearanceFields />
-          </TabsContent>
-          <TabsContent value="permissions" className="min-h-0 overflow-y-auto pr-1">
-            <PermissionsSection editor={permissions} threadId={threadId} fetch={fetch} />
-          </TabsContent>
-          <TabsContent value="trees" className="min-h-0 overflow-y-auto pr-1">
-            <TreesSection fetch={fetch} projects={projects} stored={stored} onDeleted={onDeleted} />
-          </TabsContent>
-        </Tabs>
-      </DialogContent>
-    </Dialog>
+    <HeaderDialog
+      open={open}
+      onOpenChange={setOpen}
+      label="settings"
+      hover="settings — the colour theme, fonts, permissions and thread trees"
+      icon={<Settings2Icon />}
+      title="Settings"
+      description="appearance is kept in this browser; permissions are saved on the server; trees are measured on it"
+      contentClassName="flex max-h-5/6 flex-col sm:max-w-3xl"
+    >
+      <Tabs defaultValue="appearance" className="min-h-0 flex-1">
+        <TabsList>
+          <TabsTrigger value="appearance">Appearance</TabsTrigger>
+          <TabsTrigger value="permissions">Permissions</TabsTrigger>
+          <TabsTrigger value="trees">Trees</TabsTrigger>
+        </TabsList>
+        <TabsContent value="appearance" className="max-w-sm">
+          <AppearanceFields />
+        </TabsContent>
+        <TabsContent value="permissions" className="min-h-0 overflow-y-auto pr-1">
+          <PermissionsSection editor={permissions} threadId={threadId} fetch={fetch} />
+        </TabsContent>
+        <TabsContent value="trees" className="min-h-0 overflow-y-auto pr-1">
+          <TreesSection fetch={fetch} projects={projects} stored={stored} onDeleted={onDeleted} />
+        </TabsContent>
+      </Tabs>
+    </HeaderDialog>
   )
 }
