@@ -75,6 +75,7 @@ export {
 } from './git-state.ts'
 export { EnsoThreadPages } from './thread-pages.ts'
 export { THREAD_STATUS_WORDS } from './thread-status-words.ts'
+export { ENSO_UI_EVENTS, EnsoThreadStatusEvent, EnsoThreadStatusKind, type EnsoUiEventName } from './ui-events.ts'
 export {
   DEFAULT_GUARD_POLICY,
   ENSO_GUARD_DENIAL_ENTRY,

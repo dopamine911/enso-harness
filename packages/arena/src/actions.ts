@@ -1,4 +1,4 @@
-import { THREAD_STATUS_WORDS } from '@enso/core'
+import type { EnsoThreadStatusEvent } from '@enso/core'
 import { redactJudgeText } from '@enso/core/judge'
 import type { ArenaNoteKind, ArenaPerception } from './timeline.ts'
 
@@ -111,8 +111,17 @@ export type ArenaAction =
   | { readonly action: 'close-tab'; readonly tab?: number }
   | { readonly action: 'stop'; readonly reason?: string }
 
-/** The longest single `wait`: a run that needs longer waits again, and the timeline shows it waited. */
+/**
+ * The longest blind `wait` (a fixed sleep): the agent sleeps through nothing longer than a minute,
+ * and a run that needs longer waits again, so the timeline shows it waited.
+ */
 export const LONGEST_WAIT_MS = 60_000
+/**
+ * The longest wait on the page (`until`): it returns the moment the page needs the agent (#737), so
+ * the limit is a backstop, not a cadence — the recorder cuts it under the run's idle bound (#609),
+ * which a wait in progress must not trip.
+ */
+export const LONGEST_PAGE_WAIT_MS = 10 * 60_000
 
 /** What a wait on the page waits for: any change (#637), or Enso needing the agent (#648). */
 export type ArenaWaitUntil = 'change' | 'attention'
@@ -164,50 +173,6 @@ const DIALOG_PAGE = 'dialog '
 /** Why Enso needs the agent (#648): pi asks, the run ended (done or failed), the server went, a browser dialog. */
 export type ArenaAttention = 'question' | 'idle' | 'disconnected' | 'dialog'
 
-/**
- * What on the page needs the agent, read off the status bar in Enso's own words (core's
- * `THREAD_STATUS_WORDS`, which the bar renders): a question waiting, or the run at rest —
- * `idle` after a reply or a failure, `disconnected` once the follow ended. Undefined while Enso works.
- */
-export function attentionOf(page: string): ArenaAttention | undefined {
-  if (page.startsWith(DIALOG_PAGE)) return 'dialog'
-  const bar = linesUnder(page, `"${THREAD_STATUS_WORDS.region}":`)
-  if (bar.includes(`- status: ${THREAD_STATUS_WORDS.questionWaiting}`)) return 'question'
-  if (bar.includes(`- text: ${THREAD_STATUS_WORDS.idle}`)) return 'idle'
-  if (bar.includes(`- text: ${THREAD_STATUS_WORDS.disconnected}`)) return 'disconnected'
-  return undefined
-}
-
-/** The lines indented under the first line ending with `header`, trimmed: one region of a page read. */
-function linesUnder(page: string, header: string): string[] {
-  const lines = page.split('\n')
-  const start = lines.findIndex((line) => line.trimEnd().endsWith(header))
-  if (start === -1) return []
-  const indentOf = (line: string): number => line.length - line.trimStart().length
-  const headerIndent = indentOf(lines[start] ?? '')
-  const end = lines.findIndex((line, index) => index > start && indentOf(line) <= headerIndent)
-  return lines.slice(start + 1, end === -1 ? undefined : end).map((line) => line.trim())
-}
-
-/**
- * The line a question card's body starts with (`EnsoDialogCard` in web's `chat-screen.tsx`).
- * ⚠ If the card's words change, `questionOf` finds no question in either page, and the wait falls
- * back to its #648 rule — slower, never wrong.
- */
-const QUESTION_CARD_LINE = '- text: pi is asking'
-
-/**
- * Which question a page asks (#693): the card's own line, its group named by the question's title
- * (`group "Permission Required tool : bash … command : …"`), or undefined when none is open. Two
- * cards with one title read as one question, so the safe rule applies to them.
- */
-export function questionOf(page: string): string | undefined {
-  const lines = page.split('\n')
-  // A prefix: the card's first line goes on with the dialog's method (`pi is asking select`).
-  const body = lines.findIndex((line) => line.trim().startsWith(QUESTION_CARD_LINE))
-  return body > 0 ? lines[body - 1]?.trim() : undefined
-}
-
 /** What a wait on the page came to: whether the page changed, after `waitedMs`, and — for attention — why it returned. */
 export interface ArenaPageWait {
   readonly changed: boolean
@@ -216,34 +181,12 @@ export interface ArenaPageWait {
 }
 
 /**
- * Look every `pollMs` until the page answers `until`, or `ms` runs out. `look` is the page as
- * `pageForChange` words it (or `dialogForChange`); `sleep` and `now` are the page's clock, injected
- * so the outcomes can be tested without a browser.
- *
- * `change` (#637): the first look that differs from `baseline`.
- *
- * `attention` (#648): a look that differs and needs the agent. ⚠ Not every such look does — measured,
- * a wait sent with its own click returned on Enso merely starting, and the agent gave up on it:
- * - an attention state the baseline did not have returns at once;
- * - `idle` again returns only after the wait has seen Enso work. After Start the baseline is often
- *   already `idle` — the run not begun — and the page changes while still idle as the dialog
- *   closes; the run's end is `idle` again;
- * - a `question` again returns on any change. A question stands until answered and the page holds
- *   still while it waits (measured, #637), so a page that changed and still asks is the NEXT
- *   question: after an approval, a quick tool runs and the next card arrives inside one look —
- *   live, the wait had sat out its minute behind that card.
- * - ⚠ the next question already in the baseline (#693): it arrived between the agent's click and
- *   the look the move took, so the page holds still and nothing above returns. `before` is the page
- *   the agent saw before that move: a baseline asking a question it did not (`questionOf`) is new,
- *   and returns at once. The SAME question still on screen — the card the agent just answered, on
- *   its way out — is not: returning then would invite a second answer to it.
- * A run begun and ended between two looks is missed: the wait then runs to its limit.
+ * Look every `pollMs` until the page differs from `baseline` (#637), or `ms` runs out. `look` is
+ * the page as `pageForChange` words it (or `dialogForChange`); `sleep` and `now` are the page's
+ * clock, injected so the outcomes can be tested without a browser.
  */
-export async function waitForPage(options: {
-  readonly until: ArenaWaitUntil
+export async function waitForChange(options: {
   readonly baseline: string
-  /** The page the agent saw before its last move, when it moved since it last looked (#693). */
-  readonly before?: string | undefined
   readonly look: () => Promise<string>
   readonly sleep: (ms: number) => Promise<void>
   readonly ms: number
@@ -253,28 +196,138 @@ export async function waitForPage(options: {
   const now = options.now ?? Date.now
   const started = now()
   const waited = (): number => now() - started
-  const startedIn = attentionOf(options.baseline)
-  if (options.until === 'attention' && startedIn === 'question' && options.before !== undefined) {
-    const asked = questionOf(options.baseline)
-    if (asked !== undefined && asked !== questionOf(options.before)) {
-      return { changed: true, waitedMs: 0, attention: 'question' }
-    }
-  }
-  let changed = false
-  let sawWork = startedIn === undefined
   while (waited() < options.ms) {
     await options.sleep(Math.min(options.pollMs, options.ms - waited()))
-    const page = await options.look()
-    if (page === options.baseline) continue
-    changed = true
-    if (options.until === 'change') return { changed, waitedMs: waited() }
-    const attention = attentionOf(page)
-    if (attention === undefined) sawWork = true
-    else if (sawWork || attention !== startedIn || attention === 'question') {
-      return { changed, waitedMs: waited(), attention }
-    }
+    if ((await options.look()) !== options.baseline) return { changed: true, waitedMs: waited() }
   }
-  return { changed, waitedMs: waited() }
+  return { changed: false, waitedMs: waited() }
+}
+
+/**
+ * What the page announced about its thread's status (#737, core's `enso:thread-status`), kept as
+ * the agent acts: the recorder records every announcement from a shown pane with the tab it came
+ * from, and `mark` is the agent's move — what came before it is what the agent acted from, what
+ * comes after is what its move caused. A wait until attention reads the log instead of the page.
+ */
+export interface ArenaStatusLog {
+  /** The page in `tab` announced `event`; a wait listening on that tab is told. */
+  readonly record: (tab: number, event: EnsoThreadStatusEvent) => void
+  /** The agent acts on, or has just been shown, the page: the announcements so far are what it knows. */
+  readonly mark: () => void
+  /** The last announcement from `tab` before the mark: the status the agent acted from. */
+  readonly beforeMark: (tab: number) => EnsoThreadStatusEvent | undefined
+  /** The announcements from `tab` since the mark, oldest first. */
+  readonly sinceMark: (tab: number) => readonly EnsoThreadStatusEvent[]
+  /** Hear each announcement from `tab` as it is recorded; returns the function that stops listening. */
+  readonly subscribe: (tab: number, listener: (event: EnsoThreadStatusEvent) => void) => () => void
+}
+
+export function createStatusLog(): ArenaStatusLog {
+  const before = new Map<number, EnsoThreadStatusEvent>()
+  let since: Array<{ readonly tab: number; readonly event: EnsoThreadStatusEvent }> = []
+  const listeners = new Set<{ readonly tab: number; readonly listener: (event: EnsoThreadStatusEvent) => void }>()
+  return {
+    record: (tab, event) => {
+      since.push({ tab, event })
+      for (const subscriber of listeners) if (subscriber.tab === tab) subscriber.listener(event)
+    },
+    mark: () => {
+      for (const { tab, event } of since) before.set(tab, event)
+      since = []
+    },
+    beforeMark: (tab) => before.get(tab),
+    sinceMark: (tab) => since.filter((announced) => announced.tab === tab).map((announced) => announced.event),
+    subscribe: (tab, listener) => {
+      const subscriber = { tab, listener }
+      listeners.add(subscriber)
+      return () => {
+        listeners.delete(subscriber)
+      }
+    },
+  }
+}
+
+/** A timer that can be cancelled: `fire` after `ms`, unless the returned function is called first. */
+export type ArenaTimer = (ms: number, fire: () => void) => () => void
+
+const realTimer: ArenaTimer = (ms, fire) => {
+  const timer = setTimeout(fire, ms)
+  return () => clearTimeout(timer)
+}
+
+/**
+ * Wait until the page in `tab` needs the agent (#648), read off what it announced (#737) rather
+ * than looked for: the announcements since the agent's move first, then each one as it comes, until
+ * `ms` runs out or an interrupt ends the wait. Every transition is seen, so a run begun and ended
+ * while the agent was thinking is its `idle`, never missed.
+ *
+ * ⚠ Not every announcement needs the agent — measured (#648), a wait that returned on Enso merely
+ * starting was given up on:
+ * - `disconnected` returns at once;
+ * - a `question` returns when it is not the one the agent acted from (#693): the card it just
+ *   answered, on its way out, is no return — a second answer to it would be a double approval;
+ * - `running` is Enso working: no return, but work seen;
+ * - `idle` returns after work was seen, or when the agent did not start from idle (it answered a
+ *   question, or the follow was gone). From idle with no work seen — Start just clicked, the dialog
+ *   closing — it is not the run's end.
+ * An interrupt (the run stopping, a native dialog opening) ends the wait where it is.
+ */
+export function waitForAttention(options: {
+  readonly log: ArenaStatusLog
+  readonly tab: number
+  readonly ms: number
+  /** The run stopping: the wait ends with what it has. */
+  readonly stopped: Promise<unknown>
+  /** A native dialog opening over the tab: `attention: 'dialog'`. */
+  readonly dialog: Promise<unknown>
+  readonly timer?: ArenaTimer
+  readonly now?: () => number
+}): Promise<ArenaPageWait> {
+  const now = options.now ?? Date.now
+  const started = now()
+  const waited = (): number => now() - started
+  const before = options.log.beforeMark(options.tab)
+  let sawWork = before === undefined || before.status === 'running'
+  let changed = false
+  const decide = (event: EnsoThreadStatusEvent): ArenaAttention | undefined => {
+    changed = true
+    if (event.status === 'disconnected') return 'disconnected'
+    if (event.status === 'question') {
+      const asked = event.question?.id
+      return asked !== undefined && asked === before?.question?.id ? undefined : 'question'
+    }
+    if (event.status === 'running') {
+      sawWork = true
+      return undefined
+    }
+    return sawWork || before?.status !== 'idle' ? 'idle' : undefined
+  }
+  for (const event of options.log.sinceMark(options.tab)) {
+    const attention = decide(event)
+    if (attention !== undefined) return Promise.resolve({ changed, waitedMs: waited(), attention })
+  }
+  const { promise, resolve } = Promise.withResolvers<ArenaPageWait>()
+  let settled = false
+  let stopListening = (): void => undefined
+  let cancelTimer = (): void => undefined
+  const finish = (attention?: ArenaAttention): void => {
+    if (settled) return
+    settled = true
+    stopListening()
+    cancelTimer()
+    resolve({ changed, waitedMs: waited(), ...(attention === undefined ? {} : { attention }) })
+  }
+  stopListening = options.log.subscribe(options.tab, (event) => {
+    const attention = decide(event)
+    if (attention !== undefined) finish(attention)
+  })
+  cancelTimer = (options.timer ?? realTimer)(options.ms, () => finish())
+  void options.stopped.then(() => finish())
+  void options.dialog.then(() => {
+    changed = true
+    finish('dialog')
+  })
+  return promise
 }
 
 /** What a wait until change compares with, kept as the agent acts (#637). */
@@ -285,8 +338,6 @@ export interface ArenaChangeBaseline {
   readonly moved: () => Promise<void>
   /** The page a wait starts from: the last seen, or — with none — the page as the wait finds it. */
   readonly baseline: () => Promise<string>
-  /** What the agent saw before its last move, when it has not looked since (#693); undefined otherwise. */
-  readonly before: () => string | undefined
 }
 
 /**
@@ -301,20 +352,14 @@ export interface ArenaChangeBaseline {
  */
 export function createChangeBaseline(look: () => Promise<string>): ArenaChangeBaseline {
   let seen: string | undefined
-  let seenBeforeMove: string | undefined
   return {
     saw: (page) => {
       seen = page
-      seenBeforeMove = undefined
     },
     moved: async () => {
-      // What the agent saw before this move: its read, or — a visual agent, which never reads — the
-      // view after its previous action, which is the page as the previous move left it.
-      seenBeforeMove = seen
       seen = await look().catch(() => undefined)
     },
     baseline: async () => seen ?? (await look()),
-    before: () => seenBeforeMove,
   }
 }
 
@@ -516,7 +561,8 @@ const ACTION_PARSERS: Readonly<Record<string, (request: Fields) => ArenaActionPa
     if (until !== undefined && !isWaitUntil(until)) {
       return fail(`wait "until" takes ${WAIT_UNTIL.map((kind) => `"${kind}"`).join(' or ')}`)
     }
-    return accept({ action: 'wait', ms: Math.min(ms, LONGEST_WAIT_MS), ...(until === undefined ? {} : { until }) })
+    if (until === undefined) return accept({ action: 'wait', ms: Math.min(ms, LONGEST_WAIT_MS) })
+    return accept({ action: 'wait', ms: Math.min(ms, LONGEST_PAGE_WAIT_MS), until })
   },
   note: parseNote,
   stop: (request) => {

@@ -74,6 +74,7 @@ const DOMAINS_BY_CLASSIFICATION: Readonly<Record<Classification, Readonly<Record
     'tool-input.ts': 'Surface',
     'tool-result.ts': 'Surface, Observation',
     'transcript.ts': 'Thread, Record',
+    'ui-events.ts': 'Thread, Surface',
   },
   'config/policy': {
     'command-judge.ts': 'Permission, Record',

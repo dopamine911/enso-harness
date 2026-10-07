@@ -1788,6 +1788,7 @@ const chatComponents = {
             messages={chat.messages}
             generating={chat.sessionGenerating}
             projectTitle={threadProject?.title}
+            shown={shown !== undefined}
           />
         </div>
       )
