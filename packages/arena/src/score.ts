@@ -36,8 +36,17 @@ import { type ArenaEvent, readJsonLines, readTimeline } from './timeline.ts'
 /** How bad a problem is: an error fails the run; a warning is reported and does not. */
 export type ArenaSeverity = 'error' | 'warning'
 
-/** Which log a problem was read from. */
-export type ArenaProblemSource = 'ui' | 'run' | 'timeline' | 'agent' | 'enso-log' | 'enso-eval' | 'evidence' | 'project'
+/** Which log a problem was read from; `application` is what the built page itself logged, in its Preview tab (#675). */
+export type ArenaProblemSource =
+  | 'ui'
+  | 'run'
+  | 'timeline'
+  | 'agent'
+  | 'enso-log'
+  | 'enso-eval'
+  | 'evidence'
+  | 'project'
+  | 'application'
 
 /** One problem: the same kind of thing, counted once with a few examples rather than listed N times. */
 export interface ArenaProblem {
@@ -152,7 +161,8 @@ function grouped(occurrences: readonly Occurrence[]): ArenaProblem[] {
 /** Where an event happened, as one example line: its time into the run, and the thread it was in. */
 function placeOf(event: ArenaEvent): string {
   const seconds = Math.round(event.elapsedMs / 1000)
-  return `+${seconds}s${event.page?.threadId === undefined ? '' : ` thread ${event.page.threadId}`}`
+  const tab = event.page?.tab === undefined ? '' : ` tab ${event.page.tab}`
+  return `+${seconds}s${tab}${event.page?.threadId === undefined ? '' : ` thread ${event.page.threadId}`}`
 }
 
 const short = (text: string): string => (text.length > 160 ? `${text.slice(0, 157)}…` : text)
@@ -375,10 +385,28 @@ function eventOccurrence(event: ArenaEvent): Occurrence | undefined {
   }
 }
 
+/** Whether an event happened on the built application's own page: Preview serves it under `/preview/` (#675). */
+function onTheApplication(event: ArenaEvent): boolean {
+  try {
+    return new URL(event.page?.url ?? '').pathname.startsWith('/preview/')
+  } catch {
+    return false
+  }
+}
+
+/**
+ * The timeline's problems. ⚠ What the built page logs in its Preview tab — a console error, a
+ * missing asset, a crash, an action that failed on it — is the APPLICATION's (#675): a warning
+ * under `application`, never an Enso error that fails the run. A 5xx is still Enso's: its server
+ * failed to serve the page.
+ */
 function timelineProblems(events: readonly ArenaEvent[]): Occurrence[] {
-  return events.flatMap((event) => {
+  return events.flatMap((event): Occurrence[] => {
     const occurrence = eventOccurrence(event)
-    return occurrence === undefined ? [] : [occurrence]
+    if (occurrence === undefined) return []
+    const serverFailed = event.kind === 'response-error' && event.status >= 500
+    if (occurrence.source !== 'timeline' || serverFailed || !onTheApplication(event)) return [occurrence]
+    return [{ ...occurrence, severity: 'warning', source: 'application' }]
   })
 }
 
