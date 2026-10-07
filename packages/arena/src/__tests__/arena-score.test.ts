@@ -185,6 +185,9 @@ test('⚠ what the built page logs in its Preview tab is the application’s; a 
     { kind: 'response-error', request: `GET ${preview.url.replace('index.html', 'sprite.png')}`, status: 404 },
     preview,
   )
+  // #689, as the arena saw it: Preview's sandbox blocked the page's own module script. Enso's, not the app's.
+  const corsBlocked = `Access to script at '${preview.url.replace('index.html', 'app.mjs')}' from origin 'null' has been blocked by CORS policy`
+  timeline.record({ kind: 'console-error', text: corsBlocked }, preview)
   const scoreOf = (): ReturnType<typeof scoreArenaRun> => {
     const events = readTimeline(path)
     return scoreArenaRun({
@@ -205,6 +208,9 @@ test('⚠ what the built page logs in its Preview tab is the application’s; a 
     ['warning', 'uncaught error in the page: ReferenceError: score is not defined'],
   ])
   expect(application[0]?.examples[0]).toContain('tab 1')
+
+  const cors = played.problems.find((problem) => problem.message.includes('blocked by CORS policy'))
+  expect(cors).toMatchObject({ severity: 'warning', source: 'timeline' })
 
   timeline.record({ kind: 'response-error', request: `GET ${preview.url}`, status: 500 }, preview)
   const failedToServe = scoreOf()

@@ -412,18 +412,24 @@ function onTheApplication(event: ArenaEvent): boolean {
   }
 }
 
+/** Chromium's words for a resource its CORS check refused: "… has been blocked by CORS policy". */
+const CORS_BLOCKED = 'blocked by CORS policy'
+
 /**
  * The timeline's problems. ⚠ What the built page logs in its Preview tab — a console error, a
  * missing asset, a crash, an action that failed on it — is the APPLICATION's (#675): a warning
- * under `application`, never an Enso error that fails the run. A 5xx is still Enso's: its server
- * failed to serve the page.
+ * under `application`, never an Enso error that fails the run. Two failures on that page are still
+ * Enso's: a 5xx (its server failed to serve the page), and a script blocked by CORS (#689: Preview
+ * serves the page sandboxed, and a module script it could not load is Enso's serving, not the app).
  */
 function timelineProblems(events: readonly ArenaEvent[]): Occurrence[] {
   return events.flatMap((event): Occurrence[] => {
     const occurrence = eventOccurrence(event)
     if (occurrence === undefined) return []
-    const serverFailed = event.kind === 'response-error' && event.status >= 500
-    if (occurrence.source !== 'timeline' || serverFailed || !onTheApplication(event)) return [occurrence]
+    const servedBadly =
+      (event.kind === 'response-error' && event.status >= 500) ||
+      (event.kind === 'console-error' && event.text.includes(CORS_BLOCKED))
+    if (occurrence.source !== 'timeline' || servedBadly || !onTheApplication(event)) return [occurrence]
     return [{ ...occurrence, severity: 'warning', source: 'application' }]
   })
 }
