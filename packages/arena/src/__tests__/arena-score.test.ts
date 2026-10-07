@@ -88,7 +88,29 @@ test('a clean agent run passes: the boundary held, Enso was prompted, every thre
     screenshots: 0,
     notes: { wish: 0, friction: 0, retrospective: 1 },
     work: { changedFiles: 3, commits: 1, workspaces: ['/runs/p'] },
+    modelUse: { enso: [] },
   })
+})
+
+// #674: a run set to Enso's model X whose sessions ran on Y would sit in X's column of a comparison.
+test('a run whose Enso never ran on the model it set says so; one that did, or whose model is unknown, does not', () => {
+  const [start, ...rest] = AGENT_RUN
+  if (start?.kind !== 'run-start') throw new Error('AGENT_RUN changed shape')
+  const setTo = (model: string): ArenaEventBody[] => [{ ...start, ensoModel: model }, ...rest]
+  const warned = (input: ArenaScoreInput): string[] =>
+    scoreArenaRun(input)
+      .problems.filter((problem) => problem.message.includes('--enso-model'))
+      .map((problem) => problem.examples.join('; '))
+  expect(warned(inputOf(setTo('anthropic/claude-opus-5-5'), { ensoModels: ['anthropic/claude-fable-5'] }))).toEqual([
+    'set anthropic/claude-opus-5-5; ran anthropic/claude-fable-5',
+  ])
+  // Ran on it first, then switched: it ran on it.
+  const switched = ['anthropic/claude-fable-5', 'anthropic/claude-opus-5-5']
+  expect(warned(inputOf(setTo('anthropic/claude-opus-5-5'), { ensoModels: switched }))).toEqual([])
+  // No thread's record collected: nothing to compare.
+  expect(warned(inputOf(setTo('anthropic/claude-opus-5-5'), { ensoModels: [] }))).toEqual([])
+  // Not set at all.
+  expect(warned(inputOf(AGENT_RUN, { ensoModels: ['anthropic/claude-fable-5'] }))).toEqual([])
 })
 
 // ⚠ #680: a visual agent clicks at points and types into what has focus. Counted only by name, its
@@ -185,6 +207,9 @@ test('⚠ what the built page logs in its Preview tab is the application’s; a 
     { kind: 'response-error', request: `GET ${preview.url.replace('index.html', 'sprite.png')}`, status: 404 },
     preview,
   )
+  // #689, as the arena saw it: Preview's sandbox blocked the page's own module script. Enso's, not the app's.
+  const corsBlocked = `Access to script at '${preview.url.replace('index.html', 'app.mjs')}' from origin 'null' has been blocked by CORS policy`
+  timeline.record({ kind: 'console-error', text: corsBlocked }, preview)
   const scoreOf = (): ReturnType<typeof scoreArenaRun> => {
     const events = readTimeline(path)
     return scoreArenaRun({
@@ -205,6 +230,9 @@ test('⚠ what the built page logs in its Preview tab is the application’s; a 
     ['warning', 'uncaught error in the page: ReferenceError: score is not defined'],
   ])
   expect(application[0]?.examples[0]).toContain('tab 1')
+
+  const cors = played.problems.find((problem) => problem.message.includes('blocked by CORS policy'))
+  expect(cors).toMatchObject({ severity: 'warning', source: 'timeline' })
 
   timeline.record({ kind: 'response-error', request: `GET ${preview.url}`, status: 500 }, preview)
   const failedToServe = scoreOf()
@@ -342,6 +370,14 @@ test('a run directory is read and scored to score.json and score.md', () => {
   for (const name of [`thread-${SHOWN}-bundle.md`, `thread-${UNSEEN}-bundle.md`]) {
     writeFileSync(join(evidence, name), `# bundle\n\n## log\n\`\`\`jsonl\n${record}\n\`\`\`\n`)
   }
+  // What each thread's session ran on (#674), from its record of its conditions — the models a
+  // comparison by Enso's model reads, each once, whatever else the evidence holds.
+  const ranOn = (provider: string, modelId: string): string =>
+    JSON.stringify({ conditions: { model: { provider, modelId } } })
+  writeFileSync(join(evidence, `thread-${SHOWN}-manifest.json`), ranOn('anthropic', 'claude-fable-5'))
+  writeFileSync(join(evidence, `thread-${UNSEEN}-manifest.json`), ranOn('anthropic', 'claude-haiku-4-5'))
+  writeFileSync(join(evidence, `thread-${FORK}-manifest.json`), ranOn('anthropic', 'claude-fable-5'))
+  writeFileSync(join(evidence, 'thread-torn-manifest.json'), '{"conditions":')
   const projectId = projectIdOf(realpathOrSelf(project))
   writeFileSync(
     join(evidence, 'stored-threads.json'),
@@ -350,18 +386,21 @@ test('a run directory is read and scored to score.json and score.md', () => {
       { threadId: UNSEEN, projectId: 'another-project', messageCount: 9, lastActivityAt: 'x', busy: false },
     ]),
   )
-  writeFileSync(
-    join(runDirectory, 'manifest.json'),
-    JSON.stringify(
-      foldArenaManifest({ runId: 'snake-2', events: readTimeline(join(runDirectory, 'timeline.jsonl')), evidence: [] }),
-    ),
-  )
+  // A manifest written before #680 names no perception: every run then read the tree.
+  const { perception: _dropped, ...beforePerception } = foldArenaManifest({
+    runId: 'snake-2',
+    events: readTimeline(join(runDirectory, 'timeline.jsonl')),
+    evidence: [],
+  })
+  writeFileSync(join(runDirectory, 'manifest.json'), JSON.stringify(beforePerception))
 
   const input = readArenaScoreInput(runDirectory)
   // The project (git, one untracked file) and the thread's own tree (not a repository, one file): both counted.
   expect(input.project).toEqual({ changedFiles: 2, commits: 0, workspaces: [project, tree] })
   expect(input.projectThreads).toEqual([{ threadId: SHOWN, messageCount: 4 }])
   expect(input.logRecords).toHaveLength(1)
+  expect(input.ensoModels).toEqual(['anthropic/claude-fable-5', 'anthropic/claude-haiku-4-5'])
+  expect(input.manifest.perception).toBe('tree')
 
   const score = writeArenaScore(runDirectory)
   expect(score).toMatchObject({ verdict: 'fail', uiUsed: true, errors: 1 })

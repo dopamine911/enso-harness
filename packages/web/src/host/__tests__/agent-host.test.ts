@@ -2021,6 +2021,58 @@ test('an effort chosen alone before the first prompt survives the move too, on t
   expect(hosted.runtime.modelState()).toMatchObject({ model: { id: 'faux-1' }, thinkingLevel: 'high' })
 })
 
+/**
+ * An account's provider, as pi-multi-account registers its Codex one (#688): known as the extension
+ * loads, its model list REPLACED on `session_start` by what the account serves. pi's built-in
+ * `openai` list is the agent dir's; the account serves `gpt-account` alone.
+ */
+const accountCatalog: InlineExtension = {
+  name: 'enso-host-account-catalog',
+  factory: (pi: ExtensionAPI) => {
+    pi.registerProvider('openai', { name: 'OpenAI (account)' })
+    pi.on('session_start', () => {
+      pi.registerProvider('openai', {
+        api: 'openai-responses',
+        baseUrl: 'http://account.invalid',
+        models: [fauxModelDefinition('gpt-account', 'GPT Account')],
+      })
+    })
+  },
+}
+
+// ⚠ #688, measured in the arena: the Start dialog offered pi's built-in Codex models, the session's
+// list was the account's live catalog, and `…/configure` refused the dialog's own default with a
+// 422. The dialog's list for a thread nothing has built is the list a session holds after its start.
+test("⚠ the catalogue offers a session's models, not the agent dir's: every one, its first (the dialog's default) included, starts (#688)", async () => {
+  const catalogueAgentDir = scratchAgentDir('enso-host-catalogue-')
+  writeFileSync(join(catalogueAgentDir, 'auth.json'), JSON.stringify({ openai: { type: 'api_key', key: 'sk-688' } }))
+  const host = createAgentHost({
+    servesDirectory: servesRepoRoot,
+    agentDir: catalogueAgentDir,
+    permissionRulesPath,
+    harnessPackageDir: harnessDir,
+    extensionFactories: [accountCatalog],
+  })
+  const offered = async (): Promise<string[]> =>
+    (await host.catalogue()).find((row) => row.name === 'model')?.options?.map((option) => option.id) ?? []
+
+  // No thread exists yet — a fresh process, the arena's case — and none is built to answer.
+  const beforeAnyThread = await offered()
+  expect(beforeAnyThread.filter((id) => id.startsWith('openai/'))).toEqual(['openai/gpt-account'])
+  expect(await host.listSessions()).toEqual([])
+  expect(readdirSync(catalogueAgentDir)).not.toContain('sessions')
+
+  const hosted = await host.createSession(crypto.randomUUID(), () => repoRoot)
+  openSessions.push(hosted)
+  expect(await offered()).toEqual(beforeAnyThread)
+  // What the Start dialog sends: its default (the first option) — then any other it offers.
+  const dialogDefault = beforeAnyThread[0] ?? 'nothing offered'
+  await hosted.runtime.runHostCommand({ name: 'model', value: dialogDefault })
+  const started = hosted.runtime.modelState().model
+  expect(started === null ? undefined : `${started.provider}/${started.id}`).toBe(dialogDefault)
+  for (const id of beforeAnyThread) await hosted.runtime.runHostCommand({ name: 'model', value: id })
+})
+
 // ⚠ PR #561 review: a prompt that finds the thread held JOINS the holder (#75), and pi starts a run
 // for it when none streams — so the restore's lease alone would let a run read a half-restored tree.
 test('⚠ a prompt while the thread restores its files is refused with that reason, and admitted once the restore is done (#551)', async () => {

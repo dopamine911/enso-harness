@@ -393,11 +393,15 @@ view it names, and a run of it is refused as 422. Small, stated.
 and a person's explicit CONTROL of a thread that has not run does (`POST …/command` choosing its
 model or thinking level, `…/flow` starting a login, the system-prompt preview, a permission check —
 `ThreadRegistry.ensure`). Nothing else: every GET is `peek`, and `GET …/commands` for a thread the
-server does not hold answers the host's `catalogue()` — `/model` over pi's available models,
-`/login`, `/logout`, read from the agent dir's auth and models files with no session. The Start
-dialog reads its models there, so opening the page builds nothing; the palette shows a `catalogue`
-list as none, because the slash commands belong to a running session (a prompt beginning with `/`
-cannot start one, and the dialog says so).
+server does not hold answers the host's `catalogue()` — `/model`, `/login`, `/logout`, with no
+thread built. Its models are a SESSION's (#688): the latest bound thread's, else a probe's — one
+in-memory pi session per process, built on the first read and released once `session_start` ran,
+which only the extensions that register providers see (`host/session-models.ts`). The agent dir's
+files alone are not a session's list: pi-multi-account replaces `openai-codex`'s models with the
+account's live catalog on `session_start`, and a list without that offered models the session
+refused. The Start dialog reads its models there, so opening the page builds no thread; the
+palette shows a `catalogue` list as none, because the slash commands belong to a running session
+(a prompt beginning with `/` cannot start one, and the dialog says so).
 
 **`modelState` and `runHostCommand` are the control half of #44** (#338 slice 2). The state is what
 the session runs with now — model, thinking level, the levels that model offers — on the snapshot

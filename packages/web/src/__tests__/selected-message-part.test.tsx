@@ -298,9 +298,30 @@ test('⚠ a markdown link with an executable destination renders as its text; a 
       content: '[run me](javascript:alert(1)) and [data](data:text/html,x) beside [safe](https://example.com)',
     },
   })
-  expect(rendered).toContain('run me and data beside <a href="https://example.com">safe</a>')
+  expect(rendered).toContain('run me and data beside <a href="https://example.com"')
+  expect(rendered).toContain('>safe</a>')
   expect(rendered).not.toContain('javascript:')
   expect(rendered).not.toContain('data:text/html')
+})
+
+/** The opening tag of the reply's anchor pointing at `href`, or `undefined` when there is none. */
+const anchorTo = (rendered: string, href: string): string | undefined =>
+  rendered.match(new RegExp(`<a [^>]*href="${href}"[^>]*>`))?.[0]
+
+// #690: a link in a reply rendered as a plain `<a href>`, so clicking it navigated Enso's own tab
+// away from the thread. It opens a new tab with no opener and no referrer, like Enso's own links;
+// a footnote reference points into this page and stays in this tab.
+test('a markdown link in a reply opens a new tab with no opener; an in-page footnote link stays put', () => {
+  const rendered = html({
+    key: 'text',
+    part: { type: 'text', content: 'Open [Neon Orchard](http://localhost:5173/).[^1]\n\n[^1]: started by the agent' },
+  })
+  const link = anchorTo(rendered, 'http://localhost:5173/')
+  expect(link).toContain('target="_blank"')
+  expect(link).toContain('rel="noopener noreferrer"')
+  const footnote = anchorTo(rendered, '#user-content-fn-1')
+  expect(footnote).toBeDefined()
+  expect(footnote).not.toContain('target=')
 })
 
 // #299: the `?fixture` page's own link tripwire must BE a link, or its inert render proves nothing —

@@ -186,7 +186,7 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
   ),
   PREVIEW_ROUTE: threadRead(
     'respondWithPreview',
-    "200 the file's bytes (#619) — one file of the thread's tree, a directory as its `index.html`, at most 10 MiB, typed by extension, under `Content-Security-Policy: sandbox allow-scripts allow-forms allow-pointer-lock allow-modals`: an opaque origin, so its requests to this server say `Origin: null` and are refused. `nosniff`, `no-referrer`, `no-store`",
+    "200 the file's bytes (#619) — one file of the thread's tree, a directory as its `index.html`, at most 10 MiB, typed by extension, under `Content-Security-Policy: sandbox allow-scripts allow-forms allow-pointer-lock allow-modals`: an opaque origin, so its requests to this server say `Origin: null` and are refused — except the page's module scripts (`Sec-Fetch-Dest: script`, #689), admitted here and answered `Access-Control-Allow-Origin: null`, their 404 too. `nosniff`, `no-referrer`, `no-store`",
     '400 malformed thread id; 403 untrusted origin; 404 no session, a project no longer served, a path that leaves the tree (`..` or a symlink), no such file, or one too large; 500 handler failure',
     { path: '/preview/threads/:threadId/:path', input: 'path: `threadId`, then the file, `/`-separated' },
   ),
