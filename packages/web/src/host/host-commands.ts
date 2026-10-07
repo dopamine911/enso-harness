@@ -93,20 +93,26 @@ export function hostCommandRows<Model extends EnsoModelChoice>(
 }
 
 /**
- * The rows a thread with NO session is offered (#484): `/model` over the same models, with no
- * `value` (there is no current one), then the `flow` rows among `flows` — `/login` and, when
- * something is stored, `/logout`, as `hostFlowRows` builds them. ⚠ Not `/thinking`, `/compact`
- * (an action) or a view, and none of pi's rows: each belongs to a session, and the Start dialog is
- * what a thread without one offers. `/thinking`'s levels are the chosen model's, carried on its
- * `/model` option.
+ * The rows a thread with NO session is offered (#484): `/model` over the same models, then the
+ * `flow` rows among `flows` — `/login` and, when something is stored, `/logout`, as `hostFlowRows`
+ * builds them. ⚠ Not `/thinking`, `/compact` (an action) or a view, and none of pi's rows: each
+ * belongs to a session, and the Start dialog is what a thread without one offers. `/thinking`'s
+ * levels are the chosen model's, carried on its `/model` option.
+ *
+ * `/model`'s `value` is the configured default (`provider/id`, pi's `defaultProvider` and
+ * `defaultModel`) when it is among the models: the Start dialog preselects it, as pi starts a
+ * session on it (#674). A default that is not offered is no value, and the dialog takes its first.
  */
 export function catalogueRows<Model extends EnsoModelChoice>(
   models: readonly Model[],
   thinkingLevelsOf: (model: Model) => readonly string[],
   flows: readonly RuntimeCommand[],
+  configuredDefault?: string,
 ): RuntimeCommand[] {
+  const options = modelOptions(models, thinkingLevelsOf)
+  const offered = options.some((option) => option.id === configuredDefault)
   return [
-    { ...MODEL_ROW, options: modelOptions(models, thinkingLevelsOf) },
+    { ...MODEL_ROW, options, ...(offered && configuredDefault !== undefined ? { value: configuredDefault } : {}) },
     ...flows.filter((row) => row.kind === 'flow'),
   ]
 }
