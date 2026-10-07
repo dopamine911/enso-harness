@@ -1388,7 +1388,7 @@ const chatComponents = {
       const chat = useChatContext()
       const stores = useThreadStores()
       const disconnected = useStore(stores.disconnected)
-      // The page's view (#361): a prompt sent from Context, Stats or Diff brings the chat back (#707).
+      // The page's view (#361): `send` brings the chat back (#707), whichever way the prompt went.
       const { open } = useContext(PaneViewContext)
       // Controlled, so the send button can disable on empty and a take-back can write it —
       // the ai-elements chatbot example's PromptInput does the same. A fork opens holding the
@@ -1421,10 +1421,16 @@ const chatComponents = {
        * image and drops the empty text block); nothing at all is not. Says whether it sent, so
        * the submit clears the draft on THAT — not on three predicates in three files agreeing
        * that a submit always reaches the wire (PR #343 review, round 2).
+       *
+       * ⚠ A SENT PROMPT SHOWS THE CHAT (#707), here and not at a caller (PR #716 review): the
+       * composer is under every view, and the run, its questions, its error and its reply are in
+       * the chat. The submit, a typed `/command` pi runs as a prompt, and the palette all send
+       * here, so none of them can start a run behind Context, Stats or Diff.
        */
       const send = (text: string, images: readonly EnsoPromptImage[]): boolean => {
         if (disconnected || stores.incidents.get().ended) return false
         if (text.trim().length === 0 && images.length === 0) return false
+        open('chat')
         const parts: ContentPart[] = [
           ...(text.length === 0 ? [] : [{ type: 'text' as const, content: text }]),
           ...images.map((image) => ({
@@ -1592,12 +1598,7 @@ const chatComponents = {
             // — and only if something went: a submit `send` refuses keeps its words.
             const commandName = images.length === 0 ? typedCommandName(text) : undefined
             if (commandName !== undefined) void submitTypedCommand(commandName, text)
-            else if (send(text, images)) {
-              setDraft('')
-              // The run, its questions and its reply are in the chat: a prompt sent from another view
-              // (#707, the composer is under every view) shows it, so no approval waits out of sight.
-              open('chat')
-            }
+            else if (send(text, images)) setDraft('')
           }}
         >
           {/* The composer chrome (#90): the knobs at the point of use, deepseek's shape — the

@@ -2062,23 +2062,26 @@ test('⚠ Stats keeps reading a thread that ran after its session idles out and 
 // ⚠ #707, from an arena run: the composer was drawn inside the chat's panel, which goes invisible and
 // inert under every other view, so a prompt typed on Diff (checking a round's changes) went nowhere,
 // silently. It is under every view now: there, it sends, and the page is asked for the chat, where
-// the run, its questions and its reply are.
-test('⚠ on Context, Stats and Diff the composer is there: a prompt typed there is sent, and Chat is asked for (#707)', async () => {
+// the run, its questions and its reply are — for a typed `/command` pi runs as a prompt too (PR #716
+// review: that path skipped the switch, and its run would have started behind the view).
+test('⚠ on Context, Stats and Diff the composer is there: a prompt or a typed /command sent there asks for Chat (#707)', async () => {
   for (const view of ['context', 'stats', 'changes'] as const) {
-    const pane = await mountPane({ view, server: { stats: TWO_CALL_STATS } })
-    await pane.settle(SNAPSHOT_LIVE)
-    const composer = pane.composer()
-    // Not inside anything a view hides: a person and an accessibility read both reach it.
-    expect(composer.closest('[inert], .invisible')).toBeNull()
-    await flush(async () => {
-      typeInto(composer, `asked from ${view}`)
-      pressEnter(composer)
-      await tick()
-    })
-    await eventually(() => expect(pane.server.prompts.map((prompt) => prompt.message)).toEqual([`asked from ${view}`]))
-    expect(pane.requestedViews).toEqual(['chat'])
-    expect(pane.composer().value).toBe('')
-    await pane.unmount()
+    for (const typed of [`asked from ${view}`, '/not-a-host-command']) {
+      const pane = await mountPane({ view, server: { stats: TWO_CALL_STATS } })
+      await pane.settle(SNAPSHOT_LIVE)
+      const composer = pane.composer()
+      // Not inside anything a view hides: a person and an accessibility read both reach it.
+      expect(composer.closest('[inert], .invisible')).toBeNull()
+      await flush(async () => {
+        typeInto(composer, typed)
+        pressEnter(composer)
+        await tick()
+      })
+      await eventually(() => expect(pane.server.prompts.map((prompt) => prompt.message)).toEqual([typed]))
+      expect(pane.requestedViews).toEqual(['chat'])
+      await eventually(() => expect(pane.composer().value).toBe(''))
+      await pane.unmount()
+    }
   }
 })
 
