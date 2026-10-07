@@ -970,7 +970,6 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
     const waited = await waitForPage({
       until: action.until,
       baseline: await lastSeen.baseline(),
-      before: lastSeen.before(),
       look: pageNow,
       sleep: (ms) => inFront().waitForTimeout(ms),
       ms: action.ms,
