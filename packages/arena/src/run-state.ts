@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
+import { gitChildEnvironment } from '@enso/core/git'
 
 /**
  * The run's state over time, beside the UI's (#584 A7, A8, A12; #608): which build of Enso ran, what
@@ -25,9 +26,15 @@ export interface ArenaEnsoBuild {
   readonly diffHash?: string
 }
 
+/**
+ * git in `repoRoot`. ⚠ Without the inherited repository variables: a git hook exports `GIT_DIR` and
+ * `GIT_INDEX_FILE`, and with them every call here would read the hook's repository, not `repoRoot`
+ * (measured: a commit from a linked worktree failed the gate on this checkout's own state).
+ */
 const git = (repoRoot: string, args: readonly string[], input?: string): string | undefined => {
   const result = spawnSync('git', args, {
     cwd: repoRoot,
+    env: gitChildEnvironment(),
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
     ...(input === undefined ? {} : { input }),

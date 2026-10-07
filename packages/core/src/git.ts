@@ -183,6 +183,18 @@ export function runGitIn(
  */
 export const runGit: GitRunner = (args, cwd) => runGitIn(process.env, args, cwd)
 
+/**
+ * The environment a git child runs under, as `runGit` gives it: this process's, without git's
+ * repository-locating variables. For a caller that spawns git itself, synchronously (the arena's
+ * recorder, score and report). ⚠ Under a git hook — a commit's gate — `GIT_DIR` and
+ * `GIT_INDEX_FILE` name the hook's repository, and a git in any other directory would read it.
+ *
+ * @group Git
+ */
+export function gitChildEnvironment(): NodeJS.ProcessEnv {
+  return withoutGitLocalVariables(process.env)
+}
+
 // ── Reading a repository ───────────────────────────────────────────────────────────────────────
 
 /** git's first line on stderr, for an `unavailable` reason; a git that never ran says so. */
