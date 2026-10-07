@@ -1,0 +1,31 @@
+# The Dogfood Arena image's build context (#676): the repository as git tracks it, plus .git (the
+# run's `ensoBuild` is read from it). Installed and generated trees are rebuilt in the image.
+node_modules
+**/node_modules
+dist-types
+coverage
+site/dist
+site/.astro
+site/src/generated
+packages/web/e2e/output
+.review-context
+
+# Local tooling and research, never part of a run.
+.inspiration
+.codegraph
+.fallow
+.playwright-mcp
+# Only the untracked settings: `.claude/pr-review.md` is tracked, and leaving it out would make every
+# containerized run's build record read as dirty.
+.claude/settings.local.json
+.local
+
+# ⚠ Never into an image: secrets and anyone's Enso home. The container's only credential is the one
+# injected into its credentials volume (`arena container credential`).
+.env
+.env.*
+**/.env
+**/.env.*
+.enso
+**/.enso
+**/auth.json

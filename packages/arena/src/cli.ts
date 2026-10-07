@@ -38,6 +38,9 @@
  *       Enso's findings (observed friction, the agent's account, the reviewer's gaps with every
  *       citation checked). Writes `report.md` and `report.json`. `--run-tests` runs the work's own
  *       tests with only PATH, a throwaway HOME and a time limit: they are agent-written code.
+ *   bun run arena container build | credential --api-key-stdin|--from FILE|--status | start …
+ *       a run in a container (`arena/container.ts`, #676): a TEST account's credential injected
+ *       into a Docker volume, the run directory the only host path, Enso's bash inside it too
  *
  * `start` exits 1 too when its run's score is FAIL, so a caller can gate on the run.
  *
@@ -59,6 +62,7 @@ import { redactJudgeText } from '@enso/core/judge'
 import { ensoHome, findRepoRoot } from '@enso/core/paths'
 import { ARENA_THINKING_LEVELS, arenaAgentDriver, resolveArenaModel } from './agent.ts'
 import { compareRunDirectories } from './compare.ts'
+import { runContainerCommand } from './container.ts'
 import { type ArenaEvidence, arenaEvidenceRowOf, foldArenaManifest } from './manifest.ts'
 import {
   type ArenaDriver,
@@ -373,6 +377,9 @@ function scoreRun(runDirectory: string): void {
 }
 
 switch (command) {
+  case 'container':
+    process.exitCode = await runContainerCommand(rest, { repoRoot, defaultOut: outDirectory })
+    break
   case 'start':
     await start()
     break
@@ -415,6 +422,6 @@ switch (command) {
   }
   default:
     fail(
-      'usage: bun run arena start --agent PROVIDER/MODEL | start --manual | brief | act <json> | manifest <run directory> | score <run directory> | compare <run directory> <run directory> | report <run directory> [--run-tests]',
+      'usage: bun run arena start --agent PROVIDER/MODEL | start --manual | brief | act <json> | manifest <run directory> | score <run directory> | compare <run directory> <run directory> | report <run directory> [--run-tests] | container build|credential|start',
     )
 }

@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readlinkSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { redactJudgeText } from '@enso/core/judge'
 import { ensoProjectsDir, projectIdOf, projectSnapshotsDir, realpathOrSelf } from '@enso/core/paths'
@@ -239,11 +239,32 @@ function snapshotStoreRow(home: string, project: string, copy: string): ArenaEvi
     return { kind: 'snapshot store', status: 'missing', reason: `the snapshot store at ${directory} holds no thread` }
   }
   try {
-    cpSync(directory, copy, { recursive: true })
+    copyTreeWithoutChmod(directory, copy)
   } catch (error) {
     return { kind: 'snapshot store', status: 'missing', reason: `${directory} could not be copied: ${String(error)}` }
   }
   return { kind: 'snapshot store', status: 'collected', path: copy }
+}
+
+/**
+ * `directory` copied to `copy`, files, directories and symlinks, without `cpSync`'s chmod after
+ * each file (#676): git keeps its objects read-only, and on Docker Desktop's file sharing a chmod of
+ * a read-only file fails with EACCES even for its owner — every containerized run lost its snapshot
+ * store. `copyFileSync` keeps the mode by itself.
+ */
+function copyTreeWithoutChmod(directory: string, copy: string): void {
+  mkdirSync(copy, { recursive: true })
+  for (const storeEntry of readdirSync(directory, { withFileTypes: true })) {
+    const source = join(directory, storeEntry.name)
+    const destination = join(copy, storeEntry.name)
+    if (storeEntry.isDirectory()) copyTreeWithoutChmod(source, destination)
+    // Verbatim, not resolved (cpSync made a relative target absolute — into the HOME's store, so the
+    // copy broke once the home was pruned, which is what #607 copies the store to survive).
+    else if (storeEntry.isSymbolicLink()) symlinkSync(readlinkSync(source), destination)
+    else if (storeEntry.isFile()) copyFileSync(source, destination)
+    // A socket, FIFO or device is not a snapshot: a failed copy, recorded as missing, never a gap.
+    else throw new Error(`${source} is not a file, directory or symlink`)
+  }
 }
 
 /** The thread ids the UI named during a run (`?thread=`), in the order first shown. */

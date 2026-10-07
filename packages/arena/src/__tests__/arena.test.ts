@@ -1,5 +1,18 @@
 import { expect, test } from 'bun:test'
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import {
+  appendFileSync,
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readlinkSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { THREAD_STATUS_WORDS } from '@enso/core'
@@ -561,6 +574,51 @@ test('Enso evidence: collected bodies are redacted, everything else is a missing
   expect(existsSync(join(copy, THREAD))).toBe(true)
   expect(again.find((row) => row.kind === 'threads')).toMatchObject({ status: 'missing' })
   expect(existsSync(join(root, 'evidence-2', 'stats.json'))).toBe(true)
+})
+
+// ⚠ PR #678: the store is copied without cpSync (whose chmod fails on Docker Desktop for git's
+// read-only objects). The copy must still be the run's own (#607): a link inside it stays relative,
+// where cpSync pointed it at the home's store, and anything that is not a snapshot fails the row.
+test('⚠ the snapshot store copy keeps read-only files and relative links, and outlives the home’s store', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'arena-store-copy-'))
+  const home = join(root, 'home')
+  const project = join(root, 'project')
+  mkdirSync(project, { recursive: true })
+  const store = projectSnapshotsDir(ensoProjectsDir(home), projectIdOf(realpathOrSelf(project)))
+  const objects = join(store, '.objects', 'objects', '19')
+  mkdirSync(objects, { recursive: true })
+  writeFileSync(join(objects, 'b7ea51'), 'blob')
+  chmodSync(join(objects, 'b7ea51'), 0o444)
+  mkdirSync(join(store, THREAD), { recursive: true })
+  symlinkSync('../.objects/objects/19/b7ea51', join(store, THREAD, 'head'))
+  const collect = (directory: string): Promise<ArenaEvidence[]> =>
+    collectEnsoEvidence({
+      serverOrigin: 'http://enso',
+      directory,
+      threadIds: [],
+      home,
+      project,
+      secretValues: [],
+      serverDown: 'down',
+    })
+
+  const copy = join(root, 'evidence', 'snapshot-store')
+  expect((await collect(join(root, 'evidence'))).find((row) => row.kind === 'snapshot store')).toMatchObject({
+    status: 'collected',
+  })
+  expect(statSync(join(copy, '.objects', 'objects', '19', 'b7ea51')).mode & 0o777).toBe(0o444)
+  expect(readlinkSync(join(copy, THREAD, 'head'))).toBe('../.objects/objects/19/b7ea51')
+  chmodSync(join(objects, 'b7ea51'), 0o644)
+  rmSync(store, { recursive: true })
+  expect(readFileSync(join(copy, THREAD, 'head'), 'utf8')).toBe('blob')
+
+  // Something that is not a snapshot: the copy fails, and the row says so rather than leave a gap.
+  mkdirSync(join(store, THREAD), { recursive: true })
+  expect(spawnSync('mkfifo', [join(store, THREAD, 'pipe')]).status).toBe(0)
+  expect((await collect(join(root, 'evidence-2'))).find((row) => row.kind === 'snapshot store')).toMatchObject({
+    status: 'missing',
+    reason: expect.stringContaining('is not a file, directory or symlink'),
+  })
 })
 
 // ⚠ #671, from an arena run: a deleted thread and the fresh thread Enso opens after it filled the
