@@ -1,8 +1,9 @@
-import { EnsoDirectoryListing, EnsoProject } from '@enso/core'
+import { EnsoDirectoryListing, EnsoProject, type EnsoStoredThread } from '@enso/core'
 import { Check } from 'typebox/value'
 import type { FetchLike } from './browser-logging.ts'
 import { createListingStore, type ListingStore } from './listing-store.ts'
 import { describeFailedResponse } from './stored-threads.ts'
+import type { ThreadSummary } from './thread-stores.ts'
 
 /**
  * The projects the rail groups threads under (#395): the launch directory first, then the ones
@@ -28,6 +29,45 @@ async function fetchProjectList(): Promise<unknown> {
  */
 export function projectOf(projects: readonly EnsoProject[], projectId: string | undefined): EnsoProject | undefined {
   return projects.find((project) => (projectId === undefined ? project.launch : project.projectId === projectId))
+}
+
+/** Where the page goes when the thread on screen is deleted: a thread to show, on this page or stored. */
+export interface ThreadAfterDelete {
+  readonly threadId: string
+  /** Already a pane on this page (shown at once); otherwise a stored thread, resumed. */
+  readonly onPage: boolean
+}
+
+/**
+ * The thread to show when the one on screen is deleted (#663): its project's most recently active
+ * OTHER thread that holds something — one on this page with a first prompt, or a stored one with
+ * messages — or undefined when there is none, and the page starts a fresh one. Measured in the arena:
+ * a delete of one of two approaches opened a new empty thread and its Start dialog, though the other
+ * was right there in the rail. A page thread's project is the rail's (`projectOf`: none is the
+ * launch project's), so the two lists are compared by the same project id.
+ */
+export function threadAfterDelete(
+  deleted: string,
+  deletedProjectId: string | undefined,
+  context: {
+    readonly projects: readonly EnsoProject[]
+    readonly pageThreads: readonly ThreadSummary[]
+    readonly stored: readonly EnsoStoredThread[]
+  },
+): ThreadAfterDelete | undefined {
+  const project = projectOf(context.projects, deletedProjectId)?.projectId
+  if (project === undefined) return undefined
+  const onPage = context.pageThreads
+    .filter((thread) => thread.threadId !== deleted && thread.title !== undefined)
+    .filter((thread) => projectOf(context.projects, thread.projectId)?.projectId === project)
+    .map((thread) => ({ threadId: thread.threadId, onPage: true, at: thread.lastActivityAt.getTime() }))
+  const pageIds = new Set(context.pageThreads.map((thread) => thread.threadId))
+  const storedOnly = context.stored
+    .filter((thread) => thread.threadId !== deleted && !pageIds.has(thread.threadId))
+    .filter((thread) => thread.projectId === project && thread.messageCount > 0)
+    .map((thread) => ({ threadId: thread.threadId, onPage: false, at: Date.parse(thread.lastActivityAt) }))
+  const latest = [...onPage, ...storedOnly].toSorted((left, right) => right.at - left.at)[0]
+  return latest === undefined ? undefined : { threadId: latest.threadId, onPage: latest.onPage }
 }
 
 /** What a project request answered: the value, or the server's reason in one line. */
