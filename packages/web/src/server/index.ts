@@ -251,6 +251,18 @@ function isLoopbackAuthority(authority: string): boolean {
   return host === LOOPBACK_ONLY || host === 'localhost' || host === '[::1]'
 }
 
+/**
+ * Whether a browser says this request came from Enso's own page (#717): `Sec-Fetch-Site` is
+ * `same-origin`, or `none` — a navigation the person made (a typed URL, a bookmark). Absent, the
+ * caller is no browser that sends Fetch Metadata (`curl`, the repo's CLIs, an old browser), and the
+ * `Origin` rule alone judges it. A page on another loopback port says `same-site`; another host,
+ * `cross-site`.
+ */
+function fromEnsosOwnPage(headers: IncomingMessage['headers']): boolean {
+  const site = headers['sec-fetch-site']
+  return site === undefined || site === 'same-origin' || site === 'none'
+}
+
 const log = ensoLogger('server', 'http')
 
 /** A body that outgrew its route's cap: the read stopped, nothing was buffered past it. */
@@ -1962,12 +1974,21 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
    * `Content-Type`, so `text/plain` reaches the handler with no preflight — and
    * `threads.acquire` mints a session for any id matching the pattern, so no existing
    * thread need be known. The reply is opaque to the attacker, but the side effect is a
-   * full agent run. Two independent checks, both here so every route inherits them:
+   * full agent run. Three independent checks, all here so every route inherits them:
    *
    * 1. `Host` must name loopback. Node does not validate it, and a DNS name that resolves
    *    to 127.0.0.1 (rebinding) makes the READ side — `/api/threads/:id`, the verbatim
    *    branch, and the log bundle — same-origin readable. A rebound name is not loopback.
-   * 2. `Origin`, when the header is PRESENT, must parse and name loopback. Browsers always
+   * 2. ⚠ A browser's `Sec-Fetch-Site` must say `same-origin` (or `none`, a navigation the
+   *    person made), when the header is present (#717). `Origin` names a HOST, and loopback
+   *    on any port passed check 3: measured, a page on `localhost:5173` — a dev server
+   *    running agent-written code — switched a thread to `bypassPermissions` (204). Enso's
+   *    own page calls its API same-origin (through the 5178 proxy, which forwards the header,
+   *    or served by this server); a page on another port is `same-site` or `cross-site`.
+   *    Fetch Metadata needs no list of Enso's own origins, which the server does not know.
+   *    The header is absent from `curl`, the repo's CLIs and browsers too old to send it,
+   *    and those are judged by check 3 alone.
+   * 3. `Origin`, when the header is PRESENT, must parse and name loopback. Browsers always
    *    send it on cross-origin POSTs; `curl` and the repo's own CLIs send none, so they are
    *    unaffected. Either dev port satisfies it, and the 5178 proxy forwards both headers
    *    unchanged.
@@ -1986,16 +2007,18 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
    * own tree — a GET under `/preview/`, never `/api/`, and `Sec-Fetch-Dest: script`, which a
    * page's `fetch()` cannot send. A module script is fetched in CORS mode, so without this no
    * ES-module page could run in Preview; what it opens is what a classic `<script src>` (which
-   * sends no `Origin`) already had: a file of the tree, run, not read.
+   * sends no `Origin`) already had: a file of the tree, run, not read. And a GET under
+   * `/preview/` skips check 2: the sandboxed page is cross-site to everything, its own images,
+   * styles and scripts included, and those files are what it is there to load.
    */
   function fromTrustedOrigin(request: IncomingMessage): boolean {
     const hostHeader = request.headers.host
     if (hostHeader === undefined || !isLoopbackAuthority(hostHeader)) return false
+    const previewLoad = request.method === 'GET' && PREVIEW_ROUTE.test(request.url ?? '')
+    if (!previewLoad && !fromEnsosOwnPage(request.headers)) return false
     const origin = request.headers.origin
     if (origin === undefined) return true
-    if (request.method === 'GET' && PREVIEW_ROUTE.test(request.url ?? '') && fromPreviewModuleLoader(request.headers)) {
-      return true
-    }
+    if (previewLoad && fromPreviewModuleLoader(request.headers)) return true
     let originHost: string
     try {
       originHost = new URL(origin).host
