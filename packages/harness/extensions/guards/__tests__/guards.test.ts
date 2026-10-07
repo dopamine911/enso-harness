@@ -27,6 +27,7 @@ import {
   ENSO_PERMISSION_DENIAL_ENTRY,
   ENSO_SECURITY_SIGNAL_ENTRY,
   ENSO_SESSION_RISK_ENTRY,
+  ENSO_THREAD_TREE_ENTRY,
   incidentPolicyOf,
   judgeContextsOfTranscript,
   customEntriesOf,
@@ -1298,7 +1299,11 @@ interface DrivenCall {
  * message, every entry the guard appended while deciding it, its result. The engine's decision is
  * broadcast on the bus inside the call, where the engine's own `tool_call` handler raises it.
  */
-function drive(runtime: GuardRuntime, calls: readonly DrivenCall[]): { branch: unknown[]; verdicts: GuardVerdict[] } {
+function drive(
+  runtime: GuardRuntime,
+  calls: readonly DrivenCall[],
+  at: string = cwd,
+): { branch: unknown[]; verdicts: GuardVerdict[] } {
   const branch: unknown[] = []
   const verdicts: GuardVerdict[] = []
   for (const { id, command, engine } of calls) {
@@ -1309,7 +1314,7 @@ function drive(runtime: GuardRuntime, calls: readonly DrivenCall[]): { branch: u
     const before = runtime.entries.length
     const verdict = runtime.toolCall(
       { type: 'tool_call', toolCallId: id, toolName: 'bash', input: { command } },
-      { cwd },
+      { cwd: at },
     )
     if (verdict === undefined && engine !== undefined) {
       runtime.emit(PERMISSIONS_DECISION_CHANNEL, {
@@ -1394,6 +1399,46 @@ test('⚠ a resumed session rebuilds its risk from the branch: the next call is 
   fresh.sessionStart({ type: 'session_start', reason: 'start' }, { cwd, sessionManager: { getBranch: () => [] } })
   fresh.toolCall(oneLiner, { cwd })
   expect(appended(fresh, ENSO_SECURITY_SIGNAL_ENTRY)).toEqual([])
+})
+
+// #726: the risk fold read every path into the thread's own tree (under `<home>/.enso`, #551) as
+// the harness's internals, so a `cd` into it after any refusal was a policy-introspection signal.
+// The guard learns the tree from the record the host appends before the session starts.
+test("⚠ after a refusal, a call into the thread's own tree is no signal live or on replay; the rest of the home still is (#726)", () => {
+  const home = dirname(PROJECTS_DIR)
+  const tree = join(PROJECTS_DIR, 'f0c3220dcc31f472', 'trees', '606b072c-424b-41a6-8d4c-448286014ca7')
+  const otherTree = join(PROJECTS_DIR, 'f0c3220dcc31f472', 'trees', 'another-thread')
+  mkdirSync(tree, { recursive: true })
+  const treeRecord = {
+    type: 'custom',
+    customType: ENSO_THREAD_TREE_ENTRY,
+    data: { kind: 'worktree', project: cwd, path: tree, branch: 'enso/606b072c', base: 'a'.repeat(40) },
+  }
+  const runtime = loadGuardRuntime()
+  runtime.sessionStart(
+    { type: 'session_start', reason: 'start' },
+    { cwd: tree, sessionManager: { getBranch: () => [treeRecord] } },
+  )
+  const { branch, verdicts } = drive(
+    runtime,
+    [
+      { id: 'c1', command: 'curl https://example.test/x' },
+      { id: 'c2', command: `cd ${tree} && node /tmp/debug_test.js` },
+      { id: 'c3', command: `ls ${otherTree}` },
+      { id: 'c4', command: `cat ${join(home, 'permissions.json')}` },
+    ],
+    tree,
+  )
+  expect(verdicts[0]?.block).toBe(true)
+  const live = appended(runtime, ENSO_SECURITY_SIGNAL_ENTRY)
+  // No signal on c2, the own tree; c3 and c4 reach another thread's tree and the policy file (and
+  // c4, refused as c3 was, is a retry too).
+  expect(live).toEqual([
+    expect.objectContaining({ signal: 'policy-introspection', toolCallId: 'c3' }),
+    expect.objectContaining({ signal: 'policy-introspection', toolCallId: 'c4' }),
+    expect.objectContaining({ signal: 'denial-retry', toolCallId: 'c4' }),
+  ])
+  expect(live).toEqual(sessionRiskOfTranscript(transcriptOf([treeRecord, ...branch])).signals)
 })
 
 test("the engine's refusals are recorded against the call the guard saw last; approvals, forwarded and malformed decisions are not", () => {

@@ -87,6 +87,7 @@ import {
   type ThreadDeleteOutcome,
 } from '../agent-host.ts'
 import { LOST_TOOL_RESULT_TEXT, NOTHING_TO_CONTINUE } from '../continuation.ts'
+import { PERMISSION_CALL_QUESTIONS_EXTENSION_PATH } from '../permission-call-questions.ts'
 import { storedPermissionModeState } from '../permission-mode-adapter.ts'
 import { readPermissionPolicy, resetPermissionPolicy, writePermissionPolicy } from '../permission-policy-file.ts'
 import { RESTORE_NOTE_EXTENSION_PATH } from '../restore-note.ts'
@@ -472,19 +473,21 @@ test('a new session says the model it starts with, as its own `model` observatio
 })
 
 // @pins boot-and-launchers/manifest-order
-test("exactly the manifest's extensions load, in order, then the host's own model watcher and restore note, with no load errors", async () => {
+test("exactly the manifest's extensions load, in order, then the host's own model watcher, restore note and ear for the engine's questions, with no load errors", async () => {
   const hosted = await hostedSession()
   const loaded = hosted.loadedExtensionPaths
-  // The last two are not the manifest's: the host's listener for pi's `model_select`, the only
-  // place a model swap is announced (#338 slice 2; `agent-host.ts` header), and its note to pi
-  // after a restore (#652, `restore-note.ts`). Listed, not hidden.
-  expect(loaded).toHaveLength(MANIFEST_EXTENSION_MARKERS.length + 2)
+  // The last three are not the manifest's: the host's listener for pi's `model_select`, the only
+  // place a model swap is announced (#338 slice 2; `agent-host.ts` header), its note to pi after a
+  // restore (#652, `restore-note.ts`), and its listener for the permission engine's questions, which
+  // says where each card stands among its call's (#728, `permission-call-questions.ts`). Listed, not hidden.
+  expect(loaded).toHaveLength(MANIFEST_EXTENSION_MARKERS.length + 3)
   MANIFEST_EXTENSION_MARKERS.forEach((marker, index) => {
     expect(loaded[index]?.endsWith(marker)).toBe(true)
   })
   expect(loaded.slice(MANIFEST_EXTENSION_MARKERS.length)).toEqual([
     MODEL_WATCH_EXTENSION_PATH,
     RESTORE_NOTE_EXTENSION_PATH,
+    PERMISSION_CALL_QUESTIONS_EXTENSION_PATH,
   ])
   logs.assertNotLogged({ rawMessage: /failed to load/ })
 })
@@ -933,6 +936,56 @@ test('⚠ back to default after bypassPermissions, the engine asks again: the mo
   expect(hosted.runtime.openDialogs()).toHaveLength(1)
   await hosted.runtime.abort()
   expect((await verdict)?.block).toBe(true)
+})
+
+/** A bash call that writes outside the tree with a command `default` asks about: two of the engine's gates ask. */
+const OUTSIDE_WRITE_HEREDOC = "<< 'EOF'\necho hi\nEOF"
+const OUTSIDE_WRITE = `cp package.json package.json.backup && cat > /tmp/enso-728.sh ${OUTSIDE_WRITE_HEREDOC}`
+
+/** Probe `command` as a bash call through the real engine, answering every card with `answer`: the cards' titles, in order. */
+async function bashCardTitles(hosted: HostedThread, command: string, answer: string): Promise<string[]> {
+  const titles: string[] = []
+  const unsubscribe = hosted.runtime.subscribe((event) => {
+    if (event.kind !== 'extension-ui-request' || !event.blocking || event.dialog?.method !== 'select') return
+    titles.push(event.dialog.title)
+    queueMicrotask(() => hosted.runtime.answerDialog({ id: event.id, value: answer }))
+  })
+  try {
+    await hosted.probeToolCall('bash', { command })
+  } finally {
+    unsubscribe()
+  }
+  return titles
+}
+
+// ⚠ #728, from an arena run: one bash call that wrote outside the tree asked twice, one card straight
+// after the other — the outside path, then the command — and the first said nothing of the second,
+// so its "Yes, for this session" read as the call's answer. The engine asks gate by gate, each card
+// with its own answers, so each card says where it stands: the first that it covers the path only and
+// that a question about the command follows, the second that it is the last. A call that asks once
+// says nothing more, and a No on the first card leaves nothing for the next call to inherit.
+test('⚠ one bash call asked twice says so on both cards: the path first, the command last (#728)', async () => {
+  const hosted = await hostedSession()
+  const [pathCard, commandCard, ...more] = await bashCardTitles(hosted, OUTSIDE_WRITE, 'Yes')
+  expect(more).toEqual([])
+  expect(pathCard).toStartWith(
+    'Question 1 about this bash call: this answer covers the path only. A separate question about running the command follows.\nPermission Required\n',
+  )
+  expect(pathCard).toContain('external path     : /tmp/enso-728.sh')
+  expect(commandCard).toStartWith(
+    'Question 2 of 2 about this bash call: running the command. The question before it covered the path only.\nPermission Required\n',
+  )
+  expect(commandCard).toContain('command      : cp package.json package.json.backup')
+
+  // Only the path asks (`cat *` is allowed): one card, the engine's own.
+  const pathOnly = await bashCardTitles(hosted, `cat > /tmp/enso-728.sh ${OUTSIDE_WRITE_HEREDOC}`, 'Yes')
+  expect(pathOnly).toEqual([expect.stringMatching(/^Permission Required\n/)])
+
+  // A No on the first card blocks the call: no second card, and the next call's lone card is no "Question 2".
+  const denied = await bashCardTitles(hosted, OUTSIDE_WRITE, 'No')
+  expect(denied).toEqual([expect.stringMatching(/^Question 1 about this bash call: /)])
+  const lone = await bashCardTitles(hosted, 'cp package.json package.json.backup', 'Yes')
+  expect(lone).toEqual([expect.stringMatching(/^Permission Required\n/)])
 })
 
 /** What the repository's `.pi/APPEND_SYSTEM.md` says: in a request only when trust loaded the project. */

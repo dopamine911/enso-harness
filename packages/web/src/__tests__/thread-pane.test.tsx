@@ -477,6 +477,41 @@ test('⚠ Open preview closes the panel and puts focus in the composer (#714)', 
   await pane.unmount()
 })
 
+// #729, from Opus's snake run: two pages listed two links both named "Open preview", and the agent
+// had to pick one by position. Each link's name now says which page it opens.
+test('each page in "What this thread built" has a link named for its page, not N identical "Open preview"s (#729)', async () => {
+  const pane = await mountPane({
+    server: {
+      pages: () => ({
+        path: '/trees/t',
+        pages: ['debug.html', 'index.html'],
+        truncated: false,
+        previewOrigin: 'http://127.0.0.1:41234',
+      }),
+    },
+  })
+  await pane.settle({ ...SNAPSHOT_LIVE, tree: true })
+  const preview = await eventually(() => {
+    const found = [...pane.container.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent?.trim() === 'Preview',
+    )
+    expect(found).toBeDefined()
+    return found
+  })
+  await flush(async () => {
+    preview?.click()
+    await tick()
+  })
+  // A link's accessible name is its text, the visually hidden part included.
+  const names = await eventually(() => {
+    const links = [...document.querySelectorAll<HTMLAnchorElement>('[role="dialog"] a')]
+    expect(links).toHaveLength(2)
+    return links.map((link) => link.textContent?.replace(/\s+/g, ' ').trim())
+  })
+  expect(names).toEqual(['Open preview of debug.html', 'Open preview of index.html'])
+  await pane.unmount()
+})
+
 // ⚠ #404: a thread's requests go through ITS fetch — the seam the fixture page closes (its threads
 // get one that refuses), and the one that carries the project header (#395). A request a pane
 // issues on the page's GLOBAL fetch instead escapes both: on the fixture page that ran a real
