@@ -10,7 +10,7 @@ import {
   fauxToolCall,
 } from '@earendil-works/pi-ai/providers/faux'
 import {
-  ARENA_IMAGES_SENT,
+  ARENA_IMAGE_STEP,
   arenaAgentDriver,
   arenaToolResult,
   arenaUiTool,
@@ -166,32 +166,37 @@ test('a screenshot reaches a model that takes images as the picture, and an erro
 })
 
 // ⚠ #724, from Opus's snake run: every screenshot the agent took stayed in its conversation and went
-// with every call — 68 of them, ~41 MB — until the API refused the request (413) at 43 minutes.
-test('⚠ each model call carries only the newest screenshots; each older one is a line saying so, not its bytes (#724)', async () => {
+// with every call — 68 of them, ~41 MB — until the API refused the request (413) at 43 minutes. And
+// PR #725 review: dropped one at a time, the request changed near its end on every call, so the
+// provider's cached prefix never held; dropped in steps, it holds for a step's worth of calls.
+test('⚠ a model call carries at most twice the step of screenshots, the oldest dropped a whole step at a time and each said, not sent (#724)', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'arena-shots-'))
-  const shots = Array.from({ length: ARENA_IMAGES_SENT + 2 }, (_, index) => {
+  const taking = 3 * ARENA_IMAGE_STEP + 1
+  const shots = Array.from({ length: taking }, (_, index) => {
     const path = join(directory, `${index + 1}.png`)
-    writeFileSync(path, `shot ${index + 1}`)
+    writeFileSync(path, `${index + 1}`)
     return path
   })
-  // What the model was sent on the call after the last screenshot: each tool result's images, as their bytes.
-  let sentImages: string[] = []
-  let sentDropped = 0
+  // Each call's images, as their bytes, and how many were said instead of sent.
+  const calls: Array<{ readonly sent: string[]; readonly said: number }> = []
+  const recording =
+    (next: FauxResponseStep): FauxResponseStep =>
+    (context, options, state, model) => {
+      const parts = context.messages.flatMap((message) =>
+        message.role === 'toolResult' && Array.isArray(message.content) ? message.content : [],
+      )
+      calls.push({
+        sent: parts.flatMap((part) =>
+          part.type === 'image' ? [Buffer.from(part.data, 'base64').toString('utf8')] : [],
+        ),
+        said: parts.filter((part) => part.type === 'text' && part.text === DROPPED_IMAGE_TEXT).length,
+      })
+      return typeof next === 'function' ? next(context, options, state, model) : next
+    }
   const core = scripted(
     [
-      ...shots.map(() => toolUse('act', { action: 'screenshot' })),
-      (context) => {
-        const parts = context.messages.flatMap((message) =>
-          message.role === 'toolResult' && Array.isArray(message.content) ? message.content : [],
-        )
-        sentImages = parts.flatMap((part) =>
-          part.type === 'image' ? [Buffer.from(part.data, 'base64').toString('utf8')] : [],
-        )
-        sentDropped = parts.filter((part) => part.type === 'text' && part.text === DROPPED_IMAGE_TEXT).length
-        return fauxAssistantMessage([fauxToolCall('act', { action: 'stop', reason: 'done' })], {
-          stopReason: 'toolUse',
-        })
-      },
+      ...shots.map(() => recording(toolUse('act', { action: 'screenshot' }))),
+      recording(toolUse('act', { action: 'stop', reason: 'done' })),
     ],
     ['text', 'image'],
   )
@@ -210,9 +215,20 @@ test('⚠ each model call carries only the newest screenshots; each older one is
   })
   expect(await agentRun(session)).toBe('it stopped the run')
 
-  // The newest four, oldest first, and a line in place of each of the two before them.
-  expect(sentImages).toEqual(['shot 3', 'shot 4', 'shot 5', 'shot 6'])
-  expect(sentDropped).toBe(2)
+  // Shots `from`..`to` sent, and each one before `from` said instead.
+  const span = (from: number, to: number): { sent: string[]; said: number } => ({
+    sent: Array.from({ length: to - from + 1 }, (_, index) => String(from + index)),
+    said: from - 1,
+  })
+  const step = ARENA_IMAGE_STEP
+  expect(calls).toEqual([
+    // None, then each one, up to twice the step: all of them go.
+    ...Array.from({ length: 2 * step + 1 }, (_, count) => span(1, count)),
+    // Past it, the oldest step goes, and the same ones stay gone until the next whole step.
+    ...Array.from({ length: step - 1 }, (_, index) => span(step + 1, 2 * step + 1 + index)),
+    span(2 * step + 1, 3 * step),
+    span(2 * step + 1, 3 * step + 1),
+  ])
 })
 
 // ⚠ #680: a visual agent knows the page only by the view each answer carries. A failed action is

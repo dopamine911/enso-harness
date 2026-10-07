@@ -57,36 +57,50 @@ export function arenaToolResult(outcome: ArenaActOutcome, imagesAccepted: boolea
 }
 
 /**
- * How many screenshots each model call carries (#724): the page now and a few before it, enough to
- * see what an action changed. A visual run attaches one after every action (#680) and a tree run
- * one per `screenshot`, and none was ever dropped: at about 600 KB each in base64, Opus's 68 took a
- * 43-minute run past the API's request size (413 request_too_large).
+ * How the screenshots a model call carries are bounded (#724), in steps of this many. A visual run
+ * attaches one after every action (#680) and a tree run one per `screenshot`, and none was ever
+ * dropped: at about 600 KB each in base64, Opus's 68 took a 43-minute run past the API's request
+ * size (413 request_too_large). Up to twice this many all go; past that the oldest are dropped this
+ * many at a time, so a call carries between this many and twice it.
+ *
+ * ⚠ IN STEPS, NOT ONE AT A TIME (PR #725 review). A window that slid by one image on every call
+ * changed the request a few messages from its end each time — inside every prefix the provider had
+ * cached — so a screenshot-heavy run re-read its whole conversation on each call. Dropped in steps,
+ * the request's start stays the same for this many calls in a row.
  */
-export const ARENA_IMAGES_SENT = 4
+export const ARENA_IMAGE_STEP = 4
 
 /** What an older screenshot reads as in the request, so the model knows one was there. */
 export const DROPPED_IMAGE_TEXT =
   '[an earlier screenshot, no longer attached: only the newest few go with each request. Take one to see the page now.]'
 
+/** How many of `images` the request drops, oldest first: none up to twice the step, then whole steps. */
+function imagesDropped(images: number): number {
+  return images <= 2 * ARENA_IMAGE_STEP ? 0 : (Math.floor(images / ARENA_IMAGE_STEP) - 1) * ARENA_IMAGE_STEP
+}
+
 /**
- * The messages a model call sends (#724): every image but the newest `kept` replaced by a line
- * saying so, newest counted from the end of the conversation. Nothing else changes, and the
- * agent's own state is not touched: this is applied to each request.
+ * The messages a model call sends (#724): the oldest images replaced by a line saying so, as many
+ * as `imagesDropped` says. Nothing else changes, and the agent's own state is not touched: this is
+ * applied to each request.
  */
-function withRecentImages(messages: readonly AgentMessage[], kept = ARENA_IMAGES_SENT): AgentMessage[] {
-  let seen = 0
-  const shaped = messages.toReversed().map((message): AgentMessage => {
-    if (!('content' in message) || !Array.isArray(message.content)) return message
-    const parts: readonly (TextContent | ImageContent | { readonly type: string })[] = message.content
-    if (!parts.some((part) => part.type === 'image')) return message
-    const content = parts.toReversed().map((part) => {
-      if (part.type !== 'image') return part
-      seen += 1
-      return seen <= kept ? part : { type: 'text' as const, text: DROPPED_IMAGE_TEXT }
+function withRecentImages(messages: readonly AgentMessage[]): AgentMessage[] {
+  const partsOf = (message: AgentMessage): readonly (TextContent | ImageContent | { readonly type: string })[] =>
+    'content' in message && Array.isArray(message.content) ? message.content : []
+  const images = messages.reduce(
+    (count, message) => count + partsOf(message).filter((part) => part.type === 'image').length,
+    0,
+  )
+  let toDrop = imagesDropped(images)
+  return messages.map((message): AgentMessage => {
+    if (toDrop === 0 || !partsOf(message).some((part) => part.type === 'image')) return message
+    const content = partsOf(message).map((part) => {
+      if (part.type !== 'image' || toDrop === 0) return part
+      toDrop -= 1
+      return { type: 'text' as const, text: DROPPED_IMAGE_TEXT }
     })
-    return { ...message, content: content.toReversed() } as AgentMessage
+    return { ...message, content } as AgentMessage
   })
-  return shaped.toReversed()
 }
 
 /** `act`: the agent's one tool. Each call is one action on the recorder's page, recorded as the agent's. */
