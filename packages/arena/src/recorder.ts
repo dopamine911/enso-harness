@@ -612,6 +612,36 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
   // agent is the front tab's — a game's alert in tab 1 must not answer for Enso's tab, nor block it.
   const dialogs = new Map<number, Dialog>()
   const frontDialog = (): Dialog | undefined => dialogs.get(front)
+  /** Who is waiting for the front tab's next dialog: an action in flight (#691). */
+  const dialogWaiters = new Set<(tabNumber: number) => void>()
+  /**
+   * An action raced against the front tab opening a native dialog (#691). Playwright does not finish
+   * a click whose dialog is unanswered, and the arena leaves dialogs open (#609), so the click would
+   * time out though it worked. The answer is the dialog, at once; the click finishes in the background
+   * once the dialog is answered, and its outcome is not anyone's to report.
+   */
+  const untilDialogOrDone = async (work: Promise<unknown>): Promise<unknown> => {
+    const atFront = front
+    let waiter: ((tabNumber: number) => void) | undefined
+    const opened = new Promise<'dialog'>((resolve) => {
+      waiter = (tabNumber) => {
+        if (tabNumber === atFront) resolve('dialog')
+      }
+      dialogWaiters.add(waiter)
+    })
+    try {
+      const first = await Promise.race([work, opened])
+      if (first !== 'dialog') return first
+      void work.catch(() => undefined)
+      const dialog = frontDialog()
+      return {
+        ...here(),
+        ...(dialog === undefined ? {} : { dialog: { type: dialog.type(), message: redact(dialog.message()) } }),
+      }
+    } finally {
+      if (waiter !== undefined) dialogWaiters.delete(waiter)
+    }
+  }
   const answerDialog = async (answer: (dialog: Dialog) => Promise<void>): Promise<ArenaPagePlace> => {
     const dialog = frontDialog()
     if (dialog === undefined) throw new Error('no dialog is open')
@@ -670,6 +700,7 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
       dialogs.set(tabNumber, dialog)
       timeline.record({ kind: 'dialog', dialog: dialog.type(), message: redact(dialog.message()) }, there())
       shootIfInFront('dialog')
+      for (const waiter of dialogWaiters) waiter(tabNumber)
     })
     tabPage.on('close', () => {
       // The browser closing at the stop closes every tab: that is the run ending, not the agent.
@@ -1082,7 +1113,7 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
       await context.tracing.group(detail)
       try {
         pointedAt = undefined
-        const result = await perform(action, via)
+        const result = await untilDialogOrDone(perform(action, via))
         if (action.action !== 'note') {
           timeline.record(
             {

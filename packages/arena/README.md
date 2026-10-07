@@ -69,8 +69,9 @@ Each bound gives its own `stopReason` in the manifest, and the score warns that 
 bound.
 
 A native browser dialog (`alert`, `confirm`, `prompt`) blocks the page until it is answered. `read`
-reports it, and `accept-dialog` (with `text` for a prompt) or `dismiss-dialog` answers it. Enso raises
-none today.
+reports it, and `accept-dialog` (with `text` for a prompt) or `dismiss-dialog` answers it. An action
+that opens one answers at once, with the dialog in its answer (#691), rather than waiting out its
+timeout for a dialog nobody has answered. Enso raises none today; the pages it builds do.
 
 **Tabs (#675).** A tab the page opens (Preview's **Open preview**, a link) comes to the front, as a
 browser shows it, and every action goes to the tab in front. `tabs` lists the open tabs by number
