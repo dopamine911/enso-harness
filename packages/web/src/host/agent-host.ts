@@ -27,6 +27,7 @@ import {
   type SessionEntry,
   type SessionInfo,
   SessionManager,
+  SettingsManager,
 } from '@earendil-works/pi-coding-agent'
 import {
   type DialogAnswer,
@@ -2923,7 +2924,19 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       })),
     )
     const models = (await catalogueModels.available()) ?? modelRuntime.getAvailableSnapshot()
-    return catalogueRows(models, getSupportedThinkingLevels, hostFlowRows(login, logout))
+    return catalogueRows(models, getSupportedThinkingLevels, hostFlowRows(login, logout), configuredDefaultModel())
+  }
+
+  /**
+   * The model pi starts a session on when none is chosen: the agent dir's `defaultProvider` and
+   * `defaultModel` (#674), as `provider/id`. Global settings only — a project's are read only once
+   * it is trusted, and the catalogue serves threads of every project.
+   */
+  function configuredDefaultModel(): string | undefined {
+    const settings = SettingsManager.create(agentDir, agentDir, { projectTrusted: false })
+    const provider = settings.getDefaultProvider()
+    const model = settings.getDefaultModel()
+    return provider === undefined || model === undefined ? undefined : `${provider}/${model}`
   }
 
   return {

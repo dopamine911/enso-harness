@@ -218,7 +218,7 @@ export const RuntimeCommand = Type.Object({
       Type.Literal('view'),
     ]),
   ),
-  /** `host` rows: the current choice, as an `options[].id`. Absent when the list is the `catalogue` — a thread with no session has no current value to show. */
+  /** `host` rows: the current choice, as an `options[].id`. In the `catalogue`, a thread with no session has no current choice: `/model`'s is the configured default when it is offered (#674), the one the Start dialog preselects. */
   value: Type.Optional(Type.String()),
   /** `host` rows with `kind: 'select' | 'level'`: what may be chosen. */
   options: Type.Optional(Type.Array(HostCommandOption)),
@@ -305,9 +305,9 @@ export function isRuntimeCommand(value: unknown): value is RuntimeCommand {
  * can be asked what it registers. So a live thread answers `live`, its own session's list; a
  * thread without a live session (never built, or idled out — the server cannot tell) answers
  * `catalogue` — the host's own rows over pi's models and credentials, read without building:
- * `/model` with no current value, `/login`, `/logout` — and nothing a session alone has. The
- * palette shows a `catalogue` list as none: the slash commands belong to a running session, and
- * the Start dialog is what a thread without one offers.
+ * `/model` with the configured default as its value, `/login`, `/logout` — and nothing a session
+ * alone has. The palette shows a `catalogue` list as none: the slash commands belong to a running
+ * session, and the Start dialog is what a thread without one offers.
  *
  * @group Thread runtime
  */

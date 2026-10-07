@@ -55,6 +55,7 @@ import {
   readEnsoRunContext,
   threadTrustsProject,
   ENSO_TREE_RESTORED_ENTRY,
+  type RuntimeCommand,
 } from '@enso/core'
 import { flowTrace } from '@enso/core/flow-trace'
 import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
@@ -2071,6 +2072,32 @@ test("⚠ the catalogue offers a session's models, not the agent dir's: every on
   const started = hosted.runtime.modelState().model
   expect(started === null ? undefined : `${started.provider}/${started.id}`).toBe(dialogDefault)
   for (const id of beforeAnyThread) await hosted.runtime.runHostCommand({ name: 'model', value: id })
+})
+
+// #674: pi starts a session on the configured default (`defaultProvider`/`defaultModel`), and the Start
+// dialog preselects the `/model` row's value — none until now, so the dialog took its first model,
+// whatever the settings named. A default the session's list lacks is no value: preselecting it would
+// be the 422 of #688 again.
+test('the catalogue’s model row carries the configured default when it is offered, and none when it is not', async () => {
+  const modelRowWith = async (settings: Record<string, string> | undefined): Promise<RuntimeCommand | undefined> => {
+    const catalogueAgentDir = scratchAgentDir('enso-host-default-')
+    writeFileSync(join(catalogueAgentDir, 'auth.json'), JSON.stringify({ openai: { type: 'api_key', key: 'sk-674' } }))
+    if (settings !== undefined) writeFileSync(join(catalogueAgentDir, 'settings.json'), JSON.stringify(settings))
+    const host = createAgentHost({
+      servesDirectory: servesRepoRoot,
+      agentDir: catalogueAgentDir,
+      permissionRulesPath,
+      harnessPackageDir: harnessDir,
+      extensionFactories: [accountCatalog],
+    })
+    return (await host.catalogue()).find((row) => row.name === 'model')
+  }
+  expect((await modelRowWith({ defaultProvider: 'openai', defaultModel: 'gpt-account' }))?.value).toBe(
+    'openai/gpt-account',
+  )
+  // A built-in model the account's list replaced, and no settings at all: no value, the first is taken.
+  expect((await modelRowWith({ defaultProvider: 'openai', defaultModel: 'gpt-5.5' }))?.value).toBeUndefined()
+  expect((await modelRowWith(undefined))?.value).toBeUndefined()
 })
 
 // ⚠ PR #561 review: a prompt that finds the thread held JOINS the holder (#75), and pi starts a run
