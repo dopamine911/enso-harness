@@ -212,6 +212,20 @@ export function isEnsoThreadId(value: unknown): value is string {
 }
 
 /**
+ * The longest name a thread takes (#670): the rail shows a line of it, the hover the rest.
+ * @group Thread inspection
+ */
+export const THREAD_NAME_MAX_LENGTH = 120
+
+/**
+ * A thread's name, as a person gives it (#670): something not blank, at most
+ * {@link THREAD_NAME_MAX_LENGTH} characters. Stored as pi's own `session_info` entry, the one pi's
+ * `/name` writes, so the newest one is the name and a resume keeps it.
+ * @group Thread inspection
+ */
+export const EnsoThreadName = Type.String({ minLength: 1, maxLength: THREAD_NAME_MAX_LENGTH, pattern: '\\S' })
+
+/**
  * One of pi's session files for this workspace (#95), as the rail lists it: a session the
  * user can come back to.
  *
@@ -228,6 +242,8 @@ export const EnsoStoredThread = Type.Object(
     projectId: Type.String(),
     /** The first user message, or undefined for a session with none — the rail's title, as deepseek does. */
     title: Type.Optional(Type.String()),
+    /** The name a person gave the thread (#670) — its newest `session_info` — shown instead of the title; absent when none. */
+    name: Type.Optional(EnsoThreadName),
     /** The file's mtime, ISO 8601 — when the session last grew. */
     lastActivityAt: Type.String(),
     messageCount: Type.Integer({ minimum: 0 }),
@@ -286,6 +302,15 @@ export const EnsoRestoreUndoRequest = Type.Object(
 )
 /** @group Thread inspection */
 export type EnsoRestoreUndoRequest = Static<typeof EnsoRestoreUndoRequest>
+
+/**
+ * The body of `POST …/name` (#670): the thread's new name. The first prompt stays the title a
+ * thread with no name shows.
+ * @group Thread inspection
+ */
+export const EnsoThreadRenameRequest = Type.Object({ name: EnsoThreadName }, { additionalProperties: false })
+/** @group Thread inspection */
+export type EnsoThreadRenameRequest = Static<typeof EnsoThreadRenameRequest>
 
 /**
  * What a fork answers (#433): the new thread, and the forked message's text — pi's `/fork` puts it
@@ -466,6 +491,8 @@ export const EnsoThreadHistory = Type.Object(
     incidents: EnsoSessionIncidents,
     /** Present only when the branch ends inside a turn — see {@link EnsoInterruptedTail}. */
     interrupted: Type.Optional(EnsoInterruptedTail),
+    /** The name a person gave the thread (#670) — its newest `session_info` — absent when none. */
+    name: Type.Optional(EnsoThreadName),
   },
   { additionalProperties: false },
 )

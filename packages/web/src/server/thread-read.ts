@@ -79,6 +79,8 @@ export interface ThreadMount {
   readonly messages: UIMessage[]
   /** Set only when the branch ends inside a turn (#109). */
   readonly interrupted: EnsoInterruptedTail | undefined
+  /** The name a person gave the thread (#670): the live session's, else the file's; `undefined` when none. */
+  readonly name: string | undefined
   readonly live: boolean
   readonly busy: boolean
   readonly generation: number
@@ -158,6 +160,7 @@ export async function readThreadMount(deps: ThreadReadDeps, threadId: string): P
   return {
     present: nowLive !== undefined || stored !== undefined,
     storedOutside,
+    name: inspection === undefined ? stored?.name : inspection.name,
     messages: transcriptToMessages(transcript),
     sessionRisk: { level: risk.level, signals: risk.signals.length },
     incidents: sessionIncidentsOf(

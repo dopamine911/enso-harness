@@ -18,18 +18,11 @@ import {
   ArtifactTitle,
 } from './components/ai-elements/artifact.tsx'
 import { Button } from './components/ui/button.tsx'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from './components/ui/dialog.tsx'
 import { Field, FieldError, FieldLabel } from './components/ui/field.tsx'
 import { Input } from './components/ui/input.tsx'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './components/ui/select.tsx'
 import { Textarea } from './components/ui/textarea.tsx'
+import { HeaderDialog } from './header-dialog.tsx'
 import { TEXT_PART_COMPONENTS } from './markdown-image.tsx'
 import {
   blankDraft,
@@ -921,34 +914,24 @@ export function PromptManagerDialog({
   const { library, project, runtimeDefault, reload } = useLibrary(open, threadId, fetch)
   const manager = useManagerState(library, reload, fetch, () => setOpen(false))
   return (
-    <Dialog open={open} onOpenChange={(next: boolean) => (next ? setOpen(true) : manager.close())}>
-      <DialogTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label="prompts"
-          title="prompts — the library of system, append and session prompts"
-        >
-          <ScrollTextIcon />
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="flex h-5/6 flex-col sm:max-w-6xl">
-        <DialogHeader>
-          <DialogTitle>Prompts</DialogTitle>
-          <DialogDescription>
-            markdown files in ENSO_HOME/prompts — edit, copy and name them here; a trusted project's own, in
-            .enso/prompts, are read-only
-          </DialogDescription>
-        </DialogHeader>
-        <ManagerBody
-          library={library}
-          project={project}
-          runtimeDefault={runtimeDefault}
-          manager={manager}
-          threadId={threadId}
-          fetch={fetch}
-        />
-      </DialogContent>
-    </Dialog>
+    <HeaderDialog
+      open={open}
+      onOpenChange={(next: boolean) => (next ? setOpen(true) : manager.close())}
+      label="prompts"
+      hover="prompts — the library of system, append and session prompts"
+      icon={<ScrollTextIcon />}
+      title="Prompts"
+      description="markdown files in ENSO_HOME/prompts — edit, copy and name them here; a trusted project's own, in .enso/prompts, are read-only"
+      contentClassName="flex h-5/6 flex-col sm:max-w-6xl"
+    >
+      <ManagerBody
+        library={library}
+        project={project}
+        runtimeDefault={runtimeDefault}
+        manager={manager}
+        threadId={threadId}
+        fetch={fetch}
+      />
+    </HeaderDialog>
   )
 }

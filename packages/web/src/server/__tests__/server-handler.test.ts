@@ -944,6 +944,46 @@ test('⚠ POST …/restore answers the restored and safety hashes; refuses an un
   expect(busy.body).toContain('is running')
 })
 
+/** `POST …/name` (#670) with this body; the status and the text it answered. */
+async function rename(url: string, threadId: string, body: unknown): Promise<{ status: number; body: string }> {
+  const response = await fetch(`${url}/api/threads/${threadId}/name`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  return { status: response.status, body: await response.text() }
+}
+
+test('⚠ POST …/name names a thread — trimmed — and the listing carries it, as the history carries a stored name; refuses a blank or too long name or a bad body (400), an unknown thread (404) and a running one (409) (#670)', async () => {
+  const branch = { transcript: STORED_BRANCH, modified: new Date(0), firstMessage: 'earlier question' }
+  const stored = { 'stored-1': branch, named: { ...branch, name: 'Approach B: a parser' }, plain: branch }
+  const { url, built } = await startWith(asksAndWaits, stored)
+  expect(await rename(url, 'stored-1', { name: '  Approach A: regex  ' })).toEqual({ status: 204, body: '' })
+  const listed = (await (await fetch(`${url}/api/stored-threads`)).json()) as EnsoStoredThread[]
+  expect(listed.find((row) => row.threadId === 'stored-1')).toMatchObject({
+    name: 'Approach A: regex',
+    title: 'earlier question',
+  })
+  // A resume mounts from the history: a named thread comes back named. (A live one's name is its
+  // session's — the host test's.)
+  const history = (await (await fetch(`${url}/api/threads/named/history`)).json()) as EnsoThreadHistory
+  expect(history.name).toBe('Approach B: a parser')
+  const unnamed = (await (await fetch(`${url}/api/threads/plain/history`)).json()) as { name?: string }
+  expect(unnamed.name).toBeUndefined()
+  for (const refused of [{ name: '   ' }, { name: '' }, { name: 'x'.repeat(121) }, { name: 'a', extra: 1 }, {}]) {
+    expect((await rename(url, 'stored-1', refused)).status).toBe(400)
+  }
+  // An unknown thread is answered before the lease: nothing is BUILT under its id.
+  const builtBefore = built.length
+  expect((await rename(url, 'never-stored', { name: 'x' })).status).toBe(404)
+  expect(built).toHaveLength(builtBefore)
+  // A run holds the thread: a name appended now would land between the run's messages.
+  await prompt(url, 'stored-1', '/mode')
+  const busy = await rename(url, 'stored-1', { name: 'later' })
+  expect(busy.status).toBe(409)
+  expect(busy.body).toContain('is running')
+})
+
 // ⚠ PR #561 review: the restore routes HOLD the thread for the whole restore, as a run does — a
 // control route that comes meanwhile is refused, and the hold is given back once it settles.
 test('⚠ a restore holds its thread until it settles: a mode change meanwhile is refused (409), and accepted after; POST …/restore/undo answers the same way (#551, #565)', async () => {

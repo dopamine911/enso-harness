@@ -1,6 +1,6 @@
 import type { EnsoProject, EnsoStoredThread } from '@enso/core'
 import { ChevronDownIcon, ChevronRightIcon, EllipsisIcon, FolderPlusIcon, GitForkIcon, PlusIcon } from 'lucide-react'
-import { createContext, useContext, useState } from 'react'
+import { createContext, useContext, useMemo, useState } from 'react'
 import { Button } from './components/ui/button.tsx'
 import {
   DropdownMenu,
@@ -143,8 +143,11 @@ export function forkParentTitles(
   pageThreads: readonly ThreadSummary[],
 ): ReadonlyMap<string, string> {
   const titles = new Map<string, string>()
-  for (const thread of stored) titles.set(thread.threadId, thread.title ?? UNTITLED_THREAD)
-  for (const thread of pageThreads) if (thread.title !== undefined) titles.set(thread.threadId, thread.title)
+  for (const thread of stored) titles.set(thread.threadId, thread.name ?? thread.title ?? UNTITLED_THREAD)
+  for (const thread of pageThreads) {
+    const title = thread.name ?? thread.title
+    if (title !== undefined) titles.set(thread.threadId, title)
+  }
   const parents = new Map<string, string>()
   for (const thread of stored) {
     if (thread.parentThreadId !== undefined) {
@@ -158,12 +161,22 @@ export function forkParentTitles(
 const NO_FORKS: ReadonlyMap<string, string> = new Map()
 const ForkParentsContext = createContext<ReadonlyMap<string, string>>(NO_FORKS)
 
-/** A row's title, and — for a fork — the thread it came from, under it (#433). */
-function RowTitle({ threadId, title }: { threadId: string; title: string | undefined }): React.ReactNode {
+/** A row's title, and — for a fork — the thread it came from, under it (#433); the whole title as its hover when the row reads a shorter one. */
+function RowTitle({
+  threadId,
+  title,
+  full,
+}: {
+  threadId: string
+  title: string | undefined
+  full: string | undefined
+}): React.ReactNode {
   const parent = useContext(ForkParentsContext).get(threadId)
   return (
     <span className="grid min-w-0 flex-1">
-      <span className={cn('truncate', title === undefined ? 'italic' : '')}>{title ?? UNTITLED_THREAD}</span>
+      <span className={cn('truncate', title === undefined ? 'italic' : '')} title={full === title ? undefined : full}>
+        {title ?? UNTITLED_THREAD}
+      </span>
       {parent === undefined ? null : (
         <span className="truncate text-xs text-muted-foreground">
           <GitForkIcon aria-hidden="true" className="mr-1 inline size-3" />
@@ -209,6 +222,70 @@ export function groupByProject(
 }
 
 /**
+ * About how much of a title the rail shows at its width: two titles that share this start read
+ * the same there (#670), and a screen reader names their rows the same.
+ */
+const RAIL_TITLE_SHOWN = 32
+
+/**
+ * Where `left` parts from `right`, as a place to start reading `left` from: the word before the
+ * first one they differ in, so the tail keeps a word of context ("…Approach B: …", not "…B: …").
+ * `left.length` when `left` is `right` or starts it — nothing of `left` tells it apart.
+ */
+function partingAt(left: string, right: string): number {
+  let length = 0
+  while (length < left.length && length < right.length && left[length] === right[length]) length += 1
+  if (length === left.length || length === right.length) return length
+  const differingWord = left.lastIndexOf(' ', length - 1) + 1
+  return differingWord === 0 ? 0 : left.lastIndexOf(' ', differingWord - 2) + 1
+}
+
+/**
+ * A title as the rail reads it: itself, or — when another row's starts the same and goes on
+ * differently — `…` and its words from where they part. A row whose title is another's whole (a
+ * fork's and its parent's) is no contrast: the fork line under it says which is which.
+ */
+function lookalikeLabel(
+  row: { readonly threadId: string; readonly title: string },
+  titled: ReadonlyArray<{ readonly threadId: string; readonly title: string }>,
+): string {
+  const head = row.title.slice(0, RAIL_TITLE_SHOWN)
+  const parting = titled
+    .filter((peer) => peer.threadId !== row.threadId && peer.title.slice(0, RAIL_TITLE_SHOWN) === head)
+    .map((peer) => partingAt(row.title, peer.title))
+    .filter((at) => at < row.title.length)
+  if (parting.length === 0) return row.title
+  // A page title cut at its cap ends in `…`: that alone tells nothing apart.
+  const tail = row.title.slice(Math.max(...parting)).trim()
+  return tail === '' || tail === '…' ? row.title : `…${tail}`
+}
+
+/**
+ * What each row of a section reads as (#670): the name a person gave it, else its first prompt —
+ * and where two prompts in the section start alike, the words past their shared start, so the
+ * rows are told apart without opening them (the arena's two approaches read the same at the
+ * rail's width). Two threads with the same whole prompt — a fork and its parent — keep it; the
+ * fork says whose it is under its title, and either can be renamed.
+ */
+export function railLabels(group: ProjectGroup): ReadonlyMap<string, string | undefined> {
+  const rows = [...group.threads, ...group.earlier].map((thread) => ({
+    threadId: thread.threadId,
+    name: thread.name,
+    title: thread.title,
+  }))
+  const titled = rows.flatMap((row) =>
+    row.name === undefined && row.title !== undefined ? [{ threadId: row.threadId, title: row.title }] : [],
+  )
+  return new Map(
+    rows.map((row) => [
+      row.threadId,
+      row.name ??
+        (row.title === undefined ? undefined : lookalikeLabel({ threadId: row.threadId, title: row.title }, titled)),
+    ]),
+  )
+}
+
+/**
  * A thread's live state, as the status bar's dot at rail size: violet while pi waits on you,
  * pulsing in the running colour while a run is in flight (Signal lights both), hollow when an
  * open thread is idle. A stored thread says only that it is running.
@@ -240,10 +317,13 @@ const ROW = 'flex min-h-9 w-full items-center gap-2 rounded-md px-2 text-left te
 
 function ThreadRow({
   thread,
+  label,
   active,
   onSelect,
 }: {
   thread: ThreadSummary
+  /** What the row reads as — `railLabels`. */
+  label: string | undefined
   active: boolean
   onSelect: (threadId: string) => void
 }): React.ReactNode {
@@ -256,7 +336,7 @@ function ThreadRow({
         className={cn(ROW, active ? 'bg-accent text-foreground hover:bg-accent' : 'text-foreground')}
       >
         <LiveDot state={liveState(thread)} />
-        <RowTitle threadId={thread.threadId} title={thread.title} />
+        <RowTitle threadId={thread.threadId} title={label} full={thread.name ?? thread.title} />
         <span
           className="shrink-0 font-mono text-xs text-muted-foreground tabular-nums"
           title={thread.lastActivityAt.toLocaleString()}
@@ -277,9 +357,12 @@ function ThreadRow({
  */
 function EarlierThreadRow({
   thread,
+  label,
   onResume,
 }: {
   thread: EnsoStoredThread
+  /** What the row reads as — `railLabels`. */
+  label: string | undefined
   onResume: (threadId: string) => void
 }): React.ReactNode {
   const at = new Date(thread.lastActivityAt)
@@ -292,7 +375,7 @@ function EarlierThreadRow({
         className={cn(ROW, 'text-muted-foreground hover:text-foreground')}
       >
         {thread.busy ? <LiveDot state="running" /> : null}
-        <RowTitle threadId={thread.threadId} title={thread.title} />
+        <RowTitle threadId={thread.threadId} title={label} full={thread.name ?? thread.title} />
         <span className="shrink-0 font-mono text-xs tabular-nums">
           <Age from={at} />
         </span>
@@ -403,6 +486,7 @@ function SectionRows({
   const [allStored, setAllStored] = useState(false)
   const shownStored = allStored ? group.earlier : group.earlier.slice(0, STORED_ROWS_SHOWN)
   const hidden = group.earlier.length - shownStored.length
+  const labels = useMemo(() => railLabels(group), [group])
   return (
     <>
       {group.threads.length > 0 ? (
@@ -411,6 +495,7 @@ function SectionRows({
             <ThreadRow
               key={thread.threadId}
               thread={thread}
+              label={labels.get(thread.threadId)}
               active={thread.threadId === activeThreadId}
               onSelect={onSelect}
             />
@@ -420,7 +505,12 @@ function SectionRows({
       {shownStored.length > 0 ? (
         <ol aria-label={`earlier threads in ${name}`} className="flex flex-col gap-px">
           {shownStored.map((thread) => (
-            <EarlierThreadRow key={thread.threadId} thread={thread} onResume={onResume} />
+            <EarlierThreadRow
+              key={thread.threadId}
+              thread={thread}
+              label={labels.get(thread.threadId)}
+              onResume={onResume}
+            />
           ))}
         </ol>
       ) : null}

@@ -2,17 +2,10 @@ import type { EnsoDiskUsage, EnsoStoredThread } from '@enso/core'
 import { Trash2Icon } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Button } from './components/ui/button.tsx'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from './components/ui/dialog.tsx'
+import { DialogFooter } from './components/ui/dialog.tsx'
 import { type DeletePreviewRead, type DeleteTarget, deleteThread, readDeletePreview } from './delete-thread.ts'
 import { formatBytes } from './disk-usage.ts'
+import { HeaderDialog } from './header-dialog.tsx'
 
 /**
  * A thread's Delete (#571), behind a confirmation that says what goes before it is confirmed:
@@ -93,37 +86,36 @@ export function DeleteThread({
     })
   }
   return (
-    <Dialog open={open} onOpenChange={changeOpen}>
-      <DialogTrigger asChild>
-        <Button variant="ghost" size="icon-sm" aria-label={label} title="delete this thread">
-          <Trash2Icon />
+    <HeaderDialog
+      open={open}
+      onOpenChange={changeOpen}
+      label={label}
+      hover="delete this thread"
+      icon={<Trash2Icon />}
+      title="Delete this thread?"
+      description={describeDelete(preview, stored)}
+      contentClassName="sm:max-w-md"
+      showCloseButton={!deleting}
+    >
+      {holdsWork === undefined ? null : (
+        <p role="alert" className="text-sm text-destructive">
+          {refusedForWork?.changed === true ? 'The tree changed since: ' : null}
+          {holdsWork}
+        </p>
+      )}
+      <DialogFooter>
+        <Button variant="ghost" disabled={deleting} onClick={(): void => changeOpen(false)}>
+          Cancel
         </Button>
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-md" showCloseButton={!deleting}>
-        <DialogHeader>
-          <DialogTitle>Delete this thread?</DialogTitle>
-          <DialogDescription>{describeDelete(preview, stored)}</DialogDescription>
-        </DialogHeader>
-        {holdsWork === undefined ? null : (
-          <p role="alert" className="text-sm text-destructive">
-            {refusedForWork?.changed === true ? 'The tree changed since: ' : null}
-            {holdsWork}
-          </p>
-        )}
-        <DialogFooter>
-          <Button variant="ghost" disabled={deleting} onClick={(): void => changeOpen(false)}>
-            Cancel
-          </Button>
-          <Button
-            variant="destructive"
-            disabled={deleting || preview === undefined}
-            onClick={(): void => confirm(holdsWork)}
-          >
-            {holdsWork === undefined ? 'Delete' : 'Delete anyway'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        <Button
+          variant="destructive"
+          disabled={deleting || preview === undefined}
+          onClick={(): void => confirm(holdsWork)}
+        >
+          {holdsWork === undefined ? 'Delete' : 'Delete anyway'}
+        </Button>
+      </DialogFooter>
+    </HeaderDialog>
   )
 }
 

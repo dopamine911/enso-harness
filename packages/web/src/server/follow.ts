@@ -10,6 +10,8 @@ import {
   EnsoForkRequest,
   EnsoRestoreRequest,
   EnsoRestoreUndoRequest,
+  EnsoThreadRenameRequest,
+  THREAD_NAME_MAX_LENGTH,
   EnsoHostCommandRun,
   EnsoIncidentResolution,
   EnsoPermissionModeChange,
@@ -974,30 +976,42 @@ const RESTORE_REFUSAL_STATUS = {
 } as const
 
 /**
- * Run a restore of the thread's tree holding the thread (#551, PR #561 review): a run started
- * while the files are put back would read a half-restored tree, and its snapshot would race the
- * restore on the same store's index. So the thread is LEASED, as a run is, for the whole restore
- * — refused 409 while one runs, or if one wins it meanwhile. An unknown thread is answered before
- * the lease, which would otherwise build a NEW thread under the id.
+ * Run a control that writes the thread's session or tree holding the thread (#551, PR #561 review;
+ * #670): a run started meanwhile would read a half-restored tree, or write between the entries
+ * appended. So the thread is LEASED, as a run is, for the whole control — refused 409 while one
+ * runs, or if one wins it meanwhile. An unknown thread is a 404 before the lease, which would
+ * otherwise build a NEW thread under the id.
  */
-async function restoreUnderLease(
+async function underLease<Outcome>(
   deps: ThreadReadDeps,
   threadId: string,
   action: string,
-  restore: () => ReturnType<ThreadReadDeps['host']['restoreThreadAt']>,
-): Promise<RestoreRouteOutcome> {
+  control: () => Promise<Outcome>,
+): Promise<Outcome | Refusal<404 | 409>> {
   if (deps.threads.peek(threadId) === undefined && (await deps.host.storedThreadDirectory(threadId)) === undefined) {
     return { status: 404, reason: `thread ${threadId} has no session in a project this server serves` }
   }
   const lease = await controlLease(deps.threads, threadId, action)
   if ('reason' in lease) return lease
   try {
-    const outcome = await restore()
-    if (outcome.kind !== 'restored') return { status: RESTORE_REFUSAL_STATUS[outcome.kind], reason: outcome.reason }
-    return { status: 200, receipt: { hash: outcome.hash, safety: outcome.safety } }
+    return await control()
   } finally {
     lease.release()
   }
+}
+
+/** A restore of the thread's tree (#551) or its undo (#565), under the lease: the host's outcome as the route answers it. */
+function restoreUnderLease(
+  deps: ThreadReadDeps,
+  threadId: string,
+  action: string,
+  restore: () => ReturnType<ThreadReadDeps['host']['restoreThreadAt']>,
+): Promise<RestoreRouteOutcome> {
+  return underLease(deps, threadId, action, async (): Promise<RestoreRouteOutcome> => {
+    const outcome = await restore()
+    if (outcome.kind !== 'restored') return { status: RESTORE_REFUSAL_STATUS[outcome.kind], reason: outcome.reason }
+    return { status: 200, receipt: { hash: outcome.hash, safety: outcome.safety } }
+  })
 }
 
 /**
@@ -1027,6 +1041,23 @@ export function undoLastRestore(
   return restoreUnderLease(deps, threadId, 'undo its last restore', () =>
     deps.host.undoLastRestore(threadId, request.safety),
   )
+}
+
+export type RenameRouteOutcome = { readonly status: 204 } | Refusal<404 | 409>
+
+/**
+ * Name a thread (#670), held as a restore is: the name is pi's `session_info` entry, and one
+ * appended while a run writes would land between its messages.
+ */
+export function renameThreadAt(
+  deps: ThreadReadDeps,
+  threadId: string,
+  request: EnsoThreadRenameRequest,
+): Promise<RenameRouteOutcome> {
+  return underLease(deps, threadId, 'rename it', async () => {
+    const outcome = await deps.host.renameThread(threadId, request.name)
+    return outcome.kind === 'renamed' ? { status: 204 } : { status: 404, reason: outcome.reason }
+  })
 }
 
 export type DeleteRouteOutcome =
@@ -1075,6 +1106,17 @@ export function readRestoreUndoBody(raw: string): EnsoRestoreUndoRequest {
     'restore undo',
     'undo body needs `safety`, the commit hash the restore kept, and nothing else',
   )
+}
+
+/** The rename body (#670), checked against its closed schema — `name`, not blank, at most 120 characters. */
+export function readRenameBody(raw: string): EnsoThreadRenameRequest {
+  const body = readClosedBody(
+    raw,
+    EnsoThreadRenameRequest,
+    'rename',
+    `rename body needs a \`name\`, not blank, at most ${THREAD_NAME_MAX_LENGTH} characters, and nothing else`,
+  )
+  return { name: body.name.trim() }
 }
 
 export type AbortRouteOutcome = { readonly status: 200; readonly receipt: EnsoAbortReceipt } | Refusal<404 | 409>

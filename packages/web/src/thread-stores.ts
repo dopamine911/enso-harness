@@ -389,6 +389,8 @@ export interface ThreadSummary {
   readonly threadId: string
   /** The first user message, or undefined until there is one. */
   readonly title: string | undefined
+  /** The name a person gave it (#670) — shown instead of the title — absent when none. */
+  readonly name?: string
   /** When the pane last saw its transcript or in-flight state change. */
   readonly lastActivityAt: Date
   /** A run is in flight. */
@@ -604,7 +606,8 @@ export function adoptThread(history: EnsoThreadHistory, fetchImpl?: FetchLike, i
   threads.set(stores.threadId, stores)
   summaries.set(stores.threadId, {
     threadId: stores.threadId,
-    title: titleFromMessages(messages),
+    title: threadTitleFromMessages(messages),
+    ...(history.name === undefined ? {} : { name: history.name }),
     lastActivityAt: new Date(),
     busy: false,
     waiting: false,
@@ -632,8 +635,15 @@ export function updateThreadSummary(threadId: string, patch: Pick<ThreadSummary,
 
 export const threadListStore: Store<readonly ThreadSummary[]> = threadList
 
-/** One line, from the first user message's text — deepseek-harness titles its sessions exactly this way. */
+/** One line, from the first user message's text — deepseek-harness titles its sessions exactly this way. A prompt's name in a dialog is cut here. */
 export const TITLE_MAX_CHARS = 60
+
+/**
+ * A thread's title on the rail and the header is longer (#670): those cut it to their width, and two
+ * prompts that start alike are told apart by the words past their shared start (`railLabels`) — the
+ * arena's two approaches differed only after the 60th character, so at 60 both read the same.
+ */
+export const THREAD_TITLE_MAX_CHARS = TITLE_MAX_CHARS * 2
 
 /**
  * The message's text parts, joined, whitespace-collapsed and trimmed — the same string
@@ -641,41 +651,57 @@ export const TITLE_MAX_CHARS = 60
  * cap instead of over the whole prompt.
  *
  * A window that collapses to more than the cap already contains the title, and collapsing
- * is left-to-right, so its first `TITLE_MAX_CHARS + 1` characters are the full string's.
+ * is left-to-right, so its first `cap + 1` characters are the full string's.
  * The whole prompt is scanned only when the window collapses to LESS than the cap — a
  * prompt that opens with more whitespace than text — where there is no shorter correct
  * answer. The first prompt is routinely a pasted file or stack trace, and this ran per
  * streamed token (#283): 14.9 µs for 20 KB, now 0.19 µs.
  */
-function titleTextOf(message: UIMessage): string {
+function titleTextOf(message: UIMessage, cap: number): string {
   let source = ''
   for (const part of message.parts) {
     if (part.type !== 'text') continue
     source = source.length === 0 ? part.content : `${source} ${part.content}`
   }
   const window = source
-    .slice(0, TITLE_MAX_CHARS * 2)
+    .slice(0, cap * 2)
     .replace(/\s+/g, ' ')
     .trim()
-  if (window.length > TITLE_MAX_CHARS || source.length <= TITLE_MAX_CHARS * 2) return window
+  if (window.length > cap || source.length <= cap * 2) return window
   return source.replace(/\s+/g, ' ').trim()
 }
 
+function cutTitle(text: string, cap: number): string | undefined {
+  if (text.length === 0) return undefined
+  return text.length > cap ? `${text.slice(0, cap)}…` : text
+}
+
 /**
- * One thread's title, from ONE message — the first user one.
+ * A prompt's name, from ONE message — what a dialog quotes it as.
  *
  * Exported so a caller can depend on that message's identity rather than on the list's: the
  * list gets a new identity per streamed chunk, and the title cannot have changed (#283).
  */
 export function titleFromMessage(message: UIMessage): string | undefined {
-  const text = titleTextOf(message)
-  if (text.length === 0) return undefined
-  return text.length > TITLE_MAX_CHARS ? `${text.slice(0, TITLE_MAX_CHARS)}…` : text
+  return cutTitle(titleTextOf(message, TITLE_MAX_CHARS), TITLE_MAX_CHARS)
 }
 
-export function titleFromMessages(messages: ReadonlyArray<UIMessage>): string | undefined {
+/** A thread's title, from its first user message — the rail's and the header's, at {@link THREAD_TITLE_MAX_CHARS}. */
+export function threadTitleFromMessage(message: UIMessage): string | undefined {
+  return cutTitle(titleTextOf(message, THREAD_TITLE_MAX_CHARS), THREAD_TITLE_MAX_CHARS)
+}
+
+export function threadTitleFromMessages(messages: ReadonlyArray<UIMessage>): string | undefined {
   const first = messages.find((message) => message.role === 'user')
-  return first === undefined ? undefined : titleFromMessage(first)
+  return first === undefined ? undefined : threadTitleFromMessage(first)
+}
+
+/** A person named the thread (#670): the rail and the header show the name from now on. */
+export function nameThreadSummary(threadId: string, name: string): void {
+  const current = summaries.get(threadId)
+  if (current === undefined || current.name === name) return
+  summaries.set(threadId, { ...current, name })
+  publishThreadList()
 }
 
 /** Test seam: forget every thread, closing the follow each one holds. Never called from production code. */
