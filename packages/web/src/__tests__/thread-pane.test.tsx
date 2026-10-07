@@ -2059,6 +2059,29 @@ test('⚠ Stats keeps reading a thread that ran after its session idles out and 
   await pane.unmount()
 })
 
+// ⚠ #707, from an arena run: the composer was drawn inside the chat's panel, which goes invisible and
+// inert under every other view, so a prompt typed on Diff (checking a round's changes) went nowhere,
+// silently. It is under every view now: there, it sends, and the page is asked for the chat, where
+// the run, its questions and its reply are.
+test('⚠ on Context, Stats and Diff the composer is there: a prompt typed there is sent, and Chat is asked for (#707)', async () => {
+  for (const view of ['context', 'stats', 'changes'] as const) {
+    const pane = await mountPane({ view, server: { stats: TWO_CALL_STATS } })
+    await pane.settle(SNAPSHOT_LIVE)
+    const composer = pane.composer()
+    // Not inside anything a view hides: a person and an accessibility read both reach it.
+    expect(composer.closest('[inert], .invisible')).toBeNull()
+    await flush(async () => {
+      typeInto(composer, `asked from ${view}`)
+      pressEnter(composer)
+      await tick()
+    })
+    await eventually(() => expect(pane.server.prompts.map((prompt) => prompt.message)).toEqual([`asked from ${view}`]))
+    expect(pane.requestedViews).toEqual(['chat'])
+    expect(pane.composer().value).toBe('')
+    await pane.unmount()
+  }
+})
+
 // #359, #361: a stats row is a way into THIS pane's transcript — through the bridge inside
 // `<Conversation>`, the layout's reveal, and the step row's `data-tool-call-id`. The transcript
 // is under the Stats view, still mounted: the row finds its call there, asks the page for the
@@ -2087,11 +2110,13 @@ test('⚠ a costliest-calls row opens Chat at its call; a call not drawn there i
       expect(found).toHaveLength(2)
       return found
     })
+    // The prompt that made it run was sent from Stats, which asks for Chat (#707); the rows' own asks follow.
+    expect(pane.requestedViews).toEqual(['chat'])
     await flush(async () => rows[1]?.click())
     await eventually(() => expect(pane.container.textContent).toContain('that call is not in the transcript on screen'))
-    expect(pane.requestedViews).toEqual([])
-    await flush(async () => rows[0]?.click())
     expect(pane.requestedViews).toEqual(['chat'])
+    await flush(async () => rows[0]?.click())
+    expect(pane.requestedViews).toEqual(['chat', 'chat'])
     await eventually(() =>
       expect(scrolled).toEqual([pane.container.querySelector('[data-tool-call-id="c1"]') as Element]),
     )

@@ -816,6 +816,60 @@ function StopControl({
   )
 }
 
+/**
+ * The Start-a-session dialog (#391) on a minted thread, with what it reads: the thread's project and
+ * its permission modes. Start configures the session and sends the first prompt through the
+ * composer's own `send`; a dismissal hands a typed prompt back to the composer (#638).
+ */
+function ComposerStartSession({
+  keepPrompt,
+  send,
+}: {
+  readonly keepPrompt: (text: string) => void
+  readonly send: (text: string) => boolean
+}): React.ReactNode {
+  const stores = useThreadStores()
+  const open = useStore(stores.startSession)
+  const project = useThreadProject(stores.projectId)
+  const permission = usePermissionMode()
+  return (
+    <StartSessionDialog
+      threadId={stores.threadId}
+      fetch={stores.fetch}
+      project={project}
+      open={open}
+      onClose={(): void => stores.startSession.set(false)}
+      keepPrompt={keepPrompt}
+      mode={permission.mode}
+      modes={permission.available}
+      configure={stores.connection.configure}
+      send={send}
+    />
+  )
+}
+
+/**
+ * The composer's attachments as the wire takes them: the form hands back `data:` URLs (blob →
+ * FileReader), the wire takes bytes + kind. The form's `accept` already filtered by `File.type`;
+ * this is the same set, as a guard rather than a cast, and a miss is counted for the composer to
+ * say the same way the form says one.
+ */
+function imagesOfAttachments(files: PromptInputMessage['files']): { images: EnsoPromptImage[]; notImages: number } {
+  const images: EnsoPromptImage[] = []
+  let notImages = 0
+  for (const file of files) {
+    const inline = /^data:([^;,]+);base64,(.*)$/.exec(file.url)
+    const mimeType = inline?.[1]
+    const data = inline?.[2]
+    if (mimeType === undefined || data === undefined || !isEnsoImageMimeType(mimeType)) {
+      notImages += 1
+      continue
+    }
+    images.push({ mimeType, data })
+  }
+  return { images, notImages }
+}
+
 /** What the composer's empty box says: why it cannot send, or the invitation. */
 function composerPlaceholder({
   disconnected,
@@ -1334,6 +1388,8 @@ const chatComponents = {
       const chat = useChatContext()
       const stores = useThreadStores()
       const disconnected = useStore(stores.disconnected)
+      // The page's view (#361): a prompt sent from Context, Stats or Diff brings the chat back (#707).
+      const { open } = useContext(PaneViewContext)
       // Controlled, so the send button can disable on empty and a take-back can write it —
       // the ai-elements chatbot example's PromptInput does the same. A fork opens holding the
       // forked prompt's words (#433), as pi's `/fork` fills its editor.
@@ -1424,11 +1480,6 @@ const chatComponents = {
           if (restored.length > 0) takeBack(restored)
         })
       }
-      // The Start-a-session dialog (#391): open on a minted thread; Start configures the session
-      // and sends the first prompt through THIS send, so the bubble and the run are the composer's.
-      const startSessionOpen = useStore(stores.startSession)
-      const threadProject = useThreadProject(stores.projectId)
-      const permission = usePermissionMode()
       // The `/` palette's two outcomes (#338; the rule is in `command-palette.tsx`'s header).
       // ⚠ NEITHER TOUCHES WHAT THE USER HAS TYPED (PR #343 review). An extension command is a
       // prompt like any other — the same `send` the button uses, so it queues through pi mid-run
@@ -1527,21 +1578,7 @@ const chatComponents = {
             stores.notifications.push(describeAttachmentError(error), 'warning', 'run', ENSO_NOTICE_SOURCE)
           }
           onSubmit={({ text, files }: PromptInputMessage): void => {
-            // The form hands back `data:` URLs (blob → FileReader); the wire takes bytes + kind.
-            // The form's `accept` already filtered by `File.type`; this is the same set, as a
-            // guard rather than a cast, and a miss is said the same way the form says one.
-            const images: EnsoPromptImage[] = []
-            let notImages = 0
-            for (const file of files) {
-              const inline = /^data:([^;,]+);base64,(.*)$/.exec(file.url)
-              const mimeType = inline?.[1]
-              const data = inline?.[2]
-              if (mimeType === undefined || data === undefined || !isEnsoImageMimeType(mimeType)) {
-                notImages += 1
-                continue
-              }
-              images.push({ mimeType, data })
-            }
+            const { images, notImages } = imagesOfAttachments(files)
             if (notImages > 0) {
               stores.notifications.push(
                 describeAttachmentError({ code: 'accept', message: '', count: notImages }),
@@ -1555,7 +1592,12 @@ const chatComponents = {
             // — and only if something went: a submit `send` refuses keeps its words.
             const commandName = images.length === 0 ? typedCommandName(text) : undefined
             if (commandName !== undefined) void submitTypedCommand(commandName, text)
-            else if (send(text, images)) setDraft('')
+            else if (send(text, images)) {
+              setDraft('')
+              // The run, its questions and its reply are in the chat: a prompt sent from another view
+              // (#707, the composer is under every view) shows it, so no approval waits out of sight.
+              open('chat')
+            }
           }}
         >
           {/* The composer chrome (#90): the knobs at the point of use, deepseek's shape — the
@@ -1577,16 +1619,8 @@ const chatComponents = {
             onClose={(): void => setContextOpen(false)}
             returnFocus={(): void => textareaRef.current?.focus()}
           />
-          <StartSessionDialog
-            threadId={stores.threadId}
-            fetch={stores.fetch}
-            project={threadProject}
-            open={startSessionOpen}
-            onClose={(): void => stores.startSession.set(false)}
+          <ComposerStartSession
             keepPrompt={(text: string): void => setDraft((current) => draftWithKeptPrompt(current, text))}
-            mode={permission.mode}
-            modes={permission.available}
-            configure={stores.connection.configure}
             send={(text: string): boolean => send(text, [])}
           />
           <ComposerBody
@@ -1663,70 +1697,76 @@ const chatComponents = {
       return (
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="flex min-h-0 flex-1">
-            {/* The views share one box: the transcript keeps its size under every view, and the
+            {/* The main column: the views' box, then the composer under every view (#707). */}
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+              {/* The views share one box: the transcript keeps its size under every view, and the
 						    others are drawn over it. */}
-            <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-              {/* The transcript stays mounted AND LAID OUT under every view — `invisible` and
+              <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+                {/* The transcript stays mounted AND LAID OUT under every view — `invisible` and
 							    `inert`, never `hidden` (#362 review): a `display: none` box comes back resized,
 							    and the stick-to-bottom scroller re-pins a reader who had scrolled up. Kept at
 							    its size, its scroll, its lock and its bubbles (the stats rows' targets)
 							    survive a trip to Context or Stats. */}
-              <div
-                role="tabpanel"
-                {...panelIds('chat')}
-                inert={!onChat}
-                className={
-                  onChat ? 'flex min-h-0 min-w-0 flex-1 flex-col' : 'invisible flex min-h-0 min-w-0 flex-1 flex-col'
-                }
-              >
-                <Conversation>
-                  <TranscriptRevealBridge into={scroller} />
-                  <ConversationContent className="w-full gap-4 px-6 py-4 ledger:gap-0">
-                    <TranscriptContent
-                      Messages={Messages}
-                      empty={chat.messages.length === 0}
-                      selection={selection}
-                      placedLines={placedLines}
-                    />
-                    {/* The thread's incidents (#466): below the run that opened them, above any
+                <div
+                  role="tabpanel"
+                  {...panelIds('chat')}
+                  inert={!onChat}
+                  className={
+                    onChat ? 'flex min-h-0 min-w-0 flex-1 flex-col' : 'invisible flex min-h-0 min-w-0 flex-1 flex-col'
+                  }
+                >
+                  <Conversation>
+                    <TranscriptRevealBridge into={scroller} />
+                    <ConversationContent className="w-full gap-4 px-6 py-4 ledger:gap-0">
+                      <TranscriptContent
+                        Messages={Messages}
+                        empty={chat.messages.length === 0}
+                        selection={selection}
+                        placedLines={placedLines}
+                      />
+                      {/* The thread's incidents (#466): below the run that opened them, above any
 										    question — a halted thread waits on this card. */}
-                    <ThreadIncidents />
-                    {/* ⚠ Mounted before anything opens one, deliberately. This is where #4's
+                      <ThreadIncidents />
+                      {/* ⚠ Mounted before anything opens one, deliberately. This is where #4's
 										    `ask` verdict reaches the browser, and an unmounted slot is precisely
 										    why an approval would silently never appear. */}
-                    <PendingDialog />
-                    <RunProblem />
-                  </ConversationContent>
-                  <ConversationScrollButton />
-                </Conversation>
-                {/* pi's queue, not TanStack's `Queue` slot (#75): a prompt sent during a run goes to
-								    pi and is listed here for every follower; TanStack's own queue is bypassed. */}
-                <PendingQueue />
-                <Input />
+                      <PendingDialog />
+                      <RunProblem />
+                    </ConversationContent>
+                    <ConversationScrollButton />
+                  </Conversation>
+                </div>
+                {/* The thread's context (#361): what each request was made of, over the transcript. */}
+                {shown === 'context' ? (
+                  <div role="tabpanel" {...panelIds('context')} className="absolute inset-0 overflow-y-auto">
+                    <div className="mx-auto w-full max-w-context-view">
+                      <ThreadContextDrawer />
+                    </div>
+                  </div>
+                ) : null}
+                {/* The thread's stats (#45 phase 2), over the transcript (#361). */}
+                {shown === 'stats' ? (
+                  <div role="tabpanel" {...panelIds('stats')} className="absolute inset-0 overflow-y-auto">
+                    <div className="mx-auto w-full max-w-stats-view">
+                      <ThreadStatsDrawer onNavigate={revealInTranscript} />
+                      <ThreadEvalDrawer />
+                    </div>
+                  </div>
+                ) : null}
+                {/* What changed since the last push (#452): the tree and the chosen file's diff, over the transcript. */}
+                {shown === 'changes' ? (
+                  <div role="tabpanel" {...panelIds('changes')} className="absolute inset-0">
+                    <ThreadChanges moment={`${settledToolResults(chat.messages)}:${chat.sessionGenerating}`} />
+                  </div>
+                ) : null}
               </div>
-              {/* The thread's context (#361): what each request was made of, over the transcript. */}
-              {shown === 'context' ? (
-                <div role="tabpanel" {...panelIds('context')} className="absolute inset-0 overflow-y-auto">
-                  <div className="mx-auto w-full max-w-context-view">
-                    <ThreadContextDrawer />
-                  </div>
-                </div>
-              ) : null}
-              {/* The thread's stats (#45 phase 2), over the transcript (#361). */}
-              {shown === 'stats' ? (
-                <div role="tabpanel" {...panelIds('stats')} className="absolute inset-0 overflow-y-auto">
-                  <div className="mx-auto w-full max-w-stats-view">
-                    <ThreadStatsDrawer onNavigate={revealInTranscript} />
-                    <ThreadEvalDrawer />
-                  </div>
-                </div>
-              ) : null}
-              {/* What changed since the last push (#452): the tree and the chosen file's diff, over the transcript. */}
-              {shown === 'changes' ? (
-                <div role="tabpanel" {...panelIds('changes')} className="absolute inset-0">
-                  <ThreadChanges moment={`${settledToolResults(chat.messages)}:${chat.sessionGenerating}`} />
-                </div>
-              ) : null}
+              {/* ⚠ UNDER EVERY VIEW, NOT IN THE CHAT'S PANEL (#707): drawn inside it, the composer went
+							    invisible and inert with the transcript whenever Context, Stats or Diff was in front,
+							    and text typed there went nowhere — a person checking a round's changes lost the next
+							    prompt, and an arena agent sat out a minute. pi's queue (#75, not TanStack's `Queue`
+							    slot: a prompt sent during a run is listed here for every follower) goes with it. */}
+              <PendingQueue />
+              <Input />
             </div>
             {/* The session debug pane (#86): what the browser believes beside what pi's
 						    session holds, for THIS thread. Scrolls on its own so a long branch never
