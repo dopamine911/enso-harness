@@ -266,6 +266,39 @@ test('⚠ a new thread asks for no git state until its session is live, then rea
   await pane.unmount()
 })
 
+// ⚠ #682: a first prompt sent from the composer is in the transcript at once, but the server builds
+// the session only as it takes the prompt (#484) — about a second later in the arena. The bar read
+// the transcript's length as "the thread can answer" and asked `/git` and `/tree` in that second:
+// four 404s and four console errors per new thread. It asks once the server says the session is live.
+test("⚠ a new thread's first prompt asks for no git state or tree until the session is live (#682)", async () => {
+  const pane = await mountPane({
+    server: {
+      git: () => ({ kind: 'not-a-repository' }),
+      pages: () => ({ path: '/scripted/launch', pages: [], truncated: false }),
+    },
+  })
+  // A new thread in a tree of its own (#551), as the arena's are: the bar shows the "own tree" control.
+  await pane.settle({ ...SNAPSHOT_IDLE, tree: true })
+  // The prompt is posted; the server has not said the session is live yet, as while it builds one.
+  await flush(async () => {
+    typeInto(pane.composer(), 'build the snake game')
+    pressEnter(pane.composer())
+    await tick()
+  })
+  await eventually(() => expect(pane.server.prompts).toHaveLength(1))
+  await flush(tick)
+  expect(pane.server.gitReads).toEqual([])
+  expect(pane.server.threadTreeReads).toEqual([])
+
+  // The session is built: the snapshot says its model, and both are read from that moment.
+  await pane.settle({ ...SNAPSHOT_LIVE, tree: true })
+  await eventually(() => {
+    expect(pane.server.gitReads.length).toBeGreaterThan(0)
+    expect(pane.server.threadTreeReads.length).toBeGreaterThan(0)
+  })
+  await pane.unmount()
+})
+
 // ⚠ #619: a thread's work is in its own tree (#551), and the arena runs found no way to reach it —
 // nor to play the game it built. The bar's "own tree" opens what the thread built: the tree's path,
 // and each of its pages as a link to the server's sandboxed preview, in a new tab, holding no handle
