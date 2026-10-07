@@ -1,6 +1,7 @@
 import { type Static, Type } from 'typebox'
 import { Compile } from 'typebox/compile'
 import { ENSO_GUARD_RULES, type EnsoGuardRule, readEnsoGuardDenial } from './guard.ts'
+import { readEnsoThreadTree } from './thread-tree-record.ts'
 import type { EnsoTranscriptEntry } from './transcript.ts'
 
 /**
@@ -342,6 +343,11 @@ export type EnsoRiskEvent =
   | ({ readonly kind: 'permission-denial' } & EnsoPermissionDenial)
   /** A human resolved the session's incident (#466): the risk starts over — it resets only here. */
   | { readonly kind: 'incident-resolved' }
+  /**
+   * The thread's own working tree, as its branch records it (`enso-thread-tree`, #551): a call
+   * naming it is the thread's own work, not a reach into the harness's internals (#726).
+   */
+  | { readonly kind: 'own-tree'; readonly path: string }
 
 /**
  * A call as the fold reads it, from its tool name and its input — the one mapping both the live
@@ -386,6 +392,8 @@ export interface EnsoRiskState {
   readonly level: EnsoRiskLevel
   readonly signals: readonly EnsoSecuritySignal[]
   readonly recent: readonly RecentCall[]
+  /** The thread's own tree, from the last `own-tree` event; a resolution does not forget it. */
+  readonly ownTree?: string | undefined
 }
 
 /** @group Session risk */
@@ -426,9 +434,29 @@ const ONE_LINER =
 /**
  * The guard's policy and the harness's own internals, by name: the guards' source, the policy
  * file, any extension's `config.json` under the agent dir (the permission engine's is one), and
- * `.enso`.
+ * `.enso` — tested on a target with the thread's own tree taken out (`outsideOwnTree`).
  */
 const INTERNALS = /guards?\/|guard\.ts|permissions\.json|extensions\/[\w.-]+\/config\.json|(?:^|[\s/'"])\.enso(?:\/|\b)/
+
+/** Where a path segment ends in a command: the end, a separator, a quote or a shell operator. */
+const SEGMENT_END = `(?:$|[\\s/'"\`;&|)])`
+
+/**
+ * A call's target with every mention of the thread's own tree (#726) written as `.`, the way the
+ * same command reads in a checkout. The tree is minted under `ENSO_HOME` (`~/.enso/projects/<id>/
+ * trees/<thread>`, #551), so without this every `cd <tree>` or absolute path into it after a
+ * refusal matched `.enso` — the risk fold's form of what #615 fixed for the guard's path checks.
+ *
+ * ⚠ Only that ONE tree, and only as a whole path segment: `<tree>-other`, another thread's tree, the
+ * rest of `ENSO_HOME`, and `<tree>/..` stay as written, and so does what follows the tree — a
+ * `<tree>/.enso/config.json` is still the project's own `.enso`.
+ */
+function outsideOwnTree(target: string, ownTree: string | undefined): string {
+  const root = ownTree?.replace(/\/+$/, '')
+  if (root === undefined || root === '') return target
+  const mention = new RegExp(`${escapeRegExp(root)}(?!/\\.\\.${SEGMENT_END})(?=${SEGMENT_END})`, 'g')
+  return target.replace(mention, '.')
+}
 
 /**
  * A refusal of a shell call (`bash`, `powershell`) — by the guard, whatever rule, or by the
@@ -458,7 +486,11 @@ function withSignal(signals: EnsoSecuritySignal[], signal: EnsoSecuritySignal): 
 }
 
 /** The signals a call raises against the refusals before it in the window. */
-function callSignals(call: RecentCall, earlier: readonly RecentCall[]): EnsoSecuritySignal[] {
+function callSignals(
+  call: RecentCall,
+  earlier: readonly RecentCall[],
+  ownTree: string | undefined,
+): EnsoSecuritySignal[] {
   const found: EnsoSecuritySignal[] = []
   const denied = earlier.filter((recent) => recent.denial !== undefined)
   if (denied.length === 0) return found
@@ -486,7 +518,7 @@ function callSignals(call: RecentCall, earlier: readonly RecentCall[]): EnsoSecu
       after: [substituted.deniedId, substituted.writeId],
     })
   }
-  if (INTERNALS.test(target)) {
+  if (INTERNALS.test(outsideOwnTree(target, ownTree))) {
     withSignal(found, {
       signal: 'policy-introspection',
       toolCallId: call.toolCallId,
@@ -608,8 +640,10 @@ export function sessionRiskStep(
   thresholds: EnsoRiskThresholds = DEFAULT_RISK_THRESHOLDS,
 ): { readonly state: EnsoRiskState; readonly raised: readonly EnsoSecuritySignal[] } {
   // A resolution is a clean slate (#466): the level, the signals AND the window, so a refusal from
-  // before it cannot pair with a call after it.
-  if (event.kind === 'incident-resolved') return { state: INITIAL_SESSION_RISK, raised: [] }
+  // before it cannot pair with a call after it. The thread's tree stays: it is where, not what (#726).
+  if (event.kind === 'incident-resolved')
+    return { state: { ...INITIAL_SESSION_RISK, ownTree: state.ownTree }, raised: [] }
+  if (event.kind === 'own-tree') return { state: { ...state, ownTree: event.path }, raised: [] }
   if (event.kind === 'call') {
     const call: RecentCall = {
       toolCallId: event.toolCallId,
@@ -617,7 +651,7 @@ export function sessionRiskStep(
       ...(event.command === undefined ? {} : { command: event.command }),
       ...(event.path === undefined ? {} : { path: event.path }),
     }
-    const raised = callSignals(call, state.recent)
+    const raised = callSignals(call, state.recent, state.ownTree)
     return settle(state, [...state.recent, call].slice(-thresholds.windowCalls), raised, thresholds)
   }
   // A refusal belongs to its call; one without an id (a record written before #464) to the last.
@@ -640,7 +674,7 @@ function settle(
   thresholds: EnsoRiskThresholds,
 ): { readonly state: EnsoRiskState; readonly raised: readonly EnsoSecuritySignal[] } {
   const signals = raised.length === 0 ? state.signals : [...state.signals, ...raised]
-  return { state: { level: riskLevelOf(signals, thresholds), signals, recent }, raised }
+  return { state: { ...state, level: riskLevelOf(signals, thresholds), signals, recent }, raised }
 }
 
 /**
@@ -807,6 +841,20 @@ function legacyOperatorDenialOf(
 }
 
 /**
+ * A custom entry that names no call, as an event: a resolution (#466), or the thread's tree (#726)
+ * — the record the host appends before the session on it starts, so a resumed guard folds it as a
+ * replay does. Undefined for every other entry.
+ */
+function markerEventOf(
+  customType: string,
+  data: unknown,
+): Extract<EnsoRiskEvent, { kind: 'incident-resolved' | 'own-tree' }> | undefined {
+  if (customType === ENSO_INCIDENT_RESOLVED_ENTRY) return { kind: 'incident-resolved' }
+  const tree = readEnsoThreadTree(customType, data)
+  return tree === undefined ? undefined : { kind: 'own-tree', path: tree.path }
+}
+
+/**
  * The fold's events, in the order the live guard met them.
  *
  * ⚠ THE ORDER IS REBUILT, NOT READ. An assistant message stores every call of its batch before
@@ -830,9 +878,10 @@ function riskEventsOfSteps(steps: readonly BranchStep[]): EnsoRiskEvent[] {
       releaseThrough(undefined)
       pending = step.calls
     } else if (step.kind === 'custom') {
-      if (step.customType === ENSO_INCIDENT_RESOLVED_ENTRY) {
+      const marker = markerEventOf(step.customType, step.data)
+      if (marker !== undefined) {
         releaseThrough(undefined)
-        events.push({ kind: 'incident-resolved' })
+        events.push(marker)
         continue
       }
       const denial = denialEventOf(step.customType, step.data)

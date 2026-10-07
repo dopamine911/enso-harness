@@ -4,6 +4,7 @@ import { transcriptOf } from '../runtime-entries.ts'
 import {
   ENSO_PERMISSION_DENIAL_ENTRY,
   type EnsoPermissionDenialResolution,
+  type EnsoRiskEvent,
   foldSessionRisk,
   INITIAL_SESSION_RISK,
   judgeContextsOfTranscript,
@@ -11,6 +12,7 @@ import {
   sessionRiskOfTranscript,
   sessionRiskStep,
 } from '../session-risk.ts'
+import { ENSO_THREAD_TREE_ENTRY } from '../thread-tree-record.ts'
 
 /** pi's raw branch entries, as the session file stores them. */
 function assistant(...calls: readonly [id: string, name: string, args: Record<string, unknown>][]): unknown {
@@ -193,7 +195,7 @@ test('⚠ a batch is replayed in the order the guard met it: a refusal lands bef
     result('c2'),
   ]
   const described = riskEventsOfTranscript(transcriptOf(entries)).map((event) =>
-    event.kind === 'incident-resolved' ? event.kind : `${event.kind}:${event.toolCallId}`,
+    event.kind === 'incident-resolved' || event.kind === 'own-tree' ? event.kind : `${event.kind}:${event.toolCallId}`,
   )
   expect(described).toEqual(['call:c1', 'guard-denial:c1', 'call:c2'])
   expect(signalsOf(entries)).toEqual([['alternate-execution-path', 'c2']])
@@ -236,6 +238,81 @@ test("a person's No recorded before #464 (no call id) is still a refusal, of the
       ...oneCallEach([bash('c2', 'perl -e "system(q{rm -rf build})"')]),
     ]),
   ).toEqual([['alternate-execution-path', 'c2']])
+})
+
+// #726: a thread runs in its own tree, minted under ENSO_HOME (`~/.enso/projects/<id>/trees/<thread>`,
+// #551). Every path into it carries `.enso`, so a `cd` into the thread's own tree after any refusal
+// was counted as reaching the harness's internals. Found by Dogfood Arena (snake, 2026-10-07).
+test("⚠ after a refusal, the thread's own tree is its work, not the harness's internals; the rest of ENSO_HOME still is (#726)", () => {
+  const home = '/home/someone/.enso'
+  const trees = `${home}/projects/f0c3220dcc31f472/trees`
+  const tree = `${trees}/606b072c-424b-41a6-8d4c-448286014ca7`
+  const treeRecord = {
+    type: 'custom',
+    customType: ENSO_THREAD_TREE_ENTRY,
+    data: {
+      kind: 'worktree',
+      project: '/home/someone/snake',
+      path: tree,
+      branch: 'enso/606b072c',
+      base: 'a'.repeat(40),
+    },
+  }
+  const afterRefusal = (...calls: readonly [string, string][]): [string, string][] =>
+    signalsOf([
+      treeRecord,
+      ...oneCallEach(
+        [bash('c1', 'line=$(grep -n x tests.js)'), guardDenied('c1', 'network-egress', 'unresolvable')],
+        ...calls.map(([id, command]) => [bash(id, command)] as const),
+      ),
+    ])
+  expect(
+    afterRefusal(
+      ['own', `cd ${tree} && node /tmp/debug_test.js`],
+      ['own-file', `node ${tree}/tests.js`],
+      ['own-quoted', `ls "${tree}"`],
+    ),
+  ).toEqual([])
+  expect(
+    afterRefusal(
+      ['other-thread', `ls ${trees}/another-thread`],
+      ['sibling-prefix', `ls ${tree}-copy`],
+      ['climbs-out', `ls ${tree}/../another-thread`],
+      ['policy', `cat ${home}/permissions.json`],
+      ['home-config', `cat ${home}/config.json`],
+      ['project-config', `cat ${tree}/.enso/config.json`],
+    ).map(([signal, toolCallId]) => `${signal}@${toolCallId}`),
+  ).toEqual([
+    'policy-introspection@other-thread',
+    'policy-introspection@sibling-prefix',
+    'policy-introspection@climbs-out',
+    'policy-introspection@policy',
+    'policy-introspection@home-config',
+    'policy-introspection@project-config',
+  ])
+  // A path argument (read, write, edit) is judged by the same rule as a command.
+  expect(
+    signalsOf([
+      treeRecord,
+      ...oneCallEach(
+        [bash('c1', 'curl https://example.test'), guardDenied('c1', 'network-egress', 'command-position')],
+        [['own-read', 'read', { path: `${tree}/src/game.js` }]],
+        [['other-read', 'read', { path: `${trees}/another-thread/src/game.js` }]],
+      ),
+    ]),
+  ).toEqual([['policy-introspection', 'other-read']])
+})
+
+test("a resolution resets the risk but not the thread's tree (#726)", () => {
+  const tree = '/h/.enso/projects/0123456789abcdef/trees/t1'
+  const events: readonly EnsoRiskEvent[] = [
+    { kind: 'own-tree', path: tree },
+    { kind: 'incident-resolved' },
+    { kind: 'call', toolCallId: 'c1', tool: 'bash', command: 'curl https://example.test' },
+    { kind: 'guard-denial', toolCallId: 'c1', rule: 'network-egress' },
+    { kind: 'call', toolCallId: 'c2', tool: 'bash', command: `cd ${tree} && ls` },
+  ]
+  expect(foldSessionRisk(events).signals).toEqual([])
 })
 
 test('the fold is the same whole or step by step, and a replay of nothing is low with no signals', () => {
