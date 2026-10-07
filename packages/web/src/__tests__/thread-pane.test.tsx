@@ -2094,6 +2094,32 @@ test('⚠ Stats keeps reading a thread that ran after its session idles out and 
   await pane.unmount()
 })
 
+// ⚠ #707, from an arena run: the composer was drawn inside the chat's panel, which goes invisible and
+// inert under every other view, so a prompt typed on Diff (checking a round's changes) went nowhere,
+// silently. It is under every view now: there, it sends, and the page is asked for the chat, where
+// the run, its questions and its reply are — for a typed `/command` pi runs as a prompt too (PR #716
+// review: that path skipped the switch, and its run would have started behind the view).
+test('⚠ on Context, Stats and Diff the composer is there: a prompt or a typed /command sent there asks for Chat (#707)', async () => {
+  for (const view of ['context', 'stats', 'changes'] as const) {
+    for (const typed of [`asked from ${view}`, '/not-a-host-command']) {
+      const pane = await mountPane({ view, server: { stats: TWO_CALL_STATS } })
+      await pane.settle(SNAPSHOT_LIVE)
+      const composer = pane.composer()
+      // Not inside anything a view hides: a person and an accessibility read both reach it.
+      expect(composer.closest('[inert], .invisible')).toBeNull()
+      await flush(async () => {
+        typeInto(composer, typed)
+        pressEnter(composer)
+        await tick()
+      })
+      await eventually(() => expect(pane.server.prompts.map((prompt) => prompt.message)).toEqual([typed]))
+      expect(pane.requestedViews).toEqual(['chat'])
+      await eventually(() => expect(pane.composer().value).toBe(''))
+      await pane.unmount()
+    }
+  }
+})
+
 // #359, #361: a stats row is a way into THIS pane's transcript — through the bridge inside
 // `<Conversation>`, the layout's reveal, and the step row's `data-tool-call-id`. The transcript
 // is under the Stats view, still mounted: the row finds its call there, asks the page for the
@@ -2122,11 +2148,13 @@ test('⚠ a costliest-calls row opens Chat at its call; a call not drawn there i
       expect(found).toHaveLength(2)
       return found
     })
+    // The prompt that made it run was sent from Stats, which asks for Chat (#707); the rows' own asks follow.
+    expect(pane.requestedViews).toEqual(['chat'])
     await flush(async () => rows[1]?.click())
     await eventually(() => expect(pane.container.textContent).toContain('that call is not in the transcript on screen'))
-    expect(pane.requestedViews).toEqual([])
-    await flush(async () => rows[0]?.click())
     expect(pane.requestedViews).toEqual(['chat'])
+    await flush(async () => rows[0]?.click())
+    expect(pane.requestedViews).toEqual(['chat', 'chat'])
     await eventually(() =>
       expect(scrolled).toEqual([pane.container.querySelector('[data-tool-call-id="c1"]') as Element]),
     )
