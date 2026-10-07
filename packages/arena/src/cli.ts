@@ -66,7 +66,7 @@
 
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { gitChildEnvironment } from '@enso/core/git'
 import { redactJudgeText } from '@enso/core/judge'
 import { ensoHome, findRepoRoot } from '@enso/core/paths'
@@ -74,6 +74,7 @@ import { ARENA_THINKING_LEVELS, arenaAgentDriver, resolveArenaModel } from './ag
 import { compareByModel, compareRunDirectories } from './compare.ts'
 import { runContainerCommand } from './container.ts'
 import { type ArenaEvidence, arenaEvidenceRowOf, foldArenaManifest } from './manifest.ts'
+import { DEFAULT_ARENA_CORPUS, planArenaPublication, publishArenaRun, runArenaCommand } from './publish.ts'
 import {
   type ArenaDriver,
   collectAfterRecorderDied,
@@ -134,6 +135,7 @@ const VALUED_FLAGS = [
   'max-restarts',
   'max-cost-usd',
   'perception',
+  'corpus',
 ] as const
 type ValuedFlag = (typeof VALUED_FLAGS)[number]
 const VALUED_FLAG_ARGUMENTS = new Set<string>(VALUED_FLAGS.map((flagName) => `--${flagName}`))
@@ -515,6 +517,40 @@ function scoreRun(runDirectory: string): void {
   process.exitCode = scored.verdict === 'pass' ? 0 : 1
 }
 
+/**
+ * `publish` (#677): a reviewed run to the corpus — its documents and cited screenshots committed, one
+ * issue for the run, a comment on each product issue it maps to. Refused, with every reason, until
+ * the run is reviewed and clean; `--dry-run` shows what would go without touching GitHub.
+ */
+function publish(runDirectory: string): void {
+  const secrets = arenaSecretValues(runHomeOf(runDirectory, operatorHome, recordedRunHome(runDirectory)))
+  const plan = planArenaPublication(runDirectory, { productRepo: bugRepository(), secretValues: secrets })
+  if (plan.kind === 'refused') fail(`not published:\n${plan.reasons.map((reason) => `  - ${reason}`).join('\n')}`)
+  const corpus = flag('corpus') ?? DEFAULT_ARENA_CORPUS
+  const { publication } = plan
+  if (rest.includes('--dry-run')) {
+    process.stdout.write(
+      [
+        `would publish to ${corpus}: ${publication.title}`,
+        `labels: ${publication.labels.map((label) => label.name).join(', ')}`,
+        `files (${publication.files.length}): ${publication.files.join(', ')}`,
+        `would comment on: ${publication.backlinks.map((backlink) => backlink.issue).join(', ') || 'none'}`,
+        '',
+        publication.issueBody({ corpus, commit: '<commit>' }),
+        '',
+      ].join('\n'),
+    )
+    return
+  }
+  const checkout = join(dirname(outDirectory), 'arena-corpus', ...corpus.split('/'))
+  const outcome = publishArenaRun(runDirectory, publication, { corpus, checkout, run: runArenaCommand })
+  if (outcome.kind === 'refused') fail(`not published: ${outcome.reasons.join('; ')}`)
+  process.stdout.write(
+    `arena: published ${publication.runId} at ${outcome.commit.slice(0, 7)}: ${outcome.issue}\n` +
+      (outcome.backlinks.length === 0 ? '' : `arena: linked back from ${outcome.backlinks.join(', ')}\n`),
+  )
+}
+
 switch (command) {
   case 'container':
     process.exitCode = await runContainerCommand(rest, { repoRoot, defaultOut: outDirectory })
@@ -567,8 +603,11 @@ switch (command) {
     process.stdout.write(`${join(runDirectory, 'report.md')}\n`)
     break
   }
+  case 'publish':
+    publish(resolve(rest[0] ?? fail('publish takes a reviewed run directory')))
+    break
   default:
     fail(
-      'usage: bun run arena start --agent PROVIDER/MODEL | start --agents A,B | start --manual | brief | act <json> | manifest <run directory> | score <run directory> | compare <run directory> <run directory> | compare --by-model <run directory>… | report <run directory> [--run-tests] | container build|credential|start',
+      'usage: bun run arena start --agent PROVIDER/MODEL | start --agents A,B | start --manual | brief | act <json> | manifest <run directory> | score <run directory> | compare <run directory> <run directory> | compare --by-model <run directory>… | report <run directory> [--run-tests] | publish <run directory> [--corpus OWNER/REPO] [--dry-run] | container build|credential|start',
     )
 }

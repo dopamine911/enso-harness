@@ -295,6 +295,35 @@ screenshot it did not keep, or a thread it was not in marks the gap **unverified
 to resolve. A gap that cites nothing is unverified too, and a defect with no issue is flagged as not
 mapped. The judgement stays the reviewer's; the report checks only that the evidence exists.
 
+## Publishing a run (#677)
+
+`bun run arena publish <run dir>` puts a reviewed run in the corpus, the private
+[`dopamine911/enso-dogfood-corpus`](https://github.com/dopamine911/enso-dogfood-corpus) (`--corpus OWNER/REPO` names
+another). `--dry-run` prints what would go, the issue's body included, and touches nothing.
+
+- **Files:** `report.md`, `review.md` when there is one, `findings.json`, `score.md`, `manifest.json`, and the
+  screenshots they cite, committed under `runs/<run id>/`. The trace and the other screenshots stay with the run.
+- **One issue for the run:** its scenario, the agent's model and perception, Enso's model, the build and the verdict,
+  then each finding with its screenshots shown inline (the ones it cites, else the nearest to each second it cites),
+  pinned to the commit that holds them, and the product issue it maps to. Bare `#123`s in a finding's words are
+  written as the product repository's: in the corpus they would link to its own run issues.
+- **Labels:** `scenario:`, `model:`, `perception:`, `verdict:`, and `finding:` for each class of finding the run has.
+  `gh issue list -R dopamine911/enso-dogfood-corpus --label finding:undiscoverable` is every run with one.
+- **Backlinks:** each product issue a finding maps to gets a comment linking the run issue. Product defects stay in
+  this repository: the corpus is the evidence.
+
+It refuses, naming every reason at once, until the run can go:
+
+- the run is reviewed: `findings.json` is there and reads;
+- every finding's evidence resolves, and every `defect` names a product issue;
+- `report.md` is newer than `findings.json` (run `arena report` again after a review changes);
+- the secret scan finds nothing: a fresh scan, plus every hit an earlier scan recorded. A screenshot
+  cannot be scanned, so a secret on screen would be published: run with the run home's own credential.
+
+A run already in the corpus is refused with its issue. A publish cut short after its commit resumes from that commit.
+The corpus is cloned over HTTPS into `~/.local/share/enso/arena-corpus/`, signed in by gh's credential helper, as
+this checkout is.
+
 ## The UI-only boundary (#584)
 
 The agent runner (`src/agent.ts`) is a pi `Agent` over a bare model call, given the brief and **one
