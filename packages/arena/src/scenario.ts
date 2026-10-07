@@ -118,6 +118,8 @@ export interface ArenaBriefContext {
   readonly runDirectory?: string
   /** `owner/name` of the repository bugs are filed in, when it is known. */
   readonly repository?: string
+  /** How the run's agent perceived the page (#680): the review says which judgments that allows. */
+  readonly perception?: ArenaPerception
 }
 
 /** How the runner's agent acts: its one tool. */
@@ -245,6 +247,24 @@ ${arenaReviewBrief(context, 'self')}`
 }
 
 /**
+ * What the review may judge, given how the run's agent perceived the page (#680). A tree agent never
+ * saw the page, so a judgment of how it LOOKS (prominence, layout, what gets noticed) can't rest on
+ * its account; a visual agent's view is in the run, so its visual judgments can be checked against it.
+ */
+function perceptionNote(perception: ArenaPerception): string {
+  return perception === 'visual'
+    ? `This run's agent saw the page only as screenshots: the \`view\` after each of its actions, in
+\`screenshots/\`. It acted by mouse at x,y and the keyboard, and each pointer action's timeline line
+names what was under its point (\`under\`), which the agent itself never saw. Its judgments of how the
+page looks are evidence: check each against the view it saw. A click that hit the wrong thing is the
+agent's, unless what it saw misled it.`
+    : `This run's agent read the page as an accessibility tree and acted on controls by name: it never
+saw the page. Judge what it could: whether things work, whether controls are named and findable by
+name, the flow. Don't judge how the page looks (layout, prominence, what a person would notice) from
+its account. Where a finding depends on that, say so; a visual run (\`--perception visual\`) can answer.`
+}
+
+/**
  * The review and the bugs (#556): the run's experience reviewed against its recorded evidence,
  * improvements recommended, the Enso defects filed after searching the existing issues. Part of
  * the `command` brief (`self`: the agent that did the work reviews it); on its own, the prompt for
@@ -282,9 +302,12 @@ The run's evidence is in that directory:
   notes, the errors the browser saw, and which of Enso's records were collected or are missing;
 - \`timeline.jsonl\`: one line per thing that happened, each with \`elapsedMs\` and the thread id;
 - \`screenshots/\`: one every 30 seconds, plus one at each error, dialog, navigation, failed
-  action and Enso exit;
+  action and Enso exit — and in a visual run, the \`view\` the agent was shown after each action;
 - \`enso/\`: Enso's own output and its records for each thread;
-- \`project/\`: what was built.
+- \`.enso/projects/<project id>/trees/<thread id>/\`: what each thread built (\`project/\` usually
+  stays empty: each thread works in its own tree).
+
+${perceptionNote(context.perception ?? 'tree')}
 
 ${memory}: check each point against these files before you write it down, and cite what you
 checked (an \`elapsedMs\`, a screenshot path, a thread id). Write \`${run}/review.md\` with these

@@ -851,6 +851,21 @@ test('the runner gets the assignment alone, and its review is a prompt of its ow
   expect(review).not.toContain('Phase 3')
 })
 
+// ⚠ #680: a tree agent never saw the page, so a review must not take its account as a judgment of how
+// the page looks; a visual agent's view is in the run, and its judgments are checked against it.
+test('⚠ the review says what the run’s perception allows it to judge, and where the work really is', () => {
+  const tree = arenaReviewBrief({ runDirectory: '/runs/r', perception: 'tree' }, 'other')
+  const visual = arenaReviewBrief({ runDirectory: '/runs/r', perception: 'visual' }, 'other')
+  expect(tree).toContain('it never\nsaw the page')
+  expect(tree).toContain("Don't judge how the page looks")
+  expect(visual).toContain('saw the page only as screenshots')
+  expect(visual).toContain('(`under`)')
+  // A run from before perception was recorded was a tree run.
+  expect(arenaReviewBrief({ runDirectory: '/runs/r' }, 'other')).toContain('it never\nsaw the page')
+  // The outcome is each thread's tree, not `project/` (#681).
+  expect(tree).toContain('.enso/projects/<project id>/trees/<thread id>/')
+})
+
 test('without a run or a repository the review asks for them instead of guessing', () => {
   const review = arenaReviewBrief({}, 'other')
   expect(review).toContain('`<run directory>/review.md`')

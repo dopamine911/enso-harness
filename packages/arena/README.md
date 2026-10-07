@@ -42,6 +42,9 @@ and acts on the page:
     and name (`button "Start session"`). That's for the review only; the agent never sees it.
   - A native dialog never shows in a page capture, so every visual answer says when one is open.
   - It needs a model that takes images. Each mode refuses the other's moves, so the two stay comparable.
+  - **Its cost, as measured so far:** one view per action, which in GPT-6.1 Sol runs was 59–67 views
+    in 10–15 minutes (4.5–6.8 MB of PNG, each one an image in the model's context). The money isn't
+    measured yet: those runs were on a subscription, where Stats shows $0.0000 (#692).
 
 Run each scenario in both modes and put the two side by side with `arena compare`, which shows each
 run's perception and agent: they find different things.

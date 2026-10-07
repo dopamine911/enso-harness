@@ -191,13 +191,24 @@ function bugRepository(): string | undefined {
   return origin.status === 0 ? githubRepositoryOf(origin.stdout) : undefined
 }
 
-/** What a brief names for this invocation: the `act` command for its `--out`, the run, the repository. */
+/** How a run's agent perceived the page (#680): its own `run-start` record when it has one, else `--perception`. */
+function perceptionOf(runDirectory?: string): ArenaPerception {
+  const timelinePath = runDirectory === undefined ? undefined : join(runDirectory, 'timeline.jsonl')
+  if (timelinePath !== undefined && existsSync(timelinePath)) {
+    const start = readTimeline(timelinePath).find((event) => event.kind === 'run-start')
+    if (start?.kind === 'run-start' && start.perception !== undefined) return start.perception
+  }
+  return perceptionNamed()
+}
+
+/** What a brief names for this invocation: the `act` command for its `--out`, the run, the repository, the perception. */
 function briefContext(runDirectory?: string): ArenaBriefContext {
   const repository = bugRepository()
   return {
     act: arenaActCommand(flag('out') === undefined ? undefined : outDirectory),
     ...(runDirectory === undefined ? {} : { runDirectory }),
     ...(repository === undefined ? {} : { repository }),
+    perception: perceptionOf(runDirectory),
   }
 }
 
