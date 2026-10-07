@@ -2250,6 +2250,8 @@ interface ResumeIntent {
   epoch: number
   prefill?: string
   fromUrl?: boolean
+  /** Said on the thread once it is adopted — a delete's, when the page went to this thread (#663). */
+  notice?: string
 }
 
 /** What a resume's outcome reaches back into: the navigation count, the shown pane, the move itself, and the rail's error. */
@@ -2276,7 +2278,9 @@ function useResumeRequests({
         (history, intent) => {
           if (intent.epoch !== epoch.current) return // a navigation happened since — superseded
           setResumeError(undefined)
-          navigate(adoptPageThread(history, intent.prefill).threadId, intent.how)
+          const adopted = adoptPageThread(history, intent.prefill)
+          if (intent.notice !== undefined) adopted.notifications.push(intent.notice, 'info', 'run', ENSO_NOTICE_SOURCE)
+          navigate(adopted.threadId, intent.how)
         },
         (message, intent) => {
           if (intent.epoch !== epoch.current) return
@@ -2445,17 +2449,21 @@ export function ChatScreen(): React.ReactNode {
       // Dropped before a fresh one is minted, so the deleted thread is not what pushes another out of the budget.
       dropThread(threadId)
       void storedThreads.refresh()
-      // A stored thread is resumed, its history read first: its notice would have no pane to go to yet.
+      const said = `thread ${threadId} deleted`
+      // A stored thread is resumed, its history read first: the notice rides with the resume and is
+      // said on the thread once it is adopted (#721 review). Nothing is on screen meanwhile, so a
+      // resume that fails leaves a fresh thread, as one with no pane behind it does.
       if (next !== undefined && !next.onPage) {
-        resumeFrom(next.threadId, 'replace')
+        activePane.current = undefined
+        resume(next.threadId, { how: 'replace', epoch: epoch.current, notice: said })
         return
       }
       const shown = wasShown ? (next?.threadId ?? mintPageThread(projectId).threadId) : activePane.current
       if (shown === undefined) return
       if (wasShown) navigate(shown, 'replace')
-      getThreadStores(shown).notifications.push(`thread ${threadId} deleted`, 'info', 'run', ENSO_NOTICE_SOURCE)
+      getThreadStores(shown).notifications.push(said, 'info', 'run', ENSO_NOTICE_SOURCE)
     },
-    [navigate, resumeFrom, projects.rows, threads, stored.rows],
+    [navigate, resume, projects.rows, threads, stored.rows],
   )
   // Boot: the URL named a thread — adopt it. Once per page; the coordinator drops a stale answer.
   useEffect(() => {
