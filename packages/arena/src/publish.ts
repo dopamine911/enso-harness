@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
+import { gitChildEnvironment } from '@enso/core/git'
 import type { ArenaCheckedGap, ArenaGapClass } from './findings.ts'
 import { momentOf, readRunFindings } from './report.ts'
 import { readArenaScoreInput, scoreArenaRun } from './score.ts'
@@ -99,14 +100,21 @@ function publishedFiles(runDirectory: string, shotsByFinding: readonly (readonly
 function refusalsOf(
   runDirectory: string,
   gaps: readonly ArenaCheckedGap[],
-  productRepo: string | undefined,
-  secretValues: readonly string[],
+  {
+    productRepo,
+    secretValues,
+    manifest,
+  }: {
+    readonly productRepo: string | undefined
+    readonly secretValues: readonly string[]
+    /** The manifest already read, whose earlier scan's hits stand (PR #723 review: not read twice). */
+    readonly manifest: unknown
+  },
 ): string[] {
   const missing = RUN_DOCUMENTS.filter((document) => !existsSync(join(runDirectory, document)))
   const reportStale =
     !missing.includes('report.md') &&
     statSync(join(runDirectory, 'report.md')).mtimeMs < statSync(join(runDirectory, 'findings.json')).mtimeMs
-  const manifest: unknown = JSON.parse(readFileSync(join(runDirectory, 'manifest.json'), 'utf8'))
   const scan = withEarlierHits(scanRunForSecrets(runDirectory, secretValues), manifest, runDirectory)
   return [
     ...missing.map((document) => `no ${document} in the run (\`bun run arena report\` and \`arena score\` write them)`),
@@ -241,7 +249,11 @@ export function planArenaPublication(
     return { kind: 'refused', reasons: ['the run is not reviewed: no findings.json (`bun run arena brief --review`)'] }
   }
   if (findings.status === 'invalid') return { kind: 'refused', reasons: [`findings.json: ${findings.reason}`] }
-  const refusals = refusalsOf(runDirectory, findings.gaps, options.productRepo, options.secretValues)
+  const refusals = refusalsOf(runDirectory, findings.gaps, {
+    productRepo: options.productRepo,
+    secretValues: options.secretValues,
+    manifest: input.manifest,
+  })
   if (refusals.length > 0) return { kind: 'refused', reasons: refusals }
 
   const score = scoreArenaRun(input)
@@ -311,6 +323,9 @@ export const runArenaCommand: ArenaCommand = (command, args, options = {}) => {
   const ran = spawnSync(command, [...args], {
     ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
     ...(options.input === undefined ? {} : { input: options.input }),
+    // ⚠ Without a hook's GIT_DIR and its kin: run under one, `git -C <corpus>` would act on the
+    // repository running the hook (#624's fixture did, staging this checkout as deleted).
+    env: gitChildEnvironment(),
     encoding: 'utf8',
   })
   if (ran.status !== 0) {
@@ -333,7 +348,22 @@ Every reviewed Dogfood Arena run, published by \`bun run arena publish <run dire
   each class of finding a run has (defect, undiscoverable, agent-mistake, not-needed).
 `
 
-/** The corpus checkout, cloned once and brought up to date; an empty corpus starts on `main`. */
+/** True when `ref` names a commit in the checkout. */
+function hasRef(run: ArenaCommand, checkout: string, ref: string): boolean {
+  try {
+    run('git', ['-C', checkout, 'rev-parse', '--verify', '--quiet', ref])
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * The corpus checkout, cloned once and fast-forwarded to the corpus's `main`. Fetched and merged,
+ * not pulled: a publish cut short before its first push leaves a `main` with no upstream, where
+ * `pull` fails (PR #723 review). A local commit not yet pushed is kept, and pushed by `commitRun`; a
+ * corpus that moved past it is refused by the fast-forward, never overwritten.
+ */
 function syncCheckout(run: ArenaCommand, corpus: string, checkout: string): void {
   if (!existsSync(join(checkout, '.git'))) {
     mkdirSync(dirname(checkout), { recursive: true })
@@ -342,16 +372,12 @@ function syncCheckout(run: ArenaCommand, corpus: string, checkout: string): void
     // account's, with no access to a private corpus (found publishing the first run).
     run('git', ['clone', '--quiet', `https://github.com/${corpus}.git`, checkout])
   }
-  const hasCommit = (() => {
-    try {
-      run('git', ['-C', checkout, 'rev-parse', '--verify', '--quiet', 'HEAD'])
-      return true
-    } catch {
-      return false
-    }
-  })()
-  if (hasCommit) run('git', ['-C', checkout, 'pull', '--ff-only', '--quiet'])
-  else run('git', ['-C', checkout, 'symbolic-ref', 'HEAD', 'refs/heads/main'])
+  run('git', ['-C', checkout, 'fetch', '--quiet', 'origin'])
+  const born = hasRef(run, checkout, 'HEAD')
+  if (hasRef(run, checkout, 'refs/remotes/origin/main')) {
+    if (born) run('git', ['-C', checkout, 'merge', '--ff-only', '--quiet', 'origin/main'])
+    else run('git', ['-C', checkout, 'checkout', '--quiet', '-B', 'main', 'origin/main'])
+  } else if (!born) run('git', ['-C', checkout, 'symbolic-ref', 'HEAD', 'refs/heads/main'])
 }
 
 /** Commit the run's files under `runs/<id>/` and push; the commit that holds them, new or already there. */
@@ -370,8 +396,11 @@ function commitRun(
   run('git', ['-C', checkout, 'add', '--', folder, 'README.md'])
   if (run('git', ['-C', checkout, 'status', '--porcelain', '--', folder, 'README.md']).trim() !== '') {
     run('git', ['-C', checkout, 'commit', '--quiet', '-m', message])
-    run('git', ['-C', checkout, 'push', '--quiet', '-u', 'origin', 'HEAD:main'])
   }
+  // ⚠ Pushed every time, not only after a new commit (PR #723 review): a publish cut short between
+  // its commit and its push leaves a clean tree, and its re-run must still push — else its issue
+  // shows images from a commit only this machine holds. Up to date, the push changes nothing.
+  run('git', ['-C', checkout, 'push', '--quiet', '-u', 'origin', 'HEAD:main'])
   return run('git', ['-C', checkout, 'log', '-1', '--format=%H', '--', folder]).trim()
 }
 

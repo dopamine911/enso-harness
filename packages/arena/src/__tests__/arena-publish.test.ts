@@ -1,9 +1,19 @@
 import { expect, test } from 'bun:test'
-import { existsSync, utimesSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
-import { type ArenaPublication, planArenaPublication, productIssuesIn } from '../publish.ts'
+import { spawnSync } from 'node:child_process'
+import { existsSync, mkdtempSync, utimesSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
+import {
+  type ArenaCommand,
+  type ArenaPublication,
+  planArenaPublication,
+  productIssuesIn,
+  publishArenaRun,
+  runArenaCommand,
+} from '../publish.ts'
 import { writeArenaReport } from '../report.ts'
 import { writeArenaScore } from '../score.ts'
+import { gitIn } from './fixture-git.ts'
 import { OPTIONS, recordedRun, THREAD } from './recorded-run.ts'
 
 /**
@@ -121,3 +131,81 @@ test('the product issues a finding names: a bare number is the product repositor
   // With no product repository, a bare number names nothing that could be linked.
   expect(productIssuesIn('#659', undefined)).toEqual([])
 })
+
+/** What git answers in `directory`: git by absolute path, nothing inherited — as `gitIn` runs it. */
+function gitOut(directory: string, ...args: string[]): string {
+  const git = Bun.which('git') ?? 'git'
+  return spawnSync(git, ['-C', directory, ...args], { encoding: 'utf8', env: { PATH: dirname(git) } }).stdout.trim()
+}
+
+/** The corpus as git holds it: a bare repository as `origin`, and a checkout of it; `seeded` when it has a commit. */
+function corpusCheckout(seeded: boolean): { readonly origin: string; readonly checkout: string } {
+  const origin = mkdtempSync(join(tmpdir(), 'arena-corpus-origin-'))
+  gitIn(origin, 'init', '--quiet', '--bare', '--initial-branch=main')
+  if (seeded) {
+    const seed = mkdtempSync(join(tmpdir(), 'arena-corpus-seed-'))
+    gitIn(seed, 'init', '--quiet', '--initial-branch=main')
+    writeFileSync(join(seed, 'README.md'), '# corpus\n')
+    gitIn(seed, 'add', '.')
+    gitIn(seed, 'commit', '--quiet', '-m', 'the corpus')
+    gitIn(seed, 'push', '--quiet', origin, 'main')
+  }
+  const checkout = join(mkdtempSync(join(tmpdir(), 'arena-corpus-')), 'corpus')
+  gitIn(tmpdir(), 'clone', '--quiet', origin, checkout)
+  // The publish's own commits run as the operator's git does; this checkout's identity is its own.
+  for (const [key, value] of [
+    ['user.name', 't'],
+    ['user.email', 't@t'],
+    ['commit.gpgsign', 'false'],
+  ] as const) {
+    gitIn(checkout, 'config', key, value)
+  }
+  return { origin, checkout }
+}
+
+/** Real git; `gh` answered as GitHub would, the issue bodies kept; the first push lost, as a network blip loses it. */
+function corpusRunner(): { readonly run: ArenaCommand; readonly issues: string[] } {
+  const issues: string[] = []
+  let pushes = 0
+  const run: ArenaCommand = (command, args, options) => {
+    if (command === 'gh') {
+      if (args[1] === 'list') return '[]'
+      if (args[1] === 'create' && args[0] === 'issue') {
+        issues.push(options?.input ?? '')
+        return 'https://github.com/me/corpus/issues/1\n'
+      }
+      return ''
+    }
+    if (args.includes('push') && pushes++ === 0) throw new Error('git push failed: the network went away')
+    return runArenaCommand(command, args, options)
+  }
+  return { run, issues }
+}
+
+// ⚠ PR #723 review: the push sat behind "anything to commit?", so a publish cut short between its
+// commit and its push found a clean tree when run again, skipped the push, and opened an issue whose
+// images were a commit only this machine held. On an empty corpus the re-run's `pull` failed outright.
+test.each([
+  ['a corpus with commits', true],
+  ['an empty corpus', false],
+])(
+  '⚠ a publish cut short between its commit and its push pushes when run again, before its issue is opened — %s (#677)',
+  (_corpus, seeded) => {
+    const run = reviewedRun([defect])
+    const publication = ready(run)
+    const { origin, checkout } = corpusCheckout(seeded)
+    const corpus = corpusRunner()
+    const options = { corpus: 'me/corpus', checkout, run: corpus.run }
+
+    expect(() => publishArenaRun(run, publication, options)).toThrow('the network went away')
+    expect(corpus.issues).toEqual([])
+
+    const outcome = publishArenaRun(run, publication, options)
+    if (outcome.kind !== 'published') throw new Error(`refused: ${outcome.reasons.join('; ')}`)
+    // The commit the issue shows is the corpus's, and holds the run.
+    expect(gitOut(origin, 'cat-file', '-t', outcome.commit)).toBe('commit')
+    expect(gitOut(origin, 'ls-tree', '-r', '--name-only', outcome.commit)).toContain('runs/snake-r/report.md')
+    expect(corpus.issues).toHaveLength(1)
+    expect(corpus.issues[0]).toContain(`/blob/${outcome.commit}/runs/snake-r/`)
+  },
+)
