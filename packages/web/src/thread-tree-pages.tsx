@@ -107,9 +107,14 @@ const readNoPages = (): Promise<ThreadReadOutcome<EnsoThreadPages>> => Promise.r
 /**
  * Focus the composer of the thread layout `inside` sits in (#714): the chat screen marks its
  * layout `data-thread-layout`, and the composer is its `PromptInputTextarea` (`name="message"`).
+ * Without either (the markup changed), focus goes to `inside`, the bar's own button, close to where
+ * Radix would have returned it (PR #715 review): never to nowhere, which is the page's body.
  */
 function focusComposerNear(inside: HTMLElement | null): void {
-  inside?.closest('[data-thread-layout]')?.querySelector<HTMLTextAreaElement>('textarea[name="message"]')?.focus()
+  const composer = inside
+    ?.closest('[data-thread-layout]')
+    ?.querySelector<HTMLTextAreaElement>('textarea[name="message"]')
+  ;(composer ?? inside)?.focus()
 }
 
 /**
