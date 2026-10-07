@@ -8,6 +8,7 @@ by what a reader of the page sees, and is told nothing about Enso's internals.
 
 ```bash
 bun run arena start --agent anthropic/<model-id>   # Enso + a recorded browser + the agent under test, UI only
+bun run arena start --agents <model>,<model>       # the same scenario once per agent model, one after another
 bun run arena start --manual        # the same run with no agent: you act over `arena act`; the boundary is not held
 bun run arena brief                 # what the agent under test is told (`--manual`: the act-command version, review and bugs included)
 bun run arena brief --review --run <run dir>   # the review and bug-filing prompt for after an --agent run
@@ -15,6 +16,7 @@ bun run arena act '{"action":"read"}'   # one UI action on a --manual run
 bun run arena manifest <run dir>    # fold the manifest again; after a recorder that died, collect Enso's evidence too
 bun run arena score <run dir>       # score a run again: its logs read for problems, and whether the UI was used
 bun run arena compare <run dir> <run dir>   # two runs side by side; reads only, rewrites nothing
+bun run arena compare --by-model <run dir>…   # any number of runs, grouped by agent model and perception
 bun run arena report <run dir> [--run-tests]   # the application outcome apart from Enso's findings; the gaps' evidence checked
 ```
 
@@ -228,12 +230,40 @@ in 6.1 minutes, the detector found 9 polling cycles (5.4 minutes of waiting) and
 
 `bun run arena compare <runA> <runB>` scores both runs afresh, so runs folded by different versions
 of the score are compared by the same rules. It prints:
-- the outcome, metrics and UI checks side by side;
+- the outcome, metrics and UI checks side by side, with the model Enso's sessions ran on and the
+  agent's own cost;
 - each problem once, under "Only in A", "Only in B" or "In both" (thread ids read as `<thread>`, so the
   same 404 in two runs is one problem);
 - the friction count per pattern.
 
 It writes nothing.
+
+### Across models (#674)
+
+`bun run arena start --agents A,B` runs the scenario once per agent model, one after another (the
+ports are one stack at a time). Every model resolves before the first run, and each one's likely
+cost is printed first: the mean of the earlier runs under `--out` with that agent and perception.
+Then `bun run arena compare --by-model <run>…` groups runs by agent model and perception. Each
+column says how many runs it has, since one run per model can't tell a model's difference from
+noise. It shows:
+- how many passed, the models Enso's sessions ran on, and the means of the agent's cost, minutes,
+  actions, failed actions and notes;
+- the problems that appear under one model only;
+- each friction pattern's mean per run.
+
+**What a run costs.** The agent's own cost is its calls at the model's listed price: what an API
+key would be billed, whatever account ran it. A model with no listed price shows "unpriced". Enso's
+spend is separate and bounded by `--max-cost-usd`. Measured so far (the agent's calls only):
+
+| agent · perception | runs | mean per run |
+|---|---|---|
+| `anthropic/claude-sonnet-5-5` · tree | 12 | $0.12 |
+| `openai-codex/gpt-6.1-sol` · tree | 6 | $1.12 |
+| `openai-codex/gpt-6.1-sol` · visual | 3 | $2.41 |
+
+**Enso's model** is recorded as used: each thread's record names the model its session ran on, and
+the score and both comparisons show it. Setting it for a run isn't possible yet: the Start dialog
+preselects its first model, whatever the settings name.
 
 ## The report (#624)
 

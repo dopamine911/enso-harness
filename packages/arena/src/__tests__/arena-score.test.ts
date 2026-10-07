@@ -88,6 +88,7 @@ test('a clean agent run passes: the boundary held, Enso was prompted, every thre
     screenshots: 0,
     notes: { wish: 0, friction: 0, retrospective: 1 },
     work: { changedFiles: 3, commits: 1, workspaces: ['/runs/p'] },
+    modelUse: { enso: [] },
   })
 })
 

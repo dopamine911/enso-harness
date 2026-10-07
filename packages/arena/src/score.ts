@@ -10,6 +10,7 @@ import { type ArenaFriction, observedFriction } from './friction.ts'
 import type { ArenaManifest } from './manifest.ts'
 import { ARENA_BOUND_STOP_PREFIXES } from './run-control.ts'
 import { type ArenaEvent, type ArenaPerception, isTheApplication, readJsonLines, readTimeline } from './timeline.ts'
+import { type ArenaModelUse, agentUsageOf, ensoModelsIn } from './usage.ts'
 
 /**
  * A Dogfood Arena run's score (#556, #584): every log the run left, read for problems, and
@@ -73,6 +74,8 @@ export interface ArenaUiCheck {
 export interface ArenaScoreMetrics {
   readonly minutes?: number
   readonly actions: ArenaManifest['actions']
+  /** What the models used (#674): the agent's own calls and price, and the models Enso's sessions ran on. */
+  readonly modelUse: ArenaModelUse
   /** From Enso's own session evals: prompts that reached it (`humanMessages`), its tool calls, their errors. */
   readonly enso?: { readonly prompts: number; readonly toolCalls: number; readonly toolErrors: number }
   /** Threads the UI named, and threads Enso stores for the run's project. */
@@ -127,6 +130,8 @@ export interface ArenaScoreInput {
   readonly projectThreads?: readonly ArenaProjectThread[]
   /** What the project and the threads' trees hold at the end; absent when none could be read. */
   readonly project?: ArenaWorkspaceState
+  /** The models Enso's sessions ran on, `provider/model`; empty when no thread's record was collected. */
+  readonly ensoModels?: readonly string[]
 }
 
 /** How many examples a problem keeps: enough to find it, few enough to read. */
@@ -613,6 +618,11 @@ function metricsOf(input: ArenaScoreInput): ArenaScoreMetrics {
           toolErrors: sumOverEvals(evals, (sessionEval) => sessionEval.scorecard.signals.toolErrors),
         }
   const notes = manifest.agentNotes
+  const agentUsage = agentUsageOf(input.transcript)
+  const modelUse: ArenaModelUse = {
+    ...(agentUsage === undefined ? {} : { agent: agentUsage }),
+    enso: input.ensoModels ?? [],
+  }
   return {
     ...(minutes === undefined ? {} : { minutes }),
     actions: manifest.actions,
@@ -624,6 +634,7 @@ function metricsOf(input: ArenaScoreInput): ArenaScoreMetrics {
     screenshots: manifest.screenshots.length,
     notes: { wish: notes.wish.length, friction: notes.friction.length, retrospective: notes.retrospective.length },
     ...(input.project === undefined ? {} : { work: input.project }),
+    modelUse,
   }
 }
 
@@ -783,7 +794,13 @@ export function runWorkspaces(runDirectory: string, manifest: ArenaManifest): st
 
 /** Everything a run directory holds that the score reads. Throws when there is no manifest to score. */
 export function readArenaScoreInput(runDirectory: string): ArenaScoreInput {
-  const manifest = JSON.parse(readFileSync(join(runDirectory, 'manifest.json'), 'utf8')) as ArenaManifest
+  // A manifest written before #680 names no perception: every run then read the tree.
+  const written = JSON.parse(readFileSync(join(runDirectory, 'manifest.json'), 'utf8')) as Omit<
+    ArenaManifest,
+    'perception'
+  > &
+    Partial<Pick<ArenaManifest, 'perception'>>
+  const manifest: ArenaManifest = { ...written, perception: written.perception ?? 'tree' }
   const transcriptPath = join(runDirectory, 'agent', 'transcript.jsonl')
   const evidenceDirectory = join(runDirectory, 'enso', 'evidence')
   const files = existsSync(evidenceDirectory) ? readdirSync(evidenceDirectory) : []
@@ -801,6 +818,7 @@ export function readArenaScoreInput(runDirectory: string): ArenaScoreInput {
     ...(logRecords === undefined ? {} : { logRecords }),
     ...(stored === undefined ? {} : { projectThreads: stored }),
     ...(project === undefined ? {} : { project }),
+    ensoModels: ensoModelsIn(evidenceDirectory, files),
   }
 }
 
