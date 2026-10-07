@@ -9,7 +9,14 @@ import {
   fauxText,
   fauxToolCall,
 } from '@earendil-works/pi-ai/providers/faux'
-import { arenaAgentDriver, arenaToolResult, arenaUiTool, parseModelReference } from '../agent.ts'
+import {
+  ARENA_IMAGES_SENT,
+  arenaAgentDriver,
+  arenaToolResult,
+  arenaUiTool,
+  DROPPED_IMAGE_TEXT,
+  parseModelReference,
+} from '../agent.ts'
 import { type ArenaActOutcome, type ArenaDriverSession, awaitDriverEnd } from '../recorder.ts'
 import type { ArenaEventBody } from '../timeline.ts'
 
@@ -156,6 +163,56 @@ test('a screenshot reaches a model that takes images as the picture, and an erro
   expect(arenaToolResult(outcome, false).content).toHaveLength(1)
   expect(arenaToolResult({ ok: false, error: 'no such button' }, true)).toMatchObject({ isError: true })
   expect(arenaUiTool(fakeSession(), false, () => undefined).name).toBe('act')
+})
+
+// ⚠ #724, from Opus's snake run: every screenshot the agent took stayed in its conversation and went
+// with every call — 68 of them, ~41 MB — until the API refused the request (413) at 43 minutes.
+test('⚠ each model call carries only the newest screenshots; each older one is a line saying so, not its bytes (#724)', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'arena-shots-'))
+  const shots = Array.from({ length: ARENA_IMAGES_SENT + 2 }, (_, index) => {
+    const path = join(directory, `${index + 1}.png`)
+    writeFileSync(path, `shot ${index + 1}`)
+    return path
+  })
+  // What the model was sent on the call after the last screenshot: each tool result's images, as their bytes.
+  let sentImages: string[] = []
+  let sentDropped = 0
+  const core = scripted(
+    [
+      ...shots.map(() => toolUse('act', { action: 'screenshot' })),
+      (context) => {
+        const parts = context.messages.flatMap((message) =>
+          message.role === 'toolResult' && Array.isArray(message.content) ? message.content : [],
+        )
+        sentImages = parts.flatMap((part) =>
+          part.type === 'image' ? [Buffer.from(part.data, 'base64').toString('utf8')] : [],
+        )
+        sentDropped = parts.filter((part) => part.type === 'text' && part.text === DROPPED_IMAGE_TEXT).length
+        return fauxAssistantMessage([fauxToolCall('act', { action: 'stop', reason: 'done' })], {
+          stopReason: 'toolUse',
+        })
+      },
+    ],
+    ['text', 'image'],
+  )
+  let taken = 0
+  const session = fakeSession((request) => {
+    const isShot =
+      typeof request === 'object' && request !== null && 'action' in request && request.action === 'screenshot'
+    return isShot ? { ok: true, result: { screenshot: shots[taken++] } } : { ok: true, result: {} }
+  })
+  const agentRun = arenaAgentDriver({
+    model: core.getModel(),
+    streamFn: core.streamSimple,
+    thinking: 'off',
+    brief: 'b',
+    secretValues: [],
+  })
+  expect(await agentRun(session)).toBe('it stopped the run')
+
+  // The newest four, oldest first, and a line in place of each of the two before them.
+  expect(sentImages).toEqual(['shot 3', 'shot 4', 'shot 5', 'shot 6'])
+  expect(sentDropped).toBe(2)
 })
 
 // ⚠ #680: a visual agent knows the page only by the view each answer carries. A failed action is

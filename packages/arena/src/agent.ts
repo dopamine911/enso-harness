@@ -2,6 +2,7 @@ import { appendFileSync, mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   Agent,
+  type AgentMessage,
   type AgentTool,
   type AgentToolResult,
   type StreamFn,
@@ -53,6 +54,39 @@ export function arenaToolResult(outcome: ArenaActOutcome, imagesAccepted: boolea
     content.push({ type: 'image', data: readFileSync(shot).toString('base64'), mimeType: 'image/png' })
   }
   return { content, details: undefined, ...(outcome.ok ? {} : { isError: true }) }
+}
+
+/**
+ * How many screenshots each model call carries (#724): the page now and a few before it, enough to
+ * see what an action changed. A visual run attaches one after every action (#680) and a tree run
+ * one per `screenshot`, and none was ever dropped: at about 600 KB each in base64, Opus's 68 took a
+ * 43-minute run past the API's request size (413 request_too_large).
+ */
+export const ARENA_IMAGES_SENT = 4
+
+/** What an older screenshot reads as in the request, so the model knows one was there. */
+export const DROPPED_IMAGE_TEXT =
+  '[an earlier screenshot, no longer attached: only the newest few go with each request. Take one to see the page now.]'
+
+/**
+ * The messages a model call sends (#724): every image but the newest `kept` replaced by a line
+ * saying so, newest counted from the end of the conversation. Nothing else changes, and the
+ * agent's own state is not touched: this is applied to each request.
+ */
+function withRecentImages(messages: readonly AgentMessage[], kept = ARENA_IMAGES_SENT): AgentMessage[] {
+  let seen = 0
+  const shaped = messages.toReversed().map((message): AgentMessage => {
+    if (!('content' in message) || !Array.isArray(message.content)) return message
+    const parts: readonly (TextContent | ImageContent | { readonly type: string })[] = message.content
+    if (!parts.some((part) => part.type === 'image')) return message
+    const content = parts.toReversed().map((part) => {
+      if (part.type !== 'image') return part
+      seen += 1
+      return seen <= kept ? part : { type: 'text' as const, text: DROPPED_IMAGE_TEXT }
+    })
+    return { ...message, content: content.toReversed() } as AgentMessage
+  })
+  return shaped.toReversed()
 }
 
 /** `act`: the agent's one tool. Each call is one action on the recorder's page, recorded as the agent's. */
@@ -158,6 +192,9 @@ export function arenaAgentDriver(options: ArenaAgentOptions): ArenaDriver {
           ),
         ],
       },
+      // Only the newest screenshots go with each call (#724): every one stayed, and a 43-minute run
+      // died at 413. The conversation and its transcript keep all of them; this shapes the request.
+      transformContext: (messages) => Promise.resolve(withRecentImages(messages)),
       streamFn: options.streamFn,
       toolExecution: 'sequential',
     })
