@@ -91,6 +91,36 @@ test('a clean agent run passes: the boundary held, Enso was prompted, every thre
   })
 })
 
+// ⚠ #680: a visual agent clicks at points and types into what has focus. Counted only by name, its
+// moves would be none, and every visual run would fail `acted-on-page` for a reason that isn't Enso's.
+test('⚠ a visual run’s pointer and typed moves are moves on the page; a run from before records none and reads as tree', () => {
+  const [start, agentStart, , , ...rest] = AGENT_RUN
+  if (start?.kind !== 'run-start' || agentStart === undefined) throw new Error('AGENT_RUN changed shape')
+  const visualRun: ArenaEventBody[] = [
+    { ...start, perception: 'visual' },
+    agentStart,
+    {
+      kind: 'action',
+      via: 'agent',
+      action: 'click',
+      detail: 'click at 510,530',
+      outcome: 'ok',
+      durationMs: 3,
+      under: 'textbox "Prompt"',
+    },
+    { kind: 'action', via: 'agent', action: 'type', detail: 'type "hello"', outcome: 'ok', durationMs: 3 },
+    ...rest,
+  ]
+  const score = scoreArenaRun(inputOf(visualRun))
+  // Both moves count: the click at a point, and the text typed into what it focused.
+  expect(score.uiChecks.find((check) => check.name === 'acted-on-page')).toMatchObject({
+    status: 'pass',
+    detail: expect.stringContaining('2 move(s)'),
+  })
+  expect(score).toMatchObject({ perception: 'visual', agent: 'anthropic/m', verdict: 'pass' })
+  expect(scoreArenaRun(inputOf(AGENT_RUN)).perception).toBe('tree')
+})
+
 test('the UI checks fail on what Enso recorded, not only on what the recorder saw', () => {
   // No agent runner: the boundary was never held.
   const manual = AGENT_RUN.filter((body) => body.kind !== 'agent-start' && body.kind !== 'agent-end').map((body) =>

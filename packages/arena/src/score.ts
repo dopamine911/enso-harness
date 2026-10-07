@@ -9,7 +9,7 @@ import { type ArenaProjectThread, projectThreads } from './evidence.ts'
 import { type ArenaFriction, observedFriction } from './friction.ts'
 import type { ArenaManifest } from './manifest.ts'
 import { ARENA_BOUND_STOP_PREFIXES } from './run-control.ts'
-import { type ArenaEvent, readJsonLines, readTimeline } from './timeline.ts'
+import { type ArenaEvent, type ArenaPerception, readJsonLines, readTimeline } from './timeline.ts'
 
 /**
  * A Dogfood Arena run's score (#556, #584): every log the run left, read for problems, and
@@ -98,6 +98,9 @@ export interface ArenaWorkspaceState {
 export interface ArenaScore {
   readonly runId: string
   readonly scenario: string
+  /** How the agent perceived the page (#680), and the model that drove it: what a comparison sets side by side. */
+  readonly perception: ArenaPerception
+  readonly agent?: string
   /** Friction the timeline shows (#611 B3, `friction.ts`): findings with their seconds, never part of the verdict. */
   readonly friction: readonly ArenaFriction[]
   readonly verdict: 'pass' | 'fail'
@@ -128,8 +131,23 @@ export interface ArenaScoreInput {
 
 /** How many examples a problem keeps: enough to find it, few enough to read. */
 const EXAMPLES_KEPT = 3
-/** The moves that act on the page, as opposed to looking at it or talking to the recorder. */
-const PAGE_MOVES: ReadonlySet<string> = new Set(['click', 'fill', 'press', 'select', 'hover', 'goto', 'back', 'reload'])
+/** The actions that move the page, in either perception (#680): a pointer, a key, typed text, a tab. */
+const PAGE_MOVES: ReadonlySet<string> = new Set([
+  'click',
+  'fill',
+  'press',
+  'select',
+  'hover',
+  'goto',
+  'back',
+  'reload',
+  'move',
+  'scroll',
+  'drag',
+  'type',
+  'switch-tab',
+  'close-tab',
+])
 
 /** Errors before warnings; within a severity, the order the logs were read in. */
 const SEVERITY_ORDER: Readonly<Record<ArenaSeverity, number>> = { error: 0, warning: 1 }
@@ -636,6 +654,10 @@ export function scoreArenaRun(input: ArenaScoreInput): ArenaScore {
   return {
     runId: input.manifest.runId,
     scenario: input.manifest.scenario,
+    perception: input.manifest.perception,
+    ...(input.manifest.driver.kind === 'agent'
+      ? { agent: `${input.manifest.driver.provider}/${input.manifest.driver.model}` }
+      : {}),
     verdict: errors === 0 ? 'pass' : 'fail',
     errors,
     warnings: problems.length - errors,

@@ -26,6 +26,9 @@ function compareArenaScores(first: ArenaScore, second: ArenaScore): string {
     '',
     `| | ${first.runId} | ${second.runId} |`,
     '|---|---|---|',
+    // How each run saw the page, and who drove it (#680): a tree run and a visual run find different things.
+    row('perception', (score) => score.perception),
+    row('agent', (score) => score.agent),
     row('verdict', (score) => score.verdict.toUpperCase()),
     row('errors / warnings', (score) => `${score.errors} / ${score.warnings}`),
     row('UI used', (score) => (score.uiUsed ? 'yes' : 'not shown')),

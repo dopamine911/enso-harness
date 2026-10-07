@@ -11,9 +11,10 @@ import type { Api, ImageContent, Model, TextContent } from '@earendil-works/pi-a
 import { ModelRuntime } from '@earendil-works/pi-coding-agent'
 import { redactJudgeText } from '@enso/core/judge'
 import { ensoAgentDir } from '@enso/core/paths'
-import { ArenaActToolParameters } from './act-tool.ts'
-import { ARENA_UI_TOOL } from './actions.ts'
+import { ArenaActToolParameters, ArenaVisualActToolParameters } from './act-tool.ts'
+import { ARENA_UI_TOOL, ARENA_VIEW } from './actions.ts'
 import type { ArenaActOutcome, ArenaDriver, ArenaDriverSession } from './recorder.ts'
+import type { ArenaPerception } from './timeline.ts'
 
 /**
  * Dogfood Arena's agent runner (#556, #584): the agent under test, given the brief and ONE tool.
@@ -32,17 +33,18 @@ import type { ArenaActOutcome, ArenaDriver, ArenaDriverSession } from './recorde
  * through the UI and is in Enso's records — and a finding about it is a finding about Enso.
  */
 
-/** The screenshot path an `act` result names, when it names one. */
+/** The picture an `act` answer carries: a visual run's view (#680), else the screenshot a result names. */
 function screenshotPath(outcome: ArenaActOutcome): string | undefined {
+  if (outcome.view !== undefined) return outcome.view
   const result = outcome.result
   if (typeof result !== 'object' || result === null || !('screenshot' in result)) return undefined
   return typeof result.screenshot === 'string' ? result.screenshot : undefined
 }
 
 /**
- * The tool result the model sees: the recorder's answer as JSON, and — for a `screenshot` on a
- * model that takes images — the picture itself, because a person using Enso sees the screen, not
- * only its accessibility tree.
+ * The tool result the model sees: the recorder's answer as JSON, and — on a model that takes images —
+ * the picture itself: a visual run's view after every action (#680), a tree run's screenshot when
+ * asked for, because a person using Enso sees the screen, not only its accessibility tree.
  */
 export function arenaToolResult(outcome: ArenaActOutcome, imagesAccepted: boolean): AgentToolResult<undefined> {
   const content: (TextContent | ImageContent)[] = [{ type: 'text', text: JSON.stringify(outcome, null, 2) }]
@@ -58,14 +60,19 @@ export function arenaUiTool(
   session: Pick<ArenaDriverSession, 'act'>,
   imagesAccepted: boolean,
   onStopped: () => void,
-): AgentTool<typeof ArenaActToolParameters, undefined> {
+  perception: ArenaPerception = 'tree',
+): AgentTool<typeof ArenaActToolParameters | typeof ArenaVisualActToolParameters, undefined> {
   return {
     name: ARENA_UI_TOOL,
     label: 'Act on Enso',
     description:
-      'One action on Enso’s page, as a person at the browser would make it. Returns what happened as JSON. ' +
-      'This is your only tool: everything you do, you do through Enso.',
-    parameters: ArenaActToolParameters,
+      perception === 'visual'
+        ? `One action on Enso’s page, as a person at the browser would make it: a click, a key, text typed. ` +
+          `Every answer brings a ${ARENA_VIEW.width}×${ARENA_VIEW.height} screenshot of the page after the action; ` +
+          'that picture is the only way you see the page. This is your only tool: everything you do, you do through Enso.'
+        : 'One action on Enso’s page, as a person at the browser would make it. Returns what happened as JSON. ' +
+          'This is your only tool: everything you do, you do through Enso.',
+    parameters: perception === 'visual' ? ArenaVisualActToolParameters : ArenaActToolParameters,
     executionMode: 'sequential',
     execute: async (_toolCallId, parameters) => {
       const outcome = await session.act(parameters)
@@ -88,7 +95,10 @@ export const ARENA_THINKING_LEVELS: readonly ThinkingLevel[] = [
 ]
 
 /** The first user turn: the brief is the system prompt, this only starts the work. */
-const KICKOFF = 'Begin the assignment. Start by reading the page.'
+const KICKOFF: Readonly<Record<ArenaPerception, string>> = {
+  tree: 'Begin the assignment. Start by reading the page.',
+  visual: 'Begin the assignment. Start by taking a screenshot to see the page: {"action":"screenshot"}.',
+}
 
 /** Sent when the agent ends a turn without stopping the run: it may be done, or may have just paused. */
 const NUDGE =
@@ -108,6 +118,8 @@ export interface ArenaAgentOptions {
   /** The home's known secret values: the transcript on disk is redacted with them. */
   readonly secretValues: readonly string[]
   readonly maxNudges?: number
+  /** How the agent perceives the page (#680): the tree (the default), or a screenshot after every action. */
+  readonly perception?: ArenaPerception
 }
 
 /** A transcript line on disk: image bytes left out (the screenshot is on disk already), text redacted. */
@@ -137,7 +149,14 @@ export function arenaAgentDriver(options: ArenaAgentOptions): ArenaDriver {
         systemPrompt: options.brief,
         model: options.model,
         thinkingLevel: options.thinking,
-        tools: [arenaUiTool(session, options.model.input.includes('image'), () => (stopSent = true))],
+        tools: [
+          arenaUiTool(
+            session,
+            options.model.input.includes('image'),
+            () => (stopSent = true),
+            options.perception ?? 'tree',
+          ),
+        ],
       },
       streamFn: options.streamFn,
       toolExecution: 'sequential',
@@ -165,7 +184,7 @@ export function arenaAgentDriver(options: ArenaAgentOptions): ArenaDriver {
     const maxNudges = options.maxNudges ?? MAX_NUDGES
     for (let turn = 0; turn <= maxNudges; turn += 1) {
       if (runStopped !== undefined) return `the run stopped (${runStopped})`
-      await agent.prompt(turn === 0 ? KICKOFF : NUDGE)
+      await agent.prompt(turn === 0 ? KICKOFF[options.perception ?? 'tree'] : NUDGE)
       if (stopSent) return 'it stopped the run'
       const failure = agent.state.errorMessage
       if (failure !== undefined && runStopped === undefined) {

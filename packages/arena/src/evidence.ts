@@ -158,6 +158,21 @@ export async function collectEnsoEvidence(sources: ArenaEvidenceSources): Promis
   return rows
 }
 
+interface ArenaThreadRead {
+  readonly label: string
+  readonly suffix: string
+  readonly extension: 'json' | 'md'
+  readonly route: (id: string) => string
+}
+
+/** A thread's JSON read at `/api/threads/<id>/<suffix>`: most of what the server has for one thread. */
+const threadJson = (label: string, suffix: string): ArenaThreadRead => ({
+  label,
+  suffix,
+  extension: 'json',
+  route: (id) => `/api/threads/${id}/${suffix}`,
+})
+
 /**
  * What the stop reads for each thread (#584 A2, #608): every read route the server has for one
  * thread, each saved beside the others as `thread-<id>-<suffix>.<extension>`. The record, events,
@@ -167,24 +182,19 @@ export async function collectEnsoEvidence(sources: ArenaEvidenceSources): Promis
  * The empty suffix is the thread's own record (`thread-<id>.json`), which the score reads by that
  * exact name.
  */
-const THREAD_READS: readonly {
-  readonly label: string
-  readonly suffix: string
-  readonly extension: 'json' | 'md'
-  readonly route: (id: string) => string
-}[] = [
+const THREAD_READS: readonly ArenaThreadRead[] = [
   { label: 'record', suffix: '', extension: 'json', route: (id) => `/api/threads/${id}` },
-  { label: 'events', suffix: 'events', extension: 'json', route: (id) => `/api/threads/${id}/events` },
-  { label: 'eval', suffix: 'eval', extension: 'json', route: (id) => `/api/threads/${id}/eval` },
+  threadJson('events', 'events'),
+  threadJson('eval', 'eval'),
   { label: 'log bundle', suffix: 'bundle', extension: 'md', route: (id) => `/api/logs/bundle?thread=${id}` },
-  { label: 'history', suffix: 'history', extension: 'json', route: (id) => `/api/threads/${id}/history` },
-  { label: 'stats', suffix: 'stats', extension: 'json', route: (id) => `/api/threads/${id}/stats` },
-  { label: 'context', suffix: 'context', extension: 'json', route: (id) => `/api/threads/${id}/context` },
-  { label: 'incidents', suffix: 'incidents', extension: 'json', route: (id) => `/api/threads/${id}/incidents` },
-  { label: 'judge cases', suffix: 'judge-cases', extension: 'json', route: (id) => `/api/threads/${id}/judge-cases` },
-  { label: 'manifest', suffix: 'manifest', extension: 'json', route: (id) => `/api/threads/${id}/manifest` },
-  { label: 'git', suffix: 'git', extension: 'json', route: (id) => `/api/threads/${id}/git` },
-  { label: 'changes', suffix: 'changes', extension: 'json', route: (id) => `/api/threads/${id}/changes` },
+  threadJson('history', 'history'),
+  threadJson('stats', 'stats'),
+  threadJson('context', 'context'),
+  threadJson('incidents', 'incidents'),
+  threadJson('judge cases', 'judge-cases'),
+  threadJson('manifest', 'manifest'),
+  threadJson('git', 'git'),
+  threadJson('changes', 'changes'),
 ]
 
 /** One stored thread of the run's project, as `GET /api/stored-threads` lists it: what the score reads. */

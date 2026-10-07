@@ -158,6 +158,27 @@ test('a screenshot reaches a model that takes images as the picture, and an erro
   expect(arenaUiTool(fakeSession(), false, () => undefined).name).toBe('act')
 })
 
+// ⚠ #680: a visual agent knows the page only by the view each answer carries. A failed action is
+// the moment it most needs to see what happened, so the view comes with an error too.
+test('⚠ a visual answer carries its view as the picture — before a screenshot it also names, and on a failure too', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'arena-view-'))
+  const view = join(directory, 'view.png')
+  const requested = join(directory, 'requested.png')
+  writeFileSync(view, 'the view')
+  writeFileSync(requested, 'the full shot')
+  const pictureOf = (outcome: ArenaActOutcome): unknown =>
+    arenaToolResult(outcome, true).content.find((part) => part.type === 'image')
+  expect(pictureOf({ ok: true, result: { screenshot: requested }, view })).toEqual({
+    type: 'image',
+    data: Buffer.from('the view').toString('base64'),
+    mimeType: 'image/png',
+  })
+  expect(pictureOf({ ok: false, error: 'click: Timeout 15000ms exceeded.', view })).toMatchObject({
+    data: Buffer.from('the view').toString('base64'),
+  })
+  expect(arenaToolResult({ ok: true, result: {}, view }, false).content).toHaveLength(1)
+})
+
 test('a model reference is provider/model-id, split at the first slash', () => {
   expect(parseModelReference('anthropic/claude-test')).toEqual({ provider: 'anthropic', id: 'claude-test' })
   expect(parseModelReference('openrouter/vendor/model')).toEqual({ provider: 'openrouter', id: 'vendor/model' })

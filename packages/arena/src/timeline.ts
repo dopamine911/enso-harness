@@ -40,6 +40,18 @@ export type ArenaShotCause =
   | 'final'
   /** A tab the page opened came to the front (#675): what the agent now sees. */
   | 'tab-opened'
+  /**
+   * What a visual agent is shown after each action (#680): the tab in front, scaled to the view's
+   * size (`ARENA_VIEW`). The model sees exactly this picture, so the run keeps it.
+   */
+  | 'view'
+
+/**
+ * How the agent under test perceives the page (#680). `tree`: it reads the accessibility tree and
+ * acts on controls by name, a screen-reader user with a list of every control. `visual`: it sees a
+ * screenshot after every action and acts with a mouse at x,y and the keyboard, as a sighted user.
+ */
+export type ArenaPerception = 'tree' | 'visual'
 
 /** A note the agent wrote: a wish, a piece of friction, or its end-of-run retrospective. */
 export type ArenaNoteKind = 'wish' | 'friction' | 'retrospective'
@@ -59,6 +71,8 @@ export type ArenaEventBody =
       readonly ensoBuild?: ArenaEnsoBuild
       /** The `ENSO_HOME` the stack ran over (#610): a refold scans with its secrets, not the invoking shell's. */
       readonly home?: string
+      /** How the agent perceived the page (#680); absent on a run from before, which was `tree`. */
+      readonly perception?: ArenaPerception
     }
   | { readonly kind: 'screenshot'; readonly cause: ArenaShotCause; readonly path: string }
   | {
@@ -70,6 +84,12 @@ export type ArenaEventBody =
       readonly outcome: 'ok' | 'failed'
       readonly error?: string
       readonly durationMs: number
+      /**
+       * For a pointer action (#680): what was under the point, as the recorder read it from the page
+       * (role and name). Recorded for the review — a click on nothing, or on the wrong thing — and
+       * never shown to the agent.
+       */
+      readonly under?: string
     }
   | { readonly kind: 'navigation' }
   | { readonly kind: 'console-error'; readonly text: string }

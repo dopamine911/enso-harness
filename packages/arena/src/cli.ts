@@ -96,7 +96,7 @@ import {
 } from './scenario.ts'
 import { renderArenaScore, writeArenaScore } from './score.ts'
 import { scanRunForSecrets, withEarlierHits } from './secret-scan.ts'
-import { readTimeline } from './timeline.ts'
+import { type ArenaPerception, readTimeline } from './timeline.ts'
 
 const [command, ...rest] = process.argv.slice(2)
 
@@ -118,6 +118,7 @@ const VALUED_FLAGS = [
   'idle-minutes',
   'max-restarts',
   'max-cost-usd',
+  'perception',
 ] as const
 type ValuedFlag = (typeof VALUED_FLAGS)[number]
 const VALUED_FLAG_ARGUMENTS = new Set<string>(VALUED_FLAGS.map((flagName) => `--${flagName}`))
@@ -130,6 +131,13 @@ function flag(name: ValuedFlag): string | undefined {
 function fail(message: string): never {
   process.stderr.write(`arena: ${message}\n`)
   process.exit(1)
+}
+
+/** How the agent perceives the page (#680): `--perception tree` (the default) or `visual`. */
+function perceptionNamed(): ArenaPerception {
+  const named = flag('perception') ?? 'tree'
+  if (named === 'tree' || named === 'visual') return named
+  return fail('--perception takes "tree" (it reads the accessibility tree) or "visual" (it sees a screenshot)')
 }
 
 function scenarioNamed(): ArenaScenario {
@@ -204,7 +212,7 @@ async function driverNamed(
   const reference = flag('agent')
   if (rest.includes('--manual')) {
     if (reference !== undefined) fail('--manual and --agent are two ways to drive one run: name one')
-    return { brief: arenaBrief(scenario, 'command', context) }
+    return { brief: arenaBrief(scenario, 'command', context, perceptionNamed()) }
   }
   if (reference === undefined) {
     fail('start takes --agent PROVIDER/MODEL (the agent under test, UI only) or --manual (actions over `arena act`)')
@@ -214,8 +222,20 @@ async function driverNamed(
   const { model, streamFn } = await resolveArenaModel(operatorHome, reference).catch((error: unknown) =>
     fail(error instanceof Error ? error.message : String(error)),
   )
-  const brief = arenaBrief(scenario, 'tool')
-  const driver = arenaAgentDriver({ model, streamFn, thinking, brief, secretValues: arenaSecretValues(operatorHome) })
+  const perception = perceptionNamed()
+  // A visual agent knows the page only by its screenshots: a model that cannot take one cannot see.
+  if (perception === 'visual' && !model.input.includes('image')) {
+    fail(`--perception visual needs a model that takes images, and ${reference} does not`)
+  }
+  const brief = arenaBrief(scenario, 'tool', {}, perception)
+  const driver = arenaAgentDriver({
+    model,
+    streamFn,
+    thinking,
+    brief,
+    perception,
+    secretValues: arenaSecretValues(operatorHome),
+  })
   return { driver, brief }
 }
 
@@ -282,6 +302,7 @@ async function start(): Promise<void> {
       budgetMinutes: minutes,
       limits: runLimits(),
       headed: rest.includes('--headed'),
+      perception: perceptionNamed(),
       environment: process.env,
       ...(chromiumPath === undefined ? {} : { chromiumPath }),
       ...(driver === undefined ? {} : { driver }),
@@ -394,7 +415,7 @@ switch (command) {
     if (rest.includes('--review')) process.stdout.write(arenaReviewBrief(briefContext(flag('run')), 'other'))
     else {
       const channel = rest.includes('--manual') ? 'command' : 'tool'
-      process.stdout.write(arenaBrief(scenarioNamed(), channel, briefContext(flag('run'))))
+      process.stdout.write(arenaBrief(scenarioNamed(), channel, briefContext(flag('run')), perceptionNamed()))
     }
     break
   case 'act':

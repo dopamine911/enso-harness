@@ -1,3 +1,6 @@
+import { ARENA_VIEW } from './actions.ts'
+import type { ArenaPerception } from './timeline.ts'
+
 /**
  * Dogfood Arena's scenarios (#556): what the agent under test is asked to do, and the bounds the
  * recorder holds the run to. A scenario is the rerunnable half of a run — the same id against a
@@ -136,10 +139,38 @@ interface as it ships, and every shortcut hides the thing being tested. <json> i
 these:`
 }
 
+/** How an agent that reads the page acts on it: the accessibility tree, and controls by name. */
+const TREE_MOVES = `    {"action":"read"}
+    {"action":"click","target":{"role":"button","name":"…"}}
+    {"action":"fill","target":{"placeholder":"…"},"text":"…"}
+    {"action":"press","key":"Enter"}
+    {"action":"goto","path":"/"}
+    {"action":"hover"|"select"|"back"|"reload"|"screenshot", …}
+
+Find things the way a person reading the page would: by role and accessible name, visible text,
+label or placeholder. Start with \`read\`, which returns the page's accessibility tree and URL.
+A target may add "exact": true and "nth": <index> when a name matches more than one element.`
+
+/** How an agent that sees the page acts on it (#680): a screenshot after every action, a mouse and keys. */
+const VISUAL_MOVES = `    {"action":"screenshot"}
+    {"action":"click","x":512,"y":300}
+    {"action":"type","text":"…"}
+    {"action":"press","key":"Enter"}
+    {"action":"scroll","x":512,"y":400,"dy":600}
+    {"action":"move"|"drag"|"goto"|"back"|"reload", …}
+
+You see the page only as a picture: every answer brings a ${ARENA_VIEW.width}×${ARENA_VIEW.height} screenshot of it after
+your action, and there is no other view of it. Point at things where you see them: "x" and "y" are
+pixels on that screenshot, from its top left. To type into a field, click it first, then type.
+\`"double": true\` double-clicks, \`"button": "right"\` right-clicks, \`{"action":"move","x":…,"y":…}\`
+hovers, and \`{"action":"drag","x":…,"y":…,"toX":…,"toY":…}\` drags. \`goto\` takes a path, as the
+address bar would.`
+
 /**
  * What the agent under test reads before it starts: the assignment, then how to reach Enso — the
  * one way in and its moves — and how to write a note. It says nothing about Enso's internals, its
- * routes or its source: the agent meets the interface as shipped.
+ * routes or its source: the agent meets the interface as shipped. Its moves follow its perception
+ * (#680): a tree agent reads and names controls; a visual agent sees a screenshot and points.
  *
  * Over the `command` channel the agent has a shell, so the brief goes on to the review and the bugs
  * (`arenaReviewBrief`): three phases, in order. The agent runner's `tool` channel has no shell and
@@ -149,8 +180,11 @@ export function arenaBrief(
   scenario: ArenaScenario,
   channel: ArenaChannel = 'command',
   context: ArenaBriefContext = {},
+  perception: ArenaPerception = 'tree',
 ): string {
   const reviewed = channel === 'command'
+  const visual = perception === 'visual'
+  const look = visual ? 'look at the screenshot' : '`read` to see the page'
   const assignment = `# ${reviewed ? 'Phase 1: the assignment' : 'Your assignment'}
 
 ${scenario.assignment}
@@ -159,16 +193,7 @@ ${scenario.assignment}
 
 ${reviewed ? howTheCommandActs(context.act ?? arenaActCommand()) : HOW_THE_TOOL_ACTS}
 
-    {"action":"read"}
-    {"action":"click","target":{"role":"button","name":"…"}}
-    {"action":"fill","target":{"placeholder":"…"},"text":"…"}
-    {"action":"press","key":"Enter"}
-    {"action":"goto","path":"/"}
-    {"action":"hover"|"select"|"back"|"reload"|"screenshot", …}
-
-Find things the way a person reading the page would: by role and accessible name, visible text,
-label or placeholder. Start with \`read\`, which returns the page's accessibility tree and URL.
-A target may add "exact": true and "nth": <index> when a name matches more than one element.
+${visual ? VISUAL_MOVES : TREE_MOVES}
 Everything on screen is recorded, so text that looks like a credential is refused, not typed.
 
 A link or a button may open a new tab: it comes to the front, and your actions go to the tab in front.
@@ -183,7 +208,7 @@ returns when Enso needs you or is done — \`"attention"\` says which: \`"questi
 something: answer it), \`"idle"\` (its run ended, finished or failed), \`"disconnected"\` (the server
 went), \`"dialog"\` (a browser dialog is open). It passes over Enso merely working, so send it right
 after your click. After \`ms\` (at most a minute) with none of those, it returns without
-\`"attention"\`: wait again. Then \`read\` to see the page.
+\`"attention"\`: wait again. Then ${look}.
 
 \`{"action":"wait","until":"change","ms":…}\` returns on any change to the page since you last saw
 it, Enso's own progress included. A plain \`{"action":"wait","ms":…}\` sleeps the whole time.
@@ -202,7 +227,7 @@ When you are finished — or out of time — write one retrospective note, then 
 
 If Enso stops responding, \`{"action":"restart-enso"}\` restarts it; note what you saw first.
 
-If the browser shows a native dialog (an alert, a confirm, a prompt), \`read\` says so and the page waits
+If the browser shows a native dialog (an alert, a confirm, a prompt), ${visual ? 'the answer says so' : '`read` says so'} and the page waits
 for your answer: \`{"action":"accept-dialog"}\` (with "text" for a prompt) or \`{"action":"dismiss-dialog"}\`.
 
 The run stops on its own after ${scenario.budgetMinutes} minutes. Every answer says how much time is

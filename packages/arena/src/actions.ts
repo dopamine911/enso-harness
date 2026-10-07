@@ -1,6 +1,6 @@
 import { THREAD_STATUS_WORDS } from '@enso/core'
 import { redactJudgeText } from '@enso/core/judge'
-import type { ArenaNoteKind } from './timeline.ts'
+import type { ArenaNoteKind, ArenaPerception } from './timeline.ts'
 
 /**
  * What the agent under test may do to Enso (#556): the moves a person makes in a browser, and
@@ -32,9 +32,46 @@ export type ArenaTarget =
   | { readonly label: string; readonly exact?: boolean; readonly nth?: number }
   | { readonly placeholder: string; readonly exact?: boolean; readonly nth?: number }
 
+/**
+ * The picture a visual agent sees (#680): the tab in front, scaled from the 1440×900 window to this
+ * size, and the space its x,y are in. ⚠ Not the window's size: GPT's image pipeline scales a
+ * 1440×900 image to 1229×768, and coordinates read off that picture would land about 15% short.
+ * At 1024×640 no provider rescales (Claude's limit is 1568 px), so a point the model names is a
+ * point in the picture it saw. The recorder maps it to the window by `ARENA_VIEW.scale`.
+ */
+export const ARENA_VIEW = { width: 1024, height: 640, scale: 1440 / 1024 } as const
+
+/** A point on the view (#680): pixels from the left and from the top of the screenshot the agent was shown. */
+export interface ArenaPoint {
+  readonly left: number
+  readonly top: number
+}
+
+/**
+ * What a point's two numbers are called on the wire (#680): the fields the agent writes, and the
+ * DevTools Protocol's own. `x` and `y` are every model's and the protocol's convention, so they stay
+ * there; this codebase spells its own names out (`left`, `top`), and names the wire's here, once.
+ */
+export const POINT_FIELDS = { horizontal: 'x', vertical: 'y' } as const
+
 export type ArenaAction =
   | { readonly action: 'goto'; readonly path: string }
   | { readonly action: 'click'; readonly target: ArenaTarget }
+  /** A mouse click at a point of the view (#680): left by default; `double` for a double click. */
+  | {
+      readonly action: 'click'
+      readonly at: ArenaPoint
+      readonly button?: 'right' | 'middle'
+      readonly double?: boolean
+    }
+  /** The mouse moved to a point: what a hover shows, by position (#680). */
+  | { readonly action: 'move'; readonly at: ArenaPoint }
+  /** The wheel turned over a point, by `dx`,`dy` view pixels (#680). */
+  | { readonly action: 'scroll'; readonly at: ArenaPoint; readonly dx: number; readonly dy: number }
+  /** Press at one point, move to another, release (#680). */
+  | { readonly action: 'drag'; readonly at: ArenaPoint; readonly to: ArenaPoint }
+  /** Text typed with the keyboard into whatever has focus (#680): a sighted user clicks a field, then types. */
+  | { readonly action: 'type'; readonly text: string }
   | { readonly action: 'fill'; readonly target: ArenaTarget; readonly text: string }
   | { readonly action: 'press'; readonly key: string; readonly target?: ArenaTarget }
   | { readonly action: 'hover'; readonly target: ArenaTarget }
@@ -330,6 +367,51 @@ function withTarget(request: Fields, build: (target: ArenaTarget) => ArenaAction
   return typeof target === 'string' ? fail(target) : accept(build(target))
 }
 
+/** Where a point must be: on the view the agent was shown (#680). */
+const ON_THE_VIEW = `pixels on the ${ARENA_VIEW.width}×${ARENA_VIEW.height} screenshot, from its top left`
+
+/** A point on the view from two wire fields (`x`/`y`, or `toX`/`toY`), or undefined when it is not one. */
+function pointOf(request: Fields, horizontalField: string, verticalField: string): ArenaPoint | undefined {
+  const left = request[horizontalField]
+  const top = request[verticalField]
+  if (typeof left !== 'number' || typeof top !== 'number' || !Number.isFinite(left) || !Number.isFinite(top)) {
+    return undefined
+  }
+  if (left < 0 || top < 0 || left > ARENA_VIEW.width || top > ARENA_VIEW.height) return undefined
+  return { left, top }
+}
+
+/** A click's mouse button, when it is not the left one. */
+function buttonOf(request: Fields): 'right' | 'middle' | undefined {
+  if (request.button === 'right') return 'right'
+  if (request.button === 'middle') return 'middle'
+  return undefined
+}
+
+/** A click: on a control by name (`target`), or at a point of the view (`x`, `y`). */
+function parseClick(request: Fields): ArenaActionParse {
+  if (request.target !== undefined) return withTarget(request, (target) => ({ action: 'click', target }))
+  const at = pointOf(request, POINT_FIELDS.horizontal, POINT_FIELDS.vertical)
+  if (at === undefined) return fail(`click takes a "target", or "x" and "y": ${ON_THE_VIEW}`)
+  const button = buttonOf(request)
+  return accept({
+    action: 'click',
+    at,
+    ...(button === undefined ? {} : { button }),
+    ...(request.double === true ? { double: true } : {}),
+  })
+}
+
+function parseScroll(request: Fields): ArenaActionParse {
+  const at = pointOf(request, POINT_FIELDS.horizontal, POINT_FIELDS.vertical)
+  const dx = typeof request.dx === 'number' && Number.isFinite(request.dx) ? request.dx : 0
+  const dy = typeof request.dy === 'number' && Number.isFinite(request.dy) ? request.dy : 0
+  if (at === undefined || (dx === 0 && dy === 0)) {
+    return fail(`scroll takes "x" and "y" (${ON_THE_VIEW}) and "dy" (down is positive) or "dx"`)
+  }
+  return accept({ action: 'scroll', at, dx, dy })
+}
+
 function parseNote(request: Fields): ArenaActionParse {
   const note = NOTE_KINDS.find((kind) => kind === request.note)
   const trying = text(request, 'trying')
@@ -351,8 +433,26 @@ const ACTION_PARSERS: Readonly<Record<string, (request: Fields) => ArenaActionPa
       ? fail('goto takes a path on the web origin ("/?thread=…"), not a URL and not /api')
       : accept({ action: 'goto', path })
   },
-  click: (request) => withTarget(request, (target) => ({ action: 'click', target })),
+  click: parseClick,
   hover: (request) => withTarget(request, (target) => ({ action: 'hover', target })),
+  move: (request) => {
+    const at = pointOf(request, POINT_FIELDS.horizontal, POINT_FIELDS.vertical)
+    return at === undefined ? fail(`move takes "x" and "y": ${ON_THE_VIEW}`) : accept({ action: 'move', at })
+  },
+  scroll: parseScroll,
+  drag: (request) => {
+    const at = pointOf(request, POINT_FIELDS.horizontal, POINT_FIELDS.vertical)
+    const to = pointOf(request, 'toX', 'toY')
+    return at === undefined || to === undefined
+      ? fail(`drag takes "x", "y" and "toX", "toY": ${ON_THE_VIEW}`)
+      : accept({ action: 'drag', at, to })
+  },
+  type: (request) => {
+    const typed = text(request, 'text')
+    return typed === undefined
+      ? fail('type takes "text": it goes to whatever has focus')
+      : accept({ action: 'type', text: typed })
+  },
   fill: (request) => {
     const typed = request.text
     if (typeof typed !== 'string') return fail('fill takes "text"')
@@ -429,10 +529,41 @@ export function parseArenaAction(request: unknown): ArenaActionParse {
  */
 export function typedSecretRefusal(action: ArenaAction, secretValues: readonly string[]): string | undefined {
   let typed: string | undefined
-  if (action.action === 'fill' || action.action === 'accept-dialog') typed = action.text
+  if (action.action === 'fill' || action.action === 'accept-dialog' || action.action === 'type') typed = action.text
   if (action.action === 'select') typed = action.option
   if (typed === undefined || redactJudgeText(typed, secretValues) === typed) return undefined
   return 'refused: the text looks like a credential, and anything typed into the page is kept in the trace and screenshots'
+}
+
+/** A point as the timeline writes it: `512,300`, in view pixels. */
+const describePoint = (point: ArenaPoint): string => `${Math.round(point.left)},${Math.round(point.top)}`
+
+/** A pointer click as one word: `click`, `double-click`, `right-click`, `double-right-click`. */
+function clickWord(action: { readonly button?: 'right' | 'middle'; readonly double?: boolean }): string {
+  const button = action.button === undefined ? '' : `${action.button}-`
+  return `${action.double === true ? 'double-' : ''}${button}click`
+}
+
+/**
+ * Why this action is not one this run's perception allows (#680), or undefined when it is. A visual
+ * agent sees only the screenshot: no accessibility tree, and no control named for it. A tree agent
+ * acts on controls by name: a point on a picture it never sees would be a guess, and it would blur
+ * what the two kinds of run can be compared on.
+ */
+export function perceptionRefusal(action: ArenaAction, perception: ArenaPerception): string | undefined {
+  const atAPoint = 'at' in action
+  if (perception === 'tree') {
+    return atAPoint
+      ? 'this run reads the page as an accessibility tree: act on a control by name ("target"), not at x,y'
+      : undefined
+  }
+  if (action.action === 'read') {
+    return 'this run sees the page only as the screenshot each action returns: there is no accessibility tree'
+  }
+  if ('target' in action && action.target !== undefined) {
+    return 'this run sees the page only as a screenshot: act at x,y on it, and with the keyboard, not on a control by name'
+  }
+  return undefined
 }
 
 /** A target as one line: `button "send message"`, `text "New thread"`. */
@@ -455,8 +586,21 @@ export function describeArenaAction(action: ArenaAction, secretValues: readonly 
     case 'goto':
       return `goto ${action.path}`
     case 'click':
+      if ('at' in action) {
+        const how = clickWord(action)
+        return `${how} at ${describePoint(action.at)}`
+      }
+      return `click ${describeTarget(action.target)}`
     case 'hover':
-      return `${action.action} ${describeTarget(action.target)}`
+      return `hover ${describeTarget(action.target)}`
+    case 'move':
+      return `move to ${describePoint(action.at)}`
+    case 'scroll':
+      return `scroll ${Math.round(action.dx)},${Math.round(action.dy)} at ${describePoint(action.at)}`
+    case 'drag':
+      return `drag ${describePoint(action.at)} to ${describePoint(action.to)}`
+    case 'type':
+      return `type ${JSON.stringify(redact(action.text))}`
     case 'fill':
       return `fill ${describeTarget(action.target)} with ${JSON.stringify(redact(action.text))}`
     case 'select':
