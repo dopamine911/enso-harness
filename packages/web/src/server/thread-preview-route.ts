@@ -225,7 +225,12 @@ export function createPreviewOrigins(previewFile: ReturnType<typeof createPrevie
       })
     })
     const origin = new Promise<string>((resolve, reject) => {
-      server.once('error', reject)
+      // A listener that could not start (no port, no file descriptor) is forgotten, so the thread's
+      // next tree read tries again rather than answering this failure for the server's life (PR #719 review).
+      server.once('error', (error) => {
+        if (listeners.get(threadId)?.server === server) listeners.delete(threadId)
+        reject(error)
+      })
       server.listen(0, LOOPBACK_ONLY, () =>
         resolve(`http://${LOOPBACK_ONLY}:${(server.address() as AddressInfo).port}`),
       )
