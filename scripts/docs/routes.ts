@@ -181,14 +181,8 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
   ),
   THREAD_PAGES_ROUTE: threadRead(
     'respondWithThreadPages',
-    '200 `EnsoThreadPages` JSON (#619) — the directory the thread works in (its tree, #551) and the HTML files at its top two levels, at most 50 (`truncated` past them); `.git` and `node_modules` are not walked. Read-only',
+    "200 `EnsoThreadPages` JSON (#619) — the directory the thread works in (its tree, #551), the HTML files at its top two levels, at most 50 (`truncated` past them; `.git` and `node_modules` are not walked), and, once there is a page, `previewOrigin`: the thread's preview, an origin of its own (#713) — a loopback listener started on that first read, serving the tree at `/`, GET and HEAD only, to a loopback `Host` only, files at most 10 MiB, typed by extension, `nosniff`, `no-referrer`, `no-store`, nothing outside the tree (`..` or a symlink is a 404). Read-only",
     GIT_READ_ERRORS,
-  ),
-  PREVIEW_ROUTE: threadRead(
-    'respondWithPreview',
-    "200 the file's bytes (#619) — one file of the thread's tree, a directory as its `index.html`, at most 10 MiB, typed by extension, under `Content-Security-Policy: sandbox allow-scripts allow-forms allow-pointer-lock allow-modals`: an opaque origin, so its requests to this server say `Origin: null` and are refused — except the page's module scripts (`Sec-Fetch-Dest: script`, #689), admitted here and answered `Access-Control-Allow-Origin: null`, their 404 too. `nosniff`, `no-referrer`, `no-store`",
-    '400 malformed thread id; 403 untrusted origin; 404 no session, a project no longer served, a path that leaves the tree (`..` or a symlink), no such file, or one too large; 500 handler failure',
-    { path: '/preview/threads/:threadId/:path', input: 'path: `threadId`, then the file, `/`-separated' },
   ),
   THREAD_HISTORY_ROUTE: threadRead(
     'respondWithThreadHistory',

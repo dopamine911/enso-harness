@@ -160,6 +160,7 @@ import {
   projectTrustQuestion,
 } from './project-trust.ts'
 import { builtinProviderName, providerRefusalOf } from './provider-refusal.ts'
+import { restoreNoteExtension } from './restore-note.ts'
 import type { RuntimeEvent } from './runtime-event.ts'
 import { toRpcWireEvent } from './session-events.ts'
 import { sessionModels } from './session-models.ts'
@@ -2044,11 +2045,12 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         // no discovery (`--no-extensions`), no ~/.agents skills (`--no-skills`), and the
         // harness package as the one extension source (`-e <dir>` — pi resolves a
         // directory's `pi` manifest for extensions, skills, prompts AND themes). Inline
-        // extensions load after the manifest's: the host's watcher first, then any probes.
+        // extensions load after the manifest's: the host's watcher and its restore note (#652)
+        // first, then any probes.
         noExtensions: true,
         noSkills: true,
         additionalExtensionPaths: [harnessPackageDir],
-        extensionFactories: [modelWatch, ...(options.extensionFactories ?? [])],
+        extensionFactories: [modelWatch, restoreNoteExtension, ...(options.extensionFactories ?? [])],
         // Who said a notice (#387): each extension's registrations get a context whose
         // `ui.notify` names that extension, read off the path pi loaded it from.
         extensionsOverride: (loaded) => attributeNotices(loaded, harnessPackageDir),
