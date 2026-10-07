@@ -25,13 +25,16 @@ import {
   callValue,
   headlineOf,
   isRefused,
+  isUnpriced,
   rankCalls,
   type RefusedCalls,
   rankTools,
+  type StatsHeadline,
   type ToolSummary,
   type ToolUsageMetric,
   toolSummaries,
   toolUsageValue,
+  unpricedPrompts,
 } from './thread-stats-analysis.ts'
 import { toggleMember } from './toggle-member.ts'
 import type { RevealStatsTarget, StatsTarget } from './transcript-reveal.ts'
@@ -56,7 +59,8 @@ import { Card, Empty, Metric, Section } from './view-parts.tsx'
  * ⚠ WHAT IS MEASURED, SAID AS SUCH (livecraft's discipline): pi's session total is the cost, and
  * what the branch's messages do not account for is named, never spread over turns; a duration is
  * the log's, so a resumed thread's older calls say they were not measured; an empty section says
- * what it is waiting for instead of drawing zeros.
+ * what it is waiting for instead of drawing zeros; a model pi has no price for says its cost is
+ * unknown, never $0.0000, which reads as free (#692).
  */
 
 export type StatsOutcome = AnalysisOutcome<EnsoThreadStats>
@@ -105,6 +109,8 @@ function turnAxes(tick: (value: number) => string, width: number): React.ReactNo
 }
 
 type TurnPoint = EnsoTurnStats & { readonly label: string }
+/** A cost point; `null` for a turn on a model with no price — a gap in the line, not a $0 (#692). */
+type CostPoint = Omit<TurnPoint, 'cost'> & { readonly cost: number | null }
 
 /** Opens a turn in the transcript; absent where there is nowhere to go (a static render). */
 type OnTurn = ((turn: number) => void) | undefined
@@ -116,7 +122,7 @@ type ChartClick = { onClick: (state: MouseHandlerDataParam) => void; className: 
  * The chart's click → the turn under the pointer. Recharts reports the hovered point's index,
  * which is the one its tooltip shows, so a click anywhere in the column goes where the tooltip says.
  */
-function turnClick(data: readonly TurnPoint[], onTurn: OnTurn): ChartClick {
+function turnClick(data: readonly { readonly turn: number }[], onTurn: OnTurn): ChartClick {
   if (onTurn === undefined) return {}
   return {
     className: 'cursor-pointer',
@@ -136,7 +142,8 @@ function turnClick(data: readonly TurnPoint[], onTurn: OnTurn): ChartClick {
 function turnDot(onTurn: OnTurn): ((props: DotItemDotProps) => React.ReactNode) | boolean {
   if (onTurn === undefined) return true
   return function TurnDot(dot: DotItemDotProps): React.ReactNode {
-    const point = dot.payload as TurnPoint
+    const point = dot.payload as CostPoint
+    if (point.cost === null) return null
     const open = (): void => onTurn(point.turn)
     return (
       <circle
@@ -295,9 +302,10 @@ function CostChart({
   readonly data: readonly TurnPoint[]
   readonly onTurn: OnTurn
 }): React.ReactNode {
+  const points: CostPoint[] = data.map((point) => (isUnpriced(point) ? { ...point, cost: null } : point))
   return (
     <ChartContainer config={COST_SERIES} className="aspect-auto h-36 w-full">
-      <AreaChart data={[...data]} accessibilityLayer {...turnClick(data, onTurn)}>
+      <AreaChart data={points} accessibilityLayer {...turnClick(points, onTurn)}>
         {turnAxes(dollarTick, 48)}
         <Area
           dataKey="cost"
@@ -311,6 +319,55 @@ function CostChart({
         />
       </AreaChart>
     </ChartContainer>
+  )
+}
+
+// ── a cost pi had no price for (#692) ────────────────────────────────────────────────────────
+
+const UNKNOWN_COST = 'unknown'
+
+/**
+ * A cost turns with no price are part of: `unknown` when nothing in it was priced, otherwise at
+ * least the priced part — never a bare `$0.0000`, which reads as free (`isUnpriced`).
+ */
+function partlyPricedCostText(cost: number, unpriced: boolean): string {
+  if (!unpriced) return costText(cost)
+  return cost === 0 ? UNKNOWN_COST : `≥ ${costText(cost)}`
+}
+
+/** A per-turn figure: `—` before the first turn, `unknown` when a turn had no price. */
+function perTurnCostText(cost: number | undefined, noTurn: boolean): string {
+  if (noTurn) return '—'
+  return cost === undefined ? UNKNOWN_COST : costText(cost)
+}
+
+/** Beneath the total: whose cost it leaves out. */
+function unpricedNote(headline: StatsHeadline): string | undefined {
+  if (headline.pricing === 'priced') return undefined
+  if (headline.pricing === 'unpriced') return 'no price for this model — its tokens are counted, not its cost'
+  return `${plural(headline.unpricedTurnCount, 'turn')} on a model with no price — not in the cost`
+}
+
+function CostPerTurn({
+  headline,
+  data,
+  onTurn,
+}: {
+  readonly headline: StatsHeadline
+  readonly data: readonly TurnPoint[]
+  readonly onTurn: OnTurn
+}): React.ReactNode {
+  const noTurn = headline.turnCount === 0
+  let body: React.ReactNode = <CostChart data={data} onTurn={onTurn} />
+  if (noTurn) body = <Empty>costs appear after the first response</Empty>
+  else if (headline.pricing === 'unpriced') body = <Empty>no price for this model, so no cost to chart</Empty>
+  return (
+    <Section
+      title="Cost per turn"
+      aside={noTurn ? undefined : `median ${perTurnCostText(headline.medianTurnCost, noTurn)}`}
+    >
+      {body}
+    </Section>
   )
 }
 
@@ -531,6 +588,7 @@ export function ThreadStatsView({
     .filter((prompt) => prompt.turnCount > 0)
     .toSorted((first, second) => second.cost - first.cost)
     .slice(0, COSTLIEST_PROMPTS)
+  const unpriced = unpricedPrompts(stats.turnStats)
   const noTurn = headline.turnCount === 0
   const onTurn = onNavigate === undefined ? undefined : (turn: number): void => onNavigate({ kind: 'turn', turn })
   return (
@@ -545,8 +603,12 @@ export function ThreadStatsView({
           </p>
         )}
         <dl className="grid grid-cols-2 gap-2 @3xl:grid-cols-3">
-          <Metric label="total cost" value={costText(stats.usage.cost)} />
-          <Metric label="average cost / turn" value={noTurn ? '—' : costText(headline.averageTurnCost)} />
+          <Metric
+            label="total cost"
+            value={partlyPricedCostText(stats.usage.cost, headline.pricing !== 'priced')}
+            note={unpricedNote(headline)}
+          />
+          <Metric label="average cost / turn" value={perTurnCostText(headline.averageTurnCost, noTurn)} />
           <Metric label="turn count" value={countText(headline.turnCount)} />
           <Metric
             label="average tools / turn"
@@ -577,9 +639,7 @@ export function ThreadStatsView({
       </Card>
       <div className="grid grid-cols-1 items-start gap-4 @4xl:grid-cols-2">
         <ContextSection stats={stats} data={data} onTurn={onTurn} />
-        <Section title="Cost per turn" aside={noTurn ? undefined : `median ${costText(headline.medianTurnCost)}`}>
-          {noTurn ? <Empty>costs appear after the first response</Empty> : <CostChart data={data} onTurn={onTurn} />}
-        </Section>
+        <CostPerTurn headline={headline} data={data} onTurn={onTurn} />
         <ToolUsage tools={tools} />
         <CostliestCalls calls={stats.callStats} refused={refused} onNavigate={onNavigate} />
         {tools.length === 0 ? null : (
@@ -627,7 +687,9 @@ export function ThreadStatsView({
                       )}
                     </small>
                   </span>
-                  <b className="shrink-0 font-mono font-medium tabular-nums">{costText(prompt.cost)}</b>
+                  <b className="shrink-0 font-mono font-medium tabular-nums">
+                    {partlyPricedCostText(prompt.cost, unpriced.has(prompt.prompt))}
+                  </b>
                 </RankedRow>
               ))}
             </ol>
