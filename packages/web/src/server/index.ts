@@ -92,12 +92,7 @@ import { createThreadEvalRoute } from './thread-eval-route.ts'
 import { createThreadChangesRoute, createThreadGitRoute } from './thread-git-route.ts'
 import { createThreadSecurityReads, replayThresholdsOf } from './thread-incidents-route.ts'
 import { createThreadManifestRoute } from './thread-manifest-route.ts'
-import {
-  createPreviewRoute,
-  createThreadPagesRoute,
-  fromPreviewModuleLoader,
-  PREVIEW_CSP,
-} from './thread-preview-route.ts'
+import { createPreviewRoute, createThreadPagesRoute, PREVIEW_CSP } from './thread-preview-route.ts'
 import { readThreadMount, type ThreadReadDeps } from './thread-read.ts'
 import { createThreadRegistry, inspectThread, type ThreadView } from './thread-registry.ts'
 import { createThreadStatsRoute } from './thread-stats-route.ts'
@@ -1037,14 +1032,10 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   const respondWithThreadChanges = analysisResponder(threadChanges)
   const respondWithThreadJudgeCases = analysisResponder((threadId: string) => securityReads.judgeCases(threadId))
   const respondWithThreadPages = analysisResponder(threadPages)
-  /**
-   * One file of the thread's tree, never with Enso's origin; a miss is the 404 every outside-the-tree path gets.
-   * The page's module loader gets CORS for its opaque origin on either answer (#689), so a missing
-   * module reads as the 404 it is, not as a CORS block.
-   */
+  /** One file of the thread's tree, never with Enso's origin; a miss is the 404 every outside-the-tree path gets. */
   async function respondWithPreview(
     threadId: string,
-    request: IncomingMessage,
+    _request: IncomingMessage,
     response: ServerResponse,
     match: RegExpExecArray,
   ): Promise<void> {
@@ -1053,7 +1044,6 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
       'X-Content-Type-Options': 'nosniff',
       'Referrer-Policy': 'no-referrer',
       'Cache-Control': 'no-store',
-      ...(fromPreviewModuleLoader(request.headers) ? { 'Access-Control-Allow-Origin': 'null' } : {}),
     }
     if (file === undefined) {
       response.writeHead(404, { ...common, 'Content-Type': 'text/plain' })
@@ -1981,21 +1971,12 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
    * permission dialog that run opened (204). `new URL('null')` throws, so the string needs
    * no arm of its own — it fails the parse below. Only the absent header is trusted, and
    * only because no browser can produce it.
-   *
-   * ⚠ The one `null` admitted (#689): a preview page's module loader fetching a script of its
-   * own tree — a GET under `/preview/`, never `/api/`, and `Sec-Fetch-Dest: script`, which a
-   * page's `fetch()` cannot send. A module script is fetched in CORS mode, so without this no
-   * ES-module page could run in Preview; what it opens is what a classic `<script src>` (which
-   * sends no `Origin`) already had: a file of the tree, run, not read.
    */
   function fromTrustedOrigin(request: IncomingMessage): boolean {
     const hostHeader = request.headers.host
     if (hostHeader === undefined || !isLoopbackAuthority(hostHeader)) return false
     const origin = request.headers.origin
     if (origin === undefined) return true
-    if (request.method === 'GET' && PREVIEW_ROUTE.test(request.url ?? '') && fromPreviewModuleLoader(request.headers)) {
-      return true
-    }
     let originHost: string
     try {
       originHost = new URL(origin).host

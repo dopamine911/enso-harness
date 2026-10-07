@@ -1,5 +1,4 @@
 import { type Dirent, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
-import type { IncomingHttpHeaders } from 'node:http'
 import { extname, isAbsolute, join, relative, sep as separator } from 'node:path'
 import type { EnsoThreadPages } from '@enso/core'
 import { servedCwd, type ThreadCwdDeps } from './thread-git-route.ts'
@@ -18,15 +17,7 @@ import { servedCwd, type ThreadCwdDeps } from './thread-git-route.ts'
  * sandbox` without `allow-same-origin`: the document gets an OPAQUE origin even as a top-level tab,
  * its requests say `Origin: null`, and the server refuses that string (#205, #160 §3). It can still
  * load its own scripts, styles and images by tag; its own `fetch()` of a file is cross-origin and
- * fails, with no CORS opened for it on purpose.
- *
- * ⚠ ONE CORS ANSWER: A MODULE SCRIPT (#689). `<script type="module">` and `import` fetch in CORS
- * mode, so the opaque page asks for its own `app.mjs` with `Origin: null`, and both the server's
- * origin gate and the browser's CORS check refused it. Only a request that says it is a script —
- * `Sec-Fetch-Dest: script`, which the browser sets and no page can — is admitted from `null` and
- * answered `Access-Control-Allow-Origin: null` (`fromPreviewModuleLoader`). That opens nothing a
- * classic `<script src>` did not already: the file runs, it is not read. `fetch()` is
- * `Sec-Fetch-Dest: empty`, so it stays refused, and `/api/` never sees the exception.
+ * fails, with no CORS opened on purpose.
  *
  * ⚠ THE TREE AND NOTHING ELSE. A path's REALPATH must stay inside the tree's, so `..` and a symlink
  * out of the tree are the same 404. Looking builds nothing, and a directory this server does not
@@ -35,15 +26,6 @@ import { servedCwd, type ThreadCwdDeps } from './thread-git-route.ts'
 
 /** The page's sandbox: scripts, forms, pointer lock and `alert` (a game's "game over") — never its own origin. */
 export const PREVIEW_CSP = 'sandbox allow-scripts allow-forms allow-pointer-lock allow-modals'
-
-/**
- * Whether a preview request is a sandboxed page's module loader fetching one of its scripts
- * (#689): the page's opaque `Origin: null`, and a script destination, which the browser sets and
- * a page's `fetch()` cannot. Admitted past the origin gate and answered with CORS for `null`.
- */
-export function fromPreviewModuleLoader(headers: IncomingHttpHeaders): boolean {
-  return headers.origin === 'null' && headers['sec-fetch-dest'] === 'script'
-}
 
 /** How many pages the listing names, and how deep it looks: the work's top, not the whole tree. */
 const MAX_PAGES = 50

@@ -515,31 +515,4 @@ test.describe('seeded threads (#486)', () => {
       await start.click({ trial: true })
     }
   })
-
-  // #689: a module script is fetched in CORS mode, and the sandboxed preview's origin is opaque, so
-  // every `<script type="module">` and `import` was refused and an ES-module page never ran. The
-  // page's own `fetch()` and the control plane stay out of its reach (#619).
-  test('⚠ a preview page built of ES modules runs, and its sandbox still keeps fetch() and Enso out of reach (#689)', async ({
-    page,
-  }) => {
-    const errors: string[] = []
-    page.on('console', (message) => {
-      if (message.type() === 'error') errors.push(message.text())
-    })
-    await page.goto(`/preview/threads/${SEEDED.modules}/index.html`)
-    await expect(page.locator('#status')).toHaveText('both modules ran')
-    expect(errors).toEqual([])
-
-    // What the server answers `/api/` from this origin, writes included, is the route tests' to pin;
-    // here, what the page itself can read.
-    const reached = await page.evaluate(async () => {
-      const attempt = (path: string): Promise<string> =>
-        fetch(path).then(
-          (response) => `read ${response.status}`,
-          () => 'refused',
-        )
-      return { origin: window.origin, ownFile: await attempt('app.mjs'), control: await attempt('/api/about') }
-    })
-    expect(reached).toEqual({ origin: 'null', ownFile: 'refused', control: 'refused' })
-  })
 })
