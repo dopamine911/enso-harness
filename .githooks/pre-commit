@@ -86,27 +86,27 @@ done
 # shifts when another push lands). The gate itself runs unlocked, so worktrees still gate in
 # parallel; the restore applies the entry it pushed by sha, never `stash@{0}`, and touches only
 # this worktree.
+#
+# The lock is a SYMLINK whose target is the holder's pid, made by one `ln -s` — atomic, and failing
+# when the lock exists — so a lock never exists without its holder named (PR #703 review: a
+# directory lock with a pid written after it left a window in which a live but stalled holder read
+# as gone). A holder that is gone (a hook killed mid-run) is taken over. The removal, and the
+# release, check the link still names that holder: a waiter does not remove a lock another waiter
+# has just taken (between the check and the removal lies one command, not a stall of seconds).
 lock="$(git rev-parse --git-common-dir)/pre-commit-gate.lock"
 take_lock() {
-  empty_polls=0
-  until mkdir "${lock}" 2>/dev/null; do
-    holder=$(cat "${lock}/pid" 2>/dev/null || true)
-    # A holder that is gone, or one killed between its `mkdir` and writing its pid (the pid then
-    # never appears): the lock is taken over. The lock is held for a git command or two, so an
-    # empty pid three polls running is no live holder.
-    if [ -z "${holder}" ]; then empty_polls=$((empty_polls + 1)); else empty_polls=0; fi
-    if { [ -n "${holder}" ] && ! kill -0 "${holder}" 2>/dev/null; } || [ "${empty_polls}" -ge 3 ]; then
-      echo "pre-commit: the stash lock's holder (pid ${holder:-unwritten}) is gone; taking the lock over."
-      rm -rf "${lock}"
-      empty_polls=0
+  until ln -s "$$" "${lock}" 2>/dev/null; do
+    holder=$(readlink "${lock}" 2>/dev/null || true)
+    if [ -n "${holder}" ] && ! kill -0 "${holder}" 2>/dev/null; then
+      echo "pre-commit: the stash lock's holder (pid ${holder}) is gone; taking the lock over."
+      if [ "$(readlink "${lock}" 2>/dev/null || true)" = "${holder}" ]; then rm -f "${lock}"; fi
       continue
     fi
     sleep 1
   done
-  echo $$ >"${lock}/pid"
 }
 release_lock() {
-  rm -rf "${lock}"
+  if [ "$(readlink "${lock}" 2>/dev/null || true)" = "$$" ]; then rm -f "${lock}"; fi
 }
 
 stash_message="pre-commit gate: unstaged remainder, restored automatically"
