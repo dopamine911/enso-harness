@@ -64,6 +64,14 @@ export type ArenaAction =
    */
   | { readonly action: 'accept-dialog'; readonly text?: string }
   | { readonly action: 'dismiss-dialog' }
+  /**
+   * The browser's tabs (#675). A tab the page opens — Preview's, a link's — comes to the front as a
+   * browser shows it, and every action goes to the tab in front. `tabs` lists them; `switch-tab`
+   * brings one to the front; `close-tab` closes one (the one in front by default), never the last.
+   */
+  | { readonly action: 'tabs' }
+  | { readonly action: 'switch-tab'; readonly tab: number }
+  | { readonly action: 'close-tab'; readonly tab?: number }
   | { readonly action: 'stop'; readonly reason?: string }
 
 /** The longest single `wait`: a run that needs longer waits again, and the timeline shows it waited. */
@@ -312,6 +320,10 @@ function parseGotoPath(path: string): string | undefined {
 const fail = (error: string): ArenaActionParse => ({ ok: false, error })
 const accept = (action: ArenaAction): ArenaActionParse => ({ ok: true, action })
 
+/** A tab number as `tabs` lists it: a whole number, 0 or more; undefined when it is not one. */
+const tabNumber = (value: unknown): number | undefined =>
+  typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : undefined
+
 /** The request's target, handed to `build`, or why it is not one. */
 function withTarget(request: Fields, build: (target: ArenaTarget) => ArenaAction): ArenaActionParse {
   const target = parseTarget(request.target)
@@ -382,6 +394,20 @@ const ACTION_PARSERS: Readonly<Record<string, (request: Fields) => ArenaActionPa
     return accept({ action: 'accept-dialog', ...(typed === undefined ? {} : { text: typed }) })
   },
   'dismiss-dialog': () => accept({ action: 'dismiss-dialog' }),
+  tabs: () => accept({ action: 'tabs' }),
+  'switch-tab': (request) => {
+    const tab = tabNumber(request.tab)
+    return tab === undefined
+      ? fail('switch-tab takes "tab": a number from `tabs`')
+      : accept({ action: 'switch-tab', tab })
+  },
+  'close-tab': (request) => {
+    if (request.tab === undefined) return accept({ action: 'close-tab' })
+    const tab = tabNumber(request.tab)
+    return tab === undefined
+      ? fail('close-tab takes "tab" (a number from `tabs`), or nothing for the tab in front')
+      : accept({ action: 'close-tab', tab })
+  },
 }
 
 /** The ARENA action a request names, checked field by field. Unknown fields are ignored. */
@@ -445,6 +471,10 @@ export function describeArenaAction(action: ArenaAction, secretValues: readonly 
       return `stop${action.reason === undefined ? '' : `: ${redact(action.reason)}`}`
     case 'accept-dialog':
       return `accept-dialog${action.text === undefined ? '' : ` with ${JSON.stringify(redact(action.text))}`}`
+    case 'switch-tab':
+      return `switch-tab ${action.tab}`
+    case 'close-tab':
+      return action.tab === undefined ? 'close-tab' : `close-tab ${action.tab}`
     default:
       return action.action
   }

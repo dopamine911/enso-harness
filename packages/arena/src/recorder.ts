@@ -76,7 +76,14 @@ const ACTION_TIMEOUT_MS = 15_000
 /** How often a wait until change looks at the page (#637): a card is seen within about a second. */
 const CHANGE_POLL_MS = 1000
 /** The actions that do not move the page: after any other, the wait's baseline is the page it left (#637). */
-const LEAVES_THE_PAGE: ReadonlySet<ArenaAction['action']> = new Set(['read', 'screenshot', 'wait', 'note', 'stop'])
+const LEAVES_THE_PAGE: ReadonlySet<ArenaAction['action']> = new Set([
+  'read',
+  'screenshot',
+  'wait',
+  'note',
+  'stop',
+  'tabs',
+])
 /** How long a stopped run waits for its agent runner to finish writing before closing the page. */
 const DRIVER_SETTLE_MS = 15_000
 
@@ -508,11 +515,30 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
   // ── The browser, its trace and its listeners ───────────────────────────────────────────────
   // ⚠ A browser that fails to start must not leave Enso holding the dev ports (PR #562 review):
   // every later `arena start` would refuse them until someone killed the stack by hand.
-  const { browser, context, page } = await openTracedPage(options, runId).catch(async (error: unknown) => {
+  const {
+    browser,
+    context,
+    page: firstPage,
+  } = await openTracedPage(options, runId).catch(async (error: unknown) => {
     await stopEnso()
     throw error
   })
-  show(page)
+  // ── The tabs (#675) ────────────────────────────────────────────────────────────────────────
+  // Preview opens the built page in a new tab, and a link may too. The tab in front is the one
+  // the agent acts on and the camera shows, as a browser shows a person the tab it opened.
+  /** Every open tab by its number: Enso's first page is 0, and a number is never reused. */
+  const tabs = new Map<number, Page>([[0, firstPage]])
+  let nextTab = 1
+  let front = 0
+  const inFront = (): Page => tabs.get(front) ?? firstPage
+  const bringToFront = (tabNumber: number): Promise<void> => {
+    const tabPage = tabs.get(tabNumber)
+    if (tabPage === undefined) return Promise.resolve()
+    front = tabNumber
+    show(tabPage)
+    return tabPage.bringToFront().catch(() => undefined)
+  }
+  show(firstPage)
   let chunkNumber = 0
   /**
    * Write the trace so far. ⚠ `stopChunk` ends the chunk; between chunks nothing is traced, so
@@ -526,67 +552,121 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
     timeline.record({ kind: 'trace-chunk', path })
     if (then === 'continue') await context.tracing.startChunk()
   }
-  const here = (): ArenaPagePlace => pagePlace(page.url())
+  /** Where a tab is: its URL's place, and its number unless it is the first. */
+  const tabPlace = (tabNumber: number, tabPage: Page): ArenaPagePlace => ({
+    ...pagePlace(tabPage.url()),
+    ...(tabNumber === 0 ? {} : { tab: tabNumber }),
+  })
+  const here = (): ArenaPagePlace => tabPlace(front, inFront())
 
-  page.on('console', (message) => {
-    if (message.type() !== 'error') return
-    timeline.record({ kind: 'console-error', text: redact(message.text()) }, here())
-    void shoot('console-error')
-  })
-  page.on('pageerror', (error) => {
-    timeline.record({ kind: 'page-error', text: redact(String(error)) }, here())
-    void shoot('page-error')
-  })
-  page.on('requestfailed', (request) => {
-    timeline.record(
-      {
-        kind: 'request-failed',
-        request: `${request.method()} ${request.url()}`,
-        failure: request.failure()?.errorText ?? '',
-      },
-      here(),
-    )
-  })
-  page.on('response', (response) => {
-    if (response.status() < 400) return
-    timeline.record(
-      {
-        kind: 'response-error',
-        request: `${response.request().method()} ${response.url()}`,
-        status: response.status(),
-      },
-      here(),
-    )
-  })
-  page.on('framenavigated', (frame) => {
-    if (frame !== page.mainFrame()) return
-    timeline.record({ kind: 'navigation' }, here())
-    void shoot('navigation')
-  })
-  page.on('crash', () => {
-    timeline.record({ kind: 'page-crash' }, here())
-    // ⚠ Taken even though a crashed page may not render (#584 A9): then it is a `recorder-error`
-    // line, and the crash's missing picture is said rather than never attempted.
-    void shoot('page-crash')
-  })
   // A native dialog is left OPEN for the agent to answer (#609): it is part of the interface, and it
   // blocks the page until answered — `read` says it is there, `accept-dialog`/`dismiss-dialog` answer it.
-  let pendingDialog: Dialog | undefined
-  page.on('dialog', (dialog) => {
-    pendingDialog = dialog
-    timeline.record({ kind: 'dialog', dialog: dialog.type(), message: redact(dialog.message()) }, here())
-    void shoot('dialog')
-  })
+  // ⚠ Per tab (PR #684 review): a browser shows a dialog over its own tab, so the one that blocks the
+  // agent is the front tab's — a game's alert in tab 1 must not answer for Enso's tab, nor block it.
+  const dialogs = new Map<number, Dialog>()
+  const frontDialog = (): Dialog | undefined => dialogs.get(front)
   const answerDialog = async (answer: (dialog: Dialog) => Promise<void>): Promise<ArenaPagePlace> => {
-    const dialog = pendingDialog
+    const dialog = frontDialog()
     if (dialog === undefined) throw new Error('no dialog is open')
-    pendingDialog = undefined
+    dialogs.delete(front)
     await answer(dialog)
     return here()
   }
+  /** One tab's listeners: each event is placed at ITS tab, and captured only when that tab is in front. */
+  const watch = (tabPage: Page, tabNumber: number): void => {
+    const there = (): ArenaPagePlace => tabPlace(tabNumber, tabPage)
+    const shootIfInFront = (cause: ArenaShotCause): void => {
+      if (tabNumber === front) void shoot(cause)
+    }
+    tabPage.on('console', (message) => {
+      if (message.type() !== 'error') return
+      timeline.record({ kind: 'console-error', text: redact(message.text()) }, there())
+      shootIfInFront('console-error')
+    })
+    tabPage.on('pageerror', (error) => {
+      timeline.record({ kind: 'page-error', text: redact(String(error)) }, there())
+      shootIfInFront('page-error')
+    })
+    tabPage.on('requestfailed', (request) => {
+      timeline.record(
+        {
+          kind: 'request-failed',
+          request: `${request.method()} ${request.url()}`,
+          failure: request.failure()?.errorText ?? '',
+        },
+        there(),
+      )
+    })
+    tabPage.on('response', (response) => {
+      if (response.status() < 400) return
+      timeline.record(
+        {
+          kind: 'response-error',
+          request: `${response.request().method()} ${response.url()}`,
+          status: response.status(),
+        },
+        there(),
+      )
+    })
+    tabPage.on('framenavigated', (frame) => {
+      if (frame !== tabPage.mainFrame()) return
+      timeline.record({ kind: 'navigation' }, there())
+      shootIfInFront('navigation')
+    })
+    tabPage.on('crash', () => {
+      timeline.record({ kind: 'page-crash' }, there())
+      // ⚠ Taken even though a crashed page may not render (#584 A9): then it is a `recorder-error`
+      // line, and the crash's missing picture is said rather than never attempted.
+      shootIfInFront('page-crash')
+    })
+    tabPage.on('dialog', (dialog) => {
+      dialogs.set(tabNumber, dialog)
+      timeline.record({ kind: 'dialog', dialog: dialog.type(), message: redact(dialog.message()) }, there())
+      shootIfInFront('dialog')
+    })
+    tabPage.on('close', () => {
+      // The browser closing at the stop closes every tab: that is the run ending, not the agent.
+      if (stopping) return
+      tabs.delete(tabNumber)
+      dialogs.delete(tabNumber)
+      timeline.record({ kind: 'tab-closed', tab: tabNumber })
+      if (front !== tabNumber) return
+      const newest = Math.max(...tabs.keys())
+      if (Number.isFinite(newest)) {
+        void bringToFront(newest)
+        return
+      }
+      // ⚠ The page closed the last tab itself (`window.close()`; PR #684 review): a browser with no
+      // tab has no page to act on, so Enso opens again in a new one — its `page` listener makes it the front.
+      void context
+        .newPage()
+        .then((reopened) => reopened.goto(ARENA_WEB_ORIGIN))
+        .catch((error: unknown) => {
+          timeline.record({
+            kind: 'recorder-error',
+            during: 'reopening Enso after the last tab closed',
+            error: redact(String(error)),
+          })
+        })
+    })
+  }
+  watch(firstPage, 0)
+  context.on('page', (opened) => {
+    if (stopping) return
+    const tabNumber = nextTab
+    nextTab += 1
+    tabs.set(tabNumber, opened)
+    watch(opened, tabNumber)
+    timeline.record({ kind: 'tab-opened', tab: tabNumber, opener: front }, tabPlace(tabNumber, opened))
+    void bringToFront(tabNumber)
+    void opened
+      .waitForLoadState()
+      .catch(() => undefined)
+      .then(() => (front === tabNumber ? shoot('tab-opened') : undefined))
+  })
 
   try {
-    await page.goto(ARENA_WEB_ORIGIN)
+    await firstPage.goto(ARENA_WEB_ORIGIN)
   } catch (error) {
     await browser.close().catch(() => undefined)
     await stopEnso()
@@ -669,42 +749,73 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
 
   // ── The agent's actions ────────────────────────────────────────────────────────────────────
   /** The page as the agent sees it, for a wait on the page (#637, #648): the rail's ages aside, or the native dialog blocking it. */
-  const pageNow = async (): Promise<string> =>
-    pendingDialog === undefined
-      ? pageForChange(await page.locator('body').ariaSnapshot({ timeout: ACTION_TIMEOUT_MS }))
-      : dialogForChange(pendingDialog.type(), pendingDialog.message())
+  const pageNow = async (): Promise<string> => {
+    const dialog = frontDialog()
+    return dialog === undefined
+      ? pageForChange(await inFront().locator('body').ariaSnapshot({ timeout: ACTION_TIMEOUT_MS }))
+      : dialogForChange(dialog.type(), dialog.message())
+  }
   /** What the agent last saw: its last read, or the page right after its last move (`createChangeBaseline`). */
   const lastSeen = createChangeBaseline(pageNow)
+  /** The tab actions (#675): list the tabs, bring one to the front, close one but never the last. */
+  const performOnTabs = async (
+    action: Extract<ArenaAction, { action: 'tabs' | 'switch-tab' | 'close-tab' }>,
+  ): Promise<unknown> => {
+    if (action.action === 'tabs') {
+      return {
+        tabs: await Promise.all(
+          [...tabs].map(async ([tabNumber, tabPage]) => ({
+            tab: tabNumber,
+            url: tabPage.url(),
+            title: await tabPage.title().catch(() => ''),
+            ...(tabNumber === front ? { front: true } : {}),
+          })),
+        ),
+      }
+    }
+    const tabNumber = action.tab ?? front
+    const tabPage = tabs.get(tabNumber)
+    if (tabPage === undefined) throw new Error(`no tab ${tabNumber} — \`tabs\` lists them`)
+    if (action.action === 'switch-tab') {
+      await bringToFront(tabNumber)
+      return here()
+    }
+    if (tabs.size === 1) throw new Error('the last tab stays open: there would be no page to act on')
+    // Its `close` listener forgets it and brings the newest tab left to the front.
+    await tabPage.close()
+    return here()
+  }
   const perform = async (action: ArenaAction, via: ArenaActionSource): Promise<unknown> => {
     const timeout = ACTION_TIMEOUT_MS
     switch (action.action) {
       case 'goto':
-        await page.goto(new URL(action.path, ARENA_WEB_ORIGIN).toString(), { timeout })
+        await inFront().goto(new URL(action.path, ARENA_WEB_ORIGIN).toString(), { timeout })
         return here()
       case 'click':
-        await locate(page, action.target).click({ timeout })
+        await locate(inFront(), action.target).click({ timeout })
         return here()
       case 'hover':
-        await locate(page, action.target).hover({ timeout })
+        await locate(inFront(), action.target).hover({ timeout })
         return here()
       case 'fill':
-        await locate(page, action.target).fill(action.text, { timeout })
+        await locate(inFront(), action.target).fill(action.text, { timeout })
         return here()
       case 'select':
-        await locate(page, action.target).selectOption(action.option, { timeout })
+        await locate(inFront(), action.target).selectOption(action.option, { timeout })
         return here()
       case 'press':
-        if (action.target === undefined) await page.keyboard.press(action.key)
-        else await locate(page, action.target).press(action.key, { timeout })
+        if (action.target === undefined) await inFront().keyboard.press(action.key)
+        else await locate(inFront(), action.target).press(action.key, { timeout })
         return here()
       case 'read': {
         // ⚠ An open native dialog blocks the page, the snapshot included: say the dialog instead.
-        if (pendingDialog !== undefined) {
+        const dialog = frontDialog()
+        if (dialog !== undefined) {
           lastSeen.saw(await pageNow())
-          return { ...here(), dialog: { type: pendingDialog.type(), message: redact(pendingDialog.message()) } }
+          return { ...here(), dialog: { type: dialog.type(), message: redact(dialog.message()) } }
         }
         // One snapshot (PR #646 review): the page the agent reads is the wait's baseline too.
-        const snapshot = await page.locator('body').ariaSnapshot({ timeout })
+        const snapshot = await inFront().locator('body').ariaSnapshot({ timeout })
         lastSeen.saw(pageForChange(snapshot))
         return { ...here(), page: snapshot }
       }
@@ -712,24 +823,24 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
         return { ...here(), screenshot: await shoot('requested') }
       case 'wait': {
         if (action.until === undefined) {
-          await page.waitForTimeout(action.ms)
+          await inFront().waitForTimeout(action.ms)
           return here()
         }
         const waited = await waitForPage({
           until: action.until,
           baseline: await lastSeen.baseline(),
           look: pageNow,
-          sleep: (ms) => page.waitForTimeout(ms),
+          sleep: (ms) => inFront().waitForTimeout(ms),
           ms: action.ms,
           pollMs: CHANGE_POLL_MS,
         })
         return { ...here(), ...waited }
       }
       case 'back':
-        await page.goBack({ timeout })
+        await inFront().goBack({ timeout })
         return here()
       case 'reload':
-        await page.reload({ timeout })
+        await inFront().reload({ timeout })
         return here()
       case 'note':
         timeline.record(
@@ -754,6 +865,10 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
         return answerDialog((dialog) => dialog.accept(action.text))
       case 'dismiss-dialog':
         return answerDialog((dialog) => dialog.dismiss())
+      case 'tabs':
+      case 'switch-tab':
+      case 'close-tab':
+        return performOnTabs(action)
       case 'stop':
         resolveStop(`the agent stopped the run${action.reason === undefined ? '' : `: ${redact(action.reason)}`}`)
         return { stopping: true }

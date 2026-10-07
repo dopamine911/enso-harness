@@ -79,6 +79,10 @@ test('every action reads back as one line, and a malformed one says what it take
     { action: 'stop', reason: 'done' },
     { action: 'stop' },
     { action: 'reload' },
+    { action: 'tabs' },
+    { action: 'switch-tab', tab: 1 },
+    { action: 'close-tab' },
+    { action: 'close-tab', tab: 2 },
   ].map((request) => {
     const parsed = parseArenaAction(request)
     if (!parsed.ok) throw new Error(parsed.error)
@@ -95,6 +99,10 @@ test('every action reads back as one line, and a malformed one says what it take
     'stop: done',
     'stop',
     'reload',
+    'tabs',
+    'switch-tab 1',
+    'close-tab',
+    'close-tab 2',
   ])
   for (const malformed of [
     { action: 'fill', target: { label: 'x' } },
@@ -103,6 +111,9 @@ test('every action reads back as one line, and a malformed one says what it take
     { action: 'press', key: 'Enter', target: 'composer' },
     { action: 'wait', ms: -1 },
     { action: 'click', target: { role: '' } },
+    { action: 'switch-tab' },
+    { action: 'switch-tab', tab: -1 },
+    { action: 'close-tab', tab: 1.5 },
   ]) {
     expect(parseArenaAction(malformed)).toMatchObject({ ok: false })
   }

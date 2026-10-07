@@ -19,6 +19,11 @@ export interface ArenaPagePlace {
   readonly url: string
   /** The thread the URL names (`?thread=`, #142), or absent on a fresh page. */
   readonly threadId?: string
+  /**
+   * The tab, when it is not the first (#675): tabs are numbered as they open, Enso's is 0, and a
+   * number is never reused. Absent on the first tab, so a one-tab run's lines are what they were.
+   */
+  readonly tab?: number
 }
 
 /** Why a screenshot was taken. `sample` is the periodic one; the rest are event captures. */
@@ -33,6 +38,8 @@ export type ArenaShotCause =
   | 'enso-exit'
   | 'requested'
   | 'final'
+  /** A tab the page opened came to the front (#675): what the agent now sees. */
+  | 'tab-opened'
 
 /** A note the agent wrote: a wish, a piece of friction, or its end-of-run retrospective. */
 export type ArenaNoteKind = 'wish' | 'friction' | 'retrospective'
@@ -73,6 +80,9 @@ export type ArenaEventBody =
   | { readonly kind: 'enso-exit'; readonly exit: string }
   | { readonly kind: 'enso-start' }
   | { readonly kind: 'trace-chunk'; readonly path: string }
+  /** A tab opened by the page (#675) — Preview's, a link's — and the one it came from. */
+  | { readonly kind: 'tab-opened'; readonly tab: number; readonly opener?: number }
+  | { readonly kind: 'tab-closed'; readonly tab: number }
   /** Something the recorder itself failed to do — a trace chunk not written — recorded, not thrown. */
   | { readonly kind: 'recorder-error'; readonly during: string; readonly error: string }
   /** The agent runner started: the model that drives the UI, and the only tools it was given. */

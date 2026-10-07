@@ -171,6 +171,10 @@ label or placeholder. Start with \`read\`, which returns the page's accessibilit
 A target may add "exact": true and "nth": <index> when a name matches more than one element.
 Everything on screen is recorded, so text that looks like a credential is refused, not typed.
 
+A link or a button may open a new tab: it comes to the front, and your actions go to the tab in front.
+\`{"action":"tabs"}\` lists the open tabs, \`{"action":"switch-tab","tab":0}\` brings one to the front, and
+\`{"action":"close-tab"}\` closes the one in front (Enso's own tab is 0).
+
 While Enso works, wait for it to need you rather than sleeping a fixed time:
 
     {"action":"wait","until":"attention","ms":60000}
