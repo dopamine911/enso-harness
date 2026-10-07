@@ -100,7 +100,7 @@ import type { ListingState } from './listing-store.ts'
 import { ModelChip, ModelChoiceDialog, ThinkingLevelSelect, useModelState, useRecordedModel } from './model-state.tsx'
 import { NotificationLines, type PlacedLines, placeLines } from './notifications.tsx'
 import { PermissionModeSelect, usePermissionMode } from './permission-mode.tsx'
-import { createProjectsStore, projectOf, removeProject } from './project-list.ts'
+import { createProjectsStore, projectOf, removeProject, threadAfterDelete } from './project-list.ts'
 import { PromptManagerDialog } from './prompt-manager.tsx'
 import { QuestionnaireControls } from './questionnaire-card.tsx'
 import { providerRefusalLine, providerRefusalSource, RefusedAttemptLine, refusalOfMessage } from './refused-attempt.tsx'
@@ -2423,25 +2423,39 @@ export function ChatScreen(): React.ReactNode {
     [resume],
   )
   // A deleted thread (#571) leaves the page; its pane goes, and the listing refreshes so the rail
-  // cannot offer it again. On screen still, it is left the way a failed resume leaves one: for a
-  // fresh thread in its project, written over its URL so back does not ask for the deleted id. ⚠
-  // Not on screen — the user moved while the server worked (PR #572 review) — nothing moves them:
-  // the answer is said on the thread they are on, and its history entry stays its own.
+  // cannot offer it again. On screen still, the page shows its project's most recent other thread
+  // (#663: deleting one of two approaches opened an empty thread and its Start dialog, the other one
+  // right there in the rail) — a fresh thread only when the project holds no other — written over
+  // its URL so back does not ask for the deleted id. ⚠ Not on screen — the user moved while the
+  // server worked (PR #572 review) — nothing moves them: the answer is said on the thread they are
+  // on, and its history entry stays its own.
   const leaveDeleted = useCallback(
     (threadId: string): void => {
       // Off screen while the server worked, its stores may already be gone: the follow budget drops
       // idle threads. Only the one on screen is read, and that one the budget never drops.
       const wasShown = activePane.current === threadId
+      const next = wasShown
+        ? threadAfterDelete(threadId, getThreadStores(threadId).projectId, {
+            projects: projects.rows,
+            pageThreads: threads,
+            stored: stored.rows,
+          })
+        : undefined
       const projectId = wasShown ? getThreadStores(threadId).projectId : undefined
-      // Dropped before the fresh one is minted, so the deleted thread is not what pushes another out of the budget.
+      // Dropped before a fresh one is minted, so the deleted thread is not what pushes another out of the budget.
       dropThread(threadId)
-      const shown = wasShown ? mintPageThread(projectId).threadId : activePane.current
       void storedThreads.refresh()
+      // A stored thread is resumed, its history read first: its notice would have no pane to go to yet.
+      if (next !== undefined && !next.onPage) {
+        resumeFrom(next.threadId, 'replace')
+        return
+      }
+      const shown = wasShown ? (next?.threadId ?? mintPageThread(projectId).threadId) : activePane.current
       if (shown === undefined) return
       if (wasShown) navigate(shown, 'replace')
       getThreadStores(shown).notifications.push(`thread ${threadId} deleted`, 'info', 'run', ENSO_NOTICE_SOURCE)
     },
-    [navigate],
+    [navigate, resumeFrom, projects.rows, threads, stored.rows],
   )
   // Boot: the URL named a thread — adopt it. Once per page; the coordinator drops a stale answer.
   useEffect(() => {
