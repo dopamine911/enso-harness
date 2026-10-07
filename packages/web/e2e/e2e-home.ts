@@ -2,14 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import {
-  ensoAgentDir,
-  ensoProjectsDir,
-  findRepoRoot,
-  projectIdOf,
-  projectTreesDir,
-  realpathOrSelf,
-} from '@enso/core/paths'
+import { ensoAgentDir, findRepoRoot, realpathOrSelf } from '@enso/core/paths'
 import { demoModelsJson } from '../../../scripts/docs/feature-session.ts'
 import { writeStoredSession } from '../src/host/__tests__/stored-session.ts'
 
@@ -51,8 +44,6 @@ export interface E2eHome {
     readonly second: string
     /** A thread whose session ran in a folder no project covers: the server refuses to open it (#378). */
     readonly outside: string
-    /** A thread whose tree holds a page built of ES modules, for Preview (#689). */
-    readonly modules: string
   }
 }
 
@@ -61,7 +52,6 @@ export const SEEDED_TITLES = {
   first: 'First seeded thread',
   second: 'Second seeded thread',
   outside: 'A thread outside the projects',
-  modules: 'A thread that built a page of ES modules',
 } as const
 
 /** A reply several lines tall, numbered, so a scrolled position is a place a reader could name. */
@@ -81,30 +71,6 @@ function seedThread(cwd: string, title: string, turnCount: number): string {
     reply(title, turn + 1),
   ])
   writeStoredSession({ cwd, threadId, turns })
-  return threadId
-}
-
-/**
- * The page #689's arena run found: an `index.html` whose code is a module importing another. It
- * says it ran by writing into the page, which only the imported module's answer can.
- */
-const MODULE_PAGE = {
-  'index.html':
-    '<!doctype html><title>Modules</title><p id="status">the modules did not run</p><script type="module" src="app.mjs"></script>',
-  'app.mjs': "import { status } from './game-logic.mjs'\ndocument.getElementById('status').textContent = status()\n",
-  'game-logic.mjs': "export const status = () => 'both modules ran'\n",
-}
-
-/**
- * A thread whose cwd is its own tree (#551) under the launch project, holding `MODULE_PAGE`: a tree
- * is served exactly when its project is, so Preview serves it.
- */
-function seedModulePage(home: string, project: string): string {
-  const threadId = randomUUID()
-  const tree = join(projectTreesDir(ensoProjectsDir(home), projectIdOf(realpathOrSelf(project))), threadId)
-  mkdirSync(tree, { recursive: true })
-  for (const [fileName, fileContent] of Object.entries(MODULE_PAGE)) writeFileSync(join(tree, fileName), fileContent)
-  writeStoredSession({ cwd: tree, threadId, turns: [[SEEDED_TITLES.modules, 'Built index.html and two modules.']] })
   return threadId
 }
 
@@ -128,7 +94,6 @@ function seededHome(): E2eHome {
       first: seedThread(project, SEEDED_TITLES.first, SEEDED_TURNS),
       second: seedThread(project, SEEDED_TITLES.second, SEEDED_TURNS),
       outside: seedThread(elsewhere, SEEDED_TITLES.outside, 1),
-      modules: seedModulePage(home, project),
     },
   }
 }
