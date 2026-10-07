@@ -4,12 +4,14 @@ import {
   ENSO_GUARD_DENIAL_ENTRY,
   ENSO_PROVIDER_REFUSAL_KEY,
   ENSO_SESSION_RISK_ENTRY,
+  ENSO_UI_EVENTS,
   type EnsoFollowFrame,
   type EnsoForkReceipt,
   type EnsoGitFileChange,
   type EnsoGitRepository,
   type EnsoStoredThread,
   type EnsoThreadDeletePreview,
+  type EnsoThreadStatusEvent,
   type EnsoTranscriptEntry,
   type EnsoTreeOnDisk,
   type EnsoTreesListing,
@@ -2512,6 +2514,67 @@ test('a question waiting while Stats is shown is said on the Chat tab, in the st
   expect(liveRegion?.textContent).toBe('')
   expect(railRow()).not.toContain('waiting on you')
   await page.unmount()
+})
+
+// #737: the bar announces what it shows as `enso:thread-status` on `document` — on mount, and on
+// each change of status, question or `shown` — so a listener (the arena's wait, the browser suite)
+// never samples the page. The event follows the RENDER: it carries what the bar says at that moment.
+test('⚠ the status bar announces enso:thread-status on mount and at each change of status, question and shown (#737)', async () => {
+  const heard: EnsoThreadStatusEvent[] = []
+  const listener = (event: Event): void => {
+    if (event instanceof CustomEvent) heard.push(event.detail as EnsoThreadStatusEvent)
+  }
+  document.addEventListener(ENSO_UI_EVENTS.threadStatus, listener)
+  try {
+    const pane = await mountPane()
+    const { threadId } = pane.stores
+    // Mounted idle: said once, not once per render.
+    expect(heard).toEqual([{ threadId, shown: true, status: 'idle' }])
+    await pane.settle({ ...SNAPSHOT_IDLE, live: true, busy: true, generation: 1 })
+    await eventually(() => expect(heard.at(-1)).toEqual({ threadId, shown: true, status: 'running' }))
+    // A finer activity word is still `running`: no event for the bar going from working to a tool.
+    await pane.settle(
+      { type: 'observation', seq: 1, observation: { kind: 'message-start', role: 'assistant' } },
+      {
+        type: 'observation',
+        seq: 2,
+        observation: { kind: 'tool-call', toolCallId: 'c1', toolName: 'bash', args: { command: 'ls' } },
+      },
+    )
+    await eventually(() => expect(pane.status()).toContain('running bash'))
+    expect(heard).toHaveLength(2)
+    // A question: its id and title go with it, so a listener can tell the next one from this one.
+    await flush(async () => {
+      getThreadStores(threadId).dialog.set({ id: 'd1', dialog: { method: 'confirm', title: 'Proceed?', message: '' } })
+      await tick()
+    })
+    expect(heard.at(-1)).toEqual({
+      threadId,
+      shown: true,
+      status: 'question',
+      question: { id: 'd1', title: 'Proceed?' },
+    })
+    await flush(async () => {
+      getThreadStores(threadId).dialog.set(undefined)
+      await tick()
+    })
+    expect(heard.at(-1)).toEqual({ threadId, shown: true, status: 'running' })
+    // The rail switches away: the bar stays mounted and says so; back again, it says that too.
+    await pane.setActive(false)
+    expect(heard.at(-1)).toEqual({ threadId, shown: false, status: 'running' })
+    await pane.setActive(true)
+    expect(heard.at(-1)).toEqual({ threadId, shown: true, status: 'running' })
+    // The follow ends: disconnected, over everything else.
+    await flush(async () => {
+      getThreadStores(threadId).dialog.set({ id: 'd2', dialog: { method: 'confirm', title: 'Still?', message: '' } })
+      getThreadStores(threadId).disconnected.set(true)
+      await tick()
+    })
+    expect(heard.at(-1)).toEqual({ threadId, shown: true, status: 'disconnected' })
+    await pane.unmount()
+  } finally {
+    document.removeEventListener(ENSO_UI_EVENTS.threadStatus, listener)
+  }
 })
 
 test('New Thread mints a thread, lists it in the rail as current, and shows exactly its pane', async () => {

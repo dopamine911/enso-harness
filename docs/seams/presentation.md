@@ -371,6 +371,16 @@ The renderers that stay ours are outside the ported directory: the dialog card i
 and the status bar are the `SelectedMessagePart`, `NotificationLines`, `PermissionModeSelect`,
 `ThreadStatusBar` and `EnsoRendererMap` imports.
 
+**The page announces its own state (#737).** A component that renders a state a listener could act
+on dispatches it as a DOM `CustomEvent` on `document`, named and shaped by core's `ui-events.ts`
+(`packages/core/src/ui-events.ts#ENSO_UI_EVENTS`) and sent through `packages/web/src/ui-events.ts#announceUiEvent`
+from an effect, after the commit. The first is `enso:thread-status`, from `ThreadStatusBar`
+(`thread-status.tsx#threadStatusKind`): on mount and at each change of `running | question | idle |
+disconnected`, the open question's id and title, or `shown`. The Dogfood Arena's `wait until attention`
+(`packages/arena/src/actions.ts#waitForAttention`) listens for it instead of sampling the accessibility
+tree; the words contract (`THREAD_STATUS_WORDS`) stays for readers. From the render, never from the
+server: an event cannot fire for a state the page failed to show.
+
 **A second connection today: the fixture.** `?fixture` swaps the live adapter for the scripted
 conversation in `fixture-conversation.ts` (`chat-screen.tsx#threadChatOptions`, `connection: isFixtureMode ?
 createFixtureChat().transport() : stores.connection`), and the option's type admits both (`chat-screen.tsx#ThreadChatOptions`).

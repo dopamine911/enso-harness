@@ -1,19 +1,24 @@
 import {
+  ENSO_UI_EVENTS,
   type EnsoContextUsage,
   type EnsoSessionIncidents,
   type EnsoSessionRiskChange,
   type EnsoSessionUsage,
+  type EnsoThreadStatusKind,
   openIncidentOf,
   type ProviderRefusalClass,
   THREAD_STATUS_WORDS,
 } from '@enso/core'
 import type { UIMessage } from '@tanstack/ai-client'
 import { automaticPartsForMessage, selectMessageUI } from '@tanstack/ai-client/ui'
+import { useEffect } from 'react'
 import { toolResultState } from './EnsoToolResult.tsx'
 import { useThreadReadable } from './model-state.tsx'
 import { useStore, useThreadStores } from './store.ts'
 import { GitIndicator, type GitOutcome, settledToolResults, useThreadGit } from './thread-git.tsx'
+import { type EnsoPendingDialog } from './thread-stores.ts'
 import { ThreadTreeButton } from './thread-tree-pages.tsx'
+import { announceUiEvent } from './ui-events.ts'
 
 /**
  * The status bar (#90 PR 1): the always-on line that says what this session is doing and
@@ -498,25 +503,67 @@ export interface ThreadStatusBarProps {
   readonly projectTitle?: string | undefined
   /** Asks the page for a view (#361) — the risk word asks for Stats (#727). */
   readonly openView: (view: 'stats') => void
+  /** Whether this bar's pane is the one on screen (#737): every mounted pane keeps its bar (#472). */
+  readonly shown: boolean
+}
+
+/**
+ * What the bar says to a listener (#737, core's `EnsoThreadStatusKind`), from what it shows: the
+ * follow ended, else a question waiting, else at rest or not. The bar's finer activity words
+ * (working, thinking, running a tool, responding) are all `running` to something that waits on it.
+ */
+function threadStatusKind(activity: Activity, questionWaiting: boolean): EnsoThreadStatusKind {
+  if (activity.kind === 'disconnected') return 'disconnected'
+  if (questionWaiting) return 'question'
+  return activity.kind === 'idle' ? 'idle' : 'running'
+}
+
+/**
+ * Announce the bar's status as `enso:thread-status` (#737): on mount, and whenever the status, the
+ * open question or `shown` changes — after the commit, so a listener that reads the page on the
+ * event finds the bar saying what the event says. The question's fields are the dependencies, not
+ * the dialog object: a re-render with the same question announces nothing.
+ */
+function useThreadStatusAnnouncement(
+  threadId: string,
+  shown: boolean,
+  status: EnsoThreadStatusKind,
+  dialog: EnsoPendingDialog | undefined,
+): void {
+  const questionId = status === 'question' ? dialog?.id : undefined
+  const questionTitle = status === 'question' ? dialog?.dialog.title : undefined
+  useEffect(() => {
+    announceUiEvent(ENSO_UI_EVENTS.threadStatus, {
+      threadId,
+      shown,
+      status,
+      ...(questionId === undefined || questionTitle === undefined
+        ? {}
+        : { question: { id: questionId, title: questionTitle } }),
+    })
+  }, [threadId, shown, status, questionId, questionTitle])
 }
 
 /**
  * The bar wired to its thread: the chat's messages and in-flight flag come in as props
  * (the chat hook is bound inside chat-screen.tsx, and this module stays free of it), the
- * thread's usage store and its disconnected flag (#119) are read from context.
+ * thread's usage store and its disconnected flag (#119) are read from context. It announces
+ * what it shows (`useThreadStatusAnnouncement`, #737).
  */
 export function ThreadStatusBar({
   messages,
   generating,
   projectTitle,
   openView,
+  shown,
 }: ThreadStatusBarProps): React.ReactNode {
   const stores = useThreadStores()
   const usage = useStore(stores.usage)
   const disconnected = useStore(stores.disconnected)
   const cwd = useStore(stores.cwd)
   const onTree = useStore(stores.tree)
-  const questionWaiting = useStore(stores.dialog) !== undefined
+  const dialog = useStore(stores.dialog)
+  const questionWaiting = dialog !== undefined
   const refusal = useStore(stores.refusal)
   const refusals = useStore(stores.refusals)
   const risk = useStore(stores.sessionRisk)
@@ -528,9 +575,11 @@ export function ThreadStatusBar({
   // When the tree may have moved: a settled tool result, the run starting or ending.
   const moment = `${settledToolResults(messages)}:${generating}`
   const git = useThreadGit(moment, readable)
+  const activity = describeActivity(messages, generating, disconnected)
+  useThreadStatusAnnouncement(stores.threadId, shown, threadStatusKind(activity, questionWaiting), dialog)
   return (
     <ThreadStatusView
-      activity={describeActivity(messages, generating, disconnected)}
+      activity={activity}
       counts={countThread(messages, refusals)}
       usage={usage}
       cwd={cwd}

@@ -1,5 +1,5 @@
 import { appendFileSync, existsSync, readFileSync } from 'node:fs'
-import { isEnsoThreadId } from '@enso/core'
+import { type EnsoThreadStatusKind, isEnsoThreadId } from '@enso/core'
 import type { ArenaEnsoBuild, ArenaWorkspaceSample } from './run-state.ts'
 
 /**
@@ -105,6 +105,8 @@ export type ArenaEventBody =
   /** A tab opened by the page (#675) — Preview's, a link's — and the one it came from. */
   | { readonly kind: 'tab-opened'; readonly tab: number; readonly opener?: number }
   | { readonly kind: 'tab-closed'; readonly tab: number }
+  /** The page announced its shown thread's status (#737, core's `enso:thread-status`): each transition, as evidence. */
+  | { readonly kind: 'thread-status'; readonly status: EnsoThreadStatusKind; readonly question?: string }
   /** Something the recorder itself failed to do — a trace chunk not written — recorded, not thrown. */
   | { readonly kind: 'recorder-error'; readonly during: string; readonly error: string }
   /** The agent runner started: the model that drives the UI, and the only tools it was given. */
