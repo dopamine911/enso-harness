@@ -89,6 +89,7 @@ import {
 import { LOST_TOOL_RESULT_TEXT, NOTHING_TO_CONTINUE } from '../continuation.ts'
 import { storedPermissionModeState } from '../permission-mode-adapter.ts'
 import { readPermissionPolicy, resetPermissionPolicy, writePermissionPolicy } from '../permission-policy-file.ts'
+import { RESTORE_NOTE_EXTENSION_PATH } from '../restore-note.ts'
 import { recordedModelOf, transcriptOf } from '../transcript.ts'
 import { writeStoredSession } from './stored-session.ts'
 
@@ -471,16 +472,20 @@ test('a new session says the model it starts with, as its own `model` observatio
 })
 
 // @pins boot-and-launchers/manifest-order
-test("exactly the manifest's extensions load, in order, then the host's own model watcher, with no load errors", async () => {
+test("exactly the manifest's extensions load, in order, then the host's own model watcher and restore note, with no load errors", async () => {
   const hosted = await hostedSession()
   const loaded = hosted.loadedExtensionPaths
-  // The last is not the manifest's: it is the host's listener for pi's `model_select`, the
-  // only place a model swap is announced (#338 slice 2; `agent-host.ts` header). Listed, not hidden.
-  expect(loaded).toHaveLength(MANIFEST_EXTENSION_MARKERS.length + 1)
+  // The last two are not the manifest's: the host's listener for pi's `model_select`, the only
+  // place a model swap is announced (#338 slice 2; `agent-host.ts` header), and its note to pi
+  // after a restore (#652, `restore-note.ts`). Listed, not hidden.
+  expect(loaded).toHaveLength(MANIFEST_EXTENSION_MARKERS.length + 2)
   MANIFEST_EXTENSION_MARKERS.forEach((marker, index) => {
     expect(loaded[index]?.endsWith(marker)).toBe(true)
   })
-  expect(loaded[MANIFEST_EXTENSION_MARKERS.length]).toBe(MODEL_WATCH_EXTENSION_PATH)
+  expect(loaded.slice(MANIFEST_EXTENSION_MARKERS.length)).toEqual([
+    MODEL_WATCH_EXTENSION_PATH,
+    RESTORE_NOTE_EXTENSION_PATH,
+  ])
   logs.assertNotLogged({ rawMessage: /failed to load/ })
 })
 
@@ -2290,6 +2295,66 @@ async function deleteAsPreviewed(host: AgentHost, threadId: string): Promise<Thr
     retire: NOTHING_LIVE,
   })
 }
+
+// ⚠ #652, measured twice in the arena: a restore put the files back and left the conversation, so
+// pi's next turn worked from files that were no longer there — an agent had to tell it, and once only
+// the stale-write guard caught it. The next request now says so, once, through the real host.
+test('⚠ the request after a restore tells pi which prompt the files went back to, once; a prompt with no restore before it says nothing (#652)', async () => {
+  const project = dirtyCheckout()
+  const core = createFauxCore()
+  // Each reply records the request it answered: what the model was sent, as text, per message.
+  const sent: string[][] = []
+  type SentContent = string | ReadonlyArray<{ readonly type: string; readonly text?: string }>
+  const replying =
+    (text: string) =>
+    (context: { readonly messages: ReadonlyArray<{ readonly content: SentContent }> }): unknown => {
+      sent.push(
+        context.messages.map((message) =>
+          typeof message.content === 'string'
+            ? message.content
+            : message.content
+                .flatMap((part) => (part.type === 'text' && part.text !== undefined ? [part.text] : []))
+                .join(' '),
+        ),
+      )
+      return faux.fauxAssistantMessage(text)
+    }
+  core.setResponses(['one', 'two', 'three', 'four', 'five'].map(replying))
+  const { host } = treeHost(project, [fauxModelExtension(core)])
+  new ProjectTrustStore(agentDir).set(project, true)
+  const threadId = crypto.randomUUID()
+  const hosted = await host.createSession(threadId, () => project)
+  openSessions.push(hosted)
+  await runPrompt(hosted, 'add priorities')
+  writeFileSync(join(hosted.inspect().cwd, 'a.txt'), 'priorities\n')
+  await runPrompt(hosted, 'add due dates')
+  // The agent's edit during that round: the files at the restore are no prompt's start.
+  writeFileSync(join(hosted.inspect().cwd, 'a.txt'), 'due dates\n')
+  const restored = await host.restoreThreadAt(threadId, userEntryOf(hosted.inspect().entries, 'add priorities'))
+  if (restored.kind !== 'restored') throw new Error(`restore refused: ${JSON.stringify(restored)}`)
+
+  await runPrompt(hosted, 'try another way')
+  const afterRestore = sent[2] ?? []
+  const notes = afterRestore.filter((text) => text.startsWith('Note from Enso'))
+  expect(notes).toHaveLength(1)
+  expect(notes[0]).toContain('how they were when prompt 1 began ("add priorities")')
+  expect(notes[0]).toContain('Read a file again before you rely on it or edit it.')
+  // Nothing before the restore carried one, and the next request does not repeat it.
+  expect([...(sent[0] ?? []), ...(sent[1] ?? [])].some((text) => text.startsWith('Note from Enso'))).toBe(false)
+  await runPrompt(hosted, 'and once more')
+  expect((sent[3] ?? []).filter((text) => text.startsWith('Note from Enso'))).toHaveLength(1)
+  // An idle thread after a restore is not a torn one: the branch ends on the reply, not on the note.
+  const last = hosted.inspect().entries.at(-1)
+  expect(last?.kind === 'message' && last.role === 'assistant').toBe(true)
+
+  // Undo puts back files that were no prompt's start: said as files changed outside this conversation.
+  const undone = await host.undoLastRestore(threadId, restored.safety)
+  if (undone.kind !== 'restored') throw new Error(`undo refused: ${JSON.stringify(undone)}`)
+  await runPrompt(hosted, 'after the undo')
+  const afterUndo = (sent[4] ?? []).filter((text) => text.startsWith('Note from Enso'))
+  expect(afterUndo).toHaveLength(2)
+  expect(afterUndo[1]).toContain('back from an earlier restore (an undo)')
+})
 
 // #571: a delete removes what the thread has on disk — its session file and its store, which
 // run-context mints for every thread, tree or not — and the id stays refused, so a page still

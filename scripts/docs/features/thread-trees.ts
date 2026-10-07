@@ -15,7 +15,7 @@ export const THREAD_TREES: FeatureSpec = {
   landingTagline: 'own tree · restore · disk',
   shows: [
     "Each new thread works in a tree of its own, not in your checkout. When the project is a git repository's top level, the tree is a git worktree on a branch of its own, `enso/<thread-id>`; otherwise it is a copy of the project. It starts from your checkout as you left it, uncommitted edits and untracked files included, never your ignored files such as `node_modules` or `.env`. pi's file tools stay inside it, so one thread cannot write into another thread's files, or into yours.",
-    "At the start of every run, Enso takes a snapshot of the tree. **Restore files to here**, under any prompt you sent, puts the tree's files back to how they were when that prompt ran. The conversation is not changed, and the files the restore replaced are kept: **Undo last restore** puts them back. A fork made at a prompt gets a tree of its own, at that prompt's snapshot.",
+    "At the start of every run, Enso takes a snapshot of the tree. **Restore files to here**, under any prompt you sent, puts the tree's files back to how they were when that prompt ran. The conversation is not changed, but your next prompt tells pi the files went back, and to which prompt, so it doesn't work from files that are gone (#652). The files the restore replaced are kept: **Undo last restore** puts them back. A fork made at a prompt gets a tree of its own, at that prompt's snapshot.",
     'Deleting a thread removes its tree, its branch and its snapshots, after checking what the tree still holds. **Settings** → **Trees** lists every tree with what it takes on disk.',
   ],
   opens: [
@@ -59,7 +59,7 @@ export const THREAD_TREES: FeatureSpec = {
             .first(),
       },
       after: [
-        "**Restore files to here**, under a prompt, first asks: the thread's files go back to how they were at that prompt, the conversation is not changed, and the current files are kept as a safety snapshot. Once it is done, a notice names both snapshots, with **Undo last restore**, which puts the files from before back.",
+        "**Restore files to here**, under a prompt, first asks: the thread's files go back to how they were at that prompt, the conversation is not changed (pi is told on your next prompt), and the current files are kept as a safety snapshot. Once it is done, a notice names both snapshots, with **Undo last restore**, which puts the files from before back.",
         "**What this thread built** opens from the bar's **own tree, not your checkout**, and from **Preview** beside it once the tree holds an HTML page: the tree's full path, with **Copy path**, and the HTML pages at its top two levels. **Open preview** opens a page in a new tab, served from the tree as it is now, so you can try what the thread built.",
       ],
     },
