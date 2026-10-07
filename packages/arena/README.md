@@ -49,6 +49,15 @@ A native browser dialog (`alert`, `confirm`, `prompt`) blocks the page until it 
 reports it, and `accept-dialog` (with `text` for a prompt) or `dismiss-dialog` answers it. Enso raises
 none today.
 
+**Tabs (#675).** A tab the page opens (Preview's **Open preview**, a link) comes to the front, as a
+browser shows it, and every action goes to the tab in front. `tabs` lists the open tabs by number
+(Enso's is 0, and a number is never reused), `switch-tab` brings one to the front, and `close-tab`
+closes one; the last tab stays open. Every tab is watched and traced. A timeline line names its tab
+when it is not the first, and event screenshots are taken of the tab in front. What the built page
+itself logs in its Preview tab (a console error, a missing file, an uncaught error, a failed action)
+is scored under **application**, as a warning: a bug in the game doesn't fail Enso's run. A 5xx
+serving that page is still Enso's.
+
 **Each run has its own Enso home, `<run>/.enso` (#610).** It holds the run's projects, threads, logs
 and Stats, so the agent under test sees only the run's project, the evidence covers only the run,
 and your own Stats and logs are untouched. Your login comes in by symlink:

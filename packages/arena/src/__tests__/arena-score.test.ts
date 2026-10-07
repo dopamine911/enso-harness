@@ -139,6 +139,55 @@ test('a UI check that cannot be made is unknown, and unknown fails the run', () 
   expect(score).toMatchObject({ verdict: 'fail', uiUsed: false })
 })
 
+// ⚠ #675: once the agent plays what it built, the built page's own errors reach the timeline. They
+// are the application's — a game bug must not fail Enso's run — but a 5xx serving it is Enso's.
+test('⚠ what the built page logs in its Preview tab is the application’s; a 5xx serving that page is Enso’s', () => {
+  const path = join(mkdtempSync(join(tmpdir(), 'arena-score-')), 'timeline.jsonl')
+  const timeline = openTimeline(path, steppingClock())
+  const inThread = pagePlace(`http://127.0.0.1:5178/?thread=${SHOWN}`)
+  for (const body of AGENT_RUN) {
+    timeline.record(body, body.kind.startsWith('run-') || body.kind.startsWith('agent-') ? undefined : inThread)
+  }
+  const preview = { ...pagePlace(`http://127.0.0.1:5178/preview/threads/${SHOWN}/index.html`), tab: 1 }
+  timeline.record({ kind: 'tab-opened', tab: 1, opener: 0 }, preview)
+  timeline.record({ kind: 'page-error', text: 'ReferenceError: score is not defined' }, preview)
+  timeline.record(
+    { kind: 'response-error', request: `GET ${preview.url.replace('index.html', 'sprite.png')}`, status: 404 },
+    preview,
+  )
+  const scoreOf = (): ReturnType<typeof scoreArenaRun> => {
+    const events = readTimeline(path)
+    return scoreArenaRun({
+      ...inputOf(AGENT_RUN),
+      events,
+      manifest: foldArenaManifest({ runId: 'snake-1', events, evidence: [] }),
+    })
+  }
+  const played = scoreOf()
+  expect(played.verdict).toBe('pass')
+  const application = played.problems.filter((problem) => problem.source === 'application')
+  expect(
+    application
+      .map((problem) => [problem.severity, problem.message])
+      .toSorted((left, right) => String(left[1]).localeCompare(String(right[1]))),
+  ).toEqual([
+    ['warning', `HTTP 404: GET /preview/threads/${SHOWN}/sprite.png`],
+    ['warning', 'uncaught error in the page: ReferenceError: score is not defined'],
+  ])
+  expect(application[0]?.examples[0]).toContain('tab 1')
+
+  timeline.record({ kind: 'response-error', request: `GET ${preview.url}`, status: 500 }, preview)
+  const failedToServe = scoreOf()
+  expect(failedToServe.verdict).toBe('fail')
+  expect(failedToServe.problems).toContainEqual(
+    expect.objectContaining({
+      severity: 'error',
+      source: 'timeline',
+      message: `HTTP 500: GET /preview/threads/${SHOWN}/index.html`,
+    }),
+  )
+})
+
 test('every log is read for problems: errors fail the run, warnings are counted, the same problem is one line', () => {
   const run: ArenaEventBody[] = [
     ...AGENT_RUN.filter((body) => body.kind !== 'note' && body.kind !== 'run-stop'),

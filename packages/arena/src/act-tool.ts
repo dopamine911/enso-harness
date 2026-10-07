@@ -29,7 +29,7 @@ const ArenaTargetParameters = Type.Object({
 export const ArenaActToolParameters = Type.Object({
   action: Type.String({
     description:
-      'read | click | fill | press | hover | select | goto | back | reload | screenshot | wait | note | accept-dialog | dismiss-dialog | restart-enso | stop',
+      'read | click | fill | press | hover | select | goto | back | reload | screenshot | wait | note | accept-dialog | dismiss-dialog | tabs | switch-tab | close-tab | restart-enso | stop',
   }),
   target: Type.Optional(ArenaTargetParameters),
   text: Type.Optional(Type.String({ description: 'fill: what to type; accept-dialog: a prompt dialog’s answer' })),
@@ -37,6 +37,7 @@ export const ArenaActToolParameters = Type.Object({
   path: Type.Optional(Type.String({ description: 'goto: a path on Enso’s page, like "/"' })),
   option: Type.Optional(Type.String({ description: 'select: the option' })),
   ms: Type.Optional(Type.Number({ description: 'wait: milliseconds, at most 60000' })),
+  tab: Type.Optional(Type.Integer({ minimum: 0, description: 'switch-tab, close-tab: a tab number from `tabs`' })),
   note: Type.Optional(Type.String({ description: 'note: wish | friction | retrospective' })),
   trying: Type.Optional(Type.String()),
   happened: Type.Optional(Type.String()),
