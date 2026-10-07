@@ -92,6 +92,27 @@ test('a clean agent run passes: the boundary held, Enso was prompted, every thre
   })
 })
 
+// #674: a run set to Enso's model X whose sessions ran on Y would sit in X's column of a comparison.
+test('a run whose Enso never ran on the model it set says so; one that did, or whose model is unknown, does not', () => {
+  const [start, ...rest] = AGENT_RUN
+  if (start?.kind !== 'run-start') throw new Error('AGENT_RUN changed shape')
+  const setTo = (model: string): ArenaEventBody[] => [{ ...start, ensoModel: model }, ...rest]
+  const warned = (input: ArenaScoreInput): string[] =>
+    scoreArenaRun(input)
+      .problems.filter((problem) => problem.message.includes('--enso-model'))
+      .map((problem) => problem.examples.join('; '))
+  expect(warned(inputOf(setTo('anthropic/claude-opus-5-5'), { ensoModels: ['anthropic/claude-fable-5'] }))).toEqual([
+    'set anthropic/claude-opus-5-5; ran anthropic/claude-fable-5',
+  ])
+  // Ran on it first, then switched: it ran on it.
+  const switched = ['anthropic/claude-fable-5', 'anthropic/claude-opus-5-5']
+  expect(warned(inputOf(setTo('anthropic/claude-opus-5-5'), { ensoModels: switched }))).toEqual([])
+  // No thread's record collected: nothing to compare.
+  expect(warned(inputOf(setTo('anthropic/claude-opus-5-5'), { ensoModels: [] }))).toEqual([])
+  // Not set at all.
+  expect(warned(inputOf(AGENT_RUN, { ensoModels: ['anthropic/claude-fable-5'] }))).toEqual([])
+})
+
 // ⚠ #680: a visual agent clicks at points and types into what has focus. Counted only by name, its
 // moves would be none, and every visual run would fail `acted-on-page` for a reason that isn't Enso's.
 test('⚠ a visual run’s pointer and typed moves are moves on the page; a run from before records none and reads as tree', () => {

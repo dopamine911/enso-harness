@@ -332,6 +332,25 @@ function runProblems(input: ArenaScoreInput): Occurrence[] {
   return found
 }
 
+/**
+ * The run set Enso's model (#674), and Enso's sessions never ran on it: a comparison by Enso's model
+ * would put this run in the wrong column. A session that switched away later still ran on it first.
+ * Unknown — no thread's record collected — is no problem: there is nothing to compare.
+ */
+function ensoModelProblems(input: ArenaScoreInput): Occurrence[] {
+  const asked = input.manifest.ensoModel
+  const ran = input.ensoModels ?? []
+  if (asked === undefined || ran.length === 0 || ran.includes(asked)) return []
+  return [
+    {
+      severity: 'warning',
+      source: 'run',
+      message: "Enso's sessions never ran on the model the run set (--enso-model)",
+      example: `set ${asked}; ran ${ran.join(', ')}`,
+    },
+  ]
+}
+
 /** A failed request worth reporting: an aborted one is the page cancelling its own fetch on navigation. */
 function requestPath(request: string): string {
   const [method, url] = request.split(' ')
@@ -655,6 +674,7 @@ export function scoreArenaRun(input: ArenaScoreInput): ArenaScore {
   const problems = grouped([
     ...uiCheckProblems(uiChecks),
     ...runProblems(input),
+    ...ensoModelProblems(input),
     ...timelineProblems(input.events),
     ...agentProblems(input.transcript),
     ...ensoLogProblems(input.logRecords),

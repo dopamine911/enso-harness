@@ -17,6 +17,9 @@
  *   bun run arena start --agents PROVIDER/MODEL,PROVIDER/MODEL [...]
  *       the same scenario once per agent model, one after another (#674); every model resolves, and
  *       each one's cost is estimated from earlier runs, before the first run starts
+ *   bun run arena start … --enso-model PROVIDER/ID
+ *       the model Enso's sessions start on, set in the run home's own settings (#674); refused
+ *       over a shared --home, where it would change the operator's own default
  *   bun run arena start --manual [...]
  *       the same run with no agent: actions come over `bun run arena act` from whoever has a shell,
  *       and the manifest says the UI-only boundary was not held
@@ -85,9 +88,12 @@ import {
   arenaSecretValues,
   defaultArenaOut,
   isGuardedForAgent,
+  type EnsoModelSetting,
+  parseEnsoModel,
   prepareRunHome,
   reconcileLinkedFiles,
   runHomeOf,
+  setRunHomeModel,
 } from './run-home.ts'
 import { threadHistoriesIn } from './run-state.ts'
 import {
@@ -121,6 +127,7 @@ const VALUED_FLAGS = [
   'run',
   'agent',
   'agents',
+  'enso-model',
   'thinking',
   'repo',
   'idle-minutes',
@@ -301,10 +308,27 @@ function sayEstimates(agents: readonly string[]): void {
 }
 
 /**
+ * The model Enso's sessions start on, when `--enso-model` names one (#674). Only the run's own home
+ * can carry it: over a shared `--home` it would change the operator's own default.
+ */
+function ensoModelNamed(): EnsoModelSetting | undefined {
+  const named = flag('enso-model')
+  if (named === undefined) return undefined
+  if (flag('home') !== undefined)
+    fail('--enso-model sets the run home’s own settings; over a shared --home it would change yours')
+  try {
+    return parseEnsoModel(named)
+  } catch (error) {
+    return fail(error instanceof Error ? error.message : String(error))
+  }
+}
+
+/**
  * `start`: one run, or with `--agents` one run per agent, one after another — the ports are one
  * stack at a time. Exits 1 when any run's score is FAIL.
  */
 async function start(): Promise<void> {
+  const ensoModel = ensoModelNamed()
   const agents = agentsNamed()
   const matrix = agents.filter((agent) => agent !== undefined)
   if (matrix.length > 1) {
@@ -319,7 +343,7 @@ async function start(): Promise<void> {
   const runs: string[] = []
   let passed = true
   for (const agent of agents) {
-    const run = await startRun(agent)
+    const run = await startRun(agent, ensoModel)
     runs.push(run.runDirectory)
     passed &&= run.passed
   }
@@ -333,6 +357,7 @@ async function start(): Promise<void> {
 
 async function startRun(
   agent: string | undefined,
+  ensoModel: EnsoModelSetting | undefined,
 ): Promise<{ readonly runDirectory: string; readonly passed: boolean }> {
   refuseOverDeadRun()
   if (isGuardedForAgent(outDirectory)) {
@@ -356,6 +381,7 @@ async function startRun(
   const { driver, brief } = await driverNamed(scenario, context, agent)
   mkdirSync(runDirectory, { recursive: true })
   const home = flag('home') === undefined ? prepareRunHome(runDirectory, operatorHome) : operatorHome
+  if (ensoModel !== undefined) setRunHomeModel(home, ensoModel)
   const briefPath = join(runDirectory, 'brief.md')
   writeFileSync(briefPath, brief)
   writeFileSync(currentFile, runDirectory)
@@ -381,6 +407,7 @@ async function startRun(
       limits: runLimits(),
       headed: rest.includes('--headed'),
       perception: perceptionNamed(),
+      ...(ensoModel === undefined ? {} : { ensoModel: `${ensoModel.provider}/${ensoModel.id}` }),
       environment: process.env,
       ...(chromiumPath === undefined ? {} : { chromiumPath }),
       ...(driver === undefined ? {} : { driver }),

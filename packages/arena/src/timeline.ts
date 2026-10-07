@@ -73,6 +73,8 @@ export type ArenaEventBody =
       readonly home?: string
       /** How the agent perceived the page (#680); absent on a run from before, which was `tree`. */
       readonly perception?: ArenaPerception
+      /** The model Enso's sessions were set to start on (#674, `--enso-model`); absent when the run left it as configured. */
+      readonly ensoModel?: string | undefined
     }
   | { readonly kind: 'screenshot'; readonly cause: ArenaShotCause; readonly path: string }
   | {

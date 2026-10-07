@@ -133,6 +133,8 @@ export interface ArenaRunOptions {
   readonly headed: boolean
   /** How the agent perceives the page (#680): the accessibility tree (the default), or a screenshot after each action. */
   readonly perception?: ArenaPerception
+  /** The model Enso's sessions were set to start on (#674), recorded on the run's start; the run home's settings carry it. */
+  readonly ensoModel?: string
   /** The launcher's environment, which the stack inherits with `ENSO_HOME` set to `home`. */
   readonly environment: Readonly<Record<string, string | undefined>>
   /**
@@ -493,6 +495,8 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
     home: options.home,
     perception,
     ...(ensoBuild === undefined ? {} : { ensoBuild }),
+    // Absent when unset: the line is JSON, which leaves an undefined field out.
+    ensoModel: options.ensoModel,
   })
 
   // ── Screenshots, over a page that does not exist until the browser is up ───────────────────

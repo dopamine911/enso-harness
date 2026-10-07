@@ -261,9 +261,11 @@ spend is separate and bounded by `--max-cost-usd`. Measured so far (the agent's 
 | `openai-codex/gpt-6.1-sol` · tree | 6 | $1.12 |
 | `openai-codex/gpt-6.1-sol` · visual | 3 | $2.41 |
 
-**Enso's model** is recorded as used: each thread's record names the model its session ran on, and
-the score and both comparisons show it. Setting it for a run isn't possible yet: the Start dialog
-preselects its first model, whatever the settings name.
+**Enso's model.** `--enso-model PROVIDER/ID` sets the model Enso's sessions start on, in the run
+home's own copy of the settings (`defaultProvider`/`defaultModel`; yours are untouched, so it's
+refused over a shared `--home`). The Start dialog preselects it when its list offers it. The
+manifest records the model set, and each thread's record names the model its session ran on; the
+score and both comparisons show it, and the score warns when Enso never ran on the model set.
 
 ## The report (#624)
 
