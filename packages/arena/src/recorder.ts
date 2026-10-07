@@ -222,6 +222,19 @@ function makeProject(project: string): void {
   })
 }
 
+/**
+ * What a page read can show: no element a modal dialog hid (`aria-hidden`, which Radix sets on
+ * everything beside an open dialog) or made `inert`. `getByRole` leaves those out by itself; the
+ * text, label and placeholder locators do not.
+ */
+const READABLE = ':not([aria-hidden="true"], [aria-hidden="true"] *, [inert], [inert] *)'
+
+/**
+ * The control a target names, among what the agent can read (found live): with the Start dialog
+ * open, `placeholder: "ask pi something"` matched both the dialog's prompt and the composer behind
+ * it, so the agent's first fill failed on a box its read never showed — and after a fork, it sent
+ * the fork's prompt unchanged.
+ */
 function locate(page: Page, target: ArenaTarget): Locator {
   const exact = target.exact === true
   let found: Locator
@@ -230,9 +243,9 @@ function locate(page: Page, target: ArenaTarget): Locator {
       ...(target.name === undefined ? {} : { name: target.name }),
       exact,
     })
-  } else if ('text' in target) found = page.getByText(target.text, { exact })
-  else if ('label' in target) found = page.getByLabel(target.label, { exact })
-  else found = page.getByPlaceholder(target.placeholder, { exact })
+  } else if ('text' in target) found = page.getByText(target.text, { exact }).and(page.locator(READABLE))
+  else if ('label' in target) found = page.getByLabel(target.label, { exact }).and(page.locator(READABLE))
+  else found = page.getByPlaceholder(target.placeholder, { exact }).and(page.locator(READABLE))
   return target.nth === undefined ? found : found.nth(target.nth)
 }
 
