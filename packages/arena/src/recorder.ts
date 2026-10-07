@@ -962,6 +962,21 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
     const view = await shoot('view')
     return view === undefined ? {} : { view }
   }
+  /**
+   * What the answer shows the agent, and — when the action moved nothing — what it now acts from
+   * (#693, found live). A visual agent sees the page in every answer: a wait that returned on a
+   * card hands it the card, so the card it answers next is one it has SEEN. Left uncounted, the page
+   * before its click was the one its last move left, older than the card, and the card on its way
+   * out read as a new question: the wait returned at once on a stale one, inviting a second answer.
+   * A move's view is not counted: the page before the move stays what the agent acted from.
+   */
+  const shownAfter = async (action: ArenaAction, moved: boolean): Promise<Pick<ArenaActOutcome, 'view' | 'dialog'>> => {
+    const shown = await forTheEyes(action)
+    if (moved || (shown.view === undefined && shown.dialog === undefined)) return shown
+    const page = await pageNow().catch(() => undefined)
+    if (page !== undefined) lastSeen.saw(page)
+    return shown
+  }
   /** The actions on a control named the way a reader names it (`ArenaTarget`): a tree agent's hands. */
   const performOnControl = async (
     action: Extract<ArenaAction, { readonly action: 'click' | 'hover' | 'fill' | 'select' | 'press' }>,
@@ -1129,8 +1144,9 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
             here(),
           )
         }
-        if (!LEAVES_THE_PAGE.has(action.action)) await lastSeen.moved()
-        return { ok: true, result, ...(await forTheEyes(action)) }
+        const moved = !LEAVES_THE_PAGE.has(action.action)
+        if (moved) await lastSeen.moved()
+        return { ok: true, result, ...(await shownAfter(action, moved)) }
       } catch (error) {
         const message = errorLine(error, redact)
         timeline.record(
@@ -1147,7 +1163,7 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
           here(),
         )
         await shoot('action-failed')
-        return { ok: false, error: message, ...(await forTheEyes(action)) }
+        return { ok: false, error: message, ...(await shownAfter(action, false)) }
       } finally {
         await context.tracing.groupEnd()
       }
