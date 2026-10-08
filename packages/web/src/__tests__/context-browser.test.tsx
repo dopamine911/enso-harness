@@ -215,6 +215,75 @@ test('a focus that arrives on an open request whose category is closed opens it 
   }
 })
 
+// #747: the pick has two writers, a focus arriving and the reader's click, and is held with the
+// focus it was made under. A focus with a new key wins over the reader's pick; the reader's click
+// wins back under that focus; the same focus seen again — a re-read, a step away and back — is not
+// a new focus and leaves the reader's pick where it is.
+test('a focus with a new key picks its row over the reader’s pick; the same focus again, or none, leaves the reader’s pick', async () => {
+  const stores = mintThread()
+  globalThis.fetch = ((_input: string | URL | Request): Promise<Response> =>
+    Promise.resolve(Response.json({ ...DETAIL, threadId: stores.threadId }))) as typeof fetch
+  const container = document.createElement('div')
+  document.body.appendChild(container)
+  const root = createRoot(container)
+  const render = (focus: ContextBrowserFocus | undefined): Promise<void> =>
+    flush(async () => {
+      root.render(
+        <ThreadStoresContext.Provider value={stores}>
+          <ContextBrowser
+            requests={[REQUEST]}
+            next={MAKEUP}
+            request={2}
+            onRequest={(): void => undefined}
+            focus={focus}
+          />
+        </ThreadStoresContext.Provider>,
+      )
+    })
+  const row = (label: string): HTMLButtonElement | undefined =>
+    [...container.querySelectorAll<HTMLButtonElement>('li li button')].find((button) =>
+      button.textContent?.includes(label),
+    )
+  const pressed = (): string[] =>
+    [...container.querySelectorAll<HTMLButtonElement>('li li button[aria-pressed="true"]')].map(
+      (button) => button.textContent ?? '',
+    )
+  const view = (): string => container.querySelector('aside[aria-label="picked element"]')?.textContent ?? ''
+  const click = (button: HTMLButtonElement | undefined): Promise<void> =>
+    flush(async () => {
+      if (button === undefined) throw new Error('expected the button')
+      button.click()
+    })
+  await render({ request: 2, key: 'e4#0' })
+  await waitUntil(() => row('bash ls -la') !== undefined)
+  expect(pressed()).toEqual([expect.stringContaining('bash ls -la')])
+  // The reader opens the system prompt and picks the preamble: their click wins under the focus.
+  await click(
+    [...container.querySelectorAll<HTMLButtonElement>('button[aria-expanded]')].find((button) =>
+      button.textContent?.includes('system prompt'),
+    ),
+  )
+  await click(row('preamble'))
+  expect(pressed()).toEqual([expect.stringContaining('preamble')])
+  expect(view()).toContain('You are pi.')
+  // The same focus again (a re-read's new payload, same key): not a new focus, the pick stays.
+  await render({ request: 2, key: 'e4#0' })
+  expect(pressed()).toEqual([expect.stringContaining('preamble')])
+  // The focus leaves (a step to another request) and comes back: the reader's place survives.
+  await render(undefined)
+  expect(pressed()).toEqual([expect.stringContaining('preamble')])
+  await render({ request: 2, key: 'e4#0' })
+  expect(pressed()).toEqual([expect.stringContaining('preamble')])
+  // A focus with another key is a new focus: it wins over the reader's pick.
+  await click(row('bash ls -la'))
+  expect(pressed()).toEqual([expect.stringContaining('bash ls -la')])
+  await render({ request: 2, key: 'e1#0:section:preamble' })
+  expect(pressed()).toEqual([expect.stringContaining('preamble')])
+  expect(view()).toContain('You are pi.')
+  await flush(async () => root.unmount())
+  container.remove()
+})
+
 // A read that failed is that request's answer, not the next one's: asking for another request
 // reads again, and says so, until it is answered.
 test("a failed read is not shown as another request's while that one is read", async () => {
