@@ -255,8 +255,9 @@ export function projectThreads(
 }
 
 /**
- * The project's snapshot store (#551), kept under `copy` so the run keeps it: the copy's row, or why
- * there is none. A copy that fails is a `missing` row naming the store and the error.
+ * The project's snapshot store (#551), kept under `copy` so the run keeps it: its row, or why there is
+ * none. Collecting it hard-links each file and copies only where linking can't (#740); either failing,
+ * or reading the store failing, is a `missing` row naming the store and the error.
  */
 function snapshotStoreRow(
   home: string,
@@ -274,7 +275,11 @@ function snapshotStoreRow(
   try {
     linkTreeWithoutChmod(directory, copy, linkFile)
   } catch (error) {
-    return { kind: 'snapshot store', status: 'missing', reason: `${directory} could not be copied: ${String(error)}` }
+    return {
+      kind: 'snapshot store',
+      status: 'missing',
+      reason: `${directory} could not be collected: ${String(error)}`,
+    }
   }
   return { kind: 'snapshot store', status: 'collected', path: copy }
 }
