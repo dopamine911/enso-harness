@@ -83,6 +83,22 @@ export const ENVIRONMENT_METADATA: readonly EnvironmentMetadata[] = [
     phase: 'load',
   },
   {
+    key: 'ENSO_ARENA_SCOPE',
+    source: 'packages/arena/src/cli.ts',
+    reader: '`packages/arena/src/cli.ts#start` (`bun run arena` start)',
+    purposeAndDefault:
+      'Set by `arena start` on the copy of itself it runs inside the run’s systemd scope: the scope unit’s name. A `start` that finds it set runs the runs and leaves the launch and the cleanup to the launcher outside the scope (#742). Never set by hand.',
+    phase: 'load',
+  },
+  {
+    key: 'TMPDIR',
+    source: 'packages/arena/src/cli.ts',
+    reader: '`packages/arena/src/cli.ts#start` (process write, and on the scoped child it spawns)',
+    purposeAndDefault:
+      'Set by `arena start` to the run’s own `<tmp>/enso-arena-XXXXXX` before anything of the run starts, so Playwright, Chromium, Enso and the agent’s commands keep their temporary files where the cleanup after the run removes them (#742).',
+    phase: 'load',
+  },
+  {
     key: 'TMPDIR',
     source: 'test/scratch-preload.ts',
     reader: '`test/scratch-preload.ts` (process write, before any test file loads)',

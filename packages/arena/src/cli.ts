@@ -7,11 +7,15 @@
  * the agent's notes as it worked.
  *
  *   bun run arena start --agent PROVIDER/MODEL [--thinking LEVEL] [--scenario snake] [--minutes N]
- *                       [--home DIR] [--out DIR] [--chromium PATH] [--headed]
+ *                       [--home DIR] [--out DIR] [--chromium PATH] [--headed] [--memory-max SIZE] [--no-scope]
  *                       [--idle-minutes N] [--max-restarts N] [--max-cost-usd N]
  *       the run stops at the budget (plus a minute's grace for the retrospective), or at a bound:
  *       no action for --idle-minutes (10; 0 = off), a restart of Enso past --max-restarts (3), or
  *       Enso's own spend over --max-cost-usd (10; only over the run's own home)
+ *       launched (#742): what an earlier run left is cleared first (a dead recorder's run collected,
+ *       abandoned temporary files removed) and the run needs room to start; it then runs in its own
+ *       systemd scope, its memory capped at --memory-max (6G), unless --no-scope; afterwards whatever
+ *       it left is stopped, and one line says what that was
  *       start Enso over a fresh project and a recorded browser, and the agent under test with the
  *       brief and ONE tool, `act` (`arena/agent.ts`): no shell, no files, so the UI is its only way in
  *   bun run arena start --agents PROVIDER/MODEL,PROVIDER/MODEL [...]
@@ -47,6 +51,9 @@
  *       Enso's findings (observed friction, the agent's account, the reviewer's gaps with every
  *       citation checked). Writes `report.md` and `report.json`. `--run-tests` runs the work's own
  *       tests with only PATH, a throwaway HOME and a time limit: they are agent-written code.
+ *   bun run arena prune --keep N | --older-than DAYS [--dry-run]
+ *       free what an old run can do without (#742): its trace, and its projects' node_modules, dist
+ *       and build; never what `publish` reads, never a live run
  *   bun run arena container build | credential --api-key-stdin|--from FILE|--status | start …
  *       a run in a container (`arena/container.ts`, #676): a TEST account's credential injected
  *       into a Docker volume, the run directory the only host path, Enso's bash inside it too
@@ -69,11 +76,26 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { dirname, join, resolve } from 'node:path'
 import { gitChildEnvironment } from '@enso/core/git'
 import { redactJudgeText } from '@enso/core/judge'
+import { isListening } from '@enso/core/loopback'
 import { ensoHome, findRepoRoot } from '@enso/core/paths'
 import { ARENA_THINKING_LEVELS, arenaAgentDriver, resolveArenaModel } from './agent.ts'
 import { compareByModel, compareRunDirectories } from './compare.ts'
 import { runContainerCommand } from './container.ts'
+import {
+  ARENA_DEFAULT_MEMORY_MAX,
+  bytesUnder,
+  canScope,
+  endScope,
+  headroomShortfalls,
+  makeRunTmp,
+  portHolder,
+  scopedCommand,
+  sizeOf,
+  sweepAbandonedRunTmps,
+} from './launch.ts'
 import { type ArenaEvidence, arenaEvidenceRowOf, foldArenaManifest } from './manifest.ts'
+import { isRunning } from './process-tree.ts'
+import { pruneArenaRuns, renderPrunedRuns } from './prune.ts'
 import { DEFAULT_ARENA_CORPUS, planArenaPublication, publishArenaRun, runArenaCommand } from './publish.ts'
 import {
   type ArenaDriver,
@@ -82,6 +104,7 @@ import {
   readArenaControl,
   recordedRunHome,
   runArena,
+  STACK_PORTS,
 } from './recorder.ts'
 import { writeArenaReport } from './report.ts'
 import {
@@ -136,6 +159,9 @@ const VALUED_FLAGS = [
   'max-cost-usd',
   'perception',
   'corpus',
+  'memory-max',
+  'keep',
+  'older-than',
 ] as const
 type ValuedFlag = (typeof VALUED_FLAGS)[number]
 const VALUED_FLAG_ARGUMENTS = new Set<string>(VALUED_FLAGS.map((flagName) => `--${flagName}`))
@@ -261,20 +287,81 @@ async function driverNamed(
   return { driver, brief }
 }
 
+/** The run `<out>/current` names: the live one, or one whose recorder died before clearing it. */
+function currentRun(): string | undefined {
+  return existsSync(currentFile) ? readFileSync(currentFile, 'utf8').trim() : undefined
+}
+
 /**
- * A run whose recorder died with its stack still up holds the ports every `start` needs (#607):
- * say which run, and the command that collects its evidence and frees them, before the port check
- * says only "in use".
+ * Before a `start` (#742): what an earlier run left is taken back, and a run starts only with its
+ * ports free and room to run in. A run whose recorder died (#607) gets its evidence collected and its
+ * stack stopped, as `arena manifest` does, rather than a refusal naming the command. A live run, or
+ * anything else on the ports, is a refusal naming it.
  */
-function refuseOverDeadRun(): void {
-  if (!existsSync(currentFile)) return
-  const runDirectory = readFileSync(currentFile, 'utf8').trim()
-  const dead = deadRecorderRun(runDirectory)
-  if (dead?.stackPid === undefined) return
-  fail(
-    `the last run's recorder died and its Enso stack (pid ${dead.stackPid}) still holds the ports — ` +
-      `\`bun run arena manifest ${runDirectory}\` collects its evidence and stops it`,
-  )
+async function prepareLaunch(): Promise<void> {
+  for (const swept of sweepAbandonedRunTmps())
+    process.stdout.write(`arena: removed ${swept}, left by a run that was killed\n`)
+  const last = currentRun()
+  const control = last === undefined ? undefined : readArenaControl(last)
+  if (last !== undefined && control !== undefined && isRunning(control.pid)) {
+    fail(`a run is live at ${last} (recorder pid ${control.pid}): stop it with its \`stop\` action first`)
+  }
+  if (last !== undefined && deadRecorderRun(last) !== undefined) {
+    process.stdout.write(
+      `arena: the last run's recorder died; collecting its evidence and stopping its stack first — ${last}\n`,
+    )
+    await refoldRun(last).catch((error: unknown) => fail(error instanceof Error ? error.message : String(error)))
+  }
+  for (const port of STACK_PORTS) {
+    if (!(await isListening(port))) continue
+    const holder = portHolder(port)
+    const who =
+      holder.pid === undefined
+        ? ''
+        : ` by pid ${holder.pid}${holder.command === undefined ? '' : ` (${holder.command})`}`
+    fail(`port ${port} is in use${who}: the arena starts its own stack`)
+  }
+  const shortfalls = headroomShortfalls(outDirectory)
+  if (shortfalls.length > 0) fail(`not enough room to start a run: ${shortfalls.join('; ')}`)
+}
+
+/** Whether the stack's ports are free within `milliseconds`: a stopped stack's sockets close as its processes go. */
+async function portsFreeWithin(milliseconds: number): Promise<boolean> {
+  const deadline = Date.now() + milliseconds
+  while (Date.now() < deadline) {
+    const listening = await Promise.all(STACK_PORTS.map((port) => isListening(port)))
+    if (!listening.includes(true)) return true
+    await Bun.sleep(200)
+  }
+  return false
+}
+
+/**
+ * After the runs (#742), whatever ended them: a run whose recorder died is collected while its stack
+ * may still be up; what is left in the scope is stopped; the ports are waited for; the runs' TMPDIR
+ * goes. One line says what was found, so a leak is seen at the run that caused it.
+ */
+async function cleanUp(runTmp: string, scope?: { readonly unit: string; readonly memoryMax: string }): Promise<void> {
+  const last = currentRun()
+  if (last !== undefined && deadRecorderRun(last) !== undefined) {
+    process.stdout.write(`arena: the run's recorder died; collecting its evidence — ${last}\n`)
+    await refoldRun(last).catch((error: unknown) => {
+      process.stderr.write(`arena: ${error instanceof Error ? error.message : String(error)}\n`)
+    })
+  }
+  const ended = scope === undefined ? undefined : endScope(scope.unit)
+  const portsFree = await portsFreeWithin(10_000)
+  const tmpBytes = bytesUnder(runTmp)
+  rmSync(runTmp, { recursive: true, force: true })
+  const said = [
+    ...(scope === undefined || ended === undefined
+      ? []
+      : [`${ended.stopped} process(es) left in ${scope.unit} stopped`]),
+    ...(scope !== undefined && ended?.result === 'oom-kill' ? [`⚠ the run hit its ${scope.memoryMax} memory cap`] : []),
+    portsFree ? `ports ${STACK_PORTS.join('/')} free` : `⚠ ports ${STACK_PORTS.join('/')} still in use`,
+    `its TMPDIR removed (${sizeOf(tmpBytes)})`,
+  ]
+  process.stdout.write(`arena: cleaned up — ${said.join('; ')}\n`)
 }
 
 /** The agents `start` runs, one run each (#674): `--agents A,B`, else `--agent A`, else none for `--manual`. */
@@ -337,8 +424,76 @@ function ensoModelNamed(): EnsoModelSetting | undefined {
 /**
  * `start`: one run, or with `--agents` one run per agent, one after another — the ports are one
  * stack at a time. Exits 1 when any run's score is FAIL.
+ *
+ * Launched (#742): prepared first (`prepareLaunch`). Then, where `systemd-run --user` works and
+ * `--no-scope` is not given, `start` runs again as a child in its own memory-capped scope while this
+ * process waits outside it to clean up; else the runs run here. Either way they get their own TMPDIR.
  */
 async function start(): Promise<void> {
+  // The scoped child: its launcher prepared, and cleans up after it.
+  if (process.env['ENSO_ARENA_SCOPE'] !== undefined) exitWith(await settledRuns())
+  const memoryMax = flag('memory-max') ?? ARENA_DEFAULT_MEMORY_MAX
+  const wantsScope = !rest.includes('--no-scope')
+  const scoped = wantsScope && canScope()
+  // Checked before anything starts: preparing collects dead runs and sweeps temporary directories.
+  if (scoped && !canScope(memoryMax)) {
+    fail(`systemd refuses --memory-max ${memoryMax} as a MemoryMax; it takes values such as 6G, 4096M, 50% or infinity`)
+  }
+  await prepareLaunch()
+  if (scoped) process.exit(await launchScoped(memoryMax))
+  process.stdout.write(
+    wantsScope
+      ? 'arena: `systemd-run --user` is not available here, so the run has no memory cap of its own\n'
+      : 'arena: --no-scope, so the run has no memory cap of its own\n',
+  )
+  const runTmp = makeRunTmp({ pid: process.pid })
+  process.env['TMPDIR'] = runTmp
+  const outcome = await settledRuns()
+  await cleanUp(runTmp)
+  exitWith(outcome)
+}
+
+/** The runs' outcome, a throw included, so the caller can clean up before it is said (PR #746 review). */
+async function settledRuns(): Promise<{ readonly passed: boolean } | { readonly error: string }> {
+  try {
+    return { passed: await startRuns() }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+/** Exit as `start` does: a thrown error said the arena's way (exit 1), else 1 when a run failed its score. */
+function exitWith(outcome: { readonly passed: boolean } | { readonly error: string }): never {
+  if ('error' in outcome) fail(outcome.error)
+  process.exit(outcome.passed ? 0 : 1)
+}
+
+/**
+ * `start` again, as the transient scope `arena-<time>.scope` capped at `memoryMax` (#742); settles
+ * with its exit code once it has ended and been cleaned up after. ⚠ The child is its own process
+ * group: a Ctrl-C reaches it once, passed on from here, so its first signal is its graceful stop and
+ * a second still ends it.
+ */
+async function launchScoped(memoryMax: string): Promise<number> {
+  const unit = `arena-${new Date()
+    .toISOString()
+    .replaceAll(':', '-')
+    .replace(/\.\d+Z$/, 'Z')}.scope`
+  const runTmp = makeRunTmp({ pid: process.pid, unit })
+  const child = Bun.spawn(scopedCommand(unit, memoryMax, [process.execPath, import.meta.path, 'start', ...rest]), {
+    env: { ...process.env, ENSO_ARENA_SCOPE: unit, TMPDIR: runTmp },
+    stdio: ['ignore', 'inherit', 'inherit'],
+    detached: true,
+  })
+  process.stdout.write(`arena: the run is in its own scope, ${unit}, its memory capped at ${memoryMax}\n`)
+  for (const signalName of ['SIGINT', 'SIGTERM'] as const) process.on(signalName, () => child.kill(signalName))
+  const exit = await child.exited
+  await cleanUp(runTmp, { unit, memoryMax })
+  return exit
+}
+
+/** Each agent's run, one after another; true when every one passed. */
+async function startRuns(): Promise<boolean> {
   const ensoModel = ensoModelNamed()
   const agents = agentsNamed()
   const matrix = agents.filter((agent) => agent !== undefined)
@@ -360,14 +515,13 @@ async function start(): Promise<void> {
       `arena: ${runs.length} runs done; by model: bun run arena compare --by-model ${runs.join(' ')}\n`,
     )
   }
-  process.exit(passed ? 0 : 1)
+  return passed
 }
 
 async function startRun(
   agent: string | undefined,
   ensoModel: EnsoModelSetting | undefined,
 ): Promise<{ readonly runDirectory: string; readonly passed: boolean }> {
-  refuseOverDeadRun()
   if (isGuardedForAgent(outDirectory)) {
     fail(
       `--out ${outDirectory} is under a .enso directory, which the guard keeps Enso's agent out of: ` +
@@ -432,7 +586,7 @@ async function act(): Promise<void> {
     (argument, index) => !argument.startsWith('--') && !VALUED_FLAG_ARGUMENTS.has(rest[index - 1] ?? ''),
   )
   if (body === undefined) fail(`act takes one JSON action — \`bun run arena brief\` lists them`)
-  const runDirectory = flag('run') ?? (existsSync(currentFile) ? readFileSync(currentFile, 'utf8').trim() : undefined)
+  const runDirectory = flag('run') ?? currentRun()
   if (runDirectory === undefined) fail('no live run — start one with `bun run arena start`')
   const control = readArenaControl(runDirectory) ?? fail(`the run at ${runDirectory} is not live`)
   if (deadRecorderRun(runDirectory) !== undefined) {
@@ -467,10 +621,10 @@ function keptEvidenceOf(manifest: unknown): ArenaEvidence[] | undefined {
 /**
  * Fold a run's manifest again. A run that stopped keeps the evidence its stop collected; one whose
  * recorder died has none, so it is collected now (#584 A13, #607) and the dead run's `current`
- * pointer, which its `start` never got to clear, goes with it.
+ * pointer, which its `start` never got to clear, goes with it. Throws rather than exits: a launcher
+ * recovering a dead run still has its own cleanup to do (#742).
  */
-async function refold(): Promise<void> {
-  const runDirectory = resolve(rest[0] ?? fail('manifest takes a run directory'))
+async function refoldRun(runDirectory: string): Promise<void> {
   const runId = runDirectory.split('/').at(-1) ?? 'run'
   const manifestPath = join(runDirectory, 'manifest.json')
   const manifestKept = existsSync(manifestPath)
@@ -479,16 +633,11 @@ async function refold(): Promise<void> {
   // ⚠ A manifest is only written once evidence was taken (PR #612 review): one whose evidence does
   // not read is damaged, not a dead recorder's run. Collecting again would read whatever home this
   // command defaults to, since a stopped run left no control record naming its own.
-  if (manifestKept && kept === undefined)
-    fail(`${manifestPath} has no evidence that reads as evidence — not refolding over it`)
-  const evidence =
-    kept ??
-    (await collectAfterRecorderDied(runDirectory, operatorHome).catch((error: unknown) =>
-      fail(error instanceof Error ? error.message : String(error)),
-    ))
-  if (kept === undefined && existsSync(currentFile) && readFileSync(currentFile, 'utf8').trim() === runDirectory) {
-    rmSync(currentFile, { force: true })
+  if (manifestKept && kept === undefined) {
+    throw new Error(`${manifestPath} has no evidence that reads as evidence — not refolding over it`)
   }
+  const evidence = kept ?? (await collectAfterRecorderDied(runDirectory, operatorHome))
+  if (kept === undefined && currentRun() === runDirectory) rmSync(currentFile, { force: true })
   // The home the run recorded, not this shell's; and a hit an earlier scan found stands (PR #613 review).
   const home = runHomeOf(runDirectory, operatorHome, recordedRunHome(runDirectory))
   // A recorder that died never ran its last relink (#639): a run home's replaced link is put back
@@ -558,6 +707,21 @@ switch (command) {
   case 'start':
     await start()
     break
+  case 'prune': {
+    const keep = flag('keep')
+    const olderThan = flag('older-than')
+    if (keep === undefined && olderThan === undefined) fail('prune takes --keep N, --older-than DAYS, or both')
+    const dryRun = rest.includes('--dry-run')
+    const pruned = pruneArenaRuns({
+      outDirectory,
+      dryRun,
+      now: new Date(),
+      ...(keep === undefined ? {} : { keep: numberFlag('keep', 0) }),
+      ...(olderThan === undefined ? {} : { olderThanDays: numberFlag('older-than', 0) }),
+    })
+    process.stdout.write(`${renderPrunedRuns(pruned, dryRun)}\n`)
+    break
+  }
   case 'brief':
     if (rest.includes('--review')) process.stdout.write(arenaReviewBrief(briefContext(flag('run')), 'other'))
     else {
@@ -568,9 +732,13 @@ switch (command) {
   case 'act':
     await act()
     break
-  case 'manifest':
-    await refold()
+  case 'manifest': {
+    const runDirectory = resolve(rest[0] ?? fail('manifest takes a run directory'))
+    await refoldRun(runDirectory).catch((error: unknown) =>
+      fail(error instanceof Error ? error.message : String(error)),
+    )
     break
+  }
   case 'score':
     scoreRun(rest[0] ?? fail('score takes a run directory'))
     break
@@ -608,6 +776,6 @@ switch (command) {
     break
   default:
     fail(
-      'usage: bun run arena start --agent PROVIDER/MODEL | start --agents A,B | start --manual | brief | act <json> | manifest <run directory> | score <run directory> | compare <run directory> <run directory> | compare --by-model <run directory>… | report <run directory> [--run-tests] | publish <run directory> [--corpus OWNER/REPO] [--dry-run] | container build|credential|start',
+      'usage: bun run arena start --agent PROVIDER/MODEL | start --agents A,B | start --manual | brief | act <json> | manifest <run directory> | score <run directory> | compare <run directory> <run directory> | compare --by-model <run directory>… | report <run directory> [--run-tests] | publish <run directory> [--corpus OWNER/REPO] [--dry-run] | prune --keep N | --older-than DAYS [--dry-run] | container build|credential|start',
     )
 }

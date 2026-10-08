@@ -38,6 +38,7 @@ import {
 } from './actions.ts'
 import { collectEnsoEvidence, threadIdsShown } from './evidence.ts'
 import { type ArenaEvidence, foldArenaManifest } from './manifest.ts'
+import { isRunning, stopProcessTree } from './process-tree.ts'
 import { ARENA_GRACE_MS, type ArenaBounds, createRunControl, ensoSpendUsd } from './run-control.ts'
 import { arenaSecretSource, arenaSecretValues, reconcileLinkedFiles, runHomeOf } from './run-home.ts'
 import { ensoBuildOf, sampleWorkspaces, threadHistoriesIn } from './run-state.ts'
@@ -82,7 +83,8 @@ import {
 
 /** Where the dev stack's server answers; its web origin is `ARENA_WEB_ORIGIN` (`timeline.ts`). */
 const ARENA_SERVER_ORIGIN = 'http://127.0.0.1:5179'
-const STACK_PORTS = [5178, 5179] as const
+/** The ports a run's Enso stack listens on: the web page and the server (#742: the launcher checks and waits on them). */
+export const STACK_PORTS = [5178, 5179] as const
 const STACK_STARTUP_TIMEOUT_MS = 90_000
 const EVENT_SHOT_SPACING_MS = 2000
 /** The pause before a failed screenshot's second try (#665): long enough for a reload to settle. */
@@ -457,6 +459,18 @@ function serveControl(act: (body: unknown) => Promise<ArenaActOutcome>): ReturnT
   })
 }
 
+/** How long each step of stopping Enso's tree waits: SIGTERM to its root, to what is left, then SIGKILL (#742). */
+const STACK_STOP_GRACE_MS = 5000
+
+/**
+ * Where Playwright keeps a trace's working files until a chunk is written (#742): under the run, on
+ * disk. By default they went to `os.tmpdir()`, a tmpfs here: about 43 MB of RAM per active minute,
+ * kept until the browser closed and leaked by a recorder that died. Removed once the browser is closed.
+ */
+function traceWorkDirectory(runDirectory: string): string {
+  return join(runDirectory, 'trace', '.work')
+}
+
 /** A browser with one page, tracing, its first chunk open. A failure on the way closes what it opened. */
 async function openTracedPage(
   options: ArenaRunOptions,
@@ -464,6 +478,7 @@ async function openTracedPage(
 ): Promise<{ readonly browser: Browser; readonly context: BrowserContext; readonly page: Page }> {
   const browser = await chromium.launch({
     headless: !options.headed,
+    tracesDir: traceWorkDirectory(options.runDirectory),
     ...(options.chromiumPath === undefined ? {} : { executablePath: options.chromiumPath }),
   })
   try {
@@ -584,8 +599,10 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
     const child = enso
     enso = undefined
     if (child === undefined) return
-    child.kill('SIGTERM')
-    await Promise.race([child.exited, Bun.sleep(5000)])
+    // The whole tree (#742): `bun run dev` alone leaves a child slower than its launcher's 500 ms.
+    const left = await stopProcessTree(child.pid, STACK_STOP_GRACE_MS)
+    if (left.length > 0)
+      timeline.record({ kind: 'recorder-error', during: 'stopping Enso', error: `still running: ${left.join(', ')}` })
   }
   if (!(await startEnso())) {
     await stopEnso()
@@ -1326,6 +1343,7 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
   })
   stopping = true
   await browser.close().catch(() => undefined)
+  rmSync(traceWorkDirectory(runDirectory), { recursive: true, force: true })
   await stopEnso()
   // ⚠ After Enso is stopped and the last chunk written: every file the run keeps is final (#610) —
   // and no credential write can come after the last relink (#639).
@@ -1341,17 +1359,6 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
 // ── A recorder that died before its stop (#584 A13, #607) ──────────────────────────────────────
 // SIGKILL, an OOM, a closed terminal: no `run-stop`, no evidence, `control.json` left behind, and
 // the stack — a child the recorder never got to stop — still holding 5178/5179.
-
-/** Is a process with this id running? Signal 0 asks without sending anything. */
-function isRunning(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (error) {
-    // EPERM: it runs, as someone else. Only ESRCH means gone.
-    return error instanceof Error && 'code' in error && error.code === 'EPERM'
-  }
-}
 
 /**
  * Is `pid` the stack a run started — `bun run dev <project>`, exactly — and not a process that
@@ -1478,17 +1485,15 @@ export async function collectAfterRecorderDied(runDirectory: string, fallbackHom
     // ⚠ Said, not swallowed (PR #612 review): the control record goes regardless, so nothing later
     // would name the process still holding the ports — only a bare "port in use".
     process.stderr.write(
-      `arena: the run's Enso stack (pid ${dead.stackPid}) did not stop within 10 s of SIGTERM — stop it with \`kill ${dead.stackPid}\`\n`,
+      `arena: the run's Enso stack (pid ${dead.stackPid}) is still running after SIGTERM and SIGKILL — it is someone else's to stop\n`,
     )
   }
+  rmSync(traceWorkDirectory(runDirectory), { recursive: true, force: true })
   rmSync(controlFilePath(runDirectory), { force: true })
   return evidence
 }
 
-/** SIGTERM, as the recorder's own stop sends, then wait until it is gone (at most 10 s). True when it went. */
+/** The stack's whole tree, as the recorder's own stop takes it down (#742). True when nothing of it is left. */
 async function stopStack(pid: number): Promise<boolean> {
-  process.kill(pid, 'SIGTERM')
-  const deadline = Date.now() + 10_000
-  while (isRunning(pid) && Date.now() < deadline) await Bun.sleep(200)
-  return !isRunning(pid)
+  return (await stopProcessTree(pid, STACK_STOP_GRACE_MS)).length === 0
 }

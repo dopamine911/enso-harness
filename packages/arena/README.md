@@ -18,6 +18,7 @@ bun run arena score <run dir>       # score a run again: its logs read for probl
 bun run arena compare <run dir> <run dir>   # two runs side by side; reads only, rewrites nothing
 bun run arena compare --by-model <run dir>…   # any number of runs, grouped by agent model and perception
 bun run arena report <run dir> [--run-tests]   # the application outcome apart from Enso's findings; the gaps' evidence checked
+bun run arena prune --keep 10 --dry-run   # what old runs would free: their trace, their projects' node_modules, dist and build
 ```
 
 `start` needs one of `--agent PROVIDER/MODEL` (a model the home is logged in to, through Enso's own
@@ -25,8 +26,47 @@ login; `--thinking LEVEL`, `medium` by default) or `--manual`. It also takes `--
 `--home DIR` (an `ENSO_HOME` to run over, shared with whatever else uses it; by default each run
 gets its own, below), `--out DIR` (`$XDG_DATA_HOME/enso/arena`, i.e. `~/.local/share/enso/arena`, by
 default; one under a `.enso` directory is refused), `--chromium PATH`,
-`--repo OWNER/NAME` (where bugs are filed: the checkout's GitHub `origin` by default) and
-`--headed`. Ports 5178 and 5179 must be free: the arena starts its own stack.
+`--repo OWNER/NAME` (where bugs are filed: the checkout's GitHub `origin` by default),
+`--headed`, `--memory-max SIZE` and `--no-scope` (both below).
+
+### Launch and cleanup (#742)
+
+`start` launches the run and cleans up after it, so a run neither competes with what launched it nor
+leaves anything behind:
+
+1. **What an earlier run left is taken back.** A run whose recorder died (SIGKILL, an OOM, a closed
+   terminal) gets its evidence collected and its stack stopped, as `arena manifest` would. A temporary
+   directory whose run is gone is removed.
+2. **It refuses rather than collides.** It refuses while a run is live (naming it and its recorder),
+   while anything else holds 5178 or 5179 (naming the pid and command), and when there is less than
+   3 GB of memory available, 2 GB free in the temporary directory or 5 GB free under `--out`.
+3. **The run gets its own scope.** Where `systemd-run --user` works, the run (the recorder, Enso and
+   Chromium) runs as the transient scope `arena-<time>.scope`, its memory capped at `--memory-max`
+   (`6G` by default, plus 1 GB of swap; any value systemd's `MemoryMax=` takes, such as `4096M`, `50%`
+   or `infinity`, and a value systemd refuses is refused before anything starts). A run that overruns is killed inside its scope, and nothing
+   else on the machine is touched. `start` itself waits outside the scope. `--no-scope`, or a machine
+   without systemd, runs it unscoped, and `start` says there is no cap.
+4. **It gets its own temporary directory.** Every process of the run has `TMPDIR` set to
+   `<tmp>/enso-arena-XXXXXX`: Playwright's artifacts, Chromium's profile, Enso's and the agent's
+   temporary files. The trace's working files go to `trace/.work` in the run, on disk rather than in
+   a tmpfs.
+5. **Afterwards, whatever ended the run:** a recorder that died has its run collected; Enso's stack is
+   stopped as a whole tree (SIGTERM to its root, then to anything left, then SIGKILL); what remains in
+   the scope is stopped; the ports are waited for; the temporary directory and `trace/.work` are
+   removed. One line says what was found:
+
+   ```text
+   arena: cleaned up — 0 process(es) left in arena-<time>.scope stopped; ports 5178/5179 free; its TMPDIR removed (0 MB)
+   ```
+
+   It names a run that hit its memory cap.
+
+`bun run arena prune --keep N | --older-than DAYS [--dry-run]` frees what an old run can do without:
+its `trace/`, and the `node_modules` (and the `dist` or `build` beside a `package.json`) in its project
+and its thread trees. Both options together prune only runs that meet both. It never touches a live run,
+or what `publish` and a review read: the reports, findings, score, manifest, screenshots, timeline,
+`enso/` and the run home's sessions and snapshots. `arena report --run-tests` on a pruned run needs its
+packages installed again.
 
 **Perception (#680): `--perception tree` (the default) or `visual`.** How the agent under test sees
 and acts on the page:
@@ -360,7 +400,7 @@ in Enso's records.
 | `.enso/` | the run's own Enso home: its threads, sessions and logs as Enso wrote them (unredacted), and links to your login. Share `enso/evidence/`, not this |
 | `timeline.jsonl` | one line per event, wall clock + elapsed + URL + the thread the URL names |
 | `screenshots/` | one every 30 s (`sample`), plus one per error, dialog, navigation, failed action, page crash, Enso exit; a shot that could not be taken is a `recorder-error` line instead |
-| `trace/trace-NNN.zip` | the Playwright trace in five-minute chunks (`bunx playwright show-trace <zip>`) |
+| `trace/trace-NNN.zip` | the Playwright trace in five-minute chunks (`bunx playwright show-trace <zip>`). While the run is live, `trace/.work` holds the chunk being written; it is removed at the stop |
 | `enso/stack.log` | Enso's own output, redacted |
 | `enso/evidence/` | every read route the server has for each thread the UI named or the project stores, one `thread-<id>-<route>` file each: record, events, session eval, log bundle, history, stats, context, incidents, judge cases, run conditions (`manifest`), git, changes; plus Stats, the about page and the trees' disk use (`trees.json`) |
 | `enso/evidence/snapshot-store/` | a copy of the project's snapshot store (#551), so pruning the home costs the run nothing |
@@ -390,10 +430,10 @@ and the session file are keyed by: the jump from a screenshot to its thread, whe
   - from the stack, if it is still up, and then stops it;
   - else every route `missing` and the disk read.
 
-  `start` refuses while a dead run's stack holds the ports, and names that run; `act` on a dead run
-  says so. A stack is stopped only when it is `bun run dev <that run's project>` exactly. Observed
-  2026-10-05: a recorder killed with SIGKILL took its stack down within 2 s, so a surviving stack is
-  the rarer case.
+  `start` collects such a run itself before it starts another (#742), and `act` on a dead run says
+  so. A stack is stopped only when it is `bun run dev <that run's project>` exactly, and then as a
+  whole tree. Observed 2026-10-05: a recorder killed with SIGKILL took its stack down within 2 s, so a
+  surviving stack is the rarer case; under a scope, the launcher stops what is left either way.
 - **Every UI action goes through the recorder**, so each is in the trace (as a named group) and on the
   timeline. There is no selector, no `evaluate`, and `goto` refuses `/api`.
 - **The agent has no shell** under `--agent` (above). Under `--manual` it is whatever you give it, and
