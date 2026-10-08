@@ -1071,6 +1071,12 @@ const TranscriptSelectionContext = createContext<TranscriptSelection>({
 /** The thread's lines by where they read (#382), grouped once in `ChatLayout` for every row. */
 const PlacedLinesContext = createContext<PlacedLines>({ head: [], after: new Map(), tail: [] })
 
+/**
+ * The roles a bubble is drawn for. TanStack's `UIMessage` also has `activity` (AG-UI activity messages,
+ * `@tanstack/ai-client` 0.39), which Enso's follow adapter never emits; one that ever arrived is left out.
+ */
+type DrawnRole = Exclude<UIMessage['role'], 'activity'>
+
 /** Which messages a selection hides, which continue the one drawn before them, and each prompt's name — see {@link TranscriptSelection}. */
 function drawnMessages(
   messages: readonly UIMessage[],
@@ -1081,6 +1087,8 @@ function drawnMessages(
   const promptNames = new Map<string, string>()
   let drawnRole: UIMessage['role'] | undefined
   messages.forEach((message, position) => {
+    // Not drawn, so neither a bubble nor the break between two of one speaker's (see `DrawnRole`).
+    if (message.role === 'activity') return
     if (message.role === 'user') {
       const title = titleFromMessage(message)
       promptNames.set(message.id, `prompt ${promptNames.size + 1}${title === undefined ? '' : `: “${title}”`}`)
@@ -1109,7 +1117,7 @@ const NO_PARTS: KeyedPart[] = []
 
 interface MessageBodyProps {
   readonly messageId: string
-  readonly role: UIMessage['role']
+  readonly role: DrawnRole
   readonly parts: KeyedPart[]
   /** This message's run is in flight: a tool call with no result reads `running…` (#130). */
   readonly runOpen: boolean
@@ -1125,7 +1133,7 @@ interface MessageBodyProps {
  * Who a message is from, above it (the design direction's speaker line): `you`, or pi beside its
  * ring. Ledger drops the ring and prints the user's prompt as a receipt line, `› you`.
  */
-function MessageSpeaker({ role }: { role: UIMessage['role'] }): React.ReactNode {
+function MessageSpeaker({ role }: { role: DrawnRole }): React.ReactNode {
   if (role === 'user') {
     return (
       <div className="flex items-center justify-end gap-1 font-mono text-xs text-muted-foreground ledger:justify-start ink:font-heading ink:text-sm ink:italic">
@@ -1823,7 +1831,7 @@ const chatComponents = {
       const lines = useContext(PlacedLinesContext).after.get(message.id)
       return (
         <>
-          {hiddenMessageIds.has(message.id) ? null : (
+          {hiddenMessageIds.has(message.id) || message.role === 'activity' ? null : (
             <MessageBody
               messageId={message.id}
               role={message.role}
