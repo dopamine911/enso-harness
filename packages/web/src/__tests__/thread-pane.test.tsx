@@ -632,7 +632,7 @@ test('⚠ busy on the wire → working, stop offered, rail busy, and the mode se
   })
 
   await pane.settle(
-    { type: 'observation', seq: 1, observation: { kind: 'settled' } },
+    { type: 'observation', seq: 1, observation: { kind: 'settled', aborted: false } },
     { type: 'status', live: true, busy: false, generation: 3 },
   )
   await eventually(() => {
@@ -674,7 +674,7 @@ test('⚠ a compaction said mid-run waits for the run; once idle the pane shows 
   await flush(tick)
   expect(pane.container.textContent).toContain('the long old answer')
   await pane.settle(
-    { type: 'observation', seq: 2, observation: { kind: 'settled' } },
+    { type: 'observation', seq: 2, observation: { kind: 'settled', aborted: false } },
     { type: 'status', live: true, busy: false, generation: 1 },
   )
   await eventually(() => {
@@ -1130,7 +1130,7 @@ test("⚠ the composer's e2e selectors match the rendered markup, and the spec's
   })
 
   await pane.settle(
-    { type: 'observation', seq: 1, observation: { kind: 'settled' } },
+    { type: 'observation', seq: 1, observation: { kind: 'settled', aborted: false } },
     { type: 'status', live: true, busy: false, generation: 1 },
   )
   await eventually(() => expect(stopByName()).toBe(0))
@@ -1532,7 +1532,7 @@ test('⚠ a tool call reads running… while its run is open and aborted once th
     await tick()
   })
   await pane.settle(
-    { type: 'observation', seq: 3, observation: { kind: 'settled' } },
+    { type: 'observation', seq: 3, observation: { kind: 'settled', aborted: false } },
     { type: 'status', live: true, busy: false, generation: 1 },
   )
   await eventually(() => {
@@ -1825,7 +1825,7 @@ test('⚠ refused → retry → reply reads in order, and stays in order under a
     { type: 'observation', seq: 4, observation: { kind: 'message-start', role: 'assistant' } },
     { type: 'observation', seq: 5, observation: { kind: 'text-delta', contentIndex: 0, delta: 'FIRST-REPLY' } },
     { type: 'observation', seq: 6, observation: { kind: 'provider-retry-ended', success: true, attempt: 1 } },
-    { type: 'observation', seq: 7, observation: { kind: 'settled' } },
+    { type: 'observation', seq: 7, observation: { kind: 'settled', aborted: false } },
     { type: 'status', live: true, busy: false, generation: 1 },
   )
   const firstRun = ['first prompt', 'RATE-LIMITED', 'retrying in 4 s', 'FIRST-REPLY']
@@ -1834,7 +1834,7 @@ test('⚠ refused → retry → reply reads in order, and stays in order under a
   await pane.settle(
     { type: 'observation', seq: 8, observation: { kind: 'message-start', role: 'assistant' } },
     { type: 'observation', seq: 9, observation: { kind: 'text-delta', contentIndex: 0, delta: 'SECOND-REPLY' } },
-    { type: 'observation', seq: 10, observation: { kind: 'settled' } },
+    { type: 'observation', seq: 10, observation: { kind: 'settled', aborted: false } },
     { type: 'status', live: true, busy: false, generation: 2 },
   )
   const bothRuns = [...firstRun, 'second prompt', 'SECOND-REPLY']
@@ -1863,14 +1863,14 @@ test('⚠ a mid-stream refusal keeps its partial text; the retry’s refusal and
       seq: 8,
       observation: { kind: 'provider-retry-ended', success: false, attempt: 1, finalError: '529 overloaded' },
     },
-    { type: 'observation', seq: 9, observation: { kind: 'settled' } },
+    { type: 'observation', seq: 9, observation: { kind: 'settled', aborted: false } },
     { type: 'status', live: true, busy: false, generation: 1 },
   )
   await sendPrompt(pane, 'second prompt')
   await pane.settle(
     { type: 'observation', seq: 10, observation: { kind: 'message-start', role: 'assistant' } },
     { type: 'observation', seq: 11, observation: { kind: 'text-delta', contentIndex: 0, delta: 'SECOND-REPLY' } },
-    { type: 'observation', seq: 12, observation: { kind: 'settled' } },
+    { type: 'observation', seq: 12, observation: { kind: 'settled', aborted: false } },
     { type: 'status', live: true, busy: false, generation: 2 },
   )
   const expected = [
@@ -1897,7 +1897,7 @@ test('a `Mode:` line set between runs reads after the run before it and before t
   await pane.settle(
     { type: 'observation', seq: 1, observation: { kind: 'message-start', role: 'assistant' } },
     { type: 'observation', seq: 2, observation: { kind: 'text-delta', contentIndex: 0, delta: 'FIRST-REPLY' } },
-    { type: 'observation', seq: 3, observation: { kind: 'settled' } },
+    { type: 'observation', seq: 3, observation: { kind: 'settled', aborted: false } },
     { type: 'status', live: true, busy: false, generation: 1 },
   )
   await pane.settle({
@@ -1909,7 +1909,7 @@ test('a `Mode:` line set between runs reads after the run before it and before t
   await pane.settle(
     { type: 'observation', seq: 5, observation: { kind: 'message-start', role: 'assistant' } },
     { type: 'observation', seq: 6, observation: { kind: 'text-delta', contentIndex: 0, delta: 'SECOND-REPLY' } },
-    { type: 'observation', seq: 7, observation: { kind: 'settled' } },
+    { type: 'observation', seq: 7, observation: { kind: 'settled', aborted: false } },
     { type: 'status', live: true, busy: false, generation: 2 },
   )
   const expected = ['first prompt', 'FIRST-REPLY', 'Mode: plan', 'second prompt', 'SECOND-REPLY']

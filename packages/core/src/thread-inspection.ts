@@ -472,6 +472,17 @@ export const EnsoInterruptedTail = Type.Union([
 export type EnsoInterruptedTail = Static<typeof EnsoInterruptedTail>
 
 /**
+ * Where the branch's runs were stopped (#766): for each `enso-run-stopped` entry, oldest first,
+ * the id of the message it follows — the last message before it on the branch. Derived on read,
+ * like {@link EnsoInterruptedTail}; the page puts its "Stopped." line after each one.
+ *
+ * @group Thread inspection
+ */
+export const EnsoStoppedAfter = Type.Array(Type.String({ minLength: 1 }))
+/** @group Thread inspection */
+export type EnsoStoppedAfter = Static<typeof EnsoStoppedAfter>
+
+/**
  * A thread's history as the browser mounts it (#95): the transcript as TanStack `UIMessage`s —
  * assembled by the server's `transcript-to-messages` reader, the same way the live stream is
  * adapted to AG-UI — plus the opening permission mode the transcript persists.
@@ -494,6 +505,8 @@ export const EnsoThreadHistory = Type.Object(
     incidents: EnsoSessionIncidents,
     /** Present only when the branch ends inside a turn — see {@link EnsoInterruptedTail}. */
     interrupted: Type.Optional(EnsoInterruptedTail),
+    /** Present only when the branch records a stopped run — see {@link EnsoStoppedAfter}. */
+    stoppedAfter: Type.Optional(EnsoStoppedAfter),
     /** The name a person gave the thread (#670) — its newest `session_info`, as the listing's `name` — absent when none. */
     name: Type.Optional(Type.String({ minLength: 1 })),
   },

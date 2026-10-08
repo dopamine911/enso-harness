@@ -374,6 +374,8 @@ export const EnsoThreadHistory = Type.Object(
     incidents: EnsoSessionIncidents,
     /** Present only when the branch ends inside a turn — see {@link EnsoInterruptedTail}. */
     interrupted: Type.Optional(EnsoInterruptedTail),
+    /** Present only when the branch records a stopped run — see {@link EnsoStoppedAfter}. */
+    stoppedAfter: Type.Optional(EnsoStoppedAfter),
     /** The name a person gave the thread (#670) — its newest `session_info`, as the listing's `name` — absent when none. */
     name: Type.Optional(Type.String({ minLength: 1 })),
   },

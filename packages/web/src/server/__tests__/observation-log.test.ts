@@ -39,7 +39,7 @@ test('⚠ the first delta of a run is one info record with the latency; the rest
 test('a run with no delta leaves nothing behind: after it settles, a late delta records no latency', async () => {
   const logs = await recordEnsoLogs()
   noteRunAdmitted('obs-t2', 4)
-  recordObservation('obs-t2', 4, 9, { kind: 'settled' })
+  recordObservation('obs-t2', 4, 9, { kind: 'settled', aborted: false })
   recordObservation('obs-t2', 4, 10, { kind: 'text-delta', contentIndex: 0, delta: 'x' })
   expect(firstDeltaRecords(logs.records)).toHaveLength(0)
 })

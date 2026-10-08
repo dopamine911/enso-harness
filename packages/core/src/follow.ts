@@ -4,7 +4,7 @@ import { EnsoLoginInProgress, EnsoObservation } from './observation.ts'
 import { EnsoPermissionModeState } from './permission-mode.ts'
 import { EnsoSessionIncidents } from './session-incident.ts'
 import { EnsoSessionRiskChange } from './session-risk.ts'
-import { EnsoInterruptedTail } from './thread-inspection.ts'
+import { EnsoInterruptedTail, EnsoStoppedAfter } from './thread-inspection.ts'
 import { EnsoModelState, EnsoPromptAdmission, EnsoRecordedModel, EnsoSessionUsage } from './thread-runtime.ts'
 
 /**
@@ -74,6 +74,8 @@ export const EnsoFollowSnapshot = Type.Object(
     /** Every question pi is blocked on right now, oldest first (#114). Empty when not live. */
     openDialogs: Type.Array(EnsoOpenDialog),
     interrupted: Type.Optional(EnsoInterruptedTail),
+    /** Where the branch's runs were stopped (#766), oldest first; absent when none was — see `EnsoStoppedAfter`. */
+    stoppedAfter: Type.Optional(EnsoStoppedAfter),
     /** A login waiting on its provider (#348), which Stop can end; absent when none is. */
     login: Type.Optional(EnsoLoginInProgress),
   },

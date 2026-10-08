@@ -149,6 +149,7 @@ export {
 } from './log-tail.ts'
 export {
   ENSO_NOTICE_SOURCE,
+  ENSO_RUN_STOPPED_ENTRY,
   EnsoBranchCompacted,
   EnsoCustomEntry,
   EnsoDialogOutcome,
@@ -182,6 +183,7 @@ export {
   EnsoUiRequestOrigin,
   EnsoUnmapped,
   EnsoUsage,
+  readEnsoRunStopped,
 } from './observation.ts'
 export { EnsoPermissionModeChange, EnsoPermissionModeState } from './permission-mode.ts'
 export {
@@ -453,6 +455,7 @@ export {
   EnsoTreeOnDisk,
   EnsoTreesListing,
   EnsoInterruptedTail,
+  EnsoStoppedAfter,
   EnsoStoredThread,
   EnsoThreadEvent,
   EnsoThreadEvents,

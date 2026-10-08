@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test'
 import {
   ENSO_GUARD_DENIAL_ENTRY,
   ENSO_PERMISSION_DENIAL_ENTRY,
+  ENSO_RUN_STOPPED_ENTRY,
   ENSO_PROVIDER_REFUSAL_KEY,
   ENSO_TOOL_REFUSAL_KEY,
   ENSO_TOOL_RESULT_KEY,
@@ -9,7 +10,7 @@ import {
 } from '@enso/core'
 import type { UIMessage } from '@tanstack/ai-client'
 import { transcriptOf } from '../../host/transcript.ts'
-import { interruptedTail, transcriptToMessages } from '../transcript-to-messages.ts'
+import { interruptedTail, stoppedAfter, transcriptToMessages } from '../transcript-to-messages.ts'
 
 /**
  * #95: a stored branch mounts as the messages a live run would have left behind. Shapes are
@@ -370,4 +371,38 @@ test('an aborted reply is not a refusal, and an error with no message still says
   expect(messages[1]?.metadata).toEqual({
     [ENSO_PROVIDER_REFUSAL_KEY]: { message: 'the provider returned an error without a message' },
   })
+})
+
+// ── #766: where the branch's runs were stopped ────────────────────────────────
+// A stop is the host's `enso-run-stopped` entry after the run's last message; a reload puts its
+// line after that message, so the anchor is the last MESSAGE before each entry, oldest first.
+
+const stopEntry = (id: string): Record<string, unknown> => ({
+  type: 'custom',
+  id,
+  parentId: null,
+  timestamp: '',
+  customType: ENSO_RUN_STOPPED_ENTRY,
+  data: {},
+})
+
+test('each stop on the branch is anchored to the message before it, oldest first (#766)', () => {
+  const branch = [
+    entry('u1', { role: 'user', content: 'go', timestamp: 1 }),
+    entry('a1', { role: 'assistant', content: [], stopReason: 'aborted' }),
+    { type: 'model_change', id: 'm1', parentId: null, timestamp: '', provider: 'x', modelId: 'y' },
+    stopEntry('s1'),
+    entry('u2', { role: 'user', content: 'again', timestamp: 2 }),
+    call('a2'),
+    result('r2'),
+    stopEntry('s2'),
+  ]
+  expect(stoppedAfter(transcriptOf(branch))).toEqual(['a1', 'a2'])
+})
+
+test('a branch with no stop, or a stop entry that does not read, lists none (#766)', () => {
+  const reply = entry('a1', { role: 'assistant', content: [{ type: 'text', text: 'done' }] })
+  expect(stoppedAfter(transcriptOf([entry('u1', { role: 'user', content: 'hi', timestamp: 1 }), reply]))).toEqual([])
+  const malformed = { ...stopEntry('s1'), data: { reason: 'x' } }
+  expect(stoppedAfter(transcriptOf([reply, malformed]))).toEqual([])
 })

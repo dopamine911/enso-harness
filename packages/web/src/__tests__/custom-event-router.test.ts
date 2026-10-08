@@ -4,6 +4,8 @@ import {
   ENSO_INCIDENT_OPENED_ENTRY,
   ENSO_INCIDENT_RESOLVED_ENTRY,
   ENSO_PERMISSION_DENIAL_ENTRY,
+  ENSO_NOTICE_SOURCE,
+  ENSO_RUN_STOPPED_ENTRY,
   ENSO_SESSION_RISK_ENTRY,
   ENSO_PROVIDER_REFUSAL_KEY,
   type EnsoDialogSpec,
@@ -13,11 +15,13 @@ import {
   type EnsoFollowStatus,
   type EnsoModelState,
   type EnsoObservation,
+  type EnsoThreadHistory,
   type EnsoSessionUsage,
   NO_SESSION_INCIDENTS,
 } from '@enso/core'
-import { FOLLOW_ENDED_CUSTOM_EVENT, routeEnsoCustomEvent } from '../custom-event-router.ts'
-import { clearThreadsForTest, mintThread, type ThreadStores } from '../thread-stores.ts'
+import { FOLLOW_ENDED_CUSTOM_EVENT, RUN_STOPPED_NOTICE, routeEnsoCustomEvent } from '../custom-event-router.ts'
+import type { EnsoNotification } from '../notifications.tsx'
+import { adoptThread, clearThreadsForTest, mintThread, type ThreadStores } from '../thread-stores.ts'
 
 /**
  * #53 S1.3: the CUSTOM-chunk router was an inline closure no test reached — renaming a
@@ -211,6 +215,51 @@ test('a refusal custom-entry marks its call refused, naming who; any other entry
     ['c6', { by: 'auto' }],
   ])
   expect(notificationMessages()).toEqual([])
+})
+
+// #766: a stopped run settled exactly like a finished one. The host's `enso-run-stopped` entry is
+// what says it, live: one Enso line where the run stopped. A finished run's settle says nothing.
+const STOPPED_ENTRY: EnsoObservation = { kind: 'custom-entry', customType: ENSO_RUN_STOPPED_ENTRY, data: {} }
+const stopLines = (on: ThreadStores = stores): EnsoNotification[] =>
+  on.notifications.get().filter((notification) => notification.message === RUN_STOPPED_NOTICE)
+
+test('a stopped run’s entry is one Enso line; a finished run’s settle is none (#766)', () => {
+  observe({ kind: 'settled', aborted: false })
+  expect(stopLines()).toEqual([])
+  observe(STOPPED_ENTRY)
+  expect(stopLines()).toEqual([
+    expect.objectContaining({ message: 'Stopped.', notifyType: 'info', origin: 'run', source: ENSO_NOTICE_SOURCE }),
+  ])
+  // A reconnect's snapshot lists the same stop off the branch: it is not said twice.
+  route('snapshot', snapshot({ stoppedAfter: ['a1'] }))
+  expect(stopLines()).toHaveLength(1)
+})
+
+const STOPPED_HISTORY: EnsoThreadHistory = {
+  threadId: 'stopped-thread',
+  projectId: 'p1',
+  messages: [
+    { id: 'u1', role: 'user', parts: [{ type: 'text', content: 'go' }] },
+    { id: 'a1', role: 'assistant', parts: [] },
+    { id: 'u2', role: 'user', parts: [{ type: 'text', content: 'again' }] },
+    { id: 'a2', role: 'assistant', parts: [{ type: 'text', content: 'done' }] },
+  ],
+  permissionMode: { mode: 'default', available: ['default'] },
+  sessionRisk: { level: 'low', signals: 0 },
+  incidents: NO_SESSION_INCIDENTS,
+  stoppedAfter: ['a1'],
+}
+
+// #766, reloaded: the server reads each stop off the branch as the message it follows. The adopted
+// thread says it after that message, as the live line did; the follow's first snapshot lists the
+// same stop and says nothing more, and a stop made while the page was away is said once.
+test('a reloaded thread says each stop after its message, once, whatever the snapshots repeat (#766)', () => {
+  const adopted = adoptThread(STOPPED_HISTORY)
+  expect(stopLines(adopted).map((line) => [line.after, line.source])).toEqual([['a1', ENSO_NOTICE_SOURCE]])
+  routeEnsoCustomEvent(adopted, 'snapshot', snapshot({ threadId: 'stopped-thread', stoppedAfter: ['a1'] }))
+  expect(stopLines(adopted)).toHaveLength(1)
+  routeEnsoCustomEvent(adopted, 'snapshot', snapshot({ threadId: 'stopped-thread', stoppedAfter: ['a1', 'a2'] }))
+  expect(stopLines(adopted).map((line) => line.after)).toEqual(['a1', 'a2'])
 })
 
 // #464: the session's risk, seeded by the snapshot (the server's replay) and raised live by the

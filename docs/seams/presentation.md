@@ -317,6 +317,14 @@ export interface ThreadStores {
    * seen fewer than this.
    */
   readonly branchCompacted: WritableStore<number>
+  /**
+   * How many of the thread's stopped runs this page has said (#766): each live `enso-run-stopped`
+   * entry, and each stop the history or a snapshot listed. A snapshot lists every stop on the
+   * branch, oldest first, so the page says only those past this count — a reconnect never says a
+   * stop twice. Counted, not matched by message: a live line follows the stream's own message id,
+   * which is not the id the branch gives that message.
+   */
+  readonly runStops: WritableStore<number>
   /** The login waiting on its provider (#348): what the composer's Stop can end. Undefined when none is. */
   readonly login: WritableStore<EnsoLoginInProgress | undefined>
   /**

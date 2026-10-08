@@ -91,6 +91,12 @@ export interface NotificationsStore extends Store<ReadonlyArray<EnsoNotification
   ) => void
   /** Add a line that carries an action (#436) — the one the reader can press once. Answers the line's id. */
   readonly pushWithAction: (line: NotificationLineInput & { action: NotificationAction }) => number
+  /**
+   * Add a line after a message the caller names (#766), not the stream's or the tail: a stop read
+   * back off the branch, whose message the server named. A message the transcript does not hold
+   * falls to the tail, as any line's does.
+   */
+  readonly pushAfter: (after: string, line: NotificationLineInput) => void
   /** Take a line's action off it and hand it back, or `undefined` when it has none (any more). */
   readonly takeAction: (id: number) => NotificationAction | undefined
   /**
@@ -125,9 +131,9 @@ export function createNotificationsStore(
   let transcriptTail: string | undefined
   /** Lines a later fact has answered (`resolveLine`) — never given an action back. */
   const resolved = new Set<number>()
-  const append = (line: NotificationLineInput): number => {
+  const append = (line: NotificationLineInput, anchor?: string): number => {
     const id = nextNotificationId++
-    const after = line.origin === 'session-start' ? undefined : (streamMessageId() ?? transcriptTail)
+    const after = line.origin === 'session-start' ? undefined : (anchor ?? streamMessageId() ?? transcriptTail)
     const appended = [...store.get(), { ...line, id, at: new Date(), after }]
     store.set(appended.slice(-MAX_KEPT_NOTIFICATIONS))
     return id
@@ -142,6 +148,9 @@ export function createNotificationsStore(
       append({ message, notifyType, origin, source })
     },
     pushWithAction: append,
+    pushAfter: (after: string, line: NotificationLineInput) => {
+      append(line, after)
+    },
     takeAction: (id: number) => {
       const action = store.get().find((notification) => notification.id === id)?.action
       if (action === undefined) return undefined

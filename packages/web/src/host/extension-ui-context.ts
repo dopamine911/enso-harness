@@ -37,7 +37,7 @@ export type CustomComponentFactory<T> = (
  * stdin — pi's rpc mode owned the pending-dialog map. In-process there is no wire: the host
  * IS the UI, so it implements the interface pi's extensions call and turns each call into
  * the SAME rpc-shaped record the browser pipeline already consumes (`map-events.ts`
- * `extension_ui_request`, the #27 dialog park in `session.ts`). Replicated from pi 0.87.1 (unchanged at 0.99.2)
+ * `extension_ui_request`, the #27 dialog park in `session.ts`). Replicated from pi 0.87.1 (unchanged at 1.1.0)
  * `dist/modes/rpc/rpc-mode.js` `createExtensionUIContext` (MIT), which is the reference
  * for "a UI with no terminal".
  *

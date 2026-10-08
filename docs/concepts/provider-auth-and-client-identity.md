@@ -31,15 +31,16 @@ stand on.
 
 ## What pi does
 
-- OAuth client id, authorize endpoint, and scopes: `@earendil-works/pi-ai/dist/auth/oauth/anthropic.js:13-14`.
+- OAuth client id, authorize endpoint, and scopes: `@earendil-works/pi-ai/dist/auth/oauth/anthropic.js:11-12,23` (1.1.0).
   The client id is the one Claude Code uses, stored base64-obfuscated. The scope set includes
   `user:inference` and `user:sessions:claude_code`.
 - Token endpoint: `platform.claude.com/v1/oauth/token`.
-- Inference requests carry the bundled Anthropic SDK's own `X-Stainless-*` headers with that SDK's real
-  values. There is no `claude-cli` user agent anywhere in pi's bundle — checked by grep across `dist/`
-  and its vendored `pi-ai`.
+- ⚠ **On the OAuth path, pi presents itself as Claude Code's CLI.** The OAuth client sets
+  `user-agent: claude-cli/2.1.280` and `x-app: cli` (`@earendil-works/pi-ai/dist/api/anthropic-messages.js:43,778-779`,
+  1.1.0; already so at 0.99.2). This document said the opposite until #766. The requests also carry
+  the bundled Anthropic SDK's own `X-Stainless-*` headers.
 - ⚠ **On the OAuth path, pi prepends a Claude Code identity system block.**
-  `@earendil-works/pi-ai/dist/api/anthropic-messages.js:746-753`: `if (isOAuthToken)` sets
+  `@earendil-works/pi-ai/dist/api/anthropic-messages.js:885-893` (1.1.0): `if (isOAuthToken)` sets
   `params.system` to `"You are Claude Code, Anthropic's official CLI for Claude."` as the first block,
   ahead of the caller's own system prompt, under the comment *"For OAuth tokens, we MUST include Claude
   Code identity."* The user's system prompt is appended after it.

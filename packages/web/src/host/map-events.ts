@@ -318,7 +318,7 @@ function mapToolExecutionEnd(event: RuntimeEvent): EnsoObservation {
     complete: true,
     // ⚠ `isError` is the only signal a refused call has: the runtime turns a guard's
     // `{block: true, reason}` into an error result with the reason as its content —
-    // `@earendil-works/pi-agent-core@0.99.2` (bun.lock), `dist/agent-loop.js`, the
+    // `@earendil-works/pi-agent-core@1.1.0` (bun.lock), `dist/agent-loop.js`, the
     // `beforeResult?.block` branch: `createErrorToolResult(reason)`, `isError: true` —
     // pinned by `__tests__/agent-loop-contract.test.ts`, so a bump that moves it goes red. No distinct
     // "blocked" event exists. Treating any error result as displayable covers it — see
@@ -448,7 +448,8 @@ export function mapPiEvent(event: RuntimeEvent, delivery: EventDelivery = 'live'
       return { kind: 'run-ended', willRetry: event.willRetry === true }
 
     case 'agent_settled':
-      return { kind: 'settled' }
+      // pi 1.1.0 says whether the run was stopped (#766); an older record without it finished.
+      return { kind: 'settled', aborted: event.aborted === true }
 
     default:
       return { kind: 'unmapped', event }

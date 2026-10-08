@@ -17,7 +17,7 @@ import {
 } from '@enso/core'
 import type { UIMessage } from '@tanstack/ai-client'
 import type { BrowserLogging, FetchLike } from './browser-logging.ts'
-import { createRecentChunksStore, type RecentChunksStore } from './custom-event-router.ts'
+import { createRecentChunksStore, type RecentChunksStore, showRunStops } from './custom-event-router.ts'
 import { createFollowConnection, type FollowConnection } from './follow-connection.ts'
 import { createModeLines, type ModeLines } from './mode-lines.ts'
 import { createModelStore, type ModelStore } from './model-state.tsx'
@@ -179,6 +179,14 @@ export interface ThreadStores {
    * seen fewer than this.
    */
   readonly branchCompacted: WritableStore<number>
+  /**
+   * How many of the thread's stopped runs this page has said (#766): each live `enso-run-stopped`
+   * entry, and each stop the history or a snapshot listed. A snapshot lists every stop on the
+   * branch, oldest first, so the page says only those past this count — a reconnect never says a
+   * stop twice. Counted, not matched by message: a live line follows the stream's own message id,
+   * which is not the id the branch gives that message.
+   */
+  readonly runStops: WritableStore<number>
   /** The login waiting on its provider (#348): what the composer's Stop can end. Undefined when none is. */
   readonly login: WritableStore<EnsoLoginInProgress | undefined>
   /**
@@ -294,6 +302,7 @@ function createThreadStores(
     toolResultDescriptors,
     startSession: createStore(false),
     branchCompacted: createStore(0),
+    runStops: createStore(0),
     login: createStore<EnsoLoginInProgress | undefined>(undefined),
     projectId,
     fetch: threadFetch,
@@ -609,6 +618,9 @@ export function adoptThread(history: EnsoThreadHistory, fetchImpl?: FetchLike, i
   stores.permissionMode.applyReceipt(history.permissionMode)
   stores.sessionRisk.set(history.sessionRisk)
   stores.incidents.set(history.incidents)
+  // Each stopped run where it was stopped (#766), as the live line said it; the follow's first
+  // snapshot lists the same stops, and says none of them again.
+  showRunStops(stores, history.stoppedAfter)
   if (history.interrupted !== undefined) offerContinue(stores, history.interrupted)
   threads.set(stores.threadId, stores)
   summaries.set(stores.threadId, {

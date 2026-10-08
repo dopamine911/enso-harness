@@ -6,7 +6,7 @@ import { Compile } from 'typebox/compile'
  *
  * pi's rpc mode has four dialog methods — `select`, `confirm`, `input`, `editor` — that
  * emit an `extension_ui_request` and BLOCK the extension until an `extension_ui_response`
- * with the matching id arrives (pi `rpc-types.d.ts`, read at v0.87.1, unchanged at 0.99.2). These schemas are
+ * with the matching id arrives (pi `rpc-types.d.ts`, read at v0.87.1, unchanged at 1.1.0). These schemas are
  * the harness's model of that exchange: the QUESTION (`EnsoDialogSpec`), which rides to the
  * browser on the follow as a blocking `extension-ui-request`, and the ANSWER (`EnsoDialogAnswer`), which
  * rides back in `POST /api/threads/:id/dialog`.

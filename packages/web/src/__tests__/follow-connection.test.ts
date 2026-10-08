@@ -314,7 +314,7 @@ test("send opens TanStack's own run at admission; the thread's settle closes it"
   // The server's status for OUR generation is not a second run.
   server.frame({ type: 'status', live: true, busy: true, generation: 1 })
   server.frame({ type: 'observation', seq: 1, observation: { kind: 'text-delta', contentIndex: 0, delta: 'hi' } })
-  server.frame({ type: 'observation', seq: 2, observation: { kind: 'settled' } })
+  server.frame({ type: 'observation', seq: 2, observation: { kind: 'settled', aborted: false } })
   server.frame({ type: 'status', live: true, busy: false, generation: 1 })
   await server.untilChunks(7)
   expect(server.chunks.slice(3)).toEqual([
@@ -336,7 +336,7 @@ test('⚠ a run another client started is synthesised so this tab renders what i
     { type: EventType.RUN_STARTED, threadId: 't1', runId: 'external-4' },
     { type: EventType.TEXT_MESSAGE_START, messageId: expect.any(String), role: 'assistant' },
   ])
-  server.frame({ type: 'observation', seq: 1, observation: { kind: 'settled' } })
+  server.frame({ type: 'observation', seq: 1, observation: { kind: 'settled', aborted: false } })
   await server.untilChunks(4)
   expect(server.chunks[3]).toEqual({ type: EventType.RUN_FINISHED, threadId: 't1', runId: 'external-4' })
   server.abort()
@@ -544,7 +544,7 @@ test('abort is one POST to …/abort and names what the server did; it closes no
   expect(server.abortCount()).toBe(1)
   // Nothing closed here: the run ends when the server's settle arrives, like any run.
   expect(server.chunks.some((chunk) => chunk.type === EventType.RUN_FINISHED)).toBe(false)
-  server.frame({ type: 'observation', seq: 1, observation: { kind: 'settled' } })
+  server.frame({ type: 'observation', seq: 1, observation: { kind: 'settled', aborted: false } })
   server.frame({ type: 'status', live: true, busy: false, generation: 1 })
   await server.untilChunks(5)
   expect(server.chunks).toContainEqual({ type: EventType.RUN_FINISHED, threadId: 't1', runId: 'r1' })

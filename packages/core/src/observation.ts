@@ -1,4 +1,5 @@
 import { type Static, Type } from 'typebox'
+import { Compile } from 'typebox/compile'
 import { EnsoDialogSpec } from './dialog.ts'
 import { EnsoPermissionModeState } from './permission-mode.ts'
 import { EnsoProviderRefusal, EnsoProviderRetry, EnsoProviderRetryEnd } from './provider-refusal.ts'
@@ -554,12 +555,36 @@ export const EnsoRunEnded = Type.Object({
 })
 
 /**
- * The session-level settle. This is completion.
+ * The session-level settle. This is completion. `aborted` (#766) says the run ended because it
+ * was stopped — pi's `agent_settled` carries it since 1.1.0 — and `false` when it finished on its own.
  *
  * @group Observations
  * @category Turns and cost
  */
-export const EnsoSettled = Type.Object({ kind: Type.Literal('settled') })
+export const EnsoSettled = Type.Object({ kind: Type.Literal('settled'), aborted: Type.Boolean() })
+
+/**
+ * The `customType` a stopped run is persisted under (#766): the host appends one, with empty
+ * data, each time a run settles `aborted`, so a thread re-read from its file still says where it
+ * was stopped. pi's context builder skips `custom` entries: the model never sees it.
+ *
+ * @group Observations
+ * @category Turns and cost
+ */
+export const ENSO_RUN_STOPPED_ENTRY = 'enso-run-stopped' as const
+
+const runStoppedValidator = Compile(Type.Object({}, { additionalProperties: false }))
+
+/**
+ * Whether a custom entry records a stopped run, or is another extension's or malformed — an entry
+ * is a wire crossing, and a bad one records nothing.
+ *
+ * @group Observations
+ * @category Turns and cost
+ */
+export function readEnsoRunStopped(customType: string, data: unknown): boolean {
+  return customType === ENSO_RUN_STOPPED_ENTRY && runStoppedValidator.Check(data)
+}
 
 /**
  * pi compacted the branch (#348): its older turns are now one summary, so a transcript a page
