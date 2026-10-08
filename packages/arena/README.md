@@ -42,7 +42,8 @@ leaves anything behind:
    3 GB of memory available, 2 GB free in the temporary directory or 5 GB free under `--out`.
 3. **The run gets its own scope.** Where `systemd-run --user` works, the run (the recorder, Enso and
    Chromium) runs as the transient scope `arena-<time>.scope`, its memory capped at `--memory-max`
-   (`6G` by default, plus 1 GB of swap). A run that overruns is killed inside its scope, and nothing
+   (`6G` by default, plus 1 GB of swap; any value systemd's `MemoryMax=` takes, such as `4096M`, `50%`
+   or `infinity`, and a value systemd refuses is refused before anything starts). A run that overruns is killed inside its scope, and nothing
    else on the machine is touched. `start` itself waits outside the scope. `--no-scope`, or a machine
    without systemd, runs it unscoped, and `start` says there is no cap.
 4. **It gets its own temporary directory.** Every process of the run has `TMPDIR` set to

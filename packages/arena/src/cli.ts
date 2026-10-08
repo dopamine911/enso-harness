@@ -87,7 +87,6 @@ import {
   canScope,
   endScope,
   headroomShortfalls,
-  isMemoryMax,
   makeRunTmp,
   portHolder,
   scopedCommand,
@@ -293,13 +292,6 @@ function currentRun(): string | undefined {
   return existsSync(currentFile) ? readFileSync(currentFile, 'utf8').trim() : undefined
 }
 
-/** `--memory-max`, checked before anything starts. */
-function memoryMaxNamed(): string {
-  const memoryMax = flag('memory-max') ?? ARENA_DEFAULT_MEMORY_MAX
-  if (!isMemoryMax(memoryMax)) fail('--memory-max takes a size systemd reads, such as 6G or 4096M')
-  return memoryMax
-}
-
 /**
  * Before a `start` (#742): what an earlier run left is taken back, and a run starts only with its
  * ports free and room to run in. A run whose recorder died (#607) gets its evidence collected and its
@@ -439,22 +431,41 @@ function ensoModelNamed(): EnsoModelSetting | undefined {
  */
 async function start(): Promise<void> {
   // The scoped child: its launcher prepared, and cleans up after it.
-  if (process.env['ENSO_ARENA_SCOPE'] !== undefined) process.exit((await startRuns()) ? 0 : 1)
-  const memoryMax = memoryMaxNamed()
-  await prepareLaunch()
+  if (process.env['ENSO_ARENA_SCOPE'] !== undefined) exitWith(await settledRuns())
+  const memoryMax = flag('memory-max') ?? ARENA_DEFAULT_MEMORY_MAX
   const wantsScope = !rest.includes('--no-scope')
-  if (wantsScope && canScope()) process.exit(await launchScoped(memoryMax))
-  if (wantsScope)
-    process.stdout.write('arena: `systemd-run --user` is not available here, so the run has no memory cap of its own\n')
+  const scoped = wantsScope && canScope()
+  // Checked before anything starts: preparing collects dead runs and sweeps temporary directories.
+  if (scoped && !canScope(memoryMax)) {
+    fail(`systemd refuses --memory-max ${memoryMax} as a MemoryMax; it takes values such as 6G, 4096M, 50% or infinity`)
+  }
+  await prepareLaunch()
+  if (scoped) process.exit(await launchScoped(memoryMax))
+  process.stdout.write(
+    wantsScope
+      ? 'arena: `systemd-run --user` is not available here, so the run has no memory cap of its own\n'
+      : 'arena: --no-scope, so the run has no memory cap of its own\n',
+  )
   const runTmp = makeRunTmp({ pid: process.pid })
   process.env['TMPDIR'] = runTmp
-  let passed = false
+  const outcome = await settledRuns()
+  await cleanUp(runTmp)
+  exitWith(outcome)
+}
+
+/** The runs' outcome, a throw included, so the caller can clean up before it is said (PR #746 review). */
+async function settledRuns(): Promise<{ readonly passed: boolean } | { readonly error: string }> {
   try {
-    passed = await startRuns()
-  } finally {
-    await cleanUp(runTmp)
+    return { passed: await startRuns() }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) }
   }
-  process.exit(passed ? 0 : 1)
+}
+
+/** Exit as `start` does: a thrown error said the arena's way (exit 1), else 1 when a run failed its score. */
+function exitWith(outcome: { readonly passed: boolean } | { readonly error: string }): never {
+  if ('error' in outcome) fail(outcome.error)
+  process.exit(outcome.passed ? 0 : 1)
 }
 
 /**

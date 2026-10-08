@@ -48,11 +48,6 @@ interface RunTmpOwner {
   readonly unit?: string
 }
 
-/** A `--memory-max` value systemd takes: a number of bytes with an optional K, M, G or T. */
-export function isMemoryMax(value: string): boolean {
-  return /^\d+(\.\d+)?[KMGT]?$/i.test(value)
-}
-
 /** A new temporary directory for one run, naming its owner so a later sweep can tell it is abandoned. */
 export function makeRunTmp(owner: RunTmpOwner, base: string = tmpdir()): string {
   const directory = mkdtempSync(join(base, RUN_TMP_PREFIX))
@@ -144,9 +139,17 @@ export function portHolder(port: number): { readonly pid?: number; readonly comm
   return { pid: Number(pid), ...(command === undefined || command === '' ? {} : { command }) }
 }
 
-/** Whether a run can have a scope of its own here: `systemd-run --user` answers. */
-export function canScope(): boolean {
-  return spawnSync('systemd-run', ['--user', '--scope', '--quiet', '--', 'true'], { stdio: 'ignore' }).status === 0
+/**
+ * Whether a run can have a scope of its own here, capped at `memoryMax` when one is given:
+ * `systemd-run --user` answers. ⚠ systemd is the one judge of a cap (PR #746 review): it takes `6G`,
+ * `1.5G`, `50%` and `infinity`, and refuses `6g`, `6GB` and `0`. A pattern here would be a second
+ * grammar, wrong in both directions as the first one was.
+ */
+export function canScope(memoryMax?: string): boolean {
+  const cap = memoryMax === undefined ? [] : ['-p', `MemoryMax=${memoryMax}`]
+  return (
+    spawnSync('systemd-run', ['--user', '--scope', '--quiet', ...cap, '--', 'true'], { stdio: 'ignore' }).status === 0
+  )
 }
 
 /** The command line that runs `argv` as the transient scope `unit`, its memory capped at `memoryMax`. */
