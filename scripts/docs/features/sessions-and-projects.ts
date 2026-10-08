@@ -28,6 +28,7 @@ export const SESSIONS_AND_PROJECTS: FeatureSpec = {
       'With no roots declared, the launch folder is the only project.',
     ].join('\n'),
     '**New Thread**, or the **+** beside a project, opens **Start a session**.',
+    "**Project settings…** in a project's menu on the rail (the `⋯` beside its **+**, the launch folder's included) opens the project's page: how its new threads' trees are made, the files copied into them and the commands that set them up, each with the file it comes from. See [Thread trees](./thread-trees.md) (#754).",
     'Click a thread in the rail to open it. A cold thread opens from its file straight away.',
   ],
   shots: [
