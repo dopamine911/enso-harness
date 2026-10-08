@@ -134,6 +134,9 @@
       },
     },
   },
+  "patchedDependencies": {
+    "pi-multi-account@1.23.2": "patches/pi-multi-account@1.23.2.patch",
+  },
   "overrides": {
     "@ag-ui/core": "1.0.0",
     "@tanstack/ai": "0.58.0",

@@ -943,12 +943,14 @@ function dropCursorPublications(agentDir: string): void {
     const overlay = operatorOverlay(entry)
     return overlay === undefined ? [] : [[providerId, overlay]]
   })
-  // Staged and renamed over, as the vendor writes it: pi never reads a half-written registry.
-  const staging = `${modelsPath}.enso.tmp`
+  // Staged and renamed over, as the vendor writes it: pi never reads a half-written registry. At the
+  // file the path names: a rename onto a run home's link would replace the link (#758).
+  const target = realpathOrSelf(modelsPath)
+  const staging = `${target}.enso.tmp`
   writeFileSync(staging, `${JSON.stringify({ ...models, providers: Object.fromEntries(kept) }, null, 2)}\n`, {
     mode: 0o600,
   })
-  renameSync(staging, modelsPath)
+  renameSync(staging, target)
 }
 
 /** `RuntimeCommand` with `description` present only when pi supplied one (`exactOptionalPropertyTypes`). */
