@@ -29,9 +29,10 @@ const SETUP_OUTPUT_BYTES = 64 * 1024
  * nothing to record.
  *
  * A path to copy is relative to the project: a file or a directory, copied whole with its symlinks
- * kept as links. ⚠ One that leaves the project — `../x`, an absolute path, or through a symlinked
- * directory — is never followed: it is `missing`, as is one the project does not have. A missing
- * path makes the outcome not `ok`, but the commands still run.
+ * kept as links. ⚠ An absolute path is refused, wherever it points (the page and the docs say paths
+ * are relative; one that happens to land inside the project still is not one); so is one that
+ * leaves the project — `../x`, or through a symlinked directory. Each is `missing`, as is one the
+ * project does not have. A missing path makes the outcome not `ok`, but the commands still run.
  *
  * Each command runs with `sh -c` in the tree, in `environment` — the host's, after the secrets
  * quarantine (#89), the one pi's `bash` gets — its stdout and stderr interleaved, the tail kept
@@ -74,6 +75,7 @@ export async function prepareThreadTree(request: {
 
 /** `true` once `path` is copied; `false` when it is not the project's to copy, or is not there. */
 function copyIntoTree(project: string, tree: string, path: string): boolean {
+  if (isAbsolute(path)) return false
   const inside = relative(project, resolve(project, path))
   if (inside === '' || leaves(inside)) return false
   try {

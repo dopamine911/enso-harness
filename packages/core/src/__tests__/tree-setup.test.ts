@@ -66,13 +66,28 @@ test('a file and a directory are copied into the tree, symlinks kept as links; a
 test('⚠ a path that leaves the project is never copied: ../, absolute, or through a symlinked directory', async () => {
   const { project, tree, outside } = places()
   writeFileSync(join(outside, 'secret.txt'), 'not the project')
+  writeFileSync(join(project, 'inside.txt'), 'the project')
   symlinkSync(outside, join(project, 'escape'))
-  const threads = settings({ copy: ['../outside/secret.txt', join(outside, 'secret.txt'), 'escape/secret.txt', '.'] })
-  const outcome = await prepareThreadTree({ project, tree, threads, environment: PATH_ONLY, secretValues: [] })
+  // An absolute path is refused even when it lands inside the project (PR #756 review): paths are relative.
+  const paths = [
+    '../outside/secret.txt',
+    join(outside, 'secret.txt'),
+    join(project, 'inside.txt'),
+    'escape/secret.txt',
+    '.',
+  ]
+  const outcome = await prepareThreadTree({
+    project,
+    tree,
+    threads: settings({ copy: paths }),
+    environment: PATH_ONLY,
+    secretValues: [],
+  })
   expect(outcome?.copied).toEqual([])
-  expect(outcome?.missing).toEqual(['../outside/secret.txt', join(outside, 'secret.txt'), 'escape/secret.txt', '.'])
+  expect(outcome?.missing).toEqual(paths)
   expect(existsSync(join(tree, 'escape'))).toBe(false)
   expect(existsSync(join(tree, 'secret.txt'))).toBe(false)
+  expect(existsSync(join(tree, 'inside.txt'))).toBe(false)
 })
 
 test('commands run in the tree in order and stop at the first failure, with its exit code and output', async () => {
