@@ -75,6 +75,7 @@ import {
   treeProjectId,
 } from '@enso/core/paths'
 import { ENSO_DEFAULT_PERMISSION_POLICY, permissionEngineConfigPath } from '@enso/core/permission-rules'
+import { writeProjectThreadSettings } from '@enso/core/project-config'
 import { snapshotPaths } from '@enso/core/snapshot-store'
 import { getPermissionsService } from '@gotgenes/pi-permission-system'
 import type { LogRecorder } from '@logtape/testing/recorder'
@@ -2003,6 +2004,25 @@ test("⚠ an untrusted project's setup is not run, and nothing is recorded (#754
   expect(existsSync(join(tree, 'ran.txt'))).toBe(false)
   expect(customTypesOf(hosted)).not.toContain(ENSO_TREE_SETUP_ENTRY)
   expect((await host.threadTree(threadId))?.setup).toBeUndefined()
+})
+
+// The page's "New threads run in: off", end to end: written to the project's local tier as the page
+// writes it (the user's own config says worktree), a trusted project's new thread runs in its checkout
+// and leaves no worktree or branch in the repository.
+test("⚠ a trusted project's tier saying trees off wins over the user's worktree: the thread runs in the checkout (#754)", async () => {
+  const project = dirtyCheckout()
+  expect(writeProjectThreadSettings(project, { tier: 'local', threads: { tree: 'off' } })).toEqual({ kind: 'written' })
+  const core = createFauxCore()
+  core.setResponses([faux.fauxAssistantMessage('ran')])
+  const { host } = treeHost(project, [fauxModelExtension(core)], 'worktree')
+  new ProjectTrustStore(agentDir).set(project, true)
+  const threadId = crypto.randomUUID()
+  const hosted = await host.createSession(threadId, () => project)
+  openSessions.push(hosted)
+  await runPrompt(hosted, 'first')
+  expect(realpathOrSelf(hosted.inspect().cwd)).toBe(realpathOrSelf(project))
+  expect(await host.threadTree(threadId)).toBeUndefined()
+  expect(fixtureGit(project, 'branch', '--list', 'enso/*').trim()).toBe('')
 })
 
 // ⚠ Found live: a project's first thread mints its tree at its first run, and the trust question
