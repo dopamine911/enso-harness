@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { ENSO_CONFIG_EXAMPLE, mergeEnsoConfig, parseEnsoConfig, threadTreeFor } from '../config.ts'
+import { ENSO_CONFIG_EXAMPLE, mergeEnsoConfig, parseEnsoConfig } from '../config.ts'
 import { ensoConfigPath } from '../paths.ts'
 
 /**
@@ -28,22 +28,17 @@ test('⚠ no config file is the defaults, not a failure; nor is a file with no s
   expect(parseEnsoConfig('').kind).toBe('unreadable')
 })
 
-// #551 decision 1: trees are ON by default, now a tree goes with its thread (#571) and its
-// snapshots survive the checkout's gc (#573); a project's own entry beats the user's default,
-// matched by the key's canonical form (a `~/` key silently fell through before); a mode the schema
-// does not know is a config that fails closed.
-test("⚠ a thread's tree: the project's entry by its canonical path, else the user's default, else a worktree; an unknown mode is unreadable (#551)", () => {
+// #551, #754: the `threads` section holds a tree mode, the commands and the paths a new tree is set
+// up with; a mode the schema does not know, or an empty command, is a config that fails closed.
+test('⚠ the threads section: a mode, setup commands and paths to copy; an unknown mode or an empty command is unreadable (#551, #754)', () => {
   const parsed = parseEnsoConfig(
-    JSON.stringify({ threads: { tree: 'copy', projects: { '~/legacy': 'off', '/srv/big': 'worktree' } } }),
+    JSON.stringify({
+      threads: { tree: 'copy', projects: { '~/legacy': 'off' }, setup: ['bun install'], copy: ['.env'] },
+    }),
   )
-  if (parsed.kind !== 'ok') throw new Error(parsed.reason)
-  const canonical = (key: string): string => key.replace(/^~\//, '/home/me/')
-  expect(threadTreeFor(parsed.config, '/home/me/legacy', canonical)).toBe('off')
-  expect(threadTreeFor(parsed.config, '/srv/big', canonical)).toBe('worktree')
-  expect(threadTreeFor(parsed.config, '/srv/app', canonical)).toBe('copy')
-  expect(threadTreeFor({}, '/srv/app', canonical)).toBe('worktree')
-  expect(threadTreeFor({ threads: { projects: { '/srv/big': 'off' } } }, '/srv/big', canonical)).toBe('off')
+  expect(parsed.kind).toBe('ok')
   expect(parseEnsoConfig(JSON.stringify({ threads: { tree: 'none' } })).kind).toBe('unreadable')
+  expect(parseEnsoConfig(JSON.stringify({ threads: { setup: [''] } })).kind).toBe('unreadable')
 })
 
 test('invalid JSON is unreadable, naming the file and the failure', () => {

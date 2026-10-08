@@ -207,6 +207,19 @@ test("⚠ with ENSO_HOME set explicitly, a launch moves nothing: the checkout's 
   expect(existsSync(home)).toBe(false)
 })
 
+// #754: a checkout's `.enso/` holding only the project's own tiers is no leftover, and a launch with
+// ENSO_HOME set must not tell the operator to move it by hand.
+test("with ENSO_HOME set, a checkout .enso holding only the project's own files is not held (#754)", () => {
+  const repoRoot = mkdtempSync(join(tmpdir(), 'enso-project-own-'))
+  mkdirSync(join(repoRoot, '.enso', 'prompts'), { recursive: true })
+  writeFileSync(join(repoRoot, '.enso', 'config.json'), '{}')
+  writeFileSync(join(repoRoot, '.enso', 'config.local.json'), '{}')
+  const home = join(repoRoot, 'home')
+  expect(migrateCheckoutEnsoOnLaunch(repoRoot, { ENSO_HOME: home }).held).toBe(false)
+  writeFileSync(join(repoRoot, '.enso', 'secrets.env'), 'OLD=1\n')
+  expect(migrateCheckoutEnsoOnLaunch(repoRoot, { ENSO_HOME: home }).held).toBe(true)
+})
+
 test('migrating twice moves nothing the second time, and a checkout with no .enso creates no ENSO_HOME', () => {
   const { repoRoot, home } = legacyCheckout()
   migrateCheckoutEnso(repoRoot, home)
@@ -215,6 +228,26 @@ test('migrating twice moves nothing the second time, and a checkout with no .ens
   const untouched = join(fresh, 'home', '.enso')
   expect(migrateCheckoutEnso(fresh, untouched)).toMatchObject({ moved: [], kept: [] })
   expect(existsSync(untouched)).toBe(false)
+})
+
+test("⚠ the project's own tiers stay in the checkout: only the legacy files move (#754)", () => {
+  const root = mkdtempSync(join(tmpdir(), 'enso-migrate-project-'))
+  const repoRoot = join(root, 'checkout')
+  const home = join(root, 'home', '.enso')
+  const legacy = join(repoRoot, '.enso')
+  mkdirSync(join(legacy, 'prompts'), { recursive: true })
+  writeFileSync(join(legacy, 'config.json'), '{"threads":{"setup":["bun install"]}}')
+  writeFileSync(join(legacy, 'config.local.json'), '{"threads":{"tree":"off"}}')
+  writeFileSync(join(legacy, 'prompts', 'x.md'), 'a prompt')
+  writeFileSync(join(legacy, 'secrets.env'), 'TAVILY_API_KEY=x')
+  const migration = migrateCheckoutEnso(repoRoot, home)
+  expect(migration).toMatchObject({ moved: ['secrets.env'], kept: [] })
+  expect(readFileSync(join(legacy, 'config.json'), 'utf8')).toBe('{"threads":{"setup":["bun install"]}}')
+  expect(readFileSync(join(legacy, 'config.local.json'), 'utf8')).toBe('{"threads":{"tree":"off"}}')
+  expect(readFileSync(join(legacy, 'prompts', 'x.md'), 'utf8')).toBe('a prompt')
+  expect(existsSync(join(home, 'config.json'))).toBe(false)
+  expect(existsSync(join(home, 'prompts'))).toBe(false)
+  expect(existsSync(join(legacy, 'secrets.env'))).toBe(false)
 })
 
 // ── The project folders (#552) ────────────────────────────────────────────────────────────────

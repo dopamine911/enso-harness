@@ -400,6 +400,33 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
     ],
     { builds: 'no', path: '/api/projects/:projectId', method: 'DELETE' },
   ),
+  PROJECT_SETTINGS_READ_ROUTE: {
+    method: 'GET',
+    path: '/api/projects/:projectId/settings',
+    handler: 'respondWithProjectSettings → createProjectSettingsRoute.read → resolveProjectThreadSettings',
+    input: 'path: `projectId` (sixteen hex digits)',
+    success:
+      "200 `EnsoProjectSettings` JSON — each `threads` key (tree mode, files to copy, setup commands) with the tier it resolves from, whether the project is trusted (its own tiers are read only then), the file behind each tier, and the project's tier files that could not be read (#754)",
+    errors:
+      '403 untrusted origin; 404 no registered project with that id; 422 a server started without the user config; 500 handler failure',
+    routeClass: 'observation',
+    builds: 'no',
+    logs: 'no',
+  },
+  PROJECT_SETTINGS_WRITE_ROUTE: {
+    method: 'PUT',
+    path: '/api/projects/:projectId/settings',
+    handler: 'respondToProjectSettingsWrite → createProjectSettingsRoute.write → writeProjectThreadSettings',
+    input:
+      "path: `projectId`; body: `EnsoProjectSettingsUpdate` — the tier (`shared`, the project's committed `.enso/config.json`, or `local`, its gitignored `.enso/config.local.json`) and the `threads` keys to set, `null` removing one",
+    success:
+      "200 `EnsoProjectSettings` JSON as the settings now resolve; the tier's file keeps every other key, written as 2-space JSON (#754)",
+    errors:
+      "400 malformed body, or one that is not an update; 403 untrusted origin; 404 no registered project with that id; 413 body too large; 422 the tier's file is there and unreadable (never overwritten), the project's directory is gone, or a server started without the user config; 500 handler failure",
+    routeClass: 'control',
+    builds: 'no',
+    logs: 'yes',
+  },
   THREAD_MODE_ROUTE: threadControl(
     'respondToModeChange → changeThreadMode',
     'path: `threadId`; body: `EnsoPermissionModeChange`',

@@ -27,7 +27,6 @@ export {
   EnsoThreadTreeMode,
   mergeEnsoConfig,
   parseEnsoConfig,
-  threadTreeFor,
 } from './config.ts'
 export {
   EnsoDialogAnswer,
@@ -74,6 +73,16 @@ export {
   EnsoThreadGit,
 } from './git-state.ts'
 export { EnsoThreadPages } from './thread-pages.ts'
+export {
+  ENSO_TREE_SETUP_ENTRY,
+  EnsoConfigTier,
+  EnsoProjectSettings,
+  EnsoProjectSettingsUpdate,
+  EnsoProjectThreadSettings,
+  EnsoProjectTier,
+  EnsoTreeSetupOutcome,
+  EnsoTreeSetupStep,
+} from './project-settings.ts'
 export { THREAD_STATUS_WORDS } from './thread-status-words.ts'
 export { ENSO_UI_EVENTS, EnsoThreadStatusEvent, EnsoThreadStatusKind, type EnsoUiEventName } from './ui-events.ts'
 export {

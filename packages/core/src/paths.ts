@@ -205,6 +205,11 @@ export interface EnsoHomeMigration {
  * `print-harness/` is not moved but deleted: a build cache of the checkout, regenerated at its new
  * place (`printHarnessDir`) on the next terminal launch, whose relative links would break moved.
  *
+ * ⚠ THE PROJECT'S OWN FILES STAY (#754): the top-level `config.json`, `config.local.json` and
+ * `prompts/` are the checkout's project tiers now (`projectConfigPath`, `projectLocalConfigPath`,
+ * `projectPromptsDir`), committed or kept with it and read trust-gated as the project's. Moved,
+ * the repository's shared config would become the user's config for every project.
+ *
  * Tolerant of a second launcher migrating at the same moment (`bun run dev` starts two): a file
  * the other process moved first is skipped, not reported. `ENSO_HOME` is created `0700` — it
  * holds credentials.
@@ -224,7 +229,8 @@ export function migrateCheckoutEnso(repoRoot: string, home: string): EnsoHomeMig
 
 /**
  * The migration a LAUNCH runs (#421): into the default `ENSO_HOME` (`~/.enso`) only. With
- * `ENSO_HOME` set explicitly nothing moves — the checkout's old `.enso/` is `held` and reported.
+ * `ENSO_HOME` set explicitly nothing moves — the checkout's old `.enso/` is `held` and reported,
+ * when it holds anything besides the project's own files (#754), which stay either way.
  *
  * ⚠ Why: a launcher run from a checkout with a scratch or test `ENSO_HOME` (`ENSO_HOME=/tmp/x`)
  * would otherwise move that checkout's logins and sessions into the scratch directory, to be lost
@@ -242,8 +248,15 @@ export function migrateCheckoutEnsoOnLaunch(
   const configured = environment.ENSO_HOME
   if (configured === undefined || configured.length === 0) return migrateCheckoutEnso(repoRoot, home)
   const from = checkoutEnsoDir(repoRoot)
-  return { from, to: home, moved: [], kept: [], held: existsSync(from) }
+  const held = existsSync(from) && readdirSync(from).some((entryName) => !PROJECT_OWN_ENTRIES.has(entryName))
+  return { from, to: home, moved: [], kept: [], held }
 }
+
+/** A project-local config's basename (#754), beside the shared `config.json`. */
+const ENSO_LOCAL_CONFIG_FILENAME = 'config.local.json'
+
+/** What `migrateCheckoutEnso` leaves at the top of the checkout's `.enso/`: the project's own tiers (#754). */
+const PROJECT_OWN_ENTRIES: ReadonlySet<string> = new Set([ENSO_CONFIG_FILENAME, ENSO_LOCAL_CONFIG_FILENAME, 'prompts'])
 
 function moveTree(
   from: string,
@@ -252,6 +265,7 @@ function moveTree(
   migration: { moved: string[]; kept: string[] },
 ): void {
   for (const child of readdirSync(join(from, relativeDirectory), { withFileTypes: true })) {
+    if (relativeDirectory === '' && PROJECT_OWN_ENTRIES.has(child.name)) continue
     const relativePath = join(relativeDirectory, child.name)
     if (child.isDirectory()) {
       moveTree(from, to, relativePath, migration)
@@ -676,6 +690,17 @@ export function ensoConfigPath(home: string): string {
  */
 export function projectConfigPath(projectDirectory: string): string {
   return join(projectDirectory, ENSO_RUNTIME_DIRECTORY, ENSO_CONFIG_FILENAME)
+}
+
+/**
+ * A project's local config (#754): `<project>/.enso/config.local.json`, gitignored — one person's
+ * overrides for one project, over the shared `projectConfigPath`. Read only once the project is
+ * trusted, like the shared file.
+ *
+ * @group Workspace paths
+ */
+export function projectLocalConfigPath(projectDirectory: string): string {
+  return join(projectDirectory, ENSO_RUNTIME_DIRECTORY, ENSO_LOCAL_CONFIG_FILENAME)
 }
 
 /**

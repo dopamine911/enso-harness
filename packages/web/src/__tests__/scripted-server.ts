@@ -10,6 +10,7 @@ import type {
   EnsoThreadEvents,
   EnsoThreadHistory,
   EnsoThreadInspection,
+  EnsoThreadPages,
   EnsoThreadStats,
   EnsoTreesListing,
   RuntimeCommand,
@@ -110,7 +111,7 @@ export interface ScriptedFetchOptions {
   /** What the Diff view's read answers (#452), asked per read; 404 when absent. */
   readonly changes?: () => Omit<EnsoThreadChanges, 'threadId' | 'cwd'>
   /** What `GET /api/threads/:id/tree` answers (#619), without its `threadId`; absent is the 404. */
-  readonly pages?: () => { path: string; pages: string[]; truncated: boolean }
+  readonly pages?: () => Omit<EnsoThreadPages, 'threadId'>
   /**
    * What each `DELETE /api/threads/:id` answers (#571), in turn; the last one repeats, and 204
    * when absent. A 204 takes the thread out of `storedThreads`, as deleting its session file does.

@@ -156,13 +156,13 @@ test("⚠ projects.roots is user-only: a trusted project's is ignored, and said"
   expect(f.notices.join()).toContain('projects.roots')
 })
 
-// #551: whether a thread runs on its own tree is the user's call, made where the server reads the
-// user's file; a checkout naming `threads` would otherwise read as if it had taken effect.
-test("⚠ threads is user-only: a trusted project's is ignored, and said", async () => {
+// #754: `threads` is a project setting now (its trees' mode, setup and files to copy), resolved by
+// tier where a tree is made; a trusted project naming it is no longer told it was ignored.
+test("a trusted project's threads is read without a warning (#754)", async () => {
   const f = fixture({ user: USER, project: { ...PROJECT, threads: { tree: 'off' } } })
   const resolved = await sessionEnsoConfig({}, f.context('Trust'))
-  expect(resolved.result.kind === 'ok' ? resolved.result.config.threads : 'unreadable').toBeUndefined()
-  expect(f.notices.join()).toContain('threads')
+  expect(resolved.result.kind === 'ok' ? resolved.result.config.threads : 'unreadable').toEqual({ tree: 'off' })
+  expect(f.notices.join()).not.toContain('threads')
 })
 
 test("a trusted project's unreadable config fails CLOSED, naming the project's file", async () => {
