@@ -197,12 +197,13 @@ test('⚠ @shadcn/helpers’ peer ranges are knowingly violated — re-probe whe
 
 /**
  * ⚠ ONE AG-UI BETWEEN THE ADAPTER AND TANSTACK. The follow adapter speaks AG-UI events to
- * TanStack's chat client, so both must read the same `@ag-ui/core`. The root `overrides` entry is
- * there because #223 pins every state-layer package the code imports. Through `@tanstack/ai` 0.58 it
- * was also a DEVIATION: TanStack pinned `0.1.1-canary.beta.0`, and 1.0.0 was forced under it. Since
- * 0.59 (TanStack/ai #1460/#1465) TanStack declares 1.0.0 itself, so the override now agrees with it
- * (re-checked on the 0.66 bump, #770). A red line means the declarations parted, or a second copy got
- * installed: re-read that release's migration notes before aligning them.
+ * TanStack's chat client, so both must read ONE `@ag-ui/core`: two installed copies give `EventType`
+ * two module identities, and tsc fails (`bunfig.toml`'s header; the first test in this file pins the
+ * `overrides` rule that prevents it). Through `@tanstack/ai` 0.58 the override was also a DEVIATION:
+ * TanStack pinned `0.1.1-canary.beta.0`, and 1.0.0 was forced under it. Since 0.59 (TanStack/ai
+ * #1460/#1465) TanStack declares 1.0.0 itself, so the override agrees with it rather than overruling
+ * it (re-checked on the 0.66 bump, #770). A red line means the declarations parted or a second copy
+ * got installed: re-read that release's migration notes, then align the versions, not the test.
  */
 test('⚠ @tanstack/ai, the web package and the override name the same @ag-ui/core, and one copy is installed', () => {
   expect({

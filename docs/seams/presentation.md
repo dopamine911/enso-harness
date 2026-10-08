@@ -489,6 +489,14 @@ and its only production importer is `follow-connection.ts`.
 `chunk` and `step` legitimate in "the adapter that derives the state layer's stream" and nowhere
 else; `RecordedCustomEvent` and `ToolCallRow` are the names on our side.
 
+**One copy of each state-layer package.** Every `@tanstack/*` and `@ag-ui/*` package a source file
+imports directly is pinned once in the root `package.json` `overrides` (#223), and `bunfig.toml`'s
+hoisted linker installs one tree. Two copies are not harmless: two `@ag-ui/core` directories gave
+`EventType` two module identities, and tsc failed with "`EventType.RUN_FINISHED` is not assignable to
+`EventType.RUN_FINISHED`" (measured 2026-09-03). Since `@tanstack/ai` 0.59 TanStack declares the same
+`@ag-ui/core` itself, so that pin agrees with it rather than overruling it (#770).
+`test/dependency-gate.test.ts` holds the rule and the agreement.
+
 Ordered live-crossing-first on purpose: the bold lead of this section is the architecture table's leak
 column (`scripts/docs/seams-table.ts`), and this page used to open "nothing of the vendor kind" and
 admit the opposite three paragraphs later (#219).
