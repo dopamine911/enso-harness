@@ -13,8 +13,8 @@
 /**
  * The tested range is stated ONCE, here, and both ends read it: `enso.ts` refuses a `pi` outside it
  * before the spawn, and `scripts/__tests__/pi-version-parity.test.ts` asserts the workspace pi the
- * corpus pins against is inside it. It is `^0.99.2`: the harness's peer range and the workspace
- * devDependency.
+ * corpus pins against is inside it. It is `~1.1.0` (at least 1.1.0, below 1.2.0): the harness's peer range and the
+ * workspace devDependency.
  *
  * @invariant boot-and-launchers/pi-version-gate The terminal launcher refuses a `pi` it was not pinned against (#217).
  * The two surfaces resolve pi differently and only one was bounded: in-process imports the WORKSPACE
@@ -36,9 +36,9 @@
  */
 export const SUPPORTED_PI_VERSIONS = {
   /** The oldest pi the corpus has been run against. */
-  minimum: { major: 0, minor: 99, patch: 2 },
+  minimum: { major: 1, minor: 1, patch: 0 },
   /** The first pi it has NOT been run against. */
-  below: { major: 0, minor: 100, patch: 0 },
+  below: { major: 1, minor: 2, patch: 0 },
 }
 
 /**

@@ -36,6 +36,7 @@ import {
   ENSO_INCIDENT_RESOLVED_ENTRY,
   ENSO_LOG_EVENTS,
   ENSO_PROJECT_TRUST_ENTRY,
+  ENSO_RUN_STOPPED_ENTRY,
   ENSO_SYSTEM_PROMPT_ENTRY,
   type EnsoForkPoint,
   type EnsoIncidentOpened,
@@ -276,14 +277,15 @@ const log = ensoLogger('host')
  * (`readSecret`) — see `@enso/core`'s secrets.ts for why the root `.env` is the wrong place.
  *
  * ⚠ THE HOST LOADS ONE EXTENSION OF ITS OWN, `<inline:enso-model-watch>` (#338 slice 2), because
- * an extension is the only honest listener for a model change. pi (0.87.1; re-read at 0.99.2, line numbers 0.87.1's) announces a model
- * switch to extensions ALONE: `AgentSession.setModel` (`dist/core/agent-session.js:1645`)
- * writes the `model_change` entry through `sessionManager.appendModelChange` (:1652) with no
+ * an extension is the only honest listener for a model change. pi (0.87.1; re-read at 1.1.0, line numbers 1.1.0's) announces a model
+ * switch to extensions ALONE: `AgentSession.setModel` (`dist/core/agent-session.js:1946`)
+ * writes the `model_change` entry through `sessionManager.appendModelChange` (:1953) with no
  * session event — `entry_appended` is emitted for custom entries from the extension API's
- * `appendEntry` (:2419), for boundary drafts (:487) and for context edits (:680), never for a
- * model change — and then `_emitModelSelect` (:1661) puts `model_select` on the EXTENSION
- * runner. The thinking level is the other way round: `setThinkingLevel` (:1751) emits
- * `thinking_level_changed` on the session stream (:1763). The host hears each
+ * `appendEntry` (:2725), for boundary drafts (:640), context edits (:849), cache-warm and
+ * virtual-model-state entries (:187, :477), never for a
+ * model change — and then `_emitModelSelect` (:1962) puts `model_select` on the EXTENSION
+ * runner. The thinking level is the other way round: `setThinkingLevel` (:2052) emits
+ * `thinking_level_changed` on the session stream (:2064). The host hears each
  * where it is said, re-reads `modelState()` and emits its own `model` event once per change —
  * so a failover swap by pi-multi-account (`pi.setModel`, `index.ts:4031`) reaches the feed the
  * same way a `/model` from the palette does. The watcher registers nothing else and is listed in
@@ -311,8 +313,8 @@ const log = ensoLogger('host')
  *
  * ⚠⚠ CONTINUE RUNS ON pi'S PRIVATE RUN LIFECYCLE (#436). `continueRun` resumes a torn thread from
  * exactly its stored state — no new user message — by calling `AgentSession._runAgentPrompt(lead)`
- * (`agent-session.js:1078`, `private` in `agent-session.d.ts:403`, an ordinary method at run time)
- * through ONE cast (`PiRunLifecycle`). pi (0.87.1, and still 0.99.2) has no public continue that runs inside that
+ * (`agent-session.js:1380`, `private` in `agent-session.d.ts:520`, an ordinary method at run time)
+ * through ONE cast (`PiRunLifecycle`). pi (0.87.1, and still 1.1.0) has no public continue that runs inside that
  * lifecycle, and the lifecycle is what makes it a run: `session.agent.continue()` alone persists the
  * reply and fires the guards, but never emits `agent_settled` (the route releases the lease on
  * `settled`, so the thread stayed busy forever), leaves `isStreaming` false (a prompt enqueued during
@@ -358,7 +360,7 @@ export const MODEL_WATCH_EXTENSION_PATH = `<inline:${MODEL_WATCH_EXTENSION_NAME}
  * pi's stand-in when no model could be chosen — `@earendil-works/pi-agent-core`
  * `dist/agent.js:18` `DEFAULT_MODEL`, substituted by `createMutableAgentState` (:40) so
  * `AgentSession.model` is typed optional but never is. Every model pi actually selects
- * (`findInitialModel` in `dist/core/sdk.js:99`, `setModel`) is a registered, authenticated one;
+ * (`findInitialModel` in `dist/core/sdk.js:104`, `setModel`) is a registered, authenticated one;
  * the placeholder means "none", and the seam says `null` for it (#338 slice 2).
  */
 const PLACEHOLDER_MODEL = { provider: 'unknown', id: 'unknown' }
@@ -2609,6 +2611,10 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         // The thinking half of the model state — the module header says why the model half
         // arrives through the watcher extension instead.
         if (wire.type === 'thinking_level_changed') announceModelState()
+        // A run the operator stopped (#766) is recorded where a re-read finds it: one entry per
+        // stop, appended through the host's extension API so pi also emits `entry_appended` and
+        // every follower says it live. pi skips `custom` entries in context: the model never sees it.
+        if (event.type === 'agent_settled' && event.aborted) hostApi?.appendEntry(ENSO_RUN_STOPPED_ENTRY, {})
         // #340: the provider refused the request — said beside the failed message's own
         // `message_end`, which stays the accounting boundary it always was.
         // The provider named as a reader knows it (#387): the session's own catalogue first — an

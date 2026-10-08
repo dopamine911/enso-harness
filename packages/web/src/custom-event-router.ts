@@ -11,6 +11,7 @@ import {
   type EnsoProviderRetrying,
   providerReasonOf,
   providerRefusalClass,
+  readEnsoRunStopped,
   readEnsoSessionRiskChange,
   sessionIncidentsStep,
   toolRefusalOf,
@@ -140,6 +141,8 @@ export function routeEnsoCustomEvent(stores: ThreadStores, eventType: string, da
     stores.dialog.set(data.openDialogs[0])
     // A login waiting on its provider (#348) — a page arriving mid-login offers its Stop too.
     stores.login.set(data.login)
+    // The branch's stopped runs (#766): only those this page has not said yet.
+    showRunStops(stores, data.stoppedAfter)
     applyStatus(stores, data.generation)
     return
   }
@@ -149,6 +152,27 @@ export function routeEnsoCustomEvent(stores: ThreadStores, eventType: string, da
   }
   if (!observationValidator.Check(data) || data.kind !== eventType) return
   routeObservation(stores, data)
+}
+
+/** What a stopped run says in the thread (#766): the operator's Stop, so it never reads as a finish. */
+export const RUN_STOPPED_NOTICE = 'Stopped.'
+
+/**
+ * The thread's stops as the server read them off the branch (#766) — the history's, or a
+ * snapshot's: one line after each stop's message, for every stop past those this page has said
+ * already (`ThreadStores.runStops`). The list is the whole branch's, oldest first, so a reconnect
+ * after a live stop, or the first snapshot after the history, says nothing twice.
+ */
+export function showRunStops(stores: ThreadStores, stoppedAfter: readonly string[] = []): void {
+  for (const after of stoppedAfter.slice(stores.runStops.get())) {
+    stores.notifications.pushAfter(after, {
+      message: RUN_STOPPED_NOTICE,
+      notifyType: 'info',
+      origin: 'run',
+      source: ENSO_NOTICE_SOURCE,
+    })
+  }
+  stores.runStops.set(Math.max(stores.runStops.get(), stoppedAfter.length))
 }
 
 /**
@@ -298,6 +322,13 @@ function routeObservation(stores: ThreadStores, observation: EnsoObservation): v
       stores.queue.set([...observation.interrupting, ...observation.enqueued])
       return
     case 'custom-entry':
+      // A stopped run (#766): said once, where the run stopped — the stream's message — and counted,
+      // so the next snapshot's list of the branch's stops does not say it again.
+      if (readEnsoRunStopped(observation.customType, observation.data)) {
+        stores.notifications.push(RUN_STOPPED_NOTICE, 'info', 'run', ENSO_NOTICE_SOURCE)
+        stores.runStops.set(stores.runStops.get() + 1)
+        return
+      }
       applyGuardEntry(stores, observation.customType, observation.data)
       return
     default:

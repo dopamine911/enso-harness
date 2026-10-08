@@ -236,7 +236,13 @@ test('agent_end is a run ending, not a settle — and carries willRetry', () => 
 })
 
 test('agent_settled is the only completion', () =>
-  expect(mapPiEvent({ type: 'agent_settled' })).toEqual({ kind: 'settled' }))
+  expect(mapPiEvent({ type: 'agent_settled', aborted: false })).toEqual({ kind: 'settled', aborted: false }))
+
+// #766: a stopped run settles too, and says it was stopped — an older record without the flag finished.
+test('agent_settled carries whether the run was stopped', () => {
+  expect(mapPiEvent({ type: 'agent_settled', aborted: true })).toEqual({ kind: 'settled', aborted: true })
+  expect(mapPiEvent({ type: 'agent_settled' })).toEqual({ kind: 'settled', aborted: false })
+})
 
 // --- #29's remaining half: custom session entries are promoted, other entries are not
 test('a custom entry maps with its type and data', () =>

@@ -59,12 +59,14 @@ test('⚠ the pi the guard corpus pins against is a pi the terminal launcher wil
 
 // The range is also a PUBLISHED contract: a consumer installing the harness reads
 // `peerDependencies`, not the launcher. `>=0.84.0` said the corpus covers versions it has never
-// been run against; the two must state the same bound, and `^0.99.2` is that bound for a 0.x
-// package — the boundary tests in `enso-launch.test.ts`, beside this file, pin the equivalence.
+// been run against; the two must state the same bound. The bound is the tested MINOR: Enso calls
+// pi's private run lifecycle (#436), which a minor can change. That was `^0.99.2` on 0.x, where a
+// caret stops at the minor; on 1.x a caret runs to 2.0.0, so it is `~1.1.0` (#766). The boundary
+// tests in `enso-launch.test.ts`, beside this file, pin the equivalence.
 test('the harness declares the peer range the launcher enforces', () => {
   const manifestPath = join(import.meta.dir, '..', '..', 'packages', 'harness', 'package.json')
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
     peerDependencies?: Record<string, string>
   }
-  expect(manifest.peerDependencies?.[VENDOR_PACKAGE]).toBe(`^${piVersionText(SUPPORTED_PI_VERSIONS.minimum)}`)
+  expect(manifest.peerDependencies?.[VENDOR_PACKAGE]).toBe(`~${piVersionText(SUPPORTED_PI_VERSIONS.minimum)}`)
 })

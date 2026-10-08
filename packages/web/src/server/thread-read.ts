@@ -9,6 +9,7 @@ import {
   type EnsoSessionIncidents,
   type EnsoSessionRiskChange,
   type EnsoSessionUsage,
+  type EnsoStoppedAfter,
   type EnsoTranscriptEntry,
   sessionIncidentsOf,
   sessionRiskOfTranscript,
@@ -18,7 +19,7 @@ import type { AgentHost, StoredThreadRead } from '../host/agent-host.ts'
 import { treeRecordOf } from '../host/thread-trees.ts'
 import type { ProjectRegistry } from './projects.ts'
 import type { ThreadRegistry, ThreadView } from './thread-registry.ts'
-import { interruptedTail, transcriptToMessages } from './transcript-to-messages.ts'
+import { interruptedTail, stoppedAfter, transcriptToMessages } from './transcript-to-messages.ts'
 
 /**
  * THE LIVE-OR-COLD READ, ONCE (#214).
@@ -79,6 +80,8 @@ export interface ThreadMount {
   readonly messages: UIMessage[]
   /** Set only when the branch ends inside a turn (#109). */
   readonly interrupted: EnsoInterruptedTail | undefined
+  /** Where the branch's runs were stopped (#766), oldest first — empty when none was. Live or cold, the same entries. */
+  readonly stoppedAfter: EnsoStoppedAfter
   /** The name a person gave the thread (#670): the live session's, else the file's; `undefined` when none. */
   readonly name: string | undefined
   readonly live: boolean
@@ -162,6 +165,7 @@ export async function readThreadMount(deps: ThreadReadDeps, threadId: string): P
     storedOutside,
     name: inspection === undefined ? stored?.name : inspection.name,
     messages: transcriptToMessages(transcript),
+    stoppedAfter: stoppedAfter(transcript),
     sessionRisk: { level: risk.level, signals: risk.signals.length },
     incidents: sessionIncidentsOf(
       transcript.flatMap((transcriptEntry) => (transcriptEntry.kind === 'custom' ? [transcriptEntry] : [])),

@@ -39,6 +39,7 @@ import {
   type EnsoIncidentReport,
   ENSO_INCIDENT_RESOLVED_CHANNEL,
   ENSO_INCIDENT_RESOLVED_ENTRY,
+  ENSO_RUN_STOPPED_ENTRY,
   ENSO_SYSTEM_PROMPT_ENTRY,
   type EnsoObservation,
   type EnsoIncidentOpened,
@@ -3495,6 +3496,34 @@ test('⚠⚠ Stop while ask_user waits stops the run and leaves no question open
   expect(events.filter((event) => event.kind === 'dialog-settled')).toEqual([
     { kind: 'dialog-settled', id: question.id, outcome: 'aborted' },
   ])
+})
+
+/** The branch's `enso-run-stopped` entries (#766), as a re-read finds them. */
+const runStopsOf = (hosted: HostedThread): number =>
+  hosted.inspect().entries.filter((entry) => entry.kind === 'custom' && entry.customType === ENSO_RUN_STOPPED_ENTRY)
+    .length
+
+// #766: a run the operator stopped settled exactly like a finished one, live and on the branch. Now it
+// settles `aborted`, and the host records the stop once — through pi's API, so followers see it live.
+test('a stopped run settles aborted and records exactly one stop on the branch, said live (#766)', async () => {
+  const { hosted, events, settled } = await askedQuestionnaire([DATABASE_QUESTION])
+  await hosted.runtime.abort()
+  await settled
+  expect(events.filter((event) => event.kind === 'settled')).toEqual([{ kind: 'settled', aborted: true }])
+  expect(
+    events.filter((event) => event.kind === 'custom-entry' && event.customType === ENSO_RUN_STOPPED_ENTRY),
+  ).toEqual([{ kind: 'custom-entry', customType: ENSO_RUN_STOPPED_ENTRY, data: {} }])
+  expect(runStopsOf(hosted)).toBe(1)
+})
+
+test('a run that finishes settles not aborted and records no stop (#766)', async () => {
+  const core = createFauxCore()
+  core.setResponses([faux.fauxAssistantMessage('done')])
+  const hosted = await hostedSession([fauxModelExtension(core)])
+  const events = collectEvents(hosted)
+  await runPrompt(hosted, 'finish')
+  expect(events.filter((event) => event.kind === 'settled')).toEqual([{ kind: 'settled', aborted: false }])
+  expect(runStopsOf(hosted)).toBe(0)
 })
 
 // ── a provider's refusal (#340) ──────────────────────────────────────────────

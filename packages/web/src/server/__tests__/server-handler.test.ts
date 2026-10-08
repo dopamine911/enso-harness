@@ -15,6 +15,7 @@ import { join } from 'node:path'
 import {
   DEFAULT_RISK_THRESHOLDS,
   ENSO_PROJECT_HEADER,
+  ENSO_RUN_STOPPED_ENTRY,
   EnsoForkPoint,
   type EnsoFollowFrame,
   type EnsoModelState,
@@ -172,7 +173,7 @@ function emptyHarnessDir(): string {
 }
 
 // What the runtime says to its subscriber — observations, since L2 (#162 workstream 4).
-const SETTLED: EnsoObservation = { kind: 'settled' }
+const SETTLED: EnsoObservation = { kind: 'settled', aborted: false }
 const TEXT_DELTA: EnsoObservation = { kind: 'text-delta', contentIndex: 0, delta: 'hi' }
 const SELECT_DIALOG: EnsoObservation = {
   kind: 'extension-ui-request',
@@ -1561,6 +1562,27 @@ test('⚠ a thread BUSY here that ends on a call with no result is not a torn ta
   await prompt(idle.url, 't1', 'go')
   const ended = (await (await fetch(`${idle.url}/api/threads/t1/history`)).json()) as EnsoThreadHistory
   expect(ended.interrupted).toBe('tool-call-without-result')
+})
+
+// #766: a reload must say a stopped run was stopped, after the message it stopped at. The stop is the
+// host's `enso-run-stopped` entry; both routes carry, per stop, the message before it — a branch
+// with none carries no field at all.
+test('/history and the follow’s snapshot say where a stored thread’s run was stopped; a branch with no stop says nothing (#766)', async () => {
+  const stop = { type: 'custom', customType: ENSO_RUN_STOPPED_ENTRY, data: {}, id: 's1', parentId: 'a1', timestamp: '' }
+  const stored = {
+    stopped: { transcript: [...STORED_BRANCH, ...transcriptOf([stop])], modified: new Date(0), firstMessage: 'q' },
+    finished: { transcript: STORED_BRANCH, modified: new Date(0), firstMessage: 'q' },
+  }
+  const { url } = await startWith({ onPrompt: neverPrompted }, stored)
+  const history = (await (await fetch(`${url}/api/threads/stopped/history`)).json()) as EnsoThreadHistory
+  expect(history.stoppedAfter).toEqual(['a1'])
+  const controller = new AbortController()
+  openFollows.push(controller)
+  const follow = await openFollow(url, 'stopped', controller)
+  await follow.untilFrames(1)
+  expect(follow.frames[0]).toMatchObject({ type: 'snapshot', stoppedAfter: ['a1'] })
+  const finished = (await (await fetch(`${url}/api/threads/finished/history`)).json()) as EnsoThreadHistory
+  expect(finished).not.toHaveProperty('stoppedAfter')
 })
 
 test('GET /api/threads lists live threads with busy state and the run number', async () => {

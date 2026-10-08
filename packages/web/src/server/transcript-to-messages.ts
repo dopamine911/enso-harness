@@ -3,9 +3,11 @@ import {
   ENSO_TOOL_REFUSAL_KEY,
   ENSO_TOOL_RESULT_KEY,
   type EnsoInterruptedTail,
+  type EnsoStoppedAfter,
   type EnsoToolRefusal,
   type EnsoTranscriptEntry,
   type EnsoTranscriptPart,
+  readEnsoRunStopped,
   toolRefusalOf,
 } from '@enso/core'
 import type { MessagePart, UIMessage } from '@tanstack/ai-client'
@@ -197,4 +199,26 @@ export function interruptedTail(transcript: readonly EnsoTranscriptEntry[]): Ens
   if (answers.length === 0) return undefined
   if (answers.includes(undefined)) return 'tool-call-without-result'
   return 'tool-results-without-reply'
+}
+
+/**
+ * Where the branch's runs were stopped (#766, `EnsoStoppedAfter`): for each `enso-run-stopped`
+ * entry, oldest first, the id of the last MESSAGE before it — the bubble the page's "Stopped." line
+ * follows, as the live line follows the run's last streamed message. Read off the entries, as
+ * `interruptedTail` is (#220). A stop with no message before it has nowhere to read and is skipped.
+ */
+export function stoppedAfter(transcript: readonly EnsoTranscriptEntry[]): EnsoStoppedAfter {
+  const anchors: string[] = []
+  let lastMessageId: string | undefined
+  for (const transcriptEntry of transcript) {
+    if (transcriptEntry.kind === 'message') lastMessageId = transcriptEntry.id
+    else if (
+      transcriptEntry.kind === 'custom' &&
+      lastMessageId !== undefined &&
+      readEnsoRunStopped(transcriptEntry.customType, transcriptEntry.data)
+    ) {
+      anchors.push(lastMessageId)
+    }
+  }
+  return anchors
 }

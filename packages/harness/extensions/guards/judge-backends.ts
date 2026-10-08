@@ -18,7 +18,7 @@ import type { CommandJudge, EnsoJudgeAnswer, EnsoJudgeOutcome, EnsoJudgeQuestion
  * llama.cpp model on this machine (`local`, #532).
  *
  * - ⚠ **Imported through an alias, never as `@earendil-works/pi-ai/api/…`.**
- *   `@earendil-works/pi-classifier` is an npm alias of `@earendil-works/pi-ai@0.99.2`, the agent's
+ *   `@earendil-works/pi-classifier` is an npm alias of `@earendil-works/pi-ai@1.1.0`, the agent's
  *   own pi-ai version. pi's extension loader maps `@earendil-works/pi-ai` to its `compat` entry, and
  *   under Node (the terminal `pi`) jiti rewrites any subpath onto it —
  *   `…/dist/compat.js/api/llama-cpp-classify` — so the guards extension failed to load at all

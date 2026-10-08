@@ -62,5 +62,5 @@ test("an observation's inner name: the custom entry's type, a ui method, a tool;
     type: 'tool-call',
     name: 'bash',
   })
-  expect(describeObservation({ kind: 'settled' })).toEqual({ type: 'settled', name: undefined })
+  expect(describeObservation({ kind: 'settled', aborted: false })).toEqual({ type: 'settled', name: undefined })
 })

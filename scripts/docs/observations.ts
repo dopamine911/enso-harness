@@ -66,7 +66,7 @@ const CUSTOM_METADATA: Record<string, CustomMetadata> = {
   },
   'custom-entry': {
     consumer:
-      '`recentChunks`; a refusal (`enso-guard-denial` #387, `enso-permission-denial` #523) lands in `refusals` — every other entry is rendered by nothing (L3)',
+      '`recentChunks`; a refusal (`enso-guard-denial` #387, `enso-permission-denial` #523) lands in `refusals`; a stopped run (`enso-run-stopped` #766) is one `notifications` line and counts in `runStops` — every other entry is rendered by nothing (L3)',
     routerBranch: true,
   },
   unmapped: { consumer: '`recentChunks` only; nothing else consumes it', routerBranch: false },
@@ -79,7 +79,7 @@ const CUSTOM_METADATA: Record<string, CustomMetadata> = {
  */
 const FRAME_METADATA: Record<string, string> = {
   snapshot:
-    "`recentChunks`; `permissionMode`; `modeLines`; `model`; `cwd`; `usage`; `refusal` (the status bar's class word off the branch's last reply, #381); `dialog` (the complete open list); `generation`; `disconnected`",
+    "`recentChunks`; `permissionMode`; `modeLines`; `model`; `cwd`; `usage`; `refusal` (the status bar's class word off the branch's last reply, #381); `dialog` (the complete open list); `notifications` and `runStops` (a line after each stop not yet said, #766); `generation`; `disconnected`",
   status: '`recentChunks`; `generation`; `disconnected`',
   'follow-ended': '`recentChunks`; `disconnected`; `notifications`',
 }

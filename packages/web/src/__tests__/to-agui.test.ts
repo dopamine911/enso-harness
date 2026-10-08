@@ -107,7 +107,7 @@ test('a run ending is STEP_FINISHED, never RUN_FINISHED', () => {
 })
 
 test('only a settle becomes RUN_FINISHED', () =>
-  expect(toAgui({ kind: 'settled' })[0]).toMatchObject({
+  expect(toAgui({ kind: 'settled', aborted: false })[0]).toMatchObject({
     type: EventType.RUN_FINISHED,
     threadId: 't1',
     runId: 'r1',
@@ -217,7 +217,7 @@ test('nothing is silently dropped: every kind except an in-flight result and a b
     { kind: 'provider-retry-ended', success: false, attempt: 3, finalError: '429 rate limited' },
     { kind: 'dialog-settled', id: 'd1', outcome: 'answered' },
     { kind: 'run-ended', willRetry: false },
-    { kind: 'settled' },
+    { kind: 'settled', aborted: false },
     { kind: 'unmapped', event: { type: 'z' } },
   ]
   for (const observation of observations) {

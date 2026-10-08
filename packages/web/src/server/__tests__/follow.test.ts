@@ -175,7 +175,7 @@ async function threadSummary(url: string, threadId: string): Promise<Record<stri
 }
 
 // What the runtime says to its subscriber — observations, since L2 (#162 workstream 4).
-const SETTLED: EnsoObservation = { kind: 'settled' }
+const SETTLED: EnsoObservation = { kind: 'settled', aborted: false }
 const TEXT_DELTA: EnsoObservation = { kind: 'text-delta', contentIndex: 0, delta: 'hi' }
 const SELECT_DIALOG: EnsoObservation = {
   kind: 'extension-ui-request',
@@ -282,7 +282,7 @@ test("prompt answers at admission with a message id; the run is released by pi's
   await follow.untilFrames(6)
   expect(follow.frames.slice(3)).toEqual([
     { type: 'observation', seq: 1, observation: expect.objectContaining({ kind: 'text-delta' }) },
-    { type: 'observation', seq: 2, observation: { kind: 'settled' } },
+    { type: 'observation', seq: 2, observation: { kind: 'settled', aborted: false } },
     { type: 'status', live: true, busy: false, generation: 1 },
   ])
   expect(await threadSummary(url, 't1')).toMatchObject({ busy: false })
@@ -452,7 +452,7 @@ test('⚠ POST …/abort tells pi once and answers with the restored queue; the 
   fake.emit(SETTLED)
   await follow.untilFrames(6)
   expect(follow.frames.slice(4)).toEqual([
-    { type: 'observation', seq: 2, observation: { kind: 'settled' } },
+    { type: 'observation', seq: 2, observation: { kind: 'settled', aborted: false } },
     { type: 'status', live: true, busy: false, generation: 1 },
   ])
   const idle = await abortWith('t1')
@@ -1093,7 +1093,7 @@ test('⚠ two followers share one feed: both see every frame with the same seq, 
   fake.emit(SETTLED)
   await second.untilFrames(6)
   expect(second.frames.slice(4)).toEqual([
-    { type: 'observation', seq: 2, observation: { kind: 'settled' } },
+    { type: 'observation', seq: 2, observation: { kind: 'settled', aborted: false } },
     { type: 'status', live: true, busy: false, generation: 1 },
   ])
   // The flow page's diagram (#482): two follows, their snapshots, one feed.

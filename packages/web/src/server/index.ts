@@ -843,6 +843,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
       sessionRisk: mount.sessionRisk,
       incidents: mount.incidents,
       ...(mount.interrupted === undefined ? {} : { interrupted: mount.interrupted }),
+      ...(mount.stoppedAfter.length === 0 ? {} : { stoppedAfter: mount.stoppedAfter }),
       ...(mount.name === undefined ? {} : { name: mount.name }),
     }
     response.writeHead(200, { 'Content-Type': 'application/json' })

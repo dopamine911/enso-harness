@@ -71,7 +71,7 @@ test('an assistant event without a partial passes through unchanged', () => {
 })
 
 test('every other event type is a plain copy', () => {
-  expect(toRpcWireEvent({ type: 'agent_settled' })).toEqual({ type: 'agent_settled' })
+  expect(toRpcWireEvent({ type: 'agent_settled', aborted: false })).toEqual({ type: 'agent_settled', aborted: false })
   expect(toRpcWireEvent({ type: 'agent_end', messages: [], willRetry: true })).toEqual({
     type: 'agent_end',
     messages: [],

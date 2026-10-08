@@ -455,7 +455,7 @@ export function createPermissionModes(dependencies: PermissionModesDependencies)
     // `systemPromptOptions.forceSystemPrompt`. A forced prompt replaces the sectioned one, and
     // Enso's system head is built from those sections (`extensions/system-prompt`, "THE RUN'S
     // OPTIONS, NOT A FORCED PROMPT"). Clearing it loses no enforcement. After the handlers run,
-    // pi (0.87, and 0.99 unless a handler edits `selectedTools` itself — none does) sets `selectedTools` from the active tools, so its own prompt already lists only the
+    // pi (0.87, and 1.1 unless a handler edits `selectedTools` itself — none does) sets `selectedTools` from the active tools, so its own prompt already lists only the
     // tools the engine left active. The relocation exists to keep a subagent child's prompt
     // byte-identical, and Enso runs no subagents.
     // ⚠ This depends on manifest order: the extension loads directly after the engine, and none
