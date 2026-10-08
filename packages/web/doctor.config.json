@@ -1,0 +1,6 @@
+{
+  "$comment": "react-doctor (#747). `ignore.files` draws the same exclusion boundary as oxlint.config.ts, bunfig.toml and .fallowrc.jsonc: the ported ai-elements and shadcn primitives under src/components/ are diffed against their upstream receipts (docs/seams/presentation.md), not linted as ours.",
+  "ignore": {
+    "files": ["src/components/**"]
+  }
+}

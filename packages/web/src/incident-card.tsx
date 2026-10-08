@@ -233,7 +233,9 @@ function Resolutions({ resolutions }: { readonly resolutions: readonly EnsoIncid
   return (
     <ol className="grid gap-1.5">
       {resolutions.map((resolution, index) => (
-        // Records in order, never reordered — the position is the identity.
+        // Append-only (core `resolve` only ever pushes), never reordered or filtered, and every row carries the
+        // same `incidentId` — the position is the only identity a resolution has.
+        // react-doctor-disable-next-line no-array-index-as-key
         <li key={index}>
           <Facts
             rows={[

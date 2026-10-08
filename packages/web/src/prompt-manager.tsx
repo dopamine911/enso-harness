@@ -762,6 +762,9 @@ function useManagerState(
       }
       setRefusal(outcome.warning)
       setConflict(undefined)
+      // `savedState` is pure (prompt-editor-state.ts, its own test); the rule cannot see across the
+      // module. An updater is needed: a draft typed on since the save went out is kept (#443).
+      // react-doctor-disable-next-line no-side-effect-in-state-updater-function
       setEditor((current) => savedState(current, editor.draft, outcome.prompt, outcome.etag))
       setSelection({ kind: 'prompt', id: outcome.prompt.id })
       // Saved is what the guard was asking about: a move it held no longer needs asking.

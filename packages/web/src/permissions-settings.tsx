@@ -33,6 +33,8 @@ import {
   fetchPermissionPolicy,
   type PermissionCheck,
   type PolicyRead,
+  type PolicyResetOutcome,
+  type PolicySave,
   resetPermissionPolicy,
   savePermissionPolicy,
 } from './permissions-connection.ts'
@@ -135,13 +137,17 @@ export function usePermissionPolicy(open: boolean, fetchImpl: FetchLike | undefi
     if (loaded?.kind !== 'ok' || sent === undefined || inFlight.current) return
     inFlight.current = true
     setWorking(true)
-    const outcome = await savePermissionPolicy(
-      { file: { ...loaded.file, permission: sent } },
-      overwrite ? '*' : loaded.etag,
-      fetchImpl,
-    )
-    inFlight.current = false
-    setWorking(false)
+    let outcome: PolicySave
+    try {
+      outcome = await savePermissionPolicy(
+        { file: { ...loaded.file, permission: sent } },
+        overwrite ? '*' : loaded.etag,
+        fetchImpl,
+      )
+    } finally {
+      inFlight.current = false
+      setWorking(false)
+    }
     if (outcome.kind !== 'saved') {
       setProblem(outcome.kind === 'conflict' ? { ...outcome, during: 'save' } : outcome)
       return
@@ -156,9 +162,13 @@ export function usePermissionPolicy(open: boolean, fetchImpl: FetchLike | undefi
     if (loaded === undefined || inFlight.current) return
     inFlight.current = true
     setWorking(true)
-    const outcome = await resetPermissionPolicy(loaded.etag, fetchImpl)
-    inFlight.current = false
-    setWorking(false)
+    let outcome: PolicyResetOutcome
+    try {
+      outcome = await resetPermissionPolicy(loaded.etag, fetchImpl)
+    } finally {
+      inFlight.current = false
+      setWorking(false)
+    }
     if (outcome.kind !== 'reset') {
       setProblem(outcome.kind === 'conflict' ? { ...outcome, during: 'reset' } : outcome)
       return
@@ -206,7 +216,9 @@ function PatternField({
   row: EnsoPolicyRow
   onRename: (to: string) => string | undefined
 }): React.ReactNode {
-  const [text, setText] = useState(row.pattern)
+  // Only in-progress typing lives in state; an untouched field shows the row's own pattern.
+  const [typed, setTyped] = useState<string | undefined>(undefined)
+  const text = typed ?? row.pattern
   const [refusal, setRefusal] = useState<string | undefined>(undefined)
   const commit = (): void => {
     const to = text.trim()
@@ -220,7 +232,7 @@ function PatternField({
         aria-invalid={refusal !== undefined}
         className="h-7 font-mono text-xs"
         value={text}
-        onChange={(event: React.ChangeEvent<HTMLInputElement>) => setText(event.target.value)}
+        onChange={(event: React.ChangeEvent<HTMLInputElement>) => setTyped(event.target.value)}
         onBlur={commit}
         onKeyDown={(event: React.KeyboardEvent<HTMLInputElement>) => {
           if (event.key === 'Enter') commit()

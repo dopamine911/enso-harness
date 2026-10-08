@@ -96,7 +96,7 @@ test("a focus opens its element's category and picks its row; the element view s
   await waitUntil(() => row() !== undefined)
   expect(asked).toEqual([`/api/threads/${stores.threadId}/context/2`])
   expect(row()?.getAttribute('aria-pressed')).toBe('true')
-  const view = container.querySelector('aside[aria-label="element"]')?.textContent ?? ''
+  const view = container.querySelector('aside[aria-label="picked element"]')?.textContent ?? ''
   expect(view).toContain('ls -la')
   expect(view).toContain('a b')
   // The other category stays closed: the focus opens where it points, not everything.
@@ -290,7 +290,7 @@ test('the arrows step between requests and stop at the ends; a pick the opened r
     })
   const arrow = (label: string): HTMLButtonElement | null =>
     container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)
-  const view = (): string => container.querySelector('aside[aria-label="element"]')?.textContent ?? ''
+  const view = (): string => container.querySelector('aside[aria-label="picked element"]')?.textContent ?? ''
   const button = (selector: string, text: string): HTMLButtonElement | undefined =>
     [...container.querySelectorAll<HTMLButtonElement>(selector)].find((candidate) =>
       candidate.textContent?.includes(text),

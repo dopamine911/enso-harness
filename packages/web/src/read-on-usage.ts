@@ -31,17 +31,17 @@ export function useReadOnUsage<Outcome>(
   moment: string = '',
 ): Outcome {
   const stores = useThreadStores()
-  const [outcome, setOutcome] = useState<Outcome>(reading)
   const initial = useRef(reading)
-  const asked = useRef<{ stores: unknown; read: unknown } | undefined>(undefined)
+  // The answer is kept with the question it answers: when the question changes (a new `read`, or
+  // a new thread's stores) the render below falls back to `reading` at once, rather than showing
+  // the last question's answer for a frame and resetting in an effect.
+  const [answered, setAnswered] = useState<{ stores: unknown; read: unknown; outcome: Outcome } | undefined>(undefined)
   useEffect(() => {
-    if (asked.current?.stores !== stores || asked.current.read !== read) setOutcome(initial.current)
-    asked.current = { stores, read }
     let mounted = true
     const readLatest = latestWins(() => read(stores.threadId, stores.fetch))
     const refresh = (): void => {
       void readLatest().then((latest) => {
-        if (mounted && latest !== undefined) setOutcome(latest)
+        if (mounted && latest !== undefined) setAnswered({ stores, read, outcome: latest })
       })
     }
     refresh()
@@ -51,5 +51,7 @@ export function useReadOnUsage<Outcome>(
       unsubscribe()
     }
   }, [stores, read, moment])
-  return outcome
+  return answered !== undefined && answered.stores === stores && answered.read === read
+    ? answered.outcome
+    : initial.current
 }

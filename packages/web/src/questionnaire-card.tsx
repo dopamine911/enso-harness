@@ -166,10 +166,11 @@ function MultiChoice({
   disabled: boolean
   onDraft: (draft: Draft) => void
 }): React.ReactNode {
+  const chosen = new Set(draft.selected)
   const toggle = (label: string, checked: boolean): void => {
     const selected = question.options
       .map((option) => option.label)
-      .filter((candidate) => (candidate === label ? checked : draft.selected.includes(candidate)))
+      .filter((candidate) => (candidate === label ? checked : chosen.has(candidate)))
     onDraft({ ...draft, selected })
   }
   return (
@@ -182,7 +183,7 @@ function MultiChoice({
           control={
             <Checkbox
               id={`${idPrefix}-${index}`}
-              checked={draft.selected.includes(option.label)}
+              checked={chosen.has(option.label)}
               disabled={disabled}
               onCheckedChange={(checked: boolean | 'indeterminate') => toggle(option.label, checked === true)}
             />
