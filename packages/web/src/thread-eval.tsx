@@ -295,6 +295,10 @@ export function ThreadEvalView({
           <ol aria-label="eval timeline" className="grid gap-0.5">
             {rows.map(({ event, friction, refusals }, index) => (
               <TimelineRow
+                // An eval event has no id: several share one transcript `index` (a message's asks and
+                // gates) and log-side ones carry none. Rows are stateless and the list is time-ordered,
+                // never reordered by the user, so the position is the only identity there is.
+                // react-doctor-disable-next-line no-array-index-as-key
                 key={`${event.index ?? 'log'}-${index}`}
                 event={event}
                 friction={friction}

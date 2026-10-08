@@ -217,7 +217,7 @@ function ElementView({
   const frame = 'grid min-w-0 grid-cols-1 content-start rounded-lg border bg-background @5xl:sticky @5xl:top-4'
   if (element === undefined) {
     return (
-      <aside aria-label="element" className={frame}>
+      <aside aria-label="picked element" className={frame}>
         <div className="grid justify-items-start gap-2 px-4 py-5 text-sm text-muted-foreground">
           <PanelsTopLeftIcon aria-hidden="true" className="size-4" />
           <span>
@@ -232,7 +232,7 @@ function ElementView({
     )
   }
   return (
-    <aside aria-label="element" className={frame}>
+    <aside aria-label="picked element" className={frame}>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b p-3">
         <h3 className="min-w-0 flex-1 font-heading text-base font-semibold wrap-anywhere">{labelOf(element)}</h3>
         {hasText(element.body) ? (
@@ -546,16 +546,27 @@ type BrowserPick = {
 }
 
 function useBrowserPick(focused: EnsoContextElement | undefined): BrowserPick {
-  const [pickedKey, setPickedKey] = useState<string | undefined>(focused?.key)
+  const focusedKey = focused?.key
+  const focusedCategory = focused?.category
+  // The pick is the later of two writers — a focus arriving and the reader's click — so it is held
+  // with the focus it was made under: a focus with another key wins over it (the render adjusts the
+  // state, React's pattern for a prop that resets state), and the reader's click under that focus
+  // wins back. A focus leaving (a step to another request) leaves the pick held, for "the element
+  // you had open isn't in this request".
+  const [held, setHeld] = useState<{ focusedKey: string | undefined; key: string | undefined }>({
+    focusedKey,
+    key: focusedKey,
+  })
+  const arrived = focusedKey !== undefined && held.focusedKey !== focusedKey
+  if (arrived) setHeld({ focusedKey, key: focusedKey })
+  const pickedKey = arrived ? focusedKey : held.key
+  const setPickedKey = (key: string): void => setHeld({ focusedKey, key })
   const [openCategories, setOpenCategories] = useState<ReadonlySet<EnsoContextCategory>>(
     () => new Set(focused === undefined ? [] : [focused.category]),
   )
   const focusRow = useRef<HTMLLIElement | null>(null)
-  const focusedKey = focused?.key
-  const focusedCategory = focused?.category
   useEffect(() => {
-    if (focusedKey === undefined || focusedCategory === undefined) return
-    setPickedKey(focusedKey)
+    if (focusedCategory === undefined) return
     setOpenCategories((open) => new Set([...open, focusedCategory]))
   }, [focusedKey, focusedCategory])
   // The row is in the DOM only once its category is open, which a focus arriving on a closed

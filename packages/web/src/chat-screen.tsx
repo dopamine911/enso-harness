@@ -568,6 +568,9 @@ export function DialogAnswerControls({
   return (
     <div className="flex flex-col gap-3">
       <InputGuidance dialog={dialog} />
+      {/* A SPA answer POSTs over the follow connection; a React 19 `action` would reset the field after it
+          ran, and a refused (422) answer re-opens the controls with the words still there (PR #113 review). */}
+      {/* react-doctor-disable-next-line no-prevent-default */}
       <form
         onSubmit={(event: React.FormEvent<HTMLFormElement>) => {
           event.preventDefault()
@@ -2507,6 +2510,8 @@ export function ChatScreen(): React.ReactNode {
   )
   // Boot: the URL named a thread — adopt it. Once per page; the coordinator drops a stale answer.
   useEffect(() => {
+    // Not state and not a parent: `BOOT` is a module constant read once, `resumeFrom` this component's own request (#747).
+    // react-doctor-disable-next-line no-pass-live-state-to-parent
     if (BOOT.kind === 'resume') resumeFrom(BOOT.threadId, 'pop', true)
   }, [resumeFrom])
   useFollowUrlHistory(navigate, resumeFrom)
