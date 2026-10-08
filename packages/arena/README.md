@@ -139,13 +139,12 @@ and your own Stats and logs are untouched. Your login comes in by symlink:
 - Linked, never copied: an OAuth refresh rotates the refresh token, so a copy would leave your own
   login holding a revoked one. pi rewrites `auth.json` in place, and through the link the refresh
   lands in your file.
-- **A link can still be replaced, and is put back (#639).** A rename onto a symlink replaces the
-  link with a plain file. The multi-account extension's writes did exactly that until #758, which
-  patches it (`patches/pi-multi-account@1.23.2.patch`) to rename onto the file behind the link, as
-  Enso's own writes do. For any other writer, the recorder checks the links at every 30 s sample and
-  at the stop, and `arena manifest` checks them too. A replaced link's content goes back to your
-  file when it is the newer, and the link is restored. If your file changed after the run's, yours
-  stands and the run's change is dropped: the timeline says so as a recorder error.
+- **A link can be replaced (#639).** The harness's multi-account extension writes `auth.json` and
+  `models.json` by renaming a temp file onto the path, which replaces a link with a plain file. The
+  recorder checks the links at every 30 s sample and at the stop, and `arena manifest` checks them
+  too. A replaced link's content goes back to your file when it is the newer, and the link is
+  restored. If your file changed after the run's, yours stands and the run's change is dropped: the
+  timeline says so as a recorder error.
 - pi's lock on that file is taken beside the link, so your own pi refreshing the same provider at
   the same instant is not serialized with the run.
 
