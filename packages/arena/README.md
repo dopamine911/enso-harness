@@ -7,6 +7,7 @@ by what a reader of the page sees, and is told nothing about Enso's internals.
 ## Run
 
 ```bash
+bun run arena login                 # once: the arena's own login, which every run's Enso uses (#763)
 bun run arena start --agent anthropic/<model-id>   # Enso + a recorded browser + the agent under test, UI only
 bun run arena start --agents <model>,<model>       # the same scenario once per agent model, one after another
 bun run arena start --manual        # the same run with no agent: you act over `arena act`; the boundary is not held
@@ -21,8 +22,8 @@ bun run arena report <run dir> [--run-tests]   # the application outcome apart f
 bun run arena prune --keep 10 --dry-run   # what old runs would free: their trace, their projects' node_modules, dist and build
 ```
 
-`start` needs one of `--agent PROVIDER/MODEL` (a model the home is logged in to, through Enso's own
-login; `--thinking LEVEL`, `medium` by default) or `--manual`. It also takes `--scenario ID` (below), `--minutes N` (the budget, 120 by default),
+`start` needs one of `--agent PROVIDER/MODEL` (a model your own Enso is logged in to: the agent under
+test is the arena's driver, which uses your login; `--thinking LEVEL`, `medium` by default) or `--manual`, and an arena login (`bun run arena login`, below). It also takes `--scenario ID` (below), `--minutes N` (the budget, 120 by default),
 `--home DIR` (an `ENSO_HOME` to run over, shared with whatever else uses it; by default each run
 gets its own, below), `--out DIR` (`$XDG_DATA_HOME/enso/arena`, i.e. `~/.local/share/enso/arena`, by
 default; one under a `.enso` directory is refused), `--chromium PATH`,
@@ -133,20 +134,22 @@ bug in the game doesn't fail Enso's run. A 5xx serving the page is still Enso's.
 
 **Each run has its own Enso home, `<run>/.enso` (#610).** It holds the run's projects, threads, logs
 and Stats, so the agent under test sees only the run's project, the evidence covers only the run,
-and your own Stats and logs are untouched. Your login comes in by symlink:
-- `secrets.env`, `pi-agent/auth.json` and `pi-agent/models.json` are linked, and `settings.json` is
-  copied.
-- Linked, never copied: an OAuth refresh rotates the refresh token, so a copy would leave your own
-  login holding a revoked one. pi rewrites `auth.json` in place, and through the link the refresh
-  lands in your file.
-- **A link can be replaced (#639).** The harness's multi-account extension writes `auth.json` and
-  `models.json` by renaming a temp file onto the path, which replaces a link with a plain file. The
-  recorder checks the links at every 30 s sample and at the stop, and `arena manifest` checks them
-  too. A replaced link's content goes back to your file when it is the newer, and the link is
-  restored. If your file changed after the run's, yours stands and the run's change is dropped: the
-  timeline says so as a recorder error.
-- pi's lock on that file is taken beside the link, so your own pi refreshing the same provider at
-  the same instant is not serialized with the run.
+and your own Stats and logs are untouched. **A run never uses your login (#763):**
+- The arena has a login of its own. Run `bun run arena login` once: it opens pi over
+  `$XDG_DATA_HOME/enso/arena-login/.enso/pi-agent` (else `~/.local/share/…`), where you `/login`, to a
+  test account or your own. Your own account gets a **separate** grant, so a refresh in a run never
+  revokes yours. A run with no arena login stops at launch and says to run it.
+- `<run>/.enso/pi-agent` is a link to that directory. A directory, not files: a rename onto
+  `pi-agent/auth.json` (how the multi-account extension writes) replaces the real file, so nothing
+  breaks the link, and every run takes pi's lock on the one real file.
+- Never a copy of your login: an OAuth refresh rotates the refresh token, so the run refreshing a copy
+  would revoke yours (#610). And never links to your files: a rename onto a linked file replaced the
+  link, and a run's refresh logged you out (#639).
+- From your home a run takes `secrets.env`, linked (only you write it), and your `settings.json`,
+  copied into the arena login at each run's start, so a run starts on your default model unless
+  `--enso-model` sets one. Runs share the login directory safely because they run one at a time.
+- The arena's own driver model (`--agent`) still reads your `~/.enso/pi-agent` directly, without a
+  link: it is your process, like any pi you run.
 
 The home is named `.enso` because that is the guard's credential fragment: Enso's agent can neither
 read nor write under it. The same fragment is why runs are not kept under `~/.enso`: the project would
@@ -179,8 +182,8 @@ bun run arena container start --agent anthropic/claude-sonnet-5-5 --scenario ite
 - **Not mounted:** your home, the Docker socket, the host network. The container gets no added
   privilege.
 - **The credential goes in through stdin only**, never an argument or the environment, and is
-  stored readable by its owner only. The volume is writable: a token an OAuth refresh rotates is
-  kept for the next run, through the run home's link or the #639 reconcile.
+  stored readable by its owner only. The volume is mounted as the image user's arena login directory
+  (#763), and is writable: a token an OAuth refresh rotates is kept for the next run.
 - **What runs is the image, not your checkout.** Run `container build` again after pulling changes.
   The manifest's `ensoBuild` names the commit the image was built from. The image is built for
   **your** uid and gid, because the runs directory is a bind mount and a container user of another

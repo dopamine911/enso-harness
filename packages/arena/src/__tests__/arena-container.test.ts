@@ -26,7 +26,8 @@ test('âš  a container run mounts the credentials volume and its run directory â€
   })
   const runs = `${process.cwd()}/relative/runs`
   expect(mountsOf(dockerArguments)).toEqual([
-    `type=volume,source=${ARENA_CREDENTIALS_VOLUME},target=/home/pwuser/.enso/pi-agent`,
+    // The arena login directory of the image's user (#763): the path the Dockerfile makes and links.
+    `type=volume,source=${ARENA_CREDENTIALS_VOLUME},target=/home/pwuser/.local/share/enso/arena-login/.enso/pi-agent`,
     // Resolved (docker reads a relative bind source as a volume name), and at the SAME path inside:
     // the manifest's absolute paths must exist on the host too, or the host scores a lost project.
     `type=bind,source=${runs},target=${runs}`,

@@ -77,9 +77,9 @@ export const ENVIRONMENT_METADATA: readonly EnvironmentMetadata[] = [
   {
     key: 'XDG_DATA_HOME',
     source: 'packages/arena/src/run-home.ts',
-    reader: '`packages/arena/src/run-home.ts#defaultArenaOut` (`bun run arena` start)',
+    reader: '`packages/arena/src/run-home.ts#defaultArenaOut` and `#arenaLoginDir` (`bun run arena` start, login)',
     purposeAndDefault:
-      'Optional; where Dogfood Arena keeps its runs when `--out` is not given: `$XDG_DATA_HOME/enso/arena`, else `~/.local/share/enso/arena` (#610). Deliberately not under `ENSO_HOME`: a project under `/.enso/` is one the guard keeps Enso’s agent out of.',
+      'Optional; where Dogfood Arena keeps its runs when `--out` is not given: `$XDG_DATA_HOME/enso/arena`, else `~/.local/share/enso/arena` (#610). Deliberately not under `ENSO_HOME`: a project under `/.enso/` is one the guard keeps Enso’s agent out of. Also where the arena’s own login lives, `$XDG_DATA_HOME/enso/arena-login/.enso/pi-agent` (#763): under a `.enso` on purpose, so the guard keeps Enso’s agent out of it.',
     phase: 'load',
   },
   {
@@ -150,6 +150,14 @@ export const ENVIRONMENT_METADATA: readonly EnvironmentMetadata[] = [
     source: 'scripts/enso.ts',
     reader: '`scripts/enso.ts` (pi child environment write)',
     purposeAndDefault: 'Required pin to the selected agent directory in the spawned pi process.',
+    phase: 'boot',
+  },
+  {
+    key: 'PI_CODING_AGENT_DIR',
+    source: 'packages/arena/src/cli.ts',
+    reader: '`packages/arena/src/cli.ts#login` (pi child environment write)',
+    purposeAndDefault:
+      'Set by `bun run arena login` on the pi it opens: the arena’s own login directory (#763), so `/login` there saves the arena’s credential, never the operator’s.',
     phase: 'boot',
   },
   {

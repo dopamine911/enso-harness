@@ -1,12 +1,13 @@
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { arenaLoginDir } from './run-home.ts'
 
 /**
  * Dogfood Arena in a container (#676): `bun run arena container build | credential | start`.
  *
- * ⚠ WHY. A run on the host links the operator's own login into its home (#610) — a token refresh
- * once revoked it (#639) — and Enso's coding agent runs whatever `bash` its work takes ON THE HOST.
+ * ⚠ WHY. Enso's coding agent runs whatever `bash` its work takes ON THE HOST, and a run on the host
+ * once linked the operator's own login into its home (#610), where a token refresh revoked it (#639).
  * In the container, the run touches two things of the host and nothing else:
  *
  * - **its runs directory**, bind-mounted at the SAME absolute path it has on the host: the evidence
@@ -14,8 +15,8 @@ import { join, resolve } from 'node:path'
  *   manifest and score record absolute paths (the project, every screenshot), and a container path
  *   would not exist on the host — scored there, the run lost its project ("enso-did-the-work is
  *   unknown") and the report's screenshot links pointed out of the run;
- * - **the `enso-arena-credentials` volume**, mounted as the container's `pi-agent` directory: the
- *   TEST account's `auth.json`, injected once through stdin, never through an argument or the
+ * - **the `enso-arena-credentials` volume**, mounted as the container's arena login directory (#763):
+ *   the TEST account's `auth.json`, injected once through stdin, never through an argument or the
  *   environment (Enso scrubs provider keys from its environment anyway, #89). A Docker volume, not
  *   a host path, so the host's `~/.enso` is never reachable; and writable, so an OAuth refresh
  *   that rotates the token keeps it for the next run.
@@ -28,8 +29,12 @@ import { join, resolve } from 'node:path'
 const ARENA_IMAGE = 'enso-arena:latest'
 /** The volume holding the test account's credentials: the container's whole `pi-agent` directory. */
 export const ARENA_CREDENTIALS_VOLUME = 'enso-arena-credentials'
-/** Where the image's user keeps Enso's home; its `pi-agent` is the credentials volume. */
-const CONTAINER_AGENT_DIRECTORY = '/home/pwuser/.enso/pi-agent'
+/**
+ * Where the credentials volume is mounted: the arena login directory of the image's user (#763), so a
+ * run inside reaches it as a run on the host does. The image links its `~/.enso/pi-agent` here too,
+ * for the driver's model (`Dockerfile`).
+ */
+const CONTAINER_AGENT_DIRECTORY = arenaLoginDir({ XDG_DATA_HOME: '/home/pwuser/.local/share' })
 
 /**
  * The `start` flags the container decides, refused from a caller: its home is the credentials

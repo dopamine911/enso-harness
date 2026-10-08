@@ -9,9 +9,7 @@ import {
   readlinkSync,
   renameSync,
   rmSync,
-  statSync,
   symlinkSync,
-  utimesSync,
   writeFileSync,
 } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
@@ -20,13 +18,14 @@ import { deflateRawSync } from 'node:zlib'
 import { ensoAgentDir, ensoSecretsPath } from '@enso/core/paths'
 import {
   ARENA_RUN_HOME,
+  arenaLoginDir,
+  arenaLoginProviders,
   arenaSecretSource,
   arenaSecretValues,
   defaultArenaOut,
   isGuardedForAgent,
   parseEnsoModel,
   prepareRunHome,
-  reconcileLinkedFiles,
   runHomeOf,
   setRunHomeModel,
 } from '../run-home.ts'
@@ -42,7 +41,7 @@ const API_KEY = 'sk-ant-api-notarealkey-0123456789'
 const ACCESS = 'oauth-access-notarealtoken-abcdef'
 const REFRESH = 'oauth-refresh-notarealtoken-ghijkl'
 
-/** An operator's home with a login: `secrets.env`, an OAuth credential, models and settings. */
+/** An operator's home with a login of their own: `secrets.env`, an OAuth credential, models and settings. */
 function operatorHome(root: string): string {
   const home = join(root, 'operator', '.enso')
   mkdirSync(ensoAgentDir(home), { recursive: true })
@@ -56,50 +55,94 @@ function operatorHome(root: string): string {
   return home
 }
 
-test('⚠ the run home links the login and copies the settings: a token refresh writes through to the operator (#610)', () => {
+/** The arena's own login directory, logged in: its own OAuth credential and models. */
+function arenaLogin(root: string): string {
+  const login = arenaLoginDir({ XDG_DATA_HOME: join(root, 'data') })
+  mkdirSync(login, { recursive: true })
+  writeFileSync(
+    join(login, 'auth.json'),
+    JSON.stringify({ anthropic: { type: 'oauth', access: ACCESS, refresh: REFRESH, expires: 1_760_000_000_000 } }),
+  )
+  writeFileSync(join(login, 'models.json'), '{"providers":{}}')
+  return login
+}
+
+/** What pi-multi-account does to write a credential file (`auth-file-transaction.ts`): a temp file, renamed onto the path. */
+function atomicWrite(path: string, content: string): void {
+  const temp = `${path}.${process.pid}.tmp`
+  writeFileSync(temp, content)
+  renameSync(temp, path)
+}
+
+test('⚠ the run home reaches the arena’s own login through a directory link, never the operator’s login (#763)', () => {
   const root = mkdtempSync(join(tmpdir(), 'arena-home-'))
   const operator = operatorHome(root)
+  const login = arenaLogin(root)
   const runDirectory = join(root, 'run')
-  const home = prepareRunHome(runDirectory, operator)
+  const home = prepareRunHome(runDirectory, operator, login)
 
   expect(home).toBe(join(runDirectory, ARENA_RUN_HOME))
-  for (const [linked, source] of [
-    [ensoSecretsPath(home), ensoSecretsPath(operator)],
-    [join(ensoAgentDir(home), 'auth.json'), join(ensoAgentDir(operator), 'auth.json')],
-    [join(ensoAgentDir(home), 'models.json'), join(ensoAgentDir(operator), 'models.json')],
-  ] as const) {
-    expect(lstatSync(linked).isSymbolicLink()).toBe(true)
-    expect(readlinkSync(linked)).toBe(source)
-  }
-  const settings = join(ensoAgentDir(home), 'settings.json')
-  expect(lstatSync(settings).isSymbolicLink()).toBe(false)
-
-  // pi rewrites auth.json in place after a refresh (`FileAuthStorageBackend.withLock`): through the
-  // link, the rotated token is the operator's too, so the run cannot log the operator out.
-  writeFileSync(join(ensoAgentDir(home), 'auth.json'), '{"anthropic":{"refresh":"rotated"}}')
-  expect(readFileSync(join(ensoAgentDir(operator), 'auth.json'), 'utf8')).toContain('rotated')
-  // …while a setting the run changes stays the run's.
-  writeFileSync(settings, '{"defaultModel":"other"}')
-  expect(readFileSync(join(ensoAgentDir(operator), 'settings.json'), 'utf8')).toContain('"m"')
+  expect(lstatSync(ensoAgentDir(home)).isSymbolicLink()).toBe(true)
+  expect(readlinkSync(ensoAgentDir(home))).toBe(login)
+  // secrets.env is the operator's, linked: only a human writes it.
+  expect(readlinkSync(ensoSecretsPath(home))).toBe(ensoSecretsPath(operator))
+  // The operator's settings are copied into the login, so a run starts on the operator's default model.
+  expect(readFileSync(join(login, 'settings.json'), 'utf8')).toBe('{"defaultModel":"m"}')
 })
 
-test('a file the operator home lacks is left out of the run home, never created', () => {
+// ⚠ #639, #758: a rename onto a linked FILE replaced the link, the rotated token stayed in the run,
+// and the operator's was revoked. Through a linked DIRECTORY the rename lands in the real file.
+test("⚠ a credential written by rename inside the run home lands in the arena login, the link stays, and the operator's login is untouched", () => {
+  const root = mkdtempSync(join(tmpdir(), 'arena-home-rename-'))
+  const operator = operatorHome(root)
+  const operatorAuth = readFileSync(join(ensoAgentDir(operator), 'auth.json'), 'utf8')
+  const login = arenaLogin(root)
+  const home = prepareRunHome(join(root, 'run'), operator, login)
+
+  atomicWrite(join(ensoAgentDir(home), 'auth.json'), '{"anthropic":{"refresh":"rotated-in-the-run"}}')
+
+  expect(lstatSync(ensoAgentDir(home)).isSymbolicLink()).toBe(true)
+  expect(readFileSync(join(login, 'auth.json'), 'utf8')).toContain('rotated-in-the-run')
+  expect(readFileSync(join(ensoAgentDir(operator), 'auth.json'), 'utf8')).toBe(operatorAuth)
+  // The next run, over the same login, starts with the rotated token.
+  const next = prepareRunHome(join(root, 'next'), operator, login)
+  expect(readFileSync(join(ensoAgentDir(next), 'auth.json'), 'utf8')).toContain('rotated-in-the-run')
+})
+
+test('a file the operator home lacks is left out of the run home; settings it lacks start the run from none', () => {
   const root = mkdtempSync(join(tmpdir(), 'arena-home-bare-'))
-  const operator = join(root, 'operator', '.enso')
+  const operator = join(root, 'bare-operator', '.enso')
   mkdirSync(ensoAgentDir(operator), { recursive: true })
-  const home = prepareRunHome(join(root, 'run'), operator)
+  const login = arenaLogin(root)
+  // An earlier run set its own model in the shared login…
+  setRunHomeModel(prepareRunHome(join(root, 'earlier'), operatorHome(root), login), parseEnsoModel('anthropic/x'))
+
+  const home = prepareRunHome(join(root, 'run'), operator, login)
   expect(existsSync(ensoSecretsPath(home))).toBe(false)
-  expect(existsSync(join(ensoAgentDir(home), 'auth.json'))).toBe(false)
-  expect(existsSync(join(ensoAgentDir(home), 'settings.json'))).toBe(false)
+  // …which this run does not inherit.
+  expect(readFileSync(join(ensoAgentDir(home), 'settings.json'), 'utf8')).toBe('{}\n')
 })
 
-// #674: Enso's model for a run is the run home's own settings — never the operator's, whatever the
-// operator's file holds besides.
-test('a run sets the model Enso starts on in its own settings, keeping the rest; the operator’s are untouched', () => {
+// The container links its own `~/.enso/pi-agent` to the arena login (`Dockerfile`, #763).
+test('⚠ when the operator’s agent dir is the login itself, the settings are kept, not copied onto themselves', () => {
+  const root = mkdtempSync(join(tmpdir(), 'arena-home-same-'))
+  const login = arenaLogin(root)
+  writeFileSync(join(login, 'settings.json'), '{"defaultModel":"kept"}')
+  const operator = join(root, 'container-home', '.enso')
+  mkdirSync(operator, { recursive: true })
+  symlinkSync(login, ensoAgentDir(operator))
+
+  const home = prepareRunHome(join(root, 'run'), operator, login)
+  expect(readFileSync(join(ensoAgentDir(home), 'settings.json'), 'utf8')).toBe('{"defaultModel":"kept"}')
+})
+
+// #674: Enso's model for a run is the settings the run home reaches — never the operator's, whatever
+// the operator's file holds besides.
+test('a run sets the model Enso starts on in the settings it reaches, keeping the rest; the operator’s are untouched', () => {
   const root = mkdtempSync(join(tmpdir(), 'arena-home-model-'))
   const operator = operatorHome(root)
   writeFileSync(join(ensoAgentDir(operator), 'settings.json'), '{"defaultModel":"m","theme":"dark"}')
-  const home = prepareRunHome(join(root, 'run'), operator)
+  const home = prepareRunHome(join(root, 'run'), operator, arenaLogin(root))
   // An id may hold a slash of its own (`openrouter/anthropic/claude-…`).
   setRunHomeModel(home, parseEnsoModel('openrouter/anthropic/claude-sonnet-5-5'))
   expect(JSON.parse(readFileSync(join(ensoAgentDir(home), 'settings.json'), 'utf8'))).toEqual({
@@ -110,7 +153,7 @@ test('a run sets the model Enso starts on in its own settings, keeping the rest;
   expect(readFileSync(join(ensoAgentDir(operator), 'settings.json'), 'utf8')).toBe(
     '{"defaultModel":"m","theme":"dark"}',
   )
-  // A run home with no settings gets a file of the two.
+  // A home with no settings gets a file of the two.
   const bare = join(root, 'bare', '.enso')
   mkdirSync(ensoAgentDir(bare), { recursive: true })
   setRunHomeModel(bare, parseEnsoModel('anthropic/claude-fable-5'))
@@ -123,62 +166,22 @@ test('a run sets the model Enso starts on in its own settings, keeping the rest;
   }
 })
 
-/** What pi-multi-account does to write a credential file (`auth-file-transaction.ts`): a temp file, renamed onto the path. */
-function atomicWrite(path: string, content: string): void {
-  const temp = `${path}.${process.pid}.tmp`
-  writeFileSync(temp, content)
-  renameSync(temp, path)
-}
-
-// ⚠ #639, measured: a refresh in a run home replaced the linked auth.json with a regular file, the
-// rotated token stayed in the run, the operator's refresh token was revoked, and the next run's first
-// model call failed with `invalid_grant`. The reconcile returns the run's newer file and relinks.
-test('⚠ a credential file renamed over its link goes back to the operator, and the link is restored (#639)', () => {
-  const root = mkdtempSync(join(tmpdir(), 'arena-relink-'))
-  const operator = operatorHome(root)
-  const home = prepareRunHome(join(root, 'run'), operator)
-  const runAuth = join(ensoAgentDir(home), 'auth.json')
-  const operatorAuth = join(ensoAgentDir(operator), 'auth.json')
-  chmodSync(operatorAuth, 0o600)
-
-  atomicWrite(runAuth, '{"anthropic":{"refresh":"rotated-in-the-run"}}')
-  // The bug as it was: the link is gone, and the operator's file still holds the old token.
-  expect(lstatSync(runAuth).isSymbolicLink()).toBe(false)
-  expect(readFileSync(operatorAuth, 'utf8')).toContain(REFRESH)
-
-  expect(reconcileLinkedFiles(home, operator)).toEqual([{ path: runAuth, outcome: 'returned' }])
-  expect(readFileSync(operatorAuth, 'utf8')).toContain('rotated-in-the-run')
-  expect(lstatSync(runAuth).isSymbolicLink()).toBe(true)
-  expect(readlinkSync(runAuth)).toBe(operatorAuth)
-  // The operator's file keeps its mode: still only its owner reads the credentials.
-  expect(statSync(operatorAuth).mode & 0o777).toBe(0o600)
-  // Nothing replaced, nothing done.
-  expect(reconcileLinkedFiles(home, operator)).toEqual([])
-})
-
-test('an operator file changed after the run’s is not overwritten; the link is restored and the conflict said', () => {
-  const root = mkdtempSync(join(tmpdir(), 'arena-relink-conflict-'))
-  const operator = operatorHome(root)
-  const home = prepareRunHome(join(root, 'run'), operator)
-  const runModels = join(ensoAgentDir(home), 'models.json')
-  const operatorModels = join(ensoAgentDir(operator), 'models.json')
-  atomicWrite(runModels, '{"from":"the run"}')
-  // Long before the operator's write below: the operator's is the newer file.
-  utimesSync(runModels, 1, 1)
-  writeFileSync(operatorModels, '{"from":"the operator, later"}')
-
-  expect(reconcileLinkedFiles(home, operator)).toEqual([{ path: runModels, outcome: 'operator-newer' }])
-  expect(readFileSync(operatorModels, 'utf8')).toContain('the operator, later')
-  expect(lstatSync(runModels).isSymbolicLink()).toBe(true)
-})
-
-test('⚠ a run under ~/.enso is a project the guard keeps Enso’s agent out of; the default is not, and the run home is (#610)', () => {
+test('⚠ a run under ~/.enso is a project the guard keeps Enso’s agent out of; the default is not, and the run home and the arena login are (#610, #763)', () => {
   expect(isGuardedForAgent(join(homedir(), '.enso', 'arena'))).toBe(true)
   expect(isGuardedForAgent(defaultArenaOut({}))).toBe(false)
   expect(defaultArenaOut({ XDG_DATA_HOME: '/data' })).toBe('/data/enso/arena')
-  // The links live where the guard denies Enso's agent both reading and writing.
+  // The links live where the guard denies Enso's agent both reading and writing…
   expect(isGuardedForAgent(join('/data/enso/arena/snake-1', ARENA_RUN_HOME))).toBe(true)
   expect(isGuardedForAgent('/data/enso/arena/snake-1/project')).toBe(false)
+  // …and so does the login they lead to: an agent in a run cannot read it by its real path either.
+  expect(arenaLoginDir({ XDG_DATA_HOME: '/data' })).toBe('/data/enso/arena-login/.enso/pi-agent')
+  expect(isGuardedForAgent(arenaLoginDir({ XDG_DATA_HOME: '/data' }))).toBe(true)
+})
+
+test('the arena login names the providers it holds a credential for, and none before `arena login`', () => {
+  const root = mkdtempSync(join(tmpdir(), 'arena-login-providers-'))
+  expect(arenaLoginProviders(join(root, 'never-made'))).toEqual([])
+  expect(arenaLoginProviders(arenaLogin(root))).toEqual(['anthropic'])
 })
 
 test('the secret set holds the login’s OAuth tokens and keys as well as secrets.env', () => {
@@ -280,11 +283,11 @@ test('⚠ a secret in a response body inside the trace is found, named by file a
 test('⚠ a token the login rotates mid-run joins the secret set, and the one it replaced stays in it (PR #613 review)', () => {
   const root = mkdtempSync(join(tmpdir(), 'arena-rotate-'))
   const runDirectory = join(root, 'run')
-  const home = prepareRunHome(runDirectory, operatorHome(root))
+  const home = prepareRunHome(runDirectory, operatorHome(root), arenaLogin(root))
   const secrets = arenaSecretSource(home)
   expect(secrets()).toEqual(expect.arrayContaining([ACCESS, REFRESH]))
 
-  // pi's refresh rewrites auth.json in place — through the link, as `prepareRunHome` set it up.
+  // pi's refresh rewrites auth.json in place — through the run home's link to the arena login.
   const rotated = 'oauth-access-rotated-mid-run-0123456789'
   writeFileSync(
     join(ensoAgentDir(home), 'auth.json'),
