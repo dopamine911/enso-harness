@@ -26,6 +26,9 @@ export interface ArenaPagePlace {
   readonly tab?: number
 }
 
+/** The extension every screenshot file carries (#740: JPEG, not PNG): what a reader of the run's files skips or serves by. */
+export const ARENA_SHOT_EXTENSION = '.jpg'
+
 /** Why a screenshot was taken. `sample` is the periodic one; the rest are event captures. */
 export type ArenaShotCause =
   | 'sample'
@@ -77,6 +80,8 @@ export type ArenaEventBody =
       readonly ensoModel?: string | undefined
     }
   | { readonly kind: 'screenshot'; readonly cause: ArenaShotCause; readonly path: string }
+  /** A sample not written (#740): neither the page nor the workspaces changed since `same`, the last sample written. */
+  | { readonly kind: 'sample-skipped'; readonly same: string }
   | {
       readonly kind: 'action'
       readonly via: ArenaActionSource

@@ -1,13 +1,13 @@
 import { afterEach, expect, test } from 'bun:test'
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ensoProjectsDir, projectIdOf, projectSnapshotsDir, realpathOrSelf } from '@enso/core/paths'
 import type { Subprocess } from 'bun'
 import { collectEnsoEvidence } from '../evidence.ts'
 import type { ArenaEvidence } from '../manifest.ts'
-import { collectAfterRecorderDied, controlFilePath, createShooter, isRunStack } from '../recorder.ts'
+import { collectAfterRecorderDied, controlFilePath, createShooter, isRunStack, makeProject } from '../recorder.ts'
 import { type ArenaClock, openTimeline, pagePlace, readTimeline } from '../timeline.ts'
 
 /**
@@ -137,7 +137,7 @@ test('⚠ a screenshot that fails once and then works is a shot, after one pause
   const url = `http://127.0.0.1:5178/?thread=${THREAD}`
   let tries = 0
   shooter.show({
-    screenshot: (): Promise<unknown> => {
+    screenshot: (): Promise<Uint8Array> => {
       tries += 1
       return tries === 1
         ? Promise.reject(new Error('Protocol error (Page.captureScreenshot): Unable to capture screenshot'))
@@ -152,6 +152,57 @@ test('⚠ a screenshot that fails once and then works is a shot, after one pause
   expect(readTimeline(timeline.path)).toEqual([
     expect.objectContaining({ kind: 'screenshot', cause: 'navigation', path: taken }),
   ])
+})
+
+// #740: 39% of samples repeated the one before. A sample that shows nothing new is a line, not a file.
+test('a sample with the same picture and workspaces writes no file and says so; a change writes a JPEG; an event shot is never skipped (#740)', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'arena-shot-sample-'))
+  const timeline = openTimeline(join(root, 'timeline.jsonl'), steppingClock())
+  const shooter = createShooter({ directory: root, timeline, redact: (text: string): string => text })
+  const url = `http://127.0.0.1:5178/?thread=${THREAD}`
+  let picture = Buffer.from('the page')
+  const encodings = new Set<string>()
+  shooter.show({
+    screenshot: (options) => {
+      encodings.add(options.type)
+      return Promise.resolve(picture)
+    },
+    url: () => url,
+  })
+
+  const first = await shooter.sample('project:aa')
+  expect(await shooter.sample('project:aa')).toBeUndefined()
+  const workspaceMoved = await shooter.sample('project:bb')
+  picture = Buffer.from('the page, changed')
+  const pageMoved = await shooter.sample('project:bb')
+  const navigation = await shooter.shoot('navigation')
+
+  // Each shot written holds the page's bytes, as a JPEG; the skipped sample left no file.
+  const written = [first, workspaceMoved, pageMoved, navigation]
+  for (const path of written) expect(readFileSync(path ?? '', 'utf8')).toStartWith('the page')
+  expect(readdirSync(root).filter((name) => name !== 'timeline.jsonl')).toHaveLength(written.length)
+  expect([...encodings]).toEqual(['jpeg'])
+  expect(readTimeline(timeline.path).map((event) => event.kind)).toEqual([
+    'screenshot',
+    'sample-skipped',
+    'screenshot',
+    'screenshot',
+    'screenshot',
+  ])
+  expect(readTimeline(timeline.path)[1]).toMatchObject({ kind: 'sample-skipped', same: first, page: pagePlace(url) })
+})
+
+test('the scenario project is a working git repository with no sample hooks (#740)', () => {
+  const project = join(mkdtempSync(join(tmpdir(), 'arena-project-')), 'project')
+  makeProject(project)
+  const hooks = join(project, '.git', 'hooks')
+  expect(existsSync(hooks) ? readdirSync(hooks).filter((name) => name.endsWith('.sample')) : []).toEqual([])
+  writeFileSync(join(project, 'index.html'), '<canvas></canvas>')
+  const git = (...args: string[]): number =>
+    spawnSync('git', ['-c', 'user.name=arena', '-c', 'user.email=arena@example.invalid', ...args], { cwd: project })
+      .status ?? -1
+  expect(git('add', '.')).toBe(0)
+  expect(git('commit', '--quiet', '-m', 'first')).toBe(0)
 })
 
 /** A run directory as a recorder killed outright leaves it: a timeline with no stop, and its control record. */

@@ -244,7 +244,7 @@ test('a trace zip is read entry by entry, stored and deflated', () => {
   ])
 })
 
-test('⚠ a secret in a response body inside the trace is found, named by file and entry; the run home, links and PNGs are not read (#584 A11)', () => {
+test('⚠ a secret in a response body inside the trace is found, named by file and entry; the run home, links and screenshots are not read (#584 A11)', () => {
   const runDirectory = mkdtempSync(join(tmpdir(), 'arena-scan-'))
   mkdirSync(join(runDirectory, 'trace'))
   writeFileSync(
@@ -257,13 +257,14 @@ test('⚠ a secret in a response body inside the trace is found, named by file a
   mkdirSync(join(runDirectory, 'project'))
   writeFileSync(join(runDirectory, 'project', 'config.js'), `export const key = '${API_KEY}'\n`)
   writeFileSync(join(runDirectory, 'timeline.jsonl'), '{"kind":"run-start"}\n')
-  // Not read: the run home holds the credential links by design; a link is someone else's file; a PNG is pixels.
+  // Not read: the run home holds the credential links by design; a link is someone else's file; a screenshot is pixels.
   mkdirSync(join(runDirectory, ARENA_RUN_HOME))
   writeFileSync(join(runDirectory, ARENA_RUN_HOME, 'secrets.env'), `KEY=${API_KEY}\n`)
   const outside = join(mkdtempSync(join(tmpdir(), 'arena-outside-')), 'auth.json')
   writeFileSync(outside, API_KEY)
   symlinkSync(outside, join(runDirectory, 'linked.json'))
-  writeFileSync(join(runDirectory, 'shot.png'), API_KEY)
+  writeFileSync(join(runDirectory, 'shot.jpg'), API_KEY)
+  writeFileSync(join(runDirectory, 'older-run-shot.png'), API_KEY)
   writeFileSync(join(runDirectory, 'trace', 'trace-001.zip'), 'not a zip')
 
   const scan = scanRunForSecrets(runDirectory, [API_KEY])

@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { ENSO_UI_EVENTS, EnsoThreadStatusEvent } from '@enso/core'
@@ -46,6 +47,7 @@ import type { ArenaScenario } from './scenario.ts'
 import { type ArenaScore, writeArenaScore } from './score.ts'
 import { scanRunForSecrets } from './secret-scan.ts'
 import {
+  ARENA_SHOT_EXTENSION,
   ARENA_WEB_ORIGIN,
   type ArenaActionSource,
   type ArenaEventBody,
@@ -225,9 +227,10 @@ async function waitForWeb(timeoutMs: number): Promise<boolean> {
  * A fresh git repository for the agent: nothing in it, so everything in it is the run's. Without the
  * inherited repository variables: under a git hook, `git init` would re-initialise the HOOK's repository.
  */
-function makeProject(project: string): void {
+export function makeProject(project: string): void {
   mkdirSync(project, { recursive: true })
-  spawnSync('git', ['init', '--quiet', '--initial-branch=main'], {
+  // An empty template (#740): no sample hooks, 5 MB per run that nobody runs.
+  spawnSync('git', ['init', '--quiet', '--initial-branch=main', '--template='], {
     cwd: project,
     env: gitChildEnvironment(),
   })
@@ -285,23 +288,41 @@ function errorLine(error: unknown, redact: (text: string) => string): string {
   return redact(error instanceof Error ? (error.message.split('\n')[0] ?? '') : String(error))
 }
 
-/** What a screenshot needs of a page: Playwright's `Page`, or a test's stand-in. */
+/**
+ * How every screenshot is encoded (#740): JPEG at quality 80, a third of a PNG's size for a picture
+ * no reader needs pixel-exact. The extension the files carry is `ARENA_SHOT_EXTENSION`.
+ */
+const ARENA_SHOT_ENCODING = { type: 'jpeg', quality: 80 } as const
+
+/** What a screenshot needs of a page: Playwright's `Page`, or a test's stand-in. It answers with the picture's bytes. */
 export interface ArenaShotPage {
-  screenshot(options: { readonly path: string; readonly timeout: number }): Promise<unknown>
+  screenshot(options: {
+    readonly timeout: number
+    readonly type: typeof ARENA_SHOT_ENCODING.type
+    readonly quality: number
+  }): Promise<Uint8Array>
   url(): string
 }
 
-/** The run's camera: `show` it the page once there is one; `shoot` settles with the file, or undefined. */
+/**
+ * The run's camera: `show` it the page once there is one; `shoot` settles with the file, or
+ * undefined. `sample` is the periodic shot, given the workspaces' fingerprint at that moment.
+ */
 export interface ArenaShooter {
   readonly show: (page: ArenaShotPage) => void
   readonly shoot: (cause: ArenaShotCause) => Promise<string | undefined>
+  readonly sample: (workspaces: string) => Promise<string | undefined>
 }
 
 /**
  * The run's screenshots: numbered files under `directory`, each a `screenshot` line on the
- * timeline. An event cause is taken at most once per `EVENT_SHOT_SPACING_MS`; a sample, a
- * requested shot, the final one and a visual agent's view (#680) always. Before a page is shown,
- * nothing is taken.
+ * timeline. An event cause is taken at most once per `EVENT_SHOT_SPACING_MS`; a requested shot,
+ * the final one and a visual agent's view (#680) always. Before a page is shown, nothing is taken.
+ *
+ * A SAMPLE THAT SHOWS NOTHING NEW IS A LINE, NOT A FILE (#740): when neither the picture's bytes nor
+ * the workspaces' fingerprint moved since the last sample written, a `sample-skipped` line naming
+ * that sample keeps the cadence readable and no file is written. 39% of samples repeated their
+ * predecessor. An event shot is never skipped.
  *
  * ⚠ A SHOT THAT FAILS IS A LINE (#584 A9, #607): a `recorder-error` naming the cause. Swallowed, a
  * gap in the 30 s cadence read the same as "no sample was due", and a crash's picture that could
@@ -315,10 +336,10 @@ export function createShooter(options: {
   readonly redact: (text: string) => string
   readonly now?: () => number
   /**
-   * The visual agent's view (#680), written to `path`: the tab in front scaled to `ARENA_VIEW`. Only
-   * the recorder can take it (it needs the browser's own capture); absent, a `view` is a full shot.
+   * The visual agent's view (#680), as bytes: the tab in front scaled to `ARENA_VIEW`. Only the
+   * recorder can take it (it needs the browser's own capture); absent, a `view` is a full shot.
    */
-  readonly view?: (path: string) => Promise<void>
+  readonly view?: () => Promise<Uint8Array>
   readonly sleep?: (ms: number) => Promise<void>
 }): ArenaShooter {
   const now = options.now ?? Date.now
@@ -326,7 +347,16 @@ export function createShooter(options: {
   let shown: ArenaShotPage | undefined
   let shotNumber = 0
   const lastShotAt = new Map<ArenaShotCause, number>()
-  const shoot = async (cause: ArenaShotCause): Promise<string | undefined> => {
+  let lastSample: { readonly path: string; readonly picture: string; readonly workspaces: string } | undefined
+  const picture = async (page: ArenaShotPage, cause: ArenaShotCause): Promise<Uint8Array | { failed: unknown }> => {
+    try {
+      if (cause === 'view' && options.view !== undefined) return await options.view()
+      return await page.screenshot({ timeout: 10_000, ...ARENA_SHOT_ENCODING })
+    } catch (error) {
+      return { failed: error }
+    }
+  }
+  const take = async (cause: ArenaShotCause, workspaces?: string): Promise<string | undefined> => {
     const page = shown
     if (page === undefined) return undefined
     const at = now()
@@ -334,30 +364,31 @@ export function createShooter(options: {
       if (at - (lastShotAt.get(cause) ?? 0) < EVENT_SHOT_SPACING_MS) return undefined
     }
     lastShotAt.set(cause, at)
-    const stamp = new Date(at).toISOString().replaceAll(':', '-')
-    const path = join(options.directory, `${String(shotNumber).padStart(5, '0')}-${stamp}-${cause}.png`)
-    shotNumber += 1
-    const capture = async (): Promise<{ readonly failed: unknown } | undefined> => {
-      try {
-        if (cause === 'view' && options.view !== undefined) await options.view(path)
-        else await page.screenshot({ path, timeout: 10_000 })
-        return undefined
-      } catch (error) {
-        return { failed: error }
-      }
-    }
-    let outcome = await capture()
-    if (outcome !== undefined) {
+    let outcome = await picture(page, cause)
+    if (!(outcome instanceof Uint8Array)) {
       await sleep(SHOT_RETRY_MS)
-      outcome = await capture()
+      outcome = await picture(page, cause)
     }
-    if (outcome !== undefined) {
+    if (!(outcome instanceof Uint8Array)) {
       options.timeline.record(
         { kind: 'recorder-error', during: `screenshot (${cause})`, error: errorLine(outcome.failed, options.redact) },
         pagePlace(page.url()),
       )
       return undefined
     }
+    const hash = workspaces === undefined ? '' : createHash('sha256').update(outcome).digest('hex')
+    if (workspaces !== undefined && lastSample?.picture === hash && lastSample.workspaces === workspaces) {
+      options.timeline.record({ kind: 'sample-skipped', same: lastSample.path }, pagePlace(page.url()))
+      return undefined
+    }
+    const stamp = new Date(at).toISOString().replaceAll(':', '-')
+    const path = join(
+      options.directory,
+      `${String(shotNumber).padStart(5, '0')}-${stamp}-${cause}${ARENA_SHOT_EXTENSION}`,
+    )
+    shotNumber += 1
+    writeFileSync(path, outcome)
+    if (workspaces !== undefined) lastSample = { path, picture: hash, workspaces }
     options.timeline.record({ kind: 'screenshot', cause, path }, pagePlace(page.url()))
     return path
   }
@@ -365,7 +396,8 @@ export function createShooter(options: {
     show: (page) => {
       shown = page
     },
-    shoot,
+    shoot: (cause) => take(cause),
+    sample: (workspaces) => take('sample', workspaces),
   }
 }
 
@@ -477,7 +509,8 @@ async function openTracedPage(
     ...(options.chromiumPath === undefined ? {} : { executablePath: options.chromiumPath }),
   })
   try {
-    const context = await browser.newContext({ viewport: VIEWPORT })
+    // Reduced motion (#740): Enso's pulsing status dots stand still (`motion-safe:`), so the page repaints only when it changes.
+    const context = await browser.newContext({ viewport: VIEWPORT, reducedMotion: 'reduce' })
     // ⚠ NO SCREENCAST (#736). `screenshots: true` is Chromium's continuous screencast: every repaint a
     // JPEG, ~31 fps for a whole run because Enso's status dots animate. 97% of each trace zip, 3.3 GB for a
     // 42-minute run, all of it held in memory by the stop's secret scan. Nothing reads it: the report, the
@@ -549,12 +582,12 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
   // ⚠ Defined BEFORE Enso starts (PR #562 review): Enso's exit handler takes one, and Enso can
   // die while the recorder is still waiting for it to answer — before there is any page.
   // The view is taken by the browser's own capture once there is a browser (#680); before, nothing asks for one.
-  let captureView: (path: string) => Promise<void> = () => Promise.reject(new Error('no browser yet'))
-  const { show, shoot } = createShooter({
+  let captureView: () => Promise<Uint8Array> = () => Promise.reject(new Error('no browser yet'))
+  const { show, shoot, sample } = createShooter({
     directory: shotsDirectory,
     timeline,
     redact,
-    view: (path) => captureView(path),
+    view: () => captureView(),
   })
 
   // ── The control record, rewritten whenever the stack it names changes ──────────────────────
@@ -854,8 +887,9 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
   }
   /** A periodic sample: the screenshot and the work at the same tick, so neither is without the other. */
   const takeSample = async (): Promise<void> => {
-    timeline.record({ kind: 'workspace-sample', workspaces: sampleWorkspaces(runDirectory, workspaces()) })
-    await shoot('sample')
+    const sampled = sampleWorkspaces(runDirectory, workspaces())
+    timeline.record({ kind: 'workspace-sample', workspaces: sampled })
+    await sample(sampled.map((workspace) => `${workspace.path}:${workspace.fingerprint}`).join('\n'))
   }
   const sampler = setInterval(() => void takeSample(), scenario.sampleIntervalMs)
   let queue: Promise<unknown> = Promise.resolve()
@@ -934,11 +968,12 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
     return session
   }
   // The tab in front, as the window shows it, scaled by Chromium itself to the view's size.
-  captureView = async (path: string): Promise<void> => {
+  captureView = async (): Promise<Uint8Array> => {
     const session = await devtoolsOf(inFront())
     const { cssVisualViewport } = await session.send('Page.getLayoutMetrics')
     const { data } = await session.send('Page.captureScreenshot', {
-      format: 'png',
+      format: ARENA_SHOT_ENCODING.type,
+      quality: ARENA_SHOT_ENCODING.quality,
       // The protocol's own field names, from `POINT_FIELDS`: the page's scroll offset, the whole window.
       clip: {
         [POINT_FIELDS.horizontal]: cssVisualViewport.pageX,
@@ -948,7 +983,7 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
         scale: 1 / ARENA_VIEW.scale,
       },
     })
-    writeFileSync(path, Buffer.from(data, 'base64'))
+    return Buffer.from(data, 'base64')
   }
   /**
    * What is at a window point, as the browser's accessibility tree names it: the nearest element with

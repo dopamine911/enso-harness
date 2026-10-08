@@ -772,6 +772,47 @@ test('⚠ the snapshot store copy keeps read-only files and relative links, and 
   })
 })
 
+// #740: the store's files are hard links to the home's, not 33 MB of copies; across filesystems, copies.
+test('the snapshot store evidence hard-links the home’s files, and copies them where linking fails (#740)', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'arena-store-link-'))
+  const home = join(root, 'home')
+  const project = join(root, 'project')
+  mkdirSync(project, { recursive: true })
+  const store = projectSnapshotsDir(ensoProjectsDir(home), projectIdOf(realpathOrSelf(project)))
+  mkdirSync(join(store, THREAD), { recursive: true })
+  const original = join(store, THREAD, 'snapshot.json')
+  writeFileSync(original, '{"turn":1}')
+  chmodSync(original, 0o444)
+  const collect = (
+    directory: string,
+    linkFile?: (source: string, destination: string) => void,
+  ): Promise<ArenaEvidence[]> =>
+    collectEnsoEvidence({
+      serverOrigin: 'http://enso',
+      directory,
+      threadIds: [],
+      home,
+      project,
+      secretValues: [],
+      serverDown: 'down',
+      ...(linkFile === undefined ? {} : { linkFile }),
+    })
+
+  await collect(join(root, 'linked'))
+  const linked = join(root, 'linked', 'snapshot-store', THREAD, 'snapshot.json')
+  expect(statSync(linked).ino).toBe(statSync(original).ino)
+
+  const acrossFilesystems = (): void => {
+    throw Object.assign(new Error('EXDEV: cross-device link not permitted'), { code: 'EXDEV' })
+  }
+  const rows = await collect(join(root, 'copied'), acrossFilesystems)
+  expect(rows.find((row) => row.kind === 'snapshot store')).toMatchObject({ status: 'collected' })
+  const copied = join(root, 'copied', 'snapshot-store', THREAD, 'snapshot.json')
+  expect(statSync(copied).ino).not.toBe(statSync(original).ino)
+  expect(readFileSync(copied, 'utf8')).toBe('{"turn":1}')
+  expect(statSync(copied).mode & 0o777).toBe(0o444)
+})
+
 // ⚠ #671, from an arena run: a deleted thread and the fresh thread Enso opens after it filled the
 // score with 11 'not collected' rows that said nothing about Enso. Each is now one skipped row — and
 // a thread that ran and exists keeps every failing route as a warning row.
