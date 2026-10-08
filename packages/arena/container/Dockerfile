@@ -29,11 +29,13 @@ RUN groupmod --non-unique --gid "$ARENA_GID" pwuser \
   && usermod --non-unique --uid "$ARENA_UID" --gid "$ARENA_GID" pwuser \
   && chown -R pwuser:pwuser /home/pwuser
 
-# pwuser owns the repository and its Enso home. The credentials directory is created here so a
-# fresh named volume mounted over it is pwuser's too.
+# pwuser owns the repository and its Enso home. The arena login directory is created here so a
+# fresh named volume mounted over it is pwuser's too (#763); `~/.enso/pi-agent` links to it, so the
+# driver's model reads the same credential.
 USER pwuser
 ENV HOME=/home/pwuser
-RUN mkdir -p /home/pwuser/.enso/pi-agent \
+RUN mkdir -p /home/pwuser/.local/share/enso/arena-login/.enso/pi-agent /home/pwuser/.enso \
+  && ln -s /home/pwuser/.local/share/enso/arena-login/.enso/pi-agent /home/pwuser/.enso/pi-agent \
   && git config --global user.name "Enso Arena" \
   && git config --global user.email "arena@enso.invalid" \
   && git config --global init.defaultBranch main \

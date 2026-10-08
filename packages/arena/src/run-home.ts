@@ -1,19 +1,8 @@
-import {
-  copyFileSync,
-  existsSync,
-  lstatSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  statSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { DEFAULT_GUARD_POLICY } from '@enso/core'
-import { containsPathFragment, ensoAgentDir, ensoSecretsPath } from '@enso/core/paths'
+import { containsPathFragment, ensoAgentDir, ensoSecretsPath, realpathOrSelf } from '@enso/core/paths'
 import { knownSecretValues } from '@enso/core/secrets'
 
 /**
@@ -25,37 +14,29 @@ import { knownSecretValues } from '@enso/core/secrets'
  * So a run gets `<run>/.enso`: its own projects, threads, logs and Stats. What it borrows from the
  * operator is only what a model call needs.
  *
- * ⚠ CREDENTIALS ARE LINKED, NEVER COPIED. `pi-agent/auth.json` holds OAuth refresh tokens, and a
- * provider that rotates them on refresh would leave a copied original holding a dead token: the run
- * refreshing its copy would log the operator out. pi writes the file with `writeFileSync` on its
- * path (`FileAuthStorageBackend.withLock`), which follows a symlink, so a refresh lands in the
- * operator's own file and there is one login. Linking also keeps the credential bytes out of the run
- * directory. ⚠ What the link does not cover: pi's lock is taken beside the link (`realpath: false`),
- * not beside the operator's file, so the operator's own pi refreshing the same provider at the same
- * instant is not serialized with the run.
+ * ⚠ THE LOGIN IS THE ARENA'S OWN, REACHED BY A DIRECTORY LINK (#763). `<run>/.enso/pi-agent` is a
+ * symlink to one arena login directory (`arenaLoginDir`), logged in once with `bun run arena login`.
+ * It holds its own OAuth grant: never a COPY of the operator's (a refresh rotates a single-use token,
+ * so the copy would revoke the operator's, #610), never a link to the operator's FILES (a rename
+ * onto a linked file replaces the link, and the rotated token stayed in the run, #639). A rename
+ * onto `pi-agent/auth.json` resolves the DIRECTORY link and replaces the real file, so no writer can
+ * break the link, and pi's lock file lands in the one real directory for every run.
  *
- * ⚠⚠ A LINK CAN BE REPLACED, AND THEN THE OPERATOR IS LOGGED OUT (#639). The harness loads
- * pi-multi-account, which writes `auth.json` and `models.json` ATOMICALLY — a temp file, then a
- * rename onto the path (`auth-file-transaction.ts`) — and a rename onto a symlink replaces the link
- * with a regular file. Measured: a refresh in one run rotated the Anthropic token into that run's
- * home, the operator's file kept the old refresh token, the provider revoked it, and the next run's
- * first model call failed with `invalid_grant`. So the recorder reconciles the links while the run
- * lives and at its stop (`reconcileLinkedFiles`): a link found replaced has its content returned to
- * the operator's file, and is linked again.
+ * ⚠ RUNS SHARE THAT DIRECTORY, ONE AT A TIME. `prepareLaunch` refuses while the stack's ports are
+ * taken, so no two runs are alive at once: `setRunHomeModel` sets a run's model at its start, and each
+ * launch re-points the permission engine's link to its own home's policy (`linkEngineConfig`). From the
+ * operator a run takes `secrets.env`, linked (only a human writes it), and the settings (default model,
+ * theme), copied into the login directory at each run's start.
  *
  * ⚠ NAMED `.enso`, ON PURPOSE. `/.enso/` is the guard's credential fragment (`DEFAULT_GUARD_POLICY`):
- * Enso's own agent can neither read nor write under it, so the links are out of its reach. The same
- * fragment is why the RUN must not live under one: a project under `~/.enso/arena/…` is a path the
- * guard refuses every read and write in, and the agent could not touch its own work.
+ * Enso's own agent can neither read nor write under it, so the links are out of its reach, and so is
+ * the arena login directory, under a `.enso` of its own. The same fragment is why the RUN must not
+ * live under one: a project under `~/.enso/arena/…` is a path the guard refuses every read and write
+ * in, and the agent could not touch its own work.
  */
 
 /** The run home's directory name inside a run directory. */
 export const ARENA_RUN_HOME = '.enso'
-
-/** Under `pi-agent/`: linked to the operator's (credentials — one copy, written through). */
-const LINKED_AGENT_FILES = ['auth.json', 'models.json'] as const
-/** Under `pi-agent/`: copied (the default model and such — the run may change its own). */
-const COPIED_AGENT_FILES = ['settings.json'] as const
 
 /**
  * Where runs go by default: `$XDG_DATA_HOME/enso/arena`, else `~/.local/share/enso/arena`. Not under
@@ -71,30 +52,46 @@ export function isGuardedForAgent(directory: string): boolean {
   return containsPathFragment(resolve(directory), DEFAULT_GUARD_POLICY.secretPathFragments)
 }
 
-/** Every file the run home links to the operator's: `[the run home's path, the operator's]`. */
-function linkedPairs(runHome: string, operatorHome: string): Array<readonly [linked: string, source: string]> {
-  return [
-    [ensoSecretsPath(runHome), ensoSecretsPath(operatorHome)],
-    ...LINKED_AGENT_FILES.map(
-      (fileName) => [join(ensoAgentDir(runHome), fileName), join(ensoAgentDir(operatorHome), fileName)] as const,
-    ),
-  ]
+/**
+ * The arena's own login directory, which every host run's `pi-agent` links to (#763):
+ * `$XDG_DATA_HOME/enso/arena-login/.enso/pi-agent`, else under `~/.local/share`. Under a `.enso`, so
+ * the guard keeps Enso's agent out of it (see the module header).
+ */
+export function arenaLoginDir(environment: Readonly<Record<string, string | undefined>>): string {
+  const dataHome = environment.XDG_DATA_HOME ?? join(homedir(), '.local', 'share')
+  return ensoAgentDir(join(dataHome, 'enso', 'arena-login', ARENA_RUN_HOME))
+}
+
+/** The providers the arena login holds a credential for: none until `bun run arena login`. */
+export function arenaLoginProviders(loginAgentDir: string): string[] {
+  const authPath = join(loginAgentDir, 'auth.json')
+  if (!existsSync(authPath)) return []
+  const credentials: unknown = JSON.parse(readFileSync(authPath, 'utf8'))
+  return typeof credentials === 'object' && credentials !== null && !Array.isArray(credentials)
+    ? Object.keys(credentials)
+    : []
 }
 
 /**
- * Make `<run>/.enso` from the operator's home: the credential files linked, the settings copied,
- * nothing else. A file the operator's home does not have is left out, never created. Returns the run home.
+ * Make `<run>/.enso`: `pi-agent` a link to the arena login directory, `secrets.env` a link to the
+ * operator's, and the operator's settings copied into the login directory, so a run starts on the
+ * operator's default model unless it sets its own. A file the operator's home does not have is left
+ * out, never created. Returns the run home.
  */
-export function prepareRunHome(runDirectory: string, operatorHome: string): string {
+export function prepareRunHome(runDirectory: string, operatorHome: string, loginAgentDir: string): string {
   const home = join(runDirectory, ARENA_RUN_HOME)
-  mkdirSync(ensoAgentDir(home), { recursive: true, mode: 0o700 })
-  for (const [linked, source] of linkedPairs(home, operatorHome)) {
-    if (existsSync(source)) symlinkSync(source, linked)
-  }
-  for (const fileName of COPIED_AGENT_FILES) {
-    const source = join(ensoAgentDir(operatorHome), fileName)
-    if (existsSync(source)) copyFileSync(source, join(ensoAgentDir(home), fileName))
-  }
+  mkdirSync(home, { recursive: true, mode: 0o700 })
+  mkdirSync(loginAgentDir, { recursive: true, mode: 0o700 })
+  symlinkSync(loginAgentDir, ensoAgentDir(home))
+  if (existsSync(ensoSecretsPath(operatorHome))) symlinkSync(ensoSecretsPath(operatorHome), ensoSecretsPath(home))
+  // Every run starts from the operator's settings, or from none: never from the last run's model.
+  // In the container the operator's agent dir IS the login (its `~/.enso/pi-agent` links there): one
+  // file, nothing to copy, and a copy onto itself would empty it.
+  const operatorSettings = join(ensoAgentDir(operatorHome), 'settings.json')
+  const loginSettings = join(loginAgentDir, 'settings.json')
+  if (realpathOrSelf(ensoAgentDir(operatorHome)) === realpathOrSelf(loginAgentDir)) return home
+  if (existsSync(operatorSettings)) copyFileSync(operatorSettings, loginSettings)
+  else writeFileSync(loginSettings, '{}\n')
   return home
 }
 
@@ -112,9 +109,9 @@ export function parseEnsoModel(model: string): EnsoModelSetting {
 }
 
 /**
- * Set the model Enso's sessions start on, in the run home's own copy of the settings (#674):
- * `defaultProvider` and `defaultModel`, which pi starts a session on and the Start dialog
- * preselects. Every other setting is kept; a run home with no settings gets a file of these two.
+ * Set the model Enso's sessions start on, in the settings the run home reaches (#674; the arena
+ * login's, #763): `defaultProvider` and `defaultModel`, which pi starts a session on and the Start
+ * dialog preselects. Every other setting is kept; a home with no settings gets a file of these two.
  */
 export function setRunHomeModel(home: string, model: EnsoModelSetting): void {
   const path = join(ensoAgentDir(home), 'settings.json')
@@ -124,48 +121,6 @@ export function setRunHomeModel(home: string, model: EnsoModelSetting): void {
   }
   const updated = { ...settings, defaultProvider: model.provider, defaultModel: model.id }
   writeFileSync(path, `${JSON.stringify(updated, null, 2)}\n`)
-}
-
-/**
- * What reconciling found for one linked file that was no longer a link: its content went back to
- * the operator's file, or the operator's had changed after it and stood.
- */
-export interface ArenaRelink {
-  /** The run home's path that had been a link. */
-  readonly path: string
-  readonly outcome: 'returned' | 'operator-newer'
-}
-
-/**
- * Put every replaced link back (#639). A linked file that is a regular file now was written by an
- * atomic rename: its content goes back to the operator's file when it is the newer of the two (a
- * refresh's rotated token), and the link is restored either way. An operator file changed after it
- * is left alone — overwriting it could revoke the login another process just refreshed — and the
- * caller says so. A link still in place, and a file neither side has, are untouched.
- */
-export function reconcileLinkedFiles(runHome: string, operatorHome: string): ArenaRelink[] {
-  const relinked: ArenaRelink[] = []
-  for (const [linked, source] of linkedPairs(runHome, operatorHome)) {
-    const stats = lstatSync(linked, { throwIfNoEntry: false })
-    if (stats === undefined || stats.isSymbolicLink()) continue
-    const operatorStats = statSync(source, { throwIfNoEntry: false })
-    const newer = operatorStats === undefined || stats.mtimeMs >= operatorStats.mtimeMs
-    if (newer) writeFileSync(source, readFileSync(linked), { mode: 0o600 })
-    // ⚠ The link goes back by RENAME (PR #642 review): removing the file and then linking left a
-    // moment with no file, in which a credential write of pi-multi-account's own could land and make
-    // the link throw. A rename onto the path replaces whatever is there, at once.
-    const pendingLink = `${linked}.relink-${process.pid}`
-    symlinkSync(source, pendingLink)
-    try {
-      renameSync(pendingLink, linked)
-    } catch (error) {
-      // A rename that fails leaves no stray link behind; the caller hears why (PR #642 review).
-      rmSync(pendingLink, { force: true })
-      throw error
-    }
-    relinked.push({ path: linked, outcome: newer ? 'returned' : 'operator-newer' })
-  }
-  return relinked
 }
 
 /**

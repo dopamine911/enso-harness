@@ -57,6 +57,9 @@
  *   bun run arena container build | credential --api-key-stdin|--from FILE|--status | start …
  *       a run in a container (`arena/container.ts`, #676): a TEST account's credential injected
  *       into a Docker volume, the run directory the only host path, Enso's bash inside it too
+ *   bun run arena login
+ *       pi over the arena's own login directory (#763), for `/login` there: every host run's
+ *       `pi-agent` links to it. A login of its own, never a copy of yours; once, then as needed
  *
  * `start` exits 1 too when its run's score is FAIL, so a caller can gate on the run.
  *
@@ -65,7 +68,8 @@
  * `manifest.json`. `<out>/current` names the live run, which is how `act` finds it without `--run`.
  *
  * ⚠ Each run gets its own Enso home, `<run>/.enso` (#610, `run-home.ts`): its own projects, threads,
- * logs and Stats, with the operator's login linked in so the agent's prompts reach a real model.
+ * logs and Stats. Its `pi-agent` is a link to the arena's own login directory (#763), logged in once
+ * with `bun run arena login`, so the agent's prompts reach a real model and never use your login.
  * `--home DIR` runs over DIR instead, shared with whatever else uses it. An `--out` under a `.enso`
  * directory is refused: the guard keeps Enso's agent out of it, so the agent could not touch its
  * own project.
@@ -108,14 +112,14 @@ import {
 } from './recorder.ts'
 import { writeArenaReport } from './report.ts'
 import {
-  ARENA_RUN_HOME,
+  arenaLoginDir,
+  arenaLoginProviders,
   arenaSecretValues,
   defaultArenaOut,
   isGuardedForAgent,
   type EnsoModelSetting,
   parseEnsoModel,
   prepareRunHome,
-  reconcileLinkedFiles,
   runHomeOf,
   setRunHomeModel,
 } from './run-home.ts'
@@ -541,8 +545,12 @@ async function startRun(
   const chromiumPath = flag('chromium')
   const context = briefContext(runDirectory)
   const { driver, brief } = await driverNamed(scenario, context, agent)
+  const loginAgentDir = arenaLoginDir(process.env)
+  if (flag('home') === undefined && arenaLoginProviders(loginAgentDir).length === 0) {
+    fail(`the arena has no login yet: run \`bun run arena login\` once (it logs in ${loginAgentDir})`)
+  }
   mkdirSync(runDirectory, { recursive: true })
-  const home = flag('home') === undefined ? prepareRunHome(runDirectory, operatorHome) : operatorHome
+  const home = flag('home') === undefined ? prepareRunHome(runDirectory, operatorHome, loginAgentDir) : operatorHome
   if (ensoModel !== undefined) setRunHomeModel(home, ensoModel)
   const briefPath = join(runDirectory, 'brief.md')
   writeFileSync(briefPath, brief)
@@ -563,8 +571,6 @@ async function startRun(
       runDirectory,
       project: join(runDirectory, 'project'),
       home,
-      // The run home links the operator's login (#610); the recorder puts a replaced link back (#639).
-      ...(home === operatorHome ? {} : { linkedFrom: operatorHome }),
       budgetMinutes: minutes,
       limits: runLimits(),
       headed: rest.includes('--headed'),
@@ -640,17 +646,6 @@ async function refoldRun(runDirectory: string): Promise<void> {
   if (kept === undefined && currentRun() === runDirectory) rmSync(currentFile, { force: true })
   // The home the run recorded, not this shell's; and a hit an earlier scan found stands (PR #613 review).
   const home = runHomeOf(runDirectory, operatorHome, recordedRunHome(runDirectory))
-  // A recorder that died never ran its last relink (#639): a run home's replaced link is put back
-  // here. Its timeline is finished, so a conflict is said here (PR #642 review).
-  if (home === join(runDirectory, ARENA_RUN_HOME)) {
-    for (const relinked of reconcileLinkedFiles(home, operatorHome)) {
-      if (relinked.outcome === 'operator-newer') {
-        process.stderr.write(
-          `arena: ${relinked.path} was replaced in the run and your login changed after; yours stands, the run's change is dropped\n`,
-        )
-      }
-    }
-  }
   const secretScan = withEarlierHits(scanRunForSecrets(runDirectory, arenaSecretValues(home)), earlier, runDirectory)
   const events = readTimeline(join(runDirectory, 'timeline.jsonl'))
   const histories = threadHistoriesIn(join(runDirectory, 'enso', 'evidence'))
@@ -700,12 +695,36 @@ function publish(runDirectory: string): void {
   )
 }
 
+/**
+ * `login`: pi over the arena's own login directory, for `/login` there (#763). Its own grant, never
+ * a copy of the operator's. `--no-session`: Enso migrates sessions it finds in an agent dir into the
+ * home's projects, and this directory is every run's.
+ */
+function login(): void {
+  if (!process.stdin.isTTY) fail('arena login runs pi for its /login, so it needs a terminal')
+  const loginAgentDir = arenaLoginDir(process.env)
+  mkdirSync(loginAgentDir, { recursive: true, mode: 0o700 })
+  process.stdout.write(`arena: pi over ${loginAgentDir}: run /login, then /quit\n`)
+  const pi = spawnSync('pi', ['--no-session'], {
+    stdio: 'inherit',
+    cwd: loginAgentDir,
+    env: { ...process.env, PI_CODING_AGENT_DIR: loginAgentDir },
+  })
+  if (pi.error !== undefined) fail(`could not start pi: ${pi.error.message}`)
+  const providers = arenaLoginProviders(loginAgentDir)
+  if (providers.length === 0) fail('the arena still has no login: nothing was saved in pi')
+  process.stdout.write(`arena: logged in: ${providers.join(', ')}\n`)
+}
+
 switch (command) {
   case 'container':
     process.exitCode = await runContainerCommand(rest, { repoRoot, defaultOut: outDirectory })
     break
   case 'start':
     await start()
+    break
+  case 'login':
+    login()
     break
   case 'prune': {
     const keep = flag('keep')
@@ -776,6 +795,6 @@ switch (command) {
     break
   default:
     fail(
-      'usage: bun run arena start --agent PROVIDER/MODEL | start --agents A,B | start --manual | brief | act <json> | manifest <run directory> | score <run directory> | compare <run directory> <run directory> | compare --by-model <run directory>… | report <run directory> [--run-tests] | publish <run directory> [--corpus OWNER/REPO] [--dry-run] | prune --keep N | --older-than DAYS [--dry-run] | container build|credential|start',
+      'usage: bun run arena start --agent PROVIDER/MODEL | start --agents A,B | start --manual | login | brief | act <json> | manifest <run directory> | score <run directory> | compare <run directory> <run directory> | compare --by-model <run directory>… | report <run directory> [--run-tests] | publish <run directory> [--corpus OWNER/REPO] [--dry-run] | prune --keep N | --older-than DAYS [--dry-run] | container build|credential|start',
     )
 }
