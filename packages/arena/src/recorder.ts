@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { ENSO_UI_EVENTS, EnsoThreadStatusEvent } from '@enso/core'
 import { gitChildEnvironment } from '@enso/core/git'
 import { redactJudgeText } from '@enso/core/judge'
 import { isListening } from '@enso/core/loopback'
@@ -15,6 +16,7 @@ import {
   type Page,
 } from '@playwright/test'
 import type { Subprocess } from 'bun'
+import { Check } from 'typebox/value'
 import {
   ARENA_REFUSED_DETAIL,
   ARENA_RUNNER_STILL_RUNNING,
@@ -23,6 +25,7 @@ import {
   type ArenaPoint,
   type ArenaTarget,
   createChangeBaseline,
+  createStatusLog,
   describeArenaAction,
   dialogForChange,
   pageForChange,
@@ -30,7 +33,8 @@ import {
   perceptionRefusal,
   POINT_FIELDS,
   typedSecretRefusal,
-  waitForPage,
+  waitForAttention,
+  waitForChange,
 } from './actions.ts'
 import { collectEnsoEvidence, threadIdsShown } from './evidence.ts'
 import { type ArenaEvidence, foldArenaManifest } from './manifest.ts'
@@ -111,6 +115,16 @@ const LEAVES_THE_PAGE: ReadonlySet<ArenaAction['action']> = new Set([
   'stop',
   'tabs',
 ])
+/**
+ * The actions after which what the agent knows of the page is unchanged (#737): a wait tells it
+ * what it waited for, a note and a stop touch no page. Any other action marks the status log — the
+ * agent moved the page or was shown it — so the next wait reads what came after.
+ */
+const KEEPS_WHAT_IT_KNOWS: ReadonlySet<ArenaAction['action']> = new Set(['wait', 'note', 'stop'])
+/** The page-side function the recorder exposes (#737): a UI event's name and `detail`, forwarded as it fires. */
+const UI_EVENT_BINDING = '__ensoUiEvent'
+/** The margin a wait on the page keeps under the idle bound (#609), so a wait in progress never trips it. */
+const IDLE_BOUND_MARGIN_MS = 5000
 /** How long a stopped run waits for its agent runner to finish writing before closing the page. */
 const DRIVER_SETTLE_MS = 15_000
 
@@ -490,6 +504,11 @@ function boundsOf(options: Pick<ArenaRunOptions, 'budgetMinutes' | 'limits'>): A
   }
 }
 
+/** The longest a wait on the page runs (#737): its own cap, cut under the idle bound (#609) when there is one. */
+function pageWaitCapOf(bounds: ArenaBounds): number {
+  return bounds.idleMs === undefined ? Number.POSITIVE_INFINITY : Math.max(0, bounds.idleMs - IDLE_BOUND_MARGIN_MS)
+}
+
 /**
  * Run one arena: start Enso and the browser, serve the agent's actions, stop on a condition, write
  * the manifest, then score the run (`score.ts`). Settles with the score — undefined only when the
@@ -777,6 +796,37 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
       .then(() => (front === tabNumber ? shoot('tab-opened') : undefined))
   })
 
+  // ── The page's announcements (#737) ────────────────────────────────────────────────────────
+  // Enso's page announces its thread's status as a DOM event (core's `ENSO_UI_EVENTS`); a script
+  // installed before any page's own forwards it here, and a wait until attention reads the log
+  // instead of the page. Only a shown pane's word counts, and only once it checks against the
+  // schema: a page on another origin in this context (a preview, #713) can call the binding too.
+  const statusLog = createStatusLog()
+  const tabOf = (tabPage: Page): number | undefined => {
+    for (const [tabNumber, candidate] of tabs) if (candidate === tabPage) return tabNumber
+    return undefined
+  }
+  await context.exposeBinding(UI_EVENT_BINDING, (source, name: unknown, detail: unknown) => {
+    if (name !== ENSO_UI_EVENTS.threadStatus || !Check(EnsoThreadStatusEvent, detail) || !detail.shown) return
+    const tabNumber = tabOf(source.page)
+    if (tabNumber === undefined) return
+    statusLog.record(tabNumber, detail)
+    timeline.record(
+      {
+        kind: 'thread-status',
+        status: detail.status,
+        ...(detail.question === undefined ? {} : { question: redact(detail.question.title) }),
+      },
+      tabPlace(tabNumber, source.page),
+    )
+  })
+  await context.addInitScript(
+    `document.addEventListener(${JSON.stringify(ENSO_UI_EVENTS.threadStatus)}, (event) => {
+      const forward = window[${JSON.stringify(UI_EVENT_BINDING)}]
+      if (typeof forward === 'function') forward(event.type, event.detail)
+    })`,
+  )
+
   try {
     await firstPage.goto(ARENA_WEB_ORIGIN)
   } catch (error) {
@@ -849,12 +899,14 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
   }, scenario.traceChunkMs)
   // The clock and the bounds (#609): a tick a second; the budget opens a grace window for the
   // retrospective, and every bound stops the run with its own reason.
+  const bounds = boundsOf(options)
   const runClock = createRunControl({
-    bounds: boundsOf(options),
+    bounds,
     onGrace: () => timeline.record({ kind: 'budget-spent', graceMs: ARENA_GRACE_MS }, here()),
     onStop: resolveStop,
     readCost: () => ensoSpendUsd(options.home),
   })
+  const pageWaitCap = pageWaitCapOf(bounds)
   const ticker = setInterval(() => runClock.tick(), 1000)
   browser.on('disconnected', () => resolveStop('the browser closed'))
   for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => resolveStop(`signal ${signal}`))
@@ -1041,22 +1093,49 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
     lastSeen.saw(pageForChange(snapshot))
     return { ...here(), page: snapshot }
   }
-  /** `wait`: a fixed sleep, or a wait on the page until it changes or needs the agent (#637, #648). */
+  /**
+   * `wait`: a fixed sleep; a wait on the page until it changes (#637), looked for; or until it needs
+   * the agent (#648), read off what the page announced (#737) — the log since the agent's move, then
+   * each announcement as it comes — ended early by the run stopping or a native dialog opening over
+   * the tab. A wait that returned with attention marks the log: the agent has been told.
+   */
   const performWait = async (action: Extract<ArenaAction, { readonly action: 'wait' }>): Promise<unknown> => {
     if (action.until === undefined) {
       await inFront().waitForTimeout(action.ms)
       return here()
     }
-    const waited = await waitForPage({
-      until: action.until,
-      baseline: await lastSeen.baseline(),
-      before: lastSeen.before(),
-      look: pageNow,
-      sleep: (ms) => inFront().waitForTimeout(ms),
-      ms: action.ms,
-      pollMs: CHANGE_POLL_MS,
+    if (action.until === 'change') {
+      const waited = await waitForChange({
+        baseline: await lastSeen.baseline(),
+        look: pageNow,
+        sleep: (ms) => inFront().waitForTimeout(ms),
+        ms: action.ms,
+        pollMs: CHANGE_POLL_MS,
+      })
+      return { ...here(), ...waited }
+    }
+    if (frontDialog() !== undefined) return { ...here(), changed: true, waitedMs: 0, attention: 'dialog' }
+    const tabNumber = front
+    let waiter: ((opened: number) => void) | undefined
+    const dialog = new Promise<void>((resolve) => {
+      waiter = (opened) => {
+        if (opened === tabNumber) resolve()
+      }
+      dialogWaiters.add(waiter)
     })
-    return { ...here(), ...waited }
+    try {
+      const waited = await waitForAttention({
+        log: statusLog,
+        tab: tabNumber,
+        ms: Math.min(action.ms, pageWaitCap),
+        stopped,
+        dialog,
+      })
+      if (waited.attention !== undefined) statusLog.mark()
+      return { ...here(), ...waited }
+    } finally {
+      if (waiter !== undefined) dialogWaiters.delete(waiter)
+    }
   }
   const perform = async (action: ArenaAction, via: ArenaActionSource): Promise<unknown> => {
     const timeout = ACTION_TIMEOUT_MS
@@ -1163,6 +1242,8 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
       await context.tracing.group(detail)
       try {
         pointedAt = undefined
+        // Before the move (#737): everything the page announces from here on is what the move caused.
+        if (!KEEPS_WHAT_IT_KNOWS.has(action.action)) statusLog.mark()
         const result = await untilDialogOrDone(perform(action, via))
         if (action.action !== 'note') {
           timeline.record(

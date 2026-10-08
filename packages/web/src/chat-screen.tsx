@@ -1754,7 +1754,7 @@ const chatComponents = {
                   <div role="tabpanel" {...panelIds('stats')} className="absolute inset-0 overflow-y-auto">
                     <div className="mx-auto w-full max-w-stats-view">
                       <ThreadStatsDrawer onNavigate={revealInTranscript} />
-                      <ThreadEvalDrawer />
+                      <ThreadEvalDrawer onNavigate={revealInTranscript} />
                     </div>
                   </div>
                 ) : null}
@@ -1788,6 +1788,8 @@ const chatComponents = {
             messages={chat.messages}
             generating={chat.sessionGenerating}
             projectTitle={threadProject?.title}
+            openView={open}
+            shown={shown !== undefined}
           />
         </div>
       )

@@ -1,19 +1,24 @@
 import {
+  ENSO_UI_EVENTS,
   type EnsoContextUsage,
   type EnsoSessionIncidents,
   type EnsoSessionRiskChange,
   type EnsoSessionUsage,
+  type EnsoThreadStatusKind,
   openIncidentOf,
   type ProviderRefusalClass,
   THREAD_STATUS_WORDS,
 } from '@enso/core'
 import type { UIMessage } from '@tanstack/ai-client'
 import { automaticPartsForMessage, selectMessageUI } from '@tanstack/ai-client/ui'
+import { useEffect } from 'react'
 import { toolResultState } from './EnsoToolResult.tsx'
 import { useThreadReadable } from './model-state.tsx'
 import { useStore, useThreadStores } from './store.ts'
 import { GitIndicator, type GitOutcome, settledToolResults, useThreadGit } from './thread-git.tsx'
+import { type EnsoPendingDialog } from './thread-stores.ts'
 import { ThreadTreeButton } from './thread-tree-pages.tsx'
+import { announceUiEvent } from './ui-events.ts'
 
 /**
  * The status bar (#90 PR 1): the always-on line that says what this session is doing and
@@ -189,6 +194,8 @@ export interface ThreadStatusViewProps {
   readonly git?: GitOutcome | undefined
   /** The session's risk (#464): said only once it is above `low`. */
   readonly risk?: EnsoSessionRiskChange | undefined
+  /** Opens the Stats view at the risk's signals (#727); the risk is words alone when absent (a static render). */
+  readonly onRiskSignals?: (() => void) | undefined
   /** The session's incidents (#466): said while one is open, or once a resolution ended the thread. */
   readonly incidents?: EnsoSessionIncidents | undefined
 }
@@ -308,21 +315,45 @@ function RefusalWord({
   )
 }
 
+const RISK_TITLE =
+  'security signals observed in this session: what the agent did after a refusal. Evidence, not a verdict — the level blocks nothing; reaching incident opens an incident.'
+
 /**
  * The session's risk (#464), once it is above `low`: `risk high · 3 signals`. Observed evidence,
  * labelled as such — the level itself blocks nothing; reaching `incident` opens an incident, which
  * suspends tools only with halting on (#466). Its thresholds are uncalibrated (#468).
+ *
+ * ⚠ A BUTTON TO THE SIGNALS, NOT A TOOLTIP (#727). An arena agent clicked `risk high · 2 signals`
+ * and nothing opened; the tooltip it never got sent it to a Stats tab that only counted them, and
+ * its guess at the cause was wrong. It opens Stats at the session eval's list of each signal.
  */
-function RiskWord({ risk }: { readonly risk: EnsoSessionRiskChange | undefined }): React.ReactNode {
+function RiskWord({
+  risk,
+  onShow,
+}: {
+  readonly risk: EnsoSessionRiskChange | undefined
+  readonly onShow: (() => void) | undefined
+}): React.ReactNode {
   if (risk === undefined || risk.level === 'low') return null
-  const serious = risk.level === 'high' || risk.level === 'incident'
+  const tone = risk.level === 'high' || risk.level === 'incident' ? 'text-refuse' : 'text-foreground'
+  const words = `risk ${risk.level} · ${risk.signals} ${risk.signals === 1 ? 'signal' : 'signals'}`
+  if (onShow === undefined) {
+    return (
+      <span className={tone} title={RISK_TITLE}>
+        {words}
+      </span>
+    )
+  }
   return (
-    <span
-      className={serious ? 'text-refuse' : 'text-foreground'}
-      title="security signals observed in this session: what the agent did after a refusal. Evidence, not a verdict — the level blocks nothing; reaching incident opens an incident. The session eval on the Stats tab lists them."
+    <button
+      type="button"
+      className={`${tone} underline decoration-dotted underline-offset-2 hover:decoration-solid`}
+      aria-label={`${words}: show them on the Stats tab`}
+      title={`${RISK_TITLE} Open the Stats tab to read each one.`}
+      onClick={onShow}
     >
-      risk {risk.level} · {risk.signals} {risk.signals === 1 ? 'signal' : 'signals'}
-    </span>
+      {words}
+    </button>
   )
 }
 
@@ -402,6 +433,7 @@ export function ThreadStatusView({
   refusalSource,
   git,
   risk,
+  onRiskSignals,
   incidents,
 }: ThreadStatusViewProps): React.ReactNode {
   const dotClass = activityDotClass(activity)
@@ -429,7 +461,7 @@ export function ThreadStatusView({
 			    transcript says who refused and why. */}
       <RefusalWord refusal={refusal} source={refusalSource} />
       <IncidentWord incidents={incidents} />
-      <RiskWord risk={risk} />
+      <RiskWord risk={risk} onShow={onRiskSignals} />
       <span title="user messages in this transcript">
         {counts.prompts} {counts.prompts === 1 ? 'prompt' : 'prompts'}
       </span>
@@ -469,20 +501,69 @@ export interface ThreadStatusBarProps {
   readonly generating: boolean
   /** The thread's project's title as the page lists it (#551); the bar falls back to the cwd's name. */
   readonly projectTitle?: string | undefined
+  /** Asks the page for a view (#361) — the risk word asks for Stats (#727). */
+  readonly openView: (view: 'stats') => void
+  /** Whether this bar's pane is the one on screen (#737): every mounted pane keeps its bar (#472). */
+  readonly shown: boolean
+}
+
+/**
+ * What the bar says to a listener (#737, core's `EnsoThreadStatusKind`), from what it shows: the
+ * follow ended, else a question waiting, else at rest or not. The bar's finer activity words
+ * (working, thinking, running a tool, responding) are all `running` to something that waits on it.
+ */
+function threadStatusKind(activity: Activity, questionWaiting: boolean): EnsoThreadStatusKind {
+  if (activity.kind === 'disconnected') return 'disconnected'
+  if (questionWaiting) return 'question'
+  return activity.kind === 'idle' ? 'idle' : 'running'
+}
+
+/**
+ * Announce the bar's status as `enso:thread-status` (#737): on mount, and whenever the status, the
+ * open question or `shown` changes — after the commit, so a listener that reads the page on the
+ * event finds the bar saying what the event says. The question's fields are the dependencies, not
+ * the dialog object: a re-render with the same question announces nothing.
+ */
+function useThreadStatusAnnouncement(
+  threadId: string,
+  shown: boolean,
+  status: EnsoThreadStatusKind,
+  dialog: EnsoPendingDialog | undefined,
+): void {
+  const questionId = status === 'question' ? dialog?.id : undefined
+  const questionTitle = status === 'question' ? dialog?.dialog.title : undefined
+  useEffect(() => {
+    announceUiEvent(ENSO_UI_EVENTS.threadStatus, {
+      threadId,
+      shown,
+      status,
+      ...(questionId === undefined || questionTitle === undefined
+        ? {}
+        : { question: { id: questionId, title: questionTitle } }),
+    })
+  }, [threadId, shown, status, questionId, questionTitle])
 }
 
 /**
  * The bar wired to its thread: the chat's messages and in-flight flag come in as props
  * (the chat hook is bound inside chat-screen.tsx, and this module stays free of it), the
- * thread's usage store and its disconnected flag (#119) are read from context.
+ * thread's usage store and its disconnected flag (#119) are read from context. It announces
+ * what it shows (`useThreadStatusAnnouncement`, #737).
  */
-export function ThreadStatusBar({ messages, generating, projectTitle }: ThreadStatusBarProps): React.ReactNode {
+export function ThreadStatusBar({
+  messages,
+  generating,
+  projectTitle,
+  openView,
+  shown,
+}: ThreadStatusBarProps): React.ReactNode {
   const stores = useThreadStores()
   const usage = useStore(stores.usage)
   const disconnected = useStore(stores.disconnected)
   const cwd = useStore(stores.cwd)
   const onTree = useStore(stores.tree)
-  const questionWaiting = useStore(stores.dialog) !== undefined
+  const dialog = useStore(stores.dialog)
+  const questionWaiting = dialog !== undefined
   const refusal = useStore(stores.refusal)
   const refusals = useStore(stores.refusals)
   const risk = useStore(stores.sessionRisk)
@@ -494,9 +575,11 @@ export function ThreadStatusBar({ messages, generating, projectTitle }: ThreadSt
   // When the tree may have moved: a settled tool result, the run starting or ending.
   const moment = `${settledToolResults(messages)}:${generating}`
   const git = useThreadGit(moment, readable)
+  const activity = describeActivity(messages, generating, disconnected)
+  useThreadStatusAnnouncement(stores.threadId, shown, threadStatusKind(activity, questionWaiting), dialog)
   return (
     <ThreadStatusView
-      activity={describeActivity(messages, generating, disconnected)}
+      activity={activity}
       counts={countThread(messages, refusals)}
       usage={usage}
       cwd={cwd}
@@ -508,6 +591,10 @@ export function ThreadStatusBar({ messages, generating, projectTitle }: ThreadSt
       refusalSource={refusal?.provider}
       git={git}
       risk={risk}
+      onRiskSignals={(): void => {
+        stores.landOnRiskSignals.set(true)
+        openView('stats')
+      }}
       incidents={incidents}
     />
   )

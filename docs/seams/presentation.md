@@ -286,6 +286,12 @@ export interface ThreadStores {
    */
   readonly sessionRisk: WritableStore<EnsoSessionRiskChange>
   /**
+   * The Stats view is to open at the session risk's signals (#727): raised by the status bar's risk
+   * word as it asks for Stats, lowered by the session eval once it has landed there — or once its
+   * read failed — so the next visit to Stats opens at the top.
+   */
+  readonly landOnRiskSignals: WritableStore<boolean>
+  /**
    * The session's incidents (#466): every one opened, each with its resolutions, the tool families
    * suspended now, and whether a resolution ended the thread. Seeded from the history and the
    * follow's snapshot (the server's fold of the branch), folded live with the same
@@ -364,6 +370,16 @@ The renderers that stay ours are outside the ported directory: the dialog card i
 `chat-screen.tsx` itself (`#EnsoDialogCard`), and the tool-result descriptor renderer, notices, the mode select
 and the status bar are the `SelectedMessagePart`, `NotificationLines`, `PermissionModeSelect`,
 `ThreadStatusBar` and `EnsoRendererMap` imports.
+
+**The page announces its own state (#737).** A component that renders a state a listener could act
+on dispatches it as a DOM `CustomEvent` on `document`, named and shaped by core's `ui-events.ts`
+(`packages/core/src/ui-events.ts#ENSO_UI_EVENTS`) and sent through `packages/web/src/ui-events.ts#announceUiEvent`
+from an effect, after the commit. The first is `enso:thread-status`, from `ThreadStatusBar`
+(`thread-status.tsx#threadStatusKind`): on mount and at each change of `running | question | idle |
+disconnected`, the open question's id and title, or `shown`. The Dogfood Arena's `wait until attention`
+(`packages/arena/src/actions.ts#waitForAttention`) listens for it instead of sampling the accessibility
+tree; the words contract (`THREAD_STATUS_WORDS`) stays for readers. From the render, never from the
+server: an event cannot fire for a state the page failed to show.
 
 **A second connection today: the fixture.** `?fixture` swaps the live adapter for the scripted
 conversation in `fixture-conversation.ts` (`chat-screen.tsx#threadChatOptions`, `connection: isFixtureMode ?

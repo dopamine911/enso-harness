@@ -204,16 +204,17 @@ A link or a button may open a new tab: it comes to the front, and your actions g
 
 While Enso works, wait for it to need you rather than sleeping a fixed time:
 
-    {"action":"wait","until":"attention","ms":60000}
+    {"action":"wait","until":"attention","ms":600000}
 
-returns when Enso needs you or is done — \`"attention"\` says which: \`"question"\` (it asks you
+returns the moment Enso needs you or is done — \`"attention"\` says which: \`"question"\` (it asks you
 something: answer it), \`"idle"\` (its run ended, finished or failed), \`"disconnected"\` (the server
 went), \`"dialog"\` (a browser dialog is open). It passes over Enso merely working, so send it right
-after your click. After \`ms\` (at most a minute) with none of those, it returns without
-\`"attention"\`: wait again. Then ${look}.
+after your click, and give it the whole \`ms\` (up to ten minutes): it does not wait that long, it
+returns as soon as there is something for you. Only after \`ms\` with none of those does it return
+without \`"attention"\`. Then ${look}.
 
 \`{"action":"wait","until":"change","ms":…}\` returns on any change to the page since you last saw
-it, Enso's own progress included. A plain \`{"action":"wait","ms":…}\` sleeps the whole time.
+it, Enso's own progress included. A plain \`{"action":"wait","ms":…}\` sleeps the whole time (at most a minute).
 
 # Notes — write them when they happen, not at the end
 

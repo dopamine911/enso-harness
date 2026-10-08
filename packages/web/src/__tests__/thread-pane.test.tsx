@@ -3,17 +3,22 @@ import { createHash } from 'node:crypto'
 import {
   ENSO_GUARD_DENIAL_ENTRY,
   ENSO_PROVIDER_REFUSAL_KEY,
+  ENSO_SESSION_RISK_ENTRY,
+  ENSO_UI_EVENTS,
   type EnsoFollowFrame,
   type EnsoForkReceipt,
   type EnsoGitFileChange,
   type EnsoGitRepository,
   type EnsoStoredThread,
   type EnsoThreadDeletePreview,
+  type EnsoThreadStatusEvent,
+  type EnsoTranscriptEntry,
   type EnsoTreeOnDisk,
   type EnsoTreesListing,
   type EnsoThreadHistory,
   type EnsoThreadStats,
   NO_SESSION_INCIDENTS,
+  sessionEvalOf,
 } from '@enso/core'
 import type { UIMessage } from '@tanstack/ai-client'
 import { act } from 'react'
@@ -116,6 +121,8 @@ interface MountedPane {
   readonly composer: () => HTMLTextAreaElement
   /** The views the pane asked the page for, in order (#361) — the page is not mounted here. */
   readonly requestedViews: ThreadView[]
+  /** Re-render the pane on another view, as the page does when it answers a request (#727). */
+  readonly setView: (view: ThreadView) => Promise<void>
 }
 
 async function mountPane(
@@ -145,13 +152,16 @@ async function mountPane(
   document.body.appendChild(container)
   const root: Root = createRoot(container)
   const requestedViews: ThreadView[] = []
-  const render = (active: boolean): void =>
+  // What the page last rendered the pane with: `setActive` and `setView` each change one.
+  let shownActive = options.active ?? true
+  let shownView = options.view ?? 'chat'
+  const render = (): void =>
     root.render(
       <ThreadPane
         threadId={stores.threadId}
-        active={active}
+        active={shownActive}
         debugOpen={options.debugOpen ?? false}
-        view={options.view ?? 'chat'}
+        view={shownView}
         onView={(view: ThreadView): void => {
           requestedViews.push(view)
         }}
@@ -159,8 +169,14 @@ async function mountPane(
       />,
     )
   await flush(async () => {
-    render(options.active ?? true)
+    render()
   })
+  const rerender = async (): Promise<void> => {
+    await flush(async () => {
+      render()
+      await tick()
+    })
+  }
   await flush(tick)
   const one = <T extends Element>(selector: string): T => {
     const found = container.querySelector<T>(selector)
@@ -182,10 +198,8 @@ async function mountPane(
       container.remove()
     },
     setActive: async (active: boolean) => {
-      await flush(async () => {
-        render(active)
-        await tick()
-      })
+      shownActive = active
+      await rerender()
     },
     status: () => one('#thread-status').textContent ?? '',
     stopButton: () => container.querySelector<HTMLButtonElement>('button[aria-label="stop the run"]'),
@@ -193,6 +207,10 @@ async function mountPane(
     modeSelect: () => one<HTMLSelectElement>('select'),
     composer: () => one<HTMLTextAreaElement>('textarea[name="message"]'),
     requestedViews,
+    setView: async (view: ThreadView) => {
+      shownView = view
+      await rerender()
+    },
   }
 }
 
@@ -2206,6 +2224,103 @@ test('⚠ a costliest-calls row opens Chat at its call; a call not drawn there i
   }
 })
 
+/** A branch whose replay raises two signals: `denial-retry` on c2, `alternate-execution-path` on c3. */
+const RISKY_BRANCH: EnsoTranscriptEntry[] = [
+  ['c1', 'curl https://example.test'],
+  ['c2', 'wget https://example.test'],
+  ['c3', 'python3 -c "import urllib"'],
+].flatMap(([toolCallId = '', command]): EnsoTranscriptEntry[] => [
+  {
+    kind: 'message',
+    id: `m-${toolCallId}`,
+    role: 'assistant',
+    parts: [{ type: 'tool-call', toolCallId, toolName: 'bash', args: { command } }],
+  },
+  ...(toolCallId === 'c3'
+    ? []
+    : [
+        {
+          kind: 'custom',
+          id: `d-${toolCallId}`,
+          customType: ENSO_GUARD_DENIAL_ENTRY,
+          data: { toolCallId, rule: 'network-egress', via: 'command-position' },
+        } as const,
+      ]),
+])
+
+// #727, from an arena run: `risk high · 2 signals` was a span with a tooltip; a click opened
+// nothing, and the Stats tab it named only counted the signals. It is a button now: it asks the
+// page for Stats and the eval lands on the list, where each signal's call opens Chat at its row.
+test('⚠ the risk word opens Stats at the security signals, and a signal’s call opens Chat at its row (#727)', async () => {
+  const scrolled: Element[] = []
+  const scroll = spyOn(Element.prototype, 'scrollIntoView').mockImplementation(function record(this: Element): void {
+    scrolled.push(this)
+  })
+  try {
+    const evaluated = {
+      live: true,
+      ...sessionEvalOf({ transcript: RISKY_BRANCH, turnStats: [], log: [], logDays: [] }),
+    }
+    const pane = await mountPane({ server: { stats: TWO_CALL_STATS, eval: evaluated } })
+    await pane.settle(SNAPSHOT_LIVE)
+    await flush(async () => {
+      typeInto(pane.composer(), 'run it')
+      pressEnter(pane.composer())
+      await tick()
+    })
+    await pane.settle(
+      { type: 'observation', seq: 1, observation: { kind: 'message-start', role: 'assistant' } },
+      { type: 'observation', seq: 2, observation: { kind: 'tool-call', toolCallId: 'c3', toolName: 'bash', args: {} } },
+      {
+        type: 'observation',
+        seq: 3,
+        observation: { kind: 'custom-entry', customType: ENSO_SESSION_RISK_ENTRY, data: { level: 'high', signals: 2 } },
+      },
+    )
+    const riskWord = await eventually(() => {
+      const found = pane.container.querySelector<HTMLButtonElement>('#thread-status button[aria-label^="risk high"]')
+      expect(found?.getAttribute('aria-label')).toBe('risk high · 2 signals: show them on the Stats tab')
+      return found as HTMLButtonElement
+    })
+    expect(riskWord.textContent).toBe('risk high · 2 signals')
+    await flush(async () => riskWord.click())
+    expect(pane.requestedViews.at(-1)).toBe('stats')
+    expect(pane.stores.landOnRiskSignals.get()).toBe(true)
+    // The page answers with Stats: the eval reads, and lands on the list, focus with it.
+    await pane.setView('stats')
+    const signals = await eventually(() => {
+      const found = pane.container.querySelector<HTMLElement>(
+        '#thread-view-stats section[aria-label="security signals"]',
+      )
+      expect(found?.textContent).toContain('alternate-execution-path')
+      return found as HTMLElement
+    })
+    expect(signals.textContent).toContain('denial-retry')
+    expect(scrolled).toEqual([signals])
+    expect(document.activeElement).toBe(signals)
+    expect(pane.stores.landOnRiskSignals.get()).toBe(false)
+    // A signal's call, drawn in the transcript under Stats: Chat is asked for, and the row scrolled to.
+    const callLink = (toolCallId: string): HTMLButtonElement => {
+      const found = signals.querySelector<HTMLButtonElement>(
+        `button[aria-label="show call ${toolCallId} in the transcript"]`,
+      )
+      if (found === null) throw new Error(`expected a link to ${toolCallId}`)
+      return found
+    }
+    await flush(async () => callLink('c1').click())
+    await eventually(() => expect(signals.textContent).toContain('that call is not in the transcript on screen'))
+    expect(pane.requestedViews.at(-1)).toBe('stats')
+    await flush(async () => callLink('c3').click())
+    expect(pane.requestedViews.at(-1)).toBe('chat')
+    await eventually(() =>
+      expect(scrolled.at(-1)).toBe(pane.container.querySelector('[data-tool-call-id="c3"]') as Element),
+    )
+    await pane.unmount()
+  } finally {
+    scroll.mockRestore()
+  }
+})
+
 // ── the page (#90): the rail, New Thread, switching, earlier threads, resume (#95) ───────
 
 interface MountedPage {
@@ -2399,6 +2514,67 @@ test('a question waiting while Stats is shown is said on the Chat tab, in the st
   expect(liveRegion?.textContent).toBe('')
   expect(railRow()).not.toContain('waiting on you')
   await page.unmount()
+})
+
+// #737: the bar announces what it shows as `enso:thread-status` on `document` — on mount, and on
+// each change of status, question or `shown` — so a listener (the arena's wait, the browser suite)
+// never samples the page. The event follows the RENDER: it carries what the bar says at that moment.
+test('⚠ the status bar announces enso:thread-status on mount and at each change of status, question and shown (#737)', async () => {
+  const heard: EnsoThreadStatusEvent[] = []
+  const listener = (event: Event): void => {
+    if (event instanceof CustomEvent) heard.push(event.detail as EnsoThreadStatusEvent)
+  }
+  document.addEventListener(ENSO_UI_EVENTS.threadStatus, listener)
+  try {
+    const pane = await mountPane()
+    const { threadId } = pane.stores
+    // Mounted idle: said once, not once per render.
+    expect(heard).toEqual([{ threadId, shown: true, status: 'idle' }])
+    await pane.settle({ ...SNAPSHOT_IDLE, live: true, busy: true, generation: 1 })
+    await eventually(() => expect(heard.at(-1)).toEqual({ threadId, shown: true, status: 'running' }))
+    // A finer activity word is still `running`: no event for the bar going from working to a tool.
+    await pane.settle(
+      { type: 'observation', seq: 1, observation: { kind: 'message-start', role: 'assistant' } },
+      {
+        type: 'observation',
+        seq: 2,
+        observation: { kind: 'tool-call', toolCallId: 'c1', toolName: 'bash', args: { command: 'ls' } },
+      },
+    )
+    await eventually(() => expect(pane.status()).toContain('running bash'))
+    expect(heard).toHaveLength(2)
+    // A question: its id and title go with it, so a listener can tell the next one from this one.
+    await flush(async () => {
+      getThreadStores(threadId).dialog.set({ id: 'd1', dialog: { method: 'confirm', title: 'Proceed?', message: '' } })
+      await tick()
+    })
+    expect(heard.at(-1)).toEqual({
+      threadId,
+      shown: true,
+      status: 'question',
+      question: { id: 'd1', title: 'Proceed?' },
+    })
+    await flush(async () => {
+      getThreadStores(threadId).dialog.set(undefined)
+      await tick()
+    })
+    expect(heard.at(-1)).toEqual({ threadId, shown: true, status: 'running' })
+    // The rail switches away: the bar stays mounted and says so; back again, it says that too.
+    await pane.setActive(false)
+    expect(heard.at(-1)).toEqual({ threadId, shown: false, status: 'running' })
+    await pane.setActive(true)
+    expect(heard.at(-1)).toEqual({ threadId, shown: true, status: 'running' })
+    // The follow ends: disconnected, over everything else.
+    await flush(async () => {
+      getThreadStores(threadId).dialog.set({ id: 'd2', dialog: { method: 'confirm', title: 'Still?', message: '' } })
+      getThreadStores(threadId).disconnected.set(true)
+      await tick()
+    })
+    expect(heard.at(-1)).toEqual({ threadId, shown: true, status: 'disconnected' })
+    await pane.unmount()
+  } finally {
+    document.removeEventListener(ENSO_UI_EVENTS.threadStatus, listener)
+  }
 })
 
 test('New Thread mints a thread, lists it in the rail as current, and shows exactly its pane', async () => {

@@ -15,21 +15,22 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { THREAD_STATUS_WORDS } from '@enso/core'
+import type { EnsoThreadStatusEvent, EnsoThreadStatusKind } from '@enso/core'
 import { ensoProjectsDir, projectIdOf, projectSnapshotsDir, realpathOrSelf } from '@enso/core/paths'
 import {
   type ArenaAction,
-  attentionOf,
+  type ArenaPageWait,
   createChangeBaseline,
+  createStatusLog,
   describeArenaAction,
-  dialogForChange,
+  LONGEST_PAGE_WAIT_MS,
   LONGEST_WAIT_MS,
   pageForChange,
   parseArenaAction,
   perceptionRefusal,
-  questionOf,
   typedSecretRefusal,
-  waitForPage,
+  waitForAttention,
+  waitForChange,
 } from '../actions.ts'
 import { collectEnsoEvidence } from '../evidence.ts'
 import { type ArenaEvidence, foldArenaManifest } from '../manifest.ts'
@@ -228,10 +229,15 @@ test('a wait is capped, a note needs what was tried and what happened', () => {
   })
 })
 
-test('a wait until change is parsed, capped and worded as one; any other `until` is refused (#637)', () => {
-  expect(parseArenaAction({ action: 'wait', ms: 10 * LONGEST_WAIT_MS, until: 'change' })).toEqual({
+test('a wait until change is parsed, capped by the page wait’s own limit (#737) and worded as one; any other `until` is refused (#637)', () => {
+  expect(parseArenaAction({ action: 'wait', ms: 10 * LONGEST_PAGE_WAIT_MS, until: 'change' })).toEqual({
     ok: true,
-    action: { action: 'wait', ms: LONGEST_WAIT_MS, until: 'change' },
+    action: { action: 'wait', ms: LONGEST_PAGE_WAIT_MS, until: 'change' },
+  })
+  // A blind sleep keeps the minute: the page wait's limit is a backstop, a sleep's is the cadence.
+  expect(parseArenaAction({ action: 'wait', ms: LONGEST_PAGE_WAIT_MS })).toEqual({
+    ok: true,
+    action: { action: 'wait', ms: LONGEST_WAIT_MS },
   })
   expect(parseArenaAction({ action: 'wait', ms: 1000, until: 'idle' })).toEqual({
     ok: false,
@@ -278,8 +284,7 @@ function sleepingClock(): { readonly now: () => number; readonly sleep: (ms: num
 
 test('⚠ a wait until change returns at the first look that differs, and at its limit unchanged (#637)', async () => {
   const looks = ['same', 'same', 'card']
-  const changed = await waitForPage({
-    until: 'change',
+  const changed = await waitForChange({
     baseline: 'same',
     look: () => Promise.resolve(looks.shift() ?? 'card'),
     ms: 60_000,
@@ -290,8 +295,7 @@ test('⚠ a wait until change returns at the first look that differs, and at its
   expect(looks).toEqual([])
 
   // Nothing moves: it waits out the limit exactly, the last sleep cut to fit.
-  const unchanged = await waitForPage({
-    until: 'change',
+  const unchanged = await waitForChange({
     baseline: 'same',
     look: () => Promise.resolve('same'),
     ms: 2500,
@@ -311,8 +315,7 @@ test('⚠ a card that appears between the agent’s move and its wait is a chang
   page = 'the page, prompt typed'
   await lastSeen.moved()
   page = 'the page, prompt typed, a card' // Enso asks while the agent is still thinking.
-  const waited = await waitForPage({
-    until: 'change',
+  const waited = await waitForChange({
     baseline: await lastSeen.baseline(),
     look: () => Promise.resolve(page),
     ms: 60_000,
@@ -328,140 +331,156 @@ test('⚠ a card that appears between the agent’s move and its wait is a chang
   await expect(failing.baseline()).rejects.toThrow('the page closed')
 })
 
-/** A page read with the bar as Enso renders it: the activity word, and the question when one waits. */
-const barPage = (activity: string, question = false, chat = '  - paragraph: hello'): string =>
-  [
-    '- tabpanel "Chat":',
-    chat,
-    `- contentinfo "${THREAD_STATUS_WORDS.region}":`,
-    `  - text: ${activity}`,
-    ...(question ? [`  - status: ${THREAD_STATUS_WORDS.questionWaiting}`] : []),
-    '  - text: 1 prompt 2 tool calls',
-  ].join('\n')
-
-test('the bar says what needs the agent: a question, the run at rest, the server gone, a browser dialog (#648)', () => {
-  expect(attentionOf(barPage('running write', true))).toBe('question')
-  expect(attentionOf(barPage(THREAD_STATUS_WORDS.idle))).toBe('idle')
-  expect(attentionOf(barPage(THREAD_STATUS_WORDS.disconnected))).toBe('disconnected')
-  expect(attentionOf(dialogForChange('alert', 'Game over'))).toBe('dialog')
-  for (const working of ['working', 'thinking', 'responding', 'running bash']) {
-    expect(attentionOf(barPage(working))).toBeUndefined()
-  }
-  // The words count in the bar only: "idle" said in the chat is the chat's.
-  expect(attentionOf(barPage('working', false, '  - text: idle'))).toBeUndefined()
+/** The page's announcement (#737) for the tab under test: a status, and the question when one waits. */
+const announced = (status: EnsoThreadStatusKind, question?: string): EnsoThreadStatusEvent => ({
+  threadId: THREAD,
+  shown: true,
+  status,
+  ...(question === undefined ? {} : { question: { id: `id-${question}`, title: question } }),
 })
 
-/** A wait until attention over these looks, one a second, from `baseline`. */
-function attentionWait(baseline: string, looks: readonly string[]): ReturnType<typeof waitForPage> {
-  const queue = [...looks]
-  return waitForPage({
-    until: 'attention',
-    baseline,
-    look: () => Promise.resolve(queue.length > 1 ? (queue.shift() ?? '') : (queue[0] ?? '')),
-    ms: 10_000,
-    pollMs: 1000,
-    ...sleepingClock(),
+/**
+ * A wait until attention over a status log, with the clock and the timer in the test's hands: what
+ * the page announced before the agent's move, what it announced since, then — once the wait is
+ * listening — the announcements `live`, one a second; the timer fires at `ms` if nothing returned.
+ */
+function attentionWait(options: {
+  readonly before?: EnsoThreadStatusEvent
+  readonly since?: readonly EnsoThreadStatusEvent[]
+  readonly live?: readonly EnsoThreadStatusEvent[]
+  readonly ms?: number
+  readonly stop?: () => Promise<unknown>
+  readonly dialog?: () => Promise<unknown>
+}): Promise<ArenaPageWait> {
+  const log = createStatusLog()
+  if (options.before !== undefined) log.record(0, options.before)
+  log.mark()
+  for (const event of options.since ?? []) log.record(0, event)
+  const ms = options.ms ?? 10_000
+  let at = 0
+  let fire: (() => void) | undefined
+  const never = new Promise<never>(() => undefined)
+  const waited = waitForAttention({
+    log,
+    tab: 0,
+    ms,
+    stopped: options.stop?.() ?? never,
+    dialog: options.dialog?.() ?? never,
+    now: () => at,
+    timer: (_ms, onTime) => {
+      fire = onTime
+      return () => undefined
+    },
   })
+  void Promise.resolve().then(() => {
+    for (const event of options.live ?? []) {
+      at += 1000
+      log.record(0, event)
+    }
+    if (fire !== undefined) {
+      at = ms
+      fire()
+    }
+  })
+  return waited
 }
 
 // ⚠ #648, measured: a change wait sent with its own click returned on Enso merely starting, and the
 // agent gave up on it. Attention returns when there is something for the agent — and only then.
-test('⚠ a wait until attention passes over Enso working, and returns at the card or the run’s end (#648)', async () => {
-  const idle = barPage(THREAD_STATUS_WORDS.idle)
-  // Start just clicked: the baseline is idle, the run not begun. Working is no return; the card is.
+test('⚠ a wait until attention passes over Enso working, and returns at the card or the run’s end (#648, #737)', async () => {
+  // Start just clicked: the agent acted from idle, the run not begun. Working is no return; the card is.
   expect(
-    await attentionWait(idle, [barPage('working'), barPage('running write'), barPage('running write', true)]),
-  ).toEqual({
-    changed: true,
-    waitedMs: 3000,
-    attention: 'question',
-  })
-  // The same `idle` as the baseline returns once Enso has been seen working: the run's end.
-  const done = barPage(THREAD_STATUS_WORDS.idle, false, '  - paragraph: the reply')
-  expect(await attentionWait(idle, [barPage('responding'), done])).toEqual({
+    await attentionWait({
+      before: announced('idle'),
+      live: [announced('running'), announced('question', 'write a.md')],
+    }),
+  ).toEqual({ changed: true, waitedMs: 2000, attention: 'question' })
+  // `idle` again, once Enso has been seen working: the run's end.
+  expect(await attentionWait({ before: announced('idle'), live: [announced('running'), announced('idle')] })).toEqual({
     changed: true,
     waitedMs: 2000,
     attention: 'idle',
   })
-  // A state the baseline did not have returns at once, work seen or not.
-  expect(await attentionWait(barPage('running bash', true), [barPage(THREAD_STATUS_WORDS.disconnected)])).toMatchObject(
-    {
-      attention: 'disconnected',
-      waitedMs: 1000,
-    },
-  )
+  // A state the agent did not act from returns at once, work seen or not.
+  expect(
+    await attentionWait({ before: announced('question', 'write a.md'), live: [announced('disconnected')] }),
+  ).toEqual({ changed: true, waitedMs: 1000, attention: 'disconnected' })
+  // Nothing announced: the wait runs to its limit, unchanged.
+  expect(await attentionWait({ before: announced('idle') })).toEqual({ changed: false, waitedMs: 10_000 })
 })
 
-// ⚠ Live (#648): after the agent's Yes the baseline still showed the card; the tool ran inside one
-// look and the next card came — same `question`, no work seen — and the wait sat out its minute.
-test('⚠ the next card after an answer returns; idle changing as the dialog closes does not; a still page waits out the limit (#648)', async () => {
-  const firstCard = barPage('running write', true, '  - group: write a.md')
-  const nextCard = barPage('running write', true, '  - group: write a.md\n  - group: write b.md')
-  expect(await attentionWait(firstCard, [nextCard])).toEqual({ changed: true, waitedMs: 1000, attention: 'question' })
-  // Start just clicked: the dialog closes while the thread is still idle — not the run's end.
-  const idleDialog = barPage(THREAD_STATUS_WORDS.idle, false, '  - dialog "Start a session"')
-  const idleClosed = barPage(THREAD_STATUS_WORDS.idle, false, '  - paragraph: the prompt')
-  expect(await attentionWait(idleDialog, [idleClosed])).toEqual({ changed: true, waitedMs: 10_000 })
-  expect(await attentionWait(idleDialog, [idleClosed, barPage('working'), firstCard])).toMatchObject({
-    attention: 'question',
-    waitedMs: 3000,
-  })
-  // A card nobody answers: the page holds still, and the wait runs to its limit unchanged.
-  expect(await attentionWait(firstCard, [firstCard])).toEqual({ changed: false, waitedMs: 10_000 })
-  expect(await attentionWait(firstCard, [dialogForChange('confirm', 'Leave?')])).toMatchObject({ attention: 'dialog' })
-})
-
-/**
- * A question card as a real page read shows it (`EnsoDialogCard`), copied from an arena transcript:
- * its group named by the question's title, and its first line going on with the dialog's method.
- */
-const cardFor = (title: string): string =>
-  `  - 'group "Permission Required ${title}"':\n    - text: pi is asking select\n    - button "Yes"`
-
-// ⚠ #693, from two arena runs: after a Yes the next card was on screen before the move's look, so the
-// baseline already asked it, the page held still, and the wait sat out its minute behind a question.
-test('⚠ a question the agent had not seen before its move returns at once; the one it just answered does not', async () => {
-  const asking = (title: string): string => barPage('running bash', true, cardFor(title))
-  const holdStill = (page: string, before: string | undefined): ReturnType<typeof waitForPage> =>
-    waitForPage({
-      until: 'attention',
-      baseline: page,
-      before,
-      look: () => Promise.resolve(page),
-      ms: 10_000,
-      pollMs: 1000,
-      ...sleepingClock(),
-    })
-  // The agent answered `sort`; the card for `node *` came before the move's look.
-  expect(await holdStill(asking('command : node *'), asking('command : sort'))).toEqual({
+// ⚠ Live (#648): after the agent's Yes the page still showed the card; the tool ran at once and the
+// next card came. And #693: the next card was on screen before the agent's wait even began.
+test('⚠ the next question returns, before the wait began or during it; the one just answered does not (#648, #693)', async () => {
+  const sortCard = announced('question', 'command : sort')
+  const nodeCard = announced('question', 'command : node *')
+  // Answered `sort`; the card for `node *` came while the agent was still thinking: at once.
+  expect(await attentionWait({ before: sortCard, since: [announced('running'), nodeCard] })).toEqual({
     changed: true,
     waitedMs: 0,
     attention: 'question',
   })
-  // It sent a prompt with no question open, and a card came before the look: new, so at once too.
-  expect(await holdStill(asking('command : sort'), barPage('working'))).toMatchObject({
+  // It sent a prompt with no question open, and a card came before the wait: new, so at once too.
+  expect(await attentionWait({ before: announced('running'), since: [sortCard] })).toMatchObject({
     waitedMs: 0,
     attention: 'question',
   })
-  // ⚠ The SAME question still on screen — the card just answered, on its way out — is no return: a
-  // second answer to it would be a double approval. The #648 rule stands, and a still page waits out.
-  expect(await holdStill(asking('command : sort'), asking('command : sort'))).toEqual({
-    changed: false,
-    waitedMs: 10_000,
+  // ⚠ The SAME question announced again — the card just answered, on its way out — is no return: a
+  // second answer to it would be a double approval. The page holds still, and the wait runs out.
+  expect(await attentionWait({ before: sortCard, since: [sortCard] })).toEqual({ changed: true, waitedMs: 10_000 })
+  // Answered, the tool ran, the run ended: `idle` from a question needs no work seen.
+  expect(await attentionWait({ before: sortCard, live: [announced('idle')] })).toEqual({
+    changed: true,
+    waitedMs: 1000,
+    attention: 'idle',
   })
-  // With nothing known from before the move (the agent read the page since), the #648 rule stands too.
-  expect(await holdStill(asking('command : node *'), undefined)).toEqual({ changed: false, waitedMs: 10_000 })
+  // Start just clicked: the thread announces idle again (the pane re-shown) — not the run's end.
+  expect(await attentionWait({ before: announced('idle'), live: [announced('idle')], ms: 3000 })).toEqual({
+    changed: true,
+    waitedMs: 3000,
+  })
+})
 
-  // The baseline keeps what the agent saw before each move: its read, then the page each move left.
-  let page = asking('command : sort')
-  const lastSeen = createChangeBaseline(() => Promise.resolve(page))
-  lastSeen.saw(page)
-  page = asking('command : node *')
-  await lastSeen.moved()
-  expect(questionOf(lastSeen.before() ?? '')).toContain('command : sort')
-  expect(questionOf(await lastSeen.baseline())).toContain('command : node *')
-  lastSeen.saw(page)
-  expect(lastSeen.before()).toBeUndefined()
+// ⚠ A long wait is a backstop, not a cadence (#737): the run stopping or a native dialog ends it where it is.
+test('a wait until attention ends at once on the run stopping, and on a native dialog with attention `dialog`', async () => {
+  expect(await attentionWait({ before: announced('running'), stop: () => Promise.resolve('budget') })).toEqual({
+    changed: false,
+    waitedMs: 0,
+  })
+  expect(await attentionWait({ before: announced('running'), dialog: () => Promise.resolve() })).toEqual({
+    changed: true,
+    waitedMs: 0,
+    attention: 'dialog',
+  })
+})
+
+// The log is the agent's knowledge of the page: a mark folds what came since into what it acted from.
+test('the status log keeps the last announcement per tab before the mark and every one since, per tab', () => {
+  const log = createStatusLog()
+  log.record(0, announced('idle'))
+  log.record(1, announced('running'))
+  log.record(0, announced('running'))
+  log.mark()
+  expect(log.beforeMark(0)).toEqual(announced('running'))
+  expect(log.beforeMark(1)).toEqual(announced('running'))
+  expect(log.sinceMark(0)).toEqual([])
+  log.record(0, announced('question', 'Proceed?'))
+  log.record(1, announced('idle'))
+  expect(log.sinceMark(0)).toEqual([announced('question', 'Proceed?')])
+  expect(log.sinceMark(1)).toEqual([announced('idle')])
+  // A listener hears its own tab's announcements only, and stops when told.
+  const heard: EnsoThreadStatusEvent[] = []
+  const stop = log.subscribe(0, (event) => heard.push(event))
+  log.record(1, announced('running'))
+  log.record(0, announced('idle'))
+  stop()
+  log.record(0, announced('running'))
+  expect(heard).toEqual([announced('idle')])
+  // The agent moves again: the last of each tab's announcements is what it acted from.
+  log.mark()
+  expect(log.beforeMark(0)).toEqual(announced('running'))
+  expect(log.beforeMark(1)).toEqual(announced('running'))
+  expect(log.sinceMark(0)).toEqual([])
 })
 
 test('what the agent typed reaches the timeline redacted', () => {
