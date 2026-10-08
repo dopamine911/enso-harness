@@ -39,7 +39,7 @@ import { knownSecretValues } from '@enso/core/secrets'
  * way (a temp file renamed onto the path), and measured: a refresh in one run rotated the Anthropic
  * token into that run's home, the operator's file kept the old refresh token, the provider revoked
  * it, and the next run's first model call failed with `invalid_grant`. #758 patches the extension
- * (`patches/pi-multi-account@1.23.2.patch`) to rename onto the file behind the link. For any other
+ * (`patches/pi-multi-account@1.24.0.patch`) to rename onto the file behind the link. For any other
  * writer the recorder still reconciles the links while the run lives and at its stop
  * (`reconcileLinkedFiles`): a link found replaced has its content returned to the operator's file,
  * and is linked again.

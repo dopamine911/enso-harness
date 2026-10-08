@@ -405,7 +405,7 @@ test('⚠ dropping the Cursor slots from a linked models.json writes the file be
 })
 
 /**
- * #758, against the vendor's REAL credential transaction (`patches/pi-multi-account@1.23.2.patch`).
+ * #758, against the vendor's REAL credential transaction (`patches/pi-multi-account@1.24.0.patch`).
  * A home sharing the operator's login links `auth.json` to theirs, and a refresh rotates a single-use
  * token: a rename onto the link left the rotated token in the home and the operator's file holding a
  * revoked one (#639). Loaded by file path, as the tests above load the vendor's code.

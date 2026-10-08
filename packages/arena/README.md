@@ -141,7 +141,7 @@ and your own Stats and logs are untouched. Your login comes in by symlink:
   lands in your file.
 - **A link can still be replaced, and is put back (#639).** A rename onto a symlink replaces the
   link with a plain file. The multi-account extension's writes did exactly that until #758, which
-  patches it (`patches/pi-multi-account@1.23.2.patch`) to rename onto the file behind the link, as
+  patches it (`patches/pi-multi-account@1.24.0.patch`) to rename onto the file behind the link, as
   Enso's own writes do. For any other writer, the recorder checks the links at every 30 s sample and
   at the stop, and `arena manifest` checks them too. A replaced link's content goes back to your
   file when it is the newer, and the link is restored. If your file changed after the run's, yours
