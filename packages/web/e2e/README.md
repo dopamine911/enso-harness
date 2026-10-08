@@ -16,9 +16,10 @@ First time on a machine: `bunx playwright install chromium`. The pinned `@playwr
 
 ## The seeded home
 
-`e2e-home.ts` makes a throwaway `ENSO_HOME` for the run, and the config starts `bun run dev` over it. The model-free tier never reads or writes your real `~/.enso`. The home holds:
+`e2e-home.ts` makes a throwaway `ENSO_HOME` for the run, and the config starts `bun run dev` over it. The model-free tier never reads or writes your real `~/.enso`, and leaves nothing in your repository. The home holds:
 
 - **A `demo` provider** in pi's `models.json` (the Features capture's, from `scripts/docs/feature-session.ts`), pointing at port 1, where nothing listens. Model pickers have entries, and a request that should not happen is refused at once instead of reaching a real provider. No secret is needed.
+- **Trees off** in `config.json` (`"threads": {"tree": "off"}`, #735). The stack serves your checkout, and a new thread's tree would be a `git worktree` and an `enso/<id>` branch in your own repository. With trees off, a thread the suite starts runs in the checkout and records no tree. The seeded `modules` thread below is a plain folder, not a worktree.
 - **Stored threads**, written the way pi writes them, by `packages/web/src/host/__tests__/stored-session.ts` (the host's own test helper, because only the host may import pi):
   - `first` and `second`: `SEEDED_TURNS` (25) turns each, in the checkout's project, several screens tall;
   - `outside`: one turn in a folder no project covers, which the server refuses to open (#378);
@@ -26,7 +27,7 @@ First time on a machine: `bunx playwright install chromium`. The pinned `@playwr
 
   A test reads their ids with `e2eHome().threads` and their rail titles from `SEEDED_TITLES`.
 
-Playwright loads the config in its runner and again in every worker. The runner seeds the home once and passes its location to the workers in `ENSO_E2E_HOME`.
+Playwright loads the config in its runner and again in every worker. The runner seeds the home once and passes its location to the workers in `ENSO_E2E_HOME`. The runner removes the home as it exits, a Ctrl-C included, after Playwright has stopped the stack. A run killed outright (SIGKILL, an OOM) leaves the home in the temporary directory, but nothing in your repository.
 
 To add a seeded thread, add it to `seededHome` in `e2e-home.ts` with the turns a test needs, and give it a title in `SEEDED_TITLES`.
 

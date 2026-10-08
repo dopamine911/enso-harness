@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   ensoAgentDir,
+  ensoConfigPath,
   ensoProjectsDir,
   findRepoRoot,
   projectIdOf,
@@ -22,6 +23,13 @@ import { writeStoredSession } from '../src/host/__tests__/stored-session.ts'
  *     listening on its port: a model list has entries, and no prompt can reach a provider.
  *   • Two stored threads of `SEEDED_TURNS` turns each, written the way pi writes them
  *     (`host/__tests__/stored-session.ts`) in the project the dev stack serves, the checkout.
+ *   • `config.json` turns new threads' trees off (#735). The stack serves the checkout, and a
+ *     tree is a `git worktree` plus an `enso/<id>` branch in the developer's own repository: every
+ *     test that started a session left one of each behind.
+ *
+ * ⚠ THE HOME GOES WHEN ITS RUN ENDS (#735): the process that made it removes it as it exits, after
+ * Playwright has stopped the dev stack over it. A run killed outright (SIGKILL, an OOM) still leaves
+ * it, as a plain directory in the temporary directory and nothing in the repository.
  *
  * ⚠ ONE HOME PER RUN, FOUND BY ITS ENVIRONMENT VARIABLE. Playwright loads the config in its
  * runner and again in every worker; the runner makes the home and exports where it is, and a
@@ -113,6 +121,9 @@ function seedModulePage(home: string, project: string): string {
 
 function seededHome(): E2eHome {
   const home = mkdtempSync(join(tmpdir(), 'enso-e2e-'))
+  process.once('exit', () => rmSync(home, { recursive: true, force: true }))
+  // Every new thread runs in the checkout itself: no worktree, no branch in the developer's repository.
+  writeFileSync(ensoConfigPath(home), JSON.stringify({ threads: { tree: 'off' } }, null, 2))
   const agentDir = ensoAgentDir(home)
   mkdirSync(agentDir, { recursive: true })
   writeFileSync(join(agentDir, 'models.json'), JSON.stringify(demoModelsJson(REFUSED_PORT), null, 2))
