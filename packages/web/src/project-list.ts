@@ -1,4 +1,11 @@
-import { EnsoDirectoryListing, EnsoProject, type EnsoStoredThread } from '@enso/core'
+import {
+  EnsoDirectoryListing,
+  EnsoProject,
+  EnsoProjectSettings,
+  type EnsoProjectSettingsUpdate,
+  type EnsoStoredThread,
+} from '@enso/core'
+import type { Static, TSchema } from 'typebox'
 import { Check } from 'typebox/value'
 import type { FetchLike } from './browser-logging.ts'
 import { createListingStore, type ListingStore } from './listing-store.ts'
@@ -79,18 +86,26 @@ async function refusedBy(response: Response): Promise<{ readonly kind: 'refused'
   return { kind: 'refused', reason: await describeFailedResponse(response) }
 }
 
+/** A project request's answer: the server's refusal, or its JSON checked against `schema` — `what` names it when it does not match. */
+async function checkedAnswer<Schema extends TSchema>(
+  response: Response,
+  schema: Schema,
+  what: string,
+): Promise<ProjectRequestOutcome<Static<Schema>>> {
+  if (!response.ok) return refusedBy(response)
+  const value: unknown = await response.json()
+  return Check(schema, value)
+    ? { kind: 'ok', value }
+    : { kind: 'refused', reason: `the server's ${what} did not match its schema` }
+}
+
 /** `GET /api/projects/browse`: the declared roots, or the directories under `path` a project may be. */
 export async function browseDirectories(
   path: string | null,
   fetchImpl: FetchLike = fetch,
 ): Promise<ProjectRequestOutcome<EnsoDirectoryListing>> {
   const query = path === null ? '' : `?path=${encodeURIComponent(path)}`
-  const response = await fetchImpl(`/api/projects/browse${query}`)
-  if (!response.ok) return refusedBy(response)
-  const listing: unknown = await response.json()
-  if (!Check(EnsoDirectoryListing, listing))
-    return { kind: 'refused', reason: "the server's listing did not match its schema" }
-  return { kind: 'ok', value: listing }
+  return checkedAnswer(await fetchImpl(`/api/projects/browse${query}`), EnsoDirectoryListing, 'listing')
 }
 
 /** `POST /api/projects`: register a directory; the project, new or already registered. */
@@ -103,10 +118,7 @@ export async function registerProject(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ path }),
   })
-  if (!response.ok) return refusedBy(response)
-  const project: unknown = await response.json()
-  if (!Check(EnsoProject, project)) return { kind: 'refused', reason: "the server's project did not match its schema" }
-  return { kind: 'ok', value: project }
+  return checkedAnswer(response, EnsoProject, 'project')
 }
 
 /** `DELETE /api/projects/:id`: forget the registration — its sessions stay on disk. */
@@ -116,4 +128,33 @@ export async function removeProject(
 ): Promise<ProjectRequestOutcome<null>> {
   const response = await fetchImpl(`/api/projects/${encodeURIComponent(projectId)}`, { method: 'DELETE' })
   return response.ok ? { kind: 'ok', value: null } : refusedBy(response)
+}
+
+/** `GET /api/projects/:id/settings` (#754): the project's tiered settings, each value with the tier it came from. */
+export async function readProjectSettings(
+  projectId: string,
+  fetchImpl: FetchLike = fetch,
+): Promise<ProjectRequestOutcome<EnsoProjectSettings>> {
+  return checkedAnswer(
+    await fetchImpl(`/api/projects/${encodeURIComponent(projectId)}/settings`),
+    EnsoProjectSettings,
+    'project settings',
+  )
+}
+
+/** `PUT /api/projects/:id/settings` (#754): set or clear keys in one of the project's own tiers; the settings as they now resolve. */
+export async function saveProjectSettings(
+  projectId: string,
+  update: EnsoProjectSettingsUpdate,
+  fetchImpl: FetchLike = fetch,
+): Promise<ProjectRequestOutcome<EnsoProjectSettings>> {
+  return checkedAnswer(
+    await fetchImpl(`/api/projects/${encodeURIComponent(projectId)}/settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(update),
+    }),
+    EnsoProjectSettings,
+    'project settings',
+  )
 }

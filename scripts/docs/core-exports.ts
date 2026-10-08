@@ -57,6 +57,7 @@ const DOMAINS_BY_CLASSIFICATION: Readonly<Record<Classification, Readonly<Record
     'log-tail.ts': 'Record, Observation',
     'observation.ts': 'Observation',
     'project.ts': 'Thread, Permission',
+    'project-settings.ts': 'Thread, Record',
     'prompt-library.ts': 'Thread, Record',
     'provider-refusal.ts': 'Observation, Record',
     'run-context.ts': 'Thread, Record',
@@ -97,8 +98,10 @@ const DOMAINS_BY_CLASSIFICATION: Readonly<Record<Classification, Readonly<Record
     'process-marker.ts': 'Record',
     'permission-rules.ts': 'Permission',
     'secrets.ts': 'Permission',
+    'project-config.ts': 'Thread, Record',
     'snapshot-store.ts': 'Thread, Record',
     'thread-tree.ts': 'Thread, Record',
+    'tree-setup.ts': 'Thread, Record',
   },
   'host contract': { 'thread-runtime.ts': 'Thread, Control' },
 }

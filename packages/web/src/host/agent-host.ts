@@ -78,8 +78,11 @@ import {
   DEFAULT_GUARD_POLICY,
   ENSO_THREAD_TREE_ENTRY,
   ENSO_TREE_RESTORED_ENTRY,
+  ENSO_TREE_SETUP_ENTRY,
   type EnsoGitFileChange,
   type EnsoThreadDeletePreview,
+  type EnsoProjectThreadSettings,
+  type EnsoTreeSetupOutcome,
   type EnsoTreeOnDisk,
   type EnsoTreesListing,
   isEnsoProjectId,
@@ -109,6 +112,7 @@ import {
   restoreThreadTree,
   treeKindFor,
 } from '@enso/core/thread-tree'
+import { prepareThreadTree } from '@enso/core/tree-setup'
 import { getPermissionsService } from '@gotgenes/pi-permission-system'
 import { type BranchContext, type BranchRequestDetail, branchContext, branchRequestDetail } from './branch-context.ts'
 import { type BranchEval, branchEval } from './branch-eval.ts'
@@ -178,6 +182,7 @@ import {
   treeRecordOf,
 } from './thread-trees.ts'
 import { recordedModelOf, transcriptOf } from './transcript.ts'
+import { type ProjectThreadSettingsSource, resolveProjectThreadSettings, treeSetupOf } from './tree-setup.ts'
 
 const log = ensoLogger('host')
 
@@ -429,14 +434,15 @@ export interface AgentHostOptions {
    */
   projectsDir?: string
   /**
-   * Each new thread's own tree (#551), per project (canonical path): `'worktree'` — a worktree of
-   * the checkout under `ENSO_HOME/projects/<id>/trees/`, on its own branch, at the checkout's
-   * current state — or `'copy'` (also what a project that is no repository's top level gets);
-   * `'off'`, or no function at all, runs threads in the checkout itself, as before #551: tests, and
-   * a launcher without a home. Needs `projectsDir`. A thread already on a tree stays on it whatever
-   * this says.
+   * Each new thread's own tree (#551), per project, and how it is prepared (#754): resolved by tier
+   * from these — the user's config — and the project's own files once it is trusted, fresh for each
+   * new tree (`resolveProjectThreadSettings`). `'worktree'` — a worktree of the checkout under
+   * `ENSO_HOME/projects/<id>/trees/`, on its own branch, at the checkout's current state — or
+   * `'copy'` (also what a project that is no repository's top level gets); `'off'`, or no source at
+   * all, runs threads in the checkout itself, as before #551: tests, and a launcher without a home.
+   * Needs `projectsDir`. A thread already on a tree stays on it whatever this says.
    */
-  threadTree?: (project: string) => ThreadTreeKind | 'off'
+  threadSettings?: ProjectThreadSettingsSource
   /**
    * The environment the secrets quarantine (#89) scrubs — `process.env` in production, the
    * one pi and every `bash` child inherit. A seam so the quarantine is testable without a
@@ -617,6 +623,8 @@ export type ThreadRenameOutcome = { readonly kind: 'renamed' } | { readonly kind
 export interface ThreadTreePlace {
   readonly record: ThreadTreeRecord
   readonly store: string
+  /** What preparing the tree did (#754), when its branch records it (`treeSetupOf`). */
+  readonly setup?: EnsoTreeSetupOutcome
 }
 
 /**
@@ -1015,6 +1023,12 @@ async function inBatches<T>(jobs: readonly (() => Promise<T>)[]): Promise<T[]> {
   return results
 }
 
+/** The tree kind a project's settings give its new threads (#551): none for `off`, or no settings. */
+function treeKindIn(settings: EnsoProjectThreadSettings | undefined): ThreadTreeKind | undefined {
+  const chosen = settings?.tree.value
+  return chosen === undefined || chosen === 'off' ? undefined : chosen
+}
+
 export function createAgentHost(options: AgentHostOptions): AgentHost {
   const { agentDir, harnessPackageDir, servesDirectory, projectsDir } = options
   /** The models a thread with no session is offered (#688): a bound session's list — see the module. */
@@ -1028,11 +1042,16 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   /** Where a thread in `cwd` is filed (#552): its project's `sessions/` — the checkout's or a tree's; pi's default when no projects folder is set. */
   const sessionDirFor = (cwd: string): string | undefined =>
     projectsDir === undefined ? undefined : sessionDirectoryFor(projectsDir, cwd)
-  /** The tree kind new threads in `project` get (#551), or none: needs a projects folder to put trees in. */
-  const treeKindOf = (project: string): ThreadTreeKind | undefined => {
-    const chosen = projectsDir === undefined ? undefined : options.threadTree?.(realpathOrSelf(project))
-    return chosen === undefined || chosen === 'off' ? undefined : chosen
-  }
+  /**
+   * `project`'s new-tree settings by tier (#754), read fresh — an edit applies to the next tree; none
+   * when this host mints no trees (no projects folder to put them in, or no settings to read).
+   */
+  const threadSettingsOf = (project: string): EnsoProjectThreadSettings | undefined =>
+    projectsDir === undefined || options.threadSettings === undefined
+      ? undefined
+      : resolveProjectThreadSettings(realpathOrSelf(project), options.threadSettings, agentDir).threads
+  /** The tree kind new threads in `project` get (#551), or none. */
+  const treeKindOf = (project: string): ThreadTreeKind | undefined => treeKindIn(threadSettingsOf(project))
 
   // Order matters, and it is the module header's ⚠⚠ items: env before any pi module can
   // be imported by the loader, the proxy pin and the independent-roots switch before the first
@@ -1072,11 +1091,15 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
    */
   const liveSessionManagers = new Map<string, SessionManager>()
 
+  /** A tree just made, and what preparing it did (#754) — absent when there was nothing to set up. */
+  type MintedTree = { kind: 'minted'; record: ThreadTreeRecord; setup?: EnsoTreeSetupOutcome }
+
   /**
    * A thread's own tree, minted (#551): at the checkout's current state for a new thread, at the
    * parent's snapshot for a fork. `name` is the tree's directory (the thread's id, or a fresh one
-   * for a fork); the store is the thread's (`threadId`). The kind is the host's (`threadTree`),
-   * except that a project which is no repository's top level gets a copy.
+   * for a fork); the store is the thread's (`threadId`). The kind is the project's settings'
+   * (`threadSettingsOf`), except that a project which is no repository's top level gets a copy.
+   * Then prepared (#754, `prepareTree`): a setup that fails does not refuse the tree.
    */
   async function mintTree(request: {
     readonly threadId: string
@@ -1085,8 +1108,9 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     readonly from: Parameters<typeof mintThreadTree>[0]['from']
     /** A fork of a thread on a tree keeps its source's kind, whatever new threads get now. */
     readonly kind?: ThreadTreeKind | undefined
-  }): Promise<{ kind: 'minted'; record: ThreadTreeRecord } | { kind: 'refused'; reason: string }> {
-    const requested = request.kind ?? treeKindOf(request.project)
+  }): Promise<MintedTree | { kind: 'refused'; reason: string }> {
+    const settings = threadSettingsOf(request.project)
+    const requested = request.kind ?? treeKindIn(settings)
     if (projectsDir === undefined || requested === undefined) {
       return { kind: 'refused', reason: 'this host mints no trees (no projects folder, or trees are off)' }
     }
@@ -1112,28 +1136,91 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       kind: minted.record.kind,
       base: minted.record.base,
     })
-    return minted
+    const setup = settings === undefined ? undefined : await prepareTree(request.threadId, minted.record, settings)
+    return setup === undefined ? minted : { ...minted, setup }
+  }
+
+  /**
+   * A new tree prepared (#754): the project's files to copy copied in, its setup commands run there
+   * as Enso — in the quarantined environment pi's `bash` gets, their output redacted with the
+   * user's secret values — and the outcome. ⚠ LONG SETUPS HOLD THE THREAD'S FIRST RUN, which waits
+   * on its move; that is intended, the thread shows it is moving. A failure is warned, naming the
+   * command, and the thread still opens: the operator fixes it from there.
+   */
+  async function prepareTree(
+    threadId: string,
+    tree: ThreadTreeRecord,
+    settings: EnsoProjectThreadSettings,
+  ): Promise<EnsoTreeSetupOutcome | undefined> {
+    const outcome = await prepareThreadTree({
+      project: tree.project,
+      tree: tree.path,
+      threads: settings,
+      environment,
+      secretValues: knownSecretValues(ensoHome(environment), environment),
+    })
+    if (outcome === undefined) return undefined
+    if (outcome.ok) {
+      log.info('thread {threadId}: its tree {tree} is set up (#754)', { threadId, tree: tree.path })
+      return outcome
+    }
+    const failed = outcome.steps.find((step) => step.exitCode !== 0)
+    log.warn(
+      'thread {threadId}: its tree {tree} is not fully set up (#754) — {command} exited {exitCode}, missing {missing}; the thread opens anyway',
+      {
+        threadId,
+        tree: tree.path,
+        command: failed?.command ?? null,
+        exitCode: failed?.exitCode ?? null,
+        missing: outcome.missing,
+        tiers: outcome.tiers,
+      },
+    )
+    return outcome
   }
 
   /**
    * The session a new thread built in its checkout moves onto its tree with (#551): everything it
    * holds — what was chosen before its first run — written now as its file under a header naming
-   * the tree, opened from that file, and the tree's record appended to it. Written at once, not at
-   * pi's first flush (PR #561 review): a thread disposed before its first message would otherwise
-   * have no file to be found by, and its next build would mint again over the tree that exists.
-   * Opened from the file so pi appends to it, never writes it a second time (its first flush opens
-   * the file `wx`). The checkout session is not touched: a move undone leaves it as it was, naming
-   * no tree.
+   * the tree, opened from that file, and the tree's record appended to it, its setup's after it
+   * (#754). Written at once, not at pi's first flush (PR #561 review): a thread disposed before its
+   * first message would otherwise have no file to be found by, and its next build would mint again
+   * over the tree that exists. Opened from the file so pi appends to it, never writes it a second
+   * time (its first flush opens the file `wx`). The checkout session is not touched: a move undone
+   * leaves it as it was, naming no tree.
    */
-  function sessionOnTree(checkoutSession: SessionManager, tree: ThreadTreeRecord): SessionManager {
+  function sessionOnTree(checkoutSession: SessionManager, minted: MintedTree): SessionManager {
     const file = checkoutSession.getSessionFile()
     if (file === undefined) throw new Error(`thread ${checkoutSession.getSessionId()} has no session file path`)
-    const header = { ...checkoutSession.getHeader(), cwd: tree.path }
+    const header = { ...checkoutSession.getHeader(), cwd: minted.record.path }
     const lines = [header, ...checkoutSession.getEntries()].map((fileEntry) => `${JSON.stringify(fileEntry)}\n`)
     writeFileSync(file, lines.join(''))
     const onTree = SessionManager.open(file)
-    onTree.appendCustomEntry(ENSO_THREAD_TREE_ENTRY, tree)
+    recordTree(onTree, minted)
     return onTree
+  }
+
+  /** The tree's record on the thread, and its setup's right after it when there was one (#754). */
+  function recordTree(session: SessionManager, minted: MintedTree): void {
+    session.appendCustomEntry(ENSO_THREAD_TREE_ENTRY, minted.record)
+    if (minted.setup !== undefined) session.appendCustomEntry(ENSO_TREE_SETUP_ENTRY, minted.setup)
+  }
+
+  /**
+   * A tree made before its project was trusted, prepared once it is (#754). A project's first thread
+   * mints its tree at its first run, and the trust question is asked by that run's session — after
+   * the tree exists. Untrusted at the mint, the project's own setup was not read; "Trust project"
+   * prepares the tree now, before the run it held. Nothing when the thread has no tree, or its tree
+   * already records a setup.
+   */
+  async function prepareTreeOnTrust(threadId: string, session: SessionManager): Promise<void> {
+    const branch = transcriptOf(session.getBranch())
+    const tree = treeRecordOf(branch)
+    if (tree === undefined || treeSetupOf(branch) !== undefined) return
+    const settings = threadSettingsOf(tree.project)
+    if (settings === undefined) return
+    const setup = await prepareTree(threadId, tree, settings)
+    if (setup !== undefined) session.appendCustomEntry(ENSO_TREE_SETUP_ENTRY, setup)
   }
 
   /** A thread's snapshot store (#551): beside its session, under its project — the checkout's or its tree's. */
@@ -1351,7 +1438,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       if (file !== undefined && existsSync(file)) unlinkSync(file)
       return `the fork's ${minted.reason}`
     }
-    fork.appendCustomEntry(ENSO_THREAD_TREE_ENTRY, minted.record)
+    recordTree(fork, minted)
     return undefined
   }
 
@@ -1471,9 +1558,12 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     const located = live === undefined ? await storedSession(threadId) : undefined
     const session = live ?? (located === undefined ? undefined : SessionManager.open(located.path))
     if (session === undefined) return undefined
-    const record = treeRecordOf(transcriptOf(session.getBranch()))
+    const transcript = transcriptOf(session.getBranch())
+    const record = treeRecordOf(transcript)
     const store = storeOf(threadId, session.getCwd())
-    return record === undefined || store === undefined ? undefined : { record, store }
+    if (record === undefined || store === undefined) return undefined
+    const setup = treeSetupOf(transcript)
+    return setup === undefined ? { record, store } : { record, store, setup }
   }
 
   /** Threads whose tree a restore is putting back right now: no run is admitted on one (`admitRun`). */
@@ -1939,7 +2029,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       let next: HostedThread
       let treeSession: SessionManager | undefined
       try {
-        treeSession = sessionOnTree(checkoutSession, minted.record)
+        treeSession = sessionOnTree(checkoutSession, minted)
         next = await buildHosted(threadId, treeSession)
       } catch (error) {
         log.error('thread {threadId} could not be built on its tree: {error}', { threadId, error })
@@ -2187,6 +2277,8 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         if (answer === 'project') new ProjectTrustStore(agentDir).set(trustDirectory, true)
         else sessionManager.appendCustomEntry(ENSO_PROJECT_TRUST_ENTRY, THREAD_PROJECT_TRUST)
         projectTrust.settingsManager.setProjectTrusted(true)
+        // "Trust this thread" trusts no project: a project's setup is read under the project's own answer.
+        if (answer === 'project') await prepareTreeOnTrust(threadId, sessionManager)
         await session.reload()
         ui.notifyFrom(ENSO_SENDER, projectTrustedNotice(answer), 'info')
       },

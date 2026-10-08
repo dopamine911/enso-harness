@@ -296,11 +296,12 @@ export const CONFIG_FIELD_METADATA: readonly ConfigFieldMetadata[] = [
     field: 'threads',
     required: 'no',
     defaultWhenOmitted:
-      'A worktree for every new thread (#551 decision 1): a git worktree on branch `enso/<thread-id>` when the project is a repository\'s top level, else a copy — each one adds a worktree registration and that branch to the repository until the thread is deleted (#571). `tree` sets every project\'s mode (`"worktree"`, `"copy"`, or `"off"`: threads run in the checkout, with nothing to restore files to); `projects` maps a project path (absolute or `~/`, resolved to the canonical path) to its own mode, which beats `tree`. A tree holds no ignored file (`node_modules`, `.env`), so a build may need its install step first. User-only: a project\'s `threads` is ignored, and said.',
-    reader: '`packages/core/src/config.ts#threadTreeFor`, from `packages/web/src/server/dev.ts`',
+      'A worktree for every new thread (#551 decision 1): a git worktree on branch `enso/<thread-id>` when the project is a repository\'s top level, else a copy — each one adds a worktree registration and that branch to the repository until the thread is deleted (#571). `tree` sets the mode (`"worktree"`, `"copy"`, or `"off"`: threads run in the checkout, with nothing to restore files to); `projects`, in the user\'s file only, maps a project path (absolute or `~/`, resolved to the canonical path) to its own mode, which beats `tree`. A tree holds no ignored file (`node_modules`, `.env`): `copy` lists the project\'s paths (files or directories, relative to it, never leaving it) copied into a new tree, and `setup` the commands then run in it with `sh -c`, in order, each for at most 10 minutes, stopping at the first failure; the outcome is recorded on the thread, which opens either way (#754). Default: no copy, no setup. Tiered per project (#754): `<project>/.enso/config.local.json` > `<project>/.enso/config.json` > this file > the default, each key\'s whole value from one tier (a list replaces, never extends); the project\'s own files are read only once the project is trusted, fresh for each new tree.',
+    reader:
+      '`packages/core/src/project-config.ts#readProjectThreadSettings`, from `packages/web/src/host/agent-host.ts`',
     check: {
-      file: 'packages/core/src/config.ts',
-      contains: "return own ?? config.threads?.tree ?? 'worktree'",
+      file: 'packages/core/src/project-config.ts',
+      contains: "tree: highest(layers, 'tree') ?? { value: 'worktree', tier: 'default' }",
     },
   },
   webSearchField('', '`{}`; current-model routing with no Tavily domain filters.', 'parsed.config.webSearch ?? {}'),

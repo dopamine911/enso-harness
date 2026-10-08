@@ -136,17 +136,15 @@ async function resolveSessionConfig(context: SessionConfigContext): Promise<Sess
   if (project.kind === 'unreadable') return { result: project, path: projectPath, sources: bothSources }
   // `projects.roots` is user-only: which directories may be projects is not a project's to widen.
   // ⚠ So is `security` (#466): a checkout the agent can write must not switch halting off or raise
-  // the thresholds its own incident is measured against. ⚠ And `threads` (#551): a checkout must not
-  // take its own threads out of their trees.
-  const { projects, security, threads, ...projectConfig } = project.config
+  // the thresholds its own incident is measured against. `threads` is a project setting since #754
+  // (its tree mode, setup and files to copy); the host resolves it by tier when it makes a tree
+  // (`@enso/core/project-config`), and nothing in a session reads it from this merge.
+  const { projects, security, ...projectConfig } = project.config
   if (projects !== undefined) {
     context.ui.notify(`Enso: ${projectPath} sets projects.roots, which only ${userPath} may set — ignored.`, 'warning')
   }
   if (security !== undefined) {
     context.ui.notify(`Enso: ${projectPath} sets security, which only ${userPath} may set — ignored.`, 'warning')
-  }
-  if (threads !== undefined) {
-    context.ui.notify(`Enso: ${projectPath} sets threads, which only ${userPath} may set — ignored.`, 'warning')
   }
   const merged = mergeEnsoConfig(user.result.config, projectConfig)
   return { result: { kind: 'ok', config: merged }, path: projectPath, sources: bothSources }

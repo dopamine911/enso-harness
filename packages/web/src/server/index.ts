@@ -14,6 +14,7 @@ import {
   type EnsoPermissionPolicyReset,
   EnsoPermissionPolicyWrite,
   EnsoProjectRegistration,
+  EnsoProjectSettingsUpdate,
   type EnsoProjectsConfig,
   type EnsoRiskThresholds,
   type EnsoStoredThread,
@@ -27,11 +28,11 @@ import {
   isEnsoThreadId,
   LIBRARY_PROMPT_ID_SOURCE,
   LIBRARY_PROMPT_REF_SOURCE,
-  type ThreadTreeKind,
   withEnsoLogContext,
 } from '@enso/core'
 import { readGitChanges, readGitState, runGit } from '@enso/core/git'
 import { missingVendorPaths } from '@enso/core/pi-manifest'
+import type { Static, TSchema } from 'typebox'
 import {
   AGENT_RUNTIME_VERSION,
   type AgentHost,
@@ -40,6 +41,7 @@ import {
   ThreadDeleted,
 } from '../host/agent-host.ts'
 import { readPermissionPolicy, resetPermissionPolicy, writePermissionPolicy } from '../host/permission-policy-file.ts'
+import type { ProjectThreadSettingsSource } from '../host/tree-setup.ts'
 import { createAboutRoute, createBundleRoute } from './bundle-route.ts'
 import {
   abortThread,
@@ -73,6 +75,7 @@ import { MAX_LOG_BODY_BYTES, receiveBrowserLogs } from './logs-route.ts'
 import { createLogStatsRoute } from './logs-stats-route.ts'
 import { followLogTail, type LogTailRouteDeps } from './logs-tail-route.ts'
 import { isLoopbackAuthority, LOOPBACK_ONLY } from './loopback.ts'
+import { type ProjectSettingsAnswer, createProjectSettingsRoute } from './project-settings-route.ts'
 import { createProjectRegistry, ProjectUnavailable } from './projects.ts'
 import {
   createPromptLibrary,
@@ -217,6 +220,12 @@ const PROMPT_WRITE_ROUTE = promptRoute()
 const PROMPT_DELETE_ROUTE = promptRoute()
 /** `DELETE /api/projects/<projectId>` (#395) — the id is sixteen hex digits, so it needs no decoding. */
 const PROJECT_ROUTE = /^\/api\/projects\/([0-9a-f]{16})$/
+/**
+ * `/api/projects/<projectId>/settings` (#754): the project page's Worktrees section. One constant
+ * per method, as the routes reference reads them: `GET` reads the settings, `PUT` writes a tier.
+ */
+const PROJECT_SETTINGS_READ_ROUTE = /^\/api\/projects\/([0-9a-f]{16})\/settings$/
+const PROJECT_SETTINGS_WRITE_ROUTE = /^\/api\/projects\/([0-9a-f]{16})\/settings$/
 
 /**
  * The dev backend: the thread routes the browser's `FollowConnection` talks to (#112), and
@@ -349,6 +358,23 @@ async function readJsonBody<T>(
 }
 
 /**
+ * A body that must be exactly `schema`: `readJsonBody` over `readClosedBody`, the read every
+ * closed write here makes (a project registration, a project's settings, a permission check, the
+ * permission policy). `name` names the body in a malformed one's 400; `requirement` says what a
+ * well-formed one holds.
+ */
+function readClosedJsonBody<Schema extends TSchema>(
+  request: IncomingMessage,
+  response: ServerResponse,
+  body: BodyCap & { readonly schema: Schema; readonly name: string; readonly requirement: string },
+): Promise<Static<Schema> | undefined> {
+  return readJsonBody(request, response, {
+    ...body,
+    parse: (raw: string) => readClosedBody(raw, body.schema, body.name, body.requirement),
+  })
+}
+
+/**
  * A refused outcome, answered (#265): the status the decision carries and its reason AS the
  * body, in `text/plain` — five routes wrote this pair by hand. The route logs first, in its
  * own words: the record names the object that was refused (a prompt, a dialog id, a mode),
@@ -460,8 +486,12 @@ export interface EnsoServerOptions {
   promptsDir?: string
   /** The project folders (`ENSO_HOME/projects`, #552): where a thread's session is filed, under its project's id; absent, pi's default. */
   projectsDir?: string
-  /** Each new thread's own tree, per project (#551, `AgentHostOptions.threadTree`); absent, threads run in the checkout. */
-  threadTree?: (project: string) => ThreadTreeKind | 'off'
+  /**
+   * Each new thread's own tree and its preparation, per project, by tier (#551, #754,
+   * `AgentHostOptions.threadSettings`), and the project page's settings; absent, threads run in the
+   * checkout and the project settings routes refuse.
+   */
+  threadSettings?: ProjectThreadSettingsSource
   /**
    * The risk fold's thresholds, from the user's config (`security.incidents`, #466) — user-only, like
    * `projectRoots`. Absent, the defaults: what the guard measures with when the config sets none.
@@ -584,7 +614,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
       harnessPackageDir: options.harnessPackageDir,
       permissionRulesPath: options.permissionRulesPath,
       ...(options.projectsDir === undefined ? {} : { projectsDir: options.projectsDir }),
-      ...(options.threadTree === undefined ? {} : { threadTree: options.threadTree }),
+      ...(options.threadSettings === undefined ? {} : { threadSettings: options.threadSettings }),
     })
   const threads = createThreadRegistry({
     // A thread with a session on disk is opened where pi recorded it; a new one where its project
@@ -1008,11 +1038,20 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   // its preview is served from, a listener of its own (#713, `thread-preview-route.ts`).
   const pagesOf = createThreadPagesRoute(gitDeps)
   const previews = createPreviewOrigins(createPreviewRoute(gitDeps))
+  // The thread's tree prepared (#754): what its setup did, from its branch, with its pages.
   const threadPages = async (threadId: string): Promise<EnsoThreadPages | undefined> => {
     const listed = await pagesOf(threadId)
-    if (listed === undefined || listed.pages.length === 0) return listed
-    return { ...listed, previewOrigin: await previews.originOf(threadId) }
+    if (listed === undefined) return undefined
+    const setup = (await host.threadTree(threadId))?.setup
+    const withSetup = setup === undefined ? listed : { ...listed, setup }
+    if (listed.pages.length === 0) return withSetup
+    return { ...withSetup, previewOrigin: await previews.originOf(threadId) }
   }
+  const projectSettings = createProjectSettingsRoute({
+    projects,
+    source: options.threadSettings,
+    agentDir: options.agentDir,
+  })
 
   /**
    * A thread analysis — stats (#45), context (#361), manifest (#435), git (#453), changes (#452) — or 404 for a thread the
@@ -1575,16 +1614,12 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   }
 
   async function respondToProjectRegistration(request: IncomingMessage, response: ServerResponse): Promise<void> {
-    const registration = await readJsonBody(request, response, {
+    const registration = await readClosedJsonBody(request, response, {
       maxBytes: MAX_DIALOG_BODY_BYTES,
       capText: `a project registration is at most ${MAX_DIALOG_BODY_BYTES} bytes`,
-      parse: (raw: string) =>
-        readClosedBody(
-          raw,
-          EnsoProjectRegistration,
-          'project',
-          'a project registration takes an absolute `path` and an optional `title`',
-        ),
+      schema: EnsoProjectRegistration,
+      name: 'project',
+      requirement: 'a project registration takes an absolute `path` and an optional `title`',
     })
     if (registration === undefined) return
     const outcome = projects.register(registration)
@@ -1664,10 +1699,65 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
       answerOrFail(respondWithBrowse(url, response), response)
       return true
     }
+    if (dispatchProjectSettingsRoute(request, response, url)) return true
     const projectId = PROJECT_ROUTE.exec(url)?.[1]
     if (projectId === undefined || request.method !== 'DELETE') return false
     respondToProjectRemoval(projectId, response)
     return true
+  }
+
+  /** True when the request was a project settings route (#754): GET reads them, PUT writes a tier. */
+  function dispatchProjectSettingsRoute(request: IncomingMessage, response: ServerResponse, url: string): boolean {
+    if (request.method === 'GET') {
+      const projectId = PROJECT_SETTINGS_READ_ROUTE.exec(url)?.[1]
+      if (projectId === undefined) return false
+      answerOrFail(respondWithProjectSettings(projectId, response), response)
+      return true
+    }
+    const projectId = request.method === 'PUT' ? PROJECT_SETTINGS_WRITE_ROUTE.exec(url)?.[1] : undefined
+    if (projectId === undefined) return false
+    answerOrFail(respondToProjectSettingsWrite(projectId, request, response), response)
+    return true
+  }
+
+  /** `GET /api/projects/<projectId>/settings` (#754): resolved now, as the next tree would be. */
+  async function respondWithProjectSettings(projectId: string, response: ServerResponse): Promise<void> {
+    answerProjectSettings(response, projectSettings.read(projectId))
+  }
+
+  /**
+   * `PUT /api/projects/<projectId>/settings` (#754): `threads` keys set or removed in the project's
+   * shared or local file, answered with the settings as they now resolve. A body that is not exactly
+   * an `EnsoProjectSettingsUpdate` is a 400; a write that cannot be made, a 422 with its reason.
+   */
+  async function respondToProjectSettingsWrite(
+    projectId: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> {
+    const update = await readClosedJsonBody(request, response, {
+      maxBytes: MAX_DIALOG_BODY_BYTES,
+      capText: `a project settings update is at most ${MAX_DIALOG_BODY_BYTES} bytes`,
+      schema: EnsoProjectSettingsUpdate,
+      name: 'project settings',
+      requirement:
+        'a project settings update takes a `tier` ("shared" or "local") and `threads` with any of `tree`, `setup`, `copy` — `null` removes one',
+    })
+    if (update === undefined) return
+    const answer = projectSettings.write(projectId, update)
+    if (answer.kind === 'settings') {
+      log.info('project {projectId}: its {tier} settings were written: {keys}', {
+        projectId,
+        tier: update.tier,
+        keys: Object.keys(update.threads),
+      })
+    } else log.warn('project {projectId}: settings not written: {reason}', { projectId, reason: answer.reason })
+    answerProjectSettings(response, answer)
+  }
+
+  function answerProjectSettings(response: ServerResponse, answer: ProjectSettingsAnswer): void {
+    if (answer.kind === 'settings') answerJson(response, answer.settings)
+    else refuseWith(response, answer)
   }
 
   /**
@@ -1807,11 +1897,12 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> {
-    const check = await readJsonBody(request, response, {
+    const check = await readClosedJsonBody(request, response, {
       maxBytes: MAX_DIALOG_BODY_BYTES,
       capText: `a permission check is at most ${MAX_DIALOG_BODY_BYTES} bytes`,
-      parse: (raw: string) =>
-        readClosedBody(raw, EnsoPermissionCheckRequest, 'permission check', 'a check needs a `surface` and a `value`'),
+      schema: EnsoPermissionCheckRequest,
+      name: 'permission check',
+      requirement: 'a check needs a `surface` and a `value`',
     })
     if (check === undefined) return
     const thread = await threads.ensure(threadId)
@@ -1846,16 +1937,12 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
       endAndClose(request, response, condition.status, condition.reason)
       return
     }
-    const body = await readJsonBody(request, response, {
+    const body = await readClosedJsonBody(request, response, {
       maxBytes: MAX_POLICY_BODY_BYTES,
       capText: `a permission policy is at most ${MAX_POLICY_BODY_BYTES} bytes`,
-      parse: (raw: string) =>
-        readClosedBody(
-          raw,
-          EnsoPermissionPolicyWrite,
-          'permission policy',
-          'a save carries `{ file }`, the whole file',
-        ),
+      schema: EnsoPermissionPolicyWrite,
+      name: 'permission policy',
+      requirement: 'a save carries `{ file }`, the whole file',
     })
     if (body === undefined) return
     const written = writePermissionPolicy(options.permissionRulesPath, options.agentDir, body.file, condition)

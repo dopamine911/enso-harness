@@ -1,0 +1,5 @@
+{
+  "threads": {
+    "setup": ["bun install --frozen-lockfile"]
+  }
+}

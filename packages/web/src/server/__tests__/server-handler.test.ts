@@ -20,6 +20,7 @@ import {
   type EnsoModelState,
   type EnsoObservation,
   EnsoProject,
+  EnsoProjectSettings,
   EnsoProjectPromptLibrary,
   EnsoStoredThread,
   EnsoSystemPromptPreview,
@@ -29,6 +30,7 @@ import {
   EnsoThreadInspection,
   EnsoThreadSummary,
   type EnsoTranscriptEntry,
+  type EnsoTreeSetupOutcome,
   estimateTextTokens,
   type PromptOutcome,
   type PromptRequest,
@@ -47,8 +49,10 @@ import {
   type HostedThreadInspection,
   SessionDirectoryRefused,
   type ThreadRestoreOutcome,
+  type ThreadTreePlace,
 } from '../../host/agent-host.ts'
 import { transcriptOf } from '../../host/transcript.ts'
+import type { ProjectThreadSettingsSource } from '../../host/tree-setup.ts'
 import { startEnsoServer } from '../index.ts'
 import { NO_PROMPT_LIBRARY } from '../prompt-library.ts'
 import {
@@ -220,12 +224,18 @@ async function startWith(
     promptsDir,
     permissionRulesPath = join(tmpdir(), 'enso-unread-permissions.json'),
     launch = tmpdir(),
+    agentDir = mkdtempSync(join(tmpdir(), 'enso-handler-agent-')),
+    threadSettings,
   }: {
     readonly projectRoots?: readonly string[]
     readonly promptsDir?: string
     readonly permissionRulesPath?: string
     /** The launch directory — where a new thread is built (#395); the shared temp dir when absent. */
     readonly launch?: string
+    /** pi's agent dir, whose `trust.json` a test may write (#754); a fresh one when absent. */
+    readonly agentDir?: string
+    /** The user's config the project settings resolve against (#754); absent, the server has none. */
+    readonly threadSettings?: ProjectThreadSettingsSource
   } = {},
 ): Promise<{ url: string; built: FakeThreadRecord[]; requested: string[]; builtIn: string[] }> {
   // The fake is made before the server, whose projects' rule it must apply — bound when the server asks.
@@ -237,8 +247,9 @@ async function startWith(
     cwd: launch,
     projectRoots,
     ...(promptsDir === undefined ? {} : { promptsDir }),
+    ...(threadSettings === undefined ? {} : { threadSettings }),
     harnessPackageDir: emptyHarnessDir(),
-    agentDir: mkdtempSync(join(tmpdir(), 'enso-handler-agent-')),
+    agentDir,
     permissionRulesPath,
     logsDir: mkdtempSync(join(tmpdir(), 'enso-logs-')),
     port: 0,
@@ -713,6 +724,124 @@ test('removing the launch project says why at once, even while one of its thread
   const refused = await fetch(`${url}/api/projects/${launch?.projectId}`, { method: 'DELETE' })
   expect(refused.status).toBe(409)
   expect(await refused.text()).toBe('the launch directory is always a project')
+})
+
+// ── #754: the project page's Worktrees section ────────────────────────────────────────────────
+
+/** A server launched in a fresh project with these tier files; the user's config copies `.env`; pi's trust for the project is `trusted`. */
+async function settingsServer(options: {
+  readonly trusted: boolean
+  readonly shared?: unknown
+  readonly local?: string
+}): Promise<{ url: string; project: string; projectId: string; userPath: string }> {
+  const project = realpathSync(mkdtempSync(join(tmpdir(), 'enso-settings-project-')))
+  mkdirSync(join(project, '.enso'))
+  if (options.shared !== undefined) writeFileSync(join(project, '.enso', 'config.json'), JSON.stringify(options.shared))
+  if (options.local !== undefined) writeFileSync(join(project, '.enso', 'config.local.json'), options.local)
+  const agentDir = mkdtempSync(join(tmpdir(), 'enso-settings-agent-'))
+  // pi's trust store, written as pi writes it (`<agentDir>/trust.json`, keyed by the real path): this
+  // file may not name pi (the vendor gate, #145).
+  writeFileSync(join(agentDir, 'trust.json'), JSON.stringify({ [project]: options.trusted }))
+  const userPath = join(mkdtempSync(join(tmpdir(), 'enso-settings-home-')), 'config.json')
+  const threadSettings = { user: { threads: { copy: ['.env'] } }, userPath, canonical: (key: string) => key }
+  const { url } = await startWith(settlesAtOnce, {}, undefined, { launch: project, agentDir, threadSettings })
+  const launch = ((await (await fetch(`${url}/api/projects`)).json()) as EnsoProject[])[0]
+  if (launch === undefined) throw new Error('no launch project')
+  return { url, project, projectId: launch.projectId, userPath }
+}
+
+function putSettings(url: string, projectId: string, body: unknown): Promise<Response> {
+  return fetch(`${url}/api/projects/${projectId}/settings`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: typeof body === 'string' ? body : JSON.stringify(body),
+  })
+}
+
+async function settingsOf(response: Response): Promise<EnsoProjectSettings> {
+  const answered: unknown = await response.json()
+  if (!Check(EnsoProjectSettings, answered)) throw new Error('the answer is not EnsoProjectSettings')
+  return answered
+}
+
+test("the launch project's settings: each value with its tier, the files behind them, and its trust (#754)", async () => {
+  const { url, project, projectId, userPath } = await settingsServer({
+    trusted: true,
+    shared: { threads: { setup: ['bun install --frozen-lockfile'] } },
+  })
+  const response = await fetch(`${url}/api/projects/${projectId}/settings`)
+  expect(response.status).toBe(200)
+  expect(await settingsOf(response)).toEqual({
+    projectId,
+    path: project,
+    trusted: true,
+    threads: {
+      tree: { value: 'worktree', tier: 'default' },
+      setup: { value: ['bun install --frozen-lockfile'], tier: 'shared' },
+      copy: { value: ['.env'], tier: 'user' },
+    },
+    files: {
+      user: userPath,
+      shared: join(project, '.enso', 'config.json'),
+      local: join(project, '.enso', 'config.local.json'),
+    },
+    unreadable: [],
+  })
+})
+
+test("⚠ an untrusted project's own tiers are not read, and the settings say so (#754)", async () => {
+  const { url, projectId } = await settingsServer({ trusted: false, shared: { threads: { setup: ['make'] } } })
+  const settings = await settingsOf(await fetch(`${url}/api/projects/${projectId}/settings`))
+  expect(settings.trusted).toBe(false)
+  expect(settings.threads.setup).toEqual({ value: [], tier: 'default' })
+})
+
+test('a PUT sets and removes keys in its tier, keeps the rest of the file, and answers the settings as they now resolve (#754)', async () => {
+  const { url, project, projectId } = await settingsServer({
+    trusted: true,
+    local: JSON.stringify({ webFetch: { allowedHosts: ['docs.example.com'] } }),
+  })
+  const set = await putSettings(url, projectId, { tier: 'local', threads: { tree: 'off', copy: ['.env.local'] } })
+  expect(set.status).toBe(200)
+  expect((await settingsOf(set)).threads).toMatchObject({
+    tree: { value: 'off', tier: 'local' },
+    copy: { value: ['.env.local'], tier: 'local' },
+  })
+  const localPath = join(project, '.enso', 'config.local.json')
+  expect(readFileSync(localPath, 'utf8')).toBe(
+    `${JSON.stringify({ webFetch: { allowedHosts: ['docs.example.com'] }, threads: { tree: 'off', copy: ['.env.local'] } }, null, 2)}\n`,
+  )
+  // `null` removes the key from that tier: the next tier's value shows through.
+  const cleared = await putSettings(url, projectId, { tier: 'local', threads: { copy: null } })
+  expect((await settingsOf(cleared)).threads.copy).toEqual({ value: ['.env'], tier: 'user' })
+  expect(JSON.parse(readFileSync(localPath, 'utf8'))).toEqual({
+    webFetch: { allowedHosts: ['docs.example.com'] },
+    threads: { tree: 'off' },
+  })
+  // The shared tier is its own file, made with its directory's `.enso/` already there.
+  await putSettings(url, projectId, { tier: 'shared', threads: { setup: ['bun install'] } })
+  expect(JSON.parse(readFileSync(join(project, '.enso', 'config.json'), 'utf8'))).toEqual({
+    threads: { setup: ['bun install'] },
+  })
+})
+
+test('⚠ project settings refusals: an unknown project 404, a body that is not an update 400, an unreadable tier file 422 and untouched (#754)', async () => {
+  const { url, project, projectId } = await settingsServer({ trusted: true, local: '{ not json' })
+  expect((await fetch(`${url}/api/projects/0123456789abcdef/settings`)).status).toBe(404)
+  expect((await putSettings(url, '0123456789abcdef', { tier: 'local', threads: {} })).status).toBe(404)
+  expect((await putSettings(url, projectId, { tier: 'user', threads: {} })).status).toBe(400)
+  expect((await putSettings(url, projectId, { tier: 'shared', threads: { tree: 'none' } })).status).toBe(400)
+  expect((await putSettings(url, projectId, { tier: 'shared', threads: { setup: [''] } })).status).toBe(400)
+  expect((await putSettings(url, projectId, '{ not json')).status).toBe(400)
+  const refused = await putSettings(url, projectId, { tier: 'local', threads: { tree: 'off' } })
+  expect(refused.status).toBe(422)
+  expect(await refused.text()).toContain('never overwritten')
+  expect(readFileSync(join(project, '.enso', 'config.local.json'), 'utf8')).toBe('{ not json')
+  // The page says which file was skipped, so a value from the tier below is not mistaken for it.
+  const { unreadable } = await settingsOf(await fetch(`${url}/api/projects/${projectId}/settings`))
+  expect(unreadable.map((skipped) => [skipped.tier, skipped.path])).toEqual([
+    ['local', join(project, '.enso', 'config.local.json')],
+  ])
 })
 
 test('⚠ a request naming a different project for a thread already named is a 409, and nothing is built', async () => {
@@ -1575,6 +1704,46 @@ test('⚠ a page on another loopback port cannot escalate, prompt, answer or rea
   expect((await fetch(`${url}/api/about`, { headers: ownPage })).status).toBe(200)
   expect((await fetch(`${url}/api/about`, { headers: { 'Sec-Fetch-Site': 'none' } })).status).toBe(200)
   expect((await fetch(`${url}/api/about`, { headers: { Origin: 'http://localhost:5178' } })).status).toBe(200)
+})
+
+// #754: a failed setup is shown on the thread with its output — the tree route carries what the
+// branch recorded, and nothing for a thread whose tree had nothing to set up.
+test("the tree route carries what preparing the thread's tree did, from its branch (#754)", async () => {
+  const tree = mkdtempSync(join(tmpdir(), 'enso-setup-tree-'))
+  const setup: EnsoTreeSetupOutcome = {
+    ok: false,
+    copied: [],
+    missing: ['.env'],
+    steps: [{ command: 'bun install', exitCode: 1, durationMs: 5, output: 'no lockfile\n', truncated: false }],
+    tiers: { setup: 'shared', copy: 'local' },
+  }
+  const { url } = await startWith(
+    settlesAtOnce,
+    {
+      prepared: { transcript: STORED_BRANCH, modified: new Date(0), firstMessage: 'one', cwd: tree },
+      plain: { transcript: STORED_BRANCH, modified: new Date(0), firstMessage: 'two', cwd: tree },
+    },
+    (host) => ({
+      ...host,
+      threadTree: (threadId: string): Promise<ThreadTreePlace> =>
+        Promise.resolve({
+          record: {
+            kind: 'worktree',
+            project: '/work/app',
+            path: tree,
+            branch: `enso/${threadId}`,
+            base: 'a'.repeat(40),
+          },
+          store: '/enso/snapshots/x',
+          ...(threadId === 'prepared' ? { setup } : {}),
+        }),
+    }),
+    { launch: tree },
+  )
+  const prepared: unknown = await (await fetch(`${url}/api/threads/prepared/tree`)).json()
+  expect(prepared).toMatchObject({ threadId: 'prepared', path: tree, setup })
+  const plain: unknown = await (await fetch(`${url}/api/threads/plain/tree`)).json()
+  expect(plain).not.toHaveProperty('setup')
 })
 
 // ⚠ #713, measured: in a CSP sandbox under Enso's origin (#619) the page had an opaque origin — no

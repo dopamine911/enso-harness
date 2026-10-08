@@ -116,6 +116,8 @@ export interface ThreadsRailProps {
   readonly onAddProject: () => void
   /** Forget a registered project; its threads stay on disk. Never offered for the launch directory. */
   readonly onRemoveProject: (projectId: string) => void
+  /** Open a project's page (#754): how its new threads' trees are made. Offered for every project, the launch one too. */
+  readonly onProjectSettings: (projectId: string) => void
   /** Why the last add or remove did not go through, or undefined. Shown above the sections. */
   readonly projectNotice: string | undefined
   /**
@@ -403,23 +405,28 @@ function hiddenState(group: ProjectGroup): 'waiting' | 'running' | undefined {
   return undefined
 }
 
-/** The section's header: fold it, see where it is, start a thread in it. */
+/** What a section's header does to its project: start a thread, open its page (#754), forget it. */
+interface ProjectActions {
+  readonly onNew: (projectId: string) => void
+  readonly onRemove: (projectId: string) => void
+  readonly onSettings: (projectId: string) => void
+}
+
+/** The section's header: fold it, see where it is, start a thread in it, open its menu. */
 function SectionHeader({
   group,
   name,
   hover,
   folded,
   onFold,
-  onNew,
-  onRemove,
+  actions: { onNew, onRemove, onSettings },
 }: {
   group: ProjectGroup
   name: string
   hover: string
   folded: boolean
   onFold: () => void
-  onNew: (projectId: string) => void
-  onRemove: (projectId: string) => void
+  actions: ProjectActions
 }): React.ReactNode {
   const { project } = group
   const missing = project?.status === 'missing-dir'
@@ -452,7 +459,8 @@ function SectionHeader({
           <PlusIcon />
         </Button>
       )}
-      {project === undefined || project.launch ? null : (
+      {/* #754: every project has a page, the launch one too; only a registered one can be removed. */}
+      {project === undefined ? null : (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button type="button" size="icon" variant="ghost" className="size-6" aria-label={`more for ${name}`}>
@@ -460,9 +468,12 @@ function SectionHeader({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onSelect={() => onRemove(project.projectId)}>
-              Remove project — its threads stay on disk
-            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => onSettings(project.projectId)}>Project settings…</DropdownMenuItem>
+            {project.launch ? null : (
+              <DropdownMenuItem onSelect={() => onRemove(project.projectId)}>
+                Remove project — its threads stay on disk
+              </DropdownMenuItem>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       )}
@@ -537,30 +548,20 @@ function ProjectSection({
   activeThreadId,
   onSelect,
   onResume,
-  onNew,
-  onRemove,
+  actions,
 }: {
   group: ProjectGroup
   anyProjects: boolean
   activeThreadId: string | undefined
   onSelect: (threadId: string) => void
   onResume: (threadId: string) => void
-  onNew: (projectId: string) => void
-  onRemove: (projectId: string) => void
+  actions: ProjectActions
 }): React.ReactNode {
   const [folded, toggleFolded] = useFolded(group.project?.projectId ?? 'unlisted')
   const { name, hover } = sectionTitle(group.project, anyProjects)
   return (
     <section aria-label={name} className="flex flex-col gap-1">
-      <SectionHeader
-        group={group}
-        name={name}
-        hover={hover}
-        folded={folded}
-        onFold={toggleFolded}
-        onNew={onNew}
-        onRemove={onRemove}
-      />
+      <SectionHeader group={group} name={name} hover={hover} folded={folded} onFold={toggleFolded} actions={actions} />
       {folded ? null : (
         <SectionRows
           group={group}
@@ -586,6 +587,7 @@ export function ThreadsRail({
   onNew,
   onAddProject,
   onRemoveProject,
+  onProjectSettings,
   projectNotice,
   shownNarrow = false,
   forkParents = NO_FORKS,
@@ -593,6 +595,7 @@ export function ThreadsRail({
   const groups = groupByProject(projects, threads, earlier)
   // New Thread starts where the reader is: the project of the thread on screen.
   const activeProject = groups.find((group) => group.threads.some((thread) => thread.threadId === activeThreadId))
+  const actions: ProjectActions = { onNew, onRemove: onRemoveProject, onSettings: onProjectSettings }
   return (
     <ForkParentsContext.Provider value={forkParents}>
       <nav
@@ -630,8 +633,7 @@ export function ThreadsRail({
             activeThreadId={activeThreadId}
             onSelect={onSelect}
             onResume={onResume}
-            onNew={onNew}
-            onRemove={onRemoveProject}
+            actions={actions}
           />
         ))}
         <Button

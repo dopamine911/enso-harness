@@ -101,6 +101,7 @@ import { ModelChip, ModelChoiceDialog, ThinkingLevelSelect, useModelState, useRe
 import { NotificationLines, type PlacedLines, placeLines } from './notifications.tsx'
 import { PermissionModeSelect, usePermissionMode } from './permission-mode.tsx'
 import { createProjectsStore, projectOf, removeProject, threadAfterDelete } from './project-list.ts'
+import { ProjectSettingsDialog } from './project-settings-dialog.tsx'
 import { PromptManagerDialog } from './prompt-manager.tsx'
 import { QuestionnaireControls } from './questionnaire-card.tsx'
 import { providerRefusalLine, providerRefusalSource, RefusedAttemptLine, refusalOfMessage } from './refused-attempt.tsx'
@@ -2399,28 +2400,41 @@ function usePageListings(): PageListings {
   return { threads, stored, projects }
 }
 
-/** The rail's project controls: whether the add dialog is open, what a refused removal said, and the removal itself. */
+/** The rail's project controls: whether the add dialog is open, which project's page is, what a refused removal said, and the removal itself. */
 interface ProjectEditing {
   readonly addingProject: boolean
   readonly setAddingProject: (adding: boolean) => void
+  /** The project whose page (#754) is open, or undefined. */
+  readonly settingsProjectId: string | undefined
+  readonly setSettingsProjectId: (projectId: string | undefined) => void
   readonly projectNotice: string | undefined
   readonly setProjectNotice: (notice: string | undefined) => void
   readonly forgetProject: (projectId: string) => Promise<void>
 }
 
 /**
- * Adding and removing projects (#395 slice 3). A refused removal is said on the rail; a removed
- * project's open threads stay, under "other" — the server ended them, and the rail never drops one.
+ * Adding and removing projects (#395 slice 3), and opening one's page (#754). A refused removal is
+ * said on the rail; a removed project's open threads stay, under "other" — the server ended them,
+ * and the rail never drops one.
  */
 function useProjectEditing(): ProjectEditing {
   const [addingProject, setAddingProject] = useState(false)
+  const [settingsProjectId, setSettingsProjectId] = useState<string | undefined>(undefined)
   const [projectNotice, setProjectNotice] = useState<string | undefined>(undefined)
   const forgetProject = async (projectId: string): Promise<void> => {
     const outcome = await removeProject(projectId)
     setProjectNotice(outcome.kind === 'ok' ? undefined : `could not remove the project: ${outcome.reason}`)
     await Promise.all([projectList.refresh(), storedThreads.refresh()])
   }
-  return { addingProject, setAddingProject, projectNotice, setProjectNotice, forgetProject }
+  return {
+    addingProject,
+    setAddingProject,
+    settingsProjectId,
+    setSettingsProjectId,
+    projectNotice,
+    setProjectNotice,
+    forgetProject,
+  }
 }
 
 /** The page (#90): header, the sessions rail, and one mounted pane per live thread. */
@@ -2515,7 +2529,8 @@ export function ChatScreen(): React.ReactNode {
     if (BOOT.kind === 'resume') resumeFrom(BOOT.threadId, 'pop', true)
   }, [resumeFrom])
   useFollowUrlHistory(navigate, resumeFrom)
-  const { addingProject, setAddingProject, projectNotice, setProjectNotice, forgetProject } = useProjectEditing()
+  const editing = useProjectEditing()
+  const { addingProject, setAddingProject, projectNotice, setProjectNotice, forgetProject } = editing
   // The debug column (#86) is a right-hand pane, not a bottom drawer: stacked under the
   // transcript it took forty percent of the height and squeezed the conversation it
   // exists to explain. Opt-in by `?debug`; open by default when it is, and collapsible
@@ -2551,6 +2566,7 @@ export function ChatScreen(): React.ReactNode {
           onNew={rail.leave((projectId: string | undefined) => navigate(mintPageThread(projectId).threadId, 'push'))}
           onAddProject={() => setAddingProject(true)}
           onRemoveProject={(projectId: string) => void forgetProject(projectId)}
+          onProjectSettings={editing.setSettingsProjectId}
           projectNotice={projectNotice}
           shownNarrow={rail.open}
         />
@@ -2562,6 +2578,10 @@ export function ChatScreen(): React.ReactNode {
             void projectList.refresh()
             void storedThreads.refresh()
           }}
+        />
+        <ProjectSettingsDialog
+          project={projects.rows.find((project) => project.projectId === editing.settingsProjectId)}
+          onClose={() => editing.setSettingsProjectId(undefined)}
         />
         <div className={rail.paneClass}>
           {threads.map((thread) => (

@@ -2,6 +2,7 @@ import { afterAll, beforeAll, expect, setSystemTime, test } from 'bun:test'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -54,7 +55,10 @@ import {
   withRule,
   readEnsoRunContext,
   threadTrustsProject,
+  ENSO_THREAD_TREE_ENTRY,
   ENSO_TREE_RESTORED_ENTRY,
+  ENSO_TREE_SETUP_ENTRY,
+  type EnsoConfig,
   type RuntimeCommand,
 } from '@enso/core'
 import { flowTrace } from '@enso/core/flow-trace'
@@ -173,6 +177,28 @@ function hostWith(extensionFactories: InlineExtension[] = []): AgentHost {
 
 async function hostedSession(extensionFactories: InlineExtension[] = []): Promise<HostedThread> {
   const hosted = await hostWith(extensionFactories).createSession(crypto.randomUUID(), () => repoRoot)
+  openSessions.push(hosted)
+  return hosted
+}
+
+/**
+ * A session in a plain project of its own, for the tests whose subject is the WORKSPACE boundary
+ * ("a read inside passes", a relative write the mode allows). ⚠ Not the checkout (#754, #755): a
+ * thread's tree lives under `~/.enso`, where the guard refuses every read and write, so in a tree a
+ * test of "inside the workspace" run in the checkout measured where the checkout sits, not the guard
+ * — six failed there, and passed everywhere else. The project holds the `package.json` they read.
+ */
+async function plainWorkspaceSession(extensionFactories: InlineExtension[] = []): Promise<HostedThread> {
+  const project = realpathOrSelf(mkdtempSync(join(tmpdir(), 'enso-host-workspace-')))
+  copyFileSync(join(repoRoot, 'package.json'), join(project, 'package.json'))
+  const host = createAgentHost({
+    servesDirectory: (directory) => realpathOrSelf(directory) === project,
+    agentDir,
+    permissionRulesPath,
+    harnessPackageDir: harnessDir,
+    extensionFactories,
+  })
+  const hosted = await host.createSession(crypto.randomUUID(), () => project)
   openSessions.push(hosted)
   return hosted
 }
@@ -922,7 +948,7 @@ async function switchMode(hosted: HostedThread, mode: string): Promise<void> {
 // unasked) while the host said `default`. Asked through the real engine: a write bypass lets
 // through must ask again once the mode is back to `default`.
 test('⚠ back to default after bypassPermissions, the engine asks again: the mode shown is the mode enforced', async () => {
-  const hosted = await hostedSession()
+  const hosted = await plainWorkspaceSession()
   const write = { path: 'enso-496-mode-probe.txt', content: 'x' }
   await switchMode(hosted, 'bypassPermissions')
   expect((await hosted.probeToolCall('write', write))?.block ?? false).toBe(false)
@@ -965,7 +991,7 @@ async function bashCardTitles(hosted: HostedThread, command: string, answer: str
 // that a question about the command follows, the second that it is the last. A call that asks once
 // says nothing more, and a No on the first card leaves nothing for the next call to inherit.
 test('⚠ one bash call asked twice says so on both cards: the path first, the command last (#728)', async () => {
-  const hosted = await hostedSession()
+  const hosted = await plainWorkspaceSession()
   const [pathCard, commandCard, ...more] = await bashCardTitles(hosted, OUTSIDE_WRITE, 'Yes')
   expect(more).toEqual([])
   expect(pathCard).toStartWith(
@@ -1172,7 +1198,7 @@ test('setPermissionMode with a mode the extension registers no command for is re
 
 // @pins guarded-tool-call/one-verdict
 test('⚠ through the runtime, the real guards refuse a write outside the workspace with their reason; a read inside passes', async () => {
-  const hosted = await hostedSession()
+  const hosted = await plainWorkspaceSession()
   const refused = await hosted.probeToolCall('write', { path: '/etc/passwd', content: 'x' })
   expect(refused).toMatchObject({ block: true })
   expect(refused?.reason).toContain('/etc/passwd')
@@ -1212,7 +1238,7 @@ test('⚠ first block is final: a later extension cannot un-block the guards, an
       })
     },
   }
-  const hosted = await hostedSession([laterExtension])
+  const hosted = await plainWorkspaceSession([laterExtension])
   const write = await hosted.probeToolCall('write', { path: '/etc/passwd', content: 'x' })
   expect(write?.block).toBe(true)
   expect(write?.reason).not.toContain('later participant')
@@ -1821,11 +1847,15 @@ function dirtyCheckout(): string {
   return project
 }
 
-/** A host that gives every new thread a worktree — or `tree` — serving `project` and its trees. */
+/**
+ * A host that gives every new thread a worktree — or `tree` — serving `project` and its trees; `user`
+ * is the user's config, the user tier of the project's tree settings (#754).
+ */
 function treeHost(
   project: string,
   extensionFactories: InlineExtension[] = [],
   tree: 'worktree' | 'copy' | 'off' = 'worktree',
+  user: EnsoConfig = { threads: { tree } },
 ): { host: AgentHost; projectsDir: string } {
   // ⚠ The run's ENSO_HOME's projects folder (the preload's `<scratch>/enso-home`, which `tmpdir()`
   // names), not a folder of the test's own: the run-context extension files each run's snapshot in
@@ -1839,7 +1869,7 @@ function treeHost(
     permissionRulesPath,
     harnessPackageDir: harnessDir,
     projectsDir,
-    threadTree: () => tree,
+    threadSettings: { user, userPath: join(tmpdir(), 'enso-home', 'config.json'), canonical: (key) => key },
     extensionFactories,
   })
   return { host, projectsDir }
@@ -1881,6 +1911,130 @@ test("⚠ two threads on one project each get their own worktree at the checkout
   // Nothing of it reached the checkout.
   expect(fixtureGit(project, 'status', '--porcelain')).toBe(statusBefore)
   expect(readFileSync(join(project, 'a.txt'), 'utf8')).toBe('dirty\n')
+})
+
+// ── #754: a new tree prepared by the project's settings ───────────────────────────────────────
+
+/** `project`'s shared tier (`.enso/config.json`) setting `threads`. */
+function sharedThreads(project: string, threads: EnsoConfig['threads']): void {
+  mkdirSync(join(project, '.enso'), { recursive: true })
+  writeFileSync(join(project, '.enso', 'config.json'), JSON.stringify({ threads }))
+}
+
+/** The custom entries of a thread's branch, by type, in order. */
+function customTypesOf(hosted: HostedThread): string[] {
+  return hosted.inspect().entries.flatMap((entry) => {
+    if (entry.kind === 'custom') return [entry.customType]
+    return entry.kind === 'message' && entry.role === 'user' ? ['user'] : []
+  })
+}
+
+// ⚠ #749: a bare worktree has none of the checkout's ignored files, so the project's install step
+// and hook could not run in it. A trusted project's shared tier says how its trees are prepared.
+test("⚠ a new thread in a trusted project gets its shared tier's copy and setup in its tree before its first run, recorded right after the tree (#754)", async () => {
+  const project = dirtyCheckout()
+  sharedThreads(project, { copy: ['.env'], setup: ['test -f .env && echo prepared > setup.txt', 'echo done'] })
+  const core = createFauxCore()
+  core.setResponses([faux.fauxAssistantMessage('ran')])
+  const { host } = treeHost(project, [fauxModelExtension(core)])
+  new ProjectTrustStore(agentDir).set(project, true)
+  const threadId = crypto.randomUUID()
+  const hosted = await host.createSession(threadId, () => project)
+  openSessions.push(hosted)
+  await runPrompt(hosted, 'first')
+  const tree = hosted.inspect().cwd
+  expect(tree).not.toBe(project)
+  expect(readFileSync(join(tree, '.env'), 'utf8')).toBe('SECRET=1\n')
+  expect(readFileSync(join(tree, 'setup.txt'), 'utf8')).toBe('prepared\n')
+  expect(existsSync(join(project, 'setup.txt'))).toBe(false)
+  // Recorded right after the tree, before the first message reached the model.
+  const types = customTypesOf(hosted)
+  const treeAt = types.indexOf(ENSO_THREAD_TREE_ENTRY)
+  expect(types[treeAt + 1]).toBe(ENSO_TREE_SETUP_ENTRY)
+  expect(types.indexOf('user')).toBeGreaterThan(treeAt + 1)
+  const recorded = await host.threadTree(threadId)
+  expect(recorded?.setup).toMatchObject({
+    ok: true,
+    copied: ['.env'],
+    missing: [],
+    tiers: { setup: 'shared', copy: 'shared' },
+  })
+  expect(recorded?.setup?.steps.map((step) => step.exitCode)).toEqual([0, 0])
+})
+
+// The issue's rule: a failed setup is shown on the thread with its output, and the thread opens,
+// so it can be fixed from there.
+test('⚠ a failing setup still lets the thread run: the failure and its output are on its branch, the rest did not run (#754)', async () => {
+  const project = dirtyCheckout()
+  sharedThreads(project, { setup: ['echo broken >&2; exit 7', 'touch never.txt'] })
+  const core = createFauxCore()
+  core.setResponses([faux.fauxAssistantMessage('ran anyway')])
+  const { host } = treeHost(project, [fauxModelExtension(core)])
+  new ProjectTrustStore(agentDir).set(project, true)
+  const threadId = crypto.randomUUID()
+  const hosted = await host.createSession(threadId, () => project)
+  openSessions.push(hosted)
+  await runPrompt(hosted, 'first')
+  const tree = hosted.inspect().cwd
+  expect(tree).not.toBe(project)
+  expect(hosted.inspect().entries.some((entry) => entry.kind === 'message' && entry.role === 'assistant')).toBe(true)
+  expect(existsSync(join(tree, 'never.txt'))).toBe(false)
+  const setup = (await host.threadTree(threadId))?.setup
+  expect(setup?.ok).toBe(false)
+  expect(setup?.steps).toHaveLength(1)
+  expect(setup?.steps[0]).toMatchObject({ command: 'echo broken >&2; exit 7', exitCode: 7, output: 'broken\n' })
+})
+
+// ⚠ The project tiers are read only once the project is trusted: an untrusted checkout's config
+// runs no command, and its mode does not apply.
+test("⚠ an untrusted project's setup is not run, and nothing is recorded (#754)", async () => {
+  const project = dirtyCheckout()
+  sharedThreads(project, { setup: ['touch ran.txt'] })
+  const core = createFauxCore()
+  core.setResponses([faux.fauxAssistantMessage('ran')])
+  const { host } = treeHost(project, [fauxModelExtension(core)])
+  new ProjectTrustStore(agentDir).set(project, false)
+  const threadId = crypto.randomUUID()
+  const hosted = await host.createSession(threadId, () => project)
+  openSessions.push(hosted)
+  await runPrompt(hosted, 'first')
+  const tree = hosted.inspect().cwd
+  expect(tree).not.toBe(project)
+  expect(existsSync(join(tree, 'ran.txt'))).toBe(false)
+  expect(customTypesOf(hosted)).not.toContain(ENSO_TREE_SETUP_ENTRY)
+  expect((await host.threadTree(threadId))?.setup).toBeUndefined()
+})
+
+// ⚠ Found live: a project's first thread mints its tree at its first run, and the trust question
+// is asked by that run's session — after the tree exists. Untrusted at the mint, the shared setup
+// was skipped, and "Trust project" never brought it back: the first thread of every project ran
+// without its install. The answer prepares the tree, before the run it was asked for.
+test('⚠ "Trust project" answered at the first run prepares the tree minted before it, before the run starts (#754)', async () => {
+  const project = dirtyCheckout()
+  sharedThreads(project, { setup: ['echo prepared > setup.txt'] })
+  const core = createFauxCore()
+  core.setResponses([faux.fauxAssistantMessage('ran')])
+  const { host } = treeHost(project, [fauxModelExtension(core)])
+  const threadId = crypto.randomUUID()
+  const hosted = await host.createSession(threadId, () => project)
+  openSessions.push(hosted)
+  const asked = untilObservation(hosted, isTrustQuestion)
+  await promptAnswering(hosted, [], 'Trust project')
+  await asked
+  const tree = hosted.inspect().cwd
+  expect(tree).not.toBe(project)
+  expect(readFileSync(join(tree, 'setup.txt'), 'utf8')).toBe('prepared\n')
+  expect((await host.threadTree(threadId))?.setup).toMatchObject({ ok: true, tiers: { setup: 'shared' } })
+  // Before the reply: the run the question held started on a prepared tree.
+  const types = customTypesOf(hosted)
+  const assistantAt = hosted
+    .inspect()
+    .entries.findIndex((entry) => entry.kind === 'message' && entry.role === 'assistant')
+  const setupAt = hosted
+    .inspect()
+    .entries.findIndex((entry) => entry.kind === 'custom' && entry.customType === ENSO_TREE_SETUP_ENTRY)
+  expect(types).toContain(ENSO_TREE_SETUP_ENTRY)
+  expect(setupAt).toBeLessThan(assistantAt)
 })
 
 // ⚠ PR #561 review: a thread only BUILT — a preview looked at, a permission checked, a model chosen —
@@ -3150,7 +3304,7 @@ test('⚠ a declined ask_user questionnaire reaches the model as a decline, and 
 async function requestsAfterBatch(calls: readonly unknown[]): Promise<number> {
   const core = createFauxCore()
   core.setResponses([faux.fauxAssistantMessage([...calls]), faux.fauxAssistantMessage('Carrying on.')])
-  const hosted = await hostedSession([fauxModelExtension(core)])
+  const hosted = await plainWorkspaceSession([fauxModelExtension(core)])
   await runPrompt(hosted, 'tidy up')
   return core.state.callCount
 }
@@ -3239,7 +3393,7 @@ test('⚠⚠ the report turn: asked in the same run with only the report tool; a
     faux.fauxAssistantMessage(faux.fauxToolCall(ENSO_INCIDENT_REPORT_TOOL_NAME, report)),
     faux.fauxAssistantMessage('never asked: the report ended the run'),
   ])
-  const hosted = await hostedSession([fauxModelExtension(counted), incidentOpener()])
+  const hosted = await plainWorkspaceSession([fauxModelExtension(counted), incidentOpener()])
   const seen = collectEvents(hosted)
   await runPrompt(hosted, 'Please read the manifest.')
 

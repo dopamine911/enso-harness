@@ -1,6 +1,9 @@
 node_modules/
 dist-types/
-.enso/
+# A checkout's `.enso/` held secrets before #421, and an old checkout may still: ignored, except the
+# project's shared settings (#754). `config.local.json` is one person's, and stays ignored.
+.enso/*
+!.enso/config.json
 .local/
 .inspiration/
 

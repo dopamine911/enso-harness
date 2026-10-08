@@ -14,12 +14,13 @@ import {
   type ThreadReadOutcome,
 } from './route-read.ts'
 import { useThreadStores } from './store.ts'
+import { TreeSetupReport } from './tree-setup-report.tsx'
 
 /**
  * What a thread built, reachable from the page (#619). A thread runs in a tree of its own (#551),
  * so its work is not in the user's checkout. The status bar's "own tree" opens this: the tree's
- * path, to copy, and the HTML pages in it, each opened in a new tab on the thread's preview origin
- * (`server/thread-preview-route.ts`).
+ * path, to copy, what preparing it did (its setup, #754), and the HTML pages in it, each opened in a
+ * new tab on the thread's preview origin (`server/thread-preview-route.ts`).
  *
  * ⚠ A NEW TAB, ON AN ORIGIN OF ITS OWN (#713). The preview is agent-written; it is served from the
  * thread's own loopback port, the tree at `/`, so it runs as it would anywhere — its storage, its
@@ -52,7 +53,7 @@ function ThreadTreePagesBody({
   if (outcome.kind === 'failed') {
     return <p className="text-sm text-muted-foreground">the tree could not be read: {outcome.problem}</p>
   }
-  const { path, pages, truncated, previewOrigin } = outcome.payload
+  const { path, pages, truncated, previewOrigin, setup } = outcome.payload
   return (
     <div className="grid gap-4 text-sm">
       <div className="grid gap-1.5">
@@ -69,6 +70,8 @@ function ThreadTreePagesBody({
           <span className="text-muted-foreground">The clipboard refused the copy: select the path to copy it.</span>
         ) : null}
       </div>
+      {/* #754: what preparing the tree did — a failed setup is said here, with the file to fix. */}
+      {setup === undefined ? null : <TreeSetupReport setup={setup} />}
       <div className="grid gap-1.5">
         <span className="text-muted-foreground">Pages it can show:</span>
         {pages.length === 0 || previewOrigin === undefined ? (

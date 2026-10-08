@@ -387,6 +387,70 @@ test('⚠ "own tree" opens what the thread built: its path, and each page on its
   await pane.unmount()
 })
 
+// ⚠ #754: a tree whose setup failed still opens its thread, and fails later far from the cause (a
+// pre-commit hook with no node_modules). The panel says it on its face: the failing command, its
+// exit, and the file its list came from; the command's output waits behind its step.
+test('⚠ a failed tree setup is said on the panel — command, exit and the file to fix — its output on expanding (#754)', async () => {
+  const pane = await mountPane({
+    server: {
+      pages: () => ({
+        path: '/home/me/.enso/projects/p/trees/t',
+        pages: [],
+        truncated: false,
+        setup: {
+          ok: false,
+          copied: [],
+          missing: ['.env'],
+          steps: [
+            {
+              command: 'bun install --frozen-lockfile',
+              exitCode: 1,
+              durationMs: 2300,
+              output: 'error: lockfile had changes, but lockfile is frozen',
+              truncated: false,
+            },
+          ],
+          tiers: { setup: 'shared', copy: 'local' },
+        },
+      }),
+    },
+  })
+  await pane.settle({ ...SNAPSHOT_LIVE, tree: true })
+  const opener = [...pane.container.querySelectorAll<HTMLButtonElement>('button')].find(
+    (button) => button.textContent === 'own tree, not your checkout',
+  )
+  if (opener === undefined) throw new Error('expected the "own tree" button on the bar')
+  await flush(async () => {
+    opener.click()
+    await tick()
+  })
+  const panel = await eventually(() => {
+    const dialog = [...document.querySelectorAll<HTMLElement>('[role="dialog"]')].find((open) =>
+      open.textContent?.includes('What this thread built'),
+    )
+    if (dialog === undefined) throw new Error('expected the panel')
+    expect(dialog.querySelector('[role="alert"]')?.textContent).toBe(
+      'Setup failed at bun install --frozen-lockfile (exit 1) — the commands are in shared with the project (.enso/config.json).',
+    )
+    return dialog
+  })
+  expect(panel.textContent).toContain('Missing, not copied: .env')
+  expect(panel.textContent).not.toContain('lockfile is frozen')
+  const step = [...panel.querySelectorAll<HTMLButtonElement>('button')].find((button) =>
+    button.textContent?.startsWith('output of bun install --frozen-lockfile'),
+  )
+  if (step === undefined) throw new Error('expected the step’s toggle')
+  expect(step.textContent).toContain('exit 1, 2.3s')
+  await flush(async () => {
+    step.click()
+    await tick()
+  })
+  await eventually(() =>
+    expect(panel.querySelector('pre')?.textContent).toBe('error: lockfile had changes, but lockfile is frozen'),
+  )
+  await pane.unmount()
+})
+
 // ⚠ #640: the first agent run after the preview shipped read the "own tree" button and concluded
 // Enso had no preview. Once the tree holds a page, the bar says "Preview", and it opens the panel.
 test('⚠ the bar offers "Preview" once the thread’s tree holds a page, and not before (#640)', async () => {

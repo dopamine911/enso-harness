@@ -58,6 +58,7 @@ async function mountRail(lastActivityAt: Date): Promise<{
       onNew={noop}
       onAddProject={noop}
       onRemoveProject={noop}
+      onProjectSettings={noop}
       projectNotice={undefined}
     />
   )

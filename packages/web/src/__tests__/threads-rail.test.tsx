@@ -484,6 +484,7 @@ test('the rail names the active thread, titles the untitled honestly, and marks 
       onNew={noop}
       onAddProject={noop}
       onRemoveProject={noop}
+      onProjectSettings={noop}
       projectNotice={undefined}
     />,
   )
@@ -552,6 +553,7 @@ test("each project is a section with its own threads — the page's open ones, t
       onNew={noop}
       onAddProject={noop}
       onRemoveProject={noop}
+      onProjectSettings={noop}
       projectNotice={undefined}
     />,
   )
@@ -631,6 +633,7 @@ test('⚠ two prompts that start alike read apart on the rail — the words past
       onNew={noop}
       onAddProject={noop}
       onRemoveProject={noop}
+      onProjectSettings={noop}
       projectNotice={undefined}
     />,
   )
@@ -678,6 +681,7 @@ test('a fork says which thread it came from, by that thread’s title — a stor
       onNew={noop}
       onAddProject={noop}
       onRemoveProject={noop}
+      onProjectSettings={noop}
       projectNotice={undefined}
     />,
   )
@@ -730,6 +734,7 @@ test('a folded section says a question is waiting in it, over a run in flight; u
         onNew={noop}
         onAddProject={noop}
         onRemoveProject={noop}
+        onProjectSettings={noop}
         projectNotice={undefined}
       />,
     )
@@ -773,6 +778,7 @@ test('a section shows five stored threads and says how many more there are; a fa
     onNew: noop,
     onAddProject: noop,
     onRemoveProject: noop,
+    onProjectSettings: noop,
     projectNotice: undefined,
   }
   const rendered = renderToStaticMarkup(<ThreadsRail {...props} earlier={earlier} earlierError={undefined} />)
@@ -797,7 +803,8 @@ test('⚠ a thread minted in a project names it on every request it makes; one m
   expect(seen).toEqual(['p-app', null, 'p-app'])
 })
 
-test('a registered project can be removed from its section, the launch directory cannot; a refused removal is said', () => {
+// What the menu offers (Remove for a registered project only) is mounted in `project-settings.test.tsx` (#754).
+test('every project has a menu, the launch directory too (#754); a refused removal is said', () => {
   const rendered = renderToStaticMarkup(
     <ThreadsRail
       projects={[LAUNCH, APP]}
@@ -810,11 +817,12 @@ test('a registered project can be removed from its section, the launch directory
       onNew={noop}
       onAddProject={noop}
       onRemoveProject={noop}
+      onProjectSettings={noop}
       projectNotice="could not remove the project: 409 a thread in this project is running"
     />,
   )
   expect(sectionOf(rendered, 'app')).toContain('aria-label="more for app"')
-  expect(sectionOf(rendered, 'enso')).not.toContain('more for')
+  expect(sectionOf(rendered, 'enso')).toContain('aria-label="more for enso"')
   expect(rendered).toContain('Add project')
   expect(rendered).toMatch(/role="alert"[^>]*>could not remove the project: 409 a thread in this project is running/)
 })

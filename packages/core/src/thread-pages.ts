@@ -1,4 +1,5 @@
 import { type Static, Type } from 'typebox'
+import { EnsoTreeSetupOutcome } from './project-settings.ts'
 
 /**
  * `GET /api/threads/:threadId/tree` (#619): where the thread works, and the pages a person can open
@@ -22,6 +23,8 @@ export const EnsoThreadPages = Type.Object(
      * `/` (#713); a page is `<previewOrigin>/<page>`. Absent while there is no page to preview.
      */
     previewOrigin: Type.Optional(Type.String({ minLength: 1 })),
+    /** What preparing the tree did (#754): absent for a thread with no tree, or a tree made before setup existed. */
+    setup: Type.Optional(EnsoTreeSetupOutcome),
   },
   { additionalProperties: false },
 )
