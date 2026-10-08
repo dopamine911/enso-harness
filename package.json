@@ -37,7 +37,7 @@
     "e2e:model": "ENSO_E2E_MODEL=1 bunx playwright test --config packages/web/e2e/playwright.config.ts --grep @model",
     "coverage:check": "bun scripts/check-coverage.ts",
     "doctor": "bunx react-doctor --verbose",
-    "doctor:check": "react-doctor --project packages/web --scope full --no-score --no-supply-chain --blocking error",
+    "doctor:check": "react-doctor --project packages/web --scope full --no-score --no-supply-chain --blocking warning",
     "docs:api": "typedoc --emit none",
     "docs:build": "bun scripts/docs/build-docs.ts",
     "docs:site": "bun scripts/docs/build-docs.ts && bun scripts/docs/site-content.ts && bunx astro build --root site && bun scripts/docs/site-links.ts",

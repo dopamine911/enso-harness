@@ -287,15 +287,6 @@ function startOnEnter(event: React.KeyboardEvent<HTMLTextAreaElement>, start: ()
   void start()
 }
 
-/** The mode to offer: the one already chosen, else the thread's, else the first it offers. */
-function initialMode(
-  chosen: string | undefined,
-  current: string | undefined,
-  offered: readonly string[],
-): string | undefined {
-  return chosen ?? current ?? offered[0]
-}
-
 /** The dialog's header, and why there are no fields when loading the session failed. */
 function SessionStatus({
   catalogue,
@@ -336,7 +327,8 @@ export function StartSessionDialog(props: StartSessionDialogProps): React.ReactN
   const promptChoice = useSystemPromptChoice(open, threadId, fetchImpl)
   const [model, setModel] = useState<string | undefined>(undefined)
   const [thinking, setThinking] = useState<string | undefined>(undefined)
-  const [mode, setMode] = useState<string | undefined>(undefined)
+  // Only what the user picked is held: until then the field follows the thread's own mode (#391).
+  const [chosenMode, setMode] = useState<string | undefined>(undefined)
   const [text, setText] = useState('')
   const [modelFilter, setModelFilter] = useState('')
   const [applying, setApplying] = useState(false)
@@ -350,7 +342,8 @@ export function StartSessionDialog(props: StartSessionDialogProps): React.ReactN
     setThinking(catalogue.thinking)
     promptField.current?.focus()
   }, [catalogue])
-  useEffect(() => setMode((chosen) => initialMode(chosen, props.mode, props.modes)), [props.mode, props.modes])
+  // The mode to offer: the one chosen, else the thread's, else the first it offers.
+  const mode = chosenMode ?? props.mode ?? props.modes[0]
 
   const levels = levelsOf(catalogue, model)
   const chooseModel = (option: HostCommandOption): void => {

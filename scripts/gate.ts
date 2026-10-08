@@ -45,13 +45,19 @@
  *                  excluded from the count, and why, is recorded beside the threshold. `--summary`
  *                  prints the rate and the counts, not every clone group: on a pass the listing was
  *                  ~95 lines per commit, and `bunx fallow dupes` prints it when a failure needs it.
- *   8. react-doctor — `react-doctor --project packages/web --scope full --no-score --no-supply-chain --blocking error`:
- *                  react-doctor's lint pass over the web surface, failing on an error-severity
- *                  finding (#342). Offline by construction: `--no-score` skips the score API, the
+ *   8. react-doctor — `react-doctor --project packages/web --scope full --no-score --no-supply-chain --blocking warning`:
+ *                  react-doctor's lint pass over the web surface, failing on any finding, warnings
+ *                  included (#342, #747). Offline by construction: `--no-score` skips the score API, the
  *                  share URL and the crash trace, `--no-supply-chain` the Socket.dev lookups — a
- *                  pre-commit hook must not phone home. After typecheck, as dead-code is: the pass
+ *                  pre-commit hook must not phone home. ⚠ That is also why the gate holds no SCORE
+ *                  (#747): the number is computed by react.doctor's API from an upload of every
+ *                  finding plus repo and sha, by a formula that can move without a pin bump; measured,
+ *                  85 on that scale is "at most four warnings on the surface", which `--blocking
+ *                  warning` holds locally, with zero. After typecheck, as dead-code is: the pass
  *                  is syntactic. The rule set is upstream's and moves between versions, so a bump
- *                  of the `react-doctor` pin is a gate change and is reviewed as one (#208).
+ *                  of the `react-doctor` pin is a gate change and is reviewed as one (#208). The
+ *                  ported `src/components/` are out of its scan (`packages/web/doctor.config.json`),
+ *                  the same boundary the linter, coverage and fallow draw (presentation-gate.test.ts).
  *                  Cost: ~1.4 s wall for 141 files (measured 2026-09-23) — a rounding error beside
  *                  `bun test`. The human-facing `doctor` script (`bunx react-doctor --verbose`) keeps
  *                  the score and the share URL because a developer reading a report wants them; it
@@ -206,10 +212,10 @@ export const GATES: readonly Gate[] = [
   {
     // AFTER typecheck, as dead-code is: react-doctor's pass is syntactic (#342). Promoted from
     // the advisory CI job (`continue-on-error`, once per PR, never local) so the verdict can
-    // block, and so the hook, `check:all` and CI inherit one definition. `--blocking error` is
-    // the ratchet's starting rung: green on the day with nothing to accept; the nine warnings
-    // are triaged on #342 and `--blocking warning` is its own decision. ⚠ `--scope full` IS NOT
-    // THE DEFAULT IT CLAIMS TO BE: on a TTY, with the branch carrying changes, react-doctor
+    // block, and so the hook, `check:all` and CI inherit one definition. `--blocking error` was
+    // the ratchet's starting rung (#342); `--blocking warning` is the next (#747), taken once the
+    // surface's 16 warnings were fixed and the ported components left the scan. ⚠ `--scope full`
+    // IS NOT THE DEFAULT IT CLAIMS TO BE: on a TTY, with the branch carrying changes, react-doctor
     // asks "Choose what to scan" and waits — a pre-commit hook or `bun check:all` in a terminal
     // hung on it (PR #345, found by the author running the gate). Pinned, so a gate is a gate
     // wherever it runs; a piped run never saw the prompt, which is how it shipped. OFFLINE FLAGS ARE
@@ -218,7 +224,7 @@ export const GATES: readonly Gate[] = [
     // set is upstream's and moves between versions: a bump of the `react-doctor` pin is a gate
     // change and is reviewed as one (#208).
     name: 'react-doctor',
-    describe: 'react-doctor: no error-severity finding on the web surface',
+    describe: 'react-doctor: no finding, warnings included, on the web surface outside the ported components',
     script: 'doctor:check',
   },
   {

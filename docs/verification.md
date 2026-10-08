@@ -54,10 +54,14 @@ at the first failure:
    crossing is now the commit that causes it. What the count excludes (vendored components, core's
    schema pairs, the colour palettes, the doc generators' inventory tables) is recorded beside the
    threshold, each with its reason.
-8. **react-doctor** — `react-doctor --project packages/web --scope full --no-score --no-supply-chain --blocking error`
-   (#342): the web surface, failing on an error-severity finding. Offline flags are part of the
-   command, not options — a pre-commit hook must not phone home — and so is `--scope full`: on a
-   terminal, with changes on the branch, react-doctor otherwise asks what to scan and waits. The rule set is upstream's, so
+8. **react-doctor** — `react-doctor --project packages/web --scope full --no-score --no-supply-chain --blocking warning`
+   (#342, #747): the web surface outside the ported `src/components/` (`packages/web/doctor.config.json`
+   draws the same boundary as the linter, coverage and fallow), failing on any finding, warnings
+   included. Offline flags are part of the command, not options — a pre-commit hook must not phone
+   home — which is also why the gate holds no score: react.doctor computes it server-side from an
+   upload of the findings, and 85 on that scale measured as "at most four warnings", which this
+   holds locally with zero. `--scope full` is part of it too: on a terminal, with changes on the
+   branch, react-doctor otherwise asks what to scan and waits. The rule set is upstream's, so
    a bump of the pinned `react-doctor` is a gate change.
 9. **Bun test** — the complete test tree, with text and LCOV coverage reporters.
 10. **Aggregate coverage** — `scripts/check-coverage.ts` reads LCOV and enforces the total line and

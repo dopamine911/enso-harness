@@ -38,11 +38,13 @@ import { filesUnder } from '../scripts/source-tree.ts'
  * state-layer rule: `import { useStore } from "@/store.ts"` in `ui/card.tsx` passed every
  * gate in the repo, and so did any new file one directory below `ai-elements/`. The fence is
  * now the boundary it justifies, over the one walker (`scripts/source-tree.ts`, #174), whose
- * extension set is a superset of the `\.tsx?$` this used to apply.
+ * extension set is a superset of the `\.tsx?$` this used to apply. A fourth exclusion draws
+ * the same line (#747): react-doctor's `packages/web/doctor.config.json` → `ignore.files`,
+ * plain JSON because that is the one shape its loader reads, so its reason lives here.
  */
 
 const repositoryRoot = join(import.meta.dir, '..')
-/** The exclusion boundary the three exclusions are drawn at, and therefore the fence. */
+/** The exclusion boundary the four exclusions are drawn at, and therefore the fence. */
 const PORTED_DIRECTORY = 'packages/web/src/components'
 /**
  * The receipt each vendored subdirectory's files must name; bump one here when its clone or
