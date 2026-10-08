@@ -478,7 +478,11 @@ async function openTracedPage(
   })
   try {
     const context = await browser.newContext({ viewport: VIEWPORT })
-    await context.tracing.start({ screenshots: true, snapshots: true, title: `arena ${runId}` })
+    // ⚠ NO SCREENCAST (#736). `screenshots: true` is Chromium's continuous screencast: every repaint a
+    // JPEG, ~31 fps for a whole run because Enso's status dots animate. 97% of each trace zip, 3.3 GB for a
+    // 42-minute run, all of it held in memory by the stop's secret scan. Nothing reads it: the report, the
+    // score and the agent read the recorder's own paced screenshots. The DOM snapshots and the network stay.
+    await context.tracing.start({ screenshots: false, snapshots: true, title: `arena ${runId}` })
     await context.tracing.startChunk()
     return { browser, context, page: await context.newPage() }
   } catch (error) {
