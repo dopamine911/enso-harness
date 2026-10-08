@@ -34,14 +34,15 @@ import { knownSecretValues } from '@enso/core/secrets'
  * not beside the operator's file, so the operator's own pi refreshing the same provider at the same
  * instant is not serialized with the run.
  *
- * ⚠⚠ A LINK CAN BE REPLACED, AND THEN THE OPERATOR IS LOGGED OUT (#639). The harness loads
- * pi-multi-account, which writes `auth.json` and `models.json` ATOMICALLY — a temp file, then a
- * rename onto the path (`auth-file-transaction.ts`) — and a rename onto a symlink replaces the link
- * with a regular file. Measured: a refresh in one run rotated the Anthropic token into that run's
- * home, the operator's file kept the old refresh token, the provider revoked it, and the next run's
- * first model call failed with `invalid_grant`. So the recorder reconciles the links while the run
- * lives and at its stop (`reconcileLinkedFiles`): a link found replaced has its content returned to
- * the operator's file, and is linked again.
+ * ⚠⚠ A LINK CAN BE REPLACED, AND THEN THE OPERATOR IS LOGGED OUT (#639). A rename onto a symlink
+ * replaces the link with a regular file. pi-multi-account wrote `auth.json` and `models.json` that
+ * way (a temp file renamed onto the path), and measured: a refresh in one run rotated the Anthropic
+ * token into that run's home, the operator's file kept the old refresh token, the provider revoked
+ * it, and the next run's first model call failed with `invalid_grant`. #758 patches the extension
+ * (`patches/pi-multi-account@1.23.2.patch`) to rename onto the file behind the link. For any other
+ * writer the recorder still reconciles the links while the run lives and at its stop
+ * (`reconcileLinkedFiles`): a link found replaced has its content returned to the operator's file,
+ * and is linked again.
  *
  * ⚠ NAMED `.enso`, ON PURPOSE. `/.enso/` is the guard's credential fragment (`DEFAULT_GUARD_POLICY`):
  * Enso's own agent can neither read nor write under it, so the links are out of its reach. The same

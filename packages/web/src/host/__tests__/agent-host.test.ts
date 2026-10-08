@@ -4,12 +4,15 @@ import { createHash } from 'node:crypto'
 import {
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
+  readlinkSync,
   renameSync,
   rmSync,
+  symlinkSync,
   utimesSync,
   writeFileSync,
 } from 'node:fs'
@@ -382,6 +385,60 @@ test("⚠ with Cursor off, the Cursor slots multi-account published into pi's mo
   seedMultiAccountConfig(scratch)
   expect(readFileSync(modelsPath, 'utf8')).toBe('{ "providers": { "cursor": ')
   expect(JSON.parse(readFileSync(join(scratch, 'provider-failover.json'), 'utf8')).includeCursor).toBe(false)
+})
+
+// #758: an arena run home links `models.json` to the operator's. A rename onto the link replaced it
+// with a run-only file; the drop must land in the operator's file and leave the link a link.
+test('⚠ dropping the Cursor slots from a linked models.json writes the file behind the link and keeps the link (#758)', () => {
+  const scratch = mkdtempSync(join(tmpdir(), 'enso-host-seed-cursor-link-'))
+  const operatorModels = join(scratch, 'operator-models.json')
+  const linkedModels = join(scratch, 'models.json')
+  writeFileSync(operatorModels, JSON.stringify({ providers: { cursor: cursorPublication(9123) } }))
+  symlinkSync(operatorModels, linkedModels)
+  writeFileSync(join(scratch, 'provider-failover.json'), JSON.stringify({ includeCursor: false }))
+
+  seedMultiAccountConfig(scratch)
+
+  expect(lstatSync(linkedModels).isSymbolicLink()).toBe(true)
+  expect(readlinkSync(linkedModels)).toBe(operatorModels)
+  expect(JSON.parse(readFileSync(operatorModels, 'utf8'))).toEqual({ providers: {} })
+})
+
+/**
+ * #758, against the vendor's REAL credential transaction (`patches/pi-multi-account@1.23.2.patch`).
+ * A home sharing the operator's login links `auth.json` to theirs, and a refresh rotates a single-use
+ * token: a rename onto the link left the rotated token in the home and the operator's file holding a
+ * revoked one (#639). Loaded by file path, as the tests above load the vendor's code.
+ */
+test("⚠ multi-account's credential write through a linked auth.json reaches the file behind it and keeps the link (#758)", async () => {
+  const vendorAuth = (await import(
+    join(dirname(Bun.resolveSync('pi-multi-account/package.json', import.meta.dir)), 'auth-file-transaction.ts')
+  )) as {
+    mutateProxyAuth: (
+      authPath: string,
+      sidecarPath: string,
+      transform: () => { auth: object; sidecar: object; changed: boolean },
+      mode: 'shadow' | 'restore',
+    ) => boolean
+  }
+  const scratch = mkdtempSync(join(tmpdir(), 'enso-host-auth-link-'))
+  const operatorAuth = join(scratch, 'operator-auth.json')
+  const linkedAuth = join(scratch, 'auth.json')
+  writeFileSync(operatorAuth, JSON.stringify({ anthropic: { type: 'oauth', refresh: 'before' } }))
+  symlinkSync(operatorAuth, linkedAuth)
+  const rotated = { anthropic: { type: 'oauth', access: 'rotated-access', refresh: 'rotated-refresh', expires: 1 } }
+
+  const written = vendorAuth.mutateProxyAuth(
+    linkedAuth,
+    join(scratch, 'proxy-oauth.json'),
+    () => ({ auth: rotated, sidecar: {}, changed: true }),
+    'restore',
+  )
+
+  expect(written).toBe(true)
+  expect(lstatSync(linkedAuth).isSymbolicLink()).toBe(true)
+  expect(readlinkSync(linkedAuth)).toBe(operatorAuth)
+  expect(JSON.parse(readFileSync(operatorAuth, 'utf8'))).toEqual(rotated)
 })
 
 /**

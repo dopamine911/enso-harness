@@ -70,5 +70,8 @@
     "@tanstack/ai-react": "0.27.3",
     "@tanstack/react-virtual": "3.14.13",
     "@ag-ui/core": "1.0.0"
+  },
+  "patchedDependencies": {
+    "pi-multi-account@1.23.2": "patches/pi-multi-account@1.23.2.patch"
   }
 }
