@@ -39,6 +39,7 @@ import {
 } from './actions.ts'
 import { collectEnsoEvidence, threadIdsShown } from './evidence.ts'
 import { type ArenaEvidence, foldArenaManifest } from './manifest.ts'
+import { createPageLook, PAGE_CHANGES_SCRIPT, readPageMark } from './page-changes.ts'
 import { isRunning, stopProcessTree } from './process-tree.ts'
 import { ARENA_GRACE_MS, type ArenaBounds, createRunControl, ensoSpendUsd } from './run-control.ts'
 import { arenaSecretSource, arenaSecretValues, runHomeOf } from './run-home.ts'
@@ -96,6 +97,11 @@ const VIEWPORT = { width: 1440, height: 900 } as const
 const ACTION_TIMEOUT_MS = 15_000
 /** How often a wait until change looks at the page (#637): a card is seen within about a second. */
 const CHANGE_POLL_MS = 1000
+/**
+ * How old a wait's last look at the page may grow while the page's change count holds still (#740,
+ * `createPageLook`): what the DOM's mutations do not show is seen within this, not within a poll.
+ */
+const CHANGE_RECHECK_MS = 10_000
 /**
  * Accessibility roles that name nothing a person would point at (#680): text runs and wrappers. What
  * was under a click is the nearest node with any other role — the button, not the text inside it.
@@ -858,6 +864,9 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
       if (typeof forward === 'function') forward(event.type, event.detail)
     })`,
   )
+  // The page's count of its own changes (#740, `page-changes.ts`): a wait until change looks at the
+  // page again only when the count moved.
+  await context.addInitScript(PAGE_CHANGES_SCRIPT)
 
   try {
     await firstPage.goto(ARENA_WEB_ORIGIN)
@@ -919,15 +928,6 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
   for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => resolveStop(`signal ${signal}`))
 
   // ── The agent's actions ────────────────────────────────────────────────────────────────────
-  /** The page as the agent sees it, for a wait on the page (#637, #648): the rail's ages aside, or the native dialog blocking it. */
-  const pageNow = async (): Promise<string> => {
-    const dialog = frontDialog()
-    return dialog === undefined
-      ? pageForChange(await inFront().locator('body').ariaSnapshot({ timeout: ACTION_TIMEOUT_MS }))
-      : dialogForChange(dialog.type(), dialog.message())
-  }
-  /** What the agent last saw: its last read, or the page right after its last move (`createChangeBaseline`). */
-  const lastSeen = createChangeBaseline(pageNow)
   /** The tab actions (#675): list the tabs, bring one to the front, close one but never the last. */
   const performOnTabs = async (
     action: Extract<ArenaAction, { action: 'tabs' | 'switch-tab' | 'close-tab' }>,
@@ -957,8 +957,7 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
     return here()
   }
 
-  // ── The visual agent's eyes and hands (#680) ───────────────────────────────────────────────
-  /** One DevTools session per tab, opened when first needed: the view's capture and the point's element. */
+  /** One DevTools session per tab, opened when first needed: a wait's change mark, the view, the point's element. */
   const devtools = new WeakMap<Page, CDPSession>()
   const devtoolsOf = async (tabPage: Page): Promise<CDPSession> => {
     const known = devtools.get(tabPage)
@@ -967,6 +966,31 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
     devtools.set(tabPage, session)
     return session
   }
+  /**
+   * The page as a wait sees it (#637, #648, #740): the rail's ages aside, or the native dialog
+   * blocking it. ⚠ The dialog first: a page under an open dialog runs no script, and its change
+   * count would not answer.
+   */
+  const pageLook = createPageLook({
+    look: async () => pageForChange(await inFront().locator('body').ariaSnapshot({ timeout: ACTION_TIMEOUT_MS })),
+    mark: async () => {
+      const tabNumber = front
+      const devtoolsOfFront = await devtoolsOf(inFront()).catch(() => undefined)
+      const mark = devtoolsOfFront === undefined ? undefined : await readPageMark(devtoolsOfFront, CHANGE_POLL_MS)
+      return mark === undefined ? undefined : `${tabNumber} ${mark}`
+    },
+    recheckMs: CHANGE_RECHECK_MS,
+  })
+  const dialogPage = (): string | undefined => {
+    const dialog = frontDialog()
+    return dialog === undefined ? undefined : dialogForChange(dialog.type(), dialog.message())
+  }
+  /** The page looked at now: after a move, the baseline of the next wait. */
+  const pageNow = async (): Promise<string> => dialogPage() ?? pageLook.now()
+  /** What the agent last saw: its last read, or the page right after its last move (`createChangeBaseline`). */
+  const lastSeen = createChangeBaseline(pageNow)
+
+  // ── The visual agent's eyes and hands (#680) ───────────────────────────────────────────────
   // The tab in front, as the window shows it, scaled by Chromium itself to the view's size.
   captureView = async (): Promise<Uint8Array> => {
     const session = await devtoolsOf(inFront())
@@ -1102,10 +1126,11 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
     return { ...here(), page: snapshot }
   }
   /**
-   * `wait`: a fixed sleep; a wait on the page until it changes (#637), looked for; or until it needs
-   * the agent (#648), read off what the page announced (#737) — the log since the agent's move, then
-   * each announcement as it comes — ended early by the run stopping or a native dialog opening over
-   * the tab. A wait that returned with attention marks the log: the agent has been told.
+   * `wait`: a fixed sleep; a wait on the page until it changes (#637), looked for when the page's
+   * change count moved (#740); or until it needs the agent (#648), read off what the page announced
+   * (#737) — the log since the agent's move, then each announcement as it comes — ended early by the
+   * run stopping or a native dialog opening over the tab. A wait that returned with attention marks
+   * the log: the agent has been told.
    */
   const performWait = async (action: Extract<ArenaAction, { readonly action: 'wait' }>): Promise<unknown> => {
     if (action.until === undefined) {
@@ -1115,7 +1140,7 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
     if (action.until === 'change') {
       const waited = await waitForChange({
         baseline: await lastSeen.baseline(),
-        look: pageNow,
+        look: async () => dialogPage() ?? pageLook.current(),
         sleep: (ms) => inFront().waitForTimeout(ms),
         ms: action.ms,
         pollMs: CHANGE_POLL_MS,

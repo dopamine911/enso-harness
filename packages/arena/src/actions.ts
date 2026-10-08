@@ -141,14 +141,18 @@ export function isPageWait(detail: string): boolean {
  * Measured (#637): while a permission card waits, they are the ONLY thing on the page that moves —
  * every five seconds or so — and while Enso works, the page changes only at real events.
  */
-const RELATIVE_AGE = / (?:now|\d+[smhd])"/g
+export const RELATIVE_AGE_WORD = String.raw`(?:now|\d+[smhd])`
+const RELATIVE_AGE = new RegExp(` ${RELATIVE_AGE_WORD}"`, 'g')
+/** The rail's accessible name: Enso's `<nav aria-label="threads">`. */
+export const RAIL_NAME = 'threads'
 /** The rail's line in a page read; every line indented under it is the rail's. */
-const RAIL_LINE = '- navigation "threads"'
+const RAIL_LINE = `- navigation "${RAIL_NAME}"`
 
 /**
  * A page read as a wait until change compares it: the rail's ages aside, so the clock is no change.
  * ⚠ IN THE RAIL ONLY (PR #646 review): the ages were measured there, and the same shape elsewhere —
  * a control named "Snooze 1h" — is the page's words, whose change is a change.
+ * Its twin in the page, `PAGE_CHANGES_SCRIPT` (#740), counts every mutation but the rail's ages.
  */
 export function pageForChange(page: string): string {
   let railIndent: number | undefined
