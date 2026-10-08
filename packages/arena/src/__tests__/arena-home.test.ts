@@ -123,7 +123,7 @@ test('a run sets the model Enso starts on in its own settings, keeping the rest;
   }
 })
 
-/** A writer that renames a temp file onto the path, as pi-multi-account did before #758: it replaces a link. */
+/** What pi-multi-account does to write a credential file (`auth-file-transaction.ts`): a temp file, renamed onto the path. */
 function atomicWrite(path: string, content: string): void {
   const temp = `${path}.${process.pid}.tmp`
   writeFileSync(temp, content)
