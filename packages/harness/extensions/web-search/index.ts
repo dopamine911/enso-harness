@@ -1,10 +1,12 @@
 import type { Api, Model } from '@earendil-works/pi-ai'
 import { getEnvApiKey } from '@earendil-works/pi-ai/compat'
-import type {
-  AgentToolResult,
-  AgentToolUpdateCallback,
-  ExtensionAPI,
-  ExtensionContext,
+import {
+  type AgentToolResult,
+  type AgentToolUpdateCallback,
+  type ExtensionAPI,
+  type ExtensionContext,
+  ProjectTrustStore,
+  SettingsManager,
 } from '@earendil-works/pi-coding-agent'
 import {
   ENSO_CONFIG_FILENAME,
@@ -83,7 +85,7 @@ export interface WebSearchDependencies {
   /** The SESSION's config at `session_start` (#421) — shared with web_fetch; see its seam. */
   resolveSessionConfig: (
     session: object,
-    context: Omit<SessionConfigContext, 'home' | 'hostOwnsTrust'>,
+    context: Omit<SessionConfigContext, 'home' | 'hostOwnsTrust' | 'projectTrust'>,
   ) => Promise<SessionEnsoConfig>
   /** Env reads happen HERE (composition root) — providers receive values, never names. */
   readEnvironmentVariable: (variableName: string) => string | undefined
@@ -514,7 +516,11 @@ export default createWebSearch({
   locateConfigFile: () => ensoConfigPath(ensoHome(process.env)),
   readConfigText: readTextIfPresent,
   resolveSessionConfig: (session, context) =>
-    sessionEnsoConfig(session, { ...context, ...sessionConfigEnvironment(process.env) }),
+    sessionEnsoConfig(session, {
+      ...context,
+      // pi's own trust store and settings (#509): `harness/core` may not import them.
+      ...sessionConfigEnvironment(process.env, { ProjectTrustStore, SettingsManager }),
+    }),
   // ⚠ From the gated `ENSO_HOME/secrets.env` FILE, never `process.env` (#89): the host
   // quarantines every secret out of the environment before a session exists, precisely so
   // a `bash` child cannot print it. Extension code is trusted to read the file the model's

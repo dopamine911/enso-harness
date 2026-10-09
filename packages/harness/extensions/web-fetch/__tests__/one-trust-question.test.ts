@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { ProjectTrustStore, SettingsManager } from '@earendil-works/pi-coding-agent'
 import { ensoAgentDir, projectConfigPath } from '@enso/core/paths'
 import { sessionEnsoConfig } from '../../../core/index.ts'
 import { createWebSearch, type WebSearchDependencies } from '../../web-search/index.ts'
@@ -40,7 +41,12 @@ test('⚠ two tools, one session: the trust question is asked once (#421)', asyn
   writeFileSync(projectConfigPath(cwd), JSON.stringify({ webFetch: { allowedHosts: ['docs.project.example'] } }))
 
   const resolveSessionConfig: WebSearchDependencies['resolveSessionConfig'] = (session, context) =>
-    sessionEnsoConfig(session, { ...context, home, hostOwnsTrust: false })
+    sessionEnsoConfig(session, {
+      ...context,
+      home,
+      hostOwnsTrust: false,
+      projectTrust: { ProjectTrustStore, SettingsManager },
+    })
   const neverRead = (): undefined => undefined
   const startFetch = load(
     createWebFetch({

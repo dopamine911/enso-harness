@@ -9,12 +9,12 @@ import {
   parseEnsoConfig,
 } from '@enso/core'
 import { ensoAgentDir, ensoConfigPath, ensoHome, projectConfigPath, readTextIfPresent } from '@enso/core/paths'
-import { createProjectTrustStore, defaultProjectTrust, projectTrustOptions } from './project-trust.ts'
+import { type ProjectTrustRuntime, projectTrustOptions } from './project-trust.ts'
 
 /**
  * The config one session runs under (#421): the user's `ENSO_HOME/config.json`, and over it the
- * project's own `<cwd>/.enso/config.json` — read ONLY once the project is trusted, by pi's trust
- * store and rules (`project-trust.ts`), so one answer covers the project's `.pi/` and `.enso/`.
+ * project's own `<cwd>/.enso/config.json` — read ONLY once the project is trusted, by pi's own trust
+ * store and rules (injected, `project-trust.ts`), so one answer covers the project's `.pi/` and `.enso/`.
  *
  * pi's order: a saved decision (the project or its nearest ancestor), else `defaultProjectTrust`,
  * else the question — pi's answers, asked on the session's UI; with no UI, untrusted. An untrusted
@@ -66,19 +66,26 @@ export interface SessionConfigContext {
    * terminal has no host: there the question below is Enso's own, as pi's covers only `.pi/`.
    */
   readonly hostOwnsTrust: boolean
+  /** pi's store and settings classes (#509), which the terminal's question reads and writes. */
+  readonly projectTrust: ProjectTrustRuntime
 }
 
 /**
- * The context's two process-wide parts, read from `environment`: the user's `ENSO_HOME`, and whether
- * the web host owns project trust (it sets {@link ENSO_PROJECT_TRUST_BY_HOST} before its first
- * session).
+ * The context's process-wide parts: the user's `ENSO_HOME` and whether the web host owns project
+ * trust (it sets {@link ENSO_PROJECT_TRUST_BY_HOST} before its first session), read from
+ * `environment`; and pi's trust classes, which the calling extension imports and passes in (#509).
  *
  * @group Project trust
  */
 export function sessionConfigEnvironment(
   environment: Readonly<Record<string, string | undefined>>,
-): Pick<SessionConfigContext, 'home' | 'hostOwnsTrust'> {
-  return { home: ensoHome(environment), hostOwnsTrust: environment[ENSO_PROJECT_TRUST_BY_HOST] === '1' }
+  projectTrust: ProjectTrustRuntime,
+): Pick<SessionConfigContext, 'home' | 'hostOwnsTrust' | 'projectTrust'> {
+  return {
+    home: ensoHome(environment),
+    hostOwnsTrust: environment[ENSO_PROJECT_TRUST_BY_HOST] === '1',
+    projectTrust,
+  }
 }
 
 /**
@@ -202,10 +209,14 @@ export function userJudgeConfig(
 
 async function projectTrusted(context: SessionConfigContext, projectPath: string): Promise<boolean> {
   const agentDir = ensoAgentDir(context.home)
-  const store = createProjectTrustStore(agentDir)
+  const store = new context.projectTrust.ProjectTrustStore(agentDir)
   const saved = store.get(context.cwd)
   if (saved !== null) return saved
-  const fallback = defaultProjectTrust(agentDir)
+  // pi reads `defaultProjectTrust` from the agent dir's settings only; `projectTrusted: false` keeps
+  // the untrusted project's own `.pi/settings.json` unread while asking whether to trust it.
+  const fallback = context.projectTrust.SettingsManager.create(context.cwd, agentDir, {
+    projectTrusted: false,
+  }).getDefaultProjectTrust()
   if (fallback !== 'ask') return fallback === 'always'
   if (!context.hasUI) return false
   const options = projectTrustOptions(context.cwd)
@@ -216,6 +227,6 @@ async function projectTrusted(context: SessionConfigContext, projectPath: string
   )
   const answer = options.find((option) => option.label === picked)
   if (answer === undefined) return false
-  if (answer.updates.length > 0) store.setMany(answer.updates)
+  if (answer.updates.length > 0) store.setMany([...answer.updates])
   return answer.trusted
 }

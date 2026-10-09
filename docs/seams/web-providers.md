@@ -112,7 +112,7 @@ export interface WebSearchDependencies {
   /** The SESSION's config at `session_start` (#421) — shared with web_fetch; see its seam. */
   resolveSessionConfig: (
     session: object,
-    context: Omit<SessionConfigContext, 'home' | 'hostOwnsTrust'>,
+    context: Omit<SessionConfigContext, 'home' | 'hostOwnsTrust' | 'projectTrust'>,
   ) => Promise<SessionEnsoConfig>
   /** Env reads happen HERE (composition root) — providers receive values, never names. */
   readEnvironmentVariable: (variableName: string) => string | undefined
@@ -147,7 +147,7 @@ export interface WebFetchDependencies {
    */
   resolveSessionConfig: (
     session: object,
-    context: Omit<SessionConfigContext, 'home' | 'hostOwnsTrust'>,
+    context: Omit<SessionConfigContext, 'home' | 'hostOwnsTrust' | 'projectTrust'>,
   ) => Promise<SessionEnsoConfig>
   fetchUrl: (url: string, init: WebFetchRequestInit) => Promise<Response>
   /** Resolve a hostname to its addresses. Rejects on NXDOMAIN/timeouts. */

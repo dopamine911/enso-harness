@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ensoAgentDir, projectConfigPath } from '@enso/core/paths'
-import { createProjectTrustStore } from '../project-trust.ts'
+import type { ProjectTrustRuntime, ProjectTrustUpdate } from '../project-trust.ts'
 import {
   type SessionConfigContext,
   type SessionEnsoConfig,
@@ -13,8 +13,10 @@ import {
 
 /**
  * #421: the session's config — the user's, and over it a trusted project's `.enso/config.json`.
- * Each case is a real ENSO_HOME and a real project directory; the UI is the one thing faked, and it
- * records the question and the notices a person would see.
+ * Each case is a real ENSO_HOME and a real project directory. Faked: the UI, which records the
+ * question and the notices a person would see, and pi's trust store and settings (#509), which an
+ * extension injects — `harness/core` may not import pi (#145). The fake records which agent dir it
+ * was opened on; pi's real classes through the real wiring are `extensions/__tests__/project-trust.test.ts`'s.
  */
 
 interface Fixture {
@@ -22,36 +24,76 @@ interface Fixture {
   readonly cwd: string
   readonly asked: string[]
   readonly notices: string[]
+  /** pi's store, faked: the saved decision per directory, as the session left it. */
+  readonly saved: Map<string, boolean>
+  /** The agent dirs pi's store and settings were opened on. */
+  readonly agentDirs: string[]
   /** `hostTrust`: the web host owns trust (#502) and pi's answer is this; absent, the terminal. */
   context(answer?: string, hasUI?: boolean, hostTrust?: boolean): SessionConfigContext
 }
 
-function fixture(options: { user?: object; project?: object; settings?: object } = {}): Fixture {
+/** pi's store and settings, in memory: exact-directory decisions, and one `defaultProjectTrust`. */
+function fakeProjectTrust(
+  saved: Map<string, boolean>,
+  agentDirs: string[],
+  defaultProjectTrust: 'ask' | 'always' | 'never',
+): ProjectTrustRuntime {
+  return {
+    ProjectTrustStore: class {
+      constructor(agentDir: string) {
+        agentDirs.push(agentDir)
+      }
+      get(directory: string): boolean | null {
+        return saved.get(directory) ?? null
+      }
+      setMany(updates: ProjectTrustUpdate[]): void {
+        for (const { path, decision } of updates) {
+          if (decision === null) saved.delete(path)
+          else saved.set(path, decision)
+        }
+      }
+    },
+    SettingsManager: {
+      create: (_cwd, agentDir) => {
+        agentDirs.push(agentDir)
+        return { getDefaultProjectTrust: () => defaultProjectTrust }
+      },
+    },
+  }
+}
+
+function fixture(
+  options: { user?: object; project?: object; defaultProjectTrust?: 'ask' | 'always' | 'never' } = {},
+): Fixture {
   const root = mkdtempSync(join(tmpdir(), 'enso-session-config-'))
   const home = join(root, 'home', '.enso')
   const cwd = join(root, 'project')
   mkdirSync(ensoAgentDir(home), { recursive: true })
   mkdirSync(cwd, { recursive: true })
   if (options.user !== undefined) writeFileSync(join(home, 'config.json'), JSON.stringify(options.user))
-  if (options.settings !== undefined)
-    writeFileSync(join(ensoAgentDir(home), 'settings.json'), JSON.stringify(options.settings))
   if (options.project !== undefined) {
     mkdirSync(join(cwd, '.enso'))
     writeFileSync(projectConfigPath(cwd), JSON.stringify(options.project))
   }
   const asked: string[] = []
   const notices: string[] = []
+  const saved = new Map<string, boolean>()
+  const agentDirs: string[] = []
+  const projectTrust = fakeProjectTrust(saved, agentDirs, options.defaultProjectTrust ?? 'ask')
   return {
     home,
     cwd,
     asked,
     notices,
+    saved,
+    agentDirs,
     context: (answer?: string, hasUI = true, hostTrust?: boolean) => ({
       home,
       cwd,
       hasUI,
       isProjectTrusted: () => hostTrust === true,
       hostOwnsTrust: hostTrust !== undefined,
+      projectTrust,
       ui: {
         select: (title: string) => {
           asked.push(title)
@@ -99,7 +141,7 @@ test('no config file anywhere: the defaults, read from no file (#435)', async ()
 
 test("⚠ a trusted project's config merges over the user's: its hosts ADD to the user's (#421)", async () => {
   const f = fixture({ user: USER, project: PROJECT })
-  createProjectTrustStore(ensoAgentDir(f.home)).setMany([{ path: f.cwd, decision: true }])
+  f.saved.set(f.cwd, true)
   const resolved = await sessionEnsoConfig({}, f.context())
   expect(hostsOf(resolved)).toEqual(['docs.user.example', 'docs.project.example'])
   expect(resolved.path).toBe(projectConfigPath(f.cwd))
@@ -109,7 +151,7 @@ test("⚠ a trusted project's config merges over the user's: its hosts ADD to th
 
 test("⚠ an untrusted project's config is NOT read, and the session is told so (#421)", async () => {
   const f = fixture({ user: USER, project: PROJECT })
-  createProjectTrustStore(ensoAgentDir(f.home)).setMany([{ path: f.cwd, decision: false }])
+  f.saved.set(f.cwd, false)
   const resolved = await sessionEnsoConfig({}, f.context())
   expect(hostsOf(resolved)).toEqual(['docs.user.example'])
   expect(f.notices.join()).toContain('not trusted')
@@ -123,14 +165,16 @@ test('⚠ no saved decision: pi\'s question is asked, and "Trust" is saved where
   expect(f.asked).toHaveLength(1)
   expect(f.asked[0]).toContain(f.cwd)
   expect(hostsOf(resolved)).toEqual(['docs.user.example', 'docs.project.example'])
-  expect(createProjectTrustStore(ensoAgentDir(f.home)).get(f.cwd)).toBe(true)
+  expect(f.saved.get(f.cwd)).toBe(true)
+  // Where pi reads it: the store opened on Enso's agent dir, the one pi's sessions use.
+  expect(new Set(f.agentDirs)).toEqual(new Set([ensoAgentDir(f.home)]))
 })
 
 test('a this-session-only answer trusts this session and saves nothing', async () => {
   const f = fixture({ user: USER, project: PROJECT })
   const resolved = await sessionEnsoConfig({}, f.context('Trust (this session only)'))
   expect(hostsOf(resolved)).toEqual(['docs.user.example', 'docs.project.example'])
-  expect(createProjectTrustStore(ensoAgentDir(f.home)).get(f.cwd)).toBeNull()
+  expect(f.saved.size).toBe(0)
 })
 
 test("⚠ with no UI to ask on, an undecided project is untrusted (pi's rule), and said", async () => {
@@ -142,9 +186,9 @@ test("⚠ with no UI to ask on, an undecided project is untrusted (pi's rule), a
 })
 
 test("pi's defaultProjectTrust decides an undecided project without asking: always, never", async () => {
-  const always = fixture({ user: USER, project: PROJECT, settings: { defaultProjectTrust: 'always' } })
+  const always = fixture({ user: USER, project: PROJECT, defaultProjectTrust: 'always' })
   expect(hostsOf(await sessionEnsoConfig({}, always.context()))).toEqual(['docs.user.example', 'docs.project.example'])
-  const never = fixture({ user: USER, project: PROJECT, settings: { defaultProjectTrust: 'never' } })
+  const never = fixture({ user: USER, project: PROJECT, defaultProjectTrust: 'never' })
   expect(hostsOf(await sessionEnsoConfig({}, never.context('Trust')))).toEqual(['docs.user.example'])
   expect([...always.asked, ...never.asked]).toEqual([])
 })

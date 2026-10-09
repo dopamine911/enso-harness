@@ -1,6 +1,11 @@
 import { lookup } from 'node:dns/promises'
 import { isIP } from 'node:net'
-import type { AgentToolResult, ExtensionAPI } from '@earendil-works/pi-coding-agent'
+import {
+  type AgentToolResult,
+  type ExtensionAPI,
+  ProjectTrustStore,
+  SettingsManager,
+} from '@earendil-works/pi-coding-agent'
 import {
   ENSO_CONFIG_EXAMPLE,
   ENSO_CONFIG_FILENAME,
@@ -83,7 +88,7 @@ export interface WebFetchDependencies {
    */
   resolveSessionConfig: (
     session: object,
-    context: Omit<SessionConfigContext, 'home' | 'hostOwnsTrust'>,
+    context: Omit<SessionConfigContext, 'home' | 'hostOwnsTrust' | 'projectTrust'>,
   ) => Promise<SessionEnsoConfig>
   fetchUrl: (url: string, init: WebFetchRequestInit) => Promise<Response>
   /** Resolve a hostname to its addresses. Rejects on NXDOMAIN/timeouts. */
@@ -418,7 +423,11 @@ export default createWebFetch({
   locateConfigFile: () => ensoConfigPath(ensoHome(process.env)),
   readConfigText: readTextIfPresent,
   resolveSessionConfig: (session, context) =>
-    sessionEnsoConfig(session, { ...context, ...sessionConfigEnvironment(process.env) }),
+    sessionEnsoConfig(session, {
+      ...context,
+      // pi's own trust store and settings (#509): `harness/core` may not import them.
+      ...sessionConfigEnvironment(process.env, { ProjectTrustStore, SettingsManager }),
+    }),
   fetchUrl: (url: string, init: WebFetchRequestInit) => fetch(url, init),
   resolveHostAddresses: async (hostname: string) =>
     (await lookup(hostname, { all: true })).map((resolved) => resolved.address),
