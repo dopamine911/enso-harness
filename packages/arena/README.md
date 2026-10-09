@@ -98,11 +98,11 @@ base64) died at 43 minutes when the API refused the request (413 `request_too_la
 **`read` takes one region of the page, and after the first read only what changed (#740; `src/read-regions.ts`).**
 Every read used to be the whole page: in Opus's snake run 16 reads were 313 KB, about 80% of the text sent
 back to the model, and the second half of the run cost 1.9× the first. Now:
-- **`"region"`** is one of `chat` (the thread view, whichever tab is selected, plus the composer), `dialog`,
+- **`"region"`** is one of `transcript` (the thread view, whichever tab is selected, plus the composer), `dialog`,
   `threads` (the rail), `status` (the status bar), `header`, or `page` (everything). Each is found by role and
   accessible name, never by a class: `banner`, `navigation "threads"`, `contentinfo "thread status"`, any
-  `dialog`/`alertdialog`. `chat` is whatever is left, and exists only when a `tabpanel` is there. Without a region
-  a read takes the open dialog, else `chat`, else `page` (another site's tab). Every answer names its `region`
+  `dialog`/`alertdialog`. `transcript` is whatever is left, and exists only when a `tabpanel` is there. Without a region
+  a read takes the open dialog, else `transcript`, else `page` (another site's tab). Every answer names its `region`
   and lists the `regions` on the page. A region that isn't there is refused, with the list.
 - **The first read of a region is whole (`snapshot`). Later reads say what changed since the previous read of that
   region (`against`):** `changes` holds the added (`+`) and removed (`-`) lines, each under the unchanged lines it is

@@ -581,7 +581,7 @@ const ACTION_PARSERS: Readonly<Record<string, (request: Fields) => ArenaActionPa
   read: (request) => {
     const { region, full } = request
     if (region !== undefined && (typeof region !== 'string' || region.length === 0)) {
-      return fail('read takes "region" as the name of one, like "chat"; a read answers with the ones on the page')
+      return fail('read takes "region" as the name of one, like "transcript"; a read answers with the ones on the page')
     }
     if (full !== undefined && typeof full !== 'boolean') return fail('read takes "full" as true or false')
     return accept({
@@ -681,7 +681,7 @@ function describeTarget(target: ArenaTarget): string {
   return `placeholder "${target.placeholder}"${nth}`
 }
 
-/** A read as the timeline records it (#740): `read`, `read threads`, `read chat, full`. */
+/** A read as the timeline records it (#740): `read`, `read threads`, `read transcript, full`. */
 function describeRead(
   action: Extract<ArenaAction, { readonly action: 'read' }>,
   redact: (typed: string) => string,

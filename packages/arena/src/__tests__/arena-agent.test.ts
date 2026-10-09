@@ -297,7 +297,7 @@ test('⚠ a model call carries a region’s reads from its newest whole one on: 
   })
   expect(await agentRun(session)).toBe('it stopped the run')
 
-  const replaced = (read: number): string => supersededReadText({ read, region: 'chat' }, 4)
+  const replaced = (read: number): string => supersededReadText({ read, region: 'transcript' }, 4)
   expect(calls).toEqual([
     [],
     ['read 1'],

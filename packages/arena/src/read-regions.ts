@@ -13,17 +13,18 @@ import { RAIL_NAME } from './actions.ts'
  * The regions are found by role and accessible name in the snapshot the recorder already takes for
  * the wait's baseline (one snapshot, PR #646 review), never by a class: the header is the `banner`,
  * the rail Enso's `navigation "threads"`, the status bar its `contentinfo "thread status"`, a dialog
- * any `dialog` or `alertdialog`. `chat` is what is left — the selected view's `tabpanel` and the
+ * any `dialog` or `alertdialog`. `transcript` is what is left — the selected view's `tabpanel` and the
  * composer, which no landmark wraps — and is there only when a `tabpanel` is (another site's tab has
  * none). `page` is the whole tree.
  */
 
 /** A region of the page `read` takes. */
-type ArenaReadRegion = 'chat' | 'dialog' | 'threads' | 'status' | 'header' | 'page'
+type ArenaReadRegion = 'transcript' | 'dialog' | 'threads' | 'status' | 'header' | 'page'
 
 /** Each region as the brief tells the agent, in the order an answer lists them. */
 export const ARENA_READ_REGIONS: Readonly<Record<ArenaReadRegion, string>> = {
-  chat: 'the thread on screen: its view (Chat’s transcript, or the Context, Stats or Diff tab) and the composer',
+  transcript:
+    'the thread on screen: its view (the Chat tab’s transcript, or the Context, Stats or Diff tab) and the composer',
   dialog: 'an open dialog',
   threads: 'the threads rail',
   status: 'the status bar under the thread',
@@ -76,13 +77,13 @@ function pageRegions(snapshot: string): ReadonlyMap<ArenaReadRegion, string> {
       const region = landmarkOf(line)
       if (region !== undefined) open = { region, indent }
     }
-    const region = open?.region ?? 'chat'
+    const region = open?.region ?? 'transcript'
     const lines = owned.get(region)
     if (lines === undefined) owned.set(region, [line])
     else lines.push(line)
   }
-  const rest = owned.get('chat') ?? []
-  if (!rest.some((line) => nodeOf(line)?.role === 'tabpanel')) owned.delete('chat')
+  const rest = owned.get('transcript') ?? []
+  if (!rest.some((line) => nodeOf(line)?.role === 'tabpanel')) owned.delete('transcript')
   owned.set('page', [snapshot])
   return new Map(
     REGION_NAMES.flatMap((region) => {
@@ -216,7 +217,7 @@ interface RegionMemory {
 }
 
 /** The region a read means by default: an open dialog, else the thread on screen, else the page. */
-const DEFAULT_REGION_ORDER: readonly ArenaReadRegion[] = ['dialog', 'chat']
+const DEFAULT_REGION_ORDER: readonly ArenaReadRegion[] = ['dialog', 'transcript']
 
 /** The region a read means: the one asked for, or the default (`DEFAULT_REGION_ORDER`, then the page). */
 function chosenRegion(regions: ReadonlyMap<ArenaReadRegion, string>, asked: string | undefined): ArenaReadRegion {

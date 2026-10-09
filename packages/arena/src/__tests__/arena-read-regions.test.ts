@@ -57,8 +57,8 @@ const status = (activity: string): string => `- contentinfo "thread status":
   - text: ${activity}
   - meter "context window used"`
 
-const page = (chat: string, options: { age?: string; activity?: string } = {}): string =>
-  [HEADER, rail(options.age ?? 'now'), chat, status(options.activity ?? 'running write')].join('\n')
+const page = (transcript: string, options: { age?: string; activity?: string } = {}): string =>
+  [HEADER, rail(options.age ?? 'now'), transcript, status(options.activity ?? 'running write')].join('\n')
 
 const DIALOG = `- dialog "Start a session":
   - heading "Start a session" [level=2]
@@ -69,8 +69,8 @@ test('a read without a region is the thread on screen — its view and the compo
   const answer = createRegionReads().read(page(ASKING), {}, 0)
   expect(answer).toEqual({
     read: 1,
-    region: 'chat',
-    regions: ['chat', 'threads', 'status', 'header', 'page'],
+    region: 'transcript',
+    regions: ['transcript', 'threads', 'status', 'header', 'page'],
     snapshot: ASKING,
   })
 })
@@ -97,7 +97,7 @@ test('each region is its landmark whole, found by role and name; a page with no 
 test('a region not on the page, or no region at all, is refused with the regions that are there', () => {
   const reads = createRegionReads()
   expect(() => reads.read(page(ASKING), { region: 'dialog' }, 0)).toThrow(
-    'there is no dialog on the page now: read one of chat, threads, status, header, page',
+    'there is no dialog on the page now: read one of transcript, threads, status, header, page',
   )
   expect(() => reads.read(DIALOG, { region: 'sidebar' }, 0)).toThrow(
     '"sidebar" is not a region: read one of dialog, page',
@@ -110,8 +110,8 @@ test('a second read of a region that did not change says so, and names the read 
   // The rail's clock moved and the status bar changed: neither is the thread view.
   expect(reads.read(page(ASKING, { age: '1m', activity: 'waiting' }), {}, 0)).toEqual({
     read: 2,
-    region: 'chat',
-    regions: ['chat', 'threads', 'status', 'header', 'page'],
+    region: 'transcript',
+    regions: ['transcript', 'threads', 'status', 'header', 'page'],
     against: 1,
     diff: 'nothing changed since read 1',
     unchanged: true,
@@ -123,7 +123,7 @@ test('⚠ a read of a changed region is only the changed lines, each under the u
   reads.read(page(ASKING), {}, 0)
   expect(reads.read(page(DONE), {}, 0)).toMatchObject({
     read: 2,
-    region: 'chat',
+    region: 'transcript',
     against: 1,
     diff: 'what changed since read 1: "+" added, "-" removed, unmarked lines unchanged, for where',
     changes: [

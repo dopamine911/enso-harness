@@ -96,7 +96,7 @@ test('every action reads back as one line, and a malformed one says what it take
     { action: 'type', text: 'hello' },
     { action: 'read' },
     { action: 'read', region: 'threads' },
-    { action: 'read', region: 'chat', full: true },
+    { action: 'read', region: 'transcript', full: true },
   ].map((request) => {
     const parsed = parseArenaAction(request)
     if (!parsed.ok) throw new Error(parsed.error)
@@ -127,7 +127,7 @@ test('every action reads back as one line, and a malformed one says what it take
     'type "hello"',
     'read',
     'read threads',
-    'read chat, full',
+    'read transcript, full',
   ])
   for (const malformed of [
     { action: 'fill', target: { label: 'x' } },

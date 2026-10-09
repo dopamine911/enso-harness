@@ -157,7 +157,7 @@ accessibility tree. "region" is one of:
 ${Object.entries(ARENA_READ_REGIONS)
   .map(([region, what]) => `- "${region}": ${what}`)
   .join('\n')}
-Without "region", a read is of an open dialog, else "chat", else "page" (the answer's "region" says which),
+Without "region", a read is of an open dialog, else "transcript", else "page" (the answer's "region" says which),
 and every answer lists the "regions" on the page.
 The first read of a region returns it whole ("snapshot"). Each later read returns only what changed
 since your last read of it, which it names ("against"): "changes" marks new lines "+", gone lines "-",

@@ -57,7 +57,7 @@ export const ArenaActToolParameters = Type.Object({
   option: Type.Optional(Type.String({ description: 'select: the option' })),
   region: Type.Optional(
     Type.String({
-      description: `read: ${Object.keys(ARENA_READ_REGIONS).join(' | ')}; by default the open dialog, else chat`,
+      description: `read: ${Object.keys(ARENA_READ_REGIONS).join(' | ')}; by default the open dialog, else transcript`,
     }),
   ),
   full: Type.Optional(
