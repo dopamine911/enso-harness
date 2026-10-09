@@ -36,6 +36,7 @@
     "e2e": "bunx playwright test --config packages/web/e2e/playwright.config.ts --grep-invert @model",
     "e2e:model": "ENSO_E2E_MODEL=1 bunx playwright test --config packages/web/e2e/playwright.config.ts --grep @model",
     "coverage:check": "bun scripts/check-coverage.ts",
+    "coverage:istanbul": "bun scripts/coverage-istanbul.ts",
     "doctor": "bunx react-doctor --verbose",
     "doctor:check": "react-doctor --project packages/web --scope full --no-score --no-supply-chain --blocking warning",
     "docs:api": "typedoc --emit none",

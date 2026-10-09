@@ -14,19 +14,43 @@
  * the page load), `ignorePatterns` and `ignoreUnresolvedImports` (build output). The table still
  * shows what removing each of them would add.
  *
- * CRAP is cyclomatic × (1 − coverage)³ + cyclomatic. With `coverage/coverage-final.json` present,
- * fallow scores it from measured coverage; without it, from fallow's estimate, and the report says
- * which.
+ * CRAP is cyclomatic² × (1 − coverage)³ + cyclomatic. When `coverage/lcov.info` exists, this first
+ * converts it to `coverage/coverage-final.json` (`scripts/coverage-istanbul.ts`) and fallow scores
+ * CRAP from that measured coverage; the report says how old the LCOV is, because it describes the
+ * tree its `bun test` ran on, and this never runs the suite. Without an LCOV, CRAP is fallow's
+ * estimate, and the report says so. Measured or not, a file no test loads (and every test file,
+ * which Bun leaves out of coverage) keeps fallow's estimate; the health section counts both kinds.
  */
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import fallowConfig from '../.fallowrc.jsonc'
 import { findRepoRoot } from '../packages/core/src/paths.ts'
+import { conversionSummary, ISTANBUL_PATH, LCOV_PATH, writeIstanbulCoverage } from './coverage-istanbul.ts'
 
 const ROOT = findRepoRoot(import.meta.url)
 const REPORT_PATH = join(ROOT, '.local', 'health-full.md')
 const VARIANT_PATH = join(ROOT, '.local', 'fallow-variant.json')
-const COVERAGE_PATH = join(ROOT, 'coverage', 'coverage-final.json')
+/** fallow's CRAP threshold in the full run, and the line the health section counts against. */
+const CRAP_THRESHOLD = 30
+
+/** Where CRAP's coverage comes from: the measured map's `--coverage` flag and its description, or the estimate. */
+interface CoverageSource {
+  readonly flags: readonly string[]
+  readonly description: string
+}
+
+function coverageSource(): CoverageSource {
+  if (!existsSync(LCOV_PATH)) {
+    // fallow reads `coverage/coverage-final.json` without being passed it, so a leftover map still scores CRAP.
+    const description = existsSync(ISTANBUL_PATH)
+      ? 'a leftover `coverage/coverage-final.json`, with no `coverage/lcov.info` to refresh it from (fallow reads it unasked)'
+      : "fallow's estimate (no `coverage/lcov.info`; run `bun test` to measure)"
+    return { flags: [], description }
+  }
+  const summary = conversionSummary(writeIstanbulCoverage())
+  process.stdout.write(`health:full: CRAP from measured coverage: ${summary}\n`)
+  return { flags: ['--coverage', ISTANBUL_PATH], description: `measured, \`coverage/coverage-final.json\`: ${summary}` }
+}
 
 /** The parts of `.fallowrc.jsonc` this report turns off; the rest passes through unread. */
 interface FallowConfig {
@@ -69,7 +93,7 @@ const EXEMPTIONS: readonly Exemption[] = [
   },
   {
     name: '`health.maxCrap: 0` (CRAP off)',
-    without: (config) => ({ ...config, health: { ...config.health, maxCrap: 30 } }),
+    without: (config) => ({ ...config, health: { ...config.health, maxCrap: CRAP_THRESHOLD } }),
     keptInFullRun: false,
   },
   { name: '`entry`', without: (config) => withoutKeys(config, 'entry'), keptInFullRun: true },
@@ -89,7 +113,7 @@ function fullConfig(config: FallowConfig): FallowConfig {
 /** fallow's JSON for one command under one config; fallow exits 1 when it finds something, which is not a failure here. */
 async function fallowJson(command: string, config: FallowConfig): Promise<Record<string, unknown>> {
   writeFileSync(VARIANT_PATH, JSON.stringify(config))
-  const coverage = command === 'health' && existsSync(COVERAGE_PATH) ? ['--coverage', COVERAGE_PATH] : []
+  const coverage = command === 'health' ? COVERAGE.flags : []
   const run = await Bun.$`fallow ${command} -c ${VARIANT_PATH} ${coverage} --format json --quiet`
     .cwd(ROOT)
     .nothrow()
@@ -100,7 +124,7 @@ async function fallowJson(command: string, config: FallowConfig): Promise<Record
 /** fallow's human output for one command under the full config, as the terminal would show it. */
 async function fallowText(command: string, flags: readonly string[]): Promise<string> {
   writeFileSync(VARIANT_PATH, JSON.stringify(fullConfig(fallowConfig as FallowConfig)))
-  const coverage = command === 'health' && existsSync(COVERAGE_PATH) ? ['--coverage', COVERAGE_PATH] : []
+  const coverage = command === 'health' ? COVERAGE.flags : []
   // Piped, fallow writes no colour codes, so the report reads as plain text.
   const run = await Bun.$`fallow ${command} -c ${VARIANT_PATH} ${flags} ${coverage} --quiet`.cwd(ROOT).nothrow().quiet()
   return run.stdout.toString().trimEnd()
@@ -163,15 +187,29 @@ async function exemptionTable(config: FallowConfig): Promise<string> {
 
 const fenced = (text: string): string => `\`\`\`\n${text}\n\`\`\``
 
+/** One health finding as fallow's JSON gives it, the fields the CRAP count reads. */
+interface HealthFinding {
+  readonly crap?: number
+  readonly coverage_source?: string
+}
+
+/** The full run's functions at or over the CRAP threshold, split by where each one's coverage came from. */
+async function crapCount(): Promise<string> {
+  const health = await fallowJson('health', fullConfig(fallowConfig as FallowConfig))
+  const over = (health.findings as readonly HealthFinding[]).filter((finding) => (finding.crap ?? 0) >= CRAP_THRESHOLD)
+  const measured = over.filter((finding) => finding.coverage_source === 'istanbul').length
+  return (
+    `CRAP at or over ${CRAP_THRESHOLD}: ${over.length} functions, ${measured} scored from measured coverage and ` +
+    `${over.length - measured} from fallow's estimate.`
+  )
+}
+
 async function report(): Promise<string> {
   const config = fallowConfig as FallowConfig
-  const coverage = existsSync(COVERAGE_PATH)
-    ? 'measured (`coverage/coverage-final.json`)'
-    : "fallow's estimate (no `coverage/coverage-final.json`)"
   return [
     '# Fallow, with its exemptions off',
     '',
-    `Generated by \`bun run health:full\` (\`scripts/health-full.ts\`). CRAP coverage: ${coverage}.`,
+    `Generated by \`bun run health:full\` (\`scripts/health-full.ts\`). CRAP coverage: ${COVERAGE.description}.`,
     '',
     '## What each exemption hides',
     '',
@@ -187,10 +225,23 @@ async function report(): Promise<string> {
     '',
     '## Health',
     '',
-    fenced(await fallowText('health', ['--max-cyclomatic', '20', '--max-cognitive', '15', '--max-crap', '30'])),
+    await crapCount(),
+    '',
+    fenced(
+      await fallowText('health', [
+        '--max-cyclomatic',
+        '20',
+        '--max-cognitive',
+        '15',
+        '--max-crap',
+        `${CRAP_THRESHOLD}`,
+      ]),
+    ),
     '',
   ].join('\n')
 }
+
+const COVERAGE = coverageSource()
 
 mkdirSync(join(ROOT, '.local'), { recursive: true })
 writeFileSync(REPORT_PATH, await report())
