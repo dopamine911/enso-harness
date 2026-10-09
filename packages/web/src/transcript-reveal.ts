@@ -152,8 +152,9 @@ const HIGHLIGHT: Keyframe[] = [
 const HIGHLIGHT_MS = 2000
 
 /**
- * Ring `element` for a moment, where it already is: an incident card the windowed list scrolled to
- * itself (#588), whose own scroll a second one would fight.
+ * Ring `element` for a moment, where it already sits: the highlight without the scroll, for an element
+ * something else has already brought into view. `revealElement` scrolls and then rings; an incident
+ * card the windowed list scrolled to itself (#588) rings only, since a second scroll would fight it.
  */
 export function ringElement(element: Element): void {
   // ⓘ A DOM without the Web Animations API (the test DOM) still scrolls; the ring is decoration.

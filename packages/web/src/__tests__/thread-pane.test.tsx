@@ -2148,6 +2148,33 @@ test('after a reload, the snapshot’s incidents read where they did live — no
   await pane.unmount()
 })
 
+// PR #794 review: two incidents whose tipping calls are in the SAME message both follow it, in the
+// order they opened, and neither moves to the tail or past the next message.
+test('two incidents tipped by calls in one message both read after it, in the order they opened (#588)', async () => {
+  const twoCalls: UIMessage = {
+    id: 'm-a1',
+    role: 'assistant',
+    parts: [
+      { type: 'text', content: 'CALLING-TWICE' },
+      { type: 'tool-call', id: 'c1', name: 'bash', arguments: '{}', state: 'input-complete' },
+      { type: 'tool-result', toolCallId: 'c1', content: 'ok', state: 'complete' },
+      { type: 'tool-call', id: 'c2', name: 'bash', arguments: '{}', state: 'input-complete' },
+      { type: 'tool-result', toolCallId: 'c2', content: 'ok', state: 'complete' },
+    ],
+  }
+  const resolvedAt = (incidentId: string, toolCallId: string): EnsoIncidentRecord => ({
+    opened: openingAt(incidentId, toolCallId, false),
+    resolutions: [{ incidentId, classification: 'false-positive', outcome: 'resume', suspended: [] }],
+  })
+  const pane = await mountStored(
+    [text('m-u1', 'user', 'first prompt'), twoCalls, text('m-u2', 'user', 'second prompt')],
+    foldedIncidents([resolvedAt('inc-one', 'c1'), resolvedAt('inc-two', 'c2')]),
+  )
+  const expected = ['first prompt', 'CALLING-TWICE', 'Incident inc-one', 'Incident inc-two', 'second prompt']
+  await eventually(() => expect(readingOrder(pane, expected)).toEqual(expected))
+  await pane.unmount()
+})
+
 test('a card whose tipping call the transcript does not hold reads at the tail; one on a page not loaded yet moves up when it loads (#588)', async () => {
   const earlier = [text('p-u1', 'user', 'first prompt'), calling('p-a1', 'CALLING-REPLY', 'c1')]
   const page = [text('p-u2', 'user', 'second prompt'), text('p-a2', 'assistant', 'SECOND-REPLY')]
