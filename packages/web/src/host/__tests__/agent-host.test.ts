@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, expect, setSystemTime, test } from 'bun:test'
+import { afterAll, beforeAll, expect, setSystemTime, spyOn, test } from 'bun:test'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
@@ -25,6 +25,7 @@ import {
   type ExtensionAPI,
   type ExtensionCommandContext,
   type InlineExtension,
+  ModelRuntime,
   type SessionEntry,
   ProjectTrustStore,
   SessionManager,
@@ -140,6 +141,30 @@ const permissionRulesPath = join(mkdtempSync(join(tmpdir(), 'enso-host-rules-'))
 /** The one directory these hosts run sessions in (#395) — the server's projects, reduced to one. */
 const servesRepoRoot = (directory: string): boolean => realpathOrSelf(directory) === realpathOrSelf(repoRoot)
 const openSessions: HostedThread[] = []
+/**
+ * Every model refresh pi starts while this file runs, so the teardown can wait for them (#790).
+ * pi's model runtime starts one, unawaited, on every provider registration (`void this.refresh(…)`,
+ * `model-runtime.js:674`), and pi-multi-account registers catalogs from its `session_start` long
+ * after the session is handed over (`syncCodexModelCatalog`, `index.ts:11570`). Each refresh reads
+ * the credential store through `FileAuthStorageBackend.withLockAsync` (`auth-storage.js:116-129`),
+ * which first re-creates the agent dir and an empty `auth.json` (`ensureParentDir`,
+ * `ensureFileExists`), then locks it (`auth.json.lock`).
+ *
+ * ⚠ One still in flight when the file ended ran AFTER the scratch preload removed the run's
+ * directory, and re-created it: every run left `/tmp/enso-test-run-*` holding the last test's
+ * agent dir, an `auth.json` of `{}` and a lock the exiting process never released. Not the
+ * cancelled login (#348): it stores nothing. No session's `dispose` reaches these refreshes —
+ * pi keeps no handle on them — so the file waits for every one it started.
+ */
+const modelRefreshes = spyOn(ModelRuntime.prototype, 'refresh')
+async function settleModelRefreshes(): Promise<void> {
+  // A refresh that settles may have started another: wait until none is left unawaited.
+  for (let awaited = 0; awaited < modelRefreshes.mock.results.length;) {
+    const started = modelRefreshes.mock.results.slice(awaited).map((result) => result.value)
+    awaited += started.length
+    await Promise.allSettled(started)
+  }
+}
 
 let logs: LogRecorder
 beforeAll(async () => {
@@ -147,6 +172,8 @@ beforeAll(async () => {
 })
 afterAll(async () => {
   for (const hosted of openSessions) hosted.runtime.dispose()
+  await settleModelRefreshes()
+  modelRefreshes.mockRestore()
   await releaseEnsoLogs()
 })
 
