@@ -86,24 +86,21 @@ import { snapshotPaths } from '@enso/core/snapshot-store'
 import { getPermissionsService } from '@gotgenes/pi-permission-system'
 import type { LogRecorder } from '@logtape/testing/recorder'
 import { Type } from 'typebox'
+import { type AgentHost, createAgentHost, SessionDirectoryRefused } from '../agent-host.ts'
+import { LOST_TOOL_RESULT_TEXT, NOTHING_TO_CONTINUE } from '../continuation.ts'
+import { MODEL_WATCH_EXTENSION_PATH } from '../hosted-thread.ts'
 import {
-  type AgentHost,
-  createAgentHost,
   type HostedThread,
   type HostedThreadInspection,
-  MODEL_WATCH_EXTENSION_PATH,
-  SessionDirectoryRefused,
-  seedMultiAccountConfig,
   stopRunSettlingDialogs,
-  ThreadDeleted,
-  type ThreadDeleteOutcome,
   type ToolCallVerdict,
-} from '../agent-host.ts'
-import { LOST_TOOL_RESULT_TEXT, NOTHING_TO_CONTINUE } from '../continuation.ts'
+} from '../live-thread.ts'
+import { seedMultiAccountConfig } from '../multi-account-seed.ts'
 import { PERMISSION_CALL_QUESTIONS_EXTENSION_PATH } from '../permission-call-questions.ts'
 import { storedPermissionModeState } from '../permission-mode-adapter.ts'
 import { readPermissionPolicy, resetPermissionPolicy, writePermissionPolicy } from '../permission-policy-file.ts'
 import { RESTORE_NOTE_EXTENSION_PATH } from '../restore-note.ts'
+import { ThreadDeleted, type ThreadDeleteOutcome } from '../thread-delete.ts'
 import { recordedModelOf, transcriptOf } from '../transcript.ts'
 import { writeStoredSession } from './stored-session.ts'
 

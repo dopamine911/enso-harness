@@ -1,5 +1,6 @@
 import type { EnsoGitFileChange, EnsoGitRepository, EnsoGitState, EnsoThreadChanges, EnsoThreadGit } from '@enso/core'
-import type { AgentHost, ThreadTreePlace } from '../host/agent-host.ts'
+import type { AgentHost } from '../host/agent-host.ts'
+import type { ThreadTreePlace } from '../host/thread-log-edits.ts'
 import type { ThreadRegistry } from './thread-registry.ts'
 
 /**

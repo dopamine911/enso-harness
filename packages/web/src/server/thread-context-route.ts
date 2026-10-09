@@ -1,5 +1,6 @@
 import type { EnsoContextRequestDetail, EnsoThreadContext } from '@enso/core'
-import type { AgentHost, StoredThreadContext } from '../host/agent-host.ts'
+import type { AgentHost } from '../host/agent-host.ts'
+import type { StoredThreadContext } from '../host/stored-threads.ts'
 import { liveOrStored } from './live-or-stored.ts'
 import type { ThreadRegistry, ThreadView } from './thread-registry.ts'
 

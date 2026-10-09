@@ -1,5 +1,7 @@
 /**
  * The models a thread with no session is offered (#688): a SESSION's list, never a bare runtime's.
+ * Beside it, two other readings of pi's model runtime: the `/login` facts per provider and the model
+ * a thread chose before its first message.
  *
  * The catalogue (#484) serves the Start dialog without building the thread, and it used to read
  * pi's model runtime over the agent dir alone — "what a session builds, minus the session". It is
@@ -27,8 +29,9 @@
  * load or threw on `session_start`, or a probe that could not be built at all — and then the
  * caller falls back to the agent dir's list: a broken probe is never an empty model picker.
  */
-import type { Api, Model } from '@earendil-works/pi-ai'
+import { type Api, getSupportedThinkingLevels, type Model } from '@earendil-works/pi-ai'
 import {
+  type AgentSessionServices,
   type CreateAgentSessionFromServicesOptions,
   createAgentSessionFromServices,
   createAgentSessionServices,
@@ -38,10 +41,13 @@ import {
   SettingsManager,
 } from '@earendil-works/pi-coding-agent'
 import { ensoLogger } from '@enso/core'
+import type { LoginProviderFacts } from './host-flows.ts'
+import type { ChoiceBeforeFirstMessage } from './thread-log.ts'
 
 const log = ensoLogger('host')
 
-interface SessionModels {
+/** The models a thread with no session is offered (#688): each bound session's list, else a probe's. */
+export interface SessionModels {
   /** A thread's session was bound: its runtime is the list from now on. */
   adopt(runtime: ModelRuntime): void
   /** What a session offers now — undefined only when no session could be had. */
@@ -53,7 +59,7 @@ interface SessionModelsOptions {
   readonly harnessPackageDir: string
   /** The host's extra extensions, as a thread loads them — a test's provider among them. */
   readonly extensionFactories: readonly InlineExtension[]
-  /** The probe's session store, in memory — made by `agent-host.ts`, the storage seam (#102). */
+  /** The probe's session store, in memory — made by `thread-log.ts`, the storage seam (#102, #801). */
   readonly inMemorySession: () => CreateAgentSessionFromServicesOptions['sessionManager']
 }
 
@@ -97,7 +103,7 @@ async function probeRuntime(options: SessionModelsOptions): Promise<ModelRuntime
       agentDir: options.agentDir,
       settingsManager: SettingsManager.inMemory(),
       resourceLoaderOptions: {
-        // A thread's loader options (`buildHosted`), narrowed to the provider extensions.
+        // A thread's loader options (`hosted-thread.ts#buildHostedThread`), narrowed to the provider extensions.
         noExtensions: true,
         noSkills: true,
         additionalExtensionPaths: [options.harnessPackageDir],
@@ -124,4 +130,48 @@ async function probeRuntime(options: SessionModelsOptions): Promise<ModelRuntime
     log.warn("model probe failed: {error}; the Start dialog lists the agent dir's models alone (#688)", { error })
     return undefined
   }
+}
+
+/**
+ * The `/login` facts pi's model runtime knows about each provider — a session's, or the
+ * catalogue's over the agent dir alone (#484); one reading, so the two lists cannot drift.
+ */
+export function loginFactsOf(modelRuntime: ModelRuntime): LoginProviderFacts[] {
+  return modelRuntime.getProviders().map((provider) => {
+    const status = modelRuntime.getProviderAuthStatus(provider.id)
+    return {
+      id: provider.id,
+      name: provider.name,
+      offersOAuth: provider.auth.oauth !== undefined,
+      offersApiKeyLogin: provider.auth.apiKey?.login !== undefined,
+      configuredVia: status.configured ? (status.label ?? status.source) : undefined,
+    }
+  })
+}
+
+/**
+ * The model and effort a thread chose BEFORE its first message (#616), for its next build.
+ *
+ * ⚠ pi restores a session's model and thinking level only when the session has messages
+ * (`createAgentSession`: `hasExistingSession` is `messages.length > 0`); otherwise it takes the
+ * settings' default and records it. Since #484 a thread is configured before its first prompt — the
+ * Start dialog's model and effort are `model_change` and `thinking_level_change` entries on a branch
+ * with no message yet — and its first run REBUILDS it on its tree (#551, `treeOnFirstRun`), which
+ * would take the default over the choice. A branch with messages is pi's to restore and is left to
+ * it. A recorded model that is gone or has no credentials falls back to pi's default, as pi's own
+ * restore does.
+ */
+export function selectionBeforeFirstMessage(
+  chosen: ChoiceBeforeFirstMessage | undefined,
+  modelRuntime: AgentSessionServices['modelRuntime'],
+): Pick<CreateAgentSessionFromServicesOptions, 'model' | 'thinkingLevel'> {
+  const recorded = chosen === undefined ? undefined : modelRuntime.getModel(chosen.provider, chosen.modelId)
+  const model = recorded !== undefined && modelRuntime.hasConfiguredAuth(recorded.provider) ? recorded : undefined
+  if (model === undefined) return {}
+  // The lookup is how the recorded string becomes pi's level without a cast, as `runHostCommand`
+  // does it — and a level this model does not offer is not restored.
+  const level = chosen?.thinkingLevel
+  const thinkingLevel =
+    level === undefined ? undefined : getSupportedThinkingLevels(model).find((offered) => offered === level)
+  return { model, ...(thinkingLevel === undefined ? {} : { thinkingLevel }) }
 }

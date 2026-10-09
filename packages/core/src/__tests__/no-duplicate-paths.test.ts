@@ -121,10 +121,11 @@ test('⚠ the ".enso" literal is assembled only in paths.ts (plus guard.ts, wher
   expect(offendersMatching(/['"]\.enso['"]/, [PATHS_MODULE, GUARD_CORPUS_MODULE], '".enso"')).toEqual([])
 })
 
-// The storage seam (#102, `docs/architecture.md` → Persistence): pi's `SessionManager` and the
-// session-file layout are touched in ONE file, so a later store is a one-file change. Core and
-// the browser see a path only as debug text (`sessionDir`/`sessionFile` in the inspection).
-test("⚠ SessionManager is imported ONLY by the web host's agent-host.ts — the storage seam", () => {
-  const STORAGE_SEAM = join('packages', 'web', 'src', 'host', 'agent-host.ts')
+// The storage seam (#102, `docs/architecture.md` → Persistence; #801): pi's `SessionManager` and the
+// session-file layout are touched in ONE file, so a later store is a one-file change. Everything
+// above it reads a thread's log through `ThreadLog`; core and the browser see a path only as debug
+// text (`sessionDir`/`sessionFile` in the inspection).
+test("⚠ SessionManager is imported ONLY by the web host's thread-log.ts — the storage seam", () => {
+  const STORAGE_SEAM = join('packages', 'web', 'src', 'host', 'thread-log.ts')
   expect(offendersContaining('SessionManager', [STORAGE_SEAM])).toEqual([])
 })
