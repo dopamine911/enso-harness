@@ -453,7 +453,7 @@ closed leak and deny the open one in its last line (#216).
 Which files may import the runtime is fixed by a gate (#558): `VENDOR_IMPORTERS_ALLOWED_INSIDE_ROOTS` in `test/vendor-gate.test.ts` lists them, and the list only shrinks, so a new file cannot quietly add to what follows.
 
 Replace the runtime and the files that change are the host's: `agent-host.ts` (build a `ThreadRuntime`
-over the new loop; the storage seam lives in the same file — see `storage.md`), `session-events.ts`
+over the new loop), `thread-log.ts` (the new loop's log — see `storage.md`), `session-events.ts`
 and `map-events.ts` (produce the new loop's events and map them to observations — or map the
 loop's typed events directly and retire the replicated wire shape), `extension-ui-context.ts` and
 `questionnaire-dialog.ts` (or their equivalents, if the new loop has extensions and questions at all).

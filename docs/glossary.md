@@ -430,9 +430,9 @@ harness did). The first is canonical and never rewritten by us; the second is th
 
 **Mechanism** — where the bytes go:
 
-- **storage seam** — `AgentHost`: the only file that touches the runtime's session manager or its
-  file layout. Nothing above it sees a path except as debug text. Keeping it so is what makes a later
-  store a one-file change (#102 §1).
+- **storage seam** — `AgentHost`, over `ThreadLog` (`host/thread-log.ts`, #801): the only file that
+  touches the runtime's session manager or its file contents. Nothing above it sees a path except as
+  debug text. Keeping it so is what makes a later store a one-file change (#102 §1).
 - **sink** — the writer at the end of the log pipeline: the file, and optionally a console.
 - **ring** — the browser's in-memory recent records, at every level, that the drawer appends to a
   bundle; the server sees only what the browser ships at `info` and up.

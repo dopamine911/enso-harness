@@ -1,15 +1,5 @@
-import { createHash } from 'node:crypto'
-import {
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  unlinkSync,
-  writeFileSync,
-} from 'node:fs'
-import { basename, join, resolve } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { getSupportedThinkingLevels } from '@earendil-works/pi-ai'
 import {
   type AgentSessionServices,
@@ -25,13 +15,10 @@ import {
   VERSION as PI_VERSION,
   type PromptOptions,
   ProjectTrustStore,
-  type SessionEntry,
-  SessionManager,
   SettingsManager,
 } from '@earendil-works/pi-coding-agent'
 import {
   type DialogAnswer,
-  ENSO_INCIDENT_OPENED_ENTRY,
   ENSO_INCIDENT_RESOLVED_CHANNEL,
   ENSO_INCIDENT_RESOLVED_ENTRY,
   ENSO_LOG_EVENTS,
@@ -39,7 +26,6 @@ import {
   ENSO_RUN_STOPPED_ENTRY,
   ENSO_SYSTEM_PROMPT_ENTRY,
   type EnsoForkPoint,
-  type EnsoIncidentOpened,
   type EnsoIncidentResolution,
   type EnsoHostCommandRun,
   type EnsoModelState,
@@ -51,16 +37,12 @@ import {
   type EnsoPermissionModeState,
   type EnsoPermissionVerdict,
   type EnsoPromptAdmission,
-  type EnsoRecordedModel,
   type EnsoRiskThresholds,
-  type EnsoSessionIncidents,
-  type EnsoSessionUsage,
   type EnsoSystemPromptChoice,
   type EnsoSystemPromptPreview,
   type EnsoThreadEvent,
   type EnsoTranscriptEntry,
   ensoLogger,
-  customEntriesOf,
   transcriptEntryOf,
   type HostFlowOutcome,
   incidentResolutionRefusal,
@@ -68,62 +50,31 @@ import {
   type PromptOutcome,
   type PromptRequest,
   modeAgentName,
-  openIncidentOf,
   type RuntimeCommand,
   readRecordedMode,
   recordedPermissionMode,
   recordedSystemPrompt,
-  sessionIncidentsOf,
   THREAD_PROJECT_TRUST,
   type ThreadRuntime,
-  DEFAULT_GUARD_POLICY,
-  ENSO_THREAD_TREE_ENTRY,
-  ENSO_TREE_RESTORED_ENTRY,
-  ENSO_TREE_SETUP_ENTRY,
   type EnsoGitFileChange,
   type EnsoThreadDeletePreview,
-  type EnsoProjectThreadSettings,
-  type EnsoTreeSetupOutcome,
-  type EnsoTreeOnDisk,
   type EnsoTreesListing,
-  isEnsoProjectId,
-  type ThreadTreeKind,
   type ThreadTreeRecord,
 } from '@enso/core'
-import {
-  ensoHome,
-  ensoSecretsPath,
-  findRepoRoot,
-  projectSessionsDir,
-  projectSnapshotsDir,
-  projectTreesDir,
-  realpathOrSelf,
-} from '@enso/core/paths'
+import { ensoHome, ensoSecretsPath, findRepoRoot, realpathOrSelf } from '@enso/core/paths'
 import { describePermissionPolicy, preparePermissionPolicy } from '@enso/core/permission-rules'
-import { knownSecretValues, quarantineSecrets } from '@enso/core/secrets'
-import { forksOfStore, readCopyChanges } from '@enso/core/snapshot-store'
-import {
-  disposeThreadTree,
-  holdingReason,
-  inventoryThreadTree,
-  mintThreadTree,
-  releaseThreadStore,
-  diskUsageOf,
-  measureBudget,
-  restoreThreadTree,
-  treeKindFor,
-} from '@enso/core/thread-tree'
-import { prepareThreadTree } from '@enso/core/tree-setup'
+import { quarantineSecrets } from '@enso/core/secrets'
+import { readCopyChanges } from '@enso/core/snapshot-store'
+import { disposeThreadTree } from '@enso/core/thread-tree'
 import { getPermissionsService } from '@gotgenes/pi-permission-system'
-import { type BranchContext, type BranchRequestDetail, branchContext, branchRequestDetail } from './branch-context.ts'
-import { type BranchEval, branchEval } from './branch-eval.ts'
-import { type BranchIncidentHistory, branchIncidentHistory } from './branch-incident-history.ts'
-import { type BranchJudgeCases, branchJudgeCases, type JudgeCaseInputs } from './branch-judge-cases.ts'
-import { type BranchStats, branchStats } from './branch-stats.ts'
+import type { BranchContext, BranchRequestDetail } from './branch-context.ts'
+import type { BranchEval } from './branch-eval.ts'
+import type { BranchIncidentHistory } from './branch-incident-history.ts'
+import type { BranchJudgeCases } from './branch-judge-cases.ts'
+import type { BranchStats } from './branch-stats.ts'
 import { type ContinuationLead, continuationLead, NO_RUN_LIFECYCLE, NOTHING_TO_CONTINUE } from './continuation.ts'
 import { createEventTail, describeObservation } from './event-tail.ts'
 import { createEnsoExtensionUiContext } from './extension-ui-context.ts'
-import { forkPointOf } from './fork-point.ts'
 import {
   catalogueRows,
   decideHostCommand,
@@ -169,29 +120,29 @@ import { builtinProviderName, providerRefusalOf } from './provider-refusal.ts'
 import { restoreNoteExtension } from './restore-note.ts'
 import type { RuntimeEvent } from './runtime-event.ts'
 import { toRpcWireEvent } from './session-events.ts'
-import {
-  createSessionFiles,
-  piSessionDirectories,
-  type SessionFileHeader,
-  type SessionFileSummary,
-  sessionFilesIn,
-  threadIdOfFileName,
-} from './session-files.ts'
 import { sessionModels } from './session-models.ts'
-import { growsSessionSpend, liveSessionUsage, storedSessionUsage } from './session-usage.ts'
-import { previewOf, renderedUnder } from './system-prompt-preview.ts'
-import { decideSystemPrompt, hasSentRequest, withSystemPrompt } from './system-prompt.ts'
+import { growsSessionSpend, liveSessionUsage } from './session-usage.ts'
 import {
-  hasEntry,
-  lastRestoreOf,
-  projectIdOfCwd,
-  sessionDirectoryFor,
-  snapshotAtEntry,
-  treeLocation,
-  treeRecordOf,
-} from './thread-trees.ts'
-import { recordedModelOf, transcriptOf } from './transcript.ts'
-import { type ProjectThreadSettingsSource, resolveProjectThreadSettings, treeSetupOf } from './tree-setup.ts'
+  createStoredThreads,
+  type StoredThread,
+  type StoredThreadContext,
+  type StoredThreadRead,
+  type StoredThreadStats,
+} from './stored-threads.ts'
+import { previewOf, renderedUnder } from './system-prompt-preview.ts'
+import { decideSystemPrompt, withSystemPrompt } from './system-prompt.ts'
+import { createThreadDelete, type ThreadDeleteOutcome, ThreadDeleted } from './thread-delete.ts'
+import { createThreadFork, type ThreadForkOutcome } from './thread-fork.ts'
+import {
+  createThreadLogEdits,
+  type ThreadRenameOutcome,
+  type ThreadRestoreOutcome,
+  type ThreadTreePlace,
+} from './thread-log-edits.ts'
+import { createLog, openLog, probeLog, runtimeLogOf, type ThreadLog } from './thread-log.ts'
+import { createTreeMaking } from './thread-tree-making.ts'
+import { sessionDirectoryFor, treeRecordOf } from './thread-trees.ts'
+import { type ProjectThreadSettingsSource } from './tree-setup.ts'
 
 const log = ensoLogger('host')
 
@@ -299,20 +250,11 @@ const log = ensoLogger('host')
  * same way a `/model` from the palette does. The watcher registers nothing else and is listed in
  * `loadedExtensionPaths` like every extension pi loaded.
  *
- * ⚠ A FORK IS TAKEN FROM THE FILE, OUTSIDE ANY RUNTIME (#433). `forkThread` opens the source's
- * session file (`SessionManager.open`, building nothing — #86) and forks it the way pi's `/fork`
- * does at its default position `before` (`AgentSessionRuntime.fork`, `agent-session-runtime.js`
- * :174): the entry must be a user message; the new session's branch ends at that message's
- * PARENT (`createBranchedSession`), or is empty when the message is the root (`create` +
- * `newSession({ parentSession })`); the message's text comes back to prefill the composer. A live
- * source and a cold one fork alike — a live thread's file holds every entry its memory does once
- * flushed, and one never flushed has no file to fork. Stated non-coverage: outside a runtime pi's
- * `session_before_fork` extension hook does not fire; no loaded extension handles it today. pi
- * writes a session file only at its first assistant message, so a fork whose branch holds none
- * (the empty one above) would have no file — nothing to list, nothing naming its parent, and a
- * resume under its id would create a fresh session. The host writes such a fork's entries the way
- * pi's first flush does (`_persist`: one JSON line per entry, `wx`), and pi appends to it from
- * then on as to any flushed file.
+ * A FORK IS TAKEN FROM THE FILE, OUTSIDE ANY RUNTIME (#433): `forkThread` forks the source's log as
+ * the runtime's `/fork` does at its default position `before` (`thread-log.ts`, the storage seam),
+ * and the message's text comes back to prefill the composer. A fork whose branch holds no assistant
+ * message has its log's file written at once, so it is listed, names its parent, and resumes under
+ * its id.
  *
  * A FORK POINT IS READ OFF THE BRANCH (#435). `forkPoint` (live) and `readStoredForkPoint` (cold,
  * one open, nothing built) walk the same branch with `fork-point.ts`: the session id, the leaf,
@@ -469,8 +411,7 @@ export interface AgentHostOptions {
 }
 
 /**
- * What pi's session for one hosted thread actually contains, read straight off the
- * `SessionManager` (#86).
+ * What pi's session for one hosted thread actually contains, read straight off its log (#86).
  *
  * Everything a run shows the browser is derived from the event stream; this is the source those
  * views derive from, for a human or an agent to cross-check against.
@@ -587,77 +528,6 @@ export type SystemPromptPreviewOutcome =
   | { readonly kind: 'preview'; readonly preview: EnsoSystemPromptPreview }
   | { readonly kind: 'busy' }
   | { readonly kind: 'unsplittable' }
-
-/** One of pi's session files in a directory this host serves, as pi lists it (#95). */
-export interface StoredThread {
-  /** pi's session id — the thread id it was created under. */
-  readonly id: string
-  readonly path: string
-  /** The directory the session runs in — pi's header records it at creation, and it never changes (#395). */
-  readonly cwd: string
-  readonly modified: Date
-  readonly messageCount: number
-  /** The first user message, verbatim; empty for a session with none. */
-  readonly firstMessage: string
-  /** The name a person gave it (#670): pi's newest `session_info`; absent when none. */
-  readonly name?: string
-  /**
-   * The thread it was forked from (#433): its header's `parentSession` file, as that file's
-   * session id. Absent for a thread that is no fork, and for one whose parent file is gone.
-   */
-  readonly parentThreadId?: string
-}
-
-/** A thread's session file as a lookup by id finds it (#739): its header's facts, nothing counted. */
-type LocatedThread = Pick<StoredThread, 'id' | 'path' | 'cwd' | 'parentThreadId'>
-
-/**
- * A fork (#433), or why not. The refusals are the host's to decide and the route's to say:
- * `no-thread` — no session file under the id in a served project; `no-entry` — the file has no
- * entry under the id; `not-a-user-message` — pi forks only at a user message; `tree-refused` — the
- * fork's own tree could not be minted (#551), so no fork was made.
- */
-export type ThreadForkOutcome =
-  | { readonly kind: 'forked'; readonly threadId: string; readonly prefill: string }
-  | { readonly kind: 'no-thread' | 'no-entry' | 'not-a-user-message' | 'tree-refused'; readonly reason: string }
-
-/**
- * What restoring a thread's tree to an entry's snapshot answers (#551): the restored hash and the
- * safety snapshot of the files it replaced, or why nothing was restored.
- */
-export type ThreadRestoreOutcome =
-  | { readonly kind: 'restored'; readonly hash: string; readonly safety: string }
-  | {
-      readonly kind: 'no-thread' | 'no-entry' | 'no-tree' | 'no-snapshot' | 'no-restore' | 'superseded'
-      readonly reason: string
-    }
-  | { readonly kind: 'refused'; readonly reason: string }
-
-/** A rename (#670), or why not: `no-thread` — no session under the id, live or in a served project. */
-export type ThreadRenameOutcome = { readonly kind: 'renamed' } | { readonly kind: 'no-thread'; readonly reason: string }
-
-/** A thread's tree as its branch records it, and the snapshot store beside its session (#551). */
-export interface ThreadTreePlace {
-  readonly record: ThreadTreeRecord
-  readonly store: string
-  /** What preparing the tree did (#754), when its branch records it (`treeSetupOf`). */
-  readonly setup?: EnsoTreeSetupOutcome
-}
-
-/**
- * What deleting a thread answers (#571): deleted — its session file, its tree and its store, or the
- * store kept for the forks that lean on it — or why nothing was deleted. `holds-work` is the
- * tree's inventory refusing (forceable); `busy`, a run, a move, a restore or another delete holding
- * the thread; `refused`, a removal that failed.
- */
-export type ThreadDeleteOutcome =
-  | { readonly kind: 'deleted' }
-  | { readonly kind: 'no-thread' | 'busy' | 'holds-work' | 'refused'; readonly reason: string }
-
-/** A thread deleted, or being deleted, is never built again under its id (#571): a stale page's prompt is refused. */
-export class ThreadDeleted extends Error {
-  override readonly name = 'ThreadDeleted'
-}
 
 /**
  * Stop: tell the runtime, then settle every pending question WHILE it stops, then wait for it.
@@ -838,32 +708,6 @@ export interface AgentHost {
   projectTrust(cwd: string, branch: readonly EnsoTranscriptEntry[]): ProjectTrustState
 }
 
-/** One stored session as `readStoredThread` reads it — both halves from one open of the file. */
-export interface StoredThreadRead {
-  /** The directory the session runs in (#395), from its header. */
-  readonly cwd: string
-  /** The branch, root to leaf. */
-  readonly transcript: EnsoTranscriptEntry[]
-  /** Every usage in the file, on every branch, by pi's rule (`session-usage.ts`); no context. */
-  readonly usage: EnsoSessionUsage
-  /** What the branch records it last ran on (#434); `undefined` when it records neither a model nor a level. */
-  readonly recordedModel: EnsoRecordedModel | undefined
-  /** The name a person gave it (#670): pi's newest `session_info`; `undefined` when none. */
-  readonly name: string | undefined
-}
-
-/** A stored thread as `readStoredThreadStats` reads it. */
-export interface StoredThreadStats {
-  readonly usage: EnsoSessionUsage
-  readonly branch: BranchStats
-}
-
-/** A stored thread as `readStoredThreadContext` reads it. */
-export interface StoredThreadContext {
-  readonly usage: EnsoSessionUsage
-  readonly context: BranchContext
-}
-
 /**
  * The agent runtime this build is bound to, by version.
  *
@@ -979,73 +823,10 @@ function describeCommand(
   return description === undefined ? { name, source } : { name, source, description }
 }
 
-/** A user message's text as pi's `/fork` prefills it (`extractUserMessageText`): its text parts, joined; images dropped. */
-function userMessageText(content: string | ReadonlyArray<{ readonly type: string; readonly text?: string }>): string {
-  if (typeof content === 'string') return content
-  return content.map((part) => (part.type === 'text' && typeof part.text === 'string' ? part.text : '')).join('')
-}
-
-/**
- * A fork pi has not written because its branch holds no assistant message (the module header,
- * #433): its header and entries, written as pi's first flush writes them, so the fork is listed,
- * names its parent, and resumes under its id. A file already there — pi wrote it — is left alone.
- */
-function writeUnflushedSession(session: SessionManager): void {
-  const file = session.getSessionFile()
-  if (file === undefined || existsSync(file)) return
-  const lines = [session.getHeader(), ...session.getEntries()].map((fileEntry) => `${JSON.stringify(fileEntry)}\n`)
-  writeFileSync(file, lines.join(''), { flag: 'wx' })
-}
-
-/** A branch's incidents (#466): its custom entries, folded as the guard folds them on replay. */
-function branchIncidents(branch: readonly SessionEntry[]): EnsoSessionIncidents {
-  return sessionIncidentsOf(customEntriesOf(transcriptOf(branch)))
-}
-
 /** The mode one appended entry records, if it is an `active_agent` entry naming one. */
 function appendedMode(entry: unknown): EnsoPermissionModeName | undefined {
   const record = transcriptEntryOf(entry, 0)
   return record.kind === 'custom' ? readRecordedMode(record.customType, record.data) : undefined
-}
-
-/**
- * The opening a fork records for the source's open incident (#466 decision 5): its own id, so the
- * fork is resolved on its own, and the source's signals, halt, suspension and model (when it named
- * one, #468), pointing back at the source's thread and incident.
- */
-function inheritedOpening(sourceThreadId: string, source: EnsoIncidentOpened): EnsoIncidentOpened {
-  return {
-    incidentId: crypto.randomUUID(),
-    signals: source.signals,
-    halted: source.halted,
-    suspended: source.suspended,
-    ...(source.model === undefined ? {} : { model: source.model }),
-    inheritedFrom: { threadId: sourceThreadId, incidentId: source.incidentId },
-  }
-}
-
-/** How long a delete preview measures its tree (#578): past it, the size is `partial` — at least. */
-const PREVIEW_MEASURE_MS = 5000
-
-/** How long the trees listing measures every tree and object store in all (#578). */
-const TREES_MEASURE_MS = 15_000
-
-/** How many trees the listing reads at once: each inventory runs git, each measurement a walk. */
-const TREES_AT_ONCE = 4
-
-/** `jobs` run `TREES_AT_ONCE` at a time; their results in `jobs`' order. */
-async function inBatches<T>(jobs: readonly (() => Promise<T>)[]): Promise<T[]> {
-  const results: T[] = []
-  for (let start = 0; start < jobs.length; start += TREES_AT_ONCE) {
-    results.push(...(await Promise.all(jobs.slice(start, start + TREES_AT_ONCE).map((job) => job()))))
-  }
-  return results
-}
-
-/** The tree kind a project's settings give its new threads (#551): none for `off`, or no settings. */
-function treeKindIn(settings: EnsoProjectThreadSettings | undefined): ThreadTreeKind | undefined {
-  const chosen = settings?.tree.value
-  return chosen === undefined || chosen === 'off' ? undefined : chosen
 }
 
 export function createAgentHost(options: AgentHostOptions): AgentHost {
@@ -1056,21 +837,11 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     harnessPackageDir,
     extensionFactories: options.extensionFactories ?? [],
     // The probe is no thread: no session file.
-    inMemorySession: () => SessionManager.inMemory(agentDir),
+    inMemorySession: () => probeLog(agentDir),
   })
   /** Where a thread in `cwd` is filed (#552): its project's `sessions/` — the checkout's or a tree's; pi's default when no projects folder is set. */
   const sessionDirFor = (cwd: string): string | undefined =>
     projectsDir === undefined ? undefined : sessionDirectoryFor(projectsDir, cwd)
-  /**
-   * `project`'s new-tree settings by tier (#754), read fresh — an edit applies to the next tree; none
-   * when this host mints no trees (no projects folder to put them in, or no settings to read).
-   */
-  const threadSettingsOf = (project: string): EnsoProjectThreadSettings | undefined =>
-    projectsDir === undefined || options.threadSettings === undefined
-      ? undefined
-      : resolveProjectThreadSettings(realpathOrSelf(project), options.threadSettings, agentDir).threads
-  /** The tree kind new threads in `project` get (#551), or none. */
-  const treeKindOf = (project: string): ThreadTreeKind | undefined => treeKindIn(threadSettingsOf(project))
 
   // Order matters, and it is the module header's ⚠⚠ items: env before any pi module can
   // be imported by the loader, the proxy pin and the independent-roots switch before the first
@@ -1111,150 +882,76 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   }
 
   /**
-   * The session manager of each thread a hosted session holds open (#551): the one writer of that
-   * thread's file (control plane, invariant 4). A restore appends its record through it, never
-   * through a second manager opened beside it on the same file.
+   * The log of each thread built here (#551): the one writer of that thread's file (control plane,
+   * invariant 4). A restore appends its record through it, never through a second log opened beside
+   * it on the same file.
    */
-  const liveSessionManagers = new Map<string, SessionManager>()
+  const liveLogs = new Map<string, ThreadLog>()
 
-  /** A tree just made, and what preparing it did (#754) — absent when there was nothing to set up. */
-  type MintedTree = { kind: 'minted'; record: ThreadTreeRecord; setup?: EnsoTreeSetupOutcome }
+  /** Threads whose tree a restore is putting back right now: no run is admitted on one (`admitRun`). */
+  const restoringTrees = new Set<string>()
 
   /**
-   * A thread's own tree, minted (#551): at the checkout's current state for a new thread, at the
-   * parent's snapshot for a fork. `name` is the tree's directory (the thread's id, or a fresh one
-   * for a fork); the store is the thread's (`threadId`). The kind is the project's settings'
-   * (`threadSettingsOf`), except that a project which is no repository's top level gets a copy.
-   * Then prepared (#754, `prepareTree`): a setup that fails does not refuse the tree.
+   * Threads a delete holds right now (#571): no run is admitted (`admitRun`), no session is built
+   * (`createSession`), no fork is taken of one; and the ids deleted since the server started, which
+   * stay refused — a page still showing one would otherwise prompt a NEW thread into being under it.
    */
-  async function mintTree(request: {
-    readonly threadId: string
-    readonly project: string
-    readonly name: string
-    readonly from: Parameters<typeof mintThreadTree>[0]['from']
-    /** A fork of a thread on a tree keeps its source's kind, whatever new threads get now. */
-    readonly kind?: ThreadTreeKind | undefined
-  }): Promise<MintedTree | { kind: 'refused'; reason: string }> {
-    const settings = threadSettingsOf(request.project)
-    const requested = request.kind ?? treeKindIn(settings)
-    if (projectsDir === undefined || requested === undefined) {
-      return { kind: 'refused', reason: 'this host mints no trees (no projects folder, or trees are off)' }
-    }
-    const project = realpathOrSelf(request.project)
-    const location = treeLocation(projectsDir, project, request.name, request.threadId)
-    const kind = await treeKindFor(project, requested, environment)
-    const minted = await mintThreadTree({
-      project,
-      tree: location.tree,
-      store: location.store,
-      kind,
-      branch: location.branch,
-      from: request.from,
-      environment,
-    })
-    if (minted.kind === 'refused') {
-      log.error('no tree for thread {threadId}: {step} refused — {reason}', { threadId: request.threadId, ...minted })
-      return { kind: 'refused', reason: `its tree could not be made (${minted.step}): ${minted.reason}` }
-    }
-    log.info('thread {threadId} runs in its own tree {tree} ({kind}, base {base})', {
-      threadId: request.threadId,
-      tree: minted.record.path,
-      kind: minted.record.kind,
-      base: minted.record.base,
-    })
-    const setup = settings === undefined ? undefined : await prepareTree(request.threadId, minted.record, settings)
-    return setup === undefined ? minted : { ...minted, setup }
-  }
+  const deletingThreads = new Set<string>()
 
-  /**
-   * A new tree prepared (#754): the project's files to copy copied in, its setup commands run there
-   * as Enso — in the quarantined environment pi's `bash` gets, their output redacted with the
-   * user's secret values — and the outcome. ⚠ LONG SETUPS HOLD THE THREAD'S FIRST RUN, which waits
-   * on its move; that is intended, the thread shows it is moving. A failure is warned, naming the
-   * command, and the thread still opens: the operator fixes it from there.
-   */
-  async function prepareTree(
-    threadId: string,
-    tree: ThreadTreeRecord,
-    settings: EnsoProjectThreadSettings,
-  ): Promise<EnsoTreeSetupOutcome | undefined> {
-    const outcome = await prepareThreadTree({
-      project: tree.project,
-      tree: tree.path,
-      threads: settings,
-      environment,
-      secretValues: knownSecretValues(ensoHome(environment), environment),
-    })
-    if (outcome === undefined) return undefined
-    if (outcome.ok) {
-      log.info('thread {threadId}: its tree {tree} is set up (#754)', { threadId, tree: tree.path })
-      return outcome
-    }
-    const failed = outcome.steps.find((step) => step.exitCode !== 0)
-    log.warn(
-      'thread {threadId}: its tree {tree} is not fully set up (#754) — {command} exited {exitCode}, missing {missing}; the thread opens anyway',
-      {
-        threadId,
-        tree: tree.path,
-        command: failed?.command ?? null,
-        exitCode: failed?.exitCode ?? null,
-        missing: outcome.missing,
-        tiers: outcome.tiers,
-      },
-    )
-    return outcome
-  }
+  const deletedThreads = new Set<string>()
 
-  /**
-   * The session a new thread built in its checkout moves onto its tree with (#551): everything it
-   * holds — what was chosen before its first run — written now as its file under a header naming
-   * the tree, opened from that file, and the tree's record appended to it, its setup's after it
-   * (#754). Written at once, not at pi's first flush (PR #561 review): a thread disposed before its
-   * first message would otherwise have no file to be found by, and its next build would mint again
-   * over the tree that exists. Opened from the file so pi appends to it, never writes it a second
-   * time (its first flush opens the file `wx`). The checkout session is not touched: a move undone
-   * leaves it as it was, naming no tree.
-   */
-  function sessionOnTree(checkoutSession: SessionManager, minted: MintedTree): SessionManager {
-    const file = checkoutSession.getSessionFile()
-    if (file === undefined) throw new Error(`thread ${checkoutSession.getSessionId()} has no session file path`)
-    const header = { ...checkoutSession.getHeader(), cwd: minted.record.path }
-    const lines = [header, ...checkoutSession.getEntries()].map((fileEntry) => `${JSON.stringify(fileEntry)}\n`)
-    writeFileSync(file, lines.join(''))
-    const onTree = SessionManager.open(file)
-    recordTree(onTree, minted)
-    return onTree
-  }
+  // The host's flows over its state (#801): each reads the host through what it is handed, and nothing
+  // below names the runtime's log — they read and write a thread's log through `ThreadLog`.
+  const {
+    listSessions,
+    locate,
+    storedSession,
+    readStoredThread,
+    readStoredThreadStats,
+    readStoredThreadContext,
+    readStoredRequestDetail,
+    readStoredForkPoint,
+    readStoredThreadEval,
+    readStoredIncidentHistory,
+    judgeCaseInputs,
+    readStoredJudgeCases,
+    sessionFilesOf,
+  } = createStoredThreads({ projectsDir, servesDirectory, environment, runtimeAgentDir: getAgentDir })
+  const { treeKindOf, mintTree, logOnTree, recordTree, prepareTreeOnTrust, storeOf } = createTreeMaking({
+    projectsDir,
+    agentDir,
+    environment,
+    threadSettings: options.threadSettings,
+  })
+  const { forkThread } = createThreadFork({
+    projectsDir,
+    deletingThreads,
+    deletedThreads,
+    storedSession,
+    treeKindOf,
+    mintTree,
+    recordTree,
+    storeOf,
+  })
+  const { renameThread, threadTree, restoreThreadAt, undoLastRestore } = createThreadLogEdits({
+    environment,
+    liveLogs,
+    restoringTrees,
+    storedSession,
+    storeOf,
+  })
+  const { threadDeleted, deleteThread, previewThreadDelete, listTrees } = createThreadDelete({
+    projectsDir,
+    environment,
+    deletingThreads,
+    deletedThreads,
+    restoringTrees,
+    storedSession,
+    sessionFilesOf,
+    listSessions,
+    storeOf,
+  })
 
-  /** The tree's record on the thread, and its setup's right after it when there was one (#754). */
-  function recordTree(session: SessionManager, minted: MintedTree): void {
-    session.appendCustomEntry(ENSO_THREAD_TREE_ENTRY, minted.record)
-    if (minted.setup !== undefined) session.appendCustomEntry(ENSO_TREE_SETUP_ENTRY, minted.setup)
-  }
-
-  /**
-   * A tree made before its project was trusted, prepared once it is (#754). A project's first thread
-   * mints its tree at its first run, and the trust question is asked by that run's session — after
-   * the tree exists. Untrusted at the mint, the project's own setup was not read; "Trust project"
-   * prepares the tree now, before the run it held. Nothing when the thread has no tree, or its tree
-   * already records a setup.
-   */
-  async function prepareTreeOnTrust(threadId: string, session: SessionManager): Promise<void> {
-    const branch = transcriptOf(session.getBranch())
-    const tree = treeRecordOf(branch)
-    if (tree === undefined || treeSetupOf(branch) !== undefined) return
-    const settings = threadSettingsOf(tree.project)
-    if (settings === undefined) return
-    const setup = await prepareTree(threadId, tree, settings)
-    if (setup !== undefined) session.appendCustomEntry(ENSO_TREE_SETUP_ENTRY, setup)
-  }
-
-  /** A thread's snapshot store (#551): beside its session, under its project — the checkout's or its tree's. */
-  function storeOf(threadId: string, cwd: string): string | undefined {
-    return projectsDir === undefined
-      ? undefined
-      : join(projectSnapshotsDir(projectsDir, projectIdOfCwd(projectsDir, cwd)), threadId)
-  }
   if (quarantine.misplaced.length > 0) {
     log.warn(
       'the root .env defines {misplaced} — bun autoloads .env into every bun child, so a tool can still read it there. Move it to {secretsFile} (#89); it is not read from .env',
@@ -1263,763 +960,6 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   }
   // The theme registry pi's UI code consults; harmless without a terminal, required once.
   initTheme()
-
-  /**
-   * pi's session files, each read once per change of it (#739): a lookup by id reads the
-   * directories and the HEADER of the file named for the id; the listing summarizes a file once,
-   * and again only when it changed. pi's `listAll` parsed every line of every file on every call —
-   * 590–650 ms at 200 threads of 0.9 MB, for each cold read.
-   */
-  const sessionFiles = createSessionFiles()
-
-  /**
-   * The session files, in the order a thread id resolves (#552): one group per project folder's
-   * `sessions/` — every folder, registered or not, `locate` must tell "none" from "not yours" — in
-   * NAME order, then pi's default session directories under the ONE agent dir (the env pin above)
-   * as the last group, where the terminal launcher filed sessions before the project folders and
-   * where a session of a project whose directory is gone still sits. Sessions pi has not flushed
-   * yet (no assistant message) have no file and are not here — there is nothing to come back to.
-   */
-  async function sessionFileGroups(): Promise<string[][]> {
-    // pi's agent dir as the env names it NOW, as `listAll` read it: a later host in the process re-pins it.
-    const piDirectories = await piSessionDirectories(getAgentDir())
-    const groups = [...projectSessionDirectories().map((directory) => [directory]), piDirectories]
-    return Promise.all(groups.map(async (directories) => (await Promise.all(directories.map(sessionFilesIn))).flat()))
-  }
-
-  /**
-   * One thread per id, in group order, and within a group the most recently written file first.
-   * ⚠ The FIRST group holding an id is the thread's, never the newest copy: when the migration
-   * kept a legacy copy beside a file the project folder already held (same name, same id), the
-   * folder's copy is the thread and the legacy one is not — one thread, the same one on every call.
-   */
-  function firstPerId<File extends SessionFileHeader>(groups: readonly (readonly File[])[]): File[] {
-    const byId = new Map<string, File>()
-    for (const group of groups) {
-      for (const file of group.toSorted((first, second) => second.fileModifiedMs - first.fileModifiedMs)) {
-        if (!byId.has(file.id)) byId.set(file.id, file)
-      }
-    }
-    return [...byId.values()]
-  }
-
-  /**
-   * The thread a fork's header names by FILE (#433): that file's session id. The path is tried
-   * first; it misses once the parent has moved into its project folder (#552's migration), so the
-   * file's NAME — `<timestamp>_<id>.jsonl`, unique by id — is tried next among the listed files. A
-   * parent file that is gone names no thread, so the fork carries none.
-   */
-  async function parentThreadIdOf(parentSessionPath: string, files: readonly string[]): Promise<string | undefined> {
-    const wanted = resolve(parentSessionPath)
-    const fileName = basename(wanted)
-    const candidates = [
-      ...files.filter((file) => resolve(file) === wanted),
-      ...files.filter((file) => basename(file) === fileName && resolve(file) !== wanted),
-    ]
-    for (const candidate of candidates) {
-      const header = await sessionFiles.header(candidate)
-      if (header !== undefined) return header.id
-    }
-    return undefined
-  }
-
-  /**
-   * Each file's summary, all read at once (#739). ⚠ A COLD listing holds every changed file's text
-   * together: about +154 MB for 200 sessions of 0.9 MB, what pi's `listAll` cost on EVERY listing
-   * before. Here it is paid once per change of a file: a listing after a run re-reads only what the
-   * run wrote, and an unchanged one reads nothing.
-   */
-  async function summariesOf(files: readonly string[]): Promise<SessionFileSummary[]> {
-    const summaries = await Promise.all(files.map((file) => sessionFiles.summary(file)))
-    return summaries.filter((summary): summary is SessionFileSummary => summary !== undefined)
-  }
-
-  /** The listing: every session file summarized — once per change of the file (#739). */
-  async function everySession(): Promise<StoredThread[]> {
-    const groups = await sessionFileGroups()
-    const files = groups.flat()
-    sessionFiles.retainOnly(new Set(files))
-    const summarized = await Promise.all(groups.map(summariesOf))
-    const listed = firstPerId(summarized)
-    const stored = await Promise.all(
-      listed.map(async (summary) => {
-        const parentPath = summary.parentSessionPath
-        return storedThreadOf(summary, parentPath === undefined ? undefined : await parentThreadIdOf(parentPath, files))
-      }),
-    )
-    return stored.toSorted((first, second) => second.modified.getTime() - first.modified.getTime())
-  }
-
-  function storedThreadOf(summary: SessionFileSummary, parentThreadId: string | undefined): StoredThread {
-    // ⚠ pi's `modified` is the last message's time, and a fork COPIES its source's messages
-    // with their timestamps (#447): a fork taken now of a thread idle for hours read as hours
-    // old, and sorted with it. The header's `created` is when the fork was made; for any other
-    // session it is never later than its last message, so the later of the two changes nothing else.
-    const created = summary.created.getTime()
-    const modified = Number.isNaN(created) ? summary.modified : new Date(Math.max(summary.modified.getTime(), created))
-    return {
-      id: summary.id,
-      path: summary.path,
-      cwd: summary.cwd,
-      modified,
-      messageCount: summary.messageCount,
-      // Empty for a file with none — an empty fork's (#433) — which is no title.
-      firstMessage: summary.firstMessage,
-      // A blank `session_info` already reads as no name: it clears the title.
-      ...(summary.name === undefined ? {} : { name: summary.name }),
-      ...(parentThreadId === undefined ? {} : { parentThreadId }),
-    }
-  }
-
-  /**
-   * Every project folder's `sessions/` — every folder, registered or not; none when there is no
-   * projects folder. In NAME order, not the filesystem's: two folders holding one id (a hand-made
-   * copy beside a moved checkout's) must resolve to the same one on every call and on every
-   * machine — the lexically first folder's.
-   */
-  function projectSessionDirectories(): string[] {
-    if (projectsDir === undefined || !existsSync(projectsDir)) return []
-    return readdirSync(projectsDir, { withFileTypes: true })
-      .filter((directoryEntry) => directoryEntry.isDirectory() && isEnsoProjectId(directoryEntry.name))
-      .map((directoryEntry) => directoryEntry.name)
-      .toSorted()
-      .map((projectId) => projectSessionsDir(projectsDir, projectId))
-      .filter((directory) => existsSync(directory))
-  }
-
-  async function listSessions(): Promise<StoredThread[]> {
-    return (await everySession()).filter((stored) => servesDirectory(stored.cwd))
-  }
-
-  /**
-   * Every file under `threadId`, the thread's own first (`firstPerId`'s order) — a legacy copy
-   * beside a migrated one too — and the files of every group, for the parent's lookup. Only the
-   * files NAMED for the id are opened, and only their headers (#739): another thread's file is
-   * never read. A file whose name is not pi's shape is a candidate for any id; its header decides.
-   */
-  async function sessionFilesUnder(threadId: string): Promise<{ under: SessionFileHeader[]; files: string[] }> {
-    const groups = await sessionFileGroups()
-    const headers = await Promise.all(
-      groups.map(async (group) => {
-        const candidates = group.filter((file) => {
-          const nameThreadId = threadIdOfFileName(basename(file))
-          return nameThreadId === undefined || nameThreadId === threadId
-        })
-        const read = await Promise.all(candidates.map((file) => sessionFiles.header(file)))
-        return read.filter((header): header is SessionFileHeader => header?.id === threadId)
-      }),
-    )
-    const own = firstPerId(headers)
-    const owned = new Set(own)
-    const others = headers.flat().filter((header) => !owned.has(header))
-    return { under: [...own, ...others], files: groups.flat() }
-  }
-
-  /** The thread's session file, served or not — `createSession` must tell "none" from "not yours". */
-  async function locate(threadId: string): Promise<LocatedThread | undefined> {
-    const { under, files } = await sessionFilesUnder(threadId)
-    const [header] = under
-    if (header === undefined) return undefined
-    const parentThreadId =
-      header.parentSessionPath === undefined ? undefined : await parentThreadIdOf(header.parentSessionPath, files)
-    return {
-      id: header.id,
-      path: header.path,
-      cwd: header.cwd,
-      ...(parentThreadId === undefined ? {} : { parentThreadId }),
-    }
-  }
-
-  async function storedSession(threadId: string): Promise<LocatedThread | undefined> {
-    const located = await locate(threadId)
-    return located !== undefined && servesDirectory(located.cwd) ? located : undefined
-  }
-
-  async function storedSessionPath(threadId: string): Promise<string | undefined> {
-    return (await storedSession(threadId))?.path
-  }
-
-  /** A stored thread's branch, root to leaf — one open, nothing built (#86); undefined for no file. */
-  async function storedBranch(threadId: string): Promise<SessionEntry[] | undefined> {
-    const path = await storedSessionPath(threadId)
-    return path === undefined ? undefined : SessionManager.open(path).getBranch()
-  }
-
-  async function readStoredThread(threadId: string): Promise<StoredThreadRead | undefined> {
-    const located = await storedSession(threadId)
-    if (located === undefined) return undefined
-    // `open` loads the file into memory and writes nothing until an append.
-    const stored = SessionManager.open(located.path)
-    const branch = stored.getBranch()
-    return {
-      cwd: located.cwd,
-      transcript: transcriptOf(branch),
-      usage: storedSessionUsage(stored.getEntries()),
-      recordedModel: recordedModelOf(branch),
-      name: stored.getSessionName(),
-    }
-  }
-
-  async function readStoredThreadStats(threadId: string): Promise<StoredThreadStats | undefined> {
-    const path = await storedSessionPath(threadId)
-    if (path === undefined) return undefined
-    const stored = SessionManager.open(path)
-    return { usage: storedSessionUsage(stored.getEntries()), branch: branchStats(stored.getBranch()) }
-  }
-
-  async function readStoredThreadContext(threadId: string): Promise<StoredThreadContext | undefined> {
-    const path = await storedSessionPath(threadId)
-    if (path === undefined) return undefined
-    const stored = SessionManager.open(path)
-    return { usage: storedSessionUsage(stored.getEntries()), context: branchContext(stored.getBranch()) }
-  }
-
-  async function readStoredRequestDetail(
-    threadId: string,
-    request: number | 'next',
-  ): Promise<BranchRequestDetail | undefined> {
-    const branch = await storedBranch(threadId)
-    return branch === undefined ? undefined : branchRequestDetail(branch, request)
-  }
-
-  async function forkThread(threadId: string, entryId: string): Promise<ThreadForkOutcome> {
-    if (deletingThreads.has(threadId) || deletedThreads.has(threadId)) {
-      return { kind: 'no-thread', reason: `thread ${threadId} is deleted, or being deleted` }
-    }
-    const located = await storedSession(threadId)
-    if (located === undefined) {
-      return { kind: 'no-thread', reason: `thread ${threadId} has no session file in a project this server serves` }
-    }
-    const probe = SessionManager.open(located.path)
-    const entry = probe.getEntry(entryId)
-    if (entry === undefined) return { kind: 'no-entry', reason: `thread ${threadId} has no entry ${entryId}` }
-    if (entry.type !== 'message' || entry.message.role !== 'user') {
-      return { kind: 'not-a-user-message', reason: `entry ${entryId} is not a user message; a fork starts at one` }
-    }
-    const prefill = userMessageText(entry.message.content)
-    // The fork's own tree (#551): whenever the source runs on one — two threads never share a tree
-    // — or new threads get one. Minted at the source's snapshot as that turn began, so the fork's
-    // files are the conversation's at the fork point, not the source's files now.
-    const sourceTranscript = transcriptOf(probe.getBranch())
-    const sourceTree = treeRecordOf(sourceTranscript)
-    const plan =
-      sourceTree !== undefined || treeKindOf(located.cwd) !== undefined
-        ? forkTreePlan(threadId, located.cwd, sourceTree, snapshotAtEntry(sourceTranscript, entryId))
-        : undefined
-    if (plan?.kind === 'refused') return { kind: 'tree-refused', reason: plan.reason }
-    // Opened with the fork's tree as its cwd, so the fork's header — written by pi when it branches
-    // — names the tree the fork runs in; the source's own file is not touched.
-    const source = plan === undefined ? probe : SessionManager.open(located.path, undefined, plan.cwd)
-    // Read off the source's CURRENT branch before `createBranchedSession` turns `source` into the
-    // fork: an open incident passes on whatever the fork point (#466 decision 5) — a fork taken
-    // from before it would otherwise be a way around its suspension. A resolved or ended one does not.
-    const sourceIncident = openIncidentOf(branchIncidents(source.getBranch()))
-    // pi's `before`: the fork holds everything up to the message's parent — or nothing, naming its parent.
-    let fork: SessionManager
-    if (entry.parentId === null) {
-      fork = SessionManager.create(source.getCwd(), source.getSessionDir())
-      fork.newSession({ parentSession: located.path })
-    } else {
-      source.createBranchedSession(entry.parentId)
-      fork = source
-    }
-    if (plan !== undefined) {
-      const refusal = await giveForkItsTree(fork, plan)
-      if (refusal !== undefined) return { kind: 'tree-refused', reason: refusal }
-    }
-    if (sourceIncident !== undefined) inheritOpenIncident(threadId, fork, sourceIncident)
-    writeUnflushedSession(fork)
-    return { kind: 'forked', threadId: fork.getSessionId(), prefill }
-  }
-
-  /**
-   * Mint the fork's tree under the fork's own id (pi picks it only as it branches) and record it on
-   * the fork. The reason when it cannot be made: then there is no fork — the file pi may already
-   * have written for it goes too, so no thread is left pointing at a tree that does not exist.
-   */
-  async function giveForkItsTree(
-    fork: SessionManager,
-    plan: Extract<ReturnType<typeof forkTreePlan>, { kind: 'planned' }>,
-  ): Promise<string | undefined> {
-    const minted = await mintTree({
-      threadId: fork.getSessionId(),
-      project: plan.project,
-      name: plan.name,
-      from: plan.from,
-      kind: plan.treeKind,
-    })
-    if (minted.kind === 'refused') {
-      const file = fork.getSessionFile()
-      if (file !== undefined && existsSync(file)) unlinkSync(file)
-      return `the fork's ${minted.reason}`
-    }
-    recordTree(fork, minted)
-    return undefined
-  }
-
-  /** The source's open incident, opened again on the fork (#466 decision 5) — unless a fork taken after the opening already holds it, open. */
-  function inheritOpenIncident(
-    threadId: string,
-    fork: SessionManager,
-    sourceIncident: NonNullable<ReturnType<typeof openIncidentOf>>,
-  ): void {
-    if (openIncidentOf(branchIncidents(fork.getBranch())) !== undefined) return
-    const opening = inheritedOpening(threadId, sourceIncident.opened)
-    fork.appendCustomEntry(ENSO_INCIDENT_OPENED_ENTRY, opening)
-    log.info('fork {forkThreadId} inherits incident {sourceIncidentId} as {incidentId}', {
-      threadId,
-      forkThreadId: fork.getSessionId(),
-      sourceIncidentId: sourceIncident.opened.incidentId,
-      incidentId: opening.incidentId,
-    })
-  }
-
-  /**
-   * Where a fork's tree comes from (#551): the source's snapshot at the fork entry, in the source's
-   * store — or, for a source in its checkout with no snapshot there (a thread from before #551), the
-   * checkout as it is now. A source ON a tree with no snapshot at that turn is refused: its files at
-   * the fork point were never captured, and the checkout's are not them.
-   */
-  function forkTreePlan(
-    sourceThreadId: string,
-    sourceCwd: string,
-    sourceTree: ThreadTreeRecord | undefined,
-    at: { readonly hash: string; readonly revision: string | null } | undefined,
-  ):
-    | {
-        kind: 'planned'
-        cwd: string
-        project: string
-        name: string
-        treeKind: ThreadTreeKind | undefined
-        from: Parameters<typeof mintThreadTree>[0]['from']
-      }
-    | { kind: 'refused'; reason: string } {
-    const sourceStore = storeOf(sourceThreadId, sourceCwd)
-    if (projectsDir === undefined || sourceStore === undefined) {
-      return { kind: 'refused', reason: 'this host has no projects folder to put a tree in' }
-    }
-    if (sourceTree !== undefined && at === undefined) {
-      return { kind: 'refused', reason: `thread ${sourceThreadId} recorded no snapshot of its tree at that turn` }
-    }
-    const project = sourceTree?.project ?? sourceCwd
-    // pi picks the fork's id only when it branches, after the cwd is fixed: the tree's directory
-    // gets a name of its own, and the store the fork's id (`mintTree`).
-    const name = crypto.randomUUID()
-    return {
-      kind: 'planned',
-      cwd: treeLocation(projectsDir, realpathOrSelf(project), name, name).tree,
-      project,
-      name,
-      treeKind: sourceTree?.kind,
-      from:
-        at === undefined
-          ? { kind: 'checkout' }
-          : { kind: 'snapshot', hash: at.hash, revision: at.revision, storeDirectory: sourceStore },
-    }
-  }
-
-  /** The thread's session, live or stored (one `open`, nothing built, #86), or why there is none. */
-  async function threadSession(
-    threadId: string,
-  ): Promise<
-    | { readonly session: SessionManager; readonly live: boolean }
-    | { readonly kind: 'no-thread'; readonly reason: string }
-  > {
-    const live = liveSessionManagers.get(threadId)
-    if (live !== undefined) return { session: live, live: true }
-    const located = await storedSession(threadId)
-    if (located === undefined) {
-      return { kind: 'no-thread', reason: `thread ${threadId} has no session in a project this server serves` }
-    }
-    return { session: SessionManager.open(located.path), live: false }
-  }
-
-  async function restoreSession(
-    threadId: string,
-  ): Promise<
-    | { readonly session: SessionManager; readonly live: boolean; readonly tree: ThreadTreeRecord }
-    | { readonly kind: 'no-thread' | 'no-tree'; readonly reason: string }
-  > {
-    const found = await threadSession(threadId)
-    if ('kind' in found) return found
-    const tree = treeRecordOf(transcriptOf(found.session.getBranch()))
-    if (tree === undefined) {
-      return {
-        kind: 'no-tree',
-        reason: `thread ${threadId} runs in its checkout, not a tree of its own: nothing to restore`,
-      }
-    }
-    return { ...found, tree }
-  }
-
-  /**
-   * Name the thread (#670): pi's own `session_info` entry — what pi's `/name` writes, and what its
-   * listing reads back as the newest name — appended to the live session or to the stored file. A
-   * file pi opened from disk takes the entry at once, an empty fork's too; a live thread not yet
-   * written keeps it for its first write. The route holds the thread while it is written, so a name
-   * never lands between a run's messages.
-   */
-  async function renameThread(threadId: string, name: string): Promise<ThreadRenameOutcome> {
-    const found = await threadSession(threadId)
-    if ('kind' in found) return found
-    found.session.appendSessionInfo(name)
-    log.info('thread {threadId} named {name}', { threadId, name })
-    return { kind: 'renamed' }
-  }
-
-  async function threadTree(threadId: string): Promise<ThreadTreePlace | undefined> {
-    const live = liveSessionManagers.get(threadId)
-    const located = live === undefined ? await storedSession(threadId) : undefined
-    const session = live ?? (located === undefined ? undefined : SessionManager.open(located.path))
-    if (session === undefined) return undefined
-    const transcript = transcriptOf(session.getBranch())
-    const record = treeRecordOf(transcript)
-    const store = storeOf(threadId, session.getCwd())
-    if (record === undefined || store === undefined) return undefined
-    const setup = treeSetupOf(transcript)
-    return setup === undefined ? { record, store } : { record, store, setup }
-  }
-
-  /** Threads whose tree a restore is putting back right now: no run is admitted on one (`admitRun`). */
-  const restoringTrees = new Set<string>()
-
-  /**
-   * Put the thread's tree back to `hash` and record it: the tree's current files are snapshotted
-   * first (the safety), and a failed restore puts them back. The files only — the conversation is
-   * not changed (its side is `/fork`).
-   */
-  async function restoreTreeTo(
-    threadId: string,
-    target: { readonly session: SessionManager; readonly live: boolean; readonly tree: ThreadTreeRecord },
-    hash: string,
-  ): Promise<ThreadRestoreOutcome> {
-    const { session, live, tree } = target
-    const store = storeOf(threadId, session.getCwd())
-    if (store === undefined) return { kind: 'refused', reason: 'this host has no projects folder' }
-    restoringTrees.add(threadId)
-    const restored = await restoreThreadTree({ store, tree: tree.path, hash, environment }).finally(() =>
-      restoringTrees.delete(threadId),
-    )
-    if (restored.kind === 'refused') {
-      log.error('restore of thread {threadId} to {hash} refused at {step}: {reason}', { threadId, hash, ...restored })
-      return { kind: 'refused', reason: `${restored.step}: ${restored.reason}` }
-    }
-    session.appendCustomEntry(ENSO_TREE_RESTORED_ENTRY, { hash: restored.hash, safety: restored.safety })
-    if (!live) writeUnflushedSession(session)
-    log.info('thread {threadId} tree restored to {hash}; its files before are {safety}', { threadId, ...restored })
-    return { kind: 'restored', hash: restored.hash, safety: restored.safety }
-  }
-
-  /** Restore a thread's tree to the snapshot taken as the turn opened by `entryId` began (#551). */
-  async function restoreThreadAt(threadId: string, entryId: string): Promise<ThreadRestoreOutcome> {
-    const target = await restoreSession(threadId)
-    if ('kind' in target) return target
-    const transcript = transcriptOf(target.session.getBranch())
-    if (!hasEntry(transcript, entryId))
-      return { kind: 'no-entry', reason: `thread ${threadId} has no entry ${entryId}` }
-    const at = snapshotAtEntry(transcript, entryId)
-    if (at === undefined) {
-      return { kind: 'no-snapshot', reason: `thread ${threadId} recorded no snapshot of its tree when that turn began` }
-    }
-    return restoreTreeTo(threadId, target, at.hash)
-  }
-
-  /**
-   * Undo the thread's last restore (#565): back to the safety snapshot its newest `enso-tree-restored`
-   * record names. That is a restore too — recorded, with its own safety — so undoing again re-applies
-   * the restore it undid; each undo reverses the restore before it. ⚠ Only when `safety` IS that
-   * record's (PR #561 review): an undo pressed on an older restore's notice — or one another tab
-   * replaced since — is refused, never applied to a restore it does not name.
-   */
-  async function undoLastRestore(threadId: string, safety: string): Promise<ThreadRestoreOutcome> {
-    const target = await restoreSession(threadId)
-    if ('kind' in target) return target
-    const last = lastRestoreOf(transcriptOf(target.session.getBranch()))
-    if (last === undefined) return { kind: 'no-restore', reason: `thread ${threadId} has no restore to undo` }
-    if (last.safety !== safety) {
-      return {
-        kind: 'superseded',
-        reason: `a later restore replaced these files (its safety is ${last.safety.slice(0, 7)}); undo that one instead`,
-      }
-    }
-    return restoreTreeTo(threadId, target, last.safety)
-  }
-
-  /**
-   * Threads a delete holds right now (#571): no run is admitted (`admitRun`), no session is built
-   * (`createSession`), no fork is taken of one; and the ids deleted since the server started, which
-   * stay refused — a page still showing one would otherwise prompt a NEW thread into being under it.
-   */
-  const deletingThreads = new Set<string>()
-  const deletedThreads = new Set<string>()
-
-  /** Every session file under `threadId`: the project folders' and pi's own — a legacy copy beside a migrated one too. */
-  async function sessionFilesOf(threadId: string): Promise<string[]> {
-    return (await sessionFilesUnder(threadId)).under.map((header) => header.path)
-  }
-
-  function threadDeleted(threadId: string): boolean {
-    return deletedThreads.has(threadId)
-  }
-
-  /**
-   * A deleting thread's tree and store gone (#571, #573): its tree disposed with the store, or a
-   * store alone released. Undefined when done; the outcome to answer when not — `busy` while the
-   * project's stores are migrated or collected, `refused` when they cannot be migrated or a fork
-   * left unmigrated still reads this store (no inventory: nothing went), else the tree's work. A
-   * collection that could not run is logged, never a refusal: the store is gone.
-   */
-  async function removeTreeAndStore(
-    threadId: string,
-    tree: ThreadTreeRecord | undefined,
-    store: string | undefined,
-    force: boolean,
-  ): Promise<ThreadDeleteOutcome | undefined> {
-    let uncollected: string | undefined
-    if (tree !== undefined && store !== undefined) {
-      const disposed = await disposeThreadTree({ record: tree, store, force, environment })
-      if (disposed.kind === 'busy') return { kind: 'busy', reason: disposed.reason }
-      if (disposed.kind === 'refused') {
-        return disposed.inventory === undefined
-          ? { kind: 'refused', reason: disposed.reason }
-          : { kind: 'holds-work', reason: disposed.reason }
-      }
-      uncollected = disposed.uncollected
-    } else if (store !== undefined && existsSync(store)) {
-      const released = await releaseThreadStore(store, environment)
-      if (released.kind !== 'removed') return { kind: released.kind, reason: released.reason }
-      uncollected = released.uncollected
-    }
-    if (uncollected !== undefined) {
-      log.warn('thread {threadId}: snapshot objects not collected: {reason}', { threadId, reason: uncollected })
-    }
-    return undefined
-  }
-
-  /**
-   * Delete the thread (#571). Fail-closed, in this order: the tree's inventory first (refused, the
-   * thread is untouched — not even retired); then the live session retired; then the tree and the
-   * store, the project's object store collected (#573); the session files last, so a delete that
-   * stops partway leaves a thread that still lists and can be deleted again.
-   */
-  async function deleteThread(
-    threadId: string,
-    {
-      force,
-      confirmedWork,
-      retire,
-    }: { readonly force: boolean; readonly confirmedWork?: string | undefined; readonly retire: () => boolean },
-  ): Promise<ThreadDeleteOutcome> {
-    if (deletedThreads.has(threadId)) return { kind: 'no-thread', reason: `thread ${threadId} was deleted` }
-    if (deletingThreads.has(threadId)) return { kind: 'busy', reason: `thread ${threadId} is being deleted` }
-    if (restoringTrees.has(threadId)) {
-      return { kind: 'busy', reason: `thread ${threadId} is restoring its files; delete it once that is done` }
-    }
-    // Claimed before the first await (PR #572 review): a second delete meanwhile is `busy`, never a
-    // second run of this one beside it.
-    deletingThreads.add(threadId)
-    try {
-      const located = await storedSession(threadId)
-      if (located === undefined) {
-        return { kind: 'no-thread', reason: `thread ${threadId} has no session file in a project this server serves` }
-      }
-      const tree = treeRecordOf(transcriptOf(SessionManager.open(located.path).getBranch()))
-      const store = storeOf(threadId, located.cwd)
-      // The inventory always runs: force takes only the work the user confirmed (PR #572 review) —
-      // a run that wrote more since the list was shown has that named first, never deleted unseen.
-      if (tree !== undefined && store !== undefined) {
-        const held = holdingReason(await inventoryThreadTree({ record: tree, store, environment }))
-        const confirmed =
-          force &&
-          confirmedWork ===
-            createHash('sha256')
-              .update(held ?? '')
-              .digest('hex')
-        if (held !== undefined && !confirmed) return { kind: 'holds-work', reason: held }
-      }
-      if (!retire()) return { kind: 'busy', reason: `thread ${threadId} is running; delete it when it settles` }
-      const removed = await removeTreeAndStore(threadId, tree, store, force)
-      if (removed !== undefined) return removed
-      for (const file of await sessionFilesOf(threadId)) rmSync(file, { force: true })
-      deletedThreads.add(threadId)
-      log.info('thread {threadId} deleted: session, {tree} and store', {
-        threadId,
-        tree: tree === undefined ? 'no tree' : `its ${tree.kind} ${tree.path}`,
-      })
-      return { kind: 'deleted' }
-    } catch (error) {
-      log.error('thread {threadId} could not be deleted: {error}', { threadId, error })
-      return { kind: 'refused', reason: `thread ${threadId} could not be deleted: ${String(error)}` }
-    } finally {
-      deletingThreads.delete(threadId)
-    }
-  }
-
-  /**
-   * What `deleteThread` would do (#571), read the way it reads: the tree from the branch, the work
-   * from the same inventory and rule (`holdingReason`), the forks whose histories keep this
-   * thread's snapshots ({@link forksOfStore}).
-   */
-  async function previewThreadDelete(
-    threadId: string,
-  ): Promise<
-    | { readonly kind: 'preview'; readonly preview: EnsoThreadDeletePreview }
-    | { readonly kind: 'no-thread'; readonly reason: string }
-  > {
-    if (threadDeleted(threadId)) return { kind: 'no-thread', reason: `thread ${threadId} was deleted` }
-    const located = await storedSession(threadId)
-    if (located === undefined) {
-      return { kind: 'no-thread', reason: `thread ${threadId} has no session file in a project this server serves` }
-    }
-    const tree = treeRecordOf(transcriptOf(SessionManager.open(located.path).getBranch()))
-    const store = storeOf(threadId, located.cwd)
-    const [holdsWork, size] = await Promise.all([
-      tree !== undefined && store !== undefined
-        ? inventoryThreadTree({ record: tree, store, environment }).then(holdingReason)
-        : undefined,
-      tree === undefined ? null : diskUsageOf(tree.path, Date.now() + PREVIEW_MEASURE_MS),
-    ])
-    const keptFor = (store === undefined ? [] : forksOfStore(store)).map((fork) => ({ threadId: fork }))
-    return {
-      kind: 'preview',
-      preview: {
-        tree: tree === undefined ? null : { kind: tree.kind, path: tree.path, branch: tree.branch },
-        size,
-        holdsWork: holdsWork ?? null,
-        keptFor,
-      },
-    }
-  }
-
-  /**
-   * What thread trees cost on disk (#578). Every served thread whose branch records a tree, by the
-   * project its tree is under; then every directory under that project's `trees/` no thread records
-   * — a mint or a delete that stopped partway — named with no thread. A project with no tree but a
-   * snapshot object store (threads run in the checkout snapshot too) is listed for the store.
-   * ⚠ Every size starts at once, under one deadline and one {@link measureBudget} served in turns
-   * (#579 review): measured a batch at a time, the trees in the last batches started past the
-   * deadline and were never walked. A tree's work is the delete inventory's, a few at a time — each
-   * one runs git.
-   */
-  async function listTrees(): Promise<EnsoTreesListing> {
-    if (projectsDir === undefined) return { projects: [] }
-    const deadline = Date.now() + TREES_MEASURE_MS
-    const budget = measureBudget()
-    const recorded = new Map<string, { threadId: string; record: ThreadTreeRecord; cwd: string }[]>()
-    for (const stored of await listSessions()) {
-      const projectId = projectIdOfCwd(projectsDir, stored.cwd)
-      const record = treeRecordOf(transcriptOf(SessionManager.open(stored.path).getBranch()))
-      const trees = recorded.get(projectId) ?? []
-      if (record !== undefined) trees.push({ threadId: stored.id, record, cwd: stored.cwd })
-      recorded.set(projectId, trees)
-    }
-    const projects = await Promise.all(
-      [...recorded]
-        .toSorted(([first], [second]) => first.localeCompare(second))
-        .map(async ([projectId, threads]) => {
-          const known = new Set(threads.map(({ record }) => realpathOrSelf(record.path)))
-          const orphans = treeDirectoriesOf(projectId).filter((path) => !known.has(realpathOrSelf(path)))
-          const objects = join(projectSnapshotsDir(projectsDir, projectId), '.objects')
-          // Every size is started here, before any is awaited; the inventories run alongside, a few at a time.
-          const works = inBatches(threads.map((thread) => (): Promise<string | undefined> => workIn(thread)))
-          const [trees, objectStore] = await Promise.all([
-            Promise.all([
-              ...threads.map(async ({ threadId, record }, at): Promise<EnsoTreeOnDisk> => ({
-                threadId,
-                path: record.path,
-                kind: record.kind,
-                branch: record.branch,
-                size: await diskUsageOf(record.path, deadline, budget),
-                holdsWork: (await works)[at] ?? null,
-              })),
-              ...orphans.map(async (path): Promise<EnsoTreeOnDisk> => ({
-                threadId: null,
-                path,
-                kind: existsSync(join(path, '.git')) ? 'worktree' : 'copy',
-                branch: null,
-                size: await diskUsageOf(path, deadline, budget),
-                holdsWork: null,
-              })),
-            ]),
-            existsSync(objects) ? diskUsageOf(objects, deadline, budget) : null,
-          ])
-          return { projectId, objectStore, trees }
-        }),
-    )
-    return { projects: projects.filter((project) => project.trees.length > 0 || project.objectStore !== null) }
-  }
-
-  /** The work a recorded tree holds, as the delete would refuse for it; none without a store to compare with. */
-  async function workIn(thread: {
-    threadId: string
-    record: ThreadTreeRecord
-    cwd: string
-  }): Promise<string | undefined> {
-    const store = storeOf(thread.threadId, thread.cwd)
-    if (store === undefined) return undefined
-    return holdingReason(await inventoryThreadTree({ record: thread.record, store, environment }))
-  }
-
-  /** The directories under a project's `trees/`, by path; none when it has no such folder or it cannot be read. */
-  function treeDirectoriesOf(projectId: string): string[] {
-    if (projectsDir === undefined) return []
-    const trees = projectTreesDir(projectsDir, projectId)
-    try {
-      return readdirSync(trees, { withFileTypes: true })
-        .filter((treeEntry) => treeEntry.isDirectory())
-        .map((treeEntry) => join(trees, treeEntry.name))
-        .toSorted()
-    } catch {
-      return []
-    }
-  }
-
-  async function readStoredForkPoint(threadId: string): Promise<EnsoForkPoint | undefined> {
-    const located = await storedSession(threadId)
-    if (located === undefined) return undefined
-    return forkPointOf(SessionManager.open(located.path).getBranch(), {
-      threadId,
-      cwd: located.cwd,
-      parentThreadId: located.parentThreadId,
-    })
-  }
-
-  async function readStoredThreadEval(threadId: string): Promise<BranchEval | undefined> {
-    const branch = await storedBranch(threadId)
-    return branch === undefined ? undefined : branchEval(branch)
-  }
-
-  async function readStoredIncidentHistory(
-    threadId: string,
-    thresholds: EnsoRiskThresholds,
-  ): Promise<BranchIncidentHistory | undefined> {
-    const branch = await storedBranch(threadId)
-    return branch === undefined ? undefined : branchIncidentHistory(branch, thresholds)
-  }
-
-  /**
-   * What a judge case is built from in `cwd` (#469): the guard's default fragments and the user's
-   * secret values (`ENSO_HOME`, as the quarantine above reads it), read per call so a key added
-   * since is still scrubbed.
-   */
-  function judgeCaseInputs(cwd: string, thresholds: EnsoRiskThresholds): JudgeCaseInputs {
-    return {
-      thresholds,
-      cwd,
-      secretPathFragments: DEFAULT_GUARD_POLICY.secretPathFragments,
-      secretValues: knownSecretValues(ensoHome(environment), environment),
-    }
-  }
-
-  async function readStoredJudgeCases(
-    threadId: string,
-    thresholds: EnsoRiskThresholds,
-  ): Promise<BranchJudgeCases | undefined> {
-    const stored = await storedSession(threadId)
-    if (stored === undefined) return undefined
-    return branchJudgeCases(SessionManager.open(stored.path).getBranch(), judgeCaseInputs(stored.cwd, thresholds))
-  }
 
   async function createSession(threadId: string, newSessionDirectory: () => string): Promise<HostedThread> {
     // Resolved BEFORE the services so a bad id fails before anything is built. A file under this
@@ -2043,9 +983,8 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     // is found next time, and the browser adopts under the history's `threadId` (`thread-stores.ts#adoptThread`). The
     // file sits under the agent dir pi resolves from the env the host set, where `pi --mode rpc` put it, so the mode's
     // `active_agent` entries and the transcript land where the TUI's would; `permissionModeState()` below walks them.
-    if (located !== undefined)
-      return fencedFromDelete(threadId, await buildHosted(threadId, SessionManager.open(located.path)))
-    const created = SessionManager.create(directory, sessionDirFor(directory), { id: threadId })
+    if (located !== undefined) return fencedFromDelete(threadId, await buildHosted(threadId, openLog(located.path)))
+    const created = createLog(threadId, directory, sessionDirFor(directory))
     const hosted = fencedFromDelete(threadId, await buildHosted(threadId, created))
     // A new thread whose project gives threads a tree (#551) is built in the checkout and gets its
     // tree at its first RUN, not here (PR #561 review): a thread only built — a preview looked at,
@@ -2089,12 +1028,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
    * server's control routes cannot reach this (a moving run holds the thread's lease); the wrapper
    * refuses them itself, so no caller can.
    */
-  function treeOnFirstRun(
-    threadId: string,
-    project: string,
-    first: HostedThread,
-    checkoutSession: SessionManager,
-  ): HostedThread {
+  function treeOnFirstRun(threadId: string, project: string, first: HostedThread, checkout: ThreadLog): HostedThread {
     let current = first
     let moved = false
     let disposed = false
@@ -2108,17 +1042,17 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     const isMoving = (): boolean => moving !== undefined && !moved
 
     /**
-     * The mint undone: the tree, its branch and store, the file the move wrote; the checkout session
-     * back. The live-session entry is touched only while it still holds `treeSession`, the one this
-     * move built (a build that threw had set it): the checkout session takes it back, or — the thread
-     * disposed meanwhile — it goes. Any other entry is a newer build's under the same id, and stays.
+     * The mint undone: the tree, its branch and store, the file the move wrote; the checkout's log
+     * back. The live log is touched only while it is still `treeLog`, the one this move built (a build
+     * that threw had set it): the checkout's log takes it back, or — the thread disposed meanwhile —
+     * it goes. Any other entry is a newer build's under the same id, and stays.
      */
-    async function undoMove(tree: ThreadTreeRecord, why: string, treeSession?: SessionManager): Promise<string> {
-      const file = checkoutSession.getSessionFile()
+    async function undoMove(tree: ThreadTreeRecord, why: string, treeLog?: ThreadLog): Promise<string> {
+      const file = checkout.file
       if (file !== undefined && existsSync(file)) unlinkSync(file)
-      if (treeSession !== undefined && liveSessionManagers.get(threadId) === treeSession) {
-        if (disposed) liveSessionManagers.delete(threadId)
-        else liveSessionManagers.set(threadId, checkoutSession)
+      if (treeLog !== undefined && liveLogs.get(threadId) === treeLog) {
+        if (disposed) liveLogs.delete(threadId)
+        else liveLogs.set(threadId, checkout)
       }
       const store = storeOf(threadId, tree.path)
       const removed =
@@ -2138,13 +1072,13 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       if (minted.kind === 'refused') return minted.reason
       if (disposed) return undoMove(minted.record, `thread ${threadId} was disposed before it ran`)
       let next: HostedThread
-      let treeSession: SessionManager | undefined
+      let treeLog: ThreadLog | undefined
       try {
-        treeSession = sessionOnTree(checkoutSession, minted)
-        next = await buildHosted(threadId, treeSession)
+        treeLog = logOnTree(checkout, minted)
+        next = await buildHosted(threadId, treeLog)
       } catch (error) {
         log.error('thread {threadId} could not be built on its tree: {error}', { threadId, error })
-        return undoMove(minted.record, `its build on the tree failed: ${String(error)}`, treeSession)
+        return undoMove(minted.record, `its build on the tree failed: ${String(error)}`, treeLog)
       }
       if (disposed) {
         next.runtime.dispose()
@@ -2243,15 +1177,15 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     }
   }
 
-  /** pi built on `sessionManager` — a thread's whole session, events flowing, extensions bound. */
-  async function buildHosted(threadId: string, sessionManager: SessionManager): Promise<HostedThread> {
-    const cwd = sessionManager.getCwd()
-    liveSessionManagers.set(threadId, sessionManager)
+  /** pi built on `threadLog` — a thread's whole session, events flowing, extensions bound. */
+  async function buildHosted(threadId: string, threadLog: ThreadLog): Promise<HostedThread> {
+    const { cwd } = threadLog
+    liveLogs.set(threadId, threadLog)
     // The thread's system prompt (#443): the one its branch recorded, else pi's default until a
     // Start chooses one (`setSystemPrompt` below). An entry that does not read refuses the build —
     // never pi's default in its place, which would rewrite the prompt the thread started with. Read
     // BEFORE the services, as the directory is: a thread refused builds nothing.
-    const recorded = recordedSystemPrompt(transcriptOf(sessionManager.getBranch()))
+    const recorded = recordedSystemPrompt(threadLog.transcript())
     if (recorded.kind === 'unreadable') {
       throw new Error(`thread ${threadId}: its ${ENSO_SYSTEM_PROMPT_ENTRY} entry does not read as a system prompt`)
     }
@@ -2273,13 +1207,13 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     // Where each permission card stands among its call's questions (#728), asked of this session's engine.
     const callQuestions = createPermissionCallQuestions(
       (surface, value, agentName) =>
-        getPermissionsService(sessionManager.getSessionId())?.checkPermission(surface, value, agentName).state,
+        getPermissionsService(threadLog.threadId)?.checkPermission(surface, value, agentName).state,
     )
     // Trust before anything loads (#502): pi's `trust.json`, the thread's own record, the default —
     // else untrusted, and asked before the first run (`trustGate` below). ⚠ Keyed by the PROJECT: a
     // thread on a tree (#551) is trusted as its checkout is, never as a path no one trusted.
-    const trustDirectory = treeRecordOf(transcriptOf(sessionManager.getBranch()))?.project ?? cwd
-    const projectTrust = hostedProjectTrust(cwd, trustDirectory, agentDir, transcriptOf(sessionManager.getBranch()))
+    const trustDirectory = treeRecordOf(threadLog.transcript())?.project ?? cwd
+    const projectTrust = hostedProjectTrust(cwd, trustDirectory, agentDir, threadLog.transcript())
     const services = await createAgentSessionServices({
       cwd,
       agentDir,
@@ -2326,8 +1260,8 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
 
     const { session } = await createAgentSessionFromServices({
       services: { ...services, resourceLoader: withSystemPrompt(services.resourceLoader, () => systemPrompt) },
-      sessionManager,
-      ...selectionBeforeFirstMessage(sessionManager, services.modelRuntime),
+      sessionManager: runtimeLogOf(threadLog),
+      ...selectionBeforeFirstMessage(threadLog, services.modelRuntime),
     })
 
     // ── The event fan-out. Subscribers receive OBSERVATIONS (L2, #162 workstream 4): the
@@ -2386,10 +1320,10 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       apply: async (answer) => {
         if (answer === 'untrusted') return
         if (answer === 'project') new ProjectTrustStore(agentDir).set(trustDirectory, true)
-        else sessionManager.appendCustomEntry(ENSO_PROJECT_TRUST_ENTRY, THREAD_PROJECT_TRUST)
+        else threadLog.record(ENSO_PROJECT_TRUST_ENTRY, THREAD_PROJECT_TRUST)
         projectTrust.settingsManager.setProjectTrusted(true)
         // "Trust this thread" trusts no project: a project's setup is read under the project's own answer.
-        if (answer === 'project') await prepareTreeOnTrust(threadId, sessionManager)
+        if (answer === 'project') await prepareTreeOnTrust(threadId, threadLog)
         await session.reload()
         ui.notifyFrom(ENSO_SENDER, projectTrustedNotice(answer), 'info')
       },
@@ -2415,7 +1349,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       const registered = new Set(
         session.extensionRunner.getRegisteredCommands().map((command) => command.invocationName),
       )
-      return livePermissionModeState(transcriptOf(sessionManager.getEntries()), registered)
+      return livePermissionModeState(threadLog.everyEntry(), registered)
     }
 
     /**
@@ -2819,7 +1753,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
      * (#502): the run waits on the question, never the reverse.
      */
     function admitRun(outcome: PromptOutcome, start: () => void): void {
-      const incidents = branchIncidents(sessionManager.getBranch())
+      const incidents = threadLog.incidents()
       if (incidents.ended) {
         const ending = incidents.incidents.at(-1)?.opened.incidentId
         outcome.onRejected(
@@ -2942,14 +1876,14 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       },
       permissionModeState: currentPermissionModeState,
       setSystemPrompt(choice: EnsoSystemPromptChoice | null): string | undefined {
-        const decision = decideSystemPrompt(systemPrompt, choice, hasSentRequest(sessionManager.getBranch()))
+        const decision = decideSystemPrompt(systemPrompt, choice, threadLog.hasSentRequest())
         if (decision.kind === 'refused') return decision.reason
         if (decision.kind === 'same') return undefined
         systemPrompt = choice ?? undefined
         // Recorded BEFORE the first request, so the log says what the request will carry; pi
         // flushes it with the first assistant message, as it does the model and the mode. pi's
         // default is recorded too (`null`): it replaces a choice this branch already records.
-        sessionManager.appendCustomEntry(ENSO_SYSTEM_PROMPT_ENTRY, choice)
+        threadLog.record(ENSO_SYSTEM_PROMPT_ENTRY, choice)
         // pi re-reads the loader when it rebuilds the prompt; the same tools make it rebuild.
         session.setActiveToolsByName(session.getActiveToolNames())
         if (choice === null) log.info("system prompt set to pi's default", { threadId })
@@ -2963,7 +1897,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         return undefined
       },
       resolveIncident(incidentId: string, resolution: EnsoIncidentResolution): string | undefined {
-        const refusal = incidentResolutionRefusal(branchIncidents(sessionManager.getBranch()), incidentId, resolution)
+        const refusal = incidentResolutionRefusal(threadLog.incidents(), incidentId, resolution)
         if (refusal !== undefined) return refusal
         if (hostApi === undefined) throw new Error(`thread ${threadId}: the host's extension API was never bound`)
         const record = incidentResolvedOf(incidentId, resolution)
@@ -3034,7 +1968,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       dispose(): void {
         if (disposed) return
         disposed = true
-        if (liveSessionManagers.get(threadId) === sessionManager) liveSessionManagers.delete(threadId)
+        if (liveLogs.get(threadId) === threadLog) liveLogs.delete(threadId)
         flowsAbort.abort()
         trustGate.abort()
         ui.cancelAllDialogs()
@@ -3065,9 +1999,9 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       },
       projectTrust: () => ({ directory: trustDirectory, trusted: projectTrust.settingsManager.isProjectTrusted() }),
       checkPermission(request: EnsoPermissionCheckRequest): EnsoPermissionVerdict | undefined {
-        const service = getPermissionsService(sessionManager.getSessionId())
+        const service = getPermissionsService(threadLog.threadId)
         if (service === undefined) return undefined
-        const mode = recordedPermissionMode(transcriptOf(sessionManager.getEntries()))
+        const mode = recordedPermissionMode(threadLog.everyEntry())
         const result = service.checkPermission(request.surface, request.value, modeAgentName(mode))
         return {
           mode,
@@ -3077,13 +2011,12 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
           ...(result.reason === undefined ? {} : { reason: result.reason }),
         }
       },
-      branchStats: () => branchStats(sessionManager.getBranch()),
-      branchEval: () => branchEval(sessionManager.getBranch()),
-      branchIncidentHistory: (thresholds: EnsoRiskThresholds) =>
-        branchIncidentHistory(sessionManager.getBranch(), thresholds),
+      branchStats: () => threadLog.stats(),
+      branchEval: () => threadLog.eval(),
+      branchIncidentHistory: (thresholds: EnsoRiskThresholds) => threadLog.incidentHistory(thresholds),
       branchJudgeCases: (thresholds: EnsoRiskThresholds) =>
-        branchJudgeCases(sessionManager.getBranch(), judgeCaseInputs(sessionManager.getCwd(), thresholds)),
-      branchContext: () => branchContext(sessionManager.getBranch()),
+        threadLog.judgeCases(judgeCaseInputs(threadLog.cwd, thresholds)),
+      branchContext: () => threadLog.context(),
       previewSystemPrompt(candidate: EnsoSystemPromptChoice | null): SystemPromptPreviewOutcome {
         if (session.isStreaming || session.isCompacting) return { kind: 'busy' }
         const setChoice = (choice: EnsoSystemPromptChoice | undefined): void => {
@@ -3101,12 +2034,12 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         })
         return preview === undefined ? { kind: 'unsplittable' } : { kind: 'preview', preview }
       },
-      branchRequestDetail: (request: number | 'next') => branchRequestDetail(sessionManager.getBranch(), request),
+      branchRequestDetail: (request: number | 'next') => threadLog.requestDetail(request),
       async forkPoint(): Promise<EnsoForkPoint> {
-        const threadId = sessionManager.getSessionId()
-        return forkPointOf(sessionManager.getBranch(), {
+        const threadId = threadLog.threadId
+        return threadLog.forkPoint({
           threadId,
-          cwd: sessionManager.getCwd(),
+          cwd: threadLog.cwd,
           parentThreadId: (await locate(threadId))?.parentThreadId,
         })
       },
@@ -3114,20 +2047,20 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         // ⚠ `getSessionFile()` names the path pi WILL write, from creation — but pi flushes
         // lazily, holding every entry until the first assistant message. So the path is
         // reported only once the file exists; before that the branch below is the only copy.
-        const plannedFile = sessionManager.getSessionFile()
+        const plannedFile = threadLog.file
         return {
-          sessionId: sessionManager.getSessionId(),
-          cwd: sessionManager.getCwd(),
-          sessionDir: sessionManager.getSessionDir(),
+          sessionId: threadLog.threadId,
+          cwd: threadLog.cwd,
+          sessionDir: threadLog.directory,
           sessionFile: plannedFile !== undefined && existsSync(plannedFile) ? plannedFile : null,
           // ⚠ BUILT WHEN READ, not when inspected (#739): most callers want the cwd or the file, and
           // the transcript is the whole branch rebuilt — 2.75 ms at 5,000 turns, per `/git` or
           // `/tree`. Read it at once: a getter read later sees the branch as it is then.
           get entries() {
-            return transcriptOf(sessionManager.getBranch())
+            return threadLog.transcript()
           },
           commands: runtime.listCommands().map((command) => command.name),
-          name: sessionManager.getSessionName(),
+          name: threadLog.name(),
         }
       },
     }
@@ -3147,23 +2080,18 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
    * restore does.
    */
   function selectionBeforeFirstMessage(
-    sessionManager: SessionManager,
+    threadLog: ThreadLog,
     modelRuntime: AgentSessionServices['modelRuntime'],
   ): Pick<CreateAgentSessionFromServicesOptions, 'model' | 'thinkingLevel'> {
-    if (sessionManager.buildSessionContext().messages.length > 0) return {}
-    const branch = sessionManager.getBranch()
-    const modelEntry = branch.findLast((entry) => entry.type === 'model_change')
-    const thinkingEntry = branch.findLast((entry) => entry.type === 'thinking_level_change')
-    const recorded =
-      modelEntry?.type === 'model_change' ? modelRuntime.getModel(modelEntry.provider, modelEntry.modelId) : undefined
+    const chosen = threadLog.choiceBeforeFirstMessage()
+    const recorded = chosen === undefined ? undefined : modelRuntime.getModel(chosen.provider, chosen.modelId)
     const model = recorded !== undefined && modelRuntime.hasConfiguredAuth(recorded.provider) ? recorded : undefined
     if (model === undefined) return {}
-    // The lookup is how the entry's string becomes pi's level without a cast, as `runHostCommand`
+    // The lookup is how the recorded string becomes pi's level without a cast, as `runHostCommand`
     // does it — and a level this model does not offer is not restored.
+    const level = chosen?.thinkingLevel
     const thinkingLevel =
-      thinkingEntry?.type === 'thinking_level_change'
-        ? getSupportedThinkingLevels(model).find((offered) => offered === thinkingEntry.thinkingLevel)
-        : undefined
+      level === undefined ? undefined : getSupportedThinkingLevels(model).find((offered) => offered === level)
     return { model, ...(thinkingLevel === undefined ? {} : { thinkingLevel }) }
   }
 

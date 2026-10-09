@@ -49,9 +49,8 @@ import {
   type HostedThread,
   type HostedThreadInspection,
   SessionDirectoryRefused,
-  type ThreadRestoreOutcome,
-  type ThreadTreePlace,
 } from '../../host/agent-host.ts'
+import type { ThreadRestoreOutcome, ThreadTreePlace } from '../../host/thread-log-edits.ts'
 import { transcriptOf } from '../../host/transcript.ts'
 import type { ProjectThreadSettingsSource } from '../../host/tree-setup.ts'
 import { startEnsoServer } from '../index.ts'

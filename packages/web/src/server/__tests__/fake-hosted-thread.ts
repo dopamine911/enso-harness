@@ -35,9 +35,6 @@ import type {
   HostedThread,
   HostedThreadInspection,
   SystemPromptPreviewOutcome,
-  ThreadDeleteOutcome,
-  ThreadRenameOutcome,
-  ThreadRestoreOutcome,
 } from '../../host/agent-host.ts'
 import type { BranchContext, BranchRequestDetail } from '../../host/branch-context.ts'
 import type { BranchStats } from '../../host/branch-stats.ts'
@@ -51,6 +48,8 @@ import {
 } from '../../host/host-commands.ts'
 import { compactDoneText, decideHostFlow, hostFlowRows, loginDoneText, logoutDoneText } from '../../host/host-flows.ts'
 import { decideSystemPrompt } from '../../host/system-prompt.ts'
+import type { ThreadDeleteOutcome } from '../../host/thread-delete.ts'
+import type { ThreadRenameOutcome, ThreadRestoreOutcome } from '../../host/thread-log-edits.ts'
 
 /**
  * The one fake of the thread-runtime seam (#178; `docs/seams/thread-runtime.md`): a

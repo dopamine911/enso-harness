@@ -16,7 +16,8 @@ import {
   sessionIncidentsOf,
   sessionRiskOfTranscript,
 } from '@enso/core'
-import type { AgentHost, StoredThreadRead } from '../host/agent-host.ts'
+import type { AgentHost } from '../host/agent-host.ts'
+import type { StoredThreadRead } from '../host/stored-threads.ts'
 import { treeRecordOf } from '../host/thread-trees.ts'
 import type { ProjectRegistry } from './projects.ts'
 import type { ThreadRegistry, ThreadView } from './thread-registry.ts'

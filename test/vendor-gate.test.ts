@@ -233,6 +233,9 @@ const VENDOR_IMPORTERS_ALLOWED_INSIDE_ROOTS: readonly string[] = [
   'packages/web/src/host/session-usage.ts',
   'packages/web/src/host/system-prompt-preview.ts',
   'packages/web/src/host/system-prompt.ts',
+  // The storage seam (#801): the one file that names pi's session manager — the import moved here from
+  // agent-host.ts — so the host's flows read a thread's log through `ThreadLog` in our words.
+  'packages/web/src/host/thread-log.ts',
 ]
 
 test('⚠ inside the two roots, only the baseline files import the vendor, and the baseline only shrinks (#558)', () => {

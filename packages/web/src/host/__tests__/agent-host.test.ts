@@ -95,8 +95,6 @@ import {
   SessionDirectoryRefused,
   seedMultiAccountConfig,
   stopRunSettlingDialogs,
-  ThreadDeleted,
-  type ThreadDeleteOutcome,
   type ToolCallVerdict,
 } from '../agent-host.ts'
 import { LOST_TOOL_RESULT_TEXT, NOTHING_TO_CONTINUE } from '../continuation.ts'
@@ -104,6 +102,7 @@ import { PERMISSION_CALL_QUESTIONS_EXTENSION_PATH } from '../permission-call-que
 import { storedPermissionModeState } from '../permission-mode-adapter.ts'
 import { readPermissionPolicy, resetPermissionPolicy, writePermissionPolicy } from '../permission-policy-file.ts'
 import { RESTORE_NOTE_EXTENSION_PATH } from '../restore-note.ts'
+import { ThreadDeleted, type ThreadDeleteOutcome } from '../thread-delete.ts'
 import { recordedModelOf, transcriptOf } from '../transcript.ts'
 import { writeStoredSession } from './stored-session.ts'
 
