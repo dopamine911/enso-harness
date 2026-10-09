@@ -151,9 +151,17 @@ const HIGHLIGHT: Keyframe[] = [
 ]
 const HIGHLIGHT_MS = 2000
 
+/**
+ * Ring `element` for a moment, where it already is: an incident card the windowed list scrolled to
+ * itself (#588), whose own scroll a second one would fight.
+ */
+export function ringElement(element: Element): void {
+  // ⓘ A DOM without the Web Animations API (the test DOM) still scrolls; the ring is decoration.
+  if (typeof element.animate === 'function') element.animate(HIGHLIGHT, { duration: HIGHLIGHT_MS, easing: 'ease-out' })
+}
+
 /** Scroll `element` to the middle of its scroller and ring it for a moment. */
 export function revealElement(element: Element): void {
   element.scrollIntoView({ block: 'center', behavior: 'smooth' })
-  // ⓘ A DOM without the Web Animations API (the test DOM) still scrolls; the ring is decoration.
-  if (typeof element.animate === 'function') element.animate(HIGHLIGHT, { duration: HIGHLIGHT_MS, easing: 'ease-out' })
+  ringElement(element)
 }

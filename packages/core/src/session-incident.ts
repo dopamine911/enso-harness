@@ -555,9 +555,15 @@ export function incidentEntriesOf(
   })
 }
 
-/** An opening's tipping call: its last signal's call (the step that raised it), or its id when it has none. */
-function triggerOf(signals: readonly EnsoSecuritySignal[], fallback: string): string {
-  return signals.at(-1)?.toolCallId ?? fallback
+/**
+ * The call that tipped the risk into `incident`: the last signal's (the step that raised it), or
+ * undefined for an opening with no signals — a fork's inherited one. The page places an incident's
+ * card after the message holding this call (#588).
+ *
+ * @group Session incident
+ */
+export function tippingCallOf(signals: readonly EnsoSecuritySignal[]): string | undefined {
+  return signals.at(-1)?.toolCallId
 }
 
 /** A replayed opening, before it is compared: its tipping call and the event index it opened at. */
@@ -586,7 +592,7 @@ function replayedOpenings(
     if (event.kind === 'incident-resolved') open = false
     else if (risk.level === 'incident' && !open) {
       open = true
-      openings.push({ trigger: triggerOf(risk.signals, String(at)), signals: [...risk.signals], at })
+      openings.push({ trigger: tippingCallOf(risk.signals) ?? String(at), signals: [...risk.signals], at })
     }
   }
   return openings
@@ -639,7 +645,8 @@ function compareOpenings(
   recorded: readonly EnsoIncidentOpened[],
   events: readonly EnsoRiskEvent[],
 ): EnsoIncidentReplayRow[] {
-  const recordedBy = new Map(recorded.map((opened) => [triggerOf(opened.signals, opened.incidentId), opened]))
+  // An opening with no signal is matched by its own id: no replayed opening has it as a trigger.
+  const recordedBy = new Map(recorded.map((opened) => [tippingCallOf(opened.signals) ?? opened.incidentId, opened]))
   const rows: (EnsoIncidentReplayRow & { readonly at: number })[] = replayed.map((opening) => {
     const match = recordedBy.get(opening.trigger)
     recordedBy.delete(opening.trigger)
