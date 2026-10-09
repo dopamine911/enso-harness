@@ -1,6 +1,12 @@
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
-import type { BeforeAgentStartEvent, ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent'
+import {
+  type BeforeAgentStartEvent,
+  type ExtensionAPI,
+  type ExtensionContext,
+  ProjectTrustStore,
+  SettingsManager,
+} from '@earendil-works/pi-coding-agent'
 import {
   ENSO_MODE_PRESETS,
   ENSO_RUN_CONTEXT_ENTRY,
@@ -83,7 +89,7 @@ export interface RunContextDependencies {
   /** The session's config — one resolution per session and trust answer (`session-config.ts`). */
   resolveSessionConfig: (
     session: object,
-    context: Omit<SessionConfigContext, 'home' | 'hostOwnsTrust'>,
+    context: Omit<SessionConfigContext, 'home' | 'hostOwnsTrust' | 'projectTrust'>,
   ) => Promise<SessionEnsoConfig>
   /** Run git in `cwd` — never in a repository an inherited environment names. */
   runGit: GitRunner
@@ -288,7 +294,11 @@ export function createRunContext(dependencies: RunContextDependencies): (pi: Ext
  */
 export default createRunContext({
   resolveSessionConfig: (session, context) =>
-    sessionEnsoConfig(session, { ...context, ...sessionConfigEnvironment(process.env) }),
+    sessionEnsoConfig(session, {
+      ...context,
+      // pi's own trust store and settings (#509): `harness/core` may not import them.
+      ...sessionConfigEnvironment(process.env, { ProjectTrustStore, SettingsManager }),
+    }),
   runGit,
   readPermissionPolicy: () => {
     const agentDir = process.env.PI_CODING_AGENT_DIR
