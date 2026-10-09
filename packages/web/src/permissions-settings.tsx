@@ -70,6 +70,9 @@ const ACTIONS: ReadonlyArray<readonly [EnsoPermissionAction, string]> = [
 
 type PolicyState = { readonly kind: 'loading' } | PolicyRead
 
+/** permissions.json as read: the engine's whole file, whose `permission` is the part this page edits. */
+type PolicyFile = Extract<EnsoPermissionPolicyRead, { kind: 'ok' }>['file']
+
 /** Why the last save or reset did not land; the draft is untouched by every one of them. */
 export type PolicyProblem =
   | { readonly kind: 'conflict'; readonly detail: string; readonly during: 'save' | 'reset' }
@@ -129,7 +132,28 @@ export function usePermissionPolicy(open: boolean, fetchImpl: FetchLike | undefi
 
   const edit = (change: (permission: EnsoPermissionMap) => EnsoPermissionMap): void => {
     if (loaded?.kind !== 'ok') return
+    // A reset's notice describes the file as the reset left it; an edit moves on from it (#519).
+    setBackup(undefined)
     changeDraft(change(draftNow.current ?? permissionOf(loaded.file)))
+  }
+
+  /**
+   * What a save writes over, and under which version (#519). A plain save: the file as read, under its
+   * ETag. An overwrite after a 412: the file as it is on disk NOW, re-read, under ITS ETag, so only the
+   * draft's `permission` replaces anything and a setting edited by hand in the meantime
+   * (`permissionReviewLog: false`) stays. It used to send the file as first read with `If-Match: *`,
+   * reverting such a setting silently. A file that cannot be read now is overwritten as before.
+   */
+  const saveBase = async (
+    file: PolicyFile,
+    etag: string,
+    overwrite: boolean,
+  ): Promise<{ file: PolicyFile; etag: string }> => {
+    if (!overwrite) return { file, etag }
+    const now = await fetchPermissionPolicy(fetchImpl)
+    return now.kind === 'loaded' && now.policy.kind === 'ok'
+      ? { file: now.policy.file, etag: now.policy.etag }
+      : { file, etag: '*' }
   }
 
   const save = async (overwrite: boolean): Promise<void> => {
@@ -137,13 +161,11 @@ export function usePermissionPolicy(open: boolean, fetchImpl: FetchLike | undefi
     if (loaded?.kind !== 'ok' || sent === undefined || inFlight.current) return
     inFlight.current = true
     setWorking(true)
+    setBackup(undefined)
     let outcome: PolicySave
     try {
-      outcome = await savePermissionPolicy(
-        { file: { ...loaded.file, permission: sent } },
-        overwrite ? '*' : loaded.etag,
-        fetchImpl,
-      )
+      const base = await saveBase(loaded.file, loaded.etag, overwrite)
+      outcome = await savePermissionPolicy({ file: { ...base.file, permission: sent } }, base.etag, fetchImpl)
     } finally {
       inFlight.current = false
       setWorking(false)
@@ -605,7 +627,8 @@ function ProblemNotice({ editor }: { editor: PolicyEditor }): React.ReactNode {
     <div role="alert" aria-label="changed on disk" className="flex flex-col gap-2 text-sm">
       <p>
         permissions.json changed on disk since it was read ({problem.detail}). Nothing was written; your changes are
-        still here.
+        still here. Overwrite with mine puts your rules over the file as it is on disk now, and keeps its other settings
+        as they are there.
       </p>
       <span className="flex gap-2">
         <Button variant="outline" size="sm" disabled={editor.working} onClick={editor.reload}>
