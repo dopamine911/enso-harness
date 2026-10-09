@@ -25,8 +25,6 @@ import {
   VERSION as PI_VERSION,
   type PromptOptions,
   ProjectTrustStore,
-  type SessionEntry,
-  SessionManager,
   SettingsManager,
 } from '@earendil-works/pi-coding-agent'
 import {
@@ -53,14 +51,12 @@ import {
   type EnsoPromptAdmission,
   type EnsoRecordedModel,
   type EnsoRiskThresholds,
-  type EnsoSessionIncidents,
   type EnsoSessionUsage,
   type EnsoSystemPromptChoice,
   type EnsoSystemPromptPreview,
   type EnsoThreadEvent,
   type EnsoTranscriptEntry,
   ensoLogger,
-  customEntriesOf,
   transcriptEntryOf,
   type HostFlowOutcome,
   incidentResolutionRefusal,
@@ -73,7 +69,6 @@ import {
   readRecordedMode,
   recordedPermissionMode,
   recordedSystemPrompt,
-  sessionIncidentsOf,
   THREAD_PROJECT_TRUST,
   type ThreadRuntime,
   DEFAULT_GUARD_POLICY,
@@ -115,15 +110,14 @@ import {
 } from '@enso/core/thread-tree'
 import { prepareThreadTree } from '@enso/core/tree-setup'
 import { getPermissionsService } from '@gotgenes/pi-permission-system'
-import { type BranchContext, type BranchRequestDetail, branchContext, branchRequestDetail } from './branch-context.ts'
-import { type BranchEval, branchEval } from './branch-eval.ts'
-import { type BranchIncidentHistory, branchIncidentHistory } from './branch-incident-history.ts'
-import { type BranchJudgeCases, branchJudgeCases, type JudgeCaseInputs } from './branch-judge-cases.ts'
-import { type BranchStats, branchStats } from './branch-stats.ts'
+import type { BranchContext, BranchRequestDetail } from './branch-context.ts'
+import type { BranchEval } from './branch-eval.ts'
+import type { BranchIncidentHistory } from './branch-incident-history.ts'
+import type { BranchJudgeCases, JudgeCaseInputs } from './branch-judge-cases.ts'
+import type { BranchStats } from './branch-stats.ts'
 import { type ContinuationLead, continuationLead, NO_RUN_LIFECYCLE, NOTHING_TO_CONTINUE } from './continuation.ts'
 import { createEventTail, describeObservation } from './event-tail.ts'
 import { createEnsoExtensionUiContext } from './extension-ui-context.ts'
-import { forkPointOf } from './fork-point.ts'
 import {
   catalogueRows,
   decideHostCommand,
@@ -178,9 +172,10 @@ import {
   threadIdOfFileName,
 } from './session-files.ts'
 import { sessionModels } from './session-models.ts'
-import { growsSessionSpend, liveSessionUsage, storedSessionUsage } from './session-usage.ts'
+import { growsSessionSpend, liveSessionUsage } from './session-usage.ts'
 import { previewOf, renderedUnder } from './system-prompt-preview.ts'
-import { decideSystemPrompt, hasSentRequest, withSystemPrompt } from './system-prompt.ts'
+import { decideSystemPrompt, withSystemPrompt } from './system-prompt.ts'
+import { createLog, forkedLog, movedLog, openLog, probeLog, runtimeLogOf, type ThreadLog } from './thread-log.ts'
 import {
   hasEntry,
   lastRestoreOf,
@@ -190,7 +185,6 @@ import {
   treeLocation,
   treeRecordOf,
 } from './thread-trees.ts'
-import { recordedModelOf, transcriptOf } from './transcript.ts'
 import { type ProjectThreadSettingsSource, resolveProjectThreadSettings, treeSetupOf } from './tree-setup.ts'
 
 const log = ensoLogger('host')
@@ -299,20 +293,11 @@ const log = ensoLogger('host')
  * same way a `/model` from the palette does. The watcher registers nothing else and is listed in
  * `loadedExtensionPaths` like every extension pi loaded.
  *
- * ⚠ A FORK IS TAKEN FROM THE FILE, OUTSIDE ANY RUNTIME (#433). `forkThread` opens the source's
- * session file (`SessionManager.open`, building nothing — #86) and forks it the way pi's `/fork`
- * does at its default position `before` (`AgentSessionRuntime.fork`, `agent-session-runtime.js`
- * :174): the entry must be a user message; the new session's branch ends at that message's
- * PARENT (`createBranchedSession`), or is empty when the message is the root (`create` +
- * `newSession({ parentSession })`); the message's text comes back to prefill the composer. A live
- * source and a cold one fork alike — a live thread's file holds every entry its memory does once
- * flushed, and one never flushed has no file to fork. Stated non-coverage: outside a runtime pi's
- * `session_before_fork` extension hook does not fire; no loaded extension handles it today. pi
- * writes a session file only at its first assistant message, so a fork whose branch holds none
- * (the empty one above) would have no file — nothing to list, nothing naming its parent, and a
- * resume under its id would create a fresh session. The host writes such a fork's entries the way
- * pi's first flush does (`_persist`: one JSON line per entry, `wx`), and pi appends to it from
- * then on as to any flushed file.
+ * A FORK IS TAKEN FROM THE FILE, OUTSIDE ANY RUNTIME (#433): `forkThread` forks the source's log as
+ * the runtime's `/fork` does at its default position `before` (`thread-log.ts`, the storage seam),
+ * and the message's text comes back to prefill the composer. A fork whose branch holds no assistant
+ * message has its log's file written at once, so it is listed, names its parent, and resumes under
+ * its id.
  *
  * A FORK POINT IS READ OFF THE BRANCH (#435). `forkPoint` (live) and `readStoredForkPoint` (cold,
  * one open, nothing built) walk the same branch with `fork-point.ts`: the session id, the leaf,
@@ -469,8 +454,7 @@ export interface AgentHostOptions {
 }
 
 /**
- * What pi's session for one hosted thread actually contains, read straight off the
- * `SessionManager` (#86).
+ * What pi's session for one hosted thread actually contains, read straight off its log (#86).
  *
  * Everything a run shows the browser is derived from the event stream; this is the source those
  * views derive from, for a human or an agent to cross-check against.
@@ -979,29 +963,6 @@ function describeCommand(
   return description === undefined ? { name, source } : { name, source, description }
 }
 
-/** A user message's text as pi's `/fork` prefills it (`extractUserMessageText`): its text parts, joined; images dropped. */
-function userMessageText(content: string | ReadonlyArray<{ readonly type: string; readonly text?: string }>): string {
-  if (typeof content === 'string') return content
-  return content.map((part) => (part.type === 'text' && typeof part.text === 'string' ? part.text : '')).join('')
-}
-
-/**
- * A fork pi has not written because its branch holds no assistant message (the module header,
- * #433): its header and entries, written as pi's first flush writes them, so the fork is listed,
- * names its parent, and resumes under its id. A file already there — pi wrote it — is left alone.
- */
-function writeUnflushedSession(session: SessionManager): void {
-  const file = session.getSessionFile()
-  if (file === undefined || existsSync(file)) return
-  const lines = [session.getHeader(), ...session.getEntries()].map((fileEntry) => `${JSON.stringify(fileEntry)}\n`)
-  writeFileSync(file, lines.join(''), { flag: 'wx' })
-}
-
-/** A branch's incidents (#466): its custom entries, folded as the guard folds them on replay. */
-function branchIncidents(branch: readonly SessionEntry[]): EnsoSessionIncidents {
-  return sessionIncidentsOf(customEntriesOf(transcriptOf(branch)))
-}
-
 /** The mode one appended entry records, if it is an `active_agent` entry naming one. */
 function appendedMode(entry: unknown): EnsoPermissionModeName | undefined {
   const record = transcriptEntryOf(entry, 0)
@@ -1056,7 +1017,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     harnessPackageDir,
     extensionFactories: options.extensionFactories ?? [],
     // The probe is no thread: no session file.
-    inMemorySession: () => SessionManager.inMemory(agentDir),
+    inMemorySession: () => probeLog(agentDir),
   })
   /** Where a thread in `cwd` is filed (#552): its project's `sessions/` — the checkout's or a tree's; pi's default when no projects folder is set. */
   const sessionDirFor = (cwd: string): string | undefined =>
@@ -1111,11 +1072,11 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   }
 
   /**
-   * The session manager of each thread a hosted session holds open (#551): the one writer of that
-   * thread's file (control plane, invariant 4). A restore appends its record through it, never
-   * through a second manager opened beside it on the same file.
+   * The log of each thread built here (#551): the one writer of that thread's file (control plane,
+   * invariant 4). A restore appends its record through it, never through a second log opened beside
+   * it on the same file.
    */
-  const liveSessionManagers = new Map<string, SessionManager>()
+  const liveLogs = new Map<string, ThreadLog>()
 
   /** A tree just made, and what preparing it did (#754) — absent when there was nothing to set up. */
   type MintedTree = { kind: 'minted'; record: ThreadTreeRecord; setup?: EnsoTreeSetupOutcome }
@@ -1206,30 +1167,21 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   }
 
   /**
-   * The session a new thread built in its checkout moves onto its tree with (#551): everything it
-   * holds — what was chosen before its first run — written now as its file under a header naming
-   * the tree, opened from that file, and the tree's record appended to it, its setup's after it
-   * (#754). Written at once, not at pi's first flush (PR #561 review): a thread disposed before its
-   * first message would otherwise have no file to be found by, and its next build would mint again
-   * over the tree that exists. Opened from the file so pi appends to it, never writes it a second
-   * time (its first flush opens the file `wx`). The checkout session is not touched: a move undone
-   * leaves it as it was, naming no tree.
+   * The log a new thread built in its checkout moves onto its tree with (#551, `movedLog`), the tree's
+   * record appended to it and its setup's after it (#754). Written at once, not at the runtime's first
+   * flush: a thread disposed before its first message would otherwise have no file to be found by, and
+   * its next build would mint again over the tree that exists.
    */
-  function sessionOnTree(checkoutSession: SessionManager, minted: MintedTree): SessionManager {
-    const file = checkoutSession.getSessionFile()
-    if (file === undefined) throw new Error(`thread ${checkoutSession.getSessionId()} has no session file path`)
-    const header = { ...checkoutSession.getHeader(), cwd: minted.record.path }
-    const lines = [header, ...checkoutSession.getEntries()].map((fileEntry) => `${JSON.stringify(fileEntry)}\n`)
-    writeFileSync(file, lines.join(''))
-    const onTree = SessionManager.open(file)
+  function logOnTree(checkout: ThreadLog, minted: MintedTree): ThreadLog {
+    const onTree = movedLog(checkout, minted.record.path)
     recordTree(onTree, minted)
     return onTree
   }
 
   /** The tree's record on the thread, and its setup's right after it when there was one (#754). */
-  function recordTree(session: SessionManager, minted: MintedTree): void {
-    session.appendCustomEntry(ENSO_THREAD_TREE_ENTRY, minted.record)
-    if (minted.setup !== undefined) session.appendCustomEntry(ENSO_TREE_SETUP_ENTRY, minted.setup)
+  function recordTree(threadLog: ThreadLog, minted: MintedTree): void {
+    threadLog.record(ENSO_THREAD_TREE_ENTRY, minted.record)
+    if (minted.setup !== undefined) threadLog.record(ENSO_TREE_SETUP_ENTRY, minted.setup)
   }
 
   /**
@@ -1239,14 +1191,14 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
    * prepares the tree now, before the run it held. Nothing when the thread has no tree, or its tree
    * already records a setup.
    */
-  async function prepareTreeOnTrust(threadId: string, session: SessionManager): Promise<void> {
-    const branch = transcriptOf(session.getBranch())
+  async function prepareTreeOnTrust(threadId: string, threadLog: ThreadLog): Promise<void> {
+    const branch = threadLog.transcript()
     const tree = treeRecordOf(branch)
     if (tree === undefined || treeSetupOf(branch) !== undefined) return
     const settings = threadSettingsOf(tree.project)
     if (settings === undefined) return
     const setup = await prepareTree(threadId, tree, settings)
-    if (setup !== undefined) session.appendCustomEntry(ENSO_TREE_SETUP_ENTRY, setup)
+    if (setup !== undefined) threadLog.record(ENSO_TREE_SETUP_ENTRY, setup)
   }
 
   /** A thread's snapshot store (#551): beside its session, under its project — the checkout's or its tree's. */
@@ -1439,47 +1391,41 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     return (await storedSession(threadId))?.path
   }
 
-  /** A stored thread's branch, root to leaf — one open, nothing built (#86); undefined for no file. */
-  async function storedBranch(threadId: string): Promise<SessionEntry[] | undefined> {
+  /** A stored thread's log, open in memory — nothing built (#86); undefined for no file. */
+  async function storedLog(threadId: string): Promise<ThreadLog | undefined> {
     const path = await storedSessionPath(threadId)
-    return path === undefined ? undefined : SessionManager.open(path).getBranch()
+    return path === undefined ? undefined : openLog(path)
   }
 
   async function readStoredThread(threadId: string): Promise<StoredThreadRead | undefined> {
     const located = await storedSession(threadId)
     if (located === undefined) return undefined
-    // `open` loads the file into memory and writes nothing until an append.
-    const stored = SessionManager.open(located.path)
-    const branch = stored.getBranch()
+    // Open in memory; nothing is written until an append.
+    const stored = openLog(located.path)
     return {
       cwd: located.cwd,
-      transcript: transcriptOf(branch),
-      usage: storedSessionUsage(stored.getEntries()),
-      recordedModel: recordedModelOf(branch),
-      name: stored.getSessionName(),
+      transcript: stored.transcript(),
+      usage: stored.usage(),
+      recordedModel: stored.recordedModel(),
+      name: stored.name(),
     }
   }
 
   async function readStoredThreadStats(threadId: string): Promise<StoredThreadStats | undefined> {
-    const path = await storedSessionPath(threadId)
-    if (path === undefined) return undefined
-    const stored = SessionManager.open(path)
-    return { usage: storedSessionUsage(stored.getEntries()), branch: branchStats(stored.getBranch()) }
+    const stored = await storedLog(threadId)
+    return stored === undefined ? undefined : { usage: stored.usage(), branch: stored.stats() }
   }
 
   async function readStoredThreadContext(threadId: string): Promise<StoredThreadContext | undefined> {
-    const path = await storedSessionPath(threadId)
-    if (path === undefined) return undefined
-    const stored = SessionManager.open(path)
-    return { usage: storedSessionUsage(stored.getEntries()), context: branchContext(stored.getBranch()) }
+    const stored = await storedLog(threadId)
+    return stored === undefined ? undefined : { usage: stored.usage(), context: stored.context() }
   }
 
   async function readStoredRequestDetail(
     threadId: string,
     request: number | 'next',
   ): Promise<BranchRequestDetail | undefined> {
-    const branch = await storedBranch(threadId)
-    return branch === undefined ? undefined : branchRequestDetail(branch, request)
+    return (await storedLog(threadId))?.requestDetail(request)
   }
 
   async function forkThread(threadId: string, entryId: string): Promise<ThreadForkOutcome> {
@@ -1490,46 +1436,38 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     if (located === undefined) {
       return { kind: 'no-thread', reason: `thread ${threadId} has no session file in a project this server serves` }
     }
-    const probe = SessionManager.open(located.path)
-    const entry = probe.getEntry(entryId)
-    if (entry === undefined) return { kind: 'no-entry', reason: `thread ${threadId} has no entry ${entryId}` }
-    if (entry.type !== 'message' || entry.message.role !== 'user') {
+    const probe = openLog(located.path)
+    const prompt = probe.promptAt(entryId)
+    if (prompt.kind === 'no-entry') return { kind: 'no-entry', reason: `thread ${threadId} has no entry ${entryId}` }
+    if (prompt.kind === 'not-a-user-message') {
       return { kind: 'not-a-user-message', reason: `entry ${entryId} is not a user message; a fork starts at one` }
     }
-    const prefill = userMessageText(entry.message.content)
     // The fork's own tree (#551): whenever the source runs on one — two threads never share a tree
     // — or new threads get one. Minted at the source's snapshot as that turn began, so the fork's
     // files are the conversation's at the fork point, not the source's files now.
-    const sourceTranscript = transcriptOf(probe.getBranch())
+    const sourceTranscript = probe.transcript()
     const sourceTree = treeRecordOf(sourceTranscript)
     const plan =
       sourceTree !== undefined || treeKindOf(located.cwd) !== undefined
         ? forkTreePlan(threadId, located.cwd, sourceTree, snapshotAtEntry(sourceTranscript, entryId))
         : undefined
     if (plan?.kind === 'refused') return { kind: 'tree-refused', reason: plan.reason }
-    // Opened with the fork's tree as its cwd, so the fork's header — written by pi when it branches
-    // — names the tree the fork runs in; the source's own file is not touched.
-    const source = plan === undefined ? probe : SessionManager.open(located.path, undefined, plan.cwd)
-    // Read off the source's CURRENT branch before `createBranchedSession` turns `source` into the
-    // fork: an open incident passes on whatever the fork point (#466 decision 5) — a fork taken
-    // from before it would otherwise be a way around its suspension. A resolved or ended one does not.
-    const sourceIncident = openIncidentOf(branchIncidents(source.getBranch()))
-    // pi's `before`: the fork holds everything up to the message's parent — or nothing, naming its parent.
-    let fork: SessionManager
-    if (entry.parentId === null) {
-      fork = SessionManager.create(source.getCwd(), source.getSessionDir())
-      fork.newSession({ parentSession: located.path })
-    } else {
-      source.createBranchedSession(entry.parentId)
-      fork = source
-    }
+    // Opened with the fork's tree as its cwd, so the fork's header — written when it branches — names
+    // the tree the fork runs in; the source's own file is not touched.
+    const source = plan === undefined ? probe : openLog(located.path, plan.cwd)
+    // Read off the source's CURRENT branch before the fork turns `source` into it: an open incident
+    // passes on whatever the fork point (#466 decision 5) — a fork taken from before it would
+    // otherwise be a way around its suspension. A resolved or ended one does not.
+    const sourceIncident = openIncidentOf(source.incidents())
+    // The runtime's `before`: the fork holds everything up to the message's parent — or nothing, naming its parent.
+    const fork = forkedLog(source, prompt.parentEntryId, located.path)
     if (plan !== undefined) {
       const refusal = await giveForkItsTree(fork, plan)
       if (refusal !== undefined) return { kind: 'tree-refused', reason: refusal }
     }
     if (sourceIncident !== undefined) inheritOpenIncident(threadId, fork, sourceIncident)
-    writeUnflushedSession(fork)
-    return { kind: 'forked', threadId: fork.getSessionId(), prefill }
+    fork.writeIfUnflushed()
+    return { kind: 'forked', threadId: fork.threadId, prefill: prompt.text }
   }
 
   /**
@@ -1538,18 +1476,18 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
    * have written for it goes too, so no thread is left pointing at a tree that does not exist.
    */
   async function giveForkItsTree(
-    fork: SessionManager,
+    fork: ThreadLog,
     plan: Extract<ReturnType<typeof forkTreePlan>, { kind: 'planned' }>,
   ): Promise<string | undefined> {
     const minted = await mintTree({
-      threadId: fork.getSessionId(),
+      threadId: fork.threadId,
       project: plan.project,
       name: plan.name,
       from: plan.from,
       kind: plan.treeKind,
     })
     if (minted.kind === 'refused') {
-      const file = fork.getSessionFile()
+      const file = fork.file
       if (file !== undefined && existsSync(file)) unlinkSync(file)
       return `the fork's ${minted.reason}`
     }
@@ -1560,15 +1498,15 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   /** The source's open incident, opened again on the fork (#466 decision 5) — unless a fork taken after the opening already holds it, open. */
   function inheritOpenIncident(
     threadId: string,
-    fork: SessionManager,
+    fork: ThreadLog,
     sourceIncident: NonNullable<ReturnType<typeof openIncidentOf>>,
   ): void {
-    if (openIncidentOf(branchIncidents(fork.getBranch())) !== undefined) return
+    if (openIncidentOf(fork.incidents()) !== undefined) return
     const opening = inheritedOpening(threadId, sourceIncident.opened)
-    fork.appendCustomEntry(ENSO_INCIDENT_OPENED_ENTRY, opening)
+    fork.record(ENSO_INCIDENT_OPENED_ENTRY, opening)
     log.info('fork {forkThreadId} inherits incident {sourceIncidentId} as {incidentId}', {
       threadId,
-      forkThreadId: fork.getSessionId(),
+      forkThreadId: fork.threadId,
       sourceIncidentId: sourceIncident.opened.incidentId,
       incidentId: opening.incidentId,
     })
@@ -1623,27 +1561,26 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   async function threadSession(
     threadId: string,
   ): Promise<
-    | { readonly session: SessionManager; readonly live: boolean }
-    | { readonly kind: 'no-thread'; readonly reason: string }
+    { readonly threadLog: ThreadLog; readonly live: boolean } | { readonly kind: 'no-thread'; readonly reason: string }
   > {
-    const live = liveSessionManagers.get(threadId)
-    if (live !== undefined) return { session: live, live: true }
+    const live = liveLogs.get(threadId)
+    if (live !== undefined) return { threadLog: live, live: true }
     const located = await storedSession(threadId)
     if (located === undefined) {
       return { kind: 'no-thread', reason: `thread ${threadId} has no session in a project this server serves` }
     }
-    return { session: SessionManager.open(located.path), live: false }
+    return { threadLog: openLog(located.path), live: false }
   }
 
   async function restoreSession(
     threadId: string,
   ): Promise<
-    | { readonly session: SessionManager; readonly live: boolean; readonly tree: ThreadTreeRecord }
+    | { readonly threadLog: ThreadLog; readonly live: boolean; readonly tree: ThreadTreeRecord }
     | { readonly kind: 'no-thread' | 'no-tree'; readonly reason: string }
   > {
     const found = await threadSession(threadId)
     if ('kind' in found) return found
-    const tree = treeRecordOf(transcriptOf(found.session.getBranch()))
+    const tree = treeRecordOf(found.threadLog.transcript())
     if (tree === undefined) {
       return {
         kind: 'no-tree',
@@ -1663,19 +1600,19 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   async function renameThread(threadId: string, name: string): Promise<ThreadRenameOutcome> {
     const found = await threadSession(threadId)
     if ('kind' in found) return found
-    found.session.appendSessionInfo(name)
+    found.threadLog.rename(name)
     log.info('thread {threadId} named {name}', { threadId, name })
     return { kind: 'renamed' }
   }
 
   async function threadTree(threadId: string): Promise<ThreadTreePlace | undefined> {
-    const live = liveSessionManagers.get(threadId)
+    const live = liveLogs.get(threadId)
     const located = live === undefined ? await storedSession(threadId) : undefined
-    const session = live ?? (located === undefined ? undefined : SessionManager.open(located.path))
-    if (session === undefined) return undefined
-    const transcript = transcriptOf(session.getBranch())
+    const threadLog = live ?? (located === undefined ? undefined : openLog(located.path))
+    if (threadLog === undefined) return undefined
+    const transcript = threadLog.transcript()
     const record = treeRecordOf(transcript)
-    const store = storeOf(threadId, session.getCwd())
+    const store = storeOf(threadId, threadLog.cwd)
     if (record === undefined || store === undefined) return undefined
     const setup = treeSetupOf(transcript)
     return setup === undefined ? { record, store } : { record, store, setup }
@@ -1691,11 +1628,11 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
    */
   async function restoreTreeTo(
     threadId: string,
-    target: { readonly session: SessionManager; readonly live: boolean; readonly tree: ThreadTreeRecord },
+    target: { readonly threadLog: ThreadLog; readonly live: boolean; readonly tree: ThreadTreeRecord },
     hash: string,
   ): Promise<ThreadRestoreOutcome> {
-    const { session, live, tree } = target
-    const store = storeOf(threadId, session.getCwd())
+    const { threadLog, live, tree } = target
+    const store = storeOf(threadId, threadLog.cwd)
     if (store === undefined) return { kind: 'refused', reason: 'this host has no projects folder' }
     restoringTrees.add(threadId)
     const restored = await restoreThreadTree({ store, tree: tree.path, hash, environment }).finally(() =>
@@ -1705,8 +1642,8 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       log.error('restore of thread {threadId} to {hash} refused at {step}: {reason}', { threadId, hash, ...restored })
       return { kind: 'refused', reason: `${restored.step}: ${restored.reason}` }
     }
-    session.appendCustomEntry(ENSO_TREE_RESTORED_ENTRY, { hash: restored.hash, safety: restored.safety })
-    if (!live) writeUnflushedSession(session)
+    threadLog.record(ENSO_TREE_RESTORED_ENTRY, { hash: restored.hash, safety: restored.safety })
+    if (!live) threadLog.writeIfUnflushed()
     log.info('thread {threadId} tree restored to {hash}; its files before are {safety}', { threadId, ...restored })
     return { kind: 'restored', hash: restored.hash, safety: restored.safety }
   }
@@ -1715,7 +1652,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   async function restoreThreadAt(threadId: string, entryId: string): Promise<ThreadRestoreOutcome> {
     const target = await restoreSession(threadId)
     if ('kind' in target) return target
-    const transcript = transcriptOf(target.session.getBranch())
+    const transcript = target.threadLog.transcript()
     if (!hasEntry(transcript, entryId))
       return { kind: 'no-entry', reason: `thread ${threadId} has no entry ${entryId}` }
     const at = snapshotAtEntry(transcript, entryId)
@@ -1735,7 +1672,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   async function undoLastRestore(threadId: string, safety: string): Promise<ThreadRestoreOutcome> {
     const target = await restoreSession(threadId)
     if ('kind' in target) return target
-    const last = lastRestoreOf(transcriptOf(target.session.getBranch()))
+    const last = lastRestoreOf(target.threadLog.transcript())
     if (last === undefined) return { kind: 'no-restore', reason: `thread ${threadId} has no restore to undo` }
     if (last.safety !== safety) {
       return {
@@ -1824,7 +1761,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       if (located === undefined) {
         return { kind: 'no-thread', reason: `thread ${threadId} has no session file in a project this server serves` }
       }
-      const tree = treeRecordOf(transcriptOf(SessionManager.open(located.path).getBranch()))
+      const tree = treeRecordOf(openLog(located.path).transcript())
       const store = storeOf(threadId, located.cwd)
       // The inventory always runs: force takes only the work the user confirmed (PR #572 review) —
       // a run that wrote more since the list was shown has that named first, never deleted unseen.
@@ -1872,7 +1809,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     if (located === undefined) {
       return { kind: 'no-thread', reason: `thread ${threadId} has no session file in a project this server serves` }
     }
-    const tree = treeRecordOf(transcriptOf(SessionManager.open(located.path).getBranch()))
+    const tree = treeRecordOf(openLog(located.path).transcript())
     const store = storeOf(threadId, located.cwd)
     const [holdsWork, size] = await Promise.all([
       tree !== undefined && store !== undefined
@@ -1909,7 +1846,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     const recorded = new Map<string, { threadId: string; record: ThreadTreeRecord; cwd: string }[]>()
     for (const stored of await listSessions()) {
       const projectId = projectIdOfCwd(projectsDir, stored.cwd)
-      const record = treeRecordOf(transcriptOf(SessionManager.open(stored.path).getBranch()))
+      const record = treeRecordOf(openLog(stored.path).transcript())
       const trees = recorded.get(projectId) ?? []
       if (record !== undefined) trees.push({ threadId: stored.id, record, cwd: stored.cwd })
       recorded.set(projectId, trees)
@@ -1978,7 +1915,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   async function readStoredForkPoint(threadId: string): Promise<EnsoForkPoint | undefined> {
     const located = await storedSession(threadId)
     if (located === undefined) return undefined
-    return forkPointOf(SessionManager.open(located.path).getBranch(), {
+    return openLog(located.path).forkPoint({
       threadId,
       cwd: located.cwd,
       parentThreadId: located.parentThreadId,
@@ -1986,16 +1923,14 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   }
 
   async function readStoredThreadEval(threadId: string): Promise<BranchEval | undefined> {
-    const branch = await storedBranch(threadId)
-    return branch === undefined ? undefined : branchEval(branch)
+    return (await storedLog(threadId))?.eval()
   }
 
   async function readStoredIncidentHistory(
     threadId: string,
     thresholds: EnsoRiskThresholds,
   ): Promise<BranchIncidentHistory | undefined> {
-    const branch = await storedBranch(threadId)
-    return branch === undefined ? undefined : branchIncidentHistory(branch, thresholds)
+    return (await storedLog(threadId))?.incidentHistory(thresholds)
   }
 
   /**
@@ -2018,7 +1953,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   ): Promise<BranchJudgeCases | undefined> {
     const stored = await storedSession(threadId)
     if (stored === undefined) return undefined
-    return branchJudgeCases(SessionManager.open(stored.path).getBranch(), judgeCaseInputs(stored.cwd, thresholds))
+    return openLog(stored.path).judgeCases(judgeCaseInputs(stored.cwd, thresholds))
   }
 
   async function createSession(threadId: string, newSessionDirectory: () => string): Promise<HostedThread> {
@@ -2043,9 +1978,8 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     // is found next time, and the browser adopts under the history's `threadId` (`thread-stores.ts#adoptThread`). The
     // file sits under the agent dir pi resolves from the env the host set, where `pi --mode rpc` put it, so the mode's
     // `active_agent` entries and the transcript land where the TUI's would; `permissionModeState()` below walks them.
-    if (located !== undefined)
-      return fencedFromDelete(threadId, await buildHosted(threadId, SessionManager.open(located.path)))
-    const created = SessionManager.create(directory, sessionDirFor(directory), { id: threadId })
+    if (located !== undefined) return fencedFromDelete(threadId, await buildHosted(threadId, openLog(located.path)))
+    const created = createLog(threadId, directory, sessionDirFor(directory))
     const hosted = fencedFromDelete(threadId, await buildHosted(threadId, created))
     // A new thread whose project gives threads a tree (#551) is built in the checkout and gets its
     // tree at its first RUN, not here (PR #561 review): a thread only built — a preview looked at,
@@ -2089,12 +2023,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
    * server's control routes cannot reach this (a moving run holds the thread's lease); the wrapper
    * refuses them itself, so no caller can.
    */
-  function treeOnFirstRun(
-    threadId: string,
-    project: string,
-    first: HostedThread,
-    checkoutSession: SessionManager,
-  ): HostedThread {
+  function treeOnFirstRun(threadId: string, project: string, first: HostedThread, checkout: ThreadLog): HostedThread {
     let current = first
     let moved = false
     let disposed = false
@@ -2108,17 +2037,17 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     const isMoving = (): boolean => moving !== undefined && !moved
 
     /**
-     * The mint undone: the tree, its branch and store, the file the move wrote; the checkout session
-     * back. The live-session entry is touched only while it still holds `treeSession`, the one this
-     * move built (a build that threw had set it): the checkout session takes it back, or — the thread
-     * disposed meanwhile — it goes. Any other entry is a newer build's under the same id, and stays.
+     * The mint undone: the tree, its branch and store, the file the move wrote; the checkout's log
+     * back. The live log is touched only while it is still `treeLog`, the one this move built (a build
+     * that threw had set it): the checkout's log takes it back, or — the thread disposed meanwhile —
+     * it goes. Any other entry is a newer build's under the same id, and stays.
      */
-    async function undoMove(tree: ThreadTreeRecord, why: string, treeSession?: SessionManager): Promise<string> {
-      const file = checkoutSession.getSessionFile()
+    async function undoMove(tree: ThreadTreeRecord, why: string, treeLog?: ThreadLog): Promise<string> {
+      const file = checkout.file
       if (file !== undefined && existsSync(file)) unlinkSync(file)
-      if (treeSession !== undefined && liveSessionManagers.get(threadId) === treeSession) {
-        if (disposed) liveSessionManagers.delete(threadId)
-        else liveSessionManagers.set(threadId, checkoutSession)
+      if (treeLog !== undefined && liveLogs.get(threadId) === treeLog) {
+        if (disposed) liveLogs.delete(threadId)
+        else liveLogs.set(threadId, checkout)
       }
       const store = storeOf(threadId, tree.path)
       const removed =
@@ -2138,13 +2067,13 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       if (minted.kind === 'refused') return minted.reason
       if (disposed) return undoMove(minted.record, `thread ${threadId} was disposed before it ran`)
       let next: HostedThread
-      let treeSession: SessionManager | undefined
+      let treeLog: ThreadLog | undefined
       try {
-        treeSession = sessionOnTree(checkoutSession, minted)
-        next = await buildHosted(threadId, treeSession)
+        treeLog = logOnTree(checkout, minted)
+        next = await buildHosted(threadId, treeLog)
       } catch (error) {
         log.error('thread {threadId} could not be built on its tree: {error}', { threadId, error })
-        return undoMove(minted.record, `its build on the tree failed: ${String(error)}`, treeSession)
+        return undoMove(minted.record, `its build on the tree failed: ${String(error)}`, treeLog)
       }
       if (disposed) {
         next.runtime.dispose()
@@ -2243,15 +2172,15 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     }
   }
 
-  /** pi built on `sessionManager` — a thread's whole session, events flowing, extensions bound. */
-  async function buildHosted(threadId: string, sessionManager: SessionManager): Promise<HostedThread> {
-    const cwd = sessionManager.getCwd()
-    liveSessionManagers.set(threadId, sessionManager)
+  /** pi built on `threadLog` — a thread's whole session, events flowing, extensions bound. */
+  async function buildHosted(threadId: string, threadLog: ThreadLog): Promise<HostedThread> {
+    const { cwd } = threadLog
+    liveLogs.set(threadId, threadLog)
     // The thread's system prompt (#443): the one its branch recorded, else pi's default until a
     // Start chooses one (`setSystemPrompt` below). An entry that does not read refuses the build —
     // never pi's default in its place, which would rewrite the prompt the thread started with. Read
     // BEFORE the services, as the directory is: a thread refused builds nothing.
-    const recorded = recordedSystemPrompt(transcriptOf(sessionManager.getBranch()))
+    const recorded = recordedSystemPrompt(threadLog.transcript())
     if (recorded.kind === 'unreadable') {
       throw new Error(`thread ${threadId}: its ${ENSO_SYSTEM_PROMPT_ENTRY} entry does not read as a system prompt`)
     }
@@ -2273,13 +2202,13 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     // Where each permission card stands among its call's questions (#728), asked of this session's engine.
     const callQuestions = createPermissionCallQuestions(
       (surface, value, agentName) =>
-        getPermissionsService(sessionManager.getSessionId())?.checkPermission(surface, value, agentName).state,
+        getPermissionsService(threadLog.threadId)?.checkPermission(surface, value, agentName).state,
     )
     // Trust before anything loads (#502): pi's `trust.json`, the thread's own record, the default —
     // else untrusted, and asked before the first run (`trustGate` below). ⚠ Keyed by the PROJECT: a
     // thread on a tree (#551) is trusted as its checkout is, never as a path no one trusted.
-    const trustDirectory = treeRecordOf(transcriptOf(sessionManager.getBranch()))?.project ?? cwd
-    const projectTrust = hostedProjectTrust(cwd, trustDirectory, agentDir, transcriptOf(sessionManager.getBranch()))
+    const trustDirectory = treeRecordOf(threadLog.transcript())?.project ?? cwd
+    const projectTrust = hostedProjectTrust(cwd, trustDirectory, agentDir, threadLog.transcript())
     const services = await createAgentSessionServices({
       cwd,
       agentDir,
@@ -2326,8 +2255,8 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
 
     const { session } = await createAgentSessionFromServices({
       services: { ...services, resourceLoader: withSystemPrompt(services.resourceLoader, () => systemPrompt) },
-      sessionManager,
-      ...selectionBeforeFirstMessage(sessionManager, services.modelRuntime),
+      sessionManager: runtimeLogOf(threadLog),
+      ...selectionBeforeFirstMessage(threadLog, services.modelRuntime),
     })
 
     // ── The event fan-out. Subscribers receive OBSERVATIONS (L2, #162 workstream 4): the
@@ -2386,10 +2315,10 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       apply: async (answer) => {
         if (answer === 'untrusted') return
         if (answer === 'project') new ProjectTrustStore(agentDir).set(trustDirectory, true)
-        else sessionManager.appendCustomEntry(ENSO_PROJECT_TRUST_ENTRY, THREAD_PROJECT_TRUST)
+        else threadLog.record(ENSO_PROJECT_TRUST_ENTRY, THREAD_PROJECT_TRUST)
         projectTrust.settingsManager.setProjectTrusted(true)
         // "Trust this thread" trusts no project: a project's setup is read under the project's own answer.
-        if (answer === 'project') await prepareTreeOnTrust(threadId, sessionManager)
+        if (answer === 'project') await prepareTreeOnTrust(threadId, threadLog)
         await session.reload()
         ui.notifyFrom(ENSO_SENDER, projectTrustedNotice(answer), 'info')
       },
@@ -2415,7 +2344,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       const registered = new Set(
         session.extensionRunner.getRegisteredCommands().map((command) => command.invocationName),
       )
-      return livePermissionModeState(transcriptOf(sessionManager.getEntries()), registered)
+      return livePermissionModeState(threadLog.everyEntry(), registered)
     }
 
     /**
@@ -2819,7 +2748,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
      * (#502): the run waits on the question, never the reverse.
      */
     function admitRun(outcome: PromptOutcome, start: () => void): void {
-      const incidents = branchIncidents(sessionManager.getBranch())
+      const incidents = threadLog.incidents()
       if (incidents.ended) {
         const ending = incidents.incidents.at(-1)?.opened.incidentId
         outcome.onRejected(
@@ -2942,14 +2871,14 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       },
       permissionModeState: currentPermissionModeState,
       setSystemPrompt(choice: EnsoSystemPromptChoice | null): string | undefined {
-        const decision = decideSystemPrompt(systemPrompt, choice, hasSentRequest(sessionManager.getBranch()))
+        const decision = decideSystemPrompt(systemPrompt, choice, threadLog.hasSentRequest())
         if (decision.kind === 'refused') return decision.reason
         if (decision.kind === 'same') return undefined
         systemPrompt = choice ?? undefined
         // Recorded BEFORE the first request, so the log says what the request will carry; pi
         // flushes it with the first assistant message, as it does the model and the mode. pi's
         // default is recorded too (`null`): it replaces a choice this branch already records.
-        sessionManager.appendCustomEntry(ENSO_SYSTEM_PROMPT_ENTRY, choice)
+        threadLog.record(ENSO_SYSTEM_PROMPT_ENTRY, choice)
         // pi re-reads the loader when it rebuilds the prompt; the same tools make it rebuild.
         session.setActiveToolsByName(session.getActiveToolNames())
         if (choice === null) log.info("system prompt set to pi's default", { threadId })
@@ -2963,7 +2892,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         return undefined
       },
       resolveIncident(incidentId: string, resolution: EnsoIncidentResolution): string | undefined {
-        const refusal = incidentResolutionRefusal(branchIncidents(sessionManager.getBranch()), incidentId, resolution)
+        const refusal = incidentResolutionRefusal(threadLog.incidents(), incidentId, resolution)
         if (refusal !== undefined) return refusal
         if (hostApi === undefined) throw new Error(`thread ${threadId}: the host's extension API was never bound`)
         const record = incidentResolvedOf(incidentId, resolution)
@@ -3034,7 +2963,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       dispose(): void {
         if (disposed) return
         disposed = true
-        if (liveSessionManagers.get(threadId) === sessionManager) liveSessionManagers.delete(threadId)
+        if (liveLogs.get(threadId) === threadLog) liveLogs.delete(threadId)
         flowsAbort.abort()
         trustGate.abort()
         ui.cancelAllDialogs()
@@ -3065,9 +2994,9 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       },
       projectTrust: () => ({ directory: trustDirectory, trusted: projectTrust.settingsManager.isProjectTrusted() }),
       checkPermission(request: EnsoPermissionCheckRequest): EnsoPermissionVerdict | undefined {
-        const service = getPermissionsService(sessionManager.getSessionId())
+        const service = getPermissionsService(threadLog.threadId)
         if (service === undefined) return undefined
-        const mode = recordedPermissionMode(transcriptOf(sessionManager.getEntries()))
+        const mode = recordedPermissionMode(threadLog.everyEntry())
         const result = service.checkPermission(request.surface, request.value, modeAgentName(mode))
         return {
           mode,
@@ -3077,13 +3006,12 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
           ...(result.reason === undefined ? {} : { reason: result.reason }),
         }
       },
-      branchStats: () => branchStats(sessionManager.getBranch()),
-      branchEval: () => branchEval(sessionManager.getBranch()),
-      branchIncidentHistory: (thresholds: EnsoRiskThresholds) =>
-        branchIncidentHistory(sessionManager.getBranch(), thresholds),
+      branchStats: () => threadLog.stats(),
+      branchEval: () => threadLog.eval(),
+      branchIncidentHistory: (thresholds: EnsoRiskThresholds) => threadLog.incidentHistory(thresholds),
       branchJudgeCases: (thresholds: EnsoRiskThresholds) =>
-        branchJudgeCases(sessionManager.getBranch(), judgeCaseInputs(sessionManager.getCwd(), thresholds)),
-      branchContext: () => branchContext(sessionManager.getBranch()),
+        threadLog.judgeCases(judgeCaseInputs(threadLog.cwd, thresholds)),
+      branchContext: () => threadLog.context(),
       previewSystemPrompt(candidate: EnsoSystemPromptChoice | null): SystemPromptPreviewOutcome {
         if (session.isStreaming || session.isCompacting) return { kind: 'busy' }
         const setChoice = (choice: EnsoSystemPromptChoice | undefined): void => {
@@ -3101,12 +3029,12 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         })
         return preview === undefined ? { kind: 'unsplittable' } : { kind: 'preview', preview }
       },
-      branchRequestDetail: (request: number | 'next') => branchRequestDetail(sessionManager.getBranch(), request),
+      branchRequestDetail: (request: number | 'next') => threadLog.requestDetail(request),
       async forkPoint(): Promise<EnsoForkPoint> {
-        const threadId = sessionManager.getSessionId()
-        return forkPointOf(sessionManager.getBranch(), {
+        const threadId = threadLog.threadId
+        return threadLog.forkPoint({
           threadId,
-          cwd: sessionManager.getCwd(),
+          cwd: threadLog.cwd,
           parentThreadId: (await locate(threadId))?.parentThreadId,
         })
       },
@@ -3114,20 +3042,20 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         // ⚠ `getSessionFile()` names the path pi WILL write, from creation — but pi flushes
         // lazily, holding every entry until the first assistant message. So the path is
         // reported only once the file exists; before that the branch below is the only copy.
-        const plannedFile = sessionManager.getSessionFile()
+        const plannedFile = threadLog.file
         return {
-          sessionId: sessionManager.getSessionId(),
-          cwd: sessionManager.getCwd(),
-          sessionDir: sessionManager.getSessionDir(),
+          sessionId: threadLog.threadId,
+          cwd: threadLog.cwd,
+          sessionDir: threadLog.directory,
           sessionFile: plannedFile !== undefined && existsSync(plannedFile) ? plannedFile : null,
           // ⚠ BUILT WHEN READ, not when inspected (#739): most callers want the cwd or the file, and
           // the transcript is the whole branch rebuilt — 2.75 ms at 5,000 turns, per `/git` or
           // `/tree`. Read it at once: a getter read later sees the branch as it is then.
           get entries() {
-            return transcriptOf(sessionManager.getBranch())
+            return threadLog.transcript()
           },
           commands: runtime.listCommands().map((command) => command.name),
-          name: sessionManager.getSessionName(),
+          name: threadLog.name(),
         }
       },
     }
@@ -3147,23 +3075,18 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
    * restore does.
    */
   function selectionBeforeFirstMessage(
-    sessionManager: SessionManager,
+    threadLog: ThreadLog,
     modelRuntime: AgentSessionServices['modelRuntime'],
   ): Pick<CreateAgentSessionFromServicesOptions, 'model' | 'thinkingLevel'> {
-    if (sessionManager.buildSessionContext().messages.length > 0) return {}
-    const branch = sessionManager.getBranch()
-    const modelEntry = branch.findLast((entry) => entry.type === 'model_change')
-    const thinkingEntry = branch.findLast((entry) => entry.type === 'thinking_level_change')
-    const recorded =
-      modelEntry?.type === 'model_change' ? modelRuntime.getModel(modelEntry.provider, modelEntry.modelId) : undefined
+    const chosen = threadLog.choiceBeforeFirstMessage()
+    const recorded = chosen === undefined ? undefined : modelRuntime.getModel(chosen.provider, chosen.modelId)
     const model = recorded !== undefined && modelRuntime.hasConfiguredAuth(recorded.provider) ? recorded : undefined
     if (model === undefined) return {}
-    // The lookup is how the entry's string becomes pi's level without a cast, as `runHostCommand`
+    // The lookup is how the recorded string becomes pi's level without a cast, as `runHostCommand`
     // does it — and a level this model does not offer is not restored.
+    const level = chosen?.thinkingLevel
     const thinkingLevel =
-      thinkingEntry?.type === 'thinking_level_change'
-        ? getSupportedThinkingLevels(model).find((offered) => offered === thinkingEntry.thinkingLevel)
-        : undefined
+      level === undefined ? undefined : getSupportedThinkingLevels(model).find((offered) => offered === level)
     return { model, ...(thinkingLevel === undefined ? {} : { thinkingLevel }) }
   }
 

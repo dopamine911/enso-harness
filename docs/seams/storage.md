@@ -4,15 +4,17 @@ The contract between the runtime's durable log and everything above the host: bu
 under a thread's id, list what is on disk, read a stored transcript without building, report what one
 live session contains — and since #162 workstream 4 (L2), what crosses is the transcript of OURS
 (`EnsoTranscriptEntry`): the host decodes the runtime's stored entries below this seam. Glossary domains: **Record** — the *storage seam* is the mechanism named there, "the
-only file that touches the runtime's session manager or its file layout", a later store a one-file
-change (#102 §1) — and **Thread** (*stored thread*, *entry*, *branch* are what cross).
+only file that touches the runtime's session manager or its file contents", a later store a one-file
+change (#102 §1); since #801 that file is `host/thread-log.ts`, and the host reads a thread's log
+through `ThreadLog` — and **Thread** (*stored thread*, *entry*, *branch* are what cross).
 
 Every fence on this page is the source, checked by `test/docs-gate.test.ts`. Refresh with
 `bun scripts/docs/refresh-fences.ts docs/seams/storage.md`.
 
 ## The contract
 
-Three host-side interfaces, all in the one file the seam lives in:
+Three host-side interfaces in `agent-host.ts`, the host's entry point, over a fourth in `thread-log.ts`,
+the one file the seam's storage lives in:
 
 <!-- source: packages/web/src/host/agent-host.ts#AgentHost -->
 ```ts
@@ -224,8 +226,7 @@ export interface HostedThread {
 <!-- source: packages/web/src/host/agent-host.ts#HostedThreadInspection -->
 ```ts
 /**
- * What pi's session for one hosted thread actually contains, read straight off the
- * `SessionManager` (#86).
+ * What pi's session for one hosted thread actually contains, read straight off its log (#86).
  *
  * Everything a run shows the browser is derived from the event stream; this is the source those
  * views derive from, for a human or an agent to cross-check against.
@@ -271,6 +272,64 @@ export interface StoredThread {
    * session id. Absent for a thread that is no fork, and for one whose parent file is gone.
    */
   readonly parentThreadId?: string
+}
+```
+
+What the host reads and writes a thread's log through (#801), whatever stores it:
+
+<!-- source: packages/web/src/host/thread-log.ts#ThreadLog -->
+```ts
+/** One thread's log, open in memory. Its facts are read when asked: a fork turns the log it was taken through into the fork. */
+export interface ThreadLog {
+  readonly threadId: string
+  /** The directory the thread runs in, as the log's header records it. */
+  readonly cwd: string
+  /** The directory the log's file is in. */
+  readonly directory: string
+  /** The file the log is written to, from creation — even before the runtime has written it. */
+  readonly file: string | undefined
+  /** The name a person gave the thread (#670): the newest one recorded; `undefined` when none. */
+  name(): string | undefined
+  /** The branch, root to leaf, as the transcript of ours (L2). */
+  transcript(): EnsoTranscriptEntry[]
+  /** Every entry on every branch, as the transcript of ours: where the permission mode is read (#496). */
+  everyEntry(): EnsoTranscriptEntry[]
+  /** Every usage in the log, on every branch, by the runtime's rule (`session-usage.ts`, #45). */
+  usage(): EnsoSessionUsage
+  /** What the branch records it last ran on (#434). */
+  recordedModel(): EnsoRecordedModel | undefined
+  /** The branch's incidents (#466), folded as the guard folds them on replay. */
+  incidents(): EnsoSessionIncidents
+  /** Whether the branch holds a request already (#443): a system prompt is fixed from then on. */
+  hasSentRequest(): boolean
+  /** The branch analysed (#45 phase 2): per request, per turn, per tool. */
+  stats(): BranchStats
+  /** The branch's context, request by request (#361). */
+  context(): BranchContext
+  /** One request's context, element by element (#361 phase 3); undefined for a turn the branch does not have. */
+  requestDetail(request: number | 'next'): BranchRequestDetail | undefined
+  /** The branch as the session eval reads it (#441). */
+  eval(): BranchEval
+  /** The branch's incident history (#468), replayed under `thresholds`. */
+  incidentHistory(thresholds: EnsoRiskThresholds): BranchIncidentHistory
+  /** The branch's judge cases (#469). */
+  judgeCases(inputs: JudgeCaseInputs): BranchJudgeCases
+  /** The branch's fork point (#435), for the thread these facts name. */
+  forkPoint(facts: {
+    readonly threadId: string
+    readonly cwd: string
+    readonly parentThreadId: string | undefined
+  }): EnsoForkPoint
+  /** The prompt at `entryId` (#433). */
+  promptAt(entryId: string): PromptAtEntry
+  /** The model and level chosen before the first message (#616); undefined once the branch has a message, or when none was chosen. */
+  choiceBeforeFirstMessage(): ChoiceBeforeFirstMessage | undefined
+  /** Append a custom entry of ours. */
+  record(customType: string, data: unknown): void
+  /** Name the thread (#670): the entry the runtime's own `/name` writes and its listing reads back. */
+  rename(name: string): void
+  /** Write the log's file the way the runtime's first flush does, when it has none yet (#433). A file already there is left alone. */
+  writeIfUnflushed(): void
 }
 ```
 
@@ -433,8 +492,9 @@ export const EnsoInterruptedTail = Type.Union([
 
 ## Who implements it, who consumes it
 
-**Implemented once**, in `packages/web/src/host/agent-host.ts`, the only file that imports the runtime's
-`SessionManager`. A thread's file is filed under its project's folder,
+**Implemented once**, in `packages/web/src/host/thread-log.ts` (#801), the only file that imports the runtime's
+`SessionManager`: `ThreadLog` and the store over it — `openLog`, `createLog`, `forkedLog`, `movedLog`.
+`agent-host.ts` reads and writes every log through them. A thread's file is filed under its project's folder,
 `ENSO_HOME/projects/<projectIdOf(cwd)>/sessions/` (#552) — the host hands that directory to the runtime at
 create, a fork inherits its source's, and `bun run enso` hands the terminal runtime the same directory
 (`PI_CODING_AGENT_SESSION_DIR`); a launch first moves the sessions the runtime filed by encoded cwd under
@@ -506,7 +566,7 @@ converter, so the test reads what the real host would hand out.
 ## What fences it
 
 - **The storage-seam test**: `no-duplicate-paths.test.ts#STORAGE_SEAM` —
-  "`SessionManager` is imported ONLY by the web host's agent-host.ts — the storage seam" — a scan of
+  "`SessionManager` is imported ONLY by the web host's thread-log.ts — the storage seam" — a scan of
   every non-test source root; the `.enso` literal is likewise assembled only in `paths.ts` — plus
   `guard.ts`, where it is corpus data for `guard.ts#ENSO_PERSISTENCE_WRITE_DIRECTORIES`.
 - **The vendor gate** (`test/vendor-gate.test.ts`, #145): the runtime's package is imported only under
@@ -550,8 +610,9 @@ a thread that has only run slash commands has a full branch and no file, and `li
 Which files may import the runtime is fixed by a gate (#558): `VENDOR_IMPORTERS_ALLOWED_INSIDE_ROOTS` in `test/vendor-gate.test.ts` lists them, and the list only shrinks, so a new file cannot quietly add to what follows.
 
 Replace the store — another file layout, a database, a remote log — and the files that change are
-`packages/web/src/host/agent-host.ts` (`listSessions`, `readStoredThread`, the open-or-create in
-`createSession`, `inspect()`), `packages/web/src/host/transcript.ts` (the new store's entries → the
+`packages/web/src/host/thread-log.ts` (`ThreadLog` and its store over the new log),
+`packages/web/src/host/session-files.ts` and the listing in `agent-host.ts` (`listSessions`, `locate`:
+where the files are), `packages/web/src/host/transcript.ts` (the new store's entries → the
 transcript of ours), `packages/web/src/host/branch-stats.ts` (the new store's messages → per-turn stats) and `packages/web/src/host/session-usage.ts` (the new store's recorded spend → pi's
 totals). That is what the storage-seam test measures: a second importer of the session
 manager anywhere else is a failing test with the file named. The server routes, the registry, the

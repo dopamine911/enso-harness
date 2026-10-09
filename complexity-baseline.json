@@ -53,7 +53,7 @@
     },
     "packages/web/src/host/agent-host.ts": {
       "complexity_moderate": {
-        "count": 2
+        "count": 1
       }
     },
     "packages/web/src/host/continuation.ts": {
@@ -219,11 +219,6 @@
       }
     },
     "packages/web/src/host/agent-host.ts\u0000deleteThread": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "packages/web/src/host/agent-host.ts\u0000forkThread": {
       "complexity_moderate": {
         "count": 1
       }
