@@ -816,6 +816,7 @@ test("⚠ Settings' model of every mode is the engine's: each verdict names a ru
 // written. ⚠ Here, in this suite's process-wide agent dir, and not in a server test: the
 // multi-account extension keeps the agent dir of the first host a process builds, so a second
 // suite building real hosts under its own dir broke the isolation test above whenever it ran first.
+// `test/real-host-gate.test.ts` (#518) refuses a real host built in any other test file.
 
 /** A running session over a fresh policy file (Enso's, seeded by the host), and that file's path. */
 async function runningUnderFreshPolicy(): Promise<{ hosted: HostedThread; policyPath: string }> {

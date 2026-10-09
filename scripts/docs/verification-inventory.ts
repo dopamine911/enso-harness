@@ -198,6 +198,12 @@ const GATE_METADATA: Readonly<Record<string, GateMetadata>> = {
     limitation:
       'Matches provenance text and static imports; dynamically assembled dependencies are outside the import matcher.',
   },
+  'test/real-host-gate.test.ts': {
+    rootArrays: ['TEST_ROOTS'],
+    exceptions: [],
+    limitation:
+      'A line scan of test files for `createAgentHost(` outside `agent-host.test.ts` and for `startEnsoServer({ … })` without a top-level `host:`; a host built through some other helper is outside it.',
+  },
   'test/scratch-gate.test.ts': {
     roots: ['test/scratch-preload.ts'],
     exceptions: [],
