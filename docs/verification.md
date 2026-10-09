@@ -15,14 +15,17 @@ at the first failure:
    repository's naming gate: `scripts/lint/enso-plugin.ts` runs upstream's
    `unicorn/name-replacements` over the word lists in `scripts/lint/naming-policy.ts`. Test rules
    come from `eslint-plugin-jest`, told that `describe`/`test` are imported from `bun:test`.
-3. **TypeScript** — `tsc -b`, a project-reference build. It emits: project references require
-   `composite`, `composite` requires declaration output, and `tsc -b --noEmit` is refused with
-   TS6310, so the declarations land in each package's gitignored `dist-types/`. **The major is 6, and
-   TypeDoc is why** (#188): 7.x is the native port and ships no compiler API, so every tool that
-   *reads* types rather than checking them stops working — measured, the 7.x build is six times
-   faster (1.0 s against 6.4 s cold over this tree), and that speed was given up for the generated
-   API reference. `test/dependency-gate.test.ts` holds the pin against TypeDoc's own peer range, so
-   a bump back to 7 fails naming TypeDoc rather than surfacing as a broken docs build later.
+3. **TypeScript** — `tsc -b --checkers 4`, a project-reference build. It emits: project references
+   require `composite`, `composite` requires declaration output, and `tsc -b --noEmit` is refused with
+   TS6310, so the declarations land in each package's gitignored `dist-types/`. **The compiler is
+   TypeScript 7, the API TypeScript 6.0** (#745): 7.x is the native port and ships no compiler API,
+   so every tool that *reads* types rather than checking them — TypeDoc and the four
+   `scripts/docs/*` readers — imports `typescript`, which the root manifest aliases to
+   `@typescript/typescript6`, while `tsc` comes from `@typescript/native` (`typescript@7`). Measured
+   cold over this tree, the 7.0 build takes 2.6–2.8 s against 6.0.3's 18.2–18.4 s; #188 had given
+   that up for TypeDoc before the alias existed. `--checkers 4` is 7.0's default, pinned so laptops
+   and CI split the program the same way. `test/dependency-gate.test.ts` holds both halves: the API
+   against TypeDoc's own peer range, and `tsc` resolving to the 7.x binary.
 4. **Dead code** — `fallow dead-code` (#163): fails on any unused file, export, type or dependency.
    **No baseline since #594.** The identity baseline #163 introduced (the backlog as inventory,
    growth as the regression) had been empty since #263, and the last 17 rows were why it should
