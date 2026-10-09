@@ -74,3 +74,14 @@ The spec finds controls by their accessible names and placeholders from `src/cha
 - **Every off-screen pane keeps its own composer and mode control**, `inert` and invisible (#472). `composer(page)` and `modeControl(page)` take the one on screen.
 
 Renaming a label in the UI is a spec change too. The constants at the top of `chat.e2e.ts` are the one place to update, and `src/__tests__/thread-pane.test.tsx` reads them out of that file, so drift on either side fails `bun run check`.
+
+## Waits listen for the page's announcements
+
+The page announces its thread's status as a DOM event, `enso:thread-status` (core's `ENSO_UI_EVENTS` and `EnsoThreadStatusEvent`, #737), dispatched by the status bar after it renders the new state. `thread-status.ts` keeps every announcement from the page's first script on (`recordThreadStatus`, installed for every test in `chat.e2e.ts`'s `beforeEach`), and a test waits on it, never on words:
+
+- a run ended: `waitForRunToSettle` (`waitForRunToEnd`), then the stop control's absence as the receipt;
+- a card came up: `waitForQuestion`, whose `detail` carries the card's title;
+- a run started (`@model`): `waitForRunToStart`;
+- a rail switch landed: `waitForShownThread`.
+
+⚠ **Mark before the move.** `markThreadStatus` before the click or Enter, and the wait reads what came since. A model-free run opens and settles within the click's own round trip, so a wait started after it would have missed both words.

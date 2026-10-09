@@ -22,6 +22,20 @@ import type { Page } from '@playwright/test'
 import { expect, test } from '@playwright/test'
 import { e2eHome, SEEDED_TITLES, SEEDED_TURNS } from './e2e-home.ts'
 import { OUTPUT_DIRECTORY, WEB_ORIGIN } from './playwright.config.ts'
+import {
+  markThreadStatus,
+  recordThreadStatus,
+  waitForQuestion,
+  waitForRunToEnd,
+  waitForRunToStart,
+  waitForShownThread,
+} from './thread-status.ts'
+
+// Every test listens for the page's `enso:thread-status` from its first script on (#737,
+// `thread-status.ts`): a wait for a run to end or a card to come up returns on the event.
+test.beforeEach(async ({ page }) => {
+  await recordThreadStatus(page)
+})
 
 const SCREENSHOT_DIRECTORY = join(OUTPUT_DIRECTORY, 'screenshots')
 
@@ -48,6 +62,8 @@ const STOP_BUTTON_NAME = 'stop the run'
  */
 const MODE_COMMAND = '/mode'
 const MODE_OPTION_LABEL = /accept edits/i
+/** The card's title as the status bar announces it (#737): the select's own prompt, from `permission-modes`. */
+const MODE_QUESTION_TITLE = /select permission mode/i
 /** The line Enso's mode-lines store shows once the host reports the new mode — the observable that the answer landed. */
 const MODE_ANSWERED_STATUS = /Mode: acceptEdits/
 
@@ -62,19 +78,26 @@ const MODEL_PROMPT = 'Reply with exactly three words.'
  * Measured 2026-09-23 on claude-sonnet-4-5 with thinking: 2.2–3.8 s to the first delta, settled
  * 4.3–4.4 s after acquisition, and the browser sees the run open ~1 s after the server — so the
  * `@model` test failed 2 of 3 runs on turns that completed. A model-free run settles in well under
- * a second either way.
+ * a second either way. The bound of the wait's step, so a run that never ends fails by name.
  */
 const RUN_SETTLE_TIMEOUT_MS = 60_000
 
 /**
- * A run is "settled" when the composer no longer offers to stop it — the stop button is
- * rendered ONLY while a run is in flight, so its absence is the one reading here that
- * actually flips. ⚠ NOT "send is visible": send is rendered unconditionally (disabled when
- * there is nothing to send), so that reading held at every moment including mid-run, and the
- * step named "wait for the run to settle" gated nothing.
+ * Wait for the run started after `mark` to end: the shown pane's status bar announces `idle`
+ * (#737, `waitForRunToEnd`), not a word or control sampled until it flips.
+ *
+ * ⚠ The stop control's absence is then the receipt, not the wait: the bar announces after the
+ * commit, so the composer already says the same, and a check on it holds the composer to the
+ * event. Stop, NOT send: send is rendered unconditionally (disabled when there is nothing to
+ * send), so a reading of it held at every moment including mid-run (#277,
+ * `test/e2e-selectors.test.ts` pins this body to STOP_BUTTON_NAME).
  */
-async function waitForRunToSettle(page: Page): Promise<void> {
-  await expect(page.getByRole('button', { name: STOP_BUTTON_NAME })).toHaveCount(0, { timeout: RUN_SETTLE_TIMEOUT_MS })
+async function waitForRunToSettle(page: Page, mark: number): Promise<void> {
+  const ended = await test.step('the thread announces its run ended', () => waitForRunToEnd(page, mark), {
+    timeout: RUN_SETTLE_TIMEOUT_MS,
+  })
+  expect(ended.status).toBe('idle')
+  await expect(page.getByRole('button', { name: STOP_BUTTON_NAME })).toHaveCount(0)
 }
 
 /**
@@ -165,15 +188,18 @@ test.describe('chat surface', () => {
 
     // A session built with no model; the same words, sent again, now reach pi.
     await chooseMode(page, 'plan')
+    const beforeSend = await markThreadStatus(page)
     await composer(page).press('Enter')
-    // The dialog parks the run (#27): the composer flips to stop, then the select options
-    // render as buttons. Either order is fine; the option button is what we need.
+    // The dialog parks the run (#27): the bar announces the card once it is rendered, titled by
+    // the select's own words; its option buttons are then on screen to click.
+    const card = await test.step('the thread announces the mode card', () => waitForQuestion(page, beforeSend))
+    expect(card.question?.title).toMatch(MODE_QUESTION_TITLE)
     const modeOption = page.getByRole('button', { name: MODE_OPTION_LABEL })
-    await expect(modeOption).toBeVisible()
     await captureScreenshot(page, '02-mode-dialog')
 
+    const beforeAnswer = await markThreadStatus(page)
     await modeOption.click()
-    await waitForRunToSettle(page)
+    await waitForRunToSettle(page, beforeAnswer)
     // The answer's receipt is the `Mode:` line the browser shows from the host's `permission-mode`, not assistant text — an
     // extension command produces no model turn, so the assistant container stays empty
     // (and Playwright reads an empty block as hidden; receipt: first run of this spec).
@@ -323,12 +349,15 @@ test.describe('chat surface', () => {
 
   test('one real model turn @model', async ({ page }) => {
     await openNewThread(page)
+    const beforeSend = await markThreadStatus(page)
     await typeAndSend(page, MODEL_PROMPT)
-    // The stop affordance proves the request reached the server and a run is in flight.
-    await expect(page.getByRole('button', { name: STOP_BUTTON_NAME })).toBeVisible()
+    // The bar's `running` proves the request reached the server and a run is in flight.
+    await test.step('the thread announces its run started', () => waitForRunToStart(page, beforeSend), {
+      timeout: RUN_SETTLE_TIMEOUT_MS,
+    })
     await captureScreenshot(page, '04-model-streaming')
 
-    await waitForRunToSettle(page)
+    await waitForRunToSettle(page, beforeSend)
     const assistantMessage = page.locator('[data-role="assistant"]').last()
     await expect(assistantMessage).toBeVisible()
     await expect(assistantMessage).not.toBeEmpty()
@@ -347,10 +376,20 @@ function rail(page: Page): ReturnType<Page['getByRole']> {
   return page.getByRole('navigation', { name: 'threads' })
 }
 
-/** Open a seeded thread from the rail, the way a reader switches, and wait for its last turn. */
-async function switchTo(page: Page, title: string): Promise<void> {
+/**
+ * Open a seeded thread from the rail, the way a reader switches: the switch has landed when the
+ * thread's bar announces it is the shown pane (#737), and its transcript has a turn drawn.
+ *
+ * ⚠ ANY turn, not the last one: the transcript is windowed (#739), so a thread the reader left
+ * scrolled up draws only the rows around their place, and the last turn is not in the page.
+ */
+async function switchTo(page: Page, thread: 'first' | 'second'): Promise<void> {
+  const title = SEEDED_TITLES[thread]
+  const beforeClick = await markThreadStatus(page)
   await rail(page).getByText(title, { exact: true }).click()
-  await expect(page.getByText(`${title}, turn ${SEEDED_TURNS}, paragraph 6`).filter({ visible: true })).toBeVisible()
+  await test.step(`the ${thread} seeded thread announces it is shown`, () =>
+    waitForShownThread(page, beforeClick, SEEDED[thread]))
+  await expect(page.getByRole('log').filter({ visible: true }).getByText(`${title}, turn `).first()).toBeVisible()
 }
 
 /** The shown pane's transcript scroller: the `role="log"` root's scrolling child, outside every inert pane. */
@@ -412,10 +451,10 @@ test.describe('seeded threads (#486)', () => {
   }) => {
     await page.goto(`/?thread=${SEEDED.first}`)
     await expect(page.getByText(`${SEEDED_TITLES.first}, turn ${SEEDED_TURNS}, paragraph 6`)).toBeVisible()
-    await switchTo(page, SEEDED_TITLES.second)
+    await switchTo(page, 'second')
     // A thread opens at its bottom; the scroll there is smooth, so this waits for it to arrive.
     await expect.poll(async () => (await transcriptScroll(page)).bottomGap).toBeLessThanOrEqual(2)
-    await switchTo(page, SEEDED_TITLES.first)
+    await switchTo(page, 'first')
     // Scroll up in the first, as a reader does: the wheel over the transcript.
     const transcript = page.getByRole('log').filter({ visible: true })
     await transcript.hover()
@@ -423,10 +462,10 @@ test.describe('seeded threads (#486)', () => {
     await expect.poll(async () => (await transcriptScroll(page)).bottomGap).toBeGreaterThan(1000)
     const scrolledTo = (await transcriptScroll(page)).top
 
-    await switchTo(page, SEEDED_TITLES.second)
+    await switchTo(page, 'second')
     // The second was left at its bottom, and is still there.
     expect((await transcriptScroll(page)).bottomGap).toBeLessThanOrEqual(2)
-    await switchTo(page, SEEDED_TITLES.first)
+    await switchTo(page, 'first')
     expect((await transcriptScroll(page)).top).toBe(scrolledTo)
   })
 
@@ -436,8 +475,8 @@ test.describe('seeded threads (#486)', () => {
     page,
   }) => {
     await page.goto(`/?thread=${SEEDED.first}`)
-    await switchTo(page, SEEDED_TITLES.second)
-    await switchTo(page, SEEDED_TITLES.first)
+    await switchTo(page, 'second')
+    await switchTo(page, 'first')
     const panes = await page.evaluate(() => {
       // One status bar per pane: the pane is the bar's outermost positioned wrapper.
       const bars = [...document.querySelectorAll<HTMLElement>('footer[aria-label="thread status"]')]
