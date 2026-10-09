@@ -92,8 +92,8 @@ export function createThreadReadRoutes(state: ThreadReadRoutesState): ThreadRead
    * Decided by what the server holds, not by whether it holds anything:
    *   • HERE (a run in flight, a dialog open, or idle within the eviction window): pi's
    *     memory and the session's own mode — fresher than the file, and RESUMABLE. A page
-   *     that reloaded after a run must be able to come back before the 30-minute eviction
-   *    ; a page that reloaded UNDER pi's open question must be able to
+   *     that reloaded after a run must be able to come back before the 30-minute eviction;
+   *     a page that reloaded UNDER pi's open question must be able to
    *     come back to the card (#114). Busy is not a refusal any more: under the follow
    *     transport (#112) a resumed pane follows the run in flight, and a prompt to a busy
    *     thread queues through pi (#75) — the 409 that guarded the old per-response run

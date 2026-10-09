@@ -117,8 +117,8 @@ export interface LogTailStreamOptions {
   readonly signal: AbortSignal
   /**
    * A connection is delivering: fired before the FIRST message of each attempt, valid or not.
-   * The moment a page clears the last alert — and the one moment that satisfies both races
-   *: clearing on every frame let a bad frame and a good
+   * The moment a page clears the last alert — and the one moment that satisfies both races:
+   * clearing on every frame let a bad frame and a good
    * one in the same chunk batch into one render that showed nothing; clearing when the
    * response merely OPENED blinked the alert on every reconnect of a connection that dropped
    * before its first frame. The first message of an attempt is after the open and before any
