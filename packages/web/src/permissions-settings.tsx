@@ -161,7 +161,6 @@ export function usePermissionPolicy(open: boolean, fetchImpl: FetchLike | undefi
     if (loaded?.kind !== 'ok' || sent === undefined || inFlight.current) return
     inFlight.current = true
     setWorking(true)
-    setBackup(undefined)
     let outcome: PolicySave
     try {
       const base = await saveBase(loaded.file, loaded.etag, overwrite)
