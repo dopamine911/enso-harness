@@ -18,6 +18,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import {
   collectSnapshotGarbage,
+  compareTreeWithSnapshots,
   forksOfStore,
   materializeSnapshot,
   migrateSnapshotStores,
@@ -438,6 +439,65 @@ test('a sparse checkout snapshots the whole commit: a path it leaves off disk ke
   const first = await taken(store)
   expect(await snapshotPaths(environment, store, first.hash)).toContain('out/y')
   expect(git(store.directory, 'rev-parse', `${first.hash}:out/y`)).toBe(git(tree, 'rev-parse', 'HEAD:out/y'))
+})
+
+// #570: `read-tree` carries no skip-worktree bit, so `checkout-index` wrote `out/y` back, and git,
+// finding it present, dropped its `S` — the user's sparse checkout silently widened.
+test('⚠ a materialize into a sparse checkout writes no path the sparse checkout leaves off disk, and git still marks each skip-worktree (#570)', async () => {
+  const tree = checkout()
+  mkdirSync(join(tree, 'in'))
+  mkdirSync(join(tree, 'out'))
+  writeFileSync(join(tree, 'in', 'x'), 'x\n')
+  writeFileSync(join(tree, 'out', 'y'), 'y\n')
+  git(tree, 'add', '--all')
+  git(tree, 'commit', '--quiet', '-m', 'two directories')
+  git(tree, 'sparse-checkout', 'set', 'in')
+  const store = await opened(tree)
+  const first = await taken(store)
+  writeFileSync(join(tree, 'in', 'x'), 'edited\n')
+
+  expect(await materializeSnapshot({ directory: store.directory, tree, hash: first.hash, environment })).toEqual({
+    kind: 'materialized',
+  })
+  expect(readFileSync(join(tree, 'in', 'x'), 'utf8')).toBe('x\n')
+  expect(existsSync(join(tree, 'out'))).toBe(false)
+  expect(git(tree, 'ls-files', '-t', 'out/y')).toBe('S out/y')
+  expect(git(tree, 'status', '--porcelain')).toBe('')
+})
+
+// #569: the store never knows a directory only the project ignores, so a copy's `.venv/` was
+// listed file by file and every path sent to `check-ignore` — past 64 MiB, every snapshot refused.
+test('⚠ a copy lists a directory only its project ignores as one entry, none of its files in the snapshot, and still checks each file of a directory the project does not ignore (#569)', async () => {
+  const project = checkout()
+  writeFileSync(join(project, '.gitignore'), '.env\nbuild/\n.venv/\n*.pyc\n')
+  git(project, 'commit', '--quiet', '-am', 'ignore .venv and *.pyc')
+  const copy = mkdtempSync(join(tmpdir(), 'enso-snap-copy-'))
+  writeFileSync(join(copy, 'src.ts'), 'export const one = 1\n')
+  for (let library = 0; library < 50; library += 1) {
+    mkdirSync(join(copy, '.venv', 'lib', `p${library}`), { recursive: true })
+    writeFileSync(join(copy, '.venv', 'lib', `p${library}`, '__init__.py'), '\n')
+  }
+  mkdirSync(join(copy, 'pkg'))
+  writeFileSync(join(copy, 'pkg', 'a.py'), 'a = 1\n')
+  writeFileSync(join(copy, 'pkg', 'a.pyc'), 'compiled\n')
+  const store = await openSnapshotStore({
+    directory: join(mkdtempSync(join(tmpdir(), 'enso-snap-store-')), 'store'),
+    tree: copy,
+    environment,
+    copyOf: project,
+  })
+  if (store === undefined) throw new Error('the store did not open')
+
+  const first = await taken(store)
+  expect((await snapshotPaths(environment, store, first.hash)).toSorted()).toEqual(['pkg/a.py', 'src.ts'])
+  const compared = await compareTreeWithSnapshots({
+    directory: store.directory,
+    tree: copy,
+    hashes: ['HEAD'],
+    environment,
+  })
+  if (compared.kind !== 'compared') throw new Error(`refused at ${compared.refused.step}`)
+  expect(compared.ignored.toSorted()).toEqual(['.venv/', 'pkg/a.pyc'])
 })
 
 test("⚠ a fork's store, beside its parent's, materializes the parent's snapshot into a plain directory, in the parent's object format, and names the parent as what it was forked from", async () => {
