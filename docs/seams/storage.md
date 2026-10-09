@@ -163,7 +163,7 @@ export interface AgentHost {
 
 What `createSession` hands back — the runtime (`thread-runtime.md`) plus a read-only view deliberately not on it:
 
-<!-- source: packages/web/src/host/hosted-thread.ts#HostedThread -->
+<!-- source: packages/web/src/host/live-thread.ts#HostedThread -->
 ```ts
 export interface HostedThread {
   readonly runtime: ThreadRuntime
@@ -223,7 +223,7 @@ export interface HostedThread {
 }
 ```
 
-<!-- source: packages/web/src/host/hosted-thread.ts#HostedThreadInspection -->
+<!-- source: packages/web/src/host/live-thread.ts#HostedThreadInspection -->
 ```ts
 /**
  * What pi's session for one hosted thread actually contains, read straight off its log (#86).

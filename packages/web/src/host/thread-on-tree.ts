@@ -8,7 +8,7 @@ import {
 } from '@enso/core'
 import { disposeThreadTree } from '@enso/core/thread-tree'
 import { HostCommandRefused } from './host-commands.ts'
-import type { HostedThread } from './hosted-thread.ts'
+import type { HostedThread } from './live-thread.ts'
 import type { ThreadLog } from './thread-log.ts'
 import type { TreeMaking } from './thread-tree-making.ts'
 
@@ -35,7 +35,7 @@ export interface TreeMove {
 }
 
 /**
- * A new thread that moves onto its own tree when it first runs (#551, PR #561 review). Until
+ * A new thread that moves onto its own tree when it first runs (#551). Until
  * then it runs nowhere — it is pi built in the checkout, answering previews and permission
  * checks there. At the first `prompt` (or `continueRun`) the tree is minted from the checkout as
  * it is THEN, the session — everything chosen before (model, thinking, mode, system prompt), the
@@ -45,7 +45,7 @@ export interface TreeMove {
  * it. A mint that is refused refuses the run, never runs it in the checkout instead, and the next
  * run tries again.
  *
- * ⚠ A MOVE THAT FAILS AFTER THE MINT IS UNDONE (PR #561 review): the tree and its branch are named
+ * ⚠ A MOVE THAT FAILS AFTER THE MINT IS UNDONE (#551): the tree and its branch are named
  * by the thread's id, so a tree left behind would refuse every later mint for this thread. Any
  * step failing after the mint — the write, the build, a dispose that came meanwhile — removes the
  * tree, its branch and store, and the file the move wrote, and puts the checkout session back.

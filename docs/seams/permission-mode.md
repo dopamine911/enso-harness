@@ -513,11 +513,11 @@ left active. The prompt itself is an ordinary `select` and `input` dialog (`dial
 spawn. The rules a run ran under are hashed into its run context (`mode.rulesHash`, #435): the
 policy the engine reads with the preset of the session's mode.
 
-**Read by the host, and only there.** `hosted-thread.ts#currentPermissionModeState` implements
-`ThreadRuntime.permissionModeState` for a live thread: the walk over `sessionManager.getEntries()`, and
-`ENSO_PERMISSION_MODES` filtered by the commands the session's extension runner registered for
-`available` (read off the registry directly rather than through `listCommands`, whose call count the
-refusal path's tests pin). For a thread that is not live, `AgentHost.freshPermissionMode()` and
+**Read by the host, and only there.** `thread-announcements.ts#currentPermissionModeState` implements
+`ThreadRuntime.permissionModeState` for a live thread: the walk over the log's entries
+(`ThreadLog.everyEntry`), and `ENSO_PERMISSION_MODES` filtered by the commands the session's extension
+runner registered for `available` (`ThreadReadings.registeredCommands`, read off the registry directly
+rather than through `listCommands`, whose call count the refusal path's tests pin). For a thread that is not live, `AgentHost.freshPermissionMode()` and
 `AgentHost.storedPermissionMode(transcript)` answer from the adapter. The stored reading walks the
 BRANCH, the transcript `readStoredThread` gives; it can differ from the engine's only when `/tree`
 moved the leaf past a mode change, and the live walk replaces it as soon as the thread runs.

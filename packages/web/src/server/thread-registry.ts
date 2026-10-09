@@ -30,7 +30,7 @@ import {
   type ThreadRuntime,
 } from '@enso/core'
 import { createEventTail, type EventTail } from '../host/event-tail.ts'
-import type { HostedThread } from '../host/hosted-thread.ts'
+import type { HostedThread } from '../host/live-thread.ts'
 import { recordObservation } from './observation-log.ts'
 
 /**

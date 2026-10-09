@@ -29,11 +29,12 @@ import type { BranchIncidentHistory } from './branch-incident-history.ts'
 import type { BranchJudgeCases } from './branch-judge-cases.ts'
 import { catalogueRows } from './host-commands.ts'
 import { hostFlowRows, loginOptions, logoutOptions } from './host-flows.ts'
-import { buildHostedThread, type HostedThread, loginFactsOf, type ProjectTrustState } from './hosted-thread.ts'
+import { buildHostedThread } from './hosted-thread.ts'
+import type { HostedThread, ProjectTrustState } from './live-thread.ts'
 import { seedMultiAccountConfig } from './multi-account-seed.ts'
 import { freshPermissionModeState, storedPermissionModeState } from './permission-mode-adapter.ts'
 import { hostedProjectTrust } from './project-trust.ts'
-import { sessionModels } from './session-models.ts'
+import { loginFactsOf, sessionModels } from './session-models.ts'
 import {
   createStoredThreads,
   type StoredThread,

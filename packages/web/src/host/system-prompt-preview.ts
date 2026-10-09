@@ -1,11 +1,12 @@
 import { toToolDeclaration } from '@earendil-works/pi-ai'
-import type { AgentSession } from '@earendil-works/pi-coding-agent'
+import type { AgentSession, AgentSessionServices } from '@earendil-works/pi-coding-agent'
 import {
   type EnsoSystemPromptChoice,
   type EnsoSystemPromptPreview,
   type EnsoSystemPromptSection,
   estimateTextTokens,
 } from '@enso/core'
+import type { SystemPromptPreviewOutcome } from './live-thread.ts'
 
 /**
  * A system prompt before it is sent (#443): what a thread's next request would carry with a given
@@ -117,7 +118,7 @@ function originOf(
 }
 
 /** The swap: `setChoice` puts a choice in the loader's place; pi rebuilds for the same tools and renders. */
-export function renderedUnder(
+function renderedUnder(
   session: AgentSession,
   setChoice: (choice: EnsoSystemPromptChoice | undefined) => void,
   candidate: EnsoSystemPromptChoice | undefined,
@@ -133,7 +134,7 @@ export function renderedUnder(
 }
 
 /** What a preview is made from: pi's rendering, what the host knows of it, and the session's tools and window. */
-export interface PreviewInputs {
+interface PreviewInputs {
   readonly rendered: string
   /** The preamble when the host knows it: the candidate's, or a `SYSTEM.md` pi's loader found. */
   readonly preamble: string | undefined
@@ -145,7 +146,7 @@ export interface PreviewInputs {
 }
 
 /** The preview, from pi's rendering and the session's executable tools; `undefined` when it does not split. */
-export function previewOf({
+function previewOf({
   rendered,
   preamble,
   baseAppends,
@@ -172,4 +173,33 @@ export function previewOf({
   const totalTokens = [...sections, ...declared].reduce((sum, counted) => sum + counted.tokens, 0)
   const prompt = candidate === null ? null : { id: candidate.id, name: candidate.name, mode: candidate.mode }
   return { prompt, sections, tools: declared, totalTokens, contextWindow: contextWindow ?? null }
+}
+
+/** What previewing reads off a live thread (#443, #801): its session, its loader, and the choice it keeps. */
+export interface LivePreviewSource {
+  readonly session: AgentSession
+  /** The loader as pi built it, before the thread's choice was put in its place (`withSystemPrompt`). */
+  readonly resourceLoader: AgentSessionServices['resourceLoader']
+  readonly kept: () => EnsoSystemPromptChoice | undefined
+  readonly setChoice: (choice: EnsoSystemPromptChoice | undefined) => void
+}
+
+/** The live thread's next request under `candidate`, or why it cannot be shown (#443). */
+export function previewOnSession(
+  source: LivePreviewSource,
+  candidate: EnsoSystemPromptChoice | null,
+): SystemPromptPreviewOutcome {
+  const { session, resourceLoader } = source
+  if (session.isStreaming || session.isCompacting) return { kind: 'busy' }
+  const rendered = renderedUnder(session, source.setChoice, candidate ?? undefined, source.kept())
+  const window = session.model?.contextWindow
+  const preview = previewOf({
+    rendered,
+    preamble: candidate?.mode === 'system' ? candidate.text : resourceLoader.getSystemPrompt(),
+    baseAppends: resourceLoader.getAppendSystemPrompt(),
+    candidate,
+    tools: session.agent.state.tools,
+    contextWindow: window !== undefined && window > 0 ? window : undefined,
+  })
+  return preview === undefined ? { kind: 'unsplittable' } : { kind: 'preview', preview }
 }

@@ -88,13 +88,13 @@ import type { LogRecorder } from '@logtape/testing/recorder'
 import { Type } from 'typebox'
 import { type AgentHost, createAgentHost, SessionDirectoryRefused } from '../agent-host.ts'
 import { LOST_TOOL_RESULT_TEXT, NOTHING_TO_CONTINUE } from '../continuation.ts'
+import { MODEL_WATCH_EXTENSION_PATH } from '../hosted-thread.ts'
 import {
   type HostedThread,
   type HostedThreadInspection,
-  MODEL_WATCH_EXTENSION_PATH,
   stopRunSettlingDialogs,
   type ToolCallVerdict,
-} from '../hosted-thread.ts'
+} from '../live-thread.ts'
 import { seedMultiAccountConfig } from '../multi-account-seed.ts'
 import { PERMISSION_CALL_QUESTIONS_EXTENSION_PATH } from '../permission-call-questions.ts'
 import { storedPermissionModeState } from '../permission-mode-adapter.ts'

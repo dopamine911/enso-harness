@@ -1,10 +1,40 @@
 import type { ExtensionAPI, InlineExtension } from '@earendil-works/pi-coding-agent'
-import { modeAgentName } from '@enso/core'
 import {
+  type EnsoPermissionCheckRequest,
+  type EnsoPermissionVerdict,
+  type EnsoTranscriptEntry,
+  modeAgentName,
+  recordedPermissionMode,
+} from '@enso/core'
+import {
+  getPermissionsService,
   PERMISSIONS_DECISION_CHANNEL,
   PERMISSIONS_UI_PROMPT_CHANNEL,
   type PermissionState,
 } from '@gotgenes/pi-permission-system'
+
+/**
+ * The engine's own verdict for a value on a surface, in the mode the thread's entries record NOW
+ * (#474). Asked of the engine the session runs — never a second matcher; `undefined` when the engine
+ * has published no service for the thread.
+ */
+export function permissionVerdictOf(
+  threadId: string,
+  entries: readonly EnsoTranscriptEntry[],
+  request: EnsoPermissionCheckRequest,
+): EnsoPermissionVerdict | undefined {
+  const service = getPermissionsService(threadId)
+  if (service === undefined) return undefined
+  const mode = recordedPermissionMode(entries)
+  const result = service.checkPermission(request.surface, request.value, modeAgentName(mode))
+  return {
+    mode,
+    state: result.state,
+    origin: result.origin,
+    ...(result.matchedPattern === undefined ? {} : { matchedPattern: result.matchedPattern }),
+    ...(result.reason === undefined ? {} : { reason: result.reason }),
+  }
+}
 
 /**
  * Where a permission card stands among the questions ONE tool call asks (#728).

@@ -312,7 +312,12 @@ the runtime's session events into the open `RuntimeEvent` shape (replicated from
 JSON-event mapping, so the mapper's 29 tests kept consuming exactly what they consumed over the pipe);
 `extension-ui-context.ts` is the dialog side (an extension's `select` / `confirm` / `input` / `editor`
 becomes an open dialog; `answerDialog` resolves it, the permission engine's prompt included);
-`questionnaire-dialog.ts` lifts `ask_user`'s component into a questionnaire.
+`questionnaire-dialog.ts` lifts `ask_user`'s component into a questionnaire. The contract the server
+holds — `HostedThread`, its inspection and verdict types — is `live-thread.ts`, which names no vendor;
+so are the pieces `buildHostedThread` composes over pi through narrow ports in our words:
+`event-channel.ts` (the fan-out and its held-until-first-subscriber buffer), `host-flow-runs.ts`
+(`/login`, `/logout`, `/compact` over the thread's `ProviderAccounts`), and `thread-announcements.ts`
+(the model, usage and mode events, once per change, over `ThreadReadings`).
 
 **Consumed by the server only.** `packages/web/src/server/thread-registry.ts` holds one per live
 thread (`ThreadEntry.hosted.runtime`), subscribes it to the feed, and hands a `ThreadLease.runtime` to
@@ -457,6 +462,8 @@ over the new loop), `thread-log.ts` (the new loop's log — see `storage.md`), `
 and `map-events.ts` (produce the new loop's events and map them to observations — or map the
 loop's typed events directly and retire the replicated wire shape), `extension-ui-context.ts` and
 `questionnaire-dialog.ts` (or their equivalents, if the new loop has extensions and questions at all).
+`live-thread.ts`, `event-channel.ts`, `host-flow-runs.ts` and `thread-announcements.ts` keep their
+code: the new loop fills their ports.
 The server, the registry, the routes, the follow, the browser and every test that drives the server
 over the fake do not change — that is what the fake proves today, and it is the whole point of the
 seam. The steer/follow-up exception this section used to carry is gone with #216: a runtime with no

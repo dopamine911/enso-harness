@@ -42,7 +42,7 @@ import {
   hostCommandRows,
 } from '../../host/host-commands.ts'
 import { compactDoneText, decideHostFlow, hostFlowRows, loginDoneText, logoutDoneText } from '../../host/host-flows.ts'
-import type { HostedThread, HostedThreadInspection, SystemPromptPreviewOutcome } from '../../host/hosted-thread.ts'
+import type { HostedThread, HostedThreadInspection, SystemPromptPreviewOutcome } from '../../host/live-thread.ts'
 import { decideSystemPrompt } from '../../host/system-prompt.ts'
 import type { ThreadDeleteOutcome } from '../../host/thread-delete.ts'
 import type { ThreadRenameOutcome, ThreadRestoreOutcome } from '../../host/thread-log-edits.ts'

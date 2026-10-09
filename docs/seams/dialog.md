@@ -306,7 +306,7 @@ Where no card can be shown — pi's own terminal, or pi's rpc mode, whose `custo
 — the tool asks one plain `select` or `input` at a time. A multi-choice question is a toggle list
 closed by "✓ Done", so dismissing any prompt is a decline there too. **Stop** while the tool waits
 stops the run and leaves no card: the host settles pending questions as the stop begins and refuses
-any asked until it has finished (`hosted-thread.ts#stopRunSettlingDialogs`, `refuseDialogsUntil`). Pinned
+any asked until it has finished (`live-thread.ts#stopRunSettlingDialogs`, `refuseDialogsUntil`). Pinned
 end to end, faux model to tool result, by `agent-host.test.ts#⚠⚠ the agent asks through ask_user: its questionnaire is one dialog, and the answers are its tool result (#12)`,
 with its siblings for the decline (which pins that the run ends there) and Stop.
 
