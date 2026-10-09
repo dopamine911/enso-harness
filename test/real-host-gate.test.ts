@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { codeOnly } from '../scripts/docs/gate-source.ts'
 import { REPOSITORY_ROOT, sourceFiles } from './gate-support.ts'
 
 /**
@@ -18,20 +19,21 @@ import { REPOSITORY_ROOT, sourceFiles } from './gate-support.ts'
  *      host when it is given none (`server/index.ts`). Every server test passes a fake
  *      (`fake-hosted-thread.ts`, `NO_HOST`), which is how it should stay.
  *
- * A line scan, so it reads the call's object literal by brace depth. A host built some other way
- * (a helper in a third module) is outside it; that helper would be its own `createAgentHost(` call
- * and would show up under rule 1 if it lived in a test file.
+ * A source scan, so it reads code only: comments and strings are blanked first (`codeOnly`), and
+ * a call's object literal is read by brace depth. A host built some other way (a helper in a third
+ * module) is outside it; that helper would be its own `createAgentHost(` call and would show up
+ * under rule 1 if it lived in a test file.
  */
 
 const OWNER = 'packages/web/src/host/__tests__/agent-host.test.ts'
 const TEST_ROOTS = ['packages', 'scripts', 'test'] as const
 
-/** Test files (`__tests__/` or `*.test.*`) under the roots, repository-relative. */
+/** Test files (`__tests__/`, or `*.test.ts` / `*.test.tsx`) under the roots, repository-relative. */
 function testFiles(): string[] {
   return TEST_ROOTS.flatMap((root) => sourceFiles(join(REPOSITORY_ROOT, root), true))
     .map((path) => path.slice(REPOSITORY_ROOT.length + 1))
     .filter((path) => path.includes('/__tests__/') || /\.test\.tsx?$/.test(path))
-    .filter((path) => !path.includes('/dist-types/') && path !== 'test/real-host-gate.test.ts')
+    .filter((path) => !path.includes('/dist-types/'))
 }
 
 /** The text of the object literal opened at `open`, brace-balanced; to the end when it never closes. */
@@ -61,12 +63,11 @@ function lineOf(source: string, offset: number): number {
 }
 
 function realHostBuilders(path: string): string[] {
-  const source = readFileSync(join(REPOSITORY_ROOT, path), 'utf8')
+  if (path === OWNER) return []
+  const source = codeOnly(readFileSync(join(REPOSITORY_ROOT, path), 'utf8'))
   const offenders: string[] = []
-  if (path !== OWNER) {
-    for (const call of source.matchAll(/\bcreateAgentHost\(/g)) {
-      offenders.splice(offenders.length, 0, `${path}:${lineOf(source, call.index)}: createAgentHost(`)
-    }
+  for (const call of source.matchAll(/\bcreateAgentHost\(/g)) {
+    offenders.splice(offenders.length, 0, `${path}:${lineOf(source, call.index)}: createAgentHost(`)
   }
   for (const call of source.matchAll(/\bstartEnsoServer\(\s*\{/g)) {
     const open = call.index + call[0].length - 1
@@ -94,4 +95,8 @@ test('the scan reads the call, not the text near it: a host in a nested object d
   expect(namesHostAtTopLevel(objectLiteralAt('startEnsoServer({\n  cwd,\n  host: (rule) => fake(rule),\n})', 16))).toBe(
     true,
   )
+  // A comment or string mentioning the option is not the option (PR #788 review).
+  const commented = codeOnly('startEnsoServer({\n  cwd,\n  // no host: needed, this test never runs a session\n})')
+  expect(namesHostAtTopLevel(objectLiteralAt(commented, 16))).toBe(false)
+  expect(namesHostAtTopLevel(objectLiteralAt(codeOnly("startEnsoServer({ cwd: 'host: x' })"), 16))).toBe(false)
 })
