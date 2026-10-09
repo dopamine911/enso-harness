@@ -3,6 +3,8 @@ import {
   extractFlatShellCommandSegments,
   type FlatShellCommandSegment,
   literalShellWord,
+  type Quote,
+  quoteAfter,
   shellWordsOf,
   withoutLeadingEnvironmentAssignments,
 } from './shell-segments.ts'
@@ -254,24 +256,26 @@ export const EXEC_TERMINATORS = new Set([';', '+'])
  */
 export function findExecPayloads(words: readonly string[]): string[][] {
   const payloads: string[][] = []
+  // Two states: outside a payload (undefined), or collecting one. A predicate opens one, a
+  // terminator closes it; an empty payload is dropped.
   let current: string[] | undefined
+  const close = (): void => {
+    if (current !== undefined && current.length > 0) payloads.push(current)
+  }
   for (const word of words) {
     const resolved = literalShellWord(word)
     const value = resolved.kind === 'literal' ? resolved.value : word
     if (FIND_EXEC_PREDICATES.has(value)) {
-      if (current !== undefined && current.length > 0) payloads.push(current)
+      close()
       current = []
-      continue
-    }
-    if (current === undefined) continue
-    if (EXEC_TERMINATORS.has(value)) {
-      if (current.length > 0) payloads.push(current)
+    } else if (current !== undefined && EXEC_TERMINATORS.has(value)) {
+      close()
       current = undefined
-      continue
+    } else {
+      current?.push(word)
     }
-    current.push(word)
   }
-  if (current !== undefined && current.length > 0) payloads.push(current)
+  close()
   return payloads
 }
 
@@ -691,44 +695,35 @@ function maskSubstitutions(text: string): string {
   return masked
 }
 
-/**
- * The first refusal at any command position of the (unsegmentable) command lines, or
- * undefined. Each piece between separators is a command position; leading compound
- * keywords and `NAME=value` assignments are stepped over; the word is then what
- * `commandWordOf` sees for a segment.
- */
+/** A position outside the text or on whitespace: a `{`/`}` between two of them stands alone. */
+function isWordBoundary(text: string, position: number): boolean {
+  return position < 0 || position >= text.length || /\s/.test(text[position] ?? '')
+}
+
+/** An unquoted character that ends a command position: a list separator, a parenthesis, or a standalone brace. */
+function isPieceBoundary(text: string, index: number): boolean {
+  const character = text[index] ?? ''
+  if (character === '{' || character === '}') return isWordBoundary(text, index - 1) && isWordBoundary(text, index + 1)
+  return /^[;&|\n()]$/.test(character)
+}
+
 /** Split at every unquoted command-position boundary; a backslash escapes the next character outside single quotes. */
 function commandPositionPieces(text: string): string[] {
   const pieces: string[] = []
   let current = ''
-  let inSingle = false
-  let inDouble = false
-  const isWordBoundary = (position: number): boolean =>
-    position < 0 || position >= text.length || /\s/.test(text[position] ?? '')
+  let quote: Quote = 'none'
   for (let characterIndex = 0; characterIndex < text.length; characterIndex += 1) {
     const character = text[characterIndex] ?? ''
-    if (!inSingle && character === '\\') {
+    if (quote !== 'single' && character === '\\') {
       current += character + (text[characterIndex + 1] ?? '')
       characterIndex += 1
-      continue
-    }
-    if (character === "'" && !inDouble) inSingle = !inSingle
-    else if (character === '"' && !inSingle) inDouble = !inDouble
-    if (inSingle || inDouble) {
-      current += character
-      continue
-    }
-    const standaloneBrace =
-      (character === '{' || character === '}') &&
-      isWordBoundary(characterIndex - 1) &&
-      isWordBoundary(characterIndex + 1)
-    const listSeparator = character === ';' || character === '&' || character === '|' || character === '\n'
-    if (listSeparator || character === '(' || character === ')' || standaloneBrace) {
+    } else if (quote === 'none' && isPieceBoundary(text, characterIndex)) {
       pieces.push(current)
       current = ''
-      continue
+    } else {
+      quote = quoteAfter(quote, character)
+      current += character
     }
-    current += character
   }
   pieces.push(current)
   return pieces
@@ -751,21 +746,30 @@ function commandPositionFinding(
   depth: number,
 ): NetworkEgressMatch | undefined {
   for (const piece of commandPositionPieces(maskSubstitutions(commandLines))) {
-    const rest = withoutLeadingCompoundKeywords(piece)
-    if (rest.length === 0) continue
-    const word = (withoutLeadingEnvironmentAssignments(rest) ?? rest).trim().split(/[ \t]/, 1)[0] ?? ''
-    if (word.length === 0) continue
-    if (word.includes(SUBSTITUTION_MASK)) {
-      if (word !== SUBSTITUTION_MASK) {
-        return { matched: 'a command substitution joined to text at command position', via: 'unresolvable' }
-      }
-      continue // a substitution alone as the command: its body meets the raw scan
-    }
-    if (word.startsWith('${')) return { matched: 'a parameter expansion at command position', via: 'unresolvable' }
-    const verdict = gateSegment({ text: rest, pipedStdin: false }, denied, deniedBinaries, depth)
-    if (verdict !== undefined && verdict !== 'escalate') return verdict
+    const finding = pieceFinding(piece, denied, deniedBinaries, depth)
+    if (finding !== undefined) return finding
   }
   return undefined
+}
+
+/** One command position of `commandPositionFinding`: the two floor-only checks, then the segment classifier. */
+function pieceFinding(
+  piece: string,
+  denied: Set<string>,
+  deniedBinaries: readonly string[],
+  depth: number,
+): NetworkEgressMatch | undefined {
+  const rest = withoutLeadingCompoundKeywords(piece)
+  if (rest.length === 0) return undefined
+  const word = (withoutLeadingEnvironmentAssignments(rest) ?? rest).trim().split(/[ \t]/, 1)[0] ?? ''
+  // A substitution alone as the command: its body meets the raw scan.
+  if (word.length === 0 || word === SUBSTITUTION_MASK) return undefined
+  if (word.includes(SUBSTITUTION_MASK)) {
+    return { matched: 'a command substitution joined to text at command position', via: 'unresolvable' }
+  }
+  if (word.startsWith('${')) return { matched: 'a parameter expansion at command position', via: 'unresolvable' }
+  const verdict = gateSegment({ text: rest, pipedStdin: false }, denied, deniedBinaries, depth)
+  return verdict === 'escalate' ? undefined : verdict
 }
 
 interface HeredocBody {
@@ -867,26 +871,27 @@ function substitutionBodies(command: string): string[] {
  * purpose: this runs only where the segmenter has already declined.
  */
 function shellFedByStream(commandLines: string): boolean {
-  for (const list of commandLines.split(/\|\||&&|;|\n/)) {
-    const pipeline = list.split('|')
-    for (const [position, piece] of pipeline.entries()) {
-      // Quote-aware words where the text allows it (`bash <<< "two words"` is one operand),
-      // whitespace otherwise — coarse is the mode here, and coarse errs toward the floor.
-      const words =
-        shellWordsOf(piece.trim()) ??
-        piece
-          .trim()
-          .split(/\s+/)
-          .filter((word) => word.length > 0)
-      let head = 0
-      while (head < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[head] ?? '')) head += 1
-      if (!STDIN_SHELLS.has(canonicalToolName(basename(words[head] ?? '')))) continue
-      const rest = words.slice(head + 1)
-      const fedByRedirect = rest.some((word) => /^\d*<<</.test(word) || /^\d*<<-?/.test(word))
-      if ((position > 0 || fedByRedirect) && shellProgramIsStdin(rest)) return true
-    }
-  }
-  return false
+  return commandLines
+    .split(/\|\||&&|;|\n/)
+    .some((list) => list.split('|').some((piece, position) => isStreamFedShell(piece, position > 0)))
+}
+
+/** One pipeline stage of `shellFedByStream`: a stdin shell, `piped` into or carrying a `<<`/`<<<` redirect. */
+function isStreamFedShell(piece: string, piped: boolean): boolean {
+  // Quote-aware words where the text allows it (`bash <<< "two words"` is one operand),
+  // whitespace otherwise — coarse is the mode here, and coarse errs toward the floor.
+  const words =
+    shellWordsOf(piece.trim()) ??
+    piece
+      .trim()
+      .split(/\s+/)
+      .filter((word) => word.length > 0)
+  let head = 0
+  while (head < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[head] ?? '')) head += 1
+  if (!STDIN_SHELLS.has(canonicalToolName(basename(words[head] ?? '')))) return false
+  const rest = words.slice(head + 1)
+  const fedByRedirect = rest.some((word) => /^\d*<<</.test(word) || /^\d*<<-?/.test(word))
+  return (piped || fedByRedirect) && shellProgramIsStdin(rest)
 }
 
 /**

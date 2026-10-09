@@ -136,25 +136,35 @@ function gateWords(words: readonly string[]): EnvironmentDumpMatch | undefined {
   // `find … -exec env ;` reaches a listing command at a KNOWN offset, and the tripwire has
   // to know the one construct pi's own `find` tool and a shell `find` share (#206). Not
   // wrapper mode: find's predicates carry globs that are ordinary arguments.
-  if (command === FIND_COMMAND) {
-    for (const payload of findExecPayloads(words.slice(1))) {
-      const verdict = gateWords(payload)
-      if (verdict !== undefined) return { matched: verdict.matched, via: 'wrapped-command' }
-    }
-    return undefined
-  }
+  if (command === FIND_COMMAND) return findPayloadDump(words.slice(1))
   if (!TRANSPARENT_COMMAND_WRAPPERS.has(command)) return undefined
-  // Past a wrapper the effective command sits at an unknown offset (each wrapper has its
-  // own options), so any later word that IS a listing command is treated as one — the
-  // accepted false positive the egress deny also takes.
-  // ⚠ STATED RESIDUAL (#206): the reverse shape, a wrapper whose OWN operand follows the
-  // wrapped command (`script -qc env /dev/null`), reads as "env runs /dev/null" and passes.
-  // Counting those words as find's would deny `sudo env FOO=1 make build`, which lists
-  // nothing — so the tripwire takes the miss rather than the false positive, and says so.
-  for (const [position, word] of words.slice(1).entries()) {
+  return wrappedListingDump(words.slice(1))
+}
+
+/** The first `find` exec payload that is itself a dump, each gated as the command line it is. */
+function findPayloadDump(findOperands: readonly string[]): EnvironmentDumpMatch | undefined {
+  for (const payload of findExecPayloads(findOperands)) {
+    const verdict = gateWords(payload)
+    if (verdict !== undefined) return { matched: verdict.matched, via: 'wrapped-command' }
+  }
+  return undefined
+}
+
+/**
+ * Past a wrapper the effective command sits at an unknown offset (each wrapper has its own
+ * options), so any later word that IS a listing command is treated as one — the accepted
+ * false positive the egress deny also takes.
+ *
+ * ⚠ STATED RESIDUAL (#206): the reverse shape, a wrapper whose OWN operand follows the
+ * wrapped command (`script -qc env /dev/null`), reads as "env runs /dev/null" and passes.
+ * Counting those words as find's would deny `sudo env FOO=1 make build`, which lists
+ * nothing — so the tripwire takes the miss rather than the false positive, and says so.
+ */
+function wrappedListingDump(wrapperOperands: readonly string[]): EnvironmentDumpMatch | undefined {
+  for (const [position, word] of wrapperOperands.entries()) {
     const wrapped = commandNameOf(word)
     if (wrapped === undefined || !LISTING_COMMANDS.has(wrapped)) continue
-    const verdict = listsEnvironment(wrapped, words.slice(position + 2))
+    const verdict = listsEnvironment(wrapped, wrapperOperands.slice(position + 1))
     if (verdict !== undefined) return { matched: verdict.matched, via: 'wrapped-command' }
   }
   return undefined

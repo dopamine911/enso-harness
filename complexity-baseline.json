@@ -1,16 +1,6 @@
 {
   "kind": "health",
   "finding_counts": {
-    "packages/harness/core/environment-dump.ts": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "packages/harness/core/network-egress.ts": {
-      "complexity_moderate": {
-        "count": 4
-      }
-    },
     "packages/web/src/to-agui.ts": {
       "complexity_high": {
         "count": 1
@@ -18,31 +8,6 @@
     }
   },
   "identity_finding_counts": {
-    "packages/harness/core/environment-dump.ts\u0000gateWords": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "packages/harness/core/network-egress.ts\u0000commandPositionFinding": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "packages/harness/core/network-egress.ts\u0000commandPositionPieces": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "packages/harness/core/network-egress.ts\u0000findExecPayloads": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "packages/harness/core/network-egress.ts\u0000shellFedByStream": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
     "packages/web/src/to-agui.ts\u0000observationToAguiEvents": {
       "complexity_high": {
         "count": 1

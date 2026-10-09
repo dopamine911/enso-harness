@@ -188,11 +188,12 @@
   //
   // `thresholdOverrides` are the exceptions to the gate's ceiling, pinned per FUNCTION at the
   // exact score it measures today, so the rule still fails the moment that function grows. A
-  // number may go down, never up. Each exists because the complexity belongs to an EXTERNAL
-  // grammar or protocol that must be read top-to-bottom, where extracting helpers would scatter
-  // a state machine rather than simplify it. To retire one: reduce the function, then lower (or
-  // delete) its entry. `test/complexity-ratchet.test.ts` refuses an entry that is looser than
-  // its function's score, names a function that no longer exists, or pins one already under the ceiling.
+  // number may go down, never up. Each exists because the function holds an order that must be
+  // read top-to-bottom, where extracting helpers would hide it rather than simplify it; its
+  // `reason` says why that order cannot be split (#814). To retire one: reduce the function, then
+  // lower (or delete) its entry. `test/complexity-ratchet.test.ts` refuses an entry that is looser
+  // than its function's score, names a function that no longer exists, or pins one already under
+  // the ceiling.
   //
   // `ignore`: the vendored components, for the reason `ignoreFindings` gives above — their
   // functions are upstream's, kept diffable (the shadcn `chart.tsx` #45 fetched arrived with a
@@ -201,30 +202,6 @@
     "maxCrap": 0,
     "ignore": ["packages/web/src/components/**"],
     "thresholdOverrides": [
-      {
-        "files": ["packages/harness/core/shell-segments.ts"],
-        "functions": ["extractFlatShellCommandSegments"],
-        "maxCognitive": 68,
-        "reason": "The shell character-scanner: one linear read of the quote/escape state machine, kept close to upstream oh-my-pi so a diff stays reviewable."
-      },
-      {
-        "files": ["packages/harness/core/shell-segments.ts"],
-        "functions": ["literalShellWord"],
-        "maxCognitive": 50,
-        "reason": "Same scanner: the quoted-word reader."
-      },
-      {
-        "files": ["packages/harness/core/shell-segments.ts"],
-        "functions": ["skipShellWord"],
-        "maxCognitive": 32,
-        "reason": "Same scanner: the word skipper."
-      },
-      {
-        "files": ["packages/harness/core/shell-segments.ts"],
-        "functions": ["withoutLeadingEnvironmentAssignments"],
-        "maxCognitive": 21,
-        "reason": "Same scanner: the leading NAME=value skipper, the scanner's word grammar read once per assignment. Pinned when the ceiling moved from 25 to 20 (#595)."
-      },
       {
         "files": ["packages/harness/extensions/guards/index.ts"],
         "functions": ["decide"],
