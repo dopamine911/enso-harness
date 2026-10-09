@@ -772,7 +772,8 @@ function mcpTools(names: readonly string[]): InlineExtension {
  */
 function policyDenyRule(verdict: ToolCallVerdict | undefined, surface: string): string | undefined {
   if (verdict?.block !== true) return undefined
-  return new RegExp(String.raw`Denied by policy: '${surface}' .*\(rule '([^']*)'\)`).exec(verdict.reason ?? '')?.[1]
+  const quoted = surface.replace(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`)
+  return new RegExp(String.raw`Denied by policy: '${quoted}' .*\(rule '([^']*)'\)`).exec(verdict.reason ?? '')?.[1]
 }
 
 // #744: every mode refuses an MCP server nobody approved. pi's built-in MCP names each server tool
@@ -789,8 +790,11 @@ test('⚠ every mode refuses the tool of an MCP server the policy does not appro
 
 // #744: MCP is meant to be enabled per project by naming approved servers, so the mode's deny is a
 // default, not a wall: the preset changes only Enso's `**`, which the launch puts first in the
-// user's `mcp` map, and a server rule after it wins for that server alone. The server is named in
-// `mcp.json` with a dash, as pi's tool name spells it with `_` — the engine matches either spelling.
+// user's `mcp` map, and a server rule after it wins for that server alone. ⚠ The `mcp.json` write is
+// load-bearing (PR #795 review): the engine learns server names from it, and maps a tool name back to
+// its server only for a server it knows. Without it, `approved-server`'s rule never reaches
+// `mcp__approved_server__x` and this test fails. The dash spelling there, against `_` in pi's tool
+// name, also pins that the engine matches either spelling.
 test('⚠ an approved MCP server stays allowed under the mode deny, and every other server is still refused (#744)', async () => {
   const mcpConfig = join(agentDir, 'mcp.json')
   writeFileSync(mcpConfig, JSON.stringify({ mcpServers: { 'approved-server': { command: 'true' } } }))
