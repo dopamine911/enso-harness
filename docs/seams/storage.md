@@ -14,7 +14,7 @@ Every fence on this page is the source, checked by `test/docs-gate.test.ts`. Ref
 ## The contract
 
 Three host-side interfaces — `AgentHost` in `agent-host.ts`, the host's entry point, and the live
-thread's two in `hosted-thread.ts` — over a fourth in `thread-log.ts`, the one file the seam's storage lives in:
+thread's two in `live-thread.ts` — over a fourth in `thread-log.ts`, the one file the seam's storage lives in:
 
 <!-- source: packages/web/src/host/agent-host.ts#AgentHost -->
 ```ts
