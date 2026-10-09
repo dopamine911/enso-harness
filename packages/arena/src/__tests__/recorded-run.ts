@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { foldArenaManifest } from '../manifest.ts'
 import { threadHistoriesIn } from '../run-state.ts'
+import { scanRunForSecrets } from '../secret-scan.ts'
 import { type ArenaClock, openTimeline, pagePlace, readTimeline } from '../timeline.ts'
 import { gitIn } from './fixture-git.ts'
 
@@ -100,6 +101,8 @@ export function recordedRun(options: { readonly played?: boolean } = {}): string
     events: readTimeline(join(run, 'timeline.jsonl')),
     evidence: [],
     histories: threadHistoriesIn(evidence),
+    // What every run since #610 records; publish refuses a manifest without one (#741).
+    secretScan: scanRunForSecrets(run, []),
   })
   writeFileSync(join(run, 'manifest.json'), JSON.stringify(manifest))
   return run

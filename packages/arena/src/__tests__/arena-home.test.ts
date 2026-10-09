@@ -10,6 +10,7 @@ import {
   renameSync,
   rmSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
@@ -29,7 +30,14 @@ import {
   runHomeOf,
   setRunHomeModel,
 } from '../run-home.ts'
-import { type ArenaSecretScan, scanRunForSecrets, withEarlierHits, zipEntries } from '../secret-scan.ts'
+import {
+  type ArenaSecretScan,
+  recordedScanOf,
+  scanFilesForSecrets,
+  scanRunForSecrets,
+  withEarlierHits,
+  zipEntries,
+} from '../secret-scan.ts'
 
 /**
  * A run's own Enso home and the secret scan of what it keeps (#584 A4, A11; #610). The live half —
@@ -279,6 +287,94 @@ test('⚠ a secret in a response body inside the trace is found, named by file a
   expect(scan.entries).toBe(2)
   // The report names where, never what.
   expect(JSON.stringify(scan)).not.toContain(API_KEY)
+})
+
+test('⚠ the trace’s network log is read; a screencast frame, an image or a font in it is not (#741)', () => {
+  const runDirectory = mkdtempSync(join(tmpdir(), 'arena-scan-entries-'))
+  mkdirSync(join(runDirectory, 'trace'))
+  writeFileSync(
+    join(runDirectory, 'trace', 'trace-000.zip'),
+    zipOf([
+      { name: 'trace.trace', text: '{"type":"action"}', deflate: true },
+      { name: 'trace.network', text: `{"response":{"body":"${API_KEY}"}}`, deflate: true },
+      // Pixels and fonts: a needle in their bytes is not a secret on a page, and they are most of a chunk.
+      { name: 'screencast/page@0a1b-1791396983679.jpeg', text: `jpeg ${ACCESS}`, deflate: false },
+      { name: 'resources/5d23a9b8.png', text: `png ${ACCESS}`, deflate: true },
+      { name: 'resources/93f32213.woff2', text: `font ${ACCESS}`, deflate: false },
+      { name: 'resources/0ef09cd0.unknown', text: `unknown ${REFRESH}`, deflate: true },
+    ]),
+  )
+
+  const scan = scanRunForSecrets(runDirectory, [API_KEY, ACCESS, REFRESH])
+  expect(scan.hits).toEqual([
+    { path: 'trace/trace-000.zip', entry: 'trace.network' },
+    { path: 'trace/trace-000.zip', entry: 'resources/0ef09cd0.unknown' },
+  ])
+  expect(scan.entries).toBe(3)
+  expect(scan.unreadable).toEqual([])
+})
+
+/** The same zip with zip64 end records, as a writer makes one past 65,535 entries or 4 GB. */
+function zip64Of(zip: Buffer): Buffer {
+  const end = zip.subarray(zip.length - 22)
+  const records = Buffer.alloc(56 + 20)
+  records.writeUInt32LE(0x06_06_4b_50, 0)
+  records.writeBigUInt64LE(44n, 4)
+  records.writeBigUInt64LE(BigInt(end.readUInt16LE(8)), 24)
+  records.writeBigUInt64LE(BigInt(end.readUInt16LE(10)), 32)
+  records.writeBigUInt64LE(BigInt(end.readUInt32LE(12)), 40)
+  records.writeBigUInt64LE(BigInt(end.readUInt32LE(16)), 48)
+  records.writeUInt32LE(0x07_06_4b_50, 56)
+  records.writeBigUInt64LE(BigInt(zip.length - 22), 64)
+  records.writeUInt32LE(1, 72)
+  const zip64End = Buffer.from(end)
+  zip64End.writeUInt16LE(0xff_ff, 8)
+  zip64End.writeUInt16LE(0xff_ff, 10)
+  zip64End.writeUInt32LE(0xff_ff_ff_ff, 12)
+  zip64End.writeUInt32LE(0xff_ff_ff_ff, 16)
+  return Buffer.concat([zip.subarray(0, zip.length - 22), records, zip64End])
+}
+
+test('a zip64 trace is read from its zip64 end record, not called unreadable (#741)', () => {
+  const runDirectory = mkdtempSync(join(tmpdir(), 'arena-scan-zip64-'))
+  writeFileSync(
+    join(runDirectory, 'trace-000.zip'),
+    zip64Of(zipOf([{ name: 'trace.network', text: `{"body":"${API_KEY}"}`, deflate: true }])),
+  )
+  const scan = scanRunForSecrets(runDirectory, [API_KEY])
+  expect(scan.unreadable).toEqual([])
+  expect(scan.hits).toEqual([{ path: 'trace-000.zip', entry: 'trace.network' }])
+})
+
+test('⚠ a later scan reads only what changed since the earlier one, carrying its hits; one that knows more values reads it all (#741)', () => {
+  const runDirectory = mkdtempSync(join(tmpdir(), 'arena-scan-stamps-'))
+  mkdirSync(join(runDirectory, 'trace'))
+  const chunk = join(runDirectory, 'trace', 'trace-000.zip')
+  // Stored, so the rewrite below is the same size; whole seconds, so the time set back is the time read.
+  const written = new Date(1_791_396_983_000)
+  writeFileSync(chunk, zipOf([{ name: 'trace.network', text: API_KEY, deflate: false }]))
+  utimesSync(chunk, written, written)
+  writeFileSync(join(runDirectory, 'timeline.jsonl'), '{"kind":"run-start"}\n')
+  const chunkScan = scanFilesForSecrets(runDirectory, ['trace/trace-000.zip'], [API_KEY])
+  expect(chunkScan.hits).toEqual([{ path: 'trace/trace-000.zip', entry: 'trace.network' }])
+
+  // The chunk is rewritten to the same size and time: a scan that read it would find nothing.
+  writeFileSync(chunk, zipOf([{ name: 'trace.network', text: 'x'.repeat(API_KEY.length), deflate: false }]))
+  utimesSync(chunk, written, written)
+  writeFileSync(join(runDirectory, 'timeline.jsonl'), `{"kind":"run-start","key":"${API_KEY}"}\n`)
+  const stopScan = scanRunForSecrets(runDirectory, [API_KEY], chunkScan)
+  expect(stopScan.hits).toHaveLength(2)
+  expect(stopScan.hits).toEqual(
+    expect.arrayContaining([{ path: 'trace/trace-000.zip', entry: 'trace.network' }, { path: 'timeline.jsonl' }]),
+  )
+  expect(stopScan.scanned?.map((stamp) => stamp.path).toSorted()).toEqual(['timeline.jsonl', 'trace/trace-000.zip'])
+
+  // A refold reads the stamps back from the manifest; a value the chunk was not read for reads it again.
+  const manifest: unknown = JSON.parse(JSON.stringify({ secretScan: stopScan }))
+  expect(scanRunForSecrets(runDirectory, [API_KEY], recordedScanOf(manifest)).hits).toHaveLength(2)
+  expect(scanRunForSecrets(runDirectory, [API_KEY, ACCESS], recordedScanOf(manifest)).hits).toEqual([
+    { path: 'timeline.jsonl' },
+  ])
 })
 
 test('⚠ a token the login rotates mid-run joins the secret set, and the one it replaced stays in it (PR #613 review)', () => {
