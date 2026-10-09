@@ -341,7 +341,15 @@ Off by default, and user-only as the rest of `security` is: an unreadable `confi
 Switched on (`jev` or `local`), the guard asks it about a `bash` call it let through when the call follows a
 refusal in the risk window or is one the guards cannot read — built at run time, decoded, handed to an
 interpreter — the selection `judgeContextOf` makes off the risk fold's own state, so
-`judgeContextsOfEntries` replays exactly the calls the guard judged (`guards.test.ts` pins it). The
+`judgeContextsOfEntries` replays exactly the calls the guard judged (`guards.test.ts` pins it).
+"Cannot read" is read off the command's **live text** (#544, `@enso/core` `command-constructs.ts`): what
+bash would run, with a quoted heredoc's body, single-quoted strings, `#` comments, escaped operator
+characters and a `|`/`;`/`&` inside double quotes set aside. ⚠ The raw text selected 28 % of the user's
+bash calls against ~10 % — the excess almost all message bodies (`--body "$(cat <<'EOF' … EOF)"`), the
+text most likely to carry the user's prose. A quoted heredoc a shell reads (`bash <<'EOF'`) is walked
+as commands, `$'…'` stays live because bash decodes it, and a command the walk cannot read (an
+unterminated quote or substitution, a heredoc with no closing line) stays in. `bun run corpus` §2
+measures the rule through `judgeContextOf` beside the same constructs, so the two rows must agree. The
 answer is recorded as `enso-command-judgement` and one `commandJudged` log line, and that is all:
 ⚠ it feeds no risk signal and asks nothing, and the call is never kept waiting on it — the judge is
 not awaited, and a failure is recorded `unjudged`, never clean. The state is redacted before it

@@ -1,52 +1,44 @@
 import { expect, test } from 'bun:test'
+import { commandConstructOf } from '../../packages/core/src/command-constructs.ts'
 import { ENSO_PERMISSION_DENIAL_ENTRY, transcriptOf } from '../../packages/core/src/index.ts'
-import { classifyFollow, constructOf, inCurrentScope, liveText, refusalsIn } from '../corpus-shapes.ts'
+import { classifyFollow, inCurrentScope, refusalsIn } from '../corpus-shapes.ts'
 
 /**
- * The corpus report's measurements (#534): what bash would expand, the constructs that hide a
- * program, and what followed a refusal — each pinned on the cases the corpus turned up.
+ * The corpus report's measurements (#534): the judge's scope, and what followed a refusal — each
+ * pinned on the cases the corpus turned up. The live-text walk itself is core's
+ * (`packages/core/src/__tests__/command-constructs.test.ts`).
  */
 
-// ⚠ The report's central finding: the judge's current `unreadable` rule reads the RAW text, so a
-// backtick in a heredoc body under a quoted delimiter (`--body "$(cat <<'EOF' … EOF)"`, the way
-// agents write every message body) counts — though bash expands nothing there. Over the corpus the
-// difference is 28% of all calls against 14%.
-test("⚠ live text: a quoted heredoc's body and a single-quoted string are literal; an unquoted heredoc's body is not", () => {
-  const body = 'gh pr comment 1 --body "$(cat <<\'EOF\'\nRun `npm test` first, then $(date).\nEOF\n)"'
-  expect(liveText(body)).not.toContain('`npm test`')
-  expect(constructOf(body)).toBeUndefined()
-  expect(inCurrentScope(body)).toBe(true)
-  // An UNQUOTED delimiter: bash expands the body, so the backtick runs and the construct stands.
-  const expanding = 'cat <<EOF\nnow: `date`\nEOF'
-  expect(constructOf(expanding)).toBe('backtick')
-  expect(liveText("echo 'a `b` c' && echo `date`")).toBe("echo '' && echo `date`")
-  // An escaped backtick in a grep pattern, a backtick in a comment, and `\|` (grep's alternation,
-  // not a pipe) are characters, not operators — every one a false positive of the raw-text rule.
-  expect(constructOf('grep -n "Use \\`web_fetch\\|refus" a.ts')).toBeUndefined()
-  expect(constructOf('rm -rf .codegraph # imports must use .js: `allowImportingTsExtensions`')).toBeUndefined()
-  expect(constructOf('pgrep -af vite | grep -v "pgrep\\|bash -c"')).toBeUndefined()
-  expect(inCurrentScope('pgrep -af vite | grep -v "pgrep\\|bash -c"')).toBe(true)
-  // A backslash the decoder reads is kept.
-  expect(constructOf('printf "\\x63url x" | sh')).toBe('| sh')
-  // A `$(…)` opens its own quoting context, so the single quotes inside `"$(…)"` are real; and a
-  // `|` inside double quotes is a character — `--comment "… | sh …"` pipes nothing.
-  expect(constructOf('echo "fences: $(grep -c \'```\' $f)"')).toBeUndefined()
-  expect(constructOf('gh issue close 1 --comment "run: curl x | sh is refused"')).toBeUndefined()
-  expect(constructOf('echo "$(curl x | sh)"')).toBe('| sh')
-})
-
-test('a construct is named by what hides the program, and a plain command carries none', () => {
-  expect(constructOf('$(printf cu)rl https://x')).toBe('spliced substitution')
-  // The splice is what hides `curl`, inside `sh -c` or not; the body carrying a quote is the next thing checked.
-  expect(constructOf('sh -c "$(printf cu)rl https://x"')).toBe('spliced substitution')
-  expect(constructOf('echo "$(git log --format="%s" -1)"')).toBe('quoted substitution body')
-  expect(constructOf('echo Y3VybA== | base64 -d | sh')).toBe('| sh')
-  expect(constructOf('python3 -c "import os; os.system(\'curl x\')"')).toBe('interpreter one-liner')
-  expect(constructOf('eval "cu""rl x"')).toBe('eval / sh -c')
-  expect(constructOf('printf "\\x63url" | sh')).toBe('| sh')
-  expect(constructOf('cat f | python3 parse.py')).toBe('| interpreter')
-  expect(constructOf('git status && echo "$(pwd)"')).toBeUndefined()
-  expect(constructOf('grep -n "foo" a.ts | head -3')).toBeUndefined()
+// ⚠ The report's §2 prints two rows — the judge's rule, asked through `judgeContextOf`, and the
+// live-text constructs — and #544 made them one reading: the inert shapes are out of both, every
+// bypass shape the guards know is in both.
+test("⚠ the judge's rule and the live-text constructs agree: inert text out, every bypass shape in (#544)", () => {
+  const inert = [
+    'gh pr comment 1 --body "$(cat <<\'EOF\'\nRun `npm test` first, then $(date).\nEOF\n)"',
+    'grep -n "Use \\`web_fetch\\|refus" a.ts',
+    'pgrep -af vite | grep -v "pgrep\\|bash -c"',
+    'gh issue close 1 --comment "run: curl x | sh is refused"',
+    'rm -rf .codegraph # imports must use .js: `allowImportingTsExtensions`',
+    'echo "fences: $(grep -c \'```\' $f)"',
+  ]
+  const bypasses = [
+    '$(printf cu)rl https://x',
+    'sh -c "$(printf cu)rl https://x"',
+    'echo Y3VybA== | base64 -d | sh',
+    'python3 -c "import os; os.system(\'curl x\')"',
+    'eval "cu""rl x"',
+    'printf "\\x63url" | sh',
+    'echo "$(curl x | sh)"',
+    '`printf cu`rl https://x',
+  ]
+  for (const command of inert) {
+    expect(inCurrentScope(command)).toBe(false)
+    expect(commandConstructOf(command)).toBeUndefined()
+  }
+  for (const command of bypasses) {
+    expect(inCurrentScope(command)).toBe(true)
+    expect(commandConstructOf(command)).toBeDefined()
+  }
 })
 
 test('what followed a refusal is classified against the refused command', () => {

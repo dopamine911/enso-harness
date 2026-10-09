@@ -13,12 +13,11 @@
  * text that has been through `redactJudgeText`, cut to one line of 110 characters.
  */
 
+import { COMMAND_CONSTRUCTS, commandConstructOf } from '../packages/core/src/command-constructs.ts'
 import { DEFAULT_RISK_THRESHOLDS, riskEventsOfTranscript } from '../packages/core/src/index.ts'
 import { redactJudgeText } from '../packages/core/src/judge.ts'
 import {
   classifyFollow,
-  CONSTRUCTS,
-  constructOf,
   type FollowKind,
   inCurrentScope,
   type Refusal,
@@ -73,7 +72,9 @@ lines.push(shapeRow('a heredoc', (shape) => shape.heredoc))
 // #469 §5's pre-filter candidate: segmentable, every program a literal word, nothing hidden in the live text.
 const plain = analysed.filter(
   ({ command, shape }) =>
-    !shape.unsegmentable && shape.programs.every((program) => program !== '?') && constructOf(command) === undefined,
+    !shape.unsegmentable &&
+    shape.programs.every((program) => program !== '?') &&
+    commandConstructOf(command) === undefined,
 )
 lines.push(
   row(
@@ -90,19 +91,19 @@ for (const [program, number] of programs.slice(0, 20)) lines.push(row(program, n
 // 2. constructs: the judge's scope
 lines.push('', "## 2. The constructs that hide a program — the judge's `unreadable` scope (#469)")
 const inScope = commands.filter(inCurrentScope).length
-lines.push(row('in scope by the CURRENT rule (raw text)', inScope, commands.length))
-const constructs = commands.map(constructOf)
+lines.push(row('in scope by the CURRENT rule (judgeContextOf)', inScope, commands.length))
+const constructs = commands.map(commandConstructOf)
 const live = constructs.filter((construct) => construct !== undefined).length
 lines.push(
   row('carrying a construct in the LIVE text (literal heredocs and single quotes set aside)', live, commands.length),
 )
 lines.push('by construct, first match:')
-for (const construct of CONSTRUCTS)
+for (const construct of COMMAND_CONSTRUCTS)
   lines.push(row(construct, constructs.filter((candidate) => candidate === construct).length, live))
 if (SHOW_EXAMPLES) {
   for (const construct of ['backtick', 'spliced substitution', 'decoder', '| sh'] as const) {
     lines.push(`examples — ${construct}:`)
-    for (const command of commands.filter((candidate) => constructOf(candidate) === construct).slice(0, 5))
+    for (const command of commands.filter((candidate) => commandConstructOf(candidate) === construct).slice(0, 5))
       lines.push(example(command))
   }
 }
