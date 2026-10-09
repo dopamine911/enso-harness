@@ -159,6 +159,20 @@ test.skipIf(!hasChromium)(
   BROWSER_TEST_MS,
 )
 
+test.skipIf(!hasChromium)(
+  "⚠ the script run twice on one window (the initial about:blank's, reused) counts again, and throws nothing into the page",
+  async () => {
+    await withPage(60_000, async (open) => {
+      await open.page.evaluate(PAGE_CHANGES_SCRIPT)
+      const devtools = await open.context.newCDPSession(open.page)
+      const before = await readPageMark(devtools, POLL_MS * 10)
+      await open.page.evaluate("document.body.append('a change')")
+      expect(await readPageMark(devtools, POLL_MS * 10)).not.toBe(before)
+    })
+  },
+  BROWSER_TEST_MS,
+)
+
 test('⚠ the last look stands while the mark holds, until the recheck; an unread mark is a look', async () => {
   let page = 'the page'
   let mark: string | undefined = 'held'
