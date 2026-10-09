@@ -250,7 +250,7 @@ test("prompt answers at admission with a message id; the run is released by pi's
   const follow = await openFollow(url, 't1')
   await follow.untilFrames(1)
   // Observation preceded the first prompt: an empty snapshot, not a 404.
-  expect(follow.frames[0]).toMatchObject({ type: 'snapshot', live: false, busy: false, generation: 0, messages: [] })
+  expect(follow.frames[0]).toMatchObject({ type: 'snapshot', live: false, busy: false, generation: 0, messageCount: 0 })
 
   const trace = flowTrace({ ...PROMPT_FLOW, logs })
   fake.traceInto(trace)
@@ -613,12 +613,13 @@ test('⚠ a stored thread is followed cold from its file, and the same follow go
   const url = await startWith(fake)
   const follow = await openFollow(url, 't1')
   await follow.untilFrames(1)
-  // Cold: the file's messages and the file's usage with no context, nothing live, no question
-  // open, and no session built to show them.
+  // Cold: how many messages the file holds and the file's usage with no context, nothing live, no
+  // question open, and no session built to show them. The messages themselves are `/history`'s (#739).
   const [snapshot] = follow.frames
   expect(snapshot).toMatchObject({ type: 'snapshot', live: false, busy: false, generation: 0, openDialogs: [] })
   if (snapshot?.type !== 'snapshot') throw new Error('the follow opened without a snapshot')
-  expect(snapshot.messages).toHaveLength(2)
+  expect(snapshot.messageCount).toBe(2)
+  expect(snapshot).not.toHaveProperty('messages')
   expect(snapshot.usage).toEqual(STORED_USAGE)
   expect(fake.built).toHaveLength(0)
 

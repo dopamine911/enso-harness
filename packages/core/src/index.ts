@@ -129,11 +129,12 @@ export {
 export {
   dayStats,
   ENSO_LOG_EVENTS,
+  type EnsoDayFold,
   EnsoDayStats,
   EnsoDurationSummary,
-  foldDay,
   median,
   mergeDurationSummaries,
+  openDayFold,
 } from './log-stats.ts'
 export {
   ENSO_LOG_LEVEL_NAMES,

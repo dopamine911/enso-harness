@@ -8,10 +8,12 @@
  *   that renders plain text too, but wrapped in its own hardcoded collapsible chrome —
  *   nesting it here produced a second "Thinking..." header inside this one (fixture
  *   receipt, 2026-09-03)
- * - the "Thinking..." label uses `motion-safe:animate-pulse` (still under reduced motion, #740)
+ * - the "Thinking..." label is plain static text (#739; it pulsed `motion-safe:` since #740)
  *   instead of the upstream `Shimmer`
  *   component — Shimmer's only real dependency is the `motion` package, which is a large
- *   runtime for one gradient animation (the same call that dropped streamdown)
+ *   runtime for one gradient animation (the same call that dropped streamdown). ⚠ No
+ *   animation at all, not even a stepped one: any of them keeps the compositor ticking for
+ *   as long as pi thinks; the word already says what is happening
  * - `@repo/shadcn-ui/...` imports → `@/` aliases; removed `"use client"` (Vite SPA)
  * - `useControllableState`'s `onChange` is spread conditionally (this repo compiles with
  *   `exactOptionalPropertyTypes`; upstream does not)
@@ -171,7 +173,7 @@ export type ReasoningTriggerProps = ComponentProps<typeof CollapsibleTrigger> & 
  */
 const defaultGetThinkingMessage = (isStreaming: boolean, duration?: number) => {
 	if (isStreaming || duration === 0) {
-		return <p className="motion-safe:animate-pulse">Thinking...</p>;
+		return <p>Thinking...</p>;
 	}
 	if (duration === undefined) {
 		return <p>Thought</p>;

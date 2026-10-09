@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
 import { ENSO_UI_EVENTS, EnsoThreadStatusEvent } from '@enso/core'
 import { gitChildEnvironment } from '@enso/core/git'
 import { redactJudgeText } from '@enso/core/judge'
@@ -47,7 +47,7 @@ import { arenaSecretSource, arenaSecretValues, runHomeOf } from './run-home.ts'
 import { ensoBuildOf, sampleWorkspaces, threadHistoriesIn } from './run-state.ts'
 import type { ArenaScenario } from './scenario.ts'
 import { type ArenaScore, writeArenaScore } from './score.ts'
-import { scanRunForSecrets } from './secret-scan.ts'
+import { type ArenaSecretScan, scanFilesForSecrets, scanRunForSecrets } from './secret-scan.ts'
 import {
   ARENA_SHOT_EXTENSION,
   ARENA_WEB_ORIGIN,
@@ -684,10 +684,15 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
   }
   show(firstPage)
   let chunkNumber = 0
+  const chunkPaths: string[] = []
+  // The chunks' scan so far (#741): each chunk is read once, as it is written, and the stop reads the rest.
+  let chunkScan: ArenaSecretScan | undefined
   /**
    * Write the trace so far. ⚠ `stopChunk` ends the chunk; between chunks nothing is traced, so
    * every chunk but the last is followed by `startChunk` (PR #562 review: the first version
-   * never restarted, and traced only the run's first five minutes).
+   * never restarted, and traced only the run's first five minutes). The chunk is scanned after the
+   * next one starts, so the scan adds nothing to the untraced gap; a chunk written before a value
+   * joined the secret set is read again (`soughtValues`).
    */
   const writeChunk = async (then: 'continue' | 'last'): Promise<void> => {
     const path = join(traceDirectory, `trace-${String(chunkNumber).padStart(3, '0')}.zip`)
@@ -695,6 +700,8 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
     await context.tracing.stopChunk({ path })
     timeline.record({ kind: 'trace-chunk', path })
     if (then === 'continue') await context.tracing.startChunk()
+    chunkPaths.push(relative(runDirectory, path))
+    chunkScan = scanFilesForSecrets(runDirectory, chunkPaths, secrets(), chunkScan)
   }
   /** Where a tab is: its URL's place, and its number unless it is the first. */
   const tabPlace = (tabNumber: number, tabPage: Page): ArenaPagePlace => ({
@@ -1392,7 +1399,8 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
   rmSync(traceWorkDirectory(runDirectory), { recursive: true, force: true })
   await stopEnso()
   // ⚠ After Enso is stopped and the last chunk written: every file the run keeps is final (#610).
-  const secretScan = scanRunForSecrets(runDirectory, secrets())
+  // The chunks already read are not read again (#741); everything else is.
+  const secretScan = scanRunForSecrets(runDirectory, secrets(), chunkScan)
   const histories = threadHistoriesIn(join(ensoDirectory, 'evidence'))
   const manifest = foldArenaManifest({ runId, events: readTimeline(timeline.path), evidence, secretScan, histories })
   writeFileSync(join(runDirectory, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`)

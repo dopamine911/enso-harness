@@ -416,6 +416,8 @@ directory as a path (`core/src/guard.ts#ENSO_PERSISTENCE_WRITE_DIRECTORIES`), wh
 
 ## Pivot cost
 
+Which files may import the runtime is fixed by a gate (#558): `VENDOR_IMPORTERS_ALLOWED_INSIDE_ROOTS` in `test/vendor-gate.test.ts` lists them, and the list only shrinks, so a new file cannot quietly add to what follows.
+
 **Replace the runtime** and the file that changes is `packages/harness/extensions/guards/index.ts`: the
 registration (`pi.on`), the event types it takes (`ToolCallEvent`, `ToolResultEvent`), the
 tool-list read in `verifyPolicyToolNames`, and the verdict's return type. `decide`'s order,

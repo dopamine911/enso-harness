@@ -4,17 +4,18 @@ import {
   type EnsoModelState,
   type EnsoOpenDialog,
   type EnsoPermissionModeState,
+  type EnsoProviderRefusal,
   type EnsoRecordedModel,
   type EnsoRiskThresholds,
   type EnsoSessionIncidents,
   type EnsoSessionRiskChange,
   type EnsoSessionUsage,
   type EnsoStoppedAfter,
+  type EnsoThreadHistory,
   type EnsoTranscriptEntry,
   sessionIncidentsOf,
   sessionRiskOfTranscript,
 } from '@enso/core'
-import type { UIMessage } from '@tanstack/ai-client'
 import type { AgentHost, StoredThreadRead } from '../host/agent-host.ts'
 import { treeRecordOf } from '../host/thread-trees.ts'
 import type { ProjectRegistry } from './projects.ts'
@@ -76,8 +77,15 @@ export interface ThreadMount {
    * refuses it by name (403) rather than as unknown (404), and a page does not start it afresh.
    */
   readonly storedOutside: string | undefined
-  /** The branch as the messages a chat mounts with: pi's memory when live, the file when cold. */
-  readonly messages: UIMessage[]
+  /**
+   * The branch's entries: pi's memory when live, the file when cold. `/history` maps a PAGE of it
+   * to messages (`historyPage`, #739); the follow's snapshot sends only the two facts below.
+   */
+  readonly transcript: readonly EnsoTranscriptEntry[]
+  /** How many messages the branch holds — one per `message` entry, as `transcriptToMessages` maps them. */
+  readonly messageCount: number
+  /** The refusal the branch's last assistant message is (#381); `undefined` when it is none. */
+  readonly trailingRefusal: EnsoProviderRefusal | undefined
   /** Set only when the branch ends inside a turn (#109). */
   readonly interrupted: EnsoInterruptedTail | undefined
   /** Where the branch's runs were stopped (#766), oldest first — empty when none was. Live or cold, the same entries. */
@@ -160,11 +168,14 @@ export async function readThreadMount(deps: ThreadReadDeps, threadId: string): P
   const storedOutside = nowLive === undefined ? read.storedOutside : undefined
   const risk = sessionRiskOfTranscript(transcript, deps.riskThresholds)
   const place = placeOf(projects, threadId, inspection?.cwd ?? stored?.cwd, storedOutside)
+  const messageEntries = transcript.filter((transcriptEntry) => transcriptEntry.kind === 'message')
   return {
     present: nowLive !== undefined || stored !== undefined,
     storedOutside,
     name: inspection === undefined ? stored?.name : inspection.name,
-    messages: transcriptToMessages(transcript),
+    transcript,
+    messageCount: messageEntries.length,
+    trailingRefusal: messageEntries.findLast((message) => message.role === 'assistant')?.refusal,
     stoppedAfter: stoppedAfter(transcript),
     sessionRisk: { level: risk.level, signals: risk.signals.length },
     incidents: sessionIncidentsOf(
@@ -180,6 +191,50 @@ export async function readThreadMount(deps: ThreadReadDeps, threadId: string): P
         (inspection === undefined || inspection.sessionFile === null) &&
         place.cwd !== '' &&
         host.mintsTreesIn(place.cwd)),
+  }
+}
+
+/**
+ * The most messages one `/history` answer carries (#739). Sized for the page a person reads first:
+ * the last 200 of the 40-minute arena session are 0.48 MB as JSON, where its whole branch grown to
+ * 5,040 turns is 15 MB. Big enough that a thread of a few hours opens whole, so "Load earlier" is
+ * for the long ones. ⓘ The server's choice alone: a page asks for messages before an id, never a count.
+ */
+export const HISTORY_PAGE_MESSAGES = 200
+
+/** One `/history` page: its messages, and what of the branch is before them — `EnsoThreadHistory`'s halves. */
+type HistoryPage = Pick<EnsoThreadHistory, 'messages' | 'earlier'>
+
+/**
+ * The page of the branch's messages that ends before `before`, or its last page when `undefined`
+ * (#739). `undefined` when the branch holds no message `before`: a compaction or a `/tree` move
+ * rewrote it under the page, and the page is to re-read the thread rather than splice a stranger in.
+ *
+ * ⓘ Paged AFTER mapping, so a tool result `transcriptToMessages` stamps onto its call's message
+ * never lands on another page than its call.
+ */
+export function historyPage(
+  transcript: readonly EnsoTranscriptEntry[],
+  before: string | undefined,
+): HistoryPage | undefined {
+  const messages = transcriptToMessages(transcript)
+  const end = before === undefined ? messages.length : messages.findIndex((message) => message.id === before)
+  if (end === -1) return undefined
+  const start = Math.max(0, end - HISTORY_PAGE_MESSAGES)
+  const page = messages.slice(start, end)
+  if (start === 0) return { messages: page }
+  const earlierPrompts = messages.slice(0, start).filter((message) => message.role === 'user')
+  const firstPrompt = earlierPrompts[0]
+  return {
+    messages: page,
+    earlier: {
+      messages: start,
+      prompts: earlierPrompts.length,
+      // Text only: an image prompt's bytes are no part of a title, and could outweigh the page.
+      ...(firstPrompt === undefined
+        ? {}
+        : { firstPrompt: { ...firstPrompt, parts: firstPrompt.parts.filter((part) => part.type === 'text') } }),
+    },
   }
 }
 

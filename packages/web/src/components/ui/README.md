@@ -50,9 +50,10 @@ that reproduces the fetch — style plus CLI version — and the diff procedure 
   overflow-y-auto`, #679). The registry's content is centred with no cap, so a dialog taller than
   the window was clipped top and bottom with nothing to scroll: a long prompt in the Start dialog
   put Start session out of reach. The cap mirrors the registry's own `max-w-[calc(100%-2rem)]`.
-- **`spinner.tsx` spins only `motion-safe:`** (`motion-safe:animate-spin`, #740). The registry's
-  `animate-spin` ignores a reduced-motion preference; under it the spinner now stands still, and
-  the arena's browser (which asks for reduced motion) no longer repaints seven times a second.
+- **`spinner.tsx` does not spin** (#739). The registry's `animate-spin` ignored a reduced-motion
+  preference, so #740 narrowed it to `motion-safe:animate-spin`; #739 drops it: any running
+  animation keeps the compositor ticking for as long as it is on screen, and the debug terminals
+  show their spinner for as long as they follow a live log. The icon stays, standing still.
 
 Nothing else. These files are otherwise the registry's output, which is the point: an
 unportable primitive is one nobody can re-fetch.

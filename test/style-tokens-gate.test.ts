@@ -39,6 +39,9 @@ const PIXELS_ALLOWED = [
   'packages/web/src/debug/log-row.tsx',
   'packages/web/src/debug/log-tail-view.tsx',
   'packages/web/src/debug/thread-timeline-screen.tsx',
+  // The transcript's windowing (#739): a virtualizer's row estimate and a row's place are pixel
+  // numbers. Kept to this one file so the transcript itself stays under the gate.
+  'packages/web/src/transcript-window.ts',
 ]
 
 /**

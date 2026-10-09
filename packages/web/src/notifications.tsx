@@ -352,6 +352,10 @@ function StartupNotices({ notifications }: { notifications: readonly EnsoNotific
  * - `after`: by message id, the lines that follow that message's bubble;
  * - `tail`: after the last message — the lines whose message the transcript no longer holds.
  *
+ * A line anchored to one of `earlier` — a message on the branch before the page's first (#739) —
+ * is in none of them until "Load earlier" brings its message: at the tail it would read as said
+ * after the last reply.
+ *
  * Each list keeps the order the lines arrived in. Grouped once per change of the lines or the
  * transcript, not per row: every row re-renders on every streamed chunk.
  */
@@ -364,6 +368,7 @@ export interface PlacedLines {
 export function placeLines(
   notifications: readonly EnsoNotification[],
   transcriptIds: ReadonlySet<string>,
+  earlier: ReadonlySet<string> = new Set(),
 ): PlacedLines {
   const head: EnsoNotification[] = []
   const after = new Map<string, EnsoNotification[]>()
@@ -371,12 +376,11 @@ export function placeLines(
   for (const notification of notifications) {
     const anchor = notification.after
     if (anchor === undefined) head.push(notification)
-    else if (!transcriptIds.has(anchor)) tail.push(notification)
-    else {
+    else if (transcriptIds.has(anchor)) {
       const lines = after.get(anchor)
       if (lines === undefined) after.set(anchor, [notification])
       else lines.push(notification)
-    }
+    } else if (!earlier.has(anchor)) tail.push(notification)
   }
   return { head, after, tail }
 }

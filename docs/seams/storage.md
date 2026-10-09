@@ -236,7 +236,11 @@ export interface HostedThreadInspection {
   readonly sessionDir: string
   /** The session file once pi has flushed it; null while the session lives only in memory. */
   readonly sessionFile: string | null
-  /** The branch, root to leaf, as the transcript of ours (L2): the runtime's entry shapes stay in `transcript.ts`. */
+  /**
+   * The branch, root to leaf, as the transcript of ours (L2): the runtime's entry shapes stay in
+   * `transcript.ts`. Built when READ (#739), each read a fresh build: an inspection for the cwd
+   * pays nothing for it.
+   */
   readonly entries: readonly EnsoTranscriptEntry[]
   /** Slash commands this session registers. */
   readonly commands: readonly string[]
@@ -360,6 +364,11 @@ A thread's history as the browser mounts it, live or cold: `GET …/history` and
  *
  * Carried as `Unknown` because the shape is TanStack's, not enso's; the durable form is the
  * runtime's log, decoded by the host into `EnsoTranscriptEntry` (L2).
+ *
+ * ⚠ `messages` IS A PAGE, NOT THE BRANCH (#739): the branch's last messages, or with `?before=<id>`
+ * the ones before that message — at most the server's page size either way. A 5,000-turn branch is
+ * 15 MB as messages; the page a person reads first is under 0.5 MB. `earlier` says what is left.
+ * The other fields are the WHOLE branch's, whichever page is asked for.
  */
 export const EnsoThreadHistory = Type.Object(
   {
@@ -367,6 +376,20 @@ export const EnsoThreadHistory = Type.Object(
     /** The project it belongs to (#395), so a resumed thread is grouped under it. */
     projectId: Type.String(),
     messages: Type.Array(Type.Unknown()),
+    /** What of the branch comes before `messages` (#739); absent when they start the branch. */
+    earlier: Type.Optional(
+      Type.Object(
+        {
+          /** How many of the branch's messages come before this page — "Load earlier" says it. */
+          messages: Type.Integer({ minimum: 1 }),
+          /** How many of those are prompts: where this page's prompts start counting (`prompt 2401: …`). */
+          prompts: Type.Integer({ minimum: 0 }),
+          /** The branch's first prompt when it is among them, its text parts only — what the thread's title is read from. */
+          firstPrompt: Type.Optional(Type.Unknown()),
+        },
+        { additionalProperties: false },
+      ),
+    ),
     permissionMode: EnsoPermissionModeState,
     /** The session's risk (#464): the replayed level and how many signals it rests on — the status bar's seed. */
     sessionRisk: EnsoSessionRiskChange,
@@ -424,13 +447,20 @@ and builds the runtime again on it (PR #561 review: a thread only built leaves n
 folder is still the project's (`treeProjectId` reads the id off a tree's path), a fork's tree is
 minted from the source's snapshot at the fork point, and `restoreThreadAt` puts a tree back to the
 snapshot an `enso-run-context` record names.
-`listSessions` goes through the runtime's own listing (`SessionManager.listAll`, once per project folder
-and once over the runtime's own session directories), never a directory scan of the files, newest first,
-and keeps only the sessions whose own directory — the one the runtime's
+`listSessions` reads the session directories itself (#739): each project folder's, in name order, then
+the runtime's own default ones under the agent dir. pi's `SessionManager.listAll` parsed every line of
+every file on every call, 590–650 ms at 200 threads of 0.9 MB. Each file is summarized by
+`packages/web/src/host/session-files.ts` with pi's own `buildSessionInfo` fields (last message time,
+message count, first user text, newest `session_info` name), once per change of the file (its inode,
+size and modification time), so a listing after a run re-reads only the file the run wrote. The
+listing is newest first and keeps only the sessions whose own directory — the one the runtime's
 header records — passes the host's required `servesDirectory` rule: the server's projects (#395). A
 session made in any other directory is not listed, not read, and not reopened; building under its id
 is refused (`SessionDirectoryRefused`, answered 409 with its reason) rather than creating a second
-session beside it. `readStoredThread` resolves the id to a path through that listing, opens the file into
+session beside it. A lookup by id reads the directory listings and opens only the files NAMED for the
+id — pi names one `<timestamp>_<id>.jsonl` — and only their header, which confirms the id and gives the
+directory; another thread's file is never read, and a file named in another shape is a candidate for
+every id, its header deciding. `readStoredThread` resolves the id to a path that way, opens the file into
 memory (nothing is written until an append) and converts the branch through
 `packages/web/src/host/transcript.ts` — the one place above `session-events.ts` that reads the
 runtime's stored message shapes — and, from the same open, sums the spend pi recorded in the file
@@ -439,8 +469,9 @@ every branch, pinned equal to pi's own total in `agent-host.test.ts`. `createSes
 *creates* one under the thread's id: the thread id IS the session id (#95), so resume needs no mapping
 and no index file. Only a thread with no file asks where a new one goes (`newSessionDirectory` is a
 function, called on that branch alone), so a project the thread was once named for can be removed and
-the thread still resumes. `inspect()` reads ids and directory straight off the session manager and converts
-the live branch the same way. `forkThread` (#433) is pi's `/fork` at its default position `before`,
+the thread still resumes. `inspect()` reads ids and directory straight off the session manager; its
+`entries` convert the live branch the same way, built only when read (#739), so an inspection for the
+directory alone (`/git`, `/tree`) pays nothing for the transcript. `forkThread` (#433) is pi's `/fork` at its default position `before`,
 taken from the file: it opens the source (building nothing), refuses an entry the file lacks or one
 that is no user message, and writes a new session file whose header's `parentSession` names the
 source — the branch up to the message's parent (`createBranchedSession`), or nothing when the message
@@ -515,6 +546,8 @@ a thread that has only run slash commands has a full branch and no file, and `li
 (glossary Decision 1: they name the log); nothing above the host opens them.
 
 ## Pivot cost
+
+Which files may import the runtime is fixed by a gate (#558): `VENDOR_IMPORTERS_ALLOWED_INSIDE_ROOTS` in `test/vendor-gate.test.ts` lists them, and the list only shrinks, so a new file cannot quietly add to what follows.
 
 Replace the store — another file layout, a database, a remote log — and the files that change are
 `packages/web/src/host/agent-host.ts` (`listSessions`, `readStoredThread`, the open-or-create in

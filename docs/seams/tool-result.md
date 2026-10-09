@@ -279,6 +279,8 @@ in `@enso/core` and consumed by name. Two facts to know, neither a leak of this 
 
 ## Pivot cost
 
+Which files may import the runtime is fixed by a gate (#558): `VENDOR_IMPORTERS_ALLOWED_INSIDE_ROOTS` in `test/vendor-gate.test.ts` lists them, and the list only shrinks, so a new file cannot quietly add to what follows.
+
 **Replace the web renderer** (a different state layer, a different component kit) and the files that
 change are web-local: `EnsoToolResult.tsx` (the map, the state, the fallback), `selected-message-part.tsx`
 and `thread-status.tsx` (its two callers), `to-agui.ts` (where the descriptor rides onto the stream),

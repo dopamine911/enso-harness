@@ -199,6 +199,12 @@ export interface ThreadStores {
    */
   readonly history: readonly UIMessage[]
   /**
+   * What of the branch is before the messages this page holds (#739): `/history` sends a long
+   * thread's last page, and the transcript offers "Load earlier" while this is set. Undefined once
+   * the page holds the branch from its start — and for a thread minted here, which it always does.
+   */
+  readonly earlier: WritableStore<EarlierMessages | undefined>
+  /**
    * What the composer opens holding (#433): a fork's prefill — the forked prompt's words, to send
    * again or edit, as pi's `/fork` puts them in its editor — and empty otherwise. Read ONCE, when
    * the composer mounts; the composer owns its draft from there.
@@ -502,6 +508,8 @@ column (`scripts/docs/seams-table.ts`), and this page used to open "nothing of t
 admit the opposite three paragraphs later (#219).
 
 ## Pivot cost
+
+Which files may import the runtime is fixed by a gate (#558): `VENDOR_IMPORTERS_ALLOWED_INSIDE_ROOTS` in `test/vendor-gate.test.ts` lists them, and the list only shrinks, so a new file cannot quietly add to what follows.
 
 Replace the state layer and the files that change are the adapter and its two neighbours:
 `follow-connection.ts` (a new send/subscribe shape, or none), `custom-event-router.ts` (the client's

@@ -194,6 +194,66 @@ test('⚠ a vendor extension is named in code only there — the allowlist is th
   expect(offendersMatching(namesVendor, VENDOR_NAMED_ALLOWED)).toEqual([])
 })
 
+/**
+ * Rule 6's second half (#558, `docs/concepts/durable-room.md`): INSIDE the two roots, the files that
+ * import the vendor, a baseline that only shrinks. The roots let any file there name pi, so the
+ * pivot cost grew with every new file and no gate noticed. A file leaving the set leaves this list
+ * in the same PR (a stale row fails, as "allowlisted, matches nothing"). A new importer fails by
+ * name: put the policy in `@enso/core` or `packages/harness/core` as pure functions and keep the
+ * vendor import in an existing glue file, or, when a new glue file is really needed, add it here in
+ * the same PR with a comment saying why. Files, not lines: the file is the greppable unit, and a
+ * line count is a figure for the page, not a gate. Tests are outside it: they pin vendor shapes.
+ */
+const VENDOR_IMPORTERS_ALLOWED_INSIDE_ROOTS: readonly string[] = [
+  // ── The pi extensions: one glue file each, plus the guards' judge backends ──
+  'packages/harness/extensions/ask-user/index.ts',
+  'packages/harness/extensions/guards/index.ts',
+  'packages/harness/extensions/guards/judge-backends.ts',
+  'packages/harness/extensions/incident-report/index.ts',
+  'packages/harness/extensions/logging/index.ts',
+  'packages/harness/extensions/permission-modes/index.ts',
+  'packages/harness/extensions/run-context/index.ts',
+  'packages/harness/extensions/system-prompt/index.ts',
+  'packages/harness/extensions/web-fetch/index.ts',
+  'packages/harness/extensions/web-search/index.ts',
+  // ── The host ──
+  'packages/web/src/host/agent-host.ts',
+  'packages/web/src/host/branch-context.ts',
+  'packages/web/src/host/branch-eval.ts',
+  'packages/web/src/host/branch-incident-history.ts',
+  'packages/web/src/host/branch-judge-cases.ts',
+  'packages/web/src/host/branch-stats.ts',
+  'packages/web/src/host/context-elements.ts',
+  'packages/web/src/host/context-history.ts',
+  'packages/web/src/host/extension-ui-context.ts',
+  'packages/web/src/host/map-events.ts',
+  'packages/web/src/host/notice-sender.ts',
+  'packages/web/src/host/permission-call-questions.ts',
+  'packages/web/src/host/project-trust.ts',
+  'packages/web/src/host/provider-refusal.ts',
+  'packages/web/src/host/restore-note.ts',
+  'packages/web/src/host/session-events.ts',
+  'packages/web/src/host/session-models.ts',
+  'packages/web/src/host/session-usage.ts',
+  'packages/web/src/host/system-prompt-preview.ts',
+  'packages/web/src/host/system-prompt.ts',
+]
+
+test('⚠ inside the two roots, only the baseline files import the vendor, and the baseline only shrinks (#558)', () => {
+  const offenders = codeOffenders({
+    roots: VENDOR_ROOTS,
+    allowed: VENDOR_IMPORTERS_ALLOWED_INSIDE_ROOTS,
+    lineMatches: (line) => VENDOR_IMPORT.test(line),
+  })
+  expect(
+    offenders.map((offender) =>
+      offender.endsWith('matches nothing)')
+        ? `${offender}: it no longer imports the vendor, so remove it from VENDOR_IMPORTERS_ALLOWED_INSIDE_ROOTS`
+        : `${offender}: a new vendor importer; keep the import in an existing glue file, or add the file to VENDOR_IMPORTERS_ALLOWED_INSIDE_ROOTS saying why`,
+    ),
+  ).toEqual([])
+})
+
 // The gate can only be a ratchet if its matcher sees what a reader would call a mention. The
 // first two rows are the ones a `\b` boundary and a both-sides lookaround each missed.
 test('the matcher reads words, not substrings: a vendor name counts wherever it is spelled', () => {

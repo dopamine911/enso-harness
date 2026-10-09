@@ -276,10 +276,9 @@ test('an open halted incident requires intervention in the refusal colour; halti
   expect(resumed).not.toContain('intervention')
 })
 
-test('disconnected renders as its own word, not pulsing, with the recovery in the title', () => {
+test('disconnected renders as its own word, with the recovery in the title', () => {
   const rendered = render({ activity: { kind: 'disconnected' } })
   expect(rendered).toContain('disconnected')
-  expect(rendered).not.toContain('animate-pulse')
   expect(rendered).toContain('reload and resume from the rail')
 })
 

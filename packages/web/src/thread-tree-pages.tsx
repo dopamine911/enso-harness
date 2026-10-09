@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { FetchLike } from './browser-logging.ts'
 import { Button } from './components/ui/button.tsx'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './components/ui/dialog.tsx'
-import { useReadOnUsage } from './read-on-usage.ts'
+import { TREE_READ_INTERVAL_MS, useReadOnUsage } from './read-on-usage.ts'
 import {
   ANALYSIS_READING,
   type AnalysisOutcome,
@@ -138,7 +138,8 @@ function focusComposerNear(inside: HTMLElement | null): void {
  * button and concluded Enso had no preview: the words say where the work is, not that it can be
  * opened. So the bar also says "Preview" while there is something to preview. It reads the tree's
  * pages as the git readout reads git (`thread-git.tsx`): once the thread has a session, and again
- * at every settled tool result, so a page built mid-run brings the control in without a reload.
+ * at settled tool results, paced as git's (#739), so a page built mid-run brings the control in
+ * without a reload.
  * The panel reads its own listing each time it opens: the tree moves under a run.
  */
 export function ThreadTreeButton({
@@ -153,7 +154,12 @@ export function ThreadTreeButton({
   const stores = useThreadStores()
   // The bar's own button: where this thread's layout, and so its composer, is found from (#714).
   const trigger = useRef<HTMLButtonElement | null>(null)
-  const listed = useReadOnUsage(readable ? readThreadPages : readNoPages, THREAD_READ_NONE, moment)
+  const listed = useReadOnUsage(
+    readable ? readThreadPages : readNoPages,
+    THREAD_READ_NONE,
+    moment,
+    TREE_READ_INTERVAL_MS,
+  )
   const hasPages = listed.kind === 'read' && listed.payload.pages.length > 0
   const [open, setOpen] = useState(false)
   const [outcome, setOutcome] = useState<AnalysisOutcome<EnsoThreadPages>>(ANALYSIS_READING)
