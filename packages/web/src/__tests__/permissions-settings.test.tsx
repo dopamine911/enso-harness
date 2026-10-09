@@ -247,6 +247,85 @@ test('⚠ a 412 keeps the draft and offers a reload, which takes the file as it 
   expect(mounted.dialog().querySelector('[aria-label="changed on disk"]')).toBeNull()
 })
 
+// #519 item 2: Overwrite with mine sent the file as FIRST read with `If-Match: *`, so a setting
+// changed by hand in the meantime was silently reverted. It now re-reads the file on disk and puts
+// only the draft's rules over it, under that read's version.
+test('⚠ Overwrite with mine keeps a setting changed on disk since the read: only the rules are replaced, under the new version (#519)', async () => {
+  let reads = 0
+  let writes = 0
+  const mounted = await mountSettings({
+    override: (request) => {
+      if (request === 'GET /api/permissions') {
+        reads += 1
+        if (reads === 1) return undefined
+        const onDisk = { ...FILE, permissionReviewLog: false }
+        return Response.json(policyOf(onDisk, '"v2"'), { headers: { ETag: '"v2"' } })
+      }
+      if (request === 'PUT /api/permissions') {
+        writes += 1
+        if (writes === 1) return Response.json({ reason: 'the file changed since it was read' }, { status: 412 })
+      }
+      return undefined
+    },
+  })
+  await choose(mounted, 'action bash git status', 'deny')
+  await click(mounted, 'Save')
+  await eventually(() => find(mounted, '[aria-label="changed on disk"]'))
+  await click(mounted, 'Overwrite with mine')
+  await eventually(() =>
+    expect(mounted.sent.filter((entry) => entry.request === 'PUT /api/permissions')).toHaveLength(2),
+  )
+  const overwrite = mounted.sent.findLast((entry) => entry.request === 'PUT /api/permissions')
+  if (overwrite === undefined) throw new Error('no overwrite was sent')
+  expect(overwrite.ifMatch).toBe('"v2"')
+  const written = (overwrite.body as EnsoPermissionPolicyWrite).file
+  expect(written.permissionReviewLog).toBe(false)
+  expect((written.permission as typeof FILE.permission).bash['git status']).toBe('deny')
+})
+
+// The overwrite's one other branch (PR #791 review): a file that cannot be read when the overwrite
+// re-reads it is overwritten as before, the file as first read under `If-Match: *`.
+test('Overwrite with mine, when the file on disk cannot be read now, writes over it as read', async () => {
+  let reads = 0
+  let writes = 0
+  const mounted = await mountSettings({
+    override: (request) => {
+      if (request === 'GET /api/permissions') {
+        reads += 1
+        return reads === 1 ? undefined : new Response('gone', { status: 503 })
+      }
+      if (request === 'PUT /api/permissions') {
+        writes += 1
+        if (writes === 1) return Response.json({ reason: 'the file changed since it was read' }, { status: 412 })
+      }
+      return undefined
+    },
+  })
+  await choose(mounted, 'action bash git status', 'deny')
+  await click(mounted, 'Save')
+  await eventually(() => find(mounted, '[aria-label="changed on disk"]'))
+  await click(mounted, 'Overwrite with mine')
+  await eventually(() =>
+    expect(mounted.sent.filter((entry) => entry.request === 'PUT /api/permissions')).toHaveLength(2),
+  )
+  const overwrite = mounted.sent.findLast((entry) => entry.request === 'PUT /api/permissions')
+  if (overwrite === undefined) throw new Error('no overwrite was sent')
+  expect(overwrite.ifMatch).toBe('*')
+  const written = (overwrite.body as EnsoPermissionPolicyWrite).file
+  expect(written.authorizerChain).toEqual(FILE.authorizerChain)
+  expect((written.permission as typeof FILE.permission).bash['git status']).toBe('deny')
+})
+
+// #519 item 1: the reset's notice ("…kept at permissions.json.bak") stayed through later edits and saves.
+test('a reset names its backup until the next edit', async () => {
+  const mounted = await mountSettings()
+  await click(mounted, "Reset to Enso's policy…")
+  await click(mounted, 'Reset')
+  await eventually(() => expect(mounted.dialog().textContent).toContain('/home/person/.enso/permissions.json.bak'))
+  await choose(mounted, 'action bash **', 'deny')
+  await eventually(() => expect(mounted.dialog().textContent).not.toContain('/home/person/.enso/permissions.json.bak'))
+})
+
 test('a 422 lists where the schema refused the file, and keeps the draft', async () => {
   const mounted = await mountSettings({
     override: (request) =>
