@@ -698,8 +698,50 @@ function describeRead(
 export function describeArenaAction(action: ArenaAction, secretValues: readonly string[]): string {
   const redact = (typed: string): string => redactJudgeText(typed, secretValues)
   switch (action.action) {
-    case 'goto':
-      return `goto ${action.path}`
+    case 'type':
+    case 'fill':
+    case 'select':
+    case 'stop':
+    case 'accept-dialog':
+    case 'read':
+      return describeTypedAction(action, redact)
+    case 'click':
+    case 'hover':
+    case 'move':
+    case 'scroll':
+    case 'drag':
+      return describePointerAction(action)
+    default:
+      return describePlainAction(action)
+  }
+}
+
+/** The actions that carry what the agent typed: each typed string goes through `redact`. */
+function describeTypedAction(
+  action: Extract<ArenaAction, { readonly action: 'type' | 'fill' | 'select' | 'stop' | 'accept-dialog' | 'read' }>,
+  redact: (typed: string) => string,
+): string {
+  switch (action.action) {
+    case 'type':
+      return `type ${JSON.stringify(redact(action.text))}`
+    case 'fill':
+      return `fill ${describeTarget(action.target)} with ${JSON.stringify(redact(action.text))}`
+    case 'select':
+      return `select ${JSON.stringify(redact(action.option))} in ${describeTarget(action.target)}`
+    case 'stop':
+      return `stop${action.reason === undefined ? '' : `: ${redact(action.reason)}`}`
+    case 'accept-dialog':
+      return `accept-dialog${action.text === undefined ? '' : ` with ${JSON.stringify(redact(action.text))}`}`
+    case 'read':
+      return describeRead(action, redact)
+  }
+}
+
+/** The pointer actions: a point of the view, or for `click`/`hover` a named control. */
+function describePointerAction(
+  action: Extract<ArenaAction, { readonly action: 'click' | 'hover' | 'move' | 'scroll' | 'drag' }>,
+): string {
+  switch (action.action) {
     case 'click':
       if ('at' in action) {
         const how = clickWord(action)
@@ -714,28 +756,42 @@ export function describeArenaAction(action: ArenaAction, secretValues: readonly 
       return `scroll ${Math.round(action.dx)},${Math.round(action.dy)} at ${describePoint(action.at)}`
     case 'drag':
       return `drag ${describePoint(action.at)} to ${describePoint(action.to)}`
-    case 'type':
-      return `type ${JSON.stringify(redact(action.text))}`
-    case 'fill':
-      return `fill ${describeTarget(action.target)} with ${JSON.stringify(redact(action.text))}`
-    case 'select':
-      return `select ${JSON.stringify(redact(action.option))} in ${describeTarget(action.target)}`
+  }
+}
+
+/** The actions whose line carries nothing the agent typed: no redaction applies. */
+function describePlainAction(
+  action: Exclude<
+    ArenaAction,
+    {
+      readonly action:
+        | 'type'
+        | 'fill'
+        | 'select'
+        | 'stop'
+        | 'accept-dialog'
+        | 'read'
+        | 'click'
+        | 'hover'
+        | 'move'
+        | 'scroll'
+        | 'drag'
+    }
+  >,
+): string {
+  switch (action.action) {
+    case 'goto':
+      return `goto ${action.path}`
     case 'press':
       return `press ${action.key}${action.target === undefined ? '' : ` in ${describeTarget(action.target)}`}`
     case 'wait':
       return action.until === undefined ? `wait ${action.ms} ms` : `${PAGE_WAIT} ${action.until}, up to ${action.ms} ms`
     case 'note':
       return `note ${action.note}`
-    case 'stop':
-      return `stop${action.reason === undefined ? '' : `: ${redact(action.reason)}`}`
-    case 'accept-dialog':
-      return `accept-dialog${action.text === undefined ? '' : ` with ${JSON.stringify(redact(action.text))}`}`
     case 'switch-tab':
       return `switch-tab ${action.tab}`
     case 'close-tab':
       return action.tab === undefined ? 'close-tab' : `close-tab ${action.tab}`
-    case 'read':
-      return describeRead(action, redact)
     default:
       return action.action
   }

@@ -50,6 +50,18 @@ interface PiStateEntry {
 
 const nonEmpty = (value: unknown): value is string => typeof value === 'string' && value !== ''
 
+/** The model an entry records it ran on — a `model_change`, or an assistant reply's own — if any. */
+function modelOfEntry(entry: PiStateEntry): EnsoRecordedModel['model'] | undefined {
+  if (entry.type === 'model_change') {
+    return nonEmpty(entry.provider) && nonEmpty(entry.modelId)
+      ? { provider: entry.provider, modelId: entry.modelId }
+      : undefined
+  }
+  const reply = entry.type === 'message' && entry.message?.role === 'assistant' ? entry.message : undefined
+  if (reply === undefined || !nonEmpty(reply.provider) || !nonEmpty(reply.model)) return undefined
+  return { provider: reply.provider, modelId: reply.model }
+}
+
 /**
  * What the branch (root to leaf) records it last ran on; `undefined` when it records neither half
  * (#434). pi's own restore rule (`session-manager.js` `getSessionContextSettings`, PR #438
@@ -64,11 +76,9 @@ export function recordedModelOf(branch: readonly unknown[]): EnsoRecordedModel |
   for (const raw of branch) {
     if (typeof raw !== 'object' || raw === null) continue
     const entry = raw as PiStateEntry
-    const reply = entry.type === 'message' && entry.message?.role === 'assistant' ? entry.message : undefined
-    if (entry.type === 'model_change' && nonEmpty(entry.provider) && nonEmpty(entry.modelId)) {
-      model = { provider: entry.provider, modelId: entry.modelId }
-    } else if (reply !== undefined && nonEmpty(reply.provider) && nonEmpty(reply.model)) {
-      model = { provider: reply.provider, modelId: reply.model }
+    const recorded = modelOfEntry(entry)
+    if (recorded !== undefined) {
+      model = recorded
     } else if (entry.type === 'thinking_level_change' && nonEmpty(entry.thinkingLevel)) {
       thinkingLevel = entry.thinkingLevel
     }

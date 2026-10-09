@@ -17,7 +17,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Textarea } from './components/ui/textarea.tsx'
 import type { ConfigureOutcome } from './follow-connection.ts'
 import { ChosenMark, OptionDetail, optionKeywords } from './model-state.tsx'
-import { PI_DEFAULT_SYSTEM_PROMPT, PromptLibraryFields, useSystemPromptChoice } from './start-session-prompts.tsx'
+import {
+  PI_DEFAULT_SYSTEM_PROMPT,
+  PromptLibraryFields,
+  type SystemPromptChoice,
+  useSystemPromptChoice,
+} from './start-session-prompts.tsx'
 
 /**
  * The Start-a-session dialog (#391): a new thread opens on it — the model, the effort, the mode, the
@@ -321,6 +326,92 @@ export function draftWithKeptPrompt(draft: string, prompt: string): string {
   return draft.trim().length > 0 ? `${draft}\n\n${prompt}` : prompt
 }
 
+interface SessionFieldsProps {
+  readonly models: readonly HostCommandOption[]
+  readonly model: string | undefined
+  readonly onChooseModel: (option: HostCommandOption) => void
+  readonly modelFilter: string
+  readonly onModelFilter: (filter: string) => void
+  readonly thinking: string | undefined
+  readonly levels: readonly string[]
+  readonly onThinking: (level: string) => void
+  readonly mode: string | undefined
+  readonly modes: readonly string[]
+  readonly onMode: (mode: string) => void
+  readonly promptChoice: SystemPromptChoice
+  readonly fetch: FetchLike | undefined
+  readonly text: string
+  readonly onText: (text: string) => void
+  /** The prompt box, focused by the dialog once the fields exist. */
+  readonly promptField: React.RefObject<HTMLTextAreaElement | null>
+  readonly onStart: () => Promise<void>
+  readonly slash: boolean
+  readonly refusal: string | undefined
+}
+
+/** The fields of a loaded session: model, effort and mode, the prompt libraries, the prompt, and why Start is held. */
+function SessionFields(props: SessionFieldsProps): React.ReactNode {
+  return (
+    <FieldGroup>
+      <ModelField
+        models={props.models}
+        chosen={props.model}
+        onChoose={props.onChooseModel}
+        filter={props.modelFilter}
+        onFilter={props.onModelFilter}
+      />
+      <div className="grid grid-cols-2 gap-3">
+        <ChoiceField field={EFFORT_FIELD} value={props.thinking} choices={props.levels} onChoose={props.onThinking} />
+        <ChoiceField field={MODE_FIELD} value={props.mode} choices={props.modes} onChoose={props.onMode} />
+      </div>
+      <PromptLibraryFields choice={props.promptChoice} fetch={props.fetch} onPick={props.onText} />
+      <Field>
+        <FieldLabel htmlFor="start-session-prompt">Prompt</FieldLabel>
+        {/* Capped (#679): the Textarea grows with its text, and a long prompt pushed the dialog's
+            footer below the window; past this height it scrolls inside itself. */}
+        <Textarea
+          className="max-h-40"
+          ref={props.promptField}
+          id="start-session-prompt"
+          value={props.text}
+          rows={4}
+          placeholder="ask pi something"
+          onChange={(event: React.ChangeEvent<HTMLTextAreaElement>): void => props.onText(event.target.value)}
+          onKeyDown={(event: React.KeyboardEvent<HTMLTextAreaElement>): void => startOnEnter(event, props.onStart)}
+        />
+      </Field>
+      {props.slash ? <FieldError>{SLASH_PROMPT_REFUSAL}</FieldError> : null}
+      {props.refusal === undefined ? null : <FieldError>{props.refusal}</FieldError>}
+    </FieldGroup>
+  )
+}
+
+/** Close dismisses; Start session is held until the prompt is ready, and says so while it starts. */
+function SessionFooter({
+  ready,
+  applying,
+  onDismiss,
+  onStart,
+}: {
+  readonly ready: boolean
+  readonly applying: boolean
+  readonly onDismiss: () => void
+  readonly onStart: () => Promise<void>
+}): React.ReactNode {
+  return (
+    // Opaque while pinned: the footer's own `bg-muted/50` would show the fields scrolling under it;
+    // `bg-dialog-footer` is that same tint mixed over the dialog's background.
+    <DialogFooter className="sticky bottom-0 bg-dialog-footer">
+      <Button variant="ghost" onClick={onDismiss}>
+        Close
+      </Button>
+      <Button disabled={!ready} onClick={(): void => void onStart()}>
+        {applying ? 'Starting…' : 'Start session'}
+      </Button>
+    </DialogFooter>
+  )
+}
+
 export function StartSessionDialog(props: StartSessionDialogProps): React.ReactNode {
   const { threadId, open, onClose, fetch: fetchImpl } = props
   const catalogue = useSessionCatalogue(open, threadId, fetchImpl)
@@ -393,48 +484,29 @@ export function StartSessionDialog(props: StartSessionDialogProps): React.ReactN
       <DialogContent className="scroll-pb-20 sm:max-w-lg" onEscapeKeyDown={escapeFromFilter}>
         <SessionStatus catalogue={catalogue} project={props.project} />
         {catalogue.kind === 'loaded' ? (
-          <FieldGroup>
-            <ModelField
-              models={catalogue.models}
-              chosen={model}
-              onChoose={chooseModel}
-              filter={modelFilter}
-              onFilter={setModelFilter}
-            />
-            <div className="grid grid-cols-2 gap-3">
-              <ChoiceField field={EFFORT_FIELD} value={thinking} choices={levels} onChoose={setThinking} />
-              <ChoiceField field={MODE_FIELD} value={mode} choices={props.modes} onChoose={setMode} />
-            </div>
-            <PromptLibraryFields choice={promptChoice} fetch={fetchImpl} onPick={setText} />
-            <Field>
-              <FieldLabel htmlFor="start-session-prompt">Prompt</FieldLabel>
-              {/* Capped (#679): the Textarea grows with its text, and a long prompt pushed the dialog's
-                  footer below the window; past this height it scrolls inside itself. */}
-              <Textarea
-                className="max-h-40"
-                ref={promptField}
-                id="start-session-prompt"
-                value={text}
-                rows={4}
-                placeholder="ask pi something"
-                onChange={(event: React.ChangeEvent<HTMLTextAreaElement>): void => setText(event.target.value)}
-                onKeyDown={(event: React.KeyboardEvent<HTMLTextAreaElement>): void => startOnEnter(event, start)}
-              />
-            </Field>
-            {slash ? <FieldError>{SLASH_PROMPT_REFUSAL}</FieldError> : null}
-            {refusal === undefined ? null : <FieldError>{refusal}</FieldError>}
-          </FieldGroup>
+          <SessionFields
+            models={catalogue.models}
+            model={model}
+            onChooseModel={chooseModel}
+            modelFilter={modelFilter}
+            onModelFilter={setModelFilter}
+            thinking={thinking}
+            levels={levels}
+            onThinking={setThinking}
+            mode={mode}
+            modes={props.modes}
+            onMode={setMode}
+            promptChoice={promptChoice}
+            fetch={fetchImpl}
+            text={text}
+            onText={setText}
+            promptField={promptField}
+            onStart={start}
+            slash={slash}
+            refusal={refusal}
+          />
         ) : null}
-        {/* Opaque while pinned: the footer's own `bg-muted/50` would show the fields scrolling under it;
-            `bg-dialog-footer` is that same tint mixed over the dialog's background. */}
-        <DialogFooter className="sticky bottom-0 bg-dialog-footer">
-          <Button variant="ghost" onClick={dismiss}>
-            Close
-          </Button>
-          <Button disabled={!ready} onClick={(): void => void start()}>
-            {applying ? 'Starting…' : 'Start session'}
-          </Button>
-        </DialogFooter>
+        <SessionFooter ready={ready} applying={applying} onDismiss={dismiss} onStart={start} />
       </DialogContent>
     </Dialog>
   )

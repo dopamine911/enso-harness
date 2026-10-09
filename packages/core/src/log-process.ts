@@ -188,31 +188,37 @@ export function parseEnsoLogLevels(
 ): EnsoLogLevels {
   const retired = retiredEnvironmentNames(environment)
   if (retired.length > 0) throw new RetiredEnvironmentError(retired)
-  let file: LogLevel = DEFAULT_FILE_LEVEL
-  const overrides: EnsoLogOverride[] = []
-  const levelValue = environment.ENSO_LOG_LEVEL
-  if (levelValue !== undefined && levelValue.trim().length > 0) {
-    for (const token of levelValue.split(',')) {
-      const part = token.trim()
-      if (part.length === 0) continue
-      const separator = part.indexOf('=')
-      if (separator === -1) {
-        file = levelOf('ENSO_LOG_LEVEL', part)
-        continue
-      }
-      const category = part.slice(0, separator).trim().split('.')
-      if (category[0] !== ENSO_LOG_ROOT || category.some((segment) => segment.length === 0)) {
-        throw new EnsoLogLevelError('ENSO_LOG_LEVEL', part)
-      }
-      overrides.push({ category, level: levelOf('ENSO_LOG_LEVEL', part.slice(separator + 1)) })
-    }
-  }
+  const { file, overrides } = fileLevelsOf(environment.ENSO_LOG_LEVEL)
   const consoleValue = environment.ENSO_LOG_CONSOLE
   const console =
     consoleValue === undefined || consoleValue.trim().length === 0
       ? defaults.console
       : levelOf('ENSO_LOG_CONSOLE', consoleValue)
   return { file, console, overrides }
+}
+
+/** `ENSO_LOG_LEVEL`'s comma-separated tokens, left to right: a bare level sets the file's tier, `category=level` adds an override. */
+function fileLevelsOf(levelValue: string | undefined): { file: LogLevel; overrides: EnsoLogOverride[] } {
+  let file: LogLevel = DEFAULT_FILE_LEVEL
+  const overrides: EnsoLogOverride[] = []
+  if (levelValue === undefined || levelValue.trim().length === 0) return { file, overrides }
+  for (const token of levelValue.split(',')) {
+    const part = token.trim()
+    if (part.length === 0) continue
+    const separator = part.indexOf('=')
+    if (separator === -1) file = levelOf('ENSO_LOG_LEVEL', part)
+    else overrides.push(overrideOf(part, separator))
+  }
+  return { file, overrides }
+}
+
+/** One `category=level` token; the category must be rooted at `enso` with no empty segment. */
+function overrideOf(part: string, separator: number): EnsoLogOverride {
+  const category = part.slice(0, separator).trim().split('.')
+  if (category[0] !== ENSO_LOG_ROOT || category.some((segment) => segment.length === 0)) {
+    throw new EnsoLogLevelError('ENSO_LOG_LEVEL', part)
+  }
+  return { category, level: levelOf('ENSO_LOG_LEVEL', part.slice(separator + 1)) }
 }
 
 function levelOf(variable: string, raw: string): LogLevel {
@@ -965,16 +971,33 @@ export function openLogTail(options: {
     offset = 0
     decoder = logChunkDecoder()
   }
-  const step = (): EnsoLogTailStep => {
-    const today = ensoLogFilename(now())
-    if (today !== filename) {
-      if (filename === '') {
-        // The first call: the caller's `from` is honoured only for the file it names.
-        const day = today.slice('enso-'.length, -'.jsonl'.length)
-        if (options.from !== undefined && options.from.day === day) offset = options.from.offset
-      } else restart() // a rotation starts the new day at its head
-      filename = today
+  /** Moves onto today's file when the day's filename changed since the last step. */
+  const followDay = (today: string): void => {
+    if (today === filename) return
+    if (filename === '') {
+      // The first call: the caller's `from` is honoured only for the file it names.
+      const day = today.slice('enso-'.length, -'.jsonl'.length)
+      if (options.from !== undefined && options.from.day === day) offset = options.from.offset
+    } else restart() // a rotation starts the new day at its head
+    filename = today
+  }
+  /** The text appended to `file` since `offset`, `size` being what `stat` last said; `''` when nothing was. */
+  const readAppended = (file: string, size: number): string => {
+    if (size <= offset) return ''
+    if (descriptor === undefined) {
+      descriptor = openSync(file, 'r')
+      inode = fstatSync(descriptor).ino
     }
+    const chunk = Buffer.alloc(size - offset)
+    // `stat` then `read` are two calls: a file truncated between them answers fewer bytes
+    // than the size said, without an error. Advance by what was READ, never by what was
+    // promised, and decode only that.
+    const read = readSync(descriptor, chunk, 0, chunk.length, offset)
+    offset += read
+    return decoder.decode(chunk.subarray(0, read))
+  }
+  const step = (): EnsoLogTailStep => {
+    followDay(ensoLogFilename(now()))
     const day = filename.slice('enso-'.length, -'.jsonl'.length)
     const file = join(options.logsDir, filename)
     const stat = statSync(file, { throwIfNoEntry: false })
@@ -989,20 +1012,7 @@ export function openLogTail(options: {
     // names a byte the descriptor cannot read, or the descriptor is the old inode.
     if (stat.size < offset || (inode !== undefined && inode !== stat.ino)) restart()
     const startedAt = offset
-    let text = ''
-    if (stat.size > offset) {
-      if (descriptor === undefined) {
-        descriptor = openSync(file, 'r')
-        inode = fstatSync(descriptor).ino
-      }
-      const chunk = Buffer.alloc(stat.size - offset)
-      // `stat` then `read` are two calls: a file truncated between them answers fewer bytes
-      // than the size said, without an error. Advance by what was READ, never by what was
-      // promised, and decode only that.
-      const read = readSync(descriptor, chunk, 0, chunk.length, offset)
-      offset += read
-      text = decoder.decode(chunk.subarray(0, read))
-    }
+    const text = readAppended(file, stat.size)
     const found = selectRecords(text, options.filter)
     return {
       type: startedAt === 0 ? 'backlog' : 'records',

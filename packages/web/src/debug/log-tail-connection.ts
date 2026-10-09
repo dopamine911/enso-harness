@@ -171,11 +171,16 @@ export async function openLogTailStream(options: LogTailStreamOptions): Promise<
   }
 }
 
+/** What one connection has delivered so far; kept when the read throws mid-stream. */
+interface TailProgress {
+  resume: LogTailResume | undefined
+  delivered: boolean
+}
+
 /** One connection: open it, deliver every frame it carries, and say how it ended. */
 async function readOneTail(options: LogTailStreamOptions, url: string): Promise<TailAttempt> {
   const request = options.fetch ?? pageFetch
-  let resume: LogTailResume | undefined
-  let delivered = false
+  const progress: TailProgress = { resume: undefined, delivered: false }
   try {
     const response = await request(url, { signal: options.signal, headers: { accept: 'text/event-stream' } })
     if (!response.ok) {
@@ -183,36 +188,51 @@ async function readOneTail(options: LogTailStreamOptions, url: string): Promise<
       // named parameter for a 400, an origin for a 403 — and a reader needs the words.
       const reason = await response.text().catch(() => '')
       options.onError(`the log tail refused: ${response.status} ${reason}`.trimEnd())
-      return { outcome: response.status >= 500 ? 'ended' : 'refused', resume, delivered }
+      return { outcome: response.status >= 500 ? 'ended' : 'refused', ...progress }
     }
     if (response.body === null) {
       options.onError('the log tail answered with no body')
-      return { outcome: 'ended', resume, delivered }
+      return { outcome: 'ended', ...progress }
     }
-    let opened = false
-    for await (const { event, data: payload } of readSseData(response.body, options.signal)) {
-      if (!opened) {
-        opened = true
-        options.onOpen?.()
-      }
-      if (event === 'error') {
-        // The server could not read the file and said so. Not a stream that ended: asking
-        // again makes it fail — and record the failure — again.
-        options.onError(`the log tail stopped: ${payload}`)
-        return { outcome: 'refused', resume, delivered }
-      }
-      const frame = parseFrame(payload, options.onError)
-      if (frame === undefined) continue
-      resume = { day: frame.day, offset: frame.offset }
-      delivered = true
-      options.onFrame(frame)
+    if ((await deliverTailFrames(options, response.body, progress)) === 'refused') {
+      return { outcome: 'refused', ...progress }
     }
   } catch (error) {
     // The caller's own abort rejects the read; that is this page leaving, not a failure.
-    if (options.signal.aborted) return { outcome: 'aborted', resume, delivered }
+    if (options.signal.aborted) return { outcome: 'aborted', ...progress }
     options.onError(`the log tail stopped: ${String(error)}`)
   }
-  return { outcome: options.signal.aborted ? 'aborted' : 'ended', resume, delivered }
+  return { outcome: options.signal.aborted ? 'aborted' : 'ended', ...progress }
+}
+
+/**
+ * Deliver every frame of one open body, recording each into `progress`. `refused` when the
+ * server said it stopped; `undefined` when the body ran out.
+ */
+async function deliverTailFrames(
+  options: LogTailStreamOptions,
+  body: ReadableStream<Uint8Array>,
+  progress: TailProgress,
+): Promise<'refused' | undefined> {
+  let opened = false
+  for await (const { event, data: payload } of readSseData(body, options.signal)) {
+    if (!opened) {
+      opened = true
+      options.onOpen?.()
+    }
+    if (event === 'error') {
+      // The server could not read the file and said so. Not a stream that ended: asking
+      // again makes it fail — and record the failure — again.
+      options.onError(`the log tail stopped: ${payload}`)
+      return 'refused'
+    }
+    const frame = parseFrame(payload, options.onError)
+    if (frame === undefined) continue
+    progress.resume = { day: frame.day, offset: frame.offset }
+    progress.delivered = true
+    options.onFrame(frame)
+  }
+  return undefined
 }
 
 /** One SSE message: its `data:` payload and the `event:` name that preceded it, if any. */

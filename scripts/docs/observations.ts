@@ -200,44 +200,9 @@ function generate(): string {
   const adapterResults = new Map(schemas.map((member) => [member.kind, adapterResult(adapterSource, member.kind)]))
   const customKinds = [...adapterResults].filter(([, result]) => result.custom).map(([kind]) => kind)
   assertExactKeys('custom chunk kind', customKinds, Object.keys(CUSTOM_METADATA))
-  if (!/name: observation\.kind, value: observation/.test(adapterSource)) {
-    throw new Error('observations: to-agui.ts no longer names a CUSTOM chunk by the observation kind')
-  }
-  for (const [kind, metadata] of Object.entries(CUSTOM_METADATA)) {
-    const hasBranch = new RegExp(`^\\s+case '${kind}':`, 'm').test(routerSource)
-    if (hasBranch !== metadata.routerBranch) {
-      throw new Error(
-        `observations: ${kind} router classification drifted; source=${hasBranch}, metadata=${metadata.routerBranch}`,
-      )
-    }
-  }
-
-  // The frame chunks: the connection pushes each frame named by its type; the router branches on each.
-  if (!/name: frame\.type, value: frame/.test(connectionSource)) {
-    throw new Error('observations: follow-connection.ts no longer pushes frames named by their type')
-  }
-  if (
-    !(
-      /name: FOLLOW_ENDED_CUSTOM_EVENT/.test(connectionSource) &&
-      /FOLLOW_ENDED_CUSTOM_EVENT = 'follow-ended'/.test(routerSource)
-    )
-  ) {
-    throw new Error('observations: the follow-ended chunk is not declared by the router and pushed by the connection')
-  }
-  for (const chunkName of Object.keys(FRAME_METADATA)) {
-    const branch =
-      chunkName === 'follow-ended' ? 'eventType === FOLLOW_ENDED_CUSTOM_EVENT' : `eventType === '${chunkName}'`
-    if (!routerSource.includes(branch)) {
-      throw new Error(`observations: the router has no branch for the ${chunkName} chunk`)
-    }
-  }
-
-  if (!/\{ type: 'observation', seq: frame\.seq, observation: frame\.observation \}/.test(followSource)) {
-    throw new Error('observations: follow.ts no longer carries observations in observation frames')
-  }
-  const carrierOffset = followSource.indexOf("{ type: 'observation', seq: frame.seq, observation: frame.observation }")
-  const carrierLine = lineAt(followSource, carrierOffset)
-  const carrier = `[\`observation\` frame](../../${FOLLOW_PATH}#L${carrierLine})`
+  assertCustomRouting(adapterSource, routerSource)
+  assertFrameChunks(connectionSource, routerSource)
+  const carrier = observationCarrier(followSource)
   const elided = elidedKinds(followSource)
 
   const noProducer: string[] = []
@@ -250,14 +215,8 @@ function generate(): string {
   const unclassified: string[] = []
   const rows = schemas
     .map((member) => {
-      let producer = '**nothing produces it**'
-      const mapperLine = mapperKinds.get(member.kind)
-      const promptRouteLine = promptRouteKinds.get(member.kind)
-      if (mapperLine !== undefined) producer = `[mapper](../../${MAPPER_PATH}#L${mapperLine})`
-      else if (promptRouteLine !== undefined) producer = `[prompt route](../../${FOLLOW_PATH}#L${promptRouteLine})`
-      else noProducer.push(member.kind)
-
-      const elision = elided.get(member.kind)
+      const producer = producerCell(member.kind, mapperKinds, promptRouteKinds)
+      if (producer === undefined) noProducer.push(member.kind)
       const adapter = adapterResults.get(member.kind) ?? adapterResult(adapterSource, member.kind)
       const consumers = unique([
         ...(adapter.custom ? [CUSTOM_METADATA[member.kind]?.consumer ?? `UNCLASSIFIED (${member.kind})`] : []),
@@ -271,11 +230,8 @@ function generate(): string {
       if (consumers.some((consumer) => consumer.startsWith('UNCLASSIFIED'))) unclassified.push(member.kind)
       return {
         ...member,
-        producer,
-        carrier:
-          elision === undefined
-            ? carrier
-            : `${carrier} — [ELIDED](../../${FOLLOW_PATH}#L${elision.line}) while \`${elision.field}: false\``,
+        producer: producer ?? '**nothing produces it**',
+        carrier: carrierCell(carrier, elided.get(member.kind)),
         adapter: adapter.labels
           .map((label) =>
             label.startsWith('EventType.') || label === 'dropped' || label.startsWith('UNCLASSIFIED')
@@ -320,27 +276,88 @@ function generate(): string {
     '',
     '## Diagnostics',
     '',
-    `- Schemas with no producer: ${
-      noProducer.length === 0
-        ? 'none'
-        : noProducer
-            .toSorted()
-            .map((kind) => `\`${kind}\``)
-            .join(', ')
-    }`,
-    `- CUSTOM kinds the router records but does not route: ${recordedOnly.length === 0 ? 'none' : recordedOnly.map((kind) => `\`${kind}\``).join(', ')}`,
+    `- Schemas with no producer: ${noProducer.length === 0 ? 'none' : codeList(noProducer.toSorted())}`,
+    `- CUSTOM kinds the router records but does not route: ${recordedOnly.length === 0 ? 'none' : codeList(recordedOnly)}`,
     `- Kinds with an unclassified cell: ${
       unclassified.length === 0
         ? 'none'
-        : `${unclassified
-            .toSorted()
-            .map((kind) => `\`${kind}\``)
-            .join(', ')} — a finding, not a generation failure: the kind is printed, never omitted`
+        : `${codeList(unclassified.toSorted())} — a finding, not a generation failure: the kind is printed, never omitted`
     }`,
     '',
     `Inventory: ${schemas.length} union members; ${customKinds.length} ride CUSTOM by kind; ${Object.keys(FRAME_METADATA).length} chunks that are not observations; every chunk name has a checked browser classification.`,
     '',
   ].join('\n')
+}
+
+/** The adapter names each CUSTOM chunk by its kind, and every metadata kind's router branch is where the metadata says. */
+function assertCustomRouting(adapterSource: string, routerSource: string): void {
+  if (!/name: observation\.kind, value: observation/.test(adapterSource)) {
+    throw new Error('observations: to-agui.ts no longer names a CUSTOM chunk by the observation kind')
+  }
+  for (const [kind, metadata] of Object.entries(CUSTOM_METADATA)) {
+    const hasBranch = new RegExp(`^\\s+case '${kind}':`, 'm').test(routerSource)
+    if (hasBranch !== metadata.routerBranch) {
+      throw new Error(
+        `observations: ${kind} router classification drifted; source=${hasBranch}, metadata=${metadata.routerBranch}`,
+      )
+    }
+  }
+}
+
+/** The frame chunks: the connection pushes each frame named by its type; the router branches on each. */
+function assertFrameChunks(connectionSource: string, routerSource: string): void {
+  if (!/name: frame\.type, value: frame/.test(connectionSource)) {
+    throw new Error('observations: follow-connection.ts no longer pushes frames named by their type')
+  }
+  if (
+    !(
+      /name: FOLLOW_ENDED_CUSTOM_EVENT/.test(connectionSource) &&
+      /FOLLOW_ENDED_CUSTOM_EVENT = 'follow-ended'/.test(routerSource)
+    )
+  ) {
+    throw new Error('observations: the follow-ended chunk is not declared by the router and pushed by the connection')
+  }
+  for (const chunkName of Object.keys(FRAME_METADATA)) {
+    const branch =
+      chunkName === 'follow-ended' ? 'eventType === FOLLOW_ENDED_CUSTOM_EVENT' : `eventType === '${chunkName}'`
+    if (!routerSource.includes(branch)) {
+      throw new Error(`observations: the router has no branch for the ${chunkName} chunk`)
+    }
+  }
+}
+
+/** The link to the `observation` frame `follow.ts` carries every observation in. */
+function observationCarrier(followSource: string): string {
+  if (!/\{ type: 'observation', seq: frame\.seq, observation: frame\.observation \}/.test(followSource)) {
+    throw new Error('observations: follow.ts no longer carries observations in observation frames')
+  }
+  const carrierOffset = followSource.indexOf("{ type: 'observation', seq: frame.seq, observation: frame.observation }")
+  const carrierLine = lineAt(followSource, carrierOffset)
+  return `[\`observation\` frame](../../${FOLLOW_PATH}#L${carrierLine})`
+}
+
+/** The mapper's line producing `kind`, else the prompt route's; `undefined` when nothing produces it. */
+function producerCell(
+  kind: string,
+  mapperKinds: ReadonlyMap<string, number>,
+  promptRouteKinds: ReadonlyMap<string, number>,
+): string | undefined {
+  const mapperLine = mapperKinds.get(kind)
+  if (mapperLine !== undefined) return `[mapper](../../${MAPPER_PATH}#L${mapperLine})`
+  const promptRouteLine = promptRouteKinds.get(kind)
+  if (promptRouteLine !== undefined) return `[prompt route](../../${FOLLOW_PATH}#L${promptRouteLine})`
+  return undefined
+}
+
+/** The follow carrier, marked ELIDED with the guard's line when the follow writer drops the kind in some state (#279). */
+function carrierCell(carrier: string, elision: { line: number; field: string } | undefined): string {
+  if (elision === undefined) return carrier
+  return `${carrier} — [ELIDED](../../${FOLLOW_PATH}#L${elision.line}) while \`${elision.field}: false\``
+}
+
+/** Kinds as a comma-separated list of code spans. */
+function codeList(kinds: readonly string[]): string {
+  return kinds.map((kind) => `\`${kind}\``).join(', ')
 }
 
 // Importable: `flow-diagrams.ts` reuses these extractors, and importing must not print a page.

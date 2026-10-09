@@ -73,23 +73,33 @@ function scanObjectReads(
   found: Map<string, EnvironmentOccurrence>,
 ): void {
   const dot = new RegExp(`(?<![\\w$.])${objectName}\\s*\\.\\s*([A-Za-z_$][\\w$]*)`, 'g')
-  for (const match of sourceText.matchAll(dot)) {
-    if (isCommentedAt(sourceText, match.index ?? 0)) continue
-    addOccurrence(found, match[1] ?? '', source)
-  }
   const bracket = new RegExp(`(?<![\\w$.])${objectName}\\s*\\[\\s*(['"])([A-Za-z_$][\\w$]*)\\1\\s*\\]`, 'g')
-  for (const match of sourceText.matchAll(bracket)) {
-    if (isCommentedAt(sourceText, match.index ?? 0)) continue
-    addOccurrence(found, match[2] ?? '', source)
-  }
   const destructuring = new RegExp(`\\{([^{}]+)\\}\\s*=\\s*${objectName}\\b`, 'g')
-  for (const match of sourceText.matchAll(destructuring)) {
-    const objectIndex = (match.index ?? 0) + match[0].lastIndexOf(objectName)
+  const keys = [
+    ...uncommentedMatches(sourceText, dot).map((match) => match[1] ?? ''),
+    ...uncommentedMatches(sourceText, bracket).map((match) => match[2] ?? ''),
+    ...destructuredKeys(sourceText, destructuring, objectName),
+  ]
+  for (const key of keys) addOccurrence(found, key, source)
+}
+
+/** The matches of a global `pattern` that start in code, not in a comment. */
+function uncommentedMatches(sourceText: string, pattern: RegExp): RegExpMatchArray[] {
+  return [...sourceText.matchAll(pattern)].filter((match) => !isCommentedAt(sourceText, match.index ?? 0))
+}
+
+/**
+ * The property names of each `{ A, B: alias } = <object>` match, skipping a match whose LAST
+ * `objectWord` sits in a comment; capture 1 is the pattern's braces.
+ */
+function destructuredKeys(sourceText: string, pattern: RegExp, objectWord: string): string[] {
+  const keys: string[] = []
+  for (const match of sourceText.matchAll(pattern)) {
+    const objectIndex = (match.index ?? 0) + match[0].lastIndexOf(objectWord)
     if (isCommentedAt(sourceText, objectIndex)) continue
-    for (const property of (match[1] ?? '').split(',')) {
-      addOccurrence(found, property.split(':')[0]?.trim() ?? '', source)
-    }
+    for (const property of (match[1] ?? '').split(',')) keys.push(property.split(':')[0]?.trim() ?? '')
   }
+  return keys
 }
 
 function importedEnvironmentAliases(sourceText: string): string[] {
@@ -144,29 +154,33 @@ function scanProcessEnvironmentReads(
   source: string,
   found: Map<string, EnvironmentOccurrence>,
 ): boolean {
-  const directBases = [...sourceText.matchAll(PROCESS_ENV_BASE)].filter(
-    (match) => !isCommentedAt(sourceText, match.index ?? 0),
-  )
-  for (const base of directBases) {
-    const tail = sourceText.slice((base.index ?? 0) + base[0].length)
-    const dot = /^\s*\.\s*([A-Za-z_$][\w$]*)/.exec(tail)
-    const bracket = /^\s*\[\s*(['"])([A-Za-z_$][\w$]*)\1\s*\]/.exec(tail)
-    addOccurrence(found, dot?.[1] ?? bracket?.[2] ?? '', source)
-  }
-  const destructuring = /\{([^{}]+)\}\s*=\s*process\s*\.\s*env\b/g
-  for (const match of sourceText.matchAll(destructuring)) {
-    const processIndex = (match.index ?? 0) + match[0].lastIndexOf('process')
-    if (isCommentedAt(sourceText, processIndex)) continue
-    for (const property of (match[1] ?? '').split(',')) {
-      addOccurrence(found, property.split(':')[0]?.trim() ?? '', source)
-    }
-  }
+  const directBases = uncommentedMatches(sourceText, PROCESS_ENV_BASE)
+  const keys = [
+    ...directBases.map((base) => directBaseKey(sourceText, base)),
+    ...destructuredKeys(sourceText, /\{([^{}]+)\}\s*=\s*process\s*\.\s*env\b/g, 'process'),
+    ...childOverrideKeys(sourceText),
+  ]
+  for (const key of keys) addOccurrence(found, key, source)
+  return directBases.length > 0
+}
+
+/** The key a direct `process.env` base reads, by `.KEY` or `['KEY']`; empty when it is neither. */
+function directBaseKey(sourceText: string, base: RegExpMatchArray): string {
+  const tail = sourceText.slice((base.index ?? 0) + base[0].length)
+  const dot = /^\s*\.\s*([A-Za-z_$][\w$]*)/.exec(tail)
+  const bracket = /^\s*\[\s*(['"])([A-Za-z_$][\w$]*)\1\s*\]/.exec(tail)
+  return dot?.[1] ?? bracket?.[2] ?? ''
+}
+
+/** Every key a `{ ...process.env, KEY: value }` child override sets, skipping an override in a comment. */
+function childOverrideKeys(sourceText: string): string[] {
+  const keys: string[] = []
   for (const match of sourceText.matchAll(PROCESS_ENV_CHILD_OVERRIDE)) {
     const processIndex = (match.index ?? 0) + match[0].indexOf('process')
     if (isCommentedAt(sourceText, processIndex)) continue
-    for (const key of (match[1] ?? '').matchAll(OVERRIDE_KEY)) addOccurrence(found, key[1] ?? '', source)
+    for (const key of (match[1] ?? '').matchAll(OVERRIDE_KEY)) keys.push(key[1] ?? '')
   }
-  return directBases.length > 0
+  return keys
 }
 
 function sameRows(left: readonly string[], right: readonly string[]): boolean {

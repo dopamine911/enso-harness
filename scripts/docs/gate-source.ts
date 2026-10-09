@@ -33,6 +33,9 @@ export function codeOnly(source: string): string {
   return source.replace(COMMENT_OR_STRING, (lexeme) => lexeme.replace(/[^\n]/g, ' '))
 }
 
+/** How each square bracket moves `arrayBody`'s depth; every other character leaves it. */
+const BRACKET_DEPTH: Readonly<Record<string, number>> = { '[': 1, ']': -1 }
+
 /**
  * From just past an opening `[` to its MATCHING `]`: depth counted, string lexemes skipped.
  *
@@ -54,11 +57,9 @@ function arrayBody(source: string, start: number): string | undefined {
       continue
     }
     if (character === "'" || character === '"' || character === '`') quote = character
-    else if (character === '[') depth += 1
-    else if (character === ']') {
-      depth -= 1
-      if (depth === 0) return source.slice(start, position)
-    }
+    else depth += BRACKET_DEPTH[character] ?? 0
+    // Only a `]` lowers the depth, so it reaches 0 on the matching close and nowhere else.
+    if (depth === 0) return source.slice(start, position)
   }
   return undefined
 }

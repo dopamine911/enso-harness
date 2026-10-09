@@ -10,8 +10,10 @@ import {
   type EnsoIncidentResolution,
   type EnsoHostCommandRun,
   ensoLogger,
+  type EnsoObservation,
   type EnsoPromptBody,
   type EnsoPromptImage,
+  type EnsoPromptRejected,
   EnsoPromptReceipt,
   type EnsoSessionConfiguration,
   type EnsoToolResultDescriptor,
@@ -548,6 +550,42 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     }
   }
 
+  /**
+   * A prompt pi refused at preflight: a prompt this tab queued, the prompt of an open run, or one
+   * whose receipt has not landed yet. Each is said here, so nothing crosses to TanStack.
+   */
+  function observePromptRejected(observation: EnsoPromptRejected): void {
+    // A prompt this tab queued behind the run (#75): pi would not take it. Said where the
+    // human looks; the composer got its text back when `prompt` reported `refused`.
+    if (queuedPrompts.has(observation.messageId)) {
+      queuedPrompts.delete(observation.messageId)
+      problem('queued prompt refused: {reason}', { messageId: observation.messageId, reason: observation.reason })
+      return
+    }
+    const run = [...runs.values()].find((open) => open.promptMessageId === observation.messageId)
+    if (run === undefined) {
+      // ⚠ The rejection can beat the receipt that names the run (the queued-prompt
+      // path rejects the instant `session.prompt` runs, before the 202 body is even
+      // written). Keep it; `send` looks here when its receipt lands.
+      rejectedBeforeReceipt.set(observation.messageId, observation.reason)
+      return
+    }
+    closeRun(run, { type: EventType.RUN_ERROR, runId: run.runId, message: observation.reason })
+  }
+
+  /** What an observation does to this adapter's own state before its chunks cross. */
+  function observeBeforeCrossing(observation: EnsoObservation): void {
+    if (observation.kind === 'message-start') observeMessageStart(observation.role)
+    if (observation.kind === 'provider-refused' && current !== undefined) current.refused = true
+    if (observation.kind === 'extension-ui-request' && observation.blocking && observation.dialog === undefined) {
+      if (observation.id.length > 0) void declineUnreadable(observation.id)
+    }
+    if (observation.kind === 'tool-result' && observation.complete && observation.descriptor !== undefined) {
+      options.onToolResultDescriptor?.(observation.toolCallId, observation.descriptor)
+    }
+    if (observation.kind === 'turn-start') options.onTurnStart?.()
+  }
+
   function observe(frame: EnsoFollowFrame): void {
     if (frame.type === 'snapshot' || frame.type === 'status') {
       // The frame crosses to the router WHOLE, named by its type (#162 workstream 5): the
@@ -565,34 +603,11 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
       finishRunsThrough(serverGeneration)
       return
     }
-    if (observation.kind === 'message-start') observeMessageStart(observation.role)
-    if (observation.kind === 'provider-refused' && current !== undefined) current.refused = true
     if (observation.kind === 'prompt-rejected') {
-      // A prompt this tab queued behind the run (#75): pi would not take it. Said where the
-      // human looks; the composer got its text back when `prompt` reported `refused`.
-      if (queuedPrompts.has(observation.messageId)) {
-        queuedPrompts.delete(observation.messageId)
-        problem('queued prompt refused: {reason}', { messageId: observation.messageId, reason: observation.reason })
-        return
-      }
-      const run = [...runs.values()].find((open) => open.promptMessageId === observation.messageId)
-      if (run === undefined) {
-        // ⚠ The rejection can beat the receipt that names the run (the queued-prompt
-        // path rejects the instant `session.prompt` runs, before the 202 body is even
-        // written). Keep it; `send` looks here when its receipt lands.
-        rejectedBeforeReceipt.set(observation.messageId, observation.reason)
-        return
-      }
-      closeRun(run, { type: EventType.RUN_ERROR, runId: run.runId, message: observation.reason })
+      observePromptRejected(observation)
       return
     }
-    if (observation.kind === 'extension-ui-request' && observation.blocking && observation.dialog === undefined) {
-      if (observation.id.length > 0) void declineUnreadable(observation.id)
-    }
-    if (observation.kind === 'tool-result' && observation.complete && observation.descriptor !== undefined) {
-      options.onToolResultDescriptor?.(observation.toolCallId, observation.descriptor)
-    }
-    if (observation.kind === 'turn-start') options.onTurnStart?.()
+    observeBeforeCrossing(observation)
     push(...observationToAguiEvents(observation, idsOf(current)))
   }
 

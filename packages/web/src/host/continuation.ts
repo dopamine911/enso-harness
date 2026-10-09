@@ -36,6 +36,41 @@ export type ContinuationLead = ToolResultMessage[]
 export const LOST_TOOL_RESULT_TEXT =
   'The run stopped before this tool returned, so its result was lost. It may or may not have taken effect; check before relying on it.'
 
+/** A tool call the last assistant message made that no result answers yet. */
+interface OpenCall {
+  readonly id: string
+  readonly name: string
+}
+
+/** The last assistant message's tool calls with no result after it — none when there is no reply. */
+function openCallsOf(turns: readonly ContextMessage[]): OpenCall[] {
+  const lastAssistantIndex = turns.findLastIndex((message) => message.role === 'assistant')
+  const lastAssistant = turns[lastAssistantIndex]
+  if (lastAssistant?.role !== 'assistant') return []
+  const answered = new Set(
+    turns
+      .slice(lastAssistantIndex + 1)
+      .flatMap((message) => (message.role === 'toolResult' ? [message.toolCallId] : [])),
+  )
+  const open: OpenCall[] = []
+  for (const part of lastAssistant.content) {
+    if (part.type === 'toolCall' && !answered.has(part.id)) open.push({ id: part.id, name: part.name })
+  }
+  return open
+}
+
+/** The synthetic `isError` result that closes one open call, stamped `now`. */
+function lostResultOf(call: OpenCall, now: number): ToolResultMessage {
+  return {
+    role: 'toolResult',
+    toolCallId: call.id,
+    toolName: call.name,
+    content: [{ type: 'text', text: LOST_TOOL_RESULT_TEXT }],
+    isError: true,
+    timestamp: now,
+  }
+}
+
 /**
  * The messages a Continue starts its run with — `[]`, or the synthetic results that close the open
  * calls — or `undefined` when the thread is not one a run can continue from. Pure: `now` stamps
@@ -48,30 +83,9 @@ export function continuationLead(
   const turns = messages.filter((message) => message.role !== 'system')
   const last = turns.at(-1)
   if (last === undefined) return undefined
-  const lastAssistantIndex = turns.findLastIndex((message) => message.role === 'assistant')
-  const lastAssistant = turns[lastAssistantIndex]
-  const open: Array<{ id: string; name: string }> = []
-  if (lastAssistant?.role === 'assistant') {
-    const answered = new Set(
-      turns
-        .slice(lastAssistantIndex + 1)
-        .flatMap((message) => (message.role === 'toolResult' ? [message.toolCallId] : [])),
-    )
-    for (const part of lastAssistant.content) {
-      if (part.type === 'toolCall' && !answered.has(part.id)) open.push({ id: part.id, name: part.name })
-    }
-  }
+  const open = openCallsOf(turns)
   if (last.role === 'assistant' || last.role === 'toolResult') {
-    if (open.length > 0) {
-      return open.map((call): ToolResultMessage => ({
-        role: 'toolResult',
-        toolCallId: call.id,
-        toolName: call.name,
-        content: [{ type: 'text', text: LOST_TOOL_RESULT_TEXT }],
-        isError: true,
-        timestamp: now,
-      }))
-    }
+    if (open.length > 0) return open.map((call) => lostResultOf(call, now))
     return last.role === 'toolResult' ? [] : undefined
   }
   return last.role === 'user' || last.role === 'custom' ? [] : undefined

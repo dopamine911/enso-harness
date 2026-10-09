@@ -2097,19 +2097,8 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     return isLoopbackAuthority(originHost)
   }
 
-  /**
-   * The literal routes — the ones whose path is a constant rather than a thread's id — in
-   * precedence order. True when the request was one of them.
-   *
-   * ⚠ Its own function, beside `dispatchThreadRoute`, for the reason #174 gave when the thread
-   * routes became a table: the request callback is where every arm's cost lands, and it had
-   * reached the complexity ceiling as written (26 against a 25 max, the frame `#144`'s tail
-   * route pushed it over). The ladder stays a ladder here rather than becoming a second table
-   * because each of these answers differently — a JSON body, a stream, a 204, an
-   * answered-or-failed promise — and a table of six shapes is a `switch` wearing a hat.
-   */
-  function dispatchLiteralRoute(request: IncomingMessage, response: ServerResponse): boolean {
-    const url = request.url ?? ''
+  /** The thread listings and the host's own state: the literal routes before the log routes. */
+  function dispatchStateRoute(request: IncomingMessage, url: string, response: ServerResponse): boolean {
     if (request.method === 'GET' && url === '/api/mode') {
       respondWithFreshThreadMode(response)
       return true
@@ -2133,6 +2122,11 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
       response.end(JSON.stringify(about()))
       return true
     }
+    return false
+  }
+
+  /** The log routes (#144): the bundle, the tail, the day's stats, and the browser's own records. */
+  function dispatchLogRoute(request: IncomingMessage, url: string, response: ServerResponse): boolean {
     if (request.method === 'GET' && url.startsWith('/api/logs/bundle')) {
       respondWithBundle(url, response)
       return true
@@ -2153,6 +2147,23 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
       return true
     }
     return false
+  }
+
+  /**
+   * The literal routes — the ones whose path is a constant rather than a thread's id — in
+   * precedence order. True when the request was one of them.
+   *
+   * ⚠ Its own function, beside `dispatchThreadRoute`, for the reason #174 gave when the thread
+   * routes became a table: the request callback is where every arm's cost lands. The ladder
+   * stays a ladder rather than becoming a second table because each of these answers
+   * differently — a JSON body, a stream, a 204, an answered-or-failed promise — and a table of
+   * six shapes is a `switch` wearing a hat. ⚠ `scripts/docs/routes.ts` reads the routes off
+   * these `request.method === … && url …` conditions: keep that spelling. It is split in two
+   * ladders (#816) that run in order, so precedence is unchanged.
+   */
+  function dispatchLiteralRoute(request: IncomingMessage, response: ServerResponse): boolean {
+    const url = request.url ?? ''
+    return dispatchStateRoute(request, url, response) || dispatchLogRoute(request, url, response)
   }
 
   // ⚠ Routes dispatch HERE, outside the chat handler, on purpose: that handler's top-to-bottom

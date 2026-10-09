@@ -43,25 +43,32 @@ function leadingHeader(source: string): Header | undefined {
   const lines = source.split('\n')
   for (let lineIndex = 0; lineIndex < Math.min(lines.length, HEADER_LINE_LIMIT); lineIndex += 1) {
     const trimmed = (lines[lineIndex] ?? '').trimStart()
-    if (trimmed.startsWith('/*')) {
-      const headerLines = [lines[lineIndex] ?? '']
-      while (!headerLines.at(-1)?.includes('*/') && lineIndex + 1 < lines.length) {
-        lineIndex += 1
-        headerLines.push(lines[lineIndex] ?? '')
-      }
-      return { startLine: lineIndex - headerLines.length + 2, lines: headerLines, style: 'block' }
-    }
-    if (trimmed.startsWith('//')) {
-      const headerLines = [lines[lineIndex] ?? '']
-      const startLine = lineIndex + 1
-      while ((lines[lineIndex + 1] ?? '').trimStart().startsWith('//')) {
-        lineIndex += 1
-        headerLines.push(lines[lineIndex] ?? '')
-      }
-      return { startLine, lines: headerLines, style: 'line' }
-    }
+    if (trimmed.startsWith('/*')) return blockHeader(lines, lineIndex)
+    if (trimmed.startsWith('//')) return lineCommentHeader(lines, lineIndex)
   }
   return undefined
+}
+
+/** The block comment opening at `start`, through the line that closes it or the file's last line. */
+function blockHeader(lines: readonly string[], start: number): Header {
+  const headerLines = [lines[start] ?? '']
+  let lineIndex = start
+  while (!headerLines.at(-1)?.includes('*/') && lineIndex + 1 < lines.length) {
+    lineIndex += 1
+    headerLines.push(lines[lineIndex] ?? '')
+  }
+  return { startLine: start + 1, lines: headerLines, style: 'block' }
+}
+
+/** The run of `//` lines starting at `start`. */
+function lineCommentHeader(lines: readonly string[], start: number): Header {
+  const headerLines = [lines[start] ?? '']
+  let lineIndex = start
+  while ((lines[lineIndex + 1] ?? '').trimStart().startsWith('//')) {
+    lineIndex += 1
+    headerLines.push(lines[lineIndex] ?? '')
+  }
+  return { startLine: start + 1, lines: headerLines, style: 'line' }
 }
 
 function normalizedHeader(header: Header): string {

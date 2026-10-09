@@ -71,6 +71,34 @@ export interface KnownSections {
   readonly addendum: string | undefined
 }
 
+/** A section read off the front of the rendering, and what follows it. */
+interface ReadSection {
+  readonly section: RenderedSection
+  readonly rest: string
+}
+
+/**
+ * The section `rest` opens with (after its separator), or `undefined` when it opens none the host
+ * can read: no separator, no section tag, a name already `seen`, or no end the host can trust.
+ */
+function readSection(rest: string, seen: ReadonlySet<string>, addendum: string | undefined): ReadSection | undefined {
+  if (!rest.startsWith(SECTION_SEPARATOR)) return undefined
+  const body = rest.slice(SECTION_SEPARATOR.length)
+  const open = SECTION_OPEN.exec(body)
+  const name = open?.[1]
+  if (open === null || name === undefined || seen.has(name)) return undefined
+  const end = name === 'addendum' ? addendumEnd(body, addendum) : sectionEnd(body, name, open[0].length - 1)
+  if (end === undefined) return undefined
+  return { section: { name, text: body.slice(0, end) }, rest: body.slice(end) }
+}
+
+/** The preamble: the known one, else everything before the first section opens. */
+function preambleOf(rendered: string, known: KnownSections): string {
+  if (known.preamble !== undefined) return known.preamble
+  const firstSection = rendered.indexOf(`${SECTION_SEPARATOR}<`)
+  return firstSection === -1 ? rendered : rendered.slice(0, firstSection)
+}
+
 /**
  * pi's rendering as its sections, or `undefined` when it does not fit what the host knows.
  * `preamble` is the preamble when the host knows it (a custom one); pi's own has no section tag in
@@ -78,24 +106,18 @@ export interface KnownSections {
  * whole: its text is the user's and may hold anything, including `</addendum>` and other tags.
  */
 export function splitRenderedPrompt(rendered: string, known: KnownSections): RenderedSection[] | undefined {
-  const firstSection = rendered.indexOf(`${SECTION_SEPARATOR}<`)
-  const head = known.preamble ?? (firstSection === -1 ? rendered : rendered.slice(0, firstSection))
+  const head = preambleOf(rendered, known)
   if (head.length === 0 || !rendered.startsWith(head)) return undefined
   const sections: RenderedSection[] = [{ name: 'preamble', text: head }]
   const seen = new Set(['preamble'])
   const addendum = known.addendum === undefined ? undefined : `<addendum>\n${known.addendum}\n</addendum>`
   let rest = rendered.slice(head.length)
   while (rest.length > 0) {
-    if (!rest.startsWith(SECTION_SEPARATOR)) return undefined
-    rest = rest.slice(SECTION_SEPARATOR.length)
-    const open = SECTION_OPEN.exec(rest)
-    const name = open?.[1]
-    if (open === null || name === undefined || seen.has(name)) return undefined
-    const end = name === 'addendum' ? addendumEnd(rest, addendum) : sectionEnd(rest, name, open[0].length - 1)
-    if (end === undefined) return undefined
-    seen.add(name)
-    sections.push({ name, text: rest.slice(0, end) })
-    rest = rest.slice(end)
+    const read = readSection(rest, seen, addendum)
+    if (read === undefined) return undefined
+    seen.add(read.section.name)
+    sections.push(read.section)
+    rest = read.rest
   }
   // An addendum pi was handed but did not render means the rendering is not what the host thinks.
   return addendum !== undefined && !seen.has('addendum') ? undefined : sections

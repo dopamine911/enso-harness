@@ -77,6 +77,49 @@ function createSseFrameParser(onEvent: (event: SseEvent) => boolean | undefined)
   }
 }
 
+/** The reader calls this module makes: `getReader()`'s type lacks Bun's `readMany`, so the full interface does not fit (#816). */
+type SseStreamReader = Pick<ReadableStreamDefaultReader<Uint8Array>, 'read' | 'cancel' | 'releaseLock'>
+
+/**
+ * Feeds the stream's complete lines to the parser until EOF or until the callback stops reading.
+ * Returns the unterminated tail at EOF, or `undefined` when the callback stopped it.
+ */
+async function pumpSseLines(
+  reader: SseStreamReader,
+  signal: AbortSignal | undefined,
+  parser: SseFrameParser,
+): Promise<string | undefined> {
+  const decoder = new TextDecoder()
+  let lineBuffer = ''
+  for (;;) {
+    if (signal?.aborted === true) {
+      throw new Error('the request was aborted')
+    }
+
+    const { done, value } = await reader.read()
+    if (done) return lineBuffer
+
+    lineBuffer += decoder.decode(value, { stream: true })
+    const lines = lineBuffer.split('\n')
+    lineBuffer = lines.pop() ?? ''
+
+    // `some` stops at the first line whose callback asked to stop, leaving the rest unread.
+    if (lines.some((line) => parser.acceptLine(line))) return undefined
+  }
+}
+
+/** Cancels a stream that did not reach its end, then releases the reader either way. */
+async function releaseSseReader(reader: SseStreamReader, reachedEndOfStream: boolean): Promise<void> {
+  if (!reachedEndOfStream) {
+    try {
+      await reader.cancel()
+    } catch {
+      // Ignore cancellation failures while cleaning up an interrupted stream.
+    }
+  }
+  reader.releaseLock()
+}
+
 export async function readSseEvents(
   response: Response,
   signal: AbortSignal | undefined,
@@ -88,46 +131,15 @@ export async function readSseEvents(
   }
 
   const reader = responseBody.getReader()
-  const decoder = new TextDecoder()
   const parser = createSseFrameParser(onEvent)
-  let lineBuffer = ''
-  let stopRequested = false
   let reachedEndOfStream = false
 
   try {
-    readLoop: for (;;) {
-      if (signal?.aborted === true) {
-        throw new Error('the request was aborted')
-      }
-
-      const { done, value } = await reader.read()
-      if (done) {
-        reachedEndOfStream = true
-        break
-      }
-
-      lineBuffer += decoder.decode(value, { stream: true })
-      const lines = lineBuffer.split('\n')
-      lineBuffer = lines.pop() ?? ''
-
-      for (const line of lines) {
-        if (parser.acceptLine(line)) {
-          stopRequested = true
-          break readLoop
-        }
-      }
-    }
-
+    const remainder = await pumpSseLines(reader, signal, parser)
+    reachedEndOfStream = remainder !== undefined
     // A final event may end at EOF without the blank-line terminator.
-    if (!stopRequested) parser.finish(lineBuffer)
+    if (remainder !== undefined) parser.finish(remainder)
   } finally {
-    if (!reachedEndOfStream) {
-      try {
-        await reader.cancel()
-      } catch {
-        // Ignore cancellation failures while cleaning up an interrupted stream.
-      }
-    }
-    reader.releaseLock()
+    await releaseSseReader(reader, reachedEndOfStream)
   }
 }
