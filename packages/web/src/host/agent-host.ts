@@ -16,6 +16,7 @@ import {
   type CreateAgentSessionFromServicesOptions,
   createAgentSessionFromServices,
   createAgentSessionServices,
+  getAgentDir,
   type ExtensionAPI,
   type ExtensionError,
   type InlineExtension,
@@ -25,7 +26,6 @@ import {
   type PromptOptions,
   ProjectTrustStore,
   type SessionEntry,
-  type SessionInfo,
   SessionManager,
   SettingsManager,
 } from '@earendil-works/pi-coding-agent'
@@ -169,6 +169,14 @@ import { builtinProviderName, providerRefusalOf } from './provider-refusal.ts'
 import { restoreNoteExtension } from './restore-note.ts'
 import type { RuntimeEvent } from './runtime-event.ts'
 import { toRpcWireEvent } from './session-events.ts'
+import {
+  createSessionFiles,
+  piSessionDirectories,
+  type SessionFileHeader,
+  type SessionFileSummary,
+  sessionFilesIn,
+  threadIdOfFileName,
+} from './session-files.ts'
 import { sessionModels } from './session-models.ts'
 import { growsSessionSpend, liveSessionUsage, storedSessionUsage } from './session-usage.ts'
 import { previewOf, renderedUnder } from './system-prompt-preview.ts'
@@ -473,7 +481,11 @@ export interface HostedThreadInspection {
   readonly sessionDir: string
   /** The session file once pi has flushed it; null while the session lives only in memory. */
   readonly sessionFile: string | null
-  /** The branch, root to leaf, as the transcript of ours (L2): the runtime's entry shapes stay in `transcript.ts`. */
+  /**
+   * The branch, root to leaf, as the transcript of ours (L2): the runtime's entry shapes stay in
+   * `transcript.ts`. Built when READ (#739), each read a fresh build: an inspection for the cwd
+   * pays nothing for it.
+   */
   readonly entries: readonly EnsoTranscriptEntry[]
   /** Slash commands this session registers. */
   readonly commands: readonly string[]
@@ -595,6 +607,9 @@ export interface StoredThread {
    */
   readonly parentThreadId?: string
 }
+
+/** A thread's session file as a lookup by id finds it (#739): its header's facts, nothing counted. */
+type LocatedThread = Pick<StoredThread, 'id' | 'path' | 'cwd' | 'parentThreadId'>
 
 /**
  * A fork (#433), or why not. The refusals are the host's to decide and the route's to say:
@@ -1250,63 +1265,119 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   initTheme()
 
   /**
-   * pi's listing, through its API — never a directory scan of the files: the file naming is pi's
-   * to change, and `listAll` reads each file's header for the id and the directory. Two places are
-   * listed (#552): pi's default session directories under the ONE agent dir (the env pin above),
-   * where the terminal launcher filed sessions before the project folders and where a session of
-   * a project whose directory is gone still sits; and every project folder's `sessions/`,
-   * registered or not — `locate` must tell "none" from "not yours". Cost is one parse per file,
-   * paid per call. Sessions pi has not flushed yet (no assistant message) have no file and are not
-   * listed — there is nothing to come back to.
+   * pi's session files, each read once per change of it (#739): a lookup by id reads the
+   * directories and the HEADER of the file named for the id; the listing summarizes a file once,
+   * and again only when it changed. pi's `listAll` parsed every line of every file on every call —
+   * 590–650 ms at 200 threads of 0.9 MB, for each cold read.
    */
-  async function everySession(): Promise<StoredThread[]> {
-    const listings = await Promise.all([...projectSessionListings(), SessionManager.listAll()])
-    // One entry per thread id. The project folders are listed FIRST, so when the migration kept a
-    // legacy copy beside a file the folder already held (same name, same id), the folder's copy is
-    // the thread and the legacy one is not listed — one thread, the same one on every call.
-    const byId = new Map<string, SessionInfo>()
-    for (const info of listings.flat()) if (!byId.has(info.id)) byId.set(info.id, info)
-    const listed = [...byId.values()]
-    // A fork's header names its parent by FILE (#433); the thread is that file's session id, read
-    // off the same listing. The path misses once the parent has moved into its project folder
-    // (#552's migration), so the file's NAME — `<timestamp>_<id>.jsonl`, unique by id — is tried
-    // next. A parent file that is gone names no thread, so the fork carries none.
-    const idByPath = new Map(listed.map((info) => [resolve(info.path), info.id]))
-    const idByName = new Map(listed.map((info) => [basename(info.path), info.id]))
-    const parentOf = (path: string): string | undefined => idByPath.get(resolve(path)) ?? idByName.get(basename(path))
-    return listed
-      .map((info) => {
-        const parentThreadId = info.parentSessionPath === undefined ? undefined : parentOf(info.parentSessionPath)
-        // ⚠ pi's `modified` is the last message's time, and a fork COPIES its source's messages
-        // with their timestamps (#447): a fork taken now of a thread idle for hours read as hours
-        // old, and sorted with it. The header's `created` is when the fork was made; for any other
-        // session it is never later than its last message, so the later of the two changes nothing else.
-        const created = info.created.getTime()
-        const modified = Number.isNaN(created) ? info.modified : new Date(Math.max(info.modified.getTime(), created))
-        return {
-          id: info.id,
-          path: info.path,
-          cwd: info.cwd,
-          modified,
-          messageCount: info.messageCount,
-          // pi says `(no messages)` for a file with none — an empty fork's (#433) — which is no title.
-          firstMessage: info.messageCount === 0 ? '' : info.firstMessage,
-          // pi's listing already reads a blank `session_info` as no name: it clears the title.
-          ...(info.name === undefined ? {} : { name: info.name }),
-          ...(parentThreadId === undefined ? {} : { parentThreadId }),
-        }
-      })
-      .toSorted((first, second) => second.modified.getTime() - first.modified.getTime())
+  const sessionFiles = createSessionFiles()
+
+  /**
+   * The session files, in the order a thread id resolves (#552): one group per project folder's
+   * `sessions/` — every folder, registered or not, `locate` must tell "none" from "not yours" — in
+   * NAME order, then pi's default session directories under the ONE agent dir (the env pin above)
+   * as the last group, where the terminal launcher filed sessions before the project folders and
+   * where a session of a project whose directory is gone still sits. Sessions pi has not flushed
+   * yet (no assistant message) have no file and are not here — there is nothing to come back to.
+   */
+  async function sessionFileGroups(): Promise<string[][]> {
+    // pi's agent dir as the env names it NOW, as `listAll` read it: a later host in the process re-pins it.
+    const piDirectories = await piSessionDirectories(getAgentDir())
+    const groups = [...projectSessionDirectories().map((directory) => [directory]), piDirectories]
+    return Promise.all(groups.map(async (directories) => (await Promise.all(directories.map(sessionFilesIn))).flat()))
   }
 
   /**
-   * One `listAll` per project folder that has a `sessions/` — every folder, registered or not; none
-   * when there is no projects folder. In NAME order, not the filesystem's: `everySession` keeps the
-   * first file it sees per thread id, and two folders holding one id (a hand-made copy beside a
-   * moved checkout's) must resolve to the same one on every call and on every machine — the
-   * lexically first folder's.
+   * One thread per id, in group order, and within a group the most recently written file first.
+   * ⚠ The FIRST group holding an id is the thread's, never the newest copy: when the migration
+   * kept a legacy copy beside a file the project folder already held (same name, same id), the
+   * folder's copy is the thread and the legacy one is not — one thread, the same one on every call.
    */
-  function projectSessionListings(): Promise<SessionInfo[]>[] {
+  function firstPerId<File extends SessionFileHeader>(groups: readonly (readonly File[])[]): File[] {
+    const byId = new Map<string, File>()
+    for (const group of groups) {
+      for (const file of group.toSorted((first, second) => second.fileModifiedMs - first.fileModifiedMs)) {
+        if (!byId.has(file.id)) byId.set(file.id, file)
+      }
+    }
+    return [...byId.values()]
+  }
+
+  /**
+   * The thread a fork's header names by FILE (#433): that file's session id. The path is tried
+   * first; it misses once the parent has moved into its project folder (#552's migration), so the
+   * file's NAME — `<timestamp>_<id>.jsonl`, unique by id — is tried next among the listed files. A
+   * parent file that is gone names no thread, so the fork carries none.
+   */
+  async function parentThreadIdOf(parentSessionPath: string, files: readonly string[]): Promise<string | undefined> {
+    const wanted = resolve(parentSessionPath)
+    const fileName = basename(wanted)
+    const candidates = [
+      ...files.filter((file) => resolve(file) === wanted),
+      ...files.filter((file) => basename(file) === fileName && resolve(file) !== wanted),
+    ]
+    for (const candidate of candidates) {
+      const header = await sessionFiles.header(candidate)
+      if (header !== undefined) return header.id
+    }
+    return undefined
+  }
+
+  /**
+   * Each file's summary, all read at once (#739). ⚠ A COLD listing holds every changed file's text
+   * together: about +154 MB for 200 sessions of 0.9 MB, what pi's `listAll` cost on EVERY listing
+   * before. Here it is paid once per change of a file: a listing after a run re-reads only what the
+   * run wrote, and an unchanged one reads nothing.
+   */
+  async function summariesOf(files: readonly string[]): Promise<SessionFileSummary[]> {
+    const summaries = await Promise.all(files.map((file) => sessionFiles.summary(file)))
+    return summaries.filter((summary): summary is SessionFileSummary => summary !== undefined)
+  }
+
+  /** The listing: every session file summarized — once per change of the file (#739). */
+  async function everySession(): Promise<StoredThread[]> {
+    const groups = await sessionFileGroups()
+    const files = groups.flat()
+    sessionFiles.retainOnly(new Set(files))
+    const summarized = await Promise.all(groups.map(summariesOf))
+    const listed = firstPerId(summarized)
+    const stored = await Promise.all(
+      listed.map(async (summary) => {
+        const parentPath = summary.parentSessionPath
+        return storedThreadOf(summary, parentPath === undefined ? undefined : await parentThreadIdOf(parentPath, files))
+      }),
+    )
+    return stored.toSorted((first, second) => second.modified.getTime() - first.modified.getTime())
+  }
+
+  function storedThreadOf(summary: SessionFileSummary, parentThreadId: string | undefined): StoredThread {
+    // ⚠ pi's `modified` is the last message's time, and a fork COPIES its source's messages
+    // with their timestamps (#447): a fork taken now of a thread idle for hours read as hours
+    // old, and sorted with it. The header's `created` is when the fork was made; for any other
+    // session it is never later than its last message, so the later of the two changes nothing else.
+    const created = summary.created.getTime()
+    const modified = Number.isNaN(created) ? summary.modified : new Date(Math.max(summary.modified.getTime(), created))
+    return {
+      id: summary.id,
+      path: summary.path,
+      cwd: summary.cwd,
+      modified,
+      messageCount: summary.messageCount,
+      // Empty for a file with none — an empty fork's (#433) — which is no title.
+      firstMessage: summary.firstMessage,
+      // A blank `session_info` already reads as no name: it clears the title.
+      ...(summary.name === undefined ? {} : { name: summary.name }),
+      ...(parentThreadId === undefined ? {} : { parentThreadId }),
+    }
+  }
+
+  /**
+   * Every project folder's `sessions/` — every folder, registered or not; none when there is no
+   * projects folder. In NAME order, not the filesystem's: two folders holding one id (a hand-made
+   * copy beside a moved checkout's) must resolve to the same one on every call and on every
+   * machine — the lexically first folder's.
+   */
+  function projectSessionDirectories(): string[] {
     if (projectsDir === undefined || !existsSync(projectsDir)) return []
     return readdirSync(projectsDir, { withFileTypes: true })
       .filter((directoryEntry) => directoryEntry.isDirectory() && isEnsoProjectId(directoryEntry.name))
@@ -1314,19 +1385,52 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       .toSorted()
       .map((projectId) => projectSessionsDir(projectsDir, projectId))
       .filter((directory) => existsSync(directory))
-      .map((directory) => SessionManager.listAll(directory))
   }
 
   async function listSessions(): Promise<StoredThread[]> {
     return (await everySession()).filter((stored) => servesDirectory(stored.cwd))
   }
 
-  /** The thread's session file, served or not — `createSession` must tell "none" from "not yours". */
-  async function locate(threadId: string): Promise<StoredThread | undefined> {
-    return (await everySession()).find((stored) => stored.id === threadId)
+  /**
+   * Every file under `threadId`, the thread's own first (`firstPerId`'s order) — a legacy copy
+   * beside a migrated one too — and the files of every group, for the parent's lookup. Only the
+   * files NAMED for the id are opened, and only their headers (#739): another thread's file is
+   * never read. A file whose name is not pi's shape is a candidate for any id; its header decides.
+   */
+  async function sessionFilesUnder(threadId: string): Promise<{ under: SessionFileHeader[]; files: string[] }> {
+    const groups = await sessionFileGroups()
+    const headers = await Promise.all(
+      groups.map(async (group) => {
+        const candidates = group.filter((file) => {
+          const nameThreadId = threadIdOfFileName(basename(file))
+          return nameThreadId === undefined || nameThreadId === threadId
+        })
+        const read = await Promise.all(candidates.map((file) => sessionFiles.header(file)))
+        return read.filter((header): header is SessionFileHeader => header?.id === threadId)
+      }),
+    )
+    const own = firstPerId(headers)
+    const owned = new Set(own)
+    const others = headers.flat().filter((header) => !owned.has(header))
+    return { under: [...own, ...others], files: groups.flat() }
   }
 
-  async function storedSession(threadId: string): Promise<StoredThread | undefined> {
+  /** The thread's session file, served or not — `createSession` must tell "none" from "not yours". */
+  async function locate(threadId: string): Promise<LocatedThread | undefined> {
+    const { under, files } = await sessionFilesUnder(threadId)
+    const [header] = under
+    if (header === undefined) return undefined
+    const parentThreadId =
+      header.parentSessionPath === undefined ? undefined : await parentThreadIdOf(header.parentSessionPath, files)
+    return {
+      id: header.id,
+      path: header.path,
+      cwd: header.cwd,
+      ...(parentThreadId === undefined ? {} : { parentThreadId }),
+    }
+  }
+
+  async function storedSession(threadId: string): Promise<LocatedThread | undefined> {
     const located = await locate(threadId)
     return located !== undefined && servesDirectory(located.cwd) ? located : undefined
   }
@@ -1652,11 +1756,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
 
   /** Every session file under `threadId`: the project folders' and pi's own — a legacy copy beside a migrated one too. */
   async function sessionFilesOf(threadId: string): Promise<string[]> {
-    const listings = await Promise.all([...projectSessionListings(), SessionManager.listAll()])
-    return listings
-      .flat()
-      .filter((info) => info.id === threadId)
-      .map((info) => info.path)
+    return (await sessionFilesUnder(threadId)).under.map((header) => header.path)
   }
 
   function threadDeleted(threadId: string): boolean {
@@ -3020,7 +3120,12 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
           cwd: sessionManager.getCwd(),
           sessionDir: sessionManager.getSessionDir(),
           sessionFile: plannedFile !== undefined && existsSync(plannedFile) ? plannedFile : null,
-          entries: transcriptOf(sessionManager.getBranch()),
+          // ⚠ BUILT WHEN READ, not when inspected (#739): most callers want the cwd or the file, and
+          // the transcript is the whole branch rebuilt — 2.75 ms at 5,000 turns, per `/git` or
+          // `/tree`. Read it at once: a getter read later sees the branch as it is then.
+          get entries() {
+            return transcriptOf(sessionManager.getBranch())
+          },
           commands: runtime.listCommands().map((command) => command.name),
           name: sessionManager.getSessionName(),
         }

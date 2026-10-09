@@ -239,9 +239,12 @@ function projectName(cwd: string): string {
 
 const DOT_DISCONNECTED = 'size-2 shrink-0 rotate-45 rounded-xs bg-refuse'
 const DOT_IDLE = 'size-2 shrink-0 rounded-full border border-muted-foreground'
-const DOT_IN_FLIGHT = 'size-2 shrink-0 motion-safe:animate-pulse rounded-full bg-evidence signal:shadow-glow-evidence'
+// ⚠ Static, not pulsing (#739): any CSS animation here, even a stepped or `motion-safe:` one, keeps
+// the compositor ticking for as long as pi works — 40–55% of a GPU process in the live run. The
+// colour and the word beside the dot already say the thread is in flight.
+const DOT_IN_FLIGHT = 'size-2 shrink-0 rounded-full bg-evidence signal:shadow-glow-evidence'
 
-/** The dot beside the word: pulsing in the running colour while in flight, hollow when idle, a refusal-coloured diamond once the follow ended (#119). */
+/** The dot beside the word: solid in the running colour while in flight, hollow when idle, a refusal-coloured diamond once the follow ended (#119). */
 function activityDotClass(activity: Activity): typeof DOT_DISCONNECTED | typeof DOT_IDLE | typeof DOT_IN_FLIGHT {
   if (activity.kind === 'disconnected') return DOT_DISCONNECTED
   if (activity.kind === 'idle') return DOT_IDLE

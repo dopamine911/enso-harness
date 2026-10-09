@@ -31,7 +31,8 @@
  * gitlink, its contents not captured — stated, not hidden. A path a sparse checkout leaves off disk
  * (skip-worktree) keeps the blob its index records, so the snapshot is still the whole commit; a
  * path beyond a symlinked directory is not the tree's (git calls it "beyond a symbolic link") —
- * the symlink is snapshotted, never what it points at.
+ * the symlink is snapshotted, never what it points at. An untracked `node_modules` is ignored
+ * whatever the rules say (`DEFAULT_EXCLUDE`, #739); a tracked one is the project's and stays.
  *
  * ⚠ A COPY HAS NO REPOSITORY: IT FOLLOWS ITS PROJECT'S (#566). A store told it holds a copy of a
  * project (`copyOf`, recorded in the store) lists the copy as the store's own tracked set plus the
@@ -120,6 +121,24 @@ const SNAPSHOT_CONFIG = [
 
 /** The file in a store naming the project its tree is a copy of (#566), when it is one. */
 const COPY_OF_FILE = 'enso-copy-of'
+
+/**
+ * `git init` with an empty template (#739, as the arena's projects since #740): a store is written
+ * only by Enso's own gits, so git's 14 sample hooks (about 70 KB) and its `info/exclude` stub would
+ * land in every thread's store for nothing — the hooks never run (`core.hooksPath=/dev/null`).
+ */
+const EMPTY_TEMPLATE = '--template='
+
+/**
+ * What every listing of the tree's untracked files leaves out, whatever its ignore rules (#739): a
+ * project with no `.gitignore` had 34 MB of `node_modules` captured, 17 MB of objects in its store.
+ * Passed on git's command line, so it holds for the tree's own repository's listing as for the
+ * store's — the user's `.gitignore` and `info/exclude` are never written — and outranks every
+ * ignore file, a `!node_modules/` negation included. ⚠ Untracked files only: a `node_modules` the
+ * project TRACKS is its choice and stays in every snapshot. One flag on every `--others` listing,
+ * taking and materializing alike, so a materialize never removes what a snapshot never took.
+ */
+const DEFAULT_EXCLUDE = '--exclude=node_modules/'
 
 /**
  * One snapshot's outcome: the commit that names the tree as it was, and whether it differs from
@@ -345,7 +364,7 @@ async function ensureObjectStore(
   if (!existsSync(join(objectStore, 'HEAD'))) {
     const init = await runGitIn(
       environment,
-      ['init', '--quiet', '--bare', `--object-format=${objectFormat}`, objectStore],
+      ['init', '--quiet', '--bare', EMPTY_TEMPLATE, `--object-format=${objectFormat}`, objectStore],
       dirname(objectStore),
     )
     if (init.code !== 0) return undefined
@@ -542,7 +561,7 @@ async function mintStore(
   if (repository !== undefined && repository.objectFormat !== objectFormat) return false
   const init = await runGitIn(
     environment,
-    ['init', '--quiet', '--bare', `--object-format=${objectFormat}`, directory],
+    ['init', '--quiet', '--bare', EMPTY_TEMPLATE, `--object-format=${objectFormat}`, directory],
     tree,
   )
   if (init.code !== 0) return false
@@ -1127,7 +1146,14 @@ async function storeUntrackedFiles(
   rules: IgnoreRules,
   index: string,
 ): Promise<{ readonly kept: string[]; readonly ignored: string[] } | Refusal> {
-  const others = await runStoreGit(environment, store, ['ls-files', '--others', '--exclude-standard', '-z'], { index })
+  const others = await runStoreGit(
+    environment,
+    store,
+    ['ls-files', '--others', '--exclude-standard', DEFAULT_EXCLUDE, '-z'],
+    {
+      index,
+    },
+  )
   if (others.code !== 0) return refusedBy('ls-files', others)
   const candidates = nulList(others.stdout)
   if (rules.kind !== 'copy' || candidates.length === 0) return { kept: candidates, ignored: [] }
@@ -1157,7 +1183,7 @@ async function listTreeFiles(
     if (staged.code !== 0) return refusedBy('ls-files', staged)
     const others = await readRepositoryGit(
       environment,
-      ['ls-files', '--others', '--exclude-standard', '-z'],
+      ['ls-files', '--others', '--exclude-standard', DEFAULT_EXCLUDE, '-z'],
       store.tree,
     )
     if (others.code !== 0) return refusedBy('ls-files', others)
@@ -1389,7 +1415,8 @@ export async function compareTreeWithSnapshots(options: {
       }
       differences.push(difference)
     }
-    const listIgnored = ['ls-files', '--others', '--ignored', '--exclude-standard', '-z']
+    // The default exclusion counts as ignored here too: what no snapshot takes is the tree's own.
+    const listIgnored = ['ls-files', '--others', '--ignored', '--exclude-standard', DEFAULT_EXCLUDE, '-z']
     const ignored =
       staged.rules.kind === 'repository'
         ? await readRepositoryGit(environment, listIgnored, tree)

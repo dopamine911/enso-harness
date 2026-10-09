@@ -5,7 +5,7 @@ import { gitChildEnvironment } from '@enso/core/git'
 import type { ArenaCheckedGap, ArenaGapClass } from './findings.ts'
 import { momentOf, readRunFindings } from './report.ts'
 import { readArenaScoreInput, scoreArenaRun } from './score.ts'
-import { scanRunForSecrets, withEarlierHits } from './secret-scan.ts'
+import { recordedScanOf, scanFilesForSecrets, withEarlierHits } from './secret-scan.ts'
 
 /**
  * Publishing a reviewed run to the corpus (#677): every run so far lived on one machine, and only
@@ -17,8 +17,9 @@ import { scanRunForSecrets, withEarlierHits } from './secret-scan.ts'
  * ⚠ NOTHING LEAVES THE MACHINE UNTIL THE RUN IS CHECKED. Refused, with every reason at once: a run
  * not reviewed (no `findings.json`, or one that does not read); a finding whose evidence does not
  * resolve; a defect that names no product issue; a report older than its findings; and any secret
- * the scan finds — a fresh scan, plus every hit an earlier scan recorded (never downgraded, as the
- * manifest's). A screenshot cannot be scanned: what the corpus holds is what the run showed.
+ * found — a fresh scan of the documents it publishes, plus every hit the manifest's scan recorded,
+ * the trace's included (never downgraded, #741). A screenshot cannot be scanned: what the corpus
+ * holds is what the run showed.
  */
 
 /** Where runs are published unless `--corpus` names another. */
@@ -115,7 +116,17 @@ function refusalsOf(
   const reportStale =
     !missing.includes('report.md') &&
     statSync(join(runDirectory, 'report.md')).mtimeMs < statSync(join(runDirectory, 'findings.json')).mtimeMs
-  const scan = withEarlierHits(scanRunForSecrets(runDirectory, secretValues), manifest, runDirectory)
+  // Only what leaves the machine is read again (#741): the documents. The cited screenshots are pixels,
+  // and the trace stays local; the manifest's scan read it.
+  // ⚠ A HIT ANYWHERE STILL REFUSES, the trace's included, deliberately: a secret in the trace was on
+  // the page, and the published screenshots, which no scan reads, may show it.
+  const documents = [...RUN_DOCUMENTS, ...OPTIONAL_DOCUMENTS].filter((document) =>
+    existsSync(join(runDirectory, document)),
+  )
+  const scan = withEarlierHits(scanFilesForSecrets(runDirectory, documents, secretValues), manifest, runDirectory)
+  // ⚠ A manifest with no scan at all was written before #610: its trace was never read, and this
+  // reads only the documents, so nothing would stand between that trace and a published screenshot.
+  const traceUnscanned = recordedScanOf(manifest).scanned === undefined
   return [
     ...missing.map((document) => `no ${document} in the run (\`bun run arena report\` and \`arena score\` write them)`),
     ...(reportStale ? ['report.md is older than findings.json: run `bun run arena report <run>` again'] : []),
@@ -128,6 +139,9 @@ function refusalsOf(
         : [],
     ),
     ...[...new Set(scan.hits.map((hit) => hit.path))].map((path) => `the secret scan found a secret in ${path}`),
+    ...(traceUnscanned
+      ? ['the manifest records no secret scan of the trace: run `bun run arena manifest <run>` first']
+      : []),
   ]
 }
 

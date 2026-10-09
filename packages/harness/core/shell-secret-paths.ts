@@ -1,6 +1,5 @@
 import { isAbsolute } from 'node:path'
-import { textLooksLikeSecretPath } from '@enso/core/paths'
-import { looksLikeSecret, realpathOfNearestExisting, resolveAgainstCwd } from './paths.ts'
+import { looksLikeSecret, realpathOfNearestExisting, resolveAgainstCwd, wordTextLooksLikeSecret } from './paths.ts'
 import { extractFlatShellCommandSegments, literalShellWord, shellWordsOf } from './shell-segments.ts'
 
 /**
@@ -201,7 +200,7 @@ export function findSecretPathWord(
 ): SecretPathMatch | undefined {
   const question: PathQuestion = {
     resolved: (absolutePath) => looksLikeSecret(absolutePath, fragments, options.ownTree),
-    text: (text) => textLooksLikeSecretPath(text, fragments),
+    text: (text) => wordTextLooksLikeSecret(text, fragments, options.ownTree),
   }
   return findPathWord(command, question, cwd, options)
 }

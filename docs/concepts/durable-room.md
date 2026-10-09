@@ -118,8 +118,10 @@ Rules for new work. None needs a new abstraction, and none is Durable-shaped; ea
    entry id". Key it to an Enso thread and entry id held in an Enso record, so `/tree` is not the
    mechanism. Same for #147.
 6. **No new importer of the runtime outside the two roots, and a baseline that only shrinks inside
-   them.** The vendor gate already holds the first half. The second is new: today a new file under
-   `host/` or `extensions/` names the vendor freely, so the pivot cost grows without any gate noticing.
+   them.** The vendor gate holds both halves. Outside the roots, `VENDOR_IMPORT_ALLOWED`; inside
+   them, `VENDOR_IMPORTERS_ALLOWED_INSIDE_ROOTS` (#558), the files under `host/` and `extensions/` that may
+   import the vendor. A new importer fails by name, and a file that stops importing leaves the list in
+   the same PR, so the pivot cost can no longer grow without a gate noticing.
 7. **Do not add a port that copies Durable's contracts.** Designing against a runtime that changes
    without notice, from one implementation, gets the shape wrong in both directions. The seams exist;
    use them.

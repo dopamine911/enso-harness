@@ -490,6 +490,11 @@ export type EnsoStoppedAfter = Static<typeof EnsoStoppedAfter>
  * Carried as `Unknown` because the shape is TanStack's, not enso's; the durable form is the
  * runtime's log, decoded by the host into `EnsoTranscriptEntry` (L2).
  *
+ * ⚠ `messages` IS A PAGE, NOT THE BRANCH (#739): the branch's last messages, or with `?before=<id>`
+ * the ones before that message — at most the server's page size either way. A 5,000-turn branch is
+ * 15 MB as messages; the page a person reads first is under 0.5 MB. `earlier` says what is left.
+ * The other fields are the WHOLE branch's, whichever page is asked for.
+ *
  * @group Thread inspection
  */
 export const EnsoThreadHistory = Type.Object(
@@ -498,6 +503,20 @@ export const EnsoThreadHistory = Type.Object(
     /** The project it belongs to (#395), so a resumed thread is grouped under it. */
     projectId: Type.String(),
     messages: Type.Array(Type.Unknown()),
+    /** What of the branch comes before `messages` (#739); absent when they start the branch. */
+    earlier: Type.Optional(
+      Type.Object(
+        {
+          /** How many of the branch's messages come before this page — "Load earlier" says it. */
+          messages: Type.Integer({ minimum: 1 }),
+          /** How many of those are prompts: where this page's prompts start counting (`prompt 2401: …`). */
+          prompts: Type.Integer({ minimum: 0 }),
+          /** The branch's first prompt when it is among them, its text parts only — what the thread's title is read from. */
+          firstPrompt: Type.Optional(Type.Unknown()),
+        },
+        { additionalProperties: false },
+      ),
+    ),
     permissionMode: EnsoPermissionModeState,
     /** The session's risk (#464): the replayed level and how many signals it rests on — the status bar's seed. */
     sessionRisk: EnsoSessionRiskChange,

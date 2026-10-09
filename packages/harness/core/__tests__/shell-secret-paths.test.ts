@@ -121,6 +121,26 @@ test('⚠ a same-command symlink into the credential dir is refused at the link,
   expect(find('ln -s $(pwd)/.enso n')?.via).toBe('text')
 })
 
+// #777: a heredoc makes the segmenter decline (#545), so every word meets the text pass, which
+// asked the whole path. The thread's own tree sits under the home (`/.enso/`), so its own path
+// was refused as a credential path, in a run where that stopped the agent verifying its build.
+test("⚠ a declined command naming the thread's own tree by absolute path is judged inside the tree; text that could climb out is not (#777)", () => {
+  const tree = '/home/u/.enso/projects/p/trees/t'
+  const inTree = (command: string): SecretPathMatch | undefined =>
+    findSecretPathWord(`${command} << 'EOF'\nchecking\nEOF`, fragments, tree, { ownTree: tree })
+  expect(inTree(`cd ${tree} && cat`)).toBeUndefined()
+  expect(inTree(`cat ${tree}/src/game.js`)).toBeUndefined()
+  // Inside the tree, what a checkout's own path is refused for.
+  expect(inTree(`cat ${tree}/.env`)?.via).toBe('text')
+  // Text that is not a plain path keeps the whole spelling: an expansion or a `..` can leave the tree.
+  expect(inTree(`cat ${tree}/$X/logins/a`)?.via).toBe('text')
+  expect(inTree(`cat ${tree}/../other/a.ts`)?.via).toBe('text')
+  expect(inTree(`cat ${tree}/*`)?.via).toBe('text')
+  // The rest of the home: another thread's tree, the secrets file.
+  expect(inTree('cat /home/u/.enso/projects/p/trees/other/a.ts')?.via).toBe('text')
+  expect(inTree('cat /home/u/.enso/secrets.env')?.via).toBe('text')
+})
+
 /**
  * ⚠ STATED NON-COVERAGE, pinned — a bar, not a boundary, the same shape as the egress deny.
  * A name assembled at runtime is not in the text, and no text scan reaches it. These pass

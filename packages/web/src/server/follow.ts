@@ -201,8 +201,8 @@ function writeFrame(threads: ThreadRegistry, threadId: string, response: ServerR
  * then seen live.
  *
  * @invariant resume/cold-then-live Cold, then live, on one follow; nothing is resumed by cursor.
- * A resumed pane's follow opens before any run and reads `live: false` (the file's messages, the
- * file's usage with no context, `openDialogs: []`); the first prompt acquires, `createSession`
+ * A resumed pane's follow opens before any run and reads `live: false` (the file's message count,
+ * the file's usage with no context, `openDialogs: []`); the first prompt acquires, `createSession`
  * opens the file, and the same follow carries `status live: true`, then `busy: true, generation: 1`.
  */
 export async function followThread(deps: FollowRouteDeps, threadId: string, response: ServerResponse): Promise<void> {
@@ -259,7 +259,10 @@ export async function followThread(deps: FollowRouteDeps, threadId: string, resp
     cwd: mount.cwd,
     tree: mount.tree,
     usage: mount.usage,
-    messages: mount.messages,
+    // The transcript itself is `/history`'s, sent once per open (#739); the snapshot says only how
+    // many messages there are and whether the last reply was refused.
+    messageCount: mount.messageCount,
+    ...(mount.trailingRefusal === undefined ? {} : { trailingRefusal: mount.trailingRefusal }),
     openDialogs: mount.openDialogs,
     ...(mount.interrupted === undefined ? {} : { interrupted: mount.interrupted }),
     ...(mount.stoppedAfter.length === 0 ? {} : { stoppedAfter: mount.stoppedAfter }),

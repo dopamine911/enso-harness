@@ -580,7 +580,7 @@ function removeIfEmpty(directory: string): void {
  * is never moved while it is an orphan.
  *
  * ⚠ A fork's header names its parent by FILE PATH (#433); after a move that path is stale. The
- * host resolves a parent by its file's basename when the path misses (`agent-host.ts#everySession`),
+ * host resolves a parent by its file's basename when the path misses (`agent-host.ts#parentThreadIdOf`),
  * since pi names a file `<timestamp>_<id>.jsonl`. pi's own headers are not rewritten.
  *
  * @group Workspace paths

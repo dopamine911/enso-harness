@@ -142,8 +142,18 @@ export const EnsoFollowSnapshot = Type.Object(
      * `context`). Later changes arrive as `session-usage` observations, each the whole state.
      */
     usage: EnsoSessionUsage,
-    /** The branch as TanStack `UIMessage`s — `Unknown` because the shape is the renderer's, not enso's. */
-    messages: Type.Array(Type.Unknown()),
+    /**
+     * How many messages the branch holds — what says the thread has been seen with messages (#659).
+     * ⚠ NOT the messages (#739): the page mounts them from `/history`, which pages a long branch, so
+     * a follow that carried them too sent the whole transcript a second time on every open — 15 MB
+     * twice at 5,000 turns.
+     */
+    messageCount: Type.Integer({ minimum: 0 }),
+    /**
+     * The refusal the branch's last assistant message is (#381), absent when it is none: the status
+     * bar's refusal word on a resync. A refusal followed by a reply is history, not the thread's state.
+     */
+    trailingRefusal: Type.Optional(EnsoProviderRefusal),
     /** Every question pi is blocked on right now, oldest first (#114). Empty when not live. */
     openDialogs: Type.Array(EnsoOpenDialog),
     interrupted: Type.Optional(EnsoInterruptedTail),
@@ -269,6 +279,8 @@ section is the architecture table's leak column (`scripts/docs/seams-table.ts`),
 saying "nothing" must not stand in front of one saying "something" (#216, #219).
 
 ## Pivot cost
+
+Which files may import the runtime is fixed by a gate (#558): `VENDOR_IMPORTERS_ALLOWED_INSIDE_ROOTS` in `test/vendor-gate.test.ts` lists them, and the list only shrinks, so a new file cannot quietly add to what follows.
 
 Replace the runtime and the vocabulary does not move: the union, the frames, the follow route, the
 registry's feed, the browser adapter, the kinds table and both sweeps stay. What changes is the

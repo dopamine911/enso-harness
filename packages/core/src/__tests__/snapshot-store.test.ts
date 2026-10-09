@@ -243,6 +243,52 @@ test('a tree that is no git checkout snapshots too — no seed, every file hashe
   expect(existsSync(join(tree, '.git'))).toBe(false)
 })
 
+test('a store and its project object store are minted from an empty template: no sample hooks, no info stub (#739)', async () => {
+  const store = await opened(checkout())
+  await taken(store)
+  for (const repository of [store.directory, join(dirname(store.directory), '.objects')]) {
+    expect(existsSync(join(repository, 'HEAD'))).toBe(true)
+    expect(existsSync(join(repository, 'hooks'))).toBe(false)
+    expect(existsSync(join(repository, 'info'))).toBe(false)
+  }
+})
+
+// #739: a project with no `.gitignore` had 34 MB of `node_modules` captured into its store.
+test('⚠ an untracked node_modules is never captured, whatever the ignore rules, and a materialize leaves it; a tracked one stays in', async () => {
+  const tree = checkout()
+  mkdirSync(join(tree, 'vendor', 'node_modules'), { recursive: true })
+  writeFileSync(join(tree, 'vendor', 'node_modules', 'kept.js'), 'tracked on purpose\n')
+  git(tree, 'add', 'vendor/node_modules/kept.js')
+  git(tree, 'commit', '--quiet', '-m', 'vendored')
+  for (const installed of ['node_modules/x', 'packages/app/node_modules/y']) {
+    mkdirSync(join(tree, installed), { recursive: true })
+    writeFileSync(join(tree, installed, 'i.js'), 'installed\n')
+  }
+  const store = await opened(tree)
+  const first = await taken(store)
+  expect((await snapshotPaths(environment, store, first.hash)).toSorted()).toEqual([
+    '.gitignore',
+    'README.md',
+    'src.ts',
+    'vendor/node_modules/kept.js',
+  ])
+
+  writeFileSync(join(tree, 'stray.md'), 'unignored, untracked\n')
+  const outcome = await materializeSnapshot({ directory: store.directory, tree, hash: first.hash, environment })
+  expect(outcome).toEqual({ kind: 'materialized' })
+  expect(existsSync(join(tree, 'stray.md'))).toBe(false)
+  expect(readFileSync(join(tree, 'node_modules', 'x', 'i.js'), 'utf8')).toBe('installed\n')
+  expect(readFileSync(join(tree, 'packages', 'app', 'node_modules', 'y', 'i.js'), 'utf8')).toBe('installed\n')
+
+  // A tree in no repository, no `.gitignore` at all: the store's own listing leaves it out too.
+  const plain = mkdtempSync(join(tmpdir(), 'enso-snap-plain-'))
+  writeFileSync(join(plain, 'a.txt'), 'a\n')
+  mkdirSync(join(plain, 'node_modules', 'x'), { recursive: true })
+  writeFileSync(join(plain, 'node_modules', 'x', 'i.js'), 'installed\n')
+  const plainStore = await opened(plain)
+  expect(await snapshotPaths(environment, plainStore, (await taken(plainStore)).hash)).toEqual(['a.txt'])
+})
+
 /** Whether git speaks German here: a machine without the locale or git's catalog prints English. */
 function gitSpeaksGerman(): boolean {
   try {

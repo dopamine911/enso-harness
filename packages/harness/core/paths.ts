@@ -230,6 +230,26 @@ export function looksLikeSecret(absolutePath: string, fragments: readonly string
   return false
 }
 
+/** Text bash spells exactly as written: no expansion, quoting, glob or whitespace. */
+const PLAIN_PATH_TEXT = /^[\w./@%+,:=-]+$/
+
+/**
+ * The text pass's credential question (#777): a word judged by its TEXT, because its value is not
+ * knowable or the segmenter declined the command (a heredoc, #545). A plain literal path is asked
+ * exactly what {@link looksLikeSecret} asks of a resolved one, so inside the session's own tree it is
+ * judged relative to the tree (#615), and through its realpath; any other text is judged whole.
+ *
+ * ⚠ Only a PLAIN path is: text is a word bash has not resolved, and `<tree>/$X/logins` with
+ * `X=../../../..` names the home's logins. An expansion, a glob or a `..` segment keeps the whole
+ * text, and with it the `/.enso/` that refuses it.
+ *
+ * @group Guard predicates
+ */
+export function wordTextLooksLikeSecret(text: string, fragments: readonly string[], ownTree?: string): boolean {
+  const plain = PLAIN_PATH_TEXT.test(text) && !text.split('/').includes('..')
+  return plain ? looksLikeSecret(text, fragments, ownTree) : textLooksLikeSecretPath(text, fragments)
+}
+
 /**
  * Where a credential fragment is placed to name a location (#160 §4).
  *

@@ -816,6 +816,7 @@ test("⚠ Settings' model of every mode is the engine's: each verdict names a ru
 // written. ⚠ Here, in this suite's process-wide agent dir, and not in a server test: the
 // multi-account extension keeps the agent dir of the first host a process builds, so a second
 // suite building real hosts under its own dir broke the isolation test above whenever it ran first.
+// `test/real-host-gate.test.ts` (#518) refuses a real host built in any other test file.
 
 /** A running session over a fresh policy file (Enso's, seeded by the host), and that file's path. */
 async function runningUnderFreshPolicy(): Promise<{ hosted: HostedThread; policyPath: string }> {
@@ -1838,6 +1839,32 @@ test("⚠ a thread whose file sits in BOTH its project folder and pi's legacy di
   // And the read is the project folder's copy: two user turns, not the legacy copy's one.
   const transcript = (await host.readStoredThread(threadId))?.transcript ?? []
   expect(transcript.filter((entry) => entry.kind === 'message' && entry.role === 'user')).toHaveLength(2)
+})
+
+// #739: a lookup by id ran pi's `listAll`, which parses every line of every session file — 590–650
+// ms per cold read at 200 threads of 0.9 MB. It now opens only the file NAMED for the id. A FIFO
+// beside it, named for another thread, is the proof: any read of one blocks until a writer comes
+// (pi's listing did, and every lookup with it), so a lookup that answers never opened it.
+test('⚠ a lookup by id opens only the file named for that id: a sibling no reader gets past (a FIFO) holds up no lookup, no read and no listing (#739)', async () => {
+  const projectsDir = mkdtempSync(join(tmpdir(), 'enso-projects-'))
+  const host = createAgentHost({
+    servesDirectory: servesRepoRoot,
+    agentDir,
+    permissionRulesPath,
+    harnessPackageDir: harnessDir,
+    projectsDir,
+  })
+  const sessionDir = projectSessionsDir(projectsDir, projectIdOf(realpathOrSelf(repoRoot)))
+  const threadId = crypto.randomUUID()
+  const { file } = writeStoredSession({ cwd: repoRoot, threadId, turns: [['the question', 'the answer']], sessionDir })
+  execFileSync('mkfifo', [join(sessionDir, `2026-10-08T00-00-00-000Z_${crypto.randomUUID()}.jsonl`)])
+
+  expect(await host.storedThreadDirectory(threadId)).toBe(repoRoot)
+  const transcript = (await host.readStoredThread(threadId))?.transcript ?? []
+  expect(transcript.some((entry) => entry.kind === 'message' && entry.role === 'assistant')).toBe(true)
+  expect(await host.readStoredThread(crypto.randomUUID())).toBeUndefined()
+  // The listing reads every file — every REGULAR file: a FIFO is no session.
+  expect((await host.listSessions()).find((stored) => stored.id === threadId)?.path).toBe(file)
 })
 
 // ── #551 slice 2: each thread in its own tree ──────────────────────────────────────────────────

@@ -1,7 +1,13 @@
 import { basename } from 'node:path'
 import { PROC_ENVIRON_IN_COMMAND } from '@enso/core'
 import { isSecretShapedName } from '@enso/core/secrets'
-import { EXEC_TERMINATORS, FIND_COMMAND, findExecPayloads, TRANSPARENT_COMMAND_WRAPPERS } from './network-egress.ts'
+import {
+  EXEC_TERMINATORS,
+  FIND_COMMAND,
+  findExecPayloads,
+  TRANSPARENT_COMMAND_WRAPPERS,
+  withoutLiteralHeredocBodies,
+} from './network-egress.ts'
 import {
   extractFlatShellCommandSegments,
   literalShellWord,
@@ -154,7 +160,7 @@ function gateWords(words: readonly string[]): EnvironmentDumpMatch | undefined {
   return undefined
 }
 
-function rawScan(command: string, coarse: boolean): EnvironmentDumpMatch | undefined {
+function rawScan(command: string, coarse: boolean, listingText: string): EnvironmentDumpMatch | undefined {
   const procMatch = PROC_ENVIRON_IN_COMMAND.exec(command)
   if (procMatch !== null) return { matched: procMatch[0], via: 'proc-environ' }
   for (const expansion of command.matchAll(SHELL_EXPANSION_PATTERN)) {
@@ -168,7 +174,10 @@ function rawScan(command: string, coarse: boolean): EnvironmentDumpMatch | undef
   const listing = POWERSHELL_ENV_LISTING_PATTERN.exec(command)
   if (listing !== null) return { matched: listing[0], via: 'powershell' }
   if (!coarse) return undefined
-  const coarseMatch = COARSE_LISTING_PATTERN.exec(command)
+  // The listing words are scanned in commands only: `#!/usr/bin/env node` in a quoted heredoc's
+  // body is data for `cat` (#778). The expansions and `/proc/…/environ` above still read every
+  // body: a script written now runs later, out of this gate's sight.
+  const coarseMatch = COARSE_LISTING_PATTERN.exec(listingText)
   return coarseMatch === null ? undefined : { matched: coarseMatch[1] ?? coarseMatch[0], via: 'raw-scan' }
 }
 
@@ -193,5 +202,6 @@ export function findEnvironmentDump(
       if (verdict !== undefined) return verdict
     }
   }
-  return rawScan(command, coarse)
+  // PowerShell (forced coarse) has no heredocs: its text is scanned whole.
+  return rawScan(command, coarse, options.coarse === true ? command : withoutLiteralHeredocBodies(command))
 }

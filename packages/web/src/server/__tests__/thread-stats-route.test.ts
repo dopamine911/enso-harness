@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ENSO_LOG_EVENTS, type EnsoLogLine, type EnsoSessionUsage } from '@enso/core'
@@ -156,10 +156,10 @@ test('a live thread is answered from its session; a thread held nowhere is no an
   expect(await route('held-nowhere')).toBeUndefined()
 })
 
-// #359: a past day is folded once and kept; today is read fresh each time; a day the prune
-// deletes is forgotten. The file REWRITTEN under a kept day is how "kept" is observed — a real
-// past day never changes once the rotation moved on, which is the premise of keeping it.
-test('a day before today is read once and kept; today is re-read; a pruned day is dropped', async () => {
+// #359, #739: each day's fold is kept and extended by what is appended to its file — today's
+// new calls join without a re-read — a file rewritten shorter is folded again, and a day the
+// prune deletes is forgotten.
+test("a day's fold is kept and extended by appended records; a rewritten day refolds; a pruned day is dropped", async () => {
   const logsDir = logsDirForTheThread()
   const route = createThreadStatsRoute({
     threads: noLiveThread,
@@ -172,11 +172,17 @@ test('a day before today is read once and kept; today is re-read; a pruned day i
   const durations = async (): Promise<Array<number | undefined>> =>
     (await route(THREAD))?.callStats.map((call) => call.durationMs) ?? []
   expect(await durations()).toEqual([undefined, 400, 100, undefined, undefined])
+  appendFileSync(
+    join(logsDir, ensoLogFilename(TODAY)),
+    `${timedCall(TODAY, THREAD, 'call-3', 20)
+      .map((line) => JSON.stringify(line))
+      .join('\n')}\n`,
+  )
+  expect(await durations()).toEqual([undefined, 400, 100, undefined, 20])
   writeDay(logsDir, FIRST_DAY, timedCall(FIRST_DAY, THREAD, 'call-1', 999))
-  writeDay(logsDir, TODAY, [...timedCall(TODAY, THREAD, 'call-2', 150), ...timedCall(TODAY, THREAD, 'call-3', 20)])
-  expect(await durations()).toEqual([undefined, 400, 150, undefined, 20])
+  expect(await durations()).toEqual([undefined, 999, 100, undefined, 20])
   rmSync(join(logsDir, ensoLogFilename(FIRST_DAY)))
   const pruned = await route(THREAD)
   expect(pruned?.logDays).toEqual(['2026-09-22'])
-  expect(pruned?.callStats.map((call) => call.durationMs)).toEqual([undefined, undefined, 150, undefined, 20])
+  expect(pruned?.callStats.map((call) => call.durationMs)).toEqual([undefined, undefined, 100, undefined, 20])
 })

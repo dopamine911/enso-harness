@@ -25,7 +25,7 @@ import type { ThreadSummary } from './thread-stores.ts'
  * has open — they die with the page — then pi's session files in that project this page has not
  * got open (#95); a click resumes one, with its history and its mode, under the same id — the
  * thread id IS pi's session id. A thread RUNNING elsewhere (a run in flight, a dialog parked) is
- * shown with a pulse and still resumable: under the follow transport a resume follows the run
+ * shown with a running dot and still resumable: under the follow transport a resume follows the run
  * (#114). Idle is resumable too, even when this server still holds it — a reload must get its own
  * thread back (PR #104 review). A section's `+` starts a thread IN that project; the header's New
  * Thread starts one in the project of the thread on screen. A fork (#433) says which thread it
@@ -290,8 +290,9 @@ export function railLabels(group: ProjectGroup): ReadonlyMap<string, string | un
 
 /**
  * A thread's live state, as the status bar's dot at rail size: violet while pi waits on you,
- * pulsing in the running colour while a run is in flight (Signal lights both), hollow when an
- * open thread is idle. A stored thread says only that it is running.
+ * solid in the running colour while a run is in flight (Signal lights both), hollow when an
+ * open thread is idle. A stored thread says only that it is running. ⚠ No pulse (#739): an
+ * animation runs the compositor for as long as pi works, once per running thread in the rail.
  */
 function LiveDot({ state }: { state: 'waiting' | 'running' | 'idle' }): React.ReactNode {
   if (state === 'waiting') {
@@ -303,7 +304,7 @@ function LiveDot({ state }: { state: 'waiting' | 'running' | 'idle' }): React.Re
   }
   if (state === 'running') {
     return (
-      <span className="size-2 shrink-0 rounded-full bg-evidence motion-safe:animate-pulse signal:shadow-glow-evidence">
+      <span className="size-2 shrink-0 rounded-full bg-evidence signal:shadow-glow-evidence">
         <span className="sr-only">running</span>
       </span>
     )
@@ -352,7 +353,7 @@ function ThreadRow({
 }
 
 /**
- * One stored thread's row: title, age, and — when it is running — a pulse. Running is
+ * One stored thread's row: title, age, and — when it is running — a running dot. Running is
  * shown, not locked (#114): under the follow transport (#112) a resume MOUNTS the thread
  * and follows it, so a page that reloaded under pi's open question comes back to the card
  * from here. Before #113 a run belonged to the tab's HTTP response and a second page could

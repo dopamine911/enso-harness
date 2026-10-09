@@ -746,10 +746,10 @@ test('a prompt offers "Restore files to here" only while the snapshot says the t
   })
   const buttons = (): string[] =>
     [...pane.container.querySelectorAll('button')].map((button) => button.textContent ?? '')
-  await pane.settle({ ...SNAPSHOT_IDLE, messages: [prompted], tree: false })
+  await pane.settle({ ...SNAPSHOT_IDLE, messageCount: 1, tree: false })
   await eventually(() => expect(buttons()).toContain('fork from here'))
   expect(buttons()).not.toContain('Restore files to here')
-  await pane.settle({ ...SNAPSHOT_IDLE, messages: [prompted], tree: true })
+  await pane.settle({ ...SNAPSHOT_IDLE, messageCount: 1, tree: true })
   await eventually(() => expect(buttons()).toContain('Restore files to here'))
   await pane.unmount()
 })
@@ -776,7 +776,7 @@ test('⚠ each prompt’s restore and fork are named for their prompt, uniquely,
       incidents: NO_SESSION_INCIDENTS,
     },
   })
-  await pane.settle({ ...SNAPSHOT_IDLE, messages, tree: true })
+  await pane.settle({ ...SNAPSHOT_IDLE, messageCount: messages.length, tree: true })
   const named = (visible: string): Array<string | null> =>
     [...pane.container.querySelectorAll('button')]
       .filter((button) => button.textContent === visible)
@@ -1777,6 +1777,109 @@ test('⚠ a tool result the wire lands on a LATER message still completes the ca
   await pane.unmount()
 })
 
+// ── #739: a long thread opens on its last page, and a chunk redraws only its own message ─────────
+
+const text = (id: string, role: 'user' | 'assistant', content: string): UIMessage => ({
+  id,
+  role,
+  parts: [{ type: 'text', content }],
+})
+
+/** A stored thread's history as `/history` answers it, around `messages`. */
+const storedHistory = (threadId: string, messages: UIMessage[]): EnsoThreadHistory => ({
+  threadId,
+  projectId: 'p-launch',
+  messages,
+  permissionMode: { mode: 'default', available: ['default'] },
+  sessionRisk: { level: 'low', signals: 0 },
+  incidents: NO_SESSION_INCIDENTS,
+})
+
+test('a long thread opens on its last page; "Load earlier" puts the page before it above, its prompts numbered from the branch’s start (#739)', async () => {
+  const threadId = crypto.randomUUID()
+  const earlier = [
+    text('b-u1', 'user', 'first ask'),
+    text('b-a1', 'assistant', 'FIRST-REPLY'),
+    text('b-u2', 'user', 'second ask'),
+    text('b-a2', 'assistant', 'SECOND-REPLY'),
+  ]
+  const page = [text('b-u3', 'user', 'third ask'), text('b-a3', 'assistant', 'THIRD-REPLY')]
+  const pane = await mountPane({
+    onForked: () => undefined,
+    history: {
+      ...storedHistory(threadId, page),
+      earlier: { messages: earlier.length, prompts: 2, firstPrompt: earlier[0] },
+    },
+    server: { earlierHistories: { 'b-u3': storedHistory(threadId, earlier) } },
+  })
+  await pane.settle({ ...SNAPSHOT_IDLE, threadId, messageCount: earlier.length + page.length })
+  const forkNames = (): Array<string | null> =>
+    [...pane.container.querySelectorAll('button')]
+      .filter((button) => button.textContent === 'fork from here')
+      .map((button) => button.getAttribute('aria-label'))
+  const loadEarlier = (): HTMLButtonElement | undefined =>
+    [...pane.container.querySelectorAll('button')].find((button) => button.textContent?.startsWith('Load earlier'))
+
+  // Only the page: its prompt is the branch's third, and the thread is titled by its first.
+  await eventually(() => expect(pane.container.textContent).toContain('THIRD-REPLY'))
+  expect(pane.container.textContent).not.toContain('SECOND-REPLY')
+  expect(forkNames()).toEqual(['fork from here, prompt 3: “third ask”'])
+  expect(railTitle(threadId)).toBe('first ask')
+  expect(loadEarlier()?.textContent).toBe('Load earlier · 4 earlier messages')
+
+  await flush(async () => {
+    loadEarlier()?.click()
+    await tick()
+  })
+  const all = ['FIRST-REPLY', 'SECOND-REPLY', 'THIRD-REPLY']
+  await eventually(() => expect(readingOrder(pane, all)).toEqual(all))
+  expect(forkNames()).toEqual([
+    'fork from here, prompt 1: “first ask”',
+    'fork from here, prompt 2: “second ask”',
+    'fork from here, prompt 3: “third ask”',
+  ])
+  // The branch is whole on the page now: nothing earlier to offer.
+  expect(loadEarlier()).toBeUndefined()
+  await pane.unmount()
+})
+
+test('a streamed chunk redraws its own message and no other: the earlier bubbles see no DOM change (#739)', async () => {
+  const threadId = crypto.randomUUID()
+  const pane = await mountPane({
+    history: storedHistory(threadId, [
+      text('s-u1', 'user', 'first ask'),
+      text('s-a1', 'assistant', 'FIRST-REPLY'),
+      text('s-u2', 'user', 'second ask'),
+      text('s-a2', 'assistant', 'SECOND-REPLY'),
+    ]),
+  })
+  await pane.settle({ ...SNAPSHOT_IDLE, threadId, messageCount: 4 })
+  await sendPrompt(pane, 'third ask')
+  await pane.settle(
+    { type: 'observation', seq: 1, observation: { kind: 'message-start', role: 'assistant' } },
+    { type: 'observation', seq: 2, observation: { kind: 'text-delta', contentIndex: 0, delta: 'STREAM' } },
+  )
+  await eventually(() => expect(assistantBubbles(pane).at(-1)).toContain('STREAM'))
+  const earlierBubbles = [...pane.container.querySelectorAll('[data-role]')].filter((bubble) =>
+    /first ask|FIRST-REPLY|second ask|SECOND-REPLY/.test(bubble.textContent ?? ''),
+  )
+  expect(earlierBubbles).toHaveLength(4)
+  const changed: Node[] = []
+  const observer = new MutationObserver((records) => {
+    for (const record of records) changed.push(record.target)
+  })
+  observer.observe(pane.container, { subtree: true, childList: true, characterData: true, attributes: true })
+  await pane.settle(
+    { type: 'observation', seq: 3, observation: { kind: 'text-delta', contentIndex: 0, delta: '-ING' } },
+    { type: 'observation', seq: 4, observation: { kind: 'text-delta', contentIndex: 0, delta: '-ON' } },
+  )
+  await eventually(() => expect(assistantBubbles(pane).at(-1)).toContain('STREAM-ING-ON'))
+  observer.disconnect()
+  expect(changed.length).toBeGreaterThan(0)
+  expect(changed.filter((target) => earlierBubbles.some((bubble) => bubble.contains(target)))).toEqual([])
+  await pane.unmount()
+})
+
 // ── #382: a run line reads where it happened, not after the whole transcript ─────────────────
 
 /** Send `text` from the composer, as a person would. */
@@ -2008,6 +2111,8 @@ test("⚠ a frame on one thread's follow changes that pane and no other — cost
 
 // #453: the status bar reads git in the thread's cwd on mount, and again when a tool result
 // settles — the moment an edit, a write or a `git commit` lands — so the readout follows the tree.
+// The prompt is another tab's (no composer here): since #739 the re-reads are paced, and a run
+// started on this page opens the window the result would then wait out — `thread-status-pace.test.tsx`.
 test('the status bar reads git on mount and again when a tool result settles (#453)', async () => {
   let reads = 0
   let unstaged = 0
@@ -2035,11 +2140,6 @@ test('the status bar reads git on mount and again when a tool result settles (#4
   await pane.settle(SNAPSHOT_LIVE)
   await eventually(() => expect(pane.status()).toContain('main· clean'))
   const beforeRun = reads
-  await flush(async () => {
-    typeInto(pane.composer(), 'edit it')
-    pressEnter(pane.composer())
-    await tick()
-  })
   unstaged = 1
   await pane.settle(
     { type: 'observation', seq: 1, observation: { kind: 'message-start', role: 'assistant' } },

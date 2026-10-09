@@ -91,8 +91,13 @@ const GIT_LOCAL_VARIABLES: Record<string, true> = {
   GIT_COMMON_DIR: true,
 }
 
-/** What every query runs under, whatever the environment says. */
-const GIT_READ_ONLY_VARIABLES = { GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0', GIT_PAGER: 'cat' }
+/**
+ * What every query runs under, whatever the environment says. `LC_ALL: 'C'` (#568): failures are
+ * sorted by git's stderr (`NOT_A_WORKING_TREE`), which git translates, so under `de_DE` a directory
+ * that is no repository read as `unavailable`. `C` overrides `LANGUAGE` too; the snapshot store
+ * pins the same for its reads (#567).
+ */
+const GIT_READ_ONLY_VARIABLES = { GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0', GIT_PAGER: 'cat', LC_ALL: 'C' }
 
 /**
  * Config forced on the command line, whatever the repository or the user sets. No program the
@@ -570,21 +575,60 @@ async function trackedChanges(
   )
 }
 
+/**
+ * One untracked file read, not yet charged against the answer's budget: `skipped` when it is too
+ * big to diff at all, else its patch (`undefined` when git could not diff it) and counts.
+ */
+type UntrackedRead =
+  | { readonly kind: 'skipped'; readonly change: EnsoGitFileChange }
+  | {
+      readonly kind: 'diffed'
+      readonly file: ListedFile
+      readonly counts: { added: number | null; removed: number | null }
+      readonly patch: string | undefined
+    }
+
 /** A file git does not track yet, diffed against nothing — read only when it is small enough. */
-async function untrackedChange(
-  runGit: GitRunner,
-  root: string,
-  path: string,
-  budget: { left: number },
-): Promise<EnsoGitFileChange> {
+async function readUntracked(runGit: GitRunner, root: string, path: string): Promise<UntrackedRead> {
   const file: ListedFile = { path, oldPath: null, status: 'untracked' }
   const size = lstatSync(join(root, path), { throwIfNoEntry: false })?.size ?? 0
-  if (size > MAX_UNTRACKED_BYTES) return { ...file, added: null, removed: null, patch: null, omitted: 'too-large' }
+  if (size > MAX_UNTRACKED_BYTES) {
+    return { kind: 'skipped', change: { ...file, added: null, removed: null, patch: null, omitted: 'too-large' } }
+  }
   // `--no-index` exits 1 when the two differ — which a new file always does against nothing.
   const diffed = await runGit(['diff', ...DIFF_OPTIONS, '--no-index', '--', '/dev/null', path], root)
   const patch = diffed.code === 0 || diffed.code === 1 ? diffed.stdout : undefined
   const counts = patch === undefined ? { added: null, removed: null } : countPatch(patch)
-  return withPatch(file, counts, patch, budget)
+  return { kind: 'diffed', file, counts, patch }
+}
+
+/**
+ * How many untracked files are diffed at once (#463). One git process per file, one after another,
+ * cost about 1.5 ms each: 757 ms for 500 files, on every refresh of an open Changes view. Bounded,
+ * so a tree of 500 new files never starts 500 processes. Exported for the test that orders the
+ * answers against this limit.
+ *
+ * @group Git
+ */
+export const UNTRACKED_DIFF_CONCURRENCY = 8
+
+/** `map` over `inputs`, at most `limit` at a time, the results in the inputs' order. */
+async function mappedConcurrently<Input, Output>(
+  inputs: readonly Input[],
+  limit: number,
+  map: (input: Input) => Promise<Output>,
+): Promise<Output[]> {
+  const results: Output[] = Array.from({ length: inputs.length })
+  let next = 0
+  const work = async (): Promise<void> => {
+    while (next < inputs.length) {
+      const index = next
+      next += 1
+      results[index] = await map(inputs[index] as Input)
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, inputs.length) }, work))
+  return results
 }
 
 /**
@@ -622,10 +666,14 @@ export async function readTreeChanges(
   // A nested repository is listed as its directory (`vendor/lib/`), which has no diff of its own.
   const untrackedPaths = (await comparison.listUntracked()).filter((path) => path !== '' && !path.endsWith('/'))
   const room = Math.max(0, MAX_CHANGED_FILES - tracked.length)
-  const untracked: EnsoGitFileChange[] = []
-  for (const path of untrackedPaths.slice(0, room)) {
-    untracked.push(await untrackedChange(runGit, comparison.root, path, budget))
-  }
+  const reads = await mappedConcurrently(untrackedPaths.slice(0, room), UNTRACKED_DIFF_CONCURRENCY, (path) =>
+    readUntracked(runGit, comparison.root, path),
+  )
+  // Charged in list order, after every diff is back: which file runs out of room never depends
+  // on which git process finished first.
+  const untracked = reads.map((read) =>
+    read.kind === 'skipped' ? read.change : withPatch(read.file, read.counts, read.patch, budget),
+  )
   return {
     files: [...tracked.slice(0, MAX_CHANGED_FILES), ...untracked],
     truncated: tracked.length > MAX_CHANGED_FILES || untrackedPaths.length > room,

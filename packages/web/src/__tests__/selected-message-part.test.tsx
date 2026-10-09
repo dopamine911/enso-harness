@@ -135,7 +135,6 @@ test('⚠ a tool call with no result in a run that has ENDED reads aborted, not 
   expect(rendered).toContain('data-enso-tool-call="aborted"')
   expect(rendered).toContain('>aborted<')
   expect(rendered).not.toContain('running…')
-  expect(rendered).not.toContain('animate-pulse')
   expect(rendered).not.toContain(' open')
 })
 
