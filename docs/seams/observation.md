@@ -270,6 +270,8 @@ saying "nothing" must not stand in front of one saying "something" (#216, #219).
 
 ## Pivot cost
 
+Which files may import the runtime is fixed by a gate (#558): `VENDOR_IMPORTERS_ALLOWED_INSIDE_ROOTS` in `test/vendor-gate.test.ts` lists them, and the list only shrinks, so a new file cannot quietly add to what follows.
+
 Replace the runtime and the vocabulary does not move: the union, the frames, the follow route, the
 registry's feed, the browser adapter, the kinds table and both sweeps stay. What changes is the
 producer — the host's `map-events.ts` learns the new loop's event names, or maps its typed events

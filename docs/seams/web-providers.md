@@ -271,6 +271,8 @@ name no vendor; `anthropic-wire.ts` names a provider's HTTP wire, which is the t
 
 ## Pivot cost
 
+Which files may import the runtime is fixed by a gate (#558): `VENDOR_IMPORTERS_ALLOWED_INSIDE_ROOTS` in `test/vendor-gate.test.ts` lists them, and the list only shrinks, so a new file cannot quietly add to what follows.
+
 **Adding a provider** is one file under `providers/` exporting a `run*` over `ModelSearchRequest` (or
 its own request shape, as `deepseek` and `tavily` do), one literal on `WebSearchProviderId`, one entry
 in `WebSearchDependencies.runProviders` and the composition root's map, and — for a model-routed one —
