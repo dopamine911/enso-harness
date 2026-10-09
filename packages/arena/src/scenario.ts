@@ -106,6 +106,20 @@ const PLAY_SCENARIO = scenarioOf('play', [
 ])
 
 /**
+ * A long build in many parts (#740): every other scenario is done in minutes (a snake run took under
+ * four), and what grows with a run's length went unmeasured: the agent's context and reads, the
+ * recorder's samples and trace, Enso's threads and trees, compaction. Six games behind one front end
+ * is a project that keeps growing over many requests, and the cabinet ties them together. Outcomes,
+ * never controls: how the work is split across requests and threads is the agent's.
+ */
+const ARCADE_SCENARIO = scenarioOf('arcade', [
+  'Build a retro arcade cabinet that runs in the browser: one page styled as an arcade cabinet, from',
+  'which a player picks a game and plays it. Put six games in it: five classic arcade games of your',
+  'choosing, recreated in a retro arcade style, and one new game of your own design in the same style.',
+  'You own the design, implementation, and testing.',
+])
+
+/**
  * How the agent under test reaches the UI: the agent runner's one tool (`tool`), or the
  * `bun run arena act` command when a person or an unrestricted agent drives the run (`command`).
  */
@@ -403,8 +417,7 @@ export function arenaActCommand(outDirectory?: string): string {
 
 /** Every scenario by id: what `bun run arena start --scenario <id>` accepts. */
 export const ARENA_SCENARIOS: Readonly<Record<string, ArenaScenario>> = Object.fromEntries(
-  [SNAKE_SCENARIO, ITERATE_SCENARIO, COMPARE_SCENARIO, RESUME_SCENARIO, PLAY_SCENARIO].map((scenario) => [
-    scenario.id,
-    scenario,
-  ]),
+  [SNAKE_SCENARIO, ITERATE_SCENARIO, COMPARE_SCENARIO, RESUME_SCENARIO, PLAY_SCENARIO, ARCADE_SCENARIO].map(
+    (scenario) => [scenario.id, scenario],
+  ),
 )
