@@ -140,6 +140,9 @@ test("⚠ a quoted heredoc's body is data to the listing scan; a shell reading i
   expect(denied(`cat > run.js ${script}`)).toBeUndefined()
   // A shell reading the stream runs the body as its program.
   expect(denied("bash << 'EOF'\nenv\nEOF")).toBe('raw-scan')
+  // …and with it beside a `cat` heredoc, the whole command is scanned: a shell-fed stream anywhere
+  // keeps every body in, the data one included (PR #783 review).
+  expect(denied(`cat > run.js ${script}\nbash << 'RUN'\nnode run.js\nRUN`)).toBe('raw-scan')
   // A listing on a command line beside the heredoc.
   expect(denied(`env > dump.txt; cat > run.js ${script}`)).toBe('raw-scan')
   // An unquoted body is expanded by bash, so it stays in the scan.
