@@ -6,14 +6,13 @@ import {
   DialogAnswerControls,
   describeAttachmentError,
   EnsoDialogCard,
-  type KeyedPart,
-  keyedParts,
   settleDialog,
   ThreadPane,
 } from '../chat-screen.tsx'
 import type { DialogAnswerOutcome, FollowConnection } from '../follow-connection.ts'
 import { createStore } from '../store.ts'
 import { adoptThread, clearThreadsForTest, mintThread } from '../thread-stores.ts'
+import { type KeyedPart, keyedParts } from '../transcript-selection.ts'
 import { selectIn } from './static-markup.ts'
 
 /**

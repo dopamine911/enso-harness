@@ -56,6 +56,7 @@ import { transcriptOf } from '../../host/transcript.ts'
 import type { ProjectThreadSettingsSource } from '../../host/tree-setup.ts'
 import { startEnsoServer } from '../index.ts'
 import { NO_PROMPT_LIBRARY } from '../prompt-library.ts'
+import { HISTORY_PAGE_MESSAGES } from '../thread-read.ts'
 import {
   createFakeAgentHost,
   createFakeHostedThread,
@@ -1515,7 +1516,7 @@ test('⚠ a thread built WHILE /history reads the file is served pi\u2019s branc
   expect(snapshot.live).toBe(true)
   expect(history.permissionMode).toEqual({ mode: 'default', available: ['default', 'acceptEdits'] })
   expect(history.messages).toEqual([])
-  expect(history.messages).toEqual(snapshot.messages)
+  expect(snapshot.messageCount).toBe(history.messages.length)
   expect(history.permissionMode).toEqual(snapshot.permissionMode)
 })
 
@@ -1583,6 +1584,51 @@ test('/history and the follow’s snapshot say where a stored thread’s run was
   expect(follow.frames[0]).toMatchObject({ type: 'snapshot', stoppedAfter: ['a1'] })
   const finished = (await (await fetch(`${url}/api/threads/finished/history`)).json()) as EnsoThreadHistory
   expect(finished).not.toHaveProperty('stoppedAfter')
+})
+
+// #739: opening a thread sent the whole branch twice — `/history` and the follow's snapshot, 15 MB
+// each at 5,040 turns. `/history` sends the last page and says what is before it; `?before=` reads
+// the page before a message; the snapshot says only how many messages there are.
+test('/history pages a long branch from its end, `?before=` reads the page before, and the snapshot carries no messages (#739)', async () => {
+  const count = HISTORY_PAGE_MESSAGES + 5
+  const transcript: EnsoTranscriptEntry[] = Array.from({ length: count }, (_, position) => ({
+    kind: 'message',
+    id: `m${position}`,
+    role: position % 2 === 0 ? 'user' : 'assistant',
+    parts: [{ type: 'text', text: `message ${position}` }],
+  }))
+  const stored = { long: { transcript, modified: new Date(0), firstMessage: 'message 0' } }
+  const { url } = await startWith({ onPrompt: neverPrompted }, stored)
+  const ids = (history: EnsoThreadHistory): unknown[] =>
+    history.messages.map((message) =>
+      typeof message === 'object' && message !== null && 'id' in message ? message.id : undefined,
+    )
+
+  const last = (await (await fetch(`${url}/api/threads/long/history`)).json()) as EnsoThreadHistory
+  expect(Check(EnsoThreadHistory, last)).toBe(true)
+  expect(ids(last)).toEqual(Array.from({ length: HISTORY_PAGE_MESSAGES }, (_, position) => `m${position + 5}`))
+  // Five before it, three of them prompts; the first prompt rides along for the thread's title.
+  expect(last.earlier).toEqual({
+    messages: 5,
+    prompts: 3,
+    firstPrompt: { id: 'm0', role: 'user', parts: [{ type: 'text', content: 'message 0' }] },
+  })
+
+  const earlier = (await (await fetch(`${url}/api/threads/long/history?before=m5`)).json()) as EnsoThreadHistory
+  expect(ids(earlier)).toEqual(['m0', 'm1', 'm2', 'm3', 'm4'])
+  expect(earlier).not.toHaveProperty('earlier')
+
+  // A message the branch no longer holds (a compaction rewrote it): refused, never another page spliced in.
+  const gone = await fetch(`${url}/api/threads/long/history?before=rewritten`)
+  expect(gone.status).toBe(409)
+  expect(await gone.text()).toContain('no longer holds message rewritten')
+
+  const controller = new AbortController()
+  openFollows.push(controller)
+  const follow = await openFollow(url, 'long', controller)
+  await follow.untilFrames(1)
+  expect(follow.frames[0]).toMatchObject({ type: 'snapshot', messageCount: count })
+  expect(follow.frames[0]).not.toHaveProperty('messages')
 })
 
 test('GET /api/threads lists live threads with busy state and the run number', async () => {

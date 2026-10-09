@@ -35,20 +35,6 @@ export function refusalOfMessage(message: unknown): EnsoProviderRefusal | undefi
 }
 
 /**
- * The refusal the thread's LAST assistant message is (#381), or nothing: what a resumed thread's
- * status bar says. A refusal followed by a reply is history, not the thread's state.
- */
-export function trailingRefusalOf(messages: readonly unknown[]): EnsoProviderRefusal | undefined {
-  for (let position = messages.length - 1; position >= 0; position -= 1) {
-    const message = messages[position]
-    if (typeof message === 'object' && message !== null && 'role' in message && message.role === 'assistant') {
-      return refusalOfMessage(message)
-    }
-  }
-  return undefined
-}
-
-/**
  * The refusal in the attempt's own bubble (#381): the same row the live line is (`TranscriptLine`,
  * error), so a reloaded thread reads the way it did while it ran.
  */

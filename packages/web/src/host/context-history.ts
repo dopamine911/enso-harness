@@ -7,7 +7,7 @@ import {
   type EnsoFileOperation,
   readRecordedMode,
 } from '@enso/core'
-import { type ContextItem, foldSystem, makeupOf } from './context-elements.ts'
+import { foldSystem } from './context-elements.ts'
 
 /**
  * What happened to a thread's context, and to its files (#361 phase 4) — dsh-context's Context
@@ -19,7 +19,7 @@ import { type ContextItem, foldSystem, makeupOf } from './context-elements.ts'
  * same rule as every bar — not pi's `tokensBefore`, which is a figure of pi's own making.
  */
 
-/** A context's estimated total at a leaf — `branch-context.ts` builds it with pi's projection. */
+/** A context's estimated total at a leaf — `branch-context.ts` reads it off its walk of pi's projection (#739). */
 export type ContextTotalAt = (leafId: string | null) => number
 
 interface EventWalk {
@@ -400,10 +400,4 @@ export function fileOperations(branch: readonly SessionEntry[]): EnsoFileOperati
       ...(call.result === undefined ? {} : { resultKey: call.result.key }),
     })),
   )
-}
-
-/** Estimated total of a context's elements — the total a bar draws. */
-export function totalOfItems(items: Iterable<ContextItem>): number {
-  const makeup = makeupOf(items)
-  return makeup.system + makeup.tools + makeup.user + makeup.injected + makeup.assistant + makeup.toolResults
 }

@@ -55,13 +55,12 @@ test('no descriptor at all falls back to the envelope text', () =>
 test('an in-flight call says so rather than rendering nothing', () => expect(html(undefined)).toContain('running'))
 
 // #130: pi emits no result for a call its abort interrupted, so without the run's state a
-// stopped call read `running…` forever. Same absence, run over: aborted — still, not pulsing.
+// stopped call read `running…` forever. Same absence, run over: aborted.
 test('⚠ no result once the run is over is ABORTED, not running', () => {
   const rendered = html(undefined, false)
   expect(rendered).toContain('data-enso-tool-result="aborted"')
   expect(rendered).toContain('aborted — the run ended before this call returned')
   expect(rendered).not.toContain('running')
-  expect(rendered).not.toContain('animate-pulse')
   // The definition itself, for the two readers that branch on it.
   expect(toolResultState(undefined, true)).toEqual({ status: 'pending' })
   expect(toolResultState(undefined, false)).toEqual({ status: 'aborted' })

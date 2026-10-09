@@ -18,7 +18,7 @@ import {
 } from '@enso/core'
 import { Compile } from 'typebox/compile'
 import { Check } from 'typebox/value'
-import { providerRefusalLine, providerRefusalSource, trailingRefusalOf } from './refused-attempt.tsx'
+import { providerRefusalLine, providerRefusalSource } from './refused-attempt.tsx'
 import { createStore, type Store } from './store.ts'
 import type { ThreadStores } from './thread-stores.ts'
 
@@ -118,12 +118,12 @@ export function routeEnsoCustomEvent(stores: ThreadStores, eventType: string, da
     stores.cwd.set(data.cwd)
     stores.tree.set(data.tree)
     // #659: a session or messages means the routes answer — latched, never cleared by a later resync.
-    if (data.model !== null || data.messages.length > 0) stores.readable.set(true)
+    if (data.model !== null || data.messageCount > 0) stores.readable.set(true)
     stores.usage.set(data.usage)
     // The status bar's refusal word, resynced (#381): set when the branch's last reply is a
     // refused attempt — how a resumed thread still says it — and cleared when it is not. The
     // snapshot's own output is the mark a later reply must grow past.
-    const trailing = trailingRefusalOf(data.messages)
+    const trailing = data.trailingRefusal
     stores.refusal.set(
       trailing === undefined
         ? undefined

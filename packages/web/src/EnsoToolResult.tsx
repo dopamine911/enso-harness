@@ -102,16 +102,17 @@ export function EnsoToolResult({
 }): React.ReactNode {
   const state = toolResultState(result, runOpen)
   const descriptor = useDescriptor(result)
-  // No result yet — the call is in flight. Say so rather than rendering nothing.
+  // No result yet — the call is in flight. Say so rather than rendering nothing; in words and colour,
+  // not a pulse (#739: an animation keeps the compositor ticking for as long as the call runs).
   if (state.status === 'pending') {
     return (
-      <p data-enso-tool-result="pending" className="text-sm text-evidence motion-safe:animate-pulse">
+      <p data-enso-tool-result="pending" className="text-sm text-evidence">
         running…
       </p>
     )
   }
   // No result and the run is over (#130): the call was interrupted — by a stop, the
-  // server going away, or a torn tail on resume. Still, not pulsing; the words say why.
+  // server going away, or a torn tail on resume. Muted, not the running colour; the words say why.
   if (state.status === 'aborted') {
     return (
       <p data-enso-tool-result="aborted" className="text-sm text-muted-foreground">
