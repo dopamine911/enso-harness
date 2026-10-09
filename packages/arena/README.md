@@ -119,12 +119,13 @@ back to the model, and the second half of the run cost 1.9× the first. Now:
 Run each scenario in both modes and put the two side by side with `arena compare`, which shows each
 run's perception and agent: they find different things.
 
-Five scenarios, told only what to achieve, never which controls to use:
+Six scenarios, told only what to achieve, never which controls to use:
 - **`snake`** (the default): a Snake game with five features of the agent's choosing. One prompt and done: it exercises starting a session, approvals, and seeing what was built.
 - **`iterate`**: a to-do CLI in at least three rounds, checking each round's changes, taking one round back for another approach, and finding the work's cost and context. It reaches what Snake doesn't: the Diff view, restore, forks, Stats and Context. Its first run found #650 and #651.
 - **`compare`**: a Markdown-to-HTML converter in two approaches kept side by side, compared by what each changed and cost, one kept and the other cleaned up, then exactly what the model was given in its last request. It reaches parallel threads, deleting a thread and its tree, and Context. Its first run found #659.
 - **`resume`**: a password generator whose work is interrupted and picked up: one request stopped midway and redirected, the page reloaded and the conversation continued, a branch off an earlier request, and another model for one request. It reaches stopping a run, persistence across a reload, forks and the model control. Its first run found #664 and #665.
 - **`play`** (#675): a small browser game, then played by the agent the way a player would: it finds something wrong or missing, has it changed, and plays again, at least twice. It is never told there is a preview; whether it finds a way to play is the finding. It reaches Preview, iteration on a running application, and what only using it shows.
+- **`arcade`** (#740): a retro arcade cabinet in the browser, a page a player picks games from, with five classic arcade games recreated in a retro style and one new game of the agent's own design. A long build in many parts: the others are done in minutes, and this is where what grows with a run's length shows (context and reads, samples and trace, threads and trees, compaction).
 
 **When a run stops (#609).** Besides the agent's own `stop`:
 - **The budget (`--minutes`).** Every `act` answer carries `phase` and `remainingMs`. When the budget is
