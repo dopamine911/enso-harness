@@ -52,7 +52,7 @@ export function ensoBuildOf(repoRoot: string): ArenaEnsoBuild | undefined {
     .split('\0')
     .filter(Boolean)
     .toSorted()
-  // ⚠ git streams each file and answers its blob id (PR #623 review): an un-ignored build output
+  // ⚠ git streams each file and answers its blob id: an un-ignored build output
   // is never read whole into the recorder's memory, and the content is hashed the way git would.
   const blobs =
     untracked.length === 0

@@ -3,6 +3,8 @@ import {
   extractFlatShellCommandSegments,
   type FlatShellCommandSegment,
   literalShellWord,
+  type Quote,
+  quoteAfter,
   shellWordsOf,
   withoutLeadingEnvironmentAssignments,
 } from './shell-segments.ts'
@@ -28,14 +30,14 @@ import { canonicalToolName } from './tool-identity.ts'
  * - PARSEABLE commands (the segmenter returned segments): the denied name must be the
  *   segment's command word — leading env assignments stripped, then resolved to the
  *   LITERAL value the shell would execute (quote/escape removal: `"curl"`, `\curl` and
- *   `cu"rl"` all resolve to `curl` — PR #55 review, round 1), path prefix ignored,
+ *   `cu"rl"` all resolve to `curl`), path prefix ignored,
  *   case-folded. `echo "curl is a tool"` passes — the word is quoted argument text.
  * - UNPARSEABLE commands (the segmenter returned [] — command substitution, backticks,
  *   heredocs) AND runtime-expanded command words (`$C https://…`) fall back to a
  *   word-boundary scan of the RAW string. Coarser on purpose: substitution and
  *   indirection are exactly where evasion lives, so a false positive there is friction
  *   toward safety ("rewrite without the substitution"), not a broken gate.
- * - SYNTHESIZED command words (PR #55 review, round 2) — unquoted brace/glob characters
+ * - SYNTHESIZED command words — unquoted brace/glob characters
  *   (`{c,}url`, `/usr/bin/cur[l]`, both of which execute curl, verified live) — are
  *   DENIED OUTRIGHT: expansion assembles the name from pieces, so no scan of the
  *   unexpanded text can ever see it, and escalating to the raw scan would be theater.
@@ -138,10 +140,10 @@ const BASH_SOCKET_DEVICE_PATTERN = /\/dev\/(?:tcp|udp)\//i
  * The segment's command word, resolved to the LITERAL value the shell would execute —
  * or the reason it cannot be, which decides the caller's move.
  *
- * ⚠ Literal resolution is load-bearing (PR #55 review, round 1): `"curl"`, `\curl` and
- * `cu"rl"` are all `curl` to bash but were unequal to it as raw text — and because a
- * balanced-quoted command is fully PARSEABLE, the coarse fallback never ran. Round 2 of
- * the same review found the second class: brace/glob SYNTHESIS (`{c,}url`), where the
+ * ⚠ Literal resolution is load-bearing: `"curl"`, `\curl` and
+ * `cu"rl"` are all `curl` to bash but unequal to it as raw text — and because a
+ * balanced-quoted command is fully PARSEABLE, the coarse fallback never runs. The second
+ * class is brace/glob SYNTHESIS (`{c,}url`), where the
  * raw scan is no net at all — see LiteralShellWordResult's doc for the split.
  */
 type CommandWordResult =
@@ -151,8 +153,8 @@ type CommandWordResult =
 
 /**
  * Commands that transparently exec their argument vector as the next command — no code
- * interpretation, the wrapped command sits VERBATIM in later words (PR #55 review,
- * round 3: `timeout 30 curl …`, `env curl …`).
+ * interpretation, the wrapped command sits VERBATIM in later words
+ * (`timeout 30 curl …`, `env curl …`).
  *
  * A segment led by one of these gets WRAPPER MODE: every subsequent word receives the
  * command-word treatment, which also makes wrapper STACKING free (`nohup timeout 30 curl …` —
@@ -254,24 +256,26 @@ export const EXEC_TERMINATORS = new Set([';', '+'])
  */
 export function findExecPayloads(words: readonly string[]): string[][] {
   const payloads: string[][] = []
+  // Two states: outside a payload (undefined), or collecting one. A predicate opens one, a
+  // terminator closes it; an empty payload is dropped.
   let current: string[] | undefined
+  const close = (): void => {
+    if (current !== undefined && current.length > 0) payloads.push(current)
+  }
   for (const word of words) {
     const resolved = literalShellWord(word)
     const value = resolved.kind === 'literal' ? resolved.value : word
     if (FIND_EXEC_PREDICATES.has(value)) {
-      if (current !== undefined && current.length > 0) payloads.push(current)
+      close()
       current = []
-      continue
-    }
-    if (current === undefined) continue
-    if (EXEC_TERMINATORS.has(value)) {
-      if (current.length > 0) payloads.push(current)
+    } else if (current !== undefined && EXEC_TERMINATORS.has(value)) {
+      close()
       current = undefined
-      continue
+    } else {
+      current?.push(word)
     }
-    current.push(word)
   }
-  if (current !== undefined && current.length > 0) payloads.push(current)
+  close()
   return payloads
 }
 
@@ -415,8 +419,8 @@ function wrappedOperandFinding(
  * Scan every word of a wrapper-led segment with the command-word treatment. A word's
  * LITERAL value is checked by EVERY internal whitespace token — a quoted `-c`/`eval`
  * payload is a full shell script (`bash -c "echo hi && curl …"`), and checking only its
- * first token was PR #55 review round 4: the word resolved cleanly to the wrong token
- * and, having resolved, never escalated — the round-1 shape again, a clean-but-wrong
+ * first token lets the word resolve cleanly to the wrong token
+ * and, having resolved, never escalate — the same shape as above, a clean-but-wrong
  * value silencing the fallback that would have caught it. All-token scanning is the
  * wrapper-mode philosophy applied inside the payload; each token is basename'd and
  * case-folded. `NAME=value` words (env's assignments) and the exempted `[`/`{}` are
@@ -587,7 +591,7 @@ function gateCommandLine(
   }
   const segments = extractFlatShellCommandSegments(command)
   if (segments.length === 0) return unscannableFloor(command, denied, deniedBinaries, depth) ?? 'escalate-unparseable'
-  // Two distinct unknowable-word escalations (PR #55 review, one round each), and they
+  // Two distinct unknowable-word escalations, and they
   // must NOT share a path:
   // - runtime-expansion (`$C https://…`): the coarse scan of the WHOLE command may catch
   //   a sibling assignment (`C=curl; $C …`), so escalate to it. What it cannot see is a
@@ -619,8 +623,7 @@ function gateCommandLine(
  * over — "rewrite without the substitution" is the friction the header promises. Same for
  * a shell taking a heredoc/herestring as its program: the body is data to this scan.
  *
- * ⚠ Heredoc bodies are DATA to the command that reads them (PR #149 review, two false
- * positives): `sh migrate.sh` as a line INSIDE a body written to `run.sh` is two words of
+ * ⚠ Heredoc bodies are DATA to the command that reads them: `sh migrate.sh` as a line INSIDE a body written to `run.sh` is two words of
  * text, and `$(cu'r'l …)` inside a body under a QUOTED delimiter (`<<'EOF'`) is written
  * literally — bash expands nothing there. So the bodies are modelled: quoted ones leave
  * the substitution scan entirely, unquoted ones stay (bash DOES expand them), and only the
@@ -691,44 +694,35 @@ function maskSubstitutions(text: string): string {
   return masked
 }
 
-/**
- * The first refusal at any command position of the (unsegmentable) command lines, or
- * undefined. Each piece between separators is a command position; leading compound
- * keywords and `NAME=value` assignments are stepped over; the word is then what
- * `commandWordOf` sees for a segment.
- */
+/** A position outside the text or on whitespace: a `{`/`}` between two of them stands alone. */
+function isWordBoundary(text: string, position: number): boolean {
+  return position < 0 || position >= text.length || /\s/.test(text[position] ?? '')
+}
+
+/** An unquoted character that ends a command position: a list separator, a parenthesis, or a standalone brace. */
+function isPieceBoundary(text: string, index: number): boolean {
+  const character = text[index] ?? ''
+  if (character === '{' || character === '}') return isWordBoundary(text, index - 1) && isWordBoundary(text, index + 1)
+  return /^[;&|\n()]$/.test(character)
+}
+
 /** Split at every unquoted command-position boundary; a backslash escapes the next character outside single quotes. */
 function commandPositionPieces(text: string): string[] {
   const pieces: string[] = []
   let current = ''
-  let inSingle = false
-  let inDouble = false
-  const isWordBoundary = (position: number): boolean =>
-    position < 0 || position >= text.length || /\s/.test(text[position] ?? '')
+  let quote: Quote = 'none'
   for (let characterIndex = 0; characterIndex < text.length; characterIndex += 1) {
     const character = text[characterIndex] ?? ''
-    if (!inSingle && character === '\\') {
+    if (quote !== 'single' && character === '\\') {
       current += character + (text[characterIndex + 1] ?? '')
       characterIndex += 1
-      continue
-    }
-    if (character === "'" && !inDouble) inSingle = !inSingle
-    else if (character === '"' && !inSingle) inDouble = !inDouble
-    if (inSingle || inDouble) {
-      current += character
-      continue
-    }
-    const standaloneBrace =
-      (character === '{' || character === '}') &&
-      isWordBoundary(characterIndex - 1) &&
-      isWordBoundary(characterIndex + 1)
-    const listSeparator = character === ';' || character === '&' || character === '|' || character === '\n'
-    if (listSeparator || character === '(' || character === ')' || standaloneBrace) {
+    } else if (quote === 'none' && isPieceBoundary(text, characterIndex)) {
       pieces.push(current)
       current = ''
-      continue
+    } else {
+      quote = quoteAfter(quote, character)
+      current += character
     }
-    current += character
   }
   pieces.push(current)
   return pieces
@@ -751,21 +745,30 @@ function commandPositionFinding(
   depth: number,
 ): NetworkEgressMatch | undefined {
   for (const piece of commandPositionPieces(maskSubstitutions(commandLines))) {
-    const rest = withoutLeadingCompoundKeywords(piece)
-    if (rest.length === 0) continue
-    const word = (withoutLeadingEnvironmentAssignments(rest) ?? rest).trim().split(/[ \t]/, 1)[0] ?? ''
-    if (word.length === 0) continue
-    if (word.includes(SUBSTITUTION_MASK)) {
-      if (word !== SUBSTITUTION_MASK) {
-        return { matched: 'a command substitution joined to text at command position', via: 'unresolvable' }
-      }
-      continue // a substitution alone as the command: its body meets the raw scan
-    }
-    if (word.startsWith('${')) return { matched: 'a parameter expansion at command position', via: 'unresolvable' }
-    const verdict = gateSegment({ text: rest, pipedStdin: false }, denied, deniedBinaries, depth)
-    if (verdict !== undefined && verdict !== 'escalate') return verdict
+    const finding = pieceFinding(piece, denied, deniedBinaries, depth)
+    if (finding !== undefined) return finding
   }
   return undefined
+}
+
+/** One command position of `commandPositionFinding`: the two floor-only checks, then the segment classifier. */
+function pieceFinding(
+  piece: string,
+  denied: Set<string>,
+  deniedBinaries: readonly string[],
+  depth: number,
+): NetworkEgressMatch | undefined {
+  const rest = withoutLeadingCompoundKeywords(piece)
+  if (rest.length === 0) return undefined
+  const word = (withoutLeadingEnvironmentAssignments(rest) ?? rest).trim().split(/[ \t]/, 1)[0] ?? ''
+  // A substitution alone as the command: its body meets the raw scan.
+  if (word.length === 0 || word === SUBSTITUTION_MASK) return undefined
+  if (word.includes(SUBSTITUTION_MASK)) {
+    return { matched: 'a command substitution joined to text at command position', via: 'unresolvable' }
+  }
+  if (word.startsWith('${')) return { matched: 'a parameter expansion at command position', via: 'unresolvable' }
+  const verdict = gateSegment({ text: rest, pipedStdin: false }, denied, deniedBinaries, depth)
+  return verdict === 'escalate' ? undefined : verdict
 }
 
 interface HeredocBody {
@@ -867,26 +870,27 @@ function substitutionBodies(command: string): string[] {
  * purpose: this runs only where the segmenter has already declined.
  */
 function shellFedByStream(commandLines: string): boolean {
-  for (const list of commandLines.split(/\|\||&&|;|\n/)) {
-    const pipeline = list.split('|')
-    for (const [position, piece] of pipeline.entries()) {
-      // Quote-aware words where the text allows it (`bash <<< "two words"` is one operand),
-      // whitespace otherwise — coarse is the mode here, and coarse errs toward the floor.
-      const words =
-        shellWordsOf(piece.trim()) ??
-        piece
-          .trim()
-          .split(/\s+/)
-          .filter((word) => word.length > 0)
-      let head = 0
-      while (head < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[head] ?? '')) head += 1
-      if (!STDIN_SHELLS.has(canonicalToolName(basename(words[head] ?? '')))) continue
-      const rest = words.slice(head + 1)
-      const fedByRedirect = rest.some((word) => /^\d*<<</.test(word) || /^\d*<<-?/.test(word))
-      if ((position > 0 || fedByRedirect) && shellProgramIsStdin(rest)) return true
-    }
-  }
-  return false
+  return commandLines
+    .split(/\|\||&&|;|\n/)
+    .some((list) => list.split('|').some((piece, position) => isStreamFedShell(piece, position > 0)))
+}
+
+/** One pipeline stage of `shellFedByStream`: a stdin shell, `piped` into or carrying a `<<`/`<<<` redirect. */
+function isStreamFedShell(piece: string, piped: boolean): boolean {
+  // Quote-aware words where the text allows it (`bash <<< "two words"` is one operand),
+  // whitespace otherwise — coarse is the mode here, and coarse errs toward the floor.
+  const words =
+    shellWordsOf(piece.trim()) ??
+    piece
+      .trim()
+      .split(/\s+/)
+      .filter((word) => word.length > 0)
+  let head = 0
+  while (head < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[head] ?? '')) head += 1
+  if (!STDIN_SHELLS.has(canonicalToolName(basename(words[head] ?? '')))) return false
+  const rest = words.slice(head + 1)
+  const fedByRedirect = rest.some((word) => /^\d*<<</.test(word) || /^\d*<<-?/.test(word))
+  return (piped || fedByRedirect) && shellProgramIsStdin(rest)
 }
 
 /**

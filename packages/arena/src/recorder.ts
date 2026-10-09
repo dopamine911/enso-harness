@@ -440,7 +440,7 @@ function drive(
 
 /**
  * Wait for the runner to end after the stop, at most `settleMs`. A runner still going then — a
- * model call the abort did not cut short — gets an `agent-end` line saying so (PR #585 review):
+ * model call the abort did not cut short — gets an `agent-end` line saying so:
  * without it the manifest folds with no end at all, and the score would lose the signal. If the
  * runner ends later, its own line comes after this one and the fold reads the last.
  */
@@ -567,7 +567,7 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
     }
   }
   makeProject(project)
-  // A source, not a snapshot (PR #613 review): an OAuth refresh rewrites the linked auth.json during
+  // A source, not a snapshot: an OAuth refresh rewrites the linked auth.json during
   // the run, and a rotated token must be redacted and scanned for like the one it replaced.
   const secrets = arenaSecretSource(options.home)
   const redact = (text: string): string => redactJudgeText(text, secrets())
@@ -586,7 +586,7 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
   })
 
   // ── Screenshots, over a page that does not exist until the browser is up ───────────────────
-  // ⚠ Defined BEFORE Enso starts (PR #562 review): Enso's exit handler takes one, and Enso can
+  // ⚠ Defined BEFORE Enso starts: Enso's exit handler takes one, and Enso can
   // die while the recorder is still waiting for it to answer — before there is any page.
   // The view is taken by the browser's own capture once there is a browser (#680); before, nothing asks for one.
   let captureView: () => Promise<Uint8Array> = () => Promise.reject(new Error('no browser yet'))
@@ -651,7 +651,7 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
   }
 
   // ── The browser, its trace and its listeners ───────────────────────────────────────────────
-  // ⚠ A browser that fails to start must not leave Enso holding the dev ports (PR #562 review):
+  // ⚠ A browser that fails to start must not leave Enso holding the dev ports:
   // every later `arena start` would refuse them until someone killed the stack by hand.
   const {
     browser,
@@ -689,8 +689,8 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
   let chunkScan: ArenaSecretScan | undefined
   /**
    * Write the trace so far. ⚠ `stopChunk` ends the chunk; between chunks nothing is traced, so
-   * every chunk but the last is followed by `startChunk` (PR #562 review: the first version
-   * never restarted, and traced only the run's first five minutes). The chunk is scanned after the
+   * every chunk but the last is followed by `startChunk`, so the trace covers
+   * the whole run, not only its first chunk. The chunk is scanned after the
    * next one starts, so the scan adds nothing to the untraced gap; a chunk written before a value
    * joined the secret set is read again (`soughtValues`).
    */
@@ -713,7 +713,7 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
   // A native dialog is left OPEN for the agent to answer (#609): it is part of the interface, and it
   // blocks the page until answered — `read` says it is there (a visual run's every answer does, #680),
   // and `accept-dialog`/`dismiss-dialog` answer it.
-  // ⚠ Per tab (PR #684 review): a browser shows a dialog over its own tab, so the one that blocks the
+  // ⚠ Per tab: a browser shows a dialog over its own tab, so the one that blocks the
   // agent is the front tab's — a game's alert in tab 1 must not answer for Enso's tab, nor block it.
   const dialogs = new Map<number, Dialog>()
   const frontDialog = (): Dialog | undefined => dialogs.get(front)
@@ -820,7 +820,7 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
         void bringToFront(newest)
         return
       }
-      // ⚠ The page closed the last tab itself (`window.close()`; PR #684 review): a browser with no
+      // ⚠ The page closed the last tab itself (`window.close()`): a browser with no
       // tab has no page to act on, so Enso opens again in a new one — its `page` listener makes it the front.
       void context
         .newPage()
@@ -1140,7 +1140,7 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
       lastSeen.saw(await pageNow())
       return { ...here(), dialog: { type: dialog.type(), message: redact(dialog.message()) } }
     }
-    // One snapshot (PR #646 review): the whole page is the wait's baseline, and the region is read out of it.
+    // One snapshot: the whole page is the wait's baseline, and the region is read out of it.
     const snapshot = await inFront().locator('body').ariaSnapshot({ timeout: ACTION_TIMEOUT_MS })
     lastSeen.saw(pageForChange(snapshot))
     return { ...here(), ...regionReads.read(snapshot, action, pageVisit) }
@@ -1558,7 +1558,7 @@ export async function collectAfterRecorderDied(runDirectory: string, fallbackHom
       : {}),
   })
   if (dead?.stackPid !== undefined && !(await stopStack(dead.stackPid))) {
-    // ⚠ Said, not swallowed (PR #612 review): the control record goes regardless, so nothing later
+    // ⚠ Said, not swallowed: the control record goes regardless, so nothing later
     // would name the process still holding the ports — only a bare "port in use".
     process.stderr.write(
       `arena: the run's Enso stack (pid ${dead.stackPid}) is still running after SIGTERM and SIGKILL — it is someone else's to stop\n`,

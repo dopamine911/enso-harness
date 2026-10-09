@@ -108,7 +108,7 @@ export async function runGoogleProviderSearch(request: ModelSearchRequest): Prom
   }
   if (credential.apiKey !== undefined && credential.apiKey.length > 0) headers['x-goog-api-key'] = credential.apiKey
 
-  // trimTrailingSlash for the same reason the other wires normalize (PR #64 review):
+  // trimTrailingSlash for the same reason the other wires normalize:
   // a registry baseUrl carrying a trailing slash must not emit a double-slash URL.
   const endpointUrl = `${trimTrailingSlash(request.model.baseUrl)}/models/${request.model.id}:streamGenerateContent?alt=sse`
   const requestBody = {

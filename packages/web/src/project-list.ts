@@ -31,7 +31,7 @@ async function fetchProjectList(): Promise<unknown> {
 
 /**
  * The project a thread is in, as the page lists them — ONE rule for the rail's sections and the
- * Start dialog's label (PR #400 review). A thread that named no project was built in the launch
+ * Start dialog's label. A thread that named no project was built in the launch
  * directory, so it is the launch project's; an id no longer listed is no project the page shows.
  */
 export function projectOf(projects: readonly EnsoProject[], projectId: string | undefined): EnsoProject | undefined {

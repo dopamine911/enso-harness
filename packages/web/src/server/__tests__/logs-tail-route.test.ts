@@ -92,6 +92,19 @@ interface OpenTail {
   readonly close: () => void
 }
 
+/**
+ * Each `data:` line's frame the browser's schema takes goes into `frames`; each one it refuses
+ * goes to `refuse` as it is read, so a later line that does not parse cannot hide it.
+ */
+function acceptFrames(lines: readonly string[], frames: EnsoLogTailFrame[], refuse: (refused: Error) => void): void {
+  for (const raw of lines) {
+    if (!raw.startsWith('data: ')) continue
+    const frame: unknown = JSON.parse(raw.slice('data: '.length))
+    if (Check(EnsoLogTailFrame, frame)) frames.push(frame)
+    else refuse(new Error(`a frame the browser's schema refuses: ${raw}`))
+  }
+}
+
 async function openTail(url: string, query = ''): Promise<OpenTail> {
   const controller = new AbortController()
   openTails.push(controller)
@@ -112,12 +125,9 @@ async function openTail(url: string, query = ''): Promise<OpenTail> {
         buffered += decoder.decode(value, { stream: true })
         const lines = buffered.split('\n')
         buffered = lines.pop() ?? ''
-        for (const raw of lines) {
-          if (!raw.startsWith('data: ')) continue
-          const frame: unknown = JSON.parse(raw.slice('data: '.length))
-          if (Check(EnsoLogTailFrame, frame)) frames.push(frame)
-          else failure ??= new Error(`a frame the browser's schema refuses: ${raw}`)
-        }
+        acceptFrames(lines, frames, (refused) => {
+          failure ??= refused
+        })
         for (const waiter of waiters.splice(0)) waiter()
       }
     } catch {

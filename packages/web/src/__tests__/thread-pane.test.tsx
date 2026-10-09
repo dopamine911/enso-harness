@@ -541,8 +541,13 @@ test('⚠ Open preview closes the panel and puts focus in the composer (#714)', 
     expect(link).toBeDefined()
     return link
   })
+  if (open === undefined) throw new Error('expected the Open preview link')
+  // ⚠ #813: happy-dom follows a `_blank` link as a browser would, fetching the page into a new
+  // window; nothing listens on the preview origin, so the click's default stays undone here. What
+  // is pinned is the click's effect on this page; the link's href and target are pinned in #619's test.
+  open.addEventListener('click', (event) => event.preventDefault(), { once: true })
   await flush(async () => {
-    open?.click()
+    open.click()
     await tick()
   })
   await eventually(() => expect(document.querySelector('[role="dialog"]')).toBeNull())

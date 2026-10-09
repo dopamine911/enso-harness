@@ -213,17 +213,15 @@ const VENDOR_IMPORTERS_ALLOWED_INSIDE_ROOTS: readonly string[] = [
   'packages/harness/extensions/web-fetch/index.ts',
   'packages/harness/extensions/web-search/index.ts',
   // ── The host ──
-  'packages/web/src/host/agent-host.ts',
   'packages/web/src/host/branch-context.ts',
-  'packages/web/src/host/branch-eval.ts',
-  'packages/web/src/host/branch-incident-history.ts',
-  'packages/web/src/host/branch-judge-cases.ts',
-  'packages/web/src/host/branch-stats.ts',
+  // The context reader's elements (#361), kept by #811: priced by pi's own `estimateTokens` so the
+  // estimate stays pi's to the token, over pi's projected messages; reached only through
+  // `branch-context.ts`, behind `ThreadLog`.
   'packages/web/src/host/context-elements.ts',
-  'packages/web/src/host/context-history.ts',
   'packages/web/src/host/extension-ui-context.ts',
-  // A live thread built on pi's session (#801): moved out of agent-host.ts, which keeps the host's
-  // setup — the runtime contract over pi is this file's, the host's flows over logs name no vendor.
+  // A live thread built on pi's session (#801): moved out of agent-host.ts, as were the runtime's
+  // version and theme (#811) — the runtime contract over pi is this file's, the host's setup and its
+  // flows over logs name no vendor.
   'packages/web/src/host/hosted-thread.ts',
   'packages/web/src/host/map-events.ts',
   'packages/web/src/host/notice-sender.ts',

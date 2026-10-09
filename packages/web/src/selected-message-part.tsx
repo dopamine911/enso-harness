@@ -114,7 +114,7 @@ function ToolCallRow({
         <span aria-hidden="true">{STEP_GLYPH[status]}</span>
         <span className="shrink-0 font-mono text-sm">{selected.part.name}</span>
         {/* `min-w-0`: a flex child's default `min-width: auto` never shrinks below its
-				    content, so without it `truncate` cannot engage (PR #93 review). */}
+				    content, so without it `truncate` cannot engage. */}
         <span className="min-w-0 flex-1 truncate font-mono text-sm text-muted-foreground">{summary}</span>
         <span className="shrink-0 text-xs font-semibold tracking-wider uppercase">{STEP_WORD[status]}</span>
         <ChevronRightIcon

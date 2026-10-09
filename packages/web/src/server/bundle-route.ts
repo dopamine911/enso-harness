@@ -86,7 +86,7 @@ function selectRecords(
 }
 
 /**
- * The checkout, read once per process (PR #151 review): both routes are built at startup and
+ * The checkout, read once per process: both routes are built at startup and
  * `.git/HEAD` — plus `packed-refs` on a packed branch — does not change under a running server.
  */
 let checkoutOnce: string | undefined
@@ -105,7 +105,7 @@ export function createBundleRoute(deps: BundleRouteDeps): (query: URLSearchParam
     // The third entry point a thread id crosses (#95 named the other two). A PREFIX of a valid
     // id is itself a valid id, so the one check covers both — and it is what keeps the value
     // out of the `Content-Disposition` header: a `"` would end the filename, a CR/LF would
-    // throw inside the request callback (PR #138 review).
+    // throw inside the request callback.
     if (threadPrefix !== undefined && !isEnsoThreadId(threadPrefix)) {
       return { status: 400, reason: 'thread must be a thread id or a prefix of one' }
     }

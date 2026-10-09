@@ -40,7 +40,7 @@ import { readClosedBody } from './follow.ts'
  * ⚠ TWO LIBRARIES, NO PRECEDENCE (#470). The same module reads the user's library and a project's
  * own (`<project>/.enso/prompts/`, `projectPromptsDir`); they are listed apart, and a choice names
  * its library in its reference (`project:<id>`), so neither shadows the other. A project's is read
- * only when the thread trusts the project (`server/index.ts`), and only READ: the routes that write
+ * only when the thread trusts the project (`server/prompt-routes.ts`), and only READ: the routes that write
  * take the user's library alone, so a committed, shared file is changed in the repository.
  */
 

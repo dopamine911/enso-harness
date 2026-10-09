@@ -467,7 +467,7 @@ export function StartSessionDialog(props: StartSessionDialogProps): React.ReactN
   // ⚠ Escape in the model filter is the filter's (#638): Radix closes the dialog from a capture
   // listener on the document, so the input cannot stop it — prevented here, as the command
   // palette's pages do. It clears the filter; with nothing left to clear it closes, like Escape
-  // anywhere else (PR #645 review), as the palette's Backspace does. The filter is the dialog's
+  // anywhere else, as the palette's Backspace does. The filter is the dialog's
   // one `cmdk-input` (cmdk overrides any id we give it).
   const escapeFromFilter = (event: KeyboardEvent): void => {
     if (!(event.target instanceof HTMLElement) || !event.target.matches('input[cmdk-input]')) return

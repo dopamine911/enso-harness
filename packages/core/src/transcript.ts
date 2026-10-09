@@ -121,7 +121,7 @@ export type EnsoTranscriptEntry = Static<typeof EnsoTranscriptEntry>
 
 /**
  * One entry as a row — `12:34:56 message user`, `12:34:56 custom:modes mode=plan` — THE
- * definition (PR #100 review): the drawer and `enso-thread.ts` had one each and had drifted.
+ * definition: the drawer and `enso-thread.ts` had one each and had drifted.
  * A custom entry's `data.mode` is shown when present because the drawer's one use of this
  * row is checking which mode the branch ended in; the entry's own shape is otherwise not
  * this function's to know.

@@ -32,7 +32,7 @@ function sentWords(message: UIMessage): string {
 }
 
 /**
- * Whether `stored` is how pi stored the page's `sent` words (PR #439 review). pi rewrites a prompt
+ * Whether `stored` is how pi stored the page's `sent` words. pi rewrites a prompt
  * before writing it (`agent-session.js` `prompt`): a converted or resized image appends its notes
  * after a blank line, and `/skill:name args` becomes the skill's block, then the args. Both keep
  * enough of the sent words to be recognised. A `/template` expansion keeps none, and is NOT taken
@@ -84,7 +84,7 @@ const FORK_UNDER_WAY = 'fork: a fork of this thread is already under way'
  * route asked. Every failure is a notice on this thread, as a refused control's is; the receipt
  * only when the fork exists.
  *
- * ⚠ ONE AT A TIME PER THREAD (PR #438 review): every fork writes a new session, and the page opens
+ * ⚠ ONE AT A TIME PER THREAD: every fork writes a new session, and the page opens
  * only the latest receipt — a double click, or `/fork` pressed twice, left the first fork on disk,
  * unopened, an orphan "forked from" row in the rail. A press while one is outstanding is said and
  * dropped, as Continue's second press is.
@@ -218,7 +218,7 @@ async function restoreReceiptOf(response: Response): Promise<RestoreReceipt> {
 
 /**
  * The thread's newest restore notice that still offers its undo, per thread (#565): a later
- * restore takes the action off it, since only the newest restore can be undone (PR #561 review).
+ * restore takes the action off it, since only the newest restore can be undone.
  */
 const offeredUndo = new WeakMap<RestoreStores['notifications'], { readonly line: number; readonly message: string }>()
 

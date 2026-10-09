@@ -203,8 +203,8 @@ function chatUrlForThread(threadId: string): string {
 /** The log half of the header: the count under the cap's honesty, a wait, or — after a refusal — neither. */
 function describeLogSide(view: LogTailView, logSettled: boolean): string {
   if (view.opened) return describeRecordCount(view)
-  // A refused log connection is not a wait (PR #336 review, round two: the spinner stopped
-  // but the heading still said "waiting" beside the alert that refused it).
+  // A refused log connection is not a wait: once the spinner stops, the heading must
+  // not say "waiting" beside the alert that refused the connection.
   return logSettled ? 'nothing is being read' : 'waiting for the first frame'
 }
 

@@ -85,7 +85,7 @@ export interface TranscriptRow {
   /**
    * A user prompt's name for its fork and restore (#651): its number among the BRANCH's prompts —
    * counted from the prompts before the page (#739) — and its words as the rail shortens them,
-   * `prompt 3: “continue”`. Numbered (PR #654 review): two prompts with the same words would share
+   * `prompt 3: “continue”`. Numbered: two prompts with the same words would share
    * a name again.
    */
   readonly promptName: string | undefined

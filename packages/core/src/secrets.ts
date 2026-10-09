@@ -213,7 +213,7 @@ export interface QuarantineReport {
  * defines (whatever its shape — everything in the secrets file is a secret by definition),
  * and report a root `.env` that still holds secret-shaped names.
  *
- * ⚠ The root `.env` is NOT ours, so it is judged by shape only (PR #98 review): a project
+ * ⚠ The root `.env` is NOT ours, so it is judged by shape only: a project
  * may keep `PORT` or `PUBLIC_URL` there, and deleting those from the process would break
  * the very config bun loaded them for. Its secret-shaped names are already scrubbed by the
  * shape rule; they are additionally reported as misplaced so the operator moves them.

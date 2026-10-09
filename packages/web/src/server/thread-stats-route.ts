@@ -22,7 +22,7 @@ import type { ThreadRegistry } from './thread-registry.ts'
  *
  * ⚠ EACH THREAD-DAY IS FOLDED ONCE, THEN EXTENDED (#359, #739). With the drawer open this runs once
  * per `session-usage` — each turn, run, compaction, model change or cache warm — and it used to
- * read every day file since the branch began, synchronously, each time (PR #358 review); then it
+ * read every day file since the branch began, synchronously, each time; then it
  * kept past days and re-read today whole, 1.3 s and +443 MB on a 52 MB day. Now each day's fold is
  * kept with the offset it reached, and a request folds only what was appended since
  * (`day-file-fold.ts`): a past day costs an `fstat`, today its new lines. The keep is bounded two
@@ -96,7 +96,7 @@ export function createThreadStatsRoute(
     const daysOnDisk = logDaysOnDisk(deps.logsDir)
     followedDays.keepOnly(daysOnDisk)
     const days = daysOnDisk.filter((day) => day >= firstDay)
-    // ONE fold per day, for both halves (PR #358 review), each kept and extended (the header).
+    // ONE fold per day, for both halves, each kept and extended (the header).
     const folded = followedDays.foldsOf(days, threadId).map((fold) => ({
       totals: fold.stats().totals,
       callDurations: fold.callDurations,

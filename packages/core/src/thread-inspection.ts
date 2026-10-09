@@ -193,7 +193,7 @@ export function describeThreadEvent(event: EnsoThreadEvent): string {
 }
 
 /**
- * The shape a thread id must have to be trusted (#95, PR #104 review).
+ * The shape a thread id must have to be trusted (#95).
  *
  * ⚠ Since #95 the browser's thread id IS pi's session id, and pi puts the id in the session
  * FILENAME (`<timestamp>_<id>.jsonl`). An unconstrained id from a request body or a URL
@@ -296,7 +296,7 @@ export type EnsoRestoreRequest = Static<typeof EnsoRestoreRequest>
 /**
  * The body of `POST …/restore/undo` (#565): the safety snapshot the undo puts back — the one the
  * restore's notice promised. The host undoes only the NEWEST restore, and only when this is its
- * safety, so a notice of an older restore can never undo a later one (PR #561 review).
+ * safety, so a notice of an older restore can never undo a later one.
  * @group Thread inspection
  */
 export const EnsoRestoreUndoRequest = Type.Object(
@@ -352,7 +352,7 @@ export type EnsoDiskUsage = Static<typeof EnsoDiskUsage>
 /**
  * What deleting a thread would do (#571, `GET …/delete-preview`), read before the dialog asks. It
  * moves nothing — nothing is deleted and no snapshot is taken; its inventory only stages the tree
- * into a scratch index, which leaves loose objects in the thread's store (PR #572 review):
+ * into a scratch index, which leaves loose objects in the thread's store:
  * - `tree`: the tree a delete removes with its thread, or null for a thread in its checkout;
  * - `size`: what that tree takes on disk, ignored files included — what the delete frees of it
  *   (#578); null with no tree;
@@ -448,9 +448,9 @@ export const ENSO_FORK_COMMAND = 'fork'
 /**
  * How a stored branch ends when its last turn did not settle (#109): a prompt the
  * assistant never answered, an assistant turn that called a tool and never got its
- * result, or one whose every call got its result and no reply followed (PR #442 review) — the
+ * result, or one whose every call got its result and no reply followed — the
  * server died mid-run, or the run was cut before the reply. The third is a kill's shape, never a
- * Stop's (PR #438 review): a Stop ends the branch on pi's own error reply to the aborted model
+ * Stop's: a Stop ends the branch on pi's own error reply to the aborted model
  * call, an assistant message with no call — settled, and not named here.
  *
  * Derived on read from the branch, never written to pi's file: deepseek-harness appends a

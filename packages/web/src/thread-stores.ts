@@ -83,7 +83,7 @@ export interface ThreadStores {
   /**
    * Whether the server can answer this thread's reads (#659): it has been seen with a session or
    * messages — stored history, a snapshot's model or messages, a `model` observation. ⚠ LATCHED,
-   * never reset (PR #661 review): a snapshot nulls the model when the session idles out, and a
+   * never reset: a snapshot nulls the model when the session idles out, and a
    * thread minted on this page has no stored history, yet the thread ran and its routes answer.
    */
   readonly readable: WritableStore<boolean>
@@ -354,7 +354,7 @@ const INTERRUPTED_TAIL_NOTICE: Record<EnsoInterruptedTail, string> = {
 const CONTINUE_LABEL = 'Continue'
 
 /**
- * What the torn-tail line becomes once a run answers it (PR #442 review) — Continue's, or any other:
+ * What the torn-tail line becomes once a run answers it — Continue's, or any other:
  * a prompt sent instead, or a run another tab started. Before, the warning and its button outlived
  * the tail, and a late press was a 409 or a 422 under a reply that had already answered it.
  */
@@ -366,7 +366,7 @@ const tornTailLines = new Map<string, () => void>()
 
 /**
  * The thread's first run — Continue's, a prompt sent instead, another tab's — answers its torn
- * tail. Keyed on the run's first turn, not on `busy` (PR #440 review): every control route takes
+ * tail. Keyed on the run's first turn, not on `busy`: every control route takes
  * a lease and raises `busy` without starting a run.
  */
 function retireTornTail(threadId: string): void {
@@ -380,11 +380,11 @@ const CONTINUE_WHILE_DISCONNECTED =
 
 /**
  * The torn-tail line and its Continue (#436). Whether Continue started the run is known only once
- * the server answers (PR #439 review): a first turn that lands while the answer is pending waits
+ * the server answers: a first turn that lands while the answer is pending waits
  * for it — the turn is Continue's on a 202, and someone else's run (another tab's prompt, won just
  * before) otherwise.
  *
- * Only `told` and `refused` are final (PR #438 review). A press while disconnected is not sent at
+ * Only `told` and `refused` are final. A press while disconnected is not sent at
  * all — the composer refuses to send then for the same reason (#119) — and a `busy` or
  * `unreachable` answer started nothing: each puts the action back, so the one way to act is not
  * used up by a press that did nothing.
@@ -482,7 +482,7 @@ let activeThreadId: string | undefined
 /**
  * The active pane changed.
  *
- * Two effects, and the first is the load-bearing one (PR #301 review): the visible thread stops
+ * Two effects, and the first is the load-bearing one: the visible thread stops
  * being a drop candidate, and its clock restarts so it is not the first to go the moment the
  * user switches away.
  *
@@ -502,7 +502,7 @@ export function markThreadActive(threadId: string | undefined): void {
 /**
  * The drop candidate: the least recently active thread that is neither running nor on screen.
  *
- * ⚠ THE ACTIVE PANE IS NEVER A CANDIDATE (PR #301 review). Recency alone does not protect it:
+ * ⚠ THE ACTIVE PANE IS NEVER A CANDIDATE. Recency alone does not protect it:
  * open a thread, read its finished reply, then open four more, and the one being read was the
  * least recently active of them. Dropping it unmounts the pane under the user — `active`
  * resolves to undefined, the header falls back to the untitled label, the content area goes

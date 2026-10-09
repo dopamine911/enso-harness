@@ -132,7 +132,7 @@ export const EnsoFollowSnapshot = Type.Object(
     /**
      * Whether this thread runs on a tree of its own (#551) — its branch records one, or, for a
      * thread not built yet, the host gives new threads in its project one. Where it is not, there
-     * is no file to restore, and the page offers no restore (PR #561 review). Stable over a follow,
+     * is no file to restore, and the page offers no restore. Stable over a follow,
      * unlike `cwd`: a new thread's tree is decided before it is built.
      */
     tree: Type.Boolean(),

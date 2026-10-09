@@ -190,7 +190,7 @@ export function withFrontmatter(source: string, page: string, anchoredAt: 'docs'
  * beside pages with real titles, where it read as a broken entry — reported from the published
  * site, not caught here.
  *
- * ⚠ Every word, not just the first (PR #333 review). `charAt(0).toUpperCase()` is right for every
+ * ⚠ Every word, not just the first. `charAt(0).toUpperCase()` is right for every
  * directory this repository has today and wrong for the first hyphenated one: `getting-started`
  * would have arrived as `Getting-started overview`, which is the kind of thing nobody fixes
  * because nobody owns it.

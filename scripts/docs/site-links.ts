@@ -81,9 +81,8 @@ export function resolveHref(href: string, page: string): string {
   })()
   const insideDist = fromBase.startsWith(`${DIST}/`) ? fromBase.slice(DIST.length + 1) : fromBase
   // ⚠ Without the trim the two frames disagree on a trailing slash — `join` keeps the one a
-  // site-absolute href carries, `relative` has already dropped it from a page-relative one
-  // (PR #332 review, found by the first test to call this with both shapes). `isServed` tolerates
-  // either, so the difference was invisible until something compared the strings.
+  // site-absolute href carries, `relative` has already dropped it from a page-relative one.
+  // `isServed` tolerates either, so the difference is invisible until something compares the strings.
   return join(DIST, insideDist).replace(/\/$/, '')
 }
 
@@ -123,7 +122,7 @@ function holdsAPage(directory: string): boolean {
  * following a link written somewhere this repository does not build. It 404ed on the published
  * site while every gate was green.
  *
- * ⚠ A SECTION IS A DIRECTORY THAT HOLDS PAGES, never a name on a list (PR #332 review). The
+ * ⚠ A SECTION IS A DIRECTORY THAT HOLDS PAGES, never a name on a list. The
  * build also writes asset directories — `_astro/`, `pagefind/` today, whatever the next plugin
  * adds tomorrow — and excluding those BY NAME makes the gate false-fail the day one appears.
  * Measured: both hold exactly zero `.html` files among their 107 and 75, so "holds a page" tells

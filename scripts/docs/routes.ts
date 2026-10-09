@@ -10,7 +10,17 @@ import { assertExactKeys, runGenerator } from './generator-support.ts'
  */
 
 const ROOT = findRepoRoot(import.meta.url)
-const SERVER_PATH = 'packages/web/src/server/index.ts'
+/**
+ * The server's route groups (#810): each declares its route constants and dispatches them, so a
+ * route's constant and its dispatch are read from the same file.
+ */
+const ROUTE_GROUP_PATHS: readonly string[] = [
+  'packages/web/src/server/thread-routes.ts',
+  'packages/web/src/server/prompt-routes.ts',
+  'packages/web/src/server/project-routes.ts',
+  'packages/web/src/server/permission-routes.ts',
+  'packages/web/src/server/literal-routes.ts',
+]
 const FOLLOW_PATH = 'packages/web/src/server/follow.ts'
 const BUNDLE_PATH = 'packages/web/src/server/bundle-route.ts'
 const LOGS_PATH = 'packages/web/src/server/logs-route.ts'
@@ -569,8 +579,57 @@ interface DetectedRoute {
   readonly key: string
   readonly method: 'GET' | 'POST' | 'PUT' | 'DELETE'
   readonly path: string
+  /** The route group that declares and dispatches it. */
+  readonly file: string
   readonly line: number
   readonly kind: 'regex' | 'literal'
+}
+
+/** One route group's routes: its regex constants and its literal dispatcher branches. */
+function routesIn(file: string): { readonly regex: DetectedRoute[]; readonly literal: DetectedRoute[] } {
+  const server = readFileSync(join(ROOT, file), 'utf8')
+
+  // A route constant is a regex literal, `threadRoute('<action>')` — the server's builder for
+  // `/api/threads/<threadId>/<action>`, whose path is derived here rather than restated — or a
+  // pattern built around the library's prompt id (`promptRoute()`, `new RegExp(` — its pattern on the
+  // next lines, or the whole call on one), whose metadata states its path.
+  const regex: DetectedRoute[] = [
+    ...server.matchAll(
+      /^const ([A-Z][A-Z_]*_ROUTE) = (?:\/.*\/|threadRoute\('([a-z/-]+)'\)|promptRoute\(\)|new RegExp\((?:`.*`\))?)$/gm,
+    ),
+  ].map((match) => {
+    const key = match[1] ?? ''
+    const metadata = REGEX_ROUTE_METADATA[key]
+    const action = match[2]
+    const path = metadata?.path ?? (action === undefined ? undefined : `/api/threads/:threadId/${action}`)
+    // Only `threadRoute(...)` derives its path; any other route's metadata must state it.
+    if (metadata !== undefined && path === undefined) throw new Error(`routes: ${key} has no path in its metadata`)
+    return {
+      key,
+      method: metadata?.method ?? 'GET',
+      path: path ?? 'UNCLASSIFIED',
+      file,
+      line: lineAt(server, match.index),
+      kind: 'regex',
+    }
+  })
+  for (const route of regex) {
+    const references = [...server.matchAll(new RegExp(`\\b${route.key}\\b`, 'g'))]
+    if (references.length < 2) throw new Error(`routes: ${route.key} is declared but not dispatched in ${file}`)
+  }
+
+  const literal: DetectedRoute[] = []
+  for (const match of server.matchAll(/request\.method === '(GET|POST|PUT)' && url === '([^']+)'/g)) {
+    const method = match[1] as 'GET' | 'POST' | 'PUT'
+    const path = match[2] ?? ''
+    literal.push({ key: `${method} ${path}`, method, path, file, line: lineAt(server, match.index), kind: 'literal' })
+  }
+  for (const match of server.matchAll(/request\.method === '(GET|POST)' && url\.startsWith\('([^']+)'\)/g)) {
+    const method = match[1] as 'GET' | 'POST'
+    const path = `${match[2] ?? ''}*`
+    literal.push({ key: `${method} ${path}`, method, path, file, line: lineAt(server, match.index), kind: 'literal' })
+  }
+  return { regex, literal }
 }
 
 function lineAt(source: string, offset: number): number {
@@ -597,7 +656,6 @@ export interface ResolvedRoute extends RouteMetadata {
  * "what routes exist": `flow-diagrams.ts` draws these, it does not re-find them.
  */
 export function discoverRoutes(): ResolvedRoute[] {
-  const server = readFileSync(join(ROOT, SERVER_PATH), 'utf8')
   const supportingSources: Record<string, string> = {
     [FOLLOW_PATH]: readFileSync(join(ROOT, FOLLOW_PATH), 'utf8'),
     [BUNDLE_PATH]: readFileSync(join(ROOT, BUNDLE_PATH), 'utf8'),
@@ -606,55 +664,12 @@ export function discoverRoutes(): ResolvedRoute[] {
     [LOGS_STATS_PATH]: readFileSync(join(ROOT, LOGS_STATS_PATH), 'utf8'),
   }
 
-  // A route constant is a regex literal, `threadRoute('<action>')` — the server's builder for
-  // `/api/threads/<threadId>/<action>`, whose path is derived here rather than restated — or a
-  // pattern built around the library's prompt id (`promptRoute()`, `new RegExp(` — its pattern on the
-  // next lines, or the whole call on one), whose metadata states its path.
-  const regexRoutes: DetectedRoute[] = [
-    ...server.matchAll(
-      /^const ([A-Z][A-Z_]*_ROUTE) = (?:\/.*\/|threadRoute\('([a-z/-]+)'\)|promptRoute\(\)|new RegExp\((?:`.*`\))?)$/gm,
-    ),
-  ].map((match) => {
-    const key = match[1] ?? ''
-    const metadata = REGEX_ROUTE_METADATA[key]
-    const action = match[2]
-    const path = metadata?.path ?? (action === undefined ? undefined : `/api/threads/:threadId/${action}`)
-    // Only `threadRoute(...)` derives its path; any other route's metadata must state it.
-    if (metadata !== undefined && path === undefined) throw new Error(`routes: ${key} has no path in its metadata`)
-    return {
-      key,
-      method: metadata?.method ?? 'GET',
-      path: path ?? 'UNCLASSIFIED',
-      line: lineAt(server, match.index),
-      kind: 'regex',
-    }
-  })
-  for (const route of regexRoutes) {
-    const references = [...server.matchAll(new RegExp(`\\b${route.key}\\b`, 'g'))]
-    if (references.length < 2) throw new Error(`routes: ${route.key} is declared but not dispatched`)
-  }
-  assertExactKeys(
-    'regex route',
-    regexRoutes.map((route) => route.key),
-    Object.keys(REGEX_ROUTE_METADATA),
-  )
-
-  const literalRoutes: DetectedRoute[] = []
-  for (const match of server.matchAll(/request\.method === '(GET|POST|PUT)' && url === '([^']+)'/g)) {
-    const method = match[1] as 'GET' | 'POST' | 'PUT'
-    const path = match[2] ?? ''
-    literalRoutes.push({ key: `${method} ${path}`, method, path, line: lineAt(server, match.index), kind: 'literal' })
-  }
-  for (const match of server.matchAll(/request\.method === '(GET|POST)' && url\.startsWith\('([^']+)'\)/g)) {
-    const method = match[1] as 'GET' | 'POST'
-    const path = `${match[2] ?? ''}*`
-    literalRoutes.push({ key: `${method} ${path}`, method, path, line: lineAt(server, match.index), kind: 'literal' })
-  }
-  assertExactKeys(
-    'literal route',
-    literalRoutes.map((route) => route.key),
-    Object.keys(LITERAL_ROUTE_METADATA),
-  )
+  const groups = ROUTE_GROUP_PATHS.map(routesIn)
+  const regexRoutes = groups.flatMap((group) => group.regex)
+  const literalRoutes = groups.flatMap((group) => group.literal)
+  const keysOf = (routes: readonly DetectedRoute[]): string[] => routes.map((route) => route.key)
+  assertExactKeys('regex route', keysOf(regexRoutes), Object.keys(REGEX_ROUTE_METADATA))
+  assertExactKeys('literal route', keysOf(literalRoutes), Object.keys(LITERAL_ROUTE_METADATA))
 
   return [...regexRoutes, ...literalRoutes]
     .map((detected): ResolvedRoute => {
@@ -670,7 +685,7 @@ export function discoverRoutes(): ResolvedRoute[] {
         if (literal === undefined) throw new Error(`routes: metadata disappeared for ${detected.key}`)
         return { method: detected.method, path: detected.path, ...literal }
       })()
-      const dispatch = { path: SERVER_PATH, line: detected.line }
+      const dispatch = { path: detected.file, line: detected.line }
       if (metadata.factory === undefined) return { ...metadata, dispatch }
       const source = supportingSources[metadata.factory.path]
       if (source === undefined) throw new Error(`routes: source was not loaded for ${metadata.factory.path}`)
@@ -705,7 +720,7 @@ function generate(): string {
     '<!-- generated: scripts/docs/routes.ts -->',
     '# HTTP routes',
     '',
-    'Generated from the route constants and dispatcher in `packages/web/src/server/index.ts`, with handler contracts from `server/follow.ts`, `server/bundle-route.ts`, and `server/logs-route.ts`.',
+    `Generated from the route constants and dispatchers in the server's route groups (${ROUTE_GROUP_PATHS.map((path) => `\`${path}\``).join(', ')}), with handler contracts from \`server/follow.ts\`, \`server/bundle-route.ts\`, and \`server/logs-route.ts\`.`,
     '',
     "Every `/api/threads/:threadId…` route also reads the `X-Enso-Project` header (#395): a page names a new thread's project with it, and an id that is no registered project is a 400 before the route runs.",
     '',

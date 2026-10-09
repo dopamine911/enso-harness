@@ -34,7 +34,7 @@ export type EnsoLogLevelName = (typeof ENSO_LOG_LEVEL_NAMES)[number]
  * A tier by NAME → its rank. `warn` is here as well as `warning` because that is the
  * spelling on disk (LogTape writes `WARN`), and a person who types it means the tier.
  *
- * ⚠ NO PROTOTYPE, deliberately (PR #336 review). This table is indexed by a string a URL
+ * ⚠ NO PROTOTYPE, deliberately. This table is indexed by a string a URL
  * supplied — `?level=` — and a plain object literal answers `constructor` with `Object` and
  * `__proto__` with `Object.prototype`. Neither is nullish, so a `??` refusal never fired, the
  * rank became a non-number, every comparison against it was `false`, and the whole `trace` day
@@ -129,7 +129,7 @@ export function logLineMatches(filter: EnsoLogFilter, line: EnsoLogLine): boolea
  * is the bundle's honesty in a different place, with `matched` beside it so "the last 2000
  * of 31417" never reads as the whole day. Lower than `BUNDLE_MAX_RECORDS` (5000) because a
  * bundle is read once in an editor and this is re-rendered on every frame. Here, node-free,
- * because the BROWSER keeps the same bound (PR #336 review): the server caps each frame, and
+ * because the BROWSER keeps the same bound: the server caps each frame, and
  * a page that appended every `records` frame forever grew without limit on a `trace` day.
  *
  * @group Logging

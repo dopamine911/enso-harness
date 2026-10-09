@@ -41,7 +41,7 @@ import { Compile } from 'typebox/compile'
  *
  * A NEW thread's project is the one a page named for it (`X-Enso-Project`, `claim`), else the
  * launch project — today's behaviour. A thread is named once: a later request naming ANOTHER
- * project before the thread is built is refused (409), never quietly dropped (PR #399 review).
+ * project before the thread is built is refused (409), never quietly dropped.
  * Once the thread has a session, the session's own directory decides (pi records it in the
  * session header), whatever a page says afterwards.
  */
@@ -207,7 +207,7 @@ function writeRegistrations(statePath: string, registrations: readonly Registrat
  * Why a canonical directory may not be registered under these roots, or `undefined` when it may.
  * Strictly under one root, and no segment below that root hidden.
  *
- * ⚠ ANY root that accepts it is enough, whatever the order (PR #399 review): roots may nest
+ * ⚠ ANY root that accepts it is enough, whatever the order: roots may nest
  * (`~/code` and `~/code/sub`), and `~/code/sub` itself is under the first even though it is the
  * second. So a root's refusal is kept only as the reason to give if no other root accepts.
  */
@@ -273,7 +273,7 @@ export function createProjectRegistry(options: ProjectRegistryOptions): ProjectR
   /**
    * The project each thread was named for. Dropped when its session is built (`dropClaim`) — and
    * put back by the next request that names it, since `claim` records whatever a request says for a
-   * thread with no entry (PR #399 review). So with a page that names the project on every request,
+   * thread with no entry. So with a page that names the project on every request,
    * this holds one entry per thread such a page has asked about, for the process's life: the same
    * named non-coverage as the registry's `generations` map — loopback, dev-only, ids minted by the
    * page. Inert once the session exists: only a NEW thread's build reads it.
@@ -360,7 +360,7 @@ export function createProjectRegistry(options: ProjectRegistryOptions): ProjectR
   /**
    * The directories under `directory` a page may browse into: resolved, inside a root, not hidden.
    * ⚠ A directory can be searchable and not readable (`--x`): `realpath` and `stat` pass, the listing
-   * throws (PR #401 review — it took the server down). That is a refusal saying so, not an empty
+   * throws, and an unhandled throw takes the server down. That is a refusal saying so, not an empty
    * list, which would read as "no folders here". Each child is only resolved and stat'ed, never read.
    */
   function childDirectories(

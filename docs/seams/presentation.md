@@ -76,7 +76,7 @@ export interface FollowConnection extends SubscribeConnectionAdapter {
    * Run a `host` command (#338 slice 2): `POST …/command`, `/model` with an `options[].id` or
    * `/thinking` with a level — the same control shape as `changeMode`, and the same failure
    * path: `busy` (409) and `refused` (422, the host's reason) are recorded through `problem`
-   * and said once, the way a refused mode change is (PR #344 review). The store moves on the
+   * and said once, the way a refused mode change is. The store moves on the
    * feed's `model` observation, never on the answer.
    */
   readonly runHostCommand: (run: EnsoHostCommandRun) => Promise<HostCommandOutcome>
@@ -220,7 +220,7 @@ export interface ThreadStores {
   /**
    * Whether the server can answer this thread's reads (#659): it has been seen with a session or
    * messages — stored history, a snapshot's model or messages, a `model` observation. ⚠ LATCHED,
-   * never reset (PR #661 review): a snapshot nulls the model when the session idles out, and a
+   * never reset: a snapshot nulls the model when the session idles out, and a
    * thread minted on this page has no stored history, yet the thread ran and its routes answer.
    */
   readonly readable: WritableStore<boolean>
@@ -473,7 +473,7 @@ need none: an upstream re-port is the second implementation, and the gate is wha
 `Type.Array(Type.Unknown())` on purpose — core must not own the client's transport shape — and both
 carry the client's `UIMessage`s. They are built by `transcriptToMessages` in
 `server/transcript-to-messages.ts`, the read-side twin of `to-agui.ts`, which imports `MessagePart`
-and `UIMessage` from `@tanstack/ai-client` on its first line; the history route (`server/index.ts`)
+and `UIMessage` from `@tanstack/ai-client` on its first line; the history route (`server/thread-read-routes.ts`)
 and the follow's opening snapshot (`server/follow.ts`) each call it and put the result on the wire.
 `Unknown` here is a deliberate hole, not an absence: the shape crosses with nothing to diff, so a
 partially-deployed change to it raises no schema error on either side. Of the two, only the history
@@ -520,7 +520,7 @@ says so: *a renderer that stops speaking AG-UI deletes it and the adapter*), the
 written against the client's `ChatUIHost`), plus the message-shape crossing, which is seven sites and
 not three: `ThreadStores.history` and `reviveHistoryMessages` in the browser,
 `server/transcript-to-messages.ts` as the producer, its two callers in `server/follow.ts` (the follow
-snapshot) and `server/index.ts` (the history route), and the two schema fields that carry the result,
+snapshot) and `server/thread-read-routes.ts` (the history route), and the two schema fields that carry the result,
 `core/src/follow.ts#EnsoFollowSnapshot` and `core/src/thread-inspection.ts#EnsoThreadHistory`.
 The per-thread stores, the router's dispatch, and the fixture path are shaped by the thread, not the
 client, and survive.

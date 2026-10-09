@@ -66,7 +66,7 @@ type EarlierScan = Pick<ArenaSecretScan, 'hits' | 'scanned'>
  * Scan every file under `runDirectory` for `secretValues` (see the module header for what is skipped).
  * A file `earlier` read that is unchanged since is not read again: its stamp and hits are carried.
  *
- * ⚠ NEVER THROWS ON A FILE (PR #613 review). The project is the agent's to shape, and a `chmod 000`
+ * ⚠ NEVER THROWS ON A FILE. The project is the agent's to shape, and a `chmod 000`
  * file or directory is a legitimate outcome: thrown, it cost the run its manifest, because the scan
  * runs before the manifest is written, and `arena manifest` could not fold it either. Whatever cannot
  * be read is an `unreadable` row, and everything reachable is still scanned.
@@ -97,7 +97,7 @@ export function scanFilesForSecrets(
  * The scan a refold writes (`arena manifest`): this scan, plus every hit an earlier scan of the run
  * recorded whose file is still there.
  *
- * ⚠ NEVER DOWNGRADED (PR #613 review). A rescan can only look for the values it knows NOW: an OAuth
+ * ⚠ NEVER DOWNGRADED. A rescan can only look for the values it knows NOW: an OAuth
  * token that has since rotated, or a `--home` run refolded without its `--home`, is a value it cannot
  * see, and the leaked file would read as clean. A recorded hit cannot be re-checked without its value,
  * so it stands until its file is gone.
@@ -440,7 +440,7 @@ export function zipEntries(bytes: Uint8Array): Array<{ readonly name: string; re
     const name = new TextDecoder().decode(bytes.subarray(at + 46, at + 46 + nameLength))
     at += 46 + nameLength + extraLength + commentLength
     // The same entries the stream skips (`UNREAD_ENTRY`): pixels and fonts hold no text secret, and
-    // inflating screencast frames is the cost #741 removed (PR #782 review).
+    // inflating screencast frames is the cost #741 removed.
     if (name.endsWith('/') || UNREAD_ENTRY.test(name)) continue
     entries.push({ name, data: entryData(bytes, view, { localOffset, compressedSize, method, name }) })
   }

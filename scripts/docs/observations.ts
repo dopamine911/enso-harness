@@ -226,7 +226,7 @@ function generate(): string {
       ])
       // The cell is the finding, so the cell is the test: an unclassified adapter has already
       // put `UNCLASSIFIED` in `consumers` above, and a `!adapter.classified` disjunct here only
-      // restated that (PR #240 review).
+      // restates that.
       if (consumers.some((consumer) => consumer.startsWith('UNCLASSIFIED'))) unclassified.push(member.kind)
       return {
         ...member,

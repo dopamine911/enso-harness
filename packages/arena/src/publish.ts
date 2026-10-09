@@ -108,7 +108,7 @@ function refusalsOf(
   }: {
     readonly productRepo: string | undefined
     readonly secretValues: readonly string[]
-    /** The manifest already read, whose earlier scan's hits stand (PR #723 review: not read twice). */
+    /** The manifest already read, whose earlier scan's hits stand, not read twice. */
     readonly manifest: unknown
   },
 ): string[] {
@@ -375,7 +375,7 @@ function hasRef(run: ArenaCommand, checkout: string, ref: string): boolean {
 /**
  * The corpus checkout, cloned once and fast-forwarded to the corpus's `main`. Fetched and merged,
  * not pulled: a publish cut short before its first push leaves a `main` with no upstream, where
- * `pull` fails (PR #723 review). A local commit not yet pushed is kept, and pushed by `commitRun`; a
+ * `pull` fails. A local commit not yet pushed is kept, and pushed by `commitRun`; a
  * corpus that moved past it is refused by the fast-forward, never overwritten.
  */
 function syncCheckout(run: ArenaCommand, corpus: string, checkout: string): void {
@@ -411,7 +411,7 @@ function commitRun(
   if (run('git', ['-C', checkout, 'status', '--porcelain', '--', folder, 'README.md']).trim() !== '') {
     run('git', ['-C', checkout, 'commit', '--quiet', '-m', message])
   }
-  // ⚠ Pushed every time, not only after a new commit (PR #723 review): a publish cut short between
+  // ⚠ Pushed every time, not only after a new commit: a publish cut short between
   // its commit and its push leaves a clean tree, and its re-run must still push — else its issue
   // shows images from a commit only this machine holds. Up to date, the push changes nothing.
   run('git', ['-C', checkout, 'push', '--quiet', '-u', 'origin', 'HEAD:main'])

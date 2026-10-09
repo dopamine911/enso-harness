@@ -68,7 +68,7 @@ export function arenaToolResult(
  * size (413 request_too_large). Up to twice this many all go; past that the oldest are dropped this
  * many at a time, so a call then carries from this many to one short of twice it (4 to 7).
  *
- * ⚠ IN STEPS, NOT ONE AT A TIME (PR #725 review). A window that slid by one image on every call
+ * ⚠ IN STEPS, NOT ONE AT A TIME. A window that slid by one image on every call
  * changed the request a few messages from its end each time — inside every prefix the provider had
  * cached — so a screenshot-heavy run re-read its whole conversation on each call. Dropped in steps,
  * the request's start stays the same for this many calls in a row.

@@ -42,7 +42,7 @@ export const SSE_KEEPALIVE_MS = 5000
  * ⚠ The timer is GUARANTEED to fire in the window between a client's disconnect and the
  * handler's `finally` (pi is being torn down asynchronously in between), and a write on a
  * destroyed response emits `'error'` — with no listener, that is an uncaught exception in
- * the server (PR #108 review). So: the response's own `'close'` stops the timer, a tick
+ * the server. So: the response's own `'close'` stops the timer, a tick
  * that finds the response gone stops itself instead of writing, and an `'error'` on the
  * response is reported rather than thrown.
  */

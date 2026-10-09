@@ -24,12 +24,12 @@ import {
   sessionFilesIn,
   threadIdOfFileName,
 } from './session-files.ts'
-import { openLog, type ThreadLog } from './thread-log.ts'
+import { openLog, runtimeAgentDir, type ThreadLog } from './thread-log.ts'
 
 /**
  * A host's stored threads (#95, #739): the runtime's logs on disk in the directories it serves, listed,
  * located by id, and read cold — one open, nothing built (#86). Over `ThreadLog` (#801), so nothing
- * here names the runtime: `runtimeAgentDir` is where the runtime files logs by default, asked fresh.
+ * here names the runtime: `runtimeAgentDir` (`thread-log.ts`) is where it files logs by default.
  */
 
 /** One of pi's session files in a directory this host serves, as pi lists it (#95). */
@@ -86,7 +86,6 @@ export interface StoredThreadsHost {
   readonly projectsDir: string | undefined
   readonly servesDirectory: (directory: string) => boolean
   readonly environment: Record<string, string | undefined>
-  readonly runtimeAgentDir: () => string
 }
 
 /** A host's stored threads: the listing, a lookup by id, and every cold read (#801). */
@@ -116,7 +115,7 @@ export interface StoredThreads {
 }
 
 export function createStoredThreads(host: StoredThreadsHost): StoredThreads {
-  const { projectsDir, servesDirectory, environment, runtimeAgentDir } = host
+  const { projectsDir, servesDirectory, environment } = host
 
   /**
    * The runtime's log files, each read once per change of it (#739): a lookup by id reads the

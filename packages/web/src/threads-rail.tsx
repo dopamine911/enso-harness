@@ -27,7 +27,7 @@ import type { ThreadSummary } from './thread-stores.ts'
  * thread id IS pi's session id. A thread RUNNING elsewhere (a run in flight, a dialog parked) is
  * shown with a running dot and still resumable: under the follow transport a resume follows the run
  * (#114). Idle is resumable too, even when this server still holds it — a reload must get its own
- * thread back (PR #104 review). A section's `+` starts a thread IN that project; the header's New
+ * thread back. A section's `+` starts a thread IN that project; the header's New
  * Thread starts one in the project of the thread on screen. A fork (#433) says which thread it
  * came from under its title, by that thread's title — the listing's `parentThreadId`.
  *
@@ -257,7 +257,7 @@ function lookalikeLabel(
     .map((peer) => partingAt(row.title, peer.title))
     .filter((at) => at < row.title.length)
   const from = parting.length === 0 ? 0 : Math.max(...parting)
-  // Parting at the start (a shared run with no space to cut at, PR #722 review) cuts nothing; and a
+  // Parting at the start (a shared run with no space to cut at) cuts nothing; and a
   // page title cut at its cap ends in `…`, which alone tells nothing apart.
   const tail = row.title.slice(from).trim()
   return from === 0 || tail === '' || tail === '…' ? row.title : `…${tail}`

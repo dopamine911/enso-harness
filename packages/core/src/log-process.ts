@@ -265,7 +265,7 @@ function lowestOf(levels: EnsoLogLevels): LogLevel {
  * One pre-built alternation over the known values, so the cost is a single regex pass per
  * string rather than one pass per secret.
  *
- * ⚠ LONGEST FIRST (PR #153 review). A JS alternation takes the first branch that matches at
+ * ⚠ LONGEST FIRST. A JS alternation takes the first branch that matches at
  * a position, not the longest, so with `sk-live-abc` listed before `sk-live-abcdef99` the
  * longer secret is redacted down to its prefix and its tail stays in the file — silent
  * under-redaction, in exactly the case that matters most: two live keys from one provider,
@@ -828,7 +828,7 @@ export function ensoLogLineRenderer(
  * across a poll printed `launch ??? done`) — and LINES, where a partial last record waits for
  * its newline.
  *
- * ⚠ The carry is BYTES, not text, and the split is at the last `0x0A` (PR #336 review). A
+ * ⚠ The carry is BYTES, not text, and the split is at the last `0x0A`. A
  * newline never occurs inside a multibyte UTF-8 sequence, so cutting at one never cuts a
  * character — which is why one carry serves both cases — and, more to the point, the carry's
  * LENGTH is then a byte count a reader can subtract from its file offset. The tail publishes
@@ -857,7 +857,7 @@ export function logChunkDecoder(): LogChunkDecoder {
         carry = pending
         return ''
       }
-      // A COPY, not a view (PR #336 review, round two): `pending` is the read buffer, and on
+      // A COPY, not a view: `pending` is the read buffer, and on
       // the backlog read that buffer is the whole day. A view onto its last hundred bytes
       // pinned the whole allocation for as long as no newline arrived — on an idle log, for
       // the life of the connection, per tab. The carry is the bytes after the last newline,
@@ -911,13 +911,13 @@ export interface EnsoLogTail {
  * ⚠ `type` is not a flag anyone sets: A STEP THAT BEGAN AT BYTE 0 IS THE FILE'S WHOLE VIEW,
  * and any other step is an append. That one rule covers the first step with no `from`, the
  * local-midnight rotation onto a new filename, a file truncated in place, and — with one check
- * the rule alone did not give (PR #336 review) — a file REPLACED under the same name: `stat` is
+ * the rule alone did not give — a file REPLACED under the same name: `stat` is
  * by path and `read` is by descriptor, so an unlink-and-recreate that grew past the old offset
  * read zero bytes from the old inode forever. The inode is compared on every step, and a
  * change is a restart from the head.
  *
- * ⚠ TWO SHAPES ARE NOT COVERED, and are stated rather than claimed (PR #336 review, round
- * two). A file truncated and regrown past the old offset WITHIN ONE POLL — the `> file` or
+ * ⚠ TWO SHAPES ARE NOT COVERED, and are stated rather than claimed.
+ * A file truncated and regrown past the old offset WITHIN ONE POLL — the `> file` or
  * `cp` shape — keeps its inode and its size, so nothing here fires and the read starts
  * mid-content of the rewritten file, which the reader sees as one malformed line and the
  * records before it missing. And a `from` carries the day it belongs to but not the inode, so

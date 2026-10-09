@@ -91,16 +91,22 @@ function directImportGraph(): Map<string, string[]> {
   const graph = new Map<string, string[]>()
   for (const line of codeLinesUnder(SOURCE_ROOTS, true)) {
     for (const [, specifier] of line.text.matchAll(IMPORT_SPECIFIER)) {
-      if (specifier === undefined || specifier.startsWith('.')) continue
-      const parts = specifier.split('/')
-      const name = specifier.startsWith('@') ? parts.slice(0, 2).join('/') : (parts[0] ?? '')
-      if (!existsSync(join(REPOSITORY_ROOT, 'node_modules', name))) continue
+      const name = installedPackageOf(specifier)
+      if (name === undefined) continue
       const importers = graph.get(name)
       if (importers === undefined) graph.set(name, [line.file])
       else if (!importers.includes(line.file)) importers.push(line.file)
     }
   }
   return graph
+}
+
+/** The package a bare specifier names, subpath dropped — `undefined` for a relative one or one not installed. */
+function installedPackageOf(specifier: string | undefined): string | undefined {
+  if (specifier === undefined || specifier.startsWith('.')) return undefined
+  const parts = specifier.split('/')
+  const name = specifier.startsWith('@') ? parts.slice(0, 2).join('/') : (parts[0] ?? '')
+  return existsSync(join(REPOSITORY_ROOT, 'node_modules', name)) ? name : undefined
 }
 
 const imports = directImportGraph()

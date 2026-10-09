@@ -55,7 +55,7 @@ function hasAuthHeader(headers: Record<string, string> | undefined): boolean {
 }
 
 /**
- * `readProviderEnvironmentKey` is a SEAM (PR #64 review): it defaults to pi-ai's
+ * `readProviderEnvironmentKey` is a SEAM: it defaults to pi-ai's
  * `getEnvApiKey`, which reads the launching process environment — injectable so the
  * fallback's POSITIVE path is testable without a test ever touching `process.env`.
  *

@@ -193,7 +193,7 @@ function runTestFile(workspace: string, path: string, options: ArenaOutcomeOptio
 
 function runCommand(workspace: string, command: readonly string[], options: ArenaOutcomeOptions): ArenaTestRun {
   const [, ...args] = command
-  // A HOME of its own per run, removed when the run ends (PR #626 review): nothing the agent's tests
+  // A HOME of its own per run, removed when the run ends: nothing the agent's tests
   // leave in it outlives them, and repeated reports leave no directories behind.
   const home = mkdtempSync(join(tmpdir(), 'arena-test-home-'))
   const result = spawnSync(options.bun, args, {

@@ -39,7 +39,7 @@ export interface AgentHost {
   /**
    * The directory of the session file under this id — WHETHER OR NOT this host serves it —
    * `undefined` when there is no file. What lets a reader tell "a thread that was never stored"
-   * from "a thread whose project is gone" (PR #399 review): `readStoredThread` answers `undefined`
+   * from "a thread whose project is gone": `readStoredThread` answers `undefined`
    * for both.
    */
   storedThreadDirectory(threadId: string): Promise<string | undefined>
@@ -105,7 +105,7 @@ export interface AgentHost {
    * Delete the thread (#571): its tree through the inventory, its store — the project's object
    * store then collected, its forks' histories kept (#573) — then every session file under its id.
    * A tree holding work is deleted only `force`d AND with `confirmedWork` the sha256 (hex) of the
-   * work's words as the user was shown them (PR #572 review): work gained since is refused, named,
+   * work's words as the user was shown them: work gained since is refused, named,
    * never taken unseen. `retire` disposes the live session and refuses a busy one: the registry's,
    * which the host does not hold. Hard: nothing is kept to undo it.
    */
@@ -470,9 +470,9 @@ export const EnsoThreadHistory = Type.Object(
 /**
  * How a stored branch ends when its last turn did not settle (#109): a prompt the
  * assistant never answered, an assistant turn that called a tool and never got its
- * result, or one whose every call got its result and no reply followed (PR #442 review) — the
+ * result, or one whose every call got its result and no reply followed — the
  * server died mid-run, or the run was cut before the reply. The third is a kill's shape, never a
- * Stop's (PR #438 review): a Stop ends the branch on pi's own error reply to the aborted model
+ * Stop's: a Stop ends the branch on pi's own error reply to the aborted model
  * call, an assistant message with no call — settled, and not named here.
  *
  * Derived on read from the branch, never written to pi's file: deepseek-harness appends a
@@ -497,7 +497,9 @@ export const EnsoInterruptedTail = Type.Union([
 `agent-host.ts` and the host's flows over it read and write every log through them: the stored threads
 (`stored-threads.ts`: the listing, the lookup by id, the cold reads), a fork (`thread-fork.ts`), tree
 making (`thread-tree-making.ts`), a rename or a restore (`thread-log-edits.ts`), and a delete
-(`thread-delete.ts`) — none of which names the runtime (#801). A thread's file is filed under its project's folder,
+(`thread-delete.ts`) — none of which names the runtime (#801); since #811 neither does `agent-host.ts`,
+whose runtime version, theme and catalogue reading live in `hosted-thread.ts` and `session-models.ts`,
+and the runtime's default log directory (`runtimeAgentDir`) in `thread-log.ts`. A thread's file is filed under its project's folder,
 `ENSO_HOME/projects/<projectIdOf(cwd)>/sessions/` (#552) — the host hands that directory to the runtime at
 create, a fork inherits its source's, and `bun run enso` hands the terminal runtime the same directory
 (`PI_CODING_AGENT_SESSION_DIR`); a launch first moves the sessions the runtime filed by encoded cwd under
@@ -546,9 +548,9 @@ a parent whose file is gone names none. Outside a runtime pi's `session_before_f
 fire (no loaded extension handles it). The host is tested against the real session manager in
 `host/__tests__/agent-host.test.ts`.
 
-**Consumed by the server.** `packages/web/src/server/index.ts` owns the read routes:
-`GET /api/stored-threads` → `respondWithStoredThreads` maps each `StoredThread` to a `EnsoStoredThread`,
-marking `busy` by peeking the registry and carrying a fork's `parentThreadId`; `POST …/fork` asks
+**Consumed by the server.** The server's route groups own the read routes (#810):
+`GET /api/stored-threads` → `respondWithStoredThreads` (`server/literal-routes.ts`) maps each `StoredThread` to a `EnsoStoredThread`,
+marking `busy` by peeking the registry and carrying a fork's `parentThreadId`; `POST …/fork` (`server/thread-control-routes.ts`) asks
 `host.forkThread` (409 while a run holds the source); `GET /api/threads` summarises each live thread from `inspect()`.
 `packages/web/src/server/thread-registry.ts` is the only builder (it is handed `host.createSession`),
 and its `inspectThread` is the one place a `EnsoThreadInspection` is assembled, so the thread route and
@@ -602,6 +604,19 @@ what needs the vendor's types (a provider refusal, a result's descriptor); the h
 call it on `ctx.sessionManager.getBranch()`; the corpus scripts call it on the omp corpus. A
 different runtime is a different `runtime-entries.ts`, and the folds do not move.
 
+**And since #811, the branch readers take the log's entries in a type of ours.** The readers
+`ThreadLog` answers through — `branch-stats.ts`, `branch-eval.ts`, `branch-incident-history.ts`,
+`branch-judge-cases.ts` — and `context-history.ts` take the branch as `LogEntry`
+(`packages/web/src/host/log-entry.ts`): the stored entry's envelope and the fields they read, a type
+of ours. Entries cross into it in two places, both checked by the compiler against the runtime's own
+entry type: `logOver` in `thread-log.ts` (its `branch()`), and `branch-context.ts`, which hands
+`context-history.ts` the branch it projects. A runtime bump that renames a field a reader reads, or
+adds an entry kind or a message role, fails to compile there rather than inside a reader. The types
+change nothing at run time: an entry is still the runtime's object. Two files keep the runtime's
+types on purpose: `branch-context.ts` builds each request's context with pi's own
+`buildSessionProjection`, and `context-elements.ts` prices each message with pi's `estimateTokens`,
+so the context tab's estimate stays pi's to the token; both are reached only through `ThreadLog`.
+
 **`sessionFile` is a lagging copy.** The runtime persists lazily — nothing reaches disk until the first
 assistant message — so `inspect()` reports the path only once the file exists and `null` before;
 a thread that has only run slash commands has a full branch and no file, and `listSessions` omits it.
@@ -613,10 +628,12 @@ a thread that has only run slash commands has a full branch and no file, and `li
 Which files may import the runtime is fixed by a gate (#558): `VENDOR_IMPORTERS_ALLOWED_INSIDE_ROOTS` in `test/vendor-gate.test.ts` lists them, and the list only shrinks, so a new file cannot quietly add to what follows.
 
 Replace the store — another file layout, a database, a remote log — and the files that change are
-`packages/web/src/host/thread-log.ts` (`ThreadLog` and its store over the new log),
-`packages/web/src/host/session-files.ts` and `stored-threads.ts` (`listSessions`, `locate`:
-where the files are), `packages/web/src/host/transcript.ts` (the new store's entries → the
-transcript of ours), `packages/web/src/host/branch-stats.ts` (the new store's messages → per-turn stats) and `packages/web/src/host/session-usage.ts` (the new store's recorded spend → pi's
+`packages/web/src/host/thread-log.ts` (`ThreadLog` and its store over the new log, its entries handed
+to the branch readers as `LogEntry`, `log-entry.ts`), `packages/web/src/host/session-files.ts` and
+`stored-threads.ts` (`listSessions`, `locate`: where the files are), `packages/web/src/host/transcript.ts`
+(the new store's entries → the transcript of ours), `packages/web/src/host/branch-context.ts` and
+`context-elements.ts` (pi's projection and pricing of a request's context, #811) and
+`packages/web/src/host/session-usage.ts` (the new store's recorded spend → pi's
 totals). That is what the storage-seam test measures: a second importer of the session
 manager anywhere else is a failing test with the file named. The server routes, the registry, the
 follow's snapshot, the wire schemas, the reader, the drawer, the browser and every server test over

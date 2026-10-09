@@ -47,7 +47,7 @@ function applyLogTailFrame(view: LogTailView, frame: EnsoLogTailFrame): LogTailV
   if (frame.type === 'backlog') {
     return { day: frame.day, lines: frame.lines, matched: frame.matched, malformed: frame.malformed, opened: true }
   }
-  // ⚠ BOUNDED, at the same cap the server applies to a frame (PR #336 review): the server caps
+  // ⚠ BOUNDED, at the same cap the server applies to a frame: the server caps
   // what it SENDS per frame, and a page that appended every `records` frame forever grew
   // without limit on a `trace` day left open. The oldest rows leave as new ones land, and
   // `matched` keeps counting so the heading reads "the last 2000 of N" honestly.
@@ -124,7 +124,7 @@ export function useLogTailStream({ filter, enabled, fetch, onRecords }: LogTailS
       signal: controller.signal,
       // A connection that came up is the recovery: whatever the last alert said is over. On
       // OPEN, not on every frame — clearing per frame raced a bad frame and a good one in the
-      // same chunk into one render that showed no alert at all (PR #336 review, round two).
+      // same chunk into one render that showed no alert at all.
       onOpen: () => setProblem(undefined),
       onFrame: (frame: EnsoLogTailFrame) => {
         resumeFrom.current = { day: frame.day, offset: frame.offset }

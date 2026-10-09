@@ -258,7 +258,7 @@ path too.
 finds the open question by id on the live thread (404 when the thread is not live or the
 question is spent), validates a non-cancel answer against the question's kind
 (422 with the refusal, and the question stays open), then hands it to the runtime
-and answers 204. `server/index.ts` maps that outcome to the response (`server/index.ts#answerControl`).
+and answers 204. `server/thread-control-routes.ts` maps that outcome to the response (`server/thread-control-routes.ts#answerControl`).
 The follow's snapshot lists every open question, oldest first, so a reconnect renders the
 card at once (`server/follow.ts#followThread`; `extension-ui-context.ts#openDialogs` checks each
 request with `isEnsoDialogSpec` rather than casting).

@@ -150,7 +150,7 @@ export function arenaSecretValues(home: string): readonly string[] {
 }
 
 /**
- * The run's secret values as they GROW (PR #613 review): `arenaSecretValues`, read again whenever
+ * The run's secret values as they GROW: `arenaSecretValues`, read again whenever
  * `secrets.env` or `auth.json` changes, and added to what was already known — never replaced.
  *
  * ⚠ Why a source and not a snapshot: the login is linked (`prepareRunHome`), so an OAuth refresh during

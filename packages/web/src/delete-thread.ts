@@ -18,7 +18,7 @@ export interface DeleteTarget {
  * - 422: the tree holds work, named by the reason. Forceable: the dialog shows the server's words
  *   as they are — they already say "the tree holds work — …", so no status and no label of the
  *   page's — and offers "Delete anyway": the same call with `?force=1`, confirming the work shown
- *   by `If-Match: "<sha256 hex of that text>"` (PR #572 review). A forced delete whose text is stale
+ *   by `If-Match: "<sha256 hex of that text>"`. A forced delete whose text is stale
  *   (a run wrote more since) is refused 422 again, with the list as it is now.
  * - 409 (a run, a move or a restore holds the thread), 404 (no such thread), or no answer at
  *   all: never forceable, so the dialog closes and its caller says the reason (`onRefused`) — the

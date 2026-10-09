@@ -15,8 +15,8 @@
  *   here send stays offered in flight (a prompt during a run queues through pi, #75) and stop
  *   is its own button (#116) — two buttons by decision, owned by `composer.tsx`
  * - `add` reports EVERY refusal, with a count, even when the rest of the batch went through —
- *   upstream reported only when the whole batch failed, so a mixed drop lost files silently
- *   (PR #141 review); the selection is a pure `selectAttachments`, tested without a DOM, and
+ *   upstream reported only when the whole batch failed, so a mixed drop lost files silently;
+ *   the selection is a pure `selectAttachments`, tested without a DOM, and
  *   runs against the held count before `setFiles` rather than inside the updater
  * - the text at submit comes from the form's `message` field and the form is NOT reset:
  *   the owner clears its controlled draft (upstream `form.reset()` fought a controlled value)
@@ -40,7 +40,7 @@
  *   ⚠ `PromptInputActionMenuItem` is taken back with its group and used by nothing: the menu's
  *   content feeds every printable key inside it to Radix's typeahead, which is inert only while
  *   the content holds zero menu items. Do not put one beside a `PromptInputCommand` — see
- *   `command-palette.tsx`'s header (PR #343 review).
+ *   `command-palette.tsx`'s header.
  * - TAKEN BACK for the composer chip (#338, slice 2): `PromptInputSelect`, `PromptInputSelectTrigger`,
  *   `PromptInputSelectContent`, `PromptInputSelectItem`, `PromptInputSelectValue` (a select in
  *   the composer chrome, on shadcn `select`; upstream uses them for its model picker, here it is
@@ -170,7 +170,7 @@ export interface AttachmentLimits {
  * Which of a batch attach, and every refusal with its count. Pure, so it is tested without
  * a DOM. ⚠ Upstream reported a refusal only when the WHOLE batch failed a check (a mixed
  * drop — two PNGs and a PDF — dropped the PDF silently); here each check reports what it
- * refused even when the rest went through (PR #141 review). Order of checks is upstream's:
+ * refused even when the rest went through. Order of checks is upstream's:
  * kind, then size, then room.
  */
 export function selectAttachments(

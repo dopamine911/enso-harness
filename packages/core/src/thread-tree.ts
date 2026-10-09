@@ -560,7 +560,7 @@ async function worktreeRegistered(
  * The worktree's registration and directory removed, then its branch: `-d`, so a branch git does
  * not see merged into HEAD is kept (`-D` only when forced). Undefined when removed, else why not
  * — a failed `remove` leaves the branch and store alone, for the caller to refuse. ⚠ A tree
- * neither on disk nor registered is ALREADY removed (PR #572 review: a delete that stopped after
+ * neither on disk nor registered is ALREADY removed (a delete that stopped after
  * this step, or a user's `git worktree prune`) — the dispose goes on to its branch and store; a
  * tree still on disk is removed by git or refused, never assumed gone.
  */

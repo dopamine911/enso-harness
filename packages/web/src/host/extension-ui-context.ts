@@ -261,7 +261,7 @@ export function createEnsoExtensionUiContext(options: EnsoExtensionUiContextOpti
   /**
    * Release a component without letting its `dispose` take the extension call down: the
    * build path was hardened so a factory failure is non-fatal, and a throwing `dispose`
-   * is the same boundary (PR #107 review). Reported, never propagated.
+   * is the same boundary. Reported, never propagated.
    */
   function disposeQuietly(component: (Component & { dispose?(): void }) | undefined): void {
     try {
@@ -275,8 +275,8 @@ export function createEnsoExtensionUiContext(options: EnsoExtensionUiContextOpti
    * Build the extension's component against the inert terminal, within the budget.
    * Resolves `undefined` — never throws — when the factory throws, rejects, or does not
    * produce a component in time: pi's rpc mode never ran the factory at all, so any
-   * factory that cannot survive a terminal-less build keeps the fallback it always had
-   * (PR #107 review). The failure is reported, not swallowed. A component that arrives
+   * factory that cannot survive a terminal-less build keeps the fallback it always had.
+   * The failure is reported, not swallowed. A component that arrives
    * AFTER the budget is disposed on arrival — nobody else will ever see it.
    */
   async function buildComponent<T>(

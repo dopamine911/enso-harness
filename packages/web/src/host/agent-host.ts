@@ -1,13 +1,3 @@
-import { join } from 'node:path'
-import { getSupportedThinkingLevels } from '@earendil-works/pi-ai'
-import {
-  getAgentDir,
-  type InlineExtension,
-  initTheme,
-  ModelRuntime,
-  VERSION as PI_VERSION,
-  SettingsManager,
-} from '@earendil-works/pi-coding-agent'
 import {
   type EnsoForkPoint,
   type EnsoPermissionModeState,
@@ -27,14 +17,12 @@ import type { BranchRequestDetail } from './branch-context.ts'
 import type { BranchEval } from './branch-eval.ts'
 import type { BranchIncidentHistory } from './branch-incident-history.ts'
 import type { BranchJudgeCases } from './branch-judge-cases.ts'
-import { catalogueRows } from './host-commands.ts'
-import { hostFlowRows, loginOptions, logoutOptions } from './host-flows.ts'
-import { buildHostedThread } from './hosted-thread.ts'
+import { buildHostedThread, type HostedThreadHost, prepareRuntimeTheme } from './hosted-thread.ts'
 import type { HostedThread, ProjectTrustState } from './live-thread.ts'
 import { seedMultiAccountConfig } from './multi-account-seed.ts'
 import { freshPermissionModeState, storedPermissionModeState } from './permission-mode-adapter.ts'
 import { hostedProjectTrust } from './project-trust.ts'
-import { loginFactsOf, sessionModels } from './session-models.ts'
+import { catalogueOf, sessionModels } from './session-models.ts'
 import {
   createStoredThreads,
   type StoredThread,
@@ -145,7 +133,7 @@ export interface AgentHostOptions {
    * asks a dialog on `session_start`, or throws there, and observe what the host does — with
    * no model, no key, no network. Never set in production.
    */
-  extensionFactories?: readonly InlineExtension[]
+  extensionFactories?: HostedThreadHost['extensionFactories']
 }
 
 /**
@@ -178,7 +166,7 @@ export interface AgentHost {
   /**
    * The directory of the session file under this id — WHETHER OR NOT this host serves it —
    * `undefined` when there is no file. What lets a reader tell "a thread that was never stored"
-   * from "a thread whose project is gone" (PR #399 review): `readStoredThread` answers `undefined`
+   * from "a thread whose project is gone": `readStoredThread` answers `undefined`
    * for both.
    */
   storedThreadDirectory(threadId: string): Promise<string | undefined>
@@ -244,7 +232,7 @@ export interface AgentHost {
    * Delete the thread (#571): its tree through the inventory, its store — the project's object
    * store then collected, its forks' histories kept (#573) — then every session file under its id.
    * A tree holding work is deleted only `force`d AND with `confirmedWork` the sha256 (hex) of the
-   * work's words as the user was shown them (PR #572 review): work gained since is refused, named,
+   * work's words as the user was shown them: work gained since is refused, named,
    * never taken unseen. `retire` disposes the live session and refuses a busy one: the registry's,
    * which the host does not hold. Hard: nothing is kept to undo it.
    */
@@ -298,15 +286,6 @@ export interface AgentHost {
    */
   projectTrust(cwd: string, branch: readonly EnsoTranscriptEntry[]): ProjectTrustState
 }
-
-/**
- * The agent runtime this build is bound to, by version.
- *
- * The ONE place outside this host that needs pi's version is the log bundle's `about` (#132),
- * and it takes this string rather than the import — the vendor gate (#145) keeps the import
- * inside `host/`.
- */
-export const AGENT_RUNTIME_VERSION: string = PI_VERSION
 
 export function createAgentHost(options: AgentHostOptions): AgentHost {
   const { agentDir, harnessPackageDir, servesDirectory, projectsDir } = options
@@ -395,7 +374,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     judgeCaseInputs,
     readStoredJudgeCases,
     sessionFilesOf,
-  } = createStoredThreads({ projectsDir, servesDirectory, environment, runtimeAgentDir: getAgentDir })
+  } = createStoredThreads({ projectsDir, servesDirectory, environment })
   const { treeKindOf, mintTree, logOnTree, recordTree, prepareTreeOnTrust, storeOf } = createTreeMaking({
     projectsDir,
     agentDir,
@@ -437,8 +416,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       { misplaced: quarantine.misplaced, secretsFile: ensoSecretsPath(ensoHome(environment)) },
     )
   }
-  // The theme registry pi's UI code consults; harmless without a terminal, required once.
-  initTheme()
+  prepareRuntimeTheme()
 
   /** A live thread built on `threadLog` (`hosted-thread.ts`), over this host's state. */
   const buildHosted = (threadId: string, threadLog: ThreadLog): Promise<HostedThread> =>
@@ -461,8 +439,8 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     // id decides the directory — pi fixed it at creation — and one this host does not serve is a
     // refusal, never a fresh session beside it under the same id. Only a thread with no file asks
     // where a new one goes, so a stale answer to that question cannot block a resume.
-    // A deleted id is never built again (#571), across a restart too (PR #572 review: its store,
-    // kept for its forks, would be adopted by the new thread and swept from under it).
+    // A deleted id is never built again (#571), across a restart too: its store,
+    // kept for its forks, would otherwise be adopted by the new thread and swept from under it).
     if (deletingThreads.has(threadId) || threadDeleted(threadId)) {
       throw new ThreadDeleted(`thread ${threadId} is deleted, or being deleted`)
     }
@@ -499,7 +477,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   }
 
   /**
-   * A build that finished after its thread was deleted, or while it was (PR #572 review): the check
+   * A build that finished after its thread was deleted, or while it was: the check
    * at `createSession`'s top runs before its awaits, and the registry's `retire` cannot see a build
    * under way — so the build is disposed here, before anything can run on it or write its file again.
    */
@@ -507,44 +485,6 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     if (!deletingThreads.has(threadId) && !deletedThreads.has(threadId)) return hosted
     hosted.runtime.dispose()
     throw new ThreadDeleted(`thread ${threadId} was deleted while it was being built`)
-  }
-
-  /**
-   * The catalogue's rows (#484). The logins and stored credentials are read from pi's runtime over
-   * the agent dir alone (`sdk.js`: `ModelRuntime.create({ authPath, modelsPath })`); the MODELS are
-   * a bound session's (#688), the agent dir's alone only when no session could be had.
-   */
-  async function catalogue(): Promise<RuntimeCommand[]> {
-    const modelRuntime = await ModelRuntime.create({
-      authPath: join(agentDir, 'auth.json'),
-      modelsPath: join(agentDir, 'models.json'),
-    })
-    const providerNameOf = (providerId: string): string => modelRuntime.getProvider(providerId)?.name ?? providerId
-    const credentials = await modelRuntime.listCredentials({ signal: AbortSignal.timeout(15_000) })
-    const login = loginOptions(loginFactsOf(modelRuntime))
-    const logout = logoutOptions(
-      credentials.map((credential) => ({
-        providerId: credential.providerId,
-        providerName: providerNameOf(credential.providerId),
-        type: credential.type,
-      })),
-    )
-    const models = (await catalogueModels.available()) ?? modelRuntime.getAvailableSnapshot()
-    return catalogueRows(models, getSupportedThinkingLevels, hostFlowRows(login, logout), configuredDefaultModel())
-  }
-
-  /**
-   * The model pi starts a session on when none is chosen: the agent dir's `defaultProvider` and
-   * `defaultModel` (#674), as `provider/id`. Global settings only — a project's are read only once
-   * it is trusted, and the catalogue serves threads of every project.
-   */
-  function configuredDefaultModel(): string | undefined {
-    // The cwd argument only locates PROJECT settings, which an untrusted manager never reads:
-    // the agent dir stands in for it, so only the global `settings.json` is read.
-    const settings = SettingsManager.create(agentDir, agentDir, { projectTrusted: false })
-    const provider = settings.getDefaultProvider()
-    const model = settings.getDefaultModel()
-    return provider === undefined || model === undefined ? undefined : `${provider}/${model}`
   }
 
   return {
@@ -573,7 +513,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     mintsTreesIn: (project: string) => treeKindOf(project) !== undefined,
     freshPermissionMode: freshPermissionModeState,
     storedPermissionMode: storedPermissionModeState,
-    catalogue,
+    catalogue: () => catalogueOf(agentDir, catalogueModels),
     projectTrust(cwd: string, branch: readonly EnsoTranscriptEntry[]): ProjectTrustState {
       // Keyed as `buildHosted` keys it: a thread on a tree (#551) answers to its checkout.
       const directory = treeRecordOf(branch)?.project ?? cwd

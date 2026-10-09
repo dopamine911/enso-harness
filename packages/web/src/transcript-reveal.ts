@@ -15,7 +15,7 @@ import type { EnsoPromptStats, EnsoThreadStats, EnsoTurnStats } from '@enso/core
  *     one at its place among the prompt's turns when there is a bubble per turn (a resumed thread),
  *     else the last (a live run's one bubble). NOT simply the last: a failed turn pi retries stays
  *     on the branch with no call (`_prepareRetry` keeps it in raw history), and the retry that
- *     follows under the same prompt is the last bubble (PR #360 review).
+ *     follows under the same prompt is the last bubble.
  * What cannot be found is said by the drawer, never guessed at.
  */
 
@@ -50,8 +50,8 @@ const NON_TEXT_PART = /\[[\w-]+ content\]/g
 
 /**
  * `branch-stats.ts` cuts a long prompt's text to 120 characters and ends it `…`. Only such a text
- * is a prefix of its bubble; any other must read as the bubble does, all of it (PR #360 review:
- * with a prefix, the stem `hi` also matched a `hi there` bubble).
+ * is a prefix of its bubble; any other must read as the bubble does, all of it:
+ * with a prefix, the stem `hi` would also match a `hi there` bubble.
  */
 const TRUNCATED = '…'
 

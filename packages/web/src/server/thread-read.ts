@@ -146,7 +146,7 @@ const NOT_READ = { stored: undefined, storedOutside: undefined } as const
 /**
  * The file, read only for a thread that is not live here — nothing is built to answer (#86).
  * `readStoredThread` answers nothing both for "never stored" and for "stored in a directory that is
- * no project here"; only the second has a file, and it must not read as a new thread (PR #399 review).
+ * no project here"; only the second has a file, and it must not read as a new thread.
  */
 async function readCold(
   host: AgentHost,
@@ -308,7 +308,7 @@ function coldReading(
  * project's. `cwd: ''` when there is nowhere it will run — a new thread whose project was removed
  * (its first prompt is refused, 409, saying so), or a stored one whose directory is no project here
  * (resuming it is refused the same way). Falling back to the launch directory would name a place
- * it will never run (PR #399 review).
+ * it will never run.
  */
 function placeOf(
   projects: ProjectRegistry,

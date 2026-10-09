@@ -228,7 +228,7 @@ const repoRoot = findRepoRoot(import.meta.url)
 function bugRepository(): string | undefined {
   const named = flag('repo')
   if (named !== undefined) return named
-  // Without a hook's repository variables (PR #683 review): run under another repository's hook,
+  // Without a hook's repository variables: run under another repository's hook,
   // the origin read would be that repository's, and bugs would be filed there.
   const origin = spawnSync('git', ['remote', 'get-url', 'origin'], {
     cwd: repoRoot,
@@ -384,7 +384,7 @@ function agentsNamed(): readonly (string | undefined)[] {
 
 /**
  * The agent's model, resolved and checked against the run's perception — the one check a single
- * run and a matrix's up-front pass both make (PR #705 review). A visual agent knows the page only by
+ * run and a matrix's up-front pass both make. A visual agent knows the page only by
  * its screenshots: a model that cannot take one cannot see.
  */
 async function agentModelNamed(reference: string): Promise<Awaited<ReturnType<typeof resolveArenaModel>>> {
@@ -457,7 +457,7 @@ async function start(): Promise<void> {
   exitWith(outcome)
 }
 
-/** The runs' outcome, a throw included, so the caller can clean up before it is said (PR #746 review). */
+/** The runs' outcome, a throw included, so the caller can clean up before it is said. */
 async function settledRuns(): Promise<{ readonly passed: boolean } | { readonly error: string }> {
   try {
     return { passed: await startRuns() }
@@ -636,7 +636,7 @@ async function refoldRun(runDirectory: string): Promise<void> {
   const manifestKept = existsSync(manifestPath)
   const earlier: unknown = manifestKept ? JSON.parse(readFileSync(manifestPath, 'utf8')) : undefined
   const kept = manifestKept ? keptEvidenceOf(earlier) : undefined
-  // ⚠ A manifest is only written once evidence was taken (PR #612 review): one whose evidence does
+  // ⚠ A manifest is only written once evidence was taken: one whose evidence does
   // not read is damaged, not a dead recorder's run. Collecting again would read whatever home this
   // command defaults to, since a stopped run left no control record naming its own.
   if (manifestKept && kept === undefined) {
@@ -644,7 +644,7 @@ async function refoldRun(runDirectory: string): Promise<void> {
   }
   const evidence = kept ?? (await collectAfterRecorderDied(runDirectory, operatorHome))
   if (kept === undefined && currentRun() === runDirectory) rmSync(currentFile, { force: true })
-  // The home the run recorded, not this shell's; and a hit an earlier scan found stands (PR #613 review).
+  // The home the run recorded, not this shell's; and a hit an earlier scan found stands.
   // A file the earlier scan stamped and that is unchanged since is not read again (#741).
   const home = runHomeOf(runDirectory, operatorHome, recordedRunHome(runDirectory))
   const scan = scanRunForSecrets(runDirectory, arenaSecretValues(home), recordedScanOf(earlier))

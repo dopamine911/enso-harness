@@ -135,7 +135,7 @@ export interface ArenaManifest {
   readonly agentNotes: Readonly<Record<ArenaNoteKind, readonly ArenaNote[]>>
   /**
    * What the recorder itself failed to do, in order — a trace chunk not written, for one. Without
-   * this a missing chunk read as a shorter `traceChunks` and nothing more (PR #562 review); the
+   * this a missing chunk read as a shorter `traceChunks` and nothing more; the
    * evidence's own gaps are evidence too.
    */
   readonly recorderErrors: readonly ArenaRecorderError[]

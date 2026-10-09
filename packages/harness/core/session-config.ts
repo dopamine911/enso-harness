@@ -40,7 +40,7 @@ export interface SessionEnsoConfig {
   /**
    * The config files this resolution read, user first; empty when none exists (#435). Recorded
    * here, where the reading happens: the resolution is cached per session, so a probe at record
-   * time would name files the cached result never saw (PR #440 review).
+   * time would name files the cached result never saw.
    */
   readonly sources: readonly string[]
 }

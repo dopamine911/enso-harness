@@ -17,7 +17,7 @@ import { commentsIn, type SourceComment } from './source-comments.ts'
  *   `// @pins <flow>/<name> …` on the line above a `test(` — that test holds those invariants.
  *   `toMatchSnapshot('flow <id>: <caption>')` — a diagram a test recorded (`flow-trace.ts`).
  *
- * ⚠ PARSED, NOT MATCHED (PR #488 review): which declaration a tag documents, and which test a pin
+ * ⚠ PARSED, NOT MATCHED: which declaration a tag documents, and which test a pin
  * sits on, come from the TypeScript syntax tree (`source-comments.ts`), and the snapshot files are
  * read by the same parser. Only the tag syntax inside a comment is read as text, the way a reader
  * reads it: a line starting `@name`, running to the next such line or the comment's end. A tag with
