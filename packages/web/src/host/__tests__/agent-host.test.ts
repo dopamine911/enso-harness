@@ -1877,13 +1877,13 @@ function treeHost(
   project: string,
   extensionFactories: InlineExtension[] = [],
   tree: 'worktree' | 'copy' | 'off' = 'worktree',
-  user: EnsoConfig = { threads: { tree } },
+  options: { user?: EnsoConfig; projectsDir?: string } = {},
 ): { host: AgentHost; projectsDir: string } {
-  // ⚠ The run's ENSO_HOME's projects folder (the preload's `<scratch>/enso-home`, which `tmpdir()`
-  // names), not a folder of the test's own: the run-context extension files each run's snapshot in
-  // `ENSO_HOME/projects/<id>/snapshots/`, and the host's stores must be the same ones — as they are
-  // in production, where both resolve ENSO_HOME. Threads and trees are named by fresh ids.
-  const projectsDir = ensoProjectsDir(join(tmpdir(), 'enso-home'))
+  const user = options.user ?? { threads: { tree } }
+  // ⚠ The run's ENSO_HOME's projects folder by default (the preload's `<scratch>/enso-home`, which
+  // `tmpdir()` names), as production's launchers derive it. The host hands its folder to the
+  // run-context extension (#586), so a folder of the test's own works too: that is its own test.
+  const projectsDir = options.projectsDir ?? ensoProjectsDir(join(tmpdir(), 'enso-home'))
   const host = createAgentHost({
     servesDirectory: (directory) =>
       realpathOrSelf(directory) === project || treeProjectId(projectsDir, directory) === projectIdOf(project),
@@ -2567,6 +2567,42 @@ test("⚠ a fork's tree is the parent's at the fork point; a restore brings a tu
   await runPrompt(plain, 'hello')
   const plainUser = plain.inspect().entries.find((entry) => entry.kind === 'message' && entry.role === 'user')?.id ?? ''
   expect((await plainHost.restoreThreadAt(plain.inspect().sessionId, plainUser)).kind).toBe('no-tree')
+})
+
+// #586: the host files a thread's tree and store under its `projectsDir`, and the run-context
+// extension recorded each run's snapshot in the store it worked out from ENSO_HOME instead. With
+// the two apart, turn 2's snapshot sat in a second store, and a fork at turn 2 could not unpack it.
+test('⚠ a host whose projects folder is not under ENSO_HOME forks at turn two: the runs snapshot into its stores (#586)', async () => {
+  const project = dirtyCheckout()
+  const core = createFauxCore()
+  core.setResponses(Array.from({ length: 2 }, (_, index) => faux.fauxAssistantMessage(`reply ${index + 1}`)))
+  const elsewhere = join(mkdtempSync(join(tmpdir(), 'enso-586-')), 'projects')
+  const { host } = treeHost(project, [fauxModelExtension(core)], 'worktree', { projectsDir: elsewhere })
+  const threadId = crypto.randomUUID()
+  const hosted = await host.createSession(threadId, () => project)
+  openSessions.splice(openSessions.length, 0, hosted)
+  new ProjectTrustStore(agentDir).set(project, true)
+  await runPrompt(hosted, 'first')
+  writeFileSync(join(hosted.inspect().cwd, 'a.txt'), 'agent edit\n')
+  await runPrompt(hosted, 'second')
+  const second = hosted
+    .inspect()
+    .entries.find(
+      (entry) =>
+        entry.kind === 'message' &&
+        entry.role === 'user' &&
+        entry.parts.some((part) => part.type === 'text' && part.text === 'second'),
+    )
+  hosted.runtime.dispose()
+  if (second === undefined) throw new Error('no user entry "second"')
+
+  const forked = await host.forkThread(threadId, second.id)
+  if (forked.kind !== 'forked') throw new Error(`the fork was refused: ${JSON.stringify(forked)}`)
+  const fork = await host.createSession(forked.threadId, () => project)
+  openSessions.splice(openSessions.length, 0, fork)
+  expect(readFileSync(join(fork.inspect().cwd, 'a.txt'), 'utf8')).toBe('agent edit\n')
+  // Every snapshot store of the project is under the host's folder; none was minted under ENSO_HOME's.
+  expect(existsSync(join(ensoProjectsDir(join(tmpdir(), 'enso-home')), projectIdOf(fork.inspect().cwd)))).toBe(false)
 })
 
 /** The id of the user message that says `text`, on `entries`. */

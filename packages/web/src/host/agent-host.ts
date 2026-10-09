@@ -1066,6 +1066,13 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   // pi's answer instead of asking a second time (`harness/core/session-config.ts`, which reads it by
   // `@enso/core`'s `ENSO_PROJECT_TRUST_BY_HOST`). Written literally, as the environment inventory reads.
   process.env.ENSO_PROJECT_TRUST_BY_HOST = '1'
+  // The projects folder this host files trees and stores under (#586): the run-context extension
+  // snapshots each run into the store there, so the host is the path's one owner. Re-deriving it
+  // from ENSO_HOME agreed only while every launcher passed that home's folder; apart, turn 2's
+  // snapshot went to a second store and a fork at it failed. Cleared for a host with no folder,
+  // so an earlier host's never stands. Written literally, as the environment inventory reads.
+  if (projectsDir === undefined) delete process.env.ENSO_PROJECTS_DIR
+  else process.env.ENSO_PROJECTS_DIR = projectsDir
   seedMultiAccountConfig(agentDir)
   // The policy the permission engine reads when it loads, before the first services exist (#446,
   // #496). An unreadable file refuses to start the host rather than run under a policy nobody wrote.
