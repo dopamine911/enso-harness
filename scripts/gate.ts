@@ -18,13 +18,16 @@
  *                  naming gate (the `enso` plugin, scripts/lint/). `--bun` runs oxlint's Node entry
  *                  under Bun, which loads the TypeScript config and plugin without depending on
  *                  the Node version a machine or CI runner happens to carry.
- *   3. typecheck — `tsc -b --pretty false`: a project-reference BUILD, not `--noEmit`. The
+ *   3. typecheck — `tsc -b --pretty false --checkers 4`: a project-reference BUILD, not `--noEmit`. The
  *                  blueprint's `--noEmit` is not available here and the difference is not
  *                  cosmetic: `composite` is required by project references, `composite` requires
  *                  declaration emit, and `tsc -b --noEmit` is refused outright — measured
  *                  2026-09-18, `error TS6310: Referenced project '…/packages/core' may not
  *                  disable emit`. So this gate WRITES: `emitDeclarationOnly` declarations into
- *                  each package's `dist-types/`, gitignored, and fallow skips them.
+ *                  each package's `dist-types/`, gitignored, and fallow skips them. `tsc` is
+ *                  TypeScript 7's native binary (#745); `--checkers 4` is its default, written
+ *                  down so a laptop and CI split the program across the same checkers whatever
+ *                  a later 7.x defaults to.
  *   4. dead-code — `fallow dead-code --quiet`: fails on ANY unused file, export, type or dependency.
  *                  No baseline since #594 — it had held zero findings since #263, and re-saving it
  *                  was the one way to accept a finding silently. After typecheck, because

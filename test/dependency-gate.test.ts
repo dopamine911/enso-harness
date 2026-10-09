@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
+import typescript from 'typescript'
 import { codeLinesUnder, REPOSITORY_ROOT } from './gate-support.ts'
 
 /**
@@ -62,6 +63,7 @@ interface Manifest {
   readonly overrides?: Record<string, string>
   /** Only read off an INSTALLED manifest, never a workspace one. */
   readonly version?: string
+  readonly scripts?: Record<string, string>
 }
 
 function manifest(repositoryRelative: string): Manifest {
@@ -220,50 +222,61 @@ test('⚠ @tanstack/ai, the web package and the override name the same @ag-ui/co
 })
 
 /**
- * ⚠ THE TYPESCRIPT MAJOR IS PINNED BY TYPEDOC, NOT BY TASTE (#188). 7.0.2 was installed here
- * and the build is SIX TIMES faster on it — measured cold, `tsc -b` over this tree: 1.0 s
- * against 6.4 s. It was given up on purpose: 7.x is the native port and ships no compiler
- * API — `node_modules/typescript/lib/` holds `tsc.js` and `getExePath.js` and no
- * `typescript.js` — so every tool that READS types rather than checking them stops working.
- * TypeDoc is the one this repo needs (#188's reference surface), and its own peer range is
- * the authority, read here rather than restated.
+ * ⚠ TWO TYPESCRIPTS AT THE ROOT, ONE PER JOB (#188, #745). 7.x is the native port and ships no
+ * compiler API — its `lib/` holds `tsc.js` and `getExePath.js` and no `typescript.js` — so
+ * every tool that READS types rather than checking them needs 6.0's. #188 paid for that once by
+ * holding the whole tree on 6.0 for TypeDoc; #745 splits the jobs instead, the way 7.0's release
+ * notes document it:
  *
- * A bump back to 7 is not wrong, it is a TRADE: it buys the compile time back and costs the
- * generated API reference. This line is what makes that trade a decision instead of a
- * surprise on the next docs build — and the failure names TypeDoc, which a version pin in a
- * manifest cannot.
+ *   • `typescript` is `@typescript/typescript6`, a re-export of the 6.0 API. TypeDoc and the
+ *     four `scripts/docs/*` readers import `'typescript'` and get it, unchanged.
+ *   • `@typescript/native` is `typescript@7`, whose `tsc` is the one `bun run typecheck` runs.
+ *     Measured 2026-10-08, cold (`tsc -b --clean` first) over this tree, three runs each: 6.0.3
+ *     18.2–18.4 s, 7.0.2 2.6–2.8 s.
+ *
+ * The API's own version is read, not the wrapper's manifest (the wrapper is 6.0.2, the API it
+ * re-exports 6.0.3), against TypeDoc's peer range. The `tsc` link is checked by path because
+ * both packages ship a compiler binary and only the name decides which one `bun run` finds — a
+ * `tsc` that resolved to 6.0 would pass every check here at 6.0's cost.
  */
-test('⚠ the installed TypeScript is one TypeDoc supports — the reason the major is pinned (#188)', () => {
-  const installedMajorMinor = /^(\d+\.\d+)\./.exec(manifest('node_modules/typescript/package.json').version ?? '')?.[1]
+test('⚠ TypeDoc reads the 6.0 API through the alias, and `typecheck` runs TypeScript 7 (#188, #745)', () => {
+  expect(root.devDependencies?.typescript).toStartWith('npm:@typescript/typescript6@')
+  expect(root.devDependencies?.['@typescript/native']).toStartWith('npm:typescript@')
+  const apiMajorMinor = /^(\d+\.\d+)\./.exec(typescript.version)?.[1]
   const supported = manifest('node_modules/typedoc/package.json').peerDependencies?.typescript ?? ''
   expect(supported).not.toBe('')
-  expect(supported.split('||').map((range) => range.trim())).toContain(`${installedMajorMinor}.x`)
-  // …and the compiler API TypeDoc reads is actually on disk, which is the thing 7.x drops.
-  expect(existsSync(join(REPOSITORY_ROOT, 'node_modules/typescript/lib/typescript.js'))).toBe(true)
+  expect(supported.split('||').map((range) => range.trim())).toContain(`${apiMajorMinor}.x`)
+  expect(manifest('node_modules/@typescript/native/package.json').version).toStartWith('7.')
+  expect(root.scripts?.typecheck).toStartWith('tsc ')
+  expect(realpathSync(join(REPOSITORY_ROOT, 'node_modules/.bin/tsc'))).toBe(
+    realpathSync(join(REPOSITORY_ROOT, 'node_modules/@typescript/native/bin/tsc')),
+  )
 })
 
+/** A `bun.lock` package entry that installs a TypeScript compiler, under whatever key. */
+const LOCKED_COMPILER = /^ {4}"[^"]+": \["typescript@(\d+\.\d+)\.\d+"/gm
+
 /**
- * ⚠ THE DOWNGRADE INSTALLED A SECOND TYPESCRIPT, and #228 spent a PR removing one (PR #327
- * review).
+ * ⚠ THREE TYPESCRIPTS, AND NO WORKSPACE OWNS ONE (#228, #188, #745).
  *
- * `fallow-type-aware` declares its own `typescript` and shared the root's copy while that was
- * 7.0.2; the root moving to 6.0.3 split them, so `bun.lock` now carries a nested
- * `fallow-type-aware/typescript@7.0.2`. That is the installer doing its job, not lock drift —
- * but it is exactly the shape #228 refused, and the difference has to be checkable rather than
- * explained in a pull-request body nobody reads twice.
- *
- * The difference: #228's rule is that no WORKSPACE package pins a TypeScript of its own, so
- * `tsc -b` compiles this tree with one compiler. A vendor's private copy is that vendor's
- * business — it never reaches `tsc -b`, the barrels, or the build. This holds the rule where
- * #228 drew it and states the exception where the installer put it.
+ * #228's rule: no WORKSPACE package pins a TypeScript of its own, so `tsc -b` compiles this tree
+ * with one compiler. A vendor's private copy is that vendor's business — it never reaches
+ * `tsc -b`, the barrels, or the build — so the lock carries two: `fallow-type-aware`'s exact
+ * 7.0.2 (nested, since the root `typescript` slot is the 6.0 alias) and `react-doctor`'s 5.9
+ * (`>=5.0.4 <6`). Ours are 6.0 for the API and 7.0 for `tsc`, so the set of compiler versions
+ * stays the three it was before #745: 7.0 was already installed, for fallow. A FOURTH version
+ * is a new compiler in the install — the shape #228 spent a PR removing — and goes red here
+ * rather than in a lockfile diff nobody reads twice.
  */
-test('⚠ only the root declares TypeScript — a second copy is a vendor’s, never a workspace’s (#228, #188)', () => {
+test('⚠ only the root declares TypeScript, and the lock holds three compiler versions (#228, #745)', () => {
   const workspaces = ['packages/arena', 'packages/core', 'packages/harness', 'packages/web'].map((workspace) => ({
     workspace,
     declares: manifest(`${workspace}/package.json`).devDependencies?.typescript,
   }))
   expect(workspaces.filter((entry) => entry.declares !== undefined)).toEqual([])
-  expect(manifest('package.json').devDependencies?.typescript).toBe('~6.0.3')
+  const lock = readFileSync(join(REPOSITORY_ROOT, 'bun.lock'), 'utf8')
+  const versions = new Set([...lock.matchAll(LOCKED_COMPILER)].map((match) => match[1] ?? ''))
+  expect([...versions].toSorted((left, right) => left.localeCompare(right))).toEqual(['5.9', '6.0', '7.0'])
   // The vendor's private copy, named so the next reader does not take it for drift.
   expect(existsSync(join(REPOSITORY_ROOT, 'node_modules/fallow-type-aware/node_modules/typescript'))).toBe(true)
 })

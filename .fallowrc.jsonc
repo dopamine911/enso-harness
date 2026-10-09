@@ -37,6 +37,10 @@
     // every import site is under the vendor gate's roots or on its allowlist (#145).
     "@earendil-works/pi-ai",
     "@earendil-works/pi-tui",
+    // TypeScript 7's `tsc`, installed under an alias (#745): `typecheck` runs its binary, and
+    // fallow credits a `tsc` script to the package named `typescript` — here the 6.0 API alias.
+    // `test/dependency-gate.test.ts` checks `node_modules/.bin/tsc` resolves to this package.
+    "@typescript/native",
     // The page's fonts, served as FILES by `packages/web/src/server/font-files.ts` and linked by
     // `fonts.ts` — never imported, because Bun inlines every font a bundled stylesheet names
     // (#407). `test/fallow-config.test.ts` holds this list equal to the web package's @fontsource

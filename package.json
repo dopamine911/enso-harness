@@ -12,7 +12,7 @@
   },
   "packageManager": "bun@1.4.0",
   "scripts": {
-    "typecheck": "tsc -b --pretty false",
+    "typecheck": "tsc -b --pretty false --checkers 4",
     "deadcode:check": "fallow dead-code --quiet",
     "test": "bun test",
     "lint": "bun --bun oxlint",
@@ -50,10 +50,10 @@
     "dupes:check": "fallow dupes --quiet --summary"
   },
   "devDependencies": {
-    "typescript": "~6.0.3",
     "@happy-dom/global-registrator": "20.14.5",
     "@playwright/test": "1.63.0",
     "@types/bun": "^1.4.2",
+    "@typescript/native": "npm:typescript@~7.0.2",
     "eslint-plugin-jest": "29.16.6",
     "eslint-plugin-unicorn": "76.0.0",
     "fallow": "3.28.0",
@@ -62,7 +62,8 @@
     "oxlint": "1.85.0",
     "oxlint-tsgolint": "7.0.2003",
     "react-doctor": "0.9.14",
-    "typedoc": "0.28.20"
+    "typedoc": "0.28.20",
+    "typescript": "npm:@typescript/typescript6@~6.0.2"
   },
   "overrides": {
     "@tanstack/ai": "0.66.0",
