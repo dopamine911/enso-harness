@@ -66,7 +66,6 @@
  * @module
  */
 
-import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import {
   appendFileSync,
@@ -87,7 +86,7 @@ import {
 } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import type { EnsoGitFileChange } from './git-state.ts'
-import { exitCode, type GitResult, readTreeChanges, runGitIn, withoutGitLocalVariables } from './git.ts'
+import { execGit, type GitResult, readTreeChanges, runGitIn, withoutGitLocalVariables } from './git.ts'
 
 /**
  * How long one git of the store may take. A mint on an unseeded 100k-file tree is the slow case;
@@ -199,19 +198,16 @@ function spawnGit(
   env: NodeJS.ProcessEnv,
   input?: readonly string[] | string,
 ): Promise<GitResult> {
-  const { promise, resolve: settle } = Promise.withResolvers<GitResult>()
-  const child = execFile(
-    'git',
-    [...SNAPSHOT_CONFIG, ...args],
-    { cwd, env, timeout: SNAPSHOT_TIMEOUT_MS, maxBuffer: SNAPSHOT_MAX_OUTPUT_BYTES },
-    (error, stdout, stderr) => {
-      settle({ code: exitCode(error), stdout, stderr })
-    },
-  )
+  const { child, result } = execGit([...SNAPSHOT_CONFIG, ...args], {
+    cwd,
+    env,
+    timeout: SNAPSHOT_TIMEOUT_MS,
+    maxBuffer: SNAPSHOT_MAX_OUTPUT_BYTES,
+  })
   // A git that dies before reading its list breaks the pipe: its exit code says so, never a throw.
   child.stdin?.on('error', () => undefined)
   child.stdin?.end(typeof input === 'string' ? input : input?.map((record) => `${record}\0`).join(''))
-  return promise
+  return result
 }
 
 /**
@@ -1276,18 +1272,28 @@ async function stageTreeFiles(
   return undefined
 }
 
+/** The tree's rules and its files under them, listed against `index`; or the step that failed. */
+async function listTree(
+  environment: NodeJS.ProcessEnv,
+  store: StorePlace,
+  index: string,
+): Promise<{ readonly rules: IgnoreRules; readonly files: TreeFiles } | Refusal> {
+  const rules = await ignoreRulesOf(environment, store)
+  if ('refused' in rules) return rules
+  const files = await listTreeFiles(environment, store, rules, index)
+  return 'refused' in files ? files : { rules, files }
+}
+
 /** The tree's files under its rules, staged into `index`; the listing, or the step that failed. */
 async function stageTree(
   environment: NodeJS.ProcessEnv,
   store: StorePlace,
   index: string,
 ): Promise<{ readonly kind: 'staged'; readonly rules: IgnoreRules; readonly files: TreeFiles } | Refusal> {
-  const rules = await ignoreRulesOf(environment, store)
-  if ('refused' in rules) return rules
-  const files = await listTreeFiles(environment, store, rules, index)
-  if ('refused' in files) return files
-  const staged = await stageTreeFiles(environment, store, files, index)
-  return staged ?? { kind: 'staged', rules, files }
+  const listed = await listTree(environment, store, index)
+  if ('refused' in listed) return listed
+  const staged = await stageTreeFiles(environment, store, listed.files, index)
+  return staged ?? { kind: 'staged', ...listed }
 }
 
 async function takeSnapshot(
@@ -1400,10 +1406,9 @@ export async function materializeSnapshot(options: {
   const { directory, tree, hash, environment } = options
   const store = { directory, tree }
   const index = join(directory, 'enso-index')
-  const rules = await ignoreRulesOf(environment, store)
-  if ('refused' in rules) return rules
-  const before = await listTreeFiles(environment, store, rules, index)
-  if ('refused' in before) return before
+  const listed = await listTree(environment, store, index)
+  if ('refused' in listed) return listed
+  const before = listed.files
   const read = await runStoreGit(environment, store, ['read-tree', hash])
   if (read.code !== 0) return refusedBy('read-tree', read)
   const held = await runStoreGit(environment, store, ['ls-files', '-z'])

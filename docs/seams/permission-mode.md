@@ -305,13 +305,7 @@ export function freshPermissionModeState(): EnsoPermissionModeState {
  * and it replaces this reading as soon as the thread runs.
  */
 export function storedPermissionModeState(transcript: readonly EnsoTranscriptEntry[]): EnsoPermissionModeState {
-  for (let position = transcript.length - 1; position >= 0; position -= 1) {
-    const entry = transcript[position]
-    if (entry?.kind !== 'custom') continue
-    const recorded = readRecordedMode(entry.customType, entry.data)
-    if (recorded !== undefined) return { mode: recorded, available: [...ENSO_PERMISSION_MODES] }
-  }
-  return freshPermissionModeState()
+  return { mode: recordedPermissionMode(transcript), available: [...ENSO_PERMISSION_MODES] }
 }
 ```
 

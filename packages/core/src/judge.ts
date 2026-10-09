@@ -3,7 +3,7 @@ import { isAbsolute, join, relative, resolve } from 'node:path'
 import { ENSO_JUDGE_POLICY, type EnsoJudgeState } from './command-judge.ts'
 import { ENSO_REDACTED, ENSO_REDACTED_VALUE } from './log.ts'
 import { realpathOrSelf, textLooksLikeSecretPath } from './paths.ts'
-import { isSecretShapedName } from './secrets.ts'
+import { isSecretShapedName, secretValuePattern } from './secrets.ts'
 import type { EnsoJudgeContext } from './session-risk.ts'
 
 /**
@@ -208,15 +208,6 @@ const URL_PASSWORD = /(\b[a-z][a-z0-9+.-]*:\/\/[^\s:@/'"]+:)[^\s@/'"]+(?=@)/gi
 const TOKEN_SHAPES =
   /\bsk-[A-Za-z0-9_-]{16,}|\bgh[pousr]_[A-Za-z0-9]{20,}|\bgithub_pat_[A-Za-z0-9_]{20,}|\bxox[abprs]-[A-Za-z0-9-]{10,}|\bAKIA[0-9A-Z]{16}\b|-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g
 
-/** Every known value, longest first — a shorter one listed first would leave a longer one's tail. */
-function knownValuePattern(secretValues: readonly string[]): RegExp | undefined {
-  const scannable = secretValues
-    .filter((secret) => secret.length > 0)
-    .toSorted((left, right) => right.length - left.length)
-  if (scannable.length === 0) return undefined
-  return new RegExp(scannable.map((secret) => secret.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g')
-}
-
 /**
  * One string as the judge may see it: known secret values first, then the shapes. Markers, not
  * deletions, so the judge still reads that something was there.
@@ -224,7 +215,7 @@ function knownValuePattern(secretValues: readonly string[]): RegExp | undefined 
  * @group Command judge
  */
 export function redactJudgeText(text: string, secretValues: readonly string[]): string {
-  const known = knownValuePattern(secretValues)
+  const known = secretValuePattern(secretValues)
   const scrubbed = known === undefined ? text : text.replace(known, ENSO_REDACTED_VALUE)
   return scrubbed
     .replace(ASSIGNMENT, (whole: string, name: string) =>

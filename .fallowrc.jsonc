@@ -101,9 +101,15 @@
   // classes are excluded by decision, each with its reason:
   // - the vendored components, for the reason `ignoreFindings` gives above — dupes has its own
   //   ignore list, so the decision is written twice;
-  // - `@enso/core`: "every shape is a schema" (architecture → The shared core) emits a
-  //   `Type.Object` + `Static` pair per schema on purpose, and the tool pairs those as clones.
-  //   The convention IS the repetition; a real clone in core is found by the reviewer, not here.
+  // - `@enso/core`'s DECLARATION modules, BY NAME (#827): "every shape is a schema" (architecture →
+  //   The shared core) emits a `Type.Object` + `Static` pair per schema on purpose, most with a
+  //   validated reader beside it, and the tool pairs those as clones. The convention IS the
+  //   repetition. A file is listed when it declares and does nothing else — schemas, their types,
+  //   the reader or guard over each, the constants they enumerate — and leaves the list when it
+  //   gains logic. A core module WITH logic stays counted whole, its schemas too (`session-risk.ts`,
+  //   `session-incident.ts`, `log-stats.ts`, `follow.ts`, …): excluding it would hide its logic's
+  //   clones, which is what the old `packages/core/src/**` did, and a line suppression would sit
+  //   inside a schema literal at a token offset that moves with every edit above it.
   // - `packages/web/src/styles/themes.css`: a colour theme IS the full set of shadcn variables, so
   //   every palette block names the same variables with its own values — the tool pairs the names.
   //   Nothing is shared to fold: a theme that borrowed another's values would be the drift
@@ -117,8 +123,10 @@
   // What stays in the count and is NOT excluded: Playwright arrange/act blocks, the dispatcher's
   // route branches, a table still inline in a generator. `threshold` is the ratchet: fallow 3.25's
   // regression baseline carries dead-code categories only, so the duplicated-line percentage is
-  // the number that can only fall. Lower it when a fold lands, never raise it. Read by the
-  // blocking `duplication` step of `scripts/gate.ts` (`dupes:check`) since #593.
+  // the number that can only fall while the measured tree stays the same. Lower it when a fold
+  // lands; raise it only when an exclusion narrows and more of the tree is measured (#827), never
+  // for code added. Read by the blocking `duplication` step of `scripts/gate.ts` (`dupes:check`)
+  // since #593.
   //
   // ⚠ A ratchet that is red before any PR touches it reports nothing — every PR sees the same
   // red, so a genuine increase is indistinguishable from the standing state (#260). The 4.5
@@ -144,7 +152,16 @@
   // 2.52. `main` then crossed it unseen again: 2.7137888547499105 % (1,740 of 64,095) on
   // 2026-10-05, up from 2.51 % at `777f985` six days earlier. #593 moved the generators' tables
   // into `scripts/docs/inventory/` (an exclusion, not a fold, as the themes' was):
-  // 2.433242806235381 % (1,550 of 63,701), pinned at 2.44. Re-measure with
+  // 2.433242806235381 % (1,550 of 63,701), pinned at 2.44. `main` then drifted down to
+  // 2.28797347277133 % (1,794 of 78,410) with the pin left behind. #827 narrowed the core
+  // exclusion from all of `packages/core/src/**` to its twelve declaration modules: core counted
+  // whole was 4.01 % (3,891 of 96,930, 61 more clone groups); by name, 2.73 % (2,562 of 93,872).
+  // The logic clones that surfaced were folded — git's three runners onto `execGit`, three log
+  // line loops onto `parseEnsoLogText`, the log's and the judge's secret alternation onto
+  // `secretValuePattern`, the host's stored mode onto `recordedPermissionMode`, the snapshot
+  // store's two tree listings onto `listTree`: 2.6403800272665303 % (2,479 of 93,888), pinned at
+  // 2.65. The number ROSE because an exclusion narrowed, not because code was added: core's logic
+  // modules, and the schemas inside them, are measured now. Re-measure with
   // `bunx fallow dupes --format json` (`stats.duplication_percentage`), and lower it the moment
   // a fold makes a smaller number pass.
   //
@@ -156,11 +173,22 @@
     "mode": "semantic",
     "ignore": [
       "packages/web/src/components/**",
-      "packages/core/src/**",
+      "packages/core/src/git-state.ts",
+      "packages/core/src/guard.ts",
+      "packages/core/src/observation.ts",
+      "packages/core/src/permission-mode.ts",
+      "packages/core/src/project-settings.ts",
+      "packages/core/src/run-context.ts",
+      "packages/core/src/thread-context.ts",
+      "packages/core/src/thread-runtime.ts",
+      "packages/core/src/thread-stats.ts",
+      "packages/core/src/thread-tree-record.ts",
+      "packages/core/src/tool-result.ts",
+      "packages/core/src/ui-events.ts",
       "packages/web/src/styles/themes.css",
       "scripts/docs/inventory/**"
     ],
-    "threshold": 2.44
+    "threshold": 2.65
   },
   // Complexity. Two gate steps read this block, both blocking:
   //

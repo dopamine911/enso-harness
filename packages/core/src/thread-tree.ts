@@ -41,11 +41,10 @@
  * @module
  */
 
-import { execFile } from 'node:child_process'
 import { existsSync, mkdirSync, realpathSync, rmSync, type Stats } from 'node:fs'
 import { lstat, readdir } from 'node:fs/promises'
 import { basename, dirname, join, resolve } from 'node:path'
-import { exitCode, type GitResult, withoutGitLocalVariables } from './git.ts'
+import { execGit, type GitResult, withoutGitLocalVariables } from './git.ts'
 import {
   collectSnapshotGarbage,
   compareTreeWithSnapshots,
@@ -78,16 +77,12 @@ const TREE_CONFIG = [
 /** git in `cwd`, without the environment's repository-locating variables: `cwd` names the repository. */
 function runTreeGit(environment: NodeJS.ProcessEnv, args: readonly string[], cwd: string): Promise<GitResult> {
   const env = { ...withoutGitLocalVariables(environment), GIT_TERMINAL_PROMPT: '0', GIT_PAGER: 'cat' }
-  const { promise, resolve: settle } = Promise.withResolvers<GitResult>()
-  execFile(
-    'git',
-    [...TREE_CONFIG, ...args],
-    { cwd, env, timeout: SNAPSHOT_TIMEOUT_MS, maxBuffer: TREE_MAX_OUTPUT_BYTES },
-    (error, stdout, stderr) => {
-      settle({ code: exitCode(error), stdout, stderr })
-    },
-  )
-  return promise
+  return execGit([...TREE_CONFIG, ...args], {
+    cwd,
+    env,
+    timeout: SNAPSHOT_TIMEOUT_MS,
+    maxBuffer: TREE_MAX_OUTPUT_BYTES,
+  }).result
 }
 
 /** git's first line of `stderr`, or its exit code when it said nothing. */

@@ -25,7 +25,7 @@
  * @module
  */
 
-import { execFile } from 'node:child_process'
+import { type ChildProcess, execFile } from 'node:child_process'
 import { existsSync, lstatSync } from 'node:fs'
 import { join } from 'node:path'
 import type {
@@ -114,15 +114,42 @@ const GIT_READ_ONLY_CONFIG = [
   'diff.submodule=short',
 ]
 
+/** The exit code in an `execFile` error: git's own, or -1 for a git that never ran or was killed. */
+function exitCode(error: (Error & { code?: unknown; killed?: boolean }) | null): number {
+  if (error === null) return 0
+  return typeof error.code === 'number' && error.killed !== true ? error.code : -1
+}
+
 /**
- * The exit code in an `execFile` error: git's own, or -1 for a git that never ran or was killed.
- * Shared with the snapshot store's own runner.
+ * Where a git runs and what bounds it: its directory, its whole environment, and the timeout and
+ * output size past which it is killed (code -1).
  *
  * @group Git
  */
-export function exitCode(error: (Error & { code?: unknown; killed?: boolean }) | null): number {
-  if (error === null) return 0
-  return typeof error.code === 'number' && error.killed !== true ? error.code : -1
+export interface GitBounds {
+  readonly cwd: string
+  readonly env: NodeJS.ProcessEnv
+  readonly timeout: number
+  readonly maxBuffer: number
+}
+
+/**
+ * git with `args` under `bounds`, settled as a `GitResult`: a git that fails is its exit code,
+ * never a throw. Every git core runs goes through here — the read-only queries below, the
+ * snapshot store's and the thread trees' runners, each with its own config and bounds. `child` is
+ * for the runner that writes git's stdin (the snapshot store's).
+ *
+ * @group Git
+ */
+export function execGit(
+  args: readonly string[],
+  bounds: GitBounds,
+): { readonly child: ChildProcess; readonly result: Promise<GitResult> } {
+  const { promise, resolve } = Promise.withResolvers<GitResult>()
+  const child = execFile('git', args, bounds, (error, stdout, stderr) => {
+    resolve({ code: exitCode(error), stdout, stderr })
+  })
+  return { child, result: promise }
 }
 
 /**
@@ -167,16 +194,12 @@ export function runGitIn(
       ? {}
       : { GIT_DIR: place.gitDirectory, GIT_WORK_TREE: place.workTree, GIT_INDEX_FILE: place.index }
   const env = { ...withoutGitLocalVariables(environment), ...located, ...GIT_READ_ONLY_VARIABLES }
-  const { promise, resolve } = Promise.withResolvers<GitResult>()
-  execFile(
-    'git',
-    [...GIT_READ_ONLY_CONFIG, ...args],
-    { cwd, env, timeout: GIT_TIMEOUT_MS, maxBuffer: GIT_MAX_OUTPUT_BYTES },
-    (error, stdout, stderr) => {
-      resolve({ code: exitCode(error), stdout, stderr })
-    },
-  )
-  return promise
+  return execGit([...GIT_READ_ONLY_CONFIG, ...args], {
+    cwd,
+    env,
+    timeout: GIT_TIMEOUT_MS,
+    maxBuffer: GIT_MAX_OUTPUT_BYTES,
+  }).result
 }
 
 /**
