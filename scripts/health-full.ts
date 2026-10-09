@@ -35,40 +35,54 @@ interface FallowConfig {
   readonly health: { readonly [key: string]: unknown }
 }
 
-/** One exemption: its name in the table, and the config without it. */
+/** One exemption: its name in the table, the config without it, and whether the full run keeps it. */
 interface Exemption {
   readonly name: string
   readonly without: (config: FallowConfig) => FallowConfig
+  /** A build fact rather than a hiding rule: without it fallow reports runtime-loaded code as unused. */
+  readonly keptInFullRun: boolean
 }
 
 const withoutKeys = (config: FallowConfig, ...keys: readonly string[]): FallowConfig =>
   Object.fromEntries(Object.entries(config).filter(([key]) => !keys.includes(key))) as FallowConfig
 
 const EXEMPTIONS: readonly Exemption[] = [
-  { name: '`ignoreFindings` (vendored components)', without: (config) => withoutKeys(config, 'ignoreFindings') },
-  { name: '`ignoreExports` (schema types)', without: (config) => withoutKeys(config, 'ignoreExports') },
+  {
+    name: '`ignoreFindings` (vendored components)',
+    without: (config) => withoutKeys(config, 'ignoreFindings'),
+    keptInFullRun: false,
+  },
+  {
+    name: '`ignoreExports` (schema types)',
+    without: (config) => withoutKeys(config, 'ignoreExports'),
+    keptInFullRun: false,
+  },
   {
     name: '`duplicates.ignore`',
     without: (config) => ({ ...config, duplicates: { ...config.duplicates, ignore: [] } }),
+    keptInFullRun: false,
   },
   {
     name: '`health.ignore` and `thresholdOverrides`',
     without: (config) => ({ ...config, health: { ...config.health, ignore: [], thresholdOverrides: [] } }),
+    keptInFullRun: false,
   },
   {
     name: '`health.maxCrap: 0` (CRAP off)',
     without: (config) => ({ ...config, health: { ...config.health, maxCrap: 30 } }),
+    keptInFullRun: false,
   },
-  { name: '`entry` (kept in the full run)', without: (config) => withoutKeys(config, 'entry') },
+  { name: '`entry`', without: (config) => withoutKeys(config, 'entry'), keptInFullRun: true },
   {
-    name: '`ignoreDependencies` (kept in the full run)',
+    name: '`ignoreDependencies`',
     without: (config) => withoutKeys(config, 'ignoreDependencies'),
+    keptInFullRun: true,
   },
 ]
 
 /** The config the full run reads: every exemption that hides findings off, the build facts kept. */
 function fullConfig(config: FallowConfig): FallowConfig {
-  const hiding = EXEMPTIONS.filter((exemption) => !exemption.name.includes('kept in the full run'))
+  const hiding = EXEMPTIONS.filter((exemption) => !exemption.keptInFullRun)
   return hiding.reduce((current, exemption) => exemption.without(current), config)
 }
 
@@ -133,7 +147,8 @@ async function exemptionTable(config: FallowConfig): Promise<string> {
   const configured = await measure(config)
   const rows: string[] = []
   for (const exemption of EXEMPTIONS) {
-    rows.push(`| ${exemption.name} | ${difference(configured, await measure(exemption.without(config)))} |`)
+    const label = exemption.keptInFullRun ? `${exemption.name} (kept in the full run)` : exemption.name
+    rows.push(`| ${label} | ${difference(configured, await measure(exemption.without(config)))} |`)
   }
   const deadCode = Object.entries(configured.deadCode).map(([kind, count]) => `${count} ${kind.replaceAll('_', ' ')}`)
   return [
