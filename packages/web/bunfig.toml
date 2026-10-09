@@ -7,3 +7,11 @@
 # (its [install] linker pin), which always runs from the root.
 [serve.static]
 plugins = ["bun-plugin-tailwind", "./src/server/bun-plugin-strict-binding-workaround.ts"]
+
+# #586: `bun test` reads THIS file when run from packages/web (the natural place to run a web test,
+# and the cwd every launcher above uses), and the root's `[test]` section is then not read. Without
+# its preloads a test ran under the operator's ENSO_HOME (hosted test threads minted stores under the
+# real `~/.enso/projects`), the real TMPDIR (#546's cleanup lost), and without the Radix preload
+# (#338: mounted dropdowns and dialogs failed to render). The same two, relative to this file.
+[test]
+preload = ["../../test/scratch-preload.ts", "./src/__tests__/radix-preload.ts"]
