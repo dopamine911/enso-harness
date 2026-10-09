@@ -14,6 +14,7 @@ import { redactJudgeText } from '@enso/core/judge'
 import { ensoAgentDir } from '@enso/core/paths'
 import { ArenaActToolParameters, ArenaVisualActToolParameters } from './act-tool.ts'
 import { ARENA_UI_TOOL, ARENA_VIEW } from './actions.ts'
+import { type ArenaReadMark, readMarkOf } from './read-regions.ts'
 import type { ArenaActOutcome, ArenaDriver, ArenaDriverSession } from './recorder.ts'
 import type { ArenaPerception } from './timeline.ts'
 
@@ -45,15 +46,19 @@ function screenshotPath(outcome: ArenaActOutcome): string | undefined {
 /**
  * The tool result the model sees: the recorder's answer as JSON, and — on a model that takes images —
  * the picture itself: a visual run's view after every action (#680), a tree run's screenshot when
- * asked for, because a person using Enso sees the screen, not only its accessibility tree.
+ * asked for, because a person using Enso sees the screen, not only its accessibility tree. A read's
+ * mark rides along as the result's details (#740), for `withCurrentReads` to find.
  */
-export function arenaToolResult(outcome: ArenaActOutcome, imagesAccepted: boolean): AgentToolResult<undefined> {
+export function arenaToolResult(
+  outcome: ArenaActOutcome,
+  imagesAccepted: boolean,
+): AgentToolResult<ArenaReadMark | undefined> {
   const content: (TextContent | ImageContent)[] = [{ type: 'text', text: JSON.stringify(outcome, null, 2) }]
   const shot = imagesAccepted ? screenshotPath(outcome) : undefined
   if (shot !== undefined) {
     content.push({ type: 'image', data: readFileSync(shot).toString('base64'), mimeType: 'image/jpeg' })
   }
-  return { content, details: undefined, ...(outcome.ok ? {} : { isError: true }) }
+  return { content, details: readMarkOf(outcome.result), ...(outcome.ok ? {} : { isError: true }) }
 }
 
 /**
@@ -103,13 +108,43 @@ function withRecentImages(messages: readonly AgentMessage[]): AgentMessage[] {
   })
 }
 
+/** What a read reads as in the request once a newer whole read of its region came (#740). */
+export function supersededReadText(mark: ArenaReadMark, newest: number): string {
+  return `[read ${mark.read} of ${mark.region}, no longer attached: read ${newest} has ${mark.region} whole.]`
+}
+
+/**
+ * The messages a model call sends (#740), by #724's mechanism: each read older than its region's
+ * newest WHOLE read replaced by a line saying so. A region's reads are its last whole one and the
+ * diffs after it, each against the one before, so every diff's base stays: dropping on the newest
+ * read of any kind would drop the base of the diff that made it newest. The recorder bounds that
+ * chain (`read-regions.ts`): past the region's size in changes, its next read is whole, and the
+ * chain before it goes. Another region's reads are never touched. A read carries no image, so the
+ * screenshot count `withRecentImages` steps by is the same either way.
+ */
+function withCurrentReads(messages: readonly AgentMessage[]): AgentMessage[] {
+  const markOf = (message: AgentMessage): ArenaReadMark | undefined =>
+    message.role === 'toolResult' && message.toolName === ARENA_UI_TOOL ? readMarkOf(message.details) : undefined
+  const newestWhole = new Map<string, number>()
+  for (const message of messages) {
+    const mark = markOf(message)
+    if (mark !== undefined && mark.against === undefined) newestWhole.set(mark.region, mark.read)
+  }
+  return messages.map((message): AgentMessage => {
+    const mark = markOf(message)
+    const newest = mark === undefined ? undefined : newestWhole.get(mark.region)
+    if (mark === undefined || newest === undefined || mark.read >= newest) return message
+    return { ...message, content: [{ type: 'text', text: supersededReadText(mark, newest) }] } as AgentMessage
+  })
+}
+
 /** `act`: the agent's one tool. Each call is one action on the recorder's page, recorded as the agent's. */
 export function arenaUiTool(
   session: Pick<ArenaDriverSession, 'act'>,
   imagesAccepted: boolean,
   onStopped: () => void,
   perception: ArenaPerception = 'tree',
-): AgentTool<typeof ArenaActToolParameters | typeof ArenaVisualActToolParameters, undefined> {
+): AgentTool<typeof ArenaActToolParameters | typeof ArenaVisualActToolParameters, ArenaReadMark | undefined> {
   return {
     name: ARENA_UI_TOOL,
     label: 'Act on Enso',
@@ -119,7 +154,8 @@ export function arenaUiTool(
           `Every answer brings a ${ARENA_VIEW.width}×${ARENA_VIEW.height} screenshot of the page after the action; ` +
           'that picture is the only way you see the page. This is your only tool: everything you do, you do through Enso.'
         : 'One action on Enso’s page, as a person at the browser would make it. Returns what happened as JSON. ' +
-          'This is your only tool: everything you do, you do through Enso.',
+          '`read` returns one region of the page’s accessibility tree: whole the first time, then only what ' +
+          'changed since your last read of it. This is your only tool: everything you do, you do through Enso.',
     parameters: perception === 'visual' ? ArenaVisualActToolParameters : ArenaActToolParameters,
     executionMode: 'sequential',
     execute: async (_toolCallId, parameters) => {
@@ -207,8 +243,9 @@ export function arenaAgentDriver(options: ArenaAgentOptions): ArenaDriver {
         ],
       },
       // Only the newest screenshots go with each call (#724): every one stayed, and a 43-minute run
-      // died at 413. The conversation and its transcript keep all of them; this shapes the request.
-      transformContext: (messages) => Promise.resolve(withRecentImages(messages)),
+      // died at 413. Nor a read a newer whole read of its region replaced (#740). The conversation and
+      // its transcript keep all of them; this shapes the request.
+      transformContext: (messages) => Promise.resolve(withRecentImages(withCurrentReads(messages))),
       streamFn: options.streamFn,
       toolExecution: 'sequential',
     })

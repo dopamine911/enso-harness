@@ -76,7 +76,12 @@ export type ArenaAction =
   | { readonly action: 'press'; readonly key: string; readonly target?: ArenaTarget }
   | { readonly action: 'hover'; readonly target: ArenaTarget }
   | { readonly action: 'select'; readonly target: ArenaTarget; readonly option: string }
-  | { readonly action: 'read' }
+  /**
+   * One region of the page's accessibility tree (#740, `read-regions.ts`): whole the first time, then
+   * what changed since the last read of it; `full` has it whole. Any name is taken here: the recorder
+   * answers a region not on the page with the ones that are.
+   */
+  | { readonly action: 'read'; readonly region?: string; readonly full?: boolean }
   | { readonly action: 'screenshot' }
   /**
    * A fixed sleep; or with `until` a wait on the page, `ms` its limit: `'change'` (#637) returns as
@@ -573,7 +578,18 @@ const ACTION_PARSERS: Readonly<Record<string, (request: Fields) => ArenaActionPa
     const reason = text(request, 'reason')
     return accept({ action: 'stop', ...(reason === undefined ? {} : { reason }) })
   },
-  read: () => accept({ action: 'read' }),
+  read: (request) => {
+    const { region, full } = request
+    if (region !== undefined && (typeof region !== 'string' || region.length === 0)) {
+      return fail('read takes "region" as the name of one, like "chat"; a read answers with the ones on the page')
+    }
+    if (full !== undefined && typeof full !== 'boolean') return fail('read takes "full" as true or false')
+    return accept({
+      action: 'read',
+      ...(region === undefined ? {} : { region }),
+      ...(full === true ? { full } : {}),
+    })
+  },
   screenshot: () => accept({ action: 'screenshot' }),
   back: () => accept({ action: 'back' }),
   reload: () => accept({ action: 'reload' }),
@@ -665,6 +681,15 @@ function describeTarget(target: ArenaTarget): string {
   return `placeholder "${target.placeholder}"${nth}`
 }
 
+/** A read as the timeline records it (#740): `read`, `read threads`, `read chat, full`. */
+function describeRead(
+  action: Extract<ArenaAction, { readonly action: 'read' }>,
+  redact: (typed: string) => string,
+): string {
+  const region = action.region === undefined ? '' : ` ${redact(action.region)}`
+  return `read${region}${action.full === true ? ', full' : ''}`
+}
+
 /**
  * An action as the timeline records it: one line, with what the agent TYPED put through the
  * judge's redactor and the run's known secret values. A prompt that quotes a key must not put
@@ -709,6 +734,8 @@ export function describeArenaAction(action: ArenaAction, secretValues: readonly 
       return `switch-tab ${action.tab}`
     case 'close-tab':
       return action.tab === undefined ? 'close-tab' : `close-tab ${action.tab}`
+    case 'read':
+      return describeRead(action, redact)
     default:
       return action.action
   }

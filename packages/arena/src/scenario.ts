@@ -1,4 +1,5 @@
 import { ARENA_VIEW } from './actions.ts'
+import { ARENA_READ_REGIONS } from './read-regions.ts'
 import type { ArenaPerception } from './timeline.ts'
 
 /**
@@ -141,8 +142,9 @@ interface as it ships, and every shortcut hides the thing being tested. <json> i
 these:`
 }
 
-/** How an agent that reads the page acts on it: the accessibility tree, and controls by name. */
+/** How an agent that reads the page acts on it: the accessibility tree, a region at a time (#740), and controls by name. */
 const TREE_MOVES = `    {"action":"read"}
+    {"action":"read","region":"threads"}
     {"action":"click","target":{"role":"button","name":"…"}}
     {"action":"fill","target":{"placeholder":"…"},"text":"…"}
     {"action":"press","key":"Enter"}
@@ -150,7 +152,17 @@ const TREE_MOVES = `    {"action":"read"}
     {"action":"hover"|"select"|"back"|"reload"|"screenshot", …}
 
 Find things the way a person reading the page would: by role and accessible name, visible text,
-label or placeholder. Start with \`read\`, which returns the page's accessibility tree and URL.
+label or placeholder. Start with \`read\`, which returns the URL and one region of the page's
+accessibility tree. "region" is one of:
+${Object.entries(ARENA_READ_REGIONS)
+  .map(([region, what]) => `- "${region}": ${what}`)
+  .join('\n')}
+Without "region", a read is of an open dialog, else "chat", else "page" (the answer's "region" says which),
+and every answer lists the "regions" on the page.
+The first read of a region returns it whole ("snapshot"). Each later read returns only what changed
+since your last read of it, which it names ("against"): "changes" marks new lines "+", gone lines "-",
+and repeats unmarked the lines they sit under; or "unchanged": true. After a navigation, a reload or a
+tab switch it is whole again, and "full": true asks for it whole.
 A target may add "exact": true and "nth": <index> when a name matches more than one element.`
 
 /** How an agent that sees the page acts on it (#680): a screenshot after every action, a mouse and keys. */
