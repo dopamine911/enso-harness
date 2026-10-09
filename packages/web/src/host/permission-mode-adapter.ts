@@ -1,10 +1,12 @@
 import {
   ENSO_DEFAULT_PERMISSION_MODE,
   ENSO_PERMISSION_MODES,
+  type EnsoPermissionModeName,
   type EnsoPermissionModeState,
   type EnsoTranscriptEntry,
   readRecordedMode,
   recordedPermissionMode,
+  transcriptEntryOf,
 } from '@enso/core'
 
 /**
@@ -79,4 +81,10 @@ export function storedPermissionModeState(transcript: readonly EnsoTranscriptEnt
     if (recorded !== undefined) return { mode: recorded, available: [...ENSO_PERMISSION_MODES] }
   }
   return freshPermissionModeState()
+}
+
+/** The mode one appended entry records, if it is an `active_agent` entry naming one. */
+export function appendedMode(entry: unknown): EnsoPermissionModeName | undefined {
+  const record = transcriptEntryOf(entry, 0)
+  return record.kind === 'custom' ? readRecordedMode(record.customType, record.data) : undefined
 }

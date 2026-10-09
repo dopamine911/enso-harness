@@ -222,6 +222,9 @@ const VENDOR_IMPORTERS_ALLOWED_INSIDE_ROOTS: readonly string[] = [
   'packages/web/src/host/context-elements.ts',
   'packages/web/src/host/context-history.ts',
   'packages/web/src/host/extension-ui-context.ts',
+  // A live thread built on pi's session (#801): moved out of agent-host.ts, which keeps the host's
+  // setup — the runtime contract over pi is this file's, the host's flows over logs name no vendor.
+  'packages/web/src/host/hosted-thread.ts',
   'packages/web/src/host/map-events.ts',
   'packages/web/src/host/notice-sender.ts',
   'packages/web/src/host/permission-call-questions.ts',

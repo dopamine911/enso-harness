@@ -44,12 +44,8 @@ import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
 import { ENSO_DEFAULT_PERMISSION_POLICY } from '@enso/core/permission-rules'
 import type { LogRecorder } from '@logtape/testing/recorder'
 import { Check } from 'typebox/value'
-import {
-  type AgentHost,
-  type HostedThread,
-  type HostedThreadInspection,
-  SessionDirectoryRefused,
-} from '../../host/agent-host.ts'
+import { type AgentHost, SessionDirectoryRefused } from '../../host/agent-host.ts'
+import type { HostedThread, HostedThreadInspection } from '../../host/live-thread.ts'
 import type { ThreadRestoreOutcome, ThreadTreePlace } from '../../host/thread-log-edits.ts'
 import { transcriptOf } from '../../host/transcript.ts'
 import type { ProjectThreadSettingsSource } from '../../host/tree-setup.ts'

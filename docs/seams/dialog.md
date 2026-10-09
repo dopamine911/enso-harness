@@ -192,7 +192,7 @@ export const EnsoDialogOutcome = Type.Union([
 export const EnsoUiRequestOrigin = Type.Union([Type.Literal('session-start'), Type.Literal('run')])
 ```
 
-The host's side of it — what `agent-host.ts` binds to a session and what the runtime contract's
+The host's side of it — what `hosted-thread.ts` binds to a session and what the runtime contract's
 `answerDialog` / `openDialogs` delegate to:
 
 <!-- source: packages/web/src/host/extension-ui-context.ts#EnsoExtensionUiContext -->
@@ -249,9 +249,9 @@ goes through `finish` (`extension-ui-context.ts#finish`), which deletes the pend
 outcome and resolves the extension with its value — `undefined` for `select`/`input`/
 `editor`, `false` for `confirm`, on every non-answer outcome. That is why the settle
 observation exists at all: the runtime has no event for a question ending.
-`agent-host.ts` binds one context per session (`agent-host.ts#createSession`) and delegates the runtime contract's
-`answerDialog` and `openDialogs` to it (`agent-host.ts#answerDialog`); `cancelAllDialogs` cancels every pending
-question at session teardown (`extension-ui-context.ts#cancelAllDialogs`, called from `agent-host.ts#dispose`), so teardown is a settle
+`hosted-thread.ts` binds one context per session (`hosted-thread.ts#buildHostedThread`) and delegates the runtime contract's
+`answerDialog` and `openDialogs` to it (`hosted-thread.ts#answerDialog`); `cancelAllDialogs` cancels every pending
+question at session teardown (`extension-ui-context.ts#cancelAllDialogs`, called from `hosted-thread.ts#dispose`), so teardown is a settle
 path too.
 
 **Consumed by the server.** `answerThreadDialog` in `packages/web/src/server/follow.ts` (`server/follow.ts#answerThreadDialog`)
@@ -306,7 +306,7 @@ Where no card can be shown — pi's own terminal, or pi's rpc mode, whose `custo
 — the tool asks one plain `select` or `input` at a time. A multi-choice question is a toggle list
 closed by "✓ Done", so dismissing any prompt is a decline there too. **Stop** while the tool waits
 stops the run and leaves no card: the host settles pending questions as the stop begins and refuses
-any asked until it has finished (`agent-host.ts#stopRunSettlingDialogs`, `refuseDialogsUntil`). Pinned
+any asked until it has finished (`live-thread.ts#stopRunSettlingDialogs`, `refuseDialogsUntil`). Pinned
 end to end, faux model to tool result, by `agent-host.test.ts#⚠⚠ the agent asks through ask_user: its questionnaire is one dialog, and the answers are its tool result (#12)`,
 with its siblings for the decline (which pins that the run ends there) and Stop.
 
@@ -364,6 +364,6 @@ Replace the runtime and the vocabulary stays: `EnsoDialogSpec`, `EnsoOpenDialog`
 `EnsoDialogOutcome`, the validator, the answer route, the snapshot's list, the card and the router do not
 change — the answer route's tests in `follow.test.ts` and the card's static renders already run with no
 runtime. What changes is `extension-ui-context.ts` (implement the new loop's question interface, or
-none if it has no extensions) and `questionnaire-dialog.ts` (the `ask_user` lift). `agent-host.ts`
+none if it has no extensions) and `questionnaire-dialog.ts` (the `ask_user` lift). `hosted-thread.ts`
 changes only where it binds the context and delegates the
 two runtime-contract methods.
