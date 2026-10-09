@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { gitChildEnvironment } from '@enso/core/git'
 import { ensoProjectsDir, projectIdOf, projectSnapshotsDir, realpathOrSelf } from '@enso/core/paths'
 import type { Subprocess } from 'bun'
 import { collectEnsoEvidence } from '../evidence.ts'
@@ -198,9 +199,13 @@ test('the scenario project is a working git repository with no sample hooks (#74
   const hooks = join(project, '.git', 'hooks')
   expect(existsSync(hooks) ? readdirSync(hooks).filter((name) => name.endsWith('.sample')) : []).toEqual([])
   writeFileSync(join(project, 'index.html'), '<canvas></canvas>')
+  // ⚠ Without the hook's GIT_INDEX_FILE: under `git commit -a` it is absolute, and `git add` here
+  // would stage this file into the commit being made (#807).
   const git = (...args: string[]): number =>
-    spawnSync('git', ['-c', 'user.name=arena', '-c', 'user.email=arena@example.invalid', ...args], { cwd: project })
-      .status ?? -1
+    spawnSync('git', ['-c', 'user.name=arena', '-c', 'user.email=arena@example.invalid', ...args], {
+      cwd: project,
+      env: gitChildEnvironment(),
+    }).status ?? -1
   expect(git('add', '.')).toBe(0)
   expect(git('commit', '--quiet', '-m', 'first')).toBe(0)
 })
