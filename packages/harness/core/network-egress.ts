@@ -30,14 +30,14 @@ import { canonicalToolName } from './tool-identity.ts'
  * - PARSEABLE commands (the segmenter returned segments): the denied name must be the
  *   segment's command word — leading env assignments stripped, then resolved to the
  *   LITERAL value the shell would execute (quote/escape removal: `"curl"`, `\curl` and
- *   `cu"rl"` all resolve to `curl` — PR #55 review, round 1), path prefix ignored,
+ *   `cu"rl"` all resolve to `curl`), path prefix ignored,
  *   case-folded. `echo "curl is a tool"` passes — the word is quoted argument text.
  * - UNPARSEABLE commands (the segmenter returned [] — command substitution, backticks,
  *   heredocs) AND runtime-expanded command words (`$C https://…`) fall back to a
  *   word-boundary scan of the RAW string. Coarser on purpose: substitution and
  *   indirection are exactly where evasion lives, so a false positive there is friction
  *   toward safety ("rewrite without the substitution"), not a broken gate.
- * - SYNTHESIZED command words (PR #55 review, round 2) — unquoted brace/glob characters
+ * - SYNTHESIZED command words — unquoted brace/glob characters
  *   (`{c,}url`, `/usr/bin/cur[l]`, both of which execute curl, verified live) — are
  *   DENIED OUTRIGHT: expansion assembles the name from pieces, so no scan of the
  *   unexpanded text can ever see it, and escalating to the raw scan would be theater.
@@ -140,10 +140,10 @@ const BASH_SOCKET_DEVICE_PATTERN = /\/dev\/(?:tcp|udp)\//i
  * The segment's command word, resolved to the LITERAL value the shell would execute —
  * or the reason it cannot be, which decides the caller's move.
  *
- * ⚠ Literal resolution is load-bearing (PR #55 review, round 1): `"curl"`, `\curl` and
- * `cu"rl"` are all `curl` to bash but were unequal to it as raw text — and because a
- * balanced-quoted command is fully PARSEABLE, the coarse fallback never ran. Round 2 of
- * the same review found the second class: brace/glob SYNTHESIS (`{c,}url`), where the
+ * ⚠ Literal resolution is load-bearing: `"curl"`, `\curl` and
+ * `cu"rl"` are all `curl` to bash but unequal to it as raw text — and because a
+ * balanced-quoted command is fully PARSEABLE, the coarse fallback never runs. The second
+ * class is brace/glob SYNTHESIS (`{c,}url`), where the
  * raw scan is no net at all — see LiteralShellWordResult's doc for the split.
  */
 type CommandWordResult =
@@ -153,8 +153,8 @@ type CommandWordResult =
 
 /**
  * Commands that transparently exec their argument vector as the next command — no code
- * interpretation, the wrapped command sits VERBATIM in later words (PR #55 review,
- * round 3: `timeout 30 curl …`, `env curl …`).
+ * interpretation, the wrapped command sits VERBATIM in later words
+ * (`timeout 30 curl …`, `env curl …`).
  *
  * A segment led by one of these gets WRAPPER MODE: every subsequent word receives the
  * command-word treatment, which also makes wrapper STACKING free (`nohup timeout 30 curl …` —
@@ -419,8 +419,8 @@ function wrappedOperandFinding(
  * Scan every word of a wrapper-led segment with the command-word treatment. A word's
  * LITERAL value is checked by EVERY internal whitespace token — a quoted `-c`/`eval`
  * payload is a full shell script (`bash -c "echo hi && curl …"`), and checking only its
- * first token was PR #55 review round 4: the word resolved cleanly to the wrong token
- * and, having resolved, never escalated — the round-1 shape again, a clean-but-wrong
+ * first token lets the word resolve cleanly to the wrong token
+ * and, having resolved, never escalate — the same shape as above, a clean-but-wrong
  * value silencing the fallback that would have caught it. All-token scanning is the
  * wrapper-mode philosophy applied inside the payload; each token is basename'd and
  * case-folded. `NAME=value` words (env's assignments) and the exempted `[`/`{}` are
@@ -591,7 +591,7 @@ function gateCommandLine(
   }
   const segments = extractFlatShellCommandSegments(command)
   if (segments.length === 0) return unscannableFloor(command, denied, deniedBinaries, depth) ?? 'escalate-unparseable'
-  // Two distinct unknowable-word escalations (PR #55 review, one round each), and they
+  // Two distinct unknowable-word escalations, and they
   // must NOT share a path:
   // - runtime-expansion (`$C https://…`): the coarse scan of the WHOLE command may catch
   //   a sibling assignment (`C=curl; $C …`), so escalate to it. What it cannot see is a
@@ -623,8 +623,7 @@ function gateCommandLine(
  * over — "rewrite without the substitution" is the friction the header promises. Same for
  * a shell taking a heredoc/herestring as its program: the body is data to this scan.
  *
- * ⚠ Heredoc bodies are DATA to the command that reads them (PR #149 review, two false
- * positives): `sh migrate.sh` as a line INSIDE a body written to `run.sh` is two words of
+ * ⚠ Heredoc bodies are DATA to the command that reads them: `sh migrate.sh` as a line INSIDE a body written to `run.sh` is two words of
  * text, and `$(cu'r'l …)` inside a body under a QUOTED delimiter (`<<'EOF'`) is written
  * literally — bash expands nothing there. So the bodies are modelled: quoted ones leave
  * the substitution scan entirely, unquoted ones stay (bash DOES expand them), and only the

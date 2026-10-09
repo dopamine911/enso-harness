@@ -76,7 +76,7 @@ export interface FollowConnection extends SubscribeConnectionAdapter {
    * Run a `host` command (#338 slice 2): `POST …/command`, `/model` with an `options[].id` or
    * `/thinking` with a level — the same control shape as `changeMode`, and the same failure
    * path: `busy` (409) and `refused` (422, the host's reason) are recorded through `problem`
-   * and said once, the way a refused mode change is (PR #344 review). The store moves on the
+   * and said once, the way a refused mode change is. The store moves on the
    * feed's `model` observation, never on the answer.
    */
   readonly runHostCommand: (run: EnsoHostCommandRun) => Promise<HostCommandOutcome>
@@ -220,7 +220,7 @@ export interface ThreadStores {
   /**
    * Whether the server can answer this thread's reads (#659): it has been seen with a session or
    * messages — stored history, a snapshot's model or messages, a `model` observation. ⚠ LATCHED,
-   * never reset (PR #661 review): a snapshot nulls the model when the session idles out, and a
+   * never reset: a snapshot nulls the model when the session idles out, and a
    * thread minted on this page has no stored history, yet the thread ran and its routes answer.
    */
   readonly readable: WritableStore<boolean>

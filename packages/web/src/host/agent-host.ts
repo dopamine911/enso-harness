@@ -166,7 +166,7 @@ export interface AgentHost {
   /**
    * The directory of the session file under this id — WHETHER OR NOT this host serves it —
    * `undefined` when there is no file. What lets a reader tell "a thread that was never stored"
-   * from "a thread whose project is gone" (PR #399 review): `readStoredThread` answers `undefined`
+   * from "a thread whose project is gone": `readStoredThread` answers `undefined`
    * for both.
    */
   storedThreadDirectory(threadId: string): Promise<string | undefined>
@@ -232,7 +232,7 @@ export interface AgentHost {
    * Delete the thread (#571): its tree through the inventory, its store — the project's object
    * store then collected, its forks' histories kept (#573) — then every session file under its id.
    * A tree holding work is deleted only `force`d AND with `confirmedWork` the sha256 (hex) of the
-   * work's words as the user was shown them (PR #572 review): work gained since is refused, named,
+   * work's words as the user was shown them: work gained since is refused, named,
    * never taken unseen. `retire` disposes the live session and refuses a busy one: the registry's,
    * which the host does not hold. Hard: nothing is kept to undo it.
    */
@@ -439,8 +439,8 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     // id decides the directory — pi fixed it at creation — and one this host does not serve is a
     // refusal, never a fresh session beside it under the same id. Only a thread with no file asks
     // where a new one goes, so a stale answer to that question cannot block a resume.
-    // A deleted id is never built again (#571), across a restart too (PR #572 review: its store,
-    // kept for its forks, would be adopted by the new thread and swept from under it).
+    // A deleted id is never built again (#571), across a restart too: its store,
+    // kept for its forks, would otherwise be adopted by the new thread and swept from under it).
     if (deletingThreads.has(threadId) || threadDeleted(threadId)) {
       throw new ThreadDeleted(`thread ${threadId} is deleted, or being deleted`)
     }
@@ -477,7 +477,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   }
 
   /**
-   * A build that finished after its thread was deleted, or while it was (PR #572 review): the check
+   * A build that finished after its thread was deleted, or while it was: the check
    * at `createSession`'s top runs before its awaits, and the registry's `retire` cannot see a build
    * under way — so the build is disposed here, before anything can run on it or write its file again.
    */

@@ -163,7 +163,7 @@ export function describeChunk(chunk: RecordedCustomEvent): string {
 /**
  * pi guarantees every session entry an `id`; read defensively. A malformed entry without one
  * keys by its position in the branch — two such entries in the same second with the same type
- * would otherwise collide on the description and React would reuse the wrong row (PR #87 review).
+ * would otherwise collide on the description and React would reuse the wrong row.
  */
 function entryKey(entry: EnsoTranscriptEntry, position: number): string {
   return `${position}:${entry.id}`
@@ -217,7 +217,7 @@ export type ForkPointReading = EnsoForkPoint | { readonly problem: string } | un
 export const NO_FORK_POINT_YET = 'no fork point: the thread is not stored yet'
 
 /**
- * Why a manifest read produced none (PR #440 review): said, never dropped — a schema mismatch is
+ * Why a manifest read produced none: said, never dropped — a schema mismatch is
  * exactly the disagreement this drawer exists to show.
  */
 function manifestProblemOf(failure: unknown): string {
@@ -493,7 +493,7 @@ export const NO_SESSION_YET =
   'no live session on this server — nothing has run on this thread here, or the server no longer holds it'
 
 /**
- * Only the LATEST request's outcome may be applied (PR #87 review).
+ * Only the LATEST request's outcome may be applied.
  *
  * The drawer refetches on open and on every run settle, so two fetches can be in flight at once
  * — the mount-time 404 for a thread that has not run yet, and the post-run fetch once a fast

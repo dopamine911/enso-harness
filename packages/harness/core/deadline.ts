@@ -6,7 +6,7 @@
  *
  * - A signal that is ALREADY aborted never fires its event (`addEventListener` is not
  *   retroactive), so an `execute()` entered post-abort would run to the deadline — the
- *   guard aborts first (PR #58 review, nit 3).
+ *   guard aborts first.
  * - A budget already spent aborts BEFORE the work starts: a 0 ms timer would let fast work
  *   answer first, and a fallback must not start what the deadline already forbade.
  *

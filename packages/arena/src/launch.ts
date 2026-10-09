@@ -141,7 +141,7 @@ export function portHolder(port: number): { readonly pid?: number; readonly comm
 
 /**
  * Whether a run can have a scope of its own here, capped at `memoryMax` when one is given:
- * `systemd-run --user` answers. ⚠ systemd is the one judge of a cap (PR #746 review): it takes `6G`,
+ * `systemd-run --user` answers. ⚠ systemd is the one judge of a cap: it takes `6G`,
  * `1.5G`, `50%` and `infinity`, and refuses `6g`, `6GB` and `0`. A pattern here would be a second
  * grammar, wrong in both directions as the first one was.
  */

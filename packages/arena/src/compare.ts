@@ -93,7 +93,7 @@ function namesOf(first: readonly { readonly name: string }[], second: readonly {
 
 /**
  * A thread's segment of an API path: each run has its own thread ids, so the same problem in two runs
- * names two of them. Matched by its place in the path, not its shape (PR #622 review): a thread id
+ * names two of them. Matched by its place in the path, not its shape: a thread id
  * need not be a UUID (`isEnsoThreadId`), and the routes are where problems name one.
  */
 const THREAD_SEGMENT = /\/api\/threads\/[^/?\s]+/g

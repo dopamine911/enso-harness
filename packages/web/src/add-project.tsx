@@ -116,7 +116,7 @@ export function AddProjectDialog({ open, onClose, onAdded, fetch: fetchImpl }: A
     setRefusal(undefined)
     setPath(next)
   }
-  // Every opening starts at the roots (PR #401 review): the dialog stays mounted while closed, and
+  // Every opening starts at the roots: the dialog stays mounted while closed, and
   // the folder it was left on may since be gone, unreadable, or already added.
   const close = (): void => {
     move(null)

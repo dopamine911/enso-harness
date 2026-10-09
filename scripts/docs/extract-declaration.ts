@@ -135,13 +135,12 @@ interface BracketCount {
 /**
  * Bracket opens and closes on one line, ignoring string, template and comment lexemes, and
  * the quote still open at the line's end — a template literal spans lines, and its interior
- * is not code (PR #169 review). A comment line counts nothing: prose has apostrophes (`the
+ * is not code. A comment line counts nothing: prose has apostrophes (`the
  * repo's rule`), and an apostrophe read as a quote would swallow the `)` after it (measured
  * on `agent-host.ts:99`). Inside an open template a `*`-led line is template text, not a
  * comment, so the skip applies only when no quote is open.
  *
- * ⚠ A template nested inside a template's `${…}` is REFUSED, not scanned (PR #169 review,
- * round 2): the inner backtick would read as the outer's close and the rest of the line as
+ * ⚠ A template nested inside a template's `${…}` is REFUSED, not scanned: the inner backtick would read as the outer's close and the rest of the line as
  * code — wrong and self-consistent, the one failure this extractor must not have. The repo
  * has two such lines (`log-bundle.ts:100,103`), both inside a function body no page fences;
  * fencing one turns the gate red with this message rather than a drifted span.

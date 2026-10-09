@@ -246,7 +246,7 @@ function noThreadOutsideUi(input: ArenaScoreInput): ArenaUiCheck {
       thread.parentThreadId === undefined ? [] : [[thread.threadId, thread.parentThreadId] as const],
     ),
   )
-  // A fork of a fork of a shown thread came from the UI too (PR #585 review): walk the whole chain.
+  // A fork of a fork of a shown thread came from the UI too: walk the whole chain.
   const fromShown = (threadId: string): boolean => {
     const walked = new Set<string>()
     for (let current: string | undefined = threadId; current !== undefined; current = parentOf.get(current)) {

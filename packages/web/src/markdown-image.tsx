@@ -2,7 +2,7 @@ import type { TextPartProps } from '@tanstack/ai-react/ui'
 import { type ComponentPropsWithoutRef, useState } from 'react'
 
 /**
- * ⚠ A MARKDOWN IMAGE IS A FETCH, so a remote one waits for a click (PR #350 review).
+ * ⚠ A MARKDOWN IMAGE IS A FETCH, so a remote one waits for a click.
  *
  * `@tanstack/markdown` renders `![alt](https://host/p.png?q=…)` as an `<img>` the moment the
  * text streams in, and the browser requests it with no click. That is the classic

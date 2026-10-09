@@ -199,7 +199,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   const threads = createThreadRegistry({
     // A thread with a session on disk is opened where pi recorded it; a new one where its project
     // is — asked for only when there is no session, so a claim naming a project that has since
-    // gone cannot block a resume. The claim has done its work once the session exists (PR #399 review).
+    // gone cannot block a resume. The claim has done its work once the session exists.
     createSession: async (threadId: string) => {
       const hosted = await host.createSession(threadId, () => projects.directoryForNewThread(threadId))
       projects.dropClaim(threadId)

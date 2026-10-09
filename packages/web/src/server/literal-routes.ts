@@ -93,7 +93,7 @@ export function createLiteralRoutes(state: LiteralRoutesState): LiteralRoutes {
    * @invariant resume/rail-listing The rail is the listing, newest first, titled by the first user message.
    * The host's own listing, one header parse per file, newest first; a blank first message is no
    * title. `busy` marks a thread a run on THIS server holds: the row is shown, not locked (#114),
-   * and an idle thread the server still holds is resumable, since held is not busy (PR #104 review).
+   * and an idle thread the server still holds is resumable, since held is not busy.
    */
   async function respondWithStoredThreads(response: ServerResponse): Promise<void> {
     const stored = await host.listSessions()
@@ -147,7 +147,7 @@ export function createLiteralRoutes(state: LiteralRoutesState): LiteralRoutes {
   const stats = createLogStatsRoute({ logsDir })
 
   /**
-   * The payload before the head (PR #336 review): the fold reads the file synchronously and
+   * The payload before the head: the fold reads the file synchronously and
    * can throw — EACCES on the directory, the file removed mid-read — and a `writeHead(200)`
    * already committed would have made that throw an uncaught exception in the request
    * listener with no way to say 500. A failed read IS a record's business, the one kind this

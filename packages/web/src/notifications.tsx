@@ -100,12 +100,12 @@ export interface NotificationsStore extends Store<ReadonlyArray<EnsoNotification
   /** Take a line's action off it and hand it back, or `undefined` when it has none (any more). */
   readonly takeAction: (id: number) => NotificationAction | undefined
   /**
-   * Rewrite a line the thread has moved past, as an `info` line with no action (PR #442 review):
+   * Rewrite a line the thread has moved past, as an `info` line with no action:
    * a torn-tail warning once a run has answered it. A line already dropped off the bound is gone.
    */
   readonly resolveLine: (id: number, message: string) => void
   /**
-   * Put an action back on its line (PR #438 review): a press whose outcome was not final — the
+   * Put an action back on its line: a press whose outcome was not final — the
    * server busy, unreachable, the page disconnected — must not use up the only way to act. A line
    * already resolved, or dropped off the bound, stays as it is.
    */

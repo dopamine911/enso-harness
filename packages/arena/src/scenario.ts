@@ -210,7 +210,7 @@ export function arenaBrief(
   context: ArenaBriefContext = {},
 ): string {
   const reviewed = channel === 'command'
-  // One source for the moves and the review alike (PR #695 review): the context's perception.
+  // One source for the moves and the review alike: the context's perception.
   const visual = context.perception === 'visual'
   const look = visual ? 'look at the screenshot' : '`read` to see the page'
   const assignment = `# ${reviewed ? 'Phase 1: the assignment' : 'Your assignment'}

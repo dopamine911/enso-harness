@@ -216,7 +216,7 @@ export type EnsoDialogOutcome = Static<typeof EnsoDialogOutcome>
  */
 export const EnsoDialogSettled = Type.Object({
   kind: Type.Literal('dialog-settled'),
-  /** `minLength: 1`, as `EnsoOpenDialog.id` — a settle must name a question (PR #115 review). */
+  /** `minLength: 1`, as `EnsoOpenDialog.id` — a settle must name a question. */
   id: Type.String({ minLength: 1 }),
   outcome: EnsoDialogOutcome,
 })

@@ -121,7 +121,7 @@ function gateSegment(segmentText: string): EnvironmentDumpMatch | undefined {
  * wrapper with one behind it.
  *
  * ⚠ A payload is a command line, so it goes back through THIS function rather than having
- * its first word looked up (PR #290 review). Checking `payload[0]` alone let the sensor miss
+ * its first word looked up. Checking `payload[0]` alone let the sensor miss
  * what it catches everywhere else — `find . -exec sh -c 'env' ;` and `find . -exec sudo env ;`
  * read as "sh" and "sudo", neither a listing command, while the same two lines without the
  * `find` are caught by the wrapper scan below. The egress deny already recursed its payload

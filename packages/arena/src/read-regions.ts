@@ -11,7 +11,7 @@ import { RAIL_NAME } from './actions.ts'
  * between two reads most of it is the same.
  *
  * The regions are found by role and accessible name in the snapshot the recorder already takes for
- * the wait's baseline (one snapshot, PR #646 review), never by a class: the header is the `banner`,
+ * the wait's baseline (one snapshot), never by a class: the header is the `banner`,
  * the rail Enso's `navigation "threads"`, the status bar its `contentinfo "thread status"`, a dialog
  * any `dialog` or `alertdialog`. `transcript` is what is left — the selected view's `tabpanel` and the
  * composer, which no landmark wraps — and is there only when a `tabpanel` is (another site's tab has

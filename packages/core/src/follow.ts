@@ -60,7 +60,7 @@ export const EnsoFollowSnapshot = Type.Object(
     /**
      * Whether this thread runs on a tree of its own (#551) — its branch records one, or, for a
      * thread not built yet, the host gives new threads in its project one. Where it is not, there
-     * is no file to restore, and the page offers no restore (PR #561 review). Stable over a follow,
+     * is no file to restore, and the page offers no restore. Stable over a follow,
      * unlike `cwd`: a new thread's tree is decided before it is built.
      */
     tree: Type.Boolean(),
@@ -186,7 +186,7 @@ export const ENSO_PROMPT_BODY_MAX_BYTES: number =
  * `(?:[…]{4})*(?:[…]{2}==|[…]{3}=)?`: on a 5 MB image the grouped form costs ~300 ms of
  * event-loop time in V8, this one ~4 ms, and for a length that is a multiple of four the two
  * accept exactly the same strings. The length check is `isWholeBase64`, applied by the
- * reader beside the byte cap (PR #140 review, measured).
+ * reader beside the byte cap (measured).
  */
 const BASE64 = '^[A-Za-z0-9+/]*={0,2}$'
 

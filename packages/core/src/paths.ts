@@ -77,7 +77,7 @@ export function realpathOrSelf(path: string): string {
 /**
  * True when `directory` is the workspace root: its `package.json` parses and carries a
  * `workspaces` field of a shape npm actually accepts — an array of globs, or the object
- * form (`{ "packages": [...] }`). A `"workspaces": null` (PR #60 review) is not a root.
+ * form (`{ "packages": [...] }`). A `"workspaces": null` is not a root.
  * ⚠ A malformed `package.json` on the walk (a test fixture, a scratch dir) means "not
  * the root, keep walking" — never a throw.
  */

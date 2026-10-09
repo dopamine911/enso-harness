@@ -32,7 +32,7 @@ export interface LogStatsRouteDeps {
 
 /**
  * The day's text, or nothing when no process has written it. ONE call, never `exists` then
- * `read` (PR #336 review, round two): a file pruned between the two made the read throw, and
+ * `read`: a file pruned between the two made the read throw, and
  * the boundary above answered 500 — plus a record — for the condition this route defines as
  * the empty day. Any other failure still throws to that boundary.
  */

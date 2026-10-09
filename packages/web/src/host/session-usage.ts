@@ -76,7 +76,7 @@ export function storedSessionUsage(entries: readonly SessionEntry[]): EnsoSessio
  *   - `compaction_end` follows a compaction's own model call and the context it emptied;
  *   - `entry_appended` of a `usage` entry is pi's cache warmer (`cache-warmer.js`
  *     `appendUsage('cache_warm', …)` → `onWarmed`): in its `idle` mode it warms BETWEEN runs,
- *     where no turn follows to carry the spend (PR #357 review).
+ *     where no turn follows to carry the spend.
  */
 export function growsSessionSpend(event: AgentSessionEvent): boolean {
   switch (event.type) {

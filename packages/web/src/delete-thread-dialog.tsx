@@ -19,7 +19,7 @@ import { HeaderDialog } from './header-dialog.tsx'
  * work after the preview is still refused (422) and named, offering "Delete anyway". Any other
  * refusal closes the dialog and goes to `onRefused` — the header says it on the thread, Settings'
  * Trees on the tree's row (#578). ⚠ Once sent, a delete cannot be called back, so until the server
- * answers nothing dismisses the dialog (PR #572 review): Cancel is disabled, the close button is
+ * answers nothing dismisses the dialog: Cancel is disabled, the close button is
  * gone, and Esc and the backdrop do nothing.
  */
 export function DeleteThread({

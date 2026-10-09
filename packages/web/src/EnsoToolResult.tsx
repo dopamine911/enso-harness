@@ -20,7 +20,7 @@ import { constantStore, ThreadStoresContext, useStore } from './store.ts'
 export type EnsoRendererMap = Record<string, (props: Record<string, unknown>) => React.ReactNode>
 
 /**
- * What one tool call is in, read off its result — the ONE definition (PR #93 review).
+ * What one tool call is in, read off its result — the ONE definition.
  *
  * Pending is "no result has paired yet" — TanStack's own selection pairs results to calls
  * across the whole message list — WHILE the message's run is still open. The same absence once

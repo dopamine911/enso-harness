@@ -70,7 +70,7 @@ export interface SecretPathMatch {
  * `cat<file`, which is the same syntax with the space the shell never required. The word
  * splitter breaks on whitespace only, so a fused operator left `cat<.enso/pi-agent/auth.json`
  * as ONE word that resolved to `<cwd>/cat<.enso/…` and carried the `/.enso/` fragment past the
- * match (PR #288 review). The operator is a word boundary here for the same reason it is one
+ * match. The operator is a word boundary here for the same reason it is one
  * to the shell: what follows it is a path.
  */
 const REDIRECT_OPERATOR = /\d*(?:<<<|<<-?|<>|>>|>|<)|&>>?/g

@@ -27,7 +27,7 @@ const COMMENT_OR_STRING = /\/\*[\s\S]*?\*\/|\/\/[^\n]*|'(?:\\.|[^'\\\n])*'|"(?:\
 /**
  * `source` with every comment and string literal blanked to spaces, newlines kept: a scan for CODE
  * reads only code, at the offsets and line numbers it had. A `// no host: needed` comment or a
- * `'createAgentHost('` in a string is text, not a call (PR #788 review).
+ * `'createAgentHost('` in a string is text, not a call.
  */
 export function codeOnly(source: string): string {
   return source.replace(COMMENT_OR_STRING, (lexeme) => lexeme.replace(/[^\n]/g, ' '))
@@ -39,7 +39,7 @@ const BRACKET_DEPTH: Readonly<Record<string, number>> = { '[': 1, ']': -1 }
 /**
  * From just past an opening `[` to its MATCHING `]`: depth counted, string lexemes skipped.
  *
- * ⚠ Not a non-greedy `[…]` capture (PR #302 review). That ended the array at the first `]`
+ * ⚠ Not a non-greedy `[…]` capture. It would end the array at the first `]`
  * it saw, wherever it came from: a bracket in an allowlist's REASON comment published a short
  * count (13 entries read as 9), and a bracket inside a quoted ENTRY — a path, a pattern —
  * makes the whole declaration unreadable, which this file then reports as "absent from

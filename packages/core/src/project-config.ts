@@ -46,7 +46,7 @@ interface TierLayer {
  * default (`worktree`, no setup, nothing to copy), each key's whole value from one tier — a list
  * in a higher tier REPLACES a lower one's. The user tier's mode is its `threads.projects` entry for
  * the project, else its `threads.tree`; `canonical` turns a key as the user wrote it (`~/code/app`,
- * a trailing slash, a symlink) into the canonical path `project` is (PR #561 review): matched as
+ * a trailing slash, a symlink) into the canonical path `project` is: matched as
  * written, such a key silently fell through to the default.
  *
  * ⚠ THE PROJECT'S OWN TIERS ARE READ ONLY WHEN `trusted` (pi's trust for the project's path): an

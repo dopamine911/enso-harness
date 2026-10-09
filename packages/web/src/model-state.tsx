@@ -97,7 +97,7 @@ export function useModelState(): EnsoModelState | null {
  * Whether the rendering thread can answer a read yet (#620, #659): a live session (its model), or the
  * thread's latch (`ThreadStores.readable`: once seen with a session or messages, for good). A
  * thread just minted has neither, and its routes answer 404 — every read there was a console
- * error for a view that can only say nothing has run. ⚠ Never the model alone (PR #661 review):
+ * error for a view that can only say nothing has run. ⚠ Never the model alone:
  * a resync nulls it when the session idles out, and a thread that ran would read as never run.
  */
 export function useThreadReadable(): boolean {

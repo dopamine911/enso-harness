@@ -53,7 +53,7 @@ export function containerBuildArgs(
   owner: { readonly uid: number; readonly gid: number },
   image: string = ARENA_IMAGE,
 ): string[] {
-  // ⚠ PR #678 review: built as root (under sudo, say), the remap would make the container's user
+  // ⚠ Built as root (under sudo, say), the remap would make the container's user
   // root — the run's bash with it. The image is for the unprivileged user who runs it.
   if (owner.uid === 0)
     throw new Error('the image is built for the user who runs it, and root is not one: build without sudo')

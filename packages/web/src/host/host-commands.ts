@@ -30,7 +30,7 @@ import {
  */
 
 /**
- * A refusal the host DECIDED (PR #344 review): an unknown command, a model not on offer, a
+ * A refusal the host DECIDED: an unknown command, a model not on offer, a
  * level the model does not have, a provider pi has no credentials for. The route says exactly
  * this class as 422 with the reason verbatim; any other throw is a fault and stays a 500 —
  * a `TypeError` from a moved pi API must not reach the user as "your choice was refused".

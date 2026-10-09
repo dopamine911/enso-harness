@@ -21,7 +21,7 @@ import type { FetchLike } from '../browser-logging.ts'
  * laptop — is resumed with `?from=<that byte>`, which the route answers with `records` rather
  * than a fresh `backlog`. A reader who was halfway down a trace keeps their place. ⚠ WITHIN A
  * DAY: the byte is a position in one file, so the resume token carries the frame's `day` and
- * the route drops a `from` whose day is not the file's (PR #336 review) — a page left open
+ * the route drops a `from` whose day is not the file's — a page left open
  * across local midnight reconnects to a fresh `backlog` of the new day, never to a silent
  * skip of its head.
  *
@@ -31,7 +31,7 @@ import type { FetchLike } from '../browser-logging.ts'
  * are reported once and the loop stops; only an ended stream or a 5xx is worth asking again.
  *
  * ⚠ SO IS A READ THE SERVER COULD NOT DO. The route says so on the stream itself — an SSE
- * `event: error` carrying the reason — before it ends (PR #336 review, round two). Without
+ * `event: error` carrying the reason — before it ends. Without
  * that event a failed read looked exactly like a clean end, this loop reconnected every five
  * seconds, and each reconnect made the server fail the read again and RECORD the failure into
  * the very file it could not read: a surface that must not appear in the trace, appearing in
@@ -118,7 +118,7 @@ export interface LogTailStreamOptions {
   /**
    * A connection is delivering: fired before the FIRST message of each attempt, valid or not.
    * The moment a page clears the last alert — and the one moment that satisfies both races
-   * (PR #336 review, rounds two and three): clearing on every frame let a bad frame and a good
+   *: clearing on every frame let a bad frame and a good
    * one in the same chunk batch into one render that showed nothing; clearing when the
    * response merely OPENED blinked the alert on every reconnect of a connection that dropped
    * before its first frame. The first message of an attempt is after the open and before any
@@ -249,8 +249,7 @@ interface SseMessage {
  * frames. The unterminated tail of each chunk is carried forward, which is what makes a frame
  * split across two network chunks one frame rather than two halves of unreadable JSON.
  *
- * The grammar followed is the spec's block rule, not this route's emission (PR #336 review,
- * round three): an `event:` name applies until the blank line that ends its block, the space
+ * The grammar followed is the spec's block rule, not this route's emission: an `event:` name applies until the blank line that ends its block, the space
  * after a field's colon is optional, and a trailing `\r` is not part of a line. The route
  * writes one `data:` per block with `\n` line ends, so none of that is reachable today — but
  * an intermediary on this path has rewritten bytes before (#98/#99), and a name that leaked

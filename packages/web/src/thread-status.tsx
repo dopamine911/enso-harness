@@ -47,7 +47,7 @@ import { announceUiEvent } from './ui-events.ts'
  * context meter is pi's `getContextUsage()`: its estimate over its model's window, never a
  * percentage of ours.
  *
- * ⓘ No `role="status"`/live region, deliberately (PR #51 review, nit 3): this is a
+ * ⓘ No `role="status"`/live region, deliberately: this is a
  * persistent readout that changes on every delta, and a live region would interrupt a
  * screen reader continuously. The numbers stay poll-able, never announced; the send/stop
  * button already carries the in-flight state to assistive tech.
@@ -83,7 +83,7 @@ export type Activity =
  * one holding the step in progress; until something streams into it, that step is still the one in
  * progress. The skip stops at the first message with a part, or at a user message.
  *
- * ⓘ The catch-all DIVERGES from `selected-message-part.tsx` on purpose (PR #92 review).
+ * ⓘ The catch-all DIVERGES from `selected-message-part.tsx` on purpose.
  * The transcript renders every part kind it has no handler for visibly, because there a
  * silently skipped part is indistinguishable from one never sent. This is a one-word
  * summary with no room for per-kind detail, and `working` is TRUE of an image, a document,

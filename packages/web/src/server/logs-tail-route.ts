@@ -102,7 +102,7 @@ function readNotBefore(query: URLSearchParams, now: () => Date): number | Refuse
 }
 
 /**
- * `from` is a byte of ONE file, and `day` says which (PR #336 review). A page left open across
+ * `from` is a byte of ONE file, and `day` says which. A page left open across
  * local midnight that then reconnected handed today's file yesterday's final offset, and
  * unless today's file was still shorter than that, its head was skipped silently as
  * `records`. A `day` that is not the file's day makes `from` mean nothing; a `from` with no
@@ -163,13 +163,13 @@ export function followLogTail(deps: LogTailRouteDeps, url: string, response: Ser
     maxRecords: deps.maxRecords ?? LOG_TAIL_MAX_RECORDS,
     // The day the offset was validated against goes with it: the tail asks `now()` again to
     // pick its file, and a midnight between the two calls would otherwise apply yesterday's
-    // byte to today's file (PR #336 review, round two).
+    // byte to today's file.
     ...(parsed.from === undefined ? {} : { from: parsed.from }),
     now,
   })
   response.writeHead(200, SSE_HEADERS)
   const stopKeepalive = startSseKeepalive(response, deps.sseKeepaliveMs)
-  // ⚠ The close hook is attached BEFORE the first pump (PR #336 review): a step can throw
+  // ⚠ The close hook is attached BEFORE the first pump: a step can throw
   // (EACCES on the directory, EISDIR under the name), and a throw from the priming pump
   // escaped past `writeHead(200)` with the keepalive timer and the descriptor leaked for the
   // life of the process — the hook that would have released them was registered two lines later.
@@ -187,10 +187,10 @@ export function followLogTail(deps: LogTailRouteDeps, url: string, response: Ser
       found = tail.step()
     } catch (error) {
       // A read that failed ends THIS stream, not the server — and SAYS SO ON THE STREAM, as
-      // an SSE `error` event the page treats as a refusal and does not retry (PR #336 review,
-      // round two: a bare `end` read as a clean close, the page reconnected every five
-      // seconds, and every reconnect failed the read again and recorded the failure into
-      // the file it could not read — the surface appearing in the trace, in a loop). With
+      // an SSE `error` event the page treats as a refusal and does not retry. A bare `end`
+      // reads as a clean close: the page would reconnect every five seconds, and every
+      // reconnect would fail the read again and record the failure into the file it could
+      // not read, in a loop. With
       // the page told, this record is written once per connection a reader opened; the
       // failure is the file's own business, the reader's presence never is. `end` fires
       // `close`, which releases the rest.

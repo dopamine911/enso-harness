@@ -66,7 +66,7 @@ function malformedTable(shape: string): Error {
 function resourceDeclarations(manifest: unknown): unknown[] {
   // `in` narrows the object type itself, so `manifest.pi` reads as `unknown` with no cast
   // (TS 4.9+). Casting to `Record<string, unknown>` would be the same check written twice,
-  // and a cast is exactly what this function exists to remove from its callers (PR #314 review).
+  // and a cast is exactly what this function exists to remove from its callers.
   if (typeof manifest !== 'object' || manifest === null || !('pi' in manifest)) return []
   const table = manifest.pi
   if (table === undefined) return []
@@ -179,7 +179,7 @@ export function vendorPackageNames(manifest: unknown): string[] {
       names.add(scopeOrName)
       continue
     }
-    // ⚠ A scope with nothing after it names NO package (PR #314 review): `node_modules/@scope`
+    // ⚠ A scope with nothing after it names NO package: `node_modules/@scope`
     // would otherwise be handed to the linker as a package called `@scope`, which cannot
     // resolve — a malformed declaration reported as a missing dependency instead of as itself.
     if (scopedName !== undefined && scopedName.length > 0) names.add(`${scopeOrName}/${scopedName}`)

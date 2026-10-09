@@ -575,7 +575,7 @@ function foldUsage(fold: Fold, properties: Properties): void {
  * The CALL names the bucket. A result is joined to its call by id and counted under the name
  * the call carried; only a result with no call in sight falls back to its own name, and to
  * `(unnamed)` when it has none — never a results row beside a calls row for the same tool
- * because the two records spelled the name differently (PR #336 review).
+ * because the two records spelled the name differently.
  */
 function foldTool(fold: Fold, kind: 'tool-call' | 'tool-result', properties: Properties, instant: number): void {
   const toolCallId = stringOf(properties.toolCallId)

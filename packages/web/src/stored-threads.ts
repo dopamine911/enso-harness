@@ -76,7 +76,7 @@ export async function fetchThreadHistory(
  * injected so the race is testable with controlled resolution order.
  *
  * Each request carries its own `intent` — what the caller meant by it — and gets it back
- * with the outcome (PR #143 review): a shared "how did the latest one happen" slot is wrong
+ * with the outcome: a shared "how did the latest one happen" slot is wrong
  * the moment two requests overlap, and the boot's resume and a rail click can.
  *
  * Three outcomes, not two (#378): a history, a failure, or ABSENT — the server holds nothing under

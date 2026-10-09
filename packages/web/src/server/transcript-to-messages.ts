@@ -181,9 +181,9 @@ function answerAfter(
  * ⚠ Only the shapes a next prompt would silently paper over are named. An assistant reply with
  * text and no open call reads as settled even if it was cut short — the transcript carries no
  * fact that says so, and inventing one would be a guess. A last turn whose calls were ALL
- * answered is torn too (PR #442 review): pi keeps the reply to the results only at its end, so a
+ * answered is torn too: pi keeps the reply to the results only at its end, so a
  * kill anywhere in that model call — the longest window on a tool-using turn — leaves exactly
- * this. A Stop never does (PR #438 review, run against the real host): after the aborted results
+ * this. A Stop never does: after the aborted results
  * pi's loop makes one more model call on the aborted signal, and persists its `aborted` error reply
  * — a stopped branch ends on an assistant message with no call, settled by the rule above. So an
  * `Operation aborted` result with nothing after it is a kill that landed before that reply: torn.

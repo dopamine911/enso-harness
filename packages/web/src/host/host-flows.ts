@@ -25,7 +25,7 @@ import { HostCommandRefused } from './host-commands.ts'
  */
 
 /**
- * The user declined a flow's question (PR #346 review): typed, so the flow's catch and the prompt's
+ * The user declined a flow's question: typed, so the flow's catch and the prompt's
  * throw are coupled by the compiler, not by a string. pi's OWN cancellation — its abort path — is
  * the string `Login cancelled`, which `isFlowCancelled` also recognises; both are a cancel, not a
  * failure.
@@ -239,7 +239,7 @@ export function loginDoneText(providerName: string, authType: HostAuthType, sele
 /**
  * pi's compaction REFUSALS, as pi says them (`dist/core/agent-session.js:2186,2188,2203,2233`, 1.1.0):
  * plain `Error`s distinguishable only by sentence — so, as with its "Login cancelled", the sentence
- * is the contract (PR #347 review). A refusal is a warning; anything else is a failure.
+ * is the contract. A refusal is a warning; anything else is a failure.
  */
 const COMPACTION_REFUSALS = ['Already compacted', 'Nothing to compact', 'Compaction cancelled']
 export function isCompactionRefusal(error: unknown): boolean {

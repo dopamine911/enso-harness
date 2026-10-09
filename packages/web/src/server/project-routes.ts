@@ -75,7 +75,7 @@ export function createProjectRoutes(state: ProjectRoutesState): ProjectRoutes {
   /**
    * Forget a registration. Its sessions stay on disk. Refused while one of its threads is RUNNING
    * here — a run would go on in a directory the rail no longer shows, with nothing to stop it from.
-   * Its live threads that are NOT running are retired with it (PR #399 review): a live thread is
+   * Its live threads that are NOT running are retired with it: a live thread is
    * taken again without a build, so a page still showing one could otherwise go on prompting it in
    * the removed directory for as long as it kept it from idling out.
    */
@@ -110,7 +110,7 @@ export function createProjectRoutes(state: ProjectRoutesState): ProjectRoutes {
   /**
    * What a page may browse while adding a project: the declared roots, or `?path=` inside them. Read
    * only; the rules are the registration's (`projects.ts#browse`), so nothing listed is refused later.
-   * It reads the disk under a root, so it answers through `answerOrFail` (PR #401 review): whatever the
+   * It reads the disk under a root, so it answers through `answerOrFail`: whatever the
    * disk throws that `browse` did not foresee is a 500, never a throw with nothing above it.
    */
   async function respondWithBrowse(url: string, response: ServerResponse): Promise<void> {

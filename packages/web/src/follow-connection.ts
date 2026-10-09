@@ -218,7 +218,7 @@ async function* readSseFrames(body: ReadableStream<Uint8Array>, signal: AbortSig
 }
 
 /**
- * What the server did with a dialog answer (#112, PR #113 review):
+ * What the server did with a dialog answer (#112):
  * `answered` taken (204) — the question is spent.
  *
  * `gone` no such open question (404) — answered from another tab, or expired. Spent too.
@@ -284,7 +284,7 @@ export interface FollowConnection extends SubscribeConnectionAdapter {
    * Run a `host` command (#338 slice 2): `POST …/command`, `/model` with an `options[].id` or
    * `/thinking` with a level — the same control shape as `changeMode`, and the same failure
    * path: `busy` (409) and `refused` (422, the host's reason) are recorded through `problem`
-   * and said once, the way a refused mode change is (PR #344 review). The store moves on the
+   * and said once, the way a refused mode change is. The store moves on the
    * feed's `model` observation, never on the answer.
    */
   readonly runHostCommand: (run: EnsoHostCommandRun) => Promise<HostCommandOutcome>
@@ -345,7 +345,7 @@ export type ContinueOutcome = ModeChangeOutcome
  * What `configure` reports (#391): applied, or why not — WITH the reason, because the asking
  * dialog shows it. `refused` is the server's 422, naming the step; `failed` is any other answer
  * (a fault's 500, a body the server would not read), which is not a refusal and does not pretend
- * to be one (PR #393 review). Not said on the transcript: the dialog is where the person is
+ * to be one. Not said on the transcript: the dialog is where the person is
  * looking, and a second copy there would be a duplicate.
  */
 export type ConfigureOutcome =
@@ -390,7 +390,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
   let wake: (() => void) | undefined
   const runs = new Map<string, OpenRun>()
   /**
-   * A frame that fails the wire schema has been reported on this connection (PR #355 review).
+   * A frame that fails the wire schema has been reported on this connection.
    * Once, not per frame: the usual cause is a version mismatch — a tab from an earlier bundle
    * against a newer server, or the reverse under HMR — and then EVERY frame of the changed kind
    * fails; a token stream of them would bury the transcript under one sentence.
@@ -636,7 +636,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
    */
   type FollowOpening =
     // The BODY, not the response: `openFollow` has already established there is one, and a
-    // `Response` here would make `subscribe` re-check a null it cannot receive (PR #305 review).
+    // `Response` here would make `subscribe` re-check a null it cannot receive.
     | { readonly kind: 'opened'; readonly body: ReadableStream<Uint8Array> }
     | { readonly kind: 'released' }
     | { readonly kind: 'refused'; readonly detail: string; readonly failure: Error }
@@ -646,7 +646,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     try {
       response = await fetchImpl(`${base}/follow`, { signal: abort })
     } catch (error) {
-      // ⚠ Released while the socket was still OPENING (PR #301 review). `close()` is silent by
+      // ⚠ Released while the socket was still OPENING. `close()` is silent by
       // contract — the page letting a thread go is not an error the page should be shown — but
       // the abort lands on this fetch, whose rejection had nowhere to go but out of the
       // generator, at whoever is iterating it. Our own release ends the iteration instead.
@@ -655,7 +655,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
       return { kind: 'refused', detail: String(error), failure }
     }
     if (response.ok && response.body !== null) return { kind: 'opened', body: response.body }
-    // ⚠ The status is the fact; the body is colour (PR #305 review). Reading it can itself
+    // ⚠ The status is the fact; the body is colour. Reading it can itself
     // reject — a truncated or aborted body — and that rejection would have thrown past the
     // arming in `subscribe`, leaving the page saying "live" for a follow the server just
     // refused, which is the state #274 exists to end. The read cannot decide whether the
@@ -705,7 +705,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
         // (`abort`). Said as a chunk so the page can show it and the debug pane refetches:
         // with no run open nothing else would mention it, and the pane would keep
         // presenting its last fetch of a session that may no longer exist as current.
-        // ⚠ Said even while the page is leaving (#664, PR #668 review): the follow HAS ended, and
+        // ⚠ Said even while the page is leaving (#664): the follow HAS ended, and
         // a page the back/forward cache restores must know it — a live-looking page over a dead
         // follow is what #274 ended. Only the "failed" log line was false; that one is gated.
         if (!abort.aborted) {

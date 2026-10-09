@@ -65,7 +65,7 @@ function ThreadTreePagesBody({
             {copy === 'copied' ? 'Copied' : 'Copy path'}
           </Button>
         </div>
-        {/* PR #635 review: a refused copy is said, never a button that silently did nothing. */}
+        {/* A refused copy is said, never a button that silently did nothing. */}
         {copy === 'failed' ? (
           <span className="text-muted-foreground">The clipboard refused the copy: select the path to copy it.</span>
         ) : null}
@@ -116,7 +116,7 @@ const readNoPages = (): Promise<ThreadReadOutcome<EnsoThreadPages>> => Promise.r
  * Focus the composer of the thread layout `inside` sits in (#714): the chat screen marks its
  * layout `data-thread-layout`, and the composer is its `PromptInputTextarea` (`name="message"`).
  * Without either (the markup changed), focus goes to `inside`, the bar's own button, close to where
- * Radix would have returned it (PR #715 review): never to nowhere, which is the page's body.
+ * Radix would have returned it: never to nowhere, which is the page's body.
  */
 function focusComposerNear(inside: HTMLElement | null): void {
   const composer = inside

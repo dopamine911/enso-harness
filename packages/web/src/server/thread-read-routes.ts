@@ -93,7 +93,7 @@ export function createThreadReadRoutes(state: ThreadReadRoutesState): ThreadRead
    *   • HERE (a run in flight, a dialog open, or idle within the eviction window): pi's
    *     memory and the session's own mode — fresher than the file, and RESUMABLE. A page
    *     that reloaded after a run must be able to come back before the 30-minute eviction
-   *     (PR #104 review); a page that reloaded UNDER pi's open question must be able to
+   *    ; a page that reloaded UNDER pi's open question must be able to
    *     come back to the card (#114). Busy is not a refusal any more: under the follow
    *     transport (#112) a resumed pane follows the run in flight, and a prompt to a busy
    *     thread queues through pi (#75) — the 409 that guarded the old per-response run
@@ -137,7 +137,7 @@ export function createThreadReadRoutes(state: ThreadReadRoutesState): ThreadRead
       response.end(`stored in ${mount.storedOutside} — not a project here; add it as one to open it`)
       return
     }
-    // A deleted id (#571) is GONE, not unknown (PR #572 review): a 404 for the URL's own thread
+    // A deleted id (#571) is GONE, not unknown: a 404 for the URL's own thread
     // starts a new thread under it (#378), and the page must take this one as a failure instead.
     if (!mount.present && host.threadDeleted(threadId)) {
       response.writeHead(410, { 'Content-Type': 'text/plain' })

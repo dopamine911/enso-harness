@@ -39,7 +39,7 @@ export interface AgentHost {
   /**
    * The directory of the session file under this id — WHETHER OR NOT this host serves it —
    * `undefined` when there is no file. What lets a reader tell "a thread that was never stored"
-   * from "a thread whose project is gone" (PR #399 review): `readStoredThread` answers `undefined`
+   * from "a thread whose project is gone": `readStoredThread` answers `undefined`
    * for both.
    */
   storedThreadDirectory(threadId: string): Promise<string | undefined>
@@ -105,7 +105,7 @@ export interface AgentHost {
    * Delete the thread (#571): its tree through the inventory, its store — the project's object
    * store then collected, its forks' histories kept (#573) — then every session file under its id.
    * A tree holding work is deleted only `force`d AND with `confirmedWork` the sha256 (hex) of the
-   * work's words as the user was shown them (PR #572 review): work gained since is refused, named,
+   * work's words as the user was shown them: work gained since is refused, named,
    * never taken unseen. `retire` disposes the live session and refuses a busy one: the registry's,
    * which the host does not hold. Hard: nothing is kept to undo it.
    */
@@ -470,9 +470,9 @@ export const EnsoThreadHistory = Type.Object(
 /**
  * How a stored branch ends when its last turn did not settle (#109): a prompt the
  * assistant never answered, an assistant turn that called a tool and never got its
- * result, or one whose every call got its result and no reply followed (PR #442 review) — the
+ * result, or one whose every call got its result and no reply followed — the
  * server died mid-run, or the run was cut before the reply. The third is a kill's shape, never a
- * Stop's (PR #438 review): a Stop ends the branch on pi's own error reply to the aborted model
+ * Stop's: a Stop ends the branch on pi's own error reply to the aborted model
  * call, an assistant message with no call — settled, and not named here.
  *
  * Derived on read from the branch, never written to pi's file: deepseek-harness appends a

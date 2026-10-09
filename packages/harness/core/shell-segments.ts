@@ -243,7 +243,7 @@ function skipShellWord(command: string, start: number): number | null {
  * `"curl"`, `\curl`, `cu"rl"` and `'cu'r'l'` all resolve to `curl`.
  *
  * Three ways the value can be unknowable, and they are NOT interchangeable for a caller
- * gating on the result (both found on PR #55 review, one round each):
+ * gating on the result:
  *
  *   `runtime-expansion`  an unquoted (or double-quoted) `$` or backtick — expansion
  *                        decides the value at runtime. A coarse scan of the raw string
@@ -375,7 +375,7 @@ function afterBlanks(text: string, start: number): number {
  *
  * The wrapper-mode scan (network-egress.ts) maps `literalShellWord` over these: a transparent
  * process wrapper (`timeout 30 curl …`) moves the effective command PAST word 1, so every word
- * needs the command-word treatment there (PR #55 review, round 3).
+ * needs the command-word treatment there.
  */
 export function shellWordsOf(text: string): string[] | null {
   const words: string[] = []

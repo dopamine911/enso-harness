@@ -384,7 +384,7 @@ export async function promptThread(deps: FollowRouteDeps, threadId: string, body
     // was refused — there is nothing to join, and the prompt is not run without a lease: 409.
     const holder = threads.peek(threadId)
     if (holder?.busy === true) return joinRun(holder)
-    // Not "is running" (PR #438 review): the client shows this verbatim, and the thread is idle now.
+    // Not "is running": the client shows this verbatim, and the thread is idle now.
     return {
       status: 409,
       reason: `thread ${threadId} was taken and released again while this prompt waited on its build; send it again`,
@@ -446,7 +446,7 @@ export type ContinueOutcome = { readonly status: 202 } | Refusal<404 | 409 | 422
  * answers 202 and the run arrives on the follow like any other; the thread's own `settled` releases
  * it, as it releases a prompt's.
  *
- * A thread neither live here nor stored is a 404 BEFORE anything is built (PR #442 review): there is
+ * A thread neither live here nor stored is a 404 BEFORE anything is built: there is
  * nothing to continue by definition, and `acquire` would build a fresh session under the id and hold
  * it for the idle window only to refuse it — unlike `/command` and `/configure`, which build on purpose.
  */
@@ -476,7 +476,7 @@ export async function continueThread(deps: FollowRouteDeps, threadId: string): P
   return new Promise<ContinueOutcome>((resolve, reject) => {
     // Unlike `promptThread`'s call to pi's public `prompt`, `continueRun` reads pi's private run
     // state (#436), so a fault before either callback is plausible after a pi bump: the lease goes
-    // back and the route answers 500, rather than leaving the thread held (PR #442 review).
+    // back and the route answers 500, rather than leaving the thread held.
     try {
       lease.runtime.continueRun({
         onAccepted: () => resolve({ status: 202 }),
@@ -758,13 +758,13 @@ export async function runHostCommand(
     throw error
   }
   if (started !== undefined) {
-    // ⚠ THE LEASE FOLLOWS THE KIND (PR #347 review). A `flow` releases on acceptance — a login is
+    // ⚠ THE LEASE FOLLOWS THE KIND. A `flow` releases on acceptance — a login is
     // not a run, and holding it locked the composer for the device-code wait. An `action` holds
     // until it settles — a compaction REWRITES THE BRANCH, pi refuses a prompt while it runs and
     // arms that guard only after its own `abort()`, so the held lease is what keeps a prompt out
     // of the window, marks the thread busy, and lets Stop reach it.
     const releaseOn = started === 'flow' ? 'accepted' : 'settled'
-    // ⚠ Every exit releases (PR #346 review): the two outcomes, and a synchronous fault in
+    // ⚠ Every exit releases: the two outcomes, and a synchronous fault in
     // `startHostFlow` before either — which stays a fault (the handler's 500), with the lease
     // back, rather than the held-lease lock this branch exists to avoid.
     return new Promise<HostCommandOutcome>((resolve, reject) => {
@@ -801,7 +801,7 @@ export async function runHostCommand(
   try {
     await lease.runtime.runHostCommand(run)
   } catch (error) {
-    // ⚠ Only a refusal the host DECIDED is the caller's 422 (PR #344 review). Anything else is a
+    // ⚠ Only a refusal the host DECIDED is the caller's 422. Anything else is a
     // fault — a pi API that moved, a bug — and propagates to the handler's 500 rather than
     // reaching the user as a sentence claiming their choice was refused.
     if (error instanceof HostCommandRefused) return { status: 422, reason: error.message }
@@ -907,7 +907,7 @@ async function applyConfiguration(
 
 /**
  * The host's refusal of one host command, or `undefined` when it applied. Only a refusal the host
- * DECIDED is a refusal (PR #344 review's rule): anything else is a fault and propagates to the 500.
+ * DECIDED is a refusal: anything else is a fault and propagates to the 500.
  */
 async function hostRefusalOf(runtime: ThreadRuntime, run: EnsoHostCommandRun): Promise<string | undefined> {
   try {
@@ -980,8 +980,7 @@ const RESTORE_REFUSAL_STATUS = {
 } as const
 
 /**
- * Run a control that writes the thread's session or tree holding the thread (#551, PR #561 review;
- * #670): a run started meanwhile would read a half-restored tree, or write between the entries
+ * Run a control that writes the thread's session or tree holding the thread (#551, #670): a run started meanwhile would read a half-restored tree, or write between the entries
  * appended. So the thread is LEASED, as a run is, for the whole control — refused 409 while one
  * runs, or if one wins it meanwhile. An unknown thread is a 404 before the lease, which would
  * otherwise build a NEW thread under the id.
@@ -1035,7 +1034,7 @@ export function restoreThreadAt(
 /**
  * Undo the thread's last restore (#565): its tree back to that restore's safety snapshot — itself a
  * restore, with its own safety, so a second undo puts the first restore back. The body names the
- * safety the caller was promised; a later restore since is a 409 (PR #561 review).
+ * safety the caller was promised; a later restore since is a 409.
  */
 export function undoLastRestore(
   deps: ThreadReadDeps,
@@ -1074,7 +1073,7 @@ const DELETE_REFUSAL_STATUS = { 'no-thread': 404, busy: 409, 'holds-work': 422, 
 /**
  * Delete the thread (#571): its session file, its tree and its store — a 422 while the tree holds
  * work, unless `force` AND `confirmedWork`, the sha256 of the work's words as the page showed them,
- * matches the work the tree holds now (PR #572 review). Refused 409 while a run holds it, as every
+ * matches the work the tree holds now. Refused 409 while a run holds it, as every
  * control route is; the live session is retired by the host only once the inventory has passed, so
  * a refusal leaves the open page as it was. A claim for the id, from a page that named its
  * project, goes with it.

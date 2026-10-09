@@ -149,7 +149,7 @@ function citationProblems(citation: ArenaCitation, extent: ArenaRunExtent): stri
     const path = resolve(extent.runDirectory, citation.screenshot)
     const inside =
       !relative(extent.runDirectory, path).startsWith('..') && !isAbsolute(relative(extent.runDirectory, path))
-    // A file, not merely a path that exists (PR #626 review): `""`, `.` and `screenshots` all resolve
+    // A file, not merely a path that exists: `""`, `.` and `screenshots` all resolve
     // to a directory of the run, and none of them is a screenshot.
     const isFile = statSync(path, { throwIfNoEntry: false })?.isFile() === true
     if (!inside || !isFile) problems.push(`no screenshot ${citation.screenshot} in the run`)

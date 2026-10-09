@@ -75,7 +75,7 @@ export function sessionModels(options: SessionModelsOptions): SessionModels {
     },
     async available(): Promise<readonly Model<Api>[] | undefined> {
       const probed = bound === undefined ? await (probe ??= probeRuntime(options)) : undefined
-      // Read `bound` again: a thread bound while the probe was starting is the newer list (PR #701 review).
+      // Read `bound` again: a thread bound while the probe was starting is the newer list.
       const runtime = bound ?? probed
       if (runtime === undefined) return undefined
       await runtime.refresh({ allowNetwork: false })

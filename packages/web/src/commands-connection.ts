@@ -22,7 +22,7 @@ import type { FetchLike } from './browser-logging.ts'
  *
  * READS ONLY. The palette's one write — `POST …/command`, a `host` command's run (#338 slice 2)
  * — is `FollowConnection.runHostCommand`, beside `changeMode`: the same control-route shape,
- * the same recorded-and-said failure path, one convention for a thread write (PR #344 review).
+ * the same recorded-and-said failure path, one convention for a thread write.
  */
 export class CommandsFetchError extends Error {
   constructor(

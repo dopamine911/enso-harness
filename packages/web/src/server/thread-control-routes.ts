@@ -107,7 +107,7 @@ export function createThreadControlRoutes(state: ThreadControlRoutesState): Thre
       return
     }
     const { messageId, generation, queued } = outcome.receipt
-    // ⚠ TWO DIFFERENT FACTS, TWO NAMES (PR #326 review). `admission` is what the SERVER did —
+    // ⚠ TWO DIFFERENT FACTS, TWO NAMES. `admission` is what the SERVER did —
     // `queued` or `opened`, the record #132 asks for — and `requestedAdmission` is what the
     // CLIENT asked for. #216's rename gave the request the word `admission` too, and an object
     // literal's later key wins: the spread silently overwrote the outcome on every queued
@@ -157,7 +157,7 @@ export function createThreadControlRoutes(state: ThreadControlRoutesState): Thre
    * `DELETE …[?force=1]` (#571): 204 once the thread is gone; 400 an `If-Match` that is no strong
    * sha256 tag; 404 an unknown thread; 409 a run, a move, a restore or another delete holding it;
    * 422 a tree that holds work — the reason names it — deleted by `?force=1` only with `If-Match`
-   * the sha256 of those very words (PR #572 review): work gained since the page showed its list is
+   * the sha256 of those very words: work gained since the page showed its list is
    * named first, never taken unseen. No body.
    */
   async function respondToDelete(

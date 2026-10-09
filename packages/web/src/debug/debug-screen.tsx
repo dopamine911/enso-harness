@@ -33,13 +33,13 @@ export interface DebugScreenProps {
 export function DebugScreen({ search, fetch: pageFetch }: DebugScreenProps): React.ReactNode {
   const stats = new URLSearchParams(search).has(STATS_QUERY_FLAG)
   // The notice says what THIS page fell back to — never "opened a new thread", which is the
-  // chat page's fallback and something an observation surface cannot do (PR #336 review).
+  // chat page's fallback and something an observation surface cannot do.
   const named = readThreadUrl(search, stats ? "showing the day's stats instead" : "showing the day's log instead")
   const seam = pageFetch === undefined ? {} : { fetch: pageFetch }
   if (named.kind === 'resume') return <ThreadTimelineScreen threadId={named.threadId} {...seam} />
   const screen = stats ? <DayStatsScreen {...seam} /> : <LogTailScreen {...seam} />
   // A malformed id is said on EVERY fallback, the stats view included: the path where a reader
-  // typed something wrong is exactly the one that must not swallow it (PR #336 review).
+  // typed something wrong is exactly the one that must not swallow it.
   if (named.notice === undefined) return screen
   // The screens size themselves to the viewport; in a flex column each shrinks under the notice
   // (they are `overflow-hidden`, so their minimum height is 0) rather than pushing the page to scroll.

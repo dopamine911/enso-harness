@@ -46,7 +46,7 @@ export interface PermissionModeStore extends Store<PermissionModeState> {
    *
    * ⚠ ONE FETCH AT A TIME. `main.tsx` mounts under React StrictMode, which runs effects
    * twice in dev; both mounts pass the unknown-check before either fetch resolves, so
-   * without this they would fire two identical requests (PR #85 review). Concurrent seeds
+   * without this they would fire two identical requests. Concurrent seeds
    * share the in-flight fetch; a failed one clears the slot so a later seed may retry.
    *
    * The fetcher is injected so the guard is testable without a network; a failed or

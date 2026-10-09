@@ -74,7 +74,7 @@ export async function collectEnsoEvidence(sources: ArenaEvidenceSources): Promis
   const fetchText = sources.fetchText ?? defaultFetchText
   const rows: ArenaEvidence[] = []
   /**
-   * Each route asked once (PR #673 review): the history probe below and the thread's history read
+   * Each route asked once: the history probe below and the thread's history read
    * are the same GET, and its answer — or its failure — serves both.
    */
   const answers = new Map<string, Promise<{ readonly status: number; readonly text: string }>>()

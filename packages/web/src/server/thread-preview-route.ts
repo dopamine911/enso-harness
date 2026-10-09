@@ -231,7 +231,7 @@ export function createPreviewOrigins(previewFile: ReturnType<typeof createPrevie
       // ⚠ For the server's life, not once: a server emits `error` for a failed accept too (EMFILE
       // while taking a connection), and an `error` with no listener crashes the process. A listener
       // that could not START (no port, no file descriptor) is forgotten, so the thread's next tree
-      // read tries again (PR #719 review); a running one stays the thread's origin, and is closed
+      // read tries again; a running one stays the thread's origin, and is closed
       // with the others — a failed accept costs one connection, not the listener.
       server.on('error', (error) => {
         if (listening) {

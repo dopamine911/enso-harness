@@ -232,7 +232,7 @@ const KNOWLEDGE_CONFERRING_TOOLS = new Set([TOOL_READ, TOOL_WRITE])
  * That errs toward "read it again without a limit", never toward a write over lines the session
  * did not see.
  *
- * `truncation` is read as pi's own type, not a shape written here (PR #422 review): a rename in
+ * `truncation` is read as pi's own type, not a shape written here: a rename in
  * pi fails the typecheck. `Partial`, because `details` arrives untyped.
  */
 function returnedWholeFile(event: ToolResultEvent): boolean {
@@ -949,7 +949,7 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
    * list each `session_start` (extensions can register tools, so the list is per-session state),
    * AND lazily on the first `tool_call` if `session_start` has not fired yet, so the floor never
    * depends on pi's event ordering: a lifecycle that delivered a `tool_call` first would otherwise
-   * fail OPEN through this very window (PR #52 review). The check cannot run at extension load
+   * fail OPEN through this very window. The check cannot run at extension load
    * (pi refuses action methods there: "Extension runtime not initialized"), but by the first
    * `tool_call` the registry is certainly populated.
    *

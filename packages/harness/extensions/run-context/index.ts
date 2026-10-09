@@ -152,7 +152,7 @@ function modeRules(entries: readonly EnsoTranscriptEntry[], policyText: string |
 }
 
 /**
- * Code-point order, as `canonicalJson` orders keys (PR #440 review): `localeCompare` collates under
+ * Code-point order, as `canonicalJson` orders keys: `localeCompare` collates under
  * the process's locale, and the TUI and the web server may write one session file under different
  * `LANG`s — a spurious entry each time the surface changed.
  */
@@ -250,7 +250,7 @@ async function continuedRunContextOf(
   return { ...facts, skills: last.skills, contextFiles: last.contextFiles }
 }
 
-/** Append `current` unless it equals the last record on the branch, compared raw (PR #440 review). */
+/** Append `current` unless it equals the last record on the branch, compared raw. */
 function appendIfChanged(pi: ExtensionAPI, context: ExtensionContext, current: EnsoRunContext): void {
   // Compared RAW, not through the reader's schema: a record this writer made that the schema
   // rejects would otherwise read as absent and be appended again every run.

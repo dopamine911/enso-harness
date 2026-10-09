@@ -68,13 +68,13 @@ import { SLASH_PROMPT_REFUSAL } from './start-session.tsx'
  * running session; it reads the Start dialog's own sentence, "a / command needs a running
  * session — start one with a prompt first". A live list with zero rows reads "this session
  * registers no commands"; a filter that matches nothing reads "no command matches". A sentence
- * the server cannot back is a sentence the palette must not say (PR #343 review).
+ * the server cannot back is a sentence the palette must not say.
  *
  * ⚠ NO RADIX MENU ITEM MAY LIVE INSIDE THIS CONTENT. The dropdown's content feeds every printable
  * key pressed anywhere inside it to its typeahead (`@radix-ui/react-menu`, `MenuContent.onKeyDown`)
  * with no guard for inputs; it is harmless only because this content registers zero menu items,
  * so the typeahead has nothing to focus. One `PromptInputActionMenuItem` here and filtering
- * would yank focus out of the filter box (PR #343 review). Arrow keys are safe on their own:
+ * would yank focus out of the filter box. Arrow keys are safe on their own:
  * Radix returns before handling them unless the content itself is the target.
  *
  * The filter is NAME-FIRST, not cmdk's default fuzzy score. cmdk scores value and keywords as
@@ -137,7 +137,7 @@ export function rankCommand(rowValue: string, search: string, keywords?: readonl
   const needle = search.toLowerCase()
   const nameAt = rowValue.toLowerCase().indexOf(needle)
   // `/name` — the name starts at 1; a search typed with its own `/` matches at 0 and counts as the
-  // start too (else it would score above 1, by name length — PR #343 review). Later starts rank
+  // start too (else it would score above 1, by name length). Later starts rank
   // lower but stay above 0.5.
   if (nameAt >= 0) return 1 - (Math.max(nameAt, 1) - 1) / (2 * rowValue.length)
   const inDescription = keywords?.some((keyword) => keyword.toLowerCase().includes(needle)) ?? false

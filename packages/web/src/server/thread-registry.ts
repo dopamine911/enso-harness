@@ -443,7 +443,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
    * @invariant abort-clear-restore/one-abort-by-thread One abort per run, by thread; the route releases nothing.
    * The stop is addressed by thread id because the lease that took the run lives in the prompt
    * route's closure and a later request cannot reach it. `busy` stays true until the run's settle
-   * lands, so a second click (PR #120 review) would reach pi again. pi's `abort()` is re-entrant
+   * lands, so a second click would reach pi again. pi's `abort()` is re-entrant
    * (`agent.abort()` + `waitForIdle()`), but the second call is the same answer, so it is not
    * made: a repeat while the abort is pending is answered `aborted` with an empty `restored`, since
    * the first stop already took the queue. No live thread is `unknown` (a 404), nothing in flight
@@ -458,7 +458,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
    *
    * @invariant abort-clear-restore/stop-must-stop A stop must stop.
    * If clearing the queue throws, the loss is an `error` record, `restored` is empty, and the
-   * runtime is still told to abort (PR #129 review); never the other way round.
+   * runtime is still told to abort; never the other way round.
    */
   function abort(threadId: string): AbortResult {
     const thread = threads.get(threadId)
@@ -472,7 +472,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
         : { outcome: 'idle', restored: [] }
     }
     if (thread.abortInFlight !== undefined) return { outcome: 'aborted', restored: [] }
-    // A stop must stop (PR #129 review): if clearing the queue throws — pi emits the
+    // A stop must stop: if clearing the queue throws — pi emits the
     // emptied queue to its listeners inside it — the texts are lost and said, and pi is
     // still told to abort. Never the other way round.
     let cleared: { interrupting: string[]; enqueued: string[] } = { interrupting: [], enqueued: [] }

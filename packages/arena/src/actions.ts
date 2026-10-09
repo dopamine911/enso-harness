@@ -155,7 +155,7 @@ const RAIL_LINE = `- navigation "${RAIL_NAME}"`
 
 /**
  * A page read as a wait until change compares it: the rail's ages aside, so the clock is no change.
- * ⚠ IN THE RAIL ONLY (PR #646 review): the ages were measured there, and the same shape elsewhere —
+ * ⚠ IN THE RAIL ONLY: the ages were measured there, and the same shape elsewhere —
  * a control named "Snooze 1h" — is the page's words, whose change is a change.
  * Its twin in the page, `PAGE_CHANGES_SCRIPT` (#740), counts every mutation but the rail's ages.
  */
@@ -352,7 +352,7 @@ export interface ArenaChangeBaseline {
 /**
  * The page as the agent last saw it: its last read, or the page right after its last move.
  *
- * ⚠ TAKEN AT THE MOVE, NOT AT THE WAIT (PR #646 review, twice proposed otherwise). Between the
+ * ⚠ TAKEN AT THE MOVE, NOT AT THE WAIT. Between the
  * agent's click and its wait lies its own model call — a median 2.1 s in the Sonnet run. Forgetting
  * the page at the move and looking at the wait's start would fold a card that appeared in that gap
  * into the baseline: the page then holds still, and the wait sits out its whole limit — the bug
@@ -424,7 +424,7 @@ function fullyDecoded(pathname: string): string | undefined {
 /**
  * A `goto` path on the web origin: a path and query, never another origin, never `/api`.
  *
- * ⚠ CHECKED AS THE BROWSER WILL READ IT, not as typed (PR #562 review). The first version
+ * ⚠ CHECKED AS THE BROWSER WILL READ IT, not as typed. The first version
  * compared the raw text, so `/%61pi/threads`, `/x/../api/threads` and `/./api` passed it and
  * reached the API, and `/\evil.com/` passed it and left the origin — the URL parser treats `\`
  * as `/`. The path is resolved against a fixed origin first (dot segments collapse, a `\` that

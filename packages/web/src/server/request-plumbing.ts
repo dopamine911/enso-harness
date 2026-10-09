@@ -221,7 +221,7 @@ export function answerJson(response: ServerResponse, body: unknown): void {
 /**
  * ⚠ `decodeURIComponent` THROWS on a malformed escape (`/api/threads/%`), and a throw in the
  * request listener has nothing above it — it took the whole dev server down, every live
- * session with it, from one hand-typed URL (PR #87 review, reproduced). A bad id is the
+ * session with it, from one hand-typed URL. A bad id is the
  * caller's problem: 400 written here, `undefined` returned, and the server stays up.
  *
  * Since #95 the id is also pi's session id, which pi puts in a FILENAME — so a decoded id
@@ -245,12 +245,12 @@ export function decodeThreadId(rawSegment: string, response: ServerResponse): st
  * ⚠ The dispatcher is synchronous and a throw in the request listener has nothing above
  * it (PR #87). Every handler that awaits (the thread routes, the listing, the browser log) runs
  * through here: a rejection is reported and answered as a 500 whose text names no route (it
- * answers every one of them; PR #393 review), and the server stays up.
+ * answers every one of them), and the server stays up.
  *
  * The one exception is a refusal the SERVER decided while building a thread (#395): the thread's
  * project is gone, its directory deleted, or its session is in a directory not served. Any route
  * that builds can meet one, so it is answered here, once — 409 with the reason, not a fault
- * (PR #399 review: a refusal is not a fault, and must not read as one).
+ * (a refusal is not a fault, and must not read as one).
  */
 export function answerOrFail(work: Promise<void>, response: ServerResponse): void {
   work.catch((error: unknown) => {

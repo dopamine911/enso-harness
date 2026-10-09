@@ -43,7 +43,7 @@ const Sha256 = Type.String({ pattern: '^[0-9a-f]{64}$' })
 /**
  * What one run started under. `git` is `null` when git could not name the revision — `rev-parse
  * HEAD` failed or ran past 5 s, whatever the reason: no repository, no commit yet, no git, a
- * timeout (PR #439 review). A `status` that fails keeps the revision and records `dirty: true`: it
+ * timeout. A `status` that fails keeps the revision and records `dirty: true`: it
  * cannot say the tree is clean. `mode` is `null` when no permission policy could be read, or it
  * does not parse.
  *

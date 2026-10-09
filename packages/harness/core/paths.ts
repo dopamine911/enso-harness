@@ -278,7 +278,7 @@ export interface CredentialPlaces {
  * home), against each place and its realpath.
  *
  * ⚠ The harness's `.enso/` is NOT protected by being gitignored: ripgrep honours `.gitignore` only
- * inside a git work tree, and the agent may edit `.gitignore` (PR #420 review, measured).
+ * inside a git work tree, and the agent may edit `.gitignore`.
  *
  * ⚠ WHAT THIS DOES NOT SEE, stated: a fragment's location anywhere but those places
  * (`/srv/app/.aws`), and a basename-class file (`.env`, `id_rsa`) beneath the directory — those are

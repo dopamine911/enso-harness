@@ -2,7 +2,7 @@ import typescript from 'typescript'
 
 /**
  * Every comment in a source file, with what it is about, taken from the TypeScript syntax tree
- * (#482, PR #488 review): the docs builders read comments the way the compiler does, never by
+ * (#482): the docs builders read comments the way the compiler does, never by
  * matching text. A `//` inside a string, a template or JSX text is not a comment, and the parser is
  * the one thing that knows that.
  *
