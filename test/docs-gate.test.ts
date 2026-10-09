@@ -77,12 +77,17 @@ const BLOCK_CLOSE = /^<!--\s*\/generated-block\s*-->$/
 const DIAGRAM_FENCE_LANGUAGE = 'mermaid'
 const FENCE_CLOSE = /^```\s*$/
 
+interface FenceSource {
+  readonly path: string
+  readonly symbol: string
+}
+
 interface Fence {
   readonly openLine: number
   /** The fence's language tag, lowercased; `''` for a bare ```` ``` ````. */
   readonly language: string
   readonly body: string
-  readonly source: { path: string; symbol: string } | undefined
+  readonly source: FenceSource | undefined
 }
 
 /**
@@ -121,45 +126,41 @@ function describeLanguage(language: string): string {
   return language === '' ? 'unlabelled' : `\`${language}\``
 }
 
+/** The offender line for a fence with no `source:` marker, or `undefined` when it may stand unmarked. */
+function unmarkedFenceOffender(page: string, fence: Fence, fenceMustBeSourced: boolean): string | undefined {
+  // A page that must source its fences: TypeScript needs a marker, a diagram is exempt by
+  // name, and anything else is a third thing the rule never decided to allow.
+  if (!fenceMustBeSourced || fence.language === DIAGRAM_FENCE_LANGUAGE) return undefined
+  return SOURCEABLE_FENCE_LANGUAGE.test(fence.language)
+    ? `${page}:${fence.openLine}: ${describeLanguage(fence.language)} fence without a <!-- source: --> marker`
+    : `${page}:${fence.openLine}: ${describeLanguage(fence.language)} fence — a fence here is a sourced quote or a mermaid diagram, nothing else`
+}
+
+/** The offender line for a fence under a `source:` marker, or `undefined` when it equals its declaration. */
+function markedFenceOffender(page: string, fence: Fence, source: FenceSource): string | undefined {
+  // A marker above a fence the extractor cannot fill is a claim nothing checks — the half of
+  // the blind spot that hid a MARKED fence rather than an unmarked one (#258).
+  if (!SOURCEABLE_FENCE_LANGUAGE.test(fence.language)) {
+    return `${page}:${fence.openLine}: <!-- source: --> marker above a ${describeLanguage(fence.language)} fence — only a TypeScript or JavaScript fence can equal a declaration`
+  }
+  const sourcePath = join(REPOSITORY_ROOT, source.path)
+  if (!existsSync(sourcePath)) return `${page}:${fence.openLine}: source ${source.path} does not exist`
+  const declaration = extractDeclaration(readFileSync(sourcePath, 'utf8'), source.symbol)
+  if (declaration === undefined) {
+    return `${page}:${fence.openLine}: ${source.path} declares no top-level \`${source.symbol}\``
+  }
+  if (declaration.text.trim() === fence.body.trim()) return undefined
+  return `${page}:${fence.openLine}: fence differs from ${source.path}#${source.symbol} (${source.path}:${declaration.startLine}-${declaration.endLine})`
+}
+
 function sourcedFenceOffenders(page: string, lines: readonly string[], fenceMustBeSourced: boolean): string[] {
   const offenders: string[] = []
   for (const fence of fencesOf(page, lines, offenders)) {
-    const sourceable = SOURCEABLE_FENCE_LANGUAGE.test(fence.language)
-    if (fence.source === undefined) {
-      // A page that must source its fences: TypeScript needs a marker, a diagram is exempt by
-      // name, and anything else is a third thing the rule never decided to allow.
-      if (!fenceMustBeSourced) continue
-      if (fence.language === DIAGRAM_FENCE_LANGUAGE) continue
-      offenders.push(
-        sourceable
-          ? `${page}:${fence.openLine}: ${describeLanguage(fence.language)} fence without a <!-- source: --> marker`
-          : `${page}:${fence.openLine}: ${describeLanguage(fence.language)} fence — a fence here is a sourced quote or a mermaid diagram, nothing else`,
-      )
-      continue
-    }
-    // A marker above a fence the extractor cannot fill is a claim nothing checks — the half of
-    // the blind spot that hid a MARKED fence rather than an unmarked one (#258).
-    if (!sourceable) {
-      offenders.push(
-        `${page}:${fence.openLine}: <!-- source: --> marker above a ${describeLanguage(fence.language)} fence — only a TypeScript or JavaScript fence can equal a declaration`,
-      )
-      continue
-    }
-    const sourcePath = join(REPOSITORY_ROOT, fence.source.path)
-    if (!existsSync(sourcePath)) {
-      offenders.push(`${page}:${fence.openLine}: source ${fence.source.path} does not exist`)
-      continue
-    }
-    const declaration = extractDeclaration(readFileSync(sourcePath, 'utf8'), fence.source.symbol)
-    if (declaration === undefined) {
-      offenders.push(`${page}:${fence.openLine}: ${fence.source.path} declares no top-level \`${fence.source.symbol}\``)
-      continue
-    }
-    if (declaration.text.trim() !== fence.body.trim()) {
-      offenders.push(
-        `${page}:${fence.openLine}: fence differs from ${fence.source.path}#${fence.source.symbol} (${fence.source.path}:${declaration.startLine}-${declaration.endLine})`,
-      )
-    }
+    const offender =
+      fence.source === undefined
+        ? unmarkedFenceOffender(page, fence, fenceMustBeSourced)
+        : markedFenceOffender(page, fence, fence.source)
+    if (offender !== undefined) offenders.push(offender)
   }
   return offenders
 }
@@ -177,14 +178,30 @@ function generatorOutput(page: string, line: number, script: string): { text: st
   return { text: generated.stdout.toString() }
 }
 
-function generatedOffenders(page: string, text: string): string[] {
-  const lines = text.split('\n')
-  const marker = GENERATED_MARKER.exec(lines[0] ?? '')
-  if (marker) {
-    const output = generatorOutput(page, 1, marker[1] ?? '')
-    if ('offender' in output) return [output.offender]
-    return output.text.trim() === text.trim() ? [] : [`${page}: differs from \`bun ${marker[1] ?? ''}\` — regenerate`]
-  }
+/** A whole page under a `generated:` marker: the script's stdout, every line of it. */
+function generatedPageOffenders(page: string, text: string, script: string): string[] {
+  const output = generatorOutput(page, 1, script)
+  if ('offender' in output) return [output.offender]
+  return output.text.trim() === text.trim() ? [] : [`${page}: differs from \`bun ${script}\` — regenerate`]
+}
+
+interface GeneratedBlock {
+  readonly script: string
+  /** 1-based line of the `generated-block:` marker. */
+  readonly line: number
+  /** The lines between the markers, joined. */
+  readonly body: string
+}
+
+/** The offender line for one generated block, or `undefined` when it equals its generator. */
+function generatedBlockOffender(page: string, block: GeneratedBlock): string | undefined {
+  const output = generatorOutput(page, block.line, block.script)
+  if ('offender' in output) return output.offender
+  if (output.text.trim() === block.body.trim()) return undefined
+  return `${page}:${block.line}: block differs from \`bun ${block.script}\` — refresh`
+}
+
+function generatedBlockOffenders(page: string, lines: readonly string[]): string[] {
   const offenders: string[] = []
   for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
     const open = BLOCK_OPEN.exec(lines[lineIndex] ?? '')
@@ -195,20 +212,18 @@ function generatedOffenders(page: string, text: string): string[] {
       offenders.push(`${page}:${lineIndex + 1}: generated-block for ${script} is never closed`)
       break
     }
-    const output = generatorOutput(page, lineIndex + 1, script)
-    if ('offender' in output) offenders.push(output.offender)
-    else if (
-      output.text.trim() !==
-      lines
-        .slice(lineIndex + 1, closeIndex)
-        .join('\n')
-        .trim()
-    ) {
-      offenders.push(`${page}:${lineIndex + 1}: block differs from \`bun ${script}\` — refresh`)
-    }
+    const body = lines.slice(lineIndex + 1, closeIndex).join('\n')
+    const offender = generatedBlockOffender(page, { script, line: lineIndex + 1, body })
+    if (offender !== undefined) offenders.push(offender)
     lineIndex = closeIndex
   }
   return offenders
+}
+
+function generatedOffenders(page: string, text: string): string[] {
+  const lines = text.split('\n')
+  const marker = GENERATED_MARKER.exec(lines[0] ?? '')
+  return marker ? generatedPageOffenders(page, text, marker[1] ?? '') : generatedBlockOffenders(page, lines)
 }
 
 test('⚠ every sourced fence equals its declaration; every seam-page fence is sourced (#168)', () => {
@@ -231,33 +246,35 @@ test('⚠ every generated page, and every generated block, equals its generator 
   expect(offenders).toEqual([])
 })
 
+/** The body of the fence under `docs/architecture.md` → *Package structure*. */
+function packageStructureTree(text: string): string {
+  const start = text.indexOf('## Package structure')
+  const open = text.indexOf('```\n', start)
+  const close = text.indexOf('\n```', open + 4)
+  if (start < 0 || open < 0 || close < 0) throw new Error('architecture.md has no Package structure tree')
+  return text.slice(open + 4, close)
+}
+
 /**
  * The paths `docs/architecture.md` → *Package structure* names, resolved by indentation (two
  * spaces per level; several names on one line are siblings; a `*` is a glob and is not checked).
  */
 function architectureTreePaths(text: string): string[] {
-  const start = text.indexOf('## Package structure')
-  const open = text.indexOf('```\n', start)
-  const close = text.indexOf('\n```', open + 4)
-  if (start < 0 || open < 0 || close < 0) throw new Error('architecture.md has no Package structure tree')
   // Each stack level is the directory a deeper line nests under. A line naming several
   // siblings (`skills/ prompts/ themes/`) pushes no directory: a child under it would have
   // no unambiguous parent, so such a child is refused rather than resolved against the first.
   const stack: (string | undefined)[] = []
   const paths: string[] = []
-  for (const line of text.slice(open + 4, close).split('\n')) {
+  for (const line of packageStructureTree(text).split('\n')) {
     const names = (line.split('#')[0] ?? '').trim()
     if (names === '') continue
-    const depth = ((/^ */.exec(line)?.[0].length ?? 0) / 2) | 0
-    stack.length = depth
+    stack.length = ((/^ */.exec(line)?.[0].length ?? 0) / 2) | 0
     if (stack.some((segment) => segment === undefined)) {
       throw new Error(`architecture.md tree: "${names}" nests under a line that names several siblings`)
     }
     const parent = stack.join('')
     const siblings = names.split(/\s+/)
-    for (const name of siblings) {
-      if (!name.includes('*')) paths.push(parent + name)
-    }
+    paths.push(...siblings.filter((name) => !name.includes('*')).map((name) => parent + name))
     stack.push(siblings.length === 1 ? siblings[0] : undefined)
   }
   return paths
@@ -394,6 +411,23 @@ function retiredNames(): Set<string> {
   return new Set([...retired.matchAll(/^\|\s*`([A-Za-z][A-Za-z0-9_]*)`/gm)].map((row) => row[1] ?? ''))
 }
 
+/** `page:line: file declares no Name` for each name a page's citations claim and the linked file does not declare. */
+function undeclaredCitations(path: string, retired: ReadonlySet<string>): string[] {
+  const page = path.slice(REPOSITORY_ROOT.length + 1)
+  const offenders: string[] = []
+  for (const citation of sourceCitations(readFileSync(path, 'utf8'))) {
+    const target = join(path, '..', citation.file)
+    if (!existsSync(target)) continue // the link gate above names this one
+    // Declared, as the TypeScript parser reads the file (#482), not as a regex over it would guess.
+    const declared = declarationsIn(target, readFileSync(target, 'utf8'))
+    for (const name of citation.claimed) {
+      if (retired.has(name) || /^Pi[A-Z]/.test(name) || declared.has(name)) continue
+      offenders.push(`${page}:${citation.line}: ${citation.file} declares no ${name}`)
+    }
+  }
+  return offenders
+}
+
 /**
  * ⚠ A LINK THAT RESOLVES IS NOT A CITATION THAT HOLDS (PR #307 review). The gate above
  * proves the file exists, which is what let the leak inventory say `RuntimeEvent` was
@@ -411,21 +445,7 @@ function retiredNames(): Set<string> {
  */
 test('⚠ a symbol named beside a source link is declared in the file it links (#245)', () => {
   const retired = retiredNames()
-  const offenders: string[] = []
-  for (const path of markdownFiles(join(DOCS_ROOT, 'seams'))) {
-    const page = path.slice(REPOSITORY_ROOT.length + 1)
-    for (const citation of sourceCitations(readFileSync(path, 'utf8'))) {
-      const target = join(path, '..', citation.file)
-      if (!existsSync(target)) continue // the link gate above names this one
-      // Declared, as the TypeScript parser reads the file (#482), not as a regex over it would guess.
-      const declared = declarationsIn(target, readFileSync(target, 'utf8'))
-      for (const name of citation.claimed) {
-        if (retired.has(name) || /^Pi[A-Z]/.test(name)) continue
-        if (declared.has(name)) continue
-        offenders.push(`${page}:${citation.line}: ${citation.file} declares no ${name}`)
-      }
-    }
-  }
+  const offenders = markdownFiles(join(DOCS_ROOT, 'seams')).flatMap((path) => undeclaredCitations(path, retired))
   expect(offenders).toEqual([])
 })
 

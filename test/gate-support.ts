@@ -141,20 +141,24 @@ export interface CodeLineScan {
 export function codeOffenders(scan: CodeLineScan): string[] {
   const offenders: string[] = []
   const unvisited = new Set(scan.allowed ?? [])
-  for (const root of scan.roots) {
-    for (const path of sourceFiles(join(REPOSITORY_ROOT, root), scan.includeTests ?? false)) {
-      const repositoryRelative = path.slice(REPOSITORY_ROOT.length + 1)
-      if (scan.exemptRoots?.some((exempt) => repositoryRelative.startsWith(`${exempt}/`))) continue
-      const matches = fileMatches(scan, path, repositoryRelative)
-      if (unvisited.delete(repositoryRelative)) {
-        if (matches.length === 0) offenders.push(`${repositoryRelative} (allowlisted, matches nothing)`)
-      } else {
-        offenders.push(...matches)
-      }
-    }
+  for (const file of scannedFiles(scan)) {
+    const matches = fileMatches(scan, file.path, file.repositoryRelative)
+    if (!unvisited.delete(file.repositoryRelative)) offenders.push(...matches)
+    else if (matches.length === 0) offenders.push(`${file.repositoryRelative} (allowlisted, matches nothing)`)
   }
   for (const missing of unvisited) offenders.push(`${missing} (allowlisted, matches nothing)`)
   return offenders
+}
+
+/** Every file the scan walks, absolute and repository-relative, in walk order; exempt roots left out. */
+function scannedFiles(scan: CodeLineScan): { path: string; repositoryRelative: string }[] {
+  return scan.roots.flatMap((root) =>
+    sourceFiles(join(REPOSITORY_ROOT, root), scan.includeTests ?? false)
+      .map((path) => ({ path, repositoryRelative: path.slice(REPOSITORY_ROOT.length + 1) }))
+      .filter(
+        ({ repositoryRelative }) => !scan.exemptRoots?.some((exempt) => repositoryRelative.startsWith(`${exempt}/`)),
+      ),
+  )
 }
 
 /** One code line: 1-based number and text, as the gates address it. */

@@ -48,24 +48,23 @@ function isScannableSource(fileName: string): boolean {
   return fileName.endsWith('.ts') || fileName.endsWith('.tsx') || fileName.endsWith('.mjs')
 }
 
+/** Path fragments outside the scan: tests, installs, emitted types. */
+const EXCLUDED_PATH_FRAGMENTS = ['__tests__', 'node_modules', 'dist-types'] as const
+
+function isExcludedPath(repositoryRelative: string): boolean {
+  return (
+    EXCLUDED_PATH_FRAGMENTS.some((fragment) => repositoryRelative.includes(fragment)) ||
+    VENDORED_DIRECTORIES.some((vendored) => repositoryRelative.startsWith(vendored))
+  )
+}
+
 function collectScannableSources(): string[] {
-  const collected: string[] = []
-  for (const scannedRoot of SCANNED_ROOTS) {
-    for (const dirEntry of readdirSync(join(repositoryRoot, scannedRoot), {
-      withFileTypes: true,
-      recursive: true,
-    })) {
-      if (!(dirEntry.isFile() && isScannableSource(dirEntry.name))) continue
-      const absolutePath = join(dirEntry.parentPath, dirEntry.name)
-      const repositoryRelative = relative(repositoryRoot, absolutePath)
-      if (repositoryRelative.includes('__tests__')) continue
-      if (repositoryRelative.includes('node_modules')) continue
-      if (repositoryRelative.includes('dist-types')) continue
-      if (VENDORED_DIRECTORIES.some((vendored) => repositoryRelative.startsWith(vendored))) continue
-      collected.push(repositoryRelative)
-    }
-  }
-  return collected
+  return SCANNED_ROOTS.flatMap((scannedRoot) =>
+    readdirSync(join(repositoryRoot, scannedRoot), { withFileTypes: true, recursive: true })
+      .filter((dirEntry) => dirEntry.isFile() && isScannableSource(dirEntry.name))
+      .map((dirEntry) => relative(repositoryRoot, join(dirEntry.parentPath, dirEntry.name)))
+      .filter((repositoryRelative) => !isExcludedPath(repositoryRelative)),
+  )
 }
 
 function offendersContaining(needle: string, allowedFiles: readonly string[]): string[] {

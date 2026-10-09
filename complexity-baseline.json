@@ -1,11 +1,6 @@
 {
   "kind": "health",
   "finding_counts": {
-    "packages/core/src/__tests__/no-duplicate-paths.test.ts": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
     "packages/harness/core/environment-dump.ts": {
       "complexity_moderate": {
         "count": 1
@@ -16,38 +11,13 @@
         "count": 4
       }
     },
-    "packages/web/src/server/__tests__/logs-tail-route.test.ts": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
     "packages/web/src/to-agui.ts": {
       "complexity_high": {
-        "count": 1
-      }
-    },
-    "test/dependency-gate.test.ts": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "test/docs-gate.test.ts": {
-      "complexity_moderate": {
-        "count": 4
-      }
-    },
-    "test/gate-support.ts": {
-      "complexity_moderate": {
         "count": 1
       }
     }
   },
   "identity_finding_counts": {
-    "packages/core/src/__tests__/no-duplicate-paths.test.ts\u0000collectScannableSources": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
     "packages/harness/core/environment-dump.ts\u0000gateWords": {
       "complexity_moderate": {
         "count": 1
@@ -73,43 +43,8 @@
         "count": 1
       }
     },
-    "packages/web/src/server/__tests__/logs-tail-route.test.ts\u0000<arrow>": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
     "packages/web/src/to-agui.ts\u0000observationToAguiEvents": {
       "complexity_high": {
-        "count": 1
-      }
-    },
-    "test/dependency-gate.test.ts\u0000directImportGraph": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "test/docs-gate.test.ts\u0000<arrow>": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "test/docs-gate.test.ts\u0000architectureTreePaths": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "test/docs-gate.test.ts\u0000generatedOffenders": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "test/docs-gate.test.ts\u0000sourcedFenceOffenders": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "test/gate-support.ts\u0000codeOffenders": {
-      "complexity_moderate": {
         "count": 1
       }
     }
