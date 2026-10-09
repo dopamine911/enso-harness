@@ -86,18 +86,16 @@ import { snapshotPaths } from '@enso/core/snapshot-store'
 import { getPermissionsService } from '@gotgenes/pi-permission-system'
 import type { LogRecorder } from '@logtape/testing/recorder'
 import { Type } from 'typebox'
+import { type AgentHost, createAgentHost, SessionDirectoryRefused } from '../agent-host.ts'
+import { LOST_TOOL_RESULT_TEXT, NOTHING_TO_CONTINUE } from '../continuation.ts'
 import {
-  type AgentHost,
-  createAgentHost,
   type HostedThread,
   type HostedThreadInspection,
   MODEL_WATCH_EXTENSION_PATH,
-  SessionDirectoryRefused,
-  seedMultiAccountConfig,
   stopRunSettlingDialogs,
   type ToolCallVerdict,
-} from '../agent-host.ts'
-import { LOST_TOOL_RESULT_TEXT, NOTHING_TO_CONTINUE } from '../continuation.ts'
+} from '../hosted-thread.ts'
+import { seedMultiAccountConfig } from '../multi-account-seed.ts'
 import { PERMISSION_CALL_QUESTIONS_EXTENSION_PATH } from '../permission-call-questions.ts'
 import { storedPermissionModeState } from '../permission-mode-adapter.ts'
 import { readPermissionPolicy, resetPermissionPolicy, writePermissionPolicy } from '../permission-policy-file.ts'

@@ -1,0 +1,1320 @@
+import { existsSync } from 'node:fs'
+import { getSupportedThinkingLevels } from '@earendil-works/pi-ai'
+import {
+  type AgentSessionServices,
+  type CreateAgentSessionFromServicesOptions,
+  createAgentSessionFromServices,
+  createAgentSessionServices,
+  type ExtensionAPI,
+  type ExtensionError,
+  type InlineExtension,
+  ModelRuntime,
+  type PromptOptions,
+  ProjectTrustStore,
+} from '@earendil-works/pi-coding-agent'
+import {
+  type DialogAnswer,
+  ENSO_INCIDENT_RESOLVED_CHANNEL,
+  ENSO_INCIDENT_RESOLVED_ENTRY,
+  ENSO_LOG_EVENTS,
+  ENSO_PROJECT_TRUST_ENTRY,
+  ENSO_RUN_STOPPED_ENTRY,
+  ENSO_SYSTEM_PROMPT_ENTRY,
+  type EnsoForkPoint,
+  type EnsoIncidentResolution,
+  type EnsoHostCommandRun,
+  type EnsoModelState,
+  type EnsoObservation,
+  type EnsoLoginInProgress,
+  type EnsoOpenDialog,
+  type EnsoPermissionCheckRequest,
+  type EnsoPermissionModeName,
+  type EnsoPermissionModeState,
+  type EnsoPermissionVerdict,
+  type EnsoPromptAdmission,
+  type EnsoRiskThresholds,
+  type EnsoSystemPromptChoice,
+  type EnsoSystemPromptPreview,
+  type EnsoThreadEvent,
+  type EnsoTranscriptEntry,
+  ensoLogger,
+  transcriptEntryOf,
+  type HostFlowOutcome,
+  incidentResolutionRefusal,
+  incidentResolvedOf,
+  type PromptOutcome,
+  type PromptRequest,
+  modeAgentName,
+  type RuntimeCommand,
+  readRecordedMode,
+  recordedPermissionMode,
+  recordedSystemPrompt,
+  THREAD_PROJECT_TRUST,
+  type ThreadRuntime,
+} from '@enso/core'
+import { getPermissionsService } from '@gotgenes/pi-permission-system'
+import type { BranchContext, BranchRequestDetail } from './branch-context.ts'
+import type { BranchEval } from './branch-eval.ts'
+import type { BranchIncidentHistory } from './branch-incident-history.ts'
+import type { BranchJudgeCases } from './branch-judge-cases.ts'
+import type { BranchStats } from './branch-stats.ts'
+import { type ContinuationLead, continuationLead, NO_RUN_LIFECYCLE, NOTHING_TO_CONTINUE } from './continuation.ts'
+import { createEventTail, describeObservation } from './event-tail.ts'
+import { createEnsoExtensionUiContext } from './extension-ui-context.ts'
+import { decideHostCommand, HOST_VIEW_ROWS, HostCommandRefused, hostCommandRows } from './host-commands.ts'
+import {
+  authEventText,
+  compactDoneText,
+  decideHostFlow,
+  FlowCancelled,
+  type HostAuthEvent,
+  type HostAuthType,
+  hostFlowRows,
+  isCompactionRefusal,
+  isFlowCancelled,
+  type LoginProviderFacts,
+  loginCodeQuestion,
+  loginDoneText,
+  loginOptions,
+  logoutDoneText,
+  logoutOptions,
+  type StoredCredentialFacts,
+} from './host-flows.ts'
+import { mapPiEvent } from './map-events.ts'
+import { attributeNotices, ENSO_SENDER } from './notice-sender.ts'
+import { createPermissionCallQuestions } from './permission-call-questions.ts'
+import { livePermissionModeState, modeCommand } from './permission-mode-adapter.ts'
+import {
+  createTrustGate,
+  hostedProjectTrust,
+  PROJECT_TRUST_OPTIONS,
+  projectTrustedNotice,
+  projectTrustQuestion,
+} from './project-trust.ts'
+import { builtinProviderName, providerRefusalOf } from './provider-refusal.ts'
+import { restoreNoteExtension } from './restore-note.ts'
+import type { RuntimeEvent } from './runtime-event.ts'
+import { toRpcWireEvent } from './session-events.ts'
+import { sessionModels } from './session-models.ts'
+import { growsSessionSpend, liveSessionUsage } from './session-usage.ts'
+import type { StoredThreads } from './stored-threads.ts'
+import { previewOf, renderedUnder } from './system-prompt-preview.ts'
+import { decideSystemPrompt, withSystemPrompt } from './system-prompt.ts'
+import { runtimeLogOf, type ThreadLog } from './thread-log.ts'
+import type { TreeMaking } from './thread-tree-making.ts'
+import { treeRecordOf } from './thread-trees.ts'
+
+/**
+ * One live thread (#69): pi built on the thread's log — one `createAgentSessionServices` and one
+ * `createAgentSessionFromServices`, the harness package loaded through the same loader path the
+ * CLI's `-e <dir>` uses, and our `ExtensionUIContext` bound so dialogs reach the browser (#27) and
+ * the extensions' `hasUI` is true — its events mapped to observations, and the `ThreadRuntime` the
+ * server drives it through.
+ *
+ * ⚠⚠ ONE SERVICES OBJECT PER SESSION, NEVER SHARED (#69). Two sessions created from one services
+ * object share their extension INSTANCES: one closure receives `session_start` twice, so thread A's
+ * read tracker would authorise thread B's writes and A's `/mode` would apply to B. A services object
+ * is created per session and never reused, whatever it costs in reload time.
+ *
+ * ⚠ `bindExtensions` IS CALLED EXACTLY ONCE PER SESSION. Every call emits `session_start` (the
+ * guards reset their read tracker on it; multi-account resets thirteen failover guards). Without the
+ * call, `session_start` never fires and `ctx.hasUI` is false.
+ *
+ * ⚠ THE HOST LOADS ONE EXTENSION OF ITS OWN, `<inline:enso-model-watch>` (#338 slice 2), because an
+ * extension is the only honest listener for a model change. pi (1.1.0) announces a model switch to
+ * extensions ALONE: `AgentSession.setModel` (`dist/core/agent-session.js:1946`) writes the
+ * `model_change` entry through `appendModelChange` (:1953) with no session event — `entry_appended`
+ * is emitted for custom entries, boundary drafts, context edits, cache-warm and virtual-model-state
+ * entries, never for a model change — and then `_emitModelSelect` (:1962) puts `model_select` on the
+ * EXTENSION runner. The thinking level is the other way round: `setThinkingLevel` (:2052) emits
+ * `thinking_level_changed` on the session stream (:2064). The host hears each where it is said,
+ * re-reads `modelState()` and emits its own `model` event once per change — so a failover swap by
+ * pi-multi-account (`pi.setModel`, `index.ts:4031`) reaches the feed the same way a `/model` from the
+ * palette does. The watcher registers nothing else and is listed in `loadedExtensionPaths`.
+ *
+ * A FORK POINT IS READ OFF THE BRANCH (#435). `forkPoint` (live) and `readStoredForkPoint` (cold, one
+ * open, nothing built) walk the same branch with `fork-point.ts`: the session id, the leaf, the parent
+ * the listing resolves (#433), then the recorded model and level (#434), the last mode, the cwd and
+ * the latest `enso-run-context` the harness's `run-context` extension wrote.
+ *
+ * ⚠⚠ CONTINUE RUNS ON pi'S PRIVATE RUN LIFECYCLE (#436). `continueRun` resumes a torn thread from
+ * exactly its stored state — no new user message — by calling `AgentSession._runAgentPrompt(lead)`
+ * (`agent-session.js:1380`, `private` in `agent-session.d.ts:520`, an ordinary method at run time)
+ * through ONE cast (`PiRunLifecycle`). pi (1.1.0) has no public continue that runs inside that
+ * lifecycle, and the lifecycle is what makes it a run: `session.agent.continue()` alone persists the
+ * reply and fires the guards, but never emits `agent_settled` (the route releases the lease on
+ * `settled`, so the thread would stay busy), leaves `isStreaming` false (a prompt enqueued during it
+ * would be accepted and lost), skips auto-retry, and lets `abort()` resolve before the run stopped.
+ * `_runAgentPrompt` is what `prompt()` itself ends in (`:1331`). Whether the tail CAN be continued is
+ * decided here, not by pi (`continuation.ts`): the lifecycle would answer a completed reply again. The
+ * accepted differences from a prompt: no `input` or `before_agent_start` for the continued turn — so
+ * no permission-mode reminder and no pi-multi-account last-moment account preflight (the harness's
+ * `enso-run-context` IS re-checked, from `agent_start`, #445); no auth preflight (missing credentials
+ * become a stored error reply, and the run settles); no pre-prompt compaction check (the post-run one
+ * still runs); and the first request reuses the system prompt the transcript holds.
+ * `agent-host.test.ts` pins the lifecycle through the real host and pi's faux provider, so a pi bump
+ * that renames or reshapes the method is a red test. The cast leaves when pi ships a public
+ * `AgentSession.continue()`.
+ */
+
+const log = ensoLogger('host')
+
+/**
+ * The host's own extension (see the module header): named so `loadedExtensionPaths` says what
+ * it is, and exported so the load receipt's pin can name it beside the manifest's entries.
+ */
+const MODEL_WATCH_EXTENSION_NAME = 'enso-model-watch'
+
+export const MODEL_WATCH_EXTENSION_PATH = `<inline:${MODEL_WATCH_EXTENSION_NAME}>`
+
+/**
+ * pi's stand-in when no model could be chosen — `@earendil-works/pi-agent-core`
+ * `dist/agent.js:18` `DEFAULT_MODEL`, substituted by `createMutableAgentState` (:40) so
+ * `AgentSession.model` is typed optional but never is. Every model pi actually selects
+ * (`findInitialModel` in `dist/core/sdk.js:104`, `setModel`) is a registered, authenticated one;
+ * the placeholder means "none", and the seam says `null` for it (#338 slice 2).
+ */
+const PLACEHOLDER_MODEL = { provider: 'unknown', id: 'unknown' }
+
+/** pi's `InputSource` for prompts that arrive over a wire rather than a keyboard. */
+const PROMPT_SOURCE_RPC = 'rpc'
+
+/**
+ * Enso's admission word → pi's `streamingBehavior` literal (#216). THE ONLY PLACE the vendor's
+ * spelling is produced on the prompt path: the wire, the route, the registry and the browser
+ * all speak `interrupt`/`enqueue`, and a runtime that names its two differently is this table
+ * and nothing else. A third admission is a literal in `@enso/core` and a row here.
+ *
+ * ⚠ The value type is pi's own (`PromptOptions['streamingBehavior']`), never restated: pi
+ * renaming or widening its literals is then a compile error in this table, which is the one
+ * place that should care.
+ */
+const STREAMING_BEHAVIOR_OF: Record<EnsoPromptAdmission, NonNullable<PromptOptions['streamingBehavior']>> = {
+  interrupt: 'steer',
+  enqueue: 'followUp',
+}
+
+/** The `ExtensionMode` we bind — `ctx.mode` as extensions see it. rpc is the truthful one: no terminal, a remote surface. */
+const EXTENSION_MODE_RPC = 'rpc'
+
+/**
+ * The one member of pi's private run lifecycle `continueRun` calls (#436, module header): run the
+ * agent from `messages` with retry, compaction recovery, queued prompts and `agent_settled`.
+ */
+interface PiRunLifecycle {
+  _runAgentPrompt(messages: ContinuationLead): Promise<void>
+}
+
+/**
+ * A login while it runs (#388): whose, the page its flow announced (the code prompt links to it),
+ * and the end of its questions — see `runLogin`.
+ */
+interface LoginInProgress {
+  readonly providerName: string
+  authUrl: string | undefined
+  readonly questions: AbortController
+  /**
+   * Stop, for this login only (#348): aborting it ends the provider wait (a device-code poll, a
+   * browser callback). `flowsAbort` is the SESSION's and final; this one leaves the session be.
+   */
+  readonly cancel: AbortController
+}
+
+/**
+ * What pi's session for one hosted thread actually contains, read straight off its log (#86).
+ *
+ * Everything a run shows the browser is derived from the event stream; this is the source those
+ * views derive from, for a human or an agent to cross-check against.
+ */
+export interface HostedThreadInspection {
+  readonly sessionId: string
+  readonly cwd: string
+  readonly sessionDir: string
+  /** The session file once pi has flushed it; null while the session lives only in memory. */
+  readonly sessionFile: string | null
+  /**
+   * The branch, root to leaf, as the transcript of ours (L2): the runtime's entry shapes stay in
+   * `transcript.ts`. Built when READ (#739), each read a fresh build: an inspection for the cwd
+   * pays nothing for it.
+   */
+  readonly entries: readonly EnsoTranscriptEntry[]
+  /** Slash commands this session registers. */
+  readonly commands: readonly string[]
+  /** The name a person gave the thread (#670): pi's newest `session_info`; `undefined` when none. */
+  readonly name: string | undefined
+}
+
+export interface HostedThread {
+  readonly runtime: ThreadRuntime
+  /** How many extensions the loader found — the load receipt a caller may assert. */
+  readonly loadedExtensionPaths: readonly string[]
+  /**
+   * Read-only view of the session as pi holds it. Deliberately here and NOT on
+   * `ThreadRuntime`: that is the run contract, pinned by the one fake and the refusal-path
+   * tests, and inspection is a host concern.
+   */
+  inspect(): HostedThreadInspection
+  /** The emitted tail (#97): what the host's `emit` funnel saw, with provenance. A fresh copy per call. */
+  emittedEvents(): EnsoThreadEvent[]
+  /** The branch analysed (#45 phase 2): per request, per turn, per tool, off pi's own entries. */
+  branchStats(): BranchStats
+  /** The branch as the session eval reads it (#441): the transcript and the turns' usage. */
+  branchEval(): BranchEval
+  /** The branch's incident history (#468): records, their entries as stored, and a replay under `thresholds`. */
+  branchIncidentHistory(thresholds: EnsoRiskThresholds): BranchIncidentHistory
+  /** The branch's judge cases (#469): each call the judge would be asked about, and its redacted state. */
+  branchJudgeCases(thresholds: EnsoRiskThresholds): BranchJudgeCases
+  /** The branch's context, request by request (#361): what each was assembled from, by pi's own assembly. */
+  branchContext(): BranchContext
+  /**
+   * The system prompt the next request would carry under `candidate` — pi's default for `null` —
+   * section by section (#443). Changes nothing: the thread keeps its own choice. `busy` while a run
+   * is in flight; `unsplittable` when pi's rendering does not split back into itself.
+   */
+  previewSystemPrompt(candidate: EnsoSystemPromptChoice | null): SystemPromptPreviewOutcome
+  /** One request's context, element by element (#361 phase 3); undefined for a turn the branch does not have. */
+  branchRequestDetail(request: number | 'next'): BranchRequestDetail | undefined
+  /** The branch's fork point (#435): identity, then what it runs under — the manifest's live half. */
+  forkPoint(): Promise<EnsoForkPoint>
+  /**
+   * What the loaded extensions would say about a tool call, through the runtime's own hook
+   * runner — the verdict a model's call would meet, without a model. Inspection, like the
+   * rest of this interface: the guards' contract is pinned in their own suite against a
+   * hand-built ExtensionAPI; this is the one place the REAL runner, the real load order and
+   * the real participants are asked together (docs/flows/guarded-tool-call.md, stated gap).
+   * Runs no tool: a pass here is the hook's silence, not an execution.
+   */
+  probeToolCall(toolName: string, input: Record<string, unknown>): Promise<ToolCallVerdict | undefined>
+  /**
+   * The permission engine's own verdict for a value on a surface, in this thread's mode NOW (#474):
+   * what a call carrying it would meet, the pattern that decided it and where that rule came from
+   * (`global`, the user's file; `agent`, the mode's preset). Asked of the engine the session runs —
+   * never a second matcher. `undefined` when the engine has published no service for the session.
+   */
+  checkPermission(request: EnsoPermissionCheckRequest): EnsoPermissionVerdict | undefined
+  /**
+   * The project this session answers to, and whether it reads that project's own configuration NOW
+   * (#502): pi's `trust.json`, the thread's "Trust this thread" record, or the default — and true
+   * after a Trust answered in this session. What the project's own prompt library is read from and
+   * gated on (#470). ⚠ The PROJECT, not the cwd: a thread on a tree (#551) answers with its checkout.
+   */
+  projectTrust(): ProjectTrustState
+}
+
+/**
+ * A project's trust as a thread sees it (#470): the project's directory — a tree's checkout (#551),
+ * else the session's cwd — and whether the thread reads that project's own configuration.
+ */
+export interface ProjectTrustState {
+  readonly directory: string
+  readonly trusted: boolean
+}
+
+/**
+ * The `/login` facts pi's model runtime knows about each provider — a session's, or the
+ * catalogue's over the agent dir alone (#484); one reading, so the two lists cannot drift.
+ */
+export function loginFactsOf(modelRuntime: ModelRuntime): LoginProviderFacts[] {
+  return modelRuntime.getProviders().map((provider) => {
+    const status = modelRuntime.getProviderAuthStatus(provider.id)
+    return {
+      id: provider.id,
+      name: provider.name,
+      offersOAuth: provider.auth.oauth !== undefined,
+      offersApiKeyLogin: provider.auth.apiKey?.login !== undefined,
+      configuredVia: status.configured ? (status.label ?? status.source) : undefined,
+    }
+  })
+}
+
+/** A refusal from the `tool_call` hook, as the runtime's runner returns it — nothing when every handler passed. */
+export interface ToolCallVerdict {
+  readonly block: boolean
+  readonly reason: string | undefined
+}
+
+/** What a preview answers (#443): the preview, or why there is none. */
+export type SystemPromptPreviewOutcome =
+  | { readonly kind: 'preview'; readonly preview: EnsoSystemPromptPreview }
+  | { readonly kind: 'busy' }
+  | { readonly kind: 'unsplittable' }
+
+/**
+ * Stop: tell the runtime, then settle every pending question WHILE it stops, then wait for it.
+ *
+ * @invariant dialog-ask-answer-settled/stop-stops Stop stops: the run's abort settles every pending dialog as `aborted`.
+ * The runtime is told FIRST so its loop holds the abort signal when a blocked `tool_call` handler returns
+ * (a permission prompt): pi's `abort()` raises it synchronously, before its first `await`
+ * (`agent-session.js` `abort` → `agent.abort()`). Then, while the runtime winds down, `abortAllDialogs()`
+ * resolves each pending question to its cancel value with the glossary's outcome for exactly this,
+ * `aborted`, and every follower hears `dialog-settled`; `refuseDialogsUntil` answers any question asked
+ * before the stop finishes with its cancel value, showing nothing (ask_user's multi-select asks the next
+ * option). Never only after the abort resolves: a question from a tool's `execute` (ask_user) holds the
+ * run, pi's `abort()` waits for idle, and such a stop waited on the card for ever (#376 review). Before
+ * 2026-09-16 the host settled nothing on abort, and the vendor's permission prompt passes no signal of its
+ * own, so Stop during it waited on a human (decided, Daniel: if the user says stop, it's stop).
+ *
+ * A stop must stop (thread-registry.test.ts's rule, one layer down): the dialogs settle even if the
+ * runtime's abort rejects; the rejection still propagates, the cards still drop. Exported so that path
+ * is pinned against a stop that rejects, which the real runtime's is not made to do.
+ */
+export async function stopRunSettlingDialogs(
+  stopRuntime: () => Promise<void>,
+  settleDialogs: (stopping: Promise<void>) => void,
+): Promise<void> {
+  const stopping = stopRuntime()
+  settleDialogs(stopping)
+  await stopping
+}
+
+/** `RuntimeCommand` with `description` present only when pi supplied one (`exactOptionalPropertyTypes`). */
+function describeCommand(
+  name: string,
+  source: RuntimeCommand['source'],
+  description: string | undefined,
+): RuntimeCommand {
+  return description === undefined ? { name, source } : { name, source, description }
+}
+
+/** The mode one appended entry records, if it is an `active_agent` entry naming one. */
+function appendedMode(entry: unknown): EnsoPermissionModeName | undefined {
+  const record = transcriptEntryOf(entry, 0)
+  return record.kind === 'custom' ? readRecordedMode(record.customType, record.data) : undefined
+}
+
+/** What building a live thread reads from the host (#801). */
+export interface HostedThreadHost {
+  readonly agentDir: string
+  readonly harnessPackageDir: string
+  /** Test seam: inline extensions loaded beside the harness (`AgentHostOptions.extensionFactories`). */
+  readonly extensionFactories: readonly InlineExtension[]
+  /** The models a thread with no session is offered (#688): each bound session's list becomes it. */
+  readonly catalogueModels: ReturnType<typeof sessionModels>
+  /** The log of each thread built here (#551): a build registers its own, a dispose drops it. */
+  readonly liveLogs: Map<string, ThreadLog>
+  readonly deletingThreads: ReadonlySet<string>
+  readonly deletedThreads: ReadonlySet<string>
+  readonly restoringTrees: ReadonlySet<string>
+  readonly judgeCaseInputs: StoredThreads['judgeCaseInputs']
+  readonly locate: StoredThreads['locate']
+  readonly prepareTreeOnTrust: TreeMaking['prepareTreeOnTrust']
+}
+
+/** pi built on `threadLog` — a thread's whole session, events flowing, extensions bound. */
+export async function buildHostedThread(
+  threadId: string,
+  threadLog: ThreadLog,
+  host: HostedThreadHost,
+): Promise<HostedThread> {
+  const {
+    agentDir,
+    harnessPackageDir,
+    extensionFactories,
+    catalogueModels,
+    liveLogs,
+    deletingThreads,
+    deletedThreads,
+    restoringTrees,
+    judgeCaseInputs,
+    locate,
+    prepareTreeOnTrust,
+  } = host
+  const { cwd } = threadLog
+  liveLogs.set(threadId, threadLog)
+  // The thread's system prompt (#443): the one its branch recorded, else pi's default until a
+  // Start chooses one (`setSystemPrompt` below). An entry that does not read refuses the build —
+  // never pi's default in its place, which would rewrite the prompt the thread started with. Read
+  // BEFORE the services, as the directory is: a thread refused builds nothing.
+  const recorded = recordedSystemPrompt(threadLog.transcript())
+  if (recorded.kind === 'unreadable') {
+    throw new Error(`thread ${threadId}: its ${ENSO_SYSTEM_PROMPT_ENTRY} entry does not read as a system prompt`)
+  }
+  let systemPrompt: EnsoSystemPromptChoice | undefined = recorded.kind === 'chosen' ? recorded.choice : undefined
+  // The watcher's handler is bound after the session exists (`announceModelState` below);
+  // `model_select` cannot fire before it — only the session's own methods emit it.
+  let onModelSelect = (): void => undefined
+  // The host's own hold on pi's extension API (#466): a resolution is appended through it, so pi
+  // emits `entry_appended` and every follower folds the record live, and emitted on its event bus,
+  // where the guard listens. Re-set on each load — a reload (`trustGate`) binds a new API.
+  let hostApi: ExtensionAPI | undefined
+  const modelWatch: InlineExtension = {
+    name: MODEL_WATCH_EXTENSION_NAME,
+    factory: (pi: ExtensionAPI): void => {
+      hostApi = pi
+      pi.on('model_select', () => onModelSelect())
+    },
+  }
+  // Where each permission card stands among its call's questions (#728), asked of this session's engine.
+  const callQuestions = createPermissionCallQuestions(
+    (surface, value, agentName) =>
+      getPermissionsService(threadLog.threadId)?.checkPermission(surface, value, agentName).state,
+  )
+  // Trust before anything loads (#502): pi's `trust.json`, the thread's own record, the default —
+  // else untrusted, and asked before the first run (`trustGate` below). ⚠ Keyed by the PROJECT: a
+  // thread on a tree (#551) is trusted as its checkout is, never as a path no one trusted.
+  const trustDirectory = treeRecordOf(threadLog.transcript())?.project ?? cwd
+  const projectTrust = hostedProjectTrust(cwd, trustDirectory, agentDir, threadLog.transcript())
+  const services = await createAgentSessionServices({
+    cwd,
+    agentDir,
+    settingsManager: projectTrust.settingsManager,
+    resourceLoaderOptions: {
+      // The isolation triple `scripts/enso.ts` documents, expressed as loader options:
+      // no discovery (`--no-extensions`), no ~/.agents skills (`--no-skills`), and the
+      // harness package as the one extension source (`-e <dir>` — pi resolves a
+      // directory's `pi` manifest for extensions, skills, prompts AND themes). Inline
+      // extensions load after the manifest's: the host's watcher, its restore note (#652) and
+      // its ear for the engine's questions (#728) first, then any probes.
+      noExtensions: true,
+      noSkills: true,
+      additionalExtensionPaths: [harnessPackageDir],
+      extensionFactories: [modelWatch, restoreNoteExtension, callQuestions.extension, ...extensionFactories],
+      // Who said a notice (#387): each extension's registrations get a context whose
+      // `ui.notify` names that extension, read off the path pi loaded it from.
+      extensionsOverride: (loaded) => attributeNotices(loaded, harnessPackageDir),
+    },
+  })
+  for (const diagnostic of services.diagnostics) {
+    log.warn('pi {type}: {message}', { threadId, type: diagnostic.type, message: diagnostic.message })
+  }
+  const extensionsResult = services.resourceLoader.getExtensions()
+  log.debug('pi extensions loaded: {count}', {
+    threadId,
+    count: extensionsResult.extensions.length,
+    paths: extensionsResult.extensions.map((extension) => extension.path),
+  })
+  for (const loadError of extensionsResult.errors) {
+    // pi does not throw on a resource that fails to load; the failure would otherwise be
+    // silent and the symptom unrelated (the vendor-links incident, `server/index.ts`).
+    log.error('pi extension failed to load: {path}: {error}', {
+      threadId,
+      path: loadError.path,
+      error: loadError.error,
+    })
+  }
+
+  const { session } = await createAgentSessionFromServices({
+    services: { ...services, resourceLoader: withSystemPrompt(services.resourceLoader, () => systemPrompt) },
+    sessionManager: runtimeLogOf(threadLog),
+    ...selectionBeforeFirstMessage(threadLog, services.modelRuntime),
+  })
+
+  // ── The event fan-out. Subscribers receive OBSERVATIONS (L2, #162 workstream 4): the
+  // runtime's event is mapped here, at delivery, and its shape never leaves the host. The
+  // emitted tail (#97) records every event through this funnel with HOW it was delivered,
+  // at the one place all of them pass, so the record and the delivery cannot disagree.
+  const listeners = new Set<(observation: EnsoObservation) => void>()
+  const heldUntilFirstSubscriber: RuntimeEvent[] = []
+  let hasHadSubscriber = false
+  const emitted = createEventTail()
+  /**
+   * @invariant follow-snapshot-frames/held-until-first-subscriber Held until the first subscriber; never held after.
+   * Records emitted before the FIRST subscriber (what an extension says during session_start: multi-account's
+   * startup notify, a dialog a probe opens, an extension's `session_start` entry) are held and replayed to it with origin
+   * `session-start`, so the browser sees them exactly as it saw pi's startup stdout over the pipe; the replay is
+   * recorded again, as `replayed`, when it actually reaches a subscriber (see `subscribe`).
+   *
+   * Never between runs: the session lives across runs (#69 PR 2) and each run subscribes its own pump, so holding
+   * would replay an aborted run's `agent_settled` into the NEXT run's pump and end it before its first token (the
+   * disconnect-then-prompt race). Once a subscriber has existed, an event with nobody listening is `dropped`, not
+   * queued for the next one, like status heartbeats with no rpc client reading the pipe. That closed #88 (an entry
+   * emitted to nobody) without reopening #69 (a settle replayed into the next run's pump).
+   */
+  function emit(event: RuntimeEvent): void {
+    if (listeners.size === 0) {
+      if (!hasHadSubscriber) {
+        heldUntilFirstSubscriber.push(event)
+        // Described as the observation it will become when replayed.
+        const described = describeObservation(mapPiEvent(event, 'replayed'))
+        emitted.record(described.type, described.name, 'held')
+        return
+      }
+      const described = describeObservation(mapPiEvent(event, 'live'))
+      emitted.record(described.type, described.name, 'dropped')
+      return
+    }
+    const observation = mapPiEvent(event, 'live')
+    const described = describeObservation(observation)
+    emitted.record(described.type, described.name, 'live')
+    for (const listener of listeners) listener(observation)
+  }
+
+  const ui = createEnsoExtensionUiContext({
+    emit,
+    threadId,
+    selectTitle: callQuestions.selectTitle,
+  })
+
+  // The open trust decision, asked before a run (#502). A Trust is recorded where its answer says —
+  // pi's `trust.json` for the project, the thread's branch for the thread — then applied to pi and
+  // the session reloaded, so the engine binds the project's rules and modes before the run starts.
+  const trustGate = createTrustGate({
+    open: projectTrust.open,
+    // The project the answer is stored for (#551): a tree's own path is not a place the user knows.
+    ask: () => ui.uiContext.select(projectTrustQuestion(trustDirectory), [...PROJECT_TRUST_OPTIONS]),
+    apply: async (answer) => {
+      if (answer === 'untrusted') return
+      if (answer === 'project') new ProjectTrustStore(agentDir).set(trustDirectory, true)
+      else threadLog.record(ENSO_PROJECT_TRUST_ENTRY, THREAD_PROJECT_TRUST)
+      projectTrust.settingsManager.setProjectTrusted(true)
+      // "Trust this thread" trusts no project: a project's setup is read under the project's own answer.
+      if (answer === 'project') await prepareTreeOnTrust(threadId, threadLog)
+      await session.reload()
+      ui.notifyFrom(ENSO_SENDER, projectTrustedNotice(answer), 'info')
+    },
+  })
+
+  // ⚠ SUBSCRIBE BEFORE BINDING (#88). Extensions persist state during `session_start` — any
+  // `pi.appendEntry` there — and pi emits `entry_appended` to whoever
+  // is listening at that moment. Subscribing after `bindExtensions` returned meant those
+  // entries went to nobody: the held-until-first-subscriber buffer sits behind THIS
+  // subscription, so nothing put them in it, and the browser saw one entry where
+  // the branch had two. The `ui` notifies always crossed because `ui` binds `emit` directly.
+  // Nothing session_start emits is run progress (`agent_settled` comes from the run loop
+  // only), so replaying it into the first run's pump is inert.
+  /**
+   * The mode NOW (#84, #496): the last `active_agent` entry among the session's ENTRIES, the
+   * walk the permission engine itself makes, re-run on every call (see the adapter).
+   * The dropdown offers the modes AS REGISTERED HERE: the permission-modes extension names
+   * one command per mode, exactly after it, so the intersection is a name lookup. Read off
+   * the registry directly rather than through `listCommands` — that call's count is a
+   * contract the refusal path's tests pin, and this is not a refusal lookup.
+   */
+  function currentPermissionModeState(): EnsoPermissionModeState {
+    const registered = new Set(session.extensionRunner.getRegisteredCommands().map((command) => command.invocationName))
+    return livePermissionModeState(threadLog.everyEntry(), registered)
+  }
+
+  /**
+   * The model and thinking level NOW (#338 slice 2), read off pi's agent state on every call:
+   * `model` is `null` for pi's placeholder (see `PLACEHOLDER_MODEL`), the levels are what the
+   * current model offers (`getAvailableThinkingLevels` — pi's whole list when there is no model).
+   */
+  function currentModelState(): EnsoModelState {
+    const { model } = session
+    const chosen =
+      model === undefined || (model.provider === PLACEHOLDER_MODEL.provider && model.id === PLACEHOLDER_MODEL.id)
+        ? null
+        : { provider: model.provider, id: model.id, name: model.name }
+    return {
+      model: chosen,
+      thinkingLevel: session.thinkingLevel,
+      availableThinkingLevels: session.getAvailableThinkingLevels(),
+    }
+  }
+
+  /**
+   * Say the session's totals and context as the host's own event (#45), ONCE per change — pi's
+   * `getSessionStats`, whole, never a delta, so a follower applies the latest and cannot
+   * double-count. Said after each event `growsSessionSpend` names (`session-usage.ts` says why
+   * those and not `message_end`), and on a model change.
+   *
+   * ⚠ DECLARED ABOVE `announceModelState`, which calls it: `announcedSessionUsage` is a `let`, and
+   * a call that ran before this line would throw (PR #357 review).
+   */
+  let announcedSessionUsage: string | undefined
+  function announceSessionUsage(): void {
+    const usage = liveSessionUsage(session.getSessionStats())
+    const serialized = JSON.stringify(usage)
+    if (serialized === announcedSessionUsage) return
+    announcedSessionUsage = serialized
+    emit({ type: 'session_usage', ...usage })
+  }
+
+  /**
+   * Say the model state as the host's own event, ONCE per change. A `/model` reaches here up to
+   * three times — `thinking_level_changed` when the new model clamps the level, `model_select`,
+   * and the command's own call — and every arrival reads the same state; the feed hears one.
+   */
+  let announcedModelState: string | undefined
+  function announceModelState(): void {
+    const state = currentModelState()
+    const serialized = JSON.stringify(state)
+    if (serialized === announcedModelState) return
+    announcedModelState = serialized
+    emit({ type: 'model', ...state })
+    // A new model is a new context window: the usage's `context` moved with it.
+    announceSessionUsage()
+  }
+  onModelSelect = announceModelState
+
+  // ── The flows (#338 slice 3; `host-flows.ts` has the decisions and the words) ──────────
+  //
+  // ⚠ `listCommands` is synchronous and `listCredentials` is not (the credential store may be a
+  // file), so the stored credentials are a CACHE: read once the session is built, re-read after
+  // every flow the host itself ran. A credential saved by another process shows up at the next
+  // build, not before — said here so nobody debugs it as a bug.
+  let storedCredentials: readonly StoredCredentialFacts[] = []
+  // Every flow runs under this signal; `dispose` aborts it, so a device-code poll does not
+  // outlive the session it was logging in (the lease is not held — see `startHostFlow`).
+  const flowsAbort = new AbortController()
+  // ONE flow at a time per session (PR #346 review): two logins on one feed would interleave
+  // their questions with nothing to tell a reader which is which. The second is refused.
+  let flowInProgress: string | undefined
+  // The login waiting on its provider, if one is (#348): what `loginInProgress` says and
+  // `cancelLogin` ends. Set only between the flow's start and pi storing the credential.
+  let waitingLogin: LoginInProgress | undefined
+  const providerNameOf = (providerId: string): string =>
+    session.modelRuntime.getProvider(providerId)?.name ?? providerId
+  async function refreshStoredCredentials(): Promise<void> {
+    try {
+      const listed = await session.modelRuntime.listCredentials({ signal: AbortSignal.timeout(15_000) })
+      storedCredentials = listed.map((credential) => ({
+        providerId: credential.providerId,
+        providerName: providerNameOf(credential.providerId),
+        type: credential.type,
+      }))
+    } catch (error) {
+      log.warn('stored credentials could not be listed: {error}', { threadId, error })
+    }
+  }
+  void refreshStoredCredentials()
+
+  function currentLoginOptions(): ReturnType<typeof loginOptions> {
+    return loginOptions(loginFactsOf(session.modelRuntime))
+  }
+
+  /**
+   * pi asks; the browser answers through the dialog seam. A `secret` is masked (the host's own
+   * `askHostInput`); a `select` crosses as labels and comes back as the chosen option's id; a
+   * `manual_code` is asked in our words, with the login page the flow announced as a link on the
+   * card (#388: nothing opens a browser from here, and pi's own words never said the paste is
+   * the fallback); `text` is a plain input. No answer — cancelled, aborted — is pi's own "Login
+   * cancelled", which the flow reports as a cancellation, not a failure.
+   */
+  async function askAuthPrompt(
+    prompt: Parameters<Parameters<typeof session.modelRuntime.login>[2]['prompt']>[0],
+    login: LoginInProgress,
+  ): Promise<string> {
+    // pi's own signal when it passed one, AND the login's: a question outlives neither (#389).
+    const signal =
+      prompt.signal === undefined ? login.questions.signal : AbortSignal.any([prompt.signal, login.questions.signal])
+    let answer: string | undefined
+    switch (prompt.type) {
+      case 'secret':
+        answer = await ui.askHostInput(
+          {
+            title: prompt.message,
+            secret: true,
+            ...(prompt.placeholder === undefined ? {} : { placeholder: prompt.placeholder }),
+          },
+          signal,
+        )
+        break
+      case 'manual_code':
+        answer = await ui.askHostInput(loginCodeQuestion(login.providerName, login.authUrl, prompt.placeholder), signal)
+        break
+      case 'select': {
+        const labels = prompt.options.map((option) => option.label)
+        const chosen = await ui.uiContext.select(prompt.message, labels, signal === undefined ? undefined : { signal })
+        answer = prompt.options.find((option) => option.label === chosen)?.id
+        break
+      }
+      default:
+        answer = await ui.uiContext.input(
+          prompt.message,
+          prompt.placeholder,
+          signal === undefined ? undefined : { signal },
+        )
+    }
+    if (answer === undefined) throw new FlowCancelled()
+    return answer
+  }
+
+  /**
+   * After a login: when the session had no model, the provider's first available one — pi's
+   * TUI picks its own per-provider default from a table it does not export; the first is
+   * honest and `/model` is one keystroke away. Then the catalog refresh pi's TUI also runs.
+   */
+  async function settleAfterLogin(providerId: string): Promise<string | undefined> {
+    let selected: string | undefined
+    if (currentModelState().model === null) {
+      const candidate = session.modelRuntime.getAvailableSnapshot().find((model) => model.provider === providerId)
+      if (candidate !== undefined) {
+        await session.setModel(candidate, { persist: true })
+        selected = candidate.id
+      }
+    }
+    const refresh = await session.modelRuntime.refresh({
+      providers: [providerId],
+      signal: AbortSignal.timeout(15_000),
+    })
+    if (refresh.aborted || refresh.errors.size > 0) {
+      ui.notifyFrom(ENSO_SENDER, 'Model catalog could not be refreshed; using cached models.', 'warning')
+    }
+    return selected
+  }
+
+  async function runLogin(providerId: string, authType: HostAuthType): Promise<void> {
+    const providerName = providerNameOf(providerId)
+    // The page the flow announces (`auth_url`) is remembered for the code prompt that follows it.
+    // ⚠ A LOGIN'S QUESTIONS END WITH IT (#389). A browser login races its local callback server
+    // against the pasted code; when the callback wins, pi withdraws the code prompt through the
+    // prompt's signal — but an extension provider's prompt carries none: pi-multi-account's
+    // bridge drops it (`index.ts:263-264`) and pi's composer asks with none
+    // (`provider-composer.js:173`). The login finished and its card stayed open, "a question is
+    // waiting". So every question is tied to the login too, and withdrawn once it settles.
+    const login: LoginInProgress = {
+      providerName,
+      authUrl: undefined,
+      questions: new AbortController(),
+      cancel: new AbortController(),
+    }
+    // ⚠ WAITING IS WHAT STOP CAN END (#348): from here until pi stores the credential. A login
+    // holds no lease, so this — the `login` event, and `loginInProgress` for a snapshot — is how
+    // a page knows there is something to stop. Said once each way; the second end is a no-op.
+    waitingLogin = login
+    emit({ type: 'login', provider: providerName, waiting: true })
+    const endWaiting = (): void => {
+      if (waitingLogin !== login) return
+      waitingLogin = undefined
+      emit({ type: 'login', provider: providerName, waiting: false })
+    }
+    try {
+      await session.modelRuntime.login(providerId, authType, {
+        signal: AbortSignal.any([flowsAbort.signal, login.cancel.signal]),
+        prompt: (prompt: Parameters<typeof askAuthPrompt>[0]): Promise<string> => askAuthPrompt(prompt, login),
+        notify: (event: HostAuthEvent): void => {
+          if (event.type === 'auth_url') login.authUrl = event.url
+          ui.notifyFrom(ENSO_SENDER, authEventText(event, providerName), 'info')
+        },
+      })
+      // The credential is stored: the card goes now, not after the catalog refresh below, and
+      // there is nothing left for Stop to end.
+      login.questions.abort()
+      endWaiting()
+      // The credential IS stored past this line (PR #346 review): what follows can fail —
+      // pi refusing the model, the catalog not refreshing — and is said as a warning, never
+      // as a failed login that `/logout` would then contradict by listing the credential.
+      try {
+        const selected = await settleAfterLogin(providerId)
+        ui.notifyFrom(ENSO_SENDER, loginDoneText(providerName, authType, selected), 'info')
+      } catch (error) {
+        // Said ONCE, and neutrally: the throw may be the catalog refresh after the model was
+        // selected, so "could not select a model" would be wrong (PR #346 review 3).
+        const reason = error instanceof Error ? error.message : String(error)
+        ui.notifyFrom(ENSO_SENDER, `Logged in to ${providerName}; post-login setup failed: ${reason}`, 'warning')
+      }
+    } catch (error) {
+      // Stop's cancel is known by ITS signal, whatever sentence pi's provider throws for it.
+      if (login.cancel.signal.aborted || isFlowCancelled(error)) {
+        ui.notifyFrom(ENSO_SENDER, `Login to ${providerName} cancelled.`, 'info')
+      } else {
+        const reason = error instanceof Error ? error.message : String(error)
+        ui.notifyFrom(ENSO_SENDER, `Failed to log in to ${providerName}: ${reason}`, 'error')
+      }
+    } finally {
+      login.questions.abort()
+      endWaiting()
+      await refreshStoredCredentials()
+      announceModelState()
+    }
+  }
+
+  /**
+   * `/compact` (#338 slice 4): pi summarises the context — a model call, seconds to a minute —
+   * so it starts and is followed like a login, but the route HOLDS THE LEASE until it settles:
+   * compaction rewrites the branch, pi refuses a prompt while it runs (`agent-session.js:1227`),
+   * and `compact()` awaits `abort()` before it arms its own guard (:1866–1867), so a prompt in
+   * that window would run alongside the summary — the held lease is what forecloses it (PR #347
+   * review). Stop reaches it: `abort` below calls `abortCompaction`, and pi's own `dispose`
+   * does too (:587). The page's transcript is TanStack's copy of the messages; pi's
+   * `compaction_end` becomes `branch-compacted` (#348), and the pane re-reads the branch once
+   * the thread is idle.
+   */
+  async function runCompact(): Promise<void> {
+    ui.notifyFrom(ENSO_SENDER, 'Compacting the context…', 'info')
+    try {
+      const compacted = await session.compact()
+      ui.notifyFrom(ENSO_SENDER, compactDoneText(compacted.tokensBefore, compacted.estimatedTokensAfter), 'info')
+    } catch (error) {
+      // pi's refusals ("Nothing to compact (session too small)", smoke 2026-09-23) are not
+      // failures: said as a warning with pi's reason. Anything else is (PR #347 review).
+      const reason = error instanceof Error ? error.message : String(error)
+      if (isCompactionRefusal(error)) ui.notifyFrom(ENSO_SENDER, `Compaction did not run: ${reason}`, 'warning')
+      else ui.notifyFrom(ENSO_SENDER, `Compaction failed: ${reason}`, 'error')
+    }
+  }
+
+  function runDecidedFlow(decision: ReturnType<typeof decideHostFlow>): Promise<void> {
+    switch (decision.kind) {
+      case 'login':
+        return runLogin(decision.providerId, decision.authType)
+      case 'logout':
+        return runLogout(decision.providerId)
+      case 'compact':
+        return runCompact()
+    }
+  }
+
+  async function runLogout(providerId: string): Promise<void> {
+    const providerName = providerNameOf(providerId)
+    const type = storedCredentials.find((credential) => credential.providerId === providerId)?.type
+    try {
+      await session.modelRuntime.logout(providerId, { signal: AbortSignal.timeout(15_000) })
+      ui.notifyFrom(ENSO_SENDER, logoutDoneText(providerName, type), 'info')
+    } catch (error) {
+      ui.notifyFrom(
+        ENSO_SENDER,
+        `Logout from ${providerName} failed: ${error instanceof Error ? error.message : String(error)}`,
+        'error',
+      )
+    } finally {
+      await refreshStoredCredentials()
+      announceModelState()
+    }
+  }
+
+  const unsubscribeSession = session.subscribe((event) => {
+    try {
+      const wire = toRpcWireEvent(event)
+      emit(wire)
+      // L3 (#162 workstream 4): an `active_agent` entry was appended — a mode was set (#496).
+      // Above this seam no surface knows that entry's shape, so the host says what the mode is
+      // now, as its own event; the mapper carries it as the `permission-mode` observation.
+      if (wire.type === 'entry_appended' && appendedMode(wire.entry) !== undefined) {
+        emit({ type: 'permission_mode', ...currentPermissionModeState() })
+      }
+      // The thinking half of the model state — the module header says why the model half
+      // arrives through the watcher extension instead.
+      if (wire.type === 'thinking_level_changed') announceModelState()
+      // A run the operator stopped (#766) is recorded where a re-read finds it: one entry per
+      // stop, appended through the host's extension API so pi also emits `entry_appended` and
+      // every follower says it live. pi skips `custom` entries in context: the model never sees it.
+      if (event.type === 'agent_settled' && event.aborted) hostApi?.appendEntry(ENSO_RUN_STOPPED_ENTRY, {})
+      // #340: the provider refused the request — said beside the failed message's own
+      // `message_end`, which stays the accounting boundary it always was.
+      // The provider named as a reader knows it (#387): the session's own catalogue first — an
+      // extension may have registered the provider — then pi's built-in one.
+      const refusal = providerRefusalOf(
+        event,
+        (providerId) => session.modelRuntime.getProvider(providerId)?.name ?? builtinProviderName(providerId),
+      )
+      if (refusal !== undefined) emit({ type: 'provider_refused', ...refusal })
+      if (growsSessionSpend(event)) announceSessionUsage()
+    } catch (error) {
+      log.error('a session event could not be emitted: {error}', { threadId, error })
+    }
+  })
+
+  // Bound ONCE — see the module header. Errors thrown by an extension handler arrive here
+  // (spike receipt: a throwing session_start is routed to onError and bindExtensions
+  // resolves; it neither hangs nor rejects), and cross as the same `extension_error`
+  // record the rpc mode emitted.
+  await session.bindExtensions({
+    uiContext: ui.uiContext,
+    mode: EXTENSION_MODE_RPC,
+    onError: (error: ExtensionError) => {
+      emit({ type: 'extension_error', extensionPath: error.extensionPath, event: error.event, error: error.error })
+    },
+  })
+  // This session's runtime, its extensions' providers registered, is the catalogue's list now (#688).
+  catalogueModels.adopt(session.modelRuntime)
+  // The model the session STARTS with is on the feed too, not only later changes. It used to
+  // arrive by accident: pi-multi-account 1.21 re-applied its remembered model at `session_start`
+  // through `pi.setModel`, which fires `model_select`. From 1.22 it follows the session branch
+  // and calls nothing, so a fresh thread's chip read "default until the thread runs" after it
+  // had run (live check, 2026-09-23). Deduped, so an extension's own switch is not said twice.
+  announceModelState()
+
+  let disposed = false
+  function startPrompt(request: PromptRequest, outcome: PromptOutcome): void {
+    let accepted = false
+    // ⚠ Fire-and-forget, exactly as pi's rpc mode does: `prompt()` resolves only when
+    // the whole run finishes, and awaiting it in front of the drain loop is the
+    // original `/mode` hang. Acceptance is the preflight callback; completion is `agent_settled`.
+    // @invariant prompt-run-settle/late-rejection-dropped A rejection after acceptance never reaches the feed.
+    // It is dropped here on purpose: pi's own rpc-mode handler does the same (dist/modes/rpc/rpc-mode.js,
+    // `case "prompt"`), and pi's `_runAgentPrompt` emits `agent_settled` from a `finally`, so the run
+    // still terminates; only the error text is lost. Model and tool errors never reach this path: the
+    // agent loop turns them into an assistant message with `stopReason: "error"`, carried as usual.
+    // @unpinned no host test drives pi's preflight to success and then rejects the prompt.
+    void session
+      .prompt(request.message, {
+        ...(request.images === undefined ? {} : { images: [...request.images] }),
+        ...(request.admission === undefined ? {} : { streamingBehavior: STREAMING_BEHAVIOR_OF[request.admission] }),
+        source: PROMPT_SOURCE_RPC,
+        // pi ≥ 0.99 calls this only for an ACCEPTED prompt, with how it was dispatched
+        // (`started`, `queued` or `handled`); a rejected one never calls it and rejects below.
+        preflightResult: () => {
+          accepted = true
+          outcome.onAccepted()
+        },
+      })
+      .catch((error: unknown) => {
+        if (!accepted) outcome.onRejected(error instanceof Error ? error.message : String(error))
+      })
+  }
+
+  function startContinue(outcome: PromptOutcome): void {
+    // The run lifecycle's own two states a run cannot start in; the route's lease refuses a
+    // run it knows of first — this is the seam's lock. See the module header (#436).
+    if (session.isStreaming || session.isCompacting) {
+      outcome.onRejected('the thread is running; continue when it settles')
+      return
+    }
+    const lead = continuationLead(session.agent.state.messages)
+    if (lead === undefined) {
+      outcome.onRejected(NOTHING_TO_CONTINUE)
+      return
+    }
+    // ⚠⚠ The one cast onto pi's private run lifecycle — the module header says why. Checked
+    // BEFORE acceptance (PR #442 review): an `async` method can only fail synchronously by not
+    // being there, and a pi build without it must refuse, not answer 202 to a run that never starts.
+    const lifecycle = session as unknown as Partial<PiRunLifecycle>
+    if (typeof lifecycle._runAgentPrompt !== 'function') {
+      outcome.onRejected(NO_RUN_LIFECYCLE)
+      return
+    }
+    outcome.onAccepted()
+    void lifecycle._runAgentPrompt(lead).catch((error: unknown) => {
+      log.error('a continued run failed: {error}', { threadId, error })
+    })
+  }
+
+  /**
+   * Start a run, or refuse it: an ended thread (#466 decision 8) admits none — read off the branch
+   * at each call, since the ending is a record and a resume refuses the same way — and ⚠ is
+   * refused before the trust question, so it asks nothing either. Then the open trust decision
+   * (#502): the run waits on the question, never the reverse.
+   */
+  function admitRun(outcome: PromptOutcome, start: () => void): void {
+    const incidents = threadLog.incidents()
+    if (incidents.ended) {
+      const ending = incidents.incidents.at(-1)?.opened.incidentId
+      outcome.onRejected(
+        `incident ${ending}'s resolution ended thread ${threadId}; it admits no prompt — fork it to go on`,
+      )
+      return
+    }
+    // A delete holds the thread, or has deleted it (#571; PR #572 review: a session the registry
+    // never held outlives the delete) — nothing more may run on it, nor write its file again.
+    if (deletingThreads.has(threadId) || deletedThreads.has(threadId)) {
+      outcome.onRejected(`thread ${threadId} is being deleted, or was deleted`)
+      return
+    }
+    // ⚠ The restore route leases the thread, but a prompt that finds it held JOINS the holder
+    // (#75) — and pi starts a run for a prompt when none is streaming. So the host refuses it here
+    // while the tree is half put back (#551, PR #561 review).
+    if (restoringTrees.has(threadId)) {
+      outcome.onRejected(`thread ${threadId} is restoring its files; prompt again once that is done`)
+      return
+    }
+    trustGate.run(start, (reason) => outcome.onRejected(reason))
+  }
+
+  const runtime: ThreadRuntime = {
+    prompt(request: PromptRequest, outcome: PromptOutcome): void {
+      admitRun(outcome, () => startPrompt(request, outcome))
+    },
+    continueRun(outcome: PromptOutcome): void {
+      admitRun(outcome, () => startContinue(outcome))
+    },
+    answerDialog(response: DialogAnswer): void {
+      ui.answerDialog(response)
+    },
+    openDialogs(): EnsoOpenDialog[] {
+      return ui.openDialogs()
+    },
+    listCommands(): RuntimeCommand[] {
+      // The three sources pi's rpc `get_commands` assembles, in its order — then the host's
+      // own two (#338 slice 2), over the models pi could run right now.
+      const commands: RuntimeCommand[] = []
+      for (const command of session.extensionRunner.getRegisteredCommands()) {
+        commands.push(describeCommand(command.invocationName, 'extension', command.description))
+      }
+      for (const template of session.promptTemplates) {
+        commands.push(describeCommand(template.name, 'prompt', template.description))
+      }
+      for (const skill of session.resourceLoader.getSkills().skills) {
+        commands.push(describeCommand(`skill:${skill.name}`, 'skill', skill.description))
+      }
+      commands.push(
+        ...hostCommandRows(
+          currentModelState(),
+          session.modelRuntime.getAvailableSnapshot(),
+          getSupportedThinkingLevels,
+        ),
+      )
+      commands.push(...hostFlowRows(currentLoginOptions(), logoutOptions(storedCredentials)))
+      commands.push(...HOST_VIEW_ROWS)
+      return commands
+    },
+    loginInProgress(): EnsoLoginInProgress | undefined {
+      return waitingLogin === undefined ? undefined : { provider: waitingLogin.providerName }
+    },
+    cancelLogin(): boolean {
+      if (waitingLogin === undefined) return false
+      // The provider's wait first, then its card: the login settles as cancelled either way.
+      waitingLogin.cancel.abort()
+      waitingLogin.questions.abort()
+      return true
+    },
+    startHostFlow(run: EnsoHostCommandRun, outcome: HostFlowOutcome): void {
+      let decision: ReturnType<typeof decideHostFlow>
+      try {
+        if (flowInProgress !== undefined) throw new HostCommandRefused(`/${flowInProgress} is already in progress here`)
+        decision = decideHostFlow(run, currentLoginOptions(), logoutOptions(storedCredentials))
+      } catch (error) {
+        outcome.onRejected(error instanceof Error ? error.message : String(error))
+        return
+      }
+      outcome.onAccepted()
+      flowInProgress = run.name
+      const flow = runDecidedFlow(decision)
+      void flow.finally(() => {
+        flowInProgress = undefined
+        outcome.onSettled()
+      })
+    },
+    modelState: currentModelState,
+    sessionUsage: () => liveSessionUsage(session.getSessionStats()),
+    async runHostCommand(run: EnsoHostCommandRun): Promise<void> {
+      const decision = decideHostCommand(run, currentModelState(), session.modelRuntime.getAvailableSnapshot())
+      switch (decision.kind) {
+        case 'refused':
+          throw new HostCommandRefused(decision.reason)
+        case 'model':
+          // pi refuses a provider with no credentials (`No API key for provider/id`) — its
+          // sentence is the reason; the snapshot lists authenticated providers, so it is the
+          // rare case of a credential that lapsed between the listing and the choice. That
+          // one throw is a refusal; anything else `setModel` throws is a fault, and stays one.
+          try {
+            await session.setModel(decision.model)
+          } catch (error) {
+            if (error instanceof Error && /no api key/i.test(error.message)) throw new HostCommandRefused(error.message)
+            throw error
+          }
+          break
+        case 'thinking': {
+          // The decision checked the level against this same list; the lookup is how the string
+          // becomes pi's `ThinkingLevel` without a cast.
+          const level = session.getAvailableThinkingLevels().find((offered) => offered === decision.level)
+          if (level !== undefined) session.setThinkingLevel(level)
+          break
+        }
+      }
+      // pi's own events have said it by now (see the module header); this is the guarantee
+      // that the caller's change is on the feed whatever pi's plumbing did — deduped.
+      announceModelState()
+    },
+    permissionModeState: currentPermissionModeState,
+    setSystemPrompt(choice: EnsoSystemPromptChoice | null): string | undefined {
+      const decision = decideSystemPrompt(systemPrompt, choice, threadLog.hasSentRequest())
+      if (decision.kind === 'refused') return decision.reason
+      if (decision.kind === 'same') return undefined
+      systemPrompt = choice ?? undefined
+      // Recorded BEFORE the first request, so the log says what the request will carry; pi
+      // flushes it with the first assistant message, as it does the model and the mode. pi's
+      // default is recorded too (`null`): it replaces a choice this branch already records.
+      threadLog.record(ENSO_SYSTEM_PROMPT_ENTRY, choice)
+      // pi re-reads the loader when it rebuilds the prompt; the same tools make it rebuild.
+      session.setActiveToolsByName(session.getActiveToolNames())
+      if (choice === null) log.info("system prompt set to pi's default", { threadId })
+      else
+        log.info('system prompt {id} set ({mode})', {
+          threadId,
+          id: choice.id,
+          mode: choice.mode,
+          sha256: choice.sha256,
+        })
+      return undefined
+    },
+    resolveIncident(incidentId: string, resolution: EnsoIncidentResolution): string | undefined {
+      const refusal = incidentResolutionRefusal(threadLog.incidents(), incidentId, resolution)
+      if (refusal !== undefined) return refusal
+      if (hostApi === undefined) throw new Error(`thread ${threadId}: the host's extension API was never bound`)
+      const record = incidentResolvedOf(incidentId, resolution)
+      // The record first, then the live guard: were the guard told first, a failed append would
+      // leave a lifted suspension no file records (⚠ #466: the records are the authority).
+      hostApi.appendEntry(ENSO_INCIDENT_RESOLVED_ENTRY, record)
+      hostApi.events.emit(ENSO_INCIDENT_RESOLVED_CHANNEL, record)
+      // ⚠ The day's one record of a resolution (#468): the guard's live application logs at debug.
+      log.info(ENSO_LOG_EVENTS.incidentResolved, {
+        threadId,
+        incidentId,
+        classification: record.classification,
+        outcome: record.outcome,
+      })
+      return undefined
+    },
+    setPermissionMode(mode: string, outcome: PromptOutcome): void {
+      // Only a mode the extension registers a command for — the runtime treats an unknown
+      // slash command as ORDINARY TEXT and would send it to the model as a chat message.
+      // Found by the first test that drove this path against the real extension rather
+      // than the fake (#162 exit criteria); the route refuses earlier (422), this is the seam's own lock.
+      if (!currentPermissionModeState().available.includes(mode)) {
+        outcome.onRejected(`mode ${mode} is not one this thread offers`)
+        return
+      }
+      // The extension's command, as the prompt path runs any extension command: fire-and-
+      // forget, acceptance is completion, and the change arrives as `permission_mode`.
+      runtime.prompt({ message: modeCommand(mode) }, outcome)
+    },
+    subscribe(onObservation: (observation: EnsoObservation) => void): () => void {
+      listeners.add(onObservation)
+      hasHadSubscriber = true
+      if (heldUntilFirstSubscriber.length > 0) {
+        const held = heldUntilFirstSubscriber.splice(0)
+        for (const event of held) {
+          // The subscriber learns it is a replay (#96): the tail's `replayed` and the
+          // observation's `origin` are the same fact, told once here by the mapper.
+          const observation = mapPiEvent(event, 'replayed')
+          const described = describeObservation(observation)
+          emitted.record(described.type, described.name, 'replayed')
+          onObservation(observation)
+        }
+      }
+      return () => {
+        listeners.delete(onObservation)
+      }
+    },
+    abort(): Promise<void> {
+      // A compaction in flight is the run Stop is stopping (#338 slice 4): pi's `abort()` does
+      // not cancel it — `abortCompaction()` does, and is a no-op when none is running.
+      session.abortCompaction()
+      // A run still waiting on the trust question (#502) is dropped, and the question asked again.
+      trustGate.abort()
+      return stopRunSettlingDialogs(
+        () => session.abort(),
+        (stopping) => {
+          ui.refuseDialogsUntil(stopping)
+          ui.abortAllDialogs()
+        },
+      )
+    },
+    clearQueue(): { interrupting: string[]; enqueued: string[] } {
+      // The runtime's two lists under Enso's words (#216) — the only place either spelling is
+      // translated on this side, as `map-events.ts` is on the observation side.
+      const cleared = session.clearQueue()
+      return { interrupting: cleared.steering, enqueued: cleared.followUp }
+    },
+    dispose(): void {
+      if (disposed) return
+      disposed = true
+      if (liveLogs.get(threadId) === threadLog) liveLogs.delete(threadId)
+      flowsAbort.abort()
+      trustGate.abort()
+      ui.cancelAllDialogs()
+      unsubscribeSession()
+      // `AgentSession.dispose()` does NOT emit session_shutdown — only pi's runtime layer
+      // does. multi-account clears its timers on that event ("for ANY reason"), so the
+      // host emits it the way `AgentSessionRuntime.dispose` does, then releases.
+      void session.extensionRunner
+        .emit({ type: 'session_shutdown', reason: 'quit' })
+        .catch((error: unknown) => log.error('session_shutdown threw: {error}', { threadId, error }))
+        .finally(() => session.dispose())
+    },
+  }
+
+  return {
+    runtime,
+    loadedExtensionPaths: extensionsResult.extensions.map((extension) => extension.path),
+    emittedEvents: () => emitted.recent(),
+    async probeToolCall(toolName: string, input: Record<string, unknown>): Promise<ToolCallVerdict | undefined> {
+      const result = await session.extensionRunner.emitToolCall({
+        type: 'tool_call',
+        toolName,
+        toolCallId: `probe-${crypto.randomUUID()}`,
+        input,
+      })
+      if (result === undefined) return undefined
+      return { block: result.block === true, reason: result.reason }
+    },
+    projectTrust: () => ({ directory: trustDirectory, trusted: projectTrust.settingsManager.isProjectTrusted() }),
+    checkPermission(request: EnsoPermissionCheckRequest): EnsoPermissionVerdict | undefined {
+      const service = getPermissionsService(threadLog.threadId)
+      if (service === undefined) return undefined
+      const mode = recordedPermissionMode(threadLog.everyEntry())
+      const result = service.checkPermission(request.surface, request.value, modeAgentName(mode))
+      return {
+        mode,
+        state: result.state,
+        origin: result.origin,
+        ...(result.matchedPattern === undefined ? {} : { matchedPattern: result.matchedPattern }),
+        ...(result.reason === undefined ? {} : { reason: result.reason }),
+      }
+    },
+    branchStats: () => threadLog.stats(),
+    branchEval: () => threadLog.eval(),
+    branchIncidentHistory: (thresholds: EnsoRiskThresholds) => threadLog.incidentHistory(thresholds),
+    branchJudgeCases: (thresholds: EnsoRiskThresholds) =>
+      threadLog.judgeCases(judgeCaseInputs(threadLog.cwd, thresholds)),
+    branchContext: () => threadLog.context(),
+    previewSystemPrompt(candidate: EnsoSystemPromptChoice | null): SystemPromptPreviewOutcome {
+      if (session.isStreaming || session.isCompacting) return { kind: 'busy' }
+      const setChoice = (choice: EnsoSystemPromptChoice | undefined): void => {
+        systemPrompt = choice
+      }
+      const rendered = renderedUnder(session, setChoice, candidate ?? undefined, systemPrompt)
+      const window = session.model?.contextWindow
+      const preview = previewOf({
+        rendered,
+        preamble: candidate?.mode === 'system' ? candidate.text : services.resourceLoader.getSystemPrompt(),
+        baseAppends: services.resourceLoader.getAppendSystemPrompt(),
+        candidate,
+        tools: session.agent.state.tools,
+        contextWindow: window !== undefined && window > 0 ? window : undefined,
+      })
+      return preview === undefined ? { kind: 'unsplittable' } : { kind: 'preview', preview }
+    },
+    branchRequestDetail: (request: number | 'next') => threadLog.requestDetail(request),
+    async forkPoint(): Promise<EnsoForkPoint> {
+      const threadId = threadLog.threadId
+      return threadLog.forkPoint({
+        threadId,
+        cwd: threadLog.cwd,
+        parentThreadId: (await locate(threadId))?.parentThreadId,
+      })
+    },
+    inspect(): HostedThreadInspection {
+      // ⚠ `getSessionFile()` names the path pi WILL write, from creation — but pi flushes
+      // lazily, holding every entry until the first assistant message. So the path is
+      // reported only once the file exists; before that the branch below is the only copy.
+      const plannedFile = threadLog.file
+      return {
+        sessionId: threadLog.threadId,
+        cwd: threadLog.cwd,
+        sessionDir: threadLog.directory,
+        sessionFile: plannedFile !== undefined && existsSync(plannedFile) ? plannedFile : null,
+        // ⚠ BUILT WHEN READ, not when inspected (#739): most callers want the cwd or the file, and
+        // the transcript is the whole branch rebuilt — 2.75 ms at 5,000 turns, per `/git` or
+        // `/tree`. Read it at once: a getter read later sees the branch as it is then.
+        get entries() {
+          return threadLog.transcript()
+        },
+        commands: runtime.listCommands().map((command) => command.name),
+        name: threadLog.name(),
+      }
+    },
+  }
+}
+
+/**
+ * The model and effort a thread chose BEFORE its first message (#616), for its next build.
+ *
+ * ⚠ pi restores a session's model and thinking level only when the session has messages
+ * (`createAgentSession`: `hasExistingSession` is `messages.length > 0`); otherwise it takes the
+ * settings' default and records it. Since #484 a thread is configured before its first prompt — the
+ * Start dialog's model and effort are `model_change` and `thinking_level_change` entries on a branch
+ * with no message yet — and its first run REBUILDS it on its tree (#551, `treeOnFirstRun`). That
+ * build took the default over the choice: measured on a live run, the chosen Haiku entry was
+ * followed 119 ms later by pi's Sonnet. A branch with messages is pi's to restore and is left to it.
+ * A recorded model that is gone or has no credentials falls back to pi's default, as pi's own
+ * restore does.
+ */
+function selectionBeforeFirstMessage(
+  threadLog: ThreadLog,
+  modelRuntime: AgentSessionServices['modelRuntime'],
+): Pick<CreateAgentSessionFromServicesOptions, 'model' | 'thinkingLevel'> {
+  const chosen = threadLog.choiceBeforeFirstMessage()
+  const recorded = chosen === undefined ? undefined : modelRuntime.getModel(chosen.provider, chosen.modelId)
+  const model = recorded !== undefined && modelRuntime.hasConfiguredAuth(recorded.provider) ? recorded : undefined
+  if (model === undefined) return {}
+  // The lookup is how the recorded string becomes pi's level without a cast, as `runHostCommand`
+  // does it — and a level this model does not offer is not restored.
+  const level = chosen?.thinkingLevel
+  const thinkingLevel =
+    level === undefined ? undefined : getSupportedThinkingLevels(model).find((offered) => offered === level)
+  return { model, ...(thinkingLevel === undefined ? {} : { thinkingLevel }) }
+}

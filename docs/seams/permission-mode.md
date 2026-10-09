@@ -513,7 +513,7 @@ left active. The prompt itself is an ordinary `select` and `input` dialog (`dial
 spawn. The rules a run ran under are hashed into its run context (`mode.rulesHash`, #435): the
 policy the engine reads with the preset of the session's mode.
 
-**Read by the host, and only there.** `agent-host.ts#currentPermissionModeState` implements
+**Read by the host, and only there.** `hosted-thread.ts#currentPermissionModeState` implements
 `ThreadRuntime.permissionModeState` for a live thread: the walk over `sessionManager.getEntries()`, and
 `ENSO_PERMISSION_MODES` filtered by the commands the session's extension runner registered for
 `available` (read off the registry directly rather than through `listCommands`, whose call count the
@@ -532,7 +532,7 @@ live mid-read (#214). The inspection and summary report the live mode. And `GET 
 does **not** carry the mode.
 
 **Said by the host, mid-run.** When the host's session subscription sees an `active_agent` entry
-appended, it emits its own `permission_mode` event right after it (`host/agent-host.ts`, the session
+appended, it emits its own `permission_mode` event right after it (`host/hosted-thread.ts`, the session
 subscription). The mapper carries it as the `permission-mode` observation
 (`host/map-events.ts#mapPiEvent`, its `permission_mode` case), and `to-agui.ts` emits it as a CUSTOM
 chunk named `permission-mode`. The entry itself still crosses as a `custom-entry` — recorded and

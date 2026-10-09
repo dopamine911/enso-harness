@@ -29,8 +29,8 @@ import {
   ensoLogger,
   type ThreadRuntime,
 } from '@enso/core'
-import type { HostedThread } from '../host/agent-host.ts'
 import { createEventTail, type EventTail } from '../host/event-tail.ts'
+import type { HostedThread } from '../host/hosted-thread.ts'
 import { recordObservation } from './observation-log.ts'
 
 /**

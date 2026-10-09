@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, expect, test } from 'bun:test'
 import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
 import type { LogRecorder } from '@logtape/testing/recorder'
-import type { HostedThread } from '../../host/agent-host.ts'
+import type { HostedThread } from '../../host/hosted-thread.ts'
 import {
   createThreadRegistry,
   type ScheduleIdleDisposal,

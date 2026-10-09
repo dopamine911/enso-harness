@@ -50,7 +50,7 @@ export type PromptImageContent = Static<typeof PromptImageContent>
  * literals, declared as an Enso schema and published on `EnsoPromptBody`, so the vendor's model
  * was the only vocabulary the wire accepted — and `docs/seams/thread-runtime.md` said the
  * opposite in the same breath. The vendor gate cannot see that class of leak: no import, no
- * vendor word. pi's spelling is produced in ONE place now, `host/agent-host.ts`, which is
+ * vendor word. pi's spelling is produced in ONE place now, `host/hosted-thread.ts`, which is
  * where a vendor word belongs; a runtime that admits prompts differently becomes a host
  * change, which is this seam's whole promise.
  *

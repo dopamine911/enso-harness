@@ -13,8 +13,8 @@ Every fence on this page is the source, checked by `test/docs-gate.test.ts`. Ref
 
 ## The contract
 
-Three host-side interfaces in `agent-host.ts`, the host's entry point, over a fourth in `thread-log.ts`,
-the one file the seam's storage lives in:
+Three host-side interfaces — `AgentHost` in `agent-host.ts`, the host's entry point, and the live
+thread's two in `hosted-thread.ts` — over a fourth in `thread-log.ts`, the one file the seam's storage lives in:
 
 <!-- source: packages/web/src/host/agent-host.ts#AgentHost -->
 ```ts
@@ -163,7 +163,7 @@ export interface AgentHost {
 
 What `createSession` hands back — the runtime (`thread-runtime.md`) plus a read-only view deliberately not on it:
 
-<!-- source: packages/web/src/host/agent-host.ts#HostedThread -->
+<!-- source: packages/web/src/host/hosted-thread.ts#HostedThread -->
 ```ts
 export interface HostedThread {
   readonly runtime: ThreadRuntime
@@ -223,7 +223,7 @@ export interface HostedThread {
 }
 ```
 
-<!-- source: packages/web/src/host/agent-host.ts#HostedThreadInspection -->
+<!-- source: packages/web/src/host/hosted-thread.ts#HostedThreadInspection -->
 ```ts
 /**
  * What pi's session for one hosted thread actually contains, read straight off its log (#86).

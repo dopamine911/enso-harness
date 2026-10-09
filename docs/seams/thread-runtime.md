@@ -205,7 +205,7 @@ export interface PromptOutcome {
  * literals, declared as an Enso schema and published on `EnsoPromptBody`, so the vendor's model
  * was the only vocabulary the wire accepted — and `docs/seams/thread-runtime.md` said the
  * opposite in the same breath. The vendor gate cannot see that class of leak: no import, no
- * vendor word. pi's spelling is produced in ONE place now, `host/agent-host.ts`, which is
+ * vendor word. pi's spelling is produced in ONE place now, `host/hosted-thread.ts`, which is
  * where a vendor word belongs; a runtime that admits prompts differently becomes a host
  * change, which is this seam's whole promise.
  *
@@ -305,8 +305,8 @@ export const RuntimeCommand = Type.Object({
 
 ## Who implements it, who consumes it
 
-**Implemented once**, in the host: `packages/web/src/host/agent-host.ts` builds a `ThreadRuntime` per
-thread inside `createSession` (the object literal at `const runtime: ThreadRuntime`) and hands it out
+**Implemented once**, in the host: `packages/web/src/host/hosted-thread.ts` builds a `ThreadRuntime` per
+thread in `buildHostedThread` (the object literal at `const runtime: ThreadRuntime`) and hands it out
 as `HostedThread.runtime`. Three host modules do the adapting behind it: `session-events.ts` turns
 the runtime's session events into the open `RuntimeEvent` shape (replicated from the vendor's own
 JSON-event mapping, so the mapper's 29 tests kept consuming exactly what they consumed over the pipe);
@@ -368,7 +368,7 @@ no import, no vendor word.
 What replaced it: `EnsoPromptAdmission = 'interrupt' | 'enqueue'` (`thread-runtime.ts`),
 `EnsoPromptBody.admission` on the wire, `EnsoQueue.interrupting` / `.enqueued` on the follow's SSE
 stream, and `clearQueue` returning `{ interrupting, enqueued }`. pi's two spellings are produced in
-exactly two places, both under `host/`: `agent-host.ts#STREAMING_BEHAVIOR_OF` inbound (whose value
+exactly two places, both under `host/`: `hosted-thread.ts#STREAMING_BEHAVIOR_OF` inbound (whose value
 type is pi's own `PromptOptions['streamingBehavior']`, so a vendor rename is a compile error in the
 table) and `map-events.ts` outbound, where `queue_update`'s `steering`/`followUp` are read. A runtime
 that admits prompts differently is a literal in `@enso/core` and a row in that table.
@@ -452,7 +452,7 @@ closed leak and deny the open one in its last line (#216).
 
 Which files may import the runtime is fixed by a gate (#558): `VENDOR_IMPORTERS_ALLOWED_INSIDE_ROOTS` in `test/vendor-gate.test.ts` lists them, and the list only shrinks, so a new file cannot quietly add to what follows.
 
-Replace the runtime and the files that change are the host's: `agent-host.ts` (build a `ThreadRuntime`
+Replace the runtime and the files that change are the host's: `hosted-thread.ts` (build a `ThreadRuntime`
 over the new loop), `thread-log.ts` (the new loop's log — see `storage.md`), `session-events.ts`
 and `map-events.ts` (produce the new loop's events and map them to observations — or map the
 loop's typed events directly and retire the replicated wire shape), `extension-ui-context.ts` and
