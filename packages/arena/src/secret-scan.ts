@@ -417,10 +417,10 @@ function streamedEntryData(descriptor: number, entry: CentralDirectoryEntry): Ui
 }
 
 /**
- * A zip's entries, decompressed, from the whole file in memory: the read the stream replaced, kept as
- * its fallback. Enough of the format to read a Playwright trace (stored and deflated entries, sizes
- * from the central directory). Throws on what it does not read — zip64, an unknown method, a damaged
- * header — so the scan says "unreadable" rather than "clean".
+ * A zip's kept entries, decompressed, from the whole file in memory: the read the stream replaced,
+ * kept as its fallback, and skipping what the stream skips. Enough of the format to read a Playwright
+ * trace (stored and deflated entries, sizes from the central directory). Throws on what it does not
+ * read — zip64, an unknown method, a damaged header — so the scan says "unreadable" rather than "clean".
  */
 export function zipEntries(bytes: Uint8Array): Array<{ readonly name: string; readonly data: Uint8Array }> {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
@@ -439,7 +439,9 @@ export function zipEntries(bytes: Uint8Array): Array<{ readonly name: string; re
     const localOffset = view.getUint32(at + 42, true)
     const name = new TextDecoder().decode(bytes.subarray(at + 46, at + 46 + nameLength))
     at += 46 + nameLength + extraLength + commentLength
-    if (name.endsWith('/')) continue
+    // The same entries the stream skips (`UNREAD_ENTRY`): pixels and fonts hold no text secret, and
+    // inflating screencast frames is the cost #741 removed (PR #782 review).
+    if (name.endsWith('/') || UNREAD_ENTRY.test(name)) continue
     entries.push({ name, data: entryData(bytes, view, { localOffset, compressedSize, method, name }) })
   }
   return entries

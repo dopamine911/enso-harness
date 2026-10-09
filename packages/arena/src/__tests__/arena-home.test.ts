@@ -239,11 +239,12 @@ function zipOf(
   return Buffer.concat([...locals, directory, end])
 }
 
-test('a trace zip is read entry by entry, stored and deflated', () => {
+test('a trace zip is read entry by entry, stored and deflated; the fallback skips pixels as the stream does', () => {
   const entries = zipEntries(
     zipOf([
       { name: 'trace.trace', text: 'one', deflate: false },
       { name: 'resources/a.json', text: 'two'.repeat(50), deflate: true },
+      { name: 'screencast/frame-1.jpeg', text: 'pixels', deflate: true },
     ]),
   )
   expect(entries.map((zipEntry) => [zipEntry.name, Buffer.from(zipEntry.data).toString()])).toEqual([
