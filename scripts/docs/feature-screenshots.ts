@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os'
 import { delimiter, dirname, join, relative } from 'node:path'
 import { type Browser, chromium, type Locator, type Page } from '@playwright/test'
+import { gitChildEnvironment } from '../../packages/core/src/git.ts'
 import { isListening } from '../../packages/core/src/loopback.ts'
 import { findRepoRoot } from '../../packages/core/src/paths.ts'
 import { ENSO_DEFAULT_PERMISSION_POLICY } from '../../packages/core/src/permission-rules.ts'
@@ -722,10 +723,13 @@ async function main(): Promise<void> {
     writeFileSync(join(project, path), contents)
   }
   // A repository, so the run context records a revision — and, once pi's edit lands, `dirty`.
+  // ⚠ Without an inherited GIT_DIR / GIT_INDEX_FILE: run from a hook's shell, `add` and `commit`
+  // would write into the repository making the commit (#807).
   const git = (...args: string[]): void => {
     const run = spawnSync('git', ['-c', 'user.name=demo', '-c', 'user.email=demo@example.invalid', ...args], {
       cwd: project,
       encoding: 'utf8',
+      env: gitChildEnvironment(),
     })
     if (run.status !== 0) throw new Error(`feature-screenshots: git ${args[0]} failed: ${run.stderr}`)
   }
