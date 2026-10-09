@@ -890,6 +890,30 @@ function shellFedByStream(commandLines: string): boolean {
 }
 
 /**
+ * The command with every QUOTED heredoc body cut out: the text bash runs as commands, for a scan
+ * that reads words where the segmenter declined (#778). A body under a quoted delimiter is literal
+ * data for the command that reads it (`cat > run.js << 'EOF'`), the model `unscannableFloor` already
+ * holds (PR #149). ⚠ Unchanged when a shell reads a stream as its program (`bash << 'EOF'`): that
+ * body IS commands. Unquoted bodies stay too: bash expands them.
+ *
+ * @group Guard predicates
+ */
+export function withoutLiteralHeredocBodies(command: string): string {
+  const heredocs = heredocBodies(command)
+  const literal = heredocs.filter((body) => body.quoted)
+  if (literal.length === 0) return command
+  const commandLines = withoutRanges(
+    command,
+    heredocs.map((body) => [body.start, body.end]),
+  )
+  if (/<</.test(commandLines) && shellFedByStream(commandLines)) return command
+  return withoutRanges(
+    command,
+    literal.map((body) => [body.start, body.end]),
+  )
+}
+
+/**
  * Find the first denied network egress in a shell command, or undefined when none match.
  * `coarse` forces the raw word-boundary scan (the PowerShell path).
  *
