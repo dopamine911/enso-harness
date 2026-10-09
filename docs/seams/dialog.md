@@ -358,6 +358,8 @@ widget calls are emitted and dropped (`extension-ui-context.ts` header). Not a d
 
 ## Pivot cost
 
+Which files may import the runtime is fixed by a gate (#558): `VENDOR_IMPORTERS_ALLOWED_INSIDE_ROOTS` in `test/vendor-gate.test.ts` lists them, and the list only shrinks, so a new file cannot quietly add to what follows.
+
 Replace the runtime and the vocabulary stays: `EnsoDialogSpec`, `EnsoOpenDialog`, `DialogAnswer`,
 `EnsoDialogOutcome`, the validator, the answer route, the snapshot's list, the card and the router do not
 change — the answer route's tests in `follow.test.ts` and the card's static renders already run with no

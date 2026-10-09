@@ -547,6 +547,8 @@ a thread that has only run slash commands has a full branch and no file, and `li
 
 ## Pivot cost
 
+Which files may import the runtime is fixed by a gate (#558): `VENDOR_IMPORTERS_ALLOWED_INSIDE_ROOTS` in `test/vendor-gate.test.ts` lists them, and the list only shrinks, so a new file cannot quietly add to what follows.
+
 Replace the store — another file layout, a database, a remote log — and the files that change are
 `packages/web/src/host/agent-host.ts` (`listSessions`, `readStoredThread`, the open-or-create in
 `createSession`, `inspect()`), `packages/web/src/host/transcript.ts` (the new store's entries → the

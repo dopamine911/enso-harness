@@ -509,6 +509,8 @@ admit the opposite three paragraphs later (#219).
 
 ## Pivot cost
 
+Which files may import the runtime is fixed by a gate (#558): `VENDOR_IMPORTERS_ALLOWED_INSIDE_ROOTS` in `test/vendor-gate.test.ts` lists them, and the list only shrinks, so a new file cannot quietly add to what follows.
+
 Replace the state layer and the files that change are the adapter and its two neighbours:
 `follow-connection.ts` (a new send/subscribe shape, or none), `custom-event-router.ts` (the client's
 `onCustomEvent` is the entry; the dispatch to stores stays), `to-agui.ts` (deleted — its header

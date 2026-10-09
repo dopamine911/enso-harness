@@ -131,3 +131,23 @@ test('recorded residual: a wrapper operand after the listing hides it (#206)', (
   expect(denied('script -qc env /dev/null')).toBeUndefined()
   expect(denied('sudo env FOO=1 make build')).toBeUndefined()
 })
+
+// #778: a heredoc makes the segmenter decline (#545), and the coarse listing scan read the body:
+// `#!/usr/bin/env node` in a script written with `cat` was refused as an environment dump, and the
+// agent's next tries to write it otherwise escalated to a security incident.
+test("⚠ a quoted heredoc's body is data to the listing scan; a shell reading it, or a listing next to it, is still denied (#778)", () => {
+  const script = "<< 'EOF'\n#!/usr/bin/env node\nconsole.log('printenv is a word here')\nEOF"
+  expect(denied(`cat > run.js ${script}`)).toBeUndefined()
+  // A shell reading the stream runs the body as its program.
+  expect(denied("bash << 'EOF'\nenv\nEOF")).toBe('raw-scan')
+  // …and with it beside a `cat` heredoc, the whole command is scanned: a shell-fed stream anywhere
+  // keeps every body in, the data one included (PR #783 review).
+  expect(denied(`cat > run.js ${script}\nbash << 'RUN'\nnode run.js\nRUN`)).toBe('raw-scan')
+  // A listing on a command line beside the heredoc.
+  expect(denied(`env > dump.txt; cat > run.js ${script}`)).toBe('raw-scan')
+  // An unquoted body is expanded by bash, so it stays in the scan.
+  expect(denied('cat > run.js << EOF\n#!/usr/bin/env node\nEOF')).toBe('raw-scan')
+  // A secret expansion or /proc/…/environ in the body still counts: the script runs later.
+  expect(denied("cat > leak.sh << 'EOF'\necho $OPENAI_API_KEY\nEOF")).toBe('secret-expansion')
+  expect(denied("cat > leak.sh << 'EOF'\ncat /proc/self/environ\nEOF")).toBe('proc-environ')
+})
