@@ -34,6 +34,12 @@ import { join } from 'node:path'
  * ⚠ The teardown is an `afterAll` in THIS preload, which bun runs once at the end of the whole
  * run — not a `process.on('exit')`: measured on bun 1.4.0, `bun test` ends without firing exit
  * or beforeExit listeners at all, so a cleanup registered there never ran (the first draft).
+ *
+ * ⚠ Nothing runs after this teardown, so a write that lands after it RE-CREATES the run's
+ * directory and it stays (#790): async work a suite started and never waited for — pi's model
+ * runtime refreshing the catalog, unawaited, re-created a host test's agent dir under every run.
+ * A suite settles what it starts before its own `afterAll` ends (`agent-host.test.ts`,
+ * `settleModelRefreshes`); `test/scratch-gate.test.ts` holds that suite to it.
  */
 const scratch = mkdtempSync(join(tmpdir(), 'enso-test-run-'))
 process.env['TMPDIR'] = scratch
