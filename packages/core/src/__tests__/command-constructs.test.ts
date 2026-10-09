@@ -22,6 +22,15 @@ test("⚠ live text: a quoted heredoc's body and a single-quoted string are lite
   expect(liveShellText('cut -c1-7 <<<"$FMT"')).toBe('cut -c1-7 <<<"$FMT"')
 })
 
+// PR #800 review asked for a `<<~` strip-whitespace operator, but that is Ruby's; bash has `<<` and
+// `<<-` only. Checked in bash 5: `cat <<~EOF` is a heredoc whose delimiter is the WORD `~EOF`, closed by
+// a `~EOF` line, its body unstripped. The walk reads it the same way: not unreadable, and what follows
+// the closing line is live again.
+test('`<<~EOF` is bash reading the delimiter word `~EOF`, closed by its own line, as bash does', () => {
+  expect(commandConstructOf('cat <<~EOF\n  hi\n~EOF\necho after')).toBeUndefined()
+  expect(commandConstructOf('cat <<~EOF\n  hi\n~EOF\necho `date`')).toBe('backtick')
+})
+
 test('escapes, comments and double-quoted operators are characters; a substitution opens its own quotes', () => {
   // An escaped backtick in a grep pattern, a backtick in a comment, and `\|` (grep's alternation,
   // not a pipe) — every one a false positive of the raw-text rule.
