@@ -305,39 +305,47 @@ function valueScrubber(values: readonly string[]): ((value: unknown) => unknown)
  * every rotated key readable and unredactable for the rest of the process's life. The
  * alternation is rebuilt only when the thunk hands back a DIFFERENT array
  * (`knownSecretValuesTracking` changes identity exactly when the file does), so the steady
- * state costs one `stat` and one reference compare per record PER WRAPPED SINK: measured over
+ * state costs one `stat` and one reference compare per record: measured over
  * 20k records, 9.4 µs per record tracking against 7.5 µs snapshot and 7.3 µs with no value
- * pass at all (`.local` benchmark, #207). ⚠ The wrapper is applied to each sink separately
- * (file, and console when it is configured), and each closure asks the thunk itself — so a
- * process logging to both pays the `stat` twice per record, not once (PR #318 review). They
- * converge on the same cached alternation, so only the cost doubles, never the answer. A
- * 50k-record `trace` day pays ~0.1 s for it, ~0.2 s with the console sink on.
+ * pass at all (`.local` benchmark, #207). The wrapper is applied to each sink separately (file,
+ * and console when it is configured), but LogTape hands every sink the SAME record object, so
+ * the wrapper keeps the last record it scrubbed and what it became: the second sink asks the
+ * thunk nothing and scans nothing (#741; PR #318's review found the `stat` paid twice).
  */
 function redactingKnownValues(values: readonly string[] | (() => readonly string[])): (sink: Sink) => Sink {
   const rotating = typeof values === 'function' ? values : undefined
   let scrubbed = typeof values === 'function' ? undefined : valueScrubber(values)
   if (rotating === undefined && scrubbed === undefined) return (sink: Sink): Sink => sink
   let source: readonly string[] | undefined
+  let lastRecord: LogRecord | undefined
+  let lastScrubbedRecord: LogRecord | undefined
+  const scrubbedRecordOf = (record: LogRecord): LogRecord => {
+    if (record === lastRecord && lastScrubbedRecord !== undefined) return lastScrubbedRecord
+    if (rotating !== undefined) {
+      const latest = rotating()
+      if (latest !== source) {
+        source = latest
+        scrubbed = valueScrubber(latest)
+      }
+    }
+    const scrub = scrubbed
+    const result =
+      scrub === undefined
+        ? record
+        : {
+            ...record,
+            message: record.message.map(scrub),
+            rawMessage:
+              typeof record.rawMessage === 'string' ? (scrub(record.rawMessage) as string) : record.rawMessage,
+            properties: scrub(record.properties) as LogRecord['properties'],
+          }
+    lastRecord = record
+    lastScrubbedRecord = result
+    return result
+  }
   return (sink: Sink): Sink =>
     (record: LogRecord): void => {
-      if (rotating !== undefined) {
-        const latest = rotating()
-        if (latest !== source) {
-          source = latest
-          scrubbed = valueScrubber(latest)
-        }
-      }
-      if (scrubbed === undefined) {
-        sink(record)
-        return
-      }
-      const scrub = scrubbed
-      sink({
-        ...record,
-        message: record.message.map(scrub),
-        rawMessage: typeof record.rawMessage === 'string' ? (scrub(record.rawMessage) as string) : record.rawMessage,
-        properties: scrub(record.properties) as LogRecord['properties'],
-      })
+      sink(scrubbedRecordOf(record))
     }
 }
 
@@ -589,10 +597,8 @@ export async function configureProcessLogging(options: ProcessLoggingOptions): P
     ownTheDayFile()
     fileSink({ ...record, properties: { process: options.process, sequence: written, ...record.properties } })
   }
-  const file: Sink = withFilter(
-    stamped,
-    (record: LogRecord) => compareLogLevel(record.level, effectiveFileLevel(levels, record.category)) >= 0,
-  )
+  const fileLevelAdmits = (record: LogRecord): boolean =>
+    compareLogLevel(record.level, effectiveFileLevel(levels, record.category)) >= 0
   // ⚠ Redaction wraps EVERY output, not the file alone. The terminal renders properties too
   // (the pretty formatter, `properties: true`), and a secret-shaped value on stdout is the
   // same leak with a different reader — the #134 review caught the console sink bare.
@@ -602,15 +608,19 @@ export async function configureProcessLogging(options: ProcessLoggingOptions): P
   // message, a guard's `reason`, or a `trace` payload. Measured before it was written —
   // 193 ns for an ordinary record, 725 ns for a 20 KB payload, so a 50k-record `trace` day
   // costs ~10 ms: the write path is the right place, and the file stays safe at rest (#132).
+  // The level filter is OUTERMOST (#741): with one category at `trace`, the logger tree lets
+  // every record through, and a record the sink then drops must not pay for redaction first.
   const redactValues = redactingKnownValues(options.secretValues ?? [])
-  const sinks: Record<string, Sink> = { file: redactValues(redactByField(file, redaction)) }
+  const sinks: Record<string, Sink> = {
+    file: withFilter(redactValues(redactByField(stamped, redaction)), fileLevelAdmits),
+  }
   const ensoSinks = ['file']
   const metaSinks: string[] = []
   if (levels.console !== undefined) {
     const pretty = getConsoleSink({
       formatter: getPrettyFormatter({ timestamp: 'time', properties: true, categoryWidth: 24 }),
     })
-    sinks.console = redactValues(redactByField(withFilter(pretty, levels.console), redaction))
+    sinks.console = withFilter(redactValues(redactByField(pretty, redaction)), levels.console)
     ensoSinks.push('console')
     metaSinks.push('console')
   }
