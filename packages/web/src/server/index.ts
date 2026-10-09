@@ -33,14 +33,9 @@ import {
 import { readGitChanges, readGitState, runGit } from '@enso/core/git'
 import { missingVendorPaths } from '@enso/core/pi-manifest'
 import type { Static, TSchema } from 'typebox'
-import {
-  AGENT_RUNTIME_VERSION,
-  type AgentHost,
-  createAgentHost,
-  SessionDirectoryRefused,
-  ThreadDeleted,
-} from '../host/agent-host.ts'
+import { AGENT_RUNTIME_VERSION, type AgentHost, createAgentHost, SessionDirectoryRefused } from '../host/agent-host.ts'
 import { readPermissionPolicy, resetPermissionPolicy, writePermissionPolicy } from '../host/permission-policy-file.ts'
+import { ThreadDeleted } from '../host/thread-delete.ts'
 import type { ProjectThreadSettingsSource } from '../host/tree-setup.ts'
 import { createAboutRoute, createBundleRoute } from './bundle-route.ts'
 import {

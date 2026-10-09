@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import type { EnsoGitFileChange, EnsoGitState } from '@enso/core'
-import type { ThreadTreePlace } from '../../host/agent-host.ts'
+import type { ThreadTreePlace } from '../../host/thread-log-edits.ts'
 import { createThreadChangesRoute, createThreadGitRoute } from '../thread-git-route.ts'
 import type { ThreadView } from '../thread-registry.ts'
 import { createFakeAgentHost, createFakeHostedThread } from './fake-hosted-thread.ts'

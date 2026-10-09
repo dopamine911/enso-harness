@@ -252,7 +252,7 @@ export interface HostedThreadInspection {
 
 What `listSessions` returns, one per file on disk:
 
-<!-- source: packages/web/src/host/agent-host.ts#StoredThread -->
+<!-- source: packages/web/src/host/stored-threads.ts#StoredThread -->
 ```ts
 /** One of pi's session files in a directory this host serves, as pi lists it (#95). */
 export interface StoredThread {
@@ -494,7 +494,10 @@ export const EnsoInterruptedTail = Type.Union([
 
 **Implemented once**, in `packages/web/src/host/thread-log.ts` (#801), the only file that imports the runtime's
 `SessionManager`: `ThreadLog` and the store over it — `openLog`, `createLog`, `forkedLog`, `movedLog`.
-`agent-host.ts` reads and writes every log through them. A thread's file is filed under its project's folder,
+`agent-host.ts` and the host's flows over it read and write every log through them: the stored threads
+(`stored-threads.ts`: the listing, the lookup by id, the cold reads), a fork (`thread-fork.ts`), tree
+making (`thread-tree-making.ts`), a rename or a restore (`thread-log-edits.ts`), and a delete
+(`thread-delete.ts`) — none of which names the runtime (#801). A thread's file is filed under its project's folder,
 `ENSO_HOME/projects/<projectIdOf(cwd)>/sessions/` (#552) — the host hands that directory to the runtime at
 create, a fork inherits its source's, and `bun run enso` hands the terminal runtime the same directory
 (`PI_CODING_AGENT_SESSION_DIR`); a launch first moves the sessions the runtime filed by encoded cwd under
@@ -611,7 +614,7 @@ Which files may import the runtime is fixed by a gate (#558): `VENDOR_IMPORTERS_
 
 Replace the store — another file layout, a database, a remote log — and the files that change are
 `packages/web/src/host/thread-log.ts` (`ThreadLog` and its store over the new log),
-`packages/web/src/host/session-files.ts` and the listing in `agent-host.ts` (`listSessions`, `locate`:
+`packages/web/src/host/session-files.ts` and `stored-threads.ts` (`listSessions`, `locate`:
 where the files are), `packages/web/src/host/transcript.ts` (the new store's entries → the
 transcript of ours), `packages/web/src/host/branch-stats.ts` (the new store's messages → per-turn stats) and `packages/web/src/host/session-usage.ts` (the new store's recorded spend → pi's
 totals). That is what the storage-seam test measures: a second importer of the session

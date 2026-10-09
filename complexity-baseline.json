@@ -51,7 +51,7 @@
         "count": 1
       }
     },
-    "packages/web/src/host/agent-host.ts": {
+    "packages/web/src/host/thread-delete.ts": {
       "complexity_moderate": {
         "count": 1
       }
@@ -218,7 +218,7 @@
         "count": 1
       }
     },
-    "packages/web/src/host/agent-host.ts\u0000deleteThread": {
+    "packages/web/src/host/thread-delete.ts\u0000deleteThread": {
       "complexity_moderate": {
         "count": 1
       }
