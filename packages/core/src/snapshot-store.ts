@@ -29,10 +29,11 @@
  * are under an ignored `screenshots/` directory), and `.env`-shaped files, ignored AND untracked,
  * stay out of the store. The tree's `.git` is excluded by git itself; a nested repository is a
  * gitlink, its contents not captured — stated, not hidden. A path a sparse checkout leaves off disk
- * (skip-worktree) keeps the blob its index records, so the snapshot is still the whole commit; a
- * path beyond a symlinked directory is not the tree's (git calls it "beyond a symbolic link") —
- * the symlink is snapshotted, never what it points at. An untracked `node_modules` is ignored
- * whatever the rules say (`DEFAULT_EXCLUDE`, #739); a tracked one is the project's and stays.
+ * (skip-worktree) keeps the blob its index records, so the snapshot is still the whole commit, and
+ * a materialize leaves it off disk (#570); a path beyond a symlinked directory is not the tree's
+ * (git calls it "beyond a symbolic link") — the symlink is snapshotted, never what it points at.
+ * An untracked `node_modules` is ignored whatever the rules say (`DEFAULT_EXCLUDE`, #739); a
+ * tracked one is the project's and stays.
  *
  * ⚠ A COPY HAS NO REPOSITORY: IT FOLLOWS ITS PROJECT'S (#566). A store told it holds a copy of a
  * project (`copyOf`, recorded in the store) lists the copy as the store's own tracked set plus the
@@ -54,10 +55,11 @@
  * record as `snapshot: null`.
  *
  * ⚠ MATERIALIZING WRITES THE TREE, NEVER ITS `.git` (#551 slice 2). {@link materializeSnapshot}
- * makes a tree's files exactly a snapshot's — the store's index, `checkout-index`, then each file
- * the tree held under the same listing that the snapshot lacks, removed — still through the
- * store's own variables. Ignored files are never touched: they are the tree's own (`.env`, build
- * output), and no snapshot ever held them.
+ * makes a tree's files exactly a snapshot's — the store's index, the tree's skip-worktree paths
+ * marked again (#570: a sparse checkout stays sparse), `checkout-index`, then each file the tree
+ * held under the same listing that the snapshot lacks, removed — still through the store's own
+ * variables. Ignored files are never touched: they are the tree's own (`.env`, build output), and
+ * no snapshot ever held them.
  *
  * ⚠ node-only (`node:child_process`, `node:fs`): a subpath, `@enso/core/snapshot-store`, never the barrel.
  *
@@ -1069,12 +1071,14 @@ async function ignoreRulesOf(environment: NodeJS.ProcessEnv, store: StorePlace):
  * The tree's files as a snapshot holds them, ready to stage: `paths` for `update-index --add
  * --remove` (a tracked path gone from disk is a removal), and `recorded` — entries `update-index`
  * cannot read from disk, as the `--index-info` records their index holds: a submodule with no
- * checkout under it, a path a sparse checkout leaves off disk. `ignoredByProject`: a copy's
- * untracked files only its project's repository ignores.
+ * checkout under it, a path a sparse checkout leaves off disk. `sparse`: those last paths — tag
+ * `S`, skip-worktree — which a materialize keeps off disk (#570). `ignoredByProject`: a copy's
+ * untracked files only its project's repository ignores, a wholly ignored directory as `dir/`.
  */
 interface TreeFiles {
   readonly paths: string[]
   readonly recorded: { readonly path: string; readonly record: string }[]
+  readonly sparse: string[]
   readonly ignoredByProject: string[]
 }
 
@@ -1114,7 +1118,7 @@ function treeFilesOf(
 ): TreeFiles {
   const checked = new Map<string, boolean>()
   const paths = new Set<string>()
-  const recorded = new Map<string, string>()
+  const recorded = new Map<string, { readonly record: string; readonly sparse: boolean }>()
   for (const record of nulList(staged)) {
     // `<tag> <mode> <hash> <stage>\t<path>`; tag `S`: skip-worktree, not on disk.
     const tab = record.indexOf('\t')
@@ -1122,7 +1126,7 @@ function treeFilesOf(
     const path = record.slice(tab + 1)
     if (beyondSymlink(tree, path, checked)) continue
     if (tag === 'S' || (mode === '160000' && !existsSync(join(tree, path, '.git')))) {
-      recorded.set(path, `${mode} ${hash}\t${path}`)
+      recorded.set(path, { record: `${mode} ${hash}\t${path}`, sparse: tag === 'S' })
     } else paths.add(path)
   }
   for (const listed of untracked) {
@@ -1131,14 +1135,60 @@ function treeFilesOf(
   }
   return {
     paths: [...paths].filter((path) => !recorded.has(path)),
-    recorded: [...recorded].map(([path, record]) => ({ path, record })),
+    recorded: [...recorded].map(([path, entry]) => ({ path, record: entry.record })),
+    sparse: [...recorded].filter(([, entry]) => entry.sparse).map(([path]) => path),
     ignoredByProject,
   }
 }
 
+/** The store's listing of the tree's untracked files against `index`, `extra` flags and all. */
+async function listStoreOthers(
+  environment: NodeJS.ProcessEnv,
+  store: StorePlace,
+  index: string,
+  extra: readonly string[],
+): Promise<string[] | Refusal> {
+  const others = await runStoreGit(
+    environment,
+    store,
+    ['ls-files', '--others', '--exclude-standard', DEFAULT_EXCLUDE, '-z', ...extra],
+    { index },
+  )
+  return others.code === 0 ? nulList(others.stdout) : refusedBy('ls-files', others)
+}
+
+/**
+ * `paths` split by the project's repository: `check-ignore` in the project answers for a copy's
+ * paths, its index too (a path the project tracks is never ignored, nor a directory holding one).
+ * Exit 1: none ignored.
+ */
+async function splitByProject(
+  environment: NodeJS.ProcessEnv,
+  project: string,
+  paths: readonly string[],
+): Promise<{ readonly kept: string[]; readonly ignored: string[] } | Refusal> {
+  if (paths.length === 0) return { kept: [], ignored: [] }
+  const checked = await readRepositoryGit(environment, ['check-ignore', '-z', '--stdin'], project, paths)
+  if (checked.code !== 0 && checked.code !== 1) return refusedBy('check-ignore', checked)
+  const ignored = nulList(checked.stdout)
+  const ignoredSet = new Set(ignored)
+  return { kept: paths.filter((path) => !ignoredSet.has(path)), ignored }
+}
+
 /**
  * The tree's untracked files by the store's own listing against `index`, less — for a copy — what
- * its project's repository ignores: `kept`, and `ignored`, the paths only the project ignores.
+ * its project's repository ignores: `kept`, and `ignored`, the paths only the project ignores, a
+ * wholly ignored directory as one `dir/` entry.
+ *
+ * ⚠ A COPY IS LISTED BY DIRECTORY FIRST (#569). The store never knows a directory only the
+ * project ignores (`.venv/`, `dist/`, `target/`): listed file by file, every path went to
+ * `check-ignore` — 100k files took 430 ms a snapshot, and past 64 MiB of listing every snapshot of
+ * the copy was refused. `--directory` collapses a wholly untracked directory to `dir/`, the
+ * project's `check-ignore` drops the ignored ones whole, and only the rest is listed again, file
+ * by file (`:(literal)`: a directory named `a*` is no glob), for the project to answer per file.
+ * An untracked nested repository is `dir/` in both listings, a gitlink as before. ⚠ An ignored
+ * directory INSIDE a wholly untracked one (a new `pkg/` holding its own `.venv/`) is still listed
+ * file by file: git collapses only the outermost untracked directory.
  */
 async function storeUntrackedFiles(
   environment: NodeJS.ProcessEnv,
@@ -1146,24 +1196,25 @@ async function storeUntrackedFiles(
   rules: IgnoreRules,
   index: string,
 ): Promise<{ readonly kept: string[]; readonly ignored: string[] } | Refusal> {
-  const others = await runStoreGit(
-    environment,
-    store,
-    ['ls-files', '--others', '--exclude-standard', DEFAULT_EXCLUDE, '-z'],
-    {
-      index,
-    },
-  )
-  if (others.code !== 0) return refusedBy('ls-files', others)
-  const candidates = nulList(others.stdout)
-  if (rules.kind !== 'copy' || candidates.length === 0) return { kept: candidates, ignored: [] }
-  // The copy's paths are the project's: `check-ignore` in the project answers for them, its index
-  // too (a path the project tracks is never ignored). Exit 1: none ignored.
-  const checked = await readRepositoryGit(environment, ['check-ignore', '-z', '--stdin'], rules.project, candidates)
-  if (checked.code !== 0 && checked.code !== 1) return refusedBy('check-ignore', checked)
-  const ignored = nulList(checked.stdout)
-  const ignoredSet = new Set(ignored)
-  return { kept: candidates.filter((path) => !ignoredSet.has(path)), ignored }
+  if (rules.kind !== 'copy') {
+    const candidates = await listStoreOthers(environment, store, index, [])
+    return 'refused' in candidates ? candidates : { kept: candidates, ignored: [] }
+  }
+  const collapsed = await listStoreOthers(environment, store, index, ['--directory', '--no-empty-directory'])
+  if ('refused' in collapsed) return collapsed
+  const outer = await splitByProject(environment, rules.project, collapsed)
+  if ('refused' in outer) return outer
+  const directories = outer.kept.filter((path) => path.endsWith('/'))
+  if (directories.length === 0) return outer
+  const pathspecs = directories.map((directory) => `:(literal)${directory}`)
+  const expanded = await listStoreOthers(environment, store, index, ['--', ...pathspecs])
+  if ('refused' in expanded) return expanded
+  const inner = await splitByProject(environment, rules.project, expanded)
+  if ('refused' in inner) return inner
+  return {
+    kept: [...outer.kept.filter((path) => !path.endsWith('/')), ...inner.kept],
+    ignored: [...outer.ignored, ...inner.ignored],
+  }
 }
 
 /**
@@ -1331,7 +1382,11 @@ function removeFiles(tree: string, paths: readonly string[]): string | undefined
  * index, `checkout-index --all --force --index` (the index's stat facts become the tree's, so the
  * next snapshot re-hashes nothing), and each listed file the snapshot lacks removed. ⚠ Only a
  * listed file is ever removed — never one the rules ignore (#566), whatever repository they come
- * from — and a nested repository is left where it is. The store's HEAD is not moved: the next
+ * from — and a nested repository is left where it is. ⚠ A path a sparse checkout left off disk
+ * stays off (#570): `read-tree` carries no skip-worktree bit, so `checkout-index` wrote every such
+ * path, widening the sparse checkout — and git, finding the file present, dropped the path's `S`
+ * in the user's index. The paths the tree's listing tagged `S` are marked skip-worktree in the
+ * store's index before `checkout-index`, which skips them. The store's HEAD is not moved: the next
  * snapshot is the tree as it then is, the last one its parent. Never throws.
  *
  * @group Snapshot store
@@ -1351,11 +1406,19 @@ export async function materializeSnapshot(options: {
   if ('refused' in before) return before
   const read = await runStoreGit(environment, store, ['read-tree', hash])
   if (read.code !== 0) return refusedBy('read-tree', read)
-  const checkedOut = await runStoreGit(environment, store, ['checkout-index', '--all', '--force', '--index'])
-  if (checkedOut.code !== 0) return refusedBy('checkout-index', checkedOut)
   const held = await runStoreGit(environment, store, ['ls-files', '-z'])
   if (held.code !== 0) return refusedBy('ls-files', held)
   const inSnapshot = new Set(nulList(held.stdout))
+  // Only a path the snapshot holds can be marked: `update-index` refuses one the index lacks.
+  const sparse = before.sparse.filter((path) => inSnapshot.has(path))
+  if (sparse.length > 0) {
+    const marked = await runStoreGit(environment, store, ['update-index', '--skip-worktree', '-z', '--stdin'], {
+      input: sparse,
+    })
+    if (marked.code !== 0) return refusedBy('update-index', marked)
+  }
+  const checkedOut = await runStoreGit(environment, store, ['checkout-index', '--all', '--force', '--index'])
+  if (checkedOut.code !== 0) return refusedBy('checkout-index', checkedOut)
   const failed = removeFiles(
     tree,
     before.paths.filter((path) => !inSnapshot.has(path)),
