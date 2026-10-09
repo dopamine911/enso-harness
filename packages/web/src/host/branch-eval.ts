@@ -1,6 +1,6 @@
-import type { SessionEntry } from '@earendil-works/pi-coding-agent'
 import type { EnsoTranscriptEntry, EnsoTurnStats } from '@enso/core'
 import { branchStats } from './branch-stats.ts'
+import type { LogEntry } from './log-entry.ts'
 import { transcriptOf } from './transcript.ts'
 
 /**
@@ -14,6 +14,6 @@ export interface BranchEval {
 }
 
 /** Walk one branch, root to leaf. */
-export function branchEval(branch: readonly SessionEntry[]): BranchEval {
+export function branchEval(branch: readonly LogEntry[]): BranchEval {
   return { transcript: transcriptOf(branch), turnStats: branchStats(branch).turnStats }
 }

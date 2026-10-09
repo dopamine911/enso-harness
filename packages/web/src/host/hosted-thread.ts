@@ -5,8 +5,10 @@ import {
   type ExtensionAPI,
   type ExtensionError,
   type InlineExtension,
+  initTheme,
   type PromptOptions,
   ProjectTrustStore,
+  VERSION as PI_VERSION,
 } from '@earendil-works/pi-coding-agent'
 import {
   type DialogAnswer,
@@ -116,6 +118,20 @@ import { treeRecordOf } from './thread-trees.ts'
  */
 
 const log = ensoLogger('host')
+
+/**
+ * The agent runtime this build is bound to, by version.
+ *
+ * The ONE place outside this host that needs pi's version is the log bundle's `about` (#132),
+ * and it takes this string rather than the import — the vendor gate (#145) keeps the import
+ * inside `host/`, and in this glue file rather than `agent-host.ts` (#811).
+ */
+export const AGENT_RUNTIME_VERSION: string = PI_VERSION
+
+/** The theme registry pi's UI code consults; harmless without a terminal, required once, before any thread is built. */
+export function prepareRuntimeTheme(): void {
+  initTheme()
+}
 
 /**
  * The host's own extension (see the module header): named so `loadedExtensionPaths` says what

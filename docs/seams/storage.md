@@ -497,7 +497,9 @@ export const EnsoInterruptedTail = Type.Union([
 `agent-host.ts` and the host's flows over it read and write every log through them: the stored threads
 (`stored-threads.ts`: the listing, the lookup by id, the cold reads), a fork (`thread-fork.ts`), tree
 making (`thread-tree-making.ts`), a rename or a restore (`thread-log-edits.ts`), and a delete
-(`thread-delete.ts`) — none of which names the runtime (#801). A thread's file is filed under its project's folder,
+(`thread-delete.ts`) — none of which names the runtime (#801); since #811 neither does `agent-host.ts`,
+whose runtime version, theme and catalogue reading live in `hosted-thread.ts` and `session-models.ts`,
+and the runtime's default log directory (`runtimeAgentDir`) in `thread-log.ts`. A thread's file is filed under its project's folder,
 `ENSO_HOME/projects/<projectIdOf(cwd)>/sessions/` (#552) — the host hands that directory to the runtime at
 create, a fork inherits its source's, and `bun run enso` hands the terminal runtime the same directory
 (`PI_CODING_AGENT_SESSION_DIR`); a launch first moves the sessions the runtime filed by encoded cwd under
@@ -602,6 +604,19 @@ what needs the vendor's types (a provider refusal, a result's descriptor); the h
 call it on `ctx.sessionManager.getBranch()`; the corpus scripts call it on the omp corpus. A
 different runtime is a different `runtime-entries.ts`, and the folds do not move.
 
+**And since #811, the branch readers take the log's entries in a type of ours.** The readers
+`ThreadLog` answers through — `branch-stats.ts`, `branch-eval.ts`, `branch-incident-history.ts`,
+`branch-judge-cases.ts` — and `context-history.ts` take the branch as `LogEntry`
+(`packages/web/src/host/log-entry.ts`): the stored entry's envelope and the fields they read, a type
+of ours. Entries cross into it in two places, both checked by the compiler against the runtime's own
+entry type: `logOver` in `thread-log.ts` (its `branch()`), and `branch-context.ts`, which hands
+`context-history.ts` the branch it projects. A runtime bump that renames a field a reader reads, or
+adds an entry kind or a message role, fails to compile there rather than inside a reader. The types
+change nothing at run time: an entry is still the runtime's object. Two files keep the runtime's
+types on purpose: `branch-context.ts` builds each request's context with pi's own
+`buildSessionProjection`, and `context-elements.ts` prices each message with pi's `estimateTokens`,
+so the context tab's estimate stays pi's to the token; both are reached only through `ThreadLog`.
+
 **`sessionFile` is a lagging copy.** The runtime persists lazily — nothing reaches disk until the first
 assistant message — so `inspect()` reports the path only once the file exists and `null` before;
 a thread that has only run slash commands has a full branch and no file, and `listSessions` omits it.
@@ -613,10 +628,12 @@ a thread that has only run slash commands has a full branch and no file, and `li
 Which files may import the runtime is fixed by a gate (#558): `VENDOR_IMPORTERS_ALLOWED_INSIDE_ROOTS` in `test/vendor-gate.test.ts` lists them, and the list only shrinks, so a new file cannot quietly add to what follows.
 
 Replace the store — another file layout, a database, a remote log — and the files that change are
-`packages/web/src/host/thread-log.ts` (`ThreadLog` and its store over the new log),
-`packages/web/src/host/session-files.ts` and `stored-threads.ts` (`listSessions`, `locate`:
-where the files are), `packages/web/src/host/transcript.ts` (the new store's entries → the
-transcript of ours), `packages/web/src/host/branch-stats.ts` (the new store's messages → per-turn stats) and `packages/web/src/host/session-usage.ts` (the new store's recorded spend → pi's
+`packages/web/src/host/thread-log.ts` (`ThreadLog` and its store over the new log, its entries handed
+to the branch readers as `LogEntry`, `log-entry.ts`), `packages/web/src/host/session-files.ts` and
+`stored-threads.ts` (`listSessions`, `locate`: where the files are), `packages/web/src/host/transcript.ts`
+(the new store's entries → the transcript of ours), `packages/web/src/host/branch-context.ts` and
+`context-elements.ts` (pi's projection and pricing of a request's context, #811) and
+`packages/web/src/host/session-usage.ts` (the new store's recorded spend → pi's
 totals). That is what the storage-seam test measures: a second importer of the session
 manager anywhere else is a failing test with the file named. The server routes, the registry, the
 follow's snapshot, the wire schemas, the reader, the drawer, the browser and every server test over

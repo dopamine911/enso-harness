@@ -1,4 +1,3 @@
-import type { SessionEntry } from '@earendil-works/pi-coding-agent'
 import {
   customEntriesOf,
   type EnsoRiskThresholds,
@@ -7,6 +6,7 @@ import {
   replayIncidents,
   sessionIncidentsOf,
 } from '@enso/core'
+import type { LogEntry } from './log-entry.ts'
 import { transcriptOf } from './transcript.ts'
 
 /**
@@ -21,7 +21,7 @@ export type BranchIncidentHistory = Pick<EnsoThreadIncidents, 'incidents' | 'rep
 
 /** Walk one branch, root to leaf. */
 export function branchIncidentHistory(
-  branch: readonly SessionEntry[],
+  branch: readonly LogEntry[],
   thresholds: EnsoRiskThresholds,
 ): BranchIncidentHistory {
   const transcript = transcriptOf(branch)

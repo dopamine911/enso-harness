@@ -1,5 +1,5 @@
-import type { SessionEntry } from '@earendil-works/pi-coding-agent'
 import { contentToText, type EnsoPromptStats, type EnsoToolCallStats, type EnsoTurnStats } from '@enso/core'
+import type { LogEntry } from './log-entry.ts'
 
 /**
  * A thread's branch, analysed (#45 phase 2): per prompt, per turn, per tool — the session half
@@ -79,7 +79,7 @@ function currentPrompt(walk: Walk): MutablePrompt {
   return walk.prompts[walk.prompts.length - 1] ?? freshPrompt(0, '')
 }
 
-type MessageEntry = Extract<SessionEntry, { type: 'message' }>
+type MessageEntry = Extract<LogEntry, { type: 'message' }>
 type Message = MessageEntry['message']
 type AssistantMessage = Extract<Message, { role: 'assistant' }>
 type ToolResultMessage = Extract<Message, { role: 'toolResult' }>
@@ -157,7 +157,7 @@ function walkMessage(walk: Walk, sessionEntry: MessageEntry): void {
 }
 
 /** Walk one branch, root to leaf. */
-export function branchStats(branch: readonly SessionEntry[]): BranchStats {
+export function branchStats(branch: readonly LogEntry[]): BranchStats {
   const walk: Walk = {
     prompts: [freshPrompt(0, '')],
     spans: new Map(),

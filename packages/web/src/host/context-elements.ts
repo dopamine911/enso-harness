@@ -12,6 +12,7 @@ import {
   estimateTextTokens,
   summarizeToolInput,
 } from '@enso/core'
+import type { LogMessage } from './log-entry.ts'
 
 /**
  * A request's context as ELEMENTS (#361) — dsh-context's browser rows: a prompt section, a tool
@@ -41,7 +42,9 @@ import {
 // pi-coding-agent does not re-export pi-agent-core's `AgentMessage`; the projection's entry type,
 // which it does export, names it.
 export type ContextMessage = ProjectedSessionEntry['messages'][number]
-type SystemMessage = Extract<ContextMessage, { role: 'system' }>
+// The fold's input is the log's own type, so `context-history.ts` folds a stored entry's system message
+// without naming the runtime (#811); a projected system message is one too.
+type SystemMessage = Extract<LogMessage, { role: 'system' }>
 type SystemTool = NonNullable<SystemMessage['toolsAdded']>[number]
 
 /** What an element is made of, before it is described. */

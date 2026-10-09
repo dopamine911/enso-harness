@@ -1,7 +1,8 @@
 /**
  * The models a thread with no session is offered (#688): a SESSION's list, never a bare runtime's.
- * Beside it, two other readings of pi's model runtime: the `/login` facts per provider and the model
- * a thread chose before its first message.
+ * Beside it, the other readings of pi's model runtime: the catalogue's rows over the agent dir and
+ * that list (`catalogueOf`, #811), the `/login` facts per provider, and the model a thread chose
+ * before its first message.
  *
  * The catalogue (#484) serves the Start dialog without building the thread, and it used to read
  * pi's model runtime over the agent dir alone — "what a session builds, minus the session". It is
@@ -29,6 +30,7 @@
  * load or threw on `session_start`, or a probe that could not be built at all — and then the
  * caller falls back to the agent dir's list: a broken probe is never an empty model picker.
  */
+import { join } from 'node:path'
 import { type Api, getSupportedThinkingLevels, type Model } from '@earendil-works/pi-ai'
 import {
   type AgentSessionServices,
@@ -37,11 +39,12 @@ import {
   createAgentSessionServices,
   type InlineExtension,
   type LoadExtensionsResult,
-  type ModelRuntime,
+  ModelRuntime,
   SettingsManager,
 } from '@earendil-works/pi-coding-agent'
-import { ensoLogger } from '@enso/core'
-import type { LoginProviderFacts } from './host-flows.ts'
+import { ensoLogger, type RuntimeCommand } from '@enso/core'
+import { catalogueRows } from './host-commands.ts'
+import { hostFlowRows, type LoginProviderFacts, loginOptions, logoutOptions } from './host-flows.ts'
 import type { ChoiceBeforeFirstMessage } from './thread-log.ts'
 
 const log = ensoLogger('host')
@@ -147,6 +150,49 @@ export function loginFactsOf(modelRuntime: ModelRuntime): LoginProviderFacts[] {
       configuredVia: status.configured ? (status.label ?? status.source) : undefined,
     }
   })
+}
+
+/**
+ * The catalogue's rows (#484). The logins and stored credentials are read from pi's runtime over
+ * the agent dir alone (`sdk.js`: `ModelRuntime.create({ authPath, modelsPath })`); the MODELS are
+ * a bound session's (#688), the agent dir's alone only when no session could be had.
+ */
+export async function catalogueOf(agentDir: string, models: SessionModels): Promise<RuntimeCommand[]> {
+  const modelRuntime = await ModelRuntime.create({
+    authPath: join(agentDir, 'auth.json'),
+    modelsPath: join(agentDir, 'models.json'),
+  })
+  const providerNameOf = (providerId: string): string => modelRuntime.getProvider(providerId)?.name ?? providerId
+  const credentials = await modelRuntime.listCredentials({ signal: AbortSignal.timeout(15_000) })
+  const login = loginOptions(loginFactsOf(modelRuntime))
+  const logout = logoutOptions(
+    credentials.map((credential) => ({
+      providerId: credential.providerId,
+      providerName: providerNameOf(credential.providerId),
+      type: credential.type,
+    })),
+  )
+  const offered = (await models.available()) ?? modelRuntime.getAvailableSnapshot()
+  return catalogueRows(
+    offered,
+    getSupportedThinkingLevels,
+    hostFlowRows(login, logout),
+    configuredDefaultModel(agentDir),
+  )
+}
+
+/**
+ * The model pi starts a session on when none is chosen: the agent dir's `defaultProvider` and
+ * `defaultModel` (#674), as `provider/id`. Global settings only — a project's are read only once
+ * it is trusted, and the catalogue serves threads of every project.
+ */
+function configuredDefaultModel(agentDir: string): string | undefined {
+  // The cwd argument only locates PROJECT settings, which an untrusted manager never reads:
+  // the agent dir stands in for it, so only the global `settings.json` is read.
+  const settings = SettingsManager.create(agentDir, agentDir, { projectTrusted: false })
+  const provider = settings.getDefaultProvider()
+  const model = settings.getDefaultModel()
+  return provider === undefined || model === undefined ? undefined : `${provider}/${model}`
 }
 
 /**

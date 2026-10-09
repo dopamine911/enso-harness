@@ -1,5 +1,4 @@
 import { posix } from 'node:path'
-import type { SessionEntry } from '@earendil-works/pi-coding-agent'
 import {
   ACTIVE_AGENT_CUSTOM_TYPE,
   contentToText,
@@ -8,6 +7,7 @@ import {
   readRecordedMode,
 } from '@enso/core'
 import { foldSystem } from './context-elements.ts'
+import type { LogEntry } from './log-entry.ts'
 
 /**
  * What happened to a thread's context, and to its files (#361 phase 4) — dsh-context's Context
@@ -25,7 +25,7 @@ export type ContextTotalAt = (leafId: string | null) => number
 interface EventWalk {
   readonly events: EnsoContextEvent[]
   readonly totalAt: ContextTotalAt
-  readonly byId: ReadonlyMap<string, SessionEntry>
+  readonly byId: ReadonlyMap<string, LogEntry>
   /** The request an entry first reaches: the replies so far, plus one. */
   turn: number
   sawPrompt: boolean
@@ -37,7 +37,7 @@ interface EventWalk {
 /** Records an event at its entry; `key` defaults to the entry's id — one event per entry, but for a prompt's sections. */
 function push(
   walk: EventWalk,
-  sessionEntry: SessionEntry,
+  sessionEntry: LogEntry,
   event: Pick<EnsoContextEvent, 'kind' | 'label' | 'tokens'>,
   key: string = sessionEntry.id,
 ): void {
@@ -45,10 +45,10 @@ function push(
 }
 
 /** The change an entry made to the context: its estimate at the entry, less just before. */
-const changeAt = (walk: EventWalk, sessionEntry: SessionEntry): number =>
+const changeAt = (walk: EventWalk, sessionEntry: LogEntry): number =>
   walk.totalAt(sessionEntry.id) - walk.totalAt(sessionEntry.parentId)
 
-type SystemMessage = Extract<Extract<SessionEntry, { type: 'message' }>['message'], { role: 'system' }>
+type SystemMessage = Extract<Extract<LogEntry, { type: 'message' }>['message'], { role: 'system' }>
 
 /**
  * What a later system message changed, as one line: its sections by name, its tools (`tools
@@ -72,7 +72,7 @@ function deltaLabel(message: SystemMessage): string {
  * signed, because a later system message is a delta pi folds into the prompt
  * (`context-elements.ts`), and one that deletes a section or removes a tool shrinks it.
  */
-function systemEvents(walk: EventWalk, sessionEntry: Extract<SessionEntry, { type: 'message' }>): void {
+function systemEvents(walk: EventWalk, sessionEntry: Extract<LogEntry, { type: 'message' }>): void {
   const { message } = sessionEntry
   if (message.role !== 'system') return
   if (walk.sawPrompt) {
@@ -103,7 +103,7 @@ function editedLabel(walk: EventWalk, targetId: string): string {
  * A switch of model, thinking level or mode. Whatever is set before the first request is where
  * the thread began — the host sets the model and pi the level as a session opens — not a switch.
  */
-function settingEvents(walk: EventWalk, sessionEntry: SessionEntry): void {
+function settingEvents(walk: EventWalk, sessionEntry: LogEntry): void {
   const began = walk.turn === 1
   if (sessionEntry.type === 'model_change') {
     const model = `${sessionEntry.provider}/${sessionEntry.modelId}`
@@ -123,7 +123,7 @@ function settingEvents(walk: EventWalk, sessionEntry: SessionEntry): void {
   }
 }
 
-function entryEvents(walk: EventWalk, sessionEntry: SessionEntry): void {
+function entryEvents(walk: EventWalk, sessionEntry: LogEntry): void {
   switch (sessionEntry.type) {
     case 'message':
       systemEvents(walk, sessionEntry)
@@ -163,7 +163,7 @@ function entryEvents(walk: EventWalk, sessionEntry: SessionEntry): void {
 }
 
 /** Every context event on the branch, oldest first. */
-export function contextEvents(branch: readonly SessionEntry[], totalAt: ContextTotalAt): EnsoContextEvent[] {
+export function contextEvents(branch: readonly LogEntry[], totalAt: ContextTotalAt): EnsoContextEvent[] {
   const walk: EventWalk = {
     events: [],
     totalAt,
@@ -349,7 +349,7 @@ function operationsOf(call: CallFacts): Operation[] {
 }
 
 /** Every result on the branch, by the call it answers. */
-function resultsOf(branch: readonly SessionEntry[]): Map<string, ToolResultFacts> {
+function resultsOf(branch: readonly LogEntry[]): Map<string, ToolResultFacts> {
   const results = new Map<string, ToolResultFacts>()
   for (const sessionEntry of branch) {
     if (sessionEntry.type !== 'message' || sessionEntry.message.role !== 'toolResult') continue
@@ -364,7 +364,7 @@ function resultsOf(branch: readonly SessionEntry[]): Map<string, ToolResultFacts
 }
 
 /** Every call on the branch with its turn and, when it has landed, its result. */
-function callsOf(branch: readonly SessionEntry[]): CallFacts[] {
+function callsOf(branch: readonly LogEntry[]): CallFacts[] {
   const results = resultsOf(branch)
   const calls: CallFacts[] = []
   let turn = 0
@@ -388,7 +388,7 @@ function callsOf(branch: readonly SessionEntry[]): CallFacts[] {
 }
 
 /** Every file operation on the branch, oldest first. */
-export function fileOperations(branch: readonly SessionEntry[]): EnsoFileOperation[] {
+export function fileOperations(branch: readonly LogEntry[]): EnsoFileOperation[] {
   return callsOf(branch).flatMap((call) =>
     operationsOf(call).map((fileOperation, operationIndex) => ({
       key: `${call.key}.${operationIndex}`,

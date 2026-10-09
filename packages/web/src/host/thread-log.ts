@@ -1,5 +1,9 @@
 import { existsSync, writeFileSync } from 'node:fs'
-import { type CreateAgentSessionFromServicesOptions, SessionManager } from '@earendil-works/pi-coding-agent'
+import {
+  type CreateAgentSessionFromServicesOptions,
+  getAgentDir,
+  SessionManager,
+} from '@earendil-works/pi-coding-agent'
 import {
   customEntriesOf,
   type EnsoForkPoint,
@@ -16,6 +20,7 @@ import { type BranchIncidentHistory, branchIncidentHistory } from './branch-inci
 import { type BranchJudgeCases, branchJudgeCases, type JudgeCaseInputs } from './branch-judge-cases.ts'
 import { type BranchStats, branchStats } from './branch-stats.ts'
 import { forkPointOf } from './fork-point.ts'
+import type { LogEntry } from './log-entry.ts'
 import { storedSessionUsage } from './session-usage.ts'
 import { hasSentRequest } from './system-prompt.ts'
 import { recordedModelOf, transcriptOf } from './transcript.ts'
@@ -26,6 +31,8 @@ import { recordedModelOf, transcriptOf } from './transcript.ts'
  * THE ONE FILE that touches the runtime's session manager or its file layout, so a later store is a
  * change here and nowhere else. Everything above reads a log through {@link ThreadLog}; what crosses
  * is ours — the transcript as `EnsoTranscriptEntry`, the branch's readings as the host's own shapes.
+ * The branch readers take the runtime's entries as `LogEntry` (`log-entry.ts`, #811), and they cross
+ * into it in `logOver` below: the compiler checks the runtime's entry against our type there.
  *
  * A log is open in memory and writes nothing until an append. The runtime writes a log's file only at
  * its first assistant message, so a log holding none has no file until {@link ThreadLog.writeIfUnflushed}
@@ -117,6 +124,8 @@ export type RuntimeLog = CreateAgentSessionFromServicesOptions['sessionManager']
 const runtimeLogs = new WeakMap<ThreadLog, SessionManager>()
 
 function logOver(manager: SessionManager): ThreadLog {
+  /** The branch as the readers of ours take it (#811): where the runtime's entries become `LogEntry`. */
+  const branch = (): readonly LogEntry[] => manager.getBranch()
   const log: ThreadLog = {
     get threadId() {
       return manager.getSessionId()
@@ -137,12 +146,12 @@ function logOver(manager: SessionManager): ThreadLog {
     recordedModel: () => recordedModelOf(manager.getBranch()),
     incidents: () => sessionIncidentsOf(customEntriesOf(transcriptOf(manager.getBranch()))),
     hasSentRequest: () => hasSentRequest(manager.getBranch()),
-    stats: () => branchStats(manager.getBranch()),
+    stats: () => branchStats(branch()),
     context: () => branchContext(manager.getBranch()),
     requestDetail: (request) => branchRequestDetail(manager.getBranch(), request),
-    eval: () => branchEval(manager.getBranch()),
-    incidentHistory: (thresholds) => branchIncidentHistory(manager.getBranch(), thresholds),
-    judgeCases: (inputs) => branchJudgeCases(manager.getBranch(), inputs),
+    eval: () => branchEval(branch()),
+    incidentHistory: (thresholds) => branchIncidentHistory(branch(), thresholds),
+    judgeCases: (inputs) => branchJudgeCases(branch(), inputs),
     forkPoint: (facts) => forkPointOf(manager.getBranch(), facts),
     promptAt(entryId) {
       const entry = manager.getEntry(entryId)
@@ -198,6 +207,11 @@ export function createLog(threadId: string, cwd: string, directory: string | und
 /** A log of no thread, in memory only: the probe the catalogue's models are read through (#688). */
 export function probeLog(agentDir: string): RuntimeLog {
   return SessionManager.inMemory(agentDir)
+}
+
+/** Where the runtime files logs by default (its agent dir), asked fresh: it follows the environment the host set. */
+export function runtimeAgentDir(): string {
+  return getAgentDir()
 }
 
 /**
