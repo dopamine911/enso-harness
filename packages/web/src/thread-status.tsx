@@ -90,11 +90,11 @@ export type Activity =
  * or an unmatched result at the tail — the run is in flight. The part itself is still on
  * screen in the transcript; nothing is hidden by summarising it.
  *
- * ⚠ `selectMessageUI` HERE, `selectChatUI` in `chat-screen.tsx` (#282) — the opposite of
+ * ⚠ `selectMessageUI` HERE, `selectChatUI` in `transcript-selection.ts` (#282) — the opposite of
  * that module's choice, and deliberately. The transcript renderer needs the whole-list
  * selection because it renders EVERY message, so a call in an earlier message whose result
  * the server stamped onto a later one must still pair or it reads `running…` for ever
- * (`chat-screen.tsx`'s `message` component says so). This function reads only the LAST
+ * (`message-row.tsx#ChatMessageRow` says so). This function reads only the LAST
  * message, where that shape cannot arise: a result is normalised into the message holding
  * its call, and a result whose call is absent from the transcript is unmatched under BOTH
  * selections. The pairing this loses is pairing across messages, which the tail read never
@@ -549,7 +549,7 @@ function useThreadStatusAnnouncement(
 
 /**
  * The bar wired to its thread: the chat's messages and in-flight flag come in as props
- * (the chat hook is bound inside chat-screen.tsx, and this module stays free of it), the
+ * (the chat hook is bound inside thread-pane.tsx, and this module stays free of it), the
  * thread's usage store and its disconnected flag (#119) are read from context. It announces
  * what it shows (`useThreadStatusAnnouncement`, #737).
  */

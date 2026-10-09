@@ -369,19 +369,20 @@ throwing inside the state layer's stream loop, where a throw would end the run.
 
 **The state layer's side is built once per thread.** `createThreadStores` (`thread-stores.ts#createThreadStores`)
 creates every store above and the thread's `connection` (`createFollowConnection`,
-with `onProblem` routed into the thread's notifications and `onToolResultDescriptor` into `toolResultDescriptors`, #411). `chat-screen.tsx#threadChatOptions`
+with `onProblem` routed into the thread's notifications and `onToolResultDescriptor` into `toolResultDescriptors`, #411). `thread-pane.tsx#threadChatOptions`
 hands that connection, the stored history and an `onCustomEvent` closure over the thread's stores to the
-state layer's chat factory (`chat-screen.tsx#createThreadChatHook`) — one factory per thread, because
+state layer's chat factory (`thread-pane.tsx#createThreadChatHook`) — one factory per thread, because
 the state layer passes `onCustomEvent` no thread id.
 
-**The presentation layer is consumed by two files.** `chat-screen.tsx`'s imports pull
-`attachments`, `conversation`, `message`, `prompt-input` and `queue` from `components/ai-elements/`;
-`selected-message-part.tsx`'s pull `reasoning`. Those six ai-elements files and their commit pins are
+**The presentation layer is consumed by the surface's own components.** The pane's modules pull
+`attachments`, `prompt-input` and `queue` (`composer.tsx`), `conversation` (`chat-layout.tsx`,
+`transcript.tsx`) and `message` (`message-row.tsx`) from `components/ai-elements/`;
+`selected-message-part.tsx` pulls `reasoning`. Those ai-elements files and their commit pins are
 the generated table in [`ported-provenance.md`](./ported-provenance.md); the eight `ui/` shadcn
 primitives beneath the same fence are receipted by [`components/ui/README.md`](../../packages/web/src/components/ui/README.md)
 instead, because the shadcn registry is re-fetched by style and version rather than by commit.
-The renderers that stay ours are outside the ported directory: the dialog card is `EnsoDialogCard` in
-`chat-screen.tsx` itself (`#EnsoDialogCard`), and the tool-result descriptor renderer, notices, the mode select
+The renderers that stay ours are outside the ported directory: the dialog card is
+`dialog-card.tsx#EnsoDialogCard`, and the tool-result descriptor renderer, notices, the mode select
 and the status bar are the `SelectedMessagePart`, `NotificationLines`, `PermissionModeSelect`,
 `ThreadStatusBar` and `EnsoRendererMap` imports.
 
@@ -396,8 +397,8 @@ tree; the words contract (`THREAD_STATUS_WORDS`) stays for readers. From the ren
 server: an event cannot fire for a state the page failed to show.
 
 **A second connection today: the fixture.** `?fixture` swaps the live adapter for the scripted
-conversation in `fixture-conversation.ts` (`chat-screen.tsx#threadChatOptions`, `connection: isFixtureMode ?
-createFixtureChat().transport() : stores.connection`), and the option's type admits both (`chat-screen.tsx#ThreadChatOptions`).
+conversation in `fixture-conversation.ts` (`thread-pane.tsx#threadChatOptions`, `connection: isFixtureMode ?
+createFixtureChat().transport() : stores.connection`), and the option's type admits both (`pane-context.ts#ThreadChatOptions`).
 Everything downstream of the connection is identical on both paths, which is what the fixture is for
 (the styling dev loop, #31). The swap covers only the client's send, so a fixture page's threads are
 also minted with `fixtureFetch`, which refuses every request by name (#404): a prompt queued
@@ -445,8 +446,8 @@ need none: an upstream re-port is the second implementation, and the gate is wha
 - **`page-scoped-stores.test.ts`** (`packages/web/src/__tests__/`) walks every non-test, non-component
   source under `packages/web/src` for a store created at column zero and requires the list to equal
   exactly five page-scoped stores, each with its reason (`page-scoped-stores.test.ts#PAGE_SCOPED_BY_DESIGN`):
-  `thread-stores.ts:threadList` (the rail's list), `chat-screen.tsx:storedThreads` (the server's
-  stored-threads listing), `chat-screen.tsx:projectList` (the server's projects, #395),
+  `thread-stores.ts:threadList` (the rail's list), `page-listings.ts:storedThreads` (the server's
+  stored-threads listing), `page-listings.ts:projectList` (the server's projects, #395),
   `thread-stores.ts:browserLogging` (the page's log ring and shipper) and `page-clock.ts:pageClock`
   (the page's clock, #278). A sixth module-level store is
   thread state shared across threads — the bug class the mounted two-threads test observes — and
@@ -515,7 +516,7 @@ Replace the state layer and the files that change are the adapter and its two ne
 `follow-connection.ts` (a new send/subscribe shape, or none), `custom-event-router.ts` (the client's
 `onCustomEvent` is the entry; the dispatch to stores stays), `to-agui.ts` (deleted — its header
 says so: *a renderer that stops speaking AG-UI deletes it and the adapter*), the chat factory in
-`chat-screen.tsx` (`threadChatOptions` and `createThreadChatHook`, and the widget map
+`thread-pane.tsx` (`threadChatOptions` and `createThreadChatHook`, and the widget map
 written against the client's `ChatUIHost`), plus the message-shape crossing, which is seven sites and
 not three: `ThreadStores.history` and `reviveHistoryMessages` in the browser,
 `server/transcript-to-messages.ts` as the producer, its two callers in `server/follow.ts` (the follow

@@ -179,7 +179,7 @@ export interface ModelChipProps {
   readonly state: EnsoModelState | null
   /** What a cold thread's branch records (#434); shown only while `state` is `null`. */
   readonly recorded?: EnsoRecordedModel | null
-  /** Open the model dialog — the owner renders it (`chat-screen.tsx`), the same one the palette's `/model` row opens. */
+  /** Open the model dialog — the owner renders it (`composer.tsx`), the same one the palette's `/model` row opens. */
   readonly onOpen: () => void
 }
 

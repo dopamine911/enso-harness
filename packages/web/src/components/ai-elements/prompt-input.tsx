@@ -13,7 +13,7 @@
  *   screenshot action, `globalDrop`, `syncHiddenInput`, speech, model select, the header
  * - removed `PromptInputSubmit`: upstream folds send and stop into one button by status;
  *   here send stays offered in flight (a prompt during a run queues through pi, #75) and stop
- *   is its own button (#116) — two buttons by decision, owned by `chat-screen.tsx`
+ *   is its own button (#116) — two buttons by decision, owned by `composer.tsx`
  * - `add` reports EVERY refusal, with a count, even when the rest of the batch went through —
  *   upstream reported only when the whole batch failed, so a mixed drop lost files silently
  *   (PR #141 review); the selection is a pure `selectAttachments`, tested without a DOM, and

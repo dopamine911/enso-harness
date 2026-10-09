@@ -6,7 +6,7 @@ import { selectIn } from './static-markup.ts'
 /**
  * #84's browser half: the CURRENT permission mode as state, and the control that changes
  * it. One store per thread (#90 PR 3), so each case builds a fresh one. The dropdown is
- * rendered statically; its send wiring lives in chat-screen.tsx and is covered by the live
+ * rendered statically; its send wiring lives in composer.tsx and is covered by the live
  * receipt (renderToStaticMarkup runs no handlers).
  */
 

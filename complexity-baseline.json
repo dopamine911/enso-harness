@@ -36,11 +36,6 @@
         "count": 1
       }
     },
-    "packages/web/src/chat-screen.tsx": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
     "packages/web/src/command-palette.tsx": {
       "complexity_moderate": {
         "count": 1
@@ -204,11 +199,6 @@
       }
     },
     "packages/harness/core/web-search/sse.ts\u0000readSseEvents": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "packages/web/src/chat-screen.tsx\u0000ChatScreen": {
       "complexity_moderate": {
         "count": 1
       }

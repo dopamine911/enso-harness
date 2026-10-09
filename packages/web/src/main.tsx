@@ -12,7 +12,7 @@ import { browserLogging } from './thread-stores.ts'
 
 /**
  * THE ENTRY, deliberately thin: mount the app, nothing else. Everything importable lives
- * in chat-screen.tsx so the coverage manifest can put it in the denominator — this file
+ * in modules the coverage manifest can import (the page is chat-screen.tsx) — this file
  * is the one module allowed to touch the DOM at module scope, and it is excluded from the
  * import-everything discipline BY NAME with this rationale.
  */

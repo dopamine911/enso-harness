@@ -529,7 +529,7 @@ export function ThreadStatsView({
 
 /**
  * The Stats view wired to its thread: read on open and whenever the thread's usage moves
- * (`read-on-usage.ts`). `onNavigate` is the pane's (`chat-screen.tsx`): it finds the target in
+ * (`read-on-usage.ts`). `onNavigate` is the pane's (`chat-layout.tsx`): it finds the target in
  * that pane's transcript and says whether it could.
  */
 export function ThreadStatsDrawer({ onNavigate }: { readonly onNavigate?: RevealStatsTarget }): React.ReactNode {

@@ -2,14 +2,14 @@ import { afterAll, afterEach, expect, test } from 'bun:test'
 import { ENSO_PROJECT_HEADER } from '@enso/core'
 import { act } from 'react'
 import type { createRoot as CreateRoot, Root } from 'react-dom/client'
-import type * as ChatScreenModule from '../chat-screen.tsx'
+import type * as PageHeaderModule from '../page-header.tsx'
 import type * as ThreadStoresModule from '../thread-stores.ts'
 import { ensureDom, releaseDom } from './dom-environment.ts'
 
 // ⚠ A DOM before react-dom/client and Radix evaluate — the manager is a Radix dialog.
 ensureDom()
 const { createRoot }: { createRoot: typeof CreateRoot } = await import('react-dom/client')
-const { HeaderPromptManager }: typeof ChatScreenModule = await import('../chat-screen.tsx')
+const { HeaderPromptManager }: typeof PageHeaderModule = await import('../page-header.tsx')
 const { clearThreadsForTest, mintThread, threadListStore }: typeof ThreadStoresModule =
   await import('../thread-stores.ts')
 

@@ -14,7 +14,7 @@ import { quotedLiterals, REPOSITORY_ROOT } from './gate-support.ts'
  * itself is never the sensor.
  *
  * ⚠ Enforcement, not a unit test — the shape of `logging-gate.test.ts`. It is one half of a
- * chain: this gate pins the spec's constants to STRING LITERALS in `chat-screen.tsx`, and
+ * chain: this gate pins the spec's constants to STRING LITERALS in `composer.tsx`, and
  * `packages/web/src/__tests__/thread-pane.test.tsx` mounts the pane and pins those same names
  * to the RENDERED MARKUP. Together: a name in the spec resolves to an element a user can
  * reach. The halves are split because `packages/web/src` is the browser zone and fallow refuses
@@ -25,7 +25,7 @@ import { quotedLiterals, REPOSITORY_ROOT } from './gate-support.ts'
  */
 
 const SPEC_PATH = 'packages/web/e2e/chat.e2e.ts'
-const COMPOSER_PATH = 'packages/web/src/chat-screen.tsx'
+const COMPOSER_PATH = 'packages/web/src/composer.tsx'
 const specSource = readFileSync(join(REPOSITORY_ROOT, SPEC_PATH), 'utf8')
 const composerSource = readFileSync(join(REPOSITORY_ROOT, COMPOSER_PATH), 'utf8')
 

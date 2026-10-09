@@ -1,0 +1,55 @@
+import type { ConnectConnectionAdapter, UIMessage } from '@tanstack/ai-client'
+import { type ChatUIContexts, createChatHookContexts } from '@tanstack/ai-react/ui'
+import { createContext } from 'react'
+import type { FollowConnection } from './follow-connection.ts'
+
+/**
+ * What the widgets in a thread's pane read through (#90): TanStack's chat contexts, shared by every
+ * thread's factory, and the pane's view and debug switches.
+ */
+
+/**
+ * The chat contexts every widget below reads through — created ONCE and handed to every
+ * per-thread factory (`createThreadChatHook`), TanStack's escape hatch for "widgets in
+ * other files". One `useChatContext` serves every thread's tree because each pane's
+ * `AppChat` provides the same context, with its own chat instance.
+ */
+export const chatContexts = createChatHookContexts()
+export const useChatContext: ChatUIContexts['useChatContext'] = chatContexts.useChatContext
+
+/** The options type the widget map below is written against — one shape for every thread. */
+export interface ThreadChatOptions {
+  threadId: string
+  initialMessages: UIMessage[]
+  /** The live follow, or — under `?fixture` — the scripted conversation's local adapter. */
+  connection: ConnectConnectionAdapter | FollowConnection
+  live: boolean
+  onCustomEvent: (eventType: string, data: unknown) => void
+}
+
+/**
+ * Whether THIS pane shows the `?debug` column. Provided per pane as `debugOpen && active`:
+ * every live pane stays mounted, so gating on the page-level switch alone would render the
+ * column — with its fixed `id` and its own inspection fetches — once per thread, hidden or
+ * not (#94). Exactly one pane is active, so exactly one column exists.
+ */
+export const DebugOpenContext = createContext(false)
+
+/**
+ * The page's main views (#361): the transcript, or an analysis of the thread in its place. One
+ * choice for the page — switching thread keeps it — rendered by the pane on screen.
+ */
+export type ThreadView = 'chat' | 'context' | 'stats' | 'changes'
+
+/**
+ * What THIS pane shows, and how to change the page's view. `shown` is undefined in a hidden
+ * pane, which then draws its transcript and nothing else: the stats view — its fetches, its
+ * `stores.usage` subscription, its panel `id`s — exists once, in the pane on screen, the debug
+ * column's rule above (#358).
+ */
+export interface PaneView {
+  readonly shown: ThreadView | undefined
+  readonly open: (view: ThreadView) => void
+}
+
+export const PaneViewContext = createContext<PaneView>({ shown: undefined, open: (): void => undefined })
