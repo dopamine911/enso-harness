@@ -67,7 +67,7 @@ function followProbe(): FollowProbe {
   }
 }
 
-/** What a pane does at mount: `live: true` subscribes the thread's connection (`chat-screen.tsx`). */
+/** What a pane does at mount: `live: true` subscribes the thread's connection (`thread-pane.tsx`). */
 function mount(stores: ThreadStores): void {
   const chunks: unknown[] = []
   void (async () => {

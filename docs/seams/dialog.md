@@ -266,11 +266,11 @@ request with `isEnsoDialogSpec` rather than casting).
 **Consumed by the browser.** The question arrives as an `extension-ui-request` observation whose
 `dialog` the mapper checked with `isEnsoDialogSpec` (`map-events.ts#mapExtensionUiRequest`); the adapter passes the
 observation whole on a CUSTOM chunk named by its kind (`to-agui.ts#custom`) and the router checks
-`{ id, dialog }` again against `EnsoOpenDialog` before it reaches the store (`custom-event-router.ts#routeUiRequest`). `EnsoDialogCard` in
-`packages/web/src/chat-screen.tsx` (`#EnsoDialogCard`) renders one card and hands `answerDialog` in
+`{ id, dialog }` again against `EnsoOpenDialog` before it reaches the store (`custom-event-router.ts#routeUiRequest`).
+`dialog-card.tsx#EnsoDialogCard` renders one card and hands `answerDialog` in
 `packages/web/src/follow-connection.ts` (`follow-connection.ts#answerDialog`) exactly the answer shapes — `{ value }`,
 `{ confirmed }`, `{ answers }`, `{ cancelled: true }` — because the server forwards them verbatim
-(`chat-screen.tsx#DialogAnswerControls`). The card drops on `dialog-settled` for its id, whoever answered (`custom-event-router.ts#routeObservation`), and
+(`dialog-card.tsx#DialogAnswerControls`). The card drops on `dialog-settled` for its id, whoever answered (`custom-event-router.ts#routeObservation`), and
 the snapshot's list replaces what is shown (`custom-event-router.ts#routeEnsoCustomEvent`).
 
 **Asked by the agent (#12).** The model reaches this channel through one tool, `ask_user`

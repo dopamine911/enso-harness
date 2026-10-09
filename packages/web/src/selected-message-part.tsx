@@ -166,11 +166,11 @@ function ThinkingBlock({ content, isStreaming }: { content: string; isStreaming:
  * everywhere else. (`partsComponents.toolCall` is admitted by the TYPE but unreachable
  * in the dispatcher — noted as an upstream mismatch in the #31 PR.)
  *
- * So the `message` slot in main.tsx runs the library's OWN selection pipeline —
+ * So the transcript runs the library's OWN selection pipeline (`transcript-selection.ts`) —
  * `selectChatUI` pairs each tool result to its call across the whole message list
  * (`result` rides on the selected part), `automaticPartsForMessage` drops the paired
  * duplicates — and this switch does only the last hop, part → component. This is not the
- * hand-rolled chat of mistake 1 in main.tsx's header: the vocabulary, pairing and
+ * hand-rolled chat `thread-pane.tsx`'s header warns against: the vocabulary, pairing and
  * ordering are TanStack's exported selectors; only the final dispatch table is ours, so
  * an unknown TOOL renders through the mandatory textual contract and an unknown PART
  * KIND falls through to the visible debug block.

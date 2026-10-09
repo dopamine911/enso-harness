@@ -13,7 +13,7 @@ import { filesUnder } from '../scripts/source-tree.ts'
  * one in the denominator; a new file joins automatically via readdir, so nothing rots.
  *
  * ⚠ The cost, stated: importing a module runs its top-level code. Every library module
- * here is import-clean (chat-screen.tsx guards its one `window` read for exactly this
+ * here is import-clean (`page-mode.ts` and `chat-screen.tsx` guard their `window` reads for exactly this
  * reason). The files that are NOT import-clean are the named ENTRY_POINTS below — modules
  * whose body IS the program — and the VENDORED components, which share the linter's
  * exclusion boundary (oxlint.config.ts): upstream's code, kept diffable, not held to our coverage.

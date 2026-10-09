@@ -39,11 +39,11 @@ test.beforeEach(async ({ page }) => {
 
 const SCREENSHOT_DIRECTORY = join(OUTPUT_DIRECTORY, 'screenshots')
 
-/** Composer markup from src/chat-screen.tsx — the accessible names ARE the contract. */
+/** Composer markup from src/composer.tsx — the accessible names ARE the contract. */
 const COMPOSER_PLACEHOLDER = 'ask pi something'
 const SEND_BUTTON_NAME = 'send message'
 /**
- * ⚠ `src/chat-screen.tsx`'s own `aria-label` for the stop control. This read
+ * ⚠ `src/composer.tsx`'s own `aria-label` for the stop control. This read
  * `stop the current response` from before #116 renamed it, so the `@model` test's proof that a
  * run started matched nothing at all. `src/__tests__/thread-pane.test.tsx` reads these three
  * constants out of this file and looks for them in the rendered markup, so drift on either

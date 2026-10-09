@@ -615,6 +615,21 @@ index is generated from those headers:
 This page keeps the system-level decisions above; it does not duplicate the code-local index. Before
 touching a file, read its header and the seam page it belongs to.
 
+### Comments at the code (#485)
+
+A code comment states one of three things, in the present tense, with the issue it comes from:
+
+- **an invariant** — what stays true (tagged `@invariant` when a flow page builds from it);
+- **a reason** — why the code has this shape and not the obvious one;
+- **a trap** (`⚠`) — what breaks if the obvious change is made.
+
+How it was found — review rounds, dates, measurements, smoke receipts, who noticed — goes in the
+commit message. A decision goes to its issue, and its one sentence to the file's leading header,
+which [`reference/decisions.md`](./reference/decisions.md) indexes. A comment that tells a story
+has to be kept current by hand and nothing checks it; one that states what is true now can be read
+against the code, which is what the reviewer's touched-comments list asks of every comment a pull
+request puts at risk.
+
 ---
 
 ## Deferred, deliberately

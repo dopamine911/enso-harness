@@ -122,7 +122,7 @@ test('an import-shaped string that names no installed package is not an import (
   expect(existsSync(join(REPOSITORY_ROOT, 'node_modules', '@tanstack/react-ai'))).toBe(false)
   // …and the near neighbour it is one transposition from IS in the graph, so the skip is a
   // resolution test and not a spelling rule.
-  expect(imports.get('@tanstack/ai-react')).toEqual(expect.arrayContaining(['packages/web/src/chat-screen.tsx']))
+  expect(imports.get('@tanstack/ai-react')).toEqual(expect.arrayContaining(['packages/web/src/thread-pane.tsx']))
 })
 
 // The keyword anchor, asserted against the shape that was live when it was added (PR #302

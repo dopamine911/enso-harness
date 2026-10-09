@@ -242,7 +242,7 @@ is the point, not a courtesy* (the header of `EnsoToolResult.tsx`): a type-tag d
 payload showing as nothing, indistinguishable from a successful empty result. `toolResultState` is also
 what the status bar's `running <tool>` reads (`thread-status.tsx#describeActivity`).
 
-**The renderer map is empty** (`chat-screen.tsx#descriptorRenderers`): every result falls through to the text form,
+**The renderer map is empty** (`message-row.tsx#descriptorRenderers`): every result falls through to the text form,
 which is exactly what the contract promises for an unknown kind, so empty is the honest default. A
 renderer is added when a tool earns one. A truncated `read` or `bash` result therefore reads as its
 text and `showing 1841 of 3000 lines` under it.
@@ -284,7 +284,7 @@ Which files may import the runtime is fixed by a gate (#558): `VENDOR_IMPORTERS_
 **Replace the web renderer** (a different state layer, a different component kit) and the files that
 change are web-local: `EnsoToolResult.tsx` (the map, the state, the fallback), `selected-message-part.tsx`
 and `thread-status.tsx` (its two callers), `to-agui.ts` (where the descriptor rides onto the stream),
-and `chat-screen.tsx`'s empty map. `packages/core/src/tool-result.ts` and the observation's
+and `message-row.tsx`'s empty map. `packages/core/src/tool-result.ts` and the observation's
 `descriptor` field do not change; `tool-result.test.tsx`'s reader tests run against core
 alone.
 

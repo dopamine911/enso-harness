@@ -28,7 +28,7 @@ export function useRereadAfterCompaction(stores: ThreadStores, chat: RereadChat)
   const compacted = useStore(stores.branchCompacted)
   const applied = useRef(0)
   // The run flag as of the latest COMMITTED render, for a read that lands after it changed —
-  // written in an effect, never during render (React's rule; `chat-screen.tsx#latestMessages`).
+  // written in an effect, never during render (React's rule; `composer.tsx#ChatPromptInput`'s `latestMessages`).
   const generating = useRef(chat.sessionGenerating)
   const { sessionGenerating, setMessages } = chat
   useEffect(() => {

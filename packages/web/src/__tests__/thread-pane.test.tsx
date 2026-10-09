@@ -28,7 +28,9 @@ import {
 import type { UIMessage } from '@tanstack/ai-client'
 import { act } from 'react'
 import type { createRoot as CreateRoot, Root } from 'react-dom/client'
-import { ChatScreen, ThreadPane, type ThreadView } from '../chat-screen.tsx'
+import { ChatScreen } from '../chat-screen.tsx'
+import type { ThreadView } from '../pane-context.ts'
+import { ThreadPane } from '../thread-pane.tsx'
 import {
   adoptThread,
   clearThreadsForTest,
@@ -59,7 +61,7 @@ const { createRoot }: { createRoot: typeof CreateRoot } = await import('react-do
 /**
  * The pane, MOUNTED, over a scripted server (#118, #125 items 1–3).
  *
- * Every in-flight reading in `chat-screen.tsx` — the status bar, the stop button, the mode
+ * Every in-flight reading in the pane (`thread-pane.tsx`) — the status bar, the stop button, the mode
  * select's `disabled`, the rail's busy dot — lives inside `createChatHook`'s closure over a
  * live `useChat`, where a static render cannot reach and a hook mock would only echo what the
  * test set. These mount the real pane with the real adapter over `scripted-server.ts`, write
@@ -1111,7 +1113,7 @@ test('a blocking question announces itself: a group named by the question, and f
  * control to `stop the run`, so the one e2e that proves a run started could never match. The
  * spec does not run in CI, so the contract is gated in two halves that meet here: this test
  * pins name → RENDERED MARKUP, and `test/e2e-selectors.test.ts` pins the spec's constants →
- * the names in `chat-screen.tsx`. Renaming a control fails both; editing a constant fails the
+ * the names in `composer.tsx`. Renaming a control fails both; editing a constant fails the
  * gate. (⚠ The spec cannot be read from here: `packages/web/src` is the browser zone and
  * fallow refuses a browser → test edge. The names are literal on purpose.)
  */

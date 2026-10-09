@@ -68,7 +68,7 @@ A pull request that changes what the web page shows carries screenshots, committ
 
 ## Selectors are what a reader sees
 
-The spec finds controls by their accessible names and placeholders from `src/chat-screen.tsx`. Two traps:
+The spec finds controls by their accessible names and placeholders from `src/composer.tsx`. Two traps:
 
 - **The Start dialog's prompt box has the composer's placeholder.** A new thread opens that dialog; `openNewThread` puts it away with Escape.
 - **Every off-screen pane keeps its own composer and mode control**, `inert` and invisible (#472). `composer(page)` and `modeControl(page)` take the one on screen.

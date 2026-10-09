@@ -110,7 +110,7 @@ export interface PermissionModeSelectProps {
  * The composer-row control: current mode, and a native `<select>` of the modes the host offers.
  *
  * Presentational and chat-agnostic on purpose — it can be rendered statically in a test
- * with no chat context. `chat-screen.tsx` wraps it with the send + loading wiring. A native
+ * with no chat context. `composer.tsx` wraps it with the send + loading wiring. A native
  * `<select>` rather than a vendored component: it is keyboard- and screen-reader-complete
  * out of the box, and this repo has spent effort on what each vendored dependency costs.
  *

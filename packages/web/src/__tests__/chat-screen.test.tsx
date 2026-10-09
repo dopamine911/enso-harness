@@ -2,15 +2,11 @@ import { afterEach, expect, test } from 'bun:test'
 import { type EnsoDialogSpec, NO_SESSION_INCIDENTS } from '@enso/core'
 import type { ChatUISelectedPart } from '@tanstack/ai-client/ui'
 import { renderToStaticMarkup } from 'react-dom/server'
-import {
-  DialogAnswerControls,
-  describeAttachmentError,
-  EnsoDialogCard,
-  settleDialog,
-  ThreadPane,
-} from '../chat-screen.tsx'
+import { describeAttachmentError } from '../composer.tsx'
+import { DialogAnswerControls, EnsoDialogCard, settleDialog } from '../dialog-card.tsx'
 import type { DialogAnswerOutcome, FollowConnection } from '../follow-connection.ts'
 import { createStore } from '../store.ts'
+import { ThreadPane } from '../thread-pane.tsx'
 import { adoptThread, clearThreadsForTest, mintThread } from '../thread-stores.ts'
 import { type KeyedPart, keyedParts } from '../transcript-selection.ts'
 import { selectIn } from './static-markup.ts'

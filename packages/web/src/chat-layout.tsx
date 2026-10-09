@@ -1,0 +1,213 @@
+import type { LayoutProps } from '@tanstack/ai-react/ui'
+import { useCallback, useContext, useRef } from 'react'
+import { Conversation, ConversationContent, ConversationScrollButton } from './components/ai-elements/conversation.tsx'
+import { Alert, AlertDescription, AlertTitle } from './components/ui/alert.tsx'
+import { PendingQueue } from './composer.tsx'
+import { PendingDialog } from './dialog-card.tsx'
+import { useThreadProject } from './page-listings.ts'
+import {
+  useChatContext,
+  type ThreadChatOptions,
+  DebugOpenContext,
+  type ThreadView,
+  PaneViewContext,
+} from './pane-context.ts'
+import { useThreadStores } from './store.ts'
+import { ThreadChanges } from './thread-changes.tsx'
+import { ThreadContextDrawer } from './thread-context.tsx'
+import { ThreadDebugDrawer } from './thread-debug.tsx'
+import { ThreadEvalDrawer } from './thread-eval.tsx'
+import { settledToolResults } from './thread-git.tsx'
+import { ThreadStatsDrawer } from './thread-stats.tsx'
+import { ThreadStatusBar } from './thread-status.tsx'
+import { locateStatsTarget, type RevealStatsTarget, revealElement } from './transcript-reveal.ts'
+import {
+  type TranscriptScroller,
+  TranscriptRevealBridge,
+  useIncidentReveal,
+  TranscriptContent,
+  useTranscriptSelection,
+} from './transcript.tsx'
+
+/**
+ * A thread's layout (#90, #361): the views' box with the transcript laid out under every view, the
+ * composer under the box, the `?debug` column beside it, and the status bar under both.
+ */
+
+/**
+ * Renders a run-level error as a destructive Alert. Reads the thread's chat through the
+ * shared contexts declared above — the same `useChatContext` every widget here uses.
+ */
+function RunProblem(): React.ReactNode {
+  const chat = useChatContext()
+  if (chat.error === undefined || chat.error === null) return null
+  return (
+    <Alert variant="destructive" className="my-4">
+      <AlertTitle>the run failed</AlertTitle>
+      <AlertDescription className="whitespace-pre-wrap">
+        {chat.error instanceof Error ? chat.error.message : String(chat.error)}
+      </AlertDescription>
+    </Alert>
+  )
+}
+
+/** A view panel's `id`s, in the pane on screen only — a hidden pane's would duplicate them. */
+function panelIdsOf(shown: ThreadView | undefined, view: ThreadView): { id?: string; 'aria-labelledby'?: string } {
+  return shown === undefined ? {} : { id: `thread-view-${view}`, 'aria-labelledby': `thread-view-${view}-tab` }
+}
+
+/** The view drawn over the transcript (#361), when one other than the chat is shown. */
+function ThreadViewOverlay({
+  shown,
+  revealInTranscript,
+  changesMoment,
+}: {
+  shown: ThreadView | undefined
+  revealInTranscript: RevealStatsTarget
+  /** When the tree may have moved: a settled tool result, the run starting or ending. */
+  changesMoment: string
+}): React.ReactNode {
+  // The thread's context (#361): what each request was made of, over the transcript.
+  if (shown === 'context') {
+    return (
+      <div role="tabpanel" {...panelIdsOf(shown, 'context')} className="absolute inset-0 overflow-y-auto">
+        <div className="mx-auto w-full max-w-context-view">
+          <ThreadContextDrawer />
+        </div>
+      </div>
+    )
+  }
+  // The thread's stats (#45 phase 2), over the transcript (#361).
+  if (shown === 'stats') {
+    return (
+      <div role="tabpanel" {...panelIdsOf(shown, 'stats')} className="absolute inset-0 overflow-y-auto">
+        <div className="mx-auto w-full max-w-stats-view">
+          <ThreadStatsDrawer onNavigate={revealInTranscript} />
+          <ThreadEvalDrawer onNavigate={revealInTranscript} />
+        </div>
+      </div>
+    )
+  }
+  // What changed since the last push (#452): the tree and the chosen file's diff, over the transcript.
+  if (shown === 'changes') {
+    return (
+      <div role="tabpanel" {...panelIdsOf(shown, 'changes')} className="absolute inset-0">
+        <ThreadChanges moment={changesMoment} />
+      </div>
+    )
+  }
+  return null
+}
+
+/**
+ * The layout slot of the widget map.
+ *
+ * ⚠ A run's error is not a message part, so no `partsComponents` entry catches it (#24): it lives
+ * on the chat instance, and `RunProblem` renders it here, deliberately. A layout that reads no
+ * `chat.error` shows a failed run (a RUN_ERROR from a blocked `/mode`) as an empty assistant turn.
+ *
+ * The `Messages` slot goes unused on purpose (#739): TanStack's draws every message.
+ * `TranscriptRows` draws the ones in view.
+ */
+export function ChatLayout({ Input }: LayoutProps<ThreadChatOptions>): React.ReactNode {
+  const chat = useChatContext()
+  const debugOpen = useContext(DebugOpenContext)
+  const { shown, open } = useContext(PaneViewContext)
+  const stores = useThreadStores()
+  const threadProject = useThreadProject(stores.projectId)
+  const scroller = useRef<TranscriptScroller | null>(null)
+  const revealInTranscript = useCallback<RevealStatsTarget>(
+    (target, stats) => {
+      const bridge = scroller.current
+      const content = bridge?.content() ?? null
+      const element = content === null ? undefined : locateStatsTarget(content, stats, target)
+      if (element === undefined || bridge === null) return false
+      // Found in the transcript the Stats view hides (still mounted, so it can be searched):
+      // show it, then scroll once it has a layout to scroll in.
+      open('chat')
+      requestAnimationFrame(() => {
+        bridge.stopScroll()
+        revealElement(element)
+      })
+      return true
+    },
+    [open],
+  )
+  /** Whether the transcript is the view shown — a pane off screen keeps its chat. */
+  const onChat = (shown ?? 'chat') === 'chat'
+  const { selection, placed } = useTranscriptSelection(chat.messages, chat.sessionGenerating)
+  const incidentReveal = useIncidentReveal(scroller)
+  return (
+    // `data-thread-layout`: a panel the bar opens finds this layout's composer from it (#714).
+    <div data-thread-layout="" className="flex min-h-0 flex-1 flex-col">
+      <div className="flex min-h-0 flex-1">
+        {/* The main column: the views' box, then the composer under every view (#707). */}
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          {/* The views share one box: the transcript keeps its size under every view, and the
+						    others are drawn over it. */}
+          <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+            {/* The transcript stays mounted AND LAID OUT under every view — `invisible` and `inert`,
+                never `hidden` (#362): a `display: none` box comes back resized, and the stick-to-bottom
+                scroller re-pins a reader who had scrolled up. Kept at its size, its scroll, its lock
+                and its bubbles (the stats rows' targets) survive a trip to Context or Stats. */}
+            <div
+              role="tabpanel"
+              {...panelIdsOf(shown, 'chat')}
+              inert={!onChat}
+              className={
+                onChat ? 'flex min-h-0 min-w-0 flex-1 flex-col' : 'invisible flex min-h-0 min-w-0 flex-1 flex-col'
+              }
+            >
+              <Conversation>
+                <TranscriptRevealBridge into={scroller} />
+                <ConversationContent className="w-full gap-4 px-6 py-4 ledger:gap-0">
+                  <TranscriptContent
+                    messages={chat.messages}
+                    setMessages={chat.setMessages}
+                    selection={selection}
+                    placed={placed}
+                    incidentReveal={incidentReveal}
+                  />
+                  {/* ⚠ Mounted before anything opens one, deliberately. This is where #4's
+										    `ask` verdict reaches the browser, and an unmounted slot is precisely
+										    why an approval would silently never appear. */}
+                  <PendingDialog />
+                  <RunProblem />
+                </ConversationContent>
+                <ConversationScrollButton />
+              </Conversation>
+            </div>
+            <ThreadViewOverlay
+              shown={shown}
+              revealInTranscript={revealInTranscript}
+              changesMoment={`${settledToolResults(chat.messages)}:${chat.sessionGenerating}`}
+            />
+          </div>
+          {/* ⚠ UNDER EVERY VIEW, NOT IN THE CHAT'S PANEL (#707): inside it, the composer would go
+              invisible and inert with the transcript whenever Context, Stats or Diff is in front, and
+              text typed there would go nowhere. pi's queue (#75, not TanStack's `Queue` slot: a
+              prompt sent during a run is listed here for every follower) goes with it. */}
+          <PendingQueue />
+          <Input />
+        </div>
+        {/* The session debug pane (#86): what the browser believes beside what pi's
+						    session holds, for THIS thread. Scrolls on its own so a long branch never
+						    moves the composer. */}
+        {debugOpen ? (
+          <div id="thread-debug-pane" className="w-debug-pane shrink-0 overflow-y-auto border-l">
+            <ThreadDebugDrawer />
+          </div>
+        ) : null}
+      </div>
+      {/* The status bar (#90): activity, prompts, tool calls, cost — always visible, full
+					    width under transcript AND debug pane, so it is the one place to look. */}
+      <ThreadStatusBar
+        messages={chat.messages}
+        generating={chat.sessionGenerating}
+        projectTitle={threadProject?.title}
+        openView={open}
+        shown={shown !== undefined}
+      />
+    </div>
+  )
+}

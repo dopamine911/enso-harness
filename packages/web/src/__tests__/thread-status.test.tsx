@@ -91,7 +91,7 @@ test('a tail the summary has no word for — an image, an unmatched result — i
 
 // ⚠ THE TAIL READ IS PER-MESSAGE (#282). This function selects the LAST message ALONE
 // (`selectMessageUI`), so it cannot see a tool call in an earlier message — the opposite of
-// the transcript renderer, which must (`chat-screen.tsx`'s `message` component). This is the
+// the transcript renderer, which must (`message-row.tsx#ChatMessageRow`). This is the
 // reachable shape where the two selections could disagree and do not: a result at the tail
 // whose call sits in an EARLIER message is `matched` under the whole-transcript selection
 // and unmatched under this one, so it is filtered in the first case and hits the catch-all

@@ -78,7 +78,7 @@ const observationValidator = Compile(EnsoObservation)
  * that thread's stores (#90 PR 3); a chunk can never be attributed to the wrong thread
  * because the callback that receives it belongs to exactly one.
  *
- * Extracted from `chat-screen.tsx`'s chat options so it can be TESTED (#53 S1.3): as an
+ * Extracted from the chat options (`thread-pane.tsx#threadChatOptions`) so it can be TESTED (#53 S1.3): as an
  * inline closure on an options object, renaming a chunk name, dropping the notify-type
  * allowlist, or swapping two `apply*` calls all left the suite green. The tests drive this
  * function directly with a fresh set of stores and read their snapshots.

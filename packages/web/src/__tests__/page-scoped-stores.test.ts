@@ -20,9 +20,9 @@ const PAGE_SCOPED_BY_DESIGN: readonly string[] = [
   // The rail's list of the page's threads: one list per page, owned by the registry.
   'thread-stores.ts:threadList',
   // The server's stored-threads listing (the rail's earlier threads): one per page, refreshed on settle.
-  'chat-screen.tsx:storedThreads',
+  'page-listings.ts:storedThreads',
   // The server's projects (#395): the rail's sections, one list per page, fetched on load.
-  'chat-screen.tsx:projectList',
+  'page-listings.ts:projectList',
   // The page's log ring and shipper (#132): configured once by main.tsx, read by the drawer.
   'thread-stores.ts:browserLogging',
   // The page's clock (#278): one interval, every relative age on the page subscribed to it.
