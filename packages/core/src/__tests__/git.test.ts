@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, symlinkSync, unlinkSync, writeFileS
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { Check } from 'typebox/value'
-import { type GitRunner, readGitChanges, readGitState, runGitIn } from '../git.ts'
+import { type GitRunner, readGitChanges, readGitState, runGitIn, UNTRACKED_DIFF_CONCURRENCY } from '../git.ts'
 import { EnsoGitFileChange, EnsoGitState } from '../index.ts'
 import { findRepoRoot } from '../paths.ts'
 
@@ -92,6 +92,31 @@ test('a directory outside every repository, and one inside a git directory, are 
   expect(await read(scratch('outside'))).toEqual({ kind: 'not-a-repository' })
   expect(await read(join(repository(), '.git'))).toEqual({ kind: 'not-a-repository' })
 })
+
+/** Whether git speaks German here: a machine without the locale or git's catalog prints English. */
+function gitSpeaksGerman(): boolean {
+  try {
+    execFileSync('git', ['rev-parse'], {
+      cwd: scratch('locale'),
+      env: { ...environment, LC_ALL: 'de_DE.UTF-8' },
+      stdio: 'pipe',
+    })
+    return false
+  } catch (error) {
+    return error instanceof Error && 'stderr' in error && String(error.stderr).includes('Kein Git-Repository')
+  }
+}
+
+// #568: which failure git reported is read from its stderr, which git translates.
+test.skipIf(!gitSpeaksGerman())(
+  'a directory outside every repository is not one under a locale git translates into',
+  async () => {
+    const german = { ...environment, LC_ALL: 'de_DE.UTF-8', LANGUAGE: 'de' }
+    expect(await readGitState((args, cwd) => runGitIn(german, args, cwd), scratch('outside'))).toEqual({
+      kind: 'not-a-repository',
+    })
+  },
+)
 
 test('a repository with no commit has no head and no baseline; its files are untracked', async () => {
   const directory = scratch('unborn')
@@ -333,6 +358,50 @@ test('a binary file is listed without a patch; a large new file is not read', as
     patch: null,
     omitted: 'too-large',
   })
+})
+
+// #463: untracked files are diffed several at a time. Which file runs out of the answer's room is
+// decided in list order after every diff is back, never by which git process finished first.
+test('⚠ untracked files read concurrently: a git that answers in reverse order gives the same answer, the budget running out in list order', async () => {
+  const directory = repository()
+  const line = `${'x'.repeat(79)}\n`
+  // 30 files of about 400 KB: 12 MB of patches against an 8 MiB answer.
+  for (let file = 0; file < 30; file += 1) {
+    writeFileSync(join(directory, `new-${String(file).padStart(2, '0')}.txt`), line.repeat(5000))
+  }
+  const repositoryState = await repositoryAt(directory)
+  // A git whose answers come back highest file first: each finished diff is held until all the
+  // reader's concurrent slots (`UNTRACKED_DIFF_CONCURRENCY`) are waiting, or every file still owed
+  // is, then the highest-numbered is let go. No clock: the order is constructed. The limit is the
+  // reader's own, so the schedule follows it if it changes (PR #785 review).
+  const files = 30
+  const held: { fileNumber: number; release: () => void }[] = []
+  let released = 0
+  const releaseHighest = (): void => {
+    if (held.length === 0 || held.length < Math.min(UNTRACKED_DIFF_CONCURRENCY, files - released)) return
+    held.sort((left, right) => right.fileNumber - left.fileNumber)
+    released += 1
+    held.shift()?.release()
+  }
+  const reversed: GitRunner = async (args, cwd) => {
+    const fileNumber = /new-(\d+)\.txt$/.exec(args.at(-1) ?? '')?.[1]
+    const answer = await runGit(args, cwd)
+    if (fileNumber === undefined) return answer
+    await new Promise<void>((release) => {
+      held.splice(held.length, 0, { fileNumber: Number(fileNumber), release })
+      releaseHighest()
+    })
+    releaseHighest()
+    return answer
+  }
+  const inOrder = await readGitChanges(runGit, repositoryState)
+  expect(await readGitChanges(reversed, repositoryState)).toEqual(inOrder)
+  const omitted = inOrder.files.map((file) => file.omitted)
+  // A run of patches, then nothing but `too-large`: the budget ran out once, in list order.
+  const firstOmitted = omitted.indexOf('too-large')
+  expect(firstOmitted).toBeGreaterThan(0)
+  expect(omitted.slice(0, firstOmitted).every((reason) => reason === null)).toBe(true)
+  expect(omitted.slice(firstOmitted).every((reason) => reason === 'too-large')).toBe(true)
 })
 
 test('with no commit yet everything is compared with the empty tree', async () => {
