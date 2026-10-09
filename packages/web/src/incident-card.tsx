@@ -16,15 +16,18 @@ import {
   incidentResolutionRefusal,
   openIncidentOf,
   reportOwedOf,
+  tippingCallOf,
 } from '@enso/core'
+import type { UIMessage } from '@tanstack/ai-client'
 import { SirenIcon } from 'lucide-react'
-import { useId, useRef, useState } from 'react'
+import { createContext, useCallback, useContext, useId, useRef, useState } from 'react'
 import { Button } from './components/ui/button.tsx'
 import { Checkbox } from './components/ui/checkbox.tsx'
 import { Field, FieldLabel, FieldLegend, FieldSet } from './components/ui/field.tsx'
 import { RadioGroup, RadioGroupItem } from './components/ui/radio-group.tsx'
 import type { IncidentResolveOutcome } from './follow-connection.ts'
 import { useStore, useThreadStores } from './store.ts'
+import { ringElement } from './transcript-reveal.ts'
 
 /**
  * A session's incident as the thread shows it (#466): what was OBSERVED, what the risk fold
@@ -447,12 +450,29 @@ export interface IncidentCardProps {
   readonly resolve: (incidentId: string, resolution: EnsoIncidentResolution) => Promise<IncidentResolveOutcome>
 }
 
+/**
+ * The incident a reveal from the tail pointer waits on (#588): its card, drawn only once the windowed
+ * list scrolls its message into view, rings itself as it mounts and clears this. Provided by the
+ * thread's layout; none outside a pane.
+ */
+export const IncidentRevealContext = createContext<{ current: string | undefined } | null>(null)
+
 export function IncidentCard({ record, incidents, resolve }: IncidentCardProps): React.ReactNode {
   const titleId = useId()
   const { opened } = record
   const open = openIncidentOf(incidents) === record
+  const pendingReveal = useContext(IncidentRevealContext)
+  const ringIfRevealed = useCallback(
+    (element: HTMLElement | null) => {
+      if (element === null || pendingReveal?.current !== opened.incidentId) return
+      pendingReveal.current = undefined
+      ringElement(element)
+    },
+    [pendingReveal, opened.incidentId],
+  )
   return (
     <article
+      ref={ringIfRevealed}
       aria-labelledby={titleId}
       data-incident-id={opened.incidentId}
       className={
@@ -505,18 +525,89 @@ export function IncidentCard({ record, incidents, resolve }: IncidentCardProps):
   )
 }
 
+/** The open incident of a halted thread whose card reads above the tail, and the row it follows. */
+export interface IncidentPointer {
+  readonly incidentId: string
+  /** The position, in the loaded transcript, of the message the card follows. */
+  readonly row: number
+}
+
 /**
- * The thread's incidents, at the chat's tail (#466). The transcript renders messages, not the
- * session's custom entries, so an incident has no position among them to sit at; it sits where a
- * question does, below the run, where the person looking at a halted thread is.
+ * The thread's incident cards by where they read (#588), as `placeLines` places its lines (#382):
+ * each after the message holding its tipping call, the rest at the tail.
  */
-export function ThreadIncidents(): React.ReactNode {
+export interface PlacedIncidents {
+  readonly after: ReadonlyMap<string, readonly EnsoIncidentRecord[]>
+  readonly tail: readonly EnsoIncidentRecord[]
+  readonly pointer: IncidentPointer | undefined
+}
+
+const NOTHING_PLACED: PlacedIncidents = { after: new Map(), tail: [], pointer: undefined }
+
+/** Where each tipping call is in the loaded transcript: its message's id and position. */
+function tippingCallHolders(
+  records: readonly EnsoIncidentRecord[],
+  messages: readonly UIMessage[],
+): ReadonlyMap<string, { readonly messageId: string; readonly row: number }> {
+  const wanted = new Set<string>()
+  for (const record of records) {
+    const call = tippingCallOf(record.opened.signals)
+    if (call !== undefined) wanted.add(call)
+  }
+  const holders = new Map<string, { readonly messageId: string; readonly row: number }>()
+  for (const [row, message] of messages.entries()) {
+    for (const part of message.parts) {
+      if (part.type === 'tool-call' && wanted.has(part.id)) holders.set(part.id, { messageId: message.id, row })
+    }
+  }
+  return holders
+}
+
+/**
+ * Each incident card after the message whose parts hold its tipping call — the record's own
+ * `signals`, live (`sessionIncidentsStep`) and on reload (the snapshot's fold) alike, so no message
+ * id is persisted for it. A card whose call the loaded transcript does not hold reads at the tail:
+ * an inherited incident (no signals), a call compacted away, or one on a page not loaded yet — it
+ * moves up once "Load earlier" brings that page, as a waiting line does.
+ *
+ * DECISION (#588): the OPEN incident of a HALTED thread also keeps a pointer at the tail (`pointer`),
+ * just above the composer, while its card reads further up — a long transcript must never hide why
+ * the thread is suspended. A resolved incident, or an alert-only one (halting off), has none, nor
+ * does a card that already reads at the tail.
+ *
+ * ⚠ Placed from the messages, not the selection's id set: the call can stream into a message the
+ * set already holds, and the record can land in the same render as that chunk.
+ */
+export function placeIncidents(state: EnsoSessionIncidents, messages: readonly UIMessage[]): PlacedIncidents {
+  if (state.incidents.length === 0) return NOTHING_PLACED
+  const holders = tippingCallHolders(state.incidents, messages)
+  const open = openIncidentOf(state)
+  const after = new Map<string, EnsoIncidentRecord[]>()
+  const tail: EnsoIncidentRecord[] = []
+  let pointer: IncidentPointer | undefined
+  for (const record of state.incidents) {
+    const call = tippingCallOf(record.opened.signals)
+    const holder = call === undefined ? undefined : holders.get(call)
+    if (holder === undefined) {
+      tail.push(record)
+      continue
+    }
+    const placed = after.get(holder.messageId)
+    if (placed === undefined) after.set(holder.messageId, [record])
+    else placed.push(record)
+    if (record === open && record.opened.halted) pointer = { incidentId: record.opened.incidentId, row: holder.row }
+  }
+  return { after, tail, pointer }
+}
+
+/** Incident cards (#466), where `placeIncidents` put them: after a message, or at the tail. */
+export function IncidentCards({ records }: { records: readonly EnsoIncidentRecord[] }): React.ReactNode {
   const stores = useThreadStores()
   const incidents = useStore(stores.incidents)
-  if (incidents.incidents.length === 0) return null
+  if (records.length === 0) return null
   return (
     <>
-      {incidents.incidents.map((record) => (
+      {records.map((record) => (
         <IncidentCard
           key={record.opened.incidentId}
           record={record}
@@ -525,5 +616,34 @@ export function ThreadIncidents(): React.ReactNode {
         />
       ))}
     </>
+  )
+}
+
+/**
+ * The tail's word for a halted thread's open incident whose card reads further up (#588): what
+ * the thread waits on, and a button that brings the card into view.
+ */
+export function OpenIncidentPointer({
+  pointer,
+  reveal,
+}: {
+  pointer: IncidentPointer | undefined
+  reveal: (pointer: IncidentPointer) => void
+}): React.ReactNode {
+  if (pointer === undefined) return null
+  return (
+    <p
+      data-incident-pointer={pointer.incidentId}
+      className="my-2 flex max-w-3xl flex-wrap items-center gap-2 rounded-lg border border-refuse px-3 py-2 text-sm ledger:rounded-xs"
+    >
+      <SirenIcon aria-hidden="true" className="size-4 shrink-0 text-refuse" />
+      <span>
+        Incident {pointer.incidentId} is open and halted this thread: its tool families stay suspended until it is
+        resolved, on its card above.
+      </span>
+      <Button type="button" variant="outline" size="sm" onClick={() => reveal(pointer)}>
+        Show the incident
+      </Button>
+    </p>
   )
 }

@@ -362,6 +362,7 @@ export {
   replayIncidents,
   sessionIncidentsOf,
   sessionIncidentsStep,
+  tippingCallOf,
   toolFamilyOf,
 } from './session-incident.ts'
 export {

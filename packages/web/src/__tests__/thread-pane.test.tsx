@@ -2,11 +2,16 @@ import { afterAll, afterEach, expect, spyOn, test } from 'bun:test'
 import { createHash } from 'node:crypto'
 import {
   ENSO_GUARD_DENIAL_ENTRY,
+  ENSO_INCIDENT_OPENED_ENTRY,
+  ENSO_INCIDENT_RESOLVED_ENTRY,
   ENSO_PROVIDER_REFUSAL_KEY,
   ENSO_SESSION_RISK_ENTRY,
   ENSO_UI_EVENTS,
   type EnsoFollowFrame,
   type EnsoForkReceipt,
+  type EnsoIncidentOpened,
+  type EnsoIncidentRecord,
+  type EnsoSessionIncidents,
   type EnsoGitFileChange,
   type EnsoGitRepository,
   type EnsoStoredThread,
@@ -2017,6 +2022,239 @@ test('a `Mode:` line set between runs reads after the run before it and before t
   )
   const expected = ['first prompt', 'FIRST-REPLY', 'Mode: plan', 'second prompt', 'SECOND-REPLY']
   await eventually(() => expect(readingOrder(pane, expected)).toEqual(expected))
+  await pane.unmount()
+})
+
+// ── #588: an incident card reads after the message holding its tipping call ────────────────────
+
+/** An opening whose tipping call — its last signal's — is `toolCallId`. */
+const openingAt = (incidentId: string, toolCallId: string, halted: boolean): EnsoIncidentOpened => ({
+  incidentId,
+  signals: [{ signal: 'alternate-execution-path', toolCallId, detail: 'a second route after a refusal', after: [] }],
+  halted,
+  suspended: halted ? ['execute', 'network', 'write'] : [],
+})
+
+/** A stored assistant message saying `words`, then making call `toolCallId` and holding its result. */
+const calling = (id: string, words: string, toolCallId: string): UIMessage => ({
+  id,
+  role: 'assistant',
+  parts: [
+    { type: 'text', content: words },
+    { type: 'tool-call', id: toolCallId, name: 'bash', arguments: '{}', state: 'input-complete' },
+    { type: 'tool-result', toolCallId, content: 'ok', state: 'complete' },
+  ],
+})
+
+/** The incidents as the snapshot folds them (a reload): `records` in order, resolved or not. */
+const foldedIncidents = (records: readonly EnsoIncidentRecord[]): EnsoSessionIncidents => ({
+  incidents: [...records],
+  suspended: records.at(-1)?.resolutions.length === 0 ? (records.at(-1)?.opened.suspended ?? []) : [],
+  ended: false,
+})
+
+/** A stored thread whose snapshot carries `incidents`, as a reload reads it. */
+async function mountStored(
+  messages: UIMessage[],
+  incidents: EnsoSessionIncidents,
+  extra: { earlier?: EnsoThreadHistory['earlier']; server?: ScriptedFetchOptions } = {},
+): Promise<MountedPane> {
+  const threadId = crypto.randomUUID()
+  const pane = await mountPane({
+    history: {
+      ...storedHistory(threadId, messages),
+      incidents,
+      ...(extra.earlier === undefined ? {} : { earlier: extra.earlier }),
+    },
+    ...(extra.server === undefined ? {} : { server: extra.server }),
+  })
+  const count = messages.length + (extra.earlier?.messages ?? 0)
+  await pane.settle({ ...SNAPSHOT_IDLE, threadId, messageCount: count, incidents })
+  return pane
+}
+
+test('⚠ an incident card reads after the message holding its tipping call, and stays there under a later turn (#588)', async () => {
+  const pane = await mountPane()
+  await pane.settle(SNAPSHOT_IDLE)
+  await sendPrompt(pane, 'first prompt')
+  await pane.settle(
+    { type: 'observation', seq: 1, observation: { kind: 'message-start', role: 'assistant' } },
+    { type: 'observation', seq: 2, observation: { kind: 'text-delta', contentIndex: 0, delta: 'CALLING-REPLY' } },
+    {
+      type: 'observation',
+      seq: 3,
+      observation: { kind: 'tool-call', toolCallId: 'c1', toolName: 'bash', args: { command: 'ls' } },
+    },
+    {
+      type: 'observation',
+      seq: 4,
+      observation: {
+        kind: 'custom-entry',
+        customType: ENSO_INCIDENT_OPENED_ENTRY,
+        data: openingAt('inc-live', 'c1', false),
+      },
+    },
+    {
+      type: 'observation',
+      seq: 5,
+      observation: {
+        kind: 'tool-result',
+        toolCallId: 'c1',
+        toolName: 'bash',
+        text: 'a.ts',
+        complete: true,
+        isError: false,
+      },
+    },
+    { type: 'observation', seq: 6, observation: { kind: 'message-start', role: 'assistant' } },
+    { type: 'observation', seq: 7, observation: { kind: 'text-delta', contentIndex: 0, delta: 'WRAP-UP' } },
+    { type: 'observation', seq: 8, observation: { kind: 'settled', aborted: false } },
+    { type: 'status', live: true, busy: false, generation: 1 },
+  )
+  // Live, one bubble holds the whole run (every turn of it), so the card follows the run's reply.
+  const firstRun = ['first prompt', 'CALLING-REPLY', 'WRAP-UP', 'Incident inc-live']
+  await eventually(() => expect(readingOrder(pane, firstRun)).toEqual(firstRun))
+  await sendPrompt(pane, 'second prompt')
+  await pane.settle(
+    { type: 'observation', seq: 9, observation: { kind: 'message-start', role: 'assistant' } },
+    { type: 'observation', seq: 10, observation: { kind: 'text-delta', contentIndex: 0, delta: 'SECOND-REPLY' } },
+    { type: 'observation', seq: 11, observation: { kind: 'settled', aborted: false } },
+    { type: 'status', live: true, busy: false, generation: 2 },
+  )
+  const bothRuns = [...firstRun, 'second prompt', 'SECOND-REPLY']
+  await eventually(() => expect(readingOrder(pane, bothRuns)).toEqual(bothRuns))
+  await pane.unmount()
+})
+
+test('after a reload, the snapshot’s incidents read where they did live — no message id is stored for them (#588)', async () => {
+  const resolved: EnsoIncidentRecord = {
+    opened: openingAt('inc-stored', 'c1', true),
+    resolutions: [{ incidentId: 'inc-stored', classification: 'false-positive', outcome: 'resume', suspended: [] }],
+  }
+  const pane = await mountStored(
+    [
+      text('r-u1', 'user', 'first prompt'),
+      calling('r-a1', 'CALLING-REPLY', 'c1'),
+      text('r-a2', 'assistant', 'WRAP-UP'),
+      text('r-u2', 'user', 'second prompt'),
+      text('r-a3', 'assistant', 'SECOND-REPLY'),
+    ],
+    foldedIncidents([resolved]),
+  )
+  const expected = ['first prompt', 'CALLING-REPLY', 'Incident inc-stored', 'WRAP-UP', 'second prompt', 'SECOND-REPLY']
+  await eventually(() => expect(readingOrder(pane, expected)).toEqual(expected))
+  // Resolved: no pointer at the tail.
+  expect(pane.container.querySelector('[data-incident-pointer]')).toBeNull()
+  await pane.unmount()
+})
+
+// PR #794 review: two incidents whose tipping calls are in the SAME message both follow it, in the
+// order they opened, and neither moves to the tail or past the next message.
+test('two incidents tipped by calls in one message both read after it, in the order they opened (#588)', async () => {
+  const twoCalls: UIMessage = {
+    id: 'm-a1',
+    role: 'assistant',
+    parts: [
+      { type: 'text', content: 'CALLING-TWICE' },
+      { type: 'tool-call', id: 'c1', name: 'bash', arguments: '{}', state: 'input-complete' },
+      { type: 'tool-result', toolCallId: 'c1', content: 'ok', state: 'complete' },
+      { type: 'tool-call', id: 'c2', name: 'bash', arguments: '{}', state: 'input-complete' },
+      { type: 'tool-result', toolCallId: 'c2', content: 'ok', state: 'complete' },
+    ],
+  }
+  const resolvedAt = (incidentId: string, toolCallId: string): EnsoIncidentRecord => ({
+    opened: openingAt(incidentId, toolCallId, false),
+    resolutions: [{ incidentId, classification: 'false-positive', outcome: 'resume', suspended: [] }],
+  })
+  const pane = await mountStored(
+    [text('m-u1', 'user', 'first prompt'), twoCalls, text('m-u2', 'user', 'second prompt')],
+    foldedIncidents([resolvedAt('inc-one', 'c1'), resolvedAt('inc-two', 'c2')]),
+  )
+  const expected = ['first prompt', 'CALLING-TWICE', 'Incident inc-one', 'Incident inc-two', 'second prompt']
+  await eventually(() => expect(readingOrder(pane, expected)).toEqual(expected))
+  await pane.unmount()
+})
+
+test('a card whose tipping call the transcript does not hold reads at the tail; one on a page not loaded yet moves up when it loads (#588)', async () => {
+  const earlier = [text('p-u1', 'user', 'first prompt'), calling('p-a1', 'CALLING-REPLY', 'c1')]
+  const page = [text('p-u2', 'user', 'second prompt'), text('p-a2', 'assistant', 'SECOND-REPLY')]
+  const records: EnsoIncidentRecord[] = [
+    {
+      opened: openingAt('inc-paged', 'c1', false),
+      resolutions: [{ incidentId: 'inc-paged', classification: 'agent-error', outcome: 'resume', suspended: [] }],
+    },
+    // Its tipping call was compacted away: no message holds it.
+    { opened: openingAt('inc-gone', 'compacted-call', false), resolutions: [] },
+  ]
+  const pane = await mountStored(page, foldedIncidents(records), {
+    earlier: { messages: earlier.length, prompts: 1, firstPrompt: earlier[0] },
+    server: { earlierHistories: { 'p-u2': storedHistory('paged', earlier) } },
+  })
+  // Both at the tail while the call's page is not loaded.
+  const tail = ['second prompt', 'SECOND-REPLY', 'Incident inc-paged', 'Incident inc-gone']
+  await eventually(() => expect(readingOrder(pane, tail)).toEqual(tail))
+  const loadEarlier = [...pane.container.querySelectorAll('button')].find((button) =>
+    button.textContent?.startsWith('Load earlier'),
+  )
+  await flush(async () => {
+    loadEarlier?.click()
+    await tick()
+  })
+  const loaded = [
+    'first prompt',
+    'CALLING-REPLY',
+    'Incident inc-paged',
+    'second prompt',
+    'SECOND-REPLY',
+    'Incident inc-gone',
+  ]
+  await eventually(() => expect(readingOrder(pane, loaded)).toEqual(loaded))
+  await pane.unmount()
+})
+
+test('⚠ a halted thread’s open incident keeps a pointer at the tail that reveals its card above; resolved, the pointer goes (#588)', async () => {
+  const pane = await mountStored(
+    [
+      text('h-u1', 'user', 'first prompt'),
+      calling('h-a1', 'CALLING-REPLY', 'c1'),
+      text('h-a2', 'assistant', 'REPORT-TURN'),
+    ],
+    foldedIncidents([{ opened: openingAt('inc-halted', 'c1', true), resolutions: [] }]),
+  )
+  const pointerWords = 'is open and halted this thread'
+  const expected = ['CALLING-REPLY', 'Incident inc-halted', 'REPORT-TURN', pointerWords]
+  await eventually(() => expect(readingOrder(pane, expected)).toEqual(expected))
+  const card = pane.container.querySelector('[data-incident-id="inc-halted"]')
+  const show = [...pane.container.querySelectorAll('button')].find(
+    (button) => button.textContent === 'Show the incident',
+  )
+  const scrolled: Element[] = []
+  const scroll = spyOn(Element.prototype, 'scrollIntoView').mockImplementation(function record(this: Element): void {
+    scrolled.push(this)
+  })
+  try {
+    await flush(async () => {
+      show?.click()
+      await tick()
+    })
+    expect(card).not.toBeNull()
+    expect(scrolled).toEqual([card as Element])
+  } finally {
+    scroll.mockRestore()
+  }
+  await pane.settle({
+    type: 'observation',
+    seq: 1,
+    observation: {
+      kind: 'custom-entry',
+      customType: ENSO_INCIDENT_RESOLVED_ENTRY,
+      data: { incidentId: 'inc-halted', classification: 'false-positive', outcome: 'resume', suspended: [] },
+    },
+  })
+  await eventually(() => expect(pane.container.textContent).not.toContain(pointerWords))
+  // The card itself stays where it reads.
+  const resolved = ['CALLING-REPLY', 'Incident inc-halted', 'REPORT-TURN']
+  expect(readingOrder(pane, resolved)).toEqual(resolved)
   await pane.unmount()
 })
 

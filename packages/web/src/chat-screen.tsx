@@ -94,7 +94,14 @@ import type { EnsoRendererMap } from './EnsoToolResult.tsx'
 import { createFixtureChat, fixtureFetch } from './fixture-conversation.ts'
 import type { DialogAnswerOutcome, FollowConnection } from './follow-connection.ts'
 import { ForkContext, forkFromPage, RestoreContext, restoreFromPage } from './fork-thread.ts'
-import { ThreadIncidents } from './incident-card.tsx'
+import {
+  IncidentCards,
+  type IncidentPointer,
+  IncidentRevealContext,
+  OpenIncidentPointer,
+  type PlacedIncidents,
+  placeIncidents,
+} from './incident-card.tsx'
 import type { ListingState } from './listing-store.ts'
 import { ModelChip, ModelChoiceDialog, ThinkingLevelSelect, useModelState, useRecordedModel } from './model-state.tsx'
 import { NotificationLines, type PlacedLines, placeLines } from './notifications.tsx'
@@ -338,6 +345,41 @@ function TranscriptRevealBridge({ into }: { into: React.RefObject<TranscriptScro
     }
   }, [into, contentRef, stopScroll])
   return null
+}
+
+/** The tail pointer's reveal of an incident card, and what it waits on — `useIncidentReveal`. */
+interface IncidentReveal {
+  readonly pendingReveal: React.RefObject<string | undefined>
+  readonly rowScroll: React.RefObject<((row: number) => void) | null>
+  readonly reveal: (pointer: IncidentPointer) => void
+}
+
+/**
+ * The tail pointer's reveal of a halted thread's open incident (#588). A card the list has drawn is
+ * scrolled to and ringed as a stats target is (#359). ⚠ The list is WINDOWED (#739): a card on a
+ * row out of the window is not in the DOM to find, so the incident is left pending and the list
+ * scrolls to its row; the card rings itself as it mounts (`IncidentRevealContext`).
+ */
+function useIncidentReveal(scroller: React.RefObject<TranscriptScroller | null>): IncidentReveal {
+  const pendingReveal = useRef<string | undefined>(undefined)
+  const rowScroll = useRef<((row: number) => void) | null>(null)
+  const reveal = useCallback(
+    (pointer: IncidentPointer) => {
+      const bridge = scroller.current
+      const content = bridge?.content() ?? null
+      if (bridge === null || content === null) return
+      bridge.stopScroll()
+      const card = content.querySelector(`[data-incident-id="${CSS.escape(pointer.incidentId)}"]`)
+      if (card !== null) {
+        revealElement(card)
+        return
+      }
+      pendingReveal.current = pointer.incidentId
+      rowScroll.current?.(pointer.row)
+    },
+    [scroller],
+  )
+  return useMemo(() => ({ pendingReveal, rowScroll, reveal }), [reveal])
 }
 
 /**
@@ -987,6 +1029,15 @@ const TranscriptSelectionContext = createContext<TranscriptSelection>({
 /** The thread's lines by where they read (#382), grouped once in `ChatLayout` for every row. */
 const PlacedLinesContext = createContext<PlacedLines>({ head: [], after: new Map(), tail: [] })
 
+/** The thread's incident cards by the message they follow (#588), placed once in `ChatLayout` for every row. */
+const PlacedIncidentsContext = createContext<PlacedIncidents['after']>(new Map())
+
+/**
+ * Brings a row of the windowed list into view by its position (#588): `TranscriptRows` lends its
+ * virtualizer's scroll here for a reveal whose target is on a row out of the window, and so not drawn.
+ */
+const RowScrollContext = createContext<React.RefObject<((row: number) => void) | null> | null>(null)
+
 /**
  * The roles a bubble is drawn for. TanStack's `UIMessage` also has `activity` (AG-UI activity messages,
  * `@tanstack/ai-client` 0.39), which Enso's follow adapter never emits; one that ever arrived is left out.
@@ -1334,6 +1385,17 @@ function TranscriptRows({ messages }: { messages: readonly UIMessage[] }): React
     // measured row moves the rows below it inside the observer's own callback otherwise.
     useAnimationFrameWithResizeObserver: true,
   })
+  // ⚠ Aligned to the row's END, where an incident card follows its message (#588), and left to the
+  // virtualizer alone: it corrects its own scroll as the rows it draws are measured, and a second
+  // scroll (the card's `scrollIntoView`) would fight it. The card rings itself as it mounts.
+  const rowScroll = useContext(RowScrollContext)
+  useEffect(() => {
+    if (rowScroll === null) return undefined
+    rowScroll.current = (row) => virtualizer.scrollToIndex(row, { align: 'end' })
+    return () => {
+      rowScroll.current = null
+    }
+  }, [rowScroll, virtualizer])
   const rows = virtualizer.getVirtualItems()
   if (rows.length === 0) {
     return (
@@ -1368,9 +1430,9 @@ function TranscriptRows({ messages }: { messages: readonly UIMessage[] }): React
 }
 
 /**
- * One message's row: its bubble, from the selection's row for it, and the lines that follow it
- * (#382). The `message` slot TanStack's factory requires, and the row `TranscriptRows` draws for
- * each message in view.
+ * One message's row: its bubble, from the selection's row for it, then the incident cards whose
+ * tipping call it holds (#588) and the lines that follow it (#382). The `message` slot TanStack's
+ * factory requires, and the row `TranscriptRows` draws for each message in view.
  *
  * ⚠ It runs only for the rows in view, on every chunk (it reads the selection, and React re-renders
  * a context consumer), and all it does is a lookup and hand `MessageBody` its props — that memo is
@@ -1384,6 +1446,7 @@ function ChatMessageRow({ message }: { message: UIMessage }): React.ReactNode {
   const { rowOf, openRunMessageIds } = useContext(TranscriptSelectionContext)
   const row = rowOf(message.id)
   const lines = useContext(PlacedLinesContext).after.get(message.id)
+  const incidents = useContext(PlacedIncidentsContext).get(message.id)
   return (
     <>
       {row === undefined || row.hidden || message.role === 'activity' ? null : (
@@ -1397,6 +1460,7 @@ function ChatMessageRow({ message }: { message: UIMessage }): React.ReactNode {
           promptName={row.promptName}
         />
       )}
+      {incidents === undefined ? null : <IncidentCards records={incidents} />}
       {lines === undefined ? null : <NotificationLines lines={lines} />}
     </>
   )
@@ -1406,23 +1470,28 @@ function ChatMessageRow({ message }: { message: UIMessage }): React.ReactNode {
  * The transcript's own content: the empty state or the messages, and pi's notify lines (#29), each
  * where it happened (#382) — the startup notices and anything said before the first message head
  * it, the rest follow the message they came after (`ChatMessageRow`), and the lines whose message
- * the transcript no longer holds (a re-read replaced it) close it. A long thread's page starts
- * with "Load earlier" (#739).
+ * the transcript no longer holds (a re-read replaced it) close it. Incident cards read the same way
+ * (#588): each after the message holding its tipping call, the rest closing it, then a halted
+ * thread's pointer to its open incident further up. A long thread's page starts with "Load
+ * earlier" (#739).
  */
 function TranscriptContent({
   messages,
   setMessages,
   selection,
-  placedLines,
+  placed,
+  incidentReveal,
 }: {
   messages: readonly UIMessage[]
   setMessages: (messages: UIMessage[]) => void
   selection: TranscriptSelection
-  placedLines: PlacedLines
+  placed: { readonly lines: PlacedLines; readonly incidents: PlacedIncidents }
+  incidentReveal: IncidentReveal
 }): React.ReactNode {
   const empty = messages.length === 0
+  const { lines, incidents } = placed
   return (
-    <>
+    <IncidentRevealContext.Provider value={incidentReveal.pendingReveal}>
       {empty ? (
         <ConversationEmptyState>
           <EnsoSmile className="size-28" />
@@ -1431,16 +1500,22 @@ function TranscriptContent({
         </ConversationEmptyState>
       ) : null}
       <LoadEarlier messages={messages} setMessages={setMessages} />
-      <NotificationLines lines={placedLines.head} />
+      <NotificationLines lines={lines.head} />
       {empty ? null : (
         <TranscriptSelectionContext.Provider value={selection}>
-          <PlacedLinesContext.Provider value={placedLines}>
-            <TranscriptRows messages={messages} />
+          <PlacedLinesContext.Provider value={lines}>
+            <PlacedIncidentsContext.Provider value={incidents.after}>
+              <RowScrollContext.Provider value={incidentReveal.rowScroll}>
+                <TranscriptRows messages={messages} />
+              </RowScrollContext.Provider>
+            </PlacedIncidentsContext.Provider>
           </PlacedLinesContext.Provider>
         </TranscriptSelectionContext.Provider>
       )}
-      <NotificationLines lines={placedLines.tail} />
-    </>
+      <NotificationLines lines={lines.tail} />
+      <IncidentCards records={incidents.tail} />
+      <OpenIncidentPointer pointer={incidents.pointer} reveal={incidentReveal.reveal} />
+    </IncidentRevealContext.Provider>
   )
 }
 
@@ -1452,12 +1527,15 @@ function panelIdsOf(shown: ThreadView | undefined, view: ThreadView): { id?: str
 /**
  * The one place the transcript is selected (#280): in `ChatLayout`, where the chat is already read,
  * by the pane's own selector, which selects again only what a chunk changed (#739) — and the lines
- * placed by that selection.
+ * placed by that selection, and the incident cards by the messages (#588).
  */
 function useTranscriptSelection(
   messages: UIMessage[],
   generating: boolean,
-): { readonly selection: TranscriptSelection; readonly placedLines: PlacedLines } {
+): {
+  readonly selection: TranscriptSelection
+  readonly placed: { readonly lines: PlacedLines; readonly incidents: PlacedIncidents }
+} {
   const stores = useThreadStores()
   const [selectTranscript] = useState(createTranscriptSelector)
   const promptsBefore = useStore(stores.earlier)?.prompts ?? 0
@@ -1465,8 +1543,11 @@ function useTranscriptSelection(
     () => selectTranscript(messages, generating, promptsBefore),
     [selectTranscript, messages, generating, promptsBefore],
   )
-  const placedLines = usePlacedLines(selection, messages.at(-1)?.id)
-  return { selection, placedLines }
+  const lines = usePlacedLines(selection, messages.at(-1)?.id)
+  const incidentState = useStore(stores.incidents)
+  const incidents = useMemo(() => placeIncidents(incidentState, messages), [incidentState, messages])
+  const placed = useMemo(() => ({ lines, incidents }), [lines, incidents])
+  return { selection, placed }
 }
 
 /** The view drawn over the transcript (#361), when one other than the chat is shown. */
@@ -1826,7 +1907,8 @@ const chatComponents = {
       )
       /** Whether the transcript is the view shown — a pane off screen keeps its chat. */
       const onChat = (shown ?? 'chat') === 'chat'
-      const { selection, placedLines } = useTranscriptSelection(chat.messages, chat.sessionGenerating)
+      const { selection, placed } = useTranscriptSelection(chat.messages, chat.sessionGenerating)
+      const incidentReveal = useIncidentReveal(scroller)
       return (
         // `data-thread-layout`: a panel the bar opens finds this layout's composer from it (#714).
         <div data-thread-layout="" className="flex min-h-0 flex-1 flex-col">
@@ -1856,11 +1938,9 @@ const chatComponents = {
                         messages={chat.messages}
                         setMessages={chat.setMessages}
                         selection={selection}
-                        placedLines={placedLines}
+                        placed={placed}
+                        incidentReveal={incidentReveal}
                       />
-                      {/* The thread's incidents (#466): below the run that opened them, above any
-										    question — a halted thread waits on this card. */}
-                      <ThreadIncidents />
                       {/* ⚠ Mounted before anything opens one, deliberately. This is where #4's
 										    `ask` verdict reaches the browser, and an unmounted slot is precisely
 										    why an approval would silently never appear. */}
