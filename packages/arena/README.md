@@ -119,12 +119,13 @@ back to the model, and the second half of the run cost 1.9× the first. Now:
 Run each scenario in both modes and put the two side by side with `arena compare`, which shows each
 run's perception and agent: they find different things.
 
-Five scenarios, told only what to achieve, never which controls to use:
+Six scenarios, told only what to achieve, never which controls to use:
 - **`snake`** (the default): a Snake game with five features of the agent's choosing. One prompt and done: it exercises starting a session, approvals, and seeing what was built.
 - **`iterate`**: a to-do CLI in at least three rounds, checking each round's changes, taking one round back for another approach, and finding the work's cost and context. It reaches what Snake doesn't: the Diff view, restore, forks, Stats and Context. Its first run found #650 and #651.
 - **`compare`**: a Markdown-to-HTML converter in two approaches kept side by side, compared by what each changed and cost, one kept and the other cleaned up, then exactly what the model was given in its last request. It reaches parallel threads, deleting a thread and its tree, and Context. Its first run found #659.
 - **`resume`**: a password generator whose work is interrupted and picked up: one request stopped midway and redirected, the page reloaded and the conversation continued, a branch off an earlier request, and another model for one request. It reaches stopping a run, persistence across a reload, forks and the model control. Its first run found #664 and #665.
 - **`play`** (#675): a small browser game, then played by the agent the way a player would: it finds something wrong or missing, has it changed, and plays again, at least twice. It is never told there is a preview; whether it finds a way to play is the finding. It reaches Preview, iteration on a running application, and what only using it shows.
+- **`arcade`** (#740): a retro arcade cabinet in the browser, a page a player picks games from, with five classic arcade games recreated in a retro style and one new game of the agent's own design. A long build in many parts: the others are done in minutes, and this is where what grows with a run's length shows (context and reads, samples and trace, threads and trees, compaction).
 
 **When a run stops (#609).** Besides the agent's own `stop`:
 - **The budget (`--minutes`).** Every `act` answer carries `phase` and `remainingMs`. When the budget is
@@ -387,8 +388,11 @@ It refuses, naming every reason at once, until the run can go:
 - the run is reviewed: `findings.json` is there and reads;
 - every finding's evidence resolves, and every `defect` names a product issue;
 - `report.md` is newer than `findings.json` (run `arena report` again after a review changes);
-- the secret scan finds nothing: a fresh scan, plus every hit an earlier scan recorded. A screenshot
-  cannot be scanned, so a secret on screen would be published: run with the run home's own credential.
+- the secret scan finds nothing: a fresh scan of the documents it publishes, plus every hit the manifest's
+  scan recorded, the trace's included. A trace hit refuses too: the page showed it, and a published
+  screenshot may. A manifest that records no scan at all (a run from before #610) is refused until
+  `arena manifest` scans it. A screenshot cannot be scanned, so a secret on screen would be published:
+  run with the run home's own credential.
 
 A run already in the corpus is refused with its issue. A publish cut short after its commit resumes from that commit.
 The corpus is cloned over HTTPS into `~/.local/share/enso/arena-corpus/`, signed in by gh's credential helper, as
@@ -468,16 +472,22 @@ and the session file are keyed by: the jump from a screenshot to its thread, whe
   environment's secret-shaped names, and the OAuth tokens and keys in `auth.json`.
   - The set grows during the run: when a refresh rotates a token, the new one is added and the old
     one stays.
-- **At the stop, every file the run keeps is scanned for those values (#610).** That includes each
-  trace zip entry by entry, where Playwright keeps the network response bodies.
+- **Every file the run keeps is scanned for those values (#610, #741).** That includes each trace zip,
+  entry by entry, where Playwright keeps the network response bodies. A zip is read one entry at a time
+  from its central directory, so a whole run takes under a second and under 200 MB.
+  - Each trace chunk is scanned as it is written; the stop scans what changed since. The manifest's
+    `secretScan.scanned` stamps each file it read (path, size, mtime), and a later scan reads only files
+    that changed, or that it now knows more values to look for.
   - The manifest's `secretScan` names each hit by file and entry, never by value, and any hit fails the
     score.
   - A file or directory it cannot read is an `unreadable` warning, and the rest is still scanned:
     not scanned is not clean.
-  - `arena manifest` scans again with the home the run recorded, and keeps every earlier hit whose file
-    still exists. A rotated token is a value it can no longer look for, so a hit it cannot re-check stands.
-  - Not read: `.enso/` (the links, by design), symlinks, and PNGs. A secret Enso puts on screen is
-    still not caught in a screenshot.
+  - `arena manifest` scans again with the home the run recorded, reading only changed files, and keeps
+    every earlier hit whose file still exists. A rotated token is a value it can no longer look for, so
+    a hit it cannot re-check stands.
+  - Not read: `.enso/` (the links, by design), symlinks, and pixels: screenshots, the trace's screencast
+    frames and image resources, and fonts. A secret Enso puts on screen is still not caught in a
+    screenshot.
 - **The agent's account is not proof.** The manifest keeps its notes apart from what the recorder
   observed; the review must cite the evidence for each point, and every bug filed says it is
   unverified and names the run. Verifying those, and triaging the filed bugs, stays a person's step.

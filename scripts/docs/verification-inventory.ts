@@ -198,6 +198,12 @@ const GATE_METADATA: Readonly<Record<string, GateMetadata>> = {
     limitation:
       'Matches provenance text and static imports; dynamically assembled dependencies are outside the import matcher.',
   },
+  'test/real-host-gate.test.ts': {
+    rootArrays: ['TEST_ROOTS'],
+    exceptions: [],
+    limitation:
+      'A line scan of test files for `createAgentHost(` outside `agent-host.test.ts` and for `startEnsoServer({ … })` without a top-level `host:`; a host built through some other helper is outside it.',
+  },
   'test/scratch-gate.test.ts': {
     roots: ['test/scratch-preload.ts'],
     exceptions: [],
@@ -243,6 +249,11 @@ const GATE_METADATA: Readonly<Record<string, GateMetadata>> = {
           // constant; a second count written by hand beside it goes stale the first time the list
           // moves — which it did, twice, in this PR alone.
           'Pins every first-party code site that still names a vendor extension, tests included. Most rows are sites #215 revealed by widening the walk rather than sites that were added; each carries its reason and the condition that removes it.',
+      },
+      {
+        constant: 'VENDOR_IMPORTERS_ALLOWED_INSIDE_ROOTS',
+        reason:
+          'Inside the two roots, the files that import the vendor (#558): a baseline that only shrinks. A new importer fails by name; a file that stops importing must leave the list.',
       },
       {
         constant: 'VENDOR_ROOTS',

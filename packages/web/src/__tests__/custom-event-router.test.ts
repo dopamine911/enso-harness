@@ -7,7 +7,6 @@ import {
   ENSO_NOTICE_SOURCE,
   ENSO_RUN_STOPPED_ENTRY,
   ENSO_SESSION_RISK_ENTRY,
-  ENSO_PROVIDER_REFUSAL_KEY,
   type EnsoDialogSpec,
   type EnsoFollowSnapshot,
   type EnsoIncidentOpened,
@@ -71,7 +70,7 @@ const snapshot = (overrides: Partial<EnsoFollowSnapshot> = {}): EnsoFollowSnapsh
   model: null,
   cwd: '/work/project',
   tree: false,
-  messages: [],
+  messageCount: 0,
   usage: NO_USAGE,
   openDialogs: [],
   ...overrides,
@@ -738,20 +737,14 @@ test('⚠ a refusal after streamed text keeps its word through the turn’s usag
 })
 
 // #381: the word lived only in the page's stores, so a reload lost it and the status bar read
-// `idle · $0.0000` again. The snapshot carries the branch, whose last reply is the refused
-// attempt pi stored — that is the resync. A refusal a reply came after is history, not state.
-const refusedAttempt = (id: string): unknown => ({
-  id,
-  role: 'assistant',
-  parts: [],
-  metadata: { [ENSO_PROVIDER_REFUSAL_KEY]: { provider: 'anthropic', status: 401, message: '401 invalid x-api-key' } },
-})
-const reply = (id: string): unknown => ({ id, role: 'assistant', parts: [{ type: 'text', content: 'hello' }] })
-const prompt = (id: string): unknown => ({ id, role: 'user', parts: [{ type: 'text', content: 'hi' }] })
+// `idle · $0.0000` again. The snapshot says the refusal the branch's last reply is — the server read
+// it off pi's stored attempt (#739: the snapshot no longer carries the branch) — and that is the
+// resync. A refusal a reply came after is history, not state: the server sends none then.
+const REFUSED = { provider: 'anthropic', status: 401, message: '401 invalid x-api-key' }
 
 // @pins resume/transcript-ours
 test('a snapshot whose last reply is a refused attempt shows the word; one with a reply after it clears it (#381)', () => {
-  route('snapshot', snapshot({ usage: SPENT, messages: [prompt('u1'), refusedAttempt('a1'), prompt('u2')] }))
+  route('snapshot', snapshot({ usage: SPENT, messageCount: 3, trailingRefusal: REFUSED }))
   expect(stores.refusal.get()).toEqual({
     refusalClass: 'not logged in',
     provider: 'anthropic',
@@ -761,8 +754,8 @@ test('a snapshot whose last reply is a refused attempt shows the word; one with 
   observe({ kind: 'session-usage', ...SPENT, output: SPENT.output + 1 })
   expect(stores.refusal.get()).toBeUndefined()
 
-  route('snapshot', snapshot({ messages: [refusedAttempt('a1')] }))
-  route('snapshot', snapshot({ messages: [prompt('u1'), refusedAttempt('a1'), reply('a2')] }))
+  route('snapshot', snapshot({ messageCount: 1, trailingRefusal: REFUSED }))
+  route('snapshot', snapshot({ messageCount: 3 }))
   expect(stores.refusal.get()).toBeUndefined()
   // and the snapshot adds no transcript line: the attempt's own bubble says it
   expect(noticesBesideModeLines()).toEqual([])

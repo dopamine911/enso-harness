@@ -100,7 +100,7 @@ import { createThreadChangesRoute, createThreadGitRoute } from './thread-git-rou
 import { createThreadSecurityReads, replayThresholdsOf } from './thread-incidents-route.ts'
 import { createThreadManifestRoute } from './thread-manifest-route.ts'
 import { createPreviewOrigins, createPreviewRoute, createThreadPagesRoute } from './thread-preview-route.ts'
-import { readThreadMount, type ThreadReadDeps } from './thread-read.ts'
+import { historyPage, readThreadMount, type ThreadReadDeps } from './thread-read.ts'
 import { createThreadRegistry, inspectThread, type ThreadView } from './thread-registry.ts'
 import { createThreadStatsRoute } from './thread-stats-route.ts'
 
@@ -123,8 +123,11 @@ const THREAD_DELETE_ROUTE = /^\/api\/threads\/([^/?#]+)(\?force=1)?$/
 const THREAD_DELETE_PREVIEW_ROUTE = threadRoute('delete-preview')
 /** `GET /api/threads/<threadId>/events` — the thread's two event tails (#97). */
 const THREAD_EVENTS_ROUTE = threadRoute('events')
-/** `GET /api/threads/<threadId>/history` — the branch as messages, live or stored (#95). */
-const THREAD_HISTORY_ROUTE = threadRoute('history')
+/**
+ * `GET /api/threads/<threadId>/history[?before=<messageId>]` — the branch as messages, live or stored
+ * (#95): its last page, or the page before that message (#739).
+ */
+const THREAD_HISTORY_ROUTE = /^\/api\/threads\/([^/?#]+)\/history(?:\?([^#]*))?$/
 /** `GET /api/threads/<threadId>/commands` — the slash commands the thread can run, for the palette (#338). */
 const THREAD_COMMANDS_ROUTE = threadRoute('commands')
 /** `GET /api/threads/<threadId>/stats` — the thread analysed: per prompt, turn and tool (#45). */
@@ -204,7 +207,8 @@ const THREAD_NAME_ROUTE = threadRoute('name')
 const THREAD_INCIDENT_RESOLVE_ROUTE = /^\/api\/threads\/([^/?#]+)\/incidents\/([0-9A-Za-z-]+)\/resolve$/
 /**
  * `GET …/incidents` (#468): the thread's incident history and its replay — under the server's
- * thresholds, or the ones the query names (`?incidentAtSignals=4`). The one thread read that takes a query.
+ * thresholds, or the ones the query names (`?incidentAtSignals=4`). One of two thread reads that
+ * take a query; `…/history?before=` is the other.
  */
 const THREAD_INCIDENTS_ROUTE = /^\/api\/threads\/([^/?#]+)\/incidents(?:\?([^#]*))?$/
 /**
@@ -778,7 +782,9 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
 
   /**
    * The thread's branch as the messages a chat mounts with (#95), plus its permission mode.
-   * Read-only — looking must not build (#86).
+   * Read-only — looking must not build (#86). ONE PAGE of it (#739, `thread-read.ts#historyPage`):
+   * the last, or with `?before=<messageId>` the one before that message — and a 409 when the
+   * branch holds no such message any more (a compaction rewrote it), which the page re-reads.
    *
    * Decided by what the server holds, not by whether it holds anything:
    *   • HERE (a run in flight, a dialog open, or idle within the eviction window): pi's
@@ -810,7 +816,13 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
    * rail row is a stale listing; either failure is said on the rail's "could not open the thread"
    * line, never as the listing failing.
    */
-  async function respondWithThreadHistory(threadId: string, response: ServerResponse): Promise<void> {
+  async function respondWithThreadHistory(
+    threadId: string,
+    _request: IncomingMessage,
+    response: ServerResponse,
+    match: RegExpExecArray,
+  ): Promise<void> {
+    const before = new URLSearchParams(match[2] ?? '').get('before') ?? undefined
     const mount = await readThreadMount(threadRead, threadId)
     // #378: stored, but in a directory that is no project here — refused by name, so a page does
     // not take it for an id nobody has used and start it afresh (a 404 means exactly that).
@@ -834,11 +846,15 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
       response.end(`no session for thread ${threadId}`)
       return
     }
-
+    const page = historyPage(mount.transcript, before)
+    if (page === undefined) {
+      refuseWith(response, { status: 409, reason: `the thread's branch no longer holds message ${before}` })
+      return
+    }
     const payload: EnsoThreadHistory = {
       threadId,
       projectId: mount.projectId,
-      messages: mount.messages,
+      ...page,
       permissionMode: mount.permissionMode,
       sessionRisk: mount.sessionRisk,
       incidents: mount.incidents,
@@ -1174,7 +1190,6 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     readonly [RegExp, (threadId: string, response: ServerResponse) => void | Promise<void>]
   > = [
     [THREAD_EVENTS_ROUTE, respondWithThreadEvents],
-    [THREAD_HISTORY_ROUTE, respondWithThreadHistory],
     [THREAD_COMMANDS_ROUTE, respondWithThreadCommands],
     [THREAD_STATS_ROUTE, respondWithThreadStats],
     [THREAD_CONTEXT_ROUTE, respondWithThreadContext],
@@ -1193,6 +1208,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     { method: 'GET', route: THREAD_PROJECT_PROMPTS_ROUTE, respond: idOnly(respondWithProjectPrompts) },
     { method: 'GET', route: THREAD_PROJECT_PROMPT_ROUTE, respond: respondWithProjectPrompt },
     { method: 'GET', route: THREAD_INCIDENTS_ROUTE, respond: respondWithThreadIncidents },
+    { method: 'GET', route: THREAD_HISTORY_ROUTE, respond: respondWithThreadHistory },
     { method: 'GET', route: THREAD_ROUTE, respond: idOnly(respondWithThread) },
     {
       method: 'GET',

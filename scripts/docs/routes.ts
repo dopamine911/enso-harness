@@ -186,8 +186,12 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
   ),
   THREAD_HISTORY_ROUTE: threadRead(
     'respondWithThreadHistory',
-    '200 `EnsoThreadHistory` JSON',
-    '400 malformed thread id; 403 untrusted origin, or a session stored in a directory that is no project here (named, #378); 404 no session — an id nobody has used, which a page starts; 410 a deleted thread (#571) — this server deleted it — never started again; 500 handler failure',
+    "200 `EnsoThreadHistory` JSON — one page of the branch (#739): its last 200 messages, or with `?before=<messageId>` the 200 before that message, and `earlier` saying how many messages and prompts come before the page (the first prompt's text with them); the other fields are the whole branch's",
+    '400 malformed thread id; 403 untrusted origin, or a session stored in a directory that is no project here (named, #378); 404 no session — an id nobody has used, which a page starts; 409 `before` names a message the branch no longer holds (a compaction rewrote it); 410 a deleted thread (#571) — this server deleted it — never started again; 500 handler failure',
+    {
+      path: '/api/threads/:threadId/history',
+      input: 'path: `threadId`; query: optional `before` — a message id on the branch',
+    },
   ),
   THREAD_DELETE_PREVIEW_ROUTE: threadRead(
     'respondWithDeletePreview → AgentHost.previewThreadDelete',

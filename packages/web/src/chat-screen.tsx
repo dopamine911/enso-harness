@@ -19,15 +19,14 @@ import {
 } from '@enso/core'
 import type { ContentPart } from '@tanstack/ai'
 import type { ConnectConnectionAdapter, UIMessage } from '@tanstack/ai-client'
-import { automaticPartsForMessage, type ChatUISelectedPart, selectChatUI } from '@tanstack/ai-client/ui'
 import {
   type ChatUIContexts,
   type ChatUIHost,
   createChatHook,
   createChatHookContexts,
   type LayoutProps,
-  type MessageProps,
 } from '@tanstack/ai-react/ui'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import {
   ArrowUpIcon,
   ChartColumnIcon,
@@ -127,6 +126,7 @@ import {
   adoptThread,
   dropThread,
   getThreadStores,
+  loadEarlierMessages,
   markThreadActive,
   mintThread,
   nameThreadSummary,
@@ -134,12 +134,13 @@ import {
   type ThreadSummary,
   threadListStore,
   threadTitleFromMessage,
-  titleFromMessage,
   updateThreadSummary,
 } from './thread-stores.ts'
 import { readThreadUrl, type ThreadUrl, urlForThread } from './thread-url.ts'
 import { forkParentTitles, ThreadsRail, UNTITLED_THREAD } from './threads-rail.tsx'
 import { locateStatsTarget, type RevealStatsTarget, revealElement } from './transcript-reveal.ts'
+import { createTranscriptSelector, type KeyedPart, type TranscriptSelection } from './transcript-selection.ts'
+import { estimatedTranscriptRow, windowedRowStyle } from './transcript-window.ts'
 
 /**
  * The enso web surface (#24, #17) — every component and the chat wiring, importable with
@@ -337,51 +338,6 @@ function TranscriptRevealBridge({ into }: { into: React.RefObject<TranscriptScro
     }
   }, [into, contentRef, stopScroll])
   return null
-}
-
-/** One selected part paired with the React key that identifies it. */
-export interface KeyedPart {
-  /** Stable across re-renders AND position changes — see `keyedParts` for why that matters. */
-  partKey: string
-  selected: ChatUISelectedPart
-  isTrailingPart: boolean
-}
-
-/**
- * Pairs each selected part with a React key that is an IDENTITY, not a position.
- *
- * ⚠ Tool parts MOVE. The selection runs over the whole message list (see `ChatMessageRow`'s
- * header), so a result the server stamps onto a different message re-pairs its call and
- * shifts that call's index. A key carrying the array index therefore changes identity for a
- * part that did not change — React remounts it and the rendered tool block loses its state.
- * `noArrayIndexKey` is right to refuse it, and this is the fix rather than a suppression:
- * tool parts already carry a real id (`id` on tool-call, `toolCallId` on tool-result), so
- * key by that. Text/thinking/image parts carry no id, but they are append-only within one
- * message, so a per-KIND occurrence counter identifies them without borrowing the position
- * of the whole list.
- *
- * `isTrailingPart` rides along so the caller needs no index either — see its use below.
- *
- * ⓘ Exported for `__tests__/chat-screen.test.tsx` only; nothing else imports it.
- */
-export function keyedParts(parts: ChatUISelectedPart[]): KeyedPart[] {
-  const seenPerKind = new Map<string, number>()
-  return parts.map((selected, position) => {
-    const identity = partIdentity(selected)
-    if (identity !== undefined) {
-      return { partKey: `${selected.key}-${identity}`, selected, isTrailingPart: position === parts.length - 1 }
-    }
-    const seen = seenPerKind.get(selected.key) ?? 0
-    seenPerKind.set(selected.key, seen + 1)
-    return { partKey: `${selected.key}#${seen}`, selected, isTrailingPart: position === parts.length - 1 }
-  })
-}
-
-/** The part's own stable id, or undefined for the kinds that carry none. */
-function partIdentity(selected: ChatUISelectedPart): string | undefined {
-  if (selected.key === 'toolCall') return selected.part.id
-  if (selected.key === 'toolResult') return selected.part.toolCallId
-  return undefined
 }
 
 /**
@@ -1017,55 +973,15 @@ function PendingQueue(): React.ReactNode {
 }
 
 /**
- * The whole transcript's selection, built ONCE per streamed chunk and indexed by message id
- * (#280). Every row used to run `selectChatUI` over the entire list to find its own entry,
- * which is O(messages × parts) per chunk, not per user action: measured over the real
- * selector, one render pass of a 300-message thread spent 7.1 ms in the selector alone
- * (0.03 ms at 20, 0.98 ms at 100) before React touched the DOM. Indexed, the same pass costs
- * 0.03 ms.
- *
- * `openRunMessageIds` rides along because it is the only other thing a row needed from the
- * chat: with it here, no row calls `useChatContext`, and a row that reads only this can hand
- * everything it draws to a memo (see `MessageBody`).
+ * The transcript's selection for the rows (#280, #739): built in `ChatLayout`, where the chat is
+ * already read, by the pane's `createTranscriptSelector` — which selects again only what a chunk
+ * changed. With it here no row calls `useChatContext`, and a row hands what it draws to a memo
+ * (`MessageBody`).
  */
-interface TranscriptSelection {
-  readonly partsByMessageId: ReadonlyMap<string, KeyedPart[]>
-  /**
-   * The messages whose run is in flight, while the thread generates: every assistant message after
-   * the last user message. Not just the last message (#412): joining a run that is already going
-   * (a reload) opens a NEW message for what streams next, after the stored one that holds the
-   * call pi is still waiting on — and a user message is where a run, or a queued prompt pi took,
-   * began, so no call before it is still running.
-   */
-  readonly openRunMessageIds: ReadonlySet<string>
-  /**
-   * The messages that CONTINUE the one before them — same role, so no speaker line of their own:
-   * one pi turn is several assistant messages (each tool round is one), and "pi" says it once.
-   * Counted over the messages that are drawn: a hidden one (below) neither continues nor is continued.
-   */
-  readonly continuedMessageIds: ReadonlySet<string>
-  /**
-   * Assistant messages with nothing to draw that a later message has superseded (#382): a refused
-   * attempt the provider turned down before any token. Their bubble would be a bare speaker line;
-   * the lines said about them (`refused: …`, `retrying in …`) still read in their place. The last
-   * message is never hidden — it is the one a run is about to stream into.
-   */
-  readonly hiddenMessageIds: ReadonlySet<string>
-  /**
-   * Each user prompt's name for its fork and restore (#651): its number among the prompts, and its
-   * words as the rail shortens them — `prompt 3: “continue”`. Numbered (PR #654 review): two prompts
-   * with the same words ("continue", "ok") would share a name again. Built once per selection, not
-   * per row per chunk.
-   */
-  readonly promptNames: ReadonlyMap<string, string>
-}
-
 const TranscriptSelectionContext = createContext<TranscriptSelection>({
-  partsByMessageId: new Map(),
+  rowOf: (): undefined => undefined,
   openRunMessageIds: new Set(),
-  continuedMessageIds: new Set(),
-  hiddenMessageIds: new Set(),
-  promptNames: new Map(),
+  messageIds: new Set(),
 })
 
 /** The thread's lines by where they read (#382), grouped once in `ChatLayout` for every row. */
@@ -1077,44 +993,6 @@ const PlacedLinesContext = createContext<PlacedLines>({ head: [], after: new Map
  */
 type DrawnRole = Exclude<UIMessage['role'], 'activity'>
 
-/** Which messages a selection hides, which continue the one drawn before them, and each prompt's name — see {@link TranscriptSelection}. */
-function drawnMessages(
-  messages: readonly UIMessage[],
-  partsByMessageId: ReadonlyMap<string, KeyedPart[]>,
-): Pick<TranscriptSelection, 'continuedMessageIds' | 'hiddenMessageIds' | 'promptNames'> {
-  const continuedMessageIds = new Set<string>()
-  const hiddenMessageIds = new Set<string>()
-  const promptNames = new Map<string, string>()
-  let drawnRole: UIMessage['role'] | undefined
-  messages.forEach((message, position) => {
-    // Not drawn, so neither a bubble nor the break between two of one speaker's (see `DrawnRole`).
-    if (message.role === 'activity') return
-    if (message.role === 'user') {
-      const title = titleFromMessage(message)
-      promptNames.set(message.id, `prompt ${promptNames.size + 1}${title === undefined ? '' : `: “${title}”`}`)
-    }
-    const superseded = position < messages.length - 1
-    const empty = (partsByMessageId.get(message.id)?.length ?? 0) === 0 && refusalOfMessage(message) === undefined
-    if (superseded && empty && message.role === 'assistant') {
-      hiddenMessageIds.add(message.id)
-      return
-    }
-    if (drawnRole === message.role) continuedMessageIds.add(message.id)
-    drawnRole = message.role
-  })
-  return { continuedMessageIds, hiddenMessageIds, promptNames }
-}
-
-/**
- * The empty selection, for a lookup that finds nothing.
- *
- * ⚠ Reached only if `selectChatUI` ever returns a different message SET than `chat.messages`
- * (PR #304 review): rows iterate the latter and the index is built from the former. Nothing
- * here checks that — the per-row code this replaced returned `[]` on the same miss, so the
- * assumption is carried, not introduced. A bubble drawn empty is the symptom.
- */
-const NO_PARTS: KeyedPart[] = []
-
 interface MessageBodyProps {
   readonly messageId: string
   readonly role: DrawnRole
@@ -1125,7 +1003,7 @@ interface MessageBodyProps {
   readonly refusal: EnsoProviderRefusal | undefined
   /** Whether the speaker line is drawn — not when the message before it is the same speaker's. */
   readonly speaker: boolean
-  /** A user prompt's name for its fork and restore (#651): `prompt 2: “…”` (`TranscriptSelection.promptNames`). */
+  /** A user prompt's name for its fork and restore (#651): `prompt 2: “…”` (`TranscriptRow.promptName`). */
   readonly promptName: string | undefined
 }
 
@@ -1328,36 +1206,221 @@ function sameRenderedMessage(previous: MessageBodyProps, next: MessageBodyProps)
 }
 
 /**
- * The thread's lines by where they read (#382), for the transcript `messages` is. Also hands the
+ * The thread's lines by where they read (#382), for the transcript the selection is. Also hands the
  * store the transcript's last message: a line the page raises between runs follows it — as
- * rendered, which is what a reader saw when they acted.
+ * rendered, which is what a reader saw when they acted. Grouped again when the lines change or a
+ * message is added or removed — not per streamed chunk (#739): the selection's id set is the same
+ * object until then. A line whose message is on a page not loaded yet waits for it (`earlier`).
  */
-function usePlacedLines(messages: readonly UIMessage[]): PlacedLines {
-  const { notifications } = useThreadStores()
+function usePlacedLines(selection: TranscriptSelection, lastMessageId: string | undefined): PlacedLines {
+  const { notifications, earlier } = useThreadStores()
   useEffect(() => {
-    notifications.setTranscriptTail(messages.at(-1)?.id)
-  }, [notifications, messages])
+    notifications.setTranscriptTail(lastMessageId)
+  }, [notifications, lastMessageId])
   const lines = useStore(notifications)
-  return useMemo(() => placeLines(lines, new Set(messages.map((message) => message.id))), [lines, messages])
+  const waiting = useStore(earlier)?.anchors
+  const { messageIds } = selection
+  return useMemo(() => placeLines(lines, messageIds, waiting), [lines, messageIds, waiting])
+}
+
+/**
+ * "Load earlier" (#739): a long thread opens on its last page, and this reads the page before the
+ * first message held and puts it above. The reader is let go of the bottom first — the press is a
+ * scroll up — and the list keeps what they were reading where it was (`TranscriptRows`).
+ */
+function LoadEarlier({
+  messages,
+  setMessages,
+}: {
+  messages: readonly UIMessage[]
+  setMessages: (messages: UIMessage[]) => void
+}): React.ReactNode {
+  const stores = useThreadStores()
+  const earlier = useStore(stores.earlier)
+  const { stopScroll } = useStickToBottomContext()
+  const [loading, setLoading] = useState(false)
+  // The transcript as of the latest COMMITTED render, for a page that lands after more streamed in
+  // (`ChatPromptInput`'s `latestMessages`, PR #129 review).
+  const latestMessages = useRef(messages)
+  useEffect(() => {
+    latestMessages.current = messages
+  }, [messages])
+  if (earlier === undefined) return null
+  const load = (): void => {
+    stopScroll()
+    setLoading(true)
+    const held = latestMessages.current
+    void loadEarlierMessages(stores, held).then((page) => {
+      setLoading(false)
+      if (typeof page === 'string') {
+        stores.notifications.push(`earlier messages could not be loaded: ${page}`, 'warning', 'run', ENSO_NOTICE_SOURCE)
+        return
+      }
+      // ⚠ A compaction's re-read replaced the transcript meanwhile: the page is of a branch no longer shown.
+      if (latestMessages.current[0]?.id !== held[0]?.id) return
+      setMessages([...page.messages, ...latestMessages.current])
+      stores.earlier.set(page.earlier)
+    })
+  }
+  const count = earlier.messages === 1 ? '1 earlier message' : `${earlier.messages} earlier messages`
+  return (
+    <div className="flex justify-center">
+      <Button type="button" variant="outline" size="sm" disabled={loading} onClick={load}>
+        {loading ? 'Loading earlier messages…' : `Load earlier · ${count}`}
+      </Button>
+    </div>
+  )
+}
+
+// The row estimate and placement, in pixels as a virtualizer needs them: `transcript-window.ts`.
+
+/** Rows drawn past each edge of the viewport, so a fast scroll does not show blank space before they measure. */
+const TRANSCRIPT_OVERSCAN_ROWS = 6
+
+/** One row's box: the gap between rows is its padding, since a windowed row is placed, not flowed. */
+const TRANSCRIPT_ROW = 'pb-4 ledger:pb-0'
+
+/**
+ * The transcript's rows, WINDOWED (#739): only the rows in and near the viewport are in the DOM, so
+ * a thread of thousands of messages draws the same few dozen bubbles as a short one. The scroller is
+ * `<Conversation>`'s, so stick-to-bottom keeps following a streaming reply: the list's height is the
+ * rows' measured total, and it grows as the reply does.
+ *
+ * ⚠ `anchorTo: 'end'` is what keeps the reader in place when "Load earlier" puts a page above: the
+ * virtualizer re-anchors the scroll to the row that was at the top of the view, so the page grows
+ * upward out of sight instead of pushing the text down.
+ *
+ * A viewport with no height has no window to cut — a static render, a DOM without layout — and
+ * draws every row in flow, as the transcript did before #739.
+ */
+function TranscriptRows({ messages }: { messages: readonly UIMessage[] }): React.ReactNode {
+  const { scrollRef } = useStickToBottomContext()
+  // Where the list starts inside the scroller: below the lines and the "Load earlier" control. Any of
+  // them growing or shrinking resizes the content the list sits in, so that is what is watched.
+  const [scrollMargin, setScrollMargin] = useState(0)
+  // The list's element, as state: the list is drawn by one of two branches below, so the watch
+  // follows whichever element is mounted.
+  const [listElement, list] = useState<HTMLDivElement | null>(null)
+  useEffect(() => {
+    const content = listElement?.parentElement
+    if (listElement === null || content === null || content === undefined) return undefined
+    const measure = (): void => setScrollMargin(listElement.offsetTop)
+    measure()
+    // ⚠ A FRAME LATER, never inside the callback: the new margin moves the rows, which resizes the
+    // content this watches, and a resize caused within the same callback is the loop the browser
+    // reports as "ResizeObserver loop completed with undelivered notifications" (seen live, #739).
+    let frame = 0
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(measure)
+    })
+    observer.observe(content)
+    return () => {
+      cancelAnimationFrame(frame)
+      observer.disconnect()
+    }
+  }, [listElement])
+  const virtualizer = useVirtualizer({
+    count: messages.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: estimatedTranscriptRow,
+    getItemKey: (index) => messages[index]?.id ?? index,
+    overscan: TRANSCRIPT_OVERSCAN_ROWS,
+    scrollMargin,
+    anchorTo: 'end',
+    // Until the scroller is measured, a window the size of the page's — never zero in a browser.
+    initialRect: { width: 0, height: typeof window === 'undefined' ? 0 : window.innerHeight },
+    // Its row measurements a frame later too, for the same ResizeObserver loop as the margin's: a
+    // measured row moves the rows below it inside the observer's own callback otherwise.
+    useAnimationFrameWithResizeObserver: true,
+  })
+  const rows = virtualizer.getVirtualItems()
+  if (rows.length === 0) {
+    return (
+      <div ref={list}>
+        {messages.map((message) => (
+          <div key={message.id} className={TRANSCRIPT_ROW}>
+            <ChatMessageRow message={message} />
+          </div>
+        ))}
+      </div>
+    )
+  }
+  return (
+    <div ref={list} style={{ position: 'relative', height: virtualizer.getTotalSize() }}>
+      {rows.map((row) => {
+        const message = messages[row.index]
+        if (message === undefined) return null
+        return (
+          <div
+            key={row.key}
+            data-index={row.index}
+            ref={virtualizer.measureElement}
+            className={TRANSCRIPT_ROW}
+            style={windowedRowStyle(row.start - scrollMargin)}
+          >
+            <ChatMessageRow message={message} />
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+/**
+ * One message's row: its bubble, from the selection's row for it, and the lines that follow it
+ * (#382). The `message` slot TanStack's factory requires, and the row `TranscriptRows` draws for
+ * each message in view.
+ *
+ * ⚠ It runs only for the rows in view, on every chunk (it reads the selection, and React re-renders
+ * a context consumer), and all it does is a lookup and hand `MessageBody` its props — that memo is
+ * what keeps the redraw to the bubble that changed. The selection pairs across the whole list (a
+ * tool result the server stamps onto a DIFFERENT message than its call still pairs; a per-message
+ * `selectMessageUI` would show such a call as "running…" forever), which is why it is built once in
+ * `ChatLayout` and never here (#280). A hidden message (a refused attempt with nothing drawn) keeps
+ * its lines.
+ */
+function ChatMessageRow({ message }: { message: UIMessage }): React.ReactNode {
+  const { rowOf, openRunMessageIds } = useContext(TranscriptSelectionContext)
+  const row = rowOf(message.id)
+  const lines = useContext(PlacedLinesContext).after.get(message.id)
+  return (
+    <>
+      {row === undefined || row.hidden || message.role === 'activity' ? null : (
+        <MessageBody
+          messageId={message.id}
+          role={message.role}
+          parts={row.parts}
+          runOpen={openRunMessageIds.has(message.id)}
+          refusal={refusalOfMessage(message)}
+          speaker={row.speaker}
+          promptName={row.promptName}
+        />
+      )}
+      {lines === undefined ? null : <NotificationLines lines={lines} />}
+    </>
+  )
 }
 
 /**
  * The transcript's own content: the empty state or the messages, and pi's notify lines (#29), each
  * where it happened (#382) — the startup notices and anything said before the first message head
  * it, the rest follow the message they came after (`ChatMessageRow`), and the lines whose message
- * the transcript no longer holds (a re-read replaced it) close it.
+ * the transcript no longer holds (a re-read replaced it) close it. A long thread's page starts
+ * with "Load earlier" (#739).
  */
 function TranscriptContent({
-  Messages,
-  empty,
+  messages,
+  setMessages,
   selection,
   placedLines,
 }: {
-  Messages: LayoutProps<ThreadChatOptions>['Messages']
-  empty: boolean
+  messages: readonly UIMessage[]
+  setMessages: (messages: UIMessage[]) => void
   selection: TranscriptSelection
   placedLines: PlacedLines
 }): React.ReactNode {
+  const empty = messages.length === 0
   return (
     <>
       {empty ? (
@@ -1367,17 +1430,86 @@ function TranscriptContent({
           <p className="text-sm text-muted-foreground">ask pi something to get started</p>
         </ConversationEmptyState>
       ) : null}
+      <LoadEarlier messages={messages} setMessages={setMessages} />
       <NotificationLines lines={placedLines.head} />
       {empty ? null : (
         <TranscriptSelectionContext.Provider value={selection}>
           <PlacedLinesContext.Provider value={placedLines}>
-            <Messages />
+            <TranscriptRows messages={messages} />
           </PlacedLinesContext.Provider>
         </TranscriptSelectionContext.Provider>
       )}
       <NotificationLines lines={placedLines.tail} />
     </>
   )
+}
+
+/** A view panel's `id`s, in the pane on screen only — a hidden pane's would duplicate them. */
+function panelIdsOf(shown: ThreadView | undefined, view: ThreadView): { id?: string; 'aria-labelledby'?: string } {
+  return shown === undefined ? {} : { id: `thread-view-${view}`, 'aria-labelledby': `thread-view-${view}-tab` }
+}
+
+/**
+ * The one place the transcript is selected (#280): in `ChatLayout`, where the chat is already read,
+ * by the pane's own selector, which selects again only what a chunk changed (#739) — and the lines
+ * placed by that selection.
+ */
+function useTranscriptSelection(
+  messages: UIMessage[],
+  generating: boolean,
+): { readonly selection: TranscriptSelection; readonly placedLines: PlacedLines } {
+  const stores = useThreadStores()
+  const [selectTranscript] = useState(createTranscriptSelector)
+  const promptsBefore = useStore(stores.earlier)?.prompts ?? 0
+  const selection = useMemo(
+    () => selectTranscript(messages, generating, promptsBefore),
+    [selectTranscript, messages, generating, promptsBefore],
+  )
+  const placedLines = usePlacedLines(selection, messages.at(-1)?.id)
+  return { selection, placedLines }
+}
+
+/** The view drawn over the transcript (#361), when one other than the chat is shown. */
+function ThreadViewOverlay({
+  shown,
+  revealInTranscript,
+  changesMoment,
+}: {
+  shown: ThreadView | undefined
+  revealInTranscript: RevealStatsTarget
+  /** When the tree may have moved: a settled tool result, the run starting or ending. */
+  changesMoment: string
+}): React.ReactNode {
+  // The thread's context (#361): what each request was made of, over the transcript.
+  if (shown === 'context') {
+    return (
+      <div role="tabpanel" {...panelIdsOf(shown, 'context')} className="absolute inset-0 overflow-y-auto">
+        <div className="mx-auto w-full max-w-context-view">
+          <ThreadContextDrawer />
+        </div>
+      </div>
+    )
+  }
+  // The thread's stats (#45 phase 2), over the transcript (#361).
+  if (shown === 'stats') {
+    return (
+      <div role="tabpanel" {...panelIdsOf(shown, 'stats')} className="absolute inset-0 overflow-y-auto">
+        <div className="mx-auto w-full max-w-stats-view">
+          <ThreadStatsDrawer onNavigate={revealInTranscript} />
+          <ThreadEvalDrawer onNavigate={revealInTranscript} />
+        </div>
+      </div>
+    )
+  }
+  // What changed since the last push (#452): the tree and the chosen file's diff, over the transcript.
+  if (shown === 'changes') {
+    return (
+      <div role="tabpanel" {...panelIdsOf(shown, 'changes')} className="absolute inset-0">
+        <ThreadChanges moment={changesMoment} />
+      </div>
+    )
+  }
+  return null
 }
 
 /**
@@ -1664,13 +1796,16 @@ const chatComponents = {
      *
      * Errors are not a message part, so no `partsComponents` entry catches them. They
      * live on the chat instance and have to be rendered deliberately.
+     *
+     * The `Messages` slot goes unused on purpose (#739): TanStack's draws every message, and a
+     * 5,000-message thread drew 5,000 bubbles. `TranscriptRows` draws the ones in view.
      */
-    layout: function ChatLayout({ Messages, Input }: LayoutProps<ThreadChatOptions>): React.ReactNode {
+    layout: function ChatLayout({ Input }: LayoutProps<ThreadChatOptions>): React.ReactNode {
       const chat = useChatContext()
       const debugOpen = useContext(DebugOpenContext)
       const { shown, open } = useContext(PaneViewContext)
-      const threadProject = useThreadProject(useThreadStores().projectId)
-      const placedLines = usePlacedLines(chat.messages)
+      const stores = useThreadStores()
+      const threadProject = useThreadProject(stores.projectId)
       const scroller = useRef<TranscriptScroller | null>(null)
       const revealInTranscript = useCallback<RevealStatsTarget>(
         (target, stats) => {
@@ -1691,25 +1826,7 @@ const chatComponents = {
       )
       /** Whether the transcript is the view shown — a pane off screen keeps its chat. */
       const onChat = (shown ?? 'chat') === 'chat'
-      /** A panel's `id`s, in the pane on screen only — a hidden pane's would duplicate them. */
-      const panelIds = (view: ThreadView): { id?: string; 'aria-labelledby'?: string } =>
-        shown === undefined ? {} : { id: `thread-view-${view}`, 'aria-labelledby': `thread-view-${view}-tab` }
-      // The one place the transcript is selected (#280): here, where the chat is already read,
-      // once per chunk instead of once per row.
-      const selection = useMemo<TranscriptSelection>(() => {
-        const partsByMessageId = new Map<string, KeyedPart[]>()
-        for (const selected of selectChatUI({ messages: chat.messages }).messages) {
-          partsByMessageId.set(selected.message.id, keyedParts(automaticPartsForMessage(selected)))
-        }
-        const openRunMessageIds = new Set<string>()
-        if (chat.sessionGenerating) {
-          for (const message of chat.messages.toReversed()) {
-            if (message.role !== 'assistant') break
-            openRunMessageIds.add(message.id)
-          }
-        }
-        return { partsByMessageId, openRunMessageIds, ...drawnMessages(chat.messages, partsByMessageId) }
-      }, [chat.messages, chat.sessionGenerating])
+      const { selection, placedLines } = useTranscriptSelection(chat.messages, chat.sessionGenerating)
       return (
         // `data-thread-layout`: a panel the bar opens finds this layout's composer from it (#714).
         <div data-thread-layout="" className="flex min-h-0 flex-1 flex-col">
@@ -1726,7 +1843,7 @@ const chatComponents = {
 							    survive a trip to Context or Stats. */}
                 <div
                   role="tabpanel"
-                  {...panelIds('chat')}
+                  {...panelIdsOf(shown, 'chat')}
                   inert={!onChat}
                   className={
                     onChat ? 'flex min-h-0 min-w-0 flex-1 flex-col' : 'invisible flex min-h-0 min-w-0 flex-1 flex-col'
@@ -1736,8 +1853,8 @@ const chatComponents = {
                     <TranscriptRevealBridge into={scroller} />
                     <ConversationContent className="w-full gap-4 px-6 py-4 ledger:gap-0">
                       <TranscriptContent
-                        Messages={Messages}
-                        empty={chat.messages.length === 0}
+                        messages={chat.messages}
+                        setMessages={chat.setMessages}
                         selection={selection}
                         placedLines={placedLines}
                       />
@@ -1753,29 +1870,11 @@ const chatComponents = {
                     <ConversationScrollButton />
                   </Conversation>
                 </div>
-                {/* The thread's context (#361): what each request was made of, over the transcript. */}
-                {shown === 'context' ? (
-                  <div role="tabpanel" {...panelIds('context')} className="absolute inset-0 overflow-y-auto">
-                    <div className="mx-auto w-full max-w-context-view">
-                      <ThreadContextDrawer />
-                    </div>
-                  </div>
-                ) : null}
-                {/* The thread's stats (#45 phase 2), over the transcript (#361). */}
-                {shown === 'stats' ? (
-                  <div role="tabpanel" {...panelIds('stats')} className="absolute inset-0 overflow-y-auto">
-                    <div className="mx-auto w-full max-w-stats-view">
-                      <ThreadStatsDrawer onNavigate={revealInTranscript} />
-                      <ThreadEvalDrawer onNavigate={revealInTranscript} />
-                    </div>
-                  </div>
-                ) : null}
-                {/* What changed since the last push (#452): the tree and the chosen file's diff, over the transcript. */}
-                {shown === 'changes' ? (
-                  <div role="tabpanel" {...panelIds('changes')} className="absolute inset-0">
-                    <ThreadChanges moment={`${settledToolResults(chat.messages)}:${chat.sessionGenerating}`} />
-                  </div>
-                ) : null}
+                <ThreadViewOverlay
+                  shown={shown}
+                  revealInTranscript={revealInTranscript}
+                  changesMoment={`${settledToolResults(chat.messages)}:${chat.sessionGenerating}`}
+                />
               </div>
               {/* ⚠ UNDER EVERY VIEW, NOT IN THE CHAT'S PANEL (#707): drawn inside it, the composer went
 							    invisible and inert with the transcript whenever Context, Stats or Diff was in front,
@@ -1808,44 +1907,10 @@ const chatComponents = {
     },
     /**
      * ⚠ Ignores the bound `Parts` component ON PURPOSE — see `SelectedMessagePart`'s
-     * header for why (TanStack's own dispatcher drops tools it has no name for).
-     *
-     * The selection is the library's, run over the WHOLE message list — the same input its
-     * own Messages component gives `selectChatUI` — so a tool result the server stamps onto
-     * a DIFFERENT message than its call still pairs. A per-message `selectMessageUI` was the
-     * first draft and would have shown such a call as "running…" forever.
-     *
-     * ⚠ That whole-list selection USED TO RUN HERE, once per row, which made it O(messages ×
-     * parts) per STREAMED TOKEN rather than per user action — 7.1 ms of pure selector time
-     * per render pass at 300 messages, 0.98 ms at 100 (#280). It now runs once in
-     * `ChatLayout` and arrives indexed, so this row allocates nothing and reads no chat
-     * context: it still runs for every message on every chunk (it consumes the indexed
-     * selection, and React re-renders a context consumer), but all it does is a `Map` lookup
-     * and hand `MessageBody` its props — and that memo is what keeps the redraw to the one
-     * bubble that changed. The lines that follow the message (#382) are another lookup, grouped
-     * once in `ChatLayout`; a hidden message (a refused attempt with nothing drawn) keeps them.
+     * header for why (TanStack's own dispatcher drops tools it has no name for). The row is
+     * `ChatMessageRow`, which `TranscriptRows` draws for the messages in view (#739).
      */
-    message: function ChatMessageRow({ message }: MessageProps<ThreadChatOptions>): React.ReactNode {
-      const { partsByMessageId, openRunMessageIds, continuedMessageIds, hiddenMessageIds, promptNames } =
-        useContext(TranscriptSelectionContext)
-      const lines = useContext(PlacedLinesContext).after.get(message.id)
-      return (
-        <>
-          {hiddenMessageIds.has(message.id) || message.role === 'activity' ? null : (
-            <MessageBody
-              messageId={message.id}
-              role={message.role}
-              parts={partsByMessageId.get(message.id) ?? NO_PARTS}
-              runOpen={openRunMessageIds.has(message.id)}
-              refusal={refusalOfMessage(message)}
-              speaker={!continuedMessageIds.has(message.id)}
-              promptName={promptNames.get(message.id)}
-            />
-          )}
-          {lines === undefined ? null : <NotificationLines lines={lines} />}
-        </>
-      )
-    },
+    message: ChatMessageRow,
   },
   // ⚠ Deliberately empty, and load-bearing as documentation: nothing renders the bound
   // `Parts` component (the `message` slot above dispatches parts itself), so any entry
@@ -1858,6 +1923,29 @@ const chatComponents = {
 
 /** A pane mounted without a page has no view to change. */
 const KEEP_VIEW = (): void => undefined
+
+/**
+ * The rail's summary of a pane's thread, kept current: its title, whether it runs, whether it waits.
+ *
+ * ⚠ The title depends on the FIRST user message and nothing else, but the message list gets a new
+ * identity on every streamed chunk — so an effect over the list re-derived it per token and threw
+ * the answer away (#283). Depend on that message instead; the list's churn does not reach it, and
+ * `updateThreadSummary` is no longer called per token. A long thread's page does not hold its first
+ * prompt (#739): the history named it.
+ */
+function useThreadSummary(stores: ThreadStores, messages: readonly UIMessage[], generating: boolean): void {
+  const { threadId } = stores
+  const openingPrompt = useStore(stores.earlier)?.firstPrompt
+  const firstUserMessage = openingPrompt ?? messages.find((message) => message.role === 'user')
+  const title = useMemo(
+    () => (firstUserMessage === undefined ? undefined : threadTitleFromMessage(firstUserMessage)),
+    [firstUserMessage],
+  )
+  const waiting = useStore(stores.dialog) !== undefined
+  useEffect(() => {
+    updateThreadSummary(threadId, { title, busy: generating, waiting })
+  }, [threadId, title, generating, waiting])
+}
 
 /**
  * One thread's pane: its chat factory, its stores in context, its summary kept current for
@@ -1925,19 +2013,7 @@ export function ThreadPane({
           },
     [stores, onForked],
   )
-  // ⚠ The title depends on the FIRST user message and nothing else, but `chat.messages`
-  // gets a new identity on every streamed chunk — so an effect over the list re-derived it
-  // per token and threw the answer away (#283). Depend on that message instead; the list's
-  // churn does not reach it, and `updateThreadSummary` is no longer called per token.
-  const firstUserMessage = chat.messages.find((message) => message.role === 'user')
-  const title = useMemo(
-    () => (firstUserMessage === undefined ? undefined : threadTitleFromMessage(firstUserMessage)),
-    [firstUserMessage],
-  )
-  const waiting = useStore(stores.dialog) !== undefined
-  useEffect(() => {
-    updateThreadSummary(threadId, { title, busy: chat.sessionGenerating, waiting })
-  }, [threadId, title, chat.sessionGenerating, waiting])
+  useThreadSummary(stores, chat.messages, chat.sessionGenerating)
   const paneView = useMemo<PaneView>(() => ({ shown: active ? view : undefined, open: onView }), [active, view, onView])
   return (
     <div

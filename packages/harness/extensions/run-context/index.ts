@@ -304,7 +304,9 @@ export default createRunContext({
   // session's cwd; its project id the one a minted tree's path names (#551), else the canonical
   // path's. Opened per run; minted on the first — a thread on a tree finds the store its mint made.
   openSnapshotStore: (tree, threadId) => {
-    const projectsDir = ensoProjectsDir(ensoHome(process.env))
+    // The host's folder when a host runs this (#586: it owns the path); the terminal has no host and
+    // derives it from ENSO_HOME, as its launcher does.
+    const projectsDir = process.env.ENSO_PROJECTS_DIR ?? ensoProjectsDir(ensoHome(process.env))
     const projectId = treeProjectId(projectsDir, tree) ?? projectIdOf(realpathOrSelf(tree))
     return openSnapshotStore({
       directory: join(projectSnapshotsDir(projectsDir, projectId), threadId),

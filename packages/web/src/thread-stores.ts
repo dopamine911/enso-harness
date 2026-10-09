@@ -24,6 +24,7 @@ import { createModelStore, type ModelStore } from './model-state.tsx'
 import { createNotificationsStore, type NotificationAction, type NotificationsStore } from './notifications.tsx'
 import { createPermissionModeStore, type PermissionModeStore } from './permission-mode.tsx'
 import { createStore, type Store, type WritableStore } from './store.ts'
+import { fetchThreadHistory } from './stored-threads.ts'
 
 /**
  * Everything the browser knows about one thread beyond its messages (#90 PR 3).
@@ -60,6 +61,12 @@ export interface ThreadStores {
    * chat factory — TanStack owns the messages from there.
    */
   readonly history: readonly UIMessage[]
+  /**
+   * What of the branch is before the messages this page holds (#739): `/history` sends a long
+   * thread's last page, and the transcript offers "Load earlier" while this is set. Undefined once
+   * the page holds the branch from its start — and for a thread minted here, which it always does.
+   */
+  readonly earlier: WritableStore<EarlierMessages | undefined>
   /**
    * What the composer opens holding (#433): a fork's prefill — the forked prompt's words, to send
    * again or edit, as pi's `/fork` puts them in its editor — and empty otherwise. Read ONCE, when
@@ -214,6 +221,22 @@ export interface ProviderRefusalMark {
   readonly outputAtRefusal: number
 }
 
+/** What of the branch is before the transcript a page holds — see {@link ThreadStores.earlier}. */
+export interface EarlierMessages {
+  /** How many of the branch's messages are before the first one held. */
+  readonly messages: number
+  /** How many of those are prompts: where the held prompts' numbers start (`prompt 2401: …`). */
+  readonly prompts: number
+  /** The branch's first prompt when it is among them — the thread's title is its words, not the first held prompt's. */
+  readonly firstPrompt: UIMessage | undefined
+  /**
+   * The ids lines are anchored to that are among them — a stop the history listed (#766). A line
+   * whose message the transcript does not hold closes it (a re-read replaced the message); one of
+   * these waits, unshown, for its page.
+   */
+  readonly anchors: ReadonlySet<string>
+}
+
 export interface EnsoPendingDialog {
   readonly id: string
   readonly dialog: EnsoDialogSpec
@@ -280,6 +303,7 @@ function createThreadStores(
   return {
     threadId,
     history,
+    earlier: createStore<EarlierMessages | undefined>(undefined),
     initialDraft,
     permissionMode: createPermissionModeStore(),
     model: createModelStore(),
@@ -596,6 +620,54 @@ export function reviveHistoryMessages(messages: readonly unknown[]): UIMessage[]
 }
 
 /**
+ * What of the branch is before `held`, as a `/history` answer says it (#739) — `undefined` when the
+ * answer starts the branch. `held` is every message the page will hold once the answer is applied:
+ * the stops the history lists outside it are the lines that wait for their page.
+ */
+export function earlierThan(history: EnsoThreadHistory, held: readonly UIMessage[]): EarlierMessages | undefined {
+  if (history.earlier === undefined) return undefined
+  const heldIds = new Set(held.map((message) => message.id))
+  const { firstPrompt } = history.earlier
+  return {
+    messages: history.earlier.messages,
+    prompts: history.earlier.prompts,
+    firstPrompt: firstPrompt === undefined ? undefined : reviveHistoryMessages([firstPrompt])[0],
+    anchors: new Set((history.stoppedAfter ?? []).filter((anchor) => !heldIds.has(anchor))),
+  }
+}
+
+/** A page "Load earlier" read: its messages, and what is before them once they are held. */
+export interface EarlierPage {
+  readonly messages: UIMessage[]
+  readonly earlier: EarlierMessages | undefined
+}
+
+/**
+ * The page of the branch before `held`'s first message (#739), for "Load earlier" — or why there
+ * is none, as a line can say it. The refusals its results carry join the thread's here: keyed by
+ * call, they are right whatever becomes of the page.
+ *
+ * ⚠ Applying it is the caller's, and only while the transcript still starts where `held` did: a
+ * compaction's re-read in between replaced it, and the page belongs to a branch no longer shown.
+ */
+export async function loadEarlierMessages(
+  stores: Pick<ThreadStores, 'threadId' | 'fetch' | 'refusals'>,
+  held: readonly UIMessage[],
+): Promise<EarlierPage | string> {
+  const before = held[0]?.id
+  if (before === undefined) return 'there is no message to load earlier ones before'
+  try {
+    const history = await fetchThreadHistory(stores.threadId, stores.fetch, before)
+    if (history === undefined) return 'the server no longer holds this thread'
+    const messages = reviveHistoryMessages(history.messages)
+    stores.refusals.set(new Map([...refusalsIn(messages), ...stores.refusals.get()]))
+    return { messages, earlier: earlierThan(history, [...messages, ...held]) }
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error)
+  }
+}
+
+/**
  * A stored session becomes a live thread on this page (#95): stores under ITS id (the
  * thread id is pi's session id, so the next prompt reopens the same file), its branch as
  * the history the chat mounts with, and its persisted mode as the control's first state —
@@ -615,6 +687,8 @@ export function adoptThread(history: EnsoThreadHistory, fetchImpl?: FetchLike, i
     projectId: history.projectId,
     initialDraft,
   })
+  const earlier = earlierThan(history, messages)
+  stores.earlier.set(earlier)
   stores.permissionMode.applyReceipt(history.permissionMode)
   stores.sessionRisk.set(history.sessionRisk)
   stores.incidents.set(history.incidents)
@@ -625,7 +699,8 @@ export function adoptThread(history: EnsoThreadHistory, fetchImpl?: FetchLike, i
   threads.set(stores.threadId, stores)
   summaries.set(stores.threadId, {
     threadId: stores.threadId,
-    title: threadTitleFromMessages(messages),
+    // The branch's first prompt, which a long thread's page does not hold (#739).
+    title: threadTitleFromMessages(earlier?.firstPrompt === undefined ? messages : [earlier.firstPrompt]),
     ...(history.name === undefined ? {} : { name: history.name }),
     lastActivityAt: new Date(),
     busy: false,

@@ -146,6 +146,14 @@ export const ENVIRONMENT_METADATA: readonly EnvironmentMetadata[] = [
     phase: 'boot',
   },
   {
+    key: 'ENSO_PROJECTS_DIR',
+    source: 'packages/web/src/host/agent-host.ts',
+    reader: '`packages/web/src/host/agent-host.ts#createAgentHost` (process write)',
+    purposeAndDefault:
+      'Set by every host to its `projectsDir`, and removed for a host with none, so the run-context extension snapshots into the stores the host mints and forks from (#586). The host owns the path; the extension no longer re-derives it from `ENSO_HOME`.',
+    phase: 'boot',
+  },
+  {
     key: 'PI_CODING_AGENT_DIR',
     source: 'scripts/enso.ts',
     reader: '`scripts/enso.ts` (pi child environment write)',
@@ -182,6 +190,14 @@ export const ENVIRONMENT_METADATA: readonly EnvironmentMetadata[] = [
     reader: '`packages/harness/extensions/run-context/index.ts` (the default export’s `readPermissionPolicy`)',
     purposeAndDefault:
       'The agent directory both Enso surfaces set, read to find the permission policy the engine reads under it, for the run context’s `mode.rulesHash` (#496). Unset, the mode is `null`.',
+    phase: 'per-call',
+  },
+  {
+    key: 'ENSO_PROJECTS_DIR',
+    source: 'packages/harness/extensions/run-context/index.ts',
+    reader: '`packages/harness/extensions/run-context/index.ts` (the default export’s `openSnapshotStore`)',
+    purposeAndDefault:
+      'The projects folder the host files trees and stores under, read to open the store each run snapshots into (#586). Unset (the terminal, which has no host), `ENSO_HOME/projects`.',
     phase: 'per-call',
   },
   {

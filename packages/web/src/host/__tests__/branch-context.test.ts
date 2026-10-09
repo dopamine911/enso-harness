@@ -150,6 +150,79 @@ test('a tool result an extension pruned no longer counts in the requests after t
   expect(requests.map((request) => request.estimated.toolResults)).toEqual([0, tokens(400), 0])
 })
 
+const toolResult = (toolCallId: string, text: string): never =>
+  ({
+    role: 'toolResult',
+    toolCallId,
+    toolName: 'bash',
+    content: [{ type: 'text', text }],
+    isError: false,
+    timestamp: Date.now(),
+  }) as never
+
+/** The messages a list names, keyed and labelled — the folded prompt's (`system`, `system:…`) left out. */
+const messageLines = (named: readonly { key: string; label: string }[]): string[] =>
+  named.filter(({ key }) => key !== 'system' && !key.startsWith('system:')).map(({ key, label }) => `${key} ${label}`)
+
+// ⚠ #739: the trend is one forward walk that extends the context and resets only at a compaction;
+// the browser still projects each request whole. An edit is where a walk drifts — a message
+// restored mid-context, a line read before its message was rewritten — so every request must read
+// as pi's whole projection does.
+test('the walk reads every request as the whole projection does, across prunes, a restore and a compaction', () => {
+  const session = SessionManager.inMemory(tmpdir())
+  const user = (content: string): string => session.appendMessage({ role: 'user', content, timestamp: Date.now() })
+  session.appendMessage(systemPrompt())
+  user('one')
+  session.appendMessage(assistant([{ type: 'toolCall', id: 'c1', name: 'bash', arguments: { command: 'ls -la' } }]))
+  const first = session.appendMessage(toolResult('c1', 'x'.repeat(400)))
+  session.appendMessage(assistant([{ type: 'text', text: 'a1' }]))
+  session.appendContextEdit(first, null)
+  user('two')
+  session.appendMessage(assistant([{ type: 'text', text: 'a2' }]))
+  // Restored after the request before had lost it: it enters again, where it stands.
+  session.appendContextEdit(first, { content: 'back' })
+  user('three')
+  session.appendMessage(assistant([{ type: 'text', text: 'a3' }]))
+  // Rewritten before any request read it: it enters as rewritten.
+  session.appendContextEdit(user('four'), { content: 'the fourth' })
+  session.appendMessage(assistant([{ type: 'text', text: 'a4' }]))
+  const kept = user('five')
+  session.appendCompaction('s'.repeat(40), kept, 9000)
+  session.appendMessage(assistant([{ type: 'text', text: 'a5' }]))
+  session.appendContextEdit(kept, null)
+  user('six')
+  session.appendMessage(assistant([{ type: 'text', text: 'a6' }]))
+  // Pruned and restored between two requests: held all along, so it does not enter.
+  const seventh = user('seven')
+  session.appendMessage(assistant([{ type: 'text', text: 'a7' }]))
+  session.appendContextEdit(seventh, null)
+  session.appendContextEdit(seventh, { content: 'seven again' })
+  user('eight')
+  session.appendMessage(assistant([{ type: 'text', text: 'a8' }]))
+  const branch = session.getBranch()
+  const { requests, next } = branchContext(branch)
+  for (const request of [...requests, { turn: 'next' as const, estimated: next, brief: undefined }]) {
+    const elements = branchRequestDetail(branch, request.turn)?.elements ?? []
+    const summed = { system: 0, tools: 0, user: 0, injected: 0, assistant: 0, toolResults: 0 }
+    for (const element of elements) summed[element.category] += element.tokens
+    expect(summed).toEqual(request.estimated)
+    if (request.brief === undefined) continue
+    const entered = elements.filter((element) => element.entered && element.category !== 'assistant')
+    expect(messageLines(request.brief.added)).toEqual(messageLines(entered))
+  }
+  expect(requests.map((request) => request.brief.added.map((addition) => addition.label))).toEqual([
+    ['system prompt', 'one'],
+    ['bash ls -la'],
+    ['two'],
+    ['bash ls -la', 'three'],
+    ['the fourth'],
+    ['compaction summary', 'five'],
+    ['six'],
+    ['seven'],
+    ['eight'],
+  ])
+})
+
 // #361 phase 3: the browser's rows are the bars' makeup, split — the two are one computation.
 test("a request's elements sum to its bar's makeup, each entered since the request before marked", () => {
   const branch = threadWithACompaction().getBranch()
