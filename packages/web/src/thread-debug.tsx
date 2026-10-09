@@ -19,7 +19,7 @@ import { FOLLOW_ENDED_CUSTOM_EVENT, type RecordedCustomEvent } from './custom-ev
 import { type PermissionModeState, usePermissionMode } from './permission-mode.tsx'
 import { type Store, useStore, useThreadStores } from './store.ts'
 import { boundedFailureDetail } from './stored-threads.ts'
-import { browserLogging } from './thread-stores.ts'
+import { browserLogging, type ThreadStores } from './thread-stores.ts'
 
 const NO_LINES: readonly EnsoLogLine[] = []
 /** A page mounted without `configureBrowserLogging` (tests) has no ring: nothing to subscribe to, nothing logged. */
@@ -581,35 +581,22 @@ function saveTextFile(filename: string, text: string): void {
   URL.revokeObjectURL(url)
 }
 
-/**
- * The drawer wired to the stores, the router's record, and the server. Mounted by `?debug`.
- *
- * Refetches on open and each time the SERVER says the thread changed — a status frame, a
- * persisted mode, a settled question — plus on demand. ⚠ Not this page's `isLoading`
- * (#103 receipt): a run another tab started never toggles it, so a pane that followed a
- * `/mode` answered elsewhere sat on its mount-time fetch and showed MISMATCH against a
- * browser belief that was correct — the pane was stale, not the belief. The status frame
- * is the server's own word and arrives for every run, whoever started it. Not polled: a
- * debugging surface should put no request in the trace a human is trying to read. Opening
- * it on a fresh thread reads "nothing has run yet", the honest state, rather than an error.
- */
-export function ThreadDebugDrawer(): React.ReactNode {
-  const stores = useThreadStores()
+/** The drawer's server half: the live pair and the manifest, refetched as the drawer's header says. */
+interface ThreadInspection {
+  readonly session: EnsoThreadInspection | undefined
+  readonly events: EnsoThreadEvents | undefined
+  readonly manifest: ForkPointReading
+  readonly error: string | undefined
+  readonly refresh: () => void
+}
+
+/** Fetches the thread's inspection on mount, for a new thread, and on every server-state chunk (drawer header). */
+function useThreadInspection(stores: ThreadStores): ThreadInspection {
   const { threadId } = stores
-  const mode = usePermissionMode()
-  const usage = useStore(stores.usage)
-  const recentChunks = useStore(stores.recentChunks)
-  const generation = useStore(stores.generation)
-  const logging = useStore(browserLogging)
-  const ring = useRing(logging?.ring)
-  const logged = useMemo(() => ring.filter((line) => line.properties?.threadId === threadId), [ring, threadId])
   const [session, setSession] = useState<EnsoThreadInspection | undefined>(undefined)
   const [events, setEvents] = useState<EnsoThreadEvents | undefined>(undefined)
   const [manifest, setManifest] = useState<ForkPointReading>(undefined)
   const [error, setError] = useState<string | undefined>(undefined)
-  const [copyState, setCopyState] = useState<CopyState>('idle')
-  const [bundleState, setBundleState] = useState<BundleState>('idle')
-  const browser: BrowserBelief = { mode, usage, recentChunks, generation, logged }
   // One sequencer per thread id: a new thread starts a new "latest".
   const fetchLatest = useMemo(() => latestWins(() => fetchThreadDebug(threadId)), [threadId])
   const fetchManifestLatest = useMemo(() => latestWins(() => fetchThreadManifest(threadId)), [threadId])
@@ -651,6 +638,35 @@ export function ThreadDebugDrawer(): React.ReactNode {
       refresh()
     })
   }, [stores, refresh])
+  return { session, events, manifest, error, refresh }
+}
+
+/**
+ * The drawer wired to the stores, the router's record, and the server. Mounted by `?debug`.
+ *
+ * Refetches on open and each time the SERVER says the thread changed — a status frame, a
+ * persisted mode, a settled question — plus on demand. ⚠ Not this page's `isLoading`
+ * (#103 receipt): a run another tab started never toggles it, so a pane that followed a
+ * `/mode` answered elsewhere sat on its mount-time fetch and showed MISMATCH against a
+ * browser belief that was correct — the pane was stale, not the belief. The status frame
+ * is the server's own word and arrives for every run, whoever started it. Not polled: a
+ * debugging surface should put no request in the trace a human is trying to read. Opening
+ * it on a fresh thread reads "nothing has run yet", the honest state, rather than an error.
+ */
+export function ThreadDebugDrawer(): React.ReactNode {
+  const stores = useThreadStores()
+  const { threadId } = stores
+  const mode = usePermissionMode()
+  const usage = useStore(stores.usage)
+  const recentChunks = useStore(stores.recentChunks)
+  const generation = useStore(stores.generation)
+  const logging = useStore(browserLogging)
+  const ring = useRing(logging?.ring)
+  const logged = useMemo(() => ring.filter((line) => line.properties?.threadId === threadId), [ring, threadId])
+  const { session, events, manifest, error, refresh } = useThreadInspection(stores)
+  const [copyState, setCopyState] = useState<CopyState>('idle')
+  const [bundleState, setBundleState] = useState<BundleState>('idle')
+  const browser: BrowserBelief = { mode, usage, recentChunks, generation, logged }
   const copy = (): void => {
     navigator.clipboard.writeText(JSON.stringify({ threadId, browser, session, events, manifest }, null, 2)).then(
       () => setCopyState('copied'),

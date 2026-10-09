@@ -68,20 +68,41 @@ export function contentToText(content: unknown): string {
     .join('')
 }
 
+type PartNarrower = (raw: RuntimeContentPart) => EnsoTranscriptPart | undefined
+
+/**
+ * Each rendered part type's narrowing: `undefined` when the fields are not the shape that type
+ * carries, so the part falls through to `other`. ⚠ Looked up through `Object.hasOwn`, so a `type`
+ * of `constructor` or `toString` finds no inherited entry (#816).
+ */
+const PART_NARROWERS: Readonly<Record<string, PartNarrower>> = {
+  text: (raw): EnsoTranscriptPart | undefined =>
+    typeof raw.text === 'string' ? { type: 'text', text: raw.text } : undefined,
+  thinking: (raw): EnsoTranscriptPart | undefined =>
+    typeof raw.thinking === 'string' ? { type: 'thinking', thinking: raw.thinking } : undefined,
+  image: (raw): EnsoTranscriptPart | undefined =>
+    typeof raw.data === 'string' && typeof raw.mimeType === 'string'
+      ? { type: 'image', data: raw.data, mimeType: raw.mimeType }
+      : undefined,
+  toolCall: (raw): EnsoTranscriptPart | undefined =>
+    typeof raw.id === 'string' && typeof raw.name === 'string'
+      ? { type: 'tool-call', toolCallId: raw.id, toolName: raw.name, args: raw.arguments ?? {} }
+      : undefined,
+}
+
+function partOf(raw: RuntimeContentPart): EnsoTranscriptPart {
+  const kind = typeof raw.type === 'string' ? raw.type : 'unknown'
+  const narrowed = Object.hasOwn(PART_NARROWERS, kind) ? PART_NARROWERS[kind]?.(raw) : undefined
+  return narrowed ?? { type: 'other', kind }
+}
+
 function partsOf(content: unknown): EnsoTranscriptPart[] {
   if (typeof content === 'string') return [{ type: 'text', text: content }]
   if (!Array.isArray(content)) return []
   const parts: EnsoTranscriptPart[] = []
   for (const raw of content as RuntimeContentPart[]) {
     if (typeof raw !== 'object' || raw === null) continue
-    if (raw.type === 'text' && typeof raw.text === 'string') parts.push({ type: 'text', text: raw.text })
-    else if (raw.type === 'thinking' && typeof raw.thinking === 'string') {
-      parts.push({ type: 'thinking', thinking: raw.thinking })
-    } else if (raw.type === 'image' && typeof raw.data === 'string' && typeof raw.mimeType === 'string') {
-      parts.push({ type: 'image', data: raw.data, mimeType: raw.mimeType })
-    } else if (raw.type === 'toolCall' && typeof raw.id === 'string' && typeof raw.name === 'string') {
-      parts.push({ type: 'tool-call', toolCallId: raw.id, toolName: raw.name, args: raw.arguments ?? {} })
-    } else parts.push({ type: 'other', kind: typeof raw.type === 'string' ? raw.type : 'unknown' })
+    parts.push(partOf(raw))
   }
   return parts
 }

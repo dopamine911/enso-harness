@@ -225,6 +225,119 @@ export function runTypedHostCommand(command: RuntimeCommand, handlers: ChoiceHan
   return true
 }
 
+/** A `level` row's page (header): its options in place of the root list; picking one finishes as a `host` choice. */
+function OptionPage({
+  page,
+  onFinish,
+}: {
+  readonly page: RuntimeCommand
+  readonly onFinish: (choice: Choice) => void
+}): React.ReactNode {
+  return (
+    <>
+      <PromptInputCommandEmpty>{NO_MATCH}</PromptInputCommandEmpty>
+      <PromptInputCommandGroup heading={`/${page.name}`}>
+        {(page.options ?? []).map((option) => (
+          <PromptInputCommandItem
+            key={option.id}
+            value={option.id}
+            keywords={optionKeywords(option)}
+            data-checked={option.id === page.value}
+            onSelect={(): void => onFinish({ kind: 'host', command: page, optionId: option.id })}
+          >
+            <span className="whitespace-nowrap">{option.label}</span>
+            {option.detail === undefined ? null : (
+              <span className="truncate text-muted-foreground">{option.detail}</span>
+            )}
+          </PromptInputCommandItem>
+        ))}
+      </PromptInputCommandGroup>
+    </>
+  )
+}
+
+/** One root row: `/name`, its description, and the current option's dim label when it has one (header). */
+function CommandRow({
+  command,
+  onChoose,
+}: {
+  readonly command: RuntimeCommand
+  readonly onChoose: (command: RuntimeCommand) => void
+}): React.ReactNode {
+  const label = currentLabel(command)
+  return (
+    <PromptInputCommandItem
+      value={`/${command.name}`}
+      keywords={command.description === undefined ? [] : [command.description]}
+      onSelect={(): void => onChoose(command)}
+    >
+      <span className="font-mono whitespace-nowrap">/{command.name}</span>
+      {command.description === undefined ? null : (
+        <span className="truncate text-muted-foreground">{command.description}</span>
+      )}
+      {label === undefined ? null : (
+        <span className="ml-auto pl-2 text-xs whitespace-nowrap text-muted-foreground">{label}</span>
+      )}
+    </PromptInputCommandItem>
+  )
+}
+
+/** The root list: one group per source in {@link GROUPS} order, an empty group left out. */
+function RootPage({
+  commands,
+  onChoose,
+}: {
+  readonly commands: EnsoThreadCommands
+  readonly onChoose: (command: RuntimeCommand) => void
+}): React.ReactNode {
+  return (
+    <>
+      <PromptInputCommandEmpty>{emptyText(commands)}</PromptInputCommandEmpty>
+      {GROUPS.map(({ source, heading }) => {
+        const rows = listedRows(commands).filter((command) => command.source === source)
+        if (rows.length === 0) return null
+        return (
+          <PromptInputCommandGroup key={source} heading={heading}>
+            {rows.map((command) => (
+              <CommandRow key={command.name} command={command} onChoose={onChoose} />
+            ))}
+          </PromptInputCommandGroup>
+        )
+      })}
+    </>
+  )
+}
+
+interface PaletteRowsProps {
+  readonly state: PaletteState
+  /** The open `level` row's page, or undefined at the root. */
+  readonly page: RuntimeCommand | undefined
+  readonly onFinish: (choice: Choice) => void
+  readonly onChoose: (command: RuntimeCommand) => void
+}
+
+/** What the list shows: the fetch still out, its failure verbatim (header), or the page or root rows. */
+function PaletteRows({ state, page, onFinish, onChoose }: PaletteRowsProps): React.ReactNode {
+  return (
+    <>
+      {state.kind === 'loading' ? (
+        <div role="status" className="px-2 py-3 text-sm text-muted-foreground">
+          loading commands…
+        </div>
+      ) : null}
+      {state.kind === 'failed' ? (
+        <div role="alert" className="px-2 py-3 text-sm text-destructive">
+          {state.detail}
+        </div>
+      ) : null}
+      {state.kind === 'loaded' && page !== undefined ? <OptionPage page={page} onFinish={onFinish} /> : null}
+      {state.kind === 'loaded' && page === undefined ? (
+        <RootPage commands={state.commands} onChoose={onChoose} />
+      ) : null}
+    </>
+  )
+}
+
 export function CommandPalette({
   threadId,
   fetch: fetchImpl,
@@ -342,71 +455,7 @@ export function CommandPalette({
             placeholder={page === undefined ? 'filter commands…' : `${page.description ?? `/${page.name}`}…`}
           />
           <PromptInputCommandList>
-            {state.kind === 'loading' ? (
-              <div role="status" className="px-2 py-3 text-sm text-muted-foreground">
-                loading commands…
-              </div>
-            ) : null}
-            {state.kind === 'failed' ? (
-              <div role="alert" className="px-2 py-3 text-sm text-destructive">
-                {state.detail}
-              </div>
-            ) : null}
-            {state.kind === 'loaded' && page !== undefined ? (
-              <>
-                <PromptInputCommandEmpty>{NO_MATCH}</PromptInputCommandEmpty>
-                <PromptInputCommandGroup heading={`/${page.name}`}>
-                  {(page.options ?? []).map((option) => (
-                    <PromptInputCommandItem
-                      key={option.id}
-                      value={option.id}
-                      keywords={optionKeywords(option)}
-                      data-checked={option.id === page.value}
-                      onSelect={(): void => finish({ kind: 'host', command: page, optionId: option.id })}
-                    >
-                      <span className="whitespace-nowrap">{option.label}</span>
-                      {option.detail === undefined ? null : (
-                        <span className="truncate text-muted-foreground">{option.detail}</span>
-                      )}
-                    </PromptInputCommandItem>
-                  ))}
-                </PromptInputCommandGroup>
-              </>
-            ) : null}
-            {state.kind === 'loaded' && page === undefined ? (
-              <>
-                <PromptInputCommandEmpty>{emptyText(state.commands)}</PromptInputCommandEmpty>
-                {GROUPS.map(({ source, heading }) => {
-                  const rows = listedRows(state.commands).filter((command) => command.source === source)
-                  if (rows.length === 0) return null
-                  return (
-                    <PromptInputCommandGroup key={source} heading={heading}>
-                      {rows.map((command) => {
-                        const label = currentLabel(command)
-                        return (
-                          <PromptInputCommandItem
-                            key={command.name}
-                            value={`/${command.name}`}
-                            keywords={command.description === undefined ? [] : [command.description]}
-                            onSelect={(): void => choose(command)}
-                          >
-                            <span className="font-mono whitespace-nowrap">/{command.name}</span>
-                            {command.description === undefined ? null : (
-                              <span className="truncate text-muted-foreground">{command.description}</span>
-                            )}
-                            {label === undefined ? null : (
-                              <span className="ml-auto pl-2 text-xs whitespace-nowrap text-muted-foreground">
-                                {label}
-                              </span>
-                            )}
-                          </PromptInputCommandItem>
-                        )
-                      })}
-                    </PromptInputCommandGroup>
-                  )
-                })}
-              </>
-            ) : null}
+            <PaletteRows state={state} page={page} onFinish={finish} onChoose={choose} />
           </PromptInputCommandList>
         </PromptInputCommand>
       </PromptInputActionMenuContent>

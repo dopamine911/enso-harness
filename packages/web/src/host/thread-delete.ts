@@ -77,13 +77,17 @@ export interface ThreadDeleteHost {
   readonly storeOf: TreeMaking['storeOf']
 }
 
+/** What a delete is asked with: `force`, the work the user confirmed, and the live session's retire. */
+interface ThreadDeleteRequest {
+  readonly force: boolean
+  readonly confirmedWork?: string | undefined
+  readonly retire: () => boolean
+}
+
 /** Deleting a thread, previewing it, and listing what trees cost (#801). */
 export interface ThreadDelete {
   readonly threadDeleted: (threadId: string) => boolean
-  readonly deleteThread: (
-    threadId: string,
-    options: { readonly force: boolean; readonly confirmedWork?: string | undefined; readonly retire: () => boolean },
-  ) => Promise<ThreadDeleteOutcome>
+  readonly deleteThread: (threadId: string, options: ThreadDeleteRequest) => Promise<ThreadDeleteOutcome>
   readonly previewThreadDelete: (
     threadId: string,
   ) => Promise<
@@ -144,57 +148,73 @@ export function createThreadDelete(host: ThreadDeleteHost): ThreadDelete {
     return undefined
   }
 
+  /** Why a delete of `threadId` cannot start: deleted already, being deleted, or restoring files. */
+  function deleteRefusal(threadId: string): ThreadDeleteOutcome | undefined {
+    if (deletedThreads.has(threadId)) return { kind: 'no-thread', reason: `thread ${threadId} was deleted` }
+    if (deletingThreads.has(threadId)) return { kind: 'busy', reason: `thread ${threadId} is being deleted` }
+    if (restoringTrees.has(threadId)) {
+      return { kind: 'busy', reason: `thread ${threadId} is restoring its files; delete it once that is done` }
+    }
+    return undefined
+  }
+
+  /**
+   * The work the tree holds that the user did not confirm, or `undefined` when none blocks. The
+   * inventory always runs: force takes only the work the user confirmed (#572) — a run that
+   * wrote more since the list was shown has that named first, never deleted unseen.
+   */
+  async function unconfirmedWork(
+    tree: ThreadTreeRecord | undefined,
+    store: string | undefined,
+    { force, confirmedWork }: ThreadDeleteRequest,
+  ): Promise<string | undefined> {
+    if (tree === undefined || store === undefined) return undefined
+    const held = holdingReason(await inventoryThreadTree({ record: tree, store, environment }))
+    const confirmed =
+      force &&
+      confirmedWork ===
+        createHash('sha256')
+          .update(held ?? '')
+          .digest('hex')
+    return held !== undefined && !confirmed ? held : undefined
+  }
+
+  /** The delete itself, once claimed: every step after the claim, in `deleteThread`'s order. */
+  async function deleteClaimed(threadId: string, request: ThreadDeleteRequest): Promise<ThreadDeleteOutcome> {
+    const located = await storedSession(threadId)
+    if (located === undefined) {
+      return { kind: 'no-thread', reason: `thread ${threadId} has no session file in a project this server serves` }
+    }
+    const tree = treeRecordOf(openLog(located.path).transcript())
+    const store = storeOf(threadId, located.cwd)
+    const held = await unconfirmedWork(tree, store, request)
+    if (held !== undefined) return { kind: 'holds-work', reason: held }
+    if (!request.retire()) return { kind: 'busy', reason: `thread ${threadId} is running; delete it when it settles` }
+    const removed = await removeTreeAndStore(threadId, tree, store, request.force)
+    if (removed !== undefined) return removed
+    for (const file of await sessionFilesOf(threadId)) rmSync(file, { force: true })
+    deletedThreads.add(threadId)
+    log.info('thread {threadId} deleted: session, {tree} and store', {
+      threadId,
+      tree: tree === undefined ? 'no tree' : `its ${tree.kind} ${tree.path}`,
+    })
+    return { kind: 'deleted' }
+  }
+
   /**
    * Delete the thread (#571). Fail-closed, in this order: the tree's inventory first (refused, the
    * thread is untouched — not even retired); then the live session retired; then the tree and the
    * store, the project's object store collected (#573); the session files last, so a delete that
    * stops partway leaves a thread that still lists and can be deleted again.
    */
-  async function deleteThread(
-    threadId: string,
-    {
-      force,
-      confirmedWork,
-      retire,
-    }: { readonly force: boolean; readonly confirmedWork?: string | undefined; readonly retire: () => boolean },
-  ): Promise<ThreadDeleteOutcome> {
-    if (deletedThreads.has(threadId)) return { kind: 'no-thread', reason: `thread ${threadId} was deleted` }
-    if (deletingThreads.has(threadId)) return { kind: 'busy', reason: `thread ${threadId} is being deleted` }
-    if (restoringTrees.has(threadId)) {
-      return { kind: 'busy', reason: `thread ${threadId} is restoring its files; delete it once that is done` }
-    }
+  async function deleteThread(threadId: string, request: ThreadDeleteRequest): Promise<ThreadDeleteOutcome> {
+    const refusal = deleteRefusal(threadId)
+    if (refusal !== undefined) return refusal
     // Claimed before the first await (#572): a second delete meanwhile is `busy`, never a second run
     // of this one beside it.
     deletingThreads.add(threadId)
     try {
-      const located = await storedSession(threadId)
-      if (located === undefined) {
-        return { kind: 'no-thread', reason: `thread ${threadId} has no session file in a project this server serves` }
-      }
-      const tree = treeRecordOf(openLog(located.path).transcript())
-      const store = storeOf(threadId, located.cwd)
-      // The inventory always runs: force takes only the work the user confirmed (#572) — a run that
-      // wrote more since the list was shown has that named first, never deleted unseen.
-      if (tree !== undefined && store !== undefined) {
-        const held = holdingReason(await inventoryThreadTree({ record: tree, store, environment }))
-        const confirmed =
-          force &&
-          confirmedWork ===
-            createHash('sha256')
-              .update(held ?? '')
-              .digest('hex')
-        if (held !== undefined && !confirmed) return { kind: 'holds-work', reason: held }
-      }
-      if (!retire()) return { kind: 'busy', reason: `thread ${threadId} is running; delete it when it settles` }
-      const removed = await removeTreeAndStore(threadId, tree, store, force)
-      if (removed !== undefined) return removed
-      for (const file of await sessionFilesOf(threadId)) rmSync(file, { force: true })
-      deletedThreads.add(threadId)
-      log.info('thread {threadId} deleted: session, {tree} and store', {
-        threadId,
-        tree: tree === undefined ? 'no tree' : `its ${tree.kind} ${tree.path}`,
-      })
-      return { kind: 'deleted' }
+      return await deleteClaimed(threadId, request)
     } catch (error) {
       log.error('thread {threadId} could not be deleted: {error}', { threadId, error })
       return { kind: 'refused', reason: `thread ${threadId} could not be deleted: ${String(error)}` }

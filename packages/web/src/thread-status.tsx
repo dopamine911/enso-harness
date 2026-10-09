@@ -422,49 +422,27 @@ function QuestionWaiting({ waiting }: { waiting: boolean | undefined }): React.R
   )
 }
 
-/** Pure view — everything it shows arrives as props, so a static render pins the wording. */
-export function ThreadStatusView({
-  activity,
-  counts,
-  usage,
-  cwd,
-  projectTitle,
-  onTree,
-  treeControl,
-  questionWaiting,
-  refusal,
-  refusalSource,
-  git,
-  risk,
-  onRiskSignals,
-  incidents,
-}: ThreadStatusViewProps): React.ReactNode {
-  const dotClass = activityDotClass(activity)
-  const context = usage?.context ?? null
+/** What the run is doing now: the activity's dot and word, first in the bar. */
+function ActivityWord({ activity }: { readonly activity: ThreadStatusViewProps['activity'] }): React.ReactNode {
   return (
-    <footer
-      id="thread-status"
-      aria-label={THREAD_STATUS_WORDS.region}
-      className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t px-5 py-2 font-mono text-xs text-muted-foreground"
+    <span
+      className="flex items-center gap-2 font-medium text-foreground"
+      title={
+        activity.kind === 'disconnected'
+          ? 'the connection to the server ended — reload and resume from the rail'
+          : "what the run is doing right now, read off the transcript's tail"
+      }
     >
-      <span
-        className="flex items-center gap-2 font-medium text-foreground"
-        title={
-          activity.kind === 'disconnected'
-            ? 'the connection to the server ended — reload and resume from the rail'
-            : "what the run is doing right now, read off the transcript's tail"
-        }
-      >
-        <span aria-hidden="true" className={dotClass} />
-        {activityLabel(activity)}
-      </span>
-      {/* Seen from every view: the question itself is in the transcript (#362 review). */}
-      <QuestionWaiting waiting={questionWaiting} />
-      {/* #340: `$0.0000` beside `idle` means "nothing ran" here, not "free" — the line in the
-			    transcript says who refused and why. */}
-      <RefusalWord refusal={refusal} source={refusalSource} />
-      <IncidentWord incidents={incidents} />
-      <RiskWord risk={risk} onShow={onRiskSignals} />
+      <span aria-hidden="true" className={activityDotClass(activity)} />
+      {activityLabel(activity)}
+    </span>
+  )
+}
+
+/** The transcript's tallies: prompts and tool calls always, refused and failed only when any. */
+function CountWords({ counts }: { readonly counts: ThreadStatusViewProps['counts'] }): React.ReactNode {
+  return (
+    <>
       <span title="user messages in this transcript">
         {counts.prompts} {counts.prompts === 1 ? 'prompt' : 'prompts'}
       </span>
@@ -482,8 +460,15 @@ export function ThreadStatusView({
           {counts.failed} failed
         </span>
       )}
-      <ProjectIndicator cwd={cwd} projectTitle={projectTitle} onTree={onTree} treeControl={treeControl} />
-      {git === undefined ? null : <GitIndicator outcome={git} />}
+    </>
+  )
+}
+
+/** The bar's right end: the context meter when known, then the session's spend. */
+function SpendWords({ usage }: { readonly usage: ThreadStatusViewProps['usage'] }): React.ReactNode {
+  const context = usage?.context ?? null
+  return (
+    <>
       {context === null ? null : (
         <span className="ml-auto">
           <ContextMeter context={context} />
@@ -495,6 +480,45 @@ export function ThreadStatusView({
       >
         {usage === undefined ? '$—' : `$${usage.cost.toFixed(4)}`}
       </span>
+    </>
+  )
+}
+
+/** Pure view — everything it shows arrives as props, so a static render pins the wording. */
+export function ThreadStatusView({
+  activity,
+  counts,
+  usage,
+  cwd,
+  projectTitle,
+  onTree,
+  treeControl,
+  questionWaiting,
+  refusal,
+  refusalSource,
+  git,
+  risk,
+  onRiskSignals,
+  incidents,
+}: ThreadStatusViewProps): React.ReactNode {
+  return (
+    <footer
+      id="thread-status"
+      aria-label={THREAD_STATUS_WORDS.region}
+      className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t px-5 py-2 font-mono text-xs text-muted-foreground"
+    >
+      <ActivityWord activity={activity} />
+      {/* Seen from every view: the question itself is in the transcript (#362 review). */}
+      <QuestionWaiting waiting={questionWaiting} />
+      {/* #340: `$0.0000` beside `idle` means "nothing ran" here, not "free" — the line in the
+			    transcript says who refused and why. */}
+      <RefusalWord refusal={refusal} source={refusalSource} />
+      <IncidentWord incidents={incidents} />
+      <RiskWord risk={risk} onShow={onRiskSignals} />
+      <CountWords counts={counts} />
+      <ProjectIndicator cwd={cwd} projectTitle={projectTitle} onTree={onTree} treeControl={treeControl} />
+      {git === undefined ? null : <GitIndicator outcome={git} />}
+      <SpendWords usage={usage} />
     </footer>
   )
 }

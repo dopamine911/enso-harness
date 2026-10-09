@@ -599,24 +599,30 @@ export function mintThread(fetchImpl?: FetchLike, projectId?: string, threadId?:
 export function reviveHistoryMessages(messages: readonly unknown[]): UIMessage[] {
   const revived: UIMessage[] = []
   for (const raw of messages) {
-    if (typeof raw !== 'object' || raw === null) continue
-    const message = raw as Record<string, unknown>
-    if (typeof message.id !== 'string') continue
-    if (message.role !== 'user' && message.role !== 'assistant') continue
-    if (!Array.isArray(message.parts)) continue
-    // JSON carries the date as a string; anything else (absent, malformed) is no date.
-    const parsed = typeof message.createdAt === 'string' ? new Date(message.createdAt) : undefined
-    const createdAt = parsed !== undefined && !Number.isNaN(parsed.getTime()) ? parsed : undefined
-    const { createdAt: _wireCreatedAt, ...rest } = message
-    revived.push({
-      ...rest,
-      id: message.id,
-      role: message.role,
-      parts: message.parts as UIMessage['parts'],
-      ...(createdAt === undefined ? {} : { createdAt }),
-    })
+    const message = reviveHistoryMessage(raw)
+    if (message !== undefined) revived.push(message)
   }
   return revived
+}
+
+/** One history row as a UI message, or `undefined` when it cannot be one. */
+function reviveHistoryMessage(raw: unknown): UIMessage | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined
+  const message = raw as Record<string, unknown>
+  if (typeof message.id !== 'string') return undefined
+  if (message.role !== 'user' && message.role !== 'assistant') return undefined
+  if (!Array.isArray(message.parts)) return undefined
+  // JSON carries the date as a string; anything else (absent, malformed) is no date.
+  const parsed = typeof message.createdAt === 'string' ? new Date(message.createdAt) : undefined
+  const createdAt = parsed !== undefined && !Number.isNaN(parsed.getTime()) ? parsed : undefined
+  const { createdAt: _wireCreatedAt, ...rest } = message
+  return {
+    ...rest,
+    id: message.id,
+    role: message.role,
+    parts: message.parts as UIMessage['parts'],
+    ...(createdAt === undefined ? {} : { createdAt }),
+  }
 }
 
 /**

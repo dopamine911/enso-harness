@@ -1190,38 +1190,41 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
       if (waiter !== undefined) dialogWaiters.delete(waiter)
     }
   }
-  const perform = async (action: ArenaAction, via: ArenaActionSource): Promise<unknown> => {
+  /** The actions on the front page itself: navigate, type, shoot, answer its dialog. */
+  const performOnPage = async (
+    action: Extract<
+      ArenaAction,
+      { readonly action: 'goto' | 'type' | 'screenshot' | 'back' | 'reload' | 'accept-dialog' | 'dismiss-dialog' }
+    >,
+  ): Promise<unknown> => {
     const timeout = ACTION_TIMEOUT_MS
     switch (action.action) {
       case 'goto':
         await inFront().goto(new URL(action.path, ARENA_WEB_ORIGIN).toString(), { timeout })
         return here()
-      case 'click':
-        return 'at' in action ? performWithPointer(action) : performOnControl(action)
-      case 'move':
-      case 'scroll':
-      case 'drag':
-        return performWithPointer(action)
       case 'type':
         await inFront().keyboard.type(action.text)
         return here()
-      case 'hover':
-      case 'fill':
-      case 'select':
-      case 'press':
-        return performOnControl(action)
-      case 'read':
-        return performRead(action)
       case 'screenshot':
         return { ...here(), screenshot: await shoot('requested') }
-      case 'wait':
-        return performWait(action)
       case 'back':
         await inFront().goBack({ timeout })
         return here()
       case 'reload':
         await inFront().reload({ timeout })
         return here()
+      case 'accept-dialog':
+        return answerDialog((dialog) => dialog.accept(action.text))
+      case 'dismiss-dialog':
+        return answerDialog((dialog) => dialog.dismiss())
+    }
+  }
+  /** The actions on the run rather than the page: a note on the timeline, a restart, a stop. */
+  const performOnRun = async (
+    action: Extract<ArenaAction, { readonly action: 'note' | 'restart-enso' | 'stop' }>,
+    via: ArenaActionSource,
+  ): Promise<unknown> => {
+    switch (action.action) {
       case 'note':
         timeline.record(
           {
@@ -1241,17 +1244,38 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
         await stopEnso()
         return { restarted: await startEnso() }
       }
-      case 'accept-dialog':
-        return answerDialog((dialog) => dialog.accept(action.text))
-      case 'dismiss-dialog':
-        return answerDialog((dialog) => dialog.dismiss())
+      case 'stop':
+        resolveStop(`the agent stopped the run${action.reason === undefined ? '' : `: ${redact(action.reason)}`}`)
+        return { stopping: true }
+    }
+  }
+  const perform = async (action: ArenaAction, via: ArenaActionSource): Promise<unknown> => {
+    switch (action.action) {
+      case 'click':
+        return 'at' in action ? performWithPointer(action) : performOnControl(action)
+      case 'move':
+      case 'scroll':
+      case 'drag':
+        return performWithPointer(action)
+      case 'hover':
+      case 'fill':
+      case 'select':
+      case 'press':
+        return performOnControl(action)
+      case 'read':
+        return performRead(action)
+      case 'wait':
+        return performWait(action)
       case 'tabs':
       case 'switch-tab':
       case 'close-tab':
         return performOnTabs(action)
+      case 'note':
+      case 'restart-enso':
       case 'stop':
-        resolveStop(`the agent stopped the run${action.reason === undefined ? '' : `: ${redact(action.reason)}`}`)
-        return { stopping: true }
+        return performOnRun(action, via)
+      default:
+        return performOnPage(action)
     }
   }
 

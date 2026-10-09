@@ -126,6 +126,12 @@ const COMMENT_LINE = /^\s*(?:\/\/|\/\*|\*)/
 
 type Quote = '"' | "'" | '`' | undefined
 
+interface BracketCount {
+  opens: number
+  closes: number
+  quote: Quote
+}
+
 /**
  * Bracket opens and closes on one line, ignoring string, template and comment lexemes, and
  * the quote still open at the line's end — a template literal spans lines, and its interior
@@ -140,26 +146,28 @@ type Quote = '"' | "'" | '`' | undefined
  * has two such lines (`log-bundle.ts:100,103`), both inside a function body no page fences;
  * fencing one turns the gate red with this message rather than a drifted span.
  */
-function bracketDelta(line: string, openQuote: Quote): { opens: number; closes: number; quote: Quote } {
-  let opens = 0
-  let closes = 0
-  let quote: Quote = openQuote
-  if (quote === undefined && COMMENT_LINE.test(line)) return { opens, closes, quote }
+function bracketDelta(line: string, openQuote: Quote): BracketCount {
+  const count: BracketCount = { opens: 0, closes: 0, quote: openQuote }
+  if (openQuote === undefined && COMMENT_LINE.test(line)) return count
   for (let characterIndex = 0; characterIndex < line.length; characterIndex += 1) {
-    const character = line[characterIndex]
-    if (quote !== undefined) {
-      const skipped = insideQuote(line, characterIndex, quote)
+    if (count.quote !== undefined) {
+      const skipped = insideQuote(line, characterIndex, count.quote)
       characterIndex = skipped.characterIndex
-      quote = skipped.quote
+      count.quote = skipped.quote
       continue
     }
-    if (character === '/' && line[characterIndex + 1] === '/') break
-    if (character === '"' || character === "'" || character === '`') quote = character
-    else if (character === '{' || character === '(' || character === '[') opens += 1
-    else if (character === '}' || character === ')' || character === ']') closes += 1
+    if (line.startsWith('//', characterIndex)) break
+    countCodeCharacter(count, line[characterIndex])
   }
   // A `'` or `"` cannot span a line; only a template carries over.
-  return { opens, closes, quote: quote === '`' ? quote : undefined }
+  return { opens: count.opens, closes: count.closes, quote: count.quote === '`' ? count.quote : undefined }
+}
+
+/** One character of code: a quote opens a lexeme, a bracket counts, anything else counts nothing. */
+function countCodeCharacter(count: BracketCount, character: string | undefined): void {
+  if (character === '"' || character === "'" || character === '`') count.quote = character
+  else if (character === '{' || character === '(' || character === '[') count.opens += 1
+  else if (character === '}' || character === ')' || character === ']') count.closes += 1
 }
 
 /** One character inside a string or template: an escape skips the next; the delimiter closes; a nested template refuses. */

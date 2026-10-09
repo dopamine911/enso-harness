@@ -44,6 +44,40 @@ function resolveMessagesUrl(baseUrl: string): string {
   return base.endsWith('/v1') ? `${base}/messages` : `${base}/v1/messages`
 }
 
+/** The Claude Code OAuth credential's headers; a caller-supplied `Authorization` wins. */
+function applyOAuthHeaders(headers: Record<string, string>, apiKey: string): void {
+  if (headers.Authorization === undefined && headers.authorization === undefined) {
+    headers.Authorization = `Bearer ${apiKey}`
+  }
+  headers['anthropic-beta'] =
+    headers['anthropic-beta'] !== undefined
+      ? `${headers['anthropic-beta']},${ANTHROPIC_OAUTH_BETA_FLAGS}`
+      : ANTHROPIC_OAUTH_BETA_FLAGS
+  headers['user-agent'] = headers['user-agent'] ?? ANTHROPIC_OAUTH_USER_AGENT
+  headers['x-app'] = headers['x-app'] ?? 'cli'
+}
+
+/** Adds the credential's auth to `headers`; `true` when it is a Claude Code OAuth credential. */
+function applyCredentialHeaders(headers: Record<string, string>, apiKey: string | undefined): boolean {
+  if (apiKey === undefined || apiKey.length === 0) return false
+  if (apiKey.includes('sk-ant-oat')) {
+    applyOAuthHeaders(headers, apiKey)
+    return true
+  }
+  if (headers['x-api-key'] === undefined && headers['X-Api-Key'] === undefined) {
+    headers['x-api-key'] = apiKey
+  }
+  return false
+}
+
+function answerTokensFor(maxTokens: number): number {
+  const modelOutputBudget = Math.floor(maxTokens / 3)
+  return Math.min(
+    Math.max(MIN_ANSWER_TOKENS, modelOutputBudget > 0 ? modelOutputBudget : DEFAULT_ANSWER_TOKENS),
+    MAX_ANSWER_TOKENS,
+  )
+}
+
 /** @group Web search */
 export async function runAnthropicProviderSearch(request: ModelSearchRequest): Promise<WebSearchOutcome> {
   const credential = await resolveProviderCredential('anthropic', request)
@@ -55,29 +89,8 @@ export async function runAnthropicProviderSearch(request: ModelSearchRequest): P
     ...request.model.headers,
     ...credential.headers,
   }
-  let isOAuthCredential = false
-  if (credential.apiKey !== undefined && credential.apiKey.length > 0) {
-    isOAuthCredential = credential.apiKey.includes('sk-ant-oat')
-    if (isOAuthCredential) {
-      if (headers.Authorization === undefined && headers.authorization === undefined) {
-        headers.Authorization = `Bearer ${credential.apiKey}`
-      }
-      headers['anthropic-beta'] =
-        headers['anthropic-beta'] !== undefined
-          ? `${headers['anthropic-beta']},${ANTHROPIC_OAUTH_BETA_FLAGS}`
-          : ANTHROPIC_OAUTH_BETA_FLAGS
-      headers['user-agent'] = headers['user-agent'] ?? ANTHROPIC_OAUTH_USER_AGENT
-      headers['x-app'] = headers['x-app'] ?? 'cli'
-    } else if (headers['x-api-key'] === undefined && headers['X-Api-Key'] === undefined) {
-      headers['x-api-key'] = credential.apiKey
-    }
-  }
-
-  const modelOutputBudget = Math.floor(request.model.maxTokens / 3)
-  const answerTokens = Math.min(
-    Math.max(MIN_ANSWER_TOKENS, modelOutputBudget > 0 ? modelOutputBudget : DEFAULT_ANSWER_TOKENS),
-    MAX_ANSWER_TOKENS,
-  )
+  const isOAuthCredential = applyCredentialHeaders(headers, credential.apiKey)
+  const answerTokens = answerTokensFor(request.model.maxTokens)
 
   return runAnthropicWireSearch({
     providerId: 'anthropic',

@@ -6,16 +6,6 @@
         "count": 1
       }
     },
-    "packages/core/src/log-process.ts": {
-      "complexity_moderate": {
-        "count": 2
-      }
-    },
-    "packages/core/src/runtime-entries.ts": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
     "packages/harness/core/environment-dump.ts": {
       "complexity_moderate": {
         "count": 1
@@ -26,108 +16,13 @@
         "count": 4
       }
     },
-    "packages/harness/core/web-search/providers/anthropic.ts": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "packages/harness/core/web-search/sse.ts": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "packages/web/src/command-palette.tsx": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "packages/web/src/debug/log-tail-connection.ts": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "packages/web/src/follow-connection.ts": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "packages/web/src/host/thread-delete.ts": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "packages/web/src/host/continuation.ts": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "packages/web/src/host/system-prompt-preview.ts": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "packages/web/src/host/transcript.ts": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
     "packages/web/src/server/__tests__/logs-tail-route.test.ts": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "packages/web/src/server/index.ts": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "packages/web/src/start-session.tsx": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "packages/web/src/thread-debug.tsx": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "packages/web/src/thread-status.tsx": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "packages/web/src/thread-stores.ts": {
       "complexity_moderate": {
         "count": 1
       }
     },
     "packages/web/src/to-agui.ts": {
       "complexity_high": {
-        "count": 1
-      }
-    },
-    "scripts/docs/decisions.ts": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "scripts/docs/env-and-config.ts": {
-      "complexity_moderate": {
-        "count": 2
-      }
-    },
-    "scripts/docs/extract-declaration.ts": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "scripts/docs/gate-source.ts": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "scripts/docs/observations.ts": {
-      "complexity_moderate": {
         "count": 1
       }
     },
@@ -149,21 +44,6 @@
   },
   "identity_finding_counts": {
     "packages/core/src/__tests__/no-duplicate-paths.test.ts\u0000collectScannableSources": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "packages/core/src/log-process.ts\u0000parseEnsoLogLevels": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "packages/core/src/log-process.ts\u0000step": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "packages/core/src/runtime-entries.ts\u0000partsOf": {
       "complexity_moderate": {
         "count": 1
       }
@@ -193,113 +73,13 @@
         "count": 1
       }
     },
-    "packages/harness/core/web-search/providers/anthropic.ts\u0000runAnthropicProviderSearch": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "packages/harness/core/web-search/sse.ts\u0000readSseEvents": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "packages/web/src/command-palette.tsx\u0000CommandPalette": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "packages/web/src/debug/log-tail-connection.ts\u0000readOneTail": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "packages/web/src/follow-connection.ts\u0000observe": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "packages/web/src/host/thread-delete.ts\u0000deleteThread": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "packages/web/src/host/continuation.ts\u0000continuationLead": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "packages/web/src/host/system-prompt-preview.ts\u0000splitRenderedPrompt": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "packages/web/src/host/transcript.ts\u0000recordedModelOf": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
     "packages/web/src/server/__tests__/logs-tail-route.test.ts\u0000<arrow>": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "packages/web/src/server/index.ts\u0000dispatchLiteralRoute": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "packages/web/src/start-session.tsx\u0000StartSessionDialog": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "packages/web/src/thread-debug.tsx\u0000ThreadDebugDrawer": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "packages/web/src/thread-status.tsx\u0000ThreadStatusView": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "packages/web/src/thread-stores.ts\u0000reviveHistoryMessages": {
       "complexity_moderate": {
         "count": 1
       }
     },
     "packages/web/src/to-agui.ts\u0000observationToAguiEvents": {
       "complexity_high": {
-        "count": 1
-      }
-    },
-    "scripts/docs/decisions.ts\u0000leadingHeader": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "scripts/docs/env-and-config.ts\u0000scanObjectReads": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "scripts/docs/env-and-config.ts\u0000scanProcessEnvironmentReads": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "scripts/docs/extract-declaration.ts\u0000bracketDelta": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "scripts/docs/gate-source.ts\u0000arrayBody": {
-      "complexity_moderate": {
-        "count": 1
-      }
-    },
-    "scripts/docs/observations.ts\u0000generate": {
-      "complexity_moderate": {
         "count": 1
       }
     },

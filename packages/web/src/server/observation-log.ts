@@ -57,84 +57,87 @@ function piEventName(event: unknown): string {
   return typeof inner === 'string' ? `${outer}/${inner}` : outer
 }
 
+/** The compact properties of one kind of observation. */
+type Compactor<Kind extends EnsoObservation['kind']> = (
+  observation: Extract<EnsoObservation, { kind: Kind }>,
+) => EnsoLogProperties
+
+/** One compactor per kind: the mapped type fails the build when a kind has no entry. */
+type CompactTable = { readonly [Kind in EnsoObservation['kind']]: Compactor<Kind> }
+
+const noProperties = (): EnsoLogProperties => ({})
+
 /** The ids and sizes a compact line carries, per kind — no text below `trace`. */
+const COMPACT: CompactTable = {
+  'tool-call': (observation) => ({ toolCallId: observation.toolCallId, toolName: observation.toolName }),
+  'tool-result': (observation) => ({
+    toolCallId: observation.toolCallId,
+    toolName: observation.toolName,
+    chars: observation.text.length,
+    complete: observation.complete,
+    isError: observation.isError,
+  }),
+  'text-delta': (observation) => ({ contentIndex: observation.contentIndex, chars: observation.delta.length }),
+  'thinking-delta': (observation) => ({ contentIndex: observation.contentIndex, chars: observation.delta.length }),
+  'message-start': (observation) => ({ role: observation.role }),
+  'message-end': (observation) => ({ role: observation.role }),
+  'extension-ui-request': (observation) => ({
+    requestId: observation.id,
+    method: observation.method,
+    blocking: observation.blocking,
+  }),
+  'dialog-settled': (observation) => ({ dialogId: observation.id, outcome: observation.outcome }),
+  queue: (observation) => ({
+    interrupting: observation.interrupting.length,
+    enqueued: observation.enqueued.length,
+  }),
+  'prompt-rejected': (observation) => ({ messageId: observation.messageId, reason: observation.reason }),
+  'custom-entry': (observation) => ({ customType: observation.customType }),
+  'permission-mode': (observation) => ({ mode: observation.mode }),
+  'permission-mode-rejected': (observation) => ({ mode: observation.mode, reason: observation.reason }),
+  model: (observation) => ({
+    model: observation.model === null ? 'none' : `${observation.model.provider}/${observation.model.id}`,
+    thinkingLevel: observation.thinkingLevel,
+  }),
+  'session-usage': (observation) => ({
+    cost: observation.cost,
+    ...(observation.context?.percent == null ? {} : { contextPercent: observation.context.percent }),
+  }),
+  'branch-compacted': (observation) => ({ reason: observation.reason }),
+  login: (observation) => ({ provider: observation.provider, waiting: observation.waiting }),
+  'extension-error': (observation) => ({ extensionPath: observation.extensionPath, event: observation.event }),
+  'run-ended': (observation) => ({ willRetry: observation.willRetry }),
+  'provider-refused': (observation) => ({
+    ...(observation.provider === undefined ? {} : { provider: observation.provider }),
+    ...(observation.model === undefined ? {} : { model: observation.model }),
+    ...(observation.status === undefined ? {} : { status: observation.status }),
+    // What classes a refusal with no status (#384): the provider's own stop reason.
+    ...(observation.providerStopReason === undefined ? {} : { stopReason: observation.providerStopReason }),
+    // The provider's own sentence (#340) — the fact, not transcript text; the whole message is on `trace`.
+    reason: providerReasonOf(observation.message),
+  }),
+  'provider-retry': (observation) => ({
+    attempt: observation.attempt,
+    maxAttempts: observation.maxAttempts,
+    delayMs: observation.delayMs,
+  }),
+  'provider-retry-ended': (observation) => ({
+    success: observation.success,
+    attempt: observation.attempt,
+    ...(observation.finalError === undefined ? {} : { reason: providerReasonOf(observation.finalError) }),
+  }),
+  'turn-start': noProperties,
+  'turn-end': (observation) => ({ toolResults: observation.toolResults }),
+  unmapped: (observation) => ({ event: piEventName(observation.event) }),
+  settled: noProperties,
+}
+
+/** The compact properties of this observation, by its kind's entry in `COMPACT`. */
 function compactOf(observation: EnsoObservation): EnsoLogProperties {
-  switch (observation.kind) {
-    case 'tool-call':
-      return { toolCallId: observation.toolCallId, toolName: observation.toolName }
-    case 'tool-result':
-      return {
-        toolCallId: observation.toolCallId,
-        toolName: observation.toolName,
-        chars: observation.text.length,
-        complete: observation.complete,
-        isError: observation.isError,
-      }
-    case 'text-delta':
-    case 'thinking-delta':
-      return { contentIndex: observation.contentIndex, chars: observation.delta.length }
-    case 'message-start':
-    case 'message-end':
-      return { role: observation.role }
-    case 'extension-ui-request':
-      return { requestId: observation.id, method: observation.method, blocking: observation.blocking }
-    case 'dialog-settled':
-      return { dialogId: observation.id, outcome: observation.outcome }
-    case 'queue':
-      return { interrupting: observation.interrupting.length, enqueued: observation.enqueued.length }
-    case 'prompt-rejected':
-      return { messageId: observation.messageId, reason: observation.reason }
-    case 'custom-entry':
-      return { customType: observation.customType }
-    case 'permission-mode':
-      return { mode: observation.mode }
-    case 'permission-mode-rejected':
-      return { mode: observation.mode, reason: observation.reason }
-    case 'model':
-      return {
-        model: observation.model === null ? 'none' : `${observation.model.provider}/${observation.model.id}`,
-        thinkingLevel: observation.thinkingLevel,
-      }
-    case 'session-usage':
-      return {
-        cost: observation.cost,
-        ...(observation.context?.percent == null ? {} : { contextPercent: observation.context.percent }),
-      }
-    case 'branch-compacted':
-      return { reason: observation.reason }
-    case 'login':
-      return { provider: observation.provider, waiting: observation.waiting }
-    case 'extension-error':
-      return { extensionPath: observation.extensionPath, event: observation.event }
-    case 'run-ended':
-      return { willRetry: observation.willRetry }
-    case 'provider-refused':
-      return {
-        ...(observation.provider === undefined ? {} : { provider: observation.provider }),
-        ...(observation.model === undefined ? {} : { model: observation.model }),
-        ...(observation.status === undefined ? {} : { status: observation.status }),
-        // What classes a refusal with no status (#384): the provider's own stop reason.
-        ...(observation.providerStopReason === undefined ? {} : { stopReason: observation.providerStopReason }),
-        // The provider's own sentence (#340) — the fact, not transcript text; the whole message is on `trace`.
-        reason: providerReasonOf(observation.message),
-      }
-    case 'provider-retry':
-      return { attempt: observation.attempt, maxAttempts: observation.maxAttempts, delayMs: observation.delayMs }
-    case 'provider-retry-ended':
-      return {
-        success: observation.success,
-        attempt: observation.attempt,
-        ...(observation.finalError === undefined ? {} : { reason: providerReasonOf(observation.finalError) }),
-      }
-    case 'turn-start':
-      return {}
-    case 'turn-end':
-      return { toolResults: observation.toolResults }
-    case 'unmapped':
-      return { event: piEventName(observation.event) }
-    case 'settled':
-      return {}
-  }
+  // ⚠ The widening is sound because `CompactTable` keys each compactor by the kind it reads
+  // (#816); TypeScript cannot correlate an indexed lookup with the argument it is called on.
+  const compactor = COMPACT[observation.kind] as (observation: EnsoObservation) => EnsoLogProperties
+  return compactor(observation)
 }
 
 /**
@@ -155,7 +158,7 @@ export function recordObservation(
   observation: EnsoObservation,
 ): void {
   // ⚠ THUNKS, not objects (#284). At the default tier both of these are dropped, and the
-  // eager payload — `compactOf`'s switch, a spread, a second object holding the whole
+  // eager payload — `compactOf`'s lookup, a spread, a second object holding the whole
   // observation — was built per observation anyway: 1.04 µs of the 1.62 µs `recordObservation`
   // cost, against 0.15 µs to serialise the frame that actually reaches the browser. LogTape
   // calls the thunk only once a sink will read it.
