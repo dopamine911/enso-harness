@@ -42,7 +42,8 @@ test('the rules in the engine’s order, Enso’s catch-all marked apart from yo
 // ⚠ The engine's merge: a map over a map changes only the keys the preset names (so your rules after
 // `**` hold); a single decision REPLACES the surface, so `plan` drops every edit rule you wrote.
 test('each mode changes only what its preset names, and a single decision replaces the surface', () => {
-  expect(summary(effectiveRows(POLICY, 'default'))).toEqual(summary(policyRows(POLICY)))
+  // `default` adds only the MCP default every mode carries (#744): your rules, as written, then it.
+  expect(summary(effectiveRows(POLICY, 'default'))).toEqual([...summary(policyRows(POLICY)), 'mcp ** "deny" mode'])
   const bypass = summary(effectiveRows(POLICY, 'bypassPermissions'))
   expect(bypass).toContain('* * "allow" mode')
   expect(bypass).toContain('bash ** "allow" mode')
@@ -53,6 +54,19 @@ test('each mode changes only what its preset names, and a single decision replac
     'edit * "deny" mode',
   ])
   expect(summary(effectiveRows(POLICY, 'acceptEdits'))).toContain('edit docs/* "allow" yours')
+})
+
+// #744: every mode's MCP default is a catch-all deny, merged as a map, so a server the user approved
+// after it is still allowed — a string would have replaced the whole surface and dropped it.
+test('every mode denies MCP through its catch-all, and keeps a server the user approved after it', () => {
+  const approved: EnsoPermissionMap = { ...POLICY, mcp: { '**': 'ask', github: 'allow' } }
+  for (const mode of ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'auto'] as const) {
+    expect({ mode, mcp: effectivePermission(POLICY, mode).mcp }).toEqual({ mode, mcp: { '**': 'deny' } })
+    expect({ mode, mcp: effectivePermission(approved, mode).mcp }).toEqual({
+      mode,
+      mcp: { '**': 'deny', github: 'allow' },
+    })
+  }
 })
 
 // The `path` shorthand stands for both directions, its entries first, the direction's own after.

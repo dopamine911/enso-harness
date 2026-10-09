@@ -1245,16 +1245,24 @@ test('⚠ the guard registers no tool: it participates through tool_call only, s
 // and `cat .enso/pi-agent/auth.json` were ALLOWED — the basename gate covered one file and
 // the bash route resolved no path at all. These pin the closure on both routes, and the
 // cost: a `.enso` read is no longer available to a tool, by design.
+//
+// #744: since engine 39.0.0 the engine's own "pi infrastructure" read bypass covers only pi's
+// harness entries in the agent dir (`settings.json`, `skills/`, `extensions/` …) and never its
+// permission logs. Enso's agent dir is `ENSO_HOME/pi-agent`, so neither side of that line is the
+// engine's to decide: this guard refuses the whole dir first, harness entries and logs alike.
 
 test('⚠ every path-bearing reader is refused inside .enso, not just the one basename', () => {
   for (const path of [
     '.enso/secrets.env',
     '.enso/pi-agent/auth.json',
     '.enso/pi-agent/provider-failover.json',
+    '.enso/pi-agent/settings.json',
+    '.enso/pi-agent/skills/x/SKILL.md',
+    '.enso/pi-agent/extensions/pi-permission-system/logs/review.jsonl',
     '.enso',
   ]) {
     const verdict = call('read', { path })
-    expect(verdict?.block).toBe(true)
+    expect({ path, blocked: verdict?.block }).toEqual({ path, blocked: true })
     expect(verdict?.reason).toContain('credential pattern')
   }
   expect(call('grep', { pattern: 'sk-', path: '.enso' })?.block).toBe(true)

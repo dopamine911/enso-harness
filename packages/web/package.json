@@ -45,7 +45,7 @@
     "use-stick-to-bottom": "^1.1.6"
   },
   "devDependencies": {
-    "@gotgenes/pi-permission-system": "36.2.0",
+    "@gotgenes/pi-permission-system": "40.0.2",
     "@happy-dom/global-registrator": "20.14.5",
     "@logtape/testing": "2.3.7",
     "@playwright/test": "1.63.0",
