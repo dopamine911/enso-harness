@@ -424,6 +424,7 @@ export {
   toolRefusalOf,
   toolRefuserOf,
 } from './session-risk.ts'
+export { COMMAND_CONSTRUCTS, type CommandConstruct, commandConstructOf, liveShellText } from './command-constructs.ts'
 export {
   ENSO_CONTEXT_ADDITIONS_SHOWN,
   ENSO_CONTEXT_COMMAND,

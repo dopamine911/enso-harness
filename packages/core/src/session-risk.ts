@@ -1,5 +1,6 @@
 import { type Static, Type } from 'typebox'
 import { Compile } from 'typebox/compile'
+import { commandConstructOf } from './command-constructs.ts'
 import { ENSO_GUARD_RULES, type EnsoGuardRule, readEnsoGuardDenial } from './guard.ts'
 import { readEnsoThreadTree } from './thread-tree-record.ts'
 import type { EnsoTranscriptEntry } from './transcript.ts'
@@ -692,7 +693,7 @@ export function foldSessionRisk(
 /**
  * Why a call is in the command judge's first scope (#469): it follows a refusal in the risk
  * window, or the guards cannot read it — built at run time, decoded, or handed to another
- * interpreter, where a spelling check has nothing to read.
+ * interpreter, where a spelling check has nothing to read — in the text bash would run (#544).
  *
  * @group Session risk
  */
@@ -701,9 +702,13 @@ export const ENSO_JUDGE_SCOPE_REASONS = ['after-refusal', 'unreadable'] as const
 /** @group Session risk */
 export type EnsoJudgeScopeReason = (typeof ENSO_JUDGE_SCOPE_REASONS)[number]
 
-/** A command the guards' spelling checks cannot read; `ONE_LINER` covers an interpreter handed code. */
-const UNREADABLE =
-  /\$\(|`|(?:^|[\s;&|(])eval\s|\|\s*(?:ba|z|da|k)?sh\b|\|\s*(?:python3?|node|perl|ruby|bun|deno)\b|base64\s+(?:-d|--decode)\b|\\x[0-9a-f]{2}/i
+/**
+ * Whether the guards' spelling checks cannot read a command: a construct in its LIVE text
+ * (`command-constructs.ts`, #544). ⚠ Not the raw text — a backtick in a quoted heredoc's body, a
+ * `|` inside double quotes or a comment runs nothing, and the raw reading sent ~3× the calls,
+ * mostly message bodies carrying the user's prose. A command the walk cannot read stays in.
+ */
+const isUnreadable = (command: string): boolean => commandConstructOf(command) !== undefined
 
 /**
  * A call in the judge's scope, with what it is judged against: the refusal before it in the window
@@ -742,7 +747,7 @@ export function judgeContextOf(state: EnsoRiskState, toolCallId: string): EnsoJu
   if (call?.tool !== 'bash' || call.command === undefined) return undefined
   const earlier = state.recent.slice(0, position)
   const refused = earlier.findLast((recent) => recent.denial !== undefined)
-  const unreadable = ONE_LINER.test(call.command) || UNREADABLE.test(call.command)
+  const unreadable = isUnreadable(call.command)
   if (refused?.denial === undefined && !unreadable) return undefined
   const denied =
     refused?.denial === undefined
