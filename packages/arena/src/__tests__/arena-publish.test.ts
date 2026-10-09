@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, utimesSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import {
@@ -104,21 +104,45 @@ test('⚠ a run is refused, with every reason at once, until it is reviewed, res
   const unmapped = { ...defect, issue: undefined }
   const unresolved = { ...undiscoverable, evidence: [{ screenshot: 'screenshots/99.png' }] }
   const run = reviewedRun([unmapped, unresolved])
-  // The review was rewritten after the report, and the project holds a token the run had.
+  // The review was rewritten after the report; the review quotes a token the run had; the manifest's
+  // scan found one in the trace; the project holds one too.
   const earlier = new Date(Date.now() - 60_000)
   utimesSync(join(run, 'report.md'), earlier, earlier)
+  writeFileSync(join(run, 'review.md'), `the agent pasted ${SECRET}\n`)
+  mkdirSync(join(run, 'trace'))
+  writeFileSync(join(run, 'trace', 'trace-000.zip'), 'a trace this plan does not read')
+  const manifest = JSON.parse(readFileSync(join(run, 'manifest.json'), 'utf8'))
+  const traceHit = { path: 'trace/trace-000.zip', entry: 'resources/9f2.json' }
+  writeFileSync(
+    join(run, 'manifest.json'),
+    JSON.stringify({ ...manifest, secretScan: { files: 1, entries: 1, hits: [traceHit], unreadable: [] } }),
+  )
   writeFileSync(join(run, 'project', 'notes.txt'), `token: ${SECRET}\n`)
 
   const plan = planArenaPublication(run, { productRepo: PRODUCT, secretValues: [SECRET] })
   if (plan.kind !== 'refused') throw new Error('published a run that should have been refused')
+  // Only what is published is read (#741): the project stays local. A trace hit still refuses —
+  // the page showed it, and the published screenshots may too.
   expect(plan.reasons).toEqual([
     'report.md is older than findings.json: run `bun run arena report <run>` again',
     `finding "${unresolved.title}": evidence does not resolve — evidence 1: no screenshot screenshots/99.png in the run`,
     `finding "${unmapped.title}" is a defect that names no product issue`,
-    'the secret scan found a secret in project/notes.txt',
+    'the secret scan found a secret in review.md',
+    'the secret scan found a secret in trace/trace-000.zip',
   ])
   // Where the secret is, never the secret.
   expect(plan.reasons.join('\n')).not.toContain(SECRET)
+})
+
+test('⚠ a run whose manifest records no secret scan is refused: publish reads only the documents, so the trace would go unread (#741)', () => {
+  const run = reviewedRun([defect])
+  const { secretScan: _scan, ...beforeScans } = JSON.parse(readFileSync(join(run, 'manifest.json'), 'utf8'))
+  writeFileSync(join(run, 'manifest.json'), JSON.stringify(beforeScans))
+
+  expect(planArenaPublication(run, { productRepo: PRODUCT, secretValues: [SECRET] })).toEqual({
+    kind: 'refused',
+    reasons: ['the manifest records no secret scan of the trace: run `bun run arena manifest <run>` first'],
+  })
 })
 
 test('the product issues a finding names: a bare number is the product repository’s, a URL or owner/repo its own (#677)', () => {

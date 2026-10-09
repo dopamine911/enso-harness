@@ -135,7 +135,7 @@ import {
   SNAKE_SCENARIO,
 } from './scenario.ts'
 import { renderArenaScore, writeArenaScore } from './score.ts'
-import { scanRunForSecrets, withEarlierHits } from './secret-scan.ts'
+import { recordedScanOf, scanRunForSecrets, withEarlierHits } from './secret-scan.ts'
 import { type ArenaPerception, readTimeline } from './timeline.ts'
 import { costEstimate } from './usage.ts'
 
@@ -645,8 +645,10 @@ async function refoldRun(runDirectory: string): Promise<void> {
   const evidence = kept ?? (await collectAfterRecorderDied(runDirectory, operatorHome))
   if (kept === undefined && currentRun() === runDirectory) rmSync(currentFile, { force: true })
   // The home the run recorded, not this shell's; and a hit an earlier scan found stands (PR #613 review).
+  // A file the earlier scan stamped and that is unchanged since is not read again (#741).
   const home = runHomeOf(runDirectory, operatorHome, recordedRunHome(runDirectory))
-  const secretScan = withEarlierHits(scanRunForSecrets(runDirectory, arenaSecretValues(home)), earlier, runDirectory)
+  const scan = scanRunForSecrets(runDirectory, arenaSecretValues(home), recordedScanOf(earlier))
+  const secretScan = withEarlierHits(scan, earlier, runDirectory)
   const events = readTimeline(join(runDirectory, 'timeline.jsonl'))
   const histories = threadHistoriesIn(join(runDirectory, 'enso', 'evidence'))
   const manifest = foldArenaManifest({ runId, events, evidence, secretScan, histories })
