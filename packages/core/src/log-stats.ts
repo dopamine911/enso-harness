@@ -455,8 +455,8 @@ function foldSecurity(security: SecurityFold, message: string, properties: Prope
   }
 }
 
-function foldOf(lines: readonly EnsoLogLine[]): Fold {
-  const fold: Fold = {
+function emptyFold(): Fold {
+  return {
     processes: new Map(),
     launches: [],
     uncleanEndsOffFile: 0,
@@ -475,8 +475,6 @@ function foldOf(lines: readonly EnsoLogLine[]): Fold {
       resolutions: new Map(),
     },
   }
-  for (const line of lines) foldLine(fold, line)
-  return fold
 }
 
 function securityOf(security: SecurityFold): EnsoDayStats['security'] {
@@ -762,24 +760,55 @@ function processRowOf(process: ProcessFold): EnsoDayStats['processes'][number] {
  * @group Logging
  */
 export function dayStats(day: string, lines: readonly EnsoLogLine[], malformed: number): EnsoDayStats {
-  return foldDay(day, lines, malformed).stats
+  const fold = emptyFold()
+  for (const line of lines) foldLine(fold, line)
+  return statsOf(day, fold, lines.length, malformed)
 }
 
 /**
- * The day's stats AND each tool call's call → result, by `toolCallId` (#45 phase 2), from ONE
- * fold — the same join `stats.tools` sums per tool, kept per call so a reader can rank the calls
- * themselves. The thread stats route reads both off every day file it opens (PR #358 review:
- * folding each day twice was the same work done again).
+ * A day's fold held open (#739): records go in as the day file grows, and the stats are read off
+ * at any point — the same fold {@link dayStats} runs over a whole file, so a reader that follows
+ * today's file from the offset it reached answers what a whole re-read would, without re-reading
+ * 52 MB per request. The fold is a left fold over records in file order — each record only updates
+ * the state the ones before it left — so adding the appended records is the whole re-fold.
  *
  * @group Logging
  */
-export function foldDay(
-  day: string,
-  lines: readonly EnsoLogLine[],
-  malformed: number,
-): { readonly stats: EnsoDayStats; readonly callDurations: ReadonlyMap<string, number> } {
-  const fold = foldOf(lines)
-  return { stats: statsOf(day, fold, lines.length, malformed), callDurations: fold.callDurations }
+export interface EnsoDayFold {
+  /** One record into the fold. */
+  readonly add: (line: EnsoLogLine) => void
+  /** One line that was not a record: counted, never folded. */
+  readonly addMalformed: () => void
+  /** The stats of every line added so far: a fresh answer each call, which later records never change. */
+  readonly stats: () => EnsoDayStats
+  /**
+   * Each closed tool call's call → result so far, by `toolCallId` (#45 phase 2) — the join
+   * `stats.tools` sums per tool, kept per call so a reader can rank the calls themselves. ⚠ The
+   * fold's own map, growing as records are added: copy it to keep it.
+   */
+  readonly callDurations: ReadonlyMap<string, number>
+}
+
+/**
+ * A fold of `day` with nothing in it yet.
+ *
+ * @group Logging
+ */
+export function openDayFold(day: string): EnsoDayFold {
+  const fold = emptyFold()
+  let records = 0
+  let malformed = 0
+  return {
+    add: (line: EnsoLogLine): void => {
+      foldLine(fold, line)
+      records += 1
+    },
+    addMalformed: (): void => {
+      malformed += 1
+    },
+    stats: (): EnsoDayStats => statsOf(day, fold, records, malformed),
+    callDurations: fold.callDurations,
+  }
 }
 
 function statsOf(day: string, fold: Fold, records: number, malformed: number): EnsoDayStats {

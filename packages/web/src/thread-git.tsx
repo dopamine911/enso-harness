@@ -2,7 +2,7 @@ import { type EnsoGitRepository, EnsoThreadGit } from '@enso/core'
 import type { UIMessage } from '@tanstack/ai-client'
 import { GitBranchIcon } from 'lucide-react'
 import type { FetchLike } from './browser-logging.ts'
-import { useReadOnUsage } from './read-on-usage.ts'
+import { TREE_READ_INTERVAL_MS, useReadOnUsage } from './read-on-usage.ts'
 import { readThreadRoute, THREAD_READ_NONE, type ThreadReadOutcome } from './route-read.ts'
 
 /**
@@ -49,10 +49,11 @@ const readNothing = (): Promise<GitOutcome> => Promise.resolve(THREAD_READ_NONE)
  * The thread's git state, read on mount, whenever `moment` changes (a tool result settled, the run
  * started or ended) and whenever the thread's usage moves (`read-on-usage.ts`) — once `readable`:
  * the thread has a live session or a stored branch. The reader changing re-runs the read, so the
- * first one goes out as the session appears.
+ * first one goes out as the session appears. The re-reads are paced, at most one per
+ * `TREE_READ_INTERVAL_MS` with the last of a burst read at the window's end (#739).
  */
 export function useThreadGit(moment: string, readable: boolean): GitOutcome {
-  return useReadOnUsage(readable ? readThreadGit : readNothing, THREAD_READ_NONE, moment)
+  return useReadOnUsage(readable ? readThreadGit : readNothing, THREAD_READ_NONE, moment, TREE_READ_INTERVAL_MS)
 }
 
 /** Where the baseline came from, in words — the tooltip's first line. */

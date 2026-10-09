@@ -621,6 +621,8 @@ mode without a session in each. It is a second copy of engine behaviour, held to
 
 ## Pivot cost
 
+Which files may import the runtime is fixed by a gate (#558): `VENDOR_IMPORTERS_ALLOWED_INSIDE_ROOTS` in `test/vendor-gate.test.ts` lists them, and the list only shrinks, so a new file cannot quietly add to what follows.
+
 **Replace the engine** and the files that change are `packages/core/src/permission-modes.ts` (how a mode is
 recorded and what a preset looks like), `@enso/core/permission-rules` (the policy format, the seed and
 where the engine reads it), the permission-modes extension (the commands' entry and the `auto` link),

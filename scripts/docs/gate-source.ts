@@ -25,6 +25,15 @@
 const COMMENT_OR_STRING = /\/\*[\s\S]*?\*\/|\/\/[^\n]*|'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`/g
 
 /**
+ * `source` with every comment and string literal blanked to spaces, newlines kept: a scan for CODE
+ * reads only code, at the offsets and line numbers it had. A `// no host: needed` comment or a
+ * `'createAgentHost('` in a string is text, not a call (PR #788 review).
+ */
+export function codeOnly(source: string): string {
+  return source.replace(COMMENT_OR_STRING, (lexeme) => lexeme.replace(/[^\n]/g, ' '))
+}
+
+/**
  * From just past an opening `[` to its MATCHING `]`: depth counted, string lexemes skipped.
  *
  * ⚠ Not a non-greedy `[…]` capture (PR #302 review). That ended the array at the first `]`

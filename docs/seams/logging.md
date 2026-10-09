@@ -310,6 +310,8 @@ leak. The batch, the line shape and the options are ours; no caller sees a subst
 
 ## Pivot cost
 
+Which files may import the runtime is fixed by a gate (#558): `VENDOR_IMPORTERS_ALLOWED_INSIDE_ROOTS` in `test/vendor-gate.test.ts` lists them, and the list only shrinks, so a new file cannot quietly add to what follows.
+
 Replace the substrate and the files that change are the three the gate allows to name it:
 `packages/core/src/log.ts` (the `wrap` around the substrate's logger, `withEnsoLogContext`,
 `ensoLogLineOf`), `packages/core/src/log-process.ts` (the sinks, the filter, the two redaction

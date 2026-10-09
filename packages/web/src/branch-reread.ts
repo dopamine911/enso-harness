@@ -2,7 +2,7 @@ import type { UIMessage } from '@tanstack/ai-client'
 import { useEffect, useRef } from 'react'
 import { useStore } from './store.ts'
 import { fetchThreadHistory } from './stored-threads.ts'
-import { reviveHistoryMessages, type ThreadStores } from './thread-stores.ts'
+import { earlierThan, reviveHistoryMessages, type ThreadStores } from './thread-stores.ts'
 
 /** What of the pane's chat the re-read touches: whether a run is in flight, and its transcript. */
 interface RereadChat {
@@ -22,6 +22,7 @@ interface RereadChat {
  *
  * A later compaction makes an earlier read stale: a read applies only if no compaction was said
  * after it began. A thread the server no longer holds (404) has nothing to re-read, and is left.
+ * The read is the branch's LAST PAGE (#739), so what is before it is said again with it.
  */
 export function useRereadAfterCompaction(stores: ThreadStores, chat: RereadChat): void {
   const compacted = useStore(stores.branchCompacted)
@@ -44,7 +45,9 @@ export function useRereadAfterCompaction(stores: ThreadStores, chat: RereadChat)
           return
         }
         if (generating.current) return // a run began since: the next idle reads again
-        setMessages(reviveHistoryMessages(history.messages))
+        const messages = reviveHistoryMessages(history.messages)
+        setMessages(messages)
+        stores.earlier.set(earlierThan(history, messages))
         applied.current = wanted
       },
       () => undefined, // unreachable or refused: the transcript stays; the next compaction reads again
