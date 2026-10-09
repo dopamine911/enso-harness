@@ -105,7 +105,7 @@ export function EnsoToolResult({
   // No result yet — the call is in flight. Say so rather than rendering nothing.
   if (state.status === 'pending') {
     return (
-      <p data-enso-tool-result="pending" className="animate-pulse text-sm text-evidence">
+      <p data-enso-tool-result="pending" className="text-sm text-evidence motion-safe:animate-pulse">
         running…
       </p>
     )

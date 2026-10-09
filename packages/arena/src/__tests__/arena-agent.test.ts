@@ -152,13 +152,13 @@ test('when the run stops — the budget, a signal — the runner ends with it', 
 
 test('a screenshot reaches a model that takes images as the picture, and an error is an error result', () => {
   const directory = mkdtempSync(join(tmpdir(), 'arena-shot-'))
-  const shot = join(directory, 'shot.png')
-  writeFileSync(shot, Buffer.from([0x89, 0x50, 0x4e, 0x47]))
+  const shot = join(directory, 'shot.jpg')
+  writeFileSync(shot, Buffer.from([0xff, 0xd8, 0xff, 0xe0]))
   const outcome: ArenaActOutcome = { ok: true, result: { url: 'http://x/', screenshot: shot } }
 
   expect(arenaToolResult(outcome, true).content).toEqual([
     { type: 'text', text: JSON.stringify(outcome, null, 2) },
-    { type: 'image', data: Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString('base64'), mimeType: 'image/png' },
+    { type: 'image', data: Buffer.from([0xff, 0xd8, 0xff, 0xe0]).toString('base64'), mimeType: 'image/jpeg' },
   ])
   expect(arenaToolResult(outcome, false).content).toHaveLength(1)
   expect(arenaToolResult({ ok: false, error: 'no such button' }, true)).toMatchObject({ isError: true })
@@ -235,8 +235,8 @@ test('⚠ a model call carries at most twice the step of screenshots, the oldest
 // the moment it most needs to see what happened, so the view comes with an error too.
 test('⚠ a visual answer carries its view as the picture — before a screenshot it also names, and on a failure too', () => {
   const directory = mkdtempSync(join(tmpdir(), 'arena-view-'))
-  const view = join(directory, 'view.png')
-  const requested = join(directory, 'requested.png')
+  const view = join(directory, 'view.jpg')
+  const requested = join(directory, 'requested.jpg')
   writeFileSync(view, 'the view')
   writeFileSync(requested, 'the full shot')
   const pictureOf = (outcome: ArenaActOutcome): unknown =>
@@ -244,7 +244,7 @@ test('⚠ a visual answer carries its view as the picture — before a screensho
   expect(pictureOf({ ok: true, result: { screenshot: requested }, view })).toEqual({
     type: 'image',
     data: Buffer.from('the view').toString('base64'),
-    mimeType: 'image/png',
+    mimeType: 'image/jpeg',
   })
   expect(pictureOf({ ok: false, error: 'click: Timeout 15000ms exceeded.', view })).toMatchObject({
     data: Buffer.from('the view').toString('base64'),

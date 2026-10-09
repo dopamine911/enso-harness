@@ -402,11 +402,11 @@ in Enso's records.
 | `.enso/projects/<project id>/trees/<thread id>/` | **the application outcome**: what each thread built, one tree per thread (a compare or a fork has several). Open its `index.html`, or use the thread's Preview. The history of each tree is the snapshot store beside it, `…/snapshots/` |
 | `.enso/` | the run's own Enso home: its threads, sessions and logs as Enso wrote them (unredacted), and links to your login. Share `enso/evidence/`, not this |
 | `timeline.jsonl` | one line per event, wall clock + elapsed + URL + the thread the URL names |
-| `screenshots/` | one every 30 s (`sample`), plus one per error, dialog, navigation, failed action, page crash, Enso exit; a shot that could not be taken is a `recorder-error` line instead |
+| `screenshots/` | JPEG (quality 80, #740): one every 30 s (`sample`), plus one per error, dialog, navigation, failed action, page crash, Enso exit. A sample is not written when neither the page's picture nor the workspaces' fingerprint changed since the last sample: the timeline has a `sample-skipped` line naming that sample instead. A shot that could not be taken is a `recorder-error` line instead. The run's browser asks for reduced motion, so Enso's status dots stand still |
 | `trace/trace-NNN.zip` | the Playwright trace in five-minute chunks (`bunx playwright show-trace <zip>`): actions, DOM snapshots and the network. No screencast (#736): the viewer's filmstrip is empty, and `screenshots/` is the run's picture. While the run is live, `trace/.work` holds the chunk being written; it is removed at the stop |
 | `enso/stack.log` | Enso's own output, redacted |
 | `enso/evidence/` | every read route the server has for each thread the UI named or the project stores, one `thread-<id>-<route>` file each: record, events, session eval, log bundle, history, stats, context, incidents, judge cases, run conditions (`manifest`), git, changes; plus Stats, the about page and the trees' disk use (`trees.json`) |
-| `enso/evidence/snapshot-store/` | a copy of the project's snapshot store (#551), so pruning the home costs the run nothing |
+| `enso/evidence/snapshot-store/` | the project's snapshot store (#551), each file hard-linked (#740; copied where the run directory is on another filesystem), so pruning the home costs the run nothing |
 | `agent/transcript.jsonl` | the agent under test's own transcript (`--agent`), redacted, image bytes left out |
 | `score.json`, `score.md` | the score: verdict, UI checks, problems, observed friction, metrics |
 | `review.md`, `findings.json` | the reviewer's account and its gaps, written after the run from `review-brief.md` |
@@ -442,7 +442,7 @@ and the session file are keyed by: the jump from a screenshot to its thread, whe
 - **The agent has no shell** under `--agent` (above). Under `--manual` it is whatever you give it, and
   the manifest says the boundary was not held.
 - **Secrets.** Typed text that looks like a credential is refused, not typed: what is typed is in the
-  trace's DOM snapshots and on screenshots, and a PNG cannot be scrubbed. Text the recorder writes
+  trace's DOM snapshots and on screenshots, and a screenshot cannot be scrubbed. Text the recorder writes
   (timeline, Enso's output, evidence) is redacted with the run's secret values: `secrets.env`, the
   environment's secret-shaped names, and the OAuth tokens and keys in `auth.json`.
   - The set grows during the run: when a refresh rotates a token, the new one is added and the old

@@ -39,7 +39,7 @@ function resultText(result: ChatUISelectedToolPart['result']): string | undefine
 
 /** The glyph before a step: a check, a cross, the spinner while pi runs it, a slash once cut off. */
 const STEP_GLYPH: Record<ToolResultState['status'], React.ReactNode> = {
-  pending: <LoaderCircleIcon className="size-4 shrink-0 animate-spin text-evidence" />,
+  pending: <LoaderCircleIcon className="size-4 shrink-0 text-evidence motion-safe:animate-spin" />,
   aborted: <CircleSlashIcon className="size-4 shrink-0 text-muted-foreground" />,
   done: <CircleCheckIcon className="size-4 shrink-0 text-ok" />,
   error: <CircleXIcon className="size-4 shrink-0 text-refuse" />,

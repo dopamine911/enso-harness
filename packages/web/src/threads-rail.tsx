@@ -303,7 +303,7 @@ function LiveDot({ state }: { state: 'waiting' | 'running' | 'idle' }): React.Re
   }
   if (state === 'running') {
     return (
-      <span className="size-2 shrink-0 animate-pulse rounded-full bg-evidence signal:shadow-glow-evidence">
+      <span className="size-2 shrink-0 rounded-full bg-evidence motion-safe:animate-pulse signal:shadow-glow-evidence">
         <span className="sr-only">running</span>
       </span>
     )

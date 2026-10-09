@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { inflateRawSync } from 'node:zlib'
 import { ARENA_RUN_HOME } from './run-home.ts'
+import { ARENA_SHOT_EXTENSION } from './timeline.ts'
 
 /**
  * The run's own check that no known secret reached a file it keeps (#584 A11, #610).
@@ -139,7 +140,9 @@ function filesToScan(runDirectory: string): { readonly files: string[]; readonly
       if (directory === runDirectory && child.name === ARENA_RUN_HOME) continue
       if (child.isSymbolicLink()) continue
       if (child.isDirectory()) walk(path)
-      else if (child.isFile() && !child.name.endsWith('.png')) files.push(path)
+      // A screenshot is pixels, not text: this run's JPEGs, and an older run's PNGs on a refold (#740).
+      else if (child.isFile() && !child.name.endsWith(ARENA_SHOT_EXTENSION) && !child.name.endsWith('.png'))
+        files.push(path)
     }
   }
   walk(runDirectory)

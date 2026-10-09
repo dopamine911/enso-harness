@@ -1,4 +1,13 @@
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readlinkSync, symlinkSync, writeFileSync } from 'node:fs'
+import {
+  copyFileSync,
+  existsSync,
+  linkSync,
+  mkdirSync,
+  readdirSync,
+  readlinkSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { join } from 'node:path'
 import { redactJudgeText } from '@enso/core/judge'
 import { ensoProjectsDir, projectIdOf, projectSnapshotsDir, realpathOrSelf } from '@enso/core/paths'
@@ -50,6 +59,8 @@ export interface ArenaEvidenceSources {
   readonly serverDown?: string
   /** `fetch`, or a test's stand-in. */
   readonly fetchText?: (url: string) => Promise<{ readonly status: number; readonly text: string }>
+  /** `linkSync`, or a test's stand-in: how the snapshot store's files are linked into the run (#740). */
+  readonly linkFile?: (source: string, destination: string) => void
 }
 
 async function defaultFetchText(url: string): Promise<{ readonly status: number; readonly text: string }> {
@@ -149,7 +160,14 @@ export async function collectEnsoEvidence(sources: ArenaEvidenceSources): Promis
     rows.push({ kind: 'threads', status: 'missing', reason: 'no thread was named by the UI or stored for the project' })
   }
 
-  rows.push(snapshotStoreRow(sources.home, sources.project, join(sources.directory, 'snapshot-store')))
+  rows.push(
+    snapshotStoreRow(
+      sources.home,
+      sources.project,
+      join(sources.directory, 'snapshot-store'),
+      sources.linkFile ?? linkSync,
+    ),
+  )
   rows.push({
     kind: 'diff viewer',
     status: 'missing',
@@ -237,10 +255,16 @@ export function projectThreads(
 }
 
 /**
- * The project's snapshot store (#551), copied to `copy` so the run keeps it: the copy's row, or why
- * there is none. A copy that fails is a `missing` row naming the store and the error.
+ * The project's snapshot store (#551), kept under `copy` so the run keeps it: its row, or why there is
+ * none. Collecting it hard-links each file and copies only where linking can't (#740); either failing,
+ * or reading the store failing, is a `missing` row naming the store and the error.
  */
-function snapshotStoreRow(home: string, project: string, copy: string): ArenaEvidence {
+function snapshotStoreRow(
+  home: string,
+  project: string,
+  copy: string,
+  linkFile: (source: string, destination: string) => void,
+): ArenaEvidence {
   const directory = projectSnapshotsDir(ensoProjectsDir(home), projectIdOf(realpathOrSelf(project)))
   if (!existsSync(directory)) {
     return { kind: 'snapshot store', status: 'missing', reason: `no snapshot store at ${directory}` }
@@ -249,31 +273,59 @@ function snapshotStoreRow(home: string, project: string, copy: string): ArenaEvi
     return { kind: 'snapshot store', status: 'missing', reason: `the snapshot store at ${directory} holds no thread` }
   }
   try {
-    copyTreeWithoutChmod(directory, copy)
+    linkTreeWithoutChmod(directory, copy, linkFile)
   } catch (error) {
-    return { kind: 'snapshot store', status: 'missing', reason: `${directory} could not be copied: ${String(error)}` }
+    return {
+      kind: 'snapshot store',
+      status: 'missing',
+      reason: `${directory} could not be collected: ${String(error)}`,
+    }
   }
   return { kind: 'snapshot store', status: 'collected', path: copy }
 }
 
 /**
- * `directory` copied to `copy`, files, directories and symlinks, without `cpSync`'s chmod after
+ * `directory` kept under `copy`, files, directories and symlinks, without `cpSync`'s chmod after
  * each file (#676): git keeps its objects read-only, and on Docker Desktop's file sharing a chmod of
  * a read-only file fails with EACCES even for its owner — every containerized run lost its snapshot
- * store. `copyFileSync` keeps the mode by itself.
+ * store.
+ *
+ * A FILE IS HARD-LINKED, NOT COPIED (#740): the store's files are written once and never changed, so
+ * a link is the same bytes and mode at no cost (33 MB of copies across 80 runs), and it outlives the
+ * home's store as a copy does. Where a link cannot be made — another filesystem (EXDEV), or one that
+ * refuses links (EPERM) — the file is copied; `copyFileSync` keeps the mode by itself.
  */
-function copyTreeWithoutChmod(directory: string, copy: string): void {
+function linkTreeWithoutChmod(
+  directory: string,
+  copy: string,
+  linkFile: (source: string, destination: string) => void,
+): void {
   mkdirSync(copy, { recursive: true })
   for (const storeEntry of readdirSync(directory, { withFileTypes: true })) {
     const source = join(directory, storeEntry.name)
     const destination = join(copy, storeEntry.name)
-    if (storeEntry.isDirectory()) copyTreeWithoutChmod(source, destination)
+    if (storeEntry.isDirectory()) linkTreeWithoutChmod(source, destination, linkFile)
     // Verbatim, not resolved (cpSync made a relative target absolute — into the HOME's store, so the
     // copy broke once the home was pruned, which is what #607 copies the store to survive).
     else if (storeEntry.isSymbolicLink()) symlinkSync(readlinkSync(source), destination)
-    else if (storeEntry.isFile()) copyFileSync(source, destination)
+    else if (storeEntry.isFile()) linkOrCopy(source, destination, linkFile)
     // A socket, FIFO or device is not a snapshot: a failed copy, recorded as missing, never a gap.
     else throw new Error(`${source} is not a file, directory or symlink`)
+  }
+}
+
+/** A hard link, or a copy where the filesystem will not link (EXDEV, EPERM). Any other failure is the copy's. */
+function linkOrCopy(
+  source: string,
+  destination: string,
+  linkFile: (source: string, destination: string) => void,
+): void {
+  try {
+    linkFile(source, destination)
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    if (code !== 'EXDEV' && code !== 'EPERM') throw error
+    copyFileSync(source, destination)
   }
 }
 

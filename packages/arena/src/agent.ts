@@ -51,7 +51,7 @@ export function arenaToolResult(outcome: ArenaActOutcome, imagesAccepted: boolea
   const content: (TextContent | ImageContent)[] = [{ type: 'text', text: JSON.stringify(outcome, null, 2) }]
   const shot = imagesAccepted ? screenshotPath(outcome) : undefined
   if (shot !== undefined) {
-    content.push({ type: 'image', data: readFileSync(shot).toString('base64'), mimeType: 'image/png' })
+    content.push({ type: 'image', data: readFileSync(shot).toString('base64'), mimeType: 'image/jpeg' })
   }
   return { content, details: undefined, ...(outcome.ok ? {} : { isError: true }) }
 }
