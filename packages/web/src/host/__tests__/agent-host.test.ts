@@ -53,6 +53,7 @@ import {
   decisionAction,
   effectiveRows,
   type EnsoPermissionMap,
+  ENSO_PERMISSION_MODES,
   modeAgentName,
   openIncidentOf,
   sessionIncidentsOf,
@@ -83,6 +84,7 @@ import { writeProjectThreadSettings } from '@enso/core/project-config'
 import { snapshotPaths } from '@enso/core/snapshot-store'
 import { getPermissionsService } from '@gotgenes/pi-permission-system'
 import type { LogRecorder } from '@logtape/testing/recorder'
+import { Type } from 'typebox'
 import {
   type AgentHost,
   createAgentHost,
@@ -94,6 +96,7 @@ import {
   stopRunSettlingDialogs,
   ThreadDeleted,
   type ThreadDeleteOutcome,
+  type ToolCallVerdict,
 } from '../agent-host.ts'
 import { LOST_TOOL_RESULT_TEXT, NOTHING_TO_CONTINUE } from '../continuation.ts'
 import { PERMISSION_CALL_QUESTIONS_EXTENSION_PATH } from '../permission-call-questions.ts'
@@ -741,6 +744,150 @@ test('⚠ a deny the user wrote holds in every mode, through the real engine (#4
   }
 })
 
+/**
+ * Stand-ins for the tools pi's built-in MCP registers, `mcp__<server>__<tool>` (#744). Enso loads no
+ * MCP today, and the engine refuses an unregistered tool before any rule is consulted, so a probe
+ * of a name nobody registered would pass for the wrong reason.
+ */
+function mcpTools(names: readonly string[]): InlineExtension {
+  return {
+    name: 'enso-host-mcp-tools-probe',
+    factory: (pi: ExtensionAPI) => {
+      for (const name of names) {
+        pi.registerTool({
+          name,
+          label: name,
+          description: 'a stand-in MCP server tool',
+          parameters: Type.Object({}),
+          execute: () => Promise.resolve({ content: [], details: undefined }),
+        })
+      }
+    },
+  }
+}
+
+/**
+ * The `surface` rule that refused the call, read off the engine's reason (`Denied by policy: 'mcp'
+ * … (rule '**')`); `undefined` when the call passed or something else refused it.
+ */
+function policyDenyRule(verdict: ToolCallVerdict | undefined, surface: string): string | undefined {
+  if (verdict?.block !== true) return undefined
+  return new RegExp(String.raw`Denied by policy: '${surface}' .*\(rule '([^']*)'\)`).exec(verdict.reason ?? '')?.[1]
+}
+
+// #744: every mode refuses an MCP server nobody approved. pi's built-in MCP names each server tool
+// `mcp__<server>__<tool>` and the engine (38.0.0+) resolves it on the `mcp` surface, where each mode's
+// preset puts a catch-all deny. Called through the real `tool_call` path, as pi would call it.
+test('⚠ every mode refuses the tool of an MCP server the policy does not approve, through the real engine (#744)', async () => {
+  const hosted = await hostedUnder(ENSO_DEFAULT_PERMISSION_POLICY, [mcpTools(['mcp__unlisted__run'])])
+  for (const mode of ENSO_PERMISSION_MODES) {
+    await switchMode(hosted, mode)
+    const verdict = await hosted.probeToolCall('mcp__unlisted__run', {})
+    expect({ mode, deniedBy: policyDenyRule(verdict, 'mcp') }).toEqual({ mode, deniedBy: '**' })
+  }
+})
+
+// #744: MCP is meant to be enabled per project by naming approved servers, so the mode's deny is a
+// default, not a wall: the preset changes only Enso's `**`, which the launch puts first in the
+// user's `mcp` map, and a server rule after it wins for that server alone. The server is named in
+// `mcp.json` with a dash, as pi's tool name spells it with `_` — the engine matches either spelling.
+test('⚠ an approved MCP server stays allowed under the mode deny, and every other server is still refused (#744)', async () => {
+  const mcpConfig = join(agentDir, 'mcp.json')
+  writeFileSync(mcpConfig, JSON.stringify({ mcpServers: { 'approved-server': { command: 'true' } } }))
+  try {
+    const hosted = await hostedUnder({ permission: { '*': 'ask', mcp: { 'approved-server': 'allow' } } }, [
+      mcpTools(['mcp__approved_server__x', 'mcp__other__y']),
+    ])
+    for (const mode of ['default', 'bypassPermissions'] as const) {
+      await switchMode(hosted, mode)
+      const approved = await hosted.probeToolCall('mcp__approved_server__x', {})
+      const other = await hosted.probeToolCall('mcp__other__y', {})
+      expect({ mode, approved: approved?.block ?? false, otherDeniedBy: policyDenyRule(other, 'mcp') }).toEqual({
+        mode,
+        approved: false,
+        otherDeniedBy: '**',
+      })
+    }
+  } finally {
+    rmSync(mcpConfig, { force: true })
+  }
+})
+
+/** Probe a call through the real engine, cancelling every card it raises: the cards' titles, and the verdict. */
+async function probeCancellingCards(
+  hosted: HostedThread,
+  tool: string,
+  input: Record<string, unknown>,
+): Promise<{ readonly asked: readonly string[]; readonly blocked: boolean }> {
+  const asked: string[] = []
+  const unsubscribe = hosted.runtime.subscribe((event) => {
+    if (event.kind !== 'extension-ui-request' || !event.blocking || event.dialog?.method !== 'select') return
+    asked.push(event.dialog.title)
+    queueMicrotask(() => hosted.runtime.answerDialog({ id: event.id, cancelled: true }))
+  })
+  try {
+    const verdict = await hosted.probeToolCall(tool, input)
+    return { asked, blocked: verdict?.block ?? false }
+  } finally {
+    unsubscribe()
+  }
+}
+
+// #744, engine 39.0.0: the engine's "pi infrastructure" read bypass, which let a read anywhere in
+// pi's agent dir skip the `external_directory` gate, now covers only pi's harness entries
+// (`settings.json`, `skills/` …). Under Enso's seed (`external_directory: { '**': 'ask' }`), the
+// agent dir's credentials, sessions and the engine's own logs ask like any outside path. In
+// production the guards refuse `ENSO_HOME/pi-agent` before the engine is asked (its `/.enso/`
+// fragment, `guards.test.ts`), so this is what a custom `ENSO_HOME` outside any `.enso` meets —
+// where 36.2.0 let all of these through unasked.
+test("⚠ under Enso's policy, a read of pi's harness entries in the agent dir runs; its credentials, sessions and the engine's logs ask (#744)", async () => {
+  const hosted = await hostedUnder(ENSO_DEFAULT_PERMISSION_POLICY)
+  const readOf = async (path: string): Promise<{ readonly asked: number; readonly blocked: boolean }> => {
+    const result = await probeCancellingCards(hosted, 'read', { path: join(agentDir, path) })
+    return { asked: result.asked.length, blocked: result.blocked }
+  }
+  expect(await readOf('settings.json')).toEqual({ asked: 0, blocked: false })
+  expect(await readOf('skills/x/SKILL.md')).toEqual({ asked: 0, blocked: false })
+  for (const path of ['auth.json', 'sessions/x.jsonl', 'extensions/pi-permission-system/logs/review.jsonl']) {
+    expect({ path, ...(await readOf(path)) }).toEqual({ path, asked: 1, blocked: true })
+  }
+})
+
+// #744, engine 39.0.0: an `external_directory` deny naming an infrastructure path now blocks the
+// read the bypass used to let through; a catch-all ask still leaves the bypass in place.
+test('a targeted external_directory deny blocks a read the infrastructure bypass would let through (#744)', async () => {
+  const skills = join(agentDir, 'skills')
+  const hosted = await hostedUnder({
+    ...ENSO_DEFAULT_PERMISSION_POLICY,
+    permission: { ...ENSO_DEFAULT_PERMISSION_POLICY.permission, external_directory_read: { [`${skills}/*`]: 'deny' } },
+  })
+  const denied = await hosted.probeToolCall('read', { path: join(skills, 'x', 'SKILL.md') })
+  expect(policyDenyRule(denied, 'external_directory_read')).toBe(`${skills}/*`)
+  expect(await probeCancellingCards(hosted, 'read', { path: join(agentDir, 'settings.json') })).toEqual({
+    asked: [],
+    blocked: false,
+  })
+})
+
+// #744, engine 40.0.0: a bash path argument is matched as typed AND in its absolute spelling, so a
+// rule naming an absolute path into the session's own tree reaches the relative spelling too —
+// typed bare, or after a `cd` into the tree. Under 36.2.0 only the absolute spelling hit it, and the
+// relative ones fell through to the seed's `cat *` allow.
+test('a bash rule naming an absolute path into the tree hits the relative spelling of the same path (#744)', async () => {
+  const target = join(repoRoot, 'package.json')
+  const hosted = await hostedUnder({
+    ...ENSO_DEFAULT_PERMISSION_POLICY,
+    permission: {
+      ...ENSO_DEFAULT_PERMISSION_POLICY.permission,
+      bash: { ...ENSO_DEFAULT_PERMISSION_POLICY.permission.bash, [`cat ${target}`]: 'deny' },
+    },
+  })
+  for (const command of [`cat ${target}`, 'cat package.json', `cd ${repoRoot} && cat package.json`]) {
+    const verdict = await hosted.probeToolCall('bash', { command })
+    expect({ command, deniedBy: policyDenyRule(verdict, 'bash') }).toEqual({ command, deniedBy: `cat ${target}` })
+  }
+})
+
 // #498 rests on a fact of the engine's: it reports Enso's catch-all as `**` and a surface-wide rule
 // the user wrote (a string surface, or a `*` key) as `*`, so `auto` can leave the user's to the
 // user. Asked through the engine's own service, as the auto link asks it.
@@ -788,6 +935,8 @@ test("⚠ Settings' model of every mode is the engine's: each verdict names a ru
     ['read', 'src/a.ts'],
     ['path_read', 'src/a.ts'],
     ['path_write', 'src/a.ts'],
+    // Every mode's MCP default (#744): a preset rule on a surface the user's map lacks.
+    ['mcp', 'github'],
   ]
   for (const mode of ['bypassPermissions', 'acceptEdits', 'auto', 'plan', 'default'] as const) {
     await switchMode(hosted, mode)

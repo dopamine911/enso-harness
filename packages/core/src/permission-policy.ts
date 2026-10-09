@@ -17,7 +17,9 @@ import {
  * directions, then the mode's preset merges over the user's map key by key when both sides are
  * maps, and REPLACES the surface when either side is a single decision (`plan`'s `edit: 'deny'`
  * drops every edit rule the user wrote). `agent-host.test.ts` asks the real engine the same
- * questions in every mode, so this model cannot drift from it unnoticed.
+ * questions in every mode, so this model cannot drift from it unnoticed. Re-pinned against 40.0.2
+ * (#744), whose `expandDirectionalSugar` and `mergeFlatPermissions` are unchanged; it still exports
+ * no resolved policy to read instead (#517 item 3).
  *
  * Nothing here reads or writes the file; the host does (`host/permission-policy-file.ts`), for the
  * server's routes.

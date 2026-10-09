@@ -113,6 +113,8 @@ test('⚠ Enso’s catch-all is put first wherever a mode could otherwise overri
     path_write: { 'dist/*': 'deny' },
     external_directory_read: { '~/dev/*': 'allow' },
     write: { 'README.md': 'allow', '**': 'ask' },
+    // #744: every mode's MCP default is on this surface; an approved server must stay after it.
+    mcp: { github: 'allow' },
   }
   const { policyPath, agentDir } = launch(JSON.stringify({ permission, note: 'mine' }))
   const preparation = preparePermissionPolicy(policyPath, agentDir)
@@ -121,6 +123,7 @@ test('⚠ Enso’s catch-all is put first wherever a mode could otherwise overri
     'bash',
     'edit',
     'external_directory_read',
+    'mcp',
     'path',
   ])
   const written = readBack(policyPath) as { permission: Record<string, unknown>; note: string }
@@ -146,6 +149,10 @@ test('⚠ Enso’s catch-all is put first wherever a mode could otherwise overri
   expect(Object.entries(written.permission.write as object)).toEqual([
     ['README.md', 'allow'],
     ['**', 'ask'],
+  ])
+  expect(Object.entries(written.permission.mcp as object)).toEqual([
+    ['**', 'deny'],
+    ['github', 'allow'],
   ])
   expect(written.permission.read).toBe('allow')
 })

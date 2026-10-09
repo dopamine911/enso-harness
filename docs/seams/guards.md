@@ -364,6 +364,18 @@ the manifest, `pi.extensions` in `packages/harness/package.json`: logging, **gua
 permission engine, the mode extension, the multi-account extension, ask-user, system-prompt, run-context and incident-report. Two of those register a `tool_call` handler — guards and
 the permission engine, in that order (#496; the mode extension registers none).
 
+**The permission engine this page was measured against: `@gotgenes/pi-permission-system` 40.0.2**
+(#744; the pin in `packages/harness/package.json`). Three of its changes since 36.2.0 meet the guards.
+39.0.0 narrowed its "pi infrastructure" read bypass to pi's harness entries in the agent dir
+(`settings.json`, `skills/`, `extensions/` …), never its own permission logs, and lets a targeted
+`external_directory` deny block such a read. Enso's agent dir is `ENSO_HOME/pi-agent`, which the
+guard's `/.enso/` fragment refuses whole before the engine is asked, harness entries included
+(`guards.test.ts`); under a custom `ENSO_HOME` outside any `.enso`, the engine now asks for the agent
+dir's credentials, sessions and logs where 36.2.0 let them through (`agent-host.test.ts`). 40.0.0
+matches a bash path argument in its absolute spelling too, so a rule naming an absolute path into the
+thread's tree reaches `cat x` and `cd <tree> && cat x` as well. 38.0.0 gates pi's MCP tools on the
+`mcp` surface, which every mode denies by default ([permission modes](./permission-mode.md)).
+
 **Second implementation:** the injected analyzer. `guards.test.ts#loadGuardRuntime` builds the extension over a
 stand-in `ExtensionAPI` (captures `on`, fakes `getAllTools`) and an analyzer that allows everything,
 because the real one reads the *machine's* local policy per call (`guards.test.ts#ALLOW_ALL_ANALYZER`). The injected-verdict tests

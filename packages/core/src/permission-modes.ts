@@ -10,7 +10,8 @@
  *   the user's policy for that session.
  *
  * So a mode here is an agent preset that Enso owns: every mode is the agent `enso-mode-<mode>`,
- * and `default`'s preset is empty (the user's policy as written).
+ * and `default`'s preset is the user's policy as written, plus the MCP default every mode carries
+ * (`MCP_DENIED`).
  *
  * ⚠ `default` IS A NAMED AGENT, NEVER `name: null` (#496 review). gotgenes resolves a `null`
  * entry by falling back to the last agent it resolved in that session
@@ -36,7 +37,7 @@
  * Code's. A surface given as a STRING replaces the user's whole surface instead: `plan` uses that
  * for its denies, so a user's `edit` allow cannot reopen editing in plan.
  *
- * Probed against gotgenes 36.2.0 (#496, #499).
+ * Probed against gotgenes 36.2.0 (#496, #499); re-checked against 40.0.2 (#744).
  *
  * @module
  */
@@ -114,6 +115,23 @@ const EDITS_ALLOWED: Readonly<Record<string, SurfaceRule>> = {
 }
 
 /**
+ * Every mode refuses MCP tools by default: the `mcp` surface's catch-all is `deny` in each.
+ *
+ * Enso loads no MCP tools today. pi's MCP is the built-in extension `builtin:mcp`, which loads only
+ * through discovery, and both launch surfaces turn discovery off (`noExtensions` on the web host,
+ * `--no-extensions` in the terminal). So this deny decides nothing yet: it is the default MCP will
+ * meet when it lands, and defense in depth until then, because the guards cannot read an MCP call's
+ * arguments the way they read a bash command.
+ *
+ * ⚠ A CATCH-ALL MAP, NEVER THE STRING `'deny'`. MCP is meant to be enabled per project, by naming
+ * approved servers. Written as a map, the deny replaces only `ENSO_CATCH_ALL`, which the launch puts
+ * first in the user's `mcp` map (`permission-rules.ts#withCatchAllFirst`), so an approved server's
+ * rule after it (`mcp: { github: 'allow' }`) wins for that server and every other server stays
+ * denied, in every mode. A string would replace the whole surface and drop the approvals.
+ */
+const MCP_DENIED: SurfaceRule = { [ENSO_CATCH_ALL]: 'deny' }
+
+/**
  * Each mode's preset.
  *
  * ⚠ `bypassPermissions` still asks in two places, because gotgenes floors them to `ask` whatever
@@ -124,20 +142,22 @@ const EDITS_ALLOWED: Readonly<Record<string, SurfaceRule>> = {
  * (`cat a > b`) still writes inside the project, because the seed allows `path_write` there
  * (`permission-rules.ts#ENSO_DEFAULT_PERMISSION_POLICY` says why).
  *
+ * Every mode, `default` included, denies an MCP server the user has not approved (`MCP_DENIED`).
+ *
  * @group Permission mode
  */
 export const ENSO_MODE_PRESETS: Readonly<Record<EnsoPermissionModeName, ModePreset>> = {
   default: {
-    summary: 'the policy in permissions.json, as written',
-    permission: {},
+    summary: 'the policy in permissions.json, as written; MCP servers you have not approved are refused',
+    permission: { mcp: MCP_DENIED },
   },
   acceptEdits: {
     summary: 'edits and writes inside the project run without asking',
-    permission: EDITS_ALLOWED,
+    permission: { ...EDITS_ALLOWED, mcp: MCP_DENIED },
   },
   plan: {
     summary: 'read and explore; the edit and write tools are denied',
-    permission: { edit: 'deny', write: 'deny' },
+    permission: { edit: 'deny', write: 'deny', mcp: MCP_DENIED },
   },
   bypassPermissions: {
     summary: 'everything runs without asking, except what your own rules deny or ask',
@@ -150,11 +170,12 @@ export const ENSO_MODE_PRESETS: Readonly<Record<EnsoPermissionModeName, ModePres
       external_directory_read: { [ENSO_CATCH_ALL]: 'allow' },
       external_directory_write: { [ENSO_CATCH_ALL]: 'allow' },
       bash: { [ENSO_CATCH_ALL]: 'allow' },
+      mcp: MCP_DENIED,
     },
   },
   auto: {
     summary: 'edits run as in acceptEdits; a classifier model answers what would ask',
-    permission: EDITS_ALLOWED,
+    permission: { ...EDITS_ALLOWED, mcp: MCP_DENIED },
   },
 }
 
@@ -223,16 +244,15 @@ function frontmatterKey(key: string): string {
 
 /**
  * The agent file for a mode, in the frontmatter shape gotgenes reads: `key: value` scalars and
- * nested maps only (its parser takes no arrays, anchors or multi-line values). An empty preset
- * writes no `permission` block, which gotgenes reads as an empty scope.
+ * nested maps only (its parser takes no arrays, anchors or multi-line values). Every preset holds
+ * at least the MCP default (`MCP_DENIED`), so every file has a `permission` block.
  *
  * @group Permission mode
  */
 export function modeAgentFile(mode: EnsoPermissionModeName): string {
   const preset = ENSO_MODE_PRESETS[mode]
-  const entries = Object.entries(preset.permission)
-  const lines = ['---', `name: ${modeAgentName(mode)}`, ...(entries.length > 0 ? ['permission:'] : [])]
-  for (const [surface, rule] of entries) {
+  const lines = ['---', `name: ${modeAgentName(mode)}`, 'permission:']
+  for (const [surface, rule] of Object.entries(preset.permission)) {
     if (typeof rule === 'string') {
       lines.push(`  ${frontmatterKey(surface)}: ${rule}`)
       continue

@@ -75,20 +75,30 @@ export const EnsoPermissionModeChange = Type.Object({
 
 Five modes, in the menu's order. Every mode is the agent `enso-mode-<mode>`, whose file
 `preparePermissionPolicy` writes to `<agentDir>/agents/` at every launch
-(`core/src/permission-modes.ts#modeAgentFile`). `default`'s file has no `permission` block: the
-user's policy as written.
+(`core/src/permission-modes.ts#modeAgentFile`). `default`'s file holds only the MCP default every
+mode carries: otherwise, the user's policy as written.
 
-⚠ `default` is a named, empty agent, never `name: null`. The engine resolves a `null` entry by
+⚠ `default` is a named agent, never `name: null`. The engine resolves a `null` entry by
 falling back to the last agent it resolved in that session, so `null` after `/bypassPermissions`
 kept bypass enforced while Enso said `default` (found in review, pinned by `agent-host.test.ts`).
 
 | Mode | Preset over the policy | Summary (the menu's, and the Features page's) |
 |---|---|---|
-| `default` | none | the policy in `permissions.json`, as written |
-| `acceptEdits` | `edit`, `write` and `path_write` allowed | edits and writes inside the project run without asking |
-| `plan` | `edit` and `write` denied, as strings, so a user's own `edit` allow cannot reopen them | read and explore; the edit and write tools are denied |
-| `bypassPermissions` | every surface allowed, `external_directory_*` included | everything runs without asking, except what your own rules deny or ask |
+| `default` | `mcp` denied | the policy in `permissions.json`, as written; MCP servers you have not approved are refused |
+| `acceptEdits` | `edit`, `write` and `path_write` allowed; `mcp` denied | edits and writes inside the project run without asking |
+| `plan` | `edit` and `write` denied, as strings, so a user's own `edit` allow cannot reopen them; `mcp` denied | read and explore; the edit and write tools are denied |
+| `bypassPermissions` | every surface allowed, `external_directory_*` included, except `mcp`, denied | everything runs without asking, except what your own rules deny or ask |
 | `auto` | as `acceptEdits`, plus the classifier link (below) | edits run as in acceptEdits; a classifier model answers what would ask |
+
+**Every mode denies MCP by default (#744), as a catch-all, never a string.** Enso loads no MCP tools
+today: pi's MCP is the built-in extension `builtin:mcp`, which loads only through discovery, and both
+launch surfaces turn discovery off (`noExtensions`, `--no-extensions`). The engine (38.0.0+) gates
+pi's MCP tools, `mcp__<server>__<tool>`, on the `mcp` surface, and each preset puts
+`mcp: { '**': 'deny' }` there: defense in depth until MCP lands, since the guards cannot read an MCP
+call's arguments as they read bash. When it lands, a project enables a server by naming it as an
+`mcp` rule after the catch-all (`"mcp": { "**": "ask", "github": "allow" }`); the preset replaces
+only `**`, so the approved server keeps its rule in every mode and every other server stays denied
+(pinned through the real engine by `agent-host.test.ts`).
 
 **A mode changes only Enso's catch-all, `**`, never a rule the user wrote (#499).** The engine
 merges a preset over the user's policy key by key, and rules are last-match-wins: a preset key the
@@ -130,19 +140,21 @@ export const ENSO_PERMISSION_MODES = ['default', 'acceptEdits', 'plan', 'bypassP
  * ⚠ `plan` denies the edit and write TOOLS. A redirect from an allowlisted bash command
  * (`cat a > b`) still writes inside the project, because the seed allows `path_write` there
  * (`permission-rules.ts#ENSO_DEFAULT_PERMISSION_POLICY` says why).
+ *
+ * Every mode, `default` included, denies an MCP server the user has not approved (`MCP_DENIED`).
  */
 export const ENSO_MODE_PRESETS: Readonly<Record<EnsoPermissionModeName, ModePreset>> = {
   default: {
-    summary: 'the policy in permissions.json, as written',
-    permission: {},
+    summary: 'the policy in permissions.json, as written; MCP servers you have not approved are refused',
+    permission: { mcp: MCP_DENIED },
   },
   acceptEdits: {
     summary: 'edits and writes inside the project run without asking',
-    permission: EDITS_ALLOWED,
+    permission: { ...EDITS_ALLOWED, mcp: MCP_DENIED },
   },
   plan: {
     summary: 'read and explore; the edit and write tools are denied',
-    permission: { edit: 'deny', write: 'deny' },
+    permission: { edit: 'deny', write: 'deny', mcp: MCP_DENIED },
   },
   bypassPermissions: {
     summary: 'everything runs without asking, except what your own rules deny or ask',
@@ -155,11 +167,12 @@ export const ENSO_MODE_PRESETS: Readonly<Record<EnsoPermissionModeName, ModePres
       external_directory_read: { [ENSO_CATCH_ALL]: 'allow' },
       external_directory_write: { [ENSO_CATCH_ALL]: 'allow' },
       bash: { [ENSO_CATCH_ALL]: 'allow' },
+      mcp: MCP_DENIED,
     },
   },
   auto: {
     summary: 'edits run as in acceptEdits; a classifier model answers what would ask',
-    permission: EDITS_ALLOWED,
+    permission: { ...EDITS_ALLOWED, mcp: MCP_DENIED },
   },
 }
 ```

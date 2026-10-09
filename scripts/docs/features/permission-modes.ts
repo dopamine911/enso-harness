@@ -62,7 +62,7 @@ export const PERMISSION_MODES: FeatureSpec = {
   title: 'Permission modes',
   landingTagline: 'how much pi may do before asking',
   shows: [
-    "A permission mode says how much pi may do before it asks you. Each thread has one mode at a time, and you can change it while the thread is open. Every mode but `default` is a preset Enso lays over your permission policy for that thread; the modes follow [Claude Code's](https://code.claude.com/docs/en/permission-modes):",
+    "A permission mode says how much pi may do before it asks you. Each thread has one mode at a time, and you can change it while the thread is open. Every mode is a preset Enso lays over your permission policy for that thread (`default`'s only refuses MCP servers you have not approved); the modes follow [Claude Code's](https://code.claude.com/docs/en/permission-modes):",
     MODE_TABLE,
     'When pi needs to ask, the question appears in the chat. See [Questions and dialogs](./questions-and-dialogs.md).',
     `Your permission policy lives in \`~/.enso/permissions.json\` (\`ENSO_HOME/permissions.json\`). Its \`permission\` block names each tool or surface and what happens to it: \`allow\`, \`ask\` or \`deny\`, or a map from pattern to one of those in which the last matching pattern wins, for example \`"bash": { "*": "ask", "npm publish*": "deny" }\`. A deny rule denies in every mode. A new \`ENSO_HOME\` starts with Enso's default policy: ${listed(ALLOWED_TOOLS)} run without asking; edits and writes ask; shell commands ask, except ${READ_ONLY_COMMANDS} read-only ones such as \`git status\` and \`ls\`; ${listed(DENIED_COMMANDS)}; ${listed(ENV_PATTERNS)} files are denied to every tool; anything outside the project asks. The launch log says which file was used.`,
@@ -106,6 +106,7 @@ export const PERMISSION_MODES: FeatureSpec = {
     'An edit to `permissions.json` applies at the next tool call, in running threads too. A file that is not plain JSON stops the launch, and the error names the file; comments are not allowed. Break it while a thread runs and that thread reads an empty policy: every call asks, and the deny rules are gone until the file is fixed.',
     "A trusted project's own `.pi/` settings for the permission engine, and its `.pi/agents/` files, are read over your policy and can loosen it. In the web app every project counts as trusted; in the terminal, pi's own trust question decides.",
     'A mode the thread does not offer is refused, and so is a change while the thread is running.',
+    'Enso loads no MCP tools yet. Every mode refuses an MCP server\'s tools by default; a server your policy names after Enso\'s catch-all, as in `"mcp": { "**": "ask", "github": "allow" }`, keeps its own rule in every mode.',
   ],
   see: [
     {
