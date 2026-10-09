@@ -12,7 +12,7 @@ import { EnsoSessionUsage } from './thread-runtime.ts'
  *     session TOTAL (`getSessionStats`), the authoritative figure.
  *   - The LOG holds how long things took, and only for what was observed and not yet pruned (the
  *     directory keeps 14 days): tool durations joined by `toolCallId`, a run's prompt → settle
- *     and its first token. Folded by `foldDay`, the same fold `/debug?stats` reads, so the two
+ *     and its first token. Folded by `openDayFold`, the same fold `/debug?stats` reads, so the two
  *     surfaces cannot disagree about a duration.
  *   - One duration is the SESSION's (#359): a prompt's own, from the timestamps pi stamps on each
  *     entry as it appends it. The log cannot say it: a run's settle closes every prompt queued

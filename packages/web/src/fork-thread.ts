@@ -2,7 +2,7 @@ import { ENSO_NOTICE_SOURCE, type EnsoForkReceipt, EnsoThreadHistory } from '@en
 import type { UIMessage } from '@tanstack/ai-client'
 import { createContext } from 'react'
 import { Check } from 'typebox/value'
-import { describeFailedResponse } from './stored-threads.ts'
+import { describeFailedResponse, threadHistoryUrl } from './stored-threads.ts'
 import { reviveHistoryMessages, type ThreadStores } from './thread-stores.ts'
 
 /**
@@ -108,17 +108,43 @@ export async function forkFromPage(
   }
 }
 
-/** The thread's stored branch, as messages — or why it could not be read. */
-async function storedBranch(stores: Pick<ThreadStores, 'threadId' | 'fetch'>): Promise<UIMessage[] | string> {
+/** One page of the thread's stored branch (#739) — or why it could not be read. */
+async function historyPageOf(
+  stores: Pick<ThreadStores, 'threadId' | 'fetch'>,
+  before: string | undefined,
+): Promise<EnsoThreadHistory | string> {
   try {
-    const response = await stores.fetch(`/api/threads/${encodeURIComponent(stores.threadId)}/history`)
+    const response = await stores.fetch(threadHistoryUrl(stores.threadId, before))
     if (!response.ok) throw new Error(await describeFailedResponse(response))
     const history: unknown = await response.json()
     if (!Check(EnsoThreadHistory, history)) throw new Error("the server's history payload did not match its schema")
-    return reviveHistoryMessages(history.messages)
+    return history
   } catch (error) {
     return `the thread's branch could not be read: ${error instanceof Error ? error.message : String(error)}`
   }
+}
+
+/**
+ * The thread's stored branch from the message `page` starts at, as messages — or why it could not
+ * be read. ⚠ `/history` answers a PAGE (#739), and the match below is by place among the prompts,
+ * so the branch must start where the page does: it is read back a page at a time until it holds
+ * the page's first message (one mounted from a history carries its entry's id), or holds the
+ * branch from its start (a page that minted the thread holds it from its start too).
+ */
+async function storedBranch(
+  stores: Pick<ThreadStores, 'threadId' | 'fetch'>,
+  page: readonly UIMessage[],
+  before?: string,
+  later: readonly UIMessage[] = [],
+): Promise<UIMessage[] | string> {
+  const history = await historyPageOf(stores, before)
+  if (typeof history === 'string') return history
+  const branch = [...reviveHistoryMessages(history.messages), ...later]
+  const start = branch.findIndex(({ id }) => id === page[0]?.id)
+  if (start !== -1) return branch.slice(start)
+  const first = branch[0]
+  if (history.earlier === undefined || first === undefined) return branch
+  return storedBranch(stores, page, first.id, branch)
 }
 
 /** The pi entry for `messageId` on the stored branch, or the refusal that says why there is none. */
@@ -128,7 +154,7 @@ async function entryOnBranch(
   messageId: string | undefined,
   verb: string,
 ): Promise<{ entryId: string } | { refusal: string }> {
-  const branch = await storedBranch(stores)
+  const branch = await storedBranch(stores, page)
   if (typeof branch === 'string') return { refusal: `${verb}: ${branch}` }
   const entryId = forkEntryFor(page, messageId, branch)
   if (entryId !== undefined) return { entryId }

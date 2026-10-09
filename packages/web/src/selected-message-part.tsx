@@ -4,7 +4,7 @@ import { summarizeToolInput } from '@enso/core'
 // in `ai-elements/reasoning.tsx` replaces it (see that file's header).
 import type { ChatUISelectedPart, ChatUISelectedToolPart } from '@tanstack/ai-client/ui'
 import { TextPart } from '@tanstack/ai-react/ui'
-import { ChevronRightIcon, CircleCheckIcon, CircleSlashIcon, CircleXIcon, LoaderCircleIcon } from 'lucide-react'
+import { ChevronRightIcon, CircleCheckIcon, CircleDashedIcon, CircleSlashIcon, CircleXIcon } from 'lucide-react'
 import { Reasoning, ReasoningContent, ReasoningTrigger } from './components/ai-elements/reasoning.tsx'
 import { type EnsoRendererMap, EnsoToolResult, type ToolResultState, toolResultState } from './EnsoToolResult.tsx'
 import { cn } from './lib/utils.ts'
@@ -37,9 +37,13 @@ function resultText(result: ChatUISelectedToolPart['result']): string | undefine
   return result.content.map((part) => JSON.stringify(part)).join('\n')
 }
 
-/** The glyph before a step: a check, a cross, the spinner while pi runs it, a slash once cut off. */
+/**
+ * The glyph before a step: a check, a cross, a dashed circle while pi runs it, a slash once cut off.
+ * ⚠ The pending glyph stands still (#739): a spinner keeps the compositor ticking for as long as the
+ * step runs; a frozen spinner reads as hung, so pending gets its own static shape.
+ */
 const STEP_GLYPH: Record<ToolResultState['status'], React.ReactNode> = {
-  pending: <LoaderCircleIcon className="size-4 shrink-0 text-evidence motion-safe:animate-spin" />,
+  pending: <CircleDashedIcon className="size-4 shrink-0 text-evidence" />,
   aborted: <CircleSlashIcon className="size-4 shrink-0 text-muted-foreground" />,
   done: <CircleCheckIcon className="size-4 shrink-0 text-ok" />,
   error: <CircleXIcon className="size-4 shrink-0 text-refuse" />,

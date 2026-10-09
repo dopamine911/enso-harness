@@ -90,6 +90,8 @@ export interface ScriptedFetchOptions {
   readonly projects?: EnsoProject[]
   /** What `GET /api/threads/:id/history` answers for a resume click; keyed by thread id. */
   readonly histories?: Record<string, EnsoThreadHistory>
+  /** What `GET /api/threads/:id/history?before=<id>` answers (#739) — "Load earlier"; keyed by that message id. */
+  readonly earlierHistories?: Record<string, EnsoThreadHistory>
   /**
    * What the debug pane's two reads answer — `GET /api/threads/:id` and `…/events` (#86). One
    * inspection for every thread id (the pane compares it with the page's belief, so a test
@@ -207,15 +209,20 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
   }
   /** The thread reads a test counts (#620, #682): a thread with no session must ask neither. */
   const countedReads: Readonly<Record<string, string[]>> = { git: gitReads, tree: threadTreeReads }
+  /** `…/history`, or with `before` the page "Load earlier" asks for (#739); undefined for any other path. */
+  const historyRead = (path: string, before: string | null): Response | undefined => {
+    const history = /^\/api\/threads\/([^/]+)\/history$/.exec(path)
+    if (history?.[1] === undefined) return undefined
+    const found =
+      before === null ? options.histories?.[decodeURIComponent(history[1])] : options.earlierHistories?.[before]
+    return found === undefined ? new Response('no such thread', { status: 404 }) : Response.json(found)
+  }
   /** The page's own reads — mode seed, the rail's stored list, a resume click's history. Exact paths. */
-  const pageRead = (path: string): Response | undefined => {
+  const pageRead = (path: string, before: string | null): Response | undefined => {
     const literal = literalReads[path]
     if (literal !== undefined) return Response.json(literal())
-    const history = /^\/api\/threads\/([^/]+)\/history$/.exec(path)
-    if (history?.[1] !== undefined) {
-      const found = options.histories?.[decodeURIComponent(history[1])]
-      return found === undefined ? new Response('no such thread', { status: 404 }) : Response.json(found)
-    }
+    const history = historyRead(path, before)
+    if (history !== undefined) return history
     const events = /^\/api\/threads\/([^/]+)\/events$/.exec(path)
     if (events?.[1] !== undefined) {
       const threadId = decodeURIComponent(events[1])
@@ -319,7 +326,7 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
     const respond = action === undefined ? undefined : threadActions[action]
     if (respond !== undefined) return respond(init)
     if (action !== undefined) countedReads[action]?.push(path)
-    return Promise.resolve(pageRead(path) ?? new Response('not found', { status: 404 }))
+    return Promise.resolve(pageRead(path, url.searchParams.get('before')) ?? new Response('not found', { status: 404 }))
   }) as typeof fetch
   return {
     fetch: fetchImpl,
@@ -363,7 +370,7 @@ export const SNAPSHOT_IDLE: EnsoFollowSnapshot = {
   cwd: '/work/project',
   tree: false,
   usage: { cost: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, context: null },
-  messages: [],
+  messageCount: 0,
   openDialogs: [],
 }
 

@@ -80,8 +80,11 @@ export const TOTAL_FUNCTION_COVERAGE_FLOOR = 0.89
  *
  * Re-measured 2026-09-30 (#552's project folders, #557's one envelope decoder, #551's snapshot
  * store and thread trees — 209 owned sources): the 80% bound asks for 167, and ~10% under gives 188.
+ *
+ * Re-measured 2026-10-09 (#739's session-file index, transcript selection and window, day-file
+ * fold — 239 owned sources): the 80% bound asks for 191, and ~10% under gives 215.
  */
-export const MINIMUM_REPORTED_FILES = 188
+export const MINIMUM_REPORTED_FILES = 215
 
 const LCOV_PATH = join(findRepoRoot(import.meta.url), 'coverage', 'lcov.info')
 

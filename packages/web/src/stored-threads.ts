@@ -41,16 +41,24 @@ async function fetchStoredThreadList(): Promise<unknown> {
   return response.json()
 }
 
+/** `…/history`, or with `before` the page before that message (#739) — the one spelling of the route's address. */
+export function threadHistoryUrl(threadId: string, before?: string): string {
+  const page = before === undefined ? '' : `?before=${encodeURIComponent(before)}`
+  return `/api/threads/${encodeURIComponent(threadId)}/history${page}`
+}
+
 /**
- * A stored thread's history, for `adoptThread`. `undefined` when the server holds nothing under the
- * id — its 404, an id nobody has used yet (#378); any other non-2xx throws with the status in the
- * message, a 403 naming where a thread outside the projects is stored among them.
+ * A stored thread's history, for `adoptThread` — its last page, or with `before` the page before
+ * that message (#739). `undefined` when the server holds nothing under the id — its 404, an id
+ * nobody has used yet (#378); any other non-2xx throws with the status in the message, a 403
+ * naming where a thread outside the projects is stored among them.
  */
 export async function fetchThreadHistory(
   threadId: string,
   fetchImpl: (input: string) => Promise<Response> = fetch,
+  before?: string,
 ): Promise<EnsoThreadHistory | undefined> {
-  const response = await fetchImpl(`/api/threads/${encodeURIComponent(threadId)}/history`)
+  const response = await fetchImpl(threadHistoryUrl(threadId, before))
   if (response.status === 404) return undefined
   if (!response.ok) throw new Error(await describeFailedResponse(response))
   const payload: unknown = await response.json()
