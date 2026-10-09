@@ -95,11 +95,8 @@ HTML whose every internal link 404s with nothing failing — so it is derived ra
 down, and `test/site-gate.test.ts` holds that.
 
 The local pre-commit hook (`.githooks/pre-commit`) and the blocking CI job
-(`.github/workflows/ci.yml`) call that same script. The hook runs it over the snapshot being
-committed, not over the working tree: the unstaged remainder is stashed for the duration and
-restored afterwards, so a partial commit (`git add -p`) is gated on what CI will see (#259). The
-two exceptions are `git commit -a` and `git commit -- <path>`, where git hands the hook a
-temporary index; there it gates the working tree and says so on the first line of its output.
+(`.github/workflows/ci.yml`) call that same script. The hook runs it over the working tree as it is
+(#807): commit with no code in the tree you do not mean to commit, and CI gates the PR head either way.
 CI adds independent jobs — secret scan, automated review — but none replaces the
 twelve-step gate (react-doctor was one of them until #342 promoted it into the gate, the duplication
 ratchet until #593, and the advisory `fallow audit` job until #594 replaced it with the new-code gate). A green editor or a
