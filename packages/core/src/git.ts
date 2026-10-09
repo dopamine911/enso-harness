@@ -605,9 +605,12 @@ async function readUntracked(runGit: GitRunner, root: string, path: string): Pro
 /**
  * How many untracked files are diffed at once (#463). One git process per file, one after another,
  * cost about 1.5 ms each: 757 ms for 500 files, on every refresh of an open Changes view. Bounded,
- * so a tree of 500 new files never starts 500 processes.
+ * so a tree of 500 new files never starts 500 processes. Exported for the test that orders the
+ * answers against this limit.
+ *
+ * @group Git
  */
-const UNTRACKED_DIFF_CONCURRENCY = 8
+export const UNTRACKED_DIFF_CONCURRENCY = 8
 
 /** `map` over `inputs`, at most `limit` at a time, the results in the inputs' order. */
 async function mappedConcurrently<Input, Output>(

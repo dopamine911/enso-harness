@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, symlinkSync, unlinkSync, writeFileS
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { Check } from 'typebox/value'
-import { type GitRunner, readGitChanges, readGitState, runGitIn } from '../git.ts'
+import { type GitRunner, readGitChanges, readGitState, runGitIn, UNTRACKED_DIFF_CONCURRENCY } from '../git.ts'
 import { EnsoGitFileChange, EnsoGitState } from '../index.ts'
 import { findRepoRoot } from '../paths.ts'
 
@@ -371,13 +371,14 @@ test('⚠ untracked files read concurrently: a git that answers in reverse order
   }
   const repositoryState = await repositoryAt(directory)
   // A git whose answers come back highest file first: each finished diff is held until all the
-  // reader's concurrent slots (8, `UNTRACKED_DIFF_CONCURRENCY` in git.ts) are waiting, or every
-  // file still owed is, then the highest-numbered is let go. No clock: the order is constructed.
+  // reader's concurrent slots (`UNTRACKED_DIFF_CONCURRENCY`) are waiting, or every file still owed
+  // is, then the highest-numbered is let go. No clock: the order is constructed. The limit is the
+  // reader's own, so the schedule follows it if it changes (PR #785 review).
   const files = 30
   const held: { fileNumber: number; release: () => void }[] = []
   let released = 0
   const releaseHighest = (): void => {
-    if (held.length === 0 || held.length < Math.min(8, files - released)) return
+    if (held.length === 0 || held.length < Math.min(UNTRACKED_DIFF_CONCURRENCY, files - released)) return
     held.sort((left, right) => right.fileNumber - left.fileNumber)
     released += 1
     held.shift()?.release()
