@@ -83,8 +83,11 @@ export const TOTAL_FUNCTION_COVERAGE_FLOOR = 0.89
  *
  * Re-measured 2026-10-09 (#739's session-file index, transcript selection and window, day-file
  * fold — 239 owned sources): the 80% bound asks for 191, and ~10% under gives 215.
+ *
+ * Re-measured for #810 (the server's route groups, on top of #801's host modules — 272 owned
+ * sources): the 80% bound asks for 217, and ~10% under gives 245.
  */
-export const MINIMUM_REPORTED_FILES = 215
+export const MINIMUM_REPORTED_FILES = 245
 
 const LCOV_PATH = join(findRepoRoot(import.meta.url), 'coverage', 'lcov.info')
 

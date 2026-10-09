@@ -325,7 +325,7 @@ the run that acquired the thread. `server/follow.ts` calls `prompt`, `continueRu
 `resolveIncident` (#466), `listCommands`, `answerDialog`, `openDialogs`, `permissionModeState` from the
 unary routes; the abort route goes through the registry, whose `abort` is the one caller of `clearQueue`
 and `abort`.
-`server/index.ts` reads `permissionModeState` for the thread routes. The browser never sees it: what it
+`server/literal-routes.ts` reads `permissionModeState` for the thread routes. The browser never sees it: what it
 gets is observations on the follow.
 
 **Proven implementable a second time, once.** The fake is the second implementation this seam has

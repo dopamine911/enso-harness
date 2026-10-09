@@ -548,9 +548,9 @@ a parent whose file is gone names none. Outside a runtime pi's `session_before_f
 fire (no loaded extension handles it). The host is tested against the real session manager in
 `host/__tests__/agent-host.test.ts`.
 
-**Consumed by the server.** `packages/web/src/server/index.ts` owns the read routes:
-`GET /api/stored-threads` → `respondWithStoredThreads` maps each `StoredThread` to a `EnsoStoredThread`,
-marking `busy` by peeking the registry and carrying a fork's `parentThreadId`; `POST …/fork` asks
+**Consumed by the server.** The server's route groups own the read routes (#810):
+`GET /api/stored-threads` → `respondWithStoredThreads` (`server/literal-routes.ts`) maps each `StoredThread` to a `EnsoStoredThread`,
+marking `busy` by peeking the registry and carrying a fork's `parentThreadId`; `POST …/fork` (`server/thread-control-routes.ts`) asks
 `host.forkThread` (409 while a run holds the source); `GET /api/threads` summarises each live thread from `inspect()`.
 `packages/web/src/server/thread-registry.ts` is the only builder (it is handed `host.createSession`),
 and its `inspectThread` is the one place a `EnsoThreadInspection` is assembled, so the thread route and

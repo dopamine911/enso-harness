@@ -473,7 +473,7 @@ need none: an upstream re-port is the second implementation, and the gate is wha
 `Type.Array(Type.Unknown())` on purpose — core must not own the client's transport shape — and both
 carry the client's `UIMessage`s. They are built by `transcriptToMessages` in
 `server/transcript-to-messages.ts`, the read-side twin of `to-agui.ts`, which imports `MessagePart`
-and `UIMessage` from `@tanstack/ai-client` on its first line; the history route (`server/index.ts`)
+and `UIMessage` from `@tanstack/ai-client` on its first line; the history route (`server/thread-read-routes.ts`)
 and the follow's opening snapshot (`server/follow.ts`) each call it and put the result on the wire.
 `Unknown` here is a deliberate hole, not an absence: the shape crosses with nothing to diff, so a
 partially-deployed change to it raises no schema error on either side. Of the two, only the history
@@ -520,7 +520,7 @@ says so: *a renderer that stops speaking AG-UI deletes it and the adapter*), the
 written against the client's `ChatUIHost`), plus the message-shape crossing, which is seven sites and
 not three: `ThreadStores.history` and `reviveHistoryMessages` in the browser,
 `server/transcript-to-messages.ts` as the producer, its two callers in `server/follow.ts` (the follow
-snapshot) and `server/index.ts` (the history route), and the two schema fields that carry the result,
+snapshot) and `server/thread-read-routes.ts` (the history route), and the two schema fields that carry the result,
 `core/src/follow.ts#EnsoFollowSnapshot` and `core/src/thread-inspection.ts#EnsoThreadHistory`.
 The per-thread stores, the router's dispatch, and the fixture path are shaped by the thread, not the
 client, and survive.

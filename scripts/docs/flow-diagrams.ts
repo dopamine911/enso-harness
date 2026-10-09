@@ -196,7 +196,7 @@ function generate(): string {
     '<!-- generated: scripts/docs/flow-diagrams.ts -->',
     '# Generated flows',
     '',
-    'Every node below is read out of the source the flow runs through — the route table in `packages/web/src/server/index.ts` and the `EnsoObservation` union in `packages/core/src/observation.ts`. Nothing here is drawn by hand, so a route or a kind that moves changes this page or fails the docs gate.',
+    'Every node below is read out of the source the flow runs through — the route groups under `packages/web/src/server/` that `routes.ts` reads and the `EnsoObservation` union in `packages/core/src/observation.ts`. Nothing here is drawn by hand, so a route or a kind that moves changes this page or fails the docs gate.',
     '',
     '## Control plane',
     '',
