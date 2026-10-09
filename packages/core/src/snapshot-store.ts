@@ -55,10 +55,11 @@
  * record as `snapshot: null`.
  *
  * ⚠ MATERIALIZING WRITES THE TREE, NEVER ITS `.git` (#551 slice 2). {@link materializeSnapshot}
- * makes a tree's files exactly a snapshot's — the store's index, `checkout-index`, then each file
- * the tree held under the same listing that the snapshot lacks, removed — still through the
- * store's own variables. Ignored files are never touched: they are the tree's own (`.env`, build
- * output), and no snapshot ever held them.
+ * makes a tree's files exactly a snapshot's — the store's index, the tree's skip-worktree paths
+ * marked again (#570: a sparse checkout stays sparse), `checkout-index`, then each file the tree
+ * held under the same listing that the snapshot lacks, removed — still through the store's own
+ * variables. Ignored files are never touched: they are the tree's own (`.env`, build output), and
+ * no snapshot ever held them.
  *
  * ⚠ node-only (`node:child_process`, `node:fs`): a subpath, `@enso/core/snapshot-store`, never the barrel.
  *
