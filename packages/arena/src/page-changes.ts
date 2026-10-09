@@ -43,7 +43,11 @@ export const PAGE_CHANGES_SCRIPT = `(() => {
     characterDataOldValue: true,
   })
   const documentMark = performance.timeOrigin + ':'
+  // ⚠ CONFIGURABLE: the initial about:blank's window is reused by the same-origin document that
+  // replaces it, so the script runs twice on one window. A fixed property threw "Cannot redefine
+  // property" into the application's page, where the score read it as the application's error.
   Object.defineProperty(window, ${JSON.stringify(PAGE_CHANGES_MARK)}, {
+    configurable: true,
     get: () => {
       count(observer.takeRecords())
       return documentMark + changes
