@@ -41,7 +41,12 @@ function paced(run: () => void, intervalMs: number): PacedRefresh {
       if (windowEnd === undefined) open()
       else held = true
     },
-    cancel: () => clearTimeout(windowEnd),
+    // A cancelled pacer starts clean: nothing held, no window open (PR #787 review).
+    cancel: () => {
+      clearTimeout(windowEnd)
+      windowEnd = undefined
+      held = false
+    },
   }
 }
 

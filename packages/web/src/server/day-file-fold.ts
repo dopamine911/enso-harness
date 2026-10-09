@@ -82,6 +82,9 @@ export function followDayFile(file: string, day: string, threadId?: string): () 
     offset = 0
   }
   const take = (raw: string): void => {
+    // ⚠ Thread-scoped, a line is tested for the id's TEXT before it is parsed, as `threadLines`
+    // always has (most lines are never parsed). So a malformed line counts toward a thread's
+    // `malformed` only if it carries the id: one too broken to name its thread is the day's alone.
     if (threadId !== undefined && !raw.includes(threadId)) return
     const parsed = parseEnsoLogLine(raw)
     if (typeof parsed === 'string') fold.addMalformed()
