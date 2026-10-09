@@ -71,7 +71,7 @@ packages installed again.
 
 **Perception (#680): `--perception tree` (the default) or `visual`.** How the agent under test sees
 and acts on the page:
-- **`tree`** reads the page's accessibility tree (`read`) and acts on controls by name (role and
+- **`tree`** reads the page's accessibility tree (`read`, a region at a time: below) and acts on controls by name (role and
   accessible name, text, label, placeholder). A screen-reader user who also has a list of every
   control. It finds broken flows, errors, wrong state, and unnamed or ambiguous controls well. It
   can't judge what a sighted user sees, and it finds controls a sighted user might not notice.
@@ -94,6 +94,27 @@ Up to that, all go; past it, the oldest are dropped a whole step at a time, each
 saying one was there, so a call then carries 4 to 7. In steps, so the request's start stays the same for several calls and the provider's prompt
 cache holds (PR #725 review). Before, every screenshot stayed, and an Opus tree run that took 68 (about 41 MB in
 base64) died at 43 minutes when the API refused the request (413 `request_too_large`).
+
+**`read` takes one region of the page, and after the first read only what changed (#740; `src/read-regions.ts`).**
+Every read used to be the whole page: in Opus's snake run 16 reads were 313 KB, about 80% of the text sent
+back to the model, and the second half of the run cost 1.9× the first. Now:
+- **`"region"`** is one of `transcript` (the thread view, whichever tab is selected, plus the composer), `dialog`,
+  `threads` (the rail), `status` (the status bar), `header`, or `page` (everything). Each is found by role and
+  accessible name, never by a class: `banner`, `navigation "threads"`, `contentinfo "thread status"`, any
+  `dialog`/`alertdialog`. `transcript` is whatever is left, and exists only when a `tabpanel` is there. Without a region
+  a read takes the open dialog, else `transcript`, else `page` (another site's tab). Every answer names its `region`
+  and lists the `regions` on the page. A region that isn't there is refused, with the list.
+- **The first read of a region is whole (`snapshot`). Later reads say what changed since the previous read of that
+  region (`against`):** `changes` holds the added (`+`) and removed (`-`) lines, each under the unchanged lines it is
+  indented under, or `unchanged: true`. A navigation, a reload or a tab switch makes every region whole again, and so
+  does `"full": true`. A region also reads whole when its changes since its last whole read would be longer than
+  the region itself, or when the change is too big to compare.
+- **The agent's model call keeps a region's reads from its newest whole read on (`withCurrentReads` in
+  `src/agent.ts`).** Older ones are replaced in the request by a line saying a later read has the region whole.
+  This works the way #724 replaces screenshots: it shapes each request and leaves the conversation alone. A diff
+  needs the read it is against, so a diff and its chain stay until the next whole read, and the chain is short
+  because the length rule above forces one. Another region's reads are never touched. A `--manual` operator keeps
+  their own context: if it loses an earlier read, `"full": true` gets the region whole.
 
 Run each scenario in both modes and put the two side by side with `arena compare`, which shows each
 run's perception and agent: they find different things.

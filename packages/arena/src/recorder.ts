@@ -41,6 +41,7 @@ import { collectEnsoEvidence, threadIdsShown } from './evidence.ts'
 import { type ArenaEvidence, foldArenaManifest } from './manifest.ts'
 import { createPageLook, PAGE_CHANGES_SCRIPT, readPageMark } from './page-changes.ts'
 import { isRunning, stopProcessTree } from './process-tree.ts'
+import { createRegionReads } from './read-regions.ts'
 import { ARENA_GRACE_MS, type ArenaBounds, createRunControl, ensoSpendUsd } from './run-control.ts'
 import { arenaSecretSource, arenaSecretValues, runHomeOf } from './run-home.ts'
 import { ensoBuildOf, sampleWorkspaces, threadHistoriesIn } from './run-state.ts'
@@ -667,10 +668,16 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
   const tabs = new Map<number, Page>([[0, firstPage]])
   let nextTab = 1
   let front = 0
+  /**
+   * The page in front, counted (#740): it moves on each navigation of the tab in front and each change
+   * of the tab in front, and a `read` after it has every region whole — what it diffed against is gone.
+   */
+  let pageVisit = 0
   const inFront = (): Page => tabs.get(front) ?? firstPage
   const bringToFront = (tabNumber: number): Promise<void> => {
     const tabPage = tabs.get(tabNumber)
     if (tabPage === undefined) return Promise.resolve()
+    if (tabNumber !== front) pageVisit += 1
     front = tabNumber
     show(tabPage)
     return tabPage.bringToFront().catch(() => undefined)
@@ -778,6 +785,7 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
     })
     tabPage.on('framenavigated', (frame) => {
       if (frame !== tabPage.mainFrame()) return
+      if (tabNumber === front) pageVisit += 1
       timeline.record({ kind: 'navigation' }, there())
       shootIfInFront('navigation')
     })
@@ -1113,17 +1121,22 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
     else await control.press(action.key, { timeout })
     return here()
   }
-  /** `read`: the tab in front as its accessibility tree — or the native dialog over it, which blocks the snapshot. */
-  const performRead = async (): Promise<unknown> => {
+  /** What the agent has read of each region of the page in front (#740): a later read answers with what changed. */
+  const regionReads = createRegionReads()
+  /**
+   * `read`: a region of the tab in front as its accessibility tree, or what changed in it since its
+   * last read (#740) — or the native dialog over the tab, which blocks the snapshot.
+   */
+  const performRead = async (action: Extract<ArenaAction, { readonly action: 'read' }>): Promise<unknown> => {
     const dialog = frontDialog()
     if (dialog !== undefined) {
       lastSeen.saw(await pageNow())
       return { ...here(), dialog: { type: dialog.type(), message: redact(dialog.message()) } }
     }
-    // One snapshot (PR #646 review): the page the agent reads is the wait's baseline too.
+    // One snapshot (PR #646 review): the whole page is the wait's baseline, and the region is read out of it.
     const snapshot = await inFront().locator('body').ariaSnapshot({ timeout: ACTION_TIMEOUT_MS })
     lastSeen.saw(pageForChange(snapshot))
-    return { ...here(), page: snapshot }
+    return { ...here(), ...regionReads.read(snapshot, action, pageVisit) }
   }
   /**
    * `wait`: a fixed sleep; a wait on the page until it changes (#637), looked for when the page's
@@ -1191,7 +1204,7 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
       case 'press':
         return performOnControl(action)
       case 'read':
-        return performRead()
+        return performRead(action)
       case 'screenshot':
         return { ...here(), screenshot: await shoot('requested') }
       case 'wait':

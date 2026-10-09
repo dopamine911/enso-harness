@@ -9,6 +9,7 @@ import {
   fauxText,
   fauxToolCall,
 } from '@earendil-works/pi-ai/providers/faux'
+import { parseArenaAction } from '../actions.ts'
 import {
   ARENA_IMAGE_STEP,
   arenaAgentDriver,
@@ -16,7 +17,9 @@ import {
   arenaUiTool,
   DROPPED_IMAGE_TEXT,
   parseModelReference,
+  supersededReadText,
 } from '../agent.ts'
+import { createRegionReads, readMarkOf } from '../read-regions.ts'
 import { type ArenaActOutcome, type ArenaDriverSession, awaitDriverEnd } from '../recorder.ts'
 import type { ArenaEventBody } from '../timeline.ts'
 
@@ -229,6 +232,83 @@ test('⚠ a model call carries at most twice the step of screenshots, the oldest
     span(2 * step + 1, 3 * step),
     span(2 * step + 1, 3 * step + 1),
   ])
+})
+
+/** Enso's page as a read sees it (#740): the rail, and the thread view saying `said`. */
+const ensoPage = (said: string): string =>
+  [
+    '- navigation "threads":',
+    '  - button "New Thread"',
+    '- tabpanel "Chat":',
+    '  - log:',
+    ...Array.from({ length: 8 }, (_, turn) => `    - paragraph: earlier reply ${turn + 1} about the game`),
+    `    - paragraph: ${said}`,
+    '- textbox "ask pi something"',
+  ].join('\n')
+
+// ⚠ #740: every read stayed in the conversation — Opus's 16 were 313 KB, most of what each call
+// re-sent. A newer whole read of a region replaces the older ones; but a diff is useless without
+// the read it is against, so a region's reads since its last whole one all stay.
+test('⚠ a model call carries a region’s reads from its newest whole one on: older ones are said, another region’s stay, and a diff’s base is always there (#740)', async () => {
+  const steps: { readonly request: Parameters<typeof fauxToolCall>[1]; readonly page: string }[] = [
+    { request: { action: 'read' }, page: ensoPage('working') },
+    { request: { action: 'read' }, page: ensoPage('done') },
+    { request: { action: 'read', region: 'threads' }, page: ensoPage('done') },
+    { request: { action: 'read', full: true }, page: ensoPage('done') },
+    { request: { action: 'read' }, page: ensoPage('done') },
+  ]
+  // Each call's read results: `read N` when sent, the line it was replaced by when not.
+  const calls: string[][] = []
+  // Each call's diffs whose base was not sent with them.
+  const baseless: number[][] = []
+  const recording =
+    (next: FauxResponseStep): FauxResponseStep =>
+    (context, options, state, model) => {
+      const texts = context.messages.flatMap((message) =>
+        message.role === 'toolResult' && message.content[0]?.type === 'text' ? [message.content[0].text] : [],
+      )
+      const marks = texts.map((text) =>
+        text.startsWith('[') ? undefined : readMarkOf((JSON.parse(text) as ArenaActOutcome).result),
+      )
+      const sent = new Set(marks.flatMap((mark) => (mark === undefined ? [] : [mark.read])))
+      calls.push(texts.map((text, index) => (marks[index] === undefined ? text : `read ${marks[index]?.read}`)))
+      baseless.push(marks.flatMap((mark) => (mark?.against === undefined || sent.has(mark.against) ? [] : [mark.read])))
+      return typeof next === 'function' ? next(context, options, state, model) : next
+    }
+  const core = scripted([
+    ...steps.map(({ request }) => recording(toolUse('act', request))),
+    recording(toolUse('act', { action: 'stop', reason: 'done' })),
+  ])
+  // The recorder's reads over each step's page, asked what the agent's call asked.
+  const reads = createRegionReads()
+  let taken = 0
+  const session = fakeSession((request) => {
+    const step = steps[taken++]
+    const parsed = parseArenaAction(request)
+    if (step === undefined || !parsed.ok || parsed.action.action !== 'read') return { ok: true, result: {} }
+    return { ok: true, result: reads.read(step.page, parsed.action, 0) }
+  })
+  const agentRun = arenaAgentDriver({
+    model: core.getModel(),
+    streamFn: core.streamSimple,
+    thinking: 'off',
+    brief: 'b',
+    secretValues: [],
+  })
+  expect(await agentRun(session)).toBe('it stopped the run')
+
+  const replaced = (read: number): string => supersededReadText({ read, region: 'transcript' }, 4)
+  expect(calls).toEqual([
+    [],
+    ['read 1'],
+    // Read 2 is a diff against read 1: both go.
+    ['read 1', 'read 2'],
+    ['read 1', 'read 2', 'read 3'],
+    // Read 4 has the thread view whole: the chain before it is said, the rail's read stays.
+    [replaced(1), replaced(2), 'read 3', 'read 4'],
+    [replaced(1), replaced(2), 'read 3', 'read 4', 'read 5'],
+  ])
+  expect(baseless).toEqual(calls.map(() => []))
 })
 
 // ⚠ #680: a visual agent knows the page only by the view each answer carries. A failed action is

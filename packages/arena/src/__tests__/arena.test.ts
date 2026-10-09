@@ -94,6 +94,9 @@ test('every action reads back as one line, and a malformed one says what it take
     { action: 'scroll', x: 512, y: 400, dy: 600 },
     { action: 'drag', x: 100, y: 200, toX: 300, toY: 200 },
     { action: 'type', text: 'hello' },
+    { action: 'read' },
+    { action: 'read', region: 'threads' },
+    { action: 'read', region: 'transcript', full: true },
   ].map((request) => {
     const parsed = parseArenaAction(request)
     if (!parsed.ok) throw new Error(parsed.error)
@@ -122,6 +125,9 @@ test('every action reads back as one line, and a malformed one says what it take
     'scroll 0,600 at 512,400',
     'drag 100,200 to 300,200',
     'type "hello"',
+    'read',
+    'read threads',
+    'read transcript, full',
   ])
   for (const malformed of [
     { action: 'fill', target: { label: 'x' } },
@@ -140,6 +146,9 @@ test('every action reads back as one line, and a malformed one says what it take
     { action: 'scroll', x: 10, y: 10 },
     { action: 'drag', x: 10, y: 10, toX: 20 },
     { action: 'type', text: '' },
+    { action: 'read', region: '' },
+    { action: 'read', region: 3 },
+    { action: 'read', full: 'yes' },
   ]) {
     expect(parseArenaAction(malformed)).toMatchObject({ ok: false })
   }

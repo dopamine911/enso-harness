@@ -1,5 +1,6 @@
 import { type Static, type TNumber, type TOptional, Type } from 'typebox'
 import { ARENA_VIEW, POINT_FIELDS } from './actions.ts'
+import { ARENA_READ_REGIONS } from './read-regions.ts'
 
 /**
  * Dogfood Arena's agent tool (#556, #584): the parameters of `act`, the ONE tool the agent under
@@ -54,6 +55,14 @@ export const ArenaActToolParameters = Type.Object({
   target: Type.Optional(ArenaTargetParameters),
   text: Type.Optional(Type.String({ description: 'fill: what to type; accept-dialog: a prompt dialog’s answer' })),
   option: Type.Optional(Type.String({ description: 'select: the option' })),
+  region: Type.Optional(
+    Type.String({
+      description: `read: ${Object.keys(ARENA_READ_REGIONS).join(' | ')}; by default the open dialog, else transcript`,
+    }),
+  ),
+  full: Type.Optional(
+    Type.Boolean({ description: 'read: true for the region whole, not what changed since your last read of it' }),
+  ),
   ...SHARED_FIELDS,
 })
 /** @group Dogfood Arena */
