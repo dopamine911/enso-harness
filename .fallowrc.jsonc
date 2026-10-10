@@ -207,12 +207,15 @@
   //     `bun run complexity:baseline` to drop it. A re-save that ADDS an entry is an exception,
   //     reviewed as one.
   //
-  // Both gate cognitive only (`--max-cyclomatic` is lifted). CRAP is OFF, not raised: it is
-  // cyclomatic × (1 − coverage)³, and fallow can only ESTIMATE coverage here — Bun's LCOV has no
-  // function spans (0 `FN:` records, re-measured on #591), so every score is `coverage_source:
-  // estimated`, read from export references a request listener or a generator's `generate()`
-  // never has. Every complexity finding the old advisory audit raised on #180, #181 and #182 was
-  // `exceeded: crap` on a function the suite drives.
+  // Both gate cognitive only (`--max-cyclomatic` is lifted). CRAP (cyclomatic² × (1 − coverage)³ +
+  // cyclomatic) stays OFF here (`maxCrap: 0`) and is a warning step of its own, `crap` (#826): Bun's
+  // LCOV has no function spans, so these two steps could only score fallow's ESTIMATE, which flagged
+  // functions the suite drives (#180, #181, #182); and CRAP on in this config turns the baselined
+  // function's finding into `cognitive_crap`, which fails the new-complexity step. The `crap` step
+  // runs after `test`, converts the LCOV with `scripts/coverage-istanbul.ts`, and lists the worst
+  // functions from MEASURED coverage with `--report-only`. ⚠ fallow reads
+  // `coverage/coverage-final.json` by itself when it exists, so a hand-run `--max-crap` scores from
+  // the last map written.
   //
   // `thresholdOverrides` are the exceptions to the gate's ceiling, pinned per FUNCTION at the
   // exact score it measures today, so the rule still fails the moment that function grows. A

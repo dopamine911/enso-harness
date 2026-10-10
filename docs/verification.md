@@ -7,8 +7,8 @@ how to use it. It does not repeat the inventory.
 
 ## One definition of green
 
-`bun run check` (the same script as `check:all`) runs `scripts/gate.ts`. Twelve gates, in order, stopping
-at the first failure:
+`bun run check` (the same script as `check:all`) runs `scripts/gate.ts`. Thirteen gates, in order, stopping
+at the first failure (the last only warns):
 
 1. **Format** — `oxfmt --check`: formatting, import order and Tailwind class order, check-only.
 2. **Lint** — `oxlint` with `oxlint.config.ts`, type-aware (`oxlint-tsgolint`). It carries the
@@ -78,6 +78,12 @@ at the first failure:
    dead internal links (#188). **The build is not the check.** `astro build` reported success over 139
    dead links on the first run, because a page's `./routes.md` and `../../packages/…#L47` are both
    correct on GitHub and both 404 as routes; `scripts/docs/site-links.ts` is what notices.
+13. **CRAP** — warnings, never a failure (#826). After `test`, `scripts/coverage-istanbul.ts` converts
+   the LCOV it wrote into Istanbul, and fallow lists the ten worst functions at CRAP ≥ 30 (cyclomatic² ×
+   (1 − coverage)³ + cyclomatic) from measured coverage, with the total. It is a step of its own rather
+   than `health.maxCrap` in `.fallowrc.jsonc`: CRAP on in the config changes the key of the function
+   `complexity-baseline.json` holds and fails the new-complexity gate, and only a step after `test`
+   scores from measured coverage, on CI and laptops alike.
 
 The API reference is part of the site rather than a second site behind a link: `starlight-typedoc`
 generates one markdown page per entry point into the Starlight content tree, so the contracts carry
@@ -98,7 +104,7 @@ The local pre-commit hook (`.githooks/pre-commit`) and the blocking CI job
 (`.github/workflows/ci.yml`) call that same script. The hook runs it over the working tree as it is
 (#807): commit with no code in the tree you do not mean to commit, and CI gates the PR head either way.
 CI adds independent jobs — secret scan, automated review — but none replaces the
-twelve-step gate (react-doctor was one of them until #342 promoted it into the gate, the duplication
+thirteen-step gate (react-doctor was one of them until #342 promoted it into the gate, the duplication
 ratchet until #593, and the advisory `fallow audit` job until #594 replaced it with the new-code gate). A green editor or a
 single test is not repository green.
 
