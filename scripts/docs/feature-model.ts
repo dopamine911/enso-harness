@@ -112,88 +112,91 @@ function firstPromptOf(messages: readonly unknown[]): string {
 }
 
 /**
- * Starts the model on `port`, answering each thread from its script (`opening`); returns a
- * stopper. `log` receives one line per request.
+ * The model's answer to each request, from its thread's script (`opening`); `log` receives one
+ * line per request. Apart from the server so its routing is driven over `Request`s, no port (#832).
  */
-export function startFeatureModel(port: number, scripts: readonly FeatureModelScript[], log: string): () => void {
+export function featureModelHandler(
+  scripts: readonly FeatureModelScript[],
+  log: string,
+): (request: Request) => Promise<Response> {
   const fallback = scripts.find((script) => script.opening === undefined)
   if (fallback === undefined) throw new Error('feature model: one script must answer the threads no opening names')
   const nextReply = new Map<string, number>()
   const promptsByModel = new Map<string, string[]>()
-  const server = Bun.serve({
-    hostname: '127.0.0.1',
-    port,
-    async fetch(request) {
-      const url = new URL(request.url)
-      if (request.method !== 'POST' || !url.pathname.endsWith('/messages')) {
-        appendFileSync(log, `unhandled ${request.method} ${url.pathname}\n`)
-        return new Response('not found', { status: 404 })
-      }
-      const body = (await request.json()) as MessagesRequest
-      const firstPrompt = firstPromptOf(body.messages)
-      const script =
-        scripts.find((each) => each.opening !== undefined && firstPrompt.includes(each.opening)) ?? fallback
-      const next = nextReply.get(script.name) ?? 0
-      const auxiliary = (body.tools ?? []).length === 0
-      const parts: readonly ScriptedPart[] | undefined = auxiliary
-        ? [{ kind: 'text', text: script.summary }]
-        : script.replies[next]
-      appendFileSync(log, `${auxiliary ? 'auxiliary' : `reply ${next}`} · ${script.name} · ${body.model}\n`)
-      if (parts === undefined) {
-        return Response.json(
-          {
-            type: 'error',
-            error: {
-              type: 'invalid_request_error',
-              message: `feature model: no reply ${next} scripted for ${script.name}`,
-            },
+  return async function answer(request: Request): Promise<Response> {
+    const url = new URL(request.url)
+    if (request.method !== 'POST' || !url.pathname.endsWith('/messages')) {
+      appendFileSync(log, `unhandled ${request.method} ${url.pathname}\n`)
+      return new Response('not found', { status: 404 })
+    }
+    const body = (await request.json()) as MessagesRequest
+    const firstPrompt = firstPromptOf(body.messages)
+    const script = scripts.find((each) => each.opening !== undefined && firstPrompt.includes(each.opening)) ?? fallback
+    const next = nextReply.get(script.name) ?? 0
+    const auxiliary = (body.tools ?? []).length === 0
+    const parts: readonly ScriptedPart[] | undefined = auxiliary
+      ? [{ kind: 'text', text: script.summary }]
+      : script.replies[next]
+    appendFileSync(log, `${auxiliary ? 'auxiliary' : `reply ${next}`} · ${script.name} · ${body.model}\n`)
+    if (parts === undefined) {
+      return Response.json(
+        {
+          type: 'error',
+          error: {
+            type: 'invalid_request_error',
+            message: `feature model: no reply ${next} scripted for ${script.name}`,
           },
-          { status: 400 },
-        )
-      }
-      const replyIndex = next
-      if (!auxiliary) nextReply.set(script.name, next + 1)
+        },
+        { status: 400 },
+      )
+    }
+    const replyIndex = next
+    if (!auxiliary) nextReply.set(script.name, next + 1)
 
-      // The provider's count: the whole prompt, the part a previous request to this model cached.
-      const prompt = JSON.stringify({ system: body.system, tools: body.tools, messages: body.messages })
-      const earlier = promptsByModel.get(body.model) ?? []
-      promptsByModel.set(body.model, [...earlier, prompt])
-      const total = tokensOf(prompt.length)
-      const cached = Math.max(0, ...earlier.map((previous) => sharedPrefix(previous, prompt)))
-      const cacheRead = tokensOf(cached)
-      const input = Math.min(6, total - cacheRead)
-      const cacheWrite = total - cacheRead - input
-      const output = tokensOf(JSON.stringify(parts).length)
-      const usesTool = parts.some((part) => part.kind === 'tool')
+    // The provider's count: the whole prompt, the part a previous request to this model cached.
+    const prompt = JSON.stringify({ system: body.system, tools: body.tools, messages: body.messages })
+    const earlier = promptsByModel.get(body.model) ?? []
+    promptsByModel.set(body.model, [...earlier, prompt])
+    const total = tokensOf(prompt.length)
+    const cached = Math.max(0, ...earlier.map((previous) => sharedPrefix(previous, prompt)))
+    const cacheRead = tokensOf(cached)
+    const input = Math.min(6, total - cacheRead)
+    const cacheWrite = total - cacheRead - input
+    const output = tokensOf(JSON.stringify(parts).length)
+    const usesTool = parts.some((part) => part.kind === 'tool')
 
-      const stream = [
-        event('message_start', {
-          message: {
-            id: `msg_${script.name}_${replyIndex}`,
-            type: 'message',
-            role: 'assistant',
-            model: body.model,
-            content: [],
-            stop_reason: null,
-            stop_sequence: null,
-            usage: {
-              input_tokens: input,
-              cache_creation_input_tokens: cacheWrite,
-              cache_read_input_tokens: cacheRead,
-              output_tokens: 1,
-            },
+    const stream = [
+      event('message_start', {
+        message: {
+          id: `msg_${script.name}_${replyIndex}`,
+          type: 'message',
+          role: 'assistant',
+          model: body.model,
+          content: [],
+          stop_reason: null,
+          stop_sequence: null,
+          usage: {
+            input_tokens: input,
+            cache_creation_input_tokens: cacheWrite,
+            cache_read_input_tokens: cacheRead,
+            output_tokens: 1,
           },
-        }),
-        ...parts.flatMap((part, index) => partEvents(part, index, script.name, replyIndex)),
-        event('message_delta', {
-          delta: { stop_reason: usesTool ? 'tool_use' : 'end_turn', stop_sequence: null },
-          usage: { output_tokens: output },
-        }),
-        event('message_stop', {}),
-      ].join('')
-      return new Response(stream, { headers: { 'content-type': 'text/event-stream' } })
-    },
-  })
+        },
+      }),
+      ...parts.flatMap((part, index) => partEvents(part, index, script.name, replyIndex)),
+      event('message_delta', {
+        delta: { stop_reason: usesTool ? 'tool_use' : 'end_turn', stop_sequence: null },
+        usage: { output_tokens: output },
+      }),
+      event('message_stop', {}),
+    ].join('')
+    return new Response(stream, { headers: { 'content-type': 'text/event-stream' } })
+  }
+}
+
+/** Starts the model on `port` (`featureModelHandler`); returns a stopper. */
+export function startFeatureModel(port: number, scripts: readonly FeatureModelScript[], log: string): () => void {
+  const server = Bun.serve({ hostname: '127.0.0.1', port, fetch: featureModelHandler(scripts, log) })
   return () => {
     void server.stop(true)
   }

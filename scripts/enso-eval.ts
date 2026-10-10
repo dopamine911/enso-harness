@@ -28,6 +28,7 @@ import {
   readEnsoSessionEval,
   runningCounters,
 } from '../packages/core/src/index.ts'
+import { type CliOutput, PROCESS_OUTPUT } from './server-cli.ts'
 
 export interface EvalQuery {
   readonly threads: readonly string[]
@@ -237,37 +238,49 @@ async function fetchEval(serverUrl: string, threadId: string): Promise<EnsoSessi
   return payload
 }
 
-async function main(argv: readonly string[]): Promise<void> {
+/** Where a run writes, and the server it reads: the process's own from `main`, a capture in a test. */
+export interface EvalIo extends CliOutput {
+  readonly serverUrl: string
+}
+
+/** The output a query asks for: the payload raw, one row per thread, or the markdown (and a comparison past one). */
+function renderOutput(query: EvalQuery, evaluated: readonly EnsoSessionEval[]): string {
+  if (query.json) return `${JSON.stringify(evaluated.length === 1 ? evaluated[0] : evaluated, null, 2)}\n`
+  if (query.row) return `${evaluated.map(renderRow).join('\n')}\n`
+  const markdown = `${evaluated.map(renderMarkdown).join('\n\n')}\n`
+  return evaluated.length > 1 ? `${markdown}\n${renderComparison(evaluated)}\n` : markdown
+}
+
+/** The command over `io`; its exit code: 2 a usage error, 1 a thread the server could not evaluate, else 0. */
+export async function run(argv: readonly string[], io: EvalIo): Promise<number> {
   let query: EvalQuery
   try {
     query = parseArguments(argv)
   } catch (error) {
     if (!(error instanceof UsageError)) throw error
-    process.stderr.write(`enso-eval: ${error.message}\n\n${USAGE}\n`)
-    process.exit(2)
+    io.stderr(`enso-eval: ${error.message}\n\n${USAGE}\n`)
+    return 2
   }
   if (query.rowHeader) {
-    process.stdout.write(`${renderRowHeader()}\n`)
-    if (query.threads.length === 0) return
+    io.stdout(`${renderRowHeader()}\n`)
+    if (query.threads.length === 0) return 0
   }
-  const serverUrl = process.env.ENSO_SERVER_URL ?? 'http://127.0.0.1:5179'
   let evaluated: EnsoSessionEval[]
   try {
-    evaluated = await Promise.all(query.threads.map((threadId) => fetchEval(serverUrl, threadId)))
+    evaluated = await Promise.all(query.threads.map((threadId) => fetchEval(io.serverUrl, threadId)))
   } catch (error) {
-    process.stderr.write(`enso-eval: ${error instanceof Error ? error.message : String(error)}\n`)
-    process.exit(1)
+    io.stderr(`enso-eval: ${error instanceof Error ? error.message : String(error)}\n`)
+    return 1
   }
-  if (query.json) {
-    process.stdout.write(`${JSON.stringify(evaluated.length === 1 ? evaluated[0] : evaluated, null, 2)}\n`)
-    return
-  }
-  if (query.row) {
-    process.stdout.write(`${evaluated.map(renderRow).join('\n')}\n`)
-    return
-  }
-  process.stdout.write(`${evaluated.map(renderMarkdown).join('\n\n')}\n`)
-  if (evaluated.length > 1) process.stdout.write(`\n${renderComparison(evaluated)}\n`)
+  io.stdout(renderOutput(query, evaluated))
+  return 0
+}
+
+async function main(argv: readonly string[]): Promise<void> {
+  process.exitCode = await run(argv, {
+    ...PROCESS_OUTPUT,
+    serverUrl: process.env.ENSO_SERVER_URL ?? 'http://127.0.0.1:5179',
+  })
 }
 
 if (import.meta.main) await main(process.argv.slice(2))

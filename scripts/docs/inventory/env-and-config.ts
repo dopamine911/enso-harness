@@ -225,7 +225,7 @@ export const ENVIRONMENT_METADATA: readonly EnvironmentMetadata[] = [
     purposeAndDefault: 'Optional file log level and per-category overrides; defaults to `info`.',
     phase: 'boot / load',
   },
-  serverUrlReader('scripts/enso-logs.ts', '`scripts/enso-logs.ts#bundle`', 'bundle retrieval'),
+  serverUrlReader('scripts/enso-logs.ts', '`scripts/enso-logs.ts#main` (for `bundle`)', 'bundle retrieval'),
   serverUrlReader('scripts/enso-eval.ts', '`scripts/enso-eval.ts#main`', 'the session eval'),
   serverUrlReader('scripts/enso-incidents.ts', '`scripts/enso-incidents.ts#main`', 'the incident history'),
   serverUrlReader('scripts/enso-judge.ts', '`scripts/enso-judge.ts#main`', 'the command-judge cases and replay'),

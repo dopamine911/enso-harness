@@ -39,6 +39,7 @@ import {
   logsDirFrom,
   parseEnsoLogLine,
 } from '../packages/core/src/log-process.ts'
+import { type CliOutput, PROCESS_OUTPUT } from './server-cli.ts'
 
 const FOLLOW_POLL_MS = 250
 
@@ -147,28 +148,37 @@ export function matches(query: Query, line: EnsoLogLine, notBefore: number): boo
   return logLineMatches(filter, line)
 }
 
-/** Print every matching line in `text`; a line that is not a record is said, not skipped silently. */
-function print(query: Query, render: (line: EnsoLogLine) => string, text: string, notBefore: number): void {
+/** Where a run writes, what it reads, and whether stdout is a terminal: the process's own from `main`, a capture in a test. */
+export interface LogsIo extends CliOutput {
+  readonly serverUrl: string
+  readonly logsDir: string
+  readonly onTerminal: boolean
+}
+
+/** Every matching line in `text`, rendered; a line that is not a record is said, not skipped silently. */
+function printable(query: Query, render: (line: EnsoLogLine) => string, text: string, notBefore: number): string {
+  let output = ''
   for (const raw of text.split('\n')) {
     if (raw.length === 0) continue
     const parsed = parseEnsoLogLine(raw)
     if (typeof parsed === 'string') {
-      process.stdout.write(`(${parsed}) ${raw}\n`)
+      output += `(${parsed}) ${raw}\n`
       continue
     }
     if (!matches(query, parsed, notBefore)) continue
-    process.stdout.write(query.json ? `${raw}\n` : render(parsed))
+    output += query.json ? `${raw}\n` : render(parsed)
   }
+  return output
 }
 
 /** Poll until the day's file exists — `--follow` started before the first launcher of the day. */
-async function untilExists(file: string): Promise<void> {
+async function untilExists(file: string, io: LogsIo): Promise<void> {
   if (existsSync(file)) return
-  process.stderr.write(`enso-logs: waiting for ${file} …\n`)
+  io.stderr(`enso-logs: waiting for ${file} …\n`)
   while (!existsSync(file)) await new Promise((resolve) => setTimeout(resolve, FOLLOW_POLL_MS))
 }
 
-function follow(query: Query, render: (line: EnsoLogLine) => string, file: string): void {
+function follow(query: Query, render: (line: EnsoLogLine) => string, file: string, io: LogsIo): void {
   // Poll from where the first read ended; one descriptor for the life of the process.
   let offset = statSync(file).size
   const descriptor = openSync(file, 'r')
@@ -180,7 +190,7 @@ function follow(query: Query, render: (line: EnsoLogLine) => string, file: strin
     readSync(descriptor, chunk, 0, chunk.length, offset)
     offset = size
     const lines = decoder.decode(chunk)
-    if (lines.length > 0) print(query, render, lines, 0)
+    if (lines.length > 0) io.stdout(printable(query, render, lines, 0))
   }, FOLLOW_POLL_MS)
 }
 
@@ -190,69 +200,73 @@ function follow(query: Query, render: (line: EnsoLogLine) => string, file: strin
  * file alone is `bun run logs --json`. The browser's ring is NOT here (only a page has it);
  * the drawer's button is the bundle with that appended.
  */
-async function bundle(argv: readonly string[]): Promise<void> {
+async function bundle(argv: readonly string[], io: LogsIo): Promise<number> {
   const query = parseArguments(argv)
-  const serverUrl = process.env.ENSO_SERVER_URL ?? 'http://127.0.0.1:5179'
-  const url = `${serverUrl}/api/logs/bundle${query.thread === undefined ? '' : `?thread=${encodeURIComponent(query.thread)}`}`
+  const url = `${io.serverUrl}/api/logs/bundle${query.thread === undefined ? '' : `?thread=${encodeURIComponent(query.thread)}`}`
   let response: Response
   try {
     response = await fetch(url)
   } catch (error) {
-    process.stderr.write(
-      `enso-logs: no server at ${serverUrl} (${error instanceof Error ? error.message : String(error)}) — a bundle needs the running server for its threads; is \`bun run dev\` up? The file alone is \`bun run logs --json\`.\n`,
+    io.stderr(
+      `enso-logs: no server at ${io.serverUrl} (${error instanceof Error ? error.message : String(error)}) — a bundle needs the running server for its threads; is \`bun run dev\` up? The file alone is \`bun run logs --json\`.\n`,
     )
-    process.exit(1)
+    return 1
   }
   if (!response.ok) {
-    process.stderr.write(`enso-logs: ${url} answered ${response.status}: ${await response.text()}\n`)
-    process.exit(1)
+    io.stderr(`enso-logs: ${url} answered ${response.status}: ${await response.text()}\n`)
+    return 1
   }
-  process.stdout.write(await response.text())
+  io.stdout(await response.text())
+  return 0
 }
 
-async function main(argv: readonly string[]): Promise<void> {
-  if (argv[0] === 'bundle') {
-    await bundle(argv.slice(1))
-    return
-  }
+/** The command over `io`; its exit code: 2 a usage error, 1 nothing to read, else 0 (`--follow` keeps printing after). */
+export async function run(argv: readonly string[], io: LogsIo): Promise<number> {
+  if (argv[0] === 'bundle') return bundle(argv.slice(1), io)
   let query: Query
   try {
     query = parseArguments(argv)
   } catch (error) {
     if (!(error instanceof UsageError)) throw error
-    process.stderr.write(`enso-logs: ${error.message}\n\n${USAGE}\n`)
-    process.exit(2)
+    io.stderr(`enso-logs: ${error.message}\n\n${USAGE}\n`)
+    return 2
   }
   // A terminal gets colors and wraps to its width; a pipe (`| less`, `> file`) gets plain,
   // whole lines. `--color` keeps colors through a pipe (`| less -R`).
-  // `?? false`: typed `boolean`, but `undefined` off a terminal at runtime (#596).
-  const onTerminal = process.stdout.isTTY ?? false
-  const render = ensoLogLineRenderer({ wordWrap: onTerminal, colors: onTerminal || query.color })
+  const render = ensoLogLineRenderer({ wordWrap: io.onTerminal, colors: io.onTerminal || query.color })
   const notBefore = query.sinceMs === undefined ? 0 : Date.now() - query.sinceMs
 
   if (query.file !== undefined) {
     // A bundle is a log file with prose around it: its fenced records, in order. Anything
     // else is read as a raw log — the same parser says what is not a record.
     if (!existsSync(query.file)) {
-      process.stderr.write(`enso-logs: no such file ${query.file}\n`)
-      process.exit(1)
+      io.stderr(`enso-logs: no such file ${query.file}\n`)
+      return 1
     }
     const text = readFileSync(query.file, 'utf8')
-    print(query, render, isLogBundle(text) ? bundleRecordsText(text) : text, notBefore)
-    return
+    io.stdout(printable(query, render, isLogBundle(text) ? bundleRecordsText(text) : text, notBefore))
+    return 0
   }
 
-  const logsDir = logsDirFrom(process.env)
-  const file = join(logsDir, ensoLogFilename(query.date))
-  if (query.follow) await untilExists(file)
+  const file = join(io.logsDir, ensoLogFilename(query.date))
+  if (query.follow) await untilExists(file, io)
   else if (!existsSync(file)) {
-    process.stderr.write(
-      `enso-logs: no log for ${ensoLogFilename(query.date)} in ${logsDir} — has a launcher run today?\n`,
-    )
-    process.exit(1)
+    io.stderr(`enso-logs: no log for ${ensoLogFilename(query.date)} in ${io.logsDir} — has a launcher run today?\n`)
+    return 1
   }
-  print(query, render, readFileSync(file, 'utf8'), notBefore)
-  if (query.follow) follow(query, render, file)
+  io.stdout(printable(query, render, readFileSync(file, 'utf8'), notBefore))
+  if (query.follow) follow(query, render, file, io)
+  return 0
+}
+
+async function main(argv: readonly string[]): Promise<void> {
+  process.exitCode = await run(argv, {
+    ...PROCESS_OUTPUT,
+    serverUrl: process.env.ENSO_SERVER_URL ?? 'http://127.0.0.1:5179',
+    logsDir: logsDirFrom(process.env),
+    // `?? false`: typed `boolean`, but `undefined` off a terminal at runtime (#596).
+    onTerminal: process.stdout.isTTY ?? false,
+  })
 }
 
 if (import.meta.main) await main(process.argv.slice(2))

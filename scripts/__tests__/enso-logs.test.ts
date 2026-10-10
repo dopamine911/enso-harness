@@ -1,6 +1,10 @@
 import { expect, test } from 'bun:test'
-import type { EnsoLogLine } from '../../packages/core/src/index.ts'
-import { matches, parseArguments, UsageError } from '../enso-logs.ts'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { browserSection, buildLogBundle, type EnsoLogLine } from '../../packages/core/src/index.ts'
+import { ensoLogFilename } from '../../packages/core/src/log-process.ts'
+import { type LogsIo, matches, parseArguments, run, USAGE, UsageError } from '../enso-logs.ts'
 
 /**
  * The reader's own logic (#132, `bun run logs`): the flags, and what a line must be to print.
@@ -89,4 +93,175 @@ test('a line prints when it clears the level, is after --since, and matches the 
   expect(matches(parseArguments(['--thread', '6923']), line({ properties: { process: 'server' } }), 0)).toBe(false)
   const { properties: _dropped, ...withoutProperties } = line()
   expect(matches(parseArguments([]), withoutProperties, 0)).toBe(true)
+})
+
+// ── The command over its io: what reaches stdout and stderr, and the exit code ──
+
+const ANSI = '\u001B['
+
+interface Captured {
+  readonly code: number
+  readonly stdout: string
+  readonly stderr: string
+}
+
+async function runCaptured(argv: readonly string[], io: Partial<LogsIo> = {}): Promise<Captured> {
+  let stdout = ''
+  let stderr = ''
+  const code = await run(argv, {
+    serverUrl: 'http://127.0.0.1:1',
+    logsDir: '/nonexistent-enso-logs',
+    onTerminal: false,
+    ...io,
+    stdout: (text) => {
+      stdout += text
+    },
+    stderr: (text) => {
+      stderr += text
+    },
+  })
+  return { code, stdout, stderr }
+}
+
+/** A scratch logs directory for one test, removed after it. */
+async function withLogsDir(body: (logsDir: string) => Promise<void>): Promise<void> {
+  const logsDir = mkdtempSync(join(tmpdir(), 'enso-logs-test-'))
+  try {
+    await body(logsDir)
+  } finally {
+    rmSync(logsDir, { recursive: true, force: true })
+  }
+}
+
+const DAY = '2026-09-08'
+const WARN_RAW = JSON.stringify(line())
+const DEBUG_RAW = JSON.stringify(line({ level: 'DEBUG', message: 'quiet' }))
+
+test('run: a usage error exits 2 with the problem and the usage on stderr', async () => {
+  expect(await runCaptured(['--verbose'])).toEqual({
+    code: 2,
+    stdout: '',
+    stderr: `enso-logs: unknown flag --verbose\n\n${USAGE}\n`,
+  })
+})
+
+test("run: no file for the day exits 1 naming the day's file and the directory it looked in", async () => {
+  await withLogsDir(async (logsDir) => {
+    const result = await runCaptured(['--date', DAY], { logsDir })
+    expect(result.code).toBe(1)
+    expect(result.stdout).toBe('')
+    expect(result.stderr).toContain(`no log for enso-${DAY}.jsonl in ${logsDir}`)
+  })
+})
+
+test("run: the day's file prints its matching records, says which lines are not records, and skips the rest", async () => {
+  await withLogsDir(async (logsDir) => {
+    const dayFile = join(logsDir, ensoLogFilename(parseArguments(['--date', DAY]).date))
+    writeFileSync(dayFile, `${WARN_RAW}\n${DEBUG_RAW}\nnot a record\n`)
+
+    // --json: the matching lines exactly as on disk; the DEBUG record is under the info floor.
+    const raw = await runCaptured(['--date', DAY, '--json'], { logsDir })
+    expect(raw).toEqual({ code: 0, stdout: `${WARN_RAW}\n(not JSON) not a record\n`, stderr: '' })
+
+    // Rendered: the template's values put back, plain off a terminal, in the file's order.
+    const plain = await runCaptured(['--date', DAY], { logsDir })
+    expect(plain.stdout).toContain("'write' denied")
+    expect(plain.stdout.endsWith('(not JSON) not a record\n')).toBe(true)
+    expect(plain.stdout).not.toContain('{toolName}')
+    expect(plain.stdout).not.toContain('quiet')
+    expect(plain.stdout).not.toContain(ANSI)
+
+    // Colors on a terminal, and through a pipe only when asked.
+    expect((await runCaptured(['--date', DAY], { logsDir, onTerminal: true })).stdout).toContain(ANSI)
+    expect((await runCaptured(['--date', DAY, '--color'], { logsDir })).stdout).toContain(ANSI)
+  })
+})
+
+test('run: --since keeps only the records written within that long of now', async () => {
+  await withLogsDir(async (logsDir) => {
+    const recent = JSON.stringify(line({ '@timestamp': new Date().toISOString(), message: 'recent' }))
+    const file = join(logsDir, 'raw.jsonl')
+    writeFileSync(file, `${WARN_RAW}\n${recent}\n`)
+    const result = await runCaptured(['--file', file, '--since', '1h', '--json'])
+    expect(result.stdout).toBe(`${recent}\n`)
+  })
+})
+
+test("run: --file reads a bundle's fenced records, the server's then the browser's, and none of its prose", async () => {
+  await withLogsDir(async (logsDir) => {
+    const browserLine = line({ message: 'browser said so', properties: { process: 'web' } })
+    const bundle =
+      buildLogBundle({
+        about: {
+          at: '2026-09-09T23:50:00.000Z',
+          enso: 'abc',
+          pi: '1.0.0',
+          bun: '1.4.2',
+          os: 'linux',
+          selection: 'all',
+        },
+        threads: [],
+        lines: [line(), line({ level: 'DEBUG', message: 'quiet' })],
+        matched: 2,
+      }) + browserSection([browserLine])
+    const bundleFile = join(logsDir, 'enso-bundle.md')
+    writeFileSync(bundleFile, bundle)
+
+    const result = await runCaptured(['--file', bundleFile, '--json'])
+    expect(result).toEqual({ code: 0, stdout: `${WARN_RAW}\n${JSON.stringify(browserLine)}\n`, stderr: '' })
+  })
+})
+
+test('run: a --file that does not exist exits 1 naming it', async () => {
+  expect(await runCaptured(['--file', '/nonexistent-enso-logs/b.md'])).toEqual({
+    code: 1,
+    stdout: '',
+    stderr: 'enso-logs: no such file /nonexistent-enso-logs/b.md\n',
+  })
+})
+
+/** A stand-in for the server's bundle route: echoes the query it was asked, or fails with `status`. */
+async function withBundleServer(status: number, body: (serverUrl: string) => Promise<void>): Promise<void> {
+  const server = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    fetch(request) {
+      const url = new URL(request.url)
+      if (url.pathname !== '/api/logs/bundle') return new Response('no route', { status: 404 })
+      return new Response(`# bundle for ${url.searchParams.get('thread') ?? 'every thread'}\n`, { status })
+    },
+  })
+  try {
+    await body(server.url.origin)
+  } finally {
+    await server.stop(true)
+  }
+}
+
+test("run: bundle prints the server's bundle as it answered, for one thread when --thread names it", async () => {
+  await withBundleServer(200, async (serverUrl) => {
+    expect(await runCaptured(['bundle'], { serverUrl })).toEqual({
+      code: 0,
+      stdout: '# bundle for every thread\n',
+      stderr: '',
+    })
+    expect((await runCaptured(['bundle', '--thread', '6923 e6&x'], { serverUrl })).stdout).toBe(
+      '# bundle for 6923 e6&x\n',
+    )
+  })
+})
+
+test('run: bundle exits 1 when the server refuses, naming the URL and its answer, or when no server answers', async () => {
+  await withBundleServer(500, async (serverUrl) => {
+    expect(await runCaptured(['bundle'], { serverUrl })).toEqual({
+      code: 1,
+      stdout: '',
+      stderr: `enso-logs: ${serverUrl}/api/logs/bundle answered 500: # bundle for every thread\n\n`,
+    })
+  })
+  // Port 1 on loopback: nothing listens there, so the connection is refused.
+  const unreachable = await runCaptured(['bundle'], { serverUrl: 'http://127.0.0.1:1' })
+  expect(unreachable.code).toBe(1)
+  expect(unreachable.stderr).toContain('enso-logs: no server at http://127.0.0.1:1')
+  expect(unreachable.stderr).toContain('`bun run dev`')
 })
