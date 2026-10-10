@@ -8,7 +8,7 @@ how to use it. It does not repeat the inventory.
 ## One definition of green
 
 `bun run check` (the same script as `check:all`) runs `scripts/gate.ts`. Thirteen gates, in order, stopping
-at the first failure (the last only warns):
+at the first failure:
 
 1. **Format** — `oxfmt --check`: formatting, import order and Tailwind class order, check-only.
 2. **Lint** — `oxlint` with `oxlint.config.ts`, type-aware (`oxlint-tsgolint`). It carries the
