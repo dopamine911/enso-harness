@@ -137,18 +137,41 @@ interface Measured {
   readonly duplication: string
 }
 
+/** A list in fallow's JSON. ⚠ Throws rather than counting zero when fallow's output changes shape. */
+function listField(record: Readonly<Record<string, unknown>>, key: string): readonly unknown[] {
+  const value = record[key]
+  if (!Array.isArray(value)) throw new Error(`health:full: fallow's JSON has no \`${key}\` list`)
+  return value
+}
+
+/** `fallow dupes`'s headline, read checked: the percentage and the clone groups. */
+function duplicationOf(dupes: Readonly<Record<string, unknown>>): string {
+  const stats = dupes.stats
+  if (
+    typeof stats !== 'object' ||
+    stats === null ||
+    !('duplication_percentage' in stats) ||
+    !('clone_groups' in stats)
+  ) {
+    throw new Error("health:full: fallow's dupes JSON has no `stats`")
+  }
+  const { duplication_percentage: percentage, clone_groups: groups } = stats
+  if (typeof percentage !== 'number' || typeof groups !== 'number') {
+    throw new Error("health:full: fallow's dupes `stats` are not numbers")
+  }
+  return `${percentage.toFixed(2)}% · ${groups} groups`
+}
+
 async function measure(config: FallowConfig): Promise<Measured> {
   const deadCode = await fallowJson('dead-code', config)
   const health = await fallowJson('health', config)
-  const dupes = await fallowJson('dupes', config)
-  const counts = Object.entries(deadCode)
-    .filter(([key, value]) => Array.isArray(value) && value.length > 0 && key !== 'next_steps')
-    .map(([key, value]) => [key, (value as unknown[]).length] as const)
-  const stats = dupes.stats as { readonly duplication_percentage: number; readonly clone_groups: number }
+  const counts = Object.entries(deadCode).flatMap(([key, value]) =>
+    Array.isArray(value) && value.length > 0 && key !== 'next_steps' ? [[key, value.length] as const] : [],
+  )
   return {
     deadCode: Object.fromEntries(counts),
-    healthFindings: (health.findings as unknown[]).length,
-    duplication: `${stats.duplication_percentage.toFixed(2)}% · ${stats.clone_groups} groups`,
+    healthFindings: listField(health, 'findings').length,
+    duplication: duplicationOf(await fallowJson('dupes', config)),
   }
 }
 
@@ -187,17 +210,26 @@ async function exemptionTable(config: FallowConfig): Promise<string> {
 
 const fenced = (text: string): string => `\`\`\`\n${text}\n\`\`\``
 
-/** One health finding as fallow's JSON gives it, the fields the CRAP count reads. */
-interface HealthFinding {
-  readonly crap?: number
-  readonly coverage_source?: string
-}
+/** Whether one health finding scores at or over the CRAP threshold. */
+const crapAtOrOver = (finding: unknown): boolean =>
+  typeof finding === 'object' &&
+  finding !== null &&
+  'crap' in finding &&
+  typeof finding.crap === 'number' &&
+  finding.crap >= CRAP_THRESHOLD
+
+/** Whether fallow scored one finding from the converted map rather than its estimate (#826). */
+const scoredFromMap = (finding: unknown): boolean =>
+  typeof finding === 'object' &&
+  finding !== null &&
+  'coverage_source' in finding &&
+  finding.coverage_source === 'istanbul'
 
 /** The full run's functions at or over the CRAP threshold, split by where each one's coverage came from. */
 async function crapCount(): Promise<string> {
   const health = await fallowJson('health', fullConfig(fallowConfig as FallowConfig))
-  const over = (health.findings as readonly HealthFinding[]).filter((finding) => (finding.crap ?? 0) >= CRAP_THRESHOLD)
-  const measured = over.filter((finding) => finding.coverage_source === 'istanbul').length
+  const over = listField(health, 'findings').filter(crapAtOrOver)
+  const measured = over.filter(scoredFromMap).length
   return (
     `CRAP at or over ${CRAP_THRESHOLD}: ${over.length} functions, ${measured} scored from measured coverage and ` +
     `${over.length - measured} from fallow's estimate.`

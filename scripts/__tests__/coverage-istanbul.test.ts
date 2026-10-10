@@ -1,4 +1,8 @@
 import { expect, test } from 'bun:test'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { findRepoRoot } from '../../packages/core/src/paths.ts'
 import { istanbulFileCoverage, parseLcov } from '../coverage-istanbul.ts'
 
 /**
@@ -91,4 +95,78 @@ test('one statement per DA line from its first non-blank character; one anonymou
   // `unlisted` has no DA line, so it has no entry and fallow keeps its estimate.
   expect(coverage.f).toEqual({ 0: 3, 1: 3, 2: 0, 3: 1 })
   expect(coverage.branchMap).toEqual({})
+})
+
+/** One CRAP finding as fallow 3.33's health JSON reports it; only the fields this test reads. */
+interface CrapFinding {
+  readonly name: string
+  readonly cyclomatic: number
+  readonly crap: number
+  readonly coverageSource: unknown
+}
+
+/** One element of fallow's `findings`, read checked: undefined when it lacks the fields. */
+function crapFindingOf(value: unknown): CrapFinding | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  if (!('name' in value) || !('cyclomatic' in value) || !('crap' in value)) return undefined
+  const { name, cyclomatic, crap } = value
+  if (typeof name !== 'string' || typeof cyclomatic !== 'number' || typeof crap !== 'number') return undefined
+  return { name, cyclomatic, crap, coverageSource: 'coverage_source' in value ? value.coverage_source : undefined }
+}
+
+/** Every readable CRAP finding in fallow's health JSON. */
+function crapFindingsOf(output: unknown): CrapFinding[] {
+  if (typeof output !== 'object' || output === null || !('findings' in output)) return []
+  return Array.isArray(output.findings) ? output.findings.flatMap((value) => crapFindingOf(value) ?? []) : []
+}
+
+const SIGN_SOURCE = [
+  'export function sign(value: number): number {',
+  '  if (value > 0) return 1',
+  '  if (value < 0) return -1',
+  '  return 0',
+  '}',
+  '',
+  'export function parity(value: number): string {',
+  '  if (value % 2 === 0) return "even"',
+  '  return "odd"',
+  '}',
+].join('\n')
+
+test('⚠ the installed fallow scores CRAP from the map: an unrun function as uncovered, a fully run one at its cyclomatic (#826)', () => {
+  // ⚠ The contract with fallow itself: it matches `(anonymous_N)` entries by position and marks
+  // what it scored from the map `coverage_source: "istanbul"`. If a fallow upgrade changes either,
+  // `health:full` would silently report nothing measured; this fails instead.
+  const project = mkdtempSync(join(tmpdir(), 'coverage-istanbul-fallow-'))
+  try {
+    mkdirSync(join(project, 'src'))
+    writeFileSync(join(project, 'package.json'), JSON.stringify({ name: 'fixture', private: true }))
+    const sourcePath = join(project, 'src', 'sign.ts')
+    writeFileSync(sourcePath, SIGN_SOURCE)
+    // `sign` never ran (every line 0); `parity` ran every line.
+    const lines = new Map([
+      [1, 0],
+      [2, 0],
+      [3, 0],
+      [4, 0],
+      [7, 4],
+      [8, 4],
+      [9, 2],
+    ])
+    const map = join(project, 'coverage-final.json')
+    writeFileSync(map, JSON.stringify({ [sourcePath]: istanbulFileCoverage(sourcePath, SIGN_SOURCE, lines) }))
+    const fallow = join(findRepoRoot(import.meta.url), 'node_modules', '.bin', 'fallow')
+    const run = Bun.spawnSync([fallow, 'health', '--coverage', map, '--max-crap', '1', '--format', 'json', '--quiet'], {
+      cwd: project,
+    })
+    const findings = crapFindingsOf(JSON.parse(run.stdout.toString()))
+    const sign = findings.find((finding) => finding.name === 'sign')
+    const parity = findings.find((finding) => finding.name === 'parity')
+    expect(sign?.coverageSource).toBe('istanbul')
+    expect(sign?.crap).toBe((sign?.cyclomatic ?? 0) ** 2 + (sign?.cyclomatic ?? 0))
+    expect(parity?.coverageSource).toBe('istanbul')
+    expect(parity?.crap).toBe(parity?.cyclomatic)
+  } finally {
+    rmSync(project, { recursive: true, force: true })
+  }
 })
