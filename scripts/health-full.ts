@@ -18,8 +18,8 @@
  * converts it to `coverage/coverage-final.json` (`scripts/coverage-istanbul.ts`) and fallow scores
  * CRAP from that measured coverage; the report says how old the LCOV is, because it describes the
  * tree its `bun test` ran on, and this never runs the suite. Without an LCOV, CRAP is fallow's
- * estimate, and the report says so. Measured or not, a file no test loads (and every test file,
- * which Bun leaves out of coverage) keeps fallow's estimate; the health section counts both kinds.
+ * estimate, and the report says so. Measured or not, a file no test loads keeps fallow's
+ * estimate (test files are measured too, #838); the health section counts both kinds.
  */
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'

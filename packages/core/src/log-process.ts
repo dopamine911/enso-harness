@@ -82,12 +82,14 @@ import {
   ensoLogger,
 } from './log.ts'
 import {
+  type EnsoHomeMigration,
   ensoAgentDir,
   ensoHome,
   ensoLogsDir,
   ensoProjectsDir,
   migrateCheckoutEnsoOnLaunch,
   migrateSessionsIntoProjects,
+  type SessionMigration,
 } from './paths.ts'
 import {
   type EnsoProcessMarker,
@@ -369,6 +371,79 @@ export interface ProcessLoggingOptions {
 }
 
 /**
+ * What a launch's `.enso/` move did, said on the launcher's own logger (#421): one `info` line
+ * for what moved, a `warn` per file left because `ENSO_HOME` already had one (nothing is
+ * overwritten), and a `warn` when an explicit `ENSO_HOME` held the move back.
+ *
+ * @group Logging
+ */
+export function reportHomeMigration(log: EnsoLogger, migration: EnsoHomeMigration): void {
+  const { from, to } = migration
+  if (migration.moved.length > 0) {
+    log.info('moved {count} file(s) from {from} to {to}: Enso keeps its state in ENSO_HOME now', {
+      count: migration.moved.length,
+      from,
+      to,
+    })
+  }
+  for (const path of migration.kept) {
+    log.warn('{path} stays in {from}: {to} already has one, and nothing is overwritten — keep one by hand', {
+      path,
+      from,
+      to,
+    })
+  }
+  if (migration.held) {
+    log.warn(
+      '{from} was not moved: ENSO_HOME is set to {to}, and a launch moves it into ~/.enso only — move it by hand if you mean to',
+      {
+        from,
+        to,
+      },
+    )
+  }
+}
+
+/**
+ * What a launch's session move did (#552), said like the `.enso/` move: one `info` line for what
+ * moved, a `warn` per file or directory that stayed where it was, with why.
+ *
+ * @group Logging
+ */
+export function reportSessionMigration(log: EnsoLogger, sessions: SessionMigration, projectsDir: string): void {
+  if (sessions.moved.length > 0) {
+    log.info('moved {count} session file(s) into their project folders under {projectsDir} (#552)', {
+      count: sessions.moved.length,
+      projectsDir,
+    })
+  }
+  for (const path of sessions.kept) {
+    log.warn(
+      "{path} stays where it was: its project folder already holds a file of that name. The project folder's copy is the thread; this one is not listed until it is removed — compare them before deleting",
+      {
+        path,
+      },
+    )
+  }
+  for (const directory of sessions.orphaned) {
+    log.warn(
+      '{directory} stays where it was: the directory its sessions ran in no longer exists, so they have no project',
+      {
+        directory,
+      },
+    )
+  }
+  for (const path of sessions.unreadable) {
+    log.warn(
+      '{path} stays where it was: no session header on its first line — a tail a running pre-#552 process kept appending after the move, or not a session file; join it by hand',
+      {
+        path,
+      },
+    )
+  }
+}
+
+/**
  * A dev launcher's start (#132, #421), in the one order that works: the checkout's old `.enso/`
  * migrated into `ENSO_HOME` FIRST — before the logs, the secrets and pi's agent dir are opened
  * where they now live — then logging configured there, what the migration did reported (an `info`
@@ -408,63 +483,11 @@ export async function startLauncher(options: {
   installLoggingShutdown(dispose, options.beforeStop)
   const [layer, ...subcategory] = options.logger
   const log = ensoLogger(layer, ...subcategory)
-  const { from, to } = migration
-  if (migration.moved.length > 0) {
-    log.info('moved {count} file(s) from {from} to {to}: Enso keeps its state in ENSO_HOME now', {
-      count: migration.moved.length,
-      from,
-      to,
-    })
-  }
-  for (const path of migration.kept) {
-    log.warn('{path} stays in {from}: {to} already has one, and nothing is overwritten — keep one by hand', {
-      path,
-      from,
-      to,
-    })
-  }
-  if (migration.held) {
-    log.warn(
-      '{from} was not moved: ENSO_HOME is set to {to}, and a launch moves it into ~/.enso only — move it by hand if you mean to',
-      {
-        from,
-        to,
-      },
-    )
-  }
+  reportHomeMigration(log, migration)
   // The sessions pi filed by cwd move into their project folders (#552), after the `.enso` move
-  // above put the agent dir where it now lives. Said like the move above: what moved, what stayed.
-  const sessions = migrateSessionsIntoProjects(ensoAgentDir(home), ensoProjectsDir(home))
-  if (sessions.moved.length > 0) {
-    log.info('moved {count} session file(s) into their project folders under {projectsDir} (#552)', {
-      count: sessions.moved.length,
-      projectsDir: ensoProjectsDir(home),
-    })
-  }
-  for (const path of sessions.kept) {
-    log.warn(
-      "{path} stays where it was: its project folder already holds a file of that name. The project folder's copy is the thread; this one is not listed until it is removed — compare them before deleting",
-      {
-        path,
-      },
-    )
-  }
-  for (const directory of sessions.orphaned) {
-    log.warn(
-      '{directory} stays where it was: the directory its sessions ran in no longer exists, so they have no project',
-      {
-        directory,
-      },
-    )
-  }
-  for (const path of sessions.unreadable) {
-    log.warn(
-      '{path} stays where it was: no session header on its first line — a tail a running pre-#552 process kept appending after the move, or not a session file; join it by hand',
-      {
-        path,
-      },
-    )
-  }
+  // above put the agent dir where it now lives.
+  const projectsDir = ensoProjectsDir(home)
+  reportSessionMigration(log, migrateSessionsIntoProjects(ensoAgentDir(home), projectsDir), projectsDir)
   return { home, logsDir, log, dispose }
 }
 

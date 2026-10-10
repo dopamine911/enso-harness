@@ -29,6 +29,10 @@ preload = ["./test/scratch-preload.ts", "./packages/web/src/__tests__/radix-prel
 coverage = true
 coverageReporter = ["text", "lcov"]
 coverageDir = "coverage"
+# Test files are measured too (#838), so fallow scores their CRAP from coverage, not its estimate.
+# ⚠ They are in the REPORT, not the FLOOR: scripts/check-coverage.ts skips exactly these records
+# (`isTestFilePath`), and test/coverage-manifest.test.ts pins that this key and that skip go together.
+coverageSkipTestFiles = false
 # The vendored shadcn/ai-elements components share the linter's exclusion boundary (oxlint.config.ts):
 # upstream's code, kept diffable, not held to our floor. chat-screen.tsx imports them
 # transitively, so test/coverage-manifest.test.ts not importing them is not enough — this

@@ -42,6 +42,13 @@
  * records of the full report read 99.65% / 96.04% and passed. Both are green over a fraction of
  * the code, printing the same sentence they print for the whole suite. So size is a gate too —
  * see `MINIMUM_REPORTED_FILES`.
+ *
+ * ⚠ TEST FILES ARE IN THE REPORT, NOT IN THE FLOOR (#838). bunfig's `coverageSkipTestFiles = false`
+ * makes Bun measure every `*.test.ts(x)` too, so fallow scores the CRAP of test code from
+ * measured coverage rather than its estimate. A test file runs almost whole whenever it runs,
+ * so counting it would raise both rates and the record count without one more line of product
+ * code covered. `summarizeLcov` skips exactly the records Bun's default skipped
+ * (`isTestFilePath`); the floor's denominator is the one it was before test files were measured.
  */
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
@@ -91,6 +98,16 @@ export const MINIMUM_REPORTED_FILES = 245
 
 const LCOV_PATH = join(findRepoRoot(import.meta.url), 'coverage', 'lcov.info')
 
+/**
+ * A test file as Bun's runner names one (`*.test.ts`, `*_test.tsx`, `*.spec.js`, …): the files
+ * `coverageSkipTestFiles` leaves out by default, so the records the floor never counted (#838).
+ * Helpers beside the tests (`__tests__/log-recorder.ts`, `test/gate-support.ts`) are not test
+ * files by this rule and stay counted, as they always were.
+ */
+export function isTestFilePath(path: string): boolean {
+  return /[._](?:test|spec)\.[cm]?[jt]sx?$/.test(path)
+}
+
 export interface CoverageTotals {
   lineRate: number
   functionRate: number
@@ -98,9 +115,9 @@ export interface CoverageTotals {
 }
 
 /**
- * Sum an lcov report's LF/LH (lines found/hit) and FNF/FNH (functions found/hit) records.
- * Throws on an empty report — zero files means the tests did not run or wrote elsewhere,
- * and "no data" must never read as "no problem".
+ * Sum an lcov report's LF/LH (lines found/hit) and FNF/FNH (functions found/hit) records over its
+ * non-test files (`isTestFilePath`). Throws on an empty report — zero files means the tests did not
+ * run or wrote elsewhere, and "no data" must never read as "no problem".
  */
 export function summarizeLcov(lcovText: string): CoverageTotals {
   let linesFound = 0
@@ -108,8 +125,12 @@ export function summarizeLcov(lcovText: string): CoverageTotals {
   let functionsFound = 0
   let functionsHit = 0
   let fileCount = 0
+  let counted = false
   for (const line of lcovText.split('\n')) {
-    if (line.startsWith('SF:')) fileCount += 1
+    if (line.startsWith('SF:')) {
+      counted = !isTestFilePath(line.slice(3))
+      if (counted) fileCount += 1
+    } else if (!counted) continue
     else if (line.startsWith('LF:')) linesFound += Number(line.slice(3))
     else if (line.startsWith('LH:')) linesHit += Number(line.slice(3))
     else if (line.startsWith('FNF:')) functionsFound += Number(line.slice(4))

@@ -469,9 +469,16 @@ export function createPermissionModes(dependencies: PermissionModesDependencies)
   }
 }
 
-/** The real classifier call: the session's model through pi-ai, its reply's text. */
-async function askClassifier(request: ClassifierRequest): Promise<string> {
-  const reply = await completeSimple(
+/**
+ * The real classifier call: the session's model through pi-ai, its reply's text. `complete` is
+ * pi-ai's call unless a test hands in its own, so what is sent and what a reply becomes are
+ * checked without a provider (#838).
+ */
+export async function askClassifier(
+  request: ClassifierRequest,
+  complete: typeof completeSimple = completeSimple,
+): Promise<string> {
+  const reply = await complete(
     request.model,
     {
       systemPrompt: request.systemPrompt,
