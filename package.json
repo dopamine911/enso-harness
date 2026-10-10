@@ -50,7 +50,7 @@
     "complexity:baseline": "fallow health --complexity --max-cognitive 15 --max-cyclomatic 1000 --quiet --save-baseline complexity-baseline.json --baseline-mode identity; bun --bun oxfmt complexity-baseline.json",
     "dupes:check": "fallow dupes --quiet --summary",
     "health:full": "bun scripts/health-full.ts",
-    "crap:report": "bun scripts/coverage-istanbul.ts && fallow health --complexity --max-cognitive 1000 --max-cyclomatic 1000 --max-crap 30 --report-only --coverage coverage/coverage-final.json --top 10 --sort severity --quiet"
+    "crap:check": "bun scripts/coverage-istanbul.ts && bun scripts/check-crap.ts"
   },
   "devDependencies": {
     "@enso/core": "*",

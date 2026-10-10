@@ -8,7 +8,7 @@ how to use it. It does not repeat the inventory.
 ## One definition of green
 
 `bun run check` (the same script as `check:all`) runs `scripts/gate.ts`. Thirteen gates, in order, stopping
-at the first failure (the last only warns):
+at the first failure:
 
 1. **Format** — `oxfmt --check`: formatting, import order and Tailwind class order, check-only.
 2. **Lint** — `oxlint` with `oxlint.config.ts`, type-aware (`oxlint-tsgolint`). It carries the
@@ -78,12 +78,14 @@ at the first failure (the last only warns):
    dead internal links (#188). **The build is not the check.** `astro build` reported success over 139
    dead links on the first run, because a page's `./routes.md` and `../../packages/…#L47` are both
    correct on GitHub and both 404 as routes; `scripts/docs/site-links.ts` is what notices.
-13. **CRAP** — warnings, never a failure (#826). After `test`, `scripts/coverage-istanbul.ts` converts
-   the LCOV it wrote into Istanbul, and fallow lists the ten worst functions at CRAP ≥ 30 (cyclomatic² ×
-   (1 − coverage)³ + cyclomatic) from measured coverage, with the total. It is a step of its own rather
-   than `health.maxCrap` in `.fallowrc.jsonc`: CRAP on in the config changes the key of the function
-   `complexity-baseline.json` holds and fails the new-complexity gate, and only a step after `test`
-   scores from measured coverage, on CI and laptops alike.
+13. **CRAP** — fails on a function at CRAP ≥ 30 (cyclomatic² × (1 − coverage)³ + cyclomatic) from
+   measured coverage, unless `crap-pins.json` pins it at exactly its score with the reason it stays
+   (#844). After `test`, `scripts/coverage-istanbul.ts` converts the LCOV it wrote into Istanbul and
+   `scripts/check-crap.ts` judges fallow's scores: a pinned function may get better, never worse, and
+   a pin that is looser than its function or matches nothing fails too, so the list only shrinks. It
+   is a step of its own rather than `health.maxCrap` in `.fallowrc.jsonc`: CRAP on in the config
+   changes the key of the function `complexity-baseline.json` holds and fails the new-complexity gate
+   (#826), and only a step after `test` scores from measured coverage, on CI and laptops alike.
 
 The API reference is part of the site rather than a second site behind a link: `starlight-typedoc`
 generates one markdown page per entry point into the Starlight content tree, so the contracts carry

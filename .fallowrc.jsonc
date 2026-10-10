@@ -208,14 +208,15 @@
   //     reviewed as one.
   //
   // Both gate cognitive only (`--max-cyclomatic` is lifted). CRAP (cyclomatic² × (1 − coverage)³ +
-  // cyclomatic) stays OFF here (`maxCrap: 0`) and is a warning step of its own, `crap` (#826): Bun's
+  // cyclomatic) stays OFF here (`maxCrap: 0`) and is a step of its own, `crap` (#826, #844): Bun's
   // LCOV has no function spans, so these two steps could only score fallow's ESTIMATE, which flagged
   // functions the suite drives (#180, #181, #182); and CRAP on in this config turns the baselined
   // function's finding into `cognitive_crap`, which fails the new-complexity step. The `crap` step
-  // runs after `test`, converts the LCOV with `scripts/coverage-istanbul.ts`, and lists the worst
-  // functions from MEASURED coverage with `--report-only`. ⚠ fallow reads
-  // `coverage/coverage-final.json` by itself when it exists, so a hand-run `--max-crap` scores from
-  // the last map written.
+  // runs after `test`, converts the LCOV with `scripts/coverage-istanbul.ts`, and fails on CRAP ≥ 30
+  // from MEASURED coverage outside `crap-pins.json` (`scripts/check-crap.ts`). Its pins are not
+  // `thresholdOverrides` below: with CRAP off here, these steps would list each as `no_match`.
+  // ⚠ fallow reads `coverage/coverage-final.json` by itself when it exists, so a hand-run
+  // `--max-crap` scores from the last map written.
   //
   // `thresholdOverrides` are the exceptions to the gate's ceiling, pinned per FUNCTION at the
   // exact score it measures today, so the rule still fails the moment that function grows. A
