@@ -1,0 +1,38 @@
+[
+  {
+    "path": "packages/arena/src/recorder.ts",
+    "function": "runArena",
+    "crap": 238.1,
+    "reason": "A live run's orchestration: port checks, Enso failing to start, the browser failing to open, the first goto failing, driver versus control endpoint, the final shot only while the browser is connected, Enso down at the stop. Each branch needs a real Chromium and a spawned `bun run dev`; a fake would only echo the calls. Its hands are tested in page-hands.ts, enso-stack.ts and ui-status.ts (#838)."
+  },
+  {
+    "path": "scripts/docs/feature-screenshots.ts",
+    "function": "captureShot",
+    "crap": 99.7,
+    "reason": "Rings marks on a live page, screenshots it and reads the measured values back from the DOM. Every branch is a Playwright call on a running Enso; its decisions (crop, plain names, session shot selection) are split out and tested (#838)."
+  },
+  {
+    "path": "scripts/docs/feature-screenshots.ts",
+    "function": "locate",
+    "crap": 69.9,
+    "reason": "Turns a mark target into a Playwright Locator, recursing through `within`. A Locator only exists on a live page, and an untargeted one proves nothing until a capture resolves it (#838)."
+  },
+  {
+    "path": "scripts/docs/feature-screenshots.ts",
+    "function": "shoot",
+    "crap": 56,
+    "reason": "Annotates a live page, screenshots the viewport or a region through an overlay box, then clears the annotations. Every branch is a page call; the region arithmetic is regionCrop, tested (#838)."
+  },
+  {
+    "path": "scripts/docs/feature-screenshots.ts",
+    "function": "main",
+    "crap": 53.1,
+    "reason": "Starts the dev stack, waits on its ports, opens the browser and runs each wanted feature's session. Its decisions (options, wanted features, scratch setup) are split out and tested; what is left is process and browser lifecycle (#838)."
+  },
+  {
+    "path": "packages/web/src/to-agui.ts",
+    "function": "observationToAguiEvents",
+    "crap": 37,
+    "reason": "Fully covered, so its CRAP is its cyclomatic complexity: one `case` per observation kind. `scripts/docs/observations.ts` reads those `case` blocks to generate the observations page, so splitting the switch breaks the generator. Also in complexity-baseline.json."
+  }
+]
