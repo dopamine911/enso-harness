@@ -225,7 +225,7 @@ export interface ContainerIo {
 }
 
 const HOST_IO: ContainerIo = {
-  docker: (args, input) => docker(args, input),
+  docker,
   standardInput: readStandardInput,
   owner: () => ({ uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000 }),
   warn: HOST_DOCKER.warn,

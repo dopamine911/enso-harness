@@ -891,7 +891,11 @@ export async function refoldRun(runDirectory: string, places: ArenaRefoldPlaces)
   return manifestPath
 }
 
-/** `arena manifest`: the run refolded over this invocation's home and `--out`, its manifest named, the run scored. */
+/**
+ * The run refolded over this invocation's home and `--out`, its manifest path printed, the run
+ * scored, and `process.exitCode` set by the verdict. Called by `arena manifest`, by `start` to
+ * recover a dead run before a new one, and after a scoped launch ends with its recorder dead.
+ */
 async function refoldAndScore(runDirectory: string): Promise<void> {
   process.stdout.write(`${await refoldRun(runDirectory, { operatorHome, currentFile })}\n`)
   scoreRun(runDirectory)
