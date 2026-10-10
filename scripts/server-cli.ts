@@ -3,8 +3,8 @@ import { readFileSync } from 'node:fs'
 /**
  * What the CLIs that read the running server share (`bun run incidents`, #468; `bun run judge`,
  * #469): a usage error the caller turns into exit 2, the whole-number flag every threshold and
- * count takes, a route's JSON, the stored-thread listing a CLI reads when no thread is named, and
- * the output a CLI's `run` writes to (#832).
+ * count takes, a route's JSON, the stored-thread listing a CLI reads when no thread is named, the
+ * output a CLI's `run` writes to (#832), and the one catch `incidents` and `judge` run under (#838).
  */
 
 /** Where a CLI's `run` writes: the process's own (`PROCESS_OUTPUT`) from its `main`, captures in a test. */
@@ -27,6 +27,47 @@ export class UsageError extends Error {
   constructor(message: string) {
     super(message)
     this.name = 'UsageError'
+  }
+}
+
+/** Where `incidents` and `judge` write, and the server they read: the process's own from `main`, a capture in a test. */
+export interface ServerCliIo extends CliOutput {
+  readonly serverUrl: string
+}
+
+/**
+ * The process's own output, and the server `serverUrl` names: the dev server's when unset. Each
+ * `main` passes `process.env.ENSO_SERVER_URL` itself, so the environment inventory finds the read
+ * where it happens (#838).
+ */
+export function processServerIo(serverUrl: string | undefined): ServerCliIo {
+  return { ...PROCESS_OUTPUT, serverUrl: serverUrl ?? 'http://127.0.0.1:5179' }
+}
+
+/** A server-reading CLI's command over `io`, returning its exit code (#838). */
+type ServerCommandRun = (argv: readonly string[], io: ServerCliIo) => Promise<number>
+
+/**
+ * The `run` of a CLI whose `output` reads the server (#838), with one catch for every failure:
+ * the output on stdout and 0; a usage error on stderr with the usage, 2; anything else on stderr,
+ * 1. Nothing reaches stdout unless the whole output was made.
+ */
+export function serverCommand(
+  command: string,
+  usage: string,
+  output: (argv: readonly string[], serverUrl: string) => Promise<string>,
+): ServerCommandRun {
+  return async (argv, io) => {
+    try {
+      io.stdout(`${await output(argv, io.serverUrl)}\n`)
+      return 0
+    } catch (error) {
+      const isUsage = error instanceof UsageError
+      io.stderr(
+        `${command}: ${error instanceof Error ? error.message : String(error)}${isUsage ? `\n\n${usage}` : ''}\n`,
+      )
+      return isUsage ? 2 : 1
+    }
   }
 }
 

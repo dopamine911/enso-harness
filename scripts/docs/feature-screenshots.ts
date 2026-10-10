@@ -238,15 +238,42 @@ async function annotate(page: Page, annotations: readonly Annotation[]): Promise
   }
 }
 
-/**
- * The features `--only` asked for, by spec id; `undefined` for all of them. Playing the session
- * stops where some shots exist only while it waits (the Start dialog, the questions); under
- * `--only` those are not retaken, so recapturing one feature leaves every other image as it was.
- */
-const ONLY: readonly string[] | undefined = process.argv.includes('--only')
-  ? (process.argv[process.argv.indexOf('--only') + 1] ?? '').split(',')
-  : undefined
+/** What the command line asks for (#838). */
+interface ScreenshotOptions {
+  /**
+   * The features `--only` asked for, by spec id; `undefined` for all of them. Playing the session
+   * stops where some shots exist only while it waits (the Start dialog, the questions); under
+   * `--only` those are not retaken, so recapturing one feature leaves every other image as it was.
+   */
+  readonly only: readonly string[] | undefined
+  /** `--chromium`: the chrome binary to launch instead of Playwright's own. */
+  readonly chromium: string | undefined
+  /** `--keep`: leave the scratch directory, and say where it is. */
+  readonly keep: boolean
+}
+
+export function screenshotOptions(argv: readonly string[]): ScreenshotOptions {
+  const only = argv.indexOf('--only')
+  const chromium = argv.indexOf('--chromium')
+  return {
+    only: only >= 0 ? (argv[only + 1] ?? '').split(',') : undefined,
+    chromium: chromium >= 0 ? argv[chromium + 1] : undefined,
+    keep: argv.includes('--keep'),
+  }
+}
+
+const OPTIONS = screenshotOptions(process.argv)
 let sessionPlaying = false
+
+/** The smallest rectangle holding every box, padded by 24 and kept on the viewport: a region shot's crop. */
+export function regionCrop(boxes: readonly Rectangle[]): Rectangle {
+  const pad = 24
+  const left = Math.max(0, Math.min(...boxes.map((box) => box.left)) - pad)
+  const top = Math.max(0, Math.min(...boxes.map((box) => box.top)) - pad)
+  const right = Math.min(VIEWPORT.width, Math.max(...boxes.map((box) => box.left + box.width)) + pad)
+  const bottom = Math.min(VIEWPORT.height, Math.max(...boxes.map((box) => box.top + box.height)) + pad)
+  return { left, top, width: right - left, height: bottom - top }
+}
 
 /**
  * One shot: annotate, capture, clear the annotations. The capture is the whole viewport, or the
@@ -261,7 +288,7 @@ async function shoot(
   annotations: readonly Annotation[],
   options: { readonly region?: readonly Locator[]; readonly path?: string } = {},
 ): Promise<void> {
-  if (sessionPlaying && ONLY !== undefined) return
+  if (sessionPlaying && OPTIONS.only !== undefined) return
   const { region = [], path = join(OUT, `${name}.png`) } = options
   const anchor = annotations[0]?.target ?? region[0]
   if (anchor !== undefined) await steady(anchor)
@@ -269,12 +296,7 @@ async function shoot(
   if (region.length === 0) await page.screenshot({ path })
   else {
     const boxes = await Promise.all(region.map((locator) => rectangleOf(locator, `${name}'s region`)))
-    const pad = 24
-    const left = Math.max(0, Math.min(...boxes.map((box) => box.left)) - pad)
-    const top = Math.max(0, Math.min(...boxes.map((box) => box.top)) - pad)
-    const right = Math.min(VIEWPORT.width, Math.max(...boxes.map((box) => box.left + box.width)) + pad)
-    const bottom = Math.min(VIEWPORT.height, Math.max(...boxes.map((box) => box.top + box.height)) + pad)
-    await placeBox(page, { left, top, width: right - left, height: bottom - top }, { zIndex: '0' }, '')
+    await placeBox(page, regionCrop(boxes), { zIndex: '0' }, '')
     await page.locator('[data-feature-annotation]').last().screenshot({ path })
   }
   await clearAnnotations(page)
@@ -443,14 +465,19 @@ function locate(page: Page, target: MarkTarget): Locator {
 }
 
 /**
- * What a mark's `{shown}` is, and what a click's step calls its target: the name or label it was
- * found by when that is plain text, else the text the element renders.
+ * The name or label a mark's target was found by, when that is plain text; `undefined` when only
+ * the rendered element can say what it is (a pattern name, a text match, a tool call's row) (#838).
  */
-async function shownBy(target: MarkTarget, located: Locator): Promise<string> {
+export function plainNameOf(target: MarkTarget): string | undefined {
   if ('role' in target && typeof target.name === 'string') return target.name
   if ('label' in target) return target.label
   if ('placeholder' in target) return target.placeholder
-  return textOf(located)
+  return undefined
+}
+
+/** What a mark's `{shown}` is, and what a click's step calls its target: its plain name, else the text the element renders. */
+async function shownBy(target: MarkTarget, located: Locator): Promise<string> {
+  return plainNameOf(target) ?? textOf(located)
 }
 
 const ORDINALS = ['first', 'second', 'third', 'fourth'] as const
@@ -528,7 +555,7 @@ function recordShotFacts(spec: FeatureSpec, captured: ShotFacts): void {
  * all of it lands in the feature's facts file for `feature-pages.ts` to build the page from.
  */
 async function captureShot(page: Page, spec: FeatureSpec, shot: Shot, steps: readonly string[]): Promise<void> {
-  if (sessionPlaying && ONLY !== undefined) return
+  if (sessionPlaying && OPTIONS.only !== undefined) return
   const targets = shot.marks.map((mark) => locate(page, mark.target))
   const shown = await Promise.all(
     shot.marks.map((mark, markIndex) => shownBy(mark.target, targets[markIndex] as Locator)),
@@ -557,12 +584,19 @@ async function captureShot(page: Page, spec: FeatureSpec, shot: Shot, steps: rea
   process.stdout.write(`feature-screenshots: recorded ${shot.image} in ${factsPath(spec.id)}\n`)
 }
 
+/** Every spec'd shot the session takes at `moment`, in the registry's order; shots reached by `go` never (#838). */
+export function shotsDuring(
+  specs: readonly FeatureSpec[],
+  moment: SessionMoment,
+): { readonly spec: FeatureSpec; readonly shot: Shot }[] {
+  return specs.flatMap((spec) =>
+    spec.shots.flatMap((shot) => ('during' in shot && shot.during === moment ? [{ spec, shot }] : [])),
+  )
+}
+
 /** Every spec'd shot the session takes at `moment`, while it waits there. */
 async function sessionShots(page: Page, moment: SessionMoment): Promise<void> {
-  for (const spec of FEATURE_SPECS) {
-    for (const shot of spec.shots)
-      if ('during' in shot && shot.during === moment) await captureShot(page, spec, shot, [])
-  }
+  for (const { spec, shot } of shotsDuring(FEATURE_SPECS, moment)) await captureShot(page, spec, shot, [])
 }
 
 /** A feature's shots of the finished thread: the live ones, or (`cold`) the ones after the restart. */
@@ -625,11 +659,68 @@ async function attempt(
   await page.close()
 }
 
-/** The features `--only` names, in the registry's order; all of them without it. A name no spec has is refused. */
-function wantedFeatures(): readonly FeatureSpec[] {
-  const unknown = (ONLY ?? []).filter((requested) => !FEATURE_SPECS.some((spec) => spec.id === requested))
+/** The features `only` names, in the registry's order; all of them without it. A name no spec has is refused. */
+export function wantedFeatures(only: readonly string[] | undefined): readonly FeatureSpec[] {
+  const unknown = (only ?? []).filter((requested) => !FEATURE_SPECS.some((spec) => spec.id === requested))
   if (unknown.length > 0) throw new Error(`feature-screenshots: --only names no feature: ${unknown.join(', ')}`)
-  return FEATURE_SPECS.filter((spec) => ONLY === undefined || ONLY.includes(spec.id))
+  return FEATURE_SPECS.filter((spec) => only === undefined || only.includes(spec.id))
+}
+
+/**
+ * `scratch`, emptied, then holding the throwaway home and the demo project (#838): pi's `models.json`
+ * naming only the scripted `demo` provider, its settings, Enso's config and permission policy, the
+ * prompt library, and the project's files committed to a fresh repository.
+ */
+export function prepareScratch(scratch: string): { readonly home: string; readonly project: string } {
+  rmSync(scratch, { recursive: true, force: true })
+  const home = join(scratch, 'home')
+  const project = join(scratch, DEMO_PROJECT)
+  mkdirSync(join(home, 'pi-agent'), { recursive: true })
+  writeFileSync(join(home, 'pi-agent', 'models.json'), JSON.stringify(MODELS_JSON, null, 2))
+  writeFileSync(join(home, 'pi-agent', 'settings.json'), JSON.stringify(PI_SETTINGS, null, 2))
+  writeFileSync(join(home, 'config.json'), JSON.stringify(ENSO_CONFIG, null, 2))
+  // The permission policy (#496): Enso's default, with `web_fetch` allowed. The default asks before
+  // every fetch, and prompt 2's fetch is scripted to reach web_fetch's OWN allowlist refusal — what
+  // Web access documents — not a permission question the script has no answer for. (Found when the
+  // capture first ran after the engine switch: it waited on that question until it timed out.)
+  writeFileSync(
+    join(home, 'permissions.json'),
+    JSON.stringify(
+      {
+        ...ENSO_DEFAULT_PERMISSION_POLICY,
+        permission: { ...ENSO_DEFAULT_PERMISSION_POLICY.permission, web_fetch: 'allow' },
+      },
+      null,
+      2,
+    ),
+  )
+  mkdirSync(join(home, 'prompts'))
+  for (const [file, prompt] of Object.entries(PROMPT_LIBRARY)) writeFileSync(join(home, 'prompts', file), prompt)
+  for (const [path, contents] of Object.entries(DEMO_FILES)) {
+    mkdirSync(dirname(join(project, path)), { recursive: true })
+    writeFileSync(join(project, path), contents)
+  }
+  // A repository, so the run context records a revision — and, once pi's edit lands, `dirty`.
+  // ⚠ Without an inherited GIT_DIR / GIT_INDEX_FILE: run from a hook's shell, `add` and `commit`
+  // would write into the repository making the commit (#807). ⚠ The identity is set in the
+  // environment, not by `-c user.name`: a hook exports GIT_AUTHOR_NAME/EMAIL/DATE, which beat `-c`,
+  // so the demo commit would carry the developer's name (#838).
+  const { GIT_AUTHOR_DATE: _authorDate, GIT_COMMITTER_DATE: _committerDate, ...inherited } = gitChildEnvironment()
+  const demoEnvironment = {
+    ...inherited,
+    GIT_AUTHOR_NAME: 'demo',
+    GIT_AUTHOR_EMAIL: 'demo@example.invalid',
+    GIT_COMMITTER_NAME: 'demo',
+    GIT_COMMITTER_EMAIL: 'demo@example.invalid',
+  }
+  const git = (...args: string[]): void => {
+    const run = spawnSync('git', args, { cwd: project, encoding: 'utf8', env: demoEnvironment })
+    if (run.status !== 0) throw new Error(`feature-screenshots: git ${args[0]} failed: ${run.stderr}`)
+  }
+  git('init', '--quiet', '--initial-branch=main')
+  git('add', '--all')
+  git('commit', '--quiet', '--message', 'shop-api')
+  return { home, project }
 }
 
 /** What the finished thread's shots run in: the browser, the thread, how to restart the stack, the failures so far. */
@@ -683,9 +774,7 @@ async function captureIncidentThread(
 
 async function main(): Promise<void> {
   // Before anything starts: a mistyped `--only` should not cost a session.
-  const wanted = wantedFeatures()
-  const chromiumFlag = process.argv.indexOf('--chromium')
-  const executablePath = chromiumFlag >= 0 ? process.argv[chromiumFlag + 1] : undefined
+  const wanted = wantedFeatures(OPTIONS.only)
   for (const port of PORTS) {
     if (await isListening(port))
       throw new Error(`feature-screenshots: port ${port} is in use — stop what is on it first`)
@@ -694,48 +783,7 @@ async function main(): Promise<void> {
   // A FIXED path, not a random one: the refusals name files under it (`web_fetch` names its
   // config), and a path that changes on every run changes the screenshots with it.
   const scratch = join(tmpdir(), 'enso-feature-shots')
-  rmSync(scratch, { recursive: true, force: true })
-  const home = join(scratch, 'home')
-  const project = join(scratch, DEMO_PROJECT)
-  mkdirSync(join(home, 'pi-agent'), { recursive: true })
-  writeFileSync(join(home, 'pi-agent', 'models.json'), JSON.stringify(MODELS_JSON, null, 2))
-  writeFileSync(join(home, 'pi-agent', 'settings.json'), JSON.stringify(PI_SETTINGS, null, 2))
-  writeFileSync(join(home, 'config.json'), JSON.stringify(ENSO_CONFIG, null, 2))
-  // The permission policy (#496): Enso's default, with `web_fetch` allowed. The default asks before
-  // every fetch, and prompt 2's fetch is scripted to reach web_fetch's OWN allowlist refusal — what
-  // Web access documents — not a permission question the script has no answer for. (Found when the
-  // capture first ran after the engine switch: it waited on that question until it timed out.)
-  writeFileSync(
-    join(home, 'permissions.json'),
-    JSON.stringify(
-      {
-        ...ENSO_DEFAULT_PERMISSION_POLICY,
-        permission: { ...ENSO_DEFAULT_PERMISSION_POLICY.permission, web_fetch: 'allow' },
-      },
-      null,
-      2,
-    ),
-  )
-  mkdirSync(join(home, 'prompts'))
-  for (const [file, prompt] of Object.entries(PROMPT_LIBRARY)) writeFileSync(join(home, 'prompts', file), prompt)
-  for (const [path, contents] of Object.entries(DEMO_FILES)) {
-    mkdirSync(dirname(join(project, path)), { recursive: true })
-    writeFileSync(join(project, path), contents)
-  }
-  // A repository, so the run context records a revision — and, once pi's edit lands, `dirty`.
-  // ⚠ Without an inherited GIT_DIR / GIT_INDEX_FILE: run from a hook's shell, `add` and `commit`
-  // would write into the repository making the commit (#807).
-  const git = (...args: string[]): void => {
-    const run = spawnSync('git', ['-c', 'user.name=demo', '-c', 'user.email=demo@example.invalid', ...args], {
-      cwd: project,
-      encoding: 'utf8',
-      env: gitChildEnvironment(),
-    })
-    if (run.status !== 0) throw new Error(`feature-screenshots: git ${args[0]} failed: ${run.stderr}`)
-  }
-  git('init', '--quiet', '--initial-branch=main')
-  git('add', '--all')
-  git('commit', '--quiet', '--message', 'shop-api')
+  const { home, project } = prepareScratch(scratch)
   const modelLog = join(scratch, 'model.log')
   const stopModel = startFeatureModel(MODEL_PORT, [FEATURE_SCRIPT, INCIDENT_SCRIPT], modelLog)
   let stack = startStack(home, project)
@@ -743,7 +791,7 @@ async function main(): Promise<void> {
   const failed: string[] = []
   try {
     await waitFor(async () => (await isListening(5178)) && (await isListening(5179)), 'the dev stack')
-    browser = await chromium.launch(executablePath === undefined ? {} : { executablePath })
+    browser = await chromium.launch(OPTIONS.chromium === undefined ? {} : { executablePath: OPTIONS.chromium })
     mkdirSync(OUT, { recursive: true })
 
     let threadId = ''
@@ -780,7 +828,7 @@ async function main(): Promise<void> {
     await browser?.close()
     await stopStack(stack).catch(() => undefined)
     stopModel()
-    if (process.argv.includes('--keep')) process.stdout.write(`feature-screenshots: kept ${scratch}\n`)
+    if (OPTIONS.keep) process.stdout.write(`feature-screenshots: kept ${scratch}\n`)
     else rmSync(scratch, { recursive: true, force: true })
   }
 }

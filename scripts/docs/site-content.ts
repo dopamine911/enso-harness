@@ -49,18 +49,26 @@ export function contentPath(page: string): string {
   return page.replace(/(^|\/)README\.md$/, '$1index.md')
 }
 
-/** Every markdown page under `docs/`, repo-relative, in a stable order. */
-export function documentationPages(): string[] {
-  const pages: string[] = []
+/**
+ * Every file under `root`'s `docs/` whose name `keep` accepts, relative to `docs/`, in a stable
+ * order. `root` is the repository's; a test passes a tree of its own (#838).
+ */
+function documentationFiles(root: string, keep: (fileName: string) => boolean): string[] {
+  const files: string[] = []
   const walk = (directory: string): void => {
     for (const childName of readdirSync(directory).toSorted()) {
       const path = join(directory, childName)
       if (statSync(path).isDirectory()) walk(path)
-      else if (childName.endsWith('.md')) pages.push(relative(join(ROOT, DOCS), path))
+      else if (keep(childName)) files.push(relative(join(root, DOCS), path))
     }
   }
-  walk(join(ROOT, DOCS))
-  return pages
+  walk(join(root, DOCS))
+  return files
+}
+
+/** Every markdown page under `docs/`, repo-relative, in a stable order. */
+export function documentationPages(root: string = ROOT): string[] {
+  return documentationFiles(root, (fileName) => fileName.endsWith('.md'))
 }
 
 /**
@@ -74,17 +82,8 @@ function isAsset(path: string): boolean {
 }
 
 /** Every image file under `docs/`, repo-relative to `docs/`, in a stable order. */
-export function documentationAssets(): string[] {
-  const assets: string[] = []
-  const walk = (directory: string): void => {
-    for (const childName of readdirSync(directory).toSorted()) {
-      const path = join(directory, childName)
-      if (statSync(path).isDirectory()) walk(path)
-      else if (isAsset(childName)) assets.push(relative(join(ROOT, DOCS), path))
-    }
-  }
-  walk(join(ROOT, DOCS))
-  return assets
+export function documentationAssets(root: string = ROOT): string[] {
+  return documentationFiles(root, isAsset)
 }
 
 /**
@@ -93,12 +92,12 @@ export function documentationAssets(): string[] {
  * Beside the pages that embed them (#437): a relative `![…](./images/x.png)` is resolved by Astro
  * against the projected page, so the file has to be where the link says.
  */
-export function projectAssets(target: string): string[] {
-  const assets = documentationAssets()
+export function projectAssets(target: string, root: string = ROOT): string[] {
+  const assets = documentationAssets(root)
   for (const asset of assets) {
     const destination = join(target, asset)
     mkdirSync(dirname(destination), { recursive: true })
-    copyFileSync(join(ROOT, DOCS, asset), destination)
+    copyFileSync(join(root, DOCS, asset), destination)
   }
   return assets
 }
@@ -201,16 +200,20 @@ export function sectionTitle(directory: string): string {
   return `${words.join(' ')} overview`
 }
 
-function project(): { written: number; indexes: number } {
-  const target = join(ROOT, CONTENT)
+/**
+ * Projects `root`'s `docs/` and README into its site content and writes the landing's feature map.
+ * `root` is the repository's; a test passes a tree of its own (#838).
+ */
+export function project(root: string = ROOT): { written: number; indexes: number } {
+  const target = join(root, CONTENT)
   // Rebuilt wholesale: a page deleted from `docs/` must not survive in the site's content.
   rmSync(target, { recursive: true, force: true })
   mkdirSync(target, { recursive: true })
 
   let written = 0
   const directoriesWithIndex = new Set<string>()
-  for (const page of documentationPages()) {
-    const source = readFileSync(join(ROOT, DOCS, page), 'utf8')
+  for (const page of documentationPages(root)) {
+    const source = readFileSync(join(root, DOCS, page), 'utf8')
     const destination = join(target, contentPath(page))
     mkdirSync(dirname(destination), { recursive: true })
     writeFileSync(destination, withFrontmatter(source, page))
@@ -218,14 +221,14 @@ function project(): { written: number; indexes: number } {
     written += 1
   }
 
-  projectAssets(target)
+  projectAssets(target, root)
 
   // The repository's README, as its own page. It was the site's root until the landing page
   // (`site/src/pages/index.astro`, hello-enso's design) took `/`; the root is a page now, not
   // projected content, so nothing here may write `index.md` at the top.
   writeFileSync(
     join(target, `${README_SLUG}.md`),
-    withFrontmatter(readFileSync(join(ROOT, 'README.md'), 'utf8'), 'README.md', 'repository'),
+    withFrontmatter(readFileSync(join(root, 'README.md'), 'utf8'), 'README.md', 'repository'),
   )
 
   // The landing page's feature map (#504), as DATA the page reads: the site takes its content as
@@ -238,17 +241,17 @@ function project(): { written: number; indexes: number } {
     text: group.text,
     features: group.features.map((spec) => ({ id: spec.id, title: spec.title, tagline: spec.landingTagline })),
   }))
-  mkdirSync(join(ROOT, GENERATED), { recursive: true })
-  writeFileSync(join(ROOT, GENERATED, 'landing-features.json'), `${JSON.stringify(landing, null, 2)}\n`)
+  mkdirSync(join(root, GENERATED), { recursive: true })
+  writeFileSync(join(root, GENERATED, 'landing-features.json'), `${JSON.stringify(landing, null, 2)}\n`)
 
   // A section with no `README.md` still needs a page at its path, because the prose links to it.
   // Derived from the directory, never written by hand: the pages it holds, by their own titles.
   let indexes = 0
-  for (const directory of documentationDirectories()) {
+  for (const directory of documentationDirectories(root)) {
     if (directoriesWithIndex.has(directory)) continue
-    const pages = documentationPages().filter((page) => dirname(page) === directory)
+    const pages = documentationPages(root).filter((page) => dirname(page) === directory)
     const entries = pages.map((page) => {
-      const title = pageTitle(readFileSync(join(ROOT, DOCS, page), 'utf8'), page)
+      const title = pageTitle(readFileSync(join(root, DOCS, page), 'utf8'), page)
       return `- [${title}](${SITE_BASE}/${page.replace(/\.md$/, '')}/)`
     })
     mkdirSync(join(target, directory), { recursive: true })
@@ -263,8 +266,8 @@ function project(): { written: number; indexes: number } {
 }
 
 /** Every directory under `docs/` that holds at least one page. */
-function documentationDirectories(): string[] {
-  return [...new Set(documentationPages().map((page) => dirname(page)))].filter((directory) => directory !== '.')
+function documentationDirectories(root: string): string[] {
+  return [...new Set(documentationPages(root).map((page) => dirname(page)))].filter((directory) => directory !== '.')
 }
 
 if (import.meta.main) {
