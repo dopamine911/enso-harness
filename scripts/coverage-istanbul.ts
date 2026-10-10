@@ -221,7 +221,7 @@ export function conversionSummary(conversion: Conversion): string {
   // A targeted `bun test <file>` overwrites the whole suite's LCOV (#234); its CRAP reads every unloaded file as estimated.
   const partial =
     conversion.records < MINIMUM_REPORTED_FILES
-      ? `; ⚠ ${conversion.records} file records, fewer than the ${MINIMUM_REPORTED_FILES} of a whole-suite run: a targeted run's LCOV`
+      ? `; ⚠ ${conversion.records} file records, fewer than the ${MINIMUM_REPORTED_FILES} of a whole-suite run: this LCOV is from a targeted run, so every file it did not load reads as fallow's estimate — run \`bun test\` and convert again`
       : ''
   return (
     `${conversion.files} files, ${conversion.functions} functions from coverage/lcov.info (written ${lcovAge()})` +
