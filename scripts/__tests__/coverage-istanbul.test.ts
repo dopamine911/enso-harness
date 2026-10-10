@@ -159,6 +159,8 @@ test('⚠ the installed fallow scores CRAP from the map: an unrun function as un
     const run = Bun.spawnSync([fallow, 'health', '--coverage', map, '--max-crap', '1', '--format', 'json', '--quiet'], {
       cwd: project,
     })
+    // fallow exits 1 when it reports findings, which this test needs; 2 is fallow itself failing.
+    if (run.exitCode === 2) throw new Error(`fallow failed: ${run.stderr.toString()}${run.stdout.toString()}`)
     const findings = crapFindingsOf(JSON.parse(run.stdout.toString()))
     const sign = findings.find((finding) => finding.name === 'sign')
     const parity = findings.find((finding) => finding.name === 'parity')
