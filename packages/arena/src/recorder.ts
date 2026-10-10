@@ -40,6 +40,15 @@ import {
 import { collectEnsoEvidence, threadIdsShown } from './evidence.ts'
 import { type ArenaEvidence, foldArenaManifest } from './manifest.ts'
 import { createPageLook, PAGE_CHANGES_SCRIPT, readPageMark } from './page-changes.ts'
+import {
+  type ArenaActionRun,
+  type ArenaActOutcome,
+  type ArenaHands,
+  actOnArena,
+  errorLine,
+  performArenaAction,
+  pointedRoleOf,
+} from './perform.ts'
 import { isRunning, stopProcessTree } from './process-tree.ts'
 import { createRegionReads } from './read-regions.ts'
 import { ARENA_GRACE_MS, type ArenaBounds, createRunControl, ensoSpendUsd } from './run-control.ts'
@@ -103,33 +112,6 @@ const CHANGE_POLL_MS = 1000
  * `createPageLook`): what the DOM's mutations do not show is seen within this, not within a poll.
  */
 const CHANGE_RECHECK_MS = 10_000
-/**
- * Accessibility roles that name nothing a person would point at (#680): text runs and wrappers. What
- * was under a click is the nearest node with any other role — the button, not the text inside it.
- */
-const ROLELESS: ReadonlySet<string> = new Set([
-  'generic',
-  'none',
-  'presentation',
-  'StaticText',
-  'InlineTextBox',
-  'LineBreak',
-])
-/** The actions that do not move the page: after any other, the wait's baseline is the page it left (#637). */
-const LEAVES_THE_PAGE: ReadonlySet<ArenaAction['action']> = new Set([
-  'read',
-  'screenshot',
-  'wait',
-  'note',
-  'stop',
-  'tabs',
-])
-/**
- * The actions after which what the agent knows of the page is unchanged (#737): a wait tells it
- * what it waited for, a note and a stop touch no page. Any other action marks the status log — the
- * agent moved the page or was shown it — so the next wait reads what came after.
- */
-const KEEPS_WHAT_IT_KNOWS: ReadonlySet<ArenaAction['action']> = new Set(['wait', 'note', 'stop'])
 /** The page-side function the recorder exposes (#737): a UI event's name and `detail`, forwarded as it fires. */
 const UI_EVENT_BINDING = '__ensoUiEvent'
 /** The margin a wait on the page keeps under the idle bound (#609), so a wait in progress never trips it. */
@@ -162,22 +144,6 @@ export interface ArenaRunOptions {
    * the control endpoint by `bun run arena act` — by whoever holds a shell, which no one checks.
    */
   readonly driver?: ArenaDriver
-}
-
-/**
- * What one action came to: its result, or why it failed or was refused — and, while the run lasts,
- * where it is: `running` with the budget left, or `grace` with the time left for the retrospective.
- */
-export interface ArenaActOutcome {
-  readonly ok: boolean
-  readonly result?: unknown
-  readonly error?: string
-  readonly phase?: 'running' | 'grace'
-  readonly remainingMs?: number
-  /** A visual run's view after the action (#680): the screenshot the agent is shown. */
-  readonly view?: string
-  /** A native dialog open over the page (#680): a page capture never shows one, so the answer says it. */
-  readonly dialog?: { readonly type: string; readonly message: string }
 }
 
 /** What the recorder hands an agent runner: its one way into the page, and the run's end. */
@@ -288,11 +254,6 @@ function controlRecordOf(
   return control === undefined
     ? { pid: process.pid, runDirectory, driver: 'agent', home }
     : { port: control.port ?? 0, pid: process.pid, runDirectory, driver: 'control', home }
-}
-
-/** An error's first line, redacted: what a timeline line or an answer says of a failure. */
-function errorLine(error: unknown, redact: (text: string) => string): string {
-  return redact(error instanceof Error ? (error.message.split('\n')[0] ?? '') : String(error))
 }
 
 /**
@@ -1039,17 +1000,7 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
         includeUserAgentShadowDOM: false,
       })
       const { nodes } = await session.send('Accessibility.getPartialAXTree', { backendNodeId, fetchRelatives: true })
-      const byId = new Map(nodes.map((node) => [node.nodeId, node]))
-      let node = nodes.find((candidate) => candidate.backendDOMNodeId === backendNodeId)
-      while (node !== undefined && (node.ignored || ROLELESS.has(String(node.role?.value ?? '')))) {
-        node = node.parentId === undefined ? undefined : byId.get(node.parentId)
-      }
-      if (node === undefined) return 'nothing with a role'
-      const name = String(node.name?.value ?? '')
-        .replaceAll(/\s+/g, ' ')
-        .trim()
-      const role = String(node.role?.value ?? 'unknown')
-      return name.length === 0 ? role : `${role} "${name.length > 60 ? `${name.slice(0, 59)}…` : name}"`
+      return pointedRoleOf(nodes, backendNodeId)
     } catch {
       return 'unknown'
     }
@@ -1249,34 +1200,35 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
         return { stopping: true }
     }
   }
-  const perform = async (action: ArenaAction, via: ArenaActionSource): Promise<unknown> => {
-    switch (action.action) {
-      case 'click':
-        return 'at' in action ? performWithPointer(action) : performOnControl(action)
-      case 'move':
-      case 'scroll':
-      case 'drag':
-        return performWithPointer(action)
-      case 'hover':
-      case 'fill':
-      case 'select':
-      case 'press':
-        return performOnControl(action)
-      case 'read':
-        return performRead(action)
-      case 'wait':
-        return performWait(action)
-      case 'tabs':
-      case 'switch-tab':
-      case 'close-tab':
-        return performOnTabs(action)
-      case 'note':
-      case 'restart-enso':
-      case 'stop':
-        return performOnRun(action, via)
-      default:
-        return performOnPage(action)
-    }
+  const hands: ArenaHands = {
+    withPointer: performWithPointer,
+    onControl: performOnControl,
+    read: performRead,
+    wait: performWait,
+    onTabs: performOnTabs,
+    onRun: performOnRun,
+    onPage: performOnPage,
+  }
+  const actionRun: ArenaActionRun = {
+    stopReason: () => stopReason,
+    describe: (action) => describeArenaAction(action, secrets()),
+    // In the grace window only the retrospective and the stop are taken (#609); refused, it is a line.
+    refusal: (action) =>
+      perceptionRefusal(action, perception) ?? runClock.refusal(action.action) ?? typedSecretRefusal(action, secrets()),
+    record: (body) => {
+      timeline.record(body, here())
+    },
+    tracing: context.tracing,
+    markStatus: () => statusLog.mark(),
+    perform: (action, via) => {
+      pointedAt = undefined
+      return untilDialogOrDone(performArenaAction(action, via, hands))
+    },
+    pointedAt: () => pointedAt,
+    moved: () => lastSeen.moved(),
+    shownAfter,
+    shoot,
+    redact,
   }
 
   const actOnce = async (request: unknown, via: ArenaActionSource): Promise<ArenaActOutcome> => {
@@ -1300,66 +1252,7 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
       return { ok: false, error: parsed.error }
     }
     const { action } = parsed
-    return serialized(async () => {
-      if (stopReason !== undefined) return { ok: false, error: `the run has stopped (${stopReason})` }
-      const detail = describeArenaAction(action, secrets())
-      // In the grace window only the retrospective and the stop are taken (#609); refused, it is a line.
-      const refusal =
-        perceptionRefusal(action, perception) ??
-        runClock.refusal(action.action) ??
-        typedSecretRefusal(action, secrets())
-      if (refusal !== undefined) {
-        timeline.record(
-          { kind: 'action', via, action: action.action, detail, outcome: 'failed', error: refusal, durationMs: 0 },
-          here(),
-        )
-        return { ok: false, error: refusal }
-      }
-      const began = performance.now()
-      await context.tracing.group(detail)
-      try {
-        pointedAt = undefined
-        // Before the move (#737): everything the page announces from here on is what the move caused.
-        if (!KEEPS_WHAT_IT_KNOWS.has(action.action)) statusLog.mark()
-        const result = await untilDialogOrDone(perform(action, via))
-        if (action.action !== 'note') {
-          timeline.record(
-            {
-              kind: 'action',
-              via,
-              action: action.action,
-              detail,
-              outcome: 'ok',
-              durationMs: Math.round(performance.now() - began),
-              ...(pointedAt === undefined ? {} : { under: pointedAt }),
-            },
-            here(),
-          )
-        }
-        const moved = !LEAVES_THE_PAGE.has(action.action)
-        if (moved) await lastSeen.moved()
-        return { ok: true, result, ...(await shownAfter(action, moved)) }
-      } catch (error) {
-        const message = errorLine(error, redact)
-        timeline.record(
-          {
-            kind: 'action',
-            via,
-            action: action.action,
-            detail,
-            outcome: 'failed',
-            error: message,
-            durationMs: Math.round(performance.now() - began),
-            ...(pointedAt === undefined ? {} : { under: pointedAt }),
-          },
-          here(),
-        )
-        await shoot('action-failed')
-        return { ok: false, error: message, ...(await shownAfter(action, false)) }
-      } finally {
-        await context.tracing.groupEnd()
-      }
-    })
+    return serialized(() => actOnArena(action, via, actionRun))
   }
   /** The run's place, on every answer while it lasts: the agent sees the end coming. */
   const withClock = (outcome: ArenaActOutcome): ArenaActOutcome => {

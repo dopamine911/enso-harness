@@ -200,28 +200,49 @@ async function readStandardInput(): Promise<string> {
 }
 
 /**
+ * What the container commands reach outside themselves: docker, standard input, the user building
+ * the image, and stderr. The real ones by default; a test's stand-ins so what each command hands
+ * docker is checked without one (#832).
+ */
+export interface ContainerIo {
+  readonly docker: (args: readonly string[], input?: string) => number
+  readonly standardInput: () => Promise<string>
+  readonly owner: () => { readonly uid: number; readonly gid: number }
+  readonly warn: (line: string) => void
+}
+
+const HOST_IO: ContainerIo = {
+  docker,
+  standardInput: readStandardInput,
+  owner: () => ({ uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000 }),
+  warn: (line) => {
+    process.stderr.write(`${line}\n`)
+  },
+}
+
+/**
  * `credential --api-key-stdin` writes an Anthropic API key, read from stdin, into the volume;
  * `--from FILE` writes a test account's `auth.json`; `--status` names the providers it holds.
  */
-async function credentialCommand(rest: readonly string[]): Promise<number> {
-  if (rest.includes('--status')) return docker(containerCredentialStatusArgs())
+async function credentialCommand(rest: readonly string[], io: ContainerIo): Promise<number> {
+  if (rest.includes('--status')) return io.docker(containerCredentialStatusArgs())
   const fromIndex = rest.indexOf('--from')
   const file = fromIndex === -1 ? undefined : rest[fromIndex + 1]
   try {
-    if (file !== undefined) return docker(containerCredentialArgs(), checkedAuthFile(readFileSync(file, 'utf8')))
+    if (file !== undefined) return io.docker(containerCredentialArgs(), checkedAuthFile(readFileSync(file, 'utf8')))
     if (rest.includes('--api-key-stdin')) {
-      return docker(containerCredentialArgs(), anthropicApiKeyAuth(await readStandardInput()))
+      return io.docker(containerCredentialArgs(), anthropicApiKeyAuth(await io.standardInput()))
     }
   } catch (error) {
-    process.stderr.write(`arena: ${error instanceof Error ? error.message : String(error)}\n`)
+    io.warn(`arena: ${error instanceof Error ? error.message : String(error)}`)
     return 1
   }
-  process.stderr.write('usage: bun run arena container credential --api-key-stdin | --from FILE | --status\n')
+  io.warn('usage: bun run arena container credential --api-key-stdin | --from FILE | --status')
   return 1
 }
 
 /** `start <arena start arguments>`: one run in the container, under `--runs DIR` or the arena's default. */
-function startCommand(rest: readonly string[], defaultOut: string): number {
+function startCommand(rest: readonly string[], defaultOut: string, io: ContainerIo): number {
   const runsIndex = rest.indexOf('--runs')
   const runsDirectory = runsIndex === -1 ? defaultOut : (rest[runsIndex + 1] ?? defaultOut)
   const arenaArguments =
@@ -230,36 +251,35 @@ function startCommand(rest: readonly string[], defaultOut: string): number {
       : rest.filter((_argument, argumentIndex) => argumentIndex !== runsIndex && argumentIndex !== runsIndex + 1)
   const refusal = containerStartRefusal(arenaArguments)
   if (refusal !== undefined) {
-    process.stderr.write(`arena: ${refusal}\n`)
+    io.warn(`arena: ${refusal}`)
     return 1
   }
   if (!existsSync(runsDirectory)) mkdirSync(runsDirectory, { recursive: true })
-  return docker(containerStartArgs({ runsDirectory, arenaArguments }))
+  return io.docker(containerStartArgs({ runsDirectory, arenaArguments }))
 }
 
 /** `bun run arena container <build | credential | start> …` — the exit code. `build` builds this checkout. */
 export async function runContainerCommand(
   argumentList: readonly string[],
-  context: { readonly repoRoot: string; readonly defaultOut: string },
+  context: { readonly repoRoot: string; readonly defaultOut: string; readonly io?: ContainerIo },
 ): Promise<number> {
   const [subcommand, ...rest] = argumentList
+  const io = context.io ?? HOST_IO
   switch (subcommand) {
     case 'build':
       try {
-        return docker(
-          containerBuildArgs(context.repoRoot, { uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000 }),
-        )
+        return io.docker(containerBuildArgs(context.repoRoot, io.owner()))
       } catch (error) {
-        process.stderr.write(`arena: ${error instanceof Error ? error.message : String(error)}\n`)
+        io.warn(`arena: ${error instanceof Error ? error.message : String(error)}`)
         return 1
       }
     case 'credential':
-      return await credentialCommand(rest)
+      return await credentialCommand(rest, io)
     case 'start':
-      return startCommand(rest, context.defaultOut)
+      return startCommand(rest, context.defaultOut, io)
     default:
-      process.stderr.write(
-        'usage: bun run arena container build | credential --api-key-stdin|--from FILE|--status | start --agent PROVIDER/MODEL [--runs DIR] [arena start flags]\n',
+      io.warn(
+        'usage: bun run arena container build | credential --api-key-stdin|--from FILE|--status | start --agent PROVIDER/MODEL [--runs DIR] [arena start flags]',
       )
       return 1
   }

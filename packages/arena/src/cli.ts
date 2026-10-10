@@ -170,9 +170,14 @@ const VALUED_FLAGS = [
 type ValuedFlag = (typeof VALUED_FLAGS)[number]
 const VALUED_FLAG_ARGUMENTS = new Set<string>(VALUED_FLAGS.map((flagName) => `--${flagName}`))
 
+/** A valued flag's value in `argumentList`: the argument after the flag. */
+function flagIn(argumentList: readonly string[], name: ValuedFlag): string | undefined {
+  const index = argumentList.indexOf(`--${name}`)
+  return index === -1 ? undefined : argumentList[index + 1]
+}
+
 function flag(name: ValuedFlag): string | undefined {
-  const index = rest.indexOf(`--${name}`)
-  return index === -1 ? undefined : rest[index + 1]
+  return flagIn(rest, name)
 }
 
 function fail(message: string): never {
@@ -296,37 +301,84 @@ function currentRun(): string | undefined {
   return existsSync(currentFile) ? readFileSync(currentFile, 'utf8').trim() : undefined
 }
 
+/** What a launch looks at and acts on before a `start`: the host's, or a test's stand-ins (#832). */
+export interface ArenaLaunchProbe {
+  /** Remove the TMPDIRs killed runs left, naming each (`launch.ts#sweepAbandonedRunTmps`). */
+  readonly sweep: () => readonly string[]
+  /** The run `<out>/current` names. */
+  readonly lastRun: () => string | undefined
+  /** Collect a dead recorder's run and stop its stack (`refoldRun`); throws when it cannot. */
+  readonly refold: (runDirectory: string) => Promise<void>
+  readonly isListening: (port: number) => Promise<boolean>
+  readonly portHolder: (port: number) => { readonly pid?: number; readonly command?: string }
+  /** What a run would start short of (`launch.ts#headroomShortfalls`). */
+  readonly shortfalls: () => readonly string[]
+  /** One line on stdout. */
+  readonly say: (line: string) => void
+}
+
 /**
  * Before a `start` (#742): what an earlier run left is taken back, and a run starts only with its
- * ports free and room to run in. A run whose recorder died (#607) gets its evidence collected and its
- * stack stopped, as `arena manifest` does, rather than a refusal naming the command. A live run, or
+ * ports free and room to run in — undefined then, else why not. A run whose recorder died (#607) gets
+ * its evidence collected and its stack stopped, as `arena manifest` does, rather than a refusal
+ * naming the command. ⚠ Before the ports are looked at: its stack is what holds them. A live run, or
  * anything else on the ports, is a refusal naming it.
  */
-async function prepareLaunch(): Promise<void> {
-  for (const swept of sweepAbandonedRunTmps())
-    process.stdout.write(`arena: removed ${swept}, left by a run that was killed\n`)
-  const last = currentRun()
-  const control = last === undefined ? undefined : readArenaControl(last)
-  if (last !== undefined && control !== undefined && isRunning(control.pid)) {
-    fail(`a run is live at ${last} (recorder pid ${control.pid}): stop it with its \`stop\` action first`)
-  }
-  if (last !== undefined && deadRecorderRun(last) !== undefined) {
-    process.stdout.write(
-      `arena: the last run's recorder died; collecting its evidence and stopping its stack first — ${last}\n`,
-    )
-    await refoldRun(last).catch((error: unknown) => fail(error instanceof Error ? error.message : String(error)))
-  }
+export async function launchRefusal(probe: ArenaLaunchProbe): Promise<string | undefined> {
+  for (const swept of probe.sweep()) probe.say(`arena: removed ${swept}, left by a run that was killed`)
+  const last = probe.lastRun()
+  const lastRefusal = last === undefined ? undefined : await lastRunRefusal(last, probe)
+  if (lastRefusal !== undefined) return lastRefusal
   for (const port of STACK_PORTS) {
-    if (!(await isListening(port))) continue
-    const holder = portHolder(port)
-    const who =
-      holder.pid === undefined
-        ? ''
-        : ` by pid ${holder.pid}${holder.command === undefined ? '' : ` (${holder.command})`}`
-    fail(`port ${port} is in use${who}: the arena starts its own stack`)
+    if (await probe.isListening(port)) return portInUseRefusal(port, probe.portHolder(port))
   }
-  const shortfalls = headroomShortfalls(outDirectory)
-  if (shortfalls.length > 0) fail(`not enough room to start a run: ${shortfalls.join('; ')}`)
+  const shortfalls = probe.shortfalls()
+  return shortfalls.length > 0 ? `not enough room to start a run: ${shortfalls.join('; ')}` : undefined
+}
+
+/**
+ * The last run in a launch's way: refused while it is live; collected first when its recorder died
+ * (#607), and refused only when it cannot be collected.
+ */
+async function lastRunRefusal(
+  last: string,
+  probe: Pick<ArenaLaunchProbe, 'refold' | 'say'>,
+): Promise<string | undefined> {
+  const control = readArenaControl(last)
+  if (control !== undefined && isRunning(control.pid)) {
+    return `a run is live at ${last} (recorder pid ${control.pid}): stop it with its \`stop\` action first`
+  }
+  if (deadRecorderRun(last) === undefined) return undefined
+  probe.say(`arena: the last run's recorder died; collecting its evidence and stopping its stack first — ${last}`)
+  try {
+    await probe.refold(last)
+    return undefined
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error)
+  }
+}
+
+/** A port in use refuses a launch, naming what holds it when `ss` could say. */
+function portInUseRefusal(port: number, holder: { readonly pid?: number; readonly command?: string }): string {
+  const command = holder.command === undefined ? '' : ` (${holder.command})`
+  const who = holder.pid === undefined ? '' : ` by pid ${holder.pid}${command}`
+  return `port ${port} is in use${who}: the arena starts its own stack`
+}
+
+/** `launchRefusal` over this host: a refusal fails the `start` before anything of it begins. */
+async function prepareLaunch(): Promise<void> {
+  const refusal = await launchRefusal({
+    sweep: () => sweepAbandonedRunTmps(),
+    lastRun: currentRun,
+    refold: refoldRun,
+    isListening,
+    portHolder,
+    shortfalls: () => headroomShortfalls(outDirectory),
+    say: (line) => {
+      process.stdout.write(`${line}\n`)
+    },
+  })
+  if (refusal !== undefined) fail(refusal)
 }
 
 /** Whether the stack's ports are free within `milliseconds`: a stopped stack's sockets close as its processes go. */
@@ -338,6 +390,27 @@ async function portsFreeWithin(milliseconds: number): Promise<boolean> {
     await Bun.sleep(200)
   }
   return false
+}
+
+/**
+ * What `cleanUp` says it found (#742), in one line: what was left in the run's scope and whether it
+ * hit its memory cap, whether the ports came free, and how much the runs' TMPDIR held.
+ */
+export function cleanUpSummary(found: {
+  readonly scope:
+    | { readonly unit: string; readonly memoryMax: string; readonly stopped: number; readonly result: string }
+    | undefined
+  readonly portsFree: boolean
+  readonly tmpBytes: number
+}): string {
+  const { scope } = found
+  const said = [
+    ...(scope === undefined ? [] : [`${scope.stopped} process(es) left in ${scope.unit} stopped`]),
+    ...(scope?.result === 'oom-kill' ? [`⚠ the run hit its ${scope.memoryMax} memory cap`] : []),
+    found.portsFree ? `ports ${STACK_PORTS.join('/')} free` : `⚠ ports ${STACK_PORTS.join('/')} still in use`,
+    `its TMPDIR removed (${sizeOf(found.tmpBytes)})`,
+  ]
+  return `arena: cleaned up — ${said.join('; ')}`
 }
 
 /**
@@ -353,19 +426,11 @@ async function cleanUp(runTmp: string, scope?: { readonly unit: string; readonly
       process.stderr.write(`arena: ${error instanceof Error ? error.message : String(error)}\n`)
     })
   }
-  const ended = scope === undefined ? undefined : endScope(scope.unit)
+  const ended = scope === undefined ? undefined : { ...scope, ...endScope(scope.unit) }
   const portsFree = await portsFreeWithin(10_000)
   const tmpBytes = bytesUnder(runTmp)
   rmSync(runTmp, { recursive: true, force: true })
-  const said = [
-    ...(scope === undefined || ended === undefined
-      ? []
-      : [`${ended.stopped} process(es) left in ${scope.unit} stopped`]),
-    ...(scope !== undefined && ended?.result === 'oom-kill' ? [`⚠ the run hit its ${scope.memoryMax} memory cap`] : []),
-    portsFree ? `ports ${STACK_PORTS.join('/')} free` : `⚠ ports ${STACK_PORTS.join('/')} still in use`,
-    `its TMPDIR removed (${sizeOf(tmpBytes)})`,
-  ]
-  process.stdout.write(`arena: cleaned up — ${said.join('; ')}\n`)
+  process.stdout.write(`${cleanUpSummary({ scope: ended, portsFree, tmpBytes })}\n`)
 }
 
 /** The agents `start` runs, one run each (#674): `--agents A,B`, else `--agent A`, else none for `--manual`. */
@@ -587,30 +652,49 @@ async function startRun(
   return { runDirectory, passed }
 }
 
-async function act(): Promise<void> {
-  const body = rest.find(
-    (argument, index) => !argument.startsWith('--') && !VALUED_FLAG_ARGUMENTS.has(rest[index - 1] ?? ''),
+/**
+ * What `act` posts, and where (#832): the one argument that is neither a flag nor a flag's value, as
+ * JSON, to the endpoint of the run `--run` names, else the current one — or why it cannot: no action,
+ * no run, a run not live, a recorder that died, a run its agent drives (it has no endpoint).
+ */
+export function actRequestOf(
+  argumentList: readonly string[],
+  currentRunDirectory: () => string | undefined,
+): { readonly port: number; readonly action: unknown } | { readonly refusal: string } {
+  const body = argumentList.find(
+    (argument, index) => !argument.startsWith('--') && !VALUED_FLAG_ARGUMENTS.has(argumentList[index - 1] ?? ''),
   )
-  if (body === undefined) fail(`act takes one JSON action — \`bun run arena brief\` lists them`)
-  const runDirectory = flag('run') ?? currentRun()
-  if (runDirectory === undefined) fail('no live run — start one with `bun run arena start`')
-  const control = readArenaControl(runDirectory) ?? fail(`the run at ${runDirectory} is not live`)
+  if (body === undefined) return { refusal: 'act takes one JSON action — `bun run arena brief` lists them' }
+  const runDirectory = flagIn(argumentList, 'run') ?? currentRunDirectory()
+  if (runDirectory === undefined) return { refusal: 'no live run — start one with `bun run arena start`' }
+  const control = readArenaControl(runDirectory)
+  if (control === undefined) return { refusal: `the run at ${runDirectory} is not live` }
   if (deadRecorderRun(runDirectory) !== undefined) {
-    fail(
-      `the recorder of the run at ${runDirectory} is gone (pid ${control.pid}) — ` +
+    return {
+      refusal:
+        `the recorder of the run at ${runDirectory} is gone (pid ${control.pid}) — ` +
         `\`bun run arena manifest ${runDirectory}\` collects its evidence`,
-    )
+    }
   }
   if (control.port === undefined) {
-    fail(`the run at ${runDirectory} is driven by its agent: the page takes actions only through the agent's tool`)
+    return {
+      refusal: `the run at ${runDirectory} is driven by its agent: the page takes actions only through the agent's tool`,
+    }
   }
-  let parsed: unknown
   try {
-    parsed = JSON.parse(body)
+    return { port: control.port, action: JSON.parse(body) }
   } catch {
-    fail('the action is not JSON')
+    return { refusal: 'the action is not JSON' }
   }
-  const response = await fetch(`http://127.0.0.1:${control.port}/act`, { method: 'POST', body: JSON.stringify(parsed) })
+}
+
+async function act(): Promise<void> {
+  const request = actRequestOf(rest, currentRun)
+  if ('refusal' in request) fail(request.refusal)
+  const response = await fetch(`http://127.0.0.1:${request.port}/act`, {
+    method: 'POST',
+    body: JSON.stringify(request.action),
+  })
   const answer = (await response.json()) as { readonly ok: boolean }
   process.stdout.write(`${JSON.stringify(answer, null, 2)}\n`)
   process.exit(answer.ok ? 0 : 1)
@@ -718,85 +802,88 @@ function login(): void {
   process.stdout.write(`arena: logged in: ${providers.join(', ')}\n`)
 }
 
-switch (command) {
-  case 'container':
-    process.exitCode = await runContainerCommand(rest, { repoRoot, defaultOut: outDirectory })
-    break
-  case 'start':
-    await start()
-    break
-  case 'login':
-    login()
-    break
-  case 'prune': {
-    const keep = flag('keep')
-    const olderThan = flag('older-than')
-    if (keep === undefined && olderThan === undefined) fail('prune takes --keep N, --older-than DAYS, or both')
-    const dryRun = rest.includes('--dry-run')
-    const pruned = pruneArenaRuns({
-      outDirectory,
-      dryRun,
-      now: new Date(),
-      ...(keep === undefined ? {} : { keep: numberFlag('keep', 0) }),
-      ...(olderThan === undefined ? {} : { olderThanDays: numberFlag('older-than', 0) }),
-    })
-    process.stdout.write(`${renderPrunedRuns(pruned, dryRun)}\n`)
-    break
-  }
-  case 'brief':
-    if (rest.includes('--review')) process.stdout.write(arenaReviewBrief(briefContext(flag('run')), 'other'))
-    else {
-      const channel = rest.includes('--manual') ? 'command' : 'tool'
-      process.stdout.write(arenaBrief(scenarioNamed(), channel, briefContext(flag('run'))))
-    }
-    break
-  case 'act':
-    await act()
-    break
-  case 'manifest': {
-    const runDirectory = resolve(rest[0] ?? fail('manifest takes a run directory'))
-    await refoldRun(runDirectory).catch((error: unknown) =>
-      fail(error instanceof Error ? error.message : String(error)),
-    )
-    break
-  }
-  case 'score':
-    scoreRun(rest[0] ?? fail('score takes a run directory'))
-    break
-  case 'compare': {
-    // --by-model (#674): any number of runs, grouped by agent model and perception.
-    const runDirectories = rest.filter((argument) => argument !== '--by-model').map((argument) => resolve(argument))
-    if (rest.includes('--by-model')) {
-      if (runDirectories.length === 0) fail('compare --by-model takes the run directories to group')
-      process.stdout.write(compareByModel(runDirectories))
+// Run as a command only (#832): a test imports this file for its decisions without starting the arena.
+if (import.meta.main) {
+  switch (command) {
+    case 'container':
+      process.exitCode = await runContainerCommand(rest, { repoRoot, defaultOut: outDirectory })
+      break
+    case 'start':
+      await start()
+      break
+    case 'login':
+      login()
+      break
+    case 'prune': {
+      const keep = flag('keep')
+      const olderThan = flag('older-than')
+      if (keep === undefined && olderThan === undefined) fail('prune takes --keep N, --older-than DAYS, or both')
+      const dryRun = rest.includes('--dry-run')
+      const pruned = pruneArenaRuns({
+        outDirectory,
+        dryRun,
+        now: new Date(),
+        ...(keep === undefined ? {} : { keep: numberFlag('keep', 0) }),
+        ...(olderThan === undefined ? {} : { olderThanDays: numberFlag('older-than', 0) }),
+      })
+      process.stdout.write(`${renderPrunedRuns(pruned, dryRun)}\n`)
       break
     }
-    process.stdout.write(
-      compareRunDirectories(
-        runDirectories[0] ?? fail('compare takes two run directories'),
-        runDirectories[1] ?? fail('compare takes two run directories'),
-      ),
-    )
-    break
+    case 'brief':
+      if (rest.includes('--review')) process.stdout.write(arenaReviewBrief(briefContext(flag('run')), 'other'))
+      else {
+        const channel = rest.includes('--manual') ? 'command' : 'tool'
+        process.stdout.write(arenaBrief(scenarioNamed(), channel, briefContext(flag('run'))))
+      }
+      break
+    case 'act':
+      await act()
+      break
+    case 'manifest': {
+      const runDirectory = resolve(rest[0] ?? fail('manifest takes a run directory'))
+      await refoldRun(runDirectory).catch((error: unknown) =>
+        fail(error instanceof Error ? error.message : String(error)),
+      )
+      break
+    }
+    case 'score':
+      scoreRun(rest[0] ?? fail('score takes a run directory'))
+      break
+    case 'compare': {
+      // --by-model (#674): any number of runs, grouped by agent model and perception.
+      const runDirectories = rest.filter((argument) => argument !== '--by-model').map((argument) => resolve(argument))
+      if (rest.includes('--by-model')) {
+        if (runDirectories.length === 0) fail('compare --by-model takes the run directories to group')
+        process.stdout.write(compareByModel(runDirectories))
+        break
+      }
+      process.stdout.write(
+        compareRunDirectories(
+          runDirectories[0] ?? fail('compare takes two run directories'),
+          runDirectories[1] ?? fail('compare takes two run directories'),
+        ),
+      )
+      break
+    }
+    case 'report': {
+      const runDirectory = resolve(rest[0] ?? fail('report takes a run directory'))
+      // Test output is redacted with the run's own secrets, like everything else the run keeps (#610).
+      const secrets = arenaSecretValues(runHomeOf(runDirectory, operatorHome, recordedRunHome(runDirectory)))
+      writeArenaReport(runDirectory, {
+        runTests: rest.includes('--run-tests'),
+        path: process.env['PATH'] ?? '/usr/bin:/bin',
+        redact: (text) => redactJudgeText(text, secrets),
+        bun: process.execPath,
+      })
+      process.stdout.write(`${join(runDirectory, 'report.md')}\n`)
+      break
+    }
+    case 'publish':
+      publish(resolve(rest[0] ?? fail('publish takes a reviewed run directory')))
+      break
+    default:
+      fail(
+        'usage: bun run arena start --agent PROVIDER/MODEL | start --agents A,B | start --manual | login | brief | act <json> | manifest <run directory> | score <run directory> | compare <run directory> <run directory> | compare --by-model <run directory>… | report <run directory> [--run-tests] | publish <run directory> [--corpus OWNER/REPO] [--dry-run] | prune --keep N | --older-than DAYS [--dry-run] | container build|credential|start',
+      )
   }
-  case 'report': {
-    const runDirectory = resolve(rest[0] ?? fail('report takes a run directory'))
-    // Test output is redacted with the run's own secrets, like everything else the run keeps (#610).
-    const secrets = arenaSecretValues(runHomeOf(runDirectory, operatorHome, recordedRunHome(runDirectory)))
-    writeArenaReport(runDirectory, {
-      runTests: rest.includes('--run-tests'),
-      path: process.env['PATH'] ?? '/usr/bin:/bin',
-      redact: (text) => redactJudgeText(text, secrets),
-      bun: process.execPath,
-    })
-    process.stdout.write(`${join(runDirectory, 'report.md')}\n`)
-    break
-  }
-  case 'publish':
-    publish(resolve(rest[0] ?? fail('publish takes a reviewed run directory')))
-    break
-  default:
-    fail(
-      'usage: bun run arena start --agent PROVIDER/MODEL | start --agents A,B | start --manual | login | brief | act <json> | manifest <run directory> | score <run directory> | compare <run directory> <run directory> | compare --by-model <run directory>… | report <run directory> [--run-tests] | publish <run directory> [--corpus OWNER/REPO] [--dry-run] | prune --keep N | --older-than DAYS [--dry-run] | container build|credential|start',
-    )
 }

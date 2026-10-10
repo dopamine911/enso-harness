@@ -33,7 +33,7 @@ import {
   waitForChange,
 } from '../actions.ts'
 import { collectEnsoEvidence } from '../evidence.ts'
-import { type ArenaEvidence, foldArenaManifest } from '../manifest.ts'
+import { type ArenaEvidence, arenaEvidenceRowOf, foldArenaManifest } from '../manifest.ts'
 import { arenaActCommand, arenaBrief, arenaReviewBrief, githubRepositoryOf, SNAKE_SCENARIO } from '../scenario.ts'
 import { type ArenaClock, type ArenaEventBody, openTimeline, pagePlace, readTimeline } from '../timeline.ts'
 
@@ -679,6 +679,44 @@ test('a run whose recorder died says so', () => {
     scenario: 'unknown',
     stopReason: 'not stopped',
   })
+})
+
+test('an evidence row read back from disk is one only when its status carries its own field (#607)', () => {
+  expect(arenaEvidenceRowOf({ kind: 'stats', status: 'collected', path: 'enso/evidence/stats.json' })).toEqual({
+    kind: 'stats',
+    status: 'collected',
+    path: 'enso/evidence/stats.json',
+  })
+  for (const status of ['missing', 'skipped'] as const) {
+    expect(arenaEvidenceRowOf({ kind: 'about', status, reason: 'Enso was down' })).toEqual({
+      kind: 'about',
+      status,
+      reason: 'Enso was down',
+    })
+  }
+  // Only the row's own fields are kept: anything else in the file is not carried into a refold.
+  expect(arenaEvidenceRowOf({ kind: 'stats', status: 'collected', path: 'p', extra: 1 })).toEqual({
+    kind: 'stats',
+    status: 'collected',
+    path: 'p',
+  })
+
+  for (const notARow of [
+    undefined,
+    null,
+    'stats',
+    { status: 'collected', path: 'p' },
+    { kind: 7, status: 'collected', path: 'p' },
+    { kind: 'stats' },
+    // A status with the other status's field, or with its own of the wrong type.
+    { kind: 'stats', status: 'collected', reason: 'r' },
+    { kind: 'stats', status: 'collected', path: 3 },
+    { kind: 'about', status: 'missing', path: 'p' },
+    { kind: 'about', status: 'skipped', reason: false },
+    { kind: 'about', status: 'lost', reason: 'r' },
+  ]) {
+    expect(arenaEvidenceRowOf(notARow)).toBeUndefined()
+  }
 })
 
 test('Enso evidence: collected bodies are redacted, everything else is a missing row naming why', async () => {

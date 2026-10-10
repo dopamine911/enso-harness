@@ -19,8 +19,9 @@ import {
   parseModelReference,
   supersededReadText,
 } from '../agent.ts'
+import type { ArenaActOutcome } from '../perform.ts'
 import { createRegionReads, readMarkOf } from '../read-regions.ts'
-import { type ArenaActOutcome, type ArenaDriverSession, awaitDriverEnd } from '../recorder.ts'
+import { type ArenaDriverSession, awaitDriverEnd } from '../recorder.ts'
 import type { ArenaEventBody } from '../timeline.ts'
 
 /**

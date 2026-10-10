@@ -1,5 +1,9 @@
 import { expect, test } from 'bun:test'
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import {
+  type ContainerIo,
   ARENA_CREDENTIALS_VOLUME,
   anthropicApiKeyAuth,
   checkedAuthFile,
@@ -7,6 +11,7 @@ import {
   containerCredentialArgs,
   containerStartArgs,
   containerStartRefusal,
+  runContainerCommand,
 } from '../container.ts'
 
 /**
@@ -100,4 +105,130 @@ test('a credential that is not one is refused before it reaches the volume', () 
   const oauth = '{"anthropic":{"type":"oauth","access":"a","refresh":"r","expires":1}}'
   expect(checkedAuthFile(oauth)).toBe(`${oauth}\n`)
   expect(checkedAuthFile('{"openai":{"type":"api_key","key":"k"}}\n')).toBe('{"openai":{"type":"api_key","key":"k"}}\n')
+})
+
+/** The container commands over stand-ins: each docker call with its input, and each line said on stderr. */
+function containerIo(
+  owner = { uid: 1234, gid: 5678 },
+  standardInput = '',
+): {
+  readonly io: ContainerIo
+  readonly calls: { readonly args: readonly string[]; readonly input?: string }[]
+  readonly warned: string[]
+} {
+  const calls: { readonly args: readonly string[]; readonly input?: string }[] = []
+  const warned: string[] = []
+  return {
+    io: {
+      docker: (args, input) => {
+        calls.push(input === undefined ? { args } : { args, input })
+        return 0
+      },
+      standardInput: () => Promise.resolve(standardInput),
+      owner: () => owner,
+      warn: (line) => warned.push(line),
+    },
+    calls,
+    warned,
+  }
+}
+
+const runContainer = (
+  argumentList: readonly string[],
+  io: ContainerIo,
+  defaultOut = '/tmp/arena-default-out',
+): Promise<number> => runContainerCommand(argumentList, { repoRoot: '/repo', defaultOut, io })
+
+test('`container build` builds this checkout for the user running it; as root it builds nothing and exits 1', async () => {
+  const { io, calls } = containerIo()
+  expect(await runContainer(['build'], io)).toBe(0)
+  expect(calls).toEqual([{ args: containerBuildArgs('/repo', { uid: 1234, gid: 5678 }) }])
+
+  const root = containerIo({ uid: 0, gid: 0 })
+  expect(await runContainer(['build'], root.io)).toBe(1)
+  expect(root.calls).toEqual([])
+  expect(root.warned).toEqual([
+    'arena: the image is built for the user who runs it, and root is not one: build without sudo',
+  ])
+})
+
+test('⚠ `container credential --api-key-stdin` hands docker the key as its input, never as an argument', async () => {
+  const key = 'sk-ant-api03-notarealkey-0123456789abcdef'
+  const { io, calls } = containerIo(undefined, `${key}\n`)
+  expect(await runContainer(['credential', '--api-key-stdin'], io)).toBe(0)
+  expect(calls).toEqual([{ args: containerCredentialArgs(), input: anthropicApiKeyAuth(key) }])
+  expect(calls[0]?.args.join(' ')).not.toContain(key)
+})
+
+test('`container credential --from FILE` writes the file only once it reads as a pi credential', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'arena-container-'))
+  const good = join(directory, 'auth.json')
+  writeFileSync(good, '{"anthropic":{"type":"api_key","key":"k"}}')
+  const bad = join(directory, 'not-auth.json')
+  writeFileSync(bad, '{"anthropic":{"key":"k"}}')
+
+  const { io, calls, warned } = containerIo()
+  expect(await runContainer(['credential', '--from', good], io)).toBe(0)
+  expect(calls).toEqual([{ args: containerCredentialArgs(), input: '{"anthropic":{"type":"api_key","key":"k"}}\n' }])
+
+  expect(await runContainer(['credential', '--from', bad], io)).toBe(1)
+  expect(await runContainer(['credential', '--from', join(directory, 'absent.json')], io)).toBe(1)
+  expect(calls).toHaveLength(1)
+  expect(warned[0]).toBe('arena: anthropic: not a pi credential (api_key or oauth)')
+  expect(warned[1]).toContain('ENOENT')
+})
+
+test('`container credential --status` reads the volume and writes nothing; with no mode it is the usage, and no docker', async () => {
+  const { io, calls, warned } = containerIo()
+  expect(await runContainer(['credential', '--status'], io)).toBe(0)
+  expect(calls).toHaveLength(1)
+  expect(calls[0]?.input).toBeUndefined()
+  expect(calls[0]?.args).not.toContain('--interactive')
+  expect(mountsOf(calls[0]?.args ?? [])).toEqual(mountsOf(containerCredentialArgs()))
+
+  expect(await runContainer(['credential'], io)).toBe(1)
+  expect(await runContainer(['credential', '--from'], io)).toBe(1)
+  expect(calls).toHaveLength(1)
+  expect(warned).toEqual([
+    'usage: bun run arena container credential --api-key-stdin | --from FILE | --status',
+    'usage: bun run arena container credential --api-key-stdin | --from FILE | --status',
+  ])
+})
+
+test('`container start` runs under `--runs DIR`, made when absent and not passed on; a refused flag runs nothing', async () => {
+  const runs = join(mkdtempSync(join(tmpdir(), 'arena-container-')), 'runs')
+  const { io, calls, warned } = containerIo()
+  expect(await runContainer(['start', '--runs', runs, '--agent', 'anthropic/claude', '--minutes', '5'], io)).toBe(0)
+  expect(existsSync(runs)).toBe(true)
+  expect(calls).toEqual([
+    {
+      args: containerStartArgs({
+        runsDirectory: runs,
+        arenaArguments: ['--agent', 'anthropic/claude', '--minutes', '5'],
+      }),
+    },
+  ])
+
+  const defaultOut = join(runs, 'default')
+  expect(await runContainer(['start', '--agent', 'anthropic/claude'], io, defaultOut)).toBe(0)
+  expect(calls[1]).toEqual({
+    args: containerStartArgs({ runsDirectory: defaultOut, arenaArguments: ['--agent', 'anthropic/claude'] }),
+  })
+
+  expect(await runContainer(['start', '--agent', 'anthropic/claude', '--headed'], io)).toBe(1)
+  expect(await runContainer(['start', '--runs', runs], io)).toBe(1)
+  expect(calls).toHaveLength(2)
+  expect(warned).toEqual([
+    "arena: --headed is the container's to decide: it is not taken by `arena container start`",
+    'arena: a container run needs --agent PROVIDER/MODEL',
+  ])
+})
+
+test('an unknown `container` subcommand is the usage, exit 1, and no docker', async () => {
+  const { io, calls, warned } = containerIo()
+  expect(await runContainer(['push'], io)).toBe(1)
+  expect(await runContainer([], io)).toBe(1)
+  expect(calls).toEqual([])
+  expect(warned).toHaveLength(2)
+  expect(warned[0]).toStartWith('usage: bun run arena container build | credential')
 })
