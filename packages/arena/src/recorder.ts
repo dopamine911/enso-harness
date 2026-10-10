@@ -2,29 +2,18 @@ import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
-import { ENSO_UI_EVENTS, EnsoThreadStatusEvent } from '@enso/core'
+import { ENSO_UI_EVENTS } from '@enso/core'
 import { gitChildEnvironment } from '@enso/core/git'
 import { redactJudgeText } from '@enso/core/judge'
 import { isListening } from '@enso/core/loopback'
 import { ensoProjectsDir, projectIdOf, projectTreesDir, realpathOrSelf } from '@enso/core/paths'
-import {
-  type Browser,
-  type BrowserContext,
-  type CDPSession,
-  chromium,
-  type Dialog,
-  type Locator,
-  type Page,
-} from '@playwright/test'
-import type { Subprocess } from 'bun'
-import { Check } from 'typebox/value'
+import { type Browser, type BrowserContext, type CDPSession, chromium, type Dialog, type Page } from '@playwright/test'
 import {
   ARENA_REFUSED_DETAIL,
   ARENA_RUNNER_STILL_RUNNING,
   ARENA_VIEW,
   type ArenaAction,
   type ArenaPoint,
-  type ArenaTarget,
   createChangeBaseline,
   createStatusLog,
   describeArenaAction,
@@ -34,12 +23,29 @@ import {
   perceptionRefusal,
   POINT_FIELDS,
   typedSecretRefusal,
-  waitForAttention,
-  waitForChange,
 } from './actions.ts'
+import { createEnsoStack } from './enso-stack.ts'
 import { collectEnsoEvidence, threadIdsShown } from './evidence.ts'
 import { type ArenaEvidence, foldArenaManifest } from './manifest.ts'
 import { createPageLook, PAGE_CHANGES_SCRIPT, readPageMark } from './page-changes.ts'
+import {
+  ACTION_TIMEOUT_MS,
+  type ArenaEyes,
+  type ArenaFront,
+  type ArenaPointer,
+  type ArenaRunHands,
+  type ArenaTabs,
+  type ArenaWaiting,
+  CHANGE_POLL_MS,
+  createDialogWaiters,
+  performOnControl,
+  performOnPage,
+  performOnRun,
+  performOnTabs,
+  performWait,
+  performWithPointer,
+  shownAfter,
+} from './page-hands.ts'
 import {
   type ArenaActionRun,
   type ArenaActOutcome,
@@ -70,6 +76,7 @@ import {
   pagePlace,
   readTimeline,
 } from './timeline.ts'
+import { hearUiEvent } from './ui-status.ts'
 
 /**
  * The arena recorder (#556): it starts Enso, owns the browser, and is the agent's only hands on
@@ -103,10 +110,6 @@ const EVENT_SHOT_SPACING_MS = 2000
 /** The pause before a failed screenshot's second try (#665): long enough for a reload to settle. */
 const SHOT_RETRY_MS = 500
 const VIEWPORT = { width: 1440, height: 900 } as const
-/** A single action's own timeout: a control that never appears fails the action, not the run. */
-const ACTION_TIMEOUT_MS = 15_000
-/** How often a wait until change looks at the page (#637): a card is seen within about a second. */
-const CHANGE_POLL_MS = 1000
 /**
  * How old a wait's last look at the page may grow while the page's change count holds still (#740,
  * `createPageLook`): what the DOM's mutations do not show is seen within this, not within a poll.
@@ -209,35 +212,8 @@ export function makeProject(project: string): void {
   })
 }
 
-/**
- * What a page read can show: no element a modal dialog hid (`aria-hidden`, which Radix sets on
- * everything beside an open dialog) or made `inert`. `getByRole` leaves those out by itself; the
- * text, label and placeholder locators do not.
- */
-const READABLE = ':not([aria-hidden="true"], [aria-hidden="true"] *, [inert], [inert] *)'
-
-/**
- * The control a target names, among what the agent can read (found live): with the Start dialog
- * open, `placeholder: "ask pi something"` matched both the dialog's prompt and the composer behind
- * it, so the agent's first fill failed on a box its read never showed — and after a fork, it sent
- * the fork's prompt unchanged.
- */
-function locate(page: Page, target: ArenaTarget): Locator {
-  const exact = target.exact === true
-  let found: Locator
-  if ('role' in target) {
-    found = page.getByRole(target.role as Parameters<Page['getByRole']>[0], {
-      ...(target.name === undefined ? {} : { name: target.name }),
-      exact,
-    })
-  } else if ('text' in target) found = page.getByText(target.text, { exact }).and(page.locator(READABLE))
-  else if ('label' in target) found = page.getByLabel(target.label, { exact }).and(page.locator(READABLE))
-  else found = page.getByPlaceholder(target.placeholder, { exact }).and(page.locator(READABLE))
-  return target.nth === undefined ? found : found.nth(target.nth)
-}
-
 /** The name a refused request gave its action, short and redacted, for the timeline line that records the refusal. */
-function refusedActionName(request: unknown, redact: (text: string) => string): string {
+export function refusedActionName(request: unknown, redact: (text: string) => string): string {
   const named =
     typeof request === 'object' && request !== null && 'action' in request && typeof request.action === 'string'
       ? request.action
@@ -569,43 +545,29 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
 
   // ── Enso, as a child the recorder outlives ─────────────────────────────────────────────────
   const stackLog = join(ensoDirectory, 'stack.log')
-  let enso: Subprocess<'ignore', 'pipe', 'pipe'> | undefined
   let stopping = false
-  const pipeToLog = async (stream: ReadableStream<Uint8Array>): Promise<void> => {
-    for await (const chunk of stream) appendFileSync(stackLog, redact(new TextDecoder().decode(chunk)))
-  }
-  const startEnso = async (): Promise<boolean> => {
-    const child = Bun.spawn(['bun', 'run', 'dev', project], {
-      cwd: options.repoRoot,
-      env: { ...options.environment, ENSO_HOME: options.home },
-      stdin: 'ignore',
-      stdout: 'pipe',
-      stderr: 'pipe',
-      onExit: (_child, code, signal) => {
-        if (enso !== child || stopping) return
-        enso = undefined
-        timeline.record({ kind: 'enso-exit', exit: String(code ?? signal ?? 'unknown') })
-        void shoot('enso-exit')
-      },
-    })
-    enso = child
-    publishControl(child.pid)
-    void pipeToLog(child.stdout)
-    void pipeToLog(child.stderr)
-    timeline.record({ kind: 'enso-start' })
-    return waitForWeb(STACK_STARTUP_TIMEOUT_MS)
-  }
-  const stopEnso = async (): Promise<void> => {
-    const child = enso
-    enso = undefined
-    if (child === undefined) return
-    // The whole tree (#742): `bun run dev` alone leaves a child slower than its launcher's 500 ms.
-    const left = await stopProcessTree(child.pid, STACK_STOP_GRACE_MS)
-    if (left.length > 0)
-      timeline.record({ kind: 'recorder-error', during: 'stopping Enso', error: `still running: ${left.join(', ')}` })
-  }
-  if (!(await startEnso())) {
-    await stopEnso()
+  const enso = createEnsoStack({
+    spawn: (onExit) =>
+      Bun.spawn(['bun', 'run', 'dev', project], {
+        cwd: options.repoRoot,
+        env: { ...options.environment, ENSO_HOME: options.home },
+        stdin: 'ignore',
+        stdout: 'pipe',
+        stderr: 'pipe',
+        onExit: (_child, code, signal) => onExit(code, signal),
+      }),
+    answered: () => waitForWeb(STACK_STARTUP_TIMEOUT_MS),
+    stopTree: (pid) => stopProcessTree(pid, STACK_STOP_GRACE_MS),
+    log: (text) => appendFileSync(stackLog, redact(text)),
+    record: (body) => {
+      timeline.record(body)
+    },
+    shoot,
+    started: publishControl,
+    stopping: () => stopping,
+  })
+  if (!(await enso.start())) {
+    await enso.stop()
     throw new Error(
       `Enso did not answer on ${ARENA_WEB_ORIGIN} within ${STACK_STARTUP_TIMEOUT_MS / 1000} s — see ${stackLog}`,
     )
@@ -619,7 +581,7 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
     context,
     page: firstPage,
   } = await openTracedPage(options, runId).catch(async (error: unknown) => {
-    await stopEnso()
+    await enso.stop()
     throw error
   })
   // ── The tabs (#675) ────────────────────────────────────────────────────────────────────────
@@ -678,8 +640,21 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
   // agent is the front tab's — a game's alert in tab 1 must not answer for Enso's tab, nor block it.
   const dialogs = new Map<number, Dialog>()
   const frontDialog = (): Dialog | undefined => dialogs.get(front)
-  /** Who is waiting for the front tab's next dialog: an action in flight (#691). */
-  const dialogWaiters = new Set<(tabNumber: number) => void>()
+  /** Who is waiting for a tab's next dialog: an action in flight (#691), a wait until attention (#648). */
+  const dialogWaiters = createDialogWaiters()
+  /** The tab in front as the page's hands reach it (`page-hands.ts`). */
+  const frontHands: ArenaFront = {
+    page: inFront,
+    here,
+    tab: () => front,
+    dialog: frontDialog,
+    forgetDialog: () => {
+      dialogs.delete(front)
+    },
+    nextDialog: dialogWaiters.next,
+    shoot,
+    redact,
+  }
   /**
    * An action raced against the front tab opening a native dialog (#691). Playwright does not finish
    * a click whose dialog is unanswered, and the arena leaves dialogs open (#609), so the click would
@@ -687,16 +662,9 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
    * once the dialog is answered, and its outcome is not anyone's to report.
    */
   const untilDialogOrDone = async (work: Promise<unknown>): Promise<unknown> => {
-    const atFront = front
-    let waiter: ((tabNumber: number) => void) | undefined
-    const opened = new Promise<'dialog'>((resolve) => {
-      waiter = (tabNumber) => {
-        if (tabNumber === atFront) resolve('dialog')
-      }
-      dialogWaiters.add(waiter)
-    })
+    const nextDialog = dialogWaiters.next(front)
     try {
-      const first = await Promise.race([work, opened])
+      const first = await Promise.race([work, nextDialog.opened])
       if (first !== 'dialog') return first
       void work.catch(() => undefined)
       const dialog = frontDialog()
@@ -705,15 +673,8 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
         ...(dialog === undefined ? {} : { dialog: { type: dialog.type(), message: redact(dialog.message()) } }),
       }
     } finally {
-      if (waiter !== undefined) dialogWaiters.delete(waiter)
+      nextDialog.release()
     }
-  }
-  const answerDialog = async (answer: (dialog: Dialog) => Promise<void>): Promise<ArenaPagePlace> => {
-    const dialog = frontDialog()
-    if (dialog === undefined) throw new Error('no dialog is open')
-    dialogs.delete(front)
-    await answer(dialog)
-    return here()
   }
   /** One tab's listeners: each event is placed at ITS tab, and captured only when that tab is in front. */
   const watch = (tabPage: Page, tabNumber: number): void => {
@@ -767,7 +728,7 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
       dialogs.set(tabNumber, dialog)
       timeline.record({ kind: 'dialog', dialog: dialog.type(), message: redact(dialog.message()) }, there())
       shootIfInFront('dialog')
-      for (const waiter of dialogWaiters) waiter(tabNumber)
+      dialogWaiters.opened(tabNumber)
     })
     tabPage.on('close', () => {
       // The browser closing at the stop closes every tab: that is the run ending, not the agent.
@@ -812,26 +773,23 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
 
   // ── The page's announcements (#737) ────────────────────────────────────────────────────────
   // Enso's page announces its thread's status as a DOM event (core's `ENSO_UI_EVENTS`); a script
-  // installed before any page's own forwards it here, and a wait until attention reads the log
-  // instead of the page. Only a shown pane's word counts, and only once it checks against the
-  // schema: a page on another origin in this context (a preview, #713) can call the binding too.
+  // installed before any page's own forwards it here (`hearUiEvent`), and a wait until attention
+  // reads the log instead of the page.
   const statusLog = createStatusLog()
   const tabOf = (tabPage: Page): number | undefined => {
     for (const [tabNumber, candidate] of tabs) if (candidate === tabPage) return tabNumber
     return undefined
   }
   await context.exposeBinding(UI_EVENT_BINDING, (source, name: unknown, detail: unknown) => {
-    if (name !== ENSO_UI_EVENTS.threadStatus || !Check(EnsoThreadStatusEvent, detail) || !detail.shown) return
-    const tabNumber = tabOf(source.page)
-    if (tabNumber === undefined) return
-    statusLog.record(tabNumber, detail)
-    timeline.record(
+    hearUiEvent(
+      { name, detail, tab: tabOf(source.page) },
       {
-        kind: 'thread-status',
-        status: detail.status,
-        ...(detail.question === undefined ? {} : { question: redact(detail.question.title) }),
+        log: statusLog,
+        record: (body, tabNumber) => {
+          timeline.record(body, tabPlace(tabNumber, source.page))
+        },
+        redact,
       },
-      tabPlace(tabNumber, source.page),
     )
   })
   await context.addInitScript(
@@ -848,7 +806,7 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
     await firstPage.goto(ARENA_WEB_ORIGIN)
   } catch (error) {
     await browser.close().catch(() => undefined)
-    await stopEnso()
+    await enso.stop()
     throw error
   }
 
@@ -904,35 +862,6 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
   for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => resolveStop(`signal ${signal}`))
 
   // ── The agent's actions ────────────────────────────────────────────────────────────────────
-  /** The tab actions (#675): list the tabs, bring one to the front, close one but never the last. */
-  const performOnTabs = async (
-    action: Extract<ArenaAction, { action: 'tabs' | 'switch-tab' | 'close-tab' }>,
-  ): Promise<unknown> => {
-    if (action.action === 'tabs') {
-      return {
-        tabs: await Promise.all(
-          [...tabs].map(async ([tabNumber, tabPage]) => ({
-            tab: tabNumber,
-            url: tabPage.url(),
-            title: await tabPage.title().catch(() => ''),
-            ...(tabNumber === front ? { front: true } : {}),
-          })),
-        ),
-      }
-    }
-    const tabNumber = action.tab ?? front
-    const tabPage = tabs.get(tabNumber)
-    if (tabPage === undefined) throw new Error(`no tab ${tabNumber} — \`tabs\` lists them`)
-    if (action.action === 'switch-tab') {
-      await bringToFront(tabNumber)
-      return here()
-    }
-    if (tabs.size === 1) throw new Error('the last tab stays open: there would be no page to act on')
-    // Its `close` listener forgets it and brings the newest tab left to the front.
-    await tabPage.close()
-    return here()
-  }
-
   /** One DevTools session per tab, opened when first needed: a wait's change mark, the view, the point's element. */
   const devtools = new WeakMap<Page, CDPSession>()
   const devtoolsOf = async (tabPage: Page): Promise<CDPSession> => {
@@ -1007,78 +936,8 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
   }
   /** What the last pointer action pointed at; read into its timeline line, then cleared. */
   let pointedAt: string | undefined
-  /** A point of the view the agent saw, in the window's pixels. */
-  const toWindow = (point: ArenaPoint): ArenaPoint => ({
-    left: point.left * ARENA_VIEW.scale,
-    top: point.top * ARENA_VIEW.scale,
-  })
-  /** The pointer actions: a point of the view the agent saw, mapped to the window. */
-  const performWithPointer = async (action: Extract<ArenaAction, { readonly at: ArenaPoint }>): Promise<unknown> => {
-    const mouse = inFront().mouse
-    const from = toWindow(action.at)
-    pointedAt = await underThePoint(from)
-    if (action.action === 'click') {
-      await mouse.click(from.left, from.top, {
-        button: action.button ?? 'left',
-        clickCount: action.double === true ? 2 : 1,
-      })
-    } else if (action.action === 'drag') {
-      const to = toWindow(action.to)
-      await mouse.move(from.left, from.top)
-      await mouse.down()
-      await mouse.move(to.left, to.top, { steps: 12 })
-      await mouse.up()
-    } else {
-      await mouse.move(from.left, from.top)
-      if (action.action === 'scroll') await mouse.wheel(action.dx * ARENA_VIEW.scale, action.dy * ARENA_VIEW.scale)
-    }
-    return here()
-  }
-  /**
-   * What a visual agent is shown with every answer (#680): the view after the action, and a native
-   * dialog over the front tab, which a page capture never shows. ⚠ No capture while one is open: it
-   * blocks the page's rendering.
-   */
-  const forTheEyes = async (action: ArenaAction): Promise<Pick<ArenaActOutcome, 'view' | 'dialog'>> => {
-    if (perception !== 'visual' || action.action === 'note' || action.action === 'stop') return {}
-    const dialog = frontDialog()
-    if (dialog !== undefined) return { dialog: { type: dialog.type(), message: redact(dialog.message()) } }
-    const view = await shoot('view')
-    return view === undefined ? {} : { view }
-  }
-  /**
-   * What the answer shows the agent, and — when the action moved nothing — what it now acts from
-   * (#693, found live). A visual agent sees the page in every answer: a wait that returned on a
-   * card hands it the card, so the card it answers next is one it has SEEN. Left uncounted, the page
-   * before its click was the one its last move left, older than the card, and the card on its way
-   * out read as a new question: the wait returned at once on a stale one, inviting a second answer.
-   * A move's view is not counted: the page before the move stays what the agent acted from.
-   */
-  const shownAfter = async (action: ArenaAction, moved: boolean): Promise<Pick<ArenaActOutcome, 'view' | 'dialog'>> => {
-    const shown = await forTheEyes(action)
-    if (moved || (shown.view === undefined && shown.dialog === undefined)) return shown
-    const page = await pageNow().catch(() => undefined)
-    if (page !== undefined) lastSeen.saw(page)
-    return shown
-  }
-  /** The actions on a control named the way a reader names it (`ArenaTarget`): a tree agent's hands. */
-  const performOnControl = async (
-    action: Extract<ArenaAction, { readonly action: 'click' | 'hover' | 'fill' | 'select' | 'press' }>,
-  ): Promise<unknown> => {
-    const timeout = ACTION_TIMEOUT_MS
-    if (action.action === 'press' && action.target === undefined) {
-      await inFront().keyboard.press(action.key)
-      return here()
-    }
-    if (!('target' in action) || action.target === undefined) throw new Error(`${action.action} needs a target`)
-    const control = locate(inFront(), action.target)
-    if (action.action === 'click') await control.click({ timeout })
-    else if (action.action === 'hover') await control.hover({ timeout })
-    else if (action.action === 'fill') await control.fill(action.text, { timeout })
-    else if (action.action === 'select') await control.selectOption(action.option, { timeout })
-    else await control.press(action.key, { timeout })
-    return here()
-  }
+  /** What a visual agent is shown with each answer (#680, #693), and what it then acts from. */
+  const eyes: ArenaEyes = { perception, dialog: frontDialog, shoot, redact, pageNow, saw: lastSeen.saw }
   /** What the agent has read of each region of the page in front (#740): a later read answers with what changed. */
   const regionReads = createRegionReads()
   /**
@@ -1096,118 +955,40 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
     lastSeen.saw(pageForChange(snapshot))
     return { ...here(), ...regionReads.read(snapshot, action, pageVisit) }
   }
-  /**
-   * `wait`: a fixed sleep; a wait on the page until it changes (#637), looked for when the page's
-   * change count moved (#740); or until it needs the agent (#648), read off what the page announced
-   * (#737) — the log since the agent's move, then each announcement as it comes — ended early by the
-   * run stopping or a native dialog opening over the tab. A wait that returned with attention marks
-   * the log: the agent has been told.
-   */
-  const performWait = async (action: Extract<ArenaAction, { readonly action: 'wait' }>): Promise<unknown> => {
-    if (action.until === undefined) {
-      await inFront().waitForTimeout(action.ms)
-      return here()
-    }
-    if (action.until === 'change') {
-      const waited = await waitForChange({
-        baseline: await lastSeen.baseline(),
-        look: async () => dialogPage() ?? pageLook.current(),
-        sleep: (ms) => inFront().waitForTimeout(ms),
-        ms: action.ms,
-        pollMs: CHANGE_POLL_MS,
-      })
-      return { ...here(), ...waited }
-    }
-    if (frontDialog() !== undefined) return { ...here(), changed: true, waitedMs: 0, attention: 'dialog' }
-    const tabNumber = front
-    let waiter: ((opened: number) => void) | undefined
-    const dialog = new Promise<void>((resolve) => {
-      waiter = (opened) => {
-        if (opened === tabNumber) resolve()
-      }
-      dialogWaiters.add(waiter)
-    })
-    try {
-      const waited = await waitForAttention({
-        log: statusLog,
-        tab: tabNumber,
-        ms: Math.min(action.ms, pageWaitCap),
-        stopped,
-        dialog,
-      })
-      if (waited.attention !== undefined) statusLog.mark()
-      return { ...here(), ...waited }
-    } finally {
-      if (waiter !== undefined) dialogWaiters.delete(waiter)
-    }
+  /** What a wait on the page reads besides the tab in front (#637, #648, #737). */
+  const waiting: ArenaWaiting = {
+    baseline: lastSeen.baseline,
+    look: async () => dialogPage() ?? pageLook.current(),
+    log: statusLog,
+    capMs: pageWaitCap,
+    stopped,
   }
-  /** The actions on the front page itself: navigate, type, shoot, answer its dialog. */
-  const performOnPage = async (
-    action: Extract<
-      ArenaAction,
-      { readonly action: 'goto' | 'type' | 'screenshot' | 'back' | 'reload' | 'accept-dialog' | 'dismiss-dialog' }
-    >,
-  ): Promise<unknown> => {
-    const timeout = ACTION_TIMEOUT_MS
-    switch (action.action) {
-      case 'goto':
-        await inFront().goto(new URL(action.path, ARENA_WEB_ORIGIN).toString(), { timeout })
-        return here()
-      case 'type':
-        await inFront().keyboard.type(action.text)
-        return here()
-      case 'screenshot':
-        return { ...here(), screenshot: await shoot('requested') }
-      case 'back':
-        await inFront().goBack({ timeout })
-        return here()
-      case 'reload':
-        await inFront().reload({ timeout })
-        return here()
-      case 'accept-dialog':
-        return answerDialog((dialog) => dialog.accept(action.text))
-      case 'dismiss-dialog':
-        return answerDialog((dialog) => dialog.dismiss())
-    }
+  /** The run as a note, a restart or a stop reaches it. */
+  const runHands: ArenaRunHands = {
+    record: (body) => {
+      timeline.record(body, here())
+    },
+    redact,
+    restart: () => runClock.restart(),
+    stopEnso: () => enso.stop(),
+    startEnso: () => enso.start(),
+    stop: resolveStop,
   }
-  /** The actions on the run rather than the page: a note on the timeline, a restart, a stop. */
-  const performOnRun = async (
-    action: Extract<ArenaAction, { readonly action: 'note' | 'restart-enso' | 'stop' }>,
-    via: ArenaActionSource,
-  ): Promise<unknown> => {
-    switch (action.action) {
-      case 'note':
-        timeline.record(
-          {
-            kind: 'note',
-            via,
-            note: action.note,
-            trying: redact(action.trying),
-            happened: redact(action.happened),
-            ...(action.wanted === undefined ? {} : { wanted: redact(action.wanted) }),
-          },
-          here(),
-        )
-        return { recorded: action.note }
-      case 'restart-enso': {
-        const refused = runClock.restart()
-        if (refused !== undefined) throw new Error(refused)
-        await stopEnso()
-        return { restarted: await startEnso() }
-      }
-      case 'stop':
-        resolveStop(`the agent stopped the run${action.reason === undefined ? '' : `: ${redact(action.reason)}`}`)
-        return { stopping: true }
-    }
+  const pointer: ArenaPointer = {
+    under: underThePoint,
+    pointed: (under) => {
+      pointedAt = under
+    },
   }
+  const openTabs: ArenaTabs = { open: tabs, front: () => front, bringToFront, here }
   const hands: ArenaHands = {
-    withPointer: performWithPointer,
-    onControl: performOnControl,
+    withPointer: (action) => performWithPointer(action, frontHands, pointer),
+    onControl: (action) => performOnControl(action, frontHands),
     read: performRead,
-    wait: performWait,
-    onTabs: performOnTabs,
-    onRun: performOnRun,
-    onPage: performOnPage,
+    wait: (action) => performWait(action, frontHands, waiting),
+    onTabs: (action) => performOnTabs(action, openTabs),
+    onRun: (action, via) => performOnRun(action, via, runHands),
+    onPage: (action) => performOnPage(action, frontHands),
   }
   const actionRun: ArenaActionRun = {
     stopReason: () => stopReason,
@@ -1226,7 +1007,7 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
     },
     pointedAt: () => pointedAt,
     moved: () => lastSeen.moved(),
-    shownAfter,
+    shownAfter: (action, moved) => shownAfter(action, moved, eyes),
     shoot,
     redact,
   }
@@ -1269,7 +1050,7 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
   // a shell act on the page as the agent, and the boundary is that the agent has no shell.
   const control = options.driver === undefined ? serveControl((body) => act(body, 'control')) : undefined
   controlRecord = controlRecordOf(control, runDirectory, options.home)
-  publishControl(enso?.pid)
+  publishControl(enso.pid())
   await takeSample()
   process.stdout.write(`arena: run ${runId} is live — ${runDirectory}\n`)
   const driverDone =
@@ -1309,12 +1090,12 @@ export async function runArena(options: ArenaRunOptions): Promise<ArenaScore | u
     home: options.home,
     project,
     secretValues: secrets(),
-    ...(enso === undefined ? { serverDown: 'Enso was not running when the run stopped' } : {}),
+    ...(enso.pid() === undefined ? { serverDown: 'Enso was not running when the run stopped' } : {}),
   })
   stopping = true
   await browser.close().catch(() => undefined)
   rmSync(traceWorkDirectory(runDirectory), { recursive: true, force: true })
-  await stopEnso()
+  await enso.stop()
   // ⚠ After Enso is stopped and the last chunk written: every file the run keeps is final (#610).
   // The chunks already read are not read again (#741); everything else is.
   const secretScan = scanRunForSecrets(runDirectory, secrets(), chunkScan)

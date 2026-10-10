@@ -13,8 +13,9 @@ import type { ArenaEventBody } from '../timeline.ts'
 /**
  * What the recorder does with one agent action (#832): which hand performs it, and what the run
  * records and answers around it — over stand-ins for the page, the trace and the timeline, each
- * step written to one log so the order is what is checked. The hands over Playwright's page are
- * proven by a live run.
+ * step written to one log so the order is what is checked. The hands themselves, over the
+ * Playwright calls they make, are `arena-page-hands.test.ts` (#838); only `runArena`'s wiring of
+ * them to a real browser is left to a live run.
  */
 
 const SECRET = 'sk-live-notarealsecret-0123456789'
