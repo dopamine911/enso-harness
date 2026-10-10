@@ -106,7 +106,10 @@ single test is not repository green.
 off, written to `.local/health-full.md`. It tables what each exemption in `.fallowrc.jsonc` hides
 when removed alone, then shows fallow's dead-code, duplication and health output with every
 finding-hiding exemption off, at fallow's own limits, with CRAP on and the findings inside unused
-files shown. The gate holds the line; this report is where to look before moving it.
+files shown. CRAP is scored from measured coverage when `coverage/lcov.info` exists (#826): the
+report converts it first (`bun run coverage:istanbul`, `scripts/coverage-istanbul.ts`) and states the
+LCOV's age, since it never runs the suite itself. The gate holds the line; this report is where to
+look before moving it.
 
 `test/coverage-manifest.test.ts` closes Bun's denominator hole: Bun reports coverage only for files a
 test imported, so an untested module could otherwise disappear rather than count as zero. The test

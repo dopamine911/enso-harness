@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { arch, platform, release } from 'node:os'
 import { join } from 'node:path'
 import { buildLogBundle, type EnsoBundleAbout, type EnsoLogLine, isEnsoThreadId } from '@enso/core'
-import { ensoLogFilename, parseEnsoLogLine } from '@enso/core/log-process'
+import { ensoLogFilename, parseEnsoLogText } from '@enso/core/log-process'
 import { findRepoRoot } from '@enso/core/paths'
 import { inspectThread, type ThreadView } from './thread-registry.ts'
 
@@ -62,27 +62,21 @@ export function describeCheckout(repoRoot: string): string {
   return `unknown (${ref})`
 }
 
-/** The day's records that match, oldest first — and how many lines were not records at all. */
+/**
+ * The day's records that match, oldest first — and how many lines were not records at all, of any
+ * thread: a line too broken to parse names no thread to scope it by.
+ */
 function selectRecords(
   text: string,
   threadPrefix: string | undefined,
 ): { readonly lines: EnsoLogLine[]; readonly malformed: number } {
-  const lines: EnsoLogLine[] = []
-  let malformed = 0
-  for (const raw of text.split('\n')) {
-    if (raw.length === 0) continue
-    const parsed = parseEnsoLogLine(raw)
-    if (typeof parsed === 'string') {
-      malformed += 1
-      continue
-    }
-    if (threadPrefix !== undefined) {
-      const threadId = parsed.properties?.threadId
-      if (typeof threadId !== 'string' || !threadId.startsWith(threadPrefix)) continue
-    }
-    lines.push(parsed)
-  }
-  return { lines, malformed }
+  const { lines, malformed } = parseEnsoLogText(text)
+  if (threadPrefix === undefined) return { lines, malformed }
+  const matching = lines.filter((line) => {
+    const threadId = line.properties?.threadId
+    return typeof threadId === 'string' && threadId.startsWith(threadPrefix)
+  })
+  return { lines: matching, malformed }
 }
 
 /**

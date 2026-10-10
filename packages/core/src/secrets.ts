@@ -61,6 +61,25 @@ export function isSecretShapedName(name: string): boolean {
 }
 
 /**
+ * One alternation over every known secret VALUE, for a single regex pass per string however many
+ * there are; `undefined` when there is none to scan for, so a caller with no secret store pays
+ * nothing. Global: made for `replace`. The log's value pass and the judge's redaction both build
+ * theirs here.
+ *
+ * ⚠ LONGEST FIRST. A JS alternation takes the first branch that matches at a position, not the
+ * longest, so with `sk-live-abc` listed before `sk-live-abcdef99` the longer secret is redacted
+ * down to its prefix and its tail stays in the text — silent under-redaction, in exactly the case
+ * that matters most: two live keys from one provider, or a key and its rotation.
+ *
+ * @group Secrets
+ */
+export function secretValuePattern(values: readonly string[]): RegExp | undefined {
+  const scannable = values.filter((secret) => secret.length > 0).toSorted((left, right) => right.length - left.length)
+  if (scannable.length === 0) return undefined
+  return new RegExp(scannable.map((secret) => secret.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g')
+}
+
+/**
  * The subset of dotenv this harness needs: `NAME=value` and `export NAME=value` lines,
  * `#` comments, blank lines, single- or double-quoted values (quotes stripped, `\n` in
  * double quotes expanded), unquoted values trimmed.

@@ -95,7 +95,7 @@ import {
   removeProcessMarker,
   writeProcessMarker,
 } from './process-marker.ts'
-import { knownSecretValuesTracking } from './secrets.ts'
+import { knownSecretValuesTracking, secretValuePattern } from './secrets.ts'
 
 /**
  * A per-category override: `enso.host.events=trace` turns one subtree up without the rest.
@@ -262,19 +262,12 @@ function lowestOf(levels: EnsoLogLevels): LogLevel {
  * property, however deeply the property nests. `undefined` when there is nothing to scan
  * for, so a process with no secret store pays nothing on the write path.
  *
- * One pre-built alternation over the known values, so the cost is a single regex pass per
- * string rather than one pass per secret.
- *
- * ⚠ LONGEST FIRST. A JS alternation takes the first branch that matches at
- * a position, not the longest, so with `sk-live-abc` listed before `sk-live-abcdef99` the
- * longer secret is redacted down to its prefix and its tail stays in the file — silent
- * under-redaction, in exactly the case that matters most: two live keys from one provider,
- * or a key and its rotation. Reproduced before this line existed: `[REDACTED:value]def99`.
+ * One pre-built alternation over the known values (`secretValuePattern`, longest first), so the
+ * cost is a single regex pass per string rather than one pass per secret.
  */
 function valueScrubber(values: readonly string[]): ((value: unknown) => unknown) | undefined {
-  const scannable = values.filter((secret) => secret.length > 0).toSorted((left, right) => right.length - left.length)
-  if (scannable.length === 0) return undefined
-  const pattern = new RegExp(scannable.map((secret) => secret.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g')
+  const pattern = secretValuePattern(values)
+  if (pattern === undefined) return undefined
   const scrubbed = (value: unknown): unknown => {
     if (typeof value === 'string') return value.replace(pattern, ENSO_REDACTED_VALUE)
     if (Array.isArray(value)) return value.map(scrubbed)
@@ -780,6 +773,28 @@ export function parseEnsoLogLine(raw: string): EnsoLogLine | string {
 }
 
 /**
+ * A run of complete lines → the records in it, oldest first, and how many lines were not records
+ * (`parseEnsoLogLine` says why one is not; a reader that only counts them reads them here). `keep`
+ * sees each raw line first, so a reader after one thread skips the parse of the rest.
+ *
+ * @group Logging
+ */
+export function parseEnsoLogText(
+  text: string,
+  keep: (raw: string) => boolean = () => true,
+): { readonly lines: EnsoLogLine[]; readonly malformed: number } {
+  const lines: EnsoLogLine[] = []
+  let malformed = 0
+  for (const raw of text.split('\n')) {
+    if (raw.length === 0 || !keep(raw)) continue
+    const parsed = parseEnsoLogLine(raw)
+    if (typeof parsed === 'string') malformed += 1
+    else lines.push(parsed)
+  }
+  return { lines, malformed }
+}
+
+/**
  * A line of the file, back into the record it was: the category split, the level and the
  * instant read back, and the message re-joined from its template and properties by
  * `logLineMessageParts` — the grammar the browser shares — so any LogTape formatter renders
@@ -1033,19 +1048,7 @@ function selectRecords(
   text: string,
   filter: EnsoLogFilter,
 ): { readonly lines: EnsoLogLine[]; readonly matched: number; readonly malformed: number } {
-  const lines: EnsoLogLine[] = []
-  let matched = 0
-  let malformed = 0
-  for (const raw of text.split('\n')) {
-    if (raw.length === 0) continue
-    const parsed = parseEnsoLogLine(raw)
-    if (typeof parsed === 'string') {
-      malformed += 1
-      continue
-    }
-    if (!logLineMatches(filter, parsed)) continue
-    matched += 1
-    lines.push(parsed)
-  }
-  return { lines, matched, malformed }
+  const { lines, malformed } = parseEnsoLogText(text)
+  const matching = lines.filter((line) => logLineMatches(filter, line))
+  return { lines: matching, matched: matching.length, malformed }
 }

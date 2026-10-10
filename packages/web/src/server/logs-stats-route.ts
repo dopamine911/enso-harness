@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { EnsoDayFold, EnsoDayStats, EnsoLogLine } from '@enso/core'
-import { ensoLogFilename, parseEnsoLogLine } from '@enso/core/log-process'
+import { ensoLogFilename, parseEnsoLogText } from '@enso/core/log-process'
 import { followDayFile } from './day-file-fold.ts'
 
 /**
@@ -53,15 +53,7 @@ export function readLogFile(
   file: string,
   keep: (raw: string) => boolean = () => true,
 ): { readonly lines: EnsoLogLine[]; readonly malformed: number } {
-  const lines: EnsoLogLine[] = []
-  let malformed = 0
-  for (const raw of readDayOrNothing(file).split('\n')) {
-    if (raw.length === 0 || !keep(raw)) continue
-    const parsed = parseEnsoLogLine(raw)
-    if (typeof parsed === 'string') malformed += 1
-    else lines.push(parsed)
-  }
-  return { lines, malformed }
+  return parseEnsoLogText(readDayOrNothing(file), keep)
 }
 
 export function createLogStatsRoute(deps: LogStatsRouteDeps): () => EnsoDayStats {
