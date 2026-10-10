@@ -102,6 +102,12 @@ twelve-step gate (react-doctor was one of them until #342 promoted it into the g
 ratchet until #593, and the advisory `fallow audit` job until #594 replaced it with the new-code gate). A green editor or a
 single test is not repository green.
 
+`bun run health:full` (#825) is the other direction, and **not** a gate: fallow with its exemptions
+off, written to `.local/health-full.md`. It tables what each exemption in `.fallowrc.jsonc` hides
+when removed alone, then shows fallow's dead-code, duplication and health output with every
+finding-hiding exemption off, at fallow's own limits, with CRAP on and the findings inside unused
+files shown. The gate holds the line; this report is where to look before moving it.
+
 `test/coverage-manifest.test.ts` closes Bun's denominator hole: Bun reports coverage only for files a
 test imported, so an untested module could otherwise disappear rather than count as zero. The test
 imports every owned library source file except named program entry points and vendored presentation
