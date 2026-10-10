@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test'
 import {
+  isTestFilePath,
   MINIMUM_REPORTED_FILES,
   partialReportComplaint,
   summarizeLcov,
@@ -58,6 +59,36 @@ test('sums LF/LH and FNF/FNH across files — exact rates, not just ≤ 1', () =
   expect(totals.lineRate).toBeCloseTo(0.6, 10)
   // (3 + 2) / (4 + 6); reading FNF as FNH would give 1.
   expect(totals.functionRate).toBeCloseTo(0.5, 10)
+})
+
+// ⚠ TEST FILES (#838): bun measures them now, and each runs almost whole. Placed BETWEEN the two
+// counted records, so a parser that stops counting after one or never resumes lands elsewhere.
+test('a test file record is skipped whole: the totals and the count are the other records alone', () => {
+  const [first = '', second = ''] = TWO_FILE_REPORT.split('end_of_record\n')
+  const withTestFile =
+    `${first}end_of_record\n` +
+    'SF:packages/core/src/__tests__/paths.test.ts\nFNF:40\nFNH:40\nLF:900\nLH:900\nend_of_record\n' +
+    `${second}end_of_record\n`
+  expect(summarizeLcov(withTestFile)).toEqual(summarizeLcov(TWO_FILE_REPORT))
+})
+
+test("a test file is what bun's runner names one; a helper beside the tests stays counted", () => {
+  for (const path of [
+    'test/check-coverage.test.ts',
+    'packages/web/src/__tests__/app.test.tsx',
+    'a/b_test.js',
+    'x.spec.mts',
+  ]) {
+    expect(isTestFilePath(path)).toBe(true)
+  }
+  for (const path of [
+    'packages/core/src/__tests__/log-recorder.ts',
+    'test/gate-support.ts',
+    'packages/core/src/test-results.ts',
+    'packages/core/src/latest.ts',
+  ]) {
+    expect(isTestFilePath(path)).toBe(false)
+  }
 })
 
 test('an empty report throws — no data must never read as no problem', () => {

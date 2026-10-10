@@ -49,7 +49,15 @@ import {
   jevRequestOf,
 } from '../packages/harness/extensions/guards/judge-backends.ts'
 import { corpusThreads, type JudgeCorpus } from './judge-corpus.ts'
-import { fetchJson, readJsonLines, storedThreadIds, UsageError, wholeNumber } from './server-cli.ts'
+import {
+  fetchJson,
+  processServerIo,
+  readJsonLines,
+  serverCommand,
+  storedThreadIds,
+  UsageError,
+  wholeNumber,
+} from './server-cli.ts'
 
 /** Where the cases come from: the running server's threads, or a transcript corpus read from disk (#534). */
 export type JudgeSource = 'server' | JudgeCorpus
@@ -458,7 +466,8 @@ async function casesOf(
   }
 }
 
-async function run(query: JudgeQuery, serverUrl: string): Promise<string> {
+async function commandOutput(argv: readonly string[], serverUrl: string): Promise<string> {
+  const query = parseArguments(argv)
   if (query.command === 'score') {
     // ⚠ The files are the user's own replay and labels; they are read as written, not validated field by field.
     const records = readJsonLines(query.replayFile) as ReplayRecord[]
@@ -479,19 +488,11 @@ async function run(query: JudgeQuery, serverUrl: string): Promise<string> {
   return `${header}\n${renderReplaySummary(records, query.outFile)}`
 }
 
-/** A usage error exits 2 with the usage, anything else 1. */
+/** The command over `io`; its exit code: 2 a usage error, 1 any other failure, else 0. */
+export const run = serverCommand('enso-judge', USAGE, commandOutput)
+
 async function main(argv: readonly string[]): Promise<number> {
-  try {
-    const output = await run(parseArguments(argv), process.env.ENSO_SERVER_URL ?? 'http://127.0.0.1:5179')
-    process.stdout.write(`${output}\n`)
-    return 0
-  } catch (error) {
-    const usage = error instanceof UsageError
-    process.stderr.write(
-      `enso-judge: ${error instanceof Error ? error.message : String(error)}${usage ? `\n\n${USAGE}` : ''}\n`,
-    )
-    return usage ? 2 : 1
-  }
+  return run(argv, processServerIo(process.env.ENSO_SERVER_URL))
 }
 
 if (import.meta.main) process.exit(await main(process.argv.slice(2)))

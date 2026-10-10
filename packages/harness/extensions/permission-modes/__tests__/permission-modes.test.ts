@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test'
+import type { Api, AssistantMessage, Context, Model, SimpleStreamOptions } from '@earendil-works/pi-ai'
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
 import { ACTIVE_AGENT_CUSTOM_TYPE, ENSO_AUTO_AUTHORIZER, modeAgentName } from '@enso/core'
 import type {
@@ -8,7 +9,12 @@ import type {
   PermissionQuery,
   PromptPermissionDetails,
 } from '@gotgenes/pi-permission-system'
-import { type ClassifierRequest, createPermissionModes, type PermissionModesDependencies } from '../index.ts'
+import {
+  askClassifier,
+  type ClassifierRequest,
+  createPermissionModes,
+  type PermissionModesDependencies,
+} from '../index.ts'
 
 /**
  * #496's permission-modes extension through its factory: pi reduced to what the extension
@@ -380,6 +386,186 @@ test('an ask whose payload does not read reaches the user, never the classifier'
   const moved = { ...bashAsk('rm -rf build'), payload: { kind: 'tool' } } as unknown as PromptPermissionDetails
   expect(await session.ask(moved)).toEqual({ kind: 'defer' })
   expect(session.classifierRequests).toEqual([])
+})
+
+// --- what the classifier is told the user asked
+
+/** The text between the prompt's `<user-request>` tags, as the classifier reads it. */
+async function userRequestSeen(branch: unknown[]): Promise<string | undefined> {
+  const session = autoSession({ branch })
+  await session.ask(bashAsk('npm test'))
+  return /<user-request>\n([\s\S]*)\n<\/user-request>/.exec(session.classifierRequests[0]?.prompt ?? '')?.[1]
+}
+
+test("the classifier is told the LAST user message, whatever came after it and whatever isn't a message", async () => {
+  expect(
+    await userRequestSeen([
+      { type: 'message', message: { role: 'user', content: 'an older request' } },
+      { type: 'message', message: { role: 'user', content: 'the latest request' } },
+      { type: 'message', message: { role: 'assistant', content: [{ type: 'text', text: 'on it' }] } },
+      { type: 'custom', customType: 'active_agent', data: { name: AUTO_AGENT } },
+      { type: 'message', message: { role: 'toolResult', content: [{ type: 'text', text: 'ok' }] } },
+    ]),
+  ).toBe('the latest request')
+})
+
+test("a user message in parts is its text parts joined by lines; an image or a part with no text isn't in it", async () => {
+  expect(
+    await userRequestSeen([
+      {
+        type: 'message',
+        message: {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'rename the parser' },
+            { type: 'image', data: 'iVBORw0KGgo=', mimeType: 'image/png' },
+            { type: 'text' },
+            null,
+            { type: 'text', text: 'and keep the old name exported' },
+          ],
+        },
+      },
+    ]),
+  ).toBe('rename the parser\nand keep the old name exported')
+})
+
+test('⚠ an entry that does not read as a user message is passed over for an earlier one that does', async () => {
+  expect(
+    await userRequestSeen([
+      { type: 'message', message: { role: 'user', content: 'the request that reads' } },
+      { type: 'message', message: { role: 'user', content: { text: 'content of a shape pi never writes' } } },
+      { type: 'message', message: { role: 'user' } },
+      { type: 'message', message: null },
+      { type: 'message' },
+      { message: { role: 'user', content: 'no entry type' } },
+      null,
+      'not an entry',
+    ]),
+  ).toBe('the request that reads')
+})
+
+test('a session with no user message yet tells the classifier so, rather than an empty request', async () => {
+  expect(await userRequestSeen([{ type: 'message', message: { role: 'assistant', content: 'hello' } }])).toBe(
+    '(no user message in this session yet)',
+  )
+  expect(await userRequestSeen([])).toBe('(no user message in this session yet)')
+})
+
+// --- the real classifier call, over pi-ai's completion
+
+const CLASSIFIER_MODEL = {
+  id: 'judge-1',
+  provider: 'acme',
+  api: 'acme-messages',
+  baseUrl: 'https://acme.test',
+} as unknown as Model<Api>
+
+interface CompletionCall {
+  readonly model: Model<Api>
+  readonly context: Context
+  readonly options: SimpleStreamOptions | undefined
+}
+
+function classifierRequest(overrides: Partial<ClassifierRequest> = {}): ClassifierRequest {
+  return {
+    model: CLASSIFIER_MODEL,
+    apiKey: undefined,
+    headers: undefined,
+    environment: undefined,
+    systemPrompt: 'you review one action',
+    prompt: '<user-request>\nfix it\n</user-request>',
+    signal: new AbortController().signal,
+    ...overrides,
+  }
+}
+
+function assistantReply(reply: Pick<AssistantMessage, 'content' | 'stopReason' | 'errorMessage'>): AssistantMessage {
+  return {
+    role: 'assistant',
+    api: 'acme-messages',
+    provider: 'acme',
+    model: 'judge-1',
+    usage: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 0,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+    timestamp: 0,
+    ...reply,
+  }
+}
+
+/** A completion that records what it was sent and answers `reply`. */
+function completion(
+  reply: AssistantMessage,
+  calls: CompletionCall[],
+): (model: Model<Api>, context: Context, options?: SimpleStreamOptions) => Promise<AssistantMessage> {
+  return (model, context, options) => {
+    calls.push({ model, context, options })
+    return Promise.resolve(reply)
+  }
+}
+
+test("the classifier call sends the session's model, the system prompt and the prompt as one user message, capped at 400 tokens", async () => {
+  const calls: CompletionCall[] = []
+  const request = classifierRequest()
+  await askClassifier(request, completion(assistantReply({ content: [], stopReason: 'stop' }), calls))
+  expect(calls).toHaveLength(1)
+  const [call] = calls
+  expect(call?.model).toBe(CLASSIFIER_MODEL)
+  expect(call?.context.systemPrompt).toBe('you review one action')
+  expect(call?.context.messages).toEqual([
+    { role: 'user', content: '<user-request>\nfix it\n</user-request>', timestamp: expect.any(Number) },
+  ])
+  // No key, headers or environment: the options carry none, so pi-ai resolves its own.
+  expect(call?.options).toEqual({ signal: request.signal, maxTokens: 400 })
+})
+
+test("the session's key, headers and environment reach the call as copies, the headers' nulls included", async () => {
+  const calls: CompletionCall[] = []
+  const headers = { 'x-team': 'enso', 'x-drop': null }
+  const environment = { AZURE_RESOURCE: 'acme-east' }
+  await askClassifier(
+    classifierRequest({ apiKey: 'sk-test', headers, environment }),
+    completion(assistantReply({ content: [], stopReason: 'stop' }), calls),
+  )
+  const options = calls[0]?.options
+  expect(options?.apiKey).toBe('sk-test')
+  expect(options?.headers).toEqual(headers)
+  expect(options?.headers).not.toBe(headers)
+  expect(options?.env).toEqual(environment)
+  expect(options?.env).not.toBe(environment)
+})
+
+test("the reply is its text parts joined as written; thinking and tool calls aren't part of it", async () => {
+  const reply = assistantReply({
+    stopReason: 'stop',
+    content: [
+      { type: 'thinking', thinking: 'the user asked for a test run' },
+      { type: 'text', text: '{"decision":"allow",' },
+      { type: 'toolCall', id: 'call-1', name: 'read', arguments: {} },
+      { type: 'text', text: '"reason":"fits"}' },
+    ],
+  })
+  expect(await askClassifier(classifierRequest(), completion(reply, []))).toBe('{"decision":"allow","reason":"fits"}')
+})
+
+test("⚠ a call that ended in error or was aborted throws with the provider's message, never reads as an answer", async () => {
+  const failed = assistantReply({
+    stopReason: 'error',
+    errorMessage: '429 rate limited',
+    content: [{ type: 'text', text: '{"decision":"allow","reason":"partial"}' }],
+  })
+  await expect(askClassifier(classifierRequest(), completion(failed, []))).rejects.toThrow(
+    'the classifier call ended with error: 429 rate limited',
+  )
+  const aborted = assistantReply({ stopReason: 'aborted', content: [] })
+  await expect(askClassifier(classifierRequest(), completion(aborted, []))).rejects.toThrow(
+    'the classifier call ended with aborted: no message',
+  )
 })
 
 // --- the forced system prompt (#443)

@@ -169,24 +169,34 @@ export function scopedCommand(unit: string, memoryMax: string, argv: readonly st
   ]
 }
 
-/** One `systemctl --user show` property of a unit, empty when systemd has nothing to say. */
-function unitProperty(unit: string, property: string): string {
-  return (
-    spawnSync('systemctl', ['--user', 'show', '-p', property, '--value', unit], { encoding: 'utf8' }).stdout?.trim() ??
-    ''
-  )
+/** What `endScope` asks systemd and reads of the cgroup tree: the host's, or a test's stand-ins (#838). */
+export interface ArenaScopeHost {
+  /** `systemctl --user` with these arguments: its stdout, trimmed; empty when systemd has nothing to say. */
+  readonly systemctl: (args: readonly string[]) => string
+  /** Where the cgroup tree is mounted. */
+  readonly cgroupRoot: string
+}
+
+const HOST_SCOPE: ArenaScopeHost = {
+  systemctl: (args) => spawnSync('systemctl', ['--user', ...args], { encoding: 'utf8' }).stdout?.trim() ?? '',
+  cgroupRoot: '/sys/fs/cgroup',
 }
 
 /**
  * End a run's scope once its main process is gone: stop what is left in it, and say how many
  * processes that was and how the scope ended (`oom-kill` when the run hit its memory cap).
+ * ⚠ Counted before the stop, its result read after it, and reset last (#742): a failed scope's
+ * result is gone once it is reset.
  */
-export function endScope(unit: string): { readonly stopped: number; readonly result: string } {
-  const group = unitProperty(unit, 'ControlGroup')
-  const procs = group === '' ? '' : join('/sys/fs/cgroup', group, 'cgroup.procs')
+export function endScope(
+  unit: string,
+  host: ArenaScopeHost = HOST_SCOPE,
+): { readonly stopped: number; readonly result: string } {
+  const group = host.systemctl(['show', '-p', 'ControlGroup', '--value', unit])
+  const procs = group === '' ? '' : join(host.cgroupRoot, group, 'cgroup.procs')
   const stopped = procs !== '' && existsSync(procs) ? readFileSync(procs, 'utf8').split('\n').filter(Boolean).length : 0
-  spawnSync('systemctl', ['--user', 'stop', unit], { stdio: 'ignore' })
-  const result = unitProperty(unit, 'Result') || 'success'
-  spawnSync('systemctl', ['--user', 'reset-failed', unit], { stdio: 'ignore' })
+  host.systemctl(['stop', unit])
+  const result = host.systemctl(['show', '-p', 'Result', '--value', unit]) || 'success'
+  host.systemctl(['reset-failed', unit])
   return { stopped, result }
 }

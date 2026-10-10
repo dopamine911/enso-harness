@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -17,6 +17,7 @@ import {
   arenaUiTool,
   DROPPED_IMAGE_TEXT,
   parseModelReference,
+  resolveArenaModel,
   supersededReadText,
 } from '../agent.ts'
 import type { ArenaActOutcome } from '../perform.ts'
@@ -339,6 +340,36 @@ test('a model reference is provider/model-id, split at the first slash', () => {
   expect(parseModelReference('anthropic')).toBeUndefined()
   expect(parseModelReference('/m')).toBeUndefined()
   expect(parseModelReference('anthropic/')).toBeUndefined()
+})
+
+/** A home whose agent dir lists one provider of its own, `arena-test`, with a model that sees and one that only reads. */
+function homeWithProvider(): { readonly home: string; readonly agentDir: string } {
+  const home = mkdtempSync(join(tmpdir(), 'arena-models-'))
+  const agentDir = join(home, 'pi-agent')
+  mkdirSync(agentDir)
+  const models = [{ id: 'seer', input: ['text', 'image'] }, { id: 'reader' }]
+  const provider = { baseUrl: 'http://127.0.0.1:9/v1', api: 'openai-completions', models }
+  writeFileSync(join(agentDir, 'models.json'), JSON.stringify({ providers: { 'arena-test': provider } }))
+  return { home, agentDir }
+}
+
+test('the agent’s model resolves from the home’s agent dir only when it is known and its provider has a login', async () => {
+  const { home, agentDir } = homeWithProvider()
+  await expect(resolveArenaModel(home, 'arena-test')).rejects.toThrow(
+    '--agent takes provider/model-id, not "arena-test"',
+  )
+  // An unknown model names the provider's models; an unknown provider has none to name.
+  await expect(resolveArenaModel(home, 'arena-test/oracle')).rejects.toThrow(
+    'no model "oracle" for provider "arena-test" — known: seer, reader',
+  )
+  await expect(resolveArenaModel(home, 'nobody/oracle')).rejects.toThrow(/^no model "oracle" for provider "nobody"$/)
+  await expect(resolveArenaModel(home, 'arena-test/seer')).rejects.toThrow(
+    `provider "arena-test" has no login in ${agentDir} — log in through Enso first`,
+  )
+
+  writeFileSync(join(agentDir, 'auth.json'), JSON.stringify({ 'arena-test': { type: 'api_key', key: 'test-key' } }))
+  const { model } = await resolveArenaModel(home, 'arena-test/seer')
+  expect(model).toMatchObject({ provider: 'arena-test', id: 'seer', input: ['text', 'image'] })
 })
 
 test('a runner still going after the stop is recorded as such; one that ends in time is not', async () => {

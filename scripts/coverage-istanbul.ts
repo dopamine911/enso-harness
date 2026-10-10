@@ -28,7 +28,8 @@
  * listed file missing on disk (deleted or moved since the run), a listed file with no `DA:` lines
  * (Bun found nothing executable), and a function with no `DA:` line inside it (⚠ unless an entry
  * starts within a line of it: fallow then scores it from that neighbour's). Files the run never
- * loaded are not in the LCOV at all, and Bun leaves test files out.
+ * loaded are not in the LCOV at all. Test files are (bunfig's `coverageSkipTestFiles = false`,
+ * #838), so their CRAP is measured too.
  *
  * ⚠ fallow reads `coverage/coverage-final.json` whenever it exists, `--coverage` or not, so once
  * this has run every `fallow health` in the tree scores CRAP from it, however old its LCOV. The
@@ -38,7 +39,7 @@ import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { extname, join } from 'node:path'
 import typescript from 'typescript'
 import { findRepoRoot } from '../packages/core/src/paths.ts'
-import { MINIMUM_REPORTED_FILES } from './check-coverage.ts'
+import { isTestFilePath, MINIMUM_REPORTED_FILES } from './check-coverage.ts'
 
 const ROOT = findRepoRoot(import.meta.url)
 export const LCOV_PATH = join(ROOT, 'coverage', 'lcov.info')
@@ -178,6 +179,7 @@ export function istanbulFileCoverage(path: string, source: string, lines: Readon
 
 /** What one conversion wrote and left out, for the line the caller prints. */
 interface Conversion {
+  /** The LCOV's non-test file records (`isTestFilePath`), counted as the coverage gate counts them (#838). */
   readonly records: number
   readonly files: number
   readonly functions: number
@@ -202,7 +204,13 @@ export function writeIstanbulCoverage(): Conversion {
     }
   }
   writeFileSync(ISTANBUL_PATH, JSON.stringify(coverage))
-  return { records: records.length, files: Object.keys(coverage).length, functions, missing, withoutLines }
+  return {
+    records: records.filter(({ path }) => !isTestFilePath(path)).length,
+    files: Object.keys(coverage).length,
+    functions,
+    missing,
+    withoutLines,
+  }
 }
 
 /** How long ago the LCOV was written, in whole minutes or hours: what the coverage describes is that run's tree. */

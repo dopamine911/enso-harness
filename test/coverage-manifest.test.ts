@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import { existsSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
-import { MINIMUM_REPORTED_FILES } from '../scripts/check-coverage.ts'
+import { isTestFilePath, MINIMUM_REPORTED_FILES, summarizeLcov } from '../scripts/check-coverage.ts'
 import { filesUnder } from '../scripts/source-tree.ts'
 
 /**
@@ -60,7 +60,7 @@ function collectLibrarySources(rootDirectory: string): string[] {
   return filesUnder(rootDirectory, {
     skipDirectories: ['__tests__'],
     keep: (fileName: string, absolutePath: string): boolean => {
-      if (/\.test\.tsx?$/.test(fileName)) return false
+      if (isTestFilePath(fileName)) return false
       const repositoryRelative = relative(REPOSITORY_ROOT, absolutePath)
       if (VENDORED_DIRECTORIES.some((vendored) => repositoryRelative.startsWith(vendored))) return false
       return !ENTRY_POINT_EXCEPTIONS.some((entry) => repositoryRelative === entry)
@@ -145,4 +145,31 @@ test("⚠ the gate's minimum report size stays under the walked denominator, and
   expect(MINIMUM_REPORTED_FILES).toBeGreaterThanOrEqual(
     Math.floor(sources.length * MINIMUM_REPORT_SHARE_OF_DENOMINATOR),
   )
+})
+
+/**
+ * ⚠ THE TEST FILES (#838). bunfig's `coverageSkipTestFiles = false` puts every test file in the
+ * report, so fallow can score test code's CRAP from measured coverage. Each would read near 100%,
+ * so counted it would lift both rates and the record count without one more product line
+ * covered: a floor lowered by a config key, the back door #252 closed for the exclusion list.
+ * The pin is the whole tree's test files at 100% beside the denominator at a fixed rate: the
+ * totals and the count are the denominator's alone, and a report holding only test files is empty.
+ */
+const TEST_FILE_ROOTS = ['packages', 'scripts', 'test'] as const
+
+test('⚠ test files are measured, and none of them counts toward the floor or the minimum report size', async () => {
+  const bunfig = await Bun.file(join(REPOSITORY_ROOT, 'bunfig.toml')).text()
+  expect(bunfig).toMatch(/^coverageSkipTestFiles = false$/m)
+  const sources = LIBRARY_SOURCE_ROOTS.flatMap((root) => collectLibrarySources(join(REPOSITORY_ROOT, root)))
+  const testFiles = TEST_FILE_ROOTS.flatMap((root) =>
+    filesUnder(join(REPOSITORY_ROOT, root), { keep: (fileName: string): boolean => isTestFilePath(fileName) }),
+  )
+  // No test files found would mean the rule recognises none of this repo's names, not that it is safe.
+  expect(testFiles.length).toBeGreaterThan(20)
+  const record = (path: string, hit: { lines: number; functions: number }): string =>
+    `SF:${relative(REPOSITORY_ROOT, path)}\nFNF:4\nFNH:${hit.functions}\nLF:10\nLH:${hit.lines}\nend_of_record\n`
+  const testRecords = testFiles.map((path) => record(path, { lines: 10, functions: 4 }))
+  const report = [...sources.map((path) => record(path, { lines: 5, functions: 1 })), ...testRecords].join('')
+  expect(summarizeLcov(report)).toEqual({ lineRate: 0.5, functionRate: 0.25, fileCount: sources.length })
+  expect(() => summarizeLcov(testRecords.join(''))).toThrow(/empty/)
 })

@@ -7,6 +7,7 @@ import type {
   ModelSearchRequest,
   ResolvedProviderAuth,
   SearchModel,
+  WebSearchOutcome,
 } from '../web-search/vocabulary.ts'
 import { WebSearchProviderError } from '../web-search/vocabulary.ts'
 
@@ -203,6 +204,108 @@ test("openai: response.failed throws with the wire's message", async () => {
   )
   expect(thrown).toBeInstanceOf(WebSearchProviderError)
   expect(thrown.message).toContain('insufficient_quota')
+})
+
+/** The openai provider's outcome over `events`, required to be `searched`. */
+async function openAiSearched(events: unknown[]): Promise<Extract<WebSearchOutcome, { kind: 'searched' }>> {
+  const outcome = await runOpenAiProviderSearch(modelRequest(OPENAI_MODEL, async () => sseResponse(events)))
+  if (outcome.kind !== 'searched') throw new Error(`expected a searched outcome, got ${outcome.kind}`)
+  return outcome
+}
+
+test("openai: a web_search_call's sources follow the cited ones, titled by title, display_name, name, else the URL; the action's own URL is one too", async () => {
+  const outcome = await openAiSearched([
+    { type: 'response.output_text.delta', delta: 'Enso.' },
+    {
+      type: 'response.output_text.annotation.added',
+      annotation: { type: 'url_citation', url: 'https://example.com/enso', title: 'Enso docs', end_index: 5 },
+    },
+    {
+      type: 'response.output_item.done',
+      item: {
+        type: 'web_search_call',
+        action: {
+          sources: [
+            { url: 'https://a.example/one', title: 'One', display_name: 'not this' },
+            { url: 'https://b.example/two', display_name: 'Two', name: 'not this' },
+            { url: 'https://c.example/three', name: 'Three' },
+            { url: 'https://d.example/docs/four' },
+            { title: 'a source with no URL' },
+            { url: '', title: 'a source with an empty URL' },
+            'not a source',
+            // The cited page again, behind a tracking parameter: listed once, as the cited source.
+            { url: 'https://example.com/enso?utm_source=search', title: 'Enso docs again' },
+          ],
+          url: 'https://e.example/opened',
+        },
+      },
+    },
+    { type: 'response.completed', response: { output: [] } },
+  ])
+  expect(outcome.answerText).toBe('Enso.[1]')
+  expect(outcome.sources).toEqual([
+    { title: 'Enso docs', url: 'https://example.com/enso' },
+    { title: 'One', url: 'https://a.example/one' },
+    { title: 'Two', url: 'https://b.example/two' },
+    { title: 'Three', url: 'https://c.example/three' },
+    { title: 'four', url: 'https://d.example/docs/four' },
+    { title: 'opened', url: 'https://e.example/opened' },
+  ])
+})
+
+test('openai: a web_search_call item with no action still makes the answer searched; any other output item does not', async () => {
+  const searched = await openAiSearched([
+    { type: 'response.output_text.delta', delta: 'answer' },
+    { type: 'response.output_item.added', item: { type: 'web_search_call', id: 'ws1', status: 'in_progress' } },
+    { type: 'response.completed', response: { output: [] } },
+  ])
+  expect(searched.sources).toEqual([])
+  const events = [
+    { type: 'response.output_text.delta', delta: 'answer' },
+    { type: 'response.output_item.done', item: { type: 'message', id: 'msg1', action: { url: 'https://x.example' } } },
+    { type: 'response.output_item.done', item: 'not an item' },
+    { type: 'response.completed', response: { output: [{ type: 'reasoning', id: 'rs1' }] } },
+  ]
+  const outcome = await runOpenAiProviderSearch(modelRequest(OPENAI_MODEL, async () => sseResponse(events)))
+  expect(outcome.kind).toBe('ungrounded')
+})
+
+test("openai: the final response's url_citations are read from its message items' output_text parts, and only from there", async () => {
+  const cited = (url: string, endIndex: number): unknown => ({ type: 'url_citation', url, end_index: endIndex })
+  const outcome = await openAiSearched([
+    { type: 'response.output_text.delta', delta: 'One. Two.' },
+    {
+      type: 'response.completed',
+      response: {
+        output: [
+          {
+            type: 'message',
+            content: [
+              { type: 'output_text', text: 'One.', annotations: [cited('https://a.example/one', 4)] },
+              { type: 'refusal', annotations: [cited('https://x.example/refusal', 4)] },
+              { type: 'output_text', text: ' Two.' },
+              null,
+              {
+                type: 'output_text',
+                annotations: [{ type: 'file_citation', file_id: 'f1' }, cited('https://b.example/two', 9)],
+              },
+            ],
+          },
+          {
+            type: 'reasoning',
+            content: [{ type: 'output_text', annotations: [cited('https://x.example/reason', 9)] }],
+          },
+          { type: 'message', content: 'not a list of parts' },
+          null,
+        ],
+      },
+    },
+  ])
+  expect(outcome.answerText).toBe('One.[1] Two.[2]')
+  expect(outcome.sources).toEqual([
+    { title: 'one', url: 'https://a.example/one' },
+    { title: 'two', url: 'https://b.example/two' },
+  ])
 })
 
 // A minimal fake ChatGPT OAuth JWT whose payload carries the account id claim.

@@ -18,8 +18,8 @@
  * converts it to `coverage/coverage-final.json` (`scripts/coverage-istanbul.ts`) and fallow scores
  * CRAP from that measured coverage; the report says how old the LCOV is, because it describes the
  * tree its `bun test` ran on, and this never runs the suite. Without an LCOV, CRAP is fallow's
- * estimate, and the report says so. Measured or not, a file no test loads (and every test file,
- * which Bun leaves out of coverage) keeps fallow's estimate; the health section counts both kinds.
+ * estimate, and the report says so. Measured or not, a file no test loads keeps fallow's
+ * estimate (test files are measured too, #838); the health section counts both kinds.
  */
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -111,10 +111,14 @@ function fullConfig(config: FallowConfig): FallowConfig {
 }
 
 /** fallow's JSON for one command under one config; fallow exits 1 when it finds something, which is not a failure here. */
-async function fallowJson(command: string, config: FallowConfig): Promise<Record<string, unknown>> {
+async function fallowJson(
+  command: string,
+  config: FallowConfig,
+  coverage: CoverageSource,
+): Promise<Record<string, unknown>> {
   writeFileSync(VARIANT_PATH, JSON.stringify(config))
-  const coverage = command === 'health' ? COVERAGE.flags : []
-  const run = await Bun.$`fallow ${command} -c ${VARIANT_PATH} ${coverage} --format json --quiet`
+  const coverageFlags = command === 'health' ? coverage.flags : []
+  const run = await Bun.$`fallow ${command} -c ${VARIANT_PATH} ${coverageFlags} --format json --quiet`
     .cwd(ROOT)
     .nothrow()
     .quiet()
@@ -122,11 +126,14 @@ async function fallowJson(command: string, config: FallowConfig): Promise<Record
 }
 
 /** fallow's human output for one command under the full config, as the terminal would show it. */
-async function fallowText(command: string, flags: readonly string[]): Promise<string> {
+async function fallowText(command: string, flags: readonly string[], coverage: CoverageSource): Promise<string> {
   writeFileSync(VARIANT_PATH, JSON.stringify(fullConfig(fallowConfig as FallowConfig)))
-  const coverage = command === 'health' ? COVERAGE.flags : []
+  const coverageFlags = command === 'health' ? coverage.flags : []
   // Piped, fallow writes no colour codes, so the report reads as plain text.
-  const run = await Bun.$`fallow ${command} -c ${VARIANT_PATH} ${flags} ${coverage} --quiet`.cwd(ROOT).nothrow().quiet()
+  const run = await Bun.$`fallow ${command} -c ${VARIANT_PATH} ${flags} ${coverageFlags} --quiet`
+    .cwd(ROOT)
+    .nothrow()
+    .quiet()
   return run.stdout.toString().trimEnd()
 }
 
@@ -144,8 +151,8 @@ function listField(record: Readonly<Record<string, unknown>>, key: string): read
   return value
 }
 
-/** `fallow dupes`'s headline, read checked: the percentage and the clone groups. */
-function duplicationOf(dupes: Readonly<Record<string, unknown>>): string {
+/** `fallow dupes`'s headline, read checked: the percentage and the clone groups. ⚠ Throws when fallow's JSON changes shape. */
+export function duplicationOf(dupes: Readonly<Record<string, unknown>>): string {
   const stats = dupes.stats
   if (
     typeof stats !== 'object' ||
@@ -162,16 +169,16 @@ function duplicationOf(dupes: Readonly<Record<string, unknown>>): string {
   return `${percentage.toFixed(2)}% · ${groups} groups`
 }
 
-async function measure(config: FallowConfig): Promise<Measured> {
-  const deadCode = await fallowJson('dead-code', config)
-  const health = await fallowJson('health', config)
+async function measure(config: FallowConfig, coverage: CoverageSource): Promise<Measured> {
+  const deadCode = await fallowJson('dead-code', config, coverage)
+  const health = await fallowJson('health', config, coverage)
   const counts = Object.entries(deadCode).flatMap(([key, value]) =>
     Array.isArray(value) && value.length > 0 && key !== 'next_steps' ? [[key, value.length] as const] : [],
   )
   return {
     deadCode: Object.fromEntries(counts),
     healthFindings: listField(health, 'findings').length,
-    duplication: duplicationOf(await fallowJson('dupes', config)),
+    duplication: duplicationOf(await fallowJson('dupes', config, coverage)),
   }
 }
 
@@ -190,12 +197,12 @@ function difference(configured: Measured, without: Measured): string {
   return parts.length === 0 ? 'nothing' : parts.join(', ')
 }
 
-async function exemptionTable(config: FallowConfig): Promise<string> {
-  const configured = await measure(config)
+async function exemptionTable(config: FallowConfig, coverage: CoverageSource): Promise<string> {
+  const configured = await measure(config, coverage)
   const rows: string[] = []
   for (const exemption of EXEMPTIONS) {
     const label = exemption.keptInFullRun ? `${exemption.name} (kept in the full run)` : exemption.name
-    rows.push(`| ${label} | ${difference(configured, await measure(exemption.without(config)))} |`)
+    rows.push(`| ${label} | ${difference(configured, await measure(exemption.without(config), coverage))} |`)
   }
   const deadCode = Object.entries(configured.deadCode).map(([kind, count]) => `${count} ${kind.replaceAll('_', ' ')}`)
   return [
@@ -225,10 +232,9 @@ const scoredFromMap = (finding: unknown): boolean =>
   'coverage_source' in finding &&
   finding.coverage_source === 'istanbul'
 
-/** The full run's functions at or over the CRAP threshold, split by where each one's coverage came from. */
-async function crapCount(): Promise<string> {
-  const health = await fallowJson('health', fullConfig(fallowConfig as FallowConfig))
-  const over = listField(health, 'findings').filter(crapAtOrOver)
+/** The health section's count line: the findings at or over the CRAP threshold, split by where each one's coverage came from. */
+export function crapLine(findings: readonly unknown[]): string {
+  const over = findings.filter(crapAtOrOver)
   const measured = over.filter(scoredFromMap).length
   return (
     `CRAP at or over ${CRAP_THRESHOLD}: ${over.length} functions, ${measured} scored from measured coverage and ` +
@@ -236,45 +242,44 @@ async function crapCount(): Promise<string> {
   )
 }
 
-async function report(): Promise<string> {
+async function report(coverage: CoverageSource): Promise<string> {
   const config = fallowConfig as FallowConfig
   return [
     '# Fallow, with its exemptions off',
     '',
-    `Generated by \`bun run health:full\` (\`scripts/health-full.ts\`). CRAP coverage: ${COVERAGE.description}.`,
+    `Generated by \`bun run health:full\` (\`scripts/health-full.ts\`). CRAP coverage: ${coverage.description}.`,
     '',
     '## What each exemption hides',
     '',
-    await exemptionTable(config),
+    await exemptionTable(config, coverage),
     '',
     '## Dead code',
     '',
-    fenced(await fallowText('dead-code', ['--show-cascade'])),
+    fenced(await fallowText('dead-code', ['--show-cascade'], coverage)),
     '',
     '## Duplication',
     '',
-    fenced(await fallowText('dupes', [])),
+    fenced(await fallowText('dupes', [], coverage)),
     '',
     '## Health',
     '',
-    await crapCount(),
+    crapLine(listField(await fallowJson('health', fullConfig(config), coverage), 'findings')),
     '',
     fenced(
-      await fallowText('health', [
-        '--max-cyclomatic',
-        '20',
-        '--max-cognitive',
-        '15',
-        '--max-crap',
-        `${CRAP_THRESHOLD}`,
-      ]),
+      await fallowText(
+        'health',
+        ['--max-cyclomatic', '20', '--max-cognitive', '15', '--max-crap', `${CRAP_THRESHOLD}`],
+        coverage,
+      ),
     ),
     '',
   ].join('\n')
 }
 
-const COVERAGE = coverageSource()
-
-mkdirSync(join(ROOT, '.local'), { recursive: true })
-writeFileSync(REPORT_PATH, await report())
-process.stdout.write(`health:full: wrote ${REPORT_PATH}\n`)
+// The report is written only when run: importing the module (its tests) runs no fallow and writes nothing (#838).
+if (import.meta.main) {
+  const coverage = coverageSource()
+  mkdirSync(join(ROOT, '.local'), { recursive: true })
+  writeFileSync(REPORT_PATH, await report(coverage))
+  process.stdout.write(`health:full: wrote ${REPORT_PATH}\n`)
+}

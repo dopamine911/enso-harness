@@ -32,7 +32,7 @@ import {
   incidentReportProblems,
   readEnsoThreadIncidents,
 } from '../packages/core/src/index.ts'
-import { fetchJson, storedThreadIds, UsageError, wholeNumber } from './server-cli.ts'
+import { fetchJson, processServerIo, serverCommand, storedThreadIds, UsageError, wholeNumber } from './server-cli.ts'
 
 type ThresholdKey = keyof EnsoRiskThresholds
 
@@ -267,23 +267,18 @@ async function exportIncident(serverUrl: string, incidentId: string, into: strin
   throw new Error(`no stored thread has incident ${incidentId}`)
 }
 
-async function run(query: IncidentsQuery, serverUrl: string): Promise<string> {
+async function commandOutput(argv: readonly string[], serverUrl: string): Promise<string> {
+  const query = parseArguments(argv)
   if (query.command === 'export') return exportIncident(serverUrl, query.incidentId, query.directory)
   if (query.command === 'replay') return renderReplay(await readThreads(serverUrl, query.threads, query.thresholds))
   return renderHistory(await readThreads(serverUrl, query.threads))
 }
 
-/** One catch for both failures: a usage error exits 2 with the usage, anything else 1. */
+/** The command over `io`; its exit code: 2 a usage error, 1 any other failure, else 0. */
+export const run = serverCommand('enso-incidents', USAGE, commandOutput)
+
 async function main(argv: readonly string[]): Promise<void> {
-  const serverUrl = process.env.ENSO_SERVER_URL ?? 'http://127.0.0.1:5179'
-  try {
-    process.stdout.write(`${await run(parseArguments(argv), serverUrl)}\n`)
-  } catch (error) {
-    const usage = error instanceof UsageError
-    const reason = error instanceof Error ? error.message : String(error)
-    process.stderr.write(`enso-incidents: ${reason}${usage ? `\n\n${USAGE}` : ''}\n`)
-    process.exit(usage ? 2 : 1)
-  }
+  process.exitCode = await run(argv, processServerIo(process.env.ENSO_SERVER_URL))
 }
 
 if (import.meta.main) await main(process.argv.slice(2))

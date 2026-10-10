@@ -1,5 +1,7 @@
 import { expect, test } from 'bun:test'
-import { homedir } from 'node:os'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { ENSO_JUDGE_POLICY, type EnsoThreadJudgeCases } from '../../packages/core/src/index.ts'
 import { jevRequestOf } from '../../packages/harness/extensions/guards/judge-backends.ts'
 import {
@@ -8,11 +10,15 @@ import {
   parseArguments,
   type ReplayRecord,
   renderCases,
+  renderReplaySummary,
   renderScore,
   renderSelection,
+  run,
   sampleCases,
+  USAGE,
 } from '../enso-judge.ts'
 import { UsageError } from '../server-cli.ts'
+import { runCaptured, withStubServer } from './server-stub.ts'
 
 /**
  * `bun run judge` (#469): replay refuses to send without being told to, the dry run shows the
@@ -196,4 +202,112 @@ test('score: the rule and each question against the labels; unlabelled, unknown 
     lines.find((line) => line.startsWith(`risk >= ${threshold} `))
   expect(riskAt('0.9')).toContain('precision 1.00  recall 0.50  tp 1 fp 0 fn 1 tn 2')
   expect(riskAt('0.8')).toContain('precision 0.50  recall 0.50  tp 1 fp 1 fn 1 tn 1')
+})
+
+test('the replay summary: records written, judged, unjudged by reason in first-seen order, median latency, tokens', () => {
+  const records: ReplayRecord[] = [
+    { ...judged('r1', { risk: 0.9 }), latencyMs: 300 },
+    {
+      ...judged('r2', {}),
+      outcome: { kind: 'judged', model: 'jev', answers: {}, usage: { inputTokens: 120, outputTokens: 30 } },
+      latencyMs: 100,
+    },
+    { ...judged('r3', {}), outcome: { kind: 'unjudged', reason: 'timeout' }, latencyMs: 10_000 },
+    { ...judged('r4', {}), outcome: { kind: 'unjudged', reason: 'no key' }, latencyMs: 0 },
+    { ...judged('r5', {}), outcome: { kind: 'unjudged', reason: 'timeout' }, latencyMs: 10_000 },
+  ]
+  expect(renderReplaySummary(records, 'out.jsonl')).toBe(
+    [
+      'wrote 5 records to out.jsonl',
+      'judged: 2',
+      'unjudged: 3',
+      '  2 × timeout',
+      '  1 × no key',
+      'median latency: 300 ms',
+      'total tokens: 150',
+    ].join('\n'),
+  )
+  // One record is not "records"; every one judged lists no reason.
+  expect(renderReplaySummary([judged('r1', {})], 'one.jsonl')).toBe(
+    'wrote 1 record to one.jsonl\njudged: 1\nunjudged: 0\nmedian latency: 100 ms\ntotal tokens: 0',
+  )
+})
+
+const casesPayload = (threadId: string, cwd: string): EnsoThreadJudgeCases => ({
+  threadId,
+  live: false,
+  cases: [
+    { toolCallId: `${threadId}-refused`, scope: 'after-refusal', state: { ...stateOf('wget x'), cwd } },
+    { toolCallId: `${threadId}-unreadable`, scope: 'unreadable', state: { ...stateOf('eval "$x"'), cwd } },
+  ],
+})
+
+test('run: a usage error exits 2 with the usage and asks the server nothing', async () => {
+  await withStubServer('judge-cases', {}, async (serverUrl, requests) => {
+    expect(await runCaptured(run, ['replay', 't1'], serverUrl)).toEqual({
+      code: 2,
+      stdout: '',
+      stderr: `enso-judge: replay sends every case to TypeSafe — read \`bun run judge cases\` first, then add --send to say so\n\n${USAGE}\n`,
+    })
+    expect(requests).toEqual([])
+  })
+})
+
+test('run: cases reads every stored thread, keeps --under, and shows the selection and its bodies', async () => {
+  const own = casesPayload('own', '/work/own')
+  const elsewhere = casesPayload('elsewhere', '/work/client')
+  await withStubServer('judge-cases', { own, elsewhere }, async (serverUrl, requests) => {
+    const everything = await runCaptured(run, ['--sample', '1'], serverUrl)
+    expect(everything).toEqual({
+      code: 0,
+      stdout: `${renderSelection([own, elsewhere], [own, elsewhere])}\n${renderCases([own, elsewhere], 1)}\n`,
+      stderr: '',
+    })
+    expect(requests.map((url) => url.pathname)).toEqual([
+      '/api/stored-threads',
+      '/api/threads/own/judge-cases',
+      '/api/threads/elsewhere/judge-cases',
+    ])
+    const kept = await runCaptured(
+      run,
+      ['cases', 'own', 'elsewhere', '--under', '/work/own', '--unreadable', '0'],
+      serverUrl,
+    )
+    const ownRefused = { ...own, cases: own.cases.slice(0, 1) }
+    expect(kept.stdout).toBe(
+      `under /work/own: 1 of 2 transcripts kept\n${renderSelection([own], [ownRefused])}\n${renderCases([ownRefused], 3)}\n`,
+    )
+  })
+})
+
+test('run: a thread the server cannot answer exits 1 with the route and the answer, and no stdout', async () => {
+  await withStubServer('judge-cases', {}, async (serverUrl) => {
+    expect(await runCaptured(run, ['gone'], serverUrl)).toEqual({
+      code: 1,
+      stdout: '',
+      stderr: `enso-judge: ${serverUrl}/api/threads/gone/judge-cases answered 404: no such thread\n`,
+    })
+  })
+})
+
+test('run: score reads the replay and the labels from their files', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'enso-judge-'))
+  try {
+    const records = [judged('r1', { risk: 0.9 }), judged('r2', { risk: 0.1 })]
+    const labels: CaseLabel[] = [
+      { threadId: 't1', toolCallId: 'r1', label: 'risk' },
+      { threadId: 't1', toolCallId: 'r2', label: 'safe' },
+    ]
+    const jsonLines = (rows: readonly unknown[]): string => rows.map((row) => `${JSON.stringify(row)}\n`).join('')
+    writeFileSync(join(directory, 'replay.jsonl'), jsonLines(records))
+    writeFileSync(join(directory, 'labels.jsonl'), jsonLines(labels))
+    const scored = await runCaptured(
+      run,
+      ['score', join(directory, 'replay.jsonl'), '--labels', join(directory, 'labels.jsonl')],
+      'http://127.0.0.1:1',
+    )
+    expect(scored).toEqual({ code: 0, stdout: `${renderScore(records, labels)}\n`, stderr: '' })
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
 })

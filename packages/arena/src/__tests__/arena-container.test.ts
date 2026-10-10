@@ -11,6 +11,7 @@ import {
   containerCredentialArgs,
   containerStartArgs,
   containerStartRefusal,
+  docker,
   runContainerCommand,
 } from '../container.ts'
 
@@ -231,4 +232,18 @@ test('an unknown `container` subcommand is the usage, exit 1, and no docker', as
   expect(calls).toEqual([])
   expect(warned).toHaveLength(2)
   expect(warned[0]).toStartWith('usage: bun run arena container build | credential')
+})
+
+test('`docker` answers its exit code, hands it the input on stdin, and says so when it cannot be run at all', () => {
+  const warned: string[] = []
+  const shell = { program: 'sh', warn: (line: string) => warned.push(line) }
+  expect(docker(['-c', 'exit 3'], undefined, shell)).toBe(3)
+  // A credential goes in on stdin, never on the command line.
+  expect(docker(['-c', 'read -r key; [ "$key" = sk-ant-x ]'], 'sk-ant-x\n', shell)).toBe(0)
+  expect(docker(['-c', 'read -r key; [ "$key" = sk-ant-x ]'], 'other\n', shell)).toBe(1)
+  expect(warned).toEqual([])
+
+  const missing = { program: join(tmpdir(), 'no-docker-here'), warn: (line: string) => warned.push(line) }
+  expect(docker(['version'], undefined, missing)).toBe(1)
+  expect(warned).toEqual([expect.stringMatching(/^arena: docker could not be run: /)])
 })

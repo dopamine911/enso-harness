@@ -13,13 +13,23 @@ import {
   ensoLogLineRenderer,
   logRecordOf,
   parseEnsoLogLevels,
+  reportHomeMigration,
+  reportSessionMigration,
   retiredEnvironmentNames,
 } from '../log-process.ts'
 import { ENSO_LOG_EVENTS } from '../log-stats.ts'
-import { ENSO_REDACTED, ENSO_REDACTED_VALUE, EnsoLogLine, ensoLogger, withEnsoLogContext } from '../log.ts'
+import {
+  ENSO_LOG_ROOT,
+  ENSO_REDACTED,
+  ENSO_REDACTED_VALUE,
+  EnsoLogLine,
+  ensoLogger,
+  withEnsoLogContext,
+} from '../log.ts'
 import { ensoSecretsPath } from '../paths.ts'
 import { isProcessMarkerAlive, processMarkersDir } from '../process-marker.ts'
 import { knownSecretValuesTracking, readSecret } from '../secrets.ts'
+import { recordEnsoLogs } from './log-recorder.ts'
 
 /**
  * The file a user hands us (#132), end to end through the real configurator: what a line
@@ -625,4 +635,74 @@ test('⚠ a variable from before the rename is refused by name, never ignored', 
   )
   // And a clean environment still parses.
   expect(parseEnsoLogLevels({ ENSO_LOG_LEVEL: 'debug' }, { console: 'info' }).file).toBe('debug')
+})
+
+/**
+ * What a launch tells the user about its two migrations (#421, #552), on the launcher's own
+ * logger: a move is one `info` line with the count, and everything left where it was is its own
+ * `warning`, named, because nothing is overwritten and the user decides. A launch that moved
+ * nothing says nothing.
+ */
+test("a launch's `.enso/` move: one info line for what moved, a warning per file kept, and one when ENSO_HOME held it", async () => {
+  const logs = await recordEnsoLogs()
+  const from = '/work/checkout/.enso'
+  const to = '/home/user/custom-enso'
+  reportHomeMigration(ensoLogger('server', 'dev'), {
+    from,
+    to,
+    moved: ['secrets.env', 'pi-agent/auth.json'],
+    kept: ['config.json', 'pi-agent/settings.json'],
+    held: true,
+  })
+  expect(logs.records.map(({ category, level, properties }) => ({ category, level, properties }))).toEqual([
+    { category: [ENSO_LOG_ROOT, 'server', 'dev'], level: 'info', properties: { count: 2, from, to } },
+    { category: [ENSO_LOG_ROOT, 'server', 'dev'], level: 'warning', properties: { path: 'config.json', from, to } },
+    {
+      category: [ENSO_LOG_ROOT, 'server', 'dev'],
+      level: 'warning',
+      properties: { path: 'pi-agent/settings.json', from, to },
+    },
+    { category: [ENSO_LOG_ROOT, 'server', 'dev'], level: 'warning', properties: { from, to } },
+  ])
+  const [moved, kept, , held] = logs.records.map(({ rawMessage }) => String(rawMessage))
+  expect(moved).toContain('moved {count} file(s)')
+  expect(kept).toContain('nothing is overwritten')
+  expect(held).toContain('was not moved: ENSO_HOME is set')
+})
+
+test("a launch's session move: what moved, then each kept file, gone directory and headerless file, in that order", async () => {
+  const logs = await recordEnsoLogs()
+  reportSessionMigration(
+    ensoLogger('server', 'web'),
+    {
+      moved: ['/p/a.jsonl', '/p/b.jsonl', '/p/c.jsonl'],
+      kept: ['/legacy/kept.jsonl'],
+      orphaned: ['/legacy/--gone--'],
+      unreadable: ['/legacy/tail.jsonl'],
+    },
+    '/home/user/.enso/projects',
+  )
+  expect(
+    logs.records.map(({ level, properties, rawMessage }) => [level, properties, String(rawMessage).split(':')[0]]),
+  ).toEqual([
+    [
+      'info',
+      { count: 3, projectsDir: '/home/user/.enso/projects' },
+      'moved {count} session file(s) into their project folders under {projectsDir} (#552)',
+    ],
+    ['warning', { path: '/legacy/kept.jsonl' }, '{path} stays where it was'],
+    ['warning', { directory: '/legacy/--gone--' }, '{directory} stays where it was'],
+    ['warning', { path: '/legacy/tail.jsonl' }, '{path} stays where it was'],
+  ])
+  expect(String(logs.records[1]?.rawMessage)).toContain('already holds a file of that name')
+  expect(String(logs.records[2]?.rawMessage)).toContain('no longer exists')
+  expect(String(logs.records[3]?.rawMessage)).toContain('no session header')
+})
+
+test('a launch that moved nothing and kept nothing logs nothing about either migration', async () => {
+  const logs = await recordEnsoLogs()
+  const log = ensoLogger('server', 'dev')
+  reportHomeMigration(log, { from: '/work/checkout/.enso', to: '/home/user/.enso', moved: [], kept: [], held: false })
+  reportSessionMigration(log, { moved: [], kept: [], orphaned: [], unreadable: [] }, '/home/user/.enso/projects')
+  expect(logs.records).toEqual([])
 })
