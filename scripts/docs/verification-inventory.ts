@@ -460,7 +460,8 @@ function isComplexityPin(entry: unknown): entry is ComplexityPin {
 export function complexityRatchets(packageScripts: Readonly<Record<string, string>>, config: unknown): Ratchet[] {
   const ceiling = /--max-cognitive (\d+)/.exec(packageScripts[COMPLEXITY_SCRIPT] ?? '')?.[1]
   if (ceiling === undefined) throw new Error(`package.json: \`${COMPLEXITY_SCRIPT}\` sets no --max-cognitive`)
-  // Bun imports the JSONC config untyped; every field read below is checked before it is used.
+  // `config` is `unknown` because callers hand it anything: the untyped JSONC import, or a test's
+  // malformed shape (#832). Every field read below is checked before it is used.
   const health: unknown =
     typeof config === 'object' && config !== null && 'health' in config ? config.health : undefined
   const overrides: unknown =
