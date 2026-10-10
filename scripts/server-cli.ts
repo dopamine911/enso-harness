@@ -3,8 +3,24 @@ import { readFileSync } from 'node:fs'
 /**
  * What the CLIs that read the running server share (`bun run incidents`, #468; `bun run judge`,
  * #469): a usage error the caller turns into exit 2, the whole-number flag every threshold and
- * count takes, a route's JSON, and the stored-thread listing a CLI reads when no thread is named.
+ * count takes, a route's JSON, the stored-thread listing a CLI reads when no thread is named, and
+ * the output a CLI's `run` writes to (#832).
  */
+
+/** Where a CLI's `run` writes: the process's own (`PROCESS_OUTPUT`) from its `main`, captures in a test. */
+export interface CliOutput {
+  readonly stdout: (text: string) => void
+  readonly stderr: (text: string) => void
+}
+
+export const PROCESS_OUTPUT: CliOutput = {
+  stdout: (text) => {
+    process.stdout.write(text)
+  },
+  stderr: (text) => {
+    process.stderr.write(text)
+  },
+}
 
 /** A command line the CLI cannot read: the caller prints it with the usage and exits 2. */
 export class UsageError extends Error {

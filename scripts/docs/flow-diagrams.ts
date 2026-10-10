@@ -182,7 +182,7 @@ function observationPipeline(stages: readonly PipelineStage[]): string[] {
   return lines
 }
 
-function generate(): string {
+export function flowDiagramsPage(): string {
   const routes = discoverRoutes()
   const observationSource = readFileSync(join(ROOT, OBSERVATION_PATH), 'utf8')
   // Declaration order, NOT sorted: the page says "in the union's order of declaration", and a
@@ -221,4 +221,5 @@ function generate(): string {
   ].join('\n')
 }
 
-if (import.meta.main) runGenerator('flow-diagrams', generate)
+// Importable: `build-docs.ts#generatedPage` calls `flowDiagramsPage` (#832); importing must not print a page.
+if (import.meta.main) runGenerator('flow-diagrams', flowDiagramsPage)

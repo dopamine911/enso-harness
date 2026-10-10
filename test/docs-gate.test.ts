@@ -11,6 +11,7 @@ import {
   stringConstant,
 } from '../scripts/docs/gate-source.ts'
 import { FENCE_OPEN, SOURCEABLE_FENCE_LANGUAGE } from '../scripts/docs/refresh-fences.ts'
+import { seamsTable } from '../scripts/docs/seams-table.ts'
 import { declarationsIn } from '../scripts/docs/source-citations.ts'
 import { markdownFiles, REPOSITORY_ROOT } from './gate-support.ts'
 
@@ -514,24 +515,26 @@ test('the extractor drops the tags that file a symbol in the API index, and noth
 // ── the seam inventory (#213) ────────────────────────────────────────────────────────
 
 /**
- * The real generator over a COPY of `docs/seams/` — its one argument is the pages
- * directory, and the metadata keys it checks are still the real ones, so a fixture can add
- * or retitle a page without touching the pages this repo ships. `edit` is what the
- * thirteenth author does.
+ * A COPY of `docs/seams/`, edited: the generator's metadata keys are still the real ones, so a
+ * fixture can add or retitle a page without touching the pages this repo ships. `edit` is what
+ * the thirteenth author does.
  */
-function seamsTableOver(edit: (directory: string) => void): { exitCode: number; stdout: string; stderr: string } {
+function seamsFixture(edit: (directory: string) => void): string {
   const directory = mkdtempSync(join(tmpdir(), 'enso-seams-'))
   cpSync(join(DOCS_ROOT, 'seams'), directory, { recursive: true })
   edit(directory)
-  const run = Bun.spawnSync(['bun', 'scripts/docs/seams-table.ts', directory], { cwd: REPOSITORY_ROOT })
+  return directory
+}
+
+/** The real generator CLI over a fixture: its one argument is the pages directory. */
+function seamsTableOver(edit: (directory: string) => void): { exitCode: number; stdout: string; stderr: string } {
+  const run = Bun.spawnSync(['bun', 'scripts/docs/seams-table.ts', seamsFixture(edit)], { cwd: REPOSITORY_ROOT })
   return { exitCode: run.exitCode, stdout: run.stdout.toString(), stderr: run.stderr.toString() }
 }
 
 test('the seams table has one row per page under docs/seams, the named non-seams aside (#213)', () => {
-  const generated = seamsTableOver(() => undefined)
-  expect(generated.stderr).toBe('')
-  expect(generated.exitCode).toBe(0)
-  const listed = [...generated.stdout.matchAll(/]\(\.\/seams\/([^)]+)\)/g)].map((row) => row[1] ?? '').toSorted()
+  const table = seamsTable(join(DOCS_ROOT, 'seams'))
+  const listed = [...table.matchAll(/]\(\.\/seams\/([^)]+)\)/g)].map((row) => row[1] ?? '').toSorted()
   const onDisk = readdirSync(join(DOCS_ROOT, 'seams'))
     .filter((file) => file.endsWith('.md') && file !== 'README.md' && file !== 'ported-provenance.md')
     .toSorted()
@@ -553,22 +556,27 @@ test('⚠ a page under docs/seams the generator cannot classify is REFUSED, neve
       '# The context seam\n\n## What crosses it that should not\n\n**Nothing yet.**\n',
     )
   })
+  // The CLI's half of the contract: a refusal is a non-zero exit and a reason, never a partial table.
   expect(added.exitCode).not.toBe(0)
   expect(added.stderr).toContain('context.md')
   expect(added.stdout).toBe('')
 
   // A page the table already lists, retitled: refused by name and by the title it needs,
   // not by an exhaustiveness message that says only that a key went missing.
-  const retitled = seamsTableOver((directory: string) => {
+  const retitled = seamsFixture((directory: string) => {
     const page = join(directory, 'storage.md')
     writeFileSync(page, readFileSync(page, 'utf8').replace(/^# Seam: .+$/m, '# Storage'))
   })
-  expect(retitled.exitCode).not.toBe(0)
-  expect(retitled.stderr).toContain('storage.md has no "# Seam: …" title')
+  expect(() => seamsTable(retitled)).toThrow('storage.md has no "# Seam: …" title')
 
-  // The leak column is each page's own claim, not prose: a leak section whose first
-  // paragraph is not the bold lead cannot become a cell, and says so.
-  const unbolded = seamsTableOver((directory: string) => {
+  // The leak column is each page's own claim, not prose: a page without the section, or a leak
+  // section whose first paragraph is not the bold lead, cannot become a cell, and says so.
+  const sectionless = seamsFixture((directory: string) => {
+    const page = join(directory, 'logging.md')
+    writeFileSync(page, readFileSync(page, 'utf8').replace('## What crosses it that should not\n', '## What leaks\n'))
+  })
+  expect(() => seamsTable(sectionless)).toThrow('logging.md has no "## What crosses it that should not" section')
+  const unbolded = seamsFixture((directory: string) => {
     const page = join(directory, 'dialog.md')
     writeFileSync(
       page,
@@ -578,8 +586,7 @@ test('⚠ a page under docs/seams the generator cannot classify is REFUSED, neve
       ),
     )
   })
-  expect(unbolded.exitCode).not.toBe(0)
-  expect(unbolded.stderr).toContain("dialog.md's leak section does not open with a bold lead sentence")
+  expect(() => seamsTable(unbolded)).toThrow("dialog.md's leak section does not open with a bold lead sentence")
 })
 
 /**

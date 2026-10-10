@@ -14,8 +14,9 @@ import { redactJudgeText } from '@enso/core/judge'
 import { ensoAgentDir } from '@enso/core/paths'
 import { ArenaActToolParameters, ArenaVisualActToolParameters } from './act-tool.ts'
 import { ARENA_UI_TOOL, ARENA_VIEW } from './actions.ts'
+import type { ArenaActOutcome } from './perform.ts'
 import { type ArenaReadMark, readMarkOf } from './read-regions.ts'
-import type { ArenaActOutcome, ArenaDriver, ArenaDriverSession } from './recorder.ts'
+import type { ArenaDriver, ArenaDriverSession } from './recorder.ts'
 import type { ArenaPerception } from './timeline.ts'
 
 /**

@@ -334,7 +334,7 @@ function tableText(value: string): string {
   return value.replaceAll('|', '\\|').replaceAll('\n', ' ')
 }
 
-function generate(): string {
+export function envAndConfigPage(): string {
   const environment = scanEnvironment()
   assertEnvironmentInventory(environment)
   const config = configInventory()
@@ -410,4 +410,5 @@ function generate(): string {
   ].join('\n')
 }
 
-runGenerator('env-and-config', generate)
+// Importable: `build-docs.ts#generatedPage` calls `envAndConfigPage` (#832); importing must not print a page.
+if (import.meta.main) runGenerator('env-and-config', envAndConfigPage)

@@ -152,7 +152,12 @@ function elidedKinds(source: string): Map<string, { line: number; field: string 
   return elided
 }
 
-function adapterResult(source: string, kind: string): AdapterResult {
+/**
+ * What the AG-UI adapter's `case '<kind>':` block emits for `kind`: its `EventType.*` events, the
+ * kind itself when it rides CUSTOM, `dropped` for an empty-array branch. A kind with no case, or a
+ * case with no recognized output, is labelled UNCLASSIFIED rather than refused: the page reports it.
+ */
+export function adapterResult(source: string, kind: string): AdapterResult {
   const cases = [...source.matchAll(/^\s+case '([a-z-]+)':/gm)]
   const matchingCases = cases.filter((caseMatch) => caseMatch[1] === kind)
   if (matchingCases.length === 0)
@@ -181,7 +186,7 @@ function adapterResult(source: string, kind: string): AdapterResult {
   }
 }
 
-function generate(): string {
+export function observationsPage(): string {
   const observationSource = readFileSync(join(ROOT, OBSERVATION_PATH), 'utf8')
   const mapperSource = readFileSync(join(ROOT, MAPPER_PATH), 'utf8')
   const followSource = readFileSync(join(ROOT, FOLLOW_PATH), 'utf8')
@@ -360,5 +365,6 @@ function codeList(kinds: readonly string[]): string {
   return kinds.map((kind) => `\`${kind}\``).join(', ')
 }
 
-// Importable: `flow-diagrams.ts` reuses these extractors, and importing must not print a page.
-if (import.meta.main) runGenerator('observations', generate)
+// Importable: `flow-diagrams.ts` reuses these extractors and `build-docs.ts#generatedPage` calls
+// `observationsPage` (#832); importing must not print a page.
+if (import.meta.main) runGenerator('observations', observationsPage)

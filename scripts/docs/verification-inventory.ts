@@ -380,7 +380,8 @@ function detectedGateFiles(): string[] {
     .toSorted()
 }
 
-function firstHeaderSentence(source: string, file: string): string {
+/** A gate file's rule: the first sentence of its first doc comment that is not a `⚠` warning. */
+export function firstHeaderSentence(source: string, file: string): string {
   const header = /\/\*\*([\s\S]*?)\*\//.exec(source)?.[1]
   if (header === undefined) throw new Error(`${file}: no header comment`)
   const prose = header
@@ -453,14 +454,14 @@ function isComplexityPin(entry: unknown): entry is ComplexityPin {
 /**
  * The complexity gate's ceiling (the `complexity:check` script's `--max-cognitive`) and its
  * per-function pins (`.fallowrc.jsonc` → `health.thresholdOverrides`). An entry this cannot read
- * as one file, one function, a number and a reason is REFUSED, never skipped.
+ * as one file, one function, a number and a reason is REFUSED, never skipped. The inputs are
+ * passed in, so a test can hand it the shapes the repository does not hold (#832).
  */
-function complexityRatchets(): Ratchet[] {
-  const scripts: Readonly<Record<string, string>> = JSON.parse(repositoryFile('package.json')).scripts
-  const ceiling = /--max-cognitive (\d+)/.exec(scripts[COMPLEXITY_SCRIPT] ?? '')?.[1]
+export function complexityRatchets(packageScripts: Readonly<Record<string, string>>, config: unknown): Ratchet[] {
+  const ceiling = /--max-cognitive (\d+)/.exec(packageScripts[COMPLEXITY_SCRIPT] ?? '')?.[1]
   if (ceiling === undefined) throw new Error(`package.json: \`${COMPLEXITY_SCRIPT}\` sets no --max-cognitive`)
-  // Bun imports the JSONC config untyped; every field read below is checked before it is used.
-  const config: unknown = fallowConfig
+  // `config` is `unknown` because callers hand it anything: the untyped JSONC import, or a test's
+  // malformed shape (#832). Every field read below is checked before it is used.
   const health: unknown =
     typeof config === 'object' && config !== null && 'health' in config ? config.health : undefined
   const overrides: unknown =
@@ -570,7 +571,7 @@ function consumersOf(metadata: DoubleMetadata, tests: readonly string[]): string
   return tests.filter((file) => importsSymbol(file, metadata))
 }
 
-function generate(): string {
+export function verificationInventoryPage(): string {
   const gateFiles = detectedGateFiles()
   assertExactKeys('gate', gateFiles, Object.keys(GATE_METADATA).toSorted())
 
@@ -627,7 +628,7 @@ function generate(): string {
       location: `${linkedPath(COVERAGE_SCRIPT)} — \`TOTAL_FUNCTION_COVERAGE_FLOOR\``,
       reason: 'Minimum aggregate function coverage accepted by the coverage gate.',
     },
-    ...complexityRatchets(),
+    ...complexityRatchets(JSON.parse(repositoryFile('package.json')).scripts, fallowConfig),
     ...allowlistRatchets,
   ]
 
@@ -676,4 +677,5 @@ function generate(): string {
   ].join('\n')
 }
 
-runGenerator('verification-inventory', generate)
+// Importable: `build-docs.ts#generatedPage` calls `verificationInventoryPage` (#832); importing must not print a page.
+if (import.meta.main) runGenerator('verification-inventory', verificationInventoryPage)

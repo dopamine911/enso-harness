@@ -25,8 +25,6 @@ import { assertExactKeys, runGenerator } from './generator-support.ts'
  */
 
 const ROOT = findRepoRoot(import.meta.url)
-/** The pages directory. Overridable by argv so the gate can run this generator over a fixture (#213). */
-const SEAMS_DIRECTORY = resolve(ROOT, process.argv[2] ?? 'docs/seams')
 const LEAK_SECTION = '## What crosses it that should not'
 const PAGE_TITLE = /^# Seam: (.+)$/m
 const BOLD_LEAD = /^\*\*(.+?)\*\*/
@@ -77,8 +75,8 @@ interface SeamRow {
   readonly leak: string
 }
 
-function seamRow(file: string): SeamRow {
-  const text = readFileSync(join(SEAMS_DIRECTORY, file), 'utf8')
+function seamRow(directory: string, file: string): SeamRow {
+  const text = readFileSync(join(directory, file), 'utf8')
   const title = PAGE_TITLE.exec(text)?.[1]
   if (title === undefined) throw new Error(`${file} has no "# Seam: …" title, and is not a named non-seam page`)
   const sectionStart = text.indexOf(LEAK_SECTION)
@@ -91,16 +89,19 @@ function seamRow(file: string): SeamRow {
   return { file, name: title, leak: lead.replace(/\|/g, '\\|') }
 }
 
-function generate(): string {
-  const pages = readdirSync(SEAMS_DIRECTORY)
+/** The table over the pages in `directory`: `docs/seams`, or a fixture copy of it (#213). */
+export function seamsTable(directory: string): string {
+  const pages = readdirSync(directory)
     .filter((file) => file.endsWith('.md') && NON_SEAM_PAGES[file] !== true)
     .toSorted()
   assertExactKeys('seam page', pages, Object.keys(SEAM_METADATA))
-  const rows = pages.map(seamRow).map((row) => {
-    const metadata = SEAM_METADATA[row.file]
-    if (metadata === undefined) throw new Error(`no metadata for ${row.file}`)
-    return `| [${row.name}](./seams/${row.file}) | ${metadata.domain} | ${metadata.gate} | ${row.leak} |`
-  })
+  const rows = pages
+    .map((file) => seamRow(directory, file))
+    .map((row) => {
+      const metadata = SEAM_METADATA[row.file]
+      if (metadata === undefined) throw new Error(`no metadata for ${row.file}`)
+      return `| [${row.name}](./seams/${row.file}) | ${metadata.domain} | ${metadata.gate} | ${row.leak} |`
+    })
   return [
     '| Seam | Domain | Gate | What crosses it that should not (the page\u2019s own words) |',
     '|---|---|---|---|',
@@ -109,4 +110,6 @@ function generate(): string {
   ].join('\n')
 }
 
-runGenerator('seams-table', generate)
+// The pages directory is the one argument, so the gate can run this CLI over a fixture (#213);
+// importable, so a test calls `seamsTable` in-process (#832) without printing a page.
+if (import.meta.main) runGenerator('seams-table', () => seamsTable(resolve(ROOT, process.argv[2] ?? 'docs/seams')))

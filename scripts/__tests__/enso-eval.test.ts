@@ -1,12 +1,15 @@
 import { expect, test } from 'bun:test'
 import type { EnsoSessionEval } from '../../packages/core/src/index.ts'
 import {
+  type EvalIo,
   parseArguments,
   renderComparison,
   renderMarkdown,
   renderRow,
   renderRowHeader,
   ROW_FIELDS,
+  run,
+  USAGE,
   UsageError,
 } from '../enso-eval.ts'
 
@@ -133,4 +136,135 @@ test('the comparison table lines threads up as columns, one metric per row', () 
   const table = renderComparison([BASE, other])
   expect(table).toContain('| Metric | `thread-e` | `thread-e` |')
   expect(table).toContain('| `corrections` | 1 | 4 |')
+})
+
+/**
+ * A stand-in for the server's eval route: each known thread's payload, `malformed` a body that is
+ * no eval, anything else a 404. A `slow-` thread is held until another thread's request has
+ * arrived, so it answers after one named later — a test can see the output keep argument order.
+ * (A `slow-` thread must therefore never be asked for alone.)
+ */
+async function withEvalServer(
+  payloads: readonly EnsoSessionEval[],
+  body: (serverUrl: string, paths: string[]) => Promise<void>,
+): Promise<void> {
+  const paths: string[] = []
+  const otherArrived = Promise.withResolvers<void>()
+  const server = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    async fetch(request) {
+      const { pathname } = new URL(request.url)
+      paths.push(pathname)
+      const threadId = decodeURIComponent(pathname.split('/')[3] ?? '')
+      if (threadId.startsWith('slow-')) await otherArrived.promise
+      else otherArrived.resolve()
+      if (threadId === 'malformed') return Response.json({ threadId, nothing: 'else' })
+      const payload = payloads.find((each) => each.threadId === threadId)
+      if (payload === undefined) return new Response('no such thread', { status: 404 })
+      return Response.json(payload)
+    },
+  })
+  try {
+    await body(server.url.origin, paths)
+  } finally {
+    await server.stop(true)
+  }
+}
+
+async function runCaptured(
+  argv: readonly string[],
+  serverUrl: string,
+): Promise<{ code: number; stdout: string; stderr: string }> {
+  let stdout = ''
+  let stderr = ''
+  const io: EvalIo = {
+    serverUrl,
+    stdout: (text) => {
+      stdout += text
+    },
+    stderr: (text) => {
+      stderr += text
+    },
+  }
+  const code = await run(argv, io)
+  return { code, stdout, stderr }
+}
+
+const SLOW: EnsoSessionEval = { ...BASE, threadId: 'slow-thread-1' }
+
+test('run: a usage error exits 2 with the problem and the usage on stderr, and asks the server nothing', async () => {
+  await withEvalServer([BASE], async (serverUrl, paths) => {
+    const result = await runCaptured(['a', '--json', '--row'], serverUrl)
+    expect(result).toEqual({
+      code: 2,
+      stdout: '',
+      stderr: `enso-eval: --json and --row are each a whole output; choose one\n\n${USAGE}\n`,
+    })
+    expect(paths).toEqual([])
+  })
+})
+
+test('run: --row-header alone prints the header and never reaches the server; with a thread, the row follows it', async () => {
+  await withEvalServer([BASE], async (serverUrl, paths) => {
+    expect(await runCaptured(['--row-header'], serverUrl)).toEqual({
+      code: 0,
+      stdout: `${renderRowHeader()}\n`,
+      stderr: '',
+    })
+    expect(paths).toEqual([])
+
+    const both = await runCaptured(['--row-header', BASE.threadId, '--row'], serverUrl)
+    expect(both.code).toBe(0)
+    expect(both.stdout).toBe(`${renderRowHeader()}\n${renderRow(BASE)}\n`)
+    expect(paths).toEqual([`/api/threads/${BASE.threadId}/eval`])
+  })
+})
+
+test('run: --json is the payload itself for one thread and an array in argument order for several', async () => {
+  await withEvalServer([BASE, SLOW], async (serverUrl) => {
+    const one = await runCaptured([BASE.threadId, '--json'], serverUrl)
+    expect(one.code).toBe(0)
+    expect(JSON.parse(one.stdout)).toEqual(BASE)
+
+    // `slow-thread-1` answers last, yet comes first: the order is the arguments', not the answers'.
+    const several = await runCaptured([SLOW.threadId, BASE.threadId, '--json'], serverUrl)
+    expect(JSON.parse(several.stdout)).toEqual([SLOW, BASE])
+  })
+})
+
+test('run: the markdown is one section per thread, with the comparison table only past one thread', async () => {
+  await withEvalServer([BASE, SLOW], async (serverUrl) => {
+    const one = await runCaptured([BASE.threadId], serverUrl)
+    expect(one).toEqual({ code: 0, stdout: `${renderMarkdown(BASE)}\n`, stderr: '' })
+
+    const several = await runCaptured([SLOW.threadId, BASE.threadId], serverUrl)
+    expect(several.stdout).toBe(
+      `${renderMarkdown(SLOW)}\n\n${renderMarkdown(BASE)}\n\n${renderComparison([SLOW, BASE])}\n`,
+    )
+  })
+})
+
+test('run: a thread the server cannot evaluate exits 1, naming the URL and its answer, and prints no partial output', async () => {
+  await withEvalServer([BASE], async (serverUrl) => {
+    const missing = await runCaptured([BASE.threadId, 'gone'], serverUrl)
+    expect(missing).toEqual({
+      code: 1,
+      stdout: '',
+      stderr: `enso-eval: ${serverUrl}/api/threads/gone/eval answered 404: no such thread\n`,
+    })
+
+    const malformed = await runCaptured(['malformed'], serverUrl)
+    expect(malformed.code).toBe(1)
+    expect(malformed.stderr).toBe(
+      `enso-eval: ${serverUrl}/api/threads/malformed/eval: the payload did not match EnsoSessionEval\n`,
+    )
+  })
+})
+
+test('run: a thread id is one path segment, escaped, so a slash in it cannot reach another route', async () => {
+  await withEvalServer([], async (serverUrl, paths) => {
+    await runCaptured(['a/../b'], serverUrl)
+    expect(paths).toEqual(['/api/threads/a%2F..%2Fb/eval'])
+  })
 })

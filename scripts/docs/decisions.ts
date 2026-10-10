@@ -102,6 +102,27 @@ function firstCompleteSentence(text: string): string | undefined {
   return undefined
 }
 
+/**
+ * The decision a file's leading header records: the issues it cites, ascending and once each, and
+ * its first complete sentence, or an UNCLASSIFIED marker when it has none. `undefined` when there is
+ * no leading header or it cites no issue: not a decision header.
+ */
+export function headerDecision(source: string): Omit<DecisionRow, 'file'> | undefined {
+  const header = leadingHeader(source)
+  if (header === undefined) return undefined
+  const text = normalizedHeader(header)
+  const issues = [...new Set([...text.matchAll(ISSUE)].map((match) => Number(match[1])))]
+    .filter((issue) => Number.isInteger(issue))
+    .toSorted((left, right) => left - right)
+  if (issues.length === 0) return undefined
+  const sentence = firstCompleteSentence(text)
+  return {
+    issues,
+    decision: sentence ?? `UNCLASSIFIED — leading header at line ${header.startLine} has no complete sentence`,
+    unclassified: sentence === undefined,
+  }
+}
+
 function decisions(): DecisionRow[] {
   const rows: DecisionRow[] = []
   const seen = new Set<string>()
@@ -110,20 +131,8 @@ function decisions(): DecisionRow[] {
     const file = relative(ROOT, path).replaceAll('\\', '/')
     if (seen.has(file)) throw new Error(`duplicate decision path: ${file}`)
     seen.add(file)
-    const header = leadingHeader(readFileSync(path, 'utf8'))
-    if (header === undefined) continue
-    const text = normalizedHeader(header)
-    const issues = [...new Set([...text.matchAll(ISSUE)].map((match) => Number(match[1])))]
-      .filter((issue) => Number.isInteger(issue))
-      .toSorted((left, right) => left - right)
-    if (issues.length === 0) continue
-    const sentence = firstCompleteSentence(text)
-    rows.push({
-      file,
-      issues,
-      decision: sentence ?? `UNCLASSIFIED — leading header at line ${header.startLine} has no complete sentence`,
-      unclassified: sentence === undefined,
-    })
+    const decision = headerDecision(readFileSync(path, 'utf8'))
+    if (decision !== undefined) rows.push({ file, ...decision })
   }
   return rows
 }
@@ -161,11 +170,15 @@ function generate(rows: readonly DecisionRow[]): string {
   ].join('\n')
 }
 
-runGenerator('decisions', () => {
+/** The page, or a refusal naming every qualifying header that has no complete sentence. */
+export function decisionsPage(): string {
   const rows = decisions()
   const unclassified = rows.filter((row) => row.unclassified).map((row) => row.file)
   if (unclassified.length > 0) {
     throw new Error(`${unclassified.length} qualifying header(s) are UNCLASSIFIED: ${unclassified.join(', ')}`)
   }
   return generate(rows)
-})
+}
+
+// Importable: `build-docs.ts#generatedPage` calls `decisionsPage` (#832); importing must not print a page.
+if (import.meta.main) runGenerator('decisions', decisionsPage)

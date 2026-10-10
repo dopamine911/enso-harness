@@ -259,6 +259,77 @@ test('openai codex: a credential that is not a parseable JWT refuses before disp
   expect(fetchCalls).toBe(0)
 })
 
+// --- openai: GitHub Copilot's endpoint ---
+
+const COPILOT_MODEL = fakeModel({ provider: 'github-copilot', baseUrl: 'https://copilot.model.test.example' })
+
+/** The URL the search was dispatched to, for `model` under the credential `auth` resolves to. */
+async function dispatchedUrl(model: SearchModel, auth: ResolvedProviderAuth): Promise<string | undefined> {
+  let capturedUrl: string | undefined
+  await runOpenAiProviderSearch({
+    ...modelRequest(model, async (url) => {
+      capturedUrl = url
+      return sseResponse(OPENAI_SEARCHED_EVENTS)
+    }),
+    resolveAuth: async () => auth,
+  })
+  return capturedUrl
+}
+
+test("openai copilot: the credential's own endpoint wins, and only for a github-copilot model", async () => {
+  const enterprise = 'https://api.enterprise.githubcopilot.com'
+  expect(await dispatchedUrl(COPILOT_MODEL, { ok: true, apiKey: 'tid=1', baseUrl: enterprise })).toBe(
+    `${enterprise}/responses`,
+  )
+  // Another provider's credential endpoint is never followed: the model's own base URL stands.
+  expect(await dispatchedUrl(OPENAI_MODEL, { ok: true, apiKey: 'k', baseUrl: enterprise })).toBe(
+    'https://api.test.example/v1/responses',
+  )
+  // A blank endpoint is no endpoint: the token is read instead.
+  expect(
+    await dispatchedUrl(COPILOT_MODEL, {
+      ok: true,
+      apiKey: 'tid=1;proxy-ep=proxy.individual.githubcopilot.com',
+      baseUrl: '  ',
+    }),
+  ).toBe('https://api.individual.githubcopilot.com/responses')
+})
+
+test("openai copilot: an older token's single proxy-ep maps the proxy host onto the API host", async () => {
+  expect(
+    await dispatchedUrl(COPILOT_MODEL, {
+      ok: true,
+      apiKey: 'tid=1;exp=2;proxy-ep=proxy.individual.githubcopilot.com;sku=free',
+    }),
+  ).toBe('https://api.individual.githubcopilot.com/responses')
+  // Hosts are case-insensitive; the mapped one is lowercased.
+  expect(await dispatchedUrl(COPILOT_MODEL, { ok: true, apiKey: 'proxy-ep=PROXY.Business.GithubCopilot.COM' })).toBe(
+    'https://api.business.githubcopilot.com/responses',
+  )
+})
+
+test("openai copilot: a token whose proxy-ep is missing, repeated, or not a Copilot proxy host keeps the model's base URL", async () => {
+  const modelUrl = 'https://copilot.model.test.example/responses'
+  const refused = [
+    'tid=1;exp=2', // no proxy-ep
+    'proxy-ep=proxy.a.githubcopilot.com;proxy-ep=proxy.b.githubcopilot.com', // two: ambiguous
+    'proxy-ep=evil.individual.githubcopilot.com', // not a proxy. host
+    'proxy-ep=proxy.githubcopilot.com', // too few labels to name a tier
+    'proxy-ep=proxy.individual.githubcopilot.com.evil.example', // a Copilot-looking prefix on another domain
+    'proxy-ep=proxy.individual.notcopilot.com', // the wrong second-level domain
+    'proxy-ep=proxy.in_dividual.githubcopilot.com', // a character no host label holds
+    'proxy-ep=proxy.-individual.githubcopilot.com', // a label may not start with a hyphen
+    'proxy-ep=proxy..githubcopilot.com', // an empty label
+    `proxy-ep=proxy.${'a'.repeat(64)}.githubcopilot.com`, // a label past 63 characters
+    `proxy-ep=proxy.${Array.from({ length: 50 }, () => 'abcd').join('.')}.githubcopilot.com`, // a host past 253
+  ]
+  for (const apiKey of refused) {
+    expect({ apiKey, url: await dispatchedUrl(COPILOT_MODEL, { ok: true, apiKey }) }).toEqual({ apiKey, url: modelUrl })
+  }
+  // A credential with no token at all (headers only) keeps it too.
+  expect(await dispatchedUrl(COPILOT_MODEL, { ok: true, headers: { authorization: 'Bearer x' } })).toBe(modelUrl)
+})
+
 test('both model providers surface a failed credential resolution without dispatching', async () => {
   let fetchCalls = 0
   const countingFetch: FetchUrl = async () => {
