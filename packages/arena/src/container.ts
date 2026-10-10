@@ -181,14 +181,27 @@ export function checkedAuthFile(text: string): string {
   return text.endsWith('\n') ? text : `${text}\n`
 }
 
+/** Where `docker` runs and says it could not: the host's `docker` and stderr, or a test's stand-ins (#838). */
+export interface ArenaDockerHost {
+  readonly program: string
+  readonly warn: (line: string) => void
+}
+
+const HOST_DOCKER: ArenaDockerHost = {
+  program: 'docker',
+  warn: (line) => {
+    process.stderr.write(`${line}\n`)
+  },
+}
+
 /** `docker` with `args`, its output the caller's; the exit code, or 1 when docker could not be run. */
-function docker(args: readonly string[], input?: string): number {
-  const ran = spawnSync('docker', args, {
+export function docker(args: readonly string[], input?: string, host: ArenaDockerHost = HOST_DOCKER): number {
+  const ran = spawnSync(host.program, args, {
     stdio: [input === undefined ? 'inherit' : 'pipe', 'inherit', 'inherit'],
     ...(input === undefined ? {} : { input }),
   })
   if (ran.error !== undefined) {
-    process.stderr.write(`arena: docker could not be run: ${ran.error.message}\n`)
+    host.warn(`arena: docker could not be run: ${ran.error.message}`)
     return 1
   }
   return ran.status ?? 1
@@ -212,12 +225,10 @@ export interface ContainerIo {
 }
 
 const HOST_IO: ContainerIo = {
-  docker,
+  docker: (args, input) => docker(args, input),
   standardInput: readStandardInput,
   owner: () => ({ uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000 }),
-  warn: (line) => {
-    process.stderr.write(`${line}\n`)
-  },
+  warn: HOST_DOCKER.warn,
 }
 
 /**

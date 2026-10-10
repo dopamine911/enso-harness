@@ -100,9 +100,18 @@ import {
 import { type ArenaEvidence, arenaEvidenceRowOf, foldArenaManifest } from './manifest.ts'
 import { isRunning } from './process-tree.ts'
 import { pruneArenaRuns, renderPrunedRuns } from './prune.ts'
-import { DEFAULT_ARENA_CORPUS, planArenaPublication, publishArenaRun, runArenaCommand } from './publish.ts'
+import {
+  type ArenaPublication,
+  type ArenaPublishOutcome,
+  type ArenaPublishPlan,
+  DEFAULT_ARENA_CORPUS,
+  planArenaPublication,
+  publishArenaRun,
+  runArenaCommand,
+} from './publish.ts'
 import {
   type ArenaDriver,
+  type ArenaRunOptions,
   collectAfterRecorderDied,
   deadRecorderRun,
   readArenaControl,
@@ -185,16 +194,34 @@ function fail(message: string): never {
   process.exit(1)
 }
 
-/** How the agent perceives the page (#680): `--perception tree` (the default) or `visual`. */
-function perceptionNamed(): ArenaPerception {
-  const named = flag('perception') ?? 'tree'
-  if (named === 'tree' || named === 'visual') return named
-  return fail('--perception takes "tree" (it reads the accessibility tree) or "visual" (it sees a screenshot)')
+/** Why a command does not go on (#838): decided over the arguments, said by `orFail` as `fail` says it. */
+interface ArenaRefusal {
+  readonly refusal: string
 }
 
-function scenarioNamed(): ArenaScenario {
-  const id = flag('scenario') ?? SNAKE_SCENARIO.id
-  return ARENA_SCENARIOS[id] ?? fail(`no scenario "${id}" — known: ${Object.keys(ARENA_SCENARIOS).join(', ')}`)
+function isRefusal(value: unknown): value is ArenaRefusal {
+  return typeof value === 'object' && value !== null && 'refusal' in value
+}
+
+/** A decision's value, or its refusal failed the arena's way. */
+function orFail<T>(decided: T | ArenaRefusal): T {
+  return isRefusal(decided) ? fail(decided.refusal) : decided
+}
+
+/** How the agent perceives the page (#680): `--perception tree` (the default) or `visual`. */
+function perceptionIn(argumentList: readonly string[]): ArenaPerception | ArenaRefusal {
+  const named = flagIn(argumentList, 'perception') ?? 'tree'
+  if (named === 'tree' || named === 'visual') return named
+  return { refusal: '--perception takes "tree" (it reads the accessibility tree) or "visual" (it sees a screenshot)' }
+}
+
+function perceptionNamed(): ArenaPerception {
+  return orFail(perceptionIn(rest))
+}
+
+function scenarioIn(argumentList: readonly string[]): ArenaScenario | ArenaRefusal {
+  const id = flagIn(argumentList, 'scenario') ?? SNAKE_SCENARIO.id
+  return ARENA_SCENARIOS[id] ?? { refusal: `no scenario "${id}" — known: ${Object.keys(ARENA_SCENARIOS).join(', ')}` }
 }
 
 /** A non-negative number flag, or its default; anything else fails with the flag's name. */
@@ -244,13 +271,13 @@ function bugRepository(): string | undefined {
 }
 
 /** How a run's agent perceived the page (#680): its own `run-start` record when it has one, else `--perception`. */
-function perceptionOf(runDirectory?: string): ArenaPerception {
+export function perceptionOf(argumentList: readonly string[], runDirectory?: string): ArenaPerception | ArenaRefusal {
   const timelinePath = runDirectory === undefined ? undefined : join(runDirectory, 'timeline.jsonl')
   if (timelinePath !== undefined && existsSync(timelinePath)) {
     const start = readTimeline(timelinePath).find((event) => event.kind === 'run-start')
     if (start?.kind === 'run-start' && start.perception !== undefined) return start.perception
   }
-  return perceptionNamed()
+  return perceptionIn(argumentList)
 }
 
 /** What a brief names for this invocation: the `act` command for its `--out`, the run, the repository, the perception. */
@@ -260,35 +287,54 @@ function briefContext(runDirectory?: string): ArenaBriefContext {
     act: arenaActCommand(flag('out') === undefined ? undefined : outDirectory),
     ...(runDirectory === undefined ? {} : { runDirectory }),
     ...(repository === undefined ? {} : { repository }),
-    perception: perceptionOf(runDirectory),
+    perception: orFail(perceptionOf(rest, runDirectory)),
   }
 }
 
 /**
- * The agent runner `start` drives the run with, or undefined for `--manual`. One of the two is
- * required: a run with no agent does not hold the UI-only boundary, so it is never the default.
+ * How `start` drives a run: by hand over `arena act` (`--manual`), or by the agent `--agent` names at
+ * the `--thinking` level (medium by default). One of the two is required: a run with no agent does
+ * not hold the UI-only boundary, so it is never the default.
  */
+export function driveOf(
+  argumentList: readonly string[],
+  reference: string | undefined,
+):
+  | { readonly manual: true }
+  | { readonly reference: string; readonly thinking: (typeof ARENA_THINKING_LEVELS)[number] }
+  | ArenaRefusal {
+  if (argumentList.includes('--manual')) {
+    return reference === undefined
+      ? { manual: true }
+      : { refusal: '--manual and --agent are two ways to drive one run: name one' }
+  }
+  if (reference === undefined) {
+    return {
+      refusal:
+        'start takes --agent PROVIDER/MODEL (the agent under test, UI only) or --manual (actions over `arena act`)',
+    }
+  }
+  const thinking = ARENA_THINKING_LEVELS.find((level) => level === (flagIn(argumentList, 'thinking') ?? 'medium'))
+  return thinking === undefined
+    ? { refusal: `--thinking takes one of ${ARENA_THINKING_LEVELS.join(', ')}` }
+    : { reference, thinking }
+}
+
+/** The agent runner `start` drives the run with, or undefined for `--manual`; and the brief it is given. */
 async function driverNamed(
   scenario: ArenaScenario,
   context: ArenaBriefContext,
   reference: string | undefined,
 ): Promise<{ readonly driver?: ArenaDriver; readonly brief: string }> {
-  if (rest.includes('--manual')) {
-    if (reference !== undefined) fail('--manual and --agent are two ways to drive one run: name one')
-    return { brief: arenaBrief(scenario, 'command', context) }
-  }
-  if (reference === undefined) {
-    fail('start takes --agent PROVIDER/MODEL (the agent under test, UI only) or --manual (actions over `arena act`)')
-  }
-  const thinking = ARENA_THINKING_LEVELS.find((level) => level === (flag('thinking') ?? 'medium'))
-  if (thinking === undefined) fail(`--thinking takes one of ${ARENA_THINKING_LEVELS.join(', ')}`)
-  const { model, streamFn } = await agentModelNamed(reference)
+  const drive = orFail(driveOf(rest, reference))
+  if ('manual' in drive) return { brief: arenaBrief(scenario, 'command', context) }
+  const { model, streamFn } = await agentModelNamed(drive.reference)
   const perception = perceptionNamed()
   const brief = arenaBrief(scenario, 'tool', { perception })
   const driver = arenaAgentDriver({
     model,
     streamFn,
-    thinking,
+    thinking: drive.thinking,
     brief,
     perception,
     secretValues: arenaSecretValues(operatorHome),
@@ -296,9 +342,14 @@ async function driverNamed(
   return { driver, brief }
 }
 
-/** The run `<out>/current` names: the live one, or one whose recorder died before clearing it. */
+/** The run a `current` file names: the live one, or one whose recorder died before clearing it. */
+function currentRunIn(file: string): string | undefined {
+  return existsSync(file) ? readFileSync(file, 'utf8').trim() : undefined
+}
+
+/** The run `<out>/current` names. */
 function currentRun(): string | undefined {
-  return existsSync(currentFile) ? readFileSync(currentFile, 'utf8').trim() : undefined
+  return currentRunIn(currentFile)
 }
 
 /** What a launch looks at and acts on before a `start`: the host's, or a test's stand-ins (#832). */
@@ -370,7 +421,7 @@ async function prepareLaunch(): Promise<void> {
   const refusal = await launchRefusal({
     sweep: () => sweepAbandonedRunTmps(),
     lastRun: currentRun,
-    refold: refoldRun,
+    refold: refoldAndScore,
     isListening,
     portHolder,
     shortfalls: () => headroomShortfalls(outDirectory),
@@ -422,7 +473,7 @@ async function cleanUp(runTmp: string, scope?: { readonly unit: string; readonly
   const last = currentRun()
   if (last !== undefined && deadRecorderRun(last) !== undefined) {
     process.stdout.write(`arena: the run's recorder died; collecting its evidence — ${last}\n`)
-    await refoldRun(last).catch((error: unknown) => {
+    await refoldAndScore(last).catch((error: unknown) => {
       process.stderr.write(`arena: ${error instanceof Error ? error.message : String(error)}\n`)
     })
   }
@@ -434,16 +485,17 @@ async function cleanUp(runTmp: string, scope?: { readonly unit: string; readonly
 }
 
 /** The agents `start` runs, one run each (#674): `--agents A,B`, else `--agent A`, else none for `--manual`. */
-function agentsNamed(): readonly (string | undefined)[] {
-  const many = flag('agents')
-  if (many === undefined) return [flag('agent')]
-  if (flag('agent') !== undefined || rest.includes('--manual')) {
-    fail('--agents runs one run per agent: drop --agent and --manual')
+export function agentsIn(argumentList: readonly string[]): readonly (string | undefined)[] | ArenaRefusal {
+  const many = flagIn(argumentList, 'agents')
+  if (many === undefined) return [flagIn(argumentList, 'agent')]
+  if (flagIn(argumentList, 'agent') !== undefined || argumentList.includes('--manual')) {
+    return { refusal: '--agents runs one run per agent: drop --agent and --manual' }
   }
   const references = many.split(',').map((reference) => reference.trim())
   // An empty entry (`a,,b`, a trailing comma) is a typo, not a model to skip.
-  if (references.some((reference) => reference === ''))
-    fail(`--agents takes PROVIDER/MODEL,PROVIDER/MODEL…, not "${many}"`)
+  if (references.some((reference) => reference === '')) {
+    return { refusal: `--agents takes PROVIDER/MODEL,PROVIDER/MODEL…, not "${many}"` }
+  }
   return references
 }
 
@@ -478,43 +530,65 @@ function sayEstimates(agents: readonly string[]): void {
  * The model Enso's sessions start on, when `--enso-model` names one (#674). Only the run's own home
  * can carry it: over a shared `--home` it would change the operator's own default.
  */
-function ensoModelNamed(): EnsoModelSetting | undefined {
-  const named = flag('enso-model')
+export function ensoModelIn(argumentList: readonly string[]): EnsoModelSetting | undefined | ArenaRefusal {
+  const named = flagIn(argumentList, 'enso-model')
   if (named === undefined) return undefined
-  if (flag('home') !== undefined)
-    fail('--enso-model sets the run home’s own settings; over a shared --home it would change yours')
+  if (flagIn(argumentList, 'home') !== undefined) {
+    return { refusal: '--enso-model sets the run home’s own settings; over a shared --home it would change yours' }
+  }
   try {
     return parseEnsoModel(named)
   } catch (error) {
-    return fail(error instanceof Error ? error.message : String(error))
+    return { refusal: error instanceof Error ? error.message : String(error) }
   }
+}
+
+/**
+ * Where `start` runs its runs (#742): in a scope of their own capped at `--memory-max`, where
+ * `canScopeHere` (`systemd-run --user`) says it can and `--no-scope` is not given; else here, with
+ * the line that says why there is no cap. A cap systemd refuses is a refusal, decided before
+ * anything of the launch begins.
+ */
+export function launchPlanOf(
+  argumentList: readonly string[],
+  canScopeHere: (memoryMax?: string) => boolean,
+):
+  | { readonly scoped: true; readonly memoryMax: string }
+  | { readonly scoped: false; readonly said: string }
+  | ArenaRefusal {
+  const memoryMax = flagIn(argumentList, 'memory-max') ?? ARENA_DEFAULT_MEMORY_MAX
+  if (argumentList.includes('--no-scope')) {
+    return { scoped: false, said: 'arena: --no-scope, so the run has no memory cap of its own' }
+  }
+  if (!canScopeHere()) {
+    return {
+      scoped: false,
+      said: 'arena: `systemd-run --user` is not available here, so the run has no memory cap of its own',
+    }
+  }
+  if (!canScopeHere(memoryMax)) {
+    return {
+      refusal: `systemd refuses --memory-max ${memoryMax} as a MemoryMax; it takes values such as 6G, 4096M, 50% or infinity`,
+    }
+  }
+  return { scoped: true, memoryMax }
 }
 
 /**
  * `start`: one run, or with `--agents` one run per agent, one after another — the ports are one
  * stack at a time. Exits 1 when any run's score is FAIL.
  *
- * Launched (#742): prepared first (`prepareLaunch`). Then, where `systemd-run --user` works and
- * `--no-scope` is not given, `start` runs again as a child in its own memory-capped scope while this
- * process waits outside it to clean up; else the runs run here. Either way they get their own TMPDIR.
+ * Launched (#742): planned (`launchPlanOf`), then prepared (`prepareLaunch`). A scoped launch runs
+ * `start` again as a child in its own memory-capped scope while this process waits outside it to
+ * clean up; else the runs run here. Either way they get their own TMPDIR.
  */
 async function start(): Promise<void> {
   // The scoped child: its launcher prepared, and cleans up after it.
   if (process.env['ENSO_ARENA_SCOPE'] !== undefined) exitWith(await settledRuns())
-  const memoryMax = flag('memory-max') ?? ARENA_DEFAULT_MEMORY_MAX
-  const wantsScope = !rest.includes('--no-scope')
-  const scoped = wantsScope && canScope()
-  // Checked before anything starts: preparing collects dead runs and sweeps temporary directories.
-  if (scoped && !canScope(memoryMax)) {
-    fail(`systemd refuses --memory-max ${memoryMax} as a MemoryMax; it takes values such as 6G, 4096M, 50% or infinity`)
-  }
+  const plan = orFail(launchPlanOf(rest, canScope))
   await prepareLaunch()
-  if (scoped) process.exit(await launchScoped(memoryMax))
-  process.stdout.write(
-    wantsScope
-      ? 'arena: `systemd-run --user` is not available here, so the run has no memory cap of its own\n'
-      : 'arena: --no-scope, so the run has no memory cap of its own\n',
-  )
+  if (plan.scoped) process.exit(await launchScoped(plan.memoryMax))
+  process.stdout.write(`${plan.said}\n`)
   const runTmp = makeRunTmp({ pid: process.pid })
   process.env['TMPDIR'] = runTmp
   const outcome = await settledRuns()
@@ -544,10 +618,7 @@ function exitWith(outcome: { readonly passed: boolean } | { readonly error: stri
  * a second still ends it.
  */
 async function launchScoped(memoryMax: string): Promise<number> {
-  const unit = `arena-${new Date()
-    .toISOString()
-    .replaceAll(':', '-')
-    .replace(/\.\d+Z$/, 'Z')}.scope`
+  const unit = `arena-${stampOf(new Date())}.scope`
   const runTmp = makeRunTmp({ pid: process.pid, unit })
   const child = Bun.spawn(scopedCommand(unit, memoryMax, [process.execPath, import.meta.path, 'start', ...rest]), {
     env: { ...process.env, ENSO_ARENA_SCOPE: unit, TMPDIR: runTmp },
@@ -561,95 +632,168 @@ async function launchScoped(memoryMax: string): Promise<number> {
   return exit
 }
 
+/** A time as a run id or a scope's name carries it: ISO to the second, its colons dashes. */
+function stampOf(time: Date): string {
+  return time
+    .toISOString()
+    .replaceAll(':', '-')
+    .replace(/\.\d+Z$/, 'Z')
+}
+
+/** What a matrix of runs does with each agent (#674): the host's steps, or a test's stand-ins. */
+export interface ArenaMatrixSteps {
+  /** Resolve the agent's model and check it suits the perception; throws or fails when it does not. */
+  readonly checkModel: (agent: string) => Promise<unknown>
+  readonly sayEstimates: (agents: readonly string[]) => void
+  readonly run: (agent: string | undefined) => Promise<{ readonly runDirectory: string; readonly passed: boolean }>
+  readonly say: (line: string) => void
+}
+
 /** Each agent's run, one after another; true when every one passed. */
-async function startRuns(): Promise<boolean> {
-  const ensoModel = ensoModelNamed()
-  const agents = agentsNamed()
+export async function runMatrix(agents: readonly (string | undefined)[], steps: ArenaMatrixSteps): Promise<boolean> {
   const matrix = agents.filter((agent) => agent !== undefined)
   if (matrix.length > 1) {
     // Every model resolves and suits the perception before the first run: a bad third model must
     // not fail after two paid runs.
-    for (const agent of new Set(matrix)) await agentModelNamed(agent)
-    sayEstimates([...new Set(matrix)])
+    for (const agent of new Set(matrix)) await steps.checkModel(agent)
+    steps.sayEstimates([...new Set(matrix)])
   }
   const runs: string[] = []
   let passed = true
   for (const agent of agents) {
-    const run = await startRun(agent, ensoModel)
+    const run = await steps.run(agent)
     runs.push(run.runDirectory)
     passed &&= run.passed
   }
   if (runs.length > 1) {
-    process.stdout.write(
-      `arena: ${runs.length} runs done; by model: bun run arena compare --by-model ${runs.join(' ')}\n`,
-    )
+    steps.say(`arena: ${runs.length} runs done; by model: bun run arena compare --by-model ${runs.join(' ')}`)
   }
   return passed
 }
 
+async function startRuns(): Promise<boolean> {
+  const ensoModel = orFail(ensoModelIn(rest))
+  return await runMatrix(orFail(agentsIn(rest)), {
+    checkModel: agentModelNamed,
+    sayEstimates,
+    run: (agent) => startRun(agent, ensoModel),
+    say: (line) => {
+      process.stdout.write(`${line}\n`)
+    },
+  })
+}
+
+/**
+ * Where a run goes, and its scenario with the run's own budget (#609) — or why it cannot start:
+ * an `--out` the guard keeps Enso's agent out of, an unknown scenario, a budget that is not one.
+ */
+export function runSetupOf(
+  argumentList: readonly string[],
+  where: { readonly outDirectory: string; readonly now: Date },
+): { readonly scenario: ArenaScenario; readonly runDirectory: string } | ArenaRefusal {
+  if (isGuardedForAgent(where.outDirectory)) {
+    return {
+      refusal:
+        `--out ${where.outDirectory} is under a .enso directory, which the guard keeps Enso's agent out of: ` +
+        'it could not read or write its own project there. Name another --out.',
+    }
+  }
+  const named = scenarioIn(argumentList)
+  if (isRefusal(named)) return named
+  const minutes = Number(flagIn(argumentList, 'minutes') ?? named.budgetMinutes)
+  if (!Number.isFinite(minutes) || minutes <= 0) return { refusal: '--minutes takes a positive number' }
+  // The brief says how long the run has: the run's own budget, not the scenario's default (#609).
+  const scenario = { ...named, budgetMinutes: minutes }
+  return { scenario, runDirectory: join(where.outDirectory, `${scenario.id}-${stampOf(where.now)}`) }
+}
+
+/**
+ * A run over its own home signs in with the arena's login (#763), so it does not start without
+ * one; a `--home` run uses that home's own.
+ */
+export function loginRefusalOf(argumentList: readonly string[], loginAgentDir: string): ArenaRefusal | undefined {
+  if (flagIn(argumentList, 'home') !== undefined || arenaLoginProviders(loginAgentDir).length > 0) return undefined
+  return { refusal: `the arena has no login yet: run \`bun run arena login\` once (it logs in ${loginAgentDir})` }
+}
+
+/**
+ * The run's prompts, written into it, and the line naming the one to use: the brief, for a run
+ * driven by hand; for an agent's run, whose runner has no files to review the run with, the review
+ * and bug-filing prompt for afterwards.
+ */
+export function writePrompts(
+  runDirectory: string,
+  prompts: { readonly brief: string; readonly context: ArenaBriefContext; readonly driven: boolean },
+): string {
+  const briefPath = join(runDirectory, 'brief.md')
+  writeFileSync(briefPath, prompts.brief)
+  if (!prompts.driven) return `arena: the agent's prompt is ${briefPath}`
+  const reviewPath = join(runDirectory, 'review-brief.md')
+  writeFileSync(reviewPath, arenaReviewBrief(prompts.context, 'other'))
+  return `arena: once the run stops, the review and bug-filing prompt is ${reviewPath}`
+}
+
+/**
+ * What `runArena` is handed for one run: what the run decided, its project in its directory, its
+ * budget its scenario's (#609), and the flags that pass through — `--headed`, `--chromium` — with
+ * Enso's model as `provider/id` (#674) and the driver only when an agent drives.
+ */
+export function runOptionsOf(
+  argumentList: readonly string[],
+  run: Omit<ArenaRunOptions, 'project' | 'budgetMinutes' | 'headed' | 'chromiumPath' | 'ensoModel' | 'driver'> & {
+    readonly ensoModel: EnsoModelSetting | undefined
+    readonly driver: ArenaDriver | undefined
+  },
+): ArenaRunOptions {
+  const { ensoModel, driver, ...decided } = run
+  const chromiumPath = flagIn(argumentList, 'chromium')
+  return {
+    ...decided,
+    project: join(run.runDirectory, 'project'),
+    budgetMinutes: run.scenario.budgetMinutes,
+    headed: argumentList.includes('--headed'),
+    ...(ensoModel === undefined ? {} : { ensoModel: `${ensoModel.provider}/${ensoModel.id}` }),
+    ...(chromiumPath === undefined ? {} : { chromiumPath }),
+    ...(driver === undefined ? {} : { driver }),
+  }
+}
+
+/**
+ * One run, orchestrated: each step's decision is its own function above; what stays here is
+ * their order and the effects — the run home, the `current` pointer, the recorder.
+ */
 async function startRun(
   agent: string | undefined,
   ensoModel: EnsoModelSetting | undefined,
 ): Promise<{ readonly runDirectory: string; readonly passed: boolean }> {
-  if (isGuardedForAgent(outDirectory)) {
-    fail(
-      `--out ${outDirectory} is under a .enso directory, which the guard keeps Enso's agent out of: ` +
-        'it could not read or write its own project there. Name another --out.',
-    )
-  }
-  const named = scenarioNamed()
-  const minutes = Number(flag('minutes') ?? named.budgetMinutes)
-  if (!Number.isFinite(minutes) || minutes <= 0) fail('--minutes takes a positive number')
-  // The brief says how long the run has: the run's own budget, not the scenario's default (#609).
-  const scenario = { ...named, budgetMinutes: minutes }
-  const runId = `${scenario.id}-${new Date()
-    .toISOString()
-    .replaceAll(':', '-')
-    .replace(/\.\d+Z$/, 'Z')}`
-  const runDirectory = join(outDirectory, runId)
-  const chromiumPath = flag('chromium')
+  const { scenario, runDirectory } = orFail(runSetupOf(rest, { outDirectory, now: new Date() }))
   const context = briefContext(runDirectory)
   const { driver, brief } = await driverNamed(scenario, context, agent)
   const loginAgentDir = arenaLoginDir(process.env)
-  if (flag('home') === undefined && arenaLoginProviders(loginAgentDir).length === 0) {
-    fail(`the arena has no login yet: run \`bun run arena login\` once (it logs in ${loginAgentDir})`)
-  }
+  orFail(loginRefusalOf(rest, loginAgentDir))
   mkdirSync(runDirectory, { recursive: true })
   const home = flag('home') === undefined ? prepareRunHome(runDirectory, operatorHome, loginAgentDir) : operatorHome
   if (ensoModel !== undefined) setRunHomeModel(home, ensoModel)
-  const briefPath = join(runDirectory, 'brief.md')
-  writeFileSync(briefPath, brief)
+  const said = writePrompts(runDirectory, { brief, context, driven: driver !== undefined })
   writeFileSync(currentFile, runDirectory)
-  if (driver === undefined) {
-    process.stdout.write(`arena: the agent's prompt is ${briefPath}\n`)
-  } else {
-    // The runner's agent has no files to review the run with: the review is a prompt for afterwards.
-    const reviewPath = join(runDirectory, 'review-brief.md')
-    writeFileSync(reviewPath, arenaReviewBrief(context, 'other'))
-    process.stdout.write(`arena: once the run stops, the review and bug-filing prompt is ${reviewPath}\n`)
-  }
-  let passed = false
+  process.stdout.write(`${said}\n`)
   try {
-    const score = await runArena({
+    const options = runOptionsOf(rest, {
       scenario,
       repoRoot,
       runDirectory,
-      project: join(runDirectory, 'project'),
       home,
-      budgetMinutes: minutes,
       limits: runLimits(),
-      headed: rest.includes('--headed'),
       perception: perceptionNamed(),
-      ...(ensoModel === undefined ? {} : { ensoModel: `${ensoModel.provider}/${ensoModel.id}` }),
       environment: process.env,
-      ...(chromiumPath === undefined ? {} : { chromiumPath }),
-      ...(driver === undefined ? {} : { driver }),
+      ensoModel,
+      driver,
     })
-    passed = score?.verdict === 'pass'
+    const score = await runArena(options)
+    return { runDirectory, passed: score?.verdict === 'pass' }
   } finally {
     rmSync(currentFile, { force: true })
   }
-  return { runDirectory, passed }
 }
 
 /**
@@ -701,20 +845,26 @@ async function act(): Promise<void> {
 }
 
 /** The evidence a manifest kept, row by row; undefined when it kept none that reads as evidence. */
-function keptEvidenceOf(manifest: unknown): ArenaEvidence[] | undefined {
+export function keptEvidenceOf(manifest: unknown): ArenaEvidence[] | undefined {
   if (typeof manifest !== 'object' || manifest === null || !('evidence' in manifest)) return undefined
   if (!Array.isArray(manifest.evidence)) return undefined
   const rows: Array<ArenaEvidence | undefined> = manifest.evidence.map(arenaEvidenceRowOf)
   return rows.every((row): row is ArenaEvidence => row !== undefined) ? rows : undefined
 }
 
+/** What a refold reads besides the run (#838): the home a run that recorded none falls back to, and `<out>/current`. */
+export interface ArenaRefoldPlaces {
+  readonly operatorHome: string
+  readonly currentFile: string
+}
+
 /**
- * Fold a run's manifest again. A run that stopped keeps the evidence its stop collected; one whose
- * recorder died has none, so it is collected now (#584 A13, #607) and the dead run's `current`
- * pointer, which its `start` never got to clear, goes with it. Throws rather than exits: a launcher
- * recovering a dead run still has its own cleanup to do (#742).
+ * Fold a run's manifest again, and answer its path. A run that stopped keeps the evidence its stop
+ * collected; one whose recorder died has none, so it is collected now (#584 A13, #607) and the dead
+ * run's `current` pointer, which its `start` never got to clear, goes with it. Throws rather than
+ * exits: a launcher recovering a dead run still has its own cleanup to do (#742).
  */
-async function refoldRun(runDirectory: string): Promise<void> {
+export async function refoldRun(runDirectory: string, places: ArenaRefoldPlaces): Promise<string> {
   const runId = runDirectory.split('/').at(-1) ?? 'run'
   const manifestPath = join(runDirectory, 'manifest.json')
   const manifestKept = existsSync(manifestPath)
@@ -726,18 +876,24 @@ async function refoldRun(runDirectory: string): Promise<void> {
   if (manifestKept && kept === undefined) {
     throw new Error(`${manifestPath} has no evidence that reads as evidence — not refolding over it`)
   }
-  const evidence = kept ?? (await collectAfterRecorderDied(runDirectory, operatorHome))
-  if (kept === undefined && currentRun() === runDirectory) rmSync(currentFile, { force: true })
+  const evidence = kept ?? (await collectAfterRecorderDied(runDirectory, places.operatorHome))
+  if (kept === undefined && currentRunIn(places.currentFile) === runDirectory)
+    rmSync(places.currentFile, { force: true })
   // The home the run recorded, not this shell's; and a hit an earlier scan found stands.
   // A file the earlier scan stamped and that is unchanged since is not read again (#741).
-  const home = runHomeOf(runDirectory, operatorHome, recordedRunHome(runDirectory))
+  const home = runHomeOf(runDirectory, places.operatorHome, recordedRunHome(runDirectory))
   const scan = scanRunForSecrets(runDirectory, arenaSecretValues(home), recordedScanOf(earlier))
   const secretScan = withEarlierHits(scan, earlier, runDirectory)
   const events = readTimeline(join(runDirectory, 'timeline.jsonl'))
   const histories = threadHistoriesIn(join(runDirectory, 'enso', 'evidence'))
   const manifest = foldArenaManifest({ runId, events, evidence, secretScan, histories })
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
-  process.stdout.write(`${manifestPath}\n`)
+  return manifestPath
+}
+
+/** `arena manifest`: the run refolded over this invocation's home and `--out`, its manifest named, the run scored. */
+async function refoldAndScore(runDirectory: string): Promise<void> {
+  process.stdout.write(`${await refoldRun(runDirectory, { operatorHome, currentFile })}\n`)
   scoreRun(runDirectory)
 }
 
@@ -748,37 +904,57 @@ function scoreRun(runDirectory: string): void {
 }
 
 /**
+ * What `publish` does with a run's plan (#677): refuses it with every reason; under `--dry-run`, shows
+ * what would go to `--corpus` (the default corpus otherwise) without touching GitHub; else publishes.
+ */
+export function publishStepOf(
+  plan: ArenaPublishPlan,
+  argumentList: readonly string[],
+): ArenaRefusal | { readonly preview: string } | { readonly publication: ArenaPublication; readonly corpus: string } {
+  if (plan.kind === 'refused') {
+    return { refusal: `not published:\n${plan.reasons.map((reason) => `  - ${reason}`).join('\n')}` }
+  }
+  const corpus = flagIn(argumentList, 'corpus') ?? DEFAULT_ARENA_CORPUS
+  const { publication } = plan
+  if (!argumentList.includes('--dry-run')) return { publication, corpus }
+  const preview = [
+    `would publish to ${corpus}: ${publication.title}`,
+    `labels: ${publication.labels.map((label) => label.name).join(', ')}`,
+    `files (${publication.files.length}): ${publication.files.join(', ')}`,
+    `would comment on: ${publication.backlinks.map((backlink) => backlink.issue).join(', ') || 'none'}`,
+    '',
+    publication.issueBody({ corpus, commit: '<commit>' }),
+    '',
+  ]
+  return { preview: preview.join('\n') }
+}
+
+/** What `publish` says of what it did (#677): the run's issue at its commit, and the issues linked back from. */
+export function publishedSaid(runId: string, outcome: ArenaPublishOutcome): string | ArenaRefusal {
+  if (outcome.kind === 'refused') return { refusal: `not published: ${outcome.reasons.join('; ')}` }
+  return (
+    `arena: published ${runId} at ${outcome.commit.slice(0, 7)}: ${outcome.issue}\n` +
+    (outcome.backlinks.length === 0 ? '' : `arena: linked back from ${outcome.backlinks.join(', ')}\n`)
+  )
+}
+
+/**
  * `publish` (#677): a reviewed run to the corpus — its documents and cited screenshots committed, one
  * issue for the run, a comment on each product issue it maps to. Refused, with every reason, until
- * the run is reviewed and clean; `--dry-run` shows what would go without touching GitHub.
+ * the run is reviewed and clean.
  */
 function publish(runDirectory: string): void {
   const secrets = arenaSecretValues(runHomeOf(runDirectory, operatorHome, recordedRunHome(runDirectory)))
   const plan = planArenaPublication(runDirectory, { productRepo: bugRepository(), secretValues: secrets })
-  if (plan.kind === 'refused') fail(`not published:\n${plan.reasons.map((reason) => `  - ${reason}`).join('\n')}`)
-  const corpus = flag('corpus') ?? DEFAULT_ARENA_CORPUS
-  const { publication } = plan
-  if (rest.includes('--dry-run')) {
-    process.stdout.write(
-      [
-        `would publish to ${corpus}: ${publication.title}`,
-        `labels: ${publication.labels.map((label) => label.name).join(', ')}`,
-        `files (${publication.files.length}): ${publication.files.join(', ')}`,
-        `would comment on: ${publication.backlinks.map((backlink) => backlink.issue).join(', ') || 'none'}`,
-        '',
-        publication.issueBody({ corpus, commit: '<commit>' }),
-        '',
-      ].join('\n'),
-    )
+  const step = orFail(publishStepOf(plan, rest))
+  if ('preview' in step) {
+    process.stdout.write(step.preview)
     return
   }
+  const { publication, corpus } = step
   const checkout = join(dirname(outDirectory), 'arena-corpus', ...corpus.split('/'))
   const outcome = publishArenaRun(runDirectory, publication, { corpus, checkout, run: runArenaCommand })
-  if (outcome.kind === 'refused') fail(`not published: ${outcome.reasons.join('; ')}`)
-  process.stdout.write(
-    `arena: published ${publication.runId} at ${outcome.commit.slice(0, 7)}: ${outcome.issue}\n` +
-      (outcome.backlinks.length === 0 ? '' : `arena: linked back from ${outcome.backlinks.join(', ')}\n`),
-  )
+  process.stdout.write(orFail(publishedSaid(publication.runId, outcome)))
 }
 
 /**
@@ -833,7 +1009,7 @@ if (import.meta.main) {
       if (rest.includes('--review')) process.stdout.write(arenaReviewBrief(briefContext(flag('run')), 'other'))
       else {
         const channel = rest.includes('--manual') ? 'command' : 'tool'
-        process.stdout.write(arenaBrief(scenarioNamed(), channel, briefContext(flag('run'))))
+        process.stdout.write(arenaBrief(orFail(scenarioIn(rest)), channel, briefContext(flag('run'))))
       }
       break
     case 'act':
@@ -841,7 +1017,7 @@ if (import.meta.main) {
       break
     case 'manifest': {
       const runDirectory = resolve(rest[0] ?? fail('manifest takes a run directory'))
-      await refoldRun(runDirectory).catch((error: unknown) =>
+      await refoldAndScore(runDirectory).catch((error: unknown) =>
         fail(error instanceof Error ? error.message : String(error)),
       )
       break

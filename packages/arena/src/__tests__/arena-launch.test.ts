@@ -1,10 +1,10 @@
 import { afterEach, expect, test } from 'bun:test'
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Subprocess } from 'bun'
-import { makeRunTmp, sweepAbandonedRunTmps } from '../launch.ts'
+import { endScope, makeRunTmp, sweepAbandonedRunTmps } from '../launch.ts'
 import { isRunning, processTreeOf, stopProcessTree } from '../process-tree.ts'
 
 /**
@@ -85,4 +85,42 @@ test('⚠ the sweep removes only the temporary directories whose run is gone', (
   expect(existsSync(unowned)).toBe(true)
   expect(existsSync(stranger)).toBe(true)
   rmSync(base, { recursive: true, force: true })
+})
+
+/** A `systemctl --user` stand-in: every call it got, answering `show` from `properties`. */
+function systemctl(properties: Readonly<Record<string, string>>): {
+  readonly systemctl: (args: readonly string[]) => string
+  readonly calls: string[]
+} {
+  const calls: string[] = []
+  return {
+    calls,
+    systemctl: (args) => {
+      calls.push(args.join(' '))
+      return args[0] === 'show' ? (properties[args[2] ?? ''] ?? '') : ''
+    },
+  }
+}
+
+test('⚠ ending a scope counts what is left in it before the stop, reads how it ended after, and resets it last (#742)', () => {
+  const cgroupRoot = mkdtempSync(join(tmpdir(), 'arena-cgroup-'))
+  const group = '/user.slice/app.slice/arena-x.scope'
+  mkdirSync(join(cgroupRoot, group), { recursive: true })
+  writeFileSync(join(cgroupRoot, group, 'cgroup.procs'), '101\n102\n103\n')
+  const host = systemctl({ ControlGroup: group, Result: 'oom-kill' })
+
+  expect(endScope('arena-x.scope', { ...host, cgroupRoot })).toEqual({ stopped: 3, result: 'oom-kill' })
+  expect(host.calls).toEqual([
+    'show -p ControlGroup --value arena-x.scope',
+    'stop arena-x.scope',
+    'show -p Result --value arena-x.scope',
+    'reset-failed arena-x.scope',
+  ])
+})
+
+test('a scope systemd no longer knows, or whose cgroup is gone, had nothing left in it; no result is success', () => {
+  const cgroupRoot = mkdtempSync(join(tmpdir(), 'arena-cgroup-'))
+  expect(endScope('arena-x.scope', { ...systemctl({}), cgroupRoot })).toEqual({ stopped: 0, result: 'success' })
+  const gone = systemctl({ ControlGroup: '/user.slice/arena-x.scope' })
+  expect(endScope('arena-x.scope', { ...gone, cgroupRoot })).toEqual({ stopped: 0, result: 'success' })
 })
