@@ -291,18 +291,17 @@ function linkDomain(domains: string): string {
     .join(', ')
 }
 
-const publicExports = exportsOf()
-const counts = importerCounts(publicExports)
-const rows = publicExports.map((publicExport) => {
-  const modulePath = `../../packages/core/src/${publicExport.module}`
-  const declaration = `${modulePath}#L${publicExport.declarationLine}`
-  const imported = counts.get(`${publicExport.entrypoint}:${publicExport.symbol}`)
-  if (imported === undefined) throw new Error(`no importer counts for ${publicExport.symbol}`)
-  return `| \`${publicExport.symbol}\` | ${publicExport.kind} | \`${publicExport.entrypoint}\` | [\`${publicExport.module}\`](${modulePath}) | ${linkDomain(publicExport.domain)} | ${publicExport.classification} | ${REGIONS.map((region) => imported[region]).join(' | ')} | [L${publicExport.declarationLine}](${declaration}) |`
-})
-
-process.stdout.write(
-  [
+export function coreExportsPage(): string {
+  const publicExports = exportsOf()
+  const counts = importerCounts(publicExports)
+  const rows = publicExports.map((publicExport) => {
+    const modulePath = `../../packages/core/src/${publicExport.module}`
+    const declaration = `${modulePath}#L${publicExport.declarationLine}`
+    const imported = counts.get(`${publicExport.entrypoint}:${publicExport.symbol}`)
+    if (imported === undefined) throw new Error(`no importer counts for ${publicExport.symbol}`)
+    return `| \`${publicExport.symbol}\` | ${publicExport.kind} | \`${publicExport.entrypoint}\` | [\`${publicExport.module}\`](${modulePath}) | ${linkDomain(publicExport.domain)} | ${publicExport.classification} | ${REGIONS.map((region) => imported[region]).join(' | ')} | [L${publicExport.declarationLine}](${declaration}) |`
+  })
+  return [
     '<!-- generated: scripts/docs/core-exports.ts -->',
     '# Core exports',
     '',
@@ -320,5 +319,8 @@ process.stdout.write(
     '|---|---|---|---|---|---|---:|---:|---:|---:|---:|---|',
     ...rows,
     '',
-  ].join('\n'),
-)
+  ].join('\n')
+}
+
+// Importable: `build-docs.ts#generatedPage` calls `coreExportsPage` (#832); importing must not print a page.
+if (import.meta.main) process.stdout.write(coreExportsPage())

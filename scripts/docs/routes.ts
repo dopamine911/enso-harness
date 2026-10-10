@@ -702,7 +702,7 @@ export function discoverRoutes(): ResolvedRoute[] {
     })
 }
 
-function generate(): string {
+export function routesPage(): string {
   const routes = discoverRoutes()
   const regexCount = Object.keys(REGEX_ROUTE_METADATA).length
   const literalCount = Object.keys(LITERAL_ROUTE_METADATA).length
@@ -735,5 +735,6 @@ function generate(): string {
   ].join('\n')
 }
 
-// Importable: `flow-diagrams.ts` reuses `discoverRoutes`, and importing must not print a page.
-if (import.meta.main) runGenerator('routes', generate)
+// Importable: `flow-diagrams.ts` reuses `discoverRoutes` and `build-docs.ts#generatedPage` calls
+// `routesPage` (#832); importing must not print a page.
+if (import.meta.main) runGenerator('routes', routesPage)

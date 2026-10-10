@@ -44,7 +44,7 @@ function portOf(file: string): Port {
   }
 }
 
-function generate(): string {
+export function portedProvenancePage(): string {
   const ports = readdirSync(join(ROOT, PORTED_DIRECTORY))
     .filter((fileName) => /\.tsx?$/.test(fileName))
     .toSorted()
@@ -68,4 +68,5 @@ function generate(): string {
   ].join('\n')
 }
 
-runGenerator('ported-provenance', generate)
+// Importable: `build-docs.ts#generatedPage` calls `portedProvenancePage` (#832); importing must not print a page.
+if (import.meta.main) runGenerator('ported-provenance', portedProvenancePage)
