@@ -2,7 +2,7 @@
 #
 # Runs the SAME gate as the local pre-commit hook (`bun run check:all` = oxfmt → oxlint → tsc →
 # fallow dead-code → fallow complexity, ceiling and new code → fallow dupes → react-doctor →
-# bun test → the total-coverage floor → typedoc → the docs site and its link crawl), so "green"
+# bun test → the total-coverage floor → typedoc → the docs site and its link crawl → CRAP warnings), so "green"
 # means one thing whether it ran on a machine or here. A commit made with `--no-verify`, or by
 # someone without the hook installed, is caught at the PR instead of slipping into main.
 #

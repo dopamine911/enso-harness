@@ -137,6 +137,7 @@ const GATE_PROSE_MARKS: Readonly<Record<string, RegExp>> = {
   coverage: /coverage/i,
   'api-docs': /typedoc|api-docs/i,
   site: /site|build|crawl/i,
+  crap: /crap/i,
 }
 
 /** Comment prefixes stripped so a YAML `#` or a TSDoc ` * ` at a line join does not split a clause. */

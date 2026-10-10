@@ -80,6 +80,13 @@
  *                  crawls every built page for dead internal links. The BUILD is not the check —
  *                  `astro build` reported success over 139 dead links, because a page's
  *                  `./routes.md` is correct on GitHub and a 404 as a route. The crawl is (#188).
+ *   13. crap     — `bun scripts/coverage-istanbul.ts && fallow health --complexity --max-cognitive 1000 --max-cyclomatic 1000 --max-crap 30 --report-only --coverage coverage/coverage-final.json --top 10 --sort severity --quiet`:
+ *                  CRAP as WARNINGS (#826): converts the LCOV `test` wrote into Istanbul, then lists
+ *                  the ten worst functions at CRAP ≥ 30 from measured coverage and the total.
+ *                  `--report-only`: it never fails. It is its own step, not `health.maxCrap` in the
+ *                  config, because CRAP on in the config changes the key of the function
+ *                  `complexity-baseline.json` holds and fails the new-complexity step, and because
+ *                  only a step after `test` can score from measured coverage, on CI and laptops alike.
  *
  * ⚠ Each row's name and first backticked command is CHECKED against GATES and package.json by
  * `test/gate-abort.test.ts`, because this list is the documented authority for what "green" means
@@ -280,6 +287,12 @@ export const GATES: readonly Gate[] = [
     name: 'site',
     describe: 'starlight: the docs site builds from docs/, and every internal link resolves',
     script: 'docs:site',
+  },
+  {
+    // AFTER test, which wrote coverage/lcov.info; LAST because it can only warn (#826).
+    name: 'crap',
+    describe: 'CRAP warnings: the ten worst functions at CRAP ≥ 30 from measured coverage (never fails)',
+    script: 'crap:report',
   },
 ]
 
