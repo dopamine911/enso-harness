@@ -28,7 +28,18 @@ test is the arena's driver, which uses your login; `--thinking LEVEL`, `medium` 
 gets its own, below), `--out DIR` (`$XDG_DATA_HOME/enso/arena`, i.e. `~/.local/share/enso/arena`, by
 default; one under a `.enso` directory is refused), `--chromium PATH`,
 `--repo OWNER/NAME` (where bugs are filed: the checkout's GitHub `origin` by default),
-`--headed`, `--memory-max SIZE` and `--no-scope` (both below).
+`--headed`, `--memory-max SIZE` and `--no-scope` (both below), and `--action-gap-ms N` (below).
+
+**How fast the agent acts (#848).** The agent runner runs a turn's actions back to back, each a few
+tens of milliseconds, so without a gap a page that runs in real time is only ever used at machine
+speed: a snake run's agent sent Play Again, a key and `p` within 12 ms, saw them land inside the
+game's first 100 ms tick, and reported a game that dies at human speed as fixed. So each action
+starts at least `--action-gap-ms` after the previous one ended: 250 by default in `play` and
+`arcade`, whose apps run in real time, and 0 elsewhere, where fast input can find a real race in
+Enso. Between turns the model's own call is longer than any gap, so only a turn's later actions
+wait. The brief tells the agent the gap in force and to put a `wait` between steps a person would
+space out; `agent-start` and the manifest's driver record carry it. A `--manual` run has no runner
+to pace, so the flag is refused there.
 
 ### Launch and cleanup (#742)
 
@@ -124,8 +135,8 @@ Six scenarios, told only what to achieve, never which controls to use:
 - **`iterate`**: a to-do CLI in at least three rounds, checking each round's changes, taking one round back for another approach, and finding the work's cost and context. It reaches what Snake doesn't: the Diff view, restore, forks, Stats and Context. Its first run found #650 and #651.
 - **`compare`**: a Markdown-to-HTML converter in two approaches kept side by side, compared by what each changed and cost, one kept and the other cleaned up, then exactly what the model was given in its last request. It reaches parallel threads, deleting a thread and its tree, and Context. Its first run found #659.
 - **`resume`**: a password generator whose work is interrupted and picked up: one request stopped midway and redirected, the page reloaded and the conversation continued, a branch off an earlier request, and another model for one request. It reaches stopping a run, persistence across a reload, forks and the model control. Its first run found #664 and #665.
-- **`play`** (#675): a small browser game, then played by the agent the way a player would: it finds something wrong or missing, has it changed, and plays again, at least twice. It is never told there is a preview; whether it finds a way to play is the finding. It reaches Preview, iteration on a running application, and what only using it shows.
-- **`arcade`** (#740): a retro arcade cabinet in the browser, a page a player picks games from, with five classic arcade games recreated in a retro style and one new game of the agent's own design. A long build in many parts: the others are done in minutes, and this is where what grows with a run's length shows (context and reads, samples and trace, threads and trees, compaction).
+- **`play`** (#675): a small browser game, then played by the agent the way a player would: it finds something wrong or missing, has it changed, and plays again, at least twice. It is never told there is a preview; whether it finds a way to play is the finding. It reaches Preview, iteration on a running application, and what only using it shows. Its agent's actions are paced 250 ms apart (#848).
+- **`arcade`** (#740): a retro arcade cabinet in the browser, a page a player picks games from, with five classic arcade games recreated in a retro style and one new game of the agent's own design. A long build in many parts: the others are done in minutes, and this is where what grows with a run's length shows (context and reads, samples and trace, threads and trees, compaction). Paced like `play` (#848).
 
 **When a run stops (#609).** Besides the agent's own `stop`:
 - **The budget (`--minutes`).** Every `act` answer carries `phase` and `remainingMs`. When the budget is

@@ -175,6 +175,7 @@ const VALUED_FLAGS = [
   'memory-max',
   'keep',
   'older-than',
+  'action-gap-ms',
 ] as const
 type ValuedFlag = (typeof VALUED_FLAGS)[number]
 const VALUED_FLAG_ARGUMENTS = new Set<string>(VALUED_FLAGS.map((flagName) => `--${flagName}`))
@@ -320,6 +321,23 @@ export function driveOf(
     : { reference, thinking }
 }
 
+/**
+ * How far apart the agent runner's actions reach the page (#848): `--action-gap-ms`, else the
+ * scenario's own (250 for the real-time ones, `play` and `arcade`; 0 elsewhere). A `--manual` run
+ * has no runner to pace: its operator sends one `act` command at a time.
+ */
+export function actionGapOf(argumentList: readonly string[], scenario: ArenaScenario): number | ArenaRefusal {
+  const given = flagIn(argumentList, 'action-gap-ms')
+  if (given === undefined) return scenario.actionGapMs
+  if (argumentList.includes('--manual')) {
+    return { refusal: '--action-gap-ms paces the agent runner’s actions; a --manual run has no runner' }
+  }
+  const gap = Number(given)
+  return Number.isInteger(gap) && gap >= 0
+    ? gap
+    : { refusal: '--action-gap-ms takes a whole number of milliseconds, 0 or more' }
+}
+
 /** The agent runner `start` drives the run with, or undefined for `--manual`; and the brief it is given. */
 async function driverNamed(
   scenario: ArenaScenario,
@@ -327,16 +345,18 @@ async function driverNamed(
   reference: string | undefined,
 ): Promise<{ readonly driver?: ArenaDriver; readonly brief: string }> {
   const drive = orFail(driveOf(rest, reference))
+  const actionGapMs = orFail(actionGapOf(rest, scenario))
   if ('manual' in drive) return { brief: arenaBrief(scenario, 'command', context) }
   const { model, streamFn } = await agentModelNamed(drive.reference)
   const perception = perceptionNamed()
-  const brief = arenaBrief(scenario, 'tool', { perception })
+  const brief = arenaBrief(scenario, 'tool', { perception, actionGapMs })
   const driver = arenaAgentDriver({
     model,
     streamFn,
     thinking: drive.thinking,
     brief,
     perception,
+    actionGapMs,
     secretValues: arenaSecretValues(operatorHome),
   })
   return { driver, brief }
