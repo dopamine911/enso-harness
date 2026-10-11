@@ -82,10 +82,11 @@ packages installed again.
 
 **Perception (#680): `--perception tree` (the default) or `visual`.** How the agent under test sees
 and acts on the page:
-- **`tree`** reads the page's accessibility tree (`read`, a region at a time: below) and acts on controls by name (role and
-  accessible name, text, label, placeholder). A screen-reader user who also has a list of every
-  control. It finds broken flows, errors, wrong state, and unnamed or ambiguous controls well. It
-  can't judge what a sighted user sees, and it finds controls a sighted user might not notice.
+- **`tree`** reads the page's accessibility tree (`read`, a region at a time: below) and acts on controls by name: each
+  target names one way, role (and accessible name), text, label or placeholder, and a target naming two is refused
+  (#850). A screen-reader user who also has a list of every control. It finds broken flows, errors, wrong state, and
+  unnamed or ambiguous controls well. It can't judge what a sighted user sees, and it finds controls a sighted user
+  might not notice.
 - **`visual`** sees a **1024×640 screenshot** of the tab in front after every action, and nothing else:
   no tree, no control by name. It acts like a mouse and keyboard: `click` at `x`,`y` (also
   `"double": true` or `"button": "right"`), `move`, `scroll` (`dx`, `dy`), `drag` (`toX`, `toY`),

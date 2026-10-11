@@ -13,16 +13,22 @@ import { ARENA_READ_REGIONS } from './read-regions.ts'
  * script, a `goto` off the page or onto `/api`, and records the refusal.
  */
 
-/** A target as a reader of the page names it: a role and accessible name, visible text, a label or a placeholder. Never a selector. */
-const ArenaTargetParameters = Type.Object({
-  role: Type.Optional(Type.String({ description: 'an ARIA role: button, textbox, link, tab, dialog, …' })),
-  name: Type.Optional(Type.String({ description: 'the accessible name, with role' })),
-  text: Type.Optional(Type.String()),
-  label: Type.Optional(Type.String()),
-  placeholder: Type.Optional(Type.String()),
-  exact: Type.Optional(Type.Boolean()),
-  nth: Type.Optional(Type.Integer({ minimum: 0 })),
-})
+/**
+ * A target as a reader of the page names it: a role and accessible name, visible text, a label or a
+ * placeholder — one of them (#850; the parser refuses two). Never a selector.
+ */
+const ArenaTargetParameters = Type.Object(
+  {
+    role: Type.Optional(Type.String({ description: 'an ARIA role: button, textbox, link, tab, dialog, …' })),
+    name: Type.Optional(Type.String({ description: 'the accessible name, with role' })),
+    text: Type.Optional(Type.String()),
+    label: Type.Optional(Type.String()),
+    placeholder: Type.Optional(Type.String()),
+    exact: Type.Optional(Type.Boolean()),
+    nth: Type.Optional(Type.Integer({ minimum: 0 })),
+  },
+  { description: 'one way to name the element: role (and name), or text, or label, or placeholder; never two' },
+)
 
 /** An optional number field with what it is for: the model reads the description. */
 const numberField = (description: string): TOptional<TNumber> => Type.Optional(Type.Number({ description }))

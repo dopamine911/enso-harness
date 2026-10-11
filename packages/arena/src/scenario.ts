@@ -201,7 +201,8 @@ The first read of a region returns it whole ("snapshot"). Each later read return
 since your last read of it, which it names ("against"): "changes" marks new lines "+", gone lines "-",
 and repeats unmarked the lines they sit under; or "unchanged": true. After a navigation, a reload or a
 tab switch it is whole again, and "full": true asks for it whole.
-A target may add "exact": true and "nth": <index> when a name matches more than one element.`
+A target names an element one way: "role" (with "name"), "text", "label" or "placeholder", never two.
+It may add "exact": true and "nth": <index> when a name matches more than one element.`
 
 /** How an agent that sees the page acts on it (#680): a screenshot after every action, a mouse and keys. */
 const VISUAL_MOVES = `    {"action":"screenshot"}

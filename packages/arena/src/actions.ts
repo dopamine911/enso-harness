@@ -386,20 +386,40 @@ const isFields = (value: unknown): value is Fields =>
 const text = (fields: Fields, key: string): string | undefined =>
   typeof fields[key] === 'string' && fields[key].length > 0 ? fields[key] : undefined
 
+/** The keys that name an element, in the order a refusal lists them: `name` goes with `role`, one way per target (#850). */
+const TARGET_KEYS = ['role', 'name', 'text', 'label', 'placeholder'] as const
+
+/** What a target is, as its refusal says it: the agent resends from this. */
+const WHAT_A_TARGET_IS =
+  'a target names an element one way: {"role", "name"?}, {"text"}, {"label"} or {"placeholder"}, each with "exact" and "nth" if needed'
+
+/** Why a target object is not one: what a target is, and which of its keys the agent gave. */
+function targetRefusal(given: readonly string[]): string {
+  if (given.length === 0) return `${WHAT_A_TARGET_IS}; this one gives none of them`
+  const loneName = given.includes('name') && !given.includes('role') ? ', and "name" goes only with "role"' : ''
+  return `${WHAT_A_TARGET_IS}; this one gives ${given.map((key) => `"${key}"`).join(', ')}${loneName}`
+}
+
+/**
+ * The element a request's target names, or why it is not a target.
+ *
+ * ⚠ ONE WAY, OR REFUSED (#850): a target that names more than one way (`{role: "heading", text:
+ * "Continue"}`), or a `name` without its `role` beside another way, is refused with the keys it
+ * gave. Read as one of them, it lands on an element the agent did not name — the page's only
+ * heading — and answers ok. An empty string is no way at all, as when it stands alone.
+ */
 function parseTarget(value: unknown): ArenaTarget | string {
-  if (!isFields(value)) return 'a target is an object: {role, name?} | {text} | {label} | {placeholder}'
+  if (!isFields(value)) return `${WHAT_A_TARGET_IS}; a target is an object`
+  const given = TARGET_KEYS.filter((key) => text(value, key) !== undefined)
+  const ways = given.filter((key) => key !== 'name')
+  const [way] = ways
+  if (way === undefined || ways.length > 1 || (way !== 'role' && given.includes('name'))) return targetRefusal(given)
   const exact = value.exact === true ? { exact: true } : {}
   const nth = typeof value.nth === 'number' && Number.isInteger(value.nth) && value.nth >= 0 ? { nth: value.nth } : {}
-  const role = text(value, 'role')
-  if (role !== undefined) {
-    const name = text(value, 'name')
-    return { role, ...(name === undefined ? {} : { name }), ...exact, ...nth }
-  }
-  for (const key of ['text', 'label', 'placeholder'] as const) {
-    const named = text(value, key)
-    if (named !== undefined) return { [key]: named, ...exact, ...nth } as ArenaTarget
-  }
-  return 'a target names a role, text, label or placeholder — what a reader of the page sees'
+  const said = String(value[way])
+  if (way !== 'role') return { [way]: said, ...exact, ...nth } as ArenaTarget
+  const name = text(value, 'name')
+  return { role: said, ...(name === undefined ? {} : { name }), ...exact, ...nth }
 }
 
 /** An origin no request is ever sent to: the base `parseGotoPath` resolves a path against. */
