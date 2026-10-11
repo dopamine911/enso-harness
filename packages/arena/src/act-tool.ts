@@ -1,5 +1,5 @@
 import { type Static, type TNumber, type TOptional, Type } from 'typebox'
-import { ARENA_VIEW, POINT_FIELDS } from './actions.ts'
+import { ARENA_VIEW, LONGEST_HOLD_MS, POINT_FIELDS } from './actions.ts'
 import { ARENA_READ_REGIONS } from './read-regions.ts'
 
 /**
@@ -36,6 +36,14 @@ const numberField = (description: string): TOptional<TNumber> => Type.Optional(T
 /** The fields both perceptions share: keys, paths, waits, tabs, notes, the stop. */
 const SHARED_FIELDS = {
   key: Type.Optional(Type.String({ description: 'press: Enter, Escape, Control+K, …' })),
+  holdMs: Type.Optional(
+    Type.Integer({
+      minimum: 0,
+      maximum: LONGEST_HOLD_MS,
+      description:
+        'press: how long the key stays down, in ms (to steer by holding a key); without it the key is tapped',
+    }),
+  ),
   path: Type.Optional(Type.String({ description: 'goto: a path on Enso’s page, like "/"' })),
   ms: numberField('wait: milliseconds, at most 60000'),
   until: Type.Optional(Type.String({ description: 'wait: "attention" (Enso needs you or is done) or "change"' })),

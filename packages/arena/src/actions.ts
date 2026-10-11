@@ -73,7 +73,8 @@ export type ArenaAction =
   /** Text typed with the keyboard into whatever has focus (#680): a sighted user clicks a field, then types. */
   | { readonly action: 'type'; readonly text: string }
   | { readonly action: 'fill'; readonly target: ArenaTarget; readonly text: string }
-  | { readonly action: 'press'; readonly key: string; readonly target?: ArenaTarget }
+  /** `holdMs` keeps the key down that long before releasing it (#849); without it the key is tapped. */
+  | { readonly action: 'press'; readonly key: string; readonly holdMs?: number; readonly target?: ArenaTarget }
   | { readonly action: 'hover'; readonly target: ArenaTarget }
   | { readonly action: 'select'; readonly target: ArenaTarget; readonly option: string }
   /**
@@ -475,6 +476,15 @@ const accept = (action: ArenaAction): ArenaActionParse => ({ ok: true, action })
 const tabNumber = (value: unknown): number | undefined =>
   typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : undefined
 
+/**
+ * The longest a key is held (#849). A held key blocks the agent's turn for that long and the page
+ * sees nothing else meanwhile, so the cap bounds one action's stall; ten seconds outlasts any steer.
+ */
+export const LONGEST_HOLD_MS = 10_000
+
+const isHold = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= LONGEST_HOLD_MS
+
 /** The request's target, handed to `build`, or why it is not one. */
 function withTarget(request: Fields, build: (target: ArenaTarget) => ArenaAction): ArenaActionParse {
   const target = parseTarget(request.target)
@@ -580,8 +590,13 @@ const ACTION_PARSERS: Readonly<Record<string, (request: Fields) => ArenaActionPa
   press: (request) => {
     const key = text(request, 'key')
     if (key === undefined) return fail('press takes "key" (Enter, Escape, Control+K, …)')
-    if (request.target === undefined) return accept({ action: 'press', key })
-    return withTarget(request, (target) => ({ action: 'press', key, target }))
+    const holdMs = request.holdMs
+    if (holdMs !== undefined && !isHold(holdMs)) {
+      return fail(`press "holdMs" is how long the key stays down: a whole number of ms, 0 to ${LONGEST_HOLD_MS}`)
+    }
+    const press = holdMs === undefined ? { action: 'press' as const, key } : { action: 'press' as const, key, holdMs }
+    if (request.target === undefined) return accept(press)
+    return withTarget(request, (target) => ({ ...press, target }))
   },
   wait: (request) => {
     const ms = request.ms
@@ -802,8 +817,10 @@ function describePlainAction(
   switch (action.action) {
     case 'goto':
       return `goto ${action.path}`
-    case 'press':
-      return `press ${action.key}${action.target === undefined ? '' : ` in ${describeTarget(action.target)}`}`
+    case 'press': {
+      const held = action.holdMs === undefined ? '' : `, held ${action.holdMs} ms`
+      return `press ${action.key}${action.target === undefined ? '' : ` in ${describeTarget(action.target)}`}${held}`
+    }
     case 'wait':
       return action.until === undefined ? `wait ${action.ms} ms` : `${PAGE_WAIT} ${action.until}, up to ${action.ms} ms`
     case 'note':

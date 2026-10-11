@@ -36,6 +36,11 @@ interface ArenaTimeout {
   readonly timeout: number
 }
 
+/** How long a pressed key stays down, in ms (#849): Playwright's `delay` between keydown and keyup. */
+interface ArenaHold {
+  readonly delay?: number
+}
+
 /** A control a target names: as much of Playwright's `Locator` as the hands use. */
 export interface ArenaLocator {
   and(locator: ArenaLocator): ArenaLocator
@@ -44,7 +49,7 @@ export interface ArenaLocator {
   hover(options: ArenaTimeout): Promise<void>
   fill(value: string, options: ArenaTimeout): Promise<void>
   selectOption(value: string, options: ArenaTimeout): Promise<unknown>
-  press(key: string, options: ArenaTimeout): Promise<void>
+  press(key: string, options: ArenaTimeout & ArenaHold): Promise<void>
 }
 
 type ArenaRole = Parameters<Page['getByRole']>[0]
@@ -73,7 +78,7 @@ export interface ArenaMouse {
 
 /** The tab in front, as much of Playwright's `Page` as the hands use. */
 export interface ArenaHandPage extends ArenaLocating {
-  readonly keyboard: { press(key: string): Promise<void>; type(text: string): Promise<void> }
+  readonly keyboard: { press(key: string, options?: ArenaHold): Promise<void>; type(text: string): Promise<void> }
   readonly mouse: ArenaMouse
   goto(url: string, options: ArenaTimeout): Promise<unknown>
   goBack(options: ArenaTimeout): Promise<unknown>
@@ -173,8 +178,10 @@ export async function performOnControl(
   front: Pick<ArenaFront, 'page' | 'here'>,
 ): Promise<unknown> {
   const timeout = ACTION_TIMEOUT_MS
+  // ⚠ Playwright's `delay` is the time between keydown and keyup: the hold (#849). Left out when absent.
+  const hold = action.action === 'press' && action.holdMs !== undefined ? { delay: action.holdMs } : undefined
   if (action.action === 'press' && action.target === undefined) {
-    await front.page().keyboard.press(action.key)
+    await front.page().keyboard.press(action.key, hold)
     return front.here()
   }
   if (!('target' in action) || action.target === undefined) throw new Error(`${action.action} needs a target`)
@@ -183,7 +190,7 @@ export async function performOnControl(
   else if (action.action === 'hover') await control.hover({ timeout })
   else if (action.action === 'fill') await control.fill(action.text, { timeout })
   else if (action.action === 'select') await control.selectOption(action.option, { timeout })
-  else await control.press(action.key, { timeout })
+  else await control.press(action.key, { ...hold, timeout })
   return front.here()
 }
 

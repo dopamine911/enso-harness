@@ -81,7 +81,9 @@ or what `publish` and a review read: the reports, findings, score, manifest, scr
 packages installed again.
 
 **Perception (#680): `--perception tree` (the default) or `visual`.** How the agent under test sees
-and acts on the page:
+and acts on the page. In both, `press` takes a `key` and an optional `holdMs` (#849): how long the key
+stays down, a whole number of ms up to 10000, so a page steered by holding a key can be played; without
+it the key is tapped. The timeline line says the hold (`press ArrowRight, held 400 ms`).
 - **`tree`** reads the page's accessibility tree (`read`, a region at a time: below) and acts on controls by name: each
   target names one way, role (and accessible name), text, label or placeholder, and a target naming two is refused
   (#850). A screen-reader user who also has a list of every control. It finds broken flows, errors, wrong state, and

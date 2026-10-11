@@ -1,4 +1,4 @@
-import { ARENA_VIEW } from './actions.ts'
+import { ARENA_VIEW, LONGEST_HOLD_MS } from './actions.ts'
 import { ARENA_READ_REGIONS } from './read-regions.ts'
 import type { ArenaPerception } from './timeline.ts'
 
@@ -186,6 +186,7 @@ const TREE_MOVES = `    {"action":"read"}
     {"action":"click","target":{"role":"button","name":"…"}}
     {"action":"fill","target":{"placeholder":"…"},"text":"…"}
     {"action":"press","key":"Enter"}
+    {"action":"press","key":"ArrowRight","holdMs":400}   (holds the key down 400 ms; up to ${LONGEST_HOLD_MS})
     {"action":"goto","path":"/"}
     {"action":"hover"|"select"|"back"|"reload"|"screenshot", …}
 
@@ -209,6 +210,7 @@ const VISUAL_MOVES = `    {"action":"screenshot"}
     {"action":"click","x":512,"y":300}
     {"action":"type","text":"…"}
     {"action":"press","key":"Enter"}
+    {"action":"press","key":"ArrowRight","holdMs":400}   (holds the key down 400 ms; up to ${LONGEST_HOLD_MS})
     {"action":"scroll","x":512,"y":400,"dy":600}
     {"action":"move"|"drag"|"goto"|"back"|"reload", …}
 
