@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+  actionGapOf,
   agentsIn,
   type ArenaMatrixSteps,
   driveOf,
@@ -16,7 +17,7 @@ import {
   writePrompts,
 } from '../cli.ts'
 import type { ArenaDriver } from '../recorder.ts'
-import { SNAKE_SCENARIO } from '../scenario.ts'
+import { ARENA_SCENARIOS, SNAKE_SCENARIO } from '../scenario.ts'
 import { openTimeline } from '../timeline.ts'
 
 /**
@@ -65,6 +66,27 @@ test('a run is driven by hand or by one agent at a known thinking level, medium 
   expect(driveOf(['--thinking', 'deep'], 'anthropic/claude-test')).toEqual({
     refusal: '--thinking takes one of off, minimal, low, medium, high, xhigh, max',
   })
+})
+
+test('the runner’s actions are paced in the real-time scenarios unless --action-gap-ms says otherwise; a --manual run has no runner to pace (#848)', () => {
+  const play = ARENA_SCENARIOS.play
+  const arcade = ARENA_SCENARIOS.arcade
+  if (play === undefined || arcade === undefined) throw new Error('the real-time scenarios are gone')
+  expect(actionGapOf([], play)).toBe(250)
+  expect(actionGapOf([], arcade)).toBe(250)
+  expect(actionGapOf([], SNAKE_SCENARIO)).toBe(0)
+  expect(actionGapOf(['--action-gap-ms', '0'], play)).toBe(0)
+  expect(actionGapOf(['--action-gap-ms', '400'], SNAKE_SCENARIO)).toBe(400)
+  expect(actionGapOf(['--manual', '--action-gap-ms', '400'], SNAKE_SCENARIO)).toEqual({
+    refusal: '--action-gap-ms paces the agent runner’s actions; a --manual run has no runner',
+  })
+  // A manual run of a paced scenario is not refused: the scenario's gap is simply unused.
+  expect(actionGapOf(['--manual'], play)).toBe(250)
+  for (const bad of ['-1', '1.5', 'soon']) {
+    expect(actionGapOf(['--action-gap-ms', bad], SNAKE_SCENARIO)).toEqual({
+      refusal: '--action-gap-ms takes a whole number of milliseconds, 0 or more',
+    })
+  }
 })
 
 test('`--agents` names one run per agent, trimmed; without it `--agent` is the one run, or a manual run (#674)', () => {

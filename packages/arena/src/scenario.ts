@@ -21,7 +21,20 @@ export interface ArenaScenario {
   readonly sampleIntervalMs: number
   /** How long one trace chunk runs before it is written out, so a crash loses at most one chunk. */
   readonly traceChunkMs: number
+  /**
+   * The least time between the end of one of the agent runner's actions and the start of its next
+   * (#848). A turn's actions otherwise reach the page milliseconds apart, so a page that runs in
+   * real time is only ever used at machine speed. `0`: back to back.
+   */
+  readonly actionGapMs: number
 }
+
+/**
+ * The gap for a scenario whose app runs in real time (#848): longer than a game loop's tick, so a
+ * key sent after another lands a tick later, as a player's would; about a quick player's spacing
+ * between keys. The Enso-only scenarios stay back to back, where fast input can find a real race.
+ */
+const REAL_TIME_ACTION_GAP_MS = 250
 
 /** What every assignment ends with: work through Enso's UI, and say what was hard as it happens. */
 const WORK_AND_NOTE =
@@ -29,13 +42,14 @@ const WORK_AND_NOTE =
   'trying to do, what happened, and what you wish the interface had provided.'
 
 /** A scenario: its task, then the shared closing, with the bounds every scenario runs under. */
-function scenarioOf(id: string, task: readonly string[]): ArenaScenario {
+function scenarioOf(id: string, task: readonly string[], actionGapMs = 0): ArenaScenario {
   return {
     id,
     assignment: [...task, WORK_AND_NOTE].join(' '),
     budgetMinutes: 120,
     sampleIntervalMs: 30_000,
     traceChunkMs: 5 * 60_000,
+    actionGapMs,
   }
 }
 
@@ -96,14 +110,18 @@ const RESUME_SCENARIO = scenarioOf('resume', [
  * Preview is the tool; whether the agent finds a way to play at all is the finding. Outcomes,
  * never controls: it is never told there is a preview.
  */
-const PLAY_SCENARIO = scenarioOf('play', [
-  'Have a small browser game built that a person plays with the keyboard or the mouse: Breakout,',
-  'Tetris, Asteroids or one you prefer. Then play it yourself, in the browser, the way a player',
-  'would: start a game, play it until you lose or win, and try what a player would try. Find at',
-  'least one thing that is wrong or missing, have it fixed or added, and play again to check the',
-  'change. Do this at least twice. Report what you found by playing, apart from what the tests',
-  'said.',
-])
+const PLAY_SCENARIO = scenarioOf(
+  'play',
+  [
+    'Have a small browser game built that a person plays with the keyboard or the mouse: Breakout,',
+    'Tetris, Asteroids or one you prefer. Then play it yourself, in the browser, the way a player',
+    'would: start a game, play it until you lose or win, and try what a player would try. Find at',
+    'least one thing that is wrong or missing, have it fixed or added, and play again to check the',
+    'change. Do this at least twice. Report what you found by playing, apart from what the tests',
+    'said.',
+  ],
+  REAL_TIME_ACTION_GAP_MS,
+)
 
 /**
  * A long build in many parts (#740): every other scenario is done in minutes (a snake run took under
@@ -112,12 +130,16 @@ const PLAY_SCENARIO = scenarioOf('play', [
  * is a project that keeps growing over many requests, and the cabinet ties them together. Outcomes,
  * never controls: how the work is split across requests and threads is the agent's.
  */
-const ARCADE_SCENARIO = scenarioOf('arcade', [
-  'Build a retro arcade cabinet that runs in the browser: one page styled as an arcade cabinet, from',
-  'which a player picks a game and plays it. Put six games in it: five classic arcade games of your',
-  'choosing, recreated in a retro arcade style, and one new game of your own design in the same style.',
-  'You own the design, implementation, and testing.',
-])
+const ARCADE_SCENARIO = scenarioOf(
+  'arcade',
+  [
+    'Build a retro arcade cabinet that runs in the browser: one page styled as an arcade cabinet, from',
+    'which a player picks a game and plays it. Put six games in it: five classic arcade games of your',
+    'choosing, recreated in a retro arcade style, and one new game of your own design in the same style.',
+    'You own the design, implementation, and testing.',
+  ],
+  REAL_TIME_ACTION_GAP_MS,
+)
 
 /**
  * How the agent under test reaches the UI: the agent runner's one tool (`tool`), or the
@@ -135,6 +157,8 @@ export interface ArenaBriefContext {
   readonly repository?: string
   /** How the run's agent perceived the page (#680): the review says which judgments that allows. */
   readonly perception?: ArenaPerception
+  /** The gap the agent runner's actions are paced at (#848), when the run sets one other than the scenario's. */
+  readonly actionGapMs?: number
 }
 
 /** How the runner's agent acts: its one tool. */
@@ -240,7 +264,7 @@ returns as soon as there is something for you. Only after \`ms\` with none of th
 without \`"attention"\`. Then ${look}.
 
 \`{"action":"wait","until":"change","ms":…}\` returns on any change to the page since you last saw
-it, Enso's own progress included. A plain \`{"action":"wait","ms":…}\` sleeps the whole time (at most a minute).
+it, Enso's own progress included. A plain \`{"action":"wait","ms":…}\` sleeps the whole time (at most a minute).${reviewed ? '' : `\n\n${pacingNote(context.actionGapMs ?? scenario.actionGapMs)}`}
 
 # Notes — write them when they happen, not at the end
 
@@ -271,6 +295,21 @@ Phases 2 and 3 come after the run stops.
 
 ${assignment}
 ${arenaReviewBrief(context, 'self')}`
+}
+
+/**
+ * How far apart a turn's actions reach the page (#848), for the agent runner, whose tool calls in
+ * one turn run back to back. A person's shell runs one `act` command at a time, so the command
+ * brief has no such note.
+ */
+function pacingNote(actionGapMs: number): string {
+  const speed =
+    actionGapMs > 0
+      ? `at least ${actionGapMs} ms apart, about as fast as a quick person`
+      : 'one after another, a few milliseconds apart: far faster than a person'
+  return `Actions you send in one turn reach the page ${speed}. Where timing matters (a game, an
+animation, anything a person does at human speed), put a \`{"action":"wait","ms":…}\` between the
+steps a person would space out, and wait again before you judge what they did.`
 }
 
 /**

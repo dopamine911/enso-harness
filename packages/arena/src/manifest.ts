@@ -89,6 +89,8 @@ export type ArenaDriverRecord =
       /** Calls the model made to a tool it was not given: asked for, refused, nothing ran. */
       readonly refusedToolCalls: readonly string[]
       readonly endReason?: string
+      /** The least time between its actions (#848): a paced run and a back-to-back one play a real-time page differently. */
+      readonly actionGapMs?: number
     }
   | { readonly kind: 'control' }
 
@@ -253,6 +255,7 @@ function driverRecord(events: readonly ArenaEvent[]): ArenaDriverRecord {
     tools: start.tools,
     refusedToolCalls: events.flatMap((event) => (event.kind === 'agent-tool-refused' ? [event.tool] : [])),
     ...(end === undefined ? {} : { endReason: end.reason }),
+    ...(start.actionGapMs === undefined ? {} : { actionGapMs: start.actionGapMs }),
   }
 }
 

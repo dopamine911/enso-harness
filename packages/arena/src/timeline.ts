@@ -114,13 +114,15 @@ export type ArenaEventBody =
   | { readonly kind: 'thread-status'; readonly status: EnsoThreadStatusKind; readonly question?: string }
   /** Something the recorder itself failed to do — a trace chunk not written — recorded, not thrown. */
   | { readonly kind: 'recorder-error'; readonly during: string; readonly error: string }
-  /** The agent runner started: the model that drives the UI, and the only tools it was given. */
+  /** The agent runner started: the model that drives the UI, the only tools it was given, and how its actions were paced. */
   | {
       readonly kind: 'agent-start'
       readonly provider: string
       readonly model: string
       readonly thinking: string
       readonly tools: readonly string[]
+      /** The least time between its actions (#848); absent on runs from before it was recorded. */
+      readonly actionGapMs?: number
     }
   /** The model asked for a tool it was not given; nothing ran. */
   | { readonly kind: 'agent-tool-refused'; readonly tool: string }

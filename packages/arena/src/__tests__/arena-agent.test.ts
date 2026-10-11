@@ -16,6 +16,7 @@ import {
   arenaToolResult,
   arenaUiTool,
   DROPPED_IMAGE_TEXT,
+  pacedAct,
   parseModelReference,
   resolveArenaModel,
   supersededReadText,
@@ -104,7 +105,14 @@ test('the agent has one tool: a shell or a file write is refused and runs nothin
     { action: 'stop', reason: 'done' },
   ])
   expect(session.recorded).toEqual([
-    { kind: 'agent-start', provider: core.provider, model: 'arena-test', thinking: 'off', tools: ['act'] },
+    {
+      kind: 'agent-start',
+      provider: core.provider,
+      model: 'arena-test',
+      thinking: 'off',
+      tools: ['act'],
+      actionGapMs: 0,
+    },
     { kind: 'agent-tool-refused', tool: 'bash' },
     { kind: 'agent-tool-refused', tool: 'write' },
   ])
@@ -382,4 +390,84 @@ test('a runner still going after the stop is recorded as such; one that ends in 
   recorded.length = 0
   await awaitDriverEnd(Promise.resolve(), timeline, 1000)
   expect(recorded).toEqual([])
+})
+
+test('⚠ a paced runner’s actions in one turn reach the page at least the gap apart, and its start says the gap (#848)', async () => {
+  const core = scripted([
+    fauxAssistantMessage(
+      [
+        fauxToolCall('act', { action: 'press', key: 'ArrowRight' }),
+        fauxToolCall('act', { action: 'press', key: 'p' }),
+        fauxToolCall('act', { action: 'stop', reason: 'done' }),
+      ],
+      { stopReason: 'toolUse' },
+    ),
+  ])
+  const spans: { started: number; ended: number }[] = []
+  const session = fakeSession()
+  const unpaced = session.act
+  const timed = {
+    ...session,
+    act: async (request: unknown): Promise<ArenaActOutcome> => {
+      const started = performance.now()
+      const outcome = await unpaced(request)
+      spans.push({ started, ended: performance.now() })
+      return outcome
+    },
+  }
+  await arenaAgentDriver({
+    model: core.getModel(),
+    streamFn: core.streamSimple,
+    thinking: 'off',
+    brief: 'the brief',
+    secretValues: [],
+    actionGapMs: 60,
+  })(timed)
+
+  expect(session.sent).toEqual([
+    { action: 'press', key: 'ArrowRight' },
+    { action: 'press', key: 'p' },
+    { action: 'stop', reason: 'done' },
+  ])
+  const gaps = spans.slice(1).map((span, index) => span.started - (spans[index]?.ended ?? 0))
+  // Bun's timer may fire a fraction of a millisecond early against performance.now().
+  expect(gaps.every((gap) => gap >= 59)).toBe(true)
+  expect(session.recorded[0]).toMatchObject({ kind: 'agent-start', actionGapMs: 60 })
+})
+
+test('pacing waits only the rest of the gap, counted from the end of the last action, a failed one too (#848)', async () => {
+  let now = 0
+  const slept: number[] = []
+  const clock = {
+    now: (): number => now,
+    sleep: (ms: number): Promise<void> => {
+      slept.push(ms)
+      now += ms
+      return Promise.resolve()
+    },
+  }
+  const durations = [40, 10, 0, 0]
+  const act = pacedAct(
+    (request) => {
+      now += durations.shift() ?? 0
+      return request === 'fails'
+        ? Promise.reject(new Error('no such control'))
+        : Promise.resolve({ ok: true, result: {} })
+    },
+    250,
+    clock,
+  )
+  await act('first')
+  expect(slept).toEqual([])
+  now += 100 // the model's own time between two calls of one turn
+  await act('second')
+  expect(slept).toEqual([150])
+  now += 400 // a new turn: the model took longer than the gap
+  await expect(act('fails')).rejects.toThrow('no such control')
+  expect(slept).toEqual([150])
+  await act('after the failure')
+  expect(slept).toEqual([150, 250])
+
+  const unpaced = (): Promise<ArenaActOutcome> => Promise.resolve({ ok: true, result: {} })
+  expect(pacedAct(unpaced, 0, clock)).toBe(unpaced)
 })

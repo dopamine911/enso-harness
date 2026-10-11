@@ -168,6 +168,38 @@ export function arenaUiTool(
   }
 }
 
+/** The clock `pacedAct` reads and sleeps on: a test's, or the real one. */
+export interface ArenaPaceClock {
+  readonly now: () => number
+  readonly sleep: (ms: number) => Promise<void>
+}
+
+const HOST_PACE_CLOCK: ArenaPaceClock = { now: () => Date.now(), sleep: (ms) => Bun.sleep(ms) }
+
+/**
+ * `act`, paced (#848): each action starts at least `gapMs` after the previous one ended. A turn's
+ * tool calls run back to back, milliseconds apart, so a page that runs in real time would only ever be
+ * used at machine speed; between turns the model's own call takes far longer than any gap, so in
+ * practice only a turn's later actions wait. A failed action counts as ended. `0` is `act` itself.
+ */
+export function pacedAct(
+  act: ArenaDriverSession['act'],
+  gapMs: number,
+  clock: ArenaPaceClock = HOST_PACE_CLOCK,
+): ArenaDriverSession['act'] {
+  if (gapMs <= 0) return act
+  let lastEnded: number | undefined
+  return async (request) => {
+    const wait = lastEnded === undefined ? 0 : lastEnded + gapMs - clock.now()
+    if (wait > 0) await clock.sleep(wait)
+    try {
+      return await act(request)
+    } finally {
+      lastEnded = clock.now()
+    }
+  }
+}
+
 /** The reasoning levels `--thinking` accepts: pi's own, so the runner passes one straight through. */
 export const ARENA_THINKING_LEVELS: readonly ThinkingLevel[] = [
   'off',
@@ -205,6 +237,8 @@ export interface ArenaAgentOptions {
   readonly maxNudges?: number
   /** How the agent perceives the page (#680): the tree (the default), or a screenshot after every action. */
   readonly perception?: ArenaPerception
+  /** The least time between its actions (#848, `pacedAct`): the scenario's or `--action-gap-ms`; absent, 0. */
+  readonly actionGapMs?: number
 }
 
 /** A transcript line on disk: image bytes left out (the screenshot is on disk already), text redacted. */
@@ -229,6 +263,7 @@ export function arenaAgentDriver(options: ArenaAgentOptions): ArenaDriver {
     const transcriptPath = join(agentDirectory, 'transcript.jsonl')
     let stopSent = false
     let runStopped: string | undefined
+    const actionGapMs = options.actionGapMs ?? 0
     const agent = new Agent({
       initialState: {
         systemPrompt: options.brief,
@@ -236,7 +271,7 @@ export function arenaAgentDriver(options: ArenaAgentOptions): ArenaDriver {
         thinkingLevel: options.thinking,
         tools: [
           arenaUiTool(
-            session,
+            { act: pacedAct((request) => session.act(request), actionGapMs) },
             options.model.input.includes('image'),
             () => (stopSent = true),
             options.perception ?? 'tree',
@@ -257,6 +292,7 @@ export function arenaAgentDriver(options: ArenaAgentOptions): ArenaDriver {
       model: options.model.id,
       thinking: options.thinking,
       tools: agent.state.tools.map((tool) => tool.name),
+      actionGapMs,
     })
     agent.subscribe((event) => {
       if (event.type === 'message_end')

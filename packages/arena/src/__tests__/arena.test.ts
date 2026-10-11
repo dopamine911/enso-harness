@@ -34,7 +34,14 @@ import {
 } from '../actions.ts'
 import { collectEnsoEvidence } from '../evidence.ts'
 import { type ArenaEvidence, arenaEvidenceRowOf, foldArenaManifest } from '../manifest.ts'
-import { arenaActCommand, arenaBrief, arenaReviewBrief, githubRepositoryOf, SNAKE_SCENARIO } from '../scenario.ts'
+import {
+  ARENA_SCENARIOS,
+  arenaActCommand,
+  arenaBrief,
+  arenaReviewBrief,
+  githubRepositoryOf,
+  SNAKE_SCENARIO,
+} from '../scenario.ts'
 import { type ArenaClock, type ArenaEventBody, openTimeline, pagePlace, readTimeline } from '../timeline.ts'
 
 /**
@@ -918,6 +925,17 @@ test('the brief carries the assignment verbatim and no internals', () => {
   expect(arenaBrief(SNAKE_SCENARIO, 'tool')).not.toContain('bun run')
   expect(arenaBrief(SNAKE_SCENARIO, 'tool')).toContain('only tool you have')
   expect(arenaBrief(SNAKE_SCENARIO, 'command')).toContain('bun run arena act')
+})
+
+test('the runner’s brief says how far apart a turn’s actions reach the page, the run’s gap over the scenario’s; the command brief does not (#848)', () => {
+  const play = ARENA_SCENARIOS.play
+  if (play === undefined) throw new Error('the play scenario is gone')
+  expect(arenaBrief(play, 'tool')).toContain('reach the page at least 250 ms apart')
+  expect(arenaBrief(SNAKE_SCENARIO, 'tool')).toContain('reach the page one after another, a few milliseconds apart')
+  expect(arenaBrief(play, 'tool', { actionGapMs: 0 })).toContain('a few milliseconds apart')
+  expect(arenaBrief(SNAKE_SCENARIO, 'tool', { actionGapMs: 400 })).toContain('at least 400 ms apart')
+  // Over the command channel each action is its own command: there is no turn of back-to-back actions.
+  expect(arenaBrief(play, 'command')).not.toContain('reach the page')
 })
 
 test('the boundary holds only when the agent had the one UI tool and every action came through it', () => {
