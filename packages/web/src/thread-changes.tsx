@@ -166,9 +166,24 @@ const CELL_CLASS: Readonly<Record<DiffLine['kind'], string>> = {
   added: 'bg-ok/15',
 }
 
-/** One side of a row: its line number on that side and its text, or an empty cell where the other side has more. */
-function Side({ line, side }: { readonly line: DiffLine | null; readonly side: 'old' | 'new' }): React.ReactNode {
-  if (line === null) return <td colSpan={2} aria-label="no line on this side" className="bg-muted/40" />
+/**
+ * One side of a row: its line number on that side and its text, or an empty cell where the other side has more.
+ * `marked`: whether a reader hears the line's `+`/`−`, which is what says which side a line is on (#847).
+ *
+ * ⚠ THE EMPTY CELL IS HIDDEN FROM READERS (#847). A label on it is read in the cell and again in the row's
+ * name, so a one-sided file repeats it twice a line. A one-sided file says its missing side once, on the
+ * table; in a file with both sides the line's own marker says which side it is on.
+ */
+function Side({
+  line,
+  side,
+  marked,
+}: {
+  readonly line: DiffLine | null
+  readonly side: 'old' | 'new'
+  readonly marked: boolean
+}): React.ReactNode {
+  if (line === null) return <td colSpan={2} aria-hidden="true" className="bg-muted/40" />
   const marker = MARKER[line.kind]
   return (
     <>
@@ -176,7 +191,7 @@ function Side({ line, side }: { readonly line: DiffLine | null; readonly side: '
         {side === 'old' ? line.oldNumber : line.newNumber}
       </td>
       <td className={`px-2 break-all whitespace-pre-wrap ${CELL_CLASS[line.kind]}`}>
-        <span aria-hidden="true" className="text-muted-foreground select-none">
+        <span aria-hidden={marked ? undefined : true} className="text-muted-foreground select-none">
           {marker}{' '}
         </span>
         {line.text}
@@ -192,9 +207,11 @@ const rowKey = (row: SplitRow): string => `${row.left?.oldNumber ?? ''}:${row.ri
 function Hunk({
   hunk,
   previous,
+  marked,
 }: {
   readonly hunk: DiffHunk
   readonly previous: DiffHunk | undefined
+  readonly marked: boolean
 }): React.ReactNode {
   const hidden = hiddenBefore(hunk, previous)
   return (
@@ -209,12 +226,26 @@ function Hunk({
       </tr>
       {splitRows(hunk).map((row) => (
         <tr key={rowKey(row)} className="align-top">
-          <Side line={row.left} side="old" />
-          <Side line={row.right} side="new" />
+          <Side line={row.left} side="old" marked={marked} />
+          <Side line={row.right} side="new" marked={marked} />
         </tr>
       ))}
     </tbody>
   )
+}
+
+/**
+ * What a reader is told once of a file with no old side (added or untracked) or no new side (deleted), or
+ * `undefined` for a file with both (#847).
+ *
+ * ⚠ FROM GIT'S STATUS, NOT THE PATCH. Under `diff.context = 0` an insertion into an existing file is all
+ * `+` lines, and at the top of the file its header is a new file's (`@@ -0,0 +1 @@`); a deletion from
+ * the top is a deleted file's (`+0,0`). Neither the line kinds nor the hunk ranges tell them apart.
+ */
+function oneSidedLabel(status: EnsoGitFileChange['status']): string | undefined {
+  if (status === 'added' || status === 'untracked') return 'the old side has no lines: every line here is added'
+  if (status === 'deleted') return 'the new side has no lines: every line here is removed'
+  return undefined
 }
 
 /** Why a file has no diff to draw. */
@@ -227,6 +258,7 @@ function omittedText(change: EnsoGitFileChange): string {
 
 function FileDiff({ change }: { readonly change: EnsoGitFileChange }): React.ReactNode {
   const hunks = change.patch === null ? [] : parsePatch(change.patch)
+  const oneSided = oneSidedLabel(change.status)
   return (
     <section aria-label={`changes to ${change.path}`} className="min-w-0">
       <header className="sticky top-0 z-10 flex flex-wrap items-baseline gap-x-3 border-b bg-background px-3 py-2">
@@ -241,7 +273,7 @@ function FileDiff({ change }: { readonly change: EnsoGitFileChange }): React.Rea
       {hunks.length === 0 ? (
         <p className="px-3 py-4 text-sm text-muted-foreground">{omittedText(change)}</p>
       ) : (
-        <table className="w-full table-fixed border-collapse font-mono text-xs">
+        <table aria-label={oneSided} className="w-full table-fixed border-collapse font-mono text-xs">
           <colgroup>
             <col className="w-12" />
             <col />
@@ -249,7 +281,12 @@ function FileDiff({ change }: { readonly change: EnsoGitFileChange }): React.Rea
             <col />
           </colgroup>
           {hunks.map((hunk, hunkIndex) => (
-            <Hunk key={hunk.header + String(hunkIndex)} hunk={hunk} previous={hunks[hunkIndex - 1]} />
+            <Hunk
+              key={hunk.header + String(hunkIndex)}
+              hunk={hunk}
+              previous={hunks[hunkIndex - 1]}
+              marked={oneSided === undefined}
+            />
           ))}
         </table>
       )}
