@@ -53,7 +53,10 @@ async function eventually<T>(probe: () => T): Promise<T> {
   }
 }
 
-/** A session on a reasoning model at `high`, beside one that cannot reason. */
+/**
+ * A session on a reasoning model at `high`, listed after one that cannot reason: the chosen model
+ * is not the list's first row, as in the run that found #846.
+ */
 const COMMANDS: EnsoThreadCommands = {
   threadId: 'thread-1',
   source: 'live',
@@ -64,8 +67,8 @@ const COMMANDS: EnsoThreadCommands = {
       kind: 'select',
       value: 'fake/deep',
       options: [
-        { id: 'fake/deep', label: 'Deep', detail: 'fake', thinkingLevels: ['off', 'low', 'medium', 'high'] },
         { id: 'fake/plain', label: 'Plain', detail: 'fake', thinkingLevels: ['off'] },
+        { id: 'fake/deep', label: 'Deep', detail: 'fake', thinkingLevels: ['off', 'low', 'medium', 'high'] },
       ],
     },
     {
@@ -138,6 +141,7 @@ const EMPTY_PROJECT: EnsoProjectPromptLibrary = {
 function serverFetch(
   library: 'present' | 'absent',
   project: EnsoProjectPromptLibrary = EMPTY_PROJECT,
+  commands: EnsoThreadCommands = COMMANDS,
 ): (input: string) => Promise<Response> {
   return (input: string): Promise<Response> => {
     if (input === '/api/threads/thread-1/project-prompts') return Promise.resolve(Response.json(project))
@@ -154,7 +158,7 @@ function serverFetch(
     if (input === '/api/prompts/triage') {
       return Promise.resolve(Response.json(TRIAGE, { headers: { ETag: `"${'c'.repeat(64)}"` } }))
     }
-    return Promise.resolve(Response.json(COMMANDS))
+    return Promise.resolve(Response.json(commands))
   }
 }
 
@@ -172,6 +176,7 @@ async function mountStart(
   answer: ConfigureOutcome,
   library: 'present' | 'absent' = 'present',
   project: EnsoProjectPromptLibrary = EMPTY_PROJECT,
+  commands: EnsoThreadCommands = COMMANDS,
 ): Promise<Mounted> {
   const configured: EnsoSessionConfiguration[] = []
   const sent: string[] = []
@@ -197,7 +202,7 @@ async function mountStart(
           sent.push(text)
           return true
         }}
-        fetch={serverFetch(library, project)}
+        fetch={serverFetch(library, project, commands)}
       />,
     )
   })
@@ -222,7 +227,7 @@ async function mountStart(
   return mounted
 }
 
-/** Choose a model row, type a prompt the way a person would (React's controlled value), press Start. */
+/** Choose a model row, then type a prompt and press Start. */
 async function chooseTypeAndStart(mounted: Mounted, modelId: string, prompt: string): Promise<void> {
   const row = await eventually(() => {
     const found = mounted.dialog().querySelector<HTMLElement>(`[cmdk-item][data-value="${modelId}"]`)
@@ -233,6 +238,11 @@ async function chooseTypeAndStart(mounted: Mounted, modelId: string, prompt: str
     row.click()
     await tick()
   })
+  await typeAndStart(mounted, prompt)
+}
+
+/** Type a prompt the way a person would (React's controlled value), press Start. */
+async function typeAndStart(mounted: Mounted, prompt: string): Promise<void> {
   const field = mounted.dialog().querySelector<HTMLTextAreaElement>('#start-session-prompt')
   if (field === null) throw new Error('expected the prompt field')
   await flush(async () => {
@@ -260,10 +270,19 @@ async function typeInto(field: HTMLInputElement | HTMLTextAreaElement, text: str
   })
 }
 
-async function pressEscape(target: HTMLElement): Promise<void> {
+async function press(target: HTMLElement, key: string): Promise<void> {
   await flush(async () => {
-    target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }))
     await tick()
+  })
+}
+
+/** The model filter, once the session's models are loaded. */
+function modelFilter(mounted: Mounted): Promise<HTMLInputElement> {
+  return eventually(() => {
+    const found = mounted.dialog().querySelector<HTMLInputElement>('input[cmdk-input]')
+    if (found === null) throw new Error('expected the model filter')
+    return found
   })
 }
 
@@ -271,11 +290,7 @@ async function pressEscape(target: HTMLElement): Promise<void> {
 // list had nothing to close, so Radix's dialog took it — and the typed prompt went with it.
 test('⚠ Escape in the model filter clears the filter and keeps the dialog; Escape elsewhere closes it, the prompt kept (#638)', async () => {
   const mounted = await mountStart({ outcome: 'told' })
-  const filter = await eventually(() => {
-    const found = mounted.dialog().querySelector<HTMLInputElement>('input[cmdk-input]')
-    if (found === null) throw new Error('expected the model filter')
-    return found
-  })
+  const filter = await modelFilter(mounted)
   // The filter is named: cmdk's label, wired to the input it ids itself.
   const labelId = filter.getAttribute('aria-labelledby')
   expect(labelId === null ? undefined : document.getElementById(labelId)?.textContent).toBe('Model')
@@ -285,7 +300,7 @@ test('⚠ Escape in the model filter clears the filter and keeps the dialog; Esc
   await typeInto(filter, 'plain')
   expect(mounted.dialog().querySelectorAll('[cmdk-item]')).toHaveLength(1)
 
-  await pressEscape(filter)
+  await press(filter, 'Escape')
   expect(mounted.closes).toEqual([])
   expect(filter.value).toBe('')
   expect(mounted.dialog().querySelectorAll('[cmdk-item]').length).toBeGreaterThan(1)
@@ -293,7 +308,7 @@ test('⚠ Escape in the model filter clears the filter and keeps the dialog; Esc
 
   // Escape again, with nothing left to clear, closes from the filter too (PR #645 review) — and the
   // words are the composer's, not lost.
-  await pressEscape(filter)
+  await press(filter, 'Escape')
   expect(mounted.closes).toEqual([1])
   expect(mounted.kept).toEqual(['a prompt I typed'])
   await mounted.unmount()
@@ -347,8 +362,8 @@ test('Start sends the four settings in one call — the effort the CHOSEN model 
 })
 
 // Found by a Dogfood Arena run reading the dialog: the check beside the chosen model is drawn by
-// CSS, and cmdk's `aria-selected` is its keyboard highlight, on the first row — so a reader was told
-// the first model was selected whatever was chosen. The chosen row says so in words.
+// CSS, and cmdk's `aria-selected` is its keyboard highlight, which moves with the arrows — so the
+// chosen row says so in words.
 test('the chosen model is named as chosen in the accessibility tree, and the mark follows a new choice', async () => {
   const mounted = await mountStart({ outcome: 'told' })
   const rowText = (modelId: string): string =>
@@ -362,6 +377,71 @@ test('the chosen model is named as chosen in the accessibility tree, and the mar
   })
   expect(rowText('fake/plain')).toBe('Plainfake, chosen')
   expect(rowText('fake/deep')).toBe('Deepfake')
+  await mounted.unmount()
+})
+
+/** The model rows cmdk marks highlighted (`aria-selected`): the row Enter in the filter commits. */
+function highlightedRows(mounted: Mounted): (string | null)[] {
+  return [...mounted.dialog().querySelectorAll('[cmdk-item][aria-selected="true"]')].map((row) =>
+    row.getAttribute('data-value'),
+  )
+}
+
+/** The model row the filter names as its active descendant — what a screen reader announces — if any. */
+function activeRow(filter: HTMLInputElement): string | undefined {
+  const rowId = filter.getAttribute('aria-activedescendant')
+  return (rowId === null ? undefined : document.getElementById(rowId)?.getAttribute('data-value')) ?? undefined
+}
+
+/** The model row the accessibility tree says is chosen. */
+function chosenRow(mounted: Mounted): string | null | undefined {
+  return [...mounted.dialog().querySelectorAll('[cmdk-item]')]
+    .find((row) => row.textContent?.endsWith(', chosen'))
+    ?.getAttribute('data-value')
+}
+
+// ⚠ #846, found by a Dogfood Arena run: cmdk highlights its first row unless told which, so the
+// list read `[selected]` on the first model while another was the chosen one — and Enter in the
+// filter commits the highlighted row, so it swapped the chosen model for the first.
+test('⚠ the model list opens highlighting the chosen model; the arrows and the filter move the highlight, and Enter commits it (#846)', async () => {
+  const mounted = await mountStart({ outcome: 'told' })
+  const filter = await modelFilter(mounted)
+  // Deep is chosen and the second row: it is the one highlighted, not Plain above it — and the
+  // filter names no other row as active (cmdk names none until a key moves the highlight).
+  await eventually(() => expect(highlightedRows(mounted)).toEqual(['fake/deep']))
+  expect([undefined, 'fake/deep']).toContain(activeRow(filter))
+  await press(filter, 'Enter')
+  expect(chosenRow(mounted)).toBe('fake/deep')
+
+  await press(filter, 'ArrowUp')
+  expect(highlightedRows(mounted)).toEqual(['fake/plain'])
+  expect(activeRow(filter)).toBe('fake/plain')
+  await press(filter, 'ArrowDown')
+  expect(highlightedRows(mounted)).toEqual(['fake/deep'])
+  expect(activeRow(filter)).toBe('fake/deep')
+
+  // A filter that hides the chosen model highlights its first match; Enter takes it, and Start sends it.
+  await typeInto(filter, 'plain')
+  await eventually(() => expect(highlightedRows(mounted)).toEqual(['fake/plain']))
+  await press(filter, 'Enter')
+  expect(chosenRow(mounted)).toBe('fake/plain')
+  await typeAndStart(mounted, 'hello there')
+  await eventually(() => expect(mounted.closes).toEqual([1]))
+  expect(mounted.configured).toEqual([{ model: 'fake/plain', thinking: 'off', mode: 'default', systemPrompt: null }])
+  await mounted.unmount()
+})
+
+test('#846: a session model the list does not offer leaves the first row highlighted, and Enter in the filter chooses it', async () => {
+  const [model, thinking] = COMMANDS.commands
+  if (model === undefined || thinking === undefined) throw new Error('expected the model and thinking rows')
+  const gone: EnsoThreadCommands = { ...COMMANDS, commands: [{ ...model, value: 'fake/gone' }, thinking] }
+  const mounted = await mountStart({ outcome: 'told' }, 'present', EMPTY_PROJECT, gone)
+  const filter = await modelFilter(mounted)
+  await eventually(() => expect(highlightedRows(mounted)).toEqual(['fake/plain']))
+  expect([undefined, 'fake/plain']).toContain(activeRow(filter))
+  expect(chosenRow(mounted)).toBeUndefined()
+  await press(filter, 'Enter')
+  expect(chosenRow(mounted)).toBe('fake/plain')
   await mounted.unmount()
 })
 

@@ -161,12 +161,28 @@ function ModelField({
   filter: string
   onFilter: (filter: string) => void
 }): React.ReactNode {
+  // ⚠ cmdk highlights (`aria-selected`) its first row unless told which, and Enter in the filter
+  // commits the highlighted row (#846): the highlight is the chosen model's until the arrows or the
+  // filter move it, and a new choice takes it back. Held with the choice it moved from, so a
+  // highlight cmdk set before the choice arrived does not outlive it. A chosen model the list does
+  // not offer is no row to highlight: the highlight is left to cmdk, on its first row, so Enter
+  // still has one to commit.
+  const [moved, setMoved] = useState<{ readonly from: string | undefined; readonly value: string } | undefined>(
+    undefined,
+  )
+  const offered = models.some((option) => option.id === chosen) ? chosen : undefined
+  const highlighted = moved !== undefined && moved.from === chosen ? moved.value : offered
   return (
     <Field>
       <FieldLabel>Model</FieldLabel>
       {/* ⚠ cmdk sets the input's id itself, after ours: a `FieldLabel htmlFor` named nothing, and the
           filter read as a bare `combobox`. cmdk's own label is the one it wires to the input. */}
-      <Command className="rounded-md border" label="Model">
+      <Command
+        className="rounded-md border"
+        label="Model"
+        {...(highlighted === undefined ? {} : { value: highlighted })}
+        onValueChange={(modelId: string): void => setMoved({ from: chosen, value: modelId })}
+      >
         <CommandInput placeholder="filter models…" value={filter} onValueChange={onFilter} />
         <CommandList className="max-h-48">
           <CommandEmpty>no model matches</CommandEmpty>
@@ -277,6 +293,23 @@ export function configurationOf(choices: {
   // applied a library prompt, and a retry with pi's default must replace it, not leave it running.
   configuration.systemPrompt = choices.systemPrompt === PI_DEFAULT_SYSTEM_PROMPT ? null : choices.systemPrompt
   return configuration
+}
+
+/** A model the user picked, with the catalogue it was picked from. */
+interface ModelPick {
+  readonly in: Catalogue
+  readonly model: string
+}
+
+/**
+ * The model the dialog runs on: the one picked from this catalogue, else the session's own, else
+ * the first it offers. Read in the render the catalogue loads in (#846), so the model list mounts
+ * with it; a pick from an earlier opening does not count.
+ */
+function modelOf(catalogue: Catalogue, picked: ModelPick | undefined): string | undefined {
+  if (picked !== undefined && picked.in === catalogue) return picked.model
+  if (catalogue.kind !== 'loaded') return undefined
+  return catalogue.model ?? catalogue.models[0]?.id
 }
 
 /** The effort the dialog offers: the chosen model's levels, or the current model's when its option carries none. */
@@ -416,7 +449,8 @@ export function StartSessionDialog(props: StartSessionDialogProps): React.ReactN
   const { threadId, open, onClose, fetch: fetchImpl } = props
   const catalogue = useSessionCatalogue(open, threadId, fetchImpl)
   const promptChoice = useSystemPromptChoice(open, threadId, fetchImpl)
-  const [model, setModel] = useState<string | undefined>(undefined)
+  const [picked, setPicked] = useState<ModelPick | undefined>(undefined)
+  const model = modelOf(catalogue, picked)
   const [thinking, setThinking] = useState<string | undefined>(undefined)
   // Only what the user picked is held: until then the field follows the thread's own mode (#391).
   const [chosenMode, setMode] = useState<string | undefined>(undefined)
@@ -425,11 +459,10 @@ export function StartSessionDialog(props: StartSessionDialogProps): React.ReactN
   const [applying, setApplying] = useState(false)
   const [refusal, setRefusal] = useState<string | undefined>(undefined)
   const promptField = useRef<HTMLTextAreaElement | null>(null)
-  // The choices start from the session's own state; the prompt takes focus once the fields exist —
+  // The effort starts from the session's own; the prompt takes focus once the fields exist —
   // the dialog opened before they did, so Radix could only focus the footer's Close.
   useEffect(() => {
     if (catalogue.kind !== 'loaded') return
-    setModel(catalogue.model ?? catalogue.models[0]?.id)
     setThinking(catalogue.thinking)
     promptField.current?.focus()
   }, [catalogue])
@@ -438,7 +471,7 @@ export function StartSessionDialog(props: StartSessionDialogProps): React.ReactN
 
   const levels = levelsOf(catalogue, model)
   const chooseModel = (option: HostCommandOption): void => {
-    setModel(option.id)
+    setPicked({ in: catalogue, model: option.id })
     setThinking((wanted) => effortFor(option.thinkingLevels ?? levels, wanted))
   }
   const slash = isSlashPrompt(text)

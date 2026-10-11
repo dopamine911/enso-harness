@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test'
 import type { EnsoGitFileChange, EnsoGitRepository } from '@enso/core'
+import { Window } from 'happy-dom'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { ThreadStoresContext } from '../store.ts'
 import { type ChangesOutcome, readThreadChanges, ThreadChanges, ThreadChangesView } from '../thread-changes.tsx'
@@ -67,6 +68,132 @@ test("a file's diff: the removed line on the left beside the added one on the ri
   expect(markup).toMatch(/bg-refuse\/15[^>]*>.*before/s)
   expect(markup).toMatch(/bg-ok\/15[^>]*>.*after/s)
   expect(markup.indexOf('before')).toBeLessThan(markup.indexOf('after'))
+})
+
+// ── #847: what a screen reader is given of the diff ─────────────────────────────────────────
+
+/** The diff's table in a render, parsed into a throwaway DOM (no globals, as `static-markup.ts`). */
+function diffTableIn(markup: string): Element {
+  const window = new Window({ url: 'http://localhost/' })
+  window.document.body.innerHTML = markup
+  const table = (window.document as unknown as Document).querySelector('table')
+  if (table === null) throw new Error('the render draws no diff table')
+  return table
+}
+
+/** What a reader is given of a node: its text less what is `aria-hidden`, after its `aria-label`. */
+function heard(node: Node): string {
+  if (node.nodeType === node.TEXT_NODE) return node.textContent ?? ''
+  if (node.nodeType !== node.ELEMENT_NODE) return ''
+  const element = node as Element
+  if (element.getAttribute('aria-hidden') === 'true') return ''
+  const content = [...element.childNodes].map(heard).join('')
+  const label = element.getAttribute('aria-label')
+  return label === null ? content : `${label} ${content}`
+}
+
+/** Every cell a reader reaches, by its name (its heard text), in reading order. */
+const cellNames = (table: Element): string[] =>
+  [...table.querySelectorAll('td')]
+    .filter((cell) => cell.getAttribute('aria-hidden') !== 'true')
+    .map((cell) => heard(cell).trim())
+
+const timesHeard = (table: Element, phrase: string): number => heard(table).split(phrase).length - 1
+
+const NEW_LINES = Array.from({ length: 12 }, (_, lineIndex) => `<p>paragraph ${lineIndex + 1}</p>`)
+
+const NEW_PAGE: EnsoGitFileChange = {
+  path: 'index.html',
+  oldPath: null,
+  status: 'added',
+  added: NEW_LINES.length,
+  removed: 0,
+  patch: ['diff --git a/index.html b/index.html', '@@ -0,0 +1,12 @@', ...NEW_LINES.map((text) => `+${text}`), ''].join(
+    '\n',
+  ),
+  omitted: null,
+}
+
+test('#847: an added file reads as its lines once, its missing old side said once for the file', () => {
+  const table = diffTableIn(render(read([NEW_PAGE])))
+  expect(timesHeard(table, 'the old side has no lines: every line here is added')).toBe(1)
+  expect(timesHeard(table, 'no line on this side')).toBe(0)
+  // Every line reachable as a cell by its text, each once: its number, then the line — no marker per line.
+  expect(cellNames(table)).toEqual([
+    '@@ -0,0 +1,12 @@',
+    ...NEW_LINES.flatMap((text, lineIndex) => [String(lineIndex + 1), text]),
+  ])
+})
+
+test('#847: a deleted file says once that its new side has no lines', () => {
+  const deleted: EnsoGitFileChange = {
+    ...NEW_PAGE,
+    status: 'deleted',
+    added: 0,
+    removed: 2,
+    patch: ['diff --git a/index.html b/index.html', '@@ -1,2 +0,0 @@', '-<h1>gone</h1>', '-<p>also gone</p>', ''].join(
+      '\n',
+    ),
+  }
+  const table = diffTableIn(render(read([deleted])))
+  expect(timesHeard(table, 'the new side has no lines: every line here is removed')).toBe(1)
+  expect(cellNames(table)).toEqual(['@@ -1,2 +0,0 @@', '1', '<h1>gone</h1>', '2', '<p>also gone</p>'])
+})
+
+test('#847: in a file with both sides, each changed line says whether it was removed or added', () => {
+  const grown: EnsoGitFileChange = {
+    ...APP_CHANGE,
+    added: 2,
+    patch: ['diff --git a/src/app.ts b/src/app.ts', '@@ -1,2 +1,3 @@', ' keep', '-before', '+after', '+more', ''].join(
+      '\n',
+    ),
+  }
+  const table = diffTableIn(render(read([grown])))
+  expect(table.getAttribute('aria-label')).toBeNull()
+  expect(cellNames(table)).toEqual([
+    '@@ -1,2 +1,3 @@',
+    '1',
+    'keep',
+    '1',
+    'keep',
+    '2',
+    '− before',
+    '2',
+    '+ after',
+    '3',
+    '+ more',
+  ])
+})
+
+// ⚠ #847: with `diff.context = 0` git writes no context lines, so a plain insertion into an existing file is
+// all `+` lines, and its header can be exactly a new file's: `@@ -0,0 +1 @@` at the top of the file.
+test('#847: an insertion git diffed without context is not read as a one-sided file; an added file still is', () => {
+  const insertion = (header: string): EnsoGitFileChange => ({
+    ...APP_CHANGE,
+    removed: 0,
+    patch: ['diff --git a/src/app.ts b/src/app.ts', header, '+NEW', ''].join('\n'),
+  })
+  for (const header of ['@@ -2,0 +3 @@', '@@ -0,0 +1 @@']) {
+    const table = diffTableIn(render(read([insertion(header)])))
+    expect(table.getAttribute('aria-label')).toBeNull()
+    expect(cellNames(table)).toContain('+ NEW')
+  }
+  const created = diffTableIn(render(read([{ ...insertion('@@ -0,0 +1 @@'), status: 'added' }])))
+  expect(timesHeard(created, 'the old side has no lines: every line here is added')).toBe(1)
+  expect(cellNames(created)).toContain('NEW')
+})
+
+test('#847: what a sighted reader sees is unchanged — a shaded empty cell beside every added line', () => {
+  const table = diffTableIn(render(read([NEW_PAGE])))
+  const empty = [...table.querySelectorAll('td')].filter((cell) => cell.childNodes.length === 0)
+  expect(empty).toHaveLength(NEW_LINES.length)
+  for (const cell of empty) {
+    expect(cell.getAttribute('colspan')).toBe('2')
+    expect(cell.className).toBe('bg-muted/40')
+  }
+  // The `+` still stands before every line on screen.
+  const lineCells = [...table.querySelectorAll('td')].filter((cell) => cell.className.includes('whitespace-pre-wrap'))
+  expect(lineCells.map((cell) => cell.textContent)).toEqual(NEW_LINES.map((text) => `+ ${text}`))
 })
 
 test('a rename names both paths; too many files says so; nothing changed says so', () => {

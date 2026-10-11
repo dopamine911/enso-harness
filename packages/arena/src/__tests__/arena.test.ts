@@ -77,6 +77,54 @@ test('an action is only what a reader of the page could do', () => {
   expect(parseArenaAction('click')).toMatchObject({ ok: false })
 })
 
+// ⚠ #850: read as one of its ways, a target that names two lands on an element the agent did not name and answers ok.
+test('⚠ a target names an element one way; two ways, or a name without its role beside another, is refused with the keys it gave (#850)', () => {
+  const targetOf = (target: object): unknown => {
+    const parsed = parseArenaAction({ action: 'hover', target })
+    if (!parsed.ok) throw new Error(parsed.error)
+    return parsed.action.action === 'hover' ? parsed.action.target : undefined
+  }
+  expect(targetOf({ role: 'button', name: 'Send', exact: true, nth: 1 })).toEqual({
+    role: 'button',
+    name: 'Send',
+    exact: true,
+    nth: 1,
+  })
+  expect(targetOf({ role: 'heading' })).toEqual({ role: 'heading' })
+  expect(targetOf({ text: 'Continue', exact: true, nth: 0 })).toEqual({ text: 'Continue', exact: true, nth: 0 })
+  expect(targetOf({ label: 'Mode', nth: 2 })).toEqual({ label: 'Mode', nth: 2 })
+  expect(targetOf({ placeholder: 'ask pi something', exact: true })).toEqual({
+    placeholder: 'ask pi something',
+    exact: true,
+  })
+  // An empty field names nothing, as on its own: a model may send every optional field of the schema.
+  expect(targetOf({ role: 'button', name: 'Send', text: '', label: '', placeholder: '' })).toEqual({
+    role: 'button',
+    name: 'Send',
+  })
+
+  const mixed = { role: 'heading', text: 'Continue' }
+  for (const request of [
+    { action: 'click', target: mixed },
+    { action: 'hover', target: mixed },
+    { action: 'fill', target: mixed, text: 'x' },
+    { action: 'select', target: mixed, option: 'x' },
+    { action: 'press', key: 'Enter', target: mixed },
+  ]) {
+    expect(parseArenaAction(request)).toEqual({ ok: false, error: expect.stringContaining('"role", "text"') })
+  }
+  for (const [target, given] of [
+    [{ role: 'textbox', label: 'Prompt' }, '"role", "label"'],
+    [{ text: 'Send', placeholder: 'ask' }, '"text", "placeholder"'],
+    [{ role: 'button', name: 'Send', placeholder: 'ask', nth: 0 }, '"role", "name", "placeholder"'],
+    // A name goes with a role: beside text it is not dropped.
+    [{ name: 'Send', text: 'Send' }, '"name", "text"'],
+    [{ name: 'Send' }, '"name"'],
+  ] as const) {
+    expect(parseArenaAction({ action: 'click', target })).toEqual({ ok: false, error: expect.stringContaining(given) })
+  }
+})
+
 test('every action reads back as one line, and a malformed one says what it takes', () => {
   const lines = [
     { action: 'goto', path: '/' },
@@ -84,6 +132,7 @@ test('every action reads back as one line, and a malformed one says what it take
     { action: 'select', target: { label: 'Mode' }, option: 'default' },
     { action: 'press', key: 'Escape', target: { role: 'dialog' } },
     { action: 'press', key: 'Enter' },
+    { action: 'press', key: 'ArrowRight', holdMs: 400 },
     { action: 'wait', ms: 5 },
     { action: 'note', note: 'friction', trying: 'a', happened: 'b' },
     { action: 'stop', reason: 'done' },
@@ -115,6 +164,7 @@ test('every action reads back as one line, and a malformed one says what it take
     'select "default" in label "Mode"',
     'press Escape in dialog',
     'press Enter',
+    'press ArrowRight, held 400 ms',
     'wait 5 ms',
     'note friction',
     'stop: done',
@@ -141,6 +191,11 @@ test('every action reads back as one line, and a malformed one says what it take
     { action: 'select', target: { label: 'x' } },
     { action: 'press' },
     { action: 'press', key: 'Enter', target: 'composer' },
+    // A hold is a whole number of ms, 0 to 10000 (#849).
+    { action: 'press', key: 'ArrowRight', holdMs: -1 },
+    { action: 'press', key: 'ArrowRight', holdMs: 1.5 },
+    { action: 'press', key: 'ArrowRight', holdMs: 10_001 },
+    { action: 'press', key: 'ArrowRight', holdMs: '400' },
     { action: 'wait', ms: -1 },
     { action: 'click', target: { role: '' } },
     { action: 'switch-tab' },

@@ -73,7 +73,8 @@ export type ArenaAction =
   /** Text typed with the keyboard into whatever has focus (#680): a sighted user clicks a field, then types. */
   | { readonly action: 'type'; readonly text: string }
   | { readonly action: 'fill'; readonly target: ArenaTarget; readonly text: string }
-  | { readonly action: 'press'; readonly key: string; readonly target?: ArenaTarget }
+  /** `holdMs` keeps the key down that long before releasing it (#849); without it the key is tapped. */
+  | { readonly action: 'press'; readonly key: string; readonly holdMs?: number; readonly target?: ArenaTarget }
   | { readonly action: 'hover'; readonly target: ArenaTarget }
   | { readonly action: 'select'; readonly target: ArenaTarget; readonly option: string }
   /**
@@ -386,20 +387,40 @@ const isFields = (value: unknown): value is Fields =>
 const text = (fields: Fields, key: string): string | undefined =>
   typeof fields[key] === 'string' && fields[key].length > 0 ? fields[key] : undefined
 
+/** The keys that name an element, in the order a refusal lists them: `name` goes with `role`, one way per target (#850). */
+const TARGET_KEYS = ['role', 'name', 'text', 'label', 'placeholder'] as const
+
+/** What a target is, as its refusal says it: the agent resends from this. */
+const WHAT_A_TARGET_IS =
+  'a target names an element one way: {"role", "name"?}, {"text"}, {"label"} or {"placeholder"}, each with "exact" and "nth" if needed'
+
+/** Why a target object is not one: what a target is, and which of its keys the agent gave. */
+function targetRefusal(given: readonly string[]): string {
+  if (given.length === 0) return `${WHAT_A_TARGET_IS}; this one gives none of them`
+  const loneName = given.includes('name') && !given.includes('role') ? ', and "name" goes only with "role"' : ''
+  return `${WHAT_A_TARGET_IS}; this one gives ${given.map((key) => `"${key}"`).join(', ')}${loneName}`
+}
+
+/**
+ * The element a request's target names, or why it is not a target.
+ *
+ * ⚠ ONE WAY, OR REFUSED (#850): a target that names more than one way (`{role: "heading", text:
+ * "Continue"}`), or a `name` without its `role` beside another way, is refused with the keys it
+ * gave. Read as one of them, it lands on an element the agent did not name — the page's only
+ * heading — and answers ok. An empty string is no way at all, as when it stands alone.
+ */
 function parseTarget(value: unknown): ArenaTarget | string {
-  if (!isFields(value)) return 'a target is an object: {role, name?} | {text} | {label} | {placeholder}'
+  if (!isFields(value)) return `${WHAT_A_TARGET_IS}; a target is an object`
+  const given = TARGET_KEYS.filter((key) => text(value, key) !== undefined)
+  const ways = given.filter((key) => key !== 'name')
+  const [way] = ways
+  if (way === undefined || ways.length > 1 || (way !== 'role' && given.includes('name'))) return targetRefusal(given)
   const exact = value.exact === true ? { exact: true } : {}
   const nth = typeof value.nth === 'number' && Number.isInteger(value.nth) && value.nth >= 0 ? { nth: value.nth } : {}
-  const role = text(value, 'role')
-  if (role !== undefined) {
-    const name = text(value, 'name')
-    return { role, ...(name === undefined ? {} : { name }), ...exact, ...nth }
-  }
-  for (const key of ['text', 'label', 'placeholder'] as const) {
-    const named = text(value, key)
-    if (named !== undefined) return { [key]: named, ...exact, ...nth } as ArenaTarget
-  }
-  return 'a target names a role, text, label or placeholder — what a reader of the page sees'
+  const said = String(value[way])
+  if (way !== 'role') return { [way]: said, ...exact, ...nth } as ArenaTarget
+  const name = text(value, 'name')
+  return { role: said, ...(name === undefined ? {} : { name }), ...exact, ...nth }
 }
 
 /** An origin no request is ever sent to: the base `parseGotoPath` resolves a path against. */
@@ -454,6 +475,15 @@ const accept = (action: ArenaAction): ArenaActionParse => ({ ok: true, action })
 /** A tab number as `tabs` lists it: a whole number, 0 or more; undefined when it is not one. */
 const tabNumber = (value: unknown): number | undefined =>
   typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : undefined
+
+/**
+ * The longest a key is held (#849). A held key blocks the agent's turn for that long and the page
+ * sees nothing else meanwhile, so the cap bounds one action's stall; ten seconds outlasts any steer.
+ */
+export const LONGEST_HOLD_MS = 10_000
+
+const isHold = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= LONGEST_HOLD_MS
 
 /** The request's target, handed to `build`, or why it is not one. */
 function withTarget(request: Fields, build: (target: ArenaTarget) => ArenaAction): ArenaActionParse {
@@ -560,8 +590,13 @@ const ACTION_PARSERS: Readonly<Record<string, (request: Fields) => ArenaActionPa
   press: (request) => {
     const key = text(request, 'key')
     if (key === undefined) return fail('press takes "key" (Enter, Escape, Control+K, …)')
-    if (request.target === undefined) return accept({ action: 'press', key })
-    return withTarget(request, (target) => ({ action: 'press', key, target }))
+    const holdMs = request.holdMs
+    if (holdMs !== undefined && !isHold(holdMs)) {
+      return fail(`press "holdMs" is how long the key stays down: a whole number of ms, 0 to ${LONGEST_HOLD_MS}`)
+    }
+    const press = holdMs === undefined ? { action: 'press' as const, key } : { action: 'press' as const, key, holdMs }
+    if (request.target === undefined) return accept(press)
+    return withTarget(request, (target) => ({ ...press, target }))
   },
   wait: (request) => {
     const ms = request.ms
@@ -782,8 +817,10 @@ function describePlainAction(
   switch (action.action) {
     case 'goto':
       return `goto ${action.path}`
-    case 'press':
-      return `press ${action.key}${action.target === undefined ? '' : ` in ${describeTarget(action.target)}`}`
+    case 'press': {
+      const held = action.holdMs === undefined ? '' : `, held ${action.holdMs} ms`
+      return `press ${action.key}${action.target === undefined ? '' : ` in ${describeTarget(action.target)}`}${held}`
+    }
     case 'wait':
       return action.until === undefined ? `wait ${action.ms} ms` : `${PAGE_WAIT} ${action.until}, up to ${action.ms} ms`
     case 'note':

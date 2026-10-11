@@ -1,4 +1,4 @@
-import { ARENA_VIEW } from './actions.ts'
+import { ARENA_VIEW, LONGEST_HOLD_MS } from './actions.ts'
 import { ARENA_READ_REGIONS } from './read-regions.ts'
 import type { ArenaPerception } from './timeline.ts'
 
@@ -186,6 +186,7 @@ const TREE_MOVES = `    {"action":"read"}
     {"action":"click","target":{"role":"button","name":"…"}}
     {"action":"fill","target":{"placeholder":"…"},"text":"…"}
     {"action":"press","key":"Enter"}
+    {"action":"press","key":"ArrowRight","holdMs":400}   (holds the key down 400 ms; up to ${LONGEST_HOLD_MS})
     {"action":"goto","path":"/"}
     {"action":"hover"|"select"|"back"|"reload"|"screenshot", …}
 
@@ -201,13 +202,15 @@ The first read of a region returns it whole ("snapshot"). Each later read return
 since your last read of it, which it names ("against"): "changes" marks new lines "+", gone lines "-",
 and repeats unmarked the lines they sit under; or "unchanged": true. After a navigation, a reload or a
 tab switch it is whole again, and "full": true asks for it whole.
-A target may add "exact": true and "nth": <index> when a name matches more than one element.`
+A target names an element one way: "role" (with "name"), "text", "label" or "placeholder", never two.
+It may add "exact": true and "nth": <index> when a name matches more than one element.`
 
 /** How an agent that sees the page acts on it (#680): a screenshot after every action, a mouse and keys. */
 const VISUAL_MOVES = `    {"action":"screenshot"}
     {"action":"click","x":512,"y":300}
     {"action":"type","text":"…"}
     {"action":"press","key":"Enter"}
+    {"action":"press","key":"ArrowRight","holdMs":400}   (holds the key down 400 ms; up to ${LONGEST_HOLD_MS})
     {"action":"scroll","x":512,"y":400,"dy":600}
     {"action":"move"|"drag"|"goto"|"back"|"reload", …}
 

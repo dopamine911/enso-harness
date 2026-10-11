@@ -1,5 +1,5 @@
 import { type Static, type TNumber, type TOptional, Type } from 'typebox'
-import { ARENA_VIEW, POINT_FIELDS } from './actions.ts'
+import { ARENA_VIEW, LONGEST_HOLD_MS, POINT_FIELDS } from './actions.ts'
 import { ARENA_READ_REGIONS } from './read-regions.ts'
 
 /**
@@ -13,16 +13,22 @@ import { ARENA_READ_REGIONS } from './read-regions.ts'
  * script, a `goto` off the page or onto `/api`, and records the refusal.
  */
 
-/** A target as a reader of the page names it: a role and accessible name, visible text, a label or a placeholder. Never a selector. */
-const ArenaTargetParameters = Type.Object({
-  role: Type.Optional(Type.String({ description: 'an ARIA role: button, textbox, link, tab, dialog, …' })),
-  name: Type.Optional(Type.String({ description: 'the accessible name, with role' })),
-  text: Type.Optional(Type.String()),
-  label: Type.Optional(Type.String()),
-  placeholder: Type.Optional(Type.String()),
-  exact: Type.Optional(Type.Boolean()),
-  nth: Type.Optional(Type.Integer({ minimum: 0 })),
-})
+/**
+ * A target as a reader of the page names it: a role and accessible name, visible text, a label or a
+ * placeholder — one of them (#850; the parser refuses two). Never a selector.
+ */
+const ArenaTargetParameters = Type.Object(
+  {
+    role: Type.Optional(Type.String({ description: 'an ARIA role: button, textbox, link, tab, dialog, …' })),
+    name: Type.Optional(Type.String({ description: 'the accessible name, with role' })),
+    text: Type.Optional(Type.String()),
+    label: Type.Optional(Type.String()),
+    placeholder: Type.Optional(Type.String()),
+    exact: Type.Optional(Type.Boolean()),
+    nth: Type.Optional(Type.Integer({ minimum: 0 })),
+  },
+  { description: 'one way to name the element: role (and name), or text, or label, or placeholder; never two' },
+)
 
 /** An optional number field with what it is for: the model reads the description. */
 const numberField = (description: string): TOptional<TNumber> => Type.Optional(Type.Number({ description }))
@@ -30,6 +36,14 @@ const numberField = (description: string): TOptional<TNumber> => Type.Optional(T
 /** The fields both perceptions share: keys, paths, waits, tabs, notes, the stop. */
 const SHARED_FIELDS = {
   key: Type.Optional(Type.String({ description: 'press: Enter, Escape, Control+K, …' })),
+  holdMs: Type.Optional(
+    Type.Integer({
+      minimum: 0,
+      maximum: LONGEST_HOLD_MS,
+      description:
+        'press: how long the key stays down, in ms (to steer by holding a key); without it the key is tapped',
+    }),
+  ),
   path: Type.Optional(Type.String({ description: 'goto: a path on Enso’s page, like "/"' })),
   ms: numberField('wait: milliseconds, at most 60000'),
   until: Type.Optional(Type.String({ description: 'wait: "attention" (Enso needs you or is done) or "change"' })),

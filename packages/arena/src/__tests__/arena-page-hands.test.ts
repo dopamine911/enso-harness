@@ -65,7 +65,7 @@ function fakePage(calls: string[], fail: ReadonlySet<string> = new Set()): Arena
     getByPlaceholder: (text, options) => locator(`placeholder ${text} ${json(options)}`),
     locator: (selector) => locator(selector === READABLE ? 'readable' : `locator ${selector}`),
     keyboard: {
-      press: (key) => act(`keyboard.press ${key}`),
+      press: (key, hold) => act(`keyboard.press ${key}${hold === undefined ? '' : ` ${json(hold)}`}`),
       type: (text) => act(`keyboard.type ${text}`),
     },
     mouse: {
@@ -184,6 +184,16 @@ test('a press with no target is the keyboard on whatever has focus', async () =>
   const { front, calls } = fakeFront()
   expect(await performOnControl({ action: 'press', key: 'Escape' }, front)).toEqual(PLACE)
   expect(calls).toEqual(['keyboard.press Escape'])
+})
+
+test('a press with holdMs keeps the key down that long, on the keyboard or in a control (#849)', async () => {
+  const { front, calls } = fakeFront()
+  await performOnControl({ action: 'press', key: 'ArrowRight', holdMs: 400 }, front)
+  await performOnControl({ action: 'press', key: 'ArrowLeft', holdMs: 250, target: { text: 'Game' } }, front)
+  expect(calls).toEqual([
+    'keyboard.press ArrowRight {"delay":400}',
+    'text Game {"exact":false}.and(readable).press(ArrowLeft, {"delay":250,"timeout":15000})',
+  ])
 })
 
 test('a control action that came without a target is refused before the page is touched', async () => {
