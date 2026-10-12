@@ -45,7 +45,8 @@ import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
 import { PERMISSIONS_DECISION_CHANNEL } from '@gotgenes/pi-permission-system'
 import type { LogRecorder } from '@logtape/testing/recorder'
 import type { CheckCommandResult } from 'cc-safety-net/api'
-import { createGuards, GUARD_POLICY_TOOL_NAMES, type GuardDependencies } from '../index.ts'
+import { GUARD_POLICY_TOOL_NAMES } from '../../../core/guard-denials.ts'
+import { createGuards, type GuardDependencies } from '../index.ts'
 
 /** What a guard handler answers: a block verdict, or nothing when the call passes. */
 type GuardVerdict = { block?: boolean; reason?: string; terminate?: boolean } | undefined

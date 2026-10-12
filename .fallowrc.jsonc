@@ -235,10 +235,10 @@
     "ignore": ["packages/web/src/components/**"],
     "thresholdOverrides": [
       {
-        "files": ["packages/harness/extensions/guards/index.ts"],
+        "files": ["packages/harness/core/guard-session.ts"],
         "functions": ["decide"],
-        "maxCognitive": 26,
-        "reason": "The tool_call guard dispatch: the standing denials (floor, incident suspension — standingDenial), bash patch, then the write denials in precedence order, then the reader gate (readerDenial, last). The precedence order IS the security contract the file header documents; splitting it hides it."
+        "maxCognitive": 22,
+        "reason": "The tool_call guard dispatch: the standing denials (floor, incident suspension — standingDenial), the shell denies, then the write denials in precedence order, then the reader gate (readerDenial, last). The precedence order IS the security contract the module header documents; splitting it hides it. The bash timeout patch left it for toolCall (#861)."
       }
     ]
   },

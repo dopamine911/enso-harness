@@ -10,6 +10,14 @@ Evidence is the source of pi 1.0.0 (`earendil-works/pi`, release commit `a13d35a
 checkout) and this repository at `c53bb39`. Where a claim rests on reasoning, not on a file read, it
 says **[inference]**. Nothing here was run: no Durable code was executed, and nothing was built against it.
 
+**Decided 2026-10-12** (Daniel, #767 → #860): build toward Durable now, as **way B** below — a Durable
+thread kind beside pi, opt-in behind `ENSO_EXPERIMENTAL_DURABLE`, implemented under the existing seams as
+rule 7 asks, with Durable's imports in one gated directory and an exact pin. The rules under *What keeps
+the move cheap* stand; *Why not now* is the epic's work list rather than a reason to wait. The #767 spike
+ran Durable 1.1.0 (a guard through `beforeTool`, OAuth through pi-coding-agent's `ModelRuntime`, resume
+after SIGKILL) and found two hazards Durable leaves to its host, #863: a tool's process outlives a killed
+host, and a second opener of one store runs live work twice.
+
 ---
 
 ## What Durable is
@@ -61,8 +69,8 @@ direction.
    built from `memo`, a document and a route.
 4. **Re-execution and concurrency.** A Durable hook can run again after a crash and must be idempotent
    (`memo`: the first write wins). Tool rounds run in parallel by default (`toolExecution: "parallel"`;
-   `"sequential"` exists). `guards/index.ts` states that pi prepares a batch's calls one at a time and
-   depends on it.
+   `"sequential"` exists). `harness/core/session-security.ts` states that pi prepares a batch's calls one
+   at a time, and the guard depends on it.
 5. **Maturity and the freeze.** Released the day this was written and experimental; the source shows no
    third-party user of it. A runtime swap is the opposite of the feature freeze.
 
@@ -90,8 +98,9 @@ not:
    `pi.extensions` lists them, including two third-party ones (`@gotgenes/pi-permission-system`,
    `pi-multi-account`). Durable installs extensions in a registry, and the permission engine talks over
    pi's event bus. Each of the nine first-party extensions is `(pi: ExtensionAPI) => void`.
-3. **Guard state is closures.** The files-read set, stale-write stamps and session risk live in the
-   session-scoped closure of the guards extension.
+3. **Guard state is closures.** The files-read set, stale-write stamps and session risk live in a
+   session-scoped closure — since #861 a runtime-free guard session in `harness/core`
+   (`guard-session.ts`), which any runtime's hooks call through a port; the pi extension is glue.
 4. **The terminal is a spawn of pi**, not a surface Enso owns.
 
 ## What keeps the move cheap

@@ -26,18 +26,8 @@
  */
 
 export { runUnderDeadline } from './deadline.ts'
-export { findEnvironmentDump } from './environment-dump.ts'
-export { findDeniedNetworkEgress } from './network-egress.ts'
-export {
-  type CredentialPlaces,
-  isInsideAnyRoot,
-  isPersistenceWriteTarget,
-  isProtectedForWrite,
-  looksLikeSecret,
-  secretLocationBeneath,
-  resolveAgainstCwd,
-} from './paths.ts'
-export { createSessionReadTracker } from './read-tracker.ts'
+export { inputRecordOf, type ShellAnalyzerDenial } from './guard-denials.ts'
+export { createGuardSession, type GuardSession } from './guard-session.ts'
 export {
   type SessionConfigContext,
   type SessionEnsoConfig,
@@ -46,8 +36,6 @@ export {
   userIncidentPolicy,
   userJudgeConfig,
 } from './session-config.ts'
-export { findDirectoryWord, findSecretPathWord } from './shell-secret-paths.ts'
-export { canonicalToolName } from './tool-identity.ts'
 export { isFetchableContentType, isHostAllowed, isPublicIpAddress, parseWebFetchUrl } from './web-fetch-policy.ts'
 export { resolveModelAuth } from './web-search/auth.ts'
 export { runAnthropicProviderSearch } from './web-search/providers/anthropic.ts'

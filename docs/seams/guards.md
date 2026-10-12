@@ -123,7 +123,7 @@ direnv's `.envrc`, #160), `PROC_ENVIRON_PATH` and `PROC_ENVIRON_IN_COMMAND`
 (a process's environment, per process or per thread: one shape for the read gate and the shell deny,
 #160 §5), and `SECRET_BASENAME_PATTERNS` (`core/src/guard.ts#SECRET_BASENAME_PATTERNS`).
 
-What the extension takes, and what it is:
+What the pi extension takes, and what it is:
 
 <!-- source: packages/harness/extensions/guards/index.ts#GuardDependencies -->
 ```ts
@@ -182,12 +182,50 @@ export interface GuardDependencies {
  */
 export function createGuards(dependencies: GuardDependencies): (pi: ExtensionAPI) => void {
   return function guards(pi: ExtensionAPI): void {
-    guardsWithDependencies(pi, dependencies)
+    const session = guardSessionOver(pi, dependencies)
+    // The permission engine announces its decisions on pi's bus under its own channel name.
+    pi.events.on(PERMISSIONS_DECISION_CHANNEL, (raw: unknown) => session.permissionDecision(raw))
+
+    pi.on('session_start', (_event, extensionContext): void => {
+      session.start({
+        recordDirectory: () => extensionContext.sessionManager.getSessionDir(),
+        transcript: () => transcriptOf(extensionContext.sessionManager.getBranch()),
+      })
+    })
+
+    pi.on('tool_result', (event, extensionContext): void => {
+      session.toolResult({
+        toolName: event.toolName,
+        input: event.input,
+        isError: event.isError,
+        wholeFile: returnedWholeFile(event),
+        cwd: extensionContext.cwd,
+      })
+    })
+
+    pi.on('tool_call', (event, extensionContext): ToolCallEventResult | undefined => {
+      const outcome = session.toolCall({
+        toolCallId: event.toolCallId,
+        toolName: event.toolName,
+        input: event.input,
+        cwd: extensionContext.cwd,
+        signal: extensionContext.signal,
+        model: extensionContext.model?.id,
+      })
+      if (outcome.kind === 'allowed') {
+        // pi runs the call with the input this hook leaves on the event: the patch is written into it.
+        if (outcome.patch !== undefined) Object.assign(inputRecordOf(event.input), outcome.patch)
+        return undefined
+      }
+      return outcome.terminate === true
+        ? { block: outcome.block, reason: outcome.reason, terminate: true }
+        : { block: outcome.block, reason: outcome.reason }
+    })
   }
 }
 ```
 
-<!-- source: packages/harness/extensions/guards/index.ts#GUARD_POLICY_TOOL_NAMES -->
+<!-- source: packages/harness/core/guard-denials.ts#GUARD_POLICY_TOOL_NAMES -->
 ```ts
 /**
  * Every tool name the guard's policy references — the policy/tool-list check's input.
@@ -200,16 +238,55 @@ export function createGuards(dependencies: GuardDependencies): (pi: ExtensionAPI
 export const GUARD_POLICY_TOOL_NAMES: readonly string[] = [TOOL_READ, TOOL_WRITE, TOOL_EDIT, TOOL_BASH, TOOL_POWERSHELL]
 ```
 
+What any runtime's glue gives the guard, and what it calls (#861). The pi extension above fills the
+port from `ExtensionAPI`; a second runtime fills it from its own records and bus:
+
+<!-- source: packages/harness/core/guard-session.ts#GuardRuntime -->
+```ts
+/**
+ * What a runtime gives the guard (#861): the runtime's side of the guard seam, in our words. The pi
+ * glue fills it from `ExtensionAPI` (`appendEntry`, `events`, `getAllTools`); a second runtime fills
+ * it from its own records and bus. Nothing of a runtime's shape crosses it.
+ */
+export interface GuardRuntime {
+  /** The runtime's name, as a refusal names it to the model ("…tools pi does not register"). */
+  readonly name: string
+  /** Append a record of ours to the thread's log, beside the transcript: a denial, a signal, an incident. */
+  append(customType: string, data: unknown): void
+  /** Say something on a named channel of the thread's bus. */
+  emit(channel: string, data: unknown): void
+  /** Listen on a named channel of the thread's bus, for the session's life. */
+  on(channel: string, handler: (data: unknown) => void): void
+  /** Every tool the runtime registers now, by its own name. May throw: the floor reads a throw as a mismatch. */
+  toolNames(): readonly string[]
+}
+```
+
+<!-- source: packages/harness/core/guard-session.ts#GuardSession -->
+```ts
+/**
+ * One thread's guard: what a runtime's hooks call, in the order the runtime raises them.
+ */
+export interface GuardSession {
+  start(facts: GuardStart): void
+  toolCall(call: GuardToolCall): GuardCallOutcome
+  toolResult(result: GuardToolResult): void
+  /** A permission engine's decision, as its channel carried it (#496). */
+  permissionDecision(raw: unknown): void
+}
+```
+
 **Tool identity.** Every tool-name comparison, on both sides, folds through `canonicalToolName`
 (`harness/core/tool-identity.ts#canonicalToolName`: lowercase, no mapping table), because the runtime's
 built-ins are lowercase and vendor packages register capitalised names — a case-sensitive miss would
 let the call proceed with nothing reporting it (`tool-identity.ts`'s header).
 
-**The verdict.** The `tool_call` handler returns the runtime's `ToolCallEventResult | undefined`
-(`guards/index.ts#guardsWithDependencies`): a denial is `{ block: true, reason }`, plus `terminate: true`
-for an authorization refusal (every `return` in `decide` and `shellCommandDenial` is a
-`guards/index.ts#deny`, `{ block: true, reason, rule }`, and the handler strips the rule before
-returning), a pass is `undefined`.
+**The verdict.** The session's `toolCall` answers `refused` in the runtime's own shape — `{ block: true,
+reason }`, plus `terminate: true` for an authorization refusal — or `allowed`, with the bash default
+timeout as a `patch` when it adds one (`guard-session.ts#GuardCallOutcome`). Every `return` in `decide`
+and `shellCommandDenial` is a `guard-denials.ts#deny`, `{ block: true, reason, rule }`, and the session
+strips the rule; the pi glue hands pi `ToolCallEventResult | undefined` and writes the patch into the
+call's input, where pi reads it.
 There is no third value — the glossary's Retired table refuses `allow`/`abstain` as verdict words.
 
 **What a refusal asks of the model** (#465, #189). Each rule has a kind in core
@@ -231,29 +308,32 @@ and against pi's real loop by `agent-host.test.ts#⚠⚠ a batch the guard refus
 
 ## Who implements it, who consumes it
 
-**Implemented once**, by `packages/harness/extensions/guards/index.ts`. The default export is
-`createGuards({ analyzeBashCommand: checkCommand, harnessRoot, incidentPolicy, logsDirectory, projectsDirectory })` — the
-real analyzer, the user's `config.json` `security` section, and `ENSO_HOME`'s log and projects directories, wired at the
-composition root. `guardsWithDependencies` registers three hooks: `session_start` resets the read
-tracker, rebuilds the session's risk and incidents from the branch with the incident policy read
-afresh, and verifies the policy's tool names against the live tool list
-(`guards/index.ts#verifyPolicyToolNames`); `tool_result` records which files the session has seen,
-from *results* only — a blocked call produces no result and a failed one arrives `isError`;
-`tool_call` records the call for the session's risk, calls `decide` and logs the verdict.
+**Implemented once**, runtime free, by `packages/harness/core/guard-session.ts#createGuardSession` over its
+port (`GuardRuntime`), with the denies that read no session state in `guard-denials.ts` and the session's
+security in `session-security.ts` (#861). **Glued once**, to pi, by `packages/harness/extensions/guards/index.ts`:
+its default export is `createGuards({ analyzeBashCommand: checkCommand, harnessRoot, incidentPolicy,
+logsDirectory, projectsDirectory })` — the real analyzer, the user's `config.json` `security` section, and
+`ENSO_HOME`'s log and projects directories, wired at the composition root. The glue registers three hooks
+and each calls the session: `session_start` → `start`, which resets the read tracker, rebuilds the
+session's risk and incidents from the branch with the incident policy read afresh, and verifies the
+policy's tool names against the live tool list (`guard-session.ts#verifyPolicyToolNames`); `tool_result`
+→ `toolResult`, which records which files the session has seen, from *results* only — a blocked call
+produces no result and a failed one arrives `isError`; `tool_call` → `toolCall`, which records the call
+for the session's risk, calls `decide` and logs the verdict.
 
-**`decide`'s order** (`guards/index.ts#decide`) — nested, so described, not fenced:
+**`decide`'s order** (`guard-session.ts#decide`) — nested, so described, not fenced:
 
 1. **The fail-closed floor** (#4). If the policy names a tool the runtime does not register, or the tool
    list could not be enumerated, every call is denied with the mismatch in the reason.
    Checked lazily here if `session_start` has not fired yet, so the floor never depends on event order.
-2. **An incident's suspension** (#466, `guards/index.ts#suspensionDenial`). While a halting incident's
+2. **An incident's suspension** (#466, `guard-denials.ts#suspensionDenial`). While a halting incident's
    **report is owed** (#467), every tool but `file_incident_report` is refused under
    `incident-suspension` — reads and `ask_user` included: the report turn is bounded. Otherwise a tool
    whose family an incident suspended — execute (`bash`, `powershell`), network (`web_fetch`,
    `web_search`), write (`write`, `edit`) — is refused under the same rule, before any other: the
    incident is the thread's state, not a judgement of the call. Reading and searching are never
    suspended once the report is settled.
-3. **Shell** (`bash`, `powershell`) — `guards/index.ts#shellCommandDenial`, deny first, patch last:
+3. **Shell** (`bash`, `powershell`) — `guard-denials.ts#shellCommandDenial`, deny first, patch last:
    the analyzer (bash only; a throw is a deny per its contract), then the network deny by
    name at command position per segment, with the *cannot vouch* floor for a construct it cannot
    resolve — at every depth: a wrapper's operand or `-c` payload built at runtime, and a
@@ -262,8 +342,8 @@ from *results* only — a blocked call produces no result and a failed one arriv
    `shell-secret-paths.ts#findDirectoryWord`), then the secret-path deny —
    the reader gate's own policy over every literal word of the command (#204). The records deny comes
    before secret-path, which refuses a literal `/.enso/` too, so a touch of the records is named as one
-   and raises its own signal. Only a command that passed them all gets the default timeout injected,
-   back in `decide`, so no denied command has mutated input.
+   and raises its own signal. Only a command that passed them all gets the default timeout, as the
+   allowed answer's patch from `toolCall`, so no denied command has patched input.
 4. **No `path` argument** → pass.
 5. **Writes** (`write`, `edit`), in order: outside the write roots (the cwd when none are
    configured), a protected fragment, a persistence target, a credential pattern, then the session's
@@ -271,16 +351,16 @@ from *results* only — a blocked call produces no result and a failed one arriv
    so does *partial* — read, but only part of it (#10, #11, #57 S2; the comment in `decide` says why
    the messages differ).
 6. **Every other tool with a `path` is a reader**, by exclusion, and a credential pattern denies it
-   (`guards/index.ts#readerDenial`); so does a credential location beneath its path (`grep` over `~`),
+   (`guard-session.ts#readerDenial`); so does a credential location beneath its path (`grep` over `~`),
    except for `ls` and `find`, which return names only (#160 §4). Exclusion, not inclusion: an inclusion list naming only `read` once let `grep` over
-   `~/.aws` through (the header of `guards/index.ts`). Since #204 the same policy also runs on the shell route, so
+   `~/.aws` through (the header of `guard-session.ts`). Since #204 the same policy also runs on the shell route, so
    `read ~/.enso/pi-agent/auth.json` and `cat ~/.enso/pi-agent/auth.json` agree — they did not.
 
 **Every verdict is a record** (#132): a denial at `warn` with the tool, the path and the reason; an
 allow at `debug`; never silent (the `tool_call` handler; pinned by `guards.test.ts`).
 
 **The session's risk is observed here, and an incident is opened here** (#464, #466, phases 1 and 3
-of #189; `guards/index.ts#observeSessionSecurity`). Every call, every guard refusal and every refusal
+of #189; `session-security.ts#observeSessionSecurity`). Every call, every guard refusal and every refusal
 the permission engine makes of the agent's call (a person's No, a rule's deny, `auto`'s block — heard
 on the engine's decision bus) go through one pure fold in `@enso/core`,
 `session-risk.ts#sessionRiskStep`, with the thresholds from `config.json` (`security.incidents`). A
@@ -415,18 +495,21 @@ writes are *our* layers' jobs (`cc-safety-net-contract.test.ts#EXPECTED_ALLOWS`)
 
 ## What crosses it that should not
 
-**L5 — the tool names are the runtime's, and the guard is the runtime's extension.** (`.local/refactor/goals.md` §2.) The names: `bash`, `write`, `edit`,
-`read`, `powershell` — `guards/index.ts#GUARD_POLICY_TOOL_NAMES`; the extension: it
-registers through `pi.on('tool_call')` and returns the runtime's `ToolCallEventResult`
-(`guards/index.ts#guardsWithDependencies`). The analyzer is a vendored library — `cc-safety-net/api`'s `checkCommand`, imported by `guards/index.ts` — held
-behind our verdict: its `{ kind, reason, ruleId }` never leaves `shellCommandDenial`, which turns it into
-`{ block, reason, rule }` with `guards/index.ts#deny`. So the library and the verdict shape survive a runtime change; the
-registration and the hook's event types do not. That is already the arbiter's shape (#4): one handler
-owning the verdict, participants as libraries beneath it — designed, deferred while the count is two
-with aligned fail direction (`tool-call-participants.test.ts`'s header).
+**L5 — the tool names are the runtime's.** (`.local/refactor/goals.md` §2.) The names: `bash`, `write`, `edit`,
+`read`, `powershell` — `guard-denials.ts#GUARD_POLICY_TOOL_NAMES`; a runtime whose tools are named otherwise
+meets the fail-closed floor until its glue settles the names. Since #861 the guard is no longer the
+runtime's extension: the session is runtime free, and only the glue registers through `pi.on('tool_call')`
+and returns the runtime's `ToolCallEventResult` (`guards/index.ts#createGuards`). The analyzer is a vendored
+library — `cc-safety-net/api`'s `checkCommand`, imported by `guards/index.ts` — held behind our verdict: its
+`{ kind, reason, ruleId }` never leaves the glue, which turns it into a `ShellAnalyzerDenial` (rule and
+reason), and `shellCommandDenial` makes that a `{ block, reason, rule }` with `guard-denials.ts#deny`. So the
+library, the policy and the verdict shape survive a runtime change; the registration and the hook's event
+types do not. That is already the arbiter's shape (#4): one handler owning the verdict, participants as
+libraries beneath it — designed, deferred while the count is two with aligned fail direction
+(`tool-call-participants.test.ts`'s header).
 
 The guard also writes to the runtime's log: on every denial it appends a custom entry,
-`ENSO_GUARD_DENIAL_ENTRY` with `{ toolCallId, rule }` (`@enso/core` `guard.ts`), through `pi.appendEntry`
+`ENSO_GUARD_DENIAL_ENTRY` with `{ toolCallId, rule }` (`@enso/core` `guard.ts`), through the port's `append` — `pi.appendEntry` in the pi glue
 (#387). The crossing is the call, not the shape — the entry's type and reader are ours — and it exists
 because the runtime turns a block into an error result identical to a failed command's and runs no
 result hook for a blocked call, so the entry is the only place a refusal survives a reload.
@@ -438,14 +521,17 @@ directory as a path (`core/src/guard.ts#ENSO_PERSISTENCE_WRITE_DIRECTORIES`), wh
 
 Which files may import the runtime is fixed by a gate (#558): `VENDOR_IMPORTERS_ALLOWED_INSIDE_ROOTS` in `test/vendor-gate.test.ts` lists them, and the list only shrinks, so a new file cannot quietly add to what follows.
 
-**Replace the runtime** and the file that changes is `packages/harness/extensions/guards/index.ts`: the
-registration (`pi.on`), the event types it takes (`ToolCallEvent`, `ToolResultEvent`), the
-tool-list read in `verifyPolicyToolNames`, and the verdict's return type. `decide`'s order,
-the reasons, and the three hooks' responsibilities carry over as they are.
+**Replace the runtime** and the file that changes is the glue, `packages/harness/extensions/guards/index.ts`, or a
+second glue beside it: the registration (`pi.on`), the event types it takes (`ToolCallEvent`,
+`ToolResultEvent`), the port's four calls (`GuardRuntime`), how a read's partial result is told apart
+(`returnedWholeFile`), and the verdict's return type. `decide`'s order, the reasons, the session's
+security and the three hooks' responsibilities do not move: they are `createGuardSession`'s, and
+`core/__tests__/guard-session.test.ts` drives them through the port with no runtime at all.
 
 **What does not change**, and what proves it: `packages/harness/core/` — `paths.ts`, `network-egress.ts`,
 `shell-segments.ts`, `environment-dump.ts`, `shell-secret-paths.ts`, `read-tracker.ts`,
-`tool-identity.ts` — take strings, paths and a cwd and return matches or states (`packages/harness/core/index.ts`);
+`tool-identity.ts`, and since #861 `guard-session.ts`, `guard-denials.ts` and `session-security.ts` — take
+strings, paths, a cwd and the port, and return matches, states or verdicts (`packages/harness/core/index.ts`);
 nothing in them imports the runtime, which the vendor gate holds for every file outside `extensions/`
 and the host across every source root the repo has — `packages/core/src`, `packages/web/src`,
 `packages/harness`, `packages/web/e2e`, `scripts` and `test`, `__tests__` directories included since
@@ -460,5 +546,5 @@ pins the analyzer independently of any hook.
 
 **Replace the analyzer** and `GuardDependencies` is the seam: its `analyzeBashCommand` is one function `{ command, cwd } →
 { kind, reason, ruleId? }`, injected by the default export (`guards/index.ts#createGuards`); the contract test is rewritten for the new library,
-`shellCommandDenial`'s first block reads the new verdict, and the two allowlist mentions of its state
+the glue's `safetyNetDenial` reads the new verdict, and the two allowlist mentions of its state
 directory (`core/src/guard.ts#ENSO_PERSISTENCE_WRITE_DIRECTORIES`, the gate line) go with it.

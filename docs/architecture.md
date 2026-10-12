@@ -112,9 +112,9 @@ name winning) and no check in this repository would report it. What survives tha
 guard sees the call under that name and gates it exactly as before — which is why the guard, and not the
 manifest's order, is the property this boundary rests on.
 
-**What the guard asserts at startup, and what it does not.** On `session_start` it checks that the five
-tool names its policy gates (`read`, `write`, `edit`, `bash`, `powershell`) are present in pi's live
-`getAllTools()` — `verifyPolicyToolNames` in `extensions/guards/index.ts`. Presence, not identity: it
+**What the guard asserts at startup, and what it does not.** At every start it checks that the five
+tool names its policy gates (`read`, `write`, `edit`, `bash`, `powershell`) are present in the runtime's live
+tool list, pi's `getAllTools()` — `verifyPolicyToolNames` in `harness/core/guard-session.ts`. Presence, not identity: it
 catches an upstream rename that would otherwise turn the guard into a silent no-op, and says nothing about
 whose implementation answers the name. It never throws — a throwing `session_start` handler wedges print
 mode — and a mismatch fails closed by denying every subsequent tool call instead.
@@ -545,7 +545,7 @@ page's own lead sentence, so it cannot say a leak is open after the page says it
 | Seam | Domain | Gate | What crosses it that should not (the page’s own words) |
 |---|---|---|---|
 | [the dialog vocabulary](./seams/dialog.md) | Control | extension-UI-context tests | The four kinds are the runtime's extension-UI method names — kept, by decision. |
-| [the guards](./seams/guards.md) | Permission | `tool-call-participants`; analyzer contract test | L5 — the tool names are the runtime's, and the guard is the runtime's extension. |
+| [the guards](./seams/guards.md) | Permission | `tool-call-participants`; analyzer contract test | L5 — the tool names are the runtime's. |
 | [logging](./seams/logging.md) | Record | logging gate | The substrate is vendored, by decision, and it shows in exactly three files. |
 | [the observation vocabulary](./seams/observation.md) | Observation | kinds sweeps over `@enso/core/observation-kinds`; `observations.md` generated | `EnsoQueue` keeps the runtime's SHAPE, under our words (#216). |
 | [the permission mode](./seams/permission-mode.md) | Permission | vendor gate; `code-offenders` stale-row check | The engine's formats, in `@enso/core`. |
