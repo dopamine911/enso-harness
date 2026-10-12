@@ -251,7 +251,10 @@ port from `ExtensionAPI`; a second runtime fills it from its own records and bus
 export interface GuardRuntime {
   /** The runtime's name, as a refusal names it to the model ("…tools pi does not register"). */
   readonly name: string
-  /** Append a record of ours to the thread's log, beside the transcript: a denial, a signal, an incident. */
+  /**
+   * Append a record of ours to the thread's log, beside the transcript: every record the guard keeps
+   * — a denial, a security signal, a risk change, an incident, a permission denial, a judgement.
+   */
   append(customType: string, data: unknown): void
   /** Say something on a named channel of the thread's bus. */
   emit(channel: string, data: unknown): void
