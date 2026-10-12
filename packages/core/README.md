@@ -2,9 +2,10 @@
 
 **Every TypeBox schema in Enso's product lives here** — plus, since #59, the two pieces of
 runtime the whole workspace shares: the config loader and the path helpers.
-Nothing else in the product does. The one schema outside it is Dogfood Arena's `act` tool
-(`packages/arena/src/act-tool.ts`, #556): a test bench's, kept with the bench so removing it
-leaves nothing here (`test/duplicate-shapes-gate.test.ts`).
+Nothing else in the product does (`test/duplicate-shapes-gate.test.ts`). Dogfood Arena, in its own
+repository (`dopamine911/dogfood-arena`), tests Enso from outside through a pinned submodule and
+imports this package; it is not part of Enso's gate, so a change to the UI-event contract, the
+thread-status words or the readers here is a heads-up for the arena, not a blocker.
 
 ## Why one package
 

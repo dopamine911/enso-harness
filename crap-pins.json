@@ -1,11 +1,5 @@
 [
   {
-    "path": "packages/arena/src/recorder.ts",
-    "function": "runArena",
-    "crap": 238.1,
-    "reason": "A live run's orchestration: port checks, Enso failing to start, the browser failing to open, the first goto failing, driver versus control endpoint, the final shot only while the browser is connected, Enso down at the stop. Each branch needs a real Chromium and a spawned `bun run dev`; a fake would only echo the calls. Its hands are tested in page-hands.ts, enso-stack.ts and ui-status.ts (#838)."
-  },
-  {
     "path": "scripts/docs/feature-screenshots.ts",
     "function": "captureShot",
     "crap": 99.7,

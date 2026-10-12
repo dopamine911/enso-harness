@@ -391,10 +391,12 @@ on dispatches it as a DOM `CustomEvent` on `document`, named and shaped by core'
 (`packages/core/src/ui-events.ts#ENSO_UI_EVENTS`) and sent through `packages/web/src/ui-events.ts#announceUiEvent`
 from an effect, after the commit. The first is `enso:thread-status`, from `ThreadStatusBar`
 (`thread-status.tsx#threadStatusKind`): on mount and at each change of `running | question | idle |
-disconnected`, the open question's id and title, or `shown`. The Dogfood Arena's `wait until attention`
-(`packages/arena/src/actions.ts#waitForAttention`) listens for it instead of sampling the accessibility
-tree; the words contract (`THREAD_STATUS_WORDS`) stays for readers. From the render, never from the
-server: an event cannot fire for a state the page failed to show.
+disconnected`, the open question's id and title, or `shown`. Dogfood Arena (`dopamine911/dogfood-arena`,
+which tests Enso from outside through a pinned submodule and is not part of Enso's gate) listens for
+it in its `wait until attention` instead of sampling the accessibility tree, so a change to this
+contract or to the words (`THREAD_STATUS_WORDS`, which stay for readers) is a heads-up for the
+arena, not a blocker. From the render, never from the server: an event cannot fire for a state the
+page failed to show.
 
 **A second connection today: the fixture.** `?fixture` swaps the live adapter for the scripted
 conversation in `fixture-conversation.ts` (`thread-pane.tsx#threadChatOptions`, `connection: isFixtureMode ?

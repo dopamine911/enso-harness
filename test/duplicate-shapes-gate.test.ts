@@ -6,9 +6,7 @@ import { REPOSITORY_ROOT } from './gate-support.ts'
 
 /**
  * One place for every shape: no TypeBox schema is declared outside `@enso/core` (#53, #255) —
- * except the one test bench that is not the product. Dogfood Arena's `act` tool schema
- * (`packages/arena/src/act-tool.ts`, #556) lives with the arena, so deleting the package
- * leaves no schema in core that nothing reads. A third root is a design conversation.
+ * no exception. A second root is a design conversation.
  *
  * ⚠ Enforcement, not a unit test — the shape of `vendor-gate.test.ts`. Nothing else stops the
  * next session declaring `Type.Object` beside a consumer, which is exactly the drift that made
@@ -27,7 +25,7 @@ import { REPOSITORY_ROOT } from './gate-support.ts'
 
 /** Where a second declaration site could appear. The declaration roots are skipped. */
 const SEARCHED_ROOTS = ['packages', 'scripts', 'test'] as const
-const DECLARATION_ROOTS = [join('packages', 'core'), join('packages', 'arena')] as const
+const DECLARATION_ROOTS = [join('packages', 'core')] as const
 
 /**
  * Is this path inside a declaration root? A SEGMENT test, not a substring one (PR #321 review).
@@ -61,7 +59,7 @@ function insideDeclarationRoot(path: string): boolean {
 const SCHEMA_DECLARATION =
   /(?:^|\n)\s*(?:export\s+default\s+Type\.|(?:export\s+)?(?:const|let|var)\s+[A-Za-z][A-Za-z0-9_]*\s*(?::[^=\n]*)?=\s*Type\.)/
 
-test('⚠ no TypeBox schema is declared outside @enso/core and the arena (#53, #255, #556)', () => {
+test('⚠ no TypeBox schema is declared outside @enso/core (#53, #255)', () => {
   const offenders = SEARCHED_ROOTS.flatMap((root) => filesUnder(join(REPOSITORY_ROOT, root)))
     .filter((path) => !insideDeclarationRoot(path))
     .filter((path) => SCHEMA_DECLARATION.test(readFileSync(path, 'utf8')))
@@ -77,10 +75,8 @@ test('the declaration roots are path segments, so a sibling package is still sca
   const inside = (relative: string): boolean => insideDeclarationRoot(join(REPOSITORY_ROOT, relative))
   expect(inside(join('packages', 'core', 'src', 'follow.ts'))).toBe(true)
   expect(inside(join('packages', 'core'))).toBe(true)
-  expect(inside(join('packages', 'arena', 'src', 'act-tool.ts'))).toBe(true)
   // The shape a substring match would swallow: a sibling whose name starts with the same word.
   expect(inside(join('packages', 'core-extensions', 'src', 'shape.ts'))).toBe(false)
-  expect(inside(join('packages', 'arena-extensions', 'src', 'shape.ts'))).toBe(false)
   expect(inside(join('packages', 'web', 'src', 'store.ts'))).toBe(false)
 })
 

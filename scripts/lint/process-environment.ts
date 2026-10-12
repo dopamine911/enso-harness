@@ -20,7 +20,6 @@ export const PROCESS_ENVIRONMENT_READERS: readonly string[] = [
   'scripts/enso-eval.ts', // ENSO_SERVER_URL
   'scripts/enso-incidents.ts', // ENSO_SERVER_URL
   'scripts/enso-judge.ts', // ENSO_SERVER_URL; the environment to ensoHome() for the TypeSafe key
-  'packages/arena/src/cli.ts', // ENSO_HOME: where runs go; the environment the arena's Enso stack inherits (#556)
   'scripts/gate.ts', // npm_config_user_agent, and the child's FORCE_COLOR
   'packages/core/src/secrets.ts', // the quarantine's default argument — the seam itself
   'packages/core/src/git.ts', // the git runner's environment, repository-locating variables dropped (#453)

@@ -275,7 +275,7 @@ const LOCKED_COMPILER = /^ {4}"[^"]+": \["typescript@(\d+\.\d+)\.\d+"/gm
  * rather than in a lockfile diff nobody reads twice.
  */
 test('⚠ only the root declares TypeScript, and the lock holds three compiler versions (#228, #745)', () => {
-  const workspaces = ['packages/arena', 'packages/core', 'packages/harness', 'packages/web'].map((workspace) => ({
+  const workspaces = ['packages/core', 'packages/harness', 'packages/web'].map((workspace) => ({
     workspace,
     declares: manifest(`${workspace}/package.json`).devDependencies?.typescript,
   }))
