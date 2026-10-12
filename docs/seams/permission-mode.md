@@ -496,7 +496,7 @@ A user who removes `enso-auto` from `authorizerChain` gets prompts in `auto`, ne
 engine, then the mode extension directly after it (`packages/harness/package.json`, `pi.extensions`).
 The guards extension, the first `tool_call` participant, records every refusal the engine makes of
 the agent's call — a person's No, a rule's deny, an authorizer's block — as `enso-permission-denial`
-with the call's id (`guards/index.ts#observeSessionSecurity`, #464; before #464 the mode extension
+with the call's id (`session-security.ts#observeSessionSecurity`, #464; before #464 the mode extension
 wrote a No as `enso-operator-denial`, which session eval still reads). The mode extension drops the
 engine's forced system prompt every turn (#443), because a forced prompt replaces the sectioned one
 Enso's system head is built from; no enforcement is lost, since pi lists only the tools the engine
