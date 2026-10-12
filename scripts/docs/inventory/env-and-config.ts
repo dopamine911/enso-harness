@@ -75,30 +75,6 @@ export const ENVIRONMENT_METADATA: readonly EnvironmentMetadata[] = [
     phase: 'load',
   },
   {
-    key: 'XDG_DATA_HOME',
-    source: 'packages/arena/src/run-home.ts',
-    reader: '`packages/arena/src/run-home.ts#defaultArenaOut` and `#arenaLoginDir` (`bun run arena` start, login)',
-    purposeAndDefault:
-      'Optional; where Dogfood Arena keeps its runs when `--out` is not given: `$XDG_DATA_HOME/enso/arena`, else `~/.local/share/enso/arena` (#610). Deliberately not under `ENSO_HOME`: a project under `/.enso/` is one the guard keeps Enso’s agent out of. Also where the arena’s own login lives, `$XDG_DATA_HOME/enso/arena-login/.enso/pi-agent` (#763): under a `.enso` on purpose, so the guard keeps Enso’s agent out of it.',
-    phase: 'load',
-  },
-  {
-    key: 'ENSO_ARENA_SCOPE',
-    source: 'packages/arena/src/cli.ts',
-    reader: '`packages/arena/src/cli.ts#start` (`bun run arena` start)',
-    purposeAndDefault:
-      'Set by `arena start` on the copy of itself it runs inside the run’s systemd scope: the scope unit’s name. A `start` that finds it set runs the runs and leaves the launch and the cleanup to the launcher outside the scope (#742). Never set by hand.',
-    phase: 'load',
-  },
-  {
-    key: 'TMPDIR',
-    source: 'packages/arena/src/cli.ts',
-    reader: '`packages/arena/src/cli.ts#start` (process write, and on the scoped child it spawns)',
-    purposeAndDefault:
-      'Set by `arena start` to the run’s own `<tmp>/enso-arena-XXXXXX` before anything of the run starts, so Playwright, Chromium, Enso and the agent’s commands keep their temporary files where the cleanup after the run removes them (#742).',
-    phase: 'load',
-  },
-  {
     key: 'TMPDIR',
     source: 'test/scratch-preload.ts',
     reader: '`test/scratch-preload.ts` (process write, before any test file loads)',
@@ -161,28 +137,12 @@ export const ENVIRONMENT_METADATA: readonly EnvironmentMetadata[] = [
     phase: 'boot',
   },
   {
-    key: 'PI_CODING_AGENT_DIR',
-    source: 'packages/arena/src/cli.ts',
-    reader: '`packages/arena/src/cli.ts#login` (pi child environment write)',
-    purposeAndDefault:
-      'Set by `bun run arena login` on the pi it opens: the arena’s own login directory (#763), so `/login` there saves the arena’s credential, never the operator’s.',
-    phase: 'boot',
-  },
-  {
     key: 'PI_CODING_AGENT_SESSION_DIR',
     source: 'scripts/enso.ts',
     reader: '`scripts/enso.ts` (pi child environment write)',
     purposeAndDefault:
       'Always set, to the launch directory’s project folder — `ENSO_HOME/projects/<projectIdOf(cwd)>/sessions` — so the terminal and the web surface file and read one project’s threads in one place (#552). Unset, pi would file by encoded cwd under the agent dir.',
     phase: 'boot',
-  },
-  {
-    key: 'PATH',
-    source: 'packages/arena/src/cli.ts',
-    reader: '`packages/arena/src/cli.ts` (`arena report --run-tests`)',
-    purposeAndDefault:
-      'Handed on as the only variable the work’s own tests get (#624), beside a throwaway `HOME`: they are agent-written code run after an arena run, so nothing else of the operator’s environment reaches them. Unset, `/usr/bin:/bin`.',
-    phase: 'per-call',
   },
   {
     key: 'PI_CODING_AGENT_DIR',

@@ -4,7 +4,7 @@
  * at each change, after the commit, so a wait that returns on the event finds the page already
  * saying what the event says. The suite waited on words and controls instead — the stop button's
  * absence for "the run ended", an option button for "the card is up" — which is the sampling the
- * arena gave up in the same issue (`packages/arena/src/recorder.ts`, `actions.ts`).
+ * arena gave up in the same issue (`dopamine911/dogfood-arena`'s `src/recorder.ts`, `actions.ts`).
  *
  * The shape is the arena's: an init script, installed before the page's own, keeps every
  * announcement in order on `window`; a test marks the log before its move, and a wait reads what

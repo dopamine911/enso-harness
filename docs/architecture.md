@@ -143,10 +143,14 @@ type-only crossing is still a dependency.
 | `browser` | `packages/web/src/` (all else) | `core` |
 | `site-base` | `scripts/docs/site-base.ts` | nothing |
 | `corpus-shapes` | `scripts/corpus-shapes.ts` | `core`, `harness-core` |
-| `arena` | `packages/arena/` | `core` |
 | `scripts` | `scripts/` | `core`, `site-base`, `judge-backends`, `corpus-shapes` |
 | `test` | `test/`, `packages/web/e2e/` | `core`, `harness-core`, `harness-extensions`, `judge-backends`, `host`, `server`, `browser`, `scripts`, `corpus-shapes` |
 | `site` | `site/` | `site-base` |
+
+Dogfood Arena lives outside this repository, in `dopamine911/dogfood-arena`: it tests Enso from
+outside through a pinned submodule, imports only `@enso/core`, and is not part of Enso's gate. It
+consumes `ENSO_UI_EVENTS`, `THREAD_STATUS_WORDS` and core's readers, so a change to those is a
+heads-up for the arena, not a blocker.
 
 Every owned source file must fall in a zone (`coverage.requireAllFiles`; `index.html` is the one
 excused file). The storage seam is a forbidden call: `SessionManager.*` from `server` or `browser`
@@ -402,7 +406,6 @@ Three workspaces. The harness is the pi package; core is the shared shapes; web 
 Enso/
   packages/
     core/                   # @enso/core — every TypeBox schema and shared type of the product, one place
-    arena/                  # @enso/arena — Dogfood Arena (#556): an agent drives Enso's UI, recorded; a test bench, not the product
     harness/                # the pi package
       package.json          #   pi manifest: extensions declared EXPLICITLY, logging first
       core/                 #   guard logic, shell segmentation, egress, web-search

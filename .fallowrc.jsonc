@@ -277,7 +277,6 @@
       { "name": "browser", "patterns": ["packages/web/src/**"] },
       { "name": "site-base", "patterns": ["scripts/docs/site-base.ts"] },
       { "name": "corpus-shapes", "patterns": ["scripts/corpus-shapes.ts"] },
-      { "name": "arena", "patterns": ["packages/arena/**"] },
       { "name": "scripts", "patterns": ["scripts/**"] },
       { "name": "test", "patterns": ["test/**", "packages/web/e2e/**"] },
       { "name": "site", "patterns": ["site/**"] }
@@ -295,10 +294,6 @@
       // may itself reach only `core` — never the rest of the harness.
       { "from": "scripts", "allow": ["core", "site-base", "judge-backends", "corpus-shapes"] },
       { "from": "judge-backends", "allow": ["core"] },
-      // Dogfood Arena (#556) is a test bench driving Enso from outside, not the product: it reads
-      // Enso's records through core's readers and nothing else of ours. Nothing may import it, so
-      // deleting `packages/arena/` leaves no dangling edge.
-      { "from": "arena", "allow": ["core"] },
       // The transcript corpus report (#534) measures the shapes the GUARD sees, so its reader
       // must segment with the guard's own segmenter (`harness-core`). Same pattern: one file
       // `scripts` may reach, which reaches `core` and `harness-core` and nothing else.

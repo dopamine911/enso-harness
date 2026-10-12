@@ -229,7 +229,7 @@ the one input.
 | all source-tree gates | `bun test test/` |
 | model-free web | `bun run e2e` |
 | model-backed web | `bun run e2e:model` |
-| dogfood Enso through its UI, recorded | `bun run arena start` ([`packages/arena/README.md`](../packages/arena/README.md)) |
+| dogfood Enso through its UI, recorded | the [dopamine911/dogfood-arena](https://github.com/dopamine911/dogfood-arena) repository: it tests Enso from outside through a pinned submodule and is not part of this gate |
 | refresh sourced fences | `bun scripts/docs/refresh-fences.ts docs/seams/<page>.md` |
 | regenerate a reference | `bun scripts/docs/<generator>.ts > docs/reference/<page>.md` |
 | inspect current gate/ratchet/double inventory | read [`reference/verification-inventory.md`](./reference/verification-inventory.md) |

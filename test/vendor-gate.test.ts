@@ -52,7 +52,6 @@ import { codeOffenders, hasWordSequence, wordsOf } from './gate-support.ts'
  * missing from here is a blind spot, not a scope decision: that was #215.
  */
 const SEARCHED_ROOTS = [
-  'packages/arena',
   'packages/core/src',
   'packages/web/src',
   'packages/harness',
@@ -104,15 +103,6 @@ const VENDOR_IMPORT_ALLOWED: readonly string[] = [
   // pinned against (#217, arrived with #294). Naming the package IS the question it asks:
   // which pi did `import.meta` reach. Leaves with the range, or with the replica it protects.
   'scripts/__tests__/pi-version-parity.test.ts',
-  // Dogfood Arena's agent runner (#556, #584): the agent under test IS a pi `Agent` over a bare
-  // model call, given one tool, and it reaches the model through pi's `ModelRuntime` over the
-  // home's login, the same one Enso's sessions use. The runner's UI-only boundary is that tool
-  // list, so the import is the boundary. It is a test bench driving Enso from outside, not part
-  // of the product. Leaves if the runner moves to another agent library, or with the package.
-  'packages/arena/src/agent.ts',
-  // Its test drives that runner with pi-ai's scripted faux model, so a model asking for a shell
-  // can be shown to run nothing. Leaves with the runner.
-  'packages/arena/src/__tests__/arena-agent.test.ts',
 ]
 
 /**

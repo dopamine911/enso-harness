@@ -38,14 +38,7 @@ import { codeOffenders, hasWordSequence, isCommentLine, REPOSITORY_ROOT, sourceF
  * tokens, for the reason on `spelledNames`.
  */
 
-const SEARCHED_ROOTS = [
-  'packages/arena',
-  'packages/core/src',
-  'packages/web/src',
-  'packages/harness',
-  'scripts',
-  'test',
-] as const
+const SEARCHED_ROOTS = ['packages/core/src', 'packages/web/src', 'packages/harness', 'scripts', 'test'] as const
 /** Where the runtime's own names may stay — the vendor gate's two roots. */
 const VENDOR_ROOTS = ['packages/web/src/host', 'packages/harness/extensions'] as const
 

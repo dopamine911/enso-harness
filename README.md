@@ -409,7 +409,6 @@ The same content, with search and the generated API reference, is at
 
 ```
 packages/core/       schemas and shared contracts (@enso/core)
-packages/arena/      Dogfood Arena: an agent drives Enso's UI while a recorder keeps the evidence (test bench)
 packages/harness/    the pi package: extensions (guards, web_fetch, web_search, logging) + core helpers
 packages/web/        the web surface — Bun server hosting pi, plus the browser app
 scripts/             launchers, the gate, the docs generators   (all TypeScript, no exceptions)
@@ -417,6 +416,12 @@ docs/                architecture, glossary, seams, flows, generated reference
 site/                the Starlight docs site — a projection of docs/, never a second copy
 test/                repo-wide gates
 ```
+
+Dogfood Arena — an agent driving Enso's UI while a recorder keeps the evidence — lives in its own
+repository, [dopamine911/dogfood-arena](https://github.com/dopamine911/dogfood-arena). It tests Enso
+from outside through a pinned submodule and is not part of Enso's gate. It consumes the UI-event
+contract (`ENSO_UI_EVENTS`), the thread-status words (`THREAD_STATUS_WORDS`) and `@enso/core`'s
+readers, so a change to those is a heads-up for the arena, not a blocker here.
 
 State the agent and the tools use lives in your `ENSO_HOME` — `~/.enso` unless you set `ENSO_HOME` —
 not in the checkout: logs, secrets, pi's auth and sessions, the project list. Every checkout and

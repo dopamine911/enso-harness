@@ -40,7 +40,6 @@ import { codeOffenders } from './gate-support.ts'
  */
 
 const MIGRATED_ROOTS = [
-  'packages/arena',
   'packages/core/src',
   'packages/harness',
   'packages/web/e2e',
