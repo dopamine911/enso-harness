@@ -18,6 +18,16 @@ ran Durable 1.1.0 (a guard through `beforeTool`, OAuth through pi-coding-agent's
 after SIGKILL) and found two hazards Durable leaves to its host, #863: a tool's process outlives a killed
 host, and a second opener of one store runs live work twice.
 
+**Paused 2026-10-12** (Daniel, #860): no Durable runtime until one can be added without weakening Enso's
+security posture. Building the Durable thread (#862) found that Durable's `beforeTool` can `block` but not
+end the turn, so a refusal that needs the user's authorization would let the run go on where pi stops it.
+It also found that a hook cannot commit, so a refusal's record could land after the result it explains
+(read from the docs, not run). And a second runtime means a second log, which every security reader would
+have to agree with. The guard moved out of pi stays (#861): it changed no behaviour, and a later runtime
+still gets it. The decision above is suspended, not reversed; the rules below still hold. Revisit when a
+Durable hook can commit a record or end the turn with its verdict, when one log can serve both runtimes
+(for example pi-coding-agent itself on Durable), and when Durable's API stops breaking between releases.
+
 ---
 
 ## What Durable is
