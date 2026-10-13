@@ -52,7 +52,7 @@ const PAGE_HOMES: Readonly<Record<PageRoute['kind'], PageBack>> = {
   'add-project': { label: 'Projects', to: PROJECTS_ROUTE },
 }
 
-/** What a page's not-found says it lacks: Settings' sections, a project page's tabs (#871). */
+/** What a page's not-found says it lacks: Settings' sections, a project page's tabs (#871); Projects and Add project (#872) have none. */
 const MISSING_PART: Readonly<Record<PageRoute['kind'], string>> = {
   settings: 'Settings has no section called',
   projects: 'Projects has no section called',
