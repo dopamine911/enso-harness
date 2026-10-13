@@ -80,6 +80,9 @@ export {
   EnsoProjectSettingsUpdate,
   EnsoProjectThreadSettings,
   EnsoProjectTier,
+  EnsoProjectTierFile,
+  EnsoProjectTrust,
+  EnsoProjectTrustUpdate,
   EnsoTreeSetupOutcome,
   EnsoTreeSetupStep,
 } from './project-settings.ts'

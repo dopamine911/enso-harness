@@ -441,6 +441,31 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
     builds: 'no',
     logs: 'yes',
   },
+  PROJECT_TRUST_READ_ROUTE: {
+    method: 'GET',
+    path: '/api/projects/:projectId/trust',
+    handler: 'createProjectTrustRoute.read → projectTrusted, readProjectTierFiles',
+    input: 'path: `projectId` (sixteen hex digits) — a registered project; no path is ever taken',
+    success:
+      "200 `EnsoProjectTrust` JSON — whether a new thread or tree reads the project's own files (pi's `trust.json`, as a session is built), and each of its tier files that is there, local first, with the setup commands it declares as written, or why it was not read (a link, not a regular file, over 64 KiB, not a config Enso reads); read for display, trusted or not (#873)",
+    errors: '403 untrusted origin; 404 no registered project with that id; 500 handler failure',
+    routeClass: 'observation',
+    builds: 'no',
+    logs: 'no',
+  },
+  PROJECT_TRUST_WRITE_ROUTE: {
+    method: 'PUT',
+    path: '/api/projects/:projectId/trust',
+    handler: 'createProjectTrustRoute.write → saveProjectTrust',
+    input: 'path: `projectId`; body: `EnsoProjectTrustUpdate` — `{ "trusted": true }` trusts, `false` revokes',
+    success:
+      "200 `EnsoProjectTrust` JSON as it now stands — saved in pi's `trust.json` under the project's path, the store a thread's **Trust project** answer writes; a revoke is an explicit `false`, never a deletion, so no trusted ancestor shows through. New threads and trees follow it; a session already open keeps what it was built with (#873)",
+    errors:
+      '400 malformed body, or one that is not exactly `{ trusted }`; 403 untrusted origin; 404 no registered project with that id; 413 body too large; 500 handler failure',
+    routeClass: 'control',
+    builds: 'no',
+    logs: 'yes',
+  },
   THREAD_MODE_ROUTE: threadControl(
     'respondToModeChange → changeThreadMode',
     'path: `threadId`; body: `EnsoPermissionModeChange`',

@@ -112,7 +112,7 @@ export const PROMPTS: FeatureSpec = {
   ],
   limits: [
     "A project's own prompts are read-only here. Change them in the repository, or copy one into your library and edit the copy.",
-    "A project's prompts are offered only in a project you trusted for every thread (**Trust project**, saved in pi's `trust.json`), or with `defaultProjectTrust` set to `always`. The trust question comes with a thread's first run, after its system prompt is already chosen. So answering **Trust this thread** cannot bring a project prompt into that same thread.",
+    "A project's prompts are offered only in a project you trusted for every thread (**Trust project** in a thread, or **Trust this project…** on the project's page, both saved in pi's `trust.json`), or with `defaultProjectTrust` set to `always`. The trust question comes with a thread's first run, after its system prompt is already chosen. So answering **Trust this thread** cannot bring a project prompt into that same thread.",
     "A thread's system prompt cannot change after its first request. To run the same work with another one, start a new thread. A fork, a resume and a restart keep the prompt the thread started with, even if the file has been edited or deleted since.",
     "These are not pi's prompt templates, the `/name` commands under **prompts** in the command palette (see [Chat](./chat.md)). Those are pi's own and are not listed here.",
   ],

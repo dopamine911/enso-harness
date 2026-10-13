@@ -7,7 +7,6 @@ import {
   type InlineExtension,
   initTheme,
   type PromptOptions,
-  ProjectTrustStore,
   VERSION as PI_VERSION,
 } from '@earendil-works/pi-coding-agent'
 import {
@@ -50,6 +49,7 @@ import {
   PROJECT_TRUST_OPTIONS,
   projectTrustedNotice,
   projectTrustQuestion,
+  saveProjectTrust,
 } from './project-trust.ts'
 import { builtinProviderName, providerRefusalOf } from './provider-refusal.ts'
 import { restoreNoteExtension } from './restore-note.ts'
@@ -325,7 +325,7 @@ export async function buildHostedThread(
     ask: () => ui.uiContext.select(projectTrustQuestion(trustDirectory), [...PROJECT_TRUST_OPTIONS]),
     apply: async (answer) => {
       if (answer === 'untrusted') return
-      if (answer === 'project') new ProjectTrustStore(agentDir).set(trustDirectory, true)
+      if (answer === 'project') saveProjectTrust(trustDirectory, agentDir, true)
       else threadLog.record(ENSO_PROJECT_TRUST_ENTRY, THREAD_PROJECT_TRUST)
       projectTrust.settingsManager.setProjectTrusted(true)
       // "Trust this thread" trusts no project: a project's setup is read under the project's own answer.

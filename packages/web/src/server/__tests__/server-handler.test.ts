@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test'
+import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
   existsSync,
@@ -7,11 +8,12 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  rmdirSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import {
   DEFAULT_RISK_THRESHOLDS,
   ENSO_PROJECT_HEADER,
@@ -24,6 +26,7 @@ import {
   EnsoPermissionVerdict,
   EnsoProject,
   EnsoProjectSettings,
+  EnsoProjectTrust,
   EnsoProjectPromptLibrary,
   EnsoStoredThread,
   EnsoSystemPromptPreview,
@@ -770,7 +773,7 @@ async function settingsServer(options: {
   readonly trusted: boolean
   readonly shared?: unknown
   readonly local?: string
-}): Promise<{ url: string; project: string; projectId: string; userPath: string }> {
+}): Promise<{ url: string; project: string; projectId: string; userPath: string; agentDir: string }> {
   const project = realpathSync(mkdtempSync(join(tmpdir(), 'enso-settings-project-')))
   mkdirSync(join(project, '.enso'))
   if (options.shared !== undefined) writeFileSync(join(project, '.enso', 'config.json'), JSON.stringify(options.shared))
@@ -784,7 +787,7 @@ async function settingsServer(options: {
   const { url } = await startWith(settlesAtOnce, {}, undefined, { launch: project, agentDir, threadSettings })
   const launch = ((await (await fetch(`${url}/api/projects`)).json()) as EnsoProject[])[0]
   if (launch === undefined) throw new Error('no launch project')
-  return { url, project, projectId: launch.projectId, userPath }
+  return { url, project, projectId: launch.projectId, userPath, agentDir }
 }
 
 function putSettings(url: string, projectId: string, body: unknown): Promise<Response> {
@@ -878,6 +881,145 @@ test('⚠ project settings refusals: an unknown project 404, a body that is not 
   const { unreadable } = await settingsOf(await fetch(`${url}/api/projects/${projectId}/settings`))
   expect(unreadable.map((skipped) => [skipped.tier, skipped.path])).toEqual([
     ['local', join(project, '.enso', 'config.local.json')],
+  ])
+})
+
+// ── #873: trust from the project page ─────────────────────────────────────────────────────────
+
+function putTrust(
+  url: string,
+  projectId: string,
+  body: unknown,
+  headers: Record<string, string> = {},
+): Promise<Response> {
+  return fetch(`${url}/api/projects/${projectId}/trust`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...headers },
+    body: typeof body === 'string' ? body : JSON.stringify(body),
+  })
+}
+
+async function trustOf(response: Response): Promise<EnsoProjectTrust> {
+  expect(response.status).toBe(200)
+  const answered: unknown = await response.json()
+  if (!Check(EnsoProjectTrust, answered)) throw new Error('the answer is not EnsoProjectTrust')
+  return answered
+}
+
+/** pi's `trust.json` as the store holds it: what every new session reads. */
+const trustFile = (agentDir: string): unknown => JSON.parse(readFileSync(join(agentDir, 'trust.json'), 'utf8'))
+
+test("the trust read names each of the project's own files with the setup commands it declares as written, or none — untrusted, and nothing applied (#873)", async () => {
+  const { url, project, projectId } = await settingsServer({
+    trusted: false,
+    shared: { threads: { setup: ['bun install --frozen-lockfile', 'cp .env.example .env'] } },
+    local: JSON.stringify({ webFetch: { allowedHosts: ['docs.example.com'] } }),
+  })
+  expect(await trustOf(await fetch(`${url}/api/projects/${projectId}/trust`))).toEqual({
+    projectId,
+    path: project,
+    trusted: false,
+    files: [
+      { tier: 'local', path: join(project, '.enso', 'config.local.json') },
+      {
+        tier: 'shared',
+        path: join(project, '.enso', 'config.json'),
+        setup: ['bun install --frozen-lockfile', 'cp .env.example .env'],
+      },
+    ],
+  })
+  // Shown, not applied: the settings still resolve without the project's own files.
+  const settings = await settingsOf(await fetch(`${url}/api/projects/${projectId}/settings`))
+  expect(settings.threads.setup).toEqual({ value: [], tier: 'default' })
+
+  const bare = await settingsServer({ trusted: false })
+  expect((await trustOf(await fetch(`${bare.url}/api/projects/${bare.projectId}/trust`))).files).toEqual([])
+})
+
+test("a PUT trusts the project in pi's store and its tiers apply; a revoke saves an explicit false, so a trusted ancestor does not show through (#873)", async () => {
+  const { url, project, projectId, agentDir } = await settingsServer({
+    trusted: false,
+    shared: { threads: { setup: ['make'] } },
+  })
+  const trusted = await trustOf(await putTrust(url, projectId, { trusted: true }))
+  expect(trusted.trusted).toBe(true)
+  expect(trustFile(agentDir)).toEqual({ [project]: true })
+  const settings = await settingsOf(await fetch(`${url}/api/projects/${projectId}/settings`))
+  expect(settings.threads.setup).toEqual({ value: ['make'], tier: 'shared' })
+
+  // The project's folder trusted from above (pi takes the nearest ancestor's decision): a revoke
+  // that deleted the project's own entry would leave it trusted.
+  writeFileSync(join(agentDir, 'trust.json'), JSON.stringify({ [dirname(project)]: true }))
+  expect((await trustOf(await fetch(`${url}/api/projects/${projectId}/trust`))).trusted).toBe(true)
+  expect((await trustOf(await putTrust(url, projectId, { trusted: false }))).trusted).toBe(false)
+  expect(trustFile(agentDir)).toEqual({ [dirname(project)]: true, [project]: false })
+  expect((await settingsOf(await fetch(`${url}/api/projects/${projectId}/settings`))).trusted).toBe(false)
+})
+
+test('⚠ trust refusals: an unregistered id 404, a body that is not exactly `{ trusted }` 400 — a path is never taken — and nothing is written (#873)', async () => {
+  const { url, project, projectId, agentDir } = await settingsServer({ trusted: false })
+  expect((await fetch(`${url}/api/projects/0123456789abcdef/trust`)).status).toBe(404)
+  const unknown = await putTrust(url, '0123456789abcdef', { trusted: true })
+  expect(unknown.status).toBe(404)
+  expect(await unknown.text()).toBe('no registered project has the id 0123456789abcdef')
+  const elsewhere = realpathSync(mkdtempSync(join(tmpdir(), 'enso-unregistered-')))
+  for (const body of [{ trusted: 'yes' }, { trusted: true, path: elsewhere }, { path: elsewhere }, '{ not json']) {
+    expect([body, (await putTrust(url, projectId, body)).status]).toEqual([body, 400])
+  }
+  // A path in the URL is no project id: no route matches it.
+  expect((await putTrust(url, encodeURIComponent(elsewhere), { trusted: true })).status).toBe(404)
+  expect(trustFile(agentDir)).toEqual({ [project]: false })
+})
+
+// #717's guard, on the route that decides what a project may run: a page on another loopback port
+// (a dev server running agent-written code) can neither trust a project nor read what it declares.
+test('⚠ a foreign page cannot trust a project or read its trust; Enso’s own page can (#873, #717)', async () => {
+  const { url, project, projectId, agentDir } = await settingsServer({ trusted: false })
+  const otherPort = { Origin: 'http://localhost:5173', 'Sec-Fetch-Site': 'same-site', 'Content-Type': 'text/plain' }
+  expect((await putTrust(url, projectId, { trusted: true }, otherPort)).status).toBe(403)
+  const crossSite = { 'Sec-Fetch-Site': 'cross-site' }
+  expect((await fetch(`${url}/api/projects/${projectId}/trust`, { headers: crossSite })).status).toBe(403)
+  expect(trustFile(agentDir)).toEqual({ [project]: false })
+  const ownPage = { Origin: 'http://127.0.0.1:5178', 'Sec-Fetch-Site': 'same-origin' }
+  expect((await trustOf(await putTrust(url, projectId, { trusted: true }, ownPage))).trusted).toBe(true)
+})
+
+// The trust read happens BEFORE the project is trusted, so its files are untrusted input: a link
+// could point at a file an agent may not read, and the page would show it; a FIFO would hold the
+// server. Neither is read — each is named, and said to be read anyway once trusted.
+test('⚠ the trust read follows no link and opens no FIFO: each is named, never read, and said to be read once trusted (#873)', async () => {
+  const { url, project, projectId } = await settingsServer({ trusted: false })
+  const outside = mkdtempSync(join(tmpdir(), 'enso-trust-outside-'))
+  writeFileSync(join(outside, 'config.json'), JSON.stringify({ threads: { setup: ['leaked-from-outside'] } }))
+  symlinkSync(join(outside, 'config.json'), join(project, '.enso', 'config.json'))
+  execFileSync('mkfifo', [join(project, '.enso', 'config.local.json')])
+  const response = await fetch(`${url}/api/projects/${projectId}/trust`)
+  const text = await response.clone().text()
+  expect(text).not.toContain('leaked-from-outside')
+  const { files } = await trustOf(response)
+  expect(files.map((file) => ['unread' in file ? file.unread : 'read', file.tier])).toEqual([
+    [
+      'is not a regular file, so it is not shown here; trusting the project reads it anyway, setup commands included',
+      'local',
+    ],
+    ['is a link, so it is not shown here; trusting the project reads it anyway, setup commands included', 'shared'],
+  ])
+
+  // `.enso/` itself a link: the file inside is reached through it, and not read either.
+  const linked = await settingsServer({ trusted: false })
+  const elsewhere = mkdtempSync(join(tmpdir(), 'enso-trust-dir-'))
+  writeFileSync(join(elsewhere, 'config.json'), JSON.stringify({ threads: { setup: ['leaked-through-dir'] } }))
+  rmdirSync(join(linked.project, '.enso'))
+  symlinkSync(elsewhere, join(linked.project, '.enso'))
+  const throughDir = await trustOf(await fetch(`${linked.url}/api/projects/${linked.projectId}/trust`))
+  expect(JSON.stringify(throughDir)).not.toContain('leaked-through-dir')
+  expect(throughDir.files).toEqual([
+    {
+      tier: 'shared',
+      path: join(linked.project, '.enso', 'config.json'),
+      unread:
+        'is reached through a link, so it is not shown here; trusting the project reads it anyway, setup commands included',
+    },
   ])
 })
 

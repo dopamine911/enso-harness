@@ -99,6 +99,7 @@ import { seedMultiAccountConfig } from '../multi-account-seed.ts'
 import { PERMISSION_CALL_QUESTIONS_EXTENSION_PATH } from '../permission-call-questions.ts'
 import { storedPermissionModeState } from '../permission-mode-adapter.ts'
 import { readPermissionPolicy, resetPermissionPolicy, writePermissionPolicy } from '../permission-policy-file.ts'
+import { projectTrusted, saveProjectTrust } from '../project-trust.ts'
 import { RESTORE_NOTE_EXTENSION_PATH } from '../restore-note.ts'
 import { ThreadDeleted, type ThreadDeleteOutcome } from '../thread-delete.ts'
 import { recordedModelOf, transcriptOf } from '../transcript.ts'
@@ -1512,6 +1513,26 @@ test('a trusted repository behaves as before: its policy applies from the start,
   expect(hosted.runtime.openDialogs()).toHaveLength(0)
 })
 
+// #873: the project page's Trust (`PUT /api/projects/:id/trust` → `saveProjectTrust`) and the
+// thread's "Trust project" answer write ONE store, and each reads what the other wrote: the page
+// reads `projectTrusted`, a new session reads `hostedProjectTrust`.
+test('the thread’s "Trust project" and the page’s Trust write one store: each shows in the other (#873)', async () => {
+  const answered = yoloRepository()
+  const first = trustHost(answered)
+  expect(projectTrusted(answered, agentDir)).toBe(false)
+  await promptAnswering(await openThread(first.host, answered), first.requests, 'Trust project')
+  expect(projectTrusted(answered, agentDir)).toBe(true)
+
+  const fromPage = yoloRepository()
+  const second = trustHost(fromPage)
+  saveProjectTrust(fromPage, agentDir, true)
+  const hosted = await openThread(second.host, fromPage)
+  expect(hosted.projectTrust()).toEqual({ directory: fromPage, trusted: true })
+  await runPrompt(hosted, 'not asked')
+  expect(hosted.runtime.openDialogs()).toHaveLength(0)
+  expect(JSON.stringify(second.requests)).toContain(PROJECT_APPEND_MARKER)
+})
+
 // ⚠ Found by this test's first run: the runtime treats an unknown slash command as ordinary
 // text, so `setPermissionMode('no-such-mode')` was ACCEPTED and would have gone to the model
 // as the chat message "/no-such-mode". The route refuses earlier (422, `changeThreadMode`);
@@ -2366,6 +2387,35 @@ test("⚠ an untrusted project's setup is not run, and nothing is recorded (#754
   expect(existsSync(join(tree, 'ran.txt'))).toBe(false)
   expect(customTypesOf(hosted)).not.toContain(ENSO_TREE_SETUP_ENTRY)
   expect((await host.threadTree(threadId))?.setup).toBeUndefined()
+})
+
+// #873, the acceptance's first item: trust set from the page reaches the NEXT tree — its setup
+// runs — and a revoke reaches the next one after: no setup, and no question, since a revoke is saved
+// as "not trusted". The thread already open keeps what it was built with, as the page says.
+test('⚠ trusted from the page, a new tree runs the project’s setup; revoked, the next tree does not, and the open thread keeps its trust (#873)', async () => {
+  const project = dirtyCheckout()
+  sharedThreads(project, { setup: ['echo prepared > setup.txt'] })
+  const core = createFauxCore()
+  core.setResponses([faux.fauxAssistantMessage('one'), faux.fauxAssistantMessage('two')])
+  const { host } = treeHost(project, [fauxModelExtension(core)])
+  saveProjectTrust(project, agentDir, true)
+  const trusted = await host.createSession(crypto.randomUUID(), () => project)
+  openSessions.push(trusted)
+  await runPrompt(trusted, 'first')
+  expect(readFileSync(join(trusted.inspect().cwd, 'setup.txt'), 'utf8')).toBe('prepared\n')
+
+  saveProjectTrust(project, agentDir, false)
+  expect(new ProjectTrustStore(agentDir).get(project)).toBe(false)
+  const revokedId = crypto.randomUUID()
+  const revoked = await host.createSession(revokedId, () => project)
+  openSessions.push(revoked)
+  await runPrompt(revoked, 'second')
+  const tree = revoked.inspect().cwd
+  expect(tree).not.toBe(project)
+  expect(existsSync(join(tree, 'setup.txt'))).toBe(false)
+  expect((await host.threadTree(revokedId))?.setup).toBeUndefined()
+  expect(revoked.runtime.openDialogs()).toHaveLength(0)
+  expect(trusted.projectTrust().trusted).toBe(true)
 })
 
 // The page's "New threads run in: off", end to end: written to the project's local tier as the page

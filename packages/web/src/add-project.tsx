@@ -7,7 +7,8 @@ import { Checkbox } from './components/ui/checkbox.tsx'
 import { Field, FieldDescription, FieldError, FieldLabel } from './components/ui/field.tsx'
 import { Input } from './components/ui/input.tsx'
 import { cn } from './lib/utils.ts'
-import { browseDirectories, registerProject } from './project-list.ts'
+import { browseDirectories, registerProject, requestProjectTrust } from './project-list.ts'
+import { OWN_FILES, TrustDialog } from './project-trust-dialog.tsx'
 import { type PageRoute, projectRoute } from './thread-url.ts'
 
 /**
@@ -17,7 +18,9 @@ import { type PageRoute, projectRoute } from './thread-url.ts'
  * server would register can be chosen (`projects.ts`): resolved, never hidden unless hidden folders
  * are shown, never the home folder or one holding it, never Enso's own home. Every refusal is the
  * server's, in its words, and says why; a folder that already is a project says which, and opens it.
- * Nothing registers before the person has confirmed.
+ * Nothing registers before the person has confirmed. Trust is a choice of its own, off by default
+ * (#873): the server trusts only a registered project, so a ticked box registers first, then asks
+ * the trust in the same confirmation the project page uses, its files and setup commands named.
  */
 export interface AddProjectPageProps {
   /** The listed projects: a folder that already is one is said as such, with the way to it. */
@@ -394,9 +397,82 @@ function NameField({
   )
 }
 
+/** Said when the project was added and the trust after it was not saved: it is there, untrusted. */
+export function trustFailedAfterAdd(project: EnsoProject, reason: string): string {
+  return `${project.title} was added, but it is not trusted: ${reason}. Trust it again here, or later from its page.`
+}
+
+/** "Trust this project's own settings" (#873): off by default; on, the trust is confirmed after the project is added. */
+function TrustChoice({ trust, onTrust }: { trust: boolean; onTrust: (trust: boolean) => void }): React.ReactNode {
+  const checkboxId = useId()
+  return (
+    <div className="grid gap-1.5">
+      <Field orientation="horizontal">
+        <Checkbox
+          id={checkboxId}
+          checked={trust}
+          aria-describedby={`${checkboxId}-help`}
+          onCheckedChange={(checked: boolean | 'indeterminate'): void => onTrust(checked === true)}
+        />
+        <FieldLabel htmlFor={checkboxId}>Trust this project’s own settings</FieldLabel>
+      </Field>
+      <FieldDescription id={`${checkboxId}-help`}>
+        Enso then reads {OWN_FILES} from this folder, and its .pi/ folder — including setup commands, which run on this
+        machine in every new tree. Once it is added you see the files and their commands before anything is trusted.
+        Leave it off for a folder you didn’t write; you can trust it later from the project’s page.
+      </FieldDescription>
+    </div>
+  )
+}
+
 /**
- * Step 2, Confirm access: the folder with **Change**, its name, what pi can reach there; **Back**
- * registers nothing, **Add project** registers it under the name given — or says why not, and
+ * The project just added, asked to be trusted: the confirmation names its files and setup commands.
+ * Trusting, or leaving it untrusted (Not now), opens its page; a trust that could not be saved is
+ * said plainly — the project exists, untrusted — and can be tried again.
+ */
+function TrustAfterAdd({
+  project,
+  onDone,
+  fetchImpl,
+}: {
+  project: EnsoProject
+  onDone: (project: EnsoProject) => void
+  fetchImpl: FetchLike | undefined
+}): React.ReactNode {
+  const [busy, setBusy] = useState(false)
+  const [failure, setFailure] = useState<string | undefined>(undefined)
+  const trust = async (): Promise<void> => {
+    setBusy(true)
+    setFailure(undefined)
+    try {
+      const outcome = await requestProjectTrust(project.projectId, true, fetchImpl)
+      if (outcome.kind === 'ok') onDone(project)
+      else setFailure(trustFailedAfterAdd(project, outcome.reason))
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <TrustDialog
+      projectId={project.projectId}
+      title={project.title}
+      open
+      onOpenChange={(open: boolean) => {
+        if (!open) onDone(project)
+      }}
+      onTrust={() => void trust()}
+      busy={busy}
+      failure={failure}
+      cancelLabel="Not now"
+      fetch={fetchImpl}
+    />
+  )
+}
+
+/**
+ * Step 2, Confirm access: the folder with **Change**, its name, what pi can reach there, and
+ * whether to trust its own settings (#873); **Back** registers nothing, **Add project** registers
+ * it under the name given — then, when trust was ticked, confirms the trust — or says why not, and
  * opens the project the folder already is.
  */
 function ConfirmStep({
@@ -418,6 +494,9 @@ function ConfirmStep({
   const [nameError, setNameError] = useState<string | undefined>(undefined)
   const [refusal, setRefusal] = useState<Refusal | undefined>(undefined)
   const [adding, setAdding] = useState(false)
+  const [trust, setTrust] = useState(false)
+  // Added with trust ticked: the trust is confirmed next, over this step.
+  const [toTrust, setToTrust] = useState<EnsoProject | undefined>(undefined)
   const add = async (event: FormEvent): Promise<void> => {
     event.preventDefault()
     const title = name.trim()
@@ -427,8 +506,9 @@ function ConfirmStep({
     const outcome = await registerProject({ path: chosen.folder, title, hidden: chosen.hidden }, fetchImpl)
     setAdding(false)
     if (outcome.kind === 'refused') setRefusal({ text: outcome.reason })
-    else if (outcome.value.added) onAdded(outcome.value.project)
-    else setRefusal(alreadyAProject(outcome.value.project))
+    else if (!outcome.value.added) setRefusal(alreadyAProject(outcome.value.project))
+    else if (trust) setToTrust(outcome.value.project)
+    else onAdded(outcome.value.project)
   }
   return (
     <form onSubmit={(event) => void add(event)} noValidate className="grid gap-5 rounded-lg border bg-card p-6">
@@ -450,6 +530,8 @@ function ConfirmStep({
         error={nameError}
       />
       <ReachList chosen={chosen} onOpen={onOpen} />
+      <TrustChoice trust={trust} onTrust={setTrust} />
+      {toTrust === undefined ? null : <TrustAfterAdd project={toTrust} onDone={onAdded} fetchImpl={fetchImpl} />}
       {refusal === undefined ? null : <RefusalLine refusal={refusal} onOpen={onOpen} />}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="outline" disabled={adding} onClick={onBack}>

@@ -29,7 +29,7 @@ export const THREAD_TREES: FeatureSpec = {
       '{ "threads": { "projects": { "~/code/big-repo": "off" } } }',
       '```',
       '',
-      "A trusted project's own `.enso/config.json`, and your `.enso/config.local.json` beside it, set the same keys for that project, and win over yours: the local file first, then the shared one (#754). A launch that relies on the default says so in its log.",
+      "A trusted project's own `.enso/config.json`, and your `.enso/config.local.json` beside it, set the same keys for that project, and win over yours: the local file first, then the shared one (#754). Trust a project, or revoke it, from its page: the confirmation lists the setup commands its files declare before anything is trusted, and the change applies to the next tree (see [Sessions and projects](./sessions-and-projects.md), #873). A launch that relies on the default says so in its log.",
     ].join('\n'),
     '**Restore files to here** is under each prompt you sent, beside **fork from here**.',
     '**Settings** → **Storage** lists the trees: **Settings** is at the foot of the rail. The trash icon in the header deletes the thread on screen, through the same confirmation.',
@@ -128,7 +128,7 @@ export const THREAD_TREES: FeatureSpec = {
   limits: [
     "Nothing brings a tree's work back into your checkout yet. For a worktree, `git merge enso/<thread-id>` brings what was committed. Uncommitted edits, and everything in a copy, you copy over yourself.",
     "A tree has none of your ignored files until the project's setup copies them in or recreates them. With no setup configured, a build or a test may need its install step first.",
-    "Setup commands run on your machine, as you, whenever a tree is made. The project's own files are read only once you trust the project, but a change to them after that is not asked about again (#753).",
+    "Setup commands run on your machine, as you, whenever a tree is made. The project's own files are read only once you trust the project, but a change to them after that is not asked about again (#753): the commands the trust confirmation listed are the ones there when you trusted it.",
     'A setup that fails is said in **What this thread built**, with its output; the thread still opens.',
     "The isolation is of files, not of git: in a worktree, bash `git` still reaches your repository's refs, config and remotes.",
     'A tree is kept until its thread is deleted. Nothing removes old trees on its own.',

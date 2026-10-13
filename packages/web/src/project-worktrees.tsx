@@ -423,14 +423,20 @@ type Loading =
   | { readonly kind: 'loaded'; readonly settings: EnsoProjectSettings; readonly version: number }
   | { readonly kind: 'failed'; readonly reason: string }
 
-/** The tab for one project: its settings read when it opens, and every write's answer shown in their place. */
+/**
+ * The tab for one project: its settings read when it opens, and every write's answer shown in their
+ * place. Read again when `revision` moves — the page's trust changed (#873), and with it what the
+ * settings resolve to; the form is remounted on the new answer, as after a save.
+ */
 export function ProjectWorktrees({
   projectId,
   fetch: fetchImpl,
+  revision = 0,
 }: {
   projectId: string
   /** Injected by tests; the page's global by default. */
   fetch?: FetchLike | undefined
+  revision?: number
 }): React.ReactNode {
   const [loading, setLoading] = useState<Loading>({ kind: 'loading' })
   const [busy, setBusy] = useState(false)
@@ -440,16 +446,16 @@ export function ProjectWorktrees({
     let current = true
     void readProjectSettings(projectId, fetchImpl).then((outcome) => {
       if (!current) return
-      setLoading(
+      setLoading((was) =>
         outcome.kind === 'ok'
-          ? { kind: 'loaded', settings: outcome.value, version: 0 }
+          ? { kind: 'loaded', settings: outcome.value, version: was.kind === 'loaded' ? was.version + 1 : 0 }
           : { kind: 'failed', reason: outcome.reason },
       )
     })
     return () => {
       current = false
     }
-  }, [projectId, fetchImpl])
+  }, [projectId, fetchImpl, revision])
   const send = async (update: EnsoProjectSettingsUpdate): Promise<void> => {
     setBusy(true)
     setRefusal(undefined)

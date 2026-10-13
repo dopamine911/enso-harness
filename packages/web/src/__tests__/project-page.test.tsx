@@ -2,6 +2,7 @@ import { afterAll, expect, test } from 'bun:test'
 import type {
   EnsoProject,
   EnsoProjectSettings,
+  EnsoProjectTrust,
   EnsoStoredThread,
   EnsoTreeSetupOutcome,
   EnsoTreesListing,
@@ -145,6 +146,14 @@ const TREES: EnsoTreesListing = {
   ],
 }
 
+/** The trust `GET /api/projects/p-app/trust` answers to start with: trusted, its shared file listing two commands. */
+const TRUST: EnsoProjectTrust = {
+  projectId: 'p-app',
+  path: '/code/app',
+  trusted: true,
+  files: [{ tier: 'shared', path: '/code/app/.enso/config.json', setup: ['bun install', 'bun run db:migrate'] }],
+}
+
 /** A PUT the page sent: its body, parsed. */
 type Sent = { readonly tier: string; readonly threads: Record<string, unknown> }
 
@@ -165,10 +174,16 @@ interface MountOptions {
   readonly answers?: readonly Response[]
   /** Each Check again lists these next. */
   readonly listings?: ReadonlyArray<ListingState<EnsoProject>>
+  /** The project's trust as the server starts with it; a trust PUT moves it, as the server does. */
+  readonly trust?: EnsoProjectTrust
+  /** A trust PUT the server refuses with this text, as a 500. */
+  readonly trustRefusal?: string
 }
 
 interface Mounted {
   readonly sent: Sent[]
+  /** Each trust PUT's body, as sent. */
+  readonly trustSent: string[]
   readonly asked: Asked
   readonly container: HTMLElement
   readonly unmount: () => Promise<void>
@@ -177,10 +192,21 @@ interface Mounted {
 async function mountPage(options: MountOptions = {}): Promise<Mounted> {
   const { settings = SETTINGS, answers = [], listings = [] } = options
   const sent: Sent[] = []
+  const trustSent: string[] = []
+  let trust = options.trust ?? TRUST
   const asked: Asked = { opened: [], threads: [], removed: [] }
+  const answerTrust = (init: RequestInit | undefined): Response => {
+    if (init?.method !== 'PUT') return Response.json(trust)
+    if (typeof init.body !== 'string') throw new Error(`expected a JSON text body, got ${typeof init.body}`)
+    trustSent.push(init.body)
+    if (options.trustRefusal !== undefined) return new Response(options.trustRefusal, { status: 500 })
+    trust = { ...trust, trusted: init.body === '{"trusted":true}' }
+    return Response.json(trust)
+  }
   const fetchImpl = (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const path = requestedUrl(input)
     if (path === '/api/trees') return Promise.resolve(Response.json(TREES))
+    if (path === '/api/projects/p-app/trust') return Promise.resolve(answerTrust(init))
     if (init?.method === 'PUT') {
       if (typeof init.body !== 'string') throw new Error(`expected a JSON text body, got ${typeof init.body}`)
       sent.push(JSON.parse(init.body) as Sent)
@@ -188,7 +214,8 @@ async function mountPage(options: MountOptions = {}): Promise<Mounted> {
       if (answer === undefined) throw new Error(`no answer scripted for PUT ${sent.length}`)
       return Promise.resolve(answer)
     }
-    return Promise.resolve(Response.json(settings))
+    // The settings resolve under the project's trust as it now stands, as the server's do.
+    return Promise.resolve(Response.json({ ...settings, trusted: trust.trusted }))
   }
   let checks = 0
   function Harness(): React.ReactNode {
@@ -233,6 +260,7 @@ async function mountPage(options: MountOptions = {}): Promise<Mounted> {
   })
   return {
     sent,
+    trustSent,
     asked,
     container,
     unmount: async () => {
@@ -618,16 +646,96 @@ test('a missing folder’s banner: Check again says “Still missing” while it
   await page.unmount()
 })
 
-test('an untrusted project’s banner names the files Enso does not read (#871)', async () => {
-  const page = await mountPage({ settings: { ...SETTINGS, trusted: false } })
-  const banner = await eventually(() => {
-    const found = page.container.querySelector('[aria-labelledby="untrusted-title"]')
-    expect(found).not.toBeNull()
+// ── trust (#873) ─────────────────────────────────────────────────────────────
+
+const UNTRUSTED: EnsoProjectTrust = { ...TRUST, trusted: false }
+
+/** The dialog open over the page, once it is. */
+const openDialog = (): Promise<HTMLElement> =>
+  eventually(() => {
+    const found = document.querySelector<HTMLElement>('[role="dialog"]')
+    if (found === null) throw new Error('no dialog open')
     return found
   })
-  expect(banner?.textContent).toContain('Not trusted yet')
-  expect(banner?.textContent).toContain('/code/app/.enso/config.json, /code/app/.enso/config.local.json')
-  expect(banner?.querySelector('button')).toBeNull()
+
+const section = (page: Mounted, title: 'untrusted-title' | 'trusted-title'): HTMLElement | null =>
+  page.container.querySelector<HTMLElement>(`[aria-labelledby="${title}"]`)
+
+test('⚠ untrusted: the banner says what isn’t read; Trust this project… names its files and their setup commands as written before anything is trusted; trusted, the page says so and Worktrees reads its files (#873)', async () => {
+  const page = await mountPage({ trust: UNTRUSTED, route: { kind: 'project', projectId: 'p-app', tab: 'worktrees' } })
+  const banner = await eventually(() => {
+    const found = section(page, 'untrusted-title')
+    if (found === null) throw new Error('no untrusted banner')
+    return found
+  })
+  expect(banner.textContent).toContain('.enso/config.json and .enso/config.local.json')
+  await eventually(() => expect(page.container.textContent).toContain('This project is not trusted yet'))
+  await press(buttonNamed(banner, 'Trust this project…'))
+  const dialog = await openDialog()
+  await eventually(() => expect(dialog.textContent).toContain('/code/app/.enso/config.json'))
+  const commands = [...dialog.querySelectorAll('[aria-label="setup commands"] > li')].map((item) => item.textContent)
+  expect(commands).toEqual(['bun install', 'bun run db:migrate'])
+  expect(page.trustSent).toEqual([])
+  await press(buttonNamed(dialog, 'Trust project'))
+  expect(page.trustSent).toEqual(['{"trusted":true}'])
+  await eventually(() => expect(section(page, 'trusted-title')).not.toBeNull())
+  expect(section(page, 'untrusted-title')).toBeNull()
+  expect(document.querySelector('[role="dialog"]')).toBeNull()
+  // The tab's settings read again: they resolve under the trust now saved.
+  await eventually(() => expect(page.container.textContent).not.toContain('This project is not trusted yet'))
+  await page.unmount()
+})
+
+test('a project with no settings files of its own: the confirmation says its setup commands are none (#873)', async () => {
+  const page = await mountPage({ trust: { ...UNTRUSTED, files: [] } })
+  const banner = await eventually(() => {
+    const found = section(page, 'untrusted-title')
+    if (found === null) throw new Error('no untrusted banner')
+    return found
+  })
+  await press(buttonNamed(banner, 'Trust this project…'))
+  const dialog = await openDialog()
+  await eventually(() => expect(dialog.textContent).toContain('Setup commands: none'))
+  expect(dialog.querySelector('[aria-label="setup commands"]')).toBeNull()
+  await press(buttonNamed(dialog, 'Cancel'))
+  expect(page.trustSent).toEqual([])
+  await page.unmount()
+})
+
+test('trusted: the page says so, and Revoke trust… confirms, then saves not trusted and shows the banner again (#873)', async () => {
+  const page = await mountPage()
+  const card = await eventually(() => {
+    const found = section(page, 'trusted-title')
+    if (found === null) throw new Error('no trusted card')
+    return found
+  })
+  await press(buttonNamed(card, 'Revoke trust…'))
+  const dialog = await openDialog()
+  expect(dialog.textContent).toContain('Revoke trust in app?')
+  expect(page.trustSent).toEqual([])
+  await press(buttonNamed(dialog, 'Revoke trust'))
+  expect(page.trustSent).toEqual(['{"trusted":false}'])
+  await eventually(() => expect(section(page, 'untrusted-title')).not.toBeNull())
+  expect(section(page, 'trusted-title')).toBeNull()
+  await page.unmount()
+})
+
+test('a trust the server refuses is said in the dialog, in its words, and nothing on the page changes (#873)', async () => {
+  const page = await mountPage({ trust: UNTRUSTED, trustRefusal: 'trust.json is locked' })
+  const banner = await eventually(() => {
+    const found = section(page, 'untrusted-title')
+    if (found === null) throw new Error('no untrusted banner')
+    return found
+  })
+  await press(buttonNamed(banner, 'Trust this project…'))
+  const dialog = await openDialog()
+  await eventually(() => expect(dialog.textContent).toContain('bun install'))
+  await press(buttonNamed(dialog, 'Trust project'))
+  await eventually(() =>
+    expect(dialog.querySelector('[role="alert"]')?.textContent).toBe('Not trusted: 500 trust.json is locked'),
+  )
+  expect(section(page, 'untrusted-title')).not.toBeNull()
+  expect(section(page, 'trusted-title')).toBeNull()
   await page.unmount()
 })
 

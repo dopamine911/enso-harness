@@ -1,6 +1,6 @@
-import type { EnsoProject, EnsoProjectSettings, EnsoStoredThread } from '@enso/core'
-import { LockIcon, SearchXIcon, TriangleAlertIcon } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import type { EnsoProject, EnsoProjectTrust, EnsoStoredThread } from '@enso/core'
+import { LockIcon, SearchXIcon, ShieldCheckIcon, TriangleAlertIcon } from 'lucide-react'
+import { useState } from 'react'
 import type { FetchLike } from './browser-logging.ts'
 import { Button } from './components/ui/button.tsx'
 import {
@@ -14,13 +14,15 @@ import {
   DialogTrigger,
 } from './components/ui/dialog.tsx'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './components/ui/tabs.tsx'
+import { cn } from './lib/utils.ts'
 import type { ListingState } from './listing-store.ts'
 import {
   type ProjectRequestOutcome,
   type ProjectThread,
-  readProjectSettings,
+  requestProjectTrust,
   threadsOfProject,
 } from './project-list.ts'
+import { OWN_FILES, RevokeDialog, TrustDialog, useProjectTrust } from './project-trust-dialog.tsx'
 import { ProjectWorktrees } from './project-worktrees.tsx'
 import type { ThreadSummary } from './thread-stores.ts'
 import { PROJECT_TABS, type PageRoute, PROJECTS_ROUTE, type ProjectTab } from './thread-url.ts'
@@ -31,11 +33,12 @@ import { ProjectStorage } from './trees-settings.tsx'
  * A project's page (#871): `?page=project&project=<id>&tab=threads|worktrees|storage`, opened from
  * a Projects card, the rail's `⋯` and Settings › Storage. Its tabs gather what two dialogs held — the
  * tree settings (`ProjectSettingsDialog`, now the Worktrees tab) and its group of Settings' trees
- * (now the Storage tab) — beside its threads. Over the tabs, what is wrong with the project: its
+ * (now the Storage tab) — beside its threads. Over the tabs, what is wrong with the project — its
  * folder is gone (Check again reads the projects again — the server recomputes the status on every
- * list, `projects.ts` `viewOf`), or it is not trusted, so its own files are not read. Under them,
- * its removal, said as the server does it (`project-routes.ts`): the registration goes, its
- * threads' files stay and are served again when the folder is added again.
+ * list, `projects.ts` `viewOf`) — and its trust (#873): not trusted, with **Trust this project…**,
+ * or trusted, with **Revoke trust…**, each behind a confirmation. Under them, its removal, said as
+ * the server does it (`project-routes.ts`): the registration goes, its threads' files stay and are
+ * served again when the folder is added again.
  */
 
 /** Each tab's name on the page. */
@@ -146,44 +149,101 @@ function MissingFolderBanner({
   )
 }
 
-/**
- * Not trusted yet: what isn't read. Trusting it from here is #873's; until then the banner only
- * says so, with the files by name.
- */
-function UntrustedBanner({ settings }: { settings: EnsoProjectSettings }): React.ReactNode {
-  return (
-    <section aria-labelledby="untrusted-title" className="grid gap-2 rounded-lg border border-dashed bg-card px-4 py-3">
-      <h2 id="untrusted-title" className="flex items-center gap-2 font-semibold">
-        <LockIcon aria-hidden="true" className="size-4" />
-        Not trusted yet
-      </h2>
-      <p className="text-sm text-muted-foreground">
-        Enso isn’t reading this project’s own files ({settings.files.shared}, {settings.files.local}), so only your
-        settings and Enso’s defaults apply: the setup commands and files to copy they list aren’t used.
-      </p>
-    </section>
-  )
-}
+/** What a trust change does to the page: the trust as the server now answers it. */
+type TrustChanged = (trust: EnsoProjectTrust) => void
 
-/** The project's trust, read once the page opens: `GET /api/projects/:id/settings`. Undefined while it is out. */
-function useProjectSettings(
+/** A trust change from a confirmation: in flight, and why the last one did not go through, kept until the dialog closes. */
+function useTrustChange(
   projectId: string,
   fetchImpl: FetchLike | undefined,
-): ProjectRequestOutcome<EnsoProjectSettings> | undefined {
-  const [read, setRead] = useState<ProjectRequestOutcome<EnsoProjectSettings> | undefined>(undefined)
-  useEffect(() => {
-    let current = true
-    setRead(undefined)
-    void readProjectSettings(projectId, fetchImpl)
-      .catch((error: unknown) => ({ kind: 'refused' as const, reason: String(error) }))
-      .then((outcome) => {
-        if (current) setRead(outcome)
-      })
-    return (): void => {
-      current = false
+  onChanged: TrustChanged,
+): {
+  readonly busy: boolean
+  readonly failure: string | undefined
+  readonly change: (trusted: boolean) => Promise<boolean>
+  readonly clear: () => void
+} {
+  const [busy, setBusy] = useState(false)
+  const [failure, setFailure] = useState<string | undefined>(undefined)
+  const change = async (trusted: boolean): Promise<boolean> => {
+    setBusy(true)
+    setFailure(undefined)
+    try {
+      const outcome = await requestProjectTrust(projectId, trusted, fetchImpl)
+      if (outcome.kind === 'ok') onChanged(outcome.value)
+      else setFailure(`${trusted ? 'Not trusted' : 'Trust not revoked'}: ${outcome.reason}`)
+      return outcome.kind === 'ok'
+    } finally {
+      setBusy(false)
     }
-  }, [projectId, fetchImpl])
-  return read
+  }
+  return { busy, failure, change, clear: () => setFailure(undefined) }
+}
+
+/** What isn't read while the project is untrusted, and what is once it is trusted. */
+const UNTRUSTED_WORDS = `Enso isn’t reading this project’s own files (${OWN_FILES}), so only your settings and Enso’s defaults apply: the setup commands and files to copy they list aren’t used.`
+const TRUSTED_WORDS = `New threads read this project’s own files (${OWN_FILES}) and its .pi/ folder, and a new tree runs the setup commands they list.`
+
+/**
+ * The project's trust over the tabs: not trusted, with **Trust this project…**, whose confirmation
+ * names the files and their setup commands before anything is trusted; or trusted, with **Revoke
+ * trust…** behind its own.
+ */
+function TrustSection({
+  project,
+  trusted,
+  fetchImpl,
+  onChanged,
+}: {
+  project: EnsoProject
+  trusted: boolean
+  fetchImpl: FetchLike | undefined
+  onChanged: TrustChanged
+}): React.ReactNode {
+  const [open, setOpen] = useState(false)
+  const { busy, failure, change, clear } = useTrustChange(project.projectId, fetchImpl, onChanged)
+  const titleId = trusted ? 'trusted-title' : 'untrusted-title'
+  const dialog = {
+    title: project.title,
+    open,
+    busy,
+    failure,
+    onOpenChange: (next: boolean): void => {
+      clear()
+      setOpen(next)
+    },
+  }
+  const confirm = (): void => void change(!trusted).then((done) => done && setOpen(false))
+  return (
+    <section
+      aria-labelledby={titleId}
+      className={cn('grid gap-2 rounded-lg border bg-card px-4 py-3', trusted ? undefined : 'border-dashed')}
+    >
+      <h2 id={titleId} className="flex items-center gap-2 font-semibold">
+        {trusted ? (
+          <ShieldCheckIcon aria-hidden="true" className="size-4" />
+        ) : (
+          <LockIcon aria-hidden="true" className="size-4" />
+        )}
+        {trusted ? 'Trusted' : 'Not trusted yet'}
+      </h2>
+      <p className="text-sm text-muted-foreground">{trusted ? TRUSTED_WORDS : UNTRUSTED_WORDS}</p>
+      <Button type="button" variant="outline" className="justify-self-start" onClick={() => setOpen(true)}>
+        {trusted ? 'Revoke trust…' : 'Trust this project…'}
+      </Button>
+      {trusted ? (
+        <RevokeDialog {...dialog} onRevoke={confirm} />
+      ) : (
+        <TrustDialog
+          {...dialog}
+          projectId={project.projectId}
+          onTrust={confirm}
+          cancelLabel="Cancel"
+          fetch={fetchImpl}
+        />
+      )}
+    </section>
+  )
 }
 
 /** One of the project's threads as the Threads tab lists it: what the rail and the stored listing know of it. */
@@ -339,17 +399,49 @@ function RemoveCard({ removal }: { removal: Removal }): React.ReactNode {
   )
 }
 
-/** Over the tabs: a refused removal, the missing folder, and what isn't read while it is untrusted. */
+/** The project's trust: not trusted with its way to trust, trusted with its way to revoke, or why it was not read. */
+function TrustState({
+  project,
+  trust,
+  fetchImpl,
+  onChanged,
+}: {
+  project: EnsoProject
+  trust: ProjectRequestOutcome<EnsoProjectTrust> | undefined
+  fetchImpl: FetchLike | undefined
+  onChanged: TrustChanged
+}): React.ReactNode {
+  if (trust === undefined) return null
+  if (trust.kind === 'refused')
+    return (
+      <p role="alert" className="text-sm text-destructive">
+        trust not read: {trust.reason}
+      </p>
+    )
+  // Keyed by the state: a change mounts the other section afresh, its confirmation closed.
+  const { trusted } = trust.value
+  return (
+    <TrustSection
+      key={String(trusted)}
+      project={project}
+      trusted={trusted}
+      fetchImpl={fetchImpl}
+      onChanged={onChanged}
+    />
+  )
+}
+
+/** Over the tabs: a refused removal, the missing folder, and the project's trust. */
 function ProjectBanners({
   removal,
-  settings,
   notice,
   onCheckAgain,
+  children,
 }: {
   removal: Removal
-  settings: ProjectRequestOutcome<EnsoProjectSettings> | undefined
   notice: string | undefined
   onCheckAgain: () => Promise<ListingState<EnsoProject>>
+  children: React.ReactNode
 }): React.ReactNode {
   return (
     <>
@@ -361,18 +453,25 @@ function ProjectBanners({
       {removal.project.status === 'missing-dir' ? (
         <MissingFolderBanner removal={removal} onCheckAgain={onCheckAgain} />
       ) : null}
-      {settings?.kind === 'ok' && !settings.value.trusted ? <UntrustedBanner settings={settings.value} /> : null}
-      {settings?.kind === 'refused' ? (
-        <p role="alert" className="text-sm text-destructive">
-          trust not read: {settings.reason}
-        </p>
-      ) : null}
+      {children}
     </>
   )
 }
 
-/** The tabs, at the route's: each a navigation of its own, so back returns to the tab before. */
-function ProjectTabs({ project, props }: { project: EnsoProject; props: ProjectPageProps }): React.ReactNode {
+/**
+ * The tabs, at the route's: each a navigation of its own, so back returns to the tab before.
+ * `trustRevision` moves when the trust changes: the Worktrees tab reads its settings again, since
+ * what they resolve to depends on it.
+ */
+function ProjectTabs({
+  project,
+  props,
+  trustRevision,
+}: {
+  project: EnsoProject
+  props: ProjectPageProps
+  trustRevision: number
+}): React.ReactNode {
   const { route, fetch: fetchImpl, pageThreads, stored, onOpen } = props
   return (
     <Tabs
@@ -393,7 +492,7 @@ function ProjectTabs({ project, props }: { project: EnsoProject; props: ProjectP
         <ThreadsTab project={project} pageThreads={pageThreads} stored={stored} onOpenThread={props.onOpenThread} />
       </TabsContent>
       <TabsContent value="worktrees" className="pt-3">
-        <ProjectWorktrees projectId={project.projectId} fetch={fetchImpl} />
+        <ProjectWorktrees projectId={project.projectId} fetch={fetchImpl} revision={trustRevision} />
       </TabsContent>
       <TabsContent value="storage" className="pt-3">
         <ProjectStorage fetch={fetchImpl} project={project} stored={stored} onDeleted={props.onDeleted} />
@@ -405,13 +504,20 @@ function ProjectTabs({ project, props }: { project: EnsoProject; props: ProjectP
 /** The page for a project the listing has: banners, tabs, and the Remove card. */
 function ProjectBody({ project, props }: { project: EnsoProject; props: ProjectPageProps }): React.ReactNode {
   const { fetch: fetchImpl, pageThreads, stored } = props
-  const settings = useProjectSettings(project.projectId, fetchImpl)
+  const [trust, setTrust] = useProjectTrust(project.projectId, true, fetchImpl)
+  const [trustRevision, setTrustRevision] = useState(0)
   const threadCount = threadsOfProject(project.projectId, { projects: [project], pageThreads, stored }).length
   const removal: Removal = { project, words: removalWords(threadCount), onRemove: props.onRemove }
+  const trustChanged = (next: EnsoProjectTrust): void => {
+    setTrust(next)
+    setTrustRevision((revision) => revision + 1)
+  }
   return (
     <div className="mx-auto grid w-full max-w-3xl gap-4 p-4 md:p-6">
-      <ProjectBanners removal={removal} settings={settings} notice={props.notice} onCheckAgain={props.onCheckAgain} />
-      <ProjectTabs project={project} props={props} />
+      <ProjectBanners removal={removal} notice={props.notice} onCheckAgain={props.onCheckAgain}>
+        <TrustState project={project} trust={trust} fetchImpl={fetchImpl} onChanged={trustChanged} />
+      </ProjectBanners>
+      <ProjectTabs project={project} props={props} trustRevision={trustRevision} />
       <RemoveCard removal={removal} />
     </div>
   )

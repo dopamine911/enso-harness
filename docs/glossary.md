@@ -400,7 +400,8 @@ harness did). The first is canonical and never rewritten by us; the second is th
   file that is there is read once per session and fails closed when unreadable. A trusted project's
   `.enso/config.json` merges over it for that project's sessions.
 - **project trust** — the decision that a project's own files may change a session: the runtime's
-  project directory and the project's `.enso/config.json` (#421, #502). Saved in the runtime's `trust.json` ("Trust project"), or in
+  project directory and the project's `.enso/config.json` (#421, #502). Saved in the runtime's `trust.json` ("Trust project", or
+  the project page's Trust and Revoke, #873 — a revoke saved as an explicit "not trusted"), or in
   the web on the thread itself ("Trust this thread", an `enso-project-trust` entry); undecided is
   untrusted, and the web asks before the first run when the project has its own configuration.
   Secrets are not config: `ENSO_HOME/secrets.env`, read per call, quarantined.

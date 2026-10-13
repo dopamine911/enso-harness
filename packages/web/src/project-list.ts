@@ -3,6 +3,8 @@ import {
   EnsoProject,
   EnsoProjectSettings,
   type EnsoProjectSettingsUpdate,
+  EnsoProjectTrust,
+  type EnsoProjectTrustUpdate,
   type EnsoStoredThread,
 } from '@enso/core'
 import type { Static, TSchema } from 'typebox'
@@ -181,31 +183,57 @@ export async function removeProject(
   return response.ok ? { kind: 'ok', value: null } : refusedBy(response)
 }
 
+/**
+ * One of a project's own resources — its `settings` (#754) or its `trust` (#873) — read, or with
+ * `update` written by a PUT, and the answer checked against `schema`.
+ */
+async function projectResource<Schema extends TSchema>(
+  request: { readonly projectId: string; readonly resource: 'settings' | 'trust'; readonly update?: unknown },
+  schema: Schema,
+  fetchImpl: FetchLike,
+): Promise<ProjectRequestOutcome<Static<Schema>>> {
+  const url = `/api/projects/${encodeURIComponent(request.projectId)}/${request.resource}`
+  const response =
+    request.update === undefined
+      ? await fetchImpl(url)
+      : await fetchImpl(url, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(request.update),
+        })
+  return checkedAnswer(response, schema, `project ${request.resource}`)
+}
+
 /** `GET /api/projects/:id/settings` (#754): the project's tiered settings, each value with the tier it came from. */
-export async function readProjectSettings(
+export function readProjectSettings(
   projectId: string,
   fetchImpl: FetchLike = fetch,
 ): Promise<ProjectRequestOutcome<EnsoProjectSettings>> {
-  return checkedAnswer(
-    await fetchImpl(`/api/projects/${encodeURIComponent(projectId)}/settings`),
-    EnsoProjectSettings,
-    'project settings',
-  )
+  return projectResource({ projectId, resource: 'settings' }, EnsoProjectSettings, fetchImpl)
 }
 
 /** `PUT /api/projects/:id/settings` (#754): set or clear keys in one of the project's own tiers; the settings as they now resolve. */
-export async function saveProjectSettings(
+export function saveProjectSettings(
   projectId: string,
   update: EnsoProjectSettingsUpdate,
   fetchImpl: FetchLike = fetch,
 ): Promise<ProjectRequestOutcome<EnsoProjectSettings>> {
-  return checkedAnswer(
-    await fetchImpl(`/api/projects/${encodeURIComponent(projectId)}/settings`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(update),
-    }),
-    EnsoProjectSettings,
-    'project settings',
+  return projectResource({ projectId, resource: 'settings', update }, EnsoProjectSettings, fetchImpl)
+}
+
+/**
+ * `GET /api/projects/:id/trust` (#873) with no `change`: whether the project is trusted, and the
+ * files and setup commands trust turns on. With one, `PUT`: trust it (`true`) or revoke it
+ * (`false`). Either way the trust as it now stands; a request that never reached the server is a
+ * refusal with its reason, never a rejection.
+ */
+export function requestProjectTrust(
+  projectId: string,
+  change: boolean | undefined,
+  fetchImpl: FetchLike = fetch,
+): Promise<ProjectRequestOutcome<EnsoProjectTrust>> {
+  const update: EnsoProjectTrustUpdate | undefined = change === undefined ? undefined : { trusted: change }
+  return projectResource({ projectId, resource: 'trust', update }, EnsoProjectTrust, fetchImpl).catch(
+    (error: unknown) => ({ kind: 'refused', reason: `the trust request did not reach the server: ${String(error)}` }),
   )
 }
