@@ -1,5 +1,9 @@
 import type { ExtensionAPI, InlineExtension } from '@earendil-works/pi-coding-agent'
 import {
+  ENSO_GUARD_CHECK_CHANNEL,
+  type EnsoGuardCheck,
+  type EnsoGuardCheckQuestion,
+  type EnsoGuardRefusal,
   type EnsoPermissionCheckRequest,
   type EnsoPermissionVerdict,
   type EnsoTranscriptEntry,
@@ -14,21 +18,86 @@ import {
 } from '@gotgenes/pi-permission-system'
 
 /**
- * The engine's own verdict for a value on a surface, in the mode the thread's entries record NOW
- * (#474). Asked of the engine the session runs — never a second matcher; `undefined` when the engine
- * has published no service for the thread.
+ * "Try a command" (#474, #881): a thread's verdict on a value, asked of the layers a call meets in
+ * the order it meets them — the guards, then the permission engine — and of the code each of them
+ * runs: the guard's own decision, asked over the session's bus, and the engine's own query. Never a
+ * second matcher, so the check cannot say what the session would not do.
+ */
+
+/** A tool call as the guards judge one: the tool and its arguments. */
+interface GuardCall {
+  readonly toolName: string
+  readonly input: Readonly<Record<string, unknown>>
+}
+
+/**
+ * The tool call a value on a surface stands for: a command is a `bash` call, a path gate's path a
+ * `read` or a `write` of it. ⚠ A path to write is asked as `write`, the stricter of the two mutating
+ * tools (a `write` over a file the session has not read is refused where an `edit` passes), and the
+ * answer names the tool it asked as. Every other surface is a tool's own gate, whose check carries no
+ * arguments, while the guards judge a call by its arguments: not asked.
+ */
+const GUARD_CALLS: Readonly<Record<string, (value: string) => GuardCall>> = {
+  bash: (command) => ({ toolName: 'bash', input: { command } }),
+  path_read: (path) => ({ toolName: 'read', input: { path } }),
+  external_directory_read: (path) => ({ toolName: 'read', input: { path } }),
+  path_write: (path) => ({ toolName: 'write', input: { path } }),
+  external_directory_write: (path) => ({ toolName: 'write', input: { path } }),
+}
+
+/** A thread as the check asks it: its id, its entries (the mode), its directory and its bus. */
+export interface PermissionCheckThread {
+  readonly threadId: string
+  readonly entries: readonly EnsoTranscriptEntry[]
+  /** The session's directory: where the guard resolves a path, as it does a call's. */
+  readonly cwd: string
+  /** The session's extension bus, where its guard listens; undefined before the extensions bind. */
+  readonly events: ExtensionAPI['events'] | undefined
+}
+
+/** What the session's guard answers the call now, asked on its bus, which answers synchronously (`ENSO_GUARD_CHECK_CHANNEL`). */
+function guardCheckOf(thread: PermissionCheckThread, request: EnsoPermissionCheckRequest): EnsoGuardCheck {
+  const call = GUARD_CALLS[request.surface]?.(request.value)
+  if (call === undefined) {
+    return {
+      kind: 'not-checked',
+      reason: `the guards judge a tool call by its arguments, and a check on ${request.surface} carries none: only a command (bash) or a path gate's path is asked`,
+    }
+  }
+  if (thread.events === undefined) {
+    return { kind: 'not-checked', reason: "the thread's extensions are not bound yet, so no guard can be asked" }
+  }
+  let answered = undefined as { readonly refusal: EnsoGuardRefusal | undefined } | undefined
+  const question: EnsoGuardCheckQuestion = {
+    ...call,
+    cwd: thread.cwd,
+    answer: (refusal) => {
+      answered = { refusal }
+    },
+  }
+  thread.events.emit(ENSO_GUARD_CHECK_CHANNEL, question)
+  if (answered === undefined) return { kind: 'not-checked', reason: 'no guard answered: none is loaded in this thread' }
+  const { refusal } = answered
+  return refusal === undefined
+    ? { kind: 'passed', tool: call.toolName }
+    : { kind: 'refused', tool: call.toolName, rule: refusal.rule, reason: refusal.reason }
+}
+
+/**
+ * The thread's verdict for a value on a surface, in the mode its entries record NOW: the guards'
+ * answer, then the engine's. `undefined` when the engine has published no service for the thread.
  */
 export function permissionVerdictOf(
-  threadId: string,
-  entries: readonly EnsoTranscriptEntry[],
+  thread: PermissionCheckThread,
   request: EnsoPermissionCheckRequest,
 ): EnsoPermissionVerdict | undefined {
-  const service = getPermissionsService(threadId)
+  const service = getPermissionsService(thread.threadId)
   if (service === undefined) return undefined
-  const mode = recordedPermissionMode(entries)
+  const mode = recordedPermissionMode(thread.entries)
   const result = service.checkPermission(request.surface, request.value, modeAgentName(mode))
   return {
     mode,
+    guard: guardCheckOf(thread, request),
     state: result.state,
     origin: result.origin,
     ...(result.matchedPattern === undefined ? {} : { matchedPattern: result.matchedPattern }),

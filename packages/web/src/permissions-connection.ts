@@ -152,7 +152,7 @@ export async function resetPermissionPolicy(
   }
 }
 
-/** The engine's own verdict on `request` for `threadId`, in that thread's current mode. */
+/** The verdict on `request` for `threadId` in that thread's current mode: its guards' answer, then its engine's. */
 export async function checkPermission(
   threadId: string,
   request: EnsoPermissionCheckRequest,

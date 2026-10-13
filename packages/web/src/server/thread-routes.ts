@@ -83,8 +83,8 @@ const THREAD_COMMAND_ROUTE = threadRoute('command')
 /** `POST …/configure` (#391): a new session's model, effort and mode, applied together — the Start-a-session dialog. */
 const THREAD_CONFIGURE_ROUTE = threadRoute('configure')
 /**
- * `POST …/permissions/check` (#474): the permission engine's verdict for `{ surface, value }` in the
- * thread's mode now — Settings' "Try a command". Builds the thread on ask, as a preview does.
+ * `POST …/permissions/check` (#474, #881): the thread's verdict for `{ surface, value }` in its mode
+ * now, the guards' answer then the engine's — Settings' "Try a command". Builds the thread on ask, as a preview does.
  */
 const THREAD_PERMISSION_CHECK_ROUTE = threadRoute('permissions/check')
 /**

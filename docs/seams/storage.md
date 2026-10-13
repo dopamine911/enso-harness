@@ -207,10 +207,11 @@ export interface HostedThread {
    */
   probeToolCall(toolName: string, input: Record<string, unknown>): Promise<ToolCallVerdict | undefined>
   /**
-   * The permission engine's own verdict for a value on a surface, in this thread's mode NOW (#474):
-   * what a call carrying it would meet, the pattern that decided it and where that rule came from
-   * (`global`, the user's file; `agent`, the mode's preset). Asked of the engine the session runs —
-   * never a second matcher. `undefined` when the engine has published no service for the session.
+   * The thread's verdict for a value on a surface, in its mode NOW (#474, #881), layer by layer as a
+   * call meets them: the guards' answer first (a refusal decides, in every mode), then the permission
+   * engine's — the pattern that decided it and where that rule came from (`global`, the user's file;
+   * `agent`, the mode's preset). Asked of the session's own guard and engine, never a second matcher,
+   * and nothing is recorded. `undefined` when the engine has published no service for the session.
    */
   checkPermission(request: EnsoPermissionCheckRequest): EnsoPermissionVerdict | undefined
   /**

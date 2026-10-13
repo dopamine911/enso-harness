@@ -4,6 +4,7 @@ import {
   ENSO_MODE_PRESETS,
   ENSO_PERMISSION_MODES,
   type EnsoDraftedRuleGroup,
+  type EnsoGuardCheck,
   type EnsoPermissionAction,
   type EnsoPermissionMap,
   type EnsoPermissionModeName,
@@ -57,9 +58,9 @@ import {
  * open thread's live engine. Only the user's file: project policy is #502's, not this section's.
  *
  * ⚠ THE PAGE NEVER GUESSES A VERDICT. What a mode does to the rules is `effectiveRows` (pinned to
- * the engine by `agent-host.test.ts`); what a given command gets is only ever the engine's answer,
- * through the open thread (built on ask). When its engine has not loaded, the section says so
- * rather than match patterns itself.
+ * the engine by `agent-host.test.ts`); what a given command gets is only ever the open thread's
+ * answer (built on ask): its guards' first, which refuse in every mode (#881), then its engine's.
+ * When its engine has not loaded, the section says so rather than match patterns itself.
  */
 
 const ACTIONS: ReadonlyArray<readonly [EnsoPermissionAction, string]> = [
@@ -715,14 +716,44 @@ const ORIGIN_WORDS: Readonly<Record<string, string>> = {
   yolo: 'yoloMode approved this ask',
 }
 
-/** The engine's answer, as it gave it. */
+/**
+ * What the guards said of the value (#881). They decide before the engine, in every mode: a refusal
+ * is the answer, and the engine's verdict after it is moot; a check they were not asked says so.
+ */
+function GuardAnswer({ guard }: { guard: EnsoGuardCheck }): React.ReactNode {
+  if (guard.kind === 'refused') {
+    return (
+      <div aria-label="guard" className="flex flex-col gap-1 rounded-md border border-destructive/50 p-2">
+        <p>
+          <span className="font-semibold text-destructive">Refused by a guard: {guard.rule}</span> — asked as a{' '}
+          <code>{guard.tool}</code> call, in every mode.
+        </p>
+        <p className="whitespace-pre-line text-muted-foreground">{guard.reason}</p>
+        <p>The engine's verdict below is moot: the guard refuses the call before the engine is asked.</p>
+      </div>
+    )
+  }
+  return (
+    <p aria-label="guard">
+      {guard.kind === 'passed' ? (
+        <>
+          No guard refuses it (asked as a <code>{guard.tool}</code> call): the engine decides.
+        </>
+      ) : (
+        `The guards were not asked: ${guard.reason}. The engine's verdict alone is below, and a guard may still refuse the call.`
+      )}
+    </p>
+  )
+}
+
+/** The thread's answer, layer by layer as a call meets them: the guards, then the engine. */
 function CheckAnswer({ answer }: { answer: PermissionCheck | 'no-thread' | undefined }): React.ReactNode {
   if (answer === undefined) return null
   if (answer === 'no-thread' || answer.kind === 'not-live') {
     return (
       <p role="status" className="text-xs">
         {answer === 'no-thread'
-          ? 'Open a thread to ask its engine.'
+          ? 'Open a thread to check against its guards and engine.'
           : "This thread's permission engine has not loaded, so nothing there decides a call."}
         {answer === 'no-thread' ? '' : ` (${answer.detail})`}
       </p>
@@ -730,21 +761,25 @@ function CheckAnswer({ answer }: { answer: PermissionCheck | 'no-thread' | undef
   }
   if (answer.kind === 'unavailable') return <FieldError>{answer.detail}</FieldError>
   const { verdict } = answer
+  const moot = verdict.guard.kind === 'refused'
   return (
-    <dl aria-label="verdict" className="flex flex-col text-xs">
-      <VerdictLine term="mode">{verdict.mode}</VerdictLine>
-      <VerdictLine term="decision">
-        <span className="font-semibold">{verdict.state}</span>
-      </VerdictLine>
-      <VerdictLine term="matched">
-        {verdict.matchedPattern === undefined ? 'no pattern' : <code>{verdict.matchedPattern}</code>}
-      </VerdictLine>
-      <VerdictLine term="from">
-        {verdict.origin}
-        {ORIGIN_WORDS[verdict.origin] === undefined ? '' : ` — ${ORIGIN_WORDS[verdict.origin]}`}
-      </VerdictLine>
-      {verdict.reason === undefined ? null : <VerdictLine term="reason">{verdict.reason}</VerdictLine>}
-    </dl>
+    <div className="flex flex-col gap-2 text-xs">
+      <GuardAnswer guard={verdict.guard} />
+      <dl aria-label="verdict" className={moot ? 'flex flex-col opacity-60' : 'flex flex-col'}>
+        <VerdictLine term="mode">{verdict.mode}</VerdictLine>
+        <VerdictLine term={moot ? 'engine (moot)' : 'engine'}>
+          <span className="font-semibold">{verdict.state}</span>
+        </VerdictLine>
+        <VerdictLine term="matched">
+          {verdict.matchedPattern === undefined ? 'no pattern' : <code>{verdict.matchedPattern}</code>}
+        </VerdictLine>
+        <VerdictLine term="from">
+          {verdict.origin}
+          {ORIGIN_WORDS[verdict.origin] === undefined ? '' : ` — ${ORIGIN_WORDS[verdict.origin]}`}
+        </VerdictLine>
+        {verdict.reason === undefined ? null : <VerdictLine term="reason">{verdict.reason}</VerdictLine>}
+      </dl>
+    </div>
   )
 }
 
@@ -752,14 +787,14 @@ function CheckAnswer({ answer }: { answer: PermissionCheck | 'no-thread' | undef
 function VerdictLine({ term, children }: { term: string; children: React.ReactNode }): React.ReactNode {
   return (
     <div className="flex gap-3">
-      <dt className="w-16 shrink-0 text-muted-foreground">{term}</dt>
+      <dt className="w-24 shrink-0 text-muted-foreground">{term}</dt>
       <dd>{children}</dd>
     </div>
   )
 }
 
 /**
- * Try a command: the engine's own verdict for the open thread, in its current mode.
+ * Try a command: the open thread's verdict in its current mode, from its own guards and engine.
  * ⚠ The file as SAVED is what the engine runs under — an unsaved draft is not asked about.
  */
 function TryCommand({
@@ -808,7 +843,7 @@ function TryCommand({
           }}
         />
         <Button variant="outline" size="sm" disabled={threadId === undefined || asking} onClick={() => void ask()}>
-          Ask the engine
+          Check
         </Button>
       </span>
       {unsaved ? (

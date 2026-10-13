@@ -20,6 +20,8 @@ import {
   type EnsoFollowFrame,
   type EnsoModelState,
   type EnsoObservation,
+  type EnsoPermissionCheckRequest,
+  EnsoPermissionVerdict,
   EnsoProject,
   EnsoProjectSettings,
   EnsoProjectPromptLibrary,
@@ -2597,4 +2599,46 @@ test('"Try a command" in a thread whose engine published no service is a 409, ne
   const check = await send(url, '/api/threads/t-check/permissions/check', 'POST', { surface: 'bash', value: 'ls' })
   expect(check.status).toBe(409)
   expect((await send(url, '/api/threads/t-check/permissions/check', 'POST', { surface: 'bash' })).status).toBe(400)
+})
+
+// #881: the route hands the page the thread's verdict whole, its guard layer included, and asks the
+// thread about exactly the value sent. The thread here is a fake answering as the real host does:
+// only `agent-host.test.ts` may build a real one (#518), and that file's zone may not import the
+// server (fallow boundaries), so the real guard and engine are pinned there, on the call made here.
+test("Try a command over HTTP: a guard's refusal reaches the page beside the engine's moot verdict, for the value sent (#881)", async () => {
+  const asked: unknown[] = []
+  const refused: EnsoPermissionVerdict = {
+    mode: 'bypassPermissions',
+    guard: {
+      kind: 'refused',
+      tool: 'bash',
+      rule: 'secret-path',
+      reason: 'bash command refused: "~/.ssh/id_ed25519" names credential material.',
+    },
+    state: 'allow',
+    matchedPattern: 'cat *',
+    origin: 'global',
+  }
+  const { url } = await startWith(settlesAtOnce, {}, (host: AgentHost) => ({
+    ...host,
+    createSession: async (threadId: string, newSessionDirectory: () => string) => {
+      const hosted = await host.createSession(threadId, newSessionDirectory)
+      return {
+        ...hosted,
+        checkPermission: (request: EnsoPermissionCheckRequest) => {
+          asked.push(request)
+          return refused
+        },
+      }
+    },
+  }))
+  const check = await send(url, '/api/threads/t-guard/permissions/check', 'POST', {
+    surface: 'bash',
+    value: 'cat ~/.ssh/id_ed25519',
+  })
+  expect(check.status).toBe(200)
+  const body: unknown = JSON.parse(check.body)
+  expect(Check(EnsoPermissionVerdict, body)).toBe(true)
+  expect(body).toEqual(refused)
+  expect(asked).toEqual([{ surface: 'bash', value: 'cat ~/.ssh/id_ed25519' }])
 })

@@ -322,7 +322,10 @@ session's risk and incidents from the branch with the incident policy read afres
 policy's tool names against the live tool list (`guard-session.ts#verifyPolicyToolNames`); `tool_result`
 → `toolResult`, which records which files the session has seen, from *results* only — a blocked call
 produces no result and a failed one arrives `isError`; `tool_call` → `toolCall`, which records the call
-for the session's risk, calls `decide` and logs the verdict.
+for the session's risk, calls `decide` and logs the verdict. The session also listens on its runtime's
+bus for a host's check (`ENSO_GUARD_CHECK_CHANNEL`, #881, Settings' "Try a command"): a call described,
+not made, answered synchronously with `decide`'s refusal or none (`guard-session.ts#answerCheck`), and
+nothing recorded — no risk signal, no denial entry, no judge, no patch.
 
 **`decide`'s order** (`guard-session.ts#decide`) — nested, so described, not fenced:
 

@@ -4,10 +4,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   DEFAULT_GUARD_POLICY,
+  ENSO_GUARD_CHECK_CHANNEL,
   ENSO_GUARD_DENIAL_ENTRY,
   ENSO_INCIDENT_OPENED_ENTRY,
   ENSO_INCIDENT_REPORT_MISSING_ENTRY,
   ENSO_INCIDENT_RESOLVED_CHANNEL,
+  type EnsoGuardRefusal,
   type EnsoIncidentOpened,
   type EnsoTranscriptEntry,
   incidentPolicyOf,
@@ -154,4 +156,46 @@ test("knowledge comes from the runtime's word on a result: a read it calls parti
   })
   session.toolResult({ ...read, wholeFile: true })
   expect(call(session, 'write', { path: file, content: 'x' })).toEqual({ kind: 'allowed' })
+})
+
+/** What the session answers a check on the runtime's bus (#881): its refusal, `undefined`, or `'unanswered'`. */
+function checked(
+  runtime: FakeRuntime,
+  toolName: string,
+  input: Record<string, unknown>,
+): EnsoGuardRefusal | undefined | 'unanswered' {
+  let answered: EnsoGuardRefusal | undefined | 'unanswered' = 'unanswered'
+  const answer = (refusal: EnsoGuardRefusal | undefined): void => {
+    answered = refusal
+  }
+  runtime.announce(ENSO_GUARD_CHECK_CHANNEL, { toolName, input, cwd: WORKSPACE, answer })
+  return answered
+}
+
+// @pins guarded-tool-call/check-is-the-call
+test("⚠ a check on the runtime's bus answers what the call would now, from the session's state, and records nothing (#881)", () => {
+  const file = join(WORKSPACE, 'checked.txt')
+  writeFileSync(file, 'one\n')
+  const runtime = fakeRuntime()
+  const session = startedSession(runtime)
+
+  // A write over a file the session has not read is refused, as its call is; nothing is recorded.
+  const unread = checked(runtime, 'write', { path: file })
+  expect(unread).toEqual({ rule: 'read-before-write', reason: expect.stringContaining('has not read it') })
+  expect(checked(runtime, 'Bash', { command: 'ls' })).toBeUndefined()
+  expect(runtime.appended).toEqual([])
+  if (typeof unread !== 'object') throw new Error('expected a refusal')
+  expect(call(session, 'write', { path: file, content: 'x' })).toMatchObject({ kind: 'refused', reason: unread.reason })
+
+  // The session's state moves the answer: once it has read the whole file, the same check passes.
+  session.toolResult({ toolName: 'read', input: { path: file }, isError: false, wholeFile: true, cwd: WORKSPACE })
+  expect(checked(runtime, 'write', { path: file })).toBeUndefined()
+})
+
+test('a malformed check is not answered and does not throw (#881)', () => {
+  const runtime = fakeRuntime()
+  startedSession(runtime)
+  expect(() => runtime.announce(ENSO_GUARD_CHECK_CHANNEL, { toolName: 'bash', cwd: WORKSPACE })).not.toThrow()
+  expect(() => runtime.announce(ENSO_GUARD_CHECK_CHANNEL, 'bash')).not.toThrow()
+  expect(runtime.appended).toEqual([])
 })

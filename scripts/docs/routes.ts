@@ -134,7 +134,7 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
     handler: 'respondToPermissionCheck → HostedThread.checkPermission',
     input: 'path: `threadId`; body: `EnsoPermissionCheckRequest` — a `surface` and a `value`',
     success:
-      "200 `EnsoPermissionVerdict` JSON (#474) — the permission engine's own verdict in the thread's mode now: its decision, the pattern that won and where that rule came from (`global`, the user's file; `agent`, the mode's preset); nothing runs",
+      "200 `EnsoPermissionVerdict` JSON (#474, #881) — the thread's verdict in its mode now, layer by layer: the guards' answer first (`guard`: refused with its rule and reason, which decides in every mode, passed, or not checked and why), then the permission engine's decision, the pattern that won and where that rule came from (`global`, the user's file; `agent`, the mode's preset); nothing runs and nothing is recorded",
     errors: `${BODY_ERRORS}; 409 the engine published no service for the session; 413 body too large; 500 handler failure`,
     routeClass: 'observation',
     builds: 'yes',

@@ -3,8 +3,10 @@ import { homedir } from 'node:os'
 import {
   type CommandJudge,
   DEFAULT_GUARD_POLICY,
+  ENSO_GUARD_CHECK_CHANNEL,
   ENSO_GUARD_DENIAL_ENTRY,
   ENSO_LOG_EVENTS,
+  type EnsoGuardCheckQuestion,
   type EnsoGuardDenial,
   type EnsoIncidentPolicy,
   type EnsoTranscriptEntry,
@@ -643,5 +645,33 @@ export function createGuardSession(runtime: GuardRuntime, dependencies: GuardSes
     )
   }
 
+  /**
+   * @invariant guarded-tool-call/check-is-the-call A check is the call's own decision, unrecorded (#881).
+   * Settings' "Try a command" asks on `ENSO_GUARD_CHECK_CHANNEL`, and the answer is `decide`'s, the
+   * function `toolCall` runs, in this session's state now: the floor, a suspension, what it has read.
+   * So a check and the call it stands for cannot disagree. Nothing is recorded: no risk signal, no
+   * denial entry, no judge, no patch, since no call was made.
+   */
+  function answerCheck(raw: unknown): void {
+    const question = checkQuestionOf(raw)
+    if (question === undefined) {
+      log.error('a guard check arrived malformed; nothing is answered: {raw}', { raw })
+      return
+    }
+    const refusal = decide(canonicalToolName(question.toolName), inputRecordOf(question.input), question.cwd)
+    question.answer(refusal === undefined ? undefined : { rule: refusal.rule, reason: refusal.reason })
+  }
+  runtime.on(ENSO_GUARD_CHECK_CHANNEL, answerCheck)
+
   return { start, toolCall, toolResult, permissionDecision: (raw) => security.permissionDecision(raw) }
+}
+
+/** A host's question on `ENSO_GUARD_CHECK_CHANNEL`, read defensively: a bus carries `unknown`. */
+function checkQuestionOf(raw: unknown): EnsoGuardCheckQuestion | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined
+  if (!('toolName' in raw && 'cwd' in raw && 'answer' in raw)) return undefined
+  const { toolName, cwd, answer } = raw
+  if (typeof toolName !== 'string' || typeof cwd !== 'string' || typeof answer !== 'function') return undefined
+  const input = 'input' in raw ? inputRecordOf(raw.input) : {}
+  return { toolName, input, cwd, answer: (refusal) => answer(refusal) }
 }
