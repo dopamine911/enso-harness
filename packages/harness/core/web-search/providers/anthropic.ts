@@ -18,11 +18,15 @@ const ANTHROPIC_API_VERSION = '2023-06-01'
 /** The beta flags the Claude Code OAuth credential requires on direct API calls. */
 const ANTHROPIC_OAUTH_BETA_FLAGS = 'claude-code-20250219,oauth-2025-04-20'
 /**
- * ⚠ A pinned Claude Code version string, matching pi-ai's own hardcoded
- * `claudeCodeVersion = "2.1.75"` (anthropic-messages.js) — pi exposes no export for it,
- * so this pin drifts in step with pi's, not with the real Claude Code.
+ * ⚠ The Claude Code version the OAuth search claims: EXACTLY pi-ai's own hardcoded
+ * `claudeCodeVersion` (anthropic-messages.js), which pi's conversation path sends — pi exposes no
+ * export for it, and `harness/core` may not import pi (#145). A drift is a broken search, not a
+ * cosmetic one: Anthropic refuses the OAuth `web_search` tool below its minimum
+ * (`claude_code_version_too_old`, #925) while conversations still pass. `web-search-wire.test.ts`
+ * reads pi's installed value and fails when this one differs, so a pi upgrade that moves it is
+ * caught there.
  */
-const ANTHROPIC_OAUTH_USER_AGENT = 'claude-cli/2.1.75'
+const ANTHROPIC_OAUTH_USER_AGENT = 'claude-cli/2.1.280'
 /**
  * ⚠ Load-bearing on the OAuth path, not branding: Anthropic rejects a Claude Code OAuth
  * credential whose request lacks this exact identity as the first system block —
