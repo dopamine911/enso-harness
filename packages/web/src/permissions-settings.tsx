@@ -96,11 +96,12 @@ export interface PolicyEditor {
 }
 
 /**
- * The policy as read and the draft over it, read each time the dialog opens.
+ * The policy as read and the draft over it, read each time Settings opens.
  *
- * ⚠ HELD BY THE DIALOG, NOT THE SECTION: closing Settings or switching tab keeps an unsaved draft.
- * An open with a draft pending does not re-read — the draft was made on the version read, and a
- * newer read would let its save overwrite a change it never saw; the save's 412 says so instead.
+ * ⚠ HELD BENEATH SETTINGS, NOT BY THE SECTION: leaving Settings or switching section keeps an unsaved
+ * draft (`routed-page.tsx` holds it). An open with a draft pending does not re-read — the draft was
+ * made on the version read, and a newer read would let its save overwrite a change it never saw;
+ * the save's 412 says so instead.
  */
 export function usePermissionPolicy(open: boolean, fetchImpl: FetchLike | undefined): PolicyEditor {
   const [state, setState] = useState<PolicyState>({ kind: 'loading' })
@@ -907,8 +908,8 @@ function UnreadableWarning({ reason }: { reason: string }): React.ReactNode {
 }
 
 /**
- * The Permissions tab. `editor` is the dialog's (`usePermissionPolicy`); `threadId` is the open
- * thread "Try a command" asks.
+ * Settings' Permissions section. `editor` is the page's (`usePermissionPolicy`); `threadId` is the
+ * thread behind the page, the one "Try a command" asks.
  */
 export function PermissionsSection({
   editor,

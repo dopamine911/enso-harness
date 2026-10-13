@@ -1,7 +1,7 @@
 /*
  * THE COLOUR THEMES (src/theme.ts). Each is the shadcn token set plus Enso's own — the four
  * state roles (`evidence`, `human`, `ok`, `refuse`), `border-strong`, `radius` and the three
- * font stacks — chosen by `data-theme` on <html>; the settings dialog sets it and this browser
+ * font stacks — chosen by `data-theme` on <html>; Settings' Appearance sets it and this browser
  * keeps it. EVERY BLOCK DECLARES EVERY VARIABLE: `.dark` and `:root` alias two themes, so a
  * block that left one out would borrow it from them (`__tests__/theme.test.ts`). Each block
  * states its `color-scheme`, and the page keeps the `dark` class on <html> only for a dark theme,

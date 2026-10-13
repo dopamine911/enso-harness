@@ -5,22 +5,25 @@ import {
   type EnsoPermissionPolicyWrite,
   type EnsoPermissionVerdict,
 } from '@enso/core'
-import { act } from 'react'
+import { act, useState } from 'react'
 import type { createRoot as CreateRoot, Root } from 'react-dom/client'
 import { Check } from 'typebox/value'
-import type * as SettingsDialogModule from '../settings-dialog.tsx'
+import type * as RoutedPageModule from '../routed-page.tsx'
+import type { PageUrl } from '../thread-url.ts'
 import { ensureDom, releaseDom } from './dom-environment.ts'
+import { requestedUrl } from './scripted-server.ts'
 
 // ⚠ A DOM before react-dom/client and Radix evaluate — `dom-environment.ts` has the measurement.
 ensureDom()
 const { createRoot }: { createRoot: typeof CreateRoot } = await import('react-dom/client')
-const { SettingsDialog }: typeof SettingsDialogModule = await import('../settings-dialog.tsx')
+const { RoutedPage }: typeof RoutedPageModule = await import('../routed-page.tsx')
 
 /**
- * Settings' Permissions tab (#474), MOUNTED under happy-dom over a scripted server: a save names
- * the version read and sends the whole file, a 412 keeps the draft until the person reloads, a 422
- * lists the schema's problems, the yolo banner follows the file, Enso's `**` takes an action change
- * only, and "Try a command" never guesses without a live thread.
+ * Settings' Permissions section (#474), MOUNTED under happy-dom over a scripted server, held as the
+ * page holds it (`RoutedPage`, #869): a save names the version read and sends the whole file, a 412
+ * keeps the draft until the person reloads, a 422 lists the schema's problems, the yolo banner
+ * follows the file, Enso's `**` takes an action change only, "Try a command" never guesses without
+ * a live thread, and leaving Settings keeps an unsaved draft.
  */
 
 afterAll(releaseDom)
@@ -78,7 +81,12 @@ interface Sent {
 
 interface Mounted {
   readonly sent: Sent[]
-  readonly dialog: () => HTMLElement
+  /** The section on screen: its heading and its body. */
+  readonly section: () => HTMLElement
+  /** The section links, as the reader moves between sections. */
+  readonly nav: () => HTMLElement
+  /** Show `page` instead, as the page's navigation would: a section, or none — the reader on a thread. */
+  readonly show: (page: PageUrl | undefined) => Promise<void>
   readonly unmount: () => Promise<void>
 }
 const leftOpen = new Set<Mounted>()
@@ -135,6 +143,34 @@ function answer(request: string, body: unknown, file: Record<string, unknown>, w
   return new Response('not scripted', { status: 404 })
 }
 
+const PERMISSIONS: PageUrl = { kind: 'settings', section: 'permissions' }
+const NO_ROWS = { rows: [], error: undefined }
+
+/** What the page around Settings does with it: the page on screen, moved by Settings' own links or by `show`. */
+function SettingsOnPage({
+  threadId,
+  control,
+}: {
+  threadId: string | undefined
+  control: { show: (page: PageUrl | undefined) => void }
+}): React.ReactNode {
+  const [page, setPage] = useState<PageUrl | undefined>(PERMISSIONS)
+  control.show = setPage
+  return (
+    <RoutedPage
+      page={page}
+      onOpen={setPage}
+      onLeave={(): void => setPage(undefined)}
+      threadId={threadId}
+      projects={NO_ROWS}
+      stored={NO_ROWS}
+      onDeleted={(deleted): void => {
+        throw new Error(`the Permissions tests delete no thread, yet ${deleted} was`)
+      }}
+    />
+  )
+}
+
 async function mountSettings(
   options: { threadId?: string; file?: Record<string, unknown>; override?: Override } = {},
 ): Promise<Mounted> {
@@ -142,67 +178,53 @@ async function mountSettings(
   const container = document.createElement('div')
   document.body.appendChild(container)
   const root: Root = createRoot(container)
-  const fetch = (input: string, init?: RequestInit): Promise<Response> => {
-    const request = `${init?.method ?? 'GET'} ${input}`
+  const pageFetch = globalThis.fetch
+  // The page's own `fetch`: Settings reads and writes through it, as it does in the page.
+  globalThis.fetch = ((input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    const request = `${init?.method ?? 'GET'} ${requestedUrl(input)}`
     const body: unknown = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined
     const headers = new Headers(init?.headers)
     sent.push({ request, ifMatch: headers.get('If-Match'), ifNoneMatch: headers.get('If-None-Match'), body })
     const writes = sent.filter((entry) => entry.request === 'PUT /api/permissions').length
     return Promise.resolve(options.override?.(request) ?? answer(request, body, options.file ?? FILE, writes))
-  }
+  }) as typeof fetch
+  const control: { show: (page: PageUrl | undefined) => void } = { show: () => undefined }
   await act(async () => {
-    root.render(
-      <SettingsDialog
-        threadId={options.threadId}
-        fetch={fetch}
-        projects={[]}
-        stored={[]}
-        onDeleted={(threadId): void => {
-          throw new Error(`the Permissions tests delete no thread, yet ${threadId} was`)
-        }}
-      />,
-    )
+    root.render(<SettingsOnPage threadId={options.threadId} control={control} />)
   })
-  const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="settings"]')
-  if (trigger === null) throw new Error('expected the settings button')
-  await act(async () => trigger.click())
+  const within = (selector: string): HTMLElement => {
+    const found = container.querySelector<HTMLElement>(selector)
+    if (found === null) throw new Error(`expected ${selector} on the page`)
+    return found
+  }
   const mounted: Mounted = {
     sent,
-    dialog: (): HTMLElement => {
-      const found = document.querySelector<HTMLElement>('[role="dialog"]')
-      if (found === null) throw new Error('expected Settings to be open')
-      return found
-    },
+    section: () => within('section[aria-labelledby="settings-section-heading"]'),
+    nav: () => within('nav[aria-label="Settings sections"]'),
+    show: (page) =>
+      act(async () => {
+        control.show(page)
+      }),
     unmount: async (): Promise<void> => {
       if (!leftOpen.delete(mounted)) return
       await act(async () => root.unmount())
       container.remove()
+      globalThis.fetch = pageFetch
     },
   }
   leftOpen.add(mounted)
-  const tab = await eventually(() => {
-    const found = [...mounted.dialog().querySelectorAll<HTMLElement>('[role="tab"]')].find(
-      (candidate) => candidate.textContent === 'Permissions',
-    )
-    if (found === undefined) throw new Error('expected the Permissions tab')
-    return found
-  })
-  // Radix activates a tab on mousedown, as a pointer does; a bare click event would not.
-  await act(async () => {
-    tab.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }))
-  })
-  await eventually(() => expect(mounted.dialog().textContent).toContain('/home/person/.enso/permissions.json'))
+  await eventually(() => expect(mounted.section().textContent).toContain('/home/person/.enso/permissions.json'))
   return mounted
 }
 
 function find<Found extends Element>(mounted: Mounted, selector: string): Found {
-  const found = mounted.dialog().querySelector<Found>(selector)
+  const found = mounted.section().querySelector<Found>(selector)
   if (found === null) throw new Error(`expected ${selector}`)
   return found
 }
 
 function buttonNamed(mounted: Mounted, name: string): HTMLButtonElement {
-  const found = [...mounted.dialog().querySelectorAll<HTMLButtonElement>('button')].find(
+  const found = [...mounted.section().querySelectorAll<HTMLButtonElement>('button')].find(
     (button) => button.textContent?.trim() === name || button.getAttribute('aria-label') === name,
   )
   if (found === undefined) throw new Error(`expected the ${name} button`)
@@ -263,6 +285,32 @@ test('⚠ Save sends the whole file under the ETag read, and the next save names
   expect(writtenPermission(mounted, 1)).toMatchObject({ read: 'ask' })
 })
 
+/** Follow one of Settings' section links, as the reader does. */
+async function openSection(mounted: Mounted, label: string): Promise<void> {
+  const link = [...mounted.nav().querySelectorAll<HTMLButtonElement>('button')].find(
+    (button) => button.textContent === label,
+  )
+  if (link === undefined) throw new Error(`expected the ${label} link`)
+  await act(async () => link.click())
+}
+
+// #869: Settings is a page now, and the draft is held beneath it, as the dialog held it: leaving for a
+// thread, or for another section, keeps an unsaved change, and coming back asks for no newer read a
+// save could then write over unseen.
+test('⚠ leaving Settings, or its section, keeps an unsaved draft, and coming back reads nothing again (#869)', async () => {
+  const mounted = await mountSettings()
+  await choose(mounted, 'action bash git status', 'deny')
+  await mounted.show(undefined)
+  expect(document.querySelector('nav[aria-label="Settings sections"]')).toBeNull()
+  await mounted.show(PERMISSIONS)
+  await openSection(mounted, 'Appearance')
+  expect(mounted.section().querySelector('h2')?.textContent).toBe('Appearance')
+  await openSection(mounted, 'Permissions')
+  await eventually(() => expect(actionOf(mounted, 'bash git status')).toBe('deny'))
+  expect(buttonNamed(mounted, 'Save').disabled).toBe(false)
+  expect(mounted.sent.filter((entry) => entry.request === 'GET /api/permissions')).toHaveLength(1)
+})
+
 test('⚠ a 412 keeps the draft and offers a reload, which takes the file as it is on disk', async () => {
   const mounted = await mountSettings({
     override: (request) =>
@@ -278,7 +326,7 @@ test('⚠ a 412 keeps the draft and offers a reload, which takes the file as it 
   await click(mounted, 'Reload from disk')
   await eventually(() => expect(actionOf(mounted, 'bash git status')).toBe('allow'))
   expect(mounted.sent.filter((entry) => entry.request === 'GET /api/permissions')).toHaveLength(2)
-  expect(mounted.dialog().querySelector('[aria-label="changed on disk"]')).toBeNull()
+  expect(mounted.section().querySelector('[aria-label="changed on disk"]')).toBeNull()
 })
 
 // #519 item 2: Overwrite with mine sent the file as FIRST read with `If-Match: *`, so a setting
@@ -355,9 +403,9 @@ test('a reset names its backup until the next edit', async () => {
   const mounted = await mountSettings()
   await click(mounted, "Reset to Enso's policy…")
   await click(mounted, 'Reset')
-  await eventually(() => expect(mounted.dialog().textContent).toContain('/home/person/.enso/permissions.json.bak'))
+  await eventually(() => expect(mounted.section().textContent).toContain('/home/person/.enso/permissions.json.bak'))
   await choose(mounted, 'action bash **', 'deny')
-  await eventually(() => expect(mounted.dialog().textContent).not.toContain('/home/person/.enso/permissions.json.bak'))
+  await eventually(() => expect(mounted.section().textContent).not.toContain('/home/person/.enso/permissions.json.bak'))
 })
 
 test('a 422 lists where the schema refused the file, and keeps the draft', async () => {
@@ -383,10 +431,10 @@ test('a 422 lists where the schema refused the file, and keeps the draft', async
 
 test('the yolo banner shows only when the file sets yoloMode on', async () => {
   const off = await mountSettings({ file: { ...FILE, yoloMode: false } })
-  expect(off.dialog().querySelector('[aria-label="yolo mode"]')).toBeNull()
+  expect(off.section().querySelector('[aria-label="yolo mode"]')).toBeNull()
   await off.unmount()
   const on = await mountSettings({ file: { ...FILE, yoloMode: true } })
-  expect(on.dialog().querySelector('[aria-label="yolo mode"]')).not.toBeNull()
+  expect(on.section().querySelector('[aria-label="yolo mode"]')).not.toBeNull()
 })
 
 test("⚠ Enso's ** takes an action change only: it cannot be removed, moved, renamed, or passed by a move", async () => {
@@ -416,7 +464,7 @@ async function rename(mounted: Mounted, rule: string, to: string): Promise<void>
 test('a pattern renamed in place keeps its place; a rename onto a pattern the surface has is refused', async () => {
   const mounted = await mountSettings()
   await rename(mounted, 'bash npm run *', 'git status')
-  expect(mounted.dialog().textContent).toContain('bash already has git status')
+  expect(mounted.section().textContent).toContain('bash already has git status')
   await rename(mounted, 'bash npm run *', 'npm test')
   await click(mounted, 'Save')
   await eventually(() => expect(writes(mounted)).toHaveLength(1))
@@ -454,7 +502,7 @@ test('reset shows what it would change before it asks the server, then names the
   expect(diff.textContent).toContain('read')
   expect(mounted.sent.filter((entry) => entry.request === 'POST /api/permissions/reset')).toHaveLength(0)
   await click(mounted, 'Reset')
-  await eventually(() => expect(mounted.dialog().textContent).toContain('/home/person/.enso/permissions.json.bak'))
+  await eventually(() => expect(mounted.section().textContent).toContain('/home/person/.enso/permissions.json.bak'))
   expect(mounted.sent.find((entry) => entry.request === 'POST /api/permissions/reset')?.ifMatch).toBe('"v1"')
 })
 

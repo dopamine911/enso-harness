@@ -7,9 +7,9 @@ import { describeSize } from './disk-usage.ts'
 import { describeFailedResponse } from './stored-threads.ts'
 
 /**
- * Settings' Trees (#578): what thread trees cost on disk, per project — each tree's size, whether
+ * Settings' Storage (#578): what thread trees cost on disk, per project — each tree's size, whether
  * it holds work, and its project's snapshot store — so a person can see what to delete and delete
- * it here, through the same dialog as the header's. Read when the tab mounts and after each delete;
+ * it here, through the same dialog as the header's. Read when the section mounts and after each delete;
  * the server walks the disk for it, so nothing polls. A size the server could not read is said as
  * such, never as 0.
  */

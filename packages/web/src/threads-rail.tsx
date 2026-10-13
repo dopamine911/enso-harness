@@ -1,5 +1,13 @@
 import type { EnsoProject, EnsoStoredThread } from '@enso/core'
-import { ChevronDownIcon, ChevronRightIcon, EllipsisIcon, FolderPlusIcon, GitForkIcon, PlusIcon } from 'lucide-react'
+import {
+  ChevronDownIcon,
+  ChevronRightIcon,
+  EllipsisIcon,
+  FolderPlusIcon,
+  GitForkIcon,
+  PlusIcon,
+  Settings2Icon,
+} from 'lucide-react'
 import { createContext, useContext, useMemo, useState } from 'react'
 import { Button } from './components/ui/button.tsx'
 import {
@@ -13,6 +21,7 @@ import { pageClock } from './page-clock.ts'
 import { projectOf } from './project-list.ts'
 import { useStore } from './store.ts'
 import type { ThreadSummary } from './thread-stores.ts'
+import type { PageRoute } from './thread-url.ts'
 
 /**
  * The threads rail (#90 PR 3, #395): which conversation am I in, in which project, what else is
@@ -29,7 +38,8 @@ import type { ThreadSummary } from './thread-stores.ts'
  * (#114). Idle is resumable too, even when this server still holds it — a reload must get its own
  * thread back. A section's `+` starts a thread IN that project; the header's New
  * Thread starts one in the project of the thread on screen. A fork (#433) says which thread it
- * came from under its title, by that thread's title — the listing's `parentThreadId`.
+ * came from under its title, by that thread's title — the listing's `parentThreadId`. At its foot,
+ * the links to the pages (#869): Settings, marked as the current page while it is on screen.
  *
  * Presentational: the lists, the active id, and the callbacks arrive as props, so a static
  * render pins the wording and the active marker without any chat. Two inputs are NOT props:
@@ -120,6 +130,13 @@ export interface ThreadsRailProps {
   readonly onProjectSettings: (projectId: string) => void
   /** Why the last add or remove did not go through, or undefined. Shown above the sections. */
   readonly projectNotice: string | undefined
+  /** Open Settings (#869), the page its link at the rail's foot names. */
+  readonly onSettings: () => void
+  /**
+   * The page on screen (#869), whose link is marked as the current page; while one is, no thread row
+   * is — the thread is behind the page. Absent, or undefined, is a thread on screen.
+   */
+  readonly page?: PageRoute['kind'] | undefined
   /**
    * On a narrow screen the rail is a page of its own, shown by the header's threads button (the
    * design's rail under 760px, #407): hidden unless this is true. A wide screen always shows it.
@@ -576,6 +593,62 @@ function ProjectSection({
   )
 }
 
+/** The rail's foot (#869): its links to the pages, the one on screen marked as the current page. */
+function RailFoot({
+  page,
+  onSettings,
+}: {
+  page: PageRoute['kind'] | undefined
+  onSettings: () => void
+}): React.ReactNode {
+  const current = page === 'settings'
+  return (
+    <div className="border-t p-3">
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
+        aria-current={current ? 'page' : undefined}
+        className={cn(
+          'h-9 w-full justify-start',
+          current ? 'bg-accent text-foreground hover:bg-accent' : 'text-muted-foreground',
+        )}
+        onClick={onSettings}
+      >
+        <Settings2Icon />
+        Settings
+      </Button>
+    </div>
+  )
+}
+
+/** What went wrong, above the sections: a list that could not be fetched, a thread that would not open, a refused add or remove. */
+function RailAlerts({
+  earlierError,
+  openError,
+  projectNotice,
+}: Pick<ThreadsRailProps, 'earlierError' | 'openError' | 'projectNotice'>): React.ReactNode {
+  return (
+    <>
+      {earlierError !== undefined ? (
+        <div role="alert" className="px-2 text-xs text-destructive">
+          could not list threads: {earlierError}
+        </div>
+      ) : null}
+      {openError !== undefined ? (
+        <div role="alert" className="px-2 text-xs text-destructive">
+          could not open the thread: {openError}
+        </div>
+      ) : null}
+      {projectNotice !== undefined ? (
+        <div role="alert" className="px-2 text-xs text-destructive">
+          {projectNotice}
+        </div>
+      ) : null}
+    </>
+  )
+}
+
 export function ThreadsRail({
   projects,
   threads,
@@ -590,63 +663,55 @@ export function ThreadsRail({
   onRemoveProject,
   onProjectSettings,
   projectNotice,
+  onSettings,
+  page,
   shownNarrow = false,
   forkParents = NO_FORKS,
 }: ThreadsRailProps): React.ReactNode {
   const groups = groupByProject(projects, threads, earlier)
-  // New Thread starts where the reader is: the project of the thread on screen.
+  // New Thread starts where the reader is: the project of the thread on screen, or behind the page.
   const activeProject = groups.find((group) => group.threads.some((thread) => thread.threadId === activeThreadId))
   const actions: ProjectActions = { onNew, onRemove: onRemoveProject, onSettings: onProjectSettings }
+  const currentThreadId = page === undefined ? activeThreadId : undefined
   return (
     <ForkParentsContext.Provider value={forkParents}>
       <nav
         id="threads-rail"
         aria-label="threads"
         className={cn(
-          'shrink-0 flex-col gap-4 overflow-y-auto bg-sidebar p-3 md:flex md:w-62 md:border-r',
+          'shrink-0 flex-col bg-sidebar md:flex md:w-62 md:border-r',
           shownNarrow ? 'flex w-full' : 'hidden',
         )}
       >
-        <Button type="button" className="h-10 w-full" onClick={() => onNew(activeProject?.project?.projectId)}>
-          <PlusIcon />
-          New Thread
-        </Button>
-        {earlierError !== undefined ? (
-          <div role="alert" className="px-2 text-xs text-destructive">
-            could not list threads: {earlierError}
-          </div>
-        ) : null}
-        {openError !== undefined ? (
-          <div role="alert" className="px-2 text-xs text-destructive">
-            could not open the thread: {openError}
-          </div>
-        ) : null}
-        {projectNotice !== undefined ? (
-          <div role="alert" className="px-2 text-xs text-destructive">
-            {projectNotice}
-          </div>
-        ) : null}
-        {groups.map((group) => (
-          <ProjectSection
-            key={group.project?.projectId ?? 'unlisted'}
-            group={group}
-            anyProjects={projects.length > 0}
-            activeThreadId={activeThreadId}
-            onSelect={onSelect}
-            onResume={onResume}
-            actions={actions}
-          />
-        ))}
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          className="justify-start text-muted-foreground"
-          onClick={onAddProject}
-        >
-          <FolderPlusIcon />
-          Add project
-        </Button>
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-3">
+          <Button type="button" className="h-10 w-full" onClick={() => onNew(activeProject?.project?.projectId)}>
+            <PlusIcon />
+            New Thread
+          </Button>
+          <RailAlerts earlierError={earlierError} openError={openError} projectNotice={projectNotice} />
+          {groups.map((group) => (
+            <ProjectSection
+              key={group.project?.projectId ?? 'unlisted'}
+              group={group}
+              anyProjects={projects.length > 0}
+              activeThreadId={currentThreadId}
+              onSelect={onSelect}
+              onResume={onResume}
+              actions={actions}
+            />
+          ))}
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="justify-start text-muted-foreground"
+            onClick={onAddProject}
+          >
+            <FolderPlusIcon />
+            Add project
+          </Button>
+        </div>
+        <RailFoot page={page} onSettings={onSettings} />
       </nav>
     </ForkParentsContext.Provider>
   )

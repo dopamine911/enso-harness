@@ -4,19 +4,19 @@ import { Tabs as TabsPrimitive } from 'radix-ui'
 import { Button } from './components/ui/button.tsx'
 import { DeleteThread } from './delete-thread-dialog.tsx'
 import { EnsoSmile } from './enso-mark.tsx'
-import { storedThreads, projectList } from './page-listings.ts'
+import { storedThreads } from './page-listings.ts'
 import { isFixtureMode, isDebugMode } from './page-mode.ts'
 import type { ThreadView } from './pane-context.ts'
 import { PromptManagerDialog } from './prompt-manager.tsx'
 import { RenameThread } from './rename-thread.tsx'
-import { SettingsDialog } from './settings-dialog.tsx'
 import { useStore } from './store.ts'
 import { getThreadStores, nameThreadSummary, type ThreadSummary } from './thread-stores.ts'
 import { UNTITLED_THREAD } from './threads-rail.tsx'
 
 /**
  * The page's header (#90): the active thread's title and its Rename and Delete, the view tabs (#361),
- * the prompt manager, settings, and `?debug`'s switch.
+ * the prompt manager, and `?debug`'s switch. A page beside the threads (#869) has its own
+ * (`routed-page.tsx`).
  */
 
 /** A tab's value back to a view: the only strings the tab list hands over are these. */
@@ -87,8 +87,8 @@ export function HeaderPromptManager({ active }: { active: ThreadSummary | undefi
 
 /**
  * The page's header: the threads button (narrow screens), the mark, where you are — the active
- * thread's title, the same one the rail shows — and its Delete, then the view tabs, settings and
- * `?debug`'s switch.
+ * thread's title, the same one the rail shows — and its Delete, then the view tabs, the prompt
+ * manager and `?debug`'s switch.
  */
 export function AppHeader({
   active,
@@ -113,7 +113,6 @@ export function AppHeader({
   /** The server's stored-thread listing (#95): a thread in it has a session file. */
   stored: readonly EnsoStoredThread[]
 }): React.ReactNode {
-  const projects = useStore(projectList).rows
   return (
     <header className="flex min-h-14 items-center gap-3 border-b bg-sidebar px-3 py-2">
       <RailToggle open={rail.open} onToggle={rail.toggle} />
@@ -132,7 +131,6 @@ export function AppHeader({
       ) : null}
       <ViewTabs view={view} onView={onView} threadId={active?.threadId} />
       <HeaderPromptManager active={active} />
-      <SettingsDialog threadId={activeThreadId} projects={projects} stored={stored} onDeleted={onDeleted} />
       {isDebugMode ? (
         <PaneSwitch
           open={debugOpen}
@@ -195,7 +193,7 @@ function ThreadControls({
 }
 
 /** The header's threads button: on a narrow screen, the rail is a page of its own (#407). */
-function RailToggle({ open, onToggle }: { open: boolean; onToggle: () => void }): React.ReactNode {
+export function RailToggle({ open, onToggle }: { open: boolean; onToggle: () => void }): React.ReactNode {
   return (
     <Button
       type="button"

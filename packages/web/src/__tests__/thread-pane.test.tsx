@@ -3321,24 +3321,25 @@ test('a preview the server refuses: its reason is shown, and Delete still sends 
   await page.unmount()
 })
 
-/** Settings opened on its Trees tab (#578): Radix activates a tab on mousedown, as a pointer does. */
-async function openTreesTab(page: MountedPage): Promise<HTMLElement> {
-  const gear = page.container.querySelector<HTMLButtonElement>('header button[aria-label="settings"]')
-  if (gear === null) throw new Error('expected the settings button')
-  await page.click(gear)
-  const settings = await eventually(() => {
-    const found = [...document.querySelectorAll<HTMLElement>('[role="dialog"]')].find((dialog) =>
-      dialog.textContent?.includes('Settings'),
-    )
-    if (found === undefined) throw new Error('expected Settings to be open')
-    return found
-  })
-  const tab = [...settings.querySelectorAll<HTMLElement>('[role="tab"]')].find((found) => found.textContent === 'Trees')
-  if (tab === undefined) throw new Error('expected a Trees tab')
-  await flush(async () => {
-    tab.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }))
-    await tick()
-  })
+/** The page's main region while a page (#869) is on screen, or null while a thread is. */
+const pageRegion = (page: MountedPage): HTMLElement | null =>
+  page.container.querySelector<HTMLElement>('[role="region"][aria-labelledby="page-heading"]')
+
+/** A button by its words, inside `scope` of the page. */
+function buttonIn(page: MountedPage, scope: string, words: string): HTMLButtonElement {
+  const found = [...page.container.querySelectorAll<HTMLButtonElement>(`${scope} button`)].find(
+    (button) => button.textContent === words,
+  )
+  if (found === undefined) throw new Error(`expected ${words} in ${scope}`)
+  return found
+}
+
+/** Settings opened on its Storage section (#578, #869): the rail's link, then the section's. */
+async function openStorage(page: MountedPage): Promise<HTMLElement> {
+  await page.click(buttonIn(page, '#threads-rail', 'Settings'))
+  await page.click(buttonIn(page, 'nav[aria-label="Settings sections"]', 'Storage'))
+  const settings = pageRegion(page)
+  if (settings === null) throw new Error('expected Settings to be open')
   return settings
 }
 
@@ -3374,9 +3375,9 @@ const LAUNCH_TREES: EnsoTreesListing['projects'][number] = {
 /** A launch project with the deletable thread's tree, holding work, and a tree no thread records. */
 const TREES_LISTING: EnsoTreesListing = { projects: [LAUNCH_TREES] }
 
-test("Settings' Trees lists each tree by its thread's title with size and held work, an unreadable size as such, and the snapshot store", async () => {
+test("Settings' Storage lists each tree by its thread's title with size and held work, an unreadable size as such, and the snapshot store", async () => {
   const page = await openDeletable({ trees: () => TREES_LISTING })
-  const settings = await openTreesTab(page)
+  const settings = await openStorage(page)
   await eventually(() => expect(settings.textContent).not.toContain('Measuring…'))
   const section = settings.querySelector('section[aria-label="trees of launch"]')
   expect(section?.querySelector('h3')?.textContent).toBe('launchsnapshots 2.1 GB')
@@ -3389,10 +3390,11 @@ test("Settings' Trees lists each tree by its thread's title with size and held w
   expect(rows[1]).toContain('size could not be read (EACCES: permission denied)')
   expect(rows[1]).toContain('work not checked: no thread records it')
   expect(rows[1]).not.toMatch(/\b0 B\b/)
+  window.history.replaceState(null, '', '/')
   await page.unmount()
 })
 
-test("a delete from Settings' Trees goes through the header's preview and forced DELETE, then the listing is read again", async () => {
+test("a delete from Settings' Storage goes through the header's preview and forced DELETE, then the listing is read again; the page stays", async () => {
   let listing = TREES_LISTING
   const page = await openDeletable({
     trees: () => listing,
@@ -3412,7 +3414,7 @@ test("a delete from Settings' Trees goes through the header's preview and forced
     }
     return scripted(input, init)
   } as typeof fetch
-  const settings = await openTreesTab(page)
+  const settings = await openStorage(page)
   const trigger = await eventually(() => {
     const found = settings.querySelector<HTMLButtonElement>('button[aria-label="delete thread try the parser rewrite"]')
     if (found === null) throw new Error("expected the tree's Delete")
@@ -3426,6 +3428,12 @@ test("a delete from Settings' Trees goes through the header's preview and forced
   expect(page.server.previewReads).toEqual([`/api/threads/${DELETABLE}/delete-preview`])
   expect(page.server.deletes).toEqual([`/api/threads/${DELETABLE}?force=1`])
   expect(page.server.deleteTags).toEqual([workTag(TREES_WORK)])
+  // The thread behind the page went; the page did not (#869): still Storage, at its URL, over the next thread.
+  const shown = new URLSearchParams(window.location.search)
+  expect([shown.get('page'), shown.get('section')]).toEqual(['settings', 'storage'])
+  expect(shown.get('thread')).not.toBe(DELETABLE)
+  expect(pageRegion(page)?.querySelector('h2')?.textContent).toBe('Storage')
+  window.history.replaceState(null, '', '/')
   await page.unmount()
 })
 
@@ -3900,5 +3908,119 @@ test('a URL naming a deleted thread (410) is said on the rail and never started 
     window.history.replaceState(null, '', '/')
     await flush(async () => root.unmount())
     container.remove()
+  }
+})
+
+// ── the pages beside the threads (#869): Settings at its own URL, opened from the rail, left by a thread ──
+
+/** Where the browser's back or forward button lands: the URL moves, then the page is told. */
+async function popTo(search: string): Promise<void> {
+  await flush(async () => {
+    window.history.replaceState(null, '', search)
+    window.dispatchEvent(new PopStateEvent('popstate'))
+    await tick()
+  })
+}
+
+/** The URL's page and section, `[null, null]` while a thread is shown. */
+const pageInUrl = (): (string | null)[] => {
+  const parameters = new URLSearchParams(window.location.search)
+  return [parameters.get('page'), parameters.get('section')]
+}
+
+const pageHeading = (page: MountedPage): string | undefined =>
+  page.container.querySelector('#page-heading')?.textContent ?? undefined
+
+// @pins resume/url-names-page
+test('Settings opens from the rail as a page, each section a URL of its own; back and forward walk them and the thread behind', async () => {
+  const page = await openDeletable()
+  try {
+    const settingsLink = (): HTMLButtonElement => buttonIn(page, '#threads-rail', 'Settings')
+    await page.click(settingsLink())
+    expect(pageInUrl()).toEqual(['settings', 'appearance'])
+    expect(new URLSearchParams(window.location.search).get('thread')).toBe(DELETABLE)
+    expect(pageHeading(page)).toBe('Settings')
+    expect(settingsLink().getAttribute('aria-current')).toBe('page')
+    // The thread is behind the page: off screen, no row marked current, the header the page's own.
+    expect(page.visiblePanes()).toHaveLength(0)
+    expect(page.container.querySelector('#threads-rail [aria-current="true"]')).toBeNull()
+    expect(deleteButton(page)).toBeNull()
+    await page.click(buttonIn(page, 'nav[aria-label="Settings sections"]', 'Permissions'))
+    expect(pageInUrl()).toEqual(['settings', 'permissions'])
+    expect(pageRegion(page)?.querySelector('h2')?.textContent).toBe('Permissions')
+    // Back: the section before, then the thread with no page; forward: the page again.
+    await popTo(`?thread=${DELETABLE}&page=settings&section=appearance`)
+    expect(pageRegion(page)?.querySelector('h2')?.textContent).toBe('Appearance')
+    await popTo(`?thread=${DELETABLE}`)
+    expect(pageRegion(page)).toBeNull()
+    expect(page.visiblePanes()).toHaveLength(1)
+    expect(settingsLink().getAttribute('aria-current')).toBeNull()
+    expect(deleteButton(page)).not.toBeNull()
+    await popTo(`?thread=${DELETABLE}&page=settings&section=appearance`)
+    expect(pageHeading(page)).toBe('Settings')
+  } finally {
+    window.history.replaceState(null, '', '/')
+    await page.unmount()
+  }
+})
+
+// @pins resume/url-names-page
+test('a thread opened from Settings leaves the page, its URL the thread alone; back returns to the page', async () => {
+  const page = await openDeletable()
+  try {
+    await page.click(buttonIn(page, '#threads-rail', 'Settings'))
+    const onSettings = window.location.search
+    const row = page.activeRows().find((found) => found.textContent?.includes('try the parser rewrite'))
+    if (row === undefined) throw new Error('expected the thread behind the page in the rail')
+    await page.click(row)
+    expect(pageInUrl()).toEqual([null, null])
+    expect(new URLSearchParams(window.location.search).get('thread')).toBe(DELETABLE)
+    expect(pageRegion(page)).toBeNull()
+    expect(page.visiblePanes()).toHaveLength(1)
+    await popTo(onSettings)
+    expect(pageHeading(page)).toBe('Settings')
+    expect(page.visiblePanes()).toHaveLength(0)
+  } finally {
+    window.history.replaceState(null, '', '/')
+    await page.unmount()
+  }
+})
+
+// @pins resume/url-names-page
+test('a reload at a Settings URL comes back to its section', async () => {
+  window.history.replaceState(null, '', '?page=settings&section=storage')
+  const page = await mountPage()
+  try {
+    expect(pageHeading(page)).toBe('Settings')
+    expect(pageRegion(page)?.querySelector('h2')?.textContent).toBe('Storage')
+    expect(buttonIn(page, '#threads-rail', 'Settings').getAttribute('aria-current')).toBe('page')
+  } finally {
+    window.history.replaceState(null, '', '/')
+    await page.unmount()
+  }
+})
+
+// @pins resume/url-names-page
+test('a section Settings does not have, or a page Enso does not, is not found with the way back — never a blank page', async () => {
+  const page = await openDeletable()
+  try {
+    await popTo(`?thread=${DELETABLE}&page=settings&section=trees`)
+    expect(pageHeading(page)).toBe('Section not found')
+    expect(pageRegion(page)?.textContent).toContain('Settings has no section called “trees”.')
+    expect(buttonIn(page, '#threads-rail', 'Settings').getAttribute('aria-current')).toBe('page')
+    // The breadcrumb back: Settings, at its first section.
+    await page.click(buttonIn(page, 'header', 'Settings'))
+    expect(pageInUrl()).toEqual(['settings', 'appearance'])
+    expect(pageRegion(page)?.querySelector('h2')?.textContent).toBe('Appearance')
+    await popTo(`?thread=${DELETABLE}&page=projects`)
+    expect(pageHeading(page)).toBe('Page not found')
+    expect(pageRegion(page)?.textContent).toContain('Enso has no page called “projects”.')
+    await page.click(buttonIn(page, '[role="region"]', 'Back to the thread'))
+    expect(pageInUrl()).toEqual([null, null])
+    expect(new URLSearchParams(window.location.search).get('thread')).toBe(DELETABLE)
+    expect(page.visiblePanes()).toHaveLength(1)
+  } finally {
+    window.history.replaceState(null, '', '/')
+    await page.unmount()
   }
 })
