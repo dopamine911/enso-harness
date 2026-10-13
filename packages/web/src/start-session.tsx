@@ -56,6 +56,8 @@ export interface StartSessionDialogProps {
    * the composer (#638), since nothing reopens this dialog for the thread.
    */
   readonly keepPrompt: (text: string) => void
+  /** Whether a prompt is typed in the dialog (#875): a draft holding one is kept when the page leaves it. */
+  readonly onTyped: (typed: boolean) => void
   /** The thread's permission mode and the modes it offers — the composer's own store. */
   readonly mode: string | undefined
   readonly modes: readonly string[]
@@ -446,7 +448,7 @@ function SessionFooter({
 }
 
 export function StartSessionDialog(props: StartSessionDialogProps): React.ReactNode {
-  const { threadId, open, onClose, fetch: fetchImpl } = props
+  const { threadId, open, onClose, onTyped, fetch: fetchImpl } = props
   const catalogue = useSessionCatalogue(open, threadId, fetchImpl)
   const promptChoice = useSystemPromptChoice(open, threadId, fetchImpl)
   const [picked, setPicked] = useState<ModelPick | undefined>(undefined)
@@ -454,7 +456,12 @@ export function StartSessionDialog(props: StartSessionDialogProps): React.ReactN
   const [thinking, setThinking] = useState<string | undefined>(undefined)
   // Only what the user picked is held: until then the field follows the thread's own mode (#391).
   const [chosenMode, setMode] = useState<string | undefined>(undefined)
-  const [text, setText] = useState('')
+  const [text, holdText] = useState('')
+  // What leaving a draft thread reads (#875): a prompt typed here keeps it on the rail.
+  const setText = (next: string): void => {
+    holdText(next)
+    onTyped(next.trim().length > 0)
+  }
   const [modelFilter, setModelFilter] = useState('')
   const [applying, setApplying] = useState(false)
   const [refusal, setRefusal] = useState<string | undefined>(undefined)

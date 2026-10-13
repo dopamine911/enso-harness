@@ -2755,10 +2755,12 @@ async function mountPage(options: ScriptedFetchOptions = {}): Promise<MountedPag
     root.render(<ChatScreen />)
   })
   await flush(tick)
-  // The rail's two kinds of row, across every project's section (#395): open on this page, and earlier.
-  const buttons = (list: 'open' | 'earlier'): HTMLButtonElement[] => [
-    ...container.querySelectorAll<HTMLButtonElement>(`ol[aria-label^="${list} threads in"] button`),
-  ]
+  // The rail's two kinds of row, across every project's section and day (#395, #875): open on this
+  // page, and earlier — each row names its thread, and the page's list says which are open here.
+  const buttons = (list: 'open' | 'earlier'): HTMLButtonElement[] =>
+    [...container.querySelectorAll<HTMLButtonElement>('#threads-rail button[data-thread-id]')].filter(
+      (row) => threadListStore.get().some((thread) => thread.threadId === row.dataset.threadId) === (list === 'open'),
+    )
   return {
     container,
     server,
@@ -2875,11 +2877,7 @@ test('the Stats tab replaces the transcript in the thread on screen, and follows
 // stays hidden behind the rail. ⚠ happy-dom has no media queries: this reads the state the
 // classes encode (`hidden` below md; the panes `max-md:hidden` while it is open), not a layout.
 test('the threads button opens the rail over the thread; choosing a thread from it closes it again', async () => {
-  const page = await mountPage()
-  const newThread = [...page.container.querySelectorAll('button')].find((button) => button.textContent === 'New Thread')
-  if (newThread === undefined) throw new Error('expected a New Thread button')
-  await page.click(newThread)
-  await page.click(newThread)
+  const page = await mountStartedThreads(['first ask', 'second ask'])
   const toggle = page.container.querySelector<HTMLButtonElement>('header button[aria-controls="threads-rail"]')
   const rail = page.container.querySelector<HTMLElement>('#threads-rail')
   if (toggle === null || rail === null) throw new Error('expected the threads button and the rail it controls')
@@ -3036,6 +3034,11 @@ test('New Thread mints a thread, lists it in the rail as current, and shows exac
     expect(page.activeRows()[0]?.getAttribute('aria-current')).toBe('true')
     expect(page.visiblePanes()).toHaveLength(1)
   })
+  // A prompt half-typed, so the draft stays when the page leaves it (#875).
+  await flush(async () => {
+    typeInto(shownComposer(page), 'half a thought')
+    await tick()
+  })
   await page.click(newThread)
   await eventually(() => {
     expect(page.activeRows()).toHaveLength(2)
@@ -3044,7 +3047,11 @@ test('New Thread mints a thread, lists it in the rail as current, and shows exac
     expect(page.visiblePanes()).toHaveLength(1)
     expect(page.container.querySelectorAll('#thread-status')).toHaveLength(2)
   })
-  // Click the older row: it becomes current and its pane is the visible one.
+  // Click the older row (the newer one holding words too): it becomes current and its pane is the visible one.
+  await flush(async () => {
+    typeInto(shownComposer(page), 'another half')
+    await tick()
+  })
   const older = page.activeRows()[1]
   if (older === undefined) throw new Error('expected two rows')
   await page.click(older)
@@ -3052,6 +3059,77 @@ test('New Thread mints a thread, lists it in the rail as current, and shows exac
     expect(page.activeRows().map((row) => row.getAttribute('aria-current'))).toEqual([null, 'true'])
     expect(page.visiblePanes()).toHaveLength(1)
   })
+  await page.unmount()
+})
+
+/** The composer of the pane on screen — not one kept laid out, `inert`, under it (#370). */
+function shownComposer(page: MountedPage): HTMLTextAreaElement {
+  const found = [...page.container.querySelectorAll<HTMLTextAreaElement>('textarea[name="message"]')].find(
+    (composer) => composer.closest('[inert]') === null,
+  )
+  if (found === undefined) throw new Error('expected the composer of the pane on screen')
+  return found
+}
+
+// #875: a draft is the page's alone (#879), so one left with nothing typed — New Thread clicked
+// twice, a row clicked from it — would pile up on the rail. Leaving it drops it; words typed in
+// the composer or the Start dialog keep it, and nothing is ever asked of the server.
+test('⚠ a draft left with nothing typed is discarded; one holding a prompt, in the composer or the Start dialog, stays (#875)', async () => {
+  // A model to offer, so the Start dialog shows its fields.
+  const page = await mountPage({
+    commands: [
+      {
+        name: 'model',
+        source: 'host',
+        kind: 'select',
+        value: 'fake/plain',
+        options: [{ id: 'fake/plain', label: 'Plain' }],
+      },
+    ],
+  })
+  const newThread = [...page.container.querySelectorAll('button')].find((button) => button.textContent === 'New Thread')
+  if (newThread === undefined) throw new Error('expected a New Thread button')
+  const shown = (): string => new URLSearchParams(window.location.search).get('thread') ?? ''
+  const listed = (): string[] => threadListStore.get().map((thread) => thread.threadId)
+  await page.click(newThread)
+  const empty = shown()
+  await page.click(newThread)
+  const inDialog = shown()
+  await eventually(() => expect(listed()).toEqual([inDialog]))
+  // Words in the Start dialog's prompt, not yet handed to the composer.
+  const dialogPrompt = await eventually(() => {
+    const found = document.querySelector<HTMLTextAreaElement>('#start-session-prompt')
+    if (found === null) throw new Error('expected the Start dialog’s prompt')
+    return found
+  })
+  await flush(async () => {
+    typeInto(dialogPrompt, 'a prompt still in the dialog')
+    await tick()
+  })
+  await page.click(newThread)
+  const inComposer = shown()
+  await flush(async () => {
+    typeInto(shownComposer(page), 'a prompt in the composer')
+    await tick()
+  })
+  const row = (threadId: string): HTMLButtonElement => {
+    const found = page.activeRows().find((candidate) => candidate.dataset.threadId === threadId)
+    if (found === undefined) throw new Error(`expected the row of ${threadId}`)
+    return found
+  }
+  await page.click(row(inDialog))
+  await eventually(() => expect(shown()).toBe(inDialog))
+  expect(listed()).toEqual([inComposer, inDialog])
+  // Emptied again, the composer's draft goes the next time the page leaves it.
+  await page.click(row(inComposer))
+  await flush(async () => {
+    typeInto(shownComposer(page), '   ')
+    await tick()
+  })
+  await page.click(row(inDialog))
+  await eventually(() => expect(listed()).toEqual([inDialog]))
+  expect(listed()).not.toContain(empty)
+  expect(page.server.deletes).toEqual([])
   await page.unmount()
 })
 
@@ -3435,7 +3513,7 @@ test('a listed thread the server no longer holds opens the not-found screen with
   await page.unmount()
 })
 
-test("the not-found screen's Search threads takes focus to the rail's threads (#879; the rail's search is #875)", async () => {
+test("the not-found screen's Search threads takes focus to the rail's search box (#879, #875)", async () => {
   const page = await openDeletable({
     others: [
       {
@@ -3459,7 +3537,11 @@ test("the not-found screen's Search threads takes focus to the rail's threads (#
     return found
   })
   await page.click(search)
-  await eventually(() => expect(document.activeElement?.closest('#threads-rail ol')).not.toBeNull())
+  await eventually(() => {
+    const focused = document.activeElement
+    expect(focused?.closest('#threads-rail')).not.toBeNull()
+    expect(focused?.getAttribute('aria-label')).toBe('Search threads')
+  })
   await page.unmount()
 })
 
@@ -4339,7 +4421,9 @@ test('a URL naming a deleted thread (410) is said on the rail and never started 
       expect(railAlerts(container)).toEqual([`could not open the thread: 410 ${refusal}`])
     })
     expect(threadListStore.get().map((thread) => thread.threadId)).toContain(shown)
-    expect(container.querySelector('ol[aria-label^="open threads in"] button[aria-current="true"]')).not.toBeNull()
+    expect(
+      container.querySelector(`#threads-rail button[data-thread-id="${shown}"][aria-current="true"]`),
+    ).not.toBeNull()
   } finally {
     window.history.replaceState(null, '', '/')
     await flush(async () => root.unmount())

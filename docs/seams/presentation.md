@@ -318,6 +318,12 @@ export interface ThreadStores {
    */
   readonly startSession: WritableStore<boolean>
   /**
+   * Whether a prompt is typed and not sent (#875), by where it is typed: the composer, and the
+   * Start-a-session dialog, which holds its own until it starts or hands it to the composer. A draft
+   * holding neither is discarded when the page leaves it (`discardEmptyDraft`).
+   */
+  readonly typed: { readonly composer: WritableStore<boolean>; readonly startDialog: WritableStore<boolean> }
+  /**
    * How many compactions pi has said it finished on this thread (#348): each rewrote the branch
    * under the transcript this page holds. The pane re-reads the thread once it is idle and has
    * seen fewer than this.

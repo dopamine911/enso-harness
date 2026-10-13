@@ -12,9 +12,11 @@ import type { StreamChunk } from '@tanstack/ai'
 import type { UIMessage } from '@tanstack/ai-client'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { pageClock } from '../page-clock.ts'
+import { railDayOf, sectionLayout } from '../rail-layout.ts'
 import {
   adoptThread,
   clearThreadsForTest,
+  discardEmptyDraft,
   mintThread,
   reviveHistoryMessages,
   THREAD_TITLE_MAX_CHARS,
@@ -647,7 +649,8 @@ test('a fork says which thread it came from, by that thread’s title — a stor
   const now = pageClock.get()
   const stored = [
     storedIn('p-launch', 'parent', { title: 'the original' }),
-    storedIn('p-launch', 'fork', { title: 'the original', parentThreadId: 'parent' }),
+    // Named, so its row is its own: a fork that reads as its parent folds with it (#875), its line under the fold.
+    storedIn('p-launch', 'fork', { title: 'the original', name: 'my branch', parentThreadId: 'parent' }),
     // A fork of an open thread the listing has no title for yet: the page's own title names it.
     storedIn('p-launch', 'fork-of-open', { parentThreadId: 'open' }),
     storedIn('p-launch', 'orphan-fork', { title: 'lost parent', parentThreadId: 'elsewhere' }),
@@ -787,6 +790,212 @@ test('a section shows five stored threads and says how many more there are; a fa
   const failed = renderToStaticMarkup(<ThreadsRail {...props} earlier={[]} earlierError="connection refused" />)
   expect(failed).toContain('role="alert"')
   expect(failed).toContain('could not list threads: connection refused')
+})
+
+// ── day groups and same-title folds (#875) ───────────────────────────────────
+
+test('⚠ the day groups turn at local midnight: Today from 00:00, Yesterday the local day before, Earlier before that', () => {
+  // An injected clock, in the browser's own zone: local constructors, so the boundaries are local midnights.
+  const now = new Date(2026, 9, 13, 0, 30)
+  expect(railDayOf(new Date(2026, 9, 13, 0, 0, 0, 0), now)).toBe('today')
+  expect(railDayOf(new Date(2026, 9, 12, 23, 59, 59, 999), now)).toBe('yesterday')
+  expect(railDayOf(new Date(2026, 9, 12, 0, 0, 0, 0), now)).toBe('yesterday')
+  expect(railDayOf(new Date(2026, 9, 11, 23, 59, 59, 999), now)).toBe('earlier')
+  // Late in the day, a thread from 23 hours ago is yesterday's, not today's: a day is not 24 hours back.
+  const late = new Date(2026, 9, 13, 22, 0)
+  expect(railDayOf(new Date(2026, 9, 12, 23, 0), late)).toBe('yesterday')
+  // Ahead of this clock (another machine's), never lost: Today.
+  expect(railDayOf(new Date(2026, 9, 14, 9, 0), now)).toBe('today')
+  // Across a month's end.
+  expect(railDayOf(new Date(2026, 9, 31, 12, 0), new Date(2026, 10, 1, 8, 0))).toBe('yesterday')
+})
+
+/** A page thread for the layout tests, last active at `at`. */
+function open(
+  threadId: string,
+  title: string | undefined,
+  at: Date,
+  extra: Partial<ThreadSummary> = {},
+): ThreadSummary {
+  return { threadId, title, lastActivityAt: at, busy: false, waiting: false, projectId: 'p-launch', ...extra }
+}
+
+test('⚠ same-title threads fold within a day, at the first one’s place; a draft never folds; another day is another row (#875)', () => {
+  const now = new Date(2026, 9, 13, 15, 0)
+  const today = new Date(2026, 9, 13, 9, 0)
+  const yesterday = new Date(2026, 9, 12, 9, 0)
+  const repeat = 'Reply with exactly three words.'
+  const layout = sectionLayout(
+    {
+      threads: [
+        open('draft-1', undefined, today),
+        open('draft-2', undefined, today),
+        open('live-repeat', repeat, today),
+        open('other', 'something else', today),
+        // Named, it reads — and folds — as its name.
+        open('named', repeat, today, { name: 'the one to keep' }),
+      ],
+      earlier: [
+        storedIn('p-launch', 'stored-repeat-1', { title: repeat, lastActivityAt: today.toISOString() }),
+        storedIn('p-launch', 'stored-repeat-2', { title: repeat, lastActivityAt: today.toISOString() }),
+        storedIn('p-launch', 'old-repeat', { title: repeat, lastActivityAt: yesterday.toISOString() }),
+      ],
+    },
+    now,
+    undefined,
+  )
+  const read = layout.days.map(({ day, rows }) => ({
+    day,
+    rows: rows.map((row) =>
+      row.kind === 'fold'
+        ? `${row.title} ×${row.threads.length + row.earlier.length}: ${[...row.threads, ...row.earlier].map((thread) => thread.threadId).join(' ')}`
+        : row.thread.threadId,
+    ),
+  }))
+  expect(read).toEqual([
+    {
+      day: 'today',
+      rows: ['draft-1', 'draft-2', `${repeat} ×3: live-repeat stored-repeat-1 stored-repeat-2`, 'other', 'named'],
+    },
+    // One thread of that title yesterday: a row of its own, not a fold of one.
+    { day: 'yesterday', rows: ['old-repeat'] },
+  ])
+  expect(layout.hidden).toBe(0)
+})
+
+test('the five-row cap counts rows of stored threads alone — a fold is one row, a row with an open thread always shows (#875)', () => {
+  const now = pageClock.get()
+  const stored = (index: number, title: string): EnsoStoredThread =>
+    storedIn('p-launch', `s${index}`, { title, lastActivityAt: new Date(now.getTime() - index * 60_000).toISOString() })
+  const layout = sectionLayout(
+    {
+      threads: [open('open-repeat', 'repeated', now)],
+      earlier: [
+        // Folded with the open thread: shown, and not counted.
+        stored(0, 'repeated'),
+        // Thirty-one alike: one row.
+        ...Array.from({ length: 31 }, (_, index) => stored(index + 1, 'Reply with exactly three words.')),
+        ...Array.from({ length: STORED_ROWS_SHOWN + 1 }, (_, index) => stored(index + 40, `distinct ${index}`)),
+      ],
+    },
+    now,
+    STORED_ROWS_SHOWN,
+  )
+  const rows = layout.days.flatMap((day) => day.rows)
+  // The open fold, the folded 31, then four distinct: five rows of stored threads alone.
+  expect(rows).toHaveLength(1 + STORED_ROWS_SHOWN)
+  expect(rows[1]?.kind === 'fold' ? rows[1].earlier.length : 0).toBe(31)
+  expect(layout.hidden).toBe(2)
+})
+
+test('⚠ a collapsed fold says a question waiting on you over a run in flight among its threads, and its count (#875)', () => {
+  const now = pageClock.get()
+  const rail = (threads: ThreadSummary[], earlier: EnsoStoredThread[]): string =>
+    renderToStaticMarkup(
+      <ThreadsRail
+        projects={[LAUNCH]}
+        threads={threads}
+        activeThreadId={undefined}
+        earlier={earlier}
+        earlierError={undefined}
+        onSelect={noop}
+        onResume={noop}
+        onNew={noop}
+        onRemoveProject={noop}
+        onProjectSettings={noop}
+        onPage={noop}
+        projectNotice={undefined}
+      />,
+    )
+  const title = 'Reply with exactly three words.'
+  const idle = [storedIn('p-launch', 'a', { title }), storedIn('p-launch', 'b', { title })]
+  /** The fold's row: its button, chevron to count. */
+  const foldRow = (rendered: string): string => {
+    const start = rendered.indexOf(
+      '<button type="button" aria-expanded="false" title="Reply with exactly three words."',
+    )
+    if (start < 0) throw new Error('expected a collapsed fold')
+    return rendered.slice(start, rendered.indexOf('</button>', start))
+  }
+  const quiet = foldRow(rail([], idle))
+  expect(quiet).toContain('2 threads')
+  expect(quiet).not.toContain('running')
+  // A stored thread running among them: the fold says so.
+  const running = foldRow(rail([], [...idle, storedIn('p-launch', 'c', { title, busy: true })]))
+  expect(running).toContain('running')
+  expect(running).toContain('3 threads')
+  // An open one waiting on you: the fold says that, over the run.
+  const asking = open('asks', title, now, { busy: true, waiting: true })
+  const waiting = foldRow(rail([asking], [...idle, storedIn('p-launch', 'c', { title, busy: true })]))
+  expect(waiting).toContain('waiting on you')
+  expect(waiting).not.toContain('running')
+  // Collapsed, none of its threads' rows are drawn: the fold row is where the state is said.
+  expect(rail([asking], idle).match(/waiting on you/g)).toHaveLength(1)
+})
+
+test('a section lists its threads under Today, Yesterday and Earlier, in that order, and only the days it has (#875)', () => {
+  const now = pageClock.get()
+  const day = 86_400_000
+  const rendered = renderToStaticMarkup(
+    <ThreadsRail
+      projects={[LAUNCH, APP]}
+      threads={[open('fresh', 'asked today', now)]}
+      activeThreadId="fresh"
+      earlier={[
+        storedIn('p-launch', 'old', {
+          title: 'asked last week',
+          lastActivityAt: new Date(now.getTime() - 7 * day).toISOString(),
+        }),
+        storedIn('p-app', 'app-old', {
+          title: 'an app thread',
+          lastActivityAt: new Date(now.getTime() - 7 * day).toISOString(),
+        }),
+      ]}
+      earlierError={undefined}
+      onSelect={noop}
+      onResume={noop}
+      onNew={noop}
+      onRemoveProject={noop}
+      onProjectSettings={noop}
+      onPage={noop}
+      projectNotice={undefined}
+    />,
+  )
+  const launch = sectionOf(rendered, 'enso')
+  expect(launch.indexOf('>Today<')).toBeGreaterThan(-1)
+  expect(launch.indexOf('>Today<')).toBeLessThan(launch.indexOf('asked today'))
+  expect(launch.indexOf('asked today')).toBeLessThan(launch.indexOf('>Earlier<'))
+  expect(launch.indexOf('>Earlier<')).toBeLessThan(launch.indexOf('asked last week'))
+  expect(launch).not.toContain('>Yesterday<')
+  // The other project has its own days: only Earlier.
+  const app = sectionOf(rendered, 'app')
+  expect(app).not.toContain('>Today<')
+  expect(app).toContain('>Earlier<')
+})
+
+test('⚠ leaving a draft with nothing typed drops it; words in the composer or the Start dialog, a prompt sent, or a listing that names it keep it (#875)', () => {
+  const listed = (): string[] => threadListStore.get().map((thread) => thread.threadId)
+  const empty = mintThread()
+  discardEmptyDraft(empty.threadId, [])
+  expect(listed()).not.toContain(empty.threadId)
+  const inComposer = mintThread()
+  inComposer.typed.composer.set(true)
+  const inDialog = mintThread()
+  inDialog.typed.startDialog.set(true)
+  const sent = mintThread()
+  updateThreadSummary(sent.threadId, { title: 'asked', busy: true, waiting: false })
+  // A fork is written by its route before any prompt: listed, it is the server's, not a draft.
+  const fork = mintThread()
+  for (const stores of [inComposer, inDialog, sent, fork]) {
+    discardEmptyDraft(stores.threadId, [storedIn('p-launch', fork.threadId)])
+  }
+  expect(listed()).toEqual([fork.threadId, sent.threadId, inDialog.threadId, inComposer.threadId])
+  // Emptied again, it goes the next time it is left.
+  inComposer.typed.composer.set(false)
+  discardEmptyDraft(inComposer.threadId, [])
+  expect(listed()).not.toContain(inComposer.threadId)
+  // A thread the page no longer holds: nothing to do.
+  expect(() => discardEmptyDraft(empty.threadId, [])).not.toThrow()
 })
 
 test('⚠ a thread minted in a project names it on every request it makes; one minted with none names nothing', async () => {

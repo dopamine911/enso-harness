@@ -168,6 +168,8 @@ interface Mounted {
   readonly closes: number[]
   /** Prompts the dialog handed to the composer when dismissed (#638). */
   readonly kept: string[]
+  /** What the dialog said, each time it changed, of holding a typed prompt (#875) — the last is now. */
+  readonly typed: boolean[]
   readonly dialog: () => HTMLElement
   readonly unmount: () => Promise<void>
 }
@@ -182,6 +184,7 @@ async function mountStart(
   const sent: string[] = []
   const closes: number[] = []
   const kept: string[] = []
+  const typed: boolean[] = []
   const container = document.createElement('div')
   document.body.appendChild(container)
   const root: Root = createRoot(container)
@@ -192,6 +195,7 @@ async function mountStart(
         open={true}
         onClose={(): void => void closes.push(1)}
         keepPrompt={(text: string): void => void kept.push(text)}
+        onTyped={(holding: boolean): void => void typed.push(holding)}
         mode="default"
         modes={['default', 'plan']}
         configure={(configuration: EnsoSessionConfiguration): Promise<ConfigureOutcome> => {
@@ -216,6 +220,7 @@ async function mountStart(
     sent,
     closes,
     kept,
+    typed,
     dialog,
     unmount: async (): Promise<void> => {
       if (!leftOpen.delete(mounted)) return
@@ -320,7 +325,7 @@ test('a kept prompt fills an empty composer, and follows what a composer already
   expect(draftWithKeptPrompt('already typed', 'the dialog’s prompt')).toBe('already typed\n\nthe dialog’s prompt')
 })
 
-test('Close with a prompt typed hands it to the composer; with none, or after a Start, nothing is handed (#638)', async () => {
+test('Close with a prompt typed hands it to the composer; with none, or after a Start, nothing is handed (#638); the dialog says while it holds one (#875)', async () => {
   const closing = await mountStart({ outcome: 'told' })
   const closeButton = (): HTMLButtonElement | undefined =>
     [...closing.dialog().querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Close')
@@ -334,11 +339,14 @@ test('Close with a prompt typed hands it to the composer; with none, or after a 
   const prompt = closing.dialog().querySelector<HTMLTextAreaElement>('#start-session-prompt')
   if (prompt === null) throw new Error('expected the prompt field')
   await typeInto(prompt, 'keep me')
+  // A draft holding words only here is kept when the page leaves it.
+  expect(closing.typed.at(-1)).toBe(true)
   await flush(async () => {
     closeButton()?.click()
     await tick()
   })
   expect(closing.kept).toEqual(['keep me'])
+  expect(closing.typed.at(-1)).toBe(false)
   await closing.unmount()
 
   const starting = await mountStart({ outcome: 'told' })

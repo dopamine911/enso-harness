@@ -9,6 +9,7 @@ import {
   type EnsoSessionIncidents,
   type EnsoSessionRiskChange,
   type EnsoSessionUsage,
+  type EnsoStoredThread,
   type EnsoThreadHistory,
   ensoLogger,
   type ProviderRefusalClass,
@@ -181,6 +182,12 @@ export interface ThreadStores {
    */
   readonly startSession: WritableStore<boolean>
   /**
+   * Whether a prompt is typed and not sent (#875), by where it is typed: the composer, and the
+   * Start-a-session dialog, which holds its own until it starts or hands it to the composer. A draft
+   * holding neither is discarded when the page leaves it (`discardEmptyDraft`).
+   */
+  readonly typed: { readonly composer: WritableStore<boolean>; readonly startDialog: WritableStore<boolean> }
+  /**
    * How many compactions pi has said it finished on this thread (#348): each rewrote the branch
    * under the transcript this page holds. The pane re-reads the thread once it is idle and has
    * seen fewer than this.
@@ -325,6 +332,7 @@ function createThreadStores(
     incidents: createStore<EnsoSessionIncidents>(NO_SESSION_INCIDENTS),
     toolResultDescriptors,
     startSession: createStore(false),
+    typed: { composer: createStore(false), startDialog: createStore(false) },
     branchCompacted: createStore(0),
     runStops: createStore(0),
     login: createStore<EnsoLoginInProgress | undefined>(undefined),
@@ -534,6 +542,33 @@ export function dropThread(threadId: string): void {
   summaries.delete(threadId)
   tornTailLines.delete(threadId)
   publishThreadList()
+}
+
+/**
+ * Whether the server holds the thread: listed among its stored sessions (a fork, written by its
+ * route before any prompt), adopted from a stored branch, or prompted here (its title is that
+ * prompt's). A thread minted and never prompted is a draft, this page's only (#879: "not started").
+ */
+export function threadStarted(summary: ThreadSummary, stored: readonly EnsoStoredThread[]): boolean {
+  return (
+    summary.title !== undefined ||
+    getThreadStores(summary.threadId).history.length > 0 ||
+    stored.some((row) => row.threadId === summary.threadId)
+  )
+}
+
+/**
+ * The page is leaving `threadId` for another thread (#875): a draft with nothing typed in it — no
+ * prompt in the composer or the Start dialog, no image attached — is dropped, so unused drafts never
+ * pile up on the rail. A draft is the page's alone, so nothing is asked of the server. Anything
+ * else, and a thread the page no longer holds, stays as it is.
+ */
+export function discardEmptyDraft(threadId: string, stored: readonly EnsoStoredThread[]): void {
+  const summary = summaries.get(threadId)
+  const stores = threads.get(threadId)
+  if (summary === undefined || stores === undefined || threadStarted(summary, stored)) return
+  if (stores.typed.composer.get() || stores.typed.startDialog.get()) return
+  dropThread(threadId)
 }
 
 /**

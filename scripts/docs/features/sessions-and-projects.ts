@@ -13,10 +13,12 @@ export const SESSIONS_AND_PROJECTS: FeatureSpec = {
   landingTagline: 'where and how a run starts',
   shows: [
     "A project is a folder pi works in. The rail lists your projects, and each project's threads under it. A new thread asks how to start: which model, how much effort, which permission mode, which system prompt, and the first prompt. They are applied together when you start.",
+    "Inside a project, the rail lists threads under **Today**, **Yesterday** and **Earlier**, by when each was last active, in your browser's own day: Today starts at your local midnight. Within a day, threads that share a title fold into one row with a count (`×31`); click it to open the fold in place, and again to close it. A fold opens by itself when it holds the thread on screen. A closed fold never hides work: when one of its threads is running, or waiting on you, the fold's row shows that dot. A thread with a name of its own folds by that name; a draft, which has no title yet, never folds.",
+    '**Search threads**, at the top of the rail under **New Thread**, keeps only the threads whose title (or name) holds what you type, in any case, across every project. A project you folded opens while it holds a match, and goes back to how you left it when the search is cleared; a fold whose title matches shows with its count. When nothing matches, the rail says so, with **Clear search**. The × in the box (**clear search**), or **Escape**, empties it.',
     "A thread you ran before is still there after a restart. Until you run it again it is *cold*: Enso reads it from pi's session file, and nothing is running.",
     "A thread is titled by its first prompt. Under the title, the header says what it runs with: its project, model and effort, the model marked `(recorded)` while the thread is cold, and left out until something has said it. Click the title, or choose **Rename** in the header's **thread actions** menu (⋯), and the title becomes a field: **Enter** saves a name of its own, which the rail and the header show and the thread keeps (pi's own session name, the one pi's `/name` sets); **Escape** leaves it as it was. When two prompts in a project start alike, the rail shows each from the words where they part (\"…Approach B: a parser\"), with the whole prompt as the row's hover.",
-    'A new thread is **not started** until its first prompt: nothing of it is on the server yet, so it has no Context, Stats or Diff to show, and its **thread actions** menu offers **Discard draft** instead of a delete.',
-    'A thread the rail still lists but the server no longer holds (deleted from another tab, say) opens a page in its place: **This thread isn’t on the server**, with its id, **Start a new thread**, and **Search threads**, which takes you to the rail.',
+    'A new thread is **not started** until its first prompt: nothing of it is on the server yet, so it has no Context, Stats or Diff to show, and its **thread actions** menu offers **Discard draft** instead of a delete. A draft you leave with nothing typed in it (no words in the prompt box or the Start dialog, no image attached) is dropped from the rail when you open another thread, so unused drafts never pile up; one holding words stays.',
+    'A thread the rail still lists but the server no longer holds (deleted from another tab, say) opens a page in its place: **This thread isn’t on the server**, with its id, **Start a new thread**, and **Search threads**, which puts you in the rail’s search box.',
   ],
   opens: [
     'The folder you ran `bun run dev` in is always a project.',
@@ -74,7 +76,15 @@ export const SESSIONS_AND_PROJECTS: FeatureSpec = {
         await ui.openThread()
       },
       marks: [
+        {
+          target: { placeholder: 'Search threads' },
+          says: '**Search threads**: keeps the threads whose title holds what you type, across every project.',
+        },
         { target: { text: DEMO_PROJECT, exact: true, within: RAIL }, says: 'The project, with its threads under it.' },
+        {
+          target: { text: 'Today', exact: true, within: RAIL },
+          says: '**Today**: the threads last active since your local midnight; **Yesterday** and **Earlier** follow.',
+        },
         {
           target: { text: 'Where does the app read', within: RAIL },
           says: 'A stored thread. Hover it to see when it last ran.',

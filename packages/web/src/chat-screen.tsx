@@ -9,7 +9,7 @@ import { PageHeader, RoutedPage, type RoutedPageProps } from './routed-page.tsx'
 import { createResumeRequests, fetchThreadHistory, storedThreadsNotOnThisPage } from './stored-threads.ts'
 import { ThreadNotFound } from './thread-not-found.tsx'
 import { ThreadPane } from './thread-pane.tsx'
-import { dropThread, getThreadStores, markThreadActive, threadListStore } from './thread-stores.ts'
+import { discardEmptyDraft, dropThread, getThreadStores, markThreadActive, threadListStore } from './thread-stores.ts'
 import {
   type PageRoute,
   type PageUrl,
@@ -23,7 +23,7 @@ import {
   urlForThread,
   urlOpeningThread,
 } from './thread-url.ts'
-import { forkParentTitles, ThreadsRail } from './threads-rail.tsx'
+import { forkParentTitles, RAIL_SEARCH_ID, ThreadsRail } from './threads-rail.tsx'
 
 /**
  * The page (#90, #142): the header, the threads rail and one mounted pane per live thread, and the
@@ -329,11 +329,14 @@ function usePageNavigation(listings: PageListings): PageNavigation {
   /**
    * Make `threadId` the active pane, and tell history how it happened. History state is `null`: the
    * URL is read back, never the state object. A click leaves the page on screen; the page's own
-   * rewrite and back/forward leave it as the URL has it.
+   * rewrite and back/forward leave it as the URL has it. The thread left behind, if it is a draft
+   * with nothing typed in it, goes (#875).
    */
   const navigate = useCallback(
     (threadId: string, how: ThreadNavigation): void => {
       epoch.current += 1
+      const leaving = activePane.current
+      if (leaving !== undefined && leaving !== threadId) discardEmptyDraft(leaving, storedThreads.get().rows)
       activePane.current = threadId
       // The follow budget needs this too: the visible thread is not a drop candidate, and
       // being looked at is what counts as activity for the one being left behind (#272).
@@ -505,15 +508,9 @@ export function ChatScreen(): React.ReactNode {
               threadId={missingThread}
               onNew={() => newThread(active?.projectId)}
               onSearch={() => {
-                // The rail has no search yet (#875 adds it): the not-found screen's way into the
-                // threads is the rail itself — shown on a narrow screen, its first thread focused.
+                // The rail's search (#875): shown on a narrow screen, its box focused.
                 if (!rail.open) rail.toggle()
-                requestAnimationFrame(() =>
-                  (
-                    document.querySelector<HTMLElement>('#threads-rail ol button') ??
-                    document.querySelector<HTMLElement>('#threads-rail button')
-                  )?.focus(),
-                )
+                requestAnimationFrame(() => document.getElementById(RAIL_SEARCH_ID)?.focus())
               }}
             />
           ) : null}

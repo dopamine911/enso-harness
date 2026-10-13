@@ -15,7 +15,7 @@ export function ThreadNotFound({
 }: {
   threadId: string
   onNew: () => void
-  /** Find a thread among the ones there are: the rail, until it has a search (#875). */
+  /** Find a thread among the ones there are: the rail's search box (#875). */
   onSearch: () => void
 }): React.ReactNode {
   // The screen answers a click elsewhere (a rail row): its heading takes focus, so it is read out.

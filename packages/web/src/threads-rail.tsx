@@ -7,9 +7,11 @@ import {
   FolderPlusIcon,
   GitForkIcon,
   PlusIcon,
+  SearchIcon,
   Settings2Icon,
+  XIcon,
 } from 'lucide-react'
-import { createContext, useContext, useMemo, useState } from 'react'
+import { createContext, useContext, useId, useRef, useState, useSyncExternalStore } from 'react'
 import { Button } from './components/ui/button.tsx'
 import {
   DropdownMenu,
@@ -17,9 +19,19 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from './components/ui/dropdown-menu.tsx'
+import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from './components/ui/input-group.tsx'
 import { cn } from './lib/utils.ts'
 import { pageClock } from './page-clock.ts'
 import { projectOf } from './project-list.ts'
+import {
+  hiddenState,
+  matchingThreads,
+  RAIL_DAY_LABELS,
+  type RailDayGroup,
+  type RailRow,
+  sectionLayout,
+  startOfLocalDay,
+} from './rail-layout.ts'
 import { useStore } from './store.ts'
 import type { ThreadSummary } from './thread-stores.ts'
 import { ADD_PROJECT_ROUTE, type PageRoute, PROJECTS_ROUTE, SETTINGS_ROUTE } from './thread-url.ts'
@@ -43,11 +55,16 @@ import { ADD_PROJECT_ROUTE, type PageRoute, PROJECTS_ROUTE, SETTINGS_ROUTE } fro
  * the links to the pages (#869, #870): Projects and Settings, each marked as the current page while
  * it is on screen.
  *
+ * At its top, under New Thread, a search (#875) that keeps the threads whose title holds what is
+ * typed, across every project, opening the sections that hold one. Inside a section the threads are
+ * under Today, Yesterday and Earlier by last activity, and the ones that share a title fold into one
+ * row with a count (`rail-layout.ts`).
+ *
  * Presentational: the lists, the active id, and the callbacks arrive as props, so a static
- * render pins the wording and the active marker without any chat. Two inputs are NOT props:
+ * render pins the wording and the active marker without any chat. Three inputs are NOT props:
  * the clock (#278) — an age that only moves when the page happens to re-render is a stale
  * reading that looks live, so each age subscribes to `pageClock`, which a static render does
- * not — and which sections the reader folded, the reader's own state.
+ * not — and which sections and folds the reader folded, and what they searched for: the reader's own state.
  */
 
 /** `now`, `12s`, `3m`, `2h`, `6d` — deepseek's form, one unit, no "ago". */
@@ -352,6 +369,7 @@ function ThreadRow({
     <li>
       <button
         type="button"
+        data-thread-id={thread.threadId}
         aria-current={active ? 'true' : undefined}
         onClick={() => onSelect(thread.threadId)}
         className={cn(ROW, active ? 'bg-accent text-foreground hover:bg-accent' : 'text-foreground')}
@@ -391,6 +409,7 @@ function EarlierThreadRow({
     <li>
       <button
         type="button"
+        data-thread-id={thread.threadId}
         title={thread.busy ? 'running — resume to follow it' : `not open here — resume it (${at.toLocaleString()})`}
         onClick={() => onResume(thread.threadId)}
         className={cn(ROW, 'text-muted-foreground hover:text-foreground')}
@@ -411,16 +430,6 @@ function sectionTitle(project: EnsoProject | undefined, anyProjects: boolean): {
   return anyProjects
     ? { name: 'other', hover: 'threads in a project this server no longer lists' }
     : { name: 'threads', hover: 'the projects are not listed yet' }
-}
-
-/**
- * What a folded section's header says for the rows it hides: a question waiting on you first (only
- * an open thread can hold one, and it is busy too), else a run in flight — the order `liveState` uses.
- */
-function hiddenState(group: ProjectGroup): 'waiting' | 'running' | undefined {
-  if (group.threads.some((thread) => thread.waiting)) return 'waiting'
-  if (group.threads.some((thread) => thread.busy) || group.earlier.some((thread) => thread.busy)) return 'running'
-  return undefined
 }
 
 /** What a section's header does to its project: start a thread, open its page (#754), forget it. */
@@ -499,99 +508,249 @@ function SectionHeader({
   )
 }
 
-/** A section's rows: the page's open threads, then its stored ones — five until asked for more. */
+/** What a section's rows read as and do: open a thread of this page, resume a stored one. */
+interface RowActions {
+  /** What each row reads as — `railLabels`. */
+  readonly labels: ReadonlyMap<string, string | undefined>
+  readonly activeThreadId: string | undefined
+  readonly onSelect: (threadId: string) => void
+  readonly onResume: (threadId: string) => void
+}
+
+function RailRowItem({ row, actions }: { row: RailRow; actions: RowActions }): React.ReactNode {
+  if (row.kind === 'open') {
+    return (
+      <ThreadRow
+        thread={row.thread}
+        label={actions.labels.get(row.thread.threadId)}
+        active={row.thread.threadId === actions.activeThreadId}
+        onSelect={actions.onSelect}
+      />
+    )
+  }
+  if (row.kind === 'stored') {
+    return (
+      <EarlierThreadRow
+        thread={row.thread}
+        label={actions.labels.get(row.thread.threadId)}
+        onResume={actions.onResume}
+      />
+    )
+  }
+  return <FoldRow fold={row} actions={actions} />
+}
+
+/**
+ * Threads that share a title, folded into one row with a count (#875), that expands in place. It
+ * opens on its own when it holds the thread on screen; collapsed, it says a question waiting on
+ * you or a run in flight among its threads, so neither is ever hidden in it.
+ */
+function FoldRow({
+  fold,
+  actions,
+}: {
+  fold: Extract<RailRow, { kind: 'fold' }>
+  actions: RowActions
+}): React.ReactNode {
+  const [chosen, setChosen] = useState<boolean | undefined>(undefined)
+  const open = chosen ?? fold.threads.some((thread) => thread.threadId === actions.activeThreadId)
+  const hidden = open ? undefined : hiddenState(fold)
+  const count = fold.threads.length + fold.earlier.length
+  const first = fold.threads[0] ?? fold.earlier[0]
+  return (
+    <li>
+      <button
+        type="button"
+        aria-expanded={open}
+        title={fold.title}
+        onClick={() => setChosen(!open)}
+        className={cn(ROW, 'text-foreground')}
+      >
+        <ChevronRightIcon aria-hidden="true" className={cn('size-3 shrink-0', open ? 'rotate-90' : '')} />
+        <span className="min-w-0 flex-1 truncate">
+          {(first === undefined ? undefined : actions.labels.get(first.threadId)) ?? fold.title}
+        </span>
+        {hidden === undefined ? null : <LiveDot state={hidden} />}
+        <span className="shrink-0 rounded-full border px-1.5 font-mono text-xs tabular-nums">
+          <span aria-hidden="true">×{count}</span>
+          <span className="sr-only">{`${count} threads`}</span>
+        </span>
+      </button>
+      {open ? (
+        <ol aria-label={`${count} threads titled ${fold.title}`} className="ml-3 flex flex-col gap-px border-l pl-1">
+          {fold.threads.map((thread) => (
+            <RailRowItem key={thread.threadId} row={{ kind: 'open', thread }} actions={actions} />
+          ))}
+          {fold.earlier.map((thread) => (
+            <RailRowItem key={thread.threadId} row={{ kind: 'stored', thread }} actions={actions} />
+          ))}
+        </ol>
+      ) : null}
+    </li>
+  )
+}
+
+/** One day group of a section (#875): its label, and its rows under it. */
+function DayGroup({ group, actions }: { group: RailDayGroup; actions: RowActions }): React.ReactNode {
+  const labelId = useId()
+  return (
+    <div className="flex flex-col gap-px">
+      <span id={labelId} className="px-2 pt-1 font-mono text-xs tracking-wider text-muted-foreground uppercase">
+        {RAIL_DAY_LABELS[group.day]}
+      </span>
+      <ol aria-labelledby={labelId} className="flex flex-col gap-px">
+        {group.rows.map((row) => (
+          <RailRowItem key={row.kind === 'fold' ? row.key : row.thread.threadId} row={row} actions={actions} />
+        ))}
+      </ol>
+    </div>
+  )
+}
+
+/**
+ * A section's rows: its day groups, the page's open threads before its stored ones in each — five
+ * rows of stored threads until asked for more; every match while searching.
+ */
 function SectionRows({
   group,
-  name,
-  activeThreadId,
-  onSelect,
-  onResume,
+  today,
+  searching,
+  actions,
 }: {
   group: ProjectGroup
-  name: string
-  activeThreadId: string | undefined
-  onSelect: (threadId: string) => void
-  onResume: (threadId: string) => void
+  today: Date
+  searching: boolean
+  actions: RowActions
 }): React.ReactNode {
   const [allStored, setAllStored] = useState(false)
-  const shownStored = allStored ? group.earlier : group.earlier.slice(0, STORED_ROWS_SHOWN)
-  const hidden = group.earlier.length - shownStored.length
-  const labels = useMemo(() => railLabels(group), [group])
+  const layout = sectionLayout(group, today, allStored || searching ? undefined : STORED_ROWS_SHOWN)
   return (
     <>
-      {group.threads.length > 0 ? (
-        <ol aria-label={`open threads in ${name}`} className="flex flex-col gap-px">
-          {group.threads.map((thread) => (
-            <ThreadRow
-              key={thread.threadId}
-              thread={thread}
-              label={labels.get(thread.threadId)}
-              active={thread.threadId === activeThreadId}
-              onSelect={onSelect}
-            />
-          ))}
-        </ol>
-      ) : null}
-      {shownStored.length > 0 ? (
-        <ol aria-label={`earlier threads in ${name}`} className="flex flex-col gap-px">
-          {shownStored.map((thread) => (
-            <EarlierThreadRow
-              key={thread.threadId}
-              thread={thread}
-              label={labels.get(thread.threadId)}
-              onResume={onResume}
-            />
-          ))}
-        </ol>
-      ) : null}
+      {layout.days.map((day) => (
+        <DayGroup key={day.day} group={day} actions={actions} />
+      ))}
       {group.threads.length === 0 && group.earlier.length === 0 ? (
         <p className="px-2 py-1 text-xs text-muted-foreground italic">no threads yet</p>
       ) : null}
-      {hidden > 0 || allStored ? (
+      {!searching && (layout.hidden > 0 || allStored) ? (
         <button
           type="button"
           onClick={() => setAllStored((was) => !was)}
           className="self-start rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-popover hover:text-foreground"
         >
-          {allStored ? 'show less' : `show ${hidden} more`}
+          {allStored ? 'show less' : `show ${layout.hidden} more`}
         </button>
       ) : null}
     </>
   )
 }
 
+/**
+ * A project's section. Searching (#875) shows only its matches and opens it whatever the reader's
+ * fold says, which is kept for after; closed during a search, it stays closed until the query changes.
+ */
 function ProjectSection({
   group,
+  query,
   anyProjects,
-  activeThreadId,
-  onSelect,
-  onResume,
+  today,
+  rows,
   actions,
 }: {
   group: ProjectGroup
+  query: string
   anyProjects: boolean
-  activeThreadId: string | undefined
-  onSelect: (threadId: string) => void
-  onResume: (threadId: string) => void
+  today: Date
+  rows: Omit<RowActions, 'labels'>
   actions: ProjectActions
 }): React.ReactNode {
   const [folded, toggleFolded] = useFolded(group.project?.projectId ?? 'unlisted')
+  const [closedUnder, setClosedUnder] = useState<string | undefined>(undefined)
+  const searching = query.trim() !== ''
+  const shown = searching ? closedUnder !== query : !folded
+  const matching = matchingThreads(group, query)
   const { name, hover } = sectionTitle(group.project, anyProjects)
   return (
     <section aria-label={name} className="flex flex-col gap-1">
-      <SectionHeader group={group} name={name} hover={hover} folded={folded} onFold={toggleFolded} actions={actions} />
-      {folded ? null : (
+      <SectionHeader
+        group={matching}
+        name={name}
+        hover={hover}
+        folded={!shown}
+        onFold={searching ? () => setClosedUnder(closedUnder === query ? undefined : query) : toggleFolded}
+        actions={actions}
+      />
+      {shown ? (
         <SectionRows
-          group={group}
-          name={name}
-          activeThreadId={activeThreadId}
-          onSelect={onSelect}
-          onResume={onResume}
+          group={matching}
+          today={today}
+          searching={searching}
+          // Labelled against the whole section, so a search never changes what a row reads as.
+          actions={{ ...rows, labels: railLabels(group) }}
         />
-      )}
+      ) : null}
     </section>
   )
 }
+
+/** The rail's search box (#875): its id, so the not-found screen's **Search threads** can focus it. */
+export const RAIL_SEARCH_ID = 'threads-rail-search'
+
+/** The rail's search (#875): what is typed, the box it is typed in, and emptying it with focus kept in the box. */
+interface RailSearchState {
+  readonly query: string
+  readonly setQuery: (query: string) => void
+  readonly field: React.RefObject<HTMLInputElement | null>
+  readonly clear: () => void
+}
+
+function useRailSearch(): RailSearchState {
+  const [query, setQuery] = useState('')
+  const field = useRef<HTMLInputElement>(null)
+  const clear = (): void => {
+    setQuery('')
+    field.current?.focus()
+  }
+  return { query, setQuery, field, clear }
+}
+
+/** The search box: what is typed filters the rail; Escape or the clear button empties it. */
+function RailSearch({ search: { query, setQuery, field, clear } }: { search: RailSearchState }): React.ReactNode {
+  return (
+    <InputGroup className="h-9 bg-card">
+      <InputGroupAddon>
+        <SearchIcon aria-hidden="true" />
+      </InputGroupAddon>
+      <InputGroupInput
+        ref={field}
+        id={RAIL_SEARCH_ID}
+        type="search"
+        aria-label="Search threads"
+        placeholder="Search threads"
+        autoComplete="off"
+        value={query}
+        onChange={(event: React.ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)}
+        onKeyDown={(event: React.KeyboardEvent<HTMLInputElement>) => {
+          if (event.key !== 'Escape' || query === '') return
+          event.preventDefault()
+          setQuery('')
+        }}
+        // The browser's own clear button would be a second one beside ours.
+        className="text-sm [&::-webkit-search-cancel-button]:hidden"
+      />
+      {query === '' ? null : (
+        <InputGroupAddon align="inline-end">
+          <InputGroupButton size="icon-xs" aria-label="clear search" onClick={clear}>
+            <XIcon />
+          </InputGroupButton>
+        </InputGroupAddon>
+      )}
+    </InputGroup>
+  )
+}
+
+/** Local midnight today, as a number so the rail re-renders when the day turns and not at every tick of the clock. */
+const localMidnight = (): number => startOfLocalDay(pageClock.get()).getTime()
 
 /** One link at the rail's foot: a page, marked as the current page while it is on screen. */
 function RailLink({
@@ -673,6 +832,54 @@ function RailAlerts({
   )
 }
 
+/**
+ * The rail's sections under its search (#875): every project's, or while searching only those with
+ * a match — and when none has one, a line that says so with a way back.
+ */
+function RailSections({
+  groups,
+  search: { query, clear },
+  anyProjects,
+  rows,
+  actions,
+}: {
+  groups: readonly ProjectGroup[]
+  search: RailSearchState
+  anyProjects: boolean
+  rows: Omit<RowActions, 'labels'>
+  actions: ProjectActions
+}): React.ReactNode {
+  const today = new Date(useSyncExternalStore(pageClock.subscribe, localMidnight, localMidnight))
+  const searching = query.trim() !== ''
+  const shown = searching
+    ? groups.filter((group) => {
+        const matching = matchingThreads(group, query)
+        return matching.threads.length > 0 || matching.earlier.length > 0
+      })
+    : groups
+  if (searching && shown.length === 0) {
+    return (
+      <div role="status" className="flex flex-col items-start gap-2 px-2 py-4 text-sm text-muted-foreground">
+        <span>{`No threads match “${query.trim()}”.`}</span>
+        <button type="button" className="text-primary underline underline-offset-3" onClick={clear}>
+          Clear search
+        </button>
+      </div>
+    )
+  }
+  return shown.map((group) => (
+    <ProjectSection
+      key={group.project?.projectId ?? 'unlisted'}
+      group={group}
+      query={query}
+      anyProjects={anyProjects}
+      today={today}
+      rows={rows}
+      actions={actions}
+    />
+  ))
+}
+
 export function ThreadsRail({
   projects,
   threads,
@@ -692,10 +899,9 @@ export function ThreadsRail({
   forkParents = NO_FORKS,
 }: ThreadsRailProps): React.ReactNode {
   const groups = groupByProject(projects, threads, earlier)
+  const search = useRailSearch()
   // New Thread starts where the reader is: the project of the thread on screen, or behind the page.
   const activeProject = groups.find((group) => group.threads.some((thread) => thread.threadId === activeThreadId))
-  const actions: ProjectActions = { onNew, onRemove: onRemoveProject, onSettings: onProjectSettings }
-  const currentThreadId = page === undefined ? activeThreadId : undefined
   return (
     <ForkParentsContext.Provider value={forkParents}>
       <nav
@@ -706,23 +912,22 @@ export function ThreadsRail({
           shownNarrow ? 'flex w-full' : 'hidden',
         )}
       >
-        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-3">
+        <div className="grid gap-2 p-3 pb-1">
           <Button type="button" className="h-10 w-full" onClick={() => onNew(activeProject?.project?.projectId)}>
             <PlusIcon />
             New Thread
           </Button>
+          <RailSearch search={search} />
+        </div>
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-3 pt-2">
           <RailAlerts earlierError={earlierError} openError={openError} projectNotice={projectNotice} />
-          {groups.map((group) => (
-            <ProjectSection
-              key={group.project?.projectId ?? 'unlisted'}
-              group={group}
-              anyProjects={projects.length > 0}
-              activeThreadId={currentThreadId}
-              onSelect={onSelect}
-              onResume={onResume}
-              actions={actions}
-            />
-          ))}
+          <RailSections
+            groups={groups}
+            search={search}
+            anyProjects={projects.length > 0}
+            rows={{ activeThreadId: page === undefined ? activeThreadId : undefined, onSelect, onResume }}
+            actions={{ onNew, onRemove: onRemoveProject, onSettings: onProjectSettings }}
+          />
           <Button
             type="button"
             size="sm"

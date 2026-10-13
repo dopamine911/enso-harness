@@ -218,6 +218,7 @@ function ComposerStartSession({
       open={open && onScreen}
       onClose={(): void => stores.startSession.set(false)}
       keepPrompt={keepPrompt}
+      onTyped={stores.typed.startDialog.set}
       mode={permission.mode}
       modes={permission.available}
       configure={stores.connection.configure}
@@ -294,7 +295,10 @@ function ComposerBody({
   // A resolution ended the thread (#466): read-only for good — the server refuses a prompt, so
   // the composer says why instead of offering a send that cannot land. Forking still works.
   const ended = useStore(stores.incidents).ended
-  const canSend = (draft.trim().length > 0 || attachments.files.length > 0) && !disconnected && !ended
+  // What leaving a draft thread reads too (#875): words or an image here keep it on the rail.
+  const typed = draft.trim().length > 0 || attachments.files.length > 0
+  useEffect(() => stores.typed.composer.set(typed), [stores, typed])
+  const canSend = typed && !disconnected && !ended
   return (
     <div className="flex flex-col gap-2 rounded-lg border border-input bg-card p-2 transition-colors focus-within:border-ring">
       {attachments.files.length === 0 ? null : (

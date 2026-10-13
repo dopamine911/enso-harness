@@ -27,7 +27,7 @@ import type { ThreadView } from './pane-context.ts'
 import { PromptManagerDialog } from './prompt-manager.tsx'
 import { InlineRename } from './rename-thread.tsx'
 import { useStore } from './store.ts'
-import { getThreadStores, nameThreadSummary, type ThreadSummary } from './thread-stores.ts'
+import { getThreadStores, nameThreadSummary, type ThreadSummary, threadStarted } from './thread-stores.ts'
 import { UNTITLED_THREAD } from './threads-rail.tsx'
 
 /**
@@ -129,19 +129,6 @@ export function AppHeader(props: AppHeaderProps): React.ReactNode {
         <ThreadMenu key={shown.threadId} {...props} active={shown} started={started} onRename={rename.start} />
       )}
     </header>
-  )
-}
-
-/**
- * Whether the server holds the thread: listed among its stored sessions (a fork, written by its
- * route before any prompt), adopted from a stored branch, or prompted here (its title is that
- * prompt's). A thread minted and never prompted is a draft, this page's only (#879: "not started").
- */
-function threadStarted(active: ThreadSummary, stored: readonly EnsoStoredThread[]): boolean {
-  return (
-    active.title !== undefined ||
-    getThreadStores(active.threadId).history.length > 0 ||
-    stored.some((row) => row.threadId === active.threadId)
   )
 }
 
