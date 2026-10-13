@@ -1141,7 +1141,6 @@ test('⚠ grep over the folder ABOVE the harness root is blocked when the harnes
 test("⚠ read of a directory holding .enso/ passes the guard, and pi's read returns nothing of it (#886)", async () => {
   const workspace = mkdtempSync(join(tmpdir(), 'enso-guard-886-'))
   mkdirSync(join(workspace, '.enso'))
-  writeFileSync(join(workspace, '.enso', 'secrets.env'), 'ANTHROPIC_API_KEY=x\n')
   const result = loadGuard()(
     { type: 'tool_call', toolCallId: 't', toolName: 'read', input: { path: '.' } },
     { cwd: workspace },
