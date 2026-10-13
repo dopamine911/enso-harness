@@ -250,11 +250,13 @@ function PageStatus({
   const projectCount = projects.rows.length
   const threadCount = stored.rows.length
   return (
+    // One line when it fits, as the thread's strip (#417) — and a second when it doesn't, never a cut:
+    // a long project title breaks inside its own word rather than pushing the counts off the bar.
     <footer
       aria-label="page status"
-      className="flex min-h-8 shrink-0 items-center gap-4 overflow-hidden border-t px-6 font-mono text-xs whitespace-nowrap text-muted-foreground max-md:gap-3 max-md:px-4"
+      className="flex min-h-8 shrink-0 flex-wrap items-center gap-x-4 gap-y-0.5 border-t px-6 py-0.5 font-mono text-xs whitespace-nowrap text-muted-foreground max-md:gap-x-3 max-md:px-4"
     >
-      <span className="flex items-center gap-2 font-semibold text-foreground">
+      <span className="flex min-w-0 items-center gap-2 font-semibold break-all whitespace-normal text-foreground">
         <span aria-hidden="true" className="size-2 shrink-0 rounded-full border-dot border-muted-foreground" />
         {heading.status}
       </span>
