@@ -243,7 +243,7 @@ function hiddenSegmentOf(path: string): string | undefined {
 function standingRefusal(canonical: string, home: string, ensoHome: string | undefined): string | undefined {
   if (isWithin(canonical, home)) return `${canonical} is your home folder or holds it; choose a folder inside it`
   if (ensoHome !== undefined && isWithin(ensoHome, canonical)) {
-    return `${canonical} is Enso's own home (ENSO_HOME) or inside it, which cannot be a project`
+    return `${canonical} is Enso's own home (ENSO_HOME) or inside it; choose a folder outside it`
   }
   return undefined
 }
