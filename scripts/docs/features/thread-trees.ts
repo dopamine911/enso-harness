@@ -88,6 +88,10 @@ export const THREAD_TREES: FeatureSpec = {
           says: 'The totals across every project: how many trees, what they take, and what the snapshot stores take. A sum with a size not fully read says `at least`, and how many were not.',
         },
         {
+          target: { text: / on disk/, within: { role: 'region', name: /^trees of /, within: SETTINGS } },
+          says: "**{shown}**: the project's trees plus its snapshot store, the same number its card on the Projects page says.",
+        },
+        {
           target: { text: /^snapshots /, within: SETTINGS },
           says: "**{shown}**: the project's snapshot store, shared by all its threads' snapshots.",
         },
