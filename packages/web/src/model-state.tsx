@@ -18,13 +18,8 @@ import {
   ModelSelectorList,
   ModelSelectorName,
 } from './components/ai-elements/model-selector.tsx'
-import {
-  PromptInputSelect,
-  PromptInputSelectContent,
-  PromptInputSelectItem,
-  PromptInputSelectTrigger,
-  PromptInputSelectValue,
-} from './components/ai-elements/prompt-input.tsx'
+import { SelectItem } from './components/ui/select.tsx'
+import { SettingChip } from './setting-chip.tsx'
 import { createStore, type Store, useStore, useThreadStores } from './store.ts'
 
 /**
@@ -45,7 +40,7 @@ import { createStore, type Store, useStore, useThreadStores } from './store.ts'
  * model this page can vouch for. The permission-mode store keeps its `seed` guard because it
  * seeds from a second source (`/api/mode`); this one has one source, the follow.
  *
- * ⚠ ENABLED WHILE NOT LIVE — ON PURPOSE (#341). The thinking select hides when nothing is known
+ * ⚠ ENABLED WHILE NOT LIVE — ON PURPOSE (#341). The Effort chip hides when nothing is known
  * (no levels to offer), but the model chip stays a button: choosing the model BEFORE the first
  * prompt is the case this exists for — "the default is Cursor, I have no Cursor" — and a
  * not-yet-run thread BUILDS on `POST …/command` so the choice lands in the session the first
@@ -58,7 +53,7 @@ import { createStore, type Store, useStore, useThreadStores } from './store.ts'
  * ⓘ RECORDED, NOT LIVE (#434). A cold thread's snapshot carries `recordedModel` — what its branch
  * last ran on (the last `model_change` / `thinking_level_change`, what pi restores on open). That
  * is NOT a live state and never enters this store: it rides in `recorded`, and the chip shows it
- * only while the store is `null`, prefixed `model (recorded):`. The thinking select still hides
+ * only while the store is `null`, prefixed `model (recorded):`. The Effort chip still hides
  * then — the levels a model offers are pi's to declare once built. Every snapshot replaces
  * `recorded` too, so a thread that went live (no `recordedModel`) drops it.
  */
@@ -125,53 +120,40 @@ export function recordedModelText(recorded: EnsoRecordedModel): string {
   return `${MODEL_RECORDED} ${parts.join(' · ')}`
 }
 
-export interface ThinkingLevelSelectProps {
+export interface EffortChipProps {
   readonly state: EnsoModelState | null
   /** Called with the chosen level; never with the current one (re-selecting it is a no-op here). */
   readonly onSelect: (level: string) => void
 }
 
 /**
- * The composer-row `thinking` select over the levels the host offers (`getAvailableThinkingLevels()`
- * — pi's are discrete, so a select is the truthful widget; there is no slider on purpose). Renders
- * NOTHING while the store is `null`: the levels are pi's to declare, not ours to assume.
- *
- * ⓘ `PromptInputSelect*` (ai-elements on shadcn `select`) rather than the native `<select>` the
- * mode control uses: the ports were taken back for this (#31, port before build) and the chip
- * beside it is a dialog, so the chrome row is one visual family. `position="popper"` so the list
- * drops below the trigger inside the composer instead of item-aligned over it.
+ * The composer's Effort chip (#878): the thinking level, over the levels the host offers
+ * (`getAvailableThinkingLevels()` — pi's are discrete, so a list is the truthful widget; there is no
+ * slider on purpose). The launch panel's chip (#877), so the row is one control. Renders NOTHING
+ * while the store is `null`: the levels are pi's to declare, not ours to assume.
  */
-export function ThinkingLevelSelect({ state, onSelect }: ThinkingLevelSelectProps): React.ReactNode {
+export function EffortChip({ state, onSelect }: EffortChipProps): React.ReactNode {
   if (state === null) return null
   const { thinkingLevel, availableThinkingLevels } = state
+  // The current level always offered even if the list somehow omitted it — the readout never lies about what it was told.
+  const levels = availableThinkingLevels.includes(thinkingLevel)
+    ? availableThinkingLevels
+    : [...availableThinkingLevels, thinkingLevel]
   return (
-    <span
-      className="flex items-center gap-1.5 text-xs text-muted-foreground"
-      title="how hard pi thinks — the levels this model offers"
+    <SettingChip
+      label="Effort"
+      value={thinkingLevel}
+      display={thinkingLevel}
+      onChoose={(next: string): void => {
+        if (next !== thinkingLevel) onSelect(next)
+      }}
     >
-      <span>thinking</span>
-      <PromptInputSelect
-        value={thinkingLevel}
-        onValueChange={(next: string): void => {
-          if (next !== thinkingLevel) onSelect(next)
-        }}
-      >
-        <PromptInputSelectTrigger aria-label="thinking level" size="sm" className="h-6 px-1.5 text-xs">
-          <PromptInputSelectValue />
-        </PromptInputSelectTrigger>
-        <PromptInputSelectContent position="popper">
-          {availableThinkingLevels.map((level) => (
-            <PromptInputSelectItem key={level} value={level}>
-              {level}
-            </PromptInputSelectItem>
-          ))}
-          {/* The current level always renders even if the list somehow omitted it — the readout never lies about what it was told. */}
-          {availableThinkingLevels.includes(thinkingLevel) ? null : (
-            <PromptInputSelectItem value={thinkingLevel}>{thinkingLevel}</PromptInputSelectItem>
-          )}
-        </PromptInputSelectContent>
-      </PromptInputSelect>
-    </span>
+      {levels.map((level) => (
+        <SelectItem key={level} value={level}>
+          {level}
+        </SelectItem>
+      ))}
+    </SettingChip>
   )
 }
 

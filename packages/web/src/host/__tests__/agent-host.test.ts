@@ -5229,14 +5229,25 @@ test("a preview changes nothing: the thread's own prompt is what its request car
   expect(hosted.previewSystemPrompt(null)).toMatchObject({ kind: 'preview', preview: { prompt: null } })
 })
 
-test("the thread's context names the system prompt its branch records — live and from the file (#443)", async () => {
+test("the thread's system prompt is said live as its record, and named by its context and its inspection — live and from the file (#443, #878)", async () => {
   const { host, project } = recordingHost(1)
   const threadId = crypto.randomUUID()
   const hosted = await host.createSession(threadId, () => project)
   openSessions.push(hosted)
+  const events = collectEvents(hosted)
   expect(hosted.branchContext().systemPrompt).toBeNull()
   const choice = choiceOf('append', 'Always answer in haiku.')
   expect(hosted.runtime.setSystemPrompt(choice)).toBeUndefined()
+  // Every follower is told at once (#878): the record, appended through pi, as a `custom-entry`.
+  expect(
+    events.filter((event) => event.kind === 'custom-entry' && event.customType === ENSO_SYSTEM_PROMPT_ENTRY),
+  ).toEqual([{ kind: 'custom-entry', customType: ENSO_SYSTEM_PROMPT_ENTRY, data: choice }])
+  // …and the entries a follow's snapshot is read from (`thread-read.ts`) hold it before the first request.
+  expect(
+    hosted
+      .inspect()
+      .entries.filter((entry) => entry.kind === 'custom' && entry.customType === ENSO_SYSTEM_PROMPT_ENTRY),
+  ).toHaveLength(1)
   await runPrompt(hosted, 'one')
   const named = { id: choice.id, name: choice.name, mode: 'append' as const, sha256: choice.sha256 }
   expect(hosted.branchContext().systemPrompt).toEqual(named)

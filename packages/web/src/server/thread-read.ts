@@ -12,9 +12,11 @@ import {
   type EnsoSessionUsage,
   type EnsoStoppedAfter,
   type EnsoThreadHistory,
+  type EnsoThreadSystemPrompt,
   type EnsoTranscriptEntry,
   sessionIncidentsOf,
   sessionRiskOfTranscript,
+  threadSystemPrompt,
 } from '@enso/core'
 import type { AgentHost } from '../host/agent-host.ts'
 import type { StoredThreadRead } from '../host/stored-threads.ts'
@@ -126,6 +128,11 @@ export interface ThreadMount {
    * records neither.
    */
   readonly recordedModel: EnsoRecordedModel | undefined
+  /**
+   * The system prompt the session runs with (#878): the branch's last record (#443) — the live
+   * session's entries or the file's, the same record either way. `null` is pi's default.
+   */
+  readonly systemPrompt: EnsoThreadSystemPrompt
   /** Every question pi is blocked on, oldest first (#114); empty when the thread is not live. */
   readonly openDialogs: EnsoOpenDialog[]
   /** The login waiting on its provider (#348), which Stop can end; undefined when none is, or not live. */
@@ -187,6 +194,7 @@ export async function readThreadMount(deps: ThreadReadDeps, threadId: string): P
     trailingRefusal: messageEntries.findLast((message) => message.role === 'assistant')?.refusal,
     stoppedAfter: stoppedAfter(transcript),
     sessionRisk: { level: risk.level, signals: risk.signals.length },
+    systemPrompt: threadSystemPrompt(transcript),
     incidents: sessionIncidentsOf(
       transcript.flatMap((transcriptEntry) => (transcriptEntry.kind === 'custom' ? [transcriptEntry] : [])),
     ),

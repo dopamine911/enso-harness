@@ -1,5 +1,7 @@
-import { ChevronDownIcon } from 'lucide-react'
+import { ChevronDownIcon, LockIcon } from 'lucide-react'
+import { useState } from 'react'
 import { Select, SelectContent, SelectTrigger, SelectValue } from './components/ui/select.tsx'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './components/ui/tooltip.tsx'
 import { cn } from './lib/utils.ts'
 
 /**
@@ -104,5 +106,48 @@ export function ChipButton({ label, display, onOpen, disabled, invalid, ref }: C
       <ChipFace label={label} value={display} />
       <ChevronDownIcon aria-hidden="true" className="size-4 text-muted-foreground" />
     </button>
+  )
+}
+
+export interface LockedChipProps {
+  readonly label: string
+  readonly display: string
+  /** Why the setting cannot change now, in a sentence: what the chip says when pressed. */
+  readonly explanation: string
+}
+
+/**
+ * A setting fixed for the session's life (#878): the chip with a lock, not a list — nothing opens to
+ * choose from. Still a button, so Tab reaches it, and pressing it (click, Enter, Space) says why: the
+ * explanation, as a tooltip that focus and hover open too. ⚠ Controlled, and the click PREVENTS
+ * Radix's own: its trigger closes the tooltip on every click, the press that should open it.
+ */
+export function LockedChip({ label, display, explanation }: LockedChipProps): React.ReactNode {
+  const [open, setOpen] = useState(false)
+  return (
+    <TooltipProvider>
+      <Tooltip open={open} onOpenChange={setOpen}>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            aria-label={`${label}: ${display}, fixed for this session`}
+            onClick={(event: React.MouseEvent<HTMLButtonElement>): void => {
+              event.preventDefault()
+              setOpen(true)
+            }}
+            className={cn(
+              CHIP,
+              'flex items-center border-dashed whitespace-nowrap outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50',
+            )}
+          >
+            <ChipFace label={label} value={display} />
+            <LockIcon aria-hidden="true" className="size-3 text-muted-foreground" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="top" sideOffset={6}>
+          {explanation}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   )
 }

@@ -18,6 +18,7 @@ import {
   DEFAULT_RISK_THRESHOLDS,
   ENSO_PROJECT_HEADER,
   ENSO_RUN_STOPPED_ENTRY,
+  ENSO_SYSTEM_PROMPT_ENTRY,
   EnsoForkPoint,
   type EnsoFollowFrame,
   type EnsoModelState,
@@ -497,6 +498,27 @@ test("a cold thread's snapshot carries its recorded model beside a null model; o
   const liveFollow = await openFollow(url, 'cold', later)
   expect(liveFollow.frames[0]).toMatchObject({ type: 'snapshot', live: true, model: { model: { name: 'Fake One' } } })
   expect(liveFollow.frames[0]).not.toHaveProperty('recordedModel')
+})
+
+// #878: the composer's locked System prompt chip says what the session runs with, after a reload
+// too — so the snapshot carries the branch's record, named without its text; none is pi's default.
+test("a follow's snapshot names the system prompt the branch records, without its text; a branch with none says pi's default (#878)", async () => {
+  const choice = { id: 'reviewer', name: 'Reviewer', mode: 'system', sha256: 'c'.repeat(64), text: 'Read the diff.' }
+  const recorded = { kind: 'custom' as const, id: 'sp1', customType: ENSO_SYSTEM_PROMPT_ENTRY, data: choice }
+  const stored = {
+    chosen: { transcript: [recorded], modified: new Date(1), firstMessage: 'reviewed' },
+    plain: { transcript: [], modified: new Date(0), firstMessage: 'plain' },
+  }
+  const { url } = await startWith(settlesAtOnce, stored)
+  const snapshotOf = async (threadId: string): Promise<unknown> => {
+    const controller = new AbortController()
+    openFollows.push(controller)
+    return (await openFollow(url, threadId, controller)).frames[0]
+  }
+  const { text: _text, ...named } = choice
+  expect(await snapshotOf('chosen')).toMatchObject({ type: 'snapshot', live: false, systemPrompt: named })
+  expect(JSON.stringify(await snapshotOf('chosen'))).not.toContain('Read the diff.')
+  expect(await snapshotOf('plain')).toMatchObject({ type: 'snapshot', systemPrompt: null })
 })
 
 // #871: the stored listing names the model each thread last ran on — the project page's Threads tab

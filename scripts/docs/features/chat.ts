@@ -61,6 +61,7 @@ export const CHAT: FeatureSpec = {
     'The URL names the thread as `?thread=<id>`.',
     'To add an image, use the **attach an image** button, paste the image, or drop it on the composer.',
     'The **commands** button (the `/` icon in the composer) opens the command palette.',
+    "Above the prompt box, the thread's settings are chips: the model, **Effort** and **Mode**, each opening its list (mouse or keyboard), and **System prompt**, locked once the session has started. Pressing the locked chip says why: it is fixed for this session.",
   ],
   shots: [
     {
@@ -86,6 +87,10 @@ export const CHAT: FeatureSpec = {
           says: '**{shown}** starts a new thread with everything before this prompt, and puts the prompt back in the composer. See [Forks and lineage](./lineage.md).',
         },
         { target: { role: 'button', name: 'attach an image' }, says: '**{shown}**.' },
+        {
+          target: { role: 'button', name: /^System prompt: / },
+          says: "The session's **System prompt**, locked: pi took it when the session started. Beside it, **Effort** and **Mode** open their lists.",
+        },
         {
           target: STATUS,
           says: "The status bar: whether pi is working, then prompts, tool calls, refusals, failures, and the thread's cost.",
@@ -127,6 +132,7 @@ export const CHAT: FeatureSpec = {
     'Most rows stay folded, and that is the point of the layout. A call that finished shows a check and nothing else. A call that failed opens itself, with a red border, so a failure is never behind a click. The status bar counts both kinds: this thread has `{refused}` and `{failed}`, and they are different things.',
     'In the palette, a command runs at once, but a prompt or a skill is only inserted into the composer as `/name `, for you to finish and send.',
     'While `/login` waits for the provider (a device code to enter, a browser page to finish), the composer shows the stop button, labelled `cancel the login to <provider>`. It cancels the login, and nothing is stored. After `/compact`, or a compaction pi runs on its own when the context fills, the transcript is re-read once the thread is idle, so it shows the compacted history without a reload.',
+    'The line under the prompt box says what Enter does. While pi is idle it sends (*Enter to send · Shift+Enter for a new line*); while pi is running it queues the prompt behind the run (*pi is running · Enter queues · Shift+Enter for a new line*), and the empty box says so too.',
   ],
   limits: [
     "An image in pi's reply that lives on another host is not loaded until you click it. The button names the host first. A reply is untrusted text, and loading an image is a request to whoever wrote its URL.",

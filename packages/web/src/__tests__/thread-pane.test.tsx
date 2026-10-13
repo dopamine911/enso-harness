@@ -6,6 +6,7 @@ import {
   ENSO_INCIDENT_RESOLVED_ENTRY,
   ENSO_PROVIDER_REFUSAL_KEY,
   ENSO_SESSION_RISK_ENTRY,
+  ENSO_SYSTEM_PROMPT_ENTRY,
   ENSO_UI_EVENTS,
   type EnsoFollowFrame,
   type EnsoForkReceipt,
@@ -126,7 +127,8 @@ interface MountedPane {
   readonly status: () => string
   readonly stopButton: () => HTMLButtonElement | null
   readonly sendButton: () => HTMLButtonElement
-  readonly modeSelect: () => HTMLSelectElement
+  /** The composer's chip named `<label>: …` (#878) — `Mode`, `Effort`, `System prompt`. */
+  readonly chip: (label: string) => HTMLButtonElement
   readonly composer: () => HTMLTextAreaElement
   /** The views the pane asked the page for, in order (#361) — the page is not mounted here. */
   readonly requestedViews: ThreadView[]
@@ -213,7 +215,13 @@ async function mountPane(
     status: () => one('#thread-status').textContent ?? '',
     stopButton: () => container.querySelector<HTMLButtonElement>('button[aria-label="stop the run"]'),
     sendButton: () => one<HTMLButtonElement>('button[aria-label="send message"]'),
-    modeSelect: () => one<HTMLSelectElement>('select'),
+    chip: (label: string) => {
+      const found = [...container.querySelectorAll<HTMLButtonElement>('button[aria-label]')].find((button) =>
+        button.getAttribute('aria-label')?.startsWith(`${label}: `),
+      )
+      if (found === undefined) throw new Error(`expected the ${label} chip in the pane`)
+      return found
+    },
     composer: () => one<HTMLTextAreaElement>('textarea[name="message"]'),
     requestedViews,
     setView: async (view: ThreadView) => {
@@ -237,6 +245,37 @@ function typeInto(field: HTMLTextAreaElement, text: string): void {
 
 const pressEnter = (field: HTMLTextAreaElement): boolean =>
   field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+
+/** The options a chip's open list offers, in order (Radix renders them in a portal on `document.body`). */
+const offeredOptions = (): string[] =>
+  [...document.querySelectorAll('[data-slot="select-item"]')].map((option) => option.textContent ?? '')
+
+/**
+ * Open a chip's list by KEYBOARD — Enter on the focused chip, as Radix's trigger takes it — and choose
+ * the option named `label` with the arrow keys and Enter (#878: the keyboard path is the one to pin).
+ * Answers what the list offered.
+ */
+async function chooseByKeyboard(chip: HTMLButtonElement, label: string): Promise<string[]> {
+  await flush(async () => {
+    chip.focus()
+    chip.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+    await tick()
+  })
+  const offered = await eventually(() => {
+    const options = offeredOptions()
+    expect(options).toContain(label)
+    return options
+  })
+  await flush(async () => {
+    const option = [...document.querySelectorAll<HTMLElement>('[data-slot="select-item"]')].find(
+      (candidate) => candidate.textContent === label,
+    )
+    option?.focus()
+    option?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+    await tick()
+  })
+  return offered
+}
 
 const railBusy = (threadId: string): boolean | undefined =>
   threadListStore.get().find((thread) => thread.threadId === threadId)?.busy
@@ -627,11 +666,11 @@ test("every request a pane makes goes through its thread's fetch, never the page
 
 // ── #125 item 1: the in-flight readings flip with the wire's status frames ───────────────
 
-test('⚠ busy on the wire → working, stop offered, rail busy, and the mode select still offered (#618); settled → idle, all back', async () => {
+test('⚠ busy on the wire → working, stop offered, rail busy, and the Mode chip still offered (#618); settled → idle, all back', async () => {
   const pane = await mountPane()
   expect(pane.status()).toContain('idle')
   expect(pane.stopButton()).toBeNull()
-  expect(pane.modeSelect().disabled).toBe(false)
+  expect(pane.chip('Mode').disabled).toBe(false)
   expect(railBusy(pane.stores.threadId)).toBe(false)
 
   // Another tab's run: busy with no receipt of ours. `isLoading` would never rise for this
@@ -641,7 +680,7 @@ test('⚠ busy on the wire → working, stop offered, rail busy, and the mode se
     expect(pane.status()).toContain('working')
     expect(pane.stopButton()).not.toBeNull()
     // A run that asks before every call is the one whose mode a user needs to change (#618).
-    expect(pane.modeSelect().disabled).toBe(false)
+    expect(pane.chip('Mode').disabled).toBe(false)
     expect(railBusy(pane.stores.threadId)).toBe(true)
   })
 
@@ -652,7 +691,7 @@ test('⚠ busy on the wire → working, stop offered, rail busy, and the mode se
   await eventually(() => {
     expect(pane.status()).toContain('idle')
     expect(pane.stopButton()).toBeNull()
-    expect(pane.modeSelect().disabled).toBe(false)
+    expect(pane.chip('Mode').disabled).toBe(false)
     expect(railBusy(pane.stores.threadId)).toBe(false)
   })
   await pane.unmount()
@@ -727,19 +766,143 @@ test('⚠ while a login waits, the composer offers Stop for it; pressing it asks
   await pane.unmount()
 })
 
-test("the snapshot's mode is the select's value; the host's mode observation moves it (#84, #95, L3)", async () => {
+test("the snapshot's mode is the Mode chip's, its list the host's modes; the host's mode observation moves it (#84, #95, L3, #878)", async () => {
   const pane = await mountPane()
   await pane.settle({ ...SNAPSHOT_IDLE, permissionMode: { mode: 'plan', available: ['default', 'plan', 'auto'] } })
-  await eventually(() => {
-    expect(pane.modeSelect().value).toBe('plan')
-    expect([...pane.modeSelect().options].map((option) => option.value)).toEqual(['default', 'plan', 'auto'])
-  })
+  await eventually(() => expect(pane.chip('Mode').getAttribute('aria-label')).toBe('Mode: plan'))
+  // Choosing the mode it is in already asks nothing: the list offers the host's modes, as they came.
+  expect(await chooseByKeyboard(pane.chip('Mode'), 'plan')).toEqual(['default', 'plan', 'auto'])
+  expect(pane.server.modeChanges).toEqual([])
   await pane.settle({
     type: 'observation',
     seq: 1,
     observation: { kind: 'permission-mode', mode: 'auto', available: ['default', 'plan', 'auto'] },
   })
-  await eventually(() => expect(pane.modeSelect().value).toBe('auto'))
+  await eventually(() => expect(pane.chip('Mode').getAttribute('aria-label')).toBe('Mode: auto'))
+  // The readout never lies about what it was told: a mode the receipt's list omits is still offered, as current.
+  await pane.settle({
+    type: 'observation',
+    seq: 2,
+    observation: { kind: 'permission-mode', mode: 'bypassPermissions', available: ['default', 'plan'] },
+  })
+  await eventually(() => expect(pane.chip('Mode').getAttribute('aria-label')).toBe('Mode: bypassPermissions'))
+  expect(await chooseByKeyboard(pane.chip('Mode'), 'bypassPermissions')).toEqual([
+    'default',
+    'plan',
+    'bypassPermissions',
+  ])
+  await pane.unmount()
+})
+
+// ⚠ #878, from the prototype's click-through: a Mode change there left no trace in the thread. Here
+// every change chosen on the chip goes to the mode route, and the host's receipt writes the
+// thread's "Mode: …" line — `bypassPermissions` included, the one change a reader must see.
+test('⚠ every Mode change chosen on the chip, bypassPermissions included, POSTs the mode and leaves its "Mode: …" line in the thread', async () => {
+  const modes = ['default', 'plan', 'bypassPermissions']
+  const pane = await mountPane()
+  await pane.settle({ ...SNAPSHOT_IDLE, live: true, permissionMode: { mode: 'default', available: modes } })
+  await eventually(() => expect(pane.chip('Mode').getAttribute('aria-label')).toBe('Mode: default'))
+  const lines = (mode: string): number => pane.container.textContent?.split(`Mode: ${mode}`).length ?? 1
+  for (const [index, mode] of ['bypassPermissions', 'plan', 'bypassPermissions'].entries()) {
+    const before = lines(mode)
+    await chooseByKeyboard(pane.chip('Mode'), mode)
+    await eventually(() => expect(pane.server.modeChanges.at(-1)).toEqual({ mode }))
+    // What the host emits once the mode is persisted (`POST …/mode` answers 204, the receipt follows).
+    await pane.settle({
+      type: 'observation',
+      seq: index + 1,
+      observation: { kind: 'permission-mode', mode, available: modes },
+    })
+    await eventually(() => {
+      expect(pane.chip('Mode').getAttribute('aria-label')).toBe(`Mode: ${mode}`)
+      expect(lines(mode)).toBe(before + 1)
+    })
+  }
+  expect(pane.server.modeChanges).toEqual([
+    { mode: 'bypassPermissions' },
+    { mode: 'plan' },
+    { mode: 'bypassPermissions' },
+  ])
+  await pane.unmount()
+})
+
+// #878: the started composer's System prompt chip is locked — the session took its prompt before its
+// first request (#443) — and names the prompt the thread REPORTS: the snapshot's, which a reload
+// reads off the branch, then an entry appended live. Pressed, it says why it cannot change.
+test('the locked System prompt chip names the prompt the thread reports — the snapshot’s, then a live record — and pressing it says why it is fixed', async () => {
+  const reviewer = { id: 'reviewer', name: 'Reviewer', mode: 'system' as const, sha256: 'a'.repeat(64) }
+  const pane = await mountPane()
+  await pane.settle({ ...SNAPSHOT_IDLE, systemPrompt: reviewer })
+  const chip = (): HTMLButtonElement => pane.chip('System prompt')
+  await eventually(() =>
+    expect(chip().getAttribute('aria-label')).toBe('System prompt: Reviewer, fixed for this session'),
+  )
+  // A lock, not a list: nothing to choose from.
+  expect(chip().getAttribute('role')).toBeNull()
+  expect(chip().hasAttribute('aria-haspopup')).toBe(false)
+  await flush(async () => {
+    chip().click()
+    await tick()
+  })
+  const explanation = await eventually(() => {
+    const found = document.querySelector('[role="tooltip"]')
+    if (found === null) throw new Error('expected the explanation')
+    return found.textContent ?? ''
+  })
+  expect(explanation).toContain('Fixed for this session')
+  // A choice recorded live — another tab's Start — is what the chip says next, without its text.
+  await pane.settle({
+    type: 'observation',
+    seq: 1,
+    observation: {
+      kind: 'custom-entry',
+      customType: ENSO_SYSTEM_PROMPT_ENTRY,
+      data: { id: 'haiku', name: 'Haiku', mode: 'append', sha256: 'b'.repeat(64), text: 'Answer in haiku.' },
+    },
+  })
+  await eventually(() =>
+    expect(chip().getAttribute('aria-label')).toBe('System prompt: pi default + Haiku, fixed for this session'),
+  )
+  // pi's default, recorded over a choice, and a record that does not read — never shown as the default.
+  await pane.settle({ ...SNAPSHOT_IDLE, systemPrompt: null })
+  await eventually(() =>
+    expect(chip().getAttribute('aria-label')).toBe('System prompt: pi default, fixed for this session'),
+  )
+  await pane.settle({ ...SNAPSHOT_IDLE, systemPrompt: 'unreadable' })
+  await eventually(() =>
+    expect(chip().getAttribute('aria-label')).toBe('System prompt: unreadable record, fixed for this session'),
+  )
+  await pane.unmount()
+})
+
+// #878: what the empty box and the line under it say follow the thread — idle, a run in flight — and
+// say nothing about sending once nothing can be sent.
+test('the placeholder and the hint follow the run: idle "Ask pi something", running "Type the next prompt…", and no hint once disconnected', async () => {
+  const pane = await mountPane()
+  await pane.settle(SNAPSHOT_IDLE)
+  const hint = (): string => pane.composer().parentElement?.querySelector('p')?.textContent ?? ''
+  await eventually(() => {
+    expect(pane.composer().placeholder).toBe('Ask pi something')
+    expect(hint()).toBe('Enter to send · Shift+Enter for a new line')
+  })
+  await pane.settle({ type: 'status', live: true, busy: true, generation: 1 })
+  await eventually(() => {
+    expect(pane.composer().placeholder).toBe('Type the next prompt — it queues until this run ends')
+    expect(hint()).toBe('pi is running · Enter queues · Shift+Enter for a new line')
+  })
+  await pane.settle(
+    { type: 'observation', seq: 1, observation: { kind: 'settled', aborted: false } },
+    { type: 'status', live: true, busy: false, generation: 1 },
+  )
+  await eventually(() => expect(hint()).toBe('Enter to send · Shift+Enter for a new line'))
+  await flush(async () => {
+    pane.server.closeFollow()
+    await tick()
+  })
+  await eventually(() => {
+    expect(pane.composer().placeholder).toBe('disconnected — reload and resume from the rail')
+    expect(hint()).toBe('')
+  })
   await pane.unmount()
 })
 
@@ -1129,7 +1292,7 @@ test("⚠ the composer's e2e selectors match the rendered markup, and the spec's
   await pane.settle(SNAPSHOT_IDLE)
   const stopByName = (): number => pane.container.querySelectorAll('button[aria-label="stop the run"]').length
   await eventually(() => {
-    expect(pane.composer().placeholder).toBe('ask pi something')
+    expect(pane.composer().placeholder).toBe('Ask pi something')
     expect(pane.sendButton().getAttribute('aria-label')).toBe('send message')
     // Settled, so the spec's settle gate — the stop control's absence — holds.
     expect(stopByName()).toBe(0)
@@ -1360,7 +1523,7 @@ test('the `/` palette: an extension command sends and the typed draft stays; a t
 // the snapshot's `model` names it; the chip opens the dialog the palette's `/model` shares;
 // picking POSTs `{ name: 'model', value }` and moves nothing itself — the `model` observation
 // does; a refusal (409 running, 422 the host's reason) is a warning notice, the click did nothing else.
-test('the model chip and thinking level follow the snapshot; picking a model POSTs …/command; a refusal is a notice', async () => {
+test('the model chip and the Effort chip follow the snapshot; picking a model POSTs …/command; a refusal is a notice', async () => {
   const modelRow = {
     name: 'model',
     source: 'host' as const,
@@ -1382,7 +1545,7 @@ test('the model chip and thinking level follow the snapshot; picking a model POS
     return found
   }
   await eventually(() => expect(chip().textContent).toContain('default until the thread runs'))
-  expect(pane.container.querySelector('[aria-label="thinking level"]')).toBeNull()
+  expect(pane.container.querySelector('[aria-label^="Effort: "]')).toBeNull()
 
   await pane.settle({
     ...SNAPSHOT_IDLE,
@@ -1395,7 +1558,7 @@ test('the model chip and thinking level follow the snapshot; picking a model POS
   })
   await eventually(() => {
     expect(chip().textContent).toContain('Fake One')
-    expect(pane.container.querySelector('[aria-label="thinking level"]')?.textContent).toBe('medium')
+    expect(pane.chip('Effort').getAttribute('aria-label')).toBe('Effort: medium')
   })
 
   // The chip opens the dialog; the dialog reads the thread's commands and lists the row's options.
@@ -1438,13 +1601,16 @@ test('the model chip and thinking level follow the snapshot; picking a model POS
   })
   await eventually(() => {
     expect(chip().textContent).toContain('Fake Two')
-    expect(pane.container.querySelector('[aria-label="thinking level"]')?.textContent).toBe('high')
+    expect(pane.chip('Effort').getAttribute('aria-label')).toBe('Effort: high')
   })
+  // The Effort chip (#878), by keyboard: the levels the model offers, and a choice is the `/thinking` command.
+  expect(await chooseByKeyboard(pane.chip('Effort'), 'low')).toEqual(['off', 'low', 'medium', 'high'])
+  await eventually(() => expect(pane.server.hostCommands.at(-1)).toEqual({ name: 'thinking', value: 'low' }))
   await pane.unmount()
 })
 
 // #434: a cold thread's snapshot names what its branch last ran on. The chip says it, marked
-// recorded — never as live, so no thinking select (the levels are pi's to offer once built) —
+// recorded — never as live, so no Effort chip (the levels are pi's to offer once built) —
 // and the live snapshot replaces it once the thread runs.
 test('a cold thread shows its recorded model on the chip, marked recorded; the live snapshot wins once it runs', async () => {
   const pane = await mountPane()
@@ -1458,7 +1624,7 @@ test('a cold thread shows its recorded model on the chip, marked recorded; the l
     return found
   }
   await eventually(() => expect(chip().textContent).toBe('model (recorded): claude-sonnet-5 · anthropic · medium'))
-  expect(pane.container.querySelector('[aria-label="thinking level"]')).toBeNull()
+  expect(pane.container.querySelector('[aria-label^="Effort: "]')).toBeNull()
 
   await pane.settle({
     ...SNAPSHOT_IDLE,
@@ -1471,7 +1637,7 @@ test('a cold thread shows its recorded model on the chip, marked recorded; the l
   })
   await eventually(() => {
     expect(chip().textContent).toBe('modelFake One· fake')
-    expect(pane.container.querySelector('[aria-label="thinking level"]')?.textContent).toBe('high')
+    expect(pane.chip('Effort').getAttribute('aria-label')).toBe('Effort: high')
   })
   await pane.unmount()
 })
@@ -2307,7 +2473,7 @@ test("⚠ the debug pane names a MISMATCH between the page's mode and the server
     observation: { kind: 'permission-mode', mode: 'plan', available: ['default', 'plan'] },
   })
   await eventually(() => {
-    expect(pane.modeSelect().value).toBe('plan')
+    expect(pane.chip('Mode').getAttribute('aria-label')).toBe('Mode: plan')
     expect(debug.textContent).toContain('host mode: plan')
     expect(mismatches()).toBe(0)
   })

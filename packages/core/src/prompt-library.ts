@@ -525,6 +525,13 @@ export type RecordedSystemPrompt =
   | { readonly kind: 'chosen'; readonly choice: EnsoSystemPromptChoice }
   | { readonly kind: 'unreadable' }
 
+/** One `enso-system-prompt` entry's data as {@link recordedSystemPrompt} reads it. */
+function recordedSystemPromptOf(data: unknown): RecordedSystemPrompt {
+  if (data === undefined || data === null) return { kind: 'none' }
+  const choice = readEnsoSystemPromptChoice(data)
+  return choice === undefined ? { kind: 'unreadable' } : { kind: 'chosen', choice }
+}
+
 /**
  * What a branch says its system prompt is (#443): none (pi's default — no entry, or a last entry of
  * `null`), the choice its last `enso-system-prompt` entry holds, or an entry that does not read —
@@ -534,8 +541,30 @@ export type RecordedSystemPrompt =
  * @group Prompt library
  */
 export function recordedSystemPrompt(branch: readonly EnsoTranscriptEntry[]): RecordedSystemPrompt {
-  const data = lastCustomEntryData(branch, ENSO_SYSTEM_PROMPT_ENTRY)
-  if (data === undefined || data === null) return { kind: 'none' }
-  const choice = readEnsoSystemPromptChoice(data)
-  return choice === undefined ? { kind: 'unreadable' } : { kind: 'chosen', choice }
+  return recordedSystemPromptOf(lastCustomEntryData(branch, ENSO_SYSTEM_PROMPT_ENTRY))
+}
+
+/**
+ * One `enso-system-prompt` entry's data as a view shows it (#443, #878): the choice without its
+ * text, pi's default, or unreadable. The page reads an entry appended live with it; a branch is
+ * read by {@link threadSystemPrompt}.
+ *
+ * @group Prompt library
+ */
+export function threadSystemPromptOf(data: unknown): EnsoThreadSystemPrompt {
+  const recorded = recordedSystemPromptOf(data)
+  if (recorded.kind === 'none') return null
+  if (recorded.kind === 'unreadable') return 'unreadable'
+  const { id, name, mode, sha256 } = recorded.choice
+  return { id, name, mode, sha256 }
+}
+
+/**
+ * The branch's system prompt as a view shows it — the Context tab's label, the fork point's
+ * condition, the composer's locked chip (#878): its last `enso-system-prompt` entry's.
+ *
+ * @group Prompt library
+ */
+export function threadSystemPrompt(branch: readonly EnsoTranscriptEntry[]): EnsoThreadSystemPrompt {
+  return threadSystemPromptOf(lastCustomEntryData(branch, ENSO_SYSTEM_PROMPT_ENTRY))
 }

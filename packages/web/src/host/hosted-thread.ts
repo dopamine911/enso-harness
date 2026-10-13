@@ -615,11 +615,14 @@ export async function buildHostedThread(
       const decision = decideSystemPrompt(systemPrompt, choice, threadLog.hasSentRequest())
       if (decision.kind === 'refused') return decision.reason
       if (decision.kind === 'same') return undefined
+      if (hostApi === undefined) throw new Error(`thread ${threadId}: the host's extension API was never bound`)
       systemPrompt = choice ?? undefined
       // Recorded BEFORE the first request, so the log says what the request will carry; pi
       // flushes it with the first assistant message, as it does the model and the mode. pi's
       // default is recorded too (`null`): it replaces a choice this branch already records.
-      threadLog.record(ENSO_SYSTEM_PROMPT_ENTRY, choice)
+      // Through the host's extension API (#878), so pi emits `entry_appended` and every follower's
+      // composer shows the prompt the session now runs with, as a reload reads it off the branch.
+      hostApi.appendEntry(ENSO_SYSTEM_PROMPT_ENTRY, choice)
       // pi re-reads the loader when it rebuilds the prompt; the same tools make it rebuild.
       session.setActiveToolsByName(session.getActiveToolNames())
       if (choice === null) log.info("system prompt set to pi's default", { threadId })

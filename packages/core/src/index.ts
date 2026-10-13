@@ -281,6 +281,8 @@ export {
   recordedSystemPrompt,
   serializeLibraryPrompt,
   summarizeLibraryPrompt,
+  threadSystemPrompt,
+  threadSystemPromptOf,
   utf8Bytes,
 } from './prompt-library.ts'
 export {

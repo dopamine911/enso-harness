@@ -421,6 +421,7 @@ export const SNAPSHOT_IDLE: EnsoFollowSnapshot = {
   sessionRisk: { level: 'low', signals: 0 },
   incidents: NO_SESSION_INCIDENTS,
   model: null,
+  systemPrompt: null,
   cwd: '/work/project',
   tree: false,
   usage: { cost: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, context: null },

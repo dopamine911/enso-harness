@@ -9,12 +9,12 @@ import { ensureDom, releaseDom } from './dom-environment.ts'
 // measurement. The dialog is a Radix portal; the select's trigger takes its text from a portal too.
 ensureDom()
 const { createRoot }: { createRoot: typeof CreateRoot } = await import('react-dom/client')
-const { ModelChip, ModelChoiceDialog, ThinkingLevelSelect, MODEL_NOT_LIVE, rankOption }: typeof ModelStateModule =
+const { ModelChip, ModelChoiceDialog, EffortChip, MODEL_NOT_LIVE, rankOption }: typeof ModelStateModule =
   await import('../model-state.tsx')
 
 /**
  * The composer's model controls (#338 slice 2), MOUNTED under happy-dom: the chip's two sentences
- * (a name, or the not-live one — a button either way, #341), the thinking select's presence
+ * (a name, or the not-live one — a button either way, #341), the Effort chip's presence
  * and value, and the `/model` dialog over a fetch seam — options from a FRESH `/commands` read,
  * the current one marked, a pick delivered as `(command, optionId)` after the close, and the
  * two failures said inside the dialog. The store itself is pinned by `custom-event-router.test.ts`.
@@ -140,16 +140,16 @@ test('a cold thread with a recorded model: the chip says it, marked recorded; th
   await mounted.unmount()
 })
 
-test('the thinking select renders nothing while not live, and the current level once it is', async () => {
-  const mounted = await mount(<ThinkingLevelSelect state={null} onSelect={noop} />)
-  expect(mounted.container.querySelector('[aria-label="thinking level"]')).toBeNull()
-  await mounted.render(<ThinkingLevelSelect state={LIVE_MODEL} onSelect={noop} />)
+test('the Effort chip renders nothing while not live, and the current level once it is', async () => {
+  const mounted = await mount(<EffortChip state={null} onSelect={noop} />)
+  expect(mounted.container.querySelector('[aria-label^="Effort: "]')).toBeNull()
+  await mounted.render(<EffortChip state={LIVE_MODEL} onSelect={noop} />)
   const trigger = await eventually(() => {
-    const found = mounted.container.querySelector<HTMLButtonElement>('button[aria-label="thinking level"]')
-    if (found === null) throw new Error('expected the thinking select')
+    const found = mounted.container.querySelector<HTMLButtonElement>('button[aria-label^="Effort: "]')
+    if (found === null) throw new Error('expected the Effort chip')
     return found
   })
-  await eventually(() => expect(trigger.textContent).toBe('medium'))
+  expect(trigger.getAttribute('aria-label')).toBe('Effort: medium')
   await mounted.unmount()
 })
 

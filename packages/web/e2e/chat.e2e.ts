@@ -40,7 +40,8 @@ test.beforeEach(async ({ page }) => {
 const SCREENSHOT_DIRECTORY = join(OUTPUT_DIRECTORY, 'screenshots')
 
 /** Composer markup from src/composer.tsx — the accessible names ARE the contract. */
-const COMPOSER_PLACEHOLDER = 'ask pi something'
+// The started composer's placeholder while pi is idle (#878); a run in flight says another.
+const COMPOSER_PLACEHOLDER = 'Ask pi something'
 const SEND_BUTTON_NAME = 'send message'
 /**
  * ⚠ `src/composer.tsx`'s own `aria-label` for the stop control. This read
@@ -109,9 +110,9 @@ function composer(page: Page): Locator {
   return page.getByPlaceholder(COMPOSER_PLACEHOLDER).filter({ visible: true })
 }
 
-/** The permission-mode select on screen — what a resumed thread's persisted mode shows on (#142). */
+/** The started composer's Mode chip on screen (#878) — what a resumed thread's persisted mode shows on (#142). */
 function modeControl(page: Page): Locator {
-  return page.getByRole('combobox', { name: 'permission mode' }).filter({ visible: true })
+  return page.getByRole('combobox', { name: /^Mode: / }).filter({ visible: true })
 }
 
 /**
@@ -148,7 +149,7 @@ const START_PROMPT = 'Start the session.'
  * launch panel refuses a prompt beginning with `/`, and the `/` palette lists no rows. Start
  * applies the panel's settings (`POST …/configure`), then sends a prompt; the seeded home's `demo`
  * provider points at a port nothing listens on, so the run ends at once, refused, with no provider
- * reached. The docked composer's mode select is then the host's receipt: the session is live, in
+ * reached. The docked composer's Mode chip is then the host's receipt: the session is live, in
  * the mode the chip said.
  */
 async function startSession(page: Page, mode: string): Promise<void> {
@@ -162,16 +163,17 @@ async function startSession(page: Page, mode: string): Promise<void> {
   await launchPanel(page).getByRole('button', { name: 'Start session' }).click()
   await expect(launchPanel(page)).toHaveCount(0)
   await waitForRunToSettle(page, beforeStart)
-  await expect(modeControl(page)).toHaveValue(mode)
+  await expect(modeControl(page)).toHaveAccessibleName(`Mode: ${mode}`)
 }
 
 /**
- * Build a stored thread's session with no model, by choosing `mode` in the composer's select (#604):
- * a control route (`POST …/mode`) that acquires the thread cold off its file, with no prompt. The
- * `Mode:` line is the host's receipt: the session is live and in that mode.
+ * Build a stored thread's session with no model, by choosing `mode` on the composer's Mode chip (#604,
+ * #878): a control route (`POST …/mode`) that acquires the thread cold off its file, with no prompt.
+ * The `Mode:` line is the host's receipt: the session is live and in that mode.
  */
 async function chooseMode(page: Page, mode: string): Promise<void> {
-  await modeControl(page).selectOption(mode)
+  await modeControl(page).click()
+  await page.getByRole('option', { name: mode, exact: true }).click()
   await expect(page.getByText(`Mode: ${mode}`)).toBeVisible()
 }
 
@@ -329,7 +331,7 @@ test.describe('chat surface', () => {
     // failed). The mode CONTROL is the receipt: the "Mode: acceptEdits" line was a live notice.
     await page.reload()
     await expect(page).toHaveURL(new RegExp(`\\?thread=${first}$`))
-    await expect(modeControl(page)).toHaveValue('acceptEdits')
+    await expect(modeControl(page)).toHaveAccessibleName('Mode: acceptEdits')
     await expect(page.locator("[aria-current='true']")).toHaveCount(1)
     await captureScreenshot(page, '08-thread-reloaded')
 
@@ -342,14 +344,14 @@ test.describe('chat surface', () => {
     await expect(modeChip(page, 'default')).toBeVisible()
     await page.goBack()
     await expect(page).toHaveURL(new RegExp(`thread=${first}$`))
-    await expect(modeControl(page)).toHaveValue('acceptEdits')
+    await expect(modeControl(page)).toHaveAccessibleName('Mode: acceptEdits')
     await page.goForward()
     await expect(page).toHaveURL(new RegExp(`thread=${second}$`))
     await expect(modeChip(page, 'default')).toBeVisible()
 
     // A pasted link on a fresh page opens that thread cold — no page state.
     await page.goto(`/?thread=${first}`)
-    await expect(modeControl(page)).toHaveValue('acceptEdits')
+    await expect(modeControl(page)).toHaveAccessibleName('Mode: acceptEdits')
 
     // A URL that cannot name a thread: a new thread, on its launch panel, and the rail says why.
     await page.goto('/?thread=not%20a%20thread')

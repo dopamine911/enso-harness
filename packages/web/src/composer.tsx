@@ -48,29 +48,32 @@ import {
   useLaunching,
 } from './launch-settings.tsx'
 import { cn } from './lib/utils.ts'
-import { ModelChip, ModelChoiceDialog, ThinkingLevelSelect, useModelState, useRecordedModel } from './model-state.tsx'
+import { EffortChip, ModelChip, ModelChoiceDialog, useModelState, useRecordedModel } from './model-state.tsx'
 import { useChatContext, PaneViewContext } from './pane-context.ts'
-import { PermissionModeSelect, usePermissionMode } from './permission-mode.tsx'
+import { ModeChip, usePermissionMode } from './permission-mode.tsx'
+import { LockedChip } from './setting-chip.tsx'
 import { useStore, useThreadStores } from './store.ts'
+import { systemPromptName } from './thread-context-analysis.ts'
 import { ThreadContextDialog } from './thread-context.tsx'
 
 /**
- * A thread's composer (#90): the prompt form, its chrome (mode, model, thinking), the `/` palette
- * (#338), stop (#116), and pi's queue above it (#75) — and, before its session starts, the launch
- * panel's form (#877): the settings chips, the prompt, and Start session. Application-owned, per
- * the deprecation notice on TanStack's `ChatInput`.
+ * A thread's composer (#90): the prompt form, its chips (model, effort, mode, the locked system
+ * prompt — #878), the `/` palette (#338), stop (#116), and pi's queue above it (#75) — and, before
+ * its session starts, the launch panel's form (#877): the settings chips, the prompt, and Start
+ * session. Application-owned, per the deprecation notice on TanStack's `ChatInput`.
  */
 
 /**
- * The composer row's permission-mode control (#84): the thread's current mode, and a
- * dropdown that switches it through the mode route (L3 step C) — a control, not a prompt.
- * Beside the composer rather than in the page header (#90 PR 3): it is per THREAD, and
- * deepseek-harness keeps the mode selector in the composer chrome for the same reason.
+ * The composer's Mode chip (#84, #878): the thread's current mode, and the list that switches it
+ * through the mode route (L3 step C) — a control, not a prompt. In the composer rather than in the
+ * page header (#90 PR 3): it is per THREAD, and deepseek-harness keeps the mode selector in the
+ * composer chrome for the same reason.
  *
  * ⚠ `POST …/mode`, never a prompt: the browser says a mode; how the host's extension is
- * told is the host's (its per-mode command, #496). The indicator then updates from the
+ * told is the host's (its per-mode command, #496). The chip then updates from the
  * `permission-mode` receipt the host emits once the mode is persisted — the mode actually set —
- * never from the click. Invariant 2: a route tells pi; the feed ends the story.
+ * never from the click, and that receipt is what writes the thread's "Mode: …" line
+ * (`mode-lines.ts`), whichever mode was chosen. Invariant 2: a route tells pi; the feed ends the story.
  *
  * ⓘ Offered while a run is in flight too (#618): a run that asks before every call is the one
  * a user most needs to change, and the change governs its next tool call (`changeThreadMode`).
@@ -79,10 +82,26 @@ function PermissionModeControl(): React.ReactNode {
   const stores = useThreadStores()
   const { mode, available } = usePermissionMode()
   return (
-    <PermissionModeSelect
-      mode={mode}
-      available={available}
-      onSelect={(next: string) => void stores.connection.changeMode(next)}
+    <ModeChip mode={mode} available={available} onSelect={(next: string) => void stores.connection.changeMode(next)} />
+  )
+}
+
+/** What the locked System prompt chip says when pressed (#878). */
+const SYSTEM_PROMPT_FIXED =
+  'Fixed for this session: pi was given this system prompt when the session started. Start a new thread to use another.'
+
+/**
+ * The session's system prompt, locked (#878): pi takes one only before its first request (#443),
+ * so once the session started the chip names it and says why it cannot be chosen. It names what
+ * the thread reports (`ThreadStores.systemPrompt`: the branch's record), so a reload says it too.
+ */
+function SessionSystemPromptChip(): React.ReactNode {
+  const prompt = useStore(useThreadStores().systemPrompt)
+  return (
+    <LockedChip
+      label="System prompt"
+      display={prompt === undefined ? 'not known yet' : systemPromptName(prompt)}
+      explanation={SYSTEM_PROMPT_FIXED}
     />
   )
 }
@@ -101,9 +120,9 @@ function useFreshThreadMode(): void {
 }
 
 /**
- * The composer row's model controls (#338 slice 2, the control half of #44): the `thinking`
- * select and the model chip, both reading the thread's model store, both changing it through
- * `POST …/command` — a control, not a prompt, like the mode select beside them. The chip opens
+ * The composer's model controls (#338 slice 2, the control half of #44): the model chip and the
+ * Effort chip (#878), both reading the thread's model store, both changing it through
+ * `POST …/command` — a control, not a prompt, like the Mode chip beside them. The model chip opens
  * the model dialog the owner renders (`onOpenModelDialog`), the same one the palette's `/model`
  * row opens. ⚠ NOT disabled while a run is in flight or before the first run: pi takes a model
  * change between turns, the route answers 409 while busy and the refusal is said as a notice —
@@ -114,8 +133,8 @@ function ModelControls({ onHost, onOpenModelDialog }: HostCommandHandlers): Reac
   const recorded = useRecordedModel()
   return (
     <>
-      <ThinkingLevelSelect state={state} onSelect={(level: string): void => onHost('thinking', level)} />
       <ModelChip state={state} recorded={recorded} onOpen={(): void => onOpenModelDialog('model')} />
+      <EffortChip state={state} onSelect={(level: string): void => onHost('thinking', level)} />
     </>
   )
 }
@@ -220,17 +239,39 @@ interface LaunchSubmit {
 const LAUNCH_PLACEHOLDER = "Describe the task — what to change, where, and how you'll know it worked"
 /** What the launch panel says under the prompt, until a `/` makes it say why Start waits (#484). */
 const LAUNCH_HINT = 'Settings apply together when you start. The system prompt is fixed after that.'
+/** The started composer's words while pi runs (#878): a prompt sent now queues (#75). */
+const RUNNING_PLACEHOLDER = 'Type the next prompt — it queues until this run ends'
+const RUNNING_HINT = 'pi is running · Enter queues · Shift+Enter for a new line'
+/** …and while it is idle. */
+const IDLE_PLACEHOLDER = 'Ask pi something'
+const IDLE_HINT = 'Enter to send · Shift+Enter for a new line'
 
-/** Under the launch panel's prompt: the hint, or why a prompt beginning with `/` cannot start a session (#484). */
-function LaunchHint({ draft }: { readonly draft: string }): React.ReactNode {
-  if (isSlashPrompt(draft)) {
+/** The composer's state as its words read it (#877, #878). */
+interface ComposerState {
+  readonly launching: boolean
+  readonly running: boolean
+  /** Nothing can be sent: the page is disconnected, or a resolution ended the thread (#466). */
+  readonly closed: boolean
+}
+
+/** The hint under the prompt: the launch panel's, or what Enter does now; none while nothing can be sent. */
+function hintOf({ launching, running, closed }: ComposerState): string | undefined {
+  if (launching) return LAUNCH_HINT
+  if (closed) return undefined
+  return running ? RUNNING_HINT : IDLE_HINT
+}
+
+/** Under the prompt: the hint, or — on the launch panel — why a prompt beginning with `/` cannot start a session (#484). */
+function ComposerHint({ draft, state }: { readonly draft: string; readonly state: ComposerState }): React.ReactNode {
+  if (state.launching && isSlashPrompt(draft)) {
     return (
       <p role="alert" className="min-w-0 flex-1 self-center px-1 text-xs text-destructive">
         {SLASH_PROMPT_REFUSAL}
       </p>
     )
   }
-  return <p className="min-w-0 flex-1 self-center px-1 text-xs text-muted-foreground">{LAUNCH_HINT}</p>
+  // An empty line when nothing can be sent: it still holds the buttons to the right.
+  return <p className="min-w-0 flex-1 self-center px-1 text-xs text-muted-foreground">{hintOf(state)}</p>
 }
 
 /**
@@ -275,8 +316,8 @@ function ComposerSubmit({
 
 /**
  * Above the prompt: the launch panel's settings chips and what they say (#877), or — once the
- * session runs — the composer chrome (#90): the knobs at the point of use, deepseek's shape, the
- * model chip and thinking level (#338 slice 2) beside the mode.
+ * session runs — the same chips (#878): the knobs at the point of use, deepseek's shape — the
+ * model, the effort, the mode, and the system prompt, locked.
  */
 function ComposerSettings({
   launch,
@@ -296,9 +337,10 @@ function ComposerSettings({
     )
   }
   return (
-    <div className="flex items-center justify-end gap-3 px-1 pb-1">
+    <div role="group" aria-label="Session settings" className="flex flex-wrap items-center gap-2 px-1 pb-1">
       <ModelControls {...host} />
       <PermissionModeControl />
+      <SessionSystemPromptChip />
     </div>
   )
 }
@@ -325,20 +367,23 @@ function imagesOfAttachments(files: PromptInputMessage['files']): { images: Enso
   return { images, notImages }
 }
 
-/** What the composer's empty box says: why it cannot send, or the invitation — the launch panel's own before a session (#877). */
+/** What the composer's empty box says: why it cannot send, or the invitation — the launch panel's own before a session (#877), then by whether pi runs (#878). */
 function composerPlaceholder({
   disconnected,
   ended,
   launching,
+  running,
 }: {
   readonly disconnected: boolean
   readonly ended: boolean
   readonly launching: boolean
+  readonly running: boolean
 }): string {
   if (disconnected) return 'disconnected — reload and resume from the rail'
   // A resolution ended the thread (#466): the server refuses a prompt, and a fork goes on.
   if (ended) return 'this thread was ended by an incident resolution — it is read-only; fork it to go on'
-  return launching ? LAUNCH_PLACEHOLDER : 'ask pi something'
+  if (launching) return LAUNCH_PLACEHOLDER
+  return running ? RUNNING_PLACEHOLDER : IDLE_PLACEHOLDER
 }
 
 /** The images attached to the prompt, each with its remove button; nothing when none is. */
@@ -357,7 +402,7 @@ function AttachedImages(): React.ReactNode {
   )
 }
 
-/** The prompt box: one line in a running thread, a taller box on the launch panel (#877). */
+/** The prompt box: one line in a running thread, a taller box on the launch panel (#877); the hint and buttons wrap under it. */
 function ComposerTextarea({
   draft,
   setDraft,
@@ -380,8 +425,8 @@ function ComposerTextarea({
       autoComplete="off"
       rows={launching ? 4 : 1}
       className={cn(
-        'max-h-40 min-h-11 flex-1 resize-none border-0 bg-transparent text-base shadow-none placeholder:text-muted-foreground focus-visible:ring-0 dark:bg-transparent',
-        launching && 'min-h-24 basis-full',
+        'max-h-40 min-h-11 flex-1 basis-full resize-none border-0 bg-transparent text-base shadow-none placeholder:text-muted-foreground focus-visible:ring-0 dark:bg-transparent',
+        launching && 'min-h-24',
       )}
     />
   )
@@ -389,8 +434,8 @@ function ComposerTextarea({
 
 /**
  * Inside the ported form: the attachment strip, the textarea, the `/` palette, the attach /
- * stop / send buttons — or, on the launch panel (#877), the hint and Start session under a taller
- * box. A separate component because the attachments live in the form's context
+ * stop / send buttons — or, on the launch panel (#877), Start session — under a hint that says what
+ * Enter does (#878). A separate component because the attachments live in the form's context
  * (`usePromptInputAttachments`), and "can send" depends on them — an image with no words
  * sends (#68). ⚠ The textarea keeps its place in both shapes, so Start never remounts it.
  */
@@ -426,19 +471,20 @@ function ComposerBody({
   const typed = draft.trim().length > 0 || attachments.files.length > 0
   useEffect(() => stores.typed.set(typed), [stores, typed])
   const launching = launch !== undefined
+  const closed = disconnected || ended
   return (
     <div className="flex flex-col gap-2 rounded-lg border border-input bg-card p-2 transition-colors focus-within:border-ring">
       <AttachedImages />
-      <div className={cn('flex items-end gap-2', launching && 'flex-wrap')}>
+      <div className="flex flex-wrap items-end gap-2">
         {/* ⚠ The same element in both shapes (#877): Start never remounts it. */}
         <ComposerTextarea
           draft={draft}
           setDraft={setDraft}
           textareaRef={textareaRef}
-          placeholder={composerPlaceholder({ disconnected, ended, launching })}
+          placeholder={composerPlaceholder({ disconnected, ended, launching, running })}
           launching={launching}
         />
-        {launching ? <LaunchHint draft={draft} /> : null}
+        <ComposerHint draft={draft} state={{ launching, running, closed }} />
         {/* The `/` palette (#338): the session's slash commands, grouped; an extension command
             runs through `send`, a prompt template or skill lands in the draft with focus, a host
             command POSTs (slice 2) and `/model` opens the dialog the composer renders. */}
@@ -460,7 +506,7 @@ function ComposerBody({
         <ComposerSubmit
           launch={launch}
           draft={draft}
-          canSend={typed && !disconnected && !ended}
+          canSend={typed && !closed}
           running={running}
           disconnected={disconnected}
           onStop={onStop}

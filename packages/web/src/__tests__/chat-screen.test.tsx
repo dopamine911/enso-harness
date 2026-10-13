@@ -9,7 +9,7 @@ import { createStore } from '../store.ts'
 import { ThreadPane } from '../thread-pane.tsx'
 import { adoptThread, clearThreadsForTest, mintThread } from '../thread-stores.ts'
 import { type KeyedPart, keyedParts } from '../transcript-selection.ts'
-import { selectIn } from './static-markup.ts'
+import { chipIn } from './static-markup.ts'
 
 /**
  * #49, first pass: the dialog components had live receipts (#27, the e2e smoke) and no unit
@@ -187,8 +187,8 @@ test('a resumed pane mounts with the stored messages and the stored permission m
   const rendered = renderToStaticMarkup(<ThreadPane threadId={stored.threadId} active={true} debugOpen={false} />)
   expect(rendered).toContain('Earlier question')
   expect(rendered).toContain('Earlier answer')
-  // The stored mode is the control's selection — not how React 19 happens to spell `selected`.
-  expect(selectIn(rendered).selected).toBe('plan')
+  // The stored mode is what the Mode chip says.
+  expect(chipIn(rendered, 'Mode').name).toBe('Mode: plan')
 })
 
 // A file the composer would not take is SAID, with how many and the cap by name (#68) — never dropped silently.

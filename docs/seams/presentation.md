@@ -213,6 +213,11 @@ export interface ThreadStores {
   readonly permissionMode: PermissionModeStore
   /** The session's model and thinking level (#338 slice 2); `null` until a live snapshot or `model` observation says. */
   readonly model: ModelStore
+  /**
+   * The system prompt the session runs with (#878): every snapshot's, then an `enso-system-prompt`
+   * entry appended live. Undefined until the follow's first snapshot — never assumed pi's default.
+   */
+  readonly systemPrompt: WritableStore<EnsoThreadSystemPrompt | undefined>
   /** The tree pi runs this thread in (#44), from every snapshot; undefined until the follow's first one. */
   readonly cwd: WritableStore<string | undefined>
   /** Whether the thread runs on a tree of its own (#551), from every snapshot — what makes "Restore files to here" an offer. */
@@ -388,8 +393,8 @@ the generated table in [`ported-provenance.md`](./ported-provenance.md); the eig
 primitives beneath the same fence are receipted by [`components/ui/README.md`](../../packages/web/src/components/ui/README.md)
 instead, because the shadcn registry is re-fetched by style and version rather than by commit.
 The renderers that stay ours are outside the ported directory: the dialog card is
-`dialog-card.tsx#EnsoDialogCard`, and the tool-result descriptor renderer, notices, the mode select
-and the status bar are the `SelectedMessagePart`, `NotificationLines`, `PermissionModeSelect`,
+`dialog-card.tsx#EnsoDialogCard`, and the tool-result descriptor renderer, notices, the Mode chip
+and the status bar are the `SelectedMessagePart`, `NotificationLines`, `ModeChip`,
 `ThreadStatusBar` and `EnsoRendererMap` imports.
 
 **The page announces its own state (#737).** A component that renders a state a listener could act

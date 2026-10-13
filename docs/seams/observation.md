@@ -116,6 +116,12 @@ export const EnsoFollowSnapshot = Type.Object(
     /** What a NOT-live thread's branch records it last ran on (#434); absent when live, or when the branch records neither. */
     recordedModel: Type.Optional(EnsoRecordedModel),
     /**
+     * The system prompt the session runs with (#443, #878): the branch's last `enso-system-prompt`
+     * record — live or cold, the same record, so a reload says what a running session was given.
+     * `null` is pi's default. One chosen later arrives as that entry, appended live.
+     */
+    systemPrompt: EnsoThreadSystemPrompt,
+    /**
      * The tree pi reads and writes for this thread (#44), AS OF THIS SNAPSHOT — the live session's
      * own cwd; when the thread is not live, the stored session's (pi fixed it at creation); and
      * for a thread with neither, its project's (#395), where it will be built — or `''` when that
