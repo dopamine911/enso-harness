@@ -1,6 +1,5 @@
 import { ENSO_NOTICE_SOURCE, type EnsoForkReceipt } from '@enso/core'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AddProjectDialog } from './add-project.tsx'
 import { AppHeader } from './page-header.tsx'
 import { type PageListings, projectList, storedThreads, usePageListings } from './page-listings.ts'
 import { mintPageThread, adoptPageThread, isDebugMode } from './page-mode.ts'
@@ -180,10 +179,8 @@ function useFollowUrlHistory(
   }, [navigate, resumeFrom, showPage])
 }
 
-/** The rail's project controls: whether the add dialog is open, what a refused removal said, and the removal itself. */
+/** The rail's project controls: what a refused removal said, and the removal itself. */
 interface ProjectEditing {
-  readonly addingProject: boolean
-  readonly setAddingProject: (adding: boolean) => void
   readonly projectNotice: string | undefined
   readonly setProjectNotice: (notice: string | undefined) => void
   /** Remove the project: whether the server did — a refusal is the notice. */
@@ -191,12 +188,11 @@ interface ProjectEditing {
 }
 
 /**
- * Adding and removing projects (#395 slice 3). A refused removal is said on the rail, on Projects
- * and on the project's page (#871); a removed project's open threads stay, under "other" — the
- * server ended them, and the rail never drops one.
+ * Removing projects (#395 slice 3); adding one is a page (#872). A refused removal is said on the
+ * rail, on Projects and on the project's page (#871); a removed project's open threads stay, under
+ * "other" — the server ended them, and the rail never drops one.
  */
 function useProjectEditing(): ProjectEditing {
-  const [addingProject, setAddingProject] = useState(false)
   const [projectNotice, setProjectNotice] = useState<string | undefined>(undefined)
   const forgetProject = async (projectId: string): Promise<boolean> => {
     const outcome = await removeProject(projectId)
@@ -204,7 +200,7 @@ function useProjectEditing(): ProjectEditing {
     await Promise.all([projectList.refresh(), storedThreads.refresh()])
     return outcome.kind === 'ok'
   }
-  return { addingProject, setAddingProject, projectNotice, setProjectNotice, forgetProject }
+  return { projectNotice, setProjectNotice, forgetProject }
 }
 
 /** What a deleted thread's departure reaches into: the page's navigation state and its listings. */
@@ -401,7 +397,7 @@ export function ChatScreen(): React.ReactNode {
   const { activeThreadId, page, resumeError, navigate, resumeFrom, openFork, leaveDeleted, openPage } = navigation
   const pageThreadIds = new Set(threads.map((thread) => thread.threadId))
   const editing = useProjectEditing()
-  const { addingProject, setAddingProject, projectNotice, setProjectNotice, forgetProject } = editing
+  const { projectNotice, setProjectNotice, forgetProject } = editing
   // The debug column (#86): a right-hand pane, so it never takes height from the conversation it
   // explains. Opt-in by `?debug`, open by default when it is, and collapsible from the header.
   const [debugOpen, setDebugOpen] = useState(isDebugMode)
@@ -423,13 +419,7 @@ export function ChatScreen(): React.ReactNode {
           stored={stored.rows}
         />
       ) : (
-        <PageHeader
-          page={page}
-          projects={projects.rows}
-          rail={rail}
-          onOpen={openPage}
-          onAddProject={() => setAddingProject(true)}
-        />
+        <PageHeader page={page} projects={projects.rows} rail={rail} onOpen={openPage} />
       )}
       <div className="flex min-h-0 flex-1">
         <ThreadsRail
@@ -443,7 +433,6 @@ export function ChatScreen(): React.ReactNode {
           onSelect={rail.leave((threadId: string) => navigate(threadId, 'push'))}
           onResume={rail.leave((threadId: string) => resumeFrom(threadId, 'push'))}
           onNew={rail.leave((projectId: string | undefined) => navigate(mintPageThread(projectId).threadId, 'push'))}
-          onAddProject={() => setAddingProject(true)}
           onRemoveProject={(projectId: string) => void forgetProject(projectId)}
           onProjectSettings={rail.leave((projectId: string) => openPage(projectRoute(projectId, 'worktrees')))}
           // On Projects and a project's page, a refused removal is said on the page it was asked from: once.
@@ -451,15 +440,6 @@ export function ChatScreen(): React.ReactNode {
           onPage={rail.leave(openPage)}
           page={page?.kind === 'not-found' ? page.within : page?.kind}
           shownNarrow={rail.open}
-        />
-        <AddProjectDialog
-          open={addingProject}
-          onClose={() => setAddingProject(false)}
-          onAdded={() => {
-            setProjectNotice(undefined)
-            void projectList.refresh()
-            void storedThreads.refresh()
-          }}
         />
         <div className={rail.paneClass}>
           {threads.map((thread) => (
@@ -489,6 +469,13 @@ export function ChatScreen(): React.ReactNode {
             }}
             projectPageActions={projectPageActions(navigation, forgetProject)}
             projectNotice={projectNotice}
+            onProjectAdded={(project) => {
+              setProjectNotice(undefined)
+              // The listing first: the project's page is headed by the project the listing names.
+              void Promise.all([projectList.refresh(), storedThreads.refresh()]).then(() =>
+                openPage(projectRoute(project.projectId)),
+              )
+            }}
           />
         </div>
       </div>

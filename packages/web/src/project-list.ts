@@ -9,7 +9,7 @@ import type { Static, TSchema } from 'typebox'
 import { Check } from 'typebox/value'
 import type { FetchLike } from './browser-logging.ts'
 import { createListingStore, type ListingStore } from './listing-store.ts'
-import { describeFailedResponse } from './stored-threads.ts'
+import { boundedFailureDetail, describeFailedResponse } from './stored-threads.ts'
 import type { ThreadSummary } from './thread-stores.ts'
 
 /**
@@ -118,6 +118,19 @@ async function checkedAnswer<Schema extends TSchema>(
 }
 
 /**
+ * A browse's or a registration's answer: a 422 is the rule refusing the folder, in words written for
+ * the person choosing it (#872), shown as they are; any other failure keeps its status.
+ */
+async function folderAnswer<Schema extends TSchema>(
+  response: Response,
+  schema: Schema,
+  what: string,
+): Promise<ProjectRequestOutcome<Static<Schema>>> {
+  if (response.status !== 422) return checkedAnswer(response, schema, what)
+  return { kind: 'refused', reason: boundedFailureDetail(await response.text()) }
+}
+
+/**
  * `GET /api/projects/browse`: where browsing starts, or the directories under `path` a project may be;
  * hidden ones too when the person asked to see them (#866).
  */
@@ -130,21 +143,33 @@ export async function browseDirectories(
   if (path !== null) query.set('path', path)
   if (hidden) query.set('hidden', '1')
   const search = query.size === 0 ? '' : `?${query.toString()}`
-  return checkedAnswer(await fetchImpl(`/api/projects/browse${search}`), EnsoDirectoryListing, 'listing')
+  return folderAnswer(await fetchImpl(`/api/projects/browse${search}`), EnsoDirectoryListing, 'listing')
 }
 
-/** `POST /api/projects`: register a directory; the project, new or already registered. `hidden`: one inside a hidden folder may be (#866). */
+/** A registration's answer: the project, and whether this request added it (201) or it already was one (200). */
+export interface ProjectRegistered {
+  readonly project: EnsoProject
+  readonly added: boolean
+}
+
+/**
+ * `POST /api/projects`: register a directory under `title`, the name the page shows it by (#872).
+ * `hidden`: one inside a hidden folder may be (#866).
+ */
 export async function registerProject(
-  path: string,
-  hidden: boolean,
+  request: { readonly path: string; readonly title: string; readonly hidden: boolean },
   fetchImpl: FetchLike = fetch,
-): Promise<ProjectRequestOutcome<EnsoProject>> {
+): Promise<ProjectRequestOutcome<ProjectRegistered>> {
+  const { path, title, hidden } = request
   const response = await fetchImpl('/api/projects', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(hidden ? { path, hidden } : { path }),
+    body: JSON.stringify(hidden ? { path, title, hidden } : { path, title }),
   })
-  return checkedAnswer(response, EnsoProject, 'project')
+  const outcome = await folderAnswer(response, EnsoProject, 'project')
+  return outcome.kind === 'ok'
+    ? { kind: 'ok', value: { project: outcome.value, added: response.status === 201 } }
+    : outcome
 }
 
 /** `DELETE /api/projects/:id`: forget the registration — its sessions stay on disk. */

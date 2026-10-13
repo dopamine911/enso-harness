@@ -148,28 +148,38 @@ export interface ProjectRegistry {
   directoryForNewThread(threadId: string): string
 }
 
-/** An absolute path resolved to the directory it is, or the refusal a registration or a browse gives. */
-function canonicalDirectory(path: string): string | { readonly kind: 'refused'; readonly reason: string } {
-  if (!isAbsolute(path)) return { kind: 'refused', reason: `${path} is not an absolute path` }
+/**
+ * An absolute path resolved to the directory it is, or the refusal a registration or a browse gives,
+ * naming the folder as the person wrote it (`asked`, `~/` kept) — the canonical form may not exist.
+ */
+function canonicalDirectory(
+  path: string,
+  asked: string,
+): string | { readonly kind: 'refused'; readonly reason: string } {
+  if (!isAbsolute(path)) return { kind: 'refused', reason: 'Use a full path, such as ~/repo/my-project.' }
   let canonical: string
   try {
     canonical = realpathSync(path)
   } catch {
-    return { kind: 'refused', reason: `${path} does not exist` }
+    return { kind: 'refused', reason: `There’s no folder at ${asked}.` }
   }
-  return isDirectory(canonical) ? canonical : { kind: 'refused', reason: `${canonical} is not a directory` }
+  return isDirectory(canonical)
+    ? canonical
+    : { kind: 'refused', reason: `There’s no folder at ${asked}: it is a file, not a folder.` }
 }
 
+/** A listing of `path` (`null`: where browsing starts — no folder, so nothing to add) that `refusal` says why it may not be added, if it may not. */
 function listingOf(
   path: string | null,
   parent: string | null,
-  registrable: boolean,
+  refusal: string | undefined,
   directories: readonly EnsoDirectoryEntry[],
 ): EnsoDirectoryListing {
   return {
     path,
     parent,
-    registrable,
+    registrable: path !== null && refusal === undefined,
+    ...(refusal === undefined ? {} : { refusal }),
     directories: directories.slice(0, MAX_BROWSED_DIRECTORIES),
     truncated: directories.length > MAX_BROWSED_DIRECTORIES,
   }
@@ -238,12 +248,19 @@ function hiddenSegmentOf(path: string): string | undefined {
 /**
  * Why a canonical directory can never be a project, whatever roots are declared (#866), or
  * `undefined`: the home folder or one holding it (an agent there reaches every file the person
- * has), and Enso's own home or anything under it (its logs, sessions and credentials).
+ * has), and Enso's own home or anything under it (its logs, sessions and credentials). Said with
+ * the reason, as the Add project page shows it (#872).
  */
 function standingRefusal(canonical: string, home: string, ensoHome: string | undefined): string | undefined {
-  if (isWithin(canonical, home)) return `${canonical} is your home folder or holds it; choose a folder inside it`
+  if (canonical === home) {
+    return 'That’s your home folder. An agent there could reach everything you own, so Enso won’t add it. Pick a project folder inside it.'
+  }
+  if (isWithin(canonical, home)) {
+    return 'That folder holds your home folder, so Enso won’t add it. Pick a project folder inside your home folder.'
+  }
   if (ensoHome !== undefined && isWithin(ensoHome, canonical)) {
-    return `${canonical} is Enso's own home (ENSO_HOME) or inside it; choose a folder outside it`
+    const where = canonical === ensoHome ? 'That’s Enso’s own folder' : 'That folder is inside Enso’s own folder'
+    return `${where} (ENSO_HOME), where it keeps settings, threads and credentials. It can’t be a project.`
   }
   return undefined
 }
@@ -267,15 +284,19 @@ function refusalUnderRoots(
     if (!isWithin(root, canonical)) continue
     const below = relative(root, canonical)
     const hiddenSegment = hidden ? undefined : hiddenSegmentOf(below)
-    if (below === '') refusal ??= `${canonical} is a project root itself; register a directory under it`
-    else if (hiddenSegment !== undefined) refusal ??= hiddenRefusal(canonical, hiddenSegment)
+    if (below === '')
+      refusal ??= 'That folder is a project root itself (projects.roots). Pick a project folder inside it.'
+    else if (hiddenSegment !== undefined) refusal ??= hiddenRefusal(hiddenSegment)
     else return undefined
   }
-  return refusal ?? `${canonical} is not under a declared project root (${declared.join(', ')})`
+  return (
+    refusal ??
+    `That folder is outside your declared project roots (${declared.join(', ')}), so Enso won’t add it. Pick a folder inside one of them.`
+  )
 }
 
-function hiddenRefusal(canonical: string, segment: string): string {
-  return `${canonical} is inside a hidden directory (${segment}); show hidden folders to add it`
+function hiddenRefusal(segment: string): string {
+  return `That folder is inside a hidden folder (${segment}), where tools keep their settings and keys. Tick “show hidden folders” to add it anyway.`
 }
 
 export function createProjectRegistry(options: ProjectRegistryOptions): ProjectRegistry {
@@ -302,7 +323,9 @@ export function createProjectRegistry(options: ProjectRegistryOptions): ProjectR
   let stored: Registration[] = options.statePath === undefined ? [] : readRegistrations(options.statePath)
   for (const registration of stored) {
     const refusal = refusalOf(registration.path, true)
-    if (refusal !== undefined) log.warn('registered project not served: {reason}', { reason: refusal })
+    if (refusal !== undefined) {
+      log.warn('registered project not served: {path}: {reason}', { path: registration.path, reason: refusal })
+    }
   }
 
   /**
@@ -314,7 +337,7 @@ export function createProjectRegistry(options: ProjectRegistryOptions): ProjectR
     if (standing !== undefined) return standing
     if (roots.length > 0) return refusalUnderRoots(canonical, roots, options.roots, hidden)
     const hiddenSegment = hidden ? undefined : hiddenSegmentOf(canonical)
-    return hiddenSegment === undefined ? undefined : hiddenRefusal(canonical, hiddenSegment)
+    return hiddenSegment === undefined ? undefined : hiddenRefusal(hiddenSegment)
   }
 
   function served(): Registration[] {
@@ -371,7 +394,7 @@ export function createProjectRegistry(options: ProjectRegistryOptions): ProjectR
   }
 
   function register(request: EnsoProjectRegistration): ProjectRegistrationOutcome {
-    const resolved = canonicalDirectory(expandHome(request.path, home))
+    const resolved = canonicalDirectory(expandHome(request.path, home), request.path)
     if (typeof resolved !== 'string') return resolved
     const canonical = resolved
     if (canonical === launch.path) return { kind: 'existing', project: viewOf(launch.path, launch.title, true) }
@@ -394,12 +417,12 @@ export function createProjectRegistry(options: ProjectRegistryOptions): ProjectR
         listing: listingOf(
           null,
           null,
-          false,
+          undefined,
           existing.map((root) => entryOf(root, root)),
         ),
       }
     }
-    const resolved = canonicalDirectory(expandHome(path, home))
+    const resolved = canonicalDirectory(expandHome(path, home), path)
     if (typeof resolved !== 'string') return resolved
     const isRoot = browseRoots.includes(resolved)
     const refusal = refusalOf(resolved, hidden)
@@ -412,7 +435,7 @@ export function createProjectRegistry(options: ProjectRegistryOptions): ProjectR
       !isRoot && above !== resolved && (browseRoots.includes(above) || refusalOf(above, hidden) === undefined)
     return {
       kind: 'listing',
-      listing: listingOf(resolved, upAllowed ? above : null, refusal === undefined, children),
+      listing: listingOf(resolved, upAllowed ? above : null, refusal, children),
     }
   }
 
@@ -433,7 +456,7 @@ export function createProjectRegistry(options: ProjectRegistryOptions): ProjectR
       const code = (error as NodeJS.ErrnoException).code
       return {
         kind: 'refused',
-        reason: `cannot read ${directory}${code === 'EACCES' ? ' — permission denied' : ` (${code})`}`,
+        reason: `Enso can’t read ${directory}${code === 'EACCES' ? ': permission denied' : ` (${code})`}.`,
       }
     }
     const entries: EnsoDirectoryEntry[] = []

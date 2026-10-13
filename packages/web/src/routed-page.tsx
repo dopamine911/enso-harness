@@ -1,6 +1,7 @@
 import type { EnsoProject, EnsoStoredThread } from '@enso/core'
 import { ChevronLeftIcon, PlusIcon, SearchXIcon } from 'lucide-react'
 import { useEffect, useRef } from 'react'
+import { AddProjectPage } from './add-project.tsx'
 import { Button } from './components/ui/button.tsx'
 import { EnsoSmile } from './enso-mark.tsx'
 import type { ListingState } from './listing-store.ts'
@@ -11,7 +12,14 @@ import { ProjectPage, type ProjectPageActions } from './project-page.tsx'
 import { type ProjectCardActions, ProjectsPage } from './projects-page.tsx'
 import { SettingsPage } from './settings-page.tsx'
 import type { ThreadSummary } from './thread-stores.ts'
-import { type PageRoute, type PageUrl, PROJECTS_ROUTE, projectRoute, SETTINGS_ROUTE } from './thread-url.ts'
+import {
+  ADD_PROJECT_ROUTE,
+  type PageRoute,
+  type PageUrl,
+  PROJECTS_ROUTE,
+  projectRoute,
+  SETTINGS_ROUTE,
+} from './thread-url.ts'
 
 /**
  * The pages beside the threads (#869): what the URL's `?page=` names (`thread-url.ts`), drawn in
@@ -36,11 +44,12 @@ interface PageHeading {
   readonly status: string
 }
 
-/** Each page as its sections' not-found goes back to it: its name, and where its link opens it. A project's page is one of the Projects. */
+/** Each page as its sections' not-found goes back to it: its name, and where its link opens it. A project's page, and Add project, are among the Projects. */
 const PAGE_HOMES: Readonly<Record<PageRoute['kind'], PageBack>> = {
   settings: { label: 'Settings', to: SETTINGS_ROUTE },
   projects: { label: 'Projects', to: PROJECTS_ROUTE },
   project: { label: 'Projects', to: PROJECTS_ROUTE },
+  'add-project': { label: 'Projects', to: PROJECTS_ROUTE },
 }
 
 /** What a page's not-found says it lacks: Settings' sections, a project page's tabs (#871). */
@@ -48,6 +57,7 @@ const MISSING_PART: Readonly<Record<PageRoute['kind'], string>> = {
   settings: 'Settings has no section called',
   projects: 'Projects has no section called',
   project: 'A project’s page has no tab called',
+  'add-project': 'Add project has no section called',
 }
 
 /** A project's page is headed by the project the listing names; one it does not name is not found. */
@@ -72,6 +82,8 @@ function headingOf(page: PageUrl, projects: readonly EnsoProject[]): PageHeading
   if (page.kind === 'project') {
     return projectHeading(projects.find((project) => project.projectId === page.projectId))
   }
+  if (page.kind === 'add-project')
+    return { title: 'Add a project', back: PAGE_HOMES['add-project'], status: 'Adding a project' }
   if (page.within !== undefined) {
     const home = PAGE_HOMES[page.within]
     return { title: 'Section not found', back: home, status: home.label }
@@ -95,7 +107,8 @@ function BackLink({ back, onOpen }: { back: PageBack; onOpen: (route: PageRoute)
 
 /**
  * A page's header: the threads button (narrow screens), the mark, the breadcrumb back where the page
- * has one, its title and what it is, and the page's own action — Projects' **Add project** (#870).
+ * has one, its title and what it is, and the page's own action — Projects' **Add project** (#870),
+ * which opens the Add project page (#872).
  * Arriving on a page moves focus to its title, so a keyboard or a screen reader starts where the
  * page does; moving within it (a section) leaves focus on the link that moved it.
  */
@@ -104,15 +117,12 @@ export function PageHeader({
   projects,
   rail,
   onOpen,
-  onAddProject,
 }: {
   page: PageUrl
   /** The listed projects: a project's page is headed by its title and path (#871). */
   projects: readonly EnsoProject[]
   rail: { open: boolean; toggle: () => void }
   onOpen: (route: PageRoute) => void
-  /** Open the Add project dialog (#866) — Projects' header action. */
-  onAddProject: () => void
 }): React.ReactNode {
   const heading = headingOf(page, projects)
   const title = useRef<HTMLHeadingElement>(null)
@@ -138,7 +148,7 @@ export function PageHeader({
         )}
       </div>
       {page.kind === 'projects' ? (
-        <Button type="button" onClick={onAddProject}>
+        <Button type="button" onClick={() => onOpen(ADD_PROJECT_ROUTE)}>
           <PlusIcon />
           Add project
         </Button>
@@ -233,9 +243,11 @@ export interface RoutedPageProps {
   readonly projectPageActions: Pick<ProjectPageActions, 'onOpenThread' | 'onCheckAgain' | 'onRemove'>
   /** Why the last project removal did not go through, or undefined: said on Projects and on the project's page. */
   readonly projectNotice: string | undefined
+  /** A project the Add project page registered (#872): the page reads the projects again and opens its page. */
+  readonly onProjectAdded: (project: EnsoProject) => void
 }
 
-/** The page's own content: Settings at its section, Projects, or what was asked and not found. */
+/** The page's own content: Settings at its section, Projects, a project's page, Add project, or what was asked and not found. */
 function PageBody({
   page,
   permissions,
@@ -287,6 +299,9 @@ function PageBody({
         {...props.projectPageActions}
       />
     )
+  }
+  if (page.kind === 'add-project') {
+    return <AddProjectPage projects={projects.rows} onOpen={onOpen} onAdded={props.onProjectAdded} />
   }
   return <NotFound page={page} onOpen={onOpen} onLeave={onLeave} />
 }

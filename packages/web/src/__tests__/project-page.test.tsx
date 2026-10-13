@@ -312,7 +312,6 @@ test('every project’s rail menu offers Project settings — the launch one too
         onSelect={noop}
         onResume={noop}
         onNew={noop}
-        onAddProject={noop}
         onRemoveProject={noop}
         onProjectSettings={(projectId: string) => opened.push(projectId)}
         onPage={noop}
@@ -348,6 +347,37 @@ test('every project’s rail menu offers Project settings — the launch one too
   )
   await press(settingsItem ?? document.body)
   expect(opened).toEqual(['p-app'])
+  await flush(async () => root.unmount())
+  container.remove()
+})
+
+test('the rail’s Add project opens the Add project page (#872)', async () => {
+  const pages: PageRoute[] = []
+  const container = document.createElement('div')
+  document.body.appendChild(container)
+  const root: Root = createRoot(container)
+  await flush(async () => {
+    root.render(
+      <ThreadsRail
+        projects={[LAUNCH, APP]}
+        threads={[]}
+        activeThreadId={undefined}
+        earlier={[]}
+        earlierError={undefined}
+        onSelect={noop}
+        onResume={noop}
+        onNew={noop}
+        onRemoveProject={noop}
+        onProjectSettings={noop}
+        onPage={(route: PageRoute) => pages.push(route)}
+        projectNotice={undefined}
+      />,
+    )
+    await tick()
+  })
+  const add = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Add project')
+  await press(add ?? document.body)
+  expect(pages).toEqual([{ kind: 'add-project' }])
   await flush(async () => root.unmount())
   container.remove()
 })

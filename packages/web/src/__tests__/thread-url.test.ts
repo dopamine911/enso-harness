@@ -52,6 +52,20 @@ test('a URL names the Projects page beside its thread; it has no sections', () =
 })
 
 // @pins resume/url-names-page
+test('a URL names the Add project page beside its thread; it has no sections (#872)', () => {
+  expect(readPageUrl(`?thread=${THREAD}&page=add-project`)).toEqual({ kind: 'add-project' })
+  expect(readPageUrl('?page=add-project&section=browse')).toEqual({
+    kind: 'not-found',
+    asked: 'browse',
+    within: 'add-project',
+  })
+  const adding = urlForPage(`?thread=${THREAD}&page=projects`, { kind: 'add-project' })
+  expect(adding).toBe(`?thread=${THREAD}&page=add-project`)
+  expect(showsPage(adding, { kind: 'add-project' })).toBe(true)
+  expect(showsPage(adding, { kind: 'projects' })).toBe(false)
+})
+
+// @pins resume/url-names-page
 test('a URL names a project’s page and its tab beside its thread; no tab is Threads; a tab it has not is not found (#871)', () => {
   expect(readPageUrl(`?thread=${THREAD}&page=project&project=p-app&tab=worktrees`)).toEqual({
     kind: 'project',

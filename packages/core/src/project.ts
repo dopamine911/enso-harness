@@ -143,6 +143,8 @@ export const EnsoDirectoryListing = Type.Object(
     parent: Type.Union([Type.String(), Type.Null()]),
     /** This directory may be added; a starting folder itself is not. */
     registrable: Type.Boolean(),
+    /** Why this directory may not be added, when it is one that may not (#872): said as the Add project page shows it. */
+    refusal: Type.Optional(Type.String()),
     directories: Type.Array(EnsoDirectoryEntry),
     /** More directories than a listing holds were there; the first ones by name are listed. */
     truncated: Type.Boolean(),

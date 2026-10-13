@@ -22,7 +22,7 @@ import { pageClock } from './page-clock.ts'
 import { projectOf } from './project-list.ts'
 import { useStore } from './store.ts'
 import type { ThreadSummary } from './thread-stores.ts'
-import { type PageRoute, PROJECTS_ROUTE, SETTINGS_ROUTE } from './thread-url.ts'
+import { ADD_PROJECT_ROUTE, type PageRoute, PROJECTS_ROUTE, SETTINGS_ROUTE } from './thread-url.ts'
 
 /**
  * The threads rail (#90 PR 3, #395): which conversation am I in, in which project, what else is
@@ -124,15 +124,13 @@ export interface ThreadsRailProps {
   readonly onResume: (threadId: string) => void
   /** Start a thread in this project; `undefined` when the page knows no project yet (the server's launch directory). */
   readonly onNew: (projectId: string | undefined) => void
-  /** Open the Add project dialog (#395 slice 3). */
-  readonly onAddProject: () => void
   /** Forget a registered project; its threads stay on disk. Never offered for the launch directory. */
   readonly onRemoveProject: (projectId: string) => void
   /** Open a project's page at its Worktrees tab (#754, a page since #871): how its new threads' trees are made. Offered for every project, the launch one too. */
   readonly onProjectSettings: (projectId: string) => void
-  /** Why the last add or remove did not go through, or undefined. Shown above the sections. */
+  /** Why the last remove did not go through, or undefined. Shown above the sections. */
   readonly projectNotice: string | undefined
-  /** Open a page (#869, #870): Projects or Settings, by the link at the rail's foot that names it. */
+  /** Open a page (#869, #870, #872): Projects or Settings by the link at the rail's foot that names it, Add project by its button. */
   readonly onPage: (route: PageRoute) => void
   /**
    * The page on screen (#869), whose link is marked as the current page; while one is, no thread row
@@ -632,8 +630,11 @@ function RailFoot({
 }): React.ReactNode {
   return (
     <div className="grid gap-1 border-t p-3">
-      {/* A project's page is one of the Projects (#871): its link stays marked there. */}
-      <RailLink current={page === 'projects' || page === 'project'} onOpen={() => onPage(PROJECTS_ROUTE)}>
+      {/* A project's page and Add project are among the Projects (#871, #872): its link stays marked there. */}
+      <RailLink
+        current={page === 'projects' || page === 'project' || page === 'add-project'}
+        onOpen={() => onPage(PROJECTS_ROUTE)}
+      >
         <FolderIcon />
         Projects
       </RailLink>
@@ -682,7 +683,6 @@ export function ThreadsRail({
   onSelect,
   onResume,
   onNew,
-  onAddProject,
   onRemoveProject,
   onProjectSettings,
   projectNotice,
@@ -728,7 +728,7 @@ export function ThreadsRail({
             size="sm"
             variant="ghost"
             className="justify-start text-muted-foreground"
-            onClick={onAddProject}
+            onClick={() => onPage(ADD_PROJECT_ROUTE)}
           >
             <FolderPlusIcon />
             Add project

@@ -576,18 +576,25 @@ test('⚠ projects: registered under a root or refused with the reason; an unreg
   const launchOnly: unknown = await (await fetch(`${url}/api/projects`)).json()
   expect(launchOnly).toEqual([expect.objectContaining({ launch: true, path: realpathSync(tmpdir()), status: 'ok' })])
 
-  const first = await registerProject(url, { path: app })
+  // #872: the name the Add project page sends is the name the project is listed by.
+  const first = await registerProject(url, { path: app, title: 'Ledger app' })
   expect(first.status).toBe(201)
-  const again = await registerProject(url, { path: `${app}/` })
+  const listed: unknown = await (await fetch(`${url}/api/projects`)).json()
+  expect(listed).toContainEqual(expect.objectContaining({ path: app, title: 'Ledger app' }))
+  // Already a project: a 200 naming it, which the page opens (#872).
+  const again = await registerProject(url, { path: `${app}/`, title: 'Another name' })
   expect(again.status).toBe(200)
-  expect(((await again.json()) as EnsoProject).projectId).toBe(((await first.json()) as EnsoProject).projectId)
+  expect(await again.json()).toMatchObject({
+    projectId: ((await first.json()) as EnsoProject).projectId,
+    title: 'Ledger app',
+  })
 
   const outside = await registerProject(url, { path: mkdtempSync(join(tmpdir(), 'enso-outside-')) })
   expect(outside.status).toBe(422)
-  expect(await outside.text()).toContain('not under a declared project root')
+  expect(await outside.text()).toContain('outside your declared project roots')
   const rootItself = await registerProject(url, { path: root })
   expect(rootItself.status).toBe(422)
-  expect(await rootItself.text()).toContain('is a project root itself')
+  expect(await rootItself.text()).toContain('a project root itself')
   expect((await registerProject(url, { path: app, cwd: '/' })).status).toBe(400)
 
   expect(await prompt(url, 't1', 'hello', { [ENSO_PROJECT_HEADER]: '0123456789abcdef' })).toBe(400)

@@ -482,7 +482,6 @@ test('the rail names the active thread, titles the untitled honestly, and marks 
       onSelect={noop}
       onResume={noop}
       onNew={noop}
-      onAddProject={noop}
       onRemoveProject={noop}
       onProjectSettings={noop}
       onPage={noop}
@@ -552,7 +551,6 @@ test("each project is a section with its own threads — the page's open ones, t
       onSelect={noop}
       onResume={noop}
       onNew={noop}
-      onAddProject={noop}
       onRemoveProject={noop}
       onProjectSettings={noop}
       onPage={noop}
@@ -633,7 +631,6 @@ test('⚠ two prompts that start alike read apart on the rail — the words past
       onSelect={noop}
       onResume={noop}
       onNew={noop}
-      onAddProject={noop}
       onRemoveProject={noop}
       onProjectSettings={noop}
       onPage={noop}
@@ -682,7 +679,6 @@ test('a fork says which thread it came from, by that thread’s title — a stor
       onSelect={noop}
       onResume={noop}
       onNew={noop}
-      onAddProject={noop}
       onRemoveProject={noop}
       onProjectSettings={noop}
       onPage={noop}
@@ -736,7 +732,6 @@ test('a folded section says a question is waiting in it, over a run in flight; u
         onSelect={noop}
         onResume={noop}
         onNew={noop}
-        onAddProject={noop}
         onRemoveProject={noop}
         onProjectSettings={noop}
         onPage={noop}
@@ -781,7 +776,6 @@ test('a section shows five stored threads and says how many more there are; a fa
     onSelect: noop,
     onResume: noop,
     onNew: noop,
-    onAddProject: noop,
     onRemoveProject: noop,
     onProjectSettings: noop,
     onPage: noop,
@@ -821,7 +815,6 @@ test('every project has a menu, the launch directory too (#754); a refused remov
       onSelect={noop}
       onResume={noop}
       onNew={noop}
-      onAddProject={noop}
       onRemoveProject={noop}
       onProjectSettings={noop}
       onPage={noop}

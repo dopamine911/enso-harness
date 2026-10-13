@@ -26,7 +26,7 @@ test('⚠ a symlink under a root that leads out of it is refused: the resolved p
   symlinkSync(outside, join(root, 'escape'))
   const projects = createProjectRegistry({ launchDirectory: launch, roots: [root], statePath })
   const outcome = projects.register({ path: join(root, 'escape') })
-  expect(outcome).toEqual({ kind: 'refused', reason: expect.stringContaining('not under a declared project root') })
+  expect(outcome).toEqual({ kind: 'refused', reason: expect.stringContaining('outside your declared project roots') })
 })
 
 test('⚠ nothing inside a hidden directory under a root can be a project', () => {
@@ -35,7 +35,7 @@ test('⚠ nothing inside a hidden directory under a root can be a project', () =
   const projects = createProjectRegistry({ launchDirectory: launch, roots: [root], statePath })
   expect(projects.register({ path: join(root, 'app', '.config', 'tool') })).toEqual({
     kind: 'refused',
-    reason: expect.stringContaining('hidden directory (.config)'),
+    reason: expect.stringContaining('inside a hidden folder (.config)'),
   })
   expect(projects.register({ path: join(root, 'app') })).toMatchObject({ kind: 'registered' })
 })
@@ -66,15 +66,17 @@ test('⚠ with no roots declared, any folder registers by path, and the standing
     project: { path: join(home, 'work', 'app') },
   })
   expect(projects.register({ path: outside })).toMatchObject({ kind: 'registered', project: { path: outside } })
+  // Each refusal says why, in the words the Add project page shows (#872).
   const refusals = [
-    [home, 'is your home folder or holds it'],
-    [dirname(home), 'is your home folder or holds it'],
-    ['/', 'is your home folder or holds it'],
-    [ensoHome, "Enso's own home"],
-    [join(ensoHome, 'projects'), "Enso's own home"],
-    [join(home, '.ssh', 'keys'), 'hidden directory (.ssh)'],
-    [join(home, 'work', 'keys-link'), 'hidden directory (.ssh)'],
-    [join(home, 'work', 'home-link'), 'is your home folder or holds it'],
+    [home, 'That’s your home folder. An agent there could reach everything you own'],
+    [dirname(home), 'That folder holds your home folder'],
+    ['/', 'That folder holds your home folder'],
+    [ensoHome, 'That’s Enso’s own folder (ENSO_HOME)'],
+    [join(ensoHome, 'projects'), 'inside Enso’s own folder (ENSO_HOME)'],
+    [join(home, '.ssh', 'keys'), 'inside a hidden folder (.ssh)'],
+    [join(home, 'work', 'keys-link'), 'inside a hidden folder (.ssh)'],
+    [join(home, 'work', 'home-link'), 'That’s your home folder'],
+    ['~/nope/does-not-exist', 'There’s no folder at ~/nope/does-not-exist.'],
   ] as const
   for (const [path, reason] of refusals) {
     expect(projects.register({ path })).toEqual({ kind: 'refused', reason: expect.stringContaining(reason) })
@@ -95,13 +97,14 @@ test('with no roots declared, browsing starts at the home folder, takes a typed 
     kind: 'listing',
     listing: { path: null, directories: [{ path: home }] },
   })
-  // Home is where browsing starts, never a project; Enso's own home and hidden folders are not listed.
+  // Home is where browsing starts, never a project — the listing says why; Enso's own home and hidden folders are not listed.
   expect(projects.browse(home, false)).toEqual({
     kind: 'listing',
     listing: {
       path: home,
       parent: null,
       registrable: false,
+      refusal: expect.stringContaining('That’s your home folder'),
       directories: [
         { name: 'launch', path: launch, projectId: expect.any(String) },
         { name: 'work', path: join(home, 'work') },
@@ -124,7 +127,7 @@ test('with no roots declared, browsing starts at the home folder, takes a typed 
   })
   expect(projects.browse(dirname(home), false)).toEqual({
     kind: 'refused',
-    reason: expect.stringContaining('is your home folder or holds it'),
+    reason: expect.stringContaining('That folder holds your home folder'),
   })
 })
 
@@ -152,7 +155,7 @@ test('⚠ with hidden folders shown, a folder inside a hidden one is listed, reg
 
   expect(projects.register({ path: '~/.config/nvim' })).toEqual({
     kind: 'refused',
-    reason: expect.stringContaining('show hidden folders to add it'),
+    reason: expect.stringContaining('Tick “show hidden folders” to add it'),
   })
   expect(projects.register({ path: '~/.config/nvim', hidden: true })).toMatchObject({
     kind: 'registered',
@@ -277,7 +280,10 @@ test('⚠ a directory any declared root accepts is registered, whatever order ne
     kind: 'refused',
     reason: expect.stringContaining('a project root itself'),
   })
-  expect(alone.browse(sub, false)).toMatchObject({ kind: 'listing', listing: { registrable: false } })
+  expect(alone.browse(sub, false)).toMatchObject({
+    kind: 'listing',
+    listing: { registrable: false, refusal: expect.stringContaining('a project root itself') },
+  })
 })
 
 test('a directory merely NAMED `..something` under a root is inside it: refused as hidden, not as outside', () => {
@@ -286,7 +292,7 @@ test('a directory merely NAMED `..something` under a root is inside it: refused 
   const projects = createProjectRegistry({ launchDirectory: launch, roots: [root], statePath })
   expect(projects.register({ path: join(root, '..dotted') })).toEqual({
     kind: 'refused',
-    reason: expect.stringContaining('hidden directory (..dotted)'),
+    reason: expect.stringContaining('inside a hidden folder (..dotted)'),
   })
 })
 
@@ -332,6 +338,7 @@ test('⚠ browsing lists only directories a registration would take: resolved, i
       path: root,
       parent: null,
       registrable: false,
+      refusal: expect.stringContaining('a project root itself'),
       directories: [
         { name: 'app', path: join(root, 'app'), projectId: app.project.projectId },
         { name: 'web', path: join(root, 'web') },
@@ -346,7 +353,7 @@ test('⚠ browsing lists only directories a registration would take: resolved, i
   })
   expect(projects.browse(outside, false)).toEqual({
     kind: 'refused',
-    reason: expect.stringContaining('not under a declared project root'),
+    reason: expect.stringContaining('outside your declared project roots'),
   })
   // #866: hidden folders shown, `.cache` under the root is listed — and the roots' fence still holds.
   expect(projects.browse(root, true)).toMatchObject({
@@ -367,7 +374,7 @@ test('⚠ browsing a directory the server may enter but not read is a refusal sa
     const projects = createProjectRegistry({ launchDirectory: launch, roots: [root] })
     expect(projects.browse(locked, false)).toEqual({
       kind: 'refused',
-      reason: `cannot read ${locked} — permission denied`,
+      reason: `Enso can’t read ${locked}: permission denied.`,
     })
   } finally {
     chmodSync(locked, 0o700)

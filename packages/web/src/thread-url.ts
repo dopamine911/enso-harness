@@ -81,17 +81,21 @@ export type ProjectTab = (typeof PROJECT_TABS)[number]
 
 const isProjectTab = (value: string): value is ProjectTab => (PROJECT_TABS as readonly string[]).includes(value)
 
-/** A page the URL can name and the page can open: a Settings section, the Projects page (#870), or one project's (#871). */
+/** A page the URL can name and the page can open: a Settings section, the Projects page (#870), one project's (#871), or Add project (#872). */
 export type PageRoute =
   | { readonly kind: 'settings'; readonly section: SettingsSection }
   | { readonly kind: 'projects' }
   | { readonly kind: 'project'; readonly projectId: string; readonly tab: ProjectTab }
+  | { readonly kind: 'add-project' }
 
 /** Settings as its link opens it: the first section. */
 export const SETTINGS_ROUTE: PageRoute = { kind: 'settings', section: SETTINGS_SECTIONS[0] }
 
 /** The Projects page (#870): every project as a card. It has no sections. */
 export const PROJECTS_ROUTE: PageRoute = { kind: 'projects' }
+
+/** The Add project page (#872): choose a folder, then confirm what pi can reach there. It has no sections. */
+export const ADD_PROJECT_ROUTE: PageRoute = { kind: 'add-project' }
 
 /** One project's page at `tab` (#871): its threads unless another tab is named. */
 export function projectRoute(projectId: string, tab: ProjectTab = PROJECT_TABS[0]): PageRoute {
@@ -115,11 +119,13 @@ function readSettingsUrl(parameters: URLSearchParams): PageUrl {
   return { kind: 'not-found', asked: section.slice(0, 40), within: 'settings' }
 }
 
-/** The Projects page: it has no sections, so one named is not found — never a section guessed at. */
-function readProjectsUrl(parameters: URLSearchParams): PageUrl {
-  const section = parameters.get(SECTION_QUERY_PARAMETER)
-  if (section === null || section === '') return PROJECTS_ROUTE
-  return { kind: 'not-found', asked: section.slice(0, 40), within: 'projects' }
+/** A page with no sections (Projects, Add project): one named is not found — never a section guessed at. */
+function sectionlessReader(route: PageRoute): (parameters: URLSearchParams) => PageUrl {
+  return (parameters) => {
+    const section = parameters.get(SECTION_QUERY_PARAMETER)
+    if (section === null || section === '') return route
+    return { kind: 'not-found', asked: section.slice(0, 40), within: route.kind }
+  }
 }
 
 /**
@@ -138,8 +144,9 @@ function readProjectUrl(parameters: URLSearchParams): PageUrl {
 /** The route table: a page's name in the URL → how its own parameters read. */
 const PAGE_READERS: Readonly<Record<string, (parameters: URLSearchParams) => PageUrl>> = {
   settings: readSettingsUrl,
-  projects: readProjectsUrl,
+  projects: sectionlessReader(PROJECTS_ROUTE),
   project: readProjectUrl,
+  'add-project': sectionlessReader(ADD_PROJECT_ROUTE),
 }
 
 /**
@@ -186,7 +193,7 @@ export function showsPage(search: string, route: PageRoute): boolean {
   if (shown?.kind === 'settings' && route.kind === 'settings') return shown.section === route.section
   if (shown?.kind === 'project' && route.kind === 'project')
     return shown.projectId === route.projectId && shown.tab === route.tab
-  return shown?.kind === route.kind && route.kind === 'projects'
+  return shown?.kind === route.kind && (route.kind === 'projects' || route.kind === 'add-project')
 }
 
 /** The URL showing `threadId` and no page — a thread opened from a page leaves it; every other parameter kept. */

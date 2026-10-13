@@ -511,14 +511,14 @@ const LITERAL_ROUTE_METADATA: Record<string, Omit<RouteMetadata, 'method' | 'pat
     handler: 'respondWithBrowse → ProjectRegistry.browse',
     input: 'query: optional `path` — a directory inside a declared root; absent, the roots themselves',
     success:
-      '200 `EnsoDirectoryListing` JSON — the directories under it that are inside a root and not hidden (symlinks resolved), which already are projects, and whether this one may be added',
+      '200 `EnsoDirectoryListing` JSON — the directories under it that are inside a root and not hidden (symlinks resolved), which already are projects, and whether this one may be added — with the reason when it may not',
     errors:
       '403 untrusted origin; 422 refused, with the reason — not absolute, missing, not a directory, outside every root, or inside a hidden directory',
   }),
   'POST /api/projects': {
     handler: 'respondToProjectRegistration → ProjectRegistry.register',
     input:
-      'body: `EnsoProjectRegistration` — an absolute `path` strictly under a root the ENSO_HOME config declares (`projects.roots`), optional `title`',
+      'body: `EnsoProjectRegistration` — an absolute `path` strictly under a root the ENSO_HOME config declares (`projects.roots`), optional `title` (the name the rail and the project page show)',
     success: '201 `EnsoProject` JSON when registered; 200 when the directory already is a project',
     errors:
       '400 malformed body; 403 untrusted origin; 413 body too large; 422 refused, with the reason — not absolute, missing, not a directory, a root itself, outside every root (resolved through symlinks), or inside a hidden directory; 500 handler failure',

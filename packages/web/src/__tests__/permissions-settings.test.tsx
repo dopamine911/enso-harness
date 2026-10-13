@@ -212,6 +212,9 @@ function SettingsOnPage({
         },
       }}
       projectNotice={undefined}
+      onProjectAdded={(): void => {
+        throw new Error('the Permissions tests add no project')
+      }}
     />
   )
 }
