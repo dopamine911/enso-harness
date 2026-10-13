@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { Check } from 'typebox/value'
 import type { FetchLike } from './browser-logging.ts'
 import { DeleteThread } from './delete-thread-dialog.tsx'
-import { describeSize } from './disk-usage.ts'
+import { describeSize, formatBytes, type SizeSum, totalOf } from './disk-usage.ts'
 import { describeFailedResponse } from './stored-threads.ts'
 
 /**
@@ -86,6 +86,7 @@ export function TreesSection({
   if (read.listing.projects.length === 0) return <p className="text-sm text-muted-foreground">No thread trees.</p>
   return (
     <div className="grid gap-5">
+      <StorageTotals listing={read.listing} />
       {read.listing.projects.map((project) => {
         const title = projects.find((known) => known.projectId === project.projectId)?.title ?? project.projectId
         return (
@@ -163,4 +164,41 @@ function treeName(threadId: string | null, row: EnsoStoredThread | undefined): s
   if (threadId === null) return 'no thread records this tree'
   const title = row?.title?.trim() ?? ''
   return title === '' ? threadId.slice(0, 8) : title
+}
+
+/** One total of the row: its value, what it counts, and, for a partial sum, how much of it was read. */
+function Total({ label, value, short }: { label: string; value: string; short?: string | undefined }): React.ReactNode {
+  return (
+    <div className="flex flex-col gap-0.5 rounded-lg border bg-card p-4">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="order-first font-heading text-xl font-semibold whitespace-nowrap tabular-nums">{value}</dd>
+      {short === undefined ? null : <dd className="text-xs text-destructive">{short}</dd>}
+    </div>
+  )
+}
+
+/** A summed size as a total says it: exact when every part was measured, else "at least", with why. */
+function SizeTotal({ label, size }: { label: string; size: SizeSum }): React.ReactNode {
+  return size.kind === 'measured' ? (
+    <Total label={label} value={formatBytes(size.bytes)} />
+  ) : (
+    <Total label={label} value={`at least ${formatBytes(size.bytes)}`} short={`partial: ${size.reason}`} />
+  )
+}
+
+/**
+ * The totals across every project (#874), summed from the same listing the groups below show: the
+ * trees, what they take, and what the projects' snapshot stores take. A sum with a part not fully
+ * read is a partial, never exact.
+ */
+function StorageTotals({ listing }: { listing: EnsoTreesListing }): React.ReactNode {
+  const trees = listing.projects.flatMap((project) => project.trees)
+  const stores = listing.projects.flatMap((project) => (project.objectStore === null ? [] : [project.objectStore]))
+  return (
+    <dl aria-label="storage totals" className="grid gap-3 sm:grid-cols-3">
+      <Total label={trees.length === 1 ? 'tree' : 'trees'} value={String(trees.length)} />
+      <SizeTotal label="in trees" size={totalOf(trees.map((tree) => tree.size))} />
+      <SizeTotal label="in snapshot stores" size={totalOf(stores)} />
+    </dl>
+  )
 }

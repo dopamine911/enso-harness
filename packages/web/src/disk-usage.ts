@@ -30,3 +30,21 @@ export function describeSize(size: EnsoDiskUsage): string {
   if (size.kind === 'partial') return `at least ${formatBytes(size.bytes)} (${size.reason})`
   return `size could not be read (${size.reason})`
 }
+
+/** A sum of sizes: exact, or at least what was read — never `unreadable`, since a sum always has a value. */
+export type SizeSum = Exclude<EnsoDiskUsage, { readonly kind: 'unreadable' }>
+
+/**
+ * The sum of sizes (#874): `measured` only when every one was; else `partial`, at least the bytes
+ * read, saying how many were not — an unreadable size adds nothing and is never counted as 0.
+ */
+export function totalOf(sizes: readonly EnsoDiskUsage[]): SizeSum {
+  let bytes = 0
+  let short = 0
+  for (const size of sizes) {
+    if (size.kind !== 'unreadable') bytes += size.bytes
+    if (size.kind !== 'measured') short += 1
+  }
+  if (short === 0) return { kind: 'measured', bytes }
+  return { kind: 'partial', bytes, reason: `${short} of ${sizes.length} not fully read` }
+}

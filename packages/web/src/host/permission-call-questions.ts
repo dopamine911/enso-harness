@@ -31,18 +31,24 @@ interface GuardCall {
 }
 
 /**
- * The tool call a value on a surface stands for: a command is a `bash` call, a path gate's path a
- * `read` or a `write` of it. ⚠ A path to write is asked as `write`, the stricter of the two mutating
- * tools (a `write` over a file the session has not read is refused where an `edit` passes), and the
- * answer names the tool it asked as. Every other surface is a tool's own gate, whose check carries no
- * arguments, while the guards judge a call by its arguments: not asked.
+ * The tool calls a value on a surface stands for: a command is a `bash` call, a path gate's path a
+ * `read` or a `write` of it, and the bare gate's path (`path`, `external_directory`) both, since the
+ * engine answers the bare gate as the stricter of its two directions. ⚠ A path to write is asked as
+ * `write`, the stricter of the two mutating tools (a `write` over a file the session has not read is
+ * refused where an `edit` passes), and the answer names the tool it asked as. Every other surface is
+ * a tool's own gate, whose check carries no arguments, while the guards judge a call by its
+ * arguments: not asked.
  */
-const GUARD_CALLS: Readonly<Record<string, (value: string) => GuardCall>> = {
-  bash: (command) => ({ toolName: 'bash', input: { command } }),
-  path_read: (path) => ({ toolName: 'read', input: { path } }),
-  external_directory_read: (path) => ({ toolName: 'read', input: { path } }),
-  path_write: (path) => ({ toolName: 'write', input: { path } }),
-  external_directory_write: (path) => ({ toolName: 'write', input: { path } }),
+const readOf = (path: string): GuardCall => ({ toolName: 'read', input: { path } })
+const writeOf = (path: string): GuardCall => ({ toolName: 'write', input: { path } })
+const GUARD_CALLS: Readonly<Record<string, (value: string) => readonly GuardCall[]>> = {
+  bash: (command) => [{ toolName: 'bash', input: { command } }],
+  path: (path) => [readOf(path), writeOf(path)],
+  path_read: (path) => [readOf(path)],
+  path_write: (path) => [writeOf(path)],
+  external_directory: (path) => [readOf(path), writeOf(path)],
+  external_directory_read: (path) => [readOf(path)],
+  external_directory_write: (path) => [writeOf(path)],
 }
 
 /** A thread as the check asks it: its id, its entries (the mode), its directory and its bus. */
@@ -55,32 +61,51 @@ export interface PermissionCheckThread {
   readonly events: ExtensionAPI['events'] | undefined
 }
 
-/** What the session's guard answers the call now, asked on its bus, which answers synchronously (`ENSO_GUARD_CHECK_CHANNEL`). */
+/**
+ * What the session's guard answers one call now, asked on its bus, which answers synchronously
+ * (`ENSO_GUARD_CHECK_CHANNEL`): its refusal, or none, when it lets the call through; undefined when
+ * no guard answered.
+ */
+function askGuard(
+  events: ExtensionAPI['events'],
+  call: GuardCall,
+  cwd: string,
+): { readonly refusal: EnsoGuardRefusal | undefined } | undefined {
+  let answered = undefined as { readonly refusal: EnsoGuardRefusal | undefined } | undefined
+  const question: EnsoGuardCheckQuestion = {
+    ...call,
+    cwd,
+    answer: (refusal) => {
+      answered = { refusal }
+    },
+  }
+  events.emit(ENSO_GUARD_CHECK_CHANNEL, question)
+  return answered
+}
+
+/** What the session's guard answers the value's calls now, in order: the first refusal, else a pass of all. */
 function guardCheckOf(thread: PermissionCheckThread, request: EnsoPermissionCheckRequest): EnsoGuardCheck {
-  const call = GUARD_CALLS[request.surface]?.(request.value)
-  if (call === undefined) {
+  const calls = GUARD_CALLS[request.surface]?.(request.value)
+  if (calls === undefined) {
     return {
       kind: 'not-checked',
       reason: `the guards judge a tool call by its arguments, and a check on ${request.surface} carries none: only a command (bash) or a path gate's path is asked`,
     }
   }
-  if (thread.events === undefined) {
+  const { events } = thread
+  if (events === undefined) {
     return { kind: 'not-checked', reason: "the thread's extensions are not bound yet, so no guard can be asked" }
   }
-  let answered = undefined as { readonly refusal: EnsoGuardRefusal | undefined } | undefined
-  const question: EnsoGuardCheckQuestion = {
-    ...call,
-    cwd: thread.cwd,
-    answer: (refusal) => {
-      answered = { refusal }
-    },
+  for (const call of calls) {
+    const answered = askGuard(events, call, thread.cwd)
+    if (answered === undefined)
+      return { kind: 'not-checked', reason: 'no guard answered: none is loaded in this thread' }
+    const { refusal } = answered
+    if (refusal !== undefined) {
+      return { kind: 'refused', tool: call.toolName, rule: refusal.rule, cause: refusal.cause, reason: refusal.reason }
+    }
   }
-  thread.events.emit(ENSO_GUARD_CHECK_CHANNEL, question)
-  if (answered === undefined) return { kind: 'not-checked', reason: 'no guard answered: none is loaded in this thread' }
-  const { refusal } = answered
-  return refusal === undefined
-    ? { kind: 'passed', tool: call.toolName }
-    : { kind: 'refused', tool: call.toolName, rule: refusal.rule, cause: refusal.cause, reason: refusal.reason }
+  return { kind: 'passed', tools: calls.map((call) => call.toolName) }
 }
 
 /**

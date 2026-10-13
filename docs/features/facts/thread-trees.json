@@ -4,15 +4,15 @@
     {
       "image": "thread-trees-status",
       "steps": ["open a thread from the rail"],
-      "shown": ["own tree, not your checkout", "enso/ee6a12e8-56a4-4624-99b7-adec8fc76743"],
+      "shown": ["own tree, not your checkout", "enso/3b92bf3c-0974-4daa-a0e4-d78cd93ac64d"],
       "measured": {
-        "branch": "enso/ee6a12e8-56a4-4624-99b7-adec8fc76743"
+        "branch": "enso/3b92bf3c-0974-4daa-a0e4-d78cd93ac64d"
       }
     },
     {
       "image": "thread-trees-listing",
       "steps": ["open a thread from the rail", "choose **Settings**", "choose **Storage**"],
-      "shown": ["snapshots 49 kB", "20 kB", "the tree holds work — modified: src/config.ts", ""],
+      "shown": ["storage totals", "snapshots 49 kB", "20 kB", "the tree holds work — modified: src/config.ts", ""],
       "measured": {
         "treeSize": "20 kB"
       }

@@ -84,11 +84,18 @@ export const THREAD_TREES: FeatureSpec = {
       region: [SETTINGS],
       marks: [
         {
+          target: { label: 'storage totals', within: SETTINGS },
+          says: 'The totals across every project: how many trees, what they take, and what the snapshot stores take. A sum with a size not fully read says `at least`, and how many were not.',
+        },
+        {
           target: { text: /^snapshots /, within: SETTINGS },
           says: "**{shown}**: the project's snapshot store, shared by all its threads' snapshots.",
         },
         {
-          target: { text: /^\d+(\.\d)? (B|kB|MB|GB|TB)$/, within: SETTINGS },
+          target: {
+            text: /^\d+(\.\d)? (B|kB|MB|GB|TB)$/,
+            within: { role: 'region', name: /^trees of /, within: SETTINGS },
+          },
           says: 'What the tree takes on disk, ignored files and installs included. Trees are listed largest first.',
         },
         {

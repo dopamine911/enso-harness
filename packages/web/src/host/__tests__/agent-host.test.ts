@@ -1097,7 +1097,7 @@ test('⚠ Try a command: a guard refuses `cat ~/.ssh/id_ed25519` in every mode, 
       mode,
       verdict: {
         mode,
-        guard: { kind: 'passed', tool: 'bash' },
+        guard: { kind: 'passed', tools: ['bash'] },
         state: engine.state,
         origin: engine.origin,
         ...(engine.matchedPattern === undefined ? {} : { matchedPattern: engine.matchedPattern }),
@@ -1109,6 +1109,52 @@ test('⚠ Try a command: a guard refuses `cat ~/.ssh/id_ed25519` in every mode, 
   expect(hosted.checkPermission({ surface: 'web_fetch', value: 'https://example.com' })?.guard).toEqual({
     kind: 'not-checked',
     reason: expect.stringContaining('web_fetch'),
+  })
+})
+
+const SSH_KEY = '~/.ssh/id_ed25519'
+
+// #874: "Try a command" offers `path`, as Add rule does. The engine answers the bare gate as the
+// stricter of its two directions (its resolver's fold), so the guards are asked both calls it stands
+// for, a read and a write, and the first refusal answers. A policy whose directions disagree on the
+// key shows the fold: reading it is allowed by the rules, writing it denied, so `path` is deny.
+test('⚠ Try a command on `path`: a guard refuses the key as a read in every mode, and the engine answers the stricter of its directions (#874)', async () => {
+  const seed = ENSO_DEFAULT_PERMISSION_POLICY.permission as EnsoPermissionMap
+  const hosted = await hostedUnder({
+    ...ENSO_DEFAULT_PERMISSION_POLICY,
+    permission: { ...seed, path_write: { ...(seed.path_write as object), '~/.ssh/*': 'deny' } },
+  })
+  for (const mode of ['bypassPermissions', 'acceptEdits', 'auto', 'plan', 'default'] as const) {
+    await switchMode(hosted, mode)
+    const states = ['path_read', 'path_write', 'path'].map(
+      (surface) => hosted.checkPermission({ surface, value: SSH_KEY })?.state,
+    )
+    expect({ mode, states }).toEqual({ mode, states: ['allow', 'deny', 'deny'] })
+    expect({ mode, guard: hosted.checkPermission({ surface: 'path', value: SSH_KEY })?.guard }).toEqual({
+      mode,
+      guard: { kind: 'refused', tool: 'read', rule: 'secret-read', reason: expect.stringContaining('.ssh') },
+    })
+    // The read the check names is the call the session refuses.
+    expect({ mode, blocked: (await hosted.probeToolCall('read', { path: SSH_KEY }))?.block }).toEqual({
+      mode,
+      blocked: true,
+    })
+  }
+})
+
+test('Try a command on `path` asks the read, then the write: the first refusal answers by its call, and a pass names both (#874)', async () => {
+  const hosted = await plainWorkspaceSession()
+  // A file the session has not read passes as a read; a whole-file write over it is refused.
+  expect(hosted.checkPermission({ surface: 'path', value: 'package.json' })?.guard).toEqual({
+    kind: 'refused',
+    tool: 'write',
+    rule: 'read-before-write',
+    reason: expect.stringContaining('package.json'),
+  })
+  // A new file in the project: no guard refuses it, read or written.
+  expect(hosted.checkPermission({ surface: 'path', value: 'notes-874.txt' })?.guard).toEqual({
+    kind: 'passed',
+    tools: ['read', 'write'],
   })
 })
 
@@ -1130,8 +1176,9 @@ test('⚠ the check and the live call agree on every guard outcome: both ask the
     // The check first: it records nothing, so the call after it meets the same session.
     const guard = hosted.checkPermission({ surface, value })?.guard
     if (guard === undefined || guard.kind === 'not-checked') throw new Error(`${surface} ${value}: no guard asked`)
-    const input = guard.tool === 'bash' ? { command: value } : { path: value, content: 'x' }
-    const verdict = await hosted.probeToolCall(guard.tool, input)
+    const tool = guard.kind === 'refused' ? guard.tool : (guard.tools[0] ?? '')
+    const input = tool === 'bash' ? { command: value } : { path: value, content: 'x' }
+    const verdict = await hosted.probeToolCall(tool, input)
     outcomes.push({
       surface,
       value,

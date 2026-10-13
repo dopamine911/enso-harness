@@ -216,9 +216,11 @@ export interface EnsoGuardCheckQuestion {
 /**
  * What the guards say of a value Settings checks (#881), the `guard` of `EnsoPermissionVerdict`. They
  * decide a call BEFORE the permission engine, in every mode, so the check asks them first, as the tool
- * call the value stands for (`tool`: `bash` for a command, `read` or `write` for a path gate's path):
- * `refused` names the rule, its `cause` as a person reads it and the `reason` the model is told; `passed`, that no guard refuses it
- * now; `not-checked`, why the guards were not asked — a surface that is no one call they judge, or no
+ * call(s) the value stands for — `bash` for a command, `read` or `write` for a path gate's direction,
+ * both for the bare gate (`path`, which the engine answers as the stricter of its two directions):
+ * `refused` names the call refused (`tool`), the rule, its `cause` as a person reads it and the
+ * `reason` the model is told; `passed`, every call asked (`tools`), none of which a guard refuses
+ * now; `not-checked`, why the guards were not asked — a surface that is no call they judge, or no
  * guard listening — so a check never claims more than it asked.
  *
  * @group Guards
@@ -234,7 +236,10 @@ export const EnsoGuardCheck = Type.Union([
     },
     { additionalProperties: false },
   ),
-  Type.Object({ kind: Type.Literal('passed'), tool: Type.String() }, { additionalProperties: false }),
+  Type.Object(
+    { kind: Type.Literal('passed'), tools: Type.Array(Type.String(), { minItems: 1 }) },
+    { additionalProperties: false },
+  ),
   Type.Object({ kind: Type.Literal('not-checked'), reason: Type.String() }, { additionalProperties: false }),
 ])
 /** @group Guards */

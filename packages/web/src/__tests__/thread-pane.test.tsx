@@ -3394,6 +3394,60 @@ test("Settings' Storage lists each tree by its thread's title with size and held
   await page.unmount()
 })
 
+/** Each total of Storage's row as it reads: its value, what it counts, and, when partial, how much was not read. */
+function storageTotals(settings: HTMLElement): string[][] {
+  const row = settings.querySelector('dl[aria-label="storage totals"]')
+  return [...(row?.children ?? [])].map((total) => {
+    const value = total.querySelector('dd')?.textContent ?? ''
+    const label = total.querySelector('dt')?.textContent ?? ''
+    const short = [...total.querySelectorAll('dd')].slice(1).map((part) => part.textContent ?? '')
+    return [value, label, ...short]
+  })
+}
+
+/** A second project: one tree, measured, and a snapshot store whose walk did not finish. */
+const OTHER_TREES: EnsoTreesListing['projects'][number] = {
+  projectId: 'p-other',
+  objectStore: { kind: 'partial', bytes: 300_000_000, reason: 'not finished in time' },
+  trees: [{ ...ORPHAN_TREE, path: '/other/.enso/trees/a', size: { kind: 'measured', bytes: 88_000_000 } }],
+}
+
+/** Storage's totals, once the listing they sum is read. */
+async function totalsOf(listing: EnsoTreesListing): Promise<string[][]> {
+  const page = await openDeletable({ trees: () => listing })
+  const settings = await openStorage(page)
+  await eventually(() => expect(settings.textContent).not.toContain('Measuring…'))
+  const totals = storageTotals(settings)
+  window.history.replaceState(null, '', '/')
+  await page.unmount()
+  return totals
+}
+
+// #874: the totals across every project, summed from the groups below them. A size not fully read
+// makes its total "at least", saying how many were not, never an exact number.
+test("⚠ Storage's totals are the sums of its groups, across projects; one size not fully read makes its total partial (#874)", async () => {
+  // 412 MB + 88 MB, the orphan's unreadable size not counted as 0; 2.1 GB + at least 300 MB.
+  expect(await totalsOf({ projects: [LAUNCH_TREES, OTHER_TREES] })).toEqual([
+    ['3', 'trees'],
+    ['at least 500 MB', 'in trees', 'partial: 1 of 3 not fully read'],
+    ['at least 2.4 GB', 'in snapshot stores', 'partial: 1 of 2 not fully read'],
+  ])
+})
+
+test("Storage's totals, every size measured, are exact and say nothing of partial (#874)", async () => {
+  const listing: EnsoTreesListing = {
+    projects: [
+      { ...LAUNCH_TREES, trees: LAUNCH_TREES.trees.filter((tree) => tree !== ORPHAN_TREE) },
+      { ...OTHER_TREES, objectStore: { kind: 'measured', bytes: 300_000_000 } },
+    ],
+  }
+  expect(await totalsOf(listing)).toEqual([
+    ['2', 'trees'],
+    ['500 MB', 'in trees'],
+    ['2.4 GB', 'in snapshot stores'],
+  ])
+})
+
 test("a delete from Settings' Storage goes through the header's preview and forced DELETE, then the listing is read again; the page stays", async () => {
   let listing = TREES_LISTING
   const page = await openDeletable({
