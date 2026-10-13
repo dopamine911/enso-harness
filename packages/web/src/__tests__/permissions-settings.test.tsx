@@ -97,6 +97,9 @@ afterEach(async () => {
 /** A request the test answers itself — a 412 or a 422 the server would give — instead of the script. */
 type Override = (request: string) => Response | undefined
 
+/** The ask line a guard adds for the model to an authorization refusal (`guard-denials.ts#deny`). */
+const TOLD_TO_PI = 'This needs the user’s authorization: ask the user with ask_user, and let them decide.'
+
 /** The verdict the scripted thread gives: a guard refuses the key read, as the real one does (#881); else it passes. */
 function verdictFor(request: EnsoPermissionCheckRequest): EnsoPermissionVerdict {
   if (request.value === 'cat ~/.ssh/id_ed25519') {
@@ -106,7 +109,8 @@ function verdictFor(request: EnsoPermissionCheckRequest): EnsoPermissionVerdict 
         kind: 'refused',
         tool: 'bash',
         rule: 'secret-path',
-        reason: 'bash command refused: "~/.ssh/id_ed25519" names credential material.',
+        cause: 'bash command refused: "~/.ssh/id_ed25519" names credential material.',
+        reason: `bash command refused: "~/.ssh/id_ed25519" names credential material.\n\n${TOLD_TO_PI}`,
       },
       state: 'allow',
       matchedPattern: 'cat *',
@@ -572,13 +576,17 @@ test("try a command shows the open thread's verdict, the guards' pass first, and
 
 // #881: the guards refuse before the engine is asked, in every mode. The page said "allow" for a
 // key read under bypassPermissions; the refusal is now the answer, and the engine's verdict moot.
-test("⚠ try a command shows a guard's refusal as the answer, with its rule and reason, and the engine's verdict as moot (#881)", async () => {
+test("⚠ try a command shows a guard's refusal as the answer, its cause apart from what pi is told, and the engine's verdict as moot (#881)", async () => {
   const mounted = await mountSettings({ threadId: 't1' })
   await typeInto(mounted, 'check value', 'cat ~/.ssh/id_ed25519')
   await click(mounted, 'Check')
   const guard = await eventually(() => find(mounted, '[aria-label="guard"]'))
-  expect(guard.textContent).toContain('Refused by a guard: secret-path')
-  expect(guard.textContent).toContain('names credential material.')
+  expect(guard.textContent).toContain('Refused by a guard: secret-path — bash command refused')
+  // The instruction addressed to the model sits only under its own label, never as the page's words.
+  const told = find(mounted, '[aria-label="what pi is told"]')
+  expect(told.textContent).toContain('What pi is told')
+  expect(told.textContent).toContain(TOLD_TO_PI)
+  expect(guard.textContent?.replace(told.textContent ?? '', '')).not.toContain('ask_user')
   expect(guard.textContent).toContain('moot')
   expect(find(mounted, '[aria-label="verdict"]').textContent).toContain('engine (moot)allow')
 })

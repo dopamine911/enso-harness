@@ -726,10 +726,15 @@ function GuardAnswer({ guard }: { guard: EnsoGuardCheck }): React.ReactNode {
     return (
       <div aria-label="guard" className="flex flex-col gap-1 rounded-md border border-destructive/50 p-2">
         <p>
-          <span className="font-semibold text-destructive">Refused by a guard: {guard.rule}</span> — asked as a{' '}
-          <code>{guard.tool}</code> call, in every mode.
+          <span className="font-semibold text-destructive">Refused by a guard: {guard.rule}</span> — {guard.cause}
         </p>
-        <p className="whitespace-pre-line text-muted-foreground">{guard.reason}</p>
+        <p>
+          Asked as a <code>{guard.tool}</code> call; a guard refuses it in every mode.
+        </p>
+        <details aria-label="what pi is told" className="text-muted-foreground">
+          <summary>What pi is told</summary>
+          <p className="whitespace-pre-line">{guard.reason}</p>
+        </details>
         <p>The engine's verdict below is moot: the guard refuses the call before the engine is asked.</p>
       </div>
     )

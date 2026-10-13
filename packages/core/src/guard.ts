@@ -188,12 +188,14 @@ export function readEnsoGuardDenial(customType: string, data: unknown): EnsoGuar
 export const ENSO_GUARD_CHECK_CHANNEL = 'enso:guard-check' as const
 
 /**
- * A guard's refusal as a check reports it: the rule that refused and the reason the model would read.
+ * A guard's refusal as a check reports it (#881): the rule that refused, its `cause` as a person
+ * reads it, and the `reason` the model is told — the cause, then the ask line the rule's kind adds.
  *
  * @group Guards
  */
 export interface EnsoGuardRefusal {
   readonly rule: EnsoGuardRule
+  readonly cause: string
   readonly reason: string
 }
 
@@ -215,7 +217,7 @@ export interface EnsoGuardCheckQuestion {
  * What the guards say of a value Settings checks (#881), the `guard` of `EnsoPermissionVerdict`. They
  * decide a call BEFORE the permission engine, in every mode, so the check asks them first, as the tool
  * call the value stands for (`tool`: `bash` for a command, `read` or `write` for a path gate's path):
- * `refused` names the rule and the reason the model would read; `passed`, that no guard refuses it
+ * `refused` names the rule, its `cause` as a person reads it and the `reason` the model is told; `passed`, that no guard refuses it
  * now; `not-checked`, why the guards were not asked — a surface that is no one call they judge, or no
  * guard listening — so a check never claims more than it asked.
  *
@@ -227,6 +229,7 @@ export const EnsoGuardCheck = Type.Union([
       kind: Type.Literal('refused'),
       tool: Type.String(),
       rule: EnsoGuardDenial.properties.rule,
+      cause: Type.String(),
       reason: Type.String(),
     },
     { additionalProperties: false },
