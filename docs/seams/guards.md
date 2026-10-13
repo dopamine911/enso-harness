@@ -358,7 +358,8 @@ nothing recorded — no risk signal, no denial entry, no judge, no patch.
    the messages differ).
 6. **Every other tool with a `path` is a reader**, by exclusion, and a credential pattern denies it
    (`guard-session.ts#readerDenial`); so does a credential location beneath its path (`grep` over `~`),
-   except for `ls` and `find`, which return names only (#160 §4). Exclusion, not inclusion: an inclusion list naming only `read` once let `grep` over
+   except for `ls` and `find`, which return names only (#160 §4), and `read`, which opens the one file it
+   names; a path that does not exist searches nothing (#886). Exclusion, not inclusion: an inclusion list naming only `read` once let `grep` over
    `~/.aws` through (the header of `guard-session.ts`). Since #204 the same policy also runs on the shell route, so
    `read ~/.enso/pi-agent/auth.json` and `cat ~/.enso/pi-agent/auth.json` agree — they did not.
 
