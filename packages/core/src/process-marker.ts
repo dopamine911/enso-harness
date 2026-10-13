@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 /**
@@ -40,6 +40,9 @@ export function processMarkersDir(logsDir: string): string {
 }
 
 const markerFilename = (marker: EnsoProcessMarker): string => `${marker.process}-${marker.pid}.json`
+
+/** A marker being written: `<marker>.<writer pid>.tmp` until its rename (`writeProcessMarker`). */
+const STAGING_NAME = /\.(\d+)\.tmp$/
 
 /**
  * Write this process's marker, atomically (a half-written marker would read as malformed).
@@ -93,6 +96,16 @@ function processStartTimeMs(pid: number): number | undefined {
   return bootSeconds * 1000 + startTicks * 10
 }
 
+/** Whether `pid` names a running process. ESRCH: none. EPERM: one we may not signal — alive, someone else's. */
+function pidIsRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false
+  }
+  return true
+}
+
 /**
  * Whether a marker's owner is still running: the pid exists, and where the kernel says when it
  * started, it agrees with the marker.
@@ -100,12 +113,7 @@ function processStartTimeMs(pid: number): number | undefined {
  * @group Logging
  */
 export function isProcessMarkerAlive(marker: EnsoProcessMarker, now: () => number = Date.now): boolean {
-  try {
-    process.kill(marker.pid, 0)
-  } catch (error) {
-    // ESRCH: no such process. EPERM: a process we may not signal — alive, someone else's.
-    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false
-  }
+  if (!pidIsRunning(marker.pid)) return false
   const kernelStart = processStartTimeMs(marker.pid)
   if (kernelStart === undefined) return true
   const markerStart = Date.parse(marker.startedAt)
@@ -134,6 +142,15 @@ const isMarker = (value: unknown): value is EnsoProcessMarker =>
  * say so. A live owner's marker stays; so does this process's own (`ownPid`). A staging file left
  * by a writer that died mid-write is removed as unreadable.
  *
+ * ⚠ Other processes write and remove markers in this directory WHILE it is read (#906): two
+ * launchers starting together, a third ending. Three races, each measured as a false report (8
+ * writers starting at once, 100 rounds: 5 "unreadable", 1 "ended without a record"), each closed
+ * here. A live writer's staging file is a marker mid-write, not debris — skipped, never removed,
+ * or its writer's rename fails. A file gone between the listing and the read was renamed or
+ * removed by its owner — nothing to say. And a marker judged dead that is gone by then was its
+ * owner's clean end: an owner removes its marker before it exits, so only a marker still there
+ * after its owner has gone is an end nothing recorded.
+ *
  * @group Logging
  */
 export function reconcileProcessMarkers(logsDir: string, ownPid: number = process.pid): DeadProcessMarker[] {
@@ -147,10 +164,13 @@ export function reconcileProcessMarkers(logsDir: string, ownPid: number = proces
   const dead: DeadProcessMarker[] = []
   for (const markerName of names) {
     const path = join(directory, markerName)
+    const writer = STAGING_NAME.exec(markerName)?.[1]
+    if (writer !== undefined && pidIsRunning(Number(writer))) continue
     let parsed: unknown
     try {
       parsed = JSON.parse(readFileSync(path, 'utf8'))
-    } catch {
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue
       parsed = undefined
     }
     if (!isMarker(parsed)) {
@@ -158,7 +178,7 @@ export function reconcileProcessMarkers(logsDir: string, ownPid: number = proces
       dead.push({ kind: 'unreadable', path })
       continue
     }
-    if (parsed.pid === ownPid || isProcessMarkerAlive(parsed)) continue
+    if (parsed.pid === ownPid || isProcessMarkerAlive(parsed) || !existsSync(path)) continue
     removeProcessMarker(path)
     dead.push({ kind: 'ended', marker: parsed })
   }
