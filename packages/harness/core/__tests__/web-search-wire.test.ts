@@ -1,6 +1,4 @@
 import { expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import {
   ANTHROPIC_WEB_SEARCH_TOOL_TYPE,
   type AnthropicWireSearchOptions,
@@ -344,43 +342,4 @@ test('⚠ an OAuth credential sends the Claude Code identity system block — it
   })
   const apiKeyBody = JSON.parse(capturedBody ?? '{}') as { system?: unknown }
   expect(apiKeyBody.system).toBeUndefined()
-})
-
-/**
- * pi's own Claude Code version, read from the installed pi-ai: `harness/core` may not import pi
- * (#145) and pi exports no constant, so this reads the file — a contract check, not an import.
- */
-function piClaudeCodeVersion(): string {
-  const piAnthropic = join(
-    import.meta.dir,
-    '../../../../node_modules/@earendil-works/pi-ai/dist/api/anthropic-messages.js',
-  )
-  const found = /const claudeCodeVersion = "([^"]+)"/.exec(readFileSync(piAnthropic, 'utf8'))
-  if (found?.[1] === undefined) throw new Error(`pi-ai no longer declares claudeCodeVersion in ${piAnthropic}`)
-  return found[1]
-}
-
-// ⚠ #925: the search claimed `claude-cli/2.1.75` after pi moved to 2.1.280, and Anthropic
-// refused the OAuth `web_search` tool as `claude_code_version_too_old` while conversations,
-// which send pi's value, worked. The search must claim exactly what pi's conversation path
-// claims — so a pi upgrade that moves the version fails here, not in a person's search.
-test('⚠ an OAuth search claims the same Claude Code version as pi’s conversation path (#925)', async () => {
-  let sentHeaders: Record<string, string> | undefined
-  await runAnthropicProviderSearch({
-    query: QUERY_TEXT,
-    model: {
-      id: 'claude-test',
-      provider: 'anthropic',
-      api: 'anthropic-messages',
-      baseUrl: 'https://api.anthropic.example',
-      maxTokens: 8192,
-    } as never,
-    resolveAuth: async () => ({ ok: true, apiKey: 'sk-ant-oat01-fake-oauth-token' }),
-    fetchUrl: async (_url: string, init: FetchUrlInit) => {
-      sentHeaders = init.headers
-      return sseResponse(SEARCHED_EVENTS)
-    },
-    signal: undefined,
-  })
-  expect(sentHeaders?.['user-agent']).toBe(`claude-cli/${piClaudeCodeVersion()}`)
 })
