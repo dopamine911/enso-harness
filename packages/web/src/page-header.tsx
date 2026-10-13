@@ -99,10 +99,12 @@ export interface AppHeaderProps {
  */
 export function AppHeader(props: AppHeaderProps): React.ReactNode {
   const { active, notFound, rail, view, onView, stored } = props
-  /** The thread whose title is a field (#879); another thread on screen ends it. */
+  /** The thread whose title is a field (#879); another thread on screen ends it, so coming back shows the title. */
   const [renaming, setRenaming] = useState<string | undefined>(undefined)
   const started = active !== undefined && threadStarted(active, stored)
   const shown = notFound ? undefined : active
+  // Adjusted while rendering, React's way to reset state on a changed input: no effect, no extra paint.
+  if (renaming !== undefined && renaming !== shown?.threadId) setRenaming(undefined)
   const rename: TitleRename = {
     on: renaming !== undefined && renaming === shown?.threadId,
     start: (): void => setRenaming(shown?.threadId),

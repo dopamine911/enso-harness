@@ -3356,6 +3356,24 @@ test('Rename edits the title in place: focused with the whole name selected; Esc
   await page.unmount()
 })
 
+test('a rename left open ends when another thread is shown: coming back shows the title, not the field (#879, PR #892 review)', async () => {
+  const page = await mountStartedThreads(['first ask', 'second ask'])
+  await chooseFromThreadMenu(page, 'Rename')
+  await openNameField(page)
+  const row = (words: string): HTMLButtonElement => {
+    const found = page.activeRows().find((candidate) => candidate.textContent?.includes(words))
+    if (found === undefined) throw new Error(`expected the ${words} row`)
+    return found
+  }
+  await page.click(row('first ask'))
+  await eventually(() => expect(titleButton(page)?.textContent).toContain('first ask'))
+  await page.click(row('second ask'))
+  await eventually(() => expect(titleButton(page)?.textContent).toContain('second ask'))
+  expect(nameField(page)).toBeNull()
+  expect(page.server.names).toEqual([])
+  await page.unmount()
+})
+
 test('a rename the server refuses is said under the field, which keeps the name to try again (#879)', async () => {
   const page = await mountStartedThreads(['try the parser rewrite'], {
     nameStatus: 409,
