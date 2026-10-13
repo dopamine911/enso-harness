@@ -22,9 +22,9 @@ const ANTHROPIC_OAUTH_BETA_FLAGS = 'claude-code-20250219,oauth-2025-04-20'
  * `claudeCodeVersion` (anthropic-messages.js), which pi's conversation path sends — pi exposes no
  * export for it, and `harness/core` may not import pi (#145). A drift is a broken search, not a
  * cosmetic one: Anthropic refuses the OAuth `web_search` tool below its minimum
- * (`claude_code_version_too_old`, #925) while conversations still pass. `web-search-wire.test.ts`
- * reads pi's installed value and fails when this one differs, so a pi upgrade that moves it is
- * caught there.
+ * (`claude_code_version_too_old`, #925) while conversations still pass.
+ * `harness/extensions/web-search/__tests__/claude-code-version.test.ts` reads pi's installed value
+ * and fails when this one differs, so a pi upgrade that moves it is caught there.
  */
 const ANTHROPIC_OAUTH_USER_AGENT = 'claude-cli/2.1.280'
 /**
