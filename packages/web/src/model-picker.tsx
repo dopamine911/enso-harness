@@ -87,19 +87,30 @@ export function effortRange(option: HostCommandOption): string | undefined {
   return first === last ? first : `${first}–${last}`
 }
 
+/** A name's words without the separators around them: `-Sol` is `Sol`, ` Opus ` is `Opus`. */
+const words = (text: string): string => text.replace(/[\s_-]+/g, ' ').trim()
+
 /**
- * A model name's family and version (#880): the version is the name's first run of digits and dots,
- * the family the rest — `Claude Opus 4.5` is `Claude Opus` 4.5, `Claude 3.5 Sonnet` is `Claude
- * Sonnet` 3.5, `GPT-5.1 Codex` is `GPT Codex` 5.1. A name with no digits has no version.
+ * A model name read for its order (#880): the FAMILY is the name up to its first version number,
+ * the VERSION that number, the VARIANT what follows — `GPT-6.1-Sol` is `GPT` 6.1 `Sol`, `Claude
+ * Opus 5.5` is `Claude Opus` 5.5, `GPT-5.4 mini` is `GPT` 5.4 `mini`. A name with no digits is all
+ * family, with no version.
  */
-function familyAndVersion(name: string): { readonly family: string; readonly version: readonly number[] } {
+function readName(name: string): {
+  readonly family: string
+  readonly version: readonly number[]
+  readonly variant: string
+} {
   const match = /\d+(?:\.\d+)*/.exec(name)
-  if (match === null) return { family: name.trim(), version: [] }
-  const rest = `${name.slice(0, match.index)} ${name.slice(match.index + match[0].length)}`
-  return { family: rest.replace(/[\s_-]+/g, ' ').trim(), version: match[0].split('.').map(Number) }
+  if (match === null) return { family: words(name), version: [], variant: '' }
+  return {
+    family: words(name.slice(0, match.index)),
+    version: match[0].split('.').map(Number),
+    variant: words(name.slice(match.index + match[0].length)),
+  }
 }
 
-/** Newer first: the higher number at the first place two versions differ; a missing place is older (5 before 5.1). */
+/** Newer first: the higher number at the first place two versions differ; a missing place is older (6 after 6.1). */
 function compareVersions(left: readonly number[], right: readonly number[]): number {
   for (let place = 0; place < Math.max(left.length, right.length); place += 1) {
     const difference = (right[place] ?? -1) - (left[place] ?? -1)
@@ -110,14 +121,17 @@ function compareVersions(left: readonly number[], right: readonly number[]): num
 
 /**
  * THE ORDER WITHIN A PROVIDER (#880), pinned: by family, A–Z (case-insensitive); within a family,
- * newest version first, a name with no version last; then by name, then by id.
+ * newest version first (compared number by number: 6.1, 6, 5.6, 5.5), a name with no version after
+ * the versioned ones; one version's variants A–Z (`Astra`, `Luna`, `Sol`); then by name, then by id.
  */
 function compareModels(left: HostCommandOption, right: HostCommandOption): number {
-  const leftName = familyAndVersion(left.label)
-  const rightName = familyAndVersion(right.label)
+  const leftName = readName(left.label)
+  const rightName = readName(right.label)
+  const byWords = { sensitivity: 'base' } as const
   return (
-    leftName.family.localeCompare(rightName.family, undefined, { sensitivity: 'base' }) ||
+    leftName.family.localeCompare(rightName.family, undefined, byWords) ||
     compareVersions(leftName.version, rightName.version) ||
+    leftName.variant.localeCompare(rightName.variant, undefined, byWords) ||
     left.label.localeCompare(right.label) ||
     left.id.localeCompare(right.id)
   )

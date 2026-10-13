@@ -26,34 +26,84 @@ const shape = (
 ): [string, string[]][] =>
   modelGroups(options, recent, search).map((group) => [group.heading, group.rows.map((row) => row.option.label)])
 
-test('within a provider the order is pinned — family A–Z, then newest version first — not the catalogue’s', () => {
-  // pi's registration order, as the host lists it.
-  const catalogue = [
-    model('anthropic', 'Claude Sonnet 4.5'),
-    model('anthropic', 'Claude Opus 4.1'),
-    model('anthropic', 'Claude 3.5 Sonnet'),
-    model('anthropic', 'Claude Opus 4.5'),
-    model('anthropic', 'Claude Haiku 4.5'),
-    model('anthropic', 'Claude Opus 5'),
-    model('openai', 'GPT-5'),
-    model('openai', 'GPT-4.1'),
-    model('openai', 'GPT-5.1'),
-    model('openai', 'Codex Mini'),
-  ]
-  expect(shape(catalogue, [], '')).toEqual([
-    [
-      'anthropic',
-      [
-        'Claude Haiku 4.5',
-        'Claude Opus 5',
-        'Claude Opus 4.5',
-        'Claude Opus 4.1',
-        'Claude Sonnet 4.5',
-        'Claude 3.5 Sonnet',
-      ],
-    ],
-    ['openai', ['Codex Mini', 'GPT-5.1', 'GPT-5', 'GPT-4.1']],
+/** The labels of one provider's group, in the picker's order, for `labels` listed in that order. */
+const ordered = (labels: readonly string[]): string[] =>
+  shape(
+    labels.map((label) => model('p', label)),
+    [],
+    '',
+  ).flatMap(([, rows]) => rows)
+
+// The owner's ask for #880: newest first. The family is the name up to its first version number, the
+// version is compared number by number, and what follows it (Sol, Astra, mini) only breaks a tie.
+test('within a provider the order is pinned — family A–Z, newest version first, variants A–Z — not the catalogue’s', () => {
+  // The Codex account's catalogue as the live picker listed it (pi's order).
+  expect(
+    ordered([
+      'GPT-5.5',
+      'GPT-5.4',
+      'GPT-6 Astra',
+      'GPT-5.3 Codex Spark',
+      'GPT-6 Luna',
+      'GPT-5.6 Luna',
+      'GPT-5.4 mini',
+      'GPT-6.1 Sol',
+      'GPT-6 Sol',
+      'GPT-5.6 Sol',
+      'GPT-5.6 Terra',
+    ]),
+  ).toEqual([
+    'GPT-6.1 Sol',
+    'GPT-6 Astra',
+    'GPT-6 Luna',
+    'GPT-6 Sol',
+    'GPT-5.6 Luna',
+    'GPT-5.6 Sol',
+    'GPT-5.6 Terra',
+    'GPT-5.5',
+    'GPT-5.4',
+    'GPT-5.4 mini',
+    'GPT-5.3 Codex Spark',
   ])
+  // The prototype's list (`prototype2.html`, MODELS), hand-ordered there, plus a name with no version.
+  expect(
+    ordered([
+      'Claude Fable 5.1',
+      'Claude Fable 5',
+      'Claude Opus 5.5',
+      'Claude Opus 5',
+      'Claude Opus 4.8',
+      'Claude Opus 4.7',
+      'Claude Opus 4.6',
+      'Claude Opus 4.5',
+      'Claude Sonnet 5.5',
+      'Claude Sonnet 5',
+      'Claude Sonnet 4.6',
+      'Claude Sonnet 4.5',
+      'Claude Haiku',
+      'Claude Haiku 5.5',
+      'Claude Haiku 4.5',
+    ]),
+  ).toEqual([
+    'Claude Fable 5.1',
+    'Claude Fable 5',
+    'Claude Haiku 5.5',
+    'Claude Haiku 4.5',
+    'Claude Haiku',
+    'Claude Opus 5.5',
+    'Claude Opus 5',
+    'Claude Opus 4.8',
+    'Claude Opus 4.7',
+    'Claude Opus 4.6',
+    'Claude Opus 4.5',
+    'Claude Sonnet 5.5',
+    'Claude Sonnet 5',
+    'Claude Sonnet 4.6',
+    'Claude Sonnet 4.5',
+  ])
+  expect(
+    ordered(['GPT-6-Luna', 'GPT-5.6-Sol', 'GPT-6-Astra', 'GPT-6.1-Sol', 'GPT-5.6-Terra', 'GPT-6-Sol', 'GPT-5.6-Luna']),
+  ).toEqual(['GPT-6.1-Sol', 'GPT-6-Astra', 'GPT-6-Luna', 'GPT-6-Sol', 'GPT-5.6-Luna', 'GPT-5.6-Sol', 'GPT-5.6-Terra'])
 })
 
 test('groups are headed by the provider’s readable name: logged in first, A–Z, then the ones not logged in', () => {
