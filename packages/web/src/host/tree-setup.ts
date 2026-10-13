@@ -10,7 +10,7 @@ import {
 } from '@enso/core'
 import { readProjectThreadSettings } from '@enso/core/project-config'
 import { Compile } from 'typebox/compile'
-import { hostedProjectTrust } from './project-trust.ts'
+import { projectTrusted } from './project-trust.ts'
 
 /**
  * The host's side of #754: a project's tree settings resolved by tier under pi's trust for the
@@ -33,9 +33,9 @@ export interface ProjectThreadSettingsSource {
 
 /**
  * `project`'s new-tree settings (a canonical path) and whether its own tiers were read: pi's trust
- * for the project's path (#502), asked with no thread's branch — a project page and a new tree
- * belong to no thread, so a "Trust this thread" answer does not count. ⚠ Read fresh on every call:
- * an edit applies to the next tree. An unreadable tier is logged and resolved without (fails closed).
+ * for the project's path (#502), as a new tree asks it (`projectTrusted`). ⚠ Read fresh on every
+ * call: an edit, or a trust set or revoked (#873), applies to the next tree. An unreadable tier is
+ * logged and resolved without (fails closed).
  */
 export function resolveProjectThreadSettings(
   project: string,
@@ -46,7 +46,7 @@ export function resolveProjectThreadSettings(
   readonly trusted: boolean
   readonly unreadable: EnsoProjectSettings['unreadable']
 } {
-  const trusted = hostedProjectTrust(project, project, agentDir, []).settingsManager.isProjectTrusted()
+  const trusted = projectTrusted(project, agentDir)
   const read = readProjectThreadSettings({ project, user: source.user, canonical: source.canonical, trusted })
   for (const unreadable of read.unreadable) {
     log.warn('{path}, the {tier} tier of {project}, is unreadable and was not read (#754): {reason}', {

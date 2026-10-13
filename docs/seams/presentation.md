@@ -82,7 +82,7 @@ export interface FollowConnection extends SubscribeConnectionAdapter {
   readonly runHostCommand: (run: EnsoHostCommandRun) => Promise<HostCommandOutcome>
   /**
    * Apply a new session's model, effort and mode together (#391): `POST …/configure`, the
-   * Start-a-session dialog's Start. The server applies them in order under one lease; a refusal
+   * launch panel's Start (#877). The server applies them in order under one lease; a refusal
    * comes back with its step and reason for the dialog to show.
    */
   readonly configure: (configuration: EnsoSessionConfiguration) => Promise<ConfigureOutcome>
@@ -213,6 +213,11 @@ export interface ThreadStores {
   readonly permissionMode: PermissionModeStore
   /** The session's model and thinking level (#338 slice 2); `null` until a live snapshot or `model` observation says. */
   readonly model: ModelStore
+  /**
+   * The system prompt the session runs with (#878): every snapshot's, then an `enso-system-prompt`
+   * entry appended live. Undefined until the follow's first snapshot — never assumed pi's default.
+   */
+  readonly systemPrompt: WritableStore<EnsoThreadSystemPrompt | undefined>
   /** The tree pi runs this thread in (#44), from every snapshot; undefined until the follow's first one. */
   readonly cwd: WritableStore<string | undefined>
   /** Whether the thread runs on a tree of its own (#551), from every snapshot — what makes "Restore files to here" an offer. */
@@ -312,11 +317,17 @@ export interface ThreadStores {
    */
   readonly toolResultDescriptors: WritableStore<ReadonlyMap<string, EnsoToolResultDescriptor>>
   /**
-   * The Start-a-session dialog is open (#391). Raised when the page MINTS the thread — New Thread,
-   * a page with no thread in its URL — and lowered by Start or Escape; a thread adopted from
-   * history never raises it.
+   * The thread shows its launch panel (#877): the composer is the form that starts its session.
+   * Raised when the page MINTS the thread — New Thread, a page with no thread in its URL — and when
+   * it adopts one the server says was never started (`EnsoThreadHistory.draft`, #479); lowered once
+   * Start goes through. A thread adopted with a history never raises it.
    */
-  readonly startSession: WritableStore<boolean>
+  readonly launch: WritableStore<boolean>
+  /**
+   * Whether the composer holds something not sent (#875): words, or an image. A draft holding
+   * nothing is discarded when the page leaves it (`discardEmptyDraft`).
+   */
+  readonly typed: WritableStore<boolean>
   /**
    * How many compactions pi has said it finished on this thread (#348): each rewrote the branch
    * under the transcript this page holds. The pane re-reads the thread once it is idle and has
@@ -382,8 +393,8 @@ the generated table in [`ported-provenance.md`](./ported-provenance.md); the eig
 primitives beneath the same fence are receipted by [`components/ui/README.md`](../../packages/web/src/components/ui/README.md)
 instead, because the shadcn registry is re-fetched by style and version rather than by commit.
 The renderers that stay ours are outside the ported directory: the dialog card is
-`dialog-card.tsx#EnsoDialogCard`, and the tool-result descriptor renderer, notices, the mode select
-and the status bar are the `SelectedMessagePart`, `NotificationLines`, `PermissionModeSelect`,
+`dialog-card.tsx#EnsoDialogCard`, and the tool-result descriptor renderer, notices, the Mode chip
+and the status bar are the `SelectedMessagePart`, `NotificationLines`, `ModeChip`,
 `ThreadStatusBar` and `EnsoRendererMap` imports.
 
 **The page announces its own state (#737).** A component that renders a state a listener could act
@@ -404,7 +415,7 @@ createFixtureChat().transport() : stores.connection`), and the option's type adm
 Everything downstream of the connection is identical on both paths, which is what the fixture is for
 (the styling dev loop, #31). The swap covers only the client's send, so a fixture page's threads are
 also minted with `fixtureFetch`, which refuses every request by name (#404): a prompt queued
-mid-reply, Stop, a mode change or the Start dialog's model list reached the real server and ran a
+mid-reply, Stop, a mode change or the launch panel's model list (#877) reached the real server and ran a
 real model before. The presentation components themselves have no second implementation and
 need none: an upstream re-port is the second implementation, and the gate is what keeps it possible.
 

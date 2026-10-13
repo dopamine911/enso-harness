@@ -256,6 +256,7 @@ export async function followThread(deps: FollowRouteDeps, threadId: string, resp
     incidents: mount.incidents,
     model: mount.model,
     ...(mount.recordedModel === undefined ? {} : { recordedModel: mount.recordedModel }),
+    systemPrompt: mount.systemPrompt,
     cwd: mount.cwd,
     tree: mount.tree,
     usage: mount.usage,
@@ -828,7 +829,7 @@ export type ConfigureOutcome =
   | { readonly status: 422; readonly refusal: EnsoConfigurationRefusal }
 
 /**
- * A new session's settings, applied together (#391): the Start-a-session dialog's Start. Refused
+ * A new session's settings, applied together (#391): the launch panel's Start (#877). Refused
  * while a run holds the thread (409), as every control route is; else ONE lease for all of them, in
  * the order that matters — the system prompt first (#443: a session takes one only before its first
  * request; the library's pick is `pickSystemPrompt`), then the model (the effort a model allows

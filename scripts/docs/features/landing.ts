@@ -93,8 +93,8 @@ export const LANDING_SHOTS_DIRECTORY = 'site/src/assets/landing/captured'
 /** Keyed by the Features shot's image stem (`Shot['image']`). */
 export const LANDING_SHOTS: Readonly<Record<string, LandingShot>> = {
   'questions-ask-user': {},
-  // The dialog alone: the full viewport leaves it too small to read in a half-width column.
-  'sessions-start': { region: [{ role: 'dialog', name: 'Start a session' }] },
+  // The launch panel alone: the full viewport leaves it too small to read in a half-width column.
+  'sessions-start': { region: [{ role: 'region', name: 'What should pi work on?' }] },
   'prompts-manager': { region: [{ role: 'dialog', name: 'Prompts', exact: true }] },
   'context-now-trend': {},
   diff: {},

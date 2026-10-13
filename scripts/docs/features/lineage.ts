@@ -43,7 +43,7 @@ export const LINEAGE: FeatureSpec = {
   ],
   opens: [
     '**fork from here**, under any prompt you sent, forks the thread before that prompt.',
-    '`/fork` in the command palette forks before the last prompt.',
+    "`/fork` in the command palette, or **Fork thread** in the header's **thread actions** menu (⋯), forks before the last prompt.",
     'The new thread opens straight away. In the rail, it shows `forked from` and the title of the thread it came from.',
     "Add `?debug` to a thread's URL to see its **fork point** in the session debug drawer.",
     'A thread whose last run was cut off before pi answered shows a notice with **Continue**, which picks the run up from its stored state.',
@@ -96,7 +96,7 @@ export const LINEAGE: FeatureSpec = {
     `The thread above was forked before its ${wordFor(ORDINAL_WORDS, FORK_AT)} prompt, the one that asked pi to change \`${EDITED_PATH}\`. The fork holds the first ${wordFor(NUMBER_WORDS, FORK_AT - 1)} prompts and their answers, and nothing after. That is the point to fork from when you want to try the same request another way: on another model, in another mode, or after changing a context file.`,
     "Then compare the two fork points. Outside the identity rows, they should differ in exactly what you changed. If they differ in something else, such as a revision you didn't expect or a context file that changed under you, the two runs are not the comparison you meant. The same goes for two threads started with different system prompts: the **system prompt** row is where they differ. A fork keeps its parent's system prompt, since the prompt is fixed once a thread has sent its first request.",
     'The run context is written only when something in it changes. A thread that answered ten prompts on an unchanged tree carries one record, not ten. A fork inherits the records on its branch, so its first run adds one only if a condition changed.',
-    'A thread you open after a restart shows the model it last ran on, marked `model (recorded):`, before anything runs. See [Sessions and projects](./sessions-and-projects.md).',
+    'A thread you open after a restart shows the model it last ran on, on a chip named **Model (recorded)**, before anything runs. See [Sessions and projects](./sessions-and-projects.md).',
   ],
   limits: [
     'It records hashes and paths, never the contents of a config value, a context file or a system prompt. It can tell you that `AGENTS.md` changed, or which library prompt a thread started with, not what is in them.',

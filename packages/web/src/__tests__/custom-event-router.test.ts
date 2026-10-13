@@ -68,6 +68,7 @@ const snapshot = (overrides: Partial<EnsoFollowSnapshot> = {}): EnsoFollowSnapsh
   sessionRisk: { level: 'low', signals: 0 },
   incidents: NO_SESSION_INCIDENTS,
   model: null,
+  systemPrompt: null,
   cwd: '/work/project',
   tree: false,
   messageCount: 0,

@@ -50,6 +50,8 @@ export interface StoredThread {
    * session id. Absent for a thread that is no fork, and for one whose parent file is gone.
    */
   readonly parentThreadId?: string
+  /** The model its file last records (#871); absent when none does. */
+  readonly model?: NonNullable<EnsoRecordedModel['model']>
 }
 
 /** A thread's session file as a lookup by id finds it (#739): its header's facts, nothing counted. */
@@ -220,6 +222,7 @@ export function createStoredThreads(host: StoredThreadsHost): StoredThreads {
       // A blank `session_info` already reads as no name: it clears the title.
       ...(summary.name === undefined ? {} : { name: summary.name }),
       ...(parentThreadId === undefined ? {} : { parentThreadId }),
+      ...(summary.model === undefined ? {} : { model: summary.model }),
     }
   }
 

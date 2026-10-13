@@ -1,10 +1,5 @@
 import type { ResourceLoader, SessionEntry } from '@earendil-works/pi-coding-agent'
-import {
-  type EnsoSystemPromptChoice,
-  type EnsoThreadSystemPrompt,
-  type EnsoTranscriptEntry,
-  recordedSystemPrompt,
-} from '@enso/core'
+import type { EnsoSystemPromptChoice } from '@enso/core'
 
 /**
  * A session's system prompt from the library (#443), handed to pi through pi's OWN mechanism.
@@ -17,7 +12,7 @@ import {
  * would work too, but it is per-run by construction — exactly the rewrite the prompt cache must
  * not see — and would put a prompt decision in the harness extensions that the terminal loads.
  *
- * ⚠ THE SESSION EXISTS BEFORE THE CHOICE. The Start dialog builds the session when it opens
+ * ⚠ THE SESSION EXISTS BEFORE THE CHOICE. The launch panel builds the session when it opens (#877)
  * (#390), so the choice arrives on a live session: the loader's answer changes, and
  * `setActiveToolsByName(getActiveToolNames())` — pi's public call that rebuilds the prompt for the
  * same tools — makes pi read it again. Nothing has been sent yet, so no cached prefix is lost.
@@ -65,18 +60,6 @@ export function decideSystemPrompt(
 function sameSystemPrompt(current: EnsoSystemPromptChoice | undefined, next: EnsoSystemPromptChoice | null): boolean {
   if (current === undefined || next === null) return current === undefined && next === null
   return current.id === next.id && current.mode === next.mode && current.sha256 === next.sha256
-}
-
-/**
- * The branch's system prompt as a view shows it — the Context tab's label, the fork point's
- * condition: the choice without its text, pi's default, or unreadable.
- */
-export function threadSystemPrompt(branch: readonly EnsoTranscriptEntry[]): EnsoThreadSystemPrompt {
-  const recorded = recordedSystemPrompt(branch)
-  if (recorded.kind === 'none') return null
-  if (recorded.kind === 'unreadable') return 'unreadable'
-  const { id, name, mode, sha256 } = recorded.choice
-  return { id, name, mode, sha256 }
 }
 
 /** True once the branch holds a message: a request has gone, with whatever prompt it had. */

@@ -12,9 +12,11 @@ import {
   type EnsoSessionUsage,
   type EnsoStoppedAfter,
   type EnsoThreadHistory,
+  type EnsoThreadSystemPrompt,
   type EnsoTranscriptEntry,
   sessionIncidentsOf,
   sessionRiskOfTranscript,
+  threadSystemPrompt,
 } from '@enso/core'
 import type { AgentHost } from '../host/agent-host.ts'
 import type { StoredThreadRead } from '../host/stored-threads.ts'
@@ -85,6 +87,12 @@ export interface ThreadMount {
   readonly transcript: readonly EnsoTranscriptEntry[]
   /** How many messages the branch holds — one per `message` entry, as `transcriptToMessages` maps them. */
   readonly messageCount: number
+  /**
+   * The thread was never started (#479): live here with no message and no session file — a control
+   * route or a refused Start built it, and nothing was prompted. `/history` says it as `draft`. A
+   * fork is written by its route, and a stored thread has a file, so neither is one.
+   */
+  readonly draft: boolean
   /** The refusal the branch's last assistant message is (#381); `undefined` when it is none. */
   readonly trailingRefusal: EnsoProviderRefusal | undefined
   /** Set only when the branch ends inside a turn (#109). */
@@ -120,6 +128,11 @@ export interface ThreadMount {
    * records neither.
    */
   readonly recordedModel: EnsoRecordedModel | undefined
+  /**
+   * The system prompt the session runs with (#878): the branch's last record (#443) — the live
+   * session's entries or the file's, the same record either way. `null` is pi's default.
+   */
+  readonly systemPrompt: EnsoThreadSystemPrompt
   /** Every question pi is blocked on, oldest first (#114); empty when the thread is not live. */
   readonly openDialogs: EnsoOpenDialog[]
   /** The login waiting on its provider (#348), which Stop can end; undefined when none is, or not live. */
@@ -176,9 +189,12 @@ export async function readThreadMount(deps: ThreadReadDeps, threadId: string): P
     name: inspection === undefined ? stored?.name : inspection.name,
     transcript,
     messageCount: messageEntries.length,
+    // Live with no file: never flushed, which pi does at the first reply — so, with no message, never prompted.
+    draft: inspection?.sessionFile === null && messageEntries.length === 0,
     trailingRefusal: messageEntries.findLast((message) => message.role === 'assistant')?.refusal,
     stoppedAfter: stoppedAfter(transcript),
     sessionRisk: { level: risk.level, signals: risk.signals.length },
+    systemPrompt: threadSystemPrompt(transcript),
     incidents: sessionIncidentsOf(
       transcript.flatMap((transcriptEntry) => (transcriptEntry.kind === 'custom' ? [transcriptEntry] : [])),
     ),

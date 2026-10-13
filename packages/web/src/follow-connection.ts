@@ -290,7 +290,7 @@ export interface FollowConnection extends SubscribeConnectionAdapter {
   readonly runHostCommand: (run: EnsoHostCommandRun) => Promise<HostCommandOutcome>
   /**
    * Apply a new session's model, effort and mode together (#391): `POST …/configure`, the
-   * Start-a-session dialog's Start. The server applies them in order under one lease; a refusal
+   * launch panel's Start (#877). The server applies them in order under one lease; a refusal
    * comes back with its step and reason for the dialog to show.
    */
   readonly configure: (configuration: EnsoSessionConfiguration) => Promise<ConfigureOutcome>

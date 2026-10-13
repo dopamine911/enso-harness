@@ -1,3 +1,5 @@
+import { SelectItem } from './components/ui/select.tsx'
+import { SettingChip } from './setting-chip.tsx'
 import { createStore, type Store, useStore, useThreadStores } from './store.ts'
 
 /**
@@ -99,62 +101,40 @@ export function usePermissionMode(): PermissionModeState {
   return useStore(useThreadStores().permissionMode)
 }
 
-export interface PermissionModeSelectProps {
-  mode: string | undefined
-  available: readonly string[]
+export interface ModeChipProps {
+  readonly mode: string | undefined
+  readonly available: readonly string[]
   /** Called with the chosen mode; never with the current one (selecting it is a no-op here). */
-  onSelect: (mode: string) => void
+  readonly onSelect: (mode: string) => void
 }
 
 /**
- * The composer-row control: current mode, and a native `<select>` of the modes the host offers.
+ * The composer's Mode chip (#84, #878): the current mode, and the modes the host offers — the
+ * launch panel's chip (#877), so the row is one control. Presentational and chat-agnostic:
+ * `composer.tsx` wires the choice to the mode route.
  *
- * Presentational and chat-agnostic on purpose — it can be rendered statically in a test
- * with no chat context. `composer.tsx` wraps it with the send + loading wiring. A native
- * `<select>` rather than a vendored component: it is keyboard- and screen-reader-complete
- * out of the box, and this repo has spent effort on what each vendored dependency costs.
- *
- * ⓘ Empty `available` (nothing received yet) disables the control rather than offering a
- * hardcoded list: the options are the mode extension's to declare, not ours to assume. A run in
- * flight does not (#618): a mode chosen then governs the run's next tool call.
+ * ⓘ Empty `available` (nothing received yet) disables the chip rather than offering a hardcoded
+ * list: the options are the mode extension's to declare, not ours to assume. A run in flight does
+ * not (#618): a mode chosen then governs the run's next tool call. The current mode is always
+ * offered, even if the receipt's list somehow omitted it — the readout never lies about what it was told.
  */
-export function PermissionModeSelect({ mode, available, onSelect }: PermissionModeSelectProps): React.ReactNode {
-  const known = mode !== undefined
+export function ModeChip({ mode, available, onSelect }: ModeChipProps): React.ReactNode {
+  const modes = mode === undefined || available.includes(mode) ? available : [...available, mode]
   return (
-    <label
-      className="flex items-center gap-1.5 text-xs text-muted-foreground"
-      title={
-        known
-          ? "pi's permission mode for this thread — change it here or with /mode"
-          : 'not known until the first prompt has run — a fresh thread starts in the default mode'
-      }
+    <SettingChip
+      label="Mode"
+      value={mode ?? ''}
+      display={mode ?? 'unknown'}
+      onChoose={(next: string): void => {
+        if (next !== mode) onSelect(next)
+      }}
+      disabled={available.length === 0}
     >
-      <span>mode</span>
-      <select
-        aria-label="permission mode"
-        className="rounded-md border bg-background px-1.5 py-0.5 text-xs text-foreground disabled:opacity-60"
-        disabled={available.length === 0}
-        value={known ? mode : ''}
-        onChange={(event: React.ChangeEvent<HTMLSelectElement>) => {
-          const next = event.currentTarget.value
-          if (next.length === 0 || next === mode) return
-          onSelect(next)
-        }}
-      >
-        {known ? null : (
-          <option value="" disabled>
-            unknown
-          </option>
-        )}
-        {available.map((option) => (
-          <option key={option} value={option}>
-            {option}
-          </option>
-        ))}
-        {/* The current mode always renders even if the receipt's list somehow omitted it —
-				    the readout must never lie about what it was told. */}
-        {known && !available.includes(mode) ? <option value={mode}>{mode}</option> : null}
-      </select>
-    </label>
+      {modes.map((option) => (
+        <SelectItem key={option} value={option}>
+          {option}
+        </SelectItem>
+      ))}
+    </SettingChip>
   )
 }

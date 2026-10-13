@@ -99,6 +99,7 @@ import { seedMultiAccountConfig } from '../multi-account-seed.ts'
 import { PERMISSION_CALL_QUESTIONS_EXTENSION_PATH } from '../permission-call-questions.ts'
 import { storedPermissionModeState } from '../permission-mode-adapter.ts'
 import { readPermissionPolicy, resetPermissionPolicy, writePermissionPolicy } from '../permission-policy-file.ts'
+import { projectTrusted, saveProjectTrust } from '../project-trust.ts'
 import { RESTORE_NOTE_EXTENSION_PATH } from '../restore-note.ts'
 import { ThreadDeleted, type ThreadDeleteOutcome } from '../thread-delete.ts'
 import { recordedModelOf, transcriptOf } from '../transcript.ts'
@@ -1097,7 +1098,7 @@ test('⚠ Try a command: a guard refuses `cat ~/.ssh/id_ed25519` in every mode, 
       mode,
       verdict: {
         mode,
-        guard: { kind: 'passed', tool: 'bash' },
+        guard: { kind: 'passed', tools: ['bash'] },
         state: engine.state,
         origin: engine.origin,
         ...(engine.matchedPattern === undefined ? {} : { matchedPattern: engine.matchedPattern }),
@@ -1109,6 +1110,59 @@ test('⚠ Try a command: a guard refuses `cat ~/.ssh/id_ed25519` in every mode, 
   expect(hosted.checkPermission({ surface: 'web_fetch', value: 'https://example.com' })?.guard).toEqual({
     kind: 'not-checked',
     reason: expect.stringContaining('web_fetch'),
+  })
+})
+
+const SSH_KEY = '~/.ssh/id_ed25519'
+
+// #874: "Try a command" offers `path`, as Add rule does. The engine answers the bare gate as the
+// stricter of its two directions (its resolver's fold), so the guards are asked both calls it stands
+// for, a read and a write, and the first refusal answers. A policy whose directions disagree on the
+// key shows the fold: reading it is allowed by the rules, writing it denied, so `path` is deny.
+test('⚠ Try a command on `path`: a guard refuses the key as a read in every mode, and the engine answers the stricter of its directions (#874)', async () => {
+  const seed = ENSO_DEFAULT_PERMISSION_POLICY.permission as EnsoPermissionMap
+  const hosted = await hostedUnder({
+    ...ENSO_DEFAULT_PERMISSION_POLICY,
+    permission: { ...seed, path_write: { ...(seed.path_write as object), '~/.ssh/*': 'deny' } },
+  })
+  for (const mode of ['bypassPermissions', 'acceptEdits', 'auto', 'plan', 'default'] as const) {
+    await switchMode(hosted, mode)
+    const states = ['path_read', 'path_write', 'path'].map(
+      (surface) => hosted.checkPermission({ surface, value: SSH_KEY })?.state,
+    )
+    expect({ mode, states }).toEqual({ mode, states: ['allow', 'deny', 'deny'] })
+    expect({ mode, guard: hosted.checkPermission({ surface: 'path', value: SSH_KEY })?.guard }).toEqual({
+      mode,
+      guard: {
+        kind: 'refused',
+        tool: 'read',
+        rule: 'secret-read',
+        cause: expect.stringContaining('.ssh'),
+        reason: expect.stringContaining('.ssh'),
+      },
+    })
+    // The read the check names is the call the session refuses.
+    expect({ mode, blocked: (await hosted.probeToolCall('read', { path: SSH_KEY }))?.block }).toEqual({
+      mode,
+      blocked: true,
+    })
+  }
+})
+
+test('Try a command on `path` asks the read, then the write: the first refusal answers by its call, and a pass names both (#874)', async () => {
+  const hosted = await plainWorkspaceSession()
+  // A file the session has not read passes as a read; a whole-file write over it is refused.
+  expect(hosted.checkPermission({ surface: 'path', value: 'package.json' })?.guard).toEqual({
+    kind: 'refused',
+    tool: 'write',
+    rule: 'read-before-write',
+    cause: expect.stringContaining('package.json'),
+    reason: expect.stringContaining('package.json'),
+  })
+  // A new file in the project: no guard refuses it, read or written.
+  expect(hosted.checkPermission({ surface: 'path', value: 'notes-874.txt' })?.guard).toEqual({
+    kind: 'passed',
+    tools: ['read', 'write'],
   })
 })
 
@@ -1130,8 +1184,9 @@ test('⚠ the check and the live call agree on every guard outcome: both ask the
     // The check first: it records nothing, so the call after it meets the same session.
     const guard = hosted.checkPermission({ surface, value })?.guard
     if (guard === undefined || guard.kind === 'not-checked') throw new Error(`${surface} ${value}: no guard asked`)
-    const input = guard.tool === 'bash' ? { command: value } : { path: value, content: 'x' }
-    const verdict = await hosted.probeToolCall(guard.tool, input)
+    const tool = guard.kind === 'refused' ? guard.tool : (guard.tools[0] ?? '')
+    const input = tool === 'bash' ? { command: value } : { path: value, content: 'x' }
+    const verdict = await hosted.probeToolCall(tool, input)
     outcomes.push({
       surface,
       value,
@@ -1456,6 +1511,26 @@ test('a trusted repository behaves as before: its policy applies from the start,
   await runPrompt(hosted, 'hello')
   expect(requests).toHaveLength(1)
   expect(hosted.runtime.openDialogs()).toHaveLength(0)
+})
+
+// #873: the project page's Trust (`PUT /api/projects/:id/trust` → `saveProjectTrust`) and the
+// thread's "Trust project" answer write ONE store, and each reads what the other wrote: the page
+// reads `projectTrusted`, a new session reads `hostedProjectTrust`.
+test('the thread’s "Trust project" and the page’s Trust write one store: each shows in the other (#873)', async () => {
+  const answered = yoloRepository()
+  const first = trustHost(answered)
+  expect(projectTrusted(answered, agentDir)).toBe(false)
+  await promptAnswering(await openThread(first.host, answered), first.requests, 'Trust project')
+  expect(projectTrusted(answered, agentDir)).toBe(true)
+
+  const fromPage = yoloRepository()
+  const second = trustHost(fromPage)
+  saveProjectTrust(fromPage, agentDir, true)
+  const hosted = await openThread(second.host, fromPage)
+  expect(hosted.projectTrust()).toEqual({ directory: fromPage, trusted: true })
+  await runPrompt(hosted, 'not asked')
+  expect(hosted.runtime.openDialogs()).toHaveLength(0)
+  expect(JSON.stringify(second.requests)).toContain(PROJECT_APPEND_MARKER)
 })
 
 // ⚠ Found by this test's first run: the runtime treats an unknown slash command as ordinary
@@ -2314,6 +2389,59 @@ test("⚠ an untrusted project's setup is not run, and nothing is recorded (#754
   expect((await host.threadTree(threadId))?.setup).toBeUndefined()
 })
 
+// #873, the acceptance's first item: trust set from the page reaches the NEXT tree — its setup
+// runs — and a revoke reaches the next one after: no setup, and no question, since a revoke is saved
+// as "not trusted".
+test('⚠ trusted from the page, a new tree runs the project’s setup; revoked, the next tree does not (#873)', async () => {
+  const project = dirtyCheckout()
+  sharedThreads(project, { setup: ['echo prepared > setup.txt'] })
+  const core = createFauxCore()
+  core.setResponses([faux.fauxAssistantMessage('one'), faux.fauxAssistantMessage('two')])
+  const { host } = treeHost(project, [fauxModelExtension(core)])
+  saveProjectTrust(project, agentDir, true)
+  const trusted = await host.createSession(crypto.randomUUID(), () => project)
+  openSessions.push(trusted)
+  await runPrompt(trusted, 'first')
+  expect(readFileSync(join(trusted.inspect().cwd, 'setup.txt'), 'utf8')).toBe('prepared\n')
+
+  saveProjectTrust(project, agentDir, false)
+  expect(new ProjectTrustStore(agentDir).get(project)).toBe(false)
+  const revokedId = crypto.randomUUID()
+  const revoked = await host.createSession(revokedId, () => project)
+  openSessions.push(revoked)
+  await runPrompt(revoked, 'second')
+  const tree = revoked.inspect().cwd
+  expect(tree).not.toBe(project)
+  expect(existsSync(join(tree, 'setup.txt'))).toBe(false)
+  expect((await host.threadTree(revokedId))?.setup).toBeUndefined()
+  expect(revoked.runtime.openDialogs()).toHaveLength(0)
+})
+
+// #873, a revoke fails closed at once: the route retires the project's idle live threads
+// (`project-routes.ts`, the registry's `retire` disposes the session), and the next prompt builds
+// the thread again — here, as the registry does, by `createSession` under the same id. Built again,
+// it no longer resolves as trusted: the repository's `.pi/` policy (prompts off) no longer applies.
+// (Its system prompt, recorded at its first request, stays the one it started with.)
+test('⚠ after a revoke, an idle open thread retired as the route retires it is built untrusted at its next prompt (#873)', async () => {
+  const project = yoloRepository()
+  saveProjectTrust(project, agentDir, true)
+  const { host, requests } = trustHost(project)
+  const threadId = crypto.randomUUID()
+  const before = await openThread(host, project, threadId)
+  expect(before.projectTrust().trusted).toBe(true)
+  expect(await writeAsks(before)).toBe(false)
+  await runPrompt(before, 'trusted')
+
+  saveProjectTrust(project, agentDir, false)
+  before.runtime.dispose()
+  const after = await openThread(host, project, threadId)
+  expect(after.projectTrust()).toEqual({ directory: project, trusted: false })
+  expect(await writeAsks(after)).toBe(true)
+  await runPrompt(after, 'revoked')
+  expect(after.runtime.openDialogs()).toHaveLength(0)
+  expect(requests).toHaveLength(2)
+})
+
 // The page's "New threads run in: off", end to end: written to the project's local tier as the page
 // writes it (the user's own config says worktree), a trusted project's new thread runs in its checkout
 // and leaves no worktree or branch in the repository.
@@ -2584,7 +2712,7 @@ async function firstRunAfter(
   return { hosted, project, calledWith }
 }
 
-// ⚠ #616, measured on a live run: the Start dialog's model reached the session (`model_change` to
+// ⚠ #616, measured on a live run: the Start dialog (now the launch panel, #877)'s model reached the session (`model_change` to
 // Haiku) and was undone 119 ms later, when the first run rebuilt the thread on its tree — pi restores
 // a session's model and level only once it has messages, and a thread configured before its first
 // prompt has none, so the rebuild took the default. The choice must be what the first run runs on.
@@ -2632,7 +2760,7 @@ const accountCatalog: InlineExtension = {
   },
 }
 
-// ⚠ #688, measured in the arena: the Start dialog offered pi's built-in Codex models, the session's
+// ⚠ #688, measured in the arena: the Start dialog (now the launch panel, #877) offered pi's built-in Codex models, the session's
 // list was the account's live catalog, and `…/configure` refused the dialog's own default with a
 // 422. The dialog's list for a thread nothing has built is the list a session holds after its start.
 test("⚠ the catalogue offers a session's models, not the agent dir's: every one, its first (the dialog's default) included, starts (#688)", async () => {
@@ -2645,8 +2773,12 @@ test("⚠ the catalogue offers a session's models, not the agent dir's: every on
     harnessPackageDir: harnessDir,
     extensionFactories: [accountCatalog],
   })
+  // Offered: logged in. A provider set up but not logged in is listed too, never offered (#880).
   const offered = async (): Promise<string[]> =>
-    (await host.catalogue()).find((row) => row.name === 'model')?.options?.map((option) => option.id) ?? []
+    (await host.catalogue())
+      .find((row) => row.name === 'model')
+      ?.options?.filter((option) => option.loggedIn === true)
+      .map((option) => option.id) ?? []
 
   // No thread exists yet — a fresh process, the arena's case — and none is built to answer.
   const beforeAnyThread = await offered()
@@ -2657,7 +2789,7 @@ test("⚠ the catalogue offers a session's models, not the agent dir's: every on
   const hosted = await host.createSession(crypto.randomUUID(), () => repoRoot)
   openSessions.push(hosted)
   expect(await offered()).toEqual(beforeAnyThread)
-  // What the Start dialog sends: its default (the first option) — then any other it offers.
+  // What the launch panel sends (#877): its default (the first option) — then any other it offers.
   const dialogDefault = beforeAnyThread[0] ?? 'nothing offered'
   await hosted.runtime.runHostCommand({ name: 'model', value: dialogDefault })
   const started = hosted.runtime.modelState().model
@@ -2691,6 +2823,39 @@ test('the catalogue’s model row carries the configured default when it is offe
   expect((await modelRowWith(undefined))?.value).toBeUndefined()
   // Half a default is none, as for pi (`findInitialModel` uses the pair only when both are set).
   expect((await modelRowWith({ defaultModel: 'gpt-account' }))?.value).toBeUndefined()
+})
+
+// ⚠ #852: a thread with no session has no `/thinking` row (#484), so the launch panel's effort read
+// empty while the session then ran at pi's default. Each `/model` option says the level a session
+// started on it runs at, by pi's own rule: the model's setting, else the default setting, else
+// pi's `medium` — clamped to what the model offers.
+test('each catalogue /model option carries the level a new session runs it at, by pi’s settings (#852)', async () => {
+  const levelsWith = async (settings: object | undefined): Promise<Record<string, string | undefined>> => {
+    const catalogueAgentDir = scratchAgentDir('enso-host-effort-')
+    if (settings !== undefined) writeFileSync(join(catalogueAgentDir, 'settings.json'), JSON.stringify(settings))
+    const host = createAgentHost({
+      servesDirectory: servesRepoRoot,
+      agentDir: catalogueAgentDir,
+      permissionRulesPath,
+      harnessPackageDir: harnessDir,
+      extensionFactories: [TWO_MODELS],
+    })
+    const options = (await host.catalogue()).find((row) => row.name === 'model')?.options ?? []
+    return Object.fromEntries(
+      ['plain', 'deep'].map((id) => [
+        id,
+        options.find((option) => option.id === `enso-levels/${id}`)?.defaultThinkingLevel,
+      ]),
+    )
+  }
+  // No setting: pi's own `medium`, clamped — a model that cannot reason runs `off`.
+  expect(await levelsWith(undefined)).toEqual({ plain: 'off', deep: 'medium' })
+  // The default setting, for every model that offers it.
+  expect(await levelsWith({ defaultThinkingLevel: 'high' })).toEqual({ plain: 'off', deep: 'high' })
+  // A model's own setting wins over the default.
+  expect(
+    await levelsWith({ defaultThinkingLevel: 'high', modelThinkingLevels: { 'enso-levels/deep': 'low' } }),
+  ).toEqual({ plain: 'off', deep: 'low' })
 })
 
 // ⚠ PR #561 review: a prompt that finds the thread held JOINS the holder (#75), and pi starts a run
@@ -3330,6 +3495,36 @@ test('⚠ a stored branch reports the model its last reply ran on when the reply
     model: { provider: 'anthropic', modelId: 'test' },
     thinkingLevel: null,
   })
+})
+
+// #871: the project page lists each thread with the model it ran on, from the listing — no thread is
+// read whole for it. It must say what a cold read's recorded model says: the LAST one on the leaf's path.
+test('⚠ the stored listing names the model a session switched to last, never one on an abandoned branch; a session with no reply names none (#871)', async () => {
+  const switched = crypto.randomUUID()
+  const { file } = storeTurns(switched, [['first question', 'first answer']])
+  const more = SessionManager.open(file)
+  more.appendModelChange('openai', 'gpt-kept')
+  const branchPoint = more.appendThinkingLevelChange('high')
+  more.appendModelChange('google', 'gemini-abandoned')
+  more.branch(branchPoint)
+  more.appendMessage({ role: 'user', content: 'on the kept branch', timestamp: Date.now() })
+
+  const source = crypto.randomUUID()
+  const { userEntryIds } = storeTurns(source, [['the first prompt', 'its reply']])
+  const forked = await hostWith().forkThread(source, userEntryIds[0] ?? '')
+  if (forked.kind !== 'forked') throw new Error(`the fork was refused: ${forked.reason}`)
+  await hostWith().renameThread(forked.threadId, 'a fork with no reply yet')
+
+  const listed = await hostWith().listSessions()
+  expect(listed.find((row) => row.id === switched)?.model).toEqual({ provider: 'openai', modelId: 'gpt-kept' })
+  expect((await hostWith().readStoredThread(switched))?.recordedModel?.model).toEqual({
+    provider: 'openai',
+    modelId: 'gpt-kept',
+  })
+  expect(listed.find((row) => row.id === source)?.model).toEqual({ provider: 'anthropic', modelId: 'test' })
+  const fork = listed.find((row) => row.id === forked.threadId)
+  expect(fork).toBeDefined()
+  expect(fork?.model).toBeUndefined()
 })
 
 test('a branch that records no reply, no model change and no thinking level has no recorded model; one half alone is reported alone (#434)', () => {
@@ -4155,31 +4350,33 @@ test('⚠ a login that finishes by its callback withdraws the code question it l
   expect(hosted.runtime.openDialogs()).toEqual([])
 })
 
-// #391: the Start-a-session dialog offers the effort of the model CHOSEN in it, before anything is
+/** A provider with a model that cannot reason and one that can: pi decides each one's levels. */
+const TWO_MODELS: InlineExtension = {
+  name: 'enso-host-two-models',
+  factory: (pi: ExtensionAPI) => {
+    const base = {
+      input: ['text' as const],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 50_000,
+      maxTokens: 1000,
+    }
+    pi.registerProvider('enso-levels', {
+      api: 'enso-faux',
+      baseUrl: 'http://faux.invalid',
+      apiKey: 'faux',
+      models: [
+        { ...base, id: 'plain', name: 'Plain', reasoning: false },
+        { ...base, id: 'deep', name: 'Deep', reasoning: true },
+      ],
+    })
+  },
+}
+
+// #391: the launch panel (#877) offers the effort of the model CHOSEN on it, before anything is
 // applied — so every `/model` option carries that model's levels, decided by pi's own rule
 // (`getSupportedThinkingLevels`), not the session's current model's.
 test('each /model option carries the levels pi decides for THAT model (#391)', async () => {
-  const twoModels: InlineExtension = {
-    name: 'enso-host-two-models',
-    factory: (pi: ExtensionAPI) => {
-      const base = {
-        input: ['text' as const],
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-        contextWindow: 50_000,
-        maxTokens: 1000,
-      }
-      pi.registerProvider('enso-levels', {
-        api: 'enso-faux',
-        baseUrl: 'http://faux.invalid',
-        apiKey: 'faux',
-        models: [
-          { ...base, id: 'plain', name: 'Plain', reasoning: false },
-          { ...base, id: 'deep', name: 'Deep', reasoning: true },
-        ],
-      })
-    },
-  }
-  const hosted = await hostedSession([twoModels])
+  const hosted = await hostedSession([TWO_MODELS])
   const modelRow = hosted.runtime
     .listCommands()
     .find((command) => command.source === 'host' && command.name === 'model')
@@ -4191,6 +4388,40 @@ test('each /model option carries the levels pi decides for THAT model (#391)', a
   expect(deep).toContain('high')
   // `xhigh` is offered only to a model that maps it explicitly — pi's rule, carried as it decides.
   expect(deep).not.toContain('xhigh')
+})
+
+/** An account an extension set up and nobody logged in to, as pi-multi-account registers its spare slots (#880): no key. */
+const SIGNED_OUT_ACCOUNT: InlineExtension = {
+  name: 'enso-host-signed-out-account',
+  factory: (pi: ExtensionAPI) => {
+    pi.registerProvider('enso-account-2', {
+      name: 'Enso Account (enso-account-2)',
+      api: 'enso-faux',
+      baseUrl: 'http://faux.invalid',
+      models: [fauxModelDefinition('spare-1', 'Spare One')],
+    })
+  },
+}
+
+// #880: the picker groups models by a READABLE provider name, and says which providers are not
+// logged in instead of leaving them out. The name is pi's (`Provider.name`); an account the harness
+// set up without credentials is listed, marked, and still refused — the host stays the gate.
+test('⚠ /model names each provider readably and lists a registered provider with no credentials as not logged in — refused when picked (#880)', async () => {
+  const hosted = await hostedSession([TWO_MODELS, SIGNED_OUT_ACCOUNT])
+  const options =
+    hosted.runtime.listCommands().find((command) => command.source === 'host' && command.name === 'model')?.options ??
+    []
+  const listed = (id: string): object | undefined => {
+    const option = options.find((candidate) => candidate.id === id)
+    return option === undefined ? undefined : { providerName: option.providerName, loggedIn: option.loggedIn }
+  }
+  expect(listed('enso-levels/deep')).toEqual({ providerName: 'enso-levels', loggedIn: true })
+  expect(listed('enso-account-2/spare-1')).toEqual({ providerName: 'Enso Account (enso-account-2)', loggedIn: false })
+  // pi's built-in providers nobody set up are not listed: only what an extension registered.
+  expect(options.some((option) => option.detail === 'mistral')).toBe(false)
+  await expect(hosted.runtime.runHostCommand({ name: 'model', value: 'enso-account-2/spare-1' })).rejects.toThrow(
+    'model enso-account-2/spare-1 is not available here',
+  )
 })
 
 // ── the run context and the fork point (#435) ────────────────────────────────
@@ -5036,14 +5267,25 @@ test("a preview changes nothing: the thread's own prompt is what its request car
   expect(hosted.previewSystemPrompt(null)).toMatchObject({ kind: 'preview', preview: { prompt: null } })
 })
 
-test("the thread's context names the system prompt its branch records — live and from the file (#443)", async () => {
+test("the thread's system prompt is said live as its record, and named by its context and its inspection — live and from the file (#443, #878)", async () => {
   const { host, project } = recordingHost(1)
   const threadId = crypto.randomUUID()
   const hosted = await host.createSession(threadId, () => project)
   openSessions.push(hosted)
+  const events = collectEvents(hosted)
   expect(hosted.branchContext().systemPrompt).toBeNull()
   const choice = choiceOf('append', 'Always answer in haiku.')
   expect(hosted.runtime.setSystemPrompt(choice)).toBeUndefined()
+  // Every follower is told at once (#878): the record, appended through pi, as a `custom-entry`.
+  expect(
+    events.filter((event) => event.kind === 'custom-entry' && event.customType === ENSO_SYSTEM_PROMPT_ENTRY),
+  ).toEqual([{ kind: 'custom-entry', customType: ENSO_SYSTEM_PROMPT_ENTRY, data: choice }])
+  // …and the entries a follow's snapshot is read from (`thread-read.ts`) hold it before the first request.
+  expect(
+    hosted
+      .inspect()
+      .entries.filter((entry) => entry.kind === 'custom' && entry.customType === ENSO_SYSTEM_PROMPT_ENTRY),
+  ).toHaveLength(1)
   await runPrompt(hosted, 'one')
   const named = { id: choice.id, name: choice.name, mode: 'append' as const, sha256: choice.sha256 }
   expect(hosted.branchContext().systemPrompt).toEqual(named)

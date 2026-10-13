@@ -17,21 +17,28 @@ import { HeaderDialog } from './header-dialog.tsx'
  * (422) with the new list, said as changed, for the next click to confirm. A preview that fails is
  * said, and a plain Delete stays: the server's answer to it is authoritative. A tree that gained
  * work after the preview is still refused (422) and named, offering "Delete anyway". Any other
- * refusal closes the dialog and goes to `onRefused` — the header says it on the thread, Settings'
- * Trees on the tree's row (#578). ⚠ Once sent, a delete cannot be called back, so until the server
- * answers nothing dismisses the dialog: Cancel is disabled, the close button is
+ * refusal closes the dialog and goes to `onRefused` — the thread menu says it on the thread (#879),
+ * Settings' Trees on the tree's row (#578). ⚠ Once sent, a delete cannot be called back, so until
+ * the server answers nothing dismisses the dialog: Cancel is disabled, the close button is
  * gone, and Esc and the backdrop do nothing.
+ *
+ * Opened by its caller (`open`): the thread menu's **Delete thread…** — or by its own icon button
+ * when `trigger` names one, as Settings' Trees rows do (`DeleteThreadButton`).
  */
 export function DeleteThread({
   target,
-  label = 'delete thread',
+  open,
+  onOpenChange,
+  trigger,
   onDeleted,
   onRefused,
   stored,
 }: {
   target: DeleteTarget
-  /** The trigger's accessible name: the header's is the active thread's; a listing names its row's. */
-  label?: string
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  /** The icon button's accessible name — a listing names its row's; none where the caller opens it. */
+  trigger?: string
   onDeleted: (threadId: string) => void
   /** A refusal `force` cannot change (409, 404, no answer), in the server's words. */
   onRefused: (reason: string) => void
@@ -39,7 +46,6 @@ export function DeleteThread({
   stored: readonly EnsoStoredThread[]
 }): React.ReactNode {
   const { threadId, fetch } = target
-  const [open, setOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
   /** The server's preview while the dialog is open; `undefined` while it is read. */
   const [preview, setPreview] = useState<DeletePreviewRead | undefined>(undefined)
@@ -60,7 +66,7 @@ export function DeleteThread({
   }, [open, threadId, fetch])
   const changeOpen = (next: boolean): void => {
     if (!next && deleting) return
-    setOpen(next)
+    onOpenChange(next)
     if (!next) {
       setRefusedForWork(undefined)
       setPreview(undefined)
@@ -78,7 +84,7 @@ export function DeleteThread({
         return
       }
       // `deleting` in `changeOpen` is this render's; the answer is in, so close directly.
-      setOpen(false)
+      onOpenChange(false)
       setRefusedForWork(undefined)
       setPreview(undefined)
       if (outcome.kind === 'deleted') onDeleted(threadId)
@@ -89,9 +95,9 @@ export function DeleteThread({
     <HeaderDialog
       open={open}
       onOpenChange={changeOpen}
-      label={label}
-      hover="delete this thread"
-      icon={<Trash2Icon />}
+      trigger={
+        trigger === undefined ? undefined : { label: trigger, hover: 'delete this thread', icon: <Trash2Icon /> }
+      }
       title="Delete this thread?"
       description={describeDelete(preview, stored)}
       contentClassName="sm:max-w-md"
@@ -117,6 +123,15 @@ export function DeleteThread({
       </DialogFooter>
     </HeaderDialog>
   )
+}
+
+/** A thread's Delete behind its own icon button, named `label` — a Settings' Trees row's (#578). */
+export function DeleteThreadButton(
+  props: Omit<React.ComponentProps<typeof DeleteThread>, 'open' | 'onOpenChange' | 'trigger'> & { label: string },
+): React.ReactNode {
+  const { label, ...rest } = props
+  const [open, setOpen] = useState(false)
+  return <DeleteThread {...rest} open={open} onOpenChange={setOpen} trigger={label} />
 }
 
 /**

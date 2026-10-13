@@ -29,10 +29,11 @@ const stored = (threadId: string, minute: number, projectId: string, messageCoun
   lastActivityAt: new Date(Date.UTC(2026, 9, 7, 12, minute)).toISOString(),
   messageCount,
   busy: false,
+  waiting: false,
 })
 
 // ⚠ #663, measured in the arena: deleting the thread on screen — one of two approaches — opened a new
-// empty thread and its Start dialog, though the other approach was right there in the rail.
+// empty thread and its Start dialog (now the launch panel, #877), though the other approach was right there in the rail.
 test('⚠ after a delete, the page shows its project’s most recent other thread, on this page or stored; a fresh one only when there is none (#663)', () => {
   // The launch project's: B on this page (no projectId) and C stored under its id, C the more recent.
   const pageThreads = [onPage('A', 10), onPage('B', 20), onPage('S', 50, 'p-other')]

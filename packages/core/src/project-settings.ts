@@ -123,6 +123,56 @@ export const EnsoProjectSettingsUpdate = Type.Object(
 export type EnsoProjectSettingsUpdate = Static<typeof EnsoProjectSettingsUpdate>
 
 /**
+ * One of a project's own tier files that is there, as the trust confirmation names it (#873): the
+ * setup commands it declares, as written — absent when it sets none — or why it was not read. Read
+ * for DISPLAY, trusted or not: reading it applies nothing and runs nothing.
+ *
+ * @group Project settings
+ */
+export const EnsoProjectTierFile = Type.Union([
+  Type.Object(
+    { tier: EnsoProjectTier, path: Type.String({ minLength: 1 }), setup: Type.Optional(Commands) },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    { tier: EnsoProjectTier, path: Type.String({ minLength: 1 }), unread: Type.String({ minLength: 1 }) },
+    { additionalProperties: false },
+  ),
+])
+/** @group Project settings */
+export type EnsoProjectTierFile = Static<typeof EnsoProjectTierFile>
+
+/**
+ * `GET` and `PUT /api/projects/<projectId>/trust` (#873): whether a new thread or tree of the
+ * project reads its own files, and the files trust would turn on, the local tier first.
+ *
+ * @group Project settings
+ */
+export const EnsoProjectTrust = Type.Object(
+  {
+    projectId: Type.String({ minLength: 1 }),
+    /** The project's canonical path: the key pi's `trust.json` holds the decision under. */
+    path: Type.String({ minLength: 1 }),
+    trusted: Type.Boolean(),
+    files: Type.Array(EnsoProjectTierFile),
+  },
+  { additionalProperties: false },
+)
+/** @group Project settings */
+export type EnsoProjectTrust = Static<typeof EnsoProjectTrust>
+
+/**
+ * `PUT /api/projects/<projectId>/trust` (#873): trust the project, or revoke it. A revoke is saved
+ * as an explicit "not trusted", never a deletion: pi takes the nearest ancestor's decision when a
+ * path has none, so a deletion under a trusted folder would leave the project trusted.
+ *
+ * @group Project settings
+ */
+export const EnsoProjectTrustUpdate = Type.Object({ trusted: Type.Boolean() }, { additionalProperties: false })
+/** @group Project settings */
+export type EnsoProjectTrustUpdate = Static<typeof EnsoProjectTrustUpdate>
+
+/**
  * One setup command as it ran in a new tree.
  *
  * @group Project settings

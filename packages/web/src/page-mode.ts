@@ -24,8 +24,13 @@ export const isFixtureMode = typeof window !== 'undefined' && new URLSearchParam
  * the page mints or adopts goes through these two, so none is left on the real network.
  */
 const PAGE_FETCH = isFixtureMode ? fixtureFetch : undefined
-export const mintPageThread = (projectId?: string, threadId?: string): ThreadStores =>
-  mintThread(PAGE_FETCH, projectId, threadId)
+export const mintPageThread = (projectId?: string, threadId?: string): ThreadStores => {
+  const stores = mintThread(PAGE_FETCH, projectId, threadId)
+  // The fixture's scripted chat has no session to start (#877): its threads open on the composer,
+  // where every send replays the next turn.
+  if (isFixtureMode) stores.launch.set(false)
+  return stores
+}
 export const adoptPageThread = (history: EnsoThreadHistory, initialDraft?: string): ThreadStores =>
   adoptThread(history, PAGE_FETCH, initialDraft)
 /** `?debug` opens the session debug drawer (#86) — same switch shape as `?fixture`. */

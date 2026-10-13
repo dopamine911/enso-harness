@@ -296,7 +296,7 @@ export const RuntimeCommand = Type.Object({
       Type.Literal('view'),
     ]),
   ),
-  /** `host` rows: the current choice, as an `options[].id`. In the `catalogue`, a thread with no session has no current choice: `/model`'s is the configured default when it is offered (#674), the one the Start dialog preselects. */
+  /** `host` rows: the current choice, as an `options[].id`. In the `catalogue`, a thread with no session has no current choice: `/model`'s is the configured default when it is offered (#674), the one the launch panel preselects. */
   value: Type.Optional(Type.String()),
   /** `host` rows with `kind: 'select' | 'level'`: what may be chosen. */
   options: Type.Optional(Type.Array(HostCommandOption)),
@@ -404,7 +404,7 @@ in-memory pi session per process, built on the first read and released once `ses
 which only the extensions that register providers see (`host/session-models.ts`). The agent dir's
 files alone are not a session's list: pi-multi-account replaces `openai-codex`'s models with the
 account's live catalog on `session_start`, and a list without that offered models the session
-refused. The Start dialog reads its models there, so opening the page builds no thread, and
+refused. The launch panel reads its models there (#877), so opening the page builds no thread, and
 preselects the `/model` row's value: pi's configured default (`defaultProvider`/`defaultModel` in
 the agent dir's settings), when the list offers it (#674), else the first model. The palette shows a
 `catalogue` list as none, because the slash commands belong to a running session (a prompt beginning

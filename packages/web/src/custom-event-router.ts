@@ -1,6 +1,7 @@
 import {
   ENSO_INCIDENT_RESOLVED_ENTRY,
   ENSO_NOTICE_SOURCE,
+  ENSO_SYSTEM_PROMPT_ENTRY,
   EnsoFollowSnapshot,
   EnsoFollowStatus,
   EnsoObservation,
@@ -14,6 +15,7 @@ import {
   readEnsoRunStopped,
   readEnsoSessionRiskChange,
   sessionIncidentsStep,
+  threadSystemPromptOf,
   toolRefusalOf,
 } from '@enso/core'
 import { Compile } from 'typebox/compile'
@@ -115,6 +117,7 @@ export function routeEnsoCustomEvent(stores: ThreadStores, eventType: string, da
     // a snapshot is the resync, and a model this page cannot vouch for is no model. A cold
     // thread's recorded model (#434) rides beside it, never as live state.
     stores.model.applySnapshot(data.model, data.recordedModel)
+    stores.systemPrompt.set(data.systemPrompt)
     stores.cwd.set(data.cwd)
     stores.tree.set(data.tree)
     // #659: a session or messages means the routes answer — latched, never cleared by a later resync.
@@ -327,6 +330,11 @@ function routeObservation(stores: ThreadStores, observation: EnsoObservation): v
       if (readEnsoRunStopped(observation.customType, observation.data)) {
         stores.notifications.push(RUN_STOPPED_NOTICE, 'info', 'run', ENSO_NOTICE_SOURCE)
         stores.runStops.set(stores.runStops.get() + 1)
+        return
+      }
+      // The session's system prompt, chosen at Start (#878): the record a reload reads, without its text.
+      if (observation.customType === ENSO_SYSTEM_PROMPT_ENTRY) {
+        stores.systemPrompt.set(threadSystemPromptOf(observation.data))
         return
       }
       applyGuardEntry(stores, observation.customType, observation.data)

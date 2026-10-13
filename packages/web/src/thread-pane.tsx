@@ -6,13 +6,15 @@ import { ChatLayout } from './chat-layout.tsx'
 import { ChatPromptInput } from './composer.tsx'
 import { routeEnsoCustomEvent } from './custom-event-router.ts'
 import { createFixtureChat } from './fixture-conversation.ts'
-import { ForkContext, forkFromPage, RestoreContext, restoreFromPage } from './fork-thread.ts'
+import { ForkContext, forkFromPage, offerPaneFork, RestoreContext, restoreFromPage } from './fork-thread.ts'
 import { ChatMessageRow } from './message-row.tsx'
 import { isFixtureMode } from './page-mode.ts'
 import {
   chatContexts,
   type ThreadChatOptions,
   DebugOpenContext,
+  type LaunchActions,
+  LaunchActionsContext,
   type ThreadView,
   type PaneView,
   PaneViewContext,
@@ -166,6 +168,7 @@ export function ThreadPane({
   view = 'chat',
   onView = KEEP_VIEW,
   onForked,
+  launchActions,
 }: {
   threadId: string
   active: boolean
@@ -177,6 +180,8 @@ export function ThreadPane({
   onView?: (view: ThreadView) => void
   /** The page opens a fork this pane made (#433). Mounted alone there is no page, and no fork is offered. */
   onForked?: (receipt: EnsoForkReceipt) => void
+  /** What the launch panel does on the page (#877). Mounted alone, it offers no thread to pick up. */
+  launchActions?: LaunchActions
 }): React.ReactNode {
   const stores = getThreadStores(threadId)
   const { useAppChat } = useMemo(() => createThreadChatHook(stores), [stores])
@@ -197,6 +202,8 @@ export function ThreadPane({
           },
     [stores, onForked],
   )
+  // The header's Fork thread (#879) is this pane's `/fork`: the transcript it reads is here.
+  useEffect(() => (forkAt === undefined ? undefined : offerPaneFork(stores, forkAt)), [stores, forkAt])
   // Restoring files (#551) is offered beside the fork: on a page, not on a pane mounted alone.
   const restoreAt = useMemo(
     () =>
@@ -223,7 +230,9 @@ export function ThreadPane({
           <PaneViewContext.Provider value={paneView}>
             <ForkContext.Provider value={forkAt}>
               <RestoreContext.Provider value={restoreAt}>
-                <chat.AppChat />
+                <LaunchActionsContext.Provider value={launchActions}>
+                  <chat.AppChat />
+                </LaunchActionsContext.Provider>
               </RestoreContext.Provider>
             </ForkContext.Provider>
           </PaneViewContext.Provider>

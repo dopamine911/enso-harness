@@ -308,8 +308,8 @@ export function createThreadControlRoutes(state: ThreadControlRoutesState): Thre
 
   /**
    * `POST …/configure` (#391): a new session's model, effort and mode, applied together — the
-   * Start-a-session dialog's Start. A refused step answers 422 with its JSON refusal (the step and
-   * the reason), so the dialog can say which; a run in flight is the usual 409 text.
+   * launch panel's Start (#877). A refused step answers 422 with its JSON refusal (the step and
+   * the reason), so the panel can say which; a run in flight is the usual 409 text.
    */
   async function respondToConfigure(
     threadId: string,

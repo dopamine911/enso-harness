@@ -2,6 +2,8 @@ import type { Stats } from 'node:fs'
 import { type FileHandle, open, readdir, readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
+import type { EnsoRecordedModel } from '@enso/core'
+import { modelOfEntry } from './transcript.ts'
 
 /**
  * pi's session files, found and summarized without parsing every file per question (#739).
@@ -36,6 +38,9 @@ export interface SessionFileHeader {
   readonly parentSessionPath: string | undefined
 }
 
+/** A model a session records it ran on: a `model_change`'s, or an assistant reply's own. */
+type RecordedModel = NonNullable<EnsoRecordedModel['model']>
+
 /** One session file as the rail lists it: its header, its messages counted, its title and name. */
 export interface SessionFileSummary extends SessionFileHeader {
   /** pi's `modified`: the last user or assistant message's time, else the header's, else the file's. */
@@ -45,6 +50,13 @@ export interface SessionFileSummary extends SessionFileHeader {
   readonly firstMessage: string
   /** The newest `session_info` name, trimmed; undefined when none, or the newest is blank. */
   readonly name: string | undefined
+  /**
+   * The model the session last ran on (#871), as a cold read's recorded model says it (#434): the last
+   * entry that records one (`transcript.ts` `modelOfEntry`) on the path from the leaf — pi's leaf on
+   * opening, the file's last entry — to the root, so a change on an abandoned branch is not it.
+   * Enso's own field, not one of pi's; undefined when the path records none.
+   */
+  readonly model: RecordedModel | undefined
 }
 
 /** The session files of one host, each read once per change of it (#739). */
@@ -170,6 +182,7 @@ export function createSessionFiles(): SessionFiles {
 interface SessionLine {
   readonly type?: unknown
   readonly id?: unknown
+  readonly parentId?: unknown
   readonly cwd?: unknown
   readonly timestamp?: unknown
   readonly parentSession?: unknown
@@ -258,13 +271,24 @@ interface Tally {
   firstMessage: string
   name: string | undefined
   lastActivity: number | undefined
+  /** The leaf's: pi's leaf on opening a file is its last entry, so the last entry's model so far. */
+  model: RecordedModel | undefined
+  /** Each entry's model on the path to it — its own, else its parent's — by entry id (#871). */
+  readonly modelAt: Map<string, RecordedModel | undefined>
 }
 
 /** The file read whole and summarized; undefined when its first entry is no session header. */
 async function readSummary(path: string, stats: Stats): Promise<SessionFileSummary | undefined> {
   const contents = await readFile(path, 'utf8')
   let header: SessionFileHeader | undefined
-  const tally: Tally = { messageCount: 0, firstMessage: '', name: undefined, lastActivity: undefined }
+  const tally: Tally = {
+    messageCount: 0,
+    firstMessage: '',
+    name: undefined,
+    lastActivity: undefined,
+    model: undefined,
+    modelAt: new Map(),
+  }
   for (const parsed of parsedLines(contents)) {
     if (header !== undefined) {
       tallyEntry(tally, parsed)
@@ -280,6 +304,7 @@ async function readSummary(path: string, stats: Stats): Promise<SessionFileSumma
     messageCount: tally.messageCount,
     firstMessage: tally.firstMessage,
     name: tally.name,
+    model: tally.model,
   }
 }
 
@@ -308,11 +333,27 @@ interface SessionLineMessage {
   readonly timestamp?: unknown
 }
 
+/**
+ * The model on the path to this entry (#871): its own, else its parent's — so the last entry's is the
+ * leaf's, walked as `recordedModelOf` walks a branch, in one pass over the file. An entry with no
+ * `parentId` at all (a file from before pi's tree, which pi links in file order when it opens it)
+ * follows the entry before it; `null` is a root, with nothing before it.
+ */
+function tallyModel(tally: Tally, line: SessionLine): void {
+  let inherited: RecordedModel | undefined
+  if (typeof line.parentId === 'string') inherited = tally.modelAt.get(line.parentId)
+  else if (line.parentId === undefined) inherited = tally.model
+  const model = modelOfEntry(line) ?? inherited
+  if (typeof line.id === 'string') tally.modelAt.set(line.id, model)
+  tally.model = model
+}
+
 /** One entry after the header counted into `tally`, as pi's `buildSessionInfo` counts it. */
 function tallyEntry(tally: Tally, line: SessionLine): void {
   // The newest `session_info` names the session; a blank one clears the name (pi's own reading).
   if (line.type === 'session_info')
     tally.name = typeof line.name === 'string' ? line.name.trim() || undefined : undefined
+  tallyModel(tally, line)
   if (line.type !== 'message') return
   tally.messageCount += 1
   if (typeof line.message !== 'object' || line.message === null || !('content' in line.message)) return

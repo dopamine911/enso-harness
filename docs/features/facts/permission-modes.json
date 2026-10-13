@@ -4,7 +4,7 @@
     {
       "image": "permission-modes",
       "steps": ["open a thread from the rail"],
-      "shown": ["Mode: default", "permission mode"],
+      "shown": ["Mode: default", "Mode default"],
       "measured": {}
     }
   ]

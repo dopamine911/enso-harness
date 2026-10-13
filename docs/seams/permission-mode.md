@@ -568,8 +568,12 @@ order a call meets them (`HostedThread.checkPermission` → `permission-call-que
 The guard is asked on the session's bus (`ENSO_GUARD_CHECK_CHANNEL`), where it answers with the same
 `decide` a call meets and records nothing; a refusal is the verdict's `guard`, in every mode, and makes
 the engine's answer moot. The engine is asked through `getPermissionsService(sessionId).checkPermission`,
-with the mode's agent name. A surface that is no one call the guards judge (a tool's own gate) is
-answered `not-checked`, never as a pass.
+with the mode's agent name. A value stands for the calls a session would make of it: a command, one
+`bash` call; a path gate's direction, one `read` or `write`; the bare gate (`path`, #874), both, asked
+in that order, the first refusal answering by its call, since the engine answers the bare gate as the
+stricter of its two directions (its resolver's fold, as for a shell command naming a path it cannot
+tell is read or written). A surface that is no call the guards judge (a tool's own gate) is answered
+`not-checked`, never as a pass.
 
 ## Known gaps
 

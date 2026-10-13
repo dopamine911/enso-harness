@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test'
+import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
   existsSync,
@@ -7,15 +8,17 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  rmdirSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import {
   DEFAULT_RISK_THRESHOLDS,
   ENSO_PROJECT_HEADER,
   ENSO_RUN_STOPPED_ENTRY,
+  ENSO_SYSTEM_PROMPT_ENTRY,
   EnsoForkPoint,
   type EnsoFollowFrame,
   type EnsoModelState,
@@ -24,6 +27,7 @@ import {
   EnsoPermissionVerdict,
   EnsoProject,
   EnsoProjectSettings,
+  EnsoProjectTrust,
   EnsoProjectPromptLibrary,
   EnsoStoredThread,
   EnsoSystemPromptPreview,
@@ -354,7 +358,7 @@ test('⚠ a thread id that is not thread-id shaped is a 400 at every entry point
 })
 
 // ⚠ LOOKING MUST NOT BUILD (#86, #484). This route used to build a thread's session to list its
-// commands (#390), and the Start dialog read its models here — so opening the page built one. Now a
+// commands (#390), and the Start dialog (now the launch panel, #877) read its models here — so opening the page built one. Now a
 // thread the server holds answers its own live list, and any other id answers the host's CATALOGUE:
 // `/model` over the models pi could run (no value: no current one), the flows — nothing a session
 // alone has, and nothing built. A build that fails is not this route's concern any more.
@@ -377,7 +381,7 @@ test('⚠ GET …/commands never builds: a live thread answers its own list; any
     ['login', 'host', 'flow'],
     ['logout', 'host', 'flow'],
   ])
-  // The Start dialog's rows: every model with its own thinking levels, and no current value.
+  // The launch panel's rows (#877): every model with its own thinking levels, and no current value.
   expect(fresh.commands[0]?.value).toBeUndefined()
   expect(fresh.commands[0]?.options?.map((option) => [option.id, option.thinkingLevels])).toEqual([
     ['fake/fake-1', ['off', 'low', 'medium', 'high']],
@@ -496,6 +500,50 @@ test("a cold thread's snapshot carries its recorded model beside a null model; o
   expect(liveFollow.frames[0]).not.toHaveProperty('recordedModel')
 })
 
+// #878: the composer's locked System prompt chip says what the session runs with, after a reload
+// too — so the snapshot carries the branch's record, named without its text; none is pi's default.
+test("a follow's snapshot names the system prompt the branch records, without its text; a branch with none says pi's default (#878)", async () => {
+  const choice = { id: 'reviewer', name: 'Reviewer', mode: 'system', sha256: 'c'.repeat(64), text: 'Read the diff.' }
+  const recorded = { kind: 'custom' as const, id: 'sp1', customType: ENSO_SYSTEM_PROMPT_ENTRY, data: choice }
+  const stored = {
+    chosen: { transcript: [recorded], modified: new Date(1), firstMessage: 'reviewed' },
+    plain: { transcript: [], modified: new Date(0), firstMessage: 'plain' },
+  }
+  const { url } = await startWith(settlesAtOnce, stored)
+  const snapshotOf = async (threadId: string): Promise<unknown> => {
+    const controller = new AbortController()
+    openFollows.push(controller)
+    return (await openFollow(url, threadId, controller)).frames[0]
+  }
+  const { text: _text, ...named } = choice
+  expect(await snapshotOf('chosen')).toMatchObject({ type: 'snapshot', live: false, systemPrompt: named })
+  expect(JSON.stringify(await snapshotOf('chosen'))).not.toContain('Read the diff.')
+  expect(await snapshotOf('plain')).toMatchObject({ type: 'snapshot', systemPrompt: null })
+})
+
+// #871: the stored listing names the model each thread last ran on — the project page's Threads tab
+// shows it — checked against the listing's schema; a thread whose file records none has no `model`.
+test('the stored listing carries the model a thread last ran on, and none for a thread that records none (#871)', async () => {
+  const recordedModel = { model: { provider: 'openai', modelId: 'gpt-kept' }, thinkingLevel: 'high' }
+  const stored = {
+    ran: { transcript: [], modified: new Date(1), firstMessage: 'ran', recordedModel },
+    levelOnly: {
+      transcript: [],
+      modified: new Date(0),
+      firstMessage: 'never answered',
+      recordedModel: { model: null, thinkingLevel: 'low' },
+    },
+  }
+  const { url } = await startWith(settlesAtOnce, stored)
+  const listed = (await (await fetch(`${url}/api/stored-threads`)).json()) as unknown[]
+  expect(listed.every((row) => Check(EnsoStoredThread, row))).toBe(true)
+  expect(listed).toEqual([
+    expect.objectContaining({ threadId: 'ran', model: { provider: 'openai', modelId: 'gpt-kept' } }),
+    expect.objectContaining({ threadId: 'levelOnly' }),
+  ])
+  expect(listed[1]).not.toHaveProperty('model')
+})
+
 /** A project root with one directory under it, both canonical — a page may register `app` (#395). */
 function projectRoot(): { root: string; app: string } {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'enso-roots-')))
@@ -553,18 +601,25 @@ test('⚠ projects: registered under a root or refused with the reason; an unreg
   const launchOnly: unknown = await (await fetch(`${url}/api/projects`)).json()
   expect(launchOnly).toEqual([expect.objectContaining({ launch: true, path: realpathSync(tmpdir()), status: 'ok' })])
 
-  const first = await registerProject(url, { path: app })
+  // #872: the name the Add project page sends is the name the project is listed by.
+  const first = await registerProject(url, { path: app, title: 'Ledger app' })
   expect(first.status).toBe(201)
-  const again = await registerProject(url, { path: `${app}/` })
+  const listed: unknown = await (await fetch(`${url}/api/projects`)).json()
+  expect(listed).toContainEqual(expect.objectContaining({ path: app, title: 'Ledger app' }))
+  // Already a project: a 200 naming it, which the page opens (#872).
+  const again = await registerProject(url, { path: `${app}/`, title: 'Another name' })
   expect(again.status).toBe(200)
-  expect(((await again.json()) as EnsoProject).projectId).toBe(((await first.json()) as EnsoProject).projectId)
+  expect(await again.json()).toMatchObject({
+    projectId: ((await first.json()) as EnsoProject).projectId,
+    title: 'Ledger app',
+  })
 
   const outside = await registerProject(url, { path: mkdtempSync(join(tmpdir(), 'enso-outside-')) })
   expect(outside.status).toBe(422)
-  expect(await outside.text()).toContain('not under a declared project root')
+  expect(await outside.text()).toContain('outside your declared project roots')
   const rootItself = await registerProject(url, { path: root })
   expect(rootItself.status).toBe(422)
-  expect(await rootItself.text()).toContain('is a project root itself')
+  expect(await rootItself.text()).toContain('a project root itself')
   expect((await registerProject(url, { path: app, cwd: '/' })).status).toBe(400)
 
   expect(await prompt(url, 't1', 'hello', { [ENSO_PROJECT_HEADER]: '0123456789abcdef' })).toBe(400)
@@ -573,8 +628,9 @@ test('⚠ projects: registered under a root or refused with the reason; an unreg
 
 // A stored session belongs to the project its OWN directory is (pi's header); one whose directory
 // is no project is not served at all — not listed, not read — and forgetting a project takes its
-// threads off the rail without touching them.
-test('stored threads are listed and read only in a project, each under its own; removing a project hides its threads', async () => {
+// threads off the rail without touching them: adding the folder again serves them again. The project
+// page's Remove card says exactly this (#871, `project-page.tsx`).
+test('stored threads are listed and read only in a project, each under its own; removing a project hides its threads until it is added again', async () => {
   const { root, app } = projectRoot()
   const stored = (cwd: string): FakeStoredThread => ({
     cwd,
@@ -620,6 +676,13 @@ test('stored threads are listed and read only in a project, each under its own; 
   const stale = new AbortController()
   openFollows.push(stale)
   expect((await openFollow(url, 'inApp', stale)).frames[0]).toMatchObject({ live: false, cwd: '' })
+  // Nothing was deleted: the same folder added again is the same project, and its threads are back.
+  expect((await registeredProject(url, app)).projectId).toBe(project.projectId)
+  expect(await listed()).toEqual([
+    expect.objectContaining({ threadId: 'inLaunch' }),
+    expect.objectContaining({ threadId: 'inApp', projectId: project.projectId }),
+  ])
+  expect(await (await fetch(`${url}/api/threads/inApp/history`)).json()).toMatchObject({ projectId: project.projectId })
 })
 
 // PR #399 review. Removing a project must not strand a run: while a thread in it RUNS, the removal is
@@ -732,7 +795,7 @@ async function settingsServer(options: {
   readonly trusted: boolean
   readonly shared?: unknown
   readonly local?: string
-}): Promise<{ url: string; project: string; projectId: string; userPath: string }> {
+}): Promise<{ url: string; project: string; projectId: string; userPath: string; agentDir: string }> {
   const project = realpathSync(mkdtempSync(join(tmpdir(), 'enso-settings-project-')))
   mkdirSync(join(project, '.enso'))
   if (options.shared !== undefined) writeFileSync(join(project, '.enso', 'config.json'), JSON.stringify(options.shared))
@@ -746,7 +809,7 @@ async function settingsServer(options: {
   const { url } = await startWith(settlesAtOnce, {}, undefined, { launch: project, agentDir, threadSettings })
   const launch = ((await (await fetch(`${url}/api/projects`)).json()) as EnsoProject[])[0]
   if (launch === undefined) throw new Error('no launch project')
-  return { url, project, projectId: launch.projectId, userPath }
+  return { url, project, projectId: launch.projectId, userPath, agentDir }
 }
 
 function putSettings(url: string, projectId: string, body: unknown): Promise<Response> {
@@ -840,6 +903,178 @@ test('⚠ project settings refusals: an unknown project 404, a body that is not 
   const { unreadable } = await settingsOf(await fetch(`${url}/api/projects/${projectId}/settings`))
   expect(unreadable.map((skipped) => [skipped.tier, skipped.path])).toEqual([
     ['local', join(project, '.enso', 'config.local.json')],
+  ])
+})
+
+// ── #873: trust from the project page ─────────────────────────────────────────────────────────
+
+function putTrust(
+  url: string,
+  projectId: string,
+  body: unknown,
+  headers: Record<string, string> = {},
+): Promise<Response> {
+  return fetch(`${url}/api/projects/${projectId}/trust`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...headers },
+    body: typeof body === 'string' ? body : JSON.stringify(body),
+  })
+}
+
+async function trustOf(response: Response): Promise<EnsoProjectTrust> {
+  expect(response.status).toBe(200)
+  const answered: unknown = await response.json()
+  if (!Check(EnsoProjectTrust, answered)) throw new Error('the answer is not EnsoProjectTrust')
+  return answered
+}
+
+/** pi's `trust.json` as the store holds it: what every new session reads. */
+const trustFile = (agentDir: string): unknown => JSON.parse(readFileSync(join(agentDir, 'trust.json'), 'utf8'))
+
+test("the trust read names each of the project's own files with the setup commands it declares as written, or none — untrusted, and nothing applied (#873)", async () => {
+  const { url, project, projectId } = await settingsServer({
+    trusted: false,
+    shared: { threads: { setup: ['bun install --frozen-lockfile', 'cp .env.example .env'] } },
+    local: JSON.stringify({ webFetch: { allowedHosts: ['docs.example.com'] } }),
+  })
+  expect(await trustOf(await fetch(`${url}/api/projects/${projectId}/trust`))).toEqual({
+    projectId,
+    path: project,
+    trusted: false,
+    files: [
+      { tier: 'local', path: join(project, '.enso', 'config.local.json') },
+      {
+        tier: 'shared',
+        path: join(project, '.enso', 'config.json'),
+        setup: ['bun install --frozen-lockfile', 'cp .env.example .env'],
+      },
+    ],
+  })
+  // Shown, not applied: the settings still resolve without the project's own files.
+  const settings = await settingsOf(await fetch(`${url}/api/projects/${projectId}/settings`))
+  expect(settings.threads.setup).toEqual({ value: [], tier: 'default' })
+
+  const bare = await settingsServer({ trusted: false })
+  expect((await trustOf(await fetch(`${bare.url}/api/projects/${bare.projectId}/trust`))).files).toEqual([])
+})
+
+test("a PUT trusts the project in pi's store and its tiers apply; a revoke saves an explicit false, so a trusted ancestor does not show through (#873)", async () => {
+  const { url, project, projectId, agentDir } = await settingsServer({
+    trusted: false,
+    shared: { threads: { setup: ['make'] } },
+  })
+  const trusted = await trustOf(await putTrust(url, projectId, { trusted: true }))
+  expect(trusted.trusted).toBe(true)
+  expect(trustFile(agentDir)).toEqual({ [project]: true })
+  const settings = await settingsOf(await fetch(`${url}/api/projects/${projectId}/settings`))
+  expect(settings.threads.setup).toEqual({ value: ['make'], tier: 'shared' })
+
+  // The project's folder trusted from above (pi takes the nearest ancestor's decision): a revoke
+  // that deleted the project's own entry would leave it trusted.
+  writeFileSync(join(agentDir, 'trust.json'), JSON.stringify({ [dirname(project)]: true }))
+  expect((await trustOf(await fetch(`${url}/api/projects/${projectId}/trust`))).trusted).toBe(true)
+  expect((await trustOf(await putTrust(url, projectId, { trusted: false }))).trusted).toBe(false)
+  expect(trustFile(agentDir)).toEqual({ [dirname(project)]: true, [project]: false })
+  expect((await settingsOf(await fetch(`${url}/api/projects/${projectId}/settings`))).trusted).toBe(false)
+})
+
+test('⚠ trust refusals: an unregistered id 404, a body that is not exactly `{ trusted }` 400 — a path is never taken — and nothing is written (#873)', async () => {
+  const { url, project, projectId, agentDir } = await settingsServer({ trusted: false })
+  expect((await fetch(`${url}/api/projects/0123456789abcdef/trust`)).status).toBe(404)
+  const unknown = await putTrust(url, '0123456789abcdef', { trusted: true })
+  expect(unknown.status).toBe(404)
+  expect(await unknown.text()).toBe('no registered project has the id 0123456789abcdef')
+  const elsewhere = realpathSync(mkdtempSync(join(tmpdir(), 'enso-unregistered-')))
+  for (const body of [{ trusted: 'yes' }, { trusted: true, path: elsewhere }, { path: elsewhere }, '{ not json']) {
+    expect([body, (await putTrust(url, projectId, body)).status]).toEqual([body, 400])
+  }
+  // A path in the URL is no project id: no route matches it.
+  expect((await putTrust(url, encodeURIComponent(elsewhere), { trusted: true })).status).toBe(404)
+  expect(trustFile(agentDir)).toEqual({ [project]: false })
+})
+
+// #717's guard, on the route that decides what a project may run: a page on another loopback port
+// (a dev server running agent-written code) can neither trust a project nor read what it declares.
+test('⚠ a foreign page cannot trust a project or read its trust; Enso’s own page can (#873, #717)', async () => {
+  const { url, project, projectId, agentDir } = await settingsServer({ trusted: false })
+  const otherPort = { Origin: 'http://localhost:5173', 'Sec-Fetch-Site': 'same-site', 'Content-Type': 'text/plain' }
+  expect((await putTrust(url, projectId, { trusted: true }, otherPort)).status).toBe(403)
+  const crossSite = { 'Sec-Fetch-Site': 'cross-site' }
+  expect((await fetch(`${url}/api/projects/${projectId}/trust`, { headers: crossSite })).status).toBe(403)
+  expect(trustFile(agentDir)).toEqual({ [project]: false })
+  const ownPage = { Origin: 'http://127.0.0.1:5178', 'Sec-Fetch-Site': 'same-origin' }
+  expect((await trustOf(await putTrust(url, projectId, { trusted: true }, ownPage))).trusted).toBe(true)
+})
+
+// A revoke fails closed AT ONCE, as removal does: never under a running thread of the project, and
+// its idle live threads are retired, so the next prompt builds each again under the revoke.
+test('⚠ revoking trust is refused while one of the project’s threads runs, and nothing is written (#873)', async () => {
+  const { root, app } = projectRoot()
+  const agentDir = mkdtempSync(join(tmpdir(), 'enso-revoke-agent-'))
+  const { url } = await startWith(asksAndWaits, {}, undefined, { projectRoots: [root], agentDir })
+  const project = await registeredProject(url, app)
+  writeFileSync(join(agentDir, 'trust.json'), JSON.stringify({ [app]: true }))
+  await prompt(url, 'busy', '/mode', { [ENSO_PROJECT_HEADER]: project.projectId })
+  const refused = await putTrust(url, project.projectId, { trusted: false })
+  expect(refused.status).toBe(409)
+  expect(await refused.text()).toBe('a thread in this project is running; revoke its trust when that settles')
+  expect(trustFile(agentDir)).toEqual({ [app]: true })
+})
+
+test('⚠ revoking trust retires the project’s idle live threads, so each is built again at its next prompt; a grant retires none (#873)', async () => {
+  const { root, app } = projectRoot()
+  const { url, requested } = await startWith(settlesAtOnce, {}, undefined, { projectRoots: [root] })
+  const project = await registeredProject(url, app)
+  const naming = { [ENSO_PROJECT_HEADER]: project.projectId }
+  expect(await prompt(url, 't1', 'hello', naming)).toBe(202)
+  const liveIds = async (): Promise<string[]> =>
+    ((await (await fetch(`${url}/api/threads`)).json()) as EnsoThreadSummary[]).map((summary) => summary.threadId)
+  expect(await liveIds()).toEqual(['t1'])
+  expect((await trustOf(await putTrust(url, project.projectId, { trusted: true }))).trusted).toBe(true)
+  expect(await liveIds()).toEqual(['t1'])
+
+  expect((await trustOf(await putTrust(url, project.projectId, { trusted: false }))).trusted).toBe(false)
+  expect(await liveIds()).toEqual([])
+  expect(await prompt(url, 't1', 'again', naming)).toBe(202)
+  expect(requested).toEqual(['t1', 't1'])
+})
+
+// The trust read happens BEFORE the project is trusted, so its files are untrusted input: a link
+// could point at a file an agent may not read, and the page would show it; a FIFO would hold the
+// server. Neither is read — each is named, and said to be read anyway once trusted.
+test('⚠ the trust read follows no link and opens no FIFO: each is named, never read, and said to be read once trusted (#873)', async () => {
+  const { url, project, projectId } = await settingsServer({ trusted: false })
+  const outside = mkdtempSync(join(tmpdir(), 'enso-trust-outside-'))
+  writeFileSync(join(outside, 'config.json'), JSON.stringify({ threads: { setup: ['leaked-from-outside'] } }))
+  symlinkSync(join(outside, 'config.json'), join(project, '.enso', 'config.json'))
+  execFileSync('mkfifo', [join(project, '.enso', 'config.local.json')])
+  const response = await fetch(`${url}/api/projects/${projectId}/trust`)
+  const text = await response.clone().text()
+  expect(text).not.toContain('leaked-from-outside')
+  const { files } = await trustOf(response)
+  expect(files.map((file) => ['unread' in file ? file.unread : 'read', file.tier])).toEqual([
+    [
+      'is not a regular file, so it is not shown here; trusting the project reads it anyway, setup commands included',
+      'local',
+    ],
+    ['is a link, so it is not shown here; trusting the project reads it anyway, setup commands included', 'shared'],
+  ])
+
+  // `.enso/` itself a link: the file inside is reached through it, and not read either.
+  const linked = await settingsServer({ trusted: false })
+  const elsewhere = mkdtempSync(join(tmpdir(), 'enso-trust-dir-'))
+  writeFileSync(join(elsewhere, 'config.json'), JSON.stringify({ threads: { setup: ['leaked-through-dir'] } }))
+  rmdirSync(join(linked.project, '.enso'))
+  symlinkSync(elsewhere, join(linked.project, '.enso'))
+  const throughDir = await trustOf(await fetch(`${linked.url}/api/projects/${linked.projectId}/trust`))
+  expect(JSON.stringify(throughDir)).not.toContain('leaked-through-dir')
+  expect(throughDir.files).toEqual([
+    {
+      tier: 'shared',
+      path: join(linked.project, '.enso', 'config.json'),
+      unread:
+        'is reached through a link, so it is not shown here; trusting the project reads it anyway, setup commands included',
+    },
   ])
 })
 
@@ -1366,6 +1601,7 @@ test("⚠ a prompt on a thread passes THAT id to the host — the thread id is p
 })
 
 // @pins resume/rail-listing
+// Also waiting (#876): the test's name keys the flow snapshot below, so it stays as it was.
 test('GET /api/stored-threads lists stored threads with title, count and age, marking the ones a thread here is RUNNING', async () => {
   const stored = {
     'stored-1': {
@@ -1401,6 +1637,8 @@ test('GET /api/stored-threads lists stored threads with title, count and age, ma
       lastActivityAt: '2026-09-08T10:00:05.000Z',
       messageCount: 2,
       busy: true,
+      // The question it asked is open: waiting on the person, so the rail says so for a thread the page has not opened (#876).
+      waiting: true,
     },
     // A blank first message is no title — the rail says "new thread", not "   ". A fork names its parent (#433).
     {
@@ -1409,10 +1647,21 @@ test('GET /api/stored-threads lists stored threads with title, count and age, ma
       lastActivityAt: '2026-09-08T11:00:00.000Z',
       messageCount: 0,
       busy: false,
+      waiting: false,
       parentThreadId: 'stored-1',
     },
   ])
   expect(trace.diagram()).toMatchSnapshot('flow resume: the rail lists what is stored')
+
+  // Answered, the question is closed: no longer waiting, while the run it was asked in goes on.
+  const answered = await fetch(`${url}/api/threads/stored-1/dialog`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: 'd1', value: 'a' }),
+  })
+  expect(answered.status).toBe(204)
+  const after = (await (await fetch(`${url}/api/stored-threads`)).json()) as EnsoStoredThread[]
+  expect(after.find((thread) => thread.threadId === 'stored-1')).toMatchObject({ busy: true, waiting: false })
 })
 
 // @pins resume/looking-builds-nothing resume/opening-mode
@@ -2066,6 +2315,29 @@ test('⚠ POST …/configure applies model, effort, mode in order and names the 
 
   // Only the three settings, and nothing else, is a configuration.
   expect((await configure({ model: 'fake/fake-1', prompt: 'hi' })).status).toBe(400)
+})
+
+// ⚠ #479: a Start refused at a later step leaves a thread live on the server — the configure route
+// built it — with no message and no session file. A reload found it with a 200 and no messages,
+// adopted it as a resumed thread, and the launch panel never came back. `/history` says such a
+// thread is a draft; a stored thread, read from its file, never is.
+test('⚠ GET …/history says `draft` for a thread built by a control route and never prompted, and never for a stored one (#479)', async () => {
+  const { url, built } = await startWith(settlesAtOnce, {
+    old: { transcript: STORED_BRANCH, modified: new Date(0), firstMessage: 'earlier question' },
+  })
+  const refused = await send(url, '/api/threads/start-me/configure', 'POST', { model: 'fake/no-such-model' })
+  expect(refused.status).toBe(422)
+  expect(built).toHaveLength(1)
+
+  const draft = await fetch(`${url}/api/threads/start-me/history`)
+  expect(draft.status).toBe(200)
+  const history = (await draft.json()) as EnsoThreadHistory
+  expect(Check(EnsoThreadHistory, history)).toBe(true)
+  expect(history).toMatchObject({ threadId: 'start-me', messages: [], draft: true })
+
+  const stored = (await (await fetch(`${url}/api/threads/old/history`)).json()) as EnsoThreadHistory
+  expect(stored.messages.length).toBeGreaterThan(0)
+  expect(stored.draft).toBeUndefined()
 })
 
 // ── #443: the prompt library — files under ENSO_HOME/prompts, and a session's system prompt from it.

@@ -80,7 +80,7 @@ const THREAD_ABORT_ROUTE = threadRoute('abort')
 const THREAD_MODE_ROUTE = threadRoute('mode')
 /** `POST …/command` (#338 slice 2): run a `host` command — `/model`, `/thinking` — as a control route, not a prompt. */
 const THREAD_COMMAND_ROUTE = threadRoute('command')
-/** `POST …/configure` (#391): a new session's model, effort and mode, applied together — the Start-a-session dialog. */
+/** `POST …/configure` (#391): a new session's model, effort and mode, applied together — the launch panel (#877). */
 const THREAD_CONFIGURE_ROUTE = threadRoute('configure')
 /**
  * `POST …/permissions/check` (#474, #881): the thread's verdict for `{ surface, value }` in its mode

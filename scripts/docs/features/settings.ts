@@ -57,8 +57,8 @@ export const SETTINGS: FeatureSpec = {
   landingTagline: 'themes · fonts · permissions · storage',
   shows: [
     `**Appearance**: the look of the page, a colour theme and a font for each of ${ROLE_COUNT} roles. ${DEFAULT.label} is the default theme, and the others include ${listed(OTHER_FAMILIES)}, in dark and light variants.`,
-    "**Permissions**: the rules pi runs under, from `ENSO_HOME/permissions.json` in the permission engine's own format, in the order the engine reads them. You can view them as written or as each mode runs them, change a rule's pattern or decision, move or remove it, add rules and drafted groups of rules, save, and reset to Enso's policy. **Try a command** asks the open thread's engine what it would decide.",
-    '**Storage**: every thread tree with what it takes on disk, and a Delete for each. See [Thread trees](./thread-trees.md).',
+    "**Permissions**: the rules pi runs under, from `ENSO_HOME/permissions.json` in the permission engine's own format, in the order the engine reads them. You edit them as written: change a rule's pattern or decision, move or remove it, add rules and drafted groups of rules, save, and reset to Enso's policy. A card per mode previews the rules that mode puts in effect, read-only. **Try a command** asks the open thread what it would decide.",
+    '**Storage**: the totals across every project (trees, what they take, and what the snapshot stores take), then each project with what it takes on disk (its trees plus its snapshot store, the number its card on the Projects page says), every thread tree with what it takes, and a Delete for each. See [Thread trees](./thread-trees.md).',
     "A project's own settings are on the project's page, not here: **Project settings…** in its menu on the rail. See [Thread trees](./thread-trees.md).",
   ],
   opens: [
@@ -104,7 +104,7 @@ export const SETTINGS: FeatureSpec = {
         await ui.openThread()
         await ui.click({ role: 'button', name: 'Settings', exact: true })
         await ui.click({ role: 'button', name: 'Permissions', exact: true, within: SECTIONS })
-        await ui.page.getByRole('region', { name: 'Settings' }).getByText('Show', { exact: true }).waitFor()
+        await ui.page.getByRole('region', { name: 'Settings' }).getByRole('radiogroup', { name: 'Rules' }).waitFor()
       },
       marks: [
         {
@@ -116,8 +116,8 @@ export const SETTINGS: FeatureSpec = {
           says: '**{shown}** writes the whole file. A policy the engine would not run as written is refused before it is written, each problem named at its place: the engine runs a file it cannot read as an EMPTY policy, every deny gone.',
         },
         {
-          target: { text: 'Show', exact: true, within: PAGE },
-          says: '**{shown}**: the rules as written, which you edit, or as one of the modes runs them, with the rules that mode put there marked **from** it.',
+          target: { role: 'radiogroup', name: 'Rules', within: PAGE },
+          says: 'The views, one card each: **as written**, the rules you edit, then each mode, a read-only preview of the rules it puts in effect, in the order the engine reads them, with the ones that mode put there marked **from** it. Arrow keys move between the cards.',
         },
         {
           target: { text: 'yours — holds in every mode', within: PAGE },
@@ -140,7 +140,7 @@ export const SETTINGS: FeatureSpec = {
   limits: [
     'Appearance is not stored on the server or in `ENSO_HOME`. Another browser, or a private window, starts from the default.',
     "Permissions shows only your file. A project's own policy, which the engine reads only for a trusted project, is not shown or edited here.",
-    "**Try a command** answers for the policy as saved. It asks the open thread, in its current mode: its guards first, which refuse a call in every mode (a refusal is the answer, and the engine's verdict after it is moot), then its engine. It says so when no engine has loaded there, rather than guessing. The guards are asked only for a command (`bash`) or a path gate's path, as the `bash`, `read` or `write` call it stands for; on any other surface the answer says they were not asked.",
+    "**Try a command** answers for the policy as saved. It asks the open thread, in its current mode: its guards first, which refuse a call in every mode (a refusal is the answer, and the engine's verdict after it is moot), then its engine. It says so when no engine has loaded there, rather than guessing. The guards are asked only for a command (`bash`) or a path gate's path, as the `bash`, `read` or `write` call it stands for; a `path` check asks both the read and the write, as the engine answers it with the stricter of the two. On any other surface the answer says they were not asked.",
     "The terminal is not affected by Appearance. It uses pi's own theme. It does run under the same permission rules.",
   ],
   see: [

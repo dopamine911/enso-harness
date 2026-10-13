@@ -1,6 +1,7 @@
 import type { EnsoProject, EnsoStoredThread } from '@enso/core'
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import type { ListingState } from './listing-store.ts'
+import { recentModelIds } from './model-picker.tsx'
 import { isFixtureMode } from './page-mode.ts'
 import { createProjectsStore, projectOf } from './project-list.ts'
 import { useStore } from './store.ts'
@@ -24,6 +25,12 @@ export const projectList = createProjectsStore()
 /** The project a thread runs in, as the page lists it — a thread with none is the launch directory's. */
 export function useThreadProject(projectId: string | undefined): EnsoProject | undefined {
   return projectOf(useStore(projectList).rows, projectId)
+}
+
+/** The models of the latest threads, most recent first, each once (#880): the model picker's Recent group, from the stored sessions. */
+export function useRecentModels(): readonly string[] {
+  const { rows } = useStore(storedThreads)
+  return useMemo(() => recentModelIds(rows), [rows])
 }
 
 /** The page's three listings: its own threads, the server's stored sessions, and the projects. */

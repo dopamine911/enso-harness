@@ -88,7 +88,7 @@ test('what a mark is called: the plain name or label it was found by, else nothi
 test('the shots the session takes at a stop: each spec’s for that moment, in registry order, never one reached by `go`', () => {
   const [base] = FEATURE_SPECS
   if (base === undefined) throw new Error('the registry is empty')
-  const during = (image: string, moment: 'start-dialog' | 'questionnaire'): Shot => ({
+  const during = (image: string, moment: 'launch-panel' | 'questionnaire'): Shot => ({
     image,
     alt: image,
     marks: [],
@@ -96,13 +96,13 @@ test('the shots the session takes at a stop: each spec’s for that moment, in r
   })
   const reached: Shot = { image: 'reached', alt: 'reached', marks: [], go: async (ui) => ui.openThread() }
   const specs: FeatureSpec[] = [
-    { ...base, id: 'one', shots: [during('a', 'start-dialog'), reached, during('b', 'questionnaire')] },
+    { ...base, id: 'one', shots: [during('a', 'launch-panel'), reached, during('b', 'questionnaire')] },
     { ...base, id: 'two', shots: [reached] },
-    { ...base, id: 'three', shots: [during('c', 'start-dialog')] },
+    { ...base, id: 'three', shots: [during('c', 'launch-panel')] },
   ]
-  const taken = (moment: 'start-dialog' | 'questionnaire' | 'permission-prompt'): string[] =>
+  const taken = (moment: 'launch-panel' | 'questionnaire' | 'permission-prompt'): string[] =>
     shotsDuring(specs, moment).map(({ spec, shot }) => `${spec.id}/${shot.image}`)
-  expect(taken('start-dialog')).toEqual(['one/a', 'three/c'])
+  expect(taken('launch-panel')).toEqual(['one/a', 'three/c'])
   expect(taken('questionnaire')).toEqual(['one/b'])
   expect(taken('permission-prompt')).toEqual([])
 })

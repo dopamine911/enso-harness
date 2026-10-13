@@ -441,6 +441,31 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
     builds: 'no',
     logs: 'yes',
   },
+  PROJECT_TRUST_READ_ROUTE: {
+    method: 'GET',
+    path: '/api/projects/:projectId/trust',
+    handler: 'createProjectTrustRoute.read → projectTrusted, readProjectTierFiles',
+    input: 'path: `projectId` (sixteen hex digits) — a registered project; no path is ever taken',
+    success:
+      "200 `EnsoProjectTrust` JSON — whether a new thread or tree reads the project's own files (pi's `trust.json`, as a session is built), and each of its tier files that is there, local first, with the setup commands it declares as written, or why it was not read (a link, not a regular file, over 64 KiB, not a config Enso reads); read for display, trusted or not (#873)",
+    errors: '403 untrusted origin; 404 no registered project with that id; 500 handler failure',
+    routeClass: 'observation',
+    builds: 'no',
+    logs: 'no',
+  },
+  PROJECT_TRUST_WRITE_ROUTE: {
+    method: 'PUT',
+    path: '/api/projects/:projectId/trust',
+    handler: 'createProjectTrustRoute.write → saveProjectTrust',
+    input: 'path: `projectId`; body: `EnsoProjectTrustUpdate` — `{ "trusted": true }` trusts, `false` revokes',
+    success:
+      "200 `EnsoProjectTrust` JSON as it now stands — saved in pi's `trust.json` under the project's path, the store a thread's **Trust project** answer writes; a revoke is an explicit `false`, never a deletion, so no trusted ancestor shows through, and retires the project's live threads that are not running, so each is rebuilt under it at its next prompt. A grant reaches each thread when it is next built (#873)",
+    errors:
+      '400 malformed body, or one that is not exactly `{ trusted }`; 403 untrusted origin; 404 no registered project with that id; 409 a revoke while a thread in the project is running; 413 body too large; 500 handler failure',
+    routeClass: 'control',
+    builds: 'no',
+    logs: 'yes',
+  },
   THREAD_MODE_ROUTE: threadControl(
     'respondToModeChange → changeThreadMode',
     'path: `threadId`; body: `EnsoPermissionModeChange`',
@@ -511,14 +536,14 @@ const LITERAL_ROUTE_METADATA: Record<string, Omit<RouteMetadata, 'method' | 'pat
     handler: 'respondWithBrowse → ProjectRegistry.browse',
     input: 'query: optional `path` — a directory inside a declared root; absent, the roots themselves',
     success:
-      '200 `EnsoDirectoryListing` JSON — the directories under it that are inside a root and not hidden (symlinks resolved), which already are projects, and whether this one may be added',
+      '200 `EnsoDirectoryListing` JSON — the directories under it that are inside a root and not hidden (symlinks resolved), which already are projects, and whether this one may be added — with the reason when it may not',
     errors:
       '403 untrusted origin; 422 refused, with the reason — not absolute, missing, not a directory, outside every root, or inside a hidden directory',
   }),
   'POST /api/projects': {
     handler: 'respondToProjectRegistration → ProjectRegistry.register',
     input:
-      'body: `EnsoProjectRegistration` — an absolute `path` strictly under a root the ENSO_HOME config declares (`projects.roots`), optional `title`',
+      'body: `EnsoProjectRegistration` — an absolute `path` strictly under a root the ENSO_HOME config declares (`projects.roots`), optional `title` (the name the rail and the project page show)',
     success: '201 `EnsoProject` JSON when registered; 200 when the directory already is a project',
     errors:
       '400 malformed body; 403 untrusted origin; 413 body too large; 422 refused, with the reason — not absolute, missing, not a directory, a root itself, outside every root (resolved through symlinks), or inside a hidden directory; 500 handler failure',

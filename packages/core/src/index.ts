@@ -80,6 +80,9 @@ export {
   EnsoProjectSettingsUpdate,
   EnsoProjectThreadSettings,
   EnsoProjectTier,
+  EnsoProjectTierFile,
+  EnsoProjectTrust,
+  EnsoProjectTrustUpdate,
   EnsoTreeSetupOutcome,
   EnsoTreeSetupStep,
 } from './project-settings.ts'
@@ -278,6 +281,8 @@ export {
   recordedSystemPrompt,
   serializeLibraryPrompt,
   summarizeLibraryPrompt,
+  threadSystemPrompt,
+  threadSystemPromptOf,
   utf8Bytes,
 } from './prompt-library.ts'
 export {

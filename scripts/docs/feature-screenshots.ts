@@ -64,7 +64,7 @@ import {
  *   • A throwaway project (`feature-session.ts`), so pi's edit lands in a temporary directory and
  *     never in this checkout.
  *   • The real dev stack (`bun run dev <project>`), driven through the page like a user: the
- *     Start dialog, the composer, the questionnaire, the permission prompt. The guards, the tools,
+ *     launch panel, the composer, the questionnaire, the permission prompt. The guards, the tools,
  *     the session file and every panel are the product's own.
  *   • Then, after every other shot, a second thread for the Incidents page (`INCIDENT_SCRIPT`),
  *     whose refusals open an incident. The home turns halting on (`config.json`), so the incident
@@ -242,7 +242,7 @@ async function annotate(page: Page, annotations: readonly Annotation[]): Promise
 interface ScreenshotOptions {
   /**
    * The features `--only` asked for, by spec id; `undefined` for all of them. Playing the session
-   * stops where some shots exist only while it waits (the Start dialog, the questions); under
+   * stops where some shots exist only while it waits (the launch panel, the questions); under
    * `--only` those are not retaken, so recapturing one feature leaves every other image as it was.
    */
   readonly only: readonly string[] | undefined
@@ -352,21 +352,32 @@ async function hostCommand(page: Page, threadId: string, name: string, value?: s
 }
 
 /**
- * Plays the whole session, stopping for the shots that only exist WHILE it runs — the Start
- * dialog, the questionnaire and the permission prompt (`SessionShot`). Returns the thread's id.
+ * A new thread's launch panel (#877): the model chosen in its chip's picker, the first prompt typed
+ * into the composer it holds. Returns the panel.
  */
-async function playSession(page: Page, modelLog: string): Promise<string> {
-  await page.goto(WEB)
-  const dialog = page.getByRole('dialog', { name: 'Start a session' })
-  await dialog
+async function fillLaunchPanel(page: Page, prompt: string): Promise<Locator> {
+  const panel = page.getByRole('region', { name: 'What should pi work on?' })
+  await panel.getByRole('button', { name: /^Model: / }).click()
+  await page
+    .getByRole('dialog', { name: 'Model' })
     .getByText(/^Claude Sonnet 4\.5$/)
     .first()
     .click()
-  await dialog.getByPlaceholder('ask pi something').fill(PROMPTS[0])
-  // The library is read as the dialog opens; the Saved prompt field appears once it has been.
-  await dialog.getByText('Saved prompt', { exact: true }).waitFor()
-  await sessionShots(page, 'start-dialog')
-  await dialog.getByRole('button', { name: 'Start session' }).click()
+  await panel.locator('textarea[name="message"]').fill(prompt)
+  return panel
+}
+
+/**
+ * Plays the whole session, stopping for the shots that only exist WHILE it runs — the launch
+ * panel, the questionnaire and the permission prompt (`SessionShot`). Returns the thread's id.
+ */
+async function playSession(page: Page, modelLog: string): Promise<string> {
+  await page.goto(WEB)
+  const panel = await fillLaunchPanel(page, PROMPTS[0])
+  // The library is read as the panel shows; the Saved prompt chip appears once it has been.
+  await panel.getByRole('combobox', { name: /^Saved prompt: / }).waitFor()
+  await sessionShots(page, 'launch-panel')
+  await panel.getByRole('button', { name: 'Start session' }).click()
   await page.getByText(ANSWER_ENDINGS[0], { exact: false }).last().waitFor({ timeout: STEP_TIMEOUT_MS })
   const threadId = new URL(page.url()).searchParams.get('thread')
   if (threadId === null) throw new Error('feature-screenshots: the page names no thread after the first prompt')
@@ -408,13 +419,8 @@ async function playSession(page: Page, modelLog: string): Promise<string> {
 async function playIncidentThread(page: Page): Promise<string> {
   const threadId = crypto.randomUUID()
   await page.goto(`${WEB}/?thread=${threadId}`)
-  const dialog = page.getByRole('dialog', { name: 'Start a session' })
-  await dialog
-    .getByText(/^Claude Sonnet 4\.5$/)
-    .first()
-    .click()
-  await dialog.getByPlaceholder('ask pi something').fill(INCIDENT_PROMPT)
-  await dialog.getByRole('button', { name: 'Start session' }).click()
+  const panel = await fillLaunchPanel(page, INCIDENT_PROMPT)
+  await panel.getByRole('button', { name: 'Start session' }).click()
   // A recorded report ends the run, so the thread is done once the card shows it.
   await page.getByText('The uncharitable read', { exact: true }).waitFor({ timeout: STEP_TIMEOUT_MS })
   await page.locator('#thread-status').getByText('idle', { exact: true }).waitFor({ timeout: STEP_TIMEOUT_MS })

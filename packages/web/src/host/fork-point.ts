@@ -4,8 +4,8 @@ import {
   lastCustomEntryData,
   readEnsoRunContext,
   recordedPermissionMode,
+  threadSystemPrompt,
 } from '@enso/core'
-import { threadSystemPrompt } from './system-prompt.ts'
 import { recordedModelOf, transcriptOf } from './transcript.ts'
 
 /**

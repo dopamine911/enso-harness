@@ -66,7 +66,7 @@ export interface Mark {
 }
 
 /** The moments the demo session stops at on its way, where a shot exists only while it waits. */
-export type SessionMoment = 'start-dialog' | 'questionnaire' | 'permission-prompt'
+export type SessionMoment = 'launch-panel' | 'questionnaire' | 'permission-prompt'
 
 interface ShotBase {
   /** The image's file stem under `docs/features/images/`. */

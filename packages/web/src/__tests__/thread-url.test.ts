@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { readPageUrl, readThreadUrl, urlForPage, urlForThread, urlOpeningThread } from '../thread-url.ts'
+import { readPageUrl, readThreadUrl, showsPage, urlForPage, urlForThread, urlOpeningThread } from '../thread-url.ts'
 
 // The URL is the source of truth for the active thread (#142): what it names, and what it cannot.
 // @pins resume/url-names-thread
@@ -41,10 +41,62 @@ test('a URL names a Settings section beside its thread; no section is the first;
 })
 
 // @pins resume/url-names-page
+test('a URL names the Projects page beside its thread; it has no sections', () => {
+  expect(readPageUrl(`?thread=${THREAD}&page=projects`)).toEqual({ kind: 'projects' })
+  expect(readPageUrl('?page=projects&section=')).toEqual({ kind: 'projects' })
+  expect(readPageUrl('?page=projects&section=storage')).toEqual({
+    kind: 'not-found',
+    asked: 'storage',
+    within: 'projects',
+  })
+})
+
+// @pins resume/url-names-page
+test('a URL names the Add project page beside its thread; it has no sections (#872)', () => {
+  expect(readPageUrl(`?thread=${THREAD}&page=add-project`)).toEqual({ kind: 'add-project' })
+  expect(readPageUrl('?page=add-project&section=browse')).toEqual({
+    kind: 'not-found',
+    asked: 'browse',
+    within: 'add-project',
+  })
+  const adding = urlForPage(`?thread=${THREAD}&page=projects`, { kind: 'add-project' })
+  expect(adding).toBe(`?thread=${THREAD}&page=add-project`)
+  expect(showsPage(adding, { kind: 'add-project' })).toBe(true)
+  expect(showsPage(adding, { kind: 'projects' })).toBe(false)
+})
+
+// @pins resume/url-names-page
+test('a URL names a project’s page and its tab beside its thread; no tab is Threads; a tab it has not is not found (#871)', () => {
+  expect(readPageUrl(`?thread=${THREAD}&page=project&project=p-app&tab=worktrees`)).toEqual({
+    kind: 'project',
+    projectId: 'p-app',
+    tab: 'worktrees',
+  })
+  expect(readPageUrl('?page=project&project=p-app')).toEqual({ kind: 'project', projectId: 'p-app', tab: 'threads' })
+  // Whether a project has the id is the listing's to say: the page says when none has it.
+  expect(readPageUrl('?page=project')).toEqual({ kind: 'project', projectId: '', tab: 'threads' })
+  expect(readPageUrl('?page=project&project=p-app&tab=settings')).toEqual({
+    kind: 'not-found',
+    asked: 'settings',
+    within: 'project',
+  })
+  const storage = urlForPage(`?thread=${THREAD}&page=settings&section=storage`, {
+    kind: 'project',
+    projectId: 'p-app',
+    tab: 'storage',
+  })
+  expect(storage).toBe(`?thread=${THREAD}&page=project&project=p-app&tab=storage`)
+  expect(showsPage(storage, { kind: 'project', projectId: 'p-app', tab: 'storage' })).toBe(true)
+  expect(showsPage(storage, { kind: 'project', projectId: 'p-app', tab: 'threads' })).toBe(false)
+  expect(showsPage(storage, { kind: 'project', projectId: 'p-other', tab: 'storage' })).toBe(false)
+  expect(urlOpeningThread(storage, 't2')).toBe('?thread=t2')
+})
+
+// @pins resume/url-names-page
 test('a page or a section Enso does not have is not found, with what was asked — never a guess at a page', () => {
   expect(readPageUrl('?page=settings&section=trees')).toEqual({ kind: 'not-found', asked: 'trees', within: 'settings' })
   expect(readPageUrl('?page=SETTINGS')).toEqual({ kind: 'not-found', asked: 'SETTINGS' })
-  expect(readPageUrl('?page=projects&section=storage')).toEqual({ kind: 'not-found', asked: 'projects' })
+  expect(readPageUrl('?page=Projects')).toEqual({ kind: 'not-found', asked: 'Projects' })
   // An own key only: what every object inherits is no page.
   expect(readPageUrl('?page=constructor')).toEqual({ kind: 'not-found', asked: 'constructor' })
   expect(readPageUrl('?page=__proto__')).toEqual({ kind: 'not-found', asked: '__proto__' })
@@ -64,4 +116,10 @@ test('opening a page keeps the thread and every other parameter; opening a threa
   expect(urlOpeningThread('?log=debug', 't3')).toBe('?log=debug&thread=t3')
   // The page's own rewrite of its thread (a delete, a failed resume) keeps the page.
   expect(urlForThread(onSettings, 't4')).toBe('?debug=&thread=t4&page=settings&section=appearance')
+  // A page with no sections writes none, and drops the section of the page it replaced.
+  const onProjects = urlForPage(onSettings, { kind: 'projects' })
+  expect(onProjects).toBe(`?debug=&thread=${THREAD}&page=projects`)
+  expect(showsPage(onProjects, { kind: 'projects' })).toBe(true)
+  expect(showsPage(onSettings, { kind: 'settings', section: 'storage' })).toBe(false)
+  expect(showsPage(onSettings, { kind: 'settings', section: 'appearance' })).toBe(true)
 })

@@ -40,6 +40,8 @@ import {
   HOST_VIEW_ROWS,
   HostCommandRefused,
   hostCommandRows,
+  type ModelOffer,
+  type ModelThinking,
 } from '../../host/host-commands.ts'
 import { compactDoneText, decideHostFlow, hostFlowRows, loginDoneText, logoutDoneText } from '../../host/host-flows.ts'
 import type { HostedThread, HostedThreadInspection, SystemPromptPreviewOutcome } from '../../host/live-thread.ts'
@@ -64,10 +66,21 @@ import type { ThreadRenameOutcome, ThreadRestoreOutcome } from '../../host/threa
 const FAKE_MODEL_ONE: EnsoModelChoice = { provider: 'fake', id: 'fake-1', name: 'Fake One' }
 const FAKE_MODEL_TWO: EnsoModelChoice = { provider: 'fake', id: 'fake-2', name: 'Fake Two' }
 const FAKE_MODELS: readonly EnsoModelChoice[] = [FAKE_MODEL_ONE, FAKE_MODEL_TWO]
+/** What the fake lists (#880): its two models, logged in, under the provider's readable name. */
+const FAKE_OFFER: ModelOffer<EnsoModelChoice> = {
+  available: FAKE_MODELS,
+  loggedOut: [],
+  providerName: (providerId: string): string => (providerId === 'fake' ? 'Fake' : providerId),
+}
 
-/** The fake's per-model effort (#391): model one reasons, model two does not — as a real catalogue mixes them. */
-function fakeThinkingLevelsOf(model: EnsoModelChoice): readonly string[] {
-  return model.id === FAKE_MODEL_TWO.id ? ['off'] : ['off', 'low', 'medium', 'high']
+/**
+ * The fake's per-model effort (#391): model one reasons, model two does not — as a real catalogue
+ * mixes them. Chosen with no level, each runs at pi's `medium` clamped to its levels (#852).
+ */
+const FAKE_THINKING: ModelThinking<EnsoModelChoice> = {
+  levelsOf: (model: EnsoModelChoice): readonly string[] =>
+    model.id === FAKE_MODEL_TWO.id ? ['off'] : ['off', 'low', 'medium', 'high'],
+  onChoosing: (model: EnsoModelChoice): string => (model.id === FAKE_MODEL_TWO.id ? 'off' : 'medium'),
 }
 
 /** The fake's ways in and its one stored credential (#338 slice 3). */
@@ -80,7 +93,7 @@ const FAKE_LOGOUT_OPTIONS = [{ id: 'fake', label: 'Fake', detail: 'stored subscr
 /** The fake's host rows — `/model`, `/thinking`, `/login`, `/logout`, `/compact`, `/context` — in the real host's order; a test that replaces `listCommands` puts pi's rows before these. */
 export function fakeHostRows(record: Pick<FakeThreadRecord, 'modelState'>): RuntimeCommand[] {
   return [
-    ...hostCommandRows(record.modelState, FAKE_MODELS, fakeThinkingLevelsOf),
+    ...hostCommandRows(record.modelState, FAKE_OFFER, FAKE_THINKING),
     ...hostFlowRows(FAKE_LOGIN_OPTIONS, FAKE_LOGOUT_OPTIONS),
     ...HOST_VIEW_ROWS,
   ]
@@ -88,7 +101,7 @@ export function fakeHostRows(record: Pick<FakeThreadRecord, 'modelState'>): Runt
 
 /** The fake's catalogue (#484): the real host's rule over the same fake models and credentials. */
 function fakeCatalogue(): RuntimeCommand[] {
-  return catalogueRows(FAKE_MODELS, fakeThinkingLevelsOf, hostFlowRows(FAKE_LOGIN_OPTIONS, FAKE_LOGOUT_OPTIONS))
+  return catalogueRows(FAKE_OFFER, FAKE_THINKING, hostFlowRows(FAKE_LOGIN_OPTIONS, FAKE_LOGOUT_OPTIONS))
 }
 
 /** The sentence the fake's flow says when a test settles it — the real host's words, by flow. */
@@ -590,6 +603,8 @@ export function createFakeAgentHost(
                   firstMessage: storedThread.firstMessage,
                   ...(names.get(threadId) === undefined ? {} : { name: names.get(threadId) ?? '' }),
                   ...(storedThread.parentThreadId === undefined ? {} : { parentThreadId: storedThread.parentThreadId }),
+                  // The listing's model is the one the branch records, as the real file's last entry says it (#871).
+                  ...(storedThread.recordedModel?.model ? { model: storedThread.recordedModel.model } : {}),
                 },
               ]
             : [],

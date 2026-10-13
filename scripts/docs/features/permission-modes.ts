@@ -54,9 +54,9 @@ const READ_ONLY_COMMANDS = new Set(patternsWith(SEED.bash, 'allow').map((pattern
 const ENV_PATTERNS = patternsWith(SEED.path_read, 'deny').map((pattern) => `\`${pattern}\``)
 
 const MODE_LINE: MarkTarget = { text: 'Mode: default', exact: true }
-const SELECTOR: MarkTarget = { role: 'combobox', name: 'permission mode' }
+const MODE_CHIP: MarkTarget = { role: 'combobox', name: /^Mode: / }
 
-/** Permission modes (#482, #496): the demo thread's mode line and the mode selector. */
+/** Permission modes (#482, #496): the demo thread's mode line and the composer's Mode chip (#878). */
 export const PERMISSION_MODES: FeatureSpec = {
   id: 'permission-modes',
   title: 'Permission modes',
@@ -69,31 +69,31 @@ export const PERMISSION_MODES: FeatureSpec = {
     `In \`auto\`, a question pi would ask you goes first to a classifier: the thread's own model, asked whether the action stays within what you asked for. It allows the action or refuses it with a reason pi reads. When it cannot answer (no model, no credentials, no reply within ${CLASSIFIER_SECONDS} seconds, a reply it cannot read) you are asked instead. A rule you wrote to ask, such as \`"git push*": "ask"\`, always reaches you, and so does a file path or a directory outside the project that the classifier would allow.`,
   ],
   opens: [
-    'The **mode** selector sits above the composer. Pick a mode to change it.',
+    'The **Mode** chip sits above the composer, beside **Model**, **Effort** and **System prompt**. Pick a mode from its list to change it, with the mouse or the keyboard; every change adds a `Mode:` line to the thread, `bypassPermissions` included.',
     `Or type \`/mode\` in the chat to choose from a list, or \`/mode <name>\`. ${SLASH_COMMANDS} switch directly.`,
-    "A new thread's mode is picked in **Start a session**.",
+    "A new thread's mode is picked on its launch panel, with the **Mode** chip.",
   ],
   shots: [
     {
       image: 'permission-modes',
-      alt: 'The mode line and the mode selector',
+      alt: 'The mode line and the Mode chip',
       go: async (ui) => {
         await ui.openThread()
         await ui.scrollTo(MODE_LINE)
       },
-      region: [MODE_LINE, SELECTOR, { placeholder: 'ask pi something' }],
+      region: [MODE_LINE, MODE_CHIP, { placeholder: 'Ask pi something' }],
       marks: [
         {
           target: MODE_LINE,
           says: 'The mode, as a line in the chat. Every change adds one, so the transcript shows when each mode started.',
         },
-        { target: SELECTOR, says: 'The **mode** selector. It lists the modes this thread offers.' },
+        { target: MODE_CHIP, says: 'The **Mode** chip. Its list holds the modes this thread offers.' },
       ],
     },
   ],
   lookFor: [
     'Read the mode lines with the tool calls around them. A run of edits that went through without a question is expected under `acceptEdits`, and worth a look under `default`.',
-    "A change you make is not applied by the click. The server asks the thread to change, and the new mode arrives back on the thread's feed like any other event. So the selector always shows the mode pi is actually in, and a change refused because the thread is busy leaves it as it was.",
+    "A change you make is not applied by the click. The server asks the thread to change, and the new mode arrives back on the thread's feed like any other event. So the chip always shows the mode pi is actually in, and a change refused because the thread is busy leaves it as it was.",
     `A new thread shows the mode as \`unknown\` until its first prompt has run. It starts in \`${ENSO_DEFAULT_PERMISSION_MODE}\`.`,
   ],
   limits: [

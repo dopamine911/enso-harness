@@ -23,6 +23,7 @@ const CHECK_SURFACES: readonly string[] = [
   'read',
   'edit',
   'write',
+  'path',
   'path_read',
   'path_write',
   'web_fetch',
@@ -46,13 +47,13 @@ const SHORTHANDS: Readonly<Record<string, readonly string[]>> = {
 }
 
 /**
- * The surfaces "Try a command" offers: `surfaceChoices` with each shorthand replaced by its
- * directions. ⚠ Asked about `path` itself, the engine answers from the raw `path` block — a `*.pem`
- * deny there — while a read meets `path_read`, where the seed's `**` allow comes after it and wins:
- * a verdict no call gets (probed against the real engine in review of #474).
+ * The surfaces "Try a command" offers: `surfaceChoices` with each shorthand followed by its
+ * directions. ⚠ The engine answers a shorthand as the stricter of its two directions (its resolver's
+ * fold, as for a shell command naming a path it cannot tell is read or written), and the host asks
+ * the guards both calls (#874); a direction is asked alone.
  */
 export function checkSurfaces(permission: EnsoPermissionMap): string[] {
-  return [...new Set(surfaceChoices(permission).flatMap((surface) => SHORTHANDS[surface] ?? [surface]))]
+  return [...new Set(surfaceChoices(permission).flatMap((surface) => [surface, ...(SHORTHANDS[surface] ?? [])]))]
 }
 
 /** The decision `pattern` has on `surface`, when it is there. */

@@ -173,8 +173,8 @@ what the act caused arrives on the follow, for every follower alike. Nothing her
   session (`live`), or the host's **catalogue** (`catalogue`) when the thread has no session —
   `/model` over the models the runtime could run, `/login`, `/logout`, read from the agent dir's
   auth and models files with nothing built (#86, #484). The palette shows a catalogue list as none: the slash commands
-  belong to a running session, and the Start dialog is what a thread without one offers. The
-  Start dialog reads its models from the same catalogue, so opening the page builds nothing. Selecting an
+  belong to a running session, and the launch panel (#877) is what a thread without one offers. The
+  launch panel reads its models from the same catalogue (#877), so opening the page builds nothing. Selecting an
   extension command sends it as a prompt; a template or skill is inserted for its arguments; a
   **host command** runs through `POST …/threads/:id/command`.
 - **host command** — a slash command that is ours, not the runtime's (#338 slice 2): `source: 'host'`,
@@ -400,7 +400,8 @@ harness did). The first is canonical and never rewritten by us; the second is th
   file that is there is read once per session and fails closed when unreadable. A trusted project's
   `.enso/config.json` merges over it for that project's sessions.
 - **project trust** — the decision that a project's own files may change a session: the runtime's
-  project directory and the project's `.enso/config.json` (#421, #502). Saved in the runtime's `trust.json` ("Trust project"), or in
+  project directory and the project's `.enso/config.json` (#421, #502). Saved in the runtime's `trust.json` ("Trust project", or
+  the project page's Trust and Revoke, #873 — a revoke saved as an explicit "not trusted"), or in
   the web on the thread itself ("Trust this thread", an `enso-project-trust` entry); undecided is
   untrusted, and the web asks before the first run when the project has its own configuration.
   Secrets are not config: `ENSO_HOME/secrets.env`, read per call, quarantined.
