@@ -132,7 +132,7 @@ export const SETTINGS: FeatureSpec = {
   limits: [
     'Appearance is not stored on the server or in `ENSO_HOME`. Another browser, or a private window, starts from the default.',
     "Permissions shows only your file. A project's own policy, which the engine reads only for a trusted project, is not shown or edited here.",
-    '**Try a command** answers for the policy as saved. It asks the open thread, in its current mode, and says so when no engine has loaded there, rather than guessing.',
+    "**Try a command** answers for the policy as saved. It asks the open thread, in its current mode: its guards first, which refuse a call in every mode (a refusal is the answer, and the engine's verdict after it is moot), then its engine. It says so when no engine has loaded there, rather than guessing. The guards are asked only for a command (`bash`) or a path gate's path, as the `bash`, `read` or `write` call it stands for; on any other surface the answer says they were not asked.",
     "The terminal is not affected by Appearance. It uses pi's own theme. It does run under the same permission rules.",
   ],
   see: [

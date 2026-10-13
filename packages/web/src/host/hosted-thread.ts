@@ -241,7 +241,8 @@ export async function buildHostedThread(
   let onModelSelect = (): void => undefined
   // The host's own hold on pi's extension API (#466): a resolution is appended through it, so pi
   // emits `entry_appended` and every follower folds the record live, and emitted on its event bus,
-  // where the guard listens. Re-set on each load — a reload (`trustGate`) binds a new API.
+  // where the guard listens — as it does for "Try a command"'s question (#881). Re-set on each load:
+  // a reload (`trustGate`) binds a new API, and pi drops the old one's listeners.
   let hostApi: ExtensionAPI | undefined
   const modelWatch: InlineExtension = {
     name: MODEL_WATCH_EXTENSION_NAME,
@@ -718,7 +719,10 @@ export async function buildHostedThread(
     },
     projectTrust: () => ({ directory: trustDirectory, trusted: projectTrust.settingsManager.isProjectTrusted() }),
     checkPermission: (request: EnsoPermissionCheckRequest) =>
-      permissionVerdictOf(threadLog.threadId, threadLog.everyEntry(), request),
+      permissionVerdictOf(
+        { threadId: threadLog.threadId, entries: threadLog.everyEntry(), cwd, events: hostApi?.events },
+        request,
+      ),
     ...logReads({ threadLog, listCommands: () => runtime.listCommands(), locate, judgeCaseInputs }),
     previewSystemPrompt: (candidate: EnsoSystemPromptChoice | null) =>
       previewOnSession(

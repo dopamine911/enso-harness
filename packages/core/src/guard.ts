@@ -174,6 +174,70 @@ export function readEnsoGuardDenial(customType: string, data: unknown): EnsoGuar
 }
 
 /**
+ * The session event-bus channel a host asks the guard on what it would answer a call NOW, without
+ * the call being made (#881): Settings' "Try a command". The guard answers from the same decision a
+ * call meets, in the session's state now (its floor, an incident's suspension, what it has read), and
+ * records nothing: no denial entry, no risk signal, no patch.
+ *
+ * ⚠ The answer is SYNCHRONOUS: pi's bus is an `EventEmitter`, which runs each handler inside `emit`,
+ * so the guard has called `answer` by the time `emit` returns. No answer by then means no guard
+ * listens (none loaded, or its handler threw), and the asker says so, never reads it as a pass.
+ *
+ * @group Guards
+ */
+export const ENSO_GUARD_CHECK_CHANNEL = 'enso:guard-check' as const
+
+/**
+ * A guard's refusal as a check reports it: the rule that refused and the reason the model would read.
+ *
+ * @group Guards
+ */
+export interface EnsoGuardRefusal {
+  readonly rule: EnsoGuardRule
+  readonly reason: string
+}
+
+/**
+ * What a host asks on `ENSO_GUARD_CHECK_CHANNEL`: a tool call as the runtime would raise it, in the
+ * session's directory, and where the guard answers — its refusal, or undefined when it lets the call
+ * through.
+ *
+ * @group Guards
+ */
+export interface EnsoGuardCheckQuestion {
+  readonly toolName: string
+  readonly input: Readonly<Record<string, unknown>>
+  readonly cwd: string
+  readonly answer: (refusal: EnsoGuardRefusal | undefined) => void
+}
+
+/**
+ * What the guards say of a value Settings checks (#881), the `guard` of `EnsoPermissionVerdict`. They
+ * decide a call BEFORE the permission engine, in every mode, so the check asks them first, as the tool
+ * call the value stands for (`tool`: `bash` for a command, `read` or `write` for a path gate's path):
+ * `refused` names the rule and the reason the model would read; `passed`, that no guard refuses it
+ * now; `not-checked`, why the guards were not asked — a surface that is no one call they judge, or no
+ * guard listening — so a check never claims more than it asked.
+ *
+ * @group Guards
+ */
+export const EnsoGuardCheck = Type.Union([
+  Type.Object(
+    {
+      kind: Type.Literal('refused'),
+      tool: Type.String(),
+      rule: EnsoGuardDenial.properties.rule,
+      reason: Type.String(),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object({ kind: Type.Literal('passed'), tool: Type.String() }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal('not-checked'), reason: Type.String() }, { additionalProperties: false }),
+])
+/** @group Guards */
+export type EnsoGuardCheck = Static<typeof EnsoGuardCheck>
+
+/**
  * Defaults.
  *
  * Deliberately conservative on reads of credential material and on writes outside the workspace

@@ -563,9 +563,13 @@ modification time moved past the last one, so every running session reloads it a
 Reset copies the file to the first free `permissions.json.bak[.N]` first. The per-mode view is a
 MODEL of the engine's merge in core (`core/src/permission-policy.ts#effectiveRows`: the shorthand expansion,
 then the preset merged key by key), pinned to the engine in every mode by `agent-host.test.ts`.
-**Try a command** is not modelled: it asks the thread's own engine
-(`HostedThread.checkPermission` → the engine's `getPermissionsService(sessionId).checkPermission`,
-with the mode's agent name).
+**Try a command** is not modelled: it asks the thread's own guard, then its own engine (#881), in the
+order a call meets them (`HostedThread.checkPermission` → `permission-call-questions.ts#permissionVerdictOf`).
+The guard is asked on the session's bus (`ENSO_GUARD_CHECK_CHANNEL`), where it answers with the same
+`decide` a call meets and records nothing; a refusal is the verdict's `guard`, in every mode, and makes
+the engine's answer moot. The engine is asked through `getPermissionsService(sessionId).checkPermission`,
+with the mode's agent name. A surface that is no one call the guards judge (a tool's own gate) is
+answered `not-checked`, never as a pass.
 
 ## Known gaps
 

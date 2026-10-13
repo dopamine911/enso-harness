@@ -1,4 +1,5 @@
 import { type Static, Type } from 'typebox'
+import { EnsoGuardCheck } from './guard.ts'
 import {
   ENSO_AUTO_AUTHORIZER,
   ENSO_CATCH_ALL,
@@ -292,7 +293,7 @@ export const ENSO_DRAFTED_RULE_GROUPS: readonly EnsoDraftedRuleGroup[] = [
   {
     id: 'secrets',
     title: 'Secrets on the path gate',
-    note: 'Denied for every tool that reads a path: keys and cloud credentials stay unread.',
+    note: 'Denied on the path gate, for the tools that take a path. Whatever these rules say, a guard refuses these paths in every mode: for those tools (secret-read) and named in a shell command (secret-path).',
     rules: [
       { surface: 'path', pattern: '~/.ssh/*', decision: 'deny' },
       { surface: 'path', pattern: '~/.aws/*', decision: 'deny' },
@@ -491,14 +492,17 @@ export const EnsoPermissionCheckRequest = Type.Object(
 export type EnsoPermissionCheckRequest = Static<typeof EnsoPermissionCheckRequest>
 
 /**
- * The engine's own verdict for a thread's mode: its decision, the pattern that won and where that
- * rule came from (`global` is the user's file, `agent` the mode's preset).
+ * A thread's verdict on a value, layer by layer, as a call meets them (#474, #881): the guards first
+ * (`guard`), then the engine in the thread's mode — its decision, the pattern that won and where that
+ * rule came from (`global` is the user's file, `agent` the mode's preset). A guard's refusal decides:
+ * the engine is never asked about a refused call, so its fields then say what it WOULD answer, moot.
  *
  * @group Permission policy
  */
 export const EnsoPermissionVerdict = Type.Object(
   {
     mode: Type.String(),
+    guard: EnsoGuardCheck,
     state: EnsoPermissionAction,
     matchedPattern: Type.Optional(Type.String()),
     origin: Type.String(),

@@ -1062,6 +1062,82 @@ test('⚠ a policy the engine would not run is refused with each problem’s pla
   expect(hosted.checkPermission({ surface: 'bash', value: PUBLISH })?.state).toBe('deny')
 })
 
+// ⚠ #881: "Try a command" once answered from the engine alone, and said Allow under
+// bypassPermissions for a command the guards refuse in every mode. The check now asks the guards
+// first. Asked here of `HostedThread.checkPermission`, the call the route makes, on a real host:
+// the route itself is pinned over HTTP in `server-handler.test.ts`, with a fake host, because only
+// this file may build a real one (#518) and this zone may not import the server (fallow boundaries).
+const SSH_KEY_READ = 'cat ~/.ssh/id_ed25519'
+
+test('⚠ Try a command: a guard refuses `cat ~/.ssh/id_ed25519` in every mode, bypassPermissions included, and `ls` keeps the engine’s verdict (#881)', async () => {
+  const threadId = crypto.randomUUID()
+  const hosted = await hostWith().createSession(threadId, () => repoRoot)
+  openSessions.push(hosted)
+  for (const mode of ['bypassPermissions', 'acceptEdits', 'auto', 'plan', 'default'] as const) {
+    await switchMode(hosted, mode)
+    expect({ mode, verdict: hosted.checkPermission({ surface: 'bash', value: SSH_KEY_READ }) }).toEqual({
+      mode,
+      verdict: expect.objectContaining({
+        mode,
+        // The bash analyzer refuses it first (the guard's first shell deny); `secret-path` is behind it.
+        guard: { kind: 'refused', tool: 'bash', rule: 'cc-safety-net', reason: expect.stringContaining('ssh') },
+      }),
+    })
+    // A command no guard touches: the engine's own answer, field for field, beside the guards' pass.
+    const engine = getPermissionsService(threadId)?.checkPermission('bash', 'ls', modeAgentName(mode))
+    if (engine === undefined) throw new Error(`${mode}: the engine published no service`)
+    expect({ mode, verdict: hosted.checkPermission({ surface: 'bash', value: 'ls' }) }).toEqual({
+      mode,
+      verdict: {
+        mode,
+        guard: { kind: 'passed', tool: 'bash' },
+        state: engine.state,
+        origin: engine.origin,
+        ...(engine.matchedPattern === undefined ? {} : { matchedPattern: engine.matchedPattern }),
+        ...(engine.reason === undefined ? {} : { reason: engine.reason }),
+      },
+    })
+  }
+  // A surface that is a tool's own gate carries no arguments for a guard to judge: said, never a pass.
+  expect(hosted.checkPermission({ surface: 'web_fetch', value: 'https://example.com' })?.guard).toEqual({
+    kind: 'not-checked',
+    reason: expect.stringContaining('web_fetch'),
+  })
+})
+
+// @pins guarded-tool-call/check-is-the-call
+test('⚠ the check and the live call agree on every guard outcome: both ask the same guard (#881)', async () => {
+  const hosted = await hostedSession()
+  // bypassPermissions, so a call the guards pass is not left waiting on the engine's question.
+  await switchMode(hosted, 'bypassPermissions')
+  const samples: readonly (readonly [string, string])[] = [
+    ['bash', SSH_KEY_READ],
+    ['bash', 'curl https://example.com'],
+    ['bash', 'ls'],
+    ['path_read', '~/.aws/credentials'],
+    ['path_read', 'package.json'],
+    ['path_write', '/etc/passwd'],
+  ]
+  const outcomes: { surface: string; value: string; check: string; call: string }[] = []
+  for (const [surface, value] of samples) {
+    // The check first: it records nothing, so the call after it meets the same session.
+    const guard = hosted.checkPermission({ surface, value })?.guard
+    if (guard === undefined || guard.kind === 'not-checked') throw new Error(`${surface} ${value}: no guard asked`)
+    const input = guard.tool === 'bash' ? { command: value } : { path: value, content: 'x' }
+    const verdict = await hosted.probeToolCall(guard.tool, input)
+    outcomes.push({
+      surface,
+      value,
+      check: guard.kind === 'refused' ? guard.reason : 'passed',
+      call: verdict?.block === true ? (verdict.reason ?? '') : 'passed',
+    })
+  }
+  expect(outcomes.map(({ check }) => check === 'passed')).toEqual([false, false, true, false, true, false])
+  expect(outcomes.map(({ surface, value, call }) => ({ surface, value, answer: call }))).toEqual(
+    outcomes.map(({ surface, value, check }) => ({ surface, value, answer: check })),
+  )
+})
+
 test('a save over a file changed since it was read is refused, and the change on disk is kept (#474)', async () => {
   const { policyPath } = await runningUnderFreshPolicy()
   const { file, etag } = readOk(policyPath)

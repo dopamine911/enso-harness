@@ -50,10 +50,10 @@ export function createPermissionRoutes(state: PermissionRoutesState): Permission
   const { threads, permissionRulesPath, agentDir } = state
 
   /**
-   * `POST /api/threads/:id/permissions/check` (#474): what the thread's permission engine decides
-   * for a value on a surface, in the thread's mode now. Asked of the REAL engine the session runs
-   * (`HostedThread.checkPermission`), never a second matcher in the page. 409 when the engine has
-   * published no service for the session.
+   * `POST /api/threads/:id/permissions/check` (#474, #881): what the thread decides for a value on a
+   * surface, in its mode now — the guards' answer, then the engine's. Asked of the REAL guard and
+   * engine the session runs (`HostedThread.checkPermission`), never a second matcher in the page. 409
+   * when the engine has published no service for the session.
    */
   async function respondToPermissionCheck(
     threadId: string,

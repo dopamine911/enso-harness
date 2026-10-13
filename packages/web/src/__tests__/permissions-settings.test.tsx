@@ -1,7 +1,13 @@
 import { afterAll, afterEach, expect, test } from 'bun:test'
-import type { EnsoPermissionPolicyRead, EnsoPermissionPolicyWrite } from '@enso/core'
+import {
+  EnsoPermissionCheckRequest,
+  type EnsoPermissionPolicyRead,
+  type EnsoPermissionPolicyWrite,
+  type EnsoPermissionVerdict,
+} from '@enso/core'
 import { act } from 'react'
 import type { createRoot as CreateRoot, Root } from 'react-dom/client'
+import { Check } from 'typebox/value'
 import type * as SettingsDialogModule from '../settings-dialog.tsx'
 import { ensureDom, releaseDom } from './dom-environment.ts'
 
@@ -83,6 +89,29 @@ afterEach(async () => {
 /** A request the test answers itself — a 412 or a 422 the server would give — instead of the script. */
 type Override = (request: string) => Response | undefined
 
+/** The verdict the scripted thread gives: a guard refuses the key read, as the real one does (#881); else it passes. */
+function verdictFor(request: EnsoPermissionCheckRequest): EnsoPermissionVerdict {
+  if (request.value === 'cat ~/.ssh/id_ed25519') {
+    return {
+      mode: 'bypassPermissions',
+      guard: {
+        kind: 'refused',
+        tool: 'bash',
+        rule: 'secret-path',
+        reason: 'bash command refused: "~/.ssh/id_ed25519" names credential material.',
+      },
+      state: 'allow',
+      matchedPattern: 'cat *',
+      origin: 'global',
+    }
+  }
+  const guard: EnsoPermissionVerdict['guard'] =
+    request.surface === 'web_fetch'
+      ? { kind: 'not-checked', reason: 'a check on web_fetch carries no arguments' }
+      : { kind: 'passed', tool: 'bash' }
+  return { mode: 'default', guard, state: 'ask', matchedPattern: '**', origin: 'global' }
+}
+
 /** The scripted server: the file as read, a write read back under a new version, a reset, a verdict. */
 function answer(request: string, body: unknown, file: Record<string, unknown>, writes: number): Response {
   if (request === 'GET /api/permissions') {
@@ -96,7 +125,8 @@ function answer(request: string, body: unknown, file: Record<string, unknown>, w
     return Response.json({ backup: '/home/person/.enso/permissions.json.bak', policy: policyOf(ENSO_DEFAULT, '"v9"') })
   }
   if (request === 'POST /api/threads/t1/permissions/check') {
-    return Response.json({ mode: 'default', state: 'ask', matchedPattern: '**', origin: 'global' })
+    if (!Check(EnsoPermissionCheckRequest, body)) return new Response('not a check', { status: 400 })
+    return Response.json(verdictFor(body))
   }
   return new Response('not scripted', { status: 404 })
 }
@@ -449,9 +479,9 @@ test('a missing file is said to be an empty policy, with its reason, and its res
 
 test('⚠ try a command with no thread open says so and asks nothing', async () => {
   const mounted = await mountSettings()
-  expect(find(mounted, '[aria-label="try a command"]').textContent).toContain('Open a thread to ask its engine')
+  expect(find(mounted, '[aria-label="try a command"]').textContent).toContain('Open a thread to check')
   await typeInto(mounted, 'check value', 'git push')
-  await click(mounted, 'Ask the engine')
+  await click(mounted, 'Check')
   expect(mounted.sent.filter((entry) => entry.request.includes('/check'))).toEqual([])
 })
 
@@ -469,12 +499,13 @@ test('try a command offers a shorthand surface as its directions; adding a rule 
   expect(options('new rule surface')).toContain('external_directory')
 })
 
-test("try a command shows the engine's verdict for the open thread, and a thread whose engine has not loaded says so", async () => {
+test("try a command shows the open thread's verdict, the guards' pass first, and a thread whose engine has not loaded says so", async () => {
   const mounted = await mountSettings({ threadId: 't1' })
   await typeInto(mounted, 'check value', 'git push origin main')
-  await click(mounted, 'Ask the engine')
+  await click(mounted, 'Check')
   const verdict = await eventually(() => find(mounted, '[aria-label="verdict"]'))
   expect(verdict.textContent).toContain('global — your file')
+  expect(find(mounted, '[aria-label="guard"]').textContent).toContain('No guard refuses it')
   expect(mounted.sent.at(-1)?.body).toEqual({ surface: 'bash', value: 'git push origin main' })
   await mounted.unmount()
   const idle = await mountSettings({
@@ -485,8 +516,31 @@ test("try a command shows the engine's verdict for the open thread, and a thread
         : undefined,
   })
   await typeInto(idle, 'check value', 'ls')
-  await click(idle, 'Ask the engine')
+  await click(idle, 'Check')
   await eventually(() =>
     expect(find(idle, '[aria-label="try a command"]').textContent).toContain('permission engine has not loaded'),
   )
+})
+
+// #881: the guards refuse before the engine is asked, in every mode. The page said "allow" for a
+// key read under bypassPermissions; the refusal is now the answer, and the engine's verdict moot.
+test("⚠ try a command shows a guard's refusal as the answer, with its rule and reason, and the engine's verdict as moot (#881)", async () => {
+  const mounted = await mountSettings({ threadId: 't1' })
+  await typeInto(mounted, 'check value', 'cat ~/.ssh/id_ed25519')
+  await click(mounted, 'Check')
+  const guard = await eventually(() => find(mounted, '[aria-label="guard"]'))
+  expect(guard.textContent).toContain('Refused by a guard: secret-path')
+  expect(guard.textContent).toContain('names credential material.')
+  expect(guard.textContent).toContain('moot')
+  expect(find(mounted, '[aria-label="verdict"]').textContent).toContain('engine (moot)allow')
+})
+
+test('try a command says when the guards were not asked, never shows it as a pass (#881)', async () => {
+  const mounted = await mountSettings({ threadId: 't1' })
+  await choose(mounted, 'check surface', 'web_fetch')
+  await typeInto(mounted, 'check value', 'https://example.com')
+  await click(mounted, 'Check')
+  const guard = await eventually(() => find(mounted, '[aria-label="guard"]'))
+  expect(guard.textContent).toContain('The guards were not asked: a check on web_fetch carries no arguments')
+  expect(guard.textContent).not.toContain('No guard refuses it')
 })
