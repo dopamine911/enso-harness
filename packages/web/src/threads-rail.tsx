@@ -128,7 +128,7 @@ export interface ThreadsRailProps {
   readonly onAddProject: () => void
   /** Forget a registered project; its threads stay on disk. Never offered for the launch directory. */
   readonly onRemoveProject: (projectId: string) => void
-  /** Open a project's page (#754): how its new threads' trees are made. Offered for every project, the launch one too. */
+  /** Open a project's page at its Worktrees tab (#754, a page since #871): how its new threads' trees are made. Offered for every project, the launch one too. */
   readonly onProjectSettings: (projectId: string) => void
   /** Why the last add or remove did not go through, or undefined. Shown above the sections. */
   readonly projectNotice: string | undefined
@@ -313,7 +313,7 @@ export function railLabels(group: ProjectGroup): ReadonlyMap<string, string | un
  * open thread is idle. A stored thread says only that it is running. ⚠ No pulse (#739): an
  * animation runs the compositor for as long as pi works, once per running thread in the rail.
  */
-function LiveDot({ state }: { state: 'waiting' | 'running' | 'idle' }): React.ReactNode {
+export function LiveDot({ state }: { state: 'waiting' | 'running' | 'idle' }): React.ReactNode {
   if (state === 'waiting') {
     return (
       <span className="size-2 shrink-0 rounded-full bg-human signal:shadow-glow-human">
@@ -632,7 +632,8 @@ function RailFoot({
 }): React.ReactNode {
   return (
     <div className="grid gap-1 border-t p-3">
-      <RailLink current={page === 'projects'} onOpen={() => onPage(PROJECTS_ROUTE)}>
+      {/* A project's page is one of the Projects (#871): its link stays marked there. */}
+      <RailLink current={page === 'projects' || page === 'project'} onOpen={() => onPage(PROJECTS_ROUTE)}>
         <FolderIcon />
         Projects
       </RailLink>

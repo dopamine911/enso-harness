@@ -52,10 +52,37 @@ test('a URL names the Projects page beside its thread; it has no sections', () =
 })
 
 // @pins resume/url-names-page
+test('a URL names a project’s page and its tab beside its thread; no tab is Threads; a tab it has not is not found (#871)', () => {
+  expect(readPageUrl(`?thread=${THREAD}&page=project&project=p-app&tab=worktrees`)).toEqual({
+    kind: 'project',
+    projectId: 'p-app',
+    tab: 'worktrees',
+  })
+  expect(readPageUrl('?page=project&project=p-app')).toEqual({ kind: 'project', projectId: 'p-app', tab: 'threads' })
+  // Whether a project has the id is the listing's to say: the page says when none has it.
+  expect(readPageUrl('?page=project')).toEqual({ kind: 'project', projectId: '', tab: 'threads' })
+  expect(readPageUrl('?page=project&project=p-app&tab=settings')).toEqual({
+    kind: 'not-found',
+    asked: 'settings',
+    within: 'project',
+  })
+  const storage = urlForPage(`?thread=${THREAD}&page=settings&section=storage`, {
+    kind: 'project',
+    projectId: 'p-app',
+    tab: 'storage',
+  })
+  expect(storage).toBe(`?thread=${THREAD}&page=project&project=p-app&tab=storage`)
+  expect(showsPage(storage, { kind: 'project', projectId: 'p-app', tab: 'storage' })).toBe(true)
+  expect(showsPage(storage, { kind: 'project', projectId: 'p-app', tab: 'threads' })).toBe(false)
+  expect(showsPage(storage, { kind: 'project', projectId: 'p-other', tab: 'storage' })).toBe(false)
+  expect(urlOpeningThread(storage, 't2')).toBe('?thread=t2')
+})
+
+// @pins resume/url-names-page
 test('a page or a section Enso does not have is not found, with what was asked — never a guess at a page', () => {
   expect(readPageUrl('?page=settings&section=trees')).toEqual({ kind: 'not-found', asked: 'trees', within: 'settings' })
   expect(readPageUrl('?page=SETTINGS')).toEqual({ kind: 'not-found', asked: 'SETTINGS' })
-  expect(readPageUrl('?page=project')).toEqual({ kind: 'not-found', asked: 'project' })
+  expect(readPageUrl('?page=Projects')).toEqual({ kind: 'not-found', asked: 'Projects' })
   // An own key only: what every object inherits is no page.
   expect(readPageUrl('?page=constructor')).toEqual({ kind: 'not-found', asked: 'constructor' })
   expect(readPageUrl('?page=__proto__')).toEqual({ kind: 'not-found', asked: '__proto__' })

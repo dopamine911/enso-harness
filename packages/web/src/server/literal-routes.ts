@@ -111,6 +111,7 @@ export function createLiteralRoutes(state: LiteralRoutesState): LiteralRoutes {
           busy: threads.peek(session.id)?.busy === true,
           ...(session.parentThreadId === undefined ? {} : { parentThreadId: session.parentThreadId }),
           ...(session.name === undefined ? {} : { name: session.name }),
+          ...(session.model === undefined ? {} : { model: session.model }),
         },
       ]
     })

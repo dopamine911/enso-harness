@@ -264,6 +264,17 @@ export const EnsoStoredThread = Type.Object(
      * which no longer names a thread the page could open.
      */
     parentThreadId: Type.Optional(Type.String()),
+    /**
+     * The model the session last recorded it ran on (#871): the last `model_change` or assistant
+     * reply in its file, read as `EnsoRecordedModel`'s model is. Absent when the file records none —
+     * never a guess, and never the model a resume would pick.
+     */
+    model: Type.Optional(
+      Type.Object(
+        { provider: Type.String({ minLength: 1 }), modelId: Type.String({ minLength: 1 }) },
+        { additionalProperties: false },
+      ),
+    ),
   },
   { additionalProperties: false },
 )

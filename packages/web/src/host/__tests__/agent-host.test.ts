@@ -3386,6 +3386,36 @@ test('⚠ a stored branch reports the model its last reply ran on when the reply
   })
 })
 
+// #871: the project page lists each thread with the model it ran on, from the listing — no thread is
+// read whole for it. It must say what a cold read's recorded model says: the LAST one on the leaf's path.
+test('⚠ the stored listing names the model a session switched to last, never one on an abandoned branch; a session with no reply names none (#871)', async () => {
+  const switched = crypto.randomUUID()
+  const { file } = storeTurns(switched, [['first question', 'first answer']])
+  const more = SessionManager.open(file)
+  more.appendModelChange('openai', 'gpt-kept')
+  const branchPoint = more.appendThinkingLevelChange('high')
+  more.appendModelChange('google', 'gemini-abandoned')
+  more.branch(branchPoint)
+  more.appendMessage({ role: 'user', content: 'on the kept branch', timestamp: Date.now() })
+
+  const source = crypto.randomUUID()
+  const { userEntryIds } = storeTurns(source, [['the first prompt', 'its reply']])
+  const forked = await hostWith().forkThread(source, userEntryIds[0] ?? '')
+  if (forked.kind !== 'forked') throw new Error(`the fork was refused: ${forked.reason}`)
+  await hostWith().renameThread(forked.threadId, 'a fork with no reply yet')
+
+  const listed = await hostWith().listSessions()
+  expect(listed.find((row) => row.id === switched)?.model).toEqual({ provider: 'openai', modelId: 'gpt-kept' })
+  expect((await hostWith().readStoredThread(switched))?.recordedModel?.model).toEqual({
+    provider: 'openai',
+    modelId: 'gpt-kept',
+  })
+  expect(listed.find((row) => row.id === source)?.model).toEqual({ provider: 'anthropic', modelId: 'test' })
+  const fork = listed.find((row) => row.id === forked.threadId)
+  expect(fork).toBeDefined()
+  expect(fork?.model).toBeUndefined()
+})
+
 test('a branch that records no reply, no model change and no thinking level has no recorded model; one half alone is reported alone (#434)', () => {
   expect(recordedModelOf([{ type: 'message', message: { role: 'user', content: 'q' } }])).toBeUndefined()
   expect(recordedModelOf([{ type: 'thinking_level_change', thinkingLevel: 'medium' }])).toEqual({

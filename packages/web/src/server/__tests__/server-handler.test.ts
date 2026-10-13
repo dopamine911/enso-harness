@@ -496,6 +496,29 @@ test("a cold thread's snapshot carries its recorded model beside a null model; o
   expect(liveFollow.frames[0]).not.toHaveProperty('recordedModel')
 })
 
+// #871: the stored listing names the model each thread last ran on — the project page's Threads tab
+// shows it — checked against the listing's schema; a thread whose file records none has no `model`.
+test('the stored listing carries the model a thread last ran on, and none for a thread that records none (#871)', async () => {
+  const recordedModel = { model: { provider: 'openai', modelId: 'gpt-kept' }, thinkingLevel: 'high' }
+  const stored = {
+    ran: { transcript: [], modified: new Date(1), firstMessage: 'ran', recordedModel },
+    levelOnly: {
+      transcript: [],
+      modified: new Date(0),
+      firstMessage: 'never answered',
+      recordedModel: { model: null, thinkingLevel: 'low' },
+    },
+  }
+  const { url } = await startWith(settlesAtOnce, stored)
+  const listed = (await (await fetch(`${url}/api/stored-threads`)).json()) as unknown[]
+  expect(listed.every((row) => Check(EnsoStoredThread, row))).toBe(true)
+  expect(listed).toEqual([
+    expect.objectContaining({ threadId: 'ran', model: { provider: 'openai', modelId: 'gpt-kept' } }),
+    expect.objectContaining({ threadId: 'levelOnly' }),
+  ])
+  expect(listed[1]).not.toHaveProperty('model')
+})
+
 /** A project root with one directory under it, both canonical — a page may register `app` (#395). */
 function projectRoot(): { root: string; app: string } {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'enso-roots-')))
@@ -573,8 +596,9 @@ test('⚠ projects: registered under a root or refused with the reason; an unreg
 
 // A stored session belongs to the project its OWN directory is (pi's header); one whose directory
 // is no project is not served at all — not listed, not read — and forgetting a project takes its
-// threads off the rail without touching them.
-test('stored threads are listed and read only in a project, each under its own; removing a project hides its threads', async () => {
+// threads off the rail without touching them: adding the folder again serves them again. The project
+// page's Remove card says exactly this (#871, `project-page.tsx`).
+test('stored threads are listed and read only in a project, each under its own; removing a project hides its threads until it is added again', async () => {
   const { root, app } = projectRoot()
   const stored = (cwd: string): FakeStoredThread => ({
     cwd,
@@ -620,6 +644,13 @@ test('stored threads are listed and read only in a project, each under its own; 
   const stale = new AbortController()
   openFollows.push(stale)
   expect((await openFollow(url, 'inApp', stale)).frames[0]).toMatchObject({ live: false, cwd: '' })
+  // Nothing was deleted: the same folder added again is the same project, and its threads are back.
+  expect((await registeredProject(url, app)).projectId).toBe(project.projectId)
+  expect(await listed()).toEqual([
+    expect.objectContaining({ threadId: 'inLaunch' }),
+    expect.objectContaining({ threadId: 'inApp', projectId: project.projectId }),
+  ])
+  expect(await (await fetch(`${url}/api/threads/inApp/history`)).json()).toMatchObject({ projectId: project.projectId })
 })
 
 // PR #399 review. Removing a project must not strand a run: while a thread in it RUNS, the removal is

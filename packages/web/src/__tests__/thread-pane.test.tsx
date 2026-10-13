@@ -3383,7 +3383,7 @@ test("Settings' Storage lists each tree by its thread's title with size and held
   const section = settings.querySelector('section[aria-label="trees of launch"]')
   // The project's total (#870): its trees and its snapshot store, one unreadable tree making it a partial.
   expect(section?.querySelector('h3')?.textContent).toBe(
-    'launchat least 2.5 GB on disk (partial: 1 of 3 not fully read)snapshots 2.1 GB',
+    'launchat least 2.5 GB on disk (partial: 1 of 3 not fully read)snapshots 2.1 GBOpen project',
   )
   const rows = [...(section?.querySelectorAll('li') ?? [])].map((row) => row.textContent ?? '')
   // Largest first: the unreadable one orders as 0, and is never said as 0.
@@ -4070,9 +4070,9 @@ test('a section Settings does not have, or a page Enso does not, is not found wi
     await page.click(buttonIn(page, 'header', 'Settings'))
     expect(pageInUrl()).toEqual(['settings', 'appearance'])
     expect(pageRegion(page)?.querySelector('h2')?.textContent).toBe('Appearance')
-    await popTo(`?thread=${DELETABLE}&page=project`)
+    await popTo(`?thread=${DELETABLE}&page=trees`)
     expect(pageHeading(page)).toBe('Page not found')
-    expect(pageRegion(page)?.textContent).toContain('Enso has no page called “project”.')
+    expect(pageRegion(page)?.textContent).toContain('Enso has no page called “trees”.')
     await page.click(buttonIn(page, '[role="region"]', 'Back to the thread'))
     expect(pageInUrl()).toEqual([null, null])
     expect(new URLSearchParams(window.location.search).get('thread')).toBe(DELETABLE)
@@ -4202,6 +4202,74 @@ test('⚠ each project’s card says the size Settings › Storage says for it �
       'at least 2.5 GB on disk (partial: 1 of 3 not fully read)',
       'at least 388 MB on disk (partial: 1 of 2 not fully read)',
     ])
+  } finally {
+    window.history.replaceState(null, '', '/')
+    await page.unmount()
+  }
+})
+
+/** The project page's place in the URL: its project and tab. */
+const projectInUrl = (): [string | null, string | null, string | null] => {
+  const shown = new URLSearchParams(window.location.search)
+  return [shown.get('page'), shown.get('project'), shown.get('tab')]
+}
+
+// #871: the project settings dialog is the project's page now. Every way in reaches it at its URL:
+// a card's Settings and the rail's ⋯ at the Worktrees tab, Settings › Storage's group at Storage.
+// @pins resume/url-names-page
+test('a project’s page opens at its URL from a card’s Settings, the rail’s ⋯ and Storage’s group — the same size there; back walks them (#871)', async () => {
+  const page = await openDeletable({
+    projects: [LAUNCH_PROJECT, OTHER_PROJECT],
+    trees: () => ({ projects: [LAUNCH_TREES, OTHER_TREES] }),
+  })
+  try {
+    const menu = page.container.querySelector<HTMLElement>('button[aria-label="more for other"]')
+    await flush(async () => {
+      // Radix opens a menu on a primary-button pointerdown.
+      menu?.dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true, pointerType: 'mouse' }))
+      await tick()
+    })
+    const item = await eventually(() => {
+      const found = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+        (candidate) => candidate.textContent === 'Project settings…',
+      )
+      if (found === undefined) throw new Error('expected Project settings… in the menu of other')
+      return found
+    })
+    await page.click(item)
+    expect(projectInUrl()).toEqual(['project', 'p-other', 'worktrees'])
+    expect(pageHeading(page)).toBe('other')
+    await popTo(`?thread=${DELETABLE}`)
+    await page.click(buttonIn(page, '#threads-rail', 'Projects'))
+    const settings = [...projectCard(page, 'other').querySelectorAll('button')].find(
+      (button) => button.textContent === 'Settings',
+    )
+    if (settings === undefined) throw new Error('expected Settings on the card of other')
+    await page.click(settings)
+    expect(projectInUrl()).toEqual(['project', 'p-other', 'worktrees'])
+    expect(pageHeading(page)).toBe('other')
+    expect(document.querySelector('[role="dialog"]')).toBeNull()
+    expect(pageRegion(page)?.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe('Worktree settings')
+    // Still under Projects: its link stays marked.
+    expect(buttonIn(page, '#threads-rail', 'Projects').getAttribute('aria-current')).toBe('page')
+
+    const storage = await openStorage(page)
+    const group = await eventually(() => {
+      const found = storage.querySelector('section[aria-label="trees of other"]')
+      if (found === null) throw new Error("expected Storage's group of other")
+      return found
+    })
+    const said = onDiskIn(group.querySelector('h3') ?? group)
+    await page.click(buttonIn(page, 'section[aria-label="trees of other"] h3', 'Open project'))
+    expect(projectInUrl()).toEqual(['project', 'p-other', 'storage'])
+    const tab = await eventually(() => {
+      const found = pageRegion(page)?.querySelector('section[aria-label="trees of other"]')
+      if (found === null || found === undefined) throw new Error("expected the project's Storage tab")
+      return found
+    })
+    expect(onDiskIn(tab)).toBe(said)
+    await popTo(`?thread=${DELETABLE}&page=settings&section=storage`)
+    expect(pageRegion(page)?.querySelector('h2')?.textContent).toBe('Storage')
   } finally {
     window.history.replaceState(null, '', '/')
     await page.unmount()

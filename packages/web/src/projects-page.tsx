@@ -131,7 +131,7 @@ function TreeModeFact({
 export interface ProjectCardActions {
   /** Go to the project's threads: its most recent one, or a new one when it has none. */
   readonly onOpenThreads: (projectId: string) => void
-  /** Open the project's settings (#754). */
+  /** Open the project's page at its Worktrees tab (#754, a page since #871). */
   readonly onSettings: (projectId: string) => void
   /** Forget the registration; its folder and threads stay. Never offered for the launch folder. */
   readonly onRemove: (projectId: string) => void

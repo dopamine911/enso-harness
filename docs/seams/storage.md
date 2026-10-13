@@ -273,6 +273,8 @@ export interface StoredThread {
    * session id. Absent for a thread that is no fork, and for one whose parent file is gone.
    */
   readonly parentThreadId?: string
+  /** The model its file last records (#871); absent when none does. */
+  readonly model?: NonNullable<EnsoRecordedModel['model']>
 }
 ```
 
@@ -375,6 +377,17 @@ export const EnsoStoredThread = Type.Object(
      * which no longer names a thread the page could open.
      */
     parentThreadId: Type.Optional(Type.String()),
+    /**
+     * The model the session last recorded it ran on (#871): the last `model_change` or assistant
+     * reply in its file, read as `EnsoRecordedModel`'s model is. Absent when the file records none —
+     * never a guess, and never the model a resume would pick.
+     */
+    model: Type.Optional(
+      Type.Object(
+        { provider: Type.String({ minLength: 1 }), modelId: Type.String({ minLength: 1 }) },
+        { additionalProperties: false },
+      ),
+    ),
   },
   { additionalProperties: false },
 )
@@ -545,7 +558,10 @@ is the root (`create` + `newSession({ parentSession })`) — answering the new i
 to prefill. A fork with no assistant message on its branch is one pi would not flush, so the host
 writes its entries as pi's first flush does; the source's file is never written. `listSessions` reads
 each fork's `parentSession` back to the parent's session id (`parentThreadId`) off the same listing;
-a parent whose file is gone names none. Outside a runtime pi's `session_before_fork` hook does not
+a parent whose file is gone names none. From the same read it names the model the session last ran on
+(`model`, #871): `transcript.ts`'s `modelOfEntry` over each entry, each entry inheriting its parent's,
+so the file's last entry — pi's leaf when it opens the file — carries what a cold read's recorded model
+says, never a change on an abandoned branch; none when nothing records one. Outside a runtime pi's `session_before_fork` hook does not
 fire (no loaded extension handles it). The host is tested against the real session manager in
 `host/__tests__/agent-host.test.ts`.
 

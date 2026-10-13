@@ -1,7 +1,7 @@
 import type { EnsoTreeSetupOutcome, EnsoTreeSetupStep } from '@enso/core'
 import { ChevronRightIcon, TriangleAlertIcon } from 'lucide-react'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './components/ui/collapsible.tsx'
-import { tierWords } from './project-settings-dialog.tsx'
+import { tierWords } from './project-worktrees.tsx'
 
 /**
  * What preparing a thread's tree did (#754), in the "What this thread built" panel: the files

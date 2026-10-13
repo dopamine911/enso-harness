@@ -199,6 +199,8 @@ export interface SettingsPageProps {
   readonly stored: readonly EnsoStoredThread[]
   /** A thread deleted from Storage: the page leaves it, as the header's Delete does. */
   readonly onDeleted: (threadId: string) => void
+  /** Open a project's page at its Storage tab (#871), from Storage's group of that project. */
+  readonly onOpenProject: (projectId: string) => void
 }
 
 /** The section on screen, as the dialog's tab held it: mounted when shown, so Storage measures as it opens. */
@@ -210,6 +212,7 @@ function SectionBody({
   projects,
   stored,
   onDeleted,
+  onOpenProject,
 }: SettingsPageProps): React.ReactNode {
   if (section === 'appearance')
     return (
@@ -218,7 +221,15 @@ function SectionBody({
       </div>
     )
   if (section === 'permissions') return <PermissionsSection editor={permissions} threadId={threadId} fetch={fetch} />
-  return <TreesSection fetch={fetch} projects={projects} stored={stored} onDeleted={onDeleted} />
+  return (
+    <TreesSection
+      fetch={fetch}
+      projects={projects}
+      stored={stored}
+      onDeleted={onDeleted}
+      onOpenProject={onOpenProject}
+    />
+  )
 }
 
 export function SettingsPage(props: SettingsPageProps): React.ReactNode {

@@ -7,10 +7,11 @@ import type { ListingState } from './listing-store.ts'
 import { RailToggle } from './page-header.tsx'
 import { type PolicyEditor, usePermissionPolicy } from './permissions-settings.tsx'
 import { projectOf } from './project-list.ts'
+import { ProjectPage, type ProjectPageActions } from './project-page.tsx'
 import { type ProjectCardActions, ProjectsPage } from './projects-page.tsx'
 import { SettingsPage } from './settings-page.tsx'
 import type { ThreadSummary } from './thread-stores.ts'
-import { type PageRoute, type PageUrl, PROJECTS_ROUTE, SETTINGS_ROUTE } from './thread-url.ts'
+import { type PageRoute, type PageUrl, PROJECTS_ROUTE, projectRoute, SETTINGS_ROUTE } from './thread-url.ts'
 
 /**
  * The pages beside the threads (#869): what the URL's `?page=` names (`thread-url.ts`), drawn in
@@ -35,14 +36,29 @@ interface PageHeading {
   readonly status: string
 }
 
-/** Each page as its sections' not-found goes back to it: its name, and where its link opens it. */
+/** Each page as its sections' not-found goes back to it: its name, and where its link opens it. A project's page is one of the Projects. */
 const PAGE_HOMES: Readonly<Record<PageRoute['kind'], PageBack>> = {
   settings: { label: 'Settings', to: SETTINGS_ROUTE },
   projects: { label: 'Projects', to: PROJECTS_ROUTE },
+  project: { label: 'Projects', to: PROJECTS_ROUTE },
+}
+
+/** What a page's not-found says it lacks: Settings' sections, a project page's tabs (#871). */
+const MISSING_PART: Readonly<Record<PageRoute['kind'], string>> = {
+  settings: 'Settings has no section called',
+  projects: 'Projects has no section called',
+  project: 'A project’s page has no tab called',
+}
+
+/** A project's page is headed by the project the listing names; one it does not name is not found. */
+function projectHeading(project: EnsoProject | undefined): PageHeading {
+  const back = PAGE_HOMES.project
+  if (project === undefined) return { title: 'Project not found', back, status: back.label }
+  return { title: project.title, subtitle: project.path, back, status: project.title }
 }
 
 /** Each page's heading, the one place a page's name is written. */
-function headingOf(page: PageUrl): PageHeading {
+function headingOf(page: PageUrl, projects: readonly EnsoProject[]): PageHeading {
   if (page.kind === 'settings') {
     return {
       title: 'Settings',
@@ -52,6 +68,9 @@ function headingOf(page: PageUrl): PageHeading {
   }
   if (page.kind === 'projects') {
     return { title: 'Projects', subtitle: 'Folders on this machine that pi can work in', status: 'Projects' }
+  }
+  if (page.kind === 'project') {
+    return projectHeading(projects.find((project) => project.projectId === page.projectId))
   }
   if (page.within !== undefined) {
     const home = PAGE_HOMES[page.within]
@@ -82,17 +101,20 @@ function BackLink({ back, onOpen }: { back: PageBack; onOpen: (route: PageRoute)
  */
 export function PageHeader({
   page,
+  projects,
   rail,
   onOpen,
   onAddProject,
 }: {
   page: PageUrl
+  /** The listed projects: a project's page is headed by its title and path (#871). */
+  projects: readonly EnsoProject[]
   rail: { open: boolean; toggle: () => void }
   onOpen: (route: PageRoute) => void
   /** Open the Add project dialog (#866) — Projects' header action. */
   onAddProject: () => void
 }): React.ReactNode {
-  const heading = headingOf(page)
+  const heading = headingOf(page, projects)
   const title = useRef<HTMLHeadingElement>(null)
   useEffect(() => {
     title.current?.focus()
@@ -138,9 +160,9 @@ function NotFound({
   // Within a page, that page is the way back; a page Enso doesn't have at all goes back to the thread.
   const home = page.within === undefined ? undefined : PAGE_HOMES[page.within]
   const [where, wayBack, back] =
-    home === undefined
+    page.within === undefined || home === undefined
       ? ['Enso has no page called', 'Back to the thread', onLeave]
-      : [`${home.label} has no section called`, `Open ${home.label}`, (): void => onOpen(home.to)]
+      : [MISSING_PART[page.within], `Open ${home.label}`, (): void => onOpen(home.to)]
   return (
     <div className="grid min-h-full place-items-center p-6">
       <div className="flex w-full max-w-lg flex-col items-start gap-4 rounded-lg border bg-card p-8">
@@ -207,7 +229,9 @@ export interface RoutedPageProps {
   readonly onDeleted: (threadId: string) => void
   /** What a Projects card's buttons do (#870). */
   readonly projectActions: ProjectCardActions
-  /** Why the last project removal did not go through, or undefined: said on Projects. */
+  /** What a project's page does (#871): open one of its threads, read the projects again, and remove it — then leave it for Projects. */
+  readonly projectPageActions: Pick<ProjectPageActions, 'onOpenThread' | 'onCheckAgain' | 'onRemove'>
+  /** Why the last project removal did not go through, or undefined: said on Projects and on the project's page. */
   readonly projectNotice: string | undefined
 }
 
@@ -232,6 +256,7 @@ function PageBody({
         projects={projects.rows}
         stored={stored.rows}
         onDeleted={onDeleted}
+        onOpenProject={(projectId) => onOpen(projectRoute(projectId, 'storage'))}
       />
     )
   }
@@ -246,6 +271,20 @@ function PageBody({
         currentProjectId={behind === undefined ? undefined : projectOf(projects.rows, behind.projectId)?.projectId}
         notice={props.projectNotice}
         {...props.projectActions}
+      />
+    )
+  }
+  if (page.kind === 'project') {
+    return (
+      <ProjectPage
+        route={page}
+        projects={projects}
+        pageThreads={pageThreads}
+        stored={stored.rows}
+        notice={props.projectNotice}
+        onOpen={onOpen}
+        onDeleted={onDeleted}
+        {...props.projectPageActions}
       />
     )
   }
@@ -266,7 +305,7 @@ export function RoutedPage(props: RoutedPageProps): React.ReactNode {
       <div role="region" aria-labelledby="page-heading" className="min-h-0 flex-1 overflow-y-auto">
         <PageBody page={page} permissions={permissions} props={props} />
       </div>
-      <PageStatus heading={headingOf(page)} projects={projects} stored={stored} />
+      <PageStatus heading={headingOf(page, projects.rows)} projects={projects} stored={stored} />
     </div>
   )
 }

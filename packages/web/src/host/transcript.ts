@@ -50,8 +50,12 @@ interface PiStateEntry {
 
 const nonEmpty = (value: unknown): value is string => typeof value === 'string' && value !== ''
 
-/** The model an entry records it ran on — a `model_change`, or an assistant reply's own — if any. */
-function modelOfEntry(entry: PiStateEntry): EnsoRecordedModel['model'] | undefined {
+/**
+ * The model an entry records it ran on — a `model_change`, or an assistant reply's own — if any: what
+ * `recordedModelOf` walks a branch with, and the stored listing a session file with (#871).
+ */
+export function modelOfEntry(raw: object): EnsoRecordedModel['model'] | undefined {
+  const entry = raw as PiStateEntry
   if (entry.type === 'model_change') {
     return nonEmpty(entry.provider) && nonEmpty(entry.modelId)
       ? { provider: entry.provider, modelId: entry.modelId }
@@ -76,7 +80,7 @@ export function recordedModelOf(branch: readonly unknown[]): EnsoRecordedModel |
   for (const raw of branch) {
     if (typeof raw !== 'object' || raw === null) continue
     const entry = raw as PiStateEntry
-    const recorded = modelOfEntry(entry)
+    const recorded = modelOfEntry(raw)
     if (recorded !== undefined) {
       model = recorded
     } else if (entry.type === 'thinking_level_change' && nonEmpty(entry.thinkingLevel)) {

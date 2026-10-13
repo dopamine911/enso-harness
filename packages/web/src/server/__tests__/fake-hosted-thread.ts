@@ -590,6 +590,8 @@ export function createFakeAgentHost(
                   firstMessage: storedThread.firstMessage,
                   ...(names.get(threadId) === undefined ? {} : { name: names.get(threadId) ?? '' }),
                   ...(storedThread.parentThreadId === undefined ? {} : { parentThreadId: storedThread.parentThreadId }),
+                  // The listing's model is the one the branch records, as the real file's last entry says it (#871).
+                  ...(storedThread.recordedModel?.model ? { model: storedThread.recordedModel.model } : {}),
                 },
               ]
             : [],

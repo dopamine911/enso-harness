@@ -202,6 +202,15 @@ function SettingsOnPage({
           throw new Error('the Permissions tests remove no project')
         },
       }}
+      projectPageActions={{
+        onOpenThread: (): void => {
+          throw new Error('the Permissions tests open no thread')
+        },
+        onCheckAgain: () => Promise.reject(new Error('the Permissions tests check no project')),
+        onRemove: (): void => {
+          throw new Error('the Permissions tests remove no project')
+        },
+      }}
       projectNotice={undefined}
     />
   )

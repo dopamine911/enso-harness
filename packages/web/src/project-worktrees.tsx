@@ -1,6 +1,5 @@
 import type {
   EnsoConfigTier,
-  EnsoProject,
   EnsoProjectSettings,
   EnsoProjectSettingsUpdate,
   EnsoProjectThreadSettings,
@@ -12,21 +11,15 @@ import { useEffect, useId, useState } from 'react'
 import type { FetchLike } from './browser-logging.ts'
 import { Button } from './components/ui/button.tsx'
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from './components/ui/dialog.tsx'
-import {
   Field,
+  FieldContent,
   FieldDescription,
   FieldError,
   FieldGroup,
   FieldLabel,
   FieldLegend,
   FieldSet,
+  FieldTitle,
 } from './components/ui/field.tsx'
 import { RadioGroup, RadioGroupItem } from './components/ui/radio-group.tsx'
 import { Textarea } from './components/ui/textarea.tsx'
@@ -34,12 +27,13 @@ import { OptionSelect } from './option-select.tsx'
 import { readProjectSettings, saveProjectSettings } from './project-list.ts'
 
 /**
- * A project's page (#754), opened from its rail menu: how a new thread's tree is made in it. The
- * values are tiered (`@enso/core` `project-settings.ts`): local > shared > user > default, each
+ * A project page's Worktrees tab (#754, a page since #871): how a new thread's tree is made in it.
+ * The values are tiered (`@enso/core` `project-settings.ts`): local > shared > user > default, each
  * whole from one tier, so each field says which tier it shows and where that file is. The page
- * writes the project's own tiers only — shared (committed with the project) or local (only you) —
- * and sends just the keys the person changed; Reset removes a key from the tier that set it, so
- * the next tier's value shows through. The server decides: a refusal is shown in its words.
+ * writes the project's own tiers only — and says which one a Save writes, by its file, before it
+ * does: "Only me" (`.enso/config.local.json`) or "Shared" (`.enso/config.json`). It sends just the
+ * keys the person changed; Reset removes a key from the tier that set it, so the next tier's value
+ * shows through. The server decides: a refusal is shown in its words.
  *
  * ⚠ SETUP COMMANDS RUN ON THIS MACHINE. Whatever a tier lists runs in each new tree; the page says
  * so beside the field, and says when the project's own files are not read (an untrusted project).
@@ -83,6 +77,11 @@ interface Draft {
   readonly copy: string
 }
 
+/** The draft a payload starts: its values, as the boxes show them. */
+function draftOf(threads: EnsoProjectThreadSettings): Draft {
+  return { tree: threads.tree.value, setup: threads.setup.value.join('\n'), copy: threads.copy.value.join('\n') }
+}
+
 /** The keys the person changed, and only those — a key left alone stays in whichever tier holds it. */
 function changesOf(threads: EnsoProjectThreadSettings, draft: Draft): EnsoProjectSettingsUpdate['threads'] {
   const changes: EnsoProjectSettingsUpdate['threads'] = {}
@@ -106,23 +105,33 @@ const FIELD_LABELS: Readonly<Record<ThreadKey, string>> = {
   setup: 'Setup commands',
 }
 
-/** Under a field: the tier its value comes from, and — when that is one of the project's own — its Reset. */
+/** A tier file as the save choice names it: relative to the project when it is in it, else whole. */
+function fileInProject(file: string, projectPath: string): string {
+  const prefix = projectPath.endsWith('/') ? projectPath : `${projectPath}/`
+  return file.startsWith(prefix) ? file.slice(prefix.length) : file
+}
+
+/** Under a field: the tier its value comes from, its Reset when that is one of the project's own, and whether it is edited. */
 function TierLine({
   field,
   tier,
   files,
   busy,
+  edited,
   onReset,
 }: {
   field: ThreadKey
   tier: EnsoConfigTier
   files: EnsoProjectSettings['files']
   busy: boolean
+  edited: boolean
   onReset: (field: ThreadKey, tier: EnsoProjectTier) => void
 }): React.ReactNode {
   return (
-    <div className="flex items-center justify-between gap-2">
+    <div className="flex items-center gap-2">
       <FieldDescription>from {tierWords(tier, files)}</FieldDescription>
+      {edited ? <span className="font-mono text-xs text-primary">edited</span> : null}
+      <span className="flex-1" />
       {tier === 'shared' || tier === 'local' ? (
         <Button
           type="button"
@@ -146,6 +155,7 @@ function ListField({
   text,
   settings,
   busy,
+  edited,
   onText,
   onReset,
   children,
@@ -154,6 +164,7 @@ function ListField({
   text: string
   settings: EnsoProjectSettings
   busy: boolean
+  edited: boolean
   onText: (text: string) => void
   onReset: (field: ThreadKey, tier: EnsoProjectTier) => void
   children: React.ReactNode
@@ -175,47 +186,123 @@ function ListField({
         tier={settings.threads[field].tier}
         files={settings.files}
         busy={busy}
+        edited={edited}
         onReset={onReset}
       />
     </Field>
   )
 }
 
-/** Shared or only me: which of the project's files a Save writes. */
+/** The save choice's words for each of the project's tiers: who it is for, and the file it writes. */
+const SAVE_TARGETS: ReadonlyArray<readonly [EnsoProjectTier, string]> = [
+  ['local', 'Only me — this project'],
+  ['shared', 'Shared — committed with the project'],
+]
+
+/** Only me or Shared, each named by the file a Save writes: chosen before anything is saved. */
 function SaveTo({
   value,
+  settings,
   onChange,
 }: {
   value: EnsoProjectTier
+  settings: EnsoProjectSettings
   onChange: (tier: EnsoProjectTier) => void
 }): React.ReactNode {
   const legend = useId()
   return (
     <FieldSet>
       <FieldLegend id={legend} variant="label">
-        Save to
+        Save changes to
       </FieldLegend>
       <RadioGroup
         aria-labelledby={legend}
+        className="sm:grid-cols-2"
         value={value}
         onValueChange={(picked: string) => onChange(picked === 'shared' ? 'shared' : 'local')}
       >
-        <Field orientation="horizontal">
-          <RadioGroupItem id={`${legend}-local`} value="local" />
-          <FieldLabel htmlFor={`${legend}-local`}>Only me — this project</FieldLabel>
-        </Field>
-        <Field orientation="horizontal">
-          <RadioGroupItem id={`${legend}-shared`} value="shared" />
-          <FieldLabel htmlFor={`${legend}-shared`}>Shared — committed with the project</FieldLabel>
-        </Field>
+        {SAVE_TARGETS.map(([tier, label]) => (
+          <FieldLabel key={tier} htmlFor={`${legend}-${tier}`}>
+            <Field orientation="horizontal">
+              <RadioGroupItem id={`${legend}-${tier}`} value={tier} />
+              <FieldContent>
+                <FieldTitle>{label}</FieldTitle>
+                <FieldDescription className="font-mono text-xs break-all">
+                  {fileInProject(settings.files[tier], settings.path)}
+                </FieldDescription>
+              </FieldContent>
+            </Field>
+          </FieldLabel>
+        ))}
       </RadioGroup>
     </FieldSet>
   )
 }
 
+/** The edits not saved yet: how many, the file a Save writes, and Discard and Save. Only while there are some. */
+function UnsavedBar({
+  count,
+  file,
+  busy,
+  onDiscard,
+  onSave,
+}: {
+  count: number
+  file: string
+  busy: boolean
+  onDiscard: () => void
+  onSave: () => void
+}): React.ReactNode {
+  if (count === 0) return null
+  return (
+    <div
+      role="region"
+      aria-label="Unsaved worktree settings"
+      className="sticky bottom-0 flex flex-wrap items-center gap-3 rounded-lg border bg-card px-4 py-3"
+    >
+      <span className="grid min-w-0 flex-1 text-sm">
+        <strong>
+          {count} unsaved {count === 1 ? 'change' : 'changes'}
+        </strong>
+        <span className="truncate font-mono text-xs text-muted-foreground">Saves to {file}</span>
+      </span>
+      <Button type="button" variant="outline" disabled={busy} onClick={onDiscard}>
+        Discard
+      </Button>
+      <Button type="button" disabled={busy} onClick={onSave}>
+        {busy ? 'Saving…' : 'Save'}
+      </Button>
+    </div>
+  )
+}
+
+/** What the form says above its fields: an untrusted project's, and each of its files that could not be read. */
+function FormNotes({ settings }: { settings: EnsoProjectSettings }): React.ReactNode {
+  return (
+    <>
+      {settings.trusted ? null : (
+        <p role="note" className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">
+          This project is not trusted yet, so its own files are not read: only your settings apply. Saving still writes
+          the file.
+        </p>
+      )}
+      {settings.unreadable.map((skipped) => (
+        <p
+          key={skipped.path}
+          role="alert"
+          className="rounded-md border border-destructive/50 px-3 py-2 text-sm text-destructive"
+        >
+          {skipped.path} could not be read ({skipped.reason}), so its settings are not applied and saving to it is
+          refused. Fix the file to use it.
+        </p>
+      ))}
+    </>
+  )
+}
+
 /**
- * The Worktrees section over one loaded payload. Its draft starts from the payload; the page
- * remounts it (by key) whenever the server answers new settings, so the draft never outlives them.
+ * The tab's form over one loaded payload. Its draft starts from the payload; the tab remounts it
+ * (by key) whenever the server answers new settings, so the draft never outlives them.
  */
 function WorktreesForm({
   settings,
@@ -229,11 +316,7 @@ function WorktreesForm({
   onSend: (update: EnsoProjectSettingsUpdate) => void
 }): React.ReactNode {
   const { threads, files } = settings
-  const [draft, setDraft] = useState<Draft>(() => ({
-    tree: threads.tree.value,
-    setup: threads.setup.value.join('\n'),
-    copy: threads.copy.value.join('\n'),
-  }))
+  const [draft, setDraft] = useState<Draft>(() => draftOf(threads))
   const [saveTo, setSaveTo] = useState<EnsoProjectTier>('local')
   const treeId = useId()
   const changes = changesOf(threads, draft)
@@ -244,22 +327,12 @@ function WorktreesForm({
   }
   return (
     <FieldGroup>
-      {settings.trusted ? null : (
-        <p role="note" className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">
-          This project is not trusted yet: its own files ({files.shared}, {files.local}) are not read until it is, so
-          only your settings apply. Saving still writes the file.
-        </p>
-      )}
-      {settings.unreadable.map((skipped) => (
-        <p
-          key={skipped.path}
-          role="alert"
-          className="rounded-md border border-destructive/50 px-3 py-2 text-sm text-destructive"
-        >
-          {skipped.path} could not be read ({skipped.reason}), so its settings are not applied and saving to it is
-          refused. Fix the file to use it.
-        </p>
-      ))}
+      <p className="text-sm text-muted-foreground">
+        How a new thread’s tree is made in this project. Each value comes from one place: this project only for you, the
+        project’s shared file, your settings, or Enso’s default — the first one set wins.
+      </p>
+      <FormNotes settings={settings} />
+      <SaveTo value={saveTo} settings={settings} onChange={setSaveTo} />
       <Field>
         <FieldLabel htmlFor={treeId}>{FIELD_LABELS.tree}</FieldLabel>
         <OptionSelect
@@ -273,13 +346,21 @@ function WorktreesForm({
           A tree keeps a thread's edits out of your checkout until you bring them back. Off runs the thread in the
           project folder: no tree, and no file restore.
         </FieldDescription>
-        <TierLine field="tree" tier={threads.tree.tier} files={files} busy={busy} onReset={reset} />
+        <TierLine
+          field="tree"
+          tier={threads.tree.tier}
+          files={files}
+          busy={busy}
+          edited={changes.tree !== undefined}
+          onReset={reset}
+        />
       </Field>
       <ListField
         field="copy"
         text={draft.copy}
         settings={settings}
         busy={busy}
+        edited={changes.copy !== undefined}
         onText={(copy: string) => setDraft({ ...draft, copy })}
         onReset={reset}
       >
@@ -292,6 +373,7 @@ function WorktreesForm({
         text={draft.setup}
         settings={settings}
         busy={busy}
+        edited={changes.setup !== undefined}
         onText={(setup: string) => setDraft({ ...draft, setup })}
         onReset={reset}
       >
@@ -303,17 +385,14 @@ function WorktreesForm({
           These run on your machine, in the new tree, each time a thread's tree is made.
         </p>
       </ListField>
-      <SaveTo value={saveTo} onChange={setSaveTo} />
       {refusal === undefined ? null : <FieldError>{refusal}</FieldError>}
-      <DialogFooter>
-        <Button
-          type="button"
-          disabled={busy || Object.keys(changes).length === 0}
-          onClick={() => onSend({ tier: saveTo, threads: changes })}
-        >
-          {busy ? 'Saving…' : 'Save'}
-        </Button>
-      </DialogFooter>
+      <UnsavedBar
+        count={Object.keys(changes).length}
+        file={fileInProject(files[saveTo], settings.path)}
+        busy={busy}
+        onDiscard={() => setDraft(draftOf(threads))}
+        onSave={() => onSend({ tier: saveTo, threads: changes })}
+      />
     </FieldGroup>
   )
 }
@@ -323,13 +402,14 @@ type Loading =
   | { readonly kind: 'loaded'; readonly settings: EnsoProjectSettings; readonly version: number }
   | { readonly kind: 'failed'; readonly reason: string }
 
-/** The page's body for one project: its settings read once it opens, and every write's answer shown in their place. */
-function ProjectSettingsBody({
+/** The tab for one project: its settings read when it opens, and every write's answer shown in their place. */
+export function ProjectWorktrees({
   projectId,
-  fetchImpl,
+  fetch: fetchImpl,
 }: {
   projectId: string
-  fetchImpl: FetchLike | undefined
+  /** Injected by tests; the page's global by default. */
+  fetch?: FetchLike | undefined
 }): React.ReactNode {
   const [loading, setLoading] = useState<Loading>({ kind: 'loading' })
   const [busy, setBusy] = useState(false)
@@ -372,46 +452,12 @@ function ProjectSettingsBody({
   if (loading.kind === 'loading') return <p className="text-sm text-muted-foreground">reading its settings…</p>
   if (loading.kind === 'failed') return <FieldError>could not read its settings: {loading.reason}</FieldError>
   return (
-    <section aria-label="Worktrees" className="grid gap-3">
-      <h3 className="font-medium">Worktrees</h3>
-      <WorktreesForm
-        key={loading.version}
-        settings={loading.settings}
-        busy={busy}
-        refusal={refusal}
-        onSend={(update: EnsoProjectSettingsUpdate) => void send(update)}
-      />
-    </section>
-  )
-}
-
-/**
- * The project page as a dialog, open while `project` is set. Named by the project's title; its
- * path under it. Each opening reads the settings afresh.
- */
-export function ProjectSettingsDialog({
-  project,
-  onClose,
-  fetch: fetchImpl,
-}: {
-  project: EnsoProject | undefined
-  onClose: () => void
-  /** Injected by tests; the page's global by default. */
-  fetch?: FetchLike
-}): React.ReactNode {
-  return (
-    <Dialog open={project !== undefined} onOpenChange={(next: boolean): void => (next ? undefined : onClose())}>
-      <DialogContent className="flex max-h-5/6 flex-col sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>{project?.title}</DialogTitle>
-          <DialogDescription className="break-all">{project?.path}</DialogDescription>
-        </DialogHeader>
-        {project === undefined ? null : (
-          <div className="min-h-0 overflow-y-auto pr-1">
-            <ProjectSettingsBody key={project.projectId} projectId={project.projectId} fetchImpl={fetchImpl} />
-          </div>
-        )}
-      </DialogContent>
-    </Dialog>
+    <WorktreesForm
+      key={loading.version}
+      settings={loading.settings}
+      busy={busy}
+      refusal={refusal}
+      onSend={(update: EnsoProjectSettingsUpdate) => void send(update)}
+    />
   )
 }

@@ -58,8 +58,15 @@ export function urlForThread(search: string, threadId: string): string {
  */
 const PAGE_QUERY_PARAMETER = 'page'
 const SECTION_QUERY_PARAMETER = 'section'
+const PROJECT_QUERY_PARAMETER = 'project'
+const TAB_QUERY_PARAMETER = 'tab'
 /** Every parameter a page writes: opening a thread takes them all away, so back returns to the page. */
-const PAGE_PARAMETERS = [PAGE_QUERY_PARAMETER, SECTION_QUERY_PARAMETER] as const
+const PAGE_PARAMETERS = [
+  PAGE_QUERY_PARAMETER,
+  SECTION_QUERY_PARAMETER,
+  PROJECT_QUERY_PARAMETER,
+  TAB_QUERY_PARAMETER,
+] as const
 
 /** Settings' sections, in the order its navigation lists them; the first is where Settings opens. */
 export const SETTINGS_SECTIONS = ['appearance', 'permissions', 'storage'] as const
@@ -68,14 +75,28 @@ export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]
 const isSettingsSection = (value: string): value is SettingsSection =>
   (SETTINGS_SECTIONS as readonly string[]).includes(value)
 
-/** A page the URL can name and the page can open: a Settings section, or the Projects page (#870). */
-export type PageRoute = { readonly kind: 'settings'; readonly section: SettingsSection } | { readonly kind: 'projects' }
+/** A project page's tabs (#871), in the order the page lists them; the first is where it opens. */
+export const PROJECT_TABS = ['threads', 'worktrees', 'storage'] as const
+export type ProjectTab = (typeof PROJECT_TABS)[number]
+
+const isProjectTab = (value: string): value is ProjectTab => (PROJECT_TABS as readonly string[]).includes(value)
+
+/** A page the URL can name and the page can open: a Settings section, the Projects page (#870), or one project's (#871). */
+export type PageRoute =
+  | { readonly kind: 'settings'; readonly section: SettingsSection }
+  | { readonly kind: 'projects' }
+  | { readonly kind: 'project'; readonly projectId: string; readonly tab: ProjectTab }
 
 /** Settings as its link opens it: the first section. */
 export const SETTINGS_ROUTE: PageRoute = { kind: 'settings', section: SETTINGS_SECTIONS[0] }
 
 /** The Projects page (#870): every project as a card. It has no sections. */
 export const PROJECTS_ROUTE: PageRoute = { kind: 'projects' }
+
+/** One project's page at `tab` (#871): its threads unless another tab is named. */
+export function projectRoute(projectId: string, tab: ProjectTab = PROJECT_TABS[0]): PageRoute {
+  return { kind: 'project', projectId, tab }
+}
 
 /**
  * What a URL's `page` names: a page, or something Enso has no page for — said as such, never a
@@ -101,10 +122,24 @@ function readProjectsUrl(parameters: URLSearchParams): PageUrl {
   return { kind: 'not-found', asked: section.slice(0, 40), within: 'projects' }
 }
 
+/**
+ * A project's page by its `project` id and `tab`: none is the first tab; one the page doesn't have is
+ * not found. The id is not judged here — whether a project has it is the server's listing's to say,
+ * and the page says "no such project" when it hasn't (`project-page.tsx`).
+ */
+function readProjectUrl(parameters: URLSearchParams): PageUrl {
+  const projectId = (parameters.get(PROJECT_QUERY_PARAMETER) ?? '').slice(0, 40)
+  const tab = parameters.get(TAB_QUERY_PARAMETER)
+  if (tab === null || tab === '') return projectRoute(projectId)
+  if (isProjectTab(tab)) return projectRoute(projectId, tab)
+  return { kind: 'not-found', asked: tab.slice(0, 40), within: 'project' }
+}
+
 /** The route table: a page's name in the URL → how its own parameters read. */
 const PAGE_READERS: Readonly<Record<string, (parameters: URLSearchParams) => PageUrl>> = {
   settings: readSettingsUrl,
   projects: readProjectsUrl,
+  project: readProjectUrl,
 }
 
 /**
@@ -138,14 +173,20 @@ export function urlForPage(search: string, route: PageRoute): string {
   const parameters = withoutPage(search)
   parameters.set(PAGE_QUERY_PARAMETER, route.kind)
   if (route.kind === 'settings') parameters.set(SECTION_QUERY_PARAMETER, route.section)
+  if (route.kind === 'project') {
+    parameters.set(PROJECT_QUERY_PARAMETER, route.projectId)
+    parameters.set(TAB_QUERY_PARAMETER, route.tab)
+  }
   return `?${parameters.toString()}`
 }
 
-/** Whether `search` already shows `route`: the same page, and for Settings the same section. */
+/** Whether `search` already shows `route`: the same page, at the same section, project and tab. */
 export function showsPage(search: string, route: PageRoute): boolean {
   const shown = readPageUrl(search)
-  if (shown?.kind !== route.kind) return false
-  return route.kind !== 'settings' || (shown.kind === 'settings' && shown.section === route.section)
+  if (shown?.kind === 'settings' && route.kind === 'settings') return shown.section === route.section
+  if (shown?.kind === 'project' && route.kind === 'project')
+    return shown.projectId === route.projectId && shown.tab === route.tab
+  return shown?.kind === route.kind && route.kind === 'projects'
 }
 
 /** The URL showing `threadId` and no page — a thread opened from a page leaves it; every other parameter kept. */

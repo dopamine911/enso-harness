@@ -30,7 +30,7 @@ export const SESSIONS_AND_PROJECTS: FeatureSpec = {
       '  ```',
     ].join('\n'),
     '**New Thread**, or the **+** beside a project, opens **Start a session**.',
-    "**Project settings…** in a project's menu on the rail (the `⋯` beside its **+**, the launch folder's included) opens the project's page: how its new threads' trees are made, the files copied into them and the commands that set them up, each with the file it comes from. See [Thread trees](./thread-trees.md) (#754).",
+    "Each project has a page of its own, at `?page=project&project=<id>&tab=threads|worktrees|storage` (#871): **Project settings…** in a project's menu on the rail (the `⋯` beside its **+**, the launch folder's included) opens it at **Worktree settings**: how its new threads' trees are made, the files copied into them and the commands that set them up, each with the file it comes from (see [Thread trees](./thread-trees.md), #754). **Threads** lists the project's threads with their state, the model each last ran on, and when; **Storage** lists its trees with their sizes, under the project's one total. Over the tabs, the page says when the project's folder is missing — **Check again** reads the projects again, and the notice goes once the folder is back — and when the project is not trusted yet, naming the files Enso does not read. Under them, **Remove project…** says what removing does before it does it; the folder Enso was started in can't be removed.",
     "**Projects** at the foot of the rail opens the Projects page, at its own address `?page=projects` (#870). Every project is a card, the folder Enso was started in first. A card shows the project's name and badges: **current** (the project of the thread behind the page), **started here**, **not trusted** (Enso does not read its own settings files) and **folder missing**. It also shows the path, how many threads the project holds and when one was last active, and what it takes on disk: its thread trees plus its snapshot store, the same number Settings › Storage gives for it. When part of that could not be measured, the size reads \"at least\" and says how much. Last on the card is what a new thread gets: a worktree, a copy, or the folder itself. **Open threads** opens the project's most recent thread, or starts a thread there when it has none. **Settings** opens the project's settings, as **Project settings…** does. The trash opens the rail's own **Remove project — its threads stay on disk**; the folder Enso was started in has none. **Add project** at the top opens the same dialog as the rail's.",
     'Click a thread in the rail to open it. A cold thread opens from its file straight away.',
   ],
@@ -93,7 +93,7 @@ export const SESSIONS_AND_PROJECTS: FeatureSpec = {
   ],
   limits: [
     'A project must be strictly inside a declared root. Hidden folders, and links that lead out of a root, are not offered.',
-    'Removing a project only forgets the registration. Its threads stay on disk, and come back if you add the folder again.',
+    'Removing a project only forgets the registration. Its threads stay on disk but are not listed or opened until you add the folder again; then they come back.',
     'A thread is stored once pi has answered at least once. A thread closed before its first reply is not kept.',
     'Enso never fetches, pushes or changes anything in git. "Last push" is what this copy of the repository last saw of the remote; run `git fetch` yourself to update it.',
   ],
