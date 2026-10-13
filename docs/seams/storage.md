@@ -154,7 +154,7 @@ export interface AgentHost {
   /**
    * The project a session built for `branch` in `cwd` would answer to, and whether it would read
    * that project's own configuration (#470): the decision a build makes first (`hostedProjectTrust`,
-   * keyed as the build keys it, #551), asked without building — so the Start dialog lists a
+   * keyed as the build keys it, #551), asked without building — so the launch panel lists a (#877)
    * project's prompts for a thread nothing has built yet (#484's rule, #86).
    */
   projectTrust(cwd: string, branch: readonly EnsoTranscriptEntry[]): ProjectTrustState
@@ -481,6 +481,13 @@ export const EnsoThreadHistory = Type.Object(
     stoppedAfter: Type.Optional(EnsoStoppedAfter),
     /** The name a person gave the thread (#670) — its newest `session_info`, as the listing's `name` — absent when none. */
     name: Type.Optional(Type.String({ minLength: 1 })),
+    /**
+     * Present only for a thread never started (#479): live on this server with no message and no
+     * session file — built by a control route, or by a Start refused at a later step, and never
+     * prompted. A page opens it on the launch panel, as it opens a thread it mints. A fork is written
+     * by its route before any prompt, so it is never one.
+     */
+    draft: Type.Optional(Type.Literal(true)),
   },
   { additionalProperties: false },
 )

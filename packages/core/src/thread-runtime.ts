@@ -75,11 +75,18 @@ export const HostCommandOption = Type.Object({
   detail: Type.Optional(Type.String()),
   /**
    * On a `/model` option only (#391): the thinking levels THAT model supports, as the runtime
-   * decides them — so a page can offer the effort for a model before switching to it (the
-   * Start-a-session dialog applies everything at once). The `thinking` row's own options are the
-   * CURRENT model's.
+   * decides them — so a page can offer the effort for a model before switching to it (the launch
+   * panel applies everything at once, #877). The `thinking` row's own options are the CURRENT model's.
    */
   thinkingLevels: Type.Optional(Type.Array(Type.String())),
+  /**
+   * On a `/model` option only (#852): the thinking level the session runs at when THAT model is
+   * chosen and no level is — pi's setting for the model, else its default level, else (a new
+   * session) `medium` or (a running one) the session's own, clamped to the model's levels as pi
+   * clamps them. What a page shows before a level is picked, so its effort is never empty and
+   * never a guess.
+   */
+  defaultThinkingLevel: Type.Optional(Type.String()),
 })
 /** @group Thread runtime */
 export type HostCommandOption = Static<typeof HostCommandOption>
@@ -218,7 +225,7 @@ export const RuntimeCommand = Type.Object({
       Type.Literal('view'),
     ]),
   ),
-  /** `host` rows: the current choice, as an `options[].id`. In the `catalogue`, a thread with no session has no current choice: `/model`'s is the configured default when it is offered (#674), the one the Start dialog preselects. */
+  /** `host` rows: the current choice, as an `options[].id`. In the `catalogue`, a thread with no session has no current choice: `/model`'s is the configured default when it is offered (#674), the one the launch panel preselects. */
   value: Type.Optional(Type.String()),
   /** `host` rows with `kind: 'select' | 'level'`: what may be chosen. */
   options: Type.Optional(Type.Array(HostCommandOption)),
@@ -244,7 +251,7 @@ export type EnsoHostCommandRun = Static<typeof EnsoHostCommandRun>
 
 /**
  * `POST /api/threads/:id/configure` (#391): a new session's settings, applied together — the
- * Start-a-session dialog's Start. `model` is a `/model` option id, `thinking` a level THAT model
+ * launch panel's Start (#877). `model` is a `/model` option id, `thinking` a level THAT model
  * supports, `mode` a permission mode the thread offers, `systemPrompt` a library prompt (#443). The
  * server applies them under one lease, the system prompt first (it is the one a session can take
  * only before its first request) and then the rest in this order (the effort a model allows depends
@@ -307,7 +314,7 @@ export function isRuntimeCommand(value: unknown): value is RuntimeCommand {
  * `catalogue` — the host's own rows over pi's models and credentials, read without building:
  * `/model` with the configured default as its value, `/login`, `/logout` — and nothing a session
  * alone has. The palette shows a `catalogue` list as none: the slash commands belong to a running
- * session, and the Start dialog is what a thread without one offers.
+ * session, and the Start dialog (now the launch panel, #877) is what a thread without one offers.
  *
  * @group Thread runtime
  */

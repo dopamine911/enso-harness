@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AppHeader } from './page-header.tsx'
 import { type PageListings, projectList, storedThreads, usePageListings } from './page-listings.ts'
 import { mintPageThread, adoptPageThread, isDebugMode } from './page-mode.ts'
-import type { ThreadView } from './pane-context.ts'
+import type { LaunchActions, ThreadView } from './pane-context.ts'
 import { removeProject, threadAfterDelete, threadsOfProject } from './project-list.ts'
 import { PageHeader, RoutedPage, type RoutedPageProps } from './routed-page.tsx'
 import { createResumeRequests, fetchThreadHistory, storedThreadsNotOnThisPage } from './stored-threads.ts'
@@ -290,6 +290,8 @@ interface PageNavigation {
   readonly openPage: (route: PageRoute) => void
   /** Leave the page for the thread behind it, or a fresh one when none is adopted yet. */
   readonly leavePage: () => void
+  /** What a draft's launch panel does on this page (#877). */
+  readonly launchActions: LaunchActions
 }
 
 /** What a thread that could not be opened leaves said: the rail's line (#95), or the pane's not-found screen (#879). */
@@ -387,6 +389,7 @@ function usePageNavigation(listings: PageListings): PageNavigation {
     if (BOOT.kind === 'resume') resumeFrom(BOOT.threadId, 'pop', true)
   }, [resumeFrom])
   useFollowUrlHistory(navigate, resumeFrom, setPage)
+  const launchActions = useLaunchActions(navigate, resumeFrom, openPage)
   return {
     activeThreadId,
     page,
@@ -398,6 +401,7 @@ function usePageNavigation(listings: PageListings): PageNavigation {
     ...departures,
     openPage,
     leavePage,
+    launchActions,
   }
 }
 
@@ -436,6 +440,21 @@ function projectPageActions(
         if (removed) navigation.openPage(PROJECTS_ROUTE)
       }),
   }
+}
+
+/** A draft's launch panel's page actions (#877): a recent thread opens as a rail row does; Manage projects opens Projects. */
+function useLaunchActions(
+  navigate: PageNavigation['navigate'],
+  resumeFrom: PageNavigation['resumeFrom'],
+  openPage: PageNavigation['openPage'],
+): LaunchActions {
+  return useMemo<LaunchActions>(
+    () => ({
+      openThread: (thread) => (thread.onPage ? navigate(thread.threadId, 'push') : resumeFrom(thread.threadId, 'push')),
+      manageProjects: () => openPage(PROJECTS_ROUTE),
+    }),
+    [navigate, resumeFrom, openPage],
+  )
 }
 
 /** The page (#90): header, the sessions rail, one mounted pane per live thread, and a page over them (#869). */
@@ -503,6 +522,7 @@ export function ChatScreen(): React.ReactNode {
               view={view}
               onView={setView}
               onForked={openFork}
+              launchActions={navigation.launchActions}
             />
           ))}
           {page === undefined && missingThread !== undefined ? (

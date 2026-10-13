@@ -48,7 +48,7 @@ that reproduces the fetch — style plus CLI version — and the diff procedure 
   emits `import { cn } from "cn"` and adds that package; this repo has one `cn` and it is ours.
 - **`dialog.tsx`'s `DialogContent` caps its height and scrolls** (`max-h-[calc(100%-2rem)]
   overflow-y-auto`, #679). The registry's content is centred with no cap, so a dialog taller than
-  the window was clipped top and bottom with nothing to scroll: a long prompt in the Start dialog
+  the window was clipped top and bottom with nothing to scroll: a long prompt in the Start dialog (now the launch panel, #877)
   put Start session out of reach. The cap mirrors the registry's own `max-w-[calc(100%-2rem)]`.
 - **`spinner.tsx` does not spin** (#739). The registry's `animate-spin` ignored a reduced-motion
   preference, so #740 narrowed it to `motion-safe:animate-spin`; #739 drops it: any running

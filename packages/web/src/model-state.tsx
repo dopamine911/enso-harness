@@ -223,7 +223,7 @@ export function optionKeywords(option: HostCommandOption): string[] {
   return option.detail === undefined ? [option.label] : [option.label, option.detail]
 }
 
-/** A model option's provider, dim beside its name — the model picker's row and the Start-a-session dialog's (#391). */
+/** A model option's provider, dim beside its name — the model picker's row and the launch panel (#877). */
 export function OptionDetail({ option }: { option: HostCommandOption }): React.ReactNode {
   return option.detail === undefined ? null : <span className="text-xs text-muted-foreground">{option.detail}</span>
 }
@@ -232,7 +232,7 @@ export function OptionDetail({ option }: { option: HostCommandOption }): React.R
  * The chosen option, in words for the accessibility tree: the check beside it is drawn by CSS
  * (`data-checked`), and the list's own `aria-selected` is cmdk's keyboard highlight, which starts on
  * the first option — so a reader was told the first model was selected whatever was chosen (found
- * by a Dogfood Arena run reading the Start dialog).
+ * by a Dogfood Arena run reading the launch panel (#877).
  */
 export function ChosenMark({ chosen }: { chosen: boolean }): React.ReactNode {
   return chosen ? <span className="sr-only">, chosen</span> : null

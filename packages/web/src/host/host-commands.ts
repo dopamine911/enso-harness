@@ -50,16 +50,27 @@ export function modelOptionId(model: Pick<EnsoModelChoice, 'provider' | 'id'>): 
   return `${model.provider}/${model.id}`
 }
 
-/** The `/model` options: one per model pi could run right now, each carrying its own thinking levels (#391). */
+/**
+ * What the host knows of each model's thinking: the levels it offers (#391), and the level the
+ * session runs at when it is chosen with none (#852) — pi's rule, which the caller passes so this
+ * module stays free of the vendor's model type.
+ */
+export interface ModelThinking<Model extends EnsoModelChoice> {
+  readonly levelsOf: (model: Model) => readonly string[]
+  readonly onChoosing: (model: Model) => string
+}
+
+/** The `/model` options: one per model pi could run right now, each carrying its own thinking levels and the one it runs at (#391, #852). */
 function modelOptions<Model extends EnsoModelChoice>(
   models: readonly Model[],
-  thinkingLevelsOf: (model: Model) => readonly string[],
+  thinking: ModelThinking<Model>,
 ): HostCommandOption[] {
   return models.map((model) => ({
     id: modelOptionId(model),
     label: model.name,
     detail: model.provider,
-    thinkingLevels: [...thinkingLevelsOf(model)],
+    thinkingLevels: [...thinking.levelsOf(model)],
+    defaultThinkingLevel: thinking.onChoosing(model),
   }))
 }
 
@@ -67,19 +78,19 @@ const MODEL_ROW = { name: HOST_COMMAND_MODEL, source: 'host', kind: 'select', de
 
 /**
  * The two host rows, in the contract's order: `model`, then `thinking`. Each `/model` option
- * carries that model's thinking levels (#391), read by `thinkingLevelsOf` — the host passes the
- * runtime's own rule, so this module stays free of the vendor's model type.
+ * carries that model's thinking levels (#391) and the level it runs at once chosen (#852), read by
+ * `thinking` — the host passes the runtime's own rules.
  */
 export function hostCommandRows<Model extends EnsoModelChoice>(
   state: EnsoModelState,
   models: readonly Model[],
-  thinkingLevelsOf: (model: Model) => readonly string[],
+  thinking: ModelThinking<Model>,
 ): RuntimeCommand[] {
   return [
     {
       ...MODEL_ROW,
       ...(state.model === null ? {} : { value: modelOptionId(state.model) }),
-      options: modelOptions(models, thinkingLevelsOf),
+      options: modelOptions(models, thinking),
     },
     {
       name: HOST_COMMAND_THINKING,
@@ -96,20 +107,21 @@ export function hostCommandRows<Model extends EnsoModelChoice>(
  * The rows a thread with NO session is offered (#484): `/model` over the same models, then the
  * `flow` rows among `flows` — `/login` and, when something is stored, `/logout`, as `hostFlowRows`
  * builds them. ⚠ Not `/thinking`, `/compact` (an action) or a view, and none of pi's rows: each
- * belongs to a session, and the Start dialog is what a thread without one offers. `/thinking`'s
- * levels are the chosen model's, carried on its `/model` option.
+ * belongs to a session, and the launch panel is what a thread without one offers (#877).
+ * `/thinking`'s levels are the chosen model's, carried on its `/model` option with the level a new
+ * session starts it at (#852).
  *
  * `/model`'s `value` is the configured default (`provider/id`, pi's `defaultProvider` and
- * `defaultModel`) when it is among the models: the Start dialog preselects it, as pi starts a
- * session on it (#674). A default that is not offered is no value, and the dialog takes its first.
+ * `defaultModel`) when it is among the models: the launch panel preselects it, as pi starts a
+ * session on it (#674). A default that is not offered is no value, and the panel takes its first.
  */
 export function catalogueRows<Model extends EnsoModelChoice>(
   models: readonly Model[],
-  thinkingLevelsOf: (model: Model) => readonly string[],
+  thinking: ModelThinking<Model>,
   flows: readonly RuntimeCommand[],
   configuredDefault?: string,
 ): RuntimeCommand[] {
-  const options = modelOptions(models, thinkingLevelsOf)
+  const options = modelOptions(models, thinking)
   const offered = options.some((option) => option.id === configuredDefault)
   return [
     { ...MODEL_ROW, options, ...(offered && configuredDefault !== undefined ? { value: configuredDefault } : {}) },

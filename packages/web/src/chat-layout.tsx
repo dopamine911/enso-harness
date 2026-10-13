@@ -1,9 +1,11 @@
 import type { LayoutProps } from '@tanstack/ai-react/ui'
-import { useCallback, useContext, useRef } from 'react'
+import { useCallback, useContext, useId, useRef } from 'react'
 import { Conversation, ConversationContent, ConversationScrollButton } from './components/ai-elements/conversation.tsx'
 import { Alert, AlertDescription, AlertTitle } from './components/ui/alert.tsx'
 import { PendingQueue } from './composer.tsx'
 import { PendingDialog } from './dialog-card.tsx'
+import { LaunchHead, LaunchNotices, LaunchRecent } from './launch-panel.tsx'
+import { useLaunching } from './launch-settings.tsx'
 import { useThreadProject } from './page-listings.ts'
 import {
   useChatContext,
@@ -31,8 +33,12 @@ import {
 
 /**
  * A thread's layout (#90, #361): the views' box with the transcript laid out under every view, the
- * composer under the box, the `?debug` column beside it, and the status bar under both.
+ * composer under the box, the `?debug` column beside it, and the status bar under both. Before the
+ * session starts, the launch panel (#877) in the views' place, around the same composer.
  */
+
+/** The launch panel's column: its head, the composer and the recent threads, centred while they fit, scrolled when not. */
+const LAUNCH_COLUMN = 'flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto py-8'
 
 /**
  * Renders a run-level error as a destructive Alert. Reads the thread's chat through the
@@ -100,21 +106,12 @@ function ThreadViewOverlay({
 }
 
 /**
- * The layout slot of the widget map.
- *
- * ⚠ A run's error is not a message part, so no `partsComponents` entry catches it (#24): it lives
- * on the chat instance, and `RunProblem` renders it here, deliberately. A layout that reads no
- * `chat.error` shows a failed run (a RUN_ERROR from a blocked `/mode`) as an empty assistant turn.
- *
- * The `Messages` slot goes unused on purpose (#739): TanStack's draws every message.
- * `TranscriptRows` draws the ones in view.
+ * The views' box of a started thread: the views share it, the transcript keeping its size under
+ * every view and the others drawn over it.
  */
-export function ChatLayout({ Input }: LayoutProps<ThreadChatOptions>): React.ReactNode {
+function ThreadViews(): React.ReactNode {
   const chat = useChatContext()
-  const debugOpen = useContext(DebugOpenContext)
   const { shown, open } = useContext(PaneViewContext)
-  const stores = useThreadStores()
-  const threadProject = useThreadProject(stores.projectId)
   const scroller = useRef<TranscriptScroller | null>(null)
   const revealInTranscript = useCallback<RevealStatsTarget>(
     (target, stats) => {
@@ -138,57 +135,100 @@ export function ChatLayout({ Input }: LayoutProps<ThreadChatOptions>): React.Rea
   const { selection, placed } = useTranscriptSelection(chat.messages, chat.sessionGenerating)
   const incidentReveal = useIncidentReveal(scroller)
   return (
+    <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+      {/* The transcript stays mounted AND LAID OUT under every view — `invisible` and `inert`,
+          never `hidden` (#362): a `display: none` box comes back resized, and the stick-to-bottom
+          scroller re-pins a reader who had scrolled up. Kept at its size, its scroll, its lock
+          and its bubbles (the stats rows' targets) survive a trip to Context or Stats. */}
+      <div
+        role="tabpanel"
+        {...panelIdsOf(shown, 'chat')}
+        inert={!onChat}
+        className={onChat ? 'flex min-h-0 min-w-0 flex-1 flex-col' : 'invisible flex min-h-0 min-w-0 flex-1 flex-col'}
+      >
+        <Conversation>
+          <TranscriptRevealBridge into={scroller} />
+          <ConversationContent className="w-full gap-4 px-6 py-4 ledger:gap-0">
+            <TranscriptContent
+              messages={chat.messages}
+              setMessages={chat.setMessages}
+              selection={selection}
+              placed={placed}
+              incidentReveal={incidentReveal}
+            />
+            {/* ⚠ Mounted before anything opens one, deliberately. This is where #4's
+                `ask` verdict reaches the browser, and an unmounted slot is precisely
+                why an approval would silently never appear. */}
+            <PendingDialog />
+            <RunProblem />
+          </ConversationContent>
+          <ConversationScrollButton />
+        </Conversation>
+      </div>
+      <ThreadViewOverlay
+        shown={shown}
+        revealInTranscript={revealInTranscript}
+        changesMoment={`${settledToolResults(chat.messages)}:${chat.sessionGenerating}`}
+      />
+    </div>
+  )
+}
+
+/**
+ * The layout slot of the widget map.
+ *
+ * ⚠ A run's error is not a message part, so no `partsComponents` entry catches it (#24): it lives
+ * on the chat instance, and `RunProblem` renders it here, deliberately. A layout that reads no
+ * `chat.error` shows a failed run (a RUN_ERROR from a blocked `/mode`) as an empty assistant turn.
+ *
+ * The `Messages` slot goes unused on purpose (#739): TanStack's draws every message.
+ * `TranscriptRows` draws the ones in view.
+ */
+export function ChatLayout({ Input }: LayoutProps<ThreadChatOptions>): React.ReactNode {
+  const chat = useChatContext()
+  const debugOpen = useContext(DebugOpenContext)
+  const { shown, open } = useContext(PaneViewContext)
+  const stores = useThreadStores()
+  const threadProject = useThreadProject(stores.projectId)
+  // A thread not started shows its launch panel (#877) where the views are.
+  const launching = useLaunching()
+  const launchTitle = useId()
+  return (
     // `data-thread-layout`: a panel the bar opens finds this layout's composer from it (#714).
     <div data-thread-layout="" className="flex min-h-0 flex-1 flex-col">
       <div className="flex min-h-0 flex-1">
-        {/* The main column: the views' box, then the composer under every view (#707). */}
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          {/* The views share one box: the transcript keeps its size under every view, and the
-						    others are drawn over it. */}
-          <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-            {/* The transcript stays mounted AND LAID OUT under every view — `invisible` and `inert`,
-                never `hidden` (#362): a `display: none` box comes back resized, and the stick-to-bottom
-                scroller re-pins a reader who had scrolled up. Kept at its size, its scroll, its lock
-                and its bubbles (the stats rows' targets) survive a trip to Context or Stats. */}
-            <div
-              role="tabpanel"
-              {...panelIdsOf(shown, 'chat')}
-              inert={!onChat}
-              className={
-                onChat ? 'flex min-h-0 min-w-0 flex-1 flex-col' : 'invisible flex min-h-0 min-w-0 flex-1 flex-col'
-              }
-            >
-              <Conversation>
-                <TranscriptRevealBridge into={scroller} />
-                <ConversationContent className="w-full gap-4 px-6 py-4 ledger:gap-0">
-                  <TranscriptContent
-                    messages={chat.messages}
-                    setMessages={chat.setMessages}
-                    selection={selection}
-                    placed={placed}
-                    incidentReveal={incidentReveal}
-                  />
-                  {/* ⚠ Mounted before anything opens one, deliberately. This is where #4's
-										    `ask` verdict reaches the browser, and an unmounted slot is precisely
-										    why an approval would silently never appear. */}
-                  <PendingDialog />
-                  <RunProblem />
-                </ConversationContent>
-                <ConversationScrollButton />
-              </Conversation>
-            </div>
-            <ThreadViewOverlay
-              shown={shown}
-              revealInTranscript={revealInTranscript}
-              changesMoment={`${settledToolResults(chat.messages)}:${chat.sessionGenerating}`}
-            />
-          </div>
+        {/* The main column: the views' box, then the composer under every view (#707) — or, before
+            the session starts, the launch panel around the same composer, centred and scrolling. */}
+        <div
+          className={launching ? LAUNCH_COLUMN : 'flex min-h-0 min-w-0 flex-1 flex-col'}
+          {...(launching ? { role: 'region', 'aria-labelledby': launchTitle } : {})}
+        >
+          {launching ? (
+            <>
+              <LaunchHead titleId={launchTitle} />
+              {/* Mounted here too: what the page said on the thread, a question or a failed run
+                  before the first prompt is said. */}
+              <div className="mx-auto grid w-full max-w-2xl gap-2 px-6 empty:hidden">
+                <LaunchNotices />
+                <PendingDialog />
+                <RunProblem />
+              </div>
+            </>
+          ) : (
+            <ThreadViews />
+          )}
           {/* ⚠ UNDER EVERY VIEW, NOT IN THE CHAT'S PANEL (#707): inside it, the composer would go
               invisible and inert with the transcript whenever Context, Stats or Diff is in front, and
               text typed there would go nowhere. pi's queue (#75, not TanStack's `Queue` slot: a
-              prompt sent during a run is listed here for every follower) goes with it. */}
+              prompt sent during a run is listed here for every follower) goes with it.
+              ⚠ ONE COMPOSER, MOVED, NEVER COPIED (#877): the launch panel's form and the docked
+              composer are this one element, kept at this place in the tree — only its wrapper's class
+              changes — so its draft, its attachments and its focus stay through Start. */}
           <PendingQueue />
-          <Input />
+          <div className={launching ? 'mx-auto w-full max-w-2xl' : 'contents'}>
+            <Input />
+          </div>
+          {launching ? <LaunchRecent /> : null}
         </div>
         {/* The session debug pane (#86): what the browser believes beside what pi's
 						    session holds, for THIS thread. Scrolls on its own so a long branch never

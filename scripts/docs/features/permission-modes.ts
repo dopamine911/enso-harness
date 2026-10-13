@@ -71,7 +71,7 @@ export const PERMISSION_MODES: FeatureSpec = {
   opens: [
     'The **mode** selector sits above the composer. Pick a mode to change it.',
     `Or type \`/mode\` in the chat to choose from a list, or \`/mode <name>\`. ${SLASH_COMMANDS} switch directly.`,
-    "A new thread's mode is picked in **Start a session**.",
+    "A new thread's mode is picked on its launch panel, with the **Mode** chip.",
   ],
   shots: [
     {

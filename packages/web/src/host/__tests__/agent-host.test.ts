@@ -2712,7 +2712,7 @@ async function firstRunAfter(
   return { hosted, project, calledWith }
 }
 
-// ⚠ #616, measured on a live run: the Start dialog's model reached the session (`model_change` to
+// ⚠ #616, measured on a live run: the Start dialog (now the launch panel, #877)'s model reached the session (`model_change` to
 // Haiku) and was undone 119 ms later, when the first run rebuilt the thread on its tree — pi restores
 // a session's model and level only once it has messages, and a thread configured before its first
 // prompt has none, so the rebuild took the default. The choice must be what the first run runs on.
@@ -2760,7 +2760,7 @@ const accountCatalog: InlineExtension = {
   },
 }
 
-// ⚠ #688, measured in the arena: the Start dialog offered pi's built-in Codex models, the session's
+// ⚠ #688, measured in the arena: the Start dialog (now the launch panel, #877) offered pi's built-in Codex models, the session's
 // list was the account's live catalog, and `…/configure` refused the dialog's own default with a
 // 422. The dialog's list for a thread nothing has built is the list a session holds after its start.
 test("⚠ the catalogue offers a session's models, not the agent dir's: every one, its first (the dialog's default) included, starts (#688)", async () => {
@@ -2785,7 +2785,7 @@ test("⚠ the catalogue offers a session's models, not the agent dir's: every on
   const hosted = await host.createSession(crypto.randomUUID(), () => repoRoot)
   openSessions.push(hosted)
   expect(await offered()).toEqual(beforeAnyThread)
-  // What the Start dialog sends: its default (the first option) — then any other it offers.
+  // What the launch panel sends (#877): its default (the first option) — then any other it offers.
   const dialogDefault = beforeAnyThread[0] ?? 'nothing offered'
   await hosted.runtime.runHostCommand({ name: 'model', value: dialogDefault })
   const started = hosted.runtime.modelState().model
@@ -2819,6 +2819,39 @@ test('the catalogue’s model row carries the configured default when it is offe
   expect((await modelRowWith(undefined))?.value).toBeUndefined()
   // Half a default is none, as for pi (`findInitialModel` uses the pair only when both are set).
   expect((await modelRowWith({ defaultModel: 'gpt-account' }))?.value).toBeUndefined()
+})
+
+// ⚠ #852: a thread with no session has no `/thinking` row (#484), so the launch panel's effort read
+// empty while the session then ran at pi's default. Each `/model` option says the level a session
+// started on it runs at, by pi's own rule: the model's setting, else the default setting, else
+// pi's `medium` — clamped to what the model offers.
+test('each catalogue /model option carries the level a new session runs it at, by pi’s settings (#852)', async () => {
+  const levelsWith = async (settings: object | undefined): Promise<Record<string, string | undefined>> => {
+    const catalogueAgentDir = scratchAgentDir('enso-host-effort-')
+    if (settings !== undefined) writeFileSync(join(catalogueAgentDir, 'settings.json'), JSON.stringify(settings))
+    const host = createAgentHost({
+      servesDirectory: servesRepoRoot,
+      agentDir: catalogueAgentDir,
+      permissionRulesPath,
+      harnessPackageDir: harnessDir,
+      extensionFactories: [TWO_MODELS],
+    })
+    const options = (await host.catalogue()).find((row) => row.name === 'model')?.options ?? []
+    return Object.fromEntries(
+      ['plain', 'deep'].map((id) => [
+        id,
+        options.find((option) => option.id === `enso-levels/${id}`)?.defaultThinkingLevel,
+      ]),
+    )
+  }
+  // No setting: pi's own `medium`, clamped — a model that cannot reason runs `off`.
+  expect(await levelsWith(undefined)).toEqual({ plain: 'off', deep: 'medium' })
+  // The default setting, for every model that offers it.
+  expect(await levelsWith({ defaultThinkingLevel: 'high' })).toEqual({ plain: 'off', deep: 'high' })
+  // A model's own setting wins over the default.
+  expect(
+    await levelsWith({ defaultThinkingLevel: 'high', modelThinkingLevels: { 'enso-levels/deep': 'low' } }),
+  ).toEqual({ plain: 'off', deep: 'low' })
 })
 
 // ⚠ PR #561 review: a prompt that finds the thread held JOINS the holder (#75), and pi starts a run
@@ -4313,31 +4346,33 @@ test('⚠ a login that finishes by its callback withdraws the code question it l
   expect(hosted.runtime.openDialogs()).toEqual([])
 })
 
-// #391: the Start-a-session dialog offers the effort of the model CHOSEN in it, before anything is
+/** A provider with a model that cannot reason and one that can: pi decides each one's levels. */
+const TWO_MODELS: InlineExtension = {
+  name: 'enso-host-two-models',
+  factory: (pi: ExtensionAPI) => {
+    const base = {
+      input: ['text' as const],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 50_000,
+      maxTokens: 1000,
+    }
+    pi.registerProvider('enso-levels', {
+      api: 'enso-faux',
+      baseUrl: 'http://faux.invalid',
+      apiKey: 'faux',
+      models: [
+        { ...base, id: 'plain', name: 'Plain', reasoning: false },
+        { ...base, id: 'deep', name: 'Deep', reasoning: true },
+      ],
+    })
+  },
+}
+
+// #391: the launch panel (#877) offers the effort of the model CHOSEN on it, before anything is
 // applied — so every `/model` option carries that model's levels, decided by pi's own rule
 // (`getSupportedThinkingLevels`), not the session's current model's.
 test('each /model option carries the levels pi decides for THAT model (#391)', async () => {
-  const twoModels: InlineExtension = {
-    name: 'enso-host-two-models',
-    factory: (pi: ExtensionAPI) => {
-      const base = {
-        input: ['text' as const],
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-        contextWindow: 50_000,
-        maxTokens: 1000,
-      }
-      pi.registerProvider('enso-levels', {
-        api: 'enso-faux',
-        baseUrl: 'http://faux.invalid',
-        apiKey: 'faux',
-        models: [
-          { ...base, id: 'plain', name: 'Plain', reasoning: false },
-          { ...base, id: 'deep', name: 'Deep', reasoning: true },
-        ],
-      })
-    },
-  }
-  const hosted = await hostedSession([twoModels])
+  const hosted = await hostedSession([TWO_MODELS])
   const modelRow = hosted.runtime
     .listCommands()
     .find((command) => command.source === 'host' && command.name === 'model')

@@ -33,7 +33,7 @@ async function fetchProjectList(): Promise<unknown> {
 
 /**
  * The project a thread is in, as the page lists them — ONE rule for the rail's sections and the
- * Start dialog's label. A thread that named no project was built in the launch
+ * launch panel's label (#877). A thread that named no project was built in the launch
  * directory, so it is the launch project's; an id no longer listed is no project the page shows.
  */
 export function projectOf(projects: readonly EnsoProject[], projectId: string | undefined): EnsoProject | undefined {
@@ -100,7 +100,7 @@ export function threadsInNoProject(context: ProjectThreadsContext): ProjectThrea
  * The thread to show when the one on screen is deleted (#663): its project's most recently active
  * OTHER thread that holds something (`threadsOfProject`), or undefined when there is none, and the
  * page starts a fresh one. Measured in the arena: a delete of one of two approaches opened a new
- * empty thread and its Start dialog, though the other was right there in the rail.
+ * empty thread and its Start dialog (now the launch panel, #877), though the other was right there in the rail.
  */
 export function threadAfterDelete(
   deleted: string,

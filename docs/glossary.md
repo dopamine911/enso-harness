@@ -173,8 +173,8 @@ what the act caused arrives on the follow, for every follower alike. Nothing her
   session (`live`), or the host's **catalogue** (`catalogue`) when the thread has no session —
   `/model` over the models the runtime could run, `/login`, `/logout`, read from the agent dir's
   auth and models files with nothing built (#86, #484). The palette shows a catalogue list as none: the slash commands
-  belong to a running session, and the Start dialog is what a thread without one offers. The
-  Start dialog reads its models from the same catalogue, so opening the page builds nothing. Selecting an
+  belong to a running session, and the launch panel (#877) is what a thread without one offers. The
+  launch panel reads its models from the same catalogue (#877), so opening the page builds nothing. Selecting an
   extension command sends it as a prompt; a template or skill is inserted for its arguments; a
   **host command** runs through `POST …/threads/:id/command`.
 - **host command** — a slash command that is ours, not the runtime's (#338 slice 2): `source: 'host'`,

@@ -27,7 +27,7 @@ import { realpathOrSelf } from '@enso/core/paths'
  * provider inside the package, so its default (`true`) registers `cursor` and a spare
  * `cursor-account-2` whether or not anyone has a Cursor login, and publishes both into pi's
  * `models.json` with a placeholder key (`cursor-proxy`) against its loopback proxy. pi reads a key as
- * a credential, so every Cursor model would be offered as usable — in the Start dialog, the model
+ * a credential, so every Cursor model would be offered as usable — in the launch panel (#877), the model
  * picker, and as the default model. Cursor is opt-in: `"includeCursor": true` in the file turns it
  * back on and is kept. The vendor never removes a Cursor publication (`dropOwnLoopbackPublications`
  * skips them), so with Cursor off the seed also drops the ones it left in `models.json`, by the test

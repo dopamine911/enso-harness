@@ -2,6 +2,7 @@ import type { ConnectConnectionAdapter, UIMessage } from '@tanstack/ai-client'
 import { type ChatUIContexts, createChatHookContexts } from '@tanstack/ai-react/ui'
 import { createContext } from 'react'
 import type { FollowConnection } from './follow-connection.ts'
+import type { ThreadAfterDelete } from './project-list.ts'
 
 /**
  * What the widgets in a thread's pane read through (#90): TanStack's chat contexts, shared by every
@@ -53,3 +54,15 @@ export interface PaneView {
 }
 
 export const PaneViewContext = createContext<PaneView>({ shown: undefined, open: (): void => undefined })
+
+/**
+ * What a draft's launch panel does on the page (#877): open one of its project's recent threads —
+ * shown when on this page, else resumed, as a rail row opens it — and open Projects, where a
+ * thread with no folder to start in is sent. Absent where no page holds the pane.
+ */
+export interface LaunchActions {
+  readonly openThread: (thread: ThreadAfterDelete) => void
+  readonly manageProjects: () => void
+}
+
+export const LaunchActionsContext = createContext<LaunchActions | undefined>(undefined)

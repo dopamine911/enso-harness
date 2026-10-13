@@ -13,6 +13,8 @@ import {
   chatContexts,
   type ThreadChatOptions,
   DebugOpenContext,
+  type LaunchActions,
+  LaunchActionsContext,
   type ThreadView,
   type PaneView,
   PaneViewContext,
@@ -166,6 +168,7 @@ export function ThreadPane({
   view = 'chat',
   onView = KEEP_VIEW,
   onForked,
+  launchActions,
 }: {
   threadId: string
   active: boolean
@@ -177,6 +180,8 @@ export function ThreadPane({
   onView?: (view: ThreadView) => void
   /** The page opens a fork this pane made (#433). Mounted alone there is no page, and no fork is offered. */
   onForked?: (receipt: EnsoForkReceipt) => void
+  /** What the launch panel does on the page (#877). Mounted alone, it offers no thread to pick up. */
+  launchActions?: LaunchActions
 }): React.ReactNode {
   const stores = getThreadStores(threadId)
   const { useAppChat } = useMemo(() => createThreadChatHook(stores), [stores])
@@ -225,7 +230,9 @@ export function ThreadPane({
           <PaneViewContext.Provider value={paneView}>
             <ForkContext.Provider value={forkAt}>
               <RestoreContext.Provider value={restoreAt}>
-                <chat.AppChat />
+                <LaunchActionsContext.Provider value={launchActions}>
+                  <chat.AppChat />
+                </LaunchActionsContext.Provider>
               </RestoreContext.Provider>
             </ForkContext.Provider>
           </PaneViewContext.Provider>

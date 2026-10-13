@@ -357,7 +357,7 @@ test('⚠ a thread id that is not thread-id shaped is a 400 at every entry point
 })
 
 // ⚠ LOOKING MUST NOT BUILD (#86, #484). This route used to build a thread's session to list its
-// commands (#390), and the Start dialog read its models here — so opening the page built one. Now a
+// commands (#390), and the Start dialog (now the launch panel, #877) read its models here — so opening the page built one. Now a
 // thread the server holds answers its own live list, and any other id answers the host's CATALOGUE:
 // `/model` over the models pi could run (no value: no current one), the flows — nothing a session
 // alone has, and nothing built. A build that fails is not this route's concern any more.
@@ -380,7 +380,7 @@ test('⚠ GET …/commands never builds: a live thread answers its own list; any
     ['login', 'host', 'flow'],
     ['logout', 'host', 'flow'],
   ])
-  // The Start dialog's rows: every model with its own thinking levels, and no current value.
+  // The launch panel's rows (#877): every model with its own thinking levels, and no current value.
   expect(fresh.commands[0]?.value).toBeUndefined()
   expect(fresh.commands[0]?.options?.map((option) => [option.id, option.thinkingLevels])).toEqual([
     ['fake/fake-1', ['off', 'low', 'medium', 'high']],
@@ -2293,6 +2293,29 @@ test('⚠ POST …/configure applies model, effort, mode in order and names the 
 
   // Only the three settings, and nothing else, is a configuration.
   expect((await configure({ model: 'fake/fake-1', prompt: 'hi' })).status).toBe(400)
+})
+
+// ⚠ #479: a Start refused at a later step leaves a thread live on the server — the configure route
+// built it — with no message and no session file. A reload found it with a 200 and no messages,
+// adopted it as a resumed thread, and the launch panel never came back. `/history` says such a
+// thread is a draft; a stored thread, read from its file, never is.
+test('⚠ GET …/history says `draft` for a thread built by a control route and never prompted, and never for a stored one (#479)', async () => {
+  const { url, built } = await startWith(settlesAtOnce, {
+    old: { transcript: STORED_BRANCH, modified: new Date(0), firstMessage: 'earlier question' },
+  })
+  const refused = await send(url, '/api/threads/start-me/configure', 'POST', { model: 'fake/no-such-model' })
+  expect(refused.status).toBe(422)
+  expect(built).toHaveLength(1)
+
+  const draft = await fetch(`${url}/api/threads/start-me/history`)
+  expect(draft.status).toBe(200)
+  const history = (await draft.json()) as EnsoThreadHistory
+  expect(Check(EnsoThreadHistory, history)).toBe(true)
+  expect(history).toMatchObject({ threadId: 'start-me', messages: [], draft: true })
+
+  const stored = (await (await fetch(`${url}/api/threads/old/history`)).json()) as EnsoThreadHistory
+  expect(stored.messages.length).toBeGreaterThan(0)
+  expect(stored.draft).toBeUndefined()
 })
 
 // ── #443: the prompt library — files under ENSO_HOME/prompts, and a session's system prompt from it.

@@ -140,8 +140,8 @@ async function mountPane(
     debugOpen?: boolean
     view?: ThreadView
     server?: ScriptedFetchOptions
-    /** Leave the Start-a-session dialog open (#391); closed otherwise, as Escape would. */
-    startSession?: boolean
+    /** Leave a minted thread on its launch panel (#877); lowered otherwise, as a Start that went through lowers it. */
+    launch?: boolean
     /** The page's GLOBAL fetch — the scripted server's unless a test sets a tripwire (#404). */
     globalFetch?: typeof fetch
     /** Mount a STORED thread, as a reload does (`adoptThread`), instead of minting a new one. */
@@ -154,9 +154,9 @@ async function mountPane(
   // What the page itself fetches outside a thread; a pane's own requests go through its thread's.
   globalThis.fetch = options.globalFetch ?? server.fetch
   const stores = options.history === undefined ? mintThread(server.fetch) : adoptThread(options.history, server.fetch)
-  // A minted thread opens on the Start-a-session dialog (#391). These tests are about the pane
-  // behind it, so it is closed first — as the person pressing Escape would — unless one asks.
-  stores.startSession.set(options.startSession ?? false)
+  // A minted thread opens on its launch panel (#877). These tests are about the started pane, so it
+  // is lowered first — as a Start that went through lowers it — unless one asks.
+  if (options.history === undefined) stores.launch.set(options.launch ?? false)
   const container = document.createElement('div')
   document.body.appendChild(container)
   const root: Root = createRoot(container)
@@ -1172,6 +1172,8 @@ test('⚠ a queued prompt refused after a delay takes back only its own bubble; 
   }) as typeof fetch
   globalThis.fetch = gated
   const stores = mintThread(gated)
+  // About the started pane's composer: its launch panel is lowered, as a Start that went through lowers it (#877).
+  stores.launch.set(false)
   const container = document.createElement('div')
   document.body.appendChild(container)
   const root: Root = createRoot(container)
@@ -3073,10 +3075,11 @@ function shownComposer(page: MountedPage): HTMLTextAreaElement {
 }
 
 // #875: a draft is the page's alone (#879), so one left with nothing typed — New Thread clicked
-// twice, a row clicked from it — would pile up on the rail. Leaving it drops it; words typed in
-// the composer or the Start dialog keep it, and nothing is ever asked of the server.
-test('⚠ a draft left with nothing typed is discarded; one holding a prompt, in the composer or the Start dialog, stays (#875)', async () => {
-  // A model to offer, so the Start dialog shows its fields.
+// twice, a row clicked from it — would pile up on the rail. Leaving it drops it; words typed in its
+// composer — the launch panel's form until it starts (#877) — keep it, and nothing is ever asked of
+// the server.
+test('⚠ a draft left with nothing typed is discarded; one holding a prompt on its launch panel stays (#875, #877)', async () => {
+  // A model to offer, so the launch panel shows its settings.
   const page = await mountPage({
     commands: [
       {
@@ -3095,22 +3098,18 @@ test('⚠ a draft left with nothing typed is discarded; one holding a prompt, in
   await page.click(newThread)
   const empty = shown()
   await page.click(newThread)
-  const inDialog = shown()
-  await eventually(() => expect(listed()).toEqual([inDialog]))
-  // Words in the Start dialog's prompt, not yet handed to the composer.
-  const dialogPrompt = await eventually(() => {
-    const found = document.querySelector<HTMLTextAreaElement>('#start-session-prompt')
-    if (found === null) throw new Error('expected the Start dialog’s prompt')
-    return found
-  })
+  const kept = shown()
+  await eventually(() => expect(listed()).toEqual([kept]))
+  // Words in the launch panel's prompt: the composer, before Start.
+  await eventually(() => expect(page.container.textContent).toContain('What should pi work on?'))
   await flush(async () => {
-    typeInto(dialogPrompt, 'a prompt still in the dialog')
+    typeInto(shownComposer(page), 'a prompt on the launch panel')
     await tick()
   })
   await page.click(newThread)
-  const inComposer = shown()
+  const emptied = shown()
   await flush(async () => {
-    typeInto(shownComposer(page), 'a prompt in the composer')
+    typeInto(shownComposer(page), 'a prompt typed, then taken back')
     await tick()
   })
   const row = (threadId: string): HTMLButtonElement => {
@@ -3118,17 +3117,18 @@ test('⚠ a draft left with nothing typed is discarded; one holding a prompt, in
     if (found === undefined) throw new Error(`expected the row of ${threadId}`)
     return found
   }
-  await page.click(row(inDialog))
-  await eventually(() => expect(shown()).toBe(inDialog))
-  expect(listed()).toEqual([inComposer, inDialog])
+  await page.click(row(kept))
+  await eventually(() => expect(shown()).toBe(kept))
+  expect(listed()).toEqual([emptied, kept])
+  expect(shownComposer(page).value).toBe('a prompt on the launch panel')
   // Emptied again, the composer's draft goes the next time the page leaves it.
-  await page.click(row(inComposer))
+  await page.click(row(emptied))
   await flush(async () => {
     typeInto(shownComposer(page), '   ')
     await tick()
   })
-  await page.click(row(inDialog))
-  await eventually(() => expect(listed()).toEqual([inDialog]))
+  await page.click(row(kept))
+  await eventually(() => expect(listed()).toEqual([kept]))
   expect(listed()).not.toContain(empty)
   expect(page.server.deletes).toEqual([])
   await page.unmount()
@@ -3275,7 +3275,7 @@ async function threadMenuReads(page: Pick<MountedPage, 'container'>): Promise<st
 
 /**
  * The open delete confirmation, or `undefined` — Radix renders dialogs into `document.body`, and a
- * fresh thread's Start-a-session dialog may be open beside it.
+ * fresh thread's launch panel may be open beside it (#877).
  */
 const deleteDialog = (): HTMLElement | undefined =>
   [...document.querySelectorAll<HTMLElement>('[role="dialog"]')].find((dialog) =>
@@ -3982,9 +3982,10 @@ test('a delete the server takes (204) leaves the thread for a fresh one, and the
 })
 
 // ⚠ #663, from an arena run: deleting one of two approaches opened a new empty thread and its Start
-// dialog, the other right there in the rail. The page goes to the project's newest other thread —
-// here a stored one, resumed — and says the delete on it (#721 review: the notice was lost on this path).
-test('⚠ a delete of the thread on screen goes to its project’s newest other thread — a stored one resumed with its history — and says the delete there; no Start dialog (#663)', async () => {
+// dialog — now its launch panel (#877) — the other right there in the rail. The page goes to the
+// project's newest other thread — here a stored one, resumed — and says the delete on it (#721
+// review: the notice was lost on this path).
+test('⚠ a delete of the thread on screen goes to its project’s newest other thread — a stored one resumed with its history — and says the delete there; no launch panel (#663)', async () => {
   const sibling = 'stored-sibling'
   const page = await openDeletable({
     others: [
@@ -4020,9 +4021,7 @@ test('⚠ a delete of the thread on screen goes to its project’s newest other 
     expect(page.container.textContent).not.toContain('Rewriting parse.ts')
     expect(notices(page).some((notice) => notice.endsWith(`thread ${DELETABLE} deleted`))).toBe(true)
   })
-  expect(
-    [...document.querySelectorAll('[role="dialog"]')].some((dialog) => dialog.textContent?.includes('Start a session')),
-  ).toBe(false)
+  expect(page.container.textContent).not.toContain('What should pi work on?')
   await page.unmount()
 })
 
@@ -4350,17 +4349,49 @@ const railAlerts = (container: HTMLElement): string[] =>
 // #378: the page writes a fresh thread's id to the URL before its first prompt. If the server
 // restarts, or drops the empty thread, before that prompt, the URL names an id the server has never
 // held: a 404. That is no error — the thread is started under the id the URL already names.
-test("⚠ the URL's own thread, never held by the server, is started under that id: no error, the Start dialog open (#378)", async () => {
+test("⚠ the URL's own thread, never held by the server, is started under that id: no error, its launch panel shown (#378, #877)", async () => {
   const page = await mountPage()
   const unused = crypto.randomUUID()
   try {
     await visitThreadUrl(unused)
     await eventually(() => {
       expect(threadListStore.get().map((thread) => thread.threadId)).toContain(unused)
-      // Radix renders the dialog into `document.body`, not inside the page's container.
-      expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Start a session')
+      expect(page.container.querySelector('[role="region"] h2')?.textContent).toBe('What should pi work on?')
     })
     expect(window.location.search).toBe(`?thread=${unused}`)
+    expect(railAlerts(page.container)).toEqual([])
+  } finally {
+    window.history.replaceState(null, '', '/')
+    await page.unmount()
+  }
+})
+
+// ⚠ #479: a reload before the first prompt — a Start refused, the tab reloaded — found the empty
+// thread the server still held: a 200 with no messages, adopted as a resumed thread, and the
+// settings a session starts with, the system prompt among them, were offered nowhere. The server
+// says the thread is a draft, and the page opens it on its launch panel, as it opens one it minted.
+test('⚠ a reload of a thread the server holds but never started opens its launch panel, not an empty transcript (#479)', async () => {
+  const draft = crypto.randomUUID()
+  const page = await mountPage({
+    histories: {
+      [draft]: {
+        threadId: draft,
+        projectId: 'p-launch',
+        messages: [],
+        permissionMode: { mode: 'default', available: ['default', 'plan'] },
+        sessionRisk: { level: 'low', signals: 0 },
+        incidents: NO_SESSION_INCIDENTS,
+        draft: true,
+      },
+    },
+  })
+  try {
+    await visitThreadUrl(draft)
+    await eventually(() => {
+      expect(threadListStore.get().map((thread) => thread.threadId)).toContain(draft)
+      expect(page.container.querySelector('[role="region"] h2')?.textContent).toBe('What should pi work on?')
+    })
+    expect(getThreadStores(draft)?.launch.get()).toBe(true)
     expect(railAlerts(page.container)).toEqual([])
   } finally {
     window.history.replaceState(null, '', '/')

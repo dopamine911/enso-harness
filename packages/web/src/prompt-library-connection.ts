@@ -13,7 +13,7 @@ import type { FetchLike } from './browser-logging.ts'
 /**
  * The prompt library's reads (#443): `GET /api/prompts` and `GET /api/prompts/:id`, validated with
  * the wire's own schemas, as `commands-connection.ts` reads the palette's list. The route writes no
- * record for a read, so the Start dialog asks on every open: a file edited elsewhere is what it shows.
+ * record for a read, so the launch panel asks on every open (#877): a file edited elsewhere is what it shows.
  *
  * A failure is data, never a throw: the dialog says it beside the field it concerns and still
  * starts with pi's default — never silently, since the reason is on screen.

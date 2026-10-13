@@ -17,7 +17,7 @@ import {
  * would work too, but it is per-run by construction — exactly the rewrite the prompt cache must
  * not see — and would put a prompt decision in the harness extensions that the terminal loads.
  *
- * ⚠ THE SESSION EXISTS BEFORE THE CHOICE. The Start dialog builds the session when it opens
+ * ⚠ THE SESSION EXISTS BEFORE THE CHOICE. The launch panel builds the session when it opens (#877)
  * (#390), so the choice arrives on a live session: the loader's answer changes, and
  * `setActiveToolsByName(getActiveToolNames())` — pi's public call that rebuilds the prompt for the
  * same tools — makes pi read it again. Nothing has been sent yet, so no cached prefix is lost.

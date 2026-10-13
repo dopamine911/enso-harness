@@ -145,7 +145,7 @@ test("a summary update reaches the list and moves the thread's activity clock; a
 })
 
 // @pins resume/one-id
-test('adopting stored history restores dates, title and mode under the stored thread id exactly once, and never asks to start a session (#391)', () => {
+test('adopting stored history restores dates, title and mode under the stored thread id exactly once, and never opens the launch panel (#391, #877)', () => {
   const history = {
     threadId: 'stored-1',
     projectId: 'p-launch',
@@ -167,11 +167,28 @@ test('adopting stored history restores dates, title and mode under the stored th
   expect(adopted.history[0]?.createdAt).toBeInstanceOf(Date)
   expect(adopted.history[0]?.createdAt?.toISOString()).toBe('2026-09-08T10:00:00.000Z')
   expect(adopted.permissionMode.get()).toEqual({ mode: 'plan', available: ['default', 'plan'] })
-  // A resumed thread has its session's settings already; only a minted one opens the dialog.
-  expect(adopted.startSession.get()).toBe(false)
+  // A resumed thread has its session's settings already; it opens on its transcript, not the launch panel.
+  expect(adopted.launch.get()).toBe(false)
   expect(threadListStore.get()).toMatchObject([{ threadId: 'stored-1', title: 'resume this work', busy: false }])
   expect(adoptThread({ ...history, messages: [] })).toBe(adopted)
   expect(threadListStore.get()).toHaveLength(1)
+})
+
+// #479: a reload before the first prompt adopted the empty thread the server still held, and the
+// settings a session starts with — the system prompt among them — were offered nowhere. The server
+// says such a thread was never started; an empty fork, written by its route, it does not.
+test('a thread the server says was never started opens on the launch panel, as a minted one does; an empty fork does not (#479)', () => {
+  const empty = {
+    threadId: 'never-started',
+    projectId: 'p-launch',
+    messages: [],
+    permissionMode: { mode: 'default', available: ['default', 'plan'] },
+    sessionRisk: { level: 'low', signals: 0 } as const,
+    incidents: NO_SESSION_INCIDENTS,
+  }
+  expect(adoptThread({ ...empty, draft: true }).launch.get()).toBe(true)
+  expect(adoptThread({ ...empty, threadId: 'empty-fork' }).launch.get()).toBe(false)
+  expect(mintThread().launch.get()).toBe(true)
 })
 
 // #387 after a reload: the server joined the guard's entry onto the stored result; adopting
@@ -1015,25 +1032,23 @@ test('a section lists its threads under Today, Yesterday and Earlier, in that or
   expect(app).toContain('>Earlier<')
 })
 
-test('⚠ leaving a draft with nothing typed drops it; words in the composer or the Start dialog, a prompt sent, or a listing that names it keep it (#875)', () => {
+test('⚠ leaving a draft with nothing typed drops it; words in its composer, a prompt sent, or a listing that names it keep it (#875)', () => {
   const listed = (): string[] => threadListStore.get().map((thread) => thread.threadId)
   const empty = mintThread()
   discardEmptyDraft(empty.threadId, [])
   expect(listed()).not.toContain(empty.threadId)
   const inComposer = mintThread()
-  inComposer.typed.composer.set(true)
-  const inDialog = mintThread()
-  inDialog.typed.startDialog.set(true)
+  inComposer.typed.set(true)
   const sent = mintThread()
   updateThreadSummary(sent.threadId, { title: 'asked', busy: true, waiting: false })
   // A fork is written by its route before any prompt: listed, it is the server's, not a draft.
   const fork = mintThread()
-  for (const stores of [inComposer, inDialog, sent, fork]) {
+  for (const stores of [inComposer, sent, fork]) {
     discardEmptyDraft(stores.threadId, [storedIn('p-launch', fork.threadId)])
   }
-  expect(listed()).toEqual([fork.threadId, sent.threadId, inDialog.threadId, inComposer.threadId])
+  expect(listed()).toEqual([fork.threadId, sent.threadId, inComposer.threadId])
   // Emptied again, it goes the next time it is left.
-  inComposer.typed.composer.set(false)
+  inComposer.typed.set(false)
   discardEmptyDraft(inComposer.threadId, [])
   expect(listed()).not.toContain(inComposer.threadId)
   // A thread the page no longer holds: nothing to do.

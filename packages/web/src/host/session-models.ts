@@ -4,7 +4,7 @@
  * that list (`catalogueOf`, #811), the `/login` facts per provider, and the model a thread chose
  * before its first message.
  *
- * The catalogue (#484) serves the Start dialog without building the thread, and it used to read
+ * The catalogue (#484) serves the launch panel without building the thread (#877), and it used to read
  * pi's model runtime over the agent dir alone — "what a session builds, minus the session". It is
  * not: a session's runtime also holds what its extensions register, and they register on
  * `session_start` too. pi-multi-account replaces `openai-codex`'s list with the account's live
@@ -31,7 +31,13 @@
  * caller falls back to the agent dir's list: a broken probe is never an empty model picker.
  */
 import { join } from 'node:path'
-import { type Api, getSupportedThinkingLevels, type Model } from '@earendil-works/pi-ai'
+import {
+  type Api,
+  clampThinkingLevel,
+  getSupportedThinkingLevels,
+  type Model,
+  type ModelThinkingLevel,
+} from '@earendil-works/pi-ai'
 import {
   type AgentSessionServices,
   type CreateAgentSessionFromServicesOptions,
@@ -43,7 +49,7 @@ import {
   SettingsManager,
 } from '@earendil-works/pi-coding-agent'
 import { ensoLogger, type RuntimeCommand } from '@enso/core'
-import { catalogueRows } from './host-commands.ts'
+import { catalogueRows, type ModelThinking } from './host-commands.ts'
 import { hostFlowRows, type LoginProviderFacts, loginOptions, logoutOptions } from './host-flows.ts'
 import type { ChoiceBeforeFirstMessage } from './thread-log.ts'
 
@@ -130,7 +136,7 @@ async function probeRuntime(options: SessionModelsOptions): Promise<ModelRuntime
       await session.extensionRunner.emit({ type: 'session_shutdown', reason: 'quit' }).finally(() => session.dispose())
     }
   } catch (error) {
-    log.warn("model probe failed: {error}; the Start dialog lists the agent dir's models alone (#688)", { error })
+    log.warn("model probe failed: {error}; the launch panel lists the agent dir's models alone (#688, #877)", { error })
     return undefined
   }
 }
@@ -173,26 +179,53 @@ export async function catalogueOf(agentDir: string, models: SessionModels): Prom
     })),
   )
   const offered = (await models.available()) ?? modelRuntime.getAvailableSnapshot()
+  const settings = globalSettings(agentDir)
   return catalogueRows(
     offered,
-    getSupportedThinkingLevels,
+    thinkingOnChoosing(settings, PI_DEFAULT_THINKING_LEVEL),
     hostFlowRows(login, logout),
-    configuredDefaultModel(agentDir),
+    configuredDefaultModel(settings),
   )
 }
 
 /**
- * The model pi starts a session on when none is chosen: the agent dir's `defaultProvider` and
- * `defaultModel` (#674), as `provider/id`. Global settings only — a project's are read only once
- * it is trusted, and the catalogue serves threads of every project.
+ * The agent dir's own settings, as a new session reads them. Global settings only — a project's are
+ * read only once it is trusted, and the catalogue serves threads of every project.
  */
-function configuredDefaultModel(agentDir: string): string | undefined {
+function globalSettings(agentDir: string): SettingsManager {
   // The cwd argument only locates PROJECT settings, which an untrusted manager never reads:
   // the agent dir stands in for it, so only the global `settings.json` is read.
-  const settings = SettingsManager.create(agentDir, agentDir, { projectTrusted: false })
+  return SettingsManager.create(agentDir, agentDir, { projectTrusted: false })
+}
+
+/** The model pi starts a session on when none is chosen: `defaultProvider` and `defaultModel` (#674), as `provider/id`. */
+function configuredDefaultModel(settings: SettingsManager): string | undefined {
   const provider = settings.getDefaultProvider()
   const model = settings.getDefaultModel()
   return provider === undefined || model === undefined ? undefined : `${provider}/${model}`
+}
+
+/**
+ * The level a NEW session starts at when its settings name none: pi's `DEFAULT_THINKING_LEVEL`
+ * (`core/defaults.js`), which its package does not export.
+ */
+const PI_DEFAULT_THINKING_LEVEL: ModelThinkingLevel = 'medium'
+
+/**
+ * pi's thinking rules for a model (#852): the levels it offers, and the level the session runs at
+ * when the model is chosen with none — `createAgentSession` for a new session, `setModel` for a
+ * running one: the settings' level for that model, else their default level, else `fallback` (a new
+ * session's `medium`, a running one's own level), clamped to the levels the model offers.
+ */
+export function thinkingOnChoosing(settings: SettingsManager, fallback: ModelThinkingLevel): ModelThinking<Model<Api>> {
+  return {
+    levelsOf: getSupportedThinkingLevels,
+    onChoosing: (model: Model<Api>): string =>
+      clampThinkingLevel(
+        model,
+        settings.getModelThinkingLevel(model.provider, model.id) ?? settings.getDefaultThinkingLevel() ?? fallback,
+      ),
+  }
 }
 
 /**
@@ -201,7 +234,7 @@ function configuredDefaultModel(agentDir: string): string | undefined {
  * ⚠ pi restores a session's model and thinking level only when the session has messages
  * (`createAgentSession`: `hasExistingSession` is `messages.length > 0`); otherwise it takes the
  * settings' default and records it. Since #484 a thread is configured before its first prompt — the
- * Start dialog's model and effort are `model_change` and `thinking_level_change` entries on a branch
+ * launch panel's (#877) model and effort are `model_change` and `thinking_level_change` entries on a branch
  * with no message yet — and its first run REBUILDS it on its tree (#551, `treeOnFirstRun`), which
  * would take the default over the choice. A branch with messages is pi's to restore and is left to
  * it. A recorded model that is gone or has no credentials falls back to pi's default, as pi's own

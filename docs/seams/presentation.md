@@ -82,7 +82,7 @@ export interface FollowConnection extends SubscribeConnectionAdapter {
   readonly runHostCommand: (run: EnsoHostCommandRun) => Promise<HostCommandOutcome>
   /**
    * Apply a new session's model, effort and mode together (#391): `POST …/configure`, the
-   * Start-a-session dialog's Start. The server applies them in order under one lease; a refusal
+   * launch panel's Start (#877). The server applies them in order under one lease; a refusal
    * comes back with its step and reason for the dialog to show.
    */
   readonly configure: (configuration: EnsoSessionConfiguration) => Promise<ConfigureOutcome>
@@ -312,17 +312,17 @@ export interface ThreadStores {
    */
   readonly toolResultDescriptors: WritableStore<ReadonlyMap<string, EnsoToolResultDescriptor>>
   /**
-   * The Start-a-session dialog is open (#391). Raised when the page MINTS the thread — New Thread,
-   * a page with no thread in its URL — and lowered by Start or Escape; a thread adopted from
-   * history never raises it.
+   * The thread shows its launch panel (#877): the composer is the form that starts its session.
+   * Raised when the page MINTS the thread — New Thread, a page with no thread in its URL — and when
+   * it adopts one the server says was never started (`EnsoThreadHistory.draft`, #479); lowered once
+   * Start goes through. A thread adopted with a history never raises it.
    */
-  readonly startSession: WritableStore<boolean>
+  readonly launch: WritableStore<boolean>
   /**
-   * Whether a prompt is typed and not sent (#875), by where it is typed: the composer, and the
-   * Start-a-session dialog, which holds its own until it starts or hands it to the composer. A draft
-   * holding neither is discarded when the page leaves it (`discardEmptyDraft`).
+   * Whether the composer holds something not sent (#875): words, or an image. A draft holding
+   * nothing is discarded when the page leaves it (`discardEmptyDraft`).
    */
-  readonly typed: { readonly composer: WritableStore<boolean>; readonly startDialog: WritableStore<boolean> }
+  readonly typed: WritableStore<boolean>
   /**
    * How many compactions pi has said it finished on this thread (#348): each rewrote the branch
    * under the transcript this page holds. The pane re-reads the thread once it is idle and has
@@ -410,7 +410,7 @@ createFixtureChat().transport() : stores.connection`), and the option's type adm
 Everything downstream of the connection is identical on both paths, which is what the fixture is for
 (the styling dev loop, #31). The swap covers only the client's send, so a fixture page's threads are
 also minted with `fixtureFetch`, which refuses every request by name (#404): a prompt queued
-mid-reply, Stop, a mode change or the Start dialog's model list reached the real server and ran a
+mid-reply, Stop, a mode change or the launch panel's model list (#877) reached the real server and ran a
 real model before. The presentation components themselves have no second implementation and
 need none: an upstream re-port is the second implementation, and the gate is what keeps it possible.
 

@@ -14,8 +14,8 @@ import {
   PromptInputCommandItem,
   PromptInputCommandList,
 } from './components/ai-elements/prompt-input.tsx'
+import { SLASH_PROMPT_REFUSAL } from './launch-settings.tsx'
 import { optionKeywords } from './model-state.tsx'
-import { SLASH_PROMPT_REFUSAL } from './start-session.tsx'
 
 /**
  * The `/` command palette (#338, slice 1): Claude Code's `/` button in VS Code, as a popup
@@ -63,9 +63,9 @@ import { SLASH_PROMPT_REFUSAL } from './start-session.tsx'
  * route's business, not the palette's.
  *
  * Empty states say WHICH empty. The route builds nothing (#86, #484): a thread the server holds
- * answers its own list (`live`); any other thread answers the host's `catalogue` — the Start
- * dialog's rows — and the palette lists NONE of those, because the slash commands belong to a
- * running session; it reads the Start dialog's own sentence, "a / command needs a running
+ * answers its own list (`live`); any other thread answers the host's `catalogue` — the launch
+ * panel's rows (#877) — and the palette lists NONE of those, because the slash commands belong to a
+ * running session; it reads the launch panel's own sentence (#877), "a / command needs a running
  * session — start one with a prompt first". A live list with zero rows reads "this session
  * registers no commands"; a filter that matches nothing reads "no command matches". A sentence
  * the server cannot back is a sentence the palette must not say.
@@ -146,7 +146,7 @@ export function rankCommand(rowValue: string, search: string, keywords?: readonl
 
 /**
  * The rows the palette lists: a live session's, every one of them; for a thread with no session,
- * NONE (#484) — the host's `catalogue` is the Start dialog's, and the slash commands belong to a
+ * NONE (#484) — the host's `catalogue` is the launch panel's (#877), and the slash commands belong to a
  * running session. The sentence says so where the rows would be.
  */
 function listedRows(commands: EnsoThreadCommands): readonly RuntimeCommand[] {

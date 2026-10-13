@@ -246,8 +246,11 @@ function TrustSection({
   )
 }
 
-/** One of the project's threads as the Threads tab lists it: what the rail and the stored listing know of it. */
-interface ThreadLine {
+/**
+ * One of a project's threads as a list names it — the Threads tab's, and the launch panel's "pick up
+ * where you left off" (#877): what the rail and the stored listing know of it.
+ */
+export interface ThreadLine {
   readonly thread: ProjectThread
   readonly title: string
   readonly state: 'waiting' | 'running' | 'idle'
@@ -256,7 +259,7 @@ interface ThreadLine {
 }
 
 /** A thread's line: its title as the rail names it, its state, and the model its file last records. */
-function lineOf(
+export function threadLineOf(
   thread: ProjectThread,
   pageThreads: readonly ThreadSummary[],
   stored: readonly EnsoStoredThread[],
@@ -290,7 +293,7 @@ function ThreadsTab({
   onOpenThread: (thread: ProjectThread) => void
 }): React.ReactNode {
   const context = { projects: [project], pageThreads, stored }
-  const lines = threadsOfProject(project.projectId, context).map((thread) => lineOf(thread, pageThreads, stored))
+  const lines = threadsOfProject(project.projectId, context).map((thread) => threadLineOf(thread, pageThreads, stored))
   if (lines.length === 0) {
     return (
       <div className="grid gap-1 rounded-lg border border-dashed px-4 py-6 text-center text-sm">

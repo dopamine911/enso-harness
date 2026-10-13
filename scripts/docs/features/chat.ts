@@ -56,7 +56,7 @@ export const CHAT: FeatureSpec = {
   ],
   opens: [
     'Start the web app with `bun run dev` and open `http://127.0.0.1:5178`.',
-    '**New Thread** in the rail starts a thread. A thread you opened before is listed under its project. Click it to open it again.',
+    '**New Thread** in the rail opens a new thread on its launch panel: type the first prompt and press **Start session**, and the same composer, with what you attached, docks under the transcript. See [Sessions and projects](./sessions-and-projects.md). A thread you opened before is listed under its project. Click it to open it again.',
     'The **Chat** tab shows the conversation. **Context** and **Stats** are the other two views of the same thread.',
     'The URL names the thread as `?thread=<id>`.',
     'To add an image, use the **attach an image** button, paste the image, or drop it on the composer.',

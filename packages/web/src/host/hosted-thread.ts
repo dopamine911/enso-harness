@@ -1,4 +1,3 @@
-import { getSupportedThinkingLevels } from '@earendil-works/pi-ai'
 import {
   createAgentSessionFromServices,
   createAgentSessionServices,
@@ -54,7 +53,7 @@ import {
 import { builtinProviderName, providerRefusalOf } from './provider-refusal.ts'
 import { restoreNoteExtension } from './restore-note.ts'
 import { toRpcWireEvent } from './session-events.ts'
-import { loginFactsOf, type SessionModels, selectionBeforeFirstMessage } from './session-models.ts'
+import { loginFactsOf, type SessionModels, selectionBeforeFirstMessage, thinkingOnChoosing } from './session-models.ts'
 import { growsSessionSpend, liveSessionUsage } from './session-usage.ts'
 import type { StoredThreads } from './stored-threads.ts'
 import { previewOnSession } from './system-prompt-preview.ts'
@@ -570,7 +569,7 @@ export async function buildHostedThread(
         ...hostCommandRows(
           currentModelState(),
           session.modelRuntime.getAvailableSnapshot(),
-          getSupportedThinkingLevels,
+          thinkingOnChoosing(session.settingsManager, session.thinkingLevel),
         ),
       )
       commands.push(...flows.rows())
