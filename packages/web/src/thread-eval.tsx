@@ -199,7 +199,7 @@ export function ThreadEvalView({
   const logRead = evaluated.logDays.length > 0
   const rows = runningCounters(evaluated.events)
   return (
-    <section aria-label="session eval" className="@container grid grid-cols-1 gap-4 p-4 pt-0">
+    <section aria-label="session eval" className="@container grid grid-cols-1 gap-4 p-6 pt-0">
       <Card
         title="Session eval"
         sub={`${countText(evaluated.events.length)} events · ${evaluated.live ? 'live' : 'from the file'} · mechanical, no composite`}

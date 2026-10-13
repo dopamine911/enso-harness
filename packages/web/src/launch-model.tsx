@@ -1,6 +1,6 @@
 import type { HostCommandOption } from '@enso/core'
 import { useRef, useState } from 'react'
-import { ModelPickerDialog } from './model-picker.tsx'
+import { ModelPicker } from './model-picker.tsx'
 import { ChipButton } from './setting-chip.tsx'
 
 /**
@@ -43,9 +43,11 @@ export function LaunchModelChip({
         onOpen={(): void => setOpen(true)}
         disabled={loading || models.length === 0}
         invalid={invalid}
+        expanded={open}
       />
-      <ModelPickerDialog
+      <ModelPicker
         open={open}
+        anchor={chip}
         listing={{ kind: 'loaded', options: models }}
         chosen={chosen}
         recent={recent}

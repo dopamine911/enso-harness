@@ -1,7 +1,6 @@
 import type { EnsoProject } from '@enso/core'
-import { ChevronsUpDownIcon, FolderIcon, FolderPlusIcon } from 'lucide-react'
+import { ChevronDownIcon, FolderIcon, FolderPlusIcon } from 'lucide-react'
 import type { FetchLike } from './browser-logging.ts'
-import { Button } from './components/ui/button.tsx'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -11,12 +10,15 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from './components/ui/dropdown-menu.tsx'
+import { cn } from './lib/utils.ts'
+import { MENU_CONTENT, MENU_ITEM } from './menu-chrome.ts'
 import { ProjectStatusBadges, useProjectSettings } from './project-status.tsx'
 import { ADD_PROJECT_ROUTE, type PageRoute, PROJECTS_ROUTE } from './thread-url.ts'
 
 /**
- * The rail's project switcher (#876), at its top: which project is current — the one New Thread
- * starts in and the rail keeps open — and a menu to pick another. The menu lists every project with
+ * The rail's project switcher (#876), a muted line under the brand at the rail's top (#417): which
+ * project is current — the one New thread starts in and the rail keeps open — and a menu to pick
+ * another. The menu lists every project with
  * its trouble (folder missing, not trusted: read when the menu opens, as the Projects page reads
  * it), the threads in no listed project when there are any, and the ways to **Add project** and
  * **Manage projects**. The current one is checked, for a screen reader too: the projects are a
@@ -61,7 +63,7 @@ function ChoiceLabel({ choice, trusted }: { choice: SwitcherChoice; trusted: boo
     return (
       <>
         <span className="min-w-0 flex-1 truncate">{NOT_IN_A_PROJECT}</span>
-        <span className="shrink-0 font-mono text-xs text-muted-foreground tabular-nums">
+        <span className="shrink-0 font-mono text-meta text-muted-foreground tabular-nums">
           {choice.threadCount}
           <span className="sr-only">{choice.threadCount === 1 ? ' thread' : ' threads'}</span>
         </span>
@@ -72,7 +74,7 @@ function ChoiceLabel({ choice, trusted }: { choice: SwitcherChoice; trusted: boo
     <>
       <span className="grid min-w-0 flex-1">
         <span className="truncate">{project.title}</span>
-        <span className="truncate font-mono text-xs text-muted-foreground" title={project.path}>
+        <span className="truncate font-mono text-meta text-muted-foreground" title={project.path}>
           {project.path}
         </span>
       </span>
@@ -109,7 +111,11 @@ function SwitcherItems({
               value={choice.key}
               disabled={choice.unavailable}
               title={choice.unavailable ? 'its folder is gone and it holds no thread' : undefined}
-              className="gap-2 py-1.5"
+              // Two lines, the check before them where the prototype's is, in the primary.
+              className={cn(
+                MENU_ITEM,
+                'min-h-13 pl-10 [&>[data-slot=dropdown-menu-radio-item-indicator]]:right-auto [&>[data-slot=dropdown-menu-radio-item-indicator]]:left-3 [&>[data-slot=dropdown-menu-radio-item-indicator]]:text-primary',
+              )}
             >
               <ChoiceLabel choice={choice} trusted={read?.kind === 'ok' ? read.value.trusted : undefined} />
             </DropdownMenuRadioItem>
@@ -117,11 +123,11 @@ function SwitcherItems({
         })}
       </DropdownMenuRadioGroup>
       <DropdownMenuSeparator />
-      <DropdownMenuItem onSelect={() => onPage(ADD_PROJECT_ROUTE)}>
+      <DropdownMenuItem className={MENU_ITEM} onSelect={() => onPage(ADD_PROJECT_ROUTE)}>
         <FolderPlusIcon />
         Add project…
       </DropdownMenuItem>
-      <DropdownMenuItem onSelect={() => onPage(PROJECTS_ROUTE)}>
+      <DropdownMenuItem className={MENU_ITEM} onSelect={() => onPage(PROJECTS_ROUTE)}>
         <FolderIcon />
         Manage projects
       </DropdownMenuItem>
@@ -134,21 +140,17 @@ export function ProjectSwitcher(props: ProjectSwitcherProps): React.ReactNode {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button
+        <button
           type="button"
-          variant="ghost"
           aria-label={`Project: ${name}. Switch project`}
-          className="h-9 w-full justify-between gap-2 px-2 font-semibold"
+          className="flex min-h-5 max-w-full items-center gap-1 justify-self-start rounded-xs text-xs text-muted-foreground transition-colors duration-150 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring aria-expanded:text-foreground"
         >
-          <span className="flex min-w-0 items-center gap-2">
-            <FolderIcon className="text-muted-foreground" />
-            <span className="truncate">{name}</span>
-          </span>
-          <ChevronsUpDownIcon className="text-muted-foreground" />
-        </Button>
+          <span className="truncate">{name}</span>
+          <ChevronDownIcon aria-hidden="true" className="size-3 shrink-0" />
+        </button>
       </DropdownMenuTrigger>
       {/* Radix names the menu by its trigger: "Project: … Switch project". */}
-      <DropdownMenuContent align="start" className="w-80">
+      <DropdownMenuContent align="start" className={cn(MENU_CONTENT, 'w-80')}>
         <SwitcherItems {...props} />
       </DropdownMenuContent>
     </DropdownMenu>

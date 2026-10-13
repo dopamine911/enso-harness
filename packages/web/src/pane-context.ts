@@ -37,6 +37,12 @@ export interface ThreadChatOptions {
 export const DebugOpenContext = createContext(false)
 
 /**
+ * Closes the `?debug` column — the pane header's close (#417), the same switch as the thread menu's
+ * Hide debug pane. Undefined on a page without `?debug`, where the column has no close to offer.
+ */
+export const CloseDebugContext = createContext<(() => void) | undefined>(undefined)
+
+/**
  * The page's main views (#361): the transcript, or an analysis of the thread in its place. One
  * choice for the page — switching thread keeps it — rendered by the pane on screen.
  */

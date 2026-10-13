@@ -42,7 +42,8 @@ export function useProjectSettings(projectIds: readonly string[], fetchImpl: Fet
   return reads
 }
 
-export const BADGE = 'inline-flex items-center gap-1 rounded-full border px-2 font-mono text-xs'
+export const BADGE =
+  'inline-flex items-center gap-1 rounded-full border border-border-strong px-2 py-px font-mono text-meta font-medium whitespace-nowrap text-muted-foreground'
 
 /** A project's trouble, as badges: its folder missing, and not trusted. */
 export function ProjectStatusBadges({
@@ -56,7 +57,7 @@ export function ProjectStatusBadges({
   return (
     <>
       {project.status === 'missing-dir' ? (
-        <span className={cn(BADGE, 'border-destructive text-destructive')} title={`${project.path} no longer exists`}>
+        <span className={cn(BADGE, 'border-refuse text-refuse')} title={`${project.path} no longer exists`}>
           <TriangleAlertIcon aria-hidden="true" className="size-3" />
           folder missing
         </span>

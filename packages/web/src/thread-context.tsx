@@ -1,5 +1,5 @@
 import { type EnsoContextMakeup, type EnsoContextRequest, EnsoThreadContext } from '@enso/core'
-import { InfoIcon, LayersIcon, PanelsTopLeftIcon } from 'lucide-react'
+import { LayersIcon, PanelsTopLeftIcon } from 'lucide-react'
 import { useRef, useState } from 'react'
 import type { FetchLike } from './browser-logging.ts'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './components/ui/dialog.tsx'
@@ -59,21 +59,12 @@ type OpenRequest = (request: ContextBrowserRequest) => void
 
 // ── Now ──────────────────────────────────────────────────────────────────────────────────────
 
-/** A big figure and what it is of — the design's `.meter-figure`. */
-function Figure({ value, of, estimate = false }: { value: string; of?: string; estimate?: boolean }): React.ReactNode {
+/** A big figure and what it is of — the prototype's `.big-number` and `.big-label` (#417). */
+function Figure({ value, of }: { value: string; of?: string }): React.ReactNode {
   return (
-    <p className="flex flex-wrap items-baseline gap-2">
-      <b
-        className={cn(
-          'font-heading text-3xl leading-tight font-semibold whitespace-nowrap',
-          estimate ? 'font-mono' : '',
-        )}
-      >
-        {value}
-      </b>
-      {of === undefined ? null : (
-        <span className="font-mono text-sm whitespace-nowrap text-muted-foreground">{of}</span>
-      )}
+    <p className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+      <b className="font-heading text-figure font-semibold whitespace-nowrap">{value}</b>
+      {of === undefined ? null : <span className="text-xs whitespace-nowrap text-muted-foreground">{of}</span>}
     </p>
   )
 }
@@ -97,7 +88,6 @@ function ContextMeter({ context }: { context: EnsoThreadContext }): React.ReactN
       <div className="grid content-start gap-2">
         <span className={caption}>pi’s context meter</span>
         <Figure
-          estimate
           value={estimateText(usage.tokens)}
           of={`of ${COMPACT.format(usage.window)} · ${PERCENT.format(usage.percent / 100)}`}
         />
@@ -150,7 +140,6 @@ function NextEstimate({ context }: { context: EnsoThreadContext }): React.ReactN
     <div className="grid content-start gap-2">
       <span className="text-xs text-muted-foreground">next request · pi’s estimate (characters ÷ 4)</span>
       <Figure
-        estimate
         value={estimateText(total)}
         of={
           last === undefined
@@ -178,13 +167,10 @@ function NextEstimate({ context }: { context: EnsoThreadContext }): React.ReactN
 function Disagreement({ request }: { request: EnsoContextRequest }): React.ReactNode {
   const estimated = totalOf(request.estimated)
   return (
-    <p className="flex items-start gap-2 rounded-md bg-popover px-3 py-2 text-sm text-muted-foreground">
-      <InfoIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-      <span>
-        <strong className="font-semibold text-foreground">Two numbers, both shown.</strong> For request {request.turn}{' '}
-        pi estimated {estimateText(estimated)}; the provider counted {COMPACT.format(request.actual.prompt)} (
-        {changeText(request.actual.prompt - estimated)}). Enso doesn’t choose between them.
-      </span>
+    <p className="rounded-sm bg-background p-3 text-sm text-muted-foreground">
+      <strong className="font-semibold text-foreground">Two numbers, both shown.</strong> For request {request.turn} pi
+      estimated {estimateText(estimated)}; the provider counted {COMPACT.format(request.actual.prompt)} (
+      {changeText(request.actual.prompt - estimated)}). Enso doesn’t choose between them.
     </p>
   )
 }
@@ -204,7 +190,7 @@ function CurrentContext({ context, onOpen }: { context: EnsoThreadContext; onOpe
         )
       }
     >
-      <div className="grid gap-4 @3xl:grid-cols-5">
+      <div className="grid gap-x-6 gap-y-4 @3xl:grid-cols-5">
         <div className="@3xl:col-span-2">
           <ContextMeter context={context} />
         </div>
@@ -644,7 +630,7 @@ function ContextCards({ context }: { context: EnsoThreadContext }): React.ReactN
   }
   const requestCount = context.requests.length
   return (
-    <div className="@container grid grid-cols-1 gap-4 p-4">
+    <div className="@container grid grid-cols-1 gap-4 p-6">
       <CurrentContext context={context} onOpen={openInBrowser} />
       <ContextTrend
         requests={context.requests}
@@ -654,8 +640,9 @@ function ContextCards({ context }: { context: EnsoThreadContext }): React.ReactN
         }}
         onOpen={openInBrowser}
       />
-      <div className="grid grid-cols-1 items-start gap-4 @5xl:grid-cols-3">
-        <div ref={browser} className="min-w-0 scroll-mt-4 @5xl:col-span-2">
+      {/* Two columns from @4xl: inside the prototype's wide view (65rem, #417) the card row is 62rem, under @5xl. */}
+      <div className="grid grid-cols-1 items-start gap-4 @4xl:grid-cols-3">
+        <div ref={browser} className="min-w-0 scroll-mt-4 @4xl:col-span-2">
           <ContextBrowser
             requests={context.requests}
             next={context.next}

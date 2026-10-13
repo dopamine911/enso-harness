@@ -16,6 +16,7 @@ import {
 } from './components/ai-elements/prompt-input.tsx'
 import { SLASH_PROMPT_REFUSAL } from './launch-settings.tsx'
 import { optionKeywords } from './model-picker.tsx'
+import { COMPOSER_ICON_BUTTON } from './setting-chip.tsx'
 
 /**
  * The `/` command palette (#338, slice 1): Claude Code's `/` button in VS Code, as a popup
@@ -432,6 +433,7 @@ export function CommandPalette({
         aria-label="commands"
         title="commands — extension commands run, prompts and skills are inserted"
         disabled={disabled}
+        className={COMPOSER_ICON_BUTTON}
       >
         <SlashIcon />
       </PromptInputActionMenuTrigger>

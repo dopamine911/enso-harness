@@ -3,8 +3,8 @@
   "shots": [
     {
       "image": "lineage-fork",
-      "steps": ["open a thread from the rail", "choose **fork from here** under the third prompt"],
-      "shown": ["forked from Where does the app read its database URL? Check .env too.", "ask pi something"],
+      "steps": ["open a thread from the rail", "choose **Fork from here** under the third prompt"],
+      "shown": ["forked from Where does the app read its database URL? Check .env too.", "Ask pi something"],
       "measured": {}
     },
     {

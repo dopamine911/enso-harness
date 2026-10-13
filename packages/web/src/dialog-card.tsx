@@ -1,10 +1,11 @@
 import type { DialogAnswer, EnsoDialogAnswer, EnsoDialogSpec } from '@enso/core'
-import { CircleQuestionMarkIcon, ExternalLinkIcon } from 'lucide-react'
+import { ExternalLinkIcon, HandIcon } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { Button } from './components/ui/button.tsx'
 import { Input } from './components/ui/input.tsx'
 import { Textarea } from './components/ui/textarea.tsx'
 import type { DialogAnswerOutcome } from './follow-connection.ts'
+import { cn } from './lib/utils.ts'
 import { QuestionnaireControls } from './questionnaire-card.tsx'
 import { useStore, useThreadStores } from './store.ts'
 import type { ThreadStores } from './thread-stores.ts'
@@ -29,6 +30,17 @@ import type { ThreadStores } from './thread-stores.ts'
  */
 
 /**
+ * The question card's buttons, in the prototype's `.ask-card` language (#417): 40px, semibold, a
+ * strong border that lights on hover; the yes of a confirm ringed in the human colour.
+ */
+const ASK_BUTTON =
+  'h-auto min-h-10 rounded-sm border-border-strong bg-transparent px-4 font-semibold hover:border-primary hover:bg-accent dark:border-border-strong dark:bg-transparent dark:hover:bg-accent'
+const ASK_HUMAN_BUTTON = cn(
+  ASK_BUTTON,
+  'border-human text-foreground hover:border-human hover:bg-human/15 dark:border-human dark:hover:bg-human/15',
+)
+
+/**
  * The per-method answer controls, one early return per dialog method, so each shape reads on its
  * own. `input` and `editor` share the form; the only difference is the field element.
  */
@@ -50,10 +62,22 @@ export function DialogAnswerControls({
       <div className="flex flex-col gap-3">
         <p className="text-sm">{dialog.message}</p>
         <div className="flex gap-2">
-          <Button type="button" disabled={disabled} onClick={() => answer({ confirmed: true })}>
+          <Button
+            type="button"
+            variant="outline"
+            className={ASK_HUMAN_BUTTON}
+            disabled={disabled}
+            onClick={() => answer({ confirmed: true })}
+          >
             Yes
           </Button>
-          <Button type="button" variant="outline" disabled={disabled} onClick={() => answer({ confirmed: false })}>
+          <Button
+            type="button"
+            variant="outline"
+            className={ASK_BUTTON}
+            disabled={disabled}
+            onClick={() => answer({ confirmed: false })}
+          >
             No
           </Button>
         </div>
@@ -66,7 +90,7 @@ export function DialogAnswerControls({
         {/* The detail behind the question (#73): a file preview, a diff, a command. Preformatted,
 				    never markdown — model-chosen file content must not render as HTML. */}
         {dialog.message === undefined || dialog.message.length === 0 ? null : (
-          <pre className="max-h-80 overflow-auto rounded-md border bg-muted/50 p-3 text-xs whitespace-pre-wrap">
+          <pre className="max-h-80 overflow-auto rounded-sm border bg-background p-3 font-mono text-xs whitespace-pre-wrap">
             {dialog.message}
           </pre>
         )}
@@ -82,7 +106,7 @@ export function DialogAnswerControls({
               variant="outline"
               disabled={disabled}
               onClick={() => answer({ value: option })}
-              className="h-auto min-h-8 max-w-full py-1.5 text-left wrap-anywhere whitespace-normal"
+              className={cn(ASK_BUTTON, 'max-w-full py-2 text-left wrap-anywhere whitespace-normal')}
             >
               {option}
             </Button>
@@ -184,28 +208,35 @@ export function EnsoDialogCard({
   ref?: React.Ref<HTMLDivElement>
 }): React.ReactNode {
   const titleId = `enso-dialog-title-${dialogId}`
+  // The prototype's `.ask-card` (#417): ringed and faintly washed in the human colour, its own
+  // padding, the asking line in the human colour above the question and its answers.
   return (
     <div
       ref={ref}
       role="group"
       aria-labelledby={titleId}
-      className="my-2 grid max-w-3xl overflow-hidden rounded-lg border border-human bg-card signal:ring-1 signal:ring-human/30 ledger:my-3 ledger:rounded-xs ledger:border-dashed ink:border-2"
+      className="grid gap-3 rounded-lg border border-human bg-human/5 p-4 ledger:my-3 ledger:rounded-xs ledger:border-dashed ink:border-2"
     >
-      <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2">
-        <span className="inline-flex items-center gap-1.5 text-xs font-semibold tracking-wider text-human uppercase">
-          <CircleQuestionMarkIcon aria-hidden="true" className="size-4" />
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="inline-flex items-center gap-2 font-semibold text-human">
+          <HandIcon aria-hidden="true" className="size-4.5" />
           pi is asking
         </span>
-        <span className="font-mono text-xs text-muted-foreground">{dialog.method}</span>
+        <span className="ml-auto font-mono text-meta text-muted-foreground">{dialog.method}</span>
       </div>
-      <div className="grid gap-3 p-3">
-        <h2 id={titleId} className="font-heading text-base font-semibold">
-          {dialog.title}
-        </h2>
-        <DialogAnswerControls dialog={dialog} answer={answer} disabled={disabled} />
-      </div>
-      <div className="flex justify-end px-3 pb-3">
-        <Button type="button" variant="ghost" size="sm" disabled={disabled} onClick={cancel}>
+      <h2 id={titleId} className="font-heading text-base font-semibold">
+        {dialog.title}
+      </h2>
+      <DialogAnswerControls dialog={dialog} answer={answer} disabled={disabled} />
+      <div className="flex justify-end">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-8 rounded-sm text-xs font-normal text-muted-foreground"
+          disabled={disabled}
+          onClick={cancel}
+        >
           Cancel — decline the question
         </Button>
       </div>

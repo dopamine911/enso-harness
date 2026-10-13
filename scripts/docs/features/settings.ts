@@ -24,6 +24,12 @@ if (DEFAULT === undefined)
 /** Every family but the default's, in Settings' order. */
 const OTHER_FAMILIES = Object.keys(FAMILIES).filter((family) => family !== DEFAULT.family)
 
+/** The last family in Settings' order, and its first theme's label: the theme cards end with them. */
+const LAST_FAMILY = Object.keys(FAMILIES).at(-1) ?? ''
+const LAST_MEMBERS = FAMILIES[LAST_FAMILY]
+const [LAST_THEME] = isObject(LAST_MEMBERS) ? Object.values(LAST_MEMBERS) : []
+if (typeof LAST_THEME !== 'string') throw new Error(`settings: ${THEME_FILE} FAMILIES ends with no theme to ring`)
+
 /** The font roles as Settings lists them (`fonts.ts`), by label. */
 const FONT_ROLES = constantIn(FONTS_FILE, 'FONT_ROLES')
 if (!Array.isArray(FONT_ROLES)) throw new Error(`settings: ${FONTS_FILE} FONT_ROLES is not an array`)
@@ -73,15 +79,18 @@ export const SETTINGS: FeatureSpec = {
         await ui.openThread()
         await ui.click({ role: 'button', name: 'Settings', exact: true })
         await ui.page.getByRole('region', { name: 'Settings' }).getByText('Theme', { exact: true }).waitFor()
+        // The theme cards run past the fold: down to the last family's, with the fonts below them.
+        await ui.scrollTo({ text: LAST_FAMILY, exact: true, within: PAGE })
       },
       marks: [
         {
           target: SECTIONS,
-          says: 'The sections: **Appearance**, **Permissions** and **Storage**, each at its own address.',
+          says: 'The sections: **Appearance**, **Permissions** and **Storage**, each at its own address, then **Projects**, the way to the Projects page.',
         },
         {
-          target: { text: 'Theme', exact: true, within: PAGE },
-          says: '**{shown}**. It applies at once, to every thread on the page.',
+          // A card's name is its label then its scheme (`Tokyo Dark, dark`).
+          target: { role: 'radio', name: `${LAST_THEME},`, within: PAGE },
+          says: 'A **Theme** card, one for each theme under its family, with a swatch of its colours and whether it is dark or light; the theme in use is ticked. Choosing one applies it at once, to every thread on the page.',
         },
         {
           target: { text: FIRST_ROLE, exact: true, within: PAGE },
@@ -104,29 +113,31 @@ export const SETTINGS: FeatureSpec = {
         await ui.openThread()
         await ui.click({ role: 'button', name: 'Settings', exact: true })
         await ui.click({ role: 'button', name: 'Permissions', exact: true, within: SECTIONS })
-        await ui.page.getByRole('region', { name: 'Settings' }).getByRole('radiogroup', { name: 'Rules' }).waitFor()
+        await ui.page.getByRole('region', { name: 'Settings' }).getByRole('radiogroup', { name: 'Modes' }).waitFor()
+        // An unsaved change: the save bar, last on the page, stays in view only while there is one.
+        await ui.choose({ label: 'action read *', within: PAGE }, 'Ask')
       },
       marks: [
         {
-          target: { text: 'This section is saved on the server', within: PAGE },
+          target: { text: 'Saved on the server', within: PAGE },
           says: 'Where the rules are: the one file the engine reads, saved on the server. A save names the version it read, so a change made by hand while the page was open is never overwritten unseen; the page offers **Reload from disk** or **Overwrite with mine**.',
         },
         {
           target: { role: 'button', name: 'Save', exact: true, within: PAGE },
-          says: '**{shown}** writes the whole file. A policy the engine would not run as written is refused before it is written, each problem named at its place: the engine runs a file it cannot read as an EMPTY policy, every deny gone.',
+          says: 'With a change not saved yet, the bar at the foot of the page says **unsaved changes** and stays in view, beside **Discard**. **{shown}** writes the whole file. A policy the engine would not run as written is refused before it is written, each problem named at its place: the engine runs a file it cannot read as an EMPTY policy, every deny gone.',
         },
         {
-          target: { role: 'radiogroup', name: 'Rules', within: PAGE },
-          says: 'The views, one card each: **as written**, the rules you edit, then each mode, a read-only preview of the rules it puts in effect, in the order the engine reads them, with the ones that mode put there marked **from** it. Arrow keys move between the cards.',
+          target: { role: 'radiogroup', name: 'Modes', within: PAGE },
+          says: 'The views, one card each: **as written**, the rules you edit, then each mode, a read-only preview of the rules it puts in effect, in the order the engine reads them, with the ones that mode put there tagged **from** it. Arrow keys move between the cards.',
         },
         {
-          target: { text: 'yours — holds in every mode', within: PAGE },
-          says: "Who a rule belongs to. **{shown}**: a rule of yours, which no mode changes. Enso's `**` rule on a surface is marked **Enso's catch-all — a mode may change this**: its decision can be edited, but it cannot be moved or removed, and every rule of yours comes after it.",
+          target: { text: 'always first', exact: true, within: PAGE },
+          says: "Who a rule belongs to. A rule with no tag is yours, and no mode changes it. Enso's `**` rule on a surface is tagged **catch-all** and its order is **{shown}**: its decision can be changed, but it cannot be moved or removed, and every rule of yours comes after it. Each rule's decision is one of **Allow**, **Ask** or **Deny**.",
         },
       ],
       after: [
-        "Below the rules: **Add a rule**, three **Drafted rules** groups (publishing, remote writes, and secrets on the path gate) that add only the rules not already in force, **Reset to Enso's policy…**, which shows what it would change before it asks and keeps the replaced file as `permissions.json.bak`, and **Try a command**.",
-        'A banner says when `yoloMode` is on, since it makes every ask an allow. When the review log is on, the page names where it is written.',
+        "Between the modes and the rules: three **Rule groups** (publishing, remote writes, and secrets on the path gate). Turning a group's switch on adds only its rules not already in force; once on, it stays on, and its rules leave from the table one by one. Below the rules: **Add rule**, **Try a command**, and **Reset to Enso's policy…**, which shows what it would change before it asks and keeps the replaced file as `permissions.json.bak`. The save bar comes last.",
+        'A **Behaviour** row says when `yoloMode` is on, since it makes every ask an allow, and while it is on a callout under the lede says so too, with **See Behaviour** to go to the row. When the review log is on, the page names where it is written.',
         "An unsaved change is kept while the browser page is open: leaving Settings for a thread, or moving to another section, doesn't lose it. A reload does.",
       ],
     },

@@ -1,4 +1,5 @@
 import type { EnsoConfigurationRefusal, EnsoSessionConfiguration, HostCommandOption, RuntimeCommand } from '@enso/core'
+import { TriangleAlertIcon } from 'lucide-react'
 import { useState } from 'react'
 import type { FetchLike } from './browser-logging.ts'
 import { fetchThreadCommands } from './commands-connection.ts'
@@ -7,6 +8,7 @@ import { SelectItem } from './components/ui/select.tsx'
 import type { ConfigureOutcome } from './follow-connection.ts'
 import { useFreshRead } from './fresh-read.ts'
 import { LaunchModelChip } from './launch-model.tsx'
+import { REFUSAL_ALERT } from './launch-panel.tsx'
 import {
   LibraryNotes,
   PI_DEFAULT_SYSTEM_PROMPT,
@@ -272,7 +274,7 @@ export function LaunchChips({
   const refusedAt = form.refusal?.step
   const recent = useRecentModels()
   return (
-    <div role="group" aria-label="Session settings" className="flex flex-wrap items-center gap-2 px-1 pb-1">
+    <div role="group" aria-label="Session settings" className="flex flex-wrap items-center gap-2">
       <LaunchModelChip
         models={catalogue.kind === 'loaded' ? catalogue.models : []}
         recent={recent}
@@ -320,13 +322,14 @@ export function LaunchNotes({ form }: { readonly form: LaunchForm }): React.Reac
   return (
     <>
       {form.catalogue.kind === 'failed' ? (
-        <p role="alert" className="px-1 text-xs text-destructive">
+        <p role="alert" className="px-1 text-detail text-refuse">
           {form.catalogue.detail}
         </p>
       ) : null}
       <LibraryNotes choice={form.prompts} />
       {form.refusal === undefined ? null : (
-        <Alert variant="destructive" className="mb-2">
+        <Alert className={REFUSAL_ALERT}>
+          <TriangleAlertIcon aria-hidden="true" />
           <AlertTitle>The session didn’t start</AlertTitle>
           <AlertDescription>{form.refusal.text}</AlertDescription>
         </Alert>

@@ -109,7 +109,7 @@ test('⚠ an engine refusal renders as the refusal card, naming your rule, auto,
     expect(inPane).toContain(expected.verdict)
     expect(inPane).toContain(expected.who)
     expect(inPane).toContain('Permission denied: rm -rf build')
-    expect(inPane).not.toContain('<dt>rule</dt>')
+    expect(inPane).not.toContain('>rule</dt>')
     expect(inPane).not.toContain('>error<')
     clearThreadsForTest()
   }

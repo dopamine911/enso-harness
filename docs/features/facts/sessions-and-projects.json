@@ -4,7 +4,14 @@
     {
       "image": "sessions-start",
       "steps": [],
-      "shown": ["Model", "Effort", "Mode", "System prompt", "Saved prompt", "Prompt"],
+      "shown": [
+        "Model Claude Sonnet 4.5",
+        "Effort medium",
+        "Mode default",
+        "System prompt pi default",
+        "Saved prompt none",
+        "Start session"
+      ],
       "measured": {}
     },
     {

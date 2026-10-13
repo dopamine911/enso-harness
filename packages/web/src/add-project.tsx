@@ -4,10 +4,12 @@ import { type FormEvent, useEffect, useId, useState } from 'react'
 import type { FetchLike } from './browser-logging.ts'
 import { Button } from './components/ui/button.tsx'
 import { Checkbox } from './components/ui/checkbox.tsx'
-import { Field, FieldDescription, FieldError, FieldLabel } from './components/ui/field.tsx'
+import { FieldError, FieldLabel } from './components/ui/field.tsx'
 import { Input } from './components/ui/input.tsx'
 import { cn } from './lib/utils.ts'
+import { PAGE_CARD, PAGE_INPUT, PAGE_OUTLINE_BUTTON, PAGE_PRIMARY_BUTTON } from './page-styles.ts'
 import { browseDirectories, registerProject, requestProjectTrust } from './project-list.ts'
+import { BADGE } from './project-status.tsx'
 import { OWN_FILES, TrustDialog } from './project-trust-dialog.tsx'
 import { type PageRoute, projectRoute } from './thread-url.ts'
 
@@ -50,6 +52,21 @@ interface Chosen {
   readonly hidden: boolean
 }
 
+/*
+ * The prototype's form pieces (#417), as this page draws them: a field (its label semibold, its help in the
+ * muted 13px), a check row (the box in a 20px column, its label and help beside it), a reach-list item drawn
+ * on the same columns, and the in-text link.
+ */
+const FIELD = 'grid grid-cols-1 gap-2'
+const FIELD_LABEL = 'text-sm leading-normal font-semibold'
+const FIELD_HELP = 'text-detail text-muted-foreground'
+const CHECK_ROW = 'grid grid-cols-check-row items-start gap-3'
+const CHECK_BOX = 'mt-0.75 size-4.5 border-border-strong'
+const REACH_ICON = 'mt-0.75 size-4 shrink-0 text-primary'
+const REACH_TITLE = 'block font-semibold'
+const REACH_DETAIL = 'block text-detail text-muted-foreground'
+const LINK_BUTTON = 'text-primary underline underline-offset-3'
+
 /** What the page says when there is no folder to start from: every declared root is gone from disk. */
 export const NO_START = 'none of the folders to start from exists — type a path above'
 
@@ -91,23 +108,24 @@ function useBrowsing(path: string | null, hidden: boolean, fetchImpl: FetchLike 
   return browsing
 }
 
-/** Step 1 and step 2, the one on screen marked. */
+/** Step 1 and step 2, the one on screen marked; a short rule between them, as the prototype draws (#417). */
 function Steps({ confirming }: { confirming: boolean }): React.ReactNode {
   const steps = [
     ['Choose a folder', !confirming],
     ['Confirm access', confirming],
   ] as const
   return (
-    <ol aria-label="Steps" className="flex items-center gap-3 text-sm">
+    <ol aria-label="Steps" className="flex flex-wrap items-center gap-2 text-detail text-muted-foreground">
       {steps.map(([label, current], index) => (
         <li
           key={label}
           aria-current={current ? 'step' : undefined}
-          className={cn('flex items-center gap-2', current ? 'font-medium' : 'text-muted-foreground')}
+          className={cn('flex items-center gap-2', current ? 'font-semibold text-foreground' : undefined)}
         >
+          {index === 0 ? null : <span aria-hidden="true" className="h-px w-6 bg-border-strong" />}
           <span
             className={cn(
-              'grid size-5 place-items-center rounded-full border text-xs',
+              'inline-flex size-6 items-center justify-center rounded-full border border-border-strong font-mono text-xs',
               current ? 'border-primary bg-primary text-primary-foreground' : undefined,
             )}
           >
@@ -140,19 +158,15 @@ function RefusalLine({
     <p
       id={id}
       role={quiet ? undefined : 'alert'}
-      className={cn('flex items-start gap-1.5 text-sm', quiet ? 'text-muted-foreground' : 'text-destructive')}
+      className={cn('flex items-start gap-2 text-detail', quiet ? 'text-muted-foreground' : 'text-refuse')}
     >
-      <TriangleAlertIcon aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
+      {quiet ? null : <TriangleAlertIcon aria-hidden="true" className="mt-0.75 size-3.5 shrink-0" />}
       <span>
         {refusal.text}
         {project === undefined ? null : (
           <>
             {' '}
-            <button
-              type="button"
-              className="font-medium underline underline-offset-2"
-              onClick={() => onOpen(projectRoute(project.projectId))}
-            >
+            <button type="button" className={LINK_BUTTON} onClick={() => onOpen(projectRoute(project.projectId))}>
               Open it
             </button>
           </>
@@ -183,12 +197,14 @@ function PathField({
     if (path.length > 0) onUse(path)
   }
   return (
-    <form onSubmit={submit} className="grid gap-2">
-      <FieldLabel htmlFor={inputId}>Folder path</FieldLabel>
+    <form onSubmit={submit} className={FIELD}>
+      <FieldLabel htmlFor={inputId} className={FIELD_LABEL}>
+        Folder path
+      </FieldLabel>
       <div className="flex gap-2">
         <Input
           id={inputId}
-          className="font-mono"
+          className={cn(PAGE_INPUT, 'font-mono text-detail md:text-detail')}
           placeholder="~/repo/my-project"
           autoComplete="off"
           spellCheck={false}
@@ -197,15 +213,18 @@ function PathField({
           value={typed}
           onChange={(event): void => onTyped(event.target.value)}
         />
-        <Button type="submit" variant="outline" disabled={typed.trim().length === 0}>
+        <Button type="submit" variant="outline" className={PAGE_OUTLINE_BUTTON} disabled={typed.trim().length === 0}>
           Use this path
         </Button>
       </div>
-      <FieldDescription>Paste a path (~/ works), or pick a folder below.</FieldDescription>
+      <p className={FIELD_HELP}>Paste a path (~/ works), or pick a folder below.</p>
       {refusal === undefined ? null : <RefusalLine id={`${inputId}-refusal`} refusal={refusal} onOpen={onOpen} />}
     </form>
   )
 }
+
+/** A folder in the list, and the row up out of it: a 40px row, the folder's icon, its name truncating (#417). */
+const FOLDER_ROW = 'flex min-h-10 w-full items-center gap-3 rounded-sm px-3 text-left text-sm hover:bg-card'
 
 function DirectoryList({
   listing,
@@ -214,48 +233,45 @@ function DirectoryList({
   listing: EnsoDirectoryListing
   onOpen: (path: string | null) => void
 }): React.ReactNode {
-  if (listing.path === null && listing.directories.length === 0) return <FieldError>{NO_START}</FieldError>
+  if (listing.path === null && listing.directories.length === 0)
+    return <FieldError className="p-4 text-detail text-refuse">{NO_START}</FieldError>
   return (
-    <ul aria-label="folders" className="flex max-h-72 flex-col gap-0.5 overflow-y-auto p-1">
+    <ul aria-label="folders" className="grid max-h-70 gap-0.5 overflow-y-auto p-1">
       {listing.path === null ? null : (
         <li>
           <button
             type="button"
             onClick={() => onOpen(listing.parent)}
-            className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-sm text-muted-foreground hover:bg-muted"
+            className={cn(FOLDER_ROW, 'text-muted-foreground hover:text-foreground')}
           >
-            <ArrowUpIcon className="size-4" /> {listing.parent === null ? 'where to start' : 'up'}
+            <ArrowUpIcon className="size-4.5 shrink-0" /> {listing.parent === null ? 'where to start' : 'up'}
           </button>
         </li>
       )}
       {listing.directories.map((directory) => (
         <li key={directory.path}>
-          <button
-            type="button"
-            title={directory.path}
-            onClick={() => onOpen(directory.path)}
-            className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-sm hover:bg-muted"
-          >
-            <FolderIcon className="size-4 shrink-0 text-muted-foreground" />
+          <button type="button" title={directory.path} onClick={() => onOpen(directory.path)} className={FOLDER_ROW}>
+            <FolderIcon className="size-4.5 shrink-0 text-muted-foreground" />
             <span className="min-w-0 flex-1 truncate">{directory.name}</span>
             {directory.projectId === undefined ? null : (
-              <span className="shrink-0 rounded-full border px-2 font-mono text-xs text-muted-foreground">
-                already a project
-              </span>
+              <span className={cn(BADGE, 'shrink-0 py-0 text-tag')}>already a project</span>
             )}
             <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground" />
           </button>
         </li>
       ))}
       {listing.directories.length === 0 && listing.path !== null ? (
-        <li className="px-2 py-1 text-sm text-muted-foreground italic">no folders here</li>
+        <li className="p-4 text-detail text-muted-foreground">no folders here</li>
       ) : null}
-      {listing.truncated ? <li className="px-2 py-1 text-xs text-muted-foreground">more folders than shown</li> : null}
+      {listing.truncated ? <li className="px-3 py-2 text-xs text-muted-foreground">more folders than shown</li> : null}
     </ul>
   )
 }
 
-/** Browsing: the folder on screen and **Choose this folder** — or why it can't be chosen — and the folders inside it. */
+/**
+ * Browsing: the folder on screen and **Choose this folder** — or why it can't be chosen — and the folders
+ * inside it, in the prototype's browser box: a bar over the list, on the page's background (#417).
+ */
 function BrowsePane({
   browsing,
   refusal,
@@ -272,24 +288,31 @@ function BrowsePane({
   const listing = browsing.kind === 'loaded' ? browsing.listing : undefined
   const choosable = listing?.path != null && refusal === undefined
   return (
-    <div className="grid gap-2">
-      <span className="text-sm font-medium">Or browse</span>
-      <div className="rounded-md border">
-        <div className="flex items-center gap-2 border-b px-3 py-2">
-          <span className="min-w-0 flex-1 font-mono text-xs break-all text-muted-foreground">
+    <div className={FIELD}>
+      <span className={FIELD_LABEL}>Or browse</span>
+      <div className="overflow-hidden rounded-sm border bg-background">
+        <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2">
+          <span
+            className={cn(
+              'flex min-h-8 min-w-0 flex-1 items-center px-2 font-mono text-xs break-all',
+              listing?.path == null ? 'text-muted-foreground' : 'font-semibold text-foreground',
+            )}
+          >
             {listing?.path ?? 'where to start'}
           </span>
           <Button
             type="button"
-            size="sm"
+            className={PAGE_PRIMARY_BUTTON}
             disabled={!choosable}
             onClick={() => (listing?.path == null ? undefined : onChoose(listing.path))}
           >
             Choose this folder
           </Button>
         </div>
-        {browsing.kind === 'loading' ? <p className="p-3 text-sm text-muted-foreground">reading folders…</p> : null}
-        {browsing.kind === 'failed' ? <FieldError className="p-3">{browsing.reason}</FieldError> : null}
+        {browsing.kind === 'loading' ? <p className="p-4 text-detail text-muted-foreground">reading folders…</p> : null}
+        {browsing.kind === 'failed' ? (
+          <FieldError className="p-4 text-detail text-refuse">{browsing.reason}</FieldError>
+        ) : null}
         {listing === undefined ? null : <DirectoryList listing={listing} onOpen={onMove} />}
       </div>
       {refusal === undefined ? null : <RefusalLine refusal={refusal} onOpen={onOpen} quiet />}
@@ -297,58 +320,83 @@ function BrowsePane({
   )
 }
 
-/** The hidden-folders toggle (#866, kept by #868's decision): off on every visit, as the guardrail is. */
-function HiddenToggle({ hidden, onHidden }: { hidden: boolean; onHidden: (hidden: boolean) => void }): React.ReactNode {
-  const toggleId = useId()
+/**
+ * One of the page's checkboxes as the prototype's check row: the box in a 20px column, its label
+ * beside it, and under the label what it means when there is something to say (#417).
+ */
+function CheckRow({
+  checked,
+  onChecked,
+  label,
+  help,
+}: {
+  checked: boolean
+  onChecked: (checked: boolean) => void
+  label: string
+  help?: React.ReactNode
+}): React.ReactNode {
+  const checkboxId = useId()
   return (
-    <Field orientation="horizontal">
+    <div className={CHECK_ROW}>
       <Checkbox
-        id={toggleId}
-        checked={hidden}
-        onCheckedChange={(checked: boolean | 'indeterminate'): void => onHidden(checked === true)}
+        id={checkboxId}
+        className={CHECK_BOX}
+        checked={checked}
+        aria-describedby={help === undefined ? undefined : `${checkboxId}-help`}
+        onCheckedChange={(next: boolean | 'indeterminate'): void => onChecked(next === true)}
       />
-      <FieldLabel htmlFor={toggleId}>show hidden folders</FieldLabel>
-    </Field>
+      <FieldLabel htmlFor={checkboxId} className={FIELD_LABEL}>
+        {label}
+      </FieldLabel>
+      {help === undefined ? null : (
+        <p id={`${checkboxId}-help`} className={cn(FIELD_HELP, 'col-start-2')}>
+          {help}
+        </p>
+      )}
+    </div>
   )
 }
 
-/** What adding the folder lets pi reach (#866, #872): the folder whole — Enso does not sandbox agents — a tree of it, and the permission rules. */
+/**
+ * What adding the folder lets pi reach (#866, #872): the folder whole — Enso does not sandbox agents — a tree
+ * of it, and the permission rules. The prototype's reach list: each icon in the primary, in a 20px column (#417).
+ */
 function ReachList({ chosen, onOpen }: { chosen: Chosen; onOpen: (route: PageRoute) => void }): React.ReactNode {
   const hiddenFolder = chosen.folder.split('/').some((segment) => segment.startsWith('.'))
   return (
-    <div className="grid gap-2">
-      <span className="text-sm font-medium">What pi can reach here</span>
+    <div className={FIELD}>
+      <span className={FIELD_LABEL}>What pi can reach here</span>
       <ul className="grid gap-3 text-sm">
-        <li className="flex gap-2.5">
-          <FolderIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-          <span className="grid gap-0.5">
-            <strong className="font-medium">Read and change files in this folder</strong>
-            <span className="text-muted-foreground">
+        <li className={CHECK_ROW}>
+          <FolderIcon aria-hidden="true" className={REACH_ICON} />
+          <span>
+            <strong className={REACH_TITLE}>Read and change files in this folder</strong>
+            <span className={REACH_DETAIL}>
               <span className="font-mono break-all">{chosen.folder}</span> and everything inside it. Enso does not
               sandbox agents, so that is the whole of what this folder lets one reach.
               {hiddenFolder ? ' It is inside a hidden folder, where tools keep their settings and keys.' : null}
             </span>
           </span>
         </li>
-        <li className="flex gap-2.5">
-          <GitBranchIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-          <span className="grid gap-0.5">
-            <strong className="font-medium">Work in a tree of it, as the project’s tree mode says</strong>
-            <span className="text-muted-foreground">
+        <li className={CHECK_ROW}>
+          <GitBranchIcon aria-hidden="true" className={REACH_ICON} />
+          <span>
+            <strong className={REACH_TITLE}>Work in a tree of it, as the project’s tree mode says</strong>
+            <span className={REACH_DETAIL}>
               A new thread gets a worktree of this folder unless your settings say otherwise, so your checkout stays as
               you left it. The project’s Worktrees tab can make it a copy, or the folder itself.
             </span>
           </span>
         </li>
-        <li className="flex gap-2.5">
-          <LockIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-          <span className="grid gap-0.5">
-            <strong className="font-medium">Follow your permission rules</strong>
-            <span className="text-muted-foreground">
+        <li className={CHECK_ROW}>
+          <LockIcon aria-hidden="true" className={REACH_ICON} />
+          <span>
+            <strong className={REACH_TITLE}>Follow your permission rules</strong>
+            <span className={REACH_DETAIL}>
               What pi may run without asking is set in{' '}
               <button
                 type="button"
-                className="text-foreground underline underline-offset-2"
+                className={LINK_BUTTON}
                 onClick={() => onOpen({ kind: 'settings', section: 'permissions' })}
               >
                 Settings › Permissions
@@ -374,22 +422,25 @@ function NameField({
 }): React.ReactNode {
   const inputId = useId()
   return (
-    <div className="grid gap-2">
-      <FieldLabel htmlFor={inputId}>Name in Enso</FieldLabel>
+    <div className={FIELD}>
+      <FieldLabel htmlFor={inputId} className={FIELD_LABEL}>
+        Name in Enso
+      </FieldLabel>
       <Input
         id={inputId}
+        className={PAGE_INPUT}
         autoComplete="off"
         aria-invalid={error !== undefined}
         aria-describedby={`${inputId}-help`}
         value={name}
         onChange={(event): void => onName(event.target.value)}
       />
-      <FieldDescription id={`${inputId}-help`}>
+      <p id={`${inputId}-help`} className={FIELD_HELP}>
         Shown in the rail and on the project’s page. It doesn’t rename the folder.
-      </FieldDescription>
+      </p>
       {error === undefined ? null : (
-        <p role="alert" className="flex items-center gap-1.5 text-sm text-destructive">
-          <TriangleAlertIcon aria-hidden="true" className="size-3.5 shrink-0" />
+        <p role="alert" className="flex items-start gap-2 text-detail text-refuse">
+          <TriangleAlertIcon aria-hidden="true" className="mt-0.75 size-3.5 shrink-0" />
           {error}
         </p>
       )}
@@ -400,29 +451,6 @@ function NameField({
 /** Said when the project was added and the trust after it was not saved: it is there, untrusted. */
 export function trustFailedAfterAdd(project: EnsoProject, reason: string): string {
   return `${project.title} was added, but it is not trusted: ${reason}. Trust it again here, or later from its page.`
-}
-
-/** "Trust this project's own settings" (#873): off by default; on, the trust is confirmed after the project is added. */
-function TrustChoice({ trust, onTrust }: { trust: boolean; onTrust: (trust: boolean) => void }): React.ReactNode {
-  const checkboxId = useId()
-  return (
-    <div className="grid gap-1.5">
-      <Field orientation="horizontal">
-        <Checkbox
-          id={checkboxId}
-          checked={trust}
-          aria-describedby={`${checkboxId}-help`}
-          onCheckedChange={(checked: boolean | 'indeterminate'): void => onTrust(checked === true)}
-        />
-        <FieldLabel htmlFor={checkboxId}>Trust this project’s own settings</FieldLabel>
-      </Field>
-      <FieldDescription id={`${checkboxId}-help`}>
-        Enso then reads {OWN_FILES} from this folder, and its .pi/ folder — including setup commands, which run on this
-        machine in every new tree. Once it is added you see the files and their commands before anything is trusted.
-        Leave it off for a folder you didn’t write; you can trust it later from the project’s page.
-      </FieldDescription>
-    </div>
-  )
 }
 
 /**
@@ -511,12 +539,12 @@ function ConfirmStep({
     else onAdded(outcome.value.project)
   }
   return (
-    <form onSubmit={(event) => void add(event)} noValidate className="grid gap-5 rounded-lg border bg-card p-6">
-      <div className="grid gap-2">
-        <span className="text-sm font-medium">Folder</span>
-        <div className="flex items-center gap-3">
+    <form onSubmit={(event) => void add(event)} noValidate className={PAGE_CARD}>
+      <div className={FIELD}>
+        <span className={FIELD_LABEL}>Folder</span>
+        <div className="flex items-center gap-2">
           <span className="min-w-0 flex-1 font-mono text-sm break-all">{chosen.folder}</span>
-          <Button type="button" variant="outline" disabled={adding} onClick={onBack}>
+          <Button type="button" variant="outline" className={PAGE_OUTLINE_BUTTON} disabled={adding} onClick={onBack}>
             Change
           </Button>
         </div>
@@ -530,14 +558,26 @@ function ConfirmStep({
         error={nameError}
       />
       <ReachList chosen={chosen} onOpen={onOpen} />
-      <TrustChoice trust={trust} onTrust={setTrust} />
+      {/* "Trust this project's own settings" (#873): off by default; on, the trust is confirmed after the project is added. */}
+      <CheckRow
+        checked={trust}
+        onChecked={setTrust}
+        label="Trust this project’s own settings"
+        help={
+          <>
+            Enso then reads {OWN_FILES} from this folder, and its .pi/ folder — including setup commands, which run on
+            this machine in every new tree. Once it is added you see the files and their commands before anything is
+            trusted. Leave it off for a folder you didn’t write; you can trust it later from the project’s page.
+          </>
+        }
+      />
       {toTrust === undefined ? null : <TrustAfterAdd project={toTrust} onDone={onAdded} fetchImpl={fetchImpl} />}
       {refusal === undefined ? null : <RefusalLine refusal={refusal} onOpen={onOpen} />}
-      <div className="flex justify-end gap-2">
-        <Button type="button" variant="outline" disabled={adding} onClick={onBack}>
+      <div className="flex flex-wrap justify-end gap-2">
+        <Button type="button" variant="outline" className={PAGE_OUTLINE_BUTTON} disabled={adding} onClick={onBack}>
           Back
         </Button>
-        <Button type="submit" disabled={adding}>
+        <Button type="submit" className={PAGE_PRIMARY_BUTTON} disabled={adding}>
           {adding ? 'Adding…' : 'Add project'}
         </Button>
       </div>
@@ -587,7 +627,7 @@ function ChooseStep({
   }
   const browseRefusal = browsing.kind === 'loaded' ? refusalOf(browsing.listing, projects) : undefined
   return (
-    <div className="grid gap-5 rounded-lg border bg-card p-6" aria-busy={checking}>
+    <div className={PAGE_CARD} aria-busy={checking}>
       <PathField
         typed={typed}
         onTyped={(next) => {
@@ -605,7 +645,8 @@ function ChooseStep({
         onChoose={(folder) => onChosen({ folder, hidden })}
         onOpen={onOpen}
       />
-      <HiddenToggle hidden={hidden} onHidden={onHidden} />
+      {/* The hidden-folders toggle (#866, kept by #868's decision): off on every visit, as the guardrail is. */}
+      <CheckRow checked={hidden} onChecked={onHidden} label="show hidden folders" />
     </div>
   )
 }
@@ -618,7 +659,7 @@ export function AddProjectPage({ projects, onOpen, onAdded, fetch: fetchImpl }: 
   const [hidden, setHidden] = useState(false)
   const [chosen, setChosen] = useState<Chosen | undefined>(undefined)
   return (
-    <div className="mx-auto grid w-full max-w-2xl gap-4 p-4 md:p-6">
+    <div className="mx-auto grid w-full max-w-page-narrow grid-cols-1 content-start gap-6 p-4 pb-12 md:p-6 md:pb-16">
       <Steps confirming={chosen !== undefined} />
       {chosen === undefined ? (
         <ChooseStep

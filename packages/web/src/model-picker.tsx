@@ -1,5 +1,5 @@
 import type { EnsoStoredThread, HostCommandOption } from '@enso/core'
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import {
   Command,
   CommandEmpty,
@@ -8,7 +8,7 @@ import {
   CommandItem,
   CommandList,
 } from './components/ui/command.tsx'
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './components/ui/dialog.tsx'
+import { Popover, PopoverAnchor, PopoverContent } from './components/ui/popover.tsx'
 
 /**
  * The model picker (#880), one for the launch panel's Model chip (#877) and the started composer's
@@ -137,6 +137,15 @@ function compareModels(left: HostCommandOption, right: HostCommandOption): numbe
   )
 }
 
+/**
+ * The picker's list in the prototype's `.popover` chrome (#417), laid over cmdk's through `className`:
+ * the filter a bare row under its search icon, ruled off from the list; the group headings mono,
+ * small and upper-case (`.pop-group`); 40px rows the accent fills when highlighted, the chosen
+ * one's check in the primary.
+ */
+const MODEL_LIST =
+  'min-h-0 flex-1 rounded-none bg-transparent p-0 **:data-[slot=command-input-wrapper]:border-b **:data-[slot=command-input-wrapper]:p-0 **:data-[slot=command-input-wrapper]:*:h-12! **:data-[slot=command-input-wrapper]:*:rounded-none! **:data-[slot=command-input-wrapper]:*:border-0 **:data-[slot=command-input-wrapper]:*:bg-transparent **:data-[slot=command-input-wrapper]:*:px-1 **:[[cmdk-group-heading]]:font-mono **:[[cmdk-group-heading]]:text-meta **:[[cmdk-group-heading]]:font-normal **:[[cmdk-group-heading]]:tracking-wider **:[[cmdk-group-heading]]:uppercase **:data-[slot=command-item]:min-h-10 **:data-[slot=command-item]:rounded-sm! **:data-[slot=command-item]:data-selected:bg-accent **:data-[slot=command-item]:[&>svg]:text-primary'
+
 /** One row of the picker: `value` is cmdk's identity for it, unique in the list (a recent model is two rows while filtering). */
 interface PickerRow {
   readonly value: string
@@ -214,7 +223,7 @@ function GroupHeading({ group }: { readonly group: PickerGroup }): React.ReactNo
   const count = group.rows.length === 1 ? '1 model' : `${group.rows.length} models`
   return (
     <>
-      {group.heading} <span className="text-destructive">· not logged in · {count}</span>
+      {group.heading} <span className="tracking-normal text-chart-3 normal-case">· not logged in · {count}</span>
     </>
   )
 }
@@ -237,8 +246,10 @@ function ModelRow({
       data-checked={option.id === chosen}
       onSelect={(): void => onChoose(option)}
     >
-      <span className="flex-1 truncate">{option.label}</span>
-      {range === undefined ? null : <span className="font-mono text-xs text-muted-foreground">{range}</span>}
+      <span className="flex-1 truncate font-medium">{option.label}</span>
+      {range === undefined ? null : (
+        <span className="font-mono text-meta whitespace-nowrap text-muted-foreground">{range}</span>
+      )}
       <ChosenMark chosen={option.id === chosen} />
     </CommandItem>
   )
@@ -296,14 +307,14 @@ function ModelList({ options, recent, chosen, onChoose, filter, onFilter }: Mode
     // ⚠ cmdk sets the input's id itself, after ours: a label `htmlFor` named nothing, and the
     // filter read as a bare `combobox`. cmdk's own label is the one it wires to the input.
     <Command
-      className="rounded-md border"
+      className={MODEL_LIST}
       label="Model"
       shouldFilter={false}
       {...(highlighted === undefined ? {} : { value: highlighted })}
       onValueChange={(value: string): void => setMoved({ from: chosen, value })}
     >
-      <CommandInput placeholder="filter models…" value={filter} onValueChange={onFilter} />
-      <CommandList className="max-h-96">
+      <CommandInput placeholder="Filter models" value={filter} onValueChange={onFilter} />
+      <CommandList className="max-h-84 min-h-0 flex-1 p-1">
         <CommandEmpty>no model matches</CommandEmpty>
         {groups.map((group) => (
           <CommandGroup key={group.key} heading={<GroupHeading group={group} />}>
@@ -325,8 +336,10 @@ type ModelListing =
   | { readonly kind: 'failed'; readonly detail: string }
   | { readonly kind: 'loaded'; readonly options: readonly HostCommandOption[] }
 
-interface ModelPickerDialogProps {
+interface ModelPickerProps {
   readonly open: boolean
+  /** The Model chip the picker hangs from (#417): it opens above it, or below where there is no room. */
+  readonly anchor: React.RefObject<HTMLElement | null>
   readonly listing: ModelListing
   /** The chosen model's option id: marked, and highlighted first. */
   readonly chosen: string | undefined
@@ -354,15 +367,21 @@ function ListingStatus({ listing }: { readonly listing: Exclude<ModelListing, { 
   )
 }
 
-/** The model picker as a dialog, its filter cleared each time it closes. */
-export function ModelPickerDialog(props: ModelPickerDialogProps): React.ReactNode {
-  const { open, listing, onClose, returnFocus } = props
+/**
+ * The model picker as the prototype's `.popover` (#417): hung from the Model chip — above it, or
+ * below where the window has no room — 360px wide, lifted by `shadow-pop`, no backdrop; its filter
+ * cleared each time it closes. Escape and a click outside close it; a press on the chip itself does
+ * not (`keepOnAnchor`), or the chip's own click would reopen what the press had just closed.
+ */
+export function ModelPicker(props: ModelPickerProps): React.ReactNode {
+  const { open, anchor, listing, onClose, returnFocus } = props
   const [filter, setFilter] = useState('')
+  const footId = useId()
   const close = (): void => {
     setFilter('')
     onClose()
   }
-  // ⚠ Escape in the filter is the filter's (#638): Radix closes the dialog from a capture listener
+  // ⚠ Escape in the filter is the filter's (#638): Radix closes the popover from a capture listener
   // on the document, so the input cannot stop it — prevented here, as the command palette's pages
   // do. It clears the filter; with nothing left to clear it closes, like Escape anywhere else. The
   // filter is the picker's one `cmdk-input` (cmdk overrides any id we give it).
@@ -372,27 +391,35 @@ export function ModelPickerDialog(props: ModelPickerDialogProps): React.ReactNod
     event.preventDefault()
     setFilter('')
   }
+  const keepOnAnchor = (event: Event): void => {
+    if (event.target instanceof Node && anchor.current?.contains(event.target) === true) event.preventDefault()
+  }
   return (
-    <Dialog
+    <Popover
       open={open}
       onOpenChange={(next: boolean): void => {
         if (!next) close()
       }}
     >
+      <PopoverAnchor virtualRef={anchor} />
       {/* ⚠ Closed, focus goes where the owner says: Radix returns it to a trigger of its own, and
           neither the chip nor the palette is one, so a keyboard user was left on the page's body. */}
-      <DialogContent
-        className="sm:max-w-lg"
+      <PopoverContent
+        aria-label="Model"
+        aria-describedby={footId}
+        side="top"
+        align="start"
+        sideOffset={6}
+        collisionPadding={8}
+        className="max-h-(--radix-popover-content-available-height) w-popover max-w-(--radix-popover-content-available-width) gap-0 overflow-hidden p-0 shadow-pop ring-0"
         onEscapeKeyDown={escapeFromFilter}
+        onPointerDownOutside={keepOnAnchor}
+        onFocusOutside={keepOnAnchor}
         onCloseAutoFocus={(event: Event): void => {
           event.preventDefault()
           returnFocus()
         }}
       >
-        <DialogHeader>
-          <DialogTitle>Model</DialogTitle>
-          <DialogDescription>{props.purpose}; each row shows the effort levels it offers</DialogDescription>
-        </DialogHeader>
         {listing.kind === 'loaded' ? (
           <ModelList
             options={listing.options}
@@ -408,7 +435,11 @@ export function ModelPickerDialog(props: ModelPickerDialogProps): React.ReactNod
         ) : (
           <ListingStatus listing={listing} />
         )}
-      </DialogContent>
-    </Dialog>
+        {/* Under the list, as the prototype's `.pop-foot` says it (#417): what choosing does here, and what a row's range is. */}
+        <p id={footId} className="shrink-0 border-t px-3 py-2 text-xs text-muted-foreground">
+          {props.purpose}; each row shows the effort levels that model offers
+        </p>
+      </PopoverContent>
+    </Popover>
   )
 }

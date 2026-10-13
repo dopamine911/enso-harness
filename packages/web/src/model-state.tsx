@@ -19,7 +19,7 @@ import {
   ModelSelectorName,
 } from './components/ai-elements/model-selector.tsx'
 import { SelectItem } from './components/ui/select.tsx'
-import { ChosenMark, ModelPickerDialog, optionKeywords, rankOption } from './model-picker.tsx'
+import { ChosenMark, ModelPicker, optionKeywords, rankOption } from './model-picker.tsx'
 import { ChipButton, SettingChip } from './setting-chip.tsx'
 import { createStore, type Store, useStore, useThreadStores } from './store.ts'
 
@@ -164,6 +164,10 @@ export interface ModelChipProps {
   readonly recorded?: EnsoRecordedModel | null
   /** Open the model dialog — the owner renders it (`composer.tsx`), the same one the palette's `/model` row opens. */
   readonly onOpen: () => void
+  /** That dialog is open: the chip is drawn open. */
+  readonly open?: boolean
+  /** The chip, for the model picker to hang from (#417). */
+  readonly ref?: React.Ref<HTMLButtonElement>
 }
 
 /** What the chip says: its name and its value — the model and its provider; none; the recorded model, so named; the not-live sentence. */
@@ -190,7 +194,7 @@ function chipFace(
  * else on the page would say so. A cold thread's recorded model is named `Model (recorded)`, so it
  * never reads as live (#434).
  */
-export function ModelChip({ state, recorded = null, onOpen }: ModelChipProps): React.ReactNode {
+export function ModelChip({ state, recorded = null, onOpen, open, ref }: ModelChipProps): React.ReactNode {
   const { label, display } = chipFace(state, recorded)
   const model = state?.model ?? null
   let title = 'the model this thread runs — change it here or with /model'
@@ -198,7 +202,16 @@ export function ModelChip({ state, recorded = null, onOpen }: ModelChipProps): R
     title = 'what this thread last ran on, from its log — not live yet; pick a model now or run it (/model)'
   } else if (state === null) title = 'no live session yet — pick a model now and the first prompt runs on it (/model)'
   else if (model !== null) title = `${model.provider}/${model.id} — ${title}`
-  return <ChipButton label={label} display={display} title={title} onOpen={onOpen} />
+  return (
+    <ChipButton
+      {...(ref === undefined ? {} : { ref })}
+      label={label}
+      display={display}
+      title={title}
+      onOpen={onOpen}
+      expanded={open === true}
+    />
+  )
 }
 
 /** A flow option's second column, dim beside its name: `/login`'s way in, `/logout`'s stored credential. */
@@ -212,6 +225,8 @@ export interface ModelChoiceDialogProps {
   readonly command: string | undefined
   /** The recent model ids, newest first (`useRecentModels`): the model picker's Recent group (#880). */
   readonly recent: readonly string[]
+  /** The Model chip the model picker hangs from (#417) — the palette's `/model` opens it there too. */
+  readonly anchor: React.RefObject<HTMLElement | null>
   readonly onClose: () => void
   /**
    * Where focus goes once the dialog has closed — the composer (#367). The palette that opened it
@@ -308,6 +323,7 @@ export function ModelChoiceDialog({
   threadId,
   command,
   recent,
+  anchor,
   onClose,
   returnFocus,
   onPick,
@@ -336,8 +352,9 @@ export function ModelChoiceDialog({
   }
   return (
     <>
-      <ModelPickerDialog
+      <ModelPicker
         open={command === MODEL_COMMAND}
+        anchor={anchor}
         listing={state.kind === 'loaded' ? { kind: 'loaded', options: state.row.options ?? [] } : state}
         chosen={state.kind === 'loaded' ? state.row.value : undefined}
         recent={recent}

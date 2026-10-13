@@ -54,7 +54,7 @@ export function MakeupBar({
   const total = totalOf(makeup)
   const width = Math.max(scale, total)
   return (
-    <div role="img" aria-label={label} className="relative flex h-4 w-full gap-px overflow-hidden rounded-sm bg-hatch">
+    <div role="img" aria-label={label} className="relative flex h-3 w-full overflow-hidden rounded-sm bg-hatch">
       {CONTEXT_CATEGORIES.map((category) =>
         makeup[category] === 0 ? null : (
           <span

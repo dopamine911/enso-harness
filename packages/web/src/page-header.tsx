@@ -1,12 +1,15 @@
 import { ENSO_NOTICE_SOURCE, type EnsoModelState, type EnsoRecordedModel, type EnsoStoredThread } from '@enso/core'
 import {
+  BugIcon,
   ChartColumnIcon,
   EllipsisIcon,
   FileDiffIcon,
+  GitForkIcon,
   LayersIcon,
   MenuIcon,
   MessagesSquareIcon,
   PencilIcon,
+  Trash2Icon,
 } from 'lucide-react'
 import { Tabs as TabsPrimitive } from 'radix-ui'
 import { useRef, useState } from 'react'
@@ -19,8 +22,9 @@ import {
   DropdownMenuTrigger,
 } from './components/ui/dropdown-menu.tsx'
 import { DeleteThread } from './delete-thread-dialog.tsx'
-import { EnsoSmile } from './enso-mark.tsx'
 import { paneForkOf } from './fork-thread.ts'
+import { cn } from './lib/utils.ts'
+import { MENU_CONTENT, MENU_ITEM } from './menu-chrome.ts'
 import { storedThreads, useThreadProject } from './page-listings.ts'
 import { isFixtureMode } from './page-mode.ts'
 import type { ThreadView } from './pane-context.ts'
@@ -93,9 +97,9 @@ export interface AppHeaderProps {
 }
 
 /**
- * The page's header: the threads button (narrow screens), the mark, where you are — the active
- * thread's title, the same one the rail shows, and what it runs with — then the view tabs, the
- * prompt manager and the thread menu.
+ * The page's header, over the main column only — the brand is the rail's (#417): the threads
+ * button (narrow screens), where you are — the active thread's title, the same one the rail shows,
+ * and what it runs with — then the view tabs, the prompt manager and the thread menu.
  */
 export function AppHeader(props: AppHeaderProps): React.ReactNode {
   const { active, notFound, rail, view, onView, stored } = props
@@ -111,16 +115,13 @@ export function AppHeader(props: AppHeaderProps): React.ReactNode {
     done: (): void => setRenaming(undefined),
   }
   return (
-    <header className="flex min-h-14 items-center gap-3 border-b bg-sidebar px-3 py-2">
+    <header className={HEADER}>
       <RailToggle open={rail.open} onToggle={rail.toggle} />
-      <EnsoSmile className="size-7.5" />
       <h1 className="sr-only">Enso · pi runtime</h1>
       <div className="grid min-w-0 flex-1">
         <ThreadTitle {...props} started={started} rename={rename} />
       </div>
-      {isFixtureMode ? (
-        <span className="rounded-full border px-2 py-0.5 text-xs text-muted-foreground">fixture</span>
-      ) : null}
+      {isFixtureMode ? <span className={BADGE}>fixture</span> : null}
       {notFound ? null : (
         <ViewTabs view={view} onView={onView} threadId={active?.threadId} draft={active !== undefined && !started} />
       )}
@@ -166,7 +167,7 @@ function ThreadTitle({
           <span className={TITLE} title={active.threadId}>
             {title}
           </span>
-          <span className="shrink-0 rounded-full border px-2 py-0.5 text-xs text-muted-foreground">not started</span>
+          <span className={BADGE}>not started</span>
         </span>
         <ThreadSubtitle threadId={active.threadId} />
       </>
@@ -188,13 +189,13 @@ function ThreadTitle({
       <button
         type="button"
         title={`rename this thread · ${active.threadId}`}
-        className="group flex min-w-0 items-center gap-1.5 justify-self-start rounded-sm text-left focus-visible:outline-2 focus-visible:outline-ring"
+        className="group flex max-w-full min-w-0 items-center gap-2 justify-self-start rounded-xs text-left focus-visible:outline-2 focus-visible:outline-ring"
         onClick={rename.start}
       >
         <span className={TITLE}>{title}</span>
         <PencilIcon
           aria-hidden="true"
-          className="size-3.5 shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100"
+          className="size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100"
         />
         <span className="sr-only">, rename</span>
       </button>
@@ -203,7 +204,17 @@ function ThreadTitle({
   )
 }
 
-const TITLE = 'truncate font-heading text-base font-semibold'
+const TITLE = 'truncate font-heading text-base leading-snug font-semibold'
+
+/**
+ * A thread header's, and a page header's (`routed-page.tsx`), box: the same height and padding, so
+ * moving between a thread and a page doesn't jump (#417).
+ */
+export const HEADER = 'flex min-h-15 shrink-0 items-center gap-4 border-b px-6 py-2 max-md:gap-2 max-md:px-3'
+
+/** A small mono pill: a draft's "not started", fixture mode's mark. */
+const BADGE =
+  'inline-flex shrink-0 items-center rounded-full border border-border-strong px-2 py-px font-mono text-meta font-medium text-muted-foreground'
 
 /**
  * What the thread runs with, under its title (#879): its project · model · effort. The model and
@@ -259,12 +270,20 @@ function ThreadMenu({
     <>
       <DropdownMenu modal={false} open={open} onOpenChange={setOpen}>
         <DropdownMenuTrigger asChild>
-          <Button type="button" variant="ghost" size="icon-sm" aria-label="thread actions" title="thread actions">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="thread actions"
+            title="thread actions"
+            className={ICON_BUTTON}
+          >
             <EllipsisIcon />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent
           align="end"
+          className={cn(MENU_CONTENT, 'w-56')}
           onCloseAutoFocus={(event): void => {
             if (!keepFocus.current) return
             event.preventDefault()
@@ -272,29 +291,43 @@ function ThreadMenu({
           }}
         >
           <DropdownMenuItem
+            className={MENU_ITEM}
             disabled={!started}
             onSelect={(): void => {
               keepFocus.current = true
               onRename()
             }}
           >
+            <PencilIcon />
             Rename
           </DropdownMenuItem>
-          <DropdownMenuItem disabled={fork === undefined} onSelect={(): void => fork?.(undefined)}>
+          <DropdownMenuItem
+            className={MENU_ITEM}
+            disabled={fork === undefined}
+            onSelect={(): void => fork?.(undefined)}
+          >
+            <GitForkIcon />
             Fork thread
           </DropdownMenuItem>
           {debug === undefined ? null : (
-            <DropdownMenuItem onSelect={debug.toggle}>
+            <DropdownMenuItem className={MENU_ITEM} onSelect={debug.toggle}>
+              <BugIcon />
               {debug.open ? 'Hide debug pane' : 'Show debug pane'}
             </DropdownMenuItem>
           )}
           <DropdownMenuSeparator />
           {started ? (
-            <DropdownMenuItem variant="destructive" onSelect={(): void => setDeleting(true)}>
+            <DropdownMenuItem className={MENU_ITEM} variant="destructive" onSelect={(): void => setDeleting(true)}>
+              <Trash2Icon />
               Delete thread…
             </DropdownMenuItem>
           ) : (
-            <DropdownMenuItem variant="destructive" onSelect={(): void => onDiscardDraft(active.threadId)}>
+            <DropdownMenuItem
+              className={MENU_ITEM}
+              variant="destructive"
+              onSelect={(): void => onDiscardDraft(active.threadId)}
+            >
+              <Trash2Icon />
               Discard draft
             </DropdownMenuItem>
           )}
@@ -321,14 +354,18 @@ function ThreadMenu({
   )
 }
 
-/** The header's threads button: on a narrow screen, the rail is a page of its own (#407). */
+/** The prototype's `.icon-button` (#417): 40px, muted until hovered or open. */
+export const ICON_BUTTON =
+  'size-10 rounded-sm text-muted-foreground hover:bg-card hover:text-foreground aria-expanded:bg-card aria-expanded:text-foreground [&_svg]:size-5'
+
+/** The header's threads button: on a narrow screen, the rail is a drawer over the thread (#407, #417). */
 export function RailToggle({ open, onToggle }: { open: boolean; onToggle: () => void }): React.ReactNode {
   return (
     <Button
       type="button"
       size="icon"
-      variant="outline"
-      className="size-11 md:hidden"
+      variant="ghost"
+      className={cn(ICON_BUTTON, 'md:hidden')}
       aria-label={open ? 'hide threads' : 'show threads'}
       aria-expanded={open}
       aria-controls="threads-rail"
@@ -339,16 +376,19 @@ export function RailToggle({ open, onToggle }: { open: boolean; onToggle: () => 
   )
 }
 
+/**
+ * A view tab, the prototype's (#417): a segment of the group, the selected one on the accent. Ink
+ * keeps its own voice — underlined in ink, on no fill. Icons only under 1024px.
+ */
 const VIEW_TAB =
-  'inline-flex h-10 items-center gap-2 rounded-md border-b-2 border-transparent px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-popover hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-muted-foreground aria-selected:border-primary aria-selected:bg-popover aria-selected:text-foreground signal:aria-selected:border-transparent signal:aria-selected:ring-1 signal:aria-selected:ring-border-strong signal:aria-selected:ring-inset ink:aria-selected:border-foreground ink:aria-selected:bg-transparent [&_svg]:size-4'
+  'inline-flex min-h-8.5 items-center gap-2 rounded-sm px-3 text-sm font-medium text-muted-foreground transition-colors duration-150 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-50 disabled:hover:text-muted-foreground aria-selected:bg-accent aria-selected:text-foreground ink:rounded-none ink:border-b-2 ink:border-transparent ink:aria-selected:border-foreground ink:aria-selected:bg-transparent max-md:min-h-10 max-md:min-w-10 max-md:justify-center max-md:px-2 [&_svg]:size-4'
 
 /** A draft's hover on the views it cannot show yet (#879). */
 const NOT_STARTED_VIEW = 'available once the thread starts'
 
 /**
  * The page's views as tabs (#361): Radix's tab list, for its keyboard (arrows move between tabs)
- * and its roles — the primitive, styled here to the design direction's tab (a raised selected tab
- * with an underline in the primary; Signal rings it instead, Ink underlines in ink). The panels
+ * and its roles — the primitive, styled here as the prototype's segmented group (#417). The panels
  * are the active pane's own (`ChatLayout`), so each trigger names its panel by id rather than
  * through Radix's `TabsContent`, which would unmount the transcript. A draft (#879) has run nothing,
  * so its Context, Stats and Diff are disabled; Chat stays, the way back from a view shown before.
@@ -376,7 +416,10 @@ function ViewTabs({
         if (chosen !== undefined) onView(chosen)
       }}
     >
-      <TabsPrimitive.List aria-label="what the thread view shows" className="flex gap-1">
+      <TabsPrimitive.List
+        aria-label="what the thread view shows"
+        className="flex shrink-0 gap-0.5 rounded-lg border bg-card p-0.75 max-md:p-0.5"
+      >
         <TabsPrimitive.Trigger
           value="chat"
           id="thread-view-chat-tab"
@@ -384,7 +427,7 @@ function ViewTabs({
           className={VIEW_TAB}
         >
           <MessagesSquareIcon aria-hidden="true" />
-          <span className="max-sm:sr-only">Chat</span>
+          <span className="max-lg:sr-only">Chat</span>
           {view === 'chat' || threadId === undefined ? null : <QuestionWaiting threadId={threadId} />}
         </TabsPrimitive.Trigger>
         {RUN_VIEWS.map(({ view: tab, label, hover, Icon }) => (
@@ -398,7 +441,7 @@ function ViewTabs({
             className={VIEW_TAB}
           >
             <Icon aria-hidden="true" />
-            <span className="max-sm:sr-only">{label}</span>
+            <span className="max-lg:sr-only">{label}</span>
           </TabsPrimitive.Trigger>
         ))}
       </TabsPrimitive.List>

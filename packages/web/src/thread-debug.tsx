@@ -11,15 +11,19 @@ import {
   EnsoThreadInspection,
   type EnsoTranscriptEntry,
 } from '@enso/core'
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { BugIcon, XIcon } from 'lucide-react'
+import { Fragment, useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { Check } from 'typebox/value'
 import type { FetchLike } from './browser-logging.ts'
 import { Button } from './components/ui/button.tsx'
 import { FOLLOW_ENDED_CUSTOM_EVENT, type RecordedCustomEvent } from './custom-event-router.ts'
+import { cn } from './lib/utils.ts'
+import { CloseDebugContext } from './pane-context.ts'
 import { type PermissionModeState, usePermissionMode } from './permission-mode.tsx'
 import { type Store, useStore, useThreadStores } from './store.ts'
 import { boundedFailureDetail } from './stored-threads.ts'
 import { browserLogging, type ThreadStores } from './thread-stores.ts'
+import { LabelValues } from './view-parts.tsx'
 
 const NO_LINES: readonly EnsoLogLine[] = []
 /** A page mounted without `configureBrowserLogging` (tests) has no ring: nothing to subscribe to, nothing logged. */
@@ -138,6 +142,8 @@ export interface ThreadDebugViewProps {
   readonly onRefresh: () => void
   readonly onCopy: () => void
   readonly onBundle: () => void
+  /** Closes the pane (#417, `CloseDebugContext`); undefined where nothing can close it — no close is drawn. */
+  readonly onClose?: (() => void) | undefined
 }
 
 /**
@@ -169,19 +175,31 @@ function entryKey(entry: EnsoTranscriptEntry, position: number): string {
   return `${position}:${entry.id}`
 }
 
-function Mismatch({ when, says }: { when: boolean; says: string }): React.ReactNode {
-  if (!when) return null
-  return (
-    <span className="text-destructive-foreground ml-2 rounded bg-destructive px-1 font-semibold">MISMATCH: {says}</span>
-  )
+/**
+ * Whether a belief agrees with what the server says: `MISMATCH: …` in the refusal colour when it
+ * does not, `match` in the ok colour (the prototype's `.kv-match`, #417) when the two were compared
+ * and agree, nothing while there is nothing to compare yet.
+ */
+function Agreement({ compared, mismatch }: { compared: boolean; mismatch: string | undefined }): React.ReactNode {
+  if (mismatch !== undefined) return <span className="ml-2 font-semibold text-refuse">MISMATCH: {mismatch}</span>
+  return compared ? <span className="ml-2 text-ok">match</span> : null
 }
+
+/** One label/value row of the pane: a word, then what it holds (a string, or a value and its agreement). */
+type DebugRow = readonly [string, React.ReactNode]
+
+/** A list of the pane's records — chunks, log lines, branch entries, events: mono, muted, one per line. */
+const DEBUG_LIST = 'grid gap-0.5 font-mono text-xs break-all text-muted-foreground'
+
+/** A sub-heading inside a section: the list it heads. */
+const DEBUG_SUBHEADING = 'mt-1 font-semibold text-foreground'
 
 /** One tail, or `not fetched yet` before the first refresh. */
 function EventTailList({ events }: { events: readonly EnsoThreadEvent[] | undefined }): React.ReactNode {
-  if (events === undefined) return <div>not fetched yet</div>
-  if (events.length === 0) return <div>nothing yet</div>
+  if (events === undefined) return <div className="text-muted-foreground">not fetched yet</div>
+  if (events.length === 0) return <div className="text-muted-foreground">nothing yet</div>
   return (
-    <ol>
+    <ol className={DEBUG_LIST}>
       {events.map((event) => (
         <li key={event.sequence} className={event.provenance === 'dropped' ? 'text-destructive' : ''}>
           {describeThreadEvent(event)}
@@ -234,10 +252,10 @@ function systemPromptRow(prompt: EnsoForkPoint['conditions']['systemPrompt']): s
 
 /** The manifest (#435) as a definition list: identity first, then the conditions it runs under. */
 function ForkPointList({ reading }: { reading: ForkPointReading }): React.ReactNode {
-  if (reading === undefined) return <div>reading…</div>
+  if (reading === undefined) return <div className="text-muted-foreground">reading…</div>
   if ('problem' in reading) return <div role="status">{reading.problem}</div>
   const { identity, conditions } = reading
-  const rows: Array<readonly [string, string]> = [
+  const rows: DebugRow[] = [
     ['thread', identity.threadId],
     ['leaf entry', identity.leafEntryId ?? 'empty branch'],
     ['forked from', identity.parentThreadId ?? 'no parent'],
@@ -250,17 +268,15 @@ function ForkPointList({ reading }: { reading: ForkPointReading }): React.ReactN
       ? [['run context', 'none recorded yet'] as const]
       : runContextRows(conditions.runContext)),
   ]
-  return (
-    <dl aria-label="fork point">
-      {rows.map(([term, description]) => (
-        <div key={term} className="flex gap-2">
-          <dt className="shrink-0">{term}</dt>
-          <dd className="break-all">{description}</dd>
-        </div>
-      ))}
-    </dl>
-  )
+  return <LabelValues label="fork point" rows={rows} />
 }
+
+/** The pane's buttons: the prototype's outline button, at the pane's small size. */
+const DEBUG_BUTTON = 'rounded-sm border-border-strong text-xs dark:border-border-strong dark:bg-transparent'
+
+/** One of the pane's sections, and its heading. */
+const DEBUG_SECTION = 'grid gap-2'
+const DEBUG_HEADING = 'font-semibold text-foreground'
 
 /** The drawer's buttons, with the last copy's and bundle's outcome said beside them. */
 function DebugActions({
@@ -271,14 +287,21 @@ function DebugActions({
   onBundle,
 }: Pick<ThreadDebugViewProps, 'copyState' | 'bundleState' | 'onRefresh' | 'onCopy' | 'onBundle'>): React.ReactNode {
   return (
-    <span className="flex gap-1">
-      <Button type="button" size="sm" variant="outline" onClick={onRefresh}>
+    <div className="flex flex-wrap items-center gap-2">
+      <Button type="button" size="sm" variant="outline" className={DEBUG_BUTTON} onClick={onRefresh}>
         refresh
       </Button>
-      <Button type="button" size="sm" variant="outline" onClick={onCopy}>
+      <Button type="button" size="sm" variant="outline" className={DEBUG_BUTTON} onClick={onCopy}>
         copy as JSON
       </Button>
-      <Button type="button" size="sm" variant="outline" onClick={onBundle} disabled={bundleState === 'building'}>
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        className={DEBUG_BUTTON}
+        onClick={onBundle}
+        disabled={bundleState === 'building'}
+      >
         download log bundle
       </Button>
       {copyState === 'copied' ? <span role="status">copied</span> : null}
@@ -294,7 +317,7 @@ function DebugActions({
           bundle failed — {bundleState.failed}
         </span>
       ) : null}
-    </span>
+    </div>
   )
 }
 
@@ -307,38 +330,141 @@ function SessionSection({
   error: string | undefined
 }): React.ReactNode {
   return (
-    <section>
-      <h3 className="font-semibold text-foreground">pi's session has</h3>
+    <section className={DEBUG_SECTION}>
+      <h3 className={DEBUG_HEADING}>pi's session has</h3>
       {error !== undefined ? <div className="text-destructive">{error}</div> : null}
       {session === undefined ? (
-        <div>{error === undefined ? 'not fetched yet — press refresh' : null}</div>
+        <div className="text-muted-foreground">{error === undefined ? 'not fetched yet — press refresh' : null}</div>
       ) : (
         <>
-          <div className="break-all">session {session.sessionId}</div>
-          <div className="break-all">cwd {session.cwd}</div>
-          <div className="break-all">dir {session.sessionDir}</div>
-          <div className="break-all">
-            file{' '}
-            {session.sessionFile ?? (
-              <span title="pi flushes a session to disk only after its first assistant message; until then the branch below is the only copy">
-                in memory, not flushed yet
-              </span>
-            )}
-          </div>
-          <div>host mode: {session.permissionMode.mode}</div>
-          <div>
-            {session.busy ? 'busy' : 'idle'}, run #{session.generation}, last activity{' '}
-            {session.lastActivityAt.slice(11, 19)}
-          </div>
-          <div>commands: {session.commands.map((command) => `/${command}`).join(' ')}</div>
-          <h4 className="mt-1 text-foreground">branch ({session.entries.length} entries)</h4>
-          <ol>
+          <LabelValues
+            rows={[
+              ['session', session.sessionId],
+              ['cwd', session.cwd],
+              ['dir', session.sessionDir],
+              [
+                'file',
+                session.sessionFile ?? (
+                  <span
+                    key="file"
+                    title="pi flushes a session to disk only after its first assistant message; until then the branch below is the only copy"
+                  >
+                    in memory, not flushed yet
+                  </span>
+                ),
+              ],
+              ['host mode', session.permissionMode.mode],
+              [
+                'state',
+                `${session.busy ? 'busy' : 'idle'}, run #${session.generation}, last activity ${session.lastActivityAt.slice(11, 19)}`,
+              ],
+              ['commands', session.commands.map((command) => `/${command}`).join(' ')],
+            ]}
+          />
+          <h4 className={DEBUG_SUBHEADING}>branch ({session.entries.length} entries)</h4>
+          <ol className={DEBUG_LIST}>
             {session.entries.map((branchEntry, position) => (
               <li key={entryKey(branchEntry, position)}>{describeTranscriptEntry(branchEntry)}</li>
             ))}
           </ol>
         </>
       )}
+    </section>
+  )
+}
+
+/** The pane's 60px header (#417): the bug, its title, and the close where something can close it. */
+function DebugHeader({ onClose }: Pick<ThreadDebugViewProps, 'onClose'>): React.ReactNode {
+  return (
+    <header className="flex min-h-15 items-center gap-2 border-b py-3 pr-3 pl-4">
+      <BugIcon aria-hidden="true" className="size-4.5 shrink-0" />
+      <h2 className="flex-1 font-heading text-sm font-semibold">Session debug</h2>
+      {onClose === undefined ? null : (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label="Hide debug pane"
+          className="size-10 rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground dark:hover:bg-accent"
+          onClick={onClose}
+        >
+          <XIcon aria-hidden="true" className="size-4.5" />
+        </Button>
+      )}
+    </header>
+  )
+}
+
+/**
+ * What the browser believes, each belief on the row it is compared on: its mode against the host's,
+ * its last run against the server's — or, after a 404, against a session the server no longer holds.
+ */
+function BrowserSection({
+  browser,
+  session,
+  error,
+}: {
+  browser: BrowserBelief
+  session: EnsoThreadInspection | undefined
+  error: string | undefined
+}): React.ReactNode {
+  const browserMode = browser.mode.mode ?? 'unknown'
+  const hostMode = session?.permissionMode.mode
+  const sessionMissing = error === NO_SESSION_YET
+  const generationDrift =
+    describeGenerationDrift(browser.generation, session?.generation) ??
+    describeLostSession(browser.generation, sessionMissing)
+  return (
+    <section className={DEBUG_SECTION}>
+      <h3 className={DEBUG_HEADING}>browser believes</h3>
+      <LabelValues
+        rows={[
+          [
+            'mode',
+            <Fragment key="mode">
+              {browserMode}
+              <Agreement
+                compared={hostMode !== undefined}
+                mismatch={hostMode !== undefined && hostMode !== browserMode ? `host says ${hostMode}` : undefined}
+              />
+            </Fragment>,
+          ],
+          ['available', browser.mode.available.join(', ') || '(none yet)'],
+          [
+            'last run',
+            <Fragment key="last run">
+              {browser.generation === undefined ? 'none from this page' : `#${browser.generation}`}
+              <Agreement
+                compared={browser.generation !== undefined && session !== undefined}
+                mismatch={generationDrift}
+              />
+            </Fragment>,
+          ],
+          ['usage', describeUsage(browser.usage)],
+        ]}
+      />
+      <h4 className={DEBUG_SUBHEADING}>last {browser.recentChunks.length} CUSTOM chunks</h4>
+      <ol className={DEBUG_LIST}>
+        {browser.recentChunks.map((chunk) => (
+          <li key={chunk.sequence}>
+            {chunk.receivedAt.slice(11, 19)} {describeChunk(chunk)}
+          </li>
+        ))}
+      </ol>
+      {/* The page's own records for this thread (#132): the ring, not the server — what
+			    the adapter said as it happened, including what the server never heard. */}
+      <h4 className={DEBUG_SUBHEADING}>browser logged ({browser.logged.length})</h4>
+      <ol aria-label="browser log" className={DEBUG_LIST}>
+        {browser.logged.map((line) => (
+          <li
+            key={loggedLineKey(line)}
+            className={line.level === 'WARN' || line.level === 'ERROR' ? 'text-destructive' : ''}
+          >
+            {line['@timestamp'].slice(11, 23)} {line.level.toLowerCase()} {line.logger.replace(/^enso\.browser\.?/, '')}{' '}
+            {line.message}
+          </li>
+        ))}
+      </ol>
     </section>
   )
 }
@@ -355,17 +481,18 @@ export function ThreadDebugView({
   onRefresh,
   onCopy,
   onBundle,
+  onClose,
 }: ThreadDebugViewProps): React.ReactNode {
-  const browserMode = browser.mode.mode ?? 'unknown'
-  const hostMode = session?.permissionMode.mode
-  const sessionMissing = error === NO_SESSION_YET
-  const generationDrift =
-    describeGenerationDrift(browser.generation, session?.generation) ??
-    describeLostSession(browser.generation, sessionMissing)
+  // The prototype's debug pane (#417): a 60px header — bug, title, close — over a muted intro, the
+  // actions, and label/value grids; what the page believes beside what the server holds, `match`
+  // or MISMATCH said on the row they compare.
   return (
-    <aside aria-label="session debug" className="flex flex-col gap-3 p-3 font-mono text-xs text-muted-foreground">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="font-semibold text-foreground">session debug</span>
+    <aside aria-label="session debug" className="flex flex-col">
+      <DebugHeader onClose={onClose} />
+      <div className="flex flex-col gap-4 p-4 text-detail">
+        <p className="text-muted-foreground">
+          What the page believes, beside what pi’s session holds, for this thread.
+        </p>
         <DebugActions
           copyState={copyState}
           bundleState={bundleState}
@@ -373,44 +500,8 @@ export function ThreadDebugView({
           onCopy={onCopy}
           onBundle={onBundle}
         />
-        <span className="w-full break-all">thread {threadId}</span>
-      </div>
-      <div className="flex flex-col gap-3">
-        <section>
-          <h3 className="font-semibold text-foreground">browser believes</h3>
-          <div>
-            mode: {browserMode}
-            <Mismatch when={hostMode !== undefined && hostMode !== browserMode} says={`host says ${hostMode}`} />
-          </div>
-          <div>available: {browser.mode.available.join(', ') || '(none yet)'}</div>
-          <div>
-            last run: {browser.generation === undefined ? 'none from this page' : `#${browser.generation}`}
-            <Mismatch when={generationDrift !== undefined} says={generationDrift ?? ''} />
-          </div>
-          <div>usage: {describeUsage(browser.usage)}</div>
-          <h4 className="mt-1 text-foreground">last {browser.recentChunks.length} CUSTOM chunks</h4>
-          <ol>
-            {browser.recentChunks.map((chunk) => (
-              <li key={chunk.sequence}>
-                {chunk.receivedAt.slice(11, 19)} {describeChunk(chunk)}
-              </li>
-            ))}
-          </ol>
-          {/* The page's own records for this thread (#132): the ring, not the server — what
-					    the adapter said as it happened, including what the server never heard. */}
-          <h4 className="mt-1 text-foreground">browser logged ({browser.logged.length})</h4>
-          <ol aria-label="browser log">
-            {browser.logged.map((line) => (
-              <li
-                key={loggedLineKey(line)}
-                className={line.level === 'WARN' || line.level === 'ERROR' ? 'text-destructive' : ''}
-              >
-                {line['@timestamp'].slice(11, 23)} {line.level.toLowerCase()}{' '}
-                {line.logger.replace(/^enso\.browser\.?/, '')} {line.message}
-              </li>
-            ))}
-          </ol>
-        </section>
+        <LabelValues rows={[['thread', threadId]]} />
+        <BrowserSection browser={browser} session={session} error={error} />
         <SessionSection session={session} error={error} />
         {/* The event tails (#97): the ordering view. `emitted` is what the host's funnel saw,
 				    with how each was delivered; `sent` is what the server wrote to this browser.
@@ -418,14 +509,14 @@ export function ThreadDebugView({
 				    ⚠ One disagreement is BY DESIGN (#279): a partial `tool-result` is elided at
 				    `writeFrame`, so `emitted` counts every accumulated tick and `sent` counts only
 				    the completed one. A `tool-result` gap here is the elision, not a #88 drop. */}
-        <section>
-          <h3 className="font-semibold text-foreground">the host emitted</h3>
+        <section className={DEBUG_SECTION}>
+          <h3 className={DEBUG_HEADING}>the host emitted</h3>
           <EventTailList events={events?.emitted} />
-          <h3 className="mt-2 font-semibold text-foreground">the server sent</h3>
+          <h3 className={cn(DEBUG_HEADING, 'mt-2')}>the server sent</h3>
           <EventTailList events={events?.sent} />
         </section>
-        <section>
-          <h3 className="font-semibold text-foreground">fork point</h3>
+        <section className={DEBUG_SECTION}>
+          <h3 className={DEBUG_HEADING}>fork point</h3>
           <ForkPointList reading={manifest} />
         </section>
       </div>
@@ -655,6 +746,7 @@ function useThreadInspection(stores: ThreadStores): ThreadInspection {
  */
 export function ThreadDebugDrawer(): React.ReactNode {
   const stores = useThreadStores()
+  const close = useContext(CloseDebugContext)
   const { threadId } = stores
   const mode = usePermissionMode()
   const usage = useStore(stores.usage)
@@ -698,6 +790,7 @@ export function ThreadDebugDrawer(): React.ReactNode {
       onRefresh={refresh}
       onCopy={copy}
       onBundle={bundle}
+      onClose={close}
     />
   )
 }

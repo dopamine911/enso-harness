@@ -318,7 +318,7 @@ export interface ThreadStores {
   readonly toolResultDescriptors: WritableStore<ReadonlyMap<string, EnsoToolResultDescriptor>>
   /**
    * The thread shows its launch panel (#877): the composer is the form that starts its session.
-   * Raised when the page MINTS the thread — New Thread, a page with no thread in its URL — and when
+   * Raised when the page MINTS the thread — New thread, a page with no thread in its URL — and when
    * it adopts one the server says was never started (`EnsoThreadHistory.draft`, #479); lowered once
    * Start goes through. A thread adopted with a history never raises it.
    */
