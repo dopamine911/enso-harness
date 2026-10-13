@@ -50,7 +50,7 @@ To add a seeded thread, add it to `seededHome` in `e2e-home.ts` with the turns a
 
 Each of the four before #679's row was shown failing with its fix reverted (#486), and #713's was too.
 
-⚠ **A slash command needs a running session (#484)**, and a page visit builds none. A test that drives one first builds the thread's session: a new thread with `startSession`, which chooses the mode on the launch panel's Mode chip and starts with a prompt the seeded `demo` provider refuses at once (nothing listens on its port), and a stored thread with `chooseMode`, the docked composer's mode select, a control route that builds it with no prompt. All four tests that drove a slash command into a session-less thread had failed since #484, unnoticed because this suite is not in CI (#604).
+⚠ **A slash command needs a running session (#484)**, and a page visit builds none. A test that drives one first builds the thread's session: a new thread with `startSession`, which chooses the mode on the launch panel's Mode chip and starts with a prompt the seeded `demo` provider refuses at once (nothing listens on its port), and a stored thread with `chooseMode`, the docked composer's Mode chip (#878), a control route that builds it with no prompt. All four tests that drove a slash command into a session-less thread had failed since #484, unnoticed because this suite is not in CI (#604).
 
 ## Output
 
