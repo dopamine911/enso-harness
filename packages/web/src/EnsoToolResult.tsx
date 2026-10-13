@@ -52,7 +52,7 @@ function TextFallback({ result }: { result: ToolResultPart }): React.ReactNode {
   return (
     <pre
       data-enso-tool-result="text"
-      className="max-h-56 overflow-y-auto font-mono text-sm break-words whitespace-pre-wrap"
+      className="max-h-60 overflow-y-auto font-mono text-xs leading-relaxed break-words whitespace-pre-wrap"
     >
       {text}
     </pre>
@@ -106,7 +106,7 @@ export function EnsoToolResult({
   // not a pulse (#739: an animation keeps the compositor ticking for as long as the call runs).
   if (state.status === 'pending') {
     return (
-      <p data-enso-tool-result="pending" className="text-sm text-evidence">
+      <p data-enso-tool-result="pending" className="text-xs text-evidence">
         running…
       </p>
     )
@@ -115,7 +115,7 @@ export function EnsoToolResult({
   // server going away, or a torn tail on resume. Muted, not the running colour; the words say why.
   if (state.status === 'aborted') {
     return (
-      <p data-enso-tool-result="aborted" className="text-sm text-muted-foreground">
+      <p data-enso-tool-result="aborted" className="text-xs text-muted-foreground">
         aborted — the run ended before this call returned
       </p>
     )
@@ -127,7 +127,7 @@ export function EnsoToolResult({
   // error carries (a stderr) are kept.
   if (state.status === 'error') {
     return (
-      <pre data-enso-tool-result="error" className="font-mono text-sm break-words whitespace-pre-wrap text-refuse">
+      <pre data-enso-tool-result="error" className="font-mono text-xs break-words whitespace-pre-wrap text-refuse">
         {state.error}
       </pre>
     )

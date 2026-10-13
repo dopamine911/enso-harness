@@ -91,6 +91,11 @@ export interface ModelSearchRequest {
   signal: AbortSignal | undefined
   /** Streaming progress for the UI; carries the accumulated answer text so far. */
   onProgress?: ((text: string) => void) | undefined
+  /**
+   * The Claude Code version to claim on a Claude login (`claudeCode.version`, #925); `undefined`
+   * claims the version pi's conversations send. Read by the `anthropic` provider only.
+   */
+  claudeCodeVersion?: string | undefined
 }
 ```
 

@@ -6,6 +6,7 @@ import { DialogFooter } from './components/ui/dialog.tsx'
 import { type DeletePreviewRead, type DeleteTarget, deleteThread, readDeletePreview } from './delete-thread.ts'
 import { formatBytes } from './disk-usage.ts'
 import { HeaderDialog } from './header-dialog.tsx'
+import { PAGE_BUTTON, PAGE_OUTLINE_BUTTON } from './page-styles.ts'
 
 /**
  * A thread's Delete (#571), behind a confirmation that says what goes before it is confirmed:
@@ -104,17 +105,24 @@ export function DeleteThread({
       showCloseButton={!deleting}
     >
       {holdsWork === undefined ? null : (
-        <p role="alert" className="text-sm text-destructive">
+        <p role="alert" className="text-sm text-refuse">
           {refusedForWork?.changed === true ? 'The tree changed since: ' : null}
           {holdsWork}
         </p>
       )}
-      <DialogFooter>
-        <Button variant="ghost" disabled={deleting} onClick={(): void => changeOpen(false)}>
+      {/* The prototype's confirm actions (#417): no footer band, an outline Cancel, the delete filled in
+          the refusal colour — its words in the background's, which reads on it in a dark theme and a light one. */}
+      <DialogFooter className="mx-0 mb-0 rounded-none border-0 bg-transparent p-0 pt-3">
+        <Button
+          variant="outline"
+          className={PAGE_OUTLINE_BUTTON}
+          disabled={deleting}
+          onClick={(): void => changeOpen(false)}
+        >
           Cancel
         </Button>
         <Button
-          variant="destructive"
+          className={`${PAGE_BUTTON} bg-refuse text-background hover:bg-refuse hover:brightness-112`}
           disabled={deleting || preview === undefined}
           onClick={(): void => confirm(holdsWork)}
         >

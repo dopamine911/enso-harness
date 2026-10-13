@@ -4,6 +4,7 @@ import {
   type AnthropicWireSearchOptions,
   runAnthropicWireSearch,
 } from '../web-search/anthropic-wire.ts'
+import { runAnthropicProviderSearch } from '../web-search/providers/anthropic.ts'
 import {
   DEEPSEEK_SEARCH_BASE_URL,
   DEEPSEEK_SEARCH_MODEL_ID,
@@ -309,7 +310,6 @@ test('⚠ an OAuth credential sends the Claude Code identity system block — it
   // Observed live: without this block, Anthropic rejects the OAuth request as HTTP 429
   // rate_limit_error/"Error" (request_id req_011CejDyvm41VXVA7BY1jHgw); with it, the same
   // credential searched (audit line: `searched provider=anthropic — primary`).
-  const { runAnthropicProviderSearch } = await import('../web-search/providers/anthropic.ts')
   let capturedBody: string | undefined
   const capturingFetch: FetchUrl = async (_url: string, init: FetchUrlInit) => {
     capturedBody = init.body

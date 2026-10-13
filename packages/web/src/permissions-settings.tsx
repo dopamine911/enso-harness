@@ -21,7 +21,7 @@ import {
   withRule,
   withRuleMoved,
 } from '@enso/core'
-import { ArrowDownIcon, ArrowUpIcon, TriangleAlertIcon, XIcon } from 'lucide-react'
+import { CheckIcon, ChevronDownIcon, ChevronUpIcon, PlusIcon, TriangleAlertIcon, XIcon } from 'lucide-react'
 import { RadioGroup as RadioGroupPrimitive } from 'radix-ui'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FetchLike } from './browser-logging.ts'
@@ -30,6 +30,7 @@ import { Button } from './components/ui/button.tsx'
 import { FieldError } from './components/ui/field.tsx'
 import { Input } from './components/ui/input.tsx'
 import { OptionSelect } from './option-select.tsx'
+import { PAGE_BUTTON, PAGE_INPUT, PAGE_OUTLINE_BUTTON, SAVE_BAR, SUB_TITLE } from './page-styles.ts'
 import {
   checkPermission,
   fetchPermissionPolicy,
@@ -64,11 +65,25 @@ import {
  * When its engine has not loaded, the section says so rather than match patterns itself.
  */
 
+/** Each decision and its word, as the prototype names it: the segments' and the new rule's choice. */
 const ACTIONS: ReadonlyArray<readonly [EnsoPermissionAction, string]> = [
-  ['allow', 'allow'],
-  ['ask', 'ask'],
-  ['deny', 'deny'],
+  ['allow', 'Allow'],
+  ['ask', 'Ask'],
+  ['deny', 'Deny'],
 ]
+
+/** Each decision in its own colour, as the prototype's `.decision-text` (#417): allow ok, ask human, deny refuse. */
+const DECISION_TEXT: Readonly<Record<EnsoPermissionAction, string>> = {
+  allow: 'text-ok',
+  ask: 'text-human',
+  deny: 'text-refuse',
+}
+
+/** A page's quiet line under a title: the prototype's `.page-note`. */
+const PAGE_NOTE = 'text-sm text-muted-foreground'
+
+/** A rule list's header row, as the prototype's `.data-table th`. */
+const TABLE_HEAD = 'font-mono text-meta font-semibold tracking-wider text-muted-foreground uppercase'
 
 type PolicyState = { readonly kind: 'loading' } | PolicyRead
 
@@ -225,20 +240,39 @@ export function usePermissionPolicy(open: boolean, fetchImpl: FetchLike | undefi
   }
 }
 
-/** Who a row is, in words: what a mode may do to it. */
-function ownerWords(row: EnsoPolicyRow, mode: EnsoPermissionModeName | undefined): string {
-  if (row.owner === 'catch-all') return "Enso's catch-all — a mode may change this"
-  if (row.owner === 'mode') return `from ${mode ?? 'the mode'}`
-  return 'yours — holds in every mode'
+/** A row's tag after its pattern, the prototype's `.badge-tag`: whose it is, when not simply yours. */
+function OwnerTag({ row, mode }: { row: EnsoPolicyRow; mode: EnsoPermissionModeName | undefined }): React.ReactNode {
+  if (row.owner === 'catch-all') return <RuleTag title="Enso's catch-all — a mode may change this">catch-all</RuleTag>
+  if (row.owner === 'mode') return <RuleTag>from {mode ?? 'the mode'}</RuleTag>
+  return null
 }
 
-/** A row's pattern, editable in place: the rename lands on blur or Enter, or says why it cannot. */
+/** A small mono pill beside a pattern. `data-rule-tag` is what the tests read a row's owner by. */
+function RuleTag({ title, children }: { title?: string; children: React.ReactNode }): React.ReactNode {
+  return (
+    <span
+      data-rule-tag=""
+      title={title}
+      className="inline-flex items-center rounded-full border border-border-strong px-2 font-mono text-tag whitespace-nowrap text-muted-foreground"
+    >
+      {children}
+    </span>
+  )
+}
+
+/**
+ * A row's pattern, editable in place: the rename lands on blur or Enter, or says why it cannot. It
+ * reads as the table's mono text (#417) — no box until it is hovered or focused — and sizes to what
+ * it holds, so the row's tag sits right after it.
+ */
 function PatternField({
   row,
   onRename,
+  children,
 }: {
   row: EnsoPolicyRow
   onRename: (to: string) => string | undefined
+  children: React.ReactNode
 }): React.ReactNode {
   // Only in-progress typing lives in state; an untouched field shows the row's own pattern.
   const [typed, setTyped] = useState<string | undefined>(undefined)
@@ -250,11 +284,11 @@ function PatternField({
     setRefusal(onRename(to))
   }
   return (
-    <span className="flex min-w-0 flex-1 flex-col">
+    <>
       <Input
         aria-label={`pattern ${row.surface} ${row.pattern}`}
         aria-invalid={refusal !== undefined}
-        className="h-7 font-mono text-xs"
+        className="field-sizing-content h-8 max-w-full min-w-16 rounded-sm border-transparent bg-transparent px-1.5 font-mono text-sm shadow-none hover:border-border focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/20 aria-invalid:border-refuse md:text-sm dark:bg-transparent"
         value={text}
         onChange={(event: React.ChangeEvent<HTMLInputElement>) => setTyped(event.target.value)}
         onBlur={commit}
@@ -262,8 +296,9 @@ function PatternField({
           if (event.key === 'Enter') commit()
         }}
       />
-      {refusal === undefined ? null : <FieldError>{refusal}</FieldError>}
-    </span>
+      {children}
+      {refusal === undefined ? null : <FieldError className="basis-full">{refusal}</FieldError>}
+    </>
   )
 }
 
@@ -276,49 +311,88 @@ interface RowEdits {
   readonly canMoveDown: boolean
 }
 
-/** A rule's controls. ⚠ Enso's `**` takes an action change only: a mode needs it where it is (#499). */
-function RuleControls({ row, edits }: { row: EnsoPolicyRow; edits: RowEdits }): React.ReactNode {
-  const name = `${row.surface} ${row.pattern}`
-  const catchAll = row.pattern === ENSO_CATCH_ALL
+/** Each decision's segment, tinted when picked as the prototype's `.decision-group` (#417). */
+const DECISION_SEGMENT: Readonly<Record<EnsoPermissionAction, string>> = {
+  allow: 'data-[state=checked]:bg-ok/15 data-[state=checked]:text-ok',
+  ask: 'data-[state=checked]:bg-human/15 data-[state=checked]:text-human',
+  deny: 'data-[state=checked]:bg-refuse/15 data-[state=checked]:text-refuse',
+}
+
+/** A rule's decision as the prototype's segmented Allow | Ask | Deny: one radiogroup, named as the rule's action. */
+function DecisionSegments({
+  label,
+  value,
+  onChange,
+}: {
+  label: string
+  value: EnsoPermissionAction
+  onChange: (action: EnsoPermissionAction) => void
+}): React.ReactNode {
   return (
-    <>
-      <OptionSelect
-        label={`action ${name}`}
-        value={decisionAction(row.decision)}
-        options={ACTIONS}
-        onChange={edits.onAction}
-      />
-      {catchAll ? null : (
-        <span className="flex gap-0.5">
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            aria-label={`move ${name} up`}
-            disabled={!edits.canMoveUp}
-            onClick={() => edits.onMove(-1)}
-          >
-            <ArrowUpIcon />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            aria-label={`move ${name} down`}
-            disabled={!edits.canMoveDown}
-            onClick={() => edits.onMove(1)}
-          >
-            <ArrowDownIcon />
-          </Button>
-          <Button variant="ghost" size="icon-xs" aria-label={`remove ${name}`} onClick={edits.onRemove}>
-            <XIcon />
-          </Button>
-        </span>
-      )}
-    </>
+    <RadioGroupPrimitive.Root
+      aria-label={label}
+      orientation="horizontal"
+      value={value}
+      onValueChange={(picked: string) => {
+        const action = ACTIONS.find(([known]) => known === picked)?.[0]
+        if (action !== undefined) onChange(action)
+      }}
+      className="inline-flex overflow-hidden rounded-sm border border-border-strong"
+    >
+      {ACTIONS.map(([action, word]) => (
+        <RadioGroupPrimitive.Item
+          key={action}
+          value={action}
+          className={`min-h-8 border-border-strong px-3 text-xs font-semibold text-muted-foreground transition-colors outline-none not-first:border-l hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset ${DECISION_SEGMENT[action]}`}
+        >
+          {word}
+        </RadioGroupPrimitive.Item>
+      ))}
+    </RadioGroupPrimitive.Root>
   )
 }
 
-/** One rule: its pattern, its action, whose it is, and what an allow on it lets through. */
-function RuleRow({
+/** A table cell, as the prototype's `.data-table td`: hairlines between the rows. */
+const BODY_CELL = 'border-t px-3 py-2 align-middle'
+
+/** What an icon button in a row looks like: 32px, quiet until hovered. */
+const ROW_ICON_BUTTON = 'size-8 rounded-sm text-muted-foreground hover:text-foreground'
+
+/** The order cell's content: Enso's `**` is always first; a rule of yours moves up and down; a preview moves nothing. */
+function OrderControls({ row, edits }: { row: EnsoPolicyRow; edits: RowEdits | undefined }): React.ReactNode {
+  if (edits === undefined) return null
+  if (row.pattern === ENSO_CATCH_ALL) {
+    return <span className="text-xs whitespace-nowrap text-muted-foreground">always first</span>
+  }
+  const name = `${row.surface} ${row.pattern}`
+  return (
+    <span className="inline-flex gap-0.5">
+      <Button
+        variant="ghost"
+        size="icon"
+        className={ROW_ICON_BUTTON}
+        aria-label={`move ${name} up`}
+        disabled={!edits.canMoveUp}
+        onClick={() => edits.onMove(-1)}
+      >
+        <ChevronUpIcon />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        className={ROW_ICON_BUTTON}
+        aria-label={`move ${name} down`}
+        disabled={!edits.canMoveDown}
+        onClick={() => edits.onMove(1)}
+      >
+        <ChevronDownIcon />
+      </Button>
+    </span>
+  )
+}
+
+/** The pattern cell: the pattern (editable unless it is Enso's `**`), its tag, and what an allow on it lets through. */
+function PatternCell({
   row,
   mode,
   edits,
@@ -327,30 +401,83 @@ function RuleRow({
   mode: EnsoPermissionModeName | undefined
   edits: RowEdits | undefined
 }): React.ReactNode {
-  const renamable = edits !== undefined && row.pattern !== ENSO_CATCH_ALL
   const reason = typeof row.decision === 'object' ? row.decision.reason : undefined
+  const tag = <OwnerTag row={row} mode={mode} />
   return (
-    <li aria-label={`${row.surface} ${row.pattern}`} className="flex flex-col gap-0.5 border-b py-1.5 last:border-b-0">
-      <span className="flex items-center gap-2">
-        {renamable ? (
-          <PatternField row={row} onRename={edits.onRename} />
+    <td className={`${BODY_CELL} min-w-48`}>
+      <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        {edits !== undefined && row.pattern !== ENSO_CATCH_ALL ? (
+          <PatternField row={row} onRename={edits.onRename}>
+            {tag}
+          </PatternField>
         ) : (
-          <code className="min-w-0 flex-1 truncate text-xs">{row.pattern}</code>
-        )}
-        {edits === undefined ? (
-          <span className="text-xs font-semibold">{decisionAction(row.decision)}</span>
-        ) : (
-          <RuleControls row={row} edits={edits} />
+          <>
+            <code className="px-1.5 font-mono text-sm break-all">{row.pattern}</code>
+            {tag}
+          </>
         )}
       </span>
-      <span className="text-xs text-muted-foreground">{ownerWords(row, mode)}</span>
-      {reason === undefined ? null : <span className="text-xs">told the agent: {reason}</span>}
+      {reason === undefined ? null : <span className="block px-1.5 text-xs">told the agent: {reason}</span>}
       {row.runsCode === undefined ? null : (
-        <span className="flex items-center gap-1 text-xs text-destructive">
+        <span className="flex items-center gap-1 px-1.5 text-xs text-refuse">
           <TriangleAlertIcon className="size-3" aria-hidden="true" /> runs code unasked: {row.runsCode}
         </span>
       )}
-    </li>
+    </td>
+  )
+}
+
+/**
+ * One rule as a row of the prototype's table (#417): its number, its surface, its pattern and tag,
+ * its decision, its order, and its remove. ⚠ Enso's `**` takes a decision change only: a mode needs
+ * it where it is (#499).
+ */
+function RuleRow({
+  row,
+  number,
+  mode,
+  edits,
+}: {
+  row: EnsoPolicyRow
+  number: number
+  mode: EnsoPermissionModeName | undefined
+  edits: RowEdits | undefined
+}): React.ReactNode {
+  const name = `${row.surface} ${row.pattern}`
+  const action = decisionAction(row.decision)
+  const removable = edits !== undefined && row.pattern !== ENSO_CATCH_ALL
+  return (
+    <tr aria-label={name} className={row.owner === 'mode' ? 'text-muted-foreground' : undefined}>
+      <td className={`${BODY_CELL} text-right font-mono text-xs text-muted-foreground tabular-nums`}>{number}</td>
+      <td className={`${BODY_CELL} whitespace-nowrap`}>{row.surface}</td>
+      <PatternCell row={row} mode={mode} edits={edits} />
+      <td className={BODY_CELL}>
+        {edits === undefined ? (
+          // Where it cannot change: the word in its colour, the prototype's `.decision-text`.
+          <span data-decision={action} className={`font-mono text-xs font-semibold ${DECISION_TEXT[action]}`}>
+            {action}
+          </span>
+        ) : (
+          <DecisionSegments label={`action ${name}`} value={action} onChange={edits.onAction} />
+        )}
+      </td>
+      <td className={BODY_CELL}>
+        <OrderControls row={row} edits={edits} />
+      </td>
+      <td className={`${BODY_CELL} text-right`}>
+        {removable ? (
+          <Button
+            variant="ghost"
+            size="icon"
+            className={ROW_ICON_BUTTON}
+            aria-label={`remove ${name}`}
+            onClick={edits.onRemove}
+          >
+            <XIcon />
+          </Button>
+        ) : null}
+      </td>
+    </tr>
   )
 }
 
@@ -385,7 +512,13 @@ interface RuleEditing {
   readonly onEdit: PolicyEditor['edit']
 }
 
-/** The rules per surface, in the engine's order; editable when `editing` is given. */
+/** A column head of the rule table, as the prototype's `.data-table th`. */
+const HEAD_CELL = `px-3 py-2 text-left whitespace-nowrap ${TABLE_HEAD}`
+
+/**
+ * The rules in the engine's order, one table (#417): a row per rule, numbered down the table, each
+ * surface's rows together in a group of their own. Editable when `editing` is given.
+ */
 function RuleList({
   rows,
   mode,
@@ -395,23 +528,47 @@ function RuleList({
   mode: EnsoPermissionModeName | undefined
   editing: RuleEditing | undefined
 }): React.ReactNode {
+  const groups = rowsBySurface(rows)
+  const firsts = groups.map((_, index) => groups.slice(0, index).reduce((count, group) => count + group.rows.length, 1))
   return (
-    <div className="flex flex-col gap-3">
-      {rowsBySurface(rows).map((group) => (
-        <section key={group.surface} aria-label={`surface ${group.surface}`}>
-          <h4 className="font-mono text-xs font-semibold">{group.surface}</h4>
-          <ul className="rounded-md border px-2">
+    <div className="overflow-x-auto rounded-sm border bg-card">
+      <table aria-labelledby="permissions-rules-label" className="w-full border-collapse text-sm">
+        <thead>
+          <tr>
+            <th scope="col" className={`${HEAD_CELL} w-10 text-right`}>
+              #
+            </th>
+            <th scope="col" className={HEAD_CELL}>
+              Tool
+            </th>
+            <th scope="col" className={HEAD_CELL}>
+              Pattern
+            </th>
+            <th scope="col" className={HEAD_CELL}>
+              Decision
+            </th>
+            <th scope="col" className={HEAD_CELL}>
+              Order
+            </th>
+            <th scope="col" className={HEAD_CELL}>
+              <span className="sr-only">Remove</span>
+            </th>
+          </tr>
+        </thead>
+        {groups.map((group, index) => (
+          <tbody key={group.surface} aria-label={`surface ${group.surface}`}>
             {group.rows.map((row, position) => (
               <RuleRow
                 key={row.pattern}
                 row={row}
+                number={(firsts[index] ?? 1) + position}
                 mode={mode}
                 edits={editing === undefined ? undefined : rowEdits(row, group.rows, position, editing)}
               />
             ))}
-          </ul>
-        </section>
-      ))}
+          </tbody>
+        ))}
+      </table>
     </div>
   )
 }
@@ -429,19 +586,25 @@ function ReplacedSurfaces({
   )
   if (replaced.length === 0) return null
   return (
-    <p className="text-xs text-muted-foreground">
+    <p className={PAGE_NOTE}>
       In {mode}, the mode replaces these surfaces whole — your rules on them do not apply: {replaced.join(', ')}
     </p>
   )
 }
 
+/** Where the yoloMode Behaviour row is, for the callout under the lede to take the reader to. */
+const YOLO_ROW_ID = 'permissions-behaviour-yoloMode'
+
 /**
- * The file's knobs, said where they change behaviour. ⚠ A running thread reads the knobs when a
- * prompt starts (the engine's `before_agent_start` refresh), but the rules at every call: a saved
- * `yoloMode` is in force from the thread's NEXT prompt, and "Try a command" answers before it
- * as the engine does. Found in #474's browser smoke.
+ * Under the lede, in one quiet line: where every decision is logged, and when a saved change is in
+ * force. ⚠ A running thread reads the knobs when a prompt starts (the engine's `before_agent_start`
+ * refresh), but the rules at every call: a saved `yoloMode` is in force from the thread's NEXT
+ * prompt, and "Try a command" answers before it as the engine does. Found in #474's browser smoke.
+ *
+ * ⚠ While yoloMode is on, a callout comes first: every Ask in the table below is silently an Allow,
+ * and its Behaviour row sits at the foot of a long section, where nobody reading the rules sees it.
  */
-function KnobNotes({
+function HeadFacts({
   file,
   reviewLogDirectory,
 }: {
@@ -449,32 +612,102 @@ function KnobNotes({
   reviewLogDirectory: string
 }): React.ReactNode {
   const knobs = policyKnobs(file)
+  const showYolo = (): void => {
+    const row = document.getElementById(YOLO_ROW_ID)
+    row?.scrollIntoView({ block: 'center' })
+    row?.focus()
+  }
   return (
     <>
       {knobs.yoloMode ? (
-        <Alert variant="destructive" aria-label="yolo mode">
-          <TriangleAlertIcon />
-          <AlertTitle>yoloMode is on</AlertTitle>
-          <AlertDescription>
-            Every ask becomes allow, in every mode: nothing below that asks will ask. A running thread takes this up at
-            its next prompt.
-          </AlertDescription>
-        </Alert>
-      ) : null}
-      {knobs.reviewLog ? (
-        <p className="text-xs text-muted-foreground">
-          Every decision is logged, in <code>{reviewLogDirectory}</code>.
+        <p
+          aria-label="yolo mode is on"
+          className="flex max-w-reading flex-wrap items-center gap-x-2 gap-y-1 rounded-sm border border-refuse px-3 py-2 text-sm text-refuse"
+        >
+          <TriangleAlertIcon aria-hidden="true" className="size-4 shrink-0" />
+          <span className="font-semibold">Yolo mode is on: every Ask below is an Allow.</span>
+          <button type="button" className="underline underline-offset-3" onClick={showYolo}>
+            See Behaviour
+          </button>
         </p>
       ) : null}
-      {knobs.autoClassifier ? null : (
-        <p className="text-xs text-muted-foreground">
-          auto asks instead of classifying: the file's authorizerChain does not name Enso's classifier.
-        </p>
-      )}
-      <p className="text-xs text-muted-foreground">
+      <p className="max-w-reading text-xs text-muted-foreground">
+        {knobs.reviewLog ? (
+          <>
+            Every decision is logged, in <code className="font-mono">{reviewLogDirectory}</code>.{' '}
+          </>
+        ) : null}
         A saved rule is in force at a running thread's next call; the settings beside the rules, at its next prompt.
       </p>
     </>
+  )
+}
+
+/** A setting beside the rules that changes what they do, said as the prototype's Behaviour row (#417). */
+interface BehaviourNote {
+  readonly label: string
+  readonly title: string
+  readonly words: string
+  readonly key: string
+  readonly value: string
+  readonly danger: boolean
+}
+
+/** The notes the file's knobs call for: yoloMode on, and an authorizerChain without Enso's classifier. */
+function behaviourNotes(file: Record<string, unknown>): BehaviourNote[] {
+  const knobs = policyKnobs(file)
+  const notes: BehaviourNote[] = []
+  if (knobs.yoloMode) {
+    notes.push({
+      label: 'yolo mode',
+      title: 'Yolo mode is on',
+      words:
+        'Every ask becomes allow, in every mode: nothing in the rules above that asks will ask. A running thread takes this up at its next prompt.',
+      key: 'yoloMode',
+      value: 'on',
+      danger: true,
+    })
+  }
+  if (!knobs.autoClassifier) {
+    notes.push({
+      label: 'authorizer chain',
+      title: 'auto asks instead of classifying',
+      words: "The file's authorizerChain does not name Enso's classifier, so auto mode asks you.",
+      key: 'authorizerChain',
+      value: "doesn't name Enso's classifier",
+      danger: false,
+    })
+  }
+  return notes
+}
+
+/** The Behaviour rows: read here, changed in the file by hand. Nothing when no knob calls for a note. */
+function BehaviourNotes({ file, path }: { file: Record<string, unknown>; path: string }): React.ReactNode {
+  const notes = behaviourNotes(file)
+  if (notes.length === 0) return null
+  return (
+    <div className="grid gap-3">
+      <h3 className={SUB_TITLE}>Behaviour</h3>
+      <p className={PAGE_NOTE}>Set in the same file, beside the rules; change them there.</p>
+      <div className="rounded-lg border bg-card">
+        {notes.map((note) => (
+          <div
+            key={note.key}
+            id={`permissions-behaviour-${note.key}`}
+            tabIndex={-1}
+            aria-label={note.label}
+            className="grid gap-1 p-4 outline-none not-first:border-t focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+          >
+            <span className={note.danger ? 'font-semibold text-refuse' : 'font-semibold'}>{note.title}</span>
+            <p className={PAGE_NOTE}>{note.words}</p>
+            <p className="text-xs break-all text-muted-foreground">
+              <code className="font-mono text-meta text-foreground">{path}</code> ›{' '}
+              <code className="font-mono text-meta text-foreground">{note.key}</code> · {note.value}
+            </p>
+          </div>
+        ))}
+      </div>
+    </div>
   )
 }
 
@@ -500,28 +733,36 @@ function AddRule({
     setPattern('')
   }
   return (
-    <fieldset aria-label="add a rule" className="flex flex-col gap-1">
-      <span className="flex flex-wrap items-center gap-2">
+    <fieldset aria-label="add a rule" className="grid gap-2">
+      <span className="grid items-start gap-2 md:grid-cols-add-rule">
         <OptionSelect
           label="new rule surface"
           value={surface}
           options={surfaces.map((choice) => [choice, choice] as const)}
           onChange={setSurface}
+          className={PAGE_INPUT}
         />
         <Input
           aria-label="new rule pattern"
-          className="h-7 min-w-40 flex-1 font-mono text-xs"
+          className={`${PAGE_INPUT} font-mono`}
           placeholder="git push *"
           value={pattern}
           onChange={(event: React.ChangeEvent<HTMLInputElement>) => setPattern(event.target.value)}
         />
-        <OptionSelect label="new rule action" value={action} options={ACTIONS} onChange={setAction} />
-        <Button variant="outline" size="sm" onClick={add}>
+        <OptionSelect
+          label="new rule action"
+          value={action}
+          options={ACTIONS}
+          onChange={setAction}
+          className={PAGE_INPUT}
+        />
+        <Button variant="outline" className={PAGE_OUTLINE_BUTTON} onClick={add}>
+          <PlusIcon aria-hidden="true" />
           Add rule
         </Button>
       </span>
       {refusal === undefined ? null : <FieldError>{refusal}</FieldError>}
-      <p className="text-xs text-muted-foreground">
+      <p className={PAGE_NOTE}>
         Patterns: <code>*</code> matches anything, <code>/</code> included; a trailing <code> *</code> also matches the
         bare command (<code>git *</code> matches <code>git</code>). Last match wins on a surface.
       </p>
@@ -529,8 +770,47 @@ function AddRule({
   )
 }
 
-/** One drafted group: what it stops or allows, its rules marked when already in force, and an Add. */
-function DraftedGroup({
+/** Why a group's switch, once on, does not turn off. */
+const GROUP_ON_WORDS =
+  "On: its rules are in your table. Remove them there — Enso can't tell a group's rule from your own identical one."
+
+/**
+ * A rule group's switch, the prototype's `.switch` (#417). Off, turning it on adds the group's rules
+ * not already in force; on, it stays on: a group's rules leave from the table, one by one.
+ */
+function GroupSwitch({
+  on,
+  labelledBy,
+  onTurnOn,
+}: {
+  on: boolean
+  labelledBy: string
+  onTurnOn: () => void
+}): React.ReactNode {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      aria-labelledby={labelledBy}
+      disabled={on}
+      title={on ? GROUP_ON_WORDS : undefined}
+      onClick={onTurnOn}
+      className="group relative mt-0.5 h-6 w-10 shrink-0 rounded-full bg-border-strong transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed aria-checked:bg-primary"
+    >
+      <span
+        aria-hidden="true"
+        className="absolute top-0.75 left-0.75 size-4.5 rounded-full bg-foreground transition-transform group-aria-checked:translate-x-4 group-aria-checked:bg-primary-foreground"
+      />
+    </button>
+  )
+}
+
+/**
+ * One rule group, the prototype's `.group-card` (#417): what it stops or allows, its rules as chips
+ * (`bash · npm publish* · deny`, a tick on one already in force), and its switch.
+ */
+function RuleGroup({
   group,
   permission,
   onEdit,
@@ -540,37 +820,46 @@ function DraftedGroup({
   onEdit: PolicyEditor['edit']
 }): React.ReactNode {
   const present = group.rules.map((rule) => hasRule(permission, rule.surface, rule.pattern, rule.decision))
+  const titleId = `rule-group-${group.id}`
   return (
-    <section aria-label={`drafted ${group.title}`} className="flex flex-col gap-1 rounded-md border p-2">
-      <span className="flex items-center justify-between gap-2">
-        <span className="font-semibold">{group.title}</span>
-        <Button
-          variant="outline"
-          size="xs"
-          aria-label={`add ${group.title}`}
-          disabled={present.every(Boolean)}
-          onClick={() => onEdit((current) => withGroup(current, group))}
-        >
-          Add
-        </Button>
-      </span>
-      <p className="text-xs text-muted-foreground">{group.note}</p>
-      <ul className="text-xs">
-        {group.rules.map((rule, position) => (
-          <li key={`${rule.surface} ${rule.pattern}`}>
-            <code>
-              {rule.surface} {rule.pattern}
-            </code>{' '}
-            → {rule.decision}
-            {present[position] === true ? <span className="text-muted-foreground"> · already in force</span> : null}
-          </li>
-        ))}
-      </ul>
+    <section
+      aria-label={`rule group ${group.title}`}
+      className="flex items-start gap-3 rounded-sm border bg-card px-4 py-3"
+    >
+      <div className="grid min-w-0 flex-1 gap-0.5">
+        <span id={titleId} className="font-semibold">
+          {group.title}
+        </span>
+        <p className={PAGE_NOTE}>{group.note}</p>
+        <ul className="mt-1.5 flex flex-wrap gap-1">
+          {group.rules.map((rule, position) => (
+            <li
+              key={`${rule.surface} ${rule.pattern}`}
+              title={present[position] === true ? 'already in force' : undefined}
+              className="inline-flex items-center gap-1 rounded-sm border px-2 py-px font-mono text-meta whitespace-nowrap text-muted-foreground"
+            >
+              {rule.surface} · {rule.pattern} ·{' '}
+              <span className={`font-semibold ${DECISION_TEXT[rule.decision]}`}>{rule.decision}</span>
+              {present[position] === true ? (
+                <>
+                  <CheckIcon aria-hidden="true" className="size-3 text-ok" />
+                  <span className="sr-only">already in force</span>
+                </>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      </div>
+      <GroupSwitch
+        on={present.every(Boolean)}
+        labelledBy={titleId}
+        onTurnOn={() => onEdit((current) => withGroup(current, group))}
+      />
     </section>
   )
 }
 
-function DraftedGroups({
+function RuleGroups({
   permission,
   onEdit,
 }: {
@@ -578,30 +867,44 @@ function DraftedGroups({
   onEdit: PolicyEditor['edit']
 }): React.ReactNode {
   return (
-    <div className="flex flex-col gap-2">
-      <h3 className="font-semibold">Drafted rules</h3>
-      {ENSO_DRAFTED_RULE_GROUPS.map((group) => (
-        <DraftedGroup key={group.id} group={group} permission={permission} onEdit={onEdit} />
-      ))}
-      <p className="text-xs text-muted-foreground">
+    <div className="grid gap-3">
+      <h3 className={SUB_TITLE}>Rule groups</h3>
+      <p className={PAGE_NOTE}>Ready-made rules Enso suggests. Turning a group on adds its rules to yours.</p>
+      <div className="grid gap-2">
+        {ENSO_DRAFTED_RULE_GROUPS.map((group) => (
+          <RuleGroup key={group.id} group={group} permission={permission} onEdit={onEdit} />
+        ))}
+      </div>
+      <p className={PAGE_NOTE}>
         Git safety — no <code>--no-verify</code>, no <code>push --delete</code> — is already in Enso's policy.
       </p>
     </div>
   )
 }
 
-/** Save and Discard, and whether there is anything to save. */
-function SaveBar({ editor }: { editor: PolicyEditor }): React.ReactNode {
+/**
+ * Save and Discard, and whether there is anything to save: the prototype's `.save-bar` (#417),
+ * pinned to the bottom of what scrolls only while there is something unsaved.
+ */
+function SaveBar({ editor, path }: { editor: PolicyEditor; path: string }): React.ReactNode {
   const dirty = editor.draft !== undefined
   return (
-    <div className="flex items-center gap-2">
-      <Button size="sm" disabled={!dirty || editor.working} onClick={() => editor.save(false)}>
-        Save
-      </Button>
-      <Button variant="ghost" size="sm" disabled={!dirty || editor.working} onClick={editor.discard}>
+    <div className={dirty ? SAVE_BAR : 'flex flex-wrap items-center gap-3 rounded-lg border px-4 py-3'}>
+      <span className="min-w-50 flex-1 text-sm">
+        <strong className="block">{dirty ? 'unsaved changes' : 'saved'}</strong>
+        <span className="font-mono text-meta text-muted-foreground">Saves to {path}</span>
+      </span>
+      <Button
+        variant="outline"
+        className={PAGE_OUTLINE_BUTTON}
+        disabled={!dirty || editor.working}
+        onClick={editor.discard}
+      >
         Discard
       </Button>
-      <span className="text-xs text-muted-foreground">{dirty ? 'unsaved changes' : 'saved'}</span>
+      <Button className={PAGE_BUTTON} disabled={!dirty || editor.working} onClick={() => editor.save(false)}>
+        Save
+      </Button>
     </div>
   )
 }
@@ -613,7 +916,11 @@ function ProblemNotice({ editor }: { editor: PolicyEditor }): React.ReactNode {
   if (problem.kind === 'unavailable') return <FieldError>Not saved: {problem.detail}</FieldError>
   if (problem.kind === 'refused') {
     return (
-      <div role="alert" aria-label="refused" className="text-sm text-destructive">
+      <div
+        role="alert"
+        aria-label="refused"
+        className="grid gap-2 rounded-sm border border-refuse bg-card p-4 text-sm text-refuse"
+      >
         <p>Not saved — the engine's schema refused it: {problem.refusal.reason}</p>
         <ul className="list-disc pl-5 text-xs">
           {problem.refusal.problems.map((schemaProblem) => (
@@ -626,18 +933,27 @@ function ProblemNotice({ editor }: { editor: PolicyEditor }): React.ReactNode {
     )
   }
   return (
-    <div role="alert" aria-label="changed on disk" className="flex flex-col gap-2 text-sm">
+    <div
+      role="alert"
+      aria-label="changed on disk"
+      className="grid gap-3 rounded-sm border border-chart-3 bg-card p-4 text-sm"
+    >
       <p>
         permissions.json changed on disk since it was read ({problem.detail}). Nothing was written; your changes are
         still here. Overwrite with mine puts your rules over the file as it is on disk now, and keeps its other settings
         as they are there.
       </p>
-      <span className="flex gap-2">
-        <Button variant="outline" size="sm" disabled={editor.working} onClick={editor.reload}>
+      <span className="flex flex-wrap gap-2">
+        <Button variant="outline" className={PAGE_OUTLINE_BUTTON} disabled={editor.working} onClick={editor.reload}>
           Reload from disk
         </Button>
         {problem.during === 'save' ? (
-          <Button variant="destructive" size="sm" disabled={editor.working} onClick={() => editor.save(true)}>
+          <Button
+            variant="destructive"
+            className={PAGE_BUTTON}
+            disabled={editor.working}
+            onClick={() => editor.save(true)}
+          >
             Overwrite with mine
           </Button>
         ) : null}
@@ -650,13 +966,16 @@ const CHANGE_MARKS: Readonly<Record<PolicyChange['kind'], string>> = { added: '+
 
 /** A reset's changes, per surface (and the file's other settings), each rule added, removed or changed. */
 function ResetDiff({ changes }: { changes: readonly PolicyChange[] }): React.ReactNode {
-  if (changes.length === 0) return <p className="text-xs">The file is already Enso's policy.</p>
+  if (changes.length === 0) return <p className={PAGE_NOTE}>The file is already Enso's policy.</p>
   const sections = [...new Set(changes.map((change) => change.section))]
   return (
-    <div aria-label="reset diff" className="flex max-h-64 flex-col gap-2 overflow-y-auto rounded-md border p-2 text-xs">
+    <div
+      aria-label="reset diff"
+      className="flex max-h-64 flex-col gap-2 overflow-y-auto rounded-sm border bg-background px-3 py-2 text-xs"
+    >
       {sections.map((section) => (
         <section key={section}>
-          <h4 className="font-mono font-semibold">{section}</h4>
+          <h4 className={TABLE_HEAD}>{section}</h4>
           <ul>
             {changes
               .filter((change) => change.section === section)
@@ -678,23 +997,23 @@ function ResetPanel({ policy, editor }: { policy: EnsoPermissionPolicyRead; edit
   const [confirming, setConfirming] = useState(false)
   if (!confirming) {
     return (
-      <Button variant="outline" size="sm" className="self-start" onClick={() => setConfirming(true)}>
+      <Button variant="outline" className={`${PAGE_OUTLINE_BUTTON} self-start`} onClick={() => setConfirming(true)}>
         Reset to Enso's policy…
       </Button>
     )
   }
   const changes = policyDiff(policy.kind === 'ok' ? policy.file : undefined, policy.ensoDefault)
   return (
-    <div className="flex flex-col gap-2 rounded-md border p-2">
+    <div className="grid gap-3 rounded-sm border border-chart-3 bg-card p-4">
       <p className="text-sm">
         Resetting replaces permissions.json with Enso's policy; the current file is kept as a backup.
         {editor.draft === undefined ? '' : ' Your unsaved changes go too.'}
       </p>
       <ResetDiff changes={changes} />
-      <span className="flex gap-2">
+      <span className="flex flex-wrap gap-2">
         <Button
           variant="destructive"
-          size="sm"
+          className={PAGE_BUTTON}
           disabled={editor.working}
           onClick={() => {
             setConfirming(false)
@@ -703,7 +1022,7 @@ function ResetPanel({ policy, editor }: { policy: EnsoPermissionPolicyRead; edit
         >
           Reset
         </Button>
-        <Button variant="ghost" size="sm" onClick={() => setConfirming(false)}>
+        <Button variant="ghost" className={PAGE_BUTTON} onClick={() => setConfirming(false)}>
           Cancel
         </Button>
       </span>
@@ -725,9 +1044,9 @@ const ORIGIN_WORDS: Readonly<Record<string, string>> = {
 function GuardAnswer({ guard }: { guard: EnsoGuardCheck }): React.ReactNode {
   if (guard.kind === 'refused') {
     return (
-      <div aria-label="guard" className="flex flex-col gap-1 rounded-md border border-destructive/50 p-2">
+      <div aria-label="guard" className="grid gap-1 rounded-sm border border-refuse/50 bg-card px-3 py-2">
         <p>
-          <span className="font-semibold text-destructive">Refused by a guard: {guard.rule}</span> — {guard.cause}
+          <span className="font-semibold text-refuse">Refused by a guard: {guard.rule}</span> — {guard.cause}
         </p>
         <p>
           Asked as a <code>{guard.tool}</code> call; a guard refuses it in every mode.
@@ -759,12 +1078,15 @@ function GuardAnswer({ guard }: { guard: EnsoGuardCheck }): React.ReactNode {
   )
 }
 
-/** The thread's answer, layer by layer as a call meets them: the guards, then the engine. */
+/**
+ * The thread's answer, layer by layer as a call meets them: the guards, then the engine — in the
+ * prototype's `.check-result` box (#417), the engine's verdict in its decision's colour.
+ */
 function CheckAnswer({ answer }: { answer: PermissionCheck | 'no-thread' | undefined }): React.ReactNode {
   if (answer === undefined) return null
   if (answer === 'no-thread' || answer.kind === 'not-live') {
     return (
-      <p role="status" className="text-xs">
+      <p role="status" className={PAGE_NOTE}>
         {answer === 'no-thread'
           ? 'Open a thread to check against its guards and engine.'
           : "This thread's permission engine has not loaded, so nothing there decides a call."}
@@ -776,12 +1098,12 @@ function CheckAnswer({ answer }: { answer: PermissionCheck | 'no-thread' | undef
   const { verdict } = answer
   const moot = verdict.guard.kind === 'refused'
   return (
-    <div className="flex flex-col gap-2 text-xs">
+    <div className="grid gap-2 rounded-sm border border-border-strong bg-background px-4 py-3 text-sm">
       <GuardAnswer guard={verdict.guard} />
-      <dl aria-label="verdict" className={moot ? 'flex flex-col opacity-60' : 'flex flex-col'}>
+      <dl aria-label="verdict" className={moot ? 'grid gap-1 opacity-60' : 'grid gap-1'}>
         <VerdictLine term="mode">{verdict.mode}</VerdictLine>
         <VerdictLine term={moot ? 'engine (moot)' : 'engine'}>
-          <span className="font-semibold">{verdict.state}</span>
+          <span className={`font-mono font-semibold ${DECISION_TEXT[verdict.state]}`}>{verdict.state}</span>
         </VerdictLine>
         <VerdictLine term="matched">
           {verdict.matchedPattern === undefined ? 'no pattern' : <code>{verdict.matchedPattern}</code>}
@@ -833,9 +1155,10 @@ function TryCommand({
     setAsking(false)
   }
   return (
-    <fieldset aria-label="try a command" className="flex flex-col gap-1">
-      <h3 className="font-semibold">Try a command</h3>
-      <span className="flex flex-wrap items-center gap-2">
+    <fieldset aria-label="try a command" className="grid gap-3">
+      <h3 className={SUB_TITLE}>Try a command</h3>
+      <p className={PAGE_NOTE}>See what would happen before pi tries it.</p>
+      <span className="grid items-start gap-2 md:grid-cols-check-form">
         <OptionSelect
           label="check surface"
           value={surface}
@@ -844,10 +1167,11 @@ function TryCommand({
             setSurface(next)
             setAnswer(undefined)
           }}
+          className={PAGE_INPUT}
         />
         <Input
           aria-label="check value"
-          className="h-7 min-w-40 flex-1 font-mono text-xs"
+          className={`${PAGE_INPUT} font-mono`}
           placeholder="git push origin main"
           value={value}
           onChange={(event: React.ChangeEvent<HTMLInputElement>) => {
@@ -855,12 +1179,17 @@ function TryCommand({
             setAnswer(undefined)
           }}
         />
-        <Button variant="outline" size="sm" disabled={threadId === undefined || asking} onClick={() => void ask()}>
+        <Button
+          variant="outline"
+          className={PAGE_OUTLINE_BUTTON}
+          disabled={threadId === undefined || asking}
+          onClick={() => void ask()}
+        >
           Check
         </Button>
       </span>
       {unsaved ? (
-        <p className="text-xs text-muted-foreground">
+        <p className={PAGE_NOTE}>
           The engine answers for the policy as saved; your unsaved changes are not in force yet.
         </p>
       ) : null}
@@ -876,6 +1205,7 @@ interface ViewCard {
   readonly view: ViewMode
   readonly name: string
   readonly summary: string
+  /** Said to assistive tech only: the prototype's cards carry no tag (#417), the table's state says it. */
   readonly tag: string
 }
 
@@ -892,7 +1222,8 @@ const VIEW_CARDS: readonly ViewCard[] = [
 
 /**
  * The views as one radiogroup of cards (#874): as written, then the five modes. Radix's radio group
- * gives it the radiogroup's keys — Tab to the checked card, arrows to move and choose.
+ * gives it the radiogroup's keys — Tab to the checked card, arrows to move and choose. Drawn as the
+ * prototype's `.mode-grid` (#417): as many cards of their least width as fit.
  */
 function ViewCards({ view, onView }: { view: ViewMode; onView: (view: ViewMode) => void }): React.ReactNode {
   return (
@@ -903,7 +1234,7 @@ function ViewCards({ view, onView }: { view: ViewMode; onView: (view: ViewMode) 
         const picked = VIEW_CARDS.find((card) => card.view === value)?.view
         if (picked !== undefined) onView(picked)
       }}
-      className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3"
+      className="grid grid-cols-mode-cards gap-2"
     >
       {VIEW_CARDS.map((card) => (
         <RadioGroupPrimitive.Item
@@ -911,20 +1242,13 @@ function ViewCards({ view, onView }: { view: ViewMode; onView: (view: ViewMode) 
           value={card.view}
           aria-label={card.name}
           aria-describedby={`permissions-view-${card.view}-tag permissions-view-${card.view}`}
-          className="flex flex-col items-start gap-1 rounded-md border bg-card p-3 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50 data-[state=checked]:border-primary data-[state=checked]:bg-accent"
+          className="grid content-start gap-1 rounded-sm border bg-card p-3 text-left transition-colors outline-none hover:border-border-strong focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/20 data-[state=checked]:border-primary data-[state=checked]:bg-accent"
         >
           <span className="font-mono text-sm font-semibold">{card.name}</span>
-          <span
-            id={`permissions-view-${card.view}-tag`}
-            className={
-              card.view === 'written'
-                ? 'text-xs font-semibold text-primary uppercase'
-                : 'text-xs text-muted-foreground uppercase'
-            }
-          >
+          <span id={`permissions-view-${card.view}-tag`} className="sr-only">
             {card.tag}
           </span>
-          <span id={`permissions-view-${card.view}`} className="text-xs text-muted-foreground">
+          <span id={`permissions-view-${card.view}`} className="text-sm leading-normal text-muted-foreground">
             {card.summary}
           </span>
         </RadioGroupPrimitive.Item>
@@ -933,34 +1257,48 @@ function ViewCards({ view, onView }: { view: ViewMode; onView: (view: ViewMode) 
   )
 }
 
-/** The rules as written (editable), or as a mode runs them (read-only: the mode's rules are not yours). */
+/**
+ * The prototype's order (#417): the modes, the rule groups, then the rules — as written (editable),
+ * or as the picked mode runs them (read-only: the mode's rules are not yours) — and Add rule.
+ */
 function RulesView({ permission, editor }: { permission: EnsoPermissionMap; editor: PolicyEditor }): React.ReactNode {
   const [view, setView] = useState<ViewMode>('written')
   const mode = view === 'written' ? undefined : view
   return (
-    <div className="flex flex-col gap-2">
-      <h3 id="permissions-view-label" className="font-semibold">
-        Rules
-      </h3>
-      <p className="text-xs text-muted-foreground">
-        Each thread picks its mode from the composer. Pick a mode here to preview the rules it puts in effect; you edit
-        your rules as written.
-      </p>
-      <ViewCards view={view} onView={setView} />
-      <p role="status" className="text-xs font-semibold">
-        {mode === undefined
-          ? 'Your rules as written, in evaluation order: edit them here.'
-          : `Preview of ${mode}: the rules in effect under it, in evaluation order, its own marked "from ${mode}". Read-only — choose "as written" to edit.`}
-      </p>
-      {mode === undefined ? (
-        <RuleList rows={policyRows(permission)} mode={undefined} editing={{ permission, onEdit: editor.edit }} />
-      ) : (
-        <>
-          <ReplacedSurfaces permission={permission} mode={mode} />
-          <RuleList rows={effectiveRows(permission, mode)} mode={mode} editing={undefined} />
-        </>
-      )}
-    </div>
+    <>
+      <div className="grid gap-3">
+        <h3 id="permissions-view-label" className={SUB_TITLE}>
+          Modes
+        </h3>
+        <p className={PAGE_NOTE}>
+          Each thread picks its mode from the composer. Pick one here to preview the rules it puts in effect below; you
+          edit your rules as written.
+        </p>
+        <ViewCards view={view} onView={setView} />
+      </div>
+      <RuleGroups permission={permission} onEdit={editor.edit} />
+      <div className="grid gap-3">
+        <h3 id="permissions-rules-label" className={SUB_TITLE}>
+          Rules, in order
+        </h3>
+        <p role="status" className={`${PAGE_NOTE} empty:hidden`}>
+          {mode === undefined
+            ? null
+            : `Preview of ${mode}, read-only: the rules in effect under it, its own tagged "from ${mode}". Choose "as written" to edit.`}
+        </p>
+        {mode === undefined ? (
+          <>
+            <RuleList rows={policyRows(permission)} mode={undefined} editing={{ permission, onEdit: editor.edit }} />
+            <AddRule permission={permission} onEdit={editor.edit} />
+          </>
+        ) : (
+          <>
+            <ReplacedSurfaces permission={permission} mode={mode} />
+            <RuleList rows={effectiveRows(permission, mode)} mode={mode} editing={undefined} />
+          </>
+        )}
+      </div>
+    </>
   )
 }
 
@@ -980,7 +1318,10 @@ function UnreadableWarning({ reason }: { reason: string }): React.ReactNode {
 
 /**
  * Settings' Permissions section. `editor` is the page's (`usePermissionPolicy`); `threadId` is the
- * thread behind the page, the one "Try a command" asks.
+ * thread behind the page, the one "Try a command" asks. Laid out as the prototype's (#417): the
+ * lede, the modes, the rule groups, the rules and the way to add one, the check, the settings
+ * beside the rules, then the reset and the save bar last, pinned to the bottom of what scrolls
+ * while there is something to save.
  */
 export function PermissionsSection({
   editor,
@@ -992,12 +1333,12 @@ export function PermissionsSection({
   fetch: FetchLike | undefined
 }): React.ReactNode {
   const { state } = editor
-  if (state.kind === 'loading') return <p className="text-sm text-muted-foreground">reading permissions.json…</p>
+  if (state.kind === 'loading') return <p className={PAGE_NOTE}>reading permissions.json…</p>
   if (state.kind === 'unavailable') {
     return (
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-3">
         <FieldError>permissions: {state.detail}</FieldError>
-        <Button variant="outline" size="sm" className="self-start" onClick={editor.reload}>
+        <Button variant="outline" className={`${PAGE_OUTLINE_BUTTON} self-start`} onClick={editor.reload}>
           Try again
         </Button>
       </div>
@@ -1005,39 +1346,46 @@ export function PermissionsSection({
   }
   const { policy } = state
   const permission = editor.draft ?? (policy.kind === 'ok' ? permissionOf(policy.file) : {})
+  const tryCommand = (
+    <TryCommand
+      threadId={threadId}
+      surfaces={checkSurfaces(permission)}
+      unsaved={editor.draft !== undefined}
+      fetch={fetchImpl}
+    />
+  )
   return (
-    <div className="flex flex-col gap-4">
-      <p className="text-xs text-muted-foreground">
-        This section is saved on the server, in <code>{policy.path}</code>; the rest of Settings is kept in this
-        browser.
-      </p>
-      {editor.backup === undefined ? null : (
-        <p role="status" className="text-xs">
-          Enso's policy is in force; the file it replaced is kept at <code>{editor.backup}</code>.
+    <div className="flex flex-col gap-8">
+      <div className="grid gap-1.5">
+        <p className="max-w-reading text-muted-foreground">
+          What pi may do without asking. Rules are checked in order on each surface, and the last one that matches wins.
         </p>
-      )}
-      <ProblemNotice editor={editor} />
+        {policy.kind === 'unreadable' ? null : (
+          <HeadFacts file={policy.file} reviewLogDirectory={policy.reviewLogDirectory} />
+        )}
+        {editor.backup === undefined ? null : (
+          <p role="status" className="text-sm">
+            Enso's policy is in force; the file it replaced is kept at <code>{editor.backup}</code>.
+          </p>
+        )}
+      </div>
       {policy.kind === 'unreadable' ? (
         <>
           <UnreadableWarning reason={policy.reason} />
           <ResetPanel policy={policy} editor={editor} />
+          <ProblemNotice editor={editor} />
+          {tryCommand}
         </>
       ) : (
         <>
-          <KnobNotes file={policy.file} reviewLogDirectory={policy.reviewLogDirectory} />
-          <SaveBar editor={editor} />
           <RulesView permission={permission} editor={editor} />
-          <AddRule permission={permission} onEdit={editor.edit} />
-          <DraftedGroups permission={permission} onEdit={editor.edit} />
+          {tryCommand}
+          <BehaviourNotes file={policy.file} path={policy.path} />
           <ResetPanel policy={policy} editor={editor} />
+          <ProblemNotice editor={editor} />
+          <SaveBar editor={editor} path={policy.path} />
         </>
       )}
-      <TryCommand
-        threadId={threadId}
-        surfaces={checkSurfaces(permission)}
-        unsaved={editor.draft !== undefined}
-        fetch={fetchImpl}
-      />
     </div>
   )
 }

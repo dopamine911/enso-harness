@@ -41,6 +41,21 @@ test('⚠ the threads section: a mode, setup commands and paths to copy; an unkn
   expect(parseEnsoConfig(JSON.stringify({ threads: { setup: [''] } })).kind).toBe('unreadable')
 })
 
+// #925: `claudeCode.version` goes out in every Claude login's user-agent, so it is a version as
+// Anthropic writes them or the file is unreadable — never a header Anthropic can't parse.
+test('⚠ the claudeCode section: a dotted version parses; anything else, or a typo key, is unreadable (#925)', () => {
+  const parsed = parseEnsoConfig(JSON.stringify({ claudeCode: { version: '2.1.284' } }))
+  expect(parsed.kind === 'ok' ? parsed.config.claudeCode : undefined).toEqual({ version: '2.1.284' })
+  for (const claudeCode of [
+    { version: 'latest' },
+    { version: '2.1' },
+    { version: '2.1.284 ' },
+    { versoin: '2.1.284' },
+  ]) {
+    expect(parseEnsoConfig(JSON.stringify({ claudeCode })).kind).toBe('unreadable')
+  }
+})
+
 test('invalid JSON is unreadable, naming the file and the failure', () => {
   const result = parseEnsoConfig('{ webFetch: [')
   const reason = result.kind === 'unreadable' ? result.reason : '(readable)'

@@ -71,16 +71,17 @@ function Counts({
   readonly added: number | null
   readonly removed: number | null
 }): React.ReactNode {
-  if (added === null || removed === null) return <span className="text-muted-foreground">—</span>
+  if (added === null || removed === null) return <span className="shrink-0 text-muted-foreground">—</span>
   return (
-    <span className="tabular-nums">
+    <span className="shrink-0 whitespace-nowrap tabular-nums">
       <span className="text-ok">+{added}</span> <span className="text-refuse">−{removed}</span>
     </span>
   )
 }
 
+/** A tree row — the prototype's `.diff-file` (#417): rounded, card on hover, accent when chosen. */
 const TREE_ROW =
-  'flex w-full items-center gap-1.5 rounded-sm py-0.5 pr-2 text-left hover:bg-popover focus-visible:outline-2 focus-visible:outline-ring'
+  'flex w-full items-center gap-2 rounded-sm px-2 py-1 text-left transition-colors hover:bg-card focus-visible:outline-2 focus-visible:outline-ring'
 
 interface TreeProps {
   readonly nodes: readonly TreeNode[]
@@ -96,7 +97,7 @@ const indent = (depth: number): React.CSSProperties => ({ paddingLeft: `${depth 
 
 function TreeLevel({ nodes, depth, selected, closed, onSelect, onToggle }: TreeProps): React.ReactNode {
   return (
-    <ul>
+    <ul className="grid grid-cols-1 gap-0.5">
       {nodes.map((node) => {
         if (node.kind === 'file') {
           const { change } = node
@@ -105,7 +106,7 @@ function TreeLevel({ nodes, depth, selected, closed, onSelect, onToggle }: TreeP
             <li key={change.path}>
               <button
                 type="button"
-                className={`${TREE_ROW} ${current ? 'bg-popover text-foreground' : 'text-muted-foreground'}`}
+                className={`${TREE_ROW} ${current ? 'bg-accent text-foreground hover:bg-accent' : 'text-muted-foreground'}`}
                 style={indent(depth)}
                 aria-current={current ? 'true' : undefined}
                 title={change.oldPath === null ? change.path : `${change.oldPath} → ${change.path}`}
@@ -114,7 +115,9 @@ function TreeLevel({ nodes, depth, selected, closed, onSelect, onToggle }: TreeP
                 <span className={`w-3 shrink-0 font-semibold ${STATUS_CLASS[change.status]}`} title={change.status}>
                   {STATUS_LETTER[change.status]}
                 </span>
-                <span className="min-w-0 flex-1 truncate">{node.name}</span>
+                <span className="min-w-0 flex-1 truncate-start">
+                  <bdi dir="ltr">{node.name}</bdi>
+                </span>
                 <Counts added={change.added} removed={change.removed} />
               </button>
             </li>
@@ -135,7 +138,9 @@ function TreeLevel({ nodes, depth, selected, closed, onSelect, onToggle }: TreeP
               ) : (
                 <ChevronRightIcon aria-hidden="true" className="size-3 shrink-0" />
               )}
-              <span className="min-w-0 flex-1 truncate">{node.name}</span>
+              <span className="min-w-0 flex-1 truncate-start">
+                <bdi dir="ltr">{node.name}</bdi>
+              </span>
               <Counts added={node.added} removed={node.removed} />
             </button>
             {open ? (
@@ -217,9 +222,11 @@ function Hunk({
   return (
     <tbody>
       <tr>
-        <td colSpan={4} className="border-y bg-muted/60 px-2 py-1 text-muted-foreground">
+        <td colSpan={4} className="border-y bg-background px-3 py-1 text-chart-1">
           {hidden === 0 ? null : (
-            <span className="mr-3">⋯ {hidden === 1 ? '1 unchanged line' : `${hidden} unchanged lines`}</span>
+            <span className="mr-3 text-muted-foreground">
+              ⋯ {hidden === 1 ? '1 unchanged line' : `${hidden} unchanged lines`}
+            </span>
           )}
           {hunk.header}
         </td>
@@ -260,35 +267,38 @@ function FileDiff({ change }: { readonly change: EnsoGitFileChange }): React.Rea
   const hunks = change.patch === null ? [] : parsePatch(change.patch)
   const oneSided = oneSidedLabel(change.status)
   return (
-    <section aria-label={`changes to ${change.path}`} className="min-w-0">
-      <header className="sticky top-0 z-10 flex flex-wrap items-baseline gap-x-3 border-b bg-background px-3 py-2">
-        <h3 className="font-mono text-sm text-foreground">
+    <section aria-label={`changes to ${change.path}`} className="min-w-0 p-4">
+      <header className="flex flex-wrap items-baseline gap-x-3 pb-3">
+        <h3 className="font-mono text-sm break-all text-foreground">
           {change.oldPath === null ? change.path : `${change.oldPath} → ${change.path}`}
         </h3>
         <span className={`text-xs ${STATUS_CLASS[change.status]}`}>{change.status}</span>
-        <span className="text-xs">
+        <span className="font-mono text-xs">
           <Counts added={change.added} removed={change.removed} />
         </span>
       </header>
       {hunks.length === 0 ? (
-        <p className="px-3 py-4 text-sm text-muted-foreground">{omittedText(change)}</p>
+        <p className="rounded-sm border bg-card px-3 py-4 text-sm text-muted-foreground">{omittedText(change)}</p>
       ) : (
-        <table aria-label={oneSided} className="w-full table-fixed border-collapse font-mono text-xs">
-          <colgroup>
-            <col className="w-12" />
-            <col />
-            <col className="w-12" />
-            <col />
-          </colgroup>
-          {hunks.map((hunk, hunkIndex) => (
-            <Hunk
-              key={hunk.header + String(hunkIndex)}
-              hunk={hunk}
-              previous={hunks[hunkIndex - 1]}
-              marked={oneSided === undefined}
-            />
-          ))}
-        </table>
+        // The prototype's `.diff-code` (#417): one bordered card block of relaxed lines; the split view kept.
+        <div className="overflow-hidden rounded-sm border bg-card">
+          <table aria-label={oneSided} className="w-full table-fixed border-collapse font-mono text-xs leading-relaxed">
+            <colgroup>
+              <col className="w-12" />
+              <col />
+              <col className="w-12" />
+              <col />
+            </colgroup>
+            {hunks.map((hunk, hunkIndex) => (
+              <Hunk
+                key={hunk.header + String(hunkIndex)}
+                hunk={hunk}
+                previous={hunks[hunkIndex - 1]}
+                marked={oneSided === undefined}
+              />
+            ))}
+          </table>
+        </div>
       )}
     </section>
   )
@@ -328,7 +338,7 @@ function ChangedFiles({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b px-4 py-2 text-sm">
-        <h2 className="font-medium text-foreground">Diff</h2>
+        <h2 className="font-heading font-semibold text-foreground">Diff</h2>
         {description}
         <span className="ml-auto text-xs text-muted-foreground">
           {files.length}
@@ -346,7 +356,7 @@ function ChangedFiles({
         <div className="flex min-h-0 flex-1">
           <nav
             aria-label="changed files"
-            className="w-changes-tree shrink-0 overflow-y-auto border-r py-1 font-mono text-xs"
+            className="w-changes-tree shrink-0 overflow-y-auto border-r p-3 font-mono text-xs"
           >
             <TreeLevel
               nodes={tree.children}

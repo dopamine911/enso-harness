@@ -16,6 +16,7 @@ import { EnsoRing } from './enso-mark.tsx'
 import type { EnsoRendererMap } from './EnsoToolResult.tsx'
 import { ForkContext, RestoreContext } from './fork-thread.ts'
 import { IncidentCards, type PlacedIncidents } from './incident-card.tsx'
+import { cn } from './lib/utils.ts'
 import { NotificationLines, type PlacedLines } from './notifications.tsx'
 import { providerRefusalLine, providerRefusalSource, RefusedAttemptLine, refusalOfMessage } from './refused-attempt.tsx'
 import { SelectedMessagePart } from './selected-message-part.tsx'
@@ -76,12 +77,13 @@ interface MessageBodyProps {
 
 /**
  * Who a message is from, above it (the design direction's speaker line): `you`, or pi beside its
- * ring. Ledger drops the ring and prints the user's prompt as a receipt line, `› you`.
+ * ring, in the prototype's 11px mono (#417). Ledger drops the ring and prints the user's prompt as
+ * a receipt line, `› you`.
  */
 function MessageSpeaker({ role }: { role: DrawnRole }): React.ReactNode {
   if (role === 'user') {
     return (
-      <div className="flex items-center justify-end gap-1 font-mono text-xs text-muted-foreground ledger:justify-start ink:font-heading ink:text-sm ink:italic">
+      <div className="flex items-center justify-end gap-1 font-mono text-meta text-muted-foreground ledger:justify-start ink:font-heading ink:text-sm ink:italic">
         <span aria-hidden="true" className="hidden text-evidence ledger:inline">
           ›
         </span>
@@ -90,9 +92,9 @@ function MessageSpeaker({ role }: { role: DrawnRole }): React.ReactNode {
     )
   }
   return (
-    <div className="flex items-center gap-2 font-mono text-xs text-muted-foreground ink:font-heading ink:text-sm ink:italic">
+    <div className="flex items-center gap-2 font-mono text-meta text-muted-foreground ink:font-heading ink:text-sm ink:italic">
       {role === 'assistant' ? (
-        <EnsoRing className="size-4.5 text-foreground signal:text-evidence ledger:hidden" />
+        <EnsoRing className="size-4 shrink-0 text-foreground signal:text-evidence ledger:hidden" />
       ) : null}
       {role === 'assistant' ? 'pi' : role}
     </div>
@@ -122,14 +124,23 @@ const MessageBody = memo(function MessageBody({
   speaker,
   promptName,
 }: MessageBodyProps): React.ReactNode {
+  // The prototype's rows (#417): a prompt is a bubble at the column's right, at most four fifths
+  // of it wide, its speaker and actions right-aligned around it; pi's turn takes the column, its
+  // thought, steps and prose 12px apart (two steps in a row sit closer — `ToolCallRow`). pi's turn
+  // is often several messages, one per step round: one without its speaker line continues the
+  // turn above, so it pulls up into the row gap and reads at the turn's 12px, not the rows' 24px.
   return (
     <Message
       from={role}
       data-role={role}
-      className="max-w-3xl gap-1 ledger:ml-0 ledger:max-w-none ledger:border-b ledger:py-3"
+      className={cn(
+        'ledger:ml-0 ledger:max-w-none ledger:border-b ledger:py-3',
+        role === 'user' ? 'max-w-prompt items-end gap-1 ledger:items-start' : 'max-w-none gap-3',
+        role === 'assistant' && !speaker ? '-mt-3 ledger:mt-0' : null,
+      )}
     >
       {speaker ? <MessageSpeaker role={role} /> : null}
-      <MessageContent className="text-base leading-relaxed group-[.is-assistant]:w-full group-[.is-user]:rounded-lg group-[.is-user]:px-3 group-[.is-user]:py-2 signal:group-[.is-user]:rounded-br-sm ledger:group-[.is-user]:ml-0 ledger:group-[.is-user]:bg-transparent ledger:group-[.is-user]:p-0">
+      <MessageContent className="text-message group-[.is-assistant]:w-full group-[.is-assistant]:gap-3 group-[.is-user]:rounded-lg group-[.is-user]:border group-[.is-user]:bg-popover group-[.is-user]:px-4 group-[.is-user]:py-3 ledger:group-[.is-user]:ml-0 ledger:group-[.is-user]:border-0 ledger:group-[.is-user]:bg-transparent ledger:group-[.is-user]:p-0">
         {parts.map(({ partKey, selected, isTrailingPart }) => (
           <SelectedMessagePart
             key={`${messageId}-${partKey}`}
@@ -152,6 +163,10 @@ const MessageBody = memo(function MessageBody({
     </Message>
   )
 }, sameRenderedMessage)
+
+/** A prompt action's look (#417): the prototype's quiet 32px text button, lit on hover. */
+const PROMPT_ACTION =
+  'h-8 gap-1 rounded-sm px-2 text-xs font-normal text-muted-foreground hover:bg-card hover:text-foreground dark:hover:bg-card'
 
 /**
  * A prompt's actions: fork from it (#433) and restore the files to it (#551), each where the page
@@ -176,19 +191,19 @@ function PromptActions({
   const [confirming, setConfirming] = useState(false)
   if (forkAt === undefined && restoreAt === undefined) return null
   return (
-    <div className="flex justify-end ledger:justify-start">
+    <div className="flex gap-1">
       {forkAt === undefined ? null : (
         <Button
           type="button"
           size="sm"
           variant="ghost"
-          className="h-7 gap-1 px-2 text-xs text-muted-foreground"
+          className={PROMPT_ACTION}
           title="a new thread holding everything before this prompt, with its words ready to send again"
-          aria-label={`fork from here${named}`}
+          aria-label={`Fork from here${named}`}
           onClick={(): void => forkAt(messageId)}
         >
-          <GitForkIcon aria-hidden="true" />
-          fork from here
+          <GitForkIcon aria-hidden="true" className="size-3.5" />
+          Fork from here
         </Button>
       )}
       {restoreAt === undefined ? null : (
@@ -197,12 +212,12 @@ function PromptActions({
             type="button"
             size="sm"
             variant="ghost"
-            className="h-7 gap-1 px-2 text-xs text-muted-foreground"
+            className={PROMPT_ACTION}
             title="put the thread's files back as they were at this prompt"
             aria-label={`Restore files to here${named}`}
             onClick={(): void => setConfirming(true)}
           >
-            <HistoryIcon aria-hidden="true" />
+            <HistoryIcon aria-hidden="true" className="size-3.5" />
             Restore files to here
           </Button>
           <Dialog open={confirming} onOpenChange={setConfirming}>

@@ -1,4 +1,11 @@
-import { type EnsoProviderRefusal, providerReasonOf, providerRefusalClass, readEnsoProviderRefusal } from '@enso/core'
+import {
+  claudeCodeVersionHint,
+  claudeCodeVersionRefusalOf,
+  type EnsoProviderRefusal,
+  providerReasonOf,
+  providerRefusalClass,
+  readEnsoProviderRefusal,
+} from '@enso/core'
 import { TranscriptLine } from './notifications.tsx'
 
 /**
@@ -17,10 +24,15 @@ export function providerRefusalSource(refusal: EnsoProviderRefusal): string | un
  * One sentence, two places. Live, the router writes it as a transcript line the moment the host
  * says `provider-refused`; on a reload, pi's stored attempt carries the same refusal and its
  * bubble says it where the reply would have been. Both read this, so the two never word it apart.
+ *
+ * Anthropic's refusal of the claimed Claude Code version (#925) gets Enso's own next step after it:
+ * its sentence says "Run 'claude update'", which changes nothing Enso sends.
  */
 export function providerRefusalLine(refusal: EnsoProviderRefusal): string {
   const status = refusal.status === undefined ? '' : ` (${refusal.status})`
-  const verdict = `refused: ${providerRefusalClass(refusal)}${status} — ${providerReasonOf(refusal.message)}`
+  const versionRefusal = claudeCodeVersionRefusalOf(refusal.message)
+  const hint = versionRefusal === undefined ? '' : ` ${claudeCodeVersionHint(versionRefusal)}`
+  const verdict = `refused: ${providerRefusalClass(refusal)}${status} — ${providerReasonOf(refusal.message)}${hint}`
   if (refusal.model !== undefined) return `${refusal.model} ${verdict}`
   return providerRefusalSource(refusal) === undefined ? `the provider ${verdict}` : verdict
 }

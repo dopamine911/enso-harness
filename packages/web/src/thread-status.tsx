@@ -13,6 +13,7 @@ import type { UIMessage } from '@tanstack/ai-client'
 import { automaticPartsForMessage, selectMessageUI } from '@tanstack/ai-client/ui'
 import { useEffect } from 'react'
 import { toolResultState } from './EnsoToolResult.tsx'
+import { STATUS_BUTTON } from './menu-chrome.ts'
 import { useThreadReadable } from './model-state.tsx'
 import { useStore, useThreadStores } from './store.ts'
 import { GitIndicator, type GitOutcome, settledToolResults, useThreadGit } from './thread-git.tsx'
@@ -238,7 +239,7 @@ function projectName(cwd: string): string {
 }
 
 const DOT_DISCONNECTED = 'size-2 shrink-0 rotate-45 rounded-xs bg-refuse'
-const DOT_IDLE = 'size-2 shrink-0 rounded-full border border-muted-foreground'
+const DOT_IDLE = 'size-2 shrink-0 rounded-full border-dot border-muted-foreground'
 // ⚠ Static, not pulsing (#739): any CSS animation here, even a stepped or `motion-safe:` one, keeps
 // the compositor ticking for as long as pi works — 40–55% of a GPU process in the live run. The
 // colour and the word beside the dot already say the thread is in flight.
@@ -350,7 +351,7 @@ function RiskWord({
   return (
     <button
       type="button"
-      className={`${tone} underline decoration-dotted underline-offset-2 hover:decoration-solid`}
+      className={`${STATUS_BUTTON} ${tone} underline decoration-dotted underline-offset-2 hover:decoration-solid`}
       aria-label={`${words}: show them on the Stats tab`}
       title={`${RISK_TITLE} Open the Stats tab to read each one.`}
       onClick={onShow}
@@ -422,11 +423,12 @@ function QuestionWaiting({ waiting }: { waiting: boolean | undefined }): React.R
   )
 }
 
-/** What the run is doing now: the activity's dot and word, first in the bar. */
+/** What the run is doing now: the activity's dot and word, first in the bar — bold, in the running colour while in flight. */
 function ActivityWord({ activity }: { readonly activity: ThreadStatusViewProps['activity'] }): React.ReactNode {
+  const inFlight = activity.kind !== 'idle' && activity.kind !== 'disconnected'
   return (
     <span
-      className="flex items-center gap-2 font-medium text-foreground"
+      className={`flex shrink-0 items-center gap-2 font-semibold ${inFlight ? 'text-evidence' : 'text-foreground'}`}
       title={
         activity.kind === 'disconnected'
           ? 'the connection to the server ended — reload and resume from the rail'
@@ -469,13 +471,9 @@ function SpendWords({ usage }: { readonly usage: ThreadStatusViewProps['usage'] 
   const context = usage?.context ?? null
   return (
     <>
-      {context === null ? null : (
-        <span className="ml-auto">
-          <ContextMeter context={context} />
-        </span>
-      )}
+      {context === null ? null : <ContextMeter context={context} />}
       <span
-        className={context === null ? 'ml-auto' : undefined}
+        className="text-foreground"
         title="what this thread's session has spent — pi's own total, every model call on every branch, compactions included"
       >
         {usage === undefined ? '$—' : `$${usage.cost.toFixed(4)}`}
@@ -502,23 +500,30 @@ export function ThreadStatusView({
   incidents,
 }: ThreadStatusViewProps): React.ReactNode {
   return (
+    // One line, the prototype's (#417), when it fits — and a second when it doesn't: a cut would hide
+    // what the bar must say (the tree's "own tree, not your checkout", #576 review; a refusal; a
+    // question waiting). The meter and the cost keep their place at the bar's right end.
     <footer
       id="thread-status"
       aria-label={THREAD_STATUS_WORDS.region}
-      className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t px-5 py-2 font-mono text-xs text-muted-foreground"
+      className="flex min-h-8 shrink-0 items-center gap-4 border-t px-6 font-mono text-xs whitespace-nowrap text-muted-foreground max-md:gap-3 max-md:px-4"
     >
-      <ActivityWord activity={activity} />
-      {/* Seen from every view: the question itself is in the transcript (#362 review). */}
-      <QuestionWaiting waiting={questionWaiting} />
-      {/* #340: `$0.0000` beside `idle` means "nothing ran" here, not "free" — the line in the
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-0.5 py-0.5 max-md:gap-x-3">
+        <ActivityWord activity={activity} />
+        {/* Seen from every view: the question itself is in the transcript (#362 review). */}
+        <QuestionWaiting waiting={questionWaiting} />
+        {/* #340: `$0.0000` beside `idle` means "nothing ran" here, not "free" — the line in the
 			    transcript says who refused and why. */}
-      <RefusalWord refusal={refusal} source={refusalSource} />
-      <IncidentWord incidents={incidents} />
-      <RiskWord risk={risk} onShow={onRiskSignals} />
-      <CountWords counts={counts} />
-      <ProjectIndicator cwd={cwd} projectTitle={projectTitle} onTree={onTree} treeControl={treeControl} />
-      {git === undefined ? null : <GitIndicator outcome={git} />}
-      <SpendWords usage={usage} />
+        <RefusalWord refusal={refusal} source={refusalSource} />
+        <IncidentWord incidents={incidents} />
+        <RiskWord risk={risk} onShow={onRiskSignals} />
+        <CountWords counts={counts} />
+        <ProjectIndicator cwd={cwd} projectTitle={projectTitle} onTree={onTree} treeControl={treeControl} />
+        {git === undefined ? null : <GitIndicator outcome={git} />}
+      </div>
+      <div className="flex shrink-0 items-center gap-4 max-md:gap-3">
+        <SpendWords usage={usage} />
+      </div>
     </footer>
   )
 }

@@ -37,8 +37,8 @@ import {
  * session starts, the launch panel (#877) in the views' place, around the same composer.
  */
 
-/** The launch panel's column: its head, the composer and the recent threads, centred while they fit, scrolled when not. */
-const LAUNCH_COLUMN = 'flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto py-8'
+/** The launch panel's column: its head, the composer and the recent threads, top-aligned at the prototype's padding (#417), scrolled when they don't fit. */
+const LAUNCH_COLUMN = 'flex min-h-0 min-w-0 flex-1 flex-col gap-6 overflow-y-auto px-6 py-8 max-md:px-4 max-md:py-6'
 
 /**
  * Renders a run-level error as a destructive Alert. Reads the thread's chat through the
@@ -148,7 +148,7 @@ function ThreadViews(): React.ReactNode {
       >
         <Conversation>
           <TranscriptRevealBridge into={scroller} />
-          <ConversationContent className="w-full gap-4 px-6 py-4 ledger:gap-0">
+          <ConversationContent className="mx-auto w-full max-w-transcript gap-6 px-6 pt-6 pb-8 max-md:p-4 ledger:gap-0">
             <TranscriptContent
               messages={chat.messages}
               setMessages={chat.setMessages}
@@ -208,7 +208,7 @@ export function ChatLayout({ Input }: LayoutProps<ThreadChatOptions>): React.Rea
               <LaunchHead titleId={launchTitle} />
               {/* Mounted here too: what the page said on the thread, a question or a failed run
                   before the first prompt is said. */}
-              <div className="mx-auto grid w-full max-w-2xl gap-2 px-6 empty:hidden">
+              <div className="mx-auto grid w-full max-w-launch gap-2 empty:hidden">
                 <LaunchNotices />
                 <PendingDialog />
                 <RunProblem />
@@ -225,7 +225,7 @@ export function ChatLayout({ Input }: LayoutProps<ThreadChatOptions>): React.Rea
               composer are this one element, kept at this place in the tree — only its wrapper's class
               changes — so its draft, its attachments and its focus stay through Start. */}
           <PendingQueue />
-          <div className={launching ? 'mx-auto w-full max-w-2xl' : 'contents'}>
+          <div className={launching ? 'mx-auto w-full max-w-launch' : 'contents'}>
             <Input />
           </div>
           {launching ? <LaunchRecent /> : null}
@@ -234,7 +234,10 @@ export function ChatLayout({ Input }: LayoutProps<ThreadChatOptions>): React.Rea
 						    session holds, for THIS thread. Scrolls on its own so a long branch never
 						    moves the composer. */}
         {debugOpen ? (
-          <div id="thread-debug-pane" className="w-debug-pane shrink-0 overflow-y-auto border-l">
+          <div
+            id="thread-debug-pane"
+            className="w-debug-pane shrink-0 overflow-y-auto border-l bg-card max-md:fixed max-md:inset-y-0 max-md:right-0 max-md:z-40 max-md:w-debug-drawer max-md:shadow-pop"
+          >
             <ThreadDebugDrawer />
           </div>
         ) : null}

@@ -4,11 +4,12 @@ import { summarizeToolInput } from '@enso/core'
 // in `ai-elements/reasoning.tsx` replaces it (see that file's header).
 import type { ChatUISelectedPart, ChatUISelectedToolPart } from '@tanstack/ai-client/ui'
 import { TextPart } from '@tanstack/ai-react/ui'
-import { ChevronRightIcon, CircleCheckIcon, CircleDashedIcon, CircleSlashIcon, CircleXIcon } from 'lucide-react'
+import { CheckIcon, ChevronRightIcon, CircleDashedIcon, CircleSlashIcon, type LucideIcon, XIcon } from 'lucide-react'
 import { Reasoning, ReasoningContent, ReasoningTrigger } from './components/ai-elements/reasoning.tsx'
 import { type EnsoRendererMap, EnsoToolResult, type ToolResultState, toolResultState } from './EnsoToolResult.tsx'
 import { cn } from './lib/utils.ts'
 import { TEXT_PART_COMPONENTS } from './markdown-image.tsx'
+import { PILL } from './step-pill.ts'
 import { ToolRefusal, useToolRefusal } from './tool-refusal.tsx'
 
 /**
@@ -38,29 +39,38 @@ function resultText(result: ChatUISelectedToolPart['result']): string | undefine
 }
 
 /**
- * The glyph before a step: a check, a cross, a dashed circle while pi runs it, a slash once cut off.
+ * The pill at a step's end (#417, the prototype's `.pill`): its state as a glyph and a word in the
+ * state's colour, ringed in that colour — `✓ ok`, `running…`, `error`, `aborted`. A refused step is
+ * `ToolRefusal`'s receipt, never a pill here.
  * ⚠ The pending glyph stands still (#739): a spinner keeps the compositor ticking for as long as the
  * step runs; a frozen spinner reads as hung, so pending gets its own static shape.
  */
-const STEP_GLYPH: Record<ToolResultState['status'], React.ReactNode> = {
-  pending: <CircleDashedIcon className="size-4 shrink-0 text-evidence" />,
-  aborted: <CircleSlashIcon className="size-4 shrink-0 text-muted-foreground" />,
-  done: <CircleCheckIcon className="size-4 shrink-0 text-ok" />,
-  error: <CircleXIcon className="size-4 shrink-0 text-refuse" />,
+const STEP_PILL: Record<
+  ToolResultState['status'],
+  { readonly tone: string; readonly Glyph: LucideIcon; readonly word: string }
+> = {
+  pending: { tone: 'text-evidence', Glyph: CircleDashedIcon, word: 'running…' },
+  aborted: { tone: 'text-muted-foreground', Glyph: CircleSlashIcon, word: 'aborted' },
+  done: { tone: 'text-ok', Glyph: CheckIcon, word: 'ok' },
+  error: { tone: 'text-refuse', Glyph: XIcon, word: 'error' },
 }
 
-/** The state word at the row's end, in the state's colour. A finished step says nothing more. */
-const STEP_WORD: Record<ToolResultState['status'], React.ReactNode> = {
-  pending: <span className="text-evidence">running…</span>,
-  aborted: <span className="text-muted-foreground">aborted</span>,
-  done: null,
-  error: <span className="text-refuse">error</span>,
+/** A step's state pill — {@link STEP_PILL}. */
+function StepPill({ status }: { status: ToolResultState['status'] }): React.ReactNode {
+  const { tone, Glyph, word } = STEP_PILL[status]
+  return (
+    <span className={cn(PILL, tone)}>
+      <Glyph aria-hidden="true" className="size-2.5" />
+      {word}
+    </span>
+  )
 }
 
 /**
- * A tool call as one compact row — `✓ read  packages/web/src/x.ts  ›` — with IN and OUT folded
- * beneath it (#90 PR 2; Copilot Chat's step rows are the reference, the design direction's step
- * row the look). What the agent is doing reads step by step instead of as a wall of output.
+ * A tool call as one compact row — `›  read  packages/web/src/x.ts  (✓ ok)` — with IN and OUT folded
+ * beneath it (#90 PR 2; Copilot Chat's step rows are the reference, the prototype's `details.tool`
+ * the look, #417: the chevron leads and turns as the row opens, the state is a pill at the end).
+ * What the agent is doing reads step by step instead of as a wall of output.
  * Done/pending/error is `toolResultState`, the one definition the status bar and
  * `EnsoToolResult` also read; an error opens itself, and outlines the row in the refusal colour,
  * because a failure behind a click is a failure missed.
@@ -97,12 +107,13 @@ function ToolCallRow({
     // word on the row (the run ended first), so opening it would show a static line.
     // `data-tool-call-id`: where the stats drawer's rows land (#359) — the one key a live run's
     // bubble and a resumed thread's share (`transcript-reveal.ts`).
+    // `[[data-tool-call-id]+&]`: a step straight after a step sits 8px under it, not the turn's 12px.
     <details
       data-enso-tool-call={status}
       data-tool-call-id={selected.part.id}
       open={status === 'error'}
       className={cn(
-        'group my-1 max-w-3xl rounded-md border bg-card ledger:rounded-xs',
+        'group rounded-sm border bg-card ledger:rounded-xs [[data-tool-call-id]+&]:-mt-1',
         // Ink (#407): marginalia — a finished step is a ruled line in the margin, not a box; an
         // error keeps its box, because a failure behind a click is a failure missed.
         status === 'error'
@@ -110,32 +121,29 @@ function ToolCallRow({
           : 'ink:rounded-none ink:border-transparent ink:border-b-border ink:bg-transparent',
       )}
     >
-      <summary className="flex min-h-10 cursor-pointer list-none items-center gap-2 rounded-md px-3 marker:hidden hover:bg-popover">
-        <span aria-hidden="true">{STEP_GLYPH[status]}</span>
-        <span className="shrink-0 font-mono text-sm">{selected.part.name}</span>
-        {/* `min-w-0`: a flex child's default `min-width: auto` never shrinks below its
-				    content, so without it `truncate` cannot engage. */}
-        <span className="min-w-0 flex-1 truncate font-mono text-sm text-muted-foreground">{summary}</span>
-        <span className="shrink-0 text-xs font-semibold tracking-wider uppercase">{STEP_WORD[status]}</span>
+      <summary className="flex min-h-10 cursor-pointer list-none items-center gap-2 px-3 text-detail marker:hidden">
         <ChevronRightIcon
           aria-hidden="true"
-          className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-90"
+          className="size-3 shrink-0 text-muted-foreground transition-transform duration-150 ease-snap group-open:rotate-90"
         />
+        <span className="shrink-0 font-mono font-semibold">{selected.part.name}</span>
+        {/* `min-w-0`: a flex child's default `min-width: auto` never shrinks below its
+				    content, so without it `truncate` cannot engage. */}
+        <span className="min-w-0 flex-1 truncate font-mono text-muted-foreground">{summary}</span>
+        <StepPill status={status} />
       </summary>
-      <dl className="grid grid-cols-label-value border-t font-mono text-sm ink:bg-card">
-        <dt className="px-3 py-2 text-xs leading-6 font-semibold text-muted-foreground uppercase">in</dt>
-        <dd className="min-w-0 px-3 py-2">
-          <pre className="max-h-56 overflow-y-auto break-words whitespace-pre-wrap">
+      <dl className="grid grid-cols-label-value border-t font-mono text-xs leading-relaxed text-muted-foreground ink:bg-card">
+        <dt className="px-3 py-3 font-semibold uppercase">in</dt>
+        <dd className="min-w-0 py-3 pr-3">
+          <pre className="max-h-60 overflow-y-auto break-words whitespace-pre-wrap">
             {input === undefined ? selected.part.arguments : JSON.stringify(input, null, 2)}
           </pre>
         </dd>
-        <dt className="border-t border-dashed px-3 py-2 text-xs leading-6 font-semibold text-muted-foreground uppercase">
-          out
-        </dt>
+        <dt className="border-t border-dashed px-3 py-3 font-semibold uppercase">out</dt>
         {/* ⚠ THE INTEGRATION POINT #18 EXISTS FOR. Every tool result renders through
 				    `EnsoToolResult`: the descriptor is read from the result's metadata, and an
 				    absent result (the call is still in flight) renders the visible pending state. */}
-        <dd className="min-w-0 border-t border-dashed px-3 py-2">
+        <dd className="min-w-0 border-t border-dashed py-3 pr-3">
           <EnsoToolResult result={selected.result} runOpen={runOpen} renderers={renderers} />
         </dd>
       </dl>
@@ -143,12 +151,20 @@ function ToolCallRow({
   )
 }
 
-/** The collapsible Reasoning shell around the thinking text. */
+/**
+ * The collapsible Reasoning shell around the thinking text, in the prototype's `details.thought`
+ * (#417): a 28px muted summary whose chevron points right and turns down as it opens, then the
+ * text behind a 2px rule. The vendored trigger draws a down chevron flipped by `rotate-180`; the
+ * classes here re-aim that same icon (`svg:last-child`) instead of replacing the trigger's words.
+ */
 function ThinkingBlock({ content, isStreaming }: { content: string; isStreaming: boolean }): React.ReactNode {
   return (
-    <Reasoning isStreaming={isStreaming} className="mb-1">
-      <ReasoningTrigger className="-ml-2 min-h-8 w-fit rounded-md px-2 hover:bg-popover" />
-      <ReasoningContent className="mt-1 border-l-2 pl-4 leading-relaxed">{content}</ReasoningContent>
+    <Reasoning isStreaming={isStreaming} className="mb-0">
+      <ReasoningTrigger className="min-h-7 w-fit text-detail [&>svg:last-child]:size-3 [&>svg:last-child]:-rotate-90 [&>svg:last-child]:transition-transform [&>svg:last-child]:duration-150 [&>svg:last-child]:ease-snap data-[state=open]:[&>svg:last-child]:rotate-0" />
+      {/* `trimEnd`: the newlines pi leaves after a thought would draw as blank lines inside the rule. */}
+      <ReasoningContent className="mt-2 max-w-reading border-l-2 border-border-strong pl-4">
+        {content.trimEnd()}
+      </ReasoningContent>
     </Reasoning>
   )
 }
@@ -202,10 +218,11 @@ export function SelectedMessagePart({
   // TextPart is the markdown pipeline of record (`@tanstack/markdown`: raw HTML escaped,
   // executable URLs dropped; a remote image behind a click, ours). `prose` is
   // @tailwindcss/typography — TextPart emits bare markdown HTML with no classes of its own, so
-  // the typography plugin is what styles it.
+  // the typography plugin is what styles it. Sized as the prototype's (#417): 15px, a prompt at
+  // 1.55 in its bubble, pi's prose at 1.65 and no wider than a comfortable line.
   if (selected.part.type === 'text') {
     return (
-      <div className="prose max-w-none leading-relaxed dark:prose-invert prose-headings:font-heading prose-p:my-3 [&>div>:first-child]:mt-0 [&>div>:last-child]:mb-0">
+      <div className="prose max-w-none text-message group-[.is-assistant]:max-w-reading group-[.is-assistant]:leading-relaxed dark:prose-invert prose-headings:font-heading prose-p:my-3 [&>div>:first-child]:mt-0 [&>div>:last-child]:mb-0">
         <TextPart components={TEXT_PART_COMPONENTS} content={selected.part.content} />
       </div>
     )

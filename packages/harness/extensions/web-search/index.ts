@@ -9,9 +9,11 @@ import {
   SettingsManager,
 } from '@earendil-works/pi-coding-agent'
 import {
+  claudeCodeUserAgent,
   ENSO_CONFIG_FILENAME,
   EXTERNAL_WEB_CONTENT_NOTICE,
   ensoLogger,
+  isClaudeLoginCredential,
   parseEnsoConfig,
   WEB_SEARCH_TIMEOUT_MS,
   WEB_SEARCH_TOOL_NAME,
@@ -149,6 +151,9 @@ export function createWebSearch(dependencies: WebSearchDependencies): (pi: Exten
     // Load ONCE at extension load; see the header. The tool registers even on a broken
     // config so the refusal can say what to fix (a load-time throw could wedge pi).
     let webSearchConfig: WebSearchConfig = {}
+    // `claudeCode.version` (#925): the Claude Code version a Claude login's requests claim, the
+    // search's and the conversation's. User-only, so the session's merge carries the user's value.
+    let claudeCodeVersion: string | undefined
     let configProblem: string | undefined
     let configPath: string | undefined
     try {
@@ -156,6 +161,7 @@ export function createWebSearch(dependencies: WebSearchDependencies): (pi: Exten
       const parsed = parseEnsoConfig(dependencies.readConfigText(configPath))
       if (parsed.kind === 'ok') {
         webSearchConfig = parsed.config.webSearch ?? {}
+        claudeCodeVersion = parsed.config.claudeCode?.version
       } else {
         configProblem = parsed.reason
       }
@@ -175,6 +181,7 @@ export function createWebSearch(dependencies: WebSearchDependencies): (pi: Exten
       sessionReady = dependencies.resolveSessionConfig(context.sessionManager, context).then(
         (session) => {
           webSearchConfig = session.result.kind === 'ok' ? (session.result.config.webSearch ?? {}) : {}
+          claudeCodeVersion = session.result.kind === 'ok' ? session.result.config.claudeCode?.version : undefined
           configProblem = session.result.kind === 'ok' ? undefined : session.result.reason
           configDisplayPath = session.path
           register()
@@ -183,10 +190,18 @@ export function createWebSearch(dependencies: WebSearchDependencies): (pi: Exten
         // description must not keep the load-time backend pin for a session whose calls all refuse.
         (error: unknown) => {
           webSearchConfig = {}
+          claudeCodeVersion = undefined
           configProblem = `the session's config could not be resolved: ${String(error)}`
           register()
         },
       )
+    })
+
+    // pi's own conversation requests claim the configured version too, so a search and the turn
+    // around it never present two versions (#925). Not awaited on `sessionReady`: the setting is
+    // user-only, so the load-time value is the session's.
+    pi.on('before_provider_headers', async (event, context) => {
+      await claimClaudeCodeVersion(event.headers, context, claudeCodeVersion)
     })
 
     const register = (): void =>
@@ -227,6 +242,7 @@ export function createWebSearch(dependencies: WebSearchDependencies): (pi: Exten
           const primary = await runPrimary({
             dependencies,
             webSearchConfig,
+            claudeCodeVersion,
             extensionContext,
             query,
             signal,
@@ -304,11 +320,31 @@ type WebSearchExecuteArguments = [
 interface RunPrimaryOptions {
   dependencies: WebSearchDependencies
   webSearchConfig: WebSearchConfig
+  claudeCodeVersion: string | undefined
   extensionContext: ExtensionContext
   query: string
   signal: AbortSignal | undefined
   deadline: CallDeadline
   onProgress: (text: string) => void
+}
+
+/**
+ * The configured Claude Code version on a conversation request (#925): pi sends its own hardcoded
+ * `claude-cli/<version>` with a Claude login, and the headers this event hands over are merged
+ * after it (pi-ai's `mergeClientHeaders`), so setting the user-agent here replaces pi's. Only a
+ * Claude login claims to be Claude Code: an API key's requests, and other providers', are left as
+ * pi made them. Nothing configured, nothing changed.
+ */
+async function claimClaudeCodeVersion(
+  headers: Record<string, string | null>,
+  context: ExtensionContext,
+  version: string | undefined,
+): Promise<void> {
+  const model = context.model
+  if (version === undefined || model?.api !== 'anthropic-messages') return
+  const credential = await context.modelRegistry.getApiKeyAndHeaders(model)
+  if (!credential.ok || !isClaudeLoginCredential(credential.apiKey)) return
+  headers['user-agent'] = claudeCodeUserAgent(version)
 }
 
 /**
@@ -323,7 +359,8 @@ interface RunPrimaryOptions {
  * is not.
  */
 async function runPrimary(options: RunPrimaryOptions): Promise<WebSearchOutcome | PrimaryFailure> {
-  const { dependencies, webSearchConfig, extensionContext, query, signal, deadline, onProgress } = options
+  const { dependencies, webSearchConfig, claudeCodeVersion, extensionContext, query, signal, deadline, onProgress } =
+    options
   try {
     if (webSearchConfig.backend === 'deepseek') {
       return await underDeadline(signal, deadline, (deadlineSignal) =>
@@ -366,6 +403,7 @@ async function runPrimary(options: RunPrimaryOptions): Promise<WebSearchOutcome 
       fetchUrl: dependencies.fetchUrl,
       signal: deadlineSignal,
       onProgress,
+      claudeCodeVersion,
     })
     return await underDeadline(signal, deadline, (deadlineSignal) =>
       dependencies.runProviders[routedProviderId](modelRequest(deadlineSignal)),

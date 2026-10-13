@@ -78,6 +78,7 @@ const DOMAINS_BY_CLASSIFICATION: Readonly<Record<Classification, Readonly<Record
     'ui-events.ts': 'Thread, Surface',
   },
   'config/policy': {
+    'claude-code.ts': 'Permission, Control',
     'command-constructs.ts': 'Permission',
     'command-judge.ts': 'Permission, Record',
     'config.ts': 'Record, Permission',

@@ -39,7 +39,7 @@ To add a seeded thread, add it to `seededHome` in `e2e-home.ts` with the turns a
 | fonts load from `/fonts` | the web server's font route, wired to the page |
 | paste an image | on the launch panel an image alone does not start a session, and with words it goes out with Start's prompt; in the docked composer the image alone enables send; both reach the prompt POST as `EnsoPromptImage` |
 | the URL names the thread | reload, back/forward, a pasted link, a malformed id (#142); a fresh thread comes back on its launch panel |
-| New Thread during a slow resume | the late history is dropped (PR #143 review) |
+| New thread during a slow resume | the late history is dropped (PR #143 review) |
 | the Model chip by keyboard | on the launch panel, Escape in the model picker's filter clears it and keeps the picker, Escape again closes it with focus back on the chip; a choice made by keyboard renames the chip and leaves focus on it, the prompt kept (#877, #638) |
 | Escape on `/model` or `/context` | focus returns to the composer (#367) |
 | switching threads keeps a scrolled-up reader's place | an off-screen pane keeps its scroll position (#370) |

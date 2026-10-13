@@ -656,7 +656,12 @@ test('a 429, a 401 and a 400 are three distinct transcript lines and status word
     },
     {
       source: 'Anthropic',
-      line: 'claude-sonnet-4-5 refused: model refused (400) — Claude Code 2.1.259 does not support this model',
+      // #925: a refused Claude Code version is followed by Enso's own next step, since Anthropic's
+      // sentence ("Run 'claude update'") changes nothing Enso sends.
+      line:
+        'claude-sonnet-4-5 refused: model refused (400) — Claude Code 2.1.259 does not support this model ' +
+        `Enso sets the Claude Code version it claims, so 'claude update' doesn't change it: set ` +
+        `"claudeCode": { "version": "<version>" } in config.json in ENSO_HOME (~/.enso by default), then start a new session.`,
       word: 'model refused',
     },
   ])

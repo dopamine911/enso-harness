@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { FetchLike } from './browser-logging.ts'
 import { Button } from './components/ui/button.tsx'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './components/ui/dialog.tsx'
+import { STATUS_BUTTON } from './menu-chrome.ts'
 import { TREE_READ_INTERVAL_MS, useReadOnUsage } from './read-on-usage.ts'
 import {
   ANALYSIS_READING,
@@ -187,7 +188,7 @@ export function ThreadTreeButton({
       <button
         ref={trigger}
         type="button"
-        className="text-foreground underline decoration-dotted underline-offset-2 hover:decoration-solid"
+        className={`${STATUS_BUTTON} text-foreground underline decoration-dotted underline-offset-2 hover:decoration-solid`}
         title="this thread reads and writes a tree of its own — open to see where, and to preview its pages"
         onClick={() => setOpen(true)}
       >
@@ -196,7 +197,7 @@ export function ThreadTreeButton({
       {hasPages ? (
         <button
           type="button"
-          className="inline-flex items-center gap-1 text-foreground underline decoration-dotted underline-offset-2 hover:decoration-solid"
+          className={`${STATUS_BUTTON} text-foreground underline decoration-dotted underline-offset-2 hover:decoration-solid`}
           title="open a page this thread built, in a new tab"
           onClick={() => setOpen(true)}
         >
@@ -206,7 +207,7 @@ export function ThreadTreeButton({
       ) : null}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent
-          className="sm:max-w-lg"
+          className="rounded-lg p-6 shadow-pop ring-0 sm:max-w-lg"
           onCloseAutoFocus={(event: Event): void => {
             event.preventDefault()
             focusComposerNear(trigger.current)

@@ -294,6 +294,17 @@ async function choose(mounted: Mounted, label: string, value: string): Promise<v
   })
 }
 
+/** Pick a rule's decision the way a person would: click its segment, Allow | Ask | Deny (#417). */
+async function decide(mounted: Mounted, rule: string, action: string): Promise<void> {
+  const segment = await eventually(() =>
+    find<HTMLButtonElement>(
+      mounted,
+      `[role="radiogroup"][aria-label="action ${rule}"] [role="radio"][value="${action}"]`,
+    ),
+  )
+  await act(async () => segment.click())
+}
+
 async function typeInto(mounted: Mounted, label: string, text: string): Promise<void> {
   const field = await eventually(() => find<HTMLInputElement>(mounted, `input[aria-label="${label}"]`))
   await act(async () => {
@@ -302,8 +313,8 @@ async function typeInto(mounted: Mounted, label: string, text: string): Promise<
   })
 }
 
-const actionOf = (mounted: Mounted, rule: string): string =>
-  find<HTMLSelectElement>(mounted, `select[aria-label="action ${rule}"]`).value
+const actionOf = (mounted: Mounted, rule: string): string | null =>
+  find(mounted, `[role="radiogroup"][aria-label="action ${rule}"] [aria-checked="true"]`).getAttribute('value')
 
 const writes = (mounted: Mounted): Sent[] => mounted.sent.filter((entry) => entry.request === 'PUT /api/permissions')
 
@@ -316,7 +327,7 @@ function writtenPermission(mounted: Mounted, position: number): Record<string, u
 
 test('⚠ Save sends the whole file under the ETag read, and the next save names the version it wrote', async () => {
   const mounted = await mountSettings()
-  await choose(mounted, 'action bash git status', 'deny')
+  await decide(mounted, 'bash git status', 'deny')
   await click(mounted, 'Save')
   await eventually(() => expect(writes(mounted)).toHaveLength(1))
   expect(writes(mounted)[0]?.ifMatch).toBe('"v1"')
@@ -325,7 +336,7 @@ test('⚠ Save sends the whole file under the ETag read, and the next save names
   })
   await eventually(() => expect(buttonNamed(mounted, 'Save').disabled).toBe(true))
   expect(actionOf(mounted, 'bash git status')).toBe('deny')
-  await choose(mounted, 'action read *', 'ask')
+  await decide(mounted, 'read *', 'ask')
   await click(mounted, 'Save')
   await eventually(() => expect(writes(mounted)).toHaveLength(2))
   expect(writes(mounted)[1]?.ifMatch).toBe('"v2"')
@@ -362,19 +373,17 @@ async function press(key: string): Promise<void> {
   await settle()
 }
 
-/** Whose a row is, by the page's words for it: yours, Enso's catch-all, or a mode's ("from plan"). */
-function whose(words: string): string {
-  if (words.startsWith('yours')) return 'yours'
-  if (words.startsWith("Enso's catch-all")) return 'catch-all'
-  return words
-}
-
-/** Each rule row on screen, in order: its surface and pattern, the decision it shows, and whose it is. */
+/**
+ * Each rule row on screen, in order: its surface and pattern, the decision it shows, and whose it is
+ * — by its tag: none is yours, else `catch-all` or the mode's ("from plan").
+ */
 function shownRows(mounted: Mounted): string[] {
-  return [...mounted.section().querySelectorAll<HTMLElement>('section[aria-label^="surface "] li')].map((row) => {
-    const owner = row.children[1]?.textContent ?? ''
-    const decision = row.querySelector('select')?.value ?? row.querySelector('span.font-semibold')?.textContent
-    return `${row.getAttribute('aria-label')} → ${decision} (${whose(owner)})`
+  return [...mounted.section().querySelectorAll<HTMLElement>('[aria-label^="surface "] tr')].map((row) => {
+    const owner = row.querySelector('[data-rule-tag]')?.textContent ?? 'yours'
+    const decision =
+      row.querySelector('[role="radio"][aria-checked="true"]')?.getAttribute('value') ??
+      row.querySelector('[data-decision]')?.textContent
+    return `${row.getAttribute('aria-label')} → ${decision} (${owner})`
   })
 }
 
@@ -387,7 +396,7 @@ function rowsInEffect(mode: EnsoPermissionModeName): string[] {
 }
 
 /** The rule list's own controls: an action, a pattern, a move or a remove. */
-const ROW_CONTROLS = ['select', 'input', 'button'].map((tag) => `section[aria-label^="surface "] ${tag}`).join(', ')
+const ROW_CONTROLS = ['select', 'input', 'button'].map((tag) => `[aria-label^="surface "] ${tag}`).join(', ')
 
 // #874: the modes are a radiogroup of cards — as written, which you edit, then a preview per mode.
 test('⚠ the view is a radiogroup of cards: as written first and editable, then each mode read-only, with the rules it puts in effect (#874)', async () => {
@@ -411,7 +420,7 @@ test('⚠ the view is a radiogroup of cards: as written first and editable, then
   }
   await act(async () => cardNamed(mounted, 'as written')?.click())
   await settle()
-  await choose(mounted, 'action bash git status', 'deny')
+  await decide(mounted, 'bash git status', 'deny')
   expect(buttonNamed(mounted, 'Save').disabled).toBe(false)
 })
 
@@ -450,7 +459,7 @@ async function openSection(mounted: Mounted, label: string): Promise<void> {
 // save could then write over unseen.
 test('⚠ leaving Settings, or its section, keeps an unsaved draft, and coming back reads nothing again (#869)', async () => {
   const mounted = await mountSettings()
-  await choose(mounted, 'action bash git status', 'deny')
+  await decide(mounted, 'bash git status', 'deny')
   await mounted.show(undefined)
   expect(document.querySelector('nav[aria-label="Settings sections"]')).toBeNull()
   await mounted.show(PERMISSIONS)
@@ -469,7 +478,7 @@ test('⚠ a 412 keeps the draft and offers a reload, which takes the file as it 
         ? Response.json({ reason: 'the file changed since it was read' }, { status: 412 })
         : undefined,
   })
-  await choose(mounted, 'action bash git status', 'deny')
+  await decide(mounted, 'bash git status', 'deny')
   await click(mounted, 'Save')
   await eventually(() => expect(find(mounted, '[aria-label="changed on disk"]').textContent).toContain('changed'))
   expect(actionOf(mounted, 'bash git status')).toBe('deny')
@@ -501,7 +510,7 @@ test('⚠ Overwrite with mine keeps a setting changed on disk since the read: on
       return undefined
     },
   })
-  await choose(mounted, 'action bash git status', 'deny')
+  await decide(mounted, 'bash git status', 'deny')
   await click(mounted, 'Save')
   await eventually(() => find(mounted, '[aria-label="changed on disk"]'))
   await click(mounted, 'Overwrite with mine')
@@ -534,7 +543,7 @@ test('Overwrite with mine, when the file on disk cannot be read now, writes over
       return undefined
     },
   })
-  await choose(mounted, 'action bash git status', 'deny')
+  await decide(mounted, 'bash git status', 'deny')
   await click(mounted, 'Save')
   await eventually(() => find(mounted, '[aria-label="changed on disk"]'))
   await click(mounted, 'Overwrite with mine')
@@ -555,7 +564,7 @@ test('a reset names its backup until the next edit', async () => {
   await click(mounted, "Reset to Enso's policy…")
   await click(mounted, 'Reset')
   await eventually(() => expect(mounted.section().textContent).toContain('/home/person/.enso/permissions.json.bak'))
-  await choose(mounted, 'action bash **', 'deny')
+  await decide(mounted, 'bash **', 'deny')
   await eventually(() => expect(mounted.section().textContent).not.toContain('/home/person/.enso/permissions.json.bak'))
 })
 
@@ -572,7 +581,7 @@ test('a 422 lists where the schema refused the file, and keeps the draft', async
           )
         : undefined,
   })
-  await choose(mounted, 'action bash git status', 'deny')
+  await decide(mounted, 'bash git status', 'deny')
   await click(mounted, 'Save')
   const refusal = await eventually(() => find(mounted, '[aria-label="refused"]'))
   expect(refusal.textContent).toContain('/permission/bash/git status')
@@ -580,20 +589,27 @@ test('a 422 lists where the schema refused the file, and keeps the draft', async
   expect(actionOf(mounted, 'bash git status')).toBe('deny')
 })
 
-test('the yolo banner shows only when the file sets yoloMode on', async () => {
+test('⚠ yoloMode on is said under the lede, which takes the reader to its Behaviour row; off, neither shows', async () => {
   const off = await mountSettings({ file: { ...FILE, yoloMode: false } })
   expect(off.section().querySelector('[aria-label="yolo mode"]')).toBeNull()
+  expect(off.section().querySelector('[aria-label="yolo mode is on"]')).toBeNull()
   await off.unmount()
   const on = await mountSettings({ file: { ...FILE, yoloMode: true } })
-  expect(on.section().querySelector('[aria-label="yolo mode"]')).not.toBeNull()
+  const row = find<HTMLElement>(on, '[aria-label="yolo mode"]')
+  const callout = find<HTMLElement>(on, '[aria-label="yolo mode is on"]')
+  // The callout comes before every rule: a reader of the table has already been told.
+  expect(callout.compareDocumentPosition(find(on, 'table')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  await click(on, 'See Behaviour')
+  expect(document.activeElement).toBe(row)
 })
 
 test("⚠ Enso's ** takes an action change only: it cannot be removed, moved, renamed, or passed by a move", async () => {
   const mounted = await mountSettings()
   const catchAll = find(mounted, '[aria-label="bash **"]')
-  expect(catchAll.querySelectorAll('button')).toHaveLength(0)
+  // Its decision's segments, and nothing else: no move, no remove, no pattern to rename.
+  expect(catchAll.querySelectorAll('button:not([role="radio"])')).toHaveLength(0)
   expect(catchAll.querySelector('input')).toBeNull()
-  expect(catchAll.querySelector('select[aria-label="action bash **"]')).not.toBeNull()
+  expect(catchAll.querySelector('[role="radiogroup"][aria-label="action bash **"]')).not.toBeNull()
   // The first rule after ** cannot move above it.
   expect(buttonNamed(mounted, 'move bash git status up').disabled).toBe(true)
   await click(mounted, 'move bash git status down')
@@ -627,11 +643,16 @@ test('a pattern renamed in place keeps its place; a rename onto a pattern the su
   ])
 })
 
-test('a drafted group adds only the rules not already in force, after **', async () => {
+test('turning a rule group on adds only the rules not already in force, after **, and it stays on', async () => {
   const file = { ...FILE, permission: { ...FILE.permission, bash: { ...FILE.permission.bash, 'git push *': 'ask' } } }
   const mounted = await mountSettings({ file })
-  await click(mounted, 'add Remote writes')
-  expect(buttonNamed(mounted, 'add Remote writes').disabled).toBe(true)
+  const toggle = (): HTMLButtonElement =>
+    find<HTMLButtonElement>(mounted, '[aria-label="rule group Remote writes"] [role="switch"]')
+  expect(toggle().getAttribute('aria-checked')).toBe('false')
+  await act(async () => toggle().click())
+  await settle()
+  expect(toggle().getAttribute('aria-checked')).toBe('true')
+  expect(toggle().disabled).toBe(true)
   await click(mounted, 'Save')
   await eventually(() => expect(writes(mounted)).toHaveLength(1))
   expect(Object.keys(writtenPermission(mounted, 0).bash as object)).toEqual([
