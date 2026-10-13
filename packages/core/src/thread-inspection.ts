@@ -259,11 +259,29 @@ export const EnsoStoredThread = Type.Object(
      */
     busy: Type.Boolean(),
     /**
+     * A thread on THIS server holds a question open for the person (#876): a permission ask, an
+     * `ask_user` questionnaire, any extension dialog — its runtime's `openDialogs()`, the same
+     * questions a follow's snapshot carries. Such a thread is busy too. The rail says "waiting on
+     * you" for it, over "running", even for a thread the page has not opened.
+     */
+    waiting: Type.Boolean(),
+    /**
      * The thread this one was forked from (#433): the session id its header's `parentSession`
      * file holds. Absent for a thread that is no fork — and for one whose parent file is gone,
      * which no longer names a thread the page could open.
      */
     parentThreadId: Type.Optional(Type.String()),
+    /**
+     * The model the session last recorded it ran on (#871): the last `model_change` or assistant
+     * reply in its file, read as `EnsoRecordedModel`'s model is. Absent when the file records none —
+     * never a guess, and never the model a resume would pick.
+     */
+    model: Type.Optional(
+      Type.Object(
+        { provider: Type.String({ minLength: 1 }), modelId: Type.String({ minLength: 1 }) },
+        { additionalProperties: false },
+      ),
+    ),
   },
   { additionalProperties: false },
 )
@@ -528,6 +546,13 @@ export const EnsoThreadHistory = Type.Object(
     stoppedAfter: Type.Optional(EnsoStoppedAfter),
     /** The name a person gave the thread (#670) — its newest `session_info`, as the listing's `name` — absent when none. */
     name: Type.Optional(Type.String({ minLength: 1 })),
+    /**
+     * Present only for a thread never started (#479): live on this server with no message and no
+     * session file — built by a control route, or by a Start refused at a later step, and never
+     * prompted. A page opens it on the launch panel, as it opens a thread it mints. A fork is written
+     * by its route before any prompt, so it is never one.
+     */
+    draft: Type.Optional(Type.Literal(true)),
   },
   { additionalProperties: false },
 )

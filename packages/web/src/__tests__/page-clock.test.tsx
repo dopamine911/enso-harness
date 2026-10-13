@@ -56,10 +56,10 @@ async function mountRail(lastActivityAt: Date): Promise<{
       onSelect={noop}
       onResume={noop}
       onNew={noop}
-      onAddProject={noop}
+      onOpenProject={noop}
       onRemoveProject={noop}
       onProjectSettings={noop}
-      onSettings={noop}
+      onPage={noop}
       projectNotice={undefined}
     />
   )

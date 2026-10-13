@@ -26,6 +26,26 @@ import { reviveHistoryMessages, type ThreadStores } from './thread-stores.ts'
  */
 export const ForkContext = createContext<((messageId: string | undefined) => void) | undefined>(undefined)
 
+/**
+ * Each page pane's fork, for the header (#879): the thread menu's **Fork thread** is the palette's
+ * `/fork` — the pane's own fork at its last prompt, read off the transcript that pane holds, which
+ * the header outside it cannot see. Keyed by the pane's stores; an unmounted pane takes its entry.
+ */
+const paneForks = new WeakMap<object, (messageId: string | undefined) => void>()
+
+/** Offer the pane's fork to the header; the cleanup withdraws it. */
+export function offerPaneFork(stores: object, forkAt: (messageId: string | undefined) => void): () => void {
+  paneForks.set(stores, forkAt)
+  return (): void => {
+    if (paneForks.get(stores) === forkAt) paneForks.delete(stores)
+  }
+}
+
+/** The fork the thread's pane offers — `undefined` while no page pane holds the thread. */
+export function paneForkOf(stores: object): ((messageId: string | undefined) => void) | undefined {
+  return paneForks.get(stores)
+}
+
 /** The words a user message sent, as its text parts joined — what a fork's prefill is compared by. */
 function sentWords(message: UIMessage): string {
   return message.parts.map((part) => (part.type === 'text' ? part.content : '')).join('')

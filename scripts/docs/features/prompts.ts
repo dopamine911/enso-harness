@@ -26,7 +26,8 @@ const GOES: Readonly<Record<EnsoLibraryPromptCategory, string>> = {
   system:
     "A *system* prompt replaces the opening of pi's system prompt, and pi then leaves out its own sections on tools, rules and docs. Your project's context, skills and working folder are still pi's, and the tool definitions are sent either way.",
   append: "An *append* prompt is added to the end of pi's.",
-  session: 'A *session* prompt is a first message you use often. It fills the prompt box in the start dialog.',
+  session:
+    "A *session* prompt is a first message you use often. It fills a new thread's prompt box on its launch panel.",
 }
 
 /** The categories in the order the library declares them. */
@@ -51,9 +52,9 @@ export const PROMPTS: FeatureSpec = {
   ],
   opens: [
     '{steps}. **prompts** is the scroll icon in the header, beside **settings**, and opens **Prompts**.',
-    '**New Thread** opens **Start a session**, where **System prompt** and **Saved prompt** pick from the library. See [Sessions and projects](./sessions-and-projects.md).',
+    '**New Thread** opens a new thread on its launch panel, where the **System prompt** and **Saved prompt** chips pick from the library. See [Sessions and projects](./sessions-and-projects.md).',
     [
-      'The files are plain markdown, so you can also edit them in any editor. The manager and the start dialog read the folder again each time they open. A file looks like this:',
+      'The files are plain markdown, so you can also edit them in any editor. The manager reads the folder again each time it opens, and the launch panel each time it shows. A file looks like this:',
       '',
       '```markdown',
       REVIEWER_TEXT.trimEnd(),
@@ -106,13 +107,14 @@ export const PROMPTS: FeatureSpec = {
     "The numbers are the ones the rest of the app uses. The tokens are the same estimate the Context tab gives system text, and the breakdown is pi's own rendering on the thread on screen. So the total here is what the Context tab counts, for the first request of a thread started with this prompt, across its system prompt and tool schemas — and, for an append prompt, the addendum, which the Context tab files under injected context. A system prompt can come out well under pi's default, because pi leaves out its own tools, rules and docs sections. An append prompt always costs pi's whole prompt plus its own text.",
     'A prompt with changes you have not saved says `● unsaved` beside its name. Opening another prompt, starting a new one, or closing the dialog asks first: **Discard them** or **Keep editing**.',
     'The files can change under you: another tab, or an editor open on the same file. **Save** only replaces the version you opened. If the file changed on disk since, nothing is written, and the editor says so with two choices: **Reload from disk**, which drops your edits for the file as it is now, or **Overwrite with mine**. A new prompt, or a rename, is never saved over a file that is already there, even one the library could not read. **Delete** likewise removes only the version you opened.',
-    "A project can keep prompts of its own, committed with it, in `.enso/prompts/<id>.md`. They are the same kind of file, and once you trust the project they are listed under **Project prompts** in the manager and under **Project** in the start dialog. They are listed apart from yours, and a choice is recorded by which library it came from (`project:<id>` for the project's), so a project prompt never hides one of yours with the same name. In a project you have not trusted, the files are not read at all; the manager and the start dialog say where they are and why they are not listed.",
-    'In the start dialog, **System prompt** lists `pi default` and every system and append prompt, each with its size. It is **fixed for the whole session**. **Saved prompt** lists the session prompts and puts the one you pick into the prompt box, where you can still change it before you send it.',
-    `Once a thread has started, the Context tab names its system prompt on the system row: \`system prompt · ${REVIEWER.name}\` for a system prompt, \`system prompt · pi default + ${REVIEWER.name}\` for an append prompt, or \`system prompt · pi default\`. An append prompt's own tokens are its **addendum**, counted under **injected context** with what else was added to pi's prompt (project context, skills); the element is labelled \`addendum · ${REVIEWER.name}\`.`,
+    "A project can keep prompts of its own, committed with it, in `.enso/prompts/<id>.md`. They are the same kind of file, and once you trust the project they are listed under **Project prompts** in the manager and under **Project** on the launch panel's chips. They are listed apart from yours, and a choice is recorded by which library it came from (`project:<id>` for the project's), so a project prompt never hides one of yours with the same name. In a project you have not trusted, the files are not read at all; the manager and the launch panel say where they are and why they are not listed.",
+    'On the launch panel, **System prompt** lists `pi default` and every system and append prompt, each with its size. It is fixed for the whole session, as the panel says under the prompt: *The system prompt is fixed after that.* **Saved prompt** lists the session prompts and puts the one you pick into the prompt box, where you can still change it before you press **Start session**.',
+    `Once a thread has started, the composer keeps a **System prompt** chip, locked: it names the prompt the thread runs with (\`${REVIEWER.name}\`, \`pi default + ${REVIEWER.name}\` for an append prompt, or \`pi default\`), read from the thread's own record, so a reload says the same. Pressing it says why it cannot change: it is fixed for this session.`,
+    `The Context tab names it on the system row too: \`system prompt · ${REVIEWER.name}\` for a system prompt, \`system prompt · pi default + ${REVIEWER.name}\` for an append prompt, or \`system prompt · pi default\`. An append prompt's own tokens are its **addendum**, counted under **injected context** with what else was added to pi's prompt (project context, skills); the element is labelled \`addendum · ${REVIEWER.name}\`.`,
   ],
   limits: [
     "A project's own prompts are read-only here. Change them in the repository, or copy one into your library and edit the copy.",
-    "A project's prompts are offered only in a project you trusted for every thread (**Trust project**, saved in pi's `trust.json`), or with `defaultProjectTrust` set to `always`. The trust question comes with a thread's first run, after its system prompt is already chosen. So answering **Trust this thread** cannot bring a project prompt into that same thread.",
+    "A project's prompts are offered only in a project you trusted for every thread (**Trust project** in a thread, or **Trust this project…** on the project's page, both saved in pi's `trust.json`), or with `defaultProjectTrust` set to `always`. The trust question comes with a thread's first run, after its system prompt is already chosen. So answering **Trust this thread** cannot bring a project prompt into that same thread.",
     "A thread's system prompt cannot change after its first request. To run the same work with another one, start a new thread. A fork, a resume and a restart keep the prompt the thread started with, even if the file has been edited or deleted since.",
     "These are not pi's prompt templates, the `/name` commands under **prompts** in the command palette (see [Chat](./chat.md)). Those are pi's own and are not listed here.",
   ],
@@ -125,7 +127,7 @@ export const PROMPTS: FeatureSpec = {
     {
       path: 'docs/reference/routes.md',
       label: 'HTTP routes',
-      why: '`/api/prompts`, and the configure route the start dialog sends the system prompt through',
+      why: '`/api/prompts`, and the configure route the launch panel sends the system prompt through',
     },
     { path: 'docs/features/context.md', label: 'Context', why: 'how the system prompt is counted in each request' },
     { path: 'docs/glossary.md', label: 'Glossary', why: '*library prompt* and the system-prompt modes' },

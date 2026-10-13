@@ -1,8 +1,10 @@
 import type {
+  EnsoForkReceipt,
   EnsoFollowFrame,
   EnsoFollowSnapshot,
   EnsoGitState,
   EnsoProject,
+  EnsoProjectSettings,
   EnsoSessionEval,
   EnsoStoredThread,
   EnsoThreadChanges,
@@ -53,6 +55,12 @@ export interface ScriptedFetch {
   readonly gitReads: string[]
   /** Every `GET /api/threads/:id/tree` the server saw (#682): like `/git`, none before a session. */
   readonly threadTreeReads: string[]
+  /** Every `POST …/fork` (#433) as the thread it forks and the body it carried: `{ entryId }`. */
+  readonly forks: Array<{ threadId: string; body: unknown }>
+  /** Every `POST …/name` (#670) as the thread it names and the body it carried: `{ name }`. */
+  readonly names: Array<{ threadId: string; body: unknown }>
+  /** Every `POST …/configure` (#391) as the thread it configures and the settings it carried. */
+  readonly configures: Array<{ threadId: string; body: unknown }>
   /** Hold the next prompt's answer; returns the release. */
   readonly holdPrompt: () => () => void
   /** Hold every later delete's answer (#571) — the server has it, and has not answered; returns the release. */
@@ -129,6 +137,18 @@ export interface ScriptedFetchOptions {
    * projects when absent.
    */
   readonly trees?: () => EnsoTreesListing | { readonly status: number; readonly reason: string }
+  /** What `POST …/fork` answers (#433): the new thread's receipt; absent, the route's 404. */
+  readonly forkReceipt?: EnsoForkReceipt
+  /** What `POST …/name` answers (#670): 204 by default; anything else carries `nameReason`. */
+  readonly nameStatus?: number
+  readonly nameReason?: string
+  /**
+   * What each `POST …/configure` answers (#391), in turn; the last one repeats, and 204 when absent.
+   * A 422's `body` is the refusal — `{ step, reason }` — as the server words it.
+   */
+  readonly configureAnswers?: readonly { readonly status: number; readonly body?: unknown }[]
+  /** What `GET /api/projects/:id/settings` answers (#754), by project id; absent is the 404. */
+  readonly projectSettings?: Readonly<Record<string, EnsoProjectSettings>>
 }
 
 /** The launch project a scripted server lists by default — the id the fixtures' stored threads carry. */
@@ -179,6 +199,9 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
   const treeReads: string[] = []
   const gitReads: string[] = []
   const threadTreeReads: string[] = []
+  const forks: Array<{ threadId: string; body: unknown }> = []
+  const names: Array<{ threadId: string; body: unknown }> = []
+  const configures: Array<{ threadId: string; body: unknown }> = []
   let storedThreads = options.storedThreads ?? []
   /** Question ids the server has TAKEN an answer for — the shape of the real route's 404. */
   const spentQuestions = new Set<string>()
@@ -217,11 +240,18 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
       before === null ? options.histories?.[decodeURIComponent(history[1])] : options.earlierHistories?.[before]
     return found === undefined ? new Response('no such thread', { status: 404 }) : Response.json(found)
   }
+  /** `GET /api/projects/:id/settings` (#754): the scripted project's settings, or the 404; undefined for any other path. */
+  const settingsRead = (path: string): Response | undefined => {
+    const projectId = /^\/api\/projects\/([^/]+)\/settings$/.exec(path)?.[1]
+    if (projectId === undefined) return undefined
+    const settings = options.projectSettings?.[decodeURIComponent(projectId)]
+    return settings === undefined ? new Response('no such project', { status: 404 }) : Response.json(settings)
+  }
   /** The page's own reads — mode seed, the rail's stored list, a resume click's history. Exact paths. */
   const pageRead = (path: string, before: string | null): Response | undefined => {
     const literal = literalReads[path]
     if (literal !== undefined) return Response.json(literal())
-    const history = historyRead(path, before)
+    const history = historyRead(path, before) ?? settingsRead(path)
     if (history !== undefined) return history
     const events = /^\/api\/threads\/([^/]+)\/events$/.exec(path)
     if (events?.[1] !== undefined) {
@@ -249,8 +279,29 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
   }
   /** A thread route's last segment — `/api/threads/<id>/<action>` — or undefined for anything else. */
   const threadAction = (path: string): string | undefined => /^\/api\/threads\/[^/]+\/([^/]+)$/.exec(path)?.[1]
+  /** The thread a thread route names, decoded. */
+  const threadOf = (path: string): string => decodeURIComponent(/^\/api\/threads\/([^/]+)\//.exec(path)?.[1] ?? '')
   /** One scripted answer per thread action, keyed the way the server's own route table is. */
-  const threadActions: Record<string, (init: RequestInit | undefined) => Promise<Response>> = {
+  const threadActions: Record<string, (init: RequestInit | undefined, path: string) => Promise<Response>> = {
+    fork: (init: RequestInit | undefined, path: string): Promise<Response> => {
+      forks.push({ threadId: threadOf(path), body: postedJson(init) })
+      const receipt = options.forkReceipt
+      return Promise.resolve(
+        receipt === undefined ? new Response('no such thread', { status: 404 }) : Response.json(receipt),
+      )
+    },
+    name: (init: RequestInit | undefined, path: string): Promise<Response> => {
+      names.push({ threadId: threadOf(path), body: postedJson(init) })
+      const status = options.nameStatus ?? 204
+      return Promise.resolve(new Response(status === 204 ? null : (options.nameReason ?? 'no'), { status }))
+    },
+    configure: (init: RequestInit | undefined, path: string): Promise<Response> => {
+      const answers = options.configureAnswers ?? []
+      const answer = answers[Math.min(configures.length, answers.length - 1)] ?? { status: 204 }
+      configures.push({ threadId: threadOf(path), body: postedJson(init) })
+      if (answer.status === 204) return Promise.resolve(new Response(null, { status: 204 }))
+      return Promise.resolve(Response.json(answer.body ?? {}, { status: answer.status }))
+    },
     follow: (): Promise<Response> => Promise.resolve(openFollow()),
     prompt: (init: RequestInit | undefined): Promise<Response> => {
       prompts.push(postedJson(init) as { message: string; admission?: string; images?: unknown[] })
@@ -324,7 +375,7 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
     }
     const action = threadAction(path)
     const respond = action === undefined ? undefined : threadActions[action]
-    if (respond !== undefined) return respond(init)
+    if (respond !== undefined) return respond(init, path)
     if (action !== undefined) countedReads[action]?.push(path)
     return Promise.resolve(pageRead(path, url.searchParams.get('before')) ?? new Response('not found', { status: 404 }))
   }) as typeof fetch
@@ -342,6 +393,9 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
     treeReads,
     gitReads,
     threadTreeReads,
+    forks,
+    names,
+    configures,
     deleteTags,
     holdPrompt: () => {
       const gate = Promise.withResolvers<void>()
@@ -367,6 +421,7 @@ export const SNAPSHOT_IDLE: EnsoFollowSnapshot = {
   sessionRisk: { level: 'low', signals: 0 },
   incidents: NO_SESSION_INCIDENTS,
   model: null,
+  systemPrompt: null,
   cwd: '/work/project',
   tree: false,
   usage: { cost: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, context: null },

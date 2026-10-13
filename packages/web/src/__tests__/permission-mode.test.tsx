@@ -1,13 +1,13 @@
 import { beforeEach, expect, test } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { createPermissionModeStore, PermissionModeSelect, type PermissionModeStore } from '../permission-mode.tsx'
-import { selectIn } from './static-markup.ts'
+import { createPermissionModeStore, ModeChip, type PermissionModeStore } from '../permission-mode.tsx'
+import { chipIn } from './static-markup.ts'
 
 /**
  * #84's browser half: the CURRENT permission mode as state, and the control that changes
- * it. One store per thread (#90 PR 3), so each case builds a fresh one. The dropdown is
- * rendered statically; its send wiring lives in composer.tsx and is covered by the live
- * receipt (renderToStaticMarkup runs no handlers).
+ * it. One store per thread (#90 PR 3), so each case builds a fresh one. The chip is rendered
+ * statically here; its list, its send wiring and the Mode line a change writes are driven mounted
+ * in `thread-pane.test.tsx` (renderToStaticMarkup runs no handlers and opens no list).
  */
 
 let store: PermissionModeStore
@@ -129,43 +129,24 @@ const noop = (): void => {
   // Static markup runs no handlers; the callback exists only to satisfy the prop.
 }
 
-test("⚠ an unknown mode renders as `unknown` and offers nothing — the options are the host's to declare", () => {
-  const control = selectIn(
-    renderToStaticMarkup(<PermissionModeSelect mode={undefined} available={[]} onSelect={noop} />),
-  )
-  expect(control.labels).toEqual(['unknown'])
-  expect(control.selected).toBe('')
-  // Nothing received yet: the control is disabled rather than offering a list we invented.
-  expect(control.disabled).toBe(true)
+test("⚠ an unknown mode reads `unknown` and the chip offers nothing — the options are the host's to declare", () => {
+  // Nothing received yet: the chip is disabled rather than offering a list we invented.
+  expect(chipIn(renderToStaticMarkup(<ModeChip mode={undefined} available={[]} onSelect={noop} />), 'Mode')).toEqual({
+    name: 'Mode: unknown',
+    disabled: true,
+  })
 })
 
-test('a known mode is the selected option, and every available mode is offered', () => {
-  const control = selectIn(
-    renderToStaticMarkup(
-      <PermissionModeSelect mode="acceptEdits" available={['default', 'acceptEdits', 'plan']} onSelect={noop} />,
-    ),
+test('a known mode is what the chip says, and a list on offer enables it', () => {
+  const markup = renderToStaticMarkup(
+    <ModeChip mode="acceptEdits" available={['default', 'acceptEdits', 'plan']} onSelect={noop} />,
   )
-  expect(control.selected).toBe('acceptEdits')
-  // Exactly the modes on offer, and no `unknown` placeholder once a mode is known.
-  expect(control.options).toEqual(['default', 'acceptEdits', 'plan'])
-  expect(control.disabled).toBe(false)
-})
-
-// The readout must never lie about what it was told: a mode the receipt's list somehow
-// omitted still renders as the current selection rather than snapping to something else.
-test('a current mode missing from the option list is still shown as selected', () => {
-  const control = selectIn(
-    renderToStaticMarkup(
-      <PermissionModeSelect mode="bypassPermissions" available={['default', 'plan']} onSelect={noop} />,
-    ),
-  )
-  expect(control.selected).toBe('bypassPermissions')
-  expect(control.options).toEqual(['default', 'plan', 'bypassPermissions'])
+  expect(chipIn(markup, 'Mode')).toEqual({ name: 'Mode: acceptEdits', disabled: false })
 })
 
 // ⚠ DELETED (#236): "the control is disabled while a run is in flight" asserted
 // `toContain('disabled')` against markup whose `disabled:opacity-60` class contains that
 // substring in every render. Since #618 the control is offered during a run; that is asserted
 // through the DOM, over the wire's status frames, in `thread-pane.test.tsx` ("busy on the wire →
-// … the mode select still offered"); the empty-`available` case is the first test above. Do not
+// … the mode chip still offered"); the empty-`available` case is the first test above. Do not
 // re-add a substring form here.

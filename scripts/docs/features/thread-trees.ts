@@ -15,9 +15,9 @@ export const THREAD_TREES: FeatureSpec = {
   landingTagline: 'own tree · restore · disk',
   shows: [
     "Each new thread works in a tree of its own, not in your checkout. When the project is a git repository's top level, the tree is a git worktree on a branch of its own, `enso/<thread-id>`; otherwise it is a copy of the project. It starts from your checkout as you left it, uncommitted edits and untracked files included, never your ignored files such as `node_modules` or `.env`. pi's file tools stay inside it, so one thread cannot write into another thread's files, or into yours.",
-    "A project says how its new trees are prepared, on its own page: **Project settings…** in the project's menu on the rail. Under **Worktrees**, **Files to copy into a new tree** names ignored files such as `.env` to copy in from your checkout, and **Setup commands** run in each new tree, in order, before its first run: an install, so the project's tools, and its git hooks, work there. **New threads run in** set to `off` keeps the project's new threads in its folder, with no tree. Each value says where it comes from: your settings, the project's shared `.enso/config.json`, committed with it, or `.enso/config.local.json`, yours alone. **Save to** chooses which of the project's two files a change goes in (#754).",
+    "A project says how its new trees are prepared, on its own page: **Project settings…** in the project's menu on the rail, or **Settings** on its card on the **Projects** page, opens its **Worktree settings** tab (#871). **Files to copy into a new tree** names ignored files such as `.env` to copy in from your checkout, and **Setup commands** run in each new tree, in order, before its first run: an install, so the project's tools, and its git hooks, work there. **New threads run in** set to `off` keeps the project's new threads in its folder, with no tree. Each value says where it comes from: your settings, the project's shared `.enso/config.json`, committed with it, or `.enso/config.local.json`, yours alone. **Save changes to** names the file a change goes in before you save: **Only me — this project** (`.enso/config.local.json`) or **Shared — committed with the project** (`.enso/config.json`) (#754).",
     "At the start of every run, Enso takes a snapshot of the tree. **Restore files to here**, under any prompt you sent, puts the tree's files back to how they were when that prompt ran. The conversation is not changed, but your next prompt tells pi the files went back, and to which prompt, so it doesn't work from files that are gone (#652). The files the restore replaced are kept: **Undo last restore** puts them back. A fork made at a prompt gets a tree of its own, at that prompt's snapshot.",
-    'Deleting a thread removes its tree, its branch and its snapshots, after checking what the tree still holds. **Settings** → **Storage** lists every tree with what it takes on disk.',
+    "Deleting a thread removes its tree, its branch and its snapshots, after checking what the tree still holds. **Settings** → **Storage** lists every tree with what it takes on disk, and each project's group opens that project's **Storage** tab, which lists its trees alone.",
   ],
   opens: [
     "{steps}: the status bar says where the thread's edits land. Trees are on by default.",
@@ -29,10 +29,10 @@ export const THREAD_TREES: FeatureSpec = {
       '{ "threads": { "projects": { "~/code/big-repo": "off" } } }',
       '```',
       '',
-      "A trusted project's own `.enso/config.json`, and your `.enso/config.local.json` beside it, set the same keys for that project, and win over yours: the local file first, then the shared one (#754). A launch that relies on the default says so in its log.",
+      "A trusted project's own `.enso/config.json`, and your `.enso/config.local.json` beside it, set the same keys for that project, and win over yours: the local file first, then the shared one (#754). Trust a project, or revoke it, from its page: the confirmation lists the setup commands its files declare before anything is trusted, and the change applies to the next tree (see [Sessions and projects](./sessions-and-projects.md), #873). A launch that relies on the default says so in its log.",
     ].join('\n'),
     '**Restore files to here** is under each prompt you sent, beside **fork from here**.',
-    '**Settings** → **Storage** lists the trees: **Settings** is at the foot of the rail. The trash icon in the header deletes the thread on screen, through the same confirmation.',
+    "**Settings** → **Storage** lists the trees: **Settings** is at the foot of the rail. **Delete thread…** in the header's **thread actions** menu (⋯) deletes the thread on screen, through the same confirmation.",
   ],
   shots: [
     {
@@ -84,11 +84,22 @@ export const THREAD_TREES: FeatureSpec = {
       region: [SETTINGS],
       marks: [
         {
+          target: { label: 'storage totals', within: SETTINGS },
+          says: 'The totals across every project: how many trees, what they take, and what the snapshot stores take. A sum with a size not fully read says `at least`, and how many were not.',
+        },
+        {
+          target: { text: / on disk/, within: { role: 'region', name: /^trees of /, within: SETTINGS } },
+          says: "**{shown}**: the project's trees plus its snapshot store, the same number its card on the Projects page says.",
+        },
+        {
           target: { text: /^snapshots /, within: SETTINGS },
           says: "**{shown}**: the project's snapshot store, shared by all its threads' snapshots.",
         },
         {
-          target: { text: /^\d+(\.\d)? (B|kB|MB|GB|TB)$/, within: SETTINGS },
+          target: {
+            text: /^\d+(\.\d)? (B|kB|MB|GB|TB)$/,
+            within: { role: 'list', name: /^each tree of /, within: SETTINGS },
+          },
           says: 'What the tree takes on disk, ignored files and installs included. Trees are listed largest first.',
         },
         {
@@ -97,11 +108,11 @@ export const THREAD_TREES: FeatureSpec = {
         },
         {
           target: { role: 'button', name: /^delete thread /, within: SETTINGS },
-          says: "Deletes the thread, through the header's confirmation.",
+          says: "Deletes the thread, through the same confirmation as the thread menu's **Delete thread…**.",
         },
       ],
       after: [
-        "The trash icon opens the header's confirmation: what goes (the conversation, the tree by path and branch, and what it takes on disk), and the work deleting would lose, named before anything goes. **Delete anyway** deletes exactly that work; work the tree gained since is named again first.",
+        'The trash icon opens the delete confirmation: what goes (the conversation, the tree by path and branch, and what it takes on disk), and the work deleting would lose, named before anything goes. **Delete anyway** deletes exactly that work; work the tree gained since is named again first.',
       ],
       measure: {
         treeSize: (page) => page.getByRole('region', { name: 'Settings' }).locator('li .tabular-nums').first(),
@@ -117,7 +128,7 @@ export const THREAD_TREES: FeatureSpec = {
   limits: [
     "Nothing brings a tree's work back into your checkout yet. For a worktree, `git merge enso/<thread-id>` brings what was committed. Uncommitted edits, and everything in a copy, you copy over yourself.",
     "A tree has none of your ignored files until the project's setup copies them in or recreates them. With no setup configured, a build or a test may need its install step first.",
-    "Setup commands run on your machine, as you, whenever a tree is made. The project's own files are read only once you trust the project, but a change to them after that is not asked about again (#753).",
+    "Setup commands run on your machine, as you, whenever a tree is made. The project's own files are read only once you trust the project, but a change to them after that is not asked about again (#753): the commands the trust confirmation listed are the ones there when you trusted it.",
     'A setup that fails is said in **What this thread built**, with its output; the thread still opens.',
     "The isolation is of files, not of git: in a worktree, bash `git` still reaches your repository's refs, config and remotes.",
     'A tree is kept until its thread is deleted. Nothing removes old trees on its own.',

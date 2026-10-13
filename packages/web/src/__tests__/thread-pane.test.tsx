@@ -6,6 +6,7 @@ import {
   ENSO_INCIDENT_RESOLVED_ENTRY,
   ENSO_PROVIDER_REFUSAL_KEY,
   ENSO_SESSION_RISK_ENTRY,
+  ENSO_SYSTEM_PROMPT_ENTRY,
   ENSO_UI_EVENTS,
   type EnsoFollowFrame,
   type EnsoForkReceipt,
@@ -14,6 +15,7 @@ import {
   type EnsoSessionIncidents,
   type EnsoGitFileChange,
   type EnsoGitRepository,
+  type EnsoProject,
   type EnsoStoredThread,
   type EnsoThreadDeletePreview,
   type EnsoThreadStatusEvent,
@@ -29,6 +31,7 @@ import type { UIMessage } from '@tanstack/ai-client'
 import { act } from 'react'
 import type { createRoot as CreateRoot, Root } from 'react-dom/client'
 import { ChatScreen } from '../chat-screen.tsx'
+import { AppHeader } from '../page-header.tsx'
 import type { ThreadView } from '../pane-context.ts'
 import { ThreadPane } from '../thread-pane.tsx'
 import {
@@ -124,7 +127,8 @@ interface MountedPane {
   readonly status: () => string
   readonly stopButton: () => HTMLButtonElement | null
   readonly sendButton: () => HTMLButtonElement
-  readonly modeSelect: () => HTMLSelectElement
+  /** The composer's chip named `<label>: …` (#878) — `Mode`, `Effort`, `System prompt`. */
+  readonly chip: (label: string) => HTMLButtonElement
   readonly composer: () => HTMLTextAreaElement
   /** The views the pane asked the page for, in order (#361) — the page is not mounted here. */
   readonly requestedViews: ThreadView[]
@@ -138,8 +142,8 @@ async function mountPane(
     debugOpen?: boolean
     view?: ThreadView
     server?: ScriptedFetchOptions
-    /** Leave the Start-a-session dialog open (#391); closed otherwise, as Escape would. */
-    startSession?: boolean
+    /** Leave a minted thread on its launch panel (#877); lowered otherwise, as a Start that went through lowers it. */
+    launch?: boolean
     /** The page's GLOBAL fetch — the scripted server's unless a test sets a tripwire (#404). */
     globalFetch?: typeof fetch
     /** Mount a STORED thread, as a reload does (`adoptThread`), instead of minting a new one. */
@@ -152,9 +156,9 @@ async function mountPane(
   // What the page itself fetches outside a thread; a pane's own requests go through its thread's.
   globalThis.fetch = options.globalFetch ?? server.fetch
   const stores = options.history === undefined ? mintThread(server.fetch) : adoptThread(options.history, server.fetch)
-  // A minted thread opens on the Start-a-session dialog (#391). These tests are about the pane
-  // behind it, so it is closed first — as the person pressing Escape would — unless one asks.
-  stores.startSession.set(options.startSession ?? false)
+  // A minted thread opens on its launch panel (#877). These tests are about the started pane, so it
+  // is lowered first — as a Start that went through lowers it — unless one asks.
+  if (options.history === undefined) stores.launch.set(options.launch ?? false)
   const container = document.createElement('div')
   document.body.appendChild(container)
   const root: Root = createRoot(container)
@@ -211,7 +215,13 @@ async function mountPane(
     status: () => one('#thread-status').textContent ?? '',
     stopButton: () => container.querySelector<HTMLButtonElement>('button[aria-label="stop the run"]'),
     sendButton: () => one<HTMLButtonElement>('button[aria-label="send message"]'),
-    modeSelect: () => one<HTMLSelectElement>('select'),
+    chip: (label: string) => {
+      const found = [...container.querySelectorAll<HTMLButtonElement>('button[aria-label]')].find((button) =>
+        button.getAttribute('aria-label')?.startsWith(`${label}: `),
+      )
+      if (found === undefined) throw new Error(`expected the ${label} chip in the pane`)
+      return found
+    },
     composer: () => one<HTMLTextAreaElement>('textarea[name="message"]'),
     requestedViews,
     setView: async (view: ThreadView) => {
@@ -235,6 +245,37 @@ function typeInto(field: HTMLTextAreaElement, text: string): void {
 
 const pressEnter = (field: HTMLTextAreaElement): boolean =>
   field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+
+/** The options a chip's open list offers, in order (Radix renders them in a portal on `document.body`). */
+const offeredOptions = (): string[] =>
+  [...document.querySelectorAll('[data-slot="select-item"]')].map((option) => option.textContent ?? '')
+
+/**
+ * Open a chip's list by KEYBOARD — Enter on the focused chip, as Radix's trigger takes it — and choose
+ * the option named `label` with the arrow keys and Enter (#878: the keyboard path is the one to pin).
+ * Answers what the list offered.
+ */
+async function chooseByKeyboard(chip: HTMLButtonElement, label: string): Promise<string[]> {
+  await flush(async () => {
+    chip.focus()
+    chip.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+    await tick()
+  })
+  const offered = await eventually(() => {
+    const options = offeredOptions()
+    expect(options).toContain(label)
+    return options
+  })
+  await flush(async () => {
+    const option = [...document.querySelectorAll<HTMLElement>('[data-slot="select-item"]')].find(
+      (candidate) => candidate.textContent === label,
+    )
+    option?.focus()
+    option?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+    await tick()
+  })
+  return offered
+}
 
 const railBusy = (threadId: string): boolean | undefined =>
   threadListStore.get().find((thread) => thread.threadId === threadId)?.busy
@@ -625,11 +666,11 @@ test("every request a pane makes goes through its thread's fetch, never the page
 
 // ── #125 item 1: the in-flight readings flip with the wire's status frames ───────────────
 
-test('⚠ busy on the wire → working, stop offered, rail busy, and the mode select still offered (#618); settled → idle, all back', async () => {
+test('⚠ busy on the wire → working, stop offered, rail busy, and the Mode chip still offered (#618); settled → idle, all back', async () => {
   const pane = await mountPane()
   expect(pane.status()).toContain('idle')
   expect(pane.stopButton()).toBeNull()
-  expect(pane.modeSelect().disabled).toBe(false)
+  expect(pane.chip('Mode').disabled).toBe(false)
   expect(railBusy(pane.stores.threadId)).toBe(false)
 
   // Another tab's run: busy with no receipt of ours. `isLoading` would never rise for this
@@ -639,7 +680,7 @@ test('⚠ busy on the wire → working, stop offered, rail busy, and the mode se
     expect(pane.status()).toContain('working')
     expect(pane.stopButton()).not.toBeNull()
     // A run that asks before every call is the one whose mode a user needs to change (#618).
-    expect(pane.modeSelect().disabled).toBe(false)
+    expect(pane.chip('Mode').disabled).toBe(false)
     expect(railBusy(pane.stores.threadId)).toBe(true)
   })
 
@@ -650,7 +691,7 @@ test('⚠ busy on the wire → working, stop offered, rail busy, and the mode se
   await eventually(() => {
     expect(pane.status()).toContain('idle')
     expect(pane.stopButton()).toBeNull()
-    expect(pane.modeSelect().disabled).toBe(false)
+    expect(pane.chip('Mode').disabled).toBe(false)
     expect(railBusy(pane.stores.threadId)).toBe(false)
   })
   await pane.unmount()
@@ -725,19 +766,143 @@ test('⚠ while a login waits, the composer offers Stop for it; pressing it asks
   await pane.unmount()
 })
 
-test("the snapshot's mode is the select's value; the host's mode observation moves it (#84, #95, L3)", async () => {
+test("the snapshot's mode is the Mode chip's, its list the host's modes; the host's mode observation moves it (#84, #95, L3, #878)", async () => {
   const pane = await mountPane()
   await pane.settle({ ...SNAPSHOT_IDLE, permissionMode: { mode: 'plan', available: ['default', 'plan', 'auto'] } })
-  await eventually(() => {
-    expect(pane.modeSelect().value).toBe('plan')
-    expect([...pane.modeSelect().options].map((option) => option.value)).toEqual(['default', 'plan', 'auto'])
-  })
+  await eventually(() => expect(pane.chip('Mode').getAttribute('aria-label')).toBe('Mode: plan'))
+  // Choosing the mode it is in already asks nothing: the list offers the host's modes, as they came.
+  expect(await chooseByKeyboard(pane.chip('Mode'), 'plan')).toEqual(['default', 'plan', 'auto'])
+  expect(pane.server.modeChanges).toEqual([])
   await pane.settle({
     type: 'observation',
     seq: 1,
     observation: { kind: 'permission-mode', mode: 'auto', available: ['default', 'plan', 'auto'] },
   })
-  await eventually(() => expect(pane.modeSelect().value).toBe('auto'))
+  await eventually(() => expect(pane.chip('Mode').getAttribute('aria-label')).toBe('Mode: auto'))
+  // The readout never lies about what it was told: a mode the receipt's list omits is still offered, as current.
+  await pane.settle({
+    type: 'observation',
+    seq: 2,
+    observation: { kind: 'permission-mode', mode: 'bypassPermissions', available: ['default', 'plan'] },
+  })
+  await eventually(() => expect(pane.chip('Mode').getAttribute('aria-label')).toBe('Mode: bypassPermissions'))
+  expect(await chooseByKeyboard(pane.chip('Mode'), 'bypassPermissions')).toEqual([
+    'default',
+    'plan',
+    'bypassPermissions',
+  ])
+  await pane.unmount()
+})
+
+// ⚠ #878, from the prototype's click-through: a Mode change there left no trace in the thread. Here
+// every change chosen on the chip goes to the mode route, and the host's receipt writes the
+// thread's "Mode: …" line — `bypassPermissions` included, the one change a reader must see.
+test('⚠ every Mode change chosen on the chip, bypassPermissions included, POSTs the mode and leaves its "Mode: …" line in the thread', async () => {
+  const modes = ['default', 'plan', 'bypassPermissions']
+  const pane = await mountPane()
+  await pane.settle({ ...SNAPSHOT_IDLE, live: true, permissionMode: { mode: 'default', available: modes } })
+  await eventually(() => expect(pane.chip('Mode').getAttribute('aria-label')).toBe('Mode: default'))
+  const lines = (mode: string): number => pane.container.textContent?.split(`Mode: ${mode}`).length ?? 1
+  for (const [index, mode] of ['bypassPermissions', 'plan', 'bypassPermissions'].entries()) {
+    const before = lines(mode)
+    await chooseByKeyboard(pane.chip('Mode'), mode)
+    await eventually(() => expect(pane.server.modeChanges.at(-1)).toEqual({ mode }))
+    // What the host emits once the mode is persisted (`POST …/mode` answers 204, the receipt follows).
+    await pane.settle({
+      type: 'observation',
+      seq: index + 1,
+      observation: { kind: 'permission-mode', mode, available: modes },
+    })
+    await eventually(() => {
+      expect(pane.chip('Mode').getAttribute('aria-label')).toBe(`Mode: ${mode}`)
+      expect(lines(mode)).toBe(before + 1)
+    })
+  }
+  expect(pane.server.modeChanges).toEqual([
+    { mode: 'bypassPermissions' },
+    { mode: 'plan' },
+    { mode: 'bypassPermissions' },
+  ])
+  await pane.unmount()
+})
+
+// #878: the started composer's System prompt chip is locked — the session took its prompt before its
+// first request (#443) — and names the prompt the thread REPORTS: the snapshot's, which a reload
+// reads off the branch, then an entry appended live. Pressed, it says why it cannot change.
+test('the locked System prompt chip names the prompt the thread reports — the snapshot’s, then a live record — and pressing it says why it is fixed', async () => {
+  const reviewer = { id: 'reviewer', name: 'Reviewer', mode: 'system' as const, sha256: 'a'.repeat(64) }
+  const pane = await mountPane()
+  await pane.settle({ ...SNAPSHOT_IDLE, systemPrompt: reviewer })
+  const chip = (): HTMLButtonElement => pane.chip('System prompt')
+  await eventually(() =>
+    expect(chip().getAttribute('aria-label')).toBe('System prompt: Reviewer, fixed for this session'),
+  )
+  // A lock, not a list: nothing to choose from.
+  expect(chip().getAttribute('role')).toBeNull()
+  expect(chip().hasAttribute('aria-haspopup')).toBe(false)
+  await flush(async () => {
+    chip().click()
+    await tick()
+  })
+  const explanation = await eventually(() => {
+    const found = document.querySelector('[role="tooltip"]')
+    if (found === null) throw new Error('expected the explanation')
+    return found.textContent ?? ''
+  })
+  expect(explanation).toContain('Fixed for this session')
+  // A choice recorded live — another tab's Start — is what the chip says next, without its text.
+  await pane.settle({
+    type: 'observation',
+    seq: 1,
+    observation: {
+      kind: 'custom-entry',
+      customType: ENSO_SYSTEM_PROMPT_ENTRY,
+      data: { id: 'haiku', name: 'Haiku', mode: 'append', sha256: 'b'.repeat(64), text: 'Answer in haiku.' },
+    },
+  })
+  await eventually(() =>
+    expect(chip().getAttribute('aria-label')).toBe('System prompt: pi default + Haiku, fixed for this session'),
+  )
+  // pi's default, recorded over a choice, and a record that does not read — never shown as the default.
+  await pane.settle({ ...SNAPSHOT_IDLE, systemPrompt: null })
+  await eventually(() =>
+    expect(chip().getAttribute('aria-label')).toBe('System prompt: pi default, fixed for this session'),
+  )
+  await pane.settle({ ...SNAPSHOT_IDLE, systemPrompt: 'unreadable' })
+  await eventually(() =>
+    expect(chip().getAttribute('aria-label')).toBe('System prompt: unreadable record, fixed for this session'),
+  )
+  await pane.unmount()
+})
+
+// #878: what the empty box and the line under it say follow the thread — idle, a run in flight — and
+// say nothing about sending once nothing can be sent.
+test('the placeholder and the hint follow the run: idle "Ask pi something", running "Type the next prompt…", and no hint once disconnected', async () => {
+  const pane = await mountPane()
+  await pane.settle(SNAPSHOT_IDLE)
+  const hint = (): string => pane.composer().parentElement?.querySelector('p')?.textContent ?? ''
+  await eventually(() => {
+    expect(pane.composer().placeholder).toBe('Ask pi something')
+    expect(hint()).toBe('Enter to send · Shift+Enter for a new line')
+  })
+  await pane.settle({ type: 'status', live: true, busy: true, generation: 1 })
+  await eventually(() => {
+    expect(pane.composer().placeholder).toBe('Type the next prompt — it queues until this run ends')
+    expect(hint()).toBe('pi is running · Enter queues · Shift+Enter for a new line')
+  })
+  await pane.settle(
+    { type: 'observation', seq: 1, observation: { kind: 'settled', aborted: false } },
+    { type: 'status', live: true, busy: false, generation: 1 },
+  )
+  await eventually(() => expect(hint()).toBe('Enter to send · Shift+Enter for a new line'))
+  await flush(async () => {
+    pane.server.closeFollow()
+    await tick()
+  })
+  await eventually(() => {
+    expect(pane.composer().placeholder).toBe('disconnected — reload and resume from the rail')
+    expect(hint()).toBe('')
+  })
   await pane.unmount()
 })
 
@@ -1127,7 +1292,7 @@ test("⚠ the composer's e2e selectors match the rendered markup, and the spec's
   await pane.settle(SNAPSHOT_IDLE)
   const stopByName = (): number => pane.container.querySelectorAll('button[aria-label="stop the run"]').length
   await eventually(() => {
-    expect(pane.composer().placeholder).toBe('ask pi something')
+    expect(pane.composer().placeholder).toBe('Ask pi something')
     expect(pane.sendButton().getAttribute('aria-label')).toBe('send message')
     // Settled, so the spec's settle gate — the stop control's absence — holds.
     expect(stopByName()).toBe(0)
@@ -1170,6 +1335,8 @@ test('⚠ a queued prompt refused after a delay takes back only its own bubble; 
   }) as typeof fetch
   globalThis.fetch = gated
   const stores = mintThread(gated)
+  // About the started pane's composer: its launch panel is lowered, as a Start that went through lowers it (#877).
+  stores.launch.set(false)
   const container = document.createElement('div')
   document.body.appendChild(container)
   const root: Root = createRoot(container)
@@ -1356,7 +1523,7 @@ test('the `/` palette: an extension command sends and the typed draft stays; a t
 // the snapshot's `model` names it; the chip opens the dialog the palette's `/model` shares;
 // picking POSTs `{ name: 'model', value }` and moves nothing itself — the `model` observation
 // does; a refusal (409 running, 422 the host's reason) is a warning notice, the click did nothing else.
-test('the model chip and thinking level follow the snapshot; picking a model POSTs …/command; a refusal is a notice', async () => {
+test('the model chip and the Effort chip follow the snapshot; picking a model POSTs …/command; a refusal is a notice', async () => {
   const modelRow = {
     name: 'model',
     source: 'host' as const,
@@ -1373,12 +1540,12 @@ test('the model chip and thinking level follow the snapshot; picking a model POS
   })
   await pane.settle(SNAPSHOT_IDLE)
   const chip = (): HTMLButtonElement => {
-    const found = pane.container.querySelector<HTMLButtonElement>('button[aria-label="model"]')
+    const found = pane.container.querySelector<HTMLButtonElement>('button[aria-label^="Model"]')
     if (found === null) throw new Error('expected the model chip')
     return found
   }
   await eventually(() => expect(chip().textContent).toContain('default until the thread runs'))
-  expect(pane.container.querySelector('[aria-label="thinking level"]')).toBeNull()
+  expect(pane.container.querySelector('[aria-label^="Effort: "]')).toBeNull()
 
   await pane.settle({
     ...SNAPSHOT_IDLE,
@@ -1391,7 +1558,7 @@ test('the model chip and thinking level follow the snapshot; picking a model POS
   })
   await eventually(() => {
     expect(chip().textContent).toContain('Fake One')
-    expect(pane.container.querySelector('[aria-label="thinking level"]')?.textContent).toBe('medium')
+    expect(pane.chip('Effort').getAttribute('aria-label')).toBe('Effort: medium')
   })
 
   // The chip opens the dialog; the dialog reads the thread's commands and lists the row's options.
@@ -1434,13 +1601,16 @@ test('the model chip and thinking level follow the snapshot; picking a model POS
   })
   await eventually(() => {
     expect(chip().textContent).toContain('Fake Two')
-    expect(pane.container.querySelector('[aria-label="thinking level"]')?.textContent).toBe('high')
+    expect(pane.chip('Effort').getAttribute('aria-label')).toBe('Effort: high')
   })
+  // The Effort chip (#878), by keyboard: the levels the model offers, and a choice is the `/thinking` command.
+  expect(await chooseByKeyboard(pane.chip('Effort'), 'low')).toEqual(['off', 'low', 'medium', 'high'])
+  await eventually(() => expect(pane.server.hostCommands.at(-1)).toEqual({ name: 'thinking', value: 'low' }))
   await pane.unmount()
 })
 
 // #434: a cold thread's snapshot names what its branch last ran on. The chip says it, marked
-// recorded — never as live, so no thinking select (the levels are pi's to offer once built) —
+// recorded — never as live, so no Effort chip (the levels are pi's to offer once built) —
 // and the live snapshot replaces it once the thread runs.
 test('a cold thread shows its recorded model on the chip, marked recorded; the live snapshot wins once it runs', async () => {
   const pane = await mountPane()
@@ -1449,12 +1619,15 @@ test('a cold thread shows its recorded model on the chip, marked recorded; the l
     recordedModel: { model: { provider: 'anthropic', modelId: 'claude-sonnet-5' }, thinkingLevel: 'medium' },
   })
   const chip = (): HTMLButtonElement => {
-    const found = pane.container.querySelector<HTMLButtonElement>('button[aria-label="model"]')
+    const found = pane.container.querySelector<HTMLButtonElement>('button[aria-label^="Model"]')
     if (found === null) throw new Error('expected the model chip')
     return found
   }
-  await eventually(() => expect(chip().textContent).toBe('model (recorded): claude-sonnet-5 · anthropic · medium'))
-  expect(pane.container.querySelector('[aria-label="thinking level"]')).toBeNull()
+  // The shared chip control (#880): named `Model (recorded)`, so it never reads as live.
+  await eventually(() =>
+    expect(chip().getAttribute('aria-label')).toBe('Model (recorded): claude-sonnet-5 · anthropic · medium'),
+  )
+  expect(pane.container.querySelector('[aria-label^="Effort: "]')).toBeNull()
 
   await pane.settle({
     ...SNAPSHOT_IDLE,
@@ -1466,8 +1639,8 @@ test('a cold thread shows its recorded model on the chip, marked recorded; the l
     },
   })
   await eventually(() => {
-    expect(chip().textContent).toBe('modelFake One· fake')
-    expect(pane.container.querySelector('[aria-label="thinking level"]')?.textContent).toBe('high')
+    expect(chip().getAttribute('aria-label')).toBe('Model: Fake One · fake')
+    expect(pane.chip('Effort').getAttribute('aria-label')).toBe('Effort: high')
   })
   await pane.unmount()
 })
@@ -2303,7 +2476,7 @@ test("⚠ the debug pane names a MISMATCH between the page's mode and the server
     observation: { kind: 'permission-mode', mode: 'plan', available: ['default', 'plan'] },
   })
   await eventually(() => {
-    expect(pane.modeSelect().value).toBe('plan')
+    expect(pane.chip('Mode').getAttribute('aria-label')).toBe('Mode: plan')
     expect(debug.textContent).toContain('host mode: plan')
     expect(mismatches()).toBe(0)
   })
@@ -2753,10 +2926,12 @@ async function mountPage(options: ScriptedFetchOptions = {}): Promise<MountedPag
     root.render(<ChatScreen />)
   })
   await flush(tick)
-  // The rail's two kinds of row, across every project's section (#395): open on this page, and earlier.
-  const buttons = (list: 'open' | 'earlier'): HTMLButtonElement[] => [
-    ...container.querySelectorAll<HTMLButtonElement>(`ol[aria-label^="${list} threads in"] button`),
-  ]
+  // The rail's two kinds of row, across every project's section and day (#395, #875): open on this
+  // page, and earlier — each row names its thread, and the page's list says which are open here.
+  const buttons = (list: 'open' | 'earlier'): HTMLButtonElement[] =>
+    [...container.querySelectorAll<HTMLButtonElement>('#threads-rail button[data-thread-id]')].filter(
+      (row) => threadListStore.get().some((thread) => thread.threadId === row.dataset.threadId) === (list === 'open'),
+    )
   return {
     container,
     server,
@@ -2777,15 +2952,56 @@ async function mountPage(options: ScriptedFetchOptions = {}): Promise<MountedPag
   }
 }
 
+/**
+ * The page with `prompts.length` stored threads, each opened from the rail in turn — the last one on
+ * screen. Started threads, the server's: a draft's Context, Stats and Diff are disabled (#879). Each
+ * thread's history is its prompt and a reply, `u-<index>` and `a-<index>`, unless `server` names one.
+ */
+async function mountStartedThreads(
+  prompts: readonly string[],
+  server: ScriptedFetchOptions = {},
+): Promise<MountedPage> {
+  const ids = prompts.map((_, index) => `stored-started-${index}`)
+  const page = await mountPage({
+    ...server,
+    storedThreads: prompts.map((prompt, index) => ({
+      threadId: ids[index] ?? '',
+      projectId: 'p-launch',
+      title: prompt,
+      lastActivityAt: new Date(Date.now() - index * 60_000).toISOString(),
+      messageCount: 2,
+      busy: false,
+      waiting: false,
+    })),
+    histories: {
+      ...Object.fromEntries(
+        prompts.map((prompt, index) => [
+          ids[index] ?? '',
+          storedHistory(ids[index] ?? '', [
+            text(`u-${index}`, 'user', prompt),
+            text(`a-${index}`, 'assistant', 'done'),
+          ]),
+        ]),
+      ),
+      ...server.histories,
+    },
+  })
+  for (const [index, prompt] of prompts.entries()) {
+    const row = await eventually(() => {
+      const found = page.previousRows().find((stored) => stored.textContent?.includes(prompt))
+      if (found === undefined) throw new Error(`expected the stored row ${prompt}`)
+      return found
+    })
+    await page.click(row)
+    await eventually(() => expect(new URLSearchParams(window.location.search).get('thread')).toBe(ids[index] ?? ''))
+  }
+  return page
+}
+
 // #361: Chat and Stats are the page's views, as tabs in the header. One choice for the page:
 // the view shown is the ACTIVE thread's, and it follows a switch of thread.
 test('the Stats tab replaces the transcript in the thread on screen, and follows a switch of thread', async () => {
-  const page = await mountPage()
-  const byText = (text: string): HTMLButtonElement => {
-    const found = [...page.container.querySelectorAll('button')].find((button) => button.textContent === text)
-    if (found === undefined) throw new Error(`expected a ${text} button`)
-    return found
-  }
+  const page = await mountStartedThreads(['first ask', 'second ask'])
   const tab = (name: string): HTMLButtonElement => {
     const found = page.container.querySelector<HTMLButtonElement>(`header [role="tab"]#thread-view-${name}-tab`)
     if (found === null) throw new Error(`expected the ${name} tab in the header`)
@@ -2798,8 +3014,6 @@ test('the Stats tab replaces the transcript in the thread on screen, and follows
       await tick()
     })
   }
-  await page.click(byText('New Thread'))
-  await page.click(byText('New Thread'))
   expect(tab('chat').getAttribute('aria-selected')).toBe('true')
   // Shown: in the pane on screen, and not the transcript kept laid out but `inert` under another view.
   const shown = (id: string): HTMLElement[] =>
@@ -2818,7 +3032,7 @@ test('the Stats tab replaces the transcript in the thread on screen, and follows
     expect(shown('thread-view-chat')).toHaveLength(0)
   })
   expect(dangling()).toEqual([])
-  const older = page.activeRows()[1]
+  const older = page.activeRows().find((row) => row.getAttribute('aria-current') === null)
   if (older === undefined) throw new Error('expected two rows')
   await page.click(older)
   await eventually(() => expect(shown('thread-view-stats')).toHaveLength(1))
@@ -2835,11 +3049,7 @@ test('the Stats tab replaces the transcript in the thread on screen, and follows
 // stays hidden behind the rail. ⚠ happy-dom has no media queries: this reads the state the
 // classes encode (`hidden` below md; the panes `max-md:hidden` while it is open), not a layout.
 test('the threads button opens the rail over the thread; choosing a thread from it closes it again', async () => {
-  const page = await mountPage()
-  const newThread = [...page.container.querySelectorAll('button')].find((button) => button.textContent === 'New Thread')
-  if (newThread === undefined) throw new Error('expected a New Thread button')
-  await page.click(newThread)
-  await page.click(newThread)
+  const page = await mountStartedThreads(['first ask', 'second ask'])
   const toggle = page.container.querySelector<HTMLButtonElement>('header button[aria-controls="threads-rail"]')
   const rail = page.container.querySelector<HTMLElement>('#threads-rail')
   if (toggle === null || rail === null) throw new Error('expected the threads button and the rail it controls')
@@ -2871,10 +3081,7 @@ test('the threads button opens the rail over the thread; choosing a thread from 
 // A question from pi waits in the transcript; on another view the Chat tab, the status bar and the
 // rail's row say so, and nothing moves the reader (#362 review) — they switch when ready.
 test('a question waiting while Stats is shown is said on the Chat tab, in the status bar and on the rail; the view stays', async () => {
-  const page = await mountPage()
-  const newThread = [...page.container.querySelectorAll('button')].find((button) => button.textContent === 'New Thread')
-  if (newThread === undefined) throw new Error('expected a New Thread button')
-  await page.click(newThread)
+  const page = await mountStartedThreads(['ask something'])
   const tab = (name: string): HTMLElement => {
     const found = page.container.querySelector<HTMLElement>(`header [role="tab"]#thread-view-${name}-tab`)
     if (found === null) throw new Error(`expected the ${name} tab`)
@@ -2999,6 +3206,11 @@ test('New Thread mints a thread, lists it in the rail as current, and shows exac
     expect(page.activeRows()[0]?.getAttribute('aria-current')).toBe('true')
     expect(page.visiblePanes()).toHaveLength(1)
   })
+  // A prompt half-typed, so the draft stays when the page leaves it (#875).
+  await flush(async () => {
+    typeInto(shownComposer(page), 'half a thought')
+    await tick()
+  })
   await page.click(newThread)
   await eventually(() => {
     expect(page.activeRows()).toHaveLength(2)
@@ -3007,7 +3219,11 @@ test('New Thread mints a thread, lists it in the rail as current, and shows exac
     expect(page.visiblePanes()).toHaveLength(1)
     expect(page.container.querySelectorAll('#thread-status')).toHaveLength(2)
   })
-  // Click the older row: it becomes current and its pane is the visible one.
+  // Click the older row (the newer one holding words too): it becomes current and its pane is the visible one.
+  await flush(async () => {
+    typeInto(shownComposer(page), 'another half')
+    await tick()
+  })
   const older = page.activeRows()[1]
   if (older === undefined) throw new Error('expected two rows')
   await page.click(older)
@@ -3015,6 +3231,75 @@ test('New Thread mints a thread, lists it in the rail as current, and shows exac
     expect(page.activeRows().map((row) => row.getAttribute('aria-current'))).toEqual([null, 'true'])
     expect(page.visiblePanes()).toHaveLength(1)
   })
+  await page.unmount()
+})
+
+/** The composer of the pane on screen — not one kept laid out, `inert`, under it (#370). */
+function shownComposer(page: MountedPage): HTMLTextAreaElement {
+  const found = [...page.container.querySelectorAll<HTMLTextAreaElement>('textarea[name="message"]')].find(
+    (composer) => composer.closest('[inert]') === null,
+  )
+  if (found === undefined) throw new Error('expected the composer of the pane on screen')
+  return found
+}
+
+// #875: a draft is the page's alone (#879), so one left with nothing typed — New Thread clicked
+// twice, a row clicked from it — would pile up on the rail. Leaving it drops it; words typed in its
+// composer — the launch panel's form until it starts (#877) — keep it, and nothing is ever asked of
+// the server.
+test('⚠ a draft left with nothing typed is discarded; one holding a prompt on its launch panel stays (#875, #877)', async () => {
+  // A model to offer, so the launch panel shows its settings.
+  const page = await mountPage({
+    commands: [
+      {
+        name: 'model',
+        source: 'host',
+        kind: 'select',
+        value: 'fake/plain',
+        options: [{ id: 'fake/plain', label: 'Plain' }],
+      },
+    ],
+  })
+  const newThread = [...page.container.querySelectorAll('button')].find((button) => button.textContent === 'New Thread')
+  if (newThread === undefined) throw new Error('expected a New Thread button')
+  const shown = (): string => new URLSearchParams(window.location.search).get('thread') ?? ''
+  const listed = (): string[] => threadListStore.get().map((thread) => thread.threadId)
+  await page.click(newThread)
+  const empty = shown()
+  await page.click(newThread)
+  const kept = shown()
+  await eventually(() => expect(listed()).toEqual([kept]))
+  // Words in the launch panel's prompt: the composer, before Start.
+  await eventually(() => expect(page.container.textContent).toContain('What should pi work on?'))
+  await flush(async () => {
+    typeInto(shownComposer(page), 'a prompt on the launch panel')
+    await tick()
+  })
+  await page.click(newThread)
+  const emptied = shown()
+  await flush(async () => {
+    typeInto(shownComposer(page), 'a prompt typed, then taken back')
+    await tick()
+  })
+  const row = (threadId: string): HTMLButtonElement => {
+    const found = page.activeRows().find((candidate) => candidate.dataset.threadId === threadId)
+    if (found === undefined) throw new Error(`expected the row of ${threadId}`)
+    return found
+  }
+  await page.click(row(kept))
+  await eventually(() => expect(shown()).toBe(kept))
+  expect(listed()).toEqual([emptied, kept])
+  expect(shownComposer(page).value).toBe('a prompt on the launch panel')
+  // Emptied again, the composer's draft goes the next time the page leaves it.
+  await page.click(row(emptied))
+  await flush(async () => {
+    typeInto(shownComposer(page), '   ')
+    await tick()
+  })
+  await page.click(row(kept))
+  await eventually(() => expect(listed()).toEqual([kept]))
+  expect(listed()).not.toContain(empty)
+  expect(page.server.deletes).toEqual([])
   await page.unmount()
 })
 
@@ -3028,6 +3313,7 @@ test("the rail lists the server's stored threads; a click resumes one with its h
         lastActivityAt: new Date().toISOString(),
         messageCount: 2,
         busy: false,
+        waiting: false,
       },
     ],
     histories: {
@@ -3071,7 +3357,7 @@ const DELETABLE = 'stored-delete'
 
 /** The page with one stored thread, opened from the rail and on screen: one the server holds, so Delete is offered. */
 async function openDeletable(
-  options: Pick<ScriptedFetchOptions, 'deleteAnswers' | 'deletePreview' | 'trees' | 'histories'> & {
+  options: Pick<ScriptedFetchOptions, 'deleteAnswers' | 'deletePreview' | 'trees' | 'histories' | 'projects'> & {
     readonly others?: readonly EnsoStoredThread[]
   } = {},
 ): Promise<MountedPage> {
@@ -3085,6 +3371,7 @@ async function openDeletable(
         lastActivityAt: new Date().toISOString(),
         messageCount: 2,
         busy: false,
+        waiting: false,
       },
       ...others,
     ],
@@ -3114,12 +3401,50 @@ async function openDeletable(
   return page
 }
 
-const deleteButton = (page: MountedPage): HTMLButtonElement | null =>
-  page.container.querySelector<HTMLButtonElement>('header button[aria-label="delete thread"]')
+/** The open menu's items (#879) — Radix renders a menu into `document.body`. */
+const menuItems = (): HTMLElement[] => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+
+/** The header's thread menu (#879), opened as a pointer opens it: its items. */
+async function openThreadMenu(page: Pick<MountedPage, 'container'>): Promise<HTMLElement[]> {
+  const trigger = page.container.querySelector<HTMLElement>('header button[aria-label="thread actions"]')
+  if (trigger === null) throw new Error('expected the thread menu in the header')
+  await flush(async () => {
+    // Radix opens a menu on a primary-button pointerdown.
+    trigger.dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true, pointerType: 'mouse' }))
+    await tick()
+  })
+  return eventually(() => {
+    const items = menuItems()
+    expect(items.length).toBeGreaterThan(0)
+    return items
+  })
+}
+
+/** Choose the thread menu's item reading `words`; it must be enabled. */
+async function chooseFromThreadMenu(page: Pick<MountedPage, 'container' | 'click'>, words: string): Promise<void> {
+  const item = (await openThreadMenu(page)).find((found) => found.textContent === words)
+  if (item === undefined) throw new Error(`expected ${words} in the thread menu`)
+  expect(item.hasAttribute('data-disabled')).toBe(false)
+  await page.click(item)
+  await eventually(() => expect(menuItems()).toHaveLength(0))
+}
+
+/** The thread menu's items as they read, a disabled one marked so; the menu is closed again. */
+async function threadMenuReads(page: Pick<MountedPage, 'container'>): Promise<string[]> {
+  const items = (await openThreadMenu(page)).map(
+    (item) => `${item.textContent ?? ''}${item.hasAttribute('data-disabled') ? ' (disabled)' : ''}`,
+  )
+  await flush(async () => {
+    document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await tick()
+  })
+  await eventually(() => expect(menuItems()).toHaveLength(0))
+  return items
+}
 
 /**
  * The open delete confirmation, or `undefined` — Radix renders dialogs into `document.body`, and a
- * fresh thread's Start-a-session dialog may be open beside it.
+ * fresh thread's launch panel may be open beside it (#877).
  */
 const deleteDialog = (): HTMLElement | undefined =>
   [...document.querySelectorAll<HTMLElement>('[role="dialog"]')].find((dialog) =>
@@ -3136,9 +3461,7 @@ function dialogButton(text: string): HTMLButtonElement {
 }
 
 async function openDeleteDialog(page: MountedPage): Promise<HTMLElement> {
-  const button = deleteButton(page)
-  if (button === null) throw new Error('expected Delete in the header')
-  await page.click(button)
+  await chooseFromThreadMenu(page, 'Delete thread…')
   return eventually(() => {
     const dialog = deleteDialog()
     if (dialog === undefined) throw new Error('expected the delete dialog')
@@ -3149,18 +3472,332 @@ async function openDeleteDialog(page: MountedPage): Promise<HTMLElement> {
 const notices = (page: MountedPage): string[] =>
   [...page.container.querySelectorAll('[role="status"]')].map((notice) => notice.textContent ?? '')
 
-test('Delete is offered only on a thread the server holds', async () => {
+// #879: the header's separate Rename, Delete and debug buttons are one thread menu. A thread the
+// server holds offers Rename, Fork thread and Delete thread…; a draft — minted here and never
+// prompted, the page's alone — has nothing to rename, fork or delete, and is discarded instead.
+test('the thread menu offers Rename, Fork thread and Delete on a thread the server holds; a draft only Discard draft', async () => {
   const page = await openDeletable()
-  // A thread minted here and never prompted is the page's alone: nothing to delete.
+  expect(await threadMenuReads(page)).toEqual(['Rename', 'Fork thread', 'Delete thread…'])
   const newThread = [...page.container.querySelectorAll('button')].find((button) => button.textContent === 'New Thread')
   if (newThread === undefined) throw new Error('expected a New Thread button')
   await page.click(newThread)
-  await eventually(() => expect(deleteButton(page)).toBeNull())
+  expect(await threadMenuReads(page)).toEqual(['Rename (disabled)', 'Fork thread (disabled)', 'Discard draft'])
   const stored = page.activeRows().find((row) => row.textContent?.includes('try the parser rewrite'))
   if (stored === undefined) throw new Error('expected the stored thread on the rail')
   await page.click(stored)
-  await eventually(() => expect(deleteButton(page)).not.toBeNull())
+  expect(await threadMenuReads(page)).toEqual(['Rename', 'Fork thread', 'Delete thread…'])
   await page.unmount()
+})
+
+/** Whether the header's view tabs are disabled, Chat, Context, Stats and Diff in turn. */
+const viewTabsDisabled = (page: MountedPage): boolean[] =>
+  ['chat', 'context', 'stats', 'changes'].map(
+    (view) => page.container.querySelector<HTMLButtonElement>(`header #thread-view-${view}-tab`)?.disabled ?? true,
+  )
+
+test('a draft is "not started", its Context, Stats and Diff disabled; Discard draft leaves it and asks nothing of the server (#879)', async () => {
+  const page = await openDeletable()
+  const header = (): string => page.container.querySelector('header')?.textContent ?? ''
+  expect(header()).not.toContain('not started')
+  expect(viewTabsDisabled(page)).toEqual([false, false, false, false])
+  const newThread = [...page.container.querySelectorAll('button')].find((button) => button.textContent === 'New Thread')
+  if (newThread === undefined) throw new Error('expected a New Thread button')
+  await page.click(newThread)
+  const draft = new URLSearchParams(window.location.search).get('thread')
+  expect(draft).not.toBe(DELETABLE)
+  expect(header()).toContain('not started')
+  // Chat stays: the way back from a view shown before the draft was.
+  expect(viewTabsDisabled(page)).toEqual([false, true, true, true])
+  await chooseFromThreadMenu(page, 'Discard draft')
+  // The project's newest other thread is shown, and says the draft went; the draft is nowhere.
+  await eventually(() => {
+    expect(new URLSearchParams(window.location.search).get('thread')).toBe(DELETABLE)
+    expect(threadListStore.get().some((thread) => thread.threadId === draft)).toBe(false)
+    expect(notices(page).some((notice) => notice.endsWith('draft discarded'))).toBe(true)
+  })
+  expect(page.server.deletes).toEqual([])
+  expect(page.server.previewReads).toEqual([])
+  await page.unmount()
+})
+
+test("the menu's Fork thread is the palette's /fork: it forks at the last prompt and opens the fork, its composer holding that prompt (#879, #433)", async () => {
+  const source = 'stored-started-0'
+  const forked = 'stored-forked'
+  const page = await mountStartedThreads(['first ask'], {
+    histories: {
+      [source]: storedHistory(source, [
+        text('u-first', 'user', 'first ask'),
+        text('a-first', 'assistant', 'first answer'),
+        text('u-second', 'user', 'second ask'),
+        text('a-second', 'assistant', 'second answer'),
+      ]),
+      [forked]: storedHistory(forked, [
+        text('u-first', 'user', 'first ask'),
+        text('a-first', 'assistant', 'first answer'),
+      ]),
+    },
+    forkReceipt: { threadId: forked, prefill: 'second ask' },
+  })
+  await chooseFromThreadMenu(page, 'Fork thread')
+  await eventually(() => {
+    expect(page.server.forks).toEqual([{ threadId: source, body: { entryId: 'u-second' } }])
+    expect(new URLSearchParams(window.location.search).get('thread')).toBe(forked)
+    const composers = [...page.container.querySelectorAll<HTMLTextAreaElement>('textarea[name="message"]')]
+    expect(composers.filter((composer) => composer.closest('[inert]') === null).map(({ value }) => value)).toEqual([
+      'second ask',
+    ])
+  })
+  await page.unmount()
+})
+
+/** Press `key` in `field`, as the keyboard does. */
+async function pressKey(field: HTMLElement, key: string): Promise<void> {
+  await flush(async () => {
+    field.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }))
+    await tick()
+  })
+}
+
+/** Type `text` over a controlled input's value, as a browser does: the prototype's setter, then `input`. */
+async function typeOver(field: HTMLInputElement, text: string): Promise<void> {
+  await flush(async () => {
+    Reflect.set(HTMLInputElement.prototype, 'value', text, field)
+    field.dispatchEvent(new Event('input', { bubbles: true }))
+    await tick()
+  })
+}
+
+const titleButton = (page: MountedPage): HTMLButtonElement | null =>
+  page.container.querySelector<HTMLButtonElement>('header button[title^="rename this thread"]')
+const nameField = (page: MountedPage): HTMLInputElement | null =>
+  page.container.querySelector<HTMLInputElement>('header input[aria-label="thread name"]')
+
+async function openNameField(page: MountedPage): Promise<HTMLInputElement> {
+  return eventually(() => {
+    const field = nameField(page)
+    if (field === null) throw new Error('expected the name field in the header')
+    return field
+  })
+}
+
+test('Rename edits the title in place: focused with the whole name selected; Escape sends nothing, Enter saves (#879)', async () => {
+  const page = await mountStartedThreads(['try the parser rewrite'])
+  await chooseFromThreadMenu(page, 'Rename')
+  const field = await openNameField(page)
+  expect(document.activeElement).toBe(field)
+  expect([field.selectionStart, field.selectionEnd]).toEqual([0, 'try the parser rewrite'.length])
+  await typeOver(field, 'never sent')
+  await pressKey(field, 'Escape')
+  expect(nameField(page)).toBeNull()
+  expect(titleButton(page)?.textContent).toContain('try the parser rewrite')
+  // The title itself is the other way in.
+  const title = titleButton(page)
+  if (title === null) throw new Error('expected the title as a button')
+  await page.click(title)
+  const again = await openNameField(page)
+  expect(again.value).toBe('try the parser rewrite')
+  await typeOver(again, '  parser, take two  ')
+  await pressKey(again, 'Enter')
+  await eventually(() => {
+    expect(nameField(page)).toBeNull()
+    expect(titleButton(page)?.textContent).toContain('parser, take two')
+  })
+  expect(page.server.names).toEqual([{ threadId: 'stored-started-0', body: { name: 'parser, take two' } }])
+  await page.unmount()
+})
+
+test('a rename left open ends when another thread is shown: coming back shows the title, not the field (#879, PR #892 review)', async () => {
+  const page = await mountStartedThreads(['first ask', 'second ask'])
+  await chooseFromThreadMenu(page, 'Rename')
+  await openNameField(page)
+  const row = (words: string): HTMLButtonElement => {
+    const found = page.activeRows().find((candidate) => candidate.textContent?.includes(words))
+    if (found === undefined) throw new Error(`expected the ${words} row`)
+    return found
+  }
+  await page.click(row('first ask'))
+  await eventually(() => expect(titleButton(page)?.textContent).toContain('first ask'))
+  await page.click(row('second ask'))
+  await eventually(() => expect(titleButton(page)?.textContent).toContain('second ask'))
+  expect(nameField(page)).toBeNull()
+  expect(page.server.names).toEqual([])
+  await page.unmount()
+})
+
+test('a rename the server refuses is said under the field, which keeps the name to try again (#879)', async () => {
+  const page = await mountStartedThreads(['try the parser rewrite'], {
+    nameStatus: 409,
+    nameReason: 'thread stored-started-0 is running',
+  })
+  await chooseFromThreadMenu(page, 'Rename')
+  const field = await openNameField(page)
+  await typeOver(field, 'parser, take two')
+  await pressKey(field, 'Enter')
+  await eventually(() =>
+    expect(page.container.querySelector('header [role="alert"]')?.textContent).toBe(
+      'Not renamed: 409 thread stored-started-0 is running',
+    ),
+  )
+  expect(nameField(page)?.value).toBe('parser, take two')
+  await page.unmount()
+})
+
+// #879: a thread the rail still lists but the server no longer holds is said in the pane, by its
+// id, with the ways on — not as a line in the rail.
+test('a listed thread the server no longer holds opens the not-found screen with its id; Start a new thread leaves it (#879)', async () => {
+  const page = await openDeletable({
+    others: [
+      {
+        threadId: 'stored-gone',
+        projectId: 'p-launch',
+        title: 'a thread deleted elsewhere',
+        lastActivityAt: new Date(Date.now() - 60_000).toISOString(),
+        messageCount: 2,
+        busy: false,
+        waiting: false,
+      },
+    ],
+  })
+  const gone = page.previousRows().find((row) => row.textContent?.includes('a thread deleted elsewhere'))
+  if (gone === undefined) throw new Error('expected the stale row')
+  await page.click(gone)
+  const screen = await eventually(() => {
+    const found = page.container.querySelector<HTMLElement>('section[aria-labelledby="thread-not-found-title"]')
+    if (found === null) throw new Error('expected the not-found screen')
+    return found
+  })
+  expect(screen.querySelector('h2')?.textContent).toBe('This thread isn’t on the server')
+  expect(screen.querySelector('code')?.textContent).toBe('stored-gone')
+  expect(document.activeElement).toBe(screen.querySelector('h2'))
+  expect(page.container.textContent).not.toContain('could not open the thread')
+  // No thread is on screen: the header names none and offers none of a thread's actions.
+  expect(page.container.querySelector('header')?.textContent).toContain('Thread not found')
+  expect(page.container.querySelector('header button[aria-label="thread actions"]')).toBeNull()
+  expect(page.visiblePanes()).toHaveLength(0)
+  const start = [...screen.querySelectorAll('button')].find((button) => button.textContent === 'Start a new thread')
+  if (start === undefined) throw new Error('expected Start a new thread')
+  await page.click(start)
+  await eventually(() => {
+    expect(page.container.querySelector('section[aria-labelledby="thread-not-found-title"]')).toBeNull()
+    expect(page.container.querySelector('header')?.textContent).toContain('not started')
+    expect(page.visiblePanes()).toHaveLength(1)
+  })
+  expect(new URLSearchParams(window.location.search).get('thread')).not.toBe(DELETABLE)
+  await page.unmount()
+})
+
+test("the not-found screen's Search threads takes focus to the rail's search box (#879, #875)", async () => {
+  const page = await openDeletable({
+    others: [
+      {
+        threadId: 'stored-gone',
+        projectId: 'p-launch',
+        title: 'a thread deleted elsewhere',
+        lastActivityAt: new Date(Date.now() - 60_000).toISOString(),
+        messageCount: 2,
+        busy: false,
+        waiting: false,
+      },
+    ],
+  })
+  const gone = page.previousRows().find((row) => row.textContent?.includes('a thread deleted elsewhere'))
+  if (gone === undefined) throw new Error('expected the stale row')
+  await page.click(gone)
+  const search = await eventually(() => {
+    const found = [...page.container.querySelectorAll('section button')].find(
+      (button) => button.textContent === 'Search threads',
+    )
+    if (!(found instanceof HTMLButtonElement)) throw new Error('expected Search threads')
+    return found
+  })
+  await page.click(search)
+  await eventually(() => {
+    const focused = document.activeElement
+    expect(focused?.closest('#threads-rail')).not.toBeNull()
+    expect(focused?.getAttribute('aria-label')).toBe('Search threads')
+  })
+  await page.unmount()
+})
+
+test('under the title, what the thread runs with: project · model · effort, live — or recorded, said so — and nothing guessed (#879)', async () => {
+  const page = await mountStartedThreads(['ask something'])
+  const subtitle = (): string | undefined =>
+    page.container.querySelector('header button[title^="rename this thread"] + span')?.textContent ?? undefined
+  // A cold thread nothing has said a model for: its project alone.
+  expect(subtitle()).toBe('launch')
+  await flush(async () => {
+    page.server.frame({
+      ...SNAPSHOT_IDLE,
+      threadId: 'stored-started-0',
+      model: null,
+      recordedModel: { model: { provider: 'anthropic', modelId: 'claude-sonnet-5' }, thinkingLevel: 'medium' },
+    })
+    await tick()
+  })
+  await eventually(() => expect(subtitle()).toBe('launch · claude-sonnet-5 (recorded) · medium'))
+  await flush(async () => {
+    page.server.frame({
+      ...SNAPSHOT_LIVE,
+      threadId: 'stored-started-0',
+      model: {
+        model: { provider: 'anthropic', id: 'claude-opus-5', name: 'Claude Opus 5' },
+        thinkingLevel: 'high',
+        availableThinkingLevels: ['off', 'high'],
+      },
+    })
+    await tick()
+  })
+  await eventually(() => expect(subtitle()).toBe('launch · Claude Opus 5 · high'))
+  await page.unmount()
+})
+
+test("with ?debug, the thread menu shows and hides the debug pane where the header's switch did (#879)", async () => {
+  const stores = mintThread()
+  const active = threadListStore.get().find((thread) => thread.threadId === stores.threadId)
+  if (active === undefined) throw new Error('expected the minted thread in the list')
+  const toggles: string[] = []
+  const container = document.createElement('div')
+  document.body.appendChild(container)
+  const root: Root = createRoot(container)
+  const render = async (debugOpen: boolean | undefined): Promise<void> => {
+    await flush(async () => {
+      root.render(
+        <AppHeader
+          active={active}
+          activeThreadId={active.threadId}
+          notFound={false}
+          rail={{ open: false, toggle: () => undefined }}
+          view="chat"
+          onView={() => undefined}
+          debug={debugOpen === undefined ? undefined : { open: debugOpen, toggle: () => toggles.push('toggle') }}
+          onDeleted={() => undefined}
+          onDiscardDraft={() => undefined}
+          stored={[]}
+        />,
+      )
+      await tick()
+    })
+  }
+  const header = {
+    container,
+    click: async (button: HTMLElement): Promise<void> => {
+      await flush(async () => {
+        button.click()
+        await tick()
+      })
+    },
+  }
+  // A page without ?debug has no debug pane to offer.
+  await render(undefined)
+  expect(await threadMenuReads(header)).not.toContain('Show debug pane')
+  await render(false)
+  await chooseFromThreadMenu(header, 'Show debug pane')
+  expect(toggles).toEqual(['toggle'])
+  await render(true)
+  await chooseFromThreadMenu(header, 'Hide debug pane')
+  expect(toggles).toEqual(['toggle', 'toggle'])
+  await flush(async () => root.unmount())
+  container.remove()
 })
 
 /** The dialog once the preview is in: Delete enabled, its description past the loading line. */
@@ -3204,6 +3841,7 @@ const storedFork = (threadId: string, title?: string): EnsoStoredThread => ({
   lastActivityAt: new Date().toISOString(),
   messageCount: 1,
   busy: false,
+  waiting: false,
 })
 
 const TREE_AT =
@@ -3380,7 +4018,10 @@ test("Settings' Storage lists each tree by its thread's title with size and held
   const settings = await openStorage(page)
   await eventually(() => expect(settings.textContent).not.toContain('Measuring…'))
   const section = settings.querySelector('section[aria-label="trees of launch"]')
-  expect(section?.querySelector('h3')?.textContent).toBe('launchsnapshots 2.1 GB')
+  // The project's total (#870): its trees and its snapshot store, one unreadable tree making it a partial.
+  expect(section?.querySelector('h3')?.textContent).toBe(
+    'launchat least 2.5 GB on disk (partial: 1 of 3 not fully read)snapshots 2.1 GBOpen project',
+  )
   const rows = [...(section?.querySelectorAll('li') ?? [])].map((row) => row.textContent ?? '')
   // Largest first: the unreadable one orders as 0, and is never said as 0.
   expect(rows[0]).toContain('try the parser rewrite')
@@ -3392,6 +4033,60 @@ test("Settings' Storage lists each tree by its thread's title with size and held
   expect(rows[1]).not.toMatch(/\b0 B\b/)
   window.history.replaceState(null, '', '/')
   await page.unmount()
+})
+
+/** Each total of Storage's row as it reads: its value, what it counts, and, when partial, how much was not read. */
+function storageTotals(settings: HTMLElement): string[][] {
+  const row = settings.querySelector('dl[aria-label="storage totals"]')
+  return [...(row?.children ?? [])].map((total) => {
+    const value = total.querySelector('dd')?.textContent ?? ''
+    const label = total.querySelector('dt')?.textContent ?? ''
+    const short = [...total.querySelectorAll('dd')].slice(1).map((part) => part.textContent ?? '')
+    return [value, label, ...short]
+  })
+}
+
+/** A second project: one tree, measured, and a snapshot store whose walk did not finish. */
+const OTHER_TREES: EnsoTreesListing['projects'][number] = {
+  projectId: 'p-other',
+  objectStore: { kind: 'partial', bytes: 300_000_000, reason: 'not finished in time' },
+  trees: [{ ...ORPHAN_TREE, path: '/other/.enso/trees/a', size: { kind: 'measured', bytes: 88_000_000 } }],
+}
+
+/** Storage's totals, once the listing they sum is read. */
+async function totalsOf(listing: EnsoTreesListing): Promise<string[][]> {
+  const page = await openDeletable({ trees: () => listing })
+  const settings = await openStorage(page)
+  await eventually(() => expect(settings.textContent).not.toContain('Measuring…'))
+  const totals = storageTotals(settings)
+  window.history.replaceState(null, '', '/')
+  await page.unmount()
+  return totals
+}
+
+// #874: the totals across every project, summed from the groups below them. A size not fully read
+// makes its total "at least", saying how many were not, never an exact number.
+test("⚠ Storage's totals are the sums of its groups, across projects; one size not fully read makes its total partial (#874)", async () => {
+  // 412 MB + 88 MB, the orphan's unreadable size not counted as 0; 2.1 GB + at least 300 MB.
+  expect(await totalsOf({ projects: [LAUNCH_TREES, OTHER_TREES] })).toEqual([
+    ['3', 'trees'],
+    ['at least 500 MB', 'in trees', 'partial: 1 of 3 not fully read'],
+    ['at least 2.4 GB', 'in snapshot stores', 'partial: 1 of 2 not fully read'],
+  ])
+})
+
+test("Storage's totals, every size measured, are exact and say nothing of partial (#874)", async () => {
+  const listing: EnsoTreesListing = {
+    projects: [
+      { ...LAUNCH_TREES, trees: LAUNCH_TREES.trees.filter((tree) => tree !== ORPHAN_TREE) },
+      { ...OTHER_TREES, objectStore: { kind: 'measured', bytes: 300_000_000 } },
+    ],
+  }
+  expect(await totalsOf(listing)).toEqual([
+    ['2', 'trees'],
+    ['500 MB', 'in trees'],
+    ['2.4 GB', 'in snapshot stores'],
+  ])
 })
 
 test("a delete from Settings' Storage goes through the header's preview and forced DELETE, then the listing is read again; the page stays", async () => {
@@ -3456,9 +4151,10 @@ test('a delete the server takes (204) leaves the thread for a fresh one, and the
 })
 
 // ⚠ #663, from an arena run: deleting one of two approaches opened a new empty thread and its Start
-// dialog, the other right there in the rail. The page goes to the project's newest other thread —
-// here a stored one, resumed — and says the delete on it (#721 review: the notice was lost on this path).
-test('⚠ a delete of the thread on screen goes to its project’s newest other thread — a stored one resumed with its history — and says the delete there; no Start dialog (#663)', async () => {
+// dialog — now its launch panel (#877) — the other right there in the rail. The page goes to the
+// project's newest other thread — here a stored one, resumed — and says the delete on it (#721
+// review: the notice was lost on this path).
+test('⚠ a delete of the thread on screen goes to its project’s newest other thread — a stored one resumed with its history — and says the delete there; no launch panel (#663)', async () => {
   const sibling = 'stored-sibling'
   const page = await openDeletable({
     others: [
@@ -3469,6 +4165,7 @@ test('⚠ a delete of the thread on screen goes to its project’s newest other 
         lastActivityAt: new Date(Date.now() - 60_000).toISOString(),
         messageCount: 2,
         busy: false,
+        waiting: false,
       },
     ],
     histories: {
@@ -3493,9 +4190,7 @@ test('⚠ a delete of the thread on screen goes to its project’s newest other 
     expect(page.container.textContent).not.toContain('Rewriting parse.ts')
     expect(notices(page).some((notice) => notice.endsWith(`thread ${DELETABLE} deleted`))).toBe(true)
   })
-  expect(
-    [...document.querySelectorAll('[role="dialog"]')].some((dialog) => dialog.textContent?.includes('Start a session')),
-  ).toBe(false)
+  expect(page.container.textContent).not.toContain('What should pi work on?')
   await page.unmount()
 })
 
@@ -3511,6 +4206,7 @@ test('a delete whose next thread the server no longer holds leaves a fresh threa
         lastActivityAt: new Date(Date.now() - 60_000).toISOString(),
         messageCount: 2,
         busy: false,
+        waiting: false,
       },
     ],
   })
@@ -3559,6 +4255,7 @@ test('a thread the stored listing holds offers Delete before anything is prompte
         lastActivityAt: new Date().toISOString(),
         messageCount: 0,
         busy: false,
+        waiting: false,
       },
     ],
     histories: {
@@ -3578,10 +4275,8 @@ test('a thread the stored listing holds offers Delete before anything is prompte
     return found
   })
   await page.click(row)
-  await eventually(() => {
-    expect(new URLSearchParams(window.location.search).get('thread')).toBe(forked)
-    expect(deleteButton(page)).not.toBeNull()
-  })
+  await eventually(() => expect(new URLSearchParams(window.location.search).get('thread')).toBe(forked))
+  expect(await threadMenuReads(page)).toContain('Delete thread…')
   await page.unmount()
 })
 
@@ -3683,6 +4378,7 @@ test("a resumed thread's image renders as an <img> from the stored history, byte
         lastActivityAt: new Date().toISOString(),
         messageCount: 1,
         busy: false,
+        waiting: false,
       },
     ],
     histories: {
@@ -3735,6 +4431,7 @@ test("a resumed thread's refused attempt says the refusal in its own bubble, bef
         lastActivityAt: new Date().toISOString(),
         messageCount: 3,
         busy: false,
+        waiting: false,
       },
     ],
     histories: {
@@ -3821,17 +4518,49 @@ const railAlerts = (container: HTMLElement): string[] =>
 // #378: the page writes a fresh thread's id to the URL before its first prompt. If the server
 // restarts, or drops the empty thread, before that prompt, the URL names an id the server has never
 // held: a 404. That is no error — the thread is started under the id the URL already names.
-test("⚠ the URL's own thread, never held by the server, is started under that id: no error, the Start dialog open (#378)", async () => {
+test("⚠ the URL's own thread, never held by the server, is started under that id: no error, its launch panel shown (#378, #877)", async () => {
   const page = await mountPage()
   const unused = crypto.randomUUID()
   try {
     await visitThreadUrl(unused)
     await eventually(() => {
       expect(threadListStore.get().map((thread) => thread.threadId)).toContain(unused)
-      // Radix renders the dialog into `document.body`, not inside the page's container.
-      expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Start a session')
+      expect(page.container.querySelector('[role="region"] h2')?.textContent).toBe('What should pi work on?')
     })
     expect(window.location.search).toBe(`?thread=${unused}`)
+    expect(railAlerts(page.container)).toEqual([])
+  } finally {
+    window.history.replaceState(null, '', '/')
+    await page.unmount()
+  }
+})
+
+// ⚠ #479: a reload before the first prompt — a Start refused, the tab reloaded — found the empty
+// thread the server still held: a 200 with no messages, adopted as a resumed thread, and the
+// settings a session starts with, the system prompt among them, were offered nowhere. The server
+// says the thread is a draft, and the page opens it on its launch panel, as it opens one it minted.
+test('⚠ a reload of a thread the server holds but never started opens its launch panel, not an empty transcript (#479)', async () => {
+  const draft = crypto.randomUUID()
+  const page = await mountPage({
+    histories: {
+      [draft]: {
+        threadId: draft,
+        projectId: 'p-launch',
+        messages: [],
+        permissionMode: { mode: 'default', available: ['default', 'plan'] },
+        sessionRisk: { level: 'low', signals: 0 },
+        incidents: NO_SESSION_INCIDENTS,
+        draft: true,
+      },
+    },
+  })
+  try {
+    await visitThreadUrl(draft)
+    await eventually(() => {
+      expect(threadListStore.get().map((thread) => thread.threadId)).toContain(draft)
+      expect(page.container.querySelector('[role="region"] h2')?.textContent).toBe('What should pi work on?')
+    })
+    expect(getThreadStores(draft)?.launch.get()).toBe(true)
     expect(railAlerts(page.container)).toEqual([])
   } finally {
     window.history.replaceState(null, '', '/')
@@ -3903,7 +4632,9 @@ test('a URL naming a deleted thread (410) is said on the rail and never started 
       expect(railAlerts(container)).toEqual([`could not open the thread: 410 ${refusal}`])
     })
     expect(threadListStore.get().map((thread) => thread.threadId)).toContain(shown)
-    expect(container.querySelector('ol[aria-label^="open threads in"] button[aria-current="true"]')).not.toBeNull()
+    expect(
+      container.querySelector(`#threads-rail button[data-thread-id="${shown}"][aria-current="true"]`),
+    ).not.toBeNull()
   } finally {
     window.history.replaceState(null, '', '/')
     await flush(async () => root.unmount())
@@ -3944,7 +4675,7 @@ test('Settings opens from the rail as a page, each section a URL of its own; bac
     // The thread is behind the page: off screen, no row marked current, the header the page's own.
     expect(page.visiblePanes()).toHaveLength(0)
     expect(page.container.querySelector('#threads-rail [aria-current="true"]')).toBeNull()
-    expect(deleteButton(page)).toBeNull()
+    expect(page.container.querySelector('header button[aria-label="thread actions"]')).toBeNull()
     await page.click(buttonIn(page, 'nav[aria-label="Settings sections"]', 'Permissions'))
     expect(pageInUrl()).toEqual(['settings', 'permissions'])
     expect(pageRegion(page)?.querySelector('h2')?.textContent).toBe('Permissions')
@@ -3955,7 +4686,7 @@ test('Settings opens from the rail as a page, each section a URL of its own; bac
     expect(pageRegion(page)).toBeNull()
     expect(page.visiblePanes()).toHaveLength(1)
     expect(settingsLink().getAttribute('aria-current')).toBeNull()
-    expect(deleteButton(page)).not.toBeNull()
+    expect(page.container.querySelector('header button[aria-label="thread actions"]')).not.toBeNull()
     await popTo(`?thread=${DELETABLE}&page=settings&section=appearance`)
     expect(pageHeading(page)).toBe('Settings')
   } finally {
@@ -4012,13 +4743,207 @@ test('a section Settings does not have, or a page Enso does not, is not found wi
     await page.click(buttonIn(page, 'header', 'Settings'))
     expect(pageInUrl()).toEqual(['settings', 'appearance'])
     expect(pageRegion(page)?.querySelector('h2')?.textContent).toBe('Appearance')
-    await popTo(`?thread=${DELETABLE}&page=projects`)
+    await popTo(`?thread=${DELETABLE}&page=trees`)
     expect(pageHeading(page)).toBe('Page not found')
-    expect(pageRegion(page)?.textContent).toContain('Enso has no page called “projects”.')
+    expect(pageRegion(page)?.textContent).toContain('Enso has no page called “trees”.')
     await page.click(buttonIn(page, '[role="region"]', 'Back to the thread'))
     expect(pageInUrl()).toEqual([null, null])
     expect(new URLSearchParams(window.location.search).get('thread')).toBe(DELETABLE)
     expect(page.visiblePanes()).toHaveLength(1)
+  } finally {
+    window.history.replaceState(null, '', '/')
+    await page.unmount()
+  }
+})
+
+// ── the Projects page (#870): opened from the rail, each project a card ──
+
+const LAUNCH_PROJECT: EnsoProject = {
+  projectId: 'p-launch',
+  title: 'launch',
+  path: '/scripted/launch',
+  status: 'ok',
+  launch: true,
+}
+/** A registered project: `OTHER_TREES`' project, with one stored thread of its own. */
+const OTHER_PROJECT: EnsoProject = { projectId: 'p-other', title: 'other', path: '/other', status: 'ok', launch: false }
+const OTHER_THREAD = 'stored-other'
+
+/** A project's card on the Projects page, by its name. */
+function projectCard(page: MountedPage, name: string): HTMLElement {
+  const card = [...page.container.querySelectorAll<HTMLElement>('ul[aria-label="Projects"] > li')].find(
+    (found) => found.querySelector('h2')?.textContent === name,
+  )
+  if (card === undefined) throw new Error(`expected the card of ${name}`)
+  return card
+}
+
+/** What a project takes on disk, as `scope` says it: the size that reads "… on disk". */
+function onDiskIn(scope: Element): string {
+  const size = [...scope.querySelectorAll('span')].find(
+    (span) => span.querySelector('strong') !== null && span.textContent.includes(' on disk'),
+  )
+  if (size === undefined) throw new Error('expected a size on disk')
+  return size.textContent
+}
+
+// @pins resume/url-names-page
+test('Projects opens from the rail as a page at its own URL; Open threads resumes the project’s latest thread and leaves the page; back returns', async () => {
+  const page = await openDeletable({
+    projects: [LAUNCH_PROJECT, OTHER_PROJECT],
+    others: [
+      {
+        threadId: OTHER_THREAD,
+        projectId: 'p-other',
+        title: 'tidy the docs',
+        lastActivityAt: new Date(Date.now() - 60_000).toISOString(),
+        messageCount: 2,
+        busy: false,
+        waiting: false,
+      },
+    ],
+    histories: {
+      [OTHER_THREAD]: {
+        threadId: OTHER_THREAD,
+        projectId: 'p-other',
+        messages: [
+          { id: 'u3', role: 'user', parts: [{ type: 'text', content: 'tidy the docs' }] },
+          { id: 'a3', role: 'assistant', parts: [{ type: 'text', content: 'Tidying README.md' }] },
+        ],
+        permissionMode: { mode: 'default', available: ['default', 'plan'] },
+        sessionRisk: { level: 'low', signals: 0 },
+        incidents: NO_SESSION_INCIDENTS,
+      },
+    },
+  })
+  try {
+    const projectsLink = (): HTMLButtonElement => buttonIn(page, '#threads-rail', 'Projects')
+    await page.click(projectsLink())
+    expect(pageInUrl()).toEqual(['projects', null])
+    expect(new URLSearchParams(window.location.search).get('thread')).toBe(DELETABLE)
+    expect(pageHeading(page)).toBe('Projects')
+    expect(projectsLink().getAttribute('aria-current')).toBe('page')
+    expect(buttonIn(page, '#threads-rail', 'Settings').getAttribute('aria-current')).toBeNull()
+    expect(page.visiblePanes()).toHaveLength(0)
+    // The thread behind the page names the current project; the open thread and the stored one are counted once each.
+    expect(projectCard(page, 'launch').textContent).toContain('current')
+    expect(projectCard(page, 'other').textContent).not.toContain('current')
+    expect(projectCard(page, 'launch').textContent).toContain('1 thread')
+    const onProjects = window.location.search
+    const open = [...projectCard(page, 'other').querySelectorAll('button')].find(
+      (button) => button.textContent === 'Open threads',
+    )
+    if (open === undefined) throw new Error('expected Open threads on the card of other')
+    await page.click(open)
+    await eventually(() => {
+      expect(new URLSearchParams(window.location.search).get('thread')).toBe(OTHER_THREAD)
+      expect(page.container.textContent).toContain('Tidying README.md')
+    })
+    expect(pageInUrl()).toEqual([null, null])
+    expect(pageRegion(page)).toBeNull()
+    expect(projectsLink().getAttribute('aria-current')).toBeNull()
+    await popTo(onProjects)
+    expect(pageHeading(page)).toBe('Projects')
+  } finally {
+    window.history.replaceState(null, '', '/')
+    await page.unmount()
+  }
+})
+
+// The comment on #870: one project read three sizes in the prototype. One sum, so one number.
+test('⚠ each project’s card says the size Settings › Storage says for it — a partial one as "at least", never exact (#870)', async () => {
+  const page = await openDeletable({
+    projects: [LAUNCH_PROJECT, OTHER_PROJECT],
+    trees: () => ({ projects: [LAUNCH_TREES, OTHER_TREES] }),
+  })
+  try {
+    await page.click(buttonIn(page, '#threads-rail', 'Projects'))
+    const cards = await eventually(() => {
+      const read = [onDiskIn(projectCard(page, 'launch')), onDiskIn(projectCard(page, 'other'))]
+      expect(read.join()).not.toContain('measuring')
+      return read
+    })
+    const settings = await openStorage(page)
+    await eventually(() => expect(settings.textContent).not.toContain('Measuring…'))
+    const storage = ['launch', 'other'].map((title) => {
+      const heading = settings.querySelector(`section[aria-label="trees of ${title}"] h3`)
+      if (heading === null) throw new Error(`expected Storage's group of ${title}`)
+      return onDiskIn(heading)
+    })
+    expect(cards).toEqual(storage)
+    // 412 MB + 2.1 GB, the unreadable tree not counted as 0; 88 MB + at least 300 MB.
+    expect(cards).toEqual([
+      'at least 2.5 GB on disk (partial: 1 of 3 not fully read)',
+      'at least 388 MB on disk (partial: 1 of 2 not fully read)',
+    ])
+  } finally {
+    window.history.replaceState(null, '', '/')
+    await page.unmount()
+  }
+})
+
+/** The project page's place in the URL: its project and tab. */
+const projectInUrl = (): [string | null, string | null, string | null] => {
+  const shown = new URLSearchParams(window.location.search)
+  return [shown.get('page'), shown.get('project'), shown.get('tab')]
+}
+
+// #871: the project settings dialog is the project's page now. Every way in reaches it at its URL:
+// a card's Settings and the rail's ⋯ at the Worktrees tab, Settings › Storage's group at Storage.
+// @pins resume/url-names-page
+test('a project’s page opens at its URL from a card’s Settings, the rail’s ⋯ and Storage’s group — the same size there; back walks them (#871)', async () => {
+  const page = await openDeletable({
+    projects: [LAUNCH_PROJECT, OTHER_PROJECT],
+    trees: () => ({ projects: [LAUNCH_TREES, OTHER_TREES] }),
+  })
+  try {
+    const menu = page.container.querySelector<HTMLElement>('button[aria-label="more for other"]')
+    await flush(async () => {
+      // Radix opens a menu on a primary-button pointerdown.
+      menu?.dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true, pointerType: 'mouse' }))
+      await tick()
+    })
+    const item = await eventually(() => {
+      const found = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+        (candidate) => candidate.textContent === 'Project settings…',
+      )
+      if (found === undefined) throw new Error('expected Project settings… in the menu of other')
+      return found
+    })
+    await page.click(item)
+    expect(projectInUrl()).toEqual(['project', 'p-other', 'worktrees'])
+    expect(pageHeading(page)).toBe('other')
+    await popTo(`?thread=${DELETABLE}`)
+    await page.click(buttonIn(page, '#threads-rail', 'Projects'))
+    const settings = [...projectCard(page, 'other').querySelectorAll('button')].find(
+      (button) => button.textContent === 'Settings',
+    )
+    if (settings === undefined) throw new Error('expected Settings on the card of other')
+    await page.click(settings)
+    expect(projectInUrl()).toEqual(['project', 'p-other', 'worktrees'])
+    expect(pageHeading(page)).toBe('other')
+    expect(document.querySelector('[role="dialog"]')).toBeNull()
+    expect(pageRegion(page)?.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe('Worktree settings')
+    // Still under Projects: its link stays marked.
+    expect(buttonIn(page, '#threads-rail', 'Projects').getAttribute('aria-current')).toBe('page')
+
+    const storage = await openStorage(page)
+    const group = await eventually(() => {
+      const found = storage.querySelector('section[aria-label="trees of other"]')
+      if (found === null) throw new Error("expected Storage's group of other")
+      return found
+    })
+    const said = onDiskIn(group.querySelector('h3') ?? group)
+    await page.click(buttonIn(page, 'section[aria-label="trees of other"] h3', 'Open project'))
+    expect(projectInUrl()).toEqual(['project', 'p-other', 'storage'])
+    const tab = await eventually(() => {
+      const found = pageRegion(page)?.querySelector('section[aria-label="trees of other"]')
+      if (found === null || found === undefined) throw new Error("expected the project's Storage tab")
+      return found
+    })
+    expect(onDiskIn(tab)).toBe(said)
+    await popTo(`?thread=${DELETABLE}&page=settings&section=storage`)
+    expect(pageRegion(page)?.querySelector('h2')?.textContent).toBe('Storage')
   } finally {
     window.history.replaceState(null, '', '/')
     await page.unmount()

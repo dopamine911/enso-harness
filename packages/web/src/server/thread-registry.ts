@@ -153,7 +153,7 @@ export interface ThreadRegistry {
    * The thread's hosted session, BUILT if it is not live (#390) — for a person's explicit CONTROL
    * of a thread that has not run (a `POST …/command` setting its model or thinking level, a
    * `POST …/flow` starting a login), never for a look: `peek` builds nothing (#86), and since #484
-   * neither does the `/` palette, the model picker nor the Start dialog — their list for a thread
+   * neither does the `/` palette, the model picker nor the launch panel (#877) — their list for a thread
    * with no session is the host's catalogue. Takes no lease: it does not wait for a run, does not
    * mark the thread busy, does not count a generation. A thread it built idles out like a released
    * one. A build failure is thrown, and leaves no entry behind, as `acquire`'s does.

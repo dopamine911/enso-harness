@@ -22,6 +22,7 @@ import { Field, FieldError, FieldLabel } from './components/ui/field.tsx'
 import { Input } from './components/ui/input.tsx'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './components/ui/select.tsx'
 import { Textarea } from './components/ui/textarea.tsx'
+import { type Loading, useFreshRead } from './fresh-read.ts'
 import { HeaderDialog } from './header-dialog.tsx'
 import { TEXT_PART_COMPONENTS } from './markdown-image.tsx'
 import {
@@ -104,7 +105,9 @@ function listingOf(library: LibraryState): EnsoLibraryPromptListing | undefined 
   return library.kind === 'loaded' ? library.listing : undefined
 }
 
-type ProjectState = { readonly kind: 'loading' } | { readonly kind: 'none' } | ProjectLibraryRead
+type ProjectState = Loading | { readonly kind: 'none' } | ProjectLibraryRead
+
+const NO_PROJECT: ProjectState = { kind: 'none' }
 
 /** The thread's project library (#470), read when the manager opens; none without a thread. */
 function useProjectLibrary(
@@ -112,23 +115,10 @@ function useProjectLibrary(
   threadId: string | undefined,
   fetchImpl: FetchLike | undefined,
 ): ProjectState {
-  const [project, setProject] = useState<ProjectState>({ kind: 'loading' })
-  useEffect(() => {
-    if (!open) return
-    if (threadId === undefined) {
-      setProject({ kind: 'none' })
-      return
-    }
-    let current = true
-    setProject({ kind: 'loading' })
-    void fetchProjectPromptLibrary(threadId, fetchImpl).then((read) => {
-      if (current) setProject(read)
-    })
-    return (): void => {
-      current = false
-    }
-  }, [open, threadId, fetchImpl])
-  return project
+  const read = useFreshRead(open && threadId !== undefined, threadId ?? '', () =>
+    fetchProjectPromptLibrary(threadId ?? '', fetchImpl),
+  )
+  return threadId === undefined ? NO_PROJECT : read
 }
 
 /** The library and pi's default, read when the manager opens; `reload` after a write. */
@@ -920,9 +910,11 @@ export function PromptManagerDialog({
     <HeaderDialog
       open={open}
       onOpenChange={(next: boolean) => (next ? setOpen(true) : manager.close())}
-      label="prompts"
-      hover="prompts — the library of system, append and session prompts"
-      icon={<ScrollTextIcon />}
+      trigger={{
+        label: 'prompts',
+        hover: 'prompts — the library of system, append and session prompts',
+        icon: <ScrollTextIcon />,
+      }}
       title="Prompts"
       description="markdown files in ENSO_HOME/prompts — edit, copy and name them here; a trusted project's own, in .enso/prompts, are read-only"
       contentClassName="flex h-5/6 flex-col sm:max-w-6xl"

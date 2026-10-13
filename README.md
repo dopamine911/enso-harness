@@ -163,7 +163,7 @@ variable before spawning and tells you which on stderr
 `auth.json`, so run `/login` once — typed in the web page's chat box, where it walks pi's provider
 picker as dialog cards (#338), or in the terminal (`bun run enso`). The grant is per agent dir, so
 one login serves both. A fresh `ENSO_HOME` has none, and offers no model until you log in: the
-Start dialog says so. Cursor is off unless you set `"includeCursor": true` in
+launch panel says so (#877). Cursor is off unless you set `"includeCursor": true` in
 `pi-agent/provider-failover.json` (#341, #432). Log in first, then choose a model with `/model`.
 
 ---

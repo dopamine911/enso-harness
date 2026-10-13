@@ -22,6 +22,7 @@ import {
   withRuleMoved,
 } from '@enso/core'
 import { ArrowDownIcon, ArrowUpIcon, TriangleAlertIcon, XIcon } from 'lucide-react'
+import { RadioGroup as RadioGroupPrimitive } from 'radix-ui'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FetchLike } from './browser-logging.ts'
 import { Alert, AlertDescription, AlertTitle } from './components/ui/alert.tsx'
@@ -743,7 +744,13 @@ function GuardAnswer({ guard }: { guard: EnsoGuardCheck }): React.ReactNode {
     <p aria-label="guard">
       {guard.kind === 'passed' ? (
         <>
-          No guard refuses it (asked as a <code>{guard.tool}</code> call): the engine decides.
+          No guard refuses it (asked as{' '}
+          {guard.tools.map((tool, index) => (
+            <span key={tool}>
+              {index === 0 ? '' : ' and as '}a <code>{tool}</code> call
+            </span>
+          ))}
+          ): the engine decides.
         </>
       ) : (
         `The guards were not asked: ${guard.reason}. The engine's verdict alone is below, and a guard may still refuse the call.`
@@ -864,10 +871,67 @@ function TryCommand({
 
 type ViewMode = 'written' | EnsoPermissionModeName
 
-const VIEW_OPTIONS: ReadonlyArray<readonly [ViewMode, string]> = [
-  ['written', 'as written (edit here)'],
-  ...ENSO_PERMISSION_MODES.map((mode) => [mode, `${mode} — ${ENSO_MODE_PRESETS[mode].summary}`] as const),
+/** A card of the view's radiogroup: what it shows, and whether that view is the one you edit. */
+interface ViewCard {
+  readonly view: ViewMode
+  readonly name: string
+  readonly summary: string
+  readonly tag: string
+}
+
+/** Your rules as written — the one view you edit — then each mode's preview, in the composer's order. */
+const VIEW_CARDS: readonly ViewCard[] = [
+  { view: 'written', name: 'as written', summary: 'Your rules in permissions.json.', tag: 'edit here' },
+  ...ENSO_PERMISSION_MODES.map((mode) => ({
+    view: mode,
+    name: mode,
+    summary: ENSO_MODE_PRESETS[mode].summary,
+    tag: 'preview, read-only',
+  })),
 ]
+
+/**
+ * The views as one radiogroup of cards (#874): as written, then the five modes. Radix's radio group
+ * gives it the radiogroup's keys — Tab to the checked card, arrows to move and choose.
+ */
+function ViewCards({ view, onView }: { view: ViewMode; onView: (view: ViewMode) => void }): React.ReactNode {
+  return (
+    <RadioGroupPrimitive.Root
+      aria-labelledby="permissions-view-label"
+      value={view}
+      onValueChange={(value: string) => {
+        const picked = VIEW_CARDS.find((card) => card.view === value)?.view
+        if (picked !== undefined) onView(picked)
+      }}
+      className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3"
+    >
+      {VIEW_CARDS.map((card) => (
+        <RadioGroupPrimitive.Item
+          key={card.view}
+          value={card.view}
+          aria-label={card.name}
+          aria-describedby={`permissions-view-${card.view}-tag permissions-view-${card.view}`}
+          className="flex flex-col items-start gap-1 rounded-md border bg-card p-3 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50 data-[state=checked]:border-primary data-[state=checked]:bg-accent"
+        >
+          <span className="font-mono text-sm font-semibold">{card.name}</span>
+          <span
+            id={`permissions-view-${card.view}-tag`}
+            className={
+              card.view === 'written'
+                ? 'text-xs font-semibold text-primary uppercase'
+                : 'text-xs text-muted-foreground uppercase'
+            }
+          >
+            {card.tag}
+          </span>
+          <span id={`permissions-view-${card.view}`} className="text-xs text-muted-foreground">
+            {card.summary}
+          </span>
+        </RadioGroupPrimitive.Item>
+      ))}
+    </RadioGroupPrimitive.Root>
+  )
+}
 
 /** The rules as written (editable), or as a mode runs them (read-only: the mode's rules are not yours). */
 function RulesView({ permission, editor }: { permission: EnsoPermissionMap; editor: PolicyEditor }): React.ReactNode {
@@ -875,12 +939,19 @@ function RulesView({ permission, editor }: { permission: EnsoPermissionMap; edit
   const mode = view === 'written' ? undefined : view
   return (
     <div className="flex flex-col gap-2">
-      <span className="flex items-center gap-2">
-        <label htmlFor="permissions-view" className="text-xs font-semibold">
-          Show
-        </label>
-        <OptionSelect id="permissions-view" value={view} options={VIEW_OPTIONS} onChange={setView} />
-      </span>
+      <h3 id="permissions-view-label" className="font-semibold">
+        Rules
+      </h3>
+      <p className="text-xs text-muted-foreground">
+        Each thread picks its mode from the composer. Pick a mode here to preview the rules it puts in effect; you edit
+        your rules as written.
+      </p>
+      <ViewCards view={view} onView={setView} />
+      <p role="status" className="text-xs font-semibold">
+        {mode === undefined
+          ? 'Your rules as written, in evaluation order: edit them here.'
+          : `Preview of ${mode}: the rules in effect under it, in evaluation order, its own marked "from ${mode}". Read-only — choose "as written" to edit.`}
+      </p>
       {mode === undefined ? (
         <RuleList rows={policyRows(permission)} mode={undefined} editing={{ permission, onEdit: editor.edit }} />
       ) : (

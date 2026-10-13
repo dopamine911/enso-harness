@@ -1,4 +1,4 @@
-import type { EnsoDiskUsage } from '@enso/core'
+import type { EnsoDiskUsage, EnsoTreesListing } from '@enso/core'
 
 /** Decimal units, as `du --si` and file managers say them: a kilobyte is 1000 bytes. */
 const UNITS = ['B', 'kB', 'MB', 'GB', 'TB'] as const
@@ -29,4 +29,34 @@ export function describeSize(size: EnsoDiskUsage): string {
   if (size.kind === 'measured') return formatBytes(size.bytes)
   if (size.kind === 'partial') return `at least ${formatBytes(size.bytes)} (${size.reason})`
   return `size could not be read (${size.reason})`
+}
+
+/** A sum of sizes: exact, or at least what was read — never `unreadable`, since a sum always has a value. */
+export type SizeSum = Exclude<EnsoDiskUsage, { readonly kind: 'unreadable' }>
+
+/**
+ * The sum of sizes (#874): `measured` only when every one was; else `partial`, at least the bytes
+ * read, saying how many were not — an unreadable size adds nothing and is never counted as 0.
+ */
+export function totalOf(sizes: readonly EnsoDiskUsage[]): SizeSum {
+  let bytes = 0
+  let short = 0
+  for (const size of sizes) {
+    if (size.kind !== 'unreadable') bytes += size.bytes
+    if (size.kind !== 'measured') short += 1
+  }
+  if (short === 0) return { kind: 'measured', bytes }
+  return { kind: 'partial', bytes, reason: `${short} of ${sizes.length} not fully read` }
+}
+
+/**
+ * What one project takes on disk (#870): its trees and its snapshot store, summed from `GET
+ * /api/trees`. The ONE sum the Projects page's card and Settings › Storage both say, so the same
+ * project reads the same number in each. A project the listing does not name has neither on disk.
+ */
+export function projectDiskUsage(listing: EnsoTreesListing, projectId: string): SizeSum {
+  const project = listing.projects.find((listed) => listed.projectId === projectId)
+  if (project === undefined) return { kind: 'measured', bytes: 0 }
+  const store = project.objectStore === null ? [] : [project.objectStore]
+  return totalOf([...project.trees.map((tree) => tree.size), ...store])
 }

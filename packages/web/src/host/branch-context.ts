@@ -15,6 +15,7 @@ import {
   type EnsoContextRequest,
   type EnsoFileOperation,
   type EnsoThreadSystemPrompt,
+  threadSystemPrompt,
 } from '@enso/core'
 import { promptText } from './branch-stats.ts'
 import {
@@ -37,7 +38,6 @@ import {
   systemSources,
 } from './context-elements.ts'
 import { contextEvents, fileOperations } from './context-history.ts'
-import { threadSystemPrompt } from './system-prompt.ts'
 import { transcriptOf } from './transcript.ts'
 
 /**

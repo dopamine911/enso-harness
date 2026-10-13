@@ -93,7 +93,7 @@ export function demoModelsJson(port: number): { readonly providers: Readonly<Rec
   }
 }
 
-/** The prompts, in order: the first is typed into the Start dialog, the rest into the composer. */
+/** The prompts, in order: the first is typed on the launch panel, the rest into the docked composer. */
 export const PROMPTS = [
   'Where does the app read its database URL? Check .env too.',
   'Check the deploy notes, then fetch the Bun changelog.',
@@ -103,8 +103,8 @@ export const PROMPTS = [
 
 /**
  * The throwaway home's prompt library (#443), in the file shape `ENSO_HOME/prompts/<id>.md` holds:
- * an append prompt for the System prompt field and the manager, and a session prompt, without which
- * the Start dialog has no Saved prompt field to show. The session itself starts on pi's default, so
+ * an append prompt for the System prompt chip and the manager, and a session prompt, without which
+ * the launch panel has no Saved prompt chip to show. The session itself starts on pi's default, so
  * the scripted model answers the prompt it was written for. The Prompts page quotes `reviewer.md`
  * as its example file, so the page shows the file the screenshot was taken with.
  */

@@ -12,9 +12,11 @@ import type { StreamChunk } from '@tanstack/ai'
 import type { UIMessage } from '@tanstack/ai-client'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { pageClock } from '../page-clock.ts'
+import { railDayOf, sectionLayout } from '../rail-layout.ts'
 import {
   adoptThread,
   clearThreadsForTest,
+  discardEmptyDraft,
   mintThread,
   reviveHistoryMessages,
   THREAD_TITLE_MAX_CHARS,
@@ -143,7 +145,7 @@ test("a summary update reaches the list and moves the thread's activity clock; a
 })
 
 // @pins resume/one-id
-test('adopting stored history restores dates, title and mode under the stored thread id exactly once, and never asks to start a session (#391)', () => {
+test('adopting stored history restores dates, title and mode under the stored thread id exactly once, and never opens the launch panel (#391, #877)', () => {
   const history = {
     threadId: 'stored-1',
     projectId: 'p-launch',
@@ -165,11 +167,28 @@ test('adopting stored history restores dates, title and mode under the stored th
   expect(adopted.history[0]?.createdAt).toBeInstanceOf(Date)
   expect(adopted.history[0]?.createdAt?.toISOString()).toBe('2026-09-08T10:00:00.000Z')
   expect(adopted.permissionMode.get()).toEqual({ mode: 'plan', available: ['default', 'plan'] })
-  // A resumed thread has its session's settings already; only a minted one opens the dialog.
-  expect(adopted.startSession.get()).toBe(false)
+  // A resumed thread has its session's settings already; it opens on its transcript, not the launch panel.
+  expect(adopted.launch.get()).toBe(false)
   expect(threadListStore.get()).toMatchObject([{ threadId: 'stored-1', title: 'resume this work', busy: false }])
   expect(adoptThread({ ...history, messages: [] })).toBe(adopted)
   expect(threadListStore.get()).toHaveLength(1)
+})
+
+// #479: a reload before the first prompt adopted the empty thread the server still held, and the
+// settings a session starts with — the system prompt among them — were offered nowhere. The server
+// says such a thread was never started; an empty fork, written by its route, it does not.
+test('a thread the server says was never started opens on the launch panel, as a minted one does; an empty fork does not (#479)', () => {
+  const empty = {
+    threadId: 'never-started',
+    projectId: 'p-launch',
+    messages: [],
+    permissionMode: { mode: 'default', available: ['default', 'plan'] },
+    sessionRisk: { level: 'low', signals: 0 } as const,
+    incidents: NO_SESSION_INCIDENTS,
+  }
+  expect(adoptThread({ ...empty, draft: true }).launch.get()).toBe(true)
+  expect(adoptThread({ ...empty, threadId: 'empty-fork' }).launch.get()).toBe(false)
+  expect(mintThread().launch.get()).toBe(true)
 })
 
 // #387 after a reload: the server joined the guard's entry onto the stored result; adopting
@@ -482,10 +501,10 @@ test('the rail names the active thread, titles the untitled honestly, and marks 
       onSelect={noop}
       onResume={noop}
       onNew={noop}
-      onAddProject={noop}
+      onOpenProject={noop}
       onRemoveProject={noop}
       onProjectSettings={noop}
-      onSettings={noop}
+      onPage={noop}
       projectNotice={undefined}
     />,
   )
@@ -520,7 +539,15 @@ const GONE: EnsoProject = {
 }
 
 function storedIn(projectId: string, threadId: string, extra: Partial<EnsoStoredThread> = {}): EnsoStoredThread {
-  return { threadId, projectId, lastActivityAt: pageClock.get().toISOString(), messageCount: 2, busy: false, ...extra }
+  return {
+    threadId,
+    projectId,
+    lastActivityAt: pageClock.get().toISOString(),
+    messageCount: 2,
+    busy: false,
+    waiting: false,
+    ...extra,
+  }
 }
 
 /** The markup of the section a project's rows are in — from its label to the next section. */
@@ -531,33 +558,65 @@ function sectionOf(rendered: string, name: string): string {
   return rendered.slice(start, end < 0 ? undefined : end)
 }
 
+/**
+ * `render` under a browser storage holding the reader's open and closed sections (#876) — the
+ * static render has no DOM, so no storage of its own.
+ */
+function withSections<Result>(choices: Readonly<Record<string, boolean>>, render: () => Result): Result {
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
+  const kept = new Map<string, string>([['enso.rail.sections', JSON.stringify(choices)]])
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem: (key: string) => kept.get(key) ?? null,
+      setItem: (key: string, value: string) => kept.set(key, value),
+    },
+  })
+  try {
+    return render()
+  } finally {
+    if (original === undefined) Reflect.deleteProperty(globalThis, 'localStorage')
+    else Object.defineProperty(globalThis, 'localStorage', original)
+  }
+}
+
 test("each project is a section with its own threads — the page's open ones, then its stored ones — and a + that starts one there", () => {
   const now = pageClock.get()
-  const rendered = renderToStaticMarkup(
-    <ThreadsRail
-      projects={[LAUNCH, APP, GONE]}
-      // A thread minted before the page knew its projects has none: the server built it in the launch directory.
-      threads={[
-        { threadId: 'here', title: 'current', lastActivityAt: now, busy: false, waiting: false, projectId: undefined },
-      ]}
-      activeThreadId="here"
-      earlier={[
-        storedIn('p-launch', 'stored', {
-          title: 'resume me',
-          lastActivityAt: new Date(now.getTime() - 2 * 3_600_000).toISOString(),
-        }),
-        storedIn('p-app', 'elsewhere', { busy: true }),
-      ]}
-      earlierError={undefined}
-      onSelect={noop}
-      onResume={noop}
-      onNew={noop}
-      onAddProject={noop}
-      onRemoveProject={noop}
-      onProjectSettings={noop}
-      onSettings={noop}
-      projectNotice={undefined}
-    />,
+  // The other projects opened by the reader: closed, a section draws no rows (#876).
+  const rendered = withSections({ 'p-app': true, 'p-gone': true }, () =>
+    renderToStaticMarkup(
+      <ThreadsRail
+        projects={[LAUNCH, APP, GONE]}
+        // A thread minted before the page knew its projects has none: the server built it in the launch directory.
+        threads={[
+          {
+            threadId: 'here',
+            title: 'current',
+            lastActivityAt: now,
+            busy: false,
+            waiting: false,
+            projectId: undefined,
+          },
+        ]}
+        activeThreadId="here"
+        earlier={[
+          storedIn('p-launch', 'stored', {
+            title: 'resume me',
+            lastActivityAt: new Date(now.getTime() - 2 * 3_600_000).toISOString(),
+          }),
+          storedIn('p-app', 'elsewhere', { busy: true }),
+        ]}
+        earlierError={undefined}
+        onSelect={noop}
+        onResume={noop}
+        onNew={noop}
+        onOpenProject={noop}
+        onRemoveProject={noop}
+        onProjectSettings={noop}
+        onPage={noop}
+        projectNotice={undefined}
+      />,
+    ),
   )
   const launch = sectionOf(rendered, 'enso')
   expect(launch.indexOf('current')).toBeLessThan(launch.indexOf('resume me'))
@@ -633,10 +692,10 @@ test('⚠ two prompts that start alike read apart on the rail — the words past
       onSelect={noop}
       onResume={noop}
       onNew={noop}
-      onAddProject={noop}
+      onOpenProject={noop}
       onRemoveProject={noop}
       onProjectSettings={noop}
-      onSettings={noop}
+      onPage={noop}
       projectNotice={undefined}
     />,
   )
@@ -650,7 +709,8 @@ test('a fork says which thread it came from, by that thread’s title — a stor
   const now = pageClock.get()
   const stored = [
     storedIn('p-launch', 'parent', { title: 'the original' }),
-    storedIn('p-launch', 'fork', { title: 'the original', parentThreadId: 'parent' }),
+    // Named, so its row is its own: a fork that reads as its parent folds with it (#875), its line under the fold.
+    storedIn('p-launch', 'fork', { title: 'the original', name: 'my branch', parentThreadId: 'parent' }),
     // A fork of an open thread the listing has no title for yet: the page's own title names it.
     storedIn('p-launch', 'fork-of-open', { parentThreadId: 'open' }),
     storedIn('p-launch', 'orphan-fork', { title: 'lost parent', parentThreadId: 'elsewhere' }),
@@ -682,10 +742,10 @@ test('a fork says which thread it came from, by that thread’s title — a stor
       onSelect={noop}
       onResume={noop}
       onNew={noop}
-      onAddProject={noop}
+      onOpenProject={noop}
       onRemoveProject={noop}
       onProjectSettings={noop}
-      onSettings={noop}
+      onPage={noop}
       projectNotice={undefined}
     />,
   )
@@ -694,7 +754,7 @@ test('a fork says which thread it came from, by that thread’s title — a stor
   expect(forkLines).toEqual(['the original', 'asked just now', UNLISTED_PARENT])
 })
 
-test('⚠ an open thread whose project is not listed is kept, under "other"; with no projects yet, every thread is still there', () => {
+test('⚠ an open thread whose project is not listed is kept, under "Not in a project"; with no projects yet, every thread is still there', () => {
   const now = pageClock.get()
   const orphan = {
     threadId: 'orphan',
@@ -712,19 +772,11 @@ test('⚠ an open thread whose project is not listed is kept, under "other"; wit
   ])
 })
 
-// A folded section hides the rows that would say it; its header says it instead — a question
-// waiting on you over a run in flight, since a thread parked on a question is still busy (PR #403 review).
-test('a folded section says a question is waiting in it, over a run in flight; unfolded, the row says it', () => {
+// A closed section hides the rows that would say it; its header says it instead — a question
+// waiting on you over a run in flight, since a thread parked on a question is still busy (PR #403
+// review) — with how many (#876).
+test('a closed section says how many questions wait in it, over the runs in flight; opened, the row says it', () => {
   const now = pageClock.get()
-  const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
-  const kept = new Map<string, string>([['enso.rail.folded', JSON.stringify([APP.projectId])]])
-  Object.defineProperty(globalThis, 'localStorage', {
-    configurable: true,
-    value: {
-      getItem: (key: string) => kept.get(key) ?? null,
-      setItem: (key: string, value: string) => kept.set(key, value),
-    },
-  })
   const rail = (threads: ThreadSummary[]): string =>
     renderToStaticMarkup(
       <ThreadsRail
@@ -736,10 +788,10 @@ test('a folded section says a question is waiting in it, over a run in flight; u
         onSelect={noop}
         onResume={noop}
         onNew={noop}
-        onAddProject={noop}
+        onOpenProject={noop}
         onRemoveProject={noop}
         onProjectSettings={noop}
-        onSettings={noop}
+        onPage={noop}
         projectNotice={undefined}
       />,
     )
@@ -752,24 +804,23 @@ test('a folded section says a question is waiting in it, over a run in flight; u
     projectId: 'p-app',
   }
   const working = { ...asking, threadId: 'works', title: 'still working', waiting: false }
-  try {
-    const folded = sectionOf(rail([asking, working]), 'app')
-    expect(folded).not.toContain('asks first')
-    expect(folded).toContain('waiting on you')
-    expect(folded).not.toContain('running')
-    // Only a run in flight: the folded header says running.
-    const onlyRunning = sectionOf(rail([working]), 'app')
-    expect(onlyRunning).toContain('running')
-    expect(onlyRunning).not.toContain('waiting on you')
-    // Unfolded, the header says nothing; the row does.
-    kept.set('enso.rail.folded', '[]')
-    const open = sectionOf(rail([asking]), 'app')
-    expect(open).toContain('asks first')
-    expect(open.match(/waiting on you/g)).toHaveLength(1)
-  } finally {
-    if (original === undefined) Reflect.deleteProperty(globalThis, 'localStorage')
-    else Object.defineProperty(globalThis, 'localStorage', original)
-  }
+  // Not the current project: closed.
+  const closed = sectionOf(rail([asking, working]), 'app')
+  expect(closed).toContain('aria-expanded="false"')
+  expect(closed).not.toContain('asks first')
+  expect(closed).toContain('1 waiting on you')
+  expect(closed).not.toContain('running')
+  // Only runs in flight: the closed header says running, and how many.
+  const onlyRunning = sectionOf(rail([working, { ...working, threadId: 'works-too' }]), 'app')
+  expect(onlyRunning).toContain('2 running')
+  expect(onlyRunning).not.toContain('waiting on you')
+  // Opened, the header says nothing; the row does.
+  const opened = sectionOf(
+    withSections({ 'p-app': true }, () => rail([asking])),
+    'app',
+  )
+  expect(opened).toContain('asks first')
+  expect(opened.match(/waiting on you/g)).toHaveLength(1)
 })
 
 test('a section shows five stored threads and says how many more there are; a failed listing is an alert, not an empty rail', () => {
@@ -781,10 +832,10 @@ test('a section shows five stored threads and says how many more there are; a fa
     onSelect: noop,
     onResume: noop,
     onNew: noop,
-    onAddProject: noop,
+    onOpenProject: noop,
     onRemoveProject: noop,
     onProjectSettings: noop,
-    onSettings: noop,
+    onPage: noop,
     projectNotice: undefined,
   }
   const rendered = renderToStaticMarkup(<ThreadsRail {...props} earlier={earlier} earlierError={undefined} />)
@@ -793,6 +844,215 @@ test('a section shows five stored threads and says how many more there are; a fa
   const failed = renderToStaticMarkup(<ThreadsRail {...props} earlier={[]} earlierError="connection refused" />)
   expect(failed).toContain('role="alert"')
   expect(failed).toContain('could not list threads: connection refused')
+})
+
+// ── day groups and same-title folds (#875) ───────────────────────────────────
+
+test('⚠ the day groups turn at local midnight: Today from 00:00, Yesterday the local day before, Earlier before that', () => {
+  // An injected clock, in the browser's own zone: local constructors, so the boundaries are local midnights.
+  const now = new Date(2026, 9, 13, 0, 30)
+  expect(railDayOf(new Date(2026, 9, 13, 0, 0, 0, 0), now)).toBe('today')
+  expect(railDayOf(new Date(2026, 9, 12, 23, 59, 59, 999), now)).toBe('yesterday')
+  expect(railDayOf(new Date(2026, 9, 12, 0, 0, 0, 0), now)).toBe('yesterday')
+  expect(railDayOf(new Date(2026, 9, 11, 23, 59, 59, 999), now)).toBe('earlier')
+  // Late in the day, a thread from 23 hours ago is yesterday's, not today's: a day is not 24 hours back.
+  const late = new Date(2026, 9, 13, 22, 0)
+  expect(railDayOf(new Date(2026, 9, 12, 23, 0), late)).toBe('yesterday')
+  // Ahead of this clock (another machine's), never lost: Today.
+  expect(railDayOf(new Date(2026, 9, 14, 9, 0), now)).toBe('today')
+  // Across a month's end.
+  expect(railDayOf(new Date(2026, 9, 31, 12, 0), new Date(2026, 10, 1, 8, 0))).toBe('yesterday')
+})
+
+/** A page thread for the layout tests, last active at `at`. */
+function open(
+  threadId: string,
+  title: string | undefined,
+  at: Date,
+  extra: Partial<ThreadSummary> = {},
+): ThreadSummary {
+  return { threadId, title, lastActivityAt: at, busy: false, waiting: false, projectId: 'p-launch', ...extra }
+}
+
+test('⚠ same-title threads fold within a day, at the first one’s place; a draft never folds; another day is another row (#875)', () => {
+  const now = new Date(2026, 9, 13, 15, 0)
+  const today = new Date(2026, 9, 13, 9, 0)
+  const yesterday = new Date(2026, 9, 12, 9, 0)
+  const repeat = 'Reply with exactly three words.'
+  const layout = sectionLayout(
+    {
+      threads: [
+        open('draft-1', undefined, today),
+        open('draft-2', undefined, today),
+        open('live-repeat', repeat, today),
+        open('other', 'something else', today),
+        // Named, it reads — and folds — as its name.
+        open('named', repeat, today, { name: 'the one to keep' }),
+      ],
+      earlier: [
+        storedIn('p-launch', 'stored-repeat-1', { title: repeat, lastActivityAt: today.toISOString() }),
+        storedIn('p-launch', 'stored-repeat-2', { title: repeat, lastActivityAt: today.toISOString() }),
+        storedIn('p-launch', 'old-repeat', { title: repeat, lastActivityAt: yesterday.toISOString() }),
+      ],
+    },
+    now,
+    undefined,
+  )
+  const read = layout.days.map(({ day, rows }) => ({
+    day,
+    rows: rows.map((row) =>
+      row.kind === 'fold'
+        ? `${row.title} ×${row.threads.length + row.earlier.length}: ${[...row.threads, ...row.earlier].map((thread) => thread.threadId).join(' ')}`
+        : row.thread.threadId,
+    ),
+  }))
+  expect(read).toEqual([
+    {
+      day: 'today',
+      rows: ['draft-1', 'draft-2', `${repeat} ×3: live-repeat stored-repeat-1 stored-repeat-2`, 'other', 'named'],
+    },
+    // One thread of that title yesterday: a row of its own, not a fold of one.
+    { day: 'yesterday', rows: ['old-repeat'] },
+  ])
+  expect(layout.hidden).toBe(0)
+})
+
+test('the five-row cap counts rows of stored threads alone — a fold is one row, a row with an open thread always shows (#875)', () => {
+  const now = pageClock.get()
+  const stored = (index: number, title: string): EnsoStoredThread =>
+    storedIn('p-launch', `s${index}`, { title, lastActivityAt: new Date(now.getTime() - index * 60_000).toISOString() })
+  const layout = sectionLayout(
+    {
+      threads: [open('open-repeat', 'repeated', now)],
+      earlier: [
+        // Folded with the open thread: shown, and not counted.
+        stored(0, 'repeated'),
+        // Thirty-one alike: one row.
+        ...Array.from({ length: 31 }, (_, index) => stored(index + 1, 'Reply with exactly three words.')),
+        ...Array.from({ length: STORED_ROWS_SHOWN + 1 }, (_, index) => stored(index + 40, `distinct ${index}`)),
+      ],
+    },
+    now,
+    STORED_ROWS_SHOWN,
+  )
+  const rows = layout.days.flatMap((day) => day.rows)
+  // The open fold, the folded 31, then four distinct: five rows of stored threads alone.
+  expect(rows).toHaveLength(1 + STORED_ROWS_SHOWN)
+  expect(rows[1]?.kind === 'fold' ? rows[1].earlier.length : 0).toBe(31)
+  expect(layout.hidden).toBe(2)
+})
+
+test('⚠ a collapsed fold says a question waiting on you over a run in flight among its threads, and its count (#875)', () => {
+  const now = pageClock.get()
+  const rail = (threads: ThreadSummary[], earlier: EnsoStoredThread[]): string =>
+    renderToStaticMarkup(
+      <ThreadsRail
+        projects={[LAUNCH]}
+        threads={threads}
+        activeThreadId={undefined}
+        earlier={earlier}
+        earlierError={undefined}
+        onSelect={noop}
+        onResume={noop}
+        onNew={noop}
+        onOpenProject={noop}
+        onRemoveProject={noop}
+        onProjectSettings={noop}
+        onPage={noop}
+        projectNotice={undefined}
+      />,
+    )
+  const title = 'Reply with exactly three words.'
+  const idle = [storedIn('p-launch', 'a', { title }), storedIn('p-launch', 'b', { title })]
+  /** The fold's row: its button, chevron to count. */
+  const foldRow = (rendered: string): string => {
+    const start = rendered.indexOf(
+      '<button type="button" aria-expanded="false" title="Reply with exactly three words."',
+    )
+    if (start < 0) throw new Error('expected a collapsed fold')
+    return rendered.slice(start, rendered.indexOf('</button>', start))
+  }
+  const quiet = foldRow(rail([], idle))
+  expect(quiet).toContain('2 threads')
+  expect(quiet).not.toContain('running')
+  // A stored thread running among them: the fold says so.
+  const running = foldRow(rail([], [...idle, storedIn('p-launch', 'c', { title, busy: true })]))
+  expect(running).toContain('running')
+  expect(running).toContain('3 threads')
+  // An open one waiting on you: the fold says that, over the run.
+  const asking = open('asks', title, now, { busy: true, waiting: true })
+  const waiting = foldRow(rail([asking], [...idle, storedIn('p-launch', 'c', { title, busy: true })]))
+  expect(waiting).toContain('waiting on you')
+  expect(waiting).not.toContain('running')
+  // Collapsed, none of its threads' rows are drawn: the fold row is where the state is said.
+  expect(rail([asking], idle).match(/waiting on you/g)).toHaveLength(1)
+})
+
+test('a section lists its threads under Today, Yesterday and Earlier, in that order, and only the days it has (#875)', () => {
+  const now = pageClock.get()
+  const day = 86_400_000
+  // The other project opened by the reader (#876), so its days are drawn.
+  const rendered = withSections({ 'p-app': true }, () =>
+    renderToStaticMarkup(
+      <ThreadsRail
+        projects={[LAUNCH, APP]}
+        threads={[open('fresh', 'asked today', now)]}
+        activeThreadId="fresh"
+        earlier={[
+          storedIn('p-launch', 'old', {
+            title: 'asked last week',
+            lastActivityAt: new Date(now.getTime() - 7 * day).toISOString(),
+          }),
+          storedIn('p-app', 'app-old', {
+            title: 'an app thread',
+            lastActivityAt: new Date(now.getTime() - 7 * day).toISOString(),
+          }),
+        ]}
+        earlierError={undefined}
+        onSelect={noop}
+        onResume={noop}
+        onNew={noop}
+        onOpenProject={noop}
+        onRemoveProject={noop}
+        onProjectSettings={noop}
+        onPage={noop}
+        projectNotice={undefined}
+      />,
+    ),
+  )
+  const launch = sectionOf(rendered, 'enso')
+  expect(launch.indexOf('>Today<')).toBeGreaterThan(-1)
+  expect(launch.indexOf('>Today<')).toBeLessThan(launch.indexOf('asked today'))
+  expect(launch.indexOf('asked today')).toBeLessThan(launch.indexOf('>Earlier<'))
+  expect(launch.indexOf('>Earlier<')).toBeLessThan(launch.indexOf('asked last week'))
+  expect(launch).not.toContain('>Yesterday<')
+  // The other project has its own days: only Earlier.
+  const app = sectionOf(rendered, 'app')
+  expect(app).not.toContain('>Today<')
+  expect(app).toContain('>Earlier<')
+})
+
+test('⚠ leaving a draft with nothing typed drops it; words in its composer, a prompt sent, or a listing that names it keep it (#875)', () => {
+  const listed = (): string[] => threadListStore.get().map((thread) => thread.threadId)
+  const empty = mintThread()
+  discardEmptyDraft(empty.threadId, [])
+  expect(listed()).not.toContain(empty.threadId)
+  const inComposer = mintThread()
+  inComposer.typed.set(true)
+  const sent = mintThread()
+  updateThreadSummary(sent.threadId, { title: 'asked', busy: true, waiting: false })
+  // A fork is written by its route before any prompt: listed, it is the server's, not a draft.
+  const fork = mintThread()
+  for (const stores of [inComposer, sent, fork]) {
+    discardEmptyDraft(stores.threadId, [storedIn('p-launch', fork.threadId)])
+  }
+  expect(listed()).toEqual([fork.threadId, sent.threadId, inComposer.threadId])
+  // Emptied again, it goes the next time it is left.
+  inComposer.typed.set(false)
+  discardEmptyDraft(inComposer.threadId, [])
+  expect(listed()).not.toContain(inComposer.threadId)
+  // A thread the page no longer holds: nothing to do.
+  expect(() => discardEmptyDraft(empty.threadId, [])).not.toThrow()
 })
 
 test('⚠ a thread minted in a project names it on every request it makes; one minted with none names nothing', async () => {
@@ -821,10 +1081,10 @@ test('every project has a menu, the launch directory too (#754); a refused remov
       onSelect={noop}
       onResume={noop}
       onNew={noop}
-      onAddProject={noop}
+      onOpenProject={noop}
       onRemoveProject={noop}
       onProjectSettings={noop}
-      onSettings={noop}
+      onPage={noop}
       projectNotice="could not remove the project: 409 a thread in this project is running"
     />,
   )

@@ -1,4 +1,3 @@
-import { getSupportedThinkingLevels } from '@earendil-works/pi-ai'
 import {
   createAgentSessionFromServices,
   createAgentSessionServices,
@@ -7,7 +6,6 @@ import {
   type InlineExtension,
   initTheme,
   type PromptOptions,
-  ProjectTrustStore,
   VERSION as PI_VERSION,
 } from '@earendil-works/pi-coding-agent'
 import {
@@ -50,11 +48,18 @@ import {
   PROJECT_TRUST_OPTIONS,
   projectTrustedNotice,
   projectTrustQuestion,
+  saveProjectTrust,
 } from './project-trust.ts'
 import { builtinProviderName, providerRefusalOf } from './provider-refusal.ts'
 import { restoreNoteExtension } from './restore-note.ts'
 import { toRpcWireEvent } from './session-events.ts'
-import { loginFactsOf, type SessionModels, selectionBeforeFirstMessage } from './session-models.ts'
+import {
+  loginFactsOf,
+  modelOfferOf,
+  type SessionModels,
+  selectionBeforeFirstMessage,
+  thinkingOnChoosing,
+} from './session-models.ts'
 import { growsSessionSpend, liveSessionUsage } from './session-usage.ts'
 import type { StoredThreads } from './stored-threads.ts'
 import { previewOnSession } from './system-prompt-preview.ts'
@@ -325,7 +330,7 @@ export async function buildHostedThread(
     ask: () => ui.uiContext.select(projectTrustQuestion(trustDirectory), [...PROJECT_TRUST_OPTIONS]),
     apply: async (answer) => {
       if (answer === 'untrusted') return
-      if (answer === 'project') new ProjectTrustStore(agentDir).set(trustDirectory, true)
+      if (answer === 'project') saveProjectTrust(trustDirectory, agentDir, true)
       else threadLog.record(ENSO_PROJECT_TRUST_ENTRY, THREAD_PROJECT_TRUST)
       projectTrust.settingsManager.setProjectTrusted(true)
       // "Trust this thread" trusts no project: a project's setup is read under the project's own answer.
@@ -569,8 +574,8 @@ export async function buildHostedThread(
       commands.push(
         ...hostCommandRows(
           currentModelState(),
-          session.modelRuntime.getAvailableSnapshot(),
-          getSupportedThinkingLevels,
+          modelOfferOf(session.modelRuntime),
+          thinkingOnChoosing(session.settingsManager, session.thinkingLevel),
         ),
       )
       commands.push(...flows.rows())
@@ -616,11 +621,14 @@ export async function buildHostedThread(
       const decision = decideSystemPrompt(systemPrompt, choice, threadLog.hasSentRequest())
       if (decision.kind === 'refused') return decision.reason
       if (decision.kind === 'same') return undefined
+      if (hostApi === undefined) throw new Error(`thread ${threadId}: the host's extension API was never bound`)
       systemPrompt = choice ?? undefined
       // Recorded BEFORE the first request, so the log says what the request will carry; pi
       // flushes it with the first assistant message, as it does the model and the mode. pi's
       // default is recorded too (`null`): it replaces a choice this branch already records.
-      threadLog.record(ENSO_SYSTEM_PROMPT_ENTRY, choice)
+      // Through the host's extension API (#878), so pi emits `entry_appended` and every follower's
+      // composer shows the prompt the session now runs with, as a reload reads it off the branch.
+      hostApi.appendEntry(ENSO_SYSTEM_PROMPT_ENTRY, choice)
       // pi re-reads the loader when it rebuilds the prompt; the same tools make it rebuild.
       session.setActiveToolsByName(session.getActiveToolNames())
       if (choice === null) log.info("system prompt set to pi's default", { threadId })

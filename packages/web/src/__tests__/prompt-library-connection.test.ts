@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test'
 import { fetchLibraryPrompt, fetchPromptLibrary } from '../prompt-library-connection.ts'
 
 /**
- * #443: the Start dialog's library reads never throw — a failure is words the dialog shows beside the
+ * #443: the launch panel's library reads never throw (#877) — a failure is words the dialog shows beside the
  * field, and pi's default still starts. Each way a read fails is said as itself.
  */
 

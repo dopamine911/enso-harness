@@ -55,6 +55,25 @@ export function hostedProjectTrust(
 }
 
 /**
+ * Whether a new thread or tree of `project` reads the project's own files: the decision above,
+ * asked with no thread's branch — a project page and a new tree belong to no thread, so a "Trust
+ * this thread" answer does not count.
+ */
+export function projectTrusted(project: string, agentDir: string): boolean {
+  return hostedProjectTrust(project, project, agentDir, []).settingsManager.isProjectTrusted()
+}
+
+/**
+ * Save the project-wide decision in pi's `trust.json`: the thread's "Trust project" answer and the
+ * project page's Trust and Revoke (#873) write this one store, so each shows in the other. ⚠ A
+ * revoke is `false`, never a deletion: with no entry of its own, pi takes the nearest ancestor's
+ * (`ProjectTrustStore.get`), so a project under a trusted folder would stay trusted.
+ */
+export function saveProjectTrust(project: string, agentDir: string, trusted: boolean): void {
+  new ProjectTrustStore(agentDir).set(project, trusted)
+}
+
+/**
  * The project holds something trust would load: pi's list (`.pi/settings.json`, `extensions`,
  * `skills`, `prompts`, `themes`, `SYSTEM.md`, `APPEND_SYSTEM.md`, a `.agents/skills` above it),
  * plus what pi does not know: the engine's `.pi/agents/`, Enso's `.enso/config.json`, and the

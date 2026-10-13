@@ -1,6 +1,11 @@
 import { afterAll, afterEach, expect, test } from 'bun:test'
 import {
+  decisionAction,
+  effectiveRows,
+  ENSO_PERMISSION_MODES,
   EnsoPermissionCheckRequest,
+  type EnsoPermissionMap,
+  type EnsoPermissionModeName,
   type EnsoPermissionPolicyRead,
   type EnsoPermissionPolicyWrite,
   type EnsoPermissionVerdict,
@@ -117,10 +122,28 @@ function verdictFor(request: EnsoPermissionCheckRequest): EnsoPermissionVerdict 
       origin: 'global',
     }
   }
+  if (request.surface === 'path' && request.value === '~/.ssh/id_ed25519') {
+    return {
+      mode: 'default',
+      guard: {
+        kind: 'refused',
+        tool: 'read',
+        rule: 'secret-read',
+        cause: 'read refused: "~/.ssh/id_ed25519" is credential material.',
+        reason: 'read refused: "~/.ssh/id_ed25519" is credential material.',
+      },
+      state: 'deny',
+      matchedPattern: '~/.ssh/*',
+      origin: 'global',
+    }
+  }
+  if (request.surface === 'path') {
+    return { mode: 'default', guard: { kind: 'passed', tools: ['read', 'write'] }, state: 'allow', origin: 'global' }
+  }
   const guard: EnsoPermissionVerdict['guard'] =
     request.surface === 'web_fetch'
       ? { kind: 'not-checked', reason: 'a check on web_fetch carries no arguments' }
-      : { kind: 'passed', tool: 'bash' }
+      : { kind: 'passed', tools: ['bash'] }
   return { mode: 'default', guard, state: 'ask', matchedPattern: '**', origin: 'global' }
 }
 
@@ -164,8 +187,33 @@ function SettingsOnPage({
       threadId={threadId}
       projects={NO_ROWS}
       stored={NO_ROWS}
+      pageThreads={[]}
       onDeleted={(deleted): void => {
         throw new Error(`the Permissions tests delete no thread, yet ${deleted} was`)
+      }}
+      projectActions={{
+        onOpenThreads: (): void => {
+          throw new Error('the Permissions tests open no project')
+        },
+        onSettings: (): void => {
+          throw new Error('the Permissions tests open no project')
+        },
+        onRemove: (): void => {
+          throw new Error('the Permissions tests remove no project')
+        },
+      }}
+      projectPageActions={{
+        onOpenThread: (): void => {
+          throw new Error('the Permissions tests open no thread')
+        },
+        onCheckAgain: () => Promise.reject(new Error('the Permissions tests check no project')),
+        onRemove: (): void => {
+          throw new Error('the Permissions tests remove no project')
+        },
+      }}
+      projectNotice={undefined}
+      onProjectAdded={(): void => {
+        throw new Error('the Permissions tests add no project')
       }}
     />
   )
@@ -283,6 +331,109 @@ test('⚠ Save sends the whole file under the ETag read, and the next save names
   expect(writes(mounted)[1]?.ifMatch).toBe('"v2"')
   // A surface written as one action stays one action.
   expect(writtenPermission(mounted, 1)).toMatchObject({ read: 'ask' })
+})
+
+/** The view's cards, the radios of its one radiogroup. */
+function viewCards(mounted: Mounted): HTMLButtonElement[] {
+  return [...find(mounted, '[role="radiogroup"]').querySelectorAll<HTMLButtonElement>('[role="radio"]')]
+}
+
+const cardNamed = (mounted: Mounted, name: string): HTMLButtonElement | undefined =>
+  viewCards(mounted).find((card) => card.getAttribute('aria-label') === name)
+
+const checkedCard = (mounted: Mounted): string | null | undefined =>
+  viewCards(mounted)
+    .find((card) => card.getAttribute('aria-checked') === 'true')
+    ?.getAttribute('aria-label')
+
+/**
+ * Press a key on the focused element, as a keyboard does: down, then up. Radix moves roving focus in
+ * a timeout after the keydown, and chooses the focused radio only while the arrow is still down.
+ */
+async function press(key: string): Promise<void> {
+  const target = document.activeElement ?? document.body
+  await act(async () => {
+    target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }))
+    const { promise: focusMoved, resolve } = Promise.withResolvers<void>()
+    setTimeout(resolve, 0)
+    await focusMoved
+    target.dispatchEvent(new KeyboardEvent('keyup', { key, bubbles: true, cancelable: true }))
+  })
+  await settle()
+}
+
+/** Whose a row is, by the page's words for it: yours, Enso's catch-all, or a mode's ("from plan"). */
+function whose(words: string): string {
+  if (words.startsWith('yours')) return 'yours'
+  if (words.startsWith("Enso's catch-all")) return 'catch-all'
+  return words
+}
+
+/** Each rule row on screen, in order: its surface and pattern, the decision it shows, and whose it is. */
+function shownRows(mounted: Mounted): string[] {
+  return [...mounted.section().querySelectorAll<HTMLElement>('section[aria-label^="surface "] li')].map((row) => {
+    const owner = row.children[1]?.textContent ?? ''
+    const decision = row.querySelector('select')?.value ?? row.querySelector('span.font-semibold')?.textContent
+    return `${row.getAttribute('aria-label')} → ${decision} (${whose(owner)})`
+  })
+}
+
+/** What the page should show under `mode`: the rules `effectiveRows` (pinned to the engine) puts in effect. */
+function rowsInEffect(mode: EnsoPermissionModeName): string[] {
+  return effectiveRows(FILE.permission as EnsoPermissionMap, mode).map((row) => {
+    const owner = row.owner === 'mode' ? `from ${mode}` : row.owner
+    return `${row.surface} ${row.pattern} → ${decisionAction(row.decision)} (${owner === 'user' ? 'yours' : owner})`
+  })
+}
+
+/** The rule list's own controls: an action, a pattern, a move or a remove. */
+const ROW_CONTROLS = ['select', 'input', 'button'].map((tag) => `section[aria-label^="surface "] ${tag}`).join(', ')
+
+// #874: the modes are a radiogroup of cards — as written, which you edit, then a preview per mode.
+test('⚠ the view is a radiogroup of cards: as written first and editable, then each mode read-only, with the rules it puts in effect (#874)', async () => {
+  const mounted = await mountSettings()
+  expect(viewCards(mounted).map((card) => card.getAttribute('aria-label'))).toEqual([
+    'as written',
+    ...ENSO_PERMISSION_MODES,
+  ])
+  expect(checkedCard(mounted)).toBe('as written')
+  expect(mounted.section().querySelector(ROW_CONTROLS)).not.toBeNull()
+  for (const mode of ENSO_PERMISSION_MODES) {
+    await act(async () => cardNamed(mounted, mode)?.click())
+    await settle()
+    expect({ mode, checked: checkedCard(mounted), shown: shownRows(mounted) }).toEqual({
+      mode,
+      checked: mode,
+      shown: rowsInEffect(mode),
+    })
+    // A preview edits nothing: no action to change, no pattern to rename, no row to move or remove.
+    expect({ mode, controls: mounted.section().querySelector(ROW_CONTROLS) }).toEqual({ mode, controls: null })
+  }
+  await act(async () => cardNamed(mounted, 'as written')?.click())
+  await settle()
+  await choose(mounted, 'action bash git status', 'deny')
+  expect(buttonNamed(mounted, 'Save').disabled).toBe(false)
+})
+
+test('the view cards answer the keyboard as a radiogroup: Tab lands on the checked card, arrows move and choose, wrapping (#874)', async () => {
+  const mounted = await mountSettings()
+  // The cards' one tab stop is the checked card; Tab into the group lands there.
+  const cardStops = (): (string | null)[] =>
+    viewCards(mounted)
+      .filter((card) => card.tabIndex === 0)
+      .map((card) => card.getAttribute('aria-label'))
+  await act(async () => find<HTMLElement>(mounted, '[role="radiogroup"]').focus())
+  expect(document.activeElement?.getAttribute('aria-label')).toBe('as written')
+  expect(cardStops()).toEqual(['as written'])
+  await press('ArrowRight')
+  expect(document.activeElement?.getAttribute('aria-label')).toBe(ENSO_PERMISSION_MODES[0])
+  expect(checkedCard(mounted)).toBe(ENSO_PERMISSION_MODES[0])
+  expect(cardStops()).toEqual([ENSO_PERMISSION_MODES[0]])
+  expect(shownRows(mounted)).toEqual(rowsInEffect(ENSO_PERMISSION_MODES[0]))
+  await press('ArrowLeft')
+  await press('ArrowLeft')
+  expect(checkedCard(mounted)).toBe(ENSO_PERMISSION_MODES.at(-1))
+  expect(mounted.section().querySelector(ROW_CONTROLS)).toBeNull()
 })
 
 /** Follow one of Settings' section links, as the reader does. */
@@ -537,18 +688,37 @@ test('⚠ try a command with no thread open says so and asks nothing', async () 
   expect(mounted.sent.filter((entry) => entry.request.includes('/check'))).toEqual([])
 })
 
-// ⚠ Review of #474: asked about `path` itself, the engine answers from the raw shorthand block — a
-// verdict no call meets, since a read goes through `path_read`. A rule may still be ADDED on `path`.
-test('try a command offers a shorthand surface as its directions; adding a rule still offers the shorthand', async () => {
+// #874: `path` is checkable as Add rule offers it. The engine answers a shorthand as the stricter of
+// its directions, and the host asks the guards both calls; each direction stays checkable alone.
+test('try a command offers a shorthand surface and its directions, as adding a rule offers the shorthand (#874)', async () => {
   const file = { ...FILE, permission: { ...FILE.permission, external_directory: { '**': 'ask', '/etc/*': 'deny' } } }
   const mounted = await mountSettings({ file })
   const options = (label: string): string[] =>
     [...find(mounted, `select[aria-label="${label}"]`).querySelectorAll('option')].map((option) => option.value)
-  expect(options('check surface')).not.toContain('external_directory')
-  expect(options('check surface')).toEqual(
-    expect.arrayContaining(['external_directory_read', 'external_directory_write']),
+  for (const surface of ['path', 'external_directory']) {
+    expect(options('new rule surface')).toContain(surface)
+    expect(options('check surface')).toEqual(expect.arrayContaining([surface, `${surface}_read`, `${surface}_write`]))
+  }
+})
+
+test('⚠ try a command on `path` asks the thread for the path, and shows the guard that refuses its read and the deny (#874)', async () => {
+  const mounted = await mountSettings({ threadId: 't1' })
+  await choose(mounted, 'check surface', 'path')
+  await typeInto(mounted, 'check value', '~/.ssh/id_ed25519')
+  await click(mounted, 'Check')
+  const guard = await eventually(() => find(mounted, '[aria-label="guard"]'))
+  expect(mounted.sent.at(-1)?.body).toEqual({ surface: 'path', value: '~/.ssh/id_ed25519' })
+  expect(guard.textContent).toContain('Refused by a guard: secret-read')
+  expect(guard.textContent).toContain('Asked as a read call')
+  expect(find(mounted, '[aria-label="verdict"]').textContent).toContain('engine (moot)deny')
+  // A path no guard refuses: the pass names both calls it stands for.
+  await typeInto(mounted, 'check value', 'src/a.ts')
+  await click(mounted, 'Check')
+  await eventually(() =>
+    expect(find(mounted, '[aria-label="guard"]').textContent).toBe(
+      'No guard refuses it (asked as a read call and as a write call): the engine decides.',
+    ),
   )
-  expect(options('new rule surface')).toContain('external_directory')
 })
 
 test("try a command shows the open thread's verdict, the guards' pass first, and a thread whose engine has not loaded says so", async () => {

@@ -1,22 +1,40 @@
-import { ENSO_NOTICE_SOURCE, type EnsoStoredThread } from '@enso/core'
-import { ChartColumnIcon, FileDiffIcon, LayersIcon, MenuIcon, MessagesSquareIcon } from 'lucide-react'
+import { ENSO_NOTICE_SOURCE, type EnsoModelState, type EnsoRecordedModel, type EnsoStoredThread } from '@enso/core'
+import {
+  ChartColumnIcon,
+  EllipsisIcon,
+  FileDiffIcon,
+  LayersIcon,
+  MenuIcon,
+  MessagesSquareIcon,
+  PencilIcon,
+} from 'lucide-react'
 import { Tabs as TabsPrimitive } from 'radix-ui'
+import { useRef, useState } from 'react'
 import { Button } from './components/ui/button.tsx'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from './components/ui/dropdown-menu.tsx'
 import { DeleteThread } from './delete-thread-dialog.tsx'
 import { EnsoSmile } from './enso-mark.tsx'
-import { storedThreads } from './page-listings.ts'
-import { isFixtureMode, isDebugMode } from './page-mode.ts'
+import { paneForkOf } from './fork-thread.ts'
+import { storedThreads, useThreadProject } from './page-listings.ts'
+import { isFixtureMode } from './page-mode.ts'
 import type { ThreadView } from './pane-context.ts'
 import { PromptManagerDialog } from './prompt-manager.tsx'
-import { RenameThread } from './rename-thread.tsx'
+import { InlineRename } from './rename-thread.tsx'
 import { useStore } from './store.ts'
-import { getThreadStores, nameThreadSummary, type ThreadSummary } from './thread-stores.ts'
+import { getThreadStores, nameThreadSummary, type ThreadSummary, threadStarted } from './thread-stores.ts'
 import { UNTITLED_THREAD } from './threads-rail.tsx'
 
 /**
- * The page's header (#90): the active thread's title and its Rename and Delete, the view tabs (#361),
- * the prompt manager, and `?debug`'s switch. A page beside the threads (#869) has its own
- * (`routed-page.tsx`).
+ * The page's header (#90): the active thread's title — renamed in place (#879) — with what it runs
+ * with under it, the view tabs (#361), the prompt manager, and the thread menu (#879): Rename, Fork
+ * thread, `?debug`'s pane, and Delete thread… or Discard draft. A page beside the threads (#869) has
+ * its own (`routed-page.tsx`).
  */
 
 /** A tab's value back to a view: the only strings the tab list hands over are these. */
@@ -25,36 +43,6 @@ const THREAD_VIEWS: Readonly<Record<string, ThreadView>> = {
   context: 'context',
   stats: 'stats',
   changes: 'changes',
-}
-
-interface PaneSwitchProps {
-  readonly open: boolean
-  /** The pane's element id — what `aria-controls` names. */
-  readonly pane: string
-  /** What the switch says while the pane is closed, then while it is open. */
-  readonly labels: readonly [string, string]
-  readonly title: string
-  readonly onToggle: () => void
-  /** An icon ahead of the label. */
-  readonly children?: React.ReactNode
-}
-
-/** A header switch for a right-hand pane — the `?debug` column (#86): its state said, its pane named. */
-function PaneSwitch({ open, pane, labels, title, onToggle, children }: PaneSwitchProps): React.ReactNode {
-  return (
-    <Button
-      type="button"
-      size="sm"
-      variant={open ? 'secondary' : 'outline'}
-      aria-expanded={open}
-      aria-controls={pane}
-      title={title}
-      onClick={onToggle}
-    >
-      {children}
-      {open ? labels[1] : labels[0]}
-    </Button>
-  )
 }
 
 /**
@@ -85,109 +73,250 @@ export function HeaderPromptManager({ active }: { active: ThreadSummary | undefi
   return <PromptManagerDialog threadId={active.threadId} fetch={getThreadStores(active.threadId).fetch} />
 }
 
+/** What the header is told: the thread on screen, or the not-found screen in its place, and what its controls do. */
+export interface AppHeaderProps {
+  readonly active: ThreadSummary | undefined
+  readonly activeThreadId: string | undefined
+  /** The pane shows the not-found screen (#879): no thread is on screen, so none is offered actions. */
+  readonly notFound: boolean
+  readonly rail: { open: boolean; toggle: () => void }
+  readonly view: ThreadView
+  readonly onView: (view: ThreadView) => void
+  /** `?debug`'s column (#86): open or not, and the menu's Show/Hide; undefined on a page without `?debug`. */
+  readonly debug: { readonly open: boolean; readonly toggle: () => void } | undefined
+  /** The server deleted this thread (#571): the page leaves it. */
+  readonly onDeleted: (threadId: string) => void
+  /** A draft is discarded (#879): the page leaves it, and nothing is asked of the server. */
+  readonly onDiscardDraft: (threadId: string) => void
+  /** The server's stored-thread listing (#95): a thread in it has a session file. */
+  readonly stored: readonly EnsoStoredThread[]
+}
+
 /**
  * The page's header: the threads button (narrow screens), the mark, where you are — the active
- * thread's title, the same one the rail shows — and its Delete, then the view tabs, the prompt
- * manager and `?debug`'s switch.
+ * thread's title, the same one the rail shows, and what it runs with — then the view tabs, the
+ * prompt manager and the thread menu.
  */
-export function AppHeader({
-  active,
-  activeThreadId,
-  rail,
-  view,
-  onView,
-  debugOpen,
-  onToggleDebug,
-  onDeleted,
-  stored,
-}: {
-  active: ThreadSummary | undefined
-  activeThreadId: string | undefined
-  rail: { open: boolean; toggle: () => void }
-  view: ThreadView
-  onView: (view: ThreadView) => void
-  debugOpen: boolean
-  onToggleDebug: () => void
-  /** The server deleted this thread (#571): the page leaves it. */
-  onDeleted: (threadId: string) => void
-  /** The server's stored-thread listing (#95): a thread in it has a session file. */
-  stored: readonly EnsoStoredThread[]
-}): React.ReactNode {
+export function AppHeader(props: AppHeaderProps): React.ReactNode {
+  const { active, notFound, rail, view, onView, stored } = props
+  /** The thread whose title is a field (#879); another thread on screen ends it, so coming back shows the title. */
+  const [renaming, setRenaming] = useState<string | undefined>(undefined)
+  const started = active !== undefined && threadStarted(active, stored)
+  const shown = notFound ? undefined : active
+  // Adjusted while rendering, React's way to reset state on a changed input: no effect, no extra paint.
+  if (renaming !== undefined && renaming !== shown?.threadId) setRenaming(undefined)
+  const rename: TitleRename = {
+    on: renaming !== undefined && renaming === shown?.threadId,
+    start: (): void => setRenaming(shown?.threadId),
+    done: (): void => setRenaming(undefined),
+  }
   return (
     <header className="flex min-h-14 items-center gap-3 border-b bg-sidebar px-3 py-2">
       <RailToggle open={rail.open} onToggle={rail.toggle} />
       <EnsoSmile className="size-7.5" />
+      <h1 className="sr-only">Enso · pi runtime</h1>
       <div className="grid min-w-0 flex-1">
-        <h1 className="font-heading text-xs font-semibold tracking-wider text-muted-foreground uppercase max-sm:sr-only">
-          Enso · pi runtime
-        </h1>
-        <span className="truncate font-heading text-base font-semibold" title={activeThreadId ?? ''}>
-          {active?.name ?? active?.title ?? (activeThreadId === undefined ? 'resuming…' : UNTITLED_THREAD)}
-        </span>
+        <ThreadTitle {...props} started={started} rename={rename} />
       </div>
-      {active === undefined ? null : <ThreadControls active={active} onDeleted={onDeleted} stored={stored} />}
       {isFixtureMode ? (
         <span className="rounded-full border px-2 py-0.5 text-xs text-muted-foreground">fixture</span>
       ) : null}
-      <ViewTabs view={view} onView={onView} threadId={active?.threadId} />
-      <HeaderPromptManager active={active} />
-      {isDebugMode ? (
-        <PaneSwitch
-          open={debugOpen}
-          pane="thread-debug-pane"
-          labels={['show debug', 'hide debug']}
-          title="what the page believes beside what pi's session holds"
-          onToggle={onToggleDebug}
-        />
-      ) : null}
+      {notFound ? null : (
+        <ViewTabs view={view} onView={onView} threadId={active?.threadId} draft={active !== undefined && !started} />
+      )}
+      <HeaderPromptManager active={shown} />
+      {shown === undefined ? null : (
+        <ThreadMenu key={shown.threadId} {...props} active={shown} started={started} onRename={rename.start} />
+      )}
     </header>
   )
 }
 
+/** The title's rename in place (#879): whether the field is up, and what opens and closes it. */
+interface TitleRename {
+  readonly on: boolean
+  readonly start: () => void
+  readonly done: () => void
+}
+
 /**
- * The header's Rename (#670) and Delete (#571), offered once the server holds the thread: listed
- * among its stored sessions (a fork, written by its route before any prompt), adopted from a stored
- * branch, or prompted here (its title is that prompt's). A thread minted and never prompted is this
- * page's only.
+ * Where you are: the thread's title — a button that renames it in place (#879), or the field doing
+ * it — and under it what the thread runs with. A draft says it is not started; the not-found screen
+ * says the thread is not there.
  */
-function ThreadControls({
+function ThreadTitle({
   active,
-  onDeleted,
-  stored,
-}: {
-  active: ThreadSummary
-  onDeleted: (threadId: string) => void
-  stored: readonly EnsoStoredThread[]
-}): React.ReactNode {
-  const stores = getThreadStores(active.threadId)
-  const onServer =
-    active.title !== undefined || stores.history.length > 0 || stored.some((row) => row.threadId === active.threadId)
-  if (!onServer) return null
-  return (
-    <>
-      <RenameThread
-        key={`rename-${active.threadId}`}
-        target={stores}
+  activeThreadId,
+  notFound,
+  started,
+  rename,
+}: AppHeaderProps & { started: boolean; rename: TitleRename }): React.ReactNode {
+  if (notFound) return <span className={TITLE}>Thread not found</span>
+  if (active === undefined)
+    return (
+      <span className={TITLE} title={activeThreadId ?? ''}>
+        {activeThreadId === undefined ? 'resuming…' : UNTITLED_THREAD}
+      </span>
+    )
+  const title = active.name ?? active.title ?? UNTITLED_THREAD
+  if (!started)
+    return (
+      <>
+        <span className="flex min-w-0 items-center gap-2">
+          <span className={TITLE} title={active.threadId}>
+            {title}
+          </span>
+          <span className="shrink-0 rounded-full border px-2 py-0.5 text-xs text-muted-foreground">not started</span>
+        </span>
+        <ThreadSubtitle threadId={active.threadId} />
+      </>
+    )
+  if (rename.on)
+    return (
+      <InlineRename
+        target={getThreadStores(active.threadId)}
         current={active.name ?? active.title}
         onRenamed={(name): void => {
           nameThreadSummary(active.threadId, name)
           void storedThreads.refresh()
         }}
+        onDone={rename.done}
       />
-      <DeleteThread
-        key={active.threadId}
-        target={stores}
-        onDeleted={onDeleted}
-        onRefused={(reason): void =>
-          stores.notifications.push(
-            `thread ${active.threadId}: delete refused: ${reason}`,
-            'warning',
-            'run',
-            ENSO_NOTICE_SOURCE,
-          )
-        }
-        stored={stored}
-      />
+    )
+  return (
+    <>
+      <button
+        type="button"
+        title={`rename this thread · ${active.threadId}`}
+        className="group flex min-w-0 items-center gap-1.5 justify-self-start rounded-sm text-left focus-visible:outline-2 focus-visible:outline-ring"
+        onClick={rename.start}
+      >
+        <span className={TITLE}>{title}</span>
+        <PencilIcon
+          aria-hidden="true"
+          className="size-3.5 shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100"
+        />
+        <span className="sr-only">, rename</span>
+      </button>
+      <ThreadSubtitle threadId={active.threadId} />
+    </>
+  )
+}
+
+const TITLE = 'truncate font-heading text-base font-semibold'
+
+/**
+ * What the thread runs with, under its title (#879): its project · model · effort. The model and
+ * effort are the live session's; a cold thread's are what its branch recorded (#434), marked so; a
+ * half nothing has said is left out, never guessed.
+ */
+function ThreadSubtitle({ threadId }: { threadId: string }): React.ReactNode {
+  const stores = getThreadStores(threadId)
+  const project = useThreadProject(stores.projectId)
+  const live = useStore(stores.model)
+  const recorded = useStore(stores.model.recorded)
+  const parts = [...(project === undefined ? [] : [project.title]), ...runsWith(live, recorded)]
+  if (parts.length === 0) return null
+  return <span className="truncate text-xs text-muted-foreground">{parts.join(' · ')}</span>
+}
+
+/** The model and effort a subtitle names: the live state's, else the recorded ones, else none. */
+function runsWith(live: EnsoModelState | null, recorded: EnsoRecordedModel | null): string[] {
+  if (live !== null) return live.model === null ? [live.thinkingLevel] : [live.model.name, live.thinkingLevel]
+  if (recorded === null) return []
+  const parts = recorded.model === null ? [] : [`${recorded.model.modelId} (recorded)`]
+  return recorded.thinkingLevel === null ? parts : [...parts, recorded.thinkingLevel]
+}
+
+/**
+ * The thread menu (#879): everything the header's buttons did, in one place. **Rename** turns the
+ * title into a field; **Fork thread** is the palette's `/fork` (#433), at the last prompt;
+ * **Show/Hide debug pane** where `?debug` offered its switch; **Delete thread…** opens the delete
+ * preview with its holds-work refusal and **Delete anyway** (#571). A draft — never started, so
+ * nothing on the server — has nothing to rename or fork, and is **discarded** instead: the page
+ * leaves it, nothing is asked of the server.
+ *
+ * Controlled, so opening it renders it again: the pane offers its fork from an effect, after the
+ * header's first render. Not modal: a modal menu traps focus while it closes, and Rename's field,
+ * focused as it mounts, would lose its focus to the menu's way out.
+ */
+function ThreadMenu({
+  active,
+  started,
+  debug,
+  onRename,
+  onDeleted,
+  onDiscardDraft,
+  stored,
+}: AppHeaderProps & { active: ThreadSummary; started: boolean; onRename: () => void }): React.ReactNode {
+  const [open, setOpen] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  /** Rename takes focus into the field: the menu must not hand it back to its button as it closes. */
+  const keepFocus = useRef(false)
+  const stores = getThreadStores(active.threadId)
+  const fork = started ? paneForkOf(stores) : undefined
+  return (
+    <>
+      <DropdownMenu modal={false} open={open} onOpenChange={setOpen}>
+        <DropdownMenuTrigger asChild>
+          <Button type="button" variant="ghost" size="icon-sm" aria-label="thread actions" title="thread actions">
+            <EllipsisIcon />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align="end"
+          onCloseAutoFocus={(event): void => {
+            if (!keepFocus.current) return
+            event.preventDefault()
+            keepFocus.current = false
+          }}
+        >
+          <DropdownMenuItem
+            disabled={!started}
+            onSelect={(): void => {
+              keepFocus.current = true
+              onRename()
+            }}
+          >
+            Rename
+          </DropdownMenuItem>
+          <DropdownMenuItem disabled={fork === undefined} onSelect={(): void => fork?.(undefined)}>
+            Fork thread
+          </DropdownMenuItem>
+          {debug === undefined ? null : (
+            <DropdownMenuItem onSelect={debug.toggle}>
+              {debug.open ? 'Hide debug pane' : 'Show debug pane'}
+            </DropdownMenuItem>
+          )}
+          <DropdownMenuSeparator />
+          {started ? (
+            <DropdownMenuItem variant="destructive" onSelect={(): void => setDeleting(true)}>
+              Delete thread…
+            </DropdownMenuItem>
+          ) : (
+            <DropdownMenuItem variant="destructive" onSelect={(): void => onDiscardDraft(active.threadId)}>
+              Discard draft
+            </DropdownMenuItem>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {started ? (
+        <DeleteThread
+          target={stores}
+          open={deleting}
+          onOpenChange={setDeleting}
+          onDeleted={onDeleted}
+          onRefused={(reason): void =>
+            stores.notifications.push(
+              `thread ${active.threadId}: delete refused: ${reason}`,
+              'warning',
+              'run',
+              ENSO_NOTICE_SOURCE,
+            )
+          }
+          stored={stored}
+        />
+      ) : null}
     </>
   )
 }
@@ -211,24 +340,30 @@ export function RailToggle({ open, onToggle }: { open: boolean; onToggle: () => 
 }
 
 const VIEW_TAB =
-  'inline-flex h-10 items-center gap-2 rounded-md border-b-2 border-transparent px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-popover hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring aria-selected:border-primary aria-selected:bg-popover aria-selected:text-foreground signal:aria-selected:border-transparent signal:aria-selected:ring-1 signal:aria-selected:ring-border-strong signal:aria-selected:ring-inset ink:aria-selected:border-foreground ink:aria-selected:bg-transparent [&_svg]:size-4'
+  'inline-flex h-10 items-center gap-2 rounded-md border-b-2 border-transparent px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-popover hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-muted-foreground aria-selected:border-primary aria-selected:bg-popover aria-selected:text-foreground signal:aria-selected:border-transparent signal:aria-selected:ring-1 signal:aria-selected:ring-border-strong signal:aria-selected:ring-inset ink:aria-selected:border-foreground ink:aria-selected:bg-transparent [&_svg]:size-4'
+
+/** A draft's hover on the views it cannot show yet (#879). */
+const NOT_STARTED_VIEW = 'available once the thread starts'
 
 /**
  * The page's views as tabs (#361): Radix's tab list, for its keyboard (arrows move between tabs)
  * and its roles — the primitive, styled here to the design direction's tab (a raised selected tab
  * with an underline in the primary; Signal rings it instead, Ink underlines in ink). The panels
  * are the active pane's own (`ChatLayout`), so each trigger names its panel by id rather than
- * through Radix's `TabsContent`, which would unmount the transcript.
+ * through Radix's `TabsContent`, which would unmount the transcript. A draft (#879) has run nothing,
+ * so its Context, Stats and Diff are disabled; Chat stays, the way back from a view shown before.
  */
 function ViewTabs({
   view,
   onView,
   threadId,
+  draft,
 }: {
   view: ThreadView
   onView: (view: ThreadView) => void
   /** The thread on screen, whose waiting question the Chat tab shows; none while resuming. */
   threadId: string | undefined
+  draft: boolean
 }): React.ReactNode {
   // Only the shown view's panel is in the page, so only its tab names one (#362): a
   // reference to a panel that is not there is one a screen reader cannot follow.
@@ -252,37 +387,43 @@ function ViewTabs({
           <span className="max-sm:sr-only">Chat</span>
           {view === 'chat' || threadId === undefined ? null : <QuestionWaiting threadId={threadId} />}
         </TabsPrimitive.Trigger>
-        <TabsPrimitive.Trigger
-          value="context"
-          id="thread-view-context-tab"
-          aria-controls={controls('context')}
-          title="what each model request was made of, and how the context grew"
-          className={VIEW_TAB}
-        >
-          <LayersIcon aria-hidden="true" />
-          <span className="max-sm:sr-only">Context</span>
-        </TabsPrimitive.Trigger>
-        <TabsPrimitive.Trigger
-          value="stats"
-          id="thread-view-stats-tab"
-          aria-controls={controls('stats')}
-          title="per prompt, turn and tool: what this thread spent, and on what"
-          className={VIEW_TAB}
-        >
-          <ChartColumnIcon aria-hidden="true" />
-          <span className="max-sm:sr-only">Stats</span>
-        </TabsPrimitive.Trigger>
-        <TabsPrimitive.Trigger
-          value="changes"
-          id="thread-view-changes-tab"
-          aria-controls={controls('changes')}
-          title="every file that differs from the last push, and its diff side by side"
-          className={VIEW_TAB}
-        >
-          <FileDiffIcon aria-hidden="true" />
-          <span className="max-sm:sr-only">Diff</span>
-        </TabsPrimitive.Trigger>
+        {RUN_VIEWS.map(({ view: tab, label, hover, Icon }) => (
+          <TabsPrimitive.Trigger
+            key={tab}
+            value={tab}
+            id={`thread-view-${tab}-tab`}
+            aria-controls={controls(tab)}
+            disabled={draft}
+            title={draft ? NOT_STARTED_VIEW : hover}
+            className={VIEW_TAB}
+          >
+            <Icon aria-hidden="true" />
+            <span className="max-sm:sr-only">{label}</span>
+          </TabsPrimitive.Trigger>
+        ))}
       </TabsPrimitive.List>
     </TabsPrimitive.Root>
   )
 }
+
+/** The views of what a thread ran, after Chat: a draft has none to show (#879). */
+const RUN_VIEWS = [
+  {
+    view: 'context',
+    label: 'Context',
+    hover: 'what each model request was made of, and how the context grew',
+    Icon: LayersIcon,
+  },
+  {
+    view: 'stats',
+    label: 'Stats',
+    hover: 'per prompt, turn and tool: what this thread spent, and on what',
+    Icon: ChartColumnIcon,
+  },
+  {
+    view: 'changes',
+    label: 'Diff',
+    hover: 'every file that differs from the last push, and its diff side by side',
+    Icon: FileDiffIcon,
+  },
+] as const satisfies readonly { view: ThreadView; label: string; hover: string; Icon: typeof LayersIcon }[]

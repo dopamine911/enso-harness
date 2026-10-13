@@ -8,18 +8,23 @@ import {
   DialogTrigger,
 } from './components/ui/dialog.tsx'
 
+/** The button that opens a header dialog: its accessible name, its hover and its icon. */
+export interface HeaderDialogTrigger {
+  readonly label: string
+  readonly hover: string
+  readonly icon: React.ReactNode
+}
+
 /**
- * A header control that opens a dialog — Rename (#670), Delete (#571), Prompts (#443), Settings: an
- * icon button with its accessible name and its hover, opening a dialog with a title and a line
- * saying what it does above its body. The open state is the caller's, so a dialog that must not be
- * dismissed mid-request can refuse to close.
+ * A header dialog — Delete (#571), Prompts (#443), Settings: a dialog with a title and a line saying
+ * what it does above its body, opened by an icon button with its accessible name and its hover —
+ * or, with no `trigger`, by its caller (the thread menu's Delete, #879). The open state is the
+ * caller's, so a dialog that must not be dismissed mid-request can refuse to close.
  */
 export function HeaderDialog({
   open,
   onOpenChange,
-  label,
-  hover,
-  icon,
+  trigger,
   title,
   description,
   contentClassName,
@@ -28,10 +33,7 @@ export function HeaderDialog({
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
-  /** The button's accessible name. */
-  label: string
-  hover: string
-  icon: React.ReactNode
+  trigger: HeaderDialogTrigger | undefined
   title: string
   description: React.ReactNode
   contentClassName: string
@@ -40,11 +42,13 @@ export function HeaderDialog({
 }): React.ReactNode {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogTrigger asChild>
-        <Button variant="ghost" size="icon-sm" aria-label={label} title={hover}>
-          {icon}
-        </Button>
-      </DialogTrigger>
+      {trigger === undefined ? null : (
+        <DialogTrigger asChild>
+          <Button variant="ghost" size="icon-sm" aria-label={trigger.label} title={trigger.hover}>
+            {trigger.icon}
+          </Button>
+        </DialogTrigger>
+      )}
       <DialogContent className={contentClassName} showCloseButton={showCloseButton}>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>

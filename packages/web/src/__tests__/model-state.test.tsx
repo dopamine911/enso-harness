@@ -9,12 +9,12 @@ import { ensureDom, releaseDom } from './dom-environment.ts'
 // measurement. The dialog is a Radix portal; the select's trigger takes its text from a portal too.
 ensureDom()
 const { createRoot }: { createRoot: typeof CreateRoot } = await import('react-dom/client')
-const { ModelChip, ModelChoiceDialog, ThinkingLevelSelect, MODEL_NOT_LIVE, rankOption }: typeof ModelStateModule =
+const { ModelChip, ModelChoiceDialog, EffortChip, MODEL_NOT_LIVE }: typeof ModelStateModule =
   await import('../model-state.tsx')
 
 /**
  * The composer's model controls (#338 slice 2), MOUNTED under happy-dom: the chip's two sentences
- * (a name, or the not-live one — a button either way, #341), the thinking select's presence
+ * (a name, or the not-live one — a button either way, #341), the Effort chip's presence
  * and value, and the `/model` dialog over a fetch seam — options from a FRESH `/commands` read,
  * the current one marked, a pick delivered as `(command, optionId)` after the close, and the
  * two failures said inside the dialog. The store itself is pinned by `custom-event-router.test.ts`.
@@ -95,61 +95,62 @@ async function mount(node: React.ReactNode): Promise<Mounted> {
 
 const noop = (): void => undefined
 
+/** The Model chip: the shared chip control (#880), found by its accessible name, `Model: …`. */
+function modelChip(container: HTMLElement): HTMLButtonElement {
+  const found = container.querySelector<HTMLButtonElement>('button[aria-label^="Model"]')
+  if (found === null) throw new Error('expected the model chip')
+  return found
+}
+
 test('the chip is a button either way: the model and its provider when live, the not-live sentence when nothing is known', async () => {
   const opens: number[] = []
   const mounted = await mount(<ModelChip state={null} onOpen={(): void => void opens.push(1)} />)
-  const chip = (): HTMLButtonElement => {
-    const found = mounted.container.querySelector<HTMLButtonElement>('button[aria-label="model"]')
-    if (found === null) throw new Error('expected the model chip')
-    return found
-  }
-  expect(chip().textContent).toBe(MODEL_NOT_LIVE)
-  expect(chip().disabled).toBe(false)
+  const named = (): string | null => modelChip(mounted.container).getAttribute('aria-label')
+  expect(named()).toBe(`Model: ${MODEL_NOT_LIVE}`)
+  expect(modelChip(mounted.container).disabled).toBe(false)
+  // The shared chip control (#880), as Effort and Mode: the setting's name, then its value.
+  expect(modelChip(mounted.container).textContent).toBe(`Model${MODEL_NOT_LIVE}`)
   await flush(async () => {
-    chip().click()
+    modelChip(mounted.container).click()
   })
   expect(opens).toEqual([1])
   await mounted.render(<ModelChip state={LIVE_MODEL} onOpen={noop} />)
-  expect(chip().textContent).toBe('modelFake One· fake')
+  expect(named()).toBe('Model: Fake One · fake')
   // ⚠ #44: the same model on ANOTHER provider is a different answer — under multi-account, a
   // failover to another account slot. Only the provider says so; the chip must change with it.
   const swapped = { ...LIVE_MODEL, model: { provider: 'fake-account-2', id: 'fake-1', name: 'Fake One' } }
   await mounted.render(<ModelChip state={swapped} onOpen={noop} />)
-  expect(chip().textContent).toBe('modelFake One· fake-account-2')
-  expect(chip().title).toContain('fake-account-2/fake-1')
+  expect(named()).toBe('Model: Fake One · fake-account-2')
+  expect(modelChip(mounted.container).title).toContain('fake-account-2/fake-1')
   await mounted.render(<ModelChip state={{ ...LIVE_MODEL, model: null }} onOpen={noop} />)
-  expect(chip().textContent).toBe('model: none')
+  expect(named()).toBe('Model: none')
   await mounted.unmount()
 })
 
 test('a cold thread with a recorded model: the chip says it, marked recorded; the live state wins once there is one (#434)', async () => {
   const recorded = { model: { provider: 'anthropic', modelId: 'claude-sonnet-5' }, thinkingLevel: 'medium' }
   const mounted = await mount(<ModelChip state={null} recorded={recorded} onOpen={noop} />)
-  const chip = (): HTMLButtonElement => {
-    const found = mounted.container.querySelector<HTMLButtonElement>('button[aria-label="model"]')
-    if (found === null) throw new Error('expected the model chip')
-    return found
-  }
-  expect(chip().textContent).toBe('model (recorded): claude-sonnet-5 · anthropic · medium')
+  const named = (): string | null => modelChip(mounted.container).getAttribute('aria-label')
+  expect(named()).toBe('Model (recorded): claude-sonnet-5 · anthropic · medium')
   await mounted.render(<ModelChip state={null} recorded={{ model: null, thinkingLevel: 'high' }} onOpen={noop} />)
-  expect(chip().textContent).toBe('model (recorded): high')
+  expect(named()).toBe('Model (recorded): high')
   await mounted.render(<ModelChip state={LIVE_MODEL} recorded={recorded} onOpen={noop} />)
-  expect(chip().textContent).toBe('modelFake One· fake')
+  expect(named()).toBe('Model: Fake One · fake')
   await mounted.render(<ModelChip state={null} recorded={null} onOpen={noop} />)
-  expect(chip().textContent).toBe(MODEL_NOT_LIVE)
+  expect(named()).toBe(`Model: ${MODEL_NOT_LIVE}`)
   await mounted.unmount()
 })
 
-test('the thinking select renders nothing while not live, and the current level once it is', async () => {
-  const mounted = await mount(<ThinkingLevelSelect state={null} onSelect={noop} />)
-  expect(mounted.container.querySelector('[aria-label="thinking level"]')).toBeNull()
-  await mounted.render(<ThinkingLevelSelect state={LIVE_MODEL} onSelect={noop} />)
+test('the Effort chip renders nothing while not live, and the current level once it is', async () => {
+  const mounted = await mount(<EffortChip state={null} onSelect={noop} />)
+  expect(mounted.container.querySelector('[aria-label^="Effort: "]')).toBeNull()
+  await mounted.render(<EffortChip state={LIVE_MODEL} onSelect={noop} />)
   const trigger = await eventually(() => {
-    const found = mounted.container.querySelector<HTMLButtonElement>('button[aria-label="thinking level"]')
-    if (found === null) throw new Error('expected the thinking select')
+    const found = mounted.container.querySelector<HTMLButtonElement>('button[aria-label^="Effort: "]')
+    if (found === null) throw new Error('expected the Effort chip')
     return found
   })
-  await eventually(() => expect(trigger.textContent).toBe('medium'))
+  expect(trigger.getAttribute('aria-label')).toBe('Effort: medium')
   await mounted.unmount()
 })
 
@@ -168,6 +169,7 @@ async function mountDialog(respond: () => Response, command: string | undefined)
   const closes: number[] = []
   const mounted = await mount(
     <ModelChoiceDialog
+      recent={[]}
       threadId="thread 1"
       command={command}
       fetch={(input: string): Promise<Response> => {
@@ -202,12 +204,13 @@ test('opening the dialog reads a fresh /commands and lists the select row’s op
   expect(mounted.asked).toEqual(['/api/threads/thread%201/commands'])
   const [first, second] = mounted.rows()
   // The current one is marked for the eye (the check, `data-checked`) and for a reader, in words.
-  expect(first?.textContent).toBe('Fake Onefake, chosen')
-  expect(second?.textContent).toBe('Fake Twofake')
+  expect(first?.textContent).toBe('Fake One, chosen')
+  expect(second?.textContent).toBe('Fake Two')
   expect(first?.getAttribute('data-checked')).toBe('true')
   expect(second?.getAttribute('data-checked')).toBe('false')
-  // The group is headed by the row's description; the sr-only title says the same.
-  expect(mounted.dialog().querySelector('[cmdk-group-heading]')?.textContent).toBe('switch the model')
+  // The model picker (#880): the group is the provider; what picking does, the row's description.
+  expect(mounted.dialog().querySelector('[cmdk-group-heading]')?.textContent).toBe('fake')
+  expect(mounted.dialog().textContent).toContain('switch the model')
   await mounted.unmount()
 })
 
@@ -248,17 +251,4 @@ test('closed, the dialog renders nothing and reads nothing', async () => {
   expect(document.querySelector('[role="dialog"]')).toBeNull()
   expect(mounted.asked).toEqual([])
   await mounted.unmount()
-})
-
-// The dialog's filter is substring-first (#338 slice 3): cmdk's default fuzzy score matched
-// `openai` to 22 of 53 login options — any row spelling o-p-e-n-a-i in order. Typed text must
-// appear in the id, the label or the detail, and an earlier appearance ranks higher.
-test('rankOption hides a row the typed text does not appear in, and ranks an earlier appearance higher', () => {
-  expect(rankOption('openai/api_key', 'openai', ['OpenAI · API key', 'not configured'])).toBeGreaterThan(0)
-  expect(rankOption('opencode/api_key', 'openai', ['opencode · API key', 'not configured'])).toBe(0)
-  expect(rankOption('azure-openai-responses/api_key', 'openai', ['Azure OpenAI · API key'])).toBeGreaterThan(0)
-  expect(rankOption('openai/api_key', 'openai', ['OpenAI · API key'])).toBeGreaterThan(
-    rankOption('azure-openai-responses/api_key', 'openai', ['Azure OpenAI · API key']),
-  )
-  expect(rankOption('anything', '', [])).toBe(1)
 })

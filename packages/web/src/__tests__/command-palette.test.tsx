@@ -530,7 +530,7 @@ test('a live list with no rows says the session registers no commands', async ()
   await mounted.unmount()
 })
 
-// ⚠ #484: a thread with no session answers the host's catalogue — the Start dialog's rows. The
+// ⚠ #484: a thread with no session answers the host's catalogue — the launch panel's rows (#877). The
 // palette shows NONE of them: the slash commands belong to a running session, and the sentence
 // says what to do instead. Nothing was built to answer.
 test("`source: 'catalogue'` lists no rows, and says a / command needs a running session", async () => {

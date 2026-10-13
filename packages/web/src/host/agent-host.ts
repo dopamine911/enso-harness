@@ -281,7 +281,7 @@ export interface AgentHost {
   /**
    * The project a session built for `branch` in `cwd` would answer to, and whether it would read
    * that project's own configuration (#470): the decision a build makes first (`hostedProjectTrust`,
-   * keyed as the build keys it, #551), asked without building — so the Start dialog lists a
+   * keyed as the build keys it, #551), asked without building — so the launch panel lists a (#877)
    * project's prompts for a thread nothing has built yet (#484's rule, #86).
    */
   projectTrust(cwd: string, branch: readonly EnsoTranscriptEntry[]): ProjectTrustState

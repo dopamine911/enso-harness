@@ -9,7 +9,9 @@ import {
   type EnsoSessionIncidents,
   type EnsoSessionRiskChange,
   type EnsoSessionUsage,
+  type EnsoStoredThread,
   type EnsoThreadHistory,
+  type EnsoThreadSystemPrompt,
   ensoLogger,
   type ProviderRefusalClass,
   NO_SESSION_INCIDENTS,
@@ -76,6 +78,11 @@ export interface ThreadStores {
   readonly permissionMode: PermissionModeStore
   /** The session's model and thinking level (#338 slice 2); `null` until a live snapshot or `model` observation says. */
   readonly model: ModelStore
+  /**
+   * The system prompt the session runs with (#878): every snapshot's, then an `enso-system-prompt`
+   * entry appended live. Undefined until the follow's first snapshot — never assumed pi's default.
+   */
+  readonly systemPrompt: WritableStore<EnsoThreadSystemPrompt | undefined>
   /** The tree pi runs this thread in (#44), from every snapshot; undefined until the follow's first one. */
   readonly cwd: WritableStore<string | undefined>
   /** Whether the thread runs on a tree of its own (#551), from every snapshot — what makes "Restore files to here" an offer. */
@@ -175,11 +182,17 @@ export interface ThreadStores {
    */
   readonly toolResultDescriptors: WritableStore<ReadonlyMap<string, EnsoToolResultDescriptor>>
   /**
-   * The Start-a-session dialog is open (#391). Raised when the page MINTS the thread — New Thread,
-   * a page with no thread in its URL — and lowered by Start or Escape; a thread adopted from
-   * history never raises it.
+   * The thread shows its launch panel (#877): the composer is the form that starts its session.
+   * Raised when the page MINTS the thread — New Thread, a page with no thread in its URL — and when
+   * it adopts one the server says was never started (`EnsoThreadHistory.draft`, #479); lowered once
+   * Start goes through. A thread adopted with a history never raises it.
    */
-  readonly startSession: WritableStore<boolean>
+  readonly launch: WritableStore<boolean>
+  /**
+   * Whether the composer holds something not sent (#875): words, or an image. A draft holding
+   * nothing is discarded when the page leaves it (`discardEmptyDraft`).
+   */
+  readonly typed: WritableStore<boolean>
   /**
    * How many compactions pi has said it finished on this thread (#348): each rewrote the branch
    * under the transcript this page holds. The pane re-reads the thread once it is idle and has
@@ -307,6 +320,7 @@ function createThreadStores(
     initialDraft,
     permissionMode: createPermissionModeStore(),
     model: createModelStore(),
+    systemPrompt: createStore<EnsoThreadSystemPrompt | undefined>(undefined),
     cwd: createStore<string | undefined>(undefined),
     tree: createStore(false),
     readable: createStore(history.length > 0),
@@ -324,7 +338,8 @@ function createThreadStores(
     landOnRiskSignals: createStore(false),
     incidents: createStore<EnsoSessionIncidents>(NO_SESSION_INCIDENTS),
     toolResultDescriptors,
-    startSession: createStore(false),
+    launch: createStore(false),
+    typed: createStore(false),
     branchCompacted: createStore(0),
     runStops: createStore(0),
     login: createStore<EnsoLoginInProgress | undefined>(undefined),
@@ -537,6 +552,33 @@ export function dropThread(threadId: string): void {
 }
 
 /**
+ * Whether the server holds the thread: listed among its stored sessions (a fork, written by its
+ * route before any prompt), adopted from a stored branch, or prompted here (its title is that
+ * prompt's). A thread minted and never prompted is a draft, this page's only (#879: "not started").
+ */
+export function threadStarted(summary: ThreadSummary, stored: readonly EnsoStoredThread[]): boolean {
+  return (
+    summary.title !== undefined ||
+    getThreadStores(summary.threadId).history.length > 0 ||
+    stored.some((row) => row.threadId === summary.threadId)
+  )
+}
+
+/**
+ * The page is leaving `threadId` for another thread (#875): a draft with nothing typed in it — no
+ * prompt in its composer, no image attached — is dropped, so unused drafts never pile up on the
+ * rail. A draft is the page's alone, so nothing is asked of the server. Anything else, and a thread
+ * the page no longer holds, stays as it is.
+ */
+export function discardEmptyDraft(threadId: string, stored: readonly EnsoStoredThread[]): void {
+  const summary = summaries.get(threadId)
+  const stores = threads.get(threadId)
+  if (summary === undefined || stores === undefined || threadStarted(summary, stored)) return
+  if (stores.typed.get()) return
+  dropThread(threadId)
+}
+
+/**
  * Make room for one more live thread, so the page never holds more follows than the
  * budget.
  *
@@ -568,14 +610,14 @@ function makeRoomForOneMore(): void {
  *
  * The rail lists it at once, untitled. Inside the page's follow budget: minting past it drops
  * an idle thread (#272). `fetch` is the thread's network seam (`createThreadStores`). A minted thread opens on the
- * Start-a-session dialog (#391) — every way the page mints one is a new thread the person is about
+ * launch panel (#877) — every way the page mints one is a new thread the person is about
  * to start. `threadId` is new unless the URL named one the server has never held (#378): that
  * thread is started under the id the URL already says.
  */
 export function mintThread(fetchImpl?: FetchLike, projectId?: string, threadId?: string): ThreadStores {
   makeRoomForOneMore()
   const stores = createThreadStores(threadId ?? crypto.randomUUID(), [], fetchImpl, { projectId, initialDraft: '' })
-  stores.startSession.set(true)
+  stores.launch.set(true)
   threads.set(stores.threadId, stores)
   summaries.set(stores.threadId, {
     threadId: stores.threadId,
@@ -682,7 +724,9 @@ export async function loadEarlierMessages(
  * Adopting a thread already on this page returns it — the rail cannot hold one twice — and
  * adopting one past the page's follow budget drops an idle thread to make room (#272). `fetch`
  * is the thread's network seam, as `mintThread`'s; `initialDraft` is what its composer opens
- * holding (a fork's prefill, #433).
+ * holding (a fork's prefill, #433). A thread the server says was never started opens on its
+ * launch panel, as a minted one does (#479): a reload before the first prompt must offer the
+ * settings a session starts with, the system prompt among them.
  */
 export function adoptThread(history: EnsoThreadHistory, fetchImpl?: FetchLike, initialDraft = ''): ThreadStores {
   const existing = threads.get(history.threadId)
@@ -698,6 +742,7 @@ export function adoptThread(history: EnsoThreadHistory, fetchImpl?: FetchLike, i
   stores.permissionMode.applyReceipt(history.permissionMode)
   stores.sessionRisk.set(history.sessionRisk)
   stores.incidents.set(history.incidents)
+  stores.launch.set(history.draft === true)
   // Each stopped run where it was stopped (#766), as the live line said it; the follow's first
   // snapshot lists the same stops, and says none of them again.
   showRunStops(stores, history.stoppedAfter)

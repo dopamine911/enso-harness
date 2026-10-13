@@ -154,7 +154,7 @@ export interface AgentHost {
   /**
    * The project a session built for `branch` in `cwd` would answer to, and whether it would read
    * that project's own configuration (#470): the decision a build makes first (`hostedProjectTrust`,
-   * keyed as the build keys it, #551), asked without building — so the Start dialog lists a
+   * keyed as the build keys it, #551), asked without building — so the launch panel lists a (#877)
    * project's prompts for a thread nothing has built yet (#484's rule, #86).
    */
   projectTrust(cwd: string, branch: readonly EnsoTranscriptEntry[]): ProjectTrustState
@@ -273,6 +273,8 @@ export interface StoredThread {
    * session id. Absent for a thread that is no fork, and for one whose parent file is gone.
    */
   readonly parentThreadId?: string
+  /** The model its file last records (#871); absent when none does. */
+  readonly model?: NonNullable<EnsoRecordedModel['model']>
 }
 ```
 
@@ -370,11 +372,29 @@ export const EnsoStoredThread = Type.Object(
      */
     busy: Type.Boolean(),
     /**
+     * A thread on THIS server holds a question open for the person (#876): a permission ask, an
+     * `ask_user` questionnaire, any extension dialog — its runtime's `openDialogs()`, the same
+     * questions a follow's snapshot carries. Such a thread is busy too. The rail says "waiting on
+     * you" for it, over "running", even for a thread the page has not opened.
+     */
+    waiting: Type.Boolean(),
+    /**
      * The thread this one was forked from (#433): the session id its header's `parentSession`
      * file holds. Absent for a thread that is no fork — and for one whose parent file is gone,
      * which no longer names a thread the page could open.
      */
     parentThreadId: Type.Optional(Type.String()),
+    /**
+     * The model the session last recorded it ran on (#871): the last `model_change` or assistant
+     * reply in its file, read as `EnsoRecordedModel`'s model is. Absent when the file records none —
+     * never a guess, and never the model a resume would pick.
+     */
+    model: Type.Optional(
+      Type.Object(
+        { provider: Type.String({ minLength: 1 }), modelId: Type.String({ minLength: 1 }) },
+        { additionalProperties: false },
+      ),
+    ),
   },
   { additionalProperties: false },
 )
@@ -461,6 +481,13 @@ export const EnsoThreadHistory = Type.Object(
     stoppedAfter: Type.Optional(EnsoStoppedAfter),
     /** The name a person gave the thread (#670) — its newest `session_info`, as the listing's `name` — absent when none. */
     name: Type.Optional(Type.String({ minLength: 1 })),
+    /**
+     * Present only for a thread never started (#479): live on this server with no message and no
+     * session file — built by a control route, or by a Start refused at a later step, and never
+     * prompted. A page opens it on the launch panel, as it opens a thread it mints. A fork is written
+     * by its route before any prompt, so it is never one.
+     */
+    draft: Type.Optional(Type.Literal(true)),
   },
   { additionalProperties: false },
 )
@@ -545,13 +572,16 @@ is the root (`create` + `newSession({ parentSession })`) — answering the new i
 to prefill. A fork with no assistant message on its branch is one pi would not flush, so the host
 writes its entries as pi's first flush does; the source's file is never written. `listSessions` reads
 each fork's `parentSession` back to the parent's session id (`parentThreadId`) off the same listing;
-a parent whose file is gone names none. Outside a runtime pi's `session_before_fork` hook does not
+a parent whose file is gone names none. From the same read it names the model the session last ran on
+(`model`, #871): `transcript.ts`'s `modelOfEntry` over each entry, each entry inheriting its parent's,
+so the file's last entry — pi's leaf when it opens the file — carries what a cold read's recorded model
+says, never a change on an abandoned branch; none when nothing records one. Outside a runtime pi's `session_before_fork` hook does not
 fire (no loaded extension handles it). The host is tested against the real session manager in
 `host/__tests__/agent-host.test.ts`.
 
 **Consumed by the server.** The server's route groups own the read routes (#810):
 `GET /api/stored-threads` → `respondWithStoredThreads` (`server/literal-routes.ts`) maps each `StoredThread` to a `EnsoStoredThread`,
-marking `busy` by peeking the registry and carrying a fork's `parentThreadId`; `POST …/fork` (`server/thread-control-routes.ts`) asks
+marking `busy` by peeking the registry, `waiting` when that live thread's runtime has a question open (`openDialogs()`, #876), and carrying a fork's `parentThreadId`; `POST …/fork` (`server/thread-control-routes.ts`) asks
 `host.forkThread` (409 while a run holds the source); `GET /api/threads` summarises each live thread from `inspect()`.
 `packages/web/src/server/thread-registry.ts` is the only builder (it is handed `host.createSession`),
 and its `inspectThread` is the one place a `EnsoThreadInspection` is assembled, so the thread route and

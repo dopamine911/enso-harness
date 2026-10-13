@@ -2,6 +2,7 @@ import { type Static, Type } from 'typebox'
 import { EnsoOpenDialog } from './dialog.ts'
 import { EnsoLoginInProgress, EnsoObservation } from './observation.ts'
 import { EnsoPermissionModeState } from './permission-mode.ts'
+import { EnsoThreadSystemPrompt } from './prompt-library.ts'
 import { EnsoProviderRefusal } from './provider-refusal.ts'
 import { EnsoSessionIncidents } from './session-incident.ts'
 import { EnsoSessionRiskChange } from './session-risk.ts'
@@ -43,6 +44,12 @@ export const EnsoFollowSnapshot = Type.Object(
     model: Type.Union([EnsoModelState, Type.Null()]),
     /** What a NOT-live thread's branch records it last ran on (#434); absent when live, or when the branch records neither. */
     recordedModel: Type.Optional(EnsoRecordedModel),
+    /**
+     * The system prompt the session runs with (#443, #878): the branch's last `enso-system-prompt`
+     * record — live or cold, the same record, so a reload says what a running session was given.
+     * `null` is pi's default. One chosen later arrives as that entry, appended live.
+     */
+    systemPrompt: EnsoThreadSystemPrompt,
     /**
      * The tree pi reads and writes for this thread (#44), AS OF THIS SNAPSHOT — the live session's
      * own cwd; when the thread is not live, the stored session's (pi fixed it at creation); and

@@ -164,6 +164,7 @@ export function createThreadReadRoutes(state: ThreadReadRoutesState): ThreadRead
       ...(mount.interrupted === undefined ? {} : { interrupted: mount.interrupted }),
       ...(mount.stoppedAfter.length === 0 ? {} : { stoppedAfter: mount.stoppedAfter }),
       ...(mount.name === undefined ? {} : { name: mount.name }),
+      ...(mount.draft ? { draft: true as const } : {}),
     }
     response.writeHead(200, { 'Content-Type': 'application/json' })
     response.end(JSON.stringify(payload))
@@ -187,8 +188,8 @@ export function createThreadReadRoutes(state: ThreadReadRoutesState): ThreadRead
    * The slash commands a thread can run (#338): from ITS session when it is live, else the host's
    * catalogue (#484) — and NOTHING IS BUILT. Before #484 this route built the session for a thread
    * that had none (#390: after a restart `/login` could not run until something had been
-   * prompted), and the Start dialog read its models here, so every page visit built one. Now the
-   * Start dialog is served from the catalogue, a run or a control route is what builds, and the
+   * prompted), and the Start dialog (now the launch panel, #877) read its models here, so every page visit built one. Now the
+   * launch panel is served from the catalogue (#877), a run or a control route is what builds, and the
    * palette shows a `catalogue` list as none. No record: a reader opening a menu is not an event.
    */
   async function respondWithThreadCommands(threadId: string, response: ServerResponse): Promise<void> {

@@ -20,7 +20,7 @@ import type { FetchLike } from './browser-logging.ts'
  *
  * ⚠ NOTHING LEAVES THE PAGE (#404). The transport above is only TanStack's send; the pane talks to
  * the server through its thread's own `fetch` too — a prompt sent mid-reply (pi's queue, #75),
- * Stop, the mode select, host commands, the Start dialog, the Context and Stats reads. So a
+ * Stop, the mode select, host commands, the launch panel (#877), the Context and Stats reads. So a
  * fixture page's threads are minted with `fixtureFetch` below, which answers every request with a
  * 503 naming the fixture: a control used here says it went nowhere, instead of running a real
  * model on the real agent dir's grant (which is what #404 found it doing).
