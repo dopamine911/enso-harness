@@ -358,10 +358,16 @@ test('the switcher is keyboard operable: Enter opens it, the arrows move, Enter 
 })
 
 test('⚠ the switcher flags a missing folder and an untrusted project; lists the threads in no project with their count; opens Add project and Projects (#876)', async () => {
+  const minutesAgo = (minutes: number): Date => new Date(Date.now() - minutes * 60_000)
   const mounted = await mount({
     projects: [LAUNCH, APP, GONE],
-    threads: [open('in-launch', 'p-launch'), open('orphan', 'p-removed')],
-    earlier: [stored('orphan-stored', 'p-removed')],
+    threads: [
+      open('in-launch', 'p-launch'),
+      // The newest thread in no project is a draft: it holds nothing, so it is not what opens.
+      open('orphan-draft', 'p-removed', { title: undefined }),
+      open('orphan', 'p-removed', { lastActivityAt: minutesAgo(1) }),
+    ],
+    earlier: [{ ...stored('orphan-stored', 'p-removed'), lastActivityAt: minutesAgo(2).toISOString() }],
     activeThreadId: 'in-launch',
   })
   const entries = async (): Promise<HTMLElement[]> => {
@@ -383,10 +389,10 @@ test('⚠ the switcher flags a missing folder and an untrusted project; lists th
   // Its folder gone and no thread in it: flagged, and nothing to choose.
   expect(entry('gone').textContent).toContain('folder missing')
   expect(entry('gone').getAttribute('aria-disabled')).toBe('true')
-  expect(entry('Not in a project').textContent).toBe('Not in a project2 threads')
+  expect(entry('Not in a project').textContent).toBe('Not in a project3 threads')
   expect(items.map((item) => item.textContent).slice(-2)).toEqual(['Add project…', 'Manage projects'])
 
-  // The threads in no project: their latest opens, and they are current.
+  // The threads in no project: the latest that holds something opens, and they are current.
   await mounted.click(entry('Not in a project'))
   expect(mounted.asked.selected).toEqual(['orphan'])
   expect(switcherLabel(mounted)).toBe('Project: Not in a project. Switch project')

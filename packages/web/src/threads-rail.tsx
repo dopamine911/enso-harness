@@ -23,7 +23,7 @@ import {
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from './components/ui/input-group.tsx'
 import { cn } from './lib/utils.ts'
 import { pageClock } from './page-clock.ts'
-import { type ProjectThreadsContext, projectOf, threadsOfProject } from './project-list.ts'
+import { type ProjectThreadsContext, projectOf, threadsInNoProject, threadsOfProject } from './project-list.ts'
 import { NOT_IN_A_PROJECT, ProjectSwitcher, type SwitcherChoice } from './project-switcher.tsx'
 import {
   type HiddenSignal,
@@ -954,8 +954,10 @@ function RailSections({
 }
 
 /**
- * What the switcher offers (#876): every project — one whose folder is gone and that holds no thread
- * has nothing to open — and, when any thread is in no listed project, those, with their count.
+ * What the switcher offers (#876): every project, and, when any thread is in no listed project,
+ * those, with their count. One with nothing to open (`threadsOfProject`, `threadsInNoProject`) is
+ * offered but not choosable when nothing can start there either: a project whose folder is gone,
+ * or no project at all.
  */
 function switcherChoices(groups: readonly ProjectGroup[], context: ProjectThreadsContext): SwitcherChoice[] {
   return groups.flatMap((group): SwitcherChoice[] => {
@@ -964,44 +966,27 @@ function switcherChoices(groups: readonly ProjectGroup[], context: ProjectThread
     if (project === undefined) {
       return context.projects.length === 0 || threadCount === 0
         ? []
-        : [{ key: UNLISTED, project, threadCount, unavailable: false }]
+        : [{ key: UNLISTED, project, threadCount, unavailable: threadsInNoProject(context).length === 0 }]
     }
     const unavailable = project.status === 'missing-dir' && threadsOfProject(project.projectId, context).length === 0
     return [{ key: project.projectId, project, threadCount, unavailable }]
   })
 }
 
-/** The most recently active of a section's threads — what choosing it in the switcher opens. */
-function latestOf(group: ProjectGroup | undefined): { threadId: string; onPage: boolean } | undefined {
-  const candidates = [
-    ...(group?.threads ?? []).map((thread) => ({
-      threadId: thread.threadId,
-      onPage: true,
-      at: thread.lastActivityAt.getTime(),
-    })),
-    ...(group?.earlier ?? []).map((thread) => ({
-      threadId: thread.threadId,
-      onPage: false,
-      at: Date.parse(thread.lastActivityAt),
-    })),
-  ]
-  return candidates.toSorted((left, right) => right.at - left.at)[0]
-}
-
 /**
  * A project chosen in the switcher (#876) opens its latest thread, or a new one in it, through the
- * page — which makes it current; the threads in no project, their latest, here.
+ * page — which makes it current; the threads in no project, the latest that holds something, here.
  */
 function chooseProject(
   key: string,
-  groups: readonly ProjectGroup[],
+  context: ProjectThreadsContext,
   { onOpenProject, onSelect, onResume }: Pick<ThreadsRailProps, 'onOpenProject' | 'onSelect' | 'onResume'>,
 ): void {
   if (key !== UNLISTED) {
     onOpenProject(key)
     return
   }
-  const latest = latestOf(groups.find((group) => group.project === undefined))
+  const latest = threadsInNoProject(context)[0]
   if (latest === undefined) return
   if (latest.onPage) onSelect(latest.threadId)
   else onResume(latest.threadId)
@@ -1035,12 +1020,13 @@ function RailTop({
   search: RailSearchState
   props: ThreadsRailProps
 }): React.ReactNode {
+  const context = { projects, pageThreads: threads, stored: earlier }
   return (
     <div className="grid gap-2 p-3 pb-1">
       <ProjectSwitcher
-        choices={switcherChoices(groups, { projects, pageThreads: threads, stored: earlier })}
+        choices={switcherChoices(groups, context)}
         currentKey={current.key}
-        onChoose={(key) => chooseProject(key, groups, { onOpenProject, onSelect, onResume })}
+        onChoose={(key) => chooseProject(key, context, { onOpenProject, onSelect, onResume })}
         onPage={onPage}
         fetch={fetchImpl}
       />

@@ -61,23 +61,39 @@ export interface ProjectThread extends ThreadAfterDelete {
 }
 
 /**
- * A project's threads that hold something — one on this page with a first prompt, or a stored one
- * with messages — most recently active first: what the Projects page counts and opens (#870), and
- * where a delete goes next. A page thread's project is the rail's (`projectOf`: none is the launch
- * project's), so the two lists are compared by the same project id; one on this page is counted
- * once, as the page thread.
+ * The threads that hold something — one on this page with a first prompt, or a stored one with
+ * messages — in the section `inSection` says, by the listed project each is in (`projectOf`: a page
+ * thread with none is the launch project's; one not listed is in none), most recently active
+ * first. One on this page is counted once, as the page thread.
  */
-export function threadsOfProject(projectId: string, context: ProjectThreadsContext): ProjectThread[] {
+function heldThreads(
+  context: ProjectThreadsContext,
+  inSection: (listedProjectId: string | undefined) => boolean,
+): ProjectThread[] {
+  const listedOf = (projectId: string | undefined): string | undefined =>
+    projectOf(context.projects, projectId)?.projectId
   const onPage = context.pageThreads
-    .filter((thread) => thread.title !== undefined)
-    .filter((thread) => projectOf(context.projects, thread.projectId)?.projectId === projectId)
+    .filter((thread) => thread.title !== undefined && inSection(listedOf(thread.projectId)))
     .map((thread) => ({ threadId: thread.threadId, onPage: true, at: thread.lastActivityAt.getTime() }))
   const pageIds = new Set(context.pageThreads.map((thread) => thread.threadId))
   const storedOnly = context.stored
     .filter((thread) => !pageIds.has(thread.threadId))
-    .filter((thread) => thread.projectId === projectId && thread.messageCount > 0)
+    .filter((thread) => thread.messageCount > 0 && inSection(listedOf(thread.projectId)))
     .map((thread) => ({ threadId: thread.threadId, onPage: false, at: Date.parse(thread.lastActivityAt) }))
   return [...onPage, ...storedOnly].toSorted((left, right) => right.at - left.at)
+}
+
+/**
+ * A project's threads that hold something (`heldThreads`): what the Projects page counts and opens
+ * (#870), what the rail's switcher opens (#876), and where a delete goes next.
+ */
+export function threadsOfProject(projectId: string, context: ProjectThreadsContext): ProjectThread[] {
+  return heldThreads(context, (listedProjectId) => listedProjectId === projectId)
+}
+
+/** The threads that hold something in no listed project (`heldThreads`): what the switcher's **Not in a project** opens (#876). */
+export function threadsInNoProject(context: ProjectThreadsContext): ProjectThread[] {
+  return heldThreads(context, (listedProjectId) => listedProjectId === undefined)
 }
 
 /**
