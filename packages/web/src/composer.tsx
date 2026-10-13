@@ -194,7 +194,9 @@ function StopControl({
 /**
  * The Start-a-session dialog (#391) on a minted thread, with what it reads: the thread's project and
  * its permission modes. Start configures the session and sends the first prompt through the
- * composer's own `send`; a dismissal hands a typed prompt back to the composer (#638).
+ * composer's own `send`; a dismissal hands a typed prompt back to the composer (#638). Shown only
+ * from the pane on screen (#869): a fresh thread behind a page — Settings opened from a fresh home —
+ * keeps its dialog for when the thread is shown, never over the page.
  */
 function ComposerStartSession({
   keepPrompt,
@@ -205,6 +207,7 @@ function ComposerStartSession({
 }): React.ReactNode {
   const stores = useThreadStores()
   const open = useStore(stores.startSession)
+  const onScreen = useContext(PaneViewContext).shown !== undefined
   const project = useThreadProject(stores.projectId)
   const permission = usePermissionMode()
   return (
@@ -212,7 +215,7 @@ function ComposerStartSession({
       threadId={stores.threadId}
       fetch={stores.fetch}
       project={project}
-      open={open}
+      open={open && onScreen}
       onClose={(): void => stores.startSession.set(false)}
       keepPrompt={keepPrompt}
       mode={permission.mode}

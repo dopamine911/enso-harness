@@ -7,13 +7,13 @@ const FONTS_FILE = 'packages/web/src/fonts.ts'
 const isObject = (value: LiteralValue | undefined): value is LiteralObject =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
 
-/** The dialog's theme list, family → id → label (`theme.ts`), and the theme a browser with nothing saved shows. */
+/** Settings' theme list, family → id → label (`theme.ts`), and the theme a browser with nothing saved shows. */
 const FAMILIES = constantIn(THEME_FILE, 'FAMILIES')
 const DEFAULT_THEME = constantIn(THEME_FILE, 'DEFAULT_THEME')
 if (!isObject(FAMILIES) || typeof DEFAULT_THEME !== 'string')
   throw new Error(`settings: ${THEME_FILE} FAMILIES is not an object, or DEFAULT_THEME not an id`)
 
-/** The default theme's family and label, as the dialog lists it. */
+/** The default theme's family and label, as Settings lists it. */
 const [DEFAULT] = Object.entries(FAMILIES).flatMap(([family, members]) => {
   const label = isObject(members) ? members[DEFAULT_THEME] : undefined
   return typeof label === 'string' ? [{ family, label }] : []
@@ -21,7 +21,7 @@ const [DEFAULT] = Object.entries(FAMILIES).flatMap(([family, members]) => {
 if (DEFAULT === undefined)
   throw new Error(`settings: ${THEME_FILE} FAMILIES does not list DEFAULT_THEME ${DEFAULT_THEME}`)
 
-/** Every family but the default's, in the dialog's order. */
+/** Every family but the default's, in Settings' order. */
 const OTHER_FAMILIES = Object.keys(FAMILIES).filter((family) => family !== DEFAULT.family)
 
 /** The font roles as Settings lists them (`fonts.ts`), by label. */
@@ -46,80 +46,88 @@ if (ROLE_COUNT === undefined)
   throw new Error(`settings: ${FONTS_FILE} FONT_ROLES has ${ROLE_LABELS.length} roles, no word for it`)
 
 const [FIRST_ROLE = ''] = ROLE_LABELS
-const DIALOG: MarkTarget = { role: 'dialog', name: 'Settings' }
+/** Settings' page, by its heading: every mark below is inside it but the subtitle. */
+const PAGE: MarkTarget = { role: 'region', name: 'Settings' }
+const SECTIONS: MarkTarget = { role: 'navigation', name: 'Settings sections' }
 
-/** Settings (#407): the look of the page, and (#474) the permission rules pi runs under. */
+/** Settings (#407, #869): the look of the page, (#474) the permission rules pi runs under, and (#578) what trees take on disk. */
 export const SETTINGS: FeatureSpec = {
   id: 'settings',
   title: 'Settings',
-  landingTagline: 'themes · fonts · permissions · trees',
+  landingTagline: 'themes · fonts · permissions · storage',
   shows: [
     `**Appearance**: the look of the page, a colour theme and a font for each of ${ROLE_COUNT} roles. ${DEFAULT.label} is the default theme, and the others include ${listed(OTHER_FAMILIES)}, in dark and light variants.`,
     "**Permissions**: the rules pi runs under, from `ENSO_HOME/permissions.json` in the permission engine's own format, in the order the engine reads them. You can view them as written or as each mode runs them, change a rule's pattern or decision, move or remove it, add rules and drafted groups of rules, save, and reset to Enso's policy. **Try a command** asks the open thread's engine what it would decide.",
-    '**Trees**: every thread tree with what it takes on disk, and a Delete for each. See [Thread trees](./thread-trees.md).',
+    '**Storage**: every thread tree with what it takes on disk, and a Delete for each. See [Thread trees](./thread-trees.md).',
     "A project's own settings are on the project's page, not here: **Project settings…** in its menu on the rail. See [Thread trees](./thread-trees.md).",
   ],
   opens: [
-    '{steps}, the sliders icon at the right of the header. **Permissions** is the second tab, **Trees** the third.',
+    '{steps}, at the foot of the rail. Settings opens as a page in place of the thread, which keeps running behind it; opening a thread from the rail leaves the page.',
+    "Each section has an address of its own, `?page=settings&section=appearance`, `permissions` or `storage`, beside the thread's `?thread=`: a reload, a link or the browser's back button comes back to it.",
   ],
   shots: [
     {
       image: 'settings',
-      alt: 'The Settings dialog',
+      alt: 'The Settings page, on Appearance',
       go: async (ui) => {
         await ui.openThread()
-        await ui.click({ role: 'button', name: 'settings' })
-        await ui.page.getByRole('dialog', { name: 'Settings' }).getByText('Theme', { exact: true }).waitFor()
+        await ui.click({ role: 'button', name: 'Settings', exact: true })
+        await ui.page.getByRole('region', { name: 'Settings' }).getByText('Theme', { exact: true }).waitFor()
       },
       marks: [
         {
-          target: { text: 'Theme', exact: true, within: DIALOG },
+          target: SECTIONS,
+          says: 'The sections: **Appearance**, **Permissions** and **Storage**, each at its own address.',
+        },
+        {
+          target: { text: 'Theme', exact: true, within: PAGE },
           says: '**{shown}**. It applies at once, to every thread on the page.',
         },
         {
-          target: { text: FIRST_ROLE, exact: true, within: DIALOG },
+          target: { text: FIRST_ROLE, exact: true, within: PAGE },
           says: `The font roles: ${listed(ROLE_LABELS.map((label) => `**${label}**`))}. **{themeFont}** follows the theme. Any other choice keeps its font on every theme.`,
         },
         {
-          target: { text: 'kept in this browser', within: DIALOG },
-          says: '**{shown}**: the appearance is saved in this browser only.',
+          target: { text: 'Appearance stays in this browser' },
+          says: 'Where each section is kept: "{shown}" Appearance is not on the server, so another browser starts from the default.',
         },
       ],
       measure: {
         // The first role's choice with nothing saved: the option that follows the theme.
-        themeFont: (page) => page.getByRole('dialog', { name: 'Settings' }).getByLabel(FIRST_ROLE, { exact: true }),
+        themeFont: (page) => page.getByRole('region', { name: 'Settings' }).getByLabel(FIRST_ROLE, { exact: true }),
       },
     },
     {
       image: 'settings-permissions',
-      alt: 'The Permissions tab of Settings',
+      alt: 'The Permissions section of Settings',
       go: async (ui) => {
         await ui.openThread()
-        await ui.click({ role: 'button', name: 'settings' })
-        await ui.click({ role: 'tab', name: 'Permissions', within: DIALOG })
-        await ui.page.getByRole('dialog', { name: 'Settings' }).getByText('Show', { exact: true }).waitFor()
+        await ui.click({ role: 'button', name: 'Settings', exact: true })
+        await ui.click({ role: 'button', name: 'Permissions', exact: true, within: SECTIONS })
+        await ui.page.getByRole('region', { name: 'Settings' }).getByText('Show', { exact: true }).waitFor()
       },
       marks: [
         {
-          target: { text: 'This section is saved on the server', within: DIALOG },
+          target: { text: 'This section is saved on the server', within: PAGE },
           says: 'Where the rules are: the one file the engine reads, saved on the server. A save names the version it read, so a change made by hand while the page was open is never overwritten unseen; the page offers **Reload from disk** or **Overwrite with mine**.',
         },
         {
-          target: { role: 'button', name: 'Save', exact: true, within: DIALOG },
+          target: { role: 'button', name: 'Save', exact: true, within: PAGE },
           says: '**{shown}** writes the whole file. A policy the engine would not run as written is refused before it is written, each problem named at its place: the engine runs a file it cannot read as an EMPTY policy, every deny gone.',
         },
         {
-          target: { text: 'Show', exact: true, within: DIALOG },
+          target: { text: 'Show', exact: true, within: PAGE },
           says: '**{shown}**: the rules as written, which you edit, or as one of the modes runs them, with the rules that mode put there marked **from** it.',
         },
         {
-          target: { text: 'yours — holds in every mode', within: DIALOG },
+          target: { text: 'yours — holds in every mode', within: PAGE },
           says: "Who a rule belongs to. **{shown}**: a rule of yours, which no mode changes. Enso's `**` rule on a surface is marked **Enso's catch-all — a mode may change this**: its decision can be edited, but it cannot be moved or removed, and every rule of yours comes after it.",
         },
       ],
       after: [
         "Below the rules: **Add a rule**, three **Drafted rules** groups (publishing, remote writes, and secrets on the path gate) that add only the rules not already in force, **Reset to Enso's policy…**, which shows what it would change before it asks and keeps the replaced file as `permissions.json.bak`, and **Try a command**.",
         'A banner says when `yoloMode` is on, since it makes every ask an allow. When the review log is on, the page names where it is written.',
+        "An unsaved change is kept while the browser page is open: leaving Settings for a thread, or moving to another section, doesn't lose it. A reload does.",
       ],
     },
   ],

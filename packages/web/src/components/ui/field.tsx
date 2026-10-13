@@ -1,6 +1,6 @@
 /**
  * Vendored from the shadcn/ui registry — item `field`, `shadcn/ui radix-nova` style
- * (packages/web/components.json), fetched by `shadcn@4.20.1` (the settings dialog's theme field). MIT.
+ * (packages/web/components.json), fetched by `shadcn@4.20.1` (Settings' theme field). MIT.
  * See README.md here for the re-fetch procedure and the local changes.
  */
 import { useMemo } from "react"

@@ -6,7 +6,7 @@
  *
  * The choice is applied before first paint by `index.html`'s inline script (so a reload shows no
  * flash of the default) — it reads the id AND the scheme, saved side by side, because it cannot
- * import this list — and changed from the settings dialog, which applies it at once and saves it.
+ * import this list — and changed from Settings' Appearance, which applies it at once and saves it.
  */
 
 export type ThemeScheme = 'dark' | 'light'
