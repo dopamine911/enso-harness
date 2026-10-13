@@ -402,9 +402,10 @@ function usePageNavigation(listings: PageListings): PageNavigation {
 }
 
 /**
- * A Projects card's **Open threads** (#870): the project's most recently active thread — shown at
- * once when it is on this page, resumed when stored — or, when it has none, a new thread in it.
- * Either way the page is left, as a rail click leaves it. A gone folder with no thread offers none.
+ * A Projects card's **Open threads** (#870), and a project chosen in the rail's switcher (#876),
+ * which makes it current: the project's most recently active thread — shown at once when it is on
+ * this page, resumed when stored — or, when it has none, a new thread in it. Either way the page is
+ * left, as a rail click leaves it. A gone folder with no thread offers none.
  */
 function openProjectThreads(projectId: string, listings: PageListings, navigation: PageNavigation): void {
   const { threads, stored, projects } = listings
@@ -483,6 +484,7 @@ export function ChatScreen(): React.ReactNode {
           onSelect={rail.leave((threadId: string) => navigate(threadId, 'push'))}
           onResume={rail.leave((threadId: string) => resumeFrom(threadId, 'push'))}
           onNew={rail.leave(newThread)}
+          onOpenProject={rail.leave((projectId: string) => openProjectThreads(projectId, listings, navigation))}
           onRemoveProject={(projectId: string) => void forgetProject(projectId)}
           onProjectSettings={rail.leave((projectId: string) => openPage(projectRoute(projectId, 'worktrees')))}
           // On Projects and a project's page, a refused removal is said on the page it was asked from: once.

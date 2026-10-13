@@ -1,6 +1,5 @@
 import type { EnsoProject, EnsoProjectSettings, EnsoStoredThread, EnsoThreadTreeMode } from '@enso/core'
-import { Trash2Icon, TriangleAlertIcon } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { Trash2Icon } from 'lucide-react'
 import type { FetchLike } from './browser-logging.ts'
 import { Button } from './components/ui/button.tsx'
 import {
@@ -11,12 +10,8 @@ import {
 } from './components/ui/dropdown-menu.tsx'
 import { cn } from './lib/utils.ts'
 import type { ListingState } from './listing-store.ts'
-import {
-  type ProjectRequestOutcome,
-  type ProjectThread,
-  readProjectSettings,
-  threadsOfProject,
-} from './project-list.ts'
+import { type ProjectRequestOutcome, type ProjectThread, threadsOfProject } from './project-list.ts'
+import { BADGE, ProjectStatusBadges, useProjectSettings } from './project-status.tsx'
 import type { ThreadSummary } from './thread-stores.ts'
 import { Age } from './threads-rail.tsx'
 import { ProjectOnDisk, type TreesRead, useTreesListing } from './trees-settings.tsx'
@@ -38,40 +33,7 @@ const TREE_MODE_FACTS: Readonly<Record<EnsoThreadTreeMode, string>> = {
   off: 'threads run in the folder itself',
 }
 
-/** A project's settings as read: its answer, or the server's reason; absent while the read is out. */
-type SettingsReads = ReadonlyMap<string, ProjectRequestOutcome<EnsoProjectSettings>>
-
-/**
- * Each project's `GET /api/projects/:id/settings`, read when the page mounts and again when the
- * projects listed change (one added or removed). A read that could not reach the server is said as
- * a refusal with its reason, never as an untrusted project.
- */
-function useProjectSettings(projectIds: readonly string[], fetchNow: FetchLike): SettingsReads {
-  const key = projectIds.join('\n')
-  const [reads, setReads] = useState<SettingsReads>(new Map())
-  useEffect(() => {
-    let current = true
-    const ids = key === '' ? [] : key.split('\n')
-    const readOne = async (projectId: string): Promise<[string, ProjectRequestOutcome<EnsoProjectSettings>]> => {
-      try {
-        return [projectId, await readProjectSettings(projectId, fetchNow)]
-      } catch (error) {
-        return [projectId, { kind: 'refused', reason: error instanceof Error ? error.message : String(error) }]
-      }
-    }
-    void Promise.all(ids.map(readOne)).then((answers) => {
-      if (current) setReads(new Map(answers))
-    })
-    return (): void => {
-      current = false
-    }
-  }, [key, fetchNow])
-  return reads
-}
-
-const BADGE = 'inline-flex items-center gap-1 rounded-full border px-2 font-mono text-xs'
-
-/** What a project is, beside its name: current, started here, folder missing, not trusted. */
+/** What a project is, beside its name: current, started here, and its trouble — folder missing, not trusted. */
 function ProjectBadges({
   project,
   current,
@@ -94,17 +56,7 @@ function ProjectBadges({
           started here
         </span>
       ) : null}
-      {project.status === 'missing-dir' ? (
-        <span className={cn(BADGE, 'border-destructive text-destructive')} title={`${project.path} no longer exists`}>
-          <TriangleAlertIcon aria-hidden="true" className="size-3" />
-          folder missing
-        </span>
-      ) : null}
-      {trusted === false ? (
-        <span className={cn(BADGE, 'border-dashed')} title="Enso doesn’t read this project’s own settings files">
-          not trusted
-        </span>
-      ) : null}
+      <ProjectStatusBadges project={project} trusted={trusted} />
     </>
   )
 }

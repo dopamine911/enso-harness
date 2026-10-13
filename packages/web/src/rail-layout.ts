@@ -135,15 +135,23 @@ export function sectionLayout(section: RailThreads, now: Date, cap: number | und
   return { days, hidden }
 }
 
+/** What a row of threads the reader cannot see says for them, and for how many of them. */
+export interface HiddenSignal {
+  readonly state: 'waiting' | 'running'
+  readonly count: number
+}
+
 /**
- * What a row of threads the reader cannot see says for them — a folded section's header, a
- * collapsed fold: a question waiting on you first (only an open thread can hold one, and it is busy
- * too), else a run in flight — the order a row's own dot uses.
+ * What a row of threads the reader cannot see says for them — a collapsed project's header (#876),
+ * a collapsed fold: the questions waiting on you first (only an open thread can hold one, and it is
+ * busy too), else the runs in flight — the order a row's own dot uses — with how many.
  */
-export function hiddenState(rows: RailThreads): 'waiting' | 'running' | undefined {
-  if (rows.threads.some((thread) => thread.waiting)) return 'waiting'
-  if (rows.threads.some((thread) => thread.busy) || rows.earlier.some((thread) => thread.busy)) return 'running'
-  return undefined
+export function hiddenSignal(rows: RailThreads): HiddenSignal | undefined {
+  const waiting = rows.threads.filter((thread) => thread.waiting).length
+  if (waiting > 0) return { state: 'waiting', count: waiting }
+  const running =
+    rows.threads.filter((thread) => thread.busy).length + rows.earlier.filter((thread) => thread.busy).length
+  return running > 0 ? { state: 'running', count: running } : undefined
 }
 
 /** The threads whose title holds `query`, case aside (#875); everything when `query` is blank. An untitled thread holds nothing. */

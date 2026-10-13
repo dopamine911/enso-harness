@@ -11,7 +11,8 @@ import {
   Settings2Icon,
   XIcon,
 } from 'lucide-react'
-import { createContext, useContext, useId, useRef, useState, useSyncExternalStore } from 'react'
+import { createContext, useContext, useEffect, useId, useRef, useState, useSyncExternalStore } from 'react'
+import type { FetchLike } from './browser-logging.ts'
 import { Button } from './components/ui/button.tsx'
 import {
   DropdownMenu,
@@ -22,9 +23,11 @@ import {
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from './components/ui/input-group.tsx'
 import { cn } from './lib/utils.ts'
 import { pageClock } from './page-clock.ts'
-import { projectOf } from './project-list.ts'
+import { type ProjectThreadsContext, projectOf, threadsOfProject } from './project-list.ts'
+import { NOT_IN_A_PROJECT, ProjectSwitcher, type SwitcherChoice } from './project-switcher.tsx'
 import {
-  hiddenState,
+  type HiddenSignal,
+  hiddenSignal,
   matchingThreads,
   RAIL_DAY_LABELS,
   type RailDayGroup,
@@ -43,28 +46,32 @@ import { ADD_PROJECT_ROUTE, type PageRoute, PROJECTS_ROUTE, SETTINGS_ROUTE } fro
  * deepseek-harness's left rail is the reference — workspaces as sections, each with its sessions,
  * a title and a relative age per row, and a new-session button per workspace.
  *
- * One section per project (#395), the launch directory first. Under each: the threads this page
+ * One section per project (#395), the launch directory first, each an accordion (#876): the current
+ * project's open — the project of the thread on screen, or behind the page — the others closed,
+ * until the reader opens or closes one; a closed one says how many of its threads wait on you, or
+ * else run. Under each: the threads this page
  * has open — they die with the page — then pi's session files in that project this page has not
  * got open (#95); a click resumes one, with its history and its mode, under the same id — the
  * thread id IS pi's session id. A thread RUNNING elsewhere (a run in flight, a dialog parked) is
  * shown with a running dot and still resumable: under the follow transport a resume follows the run
  * (#114). Idle is resumable too, even when this server still holds it — a reload must get its own
- * thread back. A section's `+` starts a thread IN that project; the header's New
- * Thread starts in the project of the thread on screen. A fork (#433) says which thread it
+ * thread back. A section's `+` starts a thread IN that project; the rail's New
+ * Thread starts in the current project. A fork (#433) says which thread it
  * came from under its title, by that thread's title — the listing's `parentThreadId`. At its foot,
  * the links to the pages (#869, #870): Projects and Settings, each marked as the current page while
  * it is on screen.
  *
- * At its top, under New Thread, a search (#875) that keeps the threads whose title holds what is
- * typed, across every project, opening the sections that hold one. Inside a section the threads are
- * under Today, Yesterday and Earlier by last activity, and the ones that share a title fold into one
- * row with a count (`rail-layout.ts`).
+ * At its top, the project switcher (#876, `project-switcher.tsx`): choosing a project opens its
+ * latest thread, which makes it current. Under it New Thread, then a search (#875) that keeps the
+ * threads whose title holds what is typed, across every project, opening the sections that hold
+ * one, current or not. Inside a section the threads are under Today, Yesterday and Earlier by last
+ * activity, and the ones that share a title fold into one row with a count (`rail-layout.ts`).
  *
  * Presentational: the lists, the active id, and the callbacks arrive as props, so a static
  * render pins the wording and the active marker without any chat. Three inputs are NOT props:
  * the clock (#278) — an age that only moves when the page happens to re-render is a stale
  * reading that looks live, so each age subscribes to `pageClock`, which a static render does
- * not — and which sections and folds the reader folded, and what they searched for: the reader's own state.
+ * not — and which sections and folds the reader opened or closed, and what they searched for: the reader's own state.
  */
 
 /** `now`, `12s`, `3m`, `2h`, `6d` — deepseek's form, one unit, no "ago". */
@@ -96,29 +103,61 @@ export const UNTITLED_THREAD = 'new thread'
 /** How many stored threads a section shows before "show more" — deepseek's five. */
 export const STORED_ROWS_SHOWN = 5
 
-/** Where the rail keeps which sections the reader folded — the browser's, per project, across reloads. */
-const FOLDED_KEY = 'enso.rail.folded'
+/** Where the rail keeps which project sections the reader opened or closed (#876) — the browser's, per project, across reloads. */
+const SECTIONS_KEY = 'enso.rail.sections'
 
-function readFolded(): ReadonlySet<string> {
+/** The key of the section of threads in no listed project. */
+const UNLISTED = 'unlisted'
+
+/** A section's key: its project's id, or the threads in none. */
+const sectionKey = (group: ProjectGroup): string => group.project?.projectId ?? UNLISTED
+
+/** The reader's choice per section: open (`true`) or closed. A section with none follows whether its project is current. */
+type SectionChoices = Readonly<Record<string, boolean>>
+
+function readSectionChoices(): SectionChoices {
   try {
-    const stored: unknown = JSON.parse(globalThis.localStorage?.getItem(FOLDED_KEY) ?? '[]')
-    return new Set(Array.isArray(stored) ? stored.filter((key): key is string => typeof key === 'string') : [])
+    const stored: unknown = JSON.parse(globalThis.localStorage?.getItem(SECTIONS_KEY) ?? '{}')
+    if (typeof stored !== 'object' || stored === null || Array.isArray(stored)) return {}
+    return Object.fromEntries(
+      Object.entries(stored).filter((choice): choice is [string, boolean] => typeof choice[1] === 'boolean'),
+    )
   } catch {
-    return new Set()
+    return {}
   }
 }
 
-/** A section's fold, remembered by its key (the project id) — a reload keeps the rail as it was left. */
-function useFolded(key: string): [boolean, () => void] {
-  const [folded, setFolded] = useState(() => readFolded().has(key))
-  const toggle = (): void => {
-    const next = new Set(readFolded())
-    if (folded) next.delete(key)
-    else next.add(key)
-    globalThis.localStorage?.setItem(FOLDED_KEY, JSON.stringify([...next]))
-    setFolded(!folded)
+/** Which sections are open, and the reader opening or closing one. */
+interface SectionOpening {
+  readonly isOpen: (key: string, current: boolean) => boolean
+  readonly toggle: (key: string, open: boolean) => void
+}
+
+/**
+ * The sections' accordion (#876): the reader's choice for a project, kept across reloads, over the
+ * default — open while it is current. A project the reader ARRIVES in (a thread of it opened, or it
+ * chosen in the switcher) opens: what was chosen for it before is dropped, so it closes again once
+ * they leave it, unless they open it. Where a reload lands is no arrival — `arrived` is undefined
+ * until the page knows the projects and the thread on screen — so a current project the reader
+ * closed stays closed.
+ */
+function useSectionOpening(arrived: string | undefined): SectionOpening {
+  const [choices, setChoices] = useState(readSectionChoices)
+  const [seen, setSeen] = useState(arrived)
+  // Adjusted while rendering, React's way to reset state on a changed input: no effect, no extra paint.
+  if (arrived !== undefined && arrived !== seen) {
+    setSeen(arrived)
+    if (seen !== undefined && Object.hasOwn(choices, arrived)) {
+      setChoices(Object.fromEntries(Object.entries(choices).filter(([key]) => key !== arrived)))
+    }
   }
-  return [folded, toggle]
+  useEffect(() => {
+    globalThis.localStorage?.setItem(SECTIONS_KEY, JSON.stringify(choices))
+  }, [choices])
+  return {
+    isOpen: (key, current) => choices[key] ?? current,
+    toggle: (key, open) => setChoices({ ...choices, [key]: !open }),
+  }
 }
 
 export interface ThreadsRailProps {
@@ -141,6 +180,10 @@ export interface ThreadsRailProps {
   readonly onResume: (threadId: string) => void
   /** Start a thread in this project; `undefined` when the page knows no project yet (the server's launch directory). */
   readonly onNew: (projectId: string | undefined) => void
+  /** Make a project current from the switcher (#876): open its latest thread, or a new one in it when it has none. */
+  readonly onOpenProject: (projectId: string) => void
+  /** The page's `fetch`, for the switcher's trust reads; the browser's when absent. */
+  readonly fetch?: FetchLike | undefined
   /** Forget a registered project; its threads stay on disk. Never offered for the launch directory. */
   readonly onRemoveProject: (projectId: string) => void
   /** Open a project's page at its Worktrees tab (#754, a page since #871): how its new threads' trees are made. Offered for every project, the launch one too. */
@@ -322,6 +365,17 @@ export function railLabels(group: ProjectGroup): ReadonlyMap<string, string | un
   )
 }
 
+/** A live state's dot: violet while pi waits on you, the evidence colour while it runs. */
+const DOT: Readonly<Record<HiddenSignal['state'], string>> = {
+  waiting: 'bg-human signal:shadow-glow-human',
+  running: 'bg-evidence signal:shadow-glow-evidence',
+}
+
+const STATE_WORDS: Readonly<Record<HiddenSignal['state'], string>> = {
+  waiting: 'waiting on you',
+  running: 'running',
+}
+
 /**
  * A thread's live state, as the status bar's dot at rail size: violet while pi waits on you,
  * solid in the running colour while a run is in flight (Signal lights both), hollow when an
@@ -329,21 +383,25 @@ export function railLabels(group: ProjectGroup): ReadonlyMap<string, string | un
  * animation runs the compositor for as long as pi works, once per running thread in the rail.
  */
 export function LiveDot({ state }: { state: 'waiting' | 'running' | 'idle' }): React.ReactNode {
-  if (state === 'waiting') {
-    return (
-      <span className="size-2 shrink-0 rounded-full bg-human signal:shadow-glow-human">
-        <span className="sr-only">waiting on you</span>
-      </span>
-    )
+  if (state === 'idle') {
+    return <span aria-hidden="true" className="size-2 shrink-0 rounded-full border border-muted-foreground" />
   }
-  if (state === 'running') {
-    return (
-      <span className="size-2 shrink-0 rounded-full bg-evidence signal:shadow-glow-evidence">
-        <span className="sr-only">running</span>
-      </span>
-    )
-  }
-  return <span aria-hidden="true" className="size-2 shrink-0 rounded-full border border-muted-foreground" />
+  return (
+    <span className={cn('size-2 shrink-0 rounded-full', DOT[state])}>
+      <span className="sr-only">{STATE_WORDS[state]}</span>
+    </span>
+  )
+}
+
+/** A closed project's signal (#876): the dot of what its hidden threads say, and how many say it — "2 waiting on you". */
+function SectionSignal({ signal }: { signal: HiddenSignal }): React.ReactNode {
+  return (
+    <span className="ml-auto flex shrink-0 items-center gap-1 font-mono text-foreground tabular-nums">
+      <span aria-hidden="true" className={cn('size-2 shrink-0 rounded-full', DOT[signal.state])} />
+      <span aria-hidden="true">{signal.count}</span>
+      <span className="sr-only">{`${signal.count} ${STATE_WORDS[signal.state]}`}</span>
+    </span>
+  )
 }
 
 function liveState(thread: ThreadSummary): 'waiting' | 'running' | 'idle' {
@@ -428,7 +486,7 @@ function EarlierThreadRow({
 function sectionTitle(project: EnsoProject | undefined, anyProjects: boolean): { name: string; hover: string } {
   if (project !== undefined) return { name: project.title, hover: project.path }
   return anyProjects
-    ? { name: 'other', hover: 'threads in a project this server no longer lists' }
+    ? { name: NOT_IN_A_PROJECT, hover: 'threads in a project this server no longer lists' }
     : { name: 'threads', hover: 'the projects are not listed yet' }
 }
 
@@ -439,7 +497,7 @@ interface ProjectActions {
   readonly onSettings: (projectId: string) => void
 }
 
-/** The section's header: fold it, see where it is, start a thread in it, open its menu. */
+/** The section's header: open or close it, see where it is, start a thread in it, open its menu. */
 function SectionHeader({
   group,
   name,
@@ -457,7 +515,7 @@ function SectionHeader({
 }): React.ReactNode {
   const { project } = group
   const missing = project?.status === 'missing-dir'
-  const hidden = folded ? hiddenState(group) : undefined
+  const hidden = folded ? hiddenSignal(group) : undefined
   return (
     <div className="flex items-center gap-1">
       <button
@@ -470,7 +528,7 @@ function SectionHeader({
         {folded ? <ChevronRightIcon className="size-3 shrink-0" /> : <ChevronDownIcon className="size-3 shrink-0" />}
         <span className="min-w-0 truncate">{name}</span>
         {missing ? <span className="shrink-0 text-destructive">missing</span> : null}
-        {hidden === undefined ? null : <LiveDot state={hidden} />}
+        {hidden === undefined ? null : <SectionSignal signal={hidden} />}
       </button>
       {project === undefined ? null : (
         <Button
@@ -554,7 +612,7 @@ function FoldRow({
 }): React.ReactNode {
   const [chosen, setChosen] = useState<boolean | undefined>(undefined)
   const open = chosen ?? fold.threads.some((thread) => thread.threadId === actions.activeThreadId)
-  const hidden = open ? undefined : hiddenState(fold)
+  const hidden = open ? undefined : hiddenSignal(fold)?.state
   const count = fold.threads.length + fold.earlier.length
   const first = fold.threads[0] ?? fold.earlier[0]
   return (
@@ -646,11 +704,14 @@ function SectionRows({
 }
 
 /**
- * A project's section. Searching (#875) shows only its matches and opens it whatever the reader's
- * fold says, which is kept for after; closed during a search, it stays closed until the query changes.
+ * A project's section, open as the accordion has it (#876). Searching (#875) shows only its matches
+ * and opens it whatever the accordion says, which is kept for after; closed during a search, it
+ * stays closed until the query changes.
  */
 function ProjectSection({
   group,
+  open,
+  onToggle,
   query,
   anyProjects,
   today,
@@ -658,16 +719,17 @@ function ProjectSection({
   actions,
 }: {
   group: ProjectGroup
+  open: boolean
+  onToggle: () => void
   query: string
   anyProjects: boolean
   today: Date
   rows: Omit<RowActions, 'labels'>
   actions: ProjectActions
 }): React.ReactNode {
-  const [folded, toggleFolded] = useFolded(group.project?.projectId ?? 'unlisted')
   const [closedUnder, setClosedUnder] = useState<string | undefined>(undefined)
   const searching = query.trim() !== ''
-  const shown = searching ? closedUnder !== query : !folded
+  const shown = searching ? closedUnder !== query : open
   const matching = matchingThreads(group, query)
   const { name, hover } = sectionTitle(group.project, anyProjects)
   return (
@@ -677,7 +739,7 @@ function ProjectSection({
         name={name}
         hover={hover}
         folded={!shown}
-        onFold={searching ? () => setClosedUnder(closedUnder === query ? undefined : query) : toggleFolded}
+        onFold={searching ? () => setClosedUnder(closedUnder === query ? undefined : query) : onToggle}
         actions={actions}
       />
       {shown ? (
@@ -834,16 +896,21 @@ function RailAlerts({
 
 /**
  * The rail's sections under its search (#875): every project's, or while searching only those with
- * a match — and when none has one, a line that says so with a way back.
+ * a match — and when none has one, a line that says so with a way back. Each open or closed as the
+ * accordion has it (#876): the current one open unless the reader closed it.
  */
 function RailSections({
   groups,
+  currentKey,
+  opening,
   search: { query, clear },
   anyProjects,
   rows,
   actions,
 }: {
   groups: readonly ProjectGroup[]
+  currentKey: string | undefined
+  opening: SectionOpening
   search: RailSearchState
   anyProjects: boolean
   rows: Omit<RowActions, 'labels'>
@@ -867,41 +934,147 @@ function RailSections({
       </div>
     )
   }
-  return shown.map((group) => (
-    <ProjectSection
-      key={group.project?.projectId ?? 'unlisted'}
-      group={group}
-      query={query}
-      anyProjects={anyProjects}
-      today={today}
-      rows={rows}
-      actions={actions}
-    />
-  ))
+  return shown.map((group) => {
+    const key = sectionKey(group)
+    const open = opening.isOpen(key, key === currentKey)
+    return (
+      <ProjectSection
+        key={key}
+        group={group}
+        open={open}
+        onToggle={() => opening.toggle(key, open)}
+        query={query}
+        anyProjects={anyProjects}
+        today={today}
+        rows={rows}
+        actions={actions}
+      />
+    )
+  })
 }
 
-export function ThreadsRail({
-  projects,
-  threads,
-  activeThreadId,
-  earlier,
-  earlierError,
-  openError,
-  onSelect,
-  onResume,
-  onNew,
-  onRemoveProject,
-  onProjectSettings,
-  projectNotice,
-  onPage,
-  page,
-  shownNarrow = false,
-  forkParents = NO_FORKS,
-}: ThreadsRailProps): React.ReactNode {
+/**
+ * What the switcher offers (#876): every project — one whose folder is gone and that holds no thread
+ * has nothing to open — and, when any thread is in no listed project, those, with their count.
+ */
+function switcherChoices(groups: readonly ProjectGroup[], context: ProjectThreadsContext): SwitcherChoice[] {
+  return groups.flatMap((group): SwitcherChoice[] => {
+    const threadCount = group.threads.length + group.earlier.length
+    const { project } = group
+    if (project === undefined) {
+      return context.projects.length === 0 || threadCount === 0
+        ? []
+        : [{ key: UNLISTED, project, threadCount, unavailable: false }]
+    }
+    const unavailable = project.status === 'missing-dir' && threadsOfProject(project.projectId, context).length === 0
+    return [{ key: project.projectId, project, threadCount, unavailable }]
+  })
+}
+
+/** The most recently active of a section's threads — what choosing it in the switcher opens. */
+function latestOf(group: ProjectGroup | undefined): { threadId: string; onPage: boolean } | undefined {
+  const candidates = [
+    ...(group?.threads ?? []).map((thread) => ({
+      threadId: thread.threadId,
+      onPage: true,
+      at: thread.lastActivityAt.getTime(),
+    })),
+    ...(group?.earlier ?? []).map((thread) => ({
+      threadId: thread.threadId,
+      onPage: false,
+      at: Date.parse(thread.lastActivityAt),
+    })),
+  ]
+  return candidates.toSorted((left, right) => right.at - left.at)[0]
+}
+
+/**
+ * A project chosen in the switcher (#876) opens its latest thread, or a new one in it, through the
+ * page — which makes it current; the threads in no project, their latest, here.
+ */
+function chooseProject(
+  key: string,
+  groups: readonly ProjectGroup[],
+  { onOpenProject, onSelect, onResume }: Pick<ThreadsRailProps, 'onOpenProject' | 'onSelect' | 'onResume'>,
+): void {
+  if (key !== UNLISTED) {
+    onOpenProject(key)
+    return
+  }
+  const latest = latestOf(groups.find((group) => group.project === undefined))
+  if (latest === undefined) return
+  if (latest.onPage) onSelect(latest.threadId)
+  else onResume(latest.threadId)
+}
+
+/**
+ * The current project (#876) — the thread on screen's, or behind the page; the first listed (the
+ * launch folder) while none is known — and the accordion that keeps it open. Until the projects
+ * are listed every thread is in no project: no arrival is read from that.
+ */
+function useCurrentProject(
+  groups: readonly ProjectGroup[],
+  activeThreadId: string | undefined,
+  listed: boolean,
+): { currentGroup: ProjectGroup | undefined; currentKey: string | undefined; opening: SectionOpening } {
+  const activeGroup = groups.find((group) => group.threads.some((thread) => thread.threadId === activeThreadId))
+  const currentGroup = activeGroup ?? groups[0]
+  const opening = useSectionOpening(activeGroup === undefined || !listed ? undefined : sectionKey(activeGroup))
+  return { currentGroup, currentKey: currentGroup === undefined ? undefined : sectionKey(currentGroup), opening }
+}
+
+/** The rail's top: the project switcher (#876), New Thread in the current project, and the search (#875). */
+function RailTop({
+  groups,
+  current,
+  search,
+  props: { projects, threads, earlier, onNew, onOpenProject, onSelect, onResume, onPage, fetch: fetchImpl },
+}: {
+  groups: readonly ProjectGroup[]
+  current: { group: ProjectGroup | undefined; key: string | undefined }
+  search: RailSearchState
+  props: ThreadsRailProps
+}): React.ReactNode {
+  return (
+    <div className="grid gap-2 p-3 pb-1">
+      <ProjectSwitcher
+        choices={switcherChoices(groups, { projects, pageThreads: threads, stored: earlier })}
+        currentKey={current.key}
+        onChoose={(key) => chooseProject(key, groups, { onOpenProject, onSelect, onResume })}
+        onPage={onPage}
+        fetch={fetchImpl}
+      />
+      <Button type="button" className="h-10 w-full" onClick={() => onNew(current.group?.project?.projectId)}>
+        <PlusIcon />
+        New Thread
+      </Button>
+      <RailSearch search={search} />
+    </div>
+  )
+}
+
+export function ThreadsRail(props: ThreadsRailProps): React.ReactNode {
+  const {
+    projects,
+    threads,
+    activeThreadId,
+    earlier,
+    earlierError,
+    openError,
+    onSelect,
+    onResume,
+    onNew,
+    onRemoveProject,
+    onProjectSettings,
+    projectNotice,
+    onPage,
+    page,
+    shownNarrow = false,
+    forkParents = NO_FORKS,
+  } = props
   const groups = groupByProject(projects, threads, earlier)
   const search = useRailSearch()
-  // New Thread starts where the reader is: the project of the thread on screen, or behind the page.
-  const activeProject = groups.find((group) => group.threads.some((thread) => thread.threadId === activeThreadId))
+  const { currentGroup, currentKey, opening } = useCurrentProject(groups, activeThreadId, projects.length > 0)
   return (
     <ForkParentsContext.Provider value={forkParents}>
       <nav
@@ -912,17 +1085,13 @@ export function ThreadsRail({
           shownNarrow ? 'flex w-full' : 'hidden',
         )}
       >
-        <div className="grid gap-2 p-3 pb-1">
-          <Button type="button" className="h-10 w-full" onClick={() => onNew(activeProject?.project?.projectId)}>
-            <PlusIcon />
-            New Thread
-          </Button>
-          <RailSearch search={search} />
-        </div>
+        <RailTop groups={groups} current={{ group: currentGroup, key: currentKey }} search={search} props={props} />
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-3 pt-2">
           <RailAlerts earlierError={earlierError} openError={openError} projectNotice={projectNotice} />
           <RailSections
             groups={groups}
+            currentKey={currentKey}
+            opening={opening}
             search={search}
             anyProjects={projects.length > 0}
             rows={{ activeThreadId: page === undefined ? activeThreadId : undefined, onSelect, onResume }}

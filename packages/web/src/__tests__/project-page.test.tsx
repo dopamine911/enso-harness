@@ -340,6 +340,7 @@ test('every project’s rail menu offers Project settings — the launch one too
         onSelect={noop}
         onResume={noop}
         onNew={noop}
+        onOpenProject={noop}
         onRemoveProject={noop}
         onProjectSettings={(projectId: string) => opened.push(projectId)}
         onPage={noop}
@@ -395,6 +396,7 @@ test('the rail’s Add project opens the Add project page (#872)', async () => {
         onSelect={noop}
         onResume={noop}
         onNew={noop}
+        onOpenProject={noop}
         onRemoveProject={noop}
         onProjectSettings={noop}
         onPage={(route: PageRoute) => pages.push(route)}

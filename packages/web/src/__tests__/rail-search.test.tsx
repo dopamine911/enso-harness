@@ -19,7 +19,7 @@ const { ThreadsRail }: typeof ThreadsRailModule = await import('../threads-rail.
  */
 
 afterAll(releaseDom)
-afterEach(() => globalThis.localStorage.removeItem('enso.rail.folded'))
+afterEach(() => globalThis.localStorage.removeItem('enso.rail.sections'))
 
 const tick = (): Promise<void> => {
   const { promise, resolve } = Promise.withResolvers<void>()
@@ -82,6 +82,7 @@ async function mountRail(
         onSelect={noop}
         onResume={noop}
         onNew={noop}
+        onOpenProject={noop}
         onRemoveProject={noop}
         onProjectSettings={noop}
         onPage={noop}
@@ -139,8 +140,8 @@ async function mountRail(
 }
 
 test('⚠ search finds threads in a section the reader folded and in a collapsed fold, case aside; the fold is kept for after (#875)', async () => {
-  // The app section folded by the reader, across reloads.
-  globalThis.localStorage.setItem('enso.rail.folded', JSON.stringify([APP.projectId]))
+  // The app section closed by the reader, across reloads (#876).
+  globalThis.localStorage.setItem('enso.rail.sections', JSON.stringify({ [APP.projectId]: false }))
   const mounted = await mountRail(
     [],
     [
@@ -220,8 +221,8 @@ test('a section closed during a search stays closed until the query changes (#87
   await mounted.type('fix the')
   expect(header().getAttribute('aria-expanded')).toBe('true')
   expect(mounted.rowTitles()).toEqual(['fix the login bug', 'fix the logout'])
-  // The reader's own fold was never touched.
-  expect(globalThis.localStorage.getItem('enso.rail.folded')).toBeNull()
+  // The reader's own open and closed were never touched.
+  expect(JSON.parse(globalThis.localStorage.getItem('enso.rail.sections') ?? '{}')).toEqual({})
   await mounted.unmount()
 })
 

@@ -484,6 +484,7 @@ test('the rail names the active thread, titles the untitled honestly, and marks 
       onSelect={noop}
       onResume={noop}
       onNew={noop}
+      onOpenProject={noop}
       onRemoveProject={noop}
       onProjectSettings={noop}
       onPage={noop}
@@ -532,32 +533,65 @@ function sectionOf(rendered: string, name: string): string {
   return rendered.slice(start, end < 0 ? undefined : end)
 }
 
+/**
+ * `render` under a browser storage holding the reader's open and closed sections (#876) — the
+ * static render has no DOM, so no storage of its own.
+ */
+function withSections<Result>(choices: Readonly<Record<string, boolean>>, render: () => Result): Result {
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
+  const kept = new Map<string, string>([['enso.rail.sections', JSON.stringify(choices)]])
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem: (key: string) => kept.get(key) ?? null,
+      setItem: (key: string, value: string) => kept.set(key, value),
+    },
+  })
+  try {
+    return render()
+  } finally {
+    if (original === undefined) Reflect.deleteProperty(globalThis, 'localStorage')
+    else Object.defineProperty(globalThis, 'localStorage', original)
+  }
+}
+
 test("each project is a section with its own threads — the page's open ones, then its stored ones — and a + that starts one there", () => {
   const now = pageClock.get()
-  const rendered = renderToStaticMarkup(
-    <ThreadsRail
-      projects={[LAUNCH, APP, GONE]}
-      // A thread minted before the page knew its projects has none: the server built it in the launch directory.
-      threads={[
-        { threadId: 'here', title: 'current', lastActivityAt: now, busy: false, waiting: false, projectId: undefined },
-      ]}
-      activeThreadId="here"
-      earlier={[
-        storedIn('p-launch', 'stored', {
-          title: 'resume me',
-          lastActivityAt: new Date(now.getTime() - 2 * 3_600_000).toISOString(),
-        }),
-        storedIn('p-app', 'elsewhere', { busy: true }),
-      ]}
-      earlierError={undefined}
-      onSelect={noop}
-      onResume={noop}
-      onNew={noop}
-      onRemoveProject={noop}
-      onProjectSettings={noop}
-      onPage={noop}
-      projectNotice={undefined}
-    />,
+  // The other projects opened by the reader: closed, a section draws no rows (#876).
+  const rendered = withSections({ 'p-app': true, 'p-gone': true }, () =>
+    renderToStaticMarkup(
+      <ThreadsRail
+        projects={[LAUNCH, APP, GONE]}
+        // A thread minted before the page knew its projects has none: the server built it in the launch directory.
+        threads={[
+          {
+            threadId: 'here',
+            title: 'current',
+            lastActivityAt: now,
+            busy: false,
+            waiting: false,
+            projectId: undefined,
+          },
+        ]}
+        activeThreadId="here"
+        earlier={[
+          storedIn('p-launch', 'stored', {
+            title: 'resume me',
+            lastActivityAt: new Date(now.getTime() - 2 * 3_600_000).toISOString(),
+          }),
+          storedIn('p-app', 'elsewhere', { busy: true }),
+        ]}
+        earlierError={undefined}
+        onSelect={noop}
+        onResume={noop}
+        onNew={noop}
+        onOpenProject={noop}
+        onRemoveProject={noop}
+        onProjectSettings={noop}
+        onPage={noop}
+        projectNotice={undefined}
+      />,
+    ),
   )
   const launch = sectionOf(rendered, 'enso')
   expect(launch.indexOf('current')).toBeLessThan(launch.indexOf('resume me'))
@@ -633,6 +667,7 @@ test('⚠ two prompts that start alike read apart on the rail — the words past
       onSelect={noop}
       onResume={noop}
       onNew={noop}
+      onOpenProject={noop}
       onRemoveProject={noop}
       onProjectSettings={noop}
       onPage={noop}
@@ -682,6 +717,7 @@ test('a fork says which thread it came from, by that thread’s title — a stor
       onSelect={noop}
       onResume={noop}
       onNew={noop}
+      onOpenProject={noop}
       onRemoveProject={noop}
       onProjectSettings={noop}
       onPage={noop}
@@ -693,7 +729,7 @@ test('a fork says which thread it came from, by that thread’s title — a stor
   expect(forkLines).toEqual(['the original', 'asked just now', UNLISTED_PARENT])
 })
 
-test('⚠ an open thread whose project is not listed is kept, under "other"; with no projects yet, every thread is still there', () => {
+test('⚠ an open thread whose project is not listed is kept, under "Not in a project"; with no projects yet, every thread is still there', () => {
   const now = pageClock.get()
   const orphan = {
     threadId: 'orphan',
@@ -711,19 +747,11 @@ test('⚠ an open thread whose project is not listed is kept, under "other"; wit
   ])
 })
 
-// A folded section hides the rows that would say it; its header says it instead — a question
-// waiting on you over a run in flight, since a thread parked on a question is still busy (PR #403 review).
-test('a folded section says a question is waiting in it, over a run in flight; unfolded, the row says it', () => {
+// A closed section hides the rows that would say it; its header says it instead — a question
+// waiting on you over a run in flight, since a thread parked on a question is still busy (PR #403
+// review) — with how many (#876).
+test('a closed section says how many questions wait in it, over the runs in flight; opened, the row says it', () => {
   const now = pageClock.get()
-  const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
-  const kept = new Map<string, string>([['enso.rail.folded', JSON.stringify([APP.projectId])]])
-  Object.defineProperty(globalThis, 'localStorage', {
-    configurable: true,
-    value: {
-      getItem: (key: string) => kept.get(key) ?? null,
-      setItem: (key: string, value: string) => kept.set(key, value),
-    },
-  })
   const rail = (threads: ThreadSummary[]): string =>
     renderToStaticMarkup(
       <ThreadsRail
@@ -735,6 +763,7 @@ test('a folded section says a question is waiting in it, over a run in flight; u
         onSelect={noop}
         onResume={noop}
         onNew={noop}
+        onOpenProject={noop}
         onRemoveProject={noop}
         onProjectSettings={noop}
         onPage={noop}
@@ -750,24 +779,23 @@ test('a folded section says a question is waiting in it, over a run in flight; u
     projectId: 'p-app',
   }
   const working = { ...asking, threadId: 'works', title: 'still working', waiting: false }
-  try {
-    const folded = sectionOf(rail([asking, working]), 'app')
-    expect(folded).not.toContain('asks first')
-    expect(folded).toContain('waiting on you')
-    expect(folded).not.toContain('running')
-    // Only a run in flight: the folded header says running.
-    const onlyRunning = sectionOf(rail([working]), 'app')
-    expect(onlyRunning).toContain('running')
-    expect(onlyRunning).not.toContain('waiting on you')
-    // Unfolded, the header says nothing; the row does.
-    kept.set('enso.rail.folded', '[]')
-    const open = sectionOf(rail([asking]), 'app')
-    expect(open).toContain('asks first')
-    expect(open.match(/waiting on you/g)).toHaveLength(1)
-  } finally {
-    if (original === undefined) Reflect.deleteProperty(globalThis, 'localStorage')
-    else Object.defineProperty(globalThis, 'localStorage', original)
-  }
+  // Not the current project: closed.
+  const closed = sectionOf(rail([asking, working]), 'app')
+  expect(closed).toContain('aria-expanded="false"')
+  expect(closed).not.toContain('asks first')
+  expect(closed).toContain('1 waiting on you')
+  expect(closed).not.toContain('running')
+  // Only runs in flight: the closed header says running, and how many.
+  const onlyRunning = sectionOf(rail([working, { ...working, threadId: 'works-too' }]), 'app')
+  expect(onlyRunning).toContain('2 running')
+  expect(onlyRunning).not.toContain('waiting on you')
+  // Opened, the header says nothing; the row does.
+  const opened = sectionOf(
+    withSections({ 'p-app': true }, () => rail([asking])),
+    'app',
+  )
+  expect(opened).toContain('asks first')
+  expect(opened.match(/waiting on you/g)).toHaveLength(1)
 })
 
 test('a section shows five stored threads and says how many more there are; a failed listing is an alert, not an empty rail', () => {
@@ -779,6 +807,7 @@ test('a section shows five stored threads and says how many more there are; a fa
     onSelect: noop,
     onResume: noop,
     onNew: noop,
+    onOpenProject: noop,
     onRemoveProject: noop,
     onProjectSettings: noop,
     onPage: noop,
@@ -901,6 +930,7 @@ test('⚠ a collapsed fold says a question waiting on you over a run in flight a
         onSelect={noop}
         onResume={noop}
         onNew={noop}
+        onOpenProject={noop}
         onRemoveProject={noop}
         onProjectSettings={noop}
         onPage={noop}
@@ -936,30 +966,34 @@ test('⚠ a collapsed fold says a question waiting on you over a run in flight a
 test('a section lists its threads under Today, Yesterday and Earlier, in that order, and only the days it has (#875)', () => {
   const now = pageClock.get()
   const day = 86_400_000
-  const rendered = renderToStaticMarkup(
-    <ThreadsRail
-      projects={[LAUNCH, APP]}
-      threads={[open('fresh', 'asked today', now)]}
-      activeThreadId="fresh"
-      earlier={[
-        storedIn('p-launch', 'old', {
-          title: 'asked last week',
-          lastActivityAt: new Date(now.getTime() - 7 * day).toISOString(),
-        }),
-        storedIn('p-app', 'app-old', {
-          title: 'an app thread',
-          lastActivityAt: new Date(now.getTime() - 7 * day).toISOString(),
-        }),
-      ]}
-      earlierError={undefined}
-      onSelect={noop}
-      onResume={noop}
-      onNew={noop}
-      onRemoveProject={noop}
-      onProjectSettings={noop}
-      onPage={noop}
-      projectNotice={undefined}
-    />,
+  // The other project opened by the reader (#876), so its days are drawn.
+  const rendered = withSections({ 'p-app': true }, () =>
+    renderToStaticMarkup(
+      <ThreadsRail
+        projects={[LAUNCH, APP]}
+        threads={[open('fresh', 'asked today', now)]}
+        activeThreadId="fresh"
+        earlier={[
+          storedIn('p-launch', 'old', {
+            title: 'asked last week',
+            lastActivityAt: new Date(now.getTime() - 7 * day).toISOString(),
+          }),
+          storedIn('p-app', 'app-old', {
+            title: 'an app thread',
+            lastActivityAt: new Date(now.getTime() - 7 * day).toISOString(),
+          }),
+        ]}
+        earlierError={undefined}
+        onSelect={noop}
+        onResume={noop}
+        onNew={noop}
+        onOpenProject={noop}
+        onRemoveProject={noop}
+        onProjectSettings={noop}
+        onPage={noop}
+        projectNotice={undefined}
+      />,
+    ),
   )
   const launch = sectionOf(rendered, 'enso')
   expect(launch.indexOf('>Today<')).toBeGreaterThan(-1)
@@ -1024,6 +1058,7 @@ test('every project has a menu, the launch directory too (#754); a refused remov
       onSelect={noop}
       onResume={noop}
       onNew={noop}
+      onOpenProject={noop}
       onRemoveProject={noop}
       onProjectSettings={noop}
       onPage={noop}

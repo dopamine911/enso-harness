@@ -12,9 +12,11 @@ export const SESSIONS_AND_PROJECTS: FeatureSpec = {
   title: 'Sessions and projects',
   landingTagline: 'where and how a run starts',
   shows: [
-    "A project is a folder pi works in. The rail lists your projects, and each project's threads under it. A new thread asks how to start: which model, how much effort, which permission mode, which system prompt, and the first prompt. They are applied together when you start.",
+    'A project is a folder pi works in. The rail lists your projects, each with its threads under it. A new thread asks how to start: which model, how much effort, which permission mode, which system prompt, and the first prompt. They are applied together when you start.',
+    "Each project in the rail opens and closes like an accordion. The **current** project (the project of the thread on screen, or behind the page) is open; the others are closed until you open one. Click a project's name to open or close it; the rail keeps what you chose for each project across reloads. A closed project never hides work: when any of its threads is waiting on you, its name shows the violet dot and how many are waiting; otherwise, when any is running, the running dot and how many are running. The signal goes as soon as you answer, or the run ends. Opening a thread of another project makes that project current: it opens, and the one you left goes back to closed unless you had opened it yourself.",
+    "At the very top of the rail is the project switcher, named for the current project. Its menu lists every project with its path and its trouble: **folder missing**, and **not trusted** (read as the menu opens). Threads in a project the server no longer lists are under **Not in a project**, with how many there are. The current project is checked. Choosing a project makes it current: it opens its most recent thread (or starts one when it has none), opens it in the rail, and **New Thread** then starts there. A project whose folder is gone and which holds no thread can't be chosen. **Add project…** opens the Add project page; **Manage projects** opens the Projects page. The menu works from the keyboard: **Enter** or the down arrow opens it, the arrow keys move, **Enter** chooses, **Escape** closes it.",
     "Inside a project, the rail lists threads under **Today**, **Yesterday** and **Earlier**, by when each was last active, in your browser's own day: Today starts at your local midnight. Within a day, threads that share a title fold into one row with a count (`×31`); click it to open the fold in place, and again to close it. A fold opens by itself when it holds the thread on screen. A closed fold never hides work: when one of its threads is running, or waiting on you, the fold's row shows that dot. A thread with a name of its own folds by that name; a draft, which has no title yet, never folds.",
-    '**Search threads**, at the top of the rail under **New Thread**, keeps only the threads whose title (or name) holds what you type, in any case, across every project. A project you folded opens while it holds a match, and goes back to how you left it when the search is cleared; a fold whose title matches shows with its count. When nothing matches, the rail says so, with **Clear search**. The × in the box (**clear search**), or **Escape**, empties it.',
+    '**Search threads**, at the top of the rail under **New Thread**, keeps only the threads whose title (or name) holds what you type, in any case, across every project, current or not. A closed project opens while it holds a match, and goes back to how you left it when the search is cleared; a fold whose title matches shows with its count. When nothing matches, the rail says so, with **Clear search**. The × in the box (**clear search**), or **Escape**, empties it.',
     "A thread you ran before is still there after a restart. Until you run it again it is *cold*: Enso reads it from pi's session file, and nothing is running.",
     "A thread is titled by its first prompt. Under the title, the header says what it runs with: its project, model and effort, the model marked `(recorded)` while the thread is cold, and left out until something has said it. Click the title, or choose **Rename** in the header's **thread actions** menu (⋯), and the title becomes a field: **Enter** saves a name of its own, which the rail and the header show and the thread keeps (pi's own session name, the one pi's `/name` sets); **Escape** leaves it as it was. When two prompts in a project start alike, the rail shows each from the words where they part (\"…Approach B: a parser\"), with the whole prompt as the row's hover.",
     'A new thread is **not started** until its first prompt: nothing of it is on the server yet, so it has no Context, Stats or Diff to show, and its **thread actions** menu offers **Discard draft** instead of a delete. A draft you leave with nothing typed in it (no words in the prompt box or the Start dialog, no image attached) is dropped from the rail when you open another thread, so unused drafts never pile up; one holding words stays.',
@@ -77,10 +79,17 @@ export const SESSIONS_AND_PROJECTS: FeatureSpec = {
       },
       marks: [
         {
+          target: { role: 'button', name: /Switch project$/ },
+          says: 'The project switcher: the current project, where **New Thread** starts. Its menu picks another.',
+        },
+        {
           target: { placeholder: 'Search threads' },
           says: '**Search threads**: keeps the threads whose title holds what you type, across every project.',
         },
-        { target: { text: DEMO_PROJECT, exact: true, within: RAIL }, says: 'The project, with its threads under it.' },
+        {
+          target: { role: 'button', name: DEMO_PROJECT, exact: true, within: { role: 'region', name: DEMO_PROJECT } },
+          says: 'The current project, open, with its threads under it. Another project is closed until you open it.',
+        },
         {
           target: { text: 'Today', exact: true, within: RAIL },
           says: '**Today**: the threads last active since your local midnight; **Yesterday** and **Earlier** follow.',

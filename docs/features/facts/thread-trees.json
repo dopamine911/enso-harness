@@ -4,9 +4,9 @@
     {
       "image": "thread-trees-status",
       "steps": ["open a thread from the rail"],
-      "shown": ["own tree, not your checkout", "enso/c18bb712-825f-446a-b9fb-e75162a5f33b"],
+      "shown": ["own tree, not your checkout", "enso/22e680a9-4900-4a18-92a2-21eca38d298e"],
       "measured": {
-        "branch": "enso/c18bb712-825f-446a-b9fb-e75162a5f33b"
+        "branch": "enso/22e680a9-4900-4a18-92a2-21eca38d298e"
       }
     },
     {

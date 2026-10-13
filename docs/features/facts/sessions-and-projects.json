@@ -11,6 +11,7 @@
       "image": "sessions-cold-thread",
       "steps": ["open a thread from the rail"],
       "shown": [
+        "shop-api",
         "Search threads",
         "shop-api",
         "Today",
