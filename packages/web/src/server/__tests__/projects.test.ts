@@ -40,17 +40,134 @@ test('⚠ nothing inside a hidden directory under a root can be a project', () =
   expect(projects.register({ path: join(root, 'app') })).toMatchObject({ kind: 'registered' })
 })
 
-test('with no roots declared, only the launch directory is a project, and registering says how to declare one — in the file actually read', () => {
-  const { launch, root } = layout()
-  // A scratch ENSO_HOME (#421): pointing at ~/.enso/config.json would send the fix to a file this server never reads.
-  const configPath = '/scratch/enso-home/config.json'
-  const projects = createProjectRegistry({ launchDirectory: launch, roots: [], configPath })
-  expect(projects.list()).toEqual([expect.objectContaining({ path: launch, launch: true, status: 'ok' })])
-  const refusal = projects.register({ path: root })
-  expect(refusal).toEqual({ kind: 'refused', reason: expect.stringContaining('"projects": { "roots"') })
-  expect(refusal).toEqual({ kind: 'refused', reason: expect.stringContaining(configPath) })
+/** A scratch home holding a launch folder, Enso's own home, and folders a person might add. */
+function homeLayout(): { home: string; launch: string; ensoHome: string } {
+  const home = realpathSync(mkdtempSync(join(tmpdir(), 'enso-home-')))
+  const launch = join(home, 'launch')
+  const ensoHome = join(home, 'enso-home')
+  mkdirSync(launch)
+  mkdirSync(join(ensoHome, 'projects'), { recursive: true })
+  return { home, launch, ensoHome }
+}
+
+// #866: with no roots declared, a page may add any folder by path, absolute or `~/` — and what an agent
+// must never be handed stays refused whatever the path says, a symlink into it included.
+test('⚠ with no roots declared, any folder registers by path, and the standing refusals hold: home, a folder holding it, ENSO_HOME, a hidden segment, a symlink into one (#866)', () => {
+  const { home, launch, ensoHome } = homeLayout()
+  const outside = realpathSync(mkdtempSync(join(tmpdir(), 'enso-elsewhere-')))
+  mkdirSync(join(home, 'work', 'app'), { recursive: true })
+  mkdirSync(join(home, '.ssh', 'keys'), { recursive: true })
+  symlinkSync(join(home, '.ssh', 'keys'), join(home, 'work', 'keys-link'))
+  symlinkSync(home, join(home, 'work', 'home-link'))
+  const projects = createProjectRegistry({ launchDirectory: launch, roots: [], homeDirectory: home, ensoHome })
+
+  expect(projects.register({ path: '~/work/app' })).toMatchObject({
+    kind: 'registered',
+    project: { path: join(home, 'work', 'app') },
+  })
+  expect(projects.register({ path: outside })).toMatchObject({ kind: 'registered', project: { path: outside } })
+  const refusals = [
+    [home, 'is your home folder or holds it'],
+    [dirname(home), 'is your home folder or holds it'],
+    ['/', 'is your home folder or holds it'],
+    [ensoHome, "Enso's own home"],
+    [join(ensoHome, 'projects'), "Enso's own home"],
+    [join(home, '.ssh', 'keys'), 'hidden directory (.ssh)'],
+    [join(home, 'work', 'keys-link'), 'hidden directory (.ssh)'],
+    [join(home, 'work', 'home-link'), 'is your home folder or holds it'],
+  ] as const
+  for (const [path, reason] of refusals) {
+    expect(projects.register({ path })).toEqual({ kind: 'refused', reason: expect.stringContaining(reason) })
+  }
   // Registering the launch directory is not a new project — it already is one.
   expect(projects.register({ path: launch })).toMatchObject({ kind: 'existing', project: { launch: true } })
+})
+
+test('with no roots declared, browsing starts at the home folder, takes a typed path anywhere the rule allows, and never goes up into a folder holding home (#866)', () => {
+  const { home, launch, ensoHome } = homeLayout()
+  const outside = realpathSync(mkdtempSync(join(tmpdir(), 'enso-elsewhere-')))
+  mkdirSync(join(home, 'work', 'app'), { recursive: true })
+  mkdirSync(join(home, '.config'))
+  mkdirSync(join(outside, 'proj'))
+  const projects = createProjectRegistry({ launchDirectory: launch, roots: [], homeDirectory: home, ensoHome })
+
+  expect(projects.browse(undefined, false)).toMatchObject({
+    kind: 'listing',
+    listing: { path: null, directories: [{ path: home }] },
+  })
+  // Home is where browsing starts, never a project; Enso's own home and hidden folders are not listed.
+  expect(projects.browse(home, false)).toEqual({
+    kind: 'listing',
+    listing: {
+      path: home,
+      parent: null,
+      registrable: false,
+      directories: [
+        { name: 'launch', path: launch, projectId: expect.any(String) },
+        { name: 'work', path: join(home, 'work') },
+      ],
+      truncated: false,
+    },
+  })
+  expect(projects.browse('~/work/app', false)).toMatchObject({
+    kind: 'listing',
+    listing: { path: join(home, 'work', 'app'), parent: join(home, 'work'), registrable: true },
+  })
+  expect(projects.browse(join(outside, 'proj'), false)).toMatchObject({
+    kind: 'listing',
+    listing: { path: join(outside, 'proj'), parent: outside, registrable: true },
+  })
+  // `outside` is home's sibling: up from it would be the folder holding home, so there is no up.
+  expect(projects.browse(outside, false)).toMatchObject({
+    kind: 'listing',
+    listing: { parent: null, registrable: true },
+  })
+  expect(projects.browse(dirname(home), false)).toEqual({
+    kind: 'refused',
+    reason: expect.stringContaining('is your home folder or holds it'),
+  })
+})
+
+// #866: "show hidden folders" lifts the hidden rule for the request that asks, never the standing
+// refusals. ⚠ Serving re-checks every stored project on each read: a project added this way must
+// stay served — after a restart too — though every request without the flag still refuses it.
+test('⚠ with hidden folders shown, a folder inside a hidden one is listed, registers and stays served; without the flag it is refused, and home and ENSO_HOME are refused either way (#866)', () => {
+  const { home, launch, ensoHome } = homeLayout()
+  const nvim = join(home, '.config', 'nvim')
+  mkdirSync(nvim, { recursive: true })
+  const options = {
+    launchDirectory: launch,
+    roots: [],
+    homeDirectory: home,
+    ensoHome,
+    statePath: join(ensoHome, 'projects.json'),
+  }
+  const projects = createProjectRegistry(options)
+
+  const config = { name: '.config', path: join(home, '.config') }
+  expect(projects.browse(home, false)).toMatchObject({ listing: { directories: expect.not.arrayContaining([config]) } })
+  expect(projects.browse(home, true)).toMatchObject({ listing: { directories: expect.arrayContaining([config]) } })
+  expect(projects.browse(nvim, false)).toMatchObject({ kind: 'refused' })
+  expect(projects.browse(nvim, true)).toMatchObject({ kind: 'listing', listing: { path: nvim, registrable: true } })
+
+  expect(projects.register({ path: '~/.config/nvim' })).toEqual({
+    kind: 'refused',
+    reason: expect.stringContaining('show hidden folders to add it'),
+  })
+  expect(projects.register({ path: '~/.config/nvim', hidden: true })).toMatchObject({
+    kind: 'registered',
+    project: { path: nvim },
+  })
+  expect(projects.list().map((project) => project.path)).toContain(nvim)
+  expect(
+    createProjectRegistry(options)
+      .list()
+      .map((project) => project.path),
+  ).toContain(nvim)
+
+  for (const path of [home, ensoHome]) {
+    expect(projects.register({ path, hidden: true })).toMatchObject({ kind: 'refused' })
+  }
 })
 
 // ⚠ #551: a thread on its own tree runs in a directory no one registered. The tree belongs to the
@@ -86,10 +203,15 @@ test('registrations outlive the process; a root taken out of the config hides it
   const restarted = createProjectRegistry({ launchDirectory: launch, roots: [root], statePath })
   expect(restarted.get(registered.project.projectId)).toMatchObject({ path: app, title: 'The app' })
 
-  const rootRemoved = createProjectRegistry({ launchDirectory: launch, roots: [], statePath })
-  expect(rootRemoved.get(registered.project.projectId)).toBeUndefined()
-  expect(rootRemoved.byDirectory(app)).toBeUndefined()
+  // Narrowed to another root, the fence hides the project without forgetting it. With no roots at all
+  // there is no fence (#866): the project is served again, as any folder the standing refusals allow.
+  const elsewhere = realpathSync(mkdtempSync(join(tmpdir(), 'enso-other-root-')))
+  const rootNarrowed = createProjectRegistry({ launchDirectory: launch, roots: [elsewhere], statePath })
+  expect(rootNarrowed.get(registered.project.projectId)).toBeUndefined()
+  expect(rootNarrowed.byDirectory(app)).toBeUndefined()
   expect(readFileSync(statePath, 'utf8')).toContain(app)
+  const noRoots = createProjectRegistry({ launchDirectory: launch, roots: [], statePath })
+  expect(noRoots.byDirectory(app)?.projectId).toBe(registered.project.projectId)
   const rootBack = createProjectRegistry({ launchDirectory: launch, roots: [root], statePath })
   expect(rootBack.byDirectory(app)?.projectId).toBe(registered.project.projectId)
 })
@@ -143,6 +265,9 @@ test('⚠ a directory any declared root accepts is registered, whatever order ne
       roots,
       statePath: `${statePath}.${roots[0] === sub}`,
     })
+    // PR #867 review: a page may add exactly what a registration takes — `sub` is a root it browses
+    // from AND a folder under `root`, so it is addable. (`main` said it was not, though `register` took it.)
+    expect(projects.browse(sub, false)).toMatchObject({ kind: 'listing', listing: { registrable: true } })
     expect(projects.register({ path: sub })).toMatchObject({ kind: 'registered', project: { path: sub } })
     expect(projects.register({ path: join(sub, 'app') })).toMatchObject({ kind: 'registered' })
   }
@@ -152,6 +277,7 @@ test('⚠ a directory any declared root accepts is registered, whatever order ne
     kind: 'refused',
     reason: expect.stringContaining('a project root itself'),
   })
+  expect(alone.browse(sub, false)).toMatchObject({ kind: 'listing', listing: { registrable: false } })
 })
 
 test('a directory merely NAMED `..something` under a root is inside it: refused as hidden, not as outside', () => {
@@ -190,7 +316,7 @@ test('⚠ browsing lists only directories a registration would take: resolved, i
   const app = projects.register({ path: join(root, 'app') })
   if (app.kind === 'refused') throw new Error(app.reason)
 
-  expect(projects.browse(undefined)).toEqual({
+  expect(projects.browse(undefined, false)).toEqual({
     kind: 'listing',
     listing: {
       path: null,
@@ -200,7 +326,7 @@ test('⚠ browsing lists only directories a registration would take: resolved, i
       truncated: false,
     },
   })
-  expect(projects.browse(root)).toEqual({
+  expect(projects.browse(root, false)).toEqual({
     kind: 'listing',
     listing: {
       path: root,
@@ -214,14 +340,19 @@ test('⚠ browsing lists only directories a registration would take: resolved, i
       truncated: false,
     },
   })
-  expect(projects.browse(join(root, 'app'))).toMatchObject({
+  expect(projects.browse(join(root, 'app'), false)).toMatchObject({
     kind: 'listing',
     listing: { parent: root, registrable: true, directories: [{ name: 'src' }] },
   })
-  expect(projects.browse(outside)).toEqual({
+  expect(projects.browse(outside, false)).toEqual({
     kind: 'refused',
     reason: expect.stringContaining('not under a declared project root'),
   })
+  // #866: hidden folders shown, `.cache` under the root is listed — and the roots' fence still holds.
+  expect(projects.browse(root, true)).toMatchObject({
+    listing: { directories: expect.arrayContaining([{ name: '.cache', path: join(root, '.cache') }]) },
+  })
+  expect(projects.browse(outside, true)).toMatchObject({ kind: 'refused' })
 })
 
 // PR #401 review: a directory can be searchable and not readable (`--x`) — `realpath` and `stat`
@@ -234,7 +365,10 @@ test('⚠ browsing a directory the server may enter but not read is a refusal sa
   chmodSync(locked, 0o100)
   try {
     const projects = createProjectRegistry({ launchDirectory: launch, roots: [root] })
-    expect(projects.browse(locked)).toEqual({ kind: 'refused', reason: `cannot read ${locked} — permission denied` })
+    expect(projects.browse(locked, false)).toEqual({
+      kind: 'refused',
+      reason: `cannot read ${locked} — permission denied`,
+    })
   } finally {
     chmodSync(locked, 0o700)
   }

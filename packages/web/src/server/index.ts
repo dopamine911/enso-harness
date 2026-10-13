@@ -52,14 +52,16 @@ export interface EnsoServerOptions {
   /**
    * The launch directory: the first project (#395), where a thread nobody named a project for
    * runs. With no sandbox (#24) a session's directory IS its blast radius, so this comes from the
-   * launcher's own arguments, never from a request — and every other project must sit under one
-   * of `projectRoots`, which also come from the user's config (`ENSO_HOME/config.json`), not the page.
+   * launcher's own arguments, never from a request. Every other project is one the person added
+   * from Enso's own page, after a confirmation that says what an agent there can reach (#866).
    */
   cwd: string
-  /** `projects.roots` from the user's config: where a page may register projects. None means the launch directory only. */
+  /** `projects.roots` from the user's config: an optional fence a page's projects must sit under (#866). None means any folder the standing refusals allow. */
   projectRoots?: Readonly<EnsoProjectsConfig['roots']>
-  /** The config file `projectRoots` came from, named when a refusal says to declare a root. */
+  /** The config file `projectRoots` came from, named when a refusal points at a root. */
   projectsConfigPath?: string
+  /** Enso's own home (`ENSO_HOME`, #421): never a project, nor anything under it (#866); absent (tests), no such refusal. */
+  ensoHome?: string
   /** Where registrations are kept (`.enso/projects.json`); absent, they last as long as the process (tests). */
   projectsStatePath?: string
   /** The prompt library's directory (`ENSO_HOME/prompts`, #443); absent, the server has none and says so. */
@@ -184,6 +186,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     ...(options.projectsConfigPath === undefined ? {} : { configPath: options.projectsConfigPath }),
     ...(options.projectsStatePath === undefined ? {} : { statePath: options.projectsStatePath }),
     ...(options.projectsDir === undefined ? {} : { projectsDir: options.projectsDir }),
+    ...(options.ensoHome === undefined ? {} : { ensoHome: options.ensoHome }),
   })
   const servesDirectory = (directory: string): boolean => projects.byDirectory(directory) !== undefined
   const host: AgentHost =

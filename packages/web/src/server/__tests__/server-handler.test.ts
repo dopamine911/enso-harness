@@ -1759,6 +1759,16 @@ test('⚠ a page on another loopback port cannot escalate, prompt, answer or rea
   }
   // The mode change acquires: a session here would be proof the escalation went through.
   expect(built.length).toBe(0)
+  // #866: registering a folder sets what an agent can reach, and no root fences it any more, so a
+  // foreign page is refused here as on every route — and nothing is registered.
+  const elsewhere = realpathSync(mkdtempSync(join(tmpdir(), 'enso-elsewhere-')))
+  const foreignRegister = await fetch(`${url}/api/projects`, {
+    method: 'POST',
+    headers: otherPort,
+    body: JSON.stringify({ path: elsewhere }),
+  })
+  expect(foreignRegister.status).toBe(403)
+  expect(await (await fetch(`${url}/api/projects`)).json()).toHaveLength(1)
   // Reading is refused the same way to another site, its Origin absent as on a no-cors GET.
   expect((await fetch(`${url}/api/about`, { headers: { 'Sec-Fetch-Site': 'cross-site' } })).status).toBe(403)
 
@@ -1767,6 +1777,13 @@ test('⚠ a page on another loopback port cannot escalate, prompt, answer or rea
   expect((await fetch(`${url}/api/about`, { headers: ownPage })).status).toBe(200)
   expect((await fetch(`${url}/api/about`, { headers: { 'Sec-Fetch-Site': 'none' } })).status).toBe(200)
   expect((await fetch(`${url}/api/about`, { headers: { Origin: 'http://localhost:5178' } })).status).toBe(200)
+  // Enso's own page registers a folder with no root declared (#866): a fresh install needs no config.
+  const ownRegister = await fetch(`${url}/api/projects`, {
+    method: 'POST',
+    headers: { ...ownPage, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: elsewhere }),
+  })
+  expect(ownRegister.status).toBe(201)
 })
 
 // #754: a failed setup is shown on the thread with its output — the tree route carries what the

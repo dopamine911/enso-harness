@@ -55,7 +55,7 @@ if (config.kind === 'unreadable') {
   throw new Error(`enso-server: ${configPath}: ${config.reason}`)
 }
 if (configText === undefined) {
-  log.info('no {configPath}: the defaults — no project roots, an empty web_fetch allowlist', { configPath })
+  log.info('no {configPath}: the defaults — projects added from the page, an empty web_fetch allowlist', { configPath })
 }
 // Trees became the default (#551 decision 1): said at every launch that relies on it, since an
 // upgrade changes where a new thread's edits land with nothing in the user's own file saying so.
@@ -75,6 +75,7 @@ const { listening } = startEnsoServer({
   cwd,
   projectRoots,
   projectsConfigPath: configPath,
+  ensoHome: home,
   // The replayed risk is measured as the guard measures it (#466): the user's thresholds.
   riskThresholds: incidentPolicyOf(config.config.security).thresholds,
   projectsStatePath: ensoProjectsPath(home),

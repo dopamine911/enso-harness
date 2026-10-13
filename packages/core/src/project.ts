@@ -7,17 +7,16 @@ import type { EnsoTranscriptEntry } from './transcript.ts'
  * Projects (#395): the local directories one Enso server runs threads in.
  *
  * ⚠ THE BROWSER NAMES A PROJECT BY ID, NEVER BY PATH, once it is registered. With no sandbox
- * (#24) the directory a session runs in IS its blast radius, so which directories can be
- * projects is bounded by the INSTALL: the launch directory, and directories strictly under a
- * root the user's config declares (`projects.roots`). Registering one is the only request
- * that carries a path, and the server resolves it (`realpath`) before checking it against
- * the roots.
+ * (#24) the directory a session runs in IS its blast radius, so the person chooses it in Enso's own
+ * page, after a confirmation that says so (#866). Registering one is the only request that carries
+ * a path, and the server resolves it (`realpath`) before checking it: never the home folder or one
+ * holding it, never `ENSO_HOME`, never a hidden directory, and under a declared root when any are.
  */
 
 /**
- * The `projects` section of the user's config (`ENSO_HOME/config.json`): the roots a page may register projects
- * under. Absolute, or `~/`-relative to the home directory of whoever runs the server. Absent
- * (or empty) means the launch directory is the only project.
+ * The `projects` section of the user's config (`ENSO_HOME/config.json`): roots that FENCE the projects a
+ * page may register (#866: optional). Absolute, or `~/`-relative to the home directory of whoever runs
+ * the server. Absent (or empty): no fence — any folder the standing refusals allow.
  *
  * @group Projects
  */
@@ -72,7 +71,7 @@ export const EnsoProject = Type.Object(
 export type EnsoProject = Static<typeof EnsoProject>
 
 /**
- * `POST /api/projects`: register a directory under a declared root.
+ * `POST /api/projects`: register a directory by path — absolute or `~/` — the server resolves and checks.
  *
  * @group Projects
  */
@@ -80,6 +79,11 @@ export const EnsoProjectRegistration = Type.Object(
   {
     path: Type.String({ minLength: 1 }),
     title: Type.Optional(Type.String({ minLength: 1 })),
+    /**
+     * The person asked to see hidden folders (#866): a folder inside a hidden directory may be
+     * registered. The home folder, a folder holding it, and `ENSO_HOME` are refused regardless.
+     */
+    hidden: Type.Optional(Type.Boolean()),
   },
   { additionalProperties: false },
 )
@@ -107,8 +111,8 @@ export const EnsoProjectsState = Type.Object(
 export type EnsoProjectsState = Static<typeof EnsoProjectsState>
 
 /**
- * One directory a page may browse into while adding a project (#395): only directories inside a
- * declared root appear, resolved (a symlink that leads out is left out), never a hidden one.
+ * One directory a page may browse into while adding a project (#395, #866): only directories a
+ * registration would take appear, resolved (a symlink that leads elsewhere is checked where it leads), hidden ones only on request.
  *
  * @group Projects
  */
@@ -126,18 +130,18 @@ export const EnsoDirectoryEntry = Type.Object(
 export type EnsoDirectoryEntry = Static<typeof EnsoDirectoryEntry>
 
 /**
- * `GET /api/projects/browse[?path=…]`: the declared roots (no `path`), or one directory inside them
- * and the directories under it.
+ * `GET /api/projects/browse[?path=…][&hidden=1]`: where browsing starts (no `path`) — the declared roots,
+ * else the home folder — or one directory (absolute or `~/`) and the directories under it; hidden ones with `hidden=1`.
  *
  * @group Projects
  */
 export const EnsoDirectoryListing = Type.Object(
   {
-    /** The directory listed; `null` for the list of roots. */
+    /** The directory listed; `null` for where browsing starts. */
     path: Type.Union([Type.String(), Type.Null()]),
-    /** Where "up" goes: the directory above while it is inside a root; `null` at a root (up is the list of roots). */
+    /** Where "up" goes: the directory above while a page may browse it; `null` at a start (up is the start) or where up would leave what may be browsed. */
     parent: Type.Union([Type.String(), Type.Null()]),
-    /** This directory may be added — strictly under a root; a root itself is not. */
+    /** This directory may be added; a starting folder itself is not. */
     registrable: Type.Boolean(),
     directories: Type.Array(EnsoDirectoryEntry),
     /** More directories than a listing holds were there; the first ones by name are listed. */

@@ -24,15 +24,30 @@ import { projectIdOf, realpathOrSelf, treeProjectId } from '@enso/core/paths'
 import { Compile } from 'typebox/compile'
 
 /**
- * The projects one server runs threads in (#395).
+ * The projects one server runs threads in (#395, #866).
  *
- * ⚠ THE BLAST RADIUS IS STILL CHOSEN OUTSIDE THE BROWSER. With no sandbox (#24) a session's
- * directory is what it can reach, so the directories that can be projects are the launch
- * directory and directories STRICTLY UNDER a root the install declares (`projects.roots` in
- * the user's config, `ENSO_HOME/config.json`). A page registers one by path — the only request that carries a path —
- * and every request after names it by id. The path is resolved (`realpath`) BEFORE it is
- * checked, so a symlink under a root cannot lead out of it, and no segment below the root may be
- * hidden (`.ssh`, `.config`, `.enso` — dot-directories hold credentials and config, not projects).
+ * ⚠ THE PERSON CHOOSES THE BLAST RADIUS, IN THE PAGE, WITH THE STAKES SAID (#866). With no sandbox
+ * (#24, #397) a session's directory is what it can reach. A page registers a project by path — the
+ * only request that carries a path — and every request after names it by id. Only Enso's own page
+ * can make that request: the server refuses every browser that is not (#717, `index.ts`
+ * `fromTrustedOrigin`), and the page asks the person to confirm what an agent there can reach.
+ * #395 kept the choice outside the browser because any page reaching the origin could have made it;
+ * #717 closed that, and #866 moved the choice back to the person. An allowed command on the machine
+ * can reach this route too, as it can every route, and gains nothing it did not already have (#866).
+ *
+ * What can never be a project, whatever is declared (`standingRefusal`): the home folder, or any
+ * folder holding it (`/` among them); and Enso's own home (`ENSO_HOME`) and anything under it. The
+ * path is resolved (`realpath`) BEFORE it is checked, so a symlink cannot lead anywhere the check did
+ * not see.
+ *
+ * A directory with a hidden segment (`.ssh`, `.config`) is refused while CHOOSING unless the page
+ * asks to see hidden folders (#866: the person's toggle). It guards against a misclick, not an
+ * agent: with no sandbox, an agent in any project can already read `~/.ssh`. So it is not applied
+ * when SERVING — a stored hidden project got there by that opt-in.
+ *
+ * Roots are OPTIONAL. Declared (`projects.roots` in `ENSO_HOME/config.json`), they fence: a project
+ * must be STRICTLY UNDER one, as #395 had it. None declared, the page browses from the home folder and
+ * may name any other folder by path.
  *
  * A project's id is derived from its canonical path: the same directory is always the same
  * project, across restarts, with nothing stored to keep it so. Registrations are server state in
@@ -55,7 +70,10 @@ type Registration = EnsoProjectsState['projects'][number]
 export interface ProjectRegistryOptions {
   /** The directory the server was launched in: the first project, never removable. */
   readonly launchDirectory: string
-  /** `projects.roots` from the user's config (`ENSO_HOME/config.json`), as written: absolute or `~/`. */
+  /**
+   * `projects.roots` from the user's config (`ENSO_HOME/config.json`), as written: absolute or `~/`.
+   * Optional (#866): declared, a project must be under one; none, any folder the standing refusals allow.
+   */
   readonly roots: readonly string[]
   /**
    * The config file those roots were read from — named in every message that says to edit it, so
@@ -65,8 +83,10 @@ export interface ProjectRegistryOptions {
   readonly configPath?: string
   /** `ENSO_HOME/projects.json` (`ensoProjectsPath`); absent, registrations live in memory only (tests). */
   readonly statePath?: string
-  /** Where `~/` points; the running user's home unless a test says otherwise. */
+  /** Where `~/` points, and the folder no project may be or hold; the running user's home unless a test says otherwise. */
   readonly homeDirectory?: string
+  /** Enso's own home (`ENSO_HOME`, #421): never a project, nor anything under it (#866). Absent (tests): no such refusal. */
+  readonly ensoHome?: string
   /**
    * The project folders (`ENSO_HOME/projects`, #552): a directory under `<id>/trees/` is a thread's
    * own tree (#551) and resolves to project `<id>`. Absent, no directory is a tree (tests).
@@ -104,13 +124,14 @@ export interface ProjectRegistry {
   get(projectId: string): EnsoProject | undefined
   /** The project whose directory this is, by canonical path; `undefined` for a directory that is no project. */
   byDirectory(directory: string): EnsoProject | undefined
+  /** `hidden` (#866): the person asked to see hidden folders, so one inside a hidden directory may be registered. */
   register(request: EnsoProjectRegistration): ProjectRegistrationOutcome
   /**
-   * What a page may browse while adding a project: the declared roots (no `path`), or one directory
-   * inside them and the directories under it — each resolved and checked as a registration is, so a
-   * symlink that leads out of the roots and every hidden directory are left out.
+   * What a page may browse while adding a project: where browsing starts (no `path`) — the declared
+   * roots, else the home folder — or one directory and the directories under it, each resolved and
+   * checked as a registration is. Hidden directories are left out unless `hidden` (#866).
    */
-  browse(path: string | undefined): ProjectBrowseOutcome
+  browse(path: string | undefined, hidden: boolean): ProjectBrowseOutcome
   remove(projectId: string): ProjectRemovalOutcome
   /**
    * A page names the project of a thread (`X-Enso-Project`). The first name a thread gets is
@@ -203,9 +224,33 @@ function writeRegistrations(statePath: string, registrations: readonly Registrat
   renameSync(staging, statePath)
 }
 
+/** Whether `candidate` is `parent` itself or lies under it. A directory merely NAMED `..foo` lies under it. */
+function isWithin(parent: string, candidate: string): boolean {
+  const below = relative(parent, candidate)
+  return !(below === '..' || below.startsWith(`..${pathSeparator}`) || isAbsolute(below))
+}
+
+/** The first hidden segment of `path`'s segments, or `undefined` when none is hidden. */
+function hiddenSegmentOf(path: string): string | undefined {
+  return path.split(pathSeparator).find((segment) => segment.startsWith('.'))
+}
+
 /**
- * Why a canonical directory may not be registered under these roots, or `undefined` when it may.
- * Strictly under one root, and no segment below that root hidden.
+ * Why a canonical directory can never be a project, whatever roots are declared (#866), or
+ * `undefined`: the home folder or one holding it (an agent there reaches every file the person
+ * has), and Enso's own home or anything under it (its logs, sessions and credentials).
+ */
+function standingRefusal(canonical: string, home: string, ensoHome: string | undefined): string | undefined {
+  if (isWithin(canonical, home)) return `${canonical} is your home folder or holds it; choose a folder inside it`
+  if (ensoHome !== undefined && isWithin(ensoHome, canonical)) {
+    return `${canonical} is Enso's own home (ENSO_HOME) or inside it; choose a folder outside it`
+  }
+  return undefined
+}
+
+/**
+ * Why a canonical directory may not be registered under these declared roots, or `undefined` when
+ * it may. Strictly under one root, and — unless `hidden` is allowed — no segment below that root hidden.
  *
  * ⚠ ANY root that accepts it is enough, whatever the order: roots may nest
  * (`~/code` and `~/code/sub`), and `~/code/sub` itself is under the first even though it is the
@@ -215,27 +260,27 @@ function refusalUnderRoots(
   canonical: string,
   roots: readonly string[],
   declared: readonly string[],
-  configPath: string,
+  hidden: boolean,
 ): string | undefined {
-  if (roots.length === 0) {
-    return `no project roots are declared — add \`"projects": { "roots": ["~/code"] }\` to ${configPath}`
-  }
   let refusal: string | undefined
   for (const root of roots) {
+    if (!isWithin(root, canonical)) continue
     const below = relative(root, canonical)
-    // Outside this root: `..` itself or a `../` prefix — not a directory merely NAMED `..foo`.
-    if (below === '..' || below.startsWith(`..${pathSeparator}`) || isAbsolute(below)) continue
-    const hidden = below.split(pathSeparator).find((segment) => segment.startsWith('.'))
+    const hiddenSegment = hidden ? undefined : hiddenSegmentOf(below)
     if (below === '') refusal ??= `${canonical} is a project root itself; register a directory under it`
-    else if (hidden !== undefined) {
-      refusal ??= `${canonical} is inside a hidden directory (${hidden}), which cannot be a project`
-    } else return undefined
+    else if (hiddenSegment !== undefined) refusal ??= hiddenRefusal(canonical, hiddenSegment)
+    else return undefined
   }
   return refusal ?? `${canonical} is not under a declared project root (${declared.join(', ')})`
 }
 
+function hiddenRefusal(canonical: string, segment: string): string {
+  return `${canonical} is inside a hidden directory (${segment}); show hidden folders to add it`
+}
+
 export function createProjectRegistry(options: ProjectRegistryOptions): ProjectRegistry {
-  const home = options.homeDirectory ?? homedir()
+  const home = realpathOrSelf(options.homeDirectory ?? homedir())
+  const ensoHome = options.ensoHome === undefined ? undefined : realpathOrSelf(options.ensoHome)
   const configPath = options.configPath ?? 'ENSO_HOME/config.json'
   // ⚠ A relative root would resolve against this PROCESS's cwd, not the launch directory (PR #399
   // review) — a boundary nobody wrote down. Refused here, failing the launch, as an unreadable
@@ -247,22 +292,34 @@ export function createProjectRegistry(options: ProjectRegistryOptions): ProjectR
     }
     return realpathOrSelf(expanded)
   })
+  // With no roots declared, browsing starts at the home folder (#866): the one place a page lists from.
+  const browseRoots = roots.length > 0 ? roots : [home]
   const launchPath = realpathOrSelf(options.launchDirectory)
   const launch = { projectId: projectIdOf(launchPath), path: launchPath, title: basename(launchPath) || launchPath }
-  // ⚠ The roots are applied to what the state file holds on every read, not once: a root taken out
+  // ⚠ The rule is applied to what the state file holds on every read, not once: a root taken out
   // of the config takes its projects with it. The file keeps them, so putting the root back
   // restores them — which is why `stored` is written back whole and only `served()` is filtered.
   let stored: Registration[] = options.statePath === undefined ? [] : readRegistrations(options.statePath)
   for (const registration of stored) {
-    const refusal = refusalUnderRoots(registration.path, roots, options.roots, configPath)
+    const refusal = refusalOf(registration.path, true)
     if (refusal !== undefined) log.warn('registered project not served: {reason}', { reason: refusal })
+  }
+
+  /**
+   * Why `canonical` may not be a project here (#866): a standing refusal first, then the roots' fence
+   * when any are declared, else — unless `hidden` is allowed — a hidden segment anywhere in it.
+   */
+  function refusalOf(canonical: string, hidden: boolean): string | undefined {
+    const standing = standingRefusal(canonical, home, ensoHome)
+    if (standing !== undefined) return standing
+    if (roots.length > 0) return refusalUnderRoots(canonical, roots, options.roots, hidden)
+    const hiddenSegment = hidden ? undefined : hiddenSegmentOf(canonical)
+    return hiddenSegment === undefined ? undefined : hiddenRefusal(canonical, hiddenSegment)
   }
 
   function served(): Registration[] {
     return stored.filter(
-      (registration) =>
-        registration.path !== launch.path &&
-        refusalUnderRoots(registration.path, roots, options.roots, configPath) === undefined,
+      (registration) => registration.path !== launch.path && refusalOf(registration.path, true) === undefined,
     )
   }
 
@@ -314,11 +371,11 @@ export function createProjectRegistry(options: ProjectRegistryOptions): ProjectR
   }
 
   function register(request: EnsoProjectRegistration): ProjectRegistrationOutcome {
-    const resolved = canonicalDirectory(request.path)
+    const resolved = canonicalDirectory(expandHome(request.path, home))
     if (typeof resolved !== 'string') return resolved
     const canonical = resolved
     if (canonical === launch.path) return { kind: 'existing', project: viewOf(launch.path, launch.title, true) }
-    const refusal = refusalUnderRoots(canonical, roots, options.roots, configPath)
+    const refusal = refusalOf(canonical, request.hidden === true)
     if (refusal !== undefined) return { kind: 'refused', reason: refusal }
     const existing = served().find((registration) => registration.path === canonical)
     if (existing !== undefined) return { kind: 'existing', project: viewOf(existing.path, existing.title, false) }
@@ -329,9 +386,9 @@ export function createProjectRegistry(options: ProjectRegistryOptions): ProjectR
     return { kind: 'registered', project: viewOf(canonical, request.title, false) }
   }
 
-  function browse(path: string | undefined): ProjectBrowseOutcome {
+  function browse(path: string | undefined, hidden: boolean): ProjectBrowseOutcome {
     if (path === undefined) {
-      const existing = roots.filter(isDirectory)
+      const existing = browseRoots.filter(isDirectory)
       return {
         kind: 'listing',
         listing: listingOf(
@@ -342,29 +399,32 @@ export function createProjectRegistry(options: ProjectRegistryOptions): ProjectR
         ),
       }
     }
-    const resolved = canonicalDirectory(path)
+    const resolved = canonicalDirectory(expandHome(path, home))
     if (typeof resolved !== 'string') return resolved
-    const isRoot = roots.includes(resolved)
-    if (!isRoot) {
-      const refusal = refusalUnderRoots(resolved, roots, options.roots, configPath)
-      if (refusal !== undefined) return { kind: 'refused', reason: refusal }
-    }
-    const children = childDirectories(resolved)
+    const isRoot = browseRoots.includes(resolved)
+    const refusal = refusalOf(resolved, hidden)
+    if (!isRoot && refusal !== undefined) return { kind: 'refused', reason: refusal }
+    const children = childDirectories(resolved, hidden)
     if (!Array.isArray(children)) return children
+    // "Up" goes where a page may browse: a root, or a directory the rule would take — never into `/`.
+    const above = dirname(resolved)
+    const upAllowed =
+      !isRoot && above !== resolved && (browseRoots.includes(above) || refusalOf(above, hidden) === undefined)
     return {
       kind: 'listing',
-      listing: listingOf(resolved, isRoot ? null : dirname(resolved), !isRoot, children),
+      listing: listingOf(resolved, upAllowed ? above : null, refusal === undefined, children),
     }
   }
 
   /**
-   * The directories under `directory` a page may browse into: resolved, inside a root, not hidden.
+   * The directories under `directory` a page may browse into: resolved, and taken by the rule a registration is.
    * ⚠ A directory can be searchable and not readable (`--x`): `realpath` and `stat` pass, the listing
    * throws, and an unhandled throw takes the server down. That is a refusal saying so, not an empty
    * list, which would read as "no folders here". Each child is only resolved and stat'ed, never read.
    */
   function childDirectories(
     directory: string,
+    hidden: boolean,
   ): EnsoDirectoryEntry[] | { readonly kind: 'refused'; readonly reason: string } {
     let listed: Dirent[]
     try {
@@ -378,10 +438,9 @@ export function createProjectRegistry(options: ProjectRegistryOptions): ProjectR
     }
     const entries: EnsoDirectoryEntry[] = []
     for (const child of listed) {
-      if (child.name.startsWith('.') || !(child.isDirectory() || child.isSymbolicLink())) continue
+      if ((!hidden && child.name.startsWith('.')) || !(child.isDirectory() || child.isSymbolicLink())) continue
       const canonical = realpathOrSelf(join(directory, child.name))
-      if (!isDirectory(canonical) || refusalUnderRoots(canonical, roots, options.roots, configPath) !== undefined)
-        continue
+      if (!isDirectory(canonical) || refusalOf(canonical, hidden) !== undefined) continue
       entries.push(entryOf(canonical, child.name))
     }
     return entries.toSorted((left, right) => left.name.localeCompare(right.name))
