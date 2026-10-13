@@ -664,7 +664,9 @@ export function createGuardSession(runtime: GuardRuntime, dependencies: GuardSes
       return
     }
     const refusal = decide(canonicalToolName(question.toolName), inputRecordOf(question.input), question.cwd)
-    question.answer(refusal === undefined ? undefined : { rule: refusal.rule, reason: refusal.reason })
+    question.answer(
+      refusal === undefined ? undefined : { rule: refusal.rule, cause: refusal.cause, reason: refusal.reason },
+    )
   }
   runtime.on(ENSO_GUARD_CHECK_CHANNEL, answerCheck)
 

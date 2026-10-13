@@ -85,16 +85,20 @@ export function pathArgumentOf(input: unknown): string | undefined {
 }
 
 /**
- * A refusal as this guard produces it: the runtime's `{ block, reason, terminate? }` plus the RULE
- * that refused (#144 slice 4). The rule is what the denial record carries and what a day's stats
- * count by; the reason is prose for the model. Stripped back to the runtime's shape by its glue, so
- * the runtime is handed exactly the contract it published and nothing of ours rides on it.
+ * A refusal as this guard produces it: the runtime's `{ block, reason, terminate? }` plus two of
+ * ours: the RULE that refused (#144 slice 4), which the denial record carries and a day's stats count
+ * by, and the CAUSE, the refusal without the ask line addressed to the model, which a person reads
+ * (#881). The reason is prose for the model. Both of ours are stripped back to the runtime's shape by
+ * its glue, so the runtime is handed exactly the contract it published and nothing of ours rides on it.
  *
  * @group Guard predicates
  */
 export interface GuardDenial {
   readonly block: true
+  /** What the model is told: the cause, then the ask line its rule's kind adds, if any. */
   readonly reason: string
+  /** The refusal itself, without the ask line addressed to the model: what a person reads (#881). */
+  readonly cause: string
   readonly rule: EnsoGuardRule
   /** An authorization refusal ends the turn (#465): pi stops once every call of the batch set it. */
   readonly terminate?: true
@@ -145,6 +149,7 @@ export function deny(rule: EnsoGuardRule, reason: string, egress?: GuardDenial['
   return {
     block: true,
     reason: askLine === undefined ? reason : `${reason}\n\n${askLine}`,
+    cause: reason,
     rule,
     ...(kind === 'authorization' || kind === 'suspension' ? { terminate: true } : {}),
     ...(egress === undefined ? {} : { egress }),

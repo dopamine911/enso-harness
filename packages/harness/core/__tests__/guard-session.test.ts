@@ -182,7 +182,11 @@ test("⚠ a check on the runtime's bus answers what the call would now, from the
 
   // A write over a file the session has not read is refused, as its call is; nothing is recorded.
   const unread = checked(runtime, 'write', { path: file })
-  expect(unread).toEqual({ rule: 'read-before-write', reason: expect.stringContaining('has not read it') })
+  expect(unread).toEqual({
+    rule: 'read-before-write',
+    cause: expect.stringContaining('has not read it'),
+    reason: expect.stringContaining('has not read it'),
+  })
   expect(checked(runtime, 'Bash', { command: 'ls' })).toBeUndefined()
   expect(runtime.appended).toEqual([])
   if (typeof unread !== 'object') throw new Error('expected a refusal')
@@ -232,7 +236,11 @@ function expectAllowed(toolName: string, input: Record<string, unknown>, cwd: st
 
 function expectSecretRead(toolName: string, input: Record<string, unknown>, cwd: string, naming: string): void {
   const { check, call: outcome } = checkThenCall(toolName, input, cwd)
-  expect(check).toEqual({ rule: 'secret-read', reason: expect.stringContaining(naming) })
+  expect(check).toEqual({
+    rule: 'secret-read',
+    cause: expect.stringContaining(naming),
+    reason: expect.stringContaining(naming),
+  })
   if (typeof check !== 'object') throw new Error('expected a refusal')
   expect(outcome).toMatchObject({ kind: 'refused', reason: check.reason })
 }

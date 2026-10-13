@@ -1080,7 +1080,14 @@ test('⚠ Try a command: a guard refuses `cat ~/.ssh/id_ed25519` in every mode, 
       verdict: expect.objectContaining({
         mode,
         // The bash analyzer refuses it first (the guard's first shell deny); `secret-path` is behind it.
-        guard: { kind: 'refused', tool: 'bash', rule: 'cc-safety-net', reason: expect.stringContaining('ssh') },
+        // What a person reads is the cause; what pi is told adds the ask line its rule's kind carries.
+        guard: {
+          kind: 'refused',
+          tool: 'bash',
+          rule: 'cc-safety-net',
+          cause: expect.not.stringContaining('ask_user'),
+          reason: expect.stringContaining('ask_user'),
+        },
       }),
     })
     // A command no guard touches: the engine's own answer, field for field, beside the guards' pass.
