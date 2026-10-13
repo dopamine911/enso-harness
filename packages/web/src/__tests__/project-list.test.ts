@@ -29,6 +29,7 @@ const stored = (threadId: string, minute: number, projectId: string, messageCoun
   lastActivityAt: new Date(Date.UTC(2026, 9, 7, 12, minute)).toISOString(),
   messageCount,
   busy: false,
+  waiting: false,
 })
 
 // ⚠ #663, measured in the arena: deleting the thread on screen — one of two approaches — opened a new

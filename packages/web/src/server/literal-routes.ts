@@ -93,7 +93,9 @@ export function createLiteralRoutes(state: LiteralRoutesState): LiteralRoutes {
    * @invariant resume/rail-listing The rail is the listing, newest first, titled by the first user message.
    * The host's own listing, one header parse per file, newest first; a blank first message is no
    * title. `busy` marks a thread a run on THIS server holds: the row is shown, not locked (#114),
-   * and an idle thread the server still holds is resumable, since held is not busy.
+   * and an idle thread the server still holds is resumable, since held is not busy. `waiting`
+   * marks one whose runtime holds a question open for the person (#876), so the rail says it
+   * without the page having opened the thread.
    */
   async function respondWithStoredThreads(response: ServerResponse): Promise<void> {
     const stored = await host.listSessions()
@@ -101,6 +103,7 @@ export function createLiteralRoutes(state: LiteralRoutesState): LiteralRoutes {
       // The host lists only sessions in a project; the lookup is what names which one.
       const project = projects.byDirectory(session.cwd)
       if (project === undefined) return []
+      const live = threads.peek(session.id)
       return [
         {
           threadId: session.id,
@@ -108,7 +111,8 @@ export function createLiteralRoutes(state: LiteralRoutesState): LiteralRoutes {
           ...(session.firstMessage.trim().length === 0 ? {} : { title: session.firstMessage.trim() }),
           lastActivityAt: session.modified.toISOString(),
           messageCount: session.messageCount,
-          busy: threads.peek(session.id)?.busy === true,
+          busy: live?.busy === true,
+          waiting: live !== undefined && live.hosted.runtime.openDialogs().length > 0,
           ...(session.parentThreadId === undefined ? {} : { parentThreadId: session.parentThreadId }),
           ...(session.name === undefined ? {} : { name: session.name }),
           ...(session.model === undefined ? {} : { model: session.model }),

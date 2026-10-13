@@ -45,6 +45,7 @@ function stored(
     lastActivityAt: new Date().toISOString(),
     messageCount: 2,
     busy: false,
+    waiting: false,
     ...extra,
   }
 }

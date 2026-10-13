@@ -143,14 +143,16 @@ export interface HiddenSignal {
 
 /**
  * What a row of threads the reader cannot see says for them — a collapsed project's header (#876),
- * a collapsed fold: the questions waiting on you first (only an open thread can hold one, and it is
- * busy too), else the runs in flight — the order a row's own dot uses — with how many.
+ * a collapsed fold: the questions waiting on you first — a page thread's own, or one the server's
+ * listing says a thread not open here holds (a waiting thread is busy too) — else the runs in
+ * flight, the order a row's own dot uses, with how many.
  */
 export function hiddenSignal(rows: RailThreads): HiddenSignal | undefined {
-  const waiting = rows.threads.filter((thread) => thread.waiting).length
+  const count = (holds: (thread: ThreadSummary | EnsoStoredThread) => boolean): number =>
+    rows.threads.filter(holds).length + rows.earlier.filter(holds).length
+  const waiting = count((thread) => thread.waiting)
   if (waiting > 0) return { state: 'waiting', count: waiting }
-  const running =
-    rows.threads.filter((thread) => thread.busy).length + rows.earlier.filter((thread) => thread.busy).length
+  const running = count((thread) => thread.busy)
   return running > 0 ? { state: 'running', count: running } : undefined
 }
 

@@ -372,6 +372,13 @@ export const EnsoStoredThread = Type.Object(
      */
     busy: Type.Boolean(),
     /**
+     * A thread on THIS server holds a question open for the person (#876): a permission ask, an
+     * `ask_user` questionnaire, any extension dialog — its runtime's `openDialogs()`, the same
+     * questions a follow's snapshot carries. Such a thread is busy too. The rail says "waiting on
+     * you" for it, over "running", even for a thread the page has not opened.
+     */
+    waiting: Type.Boolean(),
+    /**
      * The thread this one was forked from (#433): the session id its header's `parentSession`
      * file holds. Absent for a thread that is no fork — and for one whose parent file is gone,
      * which no longer names a thread the page could open.
@@ -567,7 +574,7 @@ fire (no loaded extension handles it). The host is tested against the real sessi
 
 **Consumed by the server.** The server's route groups own the read routes (#810):
 `GET /api/stored-threads` → `respondWithStoredThreads` (`server/literal-routes.ts`) maps each `StoredThread` to a `EnsoStoredThread`,
-marking `busy` by peeking the registry and carrying a fork's `parentThreadId`; `POST …/fork` (`server/thread-control-routes.ts`) asks
+marking `busy` by peeking the registry, `waiting` when that live thread's runtime has a question open (`openDialogs()`, #876), and carrying a fork's `parentThreadId`; `POST …/fork` (`server/thread-control-routes.ts`) asks
 `host.forkThread` (409 while a run holds the source); `GET /api/threads` summarises each live thread from `inspect()`.
 `packages/web/src/server/thread-registry.ts` is the only builder (it is handed `host.createSession`),
 and its `inspectThread` is the one place a `EnsoThreadInspection` is assembled, so the thread route and

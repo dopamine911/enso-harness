@@ -93,6 +93,7 @@ const STORED: readonly EnsoStoredThread[] = [
     lastActivityAt: minutesAgo(5),
     messageCount: 4,
     busy: false,
+    waiting: false,
     model: { provider: 'openai', modelId: 'gpt-kept' },
   },
   {
@@ -102,6 +103,7 @@ const STORED: readonly EnsoStoredThread[] = [
     lastActivityAt: minutesAgo(60),
     messageCount: 1,
     busy: true,
+    waiting: false,
   },
   {
     threadId: 't-launch',
@@ -110,6 +112,7 @@ const STORED: readonly EnsoStoredThread[] = [
     lastActivityAt: minutesAgo(1),
     messageCount: 2,
     busy: false,
+    waiting: false,
   },
 ]
 

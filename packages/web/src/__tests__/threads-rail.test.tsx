@@ -522,7 +522,15 @@ const GONE: EnsoProject = {
 }
 
 function storedIn(projectId: string, threadId: string, extra: Partial<EnsoStoredThread> = {}): EnsoStoredThread {
-  return { threadId, projectId, lastActivityAt: pageClock.get().toISOString(), messageCount: 2, busy: false, ...extra }
+  return {
+    threadId,
+    projectId,
+    lastActivityAt: pageClock.get().toISOString(),
+    messageCount: 2,
+    busy: false,
+    waiting: false,
+    ...extra,
+  }
 }
 
 /** The markup of the section a project's rows are in — from its label to the next section. */

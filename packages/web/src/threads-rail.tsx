@@ -404,9 +404,16 @@ function SectionSignal({ signal }: { signal: HiddenSignal }): React.ReactNode {
   )
 }
 
-function liveState(thread: ThreadSummary): 'waiting' | 'running' | 'idle' {
+/** A thread's live state — a page thread's, or what the server's listing says of a stored one (#876). */
+function liveState(thread: Pick<ThreadSummary, 'waiting' | 'busy'>): 'waiting' | 'running' | 'idle' {
   if (thread.waiting) return 'waiting'
   return thread.busy ? 'running' : 'idle'
+}
+
+/** A stored row's hover while it is live; an idle one says when it last ran. */
+const STORED_ROW_HOVER: Readonly<Partial<Record<'waiting' | 'running' | 'idle', string>>> = {
+  waiting: 'waiting on you — open it to answer',
+  running: 'running — resume to follow it',
 }
 
 const ROW = 'flex min-h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-popover'
@@ -446,7 +453,8 @@ function ThreadRow({
 }
 
 /**
- * One stored thread's row: title, age, and — when it is running — a running dot. Running is
+ * One stored thread's row: title, age, and — when it is running — a running dot, or, when the
+ * server says it holds a question open for you (#876), the waiting one. Running is
  * shown, not locked (#114): under the follow transport (#112) a resume MOUNTS the thread
  * and follows it, so a page that reloaded under pi's open question comes back to the card
  * from here. Before #113 a run belonged to the tab's HTTP response and a second page could
@@ -463,16 +471,17 @@ function EarlierThreadRow({
   onResume: (threadId: string) => void
 }): React.ReactNode {
   const at = new Date(thread.lastActivityAt)
+  const state = liveState(thread)
   return (
     <li>
       <button
         type="button"
         data-thread-id={thread.threadId}
-        title={thread.busy ? 'running — resume to follow it' : `not open here — resume it (${at.toLocaleString()})`}
+        title={STORED_ROW_HOVER[state] ?? `not open here — resume it (${at.toLocaleString()})`}
         onClick={() => onResume(thread.threadId)}
         className={cn(ROW, 'text-muted-foreground hover:text-foreground')}
       >
-        {thread.busy ? <LiveDot state="running" /> : null}
+        {state === 'idle' ? null : <LiveDot state={state} />}
         <RowTitle threadId={thread.threadId} title={label} full={thread.name ?? thread.title} />
         <span className="shrink-0 font-mono text-xs tabular-nums">
           <Age from={at} />

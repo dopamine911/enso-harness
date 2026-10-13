@@ -2800,6 +2800,7 @@ async function mountStartedThreads(
       lastActivityAt: new Date(Date.now() - index * 60_000).toISOString(),
       messageCount: 2,
       busy: false,
+      waiting: false,
     })),
     histories: {
       ...Object.fromEntries(
@@ -3143,6 +3144,7 @@ test("the rail lists the server's stored threads; a click resumes one with its h
         lastActivityAt: new Date().toISOString(),
         messageCount: 2,
         busy: false,
+        waiting: false,
       },
     ],
     histories: {
@@ -3200,6 +3202,7 @@ async function openDeletable(
         lastActivityAt: new Date().toISOString(),
         messageCount: 2,
         busy: false,
+        waiting: false,
       },
       ...others,
     ],
@@ -3482,6 +3485,7 @@ test('a listed thread the server no longer holds opens the not-found screen with
         lastActivityAt: new Date(Date.now() - 60_000).toISOString(),
         messageCount: 2,
         busy: false,
+        waiting: false,
       },
     ],
   })
@@ -3523,6 +3527,7 @@ test("the not-found screen's Search threads takes focus to the rail's search box
         lastActivityAt: new Date(Date.now() - 60_000).toISOString(),
         messageCount: 2,
         busy: false,
+        waiting: false,
       },
     ],
   })
@@ -3667,6 +3672,7 @@ const storedFork = (threadId: string, title?: string): EnsoStoredThread => ({
   lastActivityAt: new Date().toISOString(),
   messageCount: 1,
   busy: false,
+  waiting: false,
 })
 
 const TREE_AT =
@@ -3989,6 +3995,7 @@ test('⚠ a delete of the thread on screen goes to its project’s newest other 
         lastActivityAt: new Date(Date.now() - 60_000).toISOString(),
         messageCount: 2,
         busy: false,
+        waiting: false,
       },
     ],
     histories: {
@@ -4031,6 +4038,7 @@ test('a delete whose next thread the server no longer holds leaves a fresh threa
         lastActivityAt: new Date(Date.now() - 60_000).toISOString(),
         messageCount: 2,
         busy: false,
+        waiting: false,
       },
     ],
   })
@@ -4079,6 +4087,7 @@ test('a thread the stored listing holds offers Delete before anything is prompte
         lastActivityAt: new Date().toISOString(),
         messageCount: 0,
         busy: false,
+        waiting: false,
       },
     ],
     histories: {
@@ -4201,6 +4210,7 @@ test("a resumed thread's image renders as an <img> from the stored history, byte
         lastActivityAt: new Date().toISOString(),
         messageCount: 1,
         busy: false,
+        waiting: false,
       },
     ],
     histories: {
@@ -4253,6 +4263,7 @@ test("a resumed thread's refused attempt says the refusal in its own bubble, bef
         lastActivityAt: new Date().toISOString(),
         messageCount: 3,
         busy: false,
+        waiting: false,
       },
     ],
     histories: {
@@ -4588,6 +4599,7 @@ test('Projects opens from the rail as a page at its own URL; Open threads resume
         lastActivityAt: new Date(Date.now() - 60_000).toISOString(),
         messageCount: 2,
         busy: false,
+        waiting: false,
       },
     ],
     histories: {

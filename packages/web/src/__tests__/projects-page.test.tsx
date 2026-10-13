@@ -114,6 +114,7 @@ const stored = (threadId: string, projectId: string, minutesAgo: number): EnsoSt
   lastActivityAt: new Date(Date.now() - minutesAgo * 60_000).toISOString(),
   messageCount: 2,
   busy: false,
+  waiting: false,
 })
 
 /** What the page was asked to do, by action, each with the project it was asked for. */

@@ -259,6 +259,13 @@ export const EnsoStoredThread = Type.Object(
      */
     busy: Type.Boolean(),
     /**
+     * A thread on THIS server holds a question open for the person (#876): a permission ask, an
+     * `ask_user` questionnaire, any extension dialog — its runtime's `openDialogs()`, the same
+     * questions a follow's snapshot carries. Such a thread is busy too. The rail says "waiting on
+     * you" for it, over "running", even for a thread the page has not opened.
+     */
+    waiting: Type.Boolean(),
+    /**
      * The thread this one was forked from (#433): the session id its header's `parentSession`
      * file holds. Absent for a thread that is no fork — and for one whose parent file is gone,
      * which no longer names a thread the page could open.

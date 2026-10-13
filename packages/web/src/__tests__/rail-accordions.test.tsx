@@ -62,7 +62,7 @@ function open(threadId: string, projectId: string, extra: Partial<ThreadSummary>
   return { threadId, title: threadId, lastActivityAt: new Date(), busy: false, waiting: false, projectId, ...extra }
 }
 
-function stored(threadId: string, projectId: string): EnsoStoredThread {
+function stored(threadId: string, projectId: string, extra: Partial<EnsoStoredThread> = {}): EnsoStoredThread {
   return {
     threadId,
     projectId,
@@ -70,6 +70,8 @@ function stored(threadId: string, projectId: string): EnsoStoredThread {
     lastActivityAt: new Date().toISOString(),
     messageCount: 2,
     busy: false,
+    waiting: false,
+    ...extra,
   }
 }
 
@@ -280,6 +282,36 @@ test('⚠ a thread waiting on you in a closed project is a signal with its count
   await mounted.click(mounted.header('app'))
   expect(sectionRows(mounted, 'app')).toEqual(['asks'])
   expect(mounted.header('app').textContent).toBe('app')
+  await mounted.unmount()
+})
+
+// After a reload the page holds no store for a thread in another project: only the server's listing
+// says it is parked on a question (#876). Read as merely running, a permission ask would be understated.
+test('⚠ after a reload, a closed project says "waiting on you" from the listing alone, with no page store for the thread; answered, it says running (#876)', async () => {
+  const here = open('here', 'p-launch')
+  const scene = (earlier: EnsoStoredThread[]): Scene => ({
+    projects: [LAUNCH, APP],
+    threads: [here],
+    earlier,
+    activeThreadId: 'here',
+  })
+  const asks = stored('asks', 'p-app', { busy: true, waiting: true })
+  const works = stored('works', 'p-app', { busy: true })
+  const mounted = await mount(scene([asks, works]))
+  expect(mounted.header('app').getAttribute('aria-expanded')).toBe('false')
+  expect(mounted.header('app').textContent).toContain('1 waiting on you')
+  expect(mounted.header('app').textContent).not.toContain('running')
+  // Opened, the stored row itself says it.
+  await mounted.click(mounted.header('app'))
+  const row = mounted.rail().querySelector<HTMLElement>('button[data-thread-id="asks"]')
+  expect(row?.textContent).toContain('waiting on you')
+  expect(row?.title).toBe('waiting on you — open it to answer')
+  await mounted.click(mounted.header('app'))
+
+  // The listing refreshed after the answer: the run goes on, nothing waits.
+  await mounted.rerender(scene([{ ...asks, waiting: false }, works]))
+  expect(mounted.header('app').textContent).not.toContain('waiting on you')
+  expect(mounted.header('app').textContent).toContain('2 running')
   await mounted.unmount()
 })
 

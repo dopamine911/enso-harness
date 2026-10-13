@@ -1579,6 +1579,7 @@ test("⚠ a prompt on a thread passes THAT id to the host — the thread id is p
 })
 
 // @pins resume/rail-listing
+// Also waiting (#876): the test's name keys the flow snapshot below, so it stays as it was.
 test('GET /api/stored-threads lists stored threads with title, count and age, marking the ones a thread here is RUNNING', async () => {
   const stored = {
     'stored-1': {
@@ -1614,6 +1615,8 @@ test('GET /api/stored-threads lists stored threads with title, count and age, ma
       lastActivityAt: '2026-09-08T10:00:05.000Z',
       messageCount: 2,
       busy: true,
+      // The question it asked is open: waiting on the person, so the rail says so for a thread the page has not opened (#876).
+      waiting: true,
     },
     // A blank first message is no title — the rail says "new thread", not "   ". A fork names its parent (#433).
     {
@@ -1622,10 +1625,21 @@ test('GET /api/stored-threads lists stored threads with title, count and age, ma
       lastActivityAt: '2026-09-08T11:00:00.000Z',
       messageCount: 0,
       busy: false,
+      waiting: false,
       parentThreadId: 'stored-1',
     },
   ])
   expect(trace.diagram()).toMatchSnapshot('flow resume: the rail lists what is stored')
+
+  // Answered, the question is closed: no longer waiting, while the run it was asked in goes on.
+  const answered = await fetch(`${url}/api/threads/stored-1/dialog`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: 'd1', value: 'a' }),
+  })
+  expect(answered.status).toBe(204)
+  const after = (await (await fetch(`${url}/api/stored-threads`)).json()) as EnsoStoredThread[]
+  expect(after.find((thread) => thread.threadId === 'stored-1')).toMatchObject({ busy: true, waiting: false })
 })
 
 // @pins resume/looking-builds-nothing resume/opening-mode

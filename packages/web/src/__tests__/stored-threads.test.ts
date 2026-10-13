@@ -32,6 +32,7 @@ test('the resumable-session store validates listings and preserves the last good
       lastActivityAt: '2026-09-08T12:00:00.000Z',
       messageCount: 2,
       busy: false,
+      waiting: false,
     },
   ]
   const store = createStoredThreadsStore(async () => {
@@ -61,6 +62,7 @@ test('the earlier list excludes every session already owned by this page', () =>
       lastActivityAt: '2026-09-08T12:00:00.000Z',
       messageCount: 2,
       busy: true,
+      waiting: false,
     },
     {
       threadId: 'earlier',
@@ -68,6 +70,7 @@ test('the earlier list excludes every session already owned by this page', () =>
       lastActivityAt: '2026-09-08T11:00:00.000Z',
       messageCount: 4,
       busy: false,
+      waiting: false,
     },
   ]
   expect(storedThreadsNotOnThisPage(stored, new Set(['here'])).map((session) => session.threadId)).toEqual(['earlier'])
