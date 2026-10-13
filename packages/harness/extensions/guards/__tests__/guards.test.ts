@@ -1134,6 +1134,24 @@ test('⚠ grep over the folder ABOVE the harness root is blocked when the harnes
   expect(result?.reason).toContain(join(harnessRoot, '.enso'))
 })
 
+// #886: `read` is exempt from the search-beneath check because pi's `read` opens the one file it
+// names. So a `read` of a directory holding `.enso/` passes the guard, and is safe only while pi's
+// own `read` reads nothing of a directory: pinned on pi's real tool, so a pi that starts listing or
+// walking a directory under `read` fails here.
+test("⚠ read of a directory holding .enso/ passes the guard, and pi's read returns nothing of it (#886)", async () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'enso-guard-886-'))
+  mkdirSync(join(workspace, '.enso'))
+  writeFileSync(join(workspace, '.enso', 'secrets.env'), 'ANTHROPIC_API_KEY=x\n')
+  const result = loadGuard()(
+    { type: 'tool_call', toolCallId: 't', toolName: 'read', input: { path: '.' } },
+    { cwd: workspace },
+  )
+  expect(result).toBeUndefined()
+  const read = createReadOnlyTools(workspace).find((tool) => tool.name === 'read')
+  if (read === undefined) throw new Error("pi's read-only tools have no read")
+  await expect(read.execute('t', { path: '.' })).rejects.toThrow('EISDIR')
+})
+
 // Names are not contents: `ls ~` and `find ~` list what is there and read no file, and refusing
 // them would block the most ordinary look around there is. A directory that holds no credential
 // location is searched as before — the workspace is a place, but `<cwd>/.ssh` does not exist.
