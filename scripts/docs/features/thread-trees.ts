@@ -31,7 +31,7 @@ export const THREAD_TREES: FeatureSpec = {
       '',
       "A trusted project's own `.enso/config.json`, and your `.enso/config.local.json` beside it, set the same keys for that project, and win over yours: the local file first, then the shared one (#754). Trust a project, or revoke it, from its page: the confirmation lists the setup commands its files declare before anything is trusted, and the change applies to the next tree (see [Sessions and projects](./sessions-and-projects.md), #873). A launch that relies on the default says so in its log.",
     ].join('\n'),
-    '**Restore files to here** is under each prompt you sent, beside **fork from here**.',
+    '**Restore files to here** is under each prompt you sent, beside **Fork from here**.',
     "**Settings** → **Storage** lists the trees: **Settings** is at the foot of the rail. **Delete thread…** in the header's **thread actions** menu (⋯) deletes the thread on screen, through the same confirmation.",
   ],
   shots: [

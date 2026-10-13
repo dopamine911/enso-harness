@@ -12,18 +12,18 @@ import type { FetchLike } from './browser-logging.ts'
 import { Button } from './components/ui/button.tsx'
 import {
   Field,
-  FieldContent,
   FieldDescription,
   FieldError,
   FieldGroup,
   FieldLabel,
   FieldLegend,
   FieldSet,
-  FieldTitle,
 } from './components/ui/field.tsx'
 import { RadioGroup, RadioGroupItem } from './components/ui/radio-group.tsx'
 import { Textarea } from './components/ui/textarea.tsx'
+import { cn } from './lib/utils.ts'
 import { OptionSelect } from './option-select.tsx'
+import { PAGE_CARD, PAGE_INPUT, PAGE_OUTLINE_BUTTON, PAGE_PRIMARY_BUTTON, SAVE_BAR } from './page-styles.ts'
 import { readProjectSettings, saveProjectSettings } from './project-list.ts'
 
 /**
@@ -134,15 +134,12 @@ function TierLine({
   onReset: (field: ThreadKey, tier: EnsoProjectTier) => void
 }): React.ReactNode {
   return (
-    <div className="flex items-center gap-2">
-      <FieldDescription>from {tierWords(tier, files)}</FieldDescription>
-      {edited ? <span className="font-mono text-xs text-primary">edited</span> : null}
-      <span className="flex-1" />
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+      <p>from {tierWords(tier, files)}</p>
       {tier === 'shared' || tier === 'local' ? (
-        <Button
+        <button
           type="button"
-          variant="outline"
-          size="xs"
+          className="min-h-7 text-xs text-primary underline underline-offset-3 disabled:cursor-not-allowed disabled:opacity-50"
           disabled={busy || unsaved}
           aria-label={`Reset ${FIELD_LABELS[field]}`}
           title={
@@ -153,13 +150,14 @@ function TierLine({
           onClick={() => onReset(field, tier)}
         >
           Reset
-        </Button>
+        </button>
       ) : null}
+      {edited ? <span className="font-mono text-meta text-chart-3">edited</span> : null}
     </div>
   )
 }
 
-/** A list field: one entry per line, its tier under it. */
+/** A list field: one entry per line, a notice over its box when it needs one, its tier under it. */
 function ListField({
   field,
   text,
@@ -169,6 +167,7 @@ function ListField({
   unsaved,
   onText,
   onReset,
+  notice,
   children,
 }: {
   field: 'setup' | 'copy'
@@ -179,15 +178,19 @@ function ListField({
   unsaved: boolean
   onText: (text: string) => void
   onReset: (field: ThreadKey, tier: EnsoProjectTier) => void
+  notice?: React.ReactNode
   children: React.ReactNode
 }): React.ReactNode {
   const id = useId()
   return (
     <Field>
-      <FieldLabel htmlFor={id}>{FIELD_LABELS[field]}</FieldLabel>
+      <FieldLabel htmlFor={id} className="font-semibold">
+        {FIELD_LABELS[field]}
+      </FieldLabel>
+      {notice}
       <Textarea
         id={id}
-        className="font-mono text-xs"
+        className={cn(PAGE_INPUT, 'min-h-24 resize-y font-mono leading-relaxed')}
         spellCheck={false}
         value={text}
         onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => onText(event.target.value)}
@@ -225,27 +228,30 @@ function SaveTo({
   const legend = useId()
   return (
     <FieldSet>
-      <FieldLegend id={legend} variant="label">
+      <FieldLegend id={legend} variant="label" className="mb-2 font-semibold">
         Save changes to
       </FieldLegend>
+      {/* The prototype's radio cards (#417): the picked one wears the primary border on the accent. */}
       <RadioGroup
         aria-labelledby={legend}
-        className="sm:grid-cols-2"
+        className="gap-2 md:grid-cols-2"
         value={value}
         onValueChange={(picked: string) => onChange(picked === 'shared' ? 'shared' : 'local')}
       >
         {SAVE_TARGETS.map(([tier, label]) => (
-          <FieldLabel key={tier} htmlFor={`${legend}-${tier}`}>
-            <Field orientation="horizontal">
-              <RadioGroupItem id={`${legend}-${tier}`} value={tier} />
-              <FieldContent>
-                <FieldTitle>{label}</FieldTitle>
-                <FieldDescription className="font-mono text-xs break-all">
-                  {fileInProject(settings.files[tier], settings.path)}
-                </FieldDescription>
-              </FieldContent>
-            </Field>
-          </FieldLabel>
+          <label
+            key={tier}
+            htmlFor={`${legend}-${tier}`}
+            className="flex cursor-pointer items-start gap-2 rounded-sm border border-border-strong p-3 transition-colors has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-ring has-data-checked:border-primary has-data-checked:bg-accent"
+          >
+            <RadioGroupItem id={`${legend}-${tier}`} value={tier} className="mt-0.5" />
+            <span className="grid min-w-0 gap-0.5">
+              <strong className="text-sm font-semibold">{label}</strong>
+              <span className="font-mono text-meta break-all text-muted-foreground">
+                {fileInProject(settings.files[tier], settings.path)}
+              </span>
+            </span>
+          </label>
         ))}
       </RadioGroup>
     </FieldSet>
@@ -268,21 +274,17 @@ function UnsavedBar({
 }): React.ReactNode {
   if (count === 0) return null
   return (
-    <div
-      role="region"
-      aria-label="Unsaved worktree settings"
-      className="sticky bottom-0 flex flex-wrap items-center gap-3 rounded-lg border bg-card px-4 py-3"
-    >
-      <span className="grid min-w-0 flex-1 text-sm">
+    <div role="region" aria-label="Unsaved worktree settings" className={SAVE_BAR}>
+      <span className="grid min-w-50 flex-1 text-sm">
         <strong>
           {count} unsaved {count === 1 ? 'change' : 'changes'}
         </strong>
-        <span className="truncate font-mono text-xs text-muted-foreground">Saves to {file}</span>
+        <span className="truncate font-mono text-meta text-muted-foreground">Saves to {file}</span>
       </span>
-      <Button type="button" variant="outline" disabled={busy} onClick={onDiscard}>
+      <Button type="button" variant="outline" className={PAGE_OUTLINE_BUTTON} disabled={busy} onClick={onDiscard}>
         Discard
       </Button>
-      <Button type="button" disabled={busy} onClick={onSave}>
+      <Button type="button" className={PAGE_PRIMARY_BUTTON} disabled={busy} onClick={onSave}>
         {busy ? 'Saving…' : 'Save'}
       </Button>
     </div>
@@ -294,17 +296,16 @@ function FormNotes({ settings }: { settings: EnsoProjectSettings }): React.React
   return (
     <>
       {settings.trusted ? null : (
-        <p role="note" className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">
+        <p
+          role="note"
+          className="rounded-sm border border-dashed border-border-strong px-3 py-2 text-sm text-muted-foreground"
+        >
           This project is not trusted yet, so its own files are not read: only your settings apply. Saving still writes
           the file.
         </p>
       )}
       {settings.unreadable.map((skipped) => (
-        <p
-          key={skipped.path}
-          role="alert"
-          className="rounded-md border border-destructive/50 px-3 py-2 text-sm text-destructive"
-        >
+        <p key={skipped.path} role="alert" className="rounded-sm border border-refuse px-3 py-2 text-sm text-refuse">
           {skipped.path} could not be read ({skipped.reason}), so its settings are not applied and saving to it is
           refused. Fix the file to use it.
         </p>
@@ -344,18 +345,20 @@ function WorktreesForm({
     onSend({ tier, threads: cleared })
   }
   return (
-    <FieldGroup>
-      <p className="text-sm text-muted-foreground">
+    <FieldGroup className={PAGE_CARD}>
+      <p className="max-w-prose text-muted-foreground">
         How a new thread’s tree is made in this project. Each value comes from one place: this project only for you, the
         project’s shared file, your settings, or Enso’s default — the first one set wins.
       </p>
       <FormNotes settings={settings} />
       <SaveTo value={saveTo} settings={settings} onChange={onSaveTo} />
       <Field>
-        <FieldLabel htmlFor={treeId}>{FIELD_LABELS.tree}</FieldLabel>
+        <FieldLabel htmlFor={treeId} className="font-semibold">
+          {FIELD_LABELS.tree}
+        </FieldLabel>
         <OptionSelect
           id={treeId}
-          className="rounded-md border bg-background px-2 py-1 text-sm text-foreground"
+          className={PAGE_INPUT}
           value={draft.tree}
           options={TREE_MODES}
           onChange={(tree: EnsoThreadTreeMode) => setDraft({ ...draft, tree })}
@@ -397,14 +400,17 @@ function WorktreesForm({
         unsaved={unsaved}
         onText={(setup: string) => setDraft({ ...draft, setup })}
         onReset={reset}
+        notice={
+          // The prototype's warning callout (#417): these commands run on this machine, so the warning sits over the box.
+          <p role="note" className="flex items-start gap-2 rounded-sm border border-chart-3 p-3 text-sm">
+            <TriangleAlertIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-chart-3" />
+            These run on your machine, in the new tree, each time a thread's tree is made.
+          </p>
+        }
       >
         <FieldDescription>
           One command per line, run in order in a new tree — for example bun install --frozen-lockfile.
         </FieldDescription>
-        <p className="flex items-center gap-1.5 text-sm text-destructive">
-          <TriangleAlertIcon aria-hidden="true" className="size-4 shrink-0" />
-          These run on your machine, in the new tree, each time a thread's tree is made.
-        </p>
       </ListField>
       {refusal === undefined ? null : <FieldError>{refusal}</FieldError>}
       <UnsavedBar

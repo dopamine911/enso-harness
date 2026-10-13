@@ -30,6 +30,8 @@ export interface FeatureUi {
   readonly tab: (name: ThreadTab) => Promise<void>
   /** Click what a reader would: the step names it by the text or name it was found by. */
   readonly click: (target: MarkTarget) => Promise<void>
+  /** Pick `option` in the select or segmented control `target`, as a reader changes a setting: the step names both. */
+  readonly choose: (target: MarkTarget, option: string) => Promise<void>
   /** Bring `target` near the top of the viewport. A reader scrolls without being told, so no step. */
   readonly scrollTo: (target: MarkTarget) => Promise<void>
   /** The thread on screen with `?debug` added: the session debug drawer. */

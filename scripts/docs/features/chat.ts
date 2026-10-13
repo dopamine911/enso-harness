@@ -56,7 +56,7 @@ export const CHAT: FeatureSpec = {
   ],
   opens: [
     'Start the web app with `bun run dev` and open `http://127.0.0.1:5178`.',
-    '**New Thread** in the rail opens a new thread on its launch panel: type the first prompt and press **Start session**, and the same composer, with what you attached, docks under the transcript. See [Sessions and projects](./sessions-and-projects.md). A thread you opened before is listed under its project. Click it to open it again.',
+    '**New thread** in the rail opens a new thread on its launch panel: type the first prompt and press **Start session**, and the same composer, with what you attached, docks under the transcript. See [Sessions and projects](./sessions-and-projects.md). A thread you opened before is listed under its project. Click it to open it again.',
     'The **Chat** tab shows the conversation. **Context** and **Stats** are the other two views of the same thread.',
     'The URL names the thread as `?thread=<id>`.',
     'To add an image, use the **attach an image** button, paste the image, or drop it on the composer.',
@@ -70,7 +70,7 @@ export const CHAT: FeatureSpec = {
       go: async (ui) => {
         await ui.openThread()
         // The first prompt's fork button: the thread from its first reply down.
-        await ui.scrollTo({ text: 'fork from here' })
+        await ui.scrollTo({ text: 'Fork from here' })
       },
       marks: [
         {
@@ -83,7 +83,7 @@ export const CHAT: FeatureSpec = {
           says: 'A tool call as one row: the tool, what it was given, and a check when it finished. Click the row to see **in** and **out**.',
         },
         {
-          target: { text: 'fork from here' },
+          target: { text: 'Fork from here' },
           says: '**{shown}** starts a new thread with everything before this prompt, and puts the prompt back in the composer. See [Forks and lineage](./lineage.md).',
         },
         { target: { role: 'button', name: 'attach an image' }, says: '**{shown}**.' },

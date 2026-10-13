@@ -52,7 +52,7 @@ export const PROMPTS: FeatureSpec = {
   ],
   opens: [
     '{steps}. **prompts** is the scroll icon in the header, beside **settings**, and opens **Prompts**.',
-    '**New Thread** opens a new thread on its launch panel, where the **System prompt** and **Saved prompt** chips pick from the library. See [Sessions and projects](./sessions-and-projects.md).',
+    '**New thread** opens a new thread on its launch panel, where the **System prompt** and **Saved prompt** chips pick from the library. See [Sessions and projects](./sessions-and-projects.md).',
     [
       'The files are plain markdown, so you can also edit them in any editor. The manager reads the folder again each time it opens, and the launch panel each time it shows. A file looks like this:',
       '',

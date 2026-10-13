@@ -170,6 +170,7 @@ async function mountDialog(respond: () => Response, command: string | undefined)
   const mounted = await mount(
     <ModelChoiceDialog
       recent={[]}
+      anchor={{ current: null }}
       threadId="thread 1"
       command={command}
       fetch={(input: string): Promise<Response> => {

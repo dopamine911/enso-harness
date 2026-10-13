@@ -10,7 +10,7 @@
     {
       "image": "debug-drawer",
       "steps": ["open a thread from the rail", "add `?debug` to the thread's address"],
-      "shown": ["session debug", "download log bundle"],
+      "shown": ["Session debug", "download log bundle"],
       "measured": {}
     }
   ]

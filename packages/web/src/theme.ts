@@ -89,7 +89,7 @@ export const DEFAULT_THEME: ThemeId = 'enso-signal'
 export const THEME_STORAGE_KEY = 'enso:theme'
 export const THEME_SCHEME_STORAGE_KEY = 'enso:theme-scheme'
 
-export function isThemeId(value: unknown): value is ThemeId {
+function isThemeId(value: unknown): value is ThemeId {
   return THEMES.some((theme) => theme.id === value)
 }
 

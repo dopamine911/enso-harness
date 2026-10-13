@@ -16,6 +16,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './components/ui/tabs.tsx'
 import { cn } from './lib/utils.ts'
 import type { ListingState } from './listing-store.ts'
+import { PAGE_BANNER, PAGE_COLUMN, PAGE_OUTLINE_BUTTON } from './page-styles.ts'
 import {
   type ProjectRequestOutcome,
   type ProjectThread,
@@ -122,11 +123,8 @@ function MissingFolderBanner({
     else setResult(undefined)
   }
   return (
-    <section
-      aria-labelledby="missing-folder-title"
-      className="grid gap-2 rounded-lg border border-destructive/60 bg-card px-4 py-3"
-    >
-      <h2 id="missing-folder-title" className="flex items-center gap-2 font-semibold text-destructive">
+    <section aria-labelledby="missing-folder-title" className={cn(PAGE_BANNER, 'border-refuse')}>
+      <h2 id="missing-folder-title" className="flex items-center gap-2 font-semibold text-refuse">
         <TriangleAlertIcon aria-hidden="true" className="size-4" />
         The folder is missing
       </h2>
@@ -135,7 +133,13 @@ function MissingFolderBanner({
         but no new thread can start here until the folder is back.
       </p>
       <div className="flex flex-wrap gap-2">
-        <Button type="button" variant="outline" disabled={checking} onClick={() => void check()}>
+        <Button
+          type="button"
+          variant="outline"
+          className={PAGE_OUTLINE_BUTTON}
+          disabled={checking}
+          onClick={() => void check()}
+        >
           {checking ? 'Checking…' : 'Check again'}
         </Button>
         {project.launch ? null : <RemoveConfirm removal={removal} label="Remove from Enso" />}
@@ -185,9 +189,10 @@ const UNTRUSTED_WORDS = `Enso isn’t reading this project’s own files (${OWN_
 const TRUSTED_WORDS = `New threads read this project’s own files (${OWN_FILES}) and its .pi/ folder, and a new tree runs the setup commands they list.`
 
 /**
- * The project's trust over the tabs: not trusted, with **Trust this project…**, whose confirmation
- * names the files and their setup commands before anything is trusted; or trusted, with **Revoke
- * trust…** behind its own.
+ * The project's trust over the tabs (#417, as the prototype draws it): not trusted is a dashed banner
+ * with **Trust this project…**, whose confirmation names the files and their setup commands before
+ * anything is trusted; trusted is a quiet line — nothing is wrong — with **Revoke trust…** behind
+ * its own confirmation.
  */
 function TrustSection({
   project,
@@ -214,23 +219,33 @@ function TrustSection({
     },
   }
   const confirm = (): void => void change(!trusted).then((done) => done && setOpen(false))
+  const button = (
+    <Button
+      type="button"
+      variant="outline"
+      className={cn(PAGE_OUTLINE_BUTTON, 'justify-self-start')}
+      onClick={() => setOpen(true)}
+    >
+      {trusted ? 'Revoke trust…' : 'Trust this project…'}
+    </Button>
+  )
   return (
     <section
       aria-labelledby={titleId}
-      className={cn('grid gap-2 rounded-lg border bg-card px-4 py-3', trusted ? undefined : 'border-dashed')}
+      className={trusted ? 'flex flex-wrap items-center gap-x-3 gap-y-2' : cn(PAGE_BANNER, 'border-dashed')}
     >
-      <h2 id={titleId} className="flex items-center gap-2 font-semibold">
+      <h2 id={titleId} className={cn('flex items-center gap-2 font-semibold', trusted ? 'text-sm' : undefined)}>
         {trusted ? (
-          <ShieldCheckIcon aria-hidden="true" className="size-4" />
+          <ShieldCheckIcon aria-hidden="true" className="size-4 text-primary" />
         ) : (
           <LockIcon aria-hidden="true" className="size-4" />
         )}
         {trusted ? 'Trusted' : 'Not trusted yet'}
       </h2>
-      <p className="text-sm text-muted-foreground">{trusted ? TRUSTED_WORDS : UNTRUSTED_WORDS}</p>
-      <Button type="button" variant="outline" className="justify-self-start" onClick={() => setOpen(true)}>
-        {trusted ? 'Revoke trust…' : 'Trust this project…'}
-      </Button>
+      <p className={cn('text-sm text-muted-foreground', trusted ? 'min-w-0 flex-1' : undefined)}>
+        {trusted ? TRUSTED_WORDS : UNTRUSTED_WORDS}
+      </p>
+      {button}
       {trusted ? (
         <RevokeDialog {...dialog} onRevoke={confirm} />
       ) : (
@@ -307,21 +322,23 @@ function ThreadsTab({
     )
   }
   return (
-    <ul aria-label={`threads in ${project.title}`} className="grid">
+    // One shrinkable column: an implicit grid track is as wide as its longest title, which pushed
+    // each row's model and age past the page (#417).
+    <ul aria-label={`threads in ${project.title}`} className="grid grid-cols-1 gap-0.5">
       {lines.map((line) => (
         <li key={line.thread.threadId}>
           <button
             type="button"
             onClick={() => onOpenThread(line.thread)}
-            className="flex min-h-10 w-full items-center gap-3 rounded-md px-2 text-left text-sm hover:bg-popover focus-visible:outline-2 focus-visible:outline-ring"
+            className="flex min-h-11 w-full items-center gap-3 rounded-sm px-3 py-2 text-left text-sm transition-colors hover:bg-card focus-visible:outline-2 focus-visible:outline-ring"
           >
             <LiveDot state={line.state} />
             <span className="min-w-0 flex-1 truncate">{line.title}</span>
-            <span className="font-mono text-xs text-muted-foreground" title={line.modelFull}>
+            <span className="font-mono text-meta whitespace-nowrap text-muted-foreground" title={line.modelFull}>
               {line.model ?? 'no model recorded'}
             </span>
             <span
-              className="w-10 text-right font-mono text-xs text-muted-foreground"
+              className="w-8 text-right font-mono text-meta whitespace-nowrap text-muted-foreground"
               title={new Date(line.thread.at).toLocaleString()}
             >
               <Age from={new Date(line.thread.at)} />
@@ -359,7 +376,7 @@ function RemoveConfirm({ removal, label }: { removal: Removal; label: string }):
   return (
     <Dialog>
       <DialogTrigger asChild>
-        <Button type="button" variant="outline" className="justify-self-start">
+        <Button type="button" variant="outline" className={cn(PAGE_OUTLINE_BUTTON, 'justify-self-start')}>
           {label}
         </Button>
       </DialogTrigger>
@@ -392,8 +409,8 @@ function RemoveCard({ removal }: { removal: Removal }): React.ReactNode {
       <p className="text-sm text-muted-foreground">This is the folder Enso was started in, so it can’t be removed.</p>
     )
   return (
-    <section aria-labelledby="remove-title" className="grid gap-2 rounded-lg border bg-card px-4 py-3">
-      <h2 id="remove-title" className="font-semibold">
+    <section aria-labelledby="remove-title" className={PAGE_BANNER}>
+      <h2 id="remove-title" className="flex items-center gap-2 font-semibold">
         Remove from Enso
       </h2>
       <p className="text-sm text-muted-foreground">{removal.words}</p>
@@ -479,25 +496,35 @@ function ProjectTabs({
   return (
     <Tabs
       value={route.tab}
+      className="gap-6"
       onValueChange={(tab: string) => {
         const picked = PROJECT_TABS.find((known) => known === tab)
         if (picked !== undefined) onOpen({ ...route, tab: picked })
       }}
     >
-      <TabsList variant="line" aria-label="Project sections">
+      {/* The prototype's underline row (#417): the list's hairline, the picked tab's primary bar sitting on it. */}
+      <TabsList
+        variant="line"
+        aria-label="Project sections"
+        className="w-full justify-start gap-1 overflow-x-auto border-b p-0 group-data-horizontal/tabs:h-auto"
+      >
         {PROJECT_TABS.map((tab) => (
-          <TabsTrigger key={tab} value={tab}>
+          <TabsTrigger
+            key={tab}
+            value={tab}
+            className="h-10 flex-none rounded-none px-3 after:bg-primary group-data-horizontal/tabs:after:-bottom-px"
+          >
             {TAB_LABELS[tab]}
           </TabsTrigger>
         ))}
       </TabsList>
-      <TabsContent value="threads" className="pt-3">
+      <TabsContent value="threads">
         <ThreadsTab project={project} pageThreads={pageThreads} stored={stored} onOpenThread={props.onOpenThread} />
       </TabsContent>
-      <TabsContent value="worktrees" className="pt-3">
+      <TabsContent value="worktrees">
         <ProjectWorktrees projectId={project.projectId} fetch={fetchImpl} revision={trustRevision} />
       </TabsContent>
-      <TabsContent value="storage" className="pt-3">
+      <TabsContent value="storage">
         <ProjectStorage fetch={fetchImpl} project={project} stored={stored} onDeleted={props.onDeleted} />
       </TabsContent>
     </Tabs>
@@ -516,7 +543,7 @@ function ProjectBody({ project, props }: { project: EnsoProject; props: ProjectP
     setTrustRevision((revision) => revision + 1)
   }
   return (
-    <div className="mx-auto grid w-full max-w-3xl gap-4 p-4 md:p-6">
+    <div className={PAGE_COLUMN}>
       <ProjectBanners removal={removal} notice={props.notice} onCheckAgain={props.onCheckAgain}>
         <TrustState project={project} trust={trust} fetchImpl={fetchImpl} onChanged={trustChanged} />
       </ProjectBanners>

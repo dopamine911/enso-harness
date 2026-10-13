@@ -10,6 +10,7 @@ import {
 } from './components/ui/dropdown-menu.tsx'
 import { cn } from './lib/utils.ts'
 import type { ListingState } from './listing-store.ts'
+import { PAGE_COLUMN, PAGE_OUTLINE_BUTTON } from './page-styles.ts'
 import { type ProjectRequestOutcome, type ProjectThread, threadsOfProject } from './project-list.ts'
 import { BADGE, ProjectStatusBadges, useProjectSettings } from './project-status.tsx'
 import type { ThreadSummary } from './thread-stores.ts'
@@ -100,7 +101,13 @@ function RemoveProject({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button type="button" size="icon" variant="ghost" aria-label={`remove ${project.title}`}>
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          className="size-10 text-muted-foreground hover:text-foreground"
+          aria-label={`remove ${project.title}`}
+        >
           <Trash2Icon />
         </Button>
       </DropdownMenuTrigger>
@@ -137,13 +144,13 @@ function ProjectCard({
     <li
       aria-labelledby={nameId}
       className={cn(
-        'flex flex-col gap-4 rounded-lg border bg-card px-6 py-4 sm:flex-row sm:items-center',
-        current ? 'border-muted-foreground/60' : undefined,
+        'flex flex-col gap-4 rounded-lg border bg-card p-4 md:flex-row md:items-center md:px-6',
+        current ? 'border-border-strong' : undefined,
       )}
     >
       <div className="grid min-w-0 flex-1 gap-1">
         <div className="flex flex-wrap items-center gap-2">
-          <h2 id={nameId} className="font-heading text-base font-semibold">
+          <h2 id={nameId} className="font-heading text-base leading-snug font-semibold">
             {project.title}
           </h2>
           <ProjectBadges
@@ -172,17 +179,23 @@ function ProjectCard({
           <TreeModeFact settings={settings} />
         </div>
       </div>
-      <div className="flex shrink-0 items-center gap-2">
+      <div className="flex shrink-0 flex-wrap items-center gap-2 md:flex-nowrap">
         <Button
           type="button"
           variant="outline"
+          className={PAGE_OUTLINE_BUTTON}
           disabled={nothingToOpen}
           title={nothingToOpen ? `${project.path} no longer exists, and no thread was kept` : undefined}
           onClick={() => actions.onOpenThreads(project.projectId)}
         >
           Open threads
         </Button>
-        <Button type="button" variant="outline" onClick={() => actions.onSettings(project.projectId)}>
+        <Button
+          type="button"
+          variant="outline"
+          className={PAGE_OUTLINE_BUTTON}
+          onClick={() => actions.onSettings(project.projectId)}
+        >
           Settings
         </Button>
         {project.launch ? null : <RemoveProject project={project} onRemove={actions.onRemove} />}
@@ -222,8 +235,8 @@ export function ProjectsPage({
   )
   const context = { projects: projects.rows, pageThreads, stored }
   return (
-    <div className="mx-auto grid w-full max-w-3xl gap-4 p-4 md:p-6">
-      <p className="text-muted-foreground">
+    <div className={PAGE_COLUMN}>
+      <p className="max-w-prose text-base leading-relaxed text-muted-foreground">
         Each project is a folder on this machine. A thread in a project works in a tree of that folder, so your checkout
         stays as you left it until you bring the work back.
       </p>

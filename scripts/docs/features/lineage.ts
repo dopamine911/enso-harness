@@ -42,7 +42,7 @@ export const LINEAGE: FeatureSpec = {
     ].join('\n'),
   ],
   opens: [
-    '**fork from here**, under any prompt you sent, forks the thread before that prompt.',
+    '**Fork from here**, under any prompt you sent, forks the thread before that prompt.',
     "`/fork` in the command palette, or **Fork thread** in the header's **thread actions** menu (⋯), forks before the last prompt.",
     'The new thread opens straight away. In the rail, it shows `forked from` and the title of the thread it came from.',
     "Add `?debug` to a thread's URL to see its **fork point** in the session debug drawer.",
@@ -64,7 +64,7 @@ export const LINEAGE: FeatureSpec = {
         {
           // By role, not placeholder: the source thread's pane stays mounted, hidden, with a
           // composer of its own, and only the fork's visible one is in the accessibility tree.
-          target: { role: 'textbox', name: 'ask pi something', exact: true },
+          target: { role: 'textbox', name: 'Ask pi something', exact: true },
           says: 'The prompt it was forked at, back in the composer. Nothing has been sent yet.',
         },
       ],

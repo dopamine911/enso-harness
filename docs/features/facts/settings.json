@@ -6,7 +6,7 @@
       "steps": ["open a thread from the rail", "choose **Settings**"],
       "shown": [
         "Settings sections",
-        "Theme",
+        "Tokyo Dark,",
         "Body",
         "Appearance stays in this browser. Permissions and storage live on the server."
       ],
@@ -16,13 +16,13 @@
     },
     {
       "image": "settings-permissions",
-      "steps": ["open a thread from the rail", "choose **Settings**", "choose **Permissions**"],
-      "shown": [
-        "This section is saved on the server, in /tmp/enso-feature-shots/home/permissions.json; the rest of Settings is kept in this browser.",
-        "Save",
-        "Rules",
-        "yours — holds in every mode"
+      "steps": [
+        "open a thread from the rail",
+        "choose **Settings**",
+        "choose **Permissions**",
+        "pick **Ask** for `action read *`"
       ],
+      "shown": ["Saved on the server · /tmp/enso-feature-shots/home/permissions.json", "Save", "Modes", "always first"],
       "measured": {}
     }
   ]

@@ -167,10 +167,11 @@ test('the fork point lists identity, then the conditions — the system prompt a
 
 // ── the mismatch highlight ───────────────────────────────────────────────────
 
-test('agreement everywhere renders no MISMATCH', () => {
+test('agreement everywhere renders no MISMATCH, and says match', () => {
   const rendered = render(believing('plan'), inspection())
   expect(rendered).not.toContain('MISMATCH')
-  expect(rendered).toContain('host mode: plan')
+  expect(rendered).toMatch(/host mode<\/dt><dd[^>]*>plan</)
+  expect(rendered).toContain('>match<')
 })
 
 // ⚠ THE FEATURE. Browser store ≠ host means the stream or the store dropped a receipt.
@@ -182,7 +183,7 @@ test('⚠ browser store disagreeing with the host is named as a MISMATCH', () =>
 // The run fence (#109): the page's last run number against the server's current one.
 test("⚠ a server ahead of this page's last run is named as a MISMATCH — a run this page did not make", () => {
   const rendered = render(believing('plan', 1), inspection({ generation: 3 }))
-  expect(rendered).toContain('last run: #1')
+  expect(rendered).toMatch(/last run<\/dt><dd[^>]*>#1/)
   expect(rendered).toContain('MISMATCH: server is at run #3 — 2 runs this page did not make')
   expect(rendered).toContain('run #3')
 })
@@ -194,7 +195,7 @@ test("⚠ a server BEHIND this page's last run is named as a restart", () => {
 
 test('no run yet on this page compares nothing: no MISMATCH, and it says so', () => {
   const rendered = render({ ...believing('plan'), generation: undefined }, inspection({ generation: 2 }))
-  expect(rendered).toContain('last run: none from this page')
+  expect(rendered).toMatch(/last run<\/dt><dd[^>]*>none from this page/)
   expect(rendered).not.toContain('MISMATCH')
 })
 

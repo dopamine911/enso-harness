@@ -96,10 +96,18 @@ export function changesText(changes: EnsoGitRepository['changes']): string {
 
 const SHORT_SHA = 7
 
+/**
+ * A thread tree's branch, `enso/<thread id>` (`host/thread-trees.ts` `treeLocation`), as the strip
+ * shows it: the id's first block, the way the review's `Worktree · f4b35c4d` does (#417) — the whole
+ * uuid took a third of the strip. The full name stays in the tooltip; any other branch is shown whole.
+ */
+const THREAD_BRANCH = /^(enso\/[0-9a-f]{8})-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+
 function RepositoryReadout({ repository }: { readonly repository: EnsoGitRepository }): React.ReactNode {
-  const name =
-    repository.branch ?? (repository.head === null ? 'no commits' : `detached ${repository.head.slice(0, SHORT_SHA)}`)
+  const unnamed = repository.head === null ? 'no commits' : `detached ${repository.head.slice(0, SHORT_SHA)}`
+  const name = repository.branch === null ? unnamed : (THREAD_BRANCH.exec(repository.branch)?.[1] ?? repository.branch)
   const title = [
+    ...(repository.branch === null ? [] : [`branch ${repository.branch}`]),
     baselineText(repository),
     ...(repository.baseline.commit === null
       ? []

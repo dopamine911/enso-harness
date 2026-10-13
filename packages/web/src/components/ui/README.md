@@ -14,6 +14,10 @@ description were reverted, per the local changes below.
 `radio-group.tsx` and `checkbox.tsx` for the `ask_user` questionnaire card (#12), by the same CLI
 and style; they need nothing `radix-ui` and `lucide-react` do not already carry, and the CLI's `cn`
 package and `package.json` edits were reverted the same way.
+`popover.tsx` for the model picker (#417), anchored to the Model chip as the prototype's `.popover`:
+the registry item as `shadcn@4.20.1 view popover` printed it (the same CLI and style; nothing beyond
+`radix-ui`), with the two edits `add` makes or this repo keeps — `"use client"` dropped under
+`rsc: false`, and `cn` from `@/lib/utils.ts`, per the local changes below.
 **License:** MIT (the shadcn/ui project's licence, as published with the CLI).
 **Issue:** #31, fenced by `test/presentation-gate.test.ts` since #253.
 

@@ -168,8 +168,8 @@ function LoadEarlier({
 /** Rows drawn past each edge of the viewport, so a fast scroll does not show blank space before they measure. */
 const TRANSCRIPT_OVERSCAN_ROWS = 6
 
-/** One row's box: the gap between rows is its padding, since a windowed row is placed, not flowed. */
-const TRANSCRIPT_ROW = 'pb-4 ledger:pb-0'
+/** One row's box: the gap between rows is its padding, since a windowed row is placed, not flowed — the prototype's 24px (#417). */
+const TRANSCRIPT_ROW = 'pb-6 ledger:pb-0'
 
 /**
  * The transcript's rows, WINDOWED (#739): only the rows in and near the viewport are in the DOM, so

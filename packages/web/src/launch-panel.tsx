@@ -3,6 +3,7 @@ import { FolderIcon, TriangleAlertIcon } from 'lucide-react'
 import { useContext, useId } from 'react'
 import { Alert, AlertDescription, AlertTitle } from './components/ui/alert.tsx'
 import { Button } from './components/ui/button.tsx'
+import { isModeLine } from './mode-lines.ts'
 import { NotificationLines } from './notifications.tsx'
 import { projectList, storedThreads } from './page-listings.ts'
 import { LaunchActionsContext } from './pane-context.ts'
@@ -27,6 +28,13 @@ const TREE_WORDS: Readonly<Record<EnsoThreadTreeMode, string>> = {
   copy: 'runs in a copy of the project folder',
   off: 'runs in the project folder itself',
 }
+
+/**
+ * A refusal on the launch panel — this one, and Start's (`LaunchNotes`) — the prototype's `.alert`
+ * (#417): ringed and faintly tinted in the refusal's colour, its title in it, its words in the text's.
+ */
+export const REFUSAL_ALERT =
+  'gap-1 rounded-sm border-refuse bg-refuse/8 p-3 text-refuse *:data-[slot=alert-description]:text-foreground *:data-[slot=alert-title]:font-semibold'
 
 /** How many of the project's threads the panel offers to pick up. */
 const RECENT_THREADS = 3
@@ -65,9 +73,9 @@ function ProjectLine({ project }: { readonly project: EnsoProject }): React.Reac
   const read = useProjectSettings([project.projectId], undefined).get(project.projectId)
   const tree = read?.kind === 'ok' ? read.value.threads.tree.value : undefined
   return (
-    <p className="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
+    <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
       <FolderIcon aria-hidden="true" className="size-4" />
-      <span className="font-mono text-foreground" title={project.path}>
+      <span className="font-mono text-xs text-foreground" title={project.path}>
         {project.title}
       </span>
       {tree === undefined ? null : <span>· {TREE_WORDS[tree]}</span>}
@@ -76,20 +84,23 @@ function ProjectLine({ project }: { readonly project: EnsoProject }): React.Reac
 }
 
 /**
- * Above the composer: the question, where the session will run, and why it cannot start there.
+ * Above the composer: the question, where the session will run, and why it cannot start there —
+ * the prototype's `.launch-head` and `.launch-blocked` (#417), in the launch column's width.
  * `titleId` names the panel's region; a generated id, since an off-screen draft's panel stays mounted.
  */
 export function LaunchHead({ titleId }: { readonly titleId: string }): React.ReactNode {
   const { project, blocked } = useLaunchProject()
   const actions = useContext(LaunchActionsContext)
   return (
-    <div className="mx-auto mt-auto grid w-full max-w-2xl gap-2 px-6 pb-2">
-      <h2 id={titleId} className="font-heading text-2xl font-semibold">
-        What should pi work on?
-      </h2>
-      {project === undefined ? null : <ProjectLine project={project} />}
+    <div className="mx-auto grid w-full max-w-launch gap-6">
+      <div className="grid gap-2">
+        <h2 id={titleId} className="font-heading text-figure leading-tight font-semibold">
+          What should pi work on?
+        </h2>
+        {project === undefined ? null : <ProjectLine project={project} />}
+      </div>
       {blocked === undefined ? null : (
-        <Alert variant="destructive" className="mt-2">
+        <Alert className={REFUSAL_ALERT}>
           <TriangleAlertIcon aria-hidden="true" />
           <AlertTitle>A new thread can’t start here</AlertTitle>
           <AlertDescription className="grid justify-items-start gap-2">
@@ -109,11 +120,12 @@ export function LaunchHead({ titleId }: { readonly titleId: string }): React.Rea
 /**
  * The thread's notices while its launch panel stands in for the transcript: what the page said on
  * it — a delete that brought it here (#663), a refused `/` command — would otherwise land in a
- * transcript nobody sees until Start.
+ * transcript nobody sees until Start. Not its mode lines (#417): the Mode chip says the mode the
+ * session starts in, and each setting is said once; the transcript still shows them after Start.
  */
 export function LaunchNotices(): React.ReactNode {
   const lines = useStore(useThreadStores().notifications)
-  return <NotificationLines lines={lines} />
+  return <NotificationLines lines={lines.filter((line) => !isModeLine(line.message))} />
 }
 
 /**
@@ -137,24 +149,24 @@ export function LaunchRecent(): React.ReactNode {
           .slice(0, RECENT_THREADS)
           .map((thread) => threadLineOf(thread, pageThreads, stored))
   return (
-    <div className="mx-auto mb-auto w-full max-w-2xl px-6 pt-4">
+    <div className="mx-auto w-full max-w-launch">
       {actions === undefined || recent.length === 0 ? null : (
-        <section aria-labelledby={heading} className="grid gap-1">
-          <h3 id={heading} className="px-2 font-mono text-xs tracking-wide text-muted-foreground uppercase">
+        <section aria-labelledby={heading} className="grid gap-2">
+          <h3 id={heading} className="font-mono text-meta font-normal tracking-wider text-muted-foreground uppercase">
             Or pick up where you left off
           </h3>
-          <ul className="grid">
+          <ul className="grid gap-0.5">
             {recent.map((line) => (
               <li key={line.thread.threadId}>
                 <button
                   type="button"
                   onClick={(): void => actions.openThread(line.thread)}
-                  className="flex min-h-9 w-full items-center gap-3 rounded-md px-2 text-left text-sm hover:bg-popover focus-visible:outline-2 focus-visible:outline-ring"
+                  className="flex min-h-10 w-full items-center gap-3 rounded-sm px-3 text-left text-sm text-muted-foreground transition-colors hover:bg-card focus-visible:outline-2 focus-visible:outline-ring"
                 >
                   <LiveDot state={line.state} />
-                  <span className="min-w-0 flex-1 truncate">{line.title}</span>
+                  <span className="min-w-0 flex-1 truncate text-foreground">{line.title}</span>
                   <span
-                    className="shrink-0 font-mono text-xs text-muted-foreground tabular-nums"
+                    className="shrink-0 font-mono text-meta whitespace-nowrap tabular-nums"
                     title={new Date(line.thread.at).toLocaleString()}
                   >
                     <Age from={new Date(line.thread.at)} />

@@ -508,7 +508,7 @@ test('the rail names the active thread, titles the untitled honestly, and marks 
       projectNotice={undefined}
     />,
   )
-  expect(rendered).toContain('New Thread')
+  expect(rendered).toContain('New thread')
   expect(rendered).toContain(UNTITLED_THREAD)
   expect(rendered).toContain('fix the login bug')
   expect(rendered).toContain('6d')
