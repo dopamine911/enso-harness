@@ -80,7 +80,7 @@ function guardCheckOf(thread: PermissionCheckThread, request: EnsoPermissionChec
   const { refusal } = answered
   return refusal === undefined
     ? { kind: 'passed', tool: call.toolName }
-    : { kind: 'refused', tool: call.toolName, rule: refusal.rule, reason: refusal.reason }
+    : { kind: 'refused', tool: call.toolName, rule: refusal.rule, cause: refusal.cause, reason: refusal.reason }
 }
 
 /**

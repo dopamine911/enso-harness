@@ -2613,6 +2613,7 @@ test("Try a command over HTTP: a guard's refusal reaches the page beside the eng
       kind: 'refused',
       tool: 'bash',
       rule: 'secret-path',
+      cause: 'bash command refused: "~/.ssh/id_ed25519" names credential material.',
       reason: 'bash command refused: "~/.ssh/id_ed25519" names credential material.',
     },
     state: 'allow',

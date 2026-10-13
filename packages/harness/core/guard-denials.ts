@@ -94,7 +94,10 @@ export function pathArgumentOf(input: unknown): string | undefined {
  */
 export interface GuardDenial {
   readonly block: true
+  /** What the model is told: the cause, then the ask line its rule's kind adds, if any. */
   readonly reason: string
+  /** The refusal itself, without the ask line addressed to the model: what a person reads (#881). */
+  readonly cause: string
   readonly rule: EnsoGuardRule
   /** An authorization refusal ends the turn (#465): pi stops once every call of the batch set it. */
   readonly terminate?: true
@@ -145,6 +148,7 @@ export function deny(rule: EnsoGuardRule, reason: string, egress?: GuardDenial['
   return {
     block: true,
     reason: askLine === undefined ? reason : `${reason}\n\n${askLine}`,
+    cause: reason,
     rule,
     ...(kind === 'authorization' || kind === 'suspension' ? { terminate: true } : {}),
     ...(egress === undefined ? {} : { egress }),
