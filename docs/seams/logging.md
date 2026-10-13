@@ -241,7 +241,10 @@ its role, pid and start time) and removes it on any end that still runs code; a 
 directory (`process-marker.ts#reconcileProcessMarkers`) and writes `previous {role} pid {pid} started
 {startedAt} ended without a record` for each marker whose owner is gone. Liveness is the pid *and* its
 kernel start time (`/proc/<pid>/stat` on Linux), since a pid is reused after the very reboot a power
-loss is. The runtime as a child (`'pi'`) gets the marker and the reconciliation but not the signal and
+loss is. Other processes write and remove markers while a start reads them, so a start reports
+none of three things that are not ends (#906): a running writer's staging file (a marker
+mid-write), a file gone between the listing and the read, and a marker its owner removed on a
+clean exit after it was read. The runtime as a child (`'pi'`) gets the marker and the reconciliation but not the signal and
 crash handlers — those are the runtime's own to install — so its unclean end is still said, by the
 next start. The day's stats fold the three outcomes per launch (`log-stats.ts#EnsoDayStats`, `processes[].ended`,
 `totals.stops/crashes/uncleanEnds`), and the Stats page shows them beside the provider refusals (#340).
