@@ -47,6 +47,20 @@ function headingOf(page: PageUrl): PageHeading {
   return { title: 'Page not found', status: 'Page not found' }
 }
 
+/** The breadcrumb back: where the page sits, one click up. */
+function BackLink({ back, onOpen }: { back: PageBack; onOpen: (route: PageRoute) => void }): React.ReactNode {
+  return (
+    <button
+      type="button"
+      onClick={() => onOpen(back.to)}
+      className="flex items-center gap-0.5 rounded-sm text-xs text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring [&_svg]:size-3"
+    >
+      <ChevronLeftIcon />
+      {back.label}
+    </button>
+  )
+}
+
 /**
  * A page's header: the threads button (narrow screens), the mark, the breadcrumb back where the page
  * has one, its title and what it is. Arriving on a page moves focus to its title, so a keyboard or
@@ -89,19 +103,6 @@ export function PageHeader({
   )
 }
 
-function BackLink({ back, onOpen }: { back: PageBack; onOpen: (route: PageRoute) => void }): React.ReactNode {
-  return (
-    <button
-      type="button"
-      onClick={() => onOpen(back.to)}
-      className="flex items-center gap-0.5 rounded-sm text-xs text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring [&_svg]:size-3"
-    >
-      <ChevronLeftIcon />
-      {back.label}
-    </button>
-  )
-}
-
 /** A page or section Enso doesn't have: what was asked, and the way back. */
 function NotFound({
   page,
@@ -112,24 +113,21 @@ function NotFound({
   onOpen: (route: PageRoute) => void
   onLeave: () => void
 }): React.ReactNode {
-  const inSettings = page.within === 'settings'
+  // Within Settings, Settings is the way back; a page Enso doesn't have at all goes back to the thread.
+  const [where, wayBack, back] =
+    page.within === 'settings'
+      ? ['Settings has no section called', 'Open Settings', (): void => onOpen(SETTINGS_ROUTE)]
+      : ['Enso has no page called', 'Back to the thread', onLeave]
   return (
     <div className="grid min-h-full place-items-center p-6">
       <div className="flex w-full max-w-lg flex-col items-start gap-4 rounded-lg border bg-card p-8">
         <SearchXIcon aria-hidden="true" className="size-7 text-muted-foreground" />
         <p className="text-sm">
-          {inSettings ? 'Settings has no section called ' : 'Enso has no page called '}
-          <code className="font-mono break-all">“{page.asked}”</code>.
+          {where} <code className="font-mono break-all">“{page.asked}”</code>.
         </p>
-        {inSettings ? (
-          <Button type="button" onClick={() => onOpen(SETTINGS_ROUTE)}>
-            Open Settings
-          </Button>
-        ) : (
-          <Button type="button" onClick={onLeave}>
-            Back to the thread
-          </Button>
-        )}
+        <Button type="button" onClick={back}>
+          {wayBack}
+        </Button>
       </div>
     </div>
   )
