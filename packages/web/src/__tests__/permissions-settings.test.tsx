@@ -129,6 +129,7 @@ function verdictFor(request: EnsoPermissionCheckRequest): EnsoPermissionVerdict 
         kind: 'refused',
         tool: 'read',
         rule: 'secret-read',
+        cause: 'read refused: "~/.ssh/id_ed25519" is credential material.',
         reason: 'read refused: "~/.ssh/id_ed25519" is credential material.',
       },
       state: 'deny',
@@ -683,7 +684,7 @@ test('⚠ try a command on `path` asks the thread for the path, and shows the gu
   const guard = await eventually(() => find(mounted, '[aria-label="guard"]'))
   expect(mounted.sent.at(-1)?.body).toEqual({ surface: 'path', value: '~/.ssh/id_ed25519' })
   expect(guard.textContent).toContain('Refused by a guard: secret-read')
-  expect(guard.textContent).toContain('asked as a read call')
+  expect(guard.textContent).toContain('Asked as a read call')
   expect(find(mounted, '[aria-label="verdict"]').textContent).toContain('engine (moot)deny')
   // A path no guard refuses: the pass names both calls it stands for.
   await typeInto(mounted, 'check value', 'src/a.ts')

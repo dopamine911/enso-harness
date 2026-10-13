@@ -1132,7 +1132,13 @@ test('⚠ Try a command on `path`: a guard refuses the key as a read in every mo
     expect({ mode, states }).toEqual({ mode, states: ['allow', 'deny', 'deny'] })
     expect({ mode, guard: hosted.checkPermission({ surface: 'path', value: SSH_KEY })?.guard }).toEqual({
       mode,
-      guard: { kind: 'refused', tool: 'read', rule: 'secret-read', reason: expect.stringContaining('.ssh') },
+      guard: {
+        kind: 'refused',
+        tool: 'read',
+        rule: 'secret-read',
+        cause: expect.stringContaining('.ssh'),
+        reason: expect.stringContaining('.ssh'),
+      },
     })
     // The read the check names is the call the session refuses.
     expect({ mode, blocked: (await hosted.probeToolCall('read', { path: SSH_KEY }))?.block }).toEqual({
@@ -1149,6 +1155,7 @@ test('Try a command on `path` asks the read, then the write: the first refusal a
     kind: 'refused',
     tool: 'write',
     rule: 'read-before-write',
+    cause: expect.stringContaining('package.json'),
     reason: expect.stringContaining('package.json'),
   })
   // A new file in the project: no guard refuses it, read or written.
