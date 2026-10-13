@@ -306,6 +306,22 @@ export const CONFIG_FIELD_METADATA: readonly ConfigFieldMetadata[] = [
     'Omitted from the Tavily request.',
     'webSearchConfig.tavily?.includeDomains',
   ),
+  {
+    field: 'claudeCode',
+    required: 'no',
+    defaultWhenOmitted:
+      'A Claude login claims pi’s own Claude Code version: conversations send pi’s, and the web search sends the same one. User-only: a trusted project’s `claudeCode` is ignored with a notice (#925).',
+    reader: `\`${WEB_SEARCH_SOURCE}#createWebSearch\``,
+    check: { file: WEB_SEARCH_SOURCE, contains: 'parsed.config.claudeCode?.version' },
+  },
+  {
+    field: 'claudeCode.version',
+    required: 'yes',
+    defaultWhenOmitted:
+      'n/a — required once `claudeCode` is present: a version as Anthropic writes them (`"2.1.284"`). It is the `claude-cli/<version>` user-agent of every request made with a Claude login (OAuth), the conversation’s and the web search’s alike; an API key’s requests claim none. Set it when Anthropic refuses a request as `claude_code_version_too_old` before pi has caught up: the refusal names the version it requires. New sessions use it (#925).',
+    reader: `\`${WEB_SEARCH_SOURCE}#claimClaudeCodeVersion\``,
+    check: { file: WEB_SEARCH_SOURCE, contains: "headers['user-agent'] = claudeCodeUserAgent(version)" },
+  },
   incidentField('', 'Incidents alert and suspend nothing; the default risk thresholds.', 'security?.incidents'),
   incidentField(
     '.incidents',

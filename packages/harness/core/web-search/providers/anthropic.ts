@@ -1,6 +1,13 @@
+import {
+  CLAUDE_CODE_DEFAULT_VERSION,
+  claudeCodeUserAgent,
+  claudeCodeVersionHint,
+  claudeCodeVersionRefusalOf,
+  isClaudeLoginCredential,
+} from '@enso/core'
 import { runAnthropicWireSearch } from '../anthropic-wire.ts'
 import { resolveProviderCredential } from '../dispatch.ts'
-import type { ModelSearchRequest, WebSearchOutcome } from '../vocabulary.ts'
+import { type ModelSearchRequest, type WebSearchOutcome, WebSearchProviderError } from '../vocabulary.ts'
 import { trimTrailingSlash } from '../wire-json.ts'
 
 /**
@@ -17,16 +24,6 @@ import { trimTrailingSlash } from '../wire-json.ts'
 const ANTHROPIC_API_VERSION = '2023-06-01'
 /** The beta flags the Claude Code OAuth credential requires on direct API calls. */
 const ANTHROPIC_OAUTH_BETA_FLAGS = 'claude-code-20250219,oauth-2025-04-20'
-/**
- * ⚠ The Claude Code version the OAuth search claims: EXACTLY pi-ai's own hardcoded
- * `claudeCodeVersion` (anthropic-messages.js), which pi's conversation path sends — pi exposes no
- * export for it, and `harness/core` may not import pi (#145). A drift is a broken search, not a
- * cosmetic one: Anthropic refuses the OAuth `web_search` tool below its minimum
- * (`claude_code_version_too_old`, #925) while conversations still pass.
- * `harness/extensions/web-search/__tests__/claude-code-version.test.ts` reads pi's installed value
- * and fails when this one differs, so a pi upgrade that moves it is caught there.
- */
-const ANTHROPIC_OAUTH_USER_AGENT = 'claude-cli/2.1.280'
 /**
  * ⚠ Load-bearing on the OAuth path, not branding: Anthropic rejects a Claude Code OAuth
  * credential whose request lacks this exact identity as the first system block —
@@ -48,8 +45,18 @@ function resolveMessagesUrl(baseUrl: string): string {
   return base.endsWith('/v1') ? `${base}/messages` : `${base}/v1/messages`
 }
 
-/** The Claude Code OAuth credential's headers; a caller-supplied `Authorization` wins. */
-function applyOAuthHeaders(headers: Record<string, string>, apiKey: string): void {
+/**
+ * The Claude Code OAuth credential's headers; a caller-supplied `Authorization` wins.
+ *
+ * The user-agent claims the configured Claude Code version when there is one (#925), over a
+ * model's own header, as pi's conversation path does with the same setting (the request headers
+ * it is given override the model's); else the model's, else the version pi itself sends.
+ */
+function applyOAuthHeaders(
+  headers: Record<string, string>,
+  apiKey: string,
+  claudeCodeVersion: string | undefined,
+): void {
   if (headers.Authorization === undefined && headers.authorization === undefined) {
     headers.Authorization = `Bearer ${apiKey}`
   }
@@ -57,21 +64,42 @@ function applyOAuthHeaders(headers: Record<string, string>, apiKey: string): voi
     headers['anthropic-beta'] !== undefined
       ? `${headers['anthropic-beta']},${ANTHROPIC_OAUTH_BETA_FLAGS}`
       : ANTHROPIC_OAUTH_BETA_FLAGS
-  headers['user-agent'] = headers['user-agent'] ?? ANTHROPIC_OAUTH_USER_AGENT
+  headers['user-agent'] =
+    claudeCodeVersion !== undefined
+      ? claudeCodeUserAgent(claudeCodeVersion)
+      : (headers['user-agent'] ?? claudeCodeUserAgent(CLAUDE_CODE_DEFAULT_VERSION))
   headers['x-app'] = headers['x-app'] ?? 'cli'
 }
 
 /** Adds the credential's auth to `headers`; `true` when it is a Claude Code OAuth credential. */
-function applyCredentialHeaders(headers: Record<string, string>, apiKey: string | undefined): boolean {
+function applyCredentialHeaders(
+  headers: Record<string, string>,
+  apiKey: string | undefined,
+  claudeCodeVersion: string | undefined,
+): boolean {
   if (apiKey === undefined || apiKey.length === 0) return false
-  if (apiKey.includes('sk-ant-oat')) {
-    applyOAuthHeaders(headers, apiKey)
+  if (isClaudeLoginCredential(apiKey)) {
+    applyOAuthHeaders(headers, apiKey, claudeCodeVersion)
     return true
   }
   if (headers['x-api-key'] === undefined && headers['X-Api-Key'] === undefined) {
     headers['x-api-key'] = apiKey
   }
   return false
+}
+
+/**
+ * Anthropic's refusal of the claimed Claude Code version, with what to do about it in Enso (#925):
+ * its own sentence says "Run 'claude update'", which changes nothing Enso sends. Any other error
+ * is returned as it came.
+ */
+function withVersionHint(error: unknown): unknown {
+  if (!(error instanceof WebSearchProviderError)) return error
+  const refusal = claudeCodeVersionRefusalOf(error.message)
+  if (refusal === undefined) return error
+  return new WebSearchProviderError(error.providerId, `${error.message} ${claudeCodeVersionHint(refusal)}`, {
+    requestDispatched: error.requestDispatched,
+  })
 }
 
 function answerTokensFor(maxTokens: number): number {
@@ -93,20 +121,24 @@ export async function runAnthropicProviderSearch(request: ModelSearchRequest): P
     ...request.model.headers,
     ...credential.headers,
   }
-  const isOAuthCredential = applyCredentialHeaders(headers, credential.apiKey)
+  const isOAuthCredential = applyCredentialHeaders(headers, credential.apiKey, request.claudeCodeVersion)
   const answerTokens = answerTokensFor(request.model.maxTokens)
 
-  return runAnthropicWireSearch({
-    providerId: 'anthropic',
-    endpointUrl: resolveMessagesUrl(request.model.baseUrl),
-    headers,
-    modelId: request.model.id,
-    prompt: request.query,
-    systemTextBlocks: isOAuthCredential ? [ANTHROPIC_OAUTH_IDENTITY] : undefined,
-    maxTokens: answerTokens,
-    maxServerToolUses: MAX_SERVER_TOOL_USES,
-    fetchUrl: request.fetchUrl,
-    signal: request.signal,
-    onProgress: request.onProgress,
-  })
+  try {
+    return await runAnthropicWireSearch({
+      providerId: 'anthropic',
+      endpointUrl: resolveMessagesUrl(request.model.baseUrl),
+      headers,
+      modelId: request.model.id,
+      prompt: request.query,
+      systemTextBlocks: isOAuthCredential ? [ANTHROPIC_OAUTH_IDENTITY] : undefined,
+      maxTokens: answerTokens,
+      maxServerToolUses: MAX_SERVER_TOOL_USES,
+      fetchUrl: request.fetchUrl,
+      signal: request.signal,
+      onProgress: request.onProgress,
+    })
+  } catch (error) {
+    throw withVersionHint(error)
+  }
 }

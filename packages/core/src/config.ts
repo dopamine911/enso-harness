@@ -1,5 +1,6 @@
 import { type Static, Type } from 'typebox'
 import { Compile } from 'typebox/compile'
+import { ClaudeCodeConfig } from './claude-code.ts'
 import { EnsoProjectsConfig } from './project.ts'
 import { EnsoSecurityConfig } from './session-incident.ts'
 import { WebFetchConfig } from './web-fetch.ts'
@@ -88,6 +89,7 @@ export const EnsoConfig = Type.Object(
     projects: Type.Optional(EnsoProjectsConfig),
     security: Type.Optional(EnsoSecurityConfig),
     threads: Type.Optional(EnsoThreadsConfig),
+    claudeCode: Type.Optional(ClaudeCodeConfig),
   },
   { additionalProperties: false },
 )

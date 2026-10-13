@@ -258,6 +258,7 @@ function configInventory(): { fields: ConfigFieldMetadata[] } {
   const projectSource = readFileSync(join(ROOT, 'packages/core/src/project.ts'), 'utf8')
   const incidentSource = readFileSync(join(ROOT, 'packages/core/src/session-incident.ts'), 'utf8')
   const judgeSource = readFileSync(join(ROOT, 'packages/core/src/command-judge.ts'), 'utf8')
+  const claudeCodeSource = readFileSync(join(ROOT, 'packages/core/src/claude-code.ts'), 'utf8')
   const discovered = [
     ...objectFields(configSource, 'EnsoConfig'),
     ...objectFields(webFetchSource, 'WebFetchConfig', 'webFetch.'),
@@ -265,6 +266,7 @@ function configInventory(): { fields: ConfigFieldMetadata[] } {
     ...objectFields(projectSource, 'EnsoProjectsConfig', 'projects.'),
     ...objectFields(incidentSource, 'EnsoSecurityConfig', 'security.'),
     ...objectFields(judgeSource, 'EnsoJudgeConfig', 'security.judge.'),
+    ...objectFields(claudeCodeSource, 'ClaudeCodeConfig', 'claudeCode.'),
   ].toSorted()
   const metadata = [...CONFIG_FIELD_METADATA].toSorted((left, right) => compareText(left.field, right.field))
   const classified = metadata.map((row) => row.field)
