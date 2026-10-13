@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { Check } from 'typebox/value'
 import type { FetchLike } from './browser-logging.ts'
 import { DeleteThread } from './delete-thread-dialog.tsx'
-import { describeSize, formatBytes, type SizeSum, totalOf } from './disk-usage.ts'
+import { describeSize, formatBytes, projectDiskUsage, type SizeSum, totalOf } from './disk-usage.ts'
 import { describeFailedResponse } from './stored-threads.ts'
 
 /**
@@ -14,7 +14,7 @@ import { describeFailedResponse } from './stored-threads.ts'
  * such, never as 0.
  */
 
-type TreesRead =
+export type TreesRead =
   | { readonly kind: 'loading' }
   | { readonly kind: 'read'; readonly listing: EnsoTreesListing }
   | { readonly kind: 'failed'; readonly reason: string }
@@ -41,6 +41,55 @@ async function readTrees(fetchImpl: FetchLike): Promise<TreesRead> {
  */
 const pageFetch: FetchLike = (input, init) => fetch(input, init)
 
+/**
+ * `GET /api/trees`, read when the caller mounts and again on `reload` — Storage reloads after a
+ * delete, as the tree is gone. The Projects page reads it once (#870). A read answered after the
+ * caller unmounted or reloaded is dropped.
+ */
+export function useTreesListing(fetchImpl: FetchLike | undefined): {
+  readonly read: TreesRead
+  readonly fetchNow: FetchLike
+  readonly reload: () => void
+} {
+  const fetchNow = fetchImpl ?? pageFetch
+  const [read, setRead] = useState<TreesRead>({ kind: 'loading' })
+  const [generation, setGeneration] = useState(0)
+  useEffect(() => {
+    let current = true
+    void readTrees(fetchNow).then((next) => {
+      if (current) setRead(next)
+    })
+    return (): void => {
+      current = false
+    }
+  }, [fetchNow, generation])
+  return { read, fetchNow, reload: () => setGeneration((count) => count + 1) }
+}
+
+/**
+ * What a project takes on disk, as the Projects page's card and Storage's project heading both say
+ * it (#870): `projectDiskUsage`'s one sum, exact when every part was measured, else "at least" with
+ * why — never read as exact.
+ */
+export function ProjectOnDisk({
+  listing,
+  projectId,
+}: {
+  listing: EnsoTreesListing
+  projectId: string
+}): React.ReactNode {
+  const size = projectDiskUsage(listing, projectId)
+  return (
+    <span>
+      <strong className="font-semibold text-foreground tabular-nums">
+        {size.kind === 'measured' ? formatBytes(size.bytes) : `at least ${formatBytes(size.bytes)}`}
+      </strong>{' '}
+      on disk
+      {size.kind === 'partial' ? <span className="text-destructive"> (partial: {size.reason})</span> : null}
+    </span>
+  )
+}
+
 export function TreesSection({
   fetch: fetchImpl,
   projects,
@@ -55,23 +104,12 @@ export function TreesSection({
   /** The server deleted this thread: the page leaves it, as the header's Delete does. */
   onDeleted: (threadId: string) => void
 }): React.ReactNode {
-  const fetchNow = fetchImpl ?? pageFetch
-  const [read, setRead] = useState<TreesRead>({ kind: 'loading' })
-  const [generation, setGeneration] = useState(0)
+  const { read, fetchNow, reload } = useTreesListing(fetchImpl)
   /** A refusal force cannot change, said on its tree's row; by thread id. */
   const [refused, setRefused] = useState<Readonly<Record<string, string>>>({})
-  useEffect(() => {
-    let current = true
-    void readTrees(fetchNow).then((next) => {
-      if (current) setRead(next)
-    })
-    return (): void => {
-      current = false
-    }
-  }, [fetchNow, generation])
   // A delete reloads the listing — the tree is gone, and its project's snapshots may be smaller.
   const deleted = (threadId: string): void => {
-    setGeneration((count) => count + 1)
+    reload()
     onDeleted(threadId)
   }
 
@@ -91,8 +129,11 @@ export function TreesSection({
         const title = projects.find((known) => known.projectId === project.projectId)?.title ?? project.projectId
         return (
           <section key={project.projectId} aria-label={`trees of ${title}`}>
-            <h3 className="flex items-baseline gap-2 font-heading text-sm font-semibold">
+            <h3 className="flex flex-wrap items-baseline gap-x-2 font-heading text-sm font-semibold">
               {title}
+              <span className="text-xs font-normal text-muted-foreground">
+                <ProjectOnDisk listing={read.listing} projectId={project.projectId} />
+              </span>
               {project.objectStore === null ? null : (
                 <span className="text-xs font-normal text-muted-foreground">
                   snapshots {describeSize(project.objectStore)}
@@ -100,7 +141,8 @@ export function TreesSection({
               )}
             </h3>
             {project.trees.length === 0 ? <p className="mt-2 text-sm text-muted-foreground">No thread trees.</p> : null}
-            <ul className="mt-2 grid gap-2">
+            {/* Named apart from the heading: the project's total there reads as a size too. */}
+            <ul aria-label={`each tree of ${title}`} className="mt-2 grid gap-2">
               {project.trees
                 .toSorted(
                   // For order only: an unreadable size sorts as 0, and is never shown as one.

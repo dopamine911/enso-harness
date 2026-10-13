@@ -1,4 +1,4 @@
-import type { EnsoDiskUsage } from '@enso/core'
+import type { EnsoDiskUsage, EnsoTreesListing } from '@enso/core'
 
 /** Decimal units, as `du --si` and file managers say them: a kilobyte is 1000 bytes. */
 const UNITS = ['B', 'kB', 'MB', 'GB', 'TB'] as const
@@ -47,4 +47,16 @@ export function totalOf(sizes: readonly EnsoDiskUsage[]): SizeSum {
   }
   if (short === 0) return { kind: 'measured', bytes }
   return { kind: 'partial', bytes, reason: `${short} of ${sizes.length} not fully read` }
+}
+
+/**
+ * What one project takes on disk (#870): its trees and its snapshot store, summed from `GET
+ * /api/trees`. The ONE sum the Projects page's card and Settings › Storage both say, so the same
+ * project reads the same number in each. A project the listing does not name has neither on disk.
+ */
+export function projectDiskUsage(listing: EnsoTreesListing, projectId: string): SizeSum {
+  const project = listing.projects.find((listed) => listed.projectId === projectId)
+  if (project === undefined) return { kind: 'measured', bytes: 0 }
+  const store = project.objectStore === null ? [] : [project.objectStore]
+  return totalOf([...project.trees.map((tree) => tree.size), ...store])
 }

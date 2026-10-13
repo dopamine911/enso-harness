@@ -102,7 +102,7 @@ async function mountRail(): Promise<{ readonly opened: string[]; readonly unmoun
       onAddProject={noop}
       onRemoveProject={noop}
       onProjectSettings={(projectId: string) => opened.push(projectId)}
-      onSettings={noop}
+      onPage={noop}
       projectNotice={undefined}
     />,
   )

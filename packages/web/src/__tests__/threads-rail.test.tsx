@@ -485,7 +485,7 @@ test('the rail names the active thread, titles the untitled honestly, and marks 
       onAddProject={noop}
       onRemoveProject={noop}
       onProjectSettings={noop}
-      onSettings={noop}
+      onPage={noop}
       projectNotice={undefined}
     />,
   )
@@ -555,7 +555,7 @@ test("each project is a section with its own threads — the page's open ones, t
       onAddProject={noop}
       onRemoveProject={noop}
       onProjectSettings={noop}
-      onSettings={noop}
+      onPage={noop}
       projectNotice={undefined}
     />,
   )
@@ -636,7 +636,7 @@ test('⚠ two prompts that start alike read apart on the rail — the words past
       onAddProject={noop}
       onRemoveProject={noop}
       onProjectSettings={noop}
-      onSettings={noop}
+      onPage={noop}
       projectNotice={undefined}
     />,
   )
@@ -685,7 +685,7 @@ test('a fork says which thread it came from, by that thread’s title — a stor
       onAddProject={noop}
       onRemoveProject={noop}
       onProjectSettings={noop}
-      onSettings={noop}
+      onPage={noop}
       projectNotice={undefined}
     />,
   )
@@ -739,7 +739,7 @@ test('a folded section says a question is waiting in it, over a run in flight; u
         onAddProject={noop}
         onRemoveProject={noop}
         onProjectSettings={noop}
-        onSettings={noop}
+        onPage={noop}
         projectNotice={undefined}
       />,
     )
@@ -784,7 +784,7 @@ test('a section shows five stored threads and says how many more there are; a fa
     onAddProject: noop,
     onRemoveProject: noop,
     onProjectSettings: noop,
-    onSettings: noop,
+    onPage: noop,
     projectNotice: undefined,
   }
   const rendered = renderToStaticMarkup(<ThreadsRail {...props} earlier={earlier} earlierError={undefined} />)
@@ -824,7 +824,7 @@ test('every project has a menu, the launch directory too (#754); a refused remov
       onAddProject={noop}
       onRemoveProject={noop}
       onProjectSettings={noop}
-      onSettings={noop}
+      onPage={noop}
       projectNotice="could not remove the project: 409 a thread in this project is running"
     />,
   )

@@ -187,9 +187,22 @@ function SettingsOnPage({
       threadId={threadId}
       projects={NO_ROWS}
       stored={NO_ROWS}
+      pageThreads={[]}
       onDeleted={(deleted): void => {
         throw new Error(`the Permissions tests delete no thread, yet ${deleted} was`)
       }}
+      projectActions={{
+        onOpenThreads: (): void => {
+          throw new Error('the Permissions tests open no project')
+        },
+        onSettings: (): void => {
+          throw new Error('the Permissions tests open no project')
+        },
+        onRemove: (): void => {
+          throw new Error('the Permissions tests remove no project')
+        },
+      }}
+      projectNotice={undefined}
     />
   )
 }

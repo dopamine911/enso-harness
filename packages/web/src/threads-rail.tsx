@@ -3,6 +3,7 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   EllipsisIcon,
+  FolderIcon,
   FolderPlusIcon,
   GitForkIcon,
   PlusIcon,
@@ -21,7 +22,7 @@ import { pageClock } from './page-clock.ts'
 import { projectOf } from './project-list.ts'
 import { useStore } from './store.ts'
 import type { ThreadSummary } from './thread-stores.ts'
-import type { PageRoute } from './thread-url.ts'
+import { type PageRoute, PROJECTS_ROUTE, SETTINGS_ROUTE } from './thread-url.ts'
 
 /**
  * The threads rail (#90 PR 3, #395): which conversation am I in, in which project, what else is
@@ -37,9 +38,10 @@ import type { PageRoute } from './thread-url.ts'
  * shown with a running dot and still resumable: under the follow transport a resume follows the run
  * (#114). Idle is resumable too, even when this server still holds it — a reload must get its own
  * thread back. A section's `+` starts a thread IN that project; the header's New
- * Thread starts one in the project of the thread on screen. A fork (#433) says which thread it
+ * Thread starts in the project of the thread on screen. A fork (#433) says which thread it
  * came from under its title, by that thread's title — the listing's `parentThreadId`. At its foot,
- * the links to the pages (#869): Settings, marked as the current page while it is on screen.
+ * the links to the pages (#869, #870): Projects and Settings, each marked as the current page while
+ * it is on screen.
  *
  * Presentational: the lists, the active id, and the callbacks arrive as props, so a static
  * render pins the wording and the active marker without any chat. Two inputs are NOT props:
@@ -66,7 +68,7 @@ export function relativeAge(from: Date, now: Date): string {
  * the transcript above it do not re-render at all. Under a static render nothing subscribes
  * and the age is computed once, against the clock's load time.
  */
-function Age({ from }: { from: Date }): React.ReactNode {
+export function Age({ from }: { from: Date }): React.ReactNode {
   const now = useStore(pageClock)
   return <>{relativeAge(from, now)}</>
 }
@@ -130,8 +132,8 @@ export interface ThreadsRailProps {
   readonly onProjectSettings: (projectId: string) => void
   /** Why the last add or remove did not go through, or undefined. Shown above the sections. */
   readonly projectNotice: string | undefined
-  /** Open Settings (#869), the page its link at the rail's foot names. */
-  readonly onSettings: () => void
+  /** Open a page (#869, #870): Projects or Settings, by the link at the rail's foot that names it. */
+  readonly onPage: (route: PageRoute) => void
   /**
    * The page on screen (#869), whose link is marked as the current page; while one is, no thread row
    * is — the thread is behind the page. Absent, or undefined, is a thread on screen.
@@ -593,31 +595,51 @@ function ProjectSection({
   )
 }
 
-/** The rail's foot (#869): its links to the pages, the one on screen marked as the current page. */
+/** One link at the rail's foot: a page, marked as the current page while it is on screen. */
+function RailLink({
+  current,
+  onOpen,
+  children,
+}: {
+  current: boolean
+  onOpen: () => void
+  children: React.ReactNode
+}): React.ReactNode {
+  return (
+    <Button
+      type="button"
+      size="sm"
+      variant="ghost"
+      aria-current={current ? 'page' : undefined}
+      className={cn(
+        'h-9 w-full justify-start',
+        current ? 'bg-accent text-foreground hover:bg-accent' : 'text-muted-foreground',
+      )}
+      onClick={onOpen}
+    >
+      {children}
+    </Button>
+  )
+}
+
+/** The rail's foot (#869, #870): its links to the pages, the one on screen marked as the current page. */
 function RailFoot({
   page,
-  onSettings,
+  onPage,
 }: {
   page: PageRoute['kind'] | undefined
-  onSettings: () => void
+  onPage: (route: PageRoute) => void
 }): React.ReactNode {
-  const current = page === 'settings'
   return (
-    <div className="border-t p-3">
-      <Button
-        type="button"
-        size="sm"
-        variant="ghost"
-        aria-current={current ? 'page' : undefined}
-        className={cn(
-          'h-9 w-full justify-start',
-          current ? 'bg-accent text-foreground hover:bg-accent' : 'text-muted-foreground',
-        )}
-        onClick={onSettings}
-      >
+    <div className="grid gap-1 border-t p-3">
+      <RailLink current={page === 'projects'} onOpen={() => onPage(PROJECTS_ROUTE)}>
+        <FolderIcon />
+        Projects
+      </RailLink>
+      <RailLink current={page === 'settings'} onOpen={() => onPage(SETTINGS_ROUTE)}>
         <Settings2Icon />
         Settings
-      </Button>
+      </RailLink>
     </div>
   )
 }
@@ -663,7 +685,7 @@ export function ThreadsRail({
   onRemoveProject,
   onProjectSettings,
   projectNotice,
-  onSettings,
+  onPage,
   page,
   shownNarrow = false,
   forkParents = NO_FORKS,
@@ -711,7 +733,7 @@ export function ThreadsRail({
             Add project
           </Button>
         </div>
-        <RailFoot page={page} onSettings={onSettings} />
+        <RailFoot page={page} onPage={onPage} />
       </nav>
     </ForkParentsContext.Provider>
   )

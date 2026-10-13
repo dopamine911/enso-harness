@@ -45,35 +45,53 @@ export interface ThreadAfterDelete {
   readonly onPage: boolean
 }
 
+/** What a page knows of a project's threads: its own threads, the server's stored ones, and the projects that place them. */
+export interface ProjectThreadsContext {
+  readonly projects: readonly EnsoProject[]
+  readonly pageThreads: readonly ThreadSummary[]
+  readonly stored: readonly EnsoStoredThread[]
+}
+
+/** One of a project's threads: on this page (a pane, shown at once) or stored only (resumed), and when it was last active. */
+export interface ProjectThread extends ThreadAfterDelete {
+  /** Its last activity, in epoch milliseconds. */
+  readonly at: number
+}
+
+/**
+ * A project's threads that hold something — one on this page with a first prompt, or a stored one
+ * with messages — most recently active first: what the Projects page counts and opens (#870), and
+ * where a delete goes next. A page thread's project is the rail's (`projectOf`: none is the launch
+ * project's), so the two lists are compared by the same project id; one on this page is counted
+ * once, as the page thread.
+ */
+export function threadsOfProject(projectId: string, context: ProjectThreadsContext): ProjectThread[] {
+  const onPage = context.pageThreads
+    .filter((thread) => thread.title !== undefined)
+    .filter((thread) => projectOf(context.projects, thread.projectId)?.projectId === projectId)
+    .map((thread) => ({ threadId: thread.threadId, onPage: true, at: thread.lastActivityAt.getTime() }))
+  const pageIds = new Set(context.pageThreads.map((thread) => thread.threadId))
+  const storedOnly = context.stored
+    .filter((thread) => !pageIds.has(thread.threadId))
+    .filter((thread) => thread.projectId === projectId && thread.messageCount > 0)
+    .map((thread) => ({ threadId: thread.threadId, onPage: false, at: Date.parse(thread.lastActivityAt) }))
+  return [...onPage, ...storedOnly].toSorted((left, right) => right.at - left.at)
+}
+
 /**
  * The thread to show when the one on screen is deleted (#663): its project's most recently active
- * OTHER thread that holds something — one on this page with a first prompt, or a stored one with
- * messages — or undefined when there is none, and the page starts a fresh one. Measured in the arena:
- * a delete of one of two approaches opened a new empty thread and its Start dialog, though the other
- * was right there in the rail. A page thread's project is the rail's (`projectOf`: none is the
- * launch project's), so the two lists are compared by the same project id.
+ * OTHER thread that holds something (`threadsOfProject`), or undefined when there is none, and the
+ * page starts a fresh one. Measured in the arena: a delete of one of two approaches opened a new
+ * empty thread and its Start dialog, though the other was right there in the rail.
  */
 export function threadAfterDelete(
   deleted: string,
   deletedProjectId: string | undefined,
-  context: {
-    readonly projects: readonly EnsoProject[]
-    readonly pageThreads: readonly ThreadSummary[]
-    readonly stored: readonly EnsoStoredThread[]
-  },
+  context: ProjectThreadsContext,
 ): ThreadAfterDelete | undefined {
   const project = projectOf(context.projects, deletedProjectId)?.projectId
   if (project === undefined) return undefined
-  const onPage = context.pageThreads
-    .filter((thread) => thread.threadId !== deleted && thread.title !== undefined)
-    .filter((thread) => projectOf(context.projects, thread.projectId)?.projectId === project)
-    .map((thread) => ({ threadId: thread.threadId, onPage: true, at: thread.lastActivityAt.getTime() }))
-  const pageIds = new Set(context.pageThreads.map((thread) => thread.threadId))
-  const storedOnly = context.stored
-    .filter((thread) => thread.threadId !== deleted && !pageIds.has(thread.threadId))
-    .filter((thread) => thread.projectId === project && thread.messageCount > 0)
-    .map((thread) => ({ threadId: thread.threadId, onPage: false, at: Date.parse(thread.lastActivityAt) }))
-  const latest = [...onPage, ...storedOnly].toSorted((left, right) => right.at - left.at)[0]
+  const latest = threadsOfProject(project, context).find((thread) => thread.threadId !== deleted)
   return latest === undefined ? undefined : { threadId: latest.threadId, onPage: latest.onPage }
 }
 

@@ -5,7 +5,7 @@ import { AppHeader } from './page-header.tsx'
 import { type PageListings, projectList, storedThreads, usePageListings } from './page-listings.ts'
 import { mintPageThread, adoptPageThread, isDebugMode } from './page-mode.ts'
 import type { ThreadView } from './pane-context.ts'
-import { removeProject, threadAfterDelete } from './project-list.ts'
+import { removeProject, threadAfterDelete, threadsOfProject } from './project-list.ts'
 import { ProjectSettingsDialog } from './project-settings-dialog.tsx'
 import { PageHeader, RoutedPage } from './routed-page.tsx'
 import { createResumeRequests, fetchThreadHistory, storedThreadsNotOnThisPage } from './stored-threads.ts'
@@ -16,7 +16,7 @@ import {
   type PageUrl,
   readPageUrl,
   readThreadUrl,
-  SETTINGS_ROUTE,
+  showsPage,
   type ThreadUrl,
   urlForPage,
   urlForThread,
@@ -331,8 +331,7 @@ function usePageNavigation(listings: PageListings): PageNavigation {
     else window.history.replaceState(null, '', urlForThread(window.location.search, threadId))
   }, [])
   const openPage = useCallback((route: PageRoute): void => {
-    const shown = readPageUrl(window.location.search)
-    if (shown?.kind === route.kind && shown.section === route.section) return
+    if (showsPage(window.location.search, route)) return
     epoch.current += 1
     setPage(route)
     window.history.pushState(null, '', urlForPage(window.location.search, route))
@@ -367,6 +366,19 @@ function usePageNavigation(listings: PageListings): PageNavigation {
   return { activeThreadId, page, resumeError, navigate, resumeFrom, openFork, leaveDeleted, openPage, leavePage }
 }
 
+/**
+ * A Projects card's **Open threads** (#870): the project's most recently active thread — shown at
+ * once when it is on this page, resumed when stored — or, when it has none, a new thread in it.
+ * Either way the page is left, as a rail click leaves it. A gone folder with no thread offers none.
+ */
+function openProjectThreads(projectId: string, listings: PageListings, navigation: PageNavigation): void {
+  const { threads, stored, projects } = listings
+  const latest = threadsOfProject(projectId, { projects: projects.rows, pageThreads: threads, stored: stored.rows })[0]
+  if (latest === undefined) navigation.navigate(mintPageThread(projectId).threadId, 'push')
+  else if (latest.onPage) navigation.navigate(latest.threadId, 'push')
+  else navigation.resumeFrom(latest.threadId, 'push')
+}
+
 /** The page (#90): header, the sessions rail, one mounted pane per live thread, and a page over them (#869). */
 export function ChatScreen(): React.ReactNode {
   const listings = usePageListings()
@@ -397,7 +409,7 @@ export function ChatScreen(): React.ReactNode {
           stored={stored.rows}
         />
       ) : (
-        <PageHeader page={page} rail={rail} onOpen={openPage} />
+        <PageHeader page={page} rail={rail} onOpen={openPage} onAddProject={() => setAddingProject(true)} />
       )}
       <div className="flex min-h-0 flex-1">
         <ThreadsRail
@@ -414,8 +426,9 @@ export function ChatScreen(): React.ReactNode {
           onAddProject={() => setAddingProject(true)}
           onRemoveProject={(projectId: string) => void forgetProject(projectId)}
           onProjectSettings={editing.setSettingsProjectId}
-          projectNotice={projectNotice}
-          onSettings={() => rail.leave(openPage)(SETTINGS_ROUTE)}
+          // On Projects, a refused removal is said on the page, beside the card it was asked from: once.
+          projectNotice={page?.kind === 'projects' ? undefined : projectNotice}
+          onPage={rail.leave(openPage)}
           page={page?.kind === 'not-found' ? page.within : page?.kind}
           shownNarrow={rail.open}
         />
@@ -451,7 +464,14 @@ export function ChatScreen(): React.ReactNode {
             threadId={activeThreadId}
             projects={projects}
             stored={stored}
+            pageThreads={threads}
             onDeleted={leaveDeleted}
+            projectActions={{
+              onOpenThreads: (projectId) => openProjectThreads(projectId, listings, navigation),
+              onSettings: editing.setSettingsProjectId,
+              onRemove: (projectId) => void forgetProject(projectId),
+            }}
+            projectNotice={projectNotice}
           />
         </div>
       </div>

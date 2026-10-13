@@ -14,6 +14,7 @@ import {
   type EnsoSessionIncidents,
   type EnsoGitFileChange,
   type EnsoGitRepository,
+  type EnsoProject,
   type EnsoStoredThread,
   type EnsoThreadDeletePreview,
   type EnsoThreadStatusEvent,
@@ -3071,7 +3072,7 @@ const DELETABLE = 'stored-delete'
 
 /** The page with one stored thread, opened from the rail and on screen: one the server holds, so Delete is offered. */
 async function openDeletable(
-  options: Pick<ScriptedFetchOptions, 'deleteAnswers' | 'deletePreview' | 'trees' | 'histories'> & {
+  options: Pick<ScriptedFetchOptions, 'deleteAnswers' | 'deletePreview' | 'trees' | 'histories' | 'projects'> & {
     readonly others?: readonly EnsoStoredThread[]
   } = {},
 ): Promise<MountedPage> {
@@ -3380,7 +3381,10 @@ test("Settings' Storage lists each tree by its thread's title with size and held
   const settings = await openStorage(page)
   await eventually(() => expect(settings.textContent).not.toContain('Measuring…'))
   const section = settings.querySelector('section[aria-label="trees of launch"]')
-  expect(section?.querySelector('h3')?.textContent).toBe('launchsnapshots 2.1 GB')
+  // The project's total (#870): its trees and its snapshot store, one unreadable tree making it a partial.
+  expect(section?.querySelector('h3')?.textContent).toBe(
+    'launchat least 2.5 GB on disk (partial: 1 of 3 not fully read)snapshots 2.1 GB',
+  )
   const rows = [...(section?.querySelectorAll('li') ?? [])].map((row) => row.textContent ?? '')
   // Largest first: the unreadable one orders as 0, and is never said as 0.
   expect(rows[0]).toContain('try the parser rewrite')
@@ -4066,13 +4070,138 @@ test('a section Settings does not have, or a page Enso does not, is not found wi
     await page.click(buttonIn(page, 'header', 'Settings'))
     expect(pageInUrl()).toEqual(['settings', 'appearance'])
     expect(pageRegion(page)?.querySelector('h2')?.textContent).toBe('Appearance')
-    await popTo(`?thread=${DELETABLE}&page=projects`)
+    await popTo(`?thread=${DELETABLE}&page=project`)
     expect(pageHeading(page)).toBe('Page not found')
-    expect(pageRegion(page)?.textContent).toContain('Enso has no page called “projects”.')
+    expect(pageRegion(page)?.textContent).toContain('Enso has no page called “project”.')
     await page.click(buttonIn(page, '[role="region"]', 'Back to the thread'))
     expect(pageInUrl()).toEqual([null, null])
     expect(new URLSearchParams(window.location.search).get('thread')).toBe(DELETABLE)
     expect(page.visiblePanes()).toHaveLength(1)
+  } finally {
+    window.history.replaceState(null, '', '/')
+    await page.unmount()
+  }
+})
+
+// ── the Projects page (#870): opened from the rail, each project a card ──
+
+const LAUNCH_PROJECT: EnsoProject = {
+  projectId: 'p-launch',
+  title: 'launch',
+  path: '/scripted/launch',
+  status: 'ok',
+  launch: true,
+}
+/** A registered project: `OTHER_TREES`' project, with one stored thread of its own. */
+const OTHER_PROJECT: EnsoProject = { projectId: 'p-other', title: 'other', path: '/other', status: 'ok', launch: false }
+const OTHER_THREAD = 'stored-other'
+
+/** A project's card on the Projects page, by its name. */
+function projectCard(page: MountedPage, name: string): HTMLElement {
+  const card = [...page.container.querySelectorAll<HTMLElement>('ul[aria-label="Projects"] > li')].find(
+    (found) => found.querySelector('h2')?.textContent === name,
+  )
+  if (card === undefined) throw new Error(`expected the card of ${name}`)
+  return card
+}
+
+/** What a project takes on disk, as `scope` says it: the size that reads "… on disk". */
+function onDiskIn(scope: Element): string {
+  const size = [...scope.querySelectorAll('span')].find(
+    (span) => span.querySelector('strong') !== null && span.textContent.includes(' on disk'),
+  )
+  if (size === undefined) throw new Error('expected a size on disk')
+  return size.textContent
+}
+
+// @pins resume/url-names-page
+test('Projects opens from the rail as a page at its own URL; Open threads resumes the project’s latest thread and leaves the page; back returns', async () => {
+  const page = await openDeletable({
+    projects: [LAUNCH_PROJECT, OTHER_PROJECT],
+    others: [
+      {
+        threadId: OTHER_THREAD,
+        projectId: 'p-other',
+        title: 'tidy the docs',
+        lastActivityAt: new Date(Date.now() - 60_000).toISOString(),
+        messageCount: 2,
+        busy: false,
+      },
+    ],
+    histories: {
+      [OTHER_THREAD]: {
+        threadId: OTHER_THREAD,
+        projectId: 'p-other',
+        messages: [
+          { id: 'u3', role: 'user', parts: [{ type: 'text', content: 'tidy the docs' }] },
+          { id: 'a3', role: 'assistant', parts: [{ type: 'text', content: 'Tidying README.md' }] },
+        ],
+        permissionMode: { mode: 'default', available: ['default', 'plan'] },
+        sessionRisk: { level: 'low', signals: 0 },
+        incidents: NO_SESSION_INCIDENTS,
+      },
+    },
+  })
+  try {
+    const projectsLink = (): HTMLButtonElement => buttonIn(page, '#threads-rail', 'Projects')
+    await page.click(projectsLink())
+    expect(pageInUrl()).toEqual(['projects', null])
+    expect(new URLSearchParams(window.location.search).get('thread')).toBe(DELETABLE)
+    expect(pageHeading(page)).toBe('Projects')
+    expect(projectsLink().getAttribute('aria-current')).toBe('page')
+    expect(buttonIn(page, '#threads-rail', 'Settings').getAttribute('aria-current')).toBeNull()
+    expect(page.visiblePanes()).toHaveLength(0)
+    // The thread behind the page names the current project; the open thread and the stored one are counted once each.
+    expect(projectCard(page, 'launch').textContent).toContain('current')
+    expect(projectCard(page, 'other').textContent).not.toContain('current')
+    expect(projectCard(page, 'launch').textContent).toContain('1 thread')
+    const onProjects = window.location.search
+    const open = [...projectCard(page, 'other').querySelectorAll('button')].find(
+      (button) => button.textContent === 'Open threads',
+    )
+    if (open === undefined) throw new Error('expected Open threads on the card of other')
+    await page.click(open)
+    await eventually(() => {
+      expect(new URLSearchParams(window.location.search).get('thread')).toBe(OTHER_THREAD)
+      expect(page.container.textContent).toContain('Tidying README.md')
+    })
+    expect(pageInUrl()).toEqual([null, null])
+    expect(pageRegion(page)).toBeNull()
+    expect(projectsLink().getAttribute('aria-current')).toBeNull()
+    await popTo(onProjects)
+    expect(pageHeading(page)).toBe('Projects')
+  } finally {
+    window.history.replaceState(null, '', '/')
+    await page.unmount()
+  }
+})
+
+// The comment on #870: one project read three sizes in the prototype. One sum, so one number.
+test('⚠ each project’s card says the size Settings › Storage says for it — a partial one as "at least", never exact (#870)', async () => {
+  const page = await openDeletable({
+    projects: [LAUNCH_PROJECT, OTHER_PROJECT],
+    trees: () => ({ projects: [LAUNCH_TREES, OTHER_TREES] }),
+  })
+  try {
+    await page.click(buttonIn(page, '#threads-rail', 'Projects'))
+    const cards = await eventually(() => {
+      const read = [onDiskIn(projectCard(page, 'launch')), onDiskIn(projectCard(page, 'other'))]
+      expect(read.join()).not.toContain('measuring')
+      return read
+    })
+    const settings = await openStorage(page)
+    await eventually(() => expect(settings.textContent).not.toContain('Measuring…'))
+    const storage = ['launch', 'other'].map((title) => {
+      const heading = settings.querySelector(`section[aria-label="trees of ${title}"] h3`)
+      if (heading === null) throw new Error(`expected Storage's group of ${title}`)
+      return onDiskIn(heading)
+    })
+    expect(cards).toEqual(storage)
+    // 412 MB + 2.1 GB, the unreadable tree not counted as 0; 88 MB + at least 300 MB.
+    expect(cards).toEqual([
+      'at least 2.5 GB on disk (partial: 1 of 3 not fully read)',
+      'at least 388 MB on disk (partial: 1 of 2 not fully read)',
+    ])
   } finally {
     window.history.replaceState(null, '', '/')
     await page.unmount()

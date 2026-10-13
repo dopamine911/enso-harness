@@ -68,11 +68,14 @@ export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]
 const isSettingsSection = (value: string): value is SettingsSection =>
   (SETTINGS_SECTIONS as readonly string[]).includes(value)
 
-/** A page the URL can name and the page can open. */
-export type PageRoute = { readonly kind: 'settings'; readonly section: SettingsSection }
+/** A page the URL can name and the page can open: a Settings section, or the Projects page (#870). */
+export type PageRoute = { readonly kind: 'settings'; readonly section: SettingsSection } | { readonly kind: 'projects' }
 
 /** Settings as its link opens it: the first section. */
 export const SETTINGS_ROUTE: PageRoute = { kind: 'settings', section: SETTINGS_SECTIONS[0] }
+
+/** The Projects page (#870): every project as a card. It has no sections. */
+export const PROJECTS_ROUTE: PageRoute = { kind: 'projects' }
 
 /**
  * What a URL's `page` names: a page, or something Enso has no page for — said as such, never a
@@ -91,9 +94,17 @@ function readSettingsUrl(parameters: URLSearchParams): PageUrl {
   return { kind: 'not-found', asked: section.slice(0, 40), within: 'settings' }
 }
 
+/** The Projects page: it has no sections, so one named is not found — never a section guessed at. */
+function readProjectsUrl(parameters: URLSearchParams): PageUrl {
+  const section = parameters.get(SECTION_QUERY_PARAMETER)
+  if (section === null || section === '') return PROJECTS_ROUTE
+  return { kind: 'not-found', asked: section.slice(0, 40), within: 'projects' }
+}
+
 /** The route table: a page's name in the URL → how its own parameters read. */
 const PAGE_READERS: Readonly<Record<string, (parameters: URLSearchParams) => PageUrl>> = {
   settings: readSettingsUrl,
+  projects: readProjectsUrl,
 }
 
 /**
@@ -126,8 +137,15 @@ function withoutPage(search: string): URLSearchParams {
 export function urlForPage(search: string, route: PageRoute): string {
   const parameters = withoutPage(search)
   parameters.set(PAGE_QUERY_PARAMETER, route.kind)
-  parameters.set(SECTION_QUERY_PARAMETER, route.section)
+  if (route.kind === 'settings') parameters.set(SECTION_QUERY_PARAMETER, route.section)
   return `?${parameters.toString()}`
+}
+
+/** Whether `search` already shows `route`: the same page, and for Settings the same section. */
+export function showsPage(search: string, route: PageRoute): boolean {
+  const shown = readPageUrl(search)
+  if (shown?.kind !== route.kind) return false
+  return route.kind !== 'settings' || (shown.kind === 'settings' && shown.section === route.section)
 }
 
 /** The URL showing `threadId` and no page — a thread opened from a page leaves it; every other parameter kept. */

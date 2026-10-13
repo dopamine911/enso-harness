@@ -94,7 +94,7 @@ export const THREAD_TREES: FeatureSpec = {
         {
           target: {
             text: /^\d+(\.\d)? (B|kB|MB|GB|TB)$/,
-            within: { role: 'region', name: /^trees of /, within: SETTINGS },
+            within: { role: 'list', name: /^each tree of /, within: SETTINGS },
           },
           says: 'What the tree takes on disk, ignored files and installs included. Trees are listed largest first.',
         },
