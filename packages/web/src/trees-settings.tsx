@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { Check } from 'typebox/value'
 import type { FetchLike } from './browser-logging.ts'
 import { Button } from './components/ui/button.tsx'
-import { DeleteThread } from './delete-thread-dialog.tsx'
+import { DeleteThreadButton } from './delete-thread-dialog.tsx'
 import { describeSize, formatBytes, projectDiskUsage, type SizeSum, totalOf } from './disk-usage.ts'
 import { describeFailedResponse } from './stored-threads.ts'
 
@@ -105,7 +105,7 @@ interface TreeListContext {
 
 /**
  * One project's trees, biggest first: each one's size, whether it holds work, and its Delete — the
- * header's dialog, with its holds-work refusal and Delete anyway (#571). Settings › Storage lists one
+ * thread menu's dialog (#879), with its holds-work refusal and Delete anyway (#571). Settings › Storage lists one
  * per project; a project page's Storage tab, its own (#871).
  */
 function ProjectTreeList({
@@ -142,7 +142,7 @@ function ProjectTreeList({
                 <span className="text-muted-foreground">{tree.kind}</span>
                 <span className="tabular-nums">{describeSize(tree.size)}</span>
                 {threadId === null ? null : (
-                  <DeleteThread
+                  <DeleteThreadButton
                     target={{ threadId, fetch: fetchNow }}
                     label={`delete thread ${name}`}
                     stored={stored}

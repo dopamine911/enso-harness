@@ -920,9 +920,11 @@ export function PromptManagerDialog({
     <HeaderDialog
       open={open}
       onOpenChange={(next: boolean) => (next ? setOpen(true) : manager.close())}
-      label="prompts"
-      hover="prompts — the library of system, append and session prompts"
-      icon={<ScrollTextIcon />}
+      trigger={{
+        label: 'prompts',
+        hover: 'prompts — the library of system, append and session prompts',
+        icon: <ScrollTextIcon />,
+      }}
       title="Prompts"
       description="markdown files in ENSO_HOME/prompts — edit, copy and name them here; a trusted project's own, in .enso/prompts, are read-only"
       contentClassName="flex h-5/6 flex-col sm:max-w-6xl"

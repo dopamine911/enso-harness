@@ -6,7 +6,7 @@ import { ChatLayout } from './chat-layout.tsx'
 import { ChatPromptInput } from './composer.tsx'
 import { routeEnsoCustomEvent } from './custom-event-router.ts'
 import { createFixtureChat } from './fixture-conversation.ts'
-import { ForkContext, forkFromPage, RestoreContext, restoreFromPage } from './fork-thread.ts'
+import { ForkContext, forkFromPage, offerPaneFork, RestoreContext, restoreFromPage } from './fork-thread.ts'
 import { ChatMessageRow } from './message-row.tsx'
 import { isFixtureMode } from './page-mode.ts'
 import {
@@ -197,6 +197,8 @@ export function ThreadPane({
           },
     [stores, onForked],
   )
+  // The header's Fork thread (#879) is this pane's `/fork`: the transcript it reads is here.
+  useEffect(() => (forkAt === undefined ? undefined : offerPaneFork(stores, forkAt)), [stores, forkAt])
   // Restoring files (#551) is offered beside the fork: on a page, not on a pane mounted alone.
   const restoreAt = useMemo(
     () =>

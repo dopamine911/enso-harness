@@ -14,7 +14,9 @@ export const SESSIONS_AND_PROJECTS: FeatureSpec = {
   shows: [
     "A project is a folder pi works in. The rail lists your projects, and each project's threads under it. A new thread asks how to start: which model, how much effort, which permission mode, which system prompt, and the first prompt. They are applied together when you start.",
     "A thread you ran before is still there after a restart. Until you run it again it is *cold*: Enso reads it from pi's session file, and nothing is running.",
-    "A thread is titled by its first prompt. **Rename** in the header (the pencil) gives it a name of its own, which the rail and the header show and the thread keeps: it is pi's own session name, the one pi's `/name` sets. When two prompts in a project start alike, the rail shows each from the words where they part (\"…Approach B: a parser\"), with the whole prompt as the row's hover.",
+    "A thread is titled by its first prompt. Under the title, the header says what it runs with: its project, model and effort, the model marked `(recorded)` while the thread is cold, and left out until something has said it. Click the title, or choose **Rename** in the header's **thread actions** menu (⋯), and the title becomes a field: **Enter** saves a name of its own, which the rail and the header show and the thread keeps (pi's own session name, the one pi's `/name` sets); **Escape** leaves it as it was. When two prompts in a project start alike, the rail shows each from the words where they part (\"…Approach B: a parser\"), with the whole prompt as the row's hover.",
+    'A new thread is **not started** until its first prompt: nothing of it is on the server yet, so it has no Context, Stats or Diff to show, and its **thread actions** menu offers **Discard draft** instead of a delete.',
+    'A thread the rail still lists but the server no longer holds (deleted from another tab, say) opens a page in its place: **This thread isn’t on the server**, with its id, **Start a new thread**, and **Search threads**, which takes you to the rail.',
   ],
   opens: [
     'The folder you ran `bun run dev` in is always a project.',

@@ -32,7 +32,7 @@ export const THREAD_TREES: FeatureSpec = {
       "A trusted project's own `.enso/config.json`, and your `.enso/config.local.json` beside it, set the same keys for that project, and win over yours: the local file first, then the shared one (#754). Trust a project, or revoke it, from its page: the confirmation lists the setup commands its files declare before anything is trusted, and the change applies to the next tree (see [Sessions and projects](./sessions-and-projects.md), #873). A launch that relies on the default says so in its log.",
     ].join('\n'),
     '**Restore files to here** is under each prompt you sent, beside **fork from here**.',
-    '**Settings** → **Storage** lists the trees: **Settings** is at the foot of the rail. The trash icon in the header deletes the thread on screen, through the same confirmation.',
+    "**Settings** → **Storage** lists the trees: **Settings** is at the foot of the rail. **Delete thread…** in the header's **thread actions** menu (⋯) deletes the thread on screen, through the same confirmation.",
   ],
   shots: [
     {
@@ -108,11 +108,11 @@ export const THREAD_TREES: FeatureSpec = {
         },
         {
           target: { role: 'button', name: /^delete thread /, within: SETTINGS },
-          says: "Deletes the thread, through the header's confirmation.",
+          says: "Deletes the thread, through the same confirmation as the thread menu's **Delete thread…**.",
         },
       ],
       after: [
-        "The trash icon opens the header's confirmation: what goes (the conversation, the tree by path and branch, and what it takes on disk), and the work deleting would lose, named before anything goes. **Delete anyway** deletes exactly that work; work the tree gained since is named again first.",
+        'The trash icon opens the delete confirmation: what goes (the conversation, the tree by path and branch, and what it takes on disk), and the work deleting would lose, named before anything goes. **Delete anyway** deletes exactly that work; work the tree gained since is named again first.',
       ],
       measure: {
         treeSize: (page) => page.getByRole('region', { name: 'Settings' }).locator('li .tabular-nums').first(),

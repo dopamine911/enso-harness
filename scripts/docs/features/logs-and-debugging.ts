@@ -75,7 +75,7 @@ export const LOGS_AND_DEBUGGING: FeatureSpec = {
       'In the browser:',
       '',
       "- {steps} for the day's log, live.",
-      "- Add `?debug` to a thread's URL to open the **session debug** drawer beside the chat.",
+      "- Add `?debug` to a thread's URL to open the **session debug** drawer beside the chat. **Hide debug pane** and **Show debug pane** in the header's **thread actions** menu (⋯) close and reopen it.",
     ].join('\n'),
   ],
   shots: [

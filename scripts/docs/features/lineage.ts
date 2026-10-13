@@ -43,7 +43,7 @@ export const LINEAGE: FeatureSpec = {
   ],
   opens: [
     '**fork from here**, under any prompt you sent, forks the thread before that prompt.',
-    '`/fork` in the command palette forks before the last prompt.',
+    "`/fork` in the command palette, or **Fork thread** in the header's **thread actions** menu (⋯), forks before the last prompt.",
     'The new thread opens straight away. In the rail, it shows `forked from` and the title of the thread it came from.',
     "Add `?debug` to a thread's URL to see its **fork point** in the session debug drawer.",
     'A thread whose last run was cut off before pi answered shows a notice with **Continue**, which picks the run up from its stored state.',
