@@ -78,6 +78,8 @@ export interface ChipButtonProps {
   readonly onOpen: () => void
   readonly disabled?: boolean
   readonly invalid?: boolean
+  /** What hovering the chip says beyond its name — the Model chip's provider and model id (#44). */
+  readonly title?: string
   /** The chip, for its picker to put focus back on when it closes: the picker is not a Radix trigger's. */
   readonly ref?: React.Ref<HTMLButtonElement>
 }
@@ -87,7 +89,15 @@ export interface ChipButtonProps {
  * `aria-invalid`, so a refused setting says so in its name (`Model: Plain, refused`) and is marked
  * as a refused select chip is.
  */
-export function ChipButton({ label, display, onOpen, disabled, invalid, ref }: ChipButtonProps): React.ReactNode {
+export function ChipButton({
+  label,
+  display,
+  onOpen,
+  disabled,
+  invalid,
+  title,
+  ref,
+}: ChipButtonProps): React.ReactNode {
   const refused = invalid === true
   return (
     <button
@@ -95,6 +105,7 @@ export function ChipButton({ label, display, onOpen, disabled, invalid, ref }: C
       type="button"
       aria-label={refused ? `${label}: ${display}, refused` : `${label}: ${display}`}
       aria-haspopup="dialog"
+      title={title}
       data-invalid={refused ? true : undefined}
       disabled={disabled === true}
       onClick={onOpen}

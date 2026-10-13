@@ -15,6 +15,7 @@ import {
   SystemPromptChip,
   useSystemPromptChoice,
 } from './launch-prompts.tsx'
+import { useRecentModels } from './page-listings.ts'
 import { useChatContext } from './pane-context.ts'
 import { usePermissionMode } from './permission-mode.tsx'
 import { SettingChip } from './setting-chip.tsx'
@@ -84,7 +85,7 @@ async function loadCatalogue(threadId: string, fetchImpl: FetchLike | undefined)
     const model = hostRow(listed.commands, 'model')
     const thinking = hostRow(listed.commands, 'thinking')
     const models = model?.options ?? []
-    if (models.length === 0) {
+    if (!models.some((option) => option.loggedIn !== false)) {
       return { kind: 'failed', detail: 'no model to run on — log in to a provider first (/login)' }
     }
     return {
@@ -104,11 +105,11 @@ const catalogueLoaded = (catalogue: Catalogue): boolean => catalogue.kind === 'l
 
 /**
  * The model the session starts on: the one picked, else the session's own (the configured default,
- * #674), else the first offered.
+ * #674), else the first on offer — never one whose provider is not logged in (#880).
  */
 function modelOf(catalogue: Catalogue, picked: string | undefined): string | undefined {
   if (catalogue.kind !== 'loaded') return undefined
-  return picked ?? catalogue.model ?? catalogue.models[0]?.id
+  return picked ?? catalogue.model ?? catalogue.models.find((option) => option.loggedIn !== false)?.id
 }
 
 /** The effort levels offered: the chosen model's, or the current model's when its option carries none. */
@@ -269,10 +270,12 @@ export function LaunchChips({
   const stores = useThreadStores()
   const { catalogue } = form
   const refusedAt = form.refusal?.step
+  const recent = useRecentModels()
   return (
     <div role="group" aria-label="Session settings" className="flex flex-wrap items-center gap-2 px-1 pb-1">
       <LaunchModelChip
         models={catalogue.kind === 'loaded' ? catalogue.models : []}
+        recent={recent}
         chosen={form.model}
         onChoose={form.chooseModel}
         loading={catalogue.kind === 'loading'}

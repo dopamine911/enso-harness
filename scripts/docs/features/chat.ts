@@ -61,7 +61,7 @@ export const CHAT: FeatureSpec = {
     'The URL names the thread as `?thread=<id>`.',
     'To add an image, use the **attach an image** button, paste the image, or drop it on the composer.',
     'The **commands** button (the `/` icon in the composer) opens the command palette.',
-    "Above the prompt box, the thread's settings are chips: the model, **Effort** and **Mode**, each opening its list (mouse or keyboard), and **System prompt**, locked once the session has started. Pressing the locked chip says why: it is fixed for this session.",
+    "Above the prompt box, the thread's settings are chips: **Model**, **Effort** and **Mode**, each opening its list (mouse or keyboard), and **System prompt**, locked once the session has started. Pressing the locked chip says why: it is fixed for this session. **Model**, like `/model` in the palette, opens the model picker: your recent models first, then each provider's, every row with its effort range. See [Sessions and projects](./sessions-and-projects.md).",
   ],
   shots: [
     {

@@ -2773,8 +2773,12 @@ test("⚠ the catalogue offers a session's models, not the agent dir's: every on
     harnessPackageDir: harnessDir,
     extensionFactories: [accountCatalog],
   })
+  // Offered: logged in. A provider set up but not logged in is listed too, never offered (#880).
   const offered = async (): Promise<string[]> =>
-    (await host.catalogue()).find((row) => row.name === 'model')?.options?.map((option) => option.id) ?? []
+    (await host.catalogue())
+      .find((row) => row.name === 'model')
+      ?.options?.filter((option) => option.loggedIn === true)
+      .map((option) => option.id) ?? []
 
   // No thread exists yet — a fresh process, the arena's case — and none is built to answer.
   const beforeAnyThread = await offered()
@@ -4384,6 +4388,40 @@ test('each /model option carries the levels pi decides for THAT model (#391)', a
   expect(deep).toContain('high')
   // `xhigh` is offered only to a model that maps it explicitly — pi's rule, carried as it decides.
   expect(deep).not.toContain('xhigh')
+})
+
+/** An account an extension set up and nobody logged in to, as pi-multi-account registers its spare slots (#880): no key. */
+const SIGNED_OUT_ACCOUNT: InlineExtension = {
+  name: 'enso-host-signed-out-account',
+  factory: (pi: ExtensionAPI) => {
+    pi.registerProvider('enso-account-2', {
+      name: 'Enso Account (enso-account-2)',
+      api: 'enso-faux',
+      baseUrl: 'http://faux.invalid',
+      models: [fauxModelDefinition('spare-1', 'Spare One')],
+    })
+  },
+}
+
+// #880: the picker groups models by a READABLE provider name, and says which providers are not
+// logged in instead of leaving them out. The name is pi's (`Provider.name`); an account the harness
+// set up without credentials is listed, marked, and still refused — the host stays the gate.
+test('⚠ /model names each provider readably and lists a registered provider with no credentials as not logged in — refused when picked (#880)', async () => {
+  const hosted = await hostedSession([TWO_MODELS, SIGNED_OUT_ACCOUNT])
+  const options =
+    hosted.runtime.listCommands().find((command) => command.source === 'host' && command.name === 'model')?.options ??
+    []
+  const listed = (id: string): object | undefined => {
+    const option = options.find((candidate) => candidate.id === id)
+    return option === undefined ? undefined : { providerName: option.providerName, loggedIn: option.loggedIn }
+  }
+  expect(listed('enso-levels/deep')).toEqual({ providerName: 'enso-levels', loggedIn: true })
+  expect(listed('enso-account-2/spare-1')).toEqual({ providerName: 'Enso Account (enso-account-2)', loggedIn: false })
+  // pi's built-in providers nobody set up are not listed: only what an extension registered.
+  expect(options.some((option) => option.detail === 'mistral')).toBe(false)
+  await expect(hosted.runtime.runHostCommand({ name: 'model', value: 'enso-account-2/spare-1' })).rejects.toThrow(
+    'model enso-account-2/spare-1 is not available here',
+  )
 })
 
 // ── the run context and the fork point (#435) ────────────────────────────────

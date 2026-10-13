@@ -49,7 +49,7 @@ import {
   SettingsManager,
 } from '@earendil-works/pi-coding-agent'
 import { ensoLogger, type RuntimeCommand } from '@enso/core'
-import { catalogueRows, type ModelThinking } from './host-commands.ts'
+import { catalogueRows, type ModelOffer, type ModelThinking } from './host-commands.ts'
 import { hostFlowRows, type LoginProviderFacts, loginOptions, logoutOptions } from './host-flows.ts'
 import type { ChoiceBeforeFirstMessage } from './thread-log.ts'
 
@@ -60,7 +60,7 @@ export interface SessionModels {
   /** A thread's session was bound: its runtime is the list from now on. */
   adopt(runtime: ModelRuntime): void
   /** What a session offers now — undefined only when no session could be had. */
-  available(): Promise<readonly Model<Api>[] | undefined>
+  offer(): Promise<ModelOffer<Model<Api>> | undefined>
 }
 
 interface SessionModelsOptions {
@@ -79,14 +79,32 @@ export function sessionModels(options: SessionModelsOptions): SessionModels {
     adopt(runtime: ModelRuntime): void {
       bound = runtime
     },
-    async available(): Promise<readonly Model<Api>[] | undefined> {
+    async offer(): Promise<ModelOffer<Model<Api>> | undefined> {
       const probed = bound === undefined ? await (probe ??= probeRuntime(options)) : undefined
       // Read `bound` again: a thread bound while the probe was starting is the newer list.
       const runtime = bound ?? probed
       if (runtime === undefined) return undefined
       await runtime.refresh({ allowNetwork: false })
-      return runtime.getAvailableSnapshot()
+      return modelOfferOf(runtime)
     },
+  }
+}
+
+/**
+ * What a runtime offers (#880): the models pi could run now, and the models of the providers an
+ * EXTENSION registered that hold no credentials — the accounts the harness set up (pi-multi-account's
+ * `anthropic-account-2`, …), listed as not logged in. ⚠ Not every provider without credentials:
+ * pi knows 42 providers and 1563 models (measured with an empty agent dir), and a picker of every
+ * one is no picker. Each provider by its readable name, pi's (`Provider.name`).
+ */
+export function modelOfferOf(runtime: ModelRuntime): ModelOffer<Model<Api>> {
+  return {
+    available: runtime.getAvailableSnapshot(),
+    loggedOut: runtime
+      .getRegisteredProviderIds()
+      .filter((providerId) => !runtime.hasConfiguredAuth(providerId))
+      .flatMap((providerId) => runtime.getModels(providerId)),
+    providerName: (providerId: string): string => runtime.getProvider(providerId)?.name ?? providerId,
   }
 }
 
@@ -178,7 +196,7 @@ export async function catalogueOf(agentDir: string, models: SessionModels): Prom
       type: credential.type,
     })),
   )
-  const offered = (await models.available()) ?? modelRuntime.getAvailableSnapshot()
+  const offered = (await models.offer()) ?? modelOfferOf(modelRuntime)
   const settings = globalSettings(agentDir)
   return catalogueRows(
     offered,

@@ -53,7 +53,13 @@ import {
 import { builtinProviderName, providerRefusalOf } from './provider-refusal.ts'
 import { restoreNoteExtension } from './restore-note.ts'
 import { toRpcWireEvent } from './session-events.ts'
-import { loginFactsOf, type SessionModels, selectionBeforeFirstMessage, thinkingOnChoosing } from './session-models.ts'
+import {
+  loginFactsOf,
+  modelOfferOf,
+  type SessionModels,
+  selectionBeforeFirstMessage,
+  thinkingOnChoosing,
+} from './session-models.ts'
 import { growsSessionSpend, liveSessionUsage } from './session-usage.ts'
 import type { StoredThreads } from './stored-threads.ts'
 import { previewOnSession } from './system-prompt-preview.ts'
@@ -568,7 +574,7 @@ export async function buildHostedThread(
       commands.push(
         ...hostCommandRows(
           currentModelState(),
-          session.modelRuntime.getAvailableSnapshot(),
+          modelOfferOf(session.modelRuntime),
           thinkingOnChoosing(session.settingsManager, session.thinkingLevel),
         ),
       )

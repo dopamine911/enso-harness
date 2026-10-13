@@ -5,6 +5,7 @@ import {
   type EnsoProject,
   type EnsoProjectPromptLibrary,
   type EnsoStoredThread,
+  type HostCommandOption,
   type RuntimeCommand,
   summarizeLibraryPrompt,
 } from '@enso/core'
@@ -80,7 +81,8 @@ const PLAIN = {
 }
 const DEEP = {
   id: 'fake/deep',
-  label: 'Deep',
+  // Named to sort after Plain by the picker's pinned order (#880): the chosen model is the second row.
+  label: 'Thinker',
   detail: 'fake',
   thinkingLevels: ['off', 'low', 'medium', 'high'],
   defaultThinkingLevel: 'medium',
@@ -388,7 +390,7 @@ async function choose(mounted: Mounted, chipLabel: string, label: string): Promi
 test('Start sends every setting in ONE configure call — the effort the CHOSEN model runs at — then the prompt, and the panel gives way to the transcript', async () => {
   const mounted = await mountLaunch()
   expect(panelTitle(mounted)).toBe('What should pi work on?')
-  // The session would run Deep; Plain cannot reason, so choosing it takes the effort to `off`.
+  // The session would run Thinker; Plain cannot reason, so choosing it takes the effort to `off`.
   await chooseModel(mounted, 'fake/plain')
   await typeAndStart(mounted, 'hello there')
   await eventually(() => expect(mounted.server.prompts.map((prompt) => prompt.message)).toEqual(['hello there']))
@@ -447,14 +449,14 @@ test('the chosen model is named as chosen in the accessibility tree, and the mar
   const dialog = await openModelPicker(mounted)
   const rowText = (modelId: string): string =>
     dialog.querySelector<HTMLElement>(`[cmdk-item][data-value="${modelId}"]`)?.textContent ?? 'no row'
-  // The session would run Deep: it is the chosen one, Plain is not.
-  expect(rowText('fake/deep')).toBe('Deepfake, chosen')
-  expect(rowText('fake/plain')).toBe('Plainfake')
+  // The session would run Thinker: it is the chosen one, Plain is not. Each row ends on its effort range (#880).
+  expect(rowText('fake/deep')).toBe('Thinkeroff–high, chosen')
+  expect(rowText('fake/plain')).toBe('Plainoff')
   await chooseModel(mounted, 'fake/plain')
   expect(mounted.chip('Model').getAttribute('aria-label')).toBe('Model: Plain')
   const reopened = await openModelPicker(mounted)
-  expect(reopened.querySelector('[cmdk-item][data-value="fake/plain"]')?.textContent).toBe('Plainfake, chosen')
-  expect(reopened.querySelector('[cmdk-item][data-value="fake/deep"]')?.textContent).toBe('Deepfake')
+  expect(reopened.querySelector('[cmdk-item][data-value="fake/plain"]')?.textContent).toBe('Plainoff, chosen')
+  expect(reopened.querySelector('[cmdk-item][data-value="fake/deep"]')?.textContent).toBe('Thinkeroff–high')
 })
 
 // ⚠ #846, found by a Dogfood Arena run: cmdk highlights its first row unless told which, so the
@@ -467,7 +469,7 @@ test('⚠ the model list opens highlighting the chosen model; the arrows and the
   // The filter is named: cmdk's label, wired to the input it ids itself.
   const labelId = filter.getAttribute('aria-labelledby')
   expect(labelId === null ? undefined : document.getElementById(labelId)?.textContent).toBe('Model')
-  // Deep is chosen and the second row: it is the one highlighted, not Plain above it — and the
+  // Thinker is chosen and the second row: it is the one highlighted, not Plain above it — and the
   // filter names no other row as active (cmdk names none until a key moves the highlight).
   await eventually(() => expect(highlightedRows(dialog)).toEqual(['fake/deep']))
   expect([undefined, 'fake/deep']).toContain(activeRow(filter))
@@ -478,10 +480,10 @@ test('⚠ the model list opens highlighting the chosen model; the arrows and the
   await press(filter, 'ArrowDown')
   expect(highlightedRows(dialog)).toEqual(['fake/deep'])
   expect(activeRow(filter)).toBe('fake/deep')
-  // Enter commits the highlight — Deep, still the chosen one — and closes the picker.
+  // Enter commits the highlight — Thinker, still the chosen one — and closes the picker.
   await press(filter, 'Enter')
   await eventually(() => expect(picker()).toBeNull())
-  expect(mounted.chip('Model').getAttribute('aria-label')).toBe('Model: Deep')
+  expect(mounted.chip('Model').getAttribute('aria-label')).toBe('Model: Thinker')
 
   // A filter that hides the chosen model highlights its first match; Enter takes it, and Start sends it.
   dialog = await openModelPicker(mounted)
@@ -599,7 +601,7 @@ test('a refused step keeps the panel, names the step and why, marks its chip, se
 // panel says why; the words stay, and the same words without the slash start as usual.
 test('a prompt beginning with / cannot start: Start is disabled and the reason is shown; without the slash it starts', async () => {
   const mounted = await mountLaunch()
-  await eventually(() => expect(mounted.chip('Model').getAttribute('aria-label')).toBe('Model: Deep'))
+  await eventually(() => expect(mounted.chip('Model').getAttribute('aria-label')).toBe('Model: Thinker'))
   await typeInto(mounted.composer(), '  /mode plan')
   await eventually(() => expect(mounted.container.textContent).toContain('a / command needs a running session'))
   expect(mounted.startButton().disabled).toBe(true)
@@ -797,4 +799,110 @@ test("the recent list offers up to three of this project's threads, newest first
   if (first === undefined) throw new Error('expected a row')
   await click(first)
   expect(mounted.opened).toEqual(['t-new'])
+})
+
+/** A second provider logged in, and an account set up but not logged in (#880), as the host lists them. */
+const OTHER_ONE: HostCommandOption = {
+  id: 'other/one',
+  label: 'Other One',
+  detail: 'other',
+  providerName: 'Other Provider',
+  loggedIn: true,
+  thinkingLevels: ['minimal', 'low', 'xhigh'],
+}
+const SPARE: readonly HostCommandOption[] = ['Spare 1', 'Spare 2'].map((label, index) => ({
+  id: `spare/s-${index + 1}`,
+  label,
+  detail: 'spare',
+  providerName: 'Spare Account (spare)',
+  loggedIn: false,
+  thinkingLevels: ['off', 'high'],
+}))
+const GROUPED: RuntimeCommand = {
+  name: 'model',
+  source: 'host',
+  kind: 'select',
+  options: [...SPARE, PLAIN, DEEP, OTHER_ONE],
+}
+
+/** A stored thread whose file last records `model` (#871). */
+function ranOn(threadId: string, model: string, minutesAgo: number): EnsoStoredThread {
+  const [provider = '', modelId = ''] = model.split('/')
+  return { ...stored(threadId, threadId, minutesAgo), model: { provider, modelId } }
+}
+
+/** The picker's group headings and each group's rows (`data-value`), in order. */
+function pickerGroups(dialog: HTMLElement): [string, (string | null)[]][] {
+  return [...dialog.querySelectorAll('[cmdk-group]')].map((group) => [
+    group.querySelector('[cmdk-group-heading]')?.textContent ?? '',
+    [...group.querySelectorAll('[cmdk-item]')].map((row) => row.getAttribute('data-value')),
+  ])
+}
+
+// #880: Recent is the models of the latest threads — what each thread's file last records — newest
+// first, each once, only those still on offer; a reload keeps it, as it is read from the server.
+test('⚠ Recent leads the picker with the models of the latest threads, last used first, and a reload keeps it (#880)', async () => {
+  const server = {
+    commands: [GROUPED],
+    storedThreads: [
+      ranOn('t-plain', 'fake/plain', 10),
+      ranOn('t-other', 'other/one', 5),
+      ranOn('t-plain-again', 'fake/plain', 30),
+      ranOn('t-gone', 'gone/model', 1),
+      ranOn('t-spare', 'spare/s-1', 2),
+    ],
+  }
+  const expected: [string, string[]][] = [
+    ['Recent', ['recent other/one', 'recent fake/plain']],
+    // Unfiltered, a recent model is not repeated in its provider's group.
+    ['fake', ['fake/deep']],
+    ['Spare Account (spare) · not logged in · 2 models', ['expand provider spare']],
+  ]
+  const first = await mountLaunch({ server })
+  expect(pickerGroups(await openModelPicker(first))).toEqual(expected)
+  await first.unmount()
+  const reloaded = await mountLaunch({ server })
+  expect(pickerGroups(await openModelPicker(reloaded))).toEqual(expected)
+})
+
+// #880 (the owner's decision on the PR): a provider not logged in is COLLAPSED — its name, "not
+// logged in · N models", and how to log in — opens to its models, and a filter shows its matches.
+// Its models are never picked: not from the list, and not as the panel's first model either.
+test('⚠ a provider not logged in is collapsed, opens to its models, shows them to a filter — and none can be picked (#880)', async () => {
+  const mounted = await mountLaunch({ server: { commands: [GROUPED] } })
+  // No configured default: the panel takes the first model on offer, never the logged-out first row.
+  await eventually(() => expect(mounted.chip('Model').getAttribute('aria-label')).toBe('Model: Plain'))
+  let dialog = await openModelPicker(mounted)
+  const collapsed = dialog.querySelector<HTMLElement>('[cmdk-item][data-value="expand provider spare"]')
+  expect(collapsed?.textContent).toBe('log in with /login to pick oneshow models')
+  expect(dialog.querySelector('[cmdk-item][data-value="spare/s-1"]')).toBeNull()
+  if (collapsed === null) throw new Error('expected the collapsed row')
+  await click(collapsed)
+  const spareRow = await eventually(() => {
+    const found = dialog.querySelector<HTMLElement>('[cmdk-item][data-value="spare/s-1"]')
+    if (found === null) throw new Error('expected the opened group')
+    return found
+  })
+  // Opened, newest first by the pinned order (#880); each row there is disabled.
+  expect(pickerGroups(dialog).at(-1)).toEqual([
+    'Spare Account (spare) · not logged in · 2 models',
+    ['spare/s-2', 'spare/s-1'],
+  ])
+  expect(spareRow.getAttribute('aria-disabled')).toBe('true')
+  await click(spareRow)
+  expect(picker()).not.toBeNull()
+  expect(mounted.chip('Model').getAttribute('aria-label')).toBe('Model: Plain')
+  await press(modelFilter(dialog), 'Escape')
+  await eventually(() => expect(picker()).toBeNull())
+
+  // Opened again it is collapsed again; a filter shows a match inside it, still not pickable.
+  dialog = await openModelPicker(mounted)
+  expect(dialog.querySelector('[cmdk-item][data-value="spare/s-2"]')).toBeNull()
+  await typeInto(modelFilter(dialog), 'spare 2')
+  await eventually(() =>
+    expect(pickerGroups(dialog)).toEqual([['Spare Account (spare) · not logged in · 1 model', ['spare/s-2']]]),
+  )
+  await press(modelFilter(dialog), 'Enter')
+  expect(picker()).not.toBeNull()
+  expect(mounted.chip('Model').getAttribute('aria-label')).toBe('Model: Plain')
 })

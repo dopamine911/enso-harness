@@ -15,7 +15,7 @@ import {
   PromptInputCommandList,
 } from './components/ai-elements/prompt-input.tsx'
 import { SLASH_PROMPT_REFUSAL } from './launch-settings.tsx'
-import { optionKeywords } from './model-state.tsx'
+import { optionKeywords } from './model-picker.tsx'
 
 /**
  * The `/` command palette (#338, slice 1): Claude Code's `/` button in VS Code, as a popup

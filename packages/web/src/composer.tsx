@@ -48,7 +48,15 @@ import {
   useLaunching,
 } from './launch-settings.tsx'
 import { cn } from './lib/utils.ts'
-import { EffortChip, ModelChip, ModelChoiceDialog, useModelState, useRecordedModel } from './model-state.tsx'
+import {
+  EffortChip,
+  ModelChip,
+  ModelChoiceDialog,
+  type ModelChoiceDialogProps,
+  useModelState,
+  useRecordedModel,
+} from './model-state.tsx'
+import { useRecentModels } from './page-listings.ts'
 import { useChatContext, PaneViewContext } from './pane-context.ts'
 import { ModeChip, usePermissionMode } from './permission-mode.tsx'
 import { LockedChip } from './setting-chip.tsx'
@@ -137,6 +145,11 @@ function ModelControls({ onHost, onOpenModelDialog }: HostCommandHandlers): Reac
       <EffortChip state={state} onSelect={(level: string): void => onHost('thinking', level)} />
     </>
   )
+}
+
+/** The composer's host-command dialog (#338), its model picker's Recent group read from the stored sessions (#880). */
+function ComposerModelDialog(props: Omit<ModelChoiceDialogProps, 'recent'>): React.ReactNode {
+  return <ModelChoiceDialog {...props} recent={useRecentModels()} />
 }
 
 /** How a `host` command is run and how the model dialog is opened — the composer's, handed to its chrome and palette. */
@@ -814,7 +827,7 @@ export function ChatPromptInput(): React.ReactNode {
       onSubmit={submit}
     >
       <ComposerSettings launch={launch.form} host={host} onSavedPrompt={setDraft} />
-      <ModelChoiceDialog
+      <ComposerModelDialog
         threadId={stores.threadId}
         fetch={stores.fetch}
         command={modelDialog}

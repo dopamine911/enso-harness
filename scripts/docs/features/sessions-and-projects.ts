@@ -55,7 +55,7 @@ export const SESSIONS_AND_PROJECTS: FeatureSpec = {
       marks: [
         {
           target: chip('button', 'Model'),
-          says: '**{shown}**: the models your login gives you; it opens a picker, and **filter models…** narrows the list. (The screenshots use a scripted stand-in, listed as `demo`.)',
+          says: "**{shown}**: the model the session starts on. It opens the model picker: **Recent** first, the models of your latest threads; then one group per provider under its own name, the ones you're logged in to first. Within a provider, models go by family, newest version first, and each row ends on the effort levels it offers (`off–high`). A provider set up but not logged in is folded under its name with how many models it has: open it to see them, but log in (`/login`) to pick one. **filter models…** narrows the list by name or provider. (The screenshots use a scripted stand-in, listed as `Demo`.)",
         },
         {
           target: chip('combobox', 'Effort'),
@@ -109,15 +109,15 @@ export const SESSIONS_AND_PROJECTS: FeatureSpec = {
         },
         { target: { text: 'Add project', within: RAIL }, says: '**{shown}**.' },
         {
-          target: { text: /^model \(recorded\):/ },
-          says: 'The model the thread last ran on, `{shown}`, marked recorded because nothing is running yet.',
+          target: { role: 'button', name: /^Model \(recorded\): / },
+          says: 'The model the thread last ran on, `{shown}`, on a chip named **Model (recorded)** because nothing is running yet.',
         },
       ],
     },
   ],
   lookFor: [
     'Nothing on the launch panel changes anything until you press **Start session**. Then the system prompt, the model, the effort and the mode are sent in one request, in that order. If one of them is refused, the panel stays, says which one and why, and marks its chip; the prompt is not sent, and stays in the box with what you attached. So you never get a session that runs your prompt on the wrong model, or under the wrong system prompt.',
-    `The thread above was opened after a restart of the app, so it is cold. Its last run was on \`${SECOND_MODEL}\`, which the composer shows as \`model (recorded):\`. The thinking selector is hidden, because there is no live session to change. Sending a prompt starts the session again under the same id, and the chip becomes the live model.`,
+    `The thread above was opened after a restart of the app, so it is cold. Its last run was on \`${SECOND_MODEL}\`, which the composer's Model chip names **Model (recorded)**. The Effort chip is hidden, because there is no live session to change. Sending a prompt starts the session again under the same id, and the chip becomes the live model.`,
     "If a thread's last run was cut off before pi answered, the thread shows a notice with a **Continue** button. Continue picks up from the stored state without a new message. See [Forks and lineage](./lineage.md), which also covers what a thread records about the conditions it ran under.",
     "The status bar also says where the project stands in git. It shows the branch, `↑` for commits not pushed yet, `↓` for commits on the remote this branch doesn't have, and the files that changed: `main ↑2 · 1 staged · 3 unstaged`. The file counts are the project folder's own, even when the folder sits inside a larger repository; the commits are the whole repository's. Hover it to see what it is measured from. That is the last push to the branch's upstream if it has one. A branch pushed without an upstream is measured from its copy on the remote. A branch never pushed is measured from where it branched off the remote's default branch, such as `origin/main`. A project with no remote counts only uncommitted changes. The readout updates when a tool call finishes, so a commit or a push by pi shows up straight away. A project outside git says `no git`. The same state is served at `GET /api/threads/:threadId/git`.",
     "A thread on a tree of its own, the default, reads its tree: the branch is the tree's, `enso/<thread-id>`, and the bar says `own tree, not your checkout`. See [Thread trees](./thread-trees.md).",

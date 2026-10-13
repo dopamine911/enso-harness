@@ -17,7 +17,7 @@
         "Today",
         "Where does the app read its database URL? Check .env too.",
         "Add project",
-        "model (recorded): claude-opus-4-1 · demo · medium"
+        "Model (recorded) claude-opus-4-1 · demo · medium"
       ],
       "measured": {}
     }

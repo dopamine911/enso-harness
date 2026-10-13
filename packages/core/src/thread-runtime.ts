@@ -87,6 +87,18 @@ export const HostCommandOption = Type.Object({
    * never a guess.
    */
   defaultThinkingLevel: Type.Optional(Type.String()),
+  /**
+   * On a `/model` option only (#880): the provider's readable name, the runtime's own
+   * (`Anthropic`, `ChatGPT Plus/Pro (Codex openai-codex-account-2)`) — the picker's group heading.
+   * `detail` stays the provider's id.
+   */
+  providerName: Type.Optional(Type.String()),
+  /**
+   * On a `/model` option only (#880): whether the runtime holds credentials for the provider. A
+   * provider set up but not logged in lists its models so the picker can say so; they are never
+   * offered — the host refuses them as any model not on offer.
+   */
+  loggedIn: Type.Optional(Type.Boolean()),
 })
 /** @group Thread runtime */
 export type HostCommandOption = Static<typeof HostCommandOption>

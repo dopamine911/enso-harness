@@ -87,7 +87,6 @@
   --container-debug-pane: 30rem; /* the ?debug column */
   --container-changes-tree: 20rem; /* the Changes tab's file tree */
   --container-command-palette: 28rem; /* the / palette's popup */
-  --container-provider-label: 16ch; /* the model chip's provider */
 }
 
 /* A label column as wide as its longest label, the value taking the rest. */

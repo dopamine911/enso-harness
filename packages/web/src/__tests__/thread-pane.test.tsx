@@ -1540,7 +1540,7 @@ test('the model chip and the Effort chip follow the snapshot; picking a model PO
   })
   await pane.settle(SNAPSHOT_IDLE)
   const chip = (): HTMLButtonElement => {
-    const found = pane.container.querySelector<HTMLButtonElement>('button[aria-label="model"]')
+    const found = pane.container.querySelector<HTMLButtonElement>('button[aria-label^="Model"]')
     if (found === null) throw new Error('expected the model chip')
     return found
   }
@@ -1619,11 +1619,14 @@ test('a cold thread shows its recorded model on the chip, marked recorded; the l
     recordedModel: { model: { provider: 'anthropic', modelId: 'claude-sonnet-5' }, thinkingLevel: 'medium' },
   })
   const chip = (): HTMLButtonElement => {
-    const found = pane.container.querySelector<HTMLButtonElement>('button[aria-label="model"]')
+    const found = pane.container.querySelector<HTMLButtonElement>('button[aria-label^="Model"]')
     if (found === null) throw new Error('expected the model chip')
     return found
   }
-  await eventually(() => expect(chip().textContent).toBe('model (recorded): claude-sonnet-5 · anthropic · medium'))
+  // The shared chip control (#880): named `Model (recorded)`, so it never reads as live.
+  await eventually(() =>
+    expect(chip().getAttribute('aria-label')).toBe('Model (recorded): claude-sonnet-5 · anthropic · medium'),
+  )
   expect(pane.container.querySelector('[aria-label^="Effort: "]')).toBeNull()
 
   await pane.settle({
@@ -1636,7 +1639,7 @@ test('a cold thread shows its recorded model on the chip, marked recorded; the l
     },
   })
   await eventually(() => {
-    expect(chip().textContent).toBe('modelFake One· fake')
+    expect(chip().getAttribute('aria-label')).toBe('Model: Fake One · fake')
     expect(pane.chip('Effort').getAttribute('aria-label')).toBe('Effort: high')
   })
   await pane.unmount()
