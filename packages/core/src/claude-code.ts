@@ -61,19 +61,18 @@ export function isClaudeLoginCredential(apiKey: string | undefined): boolean {
 }
 
 /**
- * Anthropic's refusal of the claimed version, read from an error's text: the version sent and the
- * one required, where its sentence names them.
+ * Anthropic's refusal of the claimed version, read from an error's text: the version it requires,
+ * where its sentence names one. (The version sent is in Anthropic's own sentence, which is shown.)
  *
  * @group Configuration
  */
 export interface ClaudeCodeVersionRefusal {
-  readonly sent: string | undefined
   readonly required: string | undefined
 }
 
 const VERSION_REFUSAL_CODE = 'claude_code_version_too_old'
 const VERSION_REFUSAL_SENTENCE =
-  /Claude Code (\d+\.\d+\.\d+) does not support this model(?:; version (\d+\.\d+\.\d+) or newer)?/
+  /Claude Code \d+\.\d+\.\d+ does not support this model(?:; version (\d+\.\d+\.\d+) or newer)?/
 
 /**
  * The version refusal in an error's text — its `error_code` or its sentence — or `undefined`.
@@ -83,7 +82,7 @@ const VERSION_REFUSAL_SENTENCE =
 export function claudeCodeVersionRefusalOf(text: string): ClaudeCodeVersionRefusal | undefined {
   const sentence = VERSION_REFUSAL_SENTENCE.exec(text)
   if (sentence === null && !text.includes(VERSION_REFUSAL_CODE)) return undefined
-  return { sent: sentence?.[1], required: sentence?.[2] }
+  return { required: sentence?.[1] }
 }
 
 /**
