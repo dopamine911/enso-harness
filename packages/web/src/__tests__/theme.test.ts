@@ -112,7 +112,7 @@ test('applying a theme sets data-theme and the `dark` class by its scheme; savin
 
 // The pre-paint script is inline, so it cannot import the keys or the default: it spells them,
 // and this holds the spelling.
-test("index.html's pre-paint script reads the keys the settings dialog saves under, and names the default", () => {
+test("index.html's pre-paint script reads the keys Settings saves under, and names the default", () => {
   const html = readFileSync(join(WEB, 'index.html'), 'utf8')
   expect(html).toContain(`localStorage.getItem('${THEME_STORAGE_KEY}') || '${DEFAULT_THEME}'`)
   expect(html).toContain(`localStorage.getItem('${THEME_SCHEME_STORAGE_KEY}') === 'light'`)

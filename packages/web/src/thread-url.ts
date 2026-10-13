@@ -49,3 +49,88 @@ export function urlForThread(search: string, threadId: string): string {
   parameters.set(THREAD_QUERY_PARAMETER, threadId)
   return `?${parameters.toString()}`
 }
+
+/**
+ * The pages beside the threads (#869): `?page=<name>`, with the page's own parameters, set beside
+ * `?thread=` and never in place of it. The thread stays named while a page is open, so a reload
+ * comes back to the page with the thread behind it, and leaving the page shows that thread again.
+ * The query, as the thread's id is, never the hash (#868's URL decision).
+ */
+const PAGE_QUERY_PARAMETER = 'page'
+const SECTION_QUERY_PARAMETER = 'section'
+/** Every parameter a page writes: opening a thread takes them all away, so back returns to the page. */
+const PAGE_PARAMETERS = [PAGE_QUERY_PARAMETER, SECTION_QUERY_PARAMETER] as const
+
+/** Settings' sections, in the order its navigation lists them; the first is where Settings opens. */
+export const SETTINGS_SECTIONS = ['appearance', 'permissions', 'storage'] as const
+export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]
+
+const isSettingsSection = (value: string): value is SettingsSection =>
+  (SETTINGS_SECTIONS as readonly string[]).includes(value)
+
+/** A page the URL can name and the page can open. */
+export type PageRoute = { readonly kind: 'settings'; readonly section: SettingsSection }
+
+/** Settings as its link opens it: the first section. */
+export const SETTINGS_ROUTE: PageRoute = { kind: 'settings', section: SETTINGS_SECTIONS[0] }
+
+/**
+ * What a URL's `page` names: a page, or something Enso has no page for — said as such, never a
+ * blank page. `asked` is what the URL named (cut to 40 characters, as a thread's notice is);
+ * `within`, the page it is a section of, when the page itself exists.
+ */
+export type PageUrl =
+  | PageRoute
+  | { readonly kind: 'not-found'; readonly asked: string; readonly within?: PageRoute['kind'] }
+
+/** Settings by its `section`: none is the first section; one Settings doesn't have is not found. */
+function readSettingsUrl(parameters: URLSearchParams): PageUrl {
+  const section = parameters.get(SECTION_QUERY_PARAMETER)
+  if (section === null || section === '') return SETTINGS_ROUTE
+  if (isSettingsSection(section)) return { kind: 'settings', section }
+  return { kind: 'not-found', asked: section.slice(0, 40), within: 'settings' }
+}
+
+/** The route table: a page's name in the URL → how its own parameters read. */
+const PAGE_READERS: Readonly<Record<string, (parameters: URLSearchParams) => PageUrl>> = {
+  settings: readSettingsUrl,
+}
+
+/**
+ * The page a URL names beside its thread, or undefined for none: the thread is what is shown.
+ *
+ * @invariant resume/url-names-page The URL names the page beside the thread; reload and back/forward
+ * show it. `?page=` with its own parameters sits beside `?thread=`, which stays: opening a page
+ * pushes the same thread with the page added (`urlForPage`), opening a thread from a page pushes it
+ * without the page (`urlOpeningThread`), so back returns to the page; a page's own rewrite of the
+ * thread (a delete, a failed resume) keeps the page. A page or section Enso doesn't have is
+ * not-found, never a blank page and never a guess at a page it might have meant.
+ */
+export function readPageUrl(search: string): PageUrl | undefined {
+  const parameters = new URLSearchParams(search)
+  const page = parameters.get(PAGE_QUERY_PARAMETER)
+  if (page === null || page === '') return undefined
+  // Own keys only: `?page=constructor` names no page, not `Object`'s.
+  const read = Object.hasOwn(PAGE_READERS, page) ? PAGE_READERS[page] : undefined
+  return read?.(parameters) ?? { kind: 'not-found', asked: page.slice(0, 40) }
+}
+
+/** The URL without any page parameter: the thread, and every parameter that is no page's, in order. */
+function withoutPage(search: string): URLSearchParams {
+  const parameters = new URLSearchParams(search)
+  for (const pageParameter of PAGE_PARAMETERS) parameters.delete(pageParameter)
+  return parameters
+}
+
+/** The same URL showing `route`: the page before it replaced, the thread and every other parameter kept. */
+export function urlForPage(search: string, route: PageRoute): string {
+  const parameters = withoutPage(search)
+  parameters.set(PAGE_QUERY_PARAMETER, route.kind)
+  parameters.set(SECTION_QUERY_PARAMETER, route.section)
+  return `?${parameters.toString()}`
+}
+
+/** The URL showing `threadId` and no page — a thread opened from a page leaves it; every other parameter kept. */
+export function urlOpeningThread(search: string, threadId: string): string {
+  return urlForThread(`?${withoutPage(search).toString()}`, threadId)
+}

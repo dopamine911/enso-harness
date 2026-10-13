@@ -7,16 +7,28 @@ import { mintPageThread, adoptPageThread, isDebugMode } from './page-mode.ts'
 import type { ThreadView } from './pane-context.ts'
 import { removeProject, threadAfterDelete } from './project-list.ts'
 import { ProjectSettingsDialog } from './project-settings-dialog.tsx'
+import { PageHeader, RoutedPage } from './routed-page.tsx'
 import { createResumeRequests, fetchThreadHistory, storedThreadsNotOnThisPage } from './stored-threads.ts'
 import { ThreadPane } from './thread-pane.tsx'
 import { dropThread, getThreadStores, markThreadActive, threadListStore } from './thread-stores.ts'
-import { readThreadUrl, type ThreadUrl, urlForThread } from './thread-url.ts'
+import {
+  type PageRoute,
+  type PageUrl,
+  readPageUrl,
+  readThreadUrl,
+  SETTINGS_ROUTE,
+  type ThreadUrl,
+  urlForPage,
+  urlForThread,
+  urlOpeningThread,
+} from './thread-url.ts'
 import { forkParentTitles, ThreadsRail } from './threads-rail.tsx'
 
 /**
  * The page (#90, #142): the header, the threads rail and one mounted pane per live thread, and the
- * navigation that keeps the URL, history and the shown pane in step. Importable with no DOM at
- * module scope: the entry that mounts it is `main.tsx`.
+ * navigation that keeps the URL, history and the shown pane in step — and the pages beside the
+ * threads (#869), drawn over the panes. Importable with no DOM at module scope: the entry that
+ * mounts it is `main.tsx`.
  */
 
 /**
@@ -36,9 +48,9 @@ if (FIRST_THREAD_ID !== undefined && typeof window !== 'undefined') {
 
 /** How the active thread came to change — what, if anything, is written to history. */
 type ThreadNavigation =
-  /** A click: a new history entry, so back returns to the thread before it. */
+  /** A click: a new history entry, so back returns to the thread before it — or to the page (#869) it left. */
   | 'push'
-  /** The page's own doing (a fresh thread after a failed boot): the current entry is rewritten. */
+  /** The page's own doing (a fresh thread after a failed boot, a delete): the current entry is rewritten, a page on it kept. */
   | 'replace'
   /** Back or forward: history already moved; the page follows it. */
   | 'pop'
@@ -143,15 +155,17 @@ function useResumeRequests({
 }
 
 /**
- * Back/forward: the URL moved; the page follows it — a thread on this page is a switch, one
- * that is not is a resume. Neither writes history again.
+ * Back/forward: the URL moved; the page follows it — the page it names (#869), or none, and its
+ * thread: one on this page is a switch, one that is not is a resume. Neither writes history again.
  */
 function useFollowUrlHistory(
   navigate: (threadId: string, how: ThreadNavigation) => void,
   resumeFrom: (threadId: string, how: ThreadNavigation, fromUrl?: boolean) => void,
+  showPage: (page: PageUrl | undefined) => void,
 ): void {
   useEffect(() => {
     const onPopState = (): void => {
+      showPage(readPageUrl(window.location.search))
       const named = readThreadUrl(window.location.search)
       if (named.kind !== 'resume') return
       if (threadListStore.get().some((thread) => thread.threadId === named.threadId)) {
@@ -162,7 +176,7 @@ function useFollowUrlHistory(
     }
     window.addEventListener('popstate', onPopState)
     return () => window.removeEventListener('popstate', onPopState)
-  }, [navigate, resumeFrom])
+  }, [navigate, resumeFrom, showPage])
 }
 
 /** The rail's project controls: whether the add dialog is open, which project's page is, what a refused removal said, and the removal itself. */
@@ -260,34 +274,50 @@ function useLeaveDeleted({
   )
 }
 
-/** The page's navigation: the shown thread, the rail's resume error, and every way the shown thread changes. */
+/** The page's navigation: the shown thread, the page over it, the rail's resume error, and every way either changes. */
 interface PageNavigation {
   /** Undefined only while a URL-named thread is being adopted: no pane, nothing active. */
   readonly activeThreadId: string | undefined
+  /** The page beside the threads on screen (#869), or undefined: the active thread is. */
+  readonly page: PageUrl | undefined
   readonly resumeError: string | undefined
   readonly navigate: (threadId: string, how: ThreadNavigation) => void
   readonly resumeFrom: (threadId: string, how: ThreadNavigation, fromUrl?: boolean) => void
   readonly openFork: (receipt: EnsoForkReceipt) => void
   readonly leaveDeleted: (threadId: string) => void
+  /** Show a page, a history entry of its own; the one on screen already is no navigation. */
+  readonly openPage: (route: PageRoute) => void
+  /** Leave the page for the thread behind it, or a fresh one when none is adopted yet. */
+  readonly leavePage: () => void
 }
 
 /**
  * The page's navigation (#142): the boot's adoption, rail clicks, forks, deletes, and back/forward,
- * each keeping the URL, history and the shown pane in step.
+ * each keeping the URL, history and the shown pane in step — and the pages (#869): opening one, and
+ * leaving it for a thread.
  *
  * ⚠ A resume's outcome reads two facts from its own request, never from shared state: HOW the
  * request meant to reach history (it rides with the request, `intent`), and WHETHER a navigation
  * happened since (`epoch` counts every navigation, and an outcome from before the current one is
  * dropped whole). New Thread during the boot's "resuming…" therefore wins outright: the URL says the
- * new thread, the pane shows it, and the boot's answer arrives to nobody (#143). `activePane`
- * mirrors `activeThreadId` for the same closures.
+ * new thread, the pane shows it, and the boot's answer arrives to nobody (#143). Opening a page is
+ * a navigation too: a thread asked for before it does not pull the reader off the page when it
+ * lands. `activePane` mirrors `activeThreadId` for the same closures.
  */
 function usePageNavigation(listings: PageListings): PageNavigation {
   const [activeThreadId, setActiveThreadId] = useState<string | undefined>(FIRST_THREAD_ID)
+  // Read at mount, not at module scope as the thread is: nothing is minted for a page.
+  const [page, setPage] = useState<PageUrl | undefined>(() =>
+    typeof window === 'undefined' ? undefined : readPageUrl(window.location.search),
+  )
   const [resumeError, setResumeError] = useState<string | undefined>(BOOT.kind === 'fresh' ? BOOT.notice : undefined)
   const epoch = useRef(0)
   const activePane = useRef<string | undefined>(FIRST_THREAD_ID)
-  /** Make `threadId` the active pane, and tell history how it happened. History state is `null`: the URL is read back, never the state object. */
+  /**
+   * Make `threadId` the active pane, and tell history how it happened. History state is `null`: the
+   * URL is read back, never the state object. A click leaves the page on screen; the page's own
+   * rewrite and back/forward leave it as the URL has it.
+   */
   const navigate = useCallback((threadId: string, how: ThreadNavigation): void => {
     epoch.current += 1
     activePane.current = threadId
@@ -295,11 +325,22 @@ function usePageNavigation(listings: PageListings): PageNavigation {
     // being looked at is what counts as activity for the one being left behind (#272).
     markThreadActive(threadId)
     setActiveThreadId(threadId)
+    if (how === 'push') setPage(undefined)
     if (how === 'pop' || typeof window === 'undefined') return
-    const url = urlForThread(window.location.search, threadId)
-    if (how === 'push') window.history.pushState(null, '', url)
-    else window.history.replaceState(null, '', url)
+    if (how === 'push') window.history.pushState(null, '', urlOpeningThread(window.location.search, threadId))
+    else window.history.replaceState(null, '', urlForThread(window.location.search, threadId))
   }, [])
+  const openPage = useCallback((route: PageRoute): void => {
+    const shown = readPageUrl(window.location.search)
+    if (shown?.kind === route.kind && shown.section === route.section) return
+    epoch.current += 1
+    setPage(route)
+    window.history.pushState(null, '', urlForPage(window.location.search, route))
+  }, [])
+  const leavePage = useCallback(
+    (): void => navigate(activePane.current ?? mintPageThread().threadId, 'push'),
+    [navigate],
+  )
   const resume = useResumeRequests({ epoch, activePane, navigate, setResumeError })
   const resumeFrom = useCallback(
     (threadId: string, how: ThreadNavigation, fromUrl = false): void =>
@@ -322,19 +363,20 @@ function usePageNavigation(listings: PageListings): PageNavigation {
     // react-doctor-disable-next-line no-pass-live-state-to-parent
     if (BOOT.kind === 'resume') resumeFrom(BOOT.threadId, 'pop', true)
   }, [resumeFrom])
-  useFollowUrlHistory(navigate, resumeFrom)
-  return { activeThreadId, resumeError, navigate, resumeFrom, openFork, leaveDeleted }
+  useFollowUrlHistory(navigate, resumeFrom, setPage)
+  return { activeThreadId, page, resumeError, navigate, resumeFrom, openFork, leaveDeleted, openPage, leavePage }
 }
 
-/** The page (#90): header, the sessions rail, and one mounted pane per live thread. */
+/** The page (#90): header, the sessions rail, one mounted pane per live thread, and a page over them (#869). */
 export function ChatScreen(): React.ReactNode {
   const listings = usePageListings()
   const { threads, stored, projects } = listings
-  const { activeThreadId, resumeError, navigate, resumeFrom, openFork, leaveDeleted } = usePageNavigation(listings)
+  const navigation = usePageNavigation(listings)
+  const { activeThreadId, page, resumeError, navigate, resumeFrom, openFork, leaveDeleted, openPage } = navigation
   const pageThreadIds = new Set(threads.map((thread) => thread.threadId))
   const editing = useProjectEditing()
   const { addingProject, setAddingProject, projectNotice, setProjectNotice, forgetProject } = editing
-  // The debug column (#86) is a right-hand pane, so it never takes height from the conversation it
+  // The debug column (#86): a right-hand pane, so it never takes height from the conversation it
   // explains. Opt-in by `?debug`, open by default when it is, and collapsible from the header.
   const [debugOpen, setDebugOpen] = useState(isDebugMode)
   const [view, setView] = useState<ThreadView>('chat')
@@ -342,17 +384,21 @@ export function ChatScreen(): React.ReactNode {
   const active = threads.find((thread) => thread.threadId === activeThreadId)
   return (
     <div className="flex h-dvh flex-col bg-background text-foreground">
-      <AppHeader
-        active={active}
-        activeThreadId={activeThreadId}
-        rail={rail}
-        view={view}
-        onView={setView}
-        debugOpen={debugOpen}
-        onToggleDebug={() => setDebugOpen((open) => !open)}
-        onDeleted={leaveDeleted}
-        stored={stored.rows}
-      />
+      {page === undefined ? (
+        <AppHeader
+          active={active}
+          activeThreadId={activeThreadId}
+          rail={rail}
+          view={view}
+          onView={setView}
+          debugOpen={debugOpen}
+          onToggleDebug={() => setDebugOpen((open) => !open)}
+          onDeleted={leaveDeleted}
+          stored={stored.rows}
+        />
+      ) : (
+        <PageHeader page={page} rail={rail} onOpen={openPage} />
+      )}
       <div className="flex min-h-0 flex-1">
         <ThreadsRail
           projects={projects.rows}
@@ -369,6 +415,8 @@ export function ChatScreen(): React.ReactNode {
           onRemoveProject={(projectId: string) => void forgetProject(projectId)}
           onProjectSettings={editing.setSettingsProjectId}
           projectNotice={projectNotice}
+          onSettings={() => rail.leave(openPage)(SETTINGS_ROUTE)}
+          page={page?.kind === 'not-found' ? page.within : page?.kind}
           shownNarrow={rail.open}
         />
         <AddProjectDialog
@@ -389,13 +437,22 @@ export function ChatScreen(): React.ReactNode {
             <ThreadPane
               key={thread.threadId}
               threadId={thread.threadId}
-              active={thread.threadId === activeThreadId}
+              active={page === undefined && thread.threadId === activeThreadId}
               debugOpen={isDebugMode && debugOpen}
               view={view}
               onView={setView}
               onForked={openFork}
             />
           ))}
+          <RoutedPage
+            page={page}
+            onOpen={openPage}
+            onLeave={navigation.leavePage}
+            threadId={activeThreadId}
+            projects={projects}
+            stored={stored}
+            onDeleted={leaveDeleted}
+          />
         </div>
       </div>
     </div>

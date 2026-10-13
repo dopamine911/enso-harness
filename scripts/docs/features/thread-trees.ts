@@ -1,11 +1,11 @@
 import type { FeatureSpec, MarkTarget } from './spec.ts'
 
 const STATUS: MarkTarget = { label: 'thread status' }
-const SETTINGS: MarkTarget = { role: 'dialog', name: 'Settings' }
+const SETTINGS: MarkTarget = { role: 'region', name: 'Settings' }
 
 /**
  * Thread trees (#551, #571, #573, #578): the demo thread runs in its own worktree, as every new
- * thread does by default. The shots read that tree from the status bar and from Settings' Trees;
+ * thread does by default. The shots read that tree from the status bar and from Settings' Storage;
  * the restore and delete confirmations are said in words — a page has at most two shots — and
  * nothing is confirmed, so the thread is the same for every shot after.
  */
@@ -17,7 +17,7 @@ export const THREAD_TREES: FeatureSpec = {
     "Each new thread works in a tree of its own, not in your checkout. When the project is a git repository's top level, the tree is a git worktree on a branch of its own, `enso/<thread-id>`; otherwise it is a copy of the project. It starts from your checkout as you left it, uncommitted edits and untracked files included, never your ignored files such as `node_modules` or `.env`. pi's file tools stay inside it, so one thread cannot write into another thread's files, or into yours.",
     "A project says how its new trees are prepared, on its own page: **Project settings…** in the project's menu on the rail. Under **Worktrees**, **Files to copy into a new tree** names ignored files such as `.env` to copy in from your checkout, and **Setup commands** run in each new tree, in order, before its first run: an install, so the project's tools, and its git hooks, work there. **New threads run in** set to `off` keeps the project's new threads in its folder, with no tree. Each value says where it comes from: your settings, the project's shared `.enso/config.json`, committed with it, or `.enso/config.local.json`, yours alone. **Save to** chooses which of the project's two files a change goes in (#754).",
     "At the start of every run, Enso takes a snapshot of the tree. **Restore files to here**, under any prompt you sent, puts the tree's files back to how they were when that prompt ran. The conversation is not changed, but your next prompt tells pi the files went back, and to which prompt, so it doesn't work from files that are gone (#652). The files the restore replaced are kept: **Undo last restore** puts them back. A fork made at a prompt gets a tree of its own, at that prompt's snapshot.",
-    'Deleting a thread removes its tree, its branch and its snapshots, after checking what the tree still holds. **Settings** → **Trees** lists every tree with what it takes on disk.',
+    'Deleting a thread removes its tree, its branch and its snapshots, after checking what the tree still holds. **Settings** → **Storage** lists every tree with what it takes on disk.',
   ],
   opens: [
     "{steps}: the status bar says where the thread's edits land. Trees are on by default.",
@@ -32,7 +32,7 @@ export const THREAD_TREES: FeatureSpec = {
       "A trusted project's own `.enso/config.json`, and your `.enso/config.local.json` beside it, set the same keys for that project, and win over yours: the local file first, then the shared one (#754). A launch that relies on the default says so in its log.",
     ].join('\n'),
     '**Restore files to here** is under each prompt you sent, beside **fork from here**.',
-    '**Settings** → **Trees** lists the trees. The trash icon in the header deletes the thread on screen, through the same confirmation.',
+    '**Settings** → **Storage** lists the trees: **Settings** is at the foot of the rail. The trash icon in the header deletes the thread on screen, through the same confirmation.',
   ],
   shots: [
     {
@@ -66,13 +66,18 @@ export const THREAD_TREES: FeatureSpec = {
     },
     {
       image: 'thread-trees-listing',
-      alt: 'Settings → Trees, listing the project’s trees with their sizes',
+      alt: 'Settings → Storage, listing the project’s trees with their sizes',
       go: async (ui) => {
         await ui.openThread()
-        await ui.click({ role: 'button', name: 'settings' })
-        await ui.click({ role: 'tab', name: 'Trees', within: SETTINGS })
+        await ui.click({ role: 'button', name: 'Settings', exact: true })
+        await ui.click({
+          role: 'button',
+          name: 'Storage',
+          exact: true,
+          within: { role: 'navigation', name: 'Settings sections' },
+        })
         await ui.page
-          .getByRole('dialog', { name: 'Settings' })
+          .getByRole('region', { name: 'Settings' })
           .getByText(/^snapshots /)
           .waitFor()
       },
@@ -99,7 +104,7 @@ export const THREAD_TREES: FeatureSpec = {
         "The trash icon opens the header's confirmation: what goes (the conversation, the tree by path and branch, and what it takes on disk), and the work deleting would lose, named before anything goes. **Delete anyway** deletes exactly that work; work the tree gained since is named again first.",
       ],
       measure: {
-        treeSize: (page) => page.getByRole('dialog', { name: 'Settings' }).locator('li .tabular-nums').first(),
+        treeSize: (page) => page.getByRole('region', { name: 'Settings' }).locator('li .tabular-nums').first(),
       },
     },
   ],

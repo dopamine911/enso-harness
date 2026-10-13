@@ -3,11 +3,12 @@
   "shots": [
     {
       "image": "settings",
-      "steps": ["open a thread from the rail", "choose **settings**"],
+      "steps": ["open a thread from the rail", "choose **Settings**"],
       "shown": [
+        "Settings sections",
         "Theme",
         "Body",
-        "appearance is kept in this browser; permissions are saved on the server; trees are measured on it"
+        "Appearance stays in this browser. Permissions and storage live on the server."
       ],
       "measured": {
         "themeFont": "the theme's font"
@@ -15,7 +16,7 @@
     },
     {
       "image": "settings-permissions",
-      "steps": ["open a thread from the rail", "choose **settings**", "choose **Permissions**"],
+      "steps": ["open a thread from the rail", "choose **Settings**", "choose **Permissions**"],
       "shown": [
         "This section is saved on the server, in /tmp/enso-feature-shots/home/permissions.json; the rest of Settings is kept in this browser.",
         "Save",

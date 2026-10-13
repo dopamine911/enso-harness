@@ -552,7 +552,7 @@ a mode nothing enforces. A print run has Enso's guards only.
 alone. `permission-mode-adapter.test.ts` pins the walk below the seam, and the extension's tests pin
 the link against fakes of the engine's service.
 
-**Edited by Settings (#474).** The Permissions tab reads and writes the policy file through the
+**Edited by Settings (#474).** The Permissions section reads and writes the policy file through the
 server's routes (listed in `docs/reference/routes.md`), which call the host's
 `packages/web/src/host/permission-policy-file.ts`. A save
 names the version it read (`If-Match`, as a prompt write does), gets Enso's `**` put first where a
