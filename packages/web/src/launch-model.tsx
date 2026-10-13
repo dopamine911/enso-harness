@@ -1,5 +1,5 @@
 import type { HostCommandOption } from '@enso/core'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from './components/ui/command.tsx'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './components/ui/dialog.tsx'
 import { ChosenMark, OptionDetail, optionKeywords } from './model-state.tsx'
@@ -87,6 +87,7 @@ export function LaunchModelChip({
 }): React.ReactNode {
   const [open, setOpen] = useState(false)
   const [filter, setFilter] = useState('')
+  const chip = useRef<HTMLButtonElement | null>(null)
   const close = (): void => {
     setOpen(false)
     setFilter('')
@@ -104,6 +105,7 @@ export function LaunchModelChip({
   return (
     <>
       <ChipButton
+        ref={chip}
         label="Model"
         display={modelDisplay(models, chosen, loading)}
         onOpen={(): void => setOpen(true)}
@@ -111,7 +113,16 @@ export function LaunchModelChip({
         invalid={invalid}
       />
       <Dialog open={open} onOpenChange={(next: boolean): void => (next ? setOpen(true) : close())}>
-        <DialogContent className="sm:max-w-lg" onEscapeKeyDown={escapeFromFilter}>
+        {/* ⚠ Closed, focus goes back to the chip: Radix returns it to a trigger of its own, and the
+            chip is not one, so a keyboard user was left on the page's body. */}
+        <DialogContent
+          className="sm:max-w-lg"
+          onEscapeKeyDown={escapeFromFilter}
+          onCloseAutoFocus={(event: Event): void => {
+            event.preventDefault()
+            chip.current?.focus()
+          }}
+        >
           <DialogHeader>
             <DialogTitle>Model</DialogTitle>
             <DialogDescription>the session starts on it; each row names its provider</DialogDescription>

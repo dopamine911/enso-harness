@@ -50,12 +50,14 @@ export function isSlashPrompt(text: string): boolean {
 /**
  * Whether the thread on this pane shows its launch panel (#877): raised for a thread not started,
  * until Start goes through — or until a prompt reaches it some other way (another tab's), when its
- * transcript is what there is to show.
+ * transcript is what there is to show. ⚠ A PROMPT, not any message: a Start refused at a later
+ * step has still built the session, whose first run (the configure's) opens an assistant message
+ * for its startup receipts — the panel must stay, saying why Start did not go through.
  */
 export function useLaunching(): boolean {
   const launch = useStore(useThreadStores().launch)
   const chat = useChatContext()
-  return launch && chat.messages.length === 0
+  return launch && !chat.messages.some((message) => message.role === 'user')
 }
 
 type Catalogue =
@@ -249,7 +251,10 @@ export function useLaunchForm(active: boolean): LaunchForm {
   }
 }
 
-/** What the Effort chip says when the host names no level: the session takes pi's own. */
+/**
+ * What the Effort chip says when the host names no level: the session takes pi's own. Not while the
+ * models are read: the host may yet name one, so the chip says it is loading, as the Model chip does.
+ */
 const PI_DEFAULT_EFFORT = "pi's default"
 
 /** The launch panel's chips, inside the composer: Model, Effort, Mode, System prompt — and a saved prompt for the box. */
@@ -276,7 +281,7 @@ export function LaunchChips({
       <SettingChip
         label="Effort"
         value={form.effort ?? ''}
-        display={form.effort ?? PI_DEFAULT_EFFORT}
+        display={catalogue.kind === 'loading' ? 'loading…' : (form.effort ?? PI_DEFAULT_EFFORT)}
         onChoose={form.chooseEffort}
         disabled={form.levels.length === 0}
         invalid={refusedAt === 'thinking'}

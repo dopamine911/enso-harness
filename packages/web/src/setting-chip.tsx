@@ -43,10 +43,12 @@ export interface SettingChipProps {
  * ⚠ `''` is no choice, but Radix can report it as one: inside a form (the composer is one) it
  * mirrors the select into a hidden native one, which reads `''` while it holds no option for the
  * value. Taken, Start sent `mode: ""` (`launch-panel.test.tsx`). `''` is what `value` says when
- * none is chosen, so it is never passed on.
+ * none is chosen, so it is never passed on. ⚠ Radix shows the placeholder, not the children, for
+ * `''`: the face is both, or a chip with no choice is an empty box (#852's "Effort: pi's default").
  */
 export function SettingChip(props: SettingChipProps): React.ReactNode {
   const { label, display, onChoose } = props
+  const face = <ChipFace label={label} value={display} />
   return (
     <Select
       value={props.value}
@@ -60,9 +62,7 @@ export function SettingChip(props: SettingChipProps): React.ReactNode {
         aria-invalid={props.invalid === true ? true : undefined}
         className={CHIP}
       >
-        <SelectValue>
-          <ChipFace label={label} value={display} />
-        </SelectValue>
+        <SelectValue placeholder={face}>{face}</SelectValue>
       </SelectTrigger>
       <SelectContent position="popper">{props.children}</SelectContent>
     </Select>
@@ -76,6 +76,8 @@ export interface ChipButtonProps {
   readonly onOpen: () => void
   readonly disabled?: boolean
   readonly invalid?: boolean
+  /** The chip, for its picker to put focus back on when it closes: the picker is not a Radix trigger's. */
+  readonly ref?: React.Ref<HTMLButtonElement>
 }
 
 /**
@@ -83,10 +85,11 @@ export interface ChipButtonProps {
  * `aria-invalid`, so a refused setting says so in its name (`Model: Plain, refused`) and is marked
  * as a refused select chip is.
  */
-export function ChipButton({ label, display, onOpen, disabled, invalid }: ChipButtonProps): React.ReactNode {
+export function ChipButton({ label, display, onOpen, disabled, invalid, ref }: ChipButtonProps): React.ReactNode {
   const refused = invalid === true
   return (
     <button
+      ref={ref}
       type="button"
       aria-label={refused ? `${label}: ${display}, refused` : `${label}: ${display}`}
       aria-haspopup="dialog"

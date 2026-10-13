@@ -185,6 +185,8 @@ interface MountOptions {
   readonly projectId?: string
   /** The draft's own id — one a stored listing may name too (#479). */
   readonly threadId?: string
+  /** The session's catalogue (`/commands`) answers only once this settles: the panel's loading state. */
+  readonly catalogueHeld?: Promise<void>
 }
 
 /** The server's prompt routes (#443, #470) over the scripted server, which has none. */
@@ -203,6 +205,9 @@ function withPromptRoutes(server: ScriptedFetch, options: MountOptions): typeof 
       return Promise.resolve(Response.json(TRIAGE, { headers: { ETag: `"${'c'.repeat(64)}"` } }))
     }
     if (/^\/api\/threads\/[^/]+\/project-prompts$/.test(path)) return Promise.resolve(Response.json(project))
+    if (options.catalogueHeld !== undefined && /^\/api\/threads\/[^/]+\/commands$/.test(path)) {
+      return options.catalogueHeld.then(() => server.fetch(input, init))
+    }
     if (/^\/api\/threads\/[^/]+\/project-prompts\/kickoff$/.test(path)) {
       return Promise.resolve(Response.json(KICKOFF, { headers: { ETag: `"${'d'.repeat(64)}"` } }))
     }
@@ -412,16 +417,29 @@ test('⚠ the Effort chip shows the level the session will run at, never an empt
   )
   await mounted.unmount()
 
-  // A host that names no level for the model: the chip says pi's default applies, and Start sends no effort.
+  // A host that names no level for the model: the chip says pi's default applies — on its face, not
+  // only in its name — and Start sends no effort.
   const { defaultThinkingLevel: _unnamed, ...unnamed } = DEEP
   const bare = await mountLaunch({ server: { commands: [modelRow('fake/deep', [unnamed])] } })
   await eventually(() => expect(bare.chip('Effort').getAttribute('aria-label')).toBe("Effort: pi's default"))
+  expect(bare.chip('Effort').textContent).toBe("Effortpi's default")
   await typeAndStart(bare, 'go')
   await eventually(() =>
     expect(bare.server.configures.map((configure) => configure.body)).toEqual([
       { model: 'fake/deep', mode: 'default', systemPrompt: null },
     ]),
   )
+  await bare.unmount()
+
+  // While the models are read, the level is not known yet: the chip says so, as the Model chip
+  // does — not "pi's default", which the host may be about to contradict.
+  const { promise: catalogueHeld, resolve: releaseCatalogue } = Promise.withResolvers<void>()
+  const reading = await mountLaunch({ catalogueHeld })
+  await flush(tick)
+  expect(reading.chip('Effort').getAttribute('aria-label')).toBe('Effort: loading…')
+  expect(reading.chip('Effort').textContent).toBe('Effortloading…')
+  releaseCatalogue()
+  await eventually(() => expect(reading.chip('Effort').getAttribute('aria-label')).toBe('Effort: medium'))
 })
 
 test('the chosen model is named as chosen in the accessibility tree, and the mark follows a new choice', async () => {
@@ -545,6 +563,25 @@ test('a refused step keeps the panel, names the step and why, marks its chip, se
   expect(panelTitle(mounted)).toBe('What should pi work on?')
   expect(mounted.chip('Model').getAttribute('aria-label')).toBe('Model: Plain, refused')
   expect(mounted.chip('Effort').getAttribute('aria-invalid')).toBeNull()
+  expect(mounted.composer().value).toBe('hello there')
+  expect(attached()).toBe(attachedBefore)
+
+  // ⚠ The refused Start still built the session, and the live server says so on the follow: a run
+  // opens and settles around the configure, carrying the mode receipt. No prompt reached the
+  // thread, so the panel stays (found live: it gave way to an empty transcript, the refusal unsaid).
+  await flush(async () => {
+    mounted.server.frame({ type: 'status', live: true, busy: true, generation: 1 })
+    mounted.server.frame({
+      type: 'observation',
+      seq: 1,
+      observation: { kind: 'permission-mode', mode: 'default', available: ['default', 'plan'] },
+    })
+    mounted.server.frame({ type: 'observation', seq: 2, observation: { kind: 'settled', aborted: false } })
+    mounted.server.frame({ type: 'status', live: true, busy: false, generation: 1 })
+    await tick()
+  })
+  expect(panelTitle(mounted)).toBe('What should pi work on?')
+  expect(mounted.container.textContent).toContain('the model was refused: No API key for fake/plain')
   expect(mounted.composer().value).toBe('hello there')
   expect(attached()).toBe(attachedBefore)
 

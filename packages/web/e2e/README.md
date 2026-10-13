@@ -35,21 +35,22 @@ To add a seeded thread, add it to `seededHome` in `e2e-home.ts` with the turns a
 
 | Test | Held behaviour |
 |---|---|
-| empty state, `/mode` refused, then dialog, answer, settle | before a session `/mode` is refused and its words come back to the composer (#484); the mode select builds the session with no model; then a dialog round trip through pi: Enso's mode select ("Accept edits"), then the `Mode: acceptEdits` line from the host's `permission-mode` (#496) |
+| launch panel, `/mode` refused, then dialog, answer, settle | on the launch panel (#877) a `/mode` prompt is refused with the reason, Start waits, and an Enter sends nothing and keeps the words (#484); Start, in the mode chosen on the Mode chip, builds the session with no model reached; then a dialog round trip through pi: Enso's mode select ("Accept edits"), then the `Mode: acceptEdits` line from the host's `permission-mode` (#496) |
 | fonts load from `/fonts` | the web server's font route, wired to the page |
-| paste an image | the image reaches the prompt POST as `EnsoPromptImage` |
-| the URL names the thread | reload, back/forward, a pasted link, a malformed id (#142) |
+| paste an image | on the launch panel an image alone does not start a session, and with words it goes out with Start's prompt; in the docked composer the image alone enables send; both reach the prompt POST as `EnsoPromptImage` |
+| the URL names the thread | reload, back/forward, a pasted link, a malformed id (#142); a fresh thread comes back on its launch panel |
 | New Thread during a slow resume | the late history is dropped (PR #143 review) |
+| the Model chip by keyboard | on the launch panel, Escape in the model picker's filter clears it and keeps the picker, Escape again closes it with focus back on the chip; a choice made by keyboard renames the chip and leaves focus on it, the prompt kept (#877, #638) |
 | Escape on `/model` or `/context` | focus returns to the composer (#367) |
 | switching threads keeps a scrolled-up reader's place | an off-screen pane keeps its scroll position (#370) |
 | every off-screen pane is inert and `content-visibility: hidden` | no pointer, focus or layout work for a pane off screen (#472) |
-| a URL naming an unused thread id | that thread is started with no alert; one outside the projects is refused by name (#378) |
-| a long prompt leaves the Start dialog in the window | at 1440×900 and 800×480, a 14-line prompt scrolls inside its capped box, the dialog is not clipped at the top, and Start session is in the window and clickable without scrolling (#679) |
+| a URL naming an unused thread id | that thread opens on its launch panel with no alert; one outside the projects is refused by name (#378) |
+| a long prompt leaves Start session in the window | a 14-line prompt scrolls inside its capped box and the launch panel's question is not clipped at the top; at 1440×900 Start session is in the window without scrolling, and at 800×480 the panel scrolls to it; at both it is clickable (#679) |
 | a preview page runs on its own origin | `modules`' page, opened at the thread's `previewOrigin` from its tree route, runs its root-loaded module and the module it imports and keeps its score in `localStorage`, with no console error; its origin is its own, it reads its own file, and a request it sends Enso to escalate a fresh thread builds nothing (#713, #717) |
 
 Each of the four before #679's row was shown failing with its fix reverted (#486), and #713's was too.
 
-⚠ **A slash command needs a running session (#484)**, and a page visit builds none. A test that drives one first builds the thread's session with `chooseMode`: the composer's mode select is a control route that builds it with no model. All four tests that drove a slash command into a session-less thread had failed since #484, unnoticed because this suite is not in CI (#604).
+⚠ **A slash command needs a running session (#484)**, and a page visit builds none. A test that drives one first builds the thread's session: a new thread with `startSession`, which chooses the mode on the launch panel's Mode chip and starts with a prompt the seeded `demo` provider refuses at once (nothing listens on its port), and a stored thread with `chooseMode`, the docked composer's mode select, a control route that builds it with no prompt. All four tests that drove a slash command into a session-less thread had failed since #484, unnoticed because this suite is not in CI (#604).
 
 ## Output
 
@@ -70,8 +71,8 @@ A pull request that changes what the web page shows carries screenshots, committ
 
 The spec finds controls by their accessible names and placeholders from `src/composer.tsx`. Two traps:
 
-- **The Start dialog's prompt box has the composer's placeholder.** A new thread opens that dialog; `openNewThread` puts it away with Escape.
-- **Every off-screen pane keeps its own composer and mode control**, `inert` and invisible (#472). `composer(page)` and `modeControl(page)` take the one on screen.
+- **A new thread opens on its launch panel (#877)**, the same composer with a placeholder of its own. `launchPanel(page)` finds the panel by its question, and `launchPrompt(page)` its prompt box; `composer(page)` finds the docked composer once Start has gone through.
+- **Every off-screen pane keeps its own composer, mode control and launch panel**, `inert` and invisible (#472). `composer(page)`, `modeControl(page)` and `launchPanel(page)` take the one on screen.
 
 Renaming a label in the UI is a spec change too. The constants at the top of `chat.e2e.ts` are the one place to update, and `src/__tests__/thread-pane.test.tsx` reads them out of that file, so drift on either side fails `bun run check`.
 

@@ -18,7 +18,7 @@
 import { randomUUID } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import type { Page } from '@playwright/test'
+import type { Locator, Page } from '@playwright/test'
 import { expect, test } from '@playwright/test'
 import { e2eHome, SEEDED_TITLES, SEEDED_TURNS } from './e2e-home.ts'
 import { OUTPUT_DIRECTORY, WEB_ORIGIN } from './playwright.config.ts'
@@ -101,45 +101,74 @@ async function waitForRunToSettle(page: Page, mark: number): Promise<void> {
 }
 
 /**
- * The composer on screen. ⚠ Not the placeholder alone: the Start dialog's prompt box has the same
- * one, and every off-screen pane keeps its own composer, `inert` and invisible (#472).
+ * The composer on screen. ⚠ Not the placeholder alone: every off-screen pane keeps its own
+ * composer, `inert` and invisible (#472). A thread not started shows its launch panel instead, whose
+ * prompt box has a placeholder of its own (`launchPrompt`).
  */
-function composer(page: Page): ReturnType<Page['getByPlaceholder']> {
+function composer(page: Page): Locator {
   return page.getByPlaceholder(COMPOSER_PLACEHOLDER).filter({ visible: true })
 }
 
 /** The permission-mode select on screen — what a resumed thread's persisted mode shows on (#142). */
-function modeControl(page: Page): ReturnType<Page['getByRole']> {
+function modeControl(page: Page): Locator {
   return page.getByRole('combobox', { name: 'permission mode' }).filter({ visible: true })
 }
 
 /**
- * A new thread opens the Start dialog (#395). These tests drive the composer instead, so they put
- * it away: Escape closes it, and the composer stays as it is (`start-session.tsx`).
+ * The launch panel on screen (#877): a thread not started shows it where the transcript goes, named
+ * by its question. An off-screen draft keeps its own, `inert` and invisible.
  */
-async function dismissStartDialog(page: Page): Promise<void> {
-  const dialog = page.getByRole('dialog', { name: 'Start a session' })
-  await expect(dialog).toBeVisible()
-  await page.keyboard.press('Escape')
-  await expect(dialog).toHaveCount(0)
+function launchPanel(page: Page): Locator {
+  return page.getByRole('region', { name: 'What should pi work on?' }).filter({ visible: true })
 }
 
-/** A new thread, with the Start dialog put away: what the model-free tests start from. */
+/** The launch panel's prompt box: the same composer, docked under the transcript once Start goes through. */
+function launchPrompt(page: Page): Locator {
+  return launchPanel(page).locator('textarea[name="message"]')
+}
+
+/** The launch panel's Mode chip, named by its value: `Mode: default`. */
+function modeChip(page: Page, mode: string): Locator {
+  return launchPanel(page).getByRole('combobox', { name: `Mode: ${mode}`, exact: true })
+}
+
+/** A new thread, on its launch panel: what the model-free tests start from. */
 async function openNewThread(page: Page): Promise<void> {
   await page.goto('/')
-  await dismissStartDialog(page)
-  await expect(composer(page)).toBeVisible()
+  await expect(launchPanel(page)).toBeVisible()
+}
+
+/** The first prompt `startSession` sends: it reaches the seeded `demo` provider, which nothing serves. */
+const START_PROMPT = 'Start the session.'
+
+/**
+ * Start the thread's session from its launch panel, in `mode`, chosen on the Mode chip (#877).
+ *
+ * ⚠ A slash command needs a running session since #484 ("a page visit builds no session"): the
+ * launch panel refuses a prompt beginning with `/`, and the `/` palette lists no rows. Start
+ * applies the panel's settings (`POST …/configure`), then sends a prompt; the seeded home's `demo`
+ * provider points at a port nothing listens on, so the run ends at once, refused, with no provider
+ * reached. The docked composer's mode select is then the host's receipt: the session is live, in
+ * the mode the chip said.
+ */
+async function startSession(page: Page, mode: string): Promise<void> {
+  await launchPanel(page)
+    .getByRole('combobox', { name: /^Mode: / })
+    .click()
+  await page.getByRole('option', { name: mode, exact: true }).click()
+  await expect(modeChip(page, mode)).toBeVisible()
+  await launchPrompt(page).fill(START_PROMPT)
+  const beforeStart = await markThreadStatus(page)
+  await launchPanel(page).getByRole('button', { name: 'Start session' }).click()
+  await expect(launchPanel(page)).toHaveCount(0)
+  await waitForRunToSettle(page, beforeStart)
+  await expect(modeControl(page)).toHaveValue(mode)
 }
 
 /**
- * Build the thread's session with no model, by choosing `mode` in the composer's select (#604).
- *
- * ⚠ A slash command needs a running session since #484 ("a page visit builds no session"): `/mode`
- * sent in a thread that has none comes back to the composer with the Start dialog's sentence, and
- * the `/` palette lists no rows. The select is a control route (`POST …/mode`) that acquires the
- * thread — a fresh one, or a stored one cold off its file — so this builds it without a prompt
- * reaching a provider (the seeded home's `demo` points at a port nothing listens on). The `Mode:`
- * line is the host's receipt: the session is live and in that mode.
+ * Build a stored thread's session with no model, by choosing `mode` in the composer's select (#604):
+ * a control route (`POST …/mode`) that acquires the thread cold off its file, with no prompt. The
+ * `Mode:` line is the host's receipt: the session is live and in that mode.
  */
 async function chooseMode(page: Page, mode: string): Promise<void> {
   await modeControl(page).selectOption(mode)
@@ -164,32 +193,34 @@ async function captureScreenshot(page: Page, fileName: string): Promise<void> {
 }
 
 test.describe('chat surface', () => {
-  test('empty state, /mode dialog, answer, settle (model-free)', async ({ page }) => {
+  test('launch panel, /mode refused, then dialog, answer, settle (model-free)', async ({ page }) => {
     await openNewThread(page)
     await captureScreenshot(page, '01-empty-state')
-    // The `/` palette (#338) is in the composer and opens to its filter box; Escape puts it away.
-    await page.getByRole('button', { name: 'commands' }).click()
+    // The `/` palette (#338) is in the composer, on the launch panel too, and opens to its filter
+    // box; Escape puts it away.
+    await launchPanel(page).getByRole('button', { name: 'commands' }).click()
     await expect(page.getByPlaceholder('filter commands…')).toBeVisible()
     await page.keyboard.press('Escape')
 
-    // Before a session, `/mode` is refused (#484): nothing is built, and the words go back to the
-    // composer. The refusal's sentence is pinned in `start-session.test.tsx`; this holds that the
-    // composer gets the words BACK through the real server — so it waits for the commands lookup the
-    // send makes, after which the draft was cleared and restored (the value before it proves nothing).
-    // A REQUEST issued from here on: the palette above fetched the same route, and its response may
-    // still be arriving.
-    const lookup = page.waitForRequest((request) =>
-      /\/api\/threads\/[^/]+\/commands$/.test(new URL(request.url()).pathname),
-    )
-    await typeAndSend(page, MODE_COMMAND)
-    expect((await (await lookup).response())?.ok()).toBe(true)
-    await expect(composer(page)).toHaveValue(MODE_COMMAND)
-    await expect(page.getByRole('button', { name: MODE_OPTION_LABEL })).toHaveCount(0)
+    // Before a session, `/mode` is refused (#484): the panel says why, Start waits, and an Enter
+    // sends nothing — no settings, no prompt — and leaves the words where they are. The sentence
+    // is pinned in `launch-panel.test.tsx`; this holds the real form's Enter to it.
+    const sent: string[] = []
+    page.on('request', (request) => {
+      if (/\/api\/threads\/[^/]+\/(configure|prompt)$/.test(new URL(request.url()).pathname)) sent.push(request.url())
+    })
+    await launchPrompt(page).fill(MODE_COMMAND)
+    await expect(launchPanel(page).getByRole('alert')).toContainText('a / command needs a running session')
+    await expect(launchPanel(page).getByRole('button', { name: 'Start session' })).toBeDisabled()
+    await launchPrompt(page).press('Enter')
+    await expect(launchPrompt(page)).toHaveValue(MODE_COMMAND)
+    expect(sent).toEqual([])
 
-    // A session built with no model; the same words, sent again, now reach pi.
-    await chooseMode(page, 'plan')
+    // A session started from the panel (no model reached); the same words, sent in the docked
+    // composer, now reach pi.
+    await startSession(page, 'plan')
     const beforeSend = await markThreadStatus(page)
-    await composer(page).press('Enter')
+    await typeAndSend(page, MODE_COMMAND)
     // The dialog parks the run (#27): the bar announces the card once it is rendered, titled by
     // the select's own words; its option buttons are then on screen to click.
     const card = await test.step('the thread announces the mode card', () => waitForQuestion(page, beforeSend))
@@ -223,7 +254,7 @@ test.describe('chat surface', () => {
     expect(loadedFaces).toContain('Inter Variable')
   })
 
-  test('paste an image: thumbnail, send enabled, the bytes on the wire as EnsoPromptImage (model-free)', async ({
+  test('paste an image: thumbnail, carried through Start, send enabled, the bytes on the wire as EnsoPromptImage (model-free)', async ({
     page,
   }) => {
     // The prompt route is answered here, not by pi: this pins the browser's half of #68 — paste
@@ -234,35 +265,51 @@ test.describe('chat surface', () => {
       await route.fulfill({
         status: 202,
         contentType: 'application/json',
-        body: JSON.stringify({ threadId: 't', messageId: 'm1', generation: 1, queued: false }),
+        body: JSON.stringify({ threadId: 't', messageId: `m${posted.length}`, generation: 1, queued: false }),
       })
     })
-    await openNewThread(page)
-    await expect(page.getByRole('button', { name: SEND_BUTTON_NAME })).toBeDisabled()
-
     // Ctrl+V with a PNG on the clipboard, as the browser delivers it: a `paste` whose data is a file.
-    await composer(page).focus()
-    await page.evaluate((base64) => {
-      const bytes = Uint8Array.from(atob(base64), (character) => character.charCodeAt(0))
-      const transfer = new DataTransfer()
-      transfer.items.add(new File([bytes], 'pixel.png', { type: 'image/png' }))
-      document
-        .querySelector('textarea[name="message"]:not([inert] *)')
-        ?.dispatchEvent(new ClipboardEvent('paste', { clipboardData: transfer, bubbles: true, cancelable: true }))
-    }, ONE_PIXEL_PNG)
+    const pasteImage = (): Promise<void> =>
+      page.evaluate((base64) => {
+        const bytes = Uint8Array.from(atob(base64), (character) => character.charCodeAt(0))
+        const transfer = new DataTransfer()
+        transfer.items.add(new File([bytes], 'pixel.png', { type: 'image/png' }))
+        document
+          .querySelector('textarea[name="message"]:not([inert] *)')
+          ?.dispatchEvent(new ClipboardEvent('paste', { clipboardData: transfer, bubbles: true, cancelable: true }))
+      }, ONE_PIXEL_PNG)
     const strip = page.getByLabel('attached images')
+    const sentImage = { mimeType: 'image/png', data: ONE_PIXEL_PNG }
+
+    // On the launch panel (#877): an image alone does not start a session, words with it do — and
+    // the image goes out with the first prompt.
+    await openNewThread(page)
+    const start = launchPanel(page).getByRole('button', { name: 'Start session' })
+    await launchPrompt(page).focus()
+    await pasteImage()
     await expect(strip.getByRole('img')).toHaveCount(1)
-    // An image with no words is a prompt: send is offered on the attachment alone.
+    await expect(start).toBeDisabled()
+    await launchPrompt(page).fill('what does this say?')
+    await start.click()
+    await expect(launchPanel(page)).toHaveCount(0)
+    await expect.poll(() => posted.length).toBe(1)
+    expect(posted[0]).toMatchObject({ message: 'what does this say?', images: [sentImage] })
+    await expect(strip).toHaveCount(0)
+
+    // In the docked composer, an image with no words is a prompt: send is offered on the attachment alone.
+    await expect(page.getByRole('button', { name: SEND_BUTTON_NAME })).toBeDisabled()
+    await composer(page).focus()
+    await pasteImage()
+    await expect(strip.getByRole('img')).toHaveCount(1)
     await expect(page.getByRole('button', { name: SEND_BUTTON_NAME })).toBeEnabled()
     await captureScreenshot(page, '06-image-attached')
 
-    await typeAndSend(page, 'what does this say?')
+    await typeAndSend(page, 'and this one?')
     await expect(strip).toHaveCount(0)
-    await expect.poll(() => posted.length).toBe(1)
-    expect(posted[0]?.message).toBe('what does this say?')
-    expect(posted[0]?.images).toEqual([{ mimeType: 'image/png', data: ONE_PIXEL_PNG }])
-    // The user's own image is in the transcript, as inline bytes.
-    await expect(page.locator('img[alt="attached by the user"]')).toHaveCount(1)
+    await expect.poll(() => posted.length).toBe(2)
+    expect(posted[1]).toMatchObject({ message: 'and this one?', images: [sentImage] })
+    // The user's own images are in the transcript, as inline bytes.
+    await expect(page.locator('img[alt="attached by the user"]')).toHaveCount(2)
     await captureScreenshot(page, '07-image-sent')
   })
 
@@ -275,8 +322,8 @@ test.describe('chat surface', () => {
     await expect(page).toHaveURL(/\?thread=[0-9a-f-]{36}$/)
     const first = new URL(page.url()).searchParams.get('thread') ?? ''
 
-    // A thread to come back to: choosing a mode builds its session on the server (no model, #484).
-    await chooseMode(page, 'acceptEdits')
+    // A thread to come back to: Start builds its session on the server (no model reached, #484).
+    await startSession(page, 'acceptEdits')
 
     // Reload: the same thread with its persisted mode — not a fresh one (the #68 check that
     // failed). The mode CONTROL is the receipt: the "Mode: acceptEdits" line was a live notice.
@@ -286,31 +333,29 @@ test.describe('chat surface', () => {
     await expect(page.locator("[aria-current='true']")).toHaveCount(1)
     await captureScreenshot(page, '08-thread-reloaded')
 
-    // New Thread pushes; back returns to the first thread; forward to the second.
+    // New Thread pushes; back returns to the first thread; forward to the second, on its launch
+    // panel (#877), whose Mode chip says the fresh thread's mode.
     await page.getByRole('button', { name: 'New Thread', exact: true }).click()
-    await dismissStartDialog(page)
     await expect(page).not.toHaveURL(new RegExp(`thread=${first}$`))
     const second = new URL(page.url()).searchParams.get('thread') ?? ''
     expect(second).not.toBe(first)
-    await expect(modeControl(page)).toHaveValue('default')
+    await expect(modeChip(page, 'default')).toBeVisible()
     await page.goBack()
     await expect(page).toHaveURL(new RegExp(`thread=${first}$`))
     await expect(modeControl(page)).toHaveValue('acceptEdits')
     await page.goForward()
     await expect(page).toHaveURL(new RegExp(`thread=${second}$`))
-    await expect(modeControl(page)).toHaveValue('default')
+    await expect(modeChip(page, 'default')).toBeVisible()
 
     // A pasted link on a fresh page opens that thread cold — no page state.
     await page.goto(`/?thread=${first}`)
     await expect(modeControl(page)).toHaveValue('acceptEdits')
 
-    // A URL that cannot name a thread: a new session, and the rail says why.
+    // A URL that cannot name a thread: a new thread, on its launch panel, and the rail says why.
     await page.goto('/?thread=not%20a%20thread')
-    // The fallback is a new thread, so its Start dialog opens, modal, over the rail's notice.
-    await dismissStartDialog(page)
-    await expect(page.getByRole('alert')).toContainText('is not a thread id')
+    await expect(page.getByRole('alert').filter({ hasText: 'is not a thread id' })).toHaveCount(1)
     await expect(page).toHaveURL(/\?thread=[0-9a-f-]{36}$/)
-    await expect(composer(page)).toBeVisible()
+    await expect(launchPanel(page)).toBeVisible()
     await captureScreenshot(page, '09-thread-bad-id')
   })
 
@@ -321,8 +366,7 @@ test.describe('chat surface', () => {
     // A thread to come back to, with a mode that tells it apart from a fresh one.
     await openNewThread(page)
     const first = new URL(page.url()).searchParams.get('thread') ?? ''
-    await chooseMode(page, 'acceptEdits')
-    await expect(modeControl(page)).toHaveValue('acceptEdits')
+    await startSession(page, 'acceptEdits')
 
     // The boot's /history is slow; the user does not wait.
     await page.route('**/api/threads/*/history', async (route) => {
@@ -332,25 +376,57 @@ test.describe('chat surface', () => {
     await page.goto(`/?thread=${first}`)
     await expect(page.getByText('resuming…')).toBeVisible()
     await page.getByRole('button', { name: 'New Thread', exact: true }).click()
-    await dismissStartDialog(page)
+    await expect(page).not.toHaveURL(new RegExp(`thread=${first}$`))
     const fresh = new URL(page.url()).searchParams.get('thread') ?? ''
     expect(fresh).not.toBe(first)
-    await expect(modeControl(page)).toHaveValue('default')
+    await expect(modeChip(page, 'default')).toBeVisible()
 
     // The late answer for `first` arrives — and changes nothing: URL, current row, and mode
     // all still say the fresh thread. (Pre-fix: the pane flipped to `first` under a URL naming `fresh`.)
     await page.waitForTimeout(2000)
     await expect(page).toHaveURL(new RegExp(`thread=${fresh}$`))
-    await expect(modeControl(page)).toHaveValue('default')
+    await expect(modeChip(page, 'default')).toBeVisible()
     await expect(page.locator("[aria-current='true']")).toHaveCount(1)
     await expect(page.getByText(/resuming/)).toHaveCount(0)
     await page.unroute('**/api/threads/*/history')
   })
 
+  // #877 (#638): the Model chip's picker is a dialog with a filter. Escape in the filter clears it;
+  // Escape again closes the picker — and focus is back on the chip, not on the page's body, which
+  // happy-dom cannot show (it fires no focus return). A choice made by keyboard lands there too.
+  test('⚠ the Model chip by keyboard: Escape clears the filter, then closes the picker with focus back on the chip (#877)', async ({
+    page,
+  }) => {
+    await openNewThread(page)
+    await launchPrompt(page).fill('the prompt stays')
+    const chip = launchPanel(page).getByRole('button', { name: /^Model: / })
+    const picker = page.getByRole('dialog', { name: 'Model' })
+    const filter = picker.getByRole('combobox', { name: 'Model' })
+    await chip.focus()
+    await page.keyboard.press('Enter')
+    await expect(filter).toBeFocused()
+    await page.keyboard.type('opus')
+    await page.keyboard.press('Escape')
+    await expect(filter).toHaveValue('')
+    await expect(picker).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(picker).toHaveCount(0)
+    await expect(chip).toBeFocused()
+
+    await page.keyboard.press('Enter')
+    await page.keyboard.type('opus')
+    await page.keyboard.press('Enter')
+    await expect(picker).toHaveCount(0)
+    await expect(launchPanel(page).getByRole('button', { name: 'Model: Claude Opus 4.1' })).toBeFocused()
+    await expect(launchPrompt(page)).toHaveValue('the prompt stays')
+  })
+
   test('one real model turn @model', async ({ page }) => {
     await openNewThread(page)
+    // The launch panel starts the session on the model it shows: the login's default (#674).
+    await launchPrompt(page).fill(MODEL_PROMPT)
     const beforeSend = await markThreadStatus(page)
-    await typeAndSend(page, MODEL_PROMPT)
+    await launchPanel(page).getByRole('button', { name: 'Start session' }).click()
     // The bar's `running` proves the request reached the server and a run is in flight.
     await test.step('the thread announces its run started', () => waitForRunToStart(page, beforeSend), {
       timeout: RUN_SETTLE_TIMEOUT_MS,
@@ -372,7 +448,7 @@ test.describe('chat surface', () => {
 const SEEDED = e2eHome().threads
 
 /** The threads rail, by its accessible name. */
-function rail(page: Page): ReturnType<Page['getByRole']> {
+function rail(page: Page): Locator {
   return page.getByRole('navigation', { name: 'threads' })
 }
 
@@ -513,19 +589,19 @@ test.describe('seeded threads (#486)', () => {
   }) => {
     const unused = randomUUID()
     await page.goto(`/?thread=${unused}`)
-    await expect(page.getByRole('dialog', { name: 'Start a session' })).toBeVisible()
+    await expect(launchPanel(page)).toBeVisible()
     await expect(page).toHaveURL(new RegExp(`\\?thread=${unused}$`))
-    // `role=alert` by CSS: the modal dialog hides the rail from an accessibility-tree query.
-    await expect(page.locator('[role="alert"]')).toHaveCount(0)
+    await expect(page.getByRole('alert')).toHaveCount(0)
 
     await page.goto(`/?thread=${SEEDED.outside}`)
     await expect(page.locator('[role="alert"]').filter({ hasText: 'could not open the thread:' })).toHaveCount(1)
   })
 
   // #679: the Start dialog grew with its prompt until Start session was below the window, and the
-  // dialog could not scroll, so a click on it timed out. A prompt far past the box's cap, in the
-  // window the arena found it in and in a small one.
-  test('⚠ a long prompt leaves the Start dialog in the window and Start session clickable, at 1440×900 and in a small window (#679)', async ({
+  // dialog could not scroll, so a click on it timed out. The launch panel (#877) is the pane, not a
+  // box over it: a prompt far past the box's cap leaves Start in a 1440×900 window, the one the arena
+  // found it in, and in a small one the panel scrolls to it.
+  test('⚠ a long prompt leaves Start session in the window at 1440×900, and the launch panel scrolls to it in a small window (#679)', async ({
     page,
   }) => {
     const longPrompt = Array.from(
@@ -534,24 +610,26 @@ test.describe('seeded threads (#486)', () => {
         `Line ${line + 1}: build and test a polished playable browser Snake game with neon arcade design and five features.`,
     ).join('\n')
     for (const size of [
-      { width: 1440, height: 900 },
-      { width: 800, height: 480 },
+      { width: 1440, height: 900, fits: true },
+      { width: 800, height: 480, fits: false },
     ]) {
       await page.setViewportSize(size)
       await page.goto('/')
-      const dialog = page.getByRole('dialog', { name: 'Start a session' })
-      const prompt = dialog.locator('#start-session-prompt')
+      const prompt = launchPrompt(page)
       await prompt.fill(longPrompt)
       // The box stopped growing and scrolls inside itself.
       expect(await prompt.evaluate((field) => field.scrollHeight > field.clientHeight), `${size.height}px`).toBe(true)
-      // Not clipped at the top either: the dialog starts inside the window.
-      expect((await dialog.boundingBox())?.y, `${size.height}px`).toBeGreaterThanOrEqual(0)
+      // Not clipped at the top either: the panel's question starts inside the window.
+      const question = launchPanel(page).getByRole('heading', { name: 'What should pi work on?' })
+      expect((await question.boundingBox())?.y, `${size.height}px`).toBeGreaterThanOrEqual(0)
       // In the window as it stands: unlike a click, `toBeInViewport` scrolls nothing into view.
-      const start = dialog.getByRole('button', { name: 'Start session' })
-      await expect(start).toBeInViewport({ ratio: 1 })
-      // Nothing over it: a trial click runs the actionability checks, the hit test included, and
-      // sends nothing, so no session is started against the refused `demo` provider.
+      const start = launchPanel(page).getByRole('button', { name: 'Start session' })
+      if (size.fits) await expect(start).toBeInViewport({ ratio: 1 })
+      // Reachable and nothing over it: a trial click scrolls it into view and runs the
+      // actionability checks, the hit test included, and sends nothing, so no session is started
+      // against the refused `demo` provider.
       await start.click({ trial: true })
+      await expect(start).toBeInViewport({ ratio: 1 })
     }
   })
 
