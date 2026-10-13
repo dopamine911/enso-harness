@@ -46,8 +46,8 @@ export function createProjectRoutes(state: ProjectRoutesState): ProjectRoutes {
     agentDir,
   })
 
-  // ── Projects (#395): the directories threads run in — listed, registered under a declared
-  // root, forgotten. Registration is the one request that carries a path; `projects.ts` decides it.
+  // ── Projects (#395, #866): the directories threads run in — listed, registered by path, forgotten.
+  // Registration is the one request that carries a path; `projects.ts` decides it.
   function respondWithProjects(response: ServerResponse): void {
     response.writeHead(200, { 'Content-Type': 'application/json' })
     response.end(JSON.stringify(projects.list()))
@@ -59,7 +59,8 @@ export function createProjectRoutes(state: ProjectRoutesState): ProjectRoutes {
       capText: `a project registration is at most ${MAX_DIALOG_BODY_BYTES} bytes`,
       schema: EnsoProjectRegistration,
       name: 'project',
-      requirement: 'a project registration takes an absolute `path` and an optional `title`',
+      requirement:
+        'a project registration takes a `path` (absolute or `~/`), an optional `title` and an optional `hidden`',
     })
     if (registration === undefined) return
     const outcome = projects.register(registration)
@@ -108,14 +109,15 @@ export function createProjectRoutes(state: ProjectRoutesState): ProjectRoutes {
   }
 
   /**
-   * What a page may browse while adding a project: the declared roots, or `?path=` inside them. Read
-   * only; the rules are the registration's (`projects.ts#browse`), so nothing listed is refused later.
-   * It reads the disk under a root, so it answers through `answerOrFail`: whatever the
+   * What a page may browse while adding a project: where browsing starts, or `?path=`; `&hidden=1`
+   * lists hidden folders too (#866). Read only; the rules are the registration's
+   * (`projects.ts#browse`), so nothing listed is refused later.
+   * It reads the disk, so it answers through `answerOrFail`: whatever the
    * disk throws that `browse` did not foresee is a 500, never a throw with nothing above it.
    */
   async function respondWithBrowse(url: string, response: ServerResponse): Promise<void> {
-    const path = new URL(url, 'http://loopback').searchParams.get('path') ?? undefined
-    const outcome = projects.browse(path)
+    const query = new URL(url, 'http://loopback').searchParams
+    const outcome = projects.browse(query.get('path') ?? undefined, query.get('hidden') === '1')
     if (outcome.kind === 'refused') {
       refuseWith(response, { status: 422, reason: outcome.reason })
       return

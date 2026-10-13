@@ -99,24 +99,32 @@ async function checkedAnswer<Schema extends TSchema>(
     : { kind: 'refused', reason: `the server's ${what} did not match its schema` }
 }
 
-/** `GET /api/projects/browse`: the declared roots, or the directories under `path` a project may be. */
+/**
+ * `GET /api/projects/browse`: where browsing starts, or the directories under `path` a project may be;
+ * hidden ones too when the person asked to see them (#866).
+ */
 export async function browseDirectories(
   path: string | null,
+  hidden: boolean,
   fetchImpl: FetchLike = fetch,
 ): Promise<ProjectRequestOutcome<EnsoDirectoryListing>> {
-  const query = path === null ? '' : `?path=${encodeURIComponent(path)}`
-  return checkedAnswer(await fetchImpl(`/api/projects/browse${query}`), EnsoDirectoryListing, 'listing')
+  const query = new URLSearchParams()
+  if (path !== null) query.set('path', path)
+  if (hidden) query.set('hidden', '1')
+  const search = query.size === 0 ? '' : `?${query.toString()}`
+  return checkedAnswer(await fetchImpl(`/api/projects/browse${search}`), EnsoDirectoryListing, 'listing')
 }
 
-/** `POST /api/projects`: register a directory; the project, new or already registered. */
+/** `POST /api/projects`: register a directory; the project, new or already registered. `hidden`: one inside a hidden folder may be (#866). */
 export async function registerProject(
   path: string,
+  hidden: boolean,
   fetchImpl: FetchLike = fetch,
 ): Promise<ProjectRequestOutcome<EnsoProject>> {
   const response = await fetchImpl('/api/projects', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path }),
+    body: JSON.stringify(hidden ? { path, hidden } : { path }),
   })
   return checkedAnswer(response, EnsoProject, 'project')
 }
