@@ -27,7 +27,7 @@ import {
   withEnsoLogContext,
 } from '../log.ts'
 import { ensoSecretsPath } from '../paths.ts'
-import { isProcessMarkerAlive, processMarkersDir } from '../process-marker.ts'
+import { isProcessMarkerAlive, processMarkersDir, reconcileProcessMarkers } from '../process-marker.ts'
 import { knownSecretValuesTracking, readSecret } from '../secrets.ts'
 import { recordEnsoLogs } from './log-recorder.ts'
 
@@ -308,6 +308,24 @@ test('⚠ a marker whose pid is alive but belongs to another process (pid reuse 
   expect(
     isProcessMarkerAlive({ process: 'test', pid: process.pid, startedAt: new Date(Date.now() + 60_000).toISOString() }),
   ).toBe(false)
+})
+
+test("⚠ a running writer's staging file is a marker mid-write: never reported, never removed; a dead writer's is removed as unreadable (#906)", async () => {
+  const logsDir = mkdtempSync(join(tmpdir(), 'enso-logs-'))
+  const markers = processMarkersDir(logsDir)
+  mkdirSync(markers)
+  // Empty, as `writeFileSync` leaves it the instant before its bytes land. Removing it would fail the writer's rename.
+  const live = join(markers, `web-${process.pid}.json.${process.pid}.tmp`)
+  writeFileSync(live, '')
+  expect(reconcileProcessMarkers(logsDir, -1)).toEqual([])
+  expect(readdirSync(markers)).toEqual([`web-${process.pid}.json.${process.pid}.tmp`])
+
+  const ended = Bun.spawn(['true'])
+  await ended.exited
+  const left = join(markers, `web-${ended.pid}.json.${ended.pid}.tmp`)
+  writeFileSync(left, '{"process":"web"')
+  expect(reconcileProcessMarkers(logsDir, -1)).toEqual([{ kind: 'unreadable', path: left }])
+  expect(readdirSync(markers)).toEqual([`web-${process.pid}.json.${process.pid}.tmp`])
 })
 
 test('a second configure in the same process is refused — one configurator per process, or it is a bug', async () => {
