@@ -265,6 +265,9 @@ test('⚠ a directory any declared root accepts is registered, whatever order ne
       roots,
       statePath: `${statePath}.${roots[0] === sub}`,
     })
+    // PR #867 review: a page may add exactly what a registration takes — `sub` is a root it browses
+    // from AND a folder under `root`, so it is addable. (`main` said it was not, though `register` took it.)
+    expect(projects.browse(sub, false)).toMatchObject({ kind: 'listing', listing: { registrable: true } })
     expect(projects.register({ path: sub })).toMatchObject({ kind: 'registered', project: { path: sub } })
     expect(projects.register({ path: join(sub, 'app') })).toMatchObject({ kind: 'registered' })
   }
@@ -274,6 +277,7 @@ test('⚠ a directory any declared root accepts is registered, whatever order ne
     kind: 'refused',
     reason: expect.stringContaining('a project root itself'),
   })
+  expect(alone.browse(sub, false)).toMatchObject({ kind: 'listing', listing: { registrable: false } })
 })
 
 test('a directory merely NAMED `..something` under a root is inside it: refused as hidden, not as outside', () => {
