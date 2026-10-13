@@ -20,6 +20,15 @@
 
 export { ASK_USER_TOOL_NAME, AskUserToolParameters } from './ask-user.ts'
 export {
+  CLAUDE_CODE_DEFAULT_VERSION,
+  ClaudeCodeConfig,
+  type ClaudeCodeVersionRefusal,
+  claudeCodeUserAgent,
+  claudeCodeVersionHint,
+  claudeCodeVersionRefusalOf,
+  isClaudeLoginCredential,
+} from './claude-code.ts'
+export {
   ENSO_CONFIG_EXAMPLE,
   ENSO_CONFIG_FILENAME,
   EnsoConfig,

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { ProjectTrustStore, SettingsManager } from '@earendil-works/pi-coding-agent'
-import { ensoAgentDir, projectConfigPath } from '@enso/core/paths'
+import { ensoAgentDir, ensoConfigPath, projectConfigPath } from '@enso/core/paths'
 import { sessionConfigEnvironment, sessionEnsoConfig } from '../../core/index.ts'
 import { type ProjectTrustOption, projectTrustOptions } from '../../core/project-trust.ts'
 
@@ -80,6 +80,36 @@ test("pi's defaultProjectTrust in the agent dir's settings decides an undecided 
   const { home, cwd } = fixture()
   writeFileSync(join(ensoAgentDir(home), 'settings.json'), JSON.stringify({ defaultProjectTrust: 'always' }))
   expect(await resolve(home, cwd, 'Do not trust')).toEqual({ hosts: ['docs.project.example'], asked: 0 })
+})
+
+test("⚠ a trusted project's config can't set the Claude Code version Enso claims or the incident policy: the user's stand, and the person is told (#925, #466)", async () => {
+  const { home, cwd } = fixture()
+  writeFileSync(join(ensoAgentDir(home), 'settings.json'), JSON.stringify({ defaultProjectTrust: 'always' }))
+  writeFileSync(ensoConfigPath(home), JSON.stringify({ claudeCode: { version: '2.1.284' } }))
+  writeFileSync(
+    projectConfigPath(cwd),
+    JSON.stringify({ ...PROJECT, claudeCode: { version: '9.9.9' }, security: { incidents: { halt: false } } }),
+  )
+  const notices: string[] = []
+  const resolved = await sessionEnsoConfig(
+    {},
+    {
+      cwd,
+      hasUI: true,
+      isProjectTrusted: () => false,
+      ui: { select: () => Promise.resolve(undefined), notify: (message: string) => notices.push(message) },
+      ...sessionConfigEnvironment({ ENSO_HOME: home }, { ProjectTrustStore, SettingsManager }),
+    },
+  )
+  if (resolved.result.kind !== 'ok') throw new Error(resolved.result.reason)
+  // The project's own settings still apply: it was trusted.
+  expect(resolved.result.config.webFetch?.allowedHosts).toEqual(['docs.project.example'])
+  expect(resolved.result.config.claudeCode).toEqual({ version: '2.1.284' })
+  expect(resolved.result.config.security).toBeUndefined()
+  expect(notices).toEqual([
+    `Enso: ${projectConfigPath(cwd)} sets security, which only ${ensoConfigPath(home)} may set — ignored.`,
+    `Enso: ${projectConfigPath(cwd)} sets claudeCode, which only ${ensoConfigPath(home)} may set — ignored.`,
+  ])
 })
 
 test("the answers offered are pi's, in pi's order and wording, with the this-session-only variants", () => {
