@@ -205,11 +205,11 @@ test('run: with no thread named, every stored thread is read; the replay passes 
       stdout: `${renderHistory([THREAD, OTHER])}\n`,
       stderr: '',
     })
-    expect(requests.map((url) => url.pathname)).toEqual([
-      '/api/stored-threads',
-      '/api/threads/thread-a/incidents',
-      '/api/threads/thread%20b/incidents',
-    ])
+    // The listing comes first: it decides which threads are read. Those reads run concurrently
+    // (`Promise.all`), so they reach the stub in either order; the output's order is pinned above.
+    const paths = requests.map((url) => url.pathname)
+    expect(paths[0]).toBe('/api/stored-threads')
+    expect(paths.slice(1).toSorted()).toEqual(['/api/threads/thread%20b/incidents', '/api/threads/thread-a/incidents'])
     requests.length = 0
     const replayed = await runCaptured(run, ['replay', 'thread-a', '--window-calls', '12'], serverUrl)
     expect(replayed).toEqual({ code: 0, stdout: `${renderReplay([THREAD])}\n`, stderr: '' })
