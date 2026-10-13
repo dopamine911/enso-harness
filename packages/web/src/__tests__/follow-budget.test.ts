@@ -11,7 +11,7 @@ import {
 
 /**
  * The page's follow budget (#272). A live thread holds one SSE connection for as long as
- * its pane is mounted, and before this the page opened one per New Thread click and closed
+ * its pane is mounted, and before this the page opened one per New thread click and closed
  * none: past the browser's six-per-origin limit the newest follow — and every unary `/api`
  * call the page makes — queued behind the open streams, silently.
  *

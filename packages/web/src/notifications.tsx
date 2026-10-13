@@ -218,11 +218,7 @@ export function TranscriptLine({
   const kind = notifyType ?? 'info'
   const Icon = NOTIFY_TYPE_ICONS[kind]
   return (
-    <div
-      role="status"
-      {...rest}
-      className={cn('flex max-w-3xl items-start gap-2 text-sm leading-normal', LINE_STYLE[kind].row)}
-    >
+    <div role="status" {...rest} className={cn('flex max-w-3xl items-start gap-2 text-detail', LINE_STYLE[kind].row)}>
       <Icon className={cn('mt-0.5 size-4 shrink-0', LINE_STYLE[kind].icon)} />
       <span className="min-w-0 break-words whitespace-pre-wrap">
         {source === undefined ? null : (
@@ -329,9 +325,12 @@ function StartupNotices({ notifications }: { notifications: readonly EnsoNotific
   if (notifications.length === 0) return null
   const noun = notifications.length === 1 ? 'notice' : 'notices'
   return (
-    <details data-enso-startup-notices="" className="group max-w-3xl text-sm text-muted-foreground">
+    <details data-enso-startup-notices="" className="group max-w-3xl text-detail text-muted-foreground">
       <summary className="-ml-2 inline-flex min-h-8 cursor-pointer list-none items-center gap-2 rounded-md px-2 marker:hidden hover:bg-popover hover:text-foreground">
-        <ChevronRightIcon aria-hidden="true" className="size-4 transition-transform group-open:rotate-90" />
+        <ChevronRightIcon
+          aria-hidden="true"
+          className="size-3 transition-transform duration-150 ease-snap group-open:rotate-90"
+        />
         <InfoIcon aria-hidden="true" className="size-4" />
         {notifications.length} startup {noun} from extensions
       </summary>

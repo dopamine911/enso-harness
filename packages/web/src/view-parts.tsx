@@ -29,14 +29,16 @@ export function Card({
       aria-label={title}
       className={cn('grid min-w-0 grid-cols-1 content-start rounded-lg border bg-card', className)}
     >
-      <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 py-3">
+      <header className="flex flex-wrap items-baseline gap-x-3 gap-y-2 px-4 pt-4">
         <h2 className="font-heading text-base font-semibold ledger:font-mono ledger:text-sm ledger:tracking-widest ledger:uppercase">
           {title}
         </h2>
         {sub === undefined ? null : <span className="text-xs text-muted-foreground">{sub}</span>}
-        {tools === undefined ? null : <div className="ml-auto flex flex-wrap items-center gap-2">{tools}</div>}
+        {tools === undefined ? null : (
+          <div className="ml-auto flex flex-wrap items-center gap-2 self-center">{tools}</div>
+        )}
       </header>
-      <div className="grid min-w-0 grid-cols-1 gap-3 px-4 pt-3 pb-4">{children}</div>
+      <div className="grid min-w-0 grid-cols-1 gap-3 p-4">{children}</div>
     </section>
   )
 }
@@ -173,7 +175,7 @@ export function Metric({
   note?: string | undefined
 }): React.ReactNode {
   return (
-    <div className="grid content-start gap-1 rounded-lg border bg-background px-3 py-2">
+    <div className="grid content-start gap-1 rounded-lg border bg-background p-4">
       <dt className="text-xs text-muted-foreground">{label}</dt>
       <dd
         className={cn(
@@ -211,4 +213,30 @@ export function Section({
 /** What an empty section says instead of drawing zeros. */
 export function Empty({ children }: { children: string }): React.ReactNode {
   return <p className="text-sm text-muted-foreground">{children}</p>
+}
+
+/**
+ * Label and value pairs, the prototype's `dl.kv` (#417) — the debug pane's and an incident's facts:
+ * the labels muted in the UI face, the values in mono, wrapped anywhere (ids and paths have no
+ * spaces). `className` sets the rows' spacing and size where a reader packs them tighter.
+ */
+export function LabelValues({
+  rows,
+  label,
+  className,
+}: {
+  rows: readonly (readonly [label: string, value: React.ReactNode])[]
+  label?: string
+  className?: string
+}): React.ReactNode {
+  return (
+    <dl aria-label={label} className={cn('grid grid-cols-label-value gap-x-3 gap-y-2', className)}>
+      {rows.map(([term, description]) => (
+        <div key={term} className="contents">
+          <dt className="whitespace-nowrap text-muted-foreground">{term}</dt>
+          <dd className="min-w-0 font-mono text-xs break-all">{description}</dd>
+        </div>
+      ))}
+    </dl>
+  )
 }

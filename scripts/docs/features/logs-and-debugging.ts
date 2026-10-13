@@ -75,7 +75,7 @@ export const LOGS_AND_DEBUGGING: FeatureSpec = {
       'In the browser:',
       '',
       "- {steps} for the day's log, live.",
-      "- Add `?debug` to a thread's URL to open the **session debug** drawer beside the chat. **Hide debug pane** and **Show debug pane** in the header's **thread actions** menu (⋯) close and reopen it.",
+      "- Add `?debug` to a thread's URL to open the **Session debug** pane beside the chat. Its ✕, **Hide debug pane**, closes it; **Hide debug pane** and **Show debug pane** in the header's **thread actions** menu (⋯) close and reopen it.",
     ].join('\n'),
   ],
   shots: [
@@ -102,7 +102,7 @@ export const LOGS_AND_DEBUGGING: FeatureSpec = {
       },
       marks: [
         {
-          target: { text: 'session debug', exact: true, within: DRAWER },
+          target: { text: 'Session debug', exact: true, within: DRAWER },
           says: "**{shown}**: what the page believes about the thread, what pi's session holds, what the server sent, and its **fork point** (see [Forks and lineage](./lineage.md)).",
         },
         {

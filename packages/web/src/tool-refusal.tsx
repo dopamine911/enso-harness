@@ -1,6 +1,8 @@
 import type { EnsoGuardRule, EnsoToolRefusal, EnsoToolRefuser } from '@enso/core'
 import { ShieldXIcon } from 'lucide-react'
 import { useContext } from 'react'
+import { cn } from './lib/utils.ts'
+import { PILL } from './step-pill.ts'
 import { constantStore, ThreadStoresContext, useStore } from './store.ts'
 
 /**
@@ -80,44 +82,48 @@ export function ToolRefusal({
   refusal,
 }: ToolRefusalProps): React.ReactNode {
   const by = REFUSER_NAME[refusal.by]
+  // In the transcript's step language (#417): a step row's 40px header with the verdict as a pill
+  // in the refusal colour, then what was asked in a command block, the reason, and who said no.
   return (
     // `data-tool-call-id`: where the stats drawer's rows land (#359), as on a step row.
     <article
       aria-label={`${toolName}, refused by ${by}`}
       data-enso-tool-call="refused"
       data-tool-call-id={toolCallId}
-      className="my-1 max-w-3xl overflow-hidden rounded-md border border-refuse bg-card ledger:rounded-xs"
+      className="overflow-hidden rounded-sm border border-refuse bg-card ledger:rounded-xs [[data-tool-call-id]+&]:-mt-1"
     >
-      <header className="flex min-h-10 flex-wrap items-center gap-2 px-3 py-2">
-        <span className="font-mono text-sm">{toolName}</span>
-        <span className="inline-flex items-center gap-1.5 text-xs font-semibold tracking-wider text-refuse uppercase">
-          <ShieldXIcon aria-hidden="true" className="size-4 shrink-0" />
+      <header className="flex min-h-10 flex-wrap items-center gap-2 px-3 py-2 text-detail">
+        <span className="font-mono font-semibold">{toolName}</span>
+        <span className={cn(PILL, 'ml-auto text-refuse')}>
+          <ShieldXIcon aria-hidden="true" className="size-2.5 shrink-0" />
           Refused · {verdictOf(refusal)}
         </span>
       </header>
-      {asked === undefined ? null : (
-        <pre className="border-t bg-background px-3 py-2 font-mono text-sm break-words whitespace-pre-wrap">
-          {asCommand ? (
-            <span aria-hidden="true" className="hidden text-muted-foreground ledger:inline">
-              ${' '}
-            </span>
+      <div className="grid gap-3 border-t p-3">
+        {asked === undefined ? null : (
+          <pre className="rounded-sm border bg-background p-3 font-mono text-xs break-words whitespace-pre-wrap">
+            {asCommand ? (
+              <span aria-hidden="true" className="hidden text-muted-foreground ledger:inline">
+                ${' '}
+              </span>
+            ) : null}
+            {asked}
+          </pre>
+        )}
+        {reason === undefined ? null : (
+          <p className="text-sm leading-relaxed break-words ink:font-heading ink:text-lg">{reason}</p>
+        )}
+        <dl className="grid grid-cols-label-value gap-x-3 gap-y-1 text-detail ledger:border-t ledger:border-dashed ledger:pt-2">
+          <dt className="text-muted-foreground">by</dt>
+          <dd className="font-mono text-xs">{by}</dd>
+          {refusal.by === 'guard' ? (
+            <>
+              <dt className="text-muted-foreground">rule</dt>
+              <dd className="font-mono text-xs">{refusal.rule}</dd>
+            </>
           ) : null}
-          {asked}
-        </pre>
-      )}
-      {reason === undefined ? null : (
-        <p className="px-3 pt-3 pb-2 leading-relaxed break-words ink:font-heading ink:text-lg">{reason}</p>
-      )}
-      <dl className="grid grid-cols-label-value gap-x-3 gap-y-0.5 border-t px-3 pt-2 pb-3 font-mono text-xs text-muted-foreground ledger:border-dashed">
-        <dt>by</dt>
-        <dd className="text-foreground">{by}</dd>
-        {refusal.by === 'guard' ? (
-          <>
-            <dt>rule</dt>
-            <dd className="text-foreground">{refusal.rule}</dd>
-          </>
-        ) : null}
-      </dl>
+        </dl>
+      </div>
     </article>
   )
 }

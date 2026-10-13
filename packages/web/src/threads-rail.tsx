@@ -1,6 +1,5 @@
 import type { EnsoProject, EnsoStoredThread } from '@enso/core'
 import {
-  ChevronDownIcon,
   ChevronRightIcon,
   EllipsisIcon,
   FolderIcon,
@@ -21,7 +20,9 @@ import {
   DropdownMenuTrigger,
 } from './components/ui/dropdown-menu.tsx'
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from './components/ui/input-group.tsx'
+import { EnsoSmile } from './enso-mark.tsx'
 import { cn } from './lib/utils.ts'
+import { MENU_CONTENT, MENU_ITEM } from './menu-chrome.ts'
 import { pageClock } from './page-clock.ts'
 import { type ProjectThreadsContext, projectOf, threadsInNoProject, threadsOfProject } from './project-list.ts'
 import { NOT_IN_A_PROJECT, ProjectSwitcher, type SwitcherChoice } from './project-switcher.tsx'
@@ -61,8 +62,8 @@ import { ADD_PROJECT_ROUTE, type PageRoute, PROJECTS_ROUTE, SETTINGS_ROUTE } fro
  * the links to the pages (#869, #870): Projects and Settings, each marked as the current page while
  * it is on screen.
  *
- * At its top, the project switcher (#876, `project-switcher.tsx`): choosing a project opens its
- * latest thread, which makes it current. Under it New Thread, then a search (#875) that keeps the
+ * At its top, the brand and under it the project switcher (#876, `project-switcher.tsx`): choosing a project opens its
+ * latest thread, which makes it current. Under it New thread, then a search (#875) that keeps the
  * threads whose title holds what is typed, across every project, opening the sections that hold
  * one, current or not. Inside a section the threads are under Today, Yesterday and Earlier by last
  * activity, and the ones that share a title fold into one row with a count (`rail-layout.ts`).
@@ -198,8 +199,8 @@ export interface ThreadsRailProps {
    */
   readonly page?: PageRoute['kind'] | undefined
   /**
-   * On a narrow screen the rail is a page of its own, shown by the header's threads button (the
-   * design's rail under 760px, #407): hidden unless this is true. A wide screen always shows it.
+   * On a narrow screen the rail is a drawer over the thread, shown by the header's threads button
+   * (#407; the prototype's under 768px, #417): off screen unless this is true. A wide screen always shows it.
    */
   readonly shownNarrow?: boolean
   /**
@@ -378,13 +379,21 @@ const STATE_WORDS: Readonly<Record<HiddenSignal['state'], string>> = {
 
 /**
  * A thread's live state, as the status bar's dot at rail size: violet while pi waits on you,
- * solid in the running colour while a run is in flight (Signal lights both), hollow when an
- * open thread is idle. A stored thread says only that it is running. ⚠ No pulse (#739): an
+ * solid in the running colour while a run is in flight (Signal lights both), a hollow ring when it
+ * is idle — dashed while it is a draft nothing has been asked in (#417). ⚠ No pulse (#739): an
  * animation runs the compositor for as long as pi works, once per running thread in the rail.
  */
-export function LiveDot({ state }: { state: 'waiting' | 'running' | 'idle' }): React.ReactNode {
-  if (state === 'idle') {
-    return <span aria-hidden="true" className="size-2 shrink-0 rounded-full border border-muted-foreground" />
+export function LiveDot({ state }: { state: 'waiting' | 'running' | 'idle' | 'draft' }): React.ReactNode {
+  if (state === 'idle' || state === 'draft') {
+    return (
+      <span
+        aria-hidden="true"
+        className={cn(
+          'size-2 shrink-0 rounded-full border-dot border-muted-foreground',
+          state === 'draft' ? 'border-dashed' : '',
+        )}
+      />
+    )
   }
   return (
     <span className={cn('size-2 shrink-0 rounded-full', DOT[state])}>
@@ -396,7 +405,7 @@ export function LiveDot({ state }: { state: 'waiting' | 'running' | 'idle' }): R
 /** A closed project's signal (#876): the dot of what its hidden threads say, and how many say it — "2 waiting on you". */
 function SectionSignal({ signal }: { signal: HiddenSignal }): React.ReactNode {
   return (
-    <span className="ml-auto flex shrink-0 items-center gap-1 font-mono text-foreground tabular-nums">
+    <span className="ml-auto flex shrink-0 items-center gap-1 font-mono text-meta font-medium text-muted-foreground tabular-nums">
       <span aria-hidden="true" className={cn('size-2 shrink-0 rounded-full', DOT[signal.state])} />
       <span aria-hidden="true">{signal.count}</span>
       <span className="sr-only">{`${signal.count} ${STATE_WORDS[signal.state]}`}</span>
@@ -416,7 +425,12 @@ const STORED_ROW_HOVER: Readonly<Partial<Record<'waiting' | 'running' | 'idle', 
   running: 'running — resume to follow it',
 }
 
-const ROW = 'flex min-h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-popover'
+/** A rail row, the prototype's `.thread-row` (#417): 36px, muted until hovered or current, truncated inside the rail. */
+const ROW =
+  'flex min-h-9 w-full min-w-0 items-center gap-2 rounded-sm px-2 py-1 text-left text-sm text-muted-foreground transition-colors duration-150 hover:bg-card hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring'
+
+/** A row's age: mono, at the meta size. */
+const ROW_TIME = 'shrink-0 font-mono text-meta text-muted-foreground tabular-nums'
 
 function ThreadRow({
   thread,
@@ -437,14 +451,14 @@ function ThreadRow({
         data-thread-id={thread.threadId}
         aria-current={active ? 'true' : undefined}
         onClick={() => onSelect(thread.threadId)}
-        className={cn(ROW, active ? 'bg-accent text-foreground hover:bg-accent' : 'text-foreground')}
+        className={cn(ROW, active ? 'bg-accent text-foreground hover:bg-accent' : '')}
       >
-        <LiveDot state={liveState(thread)} />
+        {/* A thread never asked anything is the page's draft (#879): its ring is dashed. */}
+        <LiveDot
+          state={thread.title === undefined && thread.name === undefined && !thread.busy ? 'draft' : liveState(thread)}
+        />
         <RowTitle threadId={thread.threadId} title={label} full={thread.name ?? thread.title} />
-        <span
-          className="shrink-0 font-mono text-xs text-muted-foreground tabular-nums"
-          title={thread.lastActivityAt.toLocaleString()}
-        >
+        <span className={ROW_TIME} title={thread.lastActivityAt.toLocaleString()}>
           <Age from={thread.lastActivityAt} />
         </span>
       </button>
@@ -479,11 +493,11 @@ function EarlierThreadRow({
         data-thread-id={thread.threadId}
         title={STORED_ROW_HOVER[state] ?? `not open here — resume it (${at.toLocaleString()})`}
         onClick={() => onResume(thread.threadId)}
-        className={cn(ROW, 'text-muted-foreground hover:text-foreground')}
+        className={ROW}
       >
-        {state === 'idle' ? null : <LiveDot state={state} />}
+        <LiveDot state={state} />
         <RowTitle threadId={thread.threadId} title={label} full={thread.name ?? thread.title} />
-        <span className="shrink-0 font-mono text-xs tabular-nums">
+        <span className={ROW_TIME}>
           <Age from={at} />
         </span>
       </button>
@@ -526,17 +540,20 @@ function SectionHeader({
   const missing = project?.status === 'missing-dir'
   const hidden = folded ? hiddenSignal(group) : undefined
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex items-center gap-0.5 pr-1">
       <button
         type="button"
         aria-expanded={!folded}
         title={hover}
         onClick={onFold}
-        className="flex min-h-8 min-w-0 flex-1 items-center gap-1 rounded-md px-1 text-left text-xs font-semibold tracking-wide text-muted-foreground hover:bg-popover hover:text-foreground"
+        className="group/section flex min-h-9 min-w-0 flex-1 items-center gap-2 rounded-sm px-2 text-left text-detail font-semibold text-foreground transition-colors duration-150 hover:bg-card focus-visible:outline-2 focus-visible:outline-ring"
       >
-        {folded ? <ChevronRightIcon className="size-3 shrink-0" /> : <ChevronDownIcon className="size-3 shrink-0" />}
+        <ChevronRightIcon
+          aria-hidden="true"
+          className="size-3 shrink-0 text-muted-foreground transition-transform duration-150 ease-snap group-aria-expanded/section:rotate-90"
+        />
         <span className="min-w-0 truncate">{name}</span>
-        {missing ? <span className="shrink-0 text-destructive">missing</span> : null}
+        {missing ? <span className="shrink-0 font-mono text-meta font-medium text-refuse">missing</span> : null}
         {hidden === undefined ? null : <SectionSignal signal={hidden} />}
       </button>
       {project === undefined ? null : (
@@ -544,7 +561,7 @@ function SectionHeader({
           type="button"
           size="icon"
           variant="ghost"
-          className="size-6"
+          className="size-8 text-muted-foreground hover:bg-card hover:text-foreground"
           aria-label={`new thread in ${name}`}
           title={missing ? `${project.path} no longer exists` : `new thread in ${project.path}`}
           disabled={missing}
@@ -557,14 +574,28 @@ function SectionHeader({
       {project === undefined ? null : (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button type="button" size="icon" variant="ghost" className="size-6" aria-label={`more for ${name}`}>
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              className="size-8 text-muted-foreground hover:bg-card hover:text-foreground aria-expanded:bg-card aria-expanded:text-foreground"
+              aria-label={`more for ${name}`}
+            >
               <EllipsisIcon />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onSelect={() => onSettings(project.projectId)}>Project settings…</DropdownMenuItem>
+          <DropdownMenuContent align="end" className={MENU_CONTENT}>
+            <DropdownMenuItem className={MENU_ITEM} onSelect={() => onSettings(project.projectId)}>
+              <Settings2Icon />
+              Project settings…
+            </DropdownMenuItem>
             {project.launch ? null : (
-              <DropdownMenuItem onSelect={() => onRemove(project.projectId)}>
+              <DropdownMenuItem
+                className={MENU_ITEM}
+                variant="destructive"
+                onSelect={() => onRemove(project.projectId)}
+              >
+                <XIcon />
                 Remove project — its threads stay on disk
               </DropdownMenuItem>
             )}
@@ -631,20 +662,26 @@ function FoldRow({
         aria-expanded={open}
         title={fold.title}
         onClick={() => setChosen(!open)}
-        className={cn(ROW, 'text-foreground')}
+        className={cn(ROW, 'group/fold')}
       >
-        <ChevronRightIcon aria-hidden="true" className={cn('size-3 shrink-0', open ? 'rotate-90' : '')} />
+        <ChevronRightIcon
+          aria-hidden="true"
+          className="size-3 shrink-0 transition-transform duration-150 ease-snap group-aria-expanded/fold:rotate-90"
+        />
         <span className="min-w-0 flex-1 truncate">
           {(first === undefined ? undefined : actions.labels.get(first.threadId)) ?? fold.title}
         </span>
         {hidden === undefined ? null : <LiveDot state={hidden} />}
-        <span className="shrink-0 rounded-full border px-1.5 font-mono text-xs tabular-nums">
+        <span className="shrink-0 rounded-full border border-border-strong px-2 font-mono text-meta text-foreground tabular-nums">
           <span aria-hidden="true">×{count}</span>
           <span className="sr-only">{`${count} threads`}</span>
         </span>
       </button>
       {open ? (
-        <ol aria-label={`${count} threads titled ${fold.title}`} className="ml-3 flex flex-col gap-px border-l pl-1">
+        <ol
+          aria-label={`${count} threads titled ${fold.title}`}
+          className="mt-0.5 ml-3 flex flex-col gap-0.5 border-l pl-4"
+        >
           {fold.threads.map((thread) => (
             <RailRowItem key={thread.threadId} row={{ kind: 'open', thread }} actions={actions} />
           ))}
@@ -661,11 +698,11 @@ function FoldRow({
 function DayGroup({ group, actions }: { group: RailDayGroup; actions: RowActions }): React.ReactNode {
   const labelId = useId()
   return (
-    <div className="flex flex-col gap-px">
-      <span id={labelId} className="px-2 pt-1 font-mono text-xs tracking-wider text-muted-foreground uppercase">
+    <div className="mt-1 flex flex-col gap-0.5">
+      <span id={labelId} className="px-2 py-1 font-mono text-meta tracking-label text-muted-foreground uppercase">
         {RAIL_DAY_LABELS[group.day]}
       </span>
-      <ol aria-labelledby={labelId} className="flex flex-col gap-px">
+      <ol aria-labelledby={labelId} className="flex flex-col gap-0.5">
         {group.rows.map((row) => (
           <RailRowItem key={row.kind === 'fold' ? row.key : row.thread.threadId} row={row} actions={actions} />
         ))}
@@ -703,7 +740,7 @@ function SectionRows({
         <button
           type="button"
           onClick={() => setAllStored((was) => !was)}
-          className="self-start rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-popover hover:text-foreground"
+          className="self-start rounded-sm px-2 py-1 text-xs text-muted-foreground hover:bg-card hover:text-foreground"
         >
           {allStored ? 'show less' : `show ${layout.hidden} more`}
         </button>
@@ -788,7 +825,8 @@ function useRailSearch(): RailSearchState {
 /** The search box: what is typed filters the rail; Escape or the clear button empties it. */
 function RailSearch({ search: { query, setQuery, field, clear } }: { search: RailSearchState }): React.ReactNode {
   return (
-    <InputGroup className="h-9 bg-card">
+    // The prototype's `.search`: a card-coloured 36px box whose border turns the ring colour on focus, no glow.
+    <InputGroup className="h-9 rounded-sm border-border bg-card text-muted-foreground has-[[data-slot=input-group-control]:focus-visible]:border-ring has-[[data-slot=input-group-control]:focus-visible]:ring-0">
       <InputGroupAddon>
         <SearchIcon aria-hidden="true" />
       </InputGroupAddon>
@@ -807,7 +845,7 @@ function RailSearch({ search: { query, setQuery, field, clear } }: { search: Rai
           setQuery('')
         }}
         // The browser's own clear button would be a second one beside ours.
-        className="text-sm [&::-webkit-search-cancel-button]:hidden"
+        className="text-detail text-foreground placeholder:text-muted-foreground [&::-webkit-search-cancel-button]:hidden"
       />
       {query === '' ? null : (
         <InputGroupAddon align="inline-end">
@@ -834,19 +872,17 @@ function RailLink({
   children: React.ReactNode
 }): React.ReactNode {
   return (
-    <Button
+    <button
       type="button"
-      size="sm"
-      variant="ghost"
       aria-current={current ? 'page' : undefined}
       className={cn(
-        'h-9 w-full justify-start',
-        current ? 'bg-accent text-foreground hover:bg-accent' : 'text-muted-foreground',
+        'flex min-h-9 w-full items-center gap-2 rounded-sm px-2 text-detail transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-ring [&_svg]:size-4 [&_svg]:shrink-0',
+        current ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-card hover:text-foreground',
       )}
       onClick={onOpen}
     >
       {children}
-    </Button>
+    </button>
   )
 }
 
@@ -859,7 +895,7 @@ function RailFoot({
   onPage: (route: PageRoute) => void
 }): React.ReactNode {
   return (
-    <div className="grid gap-1 border-t p-3">
+    <div className="grid gap-1 border-t px-3 py-2">
       {/* A project's page and Add project are among the Projects (#871, #872): its link stays marked there. */}
       <RailLink
         current={page === 'projects' || page === 'project' || page === 'add-project'}
@@ -1017,7 +1053,10 @@ function useCurrentProject(
   return { currentGroup, currentKey: currentGroup === undefined ? undefined : sectionKey(currentGroup), opening }
 }
 
-/** The rail's top: the project switcher (#876), New Thread in the current project, and the search (#875). */
+/**
+ * The rail's top: the brand, with the project switcher (#876) a muted line under it (#417), then
+ * New thread in the current project and the search (#875).
+ */
 function RailTop({
   groups,
   current,
@@ -1031,20 +1070,33 @@ function RailTop({
 }): React.ReactNode {
   const context = { projects, pageThreads: threads, stored: earlier }
   return (
-    <div className="grid gap-2 p-3 pb-1">
-      <ProjectSwitcher
-        choices={switcherChoices(groups, context)}
-        currentKey={current.key}
-        onChoose={(key) => chooseProject(key, context, { onOpenProject, onSelect, onResume })}
-        onPage={onPage}
-        fetch={fetchImpl}
-      />
-      <Button type="button" className="h-10 w-full" onClick={() => onNew(current.group?.project?.projectId)}>
-        <PlusIcon />
-        New Thread
-      </Button>
-      <RailSearch search={search} />
-    </div>
+    <>
+      <div className="flex items-center gap-3 px-4 pt-4 pb-3">
+        <EnsoSmile className="size-7 rounded-sm" />
+        <div className="grid min-w-0 flex-1">
+          <span className="font-heading text-brand font-semibold">Enso</span>
+          <ProjectSwitcher
+            choices={switcherChoices(groups, context)}
+            currentKey={current.key}
+            onChoose={(key) => chooseProject(key, context, { onOpenProject, onSelect, onResume })}
+            onPage={onPage}
+            fetch={fetchImpl}
+          />
+        </div>
+      </div>
+      <div className="grid gap-2 px-3 pb-3">
+        {/* An outline, not the primary (#417): the rail's action, not the page's. */}
+        <button
+          type="button"
+          className="flex h-9 w-full items-center gap-2 rounded-sm border border-border-strong px-3 text-detail font-semibold transition-colors duration-150 hover:border-primary hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&_svg]:size-4"
+          onClick={() => onNew(current.group?.project?.projectId)}
+        >
+          <PlusIcon aria-hidden="true" />
+          New thread
+        </button>
+        <RailSearch search={search} />
+      </div>
+    </>
   )
 }
 
@@ -1076,12 +1128,14 @@ export function ThreadsRail(props: ThreadsRailProps): React.ReactNode {
         id="threads-rail"
         aria-label="threads"
         className={cn(
-          'shrink-0 flex-col bg-sidebar md:flex md:w-62 md:border-r',
-          shownNarrow ? 'flex w-full' : 'hidden',
+          'flex w-rail shrink-0 flex-col border-r bg-sidebar max-lg:w-rail-compact',
+          // Under 768px, a drawer over the thread (#417), shown by the header's threads button (#407).
+          'max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-40 max-md:w-rail-drawer max-md:transition-transform max-md:duration-200 max-md:ease-snap',
+          shownNarrow ? '' : 'max-md:invisible max-md:-translate-x-full',
         )}
       >
         <RailTop groups={groups} current={{ group: currentGroup, key: currentKey }} search={search} props={props} />
-        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-3 pt-2">
+        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-2 pb-4">
           <RailAlerts earlierError={earlierError} openError={openError} projectNotice={projectNotice} />
           <RailSections
             groups={groups}
@@ -1092,16 +1146,14 @@ export function ThreadsRail(props: ThreadsRailProps): React.ReactNode {
             rows={{ activeThreadId: page === undefined ? activeThreadId : undefined, onSelect, onResume }}
             actions={{ onNew, onRemove: onRemoveProject, onSettings: onProjectSettings }}
           />
-          <Button
+          <button
             type="button"
-            size="sm"
-            variant="ghost"
-            className="justify-start text-muted-foreground"
+            className="flex min-h-9 items-center gap-2 self-start rounded-sm px-2 text-detail text-muted-foreground transition-colors duration-150 hover:bg-card hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring [&_svg]:size-4"
             onClick={() => onPage(ADD_PROJECT_ROUTE)}
           >
-            <FolderPlusIcon />
+            <FolderPlusIcon aria-hidden="true" />
             Add project
-          </Button>
+          </button>
         </div>
         <RailFoot page={page} onPage={onPage} />
       </nav>

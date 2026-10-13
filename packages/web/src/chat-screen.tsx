@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AppHeader } from './page-header.tsx'
 import { type PageListings, projectList, storedThreads, usePageListings } from './page-listings.ts'
 import { mintPageThread, adoptPageThread, isDebugMode } from './page-mode.ts'
-import type { LaunchActions, ThreadView } from './pane-context.ts'
+import { CloseDebugContext, type LaunchActions, type ThreadView } from './pane-context.ts'
 import { removeProject, threadAfterDelete, threadsOfProject } from './project-list.ts'
 import { PageHeader, RoutedPage, type RoutedPageProps } from './routed-page.tsx'
 import { createResumeRequests, fetchThreadHistory, storedThreadsNotOnThisPage } from './stored-threads.ts'
@@ -57,25 +57,27 @@ type ThreadNavigation =
   | 'pop'
 
 /**
- * A narrow screen shows the rail OR the thread — the design's rail under 760px (#407); choosing a
- * thread from the rail goes back to it. `leave` wraps a rail action so it also closes the rail.
+ * A narrow screen draws the rail OVER the thread, a drawer behind a scrim — the design's rail under
+ * 768px (#407, #417); choosing a thread from the rail closes it, and so does the scrim. `leave` wraps
+ * a rail action so it also closes the rail.
  */
-function useNarrowRail(): {
-  open: boolean
-  toggle: () => void
-  leave: <Arg>(act: (arg: Arg) => void) => (arg: Arg) => void
-  paneClass: string
-} {
+interface NarrowRail {
+  readonly open: boolean
+  readonly toggle: () => void
+  readonly close: () => void
+  readonly leave: <Arg>(act: (arg: Arg) => void) => (arg: Arg) => void
+}
+
+function useNarrowRail(): NarrowRail {
   const [open, setOpen] = useState(false)
   return {
     open,
     toggle: () => setOpen((current) => !current),
+    close: () => setOpen(false),
     leave: (act) => (arg) => {
       setOpen(false)
       act(arg)
     },
-    // `relative`: every pane is `absolute inset-0` in this box, shown or not (#370).
-    paneClass: open ? 'relative flex min-w-0 flex-1 max-md:hidden' : 'relative flex min-w-0 flex-1',
   }
 }
 
@@ -314,7 +316,7 @@ function useOpenFailures(): {
  * ⚠ A resume's outcome reads two facts from its own request, never from shared state: HOW the
  * request meant to reach history (it rides with the request, `intent`), and WHETHER a navigation
  * happened since (`epoch` counts every navigation, and an outcome from before the current one is
- * dropped whole). New Thread during the boot's "resuming…" therefore wins outright: the URL says the
+ * dropped whole). New thread during the boot's "resuming…" therefore wins outright: the URL says the
  * new thread, the pane shows it, and the boot's answer arrives to nobody (#143). Opening a page is
  * a navigation too: a thread asked for before it does not pull the reader off the page when it
  * lands. `activePane` mirrors `activeThreadId` for the same closures.
@@ -457,74 +459,110 @@ function useLaunchActions(
   )
 }
 
+/**
+ * The rail as the page wires it: the listings, every row's way into a thread or a page — each closing
+ * the rail drawn over the thread on a narrow screen (#407, #417) — and the project controls.
+ */
+function PageRail({
+  listings,
+  navigation,
+  rail,
+  editing: { projectNotice, forgetProject },
+  onNew,
+}: {
+  listings: PageListings
+  navigation: PageNavigation
+  rail: NarrowRail
+  editing: ProjectEditing
+  onNew: (projectId: string | undefined) => void
+}): React.ReactNode {
+  const { threads, stored, projects } = listings
+  const { activeThreadId, page, resumeError, navigate, resumeFrom, openPage } = navigation
+  const pageThreadIds = new Set(threads.map((thread) => thread.threadId))
+  return (
+    <ThreadsRail
+      projects={projects.rows}
+      threads={threads}
+      activeThreadId={activeThreadId}
+      earlier={storedThreadsNotOnThisPage(stored.rows, pageThreadIds)}
+      forkParents={forkParentTitles(stored.rows, threads)}
+      earlierError={stored.error ?? projects.error}
+      openError={resumeError}
+      onSelect={rail.leave((threadId: string) => navigate(threadId, 'push'))}
+      onResume={rail.leave((threadId: string) => resumeFrom(threadId, 'push'))}
+      onNew={rail.leave(onNew)}
+      onOpenProject={rail.leave((projectId: string) => openProjectThreads(projectId, listings, navigation))}
+      onRemoveProject={(projectId: string) => void forgetProject(projectId)}
+      onProjectSettings={rail.leave((projectId: string) => openPage(projectRoute(projectId, 'worktrees')))}
+      // On Projects and a project's page, a refused removal is said on the page it was asked from: once.
+      projectNotice={page?.kind === 'projects' || page?.kind === 'project' ? undefined : projectNotice}
+      onPage={rail.leave(openPage)}
+      page={page?.kind === 'not-found' ? page.within : page?.kind}
+      shownNarrow={rail.open}
+    />
+  )
+}
+
 /** The page (#90): header, the sessions rail, one mounted pane per live thread, and a page over them (#869). */
 export function ChatScreen(): React.ReactNode {
   const listings = usePageListings()
   const { threads, stored, projects } = listings
   const navigation = usePageNavigation(listings)
-  const { activeThreadId, page, resumeError, missingThread, navigate, resumeFrom, openFork, openPage } = navigation
-  const pageThreadIds = new Set(threads.map((thread) => thread.threadId))
+  const { activeThreadId, page, missingThread, navigate, openFork, openPage } = navigation
   const editing = useProjectEditing()
   const { projectNotice, setProjectNotice, forgetProject } = editing
   // The debug column (#86): a right-hand pane, so it never takes height from the conversation it
   // explains. Opt-in by `?debug`, open by default when it is, and collapsible from the header.
   const [debugOpen, setDebugOpen] = useState(isDebugMode)
+  // One function for the pane's lifetime: it is the close context's value, read by every pane.
+  const closeDebug = useCallback((): void => setDebugOpen(false), [])
   const [view, setView] = useState<ThreadView>('chat')
   const rail = useNarrowRail()
   const active = threads.find((thread) => thread.threadId === activeThreadId)
   const newThread = (projectId: string | undefined): void => navigate(mintPageThread(projectId).threadId, 'push')
   return (
-    <div className="flex h-dvh flex-col bg-background text-foreground">
-      {page === undefined ? (
-        <AppHeader
-          active={active}
-          activeThreadId={activeThreadId}
-          notFound={missingThread !== undefined}
-          rail={rail}
-          view={view}
-          onView={setView}
-          debug={isDebugMode ? { open: debugOpen, toggle: () => setDebugOpen((open) => !open) } : undefined}
-          onDeleted={navigation.leaveDeleted}
-          onDiscardDraft={navigation.discardDraft}
-          stored={stored.rows}
-        />
-      ) : (
-        <PageHeader page={page} projects={projects.rows} rail={rail} onOpen={openPage} />
-      )}
-      <div className="flex min-h-0 flex-1">
-        <ThreadsRail
-          projects={projects.rows}
-          threads={threads}
-          activeThreadId={activeThreadId}
-          earlier={storedThreadsNotOnThisPage(stored.rows, pageThreadIds)}
-          forkParents={forkParentTitles(stored.rows, threads)}
-          earlierError={stored.error ?? projects.error}
-          openError={resumeError}
-          onSelect={rail.leave((threadId: string) => navigate(threadId, 'push'))}
-          onResume={rail.leave((threadId: string) => resumeFrom(threadId, 'push'))}
-          onNew={rail.leave(newThread)}
-          onOpenProject={rail.leave((projectId: string) => openProjectThreads(projectId, listings, navigation))}
-          onRemoveProject={(projectId: string) => void forgetProject(projectId)}
-          onProjectSettings={rail.leave((projectId: string) => openPage(projectRoute(projectId, 'worktrees')))}
-          // On Projects and a project's page, a refused removal is said on the page it was asked from: once.
-          projectNotice={page?.kind === 'projects' || page?.kind === 'project' ? undefined : projectNotice}
-          onPage={rail.leave(openPage)}
-          page={page?.kind === 'not-found' ? page.within : page?.kind}
-          shownNarrow={rail.open}
-        />
-        <div className={rail.paneClass}>
-          {threads.map((thread) => (
-            <ThreadPane
-              key={thread.threadId}
-              threadId={thread.threadId}
-              active={page === undefined && missingThread === undefined && thread.threadId === activeThreadId}
-              debugOpen={isDebugMode && debugOpen}
-              view={view}
-              onView={setView}
-              onForked={openFork}
-              launchActions={navigation.launchActions}
-            />
-          ))}
+    // The rail runs the window's full height, its brand at its top; the header sits over the main
+    // column only (#417) — a thread's, or a page's (#869) in its place.
+    <div className="flex h-dvh bg-background text-foreground">
+      <PageRail listings={listings} navigation={navigation} rail={rail} editing={editing} onNew={newThread} />
+      {/* The drawer's scrim (#417): the thread under the rail, dimmed; a click on it closes the rail. */}
+      {rail.open ? (
+        <div aria-hidden="true" className="fixed inset-0 z-30 bg-scrim md:hidden" onClick={rail.close} />
+      ) : null}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        {page === undefined ? (
+          <AppHeader
+            active={active}
+            activeThreadId={activeThreadId}
+            notFound={missingThread !== undefined}
+            rail={rail}
+            view={view}
+            onView={setView}
+            debug={isDebugMode ? { open: debugOpen, toggle: () => setDebugOpen((open) => !open) } : undefined}
+            onDeleted={navigation.leaveDeleted}
+            onDiscardDraft={navigation.discardDraft}
+            stored={stored.rows}
+          />
+        ) : (
+          <PageHeader page={page} projects={projects.rows} rail={rail} onOpen={openPage} onNewThread={newThread} />
+        )}
+        {/* `relative`: every pane is `absolute inset-0` in this box, shown or not (#370). */}
+        <div className="relative flex min-h-0 min-w-0 flex-1">
+          {/* The debug pane's own ✕ (#417) closes it, as the thread menu's Hide does. */}
+          <CloseDebugContext.Provider value={isDebugMode ? closeDebug : undefined}>
+            {threads.map((thread) => (
+              <ThreadPane
+                key={thread.threadId}
+                threadId={thread.threadId}
+                active={page === undefined && missingThread === undefined && thread.threadId === activeThreadId}
+                debugOpen={isDebugMode && debugOpen}
+                view={view}
+                onView={setView}
+                onForked={openFork}
+                launchActions={navigation.launchActions}
+              />
+            ))}
+          </CloseDebugContext.Provider>
           {page === undefined && missingThread !== undefined ? (
             <ThreadNotFound
               threadId={missingThread}

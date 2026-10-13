@@ -3,9 +3,9 @@ import { ChevronLeftIcon, PlusIcon, SearchXIcon } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 import { AddProjectPage } from './add-project.tsx'
 import { Button } from './components/ui/button.tsx'
-import { EnsoSmile } from './enso-mark.tsx'
+import { cn } from './lib/utils.ts'
 import type { ListingState } from './listing-store.ts'
-import { RailToggle } from './page-header.tsx'
+import { HEADER, RailToggle } from './page-header.tsx'
 import { type PolicyEditor, usePermissionPolicy } from './permissions-settings.tsx'
 import { projectOf } from './project-list.ts'
 import { ProjectPage, type ProjectPageActions } from './project-page.tsx'
@@ -39,6 +39,8 @@ interface PageBack {
 interface PageHeading {
   readonly title: string
   readonly subtitle?: string
+  /** The subtitle is a path, set in the code face as the prototype's project header sets it (#417). */
+  readonly subtitleIsPath?: boolean
   readonly back?: PageBack
   /** The status strip's name for it. */
   readonly status: string
@@ -64,7 +66,7 @@ const MISSING_PART: Readonly<Record<PageRoute['kind'], string>> = {
 function projectHeading(project: EnsoProject | undefined): PageHeading {
   const back = PAGE_HOMES.project
   if (project === undefined) return { title: 'Project not found', back, status: back.label }
-  return { title: project.title, subtitle: project.path, back, status: project.title }
+  return { title: project.title, subtitle: project.path, subtitleIsPath: true, back, status: project.title }
 }
 
 /** Each page's heading, the one place a page's name is written. */
@@ -97,7 +99,7 @@ function BackLink({ back, onOpen }: { back: PageBack; onOpen: (route: PageRoute)
     <button
       type="button"
       onClick={() => onOpen(back.to)}
-      className="flex items-center gap-0.5 rounded-sm text-xs text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring [&_svg]:size-3"
+      className="-ml-1 flex min-h-6 items-center gap-1 justify-self-start rounded-xs px-1 text-xs text-muted-foreground transition-colors duration-150 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring [&_svg]:size-3.5"
     >
       <ChevronLeftIcon />
       {back.label}
@@ -105,10 +107,52 @@ function BackLink({ back, onOpen }: { back: PageBack; onOpen: (route: PageRoute)
   )
 }
 
+/** The page's own action at the header's end: Projects' Add project, a project's New thread, or none. */
+function PageAction({
+  page,
+  projects,
+  onOpen,
+  onNewThread,
+}: {
+  page: PageUrl
+  projects: readonly EnsoProject[]
+  onOpen: (route: PageRoute) => void
+  onNewThread: (projectId: string) => void
+}): React.ReactNode {
+  const className = 'h-10 rounded-sm px-4 text-sm font-semibold'
+  if (page.kind === 'projects') {
+    return (
+      <Button type="button" className={className} onClick={() => onOpen(ADD_PROJECT_ROUTE)}>
+        <PlusIcon />
+        Add project
+      </Button>
+    )
+  }
+  if (page.kind !== 'project') return null
+  const project = projects.find((row) => row.projectId === page.projectId)
+  if (project === undefined) return null
+  // A folder that is gone can start nothing — the launch panel would only say so (`launch-panel.tsx`).
+  const blocked = project.status === 'missing-dir'
+  return (
+    <Button
+      type="button"
+      className={className}
+      disabled={blocked}
+      title={blocked ? 'No new thread can start in this project' : undefined}
+      onClick={() => onNewThread(project.projectId)}
+    >
+      <PlusIcon />
+      New thread
+    </Button>
+  )
+}
+
 /**
- * A page's header: the threads button (narrow screens), the mark, the breadcrumb back where the page
- * has one, its title and what it is, and the page's own action — Projects' **Add project** (#870),
- * which opens the Add project page (#872).
+ * A page's header: the threads button (narrow screens), the breadcrumb back where the page has
+ * one, its title and what it is, and the page's own action (`PageAction`) — Projects' **Add
+ * project** (#870), which opens the Add project page (#872), or a project's **New thread** (#417),
+ * started in that project. The thread header's box (`HEADER`), so moving between a thread and a
+ * page doesn't jump (#417).
  * Arriving on a page moves focus to its title, so a keyboard or a screen reader starts where the
  * page does; moving within it (a section) leaves focus on the link that moved it.
  */
@@ -117,12 +161,15 @@ export function PageHeader({
   projects,
   rail,
   onOpen,
+  onNewThread,
 }: {
   page: PageUrl
   /** The listed projects: a project's page is headed by its title and path (#871). */
   projects: readonly EnsoProject[]
   rail: { open: boolean; toggle: () => void }
   onOpen: (route: PageRoute) => void
+  /** Start a thread in the project, as the rail's `+` does. */
+  onNewThread: (projectId: string) => void
 }): React.ReactNode {
   const heading = headingOf(page, projects)
   const title = useRef<HTMLHeadingElement>(null)
@@ -130,29 +177,31 @@ export function PageHeader({
     title.current?.focus()
   }, [heading.title])
   return (
-    <header className="flex min-h-14 items-center gap-3 border-b bg-sidebar px-3 py-2">
+    <header className={HEADER}>
       <RailToggle open={rail.open} onToggle={rail.toggle} />
-      <EnsoSmile className="size-7.5" />
       <div className="grid min-w-0 flex-1 justify-items-start">
         {heading.back === undefined ? null : <BackLink back={heading.back} onOpen={onOpen} />}
         <h1
           ref={title}
           id="page-heading"
           tabIndex={-1}
-          className="truncate font-heading text-base font-semibold focus:outline-none"
+          className="truncate font-heading text-base leading-snug font-semibold focus:outline-none"
         >
           {heading.title}
         </h1>
         {heading.subtitle === undefined ? null : (
-          <p className="max-w-full truncate text-xs text-muted-foreground">{heading.subtitle}</p>
+          <p
+            className={cn(
+              'max-w-full truncate text-xs text-muted-foreground',
+              heading.subtitleIsPath === true && 'font-mono',
+            )}
+            title={heading.subtitleIsPath === true ? heading.subtitle : undefined}
+          >
+            {heading.subtitle}
+          </p>
         )}
       </div>
-      {page.kind === 'projects' ? (
-        <Button type="button" onClick={() => onOpen(ADD_PROJECT_ROUTE)}>
-          <PlusIcon />
-          Add project
-        </Button>
-      ) : null}
+      <PageAction page={page} projects={projects} onOpen={onOpen} onNewThread={onNewThread} />
     </header>
   )
 }
@@ -203,10 +252,10 @@ function PageStatus({
   return (
     <footer
       aria-label="page status"
-      className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t px-5 py-2 font-mono text-xs text-muted-foreground"
+      className="flex min-h-8 shrink-0 items-center gap-4 overflow-hidden border-t px-6 font-mono text-xs whitespace-nowrap text-muted-foreground max-md:gap-3 max-md:px-4"
     >
       <span className="flex items-center gap-2 font-semibold text-foreground">
-        <span aria-hidden="true" className="size-2 shrink-0 rounded-full border border-muted-foreground" />
+        <span aria-hidden="true" className="size-2 shrink-0 rounded-full border-dot border-muted-foreground" />
         {heading.status}
       </span>
       <span title="the projects this server serves">
@@ -269,6 +318,7 @@ function PageBody({
         stored={stored.rows}
         onDeleted={onDeleted}
         onOpenProject={(projectId) => onOpen(projectRoute(projectId, 'storage'))}
+        onOpenProjects={() => onOpen(PROJECTS_ROUTE)}
       />
     )
   }

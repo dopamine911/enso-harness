@@ -19,6 +19,12 @@
   },
   {
     "path": "scripts/docs/feature-screenshots.ts",
+    "function": "scrollToTop",
+    "crap": 30,
+    "reason": "Wheels a live page until a windowed transcript row is drawn, then wheels it near the top over its own column, measuring after each turn. Every branch is a mouse or box call on a running Enso; there is no decision to split out and test (#417)."
+  },
+  {
+    "path": "scripts/docs/feature-screenshots.ts",
     "function": "main",
     "crap": 53.1,
     "reason": "Starts the dev stack, waits on its ports, opens the browser and runs each wanted feature's session. Its decisions (options, wanted features, scratch setup) are split out and tested; what is left is process and browser lifecycle (#838)."

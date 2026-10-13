@@ -10,8 +10,8 @@ import {
   type RuntimeCommand,
 } from '@enso/core'
 import type { ContentPart } from '@tanstack/ai'
-import { ArrowUpIcon, PaperclipIcon, SquareIcon } from 'lucide-react'
-import { useContext, useEffect, useRef, useState } from 'react'
+import { ArrowUpIcon, PaperclipIcon, SquareIcon, TriangleAlertIcon } from 'lucide-react'
+import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useRereadAfterCompaction } from './branch-reread.ts'
 import { type ChoiceHandlers, CommandPalette, runTypedHostCommand, typedCommandName } from './command-palette.tsx'
 import { fetchThreadCommands } from './commands-connection.ts'
@@ -56,10 +56,11 @@ import {
   useModelState,
   useRecordedModel,
 } from './model-state.tsx'
+import type { NotificationsStore } from './notifications.tsx'
 import { useRecentModels } from './page-listings.ts'
 import { useChatContext, PaneViewContext } from './pane-context.ts'
 import { ModeChip, usePermissionMode } from './permission-mode.tsx'
-import { LockedChip } from './setting-chip.tsx'
+import { COMPOSER_ICON_BUTTON, LockedChip } from './setting-chip.tsx'
 import { useStore, useThreadStores } from './store.ts'
 import { systemPromptName } from './thread-context-analysis.ts'
 import { ThreadContextDialog } from './thread-context.tsx'
@@ -136,12 +137,28 @@ function useFreshThreadMode(): void {
  * change between turns, the route answers 409 while busy and the refusal is said as a notice —
  * and choosing before the first prompt is the point (#341, `model-state.tsx`'s header).
  */
-function ModelControls({ onHost, onOpenModelDialog }: HostCommandHandlers): React.ReactNode {
+function ModelControls({
+  host: { onHost, onOpenModelDialog },
+  pickerOpen,
+  chipRef,
+}: {
+  readonly host: HostCommandHandlers
+  /** The model picker is open: its chip is drawn open. */
+  readonly pickerOpen: boolean
+  /** The Model chip, which the picker hangs from (#417). */
+  readonly chipRef: React.RefObject<HTMLButtonElement | null>
+}): React.ReactNode {
   const state = useModelState()
   const recorded = useRecordedModel()
   return (
     <>
-      <ModelChip state={state} recorded={recorded} onOpen={(): void => onOpenModelDialog('model')} />
+      <ModelChip
+        ref={chipRef}
+        state={state}
+        recorded={recorded}
+        onOpen={(): void => onOpenModelDialog('model')}
+        open={pickerOpen}
+      />
       <EffortChip state={state} onSelect={(level: string): void => onHost('thinking', level)} />
     </>
   )
@@ -225,7 +242,7 @@ function StopControl({
       type="button"
       size="icon"
       variant="outline"
-      className="size-11"
+      className={STOP_BUTTON}
       aria-label={stopsLogin ? `cancel the login to ${login.provider}` : 'stop the run'}
       title={
         stopsLogin
@@ -274,18 +291,35 @@ function hintOf({ launching, running, closed }: ComposerState): string | undefin
   return running ? RUNNING_HINT : IDLE_HINT
 }
 
-/** Under the prompt: the hint, or — on the launch panel — why a prompt beginning with `/` cannot start a session (#484). */
-function ComposerHint({ draft, state }: { readonly draft: string; readonly state: ComposerState }): React.ReactNode {
-  if (state.launching && isSlashPrompt(draft)) {
-    return (
-      <p role="alert" className="min-w-0 flex-1 self-center px-1 text-xs text-destructive">
-        {SLASH_PROMPT_REFUSAL}
-      </p>
-    )
-  }
-  // An empty line when nothing can be sent: it still holds the buttons to the right.
-  return <p className="min-w-0 flex-1 self-center px-1 text-xs text-muted-foreground">{hintOf(state)}</p>
+/**
+ * Under the prompt, on the launch panel (#484): why a prompt beginning with `/` cannot start a
+ * session — the prototype's `#prompt-error` (#417), in the refusal's colour, above the footer.
+ */
+function SlashRefusal({ draft, state }: { readonly draft: string; readonly state: ComposerState }): React.ReactNode {
+  if (!(state.launching && isSlashPrompt(draft))) return null
+  return (
+    <p role="alert" className="flex items-center gap-2 px-1 text-detail text-refuse">
+      <TriangleAlertIcon aria-hidden="true" className="size-3.5 shrink-0" />
+      {SLASH_PROMPT_REFUSAL}
+    </p>
+  )
 }
+
+/** The footer's left: what Enter does — an empty line when nothing can be sent, still holding the buttons to the right. */
+function ComposerHint({ state }: { readonly state: ComposerState }): React.ReactNode {
+  return <p className="min-w-0 flex-1 px-1 text-xs text-muted-foreground">{hintOf(state)}</p>
+}
+
+/**
+ * The submit's face, the prototype's `.button-primary` (#417): the primary, brighter under the
+ * pointer; held, the accent with muted words rather than a faded primary.
+ */
+const SUBMIT_BUTTON =
+  'rounded-sm text-sm hover:bg-primary hover:brightness-110 disabled:bg-accent disabled:text-muted-foreground disabled:opacity-100'
+
+/** Stop, the prototype's `.stop-button` (#417): the send button's square, ringed and drawn in the refusal's colour. */
+const STOP_BUTTON =
+  'size-10 rounded-sm border-refuse bg-transparent text-refuse hover:bg-refuse/10 hover:text-refuse dark:border-refuse dark:bg-transparent dark:hover:bg-refuse/10'
 
 /**
  * The form's submit: Start session on the launch panel — held until the prompt has words that are
@@ -309,7 +343,7 @@ function ComposerSubmit({
   if (launch !== undefined) {
     const startable = launch.ready && !disconnected && draft.trim().length > 0 && !isSlashPrompt(draft)
     return (
-      <Button type="submit" className="h-11" disabled={!startable}>
+      <Button type="submit" className={cn(SUBMIT_BUTTON, 'h-10 gap-2 px-4 font-semibold')} disabled={!startable}>
         {launch.applying ? 'Starting session…' : 'Start session'}
         <ArrowUpIcon aria-hidden="true" />
       </Button>
@@ -320,7 +354,13 @@ function ComposerSubmit({
       <StopControl running={running} disconnected={disconnected} onStop={onStop} />
       {/* Send stays offered in flight: a prompt during a run queues through pi (#75) —
           the form's submit takes the direct route past TanStack's own queue. */}
-      <Button type="submit" size="icon" className="size-11" aria-label="send message" disabled={!canSend}>
+      <Button
+        type="submit"
+        size="icon"
+        className={cn(SUBMIT_BUTTON, 'size-10')}
+        aria-label="send message"
+        disabled={!canSend}
+      >
         <ArrowUpIcon />
       </Button>
     </>
@@ -328,17 +368,24 @@ function ComposerSubmit({
 }
 
 /**
- * Above the prompt: the launch panel's settings chips and what they say (#877), or — once the
+ * The card's top row: the launch panel's settings chips and what they say (#877), or — once the
  * session runs — the same chips (#878): the knobs at the point of use, deepseek's shape — the
- * model, the effort, the mode, and the system prompt, locked.
+ * model, the effort, the mode, and the system prompt, locked. Inside the card, over the prompt, as
+ * the prototype draws them (#417).
  */
 function ComposerSettings({
   launch,
   host,
+  pickerOpen,
+  modelChip,
   onSavedPrompt,
 }: {
   readonly launch: LaunchForm | undefined
   readonly host: HostCommandHandlers
+  /** The started composer's model picker is open. */
+  readonly pickerOpen: boolean
+  /** The started composer's Model chip, which its picker hangs from. */
+  readonly modelChip: React.RefObject<HTMLButtonElement | null>
   readonly onSavedPrompt: (text: string) => void
 }): React.ReactNode {
   if (launch !== undefined) {
@@ -350,8 +397,8 @@ function ComposerSettings({
     )
   }
   return (
-    <div role="group" aria-label="Session settings" className="flex flex-wrap items-center gap-2 px-1 pb-1">
-      <ModelControls {...host} />
+    <div role="group" aria-label="Session settings" className="flex flex-wrap items-center gap-2">
+      <ModelControls host={host} pickerOpen={pickerOpen} chipRef={modelChip} />
       <PermissionModeControl />
       <SessionSystemPromptChip />
     </div>
@@ -415,7 +462,7 @@ function AttachedImages(): React.ReactNode {
   )
 }
 
-/** The prompt box: one line in a running thread, a taller box on the launch panel (#877); the hint and buttons wrap under it. */
+/** The prompt box: a short box in a running thread, a taller one on the launch panel (#877), in the prototype's prompt type (#417). */
 function ComposerTextarea({
   draft,
   setDraft,
@@ -436,20 +483,65 @@ function ComposerTextarea({
       onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => setDraft(event.target.value)}
       placeholder={placeholder}
       autoComplete="off"
-      rows={launching ? 4 : 1}
+      rows={launching ? 4 : 2}
       className={cn(
-        'max-h-40 min-h-11 flex-1 basis-full resize-none border-0 bg-transparent text-base shadow-none placeholder:text-muted-foreground focus-visible:ring-0 dark:bg-transparent',
-        launching && 'min-h-24',
+        'max-h-60 min-h-16 resize-none rounded-none border-0 bg-transparent px-1 py-2 text-message shadow-none placeholder:text-muted-foreground focus-visible:ring-0 md:text-message dark:bg-transparent',
+        launching && 'min-h-28 text-base md:text-base',
       )}
     />
   )
 }
 
 /**
- * Inside the ported form: the attachment strip, the textarea, the `/` palette, the attach /
- * stop / send buttons — or, on the launch panel (#877), Start session — under a hint that says what
- * Enter does (#878). A separate component because the attachments live in the form's context
- * (`usePromptInputAttachments`), and "can send" depends on them — an image with no words
+ * Whether the card has just docked — Start went through and the launch panel gave way — so it rises
+ * into the dock once, the prototype's `dock-in` (#417); a thread opened already started does not. A
+ * layout effect, so the first docked paint already carries the animation.
+ */
+function useDocking(launching: boolean): boolean {
+  const wasLaunching = useRef(launching)
+  const [docking, setDocking] = useState(false)
+  useLayoutEffect(() => {
+    if (wasLaunching.current && !launching) setDocking(true)
+    wasLaunching.current = launching
+  }, [launching])
+  return docking
+}
+
+/**
+ * The composer's card, the prototype's `.composer` (#417): docked, in the transcript's column with
+ * the strong border, the ring's colour while focused; on the launch panel it asks for the first
+ * prompt — the primary's border and faint ring (`.composer.is-launch`) — and once Start docks it,
+ * it rises into the dock (`useDocking`).
+ */
+function ComposerCard({
+  launching,
+  children,
+}: {
+  readonly launching: boolean
+  readonly children: React.ReactNode
+}): React.ReactNode {
+  const docking = useDocking(launching)
+  return (
+    <div
+      className={cn(
+        'mx-auto grid w-full gap-2 rounded-lg border bg-card transition-colors',
+        launching
+          ? 'border-primary p-4 shadow-launch'
+          : 'max-w-transcript border-border-strong p-3 focus-within:border-ring',
+        docking && 'animate-in duration-200 ease-out fade-in-0 slide-in-from-bottom-3 motion-reduce:animate-none',
+      )}
+    >
+      {children}
+    </div>
+  )
+}
+
+/**
+ * Inside the ported form, the composer's card (the prototype's `.composer`, #417): the settings
+ * chips on top, the attachment strip, the textarea, then a footer — the hint that says what Enter
+ * does (#878) on the left; the `/` palette, attach and stop / send — or, on the launch panel (#877),
+ * Start session — on the right. A separate component because the attachments live in the form's
+ * context (`usePromptInputAttachments`), and "can send" depends on them — an image with no words
  * sends (#68). ⚠ The textarea keeps its place in both shapes, so Start never remounts it.
  */
 function ComposerBody({
@@ -463,6 +555,7 @@ function ComposerBody({
   onInsertCommand,
   host,
   launch,
+  settings,
 }: {
   draft: string
   setDraft: (next: string) => void
@@ -474,6 +567,8 @@ function ComposerBody({
   onInsertCommand: (commandName: string) => void
   host: HostCommandHandlers
   launch: LaunchSubmit | undefined
+  /** The chips row (`ComposerSettings`), the card's first. */
+  settings: React.ReactNode
 }): React.ReactNode {
   const stores = useThreadStores()
   const attachments = usePromptInputAttachments()
@@ -486,18 +581,20 @@ function ComposerBody({
   const launching = launch !== undefined
   const closed = disconnected || ended
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-input bg-card p-2 transition-colors focus-within:border-ring">
+    <ComposerCard launching={launching}>
+      {settings}
       <AttachedImages />
-      <div className="flex flex-wrap items-end gap-2">
-        {/* ⚠ The same element in both shapes (#877): Start never remounts it. */}
-        <ComposerTextarea
-          draft={draft}
-          setDraft={setDraft}
-          textareaRef={textareaRef}
-          placeholder={composerPlaceholder({ disconnected, ended, launching, running })}
-          launching={launching}
-        />
-        <ComposerHint draft={draft} state={{ launching, running, closed }} />
+      {/* ⚠ The same element in both shapes (#877): Start never remounts it. */}
+      <ComposerTextarea
+        draft={draft}
+        setDraft={setDraft}
+        textareaRef={textareaRef}
+        placeholder={composerPlaceholder({ disconnected, ended, launching, running })}
+        launching={launching}
+      />
+      <SlashRefusal draft={draft} state={{ launching, running, closed }} />
+      <div className="flex items-center gap-2">
+        <ComposerHint state={{ launching, running, closed }} />
         {/* The `/` palette (#338): the session's slash commands, grouped; an extension command
             runs through `send`, a prompt template or skill lands in the draft with focus, a host
             command POSTs (slice 2) and `/model` opens the dialog the composer renders. */}
@@ -513,6 +610,7 @@ function ComposerBody({
           title="attach an image — or paste one, or drop it here"
           disabled={disconnected}
           onClick={attachments.openFileDialog}
+          className={COMPOSER_ICON_BUTTON}
         >
           <PaperclipIcon />
         </PromptInputButton>
@@ -525,7 +623,7 @@ function ComposerBody({
           onStop={onStop}
         />
       </div>
-    </div>
+    </ComposerCard>
   )
 }
 
@@ -547,25 +645,28 @@ export function PendingQueue(): React.ReactNode {
     return { text: queuedPrompt, key: `${queuedPrompt}\u0000${occurrence}` }
   })
   return (
-    <QueueShell aria-label="queued prompts" className="mx-6 mb-2">
-      <QueueSection>
-        <QueueSectionTrigger>
-          <QueueSectionLabel count={queued.length} label={queued.length === 1 ? 'prompt queued' : 'prompts queued'} />
-        </QueueSectionTrigger>
-        <QueueSectionContent>
-          <QueueList>
-            {keyed.map(({ text, key }) => (
-              <QueueItem key={key}>
-                <span className="flex items-start gap-2">
-                  <QueueItemIndicator />
-                  <QueueItemContent title={text}>{text}</QueueItemContent>
-                </span>
-              </QueueItem>
-            ))}
-          </QueueList>
-        </QueueSectionContent>
-      </QueueSection>
-    </QueueShell>
+    // The docked card's gutters and column (#417), so the queue lines up over the composer it feeds.
+    <div className="px-6 max-md:px-3">
+      <QueueShell aria-label="queued prompts" className="mx-auto mb-2 max-w-transcript">
+        <QueueSection>
+          <QueueSectionTrigger>
+            <QueueSectionLabel count={queued.length} label={queued.length === 1 ? 'prompt queued' : 'prompts queued'} />
+          </QueueSectionTrigger>
+          <QueueSectionContent>
+            <QueueList>
+              {keyed.map(({ text, key }) => (
+                <QueueItem key={key}>
+                  <span className="flex items-start gap-2">
+                    <QueueItemIndicator />
+                    <QueueItemContent title={text}>{text}</QueueItemContent>
+                  </span>
+                </QueueItem>
+              ))}
+            </QueueList>
+          </QueueSectionContent>
+        </QueueSection>
+      </QueueShell>
+    </div>
   )
 }
 
@@ -590,6 +691,60 @@ function useComposerLaunch(onScreen: boolean): {
       applying: form.applying,
     },
   }
+}
+
+/**
+ * A value as of the latest COMMITTED render, for a closure an older render made to read after it
+ * changed — written in an effect, never during render (React's rule).
+ */
+function useLatestCommitted<T>(value: T): React.RefObject<T> {
+  const latest = useRef(value)
+  useEffect(() => {
+    latest.current = value
+  }, [value])
+  return latest
+}
+
+/**
+ * The composer's dialogs, each rendered ONCE in it: the `select` host command whose dialog is open
+ * (`model`; undefined while closed) — for the chip and the palette's `/model` row alike (#338
+ * slice 2) — with the Model chip its picker hangs from (#417); and `/context` (#361 phase 5), the
+ * one `view` this page draws.
+ */
+function useComposerDialogs(): {
+  readonly modelDialog: string | undefined
+  readonly setModelDialog: (command: string | undefined) => void
+  readonly modelChip: React.RefObject<HTMLButtonElement | null>
+  readonly contextOpen: boolean
+  readonly setContextOpen: (open: boolean) => void
+} {
+  const [modelDialog, setModelDialog] = useState<string | undefined>(undefined)
+  const modelChip = useRef<HTMLButtonElement | null>(null)
+  const [contextOpen, setContextOpen] = useState(false)
+  return { modelDialog, setModelDialog, modelChip, contextOpen, setContextOpen }
+}
+
+/**
+ * A `view` host command, opened by name: `/context`'s dialog (#361), `/fork` at the last prompt
+ * where the pane offers a fork (#433). A view a newer host declares and this page does not draw is
+ * said, not silently dropped.
+ */
+function openHostView(
+  commandName: string,
+  {
+    openContext,
+    forkAt,
+    notifications,
+  }: {
+    readonly openContext: () => void
+    /** The pane's fork; absent where no page opens one. */
+    readonly forkAt: ((messageId: string | undefined) => void) | undefined
+    readonly notifications: NotificationsStore
+  },
+): void {
+  if (commandName === ENSO_CONTEXT_COMMAND) openContext()
+  else if (commandName === ENSO_FORK_COMMAND && forkAt !== undefined) forkAt(undefined)
+  else notifications.push(`/${commandName} opens a view this page does not have`, 'warning', 'run', ENSO_NOTICE_SOURCE)
 }
 
 /**
@@ -619,12 +774,8 @@ export function ChatPromptInput(): React.ReactNode {
   // ⚠ `takeBack` runs after a network round trip, from a closure made by an older render.
   // `chat.messages` there is that render's snapshot; filtering it would replace the
   // transcript with the snapshot minus one, reverting every delta that streamed in
-  // between. The ref is the transcript as of the latest COMMITTED render — written in an
-  // effect, never during render (React's rule).
-  const latestMessages = useRef(chat.messages)
-  useEffect(() => {
-    latestMessages.current = chat.messages
-  }, [chat.messages])
+  // between. The ref is the transcript as of the latest COMMITTED render.
+  const latestMessages = useLatestCommitted(chat.messages)
   // A compaction rewrote the branch (#348): the transcript is re-read once the thread is idle.
   useRereadAfterCompaction(stores, chat)
   /**
@@ -721,12 +872,7 @@ export function ChatPromptInput(): React.ReactNode {
       field.setSelectionRange(field.value.length, field.value.length)
     })
   }
-  // The `select` host command whose dialog is open (`model`); undefined while closed. The
-  // dialog is rendered ONCE here, for the chip and the palette's `/model` row alike (#338 slice 2).
-  const [modelDialog, setModelDialog] = useState<string | undefined>(undefined)
-  // `/context` (#361 phase 5): the one `view` this page draws. A view a newer host declares
-  // and this page does not know is said, not silently dropped.
-  const [contextOpen, setContextOpen] = useState(false)
+  const { modelDialog, setModelDialog, modelChip, contextOpen, setContextOpen } = useComposerDialogs()
   // A `host` command runs through its own route, never as a prompt: `POST …/command`, a
   // control like the mode select's — on the SAME connection, so a 409 (running) or a 422
   // (the host's reason) is recorded and said the one way a refused mode change is. Nothing
@@ -739,17 +885,12 @@ export function ChatPromptInput(): React.ReactNode {
       })
     },
     onOpenModelDialog: setModelDialog,
-    onOpenView: (commandName: string): void => {
-      if (commandName === ENSO_CONTEXT_COMMAND) setContextOpen(true)
-      else if (commandName === ENSO_FORK_COMMAND && forkAt !== undefined) forkAt(undefined)
-      else
-        stores.notifications.push(
-          `/${commandName} opens a view this page does not have`,
-          'warning',
-          'run',
-          ENSO_NOTICE_SOURCE,
-        )
-    },
+    onOpenView: (commandName: string): void =>
+      openHostView(commandName, {
+        openContext: () => setContextOpen(true),
+        forkAt,
+        notifications: stores.notifications,
+      }),
   }
   // A bare `/<name>` typed and sent (#388): when the thread's command list names it as a HOST
   // row, it does what choosing that row in the palette does — `/login` opens the provider
@@ -815,7 +956,8 @@ export function ChatPromptInput(): React.ReactNode {
 
   return (
     <PromptInput
-      className="w-full px-6 pt-3 pb-4"
+      // Docked: the prototype's `.dock` gutters (#417); on the launch panel its column pads it.
+      className={launch.form === undefined ? 'w-full px-6 pb-4 max-md:px-3 max-md:pb-3' : 'w-full'}
       accept={ENSO_IMAGE_MIME_TYPES.join(',')}
       multiple
       maxFiles={ENSO_PROMPT_MAX_IMAGES}
@@ -826,11 +968,11 @@ export function ChatPromptInput(): React.ReactNode {
       }
       onSubmit={submit}
     >
-      <ComposerSettings launch={launch.form} host={host} onSavedPrompt={setDraft} />
       <ComposerModelDialog
         threadId={stores.threadId}
         fetch={stores.fetch}
         command={modelDialog}
+        anchor={modelChip}
         onClose={(): void => setModelDialog(undefined)}
         returnFocus={(): void => textareaRef.current?.focus()}
         onPick={host.onHost}
@@ -851,6 +993,15 @@ export function ChatPromptInput(): React.ReactNode {
         onInsertCommand={insertCommand}
         host={host}
         launch={launch.submit}
+        settings={
+          <ComposerSettings
+            launch={launch.form}
+            host={host}
+            pickerOpen={modelDialog === 'model'}
+            modelChip={modelChip}
+            onSavedPrompt={setDraft}
+          />
+        }
       />
     </PromptInput>
   )

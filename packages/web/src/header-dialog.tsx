@@ -7,6 +7,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from './components/ui/dialog.tsx'
+import { cn } from './lib/utils.ts'
 
 /** The button that opens a header dialog: its accessible name, its hover and its icon. */
 export interface HeaderDialogTrigger {
@@ -20,6 +21,8 @@ export interface HeaderDialogTrigger {
  * what it does above its body, opened by an icon button with its accessible name and its hover —
  * or, with no `trigger`, by its caller (the thread menu's Delete, #879). The open state is the
  * caller's, so a dialog that must not be dismissed mid-request can refuse to close.
+ * Drawn as the prototype's confirm (#417): lifted by `shadow-pop` rather than ringed, 24px in, its
+ * title in the display face at 20px — through `className`, so the vendored dialog stays as shipped.
  */
 export function HeaderDialog({
   open,
@@ -49,9 +52,12 @@ export function HeaderDialog({
           </Button>
         </DialogTrigger>
       )}
-      <DialogContent className={contentClassName} showCloseButton={showCloseButton}>
+      <DialogContent
+        className={cn('gap-3 rounded-lg p-6 shadow-pop ring-0', contentClassName)}
+        showCloseButton={showCloseButton}
+      >
         <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
+          <DialogTitle className="text-xl leading-snug font-semibold">{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
         {children}

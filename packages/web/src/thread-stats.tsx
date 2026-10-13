@@ -406,7 +406,7 @@ export function ThreadStatsView({
   const noTurn = headline.turnCount === 0
   const onTurn = onNavigate === undefined ? undefined : (turn: number): void => onNavigate({ kind: 'turn', turn })
   return (
-    <section aria-label="thread stats" className="@container grid grid-cols-1 gap-4 p-4">
+    <section aria-label="thread stats" className="@container grid grid-cols-1 gap-4 p-6">
       <Card
         title="Session analysis"
         sub={`${plural(stats.promptStats.length, 'prompt')} analysed · ${stats.live ? 'live' : 'from the file'}`}

@@ -25,6 +25,17 @@ import type { NotificationsStore } from './notifications.tsx'
  * A malformed value is ignored, never thrown on: this runs inside the state layer's stream.
  */
 
+/** How a mode line begins: `Mode: acceptEdits`. */
+const MODE_LINE_PREFIX = 'Mode: '
+
+/**
+ * Whether a notification is one of these mode lines — for the launch panel (#417), whose Mode chip
+ * already says the mode the session starts in, so the record would say the one setting twice.
+ */
+export function isModeLine(message: string): boolean {
+  return message.startsWith(MODE_LINE_PREFIX)
+}
+
 export interface ModeLines {
   /** The `permission-mode` CUSTOM-chunk consumer — called by the router with the chunk's value. */
   readonly apply: (value: unknown) => void
@@ -40,7 +51,7 @@ export function createModeLines(notifications: NotificationsStore): ModeLines {
       lastRenderedMode = value.mode
       // The harness's own line, not an extension's notice: never grouped with the startup
       // chatter (#96), however early the receipt was replayed — #84/#88 made it visible.
-      notifications.push(`Mode: ${value.mode}`, 'info', 'run')
+      notifications.push(`${MODE_LINE_PREFIX}${value.mode}`, 'info', 'run')
     },
   }
 }

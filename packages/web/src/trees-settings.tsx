@@ -1,4 +1,5 @@
 import { type EnsoProject, type EnsoStoredThread, EnsoTreesListing } from '@enso/core'
+import { TriangleAlertIcon } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Check } from 'typebox/value'
 import type { FetchLike } from './browser-logging.ts'
@@ -122,54 +123,95 @@ function ProjectTreeList({
   if (group.trees.length === 0)
     return <p className="text-sm text-muted-foreground">No thread trees. A tree appears when a thread starts here.</p>
   return (
-    // Named apart from the heading: the project's total there reads as a size too.
-    <ul aria-label={`each tree of ${title}`} className="grid gap-2">
-      {group.trees
-        .toSorted(
-          // For order only: an unreadable size sorts as 0, and is never shown as one.
-          (first, second) =>
-            (second.size.kind === 'unreadable' ? 0 : second.size.bytes) -
-            (first.size.kind === 'unreadable' ? 0 : first.size.bytes),
-        )
-        .map((tree) => {
-          const { threadId } = tree
-          const row = threadId === null ? undefined : stored.find((known) => known.threadId === threadId)
-          const name = treeName(threadId, row)
-          return (
-            <li key={tree.path} className="grid gap-0.5 rounded-md border px-3 py-2 text-sm">
-              <div className="flex items-center gap-2">
-                <span className="min-w-0 flex-1 truncate font-medium">{name}</span>
-                <span className="text-muted-foreground">{tree.kind}</span>
-                <span className="tabular-nums">{describeSize(tree.size)}</span>
-                {threadId === null ? null : (
-                  <DeleteThreadButton
-                    target={{ threadId, fetch: fetchNow }}
-                    label={`delete thread ${name}`}
-                    stored={stored}
-                    onDeleted={onDeleted}
-                    onRefused={(reason): void => setRefused((all) => ({ ...all, [threadId]: reason }))}
-                  />
-                )}
-              </div>
-              <div className="flex gap-2 text-xs text-muted-foreground">
-                {row === undefined ? null : <span>last active {new Date(row.lastActivityAt).toLocaleString()}</span>}
-                {/* A tree no thread records has no store to compare it with: its work is unchecked, never "clean". */}
-                <span className={tree.holdsWork === null ? undefined : 'text-destructive'}>
-                  {threadId === null ? 'work not checked: no thread records it' : (tree.holdsWork ?? 'clean')}
-                </span>
-              </div>
-              <span className="truncate text-xs text-muted-foreground" title={tree.path}>
-                {tree.path}
-              </span>
-              {threadId !== null && refused[threadId] !== undefined ? (
-                <p role="alert" className="text-xs text-destructive">
-                  delete refused: {refused[threadId]}
-                </p>
-              ) : null}
-            </li>
+    // The prototype's data table (#417), kept a list: a hairline-divided card under a mono column head.
+    <div className="overflow-hidden rounded-sm border bg-card">
+      <div
+        aria-hidden="true"
+        className="flex items-center gap-3 border-b px-3 py-2 font-mono text-meta font-semibold tracking-wider whitespace-nowrap text-muted-foreground uppercase"
+      >
+        <span className="flex-1">Thread</span>
+        <span className="hidden w-16 sm:inline">Kind</span>
+        <span className="w-20 text-right">Size</span>
+        <span className="w-28 shrink-0 sm:w-52">Work</span>
+        <span className="w-8" />
+      </div>
+      {/* Named apart from the heading: the project's total there reads as a size too. */}
+      <ul aria-label={`each tree of ${title}`} className="grid">
+        {group.trees
+          .toSorted(
+            // For order only: an unreadable size sorts as 0, and is never shown as one.
+            (first, second) =>
+              (second.size.kind === 'unreadable' ? 0 : second.size.bytes) -
+              (first.size.kind === 'unreadable' ? 0 : first.size.bytes),
           )
-        })}
-    </ul>
+          .map((tree) => {
+            const { threadId } = tree
+            const row = threadId === null ? undefined : stored.find((known) => known.threadId === threadId)
+            const name = treeName(threadId, row)
+            return (
+              <li key={tree.path} className="grid gap-0.5 border-b px-3 py-2 text-sm last:border-b-0">
+                <div className="flex items-center gap-3">
+                  <span className="min-w-0 flex-1 truncate">{name}</span>
+                  <span className="hidden w-16 text-xs text-muted-foreground sm:inline">{tree.kind}</span>
+                  <span className="w-20 text-right font-mono whitespace-nowrap tabular-nums">
+                    {describeSize(tree.size)}
+                  </span>
+                  <span className="w-28 shrink-0 sm:w-52">
+                    <TreeWork threadId={threadId} holdsWork={tree.holdsWork} />
+                  </span>
+                  <span className="flex w-8 justify-end">
+                    {threadId === null ? null : (
+                      <DeleteThreadButton
+                        target={{ threadId, fetch: fetchNow }}
+                        label={`delete thread ${name}`}
+                        stored={stored}
+                        onDeleted={onDeleted}
+                        onRefused={(reason): void => setRefused((all) => ({ ...all, [threadId]: reason }))}
+                      />
+                    )}
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+                  {row === undefined ? null : <span>last active {new Date(row.lastActivityAt).toLocaleString()}</span>}
+                  <span className="min-w-0 flex-1 truncate font-mono text-meta" title={tree.path}>
+                    {tree.path}
+                  </span>
+                </div>
+                {threadId !== null && refused[threadId] !== undefined ? (
+                  <p role="alert" className="text-xs text-refuse">
+                    delete refused: {refused[threadId]}
+                  </p>
+                ) : null}
+              </li>
+            )
+          })}
+      </ul>
+    </div>
+  )
+}
+
+/**
+ * Whether a tree holds work: the prototype's warning badge when it does, "clean" when it doesn't.
+ * A tree no thread records has no store to compare it with: its work is unchecked, never "clean".
+ */
+function TreeWork({
+  threadId,
+  holdsWork,
+}: {
+  threadId: string | null
+  holdsWork: ProjectGroup['trees'][number]['holdsWork']
+}): React.ReactNode {
+  if (threadId === null)
+    return <span className="text-xs text-muted-foreground">work not checked: no thread records it</span>
+  if (holdsWork === null) return <span className="text-xs text-muted-foreground">clean</span>
+  return (
+    <span
+      title={holdsWork}
+      className="inline-flex max-w-full items-center gap-1 rounded-full border border-chart-3 px-2 py-px font-mono text-meta font-medium text-chart-3"
+    >
+      <TriangleAlertIcon aria-hidden="true" className="size-2.5 shrink-0" />
+      <span className="truncate">{holdsWork}</span>
+    </span>
   )
 }
 
@@ -216,20 +258,20 @@ export function TreesSection({
   // A project with no tree is still listed when its snapshot store takes room (threads in the checkout snapshot too).
   if (read.listing.projects.length === 0) return <p className="text-sm text-muted-foreground">No thread trees.</p>
   return (
-    <div className="grid gap-5">
+    <div className="grid gap-6">
       <StorageTotals listing={read.listing} />
       {read.listing.projects.map((group) => {
         const known = projects.find((project) => project.projectId === group.projectId)
         const title = known?.title ?? group.projectId
         return (
           <section key={group.projectId} aria-label={`trees of ${title}`} className="grid gap-2">
-            <h3 className="flex flex-wrap items-baseline gap-x-2 font-heading text-sm font-semibold">
+            <h3 className="flex flex-wrap items-baseline gap-x-3 gap-y-1 font-heading text-base font-semibold">
               {title}
-              <span className="text-xs font-normal text-muted-foreground">
+              <span className="font-sans text-sm font-normal text-muted-foreground">
                 <ProjectOnDisk listing={read.listing} projectId={group.projectId} />
               </span>
               {group.objectStore === null ? null : (
-                <span className="text-xs font-normal text-muted-foreground">
+                <span className="font-sans text-sm font-normal text-muted-foreground">
                   snapshots {describeSize(group.objectStore)}
                 </span>
               )}
@@ -239,7 +281,7 @@ export function TreesSection({
                   type="button"
                   variant="link"
                   size="xs"
-                  className="ml-auto"
+                  className="h-auto p-0 font-sans text-sm"
                   aria-label={`open ${title}'s storage`}
                   onClick={() => onOpenProject(group.projectId)}
                 >
@@ -287,7 +329,7 @@ export function ProjectStorage({
   const count = group.trees.length
   return (
     <section aria-label={`trees of ${project.title}`} className="grid gap-3">
-      <p className="text-sm text-muted-foreground">
+      <p className="max-w-prose text-muted-foreground">
         <ProjectOnDisk listing={read.listing} projectId={project.projectId} />: {count} {count === 1 ? 'tree' : 'trees'}
         {group.objectStore === null
           ? null
@@ -312,10 +354,10 @@ function treeName(threadId: string | null, row: EnsoStoredThread | undefined): s
 /** One total of the row: its value, what it counts, and, for a partial sum, how much of it was read. */
 function Total({ label, value, short }: { label: string; value: string; short?: string | undefined }): React.ReactNode {
   return (
-    <div className="flex flex-col gap-0.5 rounded-lg border bg-card p-4">
+    <div className="flex flex-col gap-1 rounded-lg border bg-card p-4">
       <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className="order-first font-heading text-xl font-semibold whitespace-nowrap tabular-nums">{value}</dd>
-      {short === undefined ? null : <dd className="text-xs text-destructive">{short}</dd>}
+      <dd className="order-first font-heading text-2xl font-semibold whitespace-nowrap tabular-nums">{value}</dd>
+      {short === undefined ? null : <dd className="text-xs text-refuse">{short}</dd>}
     </div>
   )
 }

@@ -26,8 +26,11 @@ import { Checkbox } from './components/ui/checkbox.tsx'
 import { Field, FieldLabel, FieldLegend, FieldSet } from './components/ui/field.tsx'
 import { RadioGroup, RadioGroupItem } from './components/ui/radio-group.tsx'
 import type { IncidentResolveOutcome } from './follow-connection.ts'
+import { cn } from './lib/utils.ts'
+import { PILL } from './step-pill.ts'
 import { useStore, useThreadStores } from './store.ts'
 import { ringElement } from './transcript-reveal.ts'
+import { LabelValues } from './view-parts.tsx'
 
 /**
  * A session's incident as the thread shows it (#466): what was OBSERVED, what the risk fold
@@ -78,8 +81,8 @@ function takesResolution(record: EnsoIncidentRecord, incidents: EnsoSessionIncid
 function Section({ title, children }: { readonly title: string; readonly children: React.ReactNode }): React.ReactNode {
   const headingId = useId()
   return (
-    <section aria-labelledby={headingId} className="grid gap-1.5 border-t px-3 py-2">
-      <h3 id={headingId} className="text-xs font-semibold tracking-wider text-muted-foreground uppercase">
+    <section aria-labelledby={headingId} className="grid gap-2 border-t p-3">
+      <h3 id={headingId} className="text-detail font-semibold text-muted-foreground">
         {title}
       </h3>
       {children}
@@ -94,7 +97,8 @@ function Observed({ record }: { readonly record: EnsoIncidentRecord }): React.Re
     <ul className="grid gap-2">
       {signals.map((signal) => (
         <li key={`${signal.signal}:${signal.toolCallId}`} className="grid gap-0.5">
-          <Facts
+          <LabelValues
+            className={FACTS}
             rows={[
               ['signal', signal.signal],
               ['on call', signal.toolCallId],
@@ -108,19 +112,8 @@ function Observed({ record }: { readonly record: EnsoIncidentRecord }): React.Re
   )
 }
 
-/** Label and value pairs, in the card's two-column mono grid. */
-function Facts({ rows }: { readonly rows: readonly (readonly [label: string, value: string])[] }): React.ReactNode {
-  return (
-    <dl className="grid grid-cols-label-value gap-x-3 font-mono text-xs text-muted-foreground">
-      {rows.map(([label, value]) => (
-        <div key={label} className="contents">
-          <dt>{label}</dt>
-          <dd className="text-foreground">{value}</dd>
-        </div>
-      ))}
-    </dl>
-  )
-}
+/** An incident's facts, as the debug pane's label/value pairs (#417), packed tighter and a size down. */
+const FACTS = 'gap-y-0.5 text-detail'
 
 function Suspended({ record }: { readonly record: EnsoIncidentRecord }): React.ReactNode {
   const { suspended } = record.opened
@@ -129,7 +122,10 @@ function Suspended({ record }: { readonly record: EnsoIncidentRecord }): React.R
   }
   return (
     <>
-      <Facts rows={suspended.map((family) => [family, ENSO_FAMILY_TOOLS[family].join(', ')] as const)} />
+      <LabelValues
+        className={FACTS}
+        rows={suspended.map((family) => [family, ENSO_FAMILY_TOOLS[family].join(', ')] as const)}
+      />
       {/* The opening's record, never rewritten: once resolved, what stays is the resolution's. */}
       {record.resolutions.length === 0 ? null : (
         <p className="text-xs text-muted-foreground">
@@ -240,7 +236,8 @@ function Resolutions({ resolutions }: { readonly resolutions: readonly EnsoIncid
         // same `incidentId` — the position is the only identity a resolution has.
         // react-doctor-disable-next-line no-array-index-as-key
         <li key={index}>
-          <Facts
+          <LabelValues
+            className={FACTS}
             rows={[
               ['judged', CLASSIFICATION_LABEL[resolution.classification]],
               ['outcome', resolution.outcome],
@@ -475,24 +472,23 @@ export function IncidentCard({ record, incidents, resolve }: IncidentCardProps):
       ref={ringIfRevealed}
       aria-labelledby={titleId}
       data-incident-id={opened.incidentId}
+      // The transcript's card language (#417): a step row's 40px header with the state as a pill —
+      // in the refusal colour while it is the open one — then its sections under hairlines.
       className={
         open
-          ? 'my-2 grid max-w-3xl overflow-hidden rounded-lg border border-refuse bg-card ledger:rounded-xs ink:border-2'
-          : 'my-2 grid max-w-3xl overflow-hidden rounded-lg border bg-card ledger:rounded-xs'
+          ? 'my-3 grid overflow-hidden rounded-lg border border-refuse bg-card ledger:rounded-xs ink:border-2'
+          : 'my-3 grid overflow-hidden rounded-lg border bg-card ledger:rounded-xs'
       }
     >
-      <header className="flex flex-wrap items-center gap-2 px-3 py-2">
-        <h2
-          id={titleId}
-          className="inline-flex items-center gap-1.5 text-xs font-semibold tracking-wider text-refuse uppercase"
-        >
+      <header className="flex min-h-10 flex-wrap items-center gap-2 px-3 py-2">
+        <h2 id={titleId} className="inline-flex items-center gap-2 text-detail font-semibold text-refuse">
           <SirenIcon aria-hidden="true" className="size-4 shrink-0" />
           Incident {opened.incidentId}
         </h2>
-        <span className="font-mono text-xs text-muted-foreground">{stateWord(record)}</span>
+        <span className={cn(PILL, 'ml-auto', open ? 'text-refuse' : 'text-muted-foreground')}>{stateWord(record)}</span>
       </header>
       {opened.inheritedFrom === undefined ? null : (
-        <p className="border-t px-3 py-2 text-sm">
+        <p className="border-t p-3 text-sm">
           Inherited: this thread came from thread {opened.inheritedFrom.threadId}, whose incident{' '}
           {opened.inheritedFrom.incidentId} was open. Each thread is resolved on its own.
         </p>
@@ -520,7 +516,7 @@ export function IncidentCard({ record, incidents, resolve }: IncidentCardProps):
           <ResolveForm record={record} incidents={incidents} resolve={resolve} />
         </Section>
       ) : null}
-      <p className="border-t px-3 py-2 font-mono text-xs text-muted-foreground">recorded in the session file</p>
+      <p className="border-t px-3 py-2 font-mono text-meta text-muted-foreground">recorded in the session file</p>
     </article>
   )
 }
@@ -634,7 +630,7 @@ export function OpenIncidentPointer({
   return (
     <p
       data-incident-pointer={pointer.incidentId}
-      className="my-2 flex max-w-3xl flex-wrap items-center gap-2 rounded-lg border border-refuse px-3 py-2 text-sm ledger:rounded-xs"
+      className="my-3 flex flex-wrap items-center gap-2 rounded-lg border border-refuse bg-card px-3 py-2 text-sm ledger:rounded-xs"
     >
       <SirenIcon aria-hidden="true" className="size-4 shrink-0 text-refuse" />
       <span>

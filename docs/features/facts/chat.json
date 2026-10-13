@@ -7,8 +7,8 @@
       "shown": [
         "Where does the app read its database URL? Check .env too.",
         "Thought",
-        "bash grep -rn DATABASE_URL src",
-        "fork from here",
+        "bash grep -rn DATABASE_URL src ok",
+        "Fork from here",
         "attach an image",
         "System prompt pi default",
         "thread status"

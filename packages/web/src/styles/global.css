@@ -81,11 +81,11 @@
  * and pixels in them. The widths are the `--container-*` scale, so both `max-w-*` and `w-*` exist.
  */
 @theme {
-  --container-context-view: 72rem; /* the Context tab */
-  --container-stats-view: 72rem; /* the Stats tab — the Context tab's width, so its cards pair up the same way */
+  --container-context-view: 65rem; /* the Context tab — the prototype's wide `.view-inner` (#417): its Now card and Browser + Events row need more than 860px */
+  --container-stats-view: 65rem; /* the Stats tab — the prototype's wide `.view-inner` (#417), 1040px */
   --container-context-dialog: 64rem; /* /context's dialog */
   --container-debug-pane: 30rem; /* the ?debug column */
-  --container-changes-tree: 20rem; /* the Changes tab's file tree */
+  --container-changes-tree: 16.25rem; /* the Diff tab's file tree — the prototype's 260px `.diff-files` (#417) */
   --container-command-palette: 28rem; /* the / palette's popup */
 }
 
@@ -111,6 +111,22 @@
     color-mix(in srgb, var(--foreground) 14%, transparent) 0 var(--spacing),
     transparent var(--spacing) calc(var(--spacing) * 2)
   );
+}
+
+/* ── Views (#417): the Context, Stats and Diff tabs, in the prototype's `.panel` / `.diff-*` language ── */
+@theme {
+  --text-figure: 1.75rem; /* the prototype's `.big-number` — its --text-xl, 28px */
+  --text-figure--line-height: 1.1;
+}
+
+/* A path truncated from its START, as the prototype's `.diff-file .path`: `…rc/follow-connection.ts`. The
+   text goes in a `<bdi dir="ltr">` so a leading `.` or trailing `_` keeps its place under the rtl flow. */
+@utility truncate-start {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
 }
 
 @layer base {
@@ -144,4 +160,111 @@
   border-radius: 0.25rem;
   padding: 0.125rem 0.25rem;
   font-weight: 500;
+}
+
+/*
+ * PAGES (#417): the routed pages' measures — Projects, a project's page, Add project, Settings —
+ * named from the 2026-10-12 prototype so the page code stays free of arbitrary values.
+ */
+@theme {
+  --container-page: 60rem; /* a page's column: Projects, a project's page */
+  --container-page-narrow: 45rem; /* Add project's column */
+  --container-settings: 70rem; /* Settings: its nav and its section */
+  --container-settings-nav: 12.5rem; /* Settings' section links */
+  --text-meta: 0.6875rem; /* mono meta: a row's model and age, a pill, a badge */
+  --text-meta--line-height: 1.4;
+  --text-tag: 0.625rem; /* the smallest mono label: a theme card's scheme */
+  --text-tag--line-height: 1.4;
+  --shadow-save-bar: 0 -8px 24px rgb(0 0 0 / 0.35); /* an unsaved-changes bar, lifted over what scrolls under it */
+}
+
+/* Appearance's theme cards, and Permissions' mode cards: as many columns of their least width as fit. */
+@utility grid-cols-theme-cards {
+  grid-template-columns: repeat(auto-fill, minmax(calc(var(--spacing) * 37.5), 1fr));
+}
+@utility grid-cols-mode-cards {
+  grid-template-columns: repeat(auto-fill, minmax(calc(var(--spacing) * 50), 1fr));
+}
+/* A theme card's preview: its rail, then its body. */
+@utility grid-cols-theme-preview {
+  grid-template-columns: 28% minmax(0, 1fr);
+}
+/* A font row: the role, its choice, then a sample taking the rest. */
+@utility grid-cols-font-row {
+  grid-template-columns: calc(var(--spacing) * 30) minmax(0, calc(var(--spacing) * 55)) minmax(0, 1fr);
+}
+/* Permissions' add-a-rule row: tool, pattern, decision, the button; Try a command's: tool, input, the button. */
+@utility grid-cols-add-rule {
+  grid-template-columns: calc(var(--spacing) * 35) minmax(0, 1fr) calc(var(--spacing) * 30) auto;
+}
+@utility grid-cols-check-form {
+  grid-template-columns: calc(var(--spacing) * 35) minmax(0, 1fr) auto;
+}
+/* A check row and a reach-list item (Add project): a 20px column for the box or the icon, then its words. */
+@utility grid-cols-check-row {
+  grid-template-columns: calc(var(--spacing) * 5) minmax(0, 1fr);
+}
+
+/*
+ * TRANSCRIPT (#417): the chat column and its rows, and the debug pane, from the 2026-10-12
+ * prototype — the speaker line and a tool row's pill read `--text-meta` (Pages' block above).
+ */
+@theme {
+  --container-transcript: 51.25rem; /* the transcript's column */
+  --container-reading: 68ch; /* a line of pi's prose, and a thought's */
+  --text-message: 0.9375rem; /* a prompt's bubble and pi's prose */
+  --text-message--line-height: 1.55;
+  --text-detail: 0.8125rem; /* a step's row, a thought's summary, a note line, the debug pane's labels */
+  --text-detail--line-height: 1.5;
+  --ease-snap: cubic-bezier(0.2, 0.8, 0.2, 1); /* a chevron's turn */
+}
+/* A prompt's bubble: four fifths of the column, never wider than a comfortable line; on a phone, nearly all of it. */
+@utility max-w-prompt {
+  max-width: min(80%, 38.75rem);
+  @media (width < 48rem) {
+    max-width: 92%;
+  }
+}
+
+/*
+ * SHELL (#417): the rail, the headers, the status strip and the menus' chrome, from the 2026-10-12
+ * prototype. The 13px of the rail's tools reads `--text-detail` and its 11px labels `--text-meta`
+ * (the blocks above).
+ */
+@theme {
+  --container-rail: 17rem; /* the rail's column */
+  --container-rail-compact: 15rem; /* the rail's column under 1024px */
+  --text-brand: 0.9375rem; /* "Enso" beside the mark */
+  --text-brand--line-height: 1.3;
+  --color-scrim: rgb(0 0 0 / 0.55); /* behind the rail drawn over the thread, under 768px */
+  --tracking-label: 0.06em; /* a mono uppercase label: the rail's day groups */
+}
+@theme inline {
+  /* A popover's lift: a menu, a dialog, a toast. The ring is the theme's border, so it shows on every theme. */
+  --shadow-pop: 0 12px 32px rgb(0 0 0 / 0.45), 0 0 0 1px var(--border);
+}
+/* The rail drawn over the thread on a narrow screen: the prototype's drawer, never the whole width. */
+@utility w-rail-drawer {
+  width: min(18.75rem, 86vw);
+}
+/* The ?debug column drawn over the thread on a narrow screen, as the rail is from the other side. */
+@utility w-debug-drawer {
+  width: min(20rem, 90vw);
+}
+/* A thread's hollow status ring: finer than a 2px border, heavier than a hairline. */
+@utility border-dot {
+  border-width: 1.5px;
+}
+
+/*
+ * COMPOSER (#417): the launch panel and the docked composer, their chips and pickers, from the
+ * 2026-10-12 prototype. The docked card is the transcript's column (`--container-transcript`).
+ */
+@theme {
+  --container-launch: 45rem; /* the launch panel's column */
+  --container-popover: 22.5rem; /* the model picker */
+}
+@theme inline {
+  /* The launch panel's composer: a ring of the primary, faint — the one card that asks for the first prompt. */
+  --shadow-launch: 0 0 0 4px color-mix(in srgb, var(--primary) 6%, transparent);
 }

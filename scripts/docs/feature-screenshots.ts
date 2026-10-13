@@ -309,14 +309,26 @@ async function shoot(
  * ⚠ WITH THE WHEEL, as a user scrolls. A live transcript sticks to its bottom, and it releases
  * only for a scroll it takes to be the user's: a programmatic `scrollIntoView` is undone by the
  * next animation frame, and the shot rings an element that has already left.
+ *
+ * ⚠ The transcript is WINDOWED (#739): a row more than a few rows above the view is not in the DOM
+ * at all, so there is no box to measure. The wheel goes up, as a reader scrolls back to an earlier
+ * prompt, until the row is drawn.
+ *
+ * ⚠ The wheel turns over the target's own column: it scrolls what is under the pointer, and the
+ * debug pane beside the transcript scrolls apart from it.
  */
 async function scrollToTop(target: Locator): Promise<void> {
   const page = target.page()
   await page.mouse.move(VIEWPORT.width / 2, VIEWPORT.height / 2)
+  for (let attempt = 0; attempt < 20 && (await target.count()) === 0; attempt += 1) {
+    await page.mouse.wheel(0, -VIEWPORT.height / 2)
+    await page.waitForTimeout(300)
+  }
   for (let attempt = 0; attempt < 6; attempt += 1) {
-    const { top } = await rectangleOf(target, 'the element to scroll to')
+    const { left, top, width } = await rectangleOf(target, 'the element to scroll to')
     const distance = top - 90
     if (Math.abs(distance) < 40) break
+    await page.mouse.move(Math.min(Math.max(left + width / 2, 1), VIEWPORT.width - 1), VIEWPORT.height / 2)
     await page.mouse.wheel(0, distance)
     await page.waitForTimeout(400)
   }
@@ -327,7 +339,7 @@ async function scrollToTop(target: Locator): Promise<void> {
 
 /** Sends `prompt` from the composer and waits for the answer that ends with `ending`. */
 async function send(page: Page, prompt: string, ending: string): Promise<void> {
-  const composer = page.getByPlaceholder('ask pi something')
+  const composer = page.getByPlaceholder('Ask pi something')
   await composer.fill(prompt)
   await composer.press('Enter')
   await page.getByText(ending, { exact: false }).last().waitFor({ timeout: STEP_TIMEOUT_MS })
@@ -386,7 +398,7 @@ async function playSession(page: Page, modelLog: string): Promise<string> {
   await hostCommand(page, threadId, 'model', `demo/${SECOND_MODEL}`)
 
   // Prompt 3 asks before it acts: the questionnaire first, then the permission engine's prompt.
-  const composer = page.getByPlaceholder('ask pi something')
+  const composer = page.getByPlaceholder('Ask pi something')
   await composer.fill(PROMPTS[2])
   await composer.press('Enter')
   const firstTab = page.getByRole('tab', { name: 'Failure' })
@@ -512,13 +524,24 @@ function featureUi(page: Page, thread: DemoThread, steps: string[]): FeatureUi {
       await located.click()
       await page.waitForTimeout(800)
     },
+    choose: async (target, option) => {
+      const located = locate(page, target)
+      steps.push(`pick **${option}** for \`${await shownBy(target, located)}\``)
+      // A segmented control (a rule's Allow | Ask | Deny, #417) is a radiogroup: its option is a radio to click.
+      if ((await located.getAttribute('role')) === 'radiogroup') {
+        await located.getByRole('radio', { name: option, exact: true }).click()
+      } else {
+        await located.selectOption(option)
+      }
+      await page.waitForTimeout(800)
+    },
     scrollTo: async (target) => {
       await scrollToTop(locate(page, target))
     },
     debugDrawer: async () => {
       steps.push("add `?debug` to the thread's address")
       await page.goto(`${WEB}/?debug&thread=${threadOnScreen(page, threadId)}`)
-      await page.getByText('session debug').waitFor()
+      await page.getByText('Session debug', { exact: true }).waitFor()
       await page.waitForTimeout(1200)
     },
     logPage: async () => {
@@ -528,17 +551,15 @@ function featureUi(page: Page, thread: DemoThread, steps: string[]): FeatureUi {
       await page.waitForTimeout(1500)
     },
     forkAt: async (promptNumber) => {
-      steps.push(`choose **fork from here** under the ${ORDINALS[promptNumber - 1] ?? `#${promptNumber}`} prompt`)
-      await scrollToTop(page.getByText(PROMPTS[promptNumber - 1] ?? '').last())
-      // The fork buttons are one per prompt, in order.
-      await page
-        .getByText('fork from here')
-        .nth(promptNumber - 1)
-        .click()
+      steps.push(`choose **Fork from here** under the ${ORDINALS[promptNumber - 1] ?? `#${promptNumber}`} prompt`)
+      const prompt = PROMPTS[promptNumber - 1] ?? ''
+      await scrollToTop(page.getByText(prompt).last())
+      // By the prompt its name numbers (`Fork from here, prompt 3: “…”`), never the nth on the page:
+      // the transcript is windowed (#739), so the page holds only the buttons of the rows near the view.
+      await page.getByRole('button', { name: `Fork from here, prompt ${promptNumber}:` }).click()
       await page.waitForURL((url) => url.searchParams.get('thread') !== threadId)
       // The source thread's pane stays mounted, hidden: the fork's composer is the visible one.
-      const composer = page.getByPlaceholder('ask pi something').filter({ visible: true })
-      const prompt = PROMPTS[promptNumber - 1]
+      const composer = page.getByPlaceholder('Ask pi something').filter({ visible: true })
       await waitFor(async () => (await composer.inputValue()) === prompt, "the fork's prompt in its composer")
     },
   }

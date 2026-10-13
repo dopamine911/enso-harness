@@ -17,7 +17,7 @@ const { ThreadsRail }: typeof ThreadsRailModule = await import('../threads-rail.
 /**
  * The rail's project accordions and switcher (#876), MOUNTED: the current project open and the
  * others closed, each closed one saying how many of its threads wait on you (or else run) and
- * clearing when they are answered; the switcher choosing where New Thread starts, keyboard operable,
+ * clearing when they are answered; the switcher choosing where New thread starts, keyboard operable,
  * the current project checked, each project's trouble flagged; the reader's open and closed kept
  * across a reload.
  */
@@ -315,14 +315,14 @@ test('⚠ after a reload, a closed project says "waiting on you" from the listin
   await mounted.unmount()
 })
 
-test('choosing a project in the switcher makes it current: New Thread starts there, and the rail opens it and closes the one left (#876)', async () => {
+test('choosing a project in the switcher makes it current: New thread starts there, and the rail opens it and closes the one left (#876)', async () => {
   const mounted = await mount({
     projects: [LAUNCH, APP],
     threads: [open('in-launch', 'p-launch'), open('in-app', 'p-app')],
     activeThreadId: 'in-launch',
   })
   expect(switcherLabel(mounted)).toBe('Project: enso. Switch project')
-  await mounted.click(mounted.button('New Thread'))
+  await mounted.click(mounted.button('New thread'))
   expect(mounted.asked.started).toEqual(['p-launch'])
 
   const items = await mounted.openSwitcher()
@@ -336,7 +336,7 @@ test('choosing a project in the switcher makes it current: New Thread starts the
   expect(switcherLabel(mounted)).toBe('Project: app. Switch project')
   expect(mounted.header('app').getAttribute('aria-expanded')).toBe('true')
   expect(mounted.header('enso').getAttribute('aria-expanded')).toBe('false')
-  await mounted.click(mounted.button('New Thread'))
+  await mounted.click(mounted.button('New thread'))
   expect(mounted.asked.started).toEqual(['p-launch', 'p-app'])
 
   // Choosing the current project again goes nowhere.
@@ -357,7 +357,7 @@ test('opening a thread of another project makes that project current (#876)', as
   await mounted.click(mounted.rail().querySelector<HTMLElement>('button[data-thread-id="in-app"]') ?? document.body)
   expect(mounted.asked.selected).toEqual(['in-app'])
   expect(switcherLabel(mounted)).toBe('Project: app. Switch project')
-  await mounted.click(mounted.button('New Thread'))
+  await mounted.click(mounted.button('New thread'))
   expect(mounted.asked.started).toEqual(['p-app'])
   await mounted.unmount()
 })
