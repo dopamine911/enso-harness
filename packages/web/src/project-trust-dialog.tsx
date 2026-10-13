@@ -25,9 +25,12 @@ import { type ProjectRequestOutcome, requestProjectTrust } from './project-list.
 /** The project's own files, by the names a person knows them by. */
 export const OWN_FILES = '.enso/config.json and .enso/config.local.json'
 
-/** What trust changes for threads already open, and for the next ones. */
-const NEXT_THREADS =
-  'New threads and new trees follow this; a thread already open keeps what it loaded until it closes.'
+/** What a grant changes for threads already open, and for the next ones. */
+const NEXT_THREADS = 'New threads and new trees follow this; a thread already open picks it up when it is next built.'
+
+/** What a revoke does to threads already open: what the server does (`project-routes.ts`). */
+const OPEN_THREADS_REVOKED =
+  'Its open threads that aren’t running are closed, so each is rebuilt without this trust at its next prompt; Enso won’t revoke while one of them is running.'
 
 /** One file's commands, as written, in order — or "none". */
 function SetupCommands({ setup = [] }: { setup?: readonly string[] | undefined }): React.ReactNode {
@@ -246,7 +249,7 @@ export function RevokeDialog(props: ConfirmState & { readonly onRevoke: () => vo
     <TrustConfirm
       {...props}
       title={`Revoke trust in ${props.title}?`}
-      description={`Enso stops reading this project’s own settings (${OWN_FILES}) and its .pi/ folder, so their setup commands no longer run in a new tree. ${NEXT_THREADS} It is saved as not trusted, so a new thread doesn’t ask: trust it again here.`}
+      description={`Enso stops reading this project’s own settings (${OWN_FILES}) and its .pi/ folder, so their setup commands no longer run in a new tree. ${OPEN_THREADS_REVOKED} It is saved as not trusted, so a new thread doesn’t ask: trust it again here.`}
       cancelLabel="Cancel"
       change={{
         label: 'Revoke trust',

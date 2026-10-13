@@ -2391,8 +2391,8 @@ test("⚠ an untrusted project's setup is not run, and nothing is recorded (#754
 
 // #873, the acceptance's first item: trust set from the page reaches the NEXT tree — its setup
 // runs — and a revoke reaches the next one after: no setup, and no question, since a revoke is saved
-// as "not trusted". The thread already open keeps what it was built with, as the page says.
-test('⚠ trusted from the page, a new tree runs the project’s setup; revoked, the next tree does not, and the open thread keeps its trust (#873)', async () => {
+// as "not trusted".
+test('⚠ trusted from the page, a new tree runs the project’s setup; revoked, the next tree does not (#873)', async () => {
   const project = dirtyCheckout()
   sharedThreads(project, { setup: ['echo prepared > setup.txt'] })
   const core = createFauxCore()
@@ -2415,7 +2415,31 @@ test('⚠ trusted from the page, a new tree runs the project’s setup; revoked,
   expect(existsSync(join(tree, 'setup.txt'))).toBe(false)
   expect((await host.threadTree(revokedId))?.setup).toBeUndefined()
   expect(revoked.runtime.openDialogs()).toHaveLength(0)
-  expect(trusted.projectTrust().trusted).toBe(true)
+})
+
+// #873, a revoke fails closed at once: the route retires the project's idle live threads
+// (`project-routes.ts`, the registry's `retire` disposes the session), and the next prompt builds
+// the thread again — here, as the registry does, by `createSession` under the same id. Built again,
+// it no longer resolves as trusted: the repository's `.pi/` policy (prompts off) no longer applies.
+// (Its system prompt, recorded at its first request, stays the one it started with.)
+test('⚠ after a revoke, an idle open thread retired as the route retires it is built untrusted at its next prompt (#873)', async () => {
+  const project = yoloRepository()
+  saveProjectTrust(project, agentDir, true)
+  const { host, requests } = trustHost(project)
+  const threadId = crypto.randomUUID()
+  const before = await openThread(host, project, threadId)
+  expect(before.projectTrust().trusted).toBe(true)
+  expect(await writeAsks(before)).toBe(false)
+  await runPrompt(before, 'trusted')
+
+  saveProjectTrust(project, agentDir, false)
+  before.runtime.dispose()
+  const after = await openThread(host, project, threadId)
+  expect(after.projectTrust()).toEqual({ directory: project, trusted: false })
+  expect(await writeAsks(after)).toBe(true)
+  await runPrompt(after, 'revoked')
+  expect(after.runtime.openDialogs()).toHaveLength(0)
+  expect(requests).toHaveLength(2)
 })
 
 // The page's "New threads run in: off", end to end: written to the project's local tier as the page

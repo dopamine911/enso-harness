@@ -14,8 +14,9 @@ import type { ProjectRegistry } from './projects.ts'
  * (the page's guard, #717, stops other pages only); it gains nothing, since such a command can
  * write `trust.json` itself.
  *
- * ⚠ THE NEXT THREAD AND THE NEXT TREE: a session already open keeps the decision it was built
- * with until it closes — it is read when a session is built, and a running one is not reloaded.
+ * ⚠ A GRANT REACHES THE NEXT BUILD: a session reads trust when it is built, so an open one picks a
+ * grant up when it is next built. A REVOKE FAILS CLOSED AT ONCE: `project-routes.ts` refuses it
+ * while one of the project's threads runs, and retires the others, as removal does.
  */
 
 const log = ensoLogger('server', 'http')

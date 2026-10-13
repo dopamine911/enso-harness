@@ -6,7 +6,7 @@ import { createProjectSettingsRoute, type ProjectSettingsAnswer } from './projec
 import { createProjectTrustRoute, type ProjectTrustRouteAnswer } from './project-trust-route.ts'
 import type { ProjectRegistry } from './projects.ts'
 import { answerJson, answerOrFail, MAX_DIALOG_BODY_BYTES, readClosedJsonBody, refuseWith } from './request-plumbing.ts'
-import type { ThreadRegistry } from './thread-registry.ts'
+import type { ThreadRegistry, ThreadView } from './thread-registry.ts'
 
 /**
  * The project routes (#395, #810): the projects listed, registered, browsed and removed, a
@@ -112,14 +112,8 @@ export function createProjectRoutes(state: ProjectRoutesState): ProjectRoutes {
       refuseWith(response, { status: 409, reason: 'the launch directory is always a project' })
       return
     }
-    // `inspect()` decodes a branch (#285); removal is a rare, explicit act, and live threads are few.
-    const live = threads
-      .list()
-      .filter((thread) => projects.byDirectory(thread.hosted.inspect().cwd)?.projectId === projectId)
-    if (live.some((thread) => thread.busy)) {
-      refuseWith(response, { status: 409, reason: 'a thread in this project is running; remove it when that settles' })
-      return
-    }
+    const live = idleThreadsOf(projectId, response, 'remove it')
+    if (live === undefined) return
     const outcome = projects.remove(projectId)
     if (outcome === 'launch') {
       refuseWith(response, { status: 409, reason: 'the launch directory is always a project' })
@@ -132,6 +126,48 @@ export function createProjectRoutes(state: ProjectRoutesState): ProjectRoutes {
     for (const thread of live) threads.retire(thread.threadId, 'its project was removed')
     response.writeHead(204)
     response.end()
+  }
+
+  /**
+   * The project's live threads here, none of them running — or, when one runs, undefined, its 409
+   * answered (`act`: what waits for it to settle). Removal and revoke retire these. `inspect()`
+   * decodes a branch (#285); both are rare, explicit acts, and live threads are few.
+   */
+  function idleThreadsOf(projectId: string, response: ServerResponse, act: string): ThreadView[] | undefined {
+    const live = threads
+      .list()
+      .filter((thread) => projects.byDirectory(thread.hosted.inspect().cwd)?.projectId === projectId)
+    if (!live.some((thread) => thread.busy)) return live
+    refuseWith(response, { status: 409, reason: `a thread in this project is running; ${act} when that settles` })
+    return undefined
+  }
+
+  /**
+   * `PUT /api/projects/<projectId>/trust` (#873): `{ trusted }` into pi's `trust.json` — a revoke as
+   * an explicit `false` — answered with the trust as it now stands (the change logs itself,
+   * `project-trust-route.ts`). ⚠ A REVOKE FAILS CLOSED AT ONCE, as removal does: refused (409) while
+   * one of the project's threads runs, and its live threads that are not running are retired, so
+   * each is built again — under the revoke — at its next prompt. Check, write and retire run in one
+   * turn, so no run starts between them. A grant retires nothing: an open thread picks it up when it
+   * is next built.
+   */
+  async function respondToProjectTrustWrite(
+    projectId: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> {
+    const update = await readProjectBody(request, response, {
+      what: 'project trust update',
+      schema: EnsoProjectTrustUpdate,
+      name: 'project trust',
+      requirement: 'a project trust update takes exactly `trusted`, true or false',
+    })
+    const live = update?.trusted === false ? idleThreadsOf(projectId, response, 'revoke its trust') : []
+    if (update === undefined || live === undefined) return
+    const answer = projectTrust.write(projectId, update.trusted)
+    if (answer.kind === 'trust')
+      for (const thread of live) threads.retire(thread.threadId, 'its project’s trust was revoked')
+    answerProjectTrust(response, answer)
   }
 
   /**
@@ -189,22 +225,12 @@ export function createProjectRoutes(state: ProjectRoutesState): ProjectRoutes {
       respondWithRead: respondWithProjectSettings,
       respondToWrite: respondToProjectSettingsWrite,
     },
-    // #873: `GET` the trust and the files and setup commands it turns on; `PUT` `{ trusted }` into pi's
-    // `trust.json` — a revoke as an explicit `false` — answered with the trust as it now stands (the
-    // change logs itself, `project-trust-route.ts`). A body that is not exactly the update is a 400.
+    // #873: `GET` the trust and the files and setup commands it turns on; `PUT` sets or revokes it.
     {
       read: PROJECT_TRUST_READ_ROUTE,
       write: PROJECT_TRUST_WRITE_ROUTE,
       respondWithRead: async (projectId, response) => answerProjectTrust(response, projectTrust.read(projectId)),
-      respondToWrite: async (projectId, request, response) => {
-        const update = await readProjectBody(request, response, {
-          what: 'project trust update',
-          schema: EnsoProjectTrustUpdate,
-          name: 'project trust',
-          requirement: 'a project trust update takes exactly `trusted`, true or false',
-        })
-        if (update !== undefined) answerProjectTrust(response, projectTrust.write(projectId, update.trusted))
-      },
+      respondToWrite: respondToProjectTrustWrite,
     },
   ]
 

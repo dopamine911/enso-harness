@@ -459,9 +459,9 @@ const REGEX_ROUTE_METADATA: Record<string, RegexRouteMetadata> = {
     handler: 'createProjectTrustRoute.write → saveProjectTrust',
     input: 'path: `projectId`; body: `EnsoProjectTrustUpdate` — `{ "trusted": true }` trusts, `false` revokes',
     success:
-      "200 `EnsoProjectTrust` JSON as it now stands — saved in pi's `trust.json` under the project's path, the store a thread's **Trust project** answer writes; a revoke is an explicit `false`, never a deletion, so no trusted ancestor shows through. New threads and trees follow it; a session already open keeps what it was built with (#873)",
+      "200 `EnsoProjectTrust` JSON as it now stands — saved in pi's `trust.json` under the project's path, the store a thread's **Trust project** answer writes; a revoke is an explicit `false`, never a deletion, so no trusted ancestor shows through, and retires the project's live threads that are not running, so each is rebuilt under it at its next prompt. A grant reaches each thread when it is next built (#873)",
     errors:
-      '400 malformed body, or one that is not exactly `{ trusted }`; 403 untrusted origin; 404 no registered project with that id; 413 body too large; 500 handler failure',
+      '400 malformed body, or one that is not exactly `{ trusted }`; 403 untrusted origin; 404 no registered project with that id; 409 a revoke while a thread in the project is running; 413 body too large; 500 handler failure',
     routeClass: 'control',
     builds: 'no',
     logs: 'yes',

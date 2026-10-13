@@ -984,6 +984,39 @@ test('⚠ a foreign page cannot trust a project or read its trust; Enso’s own 
   expect((await trustOf(await putTrust(url, projectId, { trusted: true }, ownPage))).trusted).toBe(true)
 })
 
+// A revoke fails closed AT ONCE, as removal does: never under a running thread of the project, and
+// its idle live threads are retired, so the next prompt builds each again under the revoke.
+test('⚠ revoking trust is refused while one of the project’s threads runs, and nothing is written (#873)', async () => {
+  const { root, app } = projectRoot()
+  const agentDir = mkdtempSync(join(tmpdir(), 'enso-revoke-agent-'))
+  const { url } = await startWith(asksAndWaits, {}, undefined, { projectRoots: [root], agentDir })
+  const project = await registeredProject(url, app)
+  writeFileSync(join(agentDir, 'trust.json'), JSON.stringify({ [app]: true }))
+  await prompt(url, 'busy', '/mode', { [ENSO_PROJECT_HEADER]: project.projectId })
+  const refused = await putTrust(url, project.projectId, { trusted: false })
+  expect(refused.status).toBe(409)
+  expect(await refused.text()).toBe('a thread in this project is running; revoke its trust when that settles')
+  expect(trustFile(agentDir)).toEqual({ [app]: true })
+})
+
+test('⚠ revoking trust retires the project’s idle live threads, so each is built again at its next prompt; a grant retires none (#873)', async () => {
+  const { root, app } = projectRoot()
+  const { url, requested } = await startWith(settlesAtOnce, {}, undefined, { projectRoots: [root] })
+  const project = await registeredProject(url, app)
+  const naming = { [ENSO_PROJECT_HEADER]: project.projectId }
+  expect(await prompt(url, 't1', 'hello', naming)).toBe(202)
+  const liveIds = async (): Promise<string[]> =>
+    ((await (await fetch(`${url}/api/threads`)).json()) as EnsoThreadSummary[]).map((summary) => summary.threadId)
+  expect(await liveIds()).toEqual(['t1'])
+  expect((await trustOf(await putTrust(url, project.projectId, { trusted: true }))).trusted).toBe(true)
+  expect(await liveIds()).toEqual(['t1'])
+
+  expect((await trustOf(await putTrust(url, project.projectId, { trusted: false }))).trusted).toBe(false)
+  expect(await liveIds()).toEqual([])
+  expect(await prompt(url, 't1', 'again', naming)).toBe(202)
+  expect(requested).toEqual(['t1', 't1'])
+})
+
 // The trust read happens BEFORE the project is trusted, so its files are untrusted input: a link
 // could point at a file an agent may not read, and the page would show it; a FIFO would hold the
 // server. Neither is read — each is named, and said to be read anyway once trusted.
