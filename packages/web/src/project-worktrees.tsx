@@ -111,13 +111,18 @@ function fileInProject(file: string, projectPath: string): string {
   return file.startsWith(prefix) ? file.slice(prefix.length) : file
 }
 
-/** Under a field: the tier its value comes from, its Reset when that is one of the project's own, and whether it is edited. */
+/**
+ * Under a field: the tier its value comes from, its Reset when that is one of the project's own, and
+ * whether it is edited. A Reset answers with new settings, which the form starts over from, so it
+ * waits while any field holds an unsaved change rather than drop that change.
+ */
 function TierLine({
   field,
   tier,
   files,
   busy,
   edited,
+  unsaved,
   onReset,
 }: {
   field: ThreadKey
@@ -125,6 +130,7 @@ function TierLine({
   files: EnsoProjectSettings['files']
   busy: boolean
   edited: boolean
+  unsaved: boolean
   onReset: (field: ThreadKey, tier: EnsoProjectTier) => void
 }): React.ReactNode {
   return (
@@ -137,9 +143,13 @@ function TierLine({
           type="button"
           variant="outline"
           size="xs"
-          disabled={busy}
+          disabled={busy || unsaved}
           aria-label={`Reset ${FIELD_LABELS[field]}`}
-          title={`remove it from ${tierWords(tier, files)}, so the next tier's value shows through`}
+          title={
+            unsaved
+              ? 'save or discard the unsaved changes first'
+              : `remove it from ${tierWords(tier, files)}, so the next tier's value shows through`
+          }
           onClick={() => onReset(field, tier)}
         >
           Reset
@@ -156,6 +166,7 @@ function ListField({
   settings,
   busy,
   edited,
+  unsaved,
   onText,
   onReset,
   children,
@@ -165,6 +176,7 @@ function ListField({
   settings: EnsoProjectSettings
   busy: boolean
   edited: boolean
+  unsaved: boolean
   onText: (text: string) => void
   onReset: (field: ThreadKey, tier: EnsoProjectTier) => void
   children: React.ReactNode
@@ -187,6 +199,7 @@ function ListField({
         files={settings.files}
         busy={busy}
         edited={edited}
+        unsaved={unsaved}
         onReset={onReset}
       />
     </Field>
@@ -302,24 +315,29 @@ function FormNotes({ settings }: { settings: EnsoProjectSettings }): React.React
 
 /**
  * The tab's form over one loaded payload. Its draft starts from the payload; the tab remounts it
- * (by key) whenever the server answers new settings, so the draft never outlives them.
+ * (by key) whenever the server answers new settings, so the draft never outlives them. The save
+ * choice is the tab's, so a save doesn't put it back to Only me.
  */
 function WorktreesForm({
   settings,
   busy,
   refusal,
+  saveTo,
+  onSaveTo,
   onSend,
 }: {
   settings: EnsoProjectSettings
   busy: boolean
   refusal: string | undefined
+  saveTo: EnsoProjectTier
+  onSaveTo: (tier: EnsoProjectTier) => void
   onSend: (update: EnsoProjectSettingsUpdate) => void
 }): React.ReactNode {
   const { threads, files } = settings
   const [draft, setDraft] = useState<Draft>(() => draftOf(threads))
-  const [saveTo, setSaveTo] = useState<EnsoProjectTier>('local')
   const treeId = useId()
   const changes = changesOf(threads, draft)
+  const unsaved = Object.keys(changes).length > 0
   const reset = (field: ThreadKey, tier: EnsoProjectTier): void => {
     const cleared: EnsoProjectSettingsUpdate['threads'] = {}
     cleared[field] = null
@@ -332,7 +350,7 @@ function WorktreesForm({
         project’s shared file, your settings, or Enso’s default — the first one set wins.
       </p>
       <FormNotes settings={settings} />
-      <SaveTo value={saveTo} settings={settings} onChange={setSaveTo} />
+      <SaveTo value={saveTo} settings={settings} onChange={onSaveTo} />
       <Field>
         <FieldLabel htmlFor={treeId}>{FIELD_LABELS.tree}</FieldLabel>
         <OptionSelect
@@ -352,6 +370,7 @@ function WorktreesForm({
           files={files}
           busy={busy}
           edited={changes.tree !== undefined}
+          unsaved={unsaved}
           onReset={reset}
         />
       </Field>
@@ -361,6 +380,7 @@ function WorktreesForm({
         settings={settings}
         busy={busy}
         edited={changes.copy !== undefined}
+        unsaved={unsaved}
         onText={(copy: string) => setDraft({ ...draft, copy })}
         onReset={reset}
       >
@@ -374,6 +394,7 @@ function WorktreesForm({
         settings={settings}
         busy={busy}
         edited={changes.setup !== undefined}
+        unsaved={unsaved}
         onText={(setup: string) => setDraft({ ...draft, setup })}
         onReset={reset}
       >
@@ -414,6 +435,7 @@ export function ProjectWorktrees({
   const [loading, setLoading] = useState<Loading>({ kind: 'loading' })
   const [busy, setBusy] = useState(false)
   const [refusal, setRefusal] = useState<string | undefined>(undefined)
+  const [saveTo, setSaveTo] = useState<EnsoProjectTier>('local')
   useEffect(() => {
     let current = true
     void readProjectSettings(projectId, fetchImpl).then((outcome) => {
@@ -457,6 +479,8 @@ export function ProjectWorktrees({
       settings={loading.settings}
       busy={busy}
       refusal={refusal}
+      saveTo={saveTo}
+      onSaveTo={setSaveTo}
       onSend={(update: EnsoProjectSettingsUpdate) => void send(update)}
     />
   )

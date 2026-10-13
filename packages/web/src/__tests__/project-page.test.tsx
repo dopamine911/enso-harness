@@ -505,6 +505,25 @@ test('Save changes to Shared names the shared file and writes the shared tier, a
   await page.unmount()
 })
 
+test('a save to Shared leaves Shared chosen, so the next save writes the same file (#871)', async () => {
+  const page = await mountWorktrees({ answers: [Response.json(SETTINGS), Response.json(SETTINGS)] })
+  const { container } = page
+  const shared = container.querySelector<HTMLElement>('[role="radio"][value="shared"]')
+  if (shared === null) throw new Error('expected the Shared choice')
+  await press(shared)
+  await typeInto(labelled<HTMLTextAreaElement>(container, 'Files to copy into a new tree'), '.npmrc')
+  await press(buttonNamed(container, 'Save'))
+  await eventually(() => expect(page.sent).toHaveLength(1))
+  await eventually(() =>
+    expect(container.querySelector('[role="radio"][value="shared"]')?.getAttribute('aria-checked')).toBe('true'),
+  )
+  await typeInto(labelled<HTMLTextAreaElement>(container, 'Setup commands'), 'make')
+  await press(buttonNamed(container, 'Save'))
+  await eventually(() => expect(page.sent).toHaveLength(2))
+  expect(page.sent.map((update) => update.tier)).toEqual(['shared', 'shared'])
+  await page.unmount()
+})
+
 test('Reset removes a key from the tier that set it, so the next tier shows through (#754)', async () => {
   const afterReset: EnsoProjectSettings = {
     ...SETTINGS,
@@ -515,6 +534,19 @@ test('Reset removes a key from the tier that set it, so the next tier shows thro
   await eventually(() => expect(tierOf(page.container, 'New threads run in')).toBe('from default'))
   expect(page.sent).toEqual([{ tier: 'shared', threads: { tree: null } }])
   expect(labelled<HTMLSelectElement>(page.container, 'New threads run in').value).toBe('worktree')
+  await page.unmount()
+})
+
+test('Reset waits while a field holds an unsaved change, which a Reset’s answer would drop (#871)', async () => {
+  const page = await mountWorktrees({ answers: [] })
+  const { container } = page
+  const reset = buttonNamed(container, 'Reset New threads run in')
+  expect(reset.hasAttribute('disabled')).toBe(false)
+  await typeInto(labelled<HTMLTextAreaElement>(container, 'Setup commands'), 'make')
+  expect(reset.hasAttribute('disabled')).toBe(true)
+  await press(buttonNamed(container, 'Discard'))
+  expect(reset.hasAttribute('disabled')).toBe(false)
+  expect(page.sent).toEqual([])
   await page.unmount()
 })
 
