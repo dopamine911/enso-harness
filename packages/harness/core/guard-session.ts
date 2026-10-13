@@ -163,13 +163,17 @@ function unseenContentReason(candidate: string, knownState: 'unknown' | 'partial
 }
 
 /**
- * The readers that return NAMES, never contents: pi's `ls` (a readdir) and `find` (fd). They are
- * the one exception to the search-beneath check (#160 §4) — listing `~` shows that `.aws` exists
- * and reads no file in it, and refusing it would block the most ordinary look around there is.
+ * The readers that read nothing BENEATH their path, the exceptions to the search-beneath check
+ * (#160 §4). pi's `ls` (a readdir) and `find` (fd) return names, never contents: listing `~` shows
+ * that `.aws` exists and reads no file in it, and refusing it would block the most ordinary look
+ * around there is. pi's `read` opens the one file it names (`readFile`, so a directory is EISDIR):
+ * judging it as a search refused every not-yet-created file in a project holding `.enso/`, its
+ * nearest existing folder standing in for a directory it never reads (#886). Each is still judged
+ * by `looksLikeSecret` on its own path, symlinked ancestors included.
  * An EXCLUSION again, for the reason the reader gate gives: a reader not named here gets the
- * check, so a future recursive tool is refused over home until someone decides it reads names.
+ * check, so a future recursive tool is refused over home until someone decides it searches nothing.
  */
-const NAME_ONLY_READERS = new Set(['ls', 'find'])
+const NON_SEARCHING_READERS = new Set(['ls', 'find', TOOL_READ])
 
 /**
  * What a runtime gives the guard (#861): the runtime's side of the guard seam, in our words. The pi
@@ -518,7 +522,8 @@ export function createGuardSession(runtime: GuardRuntime, dependencies: GuardSes
    * because an inclusion list naming only `read` once let `grep` over `~/.aws` through, and a tool
    * the guard has never heard of is still a reader. A reader is also refused when its path holds
    * a credential location beneath it (`grep` over `~` or `/` recurses into `~/.aws` the same way:
-   * #160 §4, `secretLocationBeneath`), except `ls` and `find`, which return names, never contents.
+   * #160 §4, `secretLocationBeneath`), except `ls` and `find`, which return names, never contents,
+   * and `read`, which opens the one file it names (#886); a path that does not exist searches nothing.
    * The locations are the fragments placed in home, and, where they exist, in the workspace and
    * the harness's own root (a pre-#421 `.enso/` the migration left behind: a `.gitignore` does not
    * keep ripgrep out, since it is ignored outside a git work tree and the agent may edit it).
@@ -619,7 +624,7 @@ export function createGuardSession(runtime: GuardRuntime, dependencies: GuardSes
    *
    * #160 §4: and pi's `grep` is `rg --hidden` over everything beneath its path, so a directory ABOVE
    * a credential directory reads it too — that incident, reached one directory up. A reader that
-   * returns names only is exempt from that second check (`NAME_ONLY_READERS`).
+   * searches nothing beneath its path is exempt from that second check (`NON_SEARCHING_READERS`).
    */
   function readerDenial(
     toolName: string,
@@ -633,7 +638,7 @@ export function createGuardSession(runtime: GuardRuntime, dependencies: GuardSes
           `A secret read is the precondition for exfiltration, so this is denied even for inspection.`,
       )
     }
-    if (NAME_ONLY_READERS.has(toolName)) return undefined
+    if (NON_SEARCHING_READERS.has(toolName)) return undefined
     const places: CredentialPlaces = { home: homedir(), existing: [cwd, dependencies.harnessRoot] }
     const reached = secretLocationBeneath(target, policy.secretPathFragments, places)
     if (reached === undefined) return undefined

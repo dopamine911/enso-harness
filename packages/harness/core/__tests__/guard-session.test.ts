@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -163,12 +163,13 @@ function checked(
   runtime: FakeRuntime,
   toolName: string,
   input: Record<string, unknown>,
+  cwd = WORKSPACE,
 ): EnsoGuardRefusal | undefined | 'unanswered' {
   let answered: EnsoGuardRefusal | undefined | 'unanswered' = 'unanswered'
   const answer = (refusal: EnsoGuardRefusal | undefined): void => {
     answered = refusal
   }
-  runtime.announce(ENSO_GUARD_CHECK_CHANNEL, { toolName, input, cwd: WORKSPACE, answer })
+  runtime.announce(ENSO_GUARD_CHECK_CHANNEL, { toolName, input, cwd, answer })
   return answered
 }
 
@@ -198,4 +199,65 @@ test('a malformed check is not answered and does not throw (#881)', () => {
   expect(() => runtime.announce(ENSO_GUARD_CHECK_CHANNEL, { toolName: 'bash', cwd: WORKSPACE })).not.toThrow()
   expect(() => runtime.announce(ENSO_GUARD_CHECK_CHANNEL, 'bash')).not.toThrow()
   expect(runtime.appended).toEqual([])
+})
+
+/** A project with its own settings tier (#754): `<project>/.enso/` exists, as every configured project's does. */
+function projectWithSettings(): string {
+  const project = mkdtempSync(join(tmpdir(), 'enso-guard-project-'))
+  mkdirSync(join(project, '.enso'))
+  return project
+}
+
+/**
+ * What "Try a command" answers for one tool call in `cwd`, then what the call itself gets, in a fresh
+ * session each: both are `decide`'s (#881), so every assertion below holds for both.
+ */
+function checkThenCall(
+  toolName: string,
+  input: Record<string, unknown>,
+  cwd: string,
+): { check: EnsoGuardRefusal | undefined | 'unanswered'; call: GuardCallOutcome } {
+  const runtime = fakeRuntime()
+  const session = startedSession(runtime)
+  const check = checked(runtime, toolName, input, cwd)
+  const outcome = session.toolCall({ toolCallId: 'c1', toolName, input, cwd, signal: undefined, model: undefined })
+  return { check, call: outcome }
+}
+
+function expectAllowed(toolName: string, input: Record<string, unknown>, cwd: string): void {
+  const { check, call: outcome } = checkThenCall(toolName, input, cwd)
+  expect(check).toBeUndefined()
+  expect(outcome).toEqual({ kind: 'allowed' })
+}
+
+function expectSecretRead(toolName: string, input: Record<string, unknown>, cwd: string, naming: string): void {
+  const { check, call: outcome } = checkThenCall(toolName, input, cwd)
+  expect(check).toEqual({ rule: 'secret-read', reason: expect.stringContaining(naming) })
+  if (typeof check !== 'object') throw new Error('expected a refusal')
+  expect(outcome).toMatchObject({ kind: 'refused', reason: check.reason })
+}
+
+test('⚠ read of a file that does not exist yet passes in a project holding .enso/: read opens one file and searches nothing (#886)', () => {
+  const project = projectWithSettings()
+  for (const path of ['not-yet.txt', 'sub/not-yet.txt', join(project, 'docs', 'new', 'x.md')]) {
+    expectAllowed('read', { path }, project)
+  }
+})
+
+test('⚠ grep over a project holding .enso/ is still refused for it, and grep over a path that does not exist searches nothing (#886, #160 §4)', () => {
+  const project = projectWithSettings()
+  expectSecretRead('grep', { pattern: 'x', path: project }, project, `${join(project, '.enso')} is beneath it`)
+  expectSecretRead('grep', { pattern: 'x', path: '.' }, project, `${join(project, '.enso')} is beneath it`)
+  expectAllowed('grep', { pattern: 'x', path: 'sub/not-yet' }, project)
+})
+
+test('⚠ a file that does not exist yet is still refused at a credential location: ~/.ssh/not-yet, and through a symlink into a .ssh (#886)', () => {
+  const project = projectWithSettings()
+  expectSecretRead('read', { path: '~/.ssh/not-yet' }, project, 'credential pattern')
+  const credentials = join(mkdtempSync(join(tmpdir(), 'enso-guard-home-')), '.ssh')
+  mkdirSync(credentials)
+  symlinkSync(credentials, join(project, 'keys'), 'dir')
+  for (const toolName of ['read', 'grep']) {
+    expectSecretRead(toolName, { pattern: 'x', path: 'keys/not-yet' }, project, 'credential pattern')
+  }
 })

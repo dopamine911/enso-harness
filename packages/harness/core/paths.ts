@@ -274,8 +274,13 @@ export interface CredentialPlaces {
  * {@link looksLikeSecret} judges the one path it is given, which is the right question for a tool
  * that reads that path. A recursive search reads everything BENEATH it, so `~/.aws` refused while
  * `~` — and `/` — searched the same files. As {@link looksLikeSecret} does, both the literal
- * directory and the realpath of its nearest existing ancestor are judged (a workspace symlink to
- * home), against each place and its realpath.
+ * directory and its realpath are judged (a workspace symlink to home), against each place and its
+ * realpath.
+ *
+ * ⚠ A path that does not exist searches nothing, so nothing is beneath it (#886). Its nearest
+ * existing ancestor is not what is searched: judging that folder refused a not-yet-created file in
+ * every project holding `.enso/`. The path itself is still {@link looksLikeSecret}'s to judge,
+ * through its symlinked ancestors.
  *
  * ⚠ The harness's `.enso/` is NOT protected by being gitignored: ripgrep honours `.gitignore` only
  * inside a git work tree, and the agent may edit `.gitignore`.
@@ -291,6 +296,7 @@ export function secretLocationBeneath(
   fragments: readonly string[],
   places: CredentialPlaces,
 ): string | undefined {
+  if (!existsSync(absolutePath)) return undefined
   const directories = new Set([absolutePath, realpathOfNearestExisting(absolutePath)])
   const reached = (location: string): boolean => [...directories].some((directory) => isInsideRoot(location, directory))
   const locationsIn = (place: string): string[] =>
