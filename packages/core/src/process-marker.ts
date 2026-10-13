@@ -146,7 +146,11 @@ const isMarker = (value: unknown): value is EnsoProcessMarker =>
  * launchers starting together, a third ending. Three races, each measured as a false report (8
  * writers starting at once, 100 rounds: 5 "unreadable", 1 "ended without a record"), each closed
  * here. A live writer's staging file is a marker mid-write, not debris — skipped, never removed,
- * or its writer's rename fails. A file gone between the listing and the read was renamed or
+ * or its writer's rename fails. "Live" there is the pid alone (`pidIsRunning`): a staging file
+ * may be empty or partial, so it has no `startedAt` to trust for the start-time check. A writer
+ * that died mid-write and whose pid was then reused leaves its staging file skipped until that
+ * pid's new owner exits, and removed as unreadable after: a late report and a leftover file,
+ * never a false one (PR #918 review). A file gone between the listing and the read was renamed or
  * removed by its owner — nothing to say. And a marker judged dead that is gone by then was its
  * owner's clean end: an owner removes its marker before it exits, so only a marker still there
  * after its owner has gone is an end nothing recorded.
