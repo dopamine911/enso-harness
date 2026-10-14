@@ -844,6 +844,61 @@ test('⚠ a rule switched off leaves the file for Enso’s record, greyed in pla
   expect(reread.section().querySelector('[aria-label="rules switched off"]')).toBeNull()
 })
 
+// PR #970 review: surfaces match as wildcards in file order, last match winning. The only rule on a
+// surface switched off must not move that surface after a `*` it came before: switched back on, an
+// allow the `*` deny used to beat would beat it.
+test('⚠ the only rule on a surface switched off keeps the surface in its place, empty; switched on, the file is as it was (#945)', async () => {
+  const file = {
+    authorizerChain: ['enso-auto'],
+    permission: { webfetch: { 'docs.example.com/*': 'allow' }, '*': 'deny', bash: { '**': 'ask' } },
+  }
+  const off = await mountSettings({ file })
+  await flip(ruleSwitch(off, 'webfetch docs.example.com/*'))
+  await click(off, 'Save')
+  await eventually(() => expect(writes(off)).toHaveLength(1))
+  expect(writtenPermission(off, 0)).toEqual({ webfetch: {}, '*': 'deny', bash: { '**': 'ask' } })
+  expect(Object.keys(writtenPermission(off, 0))).toEqual(['webfetch', '*', 'bash'])
+  const record = lastRecord(off)
+  if (record === undefined) throw new Error('the save sent no record')
+  const saved = lastWritten(off)
+  await off.unmount()
+
+  const on = await mountSettings({ file: saved, record })
+  await flip(ruleSwitch(on, 'webfetch docs.example.com/*'))
+  await click(on, 'Save')
+  await eventually(() => expect(writes(on)).toHaveLength(1))
+  expect(JSON.stringify(lastWritten(on))).toBe(JSON.stringify(file))
+})
+
+test('a whole-surface rule, and two neighbours switched off one after the other, go back where they were (#945)', async () => {
+  const off = await mountSettings()
+  await flip(ruleSwitch(off, 'read *'))
+  await flip(ruleSwitch(off, 'bash git status'))
+  await flip(ruleSwitch(off, 'bash npm run *'))
+  await click(off, 'Save')
+  await eventually(() => expect(writes(off)).toHaveLength(1))
+  expect(Object.keys(writtenPermission(off, 0))).toEqual(['*', 'edit', 'bash'])
+  expect(Object.keys(writtenPermission(off, 0).bash as object)).toEqual(['**', 'rm -rf *'])
+  const record = lastRecord(off)
+  if (record === undefined) throw new Error('the save sent no record')
+  expect(record.disabled).toEqual([
+    { surface: 'read', pattern: '*', decision: 'allow', after: '*', whole: true },
+    { surface: 'bash', pattern: 'git status', decision: 'allow', after: '**' },
+    { surface: 'bash', pattern: 'npm run *', decision: 'allow', after: 'git status' },
+  ])
+  const saved = lastWritten(off)
+  await off.unmount()
+
+  // On in the other order: `npm run *` first, its neighbour still off, then the rest.
+  const on = await mountSettings({ file: saved, record })
+  await flip(ruleSwitch(on, 'bash npm run *'))
+  await flip(ruleSwitch(on, 'bash git status'))
+  await flip(ruleSwitch(on, 'read *'))
+  await click(on, 'Save')
+  await eventually(() => expect(writes(on)).toHaveLength(1))
+  expect(JSON.stringify(lastWritten(on))).toBe(JSON.stringify(FILE))
+})
+
 test('switching a rule off is undone by Discard, as any edit is; Enso’s ** has no switch (#945)', async () => {
   const mounted = await mountSettings()
   expect(mounted.section().querySelector('[role="switch"][aria-label="in force: bash **"]')).toBeNull()
@@ -939,6 +994,31 @@ test('⚠ a rule group on, saved, then off, saved, leaves the file exactly as be
   await eventually(() => expect(writes(off)).toHaveLength(1))
   expect(JSON.stringify(lastWritten(off))).toBe(JSON.stringify(file))
   expect(lastRecord(off)).toEqual({ disabled: [], groups: {} })
+})
+
+// PR #970 review: a group turned on before #945 left its rules and no record. Its switch reads off,
+// so the card says its rules are in force as yours, and on then off changes nothing.
+test('a group whose rules are all in force with no record says they are yours; on then off leaves the file as it was (#945)', async () => {
+  const publishing = {
+    'npm publish*': 'deny',
+    'bun publish*': 'deny',
+    'gh release create*': 'deny',
+    'gh pr merge*': 'deny',
+  }
+  const file = { ...FILE, permission: { ...FILE.permission, bash: { ...FILE.permission.bash, ...publishing } } }
+  const mounted = await mountSettings({ file })
+  const card = (): Element => find(mounted, '[aria-label="rule group Publishing"]')
+  expect(groupSwitch(mounted, 'Publishing').getAttribute('aria-checked')).toBe('false')
+  expect(card().textContent).toContain('Its rules are all in force already, as yours')
+  expect(find(mounted, '[aria-label="rule group Remote writes"]').textContent).not.toContain('as yours')
+
+  await flip(groupSwitch(mounted, 'Publishing'))
+  expect(groupSwitch(mounted, 'Publishing').getAttribute('aria-checked')).toBe('true')
+  expect(card().textContent).not.toContain('as yours')
+  await flip(groupSwitch(mounted, 'Publishing'))
+  await click(mounted, 'Save')
+  await eventually(() => expect(writes(mounted)).toHaveLength(1))
+  expect(JSON.stringify(lastWritten(mounted))).toBe(JSON.stringify(file))
 })
 
 test('⚠ turning a group off when one of its rules was changed since lists it and asks; Cancel keeps it on (#945)', async () => {

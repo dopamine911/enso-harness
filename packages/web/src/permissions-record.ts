@@ -12,6 +12,7 @@ import {
   type EnsoSurfaceValue,
   permissionOf,
   policyRows,
+  toPatternMap,
   withoutRule,
 } from '@enso/core'
 import { decisionAt, type SettingEdits, withGroup, withSettings } from './permissions-draft.ts'
@@ -35,9 +36,6 @@ export interface RuleDraft {
 const sameDecision = (one: EnsoPermissionDecision, other: EnsoPermissionDecision): boolean =>
   decisionAction(one) === decisionAction(other) &&
   (typeof one === 'string' ? undefined : one.reason) === (typeof other === 'string' ? undefined : other.reason)
-
-const toPatternMap = (value: EnsoSurfaceValue): Readonly<Record<string, EnsoPermissionDecision>> =>
-  typeof value === 'string' ? { '*': value } : value
 
 const isRule = (rule: EnsoDisabledRule, surface: string, pattern: string): boolean =>
   rule.surface === surface && rule.pattern === pattern
@@ -69,6 +67,11 @@ export function disabledAt(record: EnsoRuleRecord, surface: string, pattern: str
 /**
  * The draft with the row's rule out of `permission` and in the record, with the key before it to go
  * back after. Enso's `**` is not switched off, as it is not removed: a mode needs it.
+ *
+ * ⚠ A surface the switch empties stays, as `{}` — no rule, the same to the engine as no key — so it
+ * keeps its PLACE. Surfaces are matched as wildcards in file order, last match winning: dropped and
+ * put back last, `read: { 'notes/*': 'allow' }` would come after a `'*': 'deny'` it came before, and
+ * switching it off and on would turn that deny into an allow.
  */
 export function withRuleDisabled(draft: RuleDraft, surface: string, pattern: string): RuleDraft {
   const { permission, record } = draft
@@ -76,7 +79,11 @@ export function withRuleDisabled(draft: RuleDraft, surface: string, pattern: str
   const decision = decisionAt(permission, surface, pattern)
   if (value === undefined || decision === undefined || pattern === ENSO_CATCH_ALL) return draft
   const whole = typeof value === 'string'
-  const keys = Object.keys(whole ? permission : value)
+  // The key before it as the page shows them, rules switched off drawn in place: a neighbour switched
+  // off before it is the one it goes back after, so the two come back in their order, whichever is
+  // switched on first.
+  const shown = withEveryRuleEnabled(draft).permission
+  const keys = Object.keys(whole ? shown : toPatternMap(shown[surface] ?? value))
   const before = keys[keys.indexOf(whole ? surface : pattern) - 1]
   const rule: EnsoDisabledRule = {
     surface,
@@ -88,7 +95,11 @@ export function withRuleDisabled(draft: RuleDraft, surface: string, pattern: str
   const rest = whole
     ? Object.fromEntries(Object.entries(permission).filter(([key]) => key !== surface))
     : withoutRule(permission, surface, pattern)
-  return { permission: rest, record: { ...record, disabled: [...record.disabled, rule] } }
+  const kept =
+    whole || rest[surface] !== undefined
+      ? rest
+      : Object.fromEntries(Object.entries(permission).map(([key, held]) => [key, key === surface ? {} : held]))
+  return { permission: kept, record: { ...record, disabled: [...record.disabled, rule] } }
 }
 
 /**
@@ -167,10 +178,20 @@ export function withRuleEnabled(draft: RuleDraft, rule: EnsoDisabledRule): RuleD
   }
 }
 
-/** The draft without a rule switched off: it was not in force, and now it is not kept either. */
+/**
+ * The draft without a rule switched off: it was not in force, and now it is not kept either — nor
+ * the empty surface that kept its place (`withRuleDisabled`).
+ */
 export function withDisabledRemoved(draft: RuleDraft, rule: EnsoDisabledRule): RuleDraft {
   const disabled = draft.record.disabled.filter((other) => !isRule(other, rule.surface, rule.pattern))
-  return { ...draft, record: { ...draft.record, disabled } }
+  // Kept while another rule switched off on it still holds its place.
+  const value = draft.permission[rule.surface]
+  const emptied = typeof value === 'object' && Object.keys(value).length === 0
+  const permission =
+    emptied && !disabled.some((other) => other.surface === rule.surface)
+      ? Object.fromEntries(Object.entries(draft.permission).filter(([key]) => key !== rule.surface))
+      : draft.permission
+  return { permission, record: { ...draft.record, disabled } }
 }
 
 /** A row on screen: the rule, and — when it is switched off — the record of it and where it goes back. */
@@ -180,13 +201,20 @@ export interface ShownRow {
 }
 
 /**
+ * The draft with every rule switched off back in place: the order the page draws, and the one a
+ * rule switched off takes its neighbour from (`withRuleDisabled`).
+ */
+function withEveryRuleEnabled(draft: RuleDraft): RuleDraft {
+  return draft.record.disabled.reduce((current, rule) => withRuleEnabled(current, rule), draft)
+}
+
+/**
  * The rules as written, the ones switched off drawn in place: each where switching it on would put
  * it, in the engine's order. The rules in force are `policyRows(permission)`, in that order.
  */
 export function shownRows(draft: RuleDraft): ShownRow[] {
   const placements = new Map(draft.record.disabled.map((rule) => [rule, placementOf(draft, rule)] as const))
-  let everything: RuleDraft = draft
-  for (const rule of draft.record.disabled) everything = withRuleEnabled(everything, rule)
+  const everything = withEveryRuleEnabled(draft)
   return policyRows(everything.permission).map((row) => {
     const rule = disabledAt(draft.record, row.surface, row.pattern)
     const placement = rule === undefined ? undefined : placements.get(rule)

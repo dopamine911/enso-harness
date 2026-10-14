@@ -169,15 +169,17 @@ function statOrUndefined(path: string): Stats | undefined {
 }
 
 /**
- * Write `text` to the file behind `policyPath` in one step: a temporary file beside it, renamed over it.
+ * Write `text` to the file behind `path` in one step: a temporary file beside it, renamed over it.
+ * The policy, and Enso's record (#945) — which the engine never reads, so moving its time is
+ * harmless — and, a policy's write having failed, the record's previous bytes put back.
  *
  * ⚠ THE MODIFICATION TIME MUST MOVE. The engine reloads a policy only when the file's `mtimeMs`
  * differs from the one it last read (`config/policy-loader.ts`), and Linux stamps it from a coarse
  * clock — one tick is milliseconds. A write landing in the same tick as the last one (a reset just
  * after a hand edit) kept the OLD policy in force, silently. Found by this file's reset test.
  */
-function writeAtomically(policyPath: string, text: string | Buffer): void {
-  const target = realpathOrSelf(policyPath)
+function writeAtomically(path: string, text: string | Buffer): void {
+  const target = realpathOrSelf(path)
   const previous = statOrUndefined(target)
   const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`
   writeFileSync(temporary, text, { flag: 'wx' })
@@ -197,10 +199,13 @@ const isEmptyRecord = (record: EnsoRuleRecord): boolean =>
   record.disabled.length === 0 && Object.keys(record.groups).length === 0
 
 /**
- * Write the policy and, when given, Enso's record (#945): both, or neither. The record goes first —
- * a rule switched off leaves the policy only once the record holds it — and when the policy's write
- * then fails, the record that was on disk is put back. A record the same as on disk is not
- * rewritten, and an empty one is not created where there was none.
+ * Write the policy and, when given, Enso's record (#945): both, or the record put back. The record
+ * goes first — a rule switched off leaves the policy only once the record holds it — and when the
+ * policy's write then fails, the record that was on disk is put back (or, none there, removed). Each
+ * write is atomic, the pair is not: a crash between them leaves the new record over the old policy.
+ * What is in force does not change; a rule being switched off reads as still in force (`liveRecord`
+ * on the page), and one being switched back on is in neither file. A record the same as on disk is
+ * not rewritten, and an empty one is not created where there was none.
  */
 function writeBoth(policyPath: string, policyText: string, record: EnsoRuleRecord | undefined): void {
   const recordPath = recordPathOf(policyPath)

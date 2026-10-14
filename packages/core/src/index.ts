@@ -251,6 +251,7 @@ export {
   policyKnobs,
   policyRows,
   runsAnyCode,
+  toPatternMap,
   withoutRule,
   withRule,
   withRuleMoved,

@@ -129,7 +129,12 @@ const DIRECTIONAL: Readonly<Record<string, readonly [string, string]>> = {
   external_directory: ['external_directory_read', 'external_directory_write'],
 }
 
-const toPatternMap = (value: EnsoSurfaceValue): Readonly<Record<string, EnsoPermissionDecision>> =>
+/**
+ * A surface's value as patterns: one decision for the whole surface is its `*` pattern.
+ *
+ * @group Permission policy
+ */
+export const toPatternMap = (value: EnsoSurfaceValue): Readonly<Record<string, EnsoPermissionDecision>> =>
   typeof value === 'string' ? { '*': value } : value
 
 /** The engine's `expandDirectionalSugar`: a shorthand's entries first, then the direction's own. */
@@ -483,7 +488,7 @@ export const ENSO_EMPTY_RULE_RECORD: EnsoRuleRecord = { disabled: [], groups: {}
  * `GET /api/permissions` (#474): the policy file as read, with its `ETag` — or why it cannot be
  * read, since the engine reads a file it cannot parse as an EMPTY policy (every call asks, every
  * deny gone) and the page must say so rather than show nothing. The `ETag` names the policy file and
- * Enso's record beside it together (#945): a save writes both, or neither.
+ * Enso's record beside it together (#945): a save writes both, or puts the record back.
  *
  * @group Permission policy
  */
@@ -524,7 +529,10 @@ export type EnsoPermissionPolicyRead = Static<typeof EnsoPermissionPolicyRead>
 /**
  * `PUT /api/permissions`'s body: the whole file as the page wants it, and Enso's record when the
  * page changed it (#945; absent, the record on disk stays). The server validates the file against
- * the engine's own schema, puts `**` first where a mode needs it, and writes both atomically.
+ * the engine's own schema, puts `**` first where a mode needs it, and writes each file atomically:
+ * the record first, then the policy, the record put back when the policy's write fails. Not one
+ * step: a crash between the two leaves the new record over the old policy — what is in force does not
+ * change, but a rule being switched back on is then in neither file.
  *
  * @group Permission policy
  */

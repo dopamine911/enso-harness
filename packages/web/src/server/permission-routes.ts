@@ -92,7 +92,7 @@ export function createPermissionRoutes(state: PermissionRoutesState): Permission
   /**
    * `PUT /api/permissions` (#474): the whole file a page sent, under its `If-Match`; normalised,
    * validated against the engine's schema and written atomically (`host/permission-policy-file.ts`),
-   * with Enso's record beside it when the page sent one (#945) — both, or neither. 412 when either
+   * with Enso's record beside it when the page sent one (#945) — both, or the record put back. 412 when either
    * file changed since the page read them; 422 with each problem when the engine would not run it.
    */
   async function respondToPolicyWrite(request: IncomingMessage, response: ServerResponse): Promise<void> {

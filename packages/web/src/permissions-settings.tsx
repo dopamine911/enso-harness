@@ -906,7 +906,9 @@ function AddRule({ draft, onEdit }: { draft: RuleDraft; onEdit: PolicyEditor['ed
  * One rule group, the prototype's `.group-card` (#417): what it stops or allows, its rules as chips
  * (`bash · npm publish* · deny`, a tick on one in force), and its switch. On adds its rules and
  * Enso's record of which it added (#945); off takes only those out — a rule you had already stays
- * yours — and asks first when one has been changed since.
+ * yours — and asks first when one has been changed since. A group whose rules are all in force with
+ * no record of adding them (turned on before #945, or written by hand) is off, and says its rules
+ * are yours: the switch owns none of them.
  */
 function RuleGroup({
   group,
@@ -942,6 +944,11 @@ function RuleGroup({
             {group.title}
           </span>
           <p className={PAGE_NOTE}>{group.note}</p>
+          {!on && present.every(Boolean) ? (
+            <p className={PAGE_NOTE}>
+              Its rules are all in force already, as yours: turning it on adds none, and turning it off takes none out.
+            </p>
+          ) : null}
           <ul className="mt-1.5 flex flex-wrap gap-1">
             {group.rules.map((rule, position) => (
               <li
