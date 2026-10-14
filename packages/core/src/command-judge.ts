@@ -50,6 +50,14 @@ export const ENSO_JUDGE_BACKENDS = ['off', 'jev', 'local'] as const
 export type EnsoJudgeBackend = (typeof ENSO_JUDGE_BACKENDS)[number]
 
 /**
+ * The secrets-file name the `jev` backend's key is read under (`ENSO_HOME/secrets.env`), per call.
+ * Settings › Security stores it there and only ever says whether it is set (#933).
+ *
+ * @group Command judge
+ */
+export const ENSO_JUDGE_KEY_NAME = 'TYPESAFE_API_KEY'
+
+/**
  * `config.json`'s `security.judge` (#469), user-only as the rest of `security` is: a project cannot
  * switch a judge on, or off, for the user. Scope 1 (around a guard) is the only scope until #469's
  * escalation lands. `local` names the llama.cpp router (a loopback URL) and the model the `local`

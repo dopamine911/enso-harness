@@ -454,6 +454,7 @@ function useLaunchActions(
     () => ({
       openThread: (thread) => (thread.onPage ? navigate(thread.threadId, 'push') : resumeFrom(thread.threadId, 'push')),
       manageProjects: () => openPage(PROJECTS_ROUTE),
+      openSettings: (section) => openPage({ kind: 'settings', section }),
     }),
     [navigate, resumeFrom, openPage],
   )

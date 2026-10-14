@@ -391,10 +391,17 @@ export {
   toolFamilyOf,
 } from './session-incident.ts'
 export {
+  EnsoJudgeKeyState,
+  EnsoJudgeKeyWrite,
+  EnsoSecuritySettingsRead,
+  EnsoSecuritySettingsWrite,
+} from './security-settings.ts'
+export {
   type CommandJudge,
   commandJudgementOf,
   ENSO_COMMAND_JUDGEMENT_ENTRY,
   ENSO_JUDGE_BACKENDS,
+  ENSO_JUDGE_KEY_NAME,
   ENSO_JUDGE_POLICY,
   ENSO_JUDGE_QUESTIONS,
   EnsoCommandJudgement,

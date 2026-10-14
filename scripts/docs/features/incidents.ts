@@ -89,7 +89,7 @@ export const INCIDENTS: FeatureSpec = {
   opens: [
     '{steps}. The card sits at the end of the chat, below the last answer.',
     [
-      'Halting and the judge are set in your `config.json` under `ENSO_HOME`. A project cannot set them:',
+      'Halting, the thresholds and the judge are set in **Settings › Security** (the card\'s "halting is off" opens it), which writes your `config.json` under `ENSO_HOME`. A project cannot set them. In the file:',
       '',
       '```json',
       '{ "security": { "incidents": { "halt": true }, "judge": { "backend": "jev" } } }',

@@ -40,9 +40,6 @@ const JEV_BASE_URL = 'https://api.typesafe.ai/v1/'
 /** The spike's model, pinned so a replay is reproducible. */
 export const JEV_MODEL = 'jev-1.13.0'
 
-/** The secrets-file name the Jev backend's key is read under (`ENSO_HOME/secrets.env`). */
-export const JEV_KEY_NAME = 'TYPESAFE_API_KEY'
-
 /** The spike's tuned questions, verbatim (#189, run 2): the numbers they produced are this text's. */
 const JUDGE_QUESTIONS = {
   risk: {

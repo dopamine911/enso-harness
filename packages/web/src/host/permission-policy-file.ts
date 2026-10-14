@@ -24,7 +24,7 @@ import { policyProblems } from './permission-policy.ts'
  * What a write expects on disk: the server's `WriteCondition` (#443), stated here because the host
  * imports only core. `absent` — no file; `matches` — the version read; `present` — whatever is there.
  */
-type WriteCondition =
+export type WriteCondition =
   | { readonly kind: 'absent' }
   | { readonly kind: 'matches'; readonly etag: string }
   | { readonly kind: 'present' }
@@ -50,7 +50,7 @@ type WriteCondition =
  */
 
 /** A strong entity tag for the file's bytes, quoted as HTTP writes one (the prompt library's). */
-function etagOf(bytes: Uint8Array): string {
+export function etagOf(bytes: Uint8Array): string {
   return `"${createHash('sha256').update(bytes).digest('hex')}"`
 }
 
@@ -59,7 +59,7 @@ function errorCode(error: unknown): unknown {
 }
 
 /** The file's bytes, or `undefined` when there is none. */
-function bytesOf(path: string): Buffer | undefined {
+export function bytesOf(path: string): Buffer | undefined {
   try {
     return readFileSync(path)
   } catch (error: unknown) {
@@ -101,7 +101,7 @@ export function readPermissionPolicy(policyPath: string, agentDir: string): Enso
 }
 
 /** Why the file on disk is not what `condition` expects, or `undefined` when it is. */
-function conflictOf(policyPath: string, condition: WriteCondition): string | undefined {
+export function conflictOf(policyPath: string, condition: WriteCondition): string | undefined {
   const bytes = bytesOf(policyPath)
   if (condition.kind === 'absent') return bytes === undefined ? undefined : `${policyPath} already exists`
   if (bytes === undefined) return `${policyPath} is no longer there: it was deleted since it was opened`
@@ -128,11 +128,11 @@ function statOrUndefined(path: string): Stats | undefined {
  * clock — one tick is milliseconds. A write landing in the same tick as the last one (a reset just
  * after a hand edit) kept the OLD policy in force, silently. Found by this file's reset test.
  */
-function writeAtomically(policyPath: string, text: string): void {
+export function writeAtomically(policyPath: string, text: string, mode?: number): void {
   const target = realpathOrSelf(policyPath)
   const previous = statOrUndefined(target)
   const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`
-  writeFileSync(temporary, text, { flag: 'wx' })
+  writeFileSync(temporary, text, mode === undefined ? { flag: 'wx' } : { flag: 'wx', mode })
   try {
     renameSync(temporary, target)
   } catch (error: unknown) {
