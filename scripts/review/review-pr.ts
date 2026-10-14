@@ -35,6 +35,7 @@ import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { findRepoRoot } from '../../packages/core/src/paths.ts'
 import { readReviewAppConfig, reviewAppIdentity } from './app-token.ts'
+import { RUNS_DIRECTORY } from './review-paths.ts'
 import type { ToolGrant } from './tool-grant-hook.ts'
 import { type PromptValues, fillPrompt, REVIEW_WORKFLOW_PATH, readReviewWorkflow } from './workflow-config.ts'
 
@@ -45,8 +46,6 @@ import { type PromptValues, fillPrompt, REVIEW_WORKFLOW_PATH, readReviewWorkflow
 export const STATUS_MARKER = '<!-- claude-run-status: pr-review -->'
 /** The second hidden line this reviewer adds: the head it reviewed, so a head is reviewed once. */
 const REVIEWED_HEAD_LINE = /<!-- local-review head=([0-9a-f]{40})/
-/** Where runs keep their worktrees, logs and captured comments. */
-const RUNS_DIRECTORY = join(homedir(), '.cache', 'enso-review')
 /** Where the credential-less steps keep bun's package cache, so an install is not cold every run. */
 const SHARED_BUN_CACHE = join(RUNS_DIRECTORY, 'bun-cache')
 /** The directory the prompt and `.claude/pr-review.md` look in for the comment list and the push's diff. */
@@ -136,17 +135,25 @@ export function statusCommentsOf(
  * not docker-agent's exit code: on #989's first run docker-agent exited 1 (`bufio.Scanner: token too
  * long`, its reader of Claude Code's output) AFTER the review was posted, and an exit-code status
  * said "failed, no verdict" under a posted verdict.
+ *
+ * ⚠ A FAILED run keeps the head reviewed BEFORE it (`previouslyReviewedHead`), not the one it failed
+ * at: that one was not reviewed, so the next run tries it again, and with `new-commits` scope from the
+ * last real review. Dropping the line made a retry after a ❌ review the whole pull request (#993's review).
  */
 export function statusCommentBody(run: {
   readonly posted: boolean
   readonly headSha: string
   readonly scope: string
   readonly agentExitCode: number
+  readonly previouslyReviewedHead?: string | undefined
 }): string {
   const short = run.headSha.slice(0, SHORT_SHA_LENGTH)
   if (!run.posted) {
-    // A run that posted nothing records no head, so the next run tries the same head again.
-    return `${STATUS_MARKER}\n❌ **Claude PR review failed** locally on \`${short}\`: no review comment was posted (docker-agent exited ${run.agentExitCode}). See the run log on the reviewing machine.`
+    const kept =
+      run.previouslyReviewedHead === undefined
+        ? ''
+        : `<!-- local-review head=${run.previouslyReviewedHead} scope=kept -->\n`
+    return `${STATUS_MARKER}\n${kept}❌ **Claude PR review failed** locally on \`${short}\`: no review comment was posted (docker-agent exited ${run.agentExitCode}). See the run log on the reviewing machine.`
   }
   const exitNote =
     run.agentExitCode === 0
@@ -347,6 +354,14 @@ function runReviewer(tree: string, runDirectory: string, prompt: string, poster:
   return reviewer.exitCode
 }
 
+/** What one run did: a line for the terminal, and whether it failed (no review reached the pull request). */
+export interface ReviewResult {
+  readonly summary: string
+  readonly failed: boolean
+  /** The head the run was at, when it got that far: the worker counts failed attempts per head. */
+  readonly head: string | undefined
+}
+
 export interface ReviewOptions {
   readonly number: number
   readonly dryRun: boolean
@@ -399,10 +414,27 @@ interface ReviewRun {
   readonly plan: Extract<ReviewPlan, { kind: 'review' }>
   readonly runDirectory: string
   readonly tree: string
+  /** The head this reviewer last reviewed, kept in the status comment when this run fails. */
+  readonly lastReviewedHead: string | undefined
+}
+
+/** The terminal line for one run: what was posted (or that nothing was), docker-agent's exit, a missing comment list, the log. */
+export function runSummary(run: {
+  readonly number: number
+  readonly posted: boolean
+  readonly where: string
+  readonly scope: string
+  readonly agentExitCode: number
+  readonly listProblem: string | undefined
+  readonly log: string
+}): string {
+  const outcome = run.posted ? `reviewed (${run.scope}); comment ${run.where}` : 'FAILED: no review comment was posted'
+  const listNote = run.listProblem === undefined ? '' : `; ${run.listProblem}`
+  return `#${run.number}: ${outcome}; docker-agent exited ${run.agentExitCode}${listNote}; log ${run.log}`
 }
 
 /** Everything after the worktree exists: context, settings, the reviewer, the status. */
-function reviewInWorktree(review: ReviewRun): string {
+function reviewInWorktree(review: ReviewRun): ReviewResult {
   const { poster, options, pullRequest, repository, plan, runDirectory, tree } = review
   const config = readReviewWorkflow(
     run(['git', 'show', `${pullRequest.baseRefOid}:${REVIEW_WORKFLOW_PATH}`], { cwd: tree }),
@@ -427,30 +459,48 @@ function reviewInWorktree(review: ReviewRun): string {
   const agentExitCode = runReviewer(tree, runDirectory, fillPrompt(config.promptTemplate, values), poster)
   const posted = options.dryRun ? existsSync(capture) : postCapturedReview(repository, options.number, capture, poster)
   if (!options.dryRun) {
-    const body = statusCommentBody({ posted, headSha: pullRequest.headRefOid, scope: plan.scope, agentExitCode })
+    const body = statusCommentBody({
+      posted,
+      headSha: pullRequest.headRefOid,
+      scope: plan.scope,
+      agentExitCode,
+      previouslyReviewedHead: review.lastReviewedHead,
+    })
     upsertStatusComment(repository, options.number, body, poster)
   }
-  const where = options.dryRun ? `captured to ${capture}` : `posted to the pull request as ${poster.login}`
-  const outcome = posted ? `reviewed (${plan.scope}); comment ${where}` : 'FAILED: no review comment was posted'
-  const listNote = listProblem === undefined ? '' : `; ${listProblem}`
-  return `#${options.number}: ${outcome}; docker-agent exited ${agentExitCode}${listNote}; log ${join(runDirectory, 'review.log')}`
+  const summary = runSummary({
+    number: options.number,
+    posted,
+    where: options.dryRun ? `captured to ${capture}` : `posted to the pull request as ${poster.login}`,
+    scope: plan.scope,
+    agentExitCode,
+    listProblem,
+    log: join(runDirectory, 'review.log'),
+  })
+  return { summary, failed: !posted, head: pullRequest.headRefOid }
 }
 
-/** One review of one pull request, start to finish. Returns what happened, for the terminal. */
-export async function reviewPullRequest(options: ReviewOptions): Promise<string> {
+/**
+ * One review of one pull request, start to finish: a line for the terminal, whether it failed, and the
+ * head it was at. The worker retries a failed one (`review-worker.ts#afterReviews`).
+ */
+export async function reviewPullRequest(options: ReviewOptions): Promise<ReviewResult> {
   const repository = repositoryName()
   const poster = await reviewPoster(repository)
   const pullRequest = readPullRequest(options.number, poster)
+  const lastReviewedHead = statusCommentsOf(pullRequestComments(repository, options.number, poster), poster.login, [
+    repository.split('/')[0] ?? '',
+  ]).lastReviewedHead
   const plan = planReview(
     pullRequest,
-    statusCommentsOf(pullRequestComments(repository, options.number, poster), poster.login, [
-      repository.split('/')[0] ?? '',
-    ]).lastReviewedHead,
+    lastReviewedHead,
     (sha) =>
       Bun.spawnSync(['git', 'merge-base', '--is-ancestor', sha, pullRequest.headRefOid], { cwd: REPOSITORY_ROOT })
         .exitCode === 0,
   )
-  if (plan.kind === 'skip') return `#${options.number}: skipped — ${plan.reason}`
+  if (plan.kind === 'skip') {
+    return { summary: `#${options.number}: skipped — ${plan.reason}`, failed: false, head: pullRequest.headRefOid }
+  }
   const runDirectory = join(
     RUNS_DIRECTORY,
     `pr-${options.number}-${pullRequest.headRefOid.slice(0, SHORT_SHA_LENGTH)}-${Date.now()}`,
@@ -459,7 +509,7 @@ export async function reviewPullRequest(options: ReviewOptions): Promise<string>
   const tree = join(runDirectory, 'tree')
   addWorktree(pullRequest, tree)
   try {
-    return reviewInWorktree({ poster, options, pullRequest, repository, plan, runDirectory, tree })
+    return reviewInWorktree({ poster, options, pullRequest, repository, plan, runDirectory, tree, lastReviewedHead })
   } finally {
     run(['git', 'worktree', 'remove', '--force', tree], { cwd: REPOSITORY_ROOT })
   }
@@ -473,5 +523,8 @@ export function parseReviewArguments(argv: readonly string[]): ReviewOptions {
 }
 
 if (import.meta.main) {
-  process.stdout.write(`${await reviewPullRequest(parseReviewArguments(process.argv.slice(2)))}\n`)
+  const result = await reviewPullRequest(parseReviewArguments(process.argv.slice(2)))
+  process.stdout.write(`${result.summary}\n`)
+  // A failed review exits 1, so a script or a cron job calling this sees it (#993's review).
+  if (result.failed) process.exitCode = 1
 }

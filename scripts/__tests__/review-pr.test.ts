@@ -7,6 +7,7 @@ import {
   planReview,
   type PullRequestState,
   reviewSettings,
+  runSummary,
   STATUS_MARKER,
   statusCommentBody,
   statusCommentsOf,
@@ -141,4 +142,47 @@ test('⚠ a status comment by anyone but the poster or a trusted author records 
     own: undefined,
     lastReviewedHead: undefined,
   })
+})
+
+test('the run summary says what was posted, or that nothing was, with the exit code and the log', () => {
+  const base = {
+    number: 7,
+    where: 'posted as reviewer[bot]',
+    scope: 'full',
+    agentExitCode: 0,
+    listProblem: undefined,
+    log: '/r/review.log',
+  }
+  expect(runSummary({ ...base, posted: true })).toBe(
+    '#7: reviewed (full); comment posted as reviewer[bot]; docker-agent exited 0; log /r/review.log',
+  )
+  expect(
+    runSummary({ ...base, posted: false, agentExitCode: 1, listProblem: 'the comment list was not built: x' }),
+  ).toBe(
+    '#7: FAILED: no review comment was posted; docker-agent exited 1; the comment list was not built: x; log /r/review.log',
+  )
+})
+
+/**
+ * ⚠ A FAILED RUN KEEPS THE HEAD REVIEWED BEFORE IT (#993's review): the retry then reviews only the
+ * commits since that review, and the head that failed is still unreviewed, so it is tried again.
+ */
+test('⚠ a failed status keeps the previously reviewed head, so the retry is new-commits from it', () => {
+  const failed = statusCommentBody({
+    posted: false,
+    headSha: HEAD,
+    scope: 'new-commits',
+    agentExitCode: 1,
+    previouslyReviewedHead: PREVIOUS,
+  })
+  expect(failed).toContain('❌')
+  expect(lastReviewedHeadOf(failed)).toBe(PREVIOUS)
+  expect(planReview(PULL_REQUEST, lastReviewedHeadOf(failed), ALWAYS_ANCESTOR)).toEqual({
+    kind: 'review',
+    scope: 'new-commits',
+    from: PREVIOUS,
+  })
+  expect(
+    lastReviewedHeadOf(statusCommentBody({ posted: false, headSha: HEAD, scope: 'full', agentExitCode: 1 })),
+  ).toBeUndefined()
 })
