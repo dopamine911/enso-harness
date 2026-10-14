@@ -1,0 +1,7 @@
+# #912: `bun test` reads THIS file when run from packages/core, and the root's `[test]` section is
+# then not read (bunfig.toml is read from the process cwd, as packages/web/bunfig.toml records for
+# #586). Without the scratch preload every temporary directory these suites make landed in the real
+# `/tmp` and stayed (#546's cleanup lost: 223 `enso-*` directories per run, measured 2026-10-13), and code resolving
+# ENSO_HOME read the operator's. test/scratch-gate.test.ts holds every package.
+[test]
+preload = ["../../test/scratch-preload.ts"]

@@ -34,8 +34,8 @@ const GUARD_RULE_VERDICT: Readonly<Record<EnsoGuardRule, string>> = {
   'protected-records': 'protected records',
 }
 
-/** Who refused, as the card's `by` row says it — the reader's own rule and the reader's own No are theirs. */
-const REFUSER_NAME: Readonly<Record<EnsoToolRefuser, string>> = {
+/** Who refused, as the card's `by` row says it — the reader's own rule and the reader's own No are theirs. The Stats view counts by it too (#928). */
+export const REFUSER_NAME: Readonly<Record<EnsoToolRefuser, string>> = {
   guard: 'Enso guard',
   rule: 'your rule',
   auto: "auto's classifier",

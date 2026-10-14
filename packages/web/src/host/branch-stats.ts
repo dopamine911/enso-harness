@@ -1,4 +1,10 @@
-import { contentToText, type EnsoPromptStats, type EnsoToolCallStats, type EnsoTurnStats } from '@enso/core'
+import {
+  contentToText,
+  type EnsoPromptStats,
+  type EnsoToolCallStats,
+  type EnsoTurnStats,
+  shellExitCodeOf,
+} from '@enso/core'
 import type { LogEntry } from './log-entry.ts'
 
 /**
@@ -13,8 +19,10 @@ import type { LogEntry } from './log-entry.ts'
  * (`session-usage.ts`); `branchCost` is what this walk attributed, and the reader states the
  * difference instead of spreading it over turns it does not belong to.
  *
- * ⚠ A failure is `isError === true` and nothing else — pi's own signal, the one a guard's refusal
- * also carries (map-events.ts). An error turn (`stopReason: 'error'`) is a turn, with its cost.
+ * ⚠ A failure is `isError === true` — pi's own signal, the one a guard's refusal also carries
+ * (map-events.ts) — except a `bash` command's non-zero exit (#928): pi marks that `isError` too,
+ * but the command ran and answered, so the call carries its `exitCode` and is not a failure. Only
+ * the reader knows who refused. An error turn (`stopReason: 'error'`) is a turn, with its cost.
  *
  * ⓘ A prompt's duration is the one duration read here (#359): its entry's timestamp to the last
  * message entry that answers it. pi stamps an entry as it appends it — a reply at its end — so the
@@ -127,12 +135,15 @@ function walkToolResult(walk: Walk, message: ToolResultMessage): void {
   const prompt = currentPrompt(walk)
   // Joined to its CALL by id, as the log's fold joins: the call names the tool.
   const call = walk.callById.get(message.toolCallId)
+  const text = contentToText(message.content)
+  const exitCode = shellExitCodeOf({ toolName: call?.toolName ?? message.toolName, isError: message.isError, text })
   if (call !== undefined) {
     call.pending = false
-    call.outputChars = contentToText(message.content).length
+    call.outputChars = text.length
     call.isError = message.isError
+    if (exitCode !== undefined) call.exitCode = exitCode
   }
-  if (message.isError) prompt.failedToolCalls += 1
+  if (message.isError && exitCode === undefined) prompt.failedToolCalls += 1
   // A summarised result is a model call of its own (pi's attribution rule): the prompt's spend, no turn.
   if (message.usage !== undefined) {
     prompt.cost += message.usage.cost.total

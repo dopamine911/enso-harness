@@ -1,4 +1,12 @@
-import { type EnsoThreadStats, type EnsoToolCallStats, type EnsoTurnStats, median } from '@enso/core'
+import {
+  ENSO_TOOL_REFUSERS,
+  type EnsoThreadStats,
+  type EnsoToolCallStats,
+  type EnsoToolRefusal,
+  type EnsoToolRefuser,
+  type EnsoTurnStats,
+  median,
+} from '@enso/core'
 
 /**
  * What the stats drawer derives from `EnsoThreadStats` before it draws (#45 phase 2): the
@@ -15,19 +23,30 @@ import { type EnsoThreadStats, type EnsoToolCallStats, type EnsoTurnStats, media
  * `auto`'s, the person's (#523); the thread's `refusals` (#387) is what tells them apart, so every
  * function here that counts failures takes it — required, so no caller can count a refusal as a
  * failure by leaving it out.
+ *
+ * ⚠ AND A NON-ZERO EXIT IS NOT A FAILURE (#928). pi marks every `bash` command that exits non-zero
+ * `isError` — `grep` with no match, `test -f`, `diff` with differences — though the command ran and
+ * answered. The call carries its `exitCode` (`shellExitCodeOf`); it is counted apart, never in the
+ * failure rate. A failure is the call itself breaking: a timeout, an abort, a spawn error, another
+ * tool's error.
  */
 
-/** The calls something refused, by tool-call id — the thread's `refusals` store. */
-export type RefusedCalls = ReadonlyMap<string, unknown>
+/** The calls something refused, by tool-call id, and who refused each — the thread's `refusals` store. */
+export type RefusedCalls = ReadonlyMap<string, EnsoToolRefusal>
 
 /** Refused (#387, #523) — by a guard, a permission rule, `auto`, or the person: a decision, said apart from a failure. */
 export function isRefused(call: EnsoToolCallStats, refused: RefusedCalls): boolean {
   return refused.has(call.toolCallId)
 }
 
-/** Failed: an error result nothing refused — the tool ran, or tried to, and failed. */
+/** Exited non-zero (#928): a `bash` command that ran and answered no — said apart from a failure. */
+export function isNonZeroExit(call: EnsoToolCallStats, refused: RefusedCalls): boolean {
+  return call.exitCode !== undefined && !isRefused(call, refused)
+}
+
+/** Failed: an error result nothing refused that is not a command's non-zero exit — the call itself broke. */
 function isFailure(call: EnsoToolCallStats, refused: RefusedCalls): boolean {
-  return call.isError && !isRefused(call, refused)
+  return call.isError && !isRefused(call, refused) && call.exitCode === undefined
 }
 
 /** A difference below a hundredth of a cent is float noise, not spend. */
@@ -65,6 +84,7 @@ export interface ToolSummary {
   readonly toolName: string
   readonly calls: number
   readonly failed: number
+  readonly exited: number
   readonly refused: number
   readonly inputChars: number
   readonly outputChars: number
@@ -85,8 +105,12 @@ export interface StatsHeadline {
   readonly averageToolsPerTurn: number
   readonly toolCalls: number
   readonly failedToolCalls: number
+  /** `bash` commands that exited non-zero (#928) — not failures. */
+  readonly nonZeroExits: number
   readonly refusedToolCalls: number
-  /** `failed / calls`, 0 with no call — a refusal is not a failure. */
+  /** The refusals by who refused (#523), in `ENSO_TOOL_REFUSERS` order, only those that refused any. */
+  readonly refusedBy: ReadonlyArray<readonly [EnsoToolRefuser, number]>
+  /** `failed / calls`, 0 with no call — neither a refusal nor a non-zero exit is a failure. */
   readonly failureRate: number
   /** pi's session total beyond what the branch's messages account for; 0 when within noise. */
   readonly offBranchCost: number
@@ -99,7 +123,11 @@ export function headlineOf(stats: EnsoThreadStats, refused: RefusedCalls): Stats
   const costsKnown = turnCount > 0 && unpricedTurnCount === 0
   const toolCalls = stats.callStats.length
   const failedToolCalls = stats.callStats.filter((call) => isFailure(call, refused)).length
-  const refusedToolCalls = stats.callStats.filter((call) => isRefused(call, refused)).length
+  const nonZeroExits = stats.callStats.filter((call) => isNonZeroExit(call, refused)).length
+  const refusals = stats.callStats.flatMap((call) => {
+    const refusal = refused.get(call.toolCallId)
+    return refusal === undefined ? [] : [refusal.by]
+  })
   const offBranch = stats.usage.cost - stats.branchCost
   return {
     turnCount,
@@ -110,7 +138,12 @@ export function headlineOf(stats: EnsoThreadStats, refused: RefusedCalls): Stats
     averageToolsPerTurn: turnCount === 0 ? 0 : toolCalls / turnCount,
     toolCalls,
     failedToolCalls,
-    refusedToolCalls,
+    nonZeroExits,
+    refusedToolCalls: refusals.length,
+    refusedBy: ENSO_TOOL_REFUSERS.flatMap((by) => {
+      const count = refusals.filter((refuser) => refuser === by).length
+      return count === 0 ? [] : [[by, count] as const]
+    }),
     failureRate: toolCalls === 0 ? 0 : failedToolCalls / toolCalls,
     offBranchCost: offBranch >= COST_EPSILON ? offBranch : 0,
   }
@@ -124,6 +157,7 @@ export function toolSummaries(calls: readonly EnsoToolCallStats[], refused: Refu
       toolName: call.toolName,
       calls: 0,
       failed: 0,
+      exited: 0,
       refused: 0,
       inputChars: 0,
       outputChars: 0,
@@ -132,6 +166,7 @@ export function toolSummaries(calls: readonly EnsoToolCallStats[], refused: Refu
     }
     summary.calls += 1
     summary.failed += Number(isFailure(call, refused))
+    summary.exited += Number(isNonZeroExit(call, refused))
     summary.refused += Number(isRefused(call, refused))
     summary.inputChars += call.inputChars
     summary.outputChars += call.outputChars

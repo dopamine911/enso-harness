@@ -15,8 +15,11 @@ import { join } from 'node:path'
  * later is scanned by every gate, not invisible to some — the widening is the safe direction.
  */
 
-/** Build outputs and dependencies: never entered, by any caller. */
-const SKIPPED_DIRECTORIES: ReadonlySet<string> = new Set(['node_modules', 'dist', 'dist-types', 'coverage'])
+/**
+ * Build outputs and dependencies: never entered, by any caller. Exported for the one reader that lists a
+ * package's directories rather than walking them (`test/dependency-gate.test.ts`, the harness `files`).
+ */
+export const SKIPPED_DIRECTORIES: ReadonlySet<string> = new Set(['node_modules', 'dist', 'dist-types', 'coverage'])
 
 /**
  * A TypeScript or JavaScript module, any flavour. Exported because a reader of source
