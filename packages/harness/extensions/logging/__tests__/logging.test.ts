@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
 import { ensoLogger } from '@enso/core'
 import { ensoLogFilename, isLoggingConfigured } from '@enso/core/log-process'
-import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
+import { recordEnsoLogs, releaseEnsoLogs } from '@enso/test-support/log-recorder'
 import { reset } from '@logtape/logtape'
 import { createLoggingExtension } from '../index.ts'
 

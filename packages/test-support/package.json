@@ -1,0 +1,17 @@
+{
+  "name": "@enso/test-support",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Helpers every package's tests share: the LogTape recorder, the flow trace, the observation-kinds oracle. Never shipped (#951).",
+  "exports": {
+    "./flow-trace": "./src/flow-trace.ts",
+    "./log-recorder": "./src/log-recorder.ts",
+    "./observation-kinds": "./src/observation-kinds.ts"
+  },
+  "dependencies": {
+    "@enso/core": "*",
+    "@logtape/logtape": "2.3.7",
+    "@logtape/testing": "2.3.7"
+  }
+}

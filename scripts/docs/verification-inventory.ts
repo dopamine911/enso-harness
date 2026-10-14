@@ -276,7 +276,7 @@ interface DoubleMetadata {
 
 const DOUBLE_METADATA: readonly DoubleMetadata[] = [
   {
-    file: 'packages/core/src/__tests__/log-recorder.ts',
+    file: 'packages/test-support/src/log-recorder.ts',
     symbol: 'recordEnsoLogs',
     label: '`recordEnsoLogs`',
     seam: 'LogTape in-memory sink, one for every package (#178)',
@@ -501,9 +501,21 @@ function testFiles(): string[] {
     .toSorted()
 }
 
+/** The tests' own package (#951): the shared recorder, the flow trace and the kinds oracle. */
+const TEST_SUPPORT_PACKAGE = 'packages/test-support'
+
+/**
+ * Where a test double may live: beside the tests (`__tests__/`), or in the tests' own package,
+ * `packages/test-support/`, since #951 moved the shared recorder there out of `@enso/core`.
+ */
 function supportFiles(): string[] {
   return repositoryFilesUnder('packages')
-    .filter((path) => path.includes('/__tests__/') && !/\.test\.tsx?$/.test(path) && /\.tsx?$/.test(path))
+    .filter(
+      (path) =>
+        (path.includes('/__tests__/') || path.startsWith(`${TEST_SUPPORT_PACKAGE}/`)) &&
+        !/\.test\.tsx?$/.test(path) &&
+        /\.tsx?$/.test(path),
+    )
     .toSorted()
 }
 
@@ -528,17 +540,31 @@ function validateDouble(metadata: DoubleMetadata): void {
   if (!declaration.test(source)) throw new Error(`${metadata.file}: stale double metadata for ${metadata.symbol}`)
 }
 
-/** `@enso/core/<subpath>` → the file core's export map names, read once; other bare specifiers → undefined. */
-const CORE_SUBPATH_TARGETS: ReadonlyMap<string, string> = new Map(
-  Object.entries(
-    (JSON.parse(repositoryFile('packages/core/package.json')) as { exports: Record<string, string> }).exports,
-  )
+/** `<package name>/<subpath>` → the file that package's export map names, for one workspace package. */
+function subpathTargetsOf(packageDirectory: string): [string, string][] {
+  const manifest = JSON.parse(repositoryFile(`${packageDirectory}/package.json`)) as {
+    name: string
+    exports: Record<string, string>
+  }
+  return Object.entries(manifest.exports)
     .filter(([subpath]) => subpath !== '.')
-    .map(([subpath, target]) => [`@enso/core/${subpath.slice(2)}`, `packages/core/${target.replace(/^\.\//, '')}`]),
-)
+    .map(([subpath, target]) => [
+      `${manifest.name}/${subpath.slice(2)}`,
+      `${packageDirectory}/${target.replace(/^\.\//, '')}`,
+    ])
+}
 
-function coreSubpathTarget(specifier: string): string | undefined {
-  return CORE_SUBPATH_TARGETS.get(specifier)
+/**
+ * `@enso/core/<subpath>` and `@enso/test-support/<subpath>` → the file the export map names, read
+ * once; other bare specifiers → undefined. Both, because a double is imported through either.
+ */
+const WORKSPACE_SUBPATH_TARGETS: ReadonlyMap<string, string> = new Map([
+  ...subpathTargetsOf('packages/core'),
+  ...subpathTargetsOf(TEST_SUPPORT_PACKAGE),
+])
+
+function workspaceSubpathTarget(specifier: string): string | undefined {
+  return WORKSPACE_SUBPATH_TARGETS.get(specifier)
 }
 
 function importsSymbol(testFile: string, metadata: DoubleMetadata): boolean {
@@ -548,7 +574,7 @@ function importsSymbol(testFile: string, metadata: DoubleMetadata): boolean {
     const specifier = match[2] ?? ''
     const imported = specifier.startsWith('.')
       ? relative(ROOT, resolve(dirname(join(ROOT, testFile)), specifier)).replaceAll('\\', '/')
-      : coreSubpathTarget(specifier)
+      : workspaceSubpathTarget(specifier)
     if (imported !== metadata.file) continue
     const importedNames = clause
       .replace(/[{}]/g, ' ')

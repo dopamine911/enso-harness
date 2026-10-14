@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test'
-import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
+import { recordEnsoLogs, releaseEnsoLogs } from '@enso/test-support/log-recorder'
 import type { LogRecord } from '@logtape/logtape'
 import { recordObservation } from '../observation-log.ts'
 import { noteRunAdmitted } from '../run-timing.ts'

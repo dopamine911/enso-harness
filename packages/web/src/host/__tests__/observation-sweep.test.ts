@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import { truncateTail } from '@earendil-works/pi-coding-agent'
 import { EnsoObservation } from '@enso/core'
-import { observationKindsDeclaredByTheUnion } from '@enso/core/observation-kinds'
+import { observationKindsDeclaredByTheUnion } from '@enso/test-support/observation-kinds'
 import { Check } from 'typebox/value'
 import { mapPiEvent } from '../map-events.ts'
 

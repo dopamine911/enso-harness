@@ -268,30 +268,54 @@
   // dependency (#145's rule).
   "boundaries": {
     "zones": [
+      // Each package's tests are a zone of their own, listed BEFORE the package's zone (a file is
+      // in the first zone that matches): a test may import exactly what the code it tests may,
+      // plus `test-support` — and production code still may not (#951).
+      { "name": "core-tests", "patterns": ["packages/core/src/__tests__/**"] },
       { "name": "core", "patterns": ["packages/core/src/**"] },
+      { "name": "test-support", "patterns": ["packages/test-support/**"] },
       { "name": "harness-core", "patterns": ["packages/harness/core/**"] },
       { "name": "judge-backends", "patterns": ["packages/harness/extensions/guards/judge-backends.ts"] },
+      { "name": "harness-extension-tests", "patterns": ["packages/harness/extensions/**/__tests__/**"] },
       { "name": "harness-extensions", "patterns": ["packages/harness/extensions/**"] },
+      { "name": "host-tests", "patterns": ["packages/web/src/host/**/__tests__/**"] },
+      { "name": "server-tests", "patterns": ["packages/web/src/server/**/__tests__/**"] },
+      { "name": "browser-tests", "patterns": ["packages/web/src/**/__tests__/**"] },
       { "name": "host", "patterns": ["packages/web/src/host/**"] },
       { "name": "server", "patterns": ["packages/web/src/server/**"] },
       { "name": "browser", "patterns": ["packages/web/src/**"] },
       { "name": "site-base", "patterns": ["scripts/docs/site-base.ts"] },
       { "name": "corpus-shapes", "patterns": ["scripts/corpus-shapes.ts"] },
+      { "name": "scripts-tests", "patterns": ["scripts/__tests__/**"] },
       { "name": "scripts", "patterns": ["scripts/**"] },
       { "name": "test", "patterns": ["test/**", "packages/web/e2e/**"] },
       { "name": "site", "patterns": ["site/**"] }
     ],
     "rules": [
+      { "from": "core-tests", "allow": ["core", "test-support"] },
       { "from": "core", "allow": [] },
+      // The tests' shared helpers (#951): built on core, imported only from test zones.
+      { "from": "test-support", "allow": ["core"] },
       { "from": "harness-core", "allow": ["core"] },
+      {
+        "from": "harness-extension-tests",
+        "allow": ["harness-extensions", "core", "harness-core", "judge-backends", "test-support"]
+      },
       { "from": "harness-extensions", "allow": ["core", "harness-core", "judge-backends"] },
+      { "from": "host-tests", "allow": ["host", "core", "test-support"] },
       { "from": "host", "allow": ["core"] },
+      { "from": "server-tests", "allow": ["server", "core", "host", "test-support"] },
       { "from": "server", "allow": ["core", "host"] },
+      { "from": "browser-tests", "allow": ["browser", "core", "test-support"] },
       { "from": "browser", "allow": ["core"] },
       // The command judge's backends (#535) are their own one-file zone, as `site-base` is: they
       // must sit where pi's libraries may be named (the vendor gate's roots), and `bun run judge`
       // must replay with exactly the guard's backends. So `scripts` may reach this ONE file, which
       // may itself reach only `core` — never the rest of the harness.
+      {
+        "from": "scripts-tests",
+        "allow": ["scripts", "core", "site-base", "judge-backends", "corpus-shapes", "test-support"]
+      },
       { "from": "scripts", "allow": ["core", "site-base", "judge-backends", "corpus-shapes"] },
       { "from": "judge-backends", "allow": ["core"] },
       // The transcript corpus report (#534) measures the shapes the GUARD sees, so its reader
@@ -321,6 +345,8 @@
           "harness-extensions",
           "judge-backends",
           "host",
+          // The e2e home seeds a stored session with the host tests' own writer.
+          "host-tests",
           "server",
           "browser",
           "scripts",
