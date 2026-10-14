@@ -141,6 +141,9 @@ function Unavailable({ reason }: { reason: string | undefined }): React.ReactNod
   return <span className="text-xs text-refuse">unavailable: {reason}</span>
 }
 
+/** Why a fallback change queued behind a save that moved or removed its fallback is refused. */
+const FALLBACKS_MOVED = 'the fallbacks changed while an earlier change was saving; nothing was changed — try again'
+
 /** The section as a role's card reads it: the saved models, the models on offer, and how to save. */
 interface RoleCardProps {
   readonly name: string
@@ -169,7 +172,10 @@ function RoleCard(props: RoleCardProps): React.ReactNode {
     changeRole((current) => withFallbacks(current, change(current.fallbacks ?? [])))
   // A fallback is named by its place, and a change queued behind a save that removed or moved one
   // would land on whatever took that place: a double-click on remove would remove two. So a change
-  // to the places it names applies only while they still hold the fallbacks this card showed.
+  // to the places it names applies only while they still hold the fallbacks this card showed;
+  // otherwise it is refused, said, and nothing is sent (`ModelsUpdate` throwing). Fallbacks are
+  // matched by model and effort, so two identical ones are not told apart: with `[A, A, B]`, remove
+  // clicked twice on the first removes both `A`s. A duplicate fallback adds nothing, so it is allowed.
   const changeShown = (
     places: readonly number[],
     change: (current: readonly EnsoModelTarget[]) => readonly EnsoModelTarget[],
@@ -180,7 +186,8 @@ function RoleCard(props: RoleCardProps): React.ReactNode {
         const shown = fallbacks[place]
         return now !== undefined && shown !== undefined && now.model === shown.model && now.effort === shown.effort
       })
-      return unmoved ? change(current) : current
+      if (!unmoved) throw new Error(FALLBACKS_MOVED)
+      return change(current)
     })
   const resolution = known ? resolveModelRole(name, models, options) : undefined
   const firstFree = options.find(

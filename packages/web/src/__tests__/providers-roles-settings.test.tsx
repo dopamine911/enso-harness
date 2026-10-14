@@ -444,11 +444,12 @@ test('⚠ remove clicked twice on a fallback before the first save answers remov
   await click(container, "move review's fallback 2 down")
   release()
 
-  await eventually(() => expect(putBodies(sent)).toHaveLength(3))
-  // The second remove and the move both name places the first remove changed: neither applies.
+  // The second remove and the move both name places the first remove changed: neither applies, and
+  // neither is sent or reported as saved — the card says why (PR #973 review, second round).
+  await eventually(() =>
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('the fallbacks changed'),
+  )
   expect(putBodies(sent)).toEqual([
-    { roles: { review: { model: 'anthropic/claude-opus-4-5', fallbacks: fallbacks.slice(1) } } },
-    { roles: { review: { model: 'anthropic/claude-opus-4-5', fallbacks: fallbacks.slice(1) } } },
     { roles: { review: { model: 'anthropic/claude-opus-4-5', fallbacks: fallbacks.slice(1) } } },
   ])
 })

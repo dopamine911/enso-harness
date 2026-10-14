@@ -393,4 +393,6 @@ test("a role's effort step refused: the record is ended when its model was appli
   expect(review.status).toBe(422)
   expect(await review.json()).toEqual({ step: 'thinking', reason: 'the effort is locked here' })
   expect(built[0]?.modelRoles).toEqual([quick, null])
+  // The effort step ran last, with `high` clamped to fake-2's only level.
+  expect(built[0]?.hostCommands.at(-1)).toEqual({ name: 'thinking', value: 'off' })
 })

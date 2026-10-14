@@ -27,7 +27,10 @@ export type ModelsSettingsState =
 /** A save's outcome: written, or the server's reason (an unreadable config file is never overwritten). */
 export type ModelsSaveOutcome = { readonly kind: 'saved' } | { readonly kind: 'refused'; readonly reason: string }
 
-/** A change to the section: given the section as the last save left it, the section to write. */
+/**
+ * A change to the section: given the section as the last save left it, the section to write. One
+ * that throws is refused with its message, and nothing is sent.
+ */
 export type ModelsUpdate = (current: EnsoModelsConfig) => EnsoModelsConfig
 
 export interface ModelsSettingsStore extends Store<ModelsSettingsState> {
