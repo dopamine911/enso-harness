@@ -20,14 +20,14 @@ const BARREL = join(CORE_SOURCE, 'index.ts')
 /**
  * The node-only subpaths (#211): declared in package.json `exports`, never on the barrel, so
  * the browser graph cannot reach `node:*` through `@enso/core`. Each is read like the barrel is.
- * Read off the manifest, so a new subpath is documented the day it is declared; the test-only
- * recorders under `__tests__` are not public surface.
+ * Read off the manifest, so a new subpath is documented the day it is declared. The test-only
+ * helpers are `@enso/test-support` since #951, so every subpath here is public surface.
  */
 const SUBPATH_MODULES: readonly { readonly file: string; readonly entrypoint: SubpathEntrypoint }[] = Object.entries(
   (JSON.parse(readFileSync(join(ROOT, 'packages/core/package.json'), 'utf8')) as { exports: Record<string, string> })
     .exports,
 ).flatMap(([subpath, target]) =>
-  subpath === '.' || target.includes('/__tests__/')
+  subpath === '.'
     ? []
     : [{ file: target.replace(/^\.\/src\//, ''), entrypoint: `@enso/core${subpath.slice(1)}` as SubpathEntrypoint }],
 )

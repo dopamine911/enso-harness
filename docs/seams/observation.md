@@ -230,7 +230,7 @@ leaves, the registry forgets the feed and `seq` restarts with the next follower,
 
 ## What fences it
 
-- **The kinds oracle**: `packages/core/src/__tests__/observation-kinds.ts` (`@enso/core/observation-kinds`) derives every `kind`
+- **The kinds oracle**: `packages/test-support/src/observation-kinds.ts` (`@enso/test-support/observation-kinds`) derives every `kind`
   literal from the union itself — never a hard-coded count, which drifted once (566e8b1). Two sweeps
   compare against it: `host/__tests__/observation-sweep.test.ts` proves every event the mapper
   handles, plus the server-synthesised kinds, validates against `EnsoObservation` and covers every

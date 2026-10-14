@@ -43,8 +43,8 @@ import {
   sessionIncidentsOf,
   sessionRiskOfTranscript,
 } from '@enso/core'
-import { type FlowTrace, flowTrace } from '@enso/core/flow-trace'
-import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
+import { type FlowTrace, flowTrace } from '@enso/test-support/flow-trace'
+import { recordEnsoLogs, releaseEnsoLogs } from '@enso/test-support/log-recorder'
 import { PERMISSIONS_DECISION_CHANNEL } from '@gotgenes/pi-permission-system'
 import type { LogRecorder } from '@logtape/testing/recorder'
 import type { CheckCommandResult } from 'cc-safety-net/api'

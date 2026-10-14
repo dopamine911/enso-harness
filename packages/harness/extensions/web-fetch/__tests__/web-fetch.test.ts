@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { ENSO_CONFIG_FILENAME, parseEnsoConfig, WEB_FETCH_MAX_RESPONSE_BYTES, WEB_FETCH_TOOL_NAME } from '@enso/core'
-import { auditRecords, recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
+import { auditRecords, recordEnsoLogs, releaseEnsoLogs } from '@enso/test-support/log-recorder'
 import type { SessionEnsoConfig } from '../../../core/index.ts'
 import { createWebFetch, type WebFetchDependencies, type WebFetchRequestInit } from '../index.ts'
 

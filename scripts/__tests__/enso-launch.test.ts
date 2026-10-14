@@ -3,9 +3,9 @@ import { chmodSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { flowTrace } from '@enso/core/flow-trace'
-import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
 import { permissionEngineConfigPath } from '@enso/core/permission-rules'
+import { flowTrace } from '@enso/test-support/flow-trace'
+import { recordEnsoLogs, releaseEnsoLogs } from '@enso/test-support/log-recorder'
 import { piVersionText, SUPPORTED_PI_VERSIONS } from '../../packages/core/src/supported-pi-versions.ts'
 import { isPrintRun, isRegisteredProject, piArguments, projectLine } from '../enso-launch.ts'
 

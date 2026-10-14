@@ -45,9 +45,9 @@ import {
   readEnsoThreadIncidents,
   readEnsoThreadJudgeCases,
 } from '@enso/core'
-import { type FlowTrace, flowTrace } from '@enso/core/flow-trace'
-import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
 import { ENSO_DEFAULT_PERMISSION_POLICY } from '@enso/core/permission-rules'
+import { type FlowTrace, flowTrace } from '@enso/test-support/flow-trace'
+import { recordEnsoLogs, releaseEnsoLogs } from '@enso/test-support/log-recorder'
 import type { LogRecorder } from '@logtape/testing/recorder'
 import { Check } from 'typebox/value'
 import { type AgentHost, SessionDirectoryRefused } from '../../host/agent-host.ts'

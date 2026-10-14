@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, expect, test } from 'bun:test'
 import { type EnsoQuestionnaireResult, QUESTIONNAIRE_COMPONENT_KEY } from '@enso/core'
-import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
+import { recordEnsoLogs, releaseEnsoLogs } from '@enso/test-support/log-recorder'
 import type { LogRecorder } from '@logtape/testing/recorder'
 import {
   type CustomComponentFactory,
