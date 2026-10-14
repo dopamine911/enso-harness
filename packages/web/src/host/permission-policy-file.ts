@@ -57,8 +57,8 @@ type WriteCondition =
  *
  * ⚠ ENSO'S RECORD RIDES THE SAME SAVE (#945). The rules switched off, and what each rule group
  * added, live in a file of Enso's beside the policy (`recordPathOf`): the engine's schema refuses
- * a key of ours inside its own file. One `ETag` names both files, and a save that cannot write both
- * writes neither (`writeBoth`).
+ * a key of ours inside its own file. One `ETag` names both files, and a save whose policy write
+ * fails puts the record back (`writeBoth`).
  */
 
 /** Where Enso's record lives (#945): beside the policy, `permissions.json` → `permissions.disabled.json`. */
@@ -205,8 +205,8 @@ const isEmptyRecord = (record: EnsoRuleRecord): boolean =>
  * write is atomic, the pair is not: a crash between them leaves the new record over the old policy.
  * What is in force does not change; a rule being switched off reads as still in force (`liveRecord`
  * on the page), one being switched back on is in neither file, and a group being turned off leaves
- * its rules as yours. A record the same as on disk is
- * not rewritten, and an empty one is not created where there was none.
+ * its rules as yours. A record the same as on disk is not rewritten, and an empty one is not created
+ * where there was none.
  */
 function writeBoth(policyPath: string, policyText: string, record: EnsoRuleRecord | undefined): void {
   const recordPath = recordPathOf(policyPath)
