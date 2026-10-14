@@ -251,7 +251,7 @@ export type EnsoPromptBody = Static<typeof EnsoPromptBody>
  * each draft's text and its attachments as `data:` URLs. Never crosses to the server; checked when
  * the page reads it back, so a shape another bundle wrote opens no composer with it.
  *
- * @group Follow wire
+ * @group Page storage
  */
 export const EnsoKeptDrafts = Type.Record(
   Type.String(),
@@ -262,7 +262,7 @@ export const EnsoKeptDrafts = Type.Record(
     ),
   }),
 )
-/** @group Follow wire */
+/** @group Page storage */
 export type EnsoKeptDrafts = Static<typeof EnsoKeptDrafts>
 
 /**

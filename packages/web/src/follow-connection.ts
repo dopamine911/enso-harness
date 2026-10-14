@@ -875,7 +875,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
         state.handedAt = Date.now()
         yield next
         state.handing = undefined
-        // The chunks `followClosed` queued apply nothing of a follow: the follow is gone.
+        // Once the pump has ended, nothing yielded applies a follow: the follow is gone.
         if (!state.ended) appliedAt = Date.now()
       }
     } finally {

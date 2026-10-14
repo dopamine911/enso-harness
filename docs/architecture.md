@@ -237,8 +237,9 @@ checks itself from outside the pipeline (#919, `page-health.ts`): a chunk held b
 applied nothing (`page-behind-check.ts`, against `FollowConnection.appliedAt`), a pane's error
 boundary, and `window`'s `error`/`unhandledrejection`. Each is logged with the thread and the
 page, and raises one banner with Reload, which keeps every composer's draft (`page-reload.ts`).
-An `error` event with no error behind it (another origin's "Script error.") is only logged: it is
-no throw of the page's. Never an automatic reload: it could cut someone off mid-answer.
+An `error` event with no error object (another origin's "Script error.", or a non-Error throw) is
+only logged, with no banner: the event cannot say it was the page's. Never an automatic reload:
+it could cut someone off mid-answer.
 
 **A dialog.** pi blocks; the follow carries a blocking `extension-ui-request`; an answer is `POST …/dialog`, validated
 against the question (#112); every settle path — answered, cancelled, timeout, abort — emits
