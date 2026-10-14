@@ -10,7 +10,7 @@ import { createLiteralRoutes } from './literal-routes.ts'
 import { isLoopbackAuthority, LOOPBACK_ONLY } from './loopback.ts'
 import { createPermissionRoutes } from './permission-routes.ts'
 import { createProjectRoutes } from './project-routes.ts'
-import { createProjectRegistry } from './projects.ts'
+import { canonicalConfigPath, createProjectRegistry } from './projects.ts'
 import { createPromptLibrary, type PromptLibrary } from './prompt-library.ts'
 import { createPromptRoutes } from './prompt-routes.ts'
 import { createSettingsRoutes } from './settings-routes.ts'
@@ -259,7 +259,12 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   })
   const { dispatchPromptRoute } = promptRoutes
   const { dispatchPermissionRoute } = permissions
-  const { dispatchSettingsRoute } = createSettingsRoutes({ ensoHome: options.ensoHome, agentDir: options.agentDir })
+  const { dispatchSettingsRoute } = createSettingsRoutes({
+    ensoHome: options.ensoHome,
+    agentDir: options.agentDir,
+    // A project's own mode is keyed as new trees match it: the resolver's canonical, else the config's rule.
+    canonical: options.threadSettings?.canonical ?? ((key) => canonicalConfigPath(key)),
+  })
   const { previews } = reads
 
   /**
@@ -318,7 +323,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
 
   // ⚠ Routes dispatch HERE, outside the chat handler, on purpose: that handler's top-to-bottom
   // shape is the #27/#34 teardown ordering (#82). What is left in the callback is the one check
-  // every request is admitted by, then the two dispatchers and the miss.
+  // every request is admitted by, then one dispatcher per route family, in order, and the miss.
   const server = createServer((request, response) => {
     if (!fromTrustedOrigin(request)) {
       log.warn('request refused: {method} {url} from host {host} origin {origin}', {

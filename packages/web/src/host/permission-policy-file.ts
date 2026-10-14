@@ -1,15 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto'
-import {
-  constants,
-  copyFileSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  type Stats,
-  statSync,
-  utimesSync,
-  writeFileSync,
-} from 'node:fs'
+import { constants, copyFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { EnsoPermissionPolicyRead, EnsoPermissionPolicyRefusal } from '@enso/core'
 import { realpathOrSelf } from '@enso/core/paths'
@@ -18,16 +7,8 @@ import {
   permissionEngineConfigPath,
   withCatchAllFirst,
 } from '@enso/core/permission-rules'
+import { bytesOf, conflictOf, errorCode, etagOf, type WriteCondition, writeAtomically } from './atomic-file.ts'
 import { policyProblems } from './permission-policy.ts'
-
-/**
- * What a write expects on disk: the server's `WriteCondition` (#443), stated here because the host
- * imports only core. `absent` — no file; `matches` — the version read; `present` — whatever is there.
- */
-export type WriteCondition =
-  | { readonly kind: 'absent' }
-  | { readonly kind: 'matches'; readonly etag: string }
-  | { readonly kind: 'present' }
 
 /**
  * The user's permission policy on disk, as Settings reads and writes it (#474):
@@ -48,25 +29,6 @@ export type WriteCondition =
  * it reloads on the modification time alone (`writeAtomically`), and its real-engine tests must
  * share `agent-host.test.ts`'s process-wide agent dir.
  */
-
-/** A strong entity tag for the file's bytes, quoted as HTTP writes one (the prompt library's). */
-export function etagOf(bytes: Uint8Array): string {
-  return `"${createHash('sha256').update(bytes).digest('hex')}"`
-}
-
-function errorCode(error: unknown): unknown {
-  return error instanceof Error && 'code' in error ? error.code : undefined
-}
-
-/** The file's bytes, or `undefined` when there is none. */
-export function bytesOf(path: string): Buffer | undefined {
-  try {
-    return readFileSync(path)
-  } catch (error: unknown) {
-    if (errorCode(error) === 'ENOENT') return undefined
-    throw error
-  }
-}
 
 /** Where the engine writes its review log: beside its config, under `logs/`. */
 function reviewLogDirectoryOf(agentDir: string): string {
@@ -98,51 +60,6 @@ export function readPermissionPolicy(policyPath: string, agentDir: string): Enso
     return { kind: 'unreadable', ...common, etag, reason: 'the file is not a JSON object' }
   }
   return { kind: 'ok', ...common, etag, file: parsed as Record<string, unknown> }
-}
-
-/** Why the file on disk is not what `condition` expects, or `undefined` when it is. */
-export function conflictOf(policyPath: string, condition: WriteCondition): string | undefined {
-  const bytes = bytesOf(policyPath)
-  if (condition.kind === 'absent') return bytes === undefined ? undefined : `${policyPath} already exists`
-  if (bytes === undefined) return `${policyPath} is no longer there: it was deleted since it was opened`
-  if (condition.kind === 'matches' && etagOf(bytes) !== condition.etag) {
-    return `${policyPath} changed on disk since it was opened — reload to see the version there now`
-  }
-  return undefined
-}
-
-function statOrUndefined(path: string): Stats | undefined {
-  try {
-    return statSync(path)
-  } catch (error: unknown) {
-    if (errorCode(error) === 'ENOENT') return undefined
-    throw error
-  }
-}
-
-/**
- * Write `text` to the file behind `policyPath` in one step: a temporary file beside it, renamed over it.
- *
- * ⚠ THE MODIFICATION TIME MUST MOVE. The engine reloads a policy only when the file's `mtimeMs`
- * differs from the one it last read (`config/policy-loader.ts`), and Linux stamps it from a coarse
- * clock — one tick is milliseconds. A write landing in the same tick as the last one (a reset just
- * after a hand edit) kept the OLD policy in force, silently. Found by this file's reset test.
- */
-export function writeAtomically(policyPath: string, text: string, mode?: number): void {
-  const target = realpathOrSelf(policyPath)
-  const previous = statOrUndefined(target)
-  const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`
-  writeFileSync(temporary, text, mode === undefined ? { flag: 'wx' } : { flag: 'wx', mode })
-  try {
-    renameSync(temporary, target)
-  } catch (error: unknown) {
-    rmSync(temporary, { force: true })
-    throw error
-  }
-  if (previous === undefined) return
-  const written = statSync(target)
-  if (written.mtimeMs > previous.mtimeMs) return
-  utimesSync(target, written.atime, (previous.mtimeMs + 1) / 1000)
 }
 
 /** @group Permission policy */

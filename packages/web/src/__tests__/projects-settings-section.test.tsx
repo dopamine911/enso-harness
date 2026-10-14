@@ -115,13 +115,18 @@ test('a root the server would refuse saves nothing; a save sends both sections w
   await page.unmount()
 })
 
-test('the trust default is set on its own route, and a choice that trusts every project is warned first', async () => {
+// #979 review, issue 4: trusting every undecided project protects less, so — #933's rule — it is
+// confirmed before it is set, not only warned about.
+test('the trust default is set on its own route, and a choice that trusts every project is confirmed first', async () => {
   const page = await mounted(read({ projects: { roots: ['/code'] }, threads: {} }))
   const { container, sent } = page
   expect(button(container, 'Set').disabled).toBe(true)
   await flush(() => type(control<HTMLSelectElement>(container, 'trust'), 'always'))
   expect(container.textContent).toContain('will run its own extensions and setup commands without asking')
   await flush(() => button(container, 'Set').click())
+  expect(container.textContent).toContain('This save protects less than what is in force now')
+  expect(sent.some((each) => each.url.endsWith('/trust'))).toBe(false)
+  await flush(() => button(container, 'Save anyway').click())
   expect(sent.at(-1)).toMatchObject({
     url: '/api/settings/projects/trust',
     method: 'PUT',
@@ -131,6 +136,35 @@ test('the trust default is set on its own route, and a choice that trusts every 
   expect(button(container, 'Set').disabled).toBe(true)
   // The file's draft is untouched by it.
   expect(sent.some((each) => each.url === '/api/settings/projects' && each.method === 'PUT')).toBe(false)
+
+  // Tightening needs no confirm.
+  await flush(() => type(control<HTMLSelectElement>(container, 'trust'), 'never'))
+  await flush(() => button(container, 'Set').click())
+  expect(sent.at(-1)).toMatchObject({ url: '/api/settings/projects/trust', body: { defaultProjectTrust: 'never' } })
+  await page.unmount()
+})
+
+// #979 review, issue 3: a pi settings file that cannot be read shows `ask`, and a Set would be refused.
+test('an unreadable pi settings file is said, and the trust cannot be set', async () => {
+  const page = await mounted({ ...(read({ threads: {} }) as object), trustUnreadable: 'Unexpected token' })
+  const { container } = page
+  expect(container.textContent).toContain('settings.json could not be read')
+  await flush(() => type(control<HTMLSelectElement>(container, 'trust'), 'never'))
+  expect(button(container, 'Set').disabled).toBe(true)
+  await page.unmount()
+})
+
+// #979 review, issue 5: a mode chosen and chosen back moves its key to the end; that is no change.
+test('a project mode set and set back is not an unsaved change', async () => {
+  const page = await mounted(read({ threads: { projects: { '/code/app': 'off', '/elsewhere': 'copy' } } }))
+  const { container } = page
+  const ownMode = container.querySelector<HTMLSelectElement>('select[aria-label="app: new threads run in"]')
+  if (ownMode === null) throw new Error('no own-mode select for the project')
+  await flush(() => type(ownMode, 'copy'))
+  expect(container.textContent).toContain('1 unsaved change')
+  await flush(() => type(ownMode, 'off'))
+  expect(container.textContent).not.toContain('unsaved change')
+  expect(button(container, 'Save').disabled).toBe(true)
   await page.unmount()
 })
 

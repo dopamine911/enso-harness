@@ -41,6 +41,8 @@ export const EnsoProjectsSettingsRead = Type.Union([
       /** pi's settings file in the agent directory, where `defaultProjectTrust` lives. */
       trustPath: Type.String(),
       defaultProjectTrust: EnsoDefaultProjectTrust,
+      /** Why pi's settings file cannot be read, when it cannot: the trust then reads `ask`, and a Set is refused. */
+      trustUnreadable: Type.Optional(Type.String()),
     },
     { additionalProperties: false },
   ),
@@ -52,6 +54,7 @@ export const EnsoProjectsSettingsRead = Type.Union([
       reason: Type.String(),
       trustPath: Type.String(),
       defaultProjectTrust: EnsoDefaultProjectTrust,
+      trustUnreadable: Type.Optional(Type.String()),
     },
     { additionalProperties: false },
   ),

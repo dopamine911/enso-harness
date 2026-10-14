@@ -15,7 +15,7 @@
  */
 
 import { mkdirSync } from 'node:fs'
-import { incidentPolicyOf, parseEnsoConfig } from '@enso/core'
+import { type EnsoConfigParseResult, incidentPolicyOf, parseEnsoConfig } from '@enso/core'
 import { startLauncher } from '@enso/core/log-process'
 import {
   ensoAgentDir,
@@ -95,7 +95,13 @@ const { listening } = startEnsoServer({
   // Enso's defaults, no setup commands — and said.
   threadSettings: {
     readUser: () => {
-      const fresh = parseEnsoConfig(readTextIfPresent(configPath))
+      // A file there that cannot be read at all (EACCES, EISDIR) is unreadable too, never a throw.
+      let fresh: EnsoConfigParseResult
+      try {
+        fresh = parseEnsoConfig(readTextIfPresent(configPath))
+      } catch (error: unknown) {
+        fresh = { kind: 'unreadable', reason: `could not be read: ${String(error)}` }
+      }
       if (fresh.kind === 'ok') return fresh.config
       log.error('{configPath} is unreadable, so your thread settings are not applied: {reason}', {
         configPath,

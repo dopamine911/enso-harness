@@ -2924,13 +2924,59 @@ test('⚠ Settings › Security over HTTP: saved only under the version read, ot
   writeFileSync(join(home, 'config.json'), '{"nope":1}')
   expect((await save({}, { 'If-Match': '*' })).status).toBe(422)
   expect(readFileSync(join(home, 'config.json'), 'utf8')).toBe('{"nope":1}')
-  const key = await request(url, '/api/settings/security/judge-key', {
-    method: 'PUT',
-    body: { value: 'ts-k-1' },
-    headers: {},
-  })
+  const storeKey = (value: string | null): Promise<Sent> =>
+    request(url, '/api/settings/security/judge-key', { method: 'PUT', body: { value }, headers: {} })
+  const key = await storeKey('ts-k-1')
   expect(JSON.parse(key.body)).toEqual({ judgeKeySet: true })
   expect((await send(url, '/api/settings/security', 'GET')).body).not.toContain('ts-k-1')
+  // A value `secrets.env` could not read back as written is refused, and the stored key stays.
+  expect((await storeKey('two words')).status).toBe(422)
+  expect(readFileSync(join(home, 'secrets.env'), 'utf8')).toBe('TYPESAFE_API_KEY=ts-k-1\n')
+  expect(JSON.parse((await storeKey(null)).body)).toEqual({ judgeKeySet: false })
+  expect(readFileSync(join(home, 'secrets.env'), 'utf8')).toBe('')
+})
+
+test('Settings › Security answers 404 when the server has no ENSO_HOME (#933)', async () => {
+  const { url } = await startWith(settlesAtOnce)
+  expect((await send(url, '/api/settings/security', 'GET')).status).toBe(404)
+  const key = await request(url, '/api/settings/security/judge-key', {
+    method: 'PUT',
+    body: { value: null },
+    headers: {},
+  })
+  expect(key.status).toBe(404)
+})
+
+test('⚠ Settings › Projects & threads over HTTP: saved only under the version read, a project mode under its canonical path, a bad file never written over (#934)', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'enso-934-route-'))
+  const app = join(home, 'app')
+  // A trailing slash: the resolver matches the key as `app`, so the page is answered `app` (#979 review).
+  writeFileSync(join(home, 'config.json'), JSON.stringify({ threads: { projects: { [`${app}/`]: 'off' } } }))
+  const { url } = await startWith(settlesAtOnce, {}, undefined, { ensoHome: home })
+  const read = await send(url, '/api/settings/projects', 'GET')
+  expect(JSON.parse(read.body).threads).toEqual({ projects: { [app]: 'off' } })
+  const save = (body: unknown, headers: Record<string, string>): Promise<Sent> =>
+    request(url, '/api/settings/projects', { method: 'PUT', body, headers })
+  const body = { threads: { projects: { [app]: 'copy' } } }
+  expect((await save(body, {})).status).toBe(428)
+  expect((await save(body, { 'If-Match': `"${'0'.repeat(64)}"` })).status).toBe(412)
+  expect((await save({ ...body, extra: 1 }, { 'If-Match': read.etag ?? '' })).status).toBe(400)
+  expect((await save(body, { 'If-Match': read.etag ?? '' })).status).toBe(200)
+  expect(JSON.parse(readFileSync(join(home, 'config.json'), 'utf8'))).toEqual(body)
+  writeFileSync(join(home, 'config.json'), '{"nope":1}')
+  expect((await save(body, { 'If-Match': '*' })).status).toBe(422)
+  expect(readFileSync(join(home, 'config.json'), 'utf8')).toBe('{"nope":1}')
+})
+
+test('Settings › Projects & threads answers 404 when the server has no ENSO_HOME, its trust route too (#934)', async () => {
+  const { url } = await startWith(settlesAtOnce)
+  expect((await send(url, '/api/settings/projects', 'GET')).status).toBe(404)
+  const trust = await request(url, '/api/settings/projects/trust', {
+    method: 'PUT',
+    body: { defaultProjectTrust: 'never' },
+    headers: {},
+  })
+  expect(trust.status).toBe(404)
 })
 
 test('⚠ the permission policy over HTTP: read with its ETag, saved only under the version read, refused with each problem, normalised, and reset with a backup (#474)', async () => {

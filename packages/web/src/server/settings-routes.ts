@@ -9,10 +9,14 @@ import {
   ensoLogger,
 } from '@enso/core'
 import type { Static, TSchema } from 'typebox'
+import type { WriteCondition } from '../host/atomic-file.ts'
 import type { ConfigSectionWrite } from '../host/config-file.ts'
-import type { WriteCondition } from '../host/permission-policy-file.ts'
 import { writeDefaultProjectTrust } from '../host/project-trust.ts'
-import { readProjectsSettings, writeProjectsSettings } from '../host/projects-config-file.ts'
+import {
+  type ProjectsSettingsPlaces,
+  readProjectsSettings,
+  writeProjectsSettings,
+} from '../host/projects-config-file.ts'
 import { readSecuritySettings, writeJudgeKey, writeSecuritySettings } from '../host/security-config-file.ts'
 import {
   answerJson,
@@ -44,6 +48,8 @@ export interface SettingsRoutesState {
   readonly ensoHome: string | undefined
   /** pi's agent directory, whose `settings.json` holds `defaultProjectTrust`. */
   readonly agentDir: string
+  /** A `threads.projects` key to the canonical path new trees match it as: the resolver's own. */
+  readonly canonical: (key: string) => string
 }
 
 export interface SettingsRoutes {
@@ -62,19 +68,17 @@ function readSettingsBody<Schema extends TSchema>(
   return readClosedJsonBody(request, response, { maxBytes: MAX_DIALOG_BODY_BYTES, capText, schema, name, requirement })
 }
 
-/** Where the settings files are: `ENSO_HOME`, and pi's agent dir. */
-interface SettingsPlaces {
-  readonly home: string
-  readonly agentDir: string
-}
-
 /** A `config.json` section's routes: its read, and its save's body, words and write. */
 interface ConfigSection<Schema extends TSchema, Read extends { path: string; etag?: string }> {
   readonly subject: WriteSubject
   readonly schema: Schema
   readonly requirement: string
-  readonly read: (places: SettingsPlaces) => Read
-  readonly write: (places: SettingsPlaces, body: Static<Schema>, condition: WriteCondition) => ConfigSectionWrite<Read>
+  readonly read: (places: ProjectsSettingsPlaces) => Read
+  readonly write: (
+    places: ProjectsSettingsPlaces,
+    body: Static<Schema>,
+    condition: WriteCondition,
+  ) => ConfigSectionWrite<Read>
 }
 
 const SECURITY_SECTION: ConfigSection<typeof EnsoSecuritySettingsWrite, EnsoSecuritySettingsRead> = {
@@ -89,8 +93,8 @@ const PROJECTS_SECTION: ConfigSection<typeof EnsoProjectsSettingsWrite, EnsoProj
   subject: 'projects settings',
   schema: EnsoProjectsSettingsWrite,
   requirement: 'a save carries `{ projects?, threads }`, each section whole, each key one `config.json` declares',
-  read: ({ home, agentDir }) => readProjectsSettings(home, agentDir),
-  write: ({ home, agentDir }, body, condition) => writeProjectsSettings(home, agentDir, body, condition),
+  read: (places) => readProjectsSettings(places),
+  write: (places, body, condition) => writeProjectsSettings(places, body, condition),
 }
 
 /**
@@ -102,7 +106,7 @@ const PROJECTS_SECTION: ConfigSection<typeof EnsoProjectsSettingsWrite, EnsoProj
 async function respondToConfigSection<Schema extends TSchema, Read extends { path: string; etag?: string }>(
   request: IncomingMessage,
   response: ServerResponse,
-  places: SettingsPlaces,
+  places: ProjectsSettingsPlaces,
   section: ConfigSection<Schema, Read>,
 ): Promise<void> {
   if (request.method === 'GET') {
@@ -153,7 +157,7 @@ async function respondToSideWrite<Schema extends TSchema, Answer extends object>
 }
 
 export function createSettingsRoutes(state: SettingsRoutesState): SettingsRoutes {
-  const { ensoHome, agentDir } = state
+  const { ensoHome, agentDir, canonical } = state
 
   /** The routes need the home; a server started without one says so instead of guessing a path. */
   function withHome(
@@ -174,7 +178,9 @@ export function createSettingsRoutes(state: SettingsRoutesState): SettingsRoutes
     const section = <Schema extends TSchema, Read extends { path: string; etag?: string }>(
       config: ConfigSection<Schema, Read>,
     ): true =>
-      withHome(request, response, (home) => respondToConfigSection(request, response, { home, agentDir }, config))
+      withHome(request, response, (home) =>
+        respondToConfigSection(request, response, { home, agentDir, canonical }, config),
+      )
     if (request.method === 'GET' && url === '/api/settings/security') return section(SECURITY_SECTION)
     if (request.method === 'PUT' && url === '/api/settings/security') return section(SECURITY_SECTION)
     if (request.method === 'PUT' && url === '/api/settings/security/judge-key') {

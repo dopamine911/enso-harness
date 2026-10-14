@@ -16,7 +16,15 @@ import { OptionSelect } from './option-select.tsx'
 import { PAGE_BUTTON, PAGE_INPUT, SUB_TITLE } from './page-styles.ts'
 import { linesOf } from './project-worktrees.tsx'
 import { fetchProjectsSettings, saveDefaultProjectTrust, saveProjectsSettings } from './projects-settings-connection.ts'
-import { ConflictNotice, SaveBar, SettingRow, SettingsFileSection, SourceLine, useSending } from './settings-rows.tsx'
+import {
+  ConflictNotice,
+  LooseningConfirm,
+  SaveBar,
+  SettingRow,
+  SettingsFileSection,
+  SourceLine,
+  useSending,
+} from './settings-rows.tsx'
 
 /**
  * Settings › Projects & threads (#934): your defaults for every project. `config.json`'s user-only
@@ -52,7 +60,7 @@ interface Draft {
   readonly tree: ModeChoice
   readonly setup: string
   readonly copy: string
-  /** A project's own mode, by canonical path: only the paths that have one. */
+  /** A project's own mode, by canonical path (the server answers each key so): only the paths that have one. */
   readonly projectModes: Readonly<Record<string, EnsoThreadTreeMode>>
 }
 
@@ -103,7 +111,12 @@ function rootsProblem(draft: Draft): string | undefined {
 
 function unsavedField(draft: Draft, saved: Draft, field: FieldName): boolean {
   if (field === 'tree') return draft.tree !== saved.tree
-  if (field === 'projectModes') return JSON.stringify(draft.projectModes) !== JSON.stringify(saved.projectModes)
+  // As a set of entries: a mode set and set back is moved to the end, not changed.
+  if (field === 'projectModes') {
+    const entries = (modes: Draft['projectModes']): string =>
+      JSON.stringify(Object.entries(modes).toSorted(([one], [other]) => one.localeCompare(other)))
+    return entries(draft.projectModes) !== entries(saved.projectModes)
+  }
   return JSON.stringify(linesOf(draft[field])) !== JSON.stringify(linesOf(saved[field]))
 }
 
@@ -154,26 +167,36 @@ function ListRow(props: {
   )
 }
 
+/** Said before trusting every undecided project: the one trust choice that protects less (#979 review). */
+const TRUST_ALWAYS_LOOSENS = 'Every project you add will run its own extensions and setup commands without asking.'
+
 /**
  * The trust an undecided project gets: pi's own key in pi's file, so it has its own Set. A project
- * decided on its page or in a thread keeps that decision whatever this says.
+ * decided on its page or in a thread keeps that decision whatever this says. Trusting them all
+ * protects less, so it is confirmed first, as Security's loosenings are; a file pi cannot read is
+ * said, and not set.
  */
 function DefaultTrust(props: {
   readonly value: EnsoDefaultProjectTrust
   readonly trustPath: string
+  readonly unreadable: string | undefined
   readonly fetchImpl: FetchLike | undefined
   readonly onSet: (value: EnsoDefaultProjectTrust) => void
 }): React.ReactNode {
   const id = 'projects-settings-trust'
   // Only what the reader picked: until then (and after a Set) the choice is what pi's file holds.
   const [picked, setPicked] = useState<EnsoDefaultProjectTrust | undefined>(undefined)
+  const [confirming, setConfirming] = useState(false)
   const choice = picked ?? props.value
+  const loosens = choice === 'always' && props.value !== 'always'
   const { working, problem, send } = useSending()
-  const set = (): void =>
+  const set = (): void => {
+    setConfirming(false)
     send(saveDefaultProjectTrust(choice, props.fetchImpl), (saved) => {
       setPicked(undefined)
       props.onSet(saved.defaultProjectTrust)
     })
+  }
   return (
     <SettingRow
       id={id}
@@ -200,17 +223,38 @@ function DefaultTrust(props: {
           id={id}
           value={choice}
           options={TRUST_CHOICES}
-          onChange={setPicked}
+          onChange={(next) => {
+            setPicked(next)
+            setConfirming(false)
+          }}
           className={PAGE_INPUT}
         />
-        <Button type="button" className={PAGE_BUTTON} disabled={working || choice === props.value} onClick={set}>
+        <Button
+          type="button"
+          className={PAGE_BUTTON}
+          disabled={working || confirming || choice === props.value || props.unreadable !== undefined}
+          onClick={loosens ? () => setConfirming(true) : set}
+        >
           Set
         </Button>
       </span>
-      {choice === 'always' && props.value !== 'always' ? (
+      {props.unreadable === undefined ? null : (
+        <FieldError>
+          {props.trustPath} could not be read, so nothing can be set here until the file is fixed: {props.unreadable}
+        </FieldError>
+      )}
+      {confirming ? (
+        <LooseningConfirm
+          loosenings={[TRUST_ALWAYS_LOOSENS]}
+          working={working}
+          onConfirm={set}
+          onCancel={() => setConfirming(false)}
+        />
+      ) : null}
+      {loosens && !confirming ? (
         <p role="note" className="flex items-start gap-2 rounded-sm border border-chart-3 p-3 text-sm">
           <TriangleAlertIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-chart-3" />
-          Every project you add will run its own extensions and setup commands without asking.
+          {TRUST_ALWAYS_LOOSENS}
         </p>
       ) : null}
       {problem === undefined ? null : <FieldError>{problem}</FieldError>}
@@ -331,6 +375,7 @@ function ProjectsForm({
           <DefaultTrust
             value={settings.defaultProjectTrust}
             trustPath={settings.trustPath}
+            unreadable={settings.trustUnreadable}
             fetchImpl={fetchImpl}
             onSet={(defaultProjectTrust) => onSaved({ ...settings, defaultProjectTrust })}
           />

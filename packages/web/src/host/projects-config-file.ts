@@ -1,7 +1,12 @@
 import { isAbsolute } from 'node:path'
-import { type EnsoProjectsSettingsRead, type EnsoProjectsSettingsWrite, type EnsoThreadsConfig } from '@enso/core'
+import type {
+  EnsoProjectsSettingsRead,
+  EnsoProjectsSettingsWrite,
+  EnsoThreadsConfig,
+  EnsoThreadTreeMode,
+} from '@enso/core'
+import type { WriteCondition } from './atomic-file.ts'
 import { type ConfigSectionWrite, readConfigFile, writeConfigSections } from './config-file.ts'
-import type { WriteCondition } from './permission-policy-file.ts'
 import { readDefaultProjectTrust } from './project-trust.ts'
 
 /**
@@ -12,19 +17,54 @@ import { readDefaultProjectTrust } from './project-trust.ts'
  * `config-file.ts` writes it. One more refusal here: a root that is neither absolute nor `~/` would
  * stop the server at its next start (`createProjectRegistry`), so it is never written.
  *
+ * ⚠ A PROJECT'S OWN MODE IS MATCHED BY CANONICAL PATH. The resolver (`readProjectThreadSettings`)
+ * applies the first `threads.projects` key whose canonical path is the project's, so `~/code/app`, a
+ * trailing slash or a symlink all name it. The read answers each key as that canonical path — the
+ * page's project rows are canonical — and a save writes it so; two keys naming one project are
+ * refused, since only one of them would apply.
+ *
  * `defaultProjectTrust` is pi's key, in pi's file: read and written in `project-trust.ts`.
  */
 
+/** Where the section's files are, and how a `threads.projects` key is matched. */
+export interface ProjectsSettingsPlaces {
+  /** `ENSO_HOME`: its `config.json`. */
+  readonly home: string
+  /** pi's agent directory: its `settings.json` holds `defaultProjectTrust`. */
+  readonly agentDir: string
+  /** A key as written to the canonical path the resolver matches it as (`canonicalConfigPath`). */
+  readonly canonical: (key: string) => string
+}
+
+/** `threads.projects` keyed by canonical path; of two keys naming one project, the first — the resolver's. */
+function canonicalModes(
+  modes: Readonly<Record<string, EnsoThreadTreeMode>>,
+  canonical: (key: string) => string,
+): Record<string, EnsoThreadTreeMode> {
+  const byPath: Record<string, EnsoThreadTreeMode> = {}
+  for (const [key, mode] of Object.entries(modes)) {
+    const path = canonical(key)
+    if (!Object.hasOwn(byPath, path)) byPath[path] = mode
+  }
+  return byPath
+}
+
 /** The user's `projects` and `threads`, pi's trust default, or why the config cannot be read. */
-export function readProjectsSettings(home: string, agentDir: string): EnsoProjectsSettingsRead {
+export function readProjectsSettings({ home, agentDir, canonical }: ProjectsSettingsPlaces): EnsoProjectsSettingsRead {
   const { parsed, ...file } = readConfigFile(home)
   const common = {
     ...file,
     ...readDefaultProjectTrust(agentDir),
   }
   if (parsed.kind === 'unreadable') return { kind: 'unreadable', ...common, reason: parsed.reason }
-  const { projects, threads } = parsed.config
-  return { kind: 'ok', ...common, ...(projects === undefined ? {} : { projects }), threads: threads ?? {} }
+  const { projects, threads = {} } = parsed.config
+  return {
+    kind: 'ok',
+    ...common,
+    ...(projects === undefined ? {} : { projects }),
+    threads:
+      threads.projects === undefined ? threads : { ...threads, projects: canonicalModes(threads.projects, canonical) },
+  }
 }
 
 /** @group Projects settings */
@@ -58,27 +98,35 @@ function problemOf(write: EnsoProjectsSettingsWrite): string | undefined {
 
 /**
  * Write `projects` and `threads` into the user's `config.json` under `condition`, every other key
- * kept. A file that is unreadable now, a root the server would refuse, or a result `parseEnsoConfig`
- * refuses, writes nothing.
+ * kept, each project's own mode under its canonical path. A file that is unreadable now, a root the
+ * server would refuse, two modes for one project, or a result `parseEnsoConfig` refuses, writes
+ * nothing.
  */
 export function writeProjectsSettings(
-  home: string,
-  agentDir: string,
+  places: ProjectsSettingsPlaces,
   write: EnsoProjectsSettingsWrite,
   condition: WriteCondition,
 ): ProjectsSettingsWrite {
   const problem = problemOf(write)
   if (problem !== undefined) return { kind: 'refused', reason: `nothing was saved: ${problem}` }
+  const asWritten = write.threads.projects ?? {}
+  const modes = canonicalModes(asWritten, places.canonical)
+  if (Object.keys(modes).length !== Object.keys(asWritten).length) {
+    return {
+      kind: 'refused',
+      reason: `nothing was saved: two of ${Object.keys(asWritten).join(', ')} name the same project, and only one would apply`,
+    }
+  }
   const roots = write.projects?.roots ?? []
-  const threads = prunedThreads(write.threads)
+  const threads = prunedThreads({ ...write.threads, projects: modes })
   return writeConfigSections(
-    home,
+    places.home,
     condition,
     ({ projects: _projects, threads: _threads, ...kept }) => ({
       ...kept,
       ...(roots.length === 0 ? {} : { projects: { roots } }),
       ...(threads === undefined ? {} : { threads }),
     }),
-    () => readProjectsSettings(home, agentDir),
+    () => readProjectsSettings(places),
   )
 }

@@ -70,15 +70,21 @@ function userSettings(agentDir: string): SettingsManager {
 
 /**
  * What a project nobody decided gets (#934): pi's `defaultProjectTrust` (`ask` when unset), and the
- * file it lives in — read by Settings › Projects & threads.
+ * file it lives in — read by Settings › Projects & threads. A file pi cannot read is `ask` too (pi
+ * reads it as no settings), so `trustUnreadable` says why, and the page says so rather than
+ * offering a Set that would be refused.
  */
 export function readDefaultProjectTrust(agentDir: string): {
   readonly trustPath: string
   readonly defaultProjectTrust: EnsoDefaultProjectTrust
+  readonly trustUnreadable?: string
 } {
+  const settings = userSettings(agentDir)
+  const unreadable = settings.drainErrors()
   return {
     trustPath: join(agentDir, 'settings.json'),
-    defaultProjectTrust: userSettings(agentDir).getDefaultProjectTrust(),
+    defaultProjectTrust: settings.getDefaultProjectTrust(),
+    ...(unreadable.length === 0 ? {} : { trustUnreadable: unreadable.map(({ error }) => error.message).join('; ') }),
   }
 }
 

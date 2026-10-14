@@ -9,7 +9,14 @@ import type {
 } from '@earendil-works/pi-classifier'
 import { classify as classifyLlamaCpp } from '@earendil-works/pi-classifier/api/llama-cpp-classify'
 import { classify as classifyTypeSafe } from '@earendil-works/pi-classifier/api/typesafe-system-one'
-import type { CommandJudge, EnsoJudgeAnswer, EnsoJudgeOutcome, EnsoJudgeQuestion, EnsoJudgeState } from '@enso/core'
+import {
+  type CommandJudge,
+  type EnsoJudgeAnswer,
+  type EnsoJudgeOutcome,
+  type EnsoJudgeQuestion,
+  type EnsoJudgeState,
+  localJudgeUrlProblem,
+} from '@enso/core'
 
 /**
  * The command judge's backends (#469, #535), on pi's classifier runtime: the #189 spike's tuned
@@ -253,22 +260,6 @@ export function createJevJudge(
   }
 }
 
-/** Hosts that are this machine: a `local` judge sends nothing anywhere else. */
-const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(['127.0.0.1', 'localhost', '[::1]'])
-
-/** The loopback base URL, or why it is not one. */
-function loopbackUrlOf(baseUrl: string): { readonly url: string } | { readonly problem: string } {
-  if (!URL.canParse(baseUrl)) return { problem: `the local judge's URL is not a URL: ${baseUrl}` }
-  const url = new URL(baseUrl)
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    return { problem: `the local judge's URL must be http(s), not ${url.protocol}` }
-  }
-  if (!LOOPBACK_HOSTS.has(url.hostname)) {
-    return { problem: `the local judge must run on this machine (a loopback address), not ${url.hostname}` }
-  }
-  return { url: baseUrl }
-}
-
 /**
  * The local backend (#532): a llama.cpp router on this machine, answering from its model's label
  * probabilities. ⚠ A URL that is not loopback sends nothing: every call is `unjudged`, with why.
@@ -276,9 +267,8 @@ function loopbackUrlOf(baseUrl: string): { readonly url: string } | { readonly p
 export function createLocalJudge(
   options: TransportOptions & { readonly baseUrl: string; readonly model: string },
 ): CommandJudge {
-  const endpoint = loopbackUrlOf(options.baseUrl)
-  if ('problem' in endpoint) {
-    const { problem } = endpoint
+  const problem = localJudgeUrlProblem(options.baseUrl)
+  if (problem !== undefined) {
     return { backend: 'local', judge: async (): Promise<EnsoJudgeOutcome> => ({ kind: 'unjudged', reason: problem }) }
   }
   const model: ClassifierModel<'llama-cpp-classify'> = {
@@ -287,7 +277,7 @@ export function createLocalJudge(
     name: options.model,
     api: 'llama-cpp-classify',
     provider: 'llama.cpp',
-    baseUrl: endpoint.url,
+    baseUrl: options.baseUrl,
     input: ['text'],
     cost: NO_COST,
     contextWindow: 32_768,

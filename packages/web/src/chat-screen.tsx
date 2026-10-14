@@ -444,7 +444,10 @@ function projectPageActions(
   }
 }
 
-/** A draft's launch panel's page actions (#877): a recent thread opens as a rail row does; Manage projects opens Projects. */
+/**
+ * A draft's launch panel's page actions (#877): a recent thread opens as a rail row does; Manage
+ * projects opens Projects; a Settings link (the incident card's halting hint, #933) opens its section.
+ */
 function useLaunchActions(
   navigate: PageNavigation['navigate'],
   resumeFrom: PageNavigation['resumeFrom'],
