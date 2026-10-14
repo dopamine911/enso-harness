@@ -31,6 +31,11 @@ import { join } from 'node:path'
  *
  * ⚠ `ENSO_HOME` is pinned the same way, for the same reason, since #551: see below.
  *
+ * ⚠ bun reads `bunfig.toml` from the process cwd only, so a `bun test` run from a package directory
+ * never sees the root's preload list. Every package holding tests carries its own bunfig naming this
+ * file (`packages/{core,harness,web}/bunfig.toml`, #586 and #912); `test/scratch-gate.test.ts` runs a
+ * leaky suite from each package's directory to hold it.
+ *
  * ⚠ The teardown is an `afterAll` in THIS preload, which bun runs once at the end of the whole
  * run — not a `process.on('exit')`: measured on bun 1.4.0, `bun test` ends without firing exit
  * or beforeExit listeners at all, so a cleanup registered there never ran (the first draft).
