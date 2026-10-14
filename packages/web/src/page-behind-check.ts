@@ -1,4 +1,4 @@
-import type { EnsoStoredThread } from '@enso/core'
+import { type EnsoStoredThread, ensoLogger } from '@enso/core'
 import { useEffect } from 'react'
 import { PAGE_HEALTH_TIMING, pageFault, reportPageFault } from './page-health.ts'
 import { isFixtureMode } from './page-mode.ts'
@@ -20,6 +20,9 @@ import { getThreadStores, threadListStore } from './thread-stores.ts'
  * once the page has said it is behind.
  */
 
+/** The check's own record: its reads failing, and reading again — the listing it reads has no UI. */
+const log = ensoLogger('browser', 'page', 'check')
+
 /** One followed thread as the check reads it: when the page last applied it. */
 interface FollowedThread {
   readonly threadId: string
@@ -34,6 +37,7 @@ interface BehindFinding {
 
 interface Watched {
   readonly signature: string
+  /** When this read was ASKED: the listing is the server as of then, or later. */
   readonly readAt: number
   /** When a read first found the row moved with the page silent; undefined while it keeps up. */
   readonly aheadSince: number | undefined
@@ -65,10 +69,10 @@ function aheadDetail(row: EnsoStoredThread, appliedAt: number, now: number): str
 }
 
 /**
- * The check, as a fold over reads: each read's rows and the page's threads in, the first thread
- * the server has been ahead on for `staleMs` out. A thread not followed, or not listed (a draft
- * the server holds nothing of), is not watched — and forgotten, so a follow that reopens starts
- * clean.
+ * The check, as a fold over reads: each read's rows, the time it was asked, and the page's threads
+ * in, the first thread the server has been ahead on for `staleMs` out. A thread not followed, or not
+ * listed (a draft the server holds nothing of), is not watched — and forgotten, so a follow that
+ * reopens starts clean.
  */
 function createBehindCheck(): (
   now: number,
@@ -109,13 +113,24 @@ export function usePageBehindCheck(): void {
     const check = createBehindCheck()
     const listing = createStoredThreadsStore()
     let stopped = false
+    /** The last read failed: its failure is logged once, and its recovery once. */
+    let failing = false
     const read = async (): Promise<void> => {
       if (stopped || pageFault.get() !== undefined) return
       if (document.visibilityState === 'visible' && followedThreads().length > 0) {
+        // ⚠ The read's time is when it was ASKED: the listing is the server as of then, or later. A
+        // time taken at the answer would count what the page applied while a slow read was out as
+        // applied before it, and a run's last change landing then would look unseen ever after.
+        const requestedAt = Date.now()
         await listing.refresh()
         // The page's side is read AFTER the server's: what it applied while the read was out counts.
         const { rows, error } = listing.get()
-        const finding = error === undefined ? check(Date.now(), followedThreads(), rows) : undefined
+        if ((error !== undefined) !== failing) {
+          failing = error !== undefined
+          if (failing) log.warn('the server check cannot read the listing: {error}', { error })
+          else log.info('the server check reads the listing again')
+        }
+        const finding = error === undefined ? check(requestedAt, followedThreads(), rows) : undefined
         if (finding !== undefined) {
           reportPageFault({ trigger: 'behind', threadId: finding.threadId, error: finding.detail })
           return
