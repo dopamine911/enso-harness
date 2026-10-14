@@ -27,9 +27,9 @@
  */
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { RUNS_DIRECTORY, WORKER_LOCK, WORKER_LOG } from './review-paths.ts'
-import { reviewPullRequest } from './review-pr.ts'
-import { drainReviewQueue } from './review-queue.ts'
+import { RUNS_DIRECTORY, SHORT_HEAD_LENGTH, WORKER_LOCK, WORKER_LOG } from './review-paths.ts'
+import { removeAbandonedWorktrees, reviewPullRequest } from './review-pr.ts'
+import { finishQueuedReview, type QueuedReview, takeQueuedReviews } from './review-queue.ts'
 
 const DEFAULT_POLL_SECONDS = 180
 /** How often the queue is checked between polls. */
@@ -97,8 +97,11 @@ export interface ReviewOutcome {
   readonly head: string | undefined
 }
 
-/** Reviews each pull request in turn; one that fails is logged and does not stop the rest. */
-async function reviewEach(numbers: readonly number[]): Promise<ReviewOutcome[]> {
+/**
+ * Reviews each pull request in turn; one that fails is logged and does not stop the rest. A queue entry
+ * is finished right after ITS review, so a worker stopped mid-pass leaves the rest queued.
+ */
+async function reviewEach(numbers: readonly number[], taken: readonly QueuedReview[]): Promise<ReviewOutcome[]> {
   const outcomes: ReviewOutcome[] = []
   for (const number of numbers) {
     try {
@@ -109,13 +112,14 @@ async function reviewEach(numbers: readonly number[]): Promise<ReviewOutcome[]> 
       log(`#${number}: review failed — ${String(error)}`)
       outcomes.push({ number, failed: true, head: undefined })
     }
+    const entry = taken.find((queued) => queued.number === number)
+    if (entry !== undefined) finishQueuedReview(entry)
   }
   return outcomes
 }
 
 /** How many times a review may fail at one head before the worker stops trying it by itself. */
 export const MAXIMUM_ATTEMPTS_PER_HEAD = 3
-const SHORT_SHA_LENGTH = 7
 
 /** Failed attempts so far, per pull request, at the head they failed at. */
 export type FailureCounts = Map<number, { readonly head: string | undefined; readonly count: number }>
@@ -163,7 +167,7 @@ export function afterReviews(
     }
     lastSeenHeads.set(outcome.number, head)
     givenUp.push(
-      `#${outcome.number}: giving up at ${head.slice(0, SHORT_SHA_LENGTH)} after ${count} failed reviews; bun run review-notify ${outcome.number} to retry`,
+      `#${outcome.number}: giving up at ${head.slice(0, SHORT_HEAD_LENGTH)} after ${count} failed reviews; bun run review-notify ${outcome.number} to retry`,
     )
   }
   return givenUp
@@ -182,7 +186,9 @@ async function workerPass(lastSeenHeads: Map<number, string>, failures: FailureC
       log(`poll failed — ${String(error)}`)
     }
   }
-  const outcomes = await reviewEach(pullRequestsToReview(drainReviewQueue(), open, lastSeenHeads))
+  const taken = takeQueuedReviews()
+  const queued = taken.map((queuedEntry) => queuedEntry.number)
+  const outcomes = await reviewEach(pullRequestsToReview(queued, open, lastSeenHeads), taken)
   for (const line of afterReviews(lastSeenHeads, failures, open, outcomes)) log(line)
 }
 
@@ -247,9 +253,15 @@ async function runUntilStopped(
   }
 }
 
+/** Removes, and logs, the worktrees runs left when their worker died mid-review. Only under the worker lock. */
+function cleanAbandonedRuns(): void {
+  for (const folderName of removeAbandonedWorktrees()) log(`removed the worktree of an abandoned run: ${folderName}`)
+}
+
 async function main(): Promise<void> {
   const options = parseWorkerArguments(process.argv.slice(2))
   if (!holdWorkerLock()) return
+  cleanAbandonedRuns()
   const pollMilliseconds = options.pollSeconds * MILLISECONDS_PER_SECOND
   const lastSeenHeads = options.reviewExisting ? new Map<number, string>() : baselineHeads()
   log(

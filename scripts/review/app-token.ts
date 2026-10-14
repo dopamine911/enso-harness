@@ -119,37 +119,69 @@ export function readTokenPermissions(installationPermissions: unknown): Record<s
   }
 }
 
-/** Who a run is on GitHub: the model's read-only token, the runner's posting token, and the login they post as. */
+/** Who a run is on GitHub: the model's read-only token, and the login the runner posts as. */
 export interface ReviewIdentity {
   readonly readToken: string
-  readonly postToken: string
   /** `<app-slug>[bot]`: the author of the status comment a run updates. */
   readonly login: string
 }
 
+/** The App's JWT, signed now from the key on disk: each mint signs its own, so none outlives its ten minutes. */
+function freshJsonWebToken(config: ReviewAppConfig): string {
+  return appJsonWebToken(config.appId, readFileSync(config.privateKeyPath, 'utf8'))
+}
+
+/** A one-hour installation token for ONE repository, with `permissions`. */
+async function installationToken(
+  fetchGithub: GithubFetch,
+  config: ReviewAppConfig,
+  repositoryName: string,
+  permissions: Readonly<Record<string, string>>,
+): Promise<string> {
+  const answer = await githubJson(
+    fetchGithub,
+    `/app/installations/${config.installationId}/access_tokens`,
+    freshJsonWebToken(config),
+    { repositories: [repositoryName], permissions },
+  )
+  if (typeof answer.token !== 'string') throw new Error('GitHub answered without a token')
+  return answer.token
+}
+
 /**
- * Two one-hour installation tokens for ONE repository (`repositoryName`, without its owner), and
- * the App's bot login.
+ * The model's read-only token for ONE repository (`repositoryName`, without its owner), and the App's
+ * bot login. The runner's posting token is minted separately, right before the post
+ * (`reviewAppPostToken`), so a long run cannot outlive it.
  */
 export async function reviewAppIdentity(
   config: ReviewAppConfig,
   repositoryName: string,
   fetchGithub: GithubFetch = fetch,
 ): Promise<ReviewIdentity> {
-  const jsonWebToken = appJsonWebToken(config.appId, readFileSync(config.privateKeyPath, 'utf8'))
-  const tokenPath = `/app/installations/${config.installationId}/access_tokens`
-  const app = await githubJson(fetchGithub, '/app', jsonWebToken)
-  const installation = await githubJson(fetchGithub, `/app/installations/${config.installationId}`, jsonWebToken)
-  const read = await githubJson(fetchGithub, tokenPath, jsonWebToken, {
-    repositories: [repositoryName],
-    permissions: readTokenPermissions(installation.permissions),
-  })
-  const post = await githubJson(fetchGithub, tokenPath, jsonWebToken, {
-    repositories: [repositoryName],
-    permissions: POST_TOKEN_PERMISSIONS,
-  })
-  if (typeof read.token !== 'string' || typeof post.token !== 'string' || typeof app.slug !== 'string') {
-    throw new Error('GitHub answered without a token or an App slug')
-  }
-  return { readToken: read.token, postToken: post.token, login: `${app.slug}[bot]` }
+  const app = await githubJson(fetchGithub, '/app', freshJsonWebToken(config))
+  const installation = await githubJson(
+    fetchGithub,
+    `/app/installations/${config.installationId}`,
+    freshJsonWebToken(config),
+  )
+  const readToken = await installationToken(
+    fetchGithub,
+    config,
+    repositoryName,
+    readTokenPermissions(installation.permissions),
+  )
+  if (typeof app.slug !== 'string') throw new Error('GitHub answered without an App slug')
+  return { readToken, login: `${app.slug}[bot]` }
+}
+
+/**
+ * The runner's posting token (`pull_requests: write`), minted when it is about to post. ⚠ Minted at the
+ * start of a run, it expired after an hour, and a run that long would have failed to post (#981 Part 4).
+ */
+export function reviewAppPostToken(
+  config: ReviewAppConfig,
+  repositoryName: string,
+  fetchGithub: GithubFetch = fetch,
+): Promise<string> {
+  return installationToken(fetchGithub, config, repositoryName, POST_TOKEN_PERMISSIONS)
 }

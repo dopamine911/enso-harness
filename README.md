@@ -351,7 +351,7 @@ choose whether and where to share the bundle.
 | 12 | `site` | builds the docs site and crawls every built page for dead links |
 | 13 | `crap` | no function at CRAP ≥ 30 from measured coverage, or over its own pin in `crap-pins.json` |
 
-Twenty-four of those tests are **gates**: tests about the source tree rather than about behaviour — "no
+Twenty-five of those tests are **gates**: tests about the source tree rather than about behaviour — "no
 production `console.*`", "every documented export is grouped", "every diagram parses". Each one names
 its offenders rather than counting them, so the failure message is the fix.
 

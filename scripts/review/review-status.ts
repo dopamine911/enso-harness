@@ -10,38 +10,31 @@
  *   - THE WORKER: the lock's pid, whether that process is alive, how long it has run, and which
  *     checkout (and commit) it runs from. Its code is that checkout's: a worker started before a merge
  *     runs the old code until restarted.
- *   - THE QUEUE: the pull requests notified and not yet taken.
- *   - IN PROGRESS: a run folder whose `tree/` worktree still exists is a review under way (the worktree
- *     is removed when a review ends, unless its worker was killed), with its elapsed time and its last
- *     tool call. With no worker running, such a folder is shown as abandoned.
+ *   - THE QUEUE: the pull requests notified whose review has not ended: an entry stays until its
+ *     review ends, so the review in progress is listed too.
+ *   - IN PROGRESS: a run folder whose `tree/` worktree still exists, and whose owning process (its
+ *     `pid` file: the worker, or a `bun run review`) is alive, with its elapsed time and its last tool
+ *     call. A folder that kept its worktree after its process died is shown as abandoned; the next
+ *     worker removes it at start.
  *   - RECENT: the last lines of `worker.log`, which the worker appends every line it prints to.
  */
 
 import { existsSync, readdirSync, readFileSync, readlinkSync } from 'node:fs'
 import { join } from 'node:path'
-import { RUNS_DIRECTORY, WORKER_LOCK, WORKER_LOG } from './review-paths.ts'
+import {
+  type RunFolder,
+  RUNS_DIRECTORY,
+  runFolderOf,
+  runOwnerIsAlive,
+  WORKER_LOCK,
+  WORKER_LOG,
+} from './review-paths.ts'
 import { queuedReviews } from './review-queue.ts'
 
-/** A run folder's name, as `review-pr.ts` makes it: `pr-<number>-<short head>-<start, epoch ms>`. */
-const RUN_DIRECTORY_NAME = /^pr-(\d+)-([0-9a-f]+)-(\d+)$/
 const RECENT_LOG_LINES = 8
 const MILLISECONDS_PER_SECOND = 1000
 const SECONDS_PER_MINUTE = 60
 const MINUTES_PER_HOUR = 60
-
-/** A run folder's name, read back. */
-export interface RunFolder {
-  readonly number: number
-  readonly shortHead: string
-  readonly startedAt: number
-}
-
-/** The run folder a name describes, or `undefined` for anything else in the directory. */
-export function runFolderOf(name: string): RunFolder | undefined {
-  const match = RUN_DIRECTORY_NAME.exec(name)
-  if (match === null) return undefined
-  return { number: Number(match[1]), shortHead: match[2] ?? '', startedAt: Number(match[3]) }
-}
 
 /** A duration as a person reads it: `42s`, `3m 05s`, `1h 12m`. */
 export function readableDuration(milliseconds: number): string {
@@ -85,12 +78,19 @@ export interface ReviewStatus {
   readonly worker:
     | { readonly kind: 'none' }
     | { readonly kind: 'stale'; readonly pid: number }
-    | { readonly kind: 'running'; readonly pid: number; readonly uptime: string; readonly checkout: string }
+    | {
+        readonly kind: 'running'
+        readonly pid: number
+        readonly uptime: string
+        readonly checkout: string
+      }
   readonly queued: readonly number[]
   readonly inProgress: readonly {
     readonly run: RunFolder
     readonly elapsed: string
     readonly lastCall: string | undefined
+    /** Whether the process that owns the run is alive; a dead owner's leftover is abandoned. */
+    readonly live: boolean
   }[]
   readonly recent: readonly string[]
 }
@@ -104,15 +104,12 @@ function workerLine(worker: ReviewStatus['worker']): string {
 /** The status as the terminal shows it. */
 export function renderReviewStatus(status: ReviewStatus): string {
   const queued = status.queued.length === 0 ? 'empty' : status.queued.map((number) => `#${number}`).join(' ')
-  // With no worker running, a run folder that still has its worktree is a review whose worker died
-  // (SIGKILL, a closed terminal, a reboot): its `finally` never removed the worktree (#993's review).
-  const label = status.worker.kind === 'running' ? 'in progress' : 'abandoned  '
   const inProgress =
     status.inProgress.length === 0
       ? ['in progress: nothing']
       : status.inProgress.map(
           (current) =>
-            `${label}: #${current.run.number} at ${current.run.shortHead}, started ${current.elapsed} ago; last call: ${current.lastCall ?? 'none yet'}`,
+            `${current.live ? 'in progress' : 'abandoned  '}: #${current.run.number} at ${current.run.shortHead}, started ${current.elapsed} ago; last call: ${current.lastCall ?? 'none yet'}`,
         )
   const recent = status.recent.length === 0 ? ['  (no worker.log yet)'] : status.recent.map((line) => `  ${line}`)
   return [workerLine(status.worker), `queue:       ${queued}`, ...inProgress, 'recent:', ...recent, ''].join('\n')
@@ -127,7 +124,8 @@ function run(command: readonly string[]): string | undefined {
  * The worker, from what was read: the lock's text (`undefined`: no lock), the seconds its pid has run
  * as `ps -o etimes=` prints them (`undefined` or empty: no such process), and its checkout's
  * description. Elapsed seconds, not a start time: `ps -o lstart=` prints a locale-dependent local date
- * that `new Date()` may not parse (#993's review).
+ * that `new Date()` may not parse (#993's review). ⚠ LINUX ONLY, as `checkoutOf` is: `etimes` is a procps
+ * field, and a `ps` without it (BSD, macOS) answers nothing, which reads as a stale lock.
  */
 export function workerFrom(
   lockText: string | undefined,
@@ -167,7 +165,14 @@ function readInProgress(now: number): ReviewStatus['inProgress'] {
     if (runFolder === undefined || !existsSync(join(RUNS_DIRECTORY, folderName, 'tree'))) return []
     const decisionLog = join(RUNS_DIRECTORY, folderName, 'tool-calls.jsonl')
     const lastCall = existsSync(decisionLog) ? lastToolCall(readFileSync(decisionLog, 'utf8')) : undefined
-    return [{ run: runFolder, elapsed: readableDuration(now - runFolder.startedAt), lastCall }]
+    return [
+      {
+        run: runFolder,
+        elapsed: readableDuration(now - runFolder.startedAt),
+        lastCall,
+        live: runOwnerIsAlive(join(RUNS_DIRECTORY, folderName)),
+      },
+    ]
   })
 }
 
