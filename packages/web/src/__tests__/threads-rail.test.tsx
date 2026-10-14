@@ -918,7 +918,9 @@ test('⚠ same-title threads fold within a day, at the first one’s place; a dr
 })
 
 test('the five-row cap counts rows of stored threads alone — a fold is one row, a row with an open thread always shows (#875)', () => {
-  const now = pageClock.get()
+  // A fixed midday, not the page clock: the threads below reach 45 minutes back, so in the first 45
+  // minutes after local midnight (UTC under `bun test`) some fell into Yesterday and the fold split.
+  const now = new Date(2026, 9, 13, 15, 0)
   const stored = (index: number, title: string): EnsoStoredThread =>
     storedIn('p-launch', `s${index}`, { title, lastActivityAt: new Date(now.getTime() - index * 60_000).toISOString() })
   const layout = sectionLayout(
