@@ -18,11 +18,11 @@
  * Everything else is refused, including MCP tools, subagents and edits.
  *
  * ⚠ "ONE PLAIN COMMAND" IS STRICTER THAN A PREFIX. `gh pr view 1; rm -rf ~` starts with
- * `gh pr view`. So a command is refused if it chains, pipes, substitutes or redirects
- * (`;`, `&`, `|`, `` ` ``, `$(`, `>`, `<`, a newline). The one exception is a heredoc
- * (`<<'EOF'`), the shape the workflow's prompt posts with (`gh pr comment N --body-file -`). Its
- * BODY is the review's markdown, full of `|` table pipes, so only its FIRST line is checked, and
- * nothing may follow the closing delimiter.
+ * `gh pr view`. So a command's first line may hold only plain characters (`PLAIN_FIRST_LINE`: no
+ * shell operator, `$`, `~`, quote, `/` or `:`), and may not name another repository. The one
+ * multi-line shape is the post, `gh pr comment <number> --body-file -` fed a QUOTED heredoc
+ * (`<<'EOF'`): its body is the review's markdown, full of `|` table pipes, so only its first line is
+ * checked, and nothing may follow the closing delimiter.
  *
  *   bun scripts/review/tool-grant-hook.ts <grant.json>   (Claude Code pipes the tool call on stdin)
  */
@@ -113,13 +113,17 @@ export type ToolDecision =
 /** `Bash(<prefix>:*)`: the prefix captured. */
 const BASH_PREFIX_ENTRY = /^Bash\((.+):\*\)$/
 /**
- * The only characters a command's first line may hold: words, numbers, flags, `owner/name`, comma
- * lists. ⚠ An ALLOWLIST, not a list of dangerous syntax. #989's review found three ways through a
- * granted prefix that a composition denylist missed: `"$GH_TOKEN"` (expansion), `-F ~/.ssh/id`
- * (home), and a file path to `--body-file`. So no `$`, `~`, quote, glob, backslash or shell operator
- * ever reaches a granted command; the prompt gives every value it needs literally.
+ * The only characters a command's first line may hold: words, numbers, flags, comma lists.
+ * ⚠ An ALLOWLIST, not a list of dangerous syntax. #989's reviews found ways through a granted
+ * prefix that a composition denylist missed: `"$GH_TOKEN"` (expansion), `-F ~/.ssh/id` (home), a
+ * file path to `--body-file`, and `--repo acme/private` or a pull request URL (another repository's
+ * text, read and then posted). So no `$`, `~`, quote, glob, backslash, shell operator, `/` or `:`
+ * reaches a granted command. The prompt's one variable, `$PR_NUMBER`, is filled before the reviewer
+ * sees it (`workflow-config.ts#fillPrompt`).
  */
-const PLAIN_FIRST_LINE = /^[A-Za-z0-9 ._:/=,@+-]+$/
+const PLAIN_FIRST_LINE = /^[A-Za-z0-9 ._=,@+-]+$/
+/** A flag that points `gh` at another repository: refused even when its value would pass the allowlist. */
+const OTHER_REPOSITORY_FLAG = /(?:^| )(?:-R|--repo)(?:[ =]|$)/
 /**
  * A first line ending in a QUOTED heredoc operator: `… <<'EOF'`, `<< "END"`. Groups: the command,
  * the quote, the delimiter. ⚠ The quote is required: with `<<EOF`, bash expands `$(…)`, backticks
@@ -179,11 +183,16 @@ function decideBash(grant: ToolGrant, command: string): ToolDecision {
       reason: `one plain command only: letters, numbers and flags, no $ ~ quotes or shell syntax (allowed: ${prefixes.join(', ')}; ${postShape})`,
     }
   }
+  if (OTHER_REPOSITORY_FLAG.test(parts.firstLine)) {
+    return { kind: 'block', reason: 'this review reads only its own pull request: no -R or --repo' }
+  }
   const prefix = prefixes.find((candidate) => startsWithCommand(parts.firstLine, candidate))
   if (prefix === undefined) {
     return { kind: 'block', reason: `not in the review's tool grant (allowed: ${prefixes.join(', ')})` }
   }
-  const isPost = prefix === POST_COMMAND_PREFIX
+  // From the command, not from which granted entry matched: a broader entry (`Bash(gh pr:*)`) listed
+  // first would otherwise skip every post check (#989's review).
+  const isPost = startsWithCommand(parts.firstLine, POST_COMMAND_PREFIX)
   const hasHeredoc = parts.heredocBody !== undefined
   if (hasHeredoc && !isPost) {
     return { kind: 'block', reason: `only the post takes a heredoc: ${postShape}` }

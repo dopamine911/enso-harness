@@ -129,16 +129,26 @@ export function statusCommentBody(run: {
   return `${STATUS_MARKER}\n<!-- local-review head=${run.headSha} scope=${run.scope} -->\n✅ **Claude PR review** ran locally on \`${short}\` (${run.scope}), with docker-agent, configured from \`${REVIEW_WORKFLOW_PATH}\`.${exitNote}`
 }
 
-/** A pull request comment, as much of one as `reviewCommentsSince` reads. */
+/** A pull request comment, as much of one as a run reads. */
 export interface IssueComment {
+  readonly id: number
   readonly body: string
   readonly created_at: string
+  /** The login that wrote it. */
+  readonly author: string
 }
 
-/** The review comments posted at or after `since` (ISO time): those that begin with the template's heading. */
-export function reviewCommentsSince(comments: readonly IssueComment[], since: string): IssueComment[] {
+/**
+ * The review comments `author` posted at or after `since` (ISO time): those that begin with the
+ * template's heading. ⚠ By author too: the Actions reviewer, or anyone, posting a `## Code Review`
+ * during a run would otherwise count as this run's post (#989's review).
+ */
+export function reviewCommentsSince(comments: readonly IssueComment[], since: string, author: string): IssueComment[] {
   return comments.filter(
-    (comment) => comment.created_at >= since && comment.body.trimStart().startsWith(REVIEW_COMMENT_HEADING),
+    (comment) =>
+      comment.author === author &&
+      comment.created_at >= since &&
+      comment.body.trimStart().startsWith(REVIEW_COMMENT_HEADING),
   )
 }
 
@@ -187,11 +197,22 @@ function repositoryName(): string {
   return run(['gh', 'repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner']).trim()
 }
 
-/** The status comment's id and body, when there is one. */
-function findStatusComment(repository: string, number: number): { id: number; body: string } | undefined {
-  const query = `map(select(.body | startswith("${STATUS_MARKER}"))) | .[0] // empty | {id, body}`
-  const found = run(['gh', 'api', `repos/${repository}/issues/${number}/comments`, '--paginate', '--jq', query]).trim()
-  return found.length === 0 ? undefined : (JSON.parse(found) as { id: number; body: string })
+/**
+ * Every comment on the pull request, one per line. ⚠ `--paginate` runs `--jq` on EACH page, so a
+ * filter that builds one array prints one array per page, which is not one JSON document past 30
+ * comments (#989's review); a filter that prints one object per comment is.
+ */
+function pullRequestComments(repository: string, number: number): IssueComment[] {
+  const filter = '.[] | {id, body, created_at, author: .user.login}'
+  return run(['gh', 'api', `repos/${repository}/issues/${number}/comments`, '--paginate', '--jq', filter])
+    .split('\n')
+    .filter((line) => line.trim().length > 0)
+    .map((line) => JSON.parse(line) as IssueComment)
+}
+
+/** The status comment, when there is one. */
+function findStatusComment(repository: string, number: number): IssueComment | undefined {
+  return pullRequestComments(repository, number).find((comment) => comment.body.startsWith(STATUS_MARKER))
 }
 
 function upsertStatusComment(repository: string, number: number, body: string): void {
@@ -244,7 +265,7 @@ function restoreBaseOwnedPaths(tree: string, baseSha: string): void {
   }
 }
 
-/** Builds `.review-context/`; answers why the comment list is missing, when it is. */
+/** Builds `.review-context/`; answers why the comment list could not be built, when its command failed. */
 function buildReviewContext(
   tree: string,
   plan: Extract<ReviewPlan, { kind: 'review' }>,
@@ -297,19 +318,10 @@ interface ReviewOptions {
   readonly dryRun: boolean
 }
 
-/** Whether a review comment reached the pull request after `since`: asked of GitHub, not inferred. */
+/** Whether this machine's `gh` login posted a review comment after `since`: asked of GitHub, not inferred. */
 function reviewWasPosted(repository: string, number: number, since: string): boolean {
-  const comments = JSON.parse(
-    run([
-      'gh',
-      'api',
-      `repos/${repository}/issues/${number}/comments`,
-      '--paginate',
-      '--jq',
-      '[.[] | {body, created_at}]',
-    ]),
-  ) as IssueComment[]
-  return reviewCommentsSince(comments, since).length > 0
+  const login = run(['gh', 'api', 'user', '--jq', '.login']).trim()
+  return reviewCommentsSince(pullRequestComments(repository, number), since, login).length > 0
 }
 
 interface ReviewRun {

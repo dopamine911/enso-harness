@@ -23,6 +23,13 @@ const LIST_STEP_NAME = 'List the comments this run puts at risk'
 
 /** `--allowedTools "A,B(c:*)"` inside the step's `claude_args`: the quoted list. */
 const ALLOWED_TOOLS_ARGUMENT = /--allowedTools\s+"([^"]+)"/
+/**
+ * The prompt's shell variable for the pull request's number, as written in its commands
+ * (`gh pr diff $PR_NUMBER`). ⚠ Filled with the number here: the reviewer's shell has no such
+ * variable, and the grant hook refuses any `$` in a command (#989's review found the reviewer
+ * refused on the first command the prompt gives it).
+ */
+const PULL_REQUEST_NUMBER_VARIABLE = /\$PR_NUMBER\b/g
 /** A GitHub expression, `${{ … }}`, with the expression inside captured. */
 const WORKFLOW_EXPRESSION = /\$\{\{\s*([^}]+?)\s*\}\}/g
 /** The touched-comments command's `--base` argument, which the workflow fills from an env var. */
@@ -155,9 +162,10 @@ export class UnknownPromptExpressionError extends Error {
 }
 
 /**
- * The prompt with its `${{ … }}` expressions filled from a local run's values. Each expression the
- * workflow uses today is listed by its exact text; any other throws, so a new expression added to
- * the workflow is caught here instead of reaching the model as literal `${{ … }}` text.
+ * The prompt with its `${{ … }}` expressions, and its `$PR_NUMBER`, filled from a local run's
+ * values. Each expression the workflow uses today is listed by its exact text; any other throws, so
+ * a new expression added to the workflow is caught here instead of reaching the model as literal
+ * `${{ … }}` text.
  */
 export function fillPrompt(template: string, values: PromptValues): string {
   const known: Record<string, string> = {
@@ -166,9 +174,11 @@ export function fillPrompt(template: string, values: PromptValues): string {
     "needs.touched-comments.outputs.scope || 'full'": values.scope,
     'github.event.pull_request.head.sha': values.headSha,
   }
-  return template.replace(WORKFLOW_EXPRESSION, (_whole, expression: string) => {
-    const value = known[expression]
-    if (value === undefined) throw new UnknownPromptExpressionError(expression)
-    return value
-  })
+  return template
+    .replace(WORKFLOW_EXPRESSION, (_whole, expression: string) => {
+      const value = known[expression]
+      if (value === undefined) throw new UnknownPromptExpressionError(expression)
+      return value
+    })
+    .replace(PULL_REQUEST_NUMBER_VARIABLE, String(values.pullRequestNumber))
 }

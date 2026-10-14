@@ -41,6 +41,9 @@ test('⚠ the real workflow yields the prompt, the read-only grant and the comme
 test("every expression in the real workflow's prompt is one the local review fills (#981)", () => {
   const prompt = fillPrompt(readReviewWorkflow(workflowText).promptTemplate, VALUES)
   expect(prompt).not.toContain('${{')
+  // The reviewer's shell has no $PR_NUMBER, and the grant refuses `$` (#989's review).
+  expect(prompt).not.toContain('$PR_NUMBER')
+  expect(prompt).toContain('gh pr diff 42')
   expect(prompt).toContain('PR NUMBER: 42')
   expect(prompt).toContain('REVIEW SCOPE: new-commits')
   expect(prompt).toContain(`HEAD: ${'f'.repeat(40)}`)

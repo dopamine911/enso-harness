@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
 import {
   claudeSessionFolder,
+  type IssueComment,
   lastReviewedHeadOf,
   parseReviewArguments,
   planReview,
@@ -83,16 +84,23 @@ test('⚠ a review posted before docker-agent failed is reported as posted, with
  * ⚠ POSTED IS WHAT IS ON THE PULL REQUEST. A hook allows a post before `gh` runs it, so "allowed"
  * would record a head nobody reviewed when the post then failed (#989's review).
  */
-test('a review counts as posted only when a comment in the template reached the pull request after the run began', () => {
+test('a review counts as posted only when this login posted a comment in the template after the run began', () => {
   const since = '2026-10-14T14:00:00Z'
+  const comment = (body: string, created_at: string, author = 'me'): IssueComment => ({
+    id: 1,
+    body,
+    created_at,
+    author,
+  })
   const comments = [
-    { body: '## Code Review\n\n### Overview\nold', created_at: '2026-10-14T13:00:00Z' },
-    { body: `${STATUS_MARKER}\n✅`, created_at: '2026-10-14T14:05:00Z' },
-    { body: 'Thanks, fixed in abc1234.', created_at: '2026-10-14T14:06:00Z' },
+    comment('## Code Review\n\n### Overview\nold', '2026-10-14T13:00:00Z'),
+    comment(`${STATUS_MARKER}\n✅`, '2026-10-14T14:05:00Z'),
+    comment('Thanks, fixed in abc1234.', '2026-10-14T14:06:00Z'),
+    comment('## Code Review\nfrom someone else', '2026-10-14T14:06:30Z', 'claude[bot]'),
   ]
-  expect(reviewCommentsSince(comments, since)).toEqual([])
-  const posted = { body: '## Code Review (commits pushed up to add4fef)\n…', created_at: '2026-10-14T14:07:00Z' }
-  expect(reviewCommentsSince([...comments, posted], since)).toEqual([posted])
+  expect(reviewCommentsSince(comments, since, 'me')).toEqual([])
+  const posted = comment('## Code Review (commits pushed up to add4fef)\n…', '2026-10-14T14:07:00Z')
+  expect(reviewCommentsSince([...comments, posted], since, 'me')).toEqual([posted])
 })
 
 test("Claude Code's session folder for a directory, named as Claude Code names it", () => {
