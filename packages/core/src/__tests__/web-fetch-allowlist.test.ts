@@ -203,6 +203,16 @@ test('⚠ a link loop throws ELOOP and the link is never replaced by a file (#97
   expect(readdirSync(directory).toSorted()).toEqual(['a.json', 'b.json', 'config.json'])
 })
 
+test('a chain of two links, the last dangling, makes the file at its end (#978 review)', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'enso-replace-'))
+  symlinkSync('real.json', join(directory, 'middle.json'))
+  symlinkSync('middle.json', join(directory, 'config.json'))
+  replaceFileText(join(directory, 'config.json'), '{}\n')
+  expect(readFileSync(join(directory, 'real.json'), 'utf8')).toBe('{}\n')
+  expect(lstatSync(join(directory, 'config.json')).isSymbolicLink()).toBe(true)
+  expect(lstatSync(join(directory, 'middle.json')).isSymbolicLink()).toBe(true)
+})
+
 // --- nonPublicAddressReason: web_fetch's address gate, the one copy (#972 re-review) ---------------
 
 const answering = (addresses: readonly string[]) => async (): Promise<readonly string[]> => addresses
