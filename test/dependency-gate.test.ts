@@ -1,7 +1,9 @@
 import { expect, test } from 'bun:test'
-import { existsSync, readFileSync, realpathSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 import typescript from 'typescript'
+import { vendorPackageNames } from '../packages/core/src/pi-manifest.ts'
+import { SKIPPED_DIRECTORIES } from '../scripts/source-tree.ts'
 import { codeLinesUnder, REPOSITORY_ROOT } from './gate-support.ts'
 
 /**
@@ -58,9 +60,13 @@ const IMPORT_SPECIFIER = /(?<![\w.$])(?:from|import|require)\s*\(?\s*['"]([^'"]+
 interface Manifest {
   readonly dependencies?: Record<string, string>
   readonly devDependencies?: Record<string, string>
+  readonly bundledDependencies?: readonly string[]
+  readonly files?: readonly string[]
   readonly peerDependencies?: Record<string, string>
   readonly peerDependenciesMeta?: Record<string, { optional?: boolean }>
   readonly overrides?: Record<string, string>
+  /** The root's: the workspace directories, as globs (`packages/*`) or as paths. */
+  readonly workspaces?: readonly string[]
   /** Only read off an INSTALLED manifest, never a workspace one. */
   readonly version?: string
   readonly scripts?: Record<string, string>
@@ -285,4 +291,119 @@ test('⚠ only the root declares TypeScript, and the lock holds three compiler v
   expect([...versions].toSorted((left, right) => left.localeCompare(right))).toEqual(['5.9', '6.0', '7.0'])
   // The vendor's private copy, named so the next reader does not take it for drift.
   expect(existsSync(join(REPOSITORY_ROOT, 'node_modules/fallow-type-aware/node_modules/typescript'))).toBe(true)
+})
+
+/** The harness: the one package pi installs (#952). */
+const harness = manifest('packages/harness/package.json')
+/** The trailing segment that makes a root `workspaces` entry a glob over its directory's children. */
+const WORKSPACE_GLOB_SUFFIX = '/*'
+
+/**
+ * Every workspace package's name, read off the root `workspaces` entries (`packages/*`, `site`).
+ * A workspace package is `private` (none is published), so npm cannot install it for an installed
+ * harness: the tarball has to carry it.
+ */
+function workspacePackageNames(): string[] {
+  const directories = (root.workspaces ?? []).flatMap((entry) => {
+    if (!entry.endsWith(WORKSPACE_GLOB_SUFFIX)) return [entry]
+    const parent = entry.slice(0, -WORKSPACE_GLOB_SUFFIX.length)
+    return readdirSync(join(REPOSITORY_ROOT, parent), { withFileTypes: true })
+      .filter((child) => child.isDirectory() && existsSync(join(REPOSITORY_ROOT, parent, child.name, 'package.json')))
+      .map((child) => `${parent}/${child.name}`)
+  })
+  return directories.flatMap((directory) => {
+    const name = (
+      JSON.parse(readFileSync(join(REPOSITORY_ROOT, directory, 'package.json'), 'utf8')) as { name?: string }
+    ).name
+    return name === undefined ? [] : [name]
+  })
+}
+
+/**
+ * ⚠ THE HARNESS BUNDLES EXACTLY WHAT NO INSTALLER CAN FETCH FOR IT (#952).
+ *
+ * pi installs an npm or git package's `dependencies` itself, so most of the harness's arrive that
+ * way. Two kinds cannot:
+ *
+ *   1. the pi packages the manifest reads by a literal `node_modules/…` path (`vendorPackageNames`):
+ *      pi's `docs/packages.md` says they "must be included in the published tarball", and a path an
+ *      installer hoisted elsewhere is a resource pi skips without a word (`pi-manifest.ts` header);
+ *   2. a workspace package the harness depends on (`@enso/core`): it is `private`, so no registry
+ *      has it.
+ *
+ * Those are `bundledDependencies`, and nothing else is, both directions: a vendor path added to the
+ * manifest without bundling it fails here, not in somebody's install. Each bundled name is also a
+ * `dependencies` key, because that is what makes `bun install` materialize it in the checkout for
+ * the pack to copy.
+ */
+test('⚠ the harness bundles exactly the packages pi reads by path and the workspace packages it depends on (#952)', () => {
+  const dependencyNames = Object.keys(harness.dependencies ?? {})
+  const workspaceNames = new Set(workspacePackageNames())
+  const mustBundle = new Set([
+    ...vendorPackageNames(harness),
+    ...dependencyNames.filter((name) => workspaceNames.has(name)),
+  ])
+  const bundled = harness.bundledDependencies ?? []
+  expect([...bundled].toSorted()).toEqual([...mustBundle].toSorted())
+  expect(bundled.filter((name) => !dependencyNames.includes(name))).toEqual([])
+  // The rule has nothing to hold over an empty manifest: both kinds exist today.
+  expect(mustBundle.size).toBeGreaterThan(1)
+})
+
+/**
+ * ⚠ EVERY PACKAGE THE HARNESS'S RUNTIME IMPORTS IS DECLARED, AND EVERY PEER STATES ONE RANGE (#952).
+ *
+ * pi supplies its own packages to an extension and maps their imports onto itself; a physical copy
+ * "can bypass Pi's extension module mapping … and create duplicate classes" (`docs/packages.md`,
+ * "Declare dependencies"). So a package the runtime imports is either a `dependency` the installer
+ * fetches or a `peerDependency` the host provides. An import declared nowhere worked only because the
+ * workspace hoisted a copy beside it: before #952 one of pi's own libraries was imported that way.
+ *
+ * ⚠ THE RANGE IS THE TESTED ONE, NOT pi's `"*"`. pi's guide asks for `"*"`, but its installer never
+ * reads a peer range (`--legacy-peer-deps` under npm, `--omit=peer` under bun, measured in pi 1.1.0's
+ * `package-manager.js`), and pi warns only about host packages in `dependencies`. So the range
+ * changes nothing at install, and it keeps the job #217 gave it: stating the bound the guard's corpus
+ * was run against (`scripts/__tests__/pi-version-parity.test.ts` pins one peer to the launcher's
+ * range; this pins the rest to that one). The bound is enforced at load by #953, not here.
+ * Tests are not the runtime and are not read.
+ */
+test('⚠ every package the harness runtime imports is a dependency or a peer, and the peers share one range (#952)', () => {
+  const declared = new Set([...Object.keys(harness.dependencies ?? {}), ...Object.keys(harness.peerDependencies ?? {})])
+  const runtimeImports = new Set<string>()
+  for (const line of codeLinesUnder(['packages/harness'])) {
+    for (const [, specifier] of line.text.matchAll(IMPORT_SPECIFIER)) {
+      const name = installedPackageOf(specifier)
+      if (name !== undefined) runtimeImports.add(name)
+    }
+  }
+  expect([...runtimeImports].filter((name) => !declared.has(name)).toSorted()).toEqual([])
+  expect(new Set(Object.values(harness.peerDependencies ?? {})).size).toBe(1)
+  // A walk that found no import would pass both.
+  expect(runtimeImports.size).toBeGreaterThan(3)
+})
+
+/** The `files` entry that keeps every test directory out of the tarball, at any depth. */
+const TESTS_EXCLUDED = '!**/__tests__'
+
+/**
+ * ⚠ THE HARNESS SHIPS EVERY DIRECTORY IT HAS, AND NONE OF ITS TESTS (#952, measured on #949).
+ *
+ * With no `files` field, `npm pack` shipped the harness's 30 test files (#949). `files` is an
+ * allowlist, so it fails the other way too: a new top-level directory that the extensions import
+ * from, or that the manifest declares a resource in, would be left out of the tarball, and pi skips
+ * a missing resource without a word. So the allowlist is held equal to the directories on disk.
+ * Test files inside a BUNDLED package are that package's own `files` (`@enso/core`'s is #951).
+ */
+test('⚠ the harness `files` lists every top-level directory and excludes every __tests__ (#952)', () => {
+  const directories = readdirSync(join(REPOSITORY_ROOT, 'packages/harness'), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && !SKIPPED_DIRECTORIES.has(entry.name))
+    .map((entry) => entry.name)
+  const files = harness.files ?? []
+  expect(files.filter((entry) => entry !== TESTS_EXCLUDED).toSorted()).toEqual(directories.toSorted())
+  expect(files).toContain(TESTS_EXCLUDED)
+})
+
+test('the harness is private until it has a name of its own (#952, #948)', () => {
+  // `enso` on npm belongs to someone else; a stray publish from the package directory would try it.
+  expect(manifest('packages/harness/package.json')).toMatchObject({ private: true })
 })

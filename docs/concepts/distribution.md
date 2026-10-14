@@ -172,6 +172,28 @@ through their `node_modules` resource paths." The manifest already references th
 written anticipating a tarball built from `bundledDependencies`. Missing today: the
 `bundledDependencies` list itself, and a `"*"` peer range (the manifest says `~1.1.0`).
 
+**Done in #952.** `bundledDependencies` lists the three vendored pi packages and `@enso/core`.
+`pi-ai` is now a peer too: the harness imports it at runtime but declared it nowhere, so it resolved
+only because the workspace hoisted a copy. The peers keep the tested range `~1.1.0`, not pi's `"*"`.
+pi's installer never reads a peer range (`--legacy-peer-deps` under npm, `--omit=peer` under bun,
+measured in pi 1.1.0's `package-manager.js`), so the choice changes nothing at install. The range
+keeps the job #217 gave it: stating the bound the guard's corpus was run against. #953 enforces that
+bound when the harness loads.
+
+Tests in `test/dependency-gate.test.ts` hold these rules:
+- the harness bundles exactly the packages pi reads by path, plus the workspace packages it depends on;
+- every package its runtime imports is a dependency or a peer;
+- a `files` allowlist covers every top-level directory and keeps the harness's own tests out of the
+  tarball.
+
+⚠ **#949 measured that this is necessary but not sufficient.** Packed from the hoisted workspace:
+- `bun pm pack` bundles the wrong package;
+- `npm pack` writes the bundled packages' own dependencies as `../` entries, which npm refuses on
+  install;
+- so `zod`, `@logtape/file` and others never arrive, and 3 of the 11 extensions fail to load.
+
+Producing a working tarball needs a packing step of its own, filed separately.
+
 `@earendil-works/pi-classifier` (an npm alias of `pi-ai@1.1.0` in `dependencies`) looks like it breaks
 the "no physical copy of a host package" rule, but it is deliberate: pi's loader rewrites
 `@earendil-works/pi-ai` subpath imports onto its `compat` entry, which failed the guards extension
@@ -224,8 +246,9 @@ copyright holder before any copy leaves the repository. **Confidence 0.9.**
 manifest is named `enso`. `enso-harness` and `enso-agent` returned E404. Enso is also an existing
 programming language (enso.org). Naming is not resolved here.
 
-⚠ `packages/harness/package.json` has no `"private": true` (core and web do). A stray `bun publish`
-from that directory today would try to publish under the taken name.
+⚠ `packages/harness/package.json` had no `"private": true` (core and web do). A stray `bun publish`
+from that directory would try to publish under the taken name. **Done in #952:** the manifest is
+`"private": true` until #948 decides the name.
 
 ---
 
