@@ -70,8 +70,9 @@ export function disabledAt(record: EnsoRuleRecord, surface: string, pattern: str
  *
  * ⚠ A surface the switch empties stays, as `{}` — no rule, the same to the engine as no key — so it
  * keeps its PLACE, and switching the rule off and back on gives the file back byte for byte. The
- * reason is that round trip, not the engine: its schema says a surface-specific rule beats the `*`
- * fallback whatever the key order in the file.
+ * reason is that round trip, not the engine: the engine reads the top-level `*` into its defaults,
+ * ahead of every surface's rules, so key order does not change a verdict (pinned with the real
+ * engine in agent-host.test.ts, "whatever the key order in the file").
  */
 export function withRuleDisabled(draft: RuleDraft, surface: string, pattern: string): RuleDraft {
   const { permission, record } = draft

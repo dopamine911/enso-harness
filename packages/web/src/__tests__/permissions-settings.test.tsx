@@ -845,7 +845,8 @@ test('⚠ a rule switched off leaves the file for Enso’s record, greyed in pla
 })
 
 // PR #970 review: the only rule on a surface switched off keeps that surface in place, as `{}`, so
-// switching it back on gives the file back byte for byte (the engine itself ignores key order).
+// switching it back on gives the file back byte for byte. Key order does not change the engine's
+// verdict (pinned in agent-host.test.ts) — the place is for the byte-for-byte round trip.
 test('⚠ the only rule on a surface switched off keeps the surface in its place, empty; switched on, the file is as it was (#945)', async () => {
   const file = {
     authorizerChain: ['enso-auto'],

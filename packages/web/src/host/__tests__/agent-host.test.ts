@@ -945,6 +945,28 @@ test("the engine reports Enso's catch-all as `**` and a user's surface-wide rule
   expect(await matchedPattern({ permission: { bash: { '*': 'ask' } } })).toBe('*')
 })
 
+// PR #970 review: Settings keeps an emptied surface in its place as `{}` for the off/on round trip,
+// NOT because the engine cares — the engine reads the top-level `*` into its defaults, ahead of every
+// surface's rules, so a surface rule beats it whatever the key order. Pinned here with the real engine.
+test('the engine gives a surface rule over the top-level `*` whatever the key order in the file (#945)', async () => {
+  const state = async (permission: object): Promise<unknown> => {
+    let sessionId = ''
+    const probe: InlineExtension = {
+      name: 'enso-host-key-order-probe',
+      factory: (pi: ExtensionAPI) => {
+        pi.on('session_start', (_event, extensionContext) => {
+          sessionId = extensionContext.sessionManager.getSessionId()
+        })
+      },
+    }
+    await hostedUnder({ permission }, [probe])
+    return getPermissionsService(sessionId)?.checkPermission('bash', 'npm test').state
+  }
+  expect(await state({ '*': 'deny' })).toBe('deny')
+  expect(await state({ bash: { 'npm *': 'allow' }, '*': 'deny' })).toBe('allow')
+  expect(await state({ '*': 'deny', bash: { 'npm *': 'allow' } })).toBe('allow')
+})
+
 // ⚠ Settings shows each mode's rules from `effectiveRows` (#474), a MODEL of the engine's merge —
 // so it is pinned to the engine here: in every mode, every verdict the engine gives names a rule
 // the model shows on that surface, with the decision the engine applied and the right owner (a
