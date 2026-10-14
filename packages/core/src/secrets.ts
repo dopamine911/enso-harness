@@ -172,7 +172,7 @@ export function writeSecret(path: string, name: string, value: string | undefine
   const after = kept.length === 0 ? '' : `${kept.join(eol)}${eol}`
   if (parseDotenv(after).get(name) !== value)
     return { kind: 'refused', reason: `the file would not read the ${name} it was given back; nothing was changed` }
-  replaceFileText(path, after, { mode: 0o600, forceMode: true })
+  replaceFileText(path, after, { mode: 0o600 })
   return { kind: 'written' }
 }
 

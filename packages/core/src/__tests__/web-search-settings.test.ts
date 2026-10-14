@@ -107,3 +107,10 @@ test('⚠ a symlinked secrets.env stays a link: the file behind it gets the key,
   expect(statSync(real).mode & 0o777).toBe(0o600)
   expect(readdirSync(store)).toEqual(['enso.env'])
 })
+
+test('a secrets.env not there yet is made owner-only (#972 re-review)', () => {
+  const path = fileIn('secrets.env')
+  expect(writeSecret(path, 'TAVILY_API_KEY', 'tvly-new')).toEqual({ kind: 'written' })
+  expect(readFileSync(path, 'utf8')).toBe('TAVILY_API_KEY=tvly-new\n')
+  expect(statSync(path).mode & 0o777).toBe(0o600)
+})

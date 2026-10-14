@@ -14,7 +14,7 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { replaceFileText } from '../paths.ts'
-import { changeUserAllowedHosts } from '../web-fetch-allowlist.ts'
+import { changeUserAllowedHosts, nonPublicAddressReason } from '../web-fetch-allowlist.ts'
 import { readWebFetchHostInput } from '../web-fetch.ts'
 
 /**
@@ -154,4 +154,60 @@ test('a write that fails leaves nothing staged behind, and the error is thrown (
   mkdirSync(join(path, 'inside'), { recursive: true })
   expect(() => replaceFileText(path, '{}\n')).toThrow()
   expect(readdirSync(directory)).toEqual(['config.json'])
+})
+
+test('⚠ a dangling symlinked config stays a link: the file it points at is made (#972 re-review)', () => {
+  const dotfiles = mkdtempSync(join(tmpdir(), 'enso-dotfiles-'))
+  const real = join(dotfiles, 'enso.json')
+  const path = join(mkdtempSync(join(tmpdir(), 'enso-allowlist-')), 'config.json')
+  symlinkSync(real, path)
+  expect(changeUserAllowedHosts(path, { add: 'a.example' }).kind).toBe('written')
+  expect(lstatSync(path).isSymbolicLink()).toBe(true)
+  expect(JSON.parse(readFileSync(real, 'utf8'))).toEqual({ webFetch: { allowedHosts: ['a.example'] } })
+  expect(readdirSync(dotfiles)).toEqual(['enso.json'])
+})
+
+test('a symlink into a directory not there is an error, and the link is left as it was (#972 re-review)', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'enso-replace-'))
+  const path = join(directory, 'config.json')
+  symlinkSync(join(directory, 'missing', 'enso.json'), path)
+  expect(() => replaceFileText(path, '{}\n')).toThrow()
+  expect(lstatSync(path).isSymbolicLink()).toBe(true)
+  expect(readdirSync(directory)).toEqual(['config.json'])
+})
+
+// --- nonPublicAddressReason: web_fetch's address gate, the one copy (#972 re-review) ---------------
+
+const answering = (addresses: readonly string[]) => async (): Promise<readonly string[]> => addresses
+
+test('any one non-public address refuses, wherever it stands in the answer', async () => {
+  expect(await nonPublicAddressReason('mixed.example', answering(['93.184.216.34', '10.0.0.1']))).toBe(
+    '"mixed.example" resolves to a non-public address (10.0.0.1)',
+  )
+})
+
+test('an empty answer refuses: no address is provably public', async () => {
+  expect(await nonPublicAddressReason('empty.example', answering([]))).toBe(
+    '"empty.example" resolves to a non-public address',
+  )
+})
+
+test('a lookup that throws refuses, naming the error', async () => {
+  const failing = async (): Promise<readonly string[]> => {
+    throw new Error('queryA ENOTFOUND nowhere.example')
+  }
+  expect(await nonPublicAddressReason('nowhere.example', failing)).toBe(
+    '"nowhere.example" did not resolve (Error: queryA ENOTFOUND nowhere.example)',
+  )
+})
+
+test('every address public passes; an IP literal (bracketed or not) is classified without a lookup', async () => {
+  expect(await nonPublicAddressReason('public.example', answering(['93.184.216.34', '2606:2800:220:1::']))).toBe(
+    undefined,
+  )
+  const neverAsked = async (): Promise<readonly string[]> => {
+    throw new Error('a literal is never looked up')
+  }
+  expect(await nonPublicAddressReason('93.184.216.34', neverAsked)).toBe(undefined)
+  expect(await nonPublicAddressReason('[::1]', neverAsked)).toBe('"::1" resolves to a non-public address (::1)')
 })
