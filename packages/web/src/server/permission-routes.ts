@@ -91,8 +91,9 @@ export function createPermissionRoutes(state: PermissionRoutesState): Permission
 
   /**
    * `PUT /api/permissions` (#474): the whole file a page sent, under its `If-Match`; normalised,
-   * validated against the engine's schema and written atomically (`host/permission-policy-file.ts`). 412 when
-   * the file changed since the page read it; 422 with each problem when the engine would not run it.
+   * validated against the engine's schema and written atomically (`host/permission-policy-file.ts`),
+   * with Enso's record beside it when the page sent one (#945) — both, or neither. 412 when either
+   * file changed since the page read them; 422 with each problem when the engine would not run it.
    */
   async function respondToPolicyWrite(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const condition = writeConditionOf(request, 'write', 'permission policy')
@@ -105,10 +106,10 @@ export function createPermissionRoutes(state: PermissionRoutesState): Permission
       capText: `a permission policy is at most ${MAX_POLICY_BODY_BYTES} bytes`,
       schema: EnsoPermissionPolicyWrite,
       name: 'permission policy',
-      requirement: 'a save carries `{ file }`, the whole file',
+      requirement: 'a save carries `{ file }`, the whole file, and `record`, Enso’s record beside it, when it changed',
     })
     if (body === undefined) return
-    const written = writePermissionPolicy(permissionRulesPath, agentDir, body.file, condition)
+    const written = writePermissionPolicy(permissionRulesPath, agentDir, body, condition)
     if (written.kind === 'conflict') {
       log.warn('permission policy not saved: {reason}', { reason: written.reason })
       refuseWith(response, { status: 412, reason: written.reason })

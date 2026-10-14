@@ -226,7 +226,10 @@ export {
 export {
   decisionAction,
   ENSO_DRAFTED_RULE_GROUPS,
+  ENSO_EMPTY_RULE_RECORD,
+  EnsoDisabledRule,
   type EnsoDraftedRuleGroup,
+  EnsoGroupAddedRule,
   EnsoPermissionAction,
   EnsoPermissionCheckRequest,
   type EnsoPermissionDecision,
@@ -239,6 +242,7 @@ export {
   type EnsoPolicyKnobs,
   type EnsoPolicyRow,
   type EnsoPolicyRowOwner,
+  EnsoRuleRecord,
   type EnsoSurfaceValue,
   effectivePermission,
   effectiveRows,

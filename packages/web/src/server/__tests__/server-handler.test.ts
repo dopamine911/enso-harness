@@ -2866,6 +2866,64 @@ test('⚠ the permission policy over HTTP: read with its ETag, saved only under 
   })
 })
 
+// #945: the rules switched off, and what each group added, live in Enso's record beside the policy
+// — the engine's schema refuses a key of ours in its file. One ETag names both files, and a save
+// writes both or neither.
+test('⚠ Enso’s record rides the policy’s save: one ETag for both files, a hand edit to either is a 412, a refusal writes neither, and a reset keeps the rules switched off (#945)', async () => {
+  const original = `${JSON.stringify({ permission: { bash: { '**': 'ask', 'git status': 'allow', 'git push *': 'deny' } } }, null, 2)}\n`
+  const { url, policyPath } = await policyServer(original)
+  const recordPath = join(dirname(policyPath), 'permissions.disabled.json')
+  const first = JSON.parse((await send(url, '/api/permissions', 'GET')).body)
+  expect(first).toMatchObject({ kind: 'ok', record: { disabled: [], groups: {} }, recordPath })
+  expect(existsSync(recordPath)).toBe(false)
+
+  const save = (body: unknown, etag: string): Promise<Sent> =>
+    request(url, '/api/permissions', { method: 'PUT', body, headers: { 'If-Match': etag } })
+  const off = { permission: { bash: { '**': 'ask', 'git status': 'allow' } } }
+  const record = {
+    disabled: [{ surface: 'bash', pattern: 'git push *', decision: 'deny', after: 'git status' }],
+    groups: { publishing: { added: [{ surface: 'bash', pattern: 'npm publish*', decision: 'deny' }] } },
+  }
+  // A schema refusal writes neither file.
+  expect((await save({ file: { permission: { bash: { x: 'dney' } } }, record }, first.etag)).status).toBe(422)
+  expect(existsSync(recordPath)).toBe(false)
+  expect(readFileSync(policyPath, 'utf8')).toBe(original)
+
+  const saved = await save({ file: off, record }, first.etag)
+  expect(saved.status).toBe(200)
+  expect(JSON.parse(readFileSync(recordPath, 'utf8'))).toEqual(record)
+  expect(JSON.parse(readFileSync(policyPath, 'utf8')).permission.bash).toEqual(off.permission.bash)
+  const read = JSON.parse((await send(url, '/api/permissions', 'GET')).body)
+  expect(read).toMatchObject({ record, etag: saved.etag })
+
+  // A hand edit to the record alone is a new version: a save under the old one writes nothing.
+  writeFileSync(recordPath, `${JSON.stringify({ disabled: [], groups: {} })}\n`)
+  const stale = await save({ file: off }, read.etag)
+  expect(stale.status).toBe(412)
+  expect(stale.body).toContain('permissions.disabled.json')
+  // A save without a record leaves the one on disk as it is.
+  const handEdited = JSON.parse((await send(url, '/api/permissions', 'GET')).body)
+  writeFileSync(recordPath, `${JSON.stringify(record, null, 2)}\n`)
+  const current = JSON.parse((await send(url, '/api/permissions', 'GET')).body)
+  expect(current.etag).not.toBe(handEdited.etag)
+  expect((await save({ file: off }, current.etag)).status).toBe(200)
+  expect(JSON.parse(readFileSync(recordPath, 'utf8'))).toEqual(record)
+
+  // A reset: the groups' record goes with the file it described; the rules switched off stay off.
+  const now = JSON.parse((await send(url, '/api/permissions', 'GET')).body)
+  const reset = await request(url, '/api/permissions/reset', { method: 'POST', headers: { 'If-Match': now.etag } })
+  expect(reset.status).toBe(200)
+  expect(JSON.parse(readFileSync(recordPath, 'utf8'))).toEqual({ disabled: record.disabled, groups: {} })
+
+  // A record that cannot be read is said so; the policy reads as before.
+  writeFileSync(recordPath, '{ "disabled": ')
+  expect(JSON.parse((await send(url, '/api/permissions', 'GET')).body)).toMatchObject({
+    kind: 'ok',
+    record: { disabled: [], groups: {} },
+    recordProblem: expect.any(String),
+  })
+})
+
 test('"Try a command" in a thread whose engine published no service is a 409, never a guess (#474)', async () => {
   const { url } = await policyServer('{}')
   const check = await send(url, '/api/threads/t-check/permissions/check', 'POST', { surface: 'bash', value: 'ls' })

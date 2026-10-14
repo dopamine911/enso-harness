@@ -560,7 +560,15 @@ mode needs it (`withCatchAllFirst`, the launch's own normalisation), is checked 
 own schema in the host (`host/permission-policy.ts#policyProblems`) and refused with each problem's
 place if the engine would not run it, then is written to a temporary file and renamed over, with its
 modification time moved past the last one, so every running session reloads it at its next call.
-Reset copies the file to the first free `permissions.json.bak[.N]` first. The per-mode view is a
+Reset copies the file to the first free `permissions.json.bak[.N]` first. Rules switched off, and
+which rules each rule group added, live in Enso's record beside the policy,
+`ENSO_HOME/permissions.disabled.json` (#945): the engine's schema refuses any top-level key it does
+not know, and reads a file it refuses as an empty policy, so a key of Enso's in `permissions.json`
+would drop every rule. The engine never reads the record, so a rule switched off is simply absent
+from the policy it runs. One `ETag` names both files; a save writes the record first and the policy
+second, and puts the old record back when the policy's write fails, so it writes both or neither.
+A reset drops the groups' part of the record and keeps the rules switched off. The record is under
+`ENSO_HOME`, which the guards refuse the agent as a write target. The per-mode view is a
 MODEL of the engine's merge in core (`core/src/permission-policy.ts#effectiveRows`: the shorthand expansion,
 then the preset merged key by key), pinned to the engine in every mode by `agent-host.test.ts`.
 **Try a command** is not modelled: it asks the thread's own guard, then its own engine (#881), in the
