@@ -16,7 +16,7 @@ import { createStore, type Store } from './store.ts'
  *                nothing for {@link PAGE_HEALTH_TIMING}`.staleMs` (`page-behind-check.ts`);
  *   stalled    — a chunk handed to the chat client and not taken back for `stallMs`, or a
  *                client that stopped taking them (`follow-connection.ts`);
- *   render     — a pane's error boundary caught a throw (`page-fault-boundary.tsx`);
+ *   render     — a pane's error boundary caught a throw (`page-fault.tsx#PaneBoundary`);
  *   error / rejection — `window`'s `error` and `unhandledrejection` ({@link watchPageFaults}).
  *
  * Every one is LOGGED, through the page's logger — the shipper puts the page id on it and the
@@ -113,11 +113,20 @@ export function describeThrown(thrown: unknown): { error: string; stack?: string
 export function watchPageFaults(target: Window, threadOnScreen: () => string | undefined): () => void {
   const onError = (event: ErrorEvent): void => {
     if (pageLeaving()) return
-    // Chrome's "ResizeObserver loop …" is an `error` event with no error behind it: a layout that
-    // took two passes, harmless, and routine under the transcript's virtualiser.
-    if (event.error == null && event.message.startsWith('ResizeObserver loop')) return
-    const thrown = event.error == null ? { error: event.message } : describeThrown(event.error)
-    reportPageFault({ trigger: 'error', threadId: threadOnScreen(), ...thrown })
+    // An `error` event with no error behind it is not a throw of this page's code: Chrome's
+    // "ResizeObserver loop …" (a layout that took two passes, routine under the transcript's
+    // virtualiser), or a cross-origin or extension script's throw, masked as "Script error.".
+    // Recorded, but no banner: nothing about following a thread is wrong.
+    if (event.error == null) {
+      if (!event.message.startsWith('ResizeObserver loop')) {
+        log.warn('an error event with no error behind it, not from this page: {error}', {
+          error: event.message,
+          ...(event.filename === '' ? {} : { source: event.filename }),
+        })
+      }
+      return
+    }
+    reportPageFault({ trigger: 'error', threadId: threadOnScreen(), ...describeThrown(event.error) })
   }
   const onRejection = (event: PromiseRejectionEvent): void => {
     // An aborted request is the page's own doing (a released follow, a superseded read).
