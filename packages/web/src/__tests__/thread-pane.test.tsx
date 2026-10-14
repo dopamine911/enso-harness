@@ -46,6 +46,7 @@ import {
 import { ensureDom, releaseDom } from './dom-environment.ts'
 import {
   createScriptedFetch,
+  isFollowRequest,
   requestedUrl,
   type ScriptedFetch,
   type ScriptedFetchOptions,
@@ -4963,9 +4964,7 @@ test('a subscription whose follow is refused leaves the record of why: the excep
   globalThis.fetch = server.fetch
   const broken: typeof fetch = Object.assign(
     (input: string | URL | Request, init?: RequestInit): Promise<Response> =>
-      requestedUrl(input).endsWith('/follow')
-        ? Promise.reject(new TypeError('the follow broke'))
-        : server.fetch(input, init),
+      isFollowRequest(input) ? Promise.reject(new TypeError('the follow broke')) : server.fetch(input, init),
     { preconnect: server.fetch.preconnect },
   )
   const stores = mintThread(broken)
