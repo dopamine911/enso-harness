@@ -167,6 +167,21 @@ function RoleCard(props: RoleCardProps): React.ReactNode {
     })
   const changeFallbacks = (change: (current: readonly EnsoModelTarget[]) => readonly EnsoModelTarget[]): void =>
     changeRole((current) => withFallbacks(current, change(current.fallbacks ?? [])))
+  // A fallback is named by its place, and a change queued behind a save that removed or moved one
+  // would land on whatever took that place: a double-click on remove would remove two. So a change
+  // to the places it names applies only while they still hold the fallbacks this card showed.
+  const changeShown = (
+    places: readonly number[],
+    change: (current: readonly EnsoModelTarget[]) => readonly EnsoModelTarget[],
+  ): void =>
+    changeFallbacks((current) => {
+      const unmoved = places.every((place) => {
+        const now = current[place]
+        const shown = fallbacks[place]
+        return now !== undefined && shown !== undefined && now.model === shown.model && now.effort === shown.effort
+      })
+      return unmoved ? change(current) : current
+    })
   const resolution = known ? resolveModelRole(name, models, options) : undefined
   const firstFree = options.find(
     (option) =>
@@ -227,7 +242,7 @@ function RoleCard(props: RoleCardProps): React.ReactNode {
                     value={target.model}
                     options={options}
                     onChange={(model) =>
-                      changeFallbacks((current) => changedAt(current, index, (now) => ({ ...now, model })))
+                      changeShown([index], (current) => changedAt(current, index, (now) => ({ ...now, model })))
                     }
                   />
                 </div>
@@ -236,7 +251,7 @@ function RoleCard(props: RoleCardProps): React.ReactNode {
                   value={target.effort}
                   unset="default effort"
                   onChange={(effort) =>
-                    changeFallbacks((current) => changedAt(current, index, (now) => withEffort(now, effort)))
+                    changeShown([index], (current) => changedAt(current, index, (now) => withEffort(now, effort)))
                   }
                 />
                 <Button
@@ -245,7 +260,7 @@ function RoleCard(props: RoleCardProps): React.ReactNode {
                   variant="ghost"
                   disabled={index === 0}
                   aria-label={`move ${name}'s fallback ${index + 1} up`}
-                  onClick={() => changeFallbacks((current) => swapped(current, index, index - 1))}
+                  onClick={() => changeShown([index, index - 1], (current) => swapped(current, index, index - 1))}
                 >
                   <ArrowUpIcon aria-hidden="true" />
                 </Button>
@@ -255,7 +270,7 @@ function RoleCard(props: RoleCardProps): React.ReactNode {
                   variant="ghost"
                   disabled={index === fallbacks.length - 1}
                   aria-label={`move ${name}'s fallback ${index + 1} down`}
-                  onClick={() => changeFallbacks((current) => swapped(current, index, index + 1))}
+                  onClick={() => changeShown([index, index + 1], (current) => swapped(current, index, index + 1))}
                 >
                   <ArrowDownIcon aria-hidden="true" />
                 </Button>
@@ -264,7 +279,7 @@ function RoleCard(props: RoleCardProps): React.ReactNode {
                   size="icon-sm"
                   variant="ghost"
                   aria-label={`remove ${name}'s fallback ${index + 1}`}
-                  onClick={() => changeFallbacks((current) => current.toSpliced(index, 1))}
+                  onClick={() => changeShown([index], (current) => current.toSpliced(index, 1))}
                 >
                   <Trash2Icon aria-hidden="true" />
                 </Button>

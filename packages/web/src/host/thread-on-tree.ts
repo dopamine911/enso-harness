@@ -160,8 +160,8 @@ export function treeOnFirstRun(first: HostedThread, move: TreeMove): HostedThrea
     listCommands: () => current.runtime.listCommands(),
     modelState: () => current.runtime.modelState(),
     sessionUsage: () => current.runtime.sessionUsage(),
-    runHostCommand: (...run) =>
-      isMoving() ? Promise.reject(new HostCommandRefused(whileMoving)) : current.runtime.runHostCommand(...run),
+    runHostCommand: (run, options) =>
+      isMoving() ? Promise.reject(new HostCommandRefused(whileMoving)) : current.runtime.runHostCommand(run, options),
     startHostFlow: (run, outcome) =>
       isMoving() ? outcome.onRejected(whileMoving) : current.runtime.startHostFlow(run, outcome),
     loginInProgress: () => current.runtime.loginInProgress(),

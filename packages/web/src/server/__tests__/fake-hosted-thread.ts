@@ -45,6 +45,7 @@ import {
   type ModelThinking,
 } from '../../host/host-commands.ts'
 import { compactDoneText, decideHostFlow, hostFlowRows, loginDoneText, logoutDoneText } from '../../host/host-flows.ts'
+import { sameModelRole } from '../../host/hosted-thread.ts'
 import type { HostedThread, HostedThreadInspection, SystemPromptPreviewOutcome } from '../../host/live-thread.ts'
 import type { HostProviderFacts, HostProviders } from '../../host/provider-settings.ts'
 import { decideSystemPrompt } from '../../host/system-prompt.ts'
@@ -277,9 +278,9 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
     for (const listener of listeners) listener(observation)
   }
   const parts: FakeThreadParts = { record, emit, open }
-  // The real host's rule (#904): a record equal to the current one appends nothing.
+  // The real host's rule (#904), by its own comparison: a record equal to the current one appends nothing.
   const setModelRole = (role: EnsoThreadModelRole | null): void => {
-    if (JSON.stringify(record.modelRoles.at(-1) ?? null) !== JSON.stringify(role)) record.modelRoles.push(role)
+    if (!sameModelRole(record.modelRoles.at(-1) ?? null, role)) record.modelRoles.push(role)
   }
   const runtime: ThreadRuntime = {
     prompt: (request: PromptRequest) => {

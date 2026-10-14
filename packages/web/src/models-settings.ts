@@ -13,7 +13,9 @@ import { checkedPayload } from './stored-threads.ts'
  * Saves run one at a time, in the order asked, and a change is a function of the section rather
  * than a section: it is applied when its turn comes, to what the last save left (or, refused, to
  * what the file held before it). Built from what the page rendered, two changes within one round
- * trip would both start from the same section and the second `PUT` would drop the first.
+ * trip would both start from the same section and the second `PUT` would drop the first. A read
+ * takes its turn in the same queue: answered after a save it started before, it would put the
+ * section back as it was, and the next change would be applied to that and undo the save.
  */
 
 /** The section, or why the page has none. */
@@ -29,8 +31,9 @@ export type ModelsSaveOutcome = { readonly kind: 'saved' } | { readonly kind: 'r
 export type ModelsUpdate = (current: EnsoModelsConfig) => EnsoModelsConfig
 
 export interface ModelsSettingsStore extends Store<ModelsSettingsState> {
+  /** Queue a read of the section; it runs once every read and save asked before it has answered. */
   readonly refresh: () => Promise<void>
-  /** Queue `update`; it runs once every save asked before it has answered. */
+  /** Queue `update`; it runs once every read and save asked before it has answered. */
   readonly save: (update: ModelsUpdate) => Promise<ModelsSaveOutcome>
 }
 
@@ -62,23 +65,25 @@ export function createModelsSettingsStore(
       return { kind: 'refused', reason: error instanceof Error ? error.message : String(error) }
     }
   }
-  // `put` never rejects, so a refused save never stops the ones queued after it.
+  // `put` and `read` never reject, so a refused save never stops the turns queued after it.
   let queue: Promise<unknown> = Promise.resolve()
+  const inTurn = <T>(run: () => Promise<T>): Promise<T> => {
+    const turn = queue.then(run)
+    queue = turn
+    return turn
+  }
+  const read = async (): Promise<void> => {
+    try {
+      store.set({ kind: 'loaded', settings: await readAnswer(await fetchImpl(ROUTE)) })
+    } catch (error) {
+      store.set({ kind: 'failed', detail: error instanceof Error ? error.message : String(error) })
+    }
+  }
   return {
     get: store.get,
     subscribe: store.subscribe,
-    refresh: async () => {
-      try {
-        store.set({ kind: 'loaded', settings: await readAnswer(await fetchImpl(ROUTE)) })
-      } catch (error) {
-        store.set({ kind: 'failed', detail: error instanceof Error ? error.message : String(error) })
-      }
-    },
-    save: (update: ModelsUpdate) => {
-      const turn = queue.then(() => put(update))
-      queue = turn
-      return turn
-    },
+    refresh: () => inTurn(read),
+    save: (update: ModelsUpdate) => inTurn(() => put(update)),
   }
 }
 

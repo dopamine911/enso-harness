@@ -423,6 +423,64 @@ test('a role deleted and the default effort changed before the first save answer
   })
 })
 
+// PR #973 review: a fallback is named by its place, and a change queued behind a save that removed
+// or moved one must not land on whatever took that place.
+test('⚠ remove clicked twice on a fallback before the first save answers removes that fallback alone', async () => {
+  const fallbacks = [
+    { model: 'anthropic/claude-haiku-4-5' },
+    { model: 'openrouter/second' },
+    { model: 'openrouter/third', effort: 'low' },
+  ]
+  const { sent, fetchImpl, release } = heldSaves(
+    { roles: { review: { model: 'anthropic/claude-opus-4-5', fallbacks } } },
+    false,
+  )
+  const store = createModelsSettingsStore(fetchImpl)
+  await store.refresh()
+  const container = await mount(<RolesSection fetch={fetchImpl} store={store} />)
+
+  await click(container, "remove review's fallback 1")
+  await click(container, "remove review's fallback 1")
+  await click(container, "move review's fallback 2 down")
+  release()
+
+  await eventually(() => expect(putBodies(sent)).toHaveLength(3))
+  // The second remove and the move both name places the first remove changed: neither applies.
+  expect(putBodies(sent)).toEqual([
+    { roles: { review: { model: 'anthropic/claude-opus-4-5', fallbacks: fallbacks.slice(1) } } },
+    { roles: { review: { model: 'anthropic/claude-opus-4-5', fallbacks: fallbacks.slice(1) } } },
+    { roles: { review: { model: 'anthropic/claude-opus-4-5', fallbacks: fallbacks.slice(1) } } },
+  ])
+})
+
+test('a read asked while a save is in flight waits its turn, so it never puts back the section the save replaced', async () => {
+  const { sent, fetchImpl: scriptedFetch } = scripted({}, () => {
+    throw new Error('this test logs in to nothing')
+  })
+  // The server answers a read with the file as it was when the request arrived; this one is slow.
+  const { promise: readAnswered, resolve: answerRead } = Promise.withResolvers<void>()
+  let reads = 0
+  const fetchImpl: FetchLike = async (input, init) => {
+    if (init?.method === 'PUT') return scriptedFetch(input, init)
+    reads += 1
+    const answer = await scriptedFetch(input, init)
+    if (reads === 2) await readAnswered
+    return answer
+  }
+  const store = createModelsSettingsStore(fetchImpl)
+  await store.refresh()
+
+  const starred = store.save((current) => ({ ...current, favorites: ['anthropic/claude-opus-4-5'] }))
+  const reread = store.refresh()
+  // The read is answered only once the save has: a read sent before the save would answer `{}`.
+  await starred
+  answerRead()
+  await reread
+  await store.save((current) => ({ ...current, defaultEffort: 'low' }))
+
+  expect(putBodies(sent).at(-1)).toEqual({ favorites: ['anthropic/claude-opus-4-5'], defaultEffort: 'low' })
+})
+
 test('a save whose turn comes while the section is not read is refused, never written over an unread file', async () => {
   const { sent, fetchImpl } = scripted({ favorites: ['anthropic/claude-opus-4-5'] }, () => {
     throw new Error('this test logs in to nothing')

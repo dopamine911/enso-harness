@@ -1,16 +1,18 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { EnsoModelsSettings, EnsoProviderLogin, EnsoProvidersListing } from '@enso/core'
 import { recordEnsoLogs, releaseEnsoLogs } from '@enso/test-support/log-recorder'
 import type { LogRecorder } from '@logtape/testing/recorder'
 import { Check } from 'typebox/value'
+import { HostCommandRefused } from '../../host/host-commands.ts'
 import { startEnsoServer } from '../index.ts'
 import {
   createFakeAgentHost,
   createFakeHostedThread,
   createFakeProviders,
+  type FakeHostedThreadOptions,
   type FakeProviders,
   type FakeThreadRecord,
 } from './fake-hosted-thread.ts'
@@ -39,7 +41,10 @@ function filesUnder(directory: string): string[] {
     .map((path) => readFileSync(path, 'utf8'))
 }
 
-async function start(config?: object): Promise<{
+async function start(
+  config?: object,
+  threadOptions?: FakeHostedThreadOptions,
+): Promise<{
   url: string
   home: string
   configPath: string
@@ -64,7 +69,7 @@ async function start(config?: object): Promise<{
     port: 0,
     host: () => ({
       ...createFakeAgentHost(() => {
-        const fake = createFakeHostedThread()
+        const fake = createFakeHostedThread(threadOptions)
         built.push(fake.record)
         return Promise.resolve(fake.hosted)
       }),
@@ -243,6 +248,17 @@ test("the user's config keeps its mode across saves: 0600 when the server made i
   }
 })
 
+test("the user's config keeps a mode the user gave it: a 0640 file is 0640 after a save", async () => {
+  const { url, configPath } = await start({ webFetch: { allowedHosts: ['docs.example.com'] } })
+  chmodSync(configPath, 0o640)
+  const saved = await fetch(`${url}/api/models/settings`, {
+    method: 'PUT',
+    body: JSON.stringify({ favorites: ['fake/fake-1'] }),
+  })
+  expect(saved.status).toBe(200)
+  expect(statSync(configPath).mode & 0o777).toBe(0o640)
+})
+
 test('two logins started together: one runs and keeps its question answerable, the other is refused (409)', async () => {
   const { url, providers } = await start()
   // Both requests read the providers before either goes on: the window a running-login check
@@ -324,4 +340,57 @@ test('re-choosing the current role appends nothing; switching roles appends only
   expect(built[0]?.modelRoles).toEqual([review, quick])
   expect((await post(`${url}/api/threads/t1/command`, { name: 'thinking', value: 'high' })).status).toBe(204)
   expect(built[0]?.modelRoles).toEqual([review, quick, null])
+})
+
+// A role step refused part way (#904, `applyRole`): with the model already switched, the record no
+// longer says what runs and is ended; with nothing applied, the role the thread ran under still is.
+test("a role's effort step refused: the record is ended when its model was applied, kept when nothing was (#904)", async () => {
+  let effortLocked = false
+  const { url, built } = await start(
+    {
+      models: {
+        roles: {
+          quick: { model: 'fake/fake-1', effort: 'low' },
+          deep: { model: 'fake/fake-1', effort: 'high' },
+          // fake-2 offers `off` alone: `high` is clamped to it.
+          review: { model: 'fake/fake-2', effort: 'high' },
+        },
+      },
+    },
+    {
+      // Each step sets only what it names, so a model switch leaves the effort for the effort step.
+      runtime: ({ record, emit }) => ({
+        runHostCommand: (run) => {
+          record.hostCommands.push(run)
+          if (run.name === 'thinking' && effortLocked) {
+            return Promise.reject(new HostCommandRefused('the effort is locked here'))
+          }
+          const [provider = '', id = ''] = (run.value ?? '').split('/')
+          record.modelState =
+            run.name === 'model'
+              ? { ...record.modelState, model: { provider, id, name: id } }
+              : { ...record.modelState, thinkingLevel: run.value ?? '' }
+          emit({ kind: 'model', ...record.modelState })
+          return Promise.resolve()
+        },
+      }),
+    },
+  )
+  const configure = (body: object): Promise<Response> => post(`${url}/api/threads/t1/configure`, body)
+  const quick = { role: 'quick', provider: 'fake', modelId: 'fake-1', thinkingLevel: 'low' }
+  expect((await configure({ role: 'quick' })).status).toBe(204)
+  expect(built[0]?.modelRoles).toEqual([quick])
+  effortLocked = true
+
+  // `deep` runs on the model already running: only its effort step runs, and it is refused.
+  const deep = await configure({ role: 'deep' })
+  expect(deep.status).toBe(422)
+  expect(await deep.json()).toEqual({ step: 'thinking', reason: 'the effort is locked here' })
+  expect(built[0]?.modelRoles).toEqual([quick])
+
+  // `review` switches the model, then its effort (`off`, fake-2's only level) is refused.
+  const review = await configure({ role: 'review' })
+  expect(review.status).toBe(422)
+  expect(await review.json()).toEqual({ step: 'thinking', reason: 'the effort is locked here' })
+  expect(built[0]?.modelRoles).toEqual([quick, null])
 })

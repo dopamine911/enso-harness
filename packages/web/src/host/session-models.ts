@@ -23,7 +23,12 @@
  * its cooldown and continuation state) and remembers no model: the session manager has a
  * branch, so the host owns the model (`rememberUserModel`). The probe is built only while no
  * session is live, so it is a session's start, earlier — and once every thread has been
- * disposed, the list is the probe's again.
+ * disposed, the list is the probe's again. ⚠ The probe is not a live session either: its
+ * extensions have had `session_shutdown` as soon as `session_start` ran (`probeRuntime`), as a
+ * disposed thread's have. What it offers is what they registered while loading and starting; a
+ * login from Settings through it runs the provider's own `login`, which for pi-multi-account's
+ * account slots hands straight to pi-ai's OAuth flow and reads no session state (read in its
+ * source, not measured). An extension whose login needed its session started would work through neither.
  *
  * Every read refreshes the runtime from the agent dir without the network — the work
  * `ModelRuntime.create` did per read before — so a login through any thread shows at once. What
@@ -67,9 +72,9 @@ export interface SessionModels {
   /** A thread's session was bound: its runtime is the list from now on. */
   adopt(runtime: ModelRuntime): void
   /**
-   * A thread's session was disposed: its runtime is refreshed no more (`refreshAll`) and is not the
-   * list — the latest bound session still live is, else the probe. A disposed session's extensions
-   * have had `session_shutdown`, so an account slot's login could not run through it.
+   * A thread's session was disposed: its runtime is refreshed no more (`refreshAll`), no longer held,
+   * and not the list — the latest bound session still live is, its extensions keeping it current,
+   * else the probe, whose extensions are no more started than a disposed session's (see the header).
    */
   release(runtime: ModelRuntime): void
   /** What a session offers now — undefined only when no session could be had. */

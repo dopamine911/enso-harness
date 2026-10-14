@@ -196,8 +196,11 @@ function describeCommand(
   return description === undefined ? { name, source } : { name, source, description }
 }
 
-/** Whether two role records say the same: both none, or the same role on the same model and effort. */
-function sameModelRole(current: EnsoThreadModelRole | null, next: EnsoThreadModelRole | null): boolean {
+/**
+ * Whether two role records say the same: both none, or the same role on the same model and effort.
+ * A record equal to the current one appends nothing — the fake host's rule too.
+ */
+export function sameModelRole(current: EnsoThreadModelRole | null, next: EnsoThreadModelRole | null): boolean {
   if (current === null || next === null) return current === next
   return (
     current.role === next.role &&
