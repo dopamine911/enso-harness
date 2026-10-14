@@ -150,8 +150,6 @@ const MAX_TOKENIZED_LINE = 1000
  */
 const LINES_PER_SLICE = 200
 
-let highlighter: Promise<HighlighterCore> | undefined
-
 function tokenOf(token: ThemedToken): SyntaxToken {
   const fontStyle = token.fontStyle ?? 0
   const classes = [
@@ -173,6 +171,23 @@ async function createHighlighter(): Promise<HighlighterCore> {
   const theme = createCssVariablesTheme({ name: THEME_NAME, variablePrefix: '--syntax-' })
   return createHighlighterCore({ themes: [theme], langs: [], engine: createJavaScriptRegexEngine() })
 }
+
+/**
+ * `load` run once and its promise shared — but a load that failed is forgotten, so the next call
+ * tries again rather than every later file staying plain until the page reloads.
+ */
+export function loadedOnce<T>(load: () => Promise<T>): () => Promise<T> {
+  let loading: Promise<T> | undefined
+  return () => {
+    loading ??= load().catch((error: unknown) => {
+      loading = undefined
+      throw error
+    })
+    return loading
+  }
+}
+
+const loadHighlighter = loadedOnce(createHighlighter)
 
 /** A tokenising pass: the highlighter and language, the file's lines, and the tokens so far. */
 interface TokenisingPass {
@@ -206,12 +221,7 @@ async function tokeniseFrom(pass: TokenisingPass, first: number, grammarState?: 
  * highlighter and its grammar loaded on first use.
  */
 export async function highlightLines(text: string, language: SyntaxLanguage): Promise<HighlightedLines> {
-  // A load that failed is forgotten, so the next file tries again rather than staying plain until reload.
-  highlighter ??= createHighlighter().catch((error: unknown) => {
-    highlighter = undefined
-    throw error
-  })
-  const loaded = await highlighter
+  const loaded = await loadHighlighter()
   if (!loaded.getLoadedLanguages().includes(language))
     await loaded.loadLanguage((await GRAMMARS[language].load()).default)
   const pass: TokenisingPass = { highlighter: loaded, language, lines: text.split('\n'), highlighted: [] }

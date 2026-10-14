@@ -253,11 +253,39 @@ test('⚠ a same-length edit inside a hidden run since the patch is caught: chan
   expect(countButton(container, 'unchanged lines')).toBeUndefined()
 })
 
-test('one side too large, the other agreeing: the runs expand from the other', async () => {
+test('the old side too large, the new agreeing: the runs stay counts, said too large — the new side alone never fills them', async () => {
   const large: EnsoGitFileText = { kind: 'too-large', bytes: 700 * 1024 }
-  for (const container of [await mount(answering(text(NEW), large)), await mount(answering(large))]) {
-    await waitUntil(() => countButton(container, '6 unchanged lines') !== undefined)
-    await act(async () => countButton(container, '6 unchanged lines')?.click())
-    expect(rowsOf(container).find((row) => row[0] === '6')).toEqual(['6', '6', 'e'])
+  const container = await mount(answering(text(NEW), large))
+  await waitUntil(() => (container.textContent ?? '').includes('too large to expand'))
+  expect(countButton(container, 'unchanged lines')).toBeUndefined()
+  // The old side agreeing, the new too large: the runs expand from the old.
+  const fromOld = await mount(answering(large))
+  await waitUntil(() => countButton(fromOld, '6 unchanged lines') !== undefined)
+  await act(async () => countButton(fromOld, '6 unchanged lines')?.click())
+  expect(rowsOf(fromOld).find((row) => row[0] === '6')).toEqual(['6', '6', 'e'])
+})
+
+test('the old side unreadable, the new agreeing: the runs stay counts, with why', async () => {
+  const container = await mount(answering(text(NEW), { kind: 'unavailable', reason: 'git cat-file failed' }))
+  await waitUntil(() => (container.textContent ?? '').includes("can't be read"))
+  expect(countButton(container, 'unchanged lines')).toBeUndefined()
+  expect(container.querySelector('[title="git cat-file failed"]')).not.toBeNull()
+})
+
+test('⚠ an added file that grew after its patch offers no unchanged lines: the lines written since are never drawn as context', async () => {
+  const added: EnsoGitFileChange = {
+    path: 'f.ts',
+    oldPath: null,
+    status: 'added',
+    added: 3,
+    removed: 0,
+    patch: ['diff --git a/f.ts b/f.ts', 'new file mode 100644', '@@ -0,0 +1,3 @@', '+a', '+b', '+c', ''].join('\n'),
+    omitted: null,
   }
+  const grown = await mountRead(readingOnce({ kind: 'none' }, text(['a', 'b', 'c', 'd', 'e'])), added)
+  expect(grown.textContent).not.toContain('unchanged line')
+  // As the patch has it, the file is all its hunk: nothing to expand, and nothing blocked either.
+  const whole = await mountRead(readingOnce({ kind: 'none' }, text(['a', 'b', 'c'])), added)
+  expect(whole.textContent).not.toContain('unchanged line')
+  expect(whole.textContent).not.toContain('changed since this diff')
 })

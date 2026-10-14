@@ -12,11 +12,14 @@ import { readSchemaRoute } from './route-read.ts'
  * ⚠ THE FILE MUST BE THE ONE THE PATCH WAS CUT FROM. The file is read after the patch, and the
  * agent may have changed it in between; lines from a newer file would be shown under the patch's
  * numbers. So a side is used only when every line the hunks show of it is the file's line at its
- * number (`agreesWith`) — and that holds only the lines the hunks show. The old side is preferred:
- * a blob at the baseline does not change. When the new side is text the hunks show too, the two
- * must also hold the same unchanged lines (`sameHiddenLines`), so an edit inside a run since the
- * patch is caught on whichever side made it. A file that fails waits for the next read of the
- * changes, which brings a new patch and reads the file again.
+ * number (`agreesWith`) — and that holds only the lines the hunks show. The runs come from the old
+ * side, a blob at the baseline, which does not change; where the hunks show the new side as text
+ * too, the two must hold the same unchanged lines (`sameHiddenLines`), so an edit inside a run
+ * since the patch is caught on whichever side made it. The new side alone never fills a run:
+ * nothing would hold its runs, and a line written past the last hunk since would show as
+ * unchanged. So with the old side too large or unreadable the runs stay counts, and a file not
+ * there before — whose old side holds no lines — must be all its hunks show. A file that fails
+ * waits for the next read of the changes, which brings a new patch and reads the file again.
  */
 
 /** What `GET …/changes/file` gave: the file, or why not. */
@@ -103,30 +106,31 @@ const TYPE_CHANGED: Expansion = {
   detail: 'the old and new sides are different kinds of file, with no unchanged lines between them',
 }
 
-/** Why neither side can be shown from, the plainest reason first. */
-function blockedBy(file: EnsoThreadChangedFile): Expansion {
-  const sides = [file.newText, file.oldText]
-  const large = sides.find((side) => side.kind === 'too-large')
-  if (large?.kind === 'too-large') {
-    const size = `${Math.ceil(large.bytes / 1024)} KiB`
-    return {
-      kind: 'blocked',
-      why: 'too large to expand',
-      detail: `the file is ${size}, past the most sent to the page`,
-    }
+/** Why the runs cannot be shown from `side`, the side they would come from. */
+function blockedBy(side: EnsoGitFileText): Expansion {
+  switch (side.kind) {
+    case 'too-large':
+      return {
+        kind: 'blocked',
+        why: 'too large to expand',
+        detail: `the file is ${Math.ceil(side.bytes / 1024)} KiB, past the most sent to the page`,
+      }
+    case 'text':
+      return CHANGED_SINCE
+    case 'binary':
+      return { kind: 'blocked', why: 'a binary file', detail: 'a binary file has no lines' }
+    case 'unavailable':
+      return { kind: 'blocked', why: "can't be read", detail: side.reason }
+    case 'none':
+      return { kind: 'blocked', why: "can't be read", detail: 'the file is on neither side' }
   }
-  if (sides.some((side) => side.kind === 'text')) return CHANGED_SINCE
-  if (sides.some((side) => side.kind === 'binary'))
-    return { kind: 'blocked', why: 'a binary file', detail: 'a binary file has no lines' }
-  const unavailable = sides.find((side) => side.kind === 'unavailable')
-  const detail = unavailable?.kind === 'unavailable' ? unavailable.reason : 'the file is on neither side'
-  return { kind: 'blocked', why: "can't be read", detail }
 }
 
 /**
- * What the unchanged runs of a file whose patch is `hunks` can be shown from: the old side's lines
- * — held to the new side's unchanged lines too when the hunks show the new side as text — else the
- * new side's, each only while it agrees with the patch. Never for a type change.
+ * What the unchanged runs of a file whose patch is `hunks` can be shown from: the old side's lines,
+ * while they agree with the patch — held to the new side's unchanged lines too when the hunks show
+ * the new side as text. A file not there before has none: its new side must be all the hunks show.
+ * Never for a type change.
  */
 export function expansionOf(
   readFile: ReadChangedFile | undefined,
@@ -140,15 +144,17 @@ export function expansionOf(
   if (outcome.kind === 'failed') return { kind: 'blocked', why: "can't be read", detail: outcome.problem }
   const { file } = outcome
   const newLines = file.newText.kind === 'text' ? linesOf(file.newText.text) : undefined
-  const oldLines = agreeingLines(file.oldText, hunks, 'old')
-  if (oldLines !== undefined) {
-    // The new side, where the hunks show it as text, must hold the same unchanged lines.
-    const held = newLines === undefined || !showsNew(hunks) || sameHiddenLines(hunks, oldLines, newLines)
-    return held ? { kind: 'ready', lines: oldLines, side: 'old' } : CHANGED_SINCE
+  if (file.oldText.kind === 'none') {
+    // No old file, no unchanged lines: a line of the new one past what the hunks show came since.
+    if (newLines === undefined) return blockedBy(file.newText)
+    const whole = agreesWith(hunks, newLines, 'new') && sameHiddenLines(hunks, [], newLines)
+    return whole ? { kind: 'ready', lines: newLines, side: 'new' } : CHANGED_SINCE
   }
-  if (newLines !== undefined && agreesWith(hunks, newLines, 'new'))
-    return { kind: 'ready', lines: newLines, side: 'new' }
-  return blockedBy(file)
+  const oldLines = agreeingLines(file.oldText, hunks, 'old')
+  if (oldLines === undefined) return blockedBy(file.oldText)
+  // The new side, where the hunks show it as text, must hold the same unchanged lines.
+  const held = newLines === undefined || !showsNew(hunks) || sameHiddenLines(hunks, oldLines, newLines)
+  return held ? { kind: 'ready', lines: oldLines, side: 'old' } : CHANGED_SINCE
 }
 
 /** Each side's lines as tokens, where the file's language is one the view highlights. */
