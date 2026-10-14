@@ -145,9 +145,9 @@ export type SecretWrite =
  * path (#932). Every other line keeps its text and its own line ending; the name's line is replaced
  * where it stood, keeping its ending and an `export ` it had (a file `source`d into a shell still
  * exports the key), or appended, ending CRLF when the file has any CRLF line. The file is written
- * owner-only, only
- * once `parseDotenv` reads the value back exactly, through `replaceFileText`: a `secrets.env` kept
- * as a symlink (a dotfiles or password-store setup) stays a link, and the file behind it changes.
+ * owner-only, and only once `parseDotenv` reads the value back exactly, through `replaceFileText`:
+ * a `secrets.env` kept as a symlink (a dotfiles or password-store setup) stays a link, and the
+ * file behind it changes.
  *
  * ⚠ The value is never in a reason: a refusal says what is wrong with its shape, not what it was.
  *

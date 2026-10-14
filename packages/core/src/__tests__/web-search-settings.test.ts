@@ -1,5 +1,14 @@
 import { expect, test } from 'bun:test'
-import { lstatSync, mkdtempSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  lstatSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { parseEnsoConfig } from '../config.ts'
@@ -120,9 +129,16 @@ test('⚠ a symlinked secrets.env stays a link: the file behind it gets the key,
   expect(readdirSync(store)).toEqual(['enso.env'])
 })
 
-test('a secrets.env not there yet is made owner-only (#972 re-review)', () => {
+test('a secrets.env not there yet is made owner-only (#978 review)', () => {
   const path = fileIn('secrets.env')
   expect(writeSecret(path, 'TAVILY_API_KEY', 'tvly-new')).toEqual({ kind: 'written' })
   expect(readFileSync(path, 'utf8')).toBe('TAVILY_API_KEY=tvly-new\n')
   expect(statSync(path).mode & 0o777).toBe(0o600)
+})
+
+test('a config.json kept 0640 stays 0640 after a Settings change (#978 review)', () => {
+  const path = fileIn('config.json', USER_FILE)
+  chmodSync(path, 0o640)
+  expect(changeUserWebSearch(path, { backend: 'deepseek' }).kind).toBe('written')
+  expect(statSync(path).mode & 0o777).toBe(0o640)
 })

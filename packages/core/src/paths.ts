@@ -125,7 +125,7 @@ export function replaceFileText(path: string, text: string, options: { mode?: nu
   const staged = `${target}.${process.pid}.tmp`
   try {
     writeFileSync(staged, text, mode === undefined ? undefined : { mode })
-    // writeFileSync's mode is masked by the umask; the file's own mode is restored exactly.
+    // writeFileSync's mode is masked by the umask; the mode chosen above is set exactly.
     if (mode !== undefined) chmodSync(staged, mode)
     renameSync(staged, target)
   } catch (error: unknown) {

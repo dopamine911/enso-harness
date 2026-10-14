@@ -53,7 +53,7 @@ export type AddressRefusal = { readonly kind: 'unresolved' | 'non-public'; reado
  * dropped). The tool and Settings' host check (#924) both ask here.
  *
  * ⚠ ADVISORY: `resolve` answers now, the request resolves again later (the stated non-coverage in
- * `web-fetch-policy.ts`). The lookup carries no deadline of its own: the system resolver's bounds it.
+ * `web-fetch-policy.ts`). The lookup carries no deadline of its own: the system resolver's timeouts bound it.
  *
  * @group Web tools
  */
