@@ -193,3 +193,26 @@ export function policyDiff(
 ): PolicyChange[] {
   return tableDiff(fileTable(current ?? {}), fileTable(target))
 }
+
+/**
+ * The Behaviour part's edits (#935), key by key over the file's settings beside `permission`: a
+ * key's new value, or `undefined` — the key taken off the file, so the engine's default is in force.
+ * A key not named is untouched.
+ */
+export type SettingEdits = Readonly<Record<string, unknown>>
+
+/**
+ * `file` with `edits` applied: an edited key keeps its place, a removed one goes, a new one comes
+ * last. Every key not edited — the rules among them — is the file's own, untouched.
+ */
+export function withSettings(file: Readonly<Record<string, unknown>>, edits: SettingEdits): Record<string, unknown> {
+  const next: Record<string, unknown> = {}
+  for (const [settingKey, settingValue] of Object.entries(file)) {
+    if (!Object.hasOwn(edits, settingKey)) next[settingKey] = settingValue
+    else if (edits[settingKey] !== undefined) next[settingKey] = edits[settingKey]
+  }
+  for (const [settingKey, edited] of Object.entries(edits)) {
+    if (!Object.hasOwn(file, settingKey) && edited !== undefined) next[settingKey] = edited
+  }
+  return next
+}

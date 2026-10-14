@@ -20,8 +20,8 @@
  * The tested range is stated ONCE, here, and every end reads it: `enso.ts` refuses a `pi` outside it
  * before the spawn, the guards extension refuses every tool call under a running pi outside it, and
  * `scripts/__tests__/pi-version-parity.test.ts` asserts the workspace pi the corpus pins against is
- * inside it. It is `~1.1.0` (at least 1.1.0, below 1.2.0): the harness's peer range and the
- * workspace devDependency.
+ * inside it. It is `~1.1.0` (at least 1.1.0, below 1.2.0): the harness's workspace devDependency on
+ * pi. Not its peer range, which is pi's `"*"` because pi's installer never reads one (#952).
  *
  * @invariant boot-and-launchers/pi-version-gate The terminal launcher refuses a `pi` it was not pinned against (#217), and the harness refuses one too, wherever it is loaded (#953).
  * The two surfaces resolve pi differently and only one was bounded: in-process imports the WORKSPACE
@@ -32,7 +32,7 @@
  * and compute a deny against the wrong target, with the whole suite green (measured 2026-09-18 with a
  * shim printing `0.85.0` earlier on `PATH`). So `enso.ts` reads `pi --version` before the spawn and
  * refuses outside this range, naming both bounds, with no override flag: the range means "the corpus
- * has been run against this", and `packages/harness/package.json` → `peerDependencies` states the same
+ * has been run against this", and `packages/harness/package.json` → `devDependencies` states the same
  * bound. Widening it means running the corpus against the new pi FIRST.
  *
  * ⚠ The launcher is not the only way in (#953): `pi install npm:<package>` loads the harness into

@@ -13,25 +13,32 @@ import { homedir, tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
+  checkoutOrInstalledRoot,
+  checkoutRootOfPackage,
   ensoAgentDir,
   ensoHome,
   ensoPermissionRulesPath,
   ensoProjectsDir,
   fileUrlToPath,
   findRepoRoot,
+  HARNESS_PACKAGE_NAME,
   harnessPackageDir,
+  installedPackageDir,
   isFileUrl,
   migrateCheckoutEnso,
   migrateCheckoutEnsoOnLaunch,
   migrateSessionsIntoProjects,
+  PackageDirNotFoundError,
   printHarnessDir,
   projectIdOf,
   projectSessionsDir,
   projectTreesDir,
   RepoRootNotFoundError,
   realpathOrSelf,
+  resolvePackageDir,
   threadTreeRoot,
   treeProjectId,
+  WEB_PACKAGE_NAME,
   webPackageDir,
 } from '../paths.ts'
 
@@ -403,4 +410,90 @@ test("a path in a thread tree is cut to that tree's root; a path in no tree has 
     threadTreeRoot(projectsDir, join(projectSessionsDir(projectsDir, '0123456789abcdef'), 'x.jsonl')),
   ).toBeUndefined()
   expect(threadTreeRoot(projectsDir, '/srv/app')).toBeUndefined()
+})
+
+/**
+ * An INSTALLED layout (#950): a pi agent dir's `npm/node_modules/` with the harness and the web
+ * package side by side, and no `package.json` declaring `workspaces` anywhere above them. Built
+ * under the run's scratch `TMPDIR`, which is outside every checkout.
+ */
+function makeInstalledFixture(): { readonly harnessDir: string; readonly webDir: string } {
+  const modules = join(mkdtempSync(join(tmpdir(), 'enso-installed-fixture-')), 'npm', 'node_modules')
+  const harnessDir = join(modules, HARNESS_PACKAGE_NAME)
+  const webDir = join(modules, ...WEB_PACKAGE_NAME.split('/'))
+  mkdirSync(join(harnessDir, 'extensions', 'guards'), { recursive: true })
+  writeFileSync(join(harnessDir, 'package.json'), JSON.stringify({ name: HARNESS_PACKAGE_NAME, version: '0.0.0' }))
+  writeFileSync(join(harnessDir, 'extensions', 'guards', 'index.ts'), 'export {};\n')
+  mkdirSync(join(webDir, 'src', 'server'), { recursive: true })
+  writeFileSync(join(webDir, 'package.json'), JSON.stringify({ name: WEB_PACKAGE_NAME, version: '0.0.0' }))
+  writeFileSync(join(webDir, 'src', 'server', 'dev.ts'), 'export {};\n')
+  return { harnessDir, webDir }
+}
+
+test("the package-name constants are the manifests' own names — a rename (#948) changes both or fails here", () => {
+  const root = findRepoRoot(import.meta.url)
+  const nameOf = (packageDir: string): unknown =>
+    (JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf8')) as Record<string, unknown>).name
+  expect(nameOf(harnessPackageDir(root))).toBe(HARNESS_PACKAGE_NAME)
+  expect(nameOf(webPackageDir(root))).toBe(WEB_PACKAGE_NAME)
+})
+
+test('⚠ installed, with no workspace root above (#950): each package is found by name, from a path or a file:// URL', () => {
+  const { harnessDir, webDir } = makeInstalledFixture()
+  expect(() => findRepoRoot(join(harnessDir, 'extensions', 'guards', 'index.ts'))).toThrow(RepoRootNotFoundError)
+  const guardsModule = pathToFileURL(join(harnessDir, 'extensions', 'guards', 'index.ts')).href
+  expect(installedPackageDir(guardsModule, HARNESS_PACKAGE_NAME)).toBe(realpathSync(harnessDir))
+  expect(installedPackageDir(join(webDir, 'src', 'server', 'dev.ts'), WEB_PACKAGE_NAME)).toBe(realpathSync(webDir))
+})
+
+test('a package.json of another name below the package root is walked past, not taken for the package (#950)', () => {
+  const { harnessDir } = makeInstalledFixture()
+  const nested = join(harnessDir, 'extensions', 'guards')
+  writeFileSync(join(nested, 'package.json'), JSON.stringify({ name: 'a-nested-fixture' }))
+  expect(installedPackageDir(join(nested, 'index.ts'), HARNESS_PACKAGE_NAME)).toBe(realpathSync(harnessDir))
+})
+
+test('no package of that name above throws a NAMED error carrying the start path and the name (#950)', () => {
+  const { harnessDir } = makeInstalledFixture()
+  const start = join(harnessDir, 'extensions', 'guards', 'index.ts')
+  expect(() => installedPackageDir(start, 'not-installed-here')).toThrow(PackageDirNotFoundError)
+  expect(() => installedPackageDir(start, 'not-installed-here')).toThrow('not-installed-here')
+})
+
+test("⚠ the guards' harnessRoot (#950): the checkout root for a workspace member, the package itself when installed", () => {
+  const checkout = makeWorkspaceFixture()
+  writeFileSync(join(checkout, 'packages', 'harness', 'package.json'), JSON.stringify({ name: HARNESS_PACKAGE_NAME }))
+  const checkedOutModule = join(checkout, 'packages', 'harness', 'extensions', 'deep', 'module.ts')
+  expect(checkoutOrInstalledRoot(checkedOutModule, HARNESS_PACKAGE_NAME)).toBe(realpathSync(checkout))
+
+  const { harnessDir } = makeInstalledFixture()
+  const installedModule = join(harnessDir, 'extensions', 'guards', 'index.ts')
+  expect(checkoutOrInstalledRoot(installedModule, HARNESS_PACKAGE_NAME)).toBe(realpathSync(harnessDir))
+})
+
+test("⚠ a package installed into someone else's monorepo is not a member of it: no checkout, no .env, no .enso to adopt (#950)", () => {
+  const strangersRoot = mkdtempSync(join(tmpdir(), 'enso-strangers-monorepo-'))
+  writeFileSync(join(strangersRoot, 'package.json'), JSON.stringify({ name: 'theirs', workspaces: ['apps/*'] }))
+  const installedHarness = join(strangersRoot, 'node_modules', HARNESS_PACKAGE_NAME)
+  mkdirSync(installedHarness, { recursive: true })
+  writeFileSync(join(installedHarness, 'package.json'), JSON.stringify({ name: HARNESS_PACKAGE_NAME }))
+  // The workspace-root walk would adopt their root; the membership test does not.
+  expect(realpathSync(findRepoRoot(installedHarness))).toBe(realpathSync(strangersRoot))
+  expect(checkoutRootOfPackage(installedHarness)).toBeUndefined()
+  expect(checkoutOrInstalledRoot(installedHarness, HARNESS_PACKAGE_NAME)).toBe(realpathSync(installedHarness))
+})
+
+test('the web package and the dev launchers (#950): its checkout when it is a member, none when installed', () => {
+  const checkout = makeWorkspaceFixture()
+  expect(checkoutRootOfPackage(join(checkout, 'packages', 'harness'))).toBe(checkout)
+  const { webDir } = makeInstalledFixture()
+  expect(checkoutRootOfPackage(webDir)).toBeUndefined()
+})
+
+test("dev.ts's harness (#950): resolved by name from the web package, the same with or without a checkout", () => {
+  const { harnessDir, webDir } = makeInstalledFixture()
+  expect(resolvePackageDir(HARNESS_PACKAGE_NAME, webDir)).toBe(realpathSync(harnessDir))
+  // This checkout: the workspace link in node_modules lands on packages/harness itself.
+  const root = findRepoRoot(import.meta.url)
+  expect(resolvePackageDir(HARNESS_PACKAGE_NAME, webPackageDir(root))).toBe(realpathSync(harnessPackageDir(root)))
 })
