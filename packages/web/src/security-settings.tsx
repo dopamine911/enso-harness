@@ -212,7 +212,10 @@ export function looseningsOf(saved: EnsoSecurityConfig, next: EnsoSecurityConfig
   return said
 }
 
-/** Said before a save that newly chooses Jev while no key is stored: such a judge judges nothing. */
+/**
+ * Said before a save that newly chooses Jev while no key is stored: such a judge judges nothing. A
+ * loosening only when a local judge was judging before; from no judge, it protects no less.
+ */
 const JEV_WITHOUT_KEY = 'The judge is Jev, but no TypeSafe key is stored: every command goes unjudged.'
 
 type SaveProblem =
@@ -508,37 +511,53 @@ function SaveProblemNotice({
 }
 
 /**
- * What a save would loosen, said before it happens: Save anyway, or go back. Shown only when
- * something protects less than what the file holds now.
+ * What a save would loosen, or choose that will not work yet, said before it happens: Save anyway,
+ * or go back. Shown only when there is one of either; a save that only will not work yet protects
+ * no less, so it is not headed or styled as a loosening (#969 re-review).
  */
-function LooseningConfirm({
+function SaveConfirm({
   loosenings,
+  notWorking,
   working,
   onConfirm,
   onCancel,
 }: {
   loosenings: readonly string[]
+  notWorking: readonly string[]
   working: boolean
   onConfirm: () => void
   onCancel: () => void
 }): React.ReactNode {
+  const loosens = loosenings.length > 0
+  const section = (heading: string, said: readonly string[], tone: string): React.ReactNode =>
+    said.length === 0 ? null : (
+      <>
+        <p className={`flex items-center gap-2 font-semibold ${tone}`}>
+          <TriangleAlertIcon aria-hidden="true" className="size-4" />
+          {heading}
+        </p>
+        <ul className="grid list-disc gap-1 pl-6">
+          {said.map((each) => (
+            <li key={each}>{each}</li>
+          ))}
+        </ul>
+      </>
+    )
   return (
     <div
       role="alert"
-      aria-label="this loosens security"
-      className="grid gap-3 rounded-sm border border-refuse bg-card p-4 text-sm"
+      aria-label={loosens ? 'this loosens security' : 'this will not work yet'}
+      className={`grid gap-3 rounded-sm border ${loosens ? 'border-refuse' : 'border-border'} bg-card p-4 text-sm`}
     >
-      <p className="flex items-center gap-2 font-semibold text-refuse">
-        <TriangleAlertIcon aria-hidden="true" className="size-4" />
-        This save protects less than what is in force now
-      </p>
-      <ul className="grid list-disc gap-1 pl-6">
-        {loosenings.map((said) => (
-          <li key={said}>{said}</li>
-        ))}
-      </ul>
+      {section('This save protects less than what is in force now', loosenings, 'text-refuse')}
+      {section('What this save chooses will not work yet', notWorking, '')}
       <span className="flex flex-wrap gap-2">
-        <Button variant="destructive" className={PAGE_BUTTON} disabled={working} onClick={onConfirm}>
+        <Button
+          variant={loosens ? 'destructive' : 'default'}
+          className={PAGE_BUTTON}
+          disabled={working}
+          onClick={onConfirm}
+        >
           Save anyway
         </Button>
         <Button variant="outline" className={PAGE_OUTLINE_BUTTON} disabled={working} onClick={onCancel}>
@@ -567,10 +586,15 @@ function SecurityForm({
   const [draft, setDraft] = useState<Draft>(saved)
   const [checked, setChecked] = useState<ReadonlySet<FieldName>>(new Set())
   const [problem, setProblem] = useState<SaveProblem | undefined>(undefined)
-  // What Save anyway writes is the section the reader was shown the loosenings of; an edit closes
-  // the confirm, so its list is never stale (#969 review).
+  // What Save anyway writes is the section the reader was shown the confirm of; an edit, or
+  // storing the key, closes the confirm, so its list is never stale (#969 review).
   const [confirming, setConfirming] = useState<
-    { readonly loosenings: readonly string[]; readonly security: EnsoSecurityConfig } | undefined
+    | {
+        readonly loosenings: readonly string[]
+        readonly notWorking: readonly string[]
+        readonly security: EnsoSecurityConfig
+      }
+    | undefined
   >(undefined)
   const [working, setWorking] = useState(false)
   const next = securityOf(draft)
@@ -604,9 +628,14 @@ function SecurityForm({
     setProblem(undefined)
     const jevWithoutKey =
       next.judge?.backend === 'jev' && settings.security.judge?.backend !== 'jev' && !settings.judgeKeySet
-    const loosenings = [...looseningsOf(settings.security, next), ...(jevWithoutKey ? [JEV_WITHOUT_KEY] : [])]
-    if (loosenings.length > 0) {
-      setConfirming({ loosenings, security: next })
+    const judgedBefore = effectiveOf(settings.security).backend !== 'off'
+    const loosenings = [
+      ...looseningsOf(settings.security, next),
+      ...(jevWithoutKey && judgedBefore ? [JEV_WITHOUT_KEY] : []),
+    ]
+    const notWorking = jevWithoutKey && !judgedBefore ? [JEV_WITHOUT_KEY] : []
+    if (loosenings.length > 0 || notWorking.length > 0) {
+      setConfirming({ loosenings, notWorking, security: next })
       return
     }
     write(next)
@@ -641,13 +670,17 @@ function SecurityForm({
             set={settings.judgeKeySet}
             secretsPath={settings.secretsPath}
             fetchImpl={fetchImpl}
-            onSet={onKeySet}
+            onSet={(set) => {
+              setConfirming(undefined)
+              onKeySet(set)
+            }}
           />
         ) : null}
       </JudgeRows>
       {confirming === undefined ? null : (
-        <LooseningConfirm
+        <SaveConfirm
           loosenings={confirming.loosenings}
+          notWorking={confirming.notWorking}
           working={working}
           onConfirm={() => write(confirming.security)}
           onCancel={() => setConfirming(undefined)}

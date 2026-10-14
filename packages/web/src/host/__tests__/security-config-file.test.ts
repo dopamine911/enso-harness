@@ -2,7 +2,8 @@ import { expect, test } from 'bun:test'
 import { mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { readSecuritySettings, writeJudgeKey, writeSecuritySettings } from '../security-config-file.ts'
+import type { EnsoSecurityConfig } from '@enso/core'
+import { prunedSecurity, readSecuritySettings, writeJudgeKey, writeSecuritySettings } from '../security-config-file.ts'
 
 /**
  * Settings › Security's files (#933): a save rewrites `config.json` whole, so what it must never do
@@ -44,6 +45,37 @@ test('a save replaces only `security`: every other key stays as it was on disk',
   expect(JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8'))).toEqual({
     webFetch: { allowedHosts: ['docs.example.com'] },
   })
+})
+
+// #969 re-review, issue 1: only empty objects are pruned. A key `EnsoSecurityConfig` gains later
+// is kept by a save, a primitive one (`false`, `0`) included, not just an object with keys.
+test('pruning drops only empty objects: every other key, primitive or not, is kept', () => {
+  const future = { incidents: {}, judge: { backend: 'off' }, enabled: false, retries: 0, label: '' }
+  expect(prunedSecurity(future as EnsoSecurityConfig)).toEqual({
+    judge: { backend: 'off' },
+    enabled: false,
+    retries: 0,
+    label: '',
+  } as EnsoSecurityConfig)
+  expect(prunedSecurity({ incidents: {}, judge: {} })).toBeUndefined()
+})
+
+// #969 re-review, issue 4: the API refuses what the page refuses: a `local` judge off this machine
+// is never asked, so it is not saved through a direct PUT either.
+test('a local judge off this machine is refused, and the file is left as it was', () => {
+  const dir = home()
+  const path = join(dir, 'config.json')
+  writeFileSync(path, '{}')
+  const written = writeSecuritySettings(
+    dir,
+    { judge: { backend: 'local', local: { baseUrl: 'http://10.0.0.2:8080', model: 'm' } } },
+    { kind: 'present' },
+  )
+  expect(written).toEqual({
+    kind: 'refused',
+    reason: 'nothing was saved: the local judge must run on this machine (a loopback address), not 10.0.0.2',
+  })
+  expect(readFileSync(path, 'utf8')).toBe('{}')
 })
 
 test('no file: the save creates it under If-None-Match', () => {
