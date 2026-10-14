@@ -173,6 +173,11 @@ function textOf(parts: readonly MessagePart[]): string {
 /** The `data:<mime>;base64,<data>` URL the composer submits, split. Anything else is not an inline image. */
 const DATA_URL = /^data:([^;,]+);base64,([A-Za-z0-9+/]*={0,2})$/
 
+/** How many times per `stallMs` the hand-over watchdog looks: a stall is said within a quarter window of its threshold. */
+const STALL_SAMPLES_PER_WINDOW = 4
+/** The watchdog's shortest tick, for the tests' shortened `stallMs`: never a busy loop. */
+const MIN_WATCHDOG_TICK_MS = 10
+
 /**
  * The user's image parts as the wire takes them (#68): inline bytes only. `EnsoPromptImage`
  * has no `url` — a server-side fetch would be egress the guards do not cover — so a part
@@ -308,9 +313,11 @@ export interface ComposingCall {
 export interface RequestPulse {
   /** When this page saw the request open (`Date.now()`). */
   readonly startedAt: number
-  /** Characters of thinking, reply text and tool-call arguments streamed so far. */
+  /** Characters of thinking streamed so far. */
   readonly thinking: number
+  /** Characters of reply text streamed so far. */
   readonly text: number
+  /** Characters of tool-call arguments streamed so far. */
   readonly tool: number
 }
 
@@ -322,7 +329,10 @@ export interface RunEnding {
   readonly error: string | undefined
 }
 
-/** What the follow says of the run, for the status bar (#914) — read when the bar renders. */
+/**
+ * What the follow says of the run (#914, #913), read on each render by the status bar and by the
+ * Context, Stats and Diff views (`ThreadViewOverlay`).
+ */
 export interface RunPulse {
   /** When the oldest run open on this page opened (`Date.now()`); undefined while none is. */
   readonly runStartedAt: number | undefined
@@ -346,9 +356,6 @@ function carriesOutput(frame: EnsoFollowFrame): boolean {
   const { observation } = frame
   return observation.kind !== 'extension-ui-request' || observation.blocking
 }
-
-/** Enough of a composing call's arguments to find its subject: pi's tools name it first. */
-export const COMPOSING_HEAD_CHARS = 2048
 
 /** What `abort()` returns: the outcome, and the prompts pi had waiting — handed back to the composer (#75). Empty unless `aborted`. */
 export interface AbortResult {
@@ -447,8 +454,9 @@ export interface FollowConnection extends SubscribeConnectionAdapter {
   readonly streamMessageId: () => string | undefined
   /**
    * When this page last applied the follow (#919), `Date.now()`: the client took back the last
-   * chunk handed to it, or a frame that queued none was observed with nothing waiting. Undefined
-   * while no follow is open — nothing is being applied, and a dropped follow is said otherwise.
+   * chunk handed to it, or a frame that passed the wire check and queued none was observed with
+   * nothing waiting. Undefined while no follow is open, and from the moment the server closes one —
+   * nothing is being applied, and a dropped follow is said otherwise.
    * What the page's server check compares the server's listing against (`page-behind-check.ts`).
    */
   readonly appliedAt: () => number | undefined
@@ -607,11 +615,14 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
   }
 
   /**
-   * The run is over for the client. `known` is false when this page cannot tell HOW it ended — the
-   * follow closed under it — so no ending is recorded, and the bar says the live view is lost instead.
+   * The run is over for the client: its closing chunk, once. `known` is false when this page cannot
+   * tell HOW it ended — the follow closed under it — so no ending is recorded, and the bar says the
+   * live view is lost instead. A run no longer open says nothing — closed already, or forgotten when
+   * the client stopped taking chunks (`consumerStopped`): TanStack reset it, and a late receipt's
+   * chunk would be yielded ahead of the next subscription's snapshot.
    */
   function closeRun(run: OpenRun, chunk: StreamChunk, known = true): void {
-    runs.delete(run.runId)
+    if (!runs.delete(run.runId)) return
     if (current === run) current = undefined
     if (runs.size === 0) {
       composing = undefined
@@ -855,9 +866,10 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
   }
 
   /**
-   * What the status bar says of the run (#914): a call the model is writing — ended once pi runs it,
-   * and a new message starts none — and an extension's failure, which ends the client's run now
-   * (`to-agui.ts`); pi's run settles later, and its ending says it too.
+   * What the follow says of the run (#914): the request in flight (`observeRequest`, #913), a call
+   * the model is writing — ended once pi runs it, and a new message starts none — and an
+   * extension's failure, which ends the client's run now (`to-agui.ts`); pi's run settles later,
+   * and its ending says it too. Read through `pulse()` by the status bar and the views.
    */
   function observeRun(observation: EnsoObservation): void {
     observeRequest(observation)
@@ -1045,24 +1057,22 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
    */
   function watchHandOver(state: Following): () => void {
     const { stallMs } = PAGE_HEALTH_TIMING
-    const timer = setInterval(
-      () => {
-        if (state.stalled || state.handing === undefined || Date.now() - state.handedAt < stallMs) return
-        state.stalled = true
-        const name = state.handing.type === EventType.CUSTOM ? state.handing.name : state.handing.type
-        const seconds = Math.round((Date.now() - state.handedAt) / 1000)
-        problem(
-          "this page has not applied the thread's updates for {seconds}s: a {chunk} chunk is still being handled. What it shows may be out of date — reload the page to catch up",
-          { seconds, chunk: name },
-        )
-        reportPageFault({
-          trigger: 'stalled',
-          threadId,
-          error: `a ${name} chunk handed to the chat client ${seconds}s ago was never taken back`,
-        })
-      },
-      Math.max(stallMs / 4, 10),
-    )
+    const tickMs = Math.max(stallMs / STALL_SAMPLES_PER_WINDOW, MIN_WATCHDOG_TICK_MS)
+    const timer = setInterval(() => {
+      if (state.stalled || state.handing === undefined || Date.now() - state.handedAt < stallMs) return
+      state.stalled = true
+      const name = state.handing.type === EventType.CUSTOM ? state.handing.name : state.handing.type
+      const seconds = Math.round((Date.now() - state.handedAt) / 1000)
+      problem(
+        "this page has not applied the thread's updates for {seconds}s: a {chunk} chunk is still being handled. What it shows may be out of date — reload the page to catch up",
+        { seconds, chunk: name },
+      )
+      reportPageFault({
+        trigger: 'stalled',
+        threadId,
+        error: `a ${name} chunk handed to the chat client ${seconds}s ago was never taken back`,
+      })
+    }, tickMs)
     return () => clearInterval(timer)
   }
 
@@ -1084,10 +1094,10 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
 
   /** One frame off the follow: observed if this page can read it, then the applied mark when nothing waits. */
   function takeFrame(raw: unknown, state: Following): void {
-    if (admitted(raw)) {
-      if (carriesOutput(raw)) outputAt = Date.now()
-      observe(raw)
-    }
+    // One that fails `admitted` applied nothing: the page is as stale as before it came.
+    if (!admitted(raw)) return
+    if (carriesOutput(raw)) outputAt = Date.now()
+    observe(raw)
     // A frame that queued nothing for the client is applied once it is observed.
     if (queue.length === 0 && state.handing === undefined) appliedAt = Date.now()
   }
@@ -1198,11 +1208,13 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
         state.handedAt = Date.now()
         yield next
         state.handing = undefined
-        appliedAt = Date.now()
+        // The chunks `followClosed` queued apply nothing of a follow: the follow is gone.
+        if (!state.ended) appliedAt = Date.now()
       }
     } finally {
       unwatch()
       unwatchSilence()
+      appliedAt = undefined
       consumerStopped(state, abort)
       stop.abort()
       await pump

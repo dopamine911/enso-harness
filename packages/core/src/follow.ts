@@ -258,6 +258,25 @@ export const EnsoPromptBody = Type.Object(
 export type EnsoPromptBody = Static<typeof EnsoPromptBody>
 
 /**
+ * The composers' drafts the page's Reload keeps in the tab's `sessionStorage` (#919), by thread:
+ * each draft's text and its attachments as `data:` URLs. Never crosses to the server; checked when
+ * the page reads it back, so a shape another bundle wrote opens no composer with it.
+ *
+ * @group Follow wire
+ */
+export const EnsoKeptDrafts = Type.Record(
+  Type.String(),
+  Type.Object({
+    text: Type.String(),
+    files: Type.Array(
+      Type.Object({ id: Type.String(), filename: Type.String(), mediaType: Type.String(), url: Type.String() }),
+    ),
+  }),
+)
+/** @group Follow wire */
+export type EnsoKeptDrafts = Static<typeof EnsoKeptDrafts>
+
+/**
  * Decoded size of a base64 string, without decoding it: three bytes per four characters, less the padding.
  *
  * @group Follow wire

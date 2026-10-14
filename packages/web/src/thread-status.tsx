@@ -364,8 +364,9 @@ const DETAIL = 'min-w-0 max-w-md truncate'
 const DETAIL_BUTTON = `${STATUS_BUTTON} underline decoration-dotted underline-offset-2 hover:decoration-solid`
 
 /**
- * What pi is doing and for how long (#914): the step, its elapsed time, the run's; while it thinks,
- * the last line of its thinking, live — which opens to the thinking's latest stretch.
+ * What pi is doing and for how long (#914): the step, its elapsed time, the run's, and the request's
+ * output so far (`~18K chars`, #913); while it thinks, the last line of its thinking, live — which
+ * opens to the thinking's latest stretch.
  */
 function WorkingDetail({
   status,

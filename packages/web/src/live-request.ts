@@ -1,6 +1,8 @@
 import type { ToolCallPart, ToolResultPart, UIMessage } from '@tanstack/ai-client'
+import { toolResultState } from './EnsoToolResult.tsx'
 import type { ComposingCall, RequestPulse } from './follow-connection.ts'
 import { formatElapsed } from './run-status.ts'
+import { COMPACT } from './stats-table.tsx'
 
 /**
  * The model request in flight, as the views say it (#913).
@@ -33,19 +35,20 @@ export function requestOutput(request: RequestPulse): number {
   return request.thinking + request.text + request.tool
 }
 
-const COMPACT = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 })
+/** pi's estimate rule (`/context`'s `next`): one token per this many characters. */
+const CHARACTERS_PER_TOKEN = 4
 
-/** `~18k chars` — the output so far, as counted on the page. */
+/** `~18K chars` — the output so far, as counted on the page. */
 export function outputCharsText(characters: number): string {
   return `~${COMPACT.format(characters)} chars`
 }
 
-/** pi's estimate rule, characters ÷ 4 (`/context`'s `next`): the in-flight output's token figure. */
+/** pi's estimate rule, characters ÷ {@link CHARACTERS_PER_TOKEN}: the in-flight output's token figure. */
 export function estimatedTokens(characters: number): number {
-  return Math.round(characters / 4)
+  return Math.round(characters / CHARACTERS_PER_TOKEN)
 }
 
-/** `≈4.5k` — an estimated token count. */
+/** `≈4.5K` — an estimated token count. */
 export function estimatedTokensText(characters: number): string {
   return `≈${COMPACT.format(estimatedTokens(characters))}`
 }
@@ -109,7 +112,9 @@ export interface PendingChange {
 }
 
 /**
- * The file change the run has in hand and has not applied (#913):
+ * The file change the run has in hand and has not applied (#913) — or, once refused or failed,
+ * the last one it tried since the prompt: that card stays until the next prompt, run over or not,
+ * so the Diff view says "not applied" even if a later call made the change another way.
  *
  *   composing  the model is still writing the call's arguments;
  *   judging    the call is whole and pi has it — the guards, the permission engine or the tool
@@ -141,10 +146,10 @@ export function pendingWrite(
   if (latest === undefined) return undefined
   const { call, result } = latest
   const change = changeOf(call.id, call.name, call.arguments)
-  if (result === undefined) return generating ? { state: 'judging', change } : undefined
-  if (result.error === undefined && result.state !== 'error') return undefined
-  const reason = result.error ?? (typeof result.content === 'string' ? result.content : '')
-  return { state: refusals.has(call.id) ? 'refused' : 'failed', change, reason }
+  const state = toolResultState(result, generating)
+  if (state.status === 'pending') return { state: 'judging', change }
+  if (state.status !== 'error') return undefined
+  return { state: refusals.has(call.id) ? 'refused' : 'failed', change, reason: state.error }
 }
 
 /**

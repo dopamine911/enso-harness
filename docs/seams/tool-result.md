@@ -174,6 +174,9 @@ export type EnsoRendererMap = Record<string, (props: Record<string, unknown>) =>
 export function toolResultState(result: ToolResultPart | undefined, runOpen: boolean): ToolResultState {
   if (result === undefined) return runOpen ? { status: 'pending' } : { status: 'aborted' }
   if (result.error !== undefined) return { status: 'error', result, error: result.error }
+  if (result.state === 'error') {
+    return { status: 'error', result, error: typeof result.content === 'string' ? result.content : '' }
+  }
   return { status: 'done', result }
 }
 ```
