@@ -45,7 +45,11 @@ export type GuardPolicy = Static<typeof GuardPolicy>
  * @group Guards
  */
 export const ENSO_GUARD_RULES = [
-  /** #4's fail-closed floor: the policy names a tool pi does not have, so everything is refused. */
+  /**
+   * #4's fail-closed floor: the policy names a tool pi does not have, or (#953) the pi it runs in is
+   * not one the guard was pinned against — either way the policy does not match its runtime, so
+   * everything is refused.
+   */
   'policy-mismatch',
   /** cc-safety-net's verdict on a bash command — destructive, or secret access through the shell. */
   'cc-safety-net',

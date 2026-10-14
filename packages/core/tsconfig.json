@@ -5,5 +5,8 @@
     "rootDir": ".",
     "types": ["bun"]
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts"],
+  // Core's own tests are their own project (`src/__tests__/tsconfig.json`, #951): they import
+  // `@enso/test-support`, which depends on core, and a project cannot reference its dependent.
+  "exclude": ["src/__tests__"]
 }

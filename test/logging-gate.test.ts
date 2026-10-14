@@ -52,8 +52,8 @@ const CONSOLE_CALL = /\bconsole\.(?:log|error|warn|info|debug|trace)\s*\(/
 const LOGTAPE_IMPORT = /["']@logtape\//
 /**
  * Each row with the condition that retires it. The recorder at
- * `packages/core/src/__tests__/log-recorder.ts` is NOT here: `__tests__` is outside the scan,
- * and it is a declared, reasoned exception (`no-duplicate-shapes.test.ts`'s barrel note).
+ * `packages/test-support/src/log-recorder.ts` is NOT here: `packages/test-support` is not a
+ * migrated root — it is the tests' own package, never shipped (#951).
  */
 const LOGTAPE_ALLOWED = [
   // The record schema and `ensoLogger` itself — the one place the substrate's types are ours

@@ -2,6 +2,7 @@ import { afterEach, expect, spyOn, test } from 'bun:test'
 import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { recordEnsoLogs } from '@enso/test-support/log-recorder'
 import { reset } from '@logtape/logtape'
 import { Check } from 'typebox/value'
 import { redactionManifest } from '../log-bundle.ts'
@@ -29,7 +30,6 @@ import {
 import { ensoSecretsPath } from '../paths.ts'
 import { isProcessMarkerAlive, processMarkersDir, reconcileProcessMarkers } from '../process-marker.ts'
 import { knownSecretValuesTracking, readSecret } from '../secrets.ts'
-import { recordEnsoLogs } from './log-recorder.ts'
 
 /**
  * The file a user hands us (#132), end to end through the real configurator: what a line

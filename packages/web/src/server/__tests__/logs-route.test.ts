@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, expect, test } from 'bun:test'
-import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
+import { recordEnsoLogs, releaseEnsoLogs } from '@enso/test-support/log-recorder'
 import type { LogRecorder } from '@logtape/testing/recorder'
 import { MAX_LOG_BODY_BYTES, receiveBrowserLogs } from '../logs-route.ts'
 

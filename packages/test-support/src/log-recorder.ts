@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
+import { ENSO_LOG_ROOT } from '@enso/core'
 import { configure, type LogRecord, reset } from '@logtape/logtape'
 import { createLogRecorder, type LogRecorder } from '@logtape/testing/recorder'
-import { ENSO_LOG_ROOT } from '../log.ts'
 
 /**
  * The tests' sink (#132), one for every package (#178): every `enso` record, at every level,
@@ -14,8 +14,9 @@ import { ENSO_LOG_ROOT } from '../log.ts'
  * `configure` replaces the first's, whose recorder is finished with by then. The meta logger
  * is routed nowhere so LogTape's own notes never leak into a test's output.
  *
- * Lives under `__tests__` on purpose: the logging gate's inventory of files that name LogTape
- * is three production files, and this is not one of them.
+ * Lives in `@enso/test-support` on purpose (#951): the logging gate's inventory of files that
+ * name LogTape is three production files and scans only production roots, and this package is
+ * test-only — never shipped, so the recorder never reaches an installed harness.
  */
 export async function recordEnsoLogs(): Promise<LogRecorder> {
   const recorder = createLogRecorder()

@@ -3,14 +3,8 @@ import { join } from 'node:path'
 import { ensoAgentDir, ensoSecretsPath, harnessPackageDir } from '../../../packages/core/src/paths.ts'
 import { declaredResources } from '../../../packages/core/src/pi-manifest.ts'
 import { isSecretShapedName, SECRET_NAME_WORDS } from '../../../packages/core/src/secrets.ts'
-import {
-  PRINT_VARIANT_NOTE,
-  piArguments,
-  piVersionText,
-  SUPPORTED_PI_VERSIONS,
-  secretsKeptOutLine,
-  vanillaPiLine,
-} from '../../enso-launch.ts'
+import { piVersionText, SUPPORTED_PI_VERSIONS } from '../../../packages/core/src/supported-pi-versions.ts'
+import { PRINT_VARIANT_NOTE, piArguments, secretsKeptOutLine, vanillaPiLine } from '../../enso-launch.ts'
 import { ROOT } from '../flow-tags.ts'
 import { stringIn } from '../source-constants.ts'
 import type { FeatureSpec } from './spec.ts'

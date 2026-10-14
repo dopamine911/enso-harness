@@ -5,6 +5,12 @@
       "path": "./packages/core"
     },
     {
+      "path": "./packages/core/src/__tests__"
+    },
+    {
+      "path": "./packages/test-support"
+    },
+    {
       "path": "./packages/harness"
     },
     {

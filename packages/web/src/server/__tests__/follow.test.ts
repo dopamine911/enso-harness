@@ -15,8 +15,8 @@ import {
   type PromptRequest,
   type ThreadRuntime,
 } from '@enso/core'
-import { type FlowTrace, flowTrace } from '@enso/core/flow-trace'
-import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
+import { type FlowTrace, flowTrace } from '@enso/test-support/flow-trace'
+import { recordEnsoLogs, releaseEnsoLogs } from '@enso/test-support/log-recorder'
 import type { LogRecorder } from '@logtape/testing/recorder'
 import type { AgentHost } from '../../host/agent-host.ts'
 import { answerThreadDialog, type FollowRouteDeps } from '../follow.ts'

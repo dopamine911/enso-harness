@@ -1,10 +1,19 @@
-import type {
-  ExtensionAPI,
-  ToolCallEventResult,
-  ToolResultEvent,
-  TruncationResult,
+import {
+  type ExtensionAPI,
+  type ExtensionContext,
+  type ToolCallEventResult,
+  type ToolResultEvent,
+  type TruncationResult,
+  VERSION,
 } from '@earendil-works/pi-coding-agent'
-import { type CommandJudge, type EnsoIncidentPolicy, ensoLogger, transcriptOf } from '@enso/core'
+import {
+  type CommandJudge,
+  type EnsoIncidentPolicy,
+  ensoLogger,
+  piVersionSupported,
+  transcriptOf,
+  unsupportedPiVersionReason,
+} from '@enso/core'
 import { checkoutOrInstalledRoot, ensoHome, ensoLogsDir, ensoProjectsDir, HARNESS_PACKAGE_NAME } from '@enso/core/paths'
 import { knownSecretValuesTracking, readSecret } from '@enso/core/secrets'
 import { PERMISSIONS_DECISION_CHANNEL } from '@gotgenes/pi-permission-system'
@@ -58,12 +67,14 @@ function returnedWholeFile(event: ToolResultEvent): boolean {
 
 /**
  * The guard's seams: the bash analyzer (#9), the harness root (#160 §4), the incident policy
- * and log directory (#466), the projects directory thread trees are minted in (#615), and the
- * command judge with the secret values its state is redacted of (#469).
+ * and log directory (#466), the projects directory thread trees are minted in (#615), the
+ * command judge with the secret values its state is redacted of (#469), and the version of the
+ * pi it runs in (#953).
  *
- * Production wires cc-safety-net's `checkCommand`, this checkout's root, the user's `config.json`
- * and `ENSO_HOME`'s log and projects directories and secrets; tests inject known verdicts, a root
- * they built, a policy, directories and a fake judge — a guard test must never reach the network.
+ * Production wires cc-safety-net's `checkCommand`, this checkout's root, the user's `config.json`,
+ * `ENSO_HOME`'s log and projects directories and secrets, and pi's own `VERSION`; tests inject known
+ * verdicts, a root they built, a policy, directories, a fake judge and a version — a guard test must
+ * never reach the network.
  * `checkCommand` reads LOCAL policy per call, so a guard test that touched the real
  * library would vary with the machine's cc-safety-net config (the contract test alone exercises
  * the real one, and pins defaults explicitly) — and the same holds for the machine's config file.
@@ -94,6 +105,42 @@ export interface GuardDependencies {
   commandJudge: () => CommandJudge | undefined
   /** The known secret values a judge state is redacted of before it leaves (#469), read per judged call. */
   judgeSecretValues: () => readonly string[]
+  /**
+   * The version of the pi this extension is running in (#953): pi's own `VERSION`, which pi's
+   * extension loader hands the host's copy of (it maps `@earendil-works/pi-coding-agent` to the
+   * running pi's `index.js`, in every resolution mode). Outside `SUPPORTED_PI_VERSIONS`, the floor
+   * refuses every tool call.
+   */
+  runningPiVersion: string
+}
+
+/** Which pi the guard's refusal is about: the one it runs in, as opposed to the launcher's "the `pi` on PATH". */
+const RUNNING_PI_SUBJECT = 'the running pi'
+
+/**
+ * Why the running pi is refused, or undefined when it is one the guard was pinned against (#953).
+ *
+ * ⚠ The launcher is not the only way in. `scripts/enso.ts` refuses an unsupported pi before it
+ * spawns one, but `pi install npm:<package>` loads the harness into whatever pi the user has and
+ * never runs the launcher — so the harness checks the pi it is actually in, against the same range,
+ * in the same words. A pi too old to export `VERSION` hands over `undefined`, which reads as no
+ * version and is refused: the safe direction.
+ */
+function runningPiRefusal(runningPiVersion: string): string | undefined {
+  return piVersionSupported(runningPiVersion)
+    ? undefined
+    : unsupportedPiVersionReason(RUNNING_PI_SUBJECT, runningPiVersion)
+}
+
+/**
+ * Says the version refusal where a person will see it, at session start (#953): every tool call is
+ * refused with the reason anyway, but a session that has not called a tool yet would otherwise look
+ * armed. Logged always; shown in pi's UI when there is one (a print run has none, and its refusals
+ * carry the reason).
+ */
+function announceVersionRefusal(refusal: string, extensionContext: ExtensionContext): void {
+  log.error('every tool call is refused: {refusal}', { refusal })
+  if (extensionContext.hasUI) extensionContext.ui.notify(`Enso: every tool call is refused — ${refusal}`, 'error')
 }
 
 /**
@@ -122,7 +169,7 @@ function safetyNetDenial(
 
 /** The guard session over pi's extension API: the port filled from `appendEntry`, `events` and `getAllTools`. */
 function guardSessionOver(pi: ExtensionAPI, dependencies: GuardDependencies): GuardSession {
-  const { analyzeBashCommand, ...seams } = dependencies
+  const { analyzeBashCommand, runningPiVersion, ...seams } = dependencies
   return createGuardSession(
     {
       name: 'pi',
@@ -132,6 +179,7 @@ function guardSessionOver(pi: ExtensionAPI, dependencies: GuardDependencies): Gu
         pi.events.on(channel, handler)
       },
       toolNames: () => pi.getAllTools().map((tool) => tool.name),
+      versionRefusal: () => runningPiRefusal(runningPiVersion),
     },
     { ...seams, analyzeShell: (input) => safetyNetDenial(analyzeBashCommand, input) },
   )
@@ -155,6 +203,8 @@ export function createGuards(dependencies: GuardDependencies): (pi: ExtensionAPI
     pi.events.on(PERMISSIONS_DECISION_CHANNEL, (raw: unknown) => session.permissionDecision(raw))
 
     pi.on('session_start', (_event, extensionContext): void => {
+      const refusal = runningPiRefusal(dependencies.runningPiVersion)
+      if (refusal !== undefined) announceVersionRefusal(refusal, extensionContext)
       session.start({
         recordDirectory: () => extensionContext.sessionManager.getSessionDir(),
         transcript: () => transcriptOf(extensionContext.sessionManager.getBranch()),
@@ -230,7 +280,7 @@ function productionCommandJudge(): CommandJudge | undefined {
   return createJevJudge({ apiKey: () => readSecret(home, JEV_KEY_NAME), timeoutMs: JUDGE_TIMEOUT_MS })
 }
 
-/** The pi entry point — the real analyzer, this checkout's root (or the installed package's) and the user's config, wired at the composition root. */
+/** The pi entry point — the real analyzer, this checkout's root (or the installed package's), the user's config and the running pi's version, wired at the composition root. */
 export default createGuards({
   analyzeBashCommand: checkCommand,
   // Not the workspace-root walk (#950): an installed harness has no workspace root above it, so
@@ -242,4 +292,5 @@ export default createGuards({
   commandJudge: productionCommandJudge,
   // The tracking thunk: one `stat` per judged call, re-read only when secrets.env changes (#207).
   judgeSecretValues: knownSecretValuesTracking(ensoHome(process.env)),
+  runningPiVersion: VERSION,
 })
