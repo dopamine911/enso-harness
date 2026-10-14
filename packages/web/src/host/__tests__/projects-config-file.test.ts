@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { writeDefaultProjectTrust } from '../project-trust.ts'
-import { type ProjectsSettingsPlaces, readProjectsSettings, writeProjectsSettings } from '../projects-config-file.ts'
+import { type SettingsPlaces, readProjectsSettings, writeProjectsSettings } from '../projects-config-file.ts'
 
 /**
  * Settings › Projects & threads' files (#934): a save rewrites `config.json` whole, so it must never
@@ -15,7 +15,7 @@ import { type ProjectsSettingsPlaces, readProjectsSettings, writeProjectsSetting
 /** The resolver's rule as a test can pin it: `~/` is `/home/me/`, and a trailing slash goes. */
 const canonical = (key: string): string => key.replace(/^~\//, '/home/me/').replace(/\/+$/, '')
 
-function dirs(): ProjectsSettingsPlaces {
+function dirs(): SettingsPlaces {
   const home = mkdtempSync(join(tmpdir(), 'enso-projects-settings-'))
   const agentDir = join(home, 'pi-agent')
   mkdirSync(agentDir)
@@ -86,14 +86,18 @@ test('a project mode is read and written under its canonical path, the one the r
   })
 })
 
-test('two modes naming one project are refused: only one of them would apply', () => {
+// #979 re-review, issue 6: the refusal names the two keys that collide, not every key written.
+test('two modes naming one project are refused, naming those two: only one of them would apply', () => {
   const places = dirs()
   const written = writeProjectsSettings(
     places,
-    { threads: { projects: { '~/code/app': 'off', '/home/me/code/app': 'copy' } } },
+    { threads: { projects: { '/srv/a': 'off', '~/code/app': 'off', '/srv/b': 'copy', '/home/me/code/app': 'copy' } } },
     { kind: 'absent' },
   )
-  expect(written).toMatchObject({ kind: 'refused', reason: expect.stringContaining('name the same project') })
+  expect(written).toEqual({
+    kind: 'refused',
+    reason: 'nothing was saved: ~/code/app and /home/me/code/app name the same project, and only one would apply',
+  })
   expect(existsSync(join(places.home, 'config.json'))).toBe(false)
 })
 

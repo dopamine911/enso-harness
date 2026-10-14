@@ -167,7 +167,11 @@ function ListRow(props: {
   )
 }
 
-/** Said before trusting every undecided project: the one trust choice that protects less (#979 review). */
+/**
+ * Said before trusting every undecided project: the choice that trusts without asking, the one
+ * confirmed (#979 review). `never` → `ask` lets a project be trusted where it was refused, but only
+ * by someone answering its own ask, so it is not confirmed here.
+ */
 const TRUST_ALWAYS_LOOSENS = 'Every project you add will run its own extensions and setup commands without asking.'
 
 /**

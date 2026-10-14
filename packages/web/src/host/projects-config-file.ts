@@ -26,8 +26,8 @@ import { readDefaultProjectTrust } from './project-trust.ts'
  * `defaultProjectTrust` is pi's key, in pi's file: read and written in `project-trust.ts`.
  */
 
-/** Where the section's files are, and how a `threads.projects` key is matched. */
-export interface ProjectsSettingsPlaces {
+/** Where Settings' `config.json` sections' files are, and how a `threads.projects` key is matched. */
+export interface SettingsPlaces {
   /** `ENSO_HOME`: its `config.json`. */
   readonly home: string
   /** pi's agent directory: its `settings.json` holds `defaultProjectTrust`. */
@@ -36,21 +36,32 @@ export interface ProjectsSettingsPlaces {
   readonly canonical: (key: string) => string
 }
 
-/** `threads.projects` keyed by canonical path; of two keys naming one project, the first — the resolver's. */
+/**
+ * `threads.projects` keyed by canonical path; of two keys naming one project, the first — the
+ * resolver's — and the first such pair as written, for a save to name.
+ */
 function canonicalModes(
   modes: Readonly<Record<string, EnsoThreadTreeMode>>,
   canonical: (key: string) => string,
-): Record<string, EnsoThreadTreeMode> {
+): { readonly byPath: Record<string, EnsoThreadTreeMode>; readonly clash?: readonly [string, string] } {
   const byPath: Record<string, EnsoThreadTreeMode> = {}
+  const keyOf: Record<string, string> = {}
+  let clash: readonly [string, string] | undefined
   for (const [key, mode] of Object.entries(modes)) {
     const path = canonical(key)
-    if (!Object.hasOwn(byPath, path)) byPath[path] = mode
+    const first = keyOf[path]
+    if (first === undefined) {
+      byPath[path] = mode
+      keyOf[path] = key
+    } else {
+      clash ??= [first, key]
+    }
   }
-  return byPath
+  return clash === undefined ? { byPath } : { byPath, clash }
 }
 
 /** The user's `projects` and `threads`, pi's trust default, or why the config cannot be read. */
-export function readProjectsSettings({ home, agentDir, canonical }: ProjectsSettingsPlaces): EnsoProjectsSettingsRead {
+export function readProjectsSettings({ home, agentDir, canonical }: SettingsPlaces): EnsoProjectsSettingsRead {
   const { parsed, ...file } = readConfigFile(home)
   const common = {
     ...file,
@@ -63,7 +74,9 @@ export function readProjectsSettings({ home, agentDir, canonical }: ProjectsSett
     ...common,
     ...(projects === undefined ? {} : { projects }),
     threads:
-      threads.projects === undefined ? threads : { ...threads, projects: canonicalModes(threads.projects, canonical) },
+      threads.projects === undefined
+        ? threads
+        : { ...threads, projects: canonicalModes(threads.projects, canonical).byPath },
   }
 }
 
@@ -103,18 +116,17 @@ function problemOf(write: EnsoProjectsSettingsWrite): string | undefined {
  * nothing.
  */
 export function writeProjectsSettings(
-  places: ProjectsSettingsPlaces,
+  places: SettingsPlaces,
   write: EnsoProjectsSettingsWrite,
   condition: WriteCondition,
 ): ProjectsSettingsWrite {
   const problem = problemOf(write)
   if (problem !== undefined) return { kind: 'refused', reason: `nothing was saved: ${problem}` }
-  const asWritten = write.threads.projects ?? {}
-  const modes = canonicalModes(asWritten, places.canonical)
-  if (Object.keys(modes).length !== Object.keys(asWritten).length) {
+  const { byPath: modes, clash } = canonicalModes(write.threads.projects ?? {}, places.canonical)
+  if (clash !== undefined) {
     return {
       kind: 'refused',
-      reason: `nothing was saved: two of ${Object.keys(asWritten).join(', ')} name the same project, and only one would apply`,
+      reason: `nothing was saved: ${clash[0]} and ${clash[1]} name the same project, and only one would apply`,
     }
   }
   const roots = write.projects?.roots ?? []
