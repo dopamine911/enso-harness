@@ -41,7 +41,7 @@ import { type PromptValues, fillPrompt, REVIEW_WORKFLOW_PATH, readReviewWorkflow
 
 /**
  * The workflow's status comment marker. Each poster keeps its own comment under it (`statusCommentsOf`):
- * the Actions step updates the first one it finds, this reviewer only the one its login wrote.
+ * the Actions step only the one `github-actions[bot]` wrote, this reviewer only the one its login wrote.
  */
 export const STATUS_MARKER = '<!-- claude-run-status: pr-review -->'
 /** The second hidden line this reviewer adds: the head it reviewed, so a head is reviewed once. */
