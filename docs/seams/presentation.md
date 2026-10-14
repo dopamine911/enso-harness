@@ -128,8 +128,9 @@ export interface FollowConnection extends SubscribeConnectionAdapter {
   readonly streamMessageId: () => string | undefined
   /**
    * When this page last applied the follow (#919), `Date.now()`: the client took back the last
-   * chunk handed to it, or a frame that queued none was observed with nothing waiting. Undefined
-   * while no follow is open — nothing is being applied, and a dropped follow is said otherwise.
+   * chunk handed to it, or a frame that passed the wire check and queued none was observed with
+   * nothing waiting. Undefined while no follow is open, and from the moment the server closes one —
+   * nothing is being applied, and a dropped follow is said otherwise.
    * What the page's server check compares the server's listing against (`page-behind-check.ts`).
    */
   readonly appliedAt: () => number | undefined
