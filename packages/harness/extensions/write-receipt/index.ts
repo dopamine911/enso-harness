@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
 import { ENSO_TOOL_RESULT_KEY, ENSO_WRITE_RECEIPT_KIND, type EnsoWriteReceiptProps } from '@enso/core'
-import { resolvePathLikePi } from '../../core/paths.ts'
+import { resolveAgainstCwd } from '../../core/paths.ts'
 
 /**
  * The `write` receipt (#920): whether a write made a new file or overwrote one, which the tool card
@@ -23,7 +23,8 @@ import { resolvePathLikePi } from '../../core/paths.ts'
  * making the file (`bash` writing it) is not seen: that write says "new".
  *
  * Only a successful write gets one: a refused or failed write wrote nothing, and its error is the
- * card's story. The path is resolved as pi's own tools resolve it (`resolvePathLikePi`), against the
+ * card's story. The path is resolved as pi's `write` resolves its argument (`resolveAgainstCwd`:
+ * a leading `@` dropped, unicode spaces folded, `~` and `file://` expanded), against the
  * session's working directory. A call a guard blocked never reaches `tool_result`
  * (`docs/flows/guarded-tool-call.md`), so every call is dropped at its `tool_execution_end`.
  */
@@ -32,7 +33,7 @@ export default function writeReceipt(pi: ExtensionAPI): void {
   pi.on('tool_execution_start', (event, extensionContext) => {
     const named = (event.args as { path?: unknown } | undefined)?.path
     if (event.toolName !== 'write' || typeof named !== 'string') return
-    const path = resolvePathLikePi(named, extensionContext.cwd)
+    const path = resolveAgainstCwd(named, extensionContext.cwd)
     const earlier = [...pendingByCall.values()].some((pending) => pending.path === path)
     pendingByCall.set(event.toolCallId, { path, existed: earlier || existsSync(path) })
   })

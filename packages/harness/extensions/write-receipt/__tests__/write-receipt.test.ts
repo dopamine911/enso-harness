@@ -78,3 +78,11 @@ test("⚠ a parallel batch: a write a guard blocked is dropped at its end, befor
   expect(pi.result('blocked')).toBeUndefined()
   expect(pi.result('next')).toEqual(receipt(false))
 })
+
+test("a path is resolved as pi's write resolves its argument: `@` dropped, so `@old.md` is the existing old.md", () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'enso-write-receipt-'))
+  writeFileSync(join(cwd, 'old.md'), 'before')
+  const pi = loaded(cwd)
+  pi.call('c1', '@old.md')
+  expect(pi.result('c1')).toEqual(receipt(true))
+})

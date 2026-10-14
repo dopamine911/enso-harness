@@ -137,6 +137,34 @@ test('#920: a path outside the known root falls back to the longest file it ends
   expect(shownFor(outcome, 'nowhere.md')).toBe('packages/web/package.json')
 })
 
+test("#920: a path pi reads as home or a file URL can't be placed here — the longest file it ends in", () => {
+  // `assets/` is first in the tree: a lookup that names nothing opens it instead.
+  const outcome = read([LOGO, changed('docs/a.md')])
+  expect(shownFor(outcome, '~/work/shop-api/docs/a.md')).toBe('docs/a.md')
+  expect(shownFor(outcome, 'file:///work/shop-api/docs/a.md')).toBe('docs/a.md')
+})
+
+test("#920: an `@` before a path is pi's mention mark, dropped as pi drops it — the path then places cleanly", () => {
+  const outcome = read([LOGO, changed('docs/a.md')])
+  expect(shownFor(outcome, '@docs/a.md')).toBe('docs/a.md')
+  expect(shownFor(outcome, '@/work/shop-api/docs/a.md')).toBe('docs/a.md')
+})
+
+test('#920: a relative path through `..` is not placed — the longest file it ends in, though it lands under the root', () => {
+  const scoped: ChangesOutcome = {
+    kind: 'read',
+    payload: {
+      threadId: 't1',
+      cwd: '/work/shop-api/packages',
+      git: { ...CHANGES_REPOSITORY, scope: 'packages/' },
+      files: [changed('packages/assets/logo.png'), changed('packages/package.json')],
+      truncated: false,
+      copy: null,
+    },
+  }
+  expect(shownFor(scoped, '../packages/package.json')).toBe('packages/package.json')
+})
+
 test('#920: a path placed cleanly under the root names that file or none — never a same-named file elsewhere', () => {
   // The named file is missing from the list (truncated, or written back to its baseline): Diff
   // opens the first file in the tree, not a deeper file that merely ends the same way.

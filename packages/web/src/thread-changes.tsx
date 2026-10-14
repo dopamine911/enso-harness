@@ -330,23 +330,26 @@ interface FilesPlace {
 }
 
 /**
- * The changed file a call's path names (#920). A path that places cleanly under `place.root` — an
+ * The changed file a call's path names (#920). The path is first read as pi's tools read it: a
+ * leading `@` (pi's mention mark) dropped. A path that then places cleanly under `place.root` — an
  * absolute one under the root loses it, a relative one without a `..` gains the thread's `scope` —
  * names exactly the file at that path, or none: a same-named file elsewhere is a different file,
  * even when the named one is missing from the list (truncated, or written back to its baseline).
- * Only a path that cannot be placed (a root reached through a symlink, a `..`) falls back to a
- * shared suffix, and then the longest such file.
+ * Only a path that cannot be placed here falls back to a shared suffix, and then the longest such
+ * file: one pi expands on the host (`~`, `~/…`, a `file:` URL — this page knows no home folder),
+ * a root reached through a symlink, a `..`.
  */
 function namedFile(
   ordered: readonly EnsoGitFileChange[],
   named: string,
   place: FilesPlace,
 ): EnsoGitFileChange | undefined {
-  const asked = named.replace(/^\.\//, '')
+  const asked = named.replace(/^@/, '').replace(/^\.\//, '')
   const rootPrefix = `${place.root.replace(/\/$/, '')}/`
   const absolute = asked.startsWith('/')
-  const underRoot = !absolute || asked.startsWith(rootPrefix)
-  if (underRoot && !asked.split('/').includes('..')) {
+  const expandedByPi = asked === '~' || asked.startsWith('~/') || asked.startsWith('file:')
+  const placeable = !expandedByPi && (!absolute || asked.startsWith(rootPrefix))
+  if (placeable && !asked.split('/').includes('..')) {
     const relative = absolute ? asked.slice(rootPrefix.length) : `${place.scope}${asked}`
     return ordered.find((change) => change.path === relative)
   }
