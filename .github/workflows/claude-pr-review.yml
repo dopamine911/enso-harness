@@ -22,16 +22,18 @@ name: Claude PR Review
 # summary and stops — see "Check for the Claude token" below. A fresh clone therefore stays green rather than
 # showing a red X on its first pull request.
 #
-# A CHANGE TO THIS FILE CANNOT BE REVIEWED BY ITS OWN PULL REQUEST. `claude-code-action` refuses to run when
-# this workflow's content differs from the copy on the default branch — a guard against a pull request
-# rewriting the reviewer to exfiltrate the token. Measured on PR #35: the step logged "Skipping action due to
-# workflow validation", posted no review, and still reported SUCCESS, so the check went GREEN while reviewing
-# nothing. That is the same false-green shape as the missing-token path above, and it is easy to misread as a
-# passing review.
+# AN EDIT HERE IS VERIFIED AFTER MERGE. A manual run executes the copy of this file on the ref it is started
+# from, normally `main`, so a change to it runs only once merged. (Under the `pull_request` trigger,
+# `claude-code-action` refused to run a pull request whose copy differed from the default branch's —
+# "Skipping action due to workflow validation", measured on PR #35 — and reported SUCCESS while reviewing
+# nothing.) The local reviewer reads the BASE branch's copy for the same reason, so a pull request that edits
+# this file is reviewed with the file as it was.
 #
-# So an edit here is verified only AFTER merge, on the next pull request that touches something else. Do not
-# treat a green `Claude review` on a pull request that modifies this file as evidence the change works — and
-# when changing the prompt, expect to land it before you can see it run.
+# ⚠ A FORK'S PULL REQUEST: read its diff before running this on it. The comment-list job runs the pull
+# request's own code (`bun install`, `scripts/docs/touched-comments.ts`), and a manual run gives the review job
+# `CLAUDE_CODE_OAUTH_TOKEN` whoever wrote the pull request; the `pull_request` trigger never gave a fork's run
+# secrets. The comment-list job's `setup-bun` keeps no cache, so code from a pull request cannot leave one
+# behind under `main`'s cache scope.
 #
 # PROJECT CONVENTIONS LOAD AUTOMATICALLY. The prompt reads `CLAUDE.md`, `.claude/rules/*.md` and
 # `.claude/memory/` from this repository, so the review enforces the conventions this project actually
@@ -116,6 +118,8 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.4" # matches ci.yml
+          # This job runs the pull request's code; a cache it saved would be restored under main's scope.
+          no-cache: true
       - run: bun install --frozen-lockfile
       # What this run reviews: on GitHub, always the whole pull request, from its base. A manual run has no push
       # to diff against. The local reviewer keeps the `new-commits` scope the prompt describes, from the head it
@@ -136,9 +140,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: touched-comments
-          path: |
-            touched-comments.md
-            new-commits.diff
+          path: touched-comments.md
           if-no-files-found: ignore
           retention-days: 7
 
@@ -183,14 +185,18 @@ jobs:
             echo 'step required, and skips cleanly until then.'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # ⚠ THE PULL REQUEST'S HEAD, BY SHA. A manual run's default checkout is the ref it was started from,
+      # normally `main`: the reviewer would read main's files while judging the pull request's diff (#994's
+      # review). Under the `pull_request` trigger the default was the pull request's merge commit.
       - name: Checkout PR head
         if: steps.token.outputs.present == 'true'
         uses: actions/checkout@v6
         with:
+          ref: ${{ needs.pull-request.outputs.head_sha }}
           fetch-depth: 1
 
-      # The list the job above built, and under `new-commits` the pushed commits' diff, into
-      # `.review-context/`, where `.claude/pr-review.md` and the prompt tell the reviewer to look.
+      # The list the job above built, into `.review-context/`, where `.claude/pr-review.md` and the prompt
+      # tell the reviewer to look.
       # ⚠ NOT `.claude/`: claude-code-action deletes that whole tree and checks it out again from the base
       # branch before the model runs (`restoreConfigFromBase`: a PR must not supply the CLI's settings or
       # hooks), so a file downloaded there is gone by the time the reviewer looks. That is how #490's first
@@ -326,24 +332,25 @@ jobs:
             --allowedTools "Read,Grep,Glob,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*)"
 
       - name: Post run indicator (sticky comment)
-        # WHY THIS EXISTS EVEN THOUGH THE TOKEN IS ALREADY CHECKED. There is a second reason the agent can
-        # fail to run, and it is not a misconfiguration: claude-code-action refuses to execute on a pull
-        # request that modifies `.github/workflows/**`. That is a deliberate security guard — otherwise a PR
-        # could edit the workflow to exfiltrate the token — and it self-resolves once the PR merges.
-        #
-        # The action sets `execution_file` only after a completed run, so an empty value means "did not run".
-        # Distinguishing the workflow-guard case from a real problem is the whole point: reporting the guard
-        # as a failure trains people to ignore this comment.
+        # WHY THIS EXISTS EVEN THOUGH THE TOKEN IS ALREADY CHECKED. The action can succeed without running
+        # the model, and a green step then reads as a review that happened. The action sets `execution_file`
+        # only after a completed run, so an empty value means "did not run", and that is reported as such.
+        # (Under the `pull_request` trigger an empty file on a pull request touching `.github/workflows/` was
+        # the action's workflow-validation guard and was labelled "auto-skipped". A manual run executes the
+        # default branch's copy, so that guard should not fire, and an empty file is never labelled benign.)
         #
         # `execution_file` alone is NOT "the review happened". On PR #104 the step FAILED (the binary was
         # missing, #1817 above) and still set it, so this comment said "✅ ran" under a red check — the third
         # false-green shape in this file, after the missing token and the workflow guard. So the step's own
         # outcome is read FIRST and on its own: any non-success is a failure, whether or not a file was
         # written (a failure before the file exists would otherwise fall through to the guard branch and
-        # read "auto-skipped" — PR #105 review). The guard itself reports SUCCESS with no file (PR #35), so
-        # that branch is reached only from a successful step.
+        # read "auto-skipped" — PR #105 review).
         #
-        # Upserted by a hidden marker so repeated pushes update one comment instead of spamming the PR.
+        # Upserted by a hidden marker so repeated runs update one comment instead of spamming the PR. ⚠ ONLY
+        # THIS WORKFLOW'S OWN comment (`github-actions[bot]`): the local reviewer keeps its own status comment
+        # under the same marker, with the head it last reviewed, and overwriting that would make it forget
+        # (#981). One comment object per line: `--paginate` runs `--jq` on each page, so a filter that builds
+        # one array per page is not one JSON document past 30 comments.
         if: ${{ always() && steps.token.outputs.present == 'true' && steps.claude.outcome != 'skipped' }}
         env:
           GH_TOKEN: ${{ github.token }}
@@ -361,17 +368,12 @@ jobs:
           elif [ -n "${EXECUTION_FILE}" ]; then
             body="${MARKER}"$'\n'"✅ **Claude PR review** ran on \`${SHA:0:7}\`."
           else
-            changed_files="$(gh pr diff "${NUMBER}" --repo "${REPO}" --name-only 2>/dev/null || true)"
-            if grep -q '^\.github/workflows/' <<<"${changed_files}"; then
-              body="${MARKER}"$'\n'"ℹ️ **Claude PR review auto-skipped** — GitHub blocks Claude from running on pull requests that modify workflow files. This is a security guard, not a configuration problem, and it runs normally once this pull request is merged."
-            else
-              echo "::warning::Claude PR review did not run despite a token being present."
-              body="${MARKER}"$'\n'"⚠️ **Claude PR review did not run**, and the \`CLAUDE_CODE_OAUTH_TOKEN\` secret IS set. Check the workflow logs — the token may be expired or invalid."
-            fi
+            echo "::warning::Claude PR review did not run despite a token being present."
+            body="${MARKER}"$'\n'"⚠️ **Claude PR review did not run**, and the \`CLAUDE_CODE_OAUTH_TOKEN\` secret IS set. Check the workflow logs — the token may be expired or invalid."
           fi
           # Upsert by hidden marker: PATCH the existing sticky comment, else POST a new one.
           existing="$(gh api "repos/${REPO}/issues/${NUMBER}/comments" --paginate \
-            --jq "map(select(.body | startswith(\"${MARKER}\"))) | .[0].id // empty")"
+            --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"${MARKER}\"))) | .id" | sed -n 1p)"
           if [ -n "${existing}" ]; then
             gh api -X PATCH "repos/${REPO}/issues/comments/${existing}" -f body="${body}" >/dev/null
           else

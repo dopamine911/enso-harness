@@ -93,3 +93,18 @@ test('the workflow runs only by hand, and every job reads the pull request from 
   expect([workflow.jobs['touched-comments']?.needs].flat()).toContain('pull-request')
   expect([workflow.jobs.review?.needs].flat()).toContain('pull-request')
 })
+
+/**
+ * ⚠ THE REVIEW JOB CHECKS OUT THE PULL REQUEST'S HEAD (#994's review). A manual run's default checkout is
+ * the ref it was started from, normally `main`; the reviewer would read main's files against the PR's diff.
+ */
+test("⚠ the review job checks out the pull request's head, and the comment-list job keeps no cache", () => {
+  type Step = { name?: string; uses?: string; with?: Record<string, unknown> }
+  const workflow = Bun.YAML.parse(workflowText) as { jobs: Record<string, { steps?: Step[] }> }
+  const reviewCheckout = workflow.jobs.review?.steps?.find((step) => step.uses?.startsWith('actions/checkout'))
+  expect(reviewCheckout?.with?.ref).toBe(`\${{ needs.pull-request.outputs.head_sha }}`)
+  const listSetupBun = workflow.jobs['touched-comments']?.steps?.find((step) =>
+    step.uses?.startsWith('oven-sh/setup-bun'),
+  )
+  expect(listSetupBun?.with?.['no-cache']).toBe(true)
+})
