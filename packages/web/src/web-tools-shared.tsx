@@ -13,10 +13,13 @@ import { describeFailedResponse } from './stored-threads.ts'
  * trusted project's own settings are shown in, read only.
  */
 
+/** What the section reads of a stored thread: its id, and the title it is named by. */
+type StoredTitle = Pick<EnsoStoredThread, 'threadId' | 'title'>
+
 export interface WebToolsSectionProps {
   readonly fetch?: FetchLike | undefined
   /** The stored listing: a thread still on the old settings is named by its title. */
-  readonly stored: readonly EnsoStoredThread[]
+  readonly stored: readonly StoredTitle[]
   /** Open a project's page, from the settings it adds. */
   readonly onOpenProject: (projectId: string) => void
 }
@@ -109,7 +112,7 @@ export function WhenItApplies({
   old,
 }: {
   readonly staleThreads: readonly string[]
-  readonly stored: readonly EnsoStoredThread[]
+  readonly stored: readonly StoredTitle[]
   /** What applies when, said first. */
   readonly lead: string
   /** What the stale threads still run on: "the old list". */

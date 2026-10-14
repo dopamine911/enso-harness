@@ -1,12 +1,6 @@
 import { expect, test } from 'bun:test'
-import { WEB_FETCH_MAX_URL_LENGTH } from '@enso/core'
-import {
-  isFetchableContentType,
-  isHostAllowed,
-  isHtmlContentType,
-  isPublicIpAddress,
-  parseWebFetchUrl,
-} from '../web-fetch-policy.ts'
+import { isPublicIpAddress, WEB_FETCH_MAX_URL_LENGTH } from '@enso/core'
+import { isFetchableContentType, isHostAllowed, isHtmlContentType, parseWebFetchUrl } from '../web-fetch-policy.ts'
 
 /**
  * web_fetch's pure policy (#54). Vectors are organised by EVASION DIMENSION (the #55
