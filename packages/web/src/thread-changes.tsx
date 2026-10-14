@@ -45,9 +45,9 @@ import { baselineText } from './thread-git.tsx'
  * ⚠ GIT'S PATCH, THEN THE FILE WHOLE (#461). The diff is git's patch: three lines of context around
  * each change and a count of the unchanged lines it left out. Clicking a count shows those lines,
  * numbered on both sides, from the file read whole (`changed-file.ts`, `GET …/changes/file`) —
- * the same read colours each side's syntax. A file neither side of which is within the size a
- * patch may be stays unexpandable and says so; a binary file, one past the size a page is sent, or
- * one git did not diff says so instead of a diff.
+ * the same read colours each side's syntax. A file whose old side is past the size a patch may be
+ * stays unexpandable and says so; a binary file, one past the size a page is sent, or one git did
+ * not diff says so instead of a diff.
  */
 
 /**

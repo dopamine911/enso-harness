@@ -108,7 +108,7 @@ export const DIFF: FeatureSpec = {
     'It never fetches, pushes or changes anything in git. "The last push" is what this copy last saw of the remote; run `git fetch` yourself to update it. How the baseline is chosen is in [Sessions and projects](./sessions-and-projects.md).',
     "It shows what differs, not who changed it. An edit you made before the session appears beside pi's.",
     `A binary file, one too large to send to the page, or one git did not produce a diff for is listed without a diff, and says why. Past ${MAX_CHANGED_FILES} files the list stops and says so.`,
-    `When both the old and the new version of a file are larger than ${MAX_FILE_TEXT_KIB} KiB, its unchanged lines stay as counts, marked \`too large to expand\`. A file that changed again after its diff was read is marked \`changed since this diff\` until the tab reads again. Run \`git diff\` on the file to see it whole.`,
+    `The unchanged lines are shown from the file's version at the baseline. When that version is larger than ${MAX_FILE_TEXT_KIB} KiB, they stay as counts, marked \`too large to expand\`. A file whose lines no longer match its diff, because it changed again after the diff was read, is marked \`changed since this diff\` until the tab reads again. Run \`git diff\` on the file to see it whole.`,
     'Only a file inside the project is read whole. A project inside a larger repository never reads a file outside its own folder.',
     `Syntax colours cover common languages, such as TypeScript, JavaScript, Python, Go, Rust, shell, JSON, YAML, CSS, HTML and Markdown. A file in any other language is shown uncoloured, and so is a line longer than ${MAX_TOKENIZED_LINE} characters.`,
   ],

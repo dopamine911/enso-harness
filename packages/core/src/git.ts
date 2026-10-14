@@ -841,7 +841,7 @@ export async function readGitChanges(
 /**
  * The largest file whose text is sent, either side, in bytes — the 512 KiB one file's patch may be
  * ({@link MAX_PATCH_CHARS}). A side past it is `too-large`; the Diff view cannot expand a file
- * when neither side is within it, and says so.
+ * whose old side is past it (the runs come from the old side alone), and says so.
  */
 const MAX_FILE_TEXT_BYTES = 512 * 1024
 

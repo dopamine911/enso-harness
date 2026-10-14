@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { highlightLines, languageOf } from '../diff-highlight.ts'
+import { highlightLines, languageOf, loadedOnce } from '../diff-highlight.ts'
 
 /**
  * #461: a changed file's syntax, in the theme's own tokens. The file is tokenised in slices so the
@@ -32,4 +32,17 @@ test('a path names its language by extension or name; any other is not guessed a
   expect(languageOf('deploy/Dockerfile')).toBe('dockerfile')
   expect(languageOf('src/main.zig')).toBeUndefined()
   expect(languageOf('.env')).toBeUndefined()
+})
+
+test('the highlighter loads once, and a load that failed is tried again by the next file, never kept', async () => {
+  let loads = 0
+  const load = loadedOnce(async () => {
+    loads += 1
+    if (loads === 1) throw new Error('the chunk did not load')
+    return `highlighter ${loads}`
+  })
+  await expect(load()).rejects.toThrow('the chunk did not load')
+  expect(await Promise.all([load(), load()])).toEqual(['highlighter 2', 'highlighter 2'])
+  expect(await load()).toBe('highlighter 2')
+  expect(loads).toBe(2)
 })
