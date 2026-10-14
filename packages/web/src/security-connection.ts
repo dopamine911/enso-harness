@@ -19,7 +19,7 @@ export type SecuritySave =
   | { readonly kind: 'saved'; readonly settings: EnsoSecuritySettingsRead }
   /** 412: the file changed on disk since it was read; nothing was written. */
   | { readonly kind: 'conflict'; readonly detail: string }
-  /** 422: the file is unreadable, or the result would be; nothing was written. */
+  /** 422: the file is unreadable, the result would be, or a `local` judge is off this machine; nothing was written. */
   | { readonly kind: 'refused'; readonly detail: string }
   | Unavailable
 

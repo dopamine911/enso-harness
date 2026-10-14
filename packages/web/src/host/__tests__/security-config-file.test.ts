@@ -51,6 +51,7 @@ test('a save replaces only `security`: every other key stays as it was on disk',
 // is kept by a save, a primitive one (`false`, `0`) included, not just an object with keys.
 test('pruning drops only empty objects: every other key, primitive or not, is kept', () => {
   const future = { incidents: {}, judge: { backend: 'off' }, enabled: false, retries: 0, label: '' }
+  // The cast stands in for keys the type does not have yet; that is the case under test.
   expect(prunedSecurity(future as EnsoSecurityConfig)).toEqual({
     judge: { backend: 'off' },
     enabled: false,

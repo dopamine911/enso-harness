@@ -587,7 +587,7 @@ function SecurityForm({
   const [checked, setChecked] = useState<ReadonlySet<FieldName>>(new Set())
   const [problem, setProblem] = useState<SaveProblem | undefined>(undefined)
   // What Save anyway writes is the section the reader was shown the confirm of; an edit, or
-  // storing the key, closes the confirm, so its list is never stale (#969 review).
+  // storing or removing the key, closes the confirm, so its list is never stale (#969 review).
   const [confirming, setConfirming] = useState<
     | {
         readonly loosenings: readonly string[]

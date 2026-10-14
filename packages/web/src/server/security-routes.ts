@@ -46,7 +46,7 @@ function readSettingsBody<Schema extends TSchema>(
 /**
  * `PUT /api/settings/security`: the whole `security` section, under the page's `If-Match` (or
  * `If-None-Match: *` when there was no file). 412 when the file changed since it was read; 422 when
- * the file is unreadable now or the result would be — nothing written either way.
+ * the file is unreadable now, the result would be, or a `local` judge is off this machine — nothing written either way.
  */
 async function respondToSettingsWrite(home: string, request: IncomingMessage, response: ServerResponse): Promise<void> {
   const condition = conditionOrRefuse(request, response, 'security settings')
