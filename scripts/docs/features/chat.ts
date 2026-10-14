@@ -1,6 +1,7 @@
 import { ENSO_IMAGE_MAX_BYTES, ENSO_PROMPT_MAX_IMAGES } from '../../../packages/core/src/follow.ts'
 import { ENSO_CONTEXT_COMMAND } from '../../../packages/core/src/thread-context.ts'
 import { ENSO_FORK_COMMAND } from '../../../packages/core/src/thread-inspection.ts'
+import { THREAD_STATUS_WORDS } from '../../../packages/core/src/thread-status-words.ts'
 import { constantIn } from '../source-constants.ts'
 import type { FeatureSpec, MarkTarget } from './spec.ts'
 
@@ -42,6 +43,14 @@ if (SETTINGS_GROUP === undefined) throw new Error('chat: command-palette.tsx GRO
 const OTHER_GROUP_WORDS = OTHER_GROUPS.map((heading) => `**${heading}**`)
   .join(', ')
   .replace(/, ([^,]*)$/, ' and $1')
+
+/** The banner a page that may be out of date shows (#919), as `page-health.ts` words it. */
+function pageFaultWord(name: 'banner' | 'reload'): string {
+  const words = constantIn('packages/web/src/page-health.ts', 'PAGE_FAULT_WORDS')
+  const word = typeof words === 'object' && words !== null ? Reflect.get(words, name) : undefined
+  if (typeof word !== 'string') throw new Error(`chat: page-health.ts PAGE_FAULT_WORDS has no ${name}`)
+  return word
+}
 
 const IMAGE_MEGABYTES = ENSO_IMAGE_MAX_BYTES / (1024 * 1024)
 
@@ -133,6 +142,7 @@ export const CHAT: FeatureSpec = {
     'In the palette, a command runs at once, but a prompt or a skill is only inserted into the composer as `/name `, for you to finish and send.',
     'While `/login` waits for the provider (a device code to enter, a browser page to finish), the composer shows the stop button, labelled `cancel the login to <provider>`. It cancels the login, and nothing is stored. After `/compact`, or a compaction pi runs on its own when the context fills, the transcript is re-read once the thread is idle, so it shows the compacted history without a reload.',
     'The line under the prompt box says what Enter does. While pi is idle it sends (*Enter to send · Shift+Enter for a new line*); while pi is running it queues the prompt behind the run (*pi is running · Enter queues · Shift+Enter for a new line*), and the empty box says so too.',
+    `If the page falls behind the server, or part of it fails, a banner across the top says *${pageFaultWord('banner')}* with **${pageFaultWord('reload')}**. Four things raise it: the server's thread list shows the thread moved on while the page applied nothing for about 10 seconds; the page held one update for about 10 seconds without finishing it, or stopped taking updates; a part of the page (the transcript, a view, the rail) failed to draw, and that part says what failed while the rest keeps working; or an error nothing caught. Each one is written to Enso's log with the thread and the page. While the banner shows, the status bar says \`${THREAD_STATUS_WORDS.behind}\`, never that pi is working. The page never reloads by itself. **${pageFaultWord('reload')}** keeps what you were writing in each thread's prompt box, and the images attached to it when the browser has room for them.`,
   ],
   limits: [
     "An image in pi's reply that lives on another host is not loaded until you click it. The button names the host first. A reply is untrusted text, and loading an image is a request to whoever wrote its URL.",

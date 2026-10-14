@@ -16,4 +16,6 @@ export const THREAD_STATUS_WORDS = {
   idle: 'idle',
   /** The run's word once the thread's follow ended: the server is gone until a reload (#119). */
   disconnected: 'disconnected',
+  /** The run's word while the page says it may be out of date (#919): fallen behind, or partly failed, until a Reload. */
+  behind: 'out of date',
 } as const

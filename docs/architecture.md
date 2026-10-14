@@ -231,7 +231,13 @@ can say so; the next follow's snapshot is the resync (#103, #114). A page that s
 follow — a throw while handling a chunk ends TanStack's subscription — closes the socket and says so
 too: a warning naming the chunk, and the exception in the run alert and the log
 (`follow-connection.ts#consumerStopped`, #915). Before that it kept reading a live follow it no
-longer applied, with nothing said.
+longer applied, with nothing said. Whatever else breaks between the wire and the screen, the page
+checks itself from outside the pipeline (#919, `page-health.ts`): a chunk held by the client past
+~10 s (the hand-over watchdog), the server's `/api/stored-threads` row moving on while the page
+applied nothing (`page-behind-check.ts`, against `FollowConnection.appliedAt`), a pane's error
+boundary, and `window`'s `error`/`unhandledrejection`. Each is logged with the thread and the
+page, and raises one banner with Reload, which keeps every composer's draft (`page-reload.ts`).
+Never an automatic reload: it could cut someone off mid-answer.
 
 **A dialog.** pi blocks; the follow carries a blocking `extension-ui-request`; an answer is `POST …/dialog`, validated
 against the question (#112); every settle path — answered, cancelled, timeout, abort — emits

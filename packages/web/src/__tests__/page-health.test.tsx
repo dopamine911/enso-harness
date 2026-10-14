@@ -1,0 +1,330 @@
+import { afterAll, afterEach, beforeEach, expect, spyOn, test } from 'bun:test'
+import { EnsoBrowserLogBatch, type EnsoStoredThread } from '@enso/core'
+import { reset } from '@logtape/logtape'
+import { act } from 'react'
+import type { createRoot as CreateRoot, Root } from 'react-dom/client'
+import { Check } from 'typebox/value'
+import { configureBrowserLogging, type LogShipper } from '../browser-logging.ts'
+import { createFollowConnection } from '../follow-connection.ts'
+import { usePageBehindCheck } from '../page-behind-check.ts'
+import { PageFaultBanner, PaneBoundary } from '../page-fault.tsx'
+import {
+  clearPageFaultForTest,
+  PAGE_FAULT_WORDS,
+  pageFault,
+  setPageHealthTimingForTest,
+  watchPageFaults,
+} from '../page-health.ts'
+import { reloadKeepingDrafts } from '../page-reload.ts'
+import { ThreadPane } from '../thread-pane.tsx'
+import { clearThreadsForTest, mintThread, type ThreadStores } from '../thread-stores.ts'
+import { ensureDom, releaseDom } from './dom-environment.ts'
+import { createScriptedFetch, type ScriptedFetch, SNAPSHOT_IDLE } from './scripted-server.ts'
+import { waitUntil } from './wait-until.ts'
+
+// ⚠ Loaded after the DOM, as every mounting file does (`dom-environment.ts` says why).
+ensureDom()
+const { createRoot }: { createRoot: typeof CreateRoot } = await import('react-dom/client')
+
+/**
+ * A page that has fallen behind, or partly failed (#919): each trigger raises the one banner and
+ * leaves a log line with the error, the thread and the page. Mounted, over the scripted server, with
+ * the thresholds shortened — the defaults are ~10 s each.
+ */
+
+const PAGE_ID = 'page-919'
+let shipper: LogShipper | undefined
+const shipped: EnsoBrowserLogBatch[] = []
+
+beforeEach(async () => {
+  shipped.length = 0
+  const logging = await configureBrowserLogging({
+    level: 'info',
+    page: PAGE_ID,
+    fetch: (_input, init) => {
+      const batch: unknown = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined
+      if (!Check(EnsoBrowserLogBatch, batch)) throw new Error('the page shipped a batch off its schema')
+      shipped.push(batch)
+      return Promise.resolve(new Response(null, { status: 204 }))
+    },
+  })
+  shipper = logging.shipper
+  setPageHealthTimingForTest({ pollMs: 30, applySlackMs: 60, staleMs: 250, stallMs: 150 })
+})
+
+const mounted: Array<{ root: Root; container: HTMLElement }> = []
+
+afterEach(async () => {
+  for (const { root, container } of mounted.splice(0)) {
+    await act(async () => root.unmount())
+    container.remove()
+  }
+  clearThreadsForTest()
+  clearPageFaultForTest()
+  setPageHealthTimingForTest()
+  globalThis.sessionStorage.clear()
+  await reset()
+})
+afterAll(releaseDom)
+
+function sleep(ms: number): Promise<void> {
+  const { promise, resolve } = Promise.withResolvers<void>()
+  setTimeout(resolve, ms)
+  return promise
+}
+const tick = (): Promise<void> => sleep(20)
+
+async function mount(node: React.ReactNode): Promise<HTMLElement> {
+  const container = document.createElement('div')
+  document.body.appendChild(container)
+  const root = createRoot(container)
+  mounted.push({ root, container })
+  await act(async () => {
+    root.render(node)
+    await tick()
+  })
+  return container
+}
+
+const banner = (container: HTMLElement): HTMLElement | null => container.querySelector('[data-page-fault]')
+
+/** The page's fault lines as the server would get them: shipped, with the page id on the batch. */
+function shippedFaults(): Array<{ page: string; properties: Record<string, unknown> }> {
+  shipper?.flush()
+  return shipped.flatMap((batch) =>
+    batch.records
+      .filter((record) => record.logger === 'enso.browser.page')
+      .map((record) => ({ page: batch.page, properties: record.properties })),
+  )
+}
+
+function BehindCheck(): null {
+  usePageBehindCheck()
+  return null
+}
+
+/** A started thread's pane over `server`, with the page's banner and server check beside it. */
+async function mountPage(server: ScriptedFetch): Promise<{ container: HTMLElement; stores: ThreadStores }> {
+  globalThis.fetch = server.fetch
+  const stores = mintThread(server.fetch)
+  stores.launch.set(false)
+  const container = await mount(
+    <>
+      <PageFaultBanner />
+      <BehindCheck />
+      <ThreadPane threadId={stores.threadId} active debugOpen={false} />
+    </>,
+  )
+  await act(async () => {
+    server.frame({ ...SNAPSHOT_IDLE, threadId: stores.threadId })
+    await tick()
+  })
+  return { container, stores }
+}
+
+function listed(threadId: string, messageCount: number, busy: boolean): EnsoStoredThread {
+  return {
+    threadId,
+    projectId: 'p-launch',
+    lastActivityAt: new Date(Date.UTC(2026, 9, 13, 18, 34, messageCount)).toISOString(),
+    messageCount,
+    busy,
+    waiting: false,
+  }
+}
+
+test('⚠ the server listing moving on while the page applies nothing raises the banner, and the bar stops claiming work', async () => {
+  const rows: EnsoStoredThread[] = []
+  const server = createScriptedFetch({ storedThreads: rows })
+  const { container, stores } = await mountPage(server)
+  rows.push(listed(stores.threadId, 2, false))
+  // Reads that find the row as it was: nothing is behind.
+  await act(() => sleep(150))
+  expect(banner(container)).toBeNull()
+  // The server moves on — 23 tool calls later, still running — and no frame reaches the page.
+  rows[0] = listed(stores.threadId, 48, true)
+  await waitUntil(() => banner(container) !== null)
+  expect(banner(container)?.textContent).toContain(PAGE_FAULT_WORDS.banner)
+  expect(banner(container)?.dataset.pageFault).toBe('behind')
+  expect(container.querySelector('#thread-status')?.textContent).toContain('out of date')
+  expect(shippedFaults()).toEqual([
+    {
+      page: PAGE_ID,
+      properties: expect.objectContaining({
+        trigger: 'behind',
+        threadId: stores.threadId,
+        error: expect.stringContaining('48 messages, running'),
+      }),
+    },
+  ])
+})
+
+test('a listing that moves with the page applying as it goes raises nothing', async () => {
+  const rows: EnsoStoredThread[] = []
+  const server = createScriptedFetch({ storedThreads: rows })
+  const { container, stores } = await mountPage(server)
+  rows.push(listed(stores.threadId, 2, false))
+  for (let count = 3; count < 30; count += 1) {
+    rows[0] = listed(stores.threadId, count, true)
+    await act(async () => {
+      server.frame({ type: 'status', live: true, busy: true, generation: 1 })
+      await tick()
+    })
+  }
+  expect(pageFault.get()).toBeUndefined()
+  expect(banner(container)).toBeNull()
+})
+
+function Throws(): React.ReactNode {
+  throw new Error('a part this page cannot draw')
+}
+
+test('⚠ a throw drawing a pane is that pane’s alone: its boundary says so, the banner shows, the rest stays usable', async () => {
+  let clicked = 0
+  // React reports a caught throw on the console too; the boundary's record is what is asserted.
+  const quiet = spyOn(console, 'error').mockImplementation(() => undefined)
+  const container = await mount(
+    <>
+      <PageFaultBanner />
+      <PaneBoundary pane="transcript" threadId="t-render">
+        <Throws />
+      </PaneBoundary>
+      <button type="button" data-composer="" onClick={() => (clicked += 1)}>
+        send
+      </button>
+    </>,
+  ).finally(() => quiet.mockRestore())
+  const failed = container.querySelector('[data-pane-failed="transcript"]')
+  expect(failed?.textContent).toContain('a part this page cannot draw')
+  expect(banner(container)?.dataset.pageFault).toBe('render')
+  await act(async () => {
+    container.querySelector<HTMLButtonElement>('[data-composer]')?.click()
+    await tick()
+  })
+  expect(clicked).toBe(1)
+  expect(shippedFaults()).toEqual([
+    {
+      page: PAGE_ID,
+      properties: expect.objectContaining({
+        trigger: 'render',
+        pane: 'transcript',
+        threadId: 't-render',
+        error: 'Error: a part this page cannot draw',
+      }),
+    },
+  ])
+})
+
+test('an unhandled rejection and an uncaught error each leave a line naming the thread on screen; the banner shows the first', async () => {
+  const container = await mount(<PageFaultBanner />)
+  const unwatch = watchPageFaults(window, () => 't-screen')
+  await act(async () => {
+    const rejection = Object.assign(new Event('unhandledrejection'), { reason: new TypeError('nobody awaited this') })
+    window.dispatchEvent(rejection)
+    window.dispatchEvent(new ErrorEvent('error', { error: new RangeError('nothing caught this'), message: 'x' }))
+    // Chrome's harmless layout notice is no fault.
+    window.dispatchEvent(
+      new ErrorEvent('error', { message: 'ResizeObserver loop completed with undelivered notifications.' }),
+    )
+    await tick()
+  })
+  unwatch()
+  expect(banner(container)?.dataset.pageFault).toBe('rejection')
+  expect(shippedFaults()).toEqual([
+    {
+      page: PAGE_ID,
+      properties: expect.objectContaining({
+        trigger: 'rejection',
+        threadId: 't-screen',
+        error: 'TypeError: nobody awaited this',
+      }),
+    },
+    {
+      page: PAGE_ID,
+      properties: expect.objectContaining({
+        trigger: 'error',
+        threadId: 't-screen',
+        error: 'RangeError: nothing caught this',
+      }),
+    },
+  ])
+})
+
+test('⚠ a chunk handed to the client and never taken back is a stall: the banner, and a line naming the chunk and the thread', async () => {
+  const container = await mount(<PageFaultBanner />)
+  const server = createScriptedFetch()
+  const connection = createFollowConnection({ threadId: 't-stall', fetch: server.fetch })
+  const chunks = connection.subscribe()[Symbol.asyncIterator]()
+  // The client takes the first chunk and never asks for the next.
+  const first = chunks.next()
+  await tick()
+  server.frame({ ...SNAPSHOT_IDLE, threadId: 't-stall' })
+  await first
+  await waitUntil(() => banner(container) !== null)
+  expect(banner(container)?.dataset.pageFault).toBe('stalled')
+  expect(shippedFaults()).toEqual([
+    {
+      page: PAGE_ID,
+      properties: expect.objectContaining({
+        trigger: 'stalled',
+        threadId: 't-stall',
+        error: expect.stringMatching(/^a \S+ chunk handed to the chat client \d+s ago was never taken back$/),
+      }),
+    },
+  ])
+  connection.close()
+  await chunks.return?.(undefined)
+})
+
+test('a client that throws on a chunk stops the subscription and raises the banner at once', async () => {
+  const container = await mount(<PageFaultBanner />)
+  const server = createScriptedFetch()
+  const connection = createFollowConnection({ threadId: 't-throw', fetch: server.fetch })
+  const chunks = connection.subscribe()[Symbol.asyncIterator]()
+  const first = chunks.next()
+  await tick()
+  server.frame({ ...SNAPSHOT_IDLE, threadId: 't-throw' })
+  await first
+  await act(async () => {
+    await chunks.throw?.(new TypeError('the stream processor broke')).catch(() => undefined)
+    await tick()
+  })
+  expect(banner(container)?.dataset.pageFault).toBe('stalled')
+  expect(shippedFaults()).toContainEqual({
+    page: PAGE_ID,
+    properties: expect.objectContaining({ trigger: 'stalled', threadId: 't-throw' }),
+  })
+  connection.close()
+})
+
+test('⚠ Reload keeps the composer’s draft: the thread’s composer opens holding it after the reload', async () => {
+  const server = createScriptedFetch()
+  globalThis.fetch = server.fetch
+  const before = mintThread(server.fetch)
+  before.launch.set(false)
+  const first = await mount(<ThreadPane threadId={before.threadId} active debugOpen={false} />)
+  const field = first.querySelector<HTMLTextAreaElement>('textarea[name="message"]')
+  if (field === null) throw new Error('expected the composer')
+  await act(async () => {
+    Reflect.set(HTMLTextAreaElement.prototype, 'value', 'half a thought, mid-answer', field)
+    field.dispatchEvent(new Event('input', { bubbles: true }))
+    await tick()
+  })
+  let reloads = 0
+  await reloadKeepingDrafts(() => {
+    reloads += 1
+  })
+  expect(reloads).toBe(1)
+  // The reload: the page is gone, then the same thread comes back from the URL.
+  for (const { root, container } of mounted.splice(0)) {
+    await act(async () => root.unmount())
+    container.remove()
+  }
+  clearThreadsForTest()
+  const after = mintThread(server.fetch, undefined, before.threadId)
+  after.launch.set(false)
+  const second = await mount(<ThreadPane threadId={after.threadId} active debugOpen={false} />)
+  expect(second.querySelector<HTMLTextAreaElement>('textarea[name="message"]')?.value).toBe(
+    'half a thought, mid-answer',
+  )
+})

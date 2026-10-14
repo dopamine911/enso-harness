@@ -514,6 +514,11 @@ export function markThreadActive(threadId: string | undefined): void {
   publishThreadList()
 }
 
+/** The thread on screen, as `markThreadActive` last set it — what a page-wide error names (#919). */
+export function threadOnScreen(): string | undefined {
+  return activeThreadId
+}
+
 /**
  * The drop candidate: the least recently active thread that is neither running nor on screen.
  *
