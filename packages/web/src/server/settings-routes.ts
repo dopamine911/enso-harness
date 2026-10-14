@@ -12,11 +12,7 @@ import type { Static, TSchema } from 'typebox'
 import type { WriteCondition } from '../host/atomic-file.ts'
 import type { ConfigSectionWrite } from '../host/config-file.ts'
 import { writeDefaultProjectTrust } from '../host/project-trust.ts'
-import {
-  type ProjectsSettingsPlaces,
-  readProjectsSettings,
-  writeProjectsSettings,
-} from '../host/projects-config-file.ts'
+import { type SettingsPlaces, readProjectsSettings, writeProjectsSettings } from '../host/projects-config-file.ts'
 import { readSecuritySettings, writeJudgeKey, writeSecuritySettings } from '../host/security-config-file.ts'
 import {
   answerJson,
@@ -73,12 +69,8 @@ interface ConfigSection<Schema extends TSchema, Read extends { path: string; eta
   readonly subject: WriteSubject
   readonly schema: Schema
   readonly requirement: string
-  readonly read: (places: ProjectsSettingsPlaces) => Read
-  readonly write: (
-    places: ProjectsSettingsPlaces,
-    body: Static<Schema>,
-    condition: WriteCondition,
-  ) => ConfigSectionWrite<Read>
+  readonly read: (places: SettingsPlaces) => Read
+  readonly write: (places: SettingsPlaces, body: Static<Schema>, condition: WriteCondition) => ConfigSectionWrite<Read>
 }
 
 const SECURITY_SECTION: ConfigSection<typeof EnsoSecuritySettingsWrite, EnsoSecuritySettingsRead> = {
@@ -106,7 +98,7 @@ const PROJECTS_SECTION: ConfigSection<typeof EnsoProjectsSettingsWrite, EnsoProj
 async function respondToConfigSection<Schema extends TSchema, Read extends { path: string; etag?: string }>(
   request: IncomingMessage,
   response: ServerResponse,
-  places: ProjectsSettingsPlaces,
+  places: SettingsPlaces,
   section: ConfigSection<Schema, Read>,
 ): Promise<void> {
   if (request.method === 'GET') {

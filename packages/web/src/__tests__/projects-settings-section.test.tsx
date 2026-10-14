@@ -144,6 +144,20 @@ test('the trust default is set on its own route, and a choice that trusts every 
   await page.unmount()
 })
 
+// #979 re-review, testing gap: Go back on the trust confirm sends nothing, and Set is offered again.
+test('going back from the trust confirm sends nothing and offers Set again', async () => {
+  const page = await mounted(read({ threads: {} }))
+  const { container, sent } = page
+  await flush(() => type(control<HTMLSelectElement>(container, 'trust'), 'always'))
+  await flush(() => button(container, 'Set').click())
+  expect(button(container, 'Set').disabled).toBe(true)
+  await flush(() => button(container, 'Go back').click())
+  expect(container.textContent).not.toContain('Save anyway')
+  expect(sent.some((each) => each.method === 'PUT')).toBe(false)
+  expect(button(container, 'Set').disabled).toBe(false)
+  await page.unmount()
+})
+
 // #979 review, issue 3: a pi settings file that cannot be read shows `ask`, and a Set would be refused.
 test('an unreadable pi settings file is said, and the trust cannot be set', async () => {
   const page = await mounted({ ...(read({ threads: {} }) as object), trustUnreadable: 'Unexpected token' })

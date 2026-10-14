@@ -8,10 +8,12 @@ import {
   realpathSync,
   rmSync,
   symlinkSync,
+  writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { projectIdOf, projectTreesDir } from '@enso/core/paths'
+import { readProjectsSettings, writeProjectsSettings } from '../../host/projects-config-file.ts'
 import { canonicalConfigPath, createProjectRegistry, ProjectUnavailable } from '../projects.ts'
 
 /**
@@ -436,4 +438,31 @@ test('a config path written with ~/, a trailing slash or through a symlink is th
   expect(canonicalConfigPath(`${app}/`, home)).toBe(app)
   expect(canonicalConfigPath('~/link', home)).toBe(app)
   expect(canonicalConfigPath(app, home)).toBe(app)
+})
+
+// #979 re-review, testing gap: Settings › Projects & threads keys a project's own mode as the
+// resolver does, with this module's `canonicalConfigPath`, so a symlinked key names its target.
+test('a project mode keyed through a symlink is read and written as the path it resolves to', () => {
+  const home = mkdtempSync(join(tmpdir(), 'enso-projects-settings-'))
+  const places = { home, agentDir: join(home, 'pi-agent'), canonical: (key: string) => canonicalConfigPath(key) }
+  mkdirSync(places.agentDir)
+  const real = join(places.home, 'real-app')
+  const link = join(places.home, 'linked-app')
+  mkdirSync(real)
+  symlinkSync(real, link)
+  const resolved = realpathSync(real)
+  writeFileSync(join(places.home, 'config.json'), JSON.stringify({ threads: { projects: { [link]: 'off' } } }))
+  const read = readProjectsSettings(places)
+  if (read.kind !== 'ok' || read.etag === undefined) throw new Error('expected a readable file')
+  expect(read.threads.projects).toEqual({ [resolved]: 'off' })
+
+  expect(
+    writeProjectsSettings(places, { threads: { projects: { [link]: 'copy' } } }, { kind: 'matches', etag: read.etag }),
+  ).toMatchObject({ kind: 'written' })
+  expect(JSON.parse(readFileSync(join(places.home, 'config.json'), 'utf8'))).toEqual({
+    threads: { projects: { [resolved]: 'copy' } },
+  })
+  expect(
+    writeProjectsSettings(places, { threads: { projects: { [link]: 'off', [real]: 'copy' } } }, { kind: 'present' }),
+  ).toMatchObject({ kind: 'refused', reason: expect.stringContaining('name the same project') })
 })
