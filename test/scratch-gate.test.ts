@@ -15,14 +15,15 @@ import { REPOSITORY_ROOT } from './gate-support.ts'
 const outer = mkdtempSync(join(tmpdir(), 'enso-scratch-gate-'))
 afterAll(() => rmSync(outer, { recursive: true, force: true }))
 
-/** A real `bun test` of `args` from the repository root, under a `TMPDIR` of its own. */
+/** A real `bun test` of `args` from `cwd` (the repository root by default), under a `TMPDIR` of its own. */
 async function runUnder(
   tmp: string,
   args: readonly string[],
+  cwd: string = REPOSITORY_ROOT,
 ): Promise<{ stdout: string; stderr: string; code: number }> {
   mkdirSync(tmp)
   const run = Bun.spawn(['bun', 'test', ...args], {
-    cwd: REPOSITORY_ROOT,
+    cwd,
     env: { ...Bun.env, TMPDIR: tmp },
     stdout: 'pipe',
     stderr: 'pipe',
@@ -35,12 +36,13 @@ async function runUnder(
   return { stdout, stderr, code }
 }
 
-test('⚠ a test run leaves no temporary directory behind, even one the suite forgot (#546)', async () => {
-  const tmp = join(outer, 'tmp')
-  const suite = join(outer, 'suite')
+/** A suite that makes a directory the way every suite does, prints where, and never removes it. */
+function leakySuite(name: string): string {
+  const suite = join(outer, name)
   mkdirSync(suite)
+  const file = join(suite, 'leaky.test.ts')
   writeFileSync(
-    join(suite, 'leaky.test.ts'),
+    file,
     [
       `import { test } from 'bun:test'`,
       `import { mkdtempSync } from 'node:fs'`,
@@ -49,7 +51,12 @@ test('⚠ a test run leaves no temporary directory behind, even one the suite fo
       `test('leaks', () => { process.stdout.write('made ' + mkdtempSync(join(tmpdir(), 'enso-leak-')) + '\\n') })`,
     ].join('\n'),
   )
-  const { stdout, code } = await runUnder(tmp, [join(suite, 'leaky.test.ts')])
+  return file
+}
+
+test('⚠ a test run leaves no temporary directory behind, even one the suite forgot (#546)', async () => {
+  const tmp = join(outer, 'tmp')
+  const { stdout, code } = await runUnder(tmp, [leakySuite('suite')])
   expect(code).toBe(0)
   const made = /^made (.+)$/m.exec(stdout)?.[1]
   // Routed: under THIS run's TMPDIR, inside the preload's per-run directory — never the real /tmp.
@@ -57,6 +64,28 @@ test('⚠ a test run leaves no temporary directory behind, even one the suite fo
   // And gone with it: the suite never removed its directory, the preload removed the run's.
   expect(readdirSync(tmp)).toEqual([])
 })
+
+/**
+ * ⚠ #912: bun reads `bunfig.toml` from the process cwd only, so `bun test` run from a package
+ * directory never sees the root's `[test]` preload. packages/harness and packages/core had no
+ * bunfig of their own: every run there left its suites' directories in the real `/tmp` (80 and 223
+ * per run, measured 2026-10-13) and resolved the operator's ENSO_HOME. Every package holding a test
+ * file is run from its own directory here, so a new package without the preload fails.
+ */
+const PACKAGES_WITH_TESTS = readdirSync(join(REPOSITORY_ROOT, 'packages')).filter(
+  (name) => !new Bun.Glob('**/*.test.{ts,tsx}').scanSync({ cwd: join(REPOSITORY_ROOT, 'packages', name) }).next().done,
+)
+
+test.each(PACKAGES_WITH_TESTS)(
+  '⚠ a test run from packages/%s leaves no temporary directory behind (#912)',
+  async (name) => {
+    const tmp = join(outer, `tmp-${name}`)
+    const { stdout, code } = await runUnder(tmp, [leakySuite(`suite-${name}`)], join(REPOSITORY_ROOT, 'packages', name))
+    expect(code).toBe(0)
+    expect(/^made (.+)$/m.exec(stdout)?.[1]).toMatch(new RegExp(`^${tmp}/enso-test-run-[^/]+/enso-leak-`))
+    expect(readdirSync(tmp)).toEqual([])
+  },
+)
 
 /**
  * ⚠ #790: a write AFTER the teardown re-creates the run's directory, and nothing removes it again.

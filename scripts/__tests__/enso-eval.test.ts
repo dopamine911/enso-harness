@@ -65,6 +65,7 @@ const BASE: EnsoSessionEval = {
       S1_duplicateToolClusters: 0,
       S3_retryAfterErrorFires: 0,
       toolErrors: 0,
+      nonZeroExits: 0,
       S5_outputCollapseSpans: 0,
       S19_timeGaps: 0,
       S20_rareCommandMatches: 0,

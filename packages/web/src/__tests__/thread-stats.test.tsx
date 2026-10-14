@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import type { EnsoThreadStats, EnsoToolCallStats } from '@enso/core'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { headlineOf, rankCalls, rankTools, toolSummaries } from '../thread-stats-analysis.ts'
+import { headlineOf, type RefusedCalls, rankCalls, rankTools, toolSummaries } from '../thread-stats-analysis.ts'
 import { ThreadStatsView } from '../thread-stats.tsx'
 
 /**
@@ -66,10 +66,10 @@ const STATS: EnsoThreadStats = {
   logDays: ['2026-09-22'],
 }
 
-/** No call refused by a guard (#387). */
-const NONE_REFUSED: ReadonlyMap<string, unknown> = new Map()
+/** No call refused (#387). */
+const NONE_REFUSED: RefusedCalls = new Map()
 
-const text = (stats: EnsoThreadStats, refused: ReadonlyMap<string, unknown> = NONE_REFUSED): string =>
+const text = (stats: EnsoThreadStats, refused: RefusedCalls = NONE_REFUSED): string =>
   renderToStaticMarkup(<ThreadStatsView outcome={{ kind: 'read', payload: stats }} refused={refused} />).replace(
     /<[^>]*>/g,
     ' ',
@@ -85,7 +85,9 @@ test("the headline is livecraft's cards: mean and median cost per turn, tools pe
     averageToolsPerTurn: 1.5,
     toolCalls: 3,
     failedToolCalls: 1,
+    nonZeroExits: 0,
     refusedToolCalls: 0,
+    refusedBy: [],
     failureRate: 1 / 3,
     offBranchCost: 0,
   })
@@ -167,6 +169,7 @@ test('rankings by duration and by failure leave out calls that have neither', ()
     toolName: 'read',
     calls: 2,
     failed: 1,
+    exited: 0,
     refused: 0,
     inputChars: 95,
     outputChars: 2115,
@@ -181,7 +184,7 @@ test('rankings by duration and by failure leave out calls that have neither', ()
 // same call, refused by a guard, is policy doing its job — counted apart, never a failure, never
 // ranked as one — and the drawer says so beside the failures instead of painting it as danger.
 test('⚠ a refused call is counted as refused, not failed: the headline, the tool, the failure ranking, the drawer', () => {
-  const c2Refused: ReadonlyMap<string, unknown> = new Map([['c2', 'secret-read']])
+  const c2Refused: RefusedCalls = new Map([['c2', { by: 'guard', rule: 'secret-read' }]])
   expect(headlineOf(STATS, c2Refused)).toMatchObject({ failedToolCalls: 0, refusedToolCalls: 1, failureRate: 0 })
   expect(toolSummaries(CALLS, c2Refused).find((tool) => tool.toolName === 'read')).toMatchObject({
     calls: 2,
@@ -190,11 +193,60 @@ test('⚠ a refused call is counted as refused, not failed: the headline, the to
   })
   expect(rankCalls(CALLS, 'failure', c2Refused)).toEqual([])
   const drawer = text(STATS, c2Refused)
-  expect(drawer).toContain('1 refused by a guard — not failures')
+  expect(drawer).toContain('1 refused by Enso guard — not failures')
   // Costliest calls tags the row: `refused`, where the same call unmarked reads `failed`.
   expect(drawer).not.toContain('failed')
   expect(text(STATS)).toContain('failed')
   expect(text(STATS)).not.toContain('refused')
+})
+
+// #928: the drawer said every refusal was "by a guard" — `auto`'s classifier's too. Each refuser
+// is named by its count, in the refusal card's words.
+test("⚠ a guard's refusal and auto's classifier's are each named by who refused, never both 'by a guard'", () => {
+  const refused: RefusedCalls = new Map([
+    ['c1', { by: 'guard', rule: 'network-egress' }],
+    ['c2', { by: 'auto' }],
+  ])
+  expect(headlineOf(STATS, refused)).toMatchObject({
+    refusedToolCalls: 2,
+    refusedBy: [
+      ['guard', 1],
+      ['auto', 1],
+    ],
+  })
+  // The static render escapes the apostrophe in "auto's".
+  const drawer = text(STATS, refused).replaceAll('&#x27;', "'")
+  expect(drawer).toContain("2 refused: 1 by Enso guard, 1 by auto's classifier — not failures")
+  expect(drawer).not.toContain('by a guard')
+})
+
+// #928: pi marks a command's non-zero exit `isError` — `grep` with no match — the same as a call
+// that broke. The thread from #928's acceptance: a `grep` that found nothing, a timed-out command
+// and an `edit` that could not apply are 2 failures and 1 non-zero exit; the rate counts the 2.
+test('⚠ a non-zero exit is counted apart from the failures: the headline, the rate, the tool, the ranking, the drawer', () => {
+  const calls = [
+    call('g1', 'bash', { isError: true, exitCode: 1 }),
+    call('t1', 'bash', { isError: true }),
+    call('e1', 'edit', { isError: true }),
+  ]
+  const stats: EnsoThreadStats = { ...STATS, callStats: calls }
+  expect(headlineOf(stats, NONE_REFUSED)).toMatchObject({
+    toolCalls: 3,
+    failedToolCalls: 2,
+    nonZeroExits: 1,
+    failureRate: 2 / 3,
+  })
+  expect(toolSummaries(calls, NONE_REFUSED).find((tool) => tool.toolName === 'bash')).toMatchObject({
+    calls: 2,
+    failed: 1,
+    exited: 1,
+  })
+  expect(rankCalls(calls, 'failure', NONE_REFUSED).map((ranked) => ranked.toolCallId)).toEqual(['t1', 'e1'])
+  const drawer = text(stats)
+  expect(drawer).toContain('2 · 66.7%')
+  expect(drawer).toContain('1 exited non-zero — not failures')
+  // Costliest calls tags the `grep` with its code, not as failed.
+  expect(drawer).toContain('exit 1')
 })
 
 test('the drawer says what it analysed, and names spend no turn on this branch accounts for', () => {

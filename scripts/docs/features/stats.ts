@@ -29,8 +29,8 @@ export const STATS: FeatureSpec = {
       },
       marks: [
         {
-          target: { text: 'refused by a guard — not failures' },
-          says: '**failures**, and under it the refusals, counted apart: `{shown}`.',
+          target: { text: '— not failures' },
+          says: '**failures**, and under it the error results that are not failures, counted apart: `{shown}`.',
         },
         {
           target: { role: 'heading', name: 'Tokens' },
@@ -56,7 +56,7 @@ export const STATS: FeatureSpec = {
     'The thread above cost {totalCost}. Three things stand out.',
     `The first turn after the switch to \`${SECOND_MODEL}\` is one solid cache-write bar in **Tokens**, and the peak of **Cost per turn**: the new model had no cache, so the whole prefix was written again, at that model's price. Nearly every other turn is almost all cache read. If you see a lone cache-write bar in a thread of your own, look for a model switch or a compaction just before it. [Context Events](./context-browser.md) names which.`,
     'The line under the metrics, {offBranch} `not attributed to a turn on this branch`, is the compaction. Its summary was a model call of its own, but not a turn of the conversation, so the tab names the cost instead of hiding it in a turn.',
-    "**failures** reads `{failures}`, not counting the refusals. pi records a guard's refusal as an error, just like a real failure. Enso keeps a record of each refusal, so the tab counts the failed `cat` as a failure and the refused calls apart. A refusal is the guard working, not the tool breaking.",
+    "**failures** reads `{failures}`, counting neither the refusals nor the commands that exited non-zero. pi records a guard's refusal and a command's non-zero exit as errors, just like a call that broke. Enso keeps a record of each refusal and of who made it, and reads the exit code pi appends to a command's output, so the tab counts the refused calls and the `cat` of a missing file apart, under the figure. A refusal is the guard working, and a non-zero exit is the command answering (`grep` finding nothing exits 1): neither is the tool breaking. A command that timed out, a call that was aborted, and an error from any other tool are failures.",
   ],
   limits: [
     'It covers the current branch only. Cost spent on a branch you forked away from, or on a compaction, is named as not attributed to a turn, rather than spread over the ones you see.',

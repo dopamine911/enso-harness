@@ -24,9 +24,12 @@ import {
   ensoProjectsDir,
   ensoProjectsPath,
   ensoPromptsDir,
-  findRepoRoot,
-  harnessPackageDir,
+  HARNESS_PACKAGE_NAME,
+  installedPackageDir,
+  checkoutRootOfPackage,
   readTextIfPresent,
+  resolvePackageDir,
+  WEB_PACKAGE_NAME,
 } from '@enso/core/paths'
 import { startEnsoServer } from './index.ts'
 import { canonicalConfigPath } from './projects.ts'
@@ -34,11 +37,16 @@ import { canonicalConfigPath } from './projects.ts'
 const cwdArgument: string | undefined = process.argv[2]
 const cwd: string = cwdArgument === undefined || cwdArgument.length === 0 ? process.cwd() : cwdArgument
 
-const repoRoot = findRepoRoot(import.meta.url)
+// Both packages found from this file, not from a workspace root (#950): installed, there is none
+// above them. The harness is resolved BY NAME from the web package, as Node would resolve an import
+// of it, so it is the workspace link here and the declared dependency in an install.
+const webDir = installedPackageDir(import.meta.url, WEB_PACKAGE_NAME)
+const harnessDir = resolvePackageDir(HARNESS_PACKAGE_NAME, webDir)
 
-// The user's Enso state (#421): migrated, then logging opened there (`startLauncher`).
+// The user's Enso state (#421): migrated, then logging opened there (`startLauncher`). Installed,
+// there is no checkout `.enso/` to migrate.
 const { home, logsDir, log } = await startLauncher({
-  repoRoot,
+  repoRoot: checkoutRootOfPackage(webDir),
   environment: process.env,
   process: 'server',
   logger: ['server', 'dev'],
@@ -90,7 +98,7 @@ const { listening } = startEnsoServer({
     canonical: (key) => canonicalConfigPath(key),
     projectsDir: ensoProjectsDir(home),
   },
-  harnessPackageDir: harnessPackageDir(repoRoot),
+  harnessPackageDir: harnessDir,
   agentDir,
   permissionRulesPath: ensoPermissionRulesPath(home),
   logsDir,
@@ -100,7 +108,7 @@ try {
   log.info('listening on {url} · pi cwd {cwd} · package {harnessPackageDir} · agentDir {agentDir} · logs {logsDir}', {
     url: await listening,
     cwd,
-    harnessPackageDir: harnessPackageDir(repoRoot),
+    harnessPackageDir: harnessDir,
     agentDir,
     logsDir,
   })

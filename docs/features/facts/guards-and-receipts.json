@@ -16,7 +16,7 @@
       "steps": ["open a thread from the rail"],
       "shown": ["bash cat docs/deploy.md error", "Refused · network egress", "Enso guard"],
       "measured": {
-        "refusedApart": "2 refused by a guard — not failures"
+        "refusedApart": "1 exited non-zero · 2 refused by Enso guard — not failures"
       }
     }
   ]

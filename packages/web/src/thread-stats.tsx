@@ -11,6 +11,7 @@ import {
   type CallMetric,
   callValue,
   headlineOf,
+  isNonZeroExit,
   isRefused,
   rankCalls,
   type RefusedCalls,
@@ -23,6 +24,7 @@ import {
   unpricedPrompts,
 } from './thread-stats-analysis.ts'
 import type { OnTurn, TurnPoint } from './thread-stats-charts.tsx'
+import { REFUSER_NAME } from './tool-refusal.tsx'
 import type { RevealStatsTarget, StatsTarget } from './transcript-reveal.ts'
 import { Card, Empty, Metric, Section } from './view-parts.tsx'
 
@@ -70,6 +72,24 @@ function durationText(milliseconds: number): string {
 }
 
 const plural = (count: number, word: string): string => `${countText(count)} ${word}${count === 1 ? '' : 's'}`
+
+/** Who refused, in the refusal card's words (#523, #928): `2 refused by Enso guard`, or each refuser's count when more than one did. */
+function refusalsText(headline: StatsHeadline): string | undefined {
+  const [only, ...others] = headline.refusedBy
+  if (only === undefined) return undefined
+  const total = `${countText(headline.refusedToolCalls)} refused`
+  if (others.length === 0) return `${total} by ${REFUSER_NAME[only[0]]}`
+  return `${total}: ${headline.refusedBy.map(([by, count]) => `${countText(count)} by ${REFUSER_NAME[by]}`).join(', ')}`
+}
+
+/** What the failures card says beside its figure: the error results that are not failures (#407, #928), or nothing. */
+function notFailuresNote(headline: StatsHeadline): string | undefined {
+  const apart = [
+    headline.nonZeroExits > 0 ? `${countText(headline.nonZeroExits)} exited non-zero` : undefined,
+    refusalsText(headline),
+  ].filter((part) => part !== undefined)
+  return apart.length === 0 ? undefined : `${apart.join(' · ')} — not failures`
+}
 
 // ── context and tokens ───────────────────────────────────────────────────────────────────────
 
@@ -206,6 +226,7 @@ function ToolUsageRow({
   const measured =
     metric === 'duration' && tool.measured < tool.calls ? ` · ${tool.measured}/${tool.calls} durations measured` : ''
   const failures = tool.failed > 0 ? ` · ${plural(tool.failed, 'failure')}` : ''
+  const exits = tool.exited > 0 ? ` · ${countText(tool.exited)} exited non-zero` : ''
   const refusals = tool.refused > 0 ? ` · ${countText(tool.refused)} refused` : ''
   return (
     <li className="grid gap-1">
@@ -225,6 +246,7 @@ function ToolUsageRow({
         {plural(tool.calls, 'call')}
         {measured}
         {failures}
+        {exits}
         {refusals}
       </small>
     </li>
@@ -272,9 +294,11 @@ function callMetricText(call: EnsoToolCallStats, metric: CallMetric, refused: Re
   return charsText(callValue(call, metric, refused))
 }
 
-/** What became of a ranked call, beside its name: refused by a guard (#407), failed, or nothing. */
+/** What became of a ranked call, beside its name: refused (#407), exited non-zero (#928), failed, or nothing. */
 function CallOutcome({ call, refused }: { call: EnsoToolCallStats; refused: RefusedCalls }): React.ReactNode {
   if (isRefused(call, refused)) return <i className="ml-1.5 text-muted-foreground not-italic">refused</i>
+  if (isNonZeroExit(call, refused))
+    return <i className="ml-1.5 text-muted-foreground not-italic">exit {call.exitCode}</i>
   return call.isError ? <i className="ml-1.5 text-refuse not-italic">failed</i> : null
 }
 
@@ -433,12 +457,8 @@ export function ThreadStatsView({
             label="failures"
             value={`${countText(headline.failedToolCalls)} · ${PERCENT.format(headline.failureRate)}`}
             danger={headline.failedToolCalls > 0}
-            // Policy doing its job is not danger (#407): a refusal is said beside, never counted in.
-            note={
-              headline.refusedToolCalls > 0
-                ? `${countText(headline.refusedToolCalls)} refused by a guard — not failures`
-                : undefined
-            }
+            // Policy doing its job, and a command answering no, are not danger (#407, #928): said beside, never counted in.
+            note={notFailuresNote(headline)}
           />
         </dl>
         {headline.offBranchCost > 0 ? (
@@ -466,6 +486,9 @@ export function ThreadStatsView({
                     {countText(tool.calls)}
                     {tool.failed > 0 ? (
                       <b className="ml-1 font-medium text-refuse">· {countText(tool.failed)}</b>
+                    ) : null}
+                    {tool.exited > 0 ? (
+                      <span className="ml-1 text-muted-foreground">· {countText(tool.exited)} exited non-zero</span>
                     ) : null}
                     {tool.refused > 0 ? (
                       <span className="ml-1 text-muted-foreground">· {countText(tool.refused)} refused</span>

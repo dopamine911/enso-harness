@@ -146,19 +146,30 @@ const log = ensoLogger('extension', 'guards')
  */
 const KNOWLEDGE_CONFERRING_TOOLS = new Set([TOOL_READ, TOOL_WRITE])
 
+/**
+ * The last sentence of every refusal that asks for a read (#922). pi prepares every call of a parallel
+ * batch, which is where the guard decides, before it runs any (`executeToolCallsParallel` in pi-agent-core's
+ * `agent-loop.js`), and the guard learns of a read only from its result (`toolResult`). So a read sent
+ * beside the write or edit it was meant to unblock is checked after that call, and the call is refused
+ * again: the model has to be told to send the read on its own.
+ */
+const READ_ON_ITS_OWN =
+  'Send that read on its own, before this call: a read sent in the same batch as this call is checked ' +
+  'after it, because every call in a batch is checked before any of them runs.'
+
 /** Why a `write` over an existing file the session has not wholly seen is refused — never read, or read in part. */
 function unseenContentReason(candidate: string, knownState: 'unknown' | 'partial'): string {
   if (knownState === 'partial') {
     return (
       `Writing to "${candidate}" is blocked: this session has read only part of it (a cut read, an ` +
       `offset or a limit), so a whole-file write would replace lines it has never seen. Use edit ` +
-      `for a change inside it, or read the whole file first.`
+      `for a change inside it, or read the whole file first. ${READ_ON_ITS_OWN}`
     )
   }
   return (
     `Writing to "${candidate}" is blocked: the file exists and this session has not ` +
     `read it, so a whole-file write would replace content the session has never seen. ` +
-    `Read "${candidate}" first, then write.`
+    `Read "${candidate}" first, then write. ${READ_ON_ITS_OWN}`
   )
 }
 
@@ -659,7 +670,7 @@ export function createGuardSession(runtime: GuardRuntime, dependencies: GuardSes
           `Mutating "${candidate}" is blocked: the file CHANGED on disk after this session ` +
             `last observed it — another agent, a git restore, or this session's own bash ` +
             `command modified it. Read "${candidate}" again to see the current content, ` +
-            `then reconsider the change before re-applying it.`,
+            `then reconsider the change before re-applying it. ${READ_ON_ITS_OWN}`,
         )
       }
       if (toolName === TOOL_WRITE && knownState !== 'fresh' && existsSync(target)) {

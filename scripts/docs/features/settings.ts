@@ -63,7 +63,7 @@ export const SETTINGS: FeatureSpec = {
   landingTagline: 'themes · fonts · permissions · storage',
   shows: [
     `**Appearance**: the look of the page, a colour theme and a font for each of ${ROLE_COUNT} roles. ${DEFAULT.label} is the default theme, and the others include ${listed(OTHER_FAMILIES)}, in dark and light variants.`,
-    "**Permissions**: the rules pi runs under, from `ENSO_HOME/permissions.json` in the permission engine's own format, in the order the engine reads them. You edit them as written: change a rule's pattern or decision, move or remove it, add rules and drafted groups of rules, save, and reset to Enso's policy. A card per mode previews the rules that mode puts in effect, read-only. **Try a command** asks the open thread what it would decide.",
+    "**Permissions**: the rules pi runs under, from `ENSO_HOME/permissions.json` in the permission engine's own format, in the order the engine reads them. You edit them as written: change a rule's pattern or decision, move or remove it, add rules and drafted groups of rules, set the file's other keys under **Behaviour**, save, and reset to Enso's policy. A card per mode previews the rules that mode puts in effect, read-only. **Try a command** asks the open thread what it would decide.",
     '**Storage**: the totals across every project (trees, what they take, and what the snapshot stores take), then each project with what it takes on disk (its trees plus its snapshot store, the number its card on the Projects page says), every thread tree with what it takes, and a Delete for each. See [Thread trees](./thread-trees.md).',
     "A project's own settings are on the project's page, not here: **Project settings…** in its menu on the rail. See [Thread trees](./thread-trees.md).",
   ],
@@ -137,7 +137,8 @@ export const SETTINGS: FeatureSpec = {
       ],
       after: [
         "Between the modes and the rules: three **Rule groups** (publishing, remote writes, and secrets on the path gate). Turning a group's switch on adds only its rules not already in force; once on, it stays on, and its rules leave from the table one by one. Below the rules: **Add rule**, **Try a command**, and **Reset to Enso's policy…**, which shows what it would change before it asks and keeps the replaced file as `permissions.json.bak`. The save bar comes last.",
-        'A **Behaviour** row says when `yoloMode` is on, since it makes every ask an allow, and while it is on a callout under the lede says so too, with **See Behaviour** to go to the row. When the review log is on, the page names where it is written.',
+        "Below the check, **Behaviour**: every other key in `permissions.json`, one control each, saved with the rules in the same **Save**. Switches for `yoloMode`, the review log and the debug log; numbers with their unit for the forwarding timeout and the prompt and review-log widths (empty is the engine's default); the authorizer chain as an ordered list and the infrastructure read paths as a list. **Remove from the file — use the default** takes a key off. `shellTools` is shown and edited in the file; the terminal-only and deprecated keys sit read-only in closed **Terminal only** and **Deprecated** disclosures.",
+        'Turning `yoloMode` on asks first, saying every Ask becomes Allow in every thread and every subagent; while it is on, a callout under the lede says so, with **See Behaviour** to go to the row. A run already going keeps auto-approving until its next prompt after it is turned off. When the review log is on, the page names where it is written.',
         "An unsaved change is kept while the browser page is open: leaving Settings for a thread, or moving to another section, doesn't lose it. A reload does.",
       ],
     },

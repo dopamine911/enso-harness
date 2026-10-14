@@ -765,6 +765,45 @@ test('⚠ a new thread whose project was removed shows no directory, and its pro
   expect(builtIn).toEqual([])
 })
 
+// ⚠ #897: a page names its new thread's project on every request, and nothing builds it until Start.
+// A reload asked `/history` with no project named, got a 404, minted the id again with no project,
+// and showed the launch project — while the server kept the claim and built the session in the
+// claimed one. `/history` says such a thread is a draft of the project it was named for, and names
+// it still once that project is removed, so the page says it is gone; the page's reads naming it
+// again are served, and its prompt is refused with the reason. An id nobody named stays 404.
+test('⚠ GET …/history says a thread named for a project and never built is a draft of that project, removed or not (#897)', async () => {
+  const { root, app } = projectRoot()
+  const { url, built } = await startWith(settlesAtOnce, {}, undefined, { projectRoots: [root] })
+  const project = await registeredProject(url, app)
+  const commands = await fetch(`${url}/api/threads/named/commands`, {
+    headers: { [ENSO_PROJECT_HEADER]: project.projectId },
+  })
+  expect(commands.status).toBe(200)
+  const draftOf = async (): Promise<EnsoThreadHistory> => {
+    const response = await fetch(`${url}/api/threads/named/history`)
+    expect(response.status).toBe(200)
+    const history = (await response.json()) as EnsoThreadHistory
+    expect(Check(EnsoThreadHistory, history)).toBe(true)
+    return history
+  }
+  expect(await draftOf()).toMatchObject({ threadId: 'named', projectId: project.projectId, messages: [], draft: true })
+  expect((await fetch(`${url}/api/threads/nobody-named/history`)).status).toBe(404)
+
+  expect((await fetch(`${url}/api/projects/${project.projectId}`, { method: 'DELETE' })).status).toBe(204)
+  expect(await draftOf()).toMatchObject({ projectId: project.projectId, draft: true })
+  const naming = { [ENSO_PROJECT_HEADER]: project.projectId }
+  expect((await fetch(`${url}/api/threads/named/commands`, { headers: naming })).status).toBe(200)
+  expect((await fetch(`${url}/api/threads/other/commands`, { headers: naming })).status).toBe(400)
+  const refused = await fetch(`${url}/api/threads/named/prompt`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...naming },
+    body: JSON.stringify({ message: 'hello' }),
+  })
+  expect(refused.status).toBe(409)
+  expect(await refused.text()).toContain('its project is no longer registered')
+  expect(built).toEqual([])
+})
+
 test("⚠ the host's refusal to run a session where it would have to is a 409 with its reason, never a 500", async () => {
   const { url } = await startWith(settlesAtOnce, {}, (host: AgentHost) => ({
     ...host,
