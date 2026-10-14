@@ -133,7 +133,7 @@ function seededHome(): E2eHome {
   // The checkout has a `.pi/` (#502): undecided, every prompt would wait on the trust question.
   // Trusted, as the operator's own `trust.json` has it — pi's file, keyed by the real path.
   writeFileSync(join(agentDir, 'trust.json'), JSON.stringify({ [realpathOrSelf(project)]: true }, null, 2))
-  // With no `projects.roots` declared, the launch folder is the only project; this folder is none.
+  // A folder never registered as a project, so a thread stored there is outside every project (#378).
   const elsewhere = join(home, 'elsewhere')
   mkdirSync(elsewhere)
   return {
