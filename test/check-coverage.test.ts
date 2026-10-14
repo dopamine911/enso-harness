@@ -82,7 +82,7 @@ test("a test file is what bun's runner names one; a helper beside the tests stay
     expect(isTestFilePath(path)).toBe(true)
   }
   for (const path of [
-    'packages/core/src/__tests__/log-recorder.ts',
+    'packages/test-support/src/log-recorder.ts',
     'test/gate-support.ts',
     'packages/core/src/test-results.ts',
     'packages/core/src/latest.ts',

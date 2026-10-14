@@ -38,10 +38,9 @@ test('every module is reachable: from the barrel, or from a subpath package.json
   // ⚠ Tree-shaking does not save a bundle from a bare `node:*` specifier: it is resolved at
   // link time, before anything is shaken, so a node-only module ON the barrel breaks a
   // browser build outright — measured on #211, and `test/browser-bundle-gate.test.ts` is
-  // the sensor. Three more are test-only: the recording sink (#178) is
-  // `@enso/core/log-recorder`, the flow trace recorder (#482) is `@enso/core/flow-trace` and
-  // the observation-kinds oracle (#173) is `@enso/core/observation-kinds`, all from under
-  // `__tests__`, where the logging gate's three-file LogTape inventory does not look.
+  // the sensor. The three test-only helpers that were subpaths here — the recording sink
+  // (#178), the flow trace recorder (#482) and the observation-kinds oracle (#173) — are
+  // `@enso/test-support` since #951, so core's shipped manifest names nothing it does not ship.
   const modules = readdirSync(join(import.meta.dir, '..'), { withFileTypes: true })
     .filter((entry) => entry.isFile() && entry.name.endsWith('.ts') && entry.name !== 'index.ts')
     .map((entry) => entry.name)
@@ -66,9 +65,6 @@ test('every module is reachable: from the barrel, or from a subpath package.json
     'snapshot-store.ts',
     'thread-tree.ts',
     'tree-setup.ts',
-    '__tests__/flow-trace.ts',
-    '__tests__/log-recorder.ts',
-    '__tests__/observation-kinds.ts',
   ])
   // ⚠ The barrel's RE-EXPORTS, not its text: `barrel.includes(module)` read a filename in a
   // comment as an export, so this assertion passed on prose (#211 — the new header names the

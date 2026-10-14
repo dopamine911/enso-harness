@@ -1,0 +1,14 @@
+{
+  // Core's tests, as a project of their own (#951). They import `@enso/test-support`, whose
+  // recorder is built on core, so they cannot be in core's project: it would have to reference
+  // the package that references it. Splitting them out keeps the graph one-way —
+  // core ← test-support ← core's tests.
+  "extends": "../../../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist-types",
+    "rootDir": ".",
+    "types": ["bun"]
+  },
+  "include": ["*.ts"],
+  "references": [{ "path": "../.." }, { "path": "../../../test-support" }]
+}

@@ -129,12 +129,14 @@ What the pi extension takes, and what it is:
 ```ts
 /**
  * The guard's seams: the bash analyzer (#9), the harness root (#160 §4), the incident policy
- * and log directory (#466), the projects directory thread trees are minted in (#615), and the
- * command judge with the secret values its state is redacted of (#469).
+ * and log directory (#466), the projects directory thread trees are minted in (#615), the
+ * command judge with the secret values its state is redacted of (#469), and the version of the
+ * pi it runs in (#953).
  *
- * Production wires cc-safety-net's `checkCommand`, this checkout's root, the user's `config.json`
- * and `ENSO_HOME`'s log and projects directories and secrets; tests inject known verdicts, a root
- * they built, a policy, directories and a fake judge — a guard test must never reach the network.
+ * Production wires cc-safety-net's `checkCommand`, this checkout's root, the user's `config.json`,
+ * `ENSO_HOME`'s log and projects directories and secrets, and pi's own `VERSION`; tests inject known
+ * verdicts, a root they built, a policy, directories, a fake judge and a version — a guard test must
+ * never reach the network.
  * `checkCommand` reads LOCAL policy per call, so a guard test that touched the real
  * library would vary with the machine's cc-safety-net config (the contract test alone exercises
  * the real one, and pins defaults explicitly) — and the same holds for the machine's config file.
@@ -164,6 +166,13 @@ export interface GuardDependencies {
   commandJudge: () => CommandJudge | undefined
   /** The known secret values a judge state is redacted of before it leaves (#469), read per judged call. */
   judgeSecretValues: () => readonly string[]
+  /**
+   * The version of the pi this extension is running in (#953): pi's own `VERSION`, which pi's
+   * extension loader hands the host's copy of (it maps `@earendil-works/pi-coding-agent` to the
+   * running pi's `index.js`, in every resolution mode). Outside `SUPPORTED_PI_VERSIONS`, the floor
+   * refuses every tool call.
+   */
+  runningPiVersion: string
 }
 ```
 
@@ -187,6 +196,8 @@ export function createGuards(dependencies: GuardDependencies): (pi: ExtensionAPI
     pi.events.on(PERMISSIONS_DECISION_CHANNEL, (raw: unknown) => session.permissionDecision(raw))
 
     pi.on('session_start', (_event, extensionContext): void => {
+      const refusal = runningPiRefusal(dependencies.runningPiVersion)
+      if (refusal !== undefined) announceVersionRefusal(refusal, extensionContext)
       session.start({
         recordDirectory: () => extensionContext.sessionManager.getSessionDir(),
         transcript: () => transcriptOf(extensionContext.sessionManager.getBranch()),
@@ -262,6 +273,14 @@ export interface GuardRuntime {
   on(channel: string, handler: (data: unknown) => void): void
   /** Every tool the runtime registers now, by its own name. May throw: the floor reads a throw as a mismatch. */
   toolNames(): readonly string[]
+  /**
+   * Why this runtime's version is not one the guard was pinned against, or undefined when it is (#953).
+   * The guard replicates its runtime's path resolver, so under a version the replica was not checked
+   * against a deny can be computed against the wrong target (#217). The glue owns the range, since it
+   * is the runtime's (pi's is `@enso/core`'s `SUPPORTED_PI_VERSIONS`). May throw: the floor reads a
+   * throw as a refusal.
+   */
+  versionRefusal(): string | undefined
 }
 ```
 
@@ -329,9 +348,16 @@ nothing recorded — no risk signal, no denial entry, no judge, no patch.
 
 **`decide`'s order** (`guard-session.ts#decide`) — nested, so described, not fenced:
 
-1. **The fail-closed floor** (#4). If the policy names a tool the runtime does not register, or the tool
-   list could not be enumerated, every call is denied with the mismatch in the reason.
-   Checked lazily here if `session_start` has not fired yet, so the floor never depends on event order.
+1. **The fail-closed floor** (#4, #953). Two legs, version first:
+   - If the runtime's version is not one the guard was pinned against (`GuardRuntime#versionRefusal`;
+     for pi, `packages/core/src/supported-pi-versions.ts#SUPPORTED_PI_VERSIONS`), or cannot be read,
+     every call is denied with the runtime's refusal as the reason. This is what makes `pi install`,
+     which never runs the terminal launcher, refuse an unsupported pi.
+   - If the policy names a tool the runtime does not register, or the tool list could not be
+     enumerated, every call is denied with the mismatch in the reason.
+
+   Both are checked lazily here if `session_start` has not fired yet, so the floor never depends on
+   event order.
 2. **An incident's suspension** (#466, `guard-denials.ts#suspensionDenial`). While a halting incident's
    **report is owed** (#467), every tool but `file_incident_report` is refused under
    `incident-suspension` — reads and `ask_user` included: the report turn is bounded. Otherwise a tool
@@ -495,10 +521,12 @@ writes are *our* layers' jobs (`cc-safety-net-contract.test.ts#EXPECTED_ALLOWS`)
 - **The schema rule**: `packages/harness/core/index.ts`'s header — no TypeBox schema is declared there; the
   policy is imported from `@enso/core` or does not exist.
 - **The pi-version parity gate** (#217, `scripts/__tests__/pi-version-parity.test.ts`): the replica's
-  agreement with pi is pinned against the WORKSPACE copy only; the `pi` the terminal launcher spawns is
-  bounded instead by `scripts/enso-launch.ts#SUPPORTED_PI_VERSIONS`, which the launcher refuses outside
-  and that test holds equal to the corpus's pi. Without it the corpus described a pi the terminal
-  surface need never have run.
+  agreement with pi is pinned against the WORKSPACE copy only; any other pi is bounded instead by
+  `packages/core/src/supported-pi-versions.ts#SUPPORTED_PI_VERSIONS`, which that test holds equal to
+  the corpus's pi. The terminal launcher refuses a `pi` on `PATH` outside it before spawning, and the
+  guard's floor refuses every call under a running pi outside it (#953), which covers a harness
+  installed with `pi install`. Without it the corpus described a pi the terminal surface need never
+  have run.
 
 ## What crosses it that should not
 

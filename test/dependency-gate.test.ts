@@ -58,10 +58,11 @@ const SOURCE_ROOTS = ['packages', 'scripts', 'test'] as const
 const IMPORT_SPECIFIER = /(?<![\w.$])(?:from|import|require)\s*\(?\s*['"]([^'"]+)['"]/g
 
 interface Manifest {
+  readonly exports?: Record<string, string>
+  readonly files?: readonly string[]
   readonly dependencies?: Record<string, string>
   readonly devDependencies?: Record<string, string>
   readonly bundledDependencies?: readonly string[]
-  readonly files?: readonly string[]
   readonly peerDependencies?: Record<string, string>
   readonly peerDependenciesMeta?: Record<string, { optional?: boolean }>
   readonly overrides?: Record<string, string>
@@ -281,10 +282,12 @@ const LOCKED_COMPILER = /^ {4}"[^"]+": \["typescript@(\d+\.\d+)\.\d+"/gm
  * rather than in a lockfile diff nobody reads twice.
  */
 test('⚠ only the root declares TypeScript, and the lock holds three compiler versions (#228, #745)', () => {
-  const workspaces = ['packages/core', 'packages/harness', 'packages/web'].map((workspace) => ({
-    workspace,
-    declares: manifest(`${workspace}/package.json`).devDependencies?.typescript,
-  }))
+  const workspaces = ['packages/core', 'packages/harness', 'packages/test-support', 'packages/web'].map(
+    (workspace) => ({
+      workspace,
+      declares: manifest(`${workspace}/package.json`).devDependencies?.typescript,
+    }),
+  )
   expect(workspaces.filter((entry) => entry.declares !== undefined)).toEqual([])
   const lock = readFileSync(join(REPOSITORY_ROOT, 'bun.lock'), 'utf8')
   const versions = new Set([...lock.matchAll(LOCKED_COMPILER)].map((match) => match[1] ?? ''))
@@ -406,4 +409,68 @@ test('⚠ the harness `files` lists every top-level directory and excludes every
 test('the harness is private until it has a name of its own (#952, #948)', () => {
   // `enso` on npm belongs to someone else; a stray publish from the package directory would try it.
   expect(manifest('packages/harness/package.json')).toMatchObject({ private: true })
+})
+
+/**
+ * The packages pi supplies to every extension it loads (pi-coding-agent `docs/packages.md`,
+ * "Declare dependencies"): `typebox` and its own `@earendil-works/pi-*` libraries. An extension
+ * package — and `@enso/core`, which ships inside the harness — declares them as `"*"` peers, never
+ * as dependencies: "a physical copy can bypass Pi's extension module mapping … and create
+ * duplicate classes".
+ */
+const PI_SUPPLIED_PACKAGE = /^(?:typebox|@earendil-works\/pi-.+)$/
+/** Where pi maps an extension's imports onto its own copies — the specifiers a peer can rely on. */
+const PI_VIRTUAL_MODULES = 'node_modules/@earendil-works/pi-coding-agent/dist/core/extensions/virtual-modules.js'
+/** A `typebox` specifier pi's virtual-module table maps: a key such as `"typebox/compile":` or `typebox:`. */
+const PI_MAPPED_TYPEBOX_SPECIFIER = /^\s+"?(typebox(?:\/[\w-]+)?)"?:/gm
+
+/**
+ * ⚠ @ENSO/CORE SHIPS INSIDE THE HARNESS, SO IT DECLARES NO PACKAGE PI SUPPLIES (#951).
+ *
+ * Measured by the #949 spike: with `typebox` in core's `dependencies`, a packed install put a
+ * physical `typebox@1.3.27` beside pi's own, and no pi warning fired — pi checks only the names in
+ * the harness's top-level `dependencies`, so this gate is the only sensor.
+ */
+test('⚠ @enso/core lists no package pi supplies in its dependencies — typebox is a "*" peer (#951)', () => {
+  const core = manifest('packages/core/package.json')
+  expect(Object.keys(core.dependencies ?? {}).filter((name) => PI_SUPPLIED_PACKAGE.test(name))).toEqual([])
+  expect(core.peerDependencies?.typebox).toBe('*')
+})
+
+/**
+ * A peer is only as good as pi's mapping of it: pi resolves an extension's `typebox` imports to
+ * its own copy through a fixed table of specifiers, and a core import of a subpath that table
+ * lacks would find no `typebox` at all in an installed harness. Read off pi's installed table, so
+ * a pi upgrade that drops a subpath goes red here rather than at load.
+ */
+test('every typebox specifier @enso/core imports is one pi maps for its extensions (#951)', () => {
+  const mapped = new Set(
+    [...readFileSync(join(REPOSITORY_ROOT, PI_VIRTUAL_MODULES), 'utf8').matchAll(PI_MAPPED_TYPEBOX_SPECIFIER)].map(
+      (match) => match[1] ?? '',
+    ),
+  )
+  // A floor: a table this regex no longer reads would make every import look unmapped — or, with
+  // the comparison inverted, mapped. Bare, compile and value are the three core uses today.
+  expect([...mapped]).toEqual(expect.arrayContaining(['typebox', 'typebox/compile', 'typebox/value']))
+  const imported = new Set<string>()
+  for (const line of codeLinesUnder(['packages/core/src'])) {
+    for (const [, specifier] of line.text.matchAll(IMPORT_SPECIFIER)) {
+      if (specifier === 'typebox' || specifier?.startsWith('typebox/')) imported.add(specifier)
+    }
+  }
+  expect(imported.size).toBeGreaterThan(0)
+  expect([...imported].filter((specifier) => !mapped.has(specifier))).toEqual([])
+})
+
+/**
+ * ⚠ What core's manifest names, core ships (#951). The #949 spike found 32 test files inside
+ * the packed harness's bundled `@enso/core`, because core had no `files` field; npm honours a
+ * bundled package's own `files`, so this one field is what keeps them out (measured with
+ * `npm pack --dry-run`, 0 `__tests__` entries). The test-only helpers that were subpaths here
+ * moved to `@enso/test-support`, so no `exports` target points at a file that does not ship.
+ */
+test('⚠ @enso/core ships no tests, and every export it declares ships (#951)', () => {
+  const core = manifest('packages/core/package.json')
+  expect(core.files).toEqual(expect.arrayContaining(['src', '!src/__tests__']))
+  expect(Object.values(core.exports ?? {}).filter((target) => target.includes('/__tests__/'))).toEqual([])
 })

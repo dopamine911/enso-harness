@@ -184,7 +184,7 @@ Use the narrowest real surface:
 - **Browser transport** — `createScriptedFetch` drives the real prompt/follow adapter with a streamed
   body and controlled routes; it is not a mock echo.
 - **Follow HTTP** — `openFollow` reads the real SSE endpoint and records frames.
-- **Logging** — the single `recordEnsoLogs` (`packages/core/src/__tests__/log-recorder.ts`, one for
+- **Logging** — the single `recordEnsoLogs` (`packages/test-support/src/log-recorder.ts`, one for
   every package) replaces the sink while calls still go through `ensoLogger` and its structured
   properties.
 - **DOM** — the shared environment owns process-wide browser globals for mounted component tests.

@@ -13,7 +13,7 @@ pin fails the page that cites it · where the behaviour is stated at the code.
 build) writes it from source: `@flow <id> <title>` and its paragraph at the
 symbol the flow starts from, `@invariant <flow>/<name> <sentence>` at each symbol that keeps a rule,
 `// @pins <flow>/<name>` above each test that holds one, and the sequence diagrams tests record with
-`@enso/core/flow-trace` and `toMatchSnapshot('flow <id>: <caption>')`. To change a built page, change
+`@enso/test-support/flow-trace` and `toMatchSnapshot('flow <id>: <caption>')`. To change a built page, change
 the code, the comment or the test; `test/flow-pages.test.ts` refuses tags that disagree.
 
 | Flow | What it preserves |

@@ -67,8 +67,6 @@ import {
   type EnsoConfig,
   type RuntimeCommand,
 } from '@enso/core'
-import { flowTrace } from '@enso/core/flow-trace'
-import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
 import {
   ensoProjectsDir,
   findRepoRoot,
@@ -83,6 +81,8 @@ import {
 import { ENSO_DEFAULT_PERMISSION_POLICY, permissionEngineConfigPath } from '@enso/core/permission-rules'
 import { writeProjectThreadSettings } from '@enso/core/project-config'
 import { snapshotPaths } from '@enso/core/snapshot-store'
+import { flowTrace } from '@enso/test-support/flow-trace'
+import { recordEnsoLogs, releaseEnsoLogs } from '@enso/test-support/log-recorder'
 import { getPermissionsService } from '@gotgenes/pi-permission-system'
 import type { LogRecorder } from '@logtape/testing/recorder'
 import { Type } from 'typebox'

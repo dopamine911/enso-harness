@@ -234,8 +234,9 @@ test("⚠ a unicode space in the cwd is NOT collapsed — pi's base-directory op
  *
  * ⚠ WHICH pi, exactly: the one in the WORKSPACE tree, which is the one the in-process host
  * imports (#69) and NOT, by construction, the `pi` the terminal launcher finds on `PATH`.
- * That second resolution is bounded by `scripts/enso-launch.ts#SUPPORTED_PI_VERSIONS` — the
- * launcher refuses a pi outside the range this corpus has been run against, and
+ * That second resolution is bounded by `packages/core/src/supported-pi-versions.ts#SUPPORTED_PI_VERSIONS` —
+ * the launcher refuses a pi outside the range this corpus has been run against, the guard refuses
+ * every call under a running pi outside it (#953), and
  * `scripts/__tests__/pi-version-parity.test.ts` asserts the range still covers the pi resolved here (#217).
  *
  * Two failure shapes, read differently: an ASSERTION diff means pi changed how it

@@ -134,23 +134,34 @@ type-only crossing is still a dependency.
 
 | Zone | Directory | May import (ours) |
 |---|---|---|
-| `core` | `packages/core/src/` | nothing |
+| `core-tests` | `packages/core/src/__tests__/` | `core`, `test-support` |
+| `core` | `packages/core/src/` (all else) | nothing |
+| `test-support` | `packages/test-support/` | `core` |
 | `harness-core` | `packages/harness/core/` | `core` |
 | `judge-backends` | `packages/harness/extensions/guards/judge-backends.ts` | `core` |
+| `harness-extension-tests` | `packages/harness/extensions/**/__tests__/` | `harness-extensions`, `core`, `harness-core`, `judge-backends`, `test-support` |
 | `harness-extensions` | `packages/harness/extensions/` (all else) | `core`, `harness-core`, `judge-backends` |
-| `host` | `packages/web/src/host/` | `core` |
-| `server` | `packages/web/src/server/` | `core`, `host` |
+| `host-tests` | `packages/web/src/host/**/__tests__/` | `host`, `core`, `test-support` |
+| `server-tests` | `packages/web/src/server/**/__tests__/` | `server`, `core`, `host`, `test-support` |
+| `browser-tests` | `packages/web/src/**/__tests__/` | `browser`, `core`, `test-support` |
+| `host` | `packages/web/src/host/` (all else) | `core` |
+| `server` | `packages/web/src/server/` (all else) | `core`, `host` |
 | `browser` | `packages/web/src/` (all else) | `core` |
 | `site-base` | `scripts/docs/site-base.ts` | nothing |
 | `corpus-shapes` | `scripts/corpus-shapes.ts` | `core`, `harness-core` |
-| `scripts` | `scripts/` | `core`, `site-base`, `judge-backends`, `corpus-shapes` |
-| `test` | `test/`, `packages/web/e2e/` | `core`, `harness-core`, `harness-extensions`, `judge-backends`, `host`, `server`, `browser`, `scripts`, `corpus-shapes` |
+| `scripts-tests` | `scripts/__tests__/` | `scripts`, `core`, `site-base`, `judge-backends`, `corpus-shapes`, `test-support` |
+| `scripts` | `scripts/` (all else) | `core`, `site-base`, `judge-backends`, `corpus-shapes` |
+| `test` | `test/`, `packages/web/e2e/` | `core`, `harness-core`, `harness-extensions`, `judge-backends`, `host`, `host-tests`, `server`, `browser`, `scripts`, `corpus-shapes` |
 | `site` | `site/` | `site-base` |
 
 Dogfood Arena lives outside this repository, in `dopamine911/dogfood-arena`: it tests Enso from
 outside through a pinned submodule, imports only `@enso/core`, and is not part of Enso's gate. It
 consumes `ENSO_UI_EVENTS`, `THREAD_STATUS_WORDS` and core's readers, so a change to those is a
 heads-up for the arena, not a blocker.
+
+A package's tests are a zone of their own, listed before the package's zone because a file is in
+the first zone that matches: a test may import what the code it tests may, plus `test-support`, the
+tests' shared helpers (#951), which production code may not.
 
 Every owned source file must fall in a zone (`coverage.requireAllFiles`; `index.html` is the one
 excused file). The storage seam is a forbidden call: `SessionManager.*` from `server` or `browser`
@@ -547,7 +558,7 @@ page's own lead sentence, so it cannot say a leak is open after the page says it
 | [the dialog vocabulary](./seams/dialog.md) | Control | extension-UI-context tests | The four kinds are the runtime's extension-UI method names — kept, by decision. |
 | [the guards](./seams/guards.md) | Permission | `tool-call-participants`; analyzer contract test | L5 — the tool names are the runtime's. |
 | [logging](./seams/logging.md) | Record | logging gate | The substrate is vendored, by decision, and it shows in exactly three files. |
-| [the observation vocabulary](./seams/observation.md) | Observation | kinds sweeps over `@enso/core/observation-kinds`; `observations.md` generated | `EnsoQueue` keeps the runtime's SHAPE, under our words (#216). |
+| [the observation vocabulary](./seams/observation.md) | Observation | kinds sweeps over `@enso/test-support/observation-kinds`; `observations.md` generated | `EnsoQueue` keeps the runtime's SHAPE, under our words (#216). |
 | [the permission mode](./seams/permission-mode.md) | Permission | vendor gate; `code-offenders` stale-row check | The engine's formats, in `@enso/core`. |
 | [presentation](./seams/presentation.md) | Surface | presentation gate; `ported-provenance.md` generated | The state layer's message shape crosses two wire payloads. |
 | [storage](./seams/storage.md) | Thread, Record | `no-duplicate-paths`; boundaries (the forbidden-call rule) | Nothing of the runtime's persistence format, since L2 |
