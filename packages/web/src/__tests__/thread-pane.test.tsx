@@ -5193,9 +5193,11 @@ test('a project’s page opens at its URL from a card’s Settings, the rail’s
   }
 })
 
-// PR #974 review: the record of WHY the live subscription ended on an error is the pane's own
+// PR #974 review: the record of WHY the subscription ended on an error is the pane's own
 // (`useSubscriptionFailureRecord`) — the exception with its stack, beside the adapter's notice.
-test('a live subscription that ends on an error leaves the record of why: the exception, its stack and the thread', async () => {
+// Driven by a follow the fetch refuses: the hook records every subscription error alike, and
+// this is the one a pane test can raise without a frame handler that throws.
+test('a subscription whose follow is refused leaves the record of why: the exception, its stack and the thread', async () => {
   const logs = await recordEnsoLogs()
   const server = createScriptedFetch()
   globalThis.fetch = server.fetch
